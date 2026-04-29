@@ -1,0 +1,36 @@
+# ---- CMake in-source build artifacts ----
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+mods/
+install_manifest.txt
+Testing/
+
+# ---- Out-of-source build directories ----
+build/
+build-*/
+_build/
+
+# ---- Compiled outputs ----
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# ---- REPL history ----
+.curry_history
+
+# ---- Editor / OS detritus ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
