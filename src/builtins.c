@@ -357,7 +357,7 @@ static val_t prim_inexact(int ac, val_t *av, void *ud) {(void)ac;(void)ud; retur
 static val_t prim_expt(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_expt(av[0],av[1]);}
 static val_t prim_sqrt(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_sqrt(av[0]);}
 static val_t prim_exp(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_exp(av[0]);}
-static val_t prim_log(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if(ac==2) return num_log(num_div(av[0],av[1])); return num_log(av[0]);}
+static val_t prim_log(int ac, val_t *av, void *ud) {(void)ud; if(ac==2) return num_div(num_log(av[0]),num_log(av[1])); return num_log(av[0]);}
 static val_t prim_sin(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_sin(av[0]);}
 static val_t prim_cos(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_cos(av[0]);}
 static val_t prim_tan(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_tan(av[0]);}
@@ -636,8 +636,20 @@ static val_t prim_current_error_port(int ac, val_t *av, void *ud) {(void)ac;(voi
 static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t port = port_open_output_string();
-    /* Temporarily redirect stdout... simplified: just call thunk and return "" */
-    apply(av[0], V_NIL);
+    val_t saved = PORT_STDOUT;
+    PORT_STDOUT = port;
+    ExnHandler h;
+    h.prev = current_handler;
+    current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        apply(av[0], V_NIL);
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        PORT_STDOUT = saved;
+        scm_raise_val(h.exn);
+    }
+    PORT_STDOUT = saved;
     return port_get_output_string(port);
 }
 
@@ -726,13 +738,19 @@ static val_t prim_make_promise(int ac, val_t *av, void *ud) {
 }
 static val_t prim_error(int ac, val_t *av, void *ud) {
     (void)ud;
-    val_t out = port_open_output_string();
-    scm_write(av[0], out); /* message */
-    for(int i=1;i<ac;i++) { scm_write(av[i],out); port_write_char(out,' '); }
-    val_t msg = port_get_output_string(out);
+    /* av[0] is the message string; remaining args are irritants */
+    val_t msg = av[0];
+    if (!vis_string(msg)) {
+        val_t out = port_open_output_string();
+        scm_write(av[0], out);
+        msg = port_get_output_string(out);
+    }
+    val_t irritants = V_NIL;
+    for (int i = ac - 1; i >= 1; i--)
+        irritants = scm_cons(av[i], irritants);
     ErrorObj *e = CURRY_NEW(ErrorObj);
     e->hdr.type=T_ERROR; e->hdr.flags=0;
-    e->message=msg; e->irritants=V_NIL; e->kind=S_ERROR;
+    e->message=msg; e->irritants=irritants; e->kind=S_ERROR;
     scm_raise_val(vptr(e));
 }
 static val_t prim_error_message(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->message;}

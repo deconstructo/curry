@@ -12,16 +12,27 @@
 
 /* ---- Helpers ---- */
 
+static void bignum_finalize(void *obj, void *cd) {
+    (void)cd;
+    mpz_clear(((Bignum *)obj)->z);
+}
+
+static void rational_finalize(void *obj, void *cd) {
+    (void)cd;
+    mpq_clear(((Rational *)obj)->q);
+}
+
 val_t make_big_from_mpz(mpz_t z) {
     /* If it fits in a fixnum, return that instead */
     if (mpz_fits_slong_p(z)) {
         long n = mpz_get_si(z);
         if (in_fixnum_range(n)) return vfix(n);
     }
-    Bignum *b = CURRY_NEW(Bignum);
+    Bignum *b = CURRY_NEW_ATOM(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set(b->z, z);
+    GC_register_finalizer_no_order(b, bignum_finalize, NULL, NULL, NULL);
     return vptr(b);
 }
 
@@ -30,11 +41,12 @@ static val_t make_rat_from_mpq(mpq_t q) {
     /* If denominator is 1, return exact integer */
     if (mpz_cmp_ui(mpq_denref(q), 1) == 0)
         return make_big_from_mpz(mpq_numref(q));
-    Rational *r = CURRY_NEW(Rational);
+    Rational *r = CURRY_NEW_ATOM(Rational);
     r->hdr.type  = T_RATIONAL;
     r->hdr.flags = 0;
     mpq_init(r->q);
     mpq_set(r->q, q);
+    GC_register_finalizer_no_order(r, rational_finalize, NULL, NULL, NULL);
     return vptr(r);
 }
 
@@ -60,40 +72,24 @@ static void to_mpq(mpq_t out, val_t v) {
 
 /* ---- Constructors ---- */
 
-/* GMP allocator wrappers: GMP passes old_size/size which GC_REALLOC/GC_FREE ignore */
-static void *gmp_gc_alloc(size_t size) { return GC_MALLOC(size); }
-static void *gmp_gc_realloc(void *ptr, size_t old_size, size_t new_size) {
-    (void)old_size;
-    return GC_REALLOC(ptr, new_size);
-}
-static void gmp_gc_free(void *ptr, size_t size) { (void)size; GC_FREE(ptr); }
-
-void num_init(void) {
-    /* Redirect GMP to Boehm GC so mpz_t/_mp_d buffers are GC-managed.
-     * Bignum/Rational are allocated non-atomically so GC can trace _mp_d
-     * pointers inside them. This means:
-     *   - Collected Bignum/Rational: GC finds _mp_d → reclaims the buffer
-     *   - Stack mpz_t temporaries that escape via longjmp: _mp_d unreachable
-     *     after unwind → GC reclaims lazily. No manual mpz_clear needed for
-     *     correctness, but existing calls are kept for eager deallocation. */
-    mp_set_memory_functions(gmp_gc_alloc, gmp_gc_realloc, gmp_gc_free);
-}
+void num_init(void) { /* GMP available; finalizers handle mpz/mpq cleanup */ }
 
 val_t num_make_bignum_i(long n) {
     if (in_fixnum_range(n)) return vfix(n);
-    Bignum *b = CURRY_NEW(Bignum);
+    Bignum *b = CURRY_NEW_ATOM(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set_si(b->z, n);
+    GC_register_finalizer_no_order(b, bignum_finalize, NULL, NULL, NULL);
     return vptr(b);
 }
 
 val_t num_make_bignum_str(const char *s, int base) {
-    Bignum *b = CURRY_NEW(Bignum);
-    b->hdr.type  = T_BIGNUM;
-    b->hdr.flags = 0;
-    mpz_init_set_str(b->z, s, base);
-    return make_big_from_mpz(b->z);
+    mpz_t z;
+    mpz_init_set_str(z, s, base);
+    val_t r = make_big_from_mpz(z);
+    mpz_clear(z);
+    return r;
 }
 
 val_t num_make_rational(val_t num, val_t den) {
@@ -542,25 +538,55 @@ val_t num_lcm(val_t a, val_t b) {
 
 /* ---- Rounding ---- */
 val_t num_floor(val_t v) {
-    if (!vis_flonum(v)) return v;
-    return num_make_float(floor(vfloat(v)));
+    if (vis_flonum(v)) return num_make_float(floor(vfloat(v)));
+    if (vis_rational(v)) {
+        mpz_t r; mpz_init(r);
+        mpz_fdiv_q(r, mpq_numref(as_rat(v)->q), mpq_denref(as_rat(v)->q));
+        val_t res = make_big_from_mpz(r); mpz_clear(r); return res;
+    }
+    return v; /* fixnum/bignum already exact integer */
 }
 val_t num_ceiling(val_t v) {
-    if (!vis_flonum(v)) return v;
-    return num_make_float(ceil(vfloat(v)));
+    if (vis_flonum(v)) return num_make_float(ceil(vfloat(v)));
+    if (vis_rational(v)) {
+        mpz_t r; mpz_init(r);
+        mpz_cdiv_q(r, mpq_numref(as_rat(v)->q), mpq_denref(as_rat(v)->q));
+        val_t res = make_big_from_mpz(r); mpz_clear(r); return res;
+    }
+    return v;
 }
 val_t num_truncate(val_t v) {
-    if (!vis_flonum(v)) return v;
-    return num_make_float(trunc(vfloat(v)));
+    if (vis_flonum(v)) return num_make_float(trunc(vfloat(v)));
+    if (vis_rational(v)) {
+        mpz_t r; mpz_init(r);
+        mpz_tdiv_q(r, mpq_numref(as_rat(v)->q), mpq_denref(as_rat(v)->q));
+        val_t res = make_big_from_mpz(r); mpz_clear(r); return res;
+    }
+    return v;
 }
 val_t num_round(val_t v) {
-    if (!vis_flonum(v)) return v;
-    double d = vfloat(v);
-    double rounded = round(d);
-    /* Break tie: round to even */
-    if (fabs(d - rounded) == 0.5 && fmod(rounded, 2.0) != 0.0)
-        rounded -= (rounded > d) ? 1.0 : -1.0;
-    return num_make_float(rounded);
+    if (vis_flonum(v)) {
+        double d = vfloat(v);
+        double rounded = round(d);
+        /* Break tie: round to even */
+        if (fabs(d - rounded) == 0.5 && fmod(rounded, 2.0) != 0.0)
+            rounded -= (rounded > d) ? 1.0 : -1.0;
+        return num_make_float(rounded);
+    }
+    if (vis_rational(v)) {
+        /* Banker's rounding: compute floor(n/d), then check remainder * 2 vs d */
+        mpz_t q, r, two_r, d; mpz_init(q); mpz_init(r); mpz_init(two_r); mpz_init(d);
+        mpz_fdiv_qr(q, r, mpq_numref(as_rat(v)->q), mpq_denref(as_rat(v)->q));
+        mpz_set(d, mpq_denref(as_rat(v)->q));
+        mpz_mul_2exp(two_r, r, 1); /* two_r = 2*r */
+        int cmp = mpz_cmp(two_r, d);
+        if (cmp > 0) mpz_add_ui(q, q, 1);          /* round up */
+        else if (cmp == 0 && mpz_odd_p(q)) mpz_add_ui(q, q, 1); /* tie: to even */
+        val_t res = make_big_from_mpz(q);
+        mpz_clear(q); mpz_clear(r); mpz_clear(two_r); mpz_clear(d);
+        return res;
+    }
+    return v;
 }
 
 /* ---- Transcendentals ---- */
