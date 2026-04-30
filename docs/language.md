@@ -418,6 +418,36 @@ Actors are lightweight concurrent processes. Each actor runs in its own thread s
 
 Actors communicate exclusively through message passing. There are no shared mutable variables (except the GC heap — use actors as the synchronization boundary).
 
+## Procedure tracing
+
+`trace` and `untrace` wrap a named procedure (looked up in the global environment) with enter/exit instrumentation. Trace output goes to stderr.
+
+```scheme
+(define (fact n) (if (<= n 1) 1 (* n (fact (- n 1)))))
+
+(trace 'fact)
+(fact 4)
+; [trace] --> (fact 4)
+; [trace] --> (fact 3)
+; [trace] --> (fact 2)
+; [trace] --> (fact 1)
+; [trace] <-- fact = 1
+; [trace] <-- fact = 2
+; [trace] <-- fact = 6
+; [trace] <-- fact = 24
+
+(untrace 'fact)     ; remove tracing
+(traced? fact)      ; => #f
+```
+
+| Procedure | Description |
+|-----------|-------------|
+| `(trace 'name)` | Wrap the global binding of `name` with trace instrumentation |
+| `(untrace 'name)` | Unwrap, restoring the original procedure |
+| `(traced? x)` | Returns `#t` if `x` is a traced-procedure wrapper |
+
+`trace` and `untrace` take **quoted symbols**, not values. Tracing a traced procedure is a no-op; untracing a non-traced procedure is also a no-op.
+
 ## Module search path
 
 Modules are located by mapping a name-list to a file path:

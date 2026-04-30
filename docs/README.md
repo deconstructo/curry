@@ -46,6 +46,9 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 | [git](module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
 | [vecdb](module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [qt6](module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | `qt6-base-dev` |
+| [plplot](module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
+| [regex](module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
+| [sync](module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
 
 ## Quick install (Debian/Ubuntu)
 
@@ -56,7 +59,8 @@ sudo apt install libgc-dev libgmp-dev cmake build-essential
 # Modules
 sudo apt install libsqlite3-dev libssl-dev libldap-dev \
                  libgtk-4-dev libcurl4-openssl-dev \
-                 libpng-dev libjpeg-dev libgit2-dev
+                 libpng-dev libjpeg-dev libgit2-dev \
+                 libplplot-dev
 ```
 
 ## Build

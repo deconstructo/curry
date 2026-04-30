@@ -142,6 +142,7 @@ PRED1(complex_p,  vis_number)
 PRED1(exact_p,    vis_exact)
 PRED1(inexact_p,  vis_inexact)
 PRED1(procedure_p,vis_proc)
+PRED1(traced_p,   vis_traced)
 PRED1(port_p,     vis_port)
 PRED1(eof_object_p,vis_eof)
 PRED1(bytevector_p,vis_bytes)
@@ -149,6 +150,29 @@ PRED1(set_p,      vis_set)
 PRED1(hash_table_p,vis_hash)
 PRED1(actor_p,    vis_actor)
 PRED1(promise_p,  vis_promise)
+
+static val_t prim_trace(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symbol(av[0])) scm_raise(V_FALSE, "trace: expected symbol");
+    val_t sym  = av[0];
+    val_t proc = env_lookup(GLOBAL_ENV, sym);
+    if (vis_traced(proc)) return sym;
+    Traced *t  = CURRY_NEW(Traced);
+    t->hdr.type = T_TRACED; t->hdr.flags = 0;
+    t->proc = proc; t->name = sym;
+    env_set(GLOBAL_ENV, sym, vptr(t));
+    return sym;
+}
+
+static val_t prim_untrace(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symbol(av[0])) scm_raise(V_FALSE, "untrace: expected symbol");
+    val_t sym  = av[0];
+    val_t proc = env_lookup(GLOBAL_ENV, sym);
+    if (!vis_traced(proc)) return sym;
+    env_set(GLOBAL_ENV, sym, as_traced(proc)->proc);
+    return sym;
+}
 
 static val_t prim_zero_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_zero(av[0])); }
 static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_positive(av[0])); }
@@ -1013,6 +1037,9 @@ void builtins_register(val_t env) {
     DEF("real?",        prim_real_p,      1,1); DEF("complex?",    prim_complex_p,   1,1);
     DEF("exact?",       prim_exact_p,     1,1); DEF("inexact?",    prim_inexact_p,   1,1);
     DEF("procedure?",   prim_procedure_p, 1,1); DEF("port?",       prim_port_p,      1,1);
+    DEF("traced?",      prim_traced_p,    1,1);
+    DEF("trace",        prim_trace,       1,1);
+    DEF("untrace",      prim_untrace,     1,1);
     DEF("eof-object?",  prim_eof_object_p,1,1); DEF("bytevector?", prim_bytevector_p,1,1);
     DEF("set?",         prim_set_p,       1,1); DEF("hash-table?", prim_hash_table_p,1,1);
     DEF("actor?",       prim_actor_p,     1,1); DEF("promise?",    prim_promise_p,   1,1);

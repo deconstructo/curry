@@ -840,6 +840,10 @@ tail:
             return V_VOID;
         }
 
+        if (vis_traced(proc)) {
+            return apply_arr(proc, argc, arr);
+        }
+
         scm_raise(V_FALSE, "not a procedure: %s",
                   vis_symbol(op) ? sym_cstr(op) : "#<value>");
     }
@@ -873,6 +877,24 @@ val_t apply(val_t proc, val_t args) {
         p->init = newval;
         return V_VOID;
     }
+    if (vis_traced(proc)) {
+        Traced *t = as_traced(proc);
+        const char *nm = vis_symbol(t->name) ? as_sym(t->name)->data : "?";
+        port_write_string(PORT_STDERR, "[trace] --> (", 13);
+        port_write_string(PORT_STDERR, nm, (uint32_t)strlen(nm));
+        for (val_t a = args; vis_pair(a); a = vcdr(a)) {
+            port_write_char(PORT_STDERR, ' ');
+            scm_write(vcar(a), PORT_STDERR);
+        }
+        port_write_string(PORT_STDERR, ")\n", 2);
+        val_t result = apply(t->proc, args);
+        port_write_string(PORT_STDERR, "[trace] <-- ", 12);
+        port_write_string(PORT_STDERR, nm, (uint32_t)strlen(nm));
+        port_write_string(PORT_STDERR, " = ", 3);
+        scm_write(result, PORT_STDERR);
+        port_write_char(PORT_STDERR, '\n');
+        return result;
+    }
     scm_raise(V_FALSE, "apply: not a procedure");
 }
 
@@ -885,6 +907,11 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
         Closure *c = as_clos(proc);
         val_t env = env_bind_arr(vptr(c->env), c->params, argc, argv);
         return eval_body(c->body, env);
+    }
+    if (vis_traced(proc)) {
+        val_t args = V_NIL;
+        for (int i = argc - 1; i >= 0; i--) args = make_pair(argv[i], args);
+        return apply(proc, args);
     }
     /* cont, param, error — rare paths, build list */
     val_t args = V_NIL;

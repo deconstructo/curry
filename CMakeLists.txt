@@ -135,6 +135,9 @@ option(BUILD_MODULE_IMAGE     "Build PNG/JPEG/GIF image module"     ON)
 option(BUILD_MODULE_GIT       "Build Git module (libgit2)"          ON)
 option(BUILD_MODULE_VECDB     "Build vector DB module"              OFF)
 option(BUILD_MODULE_QT6       "Build Qt6 graphics module"           OFF)
+option(BUILD_MODULE_PLPLOT    "Build PLplot scientific plotting module" OFF)
+option(BUILD_MODULE_REGEX     "Build POSIX regex module"            ON)
+option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -330,6 +333,29 @@ if(BUILD_MODULE_QT6)
   else()
     message(WARNING "Qt6 not found, skipping qt6 module")
   endif()
+endif()
+
+if(BUILD_MODULE_PLPLOT)
+  pkg_check_modules(PLPLOT QUIET plplot)
+  if(PLPLOT_FOUND)
+    curry_c_module(plplot)
+    target_include_directories(curry_plplot PRIVATE ${PLPLOT_INCLUDE_DIRS})
+    target_link_libraries(curry_plplot PRIVATE ${PLPLOT_LIBRARIES})
+    target_compile_options(curry_plplot PRIVATE ${PLPLOT_CFLAGS_OTHER})
+    message(STATUS "PLplot ${PLPLOT_VERSION} found — building plplot module")
+  else()
+    message(WARNING "PLplot not found, skipping plplot module (sudo apt install libplplot-dev)")
+  endif()
+endif()
+
+if(BUILD_MODULE_REGEX)
+  curry_c_module(regex)
+  message(STATUS "Building regex module (system POSIX regex.h)")
+endif()
+
+if(BUILD_MODULE_SYNC)
+  curry_c_module(sync)
+  message(STATUS "Building sync module (pthreads mutex/condvar/semaphore)")
 endif()
 
 # ---- Tests ----

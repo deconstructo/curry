@@ -57,6 +57,7 @@ typedef enum {
     T_QUANTUM       = 31,  /* quantum superposition of values */
     T_SURREAL       = 32,  /* surreal number (Hahn-series form) */
     T_MULTIVECTOR   = 33,  /* Clifford algebra element in Cl(p,q,r) */
+    T_TRACED        = 34,  /* procedure wrapped with trace instrumentation */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -107,8 +108,9 @@ static inline uint32_t vtype(val_t v) {
 #define vis_quantum(v)  vis_type(v, T_QUANTUM)
 #define vis_surreal(v)  vis_type(v, T_SURREAL)
 #define vis_mv(v)       vis_type(v, T_MULTIVECTOR)
+#define vis_traced(v)   vis_type(v, T_TRACED)
 
-#define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v))
+#define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v) || vis_traced(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
                          vis_rational(v) || vis_complex(v) || \
                          vis_quat(v) || vis_oct(v) || vis_surreal(v))
@@ -416,6 +418,13 @@ typedef struct {
     val_t data[];    /* 2*nterms entries: exp, coeff alternating */
 } Surreal;
 
+/* Traced procedure — wraps a procedure with enter/exit printing */
+typedef struct {
+    Hdr   hdr;
+    val_t proc;   /* the wrapped procedure */
+    val_t name;   /* symbol name, or V_FALSE */
+} Traced;
+
 /* ---- Convenience casts ---- */
 #define as_pair(v)    vunptr(Pair,       v)
 #define as_vec(v)     vunptr(Vector,     v)
@@ -450,6 +459,7 @@ typedef struct {
 #define as_quantum(v) vunptr(Quantum,     v)
 #define as_surreal(v) vunptr(Surreal,     v)
 #define as_mv(v)      vunptr(Multivector, v)
+#define as_traced(v)  vunptr(Traced,      v)
 
 /* Pair accessors */
 #define vcar(v)       (as_pair(v)->car)

@@ -354,6 +354,16 @@ void scm_write(val_t v, val_t port) {
     if (vis_quantum(v))  { extern void quantum_write(val_t, val_t); quantum_write(v, port); return; }
     if (vis_surreal(v))  { extern void sur_write(val_t, val_t); sur_write(v, port); return; }
     if (vis_mv(v))       { extern void mv_write(val_t, val_t); mv_write(v, port); return; }
+    if (vis_traced(v)) {
+        Traced *t = as_traced(v);
+        if (vis_symbol(t->name)) {
+            int n = snprintf(buf, sizeof(buf), "#<traced-procedure %s>", as_sym(t->name)->data);
+            port_write_string(port, buf, (uint32_t)n);
+        } else {
+            port_write_string(port, "#<traced-procedure>", 19);
+        }
+        return;
+    }
     /* fallback */
     int n = snprintf(buf, sizeof(buf), "#<object %u>", vtype(v));
     port_write_string(port, buf, (uint32_t)n);
