@@ -38,7 +38,6 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 | [network](docs/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
 | [crypto](docs/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
 | [ldap](docs/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
-| [ui](docs/module-ui.md) | `(curry ui)` | GTK4 windows, canvas, widgets | `libgtk-4-dev` |
 | [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob | `libcurl4-openssl-dev` |
 | [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL client | `libcurl4-openssl-dev` |
 | [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
