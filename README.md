@@ -1,8 +1,8 @@
-# Curry Scheme Documentation
+# Curry Scheme
 
-Curry is an R7RS Scheme interpreter with a numeric tower extending through the hypercomplex numbers, a built-in computer algebra system, quantum superposition values, an actor-model concurrency system, and a modular C extension interface.
+Curry is an R7RS Scheme interpreter with a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, an actor-model concurrency system, and a modular C extension interface.
 
-Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands. Special forms and procedures are also available under their Akkadian names and in Unicode cuneiform.
+Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands.
 
 ## Documents
 
@@ -17,66 +17,171 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 ### Extended numeric tower
 
-| Feature | Entry point | Description |
-|---------|-------------|-------------|
-| Symbolic CAS | `(symbolic x y z)` | Declare variables; arithmetic over them builds expression trees |
-| Differentiation | `(∂ expr var)` | Symbolic differentiation with simplification |
-| Substitution | `(substitute expr var val)` | Replace variable, evaluate, simplify |
-| Quantum values | `(quantum-uniform lst)` | Uniform superposition over a list |
-| Quantum values | `(superpose alist)` | Explicit amplitude superposition |
-| Quantum collapse | `(observe q)` | Probabilistic collapse to one branch |
-| Surreal numbers | `omega`, `epsilon` | First infinite and infinitesimal surreals |
-| Auto-diff | `(auto-diff f x)` | Exact numeric derivative via ε |
-| Multivectors | `(make-mv p q r)` | Clifford algebra Cl(p,q,r): rotors, spinors, PGA motors |
+| Level | Type | Entry point |
+|-------|------|-------------|
+| Fixnum | 62-bit signed integer | literals |
+| Bignum | arbitrary precision integer | `(expt 2 200)` |
+| Rational | exact ratio | `3/4`, `(/ 1 3)` |
+| Flonum | IEEE 754 double | `1.5`, `+inf.0`, `+nan.0` |
+| Complex | rectangular or polar | `(make-rectangular 3 4)` |
+| Quaternion | 4-component hypercomplex | `(make-quaternion a b c d)` |
+| Octonion | 8-component non-associative | `(make-octonion ...)` |
+| Multivector | Clifford algebra Cl(p,q,r) | `(make-mv p q r)` |
+| Surreal | Hahn series with ω and ε | `SUR_OMEGA`, `SUR_EPSILON` |
+| Symbolic | CAS expression tree | `(sym-var 'x)` |
+
+Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `(∂ (* x x) x)` → symbolic `(+ x x)`.
+
+### CAS and auto-differentiation
+
+| Procedure | Description |
+|-----------|-------------|
+| `(sym-var 'x)` | Declare a symbolic variable |
+| `(∂ expr var)` | Symbolic differentiation |
+| `(simplify expr)` | Algebraic simplification |
+| `(substitute expr var val)` | Substitute and evaluate |
+| `(auto-diff f x)` | Exact numeric derivative via dual numbers (ε) |
 
 ### Modules
 
-| Module | Import | Description | Requires |
-|--------|--------|-------------|----------|
+| Module | Import | Description | Extra deps |
+|--------|--------|-------------|------------|
 | [json](docs/module-json.md) | `(curry json)` | JSON parse / stringify | — |
 | [sqlite](docs/module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
 | [network](docs/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
 | [crypto](docs/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
 | [ldap](docs/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
-| [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob | `libcurl4-openssl-dev` |
-| [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL client | `libcurl4-openssl-dev` |
+| [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
+| [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
 | [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
 | [image](docs/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
 | [git](docs/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
-| [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
-| [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | `qt6-base-dev` |
+| [ui](docs/module-ui.md) | `(curry ui)` | GTK4 windows, menus, canvas, widgets | `libgtk-4-dev` |
+| [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
 | [plplot](docs/module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
+| [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
 | [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
 
-## Quick install (Debian/Ubuntu)
+---
+
+## Building on Linux (Debian / Ubuntu)
+
+### 1. Install dependencies
 
 ```bash
-# Core
+# Required
 sudo apt install libgc-dev libgmp-dev cmake build-essential
 
-# Modules
-sudo apt install libsqlite3-dev libssl-dev libldap-dev \
-                 libgtk-4-dev libcurl4-openssl-dev \
-                 libpng-dev libjpeg-dev libgit2-dev \
-                 libplplot-dev
+# Optional modules
+sudo apt install libsqlite3-dev        # sqlite
+sudo apt install libssl-dev            # crypto
+sudo apt install libcurl4-openssl-dev  # storage, graphql
+sudo apt install libldap-dev           # ldap
+sudo apt install libpng-dev libjpeg-dev # image
+sudo apt install libgit2-dev           # git
+sudo apt install libgtk-4-dev          # ui (GTK4)
+sudo apt install libplplot-dev         # plplot
 ```
 
-## Build
+### 2. Build
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug \
-  -DBUILD_MODULE_UI=ON \
-  -DBUILD_MODULE_STORAGE=ON \
-  -DBUILD_MODULE_GRAPHQL=ON \
-  -DBUILD_MODULE_VECDB=ON
+# Minimal build (core + always-on modules: json, network, redis, regex, sync, vecdb)
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j$(nproc)
 
+# Full build with all optional modules
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_MODULE_CRYPTO=ON \
+  -DBUILD_MODULE_LDAP=ON \
+  -DBUILD_MODULE_STORAGE=ON \
+  -DBUILD_MODULE_GRAPHQL=ON \
+  -DBUILD_MODULE_UI=ON \
+  -DBUILD_MODULE_IMAGE=ON \
+  -DBUILD_MODULE_GIT=ON \
+  -DBUILD_MODULE_PLPLOT=ON \
+  -DBUILD_MODULE_QT6=ON
+cmake --build build -j$(nproc)
+```
+
+### 3. Run
+
+```bash
 ./build/curry                          # REPL
 ./build/curry script.scm               # run a script
 ./build/curry -e '(display "𒀭") (newline)'
-ctest --test-dir build -V              # run tests
 ```
+
+---
+
+## Building on macOS
+
+### 1. Install Xcode command-line tools
+
+```bash
+xcode-select --install
+```
+
+### 2. Install dependencies via Homebrew
+
+```bash
+# Required
+brew install bdw-gc gmp cmake
+
+# Optional modules
+brew install openssl      # crypto
+brew install sqlite       # sqlite
+brew install libgit2      # git
+brew install libpng jpeg-turbo  # image
+# curl and ldap are bundled with macOS — no extra install needed
+```
+
+### 3. Build
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j$(sysctl -n hw.logicalcpu)
+./build/curry
+```
+
+### 4. Optional: Qt6 module on macOS
+
+```bash
+brew install qt@6
+
+# Qt6 from Homebrew is not on PATH by default — point CMake to it:
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_MODULE_QT6=ON \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
+cmake --build build -j$(sysctl -n hw.logicalcpu)
+```
+
+> Qt6 on macOS uses Metal for rendering. `QOpenGLWidget` is bridged through Apple's OpenGL compatibility layer; expect deprecation warnings at runtime but the module works correctly.
+
+### Notes
+
+- Modules build as `.so` bundles on both Linux and macOS; `(import (curry qt6))` works identically on both platforms.
+- Apple Silicon and x86_64 are both supported natively.
+
+---
+
+## Testing
+
+```bash
+cmake --build build && ctest --test-dir build -V
+```
+
+The test suite comprises four suites (253 tests total):
+
+| Suite | File | What it covers |
+|-------|------|----------------|
+| `core` | `tests/test_core.c` | C-level: value representation, numeric tower, lists, strings, TCO, closures, continuations, sets, hash tables, records, exceptions |
+| `scheme_r7rs` | `tests/r7rs_tests.scm` | R7RS conformance: all standard types, arithmetic, rounding, string/char ops, I/O ports, error objects, apply, fold, predicates, bytevectors, sets, hash tables |
+| `numeric_ext` | `tests/numeric_ext_tests.scm` | Clifford algebra (Cl(3,0,0) basis blades, geometric product, wedge, grade, reverse, norms), symbolic CAS (∂, simplify, substitute), surreal numbers (ω, ε, arithmetic), auto-differentiation |
+| `actors` | `tests/actors_tests.scm` | Actor spawn/alive?/send!, semaphore-coordinated result passing, mutex-protected shared state, condvar signal/wait |
+
+---
 
 ## Akkadian error messages
 
