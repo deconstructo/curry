@@ -87,7 +87,7 @@ struct CurryVM {
 };
 
 CurryVM *curry_vm_new(val_t module_env) {
-    CurryVM *vm = CURRY_NEW_ATOM(CurryVM);
+    CurryVM *vm = CURRY_NEW(CurryVM);
     vm->env = module_env;
     return vm;
 }

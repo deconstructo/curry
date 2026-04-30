@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <pthread.h>
 
 /* Open-addressing hash table mapping name -> Symbol* */
 typedef struct {
@@ -13,6 +14,7 @@ typedef struct {
 } SymTable;
 
 static SymTable table;
+static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static uint32_t hash_str(const char *s, uint32_t len) {
     /* FNV-1a */
@@ -46,6 +48,8 @@ static void table_grow(void) {
 }
 
 val_t sym_intern(const char *name, uint32_t len) {
+    pthread_mutex_lock(&table_lock);
+
     if (!table.cap || table.size * 2 >= table.cap) table_grow();
 
     uint32_t h    = hash_str(name, len);
@@ -54,8 +58,10 @@ val_t sym_intern(const char *name, uint32_t len) {
 
     while (table.buckets[idx]) {
         Symbol *s = table.buckets[idx];
-        if (s->hash == h && s->len == len && memcmp(s->data, name, len) == 0)
+        if (s->hash == h && s->len == len && memcmp(s->data, name, len) == 0) {
+            pthread_mutex_unlock(&table_lock);
             return vptr(s);
+        }
         idx = (idx + 1) & mask;
     }
 
@@ -70,6 +76,8 @@ val_t sym_intern(const char *name, uint32_t len) {
 
     table.buckets[idx] = sym;
     table.size++;
+
+    pthread_mutex_unlock(&table_lock);
     return vptr(sym);
 }
 

@@ -18,7 +18,7 @@ val_t make_big_from_mpz(mpz_t z) {
         long n = mpz_get_si(z);
         if (in_fixnum_range(n)) return vfix(n);
     }
-    Bignum *b = CURRY_NEW_ATOM(Bignum);
+    Bignum *b = CURRY_NEW(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set(b->z, z);
@@ -30,7 +30,7 @@ static val_t make_rat_from_mpq(mpq_t q) {
     /* If denominator is 1, return exact integer */
     if (mpz_cmp_ui(mpq_denref(q), 1) == 0)
         return make_big_from_mpz(mpq_numref(q));
-    Rational *r = CURRY_NEW_ATOM(Rational);
+    Rational *r = CURRY_NEW(Rational);
     r->hdr.type  = T_RATIONAL;
     r->hdr.flags = 0;
     mpq_init(r->q);
@@ -60,11 +60,28 @@ static void to_mpq(mpq_t out, val_t v) {
 
 /* ---- Constructors ---- */
 
-void num_init(void) { /* nothing needed; GMP is always available */ }
+/* GMP allocator wrappers: GMP passes old_size/size which GC_REALLOC/GC_FREE ignore */
+static void *gmp_gc_alloc(size_t size) { return GC_MALLOC(size); }
+static void *gmp_gc_realloc(void *ptr, size_t old_size, size_t new_size) {
+    (void)old_size;
+    return GC_REALLOC(ptr, new_size);
+}
+static void gmp_gc_free(void *ptr, size_t size) { (void)size; GC_FREE(ptr); }
+
+void num_init(void) {
+    /* Redirect GMP to Boehm GC so mpz_t/_mp_d buffers are GC-managed.
+     * Bignum/Rational are allocated non-atomically so GC can trace _mp_d
+     * pointers inside them. This means:
+     *   - Collected Bignum/Rational: GC finds _mp_d → reclaims the buffer
+     *   - Stack mpz_t temporaries that escape via longjmp: _mp_d unreachable
+     *     after unwind → GC reclaims lazily. No manual mpz_clear needed for
+     *     correctness, but existing calls are kept for eager deallocation. */
+    mp_set_memory_functions(gmp_gc_alloc, gmp_gc_realloc, gmp_gc_free);
+}
 
 val_t num_make_bignum_i(long n) {
     if (in_fixnum_range(n)) return vfix(n);
-    Bignum *b = CURRY_NEW_ATOM(Bignum);
+    Bignum *b = CURRY_NEW(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set_si(b->z, n);
@@ -72,7 +89,7 @@ val_t num_make_bignum_i(long n) {
 }
 
 val_t num_make_bignum_str(const char *s, int base) {
-    Bignum *b = CURRY_NEW_ATOM(Bignum);
+    Bignum *b = CURRY_NEW(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set_str(b->z, s, base);

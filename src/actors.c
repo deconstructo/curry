@@ -135,7 +135,7 @@ val_t actor_spawn(val_t closure, val_t args) {
     a->alive     = true;
     pthread_mutex_init(&a->lock, NULL);
 
-    ActorStart *start = (ActorStart *)gc_alloc_atomic(sizeof(ActorStart));
+    ActorStart *start = (ActorStart *)gc_alloc(sizeof(ActorStart));
     start->actor   = a;
     start->closure = closure;
     start->args    = args;
