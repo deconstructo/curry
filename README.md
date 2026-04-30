@@ -8,12 +8,12 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 ### Language
 
-- [Language reference](language.md) — syntax, types, special forms, numeric tower, symbolic math, quantum values, Akkadian syntax, actors, module system
-- [Symbolic expressions](symbolic.md) — CAS reference: variables, differentiation, simplification, substitution
-- [Quantum superposition](quantum.md) — quantum value type: construction, observation, arithmetic
-- [Surreal numbers](surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
-- [Multivectors](multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
-- [Akkadian / Cuneiform reference](akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
+- [Language reference](docs/language.md) — syntax, types, special forms, numeric tower, symbolic math, quantum values, Akkadian syntax, actors, module system
+- [Symbolic expressions](docs/symbolic.md) — CAS reference: variables, differentiation, simplification, substitution
+- [Quantum superposition](docs/quantum.md) — quantum value type: construction, observation, arithmetic
+- [Surreal numbers](docs/surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
+- [Multivectors](docs/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
+- [Akkadian / Cuneiform reference](docs/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
 
 ### Extended numeric tower
 
@@ -33,19 +33,22 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 | Module | Import | Description | Requires |
 |--------|--------|-------------|----------|
-| [json](module-json.md) | `(curry json)` | JSON parse / stringify | — |
-| [sqlite](module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
-| [network](module-network.md) | `(curry network)` | TCP / UDP sockets | — |
-| [crypto](module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
-| [ldap](module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
-| [ui](module-ui.md) | `(curry ui)` | GTK4 windows, canvas, widgets | `libgtk-4-dev` |
-| [storage](module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob | `libcurl4-openssl-dev` |
-| [graphql](module-graphql.md) | `(curry graphql)` | GraphQL client | `libcurl4-openssl-dev` |
-| [redis](module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
-| [image](module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
-| [git](module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
-| [vecdb](module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
-| [qt6](module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | `qt6-base-dev` |
+| [json](docs/module-json.md) | `(curry json)` | JSON parse / stringify | — |
+| [sqlite](docs/module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
+| [network](docs/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
+| [crypto](docs/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
+| [ldap](docs/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
+| [ui](docs/module-ui.md) | `(curry ui)` | GTK4 windows, canvas, widgets | `libgtk-4-dev` |
+| [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob | `libcurl4-openssl-dev` |
+| [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL client | `libcurl4-openssl-dev` |
+| [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
+| [image](docs/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
+| [git](docs/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
+| [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
+| [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | `qt6-base-dev` |
+| [plplot](docs/module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
+| [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
+| [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
 
 ## Quick install (Debian/Ubuntu)
 
@@ -56,7 +59,8 @@ sudo apt install libgc-dev libgmp-dev cmake build-essential
 # Modules
 sudo apt install libsqlite3-dev libssl-dev libldap-dev \
                  libgtk-4-dev libcurl4-openssl-dev \
-                 libpng-dev libjpeg-dev libgit2-dev
+                 libpng-dev libjpeg-dev libgit2-dev \
+                 libplplot-dev
 ```
 
 ## Build
