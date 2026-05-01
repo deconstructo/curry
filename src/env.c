@@ -5,6 +5,8 @@
 #include <string.h>
 #include <assert.h>
 
+//Scath was here
+
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
 val_t GLOBAL_ENV;
