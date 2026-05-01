@@ -308,9 +308,10 @@ static curry_val fn_commit(int ac, curry_val *av, void *ud) {
     git_reference *head_ref = NULL;
     if (git_repository_head(&head_ref, repo) == 0) {
         git_object *head_obj = NULL;
-        git_reference_peel(&head_obj, head_ref, GIT_OBJECT_COMMIT);
-        git_commit_lookup(&parent, repo, git_object_id(head_obj));
-        git_object_free(head_obj);
+        if (git_reference_peel(&head_obj, head_ref, GIT_OBJECT_COMMIT) == 0) {
+            git_commit_lookup(&parent, repo, git_object_id(head_obj));
+            git_object_free(head_obj);
+        }
         git_reference_free(head_ref);
     }
 
@@ -450,19 +451,19 @@ static curry_val fn_diff_staged(int ac, curry_val *av, void *ud) {
     git_object *head_obj = NULL;
     git_reference *head_ref = NULL;
     if (git_repository_head(&head_ref, repo) == 0) {
-        git_reference_peel(&head_obj, head_ref, GIT_OBJECT_COMMIT);
-        git_tree *head_tree = NULL;
-        git_commit *c = NULL;
-        git_commit_lookup(&c, repo, git_object_id(head_obj));
-        if (c) { git_commit_tree(&head_tree, c); git_commit_free(c); }
-        git_diff_index_to_workdir(&diff, repo, NULL, NULL);  /* placeholder */
-        git_diff_free(diff); diff = NULL;
-        git_diff_tree_to_index(&diff, repo, head_tree, NULL, NULL);
-        if (head_tree) git_tree_free(head_tree);
-        git_object_free(head_obj);
+        if (git_reference_peel(&head_obj, head_ref, GIT_OBJECT_COMMIT) == 0) {
+            git_tree *head_tree = NULL;
+            git_commit *c = NULL;
+            git_commit_lookup(&c, repo, git_object_id(head_obj));
+            if (c) { git_commit_tree(&head_tree, c); git_commit_free(c); }
+            git_diff_tree_to_index(&diff, repo, head_tree, NULL, NULL);
+            if (head_tree) git_tree_free(head_tree);
+            git_object_free(head_obj);
+        }
         git_reference_free(head_ref);
     } else {
-        git_diff_index_to_workdir(&diff, repo, NULL, NULL);
+        /* No HEAD yet (empty repo): compare empty tree against index */
+        git_diff_tree_to_index(&diff, repo, NULL, NULL, NULL);
     }
 
     char *out = NULL;

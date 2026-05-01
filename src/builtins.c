@@ -623,9 +623,11 @@ static val_t prim_read_line(int ac, val_t *av, void *ud) {(void)ud; return port_
 static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_open_input_string(as_str(av[0])->data,as_str(av[0])->len);}
 static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_open_output_string();}
 static val_t prim_get_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_string(av[0]);}
-static val_t prim_open_file(int ac, val_t *av, void *ud) {(void)ud;
-    int flags = ac>1 && !vis_false(av[1]) ? PORT_OUTPUT : PORT_INPUT;
-    return port_open_file(as_str(av[0])->data, flags);
+static val_t prim_open_input_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    return port_open_file(as_str(av[0])->data, PORT_INPUT);
+}
+static val_t prim_open_output_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    return port_open_file(as_str(av[0])->data, PORT_OUTPUT);
 }
 static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
 static val_t prim_input_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0]));}
@@ -651,6 +653,10 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     }
     PORT_STDOUT = saved;
     return port_get_output_string(port);
+}
+
+static val_t prim_system(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    return vfix(system(as_str(av[0])->data));
 }
 
 /* ---- Control ---- */
@@ -1155,8 +1161,8 @@ void builtins_register(val_t env) {
     DEF("open-input-string",prim_open_input_string,1,1);
     DEF("open-output-string",prim_open_output_string,0,0);
     DEF("get-output-string",prim_get_output_string,1,1);
-    DEF("open-input-file",prim_open_file,1,1);
-    DEF("open-output-file",prim_open_file,1,2);
+    DEF("open-input-file",prim_open_input_file,1,1);
+    DEF("open-output-file",prim_open_output_file,1,1);
     DEF("close-port",prim_close_port,1,1); DEF("close-input-port",prim_close_port,1,1);
     DEF("close-output-port",prim_close_port,1,1);
     DEF("input-port?",prim_input_port_p,1,1); DEF("output-port?",prim_output_port_p,1,1);
@@ -1214,6 +1220,7 @@ void builtins_register(val_t env) {
     DEF("void",       prim_void,    0,0);
     DEF("load",       prim_load,    1,1);
     DEF("exit",       prim_exit,    0,1);
+    DEF("system",     prim_system,  1,1);
     DEF("gc",         prim_gc,      0,0);
     DEF("eof-object", prim_void,    0,0); /* placeholder; EOF created by reader */
 
