@@ -10,3 +10,15 @@ add_test(NAME actors      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
 set_tests_properties(numeric_ext actors PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+
+if(BUILD_MODULE_GIT AND TARGET curry_git)
+    add_test(NAME git COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_git.scm)
+    set_tests_properties(git PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
+if(TARGET curry_plplot)
+    add_test(NAME plplot COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_plplot.scm)
+    set_tests_properties(plplot PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()

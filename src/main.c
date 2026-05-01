@@ -19,7 +19,7 @@
 #  include <readline/history.h>
 #endif
 
-#define CURRY_VERSION "0.1.0"
+#define CURRY_VERSION "0.1.5"
 #define BANNER \
     "Curry Scheme " CURRY_VERSION " (R7RS)\n" \
     "Type ,quit to exit, ,help for help.\n"
