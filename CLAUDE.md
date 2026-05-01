@@ -185,9 +185,17 @@ Open-addressing hash tables with 75% max load and tombstone deletion. Three comp
 
 `modules_init()` calls `builtins_register(GLOBAL_ENV)` to populate the top-level environment.
 
-### Graphics / GPU (`modules/qt6/qt6.cpp`)
+### Graphics / UI (`modules/qt6/qt6.cpp`)
 
-The qt6 module layers: 2D canvas (QPainter), 3D scene (Qt3D / QRhi), and 4D projection math (pure C++, no Qt dependency). 4D→3D projection uses perspective division on the w-axis (`project_4d_to_3d`). 3D rendering uses Qt6's `QRhi` abstraction: Metal on macOS, Vulkan on Linux, D3D11 on Windows. GPU compute is exposed via `gpu-buffer-make` / `gpu-dispatch` backed by QRhi compute shaders.
+The qt6 module has three API layers:
+
+- **Layer 1** (`qt-*`): Raw Qt6 queries — painter/widget dimensions, `qt-gpu?` (OpenGL init check), `qt-process-events`.
+- **Layer 2** (`gfx-*`): GPU-accelerated 2D graphics via `QPainter` on `QOpenGLWidget`. Primitives: clear, color, pen, shapes (rect, circle, ellipse, arc, pie, polygon), text, transforms (translate/rotate/scale), and batch drawing (`gfx-draw-points!`, `gfx-draw-lines!`, `gfx-fill-triangles!`). CPU software rendering falls back automatically via Mesa/llvmpipe when no GPU is present.
+- **Layer 3** (natural names): Full UI framework — windows (`make-window`), canvas (`canvas-on-draw!`, `canvas-on-mouse!`), menus, toolbars, status bars, layout boxes (`make-vbox`, `make-hbox`), tabs, group boxes, and widgets (labels, buttons, checkboxes, sliders, dropdowns, radio groups, spin boxes, text inputs, progress bars, timers).
+
+4D projection math is also included (pure C++, no Qt dependency): `project_4d_to_3d` uses perspective division on the w-axis. Scheme API: `make-4d-projector`, `project-4d`, `rotate-4d-xw`.
+
+Cross-platform: Linux X11/Wayland (OpenGL), macOS (Metal via Qt), Windows (D3D/ANGLE).
 
 macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary uses `ENABLE_EXPORTS ON` (`-rdynamic` / `-Wl,-export_dynamic`). Module `.so` targets link with `-undefined dynamic_lookup` so `curry_*` symbols resolve from the main binary at `dlopen` time.
 
