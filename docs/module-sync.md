@@ -2,6 +2,8 @@
 
 Low-level synchronisation primitives: mutex, condition variable, and counting semaphore, built directly over POSIX pthreads. No external library required.
 
+> **macOS note.** macOS does not implement unnamed POSIX semaphores (`sem_init` always fails). The semaphore type in this module is therefore implemented with a `pthread_mutex_t` + `pthread_cond_t` + counter — identical semantics to `sem_t`, but portable across Linux and macOS.
+
 > **Prefer actors.** Curry's `spawn` / `send!` / `receive` actor model is the recommended concurrency abstraction. Use this module when you specifically need explicit mutex/condvar/semaphore control — e.g. to interoperate with C libraries or to build higher-level synchronisation structures.
 
 ## Import

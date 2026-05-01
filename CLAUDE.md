@@ -87,8 +87,11 @@ Apple's OpenGL compatibility layer; expect deprecation warnings at runtime
 
 - Modules are built as `.so` bundles (CMake `MODULE` type) on both Linux and
   macOS, so `(import (curry qt6))` works identically on both platforms.
-- Symbol export uses `ENABLE_EXPORTS ON` which maps to `-rdynamic` on Linux
-  and `-Wl,-export_dynamic` on macOS — no manual linker flags needed.
+- Symbol export: the main binary is built with `ENABLE_EXPORTS ON`, which maps
+  to `-rdynamic` on Linux and `-Wl,-export_dynamic` on macOS. Module `.so`
+  targets additionally link with `-undefined dynamic_lookup` on macOS so that
+  `curry_*` symbols are resolved from the main binary at `dlopen` time rather
+  than at static link time.
 - Boehm GC tracks dlopen'd images via `_dyld_register_func_for_add_image` on
   macOS, so GC roots in module data segments (including `s_proc_roots` in the
   qt6 module) are scanned correctly.

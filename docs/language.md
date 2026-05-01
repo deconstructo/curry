@@ -5,7 +5,11 @@ Curry is an R7RS Scheme interpreter with a numeric tower that extends through th
 ## Quick start
 
 ```bash
+# Linux
 cmake -B build && cmake --build build -j$(nproc)
+# macOS
+cmake -B build && cmake --build build -j$(sysctl -n hw.logicalcpu)
+
 ./build/curry                        # REPL
 ./build/curry script.scm             # run a file
 ./build/curry -e '(display (+ 1 2))' # evaluate expression

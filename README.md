@@ -172,7 +172,7 @@ cmake --build build -j$(sysctl -n hw.logicalcpu)
 cmake --build build && ctest --test-dir build -V
 ```
 
-The test suite comprises four suites (253 tests total):
+The test suite comprises four suites (262 tests total):
 
 | Suite | File | What it covers |
 |-------|------|----------------|
