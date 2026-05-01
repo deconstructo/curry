@@ -10,13 +10,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 
 # Configure with optional modules
 cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_MODULE_CRYPTO=ON \
+  -DBUILD_MODULE_LDAP=ON \
+  -DBUILD_MODULE_STORAGE=ON \
+  -DBUILD_MODULE_GRAPHQL=ON \
+  -DBUILD_MODULE_UI=ON \
+  -DBUILD_MODULE_IMAGE=ON \
+  -DBUILD_MODULE_GIT=ON \
+  -DBUILD_MODULE_PLPLOT=ON \
   -DBUILD_MODULE_QT6=ON \
-  -DBUILD_MODULE_SYMENGINE=ON \
-  -DBUILD_MODULE_NEO4J=OFF \
-  -DBUILD_MODULE_VECDB=ON
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6
 
 # Build
-cmake --build build -j$(nproc)
+cmake --build build -j$(nproc)                  # Linux
+cmake --build build -j$(sysctl -n hw.logicalcpu) # macOS
 
 # Run the REPL
 ./build/curry
@@ -33,68 +40,17 @@ Required: `libgc` (Boehm GC), `libgmp`, pthreads, CMake ≥ 3.20, C11 compiler.
 # Debian/Ubuntu
 sudo apt install libgc-dev libgmp-dev cmake build-essential
 
-# macOS (Homebrew — native Apple Silicon or x86_64)
+# macOS (Homebrew)
 brew install bdw-gc gmp cmake
 
 # Optional modules — Linux
-sudo apt install libsqlite3-dev        # sqlite
-sudo apt install libcurl4-openssl-dev  # storage, graphql
-sudo apt install libldap-dev           # ldap
-sudo apt install libpng-dev libjpeg-dev # image
-sudo apt install libgit2-dev           # git
+sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
+                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev
 
 # Optional modules — macOS
 brew install openssl sqlite libgit2 libpng jpeg-turbo
-# curl and ldap are bundled with macOS (no extra install needed)
+# curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with macOS
 ```
-
-## Building on macOS
-
-Install Xcode command-line tools first:
-```bash
-xcode-select --install
-```
-
-Install required dependencies:
-```bash
-brew install bdw-gc gmp cmake
-```
-
-Configure and build (same as Linux):
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j$(sysctl -n hw.logicalcpu)
-./build/curry
-```
-
-### Qt6 module on macOS
-
-```bash
-brew install qt@6
-
-# Qt6 from Homebrew is not on PATH by default — tell CMake where it is:
-cmake -B build -DCMAKE_BUILD_TYPE=Debug \
-  -DBUILD_MODULE_QT6=ON \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
-cmake --build build -j$(sysctl -n hw.logicalcpu)
-```
-
-Qt6 on macOS uses Metal for rendering. `QOpenGLWidget` is bridged through
-Apple's OpenGL compatibility layer; expect deprecation warnings at runtime
-(`libGL error: ...`) but the module works correctly.
-
-### Notes
-
-- Modules are built as `.so` bundles (CMake `MODULE` type) on both Linux and
-  macOS, so `(import (curry qt6))` works identically on both platforms.
-- Symbol export: the main binary is built with `ENABLE_EXPORTS ON`, which maps
-  to `-rdynamic` on Linux and `-Wl,-export_dynamic` on macOS. Module `.so`
-  targets additionally link with `-undefined dynamic_lookup` on macOS so that
-  `curry_*` symbols are resolved from the main binary at `dlopen` time rather
-  than at static link time.
-- Boehm GC tracks dlopen'd images via `_dyld_register_func_for_add_image` on
-  macOS, so GC roots in module data segments (including `s_proc_roots` in the
-  qt6 module) are scanned correctly.
 
 ## Tests
 
@@ -107,9 +63,31 @@ cmake --build build && ctest --test-dir build -V
 # Run only the Scheme R7RS tests
 ./build/curry tests/r7rs_tests.scm
 
+# Run a specific test file
+./build/curry tests/actors_tests.scm
+./build/curry tests/numeric_ext_tests.scm
+
 # Run a specific expression
 ./build/curry -e '(display (+ 1 2)) (newline)'
 ```
+
+The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS conformance), `numeric_ext` (Clifford algebra, CAS, surreal, auto-diff), and `actors` (concurrency primitives).
+
+## CLI flags
+
+```
+./build/curry [options] [script.scm] [args...]
+  -e EXPR    Evaluate expression and print result
+  -l FILE    Load file before entering REPL
+  -i         Force interactive REPL after loading scripts
+  -v         Print version
+```
+
+Script arguments are bound to `command-line-args` in the global environment.
+
+## REPL commands
+
+Inside the REPL, comma-prefixed commands are available: `,quit`, `,help`, `,gc` (force GC), `,env` (list all global bindings). Readline history is saved to `~/.curry_history` (last 500 entries) when readline is present.
 
 ## Architecture
 
@@ -135,19 +113,46 @@ No explicit rooting needed on the stack. Call `gc_register_thread()` at the star
 
 ### Numeric tower (`src/numeric.h`, `src/numeric.c`)
 
-Hierarchy: `fixnum → bignum (GMP mpz) → rational (GMP mpq) → flonum (double) → complex (val_t pair) → quaternion (4×double) → octonion (8×double)`.
+Hierarchy (auto-promotes upward):
 
-Arithmetic functions (`num_add`, `num_mul`, etc.) auto-promote between levels. Overflow from fixnum arithmetic goes to bignum automatically. The octonion multiplication table uses the Graves/Cayley convention.
+```
+fixnum → bignum (GMP mpz) → rational (GMP mpq) → flonum (double)
+       → complex (val_t pair) → quaternion (4×double) → octonion (8×double)
+       → multivector (Clifford Cl(p,q,r)) → surreal (Hahn series)
+       → symbolic (CAS expression tree)
+```
+
+Overflow from fixnum goes to bignum automatically. When any arithmetic operand is symbolic the result is a symbolic expression rather than an error. Octonion multiplication uses the Graves/Cayley convention.
+
+### Symbolic CAS (`src/symbolic.h`, `src/symbolic.c`)
+
+`T_SYMVAR` and `T_SYMEXPR` extend the numeric tower. Declare variables with `(symbolic x y)` or `(sym-var 'x)`. Core operations: `(∂ expr var)` (differentiation), `(simplify expr)`, `(substitute expr var val)`. Auto-differentiation via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient.
+
+Operator symbols (`SX_ADD`, `SX_MUL`, etc.) are interned at `symbolic_init()` time.
+
+### Surreal numbers (`src/surreal.h`, `src/surreal.c`)
+
+Hahn-series representation: a sorted list of `(exponent, coefficient)` pairs. Constants `SUR_OMEGA` (ω, infinite) and `SUR_EPSILON` (ε = 1/ω, infinitesimal) are available after `surreal_init()`. Forward-mode auto-diff falls out naturally: `f(x + ε)` gives `f(x) + f'(x)·ε`.
+
+### Multivectors / Clifford algebra (`src/multivec.h`, `src/multivec.c`)
+
+`T_MULTIVEC` elements of Cl(p,q,r) with up to 8 basis vectors (2⁸ = 256 components). Blade indices are bitmaps. Supports geometric product (`mv_geom`), wedge (`mv_wedge`), left contraction, reverse, grade involution, dual, and grade projection. Useful algebras: Cl(3,0,0) 3D Euclidean, Cl(3,1,0) Minkowski, Cl(3,0,1) PGA, Cl(4,1,0) CGA.
+
+### Quantum superposition (`src/quantum.h`, `src/quantum.c`)
+
+`T_QUANTUM` represents `|ψ⟩ = Σ αᵢ|xᵢ⟩` with complex amplitudes. `(observe q)` collapses probabilistically; arithmetic maps over branches. `(superpose pairs)` builds from `(amplitude . value)` lists.
 
 ### Symbols (`src/symbol.h`, `src/symbol.c`)
 
-All symbols are interned — the same name always maps to the same heap address, so `eq?` on symbols is pointer comparison. Pre-interned special-form symbols are declared via the X-macro `symbol_list.h` and are available as globals (`S_DEFINE`, `S_LAMBDA`, etc.) after `sym_init()`.
+All symbols are interned — pointer equality is identity. Pre-interned special-form symbols are declared via the X-macro `symbol_list.h` and available as globals (`S_DEFINE`, `S_LAMBDA`, etc.) after `sym_init()`.
 
 ### Evaluator (`src/eval.h`, `src/eval.c`)
 
 Tree-walking interpreter with proper tail-call optimization via `goto tail` (iterative dispatch loop). All R7RS special forms are handled as cases in `eval()`. Function application always goes through the tail of the loop for closures, enabling TCO.
 
 Exception handling uses `setjmp`/`longjmp` through the `ExnHandler` chain (`current_handler` thread-local). The `SCM_PROTECT(h, body, on_exn)` macro wraps a body with a handler frame. `call/cc` captures an escape continuation backed by a heap-allocated `jmp_buf`; upward escapes work, full first-class continuations are deferred.
+
+Before dispatching special forms, `eval()` calls `akk_translate(op)` (`src/akkadian_eval.h`) to remap Akkadian/cuneiform synonyms to their canonical English symbols — so code can be written in Standard Babylonian Akkadian and it evaluates identically.
 
 ### Environments (`src/env.h`, `src/env.c`)
 
@@ -159,7 +164,10 @@ Two kinds of modules:
 1. **C extension `.so`** — exports `void curry_module_init(CurryVM *vm)`. Loaded with `dlopen`. Call `curry_define_fn` / `curry_define_val` to register bindings.
 2. **Scheme `.sld` / `.scm`** — evaluated in a fresh environment; exports all top-level definitions.
 
-Module search order: `CURRY_MODULE_PATH` env var (colon-separated), then `lib/curry/modules/`. Module names are lists of symbols mapped to filesystem paths, e.g. `(curry json)` → `curry/json.so`.
+Always-on modules (no build flag needed): `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`.  
+Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`.
+
+Module search order: `CURRY_MODULE_PATH` env var (colon-separated), then `lib/curry/modules/`. Module names map to paths, e.g. `(curry json)` → `curry/json.so`.
 
 ### Actor system (`src/actors.h`, `src/actors.c`)
 
@@ -171,25 +179,33 @@ Scheme primitives: `spawn`, `send!`, `receive`, `self`, `actor-alive?`.
 
 Open-addressing hash tables with 75% max load and tombstone deletion. Three comparator modes: `SET_CMP_EQ` (pointer), `SET_CMP_EQV`, `SET_CMP_EQUAL` (structural). Both `Set` and `Hashtable` use the same `val_hash` / `slot_matches` infrastructure.
 
-### Adding a new built-in procedure
-
-In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *argv, void *ud)` and register it with `DEF("name", fn, min_args, max_args)` inside `builtins_register()`.
-
-### Adding a new C module
-
-1. Create `modules/<name>/<name>.c` (or `.cpp`).
-2. Implement `void curry_module_init(CurryVM *vm)` calling `curry_define_fn` / `curry_define_val`.
-3. Add a `curry_c_module(<name>)` (or `curry_cxx_module`) call in `CMakeLists.txt` under the appropriate `option` guard.
-4. Load from Scheme with `(import (curry <name>))`.
-
-### Graphics / GPU (`modules/qt6/qt6.cpp`)
-
-The qt6 module layers: 2D canvas (QPainter), 3D scene (Qt3D / QRhi), and 4D projection math (implemented in pure C++, no Qt dependency). 4D→3D projection uses perspective division on the w-axis (`project_4d_to_3d`). 3D rendering uses Qt6's `QRhi` abstraction: Metal on macOS, Vulkan on Linux, D3D11 on Windows. GPU compute is exposed via `gpu-buffer-make` / `gpu-dispatch` backed by QRhi compute shaders.
-
 ### Initialization order
 
 `gc_init() → sym_init() → num_init() → port_init() → env_init() → eval_init() → actors_init() → modules_init()`
 
 `modules_init()` calls `builtins_register(GLOBAL_ENV)` to populate the top-level environment.
 
-### Add readline support
+### Graphics / GPU (`modules/qt6/qt6.cpp`)
+
+The qt6 module layers: 2D canvas (QPainter), 3D scene (Qt3D / QRhi), and 4D projection math (pure C++, no Qt dependency). 4D→3D projection uses perspective division on the w-axis (`project_4d_to_3d`). 3D rendering uses Qt6's `QRhi` abstraction: Metal on macOS, Vulkan on Linux, D3D11 on Windows. GPU compute is exposed via `gpu-buffer-make` / `gpu-dispatch` backed by QRhi compute shaders.
+
+macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary uses `ENABLE_EXPORTS ON` (`-rdynamic` / `-Wl,-export_dynamic`). Module `.so` targets link with `-undefined dynamic_lookup` so `curry_*` symbols resolve from the main binary at `dlopen` time.
+
+## Public embedding API (`include/curry.h`, `src/api.c`)
+
+Thin wrappers around internal types for use from C extension modules. Key functions: `curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. These live in `curry_core` and resolve via `--export-dynamic`.
+
+## Adding a new built-in procedure
+
+In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *argv, void *ud)` and register it with `DEF("name", fn, min_args, max_args)` inside `builtins_register()`.
+
+## Adding a new C module
+
+1. Create `modules/<name>/<name>.c` (or `.cpp`).
+2. Implement `void curry_module_init(CurryVM *vm)` calling `curry_define_fn` / `curry_define_val`.
+3. Add a `curry_c_module(<name>)` (or `curry_cxx_module`) call in `CMakeLists.txt` under the appropriate `option` guard.
+4. Load from Scheme with `(import (curry <name>))`.
+
+## Akkadian error messages
+
+All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) selected by keyword-matching the error string against `akkadian_table[]` in `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms registered in `src/akkadian_names.h` and translated transparently in `eval()` — Akkadian code is valid Curry Scheme.
