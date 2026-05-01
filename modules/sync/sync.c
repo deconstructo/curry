@@ -13,7 +13,6 @@
 
 #include <curry.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -158,50 +157,70 @@ static curry_val fn_cond_p(int ac, curry_val *av, void *ud) {
     return curry_make_bool(has_tag(av[0], "condvar"));
 }
 
-/* ---- Counting semaphore ---- */
-static curry_val wrap_sem(sem_t *s) {
+/* ---- Counting semaphore (mutex+condvar — portable; avoids sem_init which
+ *      is unimplemented on macOS for unnamed semaphores) ---- */
+typedef struct { pthread_mutex_t mtx; pthread_cond_t cnd; unsigned count; } ScmSem;
+
+static curry_val wrap_sem(ScmSem *s) {
     return curry_make_pair(curry_make_symbol("semaphore"), pack_ptr(s));
 }
-static sem_t *get_sem(curry_val v, const char *ctx) {
+static ScmSem *get_sem(curry_val v, const char *ctx) {
     if (!has_tag(v, "semaphore")) curry_error("%s: expected semaphore", ctx);
-    return (sem_t *)unpack_ptr(curry_cdr(v));
+    return (ScmSem *)unpack_ptr(curry_cdr(v));
 }
 
 static curry_val fn_sem_make(int ac, curry_val *av, void *ud) {
     (void)ud;
     unsigned initial = (ac >= 1 && curry_is_fixnum(av[0])) ? (unsigned)curry_fixnum(av[0]) : 0;
-    sem_t *s = malloc(sizeof(sem_t));
+    ScmSem *s = malloc(sizeof(ScmSem));
     if (!s) curry_error("make-semaphore: out of memory");
-    if (sem_init(s, 0, initial) != 0) {
-        free(s); curry_error("make-semaphore: sem_init failed");
-    }
+    if (pthread_mutex_init(&s->mtx, NULL) != 0) { free(s); curry_error("make-semaphore: mutex init failed"); }
+    if (pthread_cond_init(&s->cnd, NULL)  != 0) { pthread_mutex_destroy(&s->mtx); free(s); curry_error("make-semaphore: cond init failed"); }
+    s->count = initial;
     return wrap_sem(s);
 }
 static curry_val fn_sem_destroy(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
-    sem_t *s = get_sem(av[0], "semaphore-destroy!");
-    sem_destroy(s); free(s);
+    ScmSem *s = get_sem(av[0], "semaphore-destroy!");
+    pthread_cond_destroy(&s->cnd);
+    pthread_mutex_destroy(&s->mtx);
+    free(s);
     return curry_void();
 }
 static curry_val fn_sem_wait(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
-    sem_wait(get_sem(av[0], "sem-wait!"));
+    ScmSem *s = get_sem(av[0], "sem-wait!");
+    pthread_mutex_lock(&s->mtx);
+    while (s->count == 0) pthread_cond_wait(&s->cnd, &s->mtx);
+    s->count--;
+    pthread_mutex_unlock(&s->mtx);
     return curry_void();
 }
 static curry_val fn_sem_post(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
-    sem_post(get_sem(av[0], "sem-post!"));
+    ScmSem *s = get_sem(av[0], "sem-post!");
+    pthread_mutex_lock(&s->mtx);
+    s->count++;
+    pthread_cond_signal(&s->cnd);
+    pthread_mutex_unlock(&s->mtx);
     return curry_void();
 }
 static curry_val fn_sem_trywait(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
-    return curry_make_bool(sem_trywait(get_sem(av[0], "sem-trywait!")) == 0);
+    ScmSem *s = get_sem(av[0], "sem-trywait!");
+    pthread_mutex_lock(&s->mtx);
+    int ok = (s->count > 0);
+    if (ok) s->count--;
+    pthread_mutex_unlock(&s->mtx);
+    return curry_make_bool(ok);
 }
 static curry_val fn_sem_value(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
-    int val = 0;
-    sem_getvalue(get_sem(av[0], "sem-value"), &val);
-    return curry_make_fixnum(val);
+    ScmSem *s = get_sem(av[0], "sem-value");
+    pthread_mutex_lock(&s->mtx);
+    unsigned val = s->count;
+    pthread_mutex_unlock(&s->mtx);
+    return curry_make_fixnum((intptr_t)val);
 }
 static curry_val fn_sem_p(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;

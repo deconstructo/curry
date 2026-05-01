@@ -1,6 +1,7 @@
 #include "numeric.h"
 #include "object.h"
 #include "gc.h"
+#include "eval.h"
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"

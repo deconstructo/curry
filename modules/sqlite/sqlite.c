@@ -16,6 +16,7 @@
 
 #include <curry.h>
 #include <sqlite3.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 

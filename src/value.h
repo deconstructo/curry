@@ -55,7 +55,7 @@ typedef uintptr_t val_t;
 #define vis_eof(v)      ((v) == V_EOF)
 
 /* ---- Fixnum ---- */
-#define vfix(n)         (((val_t)((intptr_t)(n) << 2)) | VTAG_FIX)
+#define vfix(n)         (((val_t)((uintptr_t)(intptr_t)(n) << 2)) | VTAG_FIX)
 #define vunfix(v)       ((intptr_t)(v) >> 2)
 #define FIXNUM_MAX      ((intptr_t)((UINTPTR_MAX >> 3) >> 1))
 #define FIXNUM_MIN      (-FIXNUM_MAX - 1)

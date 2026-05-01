@@ -97,6 +97,9 @@ target_link_libraries(curry_core PUBLIC
   m
 )
 target_compile_options(curry_core PUBLIC ${GC_CFLAGS_OTHER})
+if(GC_LIBRARY_DIRS)
+  target_link_directories(curry_core PUBLIC ${GC_LIBRARY_DIRS})
+endif()
 
 # Main REPL executable
 # api.c is compiled directly into the binary (not only into curry_core.a) so
@@ -156,6 +159,11 @@ function(curry_c_module name)
   # curry_core privately would embed a duplicate symbol-intern table, causing
   # symbols created by the module to be pointer-inequal to the same symbols in
   # the main binary and breaking frame_lookup.
+  # On macOS the static linker rejects unresolved symbols by default; tell it
+  # to defer resolution to dlopen time (same effect as -rdynamic on Linux).
+  if(APPLE)
+    target_link_options(curry_${name} PRIVATE -undefined dynamic_lookup)
+  endif()
   target_include_directories(curry_${name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -173,6 +181,9 @@ endfunction()
 function(curry_cxx_module name)
   add_library(curry_${name} MODULE modules/${name}/${name}.cpp)
   # Same rationale as curry_c_module: no curry_core link; resolved from main binary.
+  if(APPLE)
+    target_link_options(curry_${name} PRIVATE -undefined dynamic_lookup)
+  endif()
   target_include_directories(curry_${name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -304,6 +315,9 @@ if(BUILD_MODULE_GIT)
     curry_c_module(git)
     target_link_libraries(curry_git PRIVATE ${LIBGIT2_LIBRARIES})
     target_include_directories(curry_git PRIVATE ${LIBGIT2_INCLUDE_DIRS})
+    if(LIBGIT2_LIBRARY_DIRS)
+      target_link_directories(curry_git PRIVATE ${LIBGIT2_LIBRARY_DIRS})
+    endif()
   else()
     find_library(LIBGIT2_LIB NAMES git2)
     find_path(LIBGIT2_INCLUDE NAMES git2.h)
