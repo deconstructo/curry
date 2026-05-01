@@ -23,7 +23,7 @@
 
 ;;; šapāru ṣipāti ("write out the series")
 (𒅁 alāku                            ;; let  (named loop)
-    ((ṣipātu (napḫar-ṣiptu 100))
+    ((ṣipātu (napḫar-ṣiptu 10000))
      (mīnu   1))                      ;; mīnu = "term number"
   (𒌑 (𒇲𒇲 ṣipātu)                   ;; when  (pair? ṣipātu)
     (𒅆 mīnu)                         ;;   display  term index
