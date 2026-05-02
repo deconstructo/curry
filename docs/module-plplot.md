@@ -10,13 +10,41 @@ Scientific 2D/3D plotting using [PLplot](http://plplot.sourceforge.net/) — a c
 
 ## Requirements
 
+**Linux (Debian / Ubuntu)**
 ```bash
 sudo apt install libplplot-dev
+```
+
+**macOS (Homebrew)**
+```bash
+brew install plplot
 ```
 
 Build with:
 ```bash
 cmake -B build -DBUILD_MODULE_PLPLOT=ON
+cmake --build build -j$(sysctl -n hw.logicalcpu)   # macOS
+cmake --build build -j$(nproc)                      # Linux
+```
+
+### macOS driver notes
+
+The `xwin` driver requires X11/XQuartz, which is not installed by default on macOS. Use file-based or Qt drivers instead:
+
+| Driver | Output | Notes |
+|---|---|---|
+| `"pngcairo"` | PNG file | Recommended for scripts |
+| `"pdfcairo"` | PDF file | Good for print-quality output |
+| `"svgcairo"` | SVG file | Scalable vector output |
+| `"qtwidget"` | Interactive window | Requires `brew install qt@6` and the qt6 module |
+
+Example — render to PNG on macOS:
+```scheme
+(pl-sdev "pngcairo")
+(pl-sfnam "plot.png")
+(pl-init)
+...
+(pl-end)
 ```
 
 ## Initialisation and output
