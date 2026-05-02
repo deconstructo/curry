@@ -130,6 +130,43 @@ All tail positions are optimised — proper tail recursion is guaranteed. Named 
 (raise-continuable obj)
 ```
 
+### dynamic-wind
+
+`dynamic-wind` guarantees cleanup code runs regardless of how control leaves a body — normal return, exception, or escape continuation:
+
+```scheme
+(dynamic-wind before thunk after)
+```
+
+`before` is called on entry, `after` on any exit. Both are called with no arguments; the return value of `after` is discarded.
+
+```scheme
+; Safe resource cleanup pattern
+(dynamic-wind
+  (lambda () (display "acquiring\n"))
+  (lambda () (error "something went wrong"))
+  (lambda () (display "always released\n")))
+; => prints "acquiring", then "always released", then raises
+
+; Interaction with call/cc: after runs on escape too
+(define log '())
+(call-with-current-continuation
+  (lambda (k)
+    (dynamic-wind
+      (lambda () (set! log (cons 'in  log)))
+      (lambda () (k 'escaped))
+      (lambda () (set! log (cons 'out log))))))
+log  ; => (out in)
+```
+
+`call-with-port` uses this pattern to close a port on any exit:
+
+```scheme
+(call-with-port (open-input-file "data.txt")
+  (lambda (port)
+    (read port)))   ; port is closed whether read succeeds or raises
+```
+
 Errors display with a Standard Babylonian Akkadian preamble:
 
 ```
@@ -357,12 +394,14 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 ; Ports
 (open-input-file "path")
 (open-output-file "path")
-(call-with-port port proc)
+(call-with-port port proc)          ; closes port on any exit
 (with-input-from-file "path" thunk)
 (with-output-to-file "path" thunk)
 (current-input-port)
 (current-output-port)
 (current-error-port)
+(input-port-open? port)             ; #f after close-port
+(output-port-open? port)
 
 ; Reading
 (read)
@@ -390,6 +429,8 @@ Curry guarantees proper tail calls in all R7RS tail positions. Escape continuati
     (k 42)
     (error "never reached")))
 ```
+
+Continuations interact correctly with `dynamic-wind`: invoking an escape continuation unwinds all `dynamic-wind` frames entered since the continuation was captured, calling each `after` thunk before the jump.
 
 Full first-class continuations (upward-crossing) are an escape-only implementation. Delimited continuations (`shift`/`reset`) are on the roadmap.
 

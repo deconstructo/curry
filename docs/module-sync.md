@@ -40,12 +40,16 @@ Returns `#t` if `x` is a mutex handle.
 
 ### `(with-mutex mutex thunk)`
 
-Lock `mutex`, call `thunk` with no arguments, then unlock. Returns the thunk's result.
+Lock `mutex`, call `thunk` with no arguments, then unlock. Returns the thunk's result. The unlock is guaranteed even if `thunk` raises an exception — the exception is re-raised after the mutex is released, so the lock is never left held.
 
 ```scheme
 (define mx (make-mutex))
 (with-mutex mx (lambda () (display "critical section") (newline)))
 (mutex-destroy! mx)
+
+; Exception safety: mx is unlocked even if thunk errors
+(guard (e (#t (display "caught\n")))
+  (with-mutex mx (lambda () (error "boom"))))
 ```
 
 ## Condition variable
@@ -138,4 +142,6 @@ Returns `#t` if `x` is a semaphore handle.
 
 ## Resource management
 
-Handles are plain pair/bytevector values with no GC finalizer. The underlying pthread resource is heap-allocated. Call the corresponding `*-destroy!` procedure before releasing a handle to avoid resource leaks.
+Handles are plain pair/bytevector values with no GC finalizer. The underlying pthread resource is heap-allocated with `malloc`. Call the corresponding `*-destroy!` procedure before releasing a handle to avoid resource leaks.
+
+`with-mutex` is exception-safe: the mutex is always unlocked, even if the thunk raises. For condition variable and semaphore usage in potentially-raising code, wrap cleanup in `dynamic-wind` or `guard` manually.
