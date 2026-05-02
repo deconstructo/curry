@@ -79,6 +79,7 @@ set(CORE_SOURCES
   src/quantum.c
   src/surreal.c
   src/multivec.c
+  src/matrix.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})
@@ -359,7 +360,7 @@ if(BUILD_MODULE_PLPLOT)
     target_compile_options(curry_plplot PRIVATE ${PLPLOT_CFLAGS_OTHER})
     message(STATUS "PLplot ${PLPLOT_VERSION} found — building plplot module")
   else()
-    message(WARNING "PLplot not found, skipping plplot module (sudo apt install libplplot-dev)")
+    message(WARNING "PLplot not found, skipping plplot module (Linux: sudo apt install libplplot-dev  |  macOS: brew install plplot)")
   endif()
 endif()
 

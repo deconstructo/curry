@@ -58,6 +58,8 @@ typedef enum {
     T_SURREAL       = 32,  /* surreal number (Hahn-series form) */
     T_MULTIVECTOR   = 33,  /* Clifford algebra element in Cl(p,q,r) */
     T_TRACED        = 34,  /* procedure wrapped with trace instrumentation */
+    T_MATRIX        = 35,  /* 2D matrix of doubles (row-major) */
+    T_TENSOR        = 36,  /* N-dimensional tensor of doubles (row-major) */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -109,6 +111,8 @@ static inline uint32_t vtype(val_t v) {
 #define vis_surreal(v)  vis_type(v, T_SURREAL)
 #define vis_mv(v)       vis_type(v, T_MULTIVECTOR)
 #define vis_traced(v)   vis_type(v, T_TRACED)
+#define vis_matrix(v)   vis_type(v, T_MATRIX)
+#define vis_tensor(v)   vis_type(v, T_TENSOR)
 
 #define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v) || vis_traced(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
@@ -426,6 +430,26 @@ typedef struct {
     val_t name;   /* symbol name, or V_FALSE */
 } Traced;
 
+/* Matrix: a 2D array of doubles stored in row-major order.
+ * GC-atomic (no interior val_t pointers). */
+typedef struct {
+    Hdr      hdr;
+    uint32_t rows;
+    uint32_t cols;
+    double   data[];   /* rows*cols elements, row-major */
+} Matrix;
+
+/* Tensor: an N-dimensional array of doubles stored in row-major order.
+ * Layout: Tensor header + dims[ndim] uint32_t + data[size] double.
+ * The data pointer is obtained via tensor_data(t) = (double *)(t->dims + t->ndim).
+ * GC-atomic (no interior val_t pointers). */
+typedef struct {
+    Hdr      hdr;
+    uint32_t ndim;     /* number of dimensions */
+    uint32_t size;     /* total element count = product of dims */
+    uint32_t dims[];   /* ndim dimension sizes; doubles follow immediately after */
+} Tensor;
+
 /* ---- Convenience casts ---- */
 #define as_pair(v)    vunptr(Pair,       v)
 #define as_vec(v)     vunptr(Vector,     v)
@@ -461,6 +485,8 @@ typedef struct {
 #define as_surreal(v) vunptr(Surreal,     v)
 #define as_mv(v)      vunptr(Multivector, v)
 #define as_traced(v)  vunptr(Traced,      v)
+#define as_matrix(v)  vunptr(Matrix,      v)
+#define as_tensor(v)  vunptr(Tensor,      v)
 
 /* Pair accessors */
 #define vcar(v)       (as_pair(v)->car)

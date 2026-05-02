@@ -1,6 +1,6 @@
 # Curry Scheme
 
-Curry is an R7RS Scheme interpreter with a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, an actor-model concurrency system, and a modular C extension interface.
+Curry is an R7RS Scheme interpreter with a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices and tensors, an actor-model concurrency system, and a modular C extension interface.
 
 Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands.
 
@@ -134,6 +134,7 @@ brew install openssl      # crypto
 brew install sqlite       # sqlite
 brew install libgit2      # git
 brew install libpng jpeg-turbo  # image
+brew install plplot             # plplot
 # curl and ldap are bundled with macOS — no extra install needed
 ```
 

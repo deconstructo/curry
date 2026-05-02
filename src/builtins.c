@@ -1354,4 +1354,8 @@ void builtins_register(val_t env) {
     /* Multivectors — Clifford algebra Cl(p,q,r) */
     extern void mv_register_builtins(val_t env);
     mv_register_builtins(env);
+
+    /* Matrices and tensors */
+    extern void mat_register_builtins(val_t env);
+    mat_register_builtins(env);
 }

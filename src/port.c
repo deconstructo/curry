@@ -366,6 +366,8 @@ void scm_write(val_t v, val_t port) {
     if (vis_quantum(v))  { extern void quantum_write(val_t, val_t); quantum_write(v, port); return; }
     if (vis_surreal(v))  { extern void sur_write(val_t, val_t); sur_write(v, port); return; }
     if (vis_mv(v))       { extern void mv_write(val_t, val_t); mv_write(v, port); return; }
+    if (vis_matrix(v))  { extern void mat_write(val_t, val_t); mat_write(v, port); return; }
+    if (vis_tensor(v))  { extern void tensor_write(val_t, val_t); tensor_write(v, port); return; }
     if (vis_traced(v)) {
         Traced *t = as_traced(v);
         if (vis_symbol(t->name)) {
