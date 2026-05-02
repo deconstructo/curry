@@ -631,6 +631,8 @@ static val_t prim_open_output_file(int ac, val_t *av, void *ud) {(void)ac;(void)
 }
 static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
 static val_t prim_input_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0]));}
+static val_t prim_input_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
+static val_t prim_output_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_output(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
 static val_t prim_output_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_output(av[0]));}
 static val_t prim_current_input_port(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return PORT_STDIN;}
 static val_t prim_current_output_port(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return PORT_STDOUT;}
@@ -781,6 +783,57 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
         current_handler = h.prev;
         result = apply(handler, scm_cons(h.exn, V_NIL));
     }
+    return result;
+}
+
+static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t before = av[0], thunk = av[1], after = av[2];
+
+    apply(before, V_NIL);
+
+    WindFrame wf;
+    wf.before = before;
+    wf.after  = after;
+    wf.prev   = current_wind;
+    current_wind = &wf;
+
+    val_t result = V_VOID;
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    bool raised = false;
+    val_t exn_val = V_VOID;
+    if (setjmp(h.jmp) == 0) {
+        result = apply(thunk, V_NIL);
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        raised = true; exn_val = h.exn;
+    }
+
+    current_wind = wf.prev;
+    apply(after, V_NIL);
+
+    if (raised) scm_raise_val(exn_val);
+    return result;
+}
+
+static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t port = av[0], proc = av[1];
+    val_t result = V_VOID;
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    bool raised = false; val_t exn_val = V_VOID;
+    if (setjmp(h.jmp) == 0) {
+        result = apply(proc, scm_cons(port, V_NIL));
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        raised = true; exn_val = h.exn;
+    }
+    port_close(port);
+    if (raised) scm_raise_val(exn_val);
     return result;
 }
 
@@ -1166,6 +1219,7 @@ void builtins_register(val_t env) {
     DEF("close-port",prim_close_port,1,1); DEF("close-input-port",prim_close_port,1,1);
     DEF("close-output-port",prim_close_port,1,1);
     DEF("input-port?",prim_input_port_p,1,1); DEF("output-port?",prim_output_port_p,1,1);
+    DEF("input-port-open?",prim_input_port_open_p,1,1); DEF("output-port-open?",prim_output_port_open_p,1,1);
     DEF("current-input-port",prim_current_input_port,0,0);
     DEF("current-output-port",prim_current_output_port,0,0);
     DEF("current-error-port",prim_current_error_port,0,0);
@@ -1183,6 +1237,8 @@ void builtins_register(val_t env) {
     DEF("error-object-irritants",prim_error_irritants,1,1);
     DEF("error-object->string",prim_error_to_string,1,1);
     DEF("with-exception-handler",prim_with_exception_handler,2,2);
+    DEF("dynamic-wind",           prim_dynamic_wind,           3,3);
+    DEF("call-with-port",         prim_call_with_port,         2,2);
     DEF("values",prim_values,0,-1);
     DEF("boolean=?",prim_boolean_eq,2,-1);
 

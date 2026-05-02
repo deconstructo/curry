@@ -29,6 +29,17 @@ val_t port_wrap_file(FILE *fp, int flags) {
     return v;
 }
 
+static void port_gc_finalize(void *obj, void *cd) {
+    (void)cd;
+    Port *p = (Port *)obj;
+    if (!(p->flags & PORT_CLOSED) && !(p->flags & PORT_STRING) &&
+        p->u.fp && p->u.fp != stdin && p->u.fp != stdout && p->u.fp != stderr) {
+        fclose(p->u.fp);
+        p->u.fp = NULL;
+        p->flags |= PORT_CLOSED;
+    }
+}
+
 val_t port_open_file(const char *path, int flags) {
     const char *mode;
     if ((flags & PORT_BINARY)) {
@@ -40,6 +51,7 @@ val_t port_open_file(const char *path, int flags) {
     if (!fp) return V_FALSE;
     val_t v = make_port(flags);
     as_port(v)->u.fp = fp;
+    gc_finalizer(as_port(v), port_gc_finalize, NULL);
     return v;
 }
 

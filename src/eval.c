@@ -17,9 +17,20 @@
 #include <stdarg.h>
 #include <assert.h>
 
-/* ---- Exception handling ---- */
+/* ---- Exception handling and dynamic wind ---- */
 
 _Thread_local ExnHandler *current_handler = NULL;
+_Thread_local WindFrame  *current_wind    = NULL;
+
+/* Unwind dynamic-wind frames from current_wind down to target, calling each
+ * after thunk.  Used before longjmp-ing to an escape continuation. */
+static void wind_unwind_to(WindFrame *target) {
+    while (current_wind != target) {
+        WindFrame *wf = current_wind;
+        current_wind = wf->prev;
+        apply(wf->after, V_NIL);
+    }
+}
 
 void scm_raise_val(val_t exn) {
     if (current_handler) {
@@ -665,8 +676,9 @@ tail:
         /* Allocate escape continuation */
         Continuation *cont = CURRY_NEW(Continuation);
         cont->hdr.type=T_CONTINUATION; cont->hdr.flags=0;
-        cont->jmpbuf = gc_alloc(sizeof(jmp_buf));
-        cont->result = V_UNDEF;
+        cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
+        cont->result   = V_UNDEF;
+        cont->wind_top = current_wind;
         ExnHandler h;
         val_t ret;
         h.prev = current_handler; current_handler = &h;
@@ -828,6 +840,7 @@ tail:
         if (vis_cont(proc)) {
             Continuation *cont = as_cont(proc);
             cont->result = argc > 0 ? arr[0] : V_VOID;
+            wind_unwind_to((WindFrame *)cont->wind_top);
             longjmp(*(jmp_buf *)cont->jmpbuf, 1);
         }
 
@@ -867,6 +880,7 @@ val_t apply(val_t proc, val_t args) {
     if (vis_cont(proc)) {
         Continuation *cont = as_cont(proc);
         cont->result = vis_pair(args) ? vcar(args) : V_VOID;
+        wind_unwind_to((WindFrame *)cont->wind_top);
         longjmp(*(jmp_buf *)cont->jmpbuf, 1);
     }
     if (vis_param(proc)) {

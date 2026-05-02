@@ -12,7 +12,9 @@
  */
 
 #include <curry.h>
+#include "eval.h"
 #include <pthread.h>
+#include <setjmp.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -85,14 +87,25 @@ static curry_val fn_mutex_p(int ac, curry_val *av, void *ud) {
     return curry_make_bool(has_tag(av[0], "mutex"));
 }
 
-/* (with-mutex mutex thunk) — lock, call thunk, always unlock */
+/* (with-mutex mutex thunk) — lock, call thunk, always unlock (exception-safe) */
 static curry_val fn_with_mutex(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     pthread_mutex_t *m = get_mutex(av[0], "with-mutex");
     if (!curry_is_procedure(av[1])) curry_error("with-mutex: expected procedure");
     pthread_mutex_lock(m);
-    curry_val result = curry_apply(av[1], 0, NULL);
+    curry_val result = curry_void();
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    bool raised = false; curry_val exn_val = curry_void();
+    if (setjmp(h.jmp) == 0) {
+        result = curry_apply(av[1], 0, NULL);
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        raised = true; exn_val = h.exn;
+    }
     pthread_mutex_unlock(m);
+    if (raised) scm_raise_val(exn_val);
     return result;
 }
 

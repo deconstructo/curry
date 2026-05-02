@@ -240,8 +240,9 @@ typedef struct {
  * Full delimited continuations are a future extension. */
 typedef struct Continuation {
     Hdr   hdr;
-    void *jmpbuf;   /* heap-allocated jmp_buf */
-    val_t result;   /* written before longjmp */
+    void *jmpbuf;    /* heap-allocated jmp_buf */
+    val_t result;    /* written before longjmp */
+    void *wind_top;  /* WindFrame * at capture time; for dynamic-wind unwind */
 } Continuation;
 
 /* Message queue (ring buffer, grown as needed) */

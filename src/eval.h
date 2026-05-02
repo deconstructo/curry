@@ -35,6 +35,20 @@ val_t apply_arr(val_t proc, int argc, val_t *argv);
 /* Evaluate a list of expressions, return the last value */
 val_t eval_body(val_t exprs, val_t env);
 
+/* ---- Dynamic wind stack ---- */
+
+/* One frame per active dynamic-wind call.  Stack-allocated inside
+ * prim_dynamic_wind; valid only while that C frame is live (escape
+ * continuations only — sufficient for phase 1). */
+typedef struct WindFrame {
+    val_t             before;
+    val_t             after;
+    struct WindFrame *prev;
+} WindFrame;
+
+/* Thread-local wind stack (NULL = empty) */
+extern _Thread_local WindFrame *current_wind;
+
 /* ---- Exception system ---- */
 
 typedef struct ExnHandler {
