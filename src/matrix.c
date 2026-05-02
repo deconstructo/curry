@@ -792,8 +792,7 @@ static val_t prim_tensor_to_matrix(int argc, val_t *av, void *ud) {
  * Registration
  * ========================================================================= */
 
-void mat_register_builtins(val_t env) {
-    /* Matrix */
+void mat_register_matrix_builtins(val_t env) {
     mat_def(env, "make-matrix",      prim_make_matrix,      2,  3);
     mat_def(env, "matrix-identity",  prim_matrix_identity,  1,  1);
     mat_def(env, "matrix",           prim_matrix_from_list, 3,  3);
@@ -815,7 +814,9 @@ void mat_register_builtins(val_t env) {
     mat_def(env, "mat->list",        prim_mat_to_list,      1,  1);
     mat_def(env, "mat-trace",        prim_mat_trace,        1,  1);
     mat_def(env, "mat-frobenius",    prim_mat_frobenius,    1,  1);
-    /* Tensor */
+}
+
+void mat_register_tensor_builtins(val_t env) {
     mat_def(env, "make-tensor",      prim_make_tensor,      1,  2);
     mat_def(env, "tensor?",          prim_tensor_p,         1,  1);
     mat_def(env, "tensor-shape",     prim_tensor_shape,     1,  1);
@@ -833,4 +834,9 @@ void mat_register_builtins(val_t env) {
     mat_def(env, "tensor->list",     prim_tensor_to_list,   1,  1);
     mat_def(env, "matrix->tensor",   prim_matrix_to_tensor, 1,  1);
     mat_def(env, "tensor->matrix",   prim_tensor_to_matrix, 1,  1);
+}
+
+void mat_register_builtins(val_t env) {
+    mat_register_matrix_builtins(env);
+    mat_register_tensor_builtins(env);
 }

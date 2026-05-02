@@ -98,7 +98,9 @@ val_t tensor_reshape(val_t t, uint32_t ndim, const uint32_t *new_dims);
 /* Write a tensor to a port */
 void tensor_write(val_t v, val_t port);
 
-/* ---- Register all Scheme builtins ---- */
-void mat_register_builtins(val_t env);
+/* ---- Register Scheme builtins ---- */
+void mat_register_matrix_builtins(val_t env);   /* matrix functions only */
+void mat_register_tensor_builtins(val_t env);   /* tensor functions only */
+void mat_register_builtins(val_t env);           /* both (calls the two above) */
 
 #endif /* CURRY_MATRIX_H */

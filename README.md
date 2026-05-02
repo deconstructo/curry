@@ -56,7 +56,6 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
 | [image](docs/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
 | [git](docs/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
-| [ui](docs/module-ui.md) | `(curry ui)` | GTK4 windows, menus, canvas, widgets | `libgtk-4-dev` |
 | [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
 | [plplot](docs/module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
 | [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |

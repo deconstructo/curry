@@ -40,6 +40,7 @@ typedef curry_val (*CurryFn)(int argc, curry_val *argv, void *ud);
 void curry_define_fn(CurryVM *vm, const char *name, CurryFn fn,
                      int min_args, int max_args, void *ud);
 void curry_define_val(CurryVM *vm, const char *name, curry_val value);
+curry_val curry_vm_env(CurryVM *vm);
 
 /* ---- Value constructors ---- */
 curry_val curry_make_fixnum(intptr_t n);

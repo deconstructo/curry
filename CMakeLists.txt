@@ -152,6 +152,30 @@ option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 # search dir "mods" finds them.  Installed files go to lib/curry/modules/curry/.
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/mods/curry)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/mods/curry/math)
+
+# Sub-module helper for (curry math <name>) → curry/math/<name>.so
+function(curry_math_module name)
+  add_library(curry_math_${name} MODULE modules/math/${name}.c)
+  if(APPLE)
+    target_link_options(curry_math_${name} PRIVATE -undefined dynamic_lookup)
+  endif()
+  target_include_directories(curry_math_${name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${GC_INCLUDE_DIRS}
+    ${GMP_INCLUDE}
+  )
+  set_target_properties(curry_math_${name} PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "${name}"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mods/curry/math"
+  )
+  install(TARGETS curry_math_${name} DESTINATION lib/curry/modules/curry/math)
+endfunction()
+
+curry_math_module(matrix)
+curry_math_module(tensor)
 
 function(curry_c_module name)
   add_library(curry_${name} MODULE modules/${name}/${name}.c)
