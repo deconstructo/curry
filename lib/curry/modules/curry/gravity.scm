@@ -704,26 +704,28 @@
 ;;; ════════════════════════════════════════════════════════════
 
 (define (load-scenario! name-or-sym)
-  (let-values (((d G bodies) (scenario-run name-or-sym)))
-    (set! *d*       d)
-    (set! *G*       G)
-    ;; Re-dimension bodies to match ceil(d)
-    (let ((Dint (dim-for-d d)))
-      (define (pad-vec v n)
-        (let ((out (make-vector n 0.0)))
-          (do ((k 0 (+ k 1))) ((= k (min n (vector-length v))) out)
-            (vector-set! out k (vector-ref v k)))))
-      (set! *bodies*
-        (map (lambda (b)
-               (vector (body-mass b)
-                       (pad-vec (body-pos b) Dint)
-                       (pad-vec (body-vel b) Dint)
-                       '()
-                       (body-color b)))
-             bodies)))
-    (set! *frame-count* 0)
-    (set! *energy-t0*   (total-energy-compute d G *eps*))
-    (set! *energy-now*  *energy-t0*)))
+  (call-with-values
+    (lambda () (scenario-run name-or-sym))
+    (lambda (d G bodies)
+      (set! *d*       d)
+      (set! *G*       G)
+      ;; Re-dimension bodies to match ceil(d)
+      (let ((Dint (dim-for-d d)))
+        (define (pad-vec v n)
+          (let ((out (make-vector n 0.0)))
+            (do ((k 0 (+ k 1))) ((= k (min n (vector-length v))) out)
+              (vector-set! out k (vector-ref v k)))))
+        (set! *bodies*
+          (map (lambda (b)
+                 (vector (body-mass b)
+                         (pad-vec (body-pos b) Dint)
+                         (pad-vec (body-vel b) Dint)
+                         '()
+                         (body-color b)))
+               bodies)))
+      (set! *frame-count* 0)
+      (set! *energy-t0*   (total-energy-compute d G *eps*))
+      (set! *energy-now*  *energy-t0*))))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 11  UI CONSTRUCTION

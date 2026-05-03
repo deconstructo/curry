@@ -38,6 +38,13 @@
  */
 
 #include <curry.h>
+#include "eval.h"   /* SCM_PROTECT — catches longjmp-based Scheme exceptions */
+
+/* Wrap every curry_apply at a C++→Scheme boundary.  Any Scheme exception
+ * (longjmp) must not escape into Qt's C++ event machinery, as Qt does not
+ * handle foreign non-local exits and the result is undefined behaviour. */
+#define SCHEME_CALL(call) do { ExnHandler _sch_h_; \
+    SCM_PROTECT(_sch_h_, (call), (void)0); } while(0)
 
 #include <QApplication>
 #include <QMainWindow>
@@ -244,12 +251,12 @@ protected:
         if (!ws->realized) {
             ws->realized = true;
             if (!curry_is_bool(ws->realize_proc))
-                curry_apply(ws->realize_proc, 0, nullptr);
+                SCHEME_CALL(curry_apply(ws->realize_proc, 0, nullptr));
         }
     }
     void closeEvent(QCloseEvent *ev) override {
         if (!curry_is_bool(ws->close_proc))
-            curry_apply(ws->close_proc, 0, nullptr);
+            SCHEME_CALL(curry_apply(ws->close_proc, 0, nullptr));
         ev->ignore();  /* Scheme decides whether to quit */
     }
     void keyPressEvent(QKeyEvent *ev) override {
@@ -316,7 +323,7 @@ void CurryCanvas::keyPressEvent(QKeyEvent *ev) {
         curry_make_string(qt_key_str(ev->key(), ev->text())),
         build_mods(ev->modifiers())
     };
-    curry_apply(ws->key_proc, 2, argv);
+    SCHEME_CALL(curry_apply(ws->key_proc, 2, argv));
 }
 
 void CurryCanvas::fire_mouse(const char *etype, QMouseEvent *ev) {
@@ -335,7 +342,7 @@ void CurryCanvas::fire_mouse(const char *etype, QMouseEvent *ev) {
         curry_make_fixnum((intptr_t)ev->position().y()),
         build_mods(ev->modifiers())
     };
-    curry_apply(ws->mouse_proc, 5, argv);
+    SCHEME_CALL(curry_apply(ws->mouse_proc, 5, argv));
 }
 
 void CurryCanvas::paintEvent(QPaintEvent *) {
@@ -351,7 +358,15 @@ void CurryCanvas::paintEvent(QPaintEvent *) {
         curry_make_fixnum(ws->cur_w),
         curry_make_fixnum(ws->cur_h)
     };
-    curry_apply(ws->draw_proc, 3, argv);
+    /* Wrap curry_apply with SCM_PROTECT so a Scheme exception (longjmp) does
+     * not escape past this stack frame.  Without this, any error thrown from
+     * the draw callback would bypass the QPainter destructor and leave the
+     * QOpenGLWidget in a permanently-painting state, crashing the next frame. */
+    ExnHandler h;
+    SCM_PROTECT(h,
+        curry_apply(ws->draw_proc, 3, argv),
+        /* on Scheme error: swallow, finish the paint event normally */
+        (void)0);
     ws->live_painter = nullptr;
 }
 
@@ -557,7 +572,7 @@ static curry_val fn_make_button(int ac, curry_val *av, void *ud) {
     curry_val proc = av[1];
     keep_alive(proc);
     QObject::connect(btn, &QPushButton::clicked, [proc]() {
-        curry_apply(proc, 0, nullptr);
+        SCHEME_CALL(curry_apply(proc, 0, nullptr));
     });
     return widget_to_val(btn);
 }
@@ -570,7 +585,7 @@ static curry_val fn_make_toggle(int ac, curry_val *av, void *ud) {
     keep_alive(proc);
     QObject::connect(cb, &QCheckBox::toggled, [proc](bool on) {
         curry_val argv[1] = { curry_make_bool(on) };
-        curry_apply(proc, 1, argv);
+        SCHEME_CALL(curry_apply(proc, 1, argv));
     });
     return widget_to_val(cb);
 }
@@ -615,7 +630,7 @@ static curry_val fn_make_slider(int ac, curry_val *av, void *ud) {
         keep_alive(proc);
         QObject::connect(slider, &QSlider::valueChanged, [proc, ss](int) {
             curry_val argv[1] = { curry_make_float(ss->value()) };
-            curry_apply(proc, 1, argv);
+            SCHEME_CALL(curry_apply(proc, 1, argv));
         });
     }
 
@@ -657,7 +672,7 @@ static curry_val fn_make_dropdown(int ac, curry_val *av, void *ud) {
     QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
                      [proc](int i) {
         curry_val argv[1] = { curry_make_fixnum(i) };
-        curry_apply(proc, 1, argv);
+        SCHEME_CALL(curry_apply(proc, 1, argv));
     });
     return widget_to_val(combo);
 }
@@ -694,7 +709,7 @@ static curry_val fn_make_radio_group(int ac, curry_val *av, void *ud) {
     keep_alive(proc);
     QObject::connect(group, &QButtonGroup::idClicked, [proc](int id) {
         curry_val argv[1] = { curry_make_fixnum(id) };
-        curry_apply(proc, 1, argv);
+        SCHEME_CALL(curry_apply(proc, 1, argv));
     });
     container->setProperty("_qt6_bg", QVariant((quintptr)(void*)group));
     return widget_to_val(container);
@@ -719,7 +734,7 @@ static curry_val fn_make_spin_box(int ac, curry_val *av, void *ud) {
     QObject::connect(sb, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                      [proc](double val) {
         curry_val argv[1] = { curry_make_float(val) };
-        curry_apply(proc, 1, argv);
+        SCHEME_CALL(curry_apply(proc, 1, argv));
     });
     return widget_to_val(sb);
 }
@@ -744,7 +759,7 @@ static curry_val fn_make_text_input(int ac, curry_val *av, void *ud) {
     QObject::connect(le, &QLineEdit::textChanged, [proc](const QString &s) {
         QByteArray ba = s.toUtf8();
         curry_val argv[1] = { curry_make_string(ba.constData()) };
-        curry_apply(proc, 1, argv);
+        SCHEME_CALL(curry_apply(proc, 1, argv));
     });
     return widget_to_val(le);
 }
@@ -807,7 +822,7 @@ static curry_val fn_menu_add_action(int ac, curry_val *av, void *ud) {
     curry_val proc = av[2];
     keep_alive(proc);
     QObject::connect(act, &QAction::triggered, [proc]() {
-        curry_apply(proc, 0, nullptr);
+        SCHEME_CALL(curry_apply(proc, 0, nullptr));
     });
     return curry_void();
 }
@@ -844,7 +859,7 @@ static curry_val fn_toolbar_add_action(int ac, curry_val *av, void *ud) {
     curry_val proc = av[2];
     keep_alive(proc);
     QObject::connect(act, &QAction::triggered, [proc]() {
-        curry_apply(proc, 0, nullptr);
+        SCHEME_CALL(curry_apply(proc, 0, nullptr));
     });
     return curry_void();
 }
@@ -920,7 +935,7 @@ static curry_val fn_make_timer(int ac, curry_val *av, void *ud) {
     auto *t    = new QTimer();
     t->setInterval(ms);
     QObject::connect(t, &QTimer::timeout, [proc]() {
-        curry_apply(proc, 0, nullptr);
+        SCHEME_CALL(curry_apply(proc, 0, nullptr));
     });
     return timer_to_val(t);
 }
@@ -1143,6 +1158,8 @@ static curry_val fn_gfx_draw_polygon(int ac, curry_val *av, void *ud) {
 /* Text */
 static curry_val fn_gfx_draw_text(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    if (!curry_is_string(av[3]))
+        curry_error("gfx-draw-text!: arg 4 must be a string (got wrong type) — usage: (gfx-draw-text! painter x y text)");
     P->drawText(QPointF(curry_float(av[1]),curry_float(av[2])),
                 QString::fromUtf8(curry_string(av[3])));
     return curry_void();

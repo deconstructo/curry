@@ -222,8 +222,10 @@
   (set! *sweep-d*    2.0)
   (set! *sweep-dir*  0.002)
   (set! *sweep-active* #t)
-  (define-values (d G bodies) (scenario-two-body-circular))
-  (values 2.0 G bodies))
+  (call-with-values
+    (lambda () (scenario-two-body-circular))
+    (lambda (d G bodies)
+      (values 2.0 G bodies))))
 
 ;;; Called each physics step when sweep is active.
 ;;; Returns new d, bouncing between 2.0 and 5.0.
