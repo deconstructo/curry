@@ -1,6 +1,7 @@
 #include "builtins.h"
 #include "object.h"
 #include "eval.h"
+#include "syntax_rules.h"
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
@@ -792,11 +793,13 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
 
     apply(before, V_NIL);
 
-    WindFrame wf;
-    wf.before = before;
-    wf.after  = after;
-    wf.prev   = current_wind;
-    current_wind = &wf;
+    /* GC-heap allocation: longjmp cannot invalidate a stack frame we no
+     * longer own, so WindFrame must outlive any potential escape longjmp. */
+    WindFrame *wf = gc_alloc(sizeof(WindFrame));
+    wf->before = before;
+    wf->after  = after;
+    wf->prev   = current_wind;
+    current_wind = wf;
 
     val_t result = V_VOID;
     ExnHandler h;
@@ -811,7 +814,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
         raised = true; exn_val = h.exn;
     }
 
-    current_wind = wf.prev;
+    current_wind = wf->prev;
     apply(after, V_NIL);
 
     if (raised) scm_raise_val(exn_val);
@@ -1358,4 +1361,7 @@ void builtins_register(val_t env) {
     /* Matrices and tensors */
     extern void mat_register_builtins(val_t env);
     mat_register_builtins(env);
+
+    /* syntax-rules keyword */
+    syntax_rules_register(env);
 }

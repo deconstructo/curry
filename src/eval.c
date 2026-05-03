@@ -95,6 +95,39 @@ static int list_to_arr(val_t lst, val_t *arr, int max) {
     return n;
 }
 
+/* ---- parameterize WindFrame helpers ---- */
+
+typedef struct {
+    int    n;
+    val_t *params;
+    val_t *newvals;
+    val_t *oldvals;
+} ParamBindings;
+
+static val_t param_before_fn(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av;
+    ParamBindings *pb = ud;
+    for (int i = 0; i < pb->n; i++)
+        as_param(pb->params[i])->init = pb->newvals[i];
+    return V_VOID;
+}
+
+static val_t param_after_fn(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av;
+    ParamBindings *pb = ud;
+    for (int i = 0; i < pb->n; i++)
+        as_param(pb->params[i])->init = pb->oldvals[i];
+    return V_VOID;
+}
+
+static val_t make_prim_thunk(PrimFn fn, void *ud) {
+    Primitive *p = CURRY_NEW(Primitive);
+    p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name = "thunk"; p->min_args = 0; p->max_args = 0;
+    p->fn = fn; p->ud = ud;
+    return vptr(p);
+}
+
 /* ---- Quasiquote expansion ---- */
 
 static val_t expand_qq(val_t form, val_t env, int depth);
@@ -694,22 +727,38 @@ tail:
 
     if (op == S_PARAMETERIZE) {
         /* (parameterize ((param val)...) body...) */
-        /* Phase 1 implementation: simple dynamic binding via thread-local stack */
-        /* TODO: full dynamic-wind integration */
+        /* Register a WindFrame so escape continuations trigger parameter
+         * restoration via wind_unwind_to, not just normal-exit cleanup. */
         val_t bindings = vcar(rest), body = vcdr(rest);
-        /* Save old values */
-        val_t b = bindings; int n = list_length(b);
-        val_t *params_arr = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-        val_t *old_vals   = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-        int i = 0;
-        while (vis_pair(b)) {
-            val_t p   = eval(vcar(vcar(b)), env);
-            val_t v   = eval(vcadr(vcar(b)), env);
-            params_arr[i] = p;
-            old_vals[i]   = as_param(p)->init;
-            as_param(p)->init = v;
-            i++; b = vcdr(b);
+        int n = list_length(bindings);
+
+        ParamBindings *pb = gc_alloc(sizeof(ParamBindings));
+        pb->n       = n;
+        pb->params  = gc_alloc((size_t)n * sizeof(val_t));
+        pb->newvals = gc_alloc((size_t)n * sizeof(val_t));
+        pb->oldvals = gc_alloc((size_t)n * sizeof(val_t));
+
+        val_t b = bindings;
+        for (int i = 0; i < n; i++, b = vcdr(b)) {
+            val_t pair  = vcar(b);
+            val_t param = eval(vcar(pair), env);
+            val_t val   = eval(vcadr(pair), env);
+            if (!vis_false(as_param(param)->converter))
+                val = apply(as_param(param)->converter, make_pair(val, V_NIL));
+            pb->params[i]  = param;
+            pb->newvals[i] = val;
+            pb->oldvals[i] = as_param(param)->init;
         }
+
+        /* GC-heap WindFrame so longjmp cannot invalidate it. */
+        WindFrame *wf = gc_alloc(sizeof(WindFrame));
+        wf->before = make_prim_thunk(param_before_fn, pb);
+        wf->after  = make_prim_thunk(param_after_fn,  pb);
+        wf->prev   = current_wind;
+
+        apply(wf->before, V_NIL);
+        current_wind = wf;
+
         val_t result = V_VOID;
         ExnHandler h;
         bool raised = false;
@@ -723,8 +772,10 @@ tail:
             current_handler = h.prev;
             raised = true; exn_val = h.exn;
         }
-        /* Restore */
-        for (int j = 0; j < i; j++) as_param(params_arr[j])->init = old_vals[j];
+
+        current_wind = wf->prev;
+        apply(wf->after, V_NIL);
+
         if (raised) scm_raise_val(exn_val);
         return result;
     }

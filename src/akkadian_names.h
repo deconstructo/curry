@@ -250,5 +250,9 @@ AKK_PR("receive",         "maḫārum",           "𒌝𒈠")   /* UM.MA = recei
 AKK_PR("self",            "ramānī",            "𒍪")     /* ZA = self/stone */
 AKK_PR("actor-alive?",    "balāṭum?",          "𒅁𒃲?")
 
+/* ---- Procedures: macros ---- */
+
+AKK_PR("syntax-rules",   "ṭupšarrūtum ṣibātum", "𒌝𒋻")   /* UM.TAR — template-pattern */
+
 #undef AKK_SF
 #undef AKK_PR

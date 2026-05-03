@@ -80,6 +80,7 @@ set(CORE_SOURCES
   src/surreal.c
   src/multivec.c
   src/matrix.c
+  src/syntax_rules.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})
