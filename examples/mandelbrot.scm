@@ -30,10 +30,10 @@
 
 ;;; ── Configuration ────────────────────────────────────────────────────────────
 
-(define *ESCAPE-SQ* 4.0)
-(define *LOG2*      (log 2.0))
-(define *STEP*      4)       ; block size in pixels (4 = 200×150 at 800×600)
-(define *ROWS-PER-TICK* 8)   ; scanlines rendered per 16ms timer tick
+(define *ESCAPE-SQ*   4.0)
+(define *LOG2*        (log 2.0))
+(define *STEP*        4)    ; block size in pixels (4 = 200×150 at 800×600)
+(define *NUM-WORKERS* 10)    ; parallel actor workers; tune to logical CPU count
 
 ;;; ── View state ───────────────────────────────────────────────────────────────
 
@@ -49,14 +49,13 @@
 (define *W* 800)
 (define *H* 600)
 
-;;; ── Render state (all owned by main thread / timer) ──────────────────────────
+;;; ── Render state ─────────────────────────────────────────────────────────────
 
-(define *frame-buf*  #f)   ; flat vector, *buf-bw* × *buf-bh* smooth-t values
+(define *frame-buf*  #f)   ; RGBA bytevector, *buf-bw* × *buf-bh* × 4 bytes
 (define *buf-bw*     0)    ; columns in *frame-buf* (= quotient W STEP at alloc time)
 (define *buf-bh*     0)    ; rows    in *frame-buf*
-(define *render-row* 0)    ; next block-row to compute
-(define *rendering*  #f)   ; #t while a render is in progress
-(define *render-tag* 0)    ; incremented on each new request (for cancellation)
+(define *rendering*  #f)   ; #t while workers are running
+(define *render-tag* 0)    ; incremented on each new request (stale-worker detection)
 
 (define *canvas* #f)
 (define *render-timer* #f)
@@ -80,35 +79,33 @@
 
 ;;; ── Colour palette ───────────────────────────────────────────────────────────
 
-(define *PAL-N* 512)
-(define *palette* (make-vector (* *PAL-N* 3) 0.0))
+(define *PAL-N*    512)
+(define *pal-bytes* (make-bytevector (* *PAL-N* 4) 255))   ; pre-baked RGBA, α=255
 
 (define (build-palette!)
   (do ((i 0 (+ i 1))) ((= i *PAL-N*))
-    (let* ((t (* (/ (inexact i) (inexact *PAL-N*)) 6.2831853))
-           (r (+ 0.5 (* 0.5 (sin t))))
-           (g (+ 0.5 (* 0.5 (sin (+ t 2.094)))))
-           (b (+ 0.5 (* 0.5 (sin (+ t 4.189))))))
-      (vector-set! *palette* (* i 3)       r)
-      (vector-set! *palette* (+ (* i 3) 1) g)
-      (vector-set! *palette* (+ (* i 3) 2) b))))
+    (let* ((t    (* (/ (inexact i) (inexact *PAL-N*)) 6.2831853))
+           (r    (inexact->exact (floor (* (+ 0.5 (* 0.5 (sin t)))               255.0))))
+           (g    (inexact->exact (floor (* (+ 0.5 (* 0.5 (sin (+ t 2.094)))) 255.0))))
+           (b    (inexact->exact (floor (* (+ 0.5 (* 0.5 (sin (+ t 4.189)))) 255.0))))
+           (base (* i 4)))
+      (bytevector-u8-set! *pal-bytes* base       (max 0 (min 255 r)))
+      (bytevector-u8-set! *pal-bytes* (+ base 1) (max 0 (min 255 g)))
+      (bytevector-u8-set! *pal-bytes* (+ base 2) (max 0 (min 255 b))))))
+      ; α byte at (+ base 3) stays 255
 
 (define (fmod x y)
   ;; Flonum modulo: result in [0, y)
   (let ((q (* (floor (/ x y)) y)))
     (- x q)))
 
-(define (palette-rgb t max-t)
-  ;; Returns (values r g b).  Interior (t >= max-t) → black.
+(define (t->pal-index t max-t)
+  ;; Returns palette index in [0, *PAL-N*), or -1 for interior (black).
   (if (or (>= t max-t) (not (finite? t)))
-      (values 0.0 0.0 0.0)
+      -1
       (let* ((phase (fmod (* t 7.3) (inexact *PAL-N*)))
-             (i     (inexact->exact (floor (max 0.0 phase))))
-             (i     (min (- *PAL-N* 1) i))
-             (b     (* i 3)))
-        (values (vector-ref *palette* b)
-                (vector-ref *palette* (+ b 1))
-                (vector-ref *palette* (+ b 2))))))
+             (i     (inexact->exact (floor (max 0.0 phase)))))
+        (min (- *PAL-N* 1) i))))
 
 ;;; ── 2-D (complex) Mandelbrot — flat arithmetic, no allocation ────────────────
 
@@ -188,23 +185,20 @@
 
 ;;; ── Pixel computation (dispatches to 2D or ND path) ─────────────────────────
 
-(define (compute-pixel px py bw bh dims mi theta phi nd-ws)
-  ;; bw, bh: canvas dims (for centre calculation)
-  (let* ((step *STEP*)
-         (wx   (/ (- (inexact px) (/ (inexact bw) 2.0)) *zoom*))
-         (wy   (/ (- (inexact py) (/ (inexact bh) 2.0)) *zoom*))
-         (cx   (+ *cx* wx))
-         (cy   (+ *cy* wy)))
+(define (compute-pixel px py bw bh dims mi theta phi nd-ws vcx vcy vzoom)
+  ;; vcx/vcy/vzoom: view state captured at render-start; safe to read from any thread.
+  (let* ((wx   (/ (- (inexact px) (/ (inexact bw) 2.0)) vzoom))
+         (wy   (/ (- (inexact py) (/ (inexact bh) 2.0)) vzoom))
+         (cx   (+ vcx wx))
+         (cy   (+ vcy wy)))
     (if (= dims 2)
         (mandel-2d cx cy mi)
         (let ((z   (list-ref nd-ws 0))
               (tmp (list-ref nd-ws 1))
               (c   (list-ref nd-ws 2)))
           (fill-c-nd! c wx wy dims theta phi)
-          ;; For ND: cx, cy are the first two algebra coords via fill-c-nd!
-          ;; The view-centre offset is applied to c[0] and c[1] directly.
-          (vector-set! c 0 (+ (vector-ref c 0) *cx*))
-          (vector-set! c 1 (+ (vector-ref c 1) *cy*))
+          (vector-set! c 0 (+ (vector-ref c 0) vcx))
+          (vector-set! c 1 (+ (vector-ref c 1) vcy))
           (mandel-nd c dims mi z tmp)))))
 
 ;;; ── Frame buffer management ──────────────────────────────────────────────────
@@ -214,41 +208,83 @@
          (bh (max 1 (quotient *H* *STEP*))))
     (set! *buf-bw*   bw)
     (set! *buf-bh*   bh)
-    (set! *frame-buf* (make-vector (* bw bh) (inexact *max-iter*)))))
+    (set! *frame-buf* (make-bytevector (* bw bh 4) 0))))
+
+;;; ── Parallel rendering ───────────────────────────────────────────────────────
+;;;
+;;; render-band! writes RGBA bytes for rows [row-start, row-end) into buf.
+;;; Multiple actors call this on non-overlapping row ranges; Boehm GC is
+;;; non-moving so the bytevector pointer is stable across threads.
+
+(define (render-band! buf bw row-start row-end step W H dims mi theta phi vcx vcy vzoom)
+  (let ((nd-ws (if (> dims 2) (make-nd-workspace dims) #f)))
+    (do ((by row-start (+ by 1)))
+        ((= by row-end))
+      (do ((bx 0 (+ bx 1)))
+          ((= bx bw))
+        (let* ((t   (compute-pixel (* bx step) (* by step) W H dims mi theta phi nd-ws vcx vcy vzoom))
+               (pi  (t->pal-index t (inexact mi)))
+               (dst (* (+ (* by bw) bx) 4)))
+          (if (< pi 0)
+              (begin
+                (bytevector-u8-set! buf dst       0)
+                (bytevector-u8-set! buf (+ dst 1) 0)
+                (bytevector-u8-set! buf (+ dst 2) 0)
+                (bytevector-u8-set! buf (+ dst 3) 255))
+              (let ((src (* pi 4)))
+                (bytevector-u8-set! buf dst       (bytevector-u8-ref *pal-bytes* src))
+                (bytevector-u8-set! buf (+ dst 1) (bytevector-u8-ref *pal-bytes* (+ src 1)))
+                (bytevector-u8-set! buf (+ dst 2) (bytevector-u8-ref *pal-bytes* (+ src 2)))
+                (bytevector-u8-set! buf (+ dst 3) 255))))))))
+
+(define (do-render!)
+  ;; Capture view state once; workers close over these values so view changes
+  ;; during a render don't corrupt the in-flight frame.
+  (let* ((bh    *buf-bh*)
+         (bw    *buf-bw*)
+         (buf   *frame-buf*)
+         (step  *STEP*)
+         (W     *W*)
+         (H     *H*)
+         (dims  *dims*)
+         (mi    *max-iter*)
+         (theta *theta*)
+         (phi   *phi*)
+         (vcx   *cx*)
+         (vcy   *cy*)
+         (vzoom *zoom*)
+         (n     (min *NUM-WORKERS* (max 1 bh))))
+    ;; Coordinator: waits for N 'done messages, then clears *rendering*.
+    ;; The timer callback notices and stops itself on the next tick.
+    (let ((coord (spawn
+                   (lambda ()
+                     (let loop ((rem n))
+                       (when (> rem 0)
+                         (receive)
+                         (loop (- rem 1))))
+                     (set! *rendering* #f)))))
+      ;; Spawn N workers, each owning a horizontal band of block-rows.
+      (do ((i 0 (+ i 1)))
+          ((= i n))
+        (let ((row-start (quotient (* i      bh) n))
+              (row-end   (quotient (* (+ i 1) bh) n)))
+          (spawn
+            (lambda ()
+              (render-band! buf bw row-start row-end step W H dims mi theta phi vcx vcy vzoom)
+              (send! coord 'done))))))))
 
 (define (request-render!)
   (set! *render-tag* (+ *render-tag* 1))
-  (set! *render-row* 0)
   (set! *rendering*  #t)
   (alloc-frame-buf!)
+  (do-render!)
   (when *render-timer* (timer-start! *render-timer*)))
 
-;;; ── Timer tick: render ROWS-PER-TICK block-rows, then redraw ─────────────────
+;;; ── Timer tick: redraw while workers run, stop when done ─────────────────────
 
 (define (render-tick!)
-  (when *rendering*
-    (let* ((step  *STEP*)
-           (bw    *buf-bw*)
-           (bh    *buf-bh*)
-           (mi    *max-iter*)
-           (dims  *dims*)
-           (theta *theta*)
-           (phi   *phi*)
-           (nd-ws (if (> dims 2) (make-nd-workspace dims) #f))
-           (buf   *frame-buf*))
-      (let loop ((rows 0))
-        (when (and (< *render-row* bh) (< rows *ROWS-PER-TICK*))
-          (let ((by *render-row*))
-            (do ((bx 0 (+ bx 1)))
-                ((= bx bw))
-              (let ((t (compute-pixel (* bx step) (* by step) *W* *H* dims mi theta phi nd-ws)))
-                (vector-set! buf (+ (* by bw) bx) t))))
-          (set! *render-row* (+ *render-row* 1))
-          (loop (+ rows 1))))
-      (when (>= *render-row* bh)
-        (set! *rendering* #f)
-        (timer-stop! *render-timer*))
-      (when *canvas* (canvas-redraw! *canvas*)))))
+  (when *canvas* (canvas-redraw! *canvas*))
+  (unless *rendering* (timer-stop! *render-timer*)))
 
 ;;; ── Draw ─────────────────────────────────────────────────────────────────────
 
@@ -262,27 +298,12 @@
   (gfx-clear! painter 0.0 0.0 0.0)
   (gfx-set-antialias! painter #f)
 
-  ;; Use *buf-bw*/*buf-bh* — dimensions the buffer was actually allocated with —
-  ;; never compute from canvas w/h here, which could exceed the buffer size.
+  ;; Single blit: RGBA bytevector (bw×bh) scaled up to W×H canvas rect.
+  ;; Each image pixel maps to a STEP×STEP block — same visual as the old loop
+  ;; but replaces ~60k FFI calls with one Qt drawImage call.
   (when (and *frame-buf* (> *buf-bw* 0) (> *buf-bh* 0))
-    (let* ((step  *STEP*)
-           (bw    *buf-bw*)
-           (bh    *buf-bh*)
-           (mi    (inexact *max-iter*))
-           (buf   *frame-buf*))
-      (do ((by 0 (+ by 1)))
-          ((= by bh))
-        (do ((bx 0 (+ bx 1)))
-            ((= bx bw))
-          (let ((t (vector-ref buf (+ (* by bw) bx))))
-            (unless (>= t mi)
-              (call-with-values
-                (lambda () (palette-rgb t mi))
-                (lambda (r g b)
-                  (gfx-set-color! painter r g b 1.0)
-                  (gfx-fill-rect! painter
-                                  (inexact (* bx step)) (inexact (* by step))
-                                  (inexact step) (inexact step))))))))))
+    (gfx-draw-image! painter 0.0 0.0 (inexact *W*) (inexact *H*)
+                     *frame-buf* *buf-bw* *buf-bh*))
 
   ;; HUD
   (gfx-set-antialias! painter #t)
