@@ -47,7 +47,11 @@ typedef struct WindFrame {
 } WindFrame;
 
 /* Thread-local wind stack (NULL = empty) */
+#ifdef __cplusplus
+extern thread_local WindFrame *current_wind;
+#else
 extern _Thread_local WindFrame *current_wind;
+#endif
 
 /* ---- Exception system ---- */
 
@@ -58,7 +62,11 @@ typedef struct ExnHandler {
 } ExnHandler;
 
 /* Thread-local current exception handler chain */
+#ifdef __cplusplus
+extern thread_local ExnHandler *current_handler;
+#else
 extern _Thread_local ExnHandler *current_handler;
+#endif
 
 /* Raise an exception (never returns) */
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
