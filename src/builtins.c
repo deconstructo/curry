@@ -762,6 +762,12 @@ static val_t prim_error(int ac, val_t *av, void *ud) {
     e->message=msg; e->irritants=irritants; e->kind=S_ERROR;
     scm_raise_val(vptr(e));
 }
+static val_t prim_eval(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t env = (ac >= 2 && vis_env(av[1])) ? av[1] : GLOBAL_ENV;
+    return eval(av[0], env);
+}
+static val_t prim_interaction_env(int ac, val_t *av, void *ud) { (void)ac;(void)av;(void)ud; return GLOBAL_ENV; }
 static val_t prim_error_message(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->message;}
 static val_t prim_error_object_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_error(av[0]));}
 static val_t prim_error_irritants(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->irritants;}
@@ -1229,6 +1235,7 @@ void builtins_register(val_t env) {
     DEF("with-output-to-string",prim_with_output_to_string,1,1);
 
     /* Control */
+    DEF("eval",prim_eval,1,2); DEF("interaction-environment",prim_interaction_env,0,0);
     DEF("apply",prim_apply,2,-1); DEF("map",prim_map,2,-1); DEF("for-each",prim_for_each,2,-1);
     DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3);
     DEF("not",prim_not,1,1);

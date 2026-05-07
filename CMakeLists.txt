@@ -143,6 +143,7 @@ option(BUILD_MODULE_QT6       "Build Qt6 graphics module"           OFF)
 option(BUILD_MODULE_PLPLOT    "Build PLplot scientific plotting module" ON)
 option(BUILD_MODULE_REGEX     "Build POSIX regex module"            ON)
 option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
+option(BUILD_MODULE_MCP       "Build MCP server module"              ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -397,6 +398,11 @@ endif()
 if(BUILD_MODULE_SYNC)
   curry_c_module(sync)
   message(STATUS "Building sync module (pthreads mutex/condvar/semaphore)")
+endif()
+
+if(BUILD_MODULE_MCP)
+  curry_c_module(mcp)
+  message(STATUS "Building MCP server module")
 endif()
 
 # ---- Tests ----

@@ -213,6 +213,103 @@ In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *
 3. Add a `curry_c_module(<name>)` (or `curry_cxx_module`) call in `CMakeLists.txt` under the appropriate `option` guard.
 4. Load from Scheme with `(import (curry <name>))`.
 
+## MCP server module (`modules/mcp/mcp.c`)
+
+Curry scripts can be offered as [Model Context Protocol](https://modelcontextprotocol.io/) servers, making
+their tools callable by Claude Code and other MCP clients over stdio.
+
+### Scheme API
+
+```scheme
+(import (curry mcp))
+
+; Register a tool.
+; schema is an alist: ((param-name . ((type . "string") (description . "...") ...)) ...)
+; Required params have no (default . ...) entry.  Optional ones do.
+; handler receives an alist of (symbol . value) pairs — one per param.
+(mcp-tool name description schema handler)
+
+; Register a resource (static or dynamic URI).
+; handler receives the URI string and must return (mcp-text ...) or (mcp-json ...).
+(mcp-resource uri description handler)
+
+; Return a plain-text result from a tool or resource handler.
+(mcp-text string)
+
+; Return a pre-serialised JSON result.
+(mcp-json string)
+
+; Emit a progress notification during a long tool call.
+; Fraction = current/total.  message is an optional status string.
+(mcp-notify-progress current total message)
+
+; Start the MCP event loop (blocks, reads JSON-RPC from stdin, writes to stdout).
+; name and version are reported during the MCP initialize handshake.
+(mcp-serve name version)   ; version defaults to "0.1.0"
+```
+
+### Schema format
+
+Each parameter entry is an alist with these keys:
+
+| Key | Required | Notes |
+|-----|----------|-------|
+| `type` | yes | `"string"`, `"number"`, `"integer"`, `"boolean"`, `"array"`, `"object"` |
+| `description` | yes | Shown in tool descriptions |
+| `default` | no | Makes the parameter optional (absent → required) |
+
+Parameters without `default` are listed under `required` in the emitted JSON Schema.
+
+### Handler argument alist
+
+The handler lambda receives one argument: an alist of `(symbol . value)` pairs.
+Values are decoded from the JSON call arguments:
+
+- JSON string → Scheme string
+- JSON number → Scheme number (exact integer if no decimal point, flonum otherwise)
+- JSON boolean → `#t` / `#f`
+- JSON array → Scheme list
+- JSON null → `'()`
+
+Use `(assq 'param-name args)` to retrieve values, or the idioms:
+
+```scheme
+(define (arg  args name)         (cdr (assq name args)))
+(define (arg? args name default) (let ((p (assq name args))) (if p (cdr p) default)))
+```
+
+### Connecting from Claude Code
+
+Add to `~/.claude.json` (or the project's `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "/path/to/build/curry",
+      "args":    ["/path/to/examples/mcp_math.scm"]
+    }
+  }
+}
+```
+
+### Example servers
+
+| File | Description |
+|------|-------------|
+| `examples/mcp_server.scm` | Minimal demo: eval, factorial, stateful define, count-to with progress |
+| `examples/mcp_math.scm` | Symbolic CAS: diff, simplify, substitute, evaluate, auto-diff, Taylor series |
+| `examples/mcp_nbody.scm` | N-body gravity in D spatial dimensions (D may be non-integer) |
+
+### Protocol notes
+
+- Transport: newline-delimited JSON-RPC 2.0 over stdio.
+- Dispatch is synchronous — one tool call at a time per process.
+- Tool errors (caught exceptions) are returned as JSON-RPC error responses; the server
+  continues running normally after an error.
+- Global Scheme state persists across calls for the lifetime of the server process.
+- `(self)` is not available from tool handlers (main thread is not an actor).
+
 ## Akkadian error messages
 
 All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) selected by keyword-matching the error string against `akkadian_table[]` in `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms registered in `src/akkadian_names.h` and translated transparently in `eval()` — Akkadian code is valid Curry Scheme.

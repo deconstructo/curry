@@ -72,6 +72,7 @@ val_t port_open_output_string(void) {
     Port *p = as_port(v);
     p->u.str.cap = 64;
     p->u.str.buf = (char *)gc_alloc_atomic(64);
+    p->u.str.buf[0] = '\0';  /* gc_alloc_atomic doesn't zero memory */
     p->u.str.pos = 0;
     p->u.str.len = 0;
     return v;
