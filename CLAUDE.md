@@ -216,7 +216,10 @@ In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *
 ## MCP server module (`modules/mcp/mcp.c`)
 
 Curry scripts can be offered as [Model Context Protocol](https://modelcontextprotocol.io/) servers, making
-their tools callable by Claude Code and other MCP clients over stdio.
+their tools callable by Claude Code and other MCP clients.  Two transports are supported:
+
+- **stdio** — one client per process, JSON-RPC 2.0 over stdin/stdout.  Used by Claude Code's `mcpServers` config.
+- **SSE** — HTTP + Server-Sent Events, multiple concurrent clients.  `GET /sse` opens a stream; `POST /message?sessionId=X` sends requests; responses arrive via the SSE stream.
 
 ### Scheme API
 
@@ -243,9 +246,16 @@ their tools callable by Claude Code and other MCP clients over stdio.
 ; Fraction = current/total.  message is an optional status string.
 (mcp-notify-progress current total message)
 
-; Start the MCP event loop (blocks, reads JSON-RPC from stdin, writes to stdout).
+; stdio transport — blocks reading JSON-RPC from stdin, writing to stdout.
 ; name and version are reported during the MCP initialize handshake.
-(mcp-serve name version)   ; version defaults to "0.1.0"
+(mcp-serve)                         ; defaults to name "curry-mcp"
+(mcp-serve name version)
+
+; SSE transport — HTTP server on port, blocks forever, supports many clients.
+; Each client GETs /sse to open a stream, then POSTs to /message?sessionId=X.
+(mcp-serve-sse port)
+(mcp-serve-sse port name)
+(mcp-serve-sse port name version)
 ```
 
 ### Schema format
@@ -280,7 +290,7 @@ Use `(assq 'param-name args)` to retrieve values, or the idioms:
 
 ### Connecting from Claude Code
 
-Add to `~/.claude.json` (or the project's `.mcp.json`):
+**stdio** (one client, spawned per session):
 
 ```json
 {
@@ -293,6 +303,20 @@ Add to `~/.claude.json` (or the project's `.mcp.json`):
 }
 ```
 
+**SSE** (persistent process, many clients):
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+```
+
+Start the SSE server with `(mcp-serve-sse 8080)` in the script.  A `[mcp] SSE server listening on port N` line is printed to stderr when ready.
+
 ### Example servers
 
 | File | Description |
@@ -303,10 +327,9 @@ Add to `~/.claude.json` (or the project's `.mcp.json`):
 
 ### Protocol notes
 
-- Transport: newline-delimited JSON-RPC 2.0 over stdio.
-- Dispatch is synchronous — one tool call at a time per process.
-- Tool errors (caught exceptions) are returned as JSON-RPC error responses; the server
-  continues running normally after an error.
+- **stdio** — newline-delimited JSON-RPC 2.0; one client only; dispatch is synchronous.
+- **SSE** — one thread per HTTP connection; up to 32 concurrent sessions (compile-time `MAX_SESSIONS`); tool calls are serialised by a mutex (Scheme evaluator is not re-entrant); progress notifications are routed to the correct session's stream; keepalive comments sent every 15 s.
+- Tool errors (caught exceptions) are returned as JSON-RPC error responses; the server continues running normally after an error.
 - Global Scheme state persists across calls for the lifetime of the server process.
 - `(self)` is not available from tool handlers (main thread is not an actor).
 

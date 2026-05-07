@@ -1,52 +1,75 @@
 /*
  * curry_mcp — MCP (Model Context Protocol) server module for Curry Scheme.
  *
- * Transport: newline-delimited JSON-RPC 2.0 over stdio.
+ * Two transports are supported:
+ *
+ *   stdio  — newline-delimited JSON-RPC 2.0 over stdin/stdout (one client).
+ *            Activated by (mcp-serve) or (mcp-serve name version).
+ *
+ *   SSE    — HTTP + Server-Sent Events, multiple concurrent clients.
+ *            Activated by (mcp-serve-sse port [name [version]]).
+ *            GET /sse  → opens SSE stream, emits endpoint URL with sessionId.
+ *            POST /message?sessionId=X → receives JSON-RPC, response via SSE.
+ *
  * Tool and resource handlers are plain Scheme lambdas registered before
- * calling mcp-serve.  Tool calls run synchronously in the serve loop.
- * Boehm GC keeps handler procs and schemas alive via static globals.
+ * calling mcp-serve / mcp-serve-sse.  Boehm GC keeps handler procs and
+ * schemas alive via static globals.
  *
  * Scheme API:
- *   (mcp-tool name description schema handler)  — register a callable tool
- *   (mcp-resource uri description handler)       — register a browseable resource
- *   (mcp-text string)                            — return text from a handler
- *   (mcp-json value)                             — return any Scheme value as JSON
- *   (mcp-notify-progress current total message)  — emit a progress notification
- *   (mcp-serve)                                  — start serving (blocks until EOF)
- *   (mcp-serve server-name version)              — with custom server identity
+ *   (mcp-tool name description schema handler)    — register a callable tool
+ *   (mcp-resource uri description handler)        — register a browseable resource
+ *   (mcp-text string)                             — return text from a handler
+ *   (mcp-json value)                              — return any Scheme value as JSON
+ *   (mcp-notify-progress current total message)   — emit a progress notification
+ *   (mcp-serve)                                   — stdio, blocks until EOF
+ *   (mcp-serve server-name version)               — stdio with custom identity
+ *   (mcp-serve-sse port)                          — SSE on port, blocks forever
+ *   (mcp-serve-sse port server-name)              — SSE with custom name
+ *   (mcp-serve-sse port server-name version)      — SSE with custom name+version
  *
  * Schema format — alist mapping param names to property alists:
  *   '((query . ((type . "string") (description . "Search terms")))
  *     (limit . ((type . "integer") (description . "Max results") (default . 10))))
  * Parameters without a (default . ...) are marked required in the JSON Schema.
- *
- * Tool handlers receive an alist with symbol keys:
- *   (lambda (args)
- *     (let ((q (cdr (assq 'query args))))
- *       (mcp-text (search q))))
  */
 
 #include <curry.h>
 #include "eval.h"    /* SCM_PROTECT, ExnHandler, current_handler */
 #include "object.h"  /* ErrorObj, vis_error, as_err */
+#include "gc.h"      /* gc_register_thread */
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
-#define MCP_VERSION  "2024-11-05"
-#define MAX_TOOLS     64
-#define MAX_RESOURCES 32
-#define LINE_LIMIT    (1 << 20)   /* 1 MB per JSON-RPC line — covers large args */
+#ifndef _WIN32
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#  include <signal.h>
+#  define HAVE_SSE 1
+#endif
 
-/* ---- Registry ---- */
+#define MCP_VERSION   "2024-11-05"
+#define MAX_TOOLS      64
+#define MAX_RESOURCES  32
+#define MAX_SESSIONS   32
+#define LINE_LIMIT     (1 << 20)   /* 1 MB per JSON-RPC line */
+
+/* ---- Forward declarations ---- */
+
+static curry_val parse_val(const char **p);
+static void      dispatch(curry_val req);
+
+/* ---- Tool / resource registry ---- */
 
 typedef struct {
     char      name[128];
     char      desc[512];
-    curry_val schema;    /* Scheme alist; lives in static storage → GC finds it */
-    curry_val handler;   /* Scheme procedure */
+    curry_val schema;
+    curry_val handler;
 } Tool;
 
 typedef struct {
@@ -63,11 +86,103 @@ static int      s_nres  = 0;
 static char s_server_name[128] = "curry-mcp";
 static char s_server_ver[32]   = "0.7.2";
 
-/* Request id of the current tool call — used by mcp-notify-progress.
- * Only valid while a tool handler is running; empty string otherwise. */
-static char s_cur_token[64] = "";
+/* Thread-local: request-id of the current tool call, for mcp-notify-progress.
+ * Thread-local so concurrent SSE sessions don't clobber each other. */
+static _Thread_local char s_cur_token[64] = "";
 
+/* Serialises curry_apply() — the Scheme evaluator is not re-entrant. */
+static pthread_mutex_t s_dispatch_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Protects stdout writes in stdio mode. */
 static pthread_mutex_t s_out_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* ---- SSE session table ---- */
+
+#ifdef HAVE_SSE
+
+typedef struct {
+    char            id[37];   /* UUID */
+    int             fd;       /* SSE socket owned by the GET /sse thread */
+    bool            active;
+    pthread_mutex_t wlock;    /* serialises writes to fd */
+} Session;
+
+static Session          s_sessions[MAX_SESSIONS];
+static pthread_rwlock_t s_sess_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+static bool             s_sess_inited = false;
+
+/* Thread-local: non-NULL while a tool call is dispatched via SSE. */
+static _Thread_local Session *t_sse_session = NULL;
+
+static void ensure_sess_init(void) {
+    if (s_sess_inited) return;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        s_sessions[i].active = false;
+        s_sessions[i].fd     = -1;
+        pthread_mutex_init(&s_sessions[i].wlock, NULL);
+    }
+    s_sess_inited = true;
+}
+
+static void gen_uuid(char out[37]) {
+    uint8_t b[16];
+    int rfd = open("/dev/urandom", O_RDONLY);
+    if (rfd >= 0) { (void)read(rfd, b, 16); close(rfd); }
+    else { for (int i = 0; i < 16; i++) b[i] = (uint8_t)rand(); }
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    snprintf(out, 37,
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],
+        b[8],b[9],b[10],b[11],b[12],b[13],b[14],b[15]);
+}
+
+static Session *alloc_session(const char *uuid, int fd) {
+    pthread_rwlock_wrlock(&s_sess_rwlock);
+    Session *found = NULL;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (!s_sessions[i].active) {
+            found = &s_sessions[i];
+            strncpy(found->id, uuid, 36);
+            found->id[36] = '\0';
+            found->fd     = fd;
+            found->active = true;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&s_sess_rwlock);
+    return found;
+}
+
+static Session *find_session(const char *uuid) {
+    pthread_rwlock_rdlock(&s_sess_rwlock);
+    Session *found = NULL;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (s_sessions[i].active && strcmp(s_sessions[i].id, uuid) == 0) {
+            found = &s_sessions[i];
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&s_sess_rwlock);
+    return found;
+}
+
+/* Write one SSE data frame to the session.  Checks active under wlock. */
+static void sse_send(Session *sess, const char *json) {
+    size_t jlen  = strlen(json);
+    size_t flen  = jlen + 8;        /* "data: " + json + "\n\n" */
+    char  *frame = malloc(flen + 1);
+    int    n     = snprintf(frame, flen + 1, "data: %s\n\n", json);
+    pthread_mutex_lock(&sess->wlock);
+    if (sess->active) {
+        if (send(sess->fd, frame, (size_t)n, MSG_NOSIGNAL) <= 0)
+            sess->active = false;
+    }
+    pthread_mutex_unlock(&sess->wlock);
+    free(frame);
+}
+
+#endif /* HAVE_SSE */
 
 /* ---- String builder ---- */
 
@@ -78,12 +193,11 @@ static void sb_free(SB *b) { free(b->buf); }
 static void sb_grow(SB *b, size_t n) {
     while (b->len+n+1 >= b->cap) { b->cap*=2; b->buf=realloc(b->buf,b->cap); }
 }
-static void sb_c(SB *b, char c)          { sb_grow(b,1); b->buf[b->len++]=c; b->buf[b->len]='\0'; }
-static void sb_s(SB *b, const char *s)   { while(*s) sb_c(b,*s++); }
-static void sb_n(SB *b, long n)          { char t[32]; snprintf(t,sizeof(t),"%ld",n); sb_s(b,t); }
-static void sb_f(SB *b, double d)        { char t[32]; snprintf(t,sizeof(t),"%g",d); sb_s(b,t); }
+static void sb_c(SB *b, char c)        { sb_grow(b,1); b->buf[b->len++]=c; b->buf[b->len]='\0'; }
+static void sb_s(SB *b, const char *s) { while(*s) sb_c(b,*s++); }
+static void sb_n(SB *b, long n)        { char t[32]; snprintf(t,sizeof(t),"%ld",n); sb_s(b,t); }
+static void sb_f(SB *b, double d)      { char t[32]; snprintf(t,sizeof(t),"%g",d); sb_s(b,t); }
 
-/* Append s as a JSON string (with quotes and escaping). */
 static void sb_quoted(SB *b, const char *s) {
     sb_c(b,'"');
     for (; *s; s++) {
@@ -97,9 +211,6 @@ static void sb_quoted(SB *b, const char *s) {
     sb_c(b,'"');
 }
 
-/* Serialize a Scheme value as JSON.
- * Pairs whose car is also a pair are treated as alists → JSON objects.
- * Other non-nil pairs are treated as lists → JSON arrays. */
 static void sb_val(SB *b, curry_val v) {
     if (curry_is_nil(v)||curry_is_void(v)) { sb_s(b,"null"); return; }
     if (curry_is_bool(v))   { sb_s(b,curry_bool(v)?"true":"false"); return; }
@@ -138,11 +249,17 @@ static void sb_val(SB *b, curry_val v) {
     sb_s(b,"null");
 }
 
-/* ---- Output ---- */
+/* ---- Output — routes to SSE session or stdout ---- */
 
 static void emit_line(const char *s) {
+#ifdef HAVE_SSE
+    if (t_sse_session) {
+        sse_send(t_sse_session, s);
+        return;
+    }
+#endif
     pthread_mutex_lock(&s_out_lock);
-    fputs(s,stdout); fputc('\n',stdout); fflush(stdout);
+    fputs(s, stdout); fputc('\n', stdout); fflush(stdout);
     pthread_mutex_unlock(&s_out_lock);
 }
 
@@ -162,8 +279,6 @@ static void emit_error(const char *id, int code, const char *msg) {
 }
 
 /* ---- JSON parser ---- */
-
-static curry_val parse_val(const char **p);
 
 static void skip_ws(const char **p) { while(**p && (unsigned char)**p<=' ') (*p)++; }
 
@@ -221,7 +336,6 @@ static curry_val parse_val(const char **p) {
     if (strncmp(*p,"true",4)==0)  { *p+=4; return curry_make_bool(true); }
     if (strncmp(*p,"false",5)==0) { *p+=5; return curry_make_bool(false); }
     if (strncmp(*p,"null",4)==0)  { *p+=4; return curry_nil(); }
-    /* number */
     char num[64]; int i=0; bool fp=false;
     if (**p=='-') num[i++]=*(*p)++;
     while (isdigit((unsigned char)**p)) num[i++]=*(*p)++;
@@ -235,7 +349,6 @@ static curry_val parse_val(const char **p) {
     return fp ? curry_make_float(atof(num)) : curry_make_fixnum(atol(num));
 }
 
-/* Look up a string key in a parsed JSON alist. */
 static curry_val aget(curry_val al, const char *key) {
     while (curry_is_pair(al)) {
         curry_val kv=curry_car(al); al=curry_cdr(al);
@@ -250,8 +363,6 @@ static curry_val aget(curry_val al, const char *key) {
 
 /* ---- Schema serializer ---- */
 
-/* Convert the Scheme schema alist to a JSON Schema object.
- * Parameters lacking a (default . ...) entry are added to "required". */
 static void sb_schema(SB *b, curry_val schema) {
     sb_s(b,"{\"type\":\"object\",\"properties\":{");
     curry_val req=curry_nil(); bool first=true;
@@ -264,10 +375,8 @@ static void sb_schema(SB *b, curry_val schema) {
         if (!first) sb_c(b,',');
         first=false;
         sb_quoted(b,nm); sb_c(b,':'); sb_c(b,'{');
-
         curry_val type=aget(props,"type"), desc=aget(props,"description"), def=aget(props,"default");
         bool has_def=!curry_is_nil(def), need_comma=false;
-
         if (curry_is_string(type)) {
             sb_s(b,"\"type\":"); sb_quoted(b,curry_string(type)); need_comma=true;
         }
@@ -324,7 +433,6 @@ static void handle_tools_list(const char *id) {
     emit_result(id,r.buf); sb_free(&r);
 }
 
-/* Remap JSON args alist (string keys) to a Scheme alist (symbol keys). */
 static curry_val json_args_to_alist(curry_val jargs) {
     curry_val out=curry_nil();
     while (curry_is_pair(jargs)) {
@@ -337,7 +445,6 @@ static curry_val json_args_to_alist(curry_val jargs) {
     return out;
 }
 
-/* Extract a human-readable message from a Scheme exception value. */
 static void exn_msg(curry_val exn, char *buf, size_t cap) {
     if (curry_is_string(exn))   { snprintf(buf,cap,"%s",curry_string(exn)); return; }
     if (vis_error(exn))         { snprintf(buf,cap,"%s",curry_string(as_err(exn)->message)); return; }
@@ -346,7 +453,6 @@ static void exn_msg(curry_val exn, char *buf, size_t cap) {
     snprintf(buf,cap,"error");
 }
 
-/* Format a tool/resource result value as a JSON content text item. */
 static void sb_content_text(SB *b, curry_val result) {
     sb_s(b,"{\"type\":\"text\",\"text\":");
     if (curry_is_pair(result) && curry_is_symbol(curry_car(result))) {
@@ -370,17 +476,13 @@ static void sb_content_text(SB *b, curry_val result) {
 static void handle_tools_call(const char *id, curry_val params) {
     curry_val name_v=aget(params,"name");
     if (!curry_is_string(name_v)) { emit_error(id,-32602,"tools/call: missing name"); return; }
-
     Tool *tool=NULL;
     for (int i=0; i<s_ntool; i++)
         if (strcmp(s_tools[i].name,curry_string(name_v))==0) { tool=&s_tools[i]; break; }
     if (!tool) { emit_error(id,-32602,"unknown tool"); return; }
-
     strncpy(s_cur_token,id,sizeof(s_cur_token)-1);
-
     curry_val jargs=aget(params,"arguments");
     curry_val args=json_args_to_alist(curry_is_pair(jargs)?jargs:curry_nil());
-
     curry_val result=curry_void();
     char errbuf[512]=""; bool failed=false;
     ExnHandler h;
@@ -388,10 +490,8 @@ static void handle_tools_call(const char *id, curry_val params) {
         { curry_val av[1]={args}; result=curry_apply(tool->handler,1,av); },
         { failed=true; exn_msg(h.exn,errbuf,sizeof(errbuf)); }
     );
-
     s_cur_token[0]='\0';
     if (failed) { emit_error(id,-32603,errbuf); return; }
-
     SB r; sb_init(&r);
     sb_s(&r,"{\"content\":["); sb_content_text(&r,result); sb_s(&r,"]}");
     emit_result(id,r.buf); sb_free(&r);
@@ -415,12 +515,10 @@ static void handle_resources_list(const char *id) {
 static void handle_resources_read(const char *id, curry_val params) {
     curry_val uri_v=aget(params,"uri");
     if (!curry_is_string(uri_v)) { emit_error(id,-32602,"resources/read: missing uri"); return; }
-
     Resource *res=NULL;
     for (int i=0;i<s_nres;i++)
         if (strcmp(s_res[i].uri,curry_string(uri_v))==0) { res=&s_res[i]; break; }
     if (!res) { emit_error(id,-32602,"unknown resource"); return; }
-
     curry_val result=curry_void();
     char errbuf[512]=""; bool failed=false;
     ExnHandler h;
@@ -429,7 +527,6 @@ static void handle_resources_read(const char *id, curry_val params) {
         { failed=true; exn_msg(h.exn,errbuf,sizeof(errbuf)); }
     );
     if (failed) { emit_error(id,-32603,errbuf); return; }
-
     SB r; sb_init(&r);
     sb_s(&r,"{\"contents\":[{\"uri\":"); sb_quoted(&r,curry_string(uri_v));
     sb_s(&r,",\"mimeType\":\"text/plain\",\"text\":");
@@ -451,8 +548,6 @@ static void dispatch(curry_val req) {
     curry_val method_v=aget(req,"method");
     if (!curry_is_string(method_v)) return;
     const char *method=curry_string(method_v);
-
-    /* Reconstruct the id as a JSON fragment for use in responses. */
     curry_val id_v=aget(req,"id");
     char id_buf[64]="null";
     if (curry_is_fixnum(id_v)) {
@@ -461,10 +556,8 @@ static void dispatch(curry_val req) {
         SB tmp; sb_init(&tmp); sb_quoted(&tmp,curry_string(id_v));
         strncpy(id_buf,tmp.buf,sizeof(id_buf)-1); sb_free(&tmp);
     }
-
     curry_val params=aget(req,"params");
     if (!curry_is_pair(params)) params=curry_nil();
-
     if      (strcmp(method,"initialize")==0)       handle_initialize(id_buf);
     else if (strcmp(method,"tools/list")==0)        handle_tools_list(id_buf);
     else if (strcmp(method,"tools/call")==0)        handle_tools_call(id_buf,params);
@@ -476,7 +569,6 @@ static void dispatch(curry_val req) {
 
 /* ---- Scheme primitives ---- */
 
-/* (mcp-tool "name" "description" schema-alist handler) */
 static curry_val fn_mcp_tool(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (s_ntool>=MAX_TOOLS)         curry_error("mcp-tool: registry full (max %d)",MAX_TOOLS);
@@ -486,12 +578,11 @@ static curry_val fn_mcp_tool(int ac, curry_val *av, void *ud) {
     Tool *t=&s_tools[s_ntool++];
     strncpy(t->name,curry_string(av[0]),sizeof(t->name)-1);
     strncpy(t->desc,curry_string(av[1]),sizeof(t->desc)-1);
-    t->schema=av[2];    /* static storage → Boehm GC conservatively scans it */
+    t->schema=av[2];
     t->handler=av[3];
     return curry_void();
 }
 
-/* (mcp-resource "uri" "description" handler) */
 static curry_val fn_mcp_resource(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (s_nres>=MAX_RESOURCES)      curry_error("mcp-resource: registry full (max %d)",MAX_RESOURCES);
@@ -505,21 +596,17 @@ static curry_val fn_mcp_resource(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
-/* (mcp-text "string") — tag a string as text content for the protocol layer. */
 static curry_val fn_mcp_text(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-text: expected string");
     return curry_make_pair(curry_make_symbol("mcp-text"),av[0]);
 }
 
-/* (mcp-json value) — serialize any Scheme value as JSON text content. */
 static curry_val fn_mcp_json(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     return curry_make_pair(curry_make_symbol("mcp-json"),av[0]);
 }
 
-/* (mcp-notify-progress current total message) — emit a progress notification.
- * Only has effect when called from within a tool handler during mcp-serve. */
 static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (s_cur_token[0]=='\0') return curry_void();
@@ -536,15 +623,13 @@ static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
-/* (mcp-serve) or (mcp-serve server-name version) — run the protocol loop. */
+/* (mcp-serve) or (mcp-serve name version) — stdio transport */
 static curry_val fn_mcp_serve(int ac, curry_val *av, void *ud) {
     (void)ud;
     if (ac>=1 && curry_is_string(av[0])) strncpy(s_server_name,curry_string(av[0]),sizeof(s_server_name)-1);
     if (ac>=2 && curry_is_string(av[1])) strncpy(s_server_ver, curry_string(av[1]),sizeof(s_server_ver)-1);
-
     char *line=malloc(LINE_LIMIT);
     if (!line) curry_error("mcp-serve: out of memory");
-
     while (fgets(line,LINE_LIMIT,stdin)) {
         size_t n=strlen(line);
         while (n>0 && (line[n-1]=='\n'||line[n-1]=='\r')) line[--n]='\0';
@@ -553,10 +638,300 @@ static curry_val fn_mcp_serve(int ac, curry_val *av, void *ud) {
         curry_val req=parse_val(&p);
         if (curry_is_pair(req)) dispatch(req);
     }
-
     free(line);
     return curry_void();
 }
+
+/* ---- SSE transport ---- */
+
+#ifdef HAVE_SSE
+
+/* Read one line from fd into buf (strips \r\n).  Returns bytes read, 0 on
+ * blank line, -1 on error/EOF. */
+static ssize_t fd_read_line(int fd, char *buf, size_t cap) {
+    size_t n = 0;
+    while (n + 1 < cap) {
+        char c;
+        ssize_t r = recv(fd, &c, 1, 0);
+        if (r <= 0) return -1;
+        if (c == '\r') continue;
+        if (c == '\n') break;
+        buf[n++] = c;
+    }
+    buf[n] = '\0';
+    return (ssize_t)n;
+}
+
+/* Read exactly n bytes from fd into buf (NUL-terminated). */
+static bool fd_read_exact(int fd, char *buf, size_t n) {
+    size_t got = 0;
+    while (got < n) {
+        ssize_t r = recv(fd, buf + got, n - got, 0);
+        if (r <= 0) return false;
+        got += (size_t)r;
+    }
+    buf[n] = '\0';
+    return true;
+}
+
+typedef struct {
+    char   method[16];
+    char   path[512];
+    char   query[256];
+    char  *body;        /* malloc'd, may be NULL */
+    size_t body_len;
+} HttpReq;
+
+/* Parse one HTTP/1.x request from fd.  Returns false on connection error. */
+static bool http_recv(int fd, HttpReq *req) {
+    memset(req, 0, sizeof(*req));
+    char line[2048];
+
+    /* Request line */
+    if (fd_read_line(fd, line, sizeof(line)) < 0) return false;
+    char *sp1 = strchr(line, ' ');
+    if (!sp1) return false;
+    *sp1 = '\0';
+    strncpy(req->method, line, sizeof(req->method) - 1);
+    char *path_start = sp1 + 1;
+    char *sp2 = strchr(path_start, ' ');
+    if (sp2) *sp2 = '\0';
+    char *q = strchr(path_start, '?');
+    if (q) {
+        strncpy(req->query, q + 1, sizeof(req->query) - 1);
+        *q = '\0';
+    }
+    strncpy(req->path, path_start, sizeof(req->path) - 1);
+
+    /* Headers */
+    size_t content_length = 0;
+    ssize_t r;
+    while ((r = fd_read_line(fd, line, sizeof(line))) > 0) {
+        if (strncasecmp(line, "content-length:", 15) == 0)
+            content_length = (size_t)atol(line + 15);
+    }
+    if (r < 0) return false; /* connection dropped mid-headers */
+
+    /* Body */
+    if (content_length > 0 && content_length < (size_t)LINE_LIMIT) {
+        req->body = malloc(content_length + 1);
+        if (!req->body) return false;
+        if (!fd_read_exact(fd, req->body, content_length)) {
+            free(req->body); req->body = NULL; return false;
+        }
+        req->body_len = content_length;
+    }
+    return true;
+}
+
+static const char *SSE_HEADERS =
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/event-stream\r\n"
+    "Cache-Control: no-cache\r\n"
+    "Connection: keep-alive\r\n"
+    "Access-Control-Allow-Origin: *\r\n"
+    "\r\n";
+
+static const char *ACCEPTED =
+    "HTTP/1.1 202 Accepted\r\n"
+    "Content-Length: 0\r\n"
+    "Access-Control-Allow-Origin: *\r\n"
+    "\r\n";
+
+static const char *CORS_PREFLIGHT =
+    "HTTP/1.1 204 No Content\r\n"
+    "Access-Control-Allow-Origin: *\r\n"
+    "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+    "Access-Control-Allow-Headers: Content-Type\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n";
+
+static const char *NOT_FOUND =
+    "HTTP/1.1 404 Not Found\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n";
+
+static const char *SERVICE_UNAVAILABLE =
+    "HTTP/1.1 503 Service Unavailable\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n";
+
+/* Handle GET /sse — open an SSE stream and block until the client disconnects. */
+static void handle_sse_get(int fd) {
+    char uuid[37];
+    gen_uuid(uuid);
+
+    Session *sess = alloc_session(uuid, fd);
+    if (!sess) {
+        send(fd, SERVICE_UNAVAILABLE, strlen(SERVICE_UNAVAILABLE), MSG_NOSIGNAL);
+        close(fd);
+        return;
+    }
+
+    if (send(fd, SSE_HEADERS, strlen(SSE_HEADERS), MSG_NOSIGNAL) <= 0) goto done;
+
+    /* Send the endpoint event so the client knows where to POST. */
+    char endpoint[320];
+    int  eplen = snprintf(endpoint, sizeof(endpoint),
+        "event: endpoint\ndata: /message?sessionId=%s\n\n", uuid);
+    if (send(fd, endpoint, (size_t)eplen, MSG_NOSIGNAL) <= 0) goto done;
+
+    /* Keep the stream alive with periodic comment pings.  Exit when the client
+     * disconnects (send fails) or when the session is marked inactive by a
+     * concurrent write failure on the POST side. */
+    while (true) {
+        sleep(15);
+        pthread_mutex_lock(&sess->wlock);
+        bool alive = sess->active;
+        if (alive) {
+            if (send(fd, ": keepalive\n\n", 13, MSG_NOSIGNAL) <= 0) {
+                sess->active = false;
+                alive = false;
+            }
+        }
+        pthread_mutex_unlock(&sess->wlock);
+        if (!alive) break;
+    }
+
+done:
+    pthread_mutex_lock(&sess->wlock);
+    sess->active = false;
+    sess->fd     = -1;
+    pthread_mutex_unlock(&sess->wlock);
+    close(fd);
+}
+
+/* Handle POST /message?sessionId=X — dispatch JSON-RPC and send response via SSE. */
+static void handle_sse_post(int fd, HttpReq *req) {
+    /* Extract sessionId from query string */
+    char sess_id[37] = "";
+    const char *sq = strstr(req->query, "sessionId=");
+    if (sq) {
+        sq += 10;
+        size_t n = strcspn(sq, "&");
+        if (n >= sizeof(sess_id)) n = sizeof(sess_id) - 1;
+        strncpy(sess_id, sq, n);
+        sess_id[n] = '\0';
+    }
+
+    /* Acknowledge immediately so the client isn't blocked on the HTTP response
+     * while we run what could be a slow tool handler. */
+    send(fd, ACCEPTED, strlen(ACCEPTED), MSG_NOSIGNAL);
+    close(fd);
+
+    if (!sess_id[0] || !req->body) return;
+
+    Session *sess = find_session(sess_id);
+    if (!sess) return;
+
+    t_sse_session = sess;
+    const char *p = req->body;
+    curry_val rpc = parse_val(&p);
+    if (curry_is_pair(rpc)) {
+        pthread_mutex_lock(&s_dispatch_lock);
+        dispatch(rpc);
+        pthread_mutex_unlock(&s_dispatch_lock);
+    }
+    t_sse_session = NULL;
+}
+
+typedef struct { int fd; } ConnArg;
+
+static void *conn_thread(void *arg) {
+    ConnArg *ca = arg;
+    int fd = ca->fd;
+    free(ca);
+
+    gc_register_thread();
+
+    HttpReq req;
+    if (!http_recv(fd, &req)) { close(fd); return NULL; }
+
+    if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/sse") == 0) {
+        handle_sse_get(fd);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/message") == 0) {
+        handle_sse_post(fd, &req);
+    } else if (strcmp(req.method, "OPTIONS") == 0) {
+        send(fd, CORS_PREFLIGHT, strlen(CORS_PREFLIGHT), MSG_NOSIGNAL);
+        close(fd);
+    } else {
+        send(fd, NOT_FOUND, strlen(NOT_FOUND), MSG_NOSIGNAL);
+        close(fd);
+    }
+
+    free(req.body);
+    return NULL;
+}
+
+/* (mcp-serve-sse port [name [version]]) — HTTP/SSE transport, blocks forever */
+static curry_val fn_mcp_serve_sse(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    if (ac < 1 || !curry_is_fixnum(av[0]))
+        curry_error("mcp-serve-sse: first argument must be a port number");
+    int port = (int)curry_fixnum(av[0]);
+    if (ac >= 2 && curry_is_string(av[1]))
+        strncpy(s_server_name, curry_string(av[1]), sizeof(s_server_name) - 1);
+    if (ac >= 3 && curry_is_string(av[2]))
+        strncpy(s_server_ver,  curry_string(av[2]), sizeof(s_server_ver) - 1);
+
+    ensure_sess_init();
+    signal(SIGPIPE, SIG_IGN); /* failed sends return -1 instead of killing the process */
+
+    /* Try dual-stack IPv6 first, fall back to IPv4. */
+    int srv = socket(AF_INET6, SOCK_STREAM, 0);
+    if (srv >= 0) {
+        int on = 1, off = 0;
+        setsockopt(srv, SOL_SOCKET,  SO_REUSEADDR, &on,  sizeof(on));
+        setsockopt(srv, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+        struct sockaddr_in6 addr = {0};
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port   = htons((uint16_t)port);
+        addr.sin6_addr   = in6addr_any;
+        if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            close(srv); srv = -1;
+        }
+    }
+    if (srv < 0) {
+        srv = socket(AF_INET, SOCK_STREAM, 0);
+        if (srv < 0) curry_error("mcp-serve-sse: socket() failed");
+        int on = 1;
+        setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+        struct sockaddr_in addr = {0};
+        addr.sin_family      = AF_INET;
+        addr.sin_port        = htons((uint16_t)port);
+        addr.sin_addr.s_addr = INADDR_ANY;
+        if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            close(srv);
+            curry_error("mcp-serve-sse: bind() failed on port %d", port);
+        }
+    }
+    if (listen(srv, 32) < 0) {
+        close(srv);
+        curry_error("mcp-serve-sse: listen() failed");
+    }
+
+    fprintf(stderr, "[mcp] SSE server listening on port %d\n", port);
+    fflush(stderr);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    while (true) {
+        int fd = accept(srv, NULL, NULL);
+        if (fd < 0) continue;
+        ConnArg *ca = malloc(sizeof(ConnArg));
+        ca->fd = fd;
+        pthread_t tid;
+        pthread_create(&tid, &attr, conn_thread, ca);
+    }
+
+    pthread_attr_destroy(&attr);
+    close(srv);
+    return curry_void();
+}
+
+#endif /* HAVE_SSE */
 
 /* ---- Module entry point ---- */
 
@@ -568,5 +943,8 @@ void curry_module_init(CurryVM *vm) {
     DEF("mcp-json",            fn_mcp_json,     1, 1);
     DEF("mcp-notify-progress", fn_mcp_progress, 3, 3);
     DEF("mcp-serve",           fn_mcp_serve,    0, 2);
+#ifdef HAVE_SSE
+    DEF("mcp-serve-sse",       fn_mcp_serve_sse, 1, 3);
+#endif
 #undef DEF
 }
