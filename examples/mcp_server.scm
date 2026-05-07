@@ -116,4 +116,4 @@
 
 
 ;;; Start the server.  This blocks until stdin closes (i.e. the client disconnects).
-(mcp-serve "curry" "0.1.7")
+(mcp-serve "curry" "0.7.2")

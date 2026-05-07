@@ -187,4 +187,4 @@ Tool examples:
   taylor     : {\"expression\": \"(/ 1 (- 1 x))\",     \"variable\": \"x\",  \"order\": 5}")))
 
 
-(mcp-serve "curry-math" "0.1.7")
+(mcp-serve "curry-math" "0.7.2")

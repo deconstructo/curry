@@ -61,7 +61,7 @@ static Resource s_res[MAX_RESOURCES];
 static int      s_nres  = 0;
 
 static char s_server_name[128] = "curry-mcp";
-static char s_server_ver[32]   = "0.1.7";
+static char s_server_ver[32]   = "0.7.2";
 
 /* Request id of the current tool call — used by mcp-notify-progress.
  * Only valid while a tool handler is running; empty string otherwise. */

@@ -390,4 +390,4 @@ The potential uses the D-dimensional formula:
   (lambda (uri) (tool-state '())))
 
 
-(mcp-serve "curry-nbody" "0.1.7")
+(mcp-serve "curry-nbody" "0.7.2")
