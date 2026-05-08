@@ -14,6 +14,7 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 - [Surreal numbers](docs/surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
 - [Multivectors](docs/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
 - [Akkadian / Cuneiform reference](docs/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
+- [MCP server](docs/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients; stdio and SSE transports
 
 ### Extended numeric tower
 
@@ -61,6 +62,7 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
 | [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
+| [mcp](docs/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
 
 ---
 
@@ -206,3 +208,41 @@ Example:
 𒀭 ḫiṭītu — lā nikkassum:
   +: not a number: "hello"
 ```
+
+---
+
+## Changelog
+
+### 0.7.2 — MCP server module
+
+- Added `(curry mcp)` module: expose Curry procedures as [Model Context Protocol](https://modelcontextprotocol.io/) tools callable from Claude Code and other AI clients
+- **stdio transport** — JSON-RPC 2.0 over stdin/stdout; one client per process, spawned by the MCP client (`mcp-serve`)
+- **SSE transport** — persistent HTTP + Server-Sent Events server; multiple concurrent clients on one port (`mcp-serve-sse`)
+- Progress notifications (`mcp-notify-progress`) for long-running tool calls
+- Example servers: `mcp_server.scm` (eval, factorial, stateful define, progress demo), `mcp_math.scm` (CAS: differentiation, simplification, auto-diff, Taylor series), `mcp_nbody.scm` (N-body gravity in D dimensions)
+
+### 0.1.7 — Matrix, tensor, and gravity simulator
+
+- First-class `Matrix` and `Tensor` types with arithmetic, map, fold, and slicing
+- `(curry math matrix)` and `(curry math tensor)` loadable Scheme modules
+- `(curry gravity)` — continuous-dimension physics simulator: gravity and electromagnetism in non-integer spatial dimension D
+- `syntax-rules` macro expander implemented; `parameterize` / `dynamic-wind` interaction fixed
+- Qt6 module hardened against Scheme exceptions escaping across C++ stack frames
+
+### 0.1.5 — Dynamic-wind, macOS support, new modules
+
+- `dynamic-wind` implemented; `with-mutex` deadlock fixed; port finalizer added
+- Full macOS build support (Apple Silicon and x86_64); `sem_init` portability fix
+- `plplot`, `regex`, and `sync` modules added
+- `trace` / `untrace` for tracing calls to global procedures
+- Memory safety: use-after-free bugs, leaks, and symbol table data race fixed
+- `tesseract.scm` demo with anaglyph stereoscopic 3D support
+
+### 0.1.0 — Initial release
+
+- R7RS Scheme interpreter with tree-walking evaluator and proper tail-call optimisation via `goto tail`
+- Numeric tower: fixnum → bignum (GMP) → rational → flonum → complex → quaternion → octonion → multivector (Clifford Cl(p,q,r)) → surreal (Hahn series) → symbolic CAS
+- Actor-model concurrency via pthreads: `spawn`, `send!`, `receive`
+- Standard Babylonian Akkadian error messages with cuneiform preambles (𒀭 ḫiṭītu)
+- Akkadian/cuneiform synonym evaluation — Curry source code can be written in Standard Babylonian Akkadian
+- Modules: `json`, `network`, `redis`, `sqlite`, `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `qt6`, `vecdb`
