@@ -61,9 +61,15 @@ typedef struct ExnHandler {
     struct ExnHandler *prev;
 } ExnHandler;
 
-/* Thread-local current exception handler chain */
+/* Thread-local current exception handler chain.
+ * Use __thread (not C++ thread_local) in both branches so that C++ callers
+ * (e.g. qt6.so) reference the TLV descriptor symbol _current_handler directly
+ * rather than generating a __ZTW wrapper call.  thread_local in C++ emits a
+ * lazy-init wrapper (__ZTW15current_handler) that is never defined by the main
+ * binary (which compiles eval.c as C), so the dynamic lookup resolves to null
+ * and the first SCM_PROTECT in a .so crashes at 0x0. */
 #ifdef __cplusplus
-extern thread_local ExnHandler *current_handler;
+extern __thread ExnHandler *current_handler;
 #else
 extern _Thread_local ExnHandler *current_handler;
 #endif
