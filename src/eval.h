@@ -48,7 +48,8 @@ typedef struct WindFrame {
 
 /* Thread-local wind stack (NULL = empty) */
 #ifdef __cplusplus
-extern thread_local WindFrame *current_wind;
+extern "C" WindFrame **curry_current_wind_ptr(void);
+#define current_wind (*curry_current_wind_ptr())
 #else
 extern _Thread_local WindFrame *current_wind;
 #endif
@@ -69,15 +70,11 @@ typedef struct ExnHandler {
  * binary (which compiles eval.c as C), so the dynamic lookup resolves to null
  * and the first SCM_PROTECT in a .so crashes at 0x0. */
 #ifdef __cplusplus
-<<<<<<< HEAD
-extern __thread ExnHandler *current_handler;
-=======
 /* current_handler is a C _Thread_local defined in eval.c.  The C++ TLS
  * wrapper (__ZTW...) is NOT exported from the main binary, so C++ dylibs
  * must access it via this plain C function instead. */
 extern "C" ExnHandler **curry_current_handler_ptr(void);
 #define current_handler (*curry_current_handler_ptr())
->>>>>>> 1462a4e (  src/eval.c — added one function after the current_handler / current_wind TLS definitions:)
 #else
 extern _Thread_local ExnHandler *current_handler;
 #endif

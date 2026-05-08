@@ -22,9 +22,10 @@
 _Thread_local ExnHandler *current_handler = NULL;
 _Thread_local WindFrame  *current_wind    = NULL;
 
-/* C accessor for current_handler — used by C++ dylibs (eval.h) to avoid the
- * C++ TLS wrapper (__ZTW...) which is not exported from the main binary. */
+/* C accessors for TLS vars — used by C++ dylibs (eval.h) to avoid the
+ * C++ TLS wrappers (__ZTW...) which are not exported from the main binary. */
 ExnHandler **curry_current_handler_ptr(void) { return &current_handler; }
+WindFrame  **curry_current_wind_ptr(void)    { return &current_wind; }
 
 /* Unwind dynamic-wind frames from current_wind down to target, calling each
  * after thunk.  Used before longjmp-ing to an escape continuation. */
