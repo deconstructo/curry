@@ -21,8 +21,11 @@
 
 #define CURRY_VERSION "0.7.2"
 #define BANNER \
+    "𒋗𒈬 𒌝 𒄿𒈾 𒋗  |  šulmu — šiprī ina qātīka\n" \
+    "Greetings — my service is in your hands\n"\
     "Curry Scheme " CURRY_VERSION " (R7RS)\n" \
-    "Type ,quit to exit, ,help for help.\n"
+    "Type ,quit to exit, ,help for help.\n\n" 
+
 
 static void init_all(void) {
     gc_init();

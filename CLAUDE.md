@@ -333,6 +333,18 @@ Start the SSE server with `(mcp-serve-sse 8080)` in the script.  A `[mcp] SSE se
 - Global Scheme state persists across calls for the lifetime of the server process.
 - `(self)` is not available from tool handlers (main thread is not an actor).
 
+## Neo4j module (`modules/neo4j/neo4j.c`)
+
+The Neo4j module must be implemented using the **raw Bolt protocol** (do not use `libneo4j-client`). Reasons: `libneo4j-client` is unmaintained (~2019) and only supports Bolt ≤ v3, which is incompatible with Neo4j 4.x/5.x. Model the implementation on the Redis module (`modules/redis/redis.c`), which speaks RESP directly over a socket.
+
+Key points:
+- Bolt 4.x+ uses **PackStream** binary encoding (similar to MessagePack) for messages.
+- The handshake negotiates the Bolt version via a 4-byte magic + 4×4-byte version proposals.
+- Authentication uses the `HELLO` message; queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
+- Request **pipelining** (sending multiple `RUN`/`PULL` pairs before draining responses) is the one client-side optimisation worth implementing for batch workloads.
+- The current `neo4j.c` is a stub — all three functions are no-ops. Replace entirely; do not build on the stub.
+- Remove the `libneo4j-client` `pkg_check_modules` block from `CMakeLists.txt`; the module has no external C dependencies beyond the standard socket API.
+
 ## Akkadian error messages
 
 All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) selected by keyword-matching the error string against `akkadian_table[]` in `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms registered in `src/akkadian_names.h` and translated transparently in `eval()` — Akkadian code is valid Curry Scheme.
