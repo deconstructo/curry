@@ -1133,6 +1133,20 @@ static val_t prim_auto_diff(int ac, val_t *av, void *ud) {
 
 /* ---- Registration ---- */
 
+/* Build exact rational: decimal_digits / 10^(strlen(decimal_digits) - 1).
+ * E.g. "314159" -> 314159/100000 = 3.14159 as an exact mpq. */
+static val_t make_decimal_rat(const char *digits) {
+    int n = (int)strlen(digits);
+    char *den = malloc((size_t)(n + 1));
+    den[0] = '1';
+    memset(den + 1, '0', (size_t)(n - 1));
+    den[n] = '\0';
+    val_t result = num_make_rational(num_make_bignum_str(digits, 10),
+                                     num_make_bignum_str(den, 10));
+    free(den);
+    return result;
+}
+
 void builtins_register(val_t env) {
     /* Type predicates */
     DEF("pair?",        prim_pair_p,      1,1); DEF("null?",       prim_null_p,      1,1); DEF("list?", prim_list_p, 1,1);
@@ -1314,7 +1328,32 @@ void builtins_register(val_t env) {
     env_define(env, sym_intern_cstr("#t"),    V_TRUE);
     env_define(env, sym_intern_cstr("#f"),    V_FALSE);
     env_define(env, sym_intern_cstr("else"),  V_TRUE);   /* for cond/case */
-    env_define(env, sym_intern_cstr("pi"),    num_make_float(3.14159265358979323846));
+
+    /* Inexact transcendental constants (standard R7RS — (exact? pi) => #f) */
+    {
+        val_t fpi = num_make_float(M_PI);
+        val_t fe  = num_make_float(M_E);
+        env_define(env, sym_intern_cstr("pi"), fpi);
+        env_define(env, sym_intern_cstr("π"),  fpi);   /* U+03C0 alias */
+        env_define(env, sym_intern_cstr("e"),  fe);
+    }
+
+    /* Exact rational approximations — 100 significant decimal digits.
+     * The numerator is a ~330-bit GMP bignum; denominator is 10^99.
+     * (exact pi) gives only the IEEE 754 double as a small rational;
+     * exact-pi/exact-e carry far more precision. */
+    {
+        val_t ep = make_decimal_rat(
+            "3141592653589793238462643383279502884197"
+            "169399375105820974944592307816406286208998628034825342117067");
+        val_t ee = make_decimal_rat(
+            "2718281828459045235360287471352662497757"
+            "247093699959574966967627724076630353547594571382178525166427");
+        env_define(env, sym_intern_cstr("exact-pi"), ep);
+        env_define(env, sym_intern_cstr("exact-π"),  ep);  /* U+03C0 alias */
+        env_define(env, sym_intern_cstr("exact-e"),  ee);
+    }
+
     env_define(env, sym_intern_cstr("+inf.0"),num_make_float(1.0/0.0));
     env_define(env, sym_intern_cstr("-inf.0"),num_make_float(-1.0/0.0));
     env_define(env, sym_intern_cstr("+nan.0"),num_make_float(0.0/0.0));
