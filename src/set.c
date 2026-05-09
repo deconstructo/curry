@@ -2,6 +2,7 @@
 #include "object.h"
 #include "gc.h"
 #include "numeric.h"
+#include "symbolic.h"
 #include <string.h>
 #include <assert.h>
 
@@ -18,6 +19,9 @@ bool scm_eqv(val_t a, val_t b) {
     if (vis_flonum(a) && vis_flonum(b)) return vfloat(a) == vfloat(b);
     if (vis_bignum(a) && vis_bignum(b)) return mpz_cmp(as_big(a)->z, as_big(b)->z) == 0;
     if (vis_rational(a) && vis_rational(b)) return mpq_equal(as_rat(a)->q, as_rat(b)->q);
+    if (vis_complex(a) && vis_complex(b))
+        return scm_eqv(as_cpx(a)->real, as_cpx(b)->real) &&
+               scm_eqv(as_cpx(a)->imag, as_cpx(b)->imag);
     if (vis_char(a) && vis_char(b)) return vunchr(a) == vunchr(b);
     if (vis_symbol(a) && vis_symbol(b)) return a == b; /* interned, so pointer eq */
     return false;
@@ -42,6 +46,8 @@ bool scm_equal(val_t a, val_t b) {
         Bytevector *ba = as_bytes(a), *bb = as_bytes(b);
         return ba->len == bb->len && memcmp(ba->data, bb->data, ba->len) == 0;
     }
+    if (vis_symbolic(a) && vis_symbolic(b))
+        return sx_equal(a, b);
     return false;
 }
 

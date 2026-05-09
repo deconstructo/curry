@@ -52,6 +52,64 @@
  *               ∂/∂x |f|     = f·f' / |f|  (undefined at f=0)
  *   Unknown ops: left as unevaluated (∂ expr var) notation.
  *
+ * --- Integration rules applied by sx_integrate ---
+ *
+ *   Linearity:  ∫(f+g+...) dx  = ∫f dx + ∫g dx + ...
+ *   Constant:   ∫c dx          = c·x   (c doesn't depend on x)
+ *   Const mul:  ∫c·f dx        = c · ∫f dx
+ *   Power:      ∫x^n dx        = x^(n+1)/(n+1)   (n ≠ −1)
+ *               ∫x^(−1) dx     = ln|x|
+ *   Linear sub: ∫f(ax+b)^n dx  = f(ax+b)^(n+1) / (a·(n+1))  (n ≠ −1)
+ *               ∫1/(ax+b) dx   = ln|ax+b| / a
+ *   sin/cos:    ∫sin(ax+b) dx  = −cos(ax+b)/a
+ *               ∫cos(ax+b) dx  = sin(ax+b)/a
+ *   tan:        ∫tan(ax+b) dx  = −ln|cos(ax+b)| / a
+ *   exp:        ∫exp(ax+b) dx  = exp(ax+b)/a
+ *   log:        ∫ln(ax+b) dx   = ((ax+b)·ln(ax+b) − (ax+b)) / a
+ *   sqrt:       ∫√(ax+b) dx    = 2(ax+b)^(3/2) / (3a)
+ *   Unknown ops / products with var: left as unevaluated (∫ expr var) notation.
+ *   Definite:   (∫ f x a b)    = F(b) − F(a)  where F = ∫f dx
+ *
+ * --- Complex / conjugate operators ---
+ *
+ *   (conj expr)                  ; symbolic complex conjugate
+ *   (real-part expr)             ; symbolic real part (returns symbolic when arg is symbolic)
+ *   (imag-part expr)             ; symbolic imaginary part
+ *
+ *   Simplification identities:
+ *     conj(conj(f))  = f
+ *     conj(real(f))  = real(f)   (real-part is real-valued)
+ *     conj(imag(f))  = imag(f)   (imag-part is real-valued)
+ *     imag(real(f))  = 0         (real-part of a real = 0)
+ *     imag(imag(f))  = 0
+ *     real(conj(f))  = real(f)
+ *     imag(conj(f))  = -(imag(f))
+ *
+ *   Differentiation (x real):
+ *     ∂conj(f)/∂x = conj(∂f/∂x)
+ *     ∂real(f)/∂x = real(∂f/∂x)
+ *     ∂imag(f)/∂x = imag(∂f/∂x)
+ *
+ *   Integration (x real):
+ *     ∫conj(f) dx = conj(∫f dx)
+ *     ∫real(f) dx = real(∫f dx)
+ *     ∫imag(f) dx = imag(∫f dx)
+ *
+ * --- Wirtinger calculus ---
+ *
+ *   Treats z and z̄ = conj(z) as independent variables.
+ *
+ *   (wirtinger-d    expr z)    ; ∂/∂z:  ∂z/∂z = 1,  ∂conj(z)/∂z = 0
+ *   (wirtinger-dbar expr z)    ; ∂/∂z̄: ∂z/∂z̄ = 0, ∂conj(z)/∂z̄ = 1
+ *
+ *   Key rules:
+ *     ∂conj(f)/∂z  = conj(∂f/∂z̄)
+ *     ∂conj(f)/∂z̄ = conj(∂f/∂z)
+ *     ∂real(f)/∂z  = ½(∂f/∂z + conj(∂f/∂z̄))
+ *     ∂imag(f)/∂z  = (∂f/∂z − conj(∂f/∂z̄)) / (2i)
+ *   Arithmetic/transcendentals follow the same chain rule as ∂.
+ *   A function is holomorphic iff wirtinger-dbar returns 0.
+ *
  * Symbolic expressions are printed in standard Scheme prefix notation and
  * are valid Scheme code when all variables are defined.
  */
@@ -87,11 +145,19 @@ val_t sx_tan(val_t a);
 val_t sx_exp(val_t a);
 val_t sx_log(val_t a);
 
+/* ---- Arithmetic (continued) ---- */
+val_t sx_conj(val_t a);
+val_t sx_real(val_t a);
+val_t sx_imag(val_t a);
+
 /* ---- CAS operations ---- */
-val_t sx_diff(val_t expr, val_t var);      /* symbolic differentiation ∂/∂var */
-val_t sx_simplify(val_t expr);             /* algebraic simplification */
-val_t sx_substitute(val_t expr, val_t var, val_t val); /* substitute var=val */
-bool  sx_equal(val_t a, val_t b);          /* structural equality */
+val_t sx_diff(val_t expr, val_t var);                        /* ∂/∂var (real variable) */
+val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar);     /* ∂/∂z or ∂/∂z̄ */
+val_t sx_integrate(val_t expr, val_t var);                   /* antiderivative ∫ ... dx */
+val_t sx_simplify(val_t expr);                               /* algebraic simplification */
+val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=val */
+bool  sx_equal(val_t a, val_t b);                            /* structural equality */
+bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */
 
 /* ---- Display ---- */
 void  sx_write(val_t expr, val_t port);
@@ -99,5 +165,6 @@ void  sx_write(val_t expr, val_t port);
 /* Interned operator symbols (available after symbolic_init) */
 extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
 extern val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
+extern val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
 
 #endif /* CURRY_SYMBOLIC_H */

@@ -446,6 +446,16 @@ val_t num_div(val_t a, val_t b) {
         scm_raise(V_FALSE, "cannot divide by a quantum value");
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_div(a, b);
+    /* Complex division: (a+bi)/(c+di) = ((ac+bd)+(bc-ad)i)/(c²+d²) */
+    if (vis_complex(a) || vis_complex(b)) {
+        val_t ar = vis_complex(a) ? as_cpx(a)->real : a, ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
+        val_t br = vis_complex(b) ? as_cpx(b)->real : b, bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
+        val_t denom = num_add(num_mul(br, br), num_mul(bi, bi));
+        return num_make_complex(
+            num_div(num_add(num_mul(ar, br), num_mul(ai, bi)), denom),
+            num_div(num_sub(num_mul(ai, br), num_mul(ar, bi)), denom)
+        );
+    }
     if (vis_flonum(a) || vis_flonum(b))
         return num_make_float(num_to_double(a) / num_to_double(b));
     /* Exact division -> rational */
@@ -604,15 +614,45 @@ val_t num_round(val_t v) {
 val_t num_expt(val_t base, val_t exp) {
     if (vis_symbolic(base) || vis_symbolic(exp)) return sx_expt(base, exp);
     if (vis_surreal(base)) return sur_expt(base, exp);
-    if (vis_exact(base) && vis_fixnum(exp)) {
+    /* Integer/rational base ^ fixnum exponent: use GMP for efficiency */
+    if ((vis_fixnum(base) || vis_bignum(base) || vis_rational(base)) && vis_fixnum(exp)) {
         long e = vunfix(exp);
         if (e == 0) return vfix(1);
-        if (e > 0 && vis_fixnum(base)) {
-            mpz_t z; mpz_init(z);
-            mpz_set_si(z, vunfix(base));
-            mpz_pow_ui(z, z, (unsigned long)e);
-            val_t r = make_big_from_mpz(z); mpz_clear(z); return r;
+        if (e == 1) return base;
+        if (e > 0) {
+            if (vis_fixnum(base)) {
+                mpz_t z; mpz_init(z);
+                mpz_set_si(z, vunfix(base));
+                mpz_pow_ui(z, z, (unsigned long)e);
+                val_t r = make_big_from_mpz(z); mpz_clear(z); return r;
+            }
+            if (vis_bignum(base)) {
+                mpz_t z; mpz_init(z);
+                mpz_pow_ui(z, as_big(base)->z, (unsigned long)e);
+                val_t r = make_big_from_mpz(z); mpz_clear(z); return r;
+            }
+            /* vis_rational */
+            mpz_t n, d; mpz_init(n); mpz_init(d);
+            mpz_pow_ui(n, mpq_numref(as_rat(base)->q), (unsigned long)e);
+            mpz_pow_ui(d, mpq_denref(as_rat(base)->q), (unsigned long)e);
+            val_t r = num_make_rational(make_big_from_mpz(n), make_big_from_mpz(d));
+            mpz_clear(n); mpz_clear(d); return r;
         }
+        /* e < 0: b^-n = 1 / b^n */
+        return num_div(vfix(1), num_expt(base, vfix(-e)));
+    }
+    /* Any numeric base ^ fixnum exponent: repeated squaring via num_mul */
+    if (vis_fixnum(exp) && !vis_surreal(base) && !vis_symbolic(base)) {
+        long e = vunfix(exp);
+        if (e == 0) return vfix(1);
+        if (e == 1) return base;
+        if (e < 0) return num_div(vfix(1), num_expt(base, vfix(-e)));
+        val_t result = vfix(1), b = base;
+        for (long n = e; n > 0; n >>= 1) {
+            if (n & 1) result = num_mul(result, b);
+            if (n > 1) b = num_mul(b, b);
+        }
+        return result;
     }
     return num_make_float(pow(num_to_double(base), num_to_double(exp)));
 }
@@ -698,8 +738,14 @@ val_t num_bitlen(val_t a) {
 }
 
 /* ---- Complex ---- */
-val_t num_real_part(val_t v) { return vis_complex(v) ? as_cpx(v)->real : v; }
-val_t num_imag_part(val_t v) { return vis_complex(v) ? as_cpx(v)->imag : vfix(0); }
+val_t num_real_part(val_t v) {
+    if (vis_symbolic(v)) return sx_real(v);
+    return vis_complex(v) ? as_cpx(v)->real : v;
+}
+val_t num_imag_part(val_t v) {
+    if (vis_symbolic(v)) return sx_imag(v);
+    return vis_complex(v) ? as_cpx(v)->imag : vfix(0);
+}
 val_t num_magnitude(val_t v) {
     if (!vis_complex(v)) return num_abs(v);
     double r = num_to_double(as_cpx(v)->real), i = num_to_double(as_cpx(v)->imag);
@@ -710,6 +756,7 @@ val_t num_angle(val_t v) {
     return num_make_float(atan2(num_to_double(as_cpx(v)->imag), num_to_double(as_cpx(v)->real)));
 }
 val_t num_conjugate(val_t v) {
+    if (vis_symbolic(v)) return sx_conj(v);
     if (!vis_complex(v)) return v;
     return num_make_complex(as_cpx(v)->real, num_neg(as_cpx(v)->imag));
 }

@@ -49,7 +49,7 @@ All numeric operations propagate through symbolic values automatically. You do n
 Nested expressions are built automatically:
 
 ```scheme
-(symbolic x)
+(symbolic m v)
 (define ke (* 1/2 m (expt v 2)))   ; kinetic energy
 ke   ; => (* 1/2 m (expt v 2))
 ```
@@ -76,7 +76,7 @@ ke   ; => (* 1/2 m (expt v 2))
 (simplify '(* (* a b) c))     ; => (* a b c)
 ```
 
-`simplify` is called automatically by `∂` and `substitute` on their results.
+`simplify` is called automatically by `∂`, `∫`, and `substitute` on their results.
 
 ## Symbolic differentiation
 
@@ -110,6 +110,9 @@ The `∂` character is U+2202 PARTIAL DIFFERENTIAL (entered directly or via an e
 | `∂(log u)/∂x` | `∂u/∂x / u` |
 | `∂(sqrt u)/∂x` | `∂u/∂x / (2 sqrt(u))` |
 | `∂(abs u)/∂x` | `sgn(u) · ∂u/∂x` |
+| `∂(conj f)/∂x` | `conj(∂f/∂x)` (x real) |
+| `∂(Re f)/∂x` | `Re(∂f/∂x)` (x real) |
+| `∂(Im f)/∂x` | `Im(∂f/∂x)` (x real) |
 
 For operators not in the table, `∂` returns the unevaluated form `(∂ expr var)`.
 
@@ -126,7 +129,7 @@ For operators not in the table, `∂` returns the unevaluated form `(∂ expr va
 
 ; Kinetic energy — derivative with respect to velocity
 (symbolic m v)
-(∂ (* 1/2 m (expt v 2)) v)   ; => (* m v)   (= momentum!)
+(∂ (* 1/2 m (expt v 2)) v)   ; => (* m v)   (= momentum)
 
 ; Chain rule
 (∂ (sin (* 2 x)) x)       ; => (* 2 (cos (* 2 x)))
@@ -159,7 +162,73 @@ Coulomb potential energy U = k·q₁·q₂/r, force F = −∂U/∂r:
 F   ; => (/ (* k q1 q2) (expt r 2))   (Coulomb's law)
 ```
 
-## Substitution
+## Symbolic integration
+
+`(∫ expr var)` returns the antiderivative of `expr` with respect to `var`, without a constant of integration. The `∫` character is U+222B INTEGRAL. The ASCII alias is `integrate`:
+
+```scheme
+(∫ expr var)
+(integrate expr var)    ; same thing
+```
+
+Definite integrals take two extra arguments for the bounds:
+
+```scheme
+(∫ expr var a b)        ; evaluates F(b) − F(a) where F = antiderivative
+```
+
+The bounds `a` and `b` may be any numeric type: fixnum, bignum, rational, flonum, or complex.
+
+### Rules implemented
+
+| Pattern | Antiderivative |
+|---------|---------------|
+| constant `c` | `c·x` |
+| `x` | `x²/2` |
+| `(expt x n)` n ≠ −1 | `x^(n+1)/(n+1)` |
+| `(expt x -1)` or `(/ 1 x)` | `ln\|x\|` |
+| `(expt (+ (* a x) b) n)` n ≠ −1 | `(ax+b)^(n+1) / (a(n+1))` |
+| `(expt (+ (* a x) b) -1)` | `ln\|ax+b\| / a` |
+| `(sin x)` | `-(cos x)` |
+| `(cos x)` | `sin x` |
+| `(tan x)` | `-(log(cos x))` |
+| `(exp x)` | `exp x` |
+| `(log x)` | `x·log(x) − x` |
+| `(sqrt x)` | `(2/3)·x^(3/2)` |
+| `k·f(x)` | `k·∫f(x)dx` |
+| `f(x) + g(x) + ...` | `∫f + ∫g + ...` |
+| `conj(f(x))` | `conj(∫f(x)dx)` |
+| `Re(f(x))` | `Re(∫f(x)dx)` |
+| `Im(f(x))` | `Im(∫f(x)dx)` |
+
+Unknown forms leave an unevaluated `(∫ expr var)` node.
+
+### Examples
+
+```scheme
+(symbolic x)
+
+(∫ (expt x 2) x)          ; => (/ (expt x 3) 3)
+(∫ (sin x) x)             ; => (- (cos x))
+(∫ (exp x) x)             ; => (exp x)
+(∫ (/ 1 x) x)             ; => (log x)
+(∫ (cos (* 3 x)) x)       ; => (/ (sin (* 3 x)) 3)
+
+; Definite integral — numeric result
+(∫ (expt x 2) x 0 1)      ; => 1/3
+(∫ (sin x) x 0 3.14159)   ; => ~2.0
+
+; Works with complex bounds
+(∫ (* 2 x) x 0 1+i)       ; => (+ -1 (* 2 i))  [= (1+i)² - 0²]
+
+; Roundtrip: ∂(∫f)/∂x = f
+(symbolic x)
+(define f (* 3 (expt x 2)))
+(define F (∫ f x))         ; F = x³
+(∂ F x)                    ; => (* 3 (expt x 2))   ✓
+```
+
+## Substitution and numeric evaluation
 
 `(substitute expr var val)` replaces all occurrences of `var` in `expr` with `val`, then simplifies. `val` may be a number or another symbolic expression.
 
@@ -175,6 +244,157 @@ F   ; => (/ (* k q1 q2) (expt r 2))   (Coulomb's law)
 (substitute (* x x) x (+ y 1))      ; => (* (+ y 1) (+ y 1))
 ```
 
+To evaluate a symbolic expression at a numeric point, convert it to a procedure:
+
+```scheme
+(symbolic x)
+(define expr (+ (expt x 3) (* -2 x) 1))
+(define (eval-at v) (substitute expr x v))
+
+(eval-at 0)      ; => 1
+(eval-at 2)      ; => 5
+(eval-at -1)     ; => 4
+```
+
+## Complex operators
+
+The symbolic system understands complex conjugates and real/imaginary part extraction as first-class operators. When the argument is a concrete number the result is numeric; when symbolic, a symbolic expression tree is returned.
+
+```scheme
+(conj expr)           ; complex conjugate — also (conjugate expr)
+(real-part expr)      ; Re(expr)
+(imag-part expr)      ; Im(expr)
+```
+
+When `expr` is symbolic, these build expression nodes:
+
+```scheme
+(symbolic z)
+(conj z)              ; => (conj z)
+(real-part z)         ; => (real-part z)
+(imag-part z)         ; => (imag-part z)
+(conj (+ z 1))        ; => (conj (+ z 1))
+(real-part (* 2 z))   ; => (real-part (* 2 z))
+```
+
+### Simplification identities
+
+The simplifier automatically applies these:
+
+| Input | Simplified |
+|-------|-----------|
+| `(conj (conj f))` | `f` |
+| `(conj (real-part f))` | `(real-part f)` |
+| `(conj (imag-part f))` | `(imag-part f)` |
+| `(real-part (conj f))` | `(real-part f)` |
+| `(real-part (real-part f))` | `(real-part f)` |
+| `(real-part (imag-part f))` | `(imag-part f)` |
+| `(imag-part (conj f))` | `(- (imag-part f))` |
+| `(imag-part (real-part f))` | `0` |
+| `(imag-part (imag-part f))` | `0` |
+
+### Differentiation of complex operators
+
+When the variable of differentiation is a real variable `x`:
+
+```scheme
+(symbolic x)
+(define f (sin x))
+
+(∂ (conj f) x)        ; => (conj (cos x))        — conj passes through ∂
+(∂ (real-part f) x)   ; => (real-part (cos x))
+(∂ (imag-part f) x)   ; => (imag-part (cos x))
+```
+
+Integration obeys the same rule — `conj`, `real-part`, and `imag-part` pass through `∫`.
+
+## Wirtinger calculus
+
+Standard calculus treats only real variables. For complex analysis you need the **Wirtinger derivatives** ∂/∂z and ∂/∂z̄, which treat `z` and `conj(z)` as independent:
+
+```scheme
+(wirtinger-d    expr z)   ; ∂/∂z
+(wirtinger-dbar expr z)   ; ∂/∂z̄
+```
+
+### Key rules
+
+| Rule | Result |
+|------|--------|
+| `∂z/∂z` | `1` |
+| `∂conj(z)/∂z` | `0` |
+| `∂z/∂z̄` | `0` |
+| `∂conj(z)/∂z̄` | `1` |
+| `∂conj(f)/∂z` | `conj(∂f/∂z̄)` — the cross rule |
+| `∂Re(f)/∂z` | `½(∂f/∂z + conj(∂f/∂z̄))` |
+| `∂Im(f)/∂z` | `(∂f/∂z − conj(∂f/∂z̄))/(2i)` |
+
+All standard arithmetic and holomorphic transcendentals follow the chain rule. A function is holomorphic iff `(wirtinger-dbar f z)` simplifies to `0`.
+
+### Holomorphicity test
+
+```scheme
+(symbolic z)
+
+; z² is holomorphic
+(wirtinger-dbar (expt z 2) z)   ; => 0   ✓
+
+; conj(z) is anti-holomorphic
+(wirtinger-dbar (conj z) z)     ; => 0   — ∂conj(z)/∂z̄ = 1 ≠ 0 means ∂/∂z̄ ≠ 0
+(wirtinger-d    (conj z) z)     ; => 0   — holomorphic part is 0
+
+; |z|² = z·conj(z) is not holomorphic
+(wirtinger-dbar (* z (conj z)) z)   ; => z   (non-zero ⟹ not holomorphic)
+
+; exp(z) is holomorphic
+(wirtinger-dbar (exp z) z)      ; => 0   ✓
+
+; Holomorphic derivative equals ordinary derivative for holomorphic functions
+(wirtinger-d (expt z 3) z)      ; => (* 3 (expt z 2))
+```
+
+### Cauchy-Riemann equations
+
+For a function f(z) = u(x,y) + i·v(x,y) written in terms of real part `u` and imaginary part `v`, the Wirtinger approach gives:
+
+```scheme
+(symbolic z)
+(define f (expt z 2))   ; f(z) = z² = (x²-y²) + 2xyi
+
+; ∂f/∂z̄ = 0 ⟺ Cauchy-Riemann conditions hold
+(wirtinger-dbar f z)    ; => 0   — z² is holomorphic ✓
+```
+
+## Auto-differentiation
+
+`(auto-diff f x)` evaluates `f(x + ε)` using dual-number surreals and extracts the ε coefficient, which equals f′(x) exactly (no finite-difference approximation error). It works for any algebraic lambda:
+
+```scheme
+(auto-diff (lambda (x) (* x x)) 3)            ; => 6    [2x at x=3]
+(auto-diff (lambda (x) (expt x 3)) 4)         ; => 48   [3x² at x=4]
+(auto-diff (lambda (t) (+ (* t t) t)) 2)      ; => 5    [2t+1 at t=2]
+(auto-diff (lambda (x) (/ 1 x)) 2)            ; => -1/4 [−1/x² at x=2]
+```
+
+Note: C-level primitives such as `sin`, `cos`, and `exp` do not propagate surreals. For transcendental derivatives use symbolic differentiation instead.
+
+### Combining auto-diff and symbolic CAS
+
+You can use symbolic differentiation to produce a derivative expression, then compile it to a fast numeric lambda:
+
+```scheme
+(symbolic x)
+(define f-expr (+ (expt x 4) (* -3 (expt x 2)) 1))
+(define df-expr (∂ f-expr x))   ; => (+ (* 4 (expt x 3)) (* -6 x))
+
+; Compile to a lambda for fast numeric evaluation
+(define (f  xv) (substitute f-expr  x xv))
+(define (df xv) (substitute df-expr x xv))
+
+(f  2)    ; => 5
+(df 2)    ; => 20   [4x³ − 6x at x=2]
+```
+
 ## Printing symbolic values
 
 Symbolic expressions display in standard Scheme prefix notation:
@@ -184,6 +404,7 @@ Symbolic expressions display in standard Scheme prefix notation:
 (display (∂ (* x x) x))     ; prints: (* 2 x)
 (display (∂ (sin x) x))     ; prints: (cos x)
 (display (∂ (/ 1 x) x))     ; prints: (/ -1 (expt x 2))
+(display (∫ (expt x 2) x))  ; prints: (/ (expt x 3) 3)
 ```
 
 `write` and `display` both use prefix notation. Negation is shown as `(- x)` rather than `(neg x)`.
@@ -199,8 +420,17 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(sym-var-name v)` | Variable name as string |
 | `(∂ expr var)` | Differentiate expr w.r.t. var |
 | `(sym-diff expr var)` | ASCII alias for ∂ |
+| `(∫ expr var)` | Indefinite integral of expr w.r.t. var |
+| `(∫ expr var a b)` | Definite integral from a to b |
+| `(integrate expr var)` | ASCII alias for ∫ |
 | `(simplify expr)` | Algebraic simplification |
 | `(substitute expr var val)` | Replace var with val |
+| `(conj expr)` / `(conjugate expr)` | Complex conjugate |
+| `(real-part expr)` | Real part (symbolic-aware) |
+| `(imag-part expr)` | Imaginary part (symbolic-aware) |
+| `(wirtinger-d expr z)` | Wirtinger ∂/∂z |
+| `(wirtinger-dbar expr z)` | Wirtinger ∂/∂z̄ |
+| `(auto-diff f x)` | Automatic differentiation at point x |
 
 All standard numeric operators (`+` `-` `*` `/` `expt` `sqrt` `sin` `cos` `tan` `exp` `log` `abs`) lift automatically over symbolic values.
 
@@ -216,3 +446,26 @@ The symbolic system combines naturally with the fractional-calculus and dimensio
 (simplify laplacian-1d)
 ; => symbolic expression for the radial Laplacian in D dimensions
 ```
+
+## Graphing with Qt6
+
+The symbolic CAS pairs naturally with the Qt6 module for interactive visualization. The pattern is:
+
+1. Declare a symbolic variable and build expressions for f, f′, and ∫f.
+2. Compile each expression to a numeric lambda using `substitute`.
+3. In the `canvas-on-draw!` callback, sample the lambda across the visible x range and connect the samples with `gfx-draw-line!`.
+4. Use sidebar sliders to adjust the view range and let `canvas-redraw!` trigger a repaint.
+
+See `examples/symbolic-grapher.scm` for a complete runnable example.
+
+```bash
+./build/curry examples/symbolic-grapher.scm
+```
+
+The grapher displays:
+- The selected function f(x) in white
+- Its symbolic derivative f′(x) in cyan
+- Its symbolic antiderivative F(x) in orange
+- The symbolic expressions for f′ and F in sidebar labels
+- Sliders for the x range and y scale
+- A dropdown to switch between preset functions

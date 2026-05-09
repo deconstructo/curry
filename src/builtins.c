@@ -971,6 +971,26 @@ static val_t prim_sx_simplify(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_simplify(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_substitute(av[0], av[1], av[2]); }
+static val_t prim_sx_integrate(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t antideriv = sx_integrate(av[0], av[1]);
+    if (ac == 4) {
+        val_t Fa = sx_substitute(antideriv, av[1], av[2]);
+        val_t Fb = sx_substitute(antideriv, av[1], av[3]);
+        return sx_sub(Fb, Fa);
+    }
+    return antideriv;
+}
+static val_t prim_conjugate(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return num_conjugate(av[0]); }
+static val_t prim_sx_real(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return num_real_part(av[0]); }
+static val_t prim_sx_imag(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return num_imag_part(av[0]); }
+static val_t prim_wirtinger_d(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_wirtinger(av[0], av[1], false); }
+static val_t prim_wirtinger_dbar(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_wirtinger(av[0], av[1], true); }
 static val_t prim_sym_var(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_symbol(av[0])) scm_raise(V_FALSE, "sym-var: argument must be a symbol");
@@ -1330,8 +1350,14 @@ void builtins_register(val_t env) {
 
     /* ---- Symbolic / CAS and Quantum ---- */
     DEF("∂",              prim_sx_diff,         2, 2);
+    DEF("∫",              prim_sx_integrate,    2, 4);
+    DEF("integrate",      prim_sx_integrate,    2, 4);
+    DEF("wirtinger-d",    prim_wirtinger_d,     2, 2);
+    DEF("wirtinger-dbar", prim_wirtinger_dbar,  2, 2);
     DEF("simplify",       prim_sx_simplify,     1, 1);
     DEF("substitute",     prim_sx_substitute,   3, 3);
+    DEF("conjugate",      prim_conjugate,       1, 1);
+    DEF("conj",           prim_conjugate,       1, 1);
     DEF("sym-var",        prim_sym_var,         1, 1);
     DEF("sym-var?",       prim_sym_var_p,       1, 1);
     DEF("sym-expr?",      prim_sym_expr_p,      1, 1);

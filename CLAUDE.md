@@ -70,7 +70,7 @@ cmake --build build && ctest --test-dir build -V
 ./build/curry -e '(display (+ 1 2)) (newline)'
 ```
 
-The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS conformance), `numeric_ext` (Clifford algebra, CAS, surreal, auto-diff), and `actors` (concurrency primitives).
+The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS conformance), `numeric_ext` (Clifford algebra, symbolic CAS — differentiation/integration/Wirtinger/complex operators, surreal numbers, auto-diff, numeric tower exactness), and `actors` (concurrency primitives).
 
 ## CLI flags
 
@@ -125,9 +125,55 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 
 ### Symbolic CAS (`src/symbolic.h`, `src/symbolic.c`)
 
-`T_SYMVAR` and `T_SYMEXPR` extend the numeric tower. Declare variables with `(symbolic x y)` or `(sym-var 'x)`. Core operations: `(∂ expr var)` (differentiation), `(simplify expr)`, `(substitute expr var val)`. Auto-differentiation via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient.
+`T_SYMVAR` and `T_SYMEXPR` extend the numeric tower. When any arithmetic operand is symbolic the result is a symbolic expression tree rather than an error.
 
-Operator symbols (`SX_ADD`, `SX_MUL`, etc.) are interned at `symbolic_init()` time.
+**Variables and expressions**
+
+```scheme
+(sym-var 'x)               ; create symbolic variable
+(symbolic x y)             ; bind x, y as symbolic unknowns in scope
+(sym-var? v)               ; predicate
+(sym-expr? v)              ; predicate
+(symbolic? v)              ; true for both T_SYMVAR and T_SYMEXPR
+(sym-var-name v)           ; recover the symbol name
+(substitute expr var val)  ; replace var with val and simplify
+(simplify expr)            ; algebraic simplification pass
+```
+
+**Differentiation** — `(∂ expr var)` where `var` is a sym-var:
+
+Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs. Unknown operators leave an unevaluated `(∂ expr var)` node.
+
+**Integration** — `(∫ expr var)` or `(integrate expr var)`:
+
+Returns the antiderivative (no constant of integration). Definite form: `(∫ expr var a b)` computes `F(b) − F(a)`. Works with all numeric tower types for bounds: fixnum, bignum, rational, flonum, complex.
+
+Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt. Unknown forms leave an unevaluated `(∫ expr var)` node.
+
+**Complex operators** — symbolic-aware; return expression trees on sym-vars:
+
+```scheme
+(conj expr)        ; complex conjugate — also (conjugate expr)
+(real-part expr)   ; Re(expr) — returns symbolic when expr is symbolic
+(imag-part expr)   ; Im(expr) — returns symbolic when expr is symbolic
+```
+
+Simplification identities: `conj(conj(f)) = f`, `conj(real(f)) = real(f)`, `imag(real(f)) = 0`, `imag(conj(f)) = -imag(f)`, etc.
+
+For a real variable `x`: `∂conj(f)/∂x = conj(∂f/∂x)`, `∫conj(f) dx = conj(∫f dx)` (same for real-part/imag-part).
+
+**Wirtinger calculus** — treats `z` and `z̄ = conj(z)` as independent variables:
+
+```scheme
+(wirtinger-d    expr z)   ; ∂/∂z:  ∂z/∂z = 1,  ∂conj(z)/∂z = 0
+(wirtinger-dbar expr z)   ; ∂/∂z̄: ∂z/∂z̄ = 0, ∂conj(z)/∂z̄ = 1
+```
+
+Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z + conj(∂f/∂z̄))`, `∂Im(f)/∂z = (∂f/∂z − conj(∂f/∂z̄))/(2i)`. Arithmetic and holomorphic transcendentals follow the standard chain rule. A function is holomorphic iff `(wirtinger-dbar f z)` simplifies to 0.
+
+**Auto-differentiation** via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient = f′(x). Works for algebraic lambdas; C-level primitives (sin, cos, exp) do not propagate surreals.
+
+Operator symbols (`SX_ADD`, `SX_MUL`, `SX_CONJ`, `SX_REAL`, `SX_IMAG`, `SX_INTEGRATE`, etc.) are interned at `symbolic_init()` time. `equal?` correctly compares symbolic expressions structurally and complex numbers by value.
 
 ### Surreal numbers (`src/surreal.h`, `src/surreal.c`)
 
