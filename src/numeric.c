@@ -184,7 +184,17 @@ bool num_is_zero(val_t v) {
     if (vis_flonum(v))   return vfloat(v) == 0.0;
     if (vis_bignum(v))   return mpz_sgn(as_big(v)->z) == 0;
     if (vis_rational(v)) return mpq_sgn(as_rat(v)->q) == 0;
+    if (vis_complex(v))  return num_is_zero(as_cpx(v)->real) && num_is_zero(as_cpx(v)->imag);
     if (vis_surreal(v))  return sur_is_zero(v);
+    return false;
+}
+
+bool num_is_one(val_t v) {
+    if (vis_fixnum(v))   return vunfix(v) == 1;
+    if (vis_flonum(v))   return vfloat(v) == 1.0;
+    if (vis_bignum(v))   return mpz_cmp_si(as_big(v)->z, 1) == 0;
+    if (vis_rational(v)) return mpq_cmp_si(as_rat(v)->q, 1, 1) == 0;
+    if (vis_complex(v))  return num_is_one(as_cpx(v)->real) && num_is_zero(as_cpx(v)->imag);
     return false;
 }
 

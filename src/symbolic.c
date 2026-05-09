@@ -87,21 +87,8 @@ bool sx_equal(val_t a, val_t b) {
 val_t sx_simplify(val_t expr);
 
 static bool is_zero(val_t v) { return vis_number(v) && num_is_zero(v); }
-static bool is_one(val_t v)  { return vis_number(v) && !vis_symbolic(v) && num_eq(v, vfix(1)); }
+static bool is_one(val_t v)  { return vis_number(v) && !vis_symbolic(v) && num_is_one(v); }
 
-/* Flatten nested same-op into a flat list; returns count */
-static int flatten_into(val_t op, val_t expr, val_t *out, int max) {
-    if (!vis_symexpr(expr) || as_symexpr(expr)->op != op) {
-        if (max > 0) out[0] = expr;
-        return 1;
-    }
-    SymExpr *se = as_symexpr(expr);
-    int total = 0;
-    for (uint32_t i = 0; i < se->nargs; i++) {
-        total += flatten_into(op, se->args[i], out + total, max - total);
-    }
-    return total;
-}
 
 val_t sx_simplify(val_t expr) {
     if (!vis_symexpr(expr)) return expr;
@@ -211,7 +198,7 @@ val_t sx_simplify(val_t expr) {
             return sx_make_expr(SX_MUL, nsym, nsyms);
         }
         /* coeff == -1: return neg */
-        if (vis_number(coeff) && num_eq(coeff, vfix(-1))) {
+        if (vis_number(coeff) && !vis_complex(coeff) && num_eq(coeff, vfix(-1))) {
             val_t inner = nsym == 1 ? nsyms[0] : sx_make_expr(SX_MUL, nsym, nsyms);
             return sx_neg(inner);
         }
@@ -228,7 +215,6 @@ val_t sx_simplify(val_t expr) {
         if (num_count == 2) return num_div(a, b);
         if (is_zero(a)) return vfix(0);
         if (is_one(b)) return a;
-        if (vis_number(a) && num_eq(a, vfix(-1))) return sx_neg(b);
     }
 
     /* ---- EXPT ---- */

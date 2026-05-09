@@ -49,6 +49,7 @@ val_t      num_inexact(val_t v);     /* exact -> inexact (flonum) */
 
 /* ---- Predicates ---- */
 bool num_is_zero(val_t v);
+bool num_is_one(val_t v);
 bool num_is_positive(val_t v);
 bool num_is_negative(val_t v);
 bool num_is_nan(val_t v);

@@ -8,11 +8,49 @@
  * a symbolic argument (T_SYMVAR or T_SYMEXPR), instead of erroring it
  * returns a symbolic expression representing the unevaluated computation.
  *
- *   (symbolic x y)      ; bind x, y as symbolic unknowns
- *   (+ x 2)             ; returns symbolic expr (+ x 2)
- *   (* x x)             ; returns (expt x 2) after simplification
- *   (∂ (* x x) x)       ; returns (* 2 x)
- *   (∂ (* 1/2 m (expt v 2)) v)  ; returns (* m v)
+ * --- Quick reference ---
+ *
+ *   (symbolic x y)               ; bind x, y as symbolic unknowns in scope
+ *   (sym-var 'x)                 ; create symbolic variable from a quoted symbol
+ *   (+ x 2)                      ; returns symbolic expr (+ x 2)
+ *   (* x x)                      ; stays as (* x x); no automatic expt folding
+ *   (∂ (* x x) x)                ; returns (* 2 x)
+ *   (∂ (* 1/2 m (expt v 2)) v)   ; returns (* m v)
+ *   (simplify expr)              ; algebraic simplification pass
+ *   (substitute expr x 3)        ; replace variable x with value 3
+ *
+ * --- Simplification rules applied by sx_simplify ---
+ *
+ *   ADD/MUL: nested same-op trees are flattened before folding, e.g.
+ *     (+ (+ a b) c)  →  (+ a b c)
+ *   ADD: numeric terms are accumulated; zero terms dropped.
+ *   MUL: numeric factors are accumulated; zero factor collapses to 0;
+ *        coefficient 1 is dropped; coefficient -1 becomes (neg ...).
+ *        Note: the -1 → neg optimisation is intentionally skipped for
+ *        complex coefficients to preserve type information.
+ *   SUB/NEG: constant folding; (- 0 x) → (neg x); (neg (neg x)) → x.
+ *   DIV: 0/x → 0; x/1 → x; constant folding.
+ *   EXPT: x^0 → 1; x^1 → x; 0^n → 0; 1^n → 1; constant folding.
+ *   SQRT/transcendentals: evaluated directly when the argument is numeric.
+ *
+ *   Zero and one detection uses num_is_zero / num_is_one, which cover all
+ *   tower levels (fixnum, bignum, rational, flonum, complex).
+ *
+ * --- Differentiation rules applied by sx_diff ---
+ *
+ *   Linearity:  ∂/∂x (f+g+...)  = ∂f/∂x + ∂g/∂x + ...
+ *   Product:    ∂/∂x (f·g·...)  = Σᵢ product with fᵢ replaced by ∂fᵢ/∂x
+ *   Quotient:   ∂/∂x (f/g)      = (f'g − fg') / g²
+ *   Power:      ∂/∂x (f^n)      = n·f^(n−1)·f'      (n numeric)
+ *               ∂/∂x (f^g)      = f^g·(g'·ln f + g·f'/f)  (general)
+ *   Chain rule: ∂/∂x sin(f)  = cos(f)·f'
+ *               ∂/∂x cos(f)  = −sin(f)·f'
+ *               ∂/∂x tan(f)  = f' / cos²(f)
+ *               ∂/∂x exp(f)  = exp(f)·f'
+ *               ∂/∂x log(f)  = f'/f
+ *               ∂/∂x √f      = f' / (2·√f)
+ *               ∂/∂x |f|     = f·f' / |f|  (undefined at f=0)
+ *   Unknown ops: left as unevaluated (∂ expr var) notation.
  *
  * Symbolic expressions are printed in standard Scheme prefix notation and
  * are valid Scheme code when all variables are defined.
