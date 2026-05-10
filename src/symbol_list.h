@@ -60,6 +60,7 @@ SYM(S_ONLY,               "only")
 SYM(S_EXCEPT,             "except")
 SYM(S_RENAME,             "rename")
 SYM(S_PREFIX,             "prefix")
+SYM(S_DEFINED_P,          "defined?")
 
 /* Syntax helpers */
 SYM(S_ELSE,               "else")

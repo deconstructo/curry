@@ -883,6 +883,14 @@ tail:
         return V_VOID;
     }
 
+    if (op == S_DEFINED_P) {
+        /* (defined? sym) — #t if sym is bound in the current environment,
+         * #f otherwise.  Special form so the symbol is not evaluated. */
+        if (!vis_pair(rest) || !vis_symbol(vcar(rest)))
+            scm_raise(V_FALSE, "defined?: expected a symbol");
+        return !vis_false(env_lookup_or_false(env, vcar(rest))) ? V_TRUE : V_FALSE;
+    }
+
     if (op == S_DEFINE_LIBRARY) {
         extern val_t modules_define_library(val_t form, val_t env);
         return modules_define_library(expr, env);

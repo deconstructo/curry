@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #ifdef __linux__
 #  include <unistd.h>
 #  include <limits.h>
@@ -113,8 +114,12 @@ void curry_define_val(CurryVM *vm, const char *name, val_t value) {
 /* ---- Load a C extension .so ---- */
 
 static Module *load_c_module(val_t name, const char *so_path) {
+    /* Probe silently first — missing file is normal (we fall back to .scm). */
+    if (access(so_path, F_OK) != 0) return NULL;
+
     void *handle = dlopen(so_path, RTLD_LAZY | RTLD_LOCAL);
     if (!handle) {
+        /* File exists but failed to load — that IS worth reporting. */
         fprintf(stderr, "modules: dlopen failed: %s\n", dlerror());
         return NULL;
     }

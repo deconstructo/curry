@@ -36,6 +36,7 @@ extern val_t
     S_VALUES, S_CALL_WITH_VALUES, S_CALL_CC, S_CALL_WITH_CC,
     /* module system */
     S_DEFINE_LIBRARY, S_IMPORT, S_EXPORT, S_ONLY, S_EXCEPT, S_RENAME, S_PREFIX,
+    S_DEFINED_P,
     /* syntax helpers */
     S_ELSE, S_ARROW, S_DOT, S_REST,
     /* actor primitives */
