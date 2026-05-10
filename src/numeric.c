@@ -660,6 +660,11 @@ val_t num_expt(val_t base, val_t exp) {
 val_t num_sqrt(val_t v) {
     if (vis_symbolic(v)) return sx_sqrt(v);
     if (vis_surreal(v))  return sur_expt(v, num_make_rational(vfix(1), vfix(2)));
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        double r = sqrt(sqrt(a*a + b*b)), theta = atan2(b, a) / 2.0;
+        return num_make_complex(num_make_float(r * cos(theta)), num_make_float(r * sin(theta)));
+    }
     if (vis_exact(v)) {
         /* Try exact integer sqrt */
         if (vis_fixnum(v) || vis_bignum(v)) {
@@ -673,18 +678,58 @@ val_t num_sqrt(val_t v) {
             mpz_clear(z); mpz_clear(s);
         }
     }
-    return num_make_float(sqrt(num_to_double(v)));
+    double x = num_to_double(v);
+    if (x < 0.0) /* sqrt of negative real → imaginary result */
+        return num_make_complex(num_make_float(0.0), num_make_float(sqrt(-x)));
+    return num_make_float(sqrt(x));
 }
 
 #define NUM_TRIG(fn) \
     val_t num_##fn(val_t v) { return num_make_float(fn(num_to_double(v))); }
-#define NUM_TRIG_SX(fn) \
-    val_t num_##fn(val_t v) { \
-        if (vis_symbolic(v)) return sx_##fn(v); \
-        return num_make_float(fn(num_to_double(v))); \
-    }
-NUM_TRIG_SX(exp) NUM_TRIG_SX(log) NUM_TRIG_SX(sin) NUM_TRIG_SX(cos) NUM_TRIG_SX(tan)
 NUM_TRIG(asin) NUM_TRIG(acos) NUM_TRIG(atan)
+
+/* Complex-aware transcendentals */
+val_t num_exp(val_t v) {
+    if (vis_symbolic(v)) return sx_exp(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        double ea = exp(a);
+        return num_make_complex(num_make_float(ea * cos(b)), num_make_float(ea * sin(b)));
+    }
+    return num_make_float(exp(num_to_double(v)));
+}
+val_t num_log(val_t v) {
+    if (vis_symbolic(v)) return sx_log(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        return num_make_complex(num_make_float(log(sqrt(a*a + b*b))), num_make_float(atan2(b, a)));
+    }
+    double x = num_to_double(v);
+    if (x < 0) /* log of negative real → complex result */
+        return num_make_complex(num_make_float(log(-x)), num_make_float(M_PI));
+    return num_make_float(log(x));
+}
+val_t num_sin(val_t v) {
+    if (vis_symbolic(v)) return sx_sin(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        return num_make_complex(num_make_float(sin(a)*cosh(b)), num_make_float(cos(a)*sinh(b)));
+    }
+    return num_make_float(sin(num_to_double(v)));
+}
+val_t num_cos(val_t v) {
+    if (vis_symbolic(v)) return sx_cos(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        return num_make_complex(num_make_float(cos(a)*cosh(b)), num_make_float(-sin(a)*sinh(b) + 0.0));
+    }
+    return num_make_float(cos(num_to_double(v)));
+}
+val_t num_tan(val_t v) {
+    if (vis_symbolic(v)) return sx_tan(v);
+    if (vis_complex(v)) return num_div(num_sin(v), num_cos(v));
+    return num_make_float(tan(num_to_double(v)));
+}
 val_t num_atan2(val_t y, val_t x) { return num_make_float(atan2(num_to_double(y), num_to_double(x))); }
 
 /* ---- Bitwise ---- */
