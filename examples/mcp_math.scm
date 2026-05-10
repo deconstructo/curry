@@ -2,6 +2,10 @@
 ;;;
 ;;; Tools:
 ;;;   diff        — symbolic differentiation: (∂ expr var)
+;;;   integrate   — symbolic antiderivative / definite integral: (∫ expr var [a b])
+;;;   frac-diff   — Caputo fractional derivative D^α[expr] wrt var
+;;;   frac-int    — Riemann-Liouville fractional integral I^α[expr] wrt var
+;;;   wirtinger   — Wirtinger derivatives ∂/∂z and ∂/∂z̄ for complex analysis
 ;;;   simplify    — algebraic simplification
 ;;;   substitute  — replace a variable with a value or expression
 ;;;   evaluate    — substitute multiple variables, reduce to a number
@@ -12,11 +16,11 @@
 ;;; Write expressions in standard Scheme notation: (* x x), (expt x 3), (+ x y).
 ;;;
 ;;; Usage:
-;;;   ./build/curry examples/mcp_math.scm
+;;;   ./build-release/curry examples/mcp_math.scm
 ;;;
 ;;; Claude Code config (~/.claude.json):
 ;;;   { "mcpServers": { "curry-math": {
-;;;       "command": "/path/to/build/curry",
+;;;       "command": "/path/to/build-release/curry",
 ;;;       "args":    ["/path/to/examples/mcp_math.scm"] } } }
 
 (import (curry mcp))
@@ -75,6 +79,113 @@ Examples:
     (let* ((expr   (parse-expr (arg args 'expression)))
            (var    (parse-var  (arg args 'variable)))
            (result (simplify (∂ expr var))))
+      (mcp-text (->str result)))))
+
+
+(mcp-tool "integrate"
+  "Compute the symbolic antiderivative of an expression, or a definite integral.
+Indefinite: integrate(expr, var) -> antiderivative F(x) such that dF/dx = f
+Definite:   integrate(expr, var, lo, hi) -> F(hi) - F(lo)
+Pre-declared variables: x y z t u v w a b c n k r s p q
+Examples:
+  integrate(\"(expt x 3)\", \"x\")              -> (/ (expt x 4) 4)
+  integrate(\"(sin x)\", \"x\")                 -> (/ (- (cos x)) 1)
+  integrate(\"(expt x 2)\", \"x\", 0, 3)        -> 9
+  integrate(\"(+ (* 2 x) 1)\", \"x\", -1, 1)   -> 2"
+  '((expression . ((type . "string") (description . "Scheme expression to integrate")))
+    (variable   . ((type . "string") (description . "Integration variable")))
+    (lo         . ((type . "number") (description . "Lower bound for definite integral") (default . "none")))
+    (hi         . ((type . "number") (description . "Upper bound for definite integral") (default . "none"))))
+  (lambda (args)
+    (let* ((expr (parse-expr (arg args 'expression)))
+           (var  (parse-var  (arg args 'variable)))
+           (lo   (arg? args 'lo #f))
+           (hi   (arg? args 'hi #f)))
+      (if (and lo hi)
+          (let* ((anti (∫ expr var))
+                 (Fa   (simplify (substitute anti var lo)))
+                 (Fb   (simplify (substitute anti var hi))))
+            (mcp-text (->str (simplify (- Fb Fa)))))
+          (mcp-text (->str (simplify (∫ expr var))))))))
+
+
+(mcp-tool "frac-diff"
+  "Compute the Caputo fractional derivative D^α[f(x)] of order α with respect to a variable.
+For non-integer α this interpolates smoothly between f (α=0), f' (α=1), f'' (α=2), etc.
+Rules: power law x^n → Γ(n+1)/Γ(n-α+1)·x^(n-α), exponential eigenfunction e^(λx) → λ^α·e^(λx),
+linearity, composition D^α∘D^β = D^(α+β). Constants give 0 (Caputo convention).
+Pre-declared variables: x y z t u v w a b c n k r s p q
+Examples:
+  frac-diff(\"(expt x 2)\", 0.5, \"x\") -> (* 1.50451 (expt x 1.5))
+  frac-diff(\"(exp x)\", 0.5, \"x\")    -> (exp x)    [eigenfunction: 1^0.5 * eˣ]
+  frac-diff(\"(expt x 3)\", 1, \"x\")   -> (* 3 (expt x 2))  [integer α = ordinary d/dx]
+  frac-diff(\"(+ (expt x 2) x)\", 0.5, \"x\") -> sum of two power terms"
+  '((expression . ((type . "string") (description . "Scheme expression")))
+    (alpha      . ((type . "number") (description . "Fractional order α (may be non-integer, 0 ≤ α ≤ 20)")))
+    (variable   . ((type . "string") (description . "Variable to differentiate with respect to"))))
+  (lambda (args)
+    (let* ((expr   (parse-expr (arg args 'expression)))
+           (alpha  (exact->inexact (arg args 'alpha)))
+           (var    (parse-var  (arg args 'variable)))
+           (result (simplify (frac-diff expr alpha var))))
+      (mcp-text (->str result)))))
+
+
+(mcp-tool "frac-int"
+  "Compute the Riemann-Liouville fractional integral I^α[f(x)] of order α.
+For non-integer α this generalises repeated integration: I^1 = ∫, I^2 = ∬, etc.
+Rules: power law x^n → Γ(n+1)/Γ(n+α+1)·x^(n+α), exponential e^(λx) → λ^(-α)·e^(λx),
+linearity, constants c → c·x^α/Γ(α+1).
+Supports definite form: I^α[f](b) - I^α[f](a).
+Pre-declared variables: x y z t u v w a b c n k r s p q
+Examples:
+  frac-int(\"x\", 0.5, \"x\")           -> (* 0.752253 (expt x 1.5))
+  frac-int(\"(expt x 2)\", 0.5, \"x\") -> (* 0.601802 (expt x 2.5))
+  frac-int(\"(exp x)\", 0.5, \"x\")    -> (* 1.0 (exp x))  [λ=1: 1^(-0.5)·eˣ... wait, 1^-0.5=1]
+  frac-int(\"(expt x 2)\", 0.5, \"x\", 0, 1) -> definite value"
+  '((expression . ((type . "string") (description . "Scheme expression")))
+    (alpha      . ((type . "number") (description . "Fractional order α (positive)")))
+    (variable   . ((type . "string") (description . "Integration variable")))
+    (lo         . ((type . "number") (description . "Lower bound for definite form") (default . "none")))
+    (hi         . ((type . "number") (description . "Upper bound for definite form") (default . "none"))))
+  (lambda (args)
+    (let* ((expr  (parse-expr (arg args 'expression)))
+           (alpha (exact->inexact (arg args 'alpha)))
+           (var   (parse-var  (arg args 'variable)))
+           (lo    (arg? args 'lo #f))
+           (hi    (arg? args 'hi #f))
+           (anti  (simplify (frac-int expr alpha var))))
+      (if (and lo hi)
+          (let* ((Fa (simplify (substitute anti var lo)))
+                 (Fb (simplify (substitute anti var hi))))
+            (mcp-text (->str (simplify (- Fb Fa)))))
+          (mcp-text (->str anti))))))
+
+
+(mcp-tool "wirtinger"
+  "Compute Wirtinger derivatives ∂/∂z or ∂/∂z̄ for complex analysis.
+Treats z and conj(z) as independent variables (Wirtinger calculus).
+A function is holomorphic iff its ∂/∂z̄ derivative is zero.
+direction: \"d\" for ∂/∂z (holomorphic part), \"dbar\" for ∂/∂z̄ (anti-holomorphic).
+Rules: ∂z/∂z=1, ∂conj(z)/∂z=0; ∂conj(f)/∂z = conj(∂f/∂z̄); arithmetic chain rule.
+Pre-declared variables: x y z t u v w a b c n k r s p q
+Examples:
+  wirtinger(\"(* z z)\", \"z\", \"d\")           -> (* 2 z)   [holomorphic]
+  wirtinger(\"(expt z 3)\", \"z\", \"d\")        -> (* 3 (expt z 2))
+  wirtinger(\"(conj z)\", \"z\", \"d\")          -> 0        [conj not holomorphic]
+  wirtinger(\"(conj z)\", \"z\", \"dbar\")       -> 1
+  wirtinger(\"(+ (* z z) (conj z))\", \"z\", \"dbar\") -> 1  [non-holomorphic part]"
+  '((expression . ((type . "string") (description . "Scheme expression (may use conj, real-part, imag-part)")))
+    (variable   . ((type . "string") (description . "Complex variable name")))
+    (direction  . ((type . "string") (description . "\"d\" for ∂/∂z, \"dbar\" for ∂/∂z̄"))))
+  (lambda (args)
+    (let* ((expr (parse-expr (arg args 'expression)))
+           (var  (parse-var  (arg args 'variable)))
+           (dir  (arg args 'direction))
+           (result (simplify
+                     (if (equal? dir "dbar")
+                         (wirtinger-dbar expr var)
+                         (wirtinger-d    expr var)))))
       (mcp-text (->str result)))))
 
 
@@ -169,22 +280,36 @@ Examples:
 ;;; ---- Resource ----
 
 (mcp-resource "math://help"
-  "Quick reference: available symbolic variables and expression syntax"
+  "Quick reference: available tools, symbolic variables, and expression syntax"
   (lambda (uri)
     (mcp-text
       "Symbolic variables (pre-declared): x y z t u v w a b c n k r s p q
 
 Expression syntax (standard Scheme):
-  arithmetic : (+ a b)  (* a b)  (- a b)  (/ a b)  (expt a n)
-  constants  : 0  1  1/3  3.14  (write exact fractions as rationals)
-  composition: (+ (* x x) (* 2 x) 1)  means x² + 2x + 1
+  arithmetic  : (+ a b)  (* a b)  (- a b)  (/ a b)  (expt a n)
+  trig/exp    : (sin x)  (cos x)  (tan x)  (exp x)  (log x)  (sqrt x)
+  complex     : (conj z)  (real-part z)  (imag-part z)
+  constants   : 0  1  1/3  3.14  (exact fractions as rationals)
+  composition : (+ (* x x) (* 2 x) 1)  means x² + 2x + 1
 
-Tool examples:
-  diff       : {\"expression\": \"(expt x 3)\",        \"variable\": \"x\"}
-  substitute : {\"expression\": \"(* x x)\",           \"variable\": \"x\",  \"value\": \"(+ y 1)\"}
-  evaluate   : {\"expression\": \"(+ (* x x) y)\",     \"bindings\": \"((x . 3) (y . 4))\"}
-  auto-diff  : {\"function\":   \"(lambda (x) (/ 1 x))\", \"point\": 2.0}
-  taylor     : {\"expression\": \"(/ 1 (- 1 x))\",     \"variable\": \"x\",  \"order\": 5}")))
+Tools:
+  diff        : {\"expression\": \"(expt x 3)\",         \"variable\": \"x\"}
+  integrate   : {\"expression\": \"(expt x 3)\",         \"variable\": \"x\"}
+  integrate   : {\"expression\": \"(expt x 2)\",         \"variable\": \"x\",  \"lo\": 0, \"hi\": 1}
+  frac-diff   : {\"expression\": \"(expt x 2)\",         \"alpha\": 0.5,       \"variable\": \"x\"}
+  frac-int    : {\"expression\": \"x\",                  \"alpha\": 0.5,       \"variable\": \"x\"}
+  wirtinger   : {\"expression\": \"(* z z)\",            \"variable\": \"z\",  \"direction\": \"d\"}
+  substitute  : {\"expression\": \"(* x x)\",            \"variable\": \"x\",  \"value\": \"(+ y 1)\"}
+  evaluate    : {\"expression\": \"(+ (* x x) y)\",      \"bindings\": \"((x . 3) (y . 4))\"}
+  auto-diff   : {\"function\":   \"(lambda (x) (/ 1 x))\", \"point\": 2.0}
+  taylor      : {\"expression\": \"(/ 1 (- 1 x))\",      \"variable\": \"x\",  \"order\": 5}
+
+Fractional calculus notes:
+  D^α[xⁿ] = Γ(n+1)/Γ(n−α+1) · x^(n−α)   (Caputo, constants → 0)
+  D^α[eˡˣ] = λ^α · eˡˣ                    (eigenfunction property)
+  I^α[xⁿ] = Γ(n+1)/Γ(n+α+1) · x^(n+α)
+  Composition: D^α ∘ D^β = D^(α+β)
+  α=0 → identity, α=1 → d/dx, α=2 → d²/dx²")))
 
 
-(mcp-serve "curry-math" "0.7.2")
+(mcp-serve "curry-math" "0.7.3")
