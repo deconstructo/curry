@@ -111,7 +111,7 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
     /* Try complex literal: ends with 'i', e.g. +2i, 3+4i, 3-4i, +i, -i */
     size_t slen = strlen(s);
     if (slen >= 2 && s[slen-1] == 'i') {
-        char *buf = (char *)gc_alloc_atomic(slen);
+        char *buf = (char *)gc_alloc_atomic(slen+1);
         memcpy(buf, s, slen - 1);
         buf[slen - 1] = '\0';
         /* Pure +i / -i */
