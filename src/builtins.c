@@ -1160,6 +1160,156 @@ static val_t prim_surreal_terms(int ac, val_t *av, void *ud) {
     return result;
 }
 
+/* ---- Numerical quadrature (adaptive Gauss-Kronrod G7K15) ---- */
+
+/*
+ * G7K15: 15-point Gauss-Kronrod rule on [-1,1].
+ * The 7 Gauss-Legendre nodes are a subset (even indices 0,2,4,6,8,10,12).
+ * Error estimate = |K15 - G7|.
+ */
+static const double GK_NODES[15] = {
+    -0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
+    -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
+    -0.2077849550078985,  0.0000000000000000,  0.2077849550078985,
+     0.4058451513773972,  0.5860872354676911,  0.7415311855993945,
+     0.8648644233597691,  0.9491079123427585,  0.9914553711208126
+};
+static const double GK_WK[15] = {   /* Kronrod weights */
+    0.02293532201052922, 0.06309209262997856, 0.10479001032225018,
+    0.14065325971552592, 0.16900472663926790, 0.19035057806478541,
+    0.20443294007529889, 0.20948214108472783, 0.20443294007529889,
+    0.19035057806478541, 0.16900472663926790, 0.14065325971552592,
+    0.10479001032225018, 0.06309209262997856, 0.02293532201052922
+};
+static const double GK_WG[7] = {    /* Gauss weights (nodes 1,3,5,7,9,11,13) */
+    0.12948496616886423, 0.27970539148927664, 0.38183005050511894,
+    0.41795918367346939, 0.38183005050511894, 0.27970539148927664,
+    0.12948496616886423
+};
+
+/* Call a Scheme unary function with a C double; return double (NaN on error). */
+static double quad_call(val_t f, double x) {
+    val_t xv  = num_make_float(x);
+    val_t res = apply(f, scm_cons(xv, V_NIL));
+    return vis_number(res) ? num_to_double(res) : NAN;
+}
+
+/* Apply G7K15 on [a,b]; store K15 result and error estimate. */
+static double gk15(val_t f, double a, double b, double *err_out) {
+    double mid = (a + b) / 2.0, hw = (b - a) / 2.0;
+    double fv[15];
+    for (int i = 0; i < 15; i++) fv[i] = quad_call(f, mid + hw * GK_NODES[i]);
+    double K = 0.0, G = 0.0;
+    for (int i = 0; i < 15; i++) K += GK_WK[i] * fv[i];
+    for (int i = 0; i < 7;  i++) G += GK_WG[i] * fv[1 + 2*i];
+    K *= hw; G *= hw;
+    *err_out = fabs(K - G);
+    return K;
+}
+
+/* Stack entry for adaptive subdivision */
+typedef struct { double a, b, val, err; } QInterval;
+
+#define QUAD_STACK_MAX 2048
+
+static val_t prim_quad(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t f   = av[0];
+    double a  = num_to_double(av[1]);
+    double b  = num_to_double(av[2]);
+    double tol = (ac > 3) ? num_to_double(av[3]) : 1e-8;
+
+    QInterval *stk = (QInterval *)gc_alloc(QUAD_STACK_MAX * sizeof(QInterval));
+    int top = 0;
+    double err0;
+    double v0 = gk15(f, a, b, &err0);
+    stk[top++] = (QInterval){a, b, v0, err0};
+
+    double total = 0.0;
+    int evals = 15;
+
+    while (top > 0) {
+        QInterval cur = stk[--top];
+        if (cur.err <= tol * fabs(cur.b - cur.a) / fabs(b - a)
+                || top >= QUAD_STACK_MAX - 2
+                || evals >= 150000) {
+            total += cur.val;
+            continue;
+        }
+        double m = (cur.a + cur.b) / 2.0;
+        double e1, e2;
+        double v1 = gk15(f, cur.a, m, &e1);
+        double v2 = gk15(f, m, cur.b, &e2);
+        evals += 30;
+        stk[top++] = (QInterval){cur.a, m, v1, e1};
+        stk[top++] = (QInterval){m, cur.b, v2, e2};
+    }
+    return num_make_float(total);
+}
+
+/*
+ * quad-frac-diff: Grünwald-Letnikov numerical D^α f(x).
+ * D^α f(x) ≈ h^{-α} Σ_{k=0}^{N} w_k · f(x - k·h)
+ * where h = x/N and w_k = w_{k-1}·(1 - (α+1)/k), w_0 = 1.
+ * Accurate for smooth f on [0,x]; N defaults to 200.
+ */
+static val_t prim_quad_frac_diff(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t f      = av[0];
+    double alpha = num_to_double(av[1]);
+    double x     = num_to_double(av[2]);
+    int    N     = (ac > 3) ? (int)num_to_long(av[3]) : 500;
+    if (N < 2) N = 2;
+    if (N > 10000) N = 10000;
+
+    double h   = x / N;
+    double sum = 0.0;
+    double w   = 1.0;
+    for (int k = 0; k <= N; k++) {
+        sum += w * quad_call(f, x - k * h);
+        w *= (1.0 - (alpha + 1.0) / (k + 1));
+    }
+    return num_make_float(pow(h, -alpha) * sum);
+}
+
+/*
+ * quad-frac-int: Riemann-Liouville fractional integral I^α f(x).
+ * I^α f(x) = (1/Γ(α)) ∫₀ˣ (x-t)^{α-1} f(t) dt
+ *
+ * Substitution to remove the endpoint singularity: let t = x·(1 - u^{1/α}),
+ * which transforms the integral to a smooth form:
+ *   I^α f(x) = x^α/Γ(α+1) · ∫₀¹ f(x·(1 - u^{1/α})) du
+ * The integrand is smooth for any α > 0 and smooth f, allowing standard G7K15.
+ * (Derivation: kernel (x-t)^{α-1} = x^{α-1}·u^{(α-1)/α}, Jacobian x/α·u^{1/α-1},
+ *  product = x^α/α · u⁰ = x^α/α; then x^α/(α·Γ(α)) = x^α/Γ(α+1).)
+ */
+static val_t prim_quad_frac_int(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t f      = av[0];
+    double alpha = num_to_double(av[1]);
+    double x     = num_to_double(av[2]);
+    int    nsub  = (ac > 3) ? (int)num_to_long(av[3]) : 32;
+
+    if (x <= 0.0)  return num_make_float(0.0);
+    if (alpha <= 0.0)
+        scm_raise(V_FALSE, "quad-frac-int: alpha must be positive");
+
+    double inv_alpha = 1.0 / alpha;
+    double result = 0.0;
+    for (int i = 0; i < nsub; i++) {
+        double u0 = (double)i / nsub, u1 = (double)(i+1) / nsub;
+        double hw = (u1 - u0) / 2.0, mid = (u0 + u1) / 2.0;
+        double sub = 0.0;
+        for (int j = 0; j < 15; j++) {
+            double u  = mid + hw * GK_NODES[j];
+            double t  = x * (1.0 - pow(u, inv_alpha));
+            sub += GK_WK[j] * quad_call(f, t);
+        }
+        result += hw * sub;
+    }
+    return num_make_float(pow(x, alpha) * result / tgamma(alpha + 1.0));
+}
+
 /* Auto-differentiation: f'(x) via f(x + ε) */
 static val_t prim_auto_diff(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -1468,6 +1618,9 @@ void builtins_register(val_t env) {
     DEF("make-surreal",         prim_make_surreal,          1, 1);
     DEF("surreal-terms",        prim_surreal_terms,         1, 1);
     DEF("auto-diff",            prim_auto_diff,             2, 2);
+    DEF("quad",                 prim_quad,                  3, 4);
+    DEF("quad-frac-diff",       prim_quad_frac_diff,        3, 4);
+    DEF("quad-frac-int",        prim_quad_frac_int,         3, 4);
 
     /* Multivectors — Clifford algebra Cl(p,q,r) */
     extern void mv_register_builtins(val_t env);

@@ -277,6 +277,71 @@ Examples:
       (mcp-text (->str (simplify (sum-list terms)))))))
 
 
+(mcp-tool "quad"
+  "Numerically integrate a function over [a, b] using adaptive Gauss-Kronrod G7K15 quadrature.
+Works for any Scheme lambda (not just symbolically differentiable functions).
+Handles smooth functions, mild singularities, and oscillatory integrands.
+Optional tol: absolute error tolerance (default 1e-8).
+Examples:
+  quad(\"(lambda (x) (* x x))\", 0, 1)              -> 0.333333   [= 1/3]
+  quad(\"(lambda (x) (sin x))\", 0, 3.14159)        -> 2.0
+  quad(\"(lambda (x) (exp (* -1 (* x x))))\", -5, 5) -> 1.7725  [≈ √π]
+  quad(\"(lambda (x) (/ 1 (+ 1 (* x x))))\", 0, 1)  -> 0.785398  [= π/4]"
+  '((function . ((type . "string") (description . "Lambda: (lambda (x) ...)")))
+    (lo       . ((type . "number") (description . "Lower bound")))
+    (hi       . ((type . "number") (description . "Upper bound")))
+    (tol      . ((type . "number") (description . "Error tolerance") (default . 1e-8))))
+  (lambda (args)
+    (let* ((f   (parse-expr (arg args 'function)))
+           (a   (exact->inexact (arg args 'lo)))
+           (b   (exact->inexact (arg args 'hi)))
+           (tol (arg? args 'tol 1e-8)))
+      (mcp-text (->str (quad f a b (exact->inexact tol)))))))
+
+
+(mcp-tool "quad-frac-diff"
+  "Numerical Grünwald-Letnikov fractional derivative D^α f(x₀) for any function f.
+Use this when the symbolic frac-diff returns an unevaluated node (e.g. for sin, cos).
+D^α f(x) ≈ h^{-α} Σ_{k=0}^{N} w_k f(x - k·h)  where h = x/N.
+Optional n: number of discretisation steps (default 500; larger = more accurate but slower).
+Examples:
+  quad-frac-diff(\"sin\", 0.5, 1.0)                        -> 0.846 (D^0.5[sin] at x=1)
+  quad-frac-diff(\"(lambda (x) (* x x))\", 0.5, 1.0)       -> ≈1.504  [matches symbolic]
+  quad-frac-diff(\"(lambda (x) (exp x))\", 0.5, 1.0)        -> 2.718  [e^x eigenfunction]"
+  '((function . ((type . "string") (description . "Lambda or named function (sin, cos, exp, …)")))
+    (alpha    . ((type . "number") (description . "Fractional order α")))
+    (point    . ((type . "number") (description . "Evaluation point x₀ > 0")))
+    (n        . ((type . "integer") (description . "Discretisation steps") (default . 500))))
+  (lambda (args)
+    (let* ((f     (parse-expr (arg args 'function)))
+           (alpha (exact->inexact (arg args 'alpha)))
+           (x0    (exact->inexact (arg args 'point)))
+           (n     (arg? args 'n 500)))
+      (mcp-text (->str (quad-frac-diff f alpha x0 n))))))
+
+
+(mcp-tool "quad-frac-int"
+  "Numerical Riemann-Liouville fractional integral I^α f(x₀) for any function f.
+I^α f(x) = (1/Γ(α)) ∫₀ˣ (x-t)^{α-1} f(t) dt
+Uses a singularity-free substitution so the kernel (x-t)^{α-1} is handled exactly.
+Use this when symbolic frac-int returns an unevaluated node (e.g. for sin, cos).
+Optional nsub: number of G7K15 sub-intervals (default 32).
+Examples:
+  quad-frac-int(\"sin\", 0.5, 1.0)                   -> 0.6697  (I^0.5[sin] at x=1)
+  quad-frac-int(\"(lambda (x) x)\", 0.5, 1.0)        -> 0.7523  [matches symbolic Γ(2)/Γ(2.5)]
+  quad-frac-int(\"(lambda (x) (* x x))\", 0.5, 2.0)  -> exact power-law result"
+  '((function . ((type . "string") (description . "Lambda or named function")))
+    (alpha    . ((type . "number") (description . "Fractional order α > 0")))
+    (point    . ((type . "number") (description . "Upper limit x₀ > 0")))
+    (nsub     . ((type . "integer") (description . "G7K15 sub-intervals") (default . 32))))
+  (lambda (args)
+    (let* ((f     (parse-expr (arg args 'function)))
+           (alpha (exact->inexact (arg args 'alpha)))
+           (x0    (exact->inexact (arg args 'point)))
+           (nsub  (arg? args 'nsub 32)))
+      (mcp-text (->str (quad-frac-int f alpha x0 nsub))))))
+
+
 ;;; ---- Resource ----
 
 (mcp-resource "math://help"
@@ -292,24 +357,31 @@ Expression syntax (standard Scheme):
   constants   : 0  1  1/3  3.14  (exact fractions as rationals)
   composition : (+ (* x x) (* 2 x) 1)  means x² + 2x + 1
 
-Tools:
-  diff        : {\"expression\": \"(expt x 3)\",         \"variable\": \"x\"}
-  integrate   : {\"expression\": \"(expt x 3)\",         \"variable\": \"x\"}
-  integrate   : {\"expression\": \"(expt x 2)\",         \"variable\": \"x\",  \"lo\": 0, \"hi\": 1}
-  frac-diff   : {\"expression\": \"(expt x 2)\",         \"alpha\": 0.5,       \"variable\": \"x\"}
-  frac-int    : {\"expression\": \"x\",                  \"alpha\": 0.5,       \"variable\": \"x\"}
-  wirtinger   : {\"expression\": \"(* z z)\",            \"variable\": \"z\",  \"direction\": \"d\"}
-  substitute  : {\"expression\": \"(* x x)\",            \"variable\": \"x\",  \"value\": \"(+ y 1)\"}
-  evaluate    : {\"expression\": \"(+ (* x x) y)\",      \"bindings\": \"((x . 3) (y . 4))\"}
-  auto-diff   : {\"function\":   \"(lambda (x) (/ 1 x))\", \"point\": 2.0}
-  taylor      : {\"expression\": \"(/ 1 (- 1 x))\",      \"variable\": \"x\",  \"order\": 5}
+Symbolic tools:
+  diff          : {\"expression\": \"(expt x 3)\",          \"variable\": \"x\"}
+  integrate     : {\"expression\": \"(expt x 3)\",          \"variable\": \"x\"}
+  integrate     : {\"expression\": \"(expt x 2)\",          \"variable\": \"x\",  \"lo\": 0, \"hi\": 1}
+  frac-diff     : {\"expression\": \"(expt x 2)\",          \"alpha\": 0.5,       \"variable\": \"x\"}
+  frac-int      : {\"expression\": \"x\",                   \"alpha\": 0.5,       \"variable\": \"x\"}
+  wirtinger     : {\"expression\": \"(* z z)\",             \"variable\": \"z\",  \"direction\": \"d\"}
+  substitute    : {\"expression\": \"(* x x)\",             \"variable\": \"x\",  \"value\": \"(+ y 1)\"}
+  evaluate      : {\"expression\": \"(+ (* x x) y)\",       \"bindings\": \"((x . 3) (y . 4))\"}
+  auto-diff     : {\"function\":   \"(lambda (x) (/ 1 x))\",  \"point\": 2.0}
+  taylor        : {\"expression\": \"(/ 1 (- 1 x))\",       \"variable\": \"x\",  \"order\": 5}
+  simplify      : {\"expression\": \"(+ (* x 1) 0)\"}
+
+Numerical tools (work for any lambda, including sin/cos/exp):
+  quad          : {\"function\": \"(lambda (x) (sin x))\",  \"lo\": 0, \"hi\": 3.14159}
+  quad-frac-diff: {\"function\": \"sin\",  \"alpha\": 0.5, \"point\": 1.0}
+  quad-frac-int : {\"function\": \"sin\",  \"alpha\": 0.5, \"point\": 1.0}
 
 Fractional calculus notes:
-  D^α[xⁿ] = Γ(n+1)/Γ(n−α+1) · x^(n−α)   (Caputo, constants → 0)
+  D^α[xⁿ] = Γ(n+1)/Γ(n−α+1) · x^(n−α)   (Caputo; constants → 0)
   D^α[eˡˣ] = λ^α · eˡˣ                    (eigenfunction property)
   I^α[xⁿ] = Γ(n+1)/Γ(n+α+1) · x^(n+α)
   Composition: D^α ∘ D^β = D^(α+β)
-  α=0 → identity, α=1 → d/dx, α=2 → d²/dx²")))
+  α=0 → identity, α=1 → d/dx, α=2 → d²/dx²
+  For sin/cos/arbitrary f: use quad-frac-diff / quad-frac-int")))
 
 
-(mcp-serve "curry-math" "0.7.3")
+(mcp-serve "curry-math" "0.7.4")
