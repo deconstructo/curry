@@ -62,6 +62,7 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
 | [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
+| [mqtt](docs/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
 | [mcp](docs/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
 
 ---
@@ -216,10 +217,10 @@ cmake --build build-release -j$(nproc)
 cd build-release && cpack -G DEB
 ```
 
-This produces `curry-scheme_0.7.2_arm64.deb` (architecture auto-detected). Install it with:
+This produces `curry-scheme_0.7.3_arm64.deb` (architecture auto-detected). Install it with:
 
 ```bash
-sudo dpkg -i curry-scheme_0.7.2_arm64.deb
+sudo dpkg -i curry-scheme_0.7.3_arm64.deb
 ```
 
 The package installs to standard system paths:
@@ -282,6 +283,17 @@ Example:
 ---
 
 ## Changelog
+
+### 0.7.3 — MQTT client module
+
+- Added `(curry mqtt)` module: full MQTT client using the Eclipse Paho C synchronous API (`libpaho-mqtt3cs`)
+- Plain TCP and TLS connections: `mqtt-connect`, `mqtt-connect-tls`
+- Publish (`mqtt-publish`) with QoS 0/1/2 and optional retain flag
+- Subscribe / unsubscribe with per-topic QoS: `mqtt-subscribe`, `mqtt-unsubscribe`
+- Blocking receive with timeout: `mqtt-receive` returns `(topic . payload)` or `#f`
+- Incoming messages delivered via a native ring-buffer queue (mutex + condvar) — Paho callback thread never touches the Scheme/GC heap
+- Test harness (`tests/test_mqtt.sh`) spins up an ephemeral Mosquitto broker (plain + TLS with a fresh self-signed cert); 14 tests cover pub/sub ordering, QoS 1, wildcard subscriptions, timeout, and TLS
+- Redis TLS (`redis-connect-tls`) and Redis tests (40 tests via `tests/test_redis.sh`) added in this cycle
 
 ### 0.7.2 — MCP server module and packaging
 
