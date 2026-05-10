@@ -108,6 +108,83 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
         val_t v = num_make_float(d);
         return exact_force ? num_exact(v) : v;
     }
+    /* Try complex literal: ends with 'i', e.g. +2i, 3+4i, 3-4i, +i, -i */
+    size_t slen = strlen(s);
+    if (slen >= 2 && s[slen-1] == 'i') {
+        char *buf = (char *)gc_alloc_atomic(slen);
+        memcpy(buf, s, slen - 1);
+        buf[slen - 1] = '\0';
+        /* Pure +i / -i */
+        if (strcmp(buf, "+") == 0) return num_make_complex(vfix(0), vfix(1));
+        if (strcmp(buf, "-") == 0) return num_make_complex(vfix(0), vfix(-1));
+        /* Find split: rightmost + or - not at pos 0 and not after e/E */
+        int split = -1;
+        for (int k = (int)slen - 2; k > 0; k--) {
+            char prev = buf[k - 1];
+            if ((buf[k] == '+' || buf[k] == '-') && prev != 'e' && prev != 'E') {
+                split = k;
+                break;
+            }
+        }
+        if (split > 0) {
+            char *rstr = (char *)gc_alloc_atomic((size_t)split + 1);
+            memcpy(rstr, buf, (size_t)split);
+            rstr[split] = '\0';
+            const char *istr = buf + split;
+            val_t re = parse_number(rstr, radix, exact_force, inexact_force);
+            if (vis_false(re)) return V_FALSE;
+            val_t im;
+            if (strcmp(istr, "+") == 0)      im = vfix(1);
+            else if (strcmp(istr, "-") == 0) im = vfix(-1);
+            else { im = parse_number(istr, radix, exact_force, inexact_force); }
+            if (vis_false(im)) return V_FALSE;
+            return num_make_complex(re, im);
+        } else {
+            /* Pure imaginary, no real part */
+            val_t im = parse_number(buf, radix, exact_force, inexact_force);
+            if (vis_false(im)) return V_FALSE;
+            return num_make_complex(vfix(0), im);
+        }
+    }
+    /* Try quaternion literal: ends with 'k', e.g. 4k, 1+2i+3j+4k, +k, -k
+     * Terms: a (real), bi, cj, dk — any subset, in order.
+     * Bare unit suffixes (+k, -j) get coefficient 1. */
+    if (slen >= 2 && s[slen-1] == 'k') {
+        char *buf = (char *)gc_alloc_atomic(slen + 1);
+        memcpy(buf, s, slen);
+        buf[slen] = '\0';
+        /* collect positions where a new signed term starts */
+        int splits[8]; int nsplits = 0;
+        splits[nsplits++] = 0;
+        for (int ki = 1; ki < (int)slen && nsplits < 8; ki++) {
+            if ((buf[ki] == '+' || buf[ki] == '-') &&
+                buf[ki-1] != 'e' && buf[ki-1] != 'E')
+                splits[nsplits++] = ki;
+        }
+        double qa = 0, qb = 0, qc = 0, qd = 0;
+        bool ok = true;
+        for (int t = 0; t < nsplits && ok; t++) {
+            int ts = splits[t];
+            int te = (t + 1 < nsplits) ? splits[t+1] : (int)slen;
+            char suffix = buf[te-1];
+            char sign = '+';
+            int ns = ts;
+            if (buf[ts] == '+' || buf[ts] == '-') { sign = buf[ts]; ns++; }
+            int nl = (te - ns) - (suffix=='i' || suffix=='j' || suffix=='k' ? 1 : 0);
+            double val = 1.0;
+            if (nl > 0) {
+                char *ep;
+                val = strtod(buf + ns, &ep);
+                if (ep != buf + ns + nl) { ok = false; break; }
+            }
+            if (sign == '-') val = -val;
+            if      (suffix == 'i') qb = val;
+            else if (suffix == 'j') qc = val;
+            else if (suffix == 'k') qd = val;
+            else                    qa = val;
+        }
+        if (ok) return num_make_quat(qa, qb, qc, qd);
+    }
     return V_FALSE; /* not a number */
 }
 

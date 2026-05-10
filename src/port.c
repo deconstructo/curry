@@ -311,7 +311,11 @@ void scm_write(val_t v, val_t port) {
     }
     if (vis_quat(v)) {
         Quaternion *q = as_quat(v);
-        int n = snprintf(buf, sizeof(buf), "%g+%gi+%gj+%gk", q->a, q->b, q->c, q->d);
+        int n = snprintf(buf, sizeof(buf), "%g%s%gi%s%gj%s%gk",
+            q->a,
+            q->b >= 0 ? "+" : "", q->b,
+            q->c >= 0 ? "+" : "", q->c,
+            q->d >= 0 ? "+" : "", q->d);
         port_write_string(port, buf, (uint32_t)n); return;
     }
     if (vis_oct(v)) {
