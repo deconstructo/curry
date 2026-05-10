@@ -166,5 +166,9 @@ void  sx_write(val_t expr, val_t port);
 extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
 extern val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 extern val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
+extern val_t SX_FRACDIFF, SX_FRACINT;
+
+val_t sx_fracdiff(val_t expr, val_t alpha, val_t var); /* D^α fractional derivative */
+val_t sx_fracint (val_t expr, val_t alpha, val_t var); /* I^α fractional integral   */
 
 #endif /* CURRY_SYMBOLIC_H */

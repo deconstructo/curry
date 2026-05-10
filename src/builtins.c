@@ -1007,6 +1007,20 @@ static val_t prim_sx_integrate(int ac, val_t *av, void *ud) {
     }
     return antideriv;
 }
+static val_t prim_frac_diff(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return sx_fracdiff(av[0], av[1], av[2]);
+}
+static val_t prim_frac_int(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t result = sx_fracint(av[0], av[1], av[2]);
+    if (ac == 5) {
+        val_t Fa = sx_substitute(result, av[2], av[3]);
+        val_t Fb = sx_substitute(result, av[2], av[4]);
+        return sx_sub(Fb, Fa);
+    }
+    return result;
+}
 static val_t prim_conjugate(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return num_conjugate(av[0]); }
 static val_t prim_sx_real(int ac, val_t *av, void *ud)
@@ -1418,6 +1432,8 @@ void builtins_register(val_t env) {
     DEF("∂",              prim_sx_diff,         2, 2);
     DEF("∫",              prim_sx_integrate,    2, 4);
     DEF("integrate",      prim_sx_integrate,    2, 4);
+    DEF("frac-diff",      prim_frac_diff,       3, 3);
+    DEF("frac-int",       prim_frac_int,        3, 5);
     DEF("wirtinger-d",    prim_wirtinger_d,     2, 2);
     DEF("wirtinger-dbar", prim_wirtinger_dbar,  2, 2);
     DEF("simplify",       prim_sx_simplify,     1, 1);

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
@@ -14,6 +15,7 @@ extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn)
 val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
 val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
+val_t SX_FRACDIFF, SX_FRACINT;
 
 void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
@@ -33,6 +35,8 @@ void symbolic_init(void) {
     SX_CONJ      = sym_intern_cstr("conj");
     SX_REAL      = sym_intern_cstr("real-part");
     SX_IMAG      = sym_intern_cstr("imag-part");
+    SX_FRACDIFF  = sym_intern_cstr("frac-diff");
+    SX_FRACINT   = sym_intern_cstr("frac-int");
 }
 
 /* ---- Constructors ---- */
@@ -785,6 +789,276 @@ val_t sx_integrate(val_t expr, val_t var) {
     return sx_make_expr(SX_INTEGRATE, 2, i_args);
 }
 
+/* ---- Fractional calculus ---- */
+
+/*
+ * sx_fracdiff: Caputo fractional derivative D^α[expr] w.r.t. var.
+ *
+ * Rules (α numeric):
+ *   D^0 f       = f                            (identity)
+ *   D^1 f       = df/dx                        (ordinary derivative)
+ *   D^n f       = d^n f / dx^n  (positive integer n, iterated)
+ *   D^α c       = 0                             (constants vanish, Caputo)
+ *   D^α x^n     = Γ(n+1)/Γ(n−α+1) · x^(n−α)  (power rule, n ≥ 0)
+ *   D^α e^(λx)  = λ^α · e^(λx)               (eigenfunction, linear argument)
+ *   D^α (f+g)   = D^α f + D^α g              (linearity)
+ *   D^α (c·f)   = c · D^α f                  (constant factor)
+ *   D^α (D^β f) = D^(α+β) f                  (composition)
+ */
+val_t sx_fracdiff(val_t expr, val_t alpha, val_t var) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "frac-diff: third argument must be a symbolic variable");
+
+    /* α=0: identity */
+    if (vis_number(alpha) && num_is_zero(alpha)) return expr;
+
+    /* α=1: ordinary derivative */
+    if (vis_number(alpha) && num_is_one(alpha)) return sx_diff(expr, var);
+
+    /* positive integer α: iterate */
+    if (vis_fixnum(alpha)) {
+        long n = vunfix(alpha);
+        if (n > 1 && n <= 20) {
+            val_t r = expr;
+            for (long i = 0; i < n; i++) r = sx_diff(r, var);
+            return r;
+        }
+    }
+
+    /* Numbers → 0 (Caputo: constants have zero fractional derivative) */
+    if (vis_number(expr)) return vfix(0);
+
+    /* Symbolic variable */
+    if (vis_symvar(expr)) {
+        /* D^α[x] = power rule with n=1 */
+        if (as_symvar(expr)->name == as_symvar(var)->name && vis_number(alpha)) {
+            double a = num_to_double(alpha);
+            double coeff = tgamma(2.0) / tgamma(2.0 - a);
+            val_t new_exp = num_sub(vfix(1), alpha);
+            return sx_mul(num_make_float(coeff), sx_expt(var, new_exp));
+        }
+        /* D^α[y] = 0 for y independent of var */
+        if (as_symvar(expr)->name != as_symvar(var)->name) return vfix(0);
+    }
+
+    if (!vis_symexpr(expr)) goto unevaluated;
+
+    {
+        SymExpr *se = as_symexpr(expr);
+        val_t op = se->op;
+        int n = (int)se->nargs;
+        val_t *args = se->args;
+
+        /* Linearity: D^α(f+g+...) */
+        if (op == SX_ADD) {
+            val_t *dargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int i = 0; i < n; i++) dargs[i] = sx_fracdiff(args[i], alpha, var);
+            return sx_simplify(sx_make_expr(SX_ADD, n, dargs));
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_sub(sx_fracdiff(args[0], alpha, var),
+                          sx_fracdiff(args[1], alpha, var));
+        if (op == SX_NEG && n == 1)
+            return sx_neg(sx_fracdiff(args[0], alpha, var));
+
+        /* Constant multiple: pull out factors independent of var */
+        if (op == SX_MUL) {
+            int nconst = 0;
+            for (int i = 0; i < n; i++)
+                if (!sx_depends_on(args[i], var)) nconst++;
+            if (nconst == n) return vfix(0);  /* whole product is constant */
+            if (nconst > 0) {
+                val_t *consts = (val_t *)gc_alloc((size_t)nconst * sizeof(val_t));
+                val_t *deps   = (val_t *)gc_alloc((size_t)(n - nconst) * sizeof(val_t));
+                int ci = 0, di = 0;
+                for (int i = 0; i < n; i++) {
+                    if (sx_depends_on(args[i], var)) deps[di++] = args[i];
+                    else consts[ci++] = args[i];
+                }
+                val_t cfactor = (nconst == 1) ? consts[0]
+                                              : sx_make_expr(SX_MUL, nconst, consts);
+                val_t dpart   = (di == 1) ? deps[0] : sx_make_expr(SX_MUL, di, deps);
+                return sx_mul(cfactor, sx_fracdiff(dpart, alpha, var));
+            }
+        }
+
+        /* Power rule: D^α[x^n] = Γ(n+1)/Γ(n−α+1) · x^(n−α) */
+        if (op == SX_EXPT && n == 2) {
+            val_t base = args[0], exp_v = args[1];
+            if (sx_equal(base, var) && vis_number(exp_v) && vis_number(alpha)) {
+                double pn = num_to_double(exp_v);
+                double a  = num_to_double(alpha);
+                if (pn >= 0.0) {
+                    double coeff = tgamma(pn + 1.0) / tgamma(pn - a + 1.0);
+                    val_t new_exp = num_sub(exp_v, alpha);
+                    return sx_mul(num_make_float(coeff), sx_expt(var, new_exp));
+                }
+            }
+        }
+
+        /* Exponential eigenfunction: D^α[e^(λx)] = λ^α · e^(λx)  (linear arg) */
+        if (op == SX_EXP && n == 1 && vis_number(alpha)) {
+            val_t df = sx_diff(args[0], var);  /* extract λ */
+            if (vis_number(df) && !num_is_zero(df)) {
+                double lambda = num_to_double(df);
+                double a = num_to_double(alpha);
+                return sx_mul(num_make_float(pow(lambda, a)), expr);
+            }
+        }
+
+        /* Composition: D^α[D^β[f, β, x], α, x] = D^(α+β)[f, x] */
+        if (op == SX_FRACDIFF && n == 3 && sx_equal(args[2], var)) {
+            val_t new_alpha = sx_simplify(sx_add(alpha, args[1]));
+            return sx_fracdiff(args[0], new_alpha, var);
+        }
+    }
+
+unevaluated:;
+    val_t fargs[3] = {expr, alpha, var};
+    return sx_make_expr(SX_FRACDIFF, 3, fargs);
+}
+
+/*
+ * sx_fracint: Riemann-Liouville fractional integral I^α[expr] w.r.t. var.
+ *
+ * Rules (α numeric):
+ *   I^0 f      = f                             (identity)
+ *   I^1 f      = ∫f dx                         (ordinary integral)
+ *   I^α c      = c · x^α / Γ(α+1)             (constant)
+ *   I^α x^n    = Γ(n+1)/Γ(n+α+1) · x^(n+α)  (power rule, n ≥ 0)
+ *   I^α e^(λx) = λ^(−α) · e^(λx)             (eigenfunction, linear arg)
+ *   I^α (f+g)  = I^α f + I^α g               (linearity)
+ *   I^α (c·f)  = c · I^α f                   (constant factor)
+ */
+val_t sx_fracint(val_t expr, val_t alpha, val_t var) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "frac-int: third argument must be a symbolic variable");
+
+    /* α=0: identity */
+    if (vis_number(alpha) && num_is_zero(alpha)) return expr;
+
+    /* α=1: ordinary integral */
+    if (vis_number(alpha) && num_is_one(alpha)) return sx_integrate(expr, var);
+
+    /* positive integer α: iterate */
+    if (vis_fixnum(alpha)) {
+        long n = vunfix(alpha);
+        if (n > 1 && n <= 20) {
+            val_t r = expr;
+            for (long i = 0; i < n; i++) r = sx_integrate(r, var);
+            return r;
+        }
+    }
+
+    /* Constant: I^α[c] = c · x^α / Γ(α+1) */
+    if (vis_number(expr) && vis_number(alpha)) {
+        double a = num_to_double(alpha);
+        double denom = tgamma(a + 1.0);
+        val_t coeff = (num_is_one(expr))
+            ? num_make_float(1.0 / denom)
+            : sx_div(expr, num_make_float(denom));
+        return sx_mul(coeff, sx_expt(var, alpha));
+    }
+
+    /* Symbolic variable */
+    if (vis_symvar(expr)) {
+        if (as_symvar(expr)->name == as_symvar(var)->name && vis_number(alpha)) {
+            /* I^α[x] = power rule with n=1 */
+            double a  = num_to_double(alpha);
+            double coeff = tgamma(2.0) / tgamma(2.0 + a);
+            val_t new_exp = num_add(vfix(1), alpha);
+            return sx_mul(num_make_float(coeff), sx_expt(var, new_exp));
+        }
+        if (as_symvar(expr)->name != as_symvar(var)->name && vis_number(alpha)) {
+            /* I^α[c] where c is a different variable (treated as constant) */
+            double a = num_to_double(alpha);
+            double denom = tgamma(a + 1.0);
+            return sx_mul(sx_div(expr, num_make_float(denom)), sx_expt(var, alpha));
+        }
+    }
+
+    if (!vis_symexpr(expr)) goto unevaluated_i;
+
+    {
+        SymExpr *se = as_symexpr(expr);
+        val_t op = se->op;
+        int n = (int)se->nargs;
+        val_t *args = se->args;
+
+        /* Linearity: I^α(f+g+...) */
+        if (op == SX_ADD) {
+            val_t *iargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int i = 0; i < n; i++) iargs[i] = sx_fracint(args[i], alpha, var);
+            return sx_simplify(sx_make_expr(SX_ADD, n, iargs));
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_sub(sx_fracint(args[0], alpha, var),
+                          sx_fracint(args[1], alpha, var));
+        if (op == SX_NEG && n == 1)
+            return sx_neg(sx_fracint(args[0], alpha, var));
+
+        /* Constant multiple */
+        if (op == SX_MUL) {
+            int nconst = 0;
+            for (int i = 0; i < n; i++)
+                if (!sx_depends_on(args[i], var)) nconst++;
+            if (nconst > 0 && nconst < n) {
+                val_t *consts = (val_t *)gc_alloc((size_t)nconst * sizeof(val_t));
+                val_t *deps   = (val_t *)gc_alloc((size_t)(n - nconst) * sizeof(val_t));
+                int ci = 0, di = 0;
+                for (int i = 0; i < n; i++) {
+                    if (sx_depends_on(args[i], var)) deps[di++] = args[i];
+                    else consts[ci++] = args[i];
+                }
+                val_t cfactor = (nconst == 1) ? consts[0]
+                                              : sx_make_expr(SX_MUL, nconst, consts);
+                val_t dpart   = (di == 1) ? deps[0] : sx_make_expr(SX_MUL, di, deps);
+                return sx_mul(cfactor, sx_fracint(dpart, alpha, var));
+            }
+            if (nconst == n && vis_number(alpha)) {
+                /* whole product is constant */
+                double a = num_to_double(alpha);
+                return sx_mul(sx_div(expr, num_make_float(tgamma(a + 1.0))),
+                              sx_expt(var, alpha));
+            }
+        }
+
+        /* Power rule: I^α[x^n] = Γ(n+1)/Γ(n+α+1) · x^(n+α) */
+        if (op == SX_EXPT && n == 2) {
+            val_t base = args[0], exp_v = args[1];
+            if (sx_equal(base, var) && vis_number(exp_v) && vis_number(alpha)) {
+                double pn = num_to_double(exp_v);
+                double a  = num_to_double(alpha);
+                if (pn >= 0.0) {
+                    double coeff = tgamma(pn + 1.0) / tgamma(pn + a + 1.0);
+                    val_t new_exp = num_add(exp_v, alpha);
+                    return sx_mul(num_make_float(coeff), sx_expt(var, new_exp));
+                }
+            }
+        }
+
+        /* Exponential eigenfunction: I^α[e^(λx)] = λ^(−α) · e^(λx) */
+        if (op == SX_EXP && n == 1 && vis_number(alpha)) {
+            val_t df = sx_diff(args[0], var);
+            if (vis_number(df) && !num_is_zero(df)) {
+                double lambda = num_to_double(df);
+                double a = num_to_double(alpha);
+                return sx_mul(num_make_float(pow(lambda, -a)), expr);
+            }
+        }
+
+        /* Composition: I^α[I^β[f, β, x], α, x] = I^(α+β)[f, x] */
+        if (op == SX_FRACINT && n == 3 && sx_equal(args[2], var)) {
+            val_t new_alpha = sx_simplify(sx_add(alpha, args[1]));
+            return sx_fracint(args[0], new_alpha, var);
+        }
+    }
+
+unevaluated_i:;
+    val_t iargs[3] = {expr, alpha, var};
+    return sx_make_expr(SX_FRACINT, 3, iargs);
+}
+
 /* ---- Display ---- */
 
 void sx_write(val_t expr, val_t port) {
@@ -800,6 +1074,30 @@ void sx_write(val_t expr, val_t port) {
         if (se->op == SX_NEG && se->nargs == 1) {
             port_write_string(port, "(- ", 3);
             sx_write(se->args[0], port);
+            port_write_char(port, ')');
+            return;
+        }
+
+        /* (frac-diff f α x) → (D^α α f x) */
+        if (se->op == SX_FRACDIFF && se->nargs == 3) {
+            port_write_string(port, "(D^\xce\xb1 ", 6); /* D^α */
+            sx_write(se->args[1], port);
+            port_write_char(port, ' ');
+            sx_write(se->args[0], port);
+            port_write_char(port, ' ');
+            sx_write(se->args[2], port);
+            port_write_char(port, ')');
+            return;
+        }
+
+        /* (frac-int f α x) → (I^α α f x) */
+        if (se->op == SX_FRACINT && se->nargs == 3) {
+            port_write_string(port, "(I^\xce\xb1 ", 6); /* I^α */
+            sx_write(se->args[1], port);
+            port_write_char(port, ' ');
+            sx_write(se->args[0], port);
+            port_write_char(port, ' ');
+            sx_write(se->args[2], port);
             port_write_char(port, ')');
             return;
         }
