@@ -151,13 +151,17 @@ double num_to_double(val_t v) {
     if (vis_rational(v)) return mpq_get_d(as_rat(v)->q);
     if (vis_complex(v))  return num_to_double(as_cpx(v)->real); /* drop imag */
     if (vis_surreal(v))  return sur_to_double(v);
-    assert(0 && "num_to_double: not a real number");
+    scm_raise(V_FALSE, "not a number: %s",
+              vis_pair(v) ? "#<pair>" :
+              vis_nil(v)  ? "()"      :
+              (v == V_TRUE) ? "#t"    :
+              (v == V_FALSE) ? "#f"   : "#<non-numeric>");
 }
 
 long num_to_long(val_t v) {
     if (vis_fixnum(v)) return vunfix(v);
     if (vis_bignum(v)) return mpz_get_si(as_big(v)->z);
-    assert(0 && "num_to_long: not an exact integer");
+    scm_raise(V_FALSE, "not an exact integer: #<non-numeric>");
 }
 
 val_t num_inexact(val_t v) {
@@ -512,8 +516,16 @@ bool num_lt(val_t a, val_t b) { return num_cmp(a,b)<0;  }
 bool num_le(val_t a, val_t b) { return num_cmp(a,b)<=0; }
 bool num_gt(val_t a, val_t b) { return num_cmp(a,b)>0;  }
 bool num_ge(val_t a, val_t b) { return num_cmp(a,b)>=0; }
-val_t num_min(val_t a, val_t b) { return num_le(a,b)?a:b; }
-val_t num_max(val_t a, val_t b) { return num_ge(a,b)?a:b; }
+val_t num_min(val_t a, val_t b) {
+    if (vis_complex(a) || vis_complex(b))
+        scm_raise(V_FALSE, "no ordering on complex numbers");
+    return num_le(a,b)?a:b;
+}
+val_t num_max(val_t a, val_t b) {
+    if (vis_complex(a) || vis_complex(b))
+        scm_raise(V_FALSE, "no ordering on complex numbers");
+    return num_ge(a,b)?a:b;
+}
 
 /* ---- Integer division ---- */
 val_t num_quotient(val_t a, val_t b) {
@@ -559,6 +571,7 @@ val_t num_lcm(val_t a, val_t b) {
 
 /* ---- Rounding ---- */
 val_t num_floor(val_t v) {
+    if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_flonum(v)) return num_make_float(floor(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -568,6 +581,7 @@ val_t num_floor(val_t v) {
     return v; /* fixnum/bignum already exact integer */
 }
 val_t num_ceiling(val_t v) {
+    if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_flonum(v)) return num_make_float(ceil(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -577,6 +591,7 @@ val_t num_ceiling(val_t v) {
     return v;
 }
 val_t num_truncate(val_t v) {
+    if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_flonum(v)) return num_make_float(trunc(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -586,6 +601,7 @@ val_t num_truncate(val_t v) {
     return v;
 }
 val_t num_round(val_t v) {
+    if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_flonum(v)) {
         double d = vfloat(v);
         double rounded = round(d);

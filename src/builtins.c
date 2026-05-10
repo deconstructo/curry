@@ -211,8 +211,8 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 static val_t prim_cons(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_cons(av[0], av[1]); }
 static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"car: not a pair"); return vcar(av[0]); }
 static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"cdr: not a pair"); return vcdr(av[0]); }
-static val_t prim_set_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; as_pair(av[0])->car=av[1]; return V_VOID; }
-static val_t prim_set_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; as_pair(av[0])->cdr=av[1]; return V_VOID; }
+static val_t prim_set_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair"); as_pair(av[0])->car=av[1]; return V_VOID; }
+static val_t prim_set_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-cdr!: not a pair"); as_pair(av[0])->cdr=av[1]; return V_VOID; }
 #define CXR1(n,a)     static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(av[0]);}
 #define CXR2(n,a,b)   static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(av[0]));}
 #define CXR3(n,a,b,c) static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(c(av[0])));}
@@ -250,8 +250,8 @@ static val_t prim_append(int ac, val_t *av, void *ud) {
     return r;
 }
 static val_t prim_reverse(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_reverse(av[0]); }
-static val_t prim_list_tail(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_list_tail(av[0], (int)vunfix(av[1])); }
-static val_t prim_list_ref(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_list_ref(av[0], (int)vunfix(av[1])); }
+static val_t prim_list_tail(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "not a number: index must be exact integer"); return scm_list_tail(av[0], (int)vunfix(av[1])); }
+static val_t prim_list_ref(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "not a number: index must be exact integer"); return scm_list_ref(av[0], (int)vunfix(av[1])); }
 static val_t prim_list_copy(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t lst = av[0], r = V_NIL, *tail = &r;
@@ -418,13 +418,15 @@ static val_t prim_num_str(int ac, val_t *av, void *ud) {
     return num_to_string(av[0], radix);
 }
 static val_t prim_str_num(int ac, val_t *av, void *ud) {
-    (void)ud; int radix = ac>1 ? (int)vunfix(av[1]) : 10;
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string->number: not a string");
+    int radix = ac>1 ? (int)vunfix(av[1]) : 10;
     return parse_number(as_str(av[0])->data, radix, false, false);
 }
 
 /* ---- Characters ---- */
 static val_t prim_char_to_int(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix((intptr_t)vunchr(av[0]));}
-static val_t prim_int_to_char(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)vunfix(av[0]));}
+static val_t prim_int_to_char(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "integer->char: not an exact integer"); return vchr((uint32_t)vunfix(av[0]));}
 static val_t prim_char_upcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)toupper((int)vunchr(av[0])));}
 static val_t prim_char_downcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)tolower((int)vunchr(av[0])));}
 #define CHAR_PRED(nm,test) static val_t prim_char_##nm(int ac, val_t *av, void *ud){(void)ac;(void)ud; return vbool(test((int)vunchr(av[0])));}
@@ -435,7 +437,9 @@ static val_t prim_char_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<
 
 /* ---- Strings ---- */
 static val_t prim_make_string(int ac, val_t *av, void *ud) {
-    (void)ud; int fill = ac>1 ? (int)vunchr(av[1]) : ' ';
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "make-string: not an exact integer");
+    int fill = ac>1 ? (int)vunchr(av[1]) : ' ';
     return scm_make_string((uint32_t)vunfix(av[0]), fill);
 }
 static val_t prim_string(int ac, val_t *av, void *ud) {
@@ -454,6 +458,8 @@ static val_t prim_string_length(int ac, val_t *av, void *ud) {
 }
 static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-ref: not a string");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-ref: not an exact integer");
     String *s = as_str(av[0]); intptr_t idx = vunfix(av[1]);
     const char *p = s->data, *end = p + s->len;
     intptr_t n = 0;
@@ -510,6 +516,9 @@ static val_t prim_string_lt(int ac, val_t *av, void *ud) {
 }
 static val_t prim_substring(int ac, val_t *av, void *ud) {
     (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "substring: not a string");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "substring: start must be exact integer");
+    if (ac > 2 && !vis_fixnum(av[2])) scm_raise(V_FALSE, "substring: end must be exact integer");
     /* Byte-level substring for now; TODO: Unicode character indices */
     String *s = as_str(av[0]);
     uint32_t start = (uint32_t)vunfix(av[1]);
@@ -554,9 +563,11 @@ static val_t prim_vector(int ac, val_t *av, void *ud) {
     for(int i=0;i<ac;i++) v->data[i]=av[i];
     return vptr(v);
 }
-static val_t prim_vector_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(as_vec(av[0])->len);}
+static val_t prim_vector_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-length: not a vector"); return vfix(as_vec(av[0])->len);}
 static val_t prim_vector_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-ref: not a vector");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-ref: not an exact integer");
     Vector *v = as_vec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= v->len)
@@ -565,6 +576,8 @@ static val_t prim_vector_ref(int ac, val_t *av, void *ud) {
 }
 static val_t prim_vector_set(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-set!: not a vector");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-set!: not an exact integer");
     Vector *v = as_vec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= v->len)
@@ -586,13 +599,19 @@ static val_t prim_list_to_vector(int ac, val_t *av, void *ud) {
     return vptr(v);
 }
 static val_t prim_vector_fill(int ac, val_t *av, void *ud) {
-    (void)ud; Vector *v=as_vec(av[0]); val_t fill=av[1];
+    (void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-fill!: not a vector");
+    Vector *v=as_vec(av[0]); val_t fill=av[1];
     uint32_t s=ac>2?(uint32_t)vunfix(av[2]):0, e=ac>3?(uint32_t)vunfix(av[3]):v->len;
     for(uint32_t i=s;i<e;i++) v->data[i]=fill;
     return V_VOID;
 }
 static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
-    (void)ud; Vector *v=as_vec(av[0]);
+    (void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-copy: not a vector");
+    if (ac > 1 && !vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-copy: start must be exact integer");
+    if (ac > 2 && !vis_fixnum(av[2])) scm_raise(V_FALSE, "vector-copy: end must be exact integer");
+    Vector *v=as_vec(av[0]);
     uint32_t s=ac>1?(uint32_t)vunfix(av[1]):0, e=ac>2?(uint32_t)vunfix(av[2]):v->len;
     uint32_t n=e-s; Vector *r=CURRY_NEW_FLEX(Vector,n);
     r->hdr.type=T_VECTOR; r->hdr.flags=0; r->len=n;
@@ -602,15 +621,17 @@ static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
 
 /* ---- Bytevectors ---- */
 static val_t prim_make_bytes(int ac, val_t *av, void *ud) {
-    (void)ud; uint32_t n=(uint32_t)vunfix(av[0]); uint8_t fill=ac>1?(uint8_t)vunfix(av[1]):0;
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "make-bytevector: not an exact integer");
+    uint32_t n=(uint32_t)vunfix(av[0]); uint8_t fill=ac>1?(uint8_t)vunfix(av[1]):0;
     Bytevector *b=CURRY_NEW_FLEX_ATOM(Bytevector,n);
     b->hdr.type=T_BYTEVECTOR; b->hdr.flags=0; b->len=n;
     memset(b->data,fill,n);
     return vptr(b);
 }
 static val_t prim_bytes_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(as_bytes(av[0])->len);}
-static val_t prim_bytes_u8_ref(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(as_bytes(av[0])->data[vunfix(av[1])]);}
-static val_t prim_bytes_u8_set(int ac, val_t *av, void *ud) {(void)ac;(void)ud; as_bytes(av[0])->data[vunfix(av[1])]=(uint8_t)vunfix(av[2]); return V_VOID;}
+static val_t prim_bytes_u8_ref(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-u8-ref: not a bytevector"); if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-u8-ref: not an exact integer"); return vfix(as_bytes(av[0])->data[vunfix(av[1])]);}
+static val_t prim_bytes_u8_set(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-u8-set!: not a bytevector"); if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-u8-set!: not an exact integer"); if (!vis_fixnum(av[2])) scm_raise(V_FALSE, "bytevector-u8-set!: value must be exact integer"); as_bytes(av[0])->data[vunfix(av[1])]=(uint8_t)vunfix(av[2]); return V_VOID;}
 
 /* ---- I/O ---- */
 static val_t prim_display(int ac, val_t *av, void *ud) {(void)ud; scm_display(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
@@ -621,13 +642,15 @@ static val_t prim_read(int ac, val_t *av, void *ud) {(void)ud; return scm_read(a
 static val_t prim_read_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_read_char(ac>0?av[0]:PORT_STDIN); return c<0?V_EOF:vchr((uint32_t)c);}
 static val_t prim_peek_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_peek_char(ac>0?av[0]:PORT_STDIN); return c<0?V_EOF:vchr((uint32_t)c);}
 static val_t prim_read_line(int ac, val_t *av, void *ud) {(void)ud; return port_read_line(ac>0?av[0]:PORT_STDIN);}
-static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_open_input_string(as_str(av[0])->data,as_str(av[0])->len);}
+static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-string: not a string"); return port_open_input_string(as_str(av[0])->data,as_str(av[0])->len);}
 static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_open_output_string();}
 static val_t prim_get_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_string(av[0]);}
 static val_t prim_open_input_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-file: not a string");
     return port_open_file(as_str(av[0])->data, PORT_INPUT);
 }
 static val_t prim_open_output_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "open-output-file: not a string");
     return port_open_file(as_str(av[0])->data, PORT_OUTPUT);
 }
 static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
@@ -659,6 +682,7 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
 }
 
 static val_t prim_system(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "system: not a string");
     return vfix(system(as_str(av[0])->data));
 }
 
@@ -926,10 +950,12 @@ static val_t prim_record_pred(int ac, val_t *av, void *ud) {
 }
 static val_t prim_record_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "record-ref: not an exact integer");
     return as_rec(av[0])->fields[vunfix(av[1])];
 }
 static val_t prim_record_set(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "record-set!: not an exact integer");
     as_rec(av[0])->fields[vunfix(av[1])] = av[2];
     return V_VOID;
 }
@@ -951,7 +977,7 @@ static val_t prim_values(int ac, val_t *av, void *ud) {
 }
 static val_t prim_void(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return V_VOID;}
 static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(av[i-1]!=av[i]) return V_FALSE; return V_TRUE;}
-static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
+static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_floor_div(int ac, val_t *av, void *ud) {

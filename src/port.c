@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <assert.h>
 
+extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
+
 val_t PORT_STDIN, PORT_STDOUT, PORT_STDERR;
 
 static val_t make_port(int flags) {
@@ -249,7 +251,8 @@ void port_close(val_t v) {
 
 val_t port_get_output_string(val_t v) {
     Port *p = as_port(v);
-    assert(p->flags & PORT_STRING);
+    if (!(p->flags & PORT_STRING))
+        scm_raise(V_FALSE, "get-output-string: not a string port");
     uint32_t len = (uint32_t)p->u.str.len;
     String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     s->hdr.type  = T_STRING;
