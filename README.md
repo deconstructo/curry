@@ -63,6 +63,7 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
 | [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
 | [mqtt](docs/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
+| [ode](docs/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
 | [mcp](docs/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
 
 ---
@@ -283,6 +284,18 @@ Example:
 ---
 
 ## Changelog
+
+### 0.7.3.1 — ODE solver module
+
+- Added `(curry ode)`: pure Scheme ODE solvers for initial-value problems `dy/dt = f(t, y)`
+- **Euler** — first-order, fixed step
+- **RK4** — classical fourth-order Runge-Kutta, fixed step; exact for polynomials of degree ≤ 4
+- **RK45** — Dormand-Prince adaptive step (the algorithm behind MATLAB's `ode45` and SciPy's `RK45`); step size controlled automatically to meet a tolerance
+- **Verlet** — velocity-Verlet symplectic integrator for Hamiltonian systems; conserves energy over long integrations where RK methods drift
+- All methods accept scalar `y` (single ODE) or list `y` (system of ODEs)
+- Works with the full numeric tower: exact rationals, complex numbers, and symbolic expressions
+- All methods have `/steps` variants returning `((t . y) ...)` snapshots at every accepted step
+- 30 tests covering all four methods against closed-form solutions
 
 ### 0.7.3 — MQTT client module
 
