@@ -25,6 +25,13 @@ if(TARGET curry_plplot)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+if(BUILD_MODULE_REDIS AND TARGET curry_redis)
+    add_test(NAME redis
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_redis.sh
+                $<TARGET_FILE:curry>
+                ${MOD_PATH})
+endif()
+
 if(BUILD_MODULE_MCP AND TARGET curry_mcp)
     add_test(NAME mcp
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_mcp.sh
