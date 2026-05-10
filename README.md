@@ -77,10 +77,25 @@ brew install curry
 
 This installs the `curry` binary with the following modules pre-built: json, network, redis, regex, sync, mcp, sqlite, crypto, ldap, storage (S3/GCS/Azure), image (PNG/JPEG), and git.
 
+Optional modules can be enabled at install time with `--with-*` flags:
+
+```bash
+brew install deconstructo/curry/curry --with-qt6       # Qt6 GUI + canvas
+brew install deconstructo/curry/curry --with-plplot    # scientific plotting
+brew install deconstructo/curry/curry --with-symengine # SymEngine CAS backend
+brew install deconstructo/curry/curry --with-neo4j     # Neo4j client
+brew install deconstructo/curry/curry --with-graphql   # GraphQL HTTP client
+
+# All of the above at once
+brew install deconstructo/curry/curry \
+  --with-qt6 --with-plplot --with-symengine --with-neo4j --with-graphql
+```
+
 To install the latest development build straight from the `main` branch:
 
 ```bash
 brew install --HEAD deconstructo/curry/curry
+brew install --HEAD deconstructo/curry/curry --with-qt6  # HEAD + Qt6
 ```
 
 The formula lives at [`Formula/curry.rb`](Formula/curry.rb) in this repository, so you can also install directly from a local clone:
