@@ -123,7 +123,6 @@ sudo apt install libcurl4-openssl-dev  # storage, graphql
 sudo apt install libldap-dev           # ldap
 sudo apt install libpng-dev libjpeg-dev # image
 sudo apt install libgit2-dev           # git
-sudo apt install libgtk-4-dev          # ui (GTK4)
 sudo apt install libplplot-dev         # plplot
 ```
 
@@ -140,10 +139,10 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_LDAP=ON \
   -DBUILD_MODULE_STORAGE=ON \
   -DBUILD_MODULE_GRAPHQL=ON \
-  -DBUILD_MODULE_UI=ON \
   -DBUILD_MODULE_IMAGE=ON \
   -DBUILD_MODULE_GIT=ON \
   -DBUILD_MODULE_PLPLOT=ON \
+  -DBUILD_MODULE_MQTT=ON \  
   -DBUILD_MODULE_QT6=ON
 cmake --build build -j$(nproc)
 ```

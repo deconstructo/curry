@@ -4,19 +4,19 @@ class Curry < Formula
   license "GPL-3.0-only"
 
   # Update url + sha256 after tagging a release:
-  #   git tag v0.7.2 && git push origin v0.7.2
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.7.2.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.7.2.tar.gz"
+  #   git tag v0.7.3.1 && git push origin v0.7.3.1
+  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.7.3.1.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.7.3.1.tar.gz"
   sha256 "a753424947d30d4087aa122a323fce6452850a5d780ce101e33459a8151cfda6"
-  version "0.7.2"
+  version "0.7.3.1"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
-  option "with-qt6",      "Build Qt6 GUI module"
-  option "with-plplot",   "Build PLplot scientific plotting module"
-  option "with-symengine","Build SymEngine symbolic CAS module"
-  option "with-neo4j",    "Build Neo4j client module"
-  option "with-graphql",  "Build GraphQL client module"
+  option "with-qt6",       "Build Qt6 GUI module"
+  option "with-plplot",    "Build PLplot scientific plotting module"
+  option "with-mqtt",      "Build MQTT client module with TLS (requires Paho C)"
+  option "with-symengine", "Build SymEngine symbolic CAS module"
+  option "with-neo4j",     "Build Neo4j client module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -28,18 +28,19 @@ class Curry < Formula
   # REPL history / line editing
   depends_on "readline"
 
-  # Always-on optional modules with brew-available deps
+  # Always-on modules with brew-available deps
   depends_on "sqlite"
   depends_on "openssl@3"
   depends_on "libgit2"
   depends_on "libpng"
   depends_on "jpeg-turbo"
-  # curl ships with macOS; no separate dep needed
+  # curl ships with macOS; no separate dep needed for graphql/storage
 
   # Option-gated deps
-  depends_on "qt@6"       if build.with? "qt6"
-  depends_on "plplot"     if build.with? "plplot"
-  depends_on "symengine"  if build.with? "symengine"
+  depends_on "qt@6"         if build.with? "qt6"
+  depends_on "plplot"       if build.with? "plplot"
+  depends_on "libpaho-mqtt" if build.with? "mqtt"
+  depends_on "symengine"    if build.with? "symengine"
 
   def install
     prefix_paths = [Formula["openssl@3"].opt_prefix]
@@ -52,13 +53,16 @@ class Curry < Formula
       -DBUILD_MODULE_CRYPTO=ON
       -DBUILD_MODULE_LDAP=ON
       -DBUILD_MODULE_STORAGE=ON
+      -DBUILD_MODULE_GRAPHQL=ON
+      -DBUILD_MODULE_REDIS=ON
       -DBUILD_MODULE_IMAGE=ON
       -DBUILD_MODULE_GIT=ON
-      -DBUILD_MODULE_QT6=#{build.with?("qt6")      ? "ON" : "OFF"}
-      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")      ? "ON" : "OFF"}
+      -DBUILD_MODULE_MCP=ON
+      -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
+      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
+      -DBUILD_MODULE_MQTT=#{build.with?("mqtt")       ? "ON" : "OFF"}
       -DBUILD_MODULE_SYMENGINE=#{build.with?("symengine") ? "ON" : "OFF"}
-      -DBUILD_MODULE_NEO4J=#{build.with?("neo4j")      ? "ON" : "OFF"}
-      -DBUILD_MODULE_GRAPHQL=#{build.with?("graphql")    ? "ON" : "OFF"}
+      -DBUILD_MODULE_NEO4J=#{build.with?("neo4j")    ? "ON" : "OFF"}
       -DBUILD_MODULE_VECDB=OFF
     ]
 

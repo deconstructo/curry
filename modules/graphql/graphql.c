@@ -178,7 +178,7 @@ static curry_val parse_json(const char **pp) {
     if (c == '{') {
         (*pp)++;
         curry_val result = curry_nil();
-        while ((**pp = *(skip_ws(*pp))), **pp != '}' && **pp) {
+        while ((*pp = skip_ws(*pp)), **pp != '}' && **pp) {
             curry_val key = parse_string(pp);
             *pp = skip_ws(*pp);
             if (**pp == ':') (*pp)++;
@@ -194,7 +194,7 @@ static curry_val parse_json(const char **pp) {
         (*pp)++;
         curry_val result = curry_nil(); curry_val tail = curry_nil();
         bool first = true;
-        while ((**pp = *(skip_ws(*pp))), **pp != ']' && **pp) {
+        while ((*pp = skip_ws(*pp)), **pp != ']' && **pp) {
             curry_val v = parse_json(pp);
             curry_val cell = curry_make_pair(v, curry_nil());
             if (first) { result = tail = cell; first = false; }
