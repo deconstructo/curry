@@ -1346,6 +1346,7 @@ void builtins_register(val_t env) {
     DEF("void",       prim_void,    0,0);
     DEF("load",       prim_load,    1,1);
     DEF("exit",       prim_exit,    0,1);
+    DEF("quit",       prim_exit,    0,1);
     DEF("system",     prim_system,  1,1);
     DEF("gc",         prim_gc,      0,0);
     DEF("eof-object", prim_void,    0,0); /* placeholder; EOF created by reader */
