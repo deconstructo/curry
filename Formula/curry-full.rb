@@ -40,6 +40,7 @@ class CurryFull < Formula
 
     args = std_cmake_args + %W[
       -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       -DBUILD_MODULE_CRYPTO=ON
       -DBUILD_MODULE_LDAP=ON
       -DBUILD_MODULE_STORAGE=ON
