@@ -66,6 +66,31 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 
 ---
 
+## Install via Homebrew (macOS)
+
+The fastest way to get Curry on macOS — no manual dependency wrangling required:
+
+```bash
+brew tap deconstructo/curry https://github.com/deconstructo/curry
+brew install curry
+```
+
+This installs the `curry` binary with the following modules pre-built: json, network, redis, regex, sync, mcp, sqlite, crypto, ldap, storage (S3/GCS/Azure), image (PNG/JPEG), and git.
+
+To install the latest development build straight from the `main` branch:
+
+```bash
+brew install --HEAD deconstructo/curry/curry
+```
+
+The formula lives at [`Formula/curry.rb`](Formula/curry.rb) in this repository, so you can also install directly from a local clone:
+
+```bash
+brew install --formula Formula/curry.rb
+```
+
+---
+
 ## Building on Linux (Debian / Ubuntu)
 
 ### 1. Install dependencies
@@ -243,8 +268,10 @@ Example:
 
 ## Changelog
 
-### 0.7.2 — MCP server module
+### 0.7.2 — MCP server module and packaging
 
+- **Homebrew formula** (`Formula/curry.rb`) — install on macOS via `brew tap deconstructo/curry && brew install curry`; pre-builds sqlite, crypto, ldap, storage, image, and git modules automatically
+- **Debian package** — `cpack -G DEB` produces `curry-scheme_0.7.2_<arch>.deb`; installs to standard system paths with correct `Depends` / `Recommends`
 - Added `(curry mcp)` module: expose Curry procedures as [Model Context Protocol](https://modelcontextprotocol.io/) tools callable from Claude Code and other AI clients
 - **stdio transport** — JSON-RPC 2.0 over stdin/stdout; one client per process, spawned by the MCP client (`mcp-serve`)
 - **SSE transport** — persistent HTTP + Server-Sent Events server; multiple concurrent clients on one port (`mcp-serve-sse`)
