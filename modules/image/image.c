@@ -162,9 +162,9 @@ static curry_val load_png(const char *path) {
     png_read_update_info(png, info);
 
     curry_val img = make_image(w, h, 4);
-    uint8_t **rows = malloc(h * sizeof(uint8_t *));
-    uint8_t *buf   = malloc(w * h * 4);
-    for (uint32_t i = 0; i < h; i++) rows[i] = buf + i * w * 4;
+    uint8_t **rows = malloc((size_t)h * sizeof(uint8_t *));
+    uint8_t *buf   = malloc((size_t)w * h * 4);
+    for (uint32_t i = 0; i < h; i++) rows[i] = buf + (size_t)i * w * 4;
 
     png_read_image(png, rows);
 
@@ -199,7 +199,7 @@ static void save_png(const char *path, curry_val img) {
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png, info);
 
-    uint8_t *row = malloc(w * ch);
+    uint8_t *row = malloc((size_t)w * ch);
     curry_val bv = img_bv(img);
     for (uint32_t y = 0; y < h; y++) {
         for (uint32_t i = 0; i < w * ch; i++)
@@ -268,7 +268,7 @@ static curry_val load_jpeg(const char *path) {
     curry_val img = make_image(w, h, ch);
     curry_val bv  = img_bv(img);
 
-    uint8_t *row = malloc(w * ch);
+    uint8_t *row = malloc((size_t)w * ch);
     for (uint32_t y = 0; y < h; y++) {
         jpeg_read_scanlines(&cinfo, &row, 1);
         for (uint32_t i = 0; i < w * ch; i++)
@@ -310,7 +310,7 @@ static void save_jpeg(const char *path, curry_val img, int quality) {
     jpeg_start_compress(&cinfo, TRUE);
 
     curry_val bv = img_bv(img);
-    uint8_t *row = malloc(w * 3);
+    uint8_t *row = malloc((size_t)w * 3);
     for (uint32_t y = 0; y < h; y++) {
         for (uint32_t x = 0; x < w; x++) {
             row[x*3+0] = curry_bytevector_ref(bv, (y*w+x)*ch+0);
