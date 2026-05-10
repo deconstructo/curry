@@ -421,6 +421,15 @@ static val_t read_datum(val_t port) {
         case ';': /* datum comment: skip next datum */
             read_datum(port);
             return read_datum(port);
+        case ':': {
+            /* #:keyword — Guile/Racket-style keyword symbol, interned as "#:name" */
+            StrBuf sb; sb_init(&sb);
+            sb_push(&sb, '#'); sb_push(&sb, ':');
+            while (!is_delimiter(peek_char_port(port)))
+                sb_push(&sb, (char)next_char(port));
+            sb.buf[sb.len] = '\0';
+            return sym_intern(sb.buf, (uint32_t)sb.len);
+        }
         /* Numeric prefixes */
         case 'b': case 'B': {
             /* binary number follows */

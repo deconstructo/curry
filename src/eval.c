@@ -829,11 +829,56 @@ tail:
     }
 
     if (op == S_IMPORT) {
-        /* Handled in modules.c; forward to the module system */
+        /* Handled in modules.c; forward to the module system.
+         *
+         * Supports both the traditional R7RS filter wrapper forms:
+         *   (import (prefix (curry redis) r/))
+         *   (import (only   (curry redis) connect get))
+         *
+         * And the keyword-argument forms (more readable for single imports):
+         *   (import (curry redis) #:prefix r/)
+         *   (import (curry redis) #:only   (connect get))
+         *   (import (curry redis) #:except (internal-helper))
+         *   (import (curry redis) #:rename ((connect r/connect)))
+         *
+         * After consuming a module spec, peek at the next element: if it is
+         * a #:keyword symbol (starts with "#:") treat it as a modifier and
+         * the element after it as the argument, then build the equivalent
+         * traditional filter form before passing to modules_import.
+         */
         extern val_t modules_import(val_t spec, val_t env);
+        extern val_t scm_cons(val_t, val_t);
         while (vis_pair(rest)) {
-            modules_import(vcar(rest), env);
+            val_t spec = vcar(rest);
             rest = vcdr(rest);
+
+            /* Check for an immediately following #:keyword modifier */
+            if (vis_pair(rest) && vis_symbol(vcar(rest))) {
+                const char *kw = sym_cstr(vcar(rest));
+                if (kw[0] == '#' && kw[1] == ':') {
+                    val_t kw_sym = vcar(rest); rest = vcdr(rest);
+                    val_t kw_arg = vcar(rest); rest = vcdr(rest);
+                    const char *name = sym_cstr(kw_sym) + 2; /* skip "#:" */
+
+                    if (!strcmp(name, "prefix")) {
+                        /* (prefix spec pfx-sym) */
+                        spec = scm_cons(S_PREFIX,
+                               scm_cons(spec,
+                               scm_cons(kw_arg, V_NIL)));
+                    } else if (!strcmp(name, "only")) {
+                        /* (only spec sym...) — kw_arg is a list */
+                        spec = scm_cons(S_ONLY, scm_cons(spec, kw_arg));
+                    } else if (!strcmp(name, "except")) {
+                        spec = scm_cons(S_EXCEPT, scm_cons(spec, kw_arg));
+                    } else if (!strcmp(name, "rename")) {
+                        /* (rename spec (old new)...) — kw_arg is a list of pairs */
+                        spec = scm_cons(S_RENAME, scm_cons(spec, kw_arg));
+                    }
+                    /* Unknown #:keyword: fall through, import spec as-is */
+                }
+            }
+
+            modules_import(spec, env);
         }
         return V_VOID;
     }
