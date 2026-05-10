@@ -189,29 +189,46 @@
             (wait))))))
 
 ;;; ---- One physics step (runs inside sim-actor) ----
+;;;
+;;; Velocity-Verlet (2nd-order symplectic):
+;;;   x_{n+1} = x_n + h·v_n + h²/2·a_n        (position half-step)
+;;;   a_{n+1} = f(x_{n+1})                      (forces at new positions)
+;;;   v_{n+1} = v_n + h/2·(a_n + a_{n+1})      (velocity full step)
+;;;
+;;; Two force evaluations per step vs. one for symplectic Euler, but
+;;; energy error drops from O(h) to O(h²) over long integrations.
 
 (define (run-one-step!)
-  (let* ((D      (inexact *D*))
-         (bodies *bodies*))
+  (let* ((D   (inexact *D*))
+         (bs  *bodies*)
+         (dt  *dt*)
+         (dt2 (* 0.5 dt dt)))
     (let step-n ((n 0))
       (when (< n *speed*)
-        (let ((accels (parallel-compute-accel bodies D *G*)))
-          (for-each
-            (lambda (body accel)
-              (vec-add! (body-vel body) accel *dt*)
-              (vec-add! (body-pos body) (body-vel body) *dt*)
-              (when *trails*
-                (let* ((pos (body-pos body))
-                       (px  (vector-ref pos 0))
-                       (py  (if (>= (vector-length pos) 2) (vector-ref pos 1) 0.0))
-                       (trail (body-trail body))
-                       (max-trail 120))
-                  (body-set-trail! body
-                    (let ((t (cons (cons px py) trail)))
-                      (if (> (length t) max-trail)
-                          (list-head t max-trail)
-                          t))))))
-            bodies accels))
+        (let ((a0 (parallel-compute-accel bs D *G*)))
+          ;; x_{n+1} = x_n + h·v_n + h²/2·a_n
+          (for-each (lambda (b a)
+                      (vec-add! (body-pos b) (body-vel b) dt)
+                      (vec-add! (body-pos b) a            dt2))
+                    bs a0)
+          ;; a_{n+1} at updated positions
+          (let ((a1 (parallel-compute-accel bs D *G*)))
+            ;; v_{n+1} = v_n + h/2·(a_n + a_{n+1})
+            (for-each (lambda (b a-old a-new)
+                        (vec-add! (body-vel b) a-old (* 0.5 dt))
+                        (vec-add! (body-vel b) a-new (* 0.5 dt))
+                        (when *trails*
+                          (let* ((pos   (body-pos b))
+                                 (px    (vector-ref pos 0))
+                                 (py    (if (>= (vector-length pos) 2)
+                                            (vector-ref pos 1) 0.0))
+                                 (trail (body-trail b)))
+                            (body-set-trail! b
+                              (let ((t (cons (cons px py) trail)))
+                                (if (> (length t) 120)
+                                    (list-head t 120)
+                                    t))))))
+                      bs a0 a1)))
         (step-n (+ n 1))))))
 
 ;;; ---- Simulation actor ----
@@ -343,7 +360,7 @@
       (string-append "dt = " (number->string *dt*)
                      "   bodies = " (number->string (length *bodies*))))
     (gfx-draw-text! painter 10 66
-      (string-append "threads: 1 Qt + 1 sim + 1 gather + "
+      (string-append "velocity-Verlet   threads: 1+1+1+"
                      (number->string *max-workers*) " workers"))
     (when *paused*
       (gfx-set-color! painter 1.0 0.6 0.2 0.9)
