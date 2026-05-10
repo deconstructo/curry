@@ -2,11 +2,19 @@
  * curry_redis — Redis client module for Curry Scheme.
  *
  * Implements the RESP2 wire protocol directly; no hiredis dependency.
+ * When built with OpenSSL present, HAVE_REDIS_TLS is defined and TLS
+ * connections are available via redis-connect-tls.
  *
  * Scheme API:
- *   ; Connection
+ *   ; Plain TCP connection
  *   (redis-connect host port)                  -> client
  *   (redis-connect host port password)         -> client  (AUTH)
+ *
+ *   ; TLS connection (requires OpenSSL at build time)
+ *   (redis-connect-tls host port)              -> client
+ *   (redis-connect-tls host port password)     -> client  (AUTH over TLS)
+ *   (redis-connect-tls host port password ca)  -> client  (custom CA cert file)
+ *
  *   (redis-close!  client)                     -> void
  *   (redis-ping    client)                     -> #t
  *   (redis-select  client db-index)            -> void
@@ -72,6 +80,11 @@
 #include <stdarg.h>
 #include <errno.h>
 
+#ifdef HAVE_REDIS_TLS
+#  include <openssl/ssl.h>
+#  include <openssl/err.h>
+#endif
+
 #ifdef _WIN32
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
@@ -99,6 +112,10 @@ typedef int sock_t;
 
 typedef struct {
     sock_t  fd;
+#ifdef HAVE_REDIS_TLS
+    SSL_CTX *ssl_ctx;  /* NULL for plain TCP connections */
+    SSL     *ssl;
+#endif
     char    rbuf[RBUF_SIZE];
     size_t  rlen;   /* bytes in rbuf */
     size_t  rpos;   /* read cursor */
@@ -128,7 +145,13 @@ static RedisConn *val_to_conn(curry_val v) {
 
 static void write_all(RedisConn *c, const char *buf, size_t len) {
     while (len > 0) {
-        ssize_t n = (ssize_t)sock_write(c->fd, buf, len);
+        ssize_t n;
+#ifdef HAVE_REDIS_TLS
+        if (c->ssl)
+            n = (ssize_t)SSL_write(c->ssl, buf, (int)len);
+        else
+#endif
+            n = (ssize_t)sock_write(c->fd, buf, len);
         if (n <= 0) curry_error("redis: write failed: %s", strerror(errno));
         buf += n; len -= (size_t)n;
     }
@@ -162,7 +185,13 @@ static void resp_arg_int(RedisConn *c, long long n) {
 
 static int rbuf_getc(RedisConn *c) {
     if (c->rpos >= c->rlen) {
-        ssize_t n = (ssize_t)sock_read(c->fd, c->rbuf, RBUF_SIZE);
+        ssize_t n;
+#ifdef HAVE_REDIS_TLS
+        if (c->ssl)
+            n = (ssize_t)SSL_read(c->ssl, c->rbuf, RBUF_SIZE);
+        else
+#endif
+            n = (ssize_t)sock_read(c->fd, c->rbuf, RBUF_SIZE);
         if (n <= 0) curry_error("redis: connection closed or read error");
         c->rlen = (size_t)n;
         c->rpos = 0;
@@ -288,11 +317,9 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     }
     freeaddrinfo(res);
 
-    RedisConn *c = malloc(sizeof(RedisConn));
+    RedisConn *c = calloc(1, sizeof(RedisConn));
     if (!c) { sock_close(fd); curry_error("redis-connect: out of memory"); }
-    c->fd   = fd;
-    c->rlen = 0;
-    c->rpos = 0;
+    c->fd = fd;
 
     if (password) {
         resp_start(c, 2);
@@ -310,6 +337,13 @@ static curry_val fn_close(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 1); resp_arg_cstr(c, "QUIT");
     resp_read(c);
+#ifdef HAVE_REDIS_TLS
+    if (c->ssl) {
+        SSL_shutdown(c->ssl);
+        SSL_free(c->ssl);
+        SSL_CTX_free(c->ssl_ctx);
+    }
+#endif
     sock_close(c->fd);
     free(c);
     return curry_void();
@@ -502,7 +536,7 @@ static curry_val fn_hgetall(int ac, curry_val *av, void *ud) {
 static curry_val fn_hdel(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, ac - 1);
+    resp_start(c, ac);
     resp_arg_cstr(c, "HDEL");
     for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
     return resp_read(c);
@@ -542,7 +576,7 @@ static curry_val fn_hexists(int ac, curry_val *av, void *ud) {
 static curry_val fn_lpush(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, ac - 1);
+    resp_start(c, ac);
     resp_arg_cstr(c, "LPUSH");
     for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
     return resp_read(c);
@@ -551,7 +585,7 @@ static curry_val fn_lpush(int ac, curry_val *av, void *ud) {
 static curry_val fn_rpush(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, ac - 1);
+    resp_start(c, ac);
     resp_arg_cstr(c, "RPUSH");
     for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
     return resp_read(c);
@@ -600,7 +634,7 @@ static curry_val fn_lrange(int ac, curry_val *av, void *ud) {
 static curry_val fn_sadd(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, ac - 1);
+    resp_start(c, ac);
     resp_arg_cstr(c, "SADD");
     for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
     return resp_read(c);
@@ -609,7 +643,7 @@ static curry_val fn_sadd(int ac, curry_val *av, void *ud) {
 static curry_val fn_srem(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, ac - 1);
+    resp_start(c, ac);
     resp_arg_cstr(c, "SREM");
     for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
     return resp_read(c);
@@ -763,11 +797,82 @@ static curry_val fn_info(int ac, curry_val *av, void *ud) {
     return resp_read(c);
 }
 
+/* ---- TLS connection ---- */
+
+#ifdef HAVE_REDIS_TLS
+static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    const char *host     = curry_string(av[0]);
+    int         port     = (int)curry_fixnum(av[1]);
+    const char *password = (ac >= 3 && curry_is_string(av[2])) ? curry_string(av[2]) : NULL;
+    const char *ca_cert  = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : NULL;
+
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port_str, &hints, &res) != 0)
+        curry_error("redis-connect-tls: cannot resolve %s", host);
+    sock_t fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd == SOCK_INVALID) { freeaddrinfo(res); curry_error("redis-connect-tls: socket()"); }
+    if (connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0) {
+        sock_close(fd); freeaddrinfo(res);
+        curry_error("redis-connect-tls: connect to %s:%d failed: %s", host, port, strerror(errno));
+    }
+    freeaddrinfo(res);
+
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) { sock_close(fd); curry_error("redis-connect-tls: SSL_CTX_new failed"); }
+
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    if (ca_cert) {
+        if (SSL_CTX_load_verify_locations(ctx, ca_cert, NULL) != 1) {
+            SSL_CTX_free(ctx); sock_close(fd);
+            curry_error("redis-connect-tls: cannot load CA cert: %s", ca_cert);
+        }
+    } else {
+        SSL_CTX_set_default_verify_paths(ctx);
+    }
+
+    SSL *ssl = SSL_new(ctx);
+    if (!ssl) { SSL_CTX_free(ctx); sock_close(fd); curry_error("redis-connect-tls: SSL_new failed"); }
+    SSL_set_fd(ssl, (int)fd);
+    SSL_set_tlsext_host_name(ssl, host);  /* SNI */
+
+    if (SSL_connect(ssl) != 1) {
+        char errbuf[256];
+        ERR_error_string_n(ERR_get_error(), errbuf, sizeof(errbuf));
+        SSL_free(ssl); SSL_CTX_free(ctx); sock_close(fd);
+        curry_error("redis-connect-tls: TLS handshake failed: %s", errbuf);
+    }
+
+    RedisConn *c = calloc(1, sizeof(RedisConn));
+    if (!c) { SSL_free(ssl); SSL_CTX_free(ctx); sock_close(fd); curry_error("redis-connect-tls: out of memory"); }
+    c->fd      = fd;
+    c->ssl_ctx = ctx;
+    c->ssl     = ssl;
+
+    if (password) {
+        resp_start(c, 2);
+        resp_arg_cstr(c, "AUTH");
+        resp_arg_cstr(c, password);
+        curry_val r = resp_read(c);
+        (void)r;
+    }
+
+    return conn_to_val(c);
+}
+#endif  /* HAVE_REDIS_TLS */
+
 /* ---- Module entry point ---- */
 
 void curry_module_init(CurryVM *vm) {
     /* Connection */
     curry_define_fn(vm, "redis-connect",  fn_connect,  2, 3, NULL);
+#ifdef HAVE_REDIS_TLS
+    curry_define_fn(vm, "redis-connect-tls", fn_connect_tls, 2, 4, NULL);
+#endif
     curry_define_fn(vm, "redis-close!",   fn_close,    1, 1, NULL);
     curry_define_fn(vm, "redis-ping",     fn_ping,     1, 1, NULL);
     curry_define_fn(vm, "redis-select",   fn_select,   2, 2, NULL);

@@ -20,6 +20,26 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   add_compile_options(-O2)
 endif()
 
+# On macOS, prefer the Homebrew arm64 OpenSSL over any x86_64 copy in /usr/local.
+if(APPLE)
+  if(NOT OPENSSL_ROOT_DIR)
+    execute_process(
+      COMMAND brew --prefix openssl
+      OUTPUT_VARIABLE OPENSSL_ROOT_DIR
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+  endif()
+  # Clear stale cache entries that point outside the desired root (e.g. a
+  # previous configure found the x86_64 copy in /usr/local on an arm64 host).
+  if(OPENSSL_ROOT_DIR AND OPENSSL_SSL_LIBRARY AND
+     NOT OPENSSL_SSL_LIBRARY MATCHES "^${OPENSSL_ROOT_DIR}")
+    message(STATUS "Clearing stale OpenSSL cache: ${OPENSSL_SSL_LIBRARY}")
+    unset(OPENSSL_CRYPTO_LIBRARY CACHE)
+    unset(OPENSSL_SSL_LIBRARY CACHE)
+    unset(OPENSSL_INCLUDE_DIR CACHE)
+  endif()
+endif()
+
 # ---- Required dependencies ----
 
 find_package(PkgConfig REQUIRED)
@@ -310,6 +330,14 @@ endif()
 
 if(BUILD_MODULE_REDIS)
   curry_c_module(redis)
+  find_package(OpenSSL QUIET)
+  if(OpenSSL_FOUND)
+    target_compile_definitions(curry_redis PRIVATE HAVE_REDIS_TLS)
+    target_link_libraries(curry_redis PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "Redis TLS support enabled (OpenSSL ${OPENSSL_VERSION})")
+  else()
+    message(STATUS "Redis TLS support disabled (OpenSSL not found)")
+  endif()
 endif()
 
 if(BUILD_MODULE_IMAGE)
