@@ -491,17 +491,30 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.2_arm64.deb
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.3_<arch>.deb
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
 
-# Hard runtime deps (modules pulled in on demand; listed as Recommends, not Depends)
+# Hard runtime deps — always required regardless of which modules are built
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "libgc1t64 | libgc1 | libgc2, libgmp10")
+
+# Always-on optional modules (network, redis, sqlite, regex, sync, vecdb, json, mqtt)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "libsqlite3-0, libssl3 | libssl1.1, libcurl4, libgit2-1.1 | libgit2-1.5 | libgit2-1.7, libpng16-16, libjpeg-turbo8 | libjpeg62-turbo")
+    "libsqlite3-0, \
+     libssl3 | libssl1.1, \
+     libcurl4 | libcurl4t64, \
+     libgit2-1.1 | libgit2-1.5 | libgit2-1.7 | libgit2-1.9, \
+     libpng16-16 | libpng16-16t64, \
+     libjpeg-turbo8 | libjpeg62-turbo | libjpeg-turbo9, \
+     libpaho-mqtt3cs1 | libpaho-mqtt3c1, \
+     libldap-2.5-0 | libldap-2.4-2")
+
+# Heavy optional modules — useful but not installed by default
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS
-    "libplplot19 | libplplot17, libreadline8")
+    "libqt6widgets6, libqt6opengl6, \
+     libplplot19 | libplplot17, \
+     libreadline8 | libreadline9")
 
 include(CPack)
