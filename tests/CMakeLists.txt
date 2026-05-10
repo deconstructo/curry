@@ -32,6 +32,13 @@ if(BUILD_MODULE_REDIS AND TARGET curry_redis)
                 ${MOD_PATH})
 endif()
 
+if(BUILD_MODULE_MQTT AND TARGET curry_mqtt)
+    add_test(NAME mqtt
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_mqtt.sh
+                $<TARGET_FILE:curry>
+                ${MOD_PATH})
+endif()
+
 if(BUILD_MODULE_MCP AND TARGET curry_mcp)
     add_test(NAME mcp
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_mcp.sh
