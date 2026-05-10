@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(curry VERSION 0.7.2 LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -404,7 +406,50 @@ add_subdirectory(tests)
 
 # ---- Install ----
 
-install(TARGETS curry DESTINATION bin)
-install(TARGETS curry_core DESTINATION lib)
-install(DIRECTORY include/ DESTINATION include/curry)
-install(DIRECTORY lib/ DESTINATION lib/curry OPTIONAL)
+install(TARGETS curry DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS curry_core DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/curry)
+# Scheme source modules (gravity.scm etc.) — placed so <exe>/../lib/curry/modules finds them
+install(DIRECTORY lib/curry/modules/
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/curry/modules
+        OPTIONAL
+        FILES_MATCHING PATTERN "*.scm")
+
+# Documentation
+install(DIRECTORY docs/
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}
+        FILES_MATCHING PATTERN "*.md" PATTERN "*.pdf")
+install(FILES README.md LICENSE
+        DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+# ---- Packaging (CPack / .deb) ----
+
+set(CPACK_PACKAGE_NAME              "curry-scheme")
+set(CPACK_PACKAGE_VENDOR            "Chris Ó Luanaigh")
+set(CPACK_PACKAGE_CONTACT           "metanoia@gmail.com")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Curry Scheme — R7RS interpreter with actor concurrency and extended numerics")
+set(CPACK_PACKAGE_DESCRIPTION "\
+R7RS Scheme interpreter featuring Boehm GC, GMP arbitrary-precision\
+ arithmetic, actor-model concurrency (pthreads), Clifford algebra\
+ multivectors, symbolic CAS, and a rich optional module system\
+ (JSON, SQLite, Redis, S3/Azure/GCS, GraphQL, Git, image I/O, Qt6, PLplot).")
+set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+# DEB-specific
+set(CPACK_GENERATOR                 "DEB")
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.2_arm64.deb
+set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
+set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
+
+# Hard runtime deps (modules pulled in on demand; listed as Recommends, not Depends)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libgc1t64 | libgc1 | libgc2, libgmp10")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
+    "libsqlite3-0, libssl3 | libssl1.1, libcurl4, libgit2-1.1 | libgit2-1.5 | libgit2-1.7, libpng16-16, libjpeg-turbo8 | libjpeg62-turbo")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS
+    "libplplot19 | libplplot17, libreadline8")
+
+include(CPack)

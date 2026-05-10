@@ -166,6 +166,36 @@ cmake --build build -j$(sysctl -n hw.logicalcpu)
 - Modules build as `.so` bundles on both Linux and macOS; `(import (curry qt6))` works identically on both platforms.
 - Apple Silicon and x86_64 are both supported natively.
 
+### 4. Create a .deb package
+
+Build in Release mode, then run CPack from the build directory:
+
+```bash
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j$(nproc)
+cd build-release && cpack -G DEB
+```
+
+This produces `curry-scheme_0.7.2_arm64.deb` (architecture auto-detected). Install it with:
+
+```bash
+sudo dpkg -i curry-scheme_0.7.2_arm64.deb
+```
+
+The package installs to standard system paths:
+
+| Path | Contents |
+|------|----------|
+| `/usr/bin/curry` | Interpreter |
+| `/usr/lib/libcurry_core.a` | Embedding library |
+| `/usr/include/curry/curry.h` | Public C API header |
+| `/usr/lib/curry/modules/curry/` | Extension modules (`.so` + `.scm`) |
+| `/usr/share/doc/curry/` | All documentation (Markdown + PDF) |
+
+Runtime dependencies (`libgc`, `libgmp`) are declared as `Depends`; the optional module libraries (SQLite, OpenSSL, libcurl, etc.) appear as `Recommends`.
+
+Optional modules can be enabled at configure time before packaging — any module whose library is present will be built and included in the package automatically.
+
 ---
 
 ## Testing
