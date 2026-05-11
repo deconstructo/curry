@@ -9,6 +9,7 @@ install_manifest.txt
 Testing/
 tests/curry_test
 b
+.claude/
 
 # ---- Out-of-source build directories ----
 build/
