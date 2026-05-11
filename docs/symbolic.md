@@ -395,6 +395,127 @@ You can use symbolic differentiation to produce a derivative expression, then co
 (df 2)    ; => 20   [4x³ − 6x at x=2]
 ```
 
+## Fractional calculus
+
+Curry extends the symbolic CAS with **fractional derivatives and integrals**, generalising the standard differential operators to non-integer order α. This is useful in viscoelasticity, anomalous diffusion, signal processing, and control theory.
+
+### Symbolic fractional operators
+
+`(frac-diff expr α var)` returns a symbolic expression for the **Caputo fractional derivative** D^α of `expr` with respect to `var`. `(frac-int expr α var)` returns a symbolic expression for the **Riemann-Liouville fractional integral** I^α.
+
+The results are expression trees: they can be further differentiated, integrated, simplified, or have variables substituted:
+
+```scheme
+(symbolic x)
+
+(frac-diff (expt x 2) 1/2 x)    ; => (frac-diff (expt x 2) 1/2 x)
+(frac-int  (expt x 2) 1/2 x)    ; => (frac-int  (expt x 2) 1/2 x)
+
+; Compose symbolic operations
+(∂ (frac-int (expt x 3) 1/2 x) x)   ; differentiates the I^(1/2) node
+(simplify (frac-diff x 1 x))         ; D^1 of x = 1
+```
+
+### Numerical fractional operators
+
+For concrete functions, numerical approximations are available:
+
+`(quad-frac-diff f α x)` computes the **Grünwald-Letnikov** fractional derivative of the callable `f` at point `x` for order `α` (may be non-integer), using a finite-difference sum with adaptive step size.
+
+`(quad-frac-int f α x)` computes the **Riemann-Liouville** fractional integral of `f` at `x` numerically.
+
+```scheme
+; D^(1/2) of x² at x=1 ≈ 2/√π ≈ 1.128
+(quad-frac-diff (lambda (x) (* x x)) 1/2 1.0)    ; ≈ 1.128
+
+; I^(1/2) of 1 at x=1 ≈ 2/√π ≈ 1.128
+(quad-frac-int  (lambda (x) 1.0)     1/2 1.0)    ; ≈ 1.128
+
+; Non-integer order
+(quad-frac-diff (lambda (x) (exp x)) 0.7 1.0)
+```
+
+### General numerical quadrature
+
+`(quad f a b)` computes the definite integral of `f` from `a` to `b` using **Gauss-Kronrod G7K15** adaptive quadrature. It is more accurate than Simpson's rule for smooth functions and handles mild endpoint singularities:
+
+```scheme
+(quad (lambda (x) (* x x)) 0 1)               ; => 1/3  (exact to double precision)
+(quad (lambda (x) (sin x)) 0 3.14159)         ; ≈ 2.0
+(quad (lambda (x) (exp (- (* x x)))) 0 10)   ; ≈ 0.8862...  (half of √π)
+```
+
+`quad` works for any callable `f`; it does not require symbolic expressions. Use it when a closed-form antiderivative does not exist or when the integrand is only available as data.
+
+## Output formatting
+
+By default, symbolic expressions display in **Scheme prefix notation** — the same form used internally. Two additional renderers convert to human-readable forms.
+
+### Infix notation — `sym->string` / `sym->infix`
+
+Both names are aliases for the same function. Returns a string with standard algebraic infix notation, with operator precedence handled automatically:
+
+```scheme
+(symbolic x)
+
+(sym->string (+ x 1))                     ; => "x + 1"
+(sym->string (* 3 (expt x 2)))            ; => "3 * x^2"
+(sym->string (+ (expt x 2) (* -2 x) 1))  ; => "x^2 - 2 * x + 1"
+(sym->string (/ 1 (+ x 1)))              ; => "1 / (x + 1)"
+(sym->string (sin (* 2 x)))              ; => "sin(2 * x)"
+(sym->string (∂ (expt x 2) x))           ; => "2 * x"
+```
+
+Subexpressions are parenthesised only when needed. Subtraction of negative terms is shown with `−` rather than `+ (−...)`.
+
+### LaTeX notation — `sym->latex`
+
+Returns a LaTeX string suitable for embedding in `$...$` or `$$...$$` math mode:
+
+```scheme
+(symbolic x)
+
+(sym->latex (expt x 2))                   ; => "x^{2}"
+(sym->latex (+ (expt x 2) (* -2 x) 1))   ; => "x^{2} - 2 x + 1"
+(sym->latex (/ 1 (+ x 1)))               ; => "\\frac{1}{x + 1}"
+(sym->latex (sqrt x))                     ; => "\\sqrt{x}"
+(sym->latex (sin x))                      ; => "\\sin\\!\\left(x\\right)"
+(sym->latex (exp (* 2 x)))               ; => "e^{2 x}"
+(sym->latex (log x))                      ; => "\\ln\\!\\left(x\\right)"
+```
+
+Rational numbers render as `\frac{p}{q}`. Variable names that match Greek letters render as LaTeX commands:
+
+```scheme
+(symbolic alpha beta gamma omega)
+
+(sym->latex (+ alpha beta))               ; => "\\alpha + \\beta"
+(sym->latex (* gamma (expt omega 2)))     ; => "\\gamma \\omega^{2}"
+```
+
+Complex operators use standard mathematical notation:
+
+```scheme
+(symbolic z)
+
+(sym->latex (conj z))                     ; => "\\overline{z}"
+(sym->latex (real-part z))               ; => "\\operatorname{Re}\\!\\left(z\\right)"
+(sym->latex (imag-part z))               ; => "\\operatorname{Im}\\!\\left(z\\right)"
+```
+
+### Workflow: symbolic derivation to LaTeX
+
+```scheme
+(symbolic x)
+(define f   (+ (expt x 4) (* -3 (expt x 2)) 1))
+(define df  (∂ f x))
+(define ddf (∂ df x))
+
+(display (sym->latex f))    ; x^{4} - 3 x^{2} + 1
+(display (sym->latex df))   ; 4 x^{3} - 6 x
+(display (sym->latex ddf))  ; 12 x^{2} - 6
+```
+
 ## Printing symbolic values
 
 Symbolic expressions display in standard Scheme prefix notation:
@@ -431,6 +552,13 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(wirtinger-d expr z)` | Wirtinger ∂/∂z |
 | `(wirtinger-dbar expr z)` | Wirtinger ∂/∂z̄ |
 | `(auto-diff f x)` | Automatic differentiation at point x |
+| `(frac-diff expr α var)` | Caputo symbolic fractional derivative D^α |
+| `(frac-int expr α var)` | Riemann-Liouville symbolic fractional integral I^α |
+| `(quad-frac-diff f α x)` | Grünwald-Letnikov numerical D^α (for concrete f) |
+| `(quad-frac-int f α x)` | Numerical Riemann-Liouville fractional integral |
+| `(quad f a b)` | Gauss-Kronrod G7K15 adaptive numerical quadrature |
+| `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 - 2*x + 1` |
+| `(sym->latex expr)` | LaTeX string: `x^{2} - 2 x + 1` |
 
 All standard numeric operators (`+` `-` `*` `/` `expt` `sqrt` `sin` `cos` `tan` `exp` `log` `abs`) lift automatically over symbolic values.
 

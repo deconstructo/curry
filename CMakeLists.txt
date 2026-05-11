@@ -98,6 +98,7 @@ set(CORE_SOURCES
   src/actors.c
   src/modules.c
   src/symbolic.c
+  src/symbolic_print.c
   src/quantum.c
   src/surreal.c
   src/multivec.c

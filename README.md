@@ -9,7 +9,7 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 ### Language
 
 - [Language reference](docs/language.md) — syntax, types, special forms, numeric tower, symbolic math, quantum values, Akkadian syntax, actors, module system
-- [Symbolic expressions](docs/symbolic.md) — CAS reference: variables, differentiation, simplification, substitution
+- [Symbolic expressions](docs/symbolic.md) — CAS reference: variables, differentiation, integration, simplification, substitution, complex operators, Wirtinger calculus, auto-diff
 - [Quantum superposition](docs/quantum.md) — quantum value type: construction, observation, arithmetic
 - [Surreal numbers](docs/surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
 - [Multivectors](docs/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
@@ -29,7 +29,7 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 | Octonion | 8-component non-associative | `(make-octonion ...)` |
 | Multivector | Clifford algebra Cl(p,q,r) | `(make-mv p q r)` |
 | Surreal | Hahn series with ω and ε | `SUR_OMEGA`, `SUR_EPSILON` |
-| Symbolic | CAS expression tree | `(sym-var 'x)` |
+| Symbolic | CAS expression tree | `(symbolic x)` |
 
 Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `(∂ (* x x) x)` → symbolic `(+ x x)`.
 
@@ -37,11 +37,28 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 
 | Procedure | Description |
 |-----------|-------------|
-| `(sym-var 'x)` | Declare a symbolic variable |
-| `(∂ expr var)` | Symbolic differentiation |
+| `(symbolic x y ...)` | Declare symbolic variables in scope |
+| `(sym-var 'x)` | Create a symbolic variable object directly |
+| `(sym-var? v)` / `(sym-expr? v)` / `(symbolic? v)` | Predicates |
+| `(sym-var-name v)` | Variable name as string |
+| `(∂ expr var)` | Symbolic differentiation (alias: `sym-diff`) |
+| `(∫ expr var)` | Indefinite integration (alias: `integrate`) |
+| `(∫ expr var a b)` | Definite integral from a to b |
 | `(simplify expr)` | Algebraic simplification |
 | `(substitute expr var val)` | Substitute and evaluate |
-| `(auto-diff f x)` | Exact numeric derivative via dual numbers (ε) |
+| `(conj expr)` / `(real-part expr)` / `(imag-part expr)` | Complex operators — symbolic-aware |
+| `(wirtinger-d expr z)` | Wirtinger ∂/∂z (treats z and z̄ as independent) |
+| `(wirtinger-dbar expr z)` | Wirtinger ∂/∂z̄ — zero iff expr is holomorphic |
+| `(auto-diff f x)` | Numeric derivative at a point via dual-number ε |
+| `(frac-diff expr α var)` | Caputo symbolic fractional derivative D^α |
+| `(frac-int expr α var)` | Riemann-Liouville symbolic fractional integral I^α |
+| `(quad-frac-diff f α x)` | Grünwald-Letnikov numerical D^α (for non-symbolic f) |
+| `(quad-frac-int f α x)` | Numerical RL fractional integral |
+| `(quad f a b)` | Gauss-Kronrod G7K15 adaptive numerical quadrature |
+| `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 + 2*x + 1` |
+| `(sym->latex expr)` | LaTeX string: `x^{2} + 2 x + 1` |
+
+`∂` and `∫` are Unicode (U+2202, U+222B); ASCII aliases `sym-diff` and `integrate` are equivalent. All standard numeric operators lift automatically over symbolic values.
 
 ### Modules
 
