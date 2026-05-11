@@ -8,11 +8,13 @@ mods/
 install_manifest.txt
 Testing/
 tests/curry_test
+b
 
 # ---- Out-of-source build directories ----
 build/
 build-*/
 _build/
+build_*/
 
 # ---- Compiled outputs ----
 *.o
