@@ -38,6 +38,14 @@ info()  { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
 ok()    { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 die()   { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# BSD sed needs: sed -i '' 's/.../.../' file
+# GNU sed needs: sed -i 's/.../.../' file  (no separate empty-string arg)
+if sed --version 2>/dev/null | grep -q GNU; then
+  sedi() { sed -i "$@"; }
+else
+  sedi() { sed -i '' "$@"; }
+fi
+
 # ── preflight ─────────────────────────────────────────────────────────────────
 cd "$REPO_ROOT"
 
@@ -90,23 +98,19 @@ ok "SHA256: $SHA256"
 info "Updating $FORMULA"
 
 # url line
-sed -i '' \
-  "s|url \"https://github.com/${GITHUB_REPO}/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" \
+sedi "s|url \"https://github.com/${GITHUB_REPO}/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" \
   "$FORMULA"
 
 # sha256 line (first occurrence — the release sha, not any resource block)
-sed -i '' \
-  "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" \
+sedi "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" \
   "$FORMULA"
 
 # version line
-sed -i '' \
-  "s|version \"[^\"]*\"|version \"${NEW_VER}\"|" \
+sedi "s|version \"[^\"]*\"|version \"${NEW_VER}\"|" \
   "$FORMULA"
 
 # update the comment block that shows the example commands
-sed -i '' \
-  "s|/tags/v[0-9][^\"]*\.tar\.gz|/tags/${TAG}.tar.gz|g" \
+sedi "s|/tags/v[0-9][^\"]*\.tar\.gz|/tags/${TAG}.tar.gz|g" \
   "$FORMULA"
 
 ok "Formula updated"
