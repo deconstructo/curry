@@ -1031,6 +1031,18 @@ static val_t prim_wirtinger_d(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_wirtinger(av[0], av[1], false); }
 static val_t prim_wirtinger_dbar(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_wirtinger(av[0], av[1], true); }
+static val_t prim_sym_to_string(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t p = port_open_output_string();
+    sx_write_infix(av[0], p);
+    return port_get_output_string(p);
+}
+static val_t prim_sym_to_latex(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t p = port_open_output_string();
+    sx_write_latex(av[0], p);
+    return port_get_output_string(p);
+}
 static val_t prim_sym_var(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_symbol(av[0])) scm_raise(V_FALSE, "sym-var: argument must be a symbol");
@@ -1580,6 +1592,7 @@ void builtins_register(val_t env) {
 
     /* ---- Symbolic / CAS and Quantum ---- */
     DEF("∂",              prim_sx_diff,         2, 2);
+    DEF("sym-diff",       prim_sx_diff,         2, 2);
     DEF("∫",              prim_sx_integrate,    2, 4);
     DEF("integrate",      prim_sx_integrate,    2, 4);
     DEF("frac-diff",      prim_frac_diff,       3, 3);
@@ -1590,6 +1603,9 @@ void builtins_register(val_t env) {
     DEF("substitute",     prim_sx_substitute,   3, 3);
     DEF("conjugate",      prim_conjugate,       1, 1);
     DEF("conj",           prim_conjugate,       1, 1);
+    DEF("sym->string",    prim_sym_to_string,   1, 1);
+    DEF("sym->infix",     prim_sym_to_string,   1, 1);
+    DEF("sym->latex",     prim_sym_to_latex,    1, 1);
     DEF("sym-var",        prim_sym_var,         1, 1);
     DEF("sym-var?",       prim_sym_var_p,       1, 1);
     DEF("sym-expr?",      prim_sym_expr_p,      1, 1);

@@ -161,6 +161,8 @@ bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr con
 
 /* ---- Display ---- */
 void  sx_write(val_t expr, val_t port);
+void  sx_write_infix(val_t expr, val_t port);   /* infix:  x^2 + 2*x + 1  */
+void  sx_write_latex(val_t expr, val_t port);   /* LaTeX:  x^{2} + 2 x + 1 */
 
 /* Interned operator symbols (available after symbolic_init) */
 extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
