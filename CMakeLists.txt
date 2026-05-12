@@ -485,14 +485,18 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_DESCRIPTION "\
 R7RS Scheme interpreter featuring Boehm GC, GMP arbitrary-precision\
  arithmetic, actor-model concurrency (pthreads), Clifford algebra\
- multivectors, symbolic CAS, and a rich optional module system\
- (JSON, SQLite, Redis, S3/Azure/GCS, GraphQL, Git, image I/O, Qt6, PLplot).")
+ multivectors, and a built-in computer algebra system with symbolic\
+ differentiation, integration (definite and indefinite), polynomial\
+ operations (expand, collect, degree), Wirtinger calculus, fractional\
+ calculus, and a full transcendental function library. Rich optional\
+ module system: JSON, SQLite, Redis, S3/Azure/GCS, GraphQL, Git,\
+ image I/O, Qt6, PLplot.")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.3_<arch>.deb
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.5_<arch>.deb
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
