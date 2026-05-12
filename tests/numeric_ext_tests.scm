@@ -381,6 +381,81 @@
 
 
 ;;; =========================================================================
+;;; Phase 2 — expand / degree / collect / leading-coeff
+;;; =========================================================================
+
+;;; expand: distribute * over +
+(check "expand constant"    (expand 5) 5)
+(check "expand var"         (expand x) x)
+(check "expand (* 2 x)"     (expand (* 2 x)) (* 2 x))
+
+;;; (x+1)*(x+2) = x²+3x+2  — verified via substitute
+(define ex12 (expand (* (+ x 1) (+ x 2))))
+(check     "expand (x+1)(x+2) is sym-expr" (sym-expr? ex12) #t)
+(check-approx "expand (x+1)(x+2) at x=3"  (substitute ex12 x 3.0) 20.0 1e-12)
+(check-approx "expand (x+1)(x+2) at x=0"  (substitute ex12 x 0.0)  2.0 1e-12)
+
+;;; (x+1)² = x²+2x+1
+(define ex-sq (expand (expt (+ x 1) 2)))
+(check-approx "expand (x+1)^2 at x=5"  (substitute ex-sq x 5.0) 36.0 1e-12)
+(check-approx "expand (x+1)^2 at x=0"  (substitute ex-sq x 0.0)  1.0 1e-12)
+
+;;; (x+1)³ = x³+3x²+3x+1
+(define ex-cube (expand (expt (+ x 1) 3)))
+(check-approx "expand (x+1)^3 at x=2"  (substitute ex-cube x 2.0) 27.0 1e-12)
+(check-approx "expand (x+1)^3 at x=0"  (substitute ex-cube x 0.0)  1.0 1e-12)
+
+;;; -(x+y) → -x + -y
+(define ex-neg (expand (- (+ x y))))
+(check-approx "expand -(x+y) at x=1,y=2"
+  (substitute (substitute ex-neg x 1.0) y 2.0) -3.0 1e-12)
+
+;;; Binomial with two variables: (x+y)*(x-y) = x²-y²
+(define ex-diff2 (expand (* (+ x y) (- x y))))
+(check-approx "expand (x+y)(x-y) at x=3,y=1"
+  (substitute (substitute ex-diff2 x 3.0) y 1.0) 8.0 1e-12)
+
+;;; degree
+(check "degree constant"           (degree 5 x)                   0)
+(check "degree var"                (degree x x)                   1)
+(check "degree other var"          (degree y x)                   0)
+(check "degree x^3"                (degree (expt x 3) x)          3)
+(check "degree 2*x^2"              (degree (* 2 (expt x 2)) x)    2)
+(check "degree x^2+3x+1"          (degree (+ (expt x 2) (* 3 x) 1) x) 2)
+(check "degree x^3+x"             (degree (+ (expt x 3) x) x)    3)
+(check "degree (x+1)*(x+2)"       (degree (* (+ x 1) (+ x 2)) x) 2)
+
+;;; leading-coeff
+(check "leading-coeff constant 5"       (leading-coeff 5 x)               5)
+(check "leading-coeff x"                (leading-coeff x x)                1)
+(check "leading-coeff 3*x"              (leading-coeff (* 3 x) x)          3)
+(check "leading-coeff x^2+3x+1"        (leading-coeff (+ (expt x 2) (* 3 x) 1) x) 1)
+(check "leading-coeff 2*x^3+x"         (leading-coeff (+ (* 2 (expt x 3)) x) x) 2)
+(check-approx "leading-coeff (x+1)(x+2)"
+  (substitute (leading-coeff (* (+ x 1) (+ x 2)) x) x 0.0) 1.0 1e-12)
+
+;;; collect: group like-degree terms
+(define c1 (collect (+ (* 2 x) (* 3 x)) x))
+(check-approx "collect 2x+3x = 5x at x=2"  (substitute c1 x 2.0) 10.0 1e-12)
+
+(define c2 (collect (+ (expt x 2) (* 2 x) (expt x 2) x) x))
+(check-approx "collect x²+2x+x²+x at x=3 = 27"
+  (substitute c2 x 3.0) 27.0 1e-12)
+
+;;; collect of expanded (x+1)² = x²+2x+1 gives a collected polynomial
+(define c3 (collect ex-sq x))
+(check "degree of collected (x+1)^2" (degree c3 x) 2)
+(check "leading-coeff of collected (x+1)^2" (leading-coeff c3 x) 1)
+
+;;; roundtrip: expand then differentiate = differentiate directly
+(define poly (expand (expt (+ x 1) 3)))
+(check-approx "d/dx (x+1)^3 expanded, at x=0"
+  (substitute (simplify (∂ poly x)) x 0.0) 3.0 1e-12)
+(check-approx "d/dx (x+1)^3 direct, at x=0"
+  (substitute (simplify (∂ (expt (+ x 1) 3) x)) x 0.0) 3.0 1e-12)
+
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

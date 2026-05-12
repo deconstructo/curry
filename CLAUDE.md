@@ -142,13 +142,13 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 
 **Differentiation** — `(∂ expr var)` where `var` is a sym-var:
 
-Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs. Unknown operators leave an unevaluated `(∂ expr var)` node.
+Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs, sinh, cosh, tanh, asin, acos, atan, asinh, acosh, atanh, cot, sec, csc. Unknown operators leave an unevaluated `(∂ expr var)` node.
 
 **Integration** — `(∫ expr var)` or `(integrate expr var)`:
 
 Returns the antiderivative (no constant of integration). Definite form: `(∫ expr var a b)` computes `F(b) − F(a)`. Works with all numeric tower types for bounds: fixnum, bignum, rational, flonum, complex.
 
-Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt. Unknown forms leave an unevaluated `(∫ expr var)` node.
+Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt, sinh, cosh, tanh, cot, sec, csc, sec², csc², asin/acos/atan/asinh/acosh/atanh (IBP, linear arg). Unknown forms leave an unevaluated `(∫ expr var)` node.
 
 **Complex operators** — symbolic-aware; return expression trees on sym-vars:
 
@@ -170,6 +170,17 @@ For a real variable `x`: `∂conj(f)/∂x = conj(∂f/∂x)`, `∫conj(f) dx = c
 ```
 
 Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z + conj(∂f/∂z̄))`, `∂Im(f)/∂z = (∂f/∂z − conj(∂f/∂z̄))/(2i)`. Arithmetic and holomorphic transcendentals follow the standard chain rule. A function is holomorphic iff `(wirtinger-dbar f z)` simplifies to 0.
+
+**Polynomial / structural operations**:
+
+```scheme
+(expand expr)              ; distribute * over +; expand integer powers 2..16
+(degree expr var)          ; polynomial degree in var (exact fixnum)
+(leading-coeff expr var)   ; coefficient of highest-degree term (expands internally)
+(collect expr var)         ; group like-degree terms, sorted by descending degree
+```
+
+`expand` fully distributes multiplications over sums and expands `(expt base n)` for integer n ∈ [2,16] by repeated distribution. `collect` calls `expand` internally and then groups terms into `(coeff * var^k)` buckets, combining coefficients of equal degree. Non-monomial sub-expressions (e.g. transcendentals of var) are left uncollected at the end of the sum.
 
 **Auto-differentiation** via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient = f′(x). Works for algebraic lambdas; C-level primitives (sin, cos, exp) do not propagate surreals.
 

@@ -361,6 +361,11 @@ val_t num_sub(val_t a, val_t b) {
         return vis_quantum(a) ? quantum_sub_scalar(a, b) : quantum_sub_scalar(b, num_neg(a));
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_sub(a, b);
+    if (vis_complex(a) || vis_complex(b)) {
+        val_t ar = vis_complex(a) ? as_cpx(a)->real : a,  ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
+        val_t br = vis_complex(b) ? as_cpx(b)->real : b,  bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
+        return num_make_complex(num_sub(ar, br), num_sub(ai, bi));
+    }
     return arith2(a, b, sub_fix, sub_big, sub_rat, sub_flo);
 }
 
@@ -700,9 +705,40 @@ val_t num_sqrt(val_t v) {
     return num_make_float(sqrt(x));
 }
 
-#define NUM_TRIG(fn) \
-    val_t num_##fn(val_t v) { return num_make_float(fn(num_to_double(v))); }
-NUM_TRIG(asin) NUM_TRIG(acos) NUM_TRIG(atan)
+val_t num_asin(val_t v) {
+    if (vis_symbolic(v)) return sx_asin(v);
+    if (vis_complex(v)) {
+        /* asin(z) = -i · ln(iz + √(1−z²)) */
+        val_t i  = num_make_complex(vfix(0), vfix(1));
+        val_t ni = num_make_complex(vfix(0), vfix(-1));
+        return num_mul(ni, num_log(num_add(num_mul(i, v),
+                        num_sqrt(num_sub(vfix(1), num_mul(v, v))))));
+    }
+    return num_make_float(asin(num_to_double(v)));
+}
+val_t num_acos(val_t v) {
+    if (vis_symbolic(v)) return sx_acos(v);
+    if (vis_complex(v)) {
+        /* acos(z) = -i · ln(z + i·√(1−z²)) */
+        val_t i  = num_make_complex(vfix(0), vfix(1));
+        val_t ni = num_make_complex(vfix(0), vfix(-1));
+        return num_mul(ni, num_log(num_add(v,
+                        num_mul(i, num_sqrt(num_sub(vfix(1), num_mul(v, v)))))));
+    }
+    return num_make_float(acos(num_to_double(v)));
+}
+val_t num_atan(val_t v) {
+    if (vis_symbolic(v)) return sx_atan(v);
+    if (vis_complex(v)) {
+        /* atan(z) = (i/2) · ln((1−iz)/(1+iz)) */
+        val_t i    = num_make_complex(vfix(0), vfix(1));
+        val_t iz   = num_mul(i, v);
+        val_t half = num_make_complex(vfix(0), num_make_float(0.5));
+        return num_mul(half, num_log(num_div(num_sub(vfix(1), iz),
+                                            num_add(vfix(1), iz))));
+    }
+    return num_make_float(atan(num_to_double(v)));
+}
 
 /* Complex-aware transcendentals */
 val_t num_exp(val_t v) {
@@ -747,6 +783,67 @@ val_t num_tan(val_t v) {
     return num_make_float(tan(num_to_double(v)));
 }
 val_t num_atan2(val_t y, val_t x) { return num_make_float(atan2(num_to_double(y), num_to_double(x))); }
+
+val_t num_sinh(val_t v) {
+    if (vis_symbolic(v)) return sx_sinh(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        return num_make_complex(num_make_float(sinh(a)*cos(b)), num_make_float(cosh(a)*sin(b)));
+    }
+    return num_make_float(sinh(num_to_double(v)));
+}
+val_t num_cosh(val_t v) {
+    if (vis_symbolic(v)) return sx_cosh(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        return num_make_complex(num_make_float(cosh(a)*cos(b)), num_make_float(sinh(a)*sin(b)));
+    }
+    return num_make_float(cosh(num_to_double(v)));
+}
+val_t num_tanh(val_t v) {
+    if (vis_symbolic(v)) return sx_tanh(v);
+    if (vis_complex(v)) {
+        double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
+        double denom = cosh(2*a) + cos(2*b);
+        return num_make_complex(num_make_float(sinh(2*a)/denom), num_make_float(sin(2*b)/denom));
+    }
+    return num_make_float(tanh(num_to_double(v)));
+}
+val_t num_asinh(val_t v) {
+    if (vis_symbolic(v)) return sx_asinh(v);
+    if (vis_complex(v))
+        /* asinh(z) = ln(z + √(z²+1)) */
+        return num_log(num_add(v, num_sqrt(num_add(num_mul(v, v), vfix(1)))));
+    return num_make_float(asinh(num_to_double(v)));
+}
+val_t num_acosh(val_t v) {
+    if (vis_symbolic(v)) return sx_acosh(v);
+    if (vis_complex(v))
+        /* acosh(z) = ln(z + √(z²−1)) */
+        return num_log(num_add(v, num_sqrt(num_sub(num_mul(v, v), vfix(1)))));
+    return num_make_float(acosh(num_to_double(v)));
+}
+val_t num_atanh(val_t v) {
+    if (vis_symbolic(v)) return sx_atanh(v);
+    if (vis_complex(v))
+        /* atanh(z) = (1/2) · ln((1+z)/(1−z)) */
+        return num_mul(num_make_float(0.5),
+                       num_log(num_div(num_add(vfix(1), v),
+                                      num_sub(vfix(1), v))));
+    return num_make_float(atanh(num_to_double(v)));
+}
+val_t num_cot(val_t v) {
+    if (vis_symbolic(v)) return sx_cot(v);
+    return num_div(num_cos(v), num_sin(v));
+}
+val_t num_sec(val_t v) {
+    if (vis_symbolic(v)) return sx_sec(v);
+    return num_div(vfix(1), num_cos(v));
+}
+val_t num_csc(val_t v) {
+    if (vis_symbolic(v)) return sx_csc(v);
+    return num_div(vfix(1), num_sin(v));
+}
 
 /* ---- Bitwise ---- */
 val_t num_bitand(val_t a, val_t b) {

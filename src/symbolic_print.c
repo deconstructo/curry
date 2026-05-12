@@ -170,6 +170,30 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
         pws(port, "Re("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_IMAG && n == 1) {
         pws(port, "Im("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_SINH && n == 1) {
+        pws(port, "sinh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_COSH && n == 1) {
+        pws(port, "cosh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_TANH && n == 1) {
+        pws(port, "tanh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ASIN && n == 1) {
+        pws(port, "asin("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ACOS && n == 1) {
+        pws(port, "acos("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ATAN && n == 1) {
+        pws(port, "atan("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ASINH && n == 1) {
+        pws(port, "asinh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ACOSH && n == 1) {
+        pws(port, "acosh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_ATANH && n == 1) {
+        pws(port, "atanh("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_COT && n == 1) {
+        pws(port, "cot("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_SEC && n == 1) {
+        pws(port, "sec("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_CSC && n == 1) {
+        pws(port, "csc("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^");
         bool ep = (sp_prec(a[1]) < SP_ATOM);
@@ -369,6 +393,30 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
     } else if (op == SX_IMAG && n == 1) {
         pws(port, "\\operatorname{Im}\\!\\left(");
         sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_SINH && n == 1) {
+        pws(port, "\\sinh\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_COSH && n == 1) {
+        pws(port, "\\cosh\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_TANH && n == 1) {
+        pws(port, "\\tanh\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ASIN && n == 1) {
+        pws(port, "\\arcsin\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ACOS && n == 1) {
+        pws(port, "\\arccos\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ATAN && n == 1) {
+        pws(port, "\\arctan\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ASINH && n == 1) {
+        pws(port, "\\operatorname{arcsinh}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ACOSH && n == 1) {
+        pws(port, "\\operatorname{arccosh}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_ATANH && n == 1) {
+        pws(port, "\\operatorname{arctanh}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_COT && n == 1) {
+        pws(port, "\\cot\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_SEC && n == 1) {
+        pws(port, "\\sec\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_CSC && n == 1) {
+        pws(port, "\\csc\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^{"); sl_latex(a[1], SP_LOW, port);
         pws(port, "}_{"); sl_latex(a[2], SP_LOW, port);

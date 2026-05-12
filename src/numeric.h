@@ -87,6 +87,15 @@ val_t num_asin(val_t v);
 val_t num_acos(val_t v);
 val_t num_atan(val_t v);
 val_t num_atan2(val_t y, val_t x);
+val_t num_sinh(val_t v);
+val_t num_cosh(val_t v);
+val_t num_tanh(val_t v);
+val_t num_asinh(val_t v);
+val_t num_acosh(val_t v);
+val_t num_atanh(val_t v);
+val_t num_cot(val_t v);
+val_t num_sec(val_t v);
+val_t num_csc(val_t v);
 
 /* ---- Comparison (exact and inexact) ---- */
 int num_cmp(val_t a, val_t b);    /* -1 / 0 / +1 */

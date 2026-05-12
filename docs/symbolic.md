@@ -44,6 +44,24 @@ All numeric operations propagate through symbolic values automatically. You do n
 (log x)               ; => (log x)
 (sqrt x)              ; => (sqrt x)
 (abs x)               ; => (abs x)
+
+; Hyperbolic functions
+(sinh x)              ; => (sinh x)
+(cosh x)              ; => (cosh x)
+(tanh x)              ; => (tanh x)
+
+; Inverse trig — evaluates numerically for real and complex; symbolic for higher tower
+(asin x)              ; => (asin x)
+(acos x)              ; => (acos x)
+(atan x)              ; => (atan x)
+(asinh x)             ; => (asinh x)
+(acosh x)             ; => (acosh x)
+(atanh x)             ; => (atanh x)
+
+; Reciprocal trig
+(cot x)               ; => (cot x)
+(sec x)               ; => (sec x)
+(csc x)               ; => (csc x)
 ```
 
 Nested expressions are built automatically:
@@ -53,6 +71,36 @@ Nested expressions are built automatically:
 (define ke (* 1/2 m (expt v 2)))   ; kinetic energy
 ke   ; => (* 1/2 m (expt v 2))
 ```
+
+### Numeric evaluation domains
+
+| Function group | Real | Complex | Quaternion+ |
+|----------------|------|---------|-------------|
+| `sin`, `cos`, `exp`, `log`, `sqrt`, `sinh`, `cosh`, `tanh` | ✓ | ✓ | symbolic |
+| `tan`, `cot`, `sec`, `csc` | ✓ | ✓ (via sin/cos) | symbolic |
+| `asin`, `acos`, `atan`, `asinh`, `acosh`, `atanh` | ✓ | ✓ | symbolic |
+
+The inverse trig and inverse hyperbolic functions evaluate over complex numbers using the standard logarithmic identities (principal values, matching ISO C99 branch cuts):
+
+```
+asin(z)  = -i · ln(iz + √(1−z²))
+acos(z)  = -i · ln(z + i·√(1−z²))
+atan(z)  = (i/2) · ln((1−iz)/(1+iz))
+asinh(z) = ln(z + √(z²+1))
+acosh(z) = ln(z + √(z²−1))
+atanh(z) = (1/2) · ln((1+z)/(1−z))
+```
+
+```scheme
+(asin (make-rectangular 0 1))    ; ≈ 0+0.8814i
+(acos (make-rectangular 0 1))    ; ≈ 1.5708-0.8814i
+(atan (make-rectangular 0 0.5))  ; ≈ 0+0.5493i
+(asinh (make-rectangular 0 1))   ; ≈ 0+1.5708i   [= iπ/2]
+(acosh (make-rectangular 0 1))   ; ≈ 0.8814+1.5708i
+(atanh (make-rectangular 0 2))   ; ≈ 0+1.1071i
+```
+
+For quaternions and higher tower levels, the result is left as a symbolic expression node.
 
 ## Simplification
 
@@ -105,11 +153,23 @@ The `∂` character is U+2202 PARTIAL DIFFERENTIAL (entered directly or via an e
 | `∂(uᵛ)/∂x` where v depends on x | `uᵛ · (v' ln u + v u'/u)` |
 | `∂(sin u)/∂x` | `cos(u) · ∂u/∂x` |
 | `∂(cos u)/∂x` | `-(sin(u)) · ∂u/∂x` |
-| `∂(tan u)/∂x` | `(1 + tan²(u)) · ∂u/∂x` |
+| `∂(tan u)/∂x` | `∂u/∂x / cos²(u)` |
 | `∂(exp u)/∂x` | `exp(u) · ∂u/∂x` |
 | `∂(log u)/∂x` | `∂u/∂x / u` |
 | `∂(sqrt u)/∂x` | `∂u/∂x / (2 sqrt(u))` |
 | `∂(abs u)/∂x` | `sgn(u) · ∂u/∂x` |
+| `∂(sinh u)/∂x` | `cosh(u) · ∂u/∂x` |
+| `∂(cosh u)/∂x` | `sinh(u) · ∂u/∂x` |
+| `∂(tanh u)/∂x` | `∂u/∂x / cosh²(u)` |
+| `∂(asin u)/∂x` | `∂u/∂x / √(1−u²)` |
+| `∂(acos u)/∂x` | `−∂u/∂x / √(1−u²)` |
+| `∂(atan u)/∂x` | `∂u/∂x / (1+u²)` |
+| `∂(asinh u)/∂x` | `∂u/∂x / √(u²+1)` |
+| `∂(acosh u)/∂x` | `∂u/∂x / √(u²−1)` |
+| `∂(atanh u)/∂x` | `∂u/∂x / (1−u²)` |
+| `∂(cot u)/∂x` | `−∂u/∂x / sin²(u)` |
+| `∂(sec u)/∂x` | `sec(u)·tan(u)·∂u/∂x` |
+| `∂(csc u)/∂x` | `−csc(u)·cot(u)·∂u/∂x` |
 | `∂(conj f)/∂x` | `conj(∂f/∂x)` (x real) |
 | `∂(Re f)/∂x` | `Re(∂f/∂x)` (x real) |
 | `∂(Im f)/∂x` | `Im(∂f/∂x)` (x real) |
@@ -195,6 +255,20 @@ The bounds `a` and `b` may be any numeric type: fixnum, bignum, rational, flonum
 | `(exp x)` | `exp x` |
 | `(log x)` | `x·log(x) − x` |
 | `(sqrt x)` | `(2/3)·x^(3/2)` |
+| `(sinh (ax+b))` | `cosh(ax+b)/a` |
+| `(cosh (ax+b))` | `sinh(ax+b)/a` |
+| `(tanh (ax+b))` | `log(cosh(ax+b))/a` |
+| `(cot (ax+b))` | `log\|sin(ax+b)\|/a` |
+| `(sec (ax+b))` | `log\|sec(ax+b)+tan(ax+b)\|/a` |
+| `(csc (ax+b))` | `−log\|csc(ax+b)+cot(ax+b)\|/a` |
+| `(expt (sec (ax+b)) 2)` | `tan(ax+b)/a` |
+| `(expt (csc (ax+b)) 2)` | `−cot(ax+b)/a` |
+| `(asin (ax+b))` | `((ax+b)·asin(ax+b) + √(1−(ax+b)²))/a` (IBP) |
+| `(acos (ax+b))` | `((ax+b)·acos(ax+b) − √(1−(ax+b)²))/a` (IBP) |
+| `(atan (ax+b))` | `((ax+b)·atan(ax+b) − log(1+(ax+b)²)/2)/a` (IBP) |
+| `(asinh (ax+b))` | `((ax+b)·asinh(ax+b) − √((ax+b)²+1))/a` |
+| `(acosh (ax+b))` | `((ax+b)·acosh(ax+b) − √((ax+b)²−1))/a` |
+| `(atanh (ax+b))` | `((ax+b)·atanh(ax+b) + log(1−(ax+b)²)/2)/a` |
 | `k·f(x)` | `k·∫f(x)dx` |
 | `f(x) + g(x) + ...` | `∫f + ∫g + ...` |
 | `conj(f(x))` | `conj(∫f(x)dx)` |
@@ -254,6 +328,101 @@ To evaluate a symbolic expression at a numeric point, convert it to a procedure:
 (eval-at 0)      ; => 1
 (eval-at 2)      ; => 5
 (eval-at -1)     ; => 4
+```
+
+## Polynomial / structural operations
+
+Four procedures treat symbolic expressions as polynomials in a single variable.
+
+### `expand`
+
+Distributes `*` over `+` and expands integer powers (2..16):
+
+```scheme
+(symbolic x y)
+
+(expand (* (+ x 1) (+ x 2)))     ; => (+ (* x x) (* 3 x) 2)   — x²+3x+2
+(expand (expt (+ x 1) 2))        ; => (+ (* x x) (* 2 x) 1)   — x²+2x+1
+(expand (expt (+ x 1) 3))        ; => (+ (* x x x) (* 3 (* x x)) (* 3 x) 1)
+(expand (* (+ x y) (- x y)))     ; => (+ (* x x) (neg (* y y))) — x²-y²
+(expand (- (+ x y)))             ; => (+ (neg x) (neg y))
+```
+
+Exponents outside the range 2..16, or symbolic exponents, are left as-is; nested multiplications are always distributed.
+
+### `degree`
+
+Returns the polynomial degree of an expression in a given variable (as an exact fixnum):
+
+```scheme
+(symbolic x y)
+
+(degree 5 x)                          ; => 0
+(degree x x)                          ; => 1
+(degree y x)                          ; => 0
+(degree (expt x 3) x)                 ; => 3
+(degree (+ (expt x 2) (* 3 x) 1) x)  ; => 2
+(degree (* (+ x 1) (+ x 2)) x)       ; => 2   — degree of the product
+```
+
+For a product, degree is the sum of degrees of factors; for a sum, it is the maximum. Transcendental functions of `x` contribute degree 0.
+
+### `leading-coeff`
+
+Returns the coefficient of the highest-degree term (internally expands first):
+
+```scheme
+(symbolic x)
+
+(leading-coeff x x)                          ; => 1
+(leading-coeff (* 3 x) x)                    ; => 3
+(leading-coeff (+ (expt x 2) (* 5 x) 7) x)  ; => 1
+(leading-coeff (+ (* 2 (expt x 3)) x) x)    ; => 2
+(leading-coeff (* (+ x 1) (+ x 2)) x)       ; => 1
+```
+
+### `collect`
+
+Groups like-degree terms together after expanding, combining their coefficients. Produces a canonical sum sorted by descending degree:
+
+```scheme
+(symbolic x)
+
+(collect (+ (* 2 x) (* 3 x)) x)
+; => (* 5 x)
+
+(collect (+ (expt x 2) (* 2 x) (expt x 2) x) x)
+; => (+ (* 2 (expt x 2)) (* 3 x))   — 2x²+3x
+
+(collect (expand (expt (+ x 1) 2)) x)
+; => (+ (expt x 2) (* 2 x) 1)       — x²+2x+1, with explicit expt
+```
+
+Terms that cannot be identified as monomials in the given variable are left at the end of the sum unchanged.
+
+### Typical polynomial workflow
+
+```scheme
+(symbolic x)
+
+; Start with a factored form
+(define p (* (+ x 1) (+ x 2) (- x 3)))
+
+; Expand to sum-of-monomials
+(define expanded (expand p))           ; x³-7x+6  (with repeated-factor notation)
+
+; Inspect polynomial properties
+(degree expanded x)                    ; => 3
+(leading-coeff expanded x)             ; => 1
+
+; Collect into canonical form
+(define canonical (collect expanded x)) ; (+ (expt x 3) (* -7 x) 6)
+
+; Evaluate
+(substitute canonical x 2)             ; => -4   (2³-14+6)
+
+; Differentiate the collected polynomial
+(simplify (∂ canonical x))             ; 3x²-7
 ```
 
 ## Complex operators
@@ -557,10 +726,14 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(quad-frac-diff f α x)` | Grünwald-Letnikov numerical D^α (for concrete f) |
 | `(quad-frac-int f α x)` | Numerical Riemann-Liouville fractional integral |
 | `(quad f a b)` | Gauss-Kronrod G7K15 adaptive numerical quadrature |
+| `(expand expr)` | Distribute `*` over `+`; expand integer powers |
+| `(degree expr var)` | Polynomial degree in var (exact fixnum) |
+| `(leading-coeff expr var)` | Coefficient of highest-degree term |
+| `(collect expr var)` | Group like-degree terms; canonical descending form |
 | `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 - 2*x + 1` |
 | `(sym->latex expr)` | LaTeX string: `x^{2} - 2 x + 1` |
 
-All standard numeric operators (`+` `-` `*` `/` `expt` `sqrt` `sin` `cos` `tan` `exp` `log` `abs`) lift automatically over symbolic values.
+All standard numeric operators lift automatically over symbolic values: `+` `-` `*` `/` `expt` `sqrt` `abs` `exp` `log` `sin` `cos` `tan` `sinh` `cosh` `tanh` `asin` `acos` `atan` `asinh` `acosh` `atanh` `cot` `sec` `csc`.
 
 ## Physics in non-integer dimensions
 

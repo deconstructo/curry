@@ -16,6 +16,10 @@ val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
 val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
 val_t SX_FRACDIFF, SX_FRACINT;
+val_t SX_SINH, SX_COSH, SX_TANH;
+val_t SX_ASIN, SX_ACOS, SX_ATAN;
+val_t SX_ASINH, SX_ACOSH, SX_ATANH;
+val_t SX_COT, SX_SEC, SX_CSC;
 
 void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
@@ -37,6 +41,18 @@ void symbolic_init(void) {
     SX_IMAG      = sym_intern_cstr("imag-part");
     SX_FRACDIFF  = sym_intern_cstr("frac-diff");
     SX_FRACINT   = sym_intern_cstr("frac-int");
+    SX_SINH      = sym_intern_cstr("sinh");
+    SX_COSH      = sym_intern_cstr("cosh");
+    SX_TANH      = sym_intern_cstr("tanh");
+    SX_ASIN      = sym_intern_cstr("asin");
+    SX_ACOS      = sym_intern_cstr("acos");
+    SX_ATAN      = sym_intern_cstr("atan");
+    SX_ASINH     = sym_intern_cstr("asinh");
+    SX_ACOSH     = sym_intern_cstr("acosh");
+    SX_ATANH     = sym_intern_cstr("atanh");
+    SX_COT       = sym_intern_cstr("cot");
+    SX_SEC       = sym_intern_cstr("sec");
+    SX_CSC       = sym_intern_cstr("csc");
 }
 
 /* ---- Constructors ---- */
@@ -265,12 +281,24 @@ val_t sx_simplify(val_t expr) {
 
     /* ---- Transcendentals on constants ---- */
     if (n == 1 && num_count == 1) {
-        if (op == SX_SIN) return num_sin(sa[0]);
-        if (op == SX_COS) return num_cos(sa[0]);
-        if (op == SX_TAN) return num_tan(sa[0]);
-        if (op == SX_EXP) return num_exp(sa[0]);
-        if (op == SX_LOG) return num_log(sa[0]);
-        if (op == SX_ABS) return num_abs(sa[0]);
+        if (op == SX_SIN)  return num_sin(sa[0]);
+        if (op == SX_COS)  return num_cos(sa[0]);
+        if (op == SX_TAN)  return num_tan(sa[0]);
+        if (op == SX_EXP)  return num_exp(sa[0]);
+        if (op == SX_LOG)  return num_log(sa[0]);
+        if (op == SX_ABS)  return num_abs(sa[0]);
+        if (op == SX_SINH)  return num_sinh(sa[0]);
+        if (op == SX_COSH)  return num_cosh(sa[0]);
+        if (op == SX_TANH)  return num_tanh(sa[0]);
+        if (op == SX_ASIN)  return num_asin(sa[0]);
+        if (op == SX_ACOS)  return num_acos(sa[0]);
+        if (op == SX_ATAN)  return num_atan(sa[0]);
+        if (op == SX_ASINH) return num_asinh(sa[0]);
+        if (op == SX_ACOSH) return num_acosh(sa[0]);
+        if (op == SX_ATANH) return num_atanh(sa[0]);
+        if (op == SX_COT)   return num_cot(sa[0]);
+        if (op == SX_SEC)   return num_sec(sa[0]);
+        if (op == SX_CSC)   return num_csc(sa[0]);
     }
 
     /* ---- CONJ ---- */
@@ -342,6 +370,19 @@ val_t sx_cos(val_t a)  { return sx_simplify(sx_expr1(SX_COS,  a)); }
 val_t sx_tan(val_t a)  { return sx_simplify(sx_expr1(SX_TAN,  a)); }
 val_t sx_exp(val_t a)  { return sx_simplify(sx_expr1(SX_EXP,  a)); }
 val_t sx_log(val_t a)  { return sx_simplify(sx_expr1(SX_LOG,  a)); }
+val_t sx_sinh(val_t a)  { if (vis_number(a)) return num_sinh(a);  return sx_simplify(sx_expr1(SX_SINH,  a)); }
+val_t sx_cosh(val_t a)  { if (vis_number(a)) return num_cosh(a);  return sx_simplify(sx_expr1(SX_COSH,  a)); }
+val_t sx_tanh(val_t a)  { if (vis_number(a)) return num_tanh(a);  return sx_simplify(sx_expr1(SX_TANH,  a)); }
+val_t sx_asin(val_t a)  { if (vis_number(a)) return num_asin(a);  return sx_simplify(sx_expr1(SX_ASIN,  a)); }
+val_t sx_acos(val_t a)  { if (vis_number(a)) return num_acos(a);  return sx_simplify(sx_expr1(SX_ACOS,  a)); }
+val_t sx_atan(val_t a)  { if (vis_number(a)) return num_atan(a);  return sx_simplify(sx_expr1(SX_ATAN,  a)); }
+val_t sx_asinh(val_t a) { if (vis_number(a)) return num_asinh(a); return sx_simplify(sx_expr1(SX_ASINH, a)); }
+val_t sx_acosh(val_t a) { if (vis_number(a)) return num_acosh(a); return sx_simplify(sx_expr1(SX_ACOSH, a)); }
+val_t sx_atanh(val_t a) { if (vis_number(a)) return num_atanh(a); return sx_simplify(sx_expr1(SX_ATANH, a)); }
+val_t sx_cot(val_t a)   { if (vis_number(a)) return num_cot(a);   return sx_simplify(sx_expr1(SX_COT,   a)); }
+val_t sx_sec(val_t a)   { if (vis_number(a)) return num_sec(a);   return sx_simplify(sx_expr1(SX_SEC,   a)); }
+val_t sx_csc(val_t a)   { if (vis_number(a)) return num_csc(a);   return sx_simplify(sx_expr1(SX_CSC,   a)); }
+
 val_t sx_conj(val_t a) {
     if (vis_number(a)) return num_conjugate(a);
     return sx_simplify(sx_expr1(SX_CONJ, a));
@@ -457,6 +498,54 @@ val_t sx_diff(val_t expr, val_t var) {
         /* d/dx |f| = f * f' / |f|  (undefined at 0) */
         return sx_div(sx_mul(args[0], sx_diff(args[0], var)), expr);
     }
+
+    /* ---- Hyperbolic (chain rule) ---- */
+    if (op == SX_SINH && n == 1)
+        return sx_mul(sx_cosh(args[0]), sx_diff(args[0], var));
+
+    if (op == SX_COSH && n == 1)
+        return sx_mul(sx_sinh(args[0]), sx_diff(args[0], var));
+
+    if (op == SX_TANH && n == 1)
+        return sx_div(sx_diff(args[0], var), sx_expt(sx_cosh(args[0]), vfix(2)));
+
+    /* ---- Inverse trig (chain rule) ---- */
+    if (op == SX_ASIN && n == 1)
+        return sx_div(sx_diff(args[0], var),
+                      sx_sqrt(sx_sub(vfix(1), sx_expt(args[0], vfix(2)))));
+
+    if (op == SX_ACOS && n == 1)
+        return sx_neg(sx_div(sx_diff(args[0], var),
+                             sx_sqrt(sx_sub(vfix(1), sx_expt(args[0], vfix(2))))));
+
+    if (op == SX_ATAN && n == 1)
+        return sx_div(sx_diff(args[0], var),
+                      sx_add(vfix(1), sx_expt(args[0], vfix(2))));
+
+    if (op == SX_ASINH && n == 1)
+        return sx_div(sx_diff(args[0], var),
+                      sx_sqrt(sx_add(sx_expt(args[0], vfix(2)), vfix(1))));
+
+    if (op == SX_ACOSH && n == 1)
+        return sx_div(sx_diff(args[0], var),
+                      sx_sqrt(sx_sub(sx_expt(args[0], vfix(2)), vfix(1))));
+
+    if (op == SX_ATANH && n == 1)
+        return sx_div(sx_diff(args[0], var),
+                      sx_sub(vfix(1), sx_expt(args[0], vfix(2))));
+
+    /* ---- Reciprocal trig (chain rule) ---- */
+    if (op == SX_COT && n == 1)
+        return sx_neg(sx_div(sx_diff(args[0], var),
+                             sx_expt(sx_sin(args[0]), vfix(2))));
+
+    if (op == SX_SEC && n == 1)
+        return sx_mul(sx_mul(sx_sec(args[0]), sx_tan(args[0])),
+                      sx_diff(args[0], var));
+
+    if (op == SX_CSC && n == 1)
+        return sx_neg(sx_mul(sx_mul(sx_csc(args[0]), sx_cot(args[0])),
+                             sx_diff(args[0], var)));
 
     /* ---- Complex operators (x is a real variable) ---- */
     /* ∂conj(f)/∂x = conj(∂f/∂x) */
@@ -591,6 +680,42 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
         return sx_div(sx_wirtinger(args[0], var, is_dbar),
                       sx_mul(vfix(2), sx_sqrt(args[0])));
 
+    /* Holomorphic transcendentals — Phase 1 extensions */
+    if (op == SX_SINH && n == 1)
+        return sx_mul(sx_cosh(args[0]), sx_wirtinger(args[0], var, is_dbar));
+    if (op == SX_COSH && n == 1)
+        return sx_mul(sx_sinh(args[0]), sx_wirtinger(args[0], var, is_dbar));
+    if (op == SX_TANH && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_expt(sx_cosh(args[0]), vfix(2)));
+    if (op == SX_ASIN && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_sqrt(sx_sub(vfix(1), sx_expt(args[0], vfix(2)))));
+    if (op == SX_ACOS && n == 1)
+        return sx_neg(sx_div(sx_wirtinger(args[0], var, is_dbar),
+                             sx_sqrt(sx_sub(vfix(1), sx_expt(args[0], vfix(2))))));
+    if (op == SX_ATAN && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_add(vfix(1), sx_expt(args[0], vfix(2))));
+    if (op == SX_ASINH && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_sqrt(sx_add(sx_expt(args[0], vfix(2)), vfix(1))));
+    if (op == SX_ACOSH && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_sqrt(sx_sub(sx_expt(args[0], vfix(2)), vfix(1))));
+    if (op == SX_ATANH && n == 1)
+        return sx_div(sx_wirtinger(args[0], var, is_dbar),
+                      sx_sub(vfix(1), sx_expt(args[0], vfix(2))));
+    if (op == SX_COT && n == 1)
+        return sx_neg(sx_div(sx_wirtinger(args[0], var, is_dbar),
+                             sx_expt(sx_sin(args[0]), vfix(2))));
+    if (op == SX_SEC && n == 1)
+        return sx_mul(sx_mul(sx_sec(args[0]), sx_tan(args[0])),
+                      sx_wirtinger(args[0], var, is_dbar));
+    if (op == SX_CSC && n == 1)
+        return sx_neg(sx_mul(sx_mul(sx_csc(args[0]), sx_cot(args[0])),
+                             sx_wirtinger(args[0], var, is_dbar)));
+
     /* Fallback: unevaluated */
     val_t wsym = sym_intern_cstr(is_dbar ? "∂z̄" : "∂z");
     val_t w_args[2] = {expr, var};
@@ -627,6 +752,284 @@ bool sx_depends_on(val_t expr, val_t var) {
             if (sx_depends_on(se->args[i], var)) return true;
     }
     return false;
+}
+
+/* ---- Polynomial / structural operations ---- */
+
+/* Distribute a*b when either operand is a sum. */
+static val_t expand_mul2(val_t a, val_t b) {
+    if (vis_symexpr(a) && as_symexpr(a)->op == SX_ADD) {
+        SymExpr *aa = as_symexpr(a);
+        int m = (int)aa->nargs;
+        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        for (int i = 0; i < m; i++) terms[i] = expand_mul2(aa->args[i], b);
+        return sx_simplify(sx_make_expr(SX_ADD, m, terms));
+    }
+    if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
+        SymExpr *ab = as_symexpr(b);
+        int m = (int)ab->nargs;
+        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        for (int i = 0; i < m; i++) terms[i] = expand_mul2(a, ab->args[i]);
+        return sx_simplify(sx_make_expr(SX_ADD, m, terms));
+    }
+    return sx_mul(a, b);
+}
+
+val_t sx_expand(val_t expr) {
+    if (!vis_symbolic(expr)) return expr;
+    if (vis_symvar(expr)) return expr;
+
+    SymExpr *se = as_symexpr(expr);
+    val_t op = se->op;
+    int n = (int)se->nargs;
+
+    val_t *ea = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    for (int i = 0; i < n; i++) ea[i] = sx_expand(se->args[i]);
+
+    if (op == SX_ADD)
+        return sx_simplify(sx_make_expr(SX_ADD, n, ea));
+
+    if (op == SX_SUB && n == 2)
+        return sx_sub(ea[0], ea[1]);
+
+    /* Push NEG into ADD */
+    if (op == SX_NEG && n == 1) {
+        val_t inner = ea[0];
+        if (vis_symexpr(inner) && as_symexpr(inner)->op == SX_ADD) {
+            SymExpr *ia = as_symexpr(inner);
+            int m = (int)ia->nargs;
+            val_t *neg_terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+            for (int i = 0; i < m; i++) neg_terms[i] = sx_neg(ia->args[i]);
+            return sx_simplify(sx_make_expr(SX_ADD, m, neg_terms));
+        }
+        return sx_neg(inner);
+    }
+
+    /* Distribute MUL over ADD, folding left */
+    if (op == SX_MUL) {
+        val_t acc = ea[0];
+        for (int i = 1; i < n; i++) acc = expand_mul2(acc, ea[i]);
+        return acc;
+    }
+
+    /* Expand integer exponents 2..16 by repeated multiplication */
+    if (op == SX_EXPT && n == 2) {
+        val_t base = ea[0], exp_v = ea[1];
+        if (vis_fixnum(exp_v)) {
+            long e = vunfix(exp_v);
+            if (e == 0) return vfix(1);
+            if (e == 1) return base;
+            if (e >= 2 && e <= 16) {
+                val_t acc = base;
+                for (long i = 1; i < e; i++) acc = expand_mul2(acc, base);
+                return acc;
+            }
+        }
+    }
+
+    return sx_simplify(sx_make_expr(op, n, ea));
+}
+
+/* Internal: degree as a C long (−1 for transcendentals of var, 0 for constants). */
+static long sx_degree_long(val_t expr, val_t var) {
+    if (vis_number(expr)) return 0;
+    if (vis_symvar(expr))
+        return (as_symvar(expr)->name == as_symvar(var)->name) ? 1 : 0;
+    if (!vis_symexpr(expr)) return 0;
+
+    SymExpr *se = as_symexpr(expr);
+    val_t op = se->op;
+    int n = (int)se->nargs;
+    val_t *args = se->args;
+
+    if (op == SX_ADD) {
+        long mx = 0;
+        for (int i = 0; i < n; i++) {
+            long d = sx_degree_long(args[i], var);
+            if (d > mx) mx = d;
+        }
+        return mx;
+    }
+    if (op == SX_SUB && n == 2) {
+        long d0 = sx_degree_long(args[0], var);
+        long d1 = sx_degree_long(args[1], var);
+        return d0 > d1 ? d0 : d1;
+    }
+    if (op == SX_NEG && n == 1)
+        return sx_degree_long(args[0], var);
+    if (op == SX_MUL) {
+        long s = 0;
+        for (int i = 0; i < n; i++) s += sx_degree_long(args[i], var);
+        return s;
+    }
+    if (op == SX_EXPT && n == 2) {
+        val_t base = args[0], exp_v = args[1];
+        if (vis_fixnum(exp_v) && vunfix(exp_v) >= 0)
+            return sx_degree_long(base, var) * vunfix(exp_v);
+    }
+    return 0;
+}
+
+val_t sx_degree(val_t expr, val_t var) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "degree: second argument must be a symbolic variable");
+    return vfix(sx_degree_long(expr, var));
+}
+
+/*
+ * Decompose a single monomial term into (coefficient × var^degree).
+ * Returns true and fills *coeff/*deg on success.
+ * Returns false if the term is not a recognizable monomial in var.
+ */
+static bool decomp_monomial(val_t term, val_t var, val_t *coeff, long *deg) {
+    if (vis_number(term)) { *coeff = term; *deg = 0; return true; }
+    if (vis_symvar(term)) {
+        if (as_symvar(term)->name == as_symvar(var)->name)
+            { *coeff = vfix(1); *deg = 1; }
+        else
+            { *coeff = term; *deg = 0; }
+        return true;
+    }
+    if (!vis_symexpr(term)) { *coeff = term; *deg = 0; return true; }
+
+    SymExpr *se = as_symexpr(term);
+    val_t op = se->op;
+    int n = (int)se->nargs;
+    val_t *args = se->args;
+
+    if (op == SX_NEG && n == 1) {
+        if (decomp_monomial(args[0], var, coeff, deg)) {
+            *coeff = sx_neg(*coeff);
+            return true;
+        }
+        return false;
+    }
+
+    /* (expt var k) */
+    if (op == SX_EXPT && n == 2 &&
+        sx_equal(args[0], var) && vis_fixnum(args[1])) {
+        *coeff = vfix(1); *deg = vunfix(args[1]); return true;
+    }
+
+    if (op == SX_MUL) {
+        long degree = 0;
+        val_t coeff_acc = vfix(1);
+        bool ok = true;
+        for (int i = 0; i < n && ok; i++) {
+            val_t f = args[i];
+            if (!sx_depends_on(f, var)) {
+                coeff_acc = sx_mul(coeff_acc, f);
+            } else if (vis_symvar(f) &&
+                       as_symvar(f)->name == as_symvar(var)->name) {
+                degree += 1;
+            } else if (vis_symexpr(f) && as_symexpr(f)->op == SX_EXPT &&
+                       (int)as_symexpr(f)->nargs == 2 &&
+                       sx_equal(as_symexpr(f)->args[0], var) &&
+                       vis_fixnum(as_symexpr(f)->args[1])) {
+                degree += vunfix(as_symexpr(f)->args[1]);
+            } else {
+                ok = false;
+            }
+        }
+        if (ok) { *coeff = coeff_acc; *deg = degree; return true; }
+    }
+
+    if (!sx_depends_on(term, var)) { *coeff = term; *deg = 0; return true; }
+    return false;
+}
+
+val_t sx_collect(val_t expr, val_t var) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "collect: second argument must be a symbolic variable");
+
+    val_t expanded = sx_expand(expr);
+
+    /* Flatten additive terms */
+    int nterms;
+    val_t *terms;
+    val_t single[1];
+    if (vis_symexpr(expanded) && as_symexpr(expanded)->op == SX_ADD) {
+        SymExpr *se = as_symexpr(expanded);
+        nterms = (int)se->nargs;
+        terms  = se->args;
+    } else {
+        single[0] = expanded; nterms = 1; terms = single;
+    }
+
+    /* degree → accumulated coefficient table */
+    long  *degs    = (long  *)gc_alloc((size_t)nterms * sizeof(long));
+    val_t *coeffs  = (val_t *)gc_alloc((size_t)nterms * sizeof(val_t));
+    val_t *unc     = (val_t *)gc_alloc((size_t)nterms * sizeof(val_t));
+    int ndeg = 0, nunc = 0;
+
+    for (int i = 0; i < nterms; i++) {
+        val_t c; long d;
+        if (decomp_monomial(terms[i], var, &c, &d)) {
+            int found = -1;
+            for (int j = 0; j < ndeg; j++) if (degs[j] == d) { found = j; break; }
+            if (found >= 0) coeffs[found] = sx_add(coeffs[found], c);
+            else { degs[ndeg] = d; coeffs[ndeg] = c; ndeg++; }
+        } else {
+            unc[nunc++] = terms[i];
+        }
+    }
+
+    /* Sort by descending degree */
+    for (int i = 0; i < ndeg - 1; i++) {
+        for (int j = 0; j < ndeg - i - 1; j++) {
+            if (degs[j] < degs[j+1]) {
+                long td = degs[j]; degs[j] = degs[j+1]; degs[j+1] = td;
+                val_t tc = coeffs[j]; coeffs[j] = coeffs[j+1]; coeffs[j+1] = tc;
+            }
+        }
+    }
+
+    /* Build result terms */
+    val_t *result = (val_t *)gc_alloc((size_t)(ndeg + nunc) * sizeof(val_t));
+    int ri = 0;
+    for (int i = 0; i < ndeg; i++) {
+        val_t c = coeffs[i];
+        long d  = degs[i];
+        if (vis_number(c) && num_is_zero(c)) continue;
+        if (d == 0)      result[ri++] = c;
+        else if (d == 1) result[ri++] = is_one(c) ? var : sx_mul(c, var);
+        else {
+            val_t vp = sx_expt(var, vfix(d));
+            result[ri++] = is_one(c) ? vp : sx_mul(c, vp);
+        }
+    }
+    for (int i = 0; i < nunc; i++) result[ri++] = unc[i];
+
+    if (ri == 0) return vfix(0);
+    if (ri == 1) return result[0];
+    return sx_simplify(sx_make_expr(SX_ADD, ri, result));
+}
+
+val_t sx_leading_coeff(val_t expr, val_t var) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "leading-coeff: second argument must be a symbolic variable");
+
+    long target = sx_degree_long(expr, var);
+    val_t expanded = sx_expand(expr);
+
+    int nterms;
+    val_t *terms;
+    val_t single[1];
+    if (vis_symexpr(expanded) && as_symexpr(expanded)->op == SX_ADD) {
+        SymExpr *se = as_symexpr(expanded);
+        nterms = (int)se->nargs;
+        terms  = se->args;
+    } else {
+        single[0] = expanded; nterms = 1; terms = single;
+    }
+
+    val_t acc = vfix(0);
+    for (int i = 0; i < nterms; i++) {
+        val_t c; long d;
+        if (decomp_monomial(terms[i], var, &c, &d) && d == target)
+            acc = sx_add(acc, c);
+    }
+    return acc;
 }
 
 /* ---- Symbolic integration ---- */
@@ -696,6 +1099,19 @@ val_t sx_integrate(val_t expr, val_t var) {
     if (op == SX_EXPT && n == 2) {
         val_t base = args[0], exp_v = args[1];
         if (!sx_depends_on(exp_v, var) && vis_number(exp_v)) {
+            /* ∫sec²(f) dx = tan(f)/f',  ∫csc²(f) dx = -cot(f)/f' */
+            if (vis_symexpr(base) && num_eq(exp_v, vfix(2))) {
+                val_t bop = as_symexpr(base)->op;
+                if ((bop == SX_SEC || bop == SX_CSC) &&
+                    as_symexpr(base)->nargs == 1) {
+                    val_t f  = as_symexpr(base)->args[0];
+                    val_t df = sx_diff(f, var);
+                    if (vis_number(df) && !num_is_zero(df)) {
+                        if (bop == SX_SEC) return sx_div(sx_tan(f), df);
+                        else               return sx_div(sx_neg(sx_cot(f)), df);
+                    }
+                }
+            }
             if (sx_equal(base, var)) {
                 /* ∫x^n dx */
                 if (num_eq(exp_v, vfix(-1)))
@@ -783,6 +1199,96 @@ val_t sx_integrate(val_t expr, val_t var) {
     /* ∫imag(f) dx = imag(∫f dx) */
     if (op == SX_IMAG && n == 1)
         return sx_imag(sx_integrate(args[0], var));
+
+    /* ---- Hyperbolic integrals (linear argument) ---- */
+    if (op == SX_SINH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_cosh(args[0]), df);
+    }
+    if (op == SX_COSH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_sinh(args[0]), df);
+    }
+    if (op == SX_TANH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_log(sx_cosh(args[0])), df);
+    }
+
+    /* ---- Reciprocal trig integrals (linear argument) ---- */
+    if (op == SX_COT && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_log(sx_abs(sx_sin(args[0]))), df);
+    }
+    if (op == SX_SEC && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_log(sx_abs(sx_add(sx_sec(args[0]), sx_tan(args[0])))), df);
+    }
+    if (op == SX_CSC && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df))
+            return sx_div(sx_neg(sx_log(sx_abs(sx_add(sx_csc(args[0]), sx_cot(args[0]))))), df);
+    }
+
+    /* ---- Inverse trig integrals — IBP results (linear argument) ---- */
+    if (op == SX_ASIN && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_add(sx_mul(f, sx_asin(f)),
+                               sx_sqrt(sx_sub(vfix(1), sx_expt(f, vfix(2)))));
+            return sx_div(res, df);
+        }
+    }
+    if (op == SX_ACOS && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_sub(sx_mul(f, sx_acos(f)),
+                               sx_sqrt(sx_sub(vfix(1), sx_expt(f, vfix(2)))));
+            return sx_div(res, df);
+        }
+    }
+    if (op == SX_ATAN && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_sub(sx_mul(f, sx_atan(f)),
+                               sx_div(sx_log(sx_add(vfix(1), sx_expt(f, vfix(2)))), vfix(2)));
+            return sx_div(res, df);
+        }
+    }
+    if (op == SX_ASINH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_sub(sx_mul(f, sx_asinh(f)),
+                               sx_sqrt(sx_add(sx_expt(f, vfix(2)), vfix(1))));
+            return sx_div(res, df);
+        }
+    }
+    if (op == SX_ACOSH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_sub(sx_mul(f, sx_acosh(f)),
+                               sx_sqrt(sx_sub(sx_expt(f, vfix(2)), vfix(1))));
+            return sx_div(res, df);
+        }
+    }
+    if (op == SX_ATANH && n == 1) {
+        val_t df = sx_diff(args[0], var);
+        if (vis_number(df) && !num_is_zero(df)) {
+            val_t f   = args[0];
+            val_t res = sx_add(sx_mul(f, sx_atanh(f)),
+                               sx_div(sx_log(sx_sub(vfix(1), sx_expt(f, vfix(2)))), vfix(2)));
+            return sx_div(res, df);
+        }
+    }
 
     /* Fallback: unevaluated (∫ expr var) */
     val_t i_args[2] = {expr, var};

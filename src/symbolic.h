@@ -43,13 +43,25 @@
  *   Quotient:   ∂/∂x (f/g)      = (f'g − fg') / g²
  *   Power:      ∂/∂x (f^n)      = n·f^(n−1)·f'      (n numeric)
  *               ∂/∂x (f^g)      = f^g·(g'·ln f + g·f'/f)  (general)
- *   Chain rule: ∂/∂x sin(f)  = cos(f)·f'
- *               ∂/∂x cos(f)  = −sin(f)·f'
- *               ∂/∂x tan(f)  = f' / cos²(f)
- *               ∂/∂x exp(f)  = exp(f)·f'
- *               ∂/∂x log(f)  = f'/f
- *               ∂/∂x √f      = f' / (2·√f)
- *               ∂/∂x |f|     = f·f' / |f|  (undefined at f=0)
+ *   Chain rule: ∂/∂x sin(f)    = cos(f)·f'
+ *               ∂/∂x cos(f)    = −sin(f)·f'
+ *               ∂/∂x tan(f)    = f' / cos²(f)
+ *               ∂/∂x exp(f)    = exp(f)·f'
+ *               ∂/∂x log(f)    = f'/f
+ *               ∂/∂x √f        = f' / (2·√f)
+ *               ∂/∂x |f|       = f·f' / |f|  (undefined at f=0)
+ *               ∂/∂x sinh(f)   = cosh(f)·f'
+ *               ∂/∂x cosh(f)   = sinh(f)·f'
+ *               ∂/∂x tanh(f)   = f' / cosh²(f)
+ *               ∂/∂x asin(f)   = f' / √(1−f²)
+ *               ∂/∂x acos(f)   = −f' / √(1−f²)
+ *               ∂/∂x atan(f)   = f' / (1+f²)
+ *               ∂/∂x asinh(f)  = f' / √(f²+1)
+ *               ∂/∂x acosh(f)  = f' / √(f²−1)
+ *               ∂/∂x atanh(f)  = f' / (1−f²)
+ *               ∂/∂x cot(f)    = −f' / sin²(f)
+ *               ∂/∂x sec(f)    = sec(f)·tan(f)·f'
+ *               ∂/∂x csc(f)    = −csc(f)·cot(f)·f'
  *   Unknown ops: left as unevaluated (∂ expr var) notation.
  *
  * --- Integration rules applied by sx_integrate ---
@@ -67,6 +79,20 @@
  *   exp:        ∫exp(ax+b) dx  = exp(ax+b)/a
  *   log:        ∫ln(ax+b) dx   = ((ax+b)·ln(ax+b) − (ax+b)) / a
  *   sqrt:       ∫√(ax+b) dx    = 2(ax+b)^(3/2) / (3a)
+ *   sinh/cosh:  ∫sinh(f) dx    = cosh(f) / f'  (linear f)
+ *               ∫cosh(f) dx    = sinh(f) / f'
+ *   tanh:       ∫tanh(f) dx    = ln(cosh(f)) / f'
+ *   cot:        ∫cot(f) dx     = ln|sin(f)| / f'
+ *   sec:        ∫sec(f) dx     = ln|sec(f)+tan(f)| / f'
+ *   csc:        ∫csc(f) dx     = −ln|csc(f)+cot(f)| / f'
+ *   sec²/csc²:  ∫sec²(f) dx    = tan(f) / f'
+ *               ∫csc²(f) dx    = −cot(f) / f'
+ *   inv trig:   ∫asin(f) dx    = (f·asin(f) + √(1−f²)) / f'  (IBP, linear f)
+ *               ∫acos(f) dx    = (f·acos(f) − √(1−f²)) / f'
+ *               ∫atan(f) dx    = (f·atan(f) − ln(1+f²)/2) / f'
+ *               ∫asinh(f) dx   = (f·asinh(f) − √(f²+1)) / f'
+ *               ∫acosh(f) dx   = (f·acosh(f) − √(f²−1)) / f'
+ *               ∫atanh(f) dx   = (f·atanh(f) + ln(1−f²)/2) / f'
  *   Unknown ops / products with var: left as unevaluated (∫ expr var) notation.
  *   Definite:   (∫ f x a b)    = F(b) − F(a)  where F = ∫f dx
  *
@@ -144,6 +170,18 @@ val_t sx_cos(val_t a);
 val_t sx_tan(val_t a);
 val_t sx_exp(val_t a);
 val_t sx_log(val_t a);
+val_t sx_sinh(val_t a);
+val_t sx_cosh(val_t a);
+val_t sx_tanh(val_t a);
+val_t sx_asin(val_t a);
+val_t sx_acos(val_t a);
+val_t sx_atan(val_t a);
+val_t sx_asinh(val_t a);
+val_t sx_acosh(val_t a);
+val_t sx_atanh(val_t a);
+val_t sx_cot(val_t a);
+val_t sx_sec(val_t a);
+val_t sx_csc(val_t a);
 
 /* ---- Arithmetic (continued) ---- */
 val_t sx_conj(val_t a);
@@ -159,6 +197,12 @@ val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=v
 bool  sx_equal(val_t a, val_t b);                            /* structural equality */
 bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */
 
+/* ---- Polynomial / structural operations ---- */
+val_t sx_expand(val_t expr);                                 /* distribute * over +, expand integer powers */
+val_t sx_degree(val_t expr, val_t var);                      /* polynomial degree in var (fixnum) */
+val_t sx_collect(val_t expr, val_t var);                     /* collect like-degree terms in var */
+val_t sx_leading_coeff(val_t expr, val_t var);               /* coefficient of highest-degree term */
+
 /* ---- Display ---- */
 void  sx_write(val_t expr, val_t port);
 void  sx_write_infix(val_t expr, val_t port);   /* infix:  x^2 + 2*x + 1  */
@@ -169,6 +213,10 @@ extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
 extern val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 extern val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
 extern val_t SX_FRACDIFF, SX_FRACINT;
+extern val_t SX_SINH, SX_COSH, SX_TANH;
+extern val_t SX_ASIN, SX_ACOS, SX_ATAN;
+extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
+extern val_t SX_COT, SX_SEC, SX_CSC;
 
 val_t sx_fracdiff(val_t expr, val_t alpha, val_t var); /* D^α fractional derivative */
 val_t sx_fracint (val_t expr, val_t alpha, val_t var); /* I^α fractional integral   */

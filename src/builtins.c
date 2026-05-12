@@ -365,6 +365,15 @@ static val_t prim_tan(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return nu
 static val_t prim_asin(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_asin(av[0]);}
 static val_t prim_acos(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_acos(av[0]);}
 static val_t prim_atan(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if(ac==2) return num_atan2(av[0],av[1]); return num_atan(av[0]);}
+static val_t prim_sinh(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return num_sinh(av[0]);}
+static val_t prim_cosh(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return num_cosh(av[0]);}
+static val_t prim_tanh(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return num_tanh(av[0]);}
+static val_t prim_asinh(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_asinh(av[0]);}
+static val_t prim_acosh(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_acosh(av[0]);}
+static val_t prim_atanh(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_atanh(av[0]);}
+static val_t prim_cot(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_cot(av[0]);}
+static val_t prim_sec(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_sec(av[0]);}
+static val_t prim_csc(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_csc(av[0]);}
 static val_t prim_floor_quotient(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_floor(num_div(av[0],av[1]));}
 static val_t prim_floor_remainder(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_sub(av[0],num_mul(prim_floor_quotient(ac,av,ud),av[1]));}
 static val_t prim_numerator(int ac, val_t *av, void *ud) {
@@ -1059,6 +1068,14 @@ static val_t prim_sym_var_name(int ac, val_t *av, void *ud) {
     if (!vis_symvar(av[0])) scm_raise(V_FALSE, "sym-var-name: not a symbolic variable");
     return sx_var_name(av[0]);
 }
+static val_t prim_expand(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_expand(av[0]); }
+static val_t prim_degree(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_degree(av[0], av[1]); }
+static val_t prim_collect(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_collect(av[0], av[1]); }
+static val_t prim_leading_coeff(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_leading_coeff(av[0], av[1]); }
 
 /* ---- Quantum primitives ---- */
 static val_t prim_superpose(int ac, val_t *av, void *ud)
@@ -1406,6 +1423,9 @@ void builtins_register(val_t env) {
     DEF("exp",prim_exp,1,1); DEF("log",prim_log,1,2);
     DEF("sin",prim_sin,1,1); DEF("cos",prim_cos,1,1); DEF("tan",prim_tan,1,1);
     DEF("asin",prim_asin,1,1); DEF("acos",prim_acos,1,1); DEF("atan",prim_atan,1,2);
+    DEF("sinh",prim_sinh,1,1); DEF("cosh",prim_cosh,1,1); DEF("tanh",prim_tanh,1,1);
+    DEF("asinh",prim_asinh,1,1); DEF("acosh",prim_acosh,1,1); DEF("atanh",prim_atanh,1,1);
+    DEF("cot",prim_cot,1,1); DEF("sec",prim_sec,1,1); DEF("csc",prim_csc,1,1);
     DEF("floor-quotient",prim_floor_quotient,2,2);
     DEF("floor-remainder",prim_floor_remainder,2,2);
     DEF("floor/",prim_floor_div,2,2);
@@ -1611,6 +1631,10 @@ void builtins_register(val_t env) {
     DEF("sym-expr?",      prim_sym_expr_p,      1, 1);
     DEF("symbolic?",      prim_symbolic_p,      1, 1);
     DEF("sym-var-name",   prim_sym_var_name,    1, 1);
+    DEF("expand",         prim_expand,          1, 1);
+    DEF("degree",         prim_degree,          2, 2);
+    DEF("collect",        prim_collect,         2, 2);
+    DEF("leading-coeff",  prim_leading_coeff,   2, 2);
     DEF("superpose",      prim_superpose,       1, 1);
     DEF("quantum-uniform",prim_quantum_uniform, 1, 1);
     DEF("observe",        prim_observe,         1, 1);
