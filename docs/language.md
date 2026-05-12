@@ -138,7 +138,7 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 | Rational | `rational?` | `3/4` |
 | Flonum | `real?` | `3.14` `1e-9` |
 | Complex | `complex?` | `1+2i` |
-| Quaternion | `quaternion?` | `(make-quaternion 1 2 3 4)` |
+| Quaternion | `quaternion?` | `1+2i+3j+4k` or `(make-quaternion 1 2 3 4)` |
 | Octonion | `octonion?` | `(make-octonion 1 2 3 4 5 6 7 8)` |
 | Multivector | `multivector?` | `(make-mv 3 0 0)` |
 | Surreal | `surreal?` | `omega`, `epsilon`, `(make-surreal ...)` |
@@ -336,6 +336,16 @@ Math constants are in scope without any import:
 ### Quaternions
 
 Quaternions represent rotations in 3D. All standard arithmetic works.
+
+Quaternion literals use the same `a+bi+cj+dk` notation as output. Any subset of terms is accepted, in order:
+
+```scheme
+1+2i+3j+4k          ; full quaternion
+3j+4k               ; pure imaginary part
++k                  ; unit k
+-2.5j
+(make-quaternion w x y z)   ; constructor form
+```
 
 ```scheme
 (define q (make-quaternion w x y z))
