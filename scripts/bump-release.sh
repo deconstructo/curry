@@ -94,6 +94,22 @@ SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
 [[ -n "$SHA256" ]] || die "SHA256 came back empty."
 ok "SHA256: $SHA256"
 
+# ── update CMakeLists.txt ─────────────────────────────────────────────────────
+CMAKELISTS="$REPO_ROOT/CMakeLists.txt"
+info "Updating $CMAKELISTS"
+sedi "s|project(curry VERSION [^ ]* LANGUAGES|project(curry VERSION ${NEW_VER} LANGUAGES|" \
+  "$CMAKELISTS"
+sedi "s|# curry-scheme_[0-9][^_]*_|# curry-scheme_${NEW_VER}_|" \
+  "$CMAKELISTS"
+ok "CMakeLists.txt updated"
+
+# ── update src/main.c ─────────────────────────────────────────────────────────
+MAIN_C="$REPO_ROOT/src/main.c"
+info "Updating $MAIN_C"
+sedi "s|#define CURRY_VERSION \"[^\"]*\"|#define CURRY_VERSION \"${NEW_VER}\"|" \
+  "$MAIN_C"
+ok "src/main.c updated"
+
 # ── update formula ────────────────────────────────────────────────────────────
 info "Updating $FORMULA"
 
@@ -121,9 +137,9 @@ grep -n "url\|sha256\|version" "$FORMULA" | grep -v "^.*#"
 echo
 
 # ── commit ────────────────────────────────────────────────────────────────────
-info "Committing formula"
-git add "$FORMULA"
-git commit -m "chore: bump Homebrew formula to ${NEW_VER}"
+info "Committing version files"
+git add "$FORMULA" "$CMAKELISTS" "$MAIN_C"
+git commit -m "chore: bump version to ${NEW_VER}"
 ok "Committed"
 
 if $PUSH_AFTER; then
