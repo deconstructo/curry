@@ -1,5 +1,7 @@
 # Multivectors — Clifford Algebra Cl(p,q,r)
 
+*v0.7.5 — 2026-05-12*
+
 Curry provides first-class multivectors: elements of the Clifford algebra Cl(p,q,r) over the reals. Multivectors unify scalars, vectors, bivectors, spinors, and rotors in a single type and make coordinate-free geometric computation tractable.
 
 ## Background

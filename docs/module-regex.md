@@ -1,5 +1,7 @@
 # Module: (curry regex)
 
+*v0.7.5 — 2026-05-12*
+
 POSIX extended regular expressions using the system `<regex.h>` (glibc, musl, Darwin). No external library required.
 
 ## Import

@@ -1,6 +1,32 @@
 # Curry Scheme Language Reference
 
-Curry is an R7RS Scheme interpreter with a numeric tower that extends through the hypercomplex numbers, an actor-model concurrency system, and a modular C extension interface. Error messages are rendered in Standard Babylonian Akkadian with cuneiform script, as scribal tradition demands.
+*v0.7.5 — 2026-05-12*
+
+Curry is an R7RS Scheme interpreter with a numeric tower that extends through the hypercomplex numbers, a built-in computer algebra system, an actor-model concurrency layer, and a modular C extension interface. Error messages are rendered in Standard Babylonian Akkadian, as scribal tradition demands.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [What's in Curry](#whats-in-curry)
+- [Module tiers](#module-tiers)
+- [R7RS deviations](#r7rs-deviations)
+- [Values and types](#values-and-types)
+- [Special forms](#special-forms)
+- [Numeric tower](#numeric-tower)
+- [Symbolic CAS](#symbolic-cas)
+- [Strings and characters](#strings-and-characters)
+- [Lists and pairs](#lists-and-pairs)
+- [Vectors](#vectors)
+- [I/O](#input--output)
+- [Continuations](#tail-calls-and-continuations)
+- [Actor model](#actor-model)
+- [Procedure tracing](#procedure-tracing)
+- [Module search path](#module-search-path)
+- [Three-language syntax](#three-language-syntax)
+- [REPL commands](#repl-commands)
+- [Environment variables](#environment-variables)
+
+---
 
 ## Quick start
 
@@ -14,6 +40,91 @@ cmake -B build && cmake --build build -j$(sysctl -n hw.logicalcpu)
 ./build/curry script.scm             # run a file
 ./build/curry -e '(display (+ 1 2))' # evaluate expression
 ```
+
+See [INSTALL.md](INSTALL.md) for full dependency and build instructions, including optional modules and the Homebrew formula.
+
+---
+
+## What's in Curry
+
+Curry has three layers:
+
+**Core language** — compiled directly into the interpreter. Always present, no import needed. Includes the full R7RS base library plus Curry's extensions: the extended numeric tower (through multivectors and symbolic expressions), the actor system, math constants (`e`, `pi`, `exact-pi`, `exact-e`), CAS procedures (`∂`, `∫`, `symbolic`, `simplify`, `substitute`, `expand`, `collect`, …), and tracing.
+
+**Standard modules** — separate `.so` or `.scm` files that are always installed alongside the interpreter. Import with `(import (curry name))`. These are: `json`, `network`, `redis`, `regex`, `sync`, `sqlite`, `mcp`, `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ode`.
+
+**Optional modules** — built only when the required external library is present at compile time (or when the Homebrew formula is installed with `--with-*`). These are: `qt6` (GUI and 2D graphics), `plplot` (scientific plotting), `symengine` (SymEngine CAS backend), `neo4j` (graph database), `mqtt` (messaging), `vecdb` (approximate nearest neighbours).
+
+Module documentation lives in separate files; see [the module docs](#module-reference).
+
+---
+
+## Module tiers
+
+| Tier | Members | Import |
+|------|---------|--------|
+| Core (always in scope) | numeric tower, CAS, actors, I/O, R7RS base | no import needed |
+| Standard | `json` `network` `redis` `regex` `sync` `sqlite` `mcp` `crypto` `ldap` `storage` `graphql` `image` `git` `ode` | `(import (curry name))` |
+| Optional (build flag / brew option) | `qt6` `plplot` `symengine` `neo4j` `mqtt` `vecdb` | `(import (curry name))` |
+
+Trying to import a module that was not built raises an error. The Homebrew formula enables all standard modules and accepts `--with-qt6`, `--with-plplot`, `--with-symengine`, `--with-neo4j`, `--with-mqtt` at install time.
+
+---
+
+## R7RS deviations
+
+Curry aims for R7RS compatibility. The following deviations are confirmed and not planned for resolution soon. Programs that rely on these R7RS guarantees need workarounds.
+
+### 1. `call/cc` — escape continuations only
+
+`call-with-current-continuation` captures and invokes escape continuations (jumping outward through live stack frames) correctly, including correct interaction with `dynamic-wind`. **Upward continuations** — capturing a continuation and invoking it after the original call has returned — are not supported and will behave unpredictably.
+
+```scheme
+; Works: escape
+(call/cc (lambda (k) (k 42) (error "never")))  ; => 42
+
+; Does NOT work: upward continuation
+(define k #f)
+(+ 1 (call/cc (lambda c (set! k c) 0)))        ; storing k and later (k 5) is unsupported
+```
+
+Delimited continuations (`shift`/`reset`) are on the roadmap but not yet implemented.
+
+### 2. `floor`, `ceiling`, `truncate`, `round` — inexact input yields inexact result
+
+R7RS requires that `(floor 1.5)` returns the exact integer `1`. Curry returns the inexact flonum `1.0`. For all four rounding procedures, when the input is inexact the output is also inexact.
+
+```scheme
+(floor   1.7)   ; => 1.0    (R7RS requires 1)
+(ceiling 1.2)   ; => 2.0    (R7RS requires 2)
+(truncate 1.9)  ; => 1.0    (R7RS requires 1)
+(round  2.5)    ; => 2.0    (R7RS requires 2)
+
+(floor 7/2)     ; => 3      (exact input → exact output — correct)
+```
+
+Workaround: `(inexact->exact (floor x))` to obtain an exact integer.
+
+### 3. `string-set!` — not implemented
+
+Mutable strings are not supported. `string-set!` is absent. Use `string-copy` plus `string-copy!` (which copies a range), or build a new string via `string-append` / `list->string`.
+
+### 4. `error-object-message` — named `error-message`
+
+R7RS specifies `error-object-message` and `error-object-irritants` as the accessors for error objects raised by `(error msg irritant ...)`. Curry uses `error-message` and `error-irritants` (without the `object-` infix).
+
+```scheme
+(guard (e (#t (error-message e)))           ; Curry
+  (error "something went wrong" 42))        ; => "something went wrong"
+
+; R7RS portable form (error-object-message e) will raise "unbound variable"
+```
+
+### 5. `raise-continuable` — identical to `raise`
+
+R7RS requires that `raise-continuable` allows the exception handler to return a value, which becomes the result of the `raise-continuable` call. Curry's `raise-continuable` is currently identical to `raise` and does not pass control back to the raise site. Handlers that return a value from `raise-continuable` will see unexpected behaviour.
+
+---
 
 ## Values and types
 
@@ -29,6 +140,7 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 | Complex | `complex?` | `1+2i` |
 | Quaternion | `quaternion?` | `(make-quaternion 1 2 3 4)` |
 | Octonion | `octonion?` | `(make-octonion 1 2 3 4 5 6 7 8)` |
+| Multivector | `multivector?` | `(make-mv 3 0 0)` |
 | Surreal | `surreal?` | `omega`, `epsilon`, `(make-surreal ...)` |
 | Symbolic variable | `sym-var?` | `(symbolic x)` then `x` |
 | Symbolic expression | `sym-expr?` | `(+ x 1)` when x is symbolic |
@@ -43,6 +155,8 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 | Procedure | `procedure?` | `(lambda (x) x)` |
 | Port | `port?` | — |
 | Actor | `actor?` | `(spawn thunk)` |
+
+---
 
 ## Special forms
 
@@ -127,7 +241,7 @@ All tail positions are optimised — proper tail recursion is guaranteed. Named 
 
 (error "message" irritant...)
 (raise obj)
-(raise-continuable obj)
+(raise-continuable obj)        ; note: currently identical to raise — see R7RS deviations
 ```
 
 ### dynamic-wind
@@ -167,15 +281,6 @@ log  ; => (out in)
     (read port)))   ; port is closed whether read succeeds or raises
 ```
 
-Errors display with a Standard Babylonian Akkadian preamble:
-
-```
-𒀭 ḫiṭītu — šumu lā šakin:
-  unbound variable: foo
-```
-
-The cuneiform sign 𒀭 (DINGIR) is the divine determinative; `ḫiṭītu` means *fault/error*. The Akkadian phrase identifies the error category — `šumu lā šakin` is "the name is not established", `lā qitnum` is "not a small thing [pair]", and so on.
-
 ### Modules and imports
 
 ```scheme
@@ -198,50 +303,19 @@ The cuneiform sign 𒀭 (DINGIR) is the divine determinative; `ḫiṭītu` mean
     (define (transform x) ...)))
 ```
 
-## Surreal numbers
-
-The surreal number type extends the real line with `omega` (ω, the first infinite ordinal) and `epsilon` (ε = 1/ω, the first positive infinitesimal). All arithmetic operators work on surreals. Surreals are totally ordered and slot into the numeric tower between rationals and flonums.
-
-```scheme
-(+ omega 3)             ; => ω + 3
-(< epsilon 1/1000000)   ; => #t  (ε smaller than any positive real)
-(> omega 1000000000)    ; => #t  (ω larger than any integer)
-(* omega epsilon)       ; => 1   (ω · ω⁻¹ = 1)
-(auto-diff (lambda (x) (* x x)) 5)  ; => 10  (exact derivative via ε)
-```
-
-See [surreal.md](surreal.md) for the full reference.
-
-## Symbolic expressions
-
-Curry includes a built-in computer algebra system. Declare variables with `symbolic`, then use ordinary arithmetic — expressions involving unresolved variables become symbolic expression trees instead of errors.
-
-```scheme
-(symbolic x)
-(+ x 1)                           ; => (+ x 1)
-(∂ (* 1/2 m (expt v 2)) v)       ; => (* m v)   (momentum!)
-(substitute (expt x 2) x 3)       ; => 9
-```
-
-See [symbolic.md](symbolic.md) for the full reference.
-
-## Quantum superposition
-
-A quantum value is a normalised probability amplitude distribution over arbitrary Scheme values. Arithmetic maps over branches without collapsing; `observe` collapses probabilistically.
-
-```scheme
-(define coin (quantum-uniform '(heads tails)))
-(observe coin)                     ; => heads or tails
-
-(define q (quantum-uniform '(1 2 3)))
-(* q 10)    ; => #|0.5774|10> + 0.5774|20> + 0.5774|30>|
-```
-
-See [quantum.md](quantum.md) for the full reference.
+---
 
 ## Numeric tower
 
-Arithmetic promotes automatically: fixnum → bignum → rational → flonum → complex → symbolic → quantum. The `exact→inexact` / `inexact→exact` procedures cross the exact/inexact boundary.
+Arithmetic promotes automatically through the tower:
+
+```
+fixnum → bignum → rational → flonum → complex
+       → quaternion → octonion → multivector
+       → surreal → symbolic
+```
+
+When any operand is symbolic, the result is a symbolic expression tree instead of an error.
 
 ```scheme
 (+ 1/3 1/6)              ; => 1/2  (exact rational)
@@ -249,6 +323,15 @@ Arithmetic promotes automatically: fixnum → bignum → rational → flonum →
 (expt 2 100)             ; => 1267650600228229401496703205376 (bignum)
 (magnitude 3+4i)         ; => 5.0
 ```
+
+Math constants are in scope without any import:
+
+| Name | Value |
+|------|-------|
+| `e` | 2.718281828459045 (flonum) |
+| `pi` | 3.141592653589793 (flonum) |
+| `exact-pi` | 100-digit rational approximation |
+| `exact-e` | 100-digit rational approximation |
 
 ### Quaternions
 
@@ -270,18 +353,9 @@ Quaternions represent rotations in 3D. All standard arithmetic works.
 (quaternion-rotate-vector q #(0 1 0))
 ```
 
-Construct a rotation quaternion from an axis and angle:
-
-```scheme
-(define (axis-angle->quat ax ay az angle)
-  (let* ((h (/ angle 2))
-         (s (sin h)))
-    (make-quaternion (cos h) (* ax s) (* ay s) (* az s))))
-```
-
 ### Octonions
 
-Octonions are a non-associative, non-commutative normed division algebra (dimension 8). They are not useful for anything. They are therefore essential.
+Octonions are a non-associative, non-commutative normed division algebra (dimension 8).
 
 ```scheme
 (define o (make-octonion e0 e1 e2 e3 e4 e5 e6 e7))
@@ -297,7 +371,7 @@ Note: `(octonion* (octonion* a b) c)` ≠ `(octonion* a (octonion* b c))` in gen
 
 ### Multivectors (Clifford algebra)
 
-Multivectors are elements of the Clifford algebra Cl(p,q,r). They unify scalars, vectors, bivectors, spinors, and rotors. Quaternions are the even subalgebra of Cl(3,0,0).
+Multivectors are elements of Cl(p,q,r). They unify scalars, vectors, bivectors, spinors, and rotors.
 
 ```scheme
 (define mv (make-mv 3 0 0))          ; zero element of Cl(3,0,0)
@@ -307,27 +381,76 @@ Multivectors are elements of the Clifford algebra Cl(p,q,r). They unify scalars,
 (define e12 (mv-e 3 0 0 1 2))        ; unit bivector e₁∧e₂
 
 (mv+ a b)                            ; addition
-(mv- a b)                            ; subtraction
 (mv* a b)                            ; geometric product
 (mv-wedge a b)                       ; outer product a∧b
 (mv-lcontract a b)                   ; left contraction a⌋b
-(mv-scale mv 2.0)
-(mv-reverse mv)                      ; grade-reversal ã
-(mv-involute mv)                     ; grade involution â
-(mv-conjugate mv)                    ; Clifford conjugate ā
-(mv-dual mv)
 (mv-grade mv k)                      ; grade-k projection
-(mv-scalar mv)                       ; scalar part as number
+(mv-dual mv)
+(mv-reverse mv)                      ; grade-reversal ã
 (mv-norm mv)
-(mv-normalize mv)
-(mv-ref mv blade)                    ; component by blade bitmap or index list
+(mv-ref mv blade)                    ; component by blade bitmap
 (mv-signature mv)                    ; → (p q r)
-
-(quaternion->mv q)                   ; embed quaternion in Cl(3,0,0)
-(mv->quaternion mv)                  ; extract quaternion from Cl(3,0,0) even part
 ```
 
-See [multivec.md](multivec.md) for the full reference, rotation examples, and notes on PGA and CGA.
+See [multivec.md](multivec.md) for the full reference.
+
+### Surreal numbers
+
+The surreal type adds ω (the first infinite ordinal) and ε = 1/ω (the first infinitesimal).
+
+```scheme
+(+ omega 3)             ; => ω + 3
+(< epsilon 1/1000000)   ; => #t
+(> omega 1000000000)    ; => #t
+(* omega epsilon)       ; => 1
+(auto-diff (lambda (x) (* x x)) 5)  ; => 10  (exact derivative via ε)
+```
+
+See [surreal.md](surreal.md) for the full reference.
+
+### CAS interaction with the upper numeric tower
+
+The CAS (symbolic layer) treats numbers as constants. **Fixnum, bignum, rational, flonum, complex, quaternion, octonion, and surreal** values are all recognized as constants — arithmetic operations on them alongside symbolic variables produce symbolic expression trees.
+
+However, there are gaps at the upper end of the tower:
+
+**Quaternions and octonions**: basic arithmetic (`+`, `-`, `*`) works. Transcendental functions (`sin`, `cos`, `exp`, `log`, `sqrt`) applied to a quaternion or octonion in a symbolic context will crash (the CAS attempts to reduce them to a flonum via `num_to_double`, which falls through). Do not mix quaternions or octonions with CAS transcendentals.
+
+**Surreals**: `+`, `-`, `*` work as CAS constants. `sqrt` is special-cased and works. `sin`, `cos`, `exp`, and `log` of a surreal will crash.
+
+**Multivectors**: not recognized as numeric constants by the CAS. Mixing a multivector with any symbolic expression will crash. Multivectors must be kept in their own computational layer, separate from the CAS.
+
+```scheme
+; Safe: symbolic variable + quaternion constant via arithmetic
+(symbolic x)
+(+ x (make-quaternion 1 0 0 0))     ; works, builds symbolic ADD node
+
+; Unsafe: transcendental of quaternion in CAS context
+(sin (make-quaternion 1 0 0 0))     ; crashes — do not do this
+
+; Unsafe: multivector in symbolic expression
+(symbolic x)
+(+ x (make-mv 3 0 0))              ; crashes — multivectors are opaque to CAS
+```
+
+---
+
+## Symbolic CAS
+
+Curry includes a built-in computer algebra system. Declare variables with `symbolic`; ordinary arithmetic on them builds expression trees.
+
+```scheme
+(symbolic x)
+(+ x 1)                           ; => (+ x 1)
+(∂ (* 1/2 m (expt v 2)) v)       ; => (* m v)
+(substitute (expt x 2) x 3)       ; => 9
+(expand (* (+ x 1) (+ x 2)))      ; => (+ (expt x 2) (* 3 x) 2)
+(collect (+ (* 2 x) (* 3 x)) x)   ; => (+ (* 5 x))
+```
+
+See [symbolic.md](symbolic.md) for the full reference: differentiation, integration, Wirtinger calculus, complex operators, polynomial operations, output formatting, and Wirtinger calculus.
+
+---
 
 ## Strings and characters
 
@@ -346,7 +469,9 @@ See [multivec.md](multivec.md) for the full reference, rotation examples, and no
 (symbol->string 'foo)
 ```
 
-Characters follow Unicode; `char->integer` returns a Unicode codepoint.
+Characters follow Unicode; `char->integer` returns a Unicode codepoint. Note: `string-set!` is not implemented — see [R7RS deviations](#r7rs-deviations).
+
+---
 
 ## Lists and pairs
 
@@ -354,7 +479,7 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 (cons 1 '(2 3))   ; (1 2 3)
 (car '(1 2 3))    ; 1
 (cdr '(1 2 3))    ; (2 3)
-(cadr '(1 2 3))   ; 2   (car of cdr)
+(cadr '(1 2 3))   ; 2
 
 (list 1 2 3)
 (length '(1 2 3))
@@ -372,6 +497,8 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 (list-ref  lst k)
 ```
 
+---
+
 ## Vectors
 
 ```scheme
@@ -388,6 +515,8 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 (vector-for-each f v)
 ```
 
+---
+
 ## Input / output
 
 ```scheme
@@ -400,7 +529,7 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 (current-input-port)
 (current-output-port)
 (current-error-port)
-(input-port-open? port)             ; #f after close-port
+(input-port-open? port)
 (output-port-open? port)
 
 ; Reading
@@ -419,6 +548,8 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint.
 (flush-output-port)
 ```
 
+---
+
 ## Tail calls and continuations
 
 Curry guarantees proper tail calls in all R7RS tail positions. Escape continuations work:
@@ -432,7 +563,9 @@ Curry guarantees proper tail calls in all R7RS tail positions. Escape continuati
 
 Continuations interact correctly with `dynamic-wind`: invoking an escape continuation unwinds all `dynamic-wind` frames entered since the continuation was captured, calling each `after` thunk before the jump.
 
-Full first-class continuations (upward-crossing) are an escape-only implementation. Delimited continuations (`shift`/`reset`) are on the roadmap.
+**Upward continuations are not supported** — see [R7RS deviations](#r7rs-deviations). Delimited continuations (`shift`/`reset`) are on the roadmap.
+
+---
 
 ## Actor model
 
@@ -461,11 +594,13 @@ Actors are lightweight concurrent processes. Each actor runs in its own thread s
 (actor-alive? a)
 ```
 
-Actors communicate exclusively through message passing. There are no shared mutable variables (except the GC heap — use actors as the synchronization boundary).
+Actors communicate exclusively through message passing. There are no shared mutable variables (except the GC heap — use actors as the synchronization boundary). The `sync` module provides mutexes, condition variables, and semaphores for cases where shared state is required.
+
+---
 
 ## Procedure tracing
 
-`trace` and `untrace` wrap a named procedure (looked up in the global environment) with enter/exit instrumentation. Trace output goes to stderr.
+`trace` and `untrace` wrap a named procedure with enter/exit instrumentation. Trace output goes to stderr.
 
 ```scheme
 (define (fact n) (if (<= n 1) 1 (* n (fact (- n 1)))))
@@ -481,7 +616,7 @@ Actors communicate exclusively through message passing. There are no shared muta
 ; [trace] <-- fact = 6
 ; [trace] <-- fact = 24
 
-(untrace 'fact)     ; remove tracing
+(untrace 'fact)
 (traced? fact)      ; => #f
 ```
 
@@ -489,41 +624,67 @@ Actors communicate exclusively through message passing. There are no shared muta
 |-----------|-------------|
 | `(trace 'name)` | Wrap the global binding of `name` with trace instrumentation |
 | `(untrace 'name)` | Unwrap, restoring the original procedure |
-| `(traced? x)` | Returns `#t` if `x` is a traced-procedure wrapper |
+| `(traced? x)` | `#t` if `x` is a traced-procedure wrapper |
 
-`trace` and `untrace` take **quoted symbols**, not values. Tracing a traced procedure is a no-op; untracing a non-traced procedure is also a no-op.
+`trace` and `untrace` take **quoted symbols**, not values.
+
+---
 
 ## Module search path
 
 Modules are located by mapping a name-list to a file path:
 
 ```
-(curry json)     →  curry/json.so   (C extension)
+(curry json)     →  curry/json.so
 (curry crypto)   →  curry/crypto.so
-(mylib util)     →  mylib/util.scm  (Scheme)
+(mylib util)     →  mylib/util.scm
 ```
 
 Search order:
 1. Paths in `CURRY_MODULE_PATH` (colon-separated)
-2. `{exe-dir}/mods/` (build tree — finds modules next to the binary)
+2. `{exe-dir}/mods/` (build tree)
 3. `{exe-dir}/../lib/curry/modules/` (installed)
 4. `lib/curry/modules/` (relative to working directory)
 
 Each directory is tried for `.so`, `.dylib`, `.sld`, `.scm` in that order.
+
+---
+
+## Module reference
+
+| Module | Tier | Description |
+|--------|------|-------------|
+| [`(curry json)`](module-json.md) | Standard | JSON parse and serialise |
+| [`(curry network)`](module-network.md) | Standard | TCP/UDP sockets |
+| [`(curry redis)`](module-redis.md) | Standard | Redis client (RESP2) |
+| [`(curry regex)`](module-regex.md) | Standard | POSIX extended regular expressions |
+| [`(curry sync)`](module-sync.md) | Standard | Mutex, condvar, semaphore |
+| [`(curry sqlite)`](module-sqlite.md) | Standard | SQLite3 |
+| [`(curry mcp)`](mcp-clients.md) | Standard | Model Context Protocol server |
+| [`(curry crypto)`](module-crypto.md) | Standard | SHA-256, HMAC, base64 |
+| [`(curry ldap)`](module-ldap.md) | Standard | LDAP directory access |
+| [`(curry storage)`](module-storage.md) | Standard | S3, Azure Blob, Swift |
+| [`(curry graphql)`](module-graphql.md) | Standard | GraphQL HTTP client |
+| [`(curry image)`](module-image.md) | Standard | PNG/JPEG/GIF image I/O |
+| [`(curry git)`](module-git.md) | Standard | Git repository access (libgit2) |
+| [`(curry ode)`](module-ode.md) | Standard | ODE solvers (RK45, Euler) |
+| [`(curry qt6)`](module-qt6.md) | Optional | Qt6 windowing, 2D graphics, widgets |
+| [`(curry plplot)`](module-plplot.md) | Optional | PLplot scientific plotting |
+| [`(curry mqtt)`](module-mqtt.md) | Optional | MQTT client with TLS |
+| [`(curry neo4j)`](module-neo4j.md) | Optional | Neo4j graph database (Bolt) |
+| [`(curry vecdb)`](module-vecdb.md) | Optional | Nearest-neighbour vector database |
+
+---
 
 ## Three-language syntax
 
 Curry supports three syntaxes for the same language, interchangeably:
 
 1. **English (R7RS)** — standard Scheme: `define`, `lambda`, `if`, `+`, `-`, `map`, …
-2. **Transliterated Akkadian** — Standard Babylonian Akkadian in Latin script: `šakānum`, `pārisum`, `šumma`, `wašābum`, …
-3. **Cuneiform** — the same words in Unicode cuneiform script: `𒋻`, `𒅁`, `𒋗`, `𒌝`, …
+2. **Transliterated Akkadian** — Standard Babylonian Akkadian in Latin script: `šakānum`, `pārisum`, `šumma`, …
+3. **Cuneiform** — the same words in Unicode cuneiform script: `𒋻`, `𒅁`, `𒋗`, …
 
-All three syntaxes resolve to the same internal operations. You can mix them freely within a single program, though this is not recommended for readability.
-
-### Why
-
-Error messages are rendered in Standard Babylonian Akkadian because scribal tradition demands it. Extending the language itself to accept Akkadian syntax follows naturally. The cuneiform script follows because the Babylonians did not write their language in Latin letters.
+All three resolve to the same internal operations and can be mixed freely within a single program.
 
 ### Selected vocabulary
 
@@ -552,20 +713,16 @@ The full vocabulary is in [akkadian-reference.md](akkadian-reference.md).
 
 ### Example — kinetic energy in three syntaxes
 
-English (R7RS):
 ```scheme
+; English (R7RS)
 (define (kinetic-energy m v)
   (* 1/2 m (* v v)))
-```
 
-Transliterated Akkadian:
-```scheme
+; Transliterated Akkadian
 (šakānum (kinetic-energy m v)
   (šapākum 1/2 m (šapākum v v)))
-```
 
-Cuneiform:
-```scheme
+; Cuneiform
 (𒋻 (kinetic-energy m v)
   (𒊺 1/2 m (𒊺 v v)))
 ```
@@ -579,9 +736,11 @@ All runtime errors carry a Standard Babylonian preamble:
   unbound variable: foo
 ```
 
-The DINGIR sign (𒀭) is the divine determinative, written before the names of gods and important concepts. `ḫiṭītu` means *fault* or *error*. The Akkadian phrase identifies the category; the English line below it gives the specific detail.
+The DINGIR sign (𒀭) is the divine determinative. `ḫiṭītu` means *fault* or *error*. The Akkadian phrase identifies the category; the English line gives the specific detail.
 
-See [akkadian-reference.md](akkadian-reference.md) for the complete error phrase catalogue and the full vocabulary of special forms and procedures.
+See [akkadian-reference.md](akkadian-reference.md) for the complete error phrase catalogue and full vocabulary.
+
+---
 
 ## REPL commands
 
@@ -590,13 +749,13 @@ See [akkadian-reference.md](akkadian-reference.md) for the complete error phrase
 | `,quit` or `,exit` | Exit |
 | `,help` | Show commands |
 | `,gc` | Force a GC cycle |
+| `,env` | List all global bindings |
 
-When built with `libreadline`, the REPL provides:
-- Line editing (arrow keys, Ctrl-A/E, Ctrl-R incremental history search)
-- Persistent history in `~/.curry_history` (last 500 entries)
-- Multi-line input: the prompt changes to `... ` when an expression spans multiple lines
+When built with `libreadline`, the REPL provides line editing (arrow keys, Ctrl-A/E, Ctrl-R incremental history search), persistent history in `~/.curry_history` (last 500 entries), and multi-line input (prompt changes to `... ` when an expression spans multiple lines).
 
 Without readline the REPL uses basic `fgets`-based input.
+
+---
 
 ## Environment variables
 

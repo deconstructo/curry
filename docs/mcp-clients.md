@@ -1,5 +1,7 @@
 # Connecting AI clients to a Curry MCP server
 
+*v0.7.5 — 2026-05-12*
+
 Curry MCP servers use **stdio transport**: the client spawns the `curry` binary as a
 subprocess and communicates with it over stdin/stdout using newline-delimited JSON-RPC 2.0.
 All clients below support this model except ChatGPT Desktop, which requires a remote HTTPS

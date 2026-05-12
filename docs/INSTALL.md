@@ -1,5 +1,7 @@
 # Installation & Building
 
+*v0.7.5 — 2026-05-12*
+
 ## Install via Homebrew (macOS)
 
 The fastest way to get Curry on macOS — no manual dependency wrangling required:

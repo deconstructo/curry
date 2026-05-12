@@ -1,5 +1,7 @@
 # Module: (curry crypto)
 
+*v0.7.5 — 2026-05-12*
+
 Cryptographic primitives: base64, MD5, SHA-1, SHA-256, HMAC-SHA-256.
 
 ## Installation

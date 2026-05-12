@@ -1,5 +1,7 @@
 # Module: (curry sqlite)
 
+*v0.7.5 — 2026-05-12*
+
 SQLite3 database access.
 
 ## Installation

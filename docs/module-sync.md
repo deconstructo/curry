@@ -1,5 +1,7 @@
 # Module: (curry sync)
 
+*v0.7.5 — 2026-05-12*
+
 Low-level synchronisation primitives: mutex, condition variable, and counting semaphore, built directly over POSIX pthreads. No external library required.
 
 > **macOS note.** macOS does not implement unnamed POSIX semaphores (`sem_init` always fails). The semaphore type in this module is therefore implemented with a `pthread_mutex_t` + `pthread_cond_t` + counter — identical semantics to `sem_t`, but portable across Linux and macOS.

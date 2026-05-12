@@ -1,5 +1,7 @@
 # Module: (curry ode)
 
+*v0.7.5 — 2026-05-12*
+
 Ordinary differential equation solvers for initial-value problems of the form **dy/dt = f(t, y)**. Pure Scheme — no C extension, no extra dependencies.
 
 `y` may be a **number** (scalar ODE) or a **list of numbers** (system of ODEs). All methods work transparently with Curry's numeric tower: exact rationals, complex numbers, and symbolic expressions are all valid.

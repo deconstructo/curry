@@ -1,5 +1,7 @@
 # Quantum Superposition Values
 
+*v0.7.5 — 2026-05-12*
+
 Curry has a first-class quantum superposition type. A quantum value is a normalized probability amplitude distribution over ordinary Scheme values. It can be operated on arithmetically without collapsing, and collapses to a single value only when explicitly observed.
 
 This is not a quantum circuit simulator. The amplitudes are classical complex numbers. What is unusual is that the *values being superposed* are arbitrary Scheme values — numbers, strings, lists, procedures, actors — not qubits.

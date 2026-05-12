@@ -1,5 +1,7 @@
 # Module: (curry ldap)
 
+*v0.7.5 — 2026-05-12*
+
 LDAP and LDAPS directory access.
 
 ## Installation

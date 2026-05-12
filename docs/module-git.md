@@ -1,5 +1,7 @@
 # Module: (curry git)
 
+*v0.7.5 — 2026-05-12*
+
 Git repository access via libgit2.
 
 ## Installation
