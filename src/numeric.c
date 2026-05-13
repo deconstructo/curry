@@ -293,6 +293,11 @@ static val_t add_rat(val_t a, val_t b) {
 static val_t add_flo(double a, double b) { return num_make_float(a + b); }
 
 val_t num_add(val_t a, val_t b) {
+    /* Fast paths: skip the full tower dispatch for the common cases */
+    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) + vfloat(b));
+    if (vis_fixnum(a) && vis_fixnum(b)) return add_fix(vunfix(a), vunfix(b));
+    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) + vfloat(b));
+    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) + (double)vunfix(b));
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_add(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, b);
@@ -355,6 +360,10 @@ static val_t sub_rat(val_t a, val_t b) {
 static val_t sub_flo(double a, double b) { return num_make_float(a - b); }
 
 val_t num_sub(val_t a, val_t b) {
+    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) - vfloat(b));
+    if (vis_fixnum(a) && vis_fixnum(b)) return sub_fix(vunfix(a), vunfix(b));
+    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) - vfloat(b));
+    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) - (double)vunfix(b));
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_sub(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, quantum_mul_scalar(b, vfix(-1)));
@@ -390,6 +399,10 @@ static val_t mul_rat(val_t a, val_t b) {
 static val_t mul_flo(double a, double b) { return num_make_float(a * b); }
 
 val_t num_mul(val_t a, val_t b) {
+    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) * vfloat(b));
+    if (vis_fixnum(a) && vis_fixnum(b)) return mul_fix(vunfix(a), vunfix(b));
+    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) * vfloat(b));
+    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) * (double)vunfix(b));
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_mul(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, b);
@@ -449,6 +462,9 @@ val_t num_mul(val_t a, val_t b) {
 
 /* ---- div ---- */
 val_t num_div(val_t a, val_t b) {
+    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
+    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) / vfloat(b));
+    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) / (double)vunfix(b));
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && !vis_quantum(b)) return quantum_div_scalar(a, b);
@@ -493,6 +509,23 @@ val_t num_abs(val_t a) {
 
 /* ---- Comparison ---- */
 int num_cmp(val_t a, val_t b) {
+    /* Fast paths */
+    if (vis_flonum(a) && vis_flonum(b)) {
+        double da = vfloat(a), db = vfloat(b);
+        return da < db ? -1 : da > db ? 1 : 0;
+    }
+    if (vis_fixnum(a) && vis_fixnum(b)) {
+        intptr_t ia = vunfix(a), ib = vunfix(b);
+        return ia < ib ? -1 : ia > ib ? 1 : 0;
+    }
+    if (vis_fixnum(a) && vis_flonum(b)) {
+        double da = (double)vunfix(a), db = vfloat(b);
+        return da < db ? -1 : da > db ? 1 : 0;
+    }
+    if (vis_flonum(a) && vis_fixnum(b)) {
+        double da = vfloat(a), db = (double)vunfix(b);
+        return da < db ? -1 : da > db ? 1 : 0;
+    }
     if (vis_surreal(a) || vis_surreal(b)) return sur_compare(a, b);
     if (vis_flonum(a) || vis_flonum(b)) {
         double da = num_to_double(a), db = num_to_double(b);
