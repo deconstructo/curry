@@ -60,6 +60,7 @@ typedef enum {
     T_TRACED        = 34,  /* procedure wrapped with trace instrumentation */
     T_MATRIX        = 35,  /* 2D matrix of doubles (row-major) */
     T_TENSOR        = 36,  /* N-dimensional tensor of doubles (row-major) */
+    T_F64VEC        = 37,  /* typed flat double[] — bulk C arithmetic (f64vector) */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -113,6 +114,7 @@ static inline uint32_t vtype(val_t v) {
 #define vis_traced(v)   vis_type(v, T_TRACED)
 #define vis_matrix(v)   vis_type(v, T_MATRIX)
 #define vis_tensor(v)   vis_type(v, T_TENSOR)
+#define vis_f64vec(v)   vis_type(v, T_F64VEC)
 
 #define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v) || vis_traced(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
@@ -185,6 +187,13 @@ typedef struct {
     Hdr    hdr;
     double e[8];
 } Octonion;
+
+/* F64Vec: typed flat array of doubles — no GC pointers, use CURRY_NEW_FLEX_ATOM */
+typedef struct {
+    Hdr      hdr;
+    uint32_t len;
+    double   data[];
+} F64Vec;
 
 typedef struct {
     Hdr      hdr;
@@ -461,6 +470,7 @@ typedef struct {
 #define as_cpx(v)     vunptr(Complex,    v)
 #define as_quat(v)    vunptr(Quaternion, v)
 #define as_oct(v)     vunptr(Octonion,   v)
+#define as_f64v(v)    vunptr(F64Vec,     v)
 #define as_bytes(v)   vunptr(Bytevector, v)
 #define as_port(v)    vunptr(Port,       v)
 #define as_clos(v)    vunptr(Closure,    v)

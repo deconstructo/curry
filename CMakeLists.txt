@@ -149,6 +149,7 @@ endif()
 
 # ---- Optional modules (shared libraries loaded at runtime) ----
 
+option(BUILD_MODULE_F64VECTOR "Build f64vector typed numeric array module" ON)
 option(BUILD_MODULE_JSON      "Build JSON module"                  ON)
 option(BUILD_MODULE_SQLITE    "Build SQLite module"                ON)
 option(BUILD_MODULE_NETWORK   "Build network module"               ON)
@@ -248,6 +249,12 @@ function(curry_cxx_module name)
   )
   install(TARGETS curry_${name} DESTINATION lib/curry/modules/curry)
 endfunction()
+
+if(BUILD_MODULE_F64VECTOR)
+  curry_c_module(f64vector)
+  target_link_libraries(curry_f64vector PRIVATE m)
+  message(STATUS "Building f64vector module (typed double[] arrays)")
+endif()
 
 if(BUILD_MODULE_JSON)
   curry_c_module(json)

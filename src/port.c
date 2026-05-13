@@ -376,6 +376,17 @@ void scm_write(val_t v, val_t port) {
     if (vis_mv(v))       { extern void mv_write(val_t, val_t); mv_write(v, port); return; }
     if (vis_matrix(v))  { extern void mat_write(val_t, val_t); mat_write(v, port); return; }
     if (vis_tensor(v))  { extern void tensor_write(val_t, val_t); tensor_write(v, port); return; }
+    if (vis_f64vec(v)) {
+        F64Vec *fv = as_f64v(v);
+        port_write_string(port, "#f64(", 5);
+        for (uint32_t i = 0; i < fv->len; i++) {
+            if (i) port_write_char(port, ' ');
+            int n = snprintf(buf, sizeof(buf), "%g", fv->data[i]);
+            port_write_string(port, buf, (uint32_t)n);
+        }
+        port_write_char(port, ')');
+        return;
+    }
     if (vis_traced(v)) {
         Traced *t = as_traced(v);
         if (vis_symbol(t->name)) {

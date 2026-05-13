@@ -48,6 +48,11 @@ bool scm_equal(val_t a, val_t b) {
     }
     if (vis_symbolic(a) && vis_symbolic(b))
         return sx_equal(a, b);
+    if (vis_f64vec(a) && vis_f64vec(b)) {
+        F64Vec *fa = as_f64v(a), *fb = as_f64v(b);
+        return fa->len == fb->len &&
+               memcmp(fa->data, fb->data, fa->len * sizeof(double)) == 0;
+    }
     return false;
 }
 
