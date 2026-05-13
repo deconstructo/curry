@@ -1,5 +1,5 @@
 ;;; prime-lattice-3d.scm — 3D cubic-spiral prime lattice
-;;; Version: 1.0
+;;; Version: 1.1
 ;;;
 ;;; Integers 0..N-1 are mapped to a 3D integer lattice shell by shell
 ;;; (Chebyshev norm: shell k = {(x,y,z) : max(|x|,|y|,|z|) = k}).
@@ -17,6 +17,7 @@
 ;;; Run: ./build/curry examples/prime-lattice-3d.scm
 
 (import (curry qt6))
+(import (curry f64vector))
 (import (scheme base))
 (import (scheme inexact))
 
@@ -49,9 +50,9 @@
             (do ((x (- k) (+ x 1))) ((> x k))
               (when (and (< n N)
                          (= k (max (abs x) (abs y) (abs z))))
-                (vector-set! lx n (inexact x))
-                (vector-set! ly n (inexact y))
-                (vector-set! lz n (inexact z))
+                (f64vector-set! lx n (inexact x))
+                (f64vector-set! ly n (inexact y))
+                (f64vector-set! lz n (inexact z))
                 (let ((p (prime? n)))
                   (vector-set! lp n p)
                   (when p (set! np (+ np 1))))
@@ -73,20 +74,20 @@
                (if (= i N) c
                    (loop (+ i 1) (if (vector-ref lp i) (+ c 1) c)))))
          (nc  (- N np))
-         (plx (make-vector np 0.0))  (ply (make-vector np 0.0))
-         (plz (make-vector np 0.0))
-         (clx (make-vector nc 0.0))  (cly (make-vector nc 0.0))
-         (clz (make-vector nc 0.0))
+         (plx (make-f64vector np))  (ply (make-f64vector np))
+         (plz (make-f64vector np))
+         (clx (make-f64vector nc))  (cly (make-f64vector nc))
+         (clz (make-f64vector nc))
          (pi  0)  (ci 0))
     (do ((i 0 (+ i 1))) ((= i N))
       (if (vector-ref lp i)
-          (begin (vector-set! plx pi (vector-ref lx i))
-                 (vector-set! ply pi (vector-ref ly i))
-                 (vector-set! plz pi (vector-ref lz i))
+          (begin (f64vector-set! plx pi (f64vector-ref lx i))
+                 (f64vector-set! ply pi (f64vector-ref ly i))
+                 (f64vector-set! plz pi (f64vector-ref lz i))
                  (set! pi (+ pi 1)))
-          (begin (vector-set! clx ci (vector-ref lx i))
-                 (vector-set! cly ci (vector-ref ly i))
-                 (vector-set! clz ci (vector-ref lz i))
+          (begin (f64vector-set! clx ci (f64vector-ref lx i))
+                 (f64vector-set! cly ci (f64vector-ref ly i))
+                 (f64vector-set! clz ci (f64vector-ref lz i))
                  (set! ci (+ ci 1)))))
     (vector np plx ply plz clx cly clz)))
 
@@ -98,9 +99,9 @@
 
 (define (rebuild! k)
   (let* ((n   (shell-volume k))
-         (lx  (make-vector n 0.0))
-         (ly  (make-vector n 0.0))
-         (lz  (make-vector n 0.0))
+         (lx  (make-f64vector n))
+         (ly  (make-f64vector n))
+         (lz  (make-f64vector n))
          (lp  (make-vector n #f))
          (_   (build-lattice! n lx ly lz lp))
          (par (partition-lattice n lx ly lz lp)))
