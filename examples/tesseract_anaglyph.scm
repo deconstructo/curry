@@ -1,4 +1,5 @@
 ;;; tesseract_anaglyph.scm — Animated 4D hypercube with anaglyph 3D rendering.
+;;; Version: 1.1
 ;;;
 ;;; Wear red-cyan glasses and the tesseract floats in real 3D space.
 ;;;
@@ -82,18 +83,8 @@
 
 ;;; ── Projection ────────────────────────────────────────────────────────────
 
-;; 3D → 2D perspective with optional eye X offset for stereo.
-;; eye-x is the horizontal camera position (negative = left eye, positive = right).
-;; Returns (screen-x . screen-y).
-(define (project-3d-to-screen p3 cx cy scale d3 eye-x)
-  (let* ((x  (vector-ref p3 0))
-         (y  (vector-ref p3 1))
-         (z  (vector-ref p3 2))
-         (w  (/ d3 (+ d3 z)))
-         ;; Parallel stereo: camera at eye-x sees the world shifted by -eye-x
-         (sx (+ cx (* scale (- x eye-x) w)))
-         (sy (+ cy (* scale (- y)       w))))
-    (cons sx sy)))
+;; Identity 3×3 matrix for vec3-project-batch — 4-D pipeline owns orientation.
+(define *I3* (vector 1.0 0.0 0.0  0.0 1.0 0.0  0.0 0.0 1.0))
 
 ;;; ── Edge-colour helpers ───────────────────────────────────────────────────
 
@@ -126,58 +117,66 @@
 
 ;;; ── Per-eye projection ────────────────────────────────────────────────────
 
-;; Project all 16 vertices to 2D for a given eye X offset.
+;; Project all 16 vertices to screen, returning #(sx sy).
+;; eye-x: camera x offset for parallel stereo (0 = no stereo).
+;; The eye shift is an x-translation in 3-D before projection — exact because
+;; the perspective w = dist/(dist+z) depends only on z, not on x.
 (define (project-all-verts cx cy scale proj eye-x)
-  (let ((out (make-vector 16)))
-    (do ((i 0 (+ i 1)))
-        ((= i 16) out)
+  (let ((p3x (make-vector 16 0.0))
+        (p3y (make-vector 16 0.0))
+        (p3z (make-vector 16 0.0)))
+    (do ((i 0 (+ i 1))) ((= i 16))
       (let* ((v4 (vector-ref *verts* i))
              (r1 (rotate-4d-xw v4 *angle-xw*))
              (r2 (rotate-4d-yz *angle-yz* r1))
              (r3 (rotate-4d-zw *angle-zw* r2))
              (p3 (project-4d  proj r3)))
-        (vector-set! out i
-          (project-3d-to-screen p3 cx cy scale *d3* eye-x))))))
+        (vector-set! p3x i (- (vector-ref p3 0) eye-x))  ; absorb eye shift here
+        (vector-set! p3y i (vector-ref p3 1))
+        (vector-set! p3z i (vector-ref p3 2))))
+    (vec3-project-batch p3x p3y p3z *I3* cx cy scale *d3*)))
 
 ;;; ── Draw one eye pass ─────────────────────────────────────────────────────
 
 ;; Draw edges and vertices using pts2d.
 ;; color-fn : (r g b) → (r' g' b')  — channel filter for this eye.
+;; pts2d is #(sx sy) from vec3-project-batch.
+;; color-fn : (r g b) → (r' g' b') — channel filter for this eye.
 (define (draw-pass painter pts2d color-fn)
-  ;; Edges
-  (do ((i 0 (+ i 1)))
-      ((= i (vector-length *edges*)))
-    (let* ((edge (vector-ref *edges* i))
-           (ia   (car edge))
-           (ib   (cdr edge))
-           (wa   (vector-ref (vector-ref *verts* ia) 3))
-           (wb   (vector-ref (vector-ref *verts* ib) 3))
-           (t    (* 0.5 (+ 1.0 (* 0.5 (+ wa wb)))))
-           (pa   (vector-ref pts2d ia))
-           (pb   (vector-ref pts2d ib)))
-      (call-with-values
-        (lambda () (edge-color t))
-        (lambda (r g b)
-          (call-with-values
-            (lambda () (color-fn r g b))
-            (lambda (r* g* b*)
-              (gfx-set-pen-color! painter r* g* b* 0.88)
-              (gfx-set-pen-width! painter 1.6)
-              (gfx-draw-line! painter (car pa) (cdr pa) (car pb) (cdr pb))))))))
-  ;; Vertices
-  (do ((i 0 (+ i 1)))
-      ((= i 16))
-    (let* ((wi (vector-ref (vector-ref *verts* i) 3))
-           (t  (* 0.5 (+ 1.0 wi)))
-           (p  (vector-ref pts2d i)))
-      (call-with-values
-        (lambda () (edge-color t))
-        (lambda (r g b)
-          (call-with-values
-            (lambda () (color-fn r g b))
-            (lambda (r* g* b*)
-              (gfx-set-color! painter r* g* b* 1.0)
-              (gfx-fill-circle! painter (car p) (cdr p) 3.5))))))))
+  (let ((sx (vector-ref pts2d 0))
+        (sy (vector-ref pts2d 1)))
+    ;; Edges
+    (do ((i 0 (+ i 1)))
+        ((= i (vector-length *edges*)))
+      (let* ((edge (vector-ref *edges* i))
+             (ia   (car edge))
+             (ib   (cdr edge))
+             (wa   (vector-ref (vector-ref *verts* ia) 3))
+             (wb   (vector-ref (vector-ref *verts* ib) 3))
+             (t    (* 0.5 (+ 1.0 (* 0.5 (+ wa wb))))))
+        (call-with-values
+          (lambda () (edge-color t))
+          (lambda (r g b)
+            (call-with-values
+              (lambda () (color-fn r g b))
+              (lambda (r* g* b*)
+                (gfx-set-pen-color! painter r* g* b* 0.88)
+                (gfx-set-pen-width! painter 1.6)
+                (gfx-draw-line! painter (vector-ref sx ia) (vector-ref sy ia)
+                                        (vector-ref sx ib) (vector-ref sy ib))))))))
+    ;; Vertices
+    (do ((i 0 (+ i 1)))
+        ((= i 16))
+      (let* ((wi (vector-ref (vector-ref *verts* i) 3))
+             (t  (* 0.5 (+ 1.0 wi))))
+        (call-with-values
+          (lambda () (edge-color t))
+          (lambda (r g b)
+            (call-with-values
+              (lambda () (color-fn r g b))
+              (lambda (r* g* b*)
+                (gfx-set-color! painter r* g* b* 1.0)
+                (gfx-fill-circle! painter (vector-ref sx i) (vector-ref sy i) 3.5)))))))))
 
 ;;; ── Per-frame draw ────────────────────────────────────────────────────────
 

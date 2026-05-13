@@ -1,4 +1,5 @@
 ;;; tesseract.scm — Animated 4D hypercube (tesseract) demo.
+;;; Version: 1.1
 ;;;
 ;;; Pipeline per frame:
 ;;;   4D vertex
@@ -80,15 +81,9 @@
 
 ;;; ── Projection ────────────────────────────────────────────────────────────
 
-;; 3D → 2D perspective.  Viewer sits on the -Z axis at distance d3.
-;; Returns (screen-x . screen-y).
-(define (project-3d-to-screen p3 cx cy scale d3)
-  (let* ((x (vector-ref p3 0))
-         (y (vector-ref p3 1))
-         (z (vector-ref p3 2))
-         (w (/ d3 (+ d3 z))))
-    (cons (+ cx (* scale x w))
-          (+ cy (* scale (- y) w)))))   ; negate y: screen y grows downward
+;; Identity 3×3 matrix — passed to vec3-project-batch when the 3-D points
+;; are already in their final orientation (4-D pipeline handled rotation).
+(define *I3* (vector 1.0 0.0 0.0  0.0 1.0 0.0  0.0 0.0 1.0))
 
 ;;; ── Animation state ───────────────────────────────────────────────────────
 
@@ -115,18 +110,23 @@
          (scale (* (min w h) 0.22))
          (proj  (make-4d-projector *d4*))
 
-         ;; Project all 16 vertices to 2D screen coords
-         (pts2d
-          (let ((out (make-vector 16)))
-            (do ((i 0 (+ i 1)))
-                ((= i 16) out)
-              (let* ((v4 (vector-ref *verts* i))
-                     (r1 (rotate-4d-xw v4 *angle-xw*))
-                     (r2 (rotate-4d-yz *angle-yz* r1))
-                     (r3 (rotate-4d-zw *angle-zw* r2))
-                     (p3 (project-4d   proj r3)))
-                (vector-set! out i
-                  (project-3d-to-screen p3 cx cy scale *d3*)))))))
+         ;; Run the 4-D pipeline, collecting 3-D results into flat vectors
+         (p3x (make-vector 16 0.0))
+         (p3y (make-vector 16 0.0))
+         (p3z (make-vector 16 0.0))
+         (_   (do ((i 0 (+ i 1))) ((= i 16))
+                (let* ((v4 (vector-ref *verts* i))
+                       (r1 (rotate-4d-xw v4 *angle-xw*))
+                       (r2 (rotate-4d-yz *angle-yz* r1))
+                       (r3 (rotate-4d-zw *angle-zw* r2))
+                       (p3 (project-4d   proj r3)))
+                  (vector-set! p3x i (vector-ref p3 0))
+                  (vector-set! p3y i (vector-ref p3 1))
+                  (vector-set! p3z i (vector-ref p3 2)))))
+         ;; Batch 3-D → 2-D in C (identity rotation — 4-D pipeline owns orientation)
+         (res (vec3-project-batch p3x p3y p3z *I3* cx cy scale *d3*))
+         (sx  (vector-ref res 0))
+         (sy  (vector-ref res 1)))
 
     ;; Draw edges — colour by mean W coordinate (blue=inner, red=outer)
     (do ((i 0 (+ i 1)))
@@ -136,17 +136,14 @@
              (ib   (cdr edge))
              (wa   (vector-ref (vector-ref *verts* ia) 3))
              (wb   (vector-ref (vector-ref *verts* ib) 3))
-             ;; t in [0,1]: 0 = inner (w=-1), 1 = outer (w=+1)
              (t    (* 0.5 (+ 1.0 (* 0.5 (+ wa wb)))))
-             ;; Cyan (inner) → Magenta (outer), bright and easy to read on dark bg
              (r    t)
              (g    (* 0.55 (- 1.0 (abs (- t 0.5)))))
-             (b    (- 1.0 t))
-             (pa   (vector-ref pts2d ia))
-             (pb   (vector-ref pts2d ib)))
+             (b    (- 1.0 t)))
         (gfx-set-pen-color! painter r g b 0.88)
         (gfx-set-pen-width! painter 1.6)
-        (gfx-draw-line! painter (car pa) (cdr pa) (car pb) (cdr pb))))
+        (gfx-draw-line! painter (vector-ref sx ia) (vector-ref sy ia)
+                                (vector-ref sx ib) (vector-ref sy ib))))
 
     ;; Draw vertices — slightly larger dot, same colour scheme
     (do ((i 0 (+ i 1)))
@@ -155,10 +152,9 @@
              (t  (* 0.5 (+ 1.0 wi)))
              (r  t)
              (g  (* 0.55 (- 1.0 (abs (- t 0.5)))))
-             (b  (- 1.0 t))
-             (p  (vector-ref pts2d i)))
+             (b  (- 1.0 t)))
         (gfx-set-color! painter r g b 1.0)
-        (gfx-fill-circle! painter (car p) (cdr p) 3.5)))))
+        (gfx-fill-circle! painter (vector-ref sx i) (vector-ref sy i) 3.5)))))
 
 ;;; ── Step ──────────────────────────────────────────────────────────────────
 

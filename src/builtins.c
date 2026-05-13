@@ -628,6 +628,74 @@ static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
     return vptr(r);
 }
 
+/* ---- Batch 3-D projection ----
+ *
+ * (vec3-project-batch lx ly lz R cx cy scale dist)
+ *
+ * Project a cloud of N 3-D points through an arbitrary 3×3 rotation matrix
+ * and a perspective divide, returning #(sx sy) — two float vectors of N
+ * screen coordinates.  The entire loop runs in C with no Scheme overhead.
+ *
+ *   lx, ly, lz  — float vectors of length N
+ *   R           — float vector, 9 elements, row-major 3×3 rotation matrix
+ *   cx, cy      — screen centre (flonum, pixels)
+ *   scale       — pixels per unit at eye distance (flonum)
+ *   dist        — perspective eye distance (flonum)
+ *
+ *   sx[i] = cx + scale * (R·p)[0] / (dist + (R·p)[2])
+ *   sy[i] = cy - scale * (R·p)[1] / (dist + (R·p)[2])
+ *
+ * The Y axis is negated so that +Y points up on screen.
+ *
+ * Euler (azimuth around Y, elevation around X) rotation matrix:
+ *   (define (mat3-euler az el)
+ *     (let ((ca (cos az)) (sa (sin az)) (ce (cos el)) (se (sin el)))
+ *       (vector ca 0.0 sa  (* sa se) ce (- (* ca se))  (- (* sa ce)) se (* ca ce))))
+ */
+static val_t prim_vec3_project_batch(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_vector(av[0]) || !vis_vector(av[1]) || !vis_vector(av[2]))
+        scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must be vectors");
+    if (!vis_vector(av[3]))
+        scm_raise(V_FALSE, "vec3-project-batch: R must be a 9-element vector");
+    Vector *lx = as_vec(av[0]);
+    Vector *ly = as_vec(av[1]);
+    Vector *lz = as_vec(av[2]);
+    Vector *Rm = as_vec(av[3]);
+    uint32_t N = lx->len;
+    if (ly->len != N || lz->len != N)
+        scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must have equal length");
+    if (Rm->len != 9)
+        scm_raise(V_FALSE, "vec3-project-batch: R must have exactly 9 elements");
+    double cx   = vfloat(av[4]);
+    double cy   = vfloat(av[5]);
+    double sc   = vfloat(av[6]);
+    double dist = vfloat(av[7]);
+    double r00 = vfloat(Rm->data[0]), r01 = vfloat(Rm->data[1]), r02 = vfloat(Rm->data[2]);
+    double r10 = vfloat(Rm->data[3]), r11 = vfloat(Rm->data[4]), r12 = vfloat(Rm->data[5]);
+    double r20 = vfloat(Rm->data[6]), r21 = vfloat(Rm->data[7]), r22 = vfloat(Rm->data[8]);
+    Vector *sx = CURRY_NEW_FLEX(Vector, N);
+    sx->hdr.type = T_VECTOR; sx->hdr.flags = 0; sx->len = N;
+    Vector *sy = CURRY_NEW_FLEX(Vector, N);
+    sy->hdr.type = T_VECTOR; sy->hdr.flags = 0; sy->len = N;
+    for (uint32_t i = 0; i < N; i++) {
+        double x = vfloat(lx->data[i]);
+        double y = vfloat(ly->data[i]);
+        double z = vfloat(lz->data[i]);
+        double fx = r00*x + r01*y + r02*z;
+        double fy = r10*x + r11*y + r12*z;
+        double fz = r20*x + r21*y + r22*z;
+        double w  = dist / (dist + fz);
+        sx->data[i] = num_make_float(cx + sc * fx * w);
+        sy->data[i] = num_make_float(cy - sc * fy * w);
+    }
+    Vector *result = CURRY_NEW_FLEX(Vector, 2);
+    result->hdr.type = T_VECTOR; result->hdr.flags = 0; result->len = 2;
+    result->data[0] = vptr(sx);
+    result->data[1] = vptr(sy);
+    return vptr(result);
+}
+
 /* ---- Bytevectors ---- */
 static val_t prim_make_bytes(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -1466,6 +1534,7 @@ void builtins_register(val_t env) {
     DEF("vector-set!",prim_vector_set,3,3); DEF("vector->list",prim_vector_to_list,1,1);
     DEF("list->vector",prim_list_to_vector,1,1); DEF("vector-fill!",prim_vector_fill,2,4);
     DEF("vector-copy",prim_vector_copy,1,3);
+    DEF("vec3-project-batch",prim_vec3_project_batch,8,8);
 
     /* Bytevectors */
     DEF("make-bytevector",prim_make_bytes,1,2); DEF("bytevector-length",prim_bytes_length,1,1);
