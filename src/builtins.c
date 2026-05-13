@@ -654,17 +654,21 @@ static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
  */
 static val_t prim_vec3_project_batch(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_vector(av[0]) || !vis_vector(av[1]) || !vis_vector(av[2]))
-        scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must be vectors");
+    bool use_f64 = vis_f64vec(av[0]);
+    if (use_f64) {
+        if (!vis_f64vec(av[1]) || !vis_f64vec(av[2]))
+            scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must all be the same type");
+    } else if (!vis_vector(av[0]) || !vis_vector(av[1]) || !vis_vector(av[2])) {
+        scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must be vectors or f64vectors");
+    }
     if (!vis_vector(av[3]))
         scm_raise(V_FALSE, "vec3-project-batch: R must be a 9-element vector");
-    Vector *lx = as_vec(av[0]);
-    Vector *ly = as_vec(av[1]);
-    Vector *lz = as_vec(av[2]);
-    Vector *Rm = as_vec(av[3]);
-    uint32_t N = lx->len;
-    if (ly->len != N || lz->len != N)
+    uint32_t N  = use_f64 ? as_f64v(av[0])->len : as_vec(av[0])->len;
+    uint32_t Ny = use_f64 ? as_f64v(av[1])->len : as_vec(av[1])->len;
+    uint32_t Nz = use_f64 ? as_f64v(av[2])->len : as_vec(av[2])->len;
+    if (Ny != N || Nz != N)
         scm_raise(V_FALSE, "vec3-project-batch: lx/ly/lz must have equal length");
+    Vector *Rm = as_vec(av[3]);
     if (Rm->len != 9)
         scm_raise(V_FALSE, "vec3-project-batch: R must have exactly 9 elements");
     double cx   = vfloat(av[4]);
@@ -678,16 +682,32 @@ static val_t prim_vec3_project_batch(int ac, val_t *av, void *ud) {
     sx->hdr.type = T_VECTOR; sx->hdr.flags = 0; sx->len = N;
     Vector *sy = CURRY_NEW_FLEX(Vector, N);
     sy->hdr.type = T_VECTOR; sy->hdr.flags = 0; sy->len = N;
-    for (uint32_t i = 0; i < N; i++) {
-        double x = vfloat(lx->data[i]);
-        double y = vfloat(ly->data[i]);
-        double z = vfloat(lz->data[i]);
-        double fx = r00*x + r01*y + r02*z;
-        double fy = r10*x + r11*y + r12*z;
-        double fz = r20*x + r21*y + r22*z;
-        double w  = dist / (dist + fz);
-        sx->data[i] = num_make_float(cx + sc * fx * w);
-        sy->data[i] = num_make_float(cy - sc * fy * w);
+    if (use_f64) {
+        double *dxp = as_f64v(av[0])->data;
+        double *dyp = as_f64v(av[1])->data;
+        double *dzp = as_f64v(av[2])->data;
+        for (uint32_t i = 0; i < N; i++) {
+            double x = dxp[i], y = dyp[i], z = dzp[i];
+            double fx = r00*x + r01*y + r02*z;
+            double fy = r10*x + r11*y + r12*z;
+            double fz = r20*x + r21*y + r22*z;
+            double w  = dist / (dist + fz);
+            sx->data[i] = num_make_float(cx + sc * fx * w);
+            sy->data[i] = num_make_float(cy - sc * fy * w);
+        }
+    } else {
+        Vector *lx = as_vec(av[0]), *ly = as_vec(av[1]), *lz = as_vec(av[2]);
+        for (uint32_t i = 0; i < N; i++) {
+            double x = vfloat(lx->data[i]);
+            double y = vfloat(ly->data[i]);
+            double z = vfloat(lz->data[i]);
+            double fx = r00*x + r01*y + r02*z;
+            double fy = r10*x + r11*y + r12*z;
+            double fz = r20*x + r21*y + r22*z;
+            double w  = dist / (dist + fz);
+            sx->data[i] = num_make_float(cx + sc * fx * w);
+            sy->data[i] = num_make_float(cy - sc * fy * w);
+        }
     }
     Vector *result = CURRY_NEW_FLEX(Vector, 2);
     result->hdr.type = T_VECTOR; result->hdr.flags = 0; result->len = 2;
