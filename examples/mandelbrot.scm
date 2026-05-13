@@ -1,4 +1,5 @@
 ;;; mandelbrot.scm — Hypercomplex Mandelbrot viewer
+;;; Version: 1.1
 ;;;
 ;;; Iterates  z ← z² + c  in three Cayley-Dickson algebras:
 ;;;   Complex    (2 real dims)  — the classic Mandelbrot set

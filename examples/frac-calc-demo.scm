@@ -1,4 +1,5 @@
 ;;; frac-calc-demo.scm
+;;; Version: 1.0
 ;;;
 ;;; Fractional derivative visualiser: D^α[f(x)] for α ∈ [0, 2].
 ;;;

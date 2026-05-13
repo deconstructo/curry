@@ -1,4 +1,5 @@
 ;;; plplot-demo.scm — showcase of the (curry plplot) module
+;;; Version: 1.0
 ;;;
 ;;; Produces a set of SVG files in /tmp covering 2-D plots, parametric curves,
 ;;; logarithmic axes, error bars, subplots, and 3-D surfaces.

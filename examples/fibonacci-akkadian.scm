@@ -1,6 +1,7 @@
 ;;
 ;; 𒀭 ṭuppi ṣipti ša šittim pānûtim
 ;; The Tablet of the Series of the Two Predecessors
+;; Version: 1.0
 ;;
 ;; 𒊕:   0     — rēšum:   first term is zero
 ;; 𒆜:   1     — arkûm:   second term is one

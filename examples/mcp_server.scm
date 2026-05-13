@@ -1,4 +1,5 @@
 ;;; examples/mcp_server.scm — Curry as a high-performance MCP server
+;;; Version: 1.0
 ;;;
 ;;; Usage:
 ;;;   ./build/curry examples/mcp_server.scm

@@ -1,4 +1,5 @@
 ;;; symbolic-grapher.scm
+;;; Version: 1.0
 ;;;
 ;;; Interactive function grapher using the symbolic CAS + Qt6.
 ;;;

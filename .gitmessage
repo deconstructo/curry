@@ -1,0 +1,9 @@
+# <type>(<scope>): <subject>  ← 72 chars max, imperative mood, no period
+#
+# Types:  feat fix docs refactor test chore perf
+# Scopes: core numeric symbolic actors modules qt6 mcp neo4j examples docs
+#
+# Body (optional — wrap at 72 chars, explain WHY not what):
+
+# Footer (optional):
+# BREAKING CHANGE: <description>

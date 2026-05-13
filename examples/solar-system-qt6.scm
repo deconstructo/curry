@@ -1,4 +1,5 @@
 ;;; solar-system-qt6.scm
+;;; Version: 1.0
 ;;;
 ;;; N-body gravitational simulation in D spatial dimensions — Qt6 + actor physics.
 ;;;

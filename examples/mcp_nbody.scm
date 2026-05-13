@@ -1,4 +1,5 @@
 ;;; examples/mcp_nbody.scm — N-body gravity simulation in D spatial dimensions
+;;; Version: 1.0
 ;;;
 ;;; Tools:
 ;;;   sim-reset    — clear all bodies, restore defaults

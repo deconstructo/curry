@@ -1,4 +1,5 @@
 ;;; examples/mcp_math.scm — Symbolic CAS + numeric tower as an MCP server
+;;; Version: 1.1
 ;;;
 ;;; Tools:
 ;;;   diff        — symbolic differentiation: (∂ expr var)

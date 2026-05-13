@@ -1,4 +1,5 @@
 ;;; matrix-tensor-demo.scm — Demonstration of matrix and tensor support.
+;;; Version: 1.0
 ;;;
 ;;; Topics covered:
 ;;;   1. Matrix construction, access, arithmetic, display
