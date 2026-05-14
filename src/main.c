@@ -19,7 +19,7 @@
 #  include <readline/history.h>
 #endif
 
-#define CURRY_VERSION "0.7.5.1"
+#define CURRY_VERSION "0.7.6"
 #define BANNER \
     "𒋗𒈬 𒌝 𒄿𒈾 𒋗  |  šulmu — šiprī ina qātīka\n" \
     "Greetings — my service is in your hands\n\n"\
