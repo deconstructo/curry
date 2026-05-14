@@ -42,9 +42,43 @@
   (let ((p (assq name args)))
     (if p (cdr p) default)))
 
+;;; Operators that may appear in a math expression passed by an MCP client.
+;;; Anything not in this list is rejected before eval reaches it.
+(define *math-ops*
+  '(+ - * / expt sqrt exp log abs
+    sin cos tan asin acos atan
+    sinh cosh tanh asinh acosh atanh
+    cot sec csc
+    ∂ ∫ integrate
+    simplify expand collect
+    substitute conj conjugate real-part imag-part
+    wirtinger-d wirtinger-dbar
+    auto-diff degree leading-coeff))
+
+(define (safe-math-expr? e)
+  (cond
+    ((number?  e) #t)
+    ((boolean? e) #t)
+    ((null?    e) #t)
+    ((symbol?  e) #t)   ; variable references (x, y, …) are leaf symbols
+    ((pair?    e)
+     (and (symbol? (car e))
+          (memq (car e) *math-ops*)
+          (let loop ((rest (cdr e)))
+            (or (null? rest)
+                (and (safe-math-expr? (car rest))
+                     (loop (cdr rest)))))))
+    (else #f)))
+
 ;;; Parse a Scheme expression string and evaluate it in the current (symbolic) env.
+;;; Only whitelisted math operators are permitted; anything else raises an error.
 (define (parse-expr str)
-  (eval (read (open-input-string str))))
+  (let ((expr (read (open-input-string str))))
+    (if (safe-math-expr? expr)
+        (eval expr)
+        (error (string-append
+                "unsafe expression — only mathematical operators are permitted: "
+                str)))))
 
 ;;; Resolve a variable name string to its symbolic object.
 (define (parse-var str)

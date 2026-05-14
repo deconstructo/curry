@@ -337,15 +337,21 @@ static curry_val parse_val(const char **p) {
     if (strncmp(*p,"false",5)==0) { *p+=5; return curry_make_bool(false); }
     if (strncmp(*p,"null",4)==0)  { *p+=4; return curry_nil(); }
     char num[64]; int i=0; bool fp=false;
-    if (**p=='-') num[i++]=*(*p)++;
-    while (isdigit((unsigned char)**p)) num[i++]=*(*p)++;
-    if (**p=='.') { fp=true; num[i++]=*(*p)++; while(isdigit((unsigned char)**p)) num[i++]=*(*p)++; }
+    /* Write one character into num[], advancing *p; silently clamps at 63. */
+    #define NUMW(c) do { if (i < (int)sizeof(num)-1) num[i++]=(c); } while(0)
+    if (**p=='-') NUMW(*(*p)++);
+    while (isdigit((unsigned char)**p)) NUMW(*(*p)++);
+    if (**p=='.') {
+        fp=true; NUMW(*(*p)++);
+        while(isdigit((unsigned char)**p)) NUMW(*(*p)++);
+    }
     if (**p=='e'||**p=='E') {
-        fp=true; num[i++]=*(*p)++;
-        if (**p=='+'||**p=='-') num[i++]=*(*p)++;
-        while (isdigit((unsigned char)**p)) num[i++]=*(*p)++;
+        fp=true; NUMW(*(*p)++);
+        if (**p=='+'||**p=='-') NUMW(*(*p)++);
+        while (isdigit((unsigned char)**p)) NUMW(*(*p)++);
     }
     num[i]='\0';
+    #undef NUMW
     return fp ? curry_make_float(atof(num)) : curry_make_fixnum(atol(num));
 }
 
