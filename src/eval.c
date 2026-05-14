@@ -375,6 +375,42 @@ tail:
         expr = vcar(body); goto tail;
     }
 
+    if (op == S_LET_VALUES || op == S_LET_STAR_VALUES) {
+        /* (let-values  (((a b) producer) ...) body...)
+         * (let*-values (((a b) producer) ...) body...) */
+        val_t bindings = vcar(rest), body = vcdr(rest);
+        val_t new_env = env_extend(env);
+        val_t b = bindings;
+        while (vis_pair(b)) {
+            val_t bind   = vcar(b);
+            val_t formals = vcar(bind);
+            val_t init_e  = vcadr(bind);
+            val_t produced = eval(init_e, op == S_LET_STAR_VALUES ? new_env : env);
+            /* Collect produced values into a list */
+            val_t vals;
+            if (vis_values(produced)) {
+                Values *mv = as_vals(produced);
+                vals = V_NIL;
+                for (int i = (int)mv->count - 1; i >= 0; i--)
+                    vals = make_pair(mv->vals[i], vals);
+            } else {
+                vals = make_pair(produced, V_NIL);
+            }
+            /* Bind formals */
+            val_t fms = formals;
+            while (vis_pair(fms) && vis_pair(vals)) {
+                env_define(new_env, vcar(fms), vcar(vals));
+                fms = vcdr(fms); vals = vcdr(vals);
+            }
+            /* Rest argument: (a . rest) or just symbol */
+            if (vis_symbol(fms)) env_define(new_env, fms, vals);
+            b = vcdr(b);
+        }
+        env = new_env;
+        while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+        expr = vcar(body); goto tail;
+    }
+
     if (op == S_AND) {
         val_t v = V_TRUE;
         while (vis_pair(rest)) {
@@ -448,6 +484,9 @@ tail:
                     (vis_char(datum) && vis_char(key) && vunchr(datum) == vunchr(key));
                 if (match) {
                     if (vis_nil(body)) return V_VOID;
+                    if (vcar(body) == S_ARROW) {
+                        return apply(eval(vcadr(body), env), make_pair(key, V_NIL));
+                    }
                     while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
                     expr = vcar(body); goto tail;
                 }

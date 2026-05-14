@@ -438,6 +438,7 @@ static val_t prim_char_to_int(int ac, val_t *av, void *ud) {(void)ac;(void)ud; r
 static val_t prim_int_to_char(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "integer->char: not an exact integer"); return vchr((uint32_t)vunfix(av[0]));}
 static val_t prim_char_upcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)toupper((int)vunchr(av[0])));}
 static val_t prim_char_downcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)tolower((int)vunchr(av[0])));}
+static val_t prim_char_foldcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)tolower((int)vunchr(av[0])));}
 #define CHAR_PRED(nm,test) static val_t prim_char_##nm(int ac, val_t *av, void *ud){(void)ac;(void)ud; return vbool(test((int)vunchr(av[0])));}
 CHAR_PRED(alpha_p, isalpha) CHAR_PRED(numeric_p, isdigit) CHAR_PRED(whitespace_p, isspace)
 CHAR_PRED(upper_p, isupper) CHAR_PRED(lower_p, islower)
@@ -491,7 +492,29 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     else { cp=(c&0x07); for(int i=1;i<4;i++) cp=(cp<<6)|((unsigned char)p[i]&0x3F); }
     return vchr(cp);
 }
-static val_t prim_string_copy(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_string_copy(av[0]);}
+/* Helper: advance a UTF-8 pointer by n characters; returns byte offset of char n */
+static uint32_t utf8_char_offset(const char *data, uint32_t byte_len, uint32_t n) {
+    uint32_t i = 0, b = 0;
+    while (b < byte_len && i < n) {
+        if (((unsigned char)data[b] & 0xC0) != 0x80) i++;
+        b++;
+    }
+    /* Advance past continuation bytes when i==n was hit mid-sequence */
+    while (b < byte_len && ((unsigned char)data[b] & 0xC0) == 0x80) b++;
+    return b;
+}
+static val_t prim_string_copy(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-copy: not a string");
+    String *s = as_str(av[0]);
+    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    uint32_t len = eb - sb;
+    String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
+    memcpy(r->data, s->data + sb, len); r->data[len] = '\0';
+    return vptr(r);
+}
 static val_t prim_string_append(int ac, val_t *av, void *ud) {
     (void)ud; if(ac==0) { String *e=CURRY_NEW_ATOM(String); e->hdr.type=T_STRING; e->hdr.flags=0; e->len=0; e->hash=0; e->data[0]=0; return vptr(e); }
     val_t r = av[0];
@@ -499,14 +522,66 @@ static val_t prim_string_append(int ac, val_t *av, void *ud) {
     return r;
 }
 static val_t prim_string_to_list(int ac, val_t *av, void *ud) {
-    (void)ac;(void)ud;
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string->list: not a string");
     String *s = as_str(av[0]);
-    val_t r = V_NIL;
-    /* Decode UTF-8 in reverse */
-    val_t port = port_open_input_string(s->data, s->len);
+    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    val_t port = port_open_input_string(s->data + sb, eb - sb);
     val_t chars = V_NIL; int cp;
     while((cp=port_read_char(port))!=-1) chars=scm_cons(vchr((uint32_t)cp),chars);
     return scm_reverse(chars);
+}
+static val_t prim_string_for_each(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t proc = av[0];
+    int nstrs = ac - 1;
+    /* Collect ports for each string */
+    val_t *ports = (val_t *)alloca((size_t)nstrs * sizeof(val_t));
+    for (int i = 0; i < nstrs; i++) {
+        String *s = as_str(av[i+1]);
+        ports[i] = port_open_input_string(s->data, s->len);
+    }
+    for (;;) {
+        val_t args = V_NIL; bool any_eof = false;
+        for (int i = nstrs - 1; i >= 0; i--) {
+            int cp = port_read_char(ports[i]);
+            if (cp == -1) { any_eof = true; break; }
+            args = scm_cons(vchr((uint32_t)cp), args);
+        }
+        if (any_eof) break;
+        apply(proc, args);
+    }
+    return V_VOID;
+}
+static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-fill!: not a string");
+    if (!vis_char(av[1]))   scm_raise(V_FALSE, "string-fill!: not a character");
+    String *s = as_str(av[0]);
+    uint32_t sb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : 0;
+    uint32_t eb = ac > 3 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[3])) : s->len;
+    /* Encode fill char */
+    uint32_t u = vunchr(av[1]); char enc[4]; int elen;
+    if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
+    else if (u < 0x800)   { enc[0]=(char)(0xC0|(u>>6)); enc[1]=(char)(0x80|(u&0x3F)); elen=2; }
+    else if (u < 0x10000) { enc[0]=(char)(0xE0|(u>>12)); enc[1]=(char)(0x80|((u>>6)&0x3F)); enc[2]=(char)(0x80|(u&0x3F)); elen=3; }
+    else { enc[0]=(char)(0xF0|(u>>18)); enc[1]=(char)(0x80|((u>>12)&0x3F)); enc[2]=(char)(0x80|((u>>6)&0x3F)); enc[3]=(char)(0x80|(u&0x3F)); elen=4; }
+    /* Fill byte-by-byte within range (only safe for same-width chars) */
+    for (uint32_t b = sb; b + (uint32_t)elen <= eb; b += (uint32_t)elen)
+        memcpy(s->data + b, enc, (size_t)elen);
+    return V_VOID;
+}
+static val_t prim_string_foldcase(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-foldcase: not a string");
+    String *s = as_str(av[0]);
+    val_t port_in  = port_open_input_string(s->data, s->len);
+    val_t port_out = port_open_output_string();
+    int cp;
+    while ((cp = port_read_char(port_in)) != -1)
+        port_write_char(port_out, tolower(cp));
+    return port_get_output_string(port_out);
 }
 static val_t prim_list_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -543,6 +618,40 @@ static val_t prim_string_contains(int ac, val_t *av, void *ud) {
     const char *haystack=as_str(av[0])->data, *needle=as_str(av[1])->data;
     const char *p = strstr(haystack, needle);
     return p ? vfix((intptr_t)(p - haystack)) : V_FALSE;
+}
+static val_t prim_write_string(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "write-string: not a string");
+    String *s = as_str(av[0]);
+    val_t port = ac > 1 ? av[1] : PORT_STDOUT;
+    uint32_t sb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : 0;
+    uint32_t eb = ac > 3 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[3])) : s->len;
+    for (uint32_t i = sb; i < eb; i++) port_write_byte(port, (uint8_t)s->data[i]);
+    return V_VOID;
+}
+static val_t prim_string_to_utf8(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string->utf8: not a string");
+    String *s = as_str(av[0]);
+    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    uint32_t len = eb - sb;
+    Bytevector *b = CURRY_NEW_FLEX_ATOM(Bytevector, len);
+    b->hdr.type=T_BYTEVECTOR; b->hdr.flags=0; b->len=len;
+    memcpy(b->data, s->data + sb, len);
+    return vptr(b);
+}
+static val_t prim_utf8_to_string(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "utf8->string: not a bytevector");
+    Bytevector *bv = as_bytes(av[0]);
+    uint32_t sb = ac > 1 ? (uint32_t)vunfix(av[1]) : 0;
+    uint32_t eb = ac > 2 ? (uint32_t)vunfix(av[2]) : bv->len;
+    uint32_t len = eb - sb;
+    String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
+    memcpy(r->data, bv->data + sb, len); r->data[len] = '\0';
+    return vptr(r);
 }
 
 /* ---- Vectors ---- */
@@ -595,8 +704,13 @@ static val_t prim_vector_set(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 static val_t prim_vector_to_list(int ac, val_t *av, void *ud) {
-    (void)ac;(void)ud; Vector *v=as_vec(av[0]); val_t r=V_NIL;
-    for(int i=(int)v->len-1;i>=0;i--) r=scm_cons(v->data[i],r);
+    (void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector->list: not a vector");
+    Vector *v = as_vec(av[0]);
+    uint32_t s = ac > 1 ? (uint32_t)vunfix(av[1]) : 0;
+    uint32_t e = ac > 2 ? (uint32_t)vunfix(av[2]) : v->len;
+    val_t r = V_NIL;
+    for (int i = (int)e - 1; i >= (int)s; i--) r = scm_cons(v->data[i], r);
     return r;
 }
 static val_t prim_list_to_vector(int ac, val_t *av, void *ud) {
@@ -626,6 +740,60 @@ static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
     r->hdr.type=T_VECTOR; r->hdr.flags=0; r->len=n;
     memcpy(r->data, v->data+s, n*sizeof(val_t));
     return vptr(r);
+}
+static val_t prim_vector_copy_bang(int ac, val_t *av, void *ud) {
+    /* (vector-copy! to at from [start [end]]) */
+    (void)ud;
+    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-copy!: to must be a vector");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-copy!: at must be exact integer");
+    if (!vis_vector(av[2])) scm_raise(V_FALSE, "vector-copy!: from must be a vector");
+    Vector *to   = as_vec(av[0]);
+    uint32_t at  = (uint32_t)vunfix(av[1]);
+    Vector *from = as_vec(av[2]);
+    uint32_t s   = ac > 3 ? (uint32_t)vunfix(av[3]) : 0;
+    uint32_t e   = ac > 4 ? (uint32_t)vunfix(av[4]) : from->len;
+    uint32_t n   = e - s;
+    if (at + n > to->len) scm_raise(V_FALSE, "vector-copy!: would exceed destination length");
+    memmove(to->data + at, from->data + s, n * sizeof(val_t));
+    return V_VOID;
+}
+static val_t prim_vector_map(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t proc = av[0];
+    int nvecs = ac - 1;
+    Vector **vecs = (Vector **)alloca((size_t)nvecs * sizeof(Vector *));
+    for (int i = 0; i < nvecs; i++) {
+        if (!vis_vector(av[i+1])) scm_raise(V_FALSE, "vector-map: not a vector");
+        vecs[i] = as_vec(av[i+1]);
+    }
+    uint32_t len = vecs[0]->len;
+    Vector *r = CURRY_NEW_FLEX(Vector, len);
+    r->hdr.type=T_VECTOR; r->hdr.flags=0; r->len=len;
+    for (uint32_t i = 0; i < len; i++) {
+        val_t args = V_NIL;
+        for (int j = nvecs - 1; j >= 0; j--)
+            args = scm_cons(vecs[j]->data[i], args);
+        r->data[i] = apply(proc, args);
+    }
+    return vptr(r);
+}
+static val_t prim_vector_for_each(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t proc = av[0];
+    int nvecs = ac - 1;
+    Vector **vecs = (Vector **)alloca((size_t)nvecs * sizeof(Vector *));
+    for (int i = 0; i < nvecs; i++) {
+        if (!vis_vector(av[i+1])) scm_raise(V_FALSE, "vector-for-each: not a vector");
+        vecs[i] = as_vec(av[i+1]);
+    }
+    uint32_t len = vecs[0]->len;
+    for (uint32_t i = 0; i < len; i++) {
+        val_t args = V_NIL;
+        for (int j = nvecs - 1; j >= 0; j--)
+            args = scm_cons(vecs[j]->data[i], args);
+        apply(proc, args);
+    }
+    return V_VOID;
 }
 
 /* ---- Batch 3-D projection ----
@@ -826,6 +994,16 @@ static val_t prim_for_each(int ac, val_t *av, void *ud) {
         for (int i = 0; i < nlists; i++)
             lists[i] = vcdr(lists[i]);
     }
+}
+static val_t prim_make_list(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "make-list: not an exact integer");
+    intptr_t k = vunfix(av[0]);
+    if (k < 0) scm_raise(V_FALSE, "make-list: negative length");
+    val_t fill = ac > 1 ? av[1] : V_FALSE;
+    val_t r = V_NIL;
+    while (k-- > 0) r = scm_cons(fill, r);
+    return r;
 }
 static val_t prim_list_head(int ac, val_t *av, void *ud) {
     (void)ud;(void)ac;
@@ -1496,6 +1674,7 @@ void builtins_register(val_t env) {
     DEF("set-cdr!",   prim_set_cdr,   2,2); DEF("list",       prim_list,      0,-1);
     DEF("list*",      prim_list_star, 1,-1); DEF("length",    prim_length,    1,1);
     DEF("append",     prim_append,    0,-1); DEF("reverse",   prim_reverse,   1,1);
+    DEF("make-list",  prim_make_list, 1,2);
     DEF("list-tail",  prim_list_tail, 2,2); DEF("list-head",  prim_list_head, 2,2); DEF("list-ref",   prim_list_ref,  2,2);
     DEF("list-copy",  prim_list_copy, 1,1);
     DEF("member",  prim_member,  2,2); DEF("memq",   prim_memq,   2,2); DEF("memv", prim_memv, 2,2);
@@ -1542,6 +1721,7 @@ void builtins_register(val_t env) {
     /* Characters */
     DEF("char->integer",prim_char_to_int,1,1); DEF("integer->char",prim_int_to_char,1,1);
     DEF("char-upcase",prim_char_upcase,1,1); DEF("char-downcase",prim_char_downcase,1,1);
+    DEF("char-foldcase",prim_char_foldcase,1,1);
     DEF("char-alphabetic?",prim_char_alpha_p,1,1); DEF("char-numeric?",prim_char_numeric_p,1,1);
     DEF("char-whitespace?",prim_char_whitespace_p,1,1);
     DEF("char-upper-case?",prim_char_upper_p,1,1); DEF("char-lower-case?",prim_char_lower_p,1,1);
@@ -1550,18 +1730,27 @@ void builtins_register(val_t env) {
     /* Strings */
     DEF("make-string",prim_make_string,1,2); DEF("string",prim_string,0,-1);
     DEF("string-length",prim_string_length,1,1); DEF("string-ref",prim_string_ref,2,2);
-    DEF("string-copy",prim_string_copy,1,1); DEF("string-append",prim_string_append,0,-1);
-    DEF("string->list",prim_string_to_list,1,1); DEF("list->string",prim_list_to_string,1,1);
+    DEF("string-copy",prim_string_copy,1,3); DEF("string-append",prim_string_append,0,-1);
+    DEF("string->list",prim_string_to_list,1,3); DEF("list->string",prim_list_to_string,1,1);
     DEF("string->symbol",prim_string_to_symbol,1,1); DEF("symbol->string",prim_symbol_to_string,1,1);
     DEF("string=?",prim_string_eq,2,-1); DEF("string<?",prim_string_lt,2,-1);
     DEF("substring",prim_substring,2,3); DEF("string-contains",prim_string_contains,2,2);
+    DEF("string-for-each",prim_string_for_each,2,-1);
+    DEF("string-fill!",prim_string_fill_bang,2,4);
+    DEF("string-foldcase",prim_string_foldcase,1,1);
+    DEF("write-string",prim_write_string,1,4);
+    DEF("string->utf8",prim_string_to_utf8,1,3);
+    DEF("utf8->string",prim_utf8_to_string,1,3);
 
     /* Vectors */
     DEF("make-vector",prim_make_vector,1,2); DEF("vector",prim_vector,0,-1);
     DEF("vector-length",prim_vector_length,1,1); DEF("vector-ref",prim_vector_ref,2,2);
-    DEF("vector-set!",prim_vector_set,3,3); DEF("vector->list",prim_vector_to_list,1,1);
+    DEF("vector-set!",prim_vector_set,3,3); DEF("vector->list",prim_vector_to_list,1,3);
     DEF("list->vector",prim_list_to_vector,1,1); DEF("vector-fill!",prim_vector_fill,2,4);
     DEF("vector-copy",prim_vector_copy,1,3);
+    DEF("vector-copy!",prim_vector_copy_bang,3,5);
+    DEF("vector-map",prim_vector_map,2,-1);
+    DEF("vector-for-each",prim_vector_for_each,2,-1);
     DEF("vec3-project-batch",prim_vec3_project_batch,8,8);
 
     /* Bytevectors */
