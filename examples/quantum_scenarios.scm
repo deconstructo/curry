@@ -64,7 +64,7 @@
     (cond ((null? sorted) (list x))
           ((<= x (car sorted)) (cons x sorted))
           (else (cons (car sorted) (insert x (cdr sorted))))))
-  (fold-left (lambda (x acc) (insert x acc)) '() lst))
+  (fold-left (lambda (acc x) (insert x acc)) '() lst))
 
 (define (percentile-of samples pct)
   (let* ((sorted (sort-asc samples))

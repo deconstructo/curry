@@ -839,9 +839,17 @@ static val_t prim_filter(int ac, val_t *av, void *ud) {
     return scm_reverse(r);
 }
 static val_t prim_fold(int ac, val_t *av, void *ud) {
+    /* fold-left: (proc acc element) — R6RS / standard left-fold convention */
     (void)ud; val_t proc=av[0], init=av[1], lst=av[2];
-    while(vis_pair(lst)) { init=apply(proc,scm_cons(vcar(lst),scm_cons(init,V_NIL))); lst=vcdr(lst); }
+    while(vis_pair(lst)) { init=apply(proc,scm_cons(init,scm_cons(vcar(lst),V_NIL))); lst=vcdr(lst); }
     return init;
+}
+static val_t prim_fold_right(int ac, val_t *av, void *ud) {
+    /* fold-right: (proc element acc) — recurse to the end, then apply on the way back */
+    (void)ud; val_t proc=av[0], init=av[1], lst=av[2];
+    if (!vis_pair(lst)) return init;
+    val_t rest = prim_fold_right(ac, (val_t[]){proc, init, vcdr(lst)}, ud);
+    return apply(proc, scm_cons(vcar(lst), scm_cons(rest, V_NIL)));
 }
 static val_t prim_not(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_false(av[0]));}
 static val_t prim_force(int ac, val_t *av, void *ud) {
@@ -1582,7 +1590,7 @@ void builtins_register(val_t env) {
     /* Control */
     DEF("eval",prim_eval,1,2); DEF("interaction-environment",prim_interaction_env,0,0);
     DEF("apply",prim_apply,2,-1); DEF("map",prim_map,2,-1); DEF("for-each",prim_for_each,2,-1);
-    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3);
+    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right,3,3);
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
     DEF("error",prim_error,1,-1); DEF("raise",prim_raise,1,1);
