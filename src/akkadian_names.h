@@ -254,5 +254,127 @@ AKK_PR("actor-alive?",    "balāṭum?",          "𒅁𒃲?")
 
 AKK_PR("syntax-rules",   "ṭupšarrūtum ṣibātum", "𒌝𒋻")   /* UM.TAR — template-pattern */
 
+/* ---- Symbolic CAS ---- */
+
+/* la-idûm: "the not-known" — the unknown quantity in O.B. algebraic tablets.
+ * Scribes posed problems as "a thing I do not know; find it." */
+AKK_PR("sym-var",         "la-idûm",             "𒉡𒅆")    /* NU.IGI = not-seen = the unknown */
+AKK_PR("sym-var?",        "la-idûm?",            "𒉡𒅆?")
+AKK_PR("sym-expr?",       "awât-la-idûm?",       "𒉡𒌝?")   /* NU.UM? = not-tablet? = unsettled */
+AKK_PR("symbolic?",       "la-idûm-šalim?",      "𒉡𒅆𒁹?") /* NU.IGI.DIŠ? = unknown-or-expression */
+AKK_PR("sym-var-name",    "šum-la-idûm",         "𒉡𒊕")    /* NU.SAG = not-seen-head = its name */
+
+/* māḫirum: "the going rate / exchange rate" — attested on O.B. commercial tablets
+ * for the price of silver, grain, oil per unit.  As a derivative: the instantaneous
+ * rate at which a quantity changes per unit of its variable. */
+AKK_PR("sym-diff",        "māḫirum",             "𒄭𒊕")    /* ḪI.SAG = rate-head */
+AKK_PR("frac-diff",       "māḫirum-ḫepûm",       "𒄭𒈠")    /* ḪI.MA  = halved-rate */
+AKK_PR("wirtinger-d",     "māḫirum-išārum",      "𒄭𒁹")    /* ḪI.DIŠ = rate-one  (holomorphic ∂/∂z) */
+AKK_PR("wirtinger-dbar",  "māḫirum-la",          "𒄭𒉡")    /* ḪI.NU  = rate-not  (anti-holomorphic ∂/∂z̄) */
+AKK_PR("auto-diff",       "māḫirum-ramāni",      "𒄭𒍪")    /* ḪI.ZA  = rate-self (forward-mode via dual) */
+
+/* eqlum: "field" — the canonical O.B. word for a measured area of land.
+ * Mathematical tablets computed field areas as we compute integrals. */
+AKK_PR("integrate",       "eqlum",               "𒀭𒆠")    /* AN.KI = sky-earth = the bounded field */
+AKK_PR("frac-int",        "eqlum-ḫepûm",         "𒀭𒆠𒈠") /* AN.KI.MA = halved-field */
+
+/* šuklulum: "to bring to completion, to make whole" — simplification
+ * renders an expression into its most perfect/reduced form. */
+AKK_PR("simplify",        "šuklulum",            "𒁹𒆠𒁹")  /* DIŠ.KI.DIŠ = one-earth-one */
+
+/* nukkurum: "to alter, to make different" — exchange one thing for another. */
+AKK_PR("substitute",      "nukkurum",            "𒁀𒋻")    /* BA.TAR = give-cut = exchange */
+
+/* rapāšum: "to broaden, to widen, to spread out" — distribute products over sums. */
+AKK_PR("expand",          "rapāšum",             "𒃲𒀀")    /* GAL.A = greatly-spread */
+
+/* elûm-ṣīrum: "the highest ascent" — the degree is the topmost exponent. */
+AKK_PR("degree",          "elûm-ṣīrum",          "𒀭𒈷")    /* AN.ME = sky-essence = the highest */
+
+/* kânum: "to be firm, to establish" — collect gathers like terms into one place. */
+AKK_PR("collect",         "kânum",               "𒆠𒁹𒁹")  /* KI.DIŠ.DIŠ = earth-gathered */
+
+/* rēšum-nikkassī: "head of accounts" — the leading coefficient is the chief term. */
+AKK_PR("leading-coeff",   "rēšum-nikkassī",      "𒊕𒈷")    /* SAG.ME = head-essence */
+
+/* tawirtum: "image, reflection, likeness" — the complex conjugate is the mirror
+ * image: same magnitude, reflected sign on the imaginary part. */
+AKK_PR("conjugate",       "tawirtum",            "𒅆𒋻")    /* IGI.TAR = eye-cut = reflected */
+AKK_PR("conj",            "tawirtum-ṣīrum",      "𒅆𒋻𒁹")  /* IGI.TAR.DIŠ = short conjugate */
+
+/* ṭuppi-la-idûm: "tablet of the unknown" — rendering a CAS expression as text. */
+AKK_PR("sym->string",     "ṭuppi-la-idûm",       "𒉡𒅆𒌝")  /* NU.IGI.UM */
+AKK_PR("sym->infix",      "ṭuppi-la-idûm-išārum","𒉡𒅆𒌝𒌋") /* NU.IGI.UM.U = infix tablet */
+AKK_PR("sym->latex",      "ṭuppi-ṣīrum-la-idûm", "𒉡𒅆𒌝𒁹") /* NU.IGI.UM.DIŠ = formal tablet */
+
+/* ---- Surreal numbers ---- */
+
+/* dāriš: "forever, for eternity" — appears in royal inscriptions as "ana dāriš"
+ * = "for ever and ever."  The surreal numbers extend the number line into the
+ * transfinite (ω) and the infinitesimal (ε = 1/ω). */
+AKK_PR("surreal?",              "ša-dāriš?",           "𒀭𒁹?")   /* AN.DIŠ?   = is it eternal? */
+AKK_PR("surreal-infinite?",     "dāriš?",              "𒀭𒀭?")   /* AN.AN?    = doubly eternal? */
+AKK_PR("surreal-finite?",       "la-dāriš?",           "𒉡𒀭?")   /* NU.AN?    = not eternal */
+AKK_PR("surreal-infinitesimal?","ṣiḫrum-ṣīrum?",       "𒉡𒉡𒀀?") /* NU.NU.A?  = supremely tiny? */
+AKK_PR("surreal-real-part",     "ṣīrum-ša-dāriš",      "𒀭𒄿")    /* AN.I      = the standard going part */
+AKK_PR("surreal-omega-part",    "ša-dāriš-kīnum",      "𒀭𒀭𒁹")  /* AN.AN.DIŠ = the ω-coefficient */
+AKK_PR("surreal-epsilon-part",  "ša-ṣiḫrim",           "𒉡𒉡𒈷") /* NU.NU.ME  = the ε-essence */
+AKK_PR("surreal-birthday",      "ūm-wulludim",         "𒌑𒅁")    /* UD.IB     = day-hold = birth-day */
+AKK_PR("surreal-nterms",        "mīnum-ša-dāriš",      "𒀭𒈠")    /* AN.MA     = count of the eternal */
+AKK_PR("surreal->number",       "ša-dāriš-ana-nikkassim","𒀭𒌑")  /* AN.UD     = eternal to temporal */
+AKK_PR("make-surreal",          "epēšum-ša-dāriš",     "𒀭𒇽")    /* AN.LU2   = make the eternal */
+AKK_PR("surreal-terms",         "nindabûm-ša-dāriš",   "𒀭𒌝")    /* AN.UM    = the eternal's tablets */
+
+/* ---- Quantum superposition ---- */
+
+/* kalāma: "everything, all things at once" — a quantum state holds all branches
+ * simultaneously.  amārum: "to see, to look upon" — observation collapses the state. */
+AKK_PR("superpose",       "kalāma",              "𒊕𒊕𒊕")  /* SAG.SAG.SAG = many-headed = all at once */
+AKK_PR("quantum-uniform", "kalāma-mitḫārum",     "𒊕𒊕𒁹")  /* SAG.SAG.DIŠ = all-equal heads */
+AKK_PR("observe",         "amārum",              "𒅆𒄿")    /* IGI.I = eye-going = to look upon */
+AKK_PR("quantum?",        "kalāma?",             "𒊕𒊕?")   /* SAG.SAG? */
+AKK_PR("quantum-states",  "kalāma-nindabûm",     "𒊕𒊕𒌝")  /* SAG.SAG.UM = all-states-tablet */
+AKK_PR("quantum-n",       "mīnum-kalāma",        "𒊕𒊕𒄿")  /* SAG.SAG.I  = count-of-all */
+
+/* ---- Multivectors / Clifford algebra ---- */
+
+/* kibrātim: genitive of kibrātum, "the four quarters of the world" — the Babylonian
+ * name for the totality of 3D space ("šar kibrāt arba'im" = king of the four quarters).
+ * A multivector lives in the full Clifford algebra over that space. */
+AKK_PR("make-mv",         "epēšum-kibrātim",     "𒆠𒃲𒇽")   /* KI.GAL.LU2 = great-space-make */
+AKK_PR("mv?",             "kibrātim?",           "𒆠𒃲?")    /* KI.GAL?    = is it a great space? */
+AKK_PR("mv-signature",    "ṣimdat-kibrātim",     "𒆠𒃲𒋻")   /* KI.GAL.TAR = space-signature */
+AKK_PR("mv-ref",          "maḫārum-kibrātim",    "𒆠𒃲𒊕")   /* KI.GAL.SAG = space-head */
+AKK_PR("mv-set!",         "šakānum-kibrātim",    "𒆠𒃲𒁹")   /* KI.GAL.DIŠ = place-in-space */
+AKK_PR("mv+",             "matāḫum-kibrātim",    "𒆠𒃲𒋻𒁹") /* KI.GAL.TAR.DIŠ = space-add */
+AKK_PR("mv-",             "ḫarāṣum-kibrātim",   "𒆠𒃲𒇲𒌑") /* KI.GAL.LAL.UD  = space-subtract */
+AKK_PR("mv*",             "šutakūlum-kibrātim",  "𒆠𒃲𒈧")   /* KI.GAL.MAŠ     = geometric product */
+AKK_PR("mv-scale",        "zâzum-kibrātim",      "𒆠𒃲𒈧𒁹") /* KI.GAL.MAŠ.DIŠ = space-scale */
+AKK_PR("mv-wedge",        "ṣilippum-kibrātim",   "𒆠𒃲𒌋")   /* KI.GAL.U  = diagonal/outer product */
+AKK_PR("mv-lcontract",    "ṣibûm-kibrātim",      "𒆠𒃲𒅁")   /* KI.GAL.IB = left-hold of space */
+AKK_PR("mv-reverse",      "turrum-kibrātim",     "𒆠𒃲𒄀𒁹") /* KI.GAL.GI.DIŠ  = space-return */
+AKK_PR("mv-involute",     "nakārum-kibrātim",    "𒆠𒃲𒉡𒄿") /* KI.GAL.NU.I    = space-become-other */
+AKK_PR("mv-conjugate",    "mitḫurtum-kibrātim",  "𒆠𒃲𒈠𒋻") /* KI.GAL.MA.TAR  = space-complement */
+AKK_PR("mv-dual",         "šanûm-kibrātim",      "𒆠𒃲𒁀𒀀") /* KI.GAL.BA.A    = the other of space */
+AKK_PR("mv-grade",        "šinīpat-kibrātim",    "𒆠𒃲𒀸")   /* KI.GAL.AŠ2 = grade level */
+AKK_PR("mv-scalar",       "ṣifrum-kibrātim",     "𒆠𒃲𒉡𒉡") /* KI.GAL.NU.NU   = zero-grade = scalar */
+AKK_PR("mv-norm2",        "napḫarum-kibrātim",   "𒆠𒃲𒈷𒈷") /* KI.GAL.ME.ME   = squared-sum */
+AKK_PR("mv-norm",         "ibum-kibrātim",       "𒆠𒃲𒅁𒁹") /* KI.GAL.IB.DIŠ  = space-side (ibum = square root) */
+AKK_PR("mv-normalize",    "ibum-ṣīrum-kibrātim", "𒆠𒃲𒅁𒌑") /* KI.GAL.IB.UD   = supreme-side */
+AKK_PR("mv-e",            "pānum-kibrātim",      "𒆠𒃲𒅆")   /* KI.GAL.IGI = face/eye of space = basis blade */
+AKK_PR("mv-from-list",    "kibrātim-maḫārum",    "𒆠𒃲𒌝")   /* KI.GAL.UM  = space from tablet */
+AKK_PR("quaternion->mv",  "rebûm-ana-kibrātim",  "𒆠𒃲𒂗")   /* KI.GAL.EN  = enter the great space */
+AKK_PR("mv->quaternion",  "kibrātum-ana-rebîm",  "𒆠𒃲𒂗𒉡") /* KI.GAL.EN.NU = exit space to fourfold */
+
+/* ---- Quaternions and Octonions ---- */
+
+/* rebûm: "fourfold, the fourth" — a quaternion is the 4D hypercomplex number.
+ * samānûm: "eightfold, the eighth" — an octonion has eight components. */
+AKK_PR("make-quaternion", "epēšum-rebûm",        "𒅁𒈷")    /* IB.ME  = hold-essence = 4D */
+AKK_PR("quaternion?",     "rebûm?",              "𒅁𒈷?")   /* IB.ME? = is it fourfold? */
+AKK_PR("make-octonion",   "epēšum-samānûm",      "𒅁𒈷𒈷")  /* IB.ME.ME  = double-hold-essence = 8D */
+AKK_PR("octonion?",       "samānûm?",            "𒅁𒈷𒈷?") /* IB.ME.ME? = is it eightfold? */
+AKK_PR("octonion-ref",    "maḫārum-samānûm",     "𒅁𒈷𒊕")  /* IB.ME.SAG = eightfold-head */
+
 #undef AKK_SF
 #undef AKK_PR

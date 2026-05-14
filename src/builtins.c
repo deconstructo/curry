@@ -1698,6 +1698,12 @@ void builtins_register(val_t env) {
     env_define(env, sym_intern_cstr("𒊭"),    V_NIL);    /* ŠA3 = inside/empty = '() */
     env_define(env, sym_intern_cstr("ṣifrum"),vfix(0));  /* zero */
     env_define(env, sym_intern_cstr("𒄿𒀭"),  num_make_float(3.14159265358979323846)); /* π */
+    /* dāriš = "forever" (ω); ṣiḫrum-ṣīrum = "supremely tiny" (ε).
+     * These are registered after surreal_init() via the surreal section below. */
+    env_define(env, sym_intern_cstr("dāriš"),     SUR_OMEGA);   /* ω: the eternal */
+    env_define(env, sym_intern_cstr("𒀭𒀭"),       SUR_OMEGA);   /* AN.AN = sky-sky = the infinite */
+    env_define(env, sym_intern_cstr("ṣiḫrum-ṣīrum"), SUR_EPSILON); /* ε: supremely tiny */
+    env_define(env, sym_intern_cstr("𒉡𒉡𒉡"),     SUR_EPSILON); /* NU.NU.NU = triple-not = infinitesimal */
 
     /* ---- Symbolic / CAS and Quantum ---- */
     DEF("∂",              prim_sx_diff,         2, 2);
@@ -1761,4 +1767,20 @@ void builtins_register(val_t env) {
 
     /* syntax-rules keyword */
     syntax_rules_register(env);
+
+    /* Second AKK_PR pass — registers Akkadian aliases for CAS, surreal, quantum,
+     * multivector, and quaternion procedures that are defined after the first pass. */
+    {
+#define AKK(e, t, c)
+#define AKK_SF(e, t, c)
+#define AKK_PR(e, t, c) \
+        { \
+            val_t _v = env_lookup_or_false(env, sym_intern_cstr(e)); \
+            if (!vis_false(_v)) { \
+                env_define(env, sym_intern_cstr(t), _v); \
+                env_define(env, sym_intern_cstr(c), _v); \
+            } \
+        }
+#include "akkadian_names.h"
+    }
 }
