@@ -72,6 +72,7 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
 | [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
 | [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
+| [neo4j](docs/module-neo4j.md) | `(curry neo4j)` | Neo4j graph database client (Bolt 4.x/5.x, no libneo4j) | — |
 | [image](docs/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
 | [git](docs/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
 | [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
@@ -118,6 +119,24 @@ Example:
 ---
 
 ## Changelog
+
+### 0.7.6 — Qt6 interactivity, Mandelbrot fixes, Neo4j documentation
+
+**Qt6 module — new input events**:
+- `(canvas-on-scroll! canvas proc)` — scroll wheel and trackpad two-finger scroll; callback receives `(dx dy x y mods)`. `dy > 0` = scroll up / zoom in. Pixel delta is used when available (trackpad), angle delta (wheel mouse) otherwise
+- Mouse double-click now delivered as `'double-press` event type through the existing `canvas-on-mouse!` callback
+- `(run-event-loop)` now calls `::exit(0)` after the Qt event loop returns, preventing a hang during Metal/OpenGL surface teardown on macOS
+
+**Mandelbrot example — five correctness fixes**:
+- **Concurrent read/write race**: introduced `*display-buf*` double-buffer; workers write to `*frame-buf*`, the coordinator atomically swaps to `*display-buf*` on completion — the paint thread never reads a buffer that's being written
+- **Stale coordinator race**: each render captures its `*render-tag*` at spawn time; the coordinator only swaps the display buffer and clears `*rendering*` if the tag is still current, preventing a superseded render from clobbering in-progress state
+- **Dead resize detection**: moved the canvas-resize check from `draw-frame` (where `*W*`/`*H*` were already updated) into the draw callback, using a `resized?` flag captured before the update
+- **`timer-stop!` nil-guard**: `render-tick!` now guards `(when *render-timer* ...)` consistently
+- **Scroll wheel and double-click zoom**: both now use the new Qt6 module events; zoom is cursor-centred
+
+**Neo4j module**:
+- `(curry neo4j)` is now documented: full reference at `docs/module-neo4j.md`, entry added to the module table
+- The module was already fully implemented (Bolt 4.x/5.x, PackStream, transactions); this release makes it discoverable
 
 ### 0.7.5 — CAS expansion: transcendentals and polynomial operations
 

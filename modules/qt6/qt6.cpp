@@ -85,6 +85,7 @@
 #include <QTimer>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QCloseEvent>
 #include <QShowEvent>
 #include <QKeySequence>
@@ -186,6 +187,7 @@ struct WinState {
     curry_val      draw_proc;
     curry_val      key_proc;
     curry_val      mouse_proc;
+    curry_val      scroll_proc;
     curry_val      realize_proc;
     curry_val      close_proc;
     int            cur_w, cur_h;
@@ -223,9 +225,11 @@ protected:
     void initializeGL() override { ws->gpu_ok = true; }
     void paintEvent(QPaintEvent *) override;
     void keyPressEvent(QKeyEvent *ev) override;
-    void mousePressEvent(QMouseEvent *ev) override   { fire_mouse("press",   ev); }
-    void mouseReleaseEvent(QMouseEvent *ev) override { fire_mouse("release", ev); }
-    void mouseMoveEvent(QMouseEvent *ev) override    { fire_mouse("move",    ev); }
+    void mousePressEvent(QMouseEvent *ev) override        { fire_mouse("press",        ev); }
+    void mouseReleaseEvent(QMouseEvent *ev) override      { fire_mouse("release",      ev); }
+    void mouseMoveEvent(QMouseEvent *ev) override         { fire_mouse("move",         ev); }
+    void mouseDoubleClickEvent(QMouseEvent *ev) override  { fire_mouse("double-press", ev); }
+    void wheelEvent(QWheelEvent *ev) override;
     void resizeEvent(QResizeEvent *ev) override {
         QOpenGLWidget::resizeEvent(ev);
         ws->cur_w = width();
@@ -233,6 +237,7 @@ protected:
     }
 private:
     void fire_mouse(const char *event_type, QMouseEvent *ev);
+    void fire_scroll(QWheelEvent *ev);
 };
 
 /* =========================================================================
@@ -345,6 +350,29 @@ void CurryCanvas::fire_mouse(const char *etype, QMouseEvent *ev) {
     SCHEME_CALL(curry_apply(ws->mouse_proc, 5, argv));
 }
 
+void CurryCanvas::wheelEvent(QWheelEvent *ev) {
+    fire_scroll(ev);
+}
+
+void CurryCanvas::fire_scroll(QWheelEvent *ev) {
+    if (curry_is_bool(ws->scroll_proc)) { ev->ignore(); return; }
+    QPoint pd = ev->pixelDelta();
+    QPoint ad = ev->angleDelta();
+    /* Prefer pixel delta (trackpad); fall back to angle delta (wheel mouse). */
+    double dx = pd.isNull() ? (double)ad.x() / 8.0 : (double)pd.x();
+    double dy = pd.isNull() ? (double)ad.y() / 8.0 : (double)pd.y();
+    QPointF pos = ev->position();
+    curry_val argv[5] = {
+        curry_make_float(dx),
+        curry_make_float(dy),
+        curry_make_fixnum((intptr_t)pos.x()),
+        curry_make_fixnum((intptr_t)pos.y()),
+        build_mods(ev->modifiers())
+    };
+    SCHEME_CALL(curry_apply(ws->scroll_proc, 5, argv));
+    ev->accept();
+}
+
 void CurryCanvas::paintEvent(QPaintEvent *) {
     if (curry_is_bool(ws->draw_proc)) return;
     QPainter painter(this);
@@ -409,6 +437,7 @@ static curry_val fn_make_window(int ac, curry_val *av, void *ud) {
     ws->draw_proc      = curry_make_bool(false);
     ws->key_proc       = curry_make_bool(false);
     ws->mouse_proc     = curry_make_bool(false);
+    ws->scroll_proc    = curry_make_bool(false);
     ws->realize_proc   = curry_make_bool(false);
     ws->close_proc     = curry_make_bool(false);
     ws->live_painter   = nullptr;
@@ -472,7 +501,7 @@ static curry_val fn_window_set_title(int ac, curry_val *av, void *ud) {
 }
 
 static curry_val fn_run_event_loop(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac;(void)av; ensure_app(); s_app->exec(); return curry_void(); }
+    (void)ud;(void)ac;(void)av; ensure_app(); s_app->exec(); ::exit(0); }
 static curry_val fn_quit_event_loop(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;(void)av; if (s_app) s_app->quit(); return curry_void(); }
 
@@ -484,6 +513,8 @@ static curry_val fn_canvas_on_draw(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->draw_proc = av[1]; return curry_void(); }
 static curry_val fn_canvas_on_mouse(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->mouse_proc = av[1]; return curry_void(); }
+static curry_val fn_canvas_on_scroll(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->scroll_proc = av[1]; return curry_void(); }
 static curry_val fn_canvas_redraw(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; val_to_canvas(av[0])->canvas->update(); return curry_void(); }
 
@@ -1365,6 +1396,7 @@ extern "C" void curry_module_init(CurryVM *vm) {
     /* --- Layer 3: Canvas --- */
     curry_define_fn(vm, "canvas-on-draw!",      fn_canvas_on_draw,      2, 2, NULL);
     curry_define_fn(vm, "canvas-on-mouse!",     fn_canvas_on_mouse,     2, 2, NULL);
+    curry_define_fn(vm, "canvas-on-scroll!",    fn_canvas_on_scroll,    2, 2, NULL);
     curry_define_fn(vm, "canvas-redraw!",       fn_canvas_redraw,       1, 1, NULL);
 
     /* --- Layer 3: Layout --- */

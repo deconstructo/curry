@@ -19,7 +19,7 @@
 ;;;
 ;;; Controls:
 ;;;   Left-drag          pan
-;;;   Scroll wheel       zoom (centred on cursor)
+;;;   Scroll wheel       zoom (centred on cursor); trackpad pinch works too
 ;;;   Double-click       zoom 2× to cursor
 ;;;   R                  reset view
 ;;;
@@ -52,11 +52,14 @@
 
 ;;; ── Render state ─────────────────────────────────────────────────────────────
 
-(define *frame-buf*  #f)   ; RGBA bytevector, *buf-bw* × *buf-bh* × 4 bytes
-(define *buf-bw*     0)    ; columns in *frame-buf* (= quotient W STEP at alloc time)
-(define *buf-bh*     0)    ; rows    in *frame-buf*
-(define *rendering*  #f)   ; #t while workers are running
-(define *render-tag* 0)    ; incremented on each new request (stale-worker detection)
+(define *frame-buf*   #f)   ; RGBA bytevector written by workers
+(define *buf-bw*      0)    ; columns in *frame-buf*
+(define *buf-bh*      0)    ; rows    in *frame-buf*
+(define *display-buf* #f)   ; last completed frame — read only by paint thread
+(define *display-bw*  0)
+(define *display-bh*  0)
+(define *rendering*   #f)   ; #t while workers are running
+(define *render-tag*  0)    ; incremented on each new request (stale-worker detection)
 
 (define *canvas* #f)
 (define *render-timer* #f)
@@ -254,16 +257,22 @@
          (vcx   *cx*)
          (vcy   *cy*)
          (vzoom *zoom*)
-         (n     (min *NUM-WORKERS* (max 1 bh))))
-    ;; Coordinator: waits for N 'done messages, then clears *rendering*.
-    ;; The timer callback notices and stops itself on the next tick.
+         (n     (min *NUM-WORKERS* (max 1 bh)))
+         (tag   *render-tag*))
+    ;; Coordinator: waits for N 'done messages, then swaps the display buffer
+    ;; and clears *rendering*.  Tag check prevents a stale coordinator from a
+    ;; superseded render from clobbering the state of a newer one.
     (let ((coord (spawn
                    (lambda ()
                      (let loop ((rem n))
                        (when (> rem 0)
                          (receive)
                          (loop (- rem 1))))
-                     (set! *rendering* #f)))))
+                     (when (= tag *render-tag*)
+                       (set! *display-buf* buf)
+                       (set! *display-bw*  bw)
+                       (set! *display-bh*  bh)
+                       (set! *rendering* #f))))))
       ;; Spawn N workers, each owning a horizontal band of block-rows.
       (do ((i 0 (+ i 1)))
           ((= i n))
@@ -285,26 +294,19 @@
 
 (define (render-tick!)
   (when *canvas* (canvas-redraw! *canvas*))
-  (unless *rendering* (timer-stop! *render-timer*)))
+  (unless *rendering* (when *render-timer* (timer-stop! *render-timer*))))
 
 ;;; ── Draw ─────────────────────────────────────────────────────────────────────
 
 (define (draw-frame painter w h)
-  ;; Re-render if the canvas has been resized since the last allocation.
-  (when (or (not (= w *W*)) (not (= h *H*)))
-    (set! *W* w)
-    (set! *H* h)
-    (request-render!))
-
   (gfx-clear! painter 0.0 0.0 0.0)
   (gfx-set-antialias! painter #f)
 
-  ;; Single blit: RGBA bytevector (bw×bh) scaled up to W×H canvas rect.
-  ;; Each image pixel maps to a STEP×STEP block — same visual as the old loop
-  ;; but replaces ~60k FFI calls with one Qt drawImage call.
-  (when (and *frame-buf* (> *buf-bw* 0) (> *buf-bh* 0))
+  ;; Single blit from the last completed frame.  *display-buf* is only written
+  ;; by the coordinator after all workers finish, so no concurrent write race.
+  (when (and *display-buf* (> *display-bw* 0) (> *display-bh* 0))
     (gfx-draw-image! painter 0.0 0.0 (inexact *W*) (inexact *H*)
-                     *frame-buf* *buf-bw* *buf-bh*))
+                     *display-buf* *display-bw* *display-bh*))
 
   ;; HUD
   (gfx-set-antialias! painter #t)
@@ -399,23 +401,43 @@
 ;; Canvas
 (canvas-on-draw! canvas
   (lambda (painter w h)
-    (set! *W* w)
-    (set! *H* h)
+    (let ((resized? (or (not (= w *W*)) (not (= h *H*)))))
+      (set! *W* w)
+      (set! *H* h)
+      (when resized? (request-render!)))
     (draw-frame painter w h)))
 
 ;; Qt6 mouse callback: (event-type button x y mods)
-;;   event-type : 'press | 'release | 'move
+;;   event-type : 'press | 'release | 'move | 'double-press
 ;;   button     : 'left | 'right | 'middle | 'none
 (canvas-on-mouse! canvas
   (lambda (ev btn x y mods)
     (cond
-      ((equal? ev 'press)   (on-mouse-press!   x y btn))
-      ((equal? ev 'release) (on-mouse-release! x y btn))
-      ((equal? ev 'move)    (on-mouse-move!    x y)))))
+      ((equal? ev 'press)        (on-mouse-press!   x y btn))
+      ((equal? ev 'release)      (on-mouse-release! x y btn))
+      ((equal? ev 'move)         (on-mouse-move!    x y))
+      ((equal? ev 'double-press) (when (equal? btn 'left)
+                                   (zoom-to-cursor! 2.0 x y))))))
+
+;; Scroll wheel / trackpad: (dx dy x y mods)  dy > 0 = zoom in
+(canvas-on-scroll! canvas
+  (lambda (dx dy x y mods)
+    (let ((factor (expt 1.002 dy)))   ; ~2× per 350 px of trackpad travel
+      (zoom-to-cursor! factor x y))))
 
 (define (zoom-step! factor)
   (set! *zoom* (* *zoom* factor))
   (request-render!))
+
+(define (zoom-to-cursor! factor sx sy)
+  ;; Keep the world point under the cursor fixed as we zoom.
+  (let* ((wx (/ (- (inexact sx) (/ (inexact *W*) 2.0)) *zoom*))
+         (wy (/ (- (inexact sy) (/ (inexact *H*) 2.0)) *zoom*))
+         (new-zoom (* *zoom* factor)))
+    (set! *cx* (- (+ *cx* wx) (/ (- (inexact sx) (/ (inexact *W*) 2.0)) new-zoom)))
+    (set! *cy* (- (+ *cy* wy) (/ (- (inexact sy) (/ (inexact *H*) 2.0)) new-zoom)))
+    (set! *zoom* new-zoom)
+    (request-render!)))
 
 (window-on-key! win
   (lambda (key mods)

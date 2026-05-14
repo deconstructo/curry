@@ -392,15 +392,14 @@ Start the SSE server with `(mcp-serve-sse 8080)` in the script.  A `[mcp] SSE se
 
 ## Neo4j module (`modules/neo4j/neo4j.c`)
 
-The Neo4j module must be implemented using the **raw Bolt protocol** (do not use `libneo4j-client`). Reasons: `libneo4j-client` is unmaintained (~2019) and only supports Bolt ≤ v3, which is incompatible with Neo4j 4.x/5.x. Model the implementation on the Redis module (`modules/redis/redis.c`), which speaks RESP directly over a socket.
+Fully implemented. Uses the **raw Bolt 4.x/5.x protocol** with PackStream binary encoding — no `libneo4j-client` dependency. Modelled on the Redis module.
 
 Key points:
-- Bolt 4.x+ uses **PackStream** binary encoding (similar to MessagePack) for messages.
-- The handshake negotiates the Bolt version via a 4-byte magic + 4×4-byte version proposals.
-- Authentication uses the `HELLO` message; queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
-- Request **pipelining** (sending multiple `RUN`/`PULL` pairs before draining responses) is the one client-side optimisation worth implementing for batch workloads.
-- The current `neo4j.c` is a stub — all three functions are no-ops. Replace entirely; do not build on the stub.
-- Remove the `libneo4j-client` `pkg_check_modules` block from `CMakeLists.txt`; the module has no external C dependencies beyond the standard socket API.
+- Bolt version negotiated at connect time; proposes 5.4, 5.0, and the 4.0–4.4 range.
+- Bolt 5.1+ authentication uses split HELLO / LOGON; earlier versions use combined HELLO.
+- Queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
+- No external C dependencies beyond the standard socket API.
+- Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/module-neo4j.md`.
 
 ## Akkadian error messages
 
