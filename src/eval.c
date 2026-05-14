@@ -11,6 +11,7 @@
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
+#include "profiling.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -258,6 +259,10 @@ tail:
         val_t val = eval(vcadr(rest), env);
         if (!env_set(env, sym, val))
             scm_raise(V_FALSE, "set!: unbound variable: %s", sym_cstr(sym));
+        if (sym == S_EVAL_PROFILER && vis_fixnum(val))
+            profiling_set_level((int)vunfix(val));
+        else if (sym == S_GC_PROFILER && vis_fixnum(val))
+            gc_profiling_set_level((int)vunfix(val));
         return V_VOID;
     }
 
@@ -974,11 +979,15 @@ tail:
             if (prim->max_args >= 0 && argc > prim->max_args)
                 scm_raise(V_FALSE, "%s: too many arguments (got %d, max %d)",
                           prim->name, argc, prim->max_args);
+            if (curry_profiling_level >= 3)
+                profiling_record_prim(sym_intern_cstr(prim->name));
             return prim->fn(argc, arr, prim->ud);
         }
 
         if (vis_closure(proc)) {
             Closure *c = as_clos(proc);
+            if (curry_profiling_level >= 1 && vis_symbol(c->name))
+                profiling_record_call_tco(c->name);
             env = env_bind_arr(vptr(c->env), c->params, argc, arr);
             val_t body = c->body;
             while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -1023,6 +1032,15 @@ val_t apply(val_t proc, val_t args) {
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);
         val_t env  = env_bind_args(vptr(c->env), c->params, args);
+        if (curry_profiling_level >= 1 && vis_symbol(c->name)) {
+            if (curry_profiling_level >= 2) {
+                uint64_t t0 = profiling_now_ns();
+                val_t r = eval_body(c->body, env);
+                profiling_record_timed(c->name, t0);
+                return r;
+            }
+            profiling_record_call(c->name);
+        }
         return eval_body(c->body, env);
     }
     if (vis_cont(proc)) {
@@ -1068,6 +1086,15 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);
         val_t env = env_bind_arr(vptr(c->env), c->params, argc, argv);
+        if (curry_profiling_level >= 1 && vis_symbol(c->name)) {
+            if (curry_profiling_level >= 2) {
+                uint64_t t0 = profiling_now_ns();
+                val_t r = eval_body(c->body, env);
+                profiling_record_timed(c->name, t0);
+                return r;
+            }
+            profiling_record_call(c->name);
+        }
         return eval_body(c->body, env);
     }
     if (vis_traced(proc)) {

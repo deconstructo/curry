@@ -46,3 +46,9 @@ if(BUILD_MODULE_MCP AND TARGET curry_mcp)
                 $<TARGET_FILE:curry>
                 ${MOD_PATH})
 endif()
+
+if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
+    add_test(NAME profiling COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/profiling_tests.scm)
+    set_tests_properties(profiling PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()

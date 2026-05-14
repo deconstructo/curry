@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 0.7.6.1 LANGUAGES C CXX)
+
+project(curry VERSION 0.7.7.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -104,6 +105,7 @@ set(CORE_SOURCES
   src/multivec.c
   src/matrix.c
   src/syntax_rules.c
+  src/profiling.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})
@@ -169,6 +171,7 @@ option(BUILD_MODULE_PLPLOT    "Build PLplot scientific plotting module" ON)
 option(BUILD_MODULE_REGEX     "Build POSIX regex module"            ON)
 option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 option(BUILD_MODULE_MCP       "Build MCP server module"              ON)
+option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -459,6 +462,11 @@ if(BUILD_MODULE_MCP)
   message(STATUS "Building MCP server module")
 endif()
 
+if(BUILD_MODULE_PROFILING)
+  curry_c_module(profiling)
+  message(STATUS "Building profiling consumer module")
+endif()
+
 # ---- Tests ----
 
 enable_testing()
@@ -503,7 +511,7 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.6.1_<arch>.deb
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.7.0_<arch>.deb
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")

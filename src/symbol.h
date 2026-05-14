@@ -44,6 +44,8 @@ extern val_t
     /* common identifiers */
     S_ERROR, S_APPLY, S_MAP, S_FOR_EACH,
     /* symbolic / CAS */
-    S_SYMBOLIC;
+    S_SYMBOLIC,
+    /* runtime profiling */
+    S_EVAL_PROFILER, S_GC_PROFILER;
 
 #endif /* CURRY_SYMBOL_H */

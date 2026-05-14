@@ -9,6 +9,7 @@
 #include "actors.h"
 #include "modules.h"
 #include "object.h"
+#include "profiling.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,7 @@
 #  include <readline/history.h>
 #endif
 
-#define CURRY_VERSION "0.7.6.1"
+#define CURRY_VERSION "0.7.7.0"
 #define BANNER \
     "𒋗𒈬 𒌝 𒄿𒈾 𒋗  |  šulmu — šiprī ina qātīka\n" \
     "Greetings — my service is in your hands\n\n"\
@@ -36,6 +37,7 @@ static void init_all(void) {
     eval_init();
     actors_init();
     modules_init();
+    profiling_init(GLOBAL_ENV);
 }
 
 /* ---- REPL ---- */
@@ -177,10 +179,28 @@ static void eval_port_exprs(val_t port, bool print) {
                     exit(0);
                 }
                 if (!strcmp(name, "help")) {
-                    puts("Commands: ,quit  ,help  ,gc  ,env");
+                    puts("Commands: ,quit  ,help  ,gc  ,env  ,profile");
                     continue;
                 }
                 if (!strcmp(name, "gc")) { gc_collect(); puts("GC complete."); continue; }
+                if (!strcmp(name, "profile")) {
+                    val_t report = profiling_report();
+                    if (vis_nil(report)) {
+                        puts("No profiling data. Set (set! **eval-profiler** 1) to enable.");
+                    } else {
+                        printf("%-40s %10s %12s\n", "function", "calls", "ns-total");
+                        printf("%-40s %10s %12s\n", "--------", "-----", "--------");
+                        for (val_t p = report; vis_pair(p); p = vcdr(p)) {
+                            val_t entry = vcar(p);
+                            const char *nm = sym_cstr(vcar(entry));
+                            val_t inner = vcdr(entry);
+                            long long calls = (long long)vunfix(vcar(inner));
+                            long long ns    = (long long)vunfix(vcdr(inner));
+                            printf("%-40s %10lld %12lld\n", nm, calls, ns);
+                        }
+                    }
+                    continue;
+                }
                 if (!strcmp(name, "env")) {
                     EnvFrame *f = as_env(GLOBAL_ENV)->frame;
                     for (uint32_t i = 0; i < f->size; i++) {

@@ -79,6 +79,10 @@ SYM(S_MONITOR,            "monitor!")
 /* Symbolic / CAS */
 SYM(S_SYMBOLIC,           "symbolic")
 
+/* Runtime profiling control */
+SYM(S_EVAL_PROFILER,      "**eval-profiler**")
+SYM(S_GC_PROFILER,        "**gc-profiler**")
+
 /* Common identifiers */
 SYM(S_ERROR,              "error")
 SYM(S_APPLY,              "apply")
