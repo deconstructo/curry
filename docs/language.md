@@ -691,33 +691,34 @@ Each directory is tried for `.so`, `.dylib`, `.sld`, `.scm` in that order.
 Curry supports three syntaxes for the same language, interchangeably:
 
 1. **English (R7RS)** — standard Scheme: `define`, `lambda`, `if`, `+`, `-`, `map`, …
-2. **Transliterated Akkadian** — Standard Babylonian Akkadian in Latin script: `šakānum`, `pārisum`, `šumma`, …
-3. **Cuneiform** — the same words in Unicode cuneiform script: `𒋻`, `𒅁`, `𒋗`, …
+2. **Transliterated Akkadian** — Standard Babylonian Akkadian in Latin script: `šakānum`, `epēšum`, `šumma`, …
+3. **Cuneiform** — the same words in Unicode cuneiform script: `𒁹`, `𒇽`, `𒋗𒈠`, …
 
-All three resolve to the same internal operations and can be mixed freely within a single program.
+All three resolve to the same internal operations and can be mixed freely within a single program.  Coverage extends beyond R7RS to the full numeric tower: symbolic CAS, surreal numbers, quantum superposition, and Clifford multivectors all have Akkadian names drawn from attested Old Babylonian vocabulary.
 
 ### Selected vocabulary
 
-| English | Akkadian | Cuneiform | Meaning |
-|---------|----------|-----------|---------|
-| `define` | `šakānum` | `𒋻` | to place / establish |
-| `lambda` | `pārisum` | `𒅁` | resolver, one who divides |
-| `if` | `šumma` | `𒋗` | if |
-| `+` | `wašābum` | `𒉡` | to add / dwell |
-| `-` | `naṭālum` | `𒇲𒌑` | to subtract / look |
-| `*` | `šapākum` | `𒊺` | to multiply / pour |
-| `/` | `zâzum` | `𒌋` | to divide / share |
-| `cons` | `rakābum` | `𒁀` | to join / ride |
-| `car` | `rēšum` | `𒁹` | head / top |
-| `cdr` | `šaplum` | `𒋗𒁀` | bottom / lower part |
-| `list` | `ṭuppum` | `𒄿𒌝` | tablet (list of things) |
-| `map` | `alākum` | `𒀪` | to go (over) / traverse |
-| `display` | `šūbrûm` | `𒁹𒊮` | to show / make visible |
-| `spawn` | `banûm` | `𒆳` | to create / beget |
-| `send!` | `šapārum` | `𒀭𒋫` | to send (a message) |
-| `receive` | `leqûm` | `𒂗` | to take / receive |
-| `error` | `ḫiṭītum` | `𒄭` | fault / error |
-| `symbolic` | `šiṭrum` | `𒌑𒋻` | writing / inscription |
+| English | Akkadian | Cuneiform | Notes |
+|---------|----------|-----------|-------|
+| `define` | `šakānum` | `𒁹` | DIŠ — to place / establish |
+| `lambda` | `epēšum` | `𒇽` | LU2 — to do / make; person/agent |
+| `if` | `šumma` | `𒋗𒈠` | the actual Akkadian conditional particle |
+| `+` | `matāḫum` | `𒋻𒁹` | TAR.DIŠ — attested O.B. math term for addition |
+| `-` | `ḫarāṣum` | `𒇲𒌑` | LAL.UD — to cut / reduce |
+| `*` | `šutakūlum` | `𒈧𒁹` | MAŠ.DIŠ — attested O.B. term for multiplication |
+| `/` | `zâzum` | `𒈧` | MAŠ — attested O.B. term for division |
+| `sqrt` | `ibum` | `𒅁𒁹` | IB.DIŠ — "the side"; the Babylonian term for square root |
+| `car` | `rēšum` | `𒊕` | SAG — *head* |
+| `cdr` | `zibbatum` | `𒆜` | KUN — *tail* |
+| `display` | `naṭālum` | `𒅆` | IGI — eye / to look upon |
+| `spawn` | `wālādum` | `𒅁𒀀` | IB.A — to beget |
+| `send!` | `šapārum` | `𒌝𒂗` | UM.EN — to send a tablet |
+| `sym-diff` / `∂` | `māḫirum` | `𒄭𒊕` | "the going rate" — O.B. exchange rate → derivative |
+| `integrate` / `∫` | `eqlum` | `𒀭𒆠` | "field/area" — O.B. math term for area |
+| `sym-var` | `la-idûm` | `𒉡𒅆` | "the not-known" — the algebraic unknown |
+| `simplify` | `šuklulum` | `𒁹𒆠𒁹` | "to make complete/perfect" |
+| `omega` (ω) | `dāriš` | `𒀭𒀭` | "forever" — the first infinite surreal |
+| `epsilon` (ε) | `ṣiḫrum-ṣīrum` | `𒉡𒉡𒉡` | "supremely tiny" — the first infinitesimal surreal |
 
 The full vocabulary is in [akkadian-reference.md](akkadian-reference.md).
 
@@ -730,11 +731,28 @@ The full vocabulary is in [akkadian-reference.md](akkadian-reference.md).
 
 ; Transliterated Akkadian
 (šakānum (kinetic-energy m v)
-  (šapākum 1/2 m (šapākum v v)))
+  (šutakūlum 1/2 m (šutakūlum v v)))
 
 ; Cuneiform
-(𒋻 (kinetic-energy m v)
-  (𒊺 1/2 m (𒊺 v v)))
+(𒁹 (kinetic-energy m v)
+  (𒈧𒁹 1/2 m (𒈧𒁹 v v)))
+```
+
+### Example — symbolic differentiation in Akkadian
+
+```scheme
+; Bind the unknown (la-idûm = "the not-known")
+(symbolic x)
+
+; ∂(x³)/∂x — in full Akkadian
+(naṭālum (māḫirum (napḫarum x 3) x))
+(pirištu)
+; => (* 3 (expt x 2))
+
+; ∫ x dx — eqlum = "field"
+(naṭālum (eqlum x x))
+(pirištu)
+; => (/ (expt x 2) 2)
 ```
 
 ### Error messages

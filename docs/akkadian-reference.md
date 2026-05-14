@@ -1,6 +1,6 @@
 # Akkadian Language Reference
 
-*v0.7.5 — 2026-05-12*
+*v0.7.6.1 — 2026-05-14*
 
 Curry Scheme accepts three equivalent notations for every name. You can mix them freely within a single program.
 
@@ -127,6 +127,8 @@ These terms are attested in Old Babylonian mathematical tablets.
 | `#t` | — | `𒌋𒉡` | U.NU — truth |
 | `#f` | — | `𒉡` | NU — falsehood (same sign as `not`) |
 | `'()` | — | `𒊭` | ŠA3 — the empty interior |
+| `0` | `ṣifrum` | — | zero, source of "cipher" |
+| `pi` / `π` | — | `𒄿𒀭` | I.AN — going skyward |
 
 ### Actors
 
@@ -136,6 +138,131 @@ These terms are attested in Old Babylonian mathematical tablets.
 | `send!` | `šapārum` | `𒌝𒂗` | UM.EN — send a tablet |
 | `receive` | `maḫārum` | `𒌝𒈠` | UM.MA — receive a tablet |
 | `self` | `ramānī` | `𒍪` | ZA — myself |
+
+---
+
+## Symbolic CAS
+
+Babylonian scribes posed algebra problems as *"a thing I do not know; find it"* and
+computed areas of fields exactly as we compute integrals.  The CAS vocabulary is
+drawn directly from attested Old Babylonian mathematical tablet terminology.
+
+| English | Transliteration | Cuneiform | Notes |
+|---------|-----------------|-----------|-------|
+| `sym-var` | `la-idûm` | `𒉡𒅆` | NU.IGI — "the not-known/not-seen"; the unknown quantity in O.B. algebraic problems |
+| `sym-var?` | `la-idûm?` | `𒉡𒅆?` | |
+| `sym-expr?` | `awât-la-idûm?` | `𒉡𒌝?` | NU.UM? — "unresolved utterance" |
+| `symbolic?` | `la-idûm-šalim?` | `𒉡𒅆𒁹?` | either kind |
+| `sym-var-name` | `šum-la-idûm` | `𒉡𒊕` | NU.SAG — "head of the unknown" = its name |
+| `sym-diff` / `∂` | `māḫirum` | `𒄭𒊕` | ḪI.SAG — "the going rate"; attested on O.B. commercial tablets for the price of silver per unit; here: the instantaneous rate of change |
+| `integrate` / `∫` | `eqlum` | `𒀭𒆠` | AN.KI — "field/area"; the canonical O.B. word for a measured field; mathematical tablets computed areas exactly as integrals |
+| `frac-diff` | `māḫirum-ḫepûm` | `𒄭𒈠` | ḪI.MA — "halved rate" |
+| `frac-int` | `eqlum-ḫepûm` | `𒀭𒆠𒈠` | AN.KI.MA — "halved field" |
+| `wirtinger-d` | `māḫirum-išārum` | `𒄭𒁹` | ḪI.DIŠ — "rate-one"; the holomorphic ∂/∂z |
+| `wirtinger-dbar` | `māḫirum-la` | `𒄭𒉡` | ḪI.NU — "rate-not"; the anti-holomorphic ∂/∂z̄ |
+| `simplify` | `šuklulum` | `𒁹𒆠𒁹` | DIŠ.KI.DIŠ — "to bring to completion, to make whole" |
+| `substitute` | `nukkurum` | `𒁀𒋻` | BA.TAR — "to alter, to exchange one thing for another" |
+| `expand` | `rapāšum` | `𒃲𒀀` | GAL.A — "to broaden, to spread out" |
+| `degree` | `elûm-ṣīrum` | `𒀭𒈷` | AN.ME — "the highest ascent"; the topmost exponent |
+| `collect` | `kânum` | `𒆠𒁹𒁹` | KI.DIŠ.DIŠ — "to be firm, to establish"; gather like terms |
+| `leading-coeff` | `rēšum-nikkassī` | `𒊕𒈷` | SAG.ME — "head of accounts"; the leading coefficient is the chief term |
+| `conjugate` / `conj` | `tawirtum` | `𒅆𒋻` | IGI.TAR — "image, reflection, likeness"; the mirror across the real axis |
+| `auto-diff` | `māḫirum-ramāni` | `𒄭𒍪` | ḪI.ZA — "rate-self"; forward-mode differentiation via dual surreals |
+| `sym->string` | `ṭuppi-la-idûm` | `𒉡𒅆𒌝` | NU.IGI.UM — "unknown as tablet" |
+| `sym->infix` | `ṭuppi-la-idûm-išārum` | `𒉡𒅆𒌝𒌋` | NU.IGI.UM.U |
+| `sym->latex` | `ṭuppi-ṣīrum-la-idûm` | `𒉡𒅆𒌝𒁹` | NU.IGI.UM.DIŠ — "formal tablet of the unknown" |
+
+---
+
+## Surreal numbers
+
+The surreal numbers extend the real line into the transfinite (ω) and the
+infinitesimal (ε = 1/ω).  The Akkadian vocabulary draws on *dāriš* — "forever,
+for eternity" — a word appearing in royal inscriptions in the phrase *ana dāriš*
+("for ever and ever").
+
+| English | Transliteration | Cuneiform | Notes |
+|---------|-----------------|-----------|-------|
+| `surreal?` | `ša-dāriš?` | `𒀭𒁹?` | AN.DIŠ? — "is it eternal?" |
+| `surreal-infinite?` | `dāriš?` | `𒀭𒀭?` | AN.AN? — "doubly eternal" |
+| `surreal-finite?` | `la-dāriš?` | `𒉡𒀭?` | NU.AN? — "not eternal" |
+| `surreal-infinitesimal?` | `ṣiḫrum-ṣīrum?` | `𒉡𒉡𒀀?` | NU.NU.A? — "supremely tiny" |
+| `surreal-real-part` | `ṣīrum-ša-dāriš` | `𒀭𒄿` | AN.I — the standard going part |
+| `surreal-omega-part` | `ša-dāriš-kīnum` | `𒀭𒀭𒁹` | AN.AN.DIŠ — the ω-coefficient |
+| `surreal-epsilon-part` | `ša-ṣiḫrim` | `𒉡𒉡𒈷` | NU.NU.ME — the ε-essence |
+| `surreal-birthday` | `ūm-wulludim` | `𒌑𒅁` | UD.IB — "day-hold" = birth-day |
+| `surreal-nterms` | `mīnum-ša-dāriš` | `𒀭𒈠` | AN.MA — count of the eternal |
+| `surreal->number` | `ša-dāriš-ana-nikkassim` | `𒀭𒌑` | AN.UD — "eternal to temporal" |
+| `make-surreal` | `epēšum-ša-dāriš` | `𒀭𒇽` | AN.LU2 — "make the eternal" |
+| `surreal-terms` | `nindabûm-ša-dāriš` | `𒀭𒌝` | AN.UM — "the eternal's tablets" |
+
+### Surreal constants
+
+| English | Transliteration | Cuneiform | Value |
+|---------|-----------------|-----------|-------|
+| `omega` | `dāriš` | `𒀭𒀭` | ω — the first infinite surreal |
+| `epsilon` | `ṣiḫrum-ṣīrum` | `𒉡𒉡𒉡` | ε = 1/ω — the first infinitesimal surreal |
+
+---
+
+## Quantum superposition
+
+| English | Transliteration | Cuneiform | Notes |
+|---------|-----------------|-----------|-------|
+| `superpose` | `kalāma` | `𒊕𒊕𒊕` | SAG.SAG.SAG — "all things at once"; a quantum state holds all branches simultaneously |
+| `quantum-uniform` | `kalāma-mitḫārum` | `𒊕𒊕𒁹` | SAG.SAG.DIŠ — "all-equal heads" |
+| `observe` | `amārum` | `𒅆𒄿` | IGI.I — "to see, to look upon"; observation collapses the superposition |
+| `quantum?` | `kalāma?` | `𒊕𒊕?` | SAG.SAG? |
+| `quantum-states` | `kalāma-nindabûm` | `𒊕𒊕𒌝` | SAG.SAG.UM — all-states-as-tablet |
+| `quantum-n` | `mīnum-kalāma` | `𒊕𒊕𒄿` | SAG.SAG.I — count-of-all |
+
+---
+
+## Multivectors / Clifford algebra
+
+*kibrātum* (𒆠𒃲) — "the four quarters of the world" — is the Babylonian name for
+the totality of three-dimensional space.  The royal title *šar kibrāt arba'im*
+("king of the four quarters") claimed dominion over all of it.  A multivector lives
+in the full Clifford algebra Cl(p,q,r) over that space.
+
+| English | Transliteration | Cuneiform | Notes |
+|---------|-----------------|-----------|-------|
+| `make-mv` | `epēšum-kibrātim` | `𒆠𒃲𒇽` | KI.GAL.LU2 — "make the great space" |
+| `mv?` | `kibrātim?` | `𒆠𒃲?` | KI.GAL? — "is it a great space?" |
+| `mv-signature` | `ṣimdat-kibrātim` | `𒆠𒃲𒋻` | KI.GAL.TAR — space-signature |
+| `mv-ref` | `maḫārum-kibrātim` | `𒆠𒃲𒊕` | KI.GAL.SAG — space-head |
+| `mv-set!` | `šakānum-kibrātim` | `𒆠𒃲𒁹` | KI.GAL.DIŠ — place-in-space |
+| `mv+` | `matāḫum-kibrātim` | `𒆠𒃲𒋻𒁹` | space-add |
+| `mv-` | `ḫarāṣum-kibrātim` | `𒆠𒃲𒇲𒌑` | space-subtract |
+| `mv*` | `šutakūlum-kibrātim` | `𒆠𒃲𒈧` | KI.GAL.MAŠ — geometric product |
+| `mv-scale` | `zâzum-kibrātim` | `𒆠𒃲𒈧𒁹` | space-scale |
+| `mv-wedge` | `ṣilippum-kibrātim` | `𒆠𒃲𒌋` | KI.GAL.U — "the diagonal"; outer/wedge product |
+| `mv-lcontract` | `ṣibûm-kibrātim` | `𒆠𒃲𒅁` | KI.GAL.IB — left contraction |
+| `mv-reverse` | `turrum-kibrātim` | `𒆠𒃲𒄀𒁹` | KI.GAL.GI.DIŠ — reverse |
+| `mv-involute` | `nakārum-kibrātim` | `𒆠𒃲𒉡𒄿` | KI.GAL.NU.I — grade involution |
+| `mv-conjugate` | `mitḫurtum-kibrātim` | `𒆠𒃲𒈠𒋻` | KI.GAL.MA.TAR — Clifford conjugate |
+| `mv-dual` | `šanûm-kibrātim` | `𒆠𒃲𒁀𒀀` | KI.GAL.BA.A — "the other of the space" |
+| `mv-grade` | `šinīpat-kibrātim` | `𒆠𒃲𒀸` | KI.GAL.AŠ2 — grade projection |
+| `mv-scalar` | `ṣifrum-kibrātim` | `𒆠𒃲𒉡𒉡` | KI.GAL.NU.NU — grade-0 = scalar part |
+| `mv-norm2` | `napḫarum-kibrātim` | `𒆠𒃲𒈷𒈷` | KI.GAL.ME.ME — squared norm |
+| `mv-norm` | `ibum-kibrātim` | `𒆠𒃲𒅁𒁹` | KI.GAL.IB.DIŠ — "side of the space" (*ibum* = square root) |
+| `mv-normalize` | `ibum-ṣīrum-kibrātim` | `𒆠𒃲𒅁𒌑` | KI.GAL.IB.UD — "supreme side" |
+| `mv-e` | `pānum-kibrātim` | `𒆠𒃲𒅆` | KI.GAL.IGI — "face/eye of the space" = basis blade |
+| `mv-from-list` | `kibrātim-maḫārum` | `𒆠𒃲𒌝` | KI.GAL.UM — "space from tablet" |
+| `quaternion->mv` | `rebûm-ana-kibrātim` | `𒆠𒃲𒂗` | KI.GAL.EN — enter the great space |
+| `mv->quaternion` | `kibrātum-ana-rebîm` | `𒆠𒃲𒂗𒉡` | KI.GAL.EN.NU — exit space to fourfold |
+
+---
+
+## Quaternions and Octonions
+
+| English | Transliteration | Cuneiform | Notes |
+|---------|-----------------|-----------|-------|
+| `make-quaternion` | `epēšum-rebûm` | `𒅁𒈷` | IB.ME — "make fourfold"; *rebûm* = fourth/fourfold in Akkadian |
+| `quaternion?` | `rebûm?` | `𒅁𒈷?` | IB.ME? |
+| `make-octonion` | `epēšum-samānûm` | `𒅁𒈷𒈷` | IB.ME.ME — "make eightfold"; *samānûm* = eighth/eightfold |
+| `octonion?` | `samānûm?` | `𒅁𒈷𒈷?` | IB.ME.ME? |
+| `octonion-ref` | `maḫārum-samānûm` | `𒅁𒈷𒊕` | IB.ME.SAG — eightfold-head |
 
 ---
 
@@ -181,6 +308,43 @@ These terms are attested in Old Babylonian mathematical tablets.
 (𒁹𒁹𒁹)
 ```
 
+### Symbolic CAS in Akkadian
+
+Differentiating a polynomial, integrating, simplifying — in the language of the scribes.
+
+```scheme
+; Bind unknowns
+(symbolic x)
+
+; ∂(x³ + 2x)/∂x  →  3x² + 2
+(naṭālum (māḫirum (matāḫum (napḫarum x 3) (šutakūlum 2 x)) x))
+(pirištu)
+
+; ∫ x² dx  →  x³/3
+(naṭālum (eqlum (napḫarum x 2) x))
+(pirištu)
+
+; Simplify (x + 0)
+(naṭālum (šuklulum (matāḫum x ṣifrum)))
+(pirištu)
+
+; Substitute x = 5 in (x² + 1)
+(naṭālum (nukkurum (matāḫum (napḫarum x 2) 𒀸) x 5))
+(pirištu)
+```
+
+### Surreal arithmetic
+
+```scheme
+; ω and ε are bound by default
+(naṭālum dāriš)          ; ω
+(pirištu)
+(naṭālum 𒉡𒉡𒉡)          ; ε
+(pirištu)
+(naṭālum (matāḫum dāriš 𒀸))   ; ω + 1
+(pirištu)
+```
+
 ---
 
 ## Notes on the signs
@@ -193,6 +357,12 @@ These terms are attested in Old Babylonian mathematical tablets.
 - **𒅁𒁹 (IB.DIŠ)** for `sqrt`: *ibum* ("the side") is how Babylonian mathematicians referred to the square root — the side of a square of given area.
 - **𒈧 (MAŠ)** for `/`: *zâzum* (to divide) and its related forms appear in Old Babylonian mathematical tablets in division problems.
 - **ṣifrum** for zero is historically significant: the Akkadian word *ṣifrum* (emptiness/void) is the source of the Arabic *ṣifr*, thence the Latin *zephirum*, and ultimately the English words "zero" and "cipher".
+- **māḫirum** (𒄭𒊕) for the derivative: the *māḫirum* price appears on hundreds of O.B. tablets — "1 shekel of silver buys X litres of barley at today's *māḫirum*." The derivative is the *māḫirum* of a function: how much the output changes per unit of input, at this moment.
+- **eqlum** (𒀭𒆠) for the integral: the word appears in virtually every Babylonian mathematical tablet involving area — *eqlam aṣbat* "I seized the field." The computation of areas under geometric figures is precisely integration.
+- **la-idûm** (𒉡𒅆) for a symbolic variable: the O.B. problem texts phrase their unknowns as *ša lā idûm* — "that which I do not know." Every algebraic tablet is a search for *la-idûm*.
+- **kibrātum** (𒆠𒃲) for multivectors: the royal epithet *šar kibrāt arba'im* — "king of the four quarters" — meant dominion over all three-dimensional space. A Clifford multivector element is precisely an element of that full geometric space.
+- **dāriš** (𒀭𒀭) for ω: the adverb *dāriš* means "forever, for eternity." Surreal ω is the simplest number greater than all naturals — the first eternity past the finite.
+- **NU.NU.NU** (𒉡𒉡𒉡) for ε: three negations — not, not, not — for a number that is not zero, not negative, and not anything you can reach from zero by finite steps. The infinitesimal that defies all ordinary measure.
 
 ---
 
@@ -206,5 +376,3 @@ sudo apt install fonts-noto
 
 # The Noto Sans Cuneiform font covers U+12000–U+1247F
 ```
-
-On macOS, **Symbola** or **Noto Sans Cuneiform** work. Most modern terminals (kitty, iTerm2, WezTerm) render supplementary plane characters correctly.
