@@ -4,11 +4,11 @@ class Curry < Formula
   license "GPL-3.0-only"
 
   # Update url + sha256 after tagging a release:
-  #   git tag v0.7.5 && git push origin v0.7.5
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.7.6.1.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.7.6.1.tar.gz"
-  sha256 "3690679810d070ff9c2891cd5613827aa8a7638576e7040d9438146aef985ad2"
-  version "0.7.6.1"
+  #   git tag v0.7.7.0 && git push origin v0.7.7.0
+  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.7.7.0.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.7.7.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "0.7.7.0"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
@@ -58,6 +58,7 @@ class Curry < Formula
       -DBUILD_MODULE_IMAGE=ON
       -DBUILD_MODULE_GIT=ON
       -DBUILD_MODULE_MCP=ON
+      -DBUILD_MODULE_PROFILING=ON
       -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
       -DBUILD_MODULE_MQTT=#{build.with?("mqtt")       ? "ON" : "OFF"}
