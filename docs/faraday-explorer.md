@@ -267,8 +267,8 @@ Step here and notice: the situation is the same as Phase 0, but with B reversed.
 
 **Phase 3 — t = 3T/4**
 B is crossing zero (going from − to +).  E is at maximum again, but **reversed**.
-The circulation arrows point counterclockwise instead of clockwise.
-*Now B is increasing in the −z direction, so the induced E fights the opposite way.*
+The circulation arrows point clockwise instead of counterclockwise.
+*Now B is increasing in the +z direction (recovering from −B₀ toward zero), so Lenz's law drives the induced E in the opposite sense to Phase 1.*
 
 Then the cycle repeats.
 
@@ -280,7 +280,7 @@ E is maximum when B is zero (changing fastest), and E is zero when B is maximum
 
 ## The integration loop: EMF in practice
 
-The white circle is an imaginary "Amperian loop" — a tool for applying the integral
+The white circle is an imaginary "Faraday loop" — a tool for applying the integral
 form of Faraday's Law.
 
 The EMF readout next to it shows:
@@ -319,8 +319,8 @@ voltage scales directly with ω.  The 50 Hz or 60 Hz of your mains supply is
 carefully controlled partly for this reason.
 
 **R (solenoid radius)**
-Making R larger makes the solenoid cross-section bigger.  Inside, E_φ = (r/2)|∂B/∂t|
-is unchanged.  Outside, E_φ = (R²/2r)|∂B/∂t| grows — a larger solenoid produces a
+Making R larger makes the solenoid cross-section bigger.  Inside, E_φ = −(r/2)∂B/∂t
+is unchanged in magnitude.  Outside, |E_φ| = (R²/2r)|∂B/∂t| grows — a larger solenoid produces a
 stronger field in the exterior region.  Also watch how the EMF saturates at a larger
 loop radius as R grows.
 

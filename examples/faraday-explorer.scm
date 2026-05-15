@@ -144,7 +144,7 @@
 ;;;   axis (the z-axis).  Therefore the induced E must share that symmetry:
 ;;;     • E can only point in the φ direction (tangential to circles).
 ;;;     • The magnitude |E| can only depend on r, not on φ or z.
-;;;   If we pick a circular Amperian loop of radius r centred on the axis,
+;;;   If we pick a circular integration loop of radius r centred on the axis,
 ;;;   E is constant in magnitude all the way around it.
 ;;;
 ;;; LEFT SIDE of Faraday's integral law (the "EMF"):
@@ -447,7 +447,7 @@
                   0.88 0.88 1.0 0.80 2.0)))
       ;; EMF readout.  reff = effective radius (whichever is smaller: loop or solenoid).
       (let* ((reff  (min *r-loop* *R*))
-             (emf   (* (- pi reff reff) db)))
+             (emf   (* (- (* pi reff reff)) db)))
         (gfx-set-color! painter 0.88 0.88 1.0 0.82)
         (gfx-set-font!  painter "monospace" 10)
         (gfx-draw-text! painter (+ cx Rlpx 7) (- cy 6)
@@ -497,7 +497,7 @@
       ;; Comparing yellow (∂B/∂t) and purple ((∇×E)_z) confirms the law.
       (gfx-set-color! painter 0.68 0.68 1.0 0.95)
       (gfx-draw-text! painter (+ px 8) (+ py (* 5 lh))
-        (string-append "(∇×E)_z  = " (fmt2 (- db)) " s⁻¹"))
+        (string-append "(∇×E)_z  = " (fmt2 (- db)) " T/s"))
       (gfx-set-color! painter 0.50 0.50 0.55 0.80)
       (gfx-draw-text! painter (+ px 8) (+ py (* 6.3 lh))
         "∇×E = −∂B/∂t   ✓"))

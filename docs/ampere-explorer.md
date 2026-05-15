@@ -416,8 +416,8 @@ trick — it is a physical effect.
 
 **"∂E/∂t drives B, so shouldn't B also create more E, which creates more B, exploding?"**  
 This is exactly what happens in an electromagnetic wave, but the fields don't explode
-because the coupled equations are balanced.  Faraday says ∂E/∂t drives ∇×B, and
-Ampere says ∂B/∂t drives ∇×E.  The two feed each other and the solution is a stable
+because the coupled equations are balanced.  Ampere says ∂E/∂t drives ∇×B, and
+Faraday says ∂B/∂t drives ∇×E.  The two feed each other and the solution is a stable
 travelling wave, not a runaway.
 
 **"In conduction mode, B is in phase with J.  But in the Faraday demo, E and B were

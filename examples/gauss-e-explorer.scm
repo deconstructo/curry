@@ -299,7 +299,7 @@
            (reff     (min *r-gauss* *R*))
            (q-enc    (/ (* (/ (* 4.0 pi) 3.0) reff reff reff rho) 1.0))
            (flux     (/ q-enc eps0))
-           (er-at-rg (cdr (E-at *r-gauss* 0.0 rho *R*))))
+           (er-at-rg (car (E-at *r-gauss* 0.0 rho *R*))))
       (gfx-set-color! painter 0.02 0.02 0.04 0.70)
       (gfx-fill-rect! painter px py pw (* 6.8 lh))
       (gfx-set-font!  painter "monospace" 11)

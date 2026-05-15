@@ -37,9 +37,9 @@
 ;;;   The white circle is a Gaussian surface you can position with the slider.
 ;;;
 ;;;   KEY EXPERIMENT:
-;;;   1. Default: Gaussian surface encloses BOTH poles → ∮B·dl ≈ 0
+;;;   1. Default: Gaussian surface encloses BOTH poles → ∮B·n̂dl ≈ 0
 ;;;      (north and south contributions cancel exactly)
-;;;   2. Move gy up to enclose ONLY the north "pole" → ∮B·dl ≠ 0
+;;;   2. Move gy up to enclose ONLY the north "pole" → ∮B·n̂dl ≠ 0
 ;;;      THIS IS WHAT A MONOPOLE WOULD LOOK LIKE.
 ;;;      But no such isolated pole has EVER been observed in nature.
 ;;;      Gauss's law for B (∇·B = 0) is an experimental fact.
@@ -213,7 +213,7 @@
 ;;;   2. Pole markers — red N (top), blue S (bottom)
 ;;;   3. B field arrows — cyan, showing the dipole pattern
 ;;;   4. Gaussian surface — white circle at (0, gy)
-;;;      Colour of ∮B·dl readout: white ≈ 0, red/blue ≠ 0 (monopole signal)
+;;;      Colour of ∮B·n̂dl readout: white ≈ 0, red/blue ≠ 0 (monopole signal)
 ;;;   5. Live values panel
 ;;;   6. Hint describing which poles are inside the surface
 
@@ -325,9 +325,9 @@
     ;; ── 5. Gaussian surface + flux readout ────────────────────────────────
     ;;
     ;; The flux colour codes the physical situation:
-    ;;   White:  ∮B·dl ≈ 0 — no monopole enclosed (physical reality)
-    ;;   Red:    ∮B·dl > 0 — north "monopole" enclosed (never seen in nature!)
-    ;;   Blue:   ∮B·dl < 0 — south "monopole" enclosed (never seen in nature!)
+    ;;   White:  ∮B·n̂dl ≈ 0 — no monopole enclosed (physical reality)
+    ;;   Red:    ∮B·n̂dl > 0 — north "monopole" enclosed (never seen in nature!)
+    ;;   Blue:   ∮B·n̂dl < 0 — south "monopole" enclosed (never seen in nature!)
     (when *show-gauss*
       ;; Circle colour
       (let* ((abs-flux (abs flux))
@@ -351,7 +351,7 @@
                         (caddr flux-col) (cadddr flux-col))
         (gfx-set-font!  painter "monospace" 10)
         (gfx-draw-text! painter (+ cx Gpx 6) (- Gcy 6)
-          (string-append "∮B·dl = " (fmt2 flux))))
+          (string-append "∮B·n̂dl = " (fmt2 flux))))
       (gfx-set-color! painter 0.60 0.60 0.80 0.60)
       (gfx-set-font!  painter "sans-serif" 9)
       (gfx-draw-text! painter (+ cx Gpx 3) (+ Gcy 5) "rg"))
@@ -384,7 +384,7 @@
             (gfx-set-color! painter 1.0 0.50 0.50 0.95)
             (gfx-set-color! painter 0.28 0.96 0.38 0.95))
         (gfx-draw-text! painter (+ px 8) (+ py (* 4 lh))
-          (string-append "∮B·dl         = " (fmt2 flux))))
+          (string-append "∮B·n̂dl         = " (fmt2 flux))))
       (gfx-set-color! painter 0.68 0.68 1.00 0.95)
       (gfx-draw-text! painter (+ px 8) (+ py (* 5 lh))
         (string-append "2π·m (ref)    = " (fmt2 (* 2.0 pi *m*))))
@@ -397,13 +397,13 @@
            (hint
             (cond
               ((and n-in s-in)
-               "Both poles enclosed — ∮B·dl = 0  (N and S always come together)")
+               "Both poles enclosed — ∮B·n̂dl = 0  (N and S always come together)")
               ((and n-in (not s-in))
-               "North 'pole' enclosed — ∮B·dl ≠ 0 — THIS is what a monopole looks like")
+               "North 'pole' enclosed — ∮B·n̂dl ≠ 0 — THIS is what a monopole looks like")
               ((and s-in (not n-in))
-               "South 'pole' enclosed — ∮B·dl ≠ 0 — Never observed in any real magnet")
+               "South 'pole' enclosed — ∮B·n̂dl ≠ 0 — Never observed in any real magnet")
               (else
-               "Neither pole enclosed — ∮B·dl ≈ 0  (field lines cancel through surface)"))))
+               "Neither pole enclosed — ∮B·n̂dl ≈ 0  (field lines cancel through surface)"))))
       (let ((c (if (and (or n-in s-in) (not (and n-in s-in)))
                    '(1.0 0.55 0.30 0.92)
                    '(1.0 0.90 0.40 0.88))))
@@ -456,7 +456,7 @@
   (make-slider "rg" 0.2 2.5 0.05 *r-gauss*
     (lambda (v) (set! *r-gauss* v) (canvas-redraw! *canvas*))))
 (box-add! *sb* (make-label "Move gy to enclose ONE pole"))
-(box-add! *sb* (make-label "and see ∮B·dl ≠ 0."))
+(box-add! *sb* (make-label "and see ∮B·n̂dl ≠ 0."))
 (box-add! *sb* (make-separator))
 
 (box-add! *sb* (make-label "── Display ──"))
@@ -489,16 +489,16 @@
 
 (box-add! *sb* (make-label "── Guided exercises ──"))
 (box-add! *sb* (make-label "1. Set gy=0, rg=1. Both poles"))
-(box-add! *sb* (make-label "   inside. ∮B·dl = ?"))
+(box-add! *sb* (make-label "   inside. ∮B·n̂dl = ?"))
 (box-add! *sb* (make-label ""))
 (box-add! *sb* (make-label "2. Set gy=d, rg=0.4. North only."))
-(box-add! *sb* (make-label "   ∮B·dl ≈ 2πm? (Check ref row.)"))
+(box-add! *sb* (make-label "   ∮B·n̂dl ≈ 2πm? (Check ref row.)"))
 (box-add! *sb* (make-label ""))
 (box-add! *sb* (make-label "3. Shrink d to 0.2. Does the"))
 (box-add! *sb* (make-label "   'monopole flux' change?"))
 (box-add! *sb* (make-label ""))
 (box-add! *sb* (make-label "4. Compare ∮E·dA from the"))
-(box-add! *sb* (make-label "   Gauss-E demo with ∮B·dl here."))
+(box-add! *sb* (make-label "   Gauss-E demo with ∮B·n̂dl here."))
 (box-add! *sb* (make-label "   What is different, and why?"))
 (box-add! *sb* (make-separator))
 

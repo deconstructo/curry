@@ -30,7 +30,7 @@ You've now seen all four. This is the last piece.
 - **Cyan arrows** — the magnetic field B, forming the characteristic dipole pattern:
   arcing from N to S in the exterior, returning through the "interior" of the magnet.
 - **White circle** — a Gaussian surface you can position with the gy slider.
-  The number next to it is ∮B·dl around the surface.
+  The number next to it is ∮B·n̂dl around the surface.
 
 ---
 
@@ -76,13 +76,13 @@ then ∮B·dA would be non-zero for a surface enclosing one. The law would be
 **Try this in the demo:**
 
 1. Default state: gy = 0, rg = 1.0. The surface encloses both the N and S pole.
-   ∮B·dl ≈ 0. The north and south contributions cancel.
+   ∮B·n̂dl ≈ 0. The north and south contributions cancel.
 
 2. Move gy slider to +0.7 (≈ d). Shrink rg to 0.4. Now only the north pole is inside.
-   ∮B·dl ≈ +2πm. **This is what a magnetic monopole would give.**
+   ∮B·n̂dl ≈ +2πm. **This is what a magnetic monopole would give.**
 
 3. Move gy to −0.7. Only the south pole inside.
-   ∮B·dl ≈ −2πm. The south monopole.
+   ∮B·n̂dl ≈ −2πm. The south monopole.
 
 The demo shows what monopoles *would* look like. The empirical fact is: **this has
 never been observed in any physical magnet, ever.**
@@ -162,7 +162,7 @@ the field lines close *through the magnet itself* — a path the simulation omit
 
 Set gy = 0, rg = 1.0 (default). Both poles are inside.
 
-What is ∮B·dl? Compare with the reference value 2πm shown in the live panel.
+What is ∮B·n̂dl? Compare with the reference value 2πm shown in the live panel.
 
 **Expected:** ≈ 0. The north contribution (+2πm) and south contribution (−2πm) cancel exactly.
 
@@ -170,7 +170,7 @@ What is ∮B·dl? Compare with the reference value 2πm shown in the live panel.
 
 Set gy = d (the pole separation), rg = 0.4.
 
-- What is ∮B·dl now?
+- What is ∮B·n̂dl now?
 - How does it compare to 2πm?
 
 **Expected:** ≈ +2πm. This is the "monopole signal." Adjust m and see the reference value track it.
@@ -180,7 +180,7 @@ Set gy = d (the pole separation), rg = 0.4.
 With north pole isolated (gy = d, rg = 0.4), reduce d toward zero.
 
 - The poles move closer together.
-- Does ∮B·dl change when d shrinks?
+- Does ∮B·n̂dl change when d shrinks?
 
 **Expected:** As long as rg still encloses only the north pole, the flux stays ≈ +2πm regardless of d. The pole strength m matters; the separation d does not (as long as the south pole is outside the surface).
 
@@ -191,7 +191,7 @@ With north pole isolated (gy = d, rg = 0.4), reduce d toward zero.
 Open the Gauss-E demo alongside this one. Place the Gauss-E surface outside the sphere (enclosing all charge Q) and the Gauss-B surface enclosing both poles.
 
 - Gauss-E: ∮E·dA ≠ 0.
-- Gauss-B: ∮B·dl ≈ 0.
+- Gauss-B: ∮B·n̂dl ≈ 0.
 
 This is the fundamental asymmetry between E and B. Electric charges exist as isolated objects (proton, electron). Magnetic poles do not.
 

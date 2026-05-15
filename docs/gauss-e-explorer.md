@@ -165,7 +165,7 @@ Drag r_gauss from 0.3 to 2.8. Note the ∮E·dA value.
 - At what r_gauss does the growth stop?
 - How does that radius relate to R?
 
-**Expected:** Saturation at r_gauss = R. Final value = Q_total/ε₀ = ρ × (4π/3) × R³.
+**Expected:** Saturation at r_gauss = R. Final value = Q_total/ε₀ = ρ × (4π/3) × R³ / ε₀.
 
 ### Exercise 2 — Sign flip
 
