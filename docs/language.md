@@ -1,6 +1,6 @@
 # Curry Scheme Language Reference
 
-*v0.7.5 — 2026-05-12*
+*v0.8.3 — 2026-05-16*
 
 Curry is an R7RS Scheme interpreter with a numeric tower that extends through the hypercomplex numbers, a built-in computer algebra system, an actor-model concurrency layer, and a modular C extension interface. Error messages are rendered in Standard Babylonian Akkadian, as scribal tradition demands.
 
@@ -16,7 +16,7 @@ Curry is an R7RS Scheme interpreter with a numeric tower that extends through th
 - [Symbolic CAS](#symbolic-cas)
 - [Strings and characters](#strings-and-characters)
 - [Lists and pairs](#lists-and-pairs)
-- [Vectors](#vectors)
+- [Vectors and bytevectors](#vectors)
 - [I/O](#input--output)
 - [Continuations](#tail-calls-and-continuations)
 - [Actor model](#actor-model)
@@ -105,19 +105,25 @@ R7RS requires that `(floor 1.5)` returns the exact integer `1`. Curry returns th
 
 Workaround: `(inexact->exact (floor x))` to obtain an exact integer.
 
-### 3. `string-set!` — not implemented
+### 3. `string-set!` — UTF-8 width constraint
 
-Mutable strings are not supported. `string-set!` is absent. Use `string-copy` plus `string-copy!` (which copies a range), or build a new string via `string-append` / `list->string`.
-
-### 4. `error-object-message` — named `error-message`
-
-R7RS specifies `error-object-message` and `error-object-irritants` as the accessors for error objects raised by `(error msg irritant ...)`. Curry uses `error-message` and `error-irritants` (without the `object-` infix).
+`string-set!` is implemented but only works when the replacement character has the same UTF-8 byte width as the character being replaced (both ASCII, both 2-byte, etc.). Replacing a character with one of a different byte width raises an error, because curry stores strings as flat UTF-8 byte arrays with no room to grow in place. Use `string-append` / `list->string` to build a new string in that case.
 
 ```scheme
-(guard (e (#t (error-message e)))           ; Curry
-  (error "something went wrong" 42))        ; => "something went wrong"
+(let ((s (string-copy "hello")))
+  (string-set! s 0 #\H)   ; OK — both ASCII (1 byte)
+  s)                       ; => "Hello"
 
-; R7RS portable form (error-object-message e) will raise "unbound variable"
+(string-set! s 0 #\λ)     ; ERROR — λ is 2 bytes, h is 1 byte
+```
+
+### 4. `error-object-message` — both names accepted
+
+Both `error-object-message` (R7RS) and `error-message` (legacy Curry name) are now available and equivalent.
+
+```scheme
+(guard (e (#t (error-object-message e)))    ; R7RS portable
+  (error "something went wrong" 42))        ; => "something went wrong"
 ```
 
 ### 5. `raise-continuable` — identical to `raise`
@@ -443,6 +449,67 @@ However, there are gaps at the upper end of the tower:
 (+ x (make-mv 3 0 0))              ; crashes — multivectors are opaque to CAS
 ```
 
+### Arithmetic procedures
+
+The numeric tower supports the full R7RS arithmetic library:
+
+```scheme
+; Predicates
+(number? v)   (complex? v)  (real? v)  (rational? v)  (integer? v)
+(exact? v)    (inexact? v)
+(exact-integer? v)           ; #t iff fixnum or bignum
+(zero? n)     (positive? n)  (negative? n)
+(odd? n)      (even? n)
+
+; Comparison (n-ary, any real type)
+(= a b ...)   (< a b ...)   (> a b ...)  (<= a b ...)  (>= a b ...)
+
+; Basic arithmetic
+(+ a b ...)  (- a b ...)  (* a b ...)  (/ a b ...)
+(square x)                   ; (* x x)
+(abs x)
+(max a b ...)  (min a b ...)
+(gcd a b ...)  (lcm a b ...)
+(numerator x)  (denominator x)
+(expt base exp)
+
+; Integer division
+(floor/ n d)                 ; → (values q r)  floor quotient and remainder
+(floor-quotient  n d)
+(floor-remainder n d)
+(truncate/ n d)              ; → (values q r)  truncate-toward-zero
+(truncate-quotient  n d)     ; same as quotient
+(truncate-remainder n d)     ; same as remainder
+(quotient  n d)              ; truncation division (C semantics)
+(remainder n d)
+(modulo    n d)              ; always same sign as d
+
+; Conversion
+(exact n)    (inexact n)
+(exact->inexact n)           ; alias
+(inexact->exact n)           ; alias
+
+; Rounding (inexact input → inexact result — see R7RS deviations)
+(floor n)    (ceiling n)  (truncate n)  (round n)
+
+; Flonum math
+(sqrt n)  (exp n)  (log n)  (log n base)
+(sin n)  (cos n)  (tan n)
+(asin n)  (acos n)  (atan n)  (atan y x)
+(sinh n)  (cosh n)  (tanh n)
+(asinh n)  (acosh n)  (atanh n)
+(floor->exact n)   (ceiling->exact n)  (truncate->exact n)  (round->exact n)
+
+; Integer square root
+(exact-integer-sqrt n)       ; → (values s r) such that n = s² + r, s ≥ 0, 0 ≤ r ≤ 2s
+
+; Bitwise (integers only)
+(arithmetic-shift n count)
+(bitwise-and a b ...)  (bitwise-or a b ...)  (bitwise-xor a b ...)
+(bitwise-not n)
+(bit-and a b ...)  (bit-or a b ...)  (bit-xor a b ...)  (bit-not n)   ; aliases
+```
+
 ---
 
 ## Symbolic CAS
@@ -467,19 +534,44 @@ See [symbolic.md](symbolic.md) for the full reference: differentiation, integrat
 ```scheme
 (string-length "hello")          ; 5
 (string-ref "hello" 1)           ; #\e
+(string-set! str k ch)           ; replace char in-place (same UTF-8 byte width only)
 (substring "hello" 1 3)          ; "el"
 (string-append "foo" "bar")      ; "foobar"
 (string->number "42")            ; 42
 (number->string 255 16)          ; "ff"
 (string-upcase "hello")          ; "HELLO"
+(string-downcase "HELLO")        ; "hello"
 (string-contains "foobar" "oba") ; 2  (or #f)
 (string->list "abc")             ; (#\a #\b #\c)
 (string-copy str)
+(string-copy str start end)      ; substring as fresh string
+(string-copy! to at from)        ; copy chars from `from` into `to` at position `at`
+(string-fill! str ch)
+(string-fill! str ch start end)
 (string->symbol "foo")
 (symbol->string 'foo)
+
+; Comparisons
+(string=? "a" "a")    (string<? "a" "b")    (string>? "b" "a")
+(string<=? "a" "b")   (string>=? "b" "a")
+; Case-insensitive
+(string-ci=? "Foo" "foo")   (string-ci<? ...)   (string-ci>? ...)
+(string-ci<=? ...)          (string-ci>=? ...)
 ```
 
-Characters follow Unicode; `char->integer` returns a Unicode codepoint. Note: `string-set!` is not implemented — see [R7RS deviations](#r7rs-deviations).
+Characters follow Unicode; `char->integer` returns a Unicode codepoint. `string-set!` works when the replacement character has the same UTF-8 byte width as the original — see [R7RS deviations](#r7rs-deviations) for the constraint.
+
+Character comparators now include the full R7RS set:
+
+```scheme
+(char=? ch1 ch2)   (char<? ch1 ch2)   (char>? ch1 ch2)
+(char<=? ch1 ch2)  (char>=? ch1 ch2)
+(char-ci=? ch1 ch2) ...              ; case-insensitive variants
+(char-alphabetic? ch)  (char-numeric? ch)  (char-whitespace? ch)
+(char-upper-case? ch)  (char-lower-case? ch)
+(char-upcase ch)       (char-downcase ch)  (char-foldcase ch)
+(digit-value ch)       ; => 0–9 for digit chars, #f otherwise
+```
 
 ---
 
@@ -514,48 +606,171 @@ Characters follow Unicode; `char->integer` returns a Unicode codepoint. Note: `s
 ```scheme
 (vector 1 2 3)
 (make-vector 5 0)          ; #(0 0 0 0 0)
+(vector? v)
 (vector-length v)
 (vector-ref v 2)
 (vector-set! v 2 99)
 (vector->list v)
+(vector->list v start end)
 (list->vector '(1 2 3))
+(vector->string v)         ; vector of chars → string
+(string->vector "abc")     ; string → vector of chars
 (vector-copy v start end)
+(vector-copy! to at from)
 (vector-fill! v val start end)
+(vector-append v1 v2 ...)  ; returns new vector
 (vector-map f v)
 (vector-for-each f v)
+```
+
+Bytevectors (`#u8(...)`) store raw bytes (0–255):
+
+```scheme
+(bytevector 1 2 3)
+(make-bytevector k 0)
+(bytevector? v)
+(bytevector-length bv)
+(bytevector-u8-ref bv k)
+(bytevector-u8-set! bv k byte)
+(bytevector-copy bv)
+(bytevector-copy bv start end)
+(bytevector-copy! to at from)
+(bytevector-copy! to at from start end)
+(bytevector-append bv1 bv2 ...)
+(utf8->string bv)          ; decode UTF-8 bytes to string
+(string->utf8 str)         ; encode string to UTF-8 bytevector
 ```
 
 ---
 
 ## Input / output
 
+### Ports
+
 ```scheme
-; Ports
-(open-input-file "path")
-(open-output-file "path")
-(call-with-port port proc)          ; closes port on any exit
-(with-input-from-file "path" thunk)
-(with-output-to-file "path" thunk)
+; Open / close
+(open-input-file "path")             ; raises file-error on failure
+(open-output-file "path")            ; raises file-error on failure
+(close-port port)
+(close-input-port port)
+(close-output-port port)
+(call-with-port port proc)           ; closes port on any exit (normal or error)
+(call-with-input-file "path" proc)   ; opens file, passes port to proc, closes on exit
+(call-with-output-file "path" proc)
+
+; Current-port parameters
 (current-input-port)
 (current-output-port)
 (current-error-port)
+
+; Parameterized current ports (dynamic scope)
+(with-input-from-file "path" thunk)  ; rebinds current-input-port for thunk's dynamic extent
+(with-output-to-file "path" thunk)
+
+; Port predicates
+(port? v)
+(input-port? v)
+(output-port? v)
 (input-port-open? port)
 (output-port-open? port)
 
+; String ports
+(open-input-string "text")
+(open-output-string)
+(get-output-string port)
+```
+
+### Character / text I/O
+
+```scheme
 ; Reading
-(read)
+(read)                               ; read one datum (from current-input-port or given port)
 (read-char)
+(read-char port)
 (peek-char)
+(peek-char port)
 (read-line)
+(read-line port)
+(read-string k)                      ; read up to k chars, return string (or eof)
+(read-string k port)
+(char-ready?)                        ; #t if a char is available without blocking
+(char-ready? port)
 (eof-object? v)
+(eof-object)                         ; the eof singleton
 
 ; Writing
-(write obj)              ; machine-readable (strings quoted)
-(display obj)            ; human-readable (strings unquoted)
+(write obj)                          ; machine-readable (strings quoted, #\x syntax for chars)
+(write obj port)
+(write-simple obj)                   ; like write but never uses datum labels for shared structure
+(write-simple obj port)
+(display obj)                        ; human-readable (strings unquoted, chars as characters)
+(display obj port)
 (newline)
+(newline port)
 (write-char ch)
+(write-char ch port)
 (write-string str)
+(write-string str port)
+(write-string str port start end)    ; write substring
 (flush-output-port)
+(flush-output-port port)
+```
+
+### Binary I/O
+
+```scheme
+; Reading bytes
+(read-u8)
+(read-u8 port)
+(peek-u8)
+(peek-u8 port)
+(u8-ready?)
+(u8-ready? port)
+(read-bytevector k)                  ; read up to k bytes into fresh bytevector
+(read-bytevector k port)
+(read-bytevector! bv)                ; read bytes into existing bytevector bv
+(read-bytevector! bv port)
+(read-bytevector! bv port start end) ; read into bv[start..end)
+
+; Writing bytes
+(write-u8 byte)
+(write-u8 byte port)
+(write-bytevector bv)
+(write-bytevector bv port)
+(write-bytevector bv port start end)
+```
+
+### File operations
+
+```scheme
+(file-exists? "path")        ; => #t or #f
+(delete-file "path")         ; raises file-error if deletion fails
+```
+
+### Process context and time
+
+```scheme
+; Environment variables
+(get-environment-variable "HOME")        ; => string or #f if unset
+(get-environment-variables)              ; => alist of ("name" . "value") pairs
+
+; Process exit
+(exit)                       ; exit with 0
+(exit code)                  ; exit with fixnum code
+(emergency-exit)             ; immediate exit, no finalizers/atexit (maps to _Exit)
+(emergency-exit code)
+
+; Error classification
+(error-object? v)            ; #t for any error raised by error/raise
+(error-object-message e)     ; => string  (also: error-message)
+(error-object-irritants e)   ; => list of irritant values
+(read-error? v)              ; #t if raised by the reader
+(file-error? v)              ; #t if raised by file I/O
+
+; Time
+(current-second)             ; => flonum, seconds since Unix epoch (POSIX time)
+(current-jiffy)              ; => fixnum, nanoseconds (CLOCK_MONOTONIC)
+(jiffies-per-second)         ; => 1000000000
 ```
 
 ---
