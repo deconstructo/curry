@@ -101,6 +101,8 @@ sedi "s|project(curry VERSION [^ ]* LANGUAGES|project(curry VERSION ${NEW_VER} L
   "$CMAKELISTS"
 sedi "s|set(CPACK_PACKAGE_VERSION[^)]*)|set(CPACK_PACKAGE_VERSION           \"${NEW_VER}\")|" \
   "$CMAKELISTS"
+sedi "s|set(CPACK_DEBIAN_PACKAGE_RELEASE[^)]*)|set(CPACK_DEBIAN_PACKAGE_RELEASE    \"1\")|" \
+  "$CMAKELISTS"
 sedi "s|# curry-scheme_[0-9][0-9._]*_|# curry-scheme_${NEW_VER}_|" \
   "$CMAKELISTS"
 ok "CMakeLists.txt updated"
