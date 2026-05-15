@@ -441,6 +441,30 @@ Key points:
 - No external C dependencies beyond the standard socket API.
 - Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/module-neo4j.md`.
 
+## R7RS compliance gaps
+
+The following standard procedures are **not yet implemented**. Everything else in `(scheme base)`, `(scheme char)`, `(scheme file)`, `(scheme inexact)`, `(scheme complex)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, and `(scheme write)` is present.
+
+### Needs new port infrastructure (`src/port.c`)
+
+- `open-input-bytevector`, `open-output-bytevector`, `get-output-bytevector` — bytevector ports (analogous to string ports which already exist; `port_get_output_bytevector` is declared in `port.h` but not implemented)
+
+### Needs cycle detection
+
+- `write-shared` — like `write` but labels shared/cyclic structure with `#0=`/`#0#` datum labels; requires a pointer→label hash table pass before printing
+
+### Needs `src/main.c` change
+
+- `command-line` — R7RS requires a list of **strings**; currently `command-line-args` stores **symbols** (interned via `sym_intern_cstr`). Fix: store with `scm_make_string` instead, then alias `command-line` to `command-line-args`.
+
+### Known limitation in implemented procedures
+
+- `string-set!` and `string-copy!` only work correctly when the replacement character has the same UTF-8 byte width as the original (1–4 bytes). Replacing an ASCII character with a multi-byte one (or vice versa) raises an error, because curry strings are stored as a flat UTF-8 byte array with no room to grow. Full fix requires either a UCS-4 (fixed-width) internal representation or an indirect `char *` pointer in `String`.
+
+### Deferred by design
+
+- Full first-class continuations (`call/cc` beyond upward escape) — requires a copying or CPS-transformed evaluator; the current tree-walker with `setjmp`/`longjmp` only supports escape continuations.
+
 ## Akkadian error messages
 
 All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) selected by keyword-matching the error string against `akkadian_table[]` in `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms registered in `src/akkadian_names.h` and translated transparently in `eval()` — Akkadian code is valid Curry Scheme.

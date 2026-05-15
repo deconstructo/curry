@@ -4,6 +4,7 @@
 #include "symbol.h"
 #include "numeric.h"
 #include "gc.h"
+#include "eval.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -15,7 +16,7 @@
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
 static void __attribute__((noreturn)) read_error(const char *msg) {
-    scm_raise(V_FALSE, "read-error: %s", msg);
+    scm_raise(S_READ_ERROR, "read-error: %s", msg);
 }
 
 /* ---- Low-level character helpers ---- */

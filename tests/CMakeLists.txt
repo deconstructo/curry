@@ -52,3 +52,9 @@ if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
     set_tests_properties(profiling PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
+
+if(BUILD_MODULE_RPI AND TARGET curry_rpi)
+    add_test(NAME rpi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_rpi.scm)
+    set_tests_properties(rpi PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()

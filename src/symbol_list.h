@@ -85,6 +85,8 @@ SYM(S_GC_PROFILER,        "**gc-profiler**")
 
 /* Common identifiers */
 SYM(S_ERROR,              "error")
+SYM(S_FILE_ERROR,         "file-error")
+SYM(S_READ_ERROR,         "read-error")
 SYM(S_APPLY,              "apply")
 SYM(S_MAP,                "map")
 SYM(S_FOR_EACH,           "for-each")

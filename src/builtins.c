@@ -18,6 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <errno.h>
+#include <time.h>
+#include <math.h>
+#include <gmp.h>
 #include <assert.h>
 #include <math.h>
 #include <ctype.h>
@@ -913,12 +918,410 @@ static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(voi
 static val_t prim_get_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_string(av[0]);}
 static val_t prim_open_input_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-file: not a string");
-    return port_open_file(as_str(av[0])->data, PORT_INPUT);
+    val_t p = port_open_file(as_str(av[0])->data, PORT_INPUT);
+    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-input-file: cannot open '%s'", as_str(av[0])->data);
+    return p;
 }
 static val_t prim_open_output_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "open-output-file: not a string");
-    return port_open_file(as_str(av[0])->data, PORT_OUTPUT);
+    val_t p = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
+    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-output-file: cannot create '%s'", as_str(av[0])->data);
+    return p;
 }
+/* ---- R7RS gap-fill ---- */
+
+/* Arithmetic */
+static val_t prim_square(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_mul(av[0], av[0]);}
+static val_t prim_exact_integer_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_fixnum(av[0]) || vis_bignum(av[0]));}
+
+static val_t prim_truncate_div(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t q = num_quotient(av[0], av[1]);
+    val_t r = num_remainder(av[0], av[1]);
+    Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+    mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
+    mv->vals[0] = q; mv->vals[1] = r;
+    return vptr(mv);
+}
+
+static val_t prim_exact_integer_sqrt(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t n = av[0];
+    if (vis_fixnum(n)) {
+        intptr_t k = vunfix(n);
+        if (k < 0) scm_raise(V_FALSE, "exact-integer-sqrt: negative argument");
+        intptr_t s = (intptr_t)sqrt((double)k);
+        while (s > 0 && s * s > k) s--;
+        while ((s+1)*(s+1) <= k) s++;
+        intptr_t r = k - s * s;
+        Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+        mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
+        mv->vals[0] = vfix(s); mv->vals[1] = vfix(r);
+        return vptr(mv);
+    }
+    if (vis_bignum(n)) {
+        if (mpz_sgn(as_big(n)->z) < 0)
+            scm_raise(V_FALSE, "exact-integer-sqrt: negative argument");
+        mpz_t s, r;
+        mpz_init(s); mpz_init(r);
+        mpz_sqrtrem(s, r, as_big(n)->z);
+        val_t vs = make_big_from_mpz(s);
+        val_t vr = make_big_from_mpz(r);
+        mpz_clear(s); mpz_clear(r);
+        Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+        mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
+        mv->vals[0] = vs; mv->vals[1] = vr;
+        return vptr(mv);
+    }
+    scm_raise(V_FALSE, "exact-integer-sqrt: requires non-negative exact integer");
+}
+
+/* Characters — missing comparators */
+static val_t prim_char_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])>vunchr(av[i])) return V_FALSE; return V_TRUE;}
+static val_t prim_char_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])<=vunchr(av[i])) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])<vunchr(av[i])) return V_FALSE; return V_TRUE;}
+
+/* Case-insensitive char comparisons (scheme char library) */
+static val_t prim_char_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))!=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))>=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))>tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))<=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))<tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+
+static val_t prim_digit_value(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    uint32_t c = vunchr(av[0]);
+    return (c >= '0' && c <= '9') ? vfix((intptr_t)(c - '0')) : V_FALSE;
+}
+
+/* Strings — missing comparators */
+static val_t prim_string_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)<0) return V_FALSE; return V_TRUE;}
+
+/* Case-insensitive string comparisons (scheme char library) */
+static int str_ci_cmp(const char *a, const char *b) {
+    while (*a && *b) {
+        int da = tolower((unsigned char)*a), db = tolower((unsigned char)*b);
+        if (da != db) return da - db;
+        a++; b++;
+    }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)!=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)>=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)<0) return V_FALSE; return V_TRUE;}
+
+static val_t prim_string_upcase(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-upcase: not a string");
+    String *s = as_str(av[0]);
+    val_t in = port_open_input_string(s->data, s->len), out = port_open_output_string();
+    int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, toupper(cp));
+    return port_get_output_string(out);
+}
+static val_t prim_string_downcase(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-downcase: not a string");
+    String *s = as_str(av[0]);
+    val_t in = port_open_input_string(s->data, s->len), out = port_open_output_string();
+    int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, tolower(cp));
+    return port_get_output_string(out);
+}
+
+/* (string-set! str k char) — in-place for same-width UTF-8; reallocates otherwise */
+static val_t prim_string_set_bang(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-set!: not a string");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-set!: index must be exact integer");
+    if (!vis_char(av[2]))   scm_raise(V_FALSE, "string-set!: not a character");
+    String *s = as_str(av[0]);
+    uint32_t bstart = utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1]));
+    uint32_t bend   = utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1]) + 1);
+    uint32_t old_blen = bend - bstart;
+    uint32_t u = vunchr(av[2]); char enc[4]; int elen;
+    if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
+    else if (u < 0x800)   { enc[0]=(char)(0xC0|(u>>6)); enc[1]=(char)(0x80|(u&0x3F)); elen=2; }
+    else if (u < 0x10000) { enc[0]=(char)(0xE0|(u>>12)); enc[1]=(char)(0x80|((u>>6)&0x3F)); enc[2]=(char)(0x80|(u&0x3F)); elen=3; }
+    else                  { enc[0]=(char)(0xF0|(u>>18)); enc[1]=(char)(0x80|((u>>12)&0x3F)); enc[2]=(char)(0x80|((u>>6)&0x3F)); enc[3]=(char)(0x80|(u&0x3F)); elen=4; }
+    if ((uint32_t)elen != old_blen)
+        scm_raise(V_FALSE, "string-set!: new character has different UTF-8 byte width than old (use string-append to build a new string)");
+    memcpy(s->data + bstart, enc, (size_t)elen);
+    return V_VOID;
+}
+
+/* (string-copy! to at from [start [end]]) */
+static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-copy!: to not a string");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-copy!: at not exact integer");
+    if (!vis_string(av[2])) scm_raise(V_FALSE, "string-copy!: from not a string");
+    String *to   = as_str(av[0]);
+    String *from = as_str(av[2]);
+    uint32_t at_b = utf8_char_offset(to->data,   to->len,   (uint32_t)vunfix(av[1]));
+    uint32_t sb   = ac > 3 ? utf8_char_offset(from->data, from->len, (uint32_t)vunfix(av[3])) : 0;
+    uint32_t eb   = ac > 4 ? utf8_char_offset(from->data, from->len, (uint32_t)vunfix(av[4])) : from->len;
+    uint32_t n    = eb - sb;
+    if (at_b + n > to->len)
+        scm_raise(V_FALSE, "string-copy!: would exceed destination length");
+    memmove(to->data + at_b, from->data + sb, n);
+    to->hash = 0;
+    return V_VOID;
+}
+
+/* Bytevectors — missing constructors/operations */
+static val_t prim_bytevector(int ac, val_t *av, void *ud) {
+    (void)ud;
+    Bytevector *b = CURRY_NEW_FLEX_ATOM(Bytevector, (uint32_t)ac);
+    b->hdr.type = T_BYTEVECTOR; b->hdr.flags = 0; b->len = (uint32_t)ac;
+    for (int i = 0; i < ac; i++) {
+        if (!vis_fixnum(av[i])) scm_raise(V_FALSE, "bytevector: not an exact integer");
+        b->data[i] = (uint8_t)vunfix(av[i]);
+    }
+    return vptr(b);
+}
+static val_t prim_bytes_copy(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-copy: not a bytevector");
+    Bytevector *b = as_bytes(av[0]);
+    uint32_t s = ac > 1 ? (uint32_t)vunfix(av[1]) : 0;
+    uint32_t e = ac > 2 ? (uint32_t)vunfix(av[2]) : b->len;
+    uint32_t n = e - s;
+    Bytevector *r = CURRY_NEW_FLEX_ATOM(Bytevector, n);
+    r->hdr.type = T_BYTEVECTOR; r->hdr.flags = 0; r->len = n;
+    memcpy(r->data, b->data + s, n);
+    return vptr(r);
+}
+static val_t prim_bytes_copy_bang(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-copy!: to not a bytevector");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-copy!: at not exact integer");
+    if (!vis_bytes(av[2])) scm_raise(V_FALSE, "bytevector-copy!: from not a bytevector");
+    Bytevector *to   = as_bytes(av[0]);
+    uint32_t    at   = (uint32_t)vunfix(av[1]);
+    Bytevector *from = as_bytes(av[2]);
+    uint32_t    s    = ac > 3 ? (uint32_t)vunfix(av[3]) : 0;
+    uint32_t    e    = ac > 4 ? (uint32_t)vunfix(av[4]) : from->len;
+    uint32_t    n    = e - s;
+    if (at + n > to->len) scm_raise(V_FALSE, "bytevector-copy!: would exceed destination");
+    memmove(to->data + at, from->data + s, n);
+    return V_VOID;
+}
+static val_t prim_bytes_append(int ac, val_t *av, void *ud) {
+    (void)ud;
+    uint32_t total = 0;
+    for (int i = 0; i < ac; i++) {
+        if (!vis_bytes(av[i])) scm_raise(V_FALSE, "bytevector-append: not a bytevector");
+        total += as_bytes(av[i])->len;
+    }
+    Bytevector *r = CURRY_NEW_FLEX_ATOM(Bytevector, total);
+    r->hdr.type = T_BYTEVECTOR; r->hdr.flags = 0; r->len = total;
+    uint32_t pos = 0;
+    for (int i = 0; i < ac; i++) {
+        Bytevector *b = as_bytes(av[i]);
+        memcpy(r->data + pos, b->data, b->len);
+        pos += b->len;
+    }
+    return vptr(r);
+}
+
+/* Vectors */
+static val_t prim_vector_append(int ac, val_t *av, void *ud) {
+    (void)ud;
+    uint32_t total = 0;
+    for (int i = 0; i < ac; i++) {
+        if (!vis_vector(av[i])) scm_raise(V_FALSE, "vector-append: not a vector");
+        total += as_vec(av[i])->len;
+    }
+    Vector *r = CURRY_NEW_FLEX(Vector, total);
+    r->hdr.type = T_VECTOR; r->hdr.flags = 0; r->len = total;
+    uint32_t pos = 0;
+    for (int i = 0; i < ac; i++) {
+        Vector *v = as_vec(av[i]);
+        memcpy(r->data + pos, v->data, v->len * sizeof(val_t));
+        pos += v->len;
+    }
+    return vptr(r);
+}
+
+/* Error predicates */
+static val_t prim_read_error_p(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return vbool(vis_error(av[0]) && as_err(av[0])->kind == S_READ_ERROR);}
+static val_t prim_file_error_p(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return vbool(vis_error(av[0]) && as_err(av[0])->kind == S_FILE_ERROR);}
+
+/* I/O — binary byte operations */
+static val_t prim_flush_output_port(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t port = ac > 0 ? av[0] : PORT_STDOUT;
+    if (!vis_port(port)) scm_raise(V_FALSE, "flush-output-port: not a port");
+    FILE *fp = as_port(port)->u.fp;
+    if (fp) fflush(fp);
+    return V_VOID;
+}
+static val_t prim_char_ready_p(int ac, val_t *av, void *ud) {(void)ud; return vbool(port_char_ready(ac>0?av[0]:PORT_STDIN));}
+static val_t prim_u8_ready_p(int ac, val_t *av, void *ud)   {(void)ud; return vbool(port_char_ready(ac>0?av[0]:PORT_STDIN));}
+static val_t prim_read_u8(int ac, val_t *av, void *ud)  {(void)ud; int b=port_read_byte(ac>0?av[0]:PORT_STDIN); return b<0?V_EOF:vfix((intptr_t)b);}
+static val_t prim_peek_u8(int ac, val_t *av, void *ud)  {(void)ud; int b=port_peek_byte(ac>0?av[0]:PORT_STDIN); return b<0?V_EOF:vfix((intptr_t)b);}
+static val_t prim_write_u8(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "write-u8: not an exact integer");
+    port_write_byte(ac>1?av[1]:PORT_STDOUT, (uint8_t)vunfix(av[0]));
+    return V_VOID;
+}
+static val_t prim_read_string(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "read-string: k must be exact integer");
+    int k = (int)vunfix(av[0]);
+    val_t port = ac > 1 ? av[1] : PORT_STDIN;
+    val_t out = port_open_output_string();
+    int count = 0, cp;
+    while (count < k && (cp = port_read_char(port)) >= 0) { port_write_char(out, cp); count++; }
+    return count == 0 ? V_EOF : port_get_output_string(out);
+}
+static val_t prim_read_bytevector(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "read-bytevector: k must be exact integer");
+    int k = (int)vunfix(av[0]);
+    val_t port = ac > 1 ? av[1] : PORT_STDIN;
+    Bytevector *bv = CURRY_NEW_FLEX_ATOM(Bytevector, (uint32_t)k);
+    bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = 0;
+    int b;
+    while (bv->len < (uint32_t)k && (b = port_read_byte(port)) >= 0) bv->data[bv->len++] = (uint8_t)b;
+    return bv->len == 0 ? V_EOF : vptr(bv);
+}
+static val_t prim_read_bytevector_bang(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "read-bytevector!: not a bytevector");
+    Bytevector *bv = as_bytes(av[0]);
+    val_t port = ac > 1 ? av[1] : PORT_STDIN;
+    uint32_t s = ac > 2 ? (uint32_t)vunfix(av[2]) : 0;
+    uint32_t e = ac > 3 ? (uint32_t)vunfix(av[3]) : bv->len;
+    int count = 0, b;
+    for (uint32_t i = s; i < e && (b = port_read_byte(port)) >= 0; i++) { bv->data[i] = (uint8_t)b; count++; }
+    return count == 0 ? V_EOF : vfix((intptr_t)count);
+}
+static val_t prim_write_bytevector(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "write-bytevector: not a bytevector");
+    Bytevector *bv = as_bytes(av[0]);
+    val_t port = ac > 1 ? av[1] : PORT_STDOUT;
+    uint32_t s = ac > 2 ? (uint32_t)vunfix(av[2]) : 0;
+    uint32_t e = ac > 3 ? (uint32_t)vunfix(av[3]) : bv->len;
+    for (uint32_t i = s; i < e; i++) port_write_byte(port, bv->data[i]);
+    return V_VOID;
+}
+static val_t prim_write_simple(int ac, val_t *av, void *ud) {(void)ud; scm_write(av[0], ac>1?av[1]:PORT_STDOUT); return V_VOID;}
+
+/* File operations */
+static val_t prim_delete_file(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "delete-file: not a string");
+    if (unlink(as_str(av[0])->data) != 0)
+        scm_raise(S_FILE_ERROR, "delete-file: %s: %s", as_str(av[0])->data, strerror(errno));
+    return V_VOID;
+}
+static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-input-file: not a string");
+    val_t port = port_open_file(as_str(av[0])->data, PORT_INPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-input-file: cannot open '%s'", as_str(av[0])->data);
+    val_t result = apply(av[1], scm_cons(port, V_NIL));
+    port_close(port);
+    return result;
+}
+static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-output-file: not a string");
+    val_t port = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-output-file: cannot open '%s'", as_str(av[0])->data);
+    val_t result = apply(av[1], scm_cons(port, V_NIL));
+    port_close(port);
+    return result;
+}
+static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "with-input-from-file: not a string");
+    val_t port = port_open_file(as_str(av[0])->data, PORT_INPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-input-from-file: cannot open '%s'", as_str(av[0])->data);
+    val_t saved = PORT_STDIN; PORT_STDIN = port;
+    ExnHandler h; h.prev = current_handler; current_handler = &h;
+    val_t result = V_VOID;
+    if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
+    else { current_handler = h.prev; PORT_STDIN = saved; port_close(port); scm_raise_val(h.exn); }
+    PORT_STDIN = saved; port_close(port);
+    return result;
+}
+static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "with-output-to-file: not a string");
+    val_t port = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-output-to-file: cannot open '%s'", as_str(av[0])->data);
+    val_t saved = PORT_STDOUT; PORT_STDOUT = port;
+    ExnHandler h; h.prev = current_handler; current_handler = &h;
+    val_t result = V_VOID;
+    if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
+    else { current_handler = h.prev; PORT_STDOUT = saved; port_close(port); scm_raise_val(h.exn); }
+    PORT_STDOUT = saved; port_close(port);
+    return result;
+}
+
+/* Process context */
+static val_t prim_get_env_var(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "get-environment-variable: not a string");
+    const char *val = getenv(as_str(av[0])->data);
+    if (!val) return V_FALSE;
+    uint32_t len = (uint32_t)strlen(val);
+    String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    s->hdr.type = T_STRING; s->hdr.flags = 0; s->len = len; s->hash = 0;
+    memcpy(s->data, val, len + 1);
+    return vptr(s);
+}
+static val_t prim_get_env_vars(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    extern char **environ;
+    val_t result = V_NIL;
+    for (char **e = environ; *e; e++) {
+        char *eq = strchr(*e, '=');
+        if (!eq) continue;
+        uint32_t nlen = (uint32_t)(eq - *e);
+        uint32_t vlen = (uint32_t)strlen(eq + 1);
+        String *name  = (String *)gc_alloc_atomic(sizeof(String) + nlen + 1);
+        name->hdr.type=T_STRING; name->hdr.flags=0; name->len=nlen; name->hash=0;
+        memcpy(name->data, *e, nlen); name->data[nlen] = '\0';
+        String *value = (String *)gc_alloc_atomic(sizeof(String) + vlen + 1);
+        value->hdr.type=T_STRING; value->hdr.flags=0; value->len=vlen; value->hash=0;
+        memcpy(value->data, eq + 1, vlen + 1);
+        result = scm_cons(scm_cons(vptr(name), vptr(value)), result);
+    }
+    return scm_reverse(result);
+}
+static val_t prim_emergency_exit(int ac, val_t *av, void *ud) {
+    (void)ud;
+    int code = (ac > 0 && vis_fixnum(av[0])) ? (int)vunfix(av[0]) : (ac > 0 && av[0] == V_FALSE) ? 1 : 0;
+    _Exit(code);
+}
+
+/* Time */
+static val_t prim_current_second(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+    return num_make_float((double)ts.tv_sec + (double)ts.tv_nsec * 1e-9);
+}
+static val_t prim_current_jiffy(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return vfix((intptr_t)ts.tv_sec * 1000000000LL + (intptr_t)ts.tv_nsec);
+}
+static val_t prim_jiffies_per_second(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud; return vfix(1000000000LL);
+}
+static val_t prim_file_exists_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "file-exists?: not a string");
+    return vbool(access(as_str(av[0])->data, F_OK) == 0);
+}
+
 static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
 static val_t prim_input_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0]));}
 static val_t prim_input_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
@@ -1853,6 +2256,10 @@ void builtins_register(val_t env) {
     DEF("max",prim_max,1,-1); DEF("min",prim_min,1,-1); DEF("abs",prim_abs,1,1);
     DEF("gcd",prim_gcd,0,-1); DEF("lcm",prim_lcm,0,-1);
     DEF("quotient",prim_quotient,2,2); DEF("remainder",prim_remainder,2,2);
+    DEF("truncate-quotient",prim_quotient,2,2); DEF("truncate-remainder",prim_remainder,2,2);
+    DEF("truncate/",prim_truncate_div,2,2);
+    DEF("square",prim_square,1,1); DEF("exact-integer?",prim_exact_integer_p,1,1);
+    DEF("exact-integer-sqrt",prim_exact_integer_sqrt,1,1);
     DEF("modulo",prim_modulo,2,2);
     DEF("floor",prim_floor,1,1); DEF("ceiling",prim_ceiling,1,1);
     DEF("truncate",prim_truncate,1,1); DEF("round",prim_round,1,1);
@@ -1891,6 +2298,10 @@ void builtins_register(val_t env) {
     DEF("char-whitespace?",prim_char_whitespace_p,1,1);
     DEF("char-upper-case?",prim_char_upper_p,1,1); DEF("char-lower-case?",prim_char_lower_p,1,1);
     DEF("char=?",prim_char_eq,2,-1); DEF("char<?",prim_char_lt,2,-1);
+    DEF("char<=?",prim_char_le,2,-1); DEF("char>?",prim_char_gt,2,-1); DEF("char>=?",prim_char_ge,2,-1);
+    DEF("char-ci=?",prim_char_ci_eq,2,-1); DEF("char-ci<?",prim_char_ci_lt,2,-1);
+    DEF("char-ci<=?",prim_char_ci_le,2,-1); DEF("char-ci>?",prim_char_ci_gt,2,-1); DEF("char-ci>=?",prim_char_ci_ge,2,-1);
+    DEF("digit-value",prim_digit_value,1,1);
 
     /* Strings */
     DEF("make-string",prim_make_string,1,2); DEF("string",prim_string,0,-1);
@@ -1899,6 +2310,11 @@ void builtins_register(val_t env) {
     DEF("string->list",prim_string_to_list,1,3); DEF("list->string",prim_list_to_string,1,1);
     DEF("string->symbol",prim_string_to_symbol,1,1); DEF("symbol->string",prim_symbol_to_string,1,1);
     DEF("string=?",prim_string_eq,2,-1); DEF("string<?",prim_string_lt,2,-1);
+    DEF("string<=?",prim_string_le,2,-1); DEF("string>?",prim_string_gt,2,-1); DEF("string>=?",prim_string_ge,2,-1);
+    DEF("string-ci=?",prim_string_ci_eq,2,-1); DEF("string-ci<?",prim_string_ci_lt,2,-1);
+    DEF("string-ci<=?",prim_string_ci_le,2,-1); DEF("string-ci>?",prim_string_ci_gt,2,-1); DEF("string-ci>=?",prim_string_ci_ge,2,-1);
+    DEF("string-upcase",prim_string_upcase,1,1); DEF("string-downcase",prim_string_downcase,1,1);
+    DEF("string-set!",prim_string_set_bang,3,3); DEF("string-copy!",prim_string_copy_bang,3,5);
     DEF("substring",prim_substring,2,3); DEF("string-contains",prim_string_contains,2,2);
     DEF("string-for-each",prim_string_for_each,2,-1);
     DEF("string-fill!",prim_string_fill_bang,2,4);
@@ -1908,6 +2324,7 @@ void builtins_register(val_t env) {
     DEF("utf8->string",prim_utf8_to_string,1,3);
 
     /* Vectors */
+    DEF("vector-append",prim_vector_append,0,-1);
     DEF("make-vector",prim_make_vector,1,2); DEF("vector",prim_vector,0,-1);
     DEF("vector-length",prim_vector_length,1,1); DEF("vector-ref",prim_vector_ref,2,2);
     DEF("vector-set!",prim_vector_set,3,3); DEF("vector->list",prim_vector_to_list,1,3);
@@ -1921,17 +2338,33 @@ void builtins_register(val_t env) {
     /* Bytevectors */
     DEF("make-bytevector",prim_make_bytes,1,2); DEF("bytevector-length",prim_bytes_length,1,1);
     DEF("bytevector-u8-ref",prim_bytes_u8_ref,2,2); DEF("bytevector-u8-set!",prim_bytes_u8_set,3,3);
+    DEF("bytevector",prim_bytevector,0,-1);
+    DEF("bytevector-copy",prim_bytes_copy,1,3); DEF("bytevector-copy!",prim_bytes_copy_bang,3,5);
+    DEF("bytevector-append",prim_bytes_append,0,-1);
 
     /* I/O */
     DEF("display",prim_display,1,2); DEF("write",prim_write,1,2);
     DEF("newline",prim_newline,0,1); DEF("write-char",prim_write_char,1,2);
     DEF("read",prim_read,0,1); DEF("read-char",prim_read_char,0,1);
     DEF("peek-char",prim_peek_char,0,1); DEF("read-line",prim_read_line,0,1);
+    DEF("read-string",prim_read_string,1,2);
+    DEF("read-u8",prim_read_u8,0,1); DEF("peek-u8",prim_peek_u8,0,1);
+    DEF("read-bytevector",prim_read_bytevector,1,2); DEF("read-bytevector!",prim_read_bytevector_bang,1,4);
+    DEF("write-u8",prim_write_u8,1,2); DEF("write-bytevector",prim_write_bytevector,1,4);
+    DEF("write-simple",prim_write_simple,1,2);
+    DEF("char-ready?",prim_char_ready_p,0,1); DEF("u8-ready?",prim_u8_ready_p,0,1);
+    DEF("flush-output-port",prim_flush_output_port,0,1);
     DEF("open-input-string",prim_open_input_string,1,1);
     DEF("open-output-string",prim_open_output_string,0,0);
     DEF("get-output-string",prim_get_output_string,1,1);
     DEF("open-input-file",prim_open_input_file,1,1);
     DEF("open-output-file",prim_open_output_file,1,1);
+    DEF("file-exists?",prim_file_exists_p,1,1);
+    DEF("delete-file",prim_delete_file,1,1);
+    DEF("call-with-input-file",prim_call_with_input_file,2,2);
+    DEF("call-with-output-file",prim_call_with_output_file,2,2);
+    DEF("with-input-from-file",prim_with_input_from_file,2,2);
+    DEF("with-output-to-file",prim_with_output_to_file,2,2);
     DEF("close-port",prim_close_port,1,1); DEF("close-input-port",prim_close_port,1,1);
     DEF("close-output-port",prim_close_port,1,1);
     DEF("input-port?",prim_input_port_p,1,1); DEF("output-port?",prim_output_port_p,1,1);
@@ -1950,8 +2383,10 @@ void builtins_register(val_t env) {
     DEF("error",prim_error,1,-1); DEF("raise",prim_raise,1,1);
     DEF("raise-continuable",prim_raise_continuable,1,1);
     DEF("error-message",prim_error_message,1,1);
+    DEF("error-object-message",prim_error_message,1,1);
     DEF("error-object?",prim_error_object_p,1,1);
     DEF("error-object-irritants",prim_error_irritants,1,1);
+    DEF("read-error?",prim_read_error_p,1,1); DEF("file-error?",prim_file_error_p,1,1);
     DEF("error-object->string",prim_error_to_string,1,1);
     DEF("with-exception-handler",prim_with_exception_handler,2,2);
     DEF("dynamic-wind",           prim_dynamic_wind,           3,3);
@@ -1994,7 +2429,13 @@ void builtins_register(val_t env) {
     DEF("load",       prim_load,    1,1);
     DEF("exit",       prim_exit,    0,1);
     DEF("quit",       prim_exit,    0,1);
+    DEF("emergency-exit",prim_emergency_exit,0,1);
     DEF("system",     prim_system,  1,1);
+    DEF("get-environment-variable", prim_get_env_var,  1,1);
+    DEF("get-environment-variables",prim_get_env_vars, 0,0);
+    DEF("current-second",      prim_current_second,      0,0);
+    DEF("current-jiffy",       prim_current_jiffy,       0,0);
+    DEF("jiffies-per-second",  prim_jiffies_per_second,  0,0);
     DEF("gc",                prim_gc,               0,0);
     DEF("profiling-report",  prim_profiling_report, 0,0);
     DEF("profiling-reset",   prim_profiling_reset,  0,0);

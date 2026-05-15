@@ -72,7 +72,7 @@ void scm_raise(val_t kind, const char *fmt, ...) {
     memcpy(s->data, full, len+1);
     e->message   = vptr(s);
     e->irritants = V_NIL;
-    e->kind      = S_ERROR;
+    e->kind      = vis_symbol(kind) ? kind : S_ERROR;
     scm_raise_val(vptr(e));
 }
 

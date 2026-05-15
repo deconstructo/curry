@@ -42,7 +42,8 @@ extern val_t
     /* actor primitives */
     S_SPAWN, S_SEND, S_RECEIVE, S_SELF, S_LINK, S_MONITOR,
     /* common identifiers */
-    S_ERROR, S_APPLY, S_MAP, S_FOR_EACH,
+    S_ERROR, S_FILE_ERROR, S_READ_ERROR,
+    S_APPLY, S_MAP, S_FOR_EACH,
     /* symbolic / CAS */
     S_SYMBOLIC,
     /* runtime profiling */
