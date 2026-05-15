@@ -121,7 +121,32 @@ Example:
 
 ## Changelog
 
-### 0.7.7 — Runtime profiler
+### 0.7.7 — R7RS compliance, fold fixes, extended Akkadian vocabulary, runtime profiler
+
+**R7RS base-library completeness** — all missing procedures and special forms added:
+
+- `let-values` / `let*-values` — destructuring bind over multiple return values
+- `case =>` clause — apply a procedure to the matched key value
+- `make-list k [fill]`
+- `string-copy`, `string->list`, `vector->list` — optional `start`/`end` indices
+- `string-for-each proc string [string ...]`
+- `string-fill! string char [start [end]]`
+- `string-foldcase` / `char-foldcase`
+- `write-string string [port [start [end]]]`
+- `string->utf8` / `utf8->string` with optional `start`/`end`
+- `vector-copy! to at from [start [end]]`
+- `vector-map proc vec [vec ...]`
+- `vector-for-each proc vec [vec ...]`
+
+All 12 test suites continue to pass (100%).
+
+**`fold-left` / `fold-right` correctness fix**:
+- `fold-left` argument order corrected from SRFI-1 `(proc element acc)` to R6RS `(proc acc element)`. The two conventions agree for commutative operations like `+` but differ for `cons`, `string-append`, and any order-sensitive reduction. `(fold-left string-append "0" '("1" "2" "3"))` now yields `"0123"` (was `"3210"`)
+- `fold-right` added: `fold-right` was present in the Akkadian name table (`lapātum-imittam` / 𒇲𒌋) but was never registered as a builtin — calling it silently did nothing. Now registered and working: `(fold-right cons '() '(1 2 3))` → `(1 2 3)`
+
+**Akkadian / cuneiform vocabulary extended**:
+- Full numeric tower operations — quaternion, octonion, multivector, surreal, and CAS procedures all have Standard Babylonian Akkadian synonyms and cuneiform aliases
+- Language reference and Akkadian reference updated to cover the complete vocabulary
 
 **Profiling module** (`(curry profiling)`):
 - `(profiler-start [level])` — enable profiling at level 1 (call counts), 2 (+ wall-clock timing via `apply()`), or 3 (+ primitive call counts). Updates the `**eval-profiler**` Scheme binding
@@ -132,6 +157,11 @@ Example:
 - TCO tail-calls are counted at all levels but not timed (no exit point on the `goto tail` path); apply-path calls are timed at level ≥ 2
 - Instrumentation is always compiled into the core binary; when profiling is off, the hot-path check is a single integer compare with branch predictor predicting not-taken — effectively zero overhead
 - `examples/profiling_mcp.scm` — MCP server wrapping the profiler as Claude Code tools
+
+**Examples**:
+- `examples/quantum_scenarios.scm` — three practical applications of the quantum superposition type: epistemic uncertainty modelled as a quantum value, arithmetic lifted over branches without collapsing, `(observe)` / `(quantum-states)` used for decision-making and distribution analysis
+
+---
 
 ### 0.7.6 — Qt6 interactivity, Mandelbrot fixes, Neo4j documentation
 
