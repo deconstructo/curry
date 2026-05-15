@@ -148,7 +148,7 @@ Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, ex
 
 Returns the antiderivative (no constant of integration). Definite form: `(∫ expr var a b)` computes `F(b) − F(a)`. Works with all numeric tower types for bounds: fixnum, bignum, rational, flonum, complex.
 
-Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt, sinh, cosh, tanh, cot, sec, csc, sec², csc², asin/acos/atan/asinh/acosh/atanh (IBP, linear arg). Unknown forms leave an unevaluated `(∫ expr var)` node.
+Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt, sinh, cosh, tanh, cot, sec, csc, sec², csc², asin/acos/atan/asinh/acosh/atanh (IBP, linear arg), sin²/cos² (half-angle identity → ∫sin²(f)dx = x/2 − sin(2f)/(4f′)), log×polynomial (IBP, LIATE order, closed form for x^n·ln(x)), 1/(ax²+bx+c) with positive discriminant (completing the square → atan form). Unknown forms leave an unevaluated `(∫ expr var)` node.
 
 **Complex operators** — symbolic-aware; return expression trees on sym-vars:
 
@@ -171,6 +171,16 @@ For a real variable `x`: `∂conj(f)/∂x = conj(∂f/∂x)`, `∫conj(f) dx = c
 
 Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z + conj(∂f/∂z̄))`, `∂Im(f)/∂z = (∂f/∂z − conj(∂f/∂z̄))/(2i)`. Arithmetic and holomorphic transcendentals follow the standard chain rule. A function is holomorphic iff `(wirtinger-dbar f z)` simplifies to 0.
 
+**Limits** — `(limit expr var point)` or `(limit expr var point dir)`:
+
+Evaluates `lim_{var→point} expr`. `dir` is `'left` (−1) or `'right` (+1) for one-sided limits; omit for two-sided. Algorithm: direct substitution first; if 0/0 or ∞/∞ form, applies L'Hôpital's rule (up to 5 iterations). Distributes over sums, products, and negation. Leaves unevaluated `(limit expr var point)` nodes for unresolved forms.
+
+```scheme
+(limit (/ (sin x) x) x 0)             ; => 1
+(limit (/ (- (exp x) 1) x) x 0)       ; => 1
+(limit (/ x (expt x 2)) x 0 'right)   ; => +inf (or unevaluated)
+```
+
 **Polynomial / structural operations**:
 
 ```scheme
@@ -182,9 +192,24 @@ Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z 
 
 `expand` fully distributes multiplications over sums and expands `(expt base n)` for integer n ∈ [2,16] by repeated distribution. `collect` calls `expand` internally and then groups terms into `(coeff * var^k)` buckets, combining coefficients of equal degree. Non-monomial sub-expressions (e.g. transcendentals of var) are left uncollected at the end of the sum.
 
+**Vector calculus (Cartesian)** — operate on lists of symbolic expressions representing fields:
+
+```scheme
+(grad f vars)              ; gradient: list of ∂f/∂vᵢ for each var in vars
+(gradient f vars)          ; alias for grad
+(divergence F vars)        ; divergence: Σ ∂Fᵢ/∂vᵢ
+(curl F vars)              ; curl (3-vector): (∂F₃/∂v₂−∂F₂/∂v₃, ...)
+(laplacian f vars)         ; scalar Laplacian: Σ ∂²f/∂vᵢ²
+(vec-laplacian F vars)     ; vector Laplacian: component-wise Laplacian
+(dot-product A B)          ; Σ Aᵢ·Bᵢ (symbolic)
+(cross-product A B)        ; 3D cross product (list of 3 symbolic expressions)
+```
+
+All operators work on lists of sym-vars or symbolic expressions. Results are simplified with `sx_simplify`. Useful for verifying PDE identities: `div(curl F) = 0`, `curl(grad f) = (0 0 0)`, Maxwell's equations, etc.
+
 **Auto-differentiation** via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient = f′(x). Works for algebraic lambdas; C-level primitives (sin, cos, exp) do not propagate surreals.
 
-Operator symbols (`SX_ADD`, `SX_MUL`, `SX_CONJ`, `SX_REAL`, `SX_IMAG`, `SX_INTEGRATE`, etc.) are interned at `symbolic_init()` time. `equal?` correctly compares symbolic expressions structurally and complex numbers by value.
+Operator symbols (`SX_ADD`, `SX_MUL`, `SX_CONJ`, `SX_REAL`, `SX_IMAG`, `SX_INTEGRATE`, `SX_LIMIT`, etc.) are interned at `symbolic_init()` time. `equal?` correctly compares symbolic expressions structurally and complex numbers by value.
 
 ### Surreal numbers (`src/surreal.h`, `src/surreal.c`)
 

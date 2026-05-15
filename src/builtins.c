@@ -1347,6 +1347,134 @@ static val_t prim_sym_var_name(int ac, val_t *av, void *ud) {
 }
 static val_t prim_expand(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_expand(av[0]); }
+static val_t prim_sx_limit(int ac, val_t *av, void *ud) {
+    (void)ud;
+    int dir = 0;
+    if (ac == 4) {
+        /* 4th arg: 'left → -1, 'right → +1, else 0 */
+        val_t d = av[3];
+        if (vis_symbol(d)) {
+            const char *s = sym_cstr(d);
+            if (strcmp(s, "left")  == 0) dir = -1;
+            else if (strcmp(s, "right") == 0) dir =  1;
+        }
+    }
+    return sx_limit(av[0], av[1], av[2], dir);
+}
+/* ---- Vector calculus (symbolic, Cartesian) ---- */
+
+/* grad(f, vars) — gradient of scalar f; vars is a list of sym-vars.
+ * Returns a list (∂f/∂x₁  ∂f/∂x₂  ...) in the same order as vars. */
+static val_t prim_grad(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t f = av[0], vars = av[1];
+    val_t result = V_NIL, *tail_ptr = &result;
+    while (vis_pair(vars)) {
+        val_t v = vcar(vars);
+        if (!vis_symvar(v)) scm_raise(V_FALSE, "grad: vars must be a list of symbolic variables");
+        Pair *cell = CURRY_NEW(Pair);
+        cell->hdr.type = T_PAIR; cell->hdr.flags = 0;
+        cell->car = sx_simplify(sx_diff(f, v));
+        cell->cdr = V_NIL;
+        *tail_ptr = vptr(cell); tail_ptr = &cell->cdr;
+        vars = vcdr(vars);
+    }
+    return result;
+}
+
+/* divergence(F, vars) — ∑ ∂Fᵢ/∂xᵢ; F and vars are same-length lists. */
+static val_t prim_divergence(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t F = av[0], vars = av[1];
+    val_t acc = vfix(0);
+    while (vis_pair(F) && vis_pair(vars)) {
+        val_t fi = vcar(F), vi = vcar(vars);
+        if (!vis_symvar(vi)) scm_raise(V_FALSE, "divergence: vars must be a list of symbolic variables");
+        acc = sx_add(acc, sx_diff(fi, vi));
+        F = vcdr(F); vars = vcdr(vars);
+    }
+    return sx_simplify(acc);
+}
+
+/* curl(F, vars) — curl of a 3-D vector field; both lists must have exactly 3 elements.
+ * Returns (∂Fz/∂y − ∂Fy/∂z,  ∂Fx/∂z − ∂Fz/∂x,  ∂Fy/∂x − ∂Fx/∂y). */
+static val_t prim_curl(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t F = av[0], vars = av[1];
+    if (!vis_pair(F) || !vis_pair(vcdr(F)) || !vis_pair(vcddr(F)))
+        scm_raise(V_FALSE, "curl: vector field must have exactly 3 components");
+    if (!vis_pair(vars) || !vis_pair(vcdr(vars)) || !vis_pair(vcddr(vars)))
+        scm_raise(V_FALSE, "curl: vars must be a list of exactly 3 variables");
+    val_t Fx = vcar(F),       Fy = vcadr(F),       Fz = vcaddr(F);
+    val_t x  = vcar(vars),    y  = vcadr(vars),     z  = vcaddr(vars);
+    if (!vis_symvar(x) || !vis_symvar(y) || !vis_symvar(z))
+        scm_raise(V_FALSE, "curl: vars must be symbolic variables");
+    val_t cx = sx_simplify(sx_sub(sx_diff(Fz, y), sx_diff(Fy, z)));
+    val_t cy = sx_simplify(sx_sub(sx_diff(Fx, z), sx_diff(Fz, x)));
+    val_t cz = sx_simplify(sx_sub(sx_diff(Fy, x), sx_diff(Fx, y)));
+    return scm_cons(cx, scm_cons(cy, scm_cons(cz, V_NIL)));
+}
+
+/* laplacian(f, vars) — ∑ ∂²f/∂xᵢ² (scalar). */
+static val_t prim_laplacian(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t f = av[0], vars = av[1];
+    val_t acc = vfix(0);
+    while (vis_pair(vars)) {
+        val_t v = vcar(vars);
+        if (!vis_symvar(v)) scm_raise(V_FALSE, "laplacian: vars must be a list of symbolic variables");
+        acc = sx_add(acc, sx_diff(sx_diff(f, v), v));
+        vars = vcdr(vars);
+    }
+    return sx_simplify(acc);
+}
+
+/* vec-laplacian(F, vars) — component-wise Laplacian of a vector field. */
+static val_t prim_vec_laplacian(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t F = av[0], vars = av[1];
+    val_t result = V_NIL, *tail_ptr = &result;
+    while (vis_pair(F)) {
+        val_t fi = vcar(F);
+        val_t fivars[2] = {fi, vars};
+        val_t lfi = prim_laplacian(2, fivars, NULL);
+        Pair *cell = CURRY_NEW(Pair);
+        cell->hdr.type = T_PAIR; cell->hdr.flags = 0;
+        cell->car = lfi; cell->cdr = V_NIL;
+        *tail_ptr = vptr(cell); tail_ptr = &cell->cdr;
+        F = vcdr(F);
+    }
+    (void)ac;
+    return result;
+}
+
+/* dot-product(A, B) — symbolic dot product of two same-length lists. */
+static val_t prim_dot_product(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t A = av[0], B = av[1];
+    val_t acc = vfix(0);
+    while (vis_pair(A) && vis_pair(B)) {
+        acc = sx_add(acc, sx_mul(vcar(A), vcar(B)));
+        A = vcdr(A); B = vcdr(B);
+    }
+    return sx_simplify(acc);
+}
+
+/* cross-product(A, B) — 3-D symbolic cross product. */
+static val_t prim_cross_product(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t A = av[0], B = av[1];
+    if (!vis_pair(A) || !vis_pair(vcdr(A)) || !vis_pair(vcddr(A)) ||
+        !vis_pair(B) || !vis_pair(vcdr(B)) || !vis_pair(vcddr(B)))
+        scm_raise(V_FALSE, "cross-product: both arguments must be lists of exactly 3 elements");
+    val_t ax = vcar(A),  ay = vcadr(A),  az = vcaddr(A);
+    val_t bx = vcar(B),  by = vcadr(B),  bz = vcaddr(B);
+    val_t cx = sx_simplify(sx_sub(sx_mul(ay, bz), sx_mul(az, by)));
+    val_t cy = sx_simplify(sx_sub(sx_mul(az, bx), sx_mul(ax, bz)));
+    val_t cz = sx_simplify(sx_sub(sx_mul(ax, by), sx_mul(ay, bx)));
+    return scm_cons(cx, scm_cons(cy, scm_cons(cz, V_NIL)));
+}
+
 static val_t prim_degree(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_degree(av[0], av[1]); }
 static val_t prim_collect(int ac, val_t *av, void *ud)
@@ -1932,6 +2060,15 @@ void builtins_register(val_t env) {
     DEF("degree",         prim_degree,          2, 2);
     DEF("collect",        prim_collect,         2, 2);
     DEF("leading-coeff",  prim_leading_coeff,   2, 2);
+    DEF("limit",          prim_sx_limit,        3, 4);
+    DEF("grad",           prim_grad,            2, 2);
+    DEF("gradient",       prim_grad,            2, 2);
+    DEF("divergence",     prim_divergence,      2, 2);
+    DEF("curl",           prim_curl,            2, 2);
+    DEF("laplacian",      prim_laplacian,       2, 2);
+    DEF("vec-laplacian",  prim_vec_laplacian,   2, 2);
+    DEF("dot-product",    prim_dot_product,     2, 2);
+    DEF("cross-product",  prim_cross_product,   2, 2);
     DEF("superpose",      prim_superpose,       1, 1);
     DEF("quantum-uniform",prim_quantum_uniform, 1, 1);
     DEF("observe",        prim_observe,         1, 1);

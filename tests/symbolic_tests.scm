@@ -240,6 +240,177 @@
 (check-approx "auto-diff x-5"      (auto-diff (lambda (t) (- t 5))       10.0)  1.0  1e-10)
 (check-approx "auto-diff 1/(x+1)"  (auto-diff (lambda (t) (/ 1 (+ t 1))) 1.0) -0.25 1e-10)
 
+;;; ---- Phase 4: IBP integration (polynomial × trig/exp/log) ---- ;;;
+
+;;; Verify antiderivatives numerically: F'(t) = f(t) at sample point t
+(define (check-antideriv label f-sym F-sym t eps)
+  (let ((dF (simplify (∂ F-sym x))))
+    (check-approx label
+                  (substitute dF x t)
+                  (substitute f-sym x t)
+                  eps)))
+
+;;; ∫x·sin(x) dx = -x·cos(x) + sin(x)
+(define ibp-xsinx (∫ (* x (sin x)) x))
+(check-antideriv "∫x·sin(x) antideriv at x=1" (* x (sin x)) ibp-xsinx 1.0 1e-9)
+(check-antideriv "∫x·sin(x) antideriv at x=2" (* x (sin x)) ibp-xsinx 2.0 1e-9)
+
+;;; ∫x·cos(x) dx = x·sin(x) + cos(x)
+(define ibp-xcosx (∫ (* x (cos x)) x))
+(check-antideriv "∫x·cos(x) antideriv at x=1" (* x (cos x)) ibp-xcosx 1.0 1e-9)
+
+;;; ∫x·exp(x) dx = x·exp(x) - exp(x)
+(define ibp-xexpx (∫ (* x (exp x)) x))
+(check-antideriv "∫x·exp(x) antideriv at x=1" (* x (exp x)) ibp-xexpx 1.0 1e-9)
+(check-antideriv "∫x·exp(x) antideriv at x=2" (* x (exp x)) ibp-xexpx 2.0 1e-9)
+
+;;; ∫x·ln(x) dx = x²/2·ln(x) - x²/4  (verified at x=1,2)
+(define ibp-xlnx (∫ (* x (log x)) x))
+(check-antideriv "∫x·ln(x) antideriv at x=1" (* x (log x)) ibp-xlnx 1.0 1e-9)
+(check-antideriv "∫x·ln(x) antideriv at x=2" (* x (log x)) ibp-xlnx 2.0 1e-9)
+
+;;; ∫x²·ln(x) dx = x³/3·ln(x) - x³/9
+(define ibp-x2lnx (∫ (* (expt x 2) (log x)) x))
+(check-antideriv "∫x²·ln(x) antideriv at x=2" (* (expt x 2) (log x)) ibp-x2lnx 2.0 1e-9)
+
+;;; ---- Phase 4: trig power reductions ---- ;;;
+
+;;; ∫sin²(x) dx = x/2 - sin(2x)/4
+(define int-sin2 (∫ (expt (sin x) 2) x))
+(check-antideriv "∫sin²(x) antideriv at x=1" (expt (sin x) 2) int-sin2 1.0 1e-9)
+(check-antideriv "∫sin²(x) antideriv at x=π/2" (expt (sin x) 2) int-sin2 1.5707963 1e-9)
+
+;;; ∫cos²(x) dx = x/2 + sin(2x)/4
+(define int-cos2 (∫ (expt (cos x) 2) x))
+(check-antideriv "∫cos²(x) antideriv at x=1" (expt (cos x) 2) int-cos2 1.0 1e-9)
+
+;;; ∫sin²(2x) dx = x/2 - sin(4x)/8
+(define int-sin2-2x (∫ (expt (sin (* 2 x)) 2) x))
+(check-antideriv "∫sin²(2x) antideriv at x=1" (expt (sin (* 2 x)) 2) int-sin2-2x 1.0 1e-9)
+
+;;; ---- Phase 4: quadratic denominator ---- ;;;
+
+;;; ∫1/(x²+1) dx = atan(x)
+(define int-1-x2p1 (∫ (/ 1 (+ (expt x 2) 1)) x))
+(check-antideriv "∫1/(x²+1) antideriv at x=1" (/ 1 (+ (expt x 2) 1)) int-1-x2p1 1.0 1e-9)
+(check-approx "∫1/(x²+1) = atan(x) at x=1"
+              (substitute int-1-x2p1 x 1.0) (atan 1.0) 1e-9)
+
+;;; ∫1/(x²+4) dx = (1/2)·atan(x/2)
+(define int-1-x2p4 (∫ (/ 1 (+ (expt x 2) 4)) x))
+(check-antideriv "∫1/(x²+4) antideriv at x=1" (/ 1 (+ (expt x 2) 4)) int-1-x2p4 1.0 1e-9)
+
+;;; ∫1/(x²+2x+2) dx = atan(x+1) via completing the square (x²+2x+2 = (x+1)²+1)
+(define int-quad-bc (∫ (/ 1 (+ (expt x 2) (* 2 x) 2)) x))
+(check-antideriv "∫1/(x²+2x+2) antideriv at x=0"
+                 (/ 1 (+ (expt x 2) (* 2 x) 2)) int-quad-bc 0.0 1e-9)
+(check-antideriv "∫1/(x²+2x+2) antideriv at x=1"
+                 (/ 1 (+ (expt x 2) (* 2 x) 2)) int-quad-bc 1.0 1e-9)
+
+;;; ---- Phase 4: limits ---- ;;;
+
+;;; Classic L'Hôpital limits
+(check-approx "lim x→0 sin(x)/x = 1"
+              (limit (/ (sin x) x) x 0) 1.0 1e-12)
+(check-approx "lim x→0 (eˣ−1)/x = 1"
+              (limit (/ (- (exp x) 1) x) x 0) 1.0 1e-12)
+(check-approx "lim x→0 (1−cos(x))/x² = 1/2"
+              (limit (/ (- 1 (cos x)) (expt x 2)) x 0) 0.5 1e-12)
+(check-approx "lim x→1 (x²−1)/(x−1) = 2"
+              (limit (/ (- (expt x 2) 1) (- x 1)) x 1) 2.0 1e-12)
+
+;;; Infinity limits
+(check "lim x→∞ 1/x = 0"
+       (limit (/ 1 x) x +inf.0) 0)
+
+;;; Direct substitution (non-indeterminate)
+(check-approx "lim x→2 (x+3) = 5"
+              (limit (+ x 3) x 2) 5.0 1e-12)
+(check-approx "lim x→0 sin(x) = 0"
+              (limit (sin x) x 0) 0.0 1e-12)
+
+;;; Three-level L'Hôpital: (x−sin(x))/x³ = 1/6
+(check-approx "lim x→0 (x−sin(x))/x³ = 1/6"
+              (limit (/ (- x (sin x)) (expt x 3)) x 0) (/ 1.0 6.0) 1e-9)
+
+;;; ---- Vector calculus ---- ;;;
+
+(define xv (sym-var 'x))
+(define yv (sym-var 'y))
+(define zv (sym-var 'z))
+(define vrs (list xv yv zv))
+
+;;; grad(x²+y²+z²) = (2x, 2y, 2z)
+(let ((g (grad (+ (expt xv 2) (expt yv 2) (expt zv 2)) vrs)))
+  (check-approx "grad(r²) x-component at (1,2,3)"
+    (substitute (substitute (substitute (car g) xv 1) yv 2) zv 3) 2.0 1e-12)
+  (check-approx "grad(r²) y-component at (1,2,3)"
+    (substitute (substitute (substitute (cadr g) xv 1) yv 2) zv 3) 4.0 1e-12)
+  (check-approx "grad(r²) z-component at (1,2,3)"
+    (substitute (substitute (substitute (caddr g) xv 1) yv 2) zv 3) 6.0 1e-12))
+
+;;; div(x²,y²,z²) = 2x+2y+2z; at (1,2,3) = 12
+(check-approx "div(x²,y²,z²) at (1,2,3) = 12"
+  (let ((d (divergence (list (expt xv 2) (expt yv 2) (expt zv 2)) vrs)))
+    (substitute (substitute (substitute d xv 1) yv 2) zv 3))
+  12.0 1e-12)
+
+;;; curl of conservative field = 0
+(let ((c (curl (list (* yv zv) (* xv zv) (* xv yv)) vrs)))
+  (check "curl(yz,xz,xy) = (0,0,0)"
+    (map (lambda (e) (substitute (substitute (substitute e xv 1) yv 2) zv 3)) c)
+    '(0 0 0)))
+
+;;; curl(-y, x, 0) = (0,0,2)
+(let ((c (curl (list (- yv) xv 0) vrs)))
+  (check "curl(-y,x,0) = (0,0,2)"
+    (map (lambda (e) (substitute (substitute (substitute e xv 0) yv 0) zv 0)) c)
+    '(0 0 2)))
+
+;;; laplacian(x²+y²+z²) = 6
+(check "laplacian(r²) = 6"
+  (laplacian (+ (expt xv 2) (expt yv 2) (expt zv 2)) vrs) 6)
+
+;;; Identity: div(curl(F)) = 0 for any F
+(let* ((F (list (expt xv 2) (* xv yv) (* xv zv)))
+       (curlF (curl F vrs))
+       (d (divergence curlF vrs)))
+  (check "div(curl(F)) = 0 (vector identity)" d 0))
+
+;;; Identity: curl(grad(f)) = (0,0,0) for any scalar f — result is symbolic 0 each
+(let* ((f (+ (expt xv 2) (* xv yv) (expt zv 2)))
+       (gf (grad f vrs))
+       (c (curl gf vrs)))
+  (check "curl(grad(f)) = (0,0,0) (vector identity)" c '(0 0 0)))
+
+;;; dot-product: (x,y,z)·(x,y,z) = x²+y²+z²; at (1,1,1) = 3
+(let ((dp (dot-product (list xv yv zv) (list xv yv zv))))
+  (check-approx "dot-product (x,y,z)·(x,y,z) at (1,1,1) = 3"
+    (substitute (substitute (substitute dp xv 1.0) yv 1.0) zv 1.0) 3.0 1e-12))
+
+;;; cross-product: (1,0,0)×(0,1,0) = (0,0,1)
+(check "cross-product (1,0,0)×(0,1,0)" (cross-product '(1 0 0) '(0 1 0)) '(0 0 1))
+
+;;; Maxwell plane wave verification (c=1 units, vacuum)
+;;; E = (0, sin(x-t), 0),  B = (0, 0, sin(x-t))
+(let* ((tv (sym-var 't))
+       (arg (- xv tv))
+       (E (list 0 (sin arg) 0))
+       (B (list 0 0 (sin arg)))
+       (xyz (list xv yv zv))
+       (divE (divergence E xyz))
+       (divB (divergence B xyz))
+       (curlE (curl E xyz))
+       (dBdt  (map (lambda (b) (simplify (∂ b tv))) B))
+       (curlB (curl B xyz))
+       (dEdt  (map (lambda (e) (simplify (∂ e tv))) E))
+       (faraday (map (lambda (a b) (simplify (+ a b))) curlE dBdt))
+       (ampere  (map (lambda (a b) (simplify (- a b))) curlB dEdt)))
+  (check "Maxwell: Gauss div(E)=0"  divE 0)
+  (check "Maxwell: monopoles div(B)=0" divB 0)
+  (check "Maxwell: Faraday curl(E)+∂B/∂t=0"  faraday '(0 0 0))
+  (check "Maxwell: Ampere curl(B)-∂E/∂t=0"   ampere  '(0 0 0)))
+
 ;;; ---- Summary ---- ;;;
 
 (newline)

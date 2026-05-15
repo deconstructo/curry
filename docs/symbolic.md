@@ -1,6 +1,6 @@
 # Symbolic Expressions — Computer Algebra in Curry
 
-*v0.7.5 — 2026-05-12*
+*v0.7.9 — 2026-05-15*
 
 Curry's numeric tower includes a built-in computer algebra system (CAS). Any operation that would normally fail with "wrong type" when applied to an unbound symbol instead builds a symbolic expression tree. The evaluator becomes a CAS by default.
 
@@ -271,6 +271,13 @@ The bounds `a` and `b` may be any numeric type: fixnum, bignum, rational, flonum
 | `(asinh (ax+b))` | `((ax+b)·asinh(ax+b) − √((ax+b)²+1))/a` |
 | `(acosh (ax+b))` | `((ax+b)·acosh(ax+b) − √((ax+b)²−1))/a` |
 | `(atanh (ax+b))` | `((ax+b)·atanh(ax+b) + log(1−(ax+b)²)/2)/a` |
+| `(expt (sin (ax+b)) 2)` | `x/2 − sin(2(ax+b))/(4a)` (half-angle) |
+| `(expt (cos (ax+b)) 2)` | `x/2 + sin(2(ax+b))/(4a)` (half-angle) |
+| `(* (expt x n) (sin (ax+b)))` | IBP: `x^n·(−cos/a) − ∫n·x^(n−1)·(−cos/a) dx` |
+| `(* (expt x n) (cos (ax+b)))` | IBP: `x^n·(sin/a) − ∫n·x^(n−1)·(sin/a) dx` |
+| `(* (expt x n) (exp (ax+b)))` | IBP: `x^n·(exp/a) − ∫n·x^(n−1)·(exp/a) dx` |
+| `(* (expt x n) (log (ax+b)))` | `x^(n+1)·ln(ax+b)/(n+1) − ∫x^(n+1)·a/((n+1)(ax+b)) dx` |
+| `(/ c (+ (* a (expt x 2)) (* b x) d))` | `2c/√Δ · atan((2ax+b)/√Δ)` where Δ=4ad−b² (Δ>0) |
 | `k·f(x)` | `k·∫f(x)dx` |
 | `f(x) + g(x) + ...` | `∫f + ∫g + ...` |
 | `conj(f(x))` | `conj(∫f(x)dx)` |
@@ -302,6 +309,157 @@ Unknown forms leave an unevaluated `(∫ expr var)` node.
 (define f (* 3 (expt x 2)))
 (define F (∫ f x))         ; F = x³
 (∂ F x)                    ; => (* 3 (expt x 2))   ✓
+
+; Integration by parts: polynomial × trig/exp
+(∫ (* x (sin x)) x)        ; => x·(−cos(x)) − (−sin(x))   i.e. −x·cos(x) + sin(x)
+(∫ (* x (cos x)) x)        ; => x·sin(x) − (−cos(x))       i.e. x·sin(x) + cos(x)
+(∫ (* x (exp x)) x)        ; => x·exp(x) − exp(x)
+
+; IBP: polynomial × logarithm (LIATE rule — differentiate log)
+(∫ (* x (log x)) x)        ; => x²·log(x)/2 − x²/4
+(∫ (* (expt x 2) (log x)) x) ; => x³·log(x)/3 − x³/9
+
+; Half-angle trig power reductions
+(∫ (expt (sin x) 2) x)     ; => x/2 − sin(2x)/4
+(∫ (expt (cos x) 2) x)     ; => x/2 + sin(2x)/4
+
+; Quadratic denominator (positive discriminant → atan form)
+(∫ (/ 1 (+ (expt x 2) 1)) x)   ; => atan(x)
+(∫ (/ 1 (+ (expt x 2) 4)) x)   ; => (1/2)·atan(x/2)
+(∫ (/ 1 (+ (expt x 2) (* 2 x) 2)) x)  ; => atan(x+1)  [completes the square]
+```
+
+## Limits
+
+`(limit f x a)` computes the two-sided limit of `f` as `x → a`.
+`(limit f x a 'left)` and `(limit f x a 'right)` compute one-sided limits.
+
+```scheme
+(symbolic x)
+
+; Direct substitution
+(limit (+ x 3) x 2)           ; => 5
+(limit (sin x) x 0)            ; => 0.0
+
+; L'Hôpital: 0/0 form
+(limit (/ (sin x) x) x 0)     ; => 1
+(limit (/ (- (exp x) 1) x) x 0)  ; => 1
+(limit (/ (- 1 (cos x)) (expt x 2)) x 0)  ; => 0.5  (1/2)
+
+; L'Hôpital applied three times
+(limit (/ (- x (sin x)) (expt x 3)) x 0)  ; => 0.166667  (1/6)
+
+; Factoring at removable discontinuity
+(limit (/ (- (expt x 2) 1) (- x 1)) x 1)  ; => 2
+
+; Infinity
+(limit (/ 1 x) x +inf.0)      ; => 0
+
+; One-sided limits
+(limit (/ 1 x) x 0.0 'right)  ; => +inf.0
+```
+
+### Algorithm
+
+1. **Direct substitution** — substitutes `a` into `f` and simplifies. Returns if numeric.
+2. **L'Hôpital** — when `f = p/q` and both `p(a) = 0` and `q(a) = 0` (or both ±∞), retries `limit(p′/q′, x, a)`. Iterates up to 5 times.
+3. **Infinity** — handles `finite/∞ = 0` directly; `∞/∞` triggers L'Hôpital.
+4. **Fallback** — returns an unevaluated `(limit f x a)` node.
+
+## Vector calculus (Cartesian)
+
+The vector calculus operators work on **Scheme lists of symbolic expressions** representing components of a scalar or vector field. Variables are passed as a list of symbolic variables in order `(x y z ...)`.
+
+```scheme
+(symbolic x y z)
+(define vars (list x y z))
+```
+
+### `grad` / `gradient`
+
+`(grad f vars)` — gradient of a scalar field `f`. Returns a list `(∂f/∂x₁ ∂f/∂x₂ ...)`.
+
+```scheme
+(grad (+ (expt x 2) (expt y 2) (expt z 2)) vars)
+; => ((* 2 x)  (* 2 y)  (* 2 z))
+```
+
+### `divergence`
+
+`(divergence F vars)` — divergence `∑ ∂Fᵢ/∂xᵢ` of a vector field `F` (list of components). Returns a scalar expression.
+
+```scheme
+(divergence (list (expt x 2) (expt y 2) (expt z 2)) vars)
+; => (+ (* 2 x) (* 2 y) (* 2 z))
+```
+
+### `curl`
+
+`(curl F vars)` — curl of a **3-D** vector field. Returns a list of 3 components:
+`(∂Fz/∂y − ∂Fy/∂z,  ∂Fx/∂z − ∂Fz/∂x,  ∂Fy/∂x − ∂Fx/∂y)`.
+
+```scheme
+; Conservative field — curl is zero
+(curl (list (* y z) (* x z) (* x y)) vars)  ; => (0 0 0)
+
+; Uniform rotation about z-axis
+(curl (list (- y) x 0) vars)   ; => (0 0 2)
+```
+
+### `laplacian`
+
+`(laplacian f vars)` — scalar Laplacian `∑ ∂²f/∂xᵢ²`. N-dimensional (works for any number of variables).
+
+```scheme
+(laplacian (+ (expt x 2) (expt y 2) (expt z 2)) vars)  ; => 6
+```
+
+### `vec-laplacian`
+
+`(vec-laplacian F vars)` — vector Laplacian: apply `laplacian` component-wise to a vector field.
+
+### `dot-product` / `cross-product`
+
+```scheme
+(dot-product (list x y z) (list x y z))   ; => x²+y²+z²
+
+(cross-product '(1 0 0) '(0 1 0))         ; => (0 0 1)
+```
+
+### Vector calculus identities
+
+The following identities hold symbolically:
+
+```scheme
+; div(curl(F)) = 0 for any F
+(divergence (curl F vars) vars)   ; => 0
+
+; curl(grad(f)) = (0 0 0) for any f
+(curl (grad f vars) vars)         ; => (0 0 0)
+```
+
+### Verifying Maxwell's equations
+
+A plane wave `E = (0, sin(kx−ωt), 0)`, `B = (0, 0, sin(kx−ωt))` satisfies all four Maxwell equations in vacuum (c=1 units):
+
+```scheme
+(symbolic x y z t)
+(define xyz (list x y z))
+(define arg (- x t))           ; kx − ωt with k=ω=1
+(define E (list 0 (sin arg) 0))
+(define B (list 0 0 (sin arg)))
+
+; Gauss: div(E) = 0
+(divergence E xyz)             ; => 0
+
+; No monopoles: div(B) = 0
+(divergence B xyz)             ; => 0
+
+; Faraday: curl(E) + ∂B/∂t = 0
+(map + (curl E xyz) (map (lambda (b) (∂ b t)) B))   ; => (0 0 0)
+
+; Ampere-Maxwell: curl(B) − ∂E/∂t = 0  (c=1, μ₀ε₀=1)
+(map - (curl B xyz) (map (lambda (e) (∂ e t)) E))   ; => (0 0 0)
 ```
 
 ## Substitution and numeric evaluation
@@ -732,6 +890,16 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(degree expr var)` | Polynomial degree in var (exact fixnum) |
 | `(leading-coeff expr var)` | Coefficient of highest-degree term |
 | `(collect expr var)` | Group like-degree terms; canonical descending form |
+| `(limit f x a)` | Two-sided limit of `f` as `x → a` |
+| `(limit f x a 'left)` | One-sided limit x→a⁻ |
+| `(limit f x a 'right)` | One-sided limit x→a⁺ |
+| `(grad f vars)` / `(gradient f vars)` | Gradient of scalar field — list of ∂f/∂xᵢ |
+| `(divergence F vars)` | Divergence of vector field — scalar |
+| `(curl F vars)` | Curl of 3-D vector field — 3-component list |
+| `(laplacian f vars)` | Scalar Laplacian ∑ ∂²f/∂xᵢ² |
+| `(vec-laplacian F vars)` | Vector Laplacian (component-wise) |
+| `(dot-product A B)` | Symbolic dot product |
+| `(cross-product A B)` | Symbolic 3-D cross product |
 | `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 - 2*x + 1` |
 | `(sym->latex expr)` | LaTeX string: `x^{2} - 2 x + 1` |
 

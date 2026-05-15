@@ -93,8 +93,30 @@
  *               ∫asinh(f) dx   = (f·asinh(f) − √(f²+1)) / f'
  *               ∫acosh(f) dx   = (f·acosh(f) − √(f²−1)) / f'
  *               ∫atanh(f) dx   = (f·atanh(f) + ln(1−f²)/2) / f'
+ *   sin²/cos²:  ∫sin²(f) dx    = x/2 − sin(2f)/(4f')  (half-angle, linear f)
+ *               ∫cos²(f) dx    = x/2 + sin(2f)/(4f')
+ *   IBP products:
+ *               ∫x^n·sin(f) dx  = x^n·(−cos(f)/f') − ∫(n·x^(n−1)·(−cos(f)/f')) dx
+ *               ∫x^n·cos(f) dx  = x^n·(sin(f)/f')  − ∫(n·x^(n−1)·(sin(f)/f'))  dx
+ *               ∫x^n·exp(f) dx  = x^n·(exp(f)/f')  − ∫(n·x^(n−1)·(exp(f)/f'))  dx
+ *               ∫x^n·ln(f) dx   = x^(n+1)·ln(f)/(n+1) − ∫x^(n+1)/(n+1)·f'/f dx
+ *   Quad. denom:∫1/(x²+k) dx   = atan(x/√k)/√k       (k>0, b=0)
+ *               ∫1/(ax²+k) dx  = atan(x√(a/k))/√(ak) (k>0, b=0)
  *   Unknown ops / products with var: left as unevaluated (∫ expr var) notation.
  *   Definite:   (∫ f x a b)    = F(b) − F(a)  where F = ∫f dx
+ *
+ * --- Limits ---
+ *
+ *   (limit f x point)           ; two-sided limit x→point
+ *   (limit f x point 'left)     ; one-sided: x→point⁻
+ *   (limit f x point 'right)    ; one-sided: x→point⁺
+ *
+ *   Algorithm:
+ *     1. Direct substitution — simplify f(point); return if numeric/finite.
+ *     2. L'Hôpital — if f = p/q and both p(point)=0 and q(point)=0 (or both ∞),
+ *        retry limit(p'/q', x, point).  Repeats up to 5 times.
+ *     3. Infinity — point = ±∞: substitute and simplify; finite/∞=0, ∞/∞ → L'Hôpital.
+ *     4. Fallback: unevaluated (limit f x point) node.
  *
  * --- Complex / conjugate operators ---
  *
@@ -197,6 +219,9 @@ val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=v
 bool  sx_equal(val_t a, val_t b);                            /* structural equality */
 bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */
 
+/* limit: dir = 0 (both), -1 (left), +1 (right) */
+val_t sx_limit(val_t expr, val_t var, val_t point, int dir);
+
 /* ---- Polynomial / structural operations ---- */
 val_t sx_expand(val_t expr);                                 /* distribute * over +, expand integer powers */
 val_t sx_degree(val_t expr, val_t var);                      /* polynomial degree in var (fixnum) */
@@ -217,6 +242,7 @@ extern val_t SX_SINH, SX_COSH, SX_TANH;
 extern val_t SX_ASIN, SX_ACOS, SX_ATAN;
 extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 extern val_t SX_COT, SX_SEC, SX_CSC;
+extern val_t SX_LIMIT;
 
 val_t sx_fracdiff(val_t expr, val_t alpha, val_t var); /* D^α fractional derivative */
 val_t sx_fracint (val_t expr, val_t alpha, val_t var); /* I^α fractional integral   */

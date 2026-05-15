@@ -20,6 +20,7 @@ val_t SX_SINH, SX_COSH, SX_TANH;
 val_t SX_ASIN, SX_ACOS, SX_ATAN;
 val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 val_t SX_COT, SX_SEC, SX_CSC;
+val_t SX_LIMIT;
 
 void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
@@ -53,6 +54,7 @@ void symbolic_init(void) {
     SX_COT       = sym_intern_cstr("cot");
     SX_SEC       = sym_intern_cstr("sec");
     SX_CSC       = sym_intern_cstr("csc");
+    SX_LIMIT     = sym_intern_cstr("limit");
 }
 
 /* ---- Constructors ---- */
@@ -170,6 +172,29 @@ val_t sx_simplify(val_t expr) {
             else syms[j++] = sa[i];
         }
         if (nsym == 0) return num_acc;
+
+        /* Cancellation: remove pairs (e, neg(e)) from syms[] */
+        {
+            bool any_cancelled = false;
+            for (int i = 0; i < nsym && !any_cancelled; i++) {
+                for (int k2 = i + 1; k2 < nsym; k2++) {
+                    bool cancel = false;
+                    if (vis_symexpr(syms[i]) && as_symexpr(syms[i])->op == SX_NEG &&
+                        sx_equal(as_symexpr(syms[i])->args[0], syms[k2])) cancel = true;
+                    else if (vis_symexpr(syms[k2]) && as_symexpr(syms[k2])->op == SX_NEG &&
+                             sx_equal(as_symexpr(syms[k2])->args[0], syms[i])) cancel = true;
+                    if (cancel) { syms[i] = syms[k2] = vfix(0); any_cancelled = true; }
+                }
+            }
+            if (any_cancelled) {
+                int new_nsym = 0;
+                for (int i = 0; i < nsym; i++)
+                    if (!is_zero(syms[i])) syms[new_nsym++] = syms[i];
+                nsym = new_nsym;
+                if (nsym == 0) return num_acc;
+            }
+        }
+
         if (is_zero(num_acc)) {
             if (nsym == 1) return syms[0];
             return sx_make_expr(SX_ADD, nsym, syms);
@@ -188,6 +213,7 @@ val_t sx_simplify(val_t expr) {
         if (num_count == 2) return num_sub(a, b);
         if (is_zero(b)) return a;
         if (is_zero(a)) return sx_neg(b);
+        if (sx_equal(a, b)) return vfix(0);
     }
 
     /* ---- NEG ---- */
@@ -1092,23 +1118,143 @@ val_t sx_integrate(val_t expr, val_t var) {
             val_t dpart   = (ndep   == 1) ? deps[0]   : sx_make_expr(SX_MUL, ndep, deps);
             return sx_mul(cfactor, sx_integrate(dpart, var));
         }
-        /* All factors depend on var — no simple rule, fall through to unevaluated */
+        /* All factors depend on var: try IBP.
+         * Priority: log factors (LIATE rule — differentiate log, integrate rest);
+         * then polynomial (x^n) factors (differentiate poly, integrate rest). */
+        {
+            int log_idx = -1;
+            int poly_idx = -1;
+            for (int i = 0; i < n; i++) {
+                val_t a = args[i];
+                /* LOG factor: use LIATE — differentiate log, integrate algebraic */
+                if (log_idx < 0 && vis_symexpr(a) &&
+                    as_symexpr(a)->op == SX_LOG && as_symexpr(a)->nargs == 1)
+                    log_idx = i;
+                /* Polynomial factor: var itself or var^k for positive integer k */
+                if (poly_idx < 0) {
+                    if (sx_equal(a, var)) {
+                        poly_idx = i;
+                    } else if (vis_symexpr(a) &&
+                               as_symexpr(a)->op == SX_EXPT &&
+                               as_symexpr(a)->nargs == 2 &&
+                               sx_equal(as_symexpr(a)->args[0], var) &&
+                               vis_fixnum(as_symexpr(a)->args[1]) &&
+                               vunfix(as_symexpr(a)->args[1]) > 0) {
+                        poly_idx = i;
+                    }
+
+                }
+            }
+            /* Choose which factor to differentiate (u) and which to integrate (f) */
+            int u_idx = -1;
+            if (log_idx >= 0)  u_idx = log_idx;
+            else if (poly_idx >= 0) u_idx = poly_idx;
+
+            /* Direct formula for log × var^k: avoids unsimplified intermediate fractions.
+             * ∫ var^k · ln(f) dx = var^(k+1)·ln(f)/(k+1) - ∫ var^(k+1)/(k+1) · f'/f dx */
+            if (log_idx >= 0 && poly_idx >= 0 && n == 2) {
+                val_t log_expr = args[log_idx];
+                val_t log_arg  = as_symexpr(log_expr)->args[0];
+                val_t poly_f   = args[poly_idx];
+                /* Determine k: var → 1, expt(var, k) → k */
+                long k;
+                if (sx_equal(poly_f, var)) {
+                    k = 1;
+                } else {
+                    k = vunfix(as_symexpr(poly_f)->args[1]);
+                }
+                val_t kp1    = vfix(k + 1);
+                val_t kp1_sq = num_mul(kp1, kp1);
+                val_t vpow   = sx_expt(var, kp1);
+                /* ∫ var^(k+1) * f'/(f*(k+1)) dx — try integration */
+                val_t df_log = sx_simplify(sx_diff(log_arg, var));
+                if (vis_number(df_log) && !num_is_zero(df_log)) {
+                    /* inner integrand = var^(k+1) * df_log / (log_arg * (k+1)) */
+                    val_t tail_expr = sx_div(sx_mul(vpow, df_log),
+                                            sx_mul(log_arg, kp1));
+                    val_t tail = sx_integrate(tail_expr, var);
+                    if (!(vis_symexpr(tail) && as_symexpr(tail)->op == SX_INTEGRATE)) {
+                        val_t head = sx_div(sx_mul(vpow, log_expr), kp1);
+                        return sx_simplify(sx_sub(head, tail));
+                    }
+                    /* Fallback for log(x): direct closed form */
+                    if (sx_equal(log_arg, var)) {
+                        /* ∫ x^k · ln(x) dx = x^(k+1)·ln(x)/(k+1) - x^(k+1)/(k+1)^2 */
+                        val_t head2 = sx_div(sx_mul(vpow, log_expr), kp1);
+                        val_t tail2 = sx_div(vpow, kp1_sq);
+                        return sx_simplify(sx_sub(head2, tail2));
+                    }
+                }
+            }
+
+            if (u_idx >= 0) {
+                val_t u = args[u_idx];
+                /* f_part = product of all factors except u */
+                val_t f_part;
+                if (n == 2) {
+                    f_part = args[1 - u_idx];
+                } else {
+                    val_t *rargs = (val_t *)gc_alloc((size_t)(n - 1) * sizeof(val_t));
+                    int ri = 0;
+                    for (int i = 0; i < n; i++)
+                        if (i != u_idx) rargs[ri++] = args[i];
+                    f_part = sx_make_expr(SX_MUL, n - 1, rargs);
+                }
+                /* v = ∫f_part dx */
+                val_t v = sx_integrate(f_part, var);
+                /* Guard: if v is still unevaluated, give up */
+                if (!(vis_symexpr(v) && as_symexpr(v)->op == SX_INTEGRATE)) {
+                    /* IBP: ∫u·f dx = u·v - ∫v·du dx
+                     * Multiply fractions explicitly to avoid unsimplified (a/b)*(c/d) */
+                    val_t du = sx_simplify(sx_diff(u, var));
+                    if (vis_number(du) && num_is_zero(du))
+                        return sx_mul(u, v);
+                    val_t inner;
+                    if (vis_symexpr(v) && as_symexpr(v)->op == SX_DIV &&
+                        as_symexpr(v)->nargs == 2 &&
+                        vis_symexpr(du) && as_symexpr(du)->op == SX_DIV &&
+                        as_symexpr(du)->nargs == 2) {
+                        /* (a/b) · (c/d) → (a*c)/(b*d) */
+                        val_t vn = as_symexpr(v)->args[0], vd = as_symexpr(v)->args[1];
+                        val_t dn = as_symexpr(du)->args[0], dd = as_symexpr(du)->args[1];
+                        inner = sx_simplify(sx_div(sx_simplify(sx_mul(vn, dn)),
+                                                   sx_simplify(sx_mul(vd, dd))));
+                    } else {
+                        inner = sx_simplify(sx_mul(v, du));
+                    }
+                    val_t tail  = sx_integrate(inner, var);
+                    return sx_simplify(sx_sub(sx_mul(u, v), tail));
+                }
+            }
+        }
     }
 
     /* Power rule: ∫f^n dx where n is numeric */
     if (op == SX_EXPT && n == 2) {
         val_t base = args[0], exp_v = args[1];
         if (!sx_depends_on(exp_v, var) && vis_number(exp_v)) {
-            /* ∫sec²(f) dx = tan(f)/f',  ∫csc²(f) dx = -cot(f)/f' */
+            /* ∫sec²(f) dx = tan(f)/f',  ∫csc²(f) dx = -cot(f)/f'
+             * ∫sin²(f) dx = x/2 - sin(2f)/(4f'),  ∫cos²(f) dx = x/2 + sin(2f)/(4f') */
             if (vis_symexpr(base) && num_eq(exp_v, vfix(2))) {
                 val_t bop = as_symexpr(base)->op;
-                if ((bop == SX_SEC || bop == SX_CSC) &&
-                    as_symexpr(base)->nargs == 1) {
+                if (as_symexpr(base)->nargs == 1) {
                     val_t f  = as_symexpr(base)->args[0];
                     val_t df = sx_diff(f, var);
                     if (vis_number(df) && !num_is_zero(df)) {
-                        if (bop == SX_SEC) return sx_div(sx_tan(f), df);
-                        else               return sx_div(sx_neg(sx_cot(f)), df);
+                        if (bop == SX_SEC)
+                            return sx_div(sx_tan(f), df);
+                        if (bop == SX_CSC)
+                            return sx_div(sx_neg(sx_cot(f)), df);
+                        if (bop == SX_SIN) {
+                            val_t sin2f = sx_sin(sx_mul(vfix(2), f));
+                            return sx_sub(sx_div(var, vfix(2)),
+                                          sx_div(sin2f, sx_mul(vfix(4), df)));
+                        }
+                        if (bop == SX_COS) {
+                            val_t sin2f = sx_sin(sx_mul(vfix(2), f));
+                            return sx_add(sx_div(var, vfix(2)),
+                                          sx_div(sin2f, sx_mul(vfix(4), df)));
+                        }
                     }
                 }
             }
@@ -1130,13 +1276,42 @@ val_t sx_integrate(val_t expr, val_t var) {
         }
     }
 
-    /* ∫1/f dx = ln|f| / f'  (linear f) */
+    /* ∫ num/den dx — linear and quadratic denominator cases */
     if (op == SX_DIV && n == 2) {
         val_t num_v = args[0], den = args[1];
         if (!sx_depends_on(num_v, var)) {
+            /* Linear: f' is constant → ln|f|/f' */
             val_t df = sx_diff(den, var);
             if (vis_number(df) && !num_is_zero(df))
                 return sx_mul(sx_div(num_v, df), sx_log(sx_abs(den)));
+
+            /* Quadratic: extract a, b, c from ax²+bx+c via point evaluation */
+            if (sx_depends_on(den, var)) {
+                val_t deg = sx_degree(den, var);
+                if (vis_fixnum(deg) && vunfix(deg) == 2) {
+                    val_t at0  = sx_simplify(sx_substitute(den, var, vfix(0)));
+                    val_t at1  = sx_simplify(sx_substitute(den, var, vfix(1)));
+                    val_t atn1 = sx_simplify(sx_substitute(den, var, vfix(-1)));
+                    if (vis_number(at0) && vis_number(at1) && vis_number(atn1)) {
+                        val_t c_v = at0;
+                        val_t b_v = num_div(num_sub(at1, atn1), vfix(2));
+                        val_t a_v = num_sub(num_sub(at1, b_v), c_v);
+                        /* disc = 4ac - b² */
+                        val_t disc = num_sub(num_mul(num_mul(vfix(4), a_v), c_v),
+                                             num_mul(b_v, b_v));
+                        if (vis_number(disc)) {
+                            double disc_d = num_to_double(disc);
+                            if (disc_d > 0.0) {
+                                /* ∫ num/(ax²+bx+c) dx = 2·num/√disc · atan((2ax+b)/√disc) */
+                                val_t sq = sx_sqrt(disc);
+                                val_t inner = sx_div(sx_add(sx_mul(num_mul(vfix(2), a_v), var), b_v), sq);
+                                return sx_mul(sx_div(num_mul(vfix(2), num_v), sq),
+                                              sx_atan(inner));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1565,3 +1740,114 @@ unevaluated_i:;
     return sx_make_expr(SX_FRACINT, 3, iargs);
 }
 
+/* ---- Limits ---- */
+
+/*
+ * sx_limit_inner: recursive worker.  depth guards against infinite L'Hôpital loops.
+ *
+ * Strategy:
+ *  1. Direct substitution — if result is a finite number, return it.
+ *  2. For expr = p/q (SX_DIV):
+ *       evaluate p and q at point separately (avoiding the 0/0→0 shortcut in simplify).
+ *       - p=0, q≠0           → 0
+ *       - p≠0, q=0            → ±∞  (unevaluated if sign is ambiguous)
+ *       - finite p, infinite q → 0
+ *       - 0/0 or ∞/∞          → L'Hôpital: retry limit(p'/q', x, point)
+ *  3. Fallback: unevaluated (limit expr var point).
+ */
+
+#define LHOPITAL_MAX 5
+
+static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int depth);
+
+static val_t sx_limit_unevaluated(val_t expr, val_t var, val_t point) {
+    val_t args[3] = {expr, var, point};
+    return sx_make_expr(SX_LIMIT, 3, args);
+}
+
+static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int depth) {
+    if (depth > LHOPITAL_MAX)
+        return sx_limit_unevaluated(expr, var, point);
+
+    /* Constant w.r.t. var */
+    if (!sx_depends_on(expr, var))
+        return sx_simplify(expr);
+
+    /* Dispatch on form */
+    if (vis_symexpr(expr)) {
+        SymExpr *se = as_symexpr(expr);
+        val_t op = se->op;
+        int n = (int)se->nargs;
+        val_t *args = se->args;
+
+        /* p/q — handle 0/0 and ∞/∞ via L'Hôpital */
+        if (op == SX_DIV && n == 2) {
+            val_t p = args[0], q = args[1];
+            val_t pv = sx_simplify(sx_substitute(p, var, point));
+            val_t qv = sx_simplify(sx_substitute(q, var, point));
+
+            bool p_zero  = vis_number(pv) && num_is_zero(pv);
+            bool q_zero  = vis_number(qv) && num_is_zero(qv);
+            bool p_inf   = vis_flonum(pv) && isinf(num_to_double(pv));
+            bool q_inf   = vis_flonum(qv) && isinf(num_to_double(qv));
+            bool p_fin   = vis_number(pv) && !p_inf;
+            bool q_fin   = vis_number(qv) && !q_inf;
+
+            if (p_zero && q_zero) {
+                /* 0/0: L'Hôpital */
+                val_t dp = sx_simplify(sx_diff(p, var));
+                val_t dq = sx_simplify(sx_diff(q, var));
+                return sx_limit_inner(sx_div(dp, dq), var, point, dir, depth + 1);
+            }
+            if (p_inf && q_inf) {
+                /* ∞/∞: L'Hôpital */
+                val_t dp = sx_simplify(sx_diff(p, var));
+                val_t dq = sx_simplify(sx_diff(q, var));
+                return sx_limit_inner(sx_div(dp, dq), var, point, dir, depth + 1);
+            }
+            if (p_fin && q_inf)
+                return vfix(0);  /* finite/∞ = 0 */
+            if (p_zero && q_fin && !q_zero)
+                return vfix(0);
+            if (p_fin && q_fin && !q_zero)
+                return sx_simplify(sx_div(pv, qv));
+        }
+
+        /* ADD/SUB/MUL/NEG: substitute into each subterm and reassemble */
+        if (op == SX_ADD) {
+            val_t *la = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int i = 0; i < n; i++)
+                la[i] = sx_limit_inner(args[i], var, point, dir, depth);
+            return sx_simplify(sx_make_expr(SX_ADD, n, la));
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_simplify(sx_sub(sx_limit_inner(args[0], var, point, dir, depth),
+                                      sx_limit_inner(args[1], var, point, dir, depth)));
+        if (op == SX_NEG && n == 1)
+            return sx_simplify(sx_neg(sx_limit_inner(args[0], var, point, dir, depth)));
+        if (op == SX_MUL) {
+            val_t *la = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int i = 0; i < n; i++)
+                la[i] = sx_limit_inner(args[i], var, point, dir, depth);
+            return sx_simplify(sx_make_expr(SX_MUL, n, la));
+        }
+    }
+
+    /* Direct substitution fallback */
+    val_t sub = sx_simplify(sx_substitute(expr, var, point));
+    if (vis_number(sub)) {
+        if (vis_flonum(sub) && isnan(num_to_double(sub)))
+            return sx_limit_unevaluated(expr, var, point);
+        return sub;
+    }
+    /* Still symbolic after substitution — unevaluated */
+    if (!sx_depends_on(sub, var))
+        return sub;
+    return sx_limit_unevaluated(expr, var, point);
+}
+
+val_t sx_limit(val_t expr, val_t var, val_t point, int dir) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "limit: second argument must be a symbolic variable");
+    return sx_limit_inner(expr, var, point, dir, 0);
+}

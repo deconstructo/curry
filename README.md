@@ -123,6 +123,34 @@ Example:
 
 ## Changelog
 
+### 0.7.9 — CAS Phase 4: limits, IBP integration, vector calculus
+
+**Symbolic integration — new patterns:**
+- **Integration by parts** for polynomial × trig/exp products: `∫x·sin(x)`, `∫x·cos(x)`, `∫x·exp(x)`, and iterated IBP for `∫x²·sin(x)` etc.
+- **Polynomial × logarithm** (LIATE rule): `∫x^n·ln(x) = x^(n+1)·ln(x)/(n+1) − x^(n+1)/(n+1)²`
+- **Trig power reductions** via half-angle: `∫sin²(f) = x/2 − sin(2f)/(4f′)`, `∫cos²(f) = x/2 + sin(2f)/(4f′)`
+- **Quadratic denominator**: `∫c/(ax²+bx+d) = 2c/√Δ · atan((2ax+b)/√Δ)` when Δ=4ad−b²>0; handles completing-the-square automatically
+
+**New `limit` procedure:**
+- `(limit f x a)` — two-sided limit; `(limit f x a 'left/'right)` for one-sided
+- Direct substitution, L'Hôpital for 0/0 and ∞/∞ (up to 5 applications), `finite/∞ = 0`
+- Three-deep L'Hôpital works: `(limit (/ (- x (sin x)) (expt x 3)) x 0)` → `1/6`
+
+**Vector calculus (Cartesian, N-dimensional):**
+- `(grad f vars)` / `(gradient f vars)` — gradient of a scalar field
+- `(divergence F vars)` — divergence of a vector field
+- `(curl F vars)` — curl (3D)
+- `(laplacian f vars)` / `(vec-laplacian F vars)` — scalar and vector Laplacian
+- `(dot-product A B)` / `(cross-product A B)` — symbolic dot and cross products
+- Identities verified symbolically: `div(curl F) = 0`, `curl(grad f) = (0 0 0)`
+- Maxwell's equations verified for a plane wave in vacuum (see `docs/symbolic.md`)
+
+**Simplifier improvements:**
+- `a − a = 0` for any structurally-equal symbolic expressions
+- `a + (−a) = 0` cancellation in the ADD simplifier
+
+---
+
 ### 0.7.9 — Raspberry Pi hardware module
 
 **New module `(curry rpi)`** — GPIO, I2C, SPI, and PWM for Raspberry Pi and
