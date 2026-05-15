@@ -121,6 +121,26 @@ Example:
 
 ## Changelog
 
+### 0.7.8 — Profiling level-2 overhaul, raw builtins, solar system HUD
+
+**Profiling level 2 — accurate wall-clock timing**:
+- Level 2 now intercepts named closures *before* the `goto tail` optimisation so that a real return address exists and wall-clock time can be measured per call, not just counted. Previously, timing only covered the `apply()` path; now it covers every call to a named closure except self-tail-recursive ones
+- Self-tail-recursive calls (where a closure calls itself as its own tail position) are exempted from the intercept — they fall through to the normal TCO path — to prevent unbounded stack growth in hot loops. They are still counted. Mutually recursive functions are fully timed
+- The level-2 description in `docs/module-profiling.md` updated to document the trade-off
+
+**Raw built-in procedures** (no import needed):
+- `(profiling-report)` — equivalent to the module's `(profiler-report)`; returns the sorted `((name . (calls . ns)) ...)` alist
+- `(profiling-reset)` — equivalent to `(profiler-reset)`; clears accumulated data
+- Together with `(set! **eval-profiler** 2)`, these let scripts enable and query the profiler without importing `(curry profiling)`
+
+**Solar system demo — live profiling HUD** (`examples/solar-system-qt6.scm`):
+- New overlay displaying the top 12 hottest named closures by accumulated wall-clock time, heat-mapped from yellow (hottest) to grey, updated every animation frame
+- Toggle with the **Profile HUD \[p\]** sidebar checkbox or by pressing **`p`**
+- **Reset Profiler** button clears counters without restarting the simulation
+- Demo enables level 2 at startup via `(set! **eval-profiler** 2)`
+
+---
+
 ### 0.7.7 — R7RS compliance, fold fixes, extended Akkadian vocabulary, runtime profiler
 
 **R7RS base-library completeness** — all missing procedures and special forms added:
