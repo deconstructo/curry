@@ -519,7 +519,7 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
 
 # Hard runtime deps — always required regardless of which modules are built
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libgc1t64 | libgc1 | libgc2, libgmp10")
+    "libgc1t64 | libgc1 | libgc2, libgmp10, libreadline8 | libreadline8t64 | libreadline9")
 
 # Always-on optional modules (network, redis, sqlite, regex, sync, vecdb, json, mqtt)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
@@ -535,7 +535,6 @@ set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
 # Heavy optional modules — useful but not installed by default
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS
     "libqt6widgets6, libqt6opengl6, \
-     libplplot19 | libplplot17, \
-     libreadline8 | libreadline9")
+     libplplot19 | libplplot17")
 
 include(CPack)
