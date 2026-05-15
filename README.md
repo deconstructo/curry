@@ -83,6 +83,7 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | [mqtt](docs/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
 | [ode](docs/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
 | [mcp](docs/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
+| [profiling](docs/module-profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
 
 ---
 
@@ -119,6 +120,18 @@ Example:
 ---
 
 ## Changelog
+
+### 0.7.7 — Runtime profiler
+
+**Profiling module** (`(curry profiling)`):
+- `(profiler-start [level])` — enable profiling at level 1 (call counts), 2 (+ wall-clock timing via `apply()`), or 3 (+ primitive call counts). Updates the `**eval-profiler**` Scheme binding
+- `(profiler-stop)` — set level to 0; accumulated data is preserved
+- `(profiler-reset)` — clear all accumulated data
+- `(profiler-level)` — return current level as a fixnum
+- `(profiler-report)` — return an alist `((name . (calls . ns)) ...)` sorted by call count, descending
+- TCO tail-calls are counted at all levels but not timed (no exit point on the `goto tail` path); apply-path calls are timed at level ≥ 2
+- Instrumentation is always compiled into the core binary; when profiling is off, the hot-path check is a single integer compare with branch predictor predicting not-taken — effectively zero overhead
+- `examples/profiling_mcp.scm` — MCP server wrapping the profiler as Claude Code tools
 
 ### 0.7.6 — Qt6 interactivity, Mandelbrot fixes, Neo4j documentation
 
