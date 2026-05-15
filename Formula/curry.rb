@@ -12,11 +12,8 @@ class Curry < Formula
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
-  option "with-qt6",       "Build Qt6 GUI module"
-  option "with-plplot",    "Build PLplot scientific plotting module"
-  option "with-mqtt",      "Build MQTT client module with TLS (requires Paho C)"
-  option "with-symengine", "Build SymEngine symbolic CAS module"
-  option "with-neo4j",     "Build Neo4j client module"
+  option "with-qt6",    "Build Qt6 GUI module"
+  option "with-plplot", "Build PLplot scientific plotting module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -24,46 +21,48 @@ class Curry < Formula
   # Required
   depends_on "bdw-gc"
   depends_on "gmp"
-
-  # REPL history / line editing
   depends_on "readline"
 
-  # Always-on modules with brew-available deps
-  depends_on "sqlite"
+  # Always-on modules
   depends_on "openssl@3"
+  depends_on "openldap"
+  depends_on "sqlite"
   depends_on "libgit2"
   depends_on "libpng"
   depends_on "jpeg-turbo"
+  depends_on "paho-mqtt-c"
   # curl ships with macOS; no separate dep needed for graphql/storage
 
-  # Option-gated deps
-  depends_on "qt@6"         if build.with? "qt6"
-  depends_on "plplot"       if build.with? "plplot"
-  depends_on "libpaho-mqtt" if build.with? "mqtt"
-  depends_on "symengine"    if build.with? "symengine"
+  depends_on "qt@6"   if build.with? "qt6"
+  depends_on "plplot" if build.with? "plplot"
 
   def install
-    prefix_paths = [Formula["openssl@3"].opt_prefix]
-    prefix_paths << Formula["qt@6"].opt_prefix if build.with? "qt6"
+    prefix_paths = [
+      Formula["openssl@3"].opt_prefix,
+      Formula["readline"].opt_prefix,
+      Formula["openldap"].opt_prefix,
+      Formula["paho-mqtt-c"].opt_prefix,
+    ]
+    prefix_paths << Formula["qt@6"].opt_prefix   if build.with? "qt6"
+    prefix_paths << Formula["plplot"].opt_prefix  if build.with? "plplot"
 
     args = std_cmake_args + %W[
       -DCMAKE_BUILD_TYPE=Release
-      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       -DCMAKE_PREFIX_PATH=#{prefix_paths.join(";")}
       -DBUILD_MODULE_CRYPTO=ON
       -DBUILD_MODULE_LDAP=ON
       -DBUILD_MODULE_STORAGE=ON
       -DBUILD_MODULE_GRAPHQL=ON
       -DBUILD_MODULE_REDIS=ON
+      -DBUILD_MODULE_MQTT=ON
       -DBUILD_MODULE_IMAGE=ON
       -DBUILD_MODULE_GIT=ON
       -DBUILD_MODULE_MCP=ON
       -DBUILD_MODULE_PROFILING=ON
-      -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
-      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
-      -DBUILD_MODULE_MQTT=#{build.with?("mqtt")       ? "ON" : "OFF"}
-      -DBUILD_MODULE_SYMENGINE=#{build.with?("symengine") ? "ON" : "OFF"}
-      -DBUILD_MODULE_NEO4J=#{build.with?("neo4j")    ? "ON" : "OFF"}
+      -DBUILD_MODULE_QT6=#{build.with?("qt6")    ? "ON" : "OFF"}
+      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot") ? "ON" : "OFF"}
+      -DBUILD_MODULE_SYMENGINE=OFF
+      -DBUILD_MODULE_NEO4J=OFF
       -DBUILD_MODULE_VECDB=OFF
     ]
 
