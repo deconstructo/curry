@@ -123,6 +123,23 @@ Example:
 
 ## Changelog
 
+### 0.8.1 — CAS Phase 5: Taylor series
+
+- **`(series f x a n)`** — truncated Taylor/Maclaurin series of `f` around point `a` to order `n`.  
+  Computed by iterating `sx_diff` / `sx_substitute`; zero-coefficient terms are dropped.  
+  Integer-valued flonum derivatives (e.g. `exp(0) = 1.0`) are coerced to fixnums before dividing by `k!`, so expansions around exact points yield **exact rational coefficients**: `1/2`, `1/6`, `1/24` …  
+  Output is a plain symbolic ADD expression — composable with `simplify`, `substitute`, `∂`, `sym->infix`, `sym->latex`.
+
+```scheme
+(symbolic x)
+(series (exp x) x 0 4)   ; (+ 1 x (* 1/2 x²) (* 1/6 x³) (* 1/24 x⁴))
+(series (sin x) x 0 5)   ; (+ x (* -1/6 x³) (* 1/120 x⁵))
+(sym->latex (series (cos x) x 0 4))
+; 1 - \frac{1}{2} x^{2} + \frac{1}{24} x^{4}
+```
+
+---
+
 ### 0.8.0 — Maxwell's equations: four interactive workbooks
 
 Four interactive Qt6 demos — one per Maxwell equation — each paired with a

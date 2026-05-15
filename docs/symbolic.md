@@ -366,6 +366,60 @@ Unknown forms leave an unevaluated `(∫ expr var)` node.
 3. **Infinity** — handles `finite/∞ = 0` directly; `∞/∞` triggers L'Hôpital.
 4. **Fallback** — returns an unevaluated `(limit f x a)` node.
 
+## Taylor series
+
+`(series f x a n)` expands `f` around the point `a` to order `n`, returning the truncated Taylor series as a symbolic sum:
+
+```
+Σ_{k=0}^{n} f^(k)(a)/k! · (x − a)^k
+```
+
+Zero-coefficient terms are dropped.  When `a` is an exact integer (e.g. `0`) and `f^(k)(a)` evaluates to an integer, the coefficients are **exact rationals** (`1/2`, `1/6`, `1/24`, …).
+
+```scheme
+(symbolic x)
+
+(series (exp x) x 0 4)
+; => (+ 1 x (* 1/2 (expt x 2)) (* 1/6 (expt x 3)) (* 1/24 (expt x 4)))
+
+(series (sin x) x 0 5)
+; => (+ x (* -1/6 (expt x 3)) (* 1/120 (expt x 5)))
+
+(series (cos x) x 0 4)
+; => (+ 1 (* -1/2 (expt x 2)) (* 1/24 (expt x 4)))
+
+(series (log (+ 1 x)) x 0 4)
+; => (+ x (* -1/2 (expt x 2)) (* 1/3 (expt x 3)) (* -1/4 (expt x 4)))
+
+; Expansion around a non-zero point
+(series (exp x) x 1 3)
+; => e + e·(x−1) + e/2·(x−1)² + e/6·(x−1)³   (flonum coefficients)
+```
+
+The result is a plain symbolic expression — you can feed it directly to `simplify`, `substitute`, `∂`, `sym->infix`, or `sym->latex`:
+
+```scheme
+(sym->latex (series (sin x) x 0 5))
+; => x - \frac{1}{6} x^{3} + \frac{1}{120} x^{5}
+
+; Numerically evaluate at a point
+(substitute (series (exp x) x 0 6) x 1)
+; => 163/60   (= 1+1+1/2+1/6+1/24+1/120+1/720, exact)
+
+; Differentiate the series — recovers the series of the derivative
+(simplify (∂ (series (sin x) x 0 5) x))
+; => (+ 1 (* -1/2 (expt x 2)) (* 1/24 (expt x 4)))  — matches (series (cos x) x 0 4)
+```
+
+### Signature
+
+| Argument | Type | Description |
+|---|---|---|
+| `f` | any symbolic or numeric expression | Function to expand |
+| `x` | sym-var | Expansion variable |
+| `a` | number or symbolic | Expansion point |
+| `n` | exact non-negative integer | Maximum order |
+
 ## Vector calculus (Cartesian)
 
 The vector calculus operators work on **Scheme lists of symbolic expressions** representing components of a scalar or vector field. Variables are passed as a list of symbolic variables in order `(x y z ...)`.
@@ -893,6 +947,7 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(limit f x a)` | Two-sided limit of `f` as `x → a` |
 | `(limit f x a 'left)` | One-sided limit x→a⁻ |
 | `(limit f x a 'right)` | One-sided limit x→a⁺ |
+| `(series f x a n)` | Truncated Taylor series of `f` around `a` to order `n` |
 | `(grad f vars)` / `(gradient f vars)` | Gradient of scalar field — list of ∂f/∂xᵢ |
 | `(divergence F vars)` | Divergence of vector field — scalar |
 | `(curl F vars)` | Curl of 3-D vector field — 3-component list |
