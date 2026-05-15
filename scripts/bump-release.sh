@@ -99,7 +99,9 @@ CMAKELISTS="$REPO_ROOT/CMakeLists.txt"
 info "Updating $CMAKELISTS"
 sedi "s|project(curry VERSION [^ ]* LANGUAGES|project(curry VERSION ${NEW_VER} LANGUAGES|" \
   "$CMAKELISTS"
-sedi "s|# curry-scheme_[0-9][^_]*_|# curry-scheme_${NEW_VER}_|" \
+sedi "s|set(CPACK_PACKAGE_VERSION[^)]*)|set(CPACK_PACKAGE_VERSION           \"${NEW_VER}\")|" \
+  "$CMAKELISTS"
+sedi "s|# curry-scheme_[0-9][0-9._]*_|# curry-scheme_${NEW_VER}_|" \
   "$CMAKELISTS"
 ok "CMakeLists.txt updated"
 

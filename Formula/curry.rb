@@ -12,8 +12,9 @@ class Curry < Formula
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
-  option "with-qt6",    "Build Qt6 GUI module"
-  option "with-plplot", "Build PLplot scientific plotting module"
+  option "with-qt6",       "Build Qt6 GUI module"
+  option "with-plplot",    "Build PLplot scientific plotting module"
+  option "with-symengine", "Build SymEngine symbolic CAS module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -30,21 +31,24 @@ class Curry < Formula
   depends_on "libgit2"
   depends_on "libpng"
   depends_on "jpeg-turbo"
-  depends_on "paho-mqtt-c"
+  depends_on "libpaho-mqtt"
   # curl ships with macOS; no separate dep needed for graphql/storage
 
-  depends_on "qt@6"   if build.with? "qt6"
-  depends_on "plplot" if build.with? "plplot"
+  # Option-gated deps
+  depends_on "qt@6"      if build.with? "qt6"
+  depends_on "plplot"    if build.with? "plplot"
+  depends_on "symengine" if build.with? "symengine"
 
   def install
     prefix_paths = [
       Formula["openssl@3"].opt_prefix,
       Formula["readline"].opt_prefix,
       Formula["openldap"].opt_prefix,
-      Formula["paho-mqtt-c"].opt_prefix,
+      Formula["libpaho-mqtt"].opt_prefix,
     ]
-    prefix_paths << Formula["qt@6"].opt_prefix   if build.with? "qt6"
-    prefix_paths << Formula["plplot"].opt_prefix  if build.with? "plplot"
+    prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
+    prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
+    prefix_paths << Formula["symengine"].opt_prefix if build.with? "symengine"
 
     args = std_cmake_args + %W[
       -DCMAKE_BUILD_TYPE=Release
@@ -59,10 +63,10 @@ class Curry < Formula
       -DBUILD_MODULE_GIT=ON
       -DBUILD_MODULE_MCP=ON
       -DBUILD_MODULE_PROFILING=ON
-      -DBUILD_MODULE_QT6=#{build.with?("qt6")    ? "ON" : "OFF"}
-      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot") ? "ON" : "OFF"}
-      -DBUILD_MODULE_SYMENGINE=OFF
-      -DBUILD_MODULE_NEO4J=OFF
+      -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
+      -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
+      -DBUILD_MODULE_SYMENGINE=#{build.with?("symengine") ? "ON" : "OFF"}
+      -DBUILD_MODULE_NEO4J=ON
       -DBUILD_MODULE_VECDB=OFF
     ]
 

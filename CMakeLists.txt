@@ -157,9 +157,9 @@ option(BUILD_MODULE_NETWORK   "Build network module"               ON)
 option(BUILD_MODULE_CRYPTO    "Build crypto module (base64/MD5/SHA)"ON)
 option(BUILD_MODULE_LDAP      "Build LDAP/LDAPS module"            ON)
 option(BUILD_MODULE_STORAGE   "Build object storage module (S3/GCS/Azure/Swift)" ON)
-option(BUILD_MODULE_GRAPHQL   "Build GraphQL client module"         OFF)
+option(BUILD_MODULE_GRAPHQL   "Build GraphQL client module"         ON)
 option(BUILD_MODULE_SYMENGINE "Build SymEngine module"              OFF)
-option(BUILD_MODULE_NEO4J     "Build Neo4j module"                  OFF)
+option(BUILD_MODULE_NEO4J     "Build Neo4j module"                  ON)
 option(BUILD_MODULE_REDIS     "Build Redis client module"           ON)
 option(BUILD_MODULE_MQTT      "Build MQTT client module (Paho C)"   ON)
 option(BUILD_MODULE_IMAGE     "Build PNG/JPEG/GIF image module"     ON)
@@ -510,6 +510,7 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
+set(CPACK_PACKAGE_VERSION           "0.7.7")       # overridden by bump-release.sh
 set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.7.7_<arch>.deb
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
