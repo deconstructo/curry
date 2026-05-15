@@ -123,6 +123,35 @@ Example:
 
 ## Changelog
 
+### 0.8.0 — Maxwell's equations: four interactive workbooks
+
+Four interactive Qt6 demos — one per Maxwell equation — each paired with a
+student guide that derives the physics, walks through the simulation, and
+includes guided exercises.  All four use the built-in symbolic CAS to verify
+the relevant identity live in the sidebar.
+
+- **Faraday's Law** (`examples/faraday-explorer.scm`, `docs/faraday-explorer.md`)  
+  Animated solenoid with time-varying B; induced E_φ computed from ∇×E = −∂B/∂t.
+  Exact two-region solution (linear / 1/r), EMF saturation, Lenz's-law phase demo.
+  CAS: verifies ∇×E + ∂B/∂t = 0 for a plane wave symbolically.
+
+- **Ampère's Law** (`examples/ampere-explorer.scm`, `docs/ampere-explorer.md`)  
+  Two modes toggled live: conduction current (wire) vs. displacement current
+  (capacitor charging).  Demonstrates the 90° phase contrast between the two.
+  CAS: verifies ∇×B − μ₀ε₀∂E/∂t = 0 for a plane wave.
+
+- **Gauss's Law for E** (`examples/gauss-e-explorer.scm`, `docs/gauss-e-explorer.md`)  
+  Uniformly-charged sphere; Gaussian surface draggable from centre to exterior.
+  Shows flux saturation at r = R and the r³ / r² field profile.  Sign toggle.
+  CAS: ∇·(r̂/3) = 1 = ρ/ε₀ (normalised units).
+
+- **Gauss's Law for B** (`examples/gauss-b-explorer.scm`, `docs/gauss-b-explorer.md`)  
+  2D magnetic dipole; positionable Gaussian surface demonstrates ∮B·n̂dl = 0
+  when both poles are enclosed, and what a monopole *would* look like.
+  CAS: proves ∇·(∇×A) = 0 identically for a concrete A = (0, xy, xyz).
+
+---
+
 ### 0.7.9 — CAS Phase 4: limits, IBP integration, vector calculus
 
 **Symbolic integration — new patterns:**
