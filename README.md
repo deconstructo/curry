@@ -15,6 +15,7 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 - [Multivectors](docs/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
 - [Akkadian / Cuneiform reference](docs/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
 - [MCP server](docs/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients; stdio and SSE transports
+- [Raspberry Pi / embedded hardware](docs/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM with the `(curry rpi)` module
 
 ### Extended numeric tower
 
@@ -121,6 +122,28 @@ Example:
 ---
 
 ## Changelog
+
+### 0.7.9 — Raspberry Pi hardware module
+
+**New module `(curry rpi)`** — GPIO, I2C, SPI, and PWM for Raspberry Pi and
+compatible Linux embedded boards (Orange Pi, Radxa, Armbian, etc.).  Linux
+only; not supported on macOS.  Enable with `-DBUILD_MODULE_RPI=ON`.
+
+- **GPIO** via `libgpiod` — the modern kernel character-device interface
+  (`/dev/gpiochipN`).  Replaces the deprecated sysfs approach.
+  `gpio-open`, `gpio-read`, `gpio-write`, `gpio-close`
+- **I2C** via direct `ioctl` on `/dev/i2c-N` — no extra library beyond
+  `libgpiod-dev`.  `i2c-open`, `i2c-read`, `i2c-write`, `i2c-close`
+- **SPI** via direct `ioctl` on `/dev/spidevN.M` — full-duplex transfers as
+  bytevectors.  `spi-open`, `spi-transfer`, `spi-close`
+- **PWM** via sysfs `/sys/class/pwm` — nanosecond precision, works with
+  `dtoverlay=pwm`.  `pwm-open`, `pwm-set!`, `pwm-enable!`, `pwm-disable!`, `pwm-close`
+- All handles are opaque tagged pairs; predicate procedures (`gpio?`, `i2c?`,
+  `spi?`, `pwm?`) provided for each type
+- Setup guide with hardware examples at [docs/RPI.md](docs/RPI.md)
+- Full API reference at [docs/module-rpi.md](docs/module-rpi.md)
+
+---
 
 ### 0.7.8 — Profiling level-2 overhaul, raw builtins, solar system HUD
 
