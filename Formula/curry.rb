@@ -73,6 +73,7 @@ class Curry < Formula
     system "cmake", "-B", "build", *args
     system "cmake", "--build", "build", "-j", ENV.make_jobs.to_s
     system "cmake", "--install", "build"
+    doc.install Dir["docs/*"]
   end
 
   test do
