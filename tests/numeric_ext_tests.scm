@@ -456,6 +456,55 @@
 
 
 ;;; =========================================================================
+;;; Taylor series: (series f x point n)
+;;; =========================================================================
+
+;;; exp around 0 to order 4: 1 + x + x²/2 + x³/6 + x⁴/24
+(define exp-s4 (series (exp x) x 0 4))
+(check "exp series is sym-expr"   (sym-expr? exp-s4) #t)
+(check-approx "exp series at x=0"   (substitute exp-s4 x 0.0) 1.0  1e-12)
+(check-approx "exp series at x=0.1" (substitute exp-s4 x 0.1) (exp 0.1) 1e-6)
+(check-approx "exp series at x=0.5" (substitute exp-s4 x 0.5) (exp 0.5) 0.01)
+
+;;; sin around 0 to order 5: x - x³/6 + x⁵/120
+(define sin-s5 (series (sin x) x 0 5))
+(check-approx "sin series at x=0"   (substitute sin-s5 x 0.0) 0.0      1e-12)
+(check-approx "sin series at x=0.1" (substitute sin-s5 x 0.1) (sin 0.1) 1e-9)
+
+;;; cos around 0 to order 4: 1 - x²/2 + x⁴/24
+(define cos-s4 (series (cos x) x 0 4))
+(check-approx "cos series at x=0"   (substitute cos-s4 x 0.0) 1.0      1e-12)
+(check-approx "cos series at x=0.1" (substitute cos-s4 x 0.1) (cos 0.1) 1e-7)
+
+;;; log(1+x) around 0 to order 4: x - x²/2 + x³/3 - x⁴/4
+(define log1p-s4 (series (log (+ 1 x)) x 0 4))
+(check-approx "log(1+x) series at x=0"   (substitute log1p-s4 x 0.0) 0.0       1e-12)
+(check-approx "log(1+x) series at x=0.3" (substitute log1p-s4 x 0.3) (log 1.3) 5e-4)
+
+;;; expansion around non-zero point: exp around x=1
+(define exp-at1 (series (exp x) x 1 3))
+(check-approx "exp series around 1, at x=1"
+  (substitute exp-at1 x 1.0) (exp 1.0) 1e-12)
+(check-approx "exp series around 1, at x=1.1"
+  (substitute exp-at1 x 1.1) (exp 1.1) 0.001)
+
+;;; constant function — all derivatives are zero, series = constant
+(define c5 (series 5 x 0 3))
+(check-approx "series of constant 5 at x=0" (substitute c5 x 0.0) 5.0 1e-12)
+(check-approx "series of constant 5 at x=7" (substitute c5 x 7.0) 5.0 1e-12)
+
+;;; polynomial — series of x² around 0 recovers x² exactly
+(define x2-s3 (series (expt x 2) x 0 3))
+(check-approx "series x^2 at x=3"  (substitute x2-s3 x  3.0) 9.0 1e-12)
+(check-approx "series x^2 at x=-2" (substitute x2-s3 x -2.0) 4.0 1e-12)
+
+;;; order 0 — just f(point)
+(define s0 (series (sin x) x 0 0))
+(check-approx "series sin order 0 at x=0" (substitute s0 x 0.0) 0.0 1e-12)
+(define s0c (series (cos x) x 0 0))
+(check-approx "series cos order 0 at x=0" (substitute s0c x 0.0) 1.0 1e-12)
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

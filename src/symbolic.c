@@ -1851,3 +1851,58 @@ val_t sx_limit(val_t expr, val_t var, val_t point, int dir) {
         scm_raise(V_FALSE, "limit: second argument must be a symbolic variable");
     return sx_limit_inner(expr, var, point, dir, 0);
 }
+
+/* ---- Taylor series ---- */
+
+/* Coerce a flonum with an integer value to a fixnum so that subsequent
+ * num_div produces exact rationals (e.g. exp(0)=1.0 → 1 → 1/6 not 0.1667). */
+static val_t series_coerce_exact(val_t v) {
+    if (!vis_flonum(v)) return v;
+    double d = num_to_double(v);
+    double fl = floor(d);
+    if (d == fl && d >= (double)INTPTR_MIN && d <= (double)INTPTR_MAX)
+        return vfix((intptr_t)fl);
+    return v;
+}
+
+val_t sx_series(val_t expr, val_t var, val_t point, int n) {
+    if (!vis_symvar(var))
+        scm_raise(V_FALSE, "series: second argument must be a symbolic variable");
+    if (n < 0) n = 0;
+
+    val_t *terms = (val_t *)gc_alloc((size_t)(n + 1) * sizeof(val_t));
+    int nterms = 0;
+    val_t fk = expr;
+    val_t fact = vfix(1);  /* k! */
+
+    for (int k = 0; k <= n; k++) {
+        if (k > 0) {
+            fk = sx_simplify(sx_diff(fk, var));
+            fact = num_mul(fact, vfix(k));
+        }
+
+        val_t ck = sx_simplify(sx_substitute(fk, var, point));
+        if (vis_number(ck) && num_is_zero(ck)) continue;
+
+        /* Promote integer-valued flonums to fixnum for exact rational output */
+        ck = series_coerce_exact(ck);
+
+        val_t coeff = vis_number(ck) ? num_div(ck, fact) : sx_div(ck, fact);
+        if (vis_number(coeff) && num_is_zero(coeff)) continue;
+
+        val_t term;
+        if (k == 0) {
+            term = coeff;
+        } else {
+            /* sx_sub(var, 0) simplifies to var automatically */
+            val_t xma = sx_sub(var, point);
+            val_t pw = (k == 1) ? xma : sx_expt(xma, vfix(k));
+            term = sx_mul(coeff, pw);
+        }
+        terms[nterms++] = term;
+    }
+
+    if (nterms == 0) return vfix(0);
+    if (nterms == 1) return terms[0];
+    return sx_simplify(sx_make_expr(SX_ADD, nterms, terms));
+}

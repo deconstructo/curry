@@ -118,6 +118,19 @@
  *     3. Infinity — point = ±∞: substitute and simplify; finite/∞=0, ∞/∞ → L'Hôpital.
  *     4. Fallback: unevaluated (limit f x point) node.
  *
+ * --- Taylor series ---
+ *
+ *   (series f x point n)        ; expand f around point to order n
+ *
+ *   Returns the truncated Taylor series as an ADD expression:
+ *     Σ_{k=0}^{n} f^(k)(point)/k! · (x − point)^k
+ *
+ *   Algorithm: compute successive derivatives via sx_diff, evaluate each at
+ *   point via sx_substitute, divide by k!, and accumulate non-zero terms.
+ *   Zero-coefficient terms are dropped.  If point = 0, (x − 0) simplifies
+ *   to x automatically.  Returns an exact rational ADD expression when f is
+ *   a standard transcendental and point is exact (e.g. 0).
+ *
  * --- Complex / conjugate operators ---
  *
  *   (conj expr)                  ; symbolic complex conjugate
@@ -221,6 +234,9 @@ bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr con
 
 /* limit: dir = 0 (both), -1 (left), +1 (right) */
 val_t sx_limit(val_t expr, val_t var, val_t point, int dir);
+
+/* Taylor series: Σ f^(k)(point)/k! · (x−point)^k  for k=0..n */
+val_t sx_series(val_t expr, val_t var, val_t point, int n);
 
 /* ---- Polynomial / structural operations ---- */
 val_t sx_expand(val_t expr);                                 /* distribute * over +, expand integer powers */

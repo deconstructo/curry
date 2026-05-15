@@ -1361,6 +1361,12 @@ static val_t prim_sx_limit(int ac, val_t *av, void *ud) {
     }
     return sx_limit(av[0], av[1], av[2], dir);
 }
+static val_t prim_sx_series(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_fixnum(av[3]) || vunfix(av[3]) < 0)
+        scm_raise(V_FALSE, "series: fourth argument must be a non-negative integer");
+    return sx_series(av[0], av[1], av[2], (int)vunfix(av[3]));
+}
 /* ---- Vector calculus (symbolic, Cartesian) ---- */
 
 /* grad(f, vars) — gradient of scalar f; vars is a list of sym-vars.
@@ -2061,6 +2067,7 @@ void builtins_register(val_t env) {
     DEF("collect",        prim_collect,         2, 2);
     DEF("leading-coeff",  prim_leading_coeff,   2, 2);
     DEF("limit",          prim_sx_limit,        3, 4);
+    DEF("series",         prim_sx_series,       4, 4);
     DEF("grad",           prim_grad,            2, 2);
     DEF("gradient",       prim_grad,            2, 2);
     DEF("divergence",     prim_divergence,      2, 2);
