@@ -1,5 +1,5 @@
 ;;; solar-system-qt6.scm
-;;; Version: 1.0
+;;; Version: 1.1
 ;;;
 ;;; N-body gravitational simulation in D spatial dimensions — Qt6 + actor physics.
 ;;;
@@ -26,6 +26,7 @@
 ;;;   Bodies slider  — number of bodies (applied at Reset)
 ;;;   Speed slider   — simulation steps per frame
 ;;;   Trails toggle  — show orbital trails
+;;;   Profile toggle — show live profiling HUD (level 2 timing)
 ;;;   Pause/Resume   — pause simulation
 ;;;   Reset          — restart with new random conditions
 ;;;   q / Escape     — quit
@@ -46,6 +47,10 @@
 (define *speed*    4)
 (define *paused*   #f)
 (define *trails*   #t)
+(define *show-profile* #f)
+
+;;; Enable wall-clock timing for named closures.
+(set! **eval-profiler** 2)
 
 ;;; ---- Body representation ----
 ;;; #(mass pos-vec vel-vec trail-list colour)
@@ -300,6 +305,75 @@
           (loop (+ i 1)))))
     (set! *bodies* (reverse bodies))))
 
+;;; ---- Profiling HUD ----
+
+;;; Snapshot updated each frame when profiling is on.
+(define *prof-snapshot* '())
+
+(define (refresh-profile-snapshot!)
+  (set! *prof-snapshot* (profiling-report)))
+
+;;; Format nanoseconds into a compact human-readable string.
+(define (fmt-ns ns)
+  (cond
+    ((>= ns 1000000000) (string-append (number->string (round (/ ns 1000000))) "ms"))
+    ((>= ns 1000000)    (string-append (number->string (round (/ ns 1000)))    "µs"))
+    (else               (string-append (number->string ns)                     "ns"))))
+
+;;; Draw the profiling overlay — semi-transparent panel, top-12 functions.
+(define (draw-profile-hud painter w h)
+  (let* ((rows    (min 12 (length *prof-snapshot*)))
+         (col-w   340)
+         (row-h   16)
+         (pad     8)
+         (panel-w (+ col-w (* 2 pad)))
+         (panel-h (+ (* rows row-h) (* 2 pad) 20))
+         (px      (- w panel-w 10))
+         (py      10))
+
+    ; Panel background
+    (gfx-set-color! painter 0.05 0.05 0.12 0.82)
+    (gfx-fill-rect! painter px py panel-w panel-h)
+    (gfx-set-color! painter 0.4 0.5 0.7 0.6)
+    (gfx-draw-rect! painter px py panel-w panel-h)
+
+    ; Header
+    (gfx-set-color! painter 0.7 0.8 1.0 1.0)
+    (gfx-set-font! painter "Monospace" 11 #t)
+    (gfx-draw-text! painter (+ px pad) (+ py pad 10) "PROFILER  (level 2 — wall clock)")
+
+    ; Column rows
+    (gfx-set-font! painter "Monospace" 11)
+    (let loop ((entries *prof-snapshot*) (i 0))
+      (when (and (pair? entries) (< i rows))
+        (let* ((entry  (car entries))
+               (name   (symbol->string (car entry)))
+               (calls  (cadr entry))
+               (ns     (cddr entry))
+               (y      (+ py pad 20 (* i row-h)))
+               ; Colour: yellow for hottest, fading to grey
+               (heat   (- 1.0 (/ i (max 1 (- rows 1)))))
+               (r      (+ 0.4 (* 0.6 heat)))
+               (g      (+ 0.4 (* 0.5 (- 1.0 heat))))
+               (b      0.4)
+               ; Truncate long names
+               (disp   (if (> (string-length name) 28)
+                           (string-append (substring name 0 25) "...")
+                           name)))
+          (gfx-set-color! painter r g b 0.95)
+          (gfx-draw-text! painter (+ px pad) (+ y 11)
+            (string-append
+              (let pad-r ((s disp) (n 28))
+                (if (>= (string-length s) n) s
+                    (pad-r (string-append s " ") n)))
+              " "
+              (let lpad ((s (number->string calls)) (n 7))
+                (if (>= (string-length s) n) s
+                    (lpad (string-append " " s) n)))
+              "  "
+              (fmt-ns ns))))
+        (loop (cdr entries) (+ i 1))))))
+
 ;;; ---- Drawing ----
 
 (define (w->s x cx scale) (+ cx (* x scale)))
@@ -366,7 +440,11 @@
     (when *paused*
       (gfx-set-color! painter 1.0 0.6 0.2 0.9)
       (gfx-set-font! painter "Monospace" 14 #t)
-      (gfx-draw-text! painter 10 82 "PAUSED"))))
+      (gfx-draw-text! painter 10 82 "PAUSED"))
+
+    ; Profiling overlay
+    (when *show-profile*
+      (draw-profile-hud painter w h))))
 
 ;;; ---- Widget handles (set during realize) ----
 
@@ -398,6 +476,7 @@
     (cond
       ((equal? key "space")  (set! *paused* (not *paused*)))
       ((equal? key "r")      (do-reset!))
+      ((equal? key "p")      (set! *show-profile* (not *show-profile*)))
       ((equal? key "q")      (quit-event-loop))
       ((equal? key "Escape") (quit-event-loop)))))
 
@@ -449,6 +528,13 @@
           (when (not on)
             (for-each (lambda (b) (body-set-trail! b '())) *bodies*)))))
 
+    (box-add! sb
+      (make-toggle "Profile HUD  [p]" #f
+        (lambda (on)
+          (set! *show-profile* on)
+          (when (not on)
+            (set! *prof-snapshot* '())))))
+
     (box-add! sb (make-separator))
 
     ; ---- Buttons ----
@@ -458,7 +544,15 @@
 
     (box-add! sb
       (make-button "Reset"
-        (lambda () (do-reset!))))
+        (lambda ()
+          (profiling-reset)
+          (do-reset!))))
+
+    (box-add! sb
+      (make-button "Reset Profiler"
+        (lambda ()
+          (profiling-reset)
+          (set! *prof-snapshot* '()))))
 
     (box-add! sb
       (make-button "Quit" quit-event-loop))
@@ -478,6 +572,8 @@
             (set! *G*     (slider-value g-slider))
             (set! *dt*    (slider-value dt-slider))
             (set! *speed* (inexact->exact (round (slider-value speed-slider)))))
+          (when *show-profile*
+            (refresh-profile-snapshot!))
           (send! sim-actor 'step)
           (canvas-redraw! canvas))))
     (timer-start! anim-timer)))

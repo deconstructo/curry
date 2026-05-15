@@ -13,6 +13,7 @@
 #include "set.h"
 #include "actors.h"
 #include "gc.h"
+#include "profiling.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1263,6 +1264,8 @@ static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
+static val_t prim_profiling_report(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return profiling_report();}
+static val_t prim_profiling_reset(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; profiling_reset(); return V_VOID;}
 static val_t prim_floor_div(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t q=prim_floor_quotient(ac,av,ud), r2=num_sub(av[0],num_mul(q,av[1]));
@@ -1830,7 +1833,9 @@ void builtins_register(val_t env) {
     DEF("exit",       prim_exit,    0,1);
     DEF("quit",       prim_exit,    0,1);
     DEF("system",     prim_system,  1,1);
-    DEF("gc",         prim_gc,      0,0);
+    DEF("gc",                prim_gc,               0,0);
+    DEF("profiling-report",  prim_profiling_report, 0,0);
+    DEF("profiling-reset",   prim_profiling_reset,  0,0);
     DEF("eof-object", prim_void,    0,0); /* placeholder; EOF created by reader */
 
     /* Constants */

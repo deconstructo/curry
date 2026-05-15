@@ -28,12 +28,29 @@ this module provides the controls and the report procedure.
 |-------|-----------------|
 | `0` | Off — single branch not taken; effectively zero overhead |
 | `1` | Call counts for named closures (both TCO and apply paths) |
-| `2` | Wall-clock timing for named closures called through `apply()` |
+| `2` | Wall-clock timing for named closures; TCO sacrificed for non-self-tail calls |
 | `3` | Level 2, plus call counts for built-in primitives |
 
 TCO calls (tail-recursive self-calls optimised via `goto tail`) are always
 counted at levels 1–3 but never timed — there is no natural exit point on the
 TCO path.
+
+### Level 2 — TCO trade-off
+
+At level 2, the evaluator intercepts calls to named closures *before* the
+`goto tail` optimisation so that a return address exists and wall-clock time
+can be measured.  This is accurate but means those call frames stay on the C
+stack for the duration of the call.
+
+To prevent unbounded stack growth in recursive loops, the intercept is skipped
+when a closure is already executing itself (i.e. `proc == prof2_current` for
+the current thread).  Self-tail-recursive calls fall through to the normal TCO
+path and are counted but not individually timed.  Mutually recursive functions
+are fully timed because they involve different closure objects.
+
+In practice: level 2 is safe for typical workloads.  If you have a hot
+self-tail loop that reaches very deep recursion *and* calls other named
+functions in its body, those inner calls will still be timed correctly.
 
 ## API
 
@@ -70,6 +87,34 @@ call count, descending.
 - `calls` — total call count (apply + TCO paths combined)
 - `ns` — accumulated wall-clock nanoseconds (non-zero only at level ≥ 2 for
   calls through `apply()`; TCO calls contribute 0 to this field)
+
+## Built-in primitives (no import required)
+
+Two procedures are registered directly in the global environment by
+`builtins_register()` and are always available without importing the profiling
+module:
+
+| Procedure | Description |
+|-----------|-------------|
+| `(profiling-report)` | Same as `(profiler-report)` — returns the sorted alist |
+| `(profiling-reset)`  | Same as `(profiler-reset)` — clears accumulated data |
+
+These are useful in scripts that set the profiling level via
+`**eval-profiler**` directly and do not want to pull in the full module:
+
+```scheme
+(set! **eval-profiler** 2)          ; enable timing without importing the module
+
+;; ... your code ...
+
+(for-each (lambda (e) (display e) (newline))
+          (profiling-report))
+
+(profiling-reset)
+```
+
+The module-level names (`profiler-report`, `profiler-reset`) are thin wrappers
+around the same C functions.
 
 ## Scheme binding `**eval-profiler**`
 
@@ -112,6 +157,22 @@ the module and writes directly to the `set!` intercept in `eval.c`.
 
 (profiler-stop)
 ```
+
+## Example — live HUD in the solar system demo
+
+`examples/solar-system-qt6.scm` embeds a live profiling overlay directly in
+the simulation window.  The demo sets level 2 at startup:
+
+```scheme
+(set! **eval-profiler** 2)
+```
+
+Toggle the overlay with the **Profile HUD \[p\]** sidebar checkbox or by
+pressing **`p`**.  While visible, it displays the top 12 hottest named
+closures (by accumulated wall-clock time), colour-coded from yellow (hottest)
+to grey (coolest), updated every animation frame.  The **Reset Profiler**
+button calls `(profiling-reset)` to start a fresh measurement window without
+restarting the simulation.
 
 ## Example — MCP server
 

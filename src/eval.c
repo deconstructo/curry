@@ -986,6 +986,22 @@ tail:
 
         if (vis_closure(proc)) {
             Closure *c = as_clos(proc);
+            if (curry_profiling_level >= 2 && vis_symbol(c->name)) {
+                /* Level 2+: sacrifice TCO for named closures to get wall-clock
+                 * timing.  Skip when re-entering the same closure (self-tail-
+                 * recursive loops) — otherwise the stack grows without bound. */
+                static _Thread_local val_t prof2_current = 0;
+                if (proc != prof2_current) {
+                    val_t saved = prof2_current;
+                    prof2_current = proc;
+                    val_t benv = env_bind_arr(vptr(c->env), c->params, argc, arr);
+                    uint64_t t0 = profiling_now_ns();
+                    val_t r = eval_body(c->body, benv);
+                    profiling_record_timed(c->name, t0);
+                    prof2_current = saved;
+                    return r;
+                }
+            }
             if (curry_profiling_level >= 1 && vis_symbol(c->name))
                 profiling_record_call_tco(c->name);
             env = env_bind_arr(vptr(c->env), c->params, argc, arr);
