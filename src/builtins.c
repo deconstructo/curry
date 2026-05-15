@@ -1330,10 +1330,37 @@ static val_t prim_sym_to_latex(int ac, val_t *av, void *ud) {
     return port_get_output_string(p);
 }
 static val_t prim_sym_var(int ac, val_t *av, void *ud) {
-    (void)ac;(void)ud;
-    if (!vis_symbol(av[0])) scm_raise(V_FALSE, "sym-var: argument must be a symbol");
-    return sx_make_var(av[0]);
+    (void)ud;
+    if (!vis_symbol(av[0])) scm_raise(V_FALSE, "sym-var: first argument must be a symbol");
+    if (ac == 1) return sx_make_var(av[0]);
+    /* Optional second arg: assumption symbol */
+    if (!vis_symbol(av[1])) scm_raise(V_FALSE, "sym-var: second argument must be an assumption symbol");
+    const char *s = sym_cstr(av[1]);
+    uint32_t flags = 0;
+    if      (strcmp(s, "real")     == 0) flags = SYM_ASSUME_REAL;
+    else if (strcmp(s, "positive") == 0) flags = SYM_ASSUME_POSITIVE;
+    else if (strcmp(s, "negative") == 0) flags = SYM_ASSUME_NEGATIVE;
+    else if (strcmp(s, "integer")  == 0) flags = SYM_ASSUME_INTEGER;
+    else if (strcmp(s, "nonzero")  == 0) flags = SYM_ASSUME_NONZERO;
+    else scm_raise(V_FALSE, "sym-var: unknown assumption (expected real, positive, negative, integer, or nonzero)");
+    return sx_make_var_flags(av[0], flags);
 }
+static val_t prim_sym_assumption_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symvar(av[0])) return V_FALSE;
+    if (!vis_symbol(av[1])) scm_raise(V_FALSE, "sym-assumption?: second argument must be a symbol");
+    const char *s = sym_cstr(av[1]);
+    uint32_t f = sym_var_flags(av[0]);
+    bool result = false;
+    if      (strcmp(s, "real")     == 0) result = (f & (SYM_ASSUME_REAL|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE|SYM_ASSUME_INTEGER)) != 0;
+    else if (strcmp(s, "positive") == 0) result = (f & SYM_ASSUME_POSITIVE) != 0;
+    else if (strcmp(s, "negative") == 0) result = (f & SYM_ASSUME_NEGATIVE) != 0;
+    else if (strcmp(s, "integer")  == 0) result = (f & SYM_ASSUME_INTEGER)  != 0;
+    else if (strcmp(s, "nonzero")  == 0) result = (f & (SYM_ASSUME_NONZERO|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE)) != 0;
+    return vbool(result);
+}
+static val_t prim_sx_sign(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return sx_sign(av[0]); }
 static val_t prim_sym_var_p(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return vbool(vis_symvar(av[0])); }
 static val_t prim_sym_expr_p(int ac, val_t *av, void *ud)
@@ -1838,6 +1865,7 @@ void builtins_register(val_t env) {
     DEF("sinh",prim_sinh,1,1); DEF("cosh",prim_cosh,1,1); DEF("tanh",prim_tanh,1,1);
     DEF("asinh",prim_asinh,1,1); DEF("acosh",prim_acosh,1,1); DEF("atanh",prim_atanh,1,1);
     DEF("cot",prim_cot,1,1); DEF("sec",prim_sec,1,1); DEF("csc",prim_csc,1,1);
+    DEF("sign",prim_sx_sign,1,1);
     DEF("floor-quotient",prim_floor_quotient,2,2);
     DEF("floor-remainder",prim_floor_remainder,2,2);
     DEF("floor/",prim_floor_div,2,2);
@@ -2057,8 +2085,9 @@ void builtins_register(val_t env) {
     DEF("sym->string",    prim_sym_to_string,   1, 1);
     DEF("sym->infix",     prim_sym_to_string,   1, 1);
     DEF("sym->latex",     prim_sym_to_latex,    1, 1);
-    DEF("sym-var",        prim_sym_var,         1, 1);
+    DEF("sym-var",        prim_sym_var,         1, 2);
     DEF("sym-var?",       prim_sym_var_p,       1, 1);
+    DEF("sym-assumption?",prim_sym_assumption_p,2, 2);
     DEF("sym-expr?",      prim_sym_expr_p,      1, 1);
     DEF("symbolic?",      prim_symbolic_p,      1, 1);
     DEF("sym-var-name",   prim_sym_var_name,    1, 1);

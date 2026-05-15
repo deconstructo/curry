@@ -181,8 +181,23 @@
 /* One-time setup — called from eval_init (after sym_init) */
 void symbolic_init(void);
 
+/* Assumption flags stored in SymVar.hdr.flags */
+#define SYM_ASSUME_REAL     (1u << 0)  /* variable is real-valued */
+#define SYM_ASSUME_POSITIVE (1u << 1)  /* variable is strictly positive (implies real) */
+#define SYM_ASSUME_NEGATIVE (1u << 2)  /* variable is strictly negative (implies real) */
+#define SYM_ASSUME_INTEGER  (1u << 3)  /* variable is an integer (implies real) */
+#define SYM_ASSUME_NONZERO  (1u << 4)  /* variable is nonzero */
+
+/* Helpers — only meaningful when v is a sym-var */
+#define sym_var_flags(v)    (as_symvar(v)->hdr.flags)
+#define sym_is_positive(v)  (vis_symvar(v) && (sym_var_flags(v) & SYM_ASSUME_POSITIVE) != 0)
+#define sym_is_negative(v)  (vis_symvar(v) && (sym_var_flags(v) & SYM_ASSUME_NEGATIVE) != 0)
+#define sym_is_real(v)      (vis_symvar(v) && (sym_var_flags(v) & \
+    (SYM_ASSUME_REAL|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE|SYM_ASSUME_INTEGER)) != 0)
+
 /* ---- Constructors ---- */
 val_t sx_make_var(val_t name);                          /* T_SYMVAR from symbol */
+val_t sx_make_var_flags(val_t name, uint32_t flags);    /* T_SYMVAR with assumption flags */
 val_t sx_make_expr(val_t op, int nargs, val_t *args);   /* T_SYMEXPR */
 
 /* ---- Accessors ---- */
@@ -217,6 +232,7 @@ val_t sx_atanh(val_t a);
 val_t sx_cot(val_t a);
 val_t sx_sec(val_t a);
 val_t sx_csc(val_t a);
+val_t sx_sign(val_t a);
 
 /* ---- Arithmetic (continued) ---- */
 val_t sx_conj(val_t a);
@@ -259,6 +275,7 @@ extern val_t SX_ASIN, SX_ACOS, SX_ATAN;
 extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 extern val_t SX_COT, SX_SEC, SX_CSC;
 extern val_t SX_LIMIT;
+extern val_t SX_SIGN;
 
 val_t sx_fracdiff(val_t expr, val_t alpha, val_t var); /* D^α fractional derivative */
 val_t sx_fracint (val_t expr, val_t alpha, val_t var); /* I^α fractional integral   */

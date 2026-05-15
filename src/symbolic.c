@@ -21,6 +21,7 @@ val_t SX_ASIN, SX_ACOS, SX_ATAN;
 val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 val_t SX_COT, SX_SEC, SX_CSC;
 val_t SX_LIMIT;
+val_t SX_SIGN;
 
 void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
@@ -55,6 +56,7 @@ void symbolic_init(void) {
     SX_SEC       = sym_intern_cstr("sec");
     SX_CSC       = sym_intern_cstr("csc");
     SX_LIMIT     = sym_intern_cstr("limit");
+    SX_SIGN      = sym_intern_cstr("sign");
 }
 
 /* ---- Constructors ---- */
@@ -63,6 +65,14 @@ val_t sx_make_var(val_t name) {
     SymVar *v = CURRY_NEW(SymVar);
     v->hdr.type  = T_SYMVAR;
     v->hdr.flags = 0;
+    v->name      = name;
+    return vptr(v);
+}
+
+val_t sx_make_var_flags(val_t name, uint32_t flags) {
+    SymVar *v = CURRY_NEW(SymVar);
+    v->hdr.type  = T_SYMVAR;
+    v->hdr.flags = flags;
     v->name      = name;
     return vptr(v);
 }
@@ -115,6 +125,7 @@ val_t sx_simplify(val_t expr);
 
 static bool is_zero(val_t v) { return vis_number(v) && num_is_zero(v); }
 static bool is_one(val_t v)  { return vis_number(v) && !vis_symbolic(v) && num_is_one(v); }
+static bool is_two(val_t v)  { return vis_fixnum(v) && vunfix(v) == 2; }
 
 
 val_t sx_simplify(val_t expr) {
@@ -246,6 +257,18 @@ val_t sx_simplify(val_t expr) {
         if (is_zero(coeff)) return vfix(0);
         if (is_one(coeff)) {
             if (nsym == 1) return nsyms[0];
+            /* (a/b) * c → (a*c)/b */
+            if (nsym == 2) {
+                for (int i = 0; i < 2; i++) {
+                    int jj = 1 - i;
+                    if (!vis_symexpr(nsyms[i]) || as_symexpr(nsyms[i])->op != SX_DIV ||
+                        as_symexpr(nsyms[i])->nargs != 2) continue;
+                    val_t dn = as_symexpr(nsyms[i])->args[0];
+                    val_t dd = as_symexpr(nsyms[i])->args[1];
+                    val_t new_num = sx_mul(dn, nsyms[jj]);
+                    return sx_simplify(sx_div(new_num, dd));
+                }
+            }
             return sx_make_expr(SX_MUL, nsym, nsyms);
         }
         /* coeff == -1: return neg */
@@ -304,6 +327,15 @@ val_t sx_simplify(val_t expr) {
     /* ---- SQRT ---- */
     if (op == SX_SQRT && n == 1 && vis_number(sa[0]))
         return num_sqrt(sa[0]);
+    /* sqrt(x^2) — simplify with assumption knowledge */
+    if (op == SX_SQRT && n == 1 && vis_symexpr(sa[0])) {
+        SymExpr *inner = as_symexpr(sa[0]);
+        if (inner->op == SX_EXPT && inner->nargs == 2 && is_two(inner->args[1])) {
+            val_t base = inner->args[0];
+            if (sym_is_positive(base)) return base;         /* sqrt(x^2) = x  (x > 0) */
+            return sx_simplify(sx_expr1(SX_ABS, base));     /* sqrt(x^2) = |x| */
+        }
+    }
 
     /* ---- Transcendentals on constants ---- */
     if (n == 1 && num_count == 1) {
@@ -325,6 +357,35 @@ val_t sx_simplify(val_t expr) {
         if (op == SX_COT)   return num_cot(sa[0]);
         if (op == SX_SEC)   return num_sec(sa[0]);
         if (op == SX_CSC)   return num_csc(sa[0]);
+        if (op == SX_SIGN) {
+            if (num_is_zero(sa[0]))     return vfix(0);
+            if (num_is_negative(sa[0])) return vfix(-1);
+            return vfix(1);
+        }
+    }
+
+    /* ---- ABS — assumption-based simplification ---- */
+    if (op == SX_ABS && n == 1) {
+        val_t a = sa[0];
+        if (sym_is_positive(a)) return a;              /* |x| = x  (x > 0) */
+        if (sym_is_negative(a)) return sx_neg(a);      /* |x| = -x  (x < 0) */
+        /* |(-x)| = |x| */
+        if (vis_symexpr(a) && as_symexpr(a)->op == SX_NEG && as_symexpr(a)->nargs == 1)
+            return sx_simplify(sx_expr1(SX_ABS, as_symexpr(a)->args[0]));
+    }
+
+    /* ---- LOG — pull exponent when base is positive ---- */
+    if (op == SX_LOG && n == 1 && vis_symexpr(sa[0])) {
+        SymExpr *inner = as_symexpr(sa[0]);
+        if (inner->op == SX_EXPT && inner->nargs == 2 && sym_is_positive(inner->args[0]))
+            return sx_simplify(sx_mul(inner->args[1], sx_log(inner->args[0]))); /* log(x^n) = n*log(x) */
+    }
+
+    /* ---- SIGN — assumption-based simplification ---- */
+    if (op == SX_SIGN && n == 1) {
+        val_t a = sa[0];
+        if (sym_is_positive(a)) return vfix(1);
+        if (sym_is_negative(a)) return vfix(-1);
     }
 
     /* ---- CONJ ---- */
@@ -408,6 +469,15 @@ val_t sx_atanh(val_t a) { if (vis_number(a)) return num_atanh(a); return sx_simp
 val_t sx_cot(val_t a)   { if (vis_number(a)) return num_cot(a);   return sx_simplify(sx_expr1(SX_COT,   a)); }
 val_t sx_sec(val_t a)   { if (vis_number(a)) return num_sec(a);   return sx_simplify(sx_expr1(SX_SEC,   a)); }
 val_t sx_csc(val_t a)   { if (vis_number(a)) return num_csc(a);   return sx_simplify(sx_expr1(SX_CSC,   a)); }
+
+val_t sx_sign(val_t a) {
+    if (vis_number(a)) {
+        if (num_is_zero(a))     return vfix(0);
+        if (num_is_negative(a)) return vfix(-1);
+        return vfix(1);
+    }
+    return sx_simplify(sx_expr1(SX_SIGN, a));
+}
 
 val_t sx_conj(val_t a) {
     if (vis_number(a)) return num_conjugate(a);
@@ -1743,6 +1813,85 @@ unevaluated_i:;
 /* ---- Limits ---- */
 
 /*
+ * sx_ratio_simplify / sx_mul_for_ratio — aggressive ratio algebra used exclusively
+ * by L'Hôpital to cancel the derivative quotient dp/dq.  NOT called from sx_simplify
+ * to avoid rewrite loops (inverting a denominator would undo the 0·∞ rewrite).
+ */
+static val_t sx_ratio_simplify(val_t num, val_t den);
+
+static val_t sx_mul_for_ratio(val_t a, val_t b) {
+    /* (p/q)*b → ratio_simplify(p*b, q) */
+    if (vis_symexpr(a) && as_symexpr(a)->op == SX_DIV && as_symexpr(a)->nargs == 2)
+        return sx_ratio_simplify(sx_mul_for_ratio(as_symexpr(a)->args[0], b),
+                                 as_symexpr(a)->args[1]);
+    if (vis_symexpr(a) && as_symexpr(a)->op == SX_NEG && as_symexpr(a)->nargs == 1)
+        return sx_neg(sx_mul_for_ratio(as_symexpr(a)->args[0], b));
+    if (vis_symexpr(b) && as_symexpr(b)->op == SX_DIV && as_symexpr(b)->nargs == 2)
+        return sx_ratio_simplify(sx_mul_for_ratio(a, as_symexpr(b)->args[0]),
+                                 as_symexpr(b)->args[1]);
+    if (vis_symexpr(b) && as_symexpr(b)->op == SX_NEG && as_symexpr(b)->nargs == 1)
+        return sx_neg(sx_mul_for_ratio(a, as_symexpr(b)->args[0]));
+    return sx_simplify(sx_expr2(SX_MUL, a, b));
+}
+
+static val_t sx_ratio_simplify(val_t num, val_t den) {
+    /* Pull negation from denominator */
+    if (vis_symexpr(den) && as_symexpr(den)->op == SX_NEG && as_symexpr(den)->nargs == 1)
+        return sx_neg(sx_ratio_simplify(num, as_symexpr(den)->args[0]));
+    if (vis_number(den) && num_is_negative(den))
+        return sx_neg(sx_ratio_simplify(num, num_neg(den)));
+    /* Pull negation from numerator */
+    if (vis_symexpr(num) && as_symexpr(num)->op == SX_NEG && as_symexpr(num)->nargs == 1)
+        return sx_neg(sx_ratio_simplify(as_symexpr(num)->args[0], den));
+    if (vis_number(num) && num_is_negative(num))
+        return sx_neg(sx_ratio_simplify(num_neg(num), den));
+    /* num/(p/q) → (num*q)/p */
+    if (vis_symexpr(den) && as_symexpr(den)->op == SX_DIV && as_symexpr(den)->nargs == 2) {
+        val_t p = as_symexpr(den)->args[0], q = as_symexpr(den)->args[1];
+        return sx_ratio_simplify(sx_mul_for_ratio(num, q), p);
+    }
+    /* (p/q)/den → p/(q*den) */
+    if (vis_symexpr(num) && as_symexpr(num)->op == SX_DIV && as_symexpr(num)->nargs == 2) {
+        val_t p = as_symexpr(num)->args[0], q = as_symexpr(num)->args[1];
+        return sx_ratio_simplify(p, sx_mul_for_ratio(q, den));
+    }
+    /* Cancel equal numerator and denominator */
+    if (sx_equal(num, den)) return vfix(1);
+    /* Factor cancellation: den appears as a factor inside a MUL numerator */
+    if (vis_symexpr(num) && as_symexpr(num)->op == SX_MUL) {
+        SymExpr *mul = as_symexpr(num);
+        for (uint32_t i = 0; i < mul->nargs; i++) {
+            if (sx_equal(mul->args[i], den)) {
+                int nn = (int)mul->nargs - 1;
+                if (nn == 0) return vfix(1);
+                if (nn == 1) return sx_simplify((i == 0) ? mul->args[1] : mul->args[0]);
+                val_t *nf = (val_t *)gc_alloc((size_t)nn * sizeof(val_t));
+                int k = 0;
+                for (uint32_t j = 0; j < mul->nargs; j++)
+                    if (j != i) nf[k++] = mul->args[j];
+                return sx_simplify(sx_make_expr(SX_MUL, nn, nf));
+            }
+        }
+    }
+    /* Power cancellations */
+    /* x^n / x → x^(n-1) */
+    if (vis_symexpr(num) && as_symexpr(num)->op == SX_EXPT && as_symexpr(num)->nargs == 2 &&
+        sx_equal(as_symexpr(num)->args[0], den))
+        return sx_simplify(sx_expt(den, num_sub(as_symexpr(num)->args[1], vfix(1))));
+    /* x / x^n → x^(1-n) */
+    if (vis_symexpr(den) && as_symexpr(den)->op == SX_EXPT && as_symexpr(den)->nargs == 2 &&
+        sx_equal(num, as_symexpr(den)->args[0]))
+        return sx_simplify(sx_expt(num, num_sub(vfix(1), as_symexpr(den)->args[1])));
+    /* x^n / x^m → x^(n-m) */
+    if (vis_symexpr(num) && as_symexpr(num)->op == SX_EXPT && as_symexpr(num)->nargs == 2 &&
+        vis_symexpr(den) && as_symexpr(den)->op == SX_EXPT && as_symexpr(den)->nargs == 2 &&
+        sx_equal(as_symexpr(num)->args[0], as_symexpr(den)->args[0]))
+        return sx_simplify(sx_expt(as_symexpr(num)->args[0],
+                                   num_sub(as_symexpr(num)->args[1], as_symexpr(den)->args[1])));
+    return sx_simplify(sx_expr2(SX_DIV, num, den));
+}
+
+/*
  * sx_limit_inner: recursive worker.  depth guards against infinite L'Hôpital loops.
  *
  * Strategy:
@@ -1797,13 +1946,13 @@ static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int dep
                 /* 0/0: L'Hôpital */
                 val_t dp = sx_simplify(sx_diff(p, var));
                 val_t dq = sx_simplify(sx_diff(q, var));
-                return sx_limit_inner(sx_div(dp, dq), var, point, dir, depth + 1);
+                return sx_limit_inner(sx_ratio_simplify(dp, dq), var, point, dir, depth + 1);
             }
             if (p_inf && q_inf) {
                 /* ∞/∞: L'Hôpital */
                 val_t dp = sx_simplify(sx_diff(p, var));
                 val_t dq = sx_simplify(sx_diff(q, var));
-                return sx_limit_inner(sx_div(dp, dq), var, point, dir, depth + 1);
+                return sx_limit_inner(sx_ratio_simplify(dp, dq), var, point, dir, depth + 1);
             }
             if (p_fin && q_inf)
                 return vfix(0);  /* finite/∞ = 0 */
@@ -1811,6 +1960,38 @@ static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int dep
                 return vfix(0);
             if (p_fin && q_fin && !q_zero)
                 return sx_simplify(sx_div(pv, qv));
+        }
+
+        /* EXPT: handle indeterminate power forms 1^∞, 0^0, ∞^0 */
+        if (op == SX_EXPT && n == 2) {
+            val_t base = args[0], expo = args[1];
+            val_t bv = sx_simplify(sx_substitute(base, var, point));
+            val_t ev = sx_simplify(sx_substitute(expo, var, point));
+            bool b_one  = is_one(bv);
+            bool b_zero = vis_number(bv) && num_is_zero(bv);
+            bool b_inf  = vis_flonum(bv) && isinf(num_to_double(bv));
+            bool e_zero = vis_number(ev) && num_is_zero(ev);
+            bool e_inf  = vis_flonum(ev) && isinf(num_to_double(ev));
+            /* Indeterminate power: rewrite f^g = exp(g * log(f)), take limit of exponent */
+            if ((b_one && e_inf) || (b_zero && e_zero) || (b_inf && e_zero)) {
+                val_t exponent = sx_mul(expo, sx_log(base));
+                val_t lim_exp = sx_limit_inner(exponent, var, point, dir, depth + 1);
+                if (vis_number(lim_exp) && !(vis_flonum(lim_exp) && isnan(num_to_double(lim_exp)))) {
+                    val_t res = sx_simplify(sx_exp(lim_exp));
+                    /* Coerce flonum integer results (e.g. 1.0 → 1) for exact equality */
+                    if (vis_flonum(res)) {
+                        double d = num_to_double(res), fl = floor(d);
+                        if (d == fl && d >= -9.0e18 && d <= 9.0e18)
+                            res = vfix((long long)d);
+                    }
+                    return res;
+                }
+            }
+            /* Non-indeterminate: both limits are determinate numbers */
+            if (vis_number(bv) && vis_number(ev) &&
+                !(vis_flonum(bv) && isnan(num_to_double(bv))) &&
+                !(vis_flonum(ev) && isnan(num_to_double(ev))))
+                return sx_simplify(num_expt(bv, ev));
         }
 
         /* ADD/SUB/MUL/NEG: substitute into each subterm and reassemble */
@@ -1829,6 +2010,25 @@ static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int dep
             val_t *la = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
             for (int i = 0; i < n; i++)
                 la[i] = sx_limit_inner(args[i], var, point, dir, depth);
+            /* 0·∞: detect after taking individual limits and rewrite as ratio.
+             * Heuristic: put the simpler (sym-var) factor in the denominator.
+             * If the ∞ factor is a sym-var → use f/(1/g) = 0/0 form (faster convergence).
+             * Otherwise → use g/(1/f) = ∞/∞ form. */
+            for (int i = 0; i < n && n == 2; i++) {
+                int j = 1 - i;
+                bool li_zero = vis_number(la[i]) && num_is_zero(la[i]);
+                bool lj_inf  = vis_flonum(la[j]) && isinf(num_to_double(la[j]));
+                if (li_zero && lj_inf) {
+                    val_t rewritten;
+                    if (vis_symvar(args[j]))
+                        /* ∞ factor is a sym-var: f/(1/g) = 0/0 form */
+                        rewritten = sx_div(args[i], sx_div(vfix(1), args[j]));
+                    else
+                        /* default: g/(1/f) = ∞/∞ form */
+                        rewritten = sx_div(args[j], sx_div(vfix(1), args[i]));
+                    return sx_limit_inner(rewritten, var, point, dir, depth + 1);
+                }
+            }
             return sx_simplify(sx_make_expr(SX_MUL, n, la));
         }
     }

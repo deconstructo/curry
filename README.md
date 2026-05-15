@@ -123,6 +123,41 @@ Example:
 
 ## Changelog
 
+### 0.8.2 — CAS Phase 7: assumptions + exotic limits
+
+**Assumption flags on symbolic variables:**
+
+`(sym-var 'x 'positive)` (and `'negative`, `'real`, `'integer`, `'nonzero`) stores a domain assumption in the variable's flag word. Assumptions unlock targeted simplification rules:
+
+- **`(sym-var 'x 'positive)`** — `|x| → x`, `√(x²) → x`, `log(xⁿ) → n·log(x)`, `sign(x) → 1`
+- **`(sym-var 'x 'negative)`** — `|x| → −x`, `sign(x) → −1`
+
+```scheme
+(define xp (sym-var 'x 'positive))
+(abs xp)                          ; => xp
+(simplify (sqrt (expt xp 2)))     ; => xp
+(simplify (log (expt xp 3)))      ; => (* 3 (log x))
+(sym-assumption? xp 'nonzero)     ; => #t  (implied by positive)
+```
+
+**`(sign x)`** — new sign function; evaluates numerically on constants and simplifies to `1`/`-1` with assumption flags. Output renders in both `sym->infix` and `sym->latex`.
+
+**Exotic indeterminate limits:**
+
+All four classical indeterminate forms now resolve:
+
+```scheme
+(symbolic x)
+(limit (* x (log x)) x 0.0 'right)          ; => 0    (0·∞)
+(limit (expt x x)       x 0.0 'right)       ; => 1    (0⁰)
+(limit (expt x (/ 1 x)) x +inf.0)           ; => 1    (∞⁰)
+(limit (expt (+ 1 (/ 1 x)) x) x +inf.0)    ; => e    (1^∞)
+```
+
+Algorithm: `0·∞` rewrites as a ratio and applies L'Hôpital; power forms rewrite `f^g` as `exp(g·log(f))`, take the limit of the exponent, then exponentiate. A new internal `sx_ratio_simplify` function cancels the L'Hôpital derivative quotient without interfering with the simplifier.
+
+---
+
 ### 0.8.1 — CAS Phase 5: Taylor series
 
 - **`(series f x a n)`** — truncated Taylor/Maclaurin series of `f` around point `a` to order `n`.  

@@ -505,6 +505,71 @@
 (check-approx "series cos order 0 at x=0" (substitute s0c x 0.0) 1.0 1e-12)
 
 ;;; =========================================================================
+;;; Assumptions: (sym-var 'x 'positive) etc.
+;;; =========================================================================
+
+(define xp (sym-var 'x 'positive))
+(define xn (sym-var 'x 'negative))
+(define xi (sym-var 'x 'integer))
+(define xr (sym-var 'x 'real))
+
+;;; sym-assumption? predicate
+(check "assumption positive"         (sym-assumption? xp 'positive) #t)
+(check "assumption not negative"     (sym-assumption? xp 'negative) #f)
+(check "positive implies real"       (sym-assumption? xp 'real)     #t)
+(check "positive implies nonzero"    (sym-assumption? xp 'nonzero)  #t)
+(check "negative implies real"       (sym-assumption? xn 'real)     #t)
+(check "integer assumption"          (sym-assumption? xi 'integer)  #t)
+(check "integer implies real"        (sym-assumption? xi 'real)     #t)
+(check "real assumption"             (sym-assumption? xr 'real)     #t)
+(check "real does not imply positive" (sym-assumption? xr 'positive) #f)
+(check "no assumption on plain var"  (sym-assumption? x  'positive) #f)
+
+;;; abs(x) simplification with assumptions
+(check "abs(xp) = xp"     (equal? (abs xp) xp)       #t)
+(check "abs(xn) = -xn"    (equal? (abs xn) (- xn))   #t)
+(check "abs(-xp) = xp"    (equal? (abs (- xp)) xp)   #t)
+
+;;; sqrt(x^2) with and without assumption
+(check "sqrt(xp^2) = xp"  (equal? (sqrt (expt xp 2)) xp)       #t)
+(check "sqrt(x^2) = |x|"  (equal? (sqrt (expt x 2)) (abs x))   #t)
+
+;;; log(x^n) = n*log(x) for positive x
+(define log-xp3 (simplify (log (expt xp 3))))
+(check "log(xp^3) = 3*log(xp)" (equal? log-xp3 (* 3 (log xp))) #t)
+
+;;; sign simplification
+(check "sign(xp) = 1"    (equal? (sign xp) 1)  #t)
+(check "sign(xn) = -1"   (equal? (sign xn) -1) #t)
+(check "sign(5) = 1"     (equal? (sign 5)  1)  #t)
+(check "sign(-3) = -1"   (equal? (sign -3) -1) #t)
+(check "sign(0) = 0"     (equal? (sign 0)  0)  #t)
+
+;;; sign display
+(check "sign infix"   (string? (sym->infix (sign x)))  #t)
+(check "sign latex"   (string? (sym->latex (sign x)))  #t)
+
+;;; =========================================================================
+;;; Exotic limits: 0·∞, 1^∞, 0^0, ∞^0
+;;; =========================================================================
+
+;;; 0·∞: lim x→0+ of x*log(x) = 0
+(define lim-xlogx (limit (* x (log x)) x 0.0 'right))
+(check "lim x→0+ x*log(x) = 0"   (and (number? lim-xlogx) (zero? lim-xlogx)) #t)
+
+;;; 0^0: lim x→0+ of x^x = 1
+(define lim-xx (limit (expt x x) x 0.0 'right))
+(check "lim x→0+ x^x = 1"   (equal? lim-xx 1) #t)
+
+;;; ∞^0: lim x→∞ of x^(1/x) = 1
+(define lim-x-inv-x (limit (expt x (/ 1 x)) x +inf.0))
+(check "lim x→∞ x^(1/x) = 1"   (equal? lim-x-inv-x 1) #t)
+
+;;; 1^∞: lim x→∞ of (1 + 1/x)^x = e
+(define lim-compound (limit (expt (+ 1 (/ 1 x)) x) x +inf.0))
+(check-approx "lim x→∞ (1+1/x)^x = e"   (exact->inexact lim-compound) (exp 1.0) 1e-9)
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

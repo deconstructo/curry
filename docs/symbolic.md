@@ -30,6 +30,43 @@ Predicates:
 (sym-var-name x)       ; "x"  — the variable name as a string
 ```
 
+### Assumption flags
+
+`sym-var` accepts an optional second argument declaring a domain assumption. Assumptions unlock additional algebraic simplification rules.
+
+```scheme
+(define xp (sym-var 'x 'positive))   ; x > 0  (implies real, nonzero)
+(define xn (sym-var 'x 'negative))   ; x < 0  (implies real)
+(define xr (sym-var 'x 'real))       ; x ∈ ℝ
+(define xi (sym-var 'x 'integer))    ; x ∈ ℤ  (implies real)
+(define xz (sym-var 'x 'nonzero))    ; x ≠ 0
+
+(sym-assumption? xp 'positive)       ; => #t
+(sym-assumption? xp 'real)           ; => #t  (implied)
+(sym-assumption? xp 'nonzero)        ; => #t  (implied)
+```
+
+**Simplification rules enabled by assumptions:**
+
+| Expression | With assumption | Result |
+|-----------|----------------|--------|
+| `(abs xp)` | `positive` | `xp` |
+| `(abs xn)` | `negative` | `(- xn)` |
+| `(sqrt (expt xp 2))` | `positive` | `xp` |
+| `(log (expt xp n))` | `positive` | `(* n (log xp))` |
+| `(sign xp)` | `positive` | `1` |
+| `(sign xn)` | `negative` | `-1` |
+
+```scheme
+(define xp (sym-var 'x 'positive))
+
+(abs xp)                          ; => xp            (not |x|)
+(simplify (sqrt (expt xp 2)))     ; => xp            (not (sqrt (expt x 2)))
+(simplify (log (expt xp 3)))      ; => (* 3 (log x))
+(sign xp)                         ; => 1
+(sign (sym-var 'y 'negative))     ; => -1
+```
+
 ## Symbolic arithmetic
 
 All numeric operations propagate through symbolic values automatically. You do not need to call anything special — just use `+`, `*`, `expt`, `sin`, etc. normally.
@@ -64,6 +101,11 @@ All numeric operations propagate through symbolic values automatically. You do n
 (cot x)               ; => (cot x)
 (sec x)               ; => (sec x)
 (csc x)               ; => (csc x)
+
+; Sign function — simplifies to 1 / -1 with assumption flags
+(sign x)              ; => (sign x)
+(sign 5)              ; => 1
+(sign -3)             ; => -1
 ```
 
 Nested expressions are built automatically:
@@ -359,12 +401,26 @@ Unknown forms leave an unevaluated `(∫ expr var)` node.
 (limit (/ 1 x) x 0.0 'right)  ; => +inf.0
 ```
 
+; Exotic indeterminate forms
+(symbolic x)
+
+; 0·∞ — rewritten as a ratio, then L'Hôpital
+(limit (* x (log x)) x 0.0 'right)          ; => 0
+
+; 0^0, ∞^0, 1^∞ — rewritten as exp(g·log(f))
+(limit (expt x x) x 0.0 'right)             ; => 1   (0^0)
+(limit (expt x (/ 1 x)) x +inf.0)           ; => 1   (∞^0)
+(limit (expt (+ 1 (/ 1 x)) x) x +inf.0)    ; => e   (1^∞)
+```
+
 ### Algorithm
 
-1. **Direct substitution** — substitutes `a` into `f` and simplifies. Returns if numeric.
-2. **L'Hôpital** — when `f = p/q` and both `p(a) = 0` and `q(a) = 0` (or both ±∞), retries `limit(p′/q′, x, a)`. Iterates up to 5 times.
-3. **Infinity** — handles `finite/∞ = 0` directly; `∞/∞` triggers L'Hôpital.
-4. **Fallback** — returns an unevaluated `(limit f x a)` node.
+1. **Direct substitution** — substitutes `a` into `f` and simplifies. Returns if numeric and not NaN.
+2. **L'Hôpital** — when `f = p/q` and both `p(a) = 0` and `q(a) = 0` (or both ±∞), differentiates numerator and denominator, simplifies the ratio, and retries. Iterates up to 5 times.
+3. **0·∞** — for a product `f·g` where one factor → 0 and the other → ∞, rewrites as `f/(1/g)` or `g/(1/f)` and applies L'Hôpital.
+4. **Indeterminate powers** — `1^∞`, `0^0`, `∞^0` forms rewrite `f^g` as `exp(g·log(f))`, take the limit of the exponent, then return `exp(lim_exp)`.
+5. **Infinity** — handles `finite/∞ = 0` directly.
+6. **Fallback** — returns an unevaluated `(limit f x a)` node.
 
 ## Taylor series
 

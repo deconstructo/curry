@@ -194,6 +194,8 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
         pws(port, "sec("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_CSC && n == 1) {
         pws(port, "csc("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (op == SX_SIGN && n == 1) {
+        pws(port, "sign("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^");
         bool ep = (sp_prec(a[1]) < SP_ATOM);
@@ -417,6 +419,8 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
         pws(port, "\\sec\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
     } else if (op == SX_CSC && n == 1) {
         pws(port, "\\csc\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (op == SX_SIGN && n == 1) {
+        pws(port, "\\operatorname{sign}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^{"); sl_latex(a[1], SP_LOW, port);
         pws(port, "}_{"); sl_latex(a[2], SP_LOW, port);

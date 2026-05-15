@@ -130,7 +130,13 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 **Variables and expressions**
 
 ```scheme
-(sym-var 'x)               ; create symbolic variable
+(sym-var 'x)               ; create symbolic variable (no assumptions)
+(sym-var 'x 'positive)     ; create symbolic variable with assumption: positive, real, nonzero
+(sym-var 'x 'negative)     ; assumption: negative, real
+(sym-var 'x 'real)         ; assumption: real
+(sym-var 'x 'integer)      ; assumption: integer (implies real)
+(sym-var 'x 'nonzero)      ; assumption: nonzero
+(sym-assumption? v 'positive) ; test assumption flag on a sym-var
 (symbolic x y)             ; bind x, y as symbolic unknowns in scope
 (sym-var? v)               ; predicate
 (sym-expr? v)              ; predicate
@@ -138,7 +144,13 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 (sym-var-name v)           ; recover the symbol name
 (substitute expr var val)  ; replace var with val and simplify
 (simplify expr)            ; algebraic simplification pass
+(sign expr)                ; sign function: 1, -1, or 0; simplifies with assumption flags
 ```
+
+**Assumption flags** are stored in `SymVar.hdr.flags` and guide algebraic simplification:
+- `(sym-var 'x 'positive)`: `abs(x) = x`, `sqrt(x²) = x`, `log(x^n) = n·log(x)`, `sign(x) = 1`
+- `(sym-var 'x 'negative)`: `abs(x) = -x`, `sign(x) = -1`
+- Assumptions propagate through `∂`, `∫`, `limit`, `simplify`
 
 **Differentiation** — `(∂ expr var)` where `var` is a sym-var:
 
@@ -173,12 +185,15 @@ Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z 
 
 **Limits** — `(limit expr var point)` or `(limit expr var point dir)`:
 
-Evaluates `lim_{var→point} expr`. `dir` is `'left` (−1) or `'right` (+1) for one-sided limits; omit for two-sided. Algorithm: direct substitution first; if 0/0 or ∞/∞ form, applies L'Hôpital's rule (up to 5 iterations). Distributes over sums, products, and negation. Leaves unevaluated `(limit expr var point)` nodes for unresolved forms.
+Evaluates `lim_{var→point} expr`. `dir` is `'left` (−1) or `'right` (+1) for one-sided limits; omit for two-sided. Algorithm: direct substitution first; if 0/0 or ∞/∞ form, applies L'Hôpital's rule (up to 5 iterations). Indeterminate 0·∞ forms are rewritten as ratios before L'Hôpital. Indeterminate power forms (1^∞, 0^0, ∞^0) are rewritten as `exp(g·log(f))`. Distributes over sums, products, and negation. Leaves unevaluated `(limit expr var point)` nodes for unresolved forms.
 
 ```scheme
 (limit (/ (sin x) x) x 0)             ; => 1
 (limit (/ (- (exp x) 1) x) x 0)       ; => 1
-(limit (/ x (expt x 2)) x 0 'right)   ; => +inf (or unevaluated)
+(limit (* x (log x)) x 0.0 'right)    ; => 0  (0·∞ form)
+(limit (expt x x) x 0.0 'right)       ; => 1  (0^0 form)
+(limit (expt x (/ 1 x)) x +inf.0)     ; => 1  (∞^0 form)
+(limit (expt (+ 1 (/ 1 x)) x) x +inf.0) ; => e  (1^∞ form)
 ```
 
 **Polynomial / structural operations**:
