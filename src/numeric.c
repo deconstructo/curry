@@ -189,6 +189,7 @@ bool num_is_zero(val_t v) {
     if (vis_bignum(v))   return mpz_sgn(as_big(v)->z) == 0;
     if (vis_rational(v)) return mpq_sgn(as_rat(v)->q) == 0;
     if (vis_complex(v))  return num_is_zero(as_cpx(v)->real) && num_is_zero(as_cpx(v)->imag);
+    if (vis_quat(v))    { Quaternion *q = as_quat(v); return q->a==0.0 && q->b==0.0 && q->c==0.0 && q->d==0.0; }
     if (vis_surreal(v))  return sur_is_zero(v);
     return false;
 }
@@ -199,6 +200,7 @@ bool num_is_one(val_t v) {
     if (vis_bignum(v))   return mpz_cmp_si(as_big(v)->z, 1) == 0;
     if (vis_rational(v)) return mpq_cmp_si(as_rat(v)->q, 1, 1) == 0;
     if (vis_complex(v))  return num_is_one(as_cpx(v)->real) && num_is_zero(as_cpx(v)->imag);
+    if (vis_quat(v))    { Quaternion *q = as_quat(v); return q->a==1.0 && q->b==0.0 && q->c==0.0 && q->d==0.0; }
     return false;
 }
 
@@ -375,6 +377,14 @@ val_t num_sub(val_t a, val_t b) {
         val_t br = vis_complex(b) ? as_cpx(b)->real : b,  bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
         return num_make_complex(num_sub(ar, br), num_sub(ai, bi));
     }
+    if (vis_quat(a) || vis_quat(b)) {
+        double qa[4] = {0,0,0,0}, qb[4] = {0,0,0,0};
+        if (vis_quat(a)) { Quaternion *q = as_quat(a); qa[0]=q->a; qa[1]=q->b; qa[2]=q->c; qa[3]=q->d; }
+        else qa[0] = num_to_double(a);
+        if (vis_quat(b)) { Quaternion *q = as_quat(b); qb[0]=q->a; qb[1]=q->b; qb[2]=q->c; qb[3]=q->d; }
+        else qb[0] = num_to_double(b);
+        return num_make_quat(qa[0]-qb[0], qa[1]-qb[1], qa[2]-qb[2], qa[3]-qb[3]);
+    }
     return arith2(a, b, sub_fix, sub_big, sub_rat, sub_flo);
 }
 
@@ -471,6 +481,21 @@ val_t num_div(val_t a, val_t b) {
         scm_raise(V_FALSE, "cannot divide by a quantum value");
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_div(a, b);
+    /* Quaternion division: a/b = a · conj(b) / ‖b‖² */
+    if (vis_quat(a) || vis_quat(b)) {
+        double a0,a1,a2,a3, b0,b1,b2,b3;
+        if (vis_quat(a)) { a0=as_quat(a)->a; a1=as_quat(a)->b; a2=as_quat(a)->c; a3=as_quat(a)->d; }
+        else { a0=num_to_double(a); a1=a2=a3=0; }
+        if (vis_quat(b)) { b0=as_quat(b)->a; b1=as_quat(b)->b; b2=as_quat(b)->c; b3=as_quat(b)->d; }
+        else { b0=num_to_double(b); b1=b2=b3=0; }
+        double n2 = b0*b0 + b1*b1 + b2*b2 + b3*b3;
+        return num_make_quat(
+            ( a0*b0 + a1*b1 + a2*b2 + a3*b3) / n2,
+            (-a0*b1 + a1*b0 - a2*b3 + a3*b2) / n2,
+            (-a0*b2 + a1*b3 + a2*b0 - a3*b1) / n2,
+            (-a0*b3 - a1*b2 + a2*b1 + a3*b0) / n2
+        );
+    }
     /* Complex division: (a+bi)/(c+di) = ((ac+bd)+(bc-ad)i)/(c²+d²) */
     if (vis_complex(a) || vis_complex(b)) {
         val_t ar = vis_complex(a) ? as_cpx(a)->real : a, ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
@@ -509,6 +534,15 @@ val_t num_abs(val_t a) {
 
 /* ---- Comparison ---- */
 int num_cmp(val_t a, val_t b) {
+    /* Quaternions have no total order — only equality is meaningful */
+    if (vis_quat(a) || vis_quat(b)) {
+        double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
+        if (vis_quat(a)) { a0=as_quat(a)->a; a1=as_quat(a)->b; a2=as_quat(a)->c; a3=as_quat(a)->d; }
+        else a0 = num_to_double(a);
+        if (vis_quat(b)) { b0=as_quat(b)->a; b1=as_quat(b)->b; b2=as_quat(b)->c; b3=as_quat(b)->d; }
+        else b0 = num_to_double(b);
+        return (a0==b0 && a1==b1 && a2==b2 && a3==b3) ? 0 : 1;
+    }
     /* Fast paths */
     if (vis_flonum(a) && vis_flonum(b)) {
         double da = vfloat(a), db = vfloat(b);
@@ -711,9 +745,28 @@ val_t num_expt(val_t base, val_t exp) {
     return num_make_float(pow(num_to_double(base), num_to_double(exp)));
 }
 
+/* Rebuild a quaternion with the same unit-pure direction as q, but with the given
+   scalar part and pure-part magnitude.  When q has no pure part (pure real), the
+   pure result lands on the canonical +i axis so the principal root is well-defined. */
+static val_t quat_assemble(const Quaternion *q, double scalar, double vscale) {
+    double b = q->b, c = q->c, d = q->d;
+    double vnorm2 = b*b + c*c + d*d;
+    if (vnorm2 < 1e-300)
+        return num_make_quat(scalar, vscale, 0.0, 0.0);
+    double s = vscale / sqrt(vnorm2);
+    return num_make_quat(scalar, b*s, c*s, d*s);
+}
+
 val_t num_sqrt(val_t v) {
     if (vis_symbolic(v)) return sx_sqrt(v);
     if (vis_surreal(v))  return sur_expt(v, num_make_rational(vfix(1), vfix(2)));
+    if (vis_quat(v)) {
+        /* sqrt(q) = sqrt((|q|+a)/2) + v̂·sqrt((|q|−a)/2)  (principal root) */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double r = sqrt(a*a + b*b + c*c + d*d);
+        return quat_assemble(q, sqrt((r + a) * 0.5), sqrt((r - a) * 0.5));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         double r = sqrt(sqrt(a*a + b*b)), theta = atan2(b, a) / 2.0;
@@ -740,6 +793,16 @@ val_t num_sqrt(val_t v) {
 
 val_t num_asin(val_t v) {
     if (vis_symbolic(v)) return sx_asin(v);
+    if (vis_quat(v)) {
+        /* Project to complex plane of q, apply complex asin, reconstruct. */
+        Quaternion *q = as_quat(v);
+        double b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        val_t z = num_make_complex(num_make_float(q->a), num_make_float(vnorm));
+        val_t w = num_asin(z);
+        return quat_assemble(q, num_to_double(as_cpx(w)->real),
+                                num_to_double(as_cpx(w)->imag));
+    }
     if (vis_complex(v)) {
         /* asin(z) = -i · ln(iz + √(1−z²)) */
         val_t i  = num_make_complex(vfix(0), vfix(1));
@@ -751,6 +814,15 @@ val_t num_asin(val_t v) {
 }
 val_t num_acos(val_t v) {
     if (vis_symbolic(v)) return sx_acos(v);
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        double b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        val_t z = num_make_complex(num_make_float(q->a), num_make_float(vnorm));
+        val_t w = num_acos(z);
+        return quat_assemble(q, num_to_double(as_cpx(w)->real),
+                                num_to_double(as_cpx(w)->imag));
+    }
     if (vis_complex(v)) {
         /* acos(z) = -i · ln(z + i·√(1−z²)) */
         val_t i  = num_make_complex(vfix(0), vfix(1));
@@ -762,6 +834,15 @@ val_t num_acos(val_t v) {
 }
 val_t num_atan(val_t v) {
     if (vis_symbolic(v)) return sx_atan(v);
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        double b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        val_t z = num_make_complex(num_make_float(q->a), num_make_float(vnorm));
+        val_t w = num_atan(z);
+        return quat_assemble(q, num_to_double(as_cpx(w)->real),
+                                num_to_double(as_cpx(w)->imag));
+    }
     if (vis_complex(v)) {
         /* atan(z) = (i/2) · ln((1−iz)/(1+iz)) */
         val_t i    = num_make_complex(vfix(0), vfix(1));
@@ -776,6 +857,14 @@ val_t num_atan(val_t v) {
 /* Complex-aware transcendentals */
 val_t num_exp(val_t v) {
     if (vis_symbolic(v)) return sx_exp(v);
+    if (vis_quat(v)) {
+        /* exp(q) = e^a · (cos‖v‖ + v̂·sin‖v‖) */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        double ea = exp(a);
+        return quat_assemble(q, ea * cos(vnorm), ea * sin(vnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         double ea = exp(a);
@@ -785,6 +874,13 @@ val_t num_exp(val_t v) {
 }
 val_t num_log(val_t v) {
     if (vis_symbolic(v)) return sx_log(v);
+    if (vis_quat(v)) {
+        /* log(q) = ln‖q‖ + v̂·arccos(a/‖q‖)  (principal branch) */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double qnorm = sqrt(a*a + b*b + c*c + d*d);
+        return quat_assemble(q, log(qnorm), acos(a / qnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         return num_make_complex(num_make_float(log(sqrt(a*a + b*b))), num_make_float(atan2(b, a)));
@@ -796,6 +892,13 @@ val_t num_log(val_t v) {
 }
 val_t num_sin(val_t v) {
     if (vis_symbolic(v)) return sx_sin(v);
+    if (vis_quat(v)) {
+        /* sin(q) = sin(a)·cosh‖v‖ + v̂·cos(a)·sinh‖v‖ */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        return quat_assemble(q, sin(a) * cosh(vnorm), cos(a) * sinh(vnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         return num_make_complex(num_make_float(sin(a)*cosh(b)), num_make_float(cos(a)*sinh(b)));
@@ -804,6 +907,13 @@ val_t num_sin(val_t v) {
 }
 val_t num_cos(val_t v) {
     if (vis_symbolic(v)) return sx_cos(v);
+    if (vis_quat(v)) {
+        /* cos(q) = cos(a)·cosh‖v‖ − v̂·sin(a)·sinh‖v‖ */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        return quat_assemble(q, cos(a) * cosh(vnorm), -sin(a) * sinh(vnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         return num_make_complex(num_make_float(cos(a)*cosh(b)), num_make_float(-sin(a)*sinh(b) + 0.0));
@@ -812,13 +922,21 @@ val_t num_cos(val_t v) {
 }
 val_t num_tan(val_t v) {
     if (vis_symbolic(v)) return sx_tan(v);
-    if (vis_complex(v)) return num_div(num_sin(v), num_cos(v));
+    /* sin(q) and cos(q) share the same imaginary axis v̂, so they commute */
+    if (vis_quat(v) || vis_complex(v)) return num_div(num_sin(v), num_cos(v));
     return num_make_float(tan(num_to_double(v)));
 }
 val_t num_atan2(val_t y, val_t x) { return num_make_float(atan2(num_to_double(y), num_to_double(x))); }
 
 val_t num_sinh(val_t v) {
     if (vis_symbolic(v)) return sx_sinh(v);
+    if (vis_quat(v)) {
+        /* sinh(q) = sinh(a)·cos‖v‖ + v̂·cosh(a)·sin‖v‖ */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        return quat_assemble(q, sinh(a) * cos(vnorm), cosh(a) * sin(vnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         return num_make_complex(num_make_float(sinh(a)*cos(b)), num_make_float(cosh(a)*sin(b)));
@@ -827,6 +945,13 @@ val_t num_sinh(val_t v) {
 }
 val_t num_cosh(val_t v) {
     if (vis_symbolic(v)) return sx_cosh(v);
+    if (vis_quat(v)) {
+        /* cosh(q) = cosh(a)·cos‖v‖ + v̂·sinh(a)·sin‖v‖ */
+        Quaternion *q = as_quat(v);
+        double a = q->a, b = q->b, c = q->c, d = q->d;
+        double vnorm = sqrt(b*b + c*c + d*d);
+        return quat_assemble(q, cosh(a) * cos(vnorm), sinh(a) * sin(vnorm));
+    }
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         return num_make_complex(num_make_float(cosh(a)*cos(b)), num_make_float(sinh(a)*sin(b)));
@@ -835,6 +960,8 @@ val_t num_cosh(val_t v) {
 }
 val_t num_tanh(val_t v) {
     if (vis_symbolic(v)) return sx_tanh(v);
+    /* sinh(q) and cosh(q) share the same imaginary axis v̂, so they commute */
+    if (vis_quat(v)) return num_div(num_sinh(v), num_cosh(v));
     if (vis_complex(v)) {
         double a = num_to_double(as_cpx(v)->real), b = num_to_double(as_cpx(v)->imag);
         double denom = cosh(2*a) + cos(2*b);
@@ -844,22 +971,22 @@ val_t num_tanh(val_t v) {
 }
 val_t num_asinh(val_t v) {
     if (vis_symbolic(v)) return sx_asinh(v);
-    if (vis_complex(v))
-        /* asinh(z) = ln(z + √(z²+1)) */
+    if (vis_quat(v) || vis_complex(v))
+        /* asinh(q) = ln(q + √(q²+1)) — works for quaternions via num_log/num_sqrt */
         return num_log(num_add(v, num_sqrt(num_add(num_mul(v, v), vfix(1)))));
     return num_make_float(asinh(num_to_double(v)));
 }
 val_t num_acosh(val_t v) {
     if (vis_symbolic(v)) return sx_acosh(v);
-    if (vis_complex(v))
-        /* acosh(z) = ln(z + √(z²−1)) */
+    if (vis_quat(v) || vis_complex(v))
+        /* acosh(q) = ln(q + √(q²−1)) */
         return num_log(num_add(v, num_sqrt(num_sub(num_mul(v, v), vfix(1)))));
     return num_make_float(acosh(num_to_double(v)));
 }
 val_t num_atanh(val_t v) {
     if (vis_symbolic(v)) return sx_atanh(v);
-    if (vis_complex(v))
-        /* atanh(z) = (1/2) · ln((1+z)/(1−z)) */
+    if (vis_quat(v) || vis_complex(v))
+        /* atanh(q) = (1/2) · ln((1+q)/(1−q)) */
         return num_mul(num_make_float(0.5),
                        num_log(num_div(num_add(vfix(1), v),
                                       num_sub(vfix(1), v))));

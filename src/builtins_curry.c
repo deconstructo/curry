@@ -78,12 +78,13 @@ static val_t prim_sym_var(int ac, val_t *av, void *ud) {
     if (!vis_symbol(av[1])) scm_raise(V_FALSE, "sym-var: second argument must be an assumption symbol");
     const char *s = sym_cstr(av[1]);
     uint32_t flags = 0;
-    if      (strcmp(s, "real")     == 0) flags = SYM_ASSUME_REAL;
-    else if (strcmp(s, "positive") == 0) flags = SYM_ASSUME_POSITIVE;
-    else if (strcmp(s, "negative") == 0) flags = SYM_ASSUME_NEGATIVE;
-    else if (strcmp(s, "integer")  == 0) flags = SYM_ASSUME_INTEGER;
-    else if (strcmp(s, "nonzero")  == 0) flags = SYM_ASSUME_NONZERO;
-    else scm_raise(V_FALSE, "sym-var: unknown assumption (expected real, positive, negative, integer, or nonzero)");
+    if      (strcmp(s, "real")     == 0 || strcmp(s, "ṣīrum")     == 0) flags = SYM_ASSUME_REAL;
+    else if (strcmp(s, "positive") == 0 || strcmp(s, "damqum")    == 0) flags = SYM_ASSUME_POSITIVE;
+    else if (strcmp(s, "negative") == 0 || strcmp(s, "lemnûm")    == 0) flags = SYM_ASSUME_NEGATIVE;
+    else if (strcmp(s, "integer")  == 0 || strcmp(s, "nikkassum") == 0) flags = SYM_ASSUME_INTEGER;
+    else if (strcmp(s, "nonzero")    == 0 || strcmp(s, "la-ṣifrum")  == 0) flags = SYM_ASSUME_NONZERO;
+    else if (strcmp(s, "quaternion") == 0 || strcmp(s, "rebûm")      == 0) flags = SYM_ASSUME_QUATERNION;
+    else scm_raise(V_FALSE, "sym-var: unknown assumption (expected real/ṣīrum, positive/damqum, negative/lemnûm, integer/nikkassum, nonzero/la-ṣifrum, quaternion/rebûm)");
     return sx_make_var_flags(av[0], flags);
 }
 static val_t prim_sym_assumption_p(int ac, val_t *av, void *ud) {
@@ -93,11 +94,12 @@ static val_t prim_sym_assumption_p(int ac, val_t *av, void *ud) {
     const char *s = sym_cstr(av[1]);
     uint32_t f = sym_var_flags(av[0]);
     bool result = false;
-    if      (strcmp(s, "real")     == 0) result = (f & (SYM_ASSUME_REAL|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE|SYM_ASSUME_INTEGER)) != 0;
-    else if (strcmp(s, "positive") == 0) result = (f & SYM_ASSUME_POSITIVE) != 0;
-    else if (strcmp(s, "negative") == 0) result = (f & SYM_ASSUME_NEGATIVE) != 0;
-    else if (strcmp(s, "integer")  == 0) result = (f & SYM_ASSUME_INTEGER)  != 0;
-    else if (strcmp(s, "nonzero")  == 0) result = (f & (SYM_ASSUME_NONZERO|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE)) != 0;
+    if      (strcmp(s, "real")       == 0 || strcmp(s, "ṣīrum")     == 0) result = (f & (SYM_ASSUME_REAL|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE|SYM_ASSUME_INTEGER)) != 0;
+    else if (strcmp(s, "positive")   == 0 || strcmp(s, "damqum")    == 0) result = (f & SYM_ASSUME_POSITIVE) != 0;
+    else if (strcmp(s, "negative")   == 0 || strcmp(s, "lemnûm")    == 0) result = (f & SYM_ASSUME_NEGATIVE) != 0;
+    else if (strcmp(s, "integer")    == 0 || strcmp(s, "nikkassum") == 0) result = (f & SYM_ASSUME_INTEGER)  != 0;
+    else if (strcmp(s, "nonzero")    == 0 || strcmp(s, "la-ṣifrum") == 0) result = (f & (SYM_ASSUME_NONZERO|SYM_ASSUME_POSITIVE|SYM_ASSUME_NEGATIVE)) != 0;
+    else if (strcmp(s, "quaternion") == 0 || strcmp(s, "rebûm")     == 0) result = (f & SYM_ASSUME_QUATERNION) != 0;
     return vbool(result);
 }
 static val_t prim_sx_sign(int ac, val_t *av, void *ud)

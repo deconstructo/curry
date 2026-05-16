@@ -26,7 +26,7 @@ static int sp_prec(val_t v) {
     if (!vis_symexpr(v)) return SP_ATOM;
     val_t op = as_symexpr(v)->op;
     if (op == SX_ADD || op == SX_SUB) return SP_ADD;
-    if (op == SX_MUL || op == SX_DIV) return SP_MUL;
+    if (op == SX_MUL || op == SX_DIV || op == SX_NCMUL) return SP_MUL;
     if (op == SX_NEG)                  return SP_NEG;
     if (op == SX_EXPT)                 return SP_POW;
     return SP_ATOM;
@@ -142,7 +142,7 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
     } else if (op == SX_NEG && n == 1) {
         port_write_char(port, '-');
         sp_infix(a[0], SP_NEG, port);
-    } else if (op == SX_MUL) {
+    } else if (op == SX_MUL || op == SX_NCMUL) {
         for (int i = 0; i < n; i++) {
             if (i > 0) pws(port, " * ");
             sp_infix(a[i], SP_MUL, port);
@@ -357,7 +357,7 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
     } else if (op == SX_NEG && n == 1) {
         port_write_char(port, '-');
         sl_latex(a[0], SP_NEG, port);
-    } else if (op == SX_MUL) {
+    } else if (op == SX_MUL || op == SX_NCMUL) {
         for (int i = 0; i < n; i++) {
             if (i > 0) port_write_char(port, ' ');
             sl_latex(a[i], SP_MUL, port);

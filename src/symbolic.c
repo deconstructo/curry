@@ -13,6 +13,7 @@ extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn)
 
 /* Interned operator symbols */
 val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
+val_t SX_NCMUL;
 val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
 val_t SX_FRACDIFF, SX_FRACINT;
@@ -27,6 +28,7 @@ void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
     SX_SUB       = sym_intern_cstr("-");
     SX_MUL       = sym_intern_cstr("*");
+    SX_NCMUL     = sym_intern_cstr("nc*");
     SX_DIV       = sym_intern_cstr("/");
     SX_NEG       = sym_intern_cstr("neg");
     SX_EXPT      = sym_intern_cstr("expt");
@@ -140,7 +142,7 @@ val_t sx_simplify(val_t expr) {
     for (int i = 0; i < n; i++) sa[i] = sx_simplify(se->args[i]);
 
     /* Flatten nested ADD or MUL into one level */
-    if (op == SX_ADD || op == SX_MUL) {
+    if (op == SX_ADD || op == SX_MUL || op == SX_NCMUL) {
         /* Count total terms after flattening */
         int total = 0;
         for (int i = 0; i < n; i++) {
@@ -314,6 +316,41 @@ val_t sx_simplify(val_t expr) {
         }
     }
 
+    /* ---- NCMUL: ordered (non-commutative) product ---- */
+    if (op == SX_NCMUL) {
+        if (n == 1) return sa[0];
+        /* All concrete: fold left-to-right */
+        if (num_count == n) {
+            val_t acc = sa[0];
+            for (int i = 1; i < n; i++) acc = num_mul(acc, sa[i]);
+            return acc;
+        }
+        /* Separate real scalars (commute freely with quaternions) from ordered
+           non-commutative factors.  Adjacent NC concretes are folded in place. */
+        val_t scalar = vfix(1); bool has_scalar = false;
+        val_t *nc = (val_t *)gc_alloc((size_t)n * sizeof(val_t)); int nc_n = 0;
+        for (int i = 0; i < n; i++) {
+            val_t v = sa[i];
+            if (is_zero(v)) return vfix(0);
+            if (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || vis_rational(v)) {
+                scalar = has_scalar ? num_mul(scalar, v) : v; has_scalar = true;
+            } else if (vis_number(v)) {
+                /* Complex/quaternion/octonion — non-commutative; fold with adjacent NC concrete */
+                if (nc_n > 0 && vis_number(nc[nc_n-1])) nc[nc_n-1] = num_mul(nc[nc_n-1], v);
+                else nc[nc_n++] = v;
+            } else {
+                nc[nc_n++] = v;
+            }
+        }
+        /* Rebuild: leading real scalar then ordered NC factors */
+        val_t *res = (val_t *)gc_alloc((size_t)(nc_n + 1) * sizeof(val_t)); int rn = 0;
+        if (has_scalar && !is_one(scalar)) res[rn++] = scalar;
+        for (int i = 0; i < nc_n; i++) if (!is_one(nc[i])) res[rn++] = nc[i];
+        if (rn == 0) return vfix(1);
+        if (rn == 1) return res[0];
+        return sx_make_expr(SX_NCMUL, rn, res);
+    }
+
     /* ---- EXPT ---- */
     if (op == SX_EXPT && n == 2) {
         val_t base = sa[0], exp = sa[1];
@@ -438,6 +475,20 @@ val_t sx_simplify(val_t expr) {
 
 /* ---- Symbolic arithmetic (these return simplified expressions) ---- */
 
+/* Returns true if v is or contains a quaternion/octonion value or a
+   quaternion-typed sym-var — signalling that products involving v are
+   non-commutative and must use SX_NCMUL. */
+static bool sx_is_nc(val_t v) {
+    if (vis_quat(v) || vis_oct(v)) return true;
+    if (vis_symvar(v)) return (sym_var_flags(v) & SYM_ASSUME_QUATERNION) != 0;
+    if (!vis_symexpr(v)) return false;
+    SymExpr *e = as_symexpr(v);
+    if (e->op == SX_NCMUL) return true;
+    for (uint32_t i = 0; i < e->nargs; i++)
+        if (sx_is_nc(e->args[i])) return true;
+    return false;
+}
+
 val_t sx_neg(val_t a) {
     if (vis_number(a)) return num_neg(a);
     return sx_simplify(sx_expr1(SX_NEG, a));
@@ -448,7 +499,11 @@ val_t sx_abs(val_t a) {
 }
 val_t sx_add(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_ADD, a, b)); }
 val_t sx_sub(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_SUB, a, b)); }
-val_t sx_mul(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_MUL, a, b)); }
+val_t sx_mul(val_t a, val_t b) {
+    if (sx_is_nc(a) || sx_is_nc(b)) return sx_ncmul(a, b);
+    return sx_simplify(sx_expr2(SX_MUL, a, b));
+}
+val_t sx_ncmul(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_NCMUL, a, b)); }
 val_t sx_div(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_DIV, a, b)); }
 val_t sx_expt(val_t base, val_t exp) { return sx_simplify(sx_expr2(SX_EXPT, base, exp)); }
 val_t sx_sqrt(val_t a) { return sx_simplify(sx_expr1(SX_SQRT, a)); }
@@ -539,6 +594,24 @@ val_t sx_diff(val_t expr, val_t var) {
             sum_terms[i] = sx_simplify(sx_make_expr(SX_MUL, n, factors));
         }
         return sx_simplify(sx_make_expr(SX_ADD, n, sum_terms));
+    }
+
+    /* ---- NC product rule: order of remaining factors must be preserved ---- */
+    if (op == SX_NCMUL) {
+        val_t *sum_terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        int nterms = 0;
+        for (int i = 0; i < n; i++) {
+            val_t di = sx_diff(args[i], var);
+            if (is_zero(di)) continue;
+            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int j = 0; j < n; j++)
+                factors[j] = (j == i) ? di : args[j];
+            sum_terms[nterms++] = sx_simplify(sx_make_expr(SX_NCMUL, n, factors));
+        }
+        if (nterms == 0) return vfix(0);
+        val_t result = sum_terms[0];
+        for (int i = 1; i < nterms; i++) result = sx_add(result, sum_terms[i]);
+        return result;
     }
 
     /* ---- Quotient rule: d/dx (f/g) = (f'g - fg') / g² ---- */
@@ -736,6 +809,22 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
         }
         return sx_simplify(sx_make_expr(SX_ADD, n, terms));
     }
+    if (op == SX_NCMUL) {
+        val_t *terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        int nterms = 0;
+        for (int i = 0; i < n; i++) {
+            val_t di = sx_wirtinger(args[i], var, is_dbar);
+            if (is_zero(di)) continue;
+            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            for (int j = 0; j < n; j++)
+                factors[j] = (j == i) ? di : args[j];
+            terms[nterms++] = sx_simplify(sx_make_expr(SX_NCMUL, n, factors));
+        }
+        if (nterms == 0) return vfix(0);
+        val_t result = terms[0];
+        for (int i = 1; i < nterms; i++) result = sx_add(result, terms[i]);
+        return result;
+    }
 
     /* Quotient rule -------------------------------------------------------- */
     if (op == SX_DIV && n == 2) {
@@ -908,6 +997,32 @@ val_t sx_expand(val_t expr) {
         return acc;
     }
 
+    /* Distribute NCMUL over ADD preserving order */
+    if (op == SX_NCMUL) {
+        val_t acc = ea[0];
+        for (int i = 1; i < n; i++) {
+            val_t b = ea[i];
+            /* left-distribute: (a1+a2)*b → a1*b + a2*b */
+            if (vis_symexpr(acc) && as_symexpr(acc)->op == SX_ADD) {
+                SymExpr *sa2 = as_symexpr(acc);
+                int m = (int)sa2->nargs;
+                val_t *ts = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+                for (int k = 0; k < m; k++) ts[k] = sx_ncmul(sa2->args[k], b);
+                acc = sx_simplify(sx_make_expr(SX_ADD, m, ts));
+            /* right-distribute: a*(b1+b2) → a*b1 + a*b2 */
+            } else if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
+                SymExpr *sb = as_symexpr(b);
+                int m = (int)sb->nargs;
+                val_t *ts = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+                for (int k = 0; k < m; k++) ts[k] = sx_ncmul(acc, sb->args[k]);
+                acc = sx_simplify(sx_make_expr(SX_ADD, m, ts));
+            } else {
+                acc = sx_ncmul(acc, b);
+            }
+        }
+        return acc;
+    }
+
     /* Expand integer exponents 2..16 by repeated multiplication */
     if (op == SX_EXPT && n == 2) {
         val_t base = ea[0], exp_v = ea[1];
@@ -953,7 +1068,7 @@ static long sx_degree_long(val_t expr, val_t var) {
     }
     if (op == SX_NEG && n == 1)
         return sx_degree_long(args[0], var);
-    if (op == SX_MUL) {
+    if (op == SX_MUL || op == SX_NCMUL) {
         long s = 0;
         for (int i = 0; i < n; i++) s += sx_degree_long(args[i], var);
         return s;
@@ -1296,6 +1411,19 @@ val_t sx_integrate(val_t expr, val_t var) {
                     return sx_simplify(sx_sub(sx_mul(u, v), tail));
                 }
             }
+        }
+    }
+
+    /* NCMUL: factor out a leading real-scalar constant, leave quaternion-prefixed
+       products unevaluated (quaternion constants don't commute past the integrand) */
+    if (op == SX_NCMUL) {
+        if (n >= 2 && vis_number(args[0]) && !vis_quat(args[0]) && !vis_oct(args[0])
+                   && !vis_complex(args[0]) && !sx_depends_on(args[0], var)) {
+            val_t coeff = args[0];
+            val_t rest  = (n == 2) ? args[1] : sx_make_expr(SX_NCMUL, n - 1, args + 1);
+            val_t irest = sx_integrate(rest, var);
+            if (!vis_symexpr(irest) || as_symexpr(irest)->op != SX_INTEGRATE)
+                return sx_ncmul(coeff, irest);
         }
     }
 

@@ -336,6 +336,11 @@ AKK_PR("sym-expr?",       "awât-la-idûm?",       "𒉡𒌝?")   /* NU.UM? = no
 AKK_PR("symbolic?",       "la-idûm-šalim?",      "𒉡𒅆𒁹?") /* NU.IGI.DIŠ? = unknown-or-expression */
 AKK_PR("sym-var-name",    "šum-la-idûm",         "𒉡𒊕")    /* NU.SAG = not-seen-head = its name */
 
+/* ṣimdat-la-idûm: "decree/constraint of the unknown" — tests whether a symbolic
+ * variable carries a given assumption (real, positive, quaternion, …).
+ * TAR = "to cut, to decide" — the scribe's determination of its nature. */
+AKK_PR("sym-assumption?", "ṣimdat-la-idûm?",    "𒋻𒉡𒅆?") /* TAR.NU.IGI? = is this the decree of the unknown? */
+
 /* māḫirum: "the going rate / exchange rate" — attested on O.B. commercial tablets
  * for the price of silver, grain, oil per unit.  As a derivative: the instantaneous
  * rate at which a quantity changes per unit of its variable. */

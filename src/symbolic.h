@@ -187,6 +187,7 @@ void symbolic_init(void);
 #define SYM_ASSUME_NEGATIVE (1u << 2)  /* variable is strictly negative (implies real) */
 #define SYM_ASSUME_INTEGER  (1u << 3)  /* variable is an integer (implies real) */
 #define SYM_ASSUME_NONZERO  (1u << 4)  /* variable is nonzero */
+#define SYM_ASSUME_QUATERNION (1u << 5) /* variable is quaternion-valued (non-commutative) */
 
 /* Helpers — only meaningful when v is a sym-var */
 #define sym_var_flags(v)    (as_symvar(v)->hdr.flags)
@@ -210,6 +211,7 @@ val_t sx_expr_arg(val_t e, int i);
 val_t sx_add(val_t a, val_t b);
 val_t sx_sub(val_t a, val_t b);
 val_t sx_mul(val_t a, val_t b);
+val_t sx_ncmul(val_t a, val_t b); /* ordered product — use when either arg is quaternion-valued */
 val_t sx_div(val_t a, val_t b);
 val_t sx_neg(val_t a);
 val_t sx_abs(val_t a);
@@ -267,6 +269,7 @@ void  sx_write_latex(val_t expr, val_t port);   /* LaTeX:  x^{2} + 2 x + 1 */
 
 /* Interned operator symbols (available after symbolic_init) */
 extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;
+extern val_t SX_NCMUL; /* ordered (non-commutative) product */
 extern val_t SX_EXPT, SX_SQRT, SX_SIN, SX_COS, SX_TAN, SX_EXP, SX_LOG, SX_ABS;
 extern val_t SX_INTEGRATE, SX_CONJ, SX_REAL, SX_IMAG;
 extern val_t SX_FRACDIFF, SX_FRACINT;
