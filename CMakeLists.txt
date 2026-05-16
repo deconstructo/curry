@@ -94,6 +94,7 @@ set(CORE_SOURCES
   src/env.c
   src/eval.c
   src/builtins.c
+  src/builtins_curry.c
   src/set.c
   src/actors.c
   src/modules.c

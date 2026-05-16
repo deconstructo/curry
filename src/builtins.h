@@ -10,9 +10,16 @@
  */
 
 #include "value.h"
+#include "object.h"
 
 /* Register all built-in procedures into env */
 void builtins_register(val_t env);
+
+/* defprim: register a primitive function (used by builtins_curry.c) */
+void defprim(val_t env, const char *name, PrimFn fn, int min, int max);
+
+/* Register Curry-specific (CAS, quantum, surreal) procedures into env */
+void builtins_curry_register(val_t env);
 
 /* Helpers for list operations (used across the codebase) */
 val_t scm_cons(val_t car, val_t cdr);
