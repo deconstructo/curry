@@ -22,6 +22,10 @@ bool scm_eqv(val_t a, val_t b) {
     if (vis_complex(a) && vis_complex(b))
         return scm_eqv(as_cpx(a)->real, as_cpx(b)->real) &&
                scm_eqv(as_cpx(a)->imag, as_cpx(b)->imag);
+    if (vis_quat(a) && vis_quat(b)) {
+        Quaternion *qa = as_quat(a), *qb = as_quat(b);
+        return qa->a == qb->a && qa->b == qb->b && qa->c == qb->c && qa->d == qb->d;
+    }
     if (vis_char(a) && vis_char(b)) return vunchr(a) == vunchr(b);
     if (vis_symbol(a) && vis_symbol(b)) return a == b; /* interned, so pointer eq */
     return false;

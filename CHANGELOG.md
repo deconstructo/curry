@@ -31,9 +31,28 @@ Euler's identity `exp(πv̂) = −1` holds for any unit pure-imaginary quaternio
 - `sym-assumption?` → `ṣimdat-la-idûm?` / `𒋻𒉡𒅆?` ("decree of the unknown?")
 - Assumption keywords accepted in both English and Akkadian in `sym-var` and `sym-assumption?`: `ṣīrum`/real, `damqum`/positive, `lemnûm`/negative, `nikkassum`/integer, `la-ṣifrum`/nonzero, `rebûm`/quaternion
 
+**Quaternion builtins — previously unregistered procedures now exposed**
+
+- `quaternion-w`, `quaternion-x`, `quaternion-y`, `quaternion-z` — component accessors
+- `quaternion-norm` — Euclidean norm `√(w²+x²+y²+z²)`
+- `quaternion-conjugate` — `a−bi−cj−dk`
+- `quaternion-normalize` — unit quaternion
+- `quaternion-inverse` — `conj(q)/‖q‖²`
+- `quaternion+` — variadic addition
+- `quaternion*` — variadic Hamilton product
+- `quaternion-rotate-vector` — rotate a 3-vector by a quaternion via `q·v·q⁻¹`
+- `conj` generic now delegates to quaternion conjugate (previously fell through to no-op)
+- `eqv?` and `equal?` now compare quaternions by component value, not pointer identity
+
+**Symbolic CAS — additional simplifications**
+
+- Like-term collection in sums: `(+ q q)` → `(nc* 2 q)`, `(+ (* 3 q) (* -3 q))` → `0`; works for commutative (`*`) and non-commutative (`nc*`) products alike
+- NC product scalar folding: real-embedded quaternion `a+0i+0j+0k` folds into its real scalar part within `nc*`; a scalar of −1 folds into negation: `(* -1 q)` → `(- q)`
+- NC integration factoring: leading and trailing constant quaternion factors are extracted around the integral of the variable-dependent middle block, preserving left-to-right order
+
 **Tests**
 
-60 new assertions in `tests/numeric_ext_tests.scm` covering: assumption flags and Akkadian aliases, NC non-commutativity, real-scalar commutativity, ordered product rule (all orderings including triple products and mixed real/quaternion), full NC expansion, substitution order preservation, return types for all nine transcendentals, exact values at zero, Euler's identity on all three imaginary axes, and the Pythagorean and hyperbolic Pythagorean identities.
+300 assertions in `tests/numeric_ext_tests.scm`; new sections cover quaternion builtins (accessors, norm, conjugate, normalize, inverse, +, *, rotate-vector), corrected `conj`/`eqv?`/`equal?` behavior, and CAS simplifications (like-term collection, −1 folding, NC integration factoring).
 
 ### 0.8.4 — GPIO interrupts and Akkadian completeness
 

@@ -241,6 +241,31 @@ The `'quaternion` assumption on a sym-var changes how `*` works: the product bec
 (simplify '(* (* a b) c))     ; => (* a b c)
 ```
 
+Additional rules for **like-term collection** in sums: terms with the same symbolic base are combined into a coefficient–base product, including cancellation:
+
+```scheme
+(symbolic x y)
+(simplify (+ x x))             ; => (* 2 x)
+(simplify (+ x x x))           ; => (* 3 x)
+(simplify (+ x (- x)))         ; => 0      — cancel
+(simplify (+ (* 3 x) (* 2 x))) ; => (* 5 x)
+```
+
+For quaternion symbolic variables, the same pass applies to `nc*` products:
+
+```scheme
+(define q (sym-var 'q 'quaternion))
+(+ q q)                        ; => (nc* 2 q)
+(+ (* 3 q) (* -3 q))           ; => 0
+```
+
+**NC product simplifications**: a real scalar of −1 in a non-commutative product folds into negation, and a quaternion whose imaginary parts are all zero folds into its real part:
+
+```scheme
+(* -1 q)                       ; => (- q)
+(* (make-quaternion 2.0 0 0 0) q)  ; => (nc* 2.0 q)
+```
+
 `simplify` is called automatically by `∂`, `∫`, and `substitute` on their results.
 
 ## Symbolic differentiation
@@ -443,6 +468,26 @@ Unknown forms leave an unevaluated `(∫ expr var)` node.
 (∫ (/ 1 (+ (expt x 2) 4)) x)   ; => (1/2)·atan(x/2)
 (∫ (/ 1 (+ (expt x 2) (* 2 x) 2)) x)  ; => atan(x+1)  [completes the square]
 ```
+
+### NC product integration
+
+For non-commutative products (`nc*`) where some factors depend on the integration variable and others do not, the integrator factors out leading and trailing constant blocks:
+
+```scheme
+(define q (sym-var 'q 'quaternion))
+(define p (sym-var 'p 'quaternion))
+(symbolic t)
+
+; Pure constant NC product — treated as constant multiple, t factored in
+(∫ (* q p) t)          ; => (nc* q p t)
+
+; Leading/trailing quaternion constants flank the integrated variable block
+(∫ (* q t p) t)        ; => (nc* q (/ (expt t 2) 2) p)
+(∫ (* q t) t)          ; => (nc* q (/ (expt t 2) 2))
+(∫ (* t q) t)          ; => (nc* (/ (expt t 2) 2) q)
+```
+
+The rule: scan the NC factor list left-to-right for the smallest contiguous block containing the integration variable; integrate just that block; reassemble with leading and trailing constant quaternion factors flanking the result, preserving left-to-right order.
 
 ## Limits
 

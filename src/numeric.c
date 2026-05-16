@@ -1079,6 +1079,7 @@ val_t num_angle(val_t v) {
 }
 val_t num_conjugate(val_t v) {
     if (vis_symbolic(v)) return sx_conj(v);
+    if (vis_quat(v)) return num_quat_conjugate(v);
     if (!vis_complex(v)) return v;
     return num_make_complex(as_cpx(v)->real, num_neg(as_cpx(v)->imag));
 }

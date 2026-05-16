@@ -367,6 +367,12 @@ Quaternion literals use the same `a+bi+cj+dk` notation as output. Any subset of 
 
 ; Rotate a 3-vector by a quaternion
 (quaternion-rotate-vector q #(0 1 0))
+
+; Standard generic procedures also work on quaternions
+(conj q)          ; quaternion conjugate — same as quaternion-conjugate
+(abs  q)          ; Euclidean norm ‖q‖ = √(w²+x²+y²+z²)
+(eqv? q1 q2)      ; #t iff all four components are equal (value comparison)
+(equal? q1 q2)    ; same
 ```
 
 ### Octonions

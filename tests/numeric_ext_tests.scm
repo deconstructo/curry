@@ -751,6 +751,87 @@
               0.0  1e-10)
 
 ;;; =========================================================================
+;;; Quaternion builtins: accessors, operations, eqv?/equal?, conj
+;;; =========================================================================
+
+(define qb (make-quaternion 1.0 2.0 3.0 4.0))
+(define qi (make-quaternion 0.0 1.0 0.0 0.0))
+(define qj (make-quaternion 0.0 0.0 1.0 0.0))
+
+;;; Component accessors
+(check-approx "quaternion-w"    (quaternion-w qb) 1.0 1e-15)
+(check-approx "quaternion-x"    (quaternion-x qb) 2.0 1e-15)
+(check-approx "quaternion-y"    (quaternion-y qb) 3.0 1e-15)
+(check-approx "quaternion-z"    (quaternion-z qb) 4.0 1e-15)
+
+;;; Norm, conjugate, normalize, inverse
+(check-approx "quaternion-norm"
+              (quaternion-norm qb) (sqrt 30.0) 1e-10)
+(check "quaternion-conjugate"
+       (equal? (quaternion-conjugate qb) (make-quaternion 1.0 -2.0 -3.0 -4.0)) #t)
+(check-approx "quaternion-norm of inverse = 1/norm"
+              (quaternion-norm (quaternion-inverse qb)) (/ 1.0 (sqrt 30.0)) 1e-10)
+(check-approx "quaternion-norm of normalized = 1"
+              (quaternion-norm (quaternion-normalize qb)) 1.0 1e-10)
+
+;;; quaternion+ and quaternion*
+(check "quaternion+"
+       (equal? (quaternion+ qb qb) (make-quaternion 2.0 4.0 6.0 8.0)) #t)
+(check "quaternion* i*j = k"
+       (equal? (quaternion* qi qj) (make-quaternion 0.0 0.0 0.0 1.0)) #t)
+(check "quaternion* j*i = -k"
+       (equal? (quaternion* qj qi) (make-quaternion 0.0 0.0 0.0 -1.0)) #t)
+
+;;; conj now correctly negates imaginary parts
+(check "conj(1+2i+3j+4k) = 1-2i-3j-4k"
+       (equal? (conj qb) (make-quaternion 1.0 -2.0 -3.0 -4.0)) #t)
+(check "conj(conj(q)) = q"
+       (equal? (conj (conj qb)) qb) #t)
+(check "q * conj(q) is real"
+       (let ((r (* qb (conj qb))))
+         (and (quaternion? r)
+              (< (abs (- (quaternion-x r) 0.0)) 1e-10)
+              (< (abs (- (quaternion-y r) 0.0)) 1e-10)
+              (< (abs (- (quaternion-z r) 0.0)) 1e-10)))
+       #t)
+
+;;; eqv? and equal? compare by value, not pointer identity
+(check "eqv? by value"   (eqv?   (make-quaternion 1.0 2.0 3.0 4.0)
+                                  (make-quaternion 1.0 2.0 3.0 4.0)) #t)
+(check "equal? by value" (equal? (make-quaternion 1.0 2.0 3.0 4.0)
+                                  (make-quaternion 1.0 2.0 3.0 4.0)) #t)
+(check "eqv? distinct"  (eqv?   (make-quaternion 1.0 2.0 3.0 4.0)
+                                  (make-quaternion 1.0 2.0 3.0 5.0)) #f)
+
+;;; =========================================================================
+;;; Quaternion CAS: additional symbolic simplification fixes
+;;; =========================================================================
+
+(define q  (sym-var 'q  'quaternion))
+(define p  (sym-var 'p  'quaternion))
+(define t  (sym-var 't))
+(define qm1 (make-quaternion -1.0 0.0 0.0 0.0))
+
+;;; Like-term collection in ADD: q+q → (nc* 2 q)
+(check "q+q → (nc* 2 q)"   (equal? (+ q q)     (* 2 q))   #t)
+(check "q+q+q → (nc* 3 q)" (equal? (+ q q q)   (* 3 q))   #t)
+(check "q+p+q groups q"    (equal? (+ q p q)   (+ (* 2 q) p)) #t)
+
+;;; Real-quaternion -1 (a+0i+0j+0k with a=-1) treated as scalar: emits (neg ...)
+(check "(-1+0i)*q → (neg q)" (equal? (* qm1 q) (- q)) #t)
+(check "(-1+0i) treated as real scalar" (equal? (* qm1 p q) (* (- p) q)) #t)
+
+;;; NC integration: quaternion constant factors around a real integrand
+(check "∫ q dt = q*t"
+       (equal? (∫ q t) (* q t)) #t)
+(check "∫ t*q dt = (t²/2)*q"
+       (equal? (∫ (* t q) t) (* (/ (expt t 2) 2) q)) #t)
+(check "∫ q*t dt = q*(t²/2)"
+       (equal? (∫ (* q t) t) (* q (/ (expt t 2) 2))) #t)
+(check "∫ q*t² dt = q*(t³/3)"
+       (equal? (∫ (* q (expt t 2)) t) (* q (/ (expt t 3) 3))) #t)
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

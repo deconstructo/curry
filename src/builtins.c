@@ -407,6 +407,66 @@ static val_t prim_make_quat(int ac, val_t *av, void *ud) {(void)ud;
 }
 static val_t prim_quat_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_quat(av[0]));}
 
+/* Quaternion accessors and operations */
+static val_t prim_quat_w(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-w: not a quaternion");
+    return num_quat_a(av[0]);
+}
+static val_t prim_quat_x(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-x: not a quaternion");
+    return num_quat_b(av[0]);
+}
+static val_t prim_quat_y(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-y: not a quaternion");
+    return num_quat_c(av[0]);
+}
+static val_t prim_quat_z(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-z: not a quaternion");
+    return num_quat_d(av[0]);
+}
+static val_t prim_quat_norm(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-norm: not a quaternion");
+    return num_quat_norm(av[0]);
+}
+static val_t prim_quat_normalize(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-normalize: not a quaternion");
+    return num_quat_normalize(av[0]);
+}
+static val_t prim_quat_conjugate(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-conjugate: not a quaternion");
+    return num_quat_conjugate(av[0]);
+}
+static val_t prim_quat_inverse(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-inverse: not a quaternion");
+    return num_quat_inverse(av[0]);
+}
+static val_t prim_quat_add(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t acc = vfix(0);
+    for (int i = 0; i < ac; i++) acc = num_add(acc, av[i]);
+    return acc;
+}
+static val_t prim_quat_mul(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t acc = vfix(1);
+    for (int i = 0; i < ac; i++) acc = num_mul(acc, av[i]);
+    return acc;
+}
+static val_t prim_quat_rotate(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_quat(av[0])) scm_raise(V_FALSE, "quaternion-rotate-vector: not a quaternion");
+    if (!vis_quat(av[1])) scm_raise(V_FALSE, "quaternion-rotate-vector: vector must be a quaternion");
+    return num_quat_rotate(av[0], av[1]);
+}
+
 /* Octonion */
 static val_t prim_make_oct(int ac, val_t *av, void *ud) {
     (void)ud; double e[8]={0};
@@ -1769,7 +1829,18 @@ void builtins_register(val_t env) {
     DEF("bitwise-xor",prim_bitxor,0,-1); DEF("bitwise-not",prim_bitnot,1,1);
     DEF("arithmetic-shift",prim_shl,2,2);
     /* Quaternion */
-    DEF("make-quaternion",prim_make_quat,4,4);
+    DEF("make-quaternion",    prim_make_quat,       4,4);
+    DEF("quaternion-w",       prim_quat_w,          1,1);
+    DEF("quaternion-x",       prim_quat_x,          1,1);
+    DEF("quaternion-y",       prim_quat_y,          1,1);
+    DEF("quaternion-z",       prim_quat_z,          1,1);
+    DEF("quaternion-norm",    prim_quat_norm,       1,1);
+    DEF("quaternion-normalize",prim_quat_normalize, 1,1);
+    DEF("quaternion-conjugate",prim_quat_conjugate, 1,1);
+    DEF("quaternion-inverse",  prim_quat_inverse,   1,1);
+    DEF("quaternion+",         prim_quat_add,       0,-1);
+    DEF("quaternion*",         prim_quat_mul,       0,-1);
+    DEF("quaternion-rotate-vector",prim_quat_rotate,2,2);
     DEF("make-octonion",prim_make_oct,8,8); DEF("octonion-ref",prim_oct_ref,2,2);
 
     /* Characters */

@@ -186,23 +186,51 @@ val_t sx_simplify(val_t expr) {
         }
         if (nsym == 0) return num_acc;
 
-        /* Cancellation: remove pairs (e, neg(e)) from syms[] */
+        /* Like-term collection: combine terms with equal bases.
+           Each symbolic term is decomposed as coeff * base where base is the
+           "structural" part (a sym-var, an nc* product, or other expr).
+           Equal bases accumulate their coefficients; coeff=0 terms are dropped. */
         {
-            bool any_cancelled = false;
-            for (int i = 0; i < nsym && !any_cancelled; i++) {
-                for (int k2 = i + 1; k2 < nsym; k2++) {
-                    bool cancel = false;
-                    if (vis_symexpr(syms[i]) && as_symexpr(syms[i])->op == SX_NEG &&
-                        sx_equal(as_symexpr(syms[i])->args[0], syms[k2])) cancel = true;
-                    else if (vis_symexpr(syms[k2]) && as_symexpr(syms[k2])->op == SX_NEG &&
-                             sx_equal(as_symexpr(syms[k2])->args[0], syms[i])) cancel = true;
-                    if (cancel) { syms[i] = syms[k2] = vfix(0); any_cancelled = true; }
+            /* Extract (coeff, base) pairs.  Convention:
+               - plain sym-var or sym-expr (not neg, not coeff*base): coeff=1, base=self
+               - neg(e):                                               coeff=-1, base=e
+               - (* n e) or (nc* n e) where n is numeric, e is non-numeric: coeff=n, base=e */
+            val_t *bases  = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            val_t *coeffs = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            for (int i = 0; i < nsym; i++) {
+                val_t s = syms[i];
+                bases[i] = s; coeffs[i] = vfix(1);
+                if (vis_symexpr(s)) {
+                    SymExpr *se = as_symexpr(s);
+                    if (se->op == SX_NEG && se->nargs == 1) {
+                        bases[i] = se->args[0]; coeffs[i] = vfix(-1);
+                    } else if ((se->op == SX_MUL || se->op == SX_NCMUL) && se->nargs >= 2
+                               && vis_number(se->args[0]) && !vis_symbolic(se->args[0])) {
+                        coeffs[i] = se->args[0];
+                        bases[i] = se->nargs == 2 ? se->args[1]
+                                 : sx_make_expr(se->op, se->nargs - 1, se->args + 1);
+                    }
                 }
             }
-            if (any_cancelled) {
+            bool any_combined = false;
+            for (int i = 0; i < nsym; i++) {
+                if (is_zero(coeffs[i])) continue;
+                for (int k2 = i + 1; k2 < nsym; k2++) {
+                    if (is_zero(coeffs[k2])) continue;
+                    if (sx_equal(bases[i], bases[k2])) {
+                        coeffs[i] = num_add(coeffs[i], coeffs[k2]);
+                        coeffs[k2] = vfix(0);
+                        any_combined = true;
+                    }
+                }
+            }
+            if (any_combined) {
                 int new_nsym = 0;
-                for (int i = 0; i < nsym; i++)
-                    if (!is_zero(syms[i])) syms[new_nsym++] = syms[i];
+                for (int i = 0; i < nsym; i++) {
+                    if (is_zero(coeffs[i])) continue;
+                    if (is_one(coeffs[i])) syms[new_nsym++] = bases[i];
+                    else syms[new_nsym++] = sx_mul(coeffs[i], bases[i]);
+                }
                 nsym = new_nsym;
                 if (nsym == 0) return num_acc;
             }
@@ -273,7 +301,7 @@ val_t sx_simplify(val_t expr) {
             }
             return sx_make_expr(SX_MUL, nsym, nsyms);
         }
-        /* coeff == -1: return neg */
+        /* coeff == -1: return neg (also detect quaternion -1+0i+0j+0k) */
         if (vis_number(coeff) && !vis_complex(coeff) && num_eq(coeff, vfix(-1))) {
             val_t inner = nsym == 1 ? nsyms[0] : sx_make_expr(SX_MUL, nsym, nsyms);
             return sx_neg(inner);
@@ -335,12 +363,29 @@ val_t sx_simplify(val_t expr) {
             if (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || vis_rational(v)) {
                 scalar = has_scalar ? num_mul(scalar, v) : v; has_scalar = true;
             } else if (vis_number(v)) {
-                /* Complex/quaternion/octonion — non-commutative; fold with adjacent NC concrete */
-                if (nc_n > 0 && vis_number(nc[nc_n-1])) nc[nc_n-1] = num_mul(nc[nc_n-1], v);
-                else nc[nc_n++] = v;
+                /* Quaternion/complex/octonion with zero imaginary parts is a real
+                   scalar and commutes freely; otherwise maintain order. */
+                bool is_real_embed = false;
+                if (vis_quat(v)) {
+                    Quaternion *q = as_quat(v);
+                    is_real_embed = (q->b == 0.0 && q->c == 0.0 && q->d == 0.0);
+                }
+                if (is_real_embed) {
+                    val_t rv = num_make_float(as_quat(v)->a);
+                    scalar = has_scalar ? num_mul(scalar, rv) : rv; has_scalar = true;
+                } else {
+                    /* NC concrete: fold with adjacent NC concrete */
+                    if (nc_n > 0 && vis_number(nc[nc_n-1])) nc[nc_n-1] = num_mul(nc[nc_n-1], v);
+                    else nc[nc_n++] = v;
+                }
             } else {
                 nc[nc_n++] = v;
             }
+        }
+        /* scalar == -1 with NC factors: emit (neg (nc* ...)) */
+        if (has_scalar && num_eq(scalar, vfix(-1)) && nc_n > 0) {
+            val_t inner = nc_n == 1 ? nc[0] : sx_make_expr(SX_NCMUL, nc_n, nc);
+            return sx_neg(inner);
         }
         /* Rebuild: leading real scalar then ordered NC factors */
         val_t *res = (val_t *)gc_alloc((size_t)(nc_n + 1) * sizeof(val_t)); int rn = 0;
@@ -1418,13 +1463,43 @@ val_t sx_integrate(val_t expr, val_t var) {
     /* NCMUL: factor out a leading real-scalar constant, leave quaternion-prefixed
        products unevaluated (quaternion constants don't commute past the integrand) */
     if (op == SX_NCMUL) {
-        if (n >= 2 && vis_number(args[0]) && !vis_quat(args[0]) && !vis_oct(args[0])
-                   && !vis_complex(args[0]) && !sx_depends_on(args[0], var)) {
-            val_t coeff = args[0];
-            val_t rest  = (n == 2) ? args[1] : sx_make_expr(SX_NCMUL, n - 1, args + 1);
-            val_t irest = sx_integrate(rest, var);
-            if (!vis_symexpr(irest) || as_symexpr(irest)->op != SX_INTEGRATE)
-                return sx_ncmul(coeff, irest);
+        /* Partition factors into a leading constant block, a variable block, and
+           a trailing constant block.  If the variable block integrates cleanly,
+           return  leading ⊗ ∫(var_block) ⊗ trailing. */
+        int first_var = n, last_var = -1;
+        for (int i = 0; i < n; i++) {
+            if (sx_depends_on(args[i], var)) {
+                if (i < first_var) first_var = i;
+                last_var = i;
+            }
+        }
+        if (first_var == n) {
+            /* No factors depend on var: whole product is constant */
+            val_t whole = n == 1 ? args[0] : sx_make_expr(SX_NCMUL, n, args);
+            return sx_ncmul(whole, var);
+        }
+        if (first_var > 0 || last_var < n - 1) {
+            /* Build the var-dependent sub-product and integrate it */
+            int vn = last_var - first_var + 1;
+            val_t var_part = vn == 1 ? args[first_var]
+                           : sx_make_expr(SX_NCMUL, vn, args + first_var);
+            val_t ivar = sx_integrate(var_part, var);
+            if (!vis_symexpr(ivar) || as_symexpr(ivar)->op != SX_INTEGRATE) {
+                /* leading ⊗ ivar ⊗ trailing */
+                val_t result = ivar;
+                if (last_var < n - 1) {
+                    val_t *trail = args + last_var + 1;
+                    int tn = n - last_var - 1;
+                    val_t tail = tn == 1 ? trail[0] : sx_make_expr(SX_NCMUL, tn, trail);
+                    result = sx_ncmul(result, tail);
+                }
+                if (first_var > 0) {
+                    val_t head = first_var == 1 ? args[0]
+                               : sx_make_expr(SX_NCMUL, first_var, args);
+                    result = sx_ncmul(head, result);
+                }
+                return result;
+            }
         }
     }
 
