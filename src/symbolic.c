@@ -960,6 +960,25 @@ static val_t expand_mul2(val_t a, val_t b) {
     return sx_mul(a, b);
 }
 
+/* Non-commutative analogue of expand_mul2: distribute a⊗b maintaining order. */
+static val_t expand_ncmul2(val_t a, val_t b) {
+    if (vis_symexpr(a) && as_symexpr(a)->op == SX_ADD) {
+        SymExpr *aa = as_symexpr(a);
+        int m = (int)aa->nargs;
+        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        for (int i = 0; i < m; i++) terms[i] = expand_ncmul2(aa->args[i], b);
+        return sx_simplify(sx_make_expr(SX_ADD, m, terms));
+    }
+    if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
+        SymExpr *ab = as_symexpr(b);
+        int m = (int)ab->nargs;
+        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        for (int i = 0; i < m; i++) terms[i] = expand_ncmul2(a, ab->args[i]);
+        return sx_simplify(sx_make_expr(SX_ADD, m, terms));
+    }
+    return sx_ncmul(a, b);
+}
+
 val_t sx_expand(val_t expr) {
     if (!vis_symbolic(expr)) return expr;
     if (vis_symvar(expr)) return expr;
@@ -1000,26 +1019,7 @@ val_t sx_expand(val_t expr) {
     /* Distribute NCMUL over ADD preserving order */
     if (op == SX_NCMUL) {
         val_t acc = ea[0];
-        for (int i = 1; i < n; i++) {
-            val_t b = ea[i];
-            /* left-distribute: (a1+a2)*b → a1*b + a2*b */
-            if (vis_symexpr(acc) && as_symexpr(acc)->op == SX_ADD) {
-                SymExpr *sa2 = as_symexpr(acc);
-                int m = (int)sa2->nargs;
-                val_t *ts = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
-                for (int k = 0; k < m; k++) ts[k] = sx_ncmul(sa2->args[k], b);
-                acc = sx_simplify(sx_make_expr(SX_ADD, m, ts));
-            /* right-distribute: a*(b1+b2) → a*b1 + a*b2 */
-            } else if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
-                SymExpr *sb = as_symexpr(b);
-                int m = (int)sb->nargs;
-                val_t *ts = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
-                for (int k = 0; k < m; k++) ts[k] = sx_ncmul(acc, sb->args[k]);
-                acc = sx_simplify(sx_make_expr(SX_ADD, m, ts));
-            } else {
-                acc = sx_ncmul(acc, b);
-            }
-        }
+        for (int i = 1; i < n; i++) acc = expand_ncmul2(acc, ea[i]);
         return acc;
     }
 
@@ -1032,7 +1032,8 @@ val_t sx_expand(val_t expr) {
             if (e == 1) return base;
             if (e >= 2 && e <= 16) {
                 val_t acc = base;
-                for (long i = 1; i < e; i++) acc = expand_mul2(acc, base);
+                for (long i = 1; i < e; i++)
+                    acc = sx_is_nc(acc) ? expand_ncmul2(acc, base) : expand_mul2(acc, base);
                 return acc;
             }
         }

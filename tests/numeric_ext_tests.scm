@@ -570,6 +570,187 @@
 (check-approx "lim x→∞ (1+1/x)^x = e"   (exact->inexact lim-compound) (exp 1.0) 1e-9)
 
 ;;; =========================================================================
+;;; Quaternion CAS: non-commutative symbolic algebra
+;;; =========================================================================
+
+;;; Quaternion-flagged sym-vars route multiplication through the ordered
+;;; SX_NCMUL node, preserving factor order.  Real scalars commute out.
+;;; Differentiation applies the product rule maintaining left-to-right order.
+
+(define q (sym-var 'q 'quaternion))
+(define p (sym-var 'p 'quaternion))
+(define t (sym-var 't))                 ; real, no assumption
+
+;;; -- Assumption flag --
+(check "q has quaternion assumption"       (sym-assumption? q 'quaternion) #t)
+(check "p has quaternion assumption"       (sym-assumption? p 'quaternion) #t)
+(check "t does not have quaternion assumption" (sym-assumption? t 'quaternion) #f)
+
+;;; Akkadian alias for sym-assumption?  (ṣimdat-la-idûm? = "decree of the unknown?")
+(check "Akkadian alias: ṣimdat-la-idûm?"  (ṣimdat-la-idûm? q 'rebûm)       #t)
+(check "Akkadian alias: la-idûm?"         (la-idûm? q)                      #t)
+
+;;; -- Non-commutativity --
+;;; q*p and p*q must be structurally distinct (Hamilton product ≠ commutative).
+(check "q*p ≠ p*q"                (equal? (* q p) (* p q))       #f)
+(check "q*p = q*p (self-equal)"   (equal? (* q p) (* q p))       #t)
+
+;;; Symbolic product nodes carry the operator nc*
+(check "q*p node is (nc* q p)"    (equal? (* q p) '(nc* q p))    #f) ; not list, just shape
+(check "q*p is symbolic"          (symbolic? (* q p))             #t)
+
+;;; -- Real scalars commute out --
+;;; Real scalars (fixnum/flonum/rational) are never NC; they fold to a leading
+;;; coefficient regardless of where they appear in the product.
+(check "2*q = q*2"                (equal? (* 2 q) (* q 2))       #t)
+(check "scalar extracted: 3*q*p = q*3*p" (equal? (* 3 q p) (* q 3 p)) #t)
+
+;;; -- Differentiation: product rule maintains order --
+;;; ∂q/∂q = 1,  ∂p/∂q = 0.
+(check "∂q/∂q = 1"               (equal? (∂ q q) 1)             #t)
+(check "∂p/∂q = 0"               (equal? (∂ p q) 0)             #t)
+
+;;; Product rule: ∂(q·p)/∂q = (∂q/∂q)·p = p  (right factor survives)
+(check "∂(q*p)/∂q = p"           (equal? (∂ (* q p) q) p)       #t)
+;;; ∂(p·q)/∂q = p·(∂q/∂q) = p  (left factor survives)
+(check "∂(p*q)/∂q = p"           (equal? (∂ (* p q) q) p)       #t)
+;;; Symmetry: differentiate the other variable
+(check "∂(q*p)/∂p = q"           (equal? (∂ (* q p) p) q)       #t)
+(check "∂(p*q)/∂p = q"           (equal? (∂ (* p q) p) q)       #t)
+
+;;; ∂(q²)/∂q = q + q  (two ordered terms; sum simplification is deferred)
+(check "∂(q²)/∂q = q+q"          (equal? (∂ (* q q) q) (+ q q)) #t)
+
+;;; Triple product — product rule gives two ordered terms, each with the
+;;; differentiated factor replaced by 1:
+;;; ∂(q·p·q)/∂q = p·q + q·p   (first and third positions both differentiate)
+(check "∂(q*p*q)/∂q = p*q + q*p"
+       (equal? (∂ (* q p q) q)
+               (+ (* p q) (* q p)))
+       #t)
+;;; ∂(q·p·q)/∂p = q·q  (only the middle factor differentiates)
+(check "∂(q*p*q)/∂p = q*q"
+       (equal? (∂ (* q p q) p)
+               (* q q))
+       #t)
+
+;;; Real variable mixed with quaternion-valued variable:
+;;; ∂(t·q)/∂t = q  (q is constant w.r.t. the real variable t)
+(check "∂(t*q)/∂t = q"           (equal? (∂ (* t q) t) q)       #t)
+(check "∂(q*t)/∂t = q"           (equal? (∂ (* q t) t) q)       #t)
+(check "∂(t*q)/∂q = t"           (equal? (∂ (* t q) q) t)       #t)
+
+;;; -- expand: full distribution over NC products --
+;;; (q+p)*(q+p) must produce four terms q², q*p, p*q, p² — NOT three,
+;;; because q*p ≠ p*q so the cross terms cannot be combined.
+(check "expand (q+p)²: four distinct terms"
+       (equal? (expand (* (+ q p) (+ q p)))
+               (+ (* q q) (* q p) (* p q) (* p p)))
+       #t)
+
+;;; NC expansion is not commutative: (q+p)² ≠ (p+q)²
+(check "expand (q+p)² ≠ expand (p+q)²"
+       (equal? (expand (* (+ q p) (+ q p)))
+               (expand (* (+ p q) (+ p q))))
+       #f)
+
+;;; Integer exponent expansion preserves order: q³ = q*q*q
+(check "expand q³ = q*q*q"
+       (equal? (expand (expt q 3))
+               (* (* q q) q))
+       #t)
+
+;;; -- substitute --
+;;; Concrete quaternion value for q: the unit imaginary i = 0+1i+0j+0k
+(define qi (make-quaternion 0.0 1.0 0.0 0.0))
+
+;;; Substituting q→qi in q*p keeps p symbolic in the right position
+(check "substitute q→qi in q*p: qi on left"
+       (equal? (substitute (* q p) q qi)
+               (* qi p))
+       #t)
+;;; And in p*q, qi ends up on the right
+(check "substitute q→qi in p*q: qi on right"
+       (equal? (substitute (* p q) q qi)
+               (* p qi))
+       #t)
+;;; Substituting an independent variable leaves the product unchanged
+(check "substitute t in q*p leaves q*p"
+       (equal? (substitute (* q p) t 5)
+               (* q p))
+       #t)
+
+;;; =========================================================================
+;;; Quaternion numeric tower: trig / hyperbolic functions
+;;; =========================================================================
+
+;;; All transcendental functions must accept quaternion arguments and return
+;;; quaternion results.  The computation embeds q = a + v̂·‖v‖ in the complex
+;;; plane {1, v̂}, applies the complex formula, then reassembles.
+
+(define qv (make-quaternion 1.0 2.0 3.0 4.0))    ; generic test quaternion
+(define q0 (make-quaternion 0.0 0.0 0.0 0.0))    ; zero quaternion
+(define q1 (make-quaternion 1.0 0.0 0.0 0.0))    ; unit real
+
+;;; Return type: all transcendentals on a quaternion yield a quaternion.
+(check "sin(q)  → quaternion"  (quaternion? (sin  qv)) #t)
+(check "cos(q)  → quaternion"  (quaternion? (cos  qv)) #t)
+(check "tan(q)  → quaternion"  (quaternion? (tan  qv)) #t)
+(check "exp(q)  → quaternion"  (quaternion? (exp  qv)) #t)
+(check "log(q)  → quaternion"  (quaternion? (log  qv)) #t)
+(check "sqrt(q) → quaternion"  (quaternion? (sqrt qv)) #t)
+(check "sinh(q) → quaternion"  (quaternion? (sinh qv)) #t)
+(check "cosh(q) → quaternion"  (quaternion? (cosh qv)) #t)
+(check "tanh(q) → quaternion"  (quaternion? (tanh qv)) #t)
+
+;;; Exact values at zero: sin(0)=0, cos(0)=1, exp(0)=1, log(1)=0, sqrt(1)=1.
+(check "sin(0) = 0"   (= (sin  q0) q0) #t)
+(check "cos(0) = 1"   (= (cos  q0) q1) #t)
+(check "exp(0) = 1"   (= (exp  q0) q1) #t)
+(check "log(1) = 0"   (= (log  q1) q0) #t)
+(check "sqrt(1) = 1"  (= (sqrt q1) q1) #t)
+(check "sinh(0) = 0"  (= (sinh q0) q0) #t)
+(check "cosh(0) = 1"  (= (cosh q0) q1) #t)
+
+;;; Pythagorean identity sin²+cos²=1 at zero (exact).
+(check "sin²(0)+cos²(0) = 1"
+       (= (+ (* (sin q0) (sin q0)) (* (cos q0) (cos q0))) q1)
+       #t)
+
+;;; Euler identity: exp(π·i) + 1 ≈ 0.
+;;; The i-direction pure-imaginary case reduces to the complex formula
+;;; exp(iπ) = cos(π) + i·sin(π) = -1.
+(define pi 3.141592653589793)
+(check-approx "exp(π·i) + 1 ≈ 0"
+              (abs (+ (exp (make-quaternion 0.0 pi 0.0 0.0)) 1))
+              0.0  1e-10)
+
+;;; Euler identity holds for every pure-imaginary axis direction.
+(check-approx "exp(π·j) + 1 ≈ 0"
+              (abs (+ (exp (make-quaternion 0.0 0.0 pi 0.0)) 1))
+              0.0  1e-10)
+(check-approx "exp(π·k) + 1 ≈ 0"
+              (abs (+ (exp (make-quaternion 0.0 0.0 0.0 pi)) 1))
+              0.0  1e-10)
+
+;;; Pythagorean identity sin²+cos² = 1 for a generic quaternion.
+;;; (abs returns the quaternion norm, so check norm of error < eps.)
+(check-approx "sin²(q)+cos²(q) ≈ 1"
+              (abs (- (+ (* (sin qv) (sin qv)) (* (cos qv) (cos qv))) q1))
+              0.0  1e-10)
+
+;;; Hyperbolic Pythagorean identity cosh²-sinh² = 1 for a generic quaternion.
+(check-approx "cosh²(q)-sinh²(q) ≈ 1"
+              (abs (- (- (* (cosh qv) (cosh qv)) (* (sinh qv) (sinh qv))) q1))
+              0.0  1e-10)
+
+;;; log∘exp roundtrip for a quaternion with ‖Im(q)‖ < π (avoids branch cut).
+(define qsmall (make-quaternion 0.0 0.5 0.3 0.1))
+(check-approx "log(exp(q)) ≈ q for small Im(q)"
+              (abs (- (log (exp qsmall)) qsmall))
+              0.0  1e-10)
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

@@ -529,6 +529,10 @@ val_t num_abs(val_t a) {
     if (vis_flonum(a))   return num_make_float(fabs(vfloat(a)));
     if (vis_bignum(a))   { mpz_t z; mpz_init(z); mpz_abs(z, as_big(a)->z); val_t r=make_big_from_mpz(z); mpz_clear(z); return r; }
     if (vis_rational(a)) { mpq_t q; mpq_init(q); mpq_abs(q, as_rat(a)->q); val_t r=make_rat_from_mpq(q); mpq_clear(q); return r; }
+    if (vis_quat(a)) {
+        Quaternion *q = as_quat(a);
+        return num_make_float(sqrt(q->a*q->a + q->b*q->b + q->c*q->c + q->d*q->d));
+    }
     return a;
 }
 
