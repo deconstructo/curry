@@ -45,12 +45,23 @@ sudo usermod -aG gpio $USER
 ### `(gpio-open chip line direction)` → gpio-handle
 
 Open a GPIO line. `chip` is the chip number (usually `0` for
-`/dev/gpiochip0`). `line` is the BCM pin number. `direction` is `'input` or
-`'output`.
+`/dev/gpiochip0`). `line` is the BCM pin number. `direction` is one of:
+
+| Symbol | Mode |
+|--------|------|
+| `'input` | Read logic level with `gpio-read` |
+| `'output` | Write logic level with `gpio-write` |
+| `'rising` | Edge events: rising edges only |
+| `'falling` | Edge events: falling edges only |
+| `'both` | Edge events: both rising and falling edges |
+
+The edge modes configure the line for interrupt-style use with
+`gpio-wait-edge` and `gpio-watch`.
 
 ```scheme
 (define led (gpio-open 0 17 'output))
 (define btn (gpio-open 0 27 'input))
+(define irq (gpio-open 0 4  'both))    ; interrupt on either edge
 ```
 
 ### `(gpio-read handle)` → 0 or 1
@@ -77,6 +88,81 @@ Release the line and close the chip. Always call this when done.
 ### `(gpio? v)` → bool
 
 Return `#t` if `v` is a gpio handle.
+
+## GPIO interrupts
+
+Lines opened with `'rising`, `'falling`, or `'both` can be monitored for
+edge transitions without polling.
+
+### `(gpio-wait-edge handle)` → `'rising` | `'falling` | `#f`
+### `(gpio-wait-edge handle timeout-ms)` → `'rising` | `'falling` | `#f`
+
+Block until an edge event arrives on `handle`, then return `'rising` or
+`'falling`. Returns `#f` if `timeout-ms` milliseconds elapse with no event.
+Pass `-1` (the default) to wait indefinitely.
+
+Because this is a blocking call, it is best used inside a `spawn`'d actor:
+
+```scheme
+(import (curry rpi))
+
+(define irq (gpio-open 0 4 'both))
+
+(define watcher
+  (spawn (lambda ()
+    (let loop ()
+      (let ((edge (gpio-wait-edge irq)))
+        (when edge
+          (display edge) (display " edge detected") (newline)
+          (loop)))))))
+```
+
+### `(gpio-watch handle proc)` → watcher-handle
+
+Spawn a background thread that calls `(proc edge timestamp-ns)` on every
+edge event. `edge` is `'rising` or `'falling`; `timestamp-ns` is the kernel
+event timestamp in nanoseconds since the Unix epoch.
+
+Returns a watcher handle that must be passed to `gpio-unwatch` to stop it.
+
+```scheme
+(define irq (gpio-open 0 4 'both))
+
+(define w (gpio-watch irq (lambda (edge ts)
+  (display edge) (display " at ") (display ts) (newline))))
+
+; ... do other work ...
+
+(gpio-unwatch w)
+(gpio-close irq)
+```
+
+Sending events to an actor from the callback:
+
+```scheme
+(define counter-actor
+  (spawn (lambda ()
+    (let loop ((n 0) (msg (receive)))
+      (display "count: ") (display n) (newline)
+      (loop (+ n 1) (receive))))))
+
+(define irq (gpio-open 0 4 'rising))
+(define w   (gpio-watch irq (lambda (edge ts)
+               (send! counter-actor (list edge ts)))))
+```
+
+**Note:** do not call `gpio-unwatch` from within the callback — it will
+deadlock. Stop the watcher from a different context (e.g., the main thread
+or a different actor).
+
+### `(gpio-unwatch watcher-handle)` → void
+
+Signal the watcher thread to stop and wait for it to exit. The gpio line
+is not closed — call `gpio-close` separately when done.
+
+### `(watcher? v)` → bool
+
+Return `#t` if `v` is a watcher handle.
 
 ## I2C
 

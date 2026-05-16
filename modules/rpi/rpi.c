@@ -4,10 +4,11 @@
  * Linux-only.  Not supported on macOS or other non-Linux platforms.
  *
  * Handles are tagged pairs:
- *   ("gpio"  . bv)  — gpiod_line*
- *   ("i2c"   . bv)  — int fd
- *   ("spi"   . bv)  — int fd
- *   ("pwm"   . bv)  — #(chip channel sysfs-path)
+ *   ("gpio"    . bv)  — gpiod_line*
+ *   ("i2c"     . bv)  — int fd
+ *   ("spi"     . bv)  — int fd
+ *   ("pwm"     . bv)  — #(chip channel sysfs-path)
+ *   ("watcher" . bv)  — GpioWatcher* (interrupt watcher thread)
  *
  * Dependencies:
  *   GPIO: libgpiod  (sudo apt install libgpiod-dev)
@@ -24,10 +25,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <pthread.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
 #include <linux/spi/spidev.h>
 #include <gpiod.h>
+#include <gc/gc.h>
 
 /* ---- pointer packing (same idiom as sync module) ---- */
 
@@ -99,9 +103,15 @@ static curry_val fn_gpio_open(int ac, curry_val *av, void *ud) {
         rc = gpiod_line_request_input(line, "curry");
     } else if (strcmp(dir, "output") == 0) {
         rc = gpiod_line_request_output(line, "curry", 0);
+    } else if (strcmp(dir, "rising") == 0) {
+        rc = gpiod_line_request_rising_edge_events(line, "curry");
+    } else if (strcmp(dir, "falling") == 0) {
+        rc = gpiod_line_request_falling_edge_events(line, "curry");
+    } else if (strcmp(dir, "both") == 0) {
+        rc = gpiod_line_request_both_edges_events(line, "curry");
     } else {
         gpiod_chip_close(chip);
-        curry_error("gpio-open: direction must be 'input or 'output, got '%s'", dir);
+        curry_error("gpio-open: direction must be 'input, 'output, 'rising, 'falling, or 'both, got '%s'", dir);
     }
 
     if (rc < 0) {
@@ -147,6 +157,143 @@ static curry_val fn_gpio_close(int ac, curry_val *av, void *ud) {
 static curry_val fn_gpio_p(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     return curry_make_bool(has_tag(av[0], "gpio"));
+}
+
+/* (gpio-wait-edge handle timeout-ms) → 'rising | 'falling | #f
+ * timeout-ms: milliseconds; -1 = wait forever.
+ * The line must have been opened with direction 'rising, 'falling, or 'both. */
+static curry_val fn_gpio_wait_edge(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    struct gpiod_line *line = get_gpio(av[0], "gpio-wait-edge");
+    int timeout_ms = (ac >= 2 && curry_is_fixnum(av[1])) ? (int)curry_fixnum(av[1]) : -1;
+
+    int fd = gpiod_line_event_get_fd(line);
+    if (fd < 0)
+        curry_error("gpio-wait-edge: line not configured for edge events — open with 'rising, 'falling, or 'both");
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    int r = poll(&pfd, 1, timeout_ms);
+    if (r < 0)  curry_error("gpio-wait-edge: poll: %s", strerror(errno));
+    if (r == 0) return curry_make_bool(false);   /* timeout */
+
+    struct gpiod_line_event ev;
+    if (gpiod_line_event_read(line, &ev) < 0)
+        curry_error("gpio-wait-edge: read failed: %s", strerror(errno));
+
+    return (ev.event_type == GPIOD_LINE_EVENT_RISING_EDGE)
+        ? curry_make_symbol("rising") : curry_make_symbol("falling");
+}
+
+/* ---- GPIO watcher (interrupt-driven background thread) ---- */
+
+typedef struct {
+    struct gpiod_line *line;
+    curry_val          callback; /* Scheme proc — kept alive via GC_add_roots below */
+    int                pipe_rd;
+    int                pipe_wr;
+    pthread_t          thread;
+    volatile int       active;
+} GpioWatcher;
+
+static curry_val wrap_watcher(GpioWatcher *w) {
+    return curry_make_pair(curry_make_symbol("watcher"), pack_ptr(w));
+}
+static GpioWatcher *get_watcher(curry_val v, const char *ctx) {
+    if (!has_tag(v, "watcher")) curry_error("%s: expected watcher handle", ctx);
+    return (GpioWatcher *)unpack_ptr(curry_cdr(v));
+}
+
+static void *watcher_thread_fn(void *arg) {
+    GpioWatcher *w = (GpioWatcher *)arg;
+
+    struct GC_stack_base sb;
+    GC_get_stack_base(&sb);
+    GC_register_my_thread(&sb);
+
+    int gpio_fd = gpiod_line_event_get_fd(w->line);
+    struct pollfd fds[2] = {
+        { .fd = gpio_fd,    .events = POLLIN },
+        { .fd = w->pipe_rd, .events = POLLIN },
+    };
+
+    while (w->active) {
+        int r = poll(fds, 2, -1);
+        if (r < 0 || (fds[1].revents & POLLIN)) break;
+        if (!(fds[0].revents & POLLIN)) continue;
+
+        struct gpiod_line_event ev;
+        if (gpiod_line_event_read(w->line, &ev) < 0) continue;
+
+        curry_val edge = (ev.event_type == GPIOD_LINE_EVENT_RISING_EDGE)
+            ? curry_make_symbol("rising") : curry_make_symbol("falling");
+        int64_t ts_ns = (int64_t)ev.ts.tv_sec * 1000000000LL + ev.ts.tv_nsec;
+        curry_val args[2] = { edge, curry_make_fixnum(ts_ns) };
+        /* NOTE: do not call gpio-unwatch from within the callback — deadlock. */
+        curry_apply(w->callback, 2, args);
+    }
+
+    GC_unregister_my_thread();
+    return NULL;
+}
+
+/* (gpio-watch handle proc) → watcher-handle
+ * proc is called as (proc edge timestamp-ns) on each interrupt.
+ * edge: 'rising or 'falling; timestamp-ns: nanoseconds since epoch.
+ * The line must have been opened with direction 'rising, 'falling, or 'both. */
+static curry_val fn_gpio_watch(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    struct gpiod_line *line = get_gpio(av[0], "gpio-watch");
+    if (!curry_is_procedure(av[1])) curry_error("gpio-watch: second argument must be a procedure");
+
+    int fd = gpiod_line_event_get_fd(line);
+    if (fd < 0)
+        curry_error("gpio-watch: line not configured for edge events — open with 'rising, 'falling, or 'both");
+
+    int pipefds[2];
+    if (pipe(pipefds) < 0)
+        curry_error("gpio-watch: pipe: %s", strerror(errno));
+
+    GpioWatcher *w = malloc(sizeof(GpioWatcher));
+    if (!w) { close(pipefds[0]); close(pipefds[1]); curry_error("gpio-watch: out of memory"); }
+
+    w->line     = line;
+    w->callback = av[1];
+    w->pipe_rd  = pipefds[0];
+    w->pipe_wr  = pipefds[1];
+    w->active   = 1;
+
+    /* Keep w->callback alive: GC scans the memory range [w, w+sizeof(*w)). */
+    GC_add_roots(w, (char *)w + sizeof(*w));
+
+    if (pthread_create(&w->thread, NULL, watcher_thread_fn, w) != 0) {
+        GC_remove_roots(w, (char *)w + sizeof(*w));
+        close(pipefds[0]); close(pipefds[1]); free(w);
+        curry_error("gpio-watch: pthread_create: %s", strerror(errno));
+    }
+
+    return wrap_watcher(w);
+}
+
+/* (gpio-unwatch watcher-handle) → void
+ * Signals the watcher thread to stop and waits for it to exit.
+ * Do not call from within the watcher callback — it will deadlock. */
+static curry_val fn_gpio_unwatch(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    GpioWatcher *w = get_watcher(av[0], "gpio-unwatch");
+    w->active = 0;
+    (void)write(w->pipe_wr, "x", 1);   /* wake the poll */
+    pthread_join(w->thread, NULL);
+    GC_remove_roots(w, (char *)w + sizeof(*w));
+    close(w->pipe_rd);
+    close(w->pipe_wr);
+    free(w);
+    return curry_void();
+}
+
+/* (watcher? v) → bool */
+static curry_val fn_watcher_p(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_make_bool(has_tag(av[0], "watcher"));
 }
 
 /* ---- I2C ---- */
@@ -456,11 +603,15 @@ static curry_val fn_pwm_p(int ac, curry_val *av, void *ud) {
 void curry_module_init(CurryVM *vm) {
 #define DEF(n, f, mn, mx) curry_define_fn(vm, n, f, mn, mx, NULL)
     /* GPIO */
-    DEF("gpio-open",       fn_gpio_open,    3, 3);
-    DEF("gpio-read",       fn_gpio_read,    1, 1);
-    DEF("gpio-write",      fn_gpio_write,   2, 2);
-    DEF("gpio-close",      fn_gpio_close,   1, 1);
-    DEF("gpio?",           fn_gpio_p,       1, 1);
+    DEF("gpio-open",       fn_gpio_open,      3, 3);
+    DEF("gpio-read",       fn_gpio_read,      1, 1);
+    DEF("gpio-write",      fn_gpio_write,     2, 2);
+    DEF("gpio-close",      fn_gpio_close,     1, 1);
+    DEF("gpio?",           fn_gpio_p,         1, 1);
+    DEF("gpio-wait-edge",  fn_gpio_wait_edge, 1, 2);
+    DEF("gpio-watch",      fn_gpio_watch,     2, 2);
+    DEF("gpio-unwatch",    fn_gpio_unwatch,   1, 1);
+    DEF("watcher?",        fn_watcher_p,      1, 1);
     /* I2C */
     DEF("i2c-open",        fn_i2c_open,     1, 1);
     DEF("i2c-read",        fn_i2c_read,     4, 4);
