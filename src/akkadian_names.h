@@ -146,6 +146,14 @@ AKK_PR("remainder",       "šērum",             "𒊕𒌝")
 AKK_PR("modulo",          "kippatum",          "𒄀𒌋")
 AKK_PR("gcd",             "kabrum",            "𒃲𒁹𒁹")
 AKK_PR("lcm",             "qallum",            "𒉡𒃲𒌑")  /* NU.GAL.UD = least common */
+/* mitḫartum: "the equal-sided figure" — the canonical OB term for x², the area of
+ * a square of side x as computed on mathematical tablets. */
+AKK_PR("square",             "mitḫartum",          "𒈠𒋻𒁹")   /* MA.TAR.DIŠ = equal-cut-one = x² */
+AKK_PR("exact-integer?",     "kinattu-nikkassum?", "𒆠𒀸?")    /* KI.AŠ2? = earth-first = whole & exact? */
+AKK_PR("truncate-quotient",  "qātum-ḫarāṣim",      "𒁀𒋻𒁹")   /* BA.TAR.DIŠ = give-cut-one */
+AKK_PR("truncate-remainder", "šērum-ḫarāṣim",      "𒊕𒋻")     /* SAG.TAR = head-cut */
+AKK_PR("truncate/",          "ḫarāṣum-kala",       "𒋻𒈷𒈷")   /* TAR.ME.ME = cut-both = both results */
+AKK_PR("exact-integer-sqrt", "ibum-kinattu",        "𒅁𒆠𒁹")   /* IB.KI.DIŠ = exact root (ibum = "the side" = OB square root) */
 AKK_PR("exact",           "kinattu",           "𒆠𒋻")
 AKK_PR("inexact",         "lā-kinattu",        "𒉡𒆠𒋻")
 AKK_PR("number->string",  "nikkassum-ana-ṭuppi","𒈷𒌝")
@@ -193,6 +201,22 @@ AKK_PR("open-output-file","petûm-ṭuppi-waṣîm", "𒂍𒉡")
 AKK_PR("close-port",      "sakārum",           "𒂍𒇲")   /* E2.LAL = bind the house */
 AKK_PR("flush-output-port","pašārum-bābim",    "𒂍𒁀")
 AKK_PR("eof-object?",     "qātum?",            "𒉡𒌝?")  /* NU.UM = no more tablet */
+AKK_PR("char-ready?",           "ṣibtum-maḫrum?",             "𒅆𒁀?")    /* IGI.BA? = seen-ready? */
+AKK_PR("u8-ready?",             "ṣibtum-riqqi-maḫrum?",       "𒅆𒁹?")    /* IGI.DIŠ? = raw-byte ready? */
+AKK_PR("read-u8",               "šemûm-ṣibtum-riqqi",         "𒅆𒁀𒁹")   /* IGI.BA.DIŠ = read one raw byte */
+AKK_PR("peek-u8",               "naṭālum-ṣibtum-riqqi",       "𒅆𒉡𒁹")   /* IGI.NU.DIŠ = look-not-one = peek without consuming */
+AKK_PR("read-string",           "šemûm-ṭuppam",               "𒅆𒌝")     /* IGI.UM = read tablet */
+AKK_PR("read-bytevector",       "šemûm-ṭuppi-ṣibtātim",       "𒅆𒌝𒁀")   /* IGI.UM.BA = read byte-tablet */
+AKK_PR("read-bytevector!",      "šemûm-ṭuppi-ṣibtātim-ina",   "𒅆𒌝𒁀𒁹") /* IGI.UM.BA.DIŠ = read into existing */
+AKK_PR("write-u8",              "šaṭārum-ṣibtum-riqqi",       "𒌝𒁀𒁹")   /* UM.BA.DIŠ = write one raw byte */
+AKK_PR("write-bytevector",      "šaṭārum-ṭuppi-ṣibtātim",     "𒌝𒁀")     /* UM.BA = write byte-tablet */
+AKK_PR("write-simple",          "šaṭārum-ṣīrum",              "𒌝𒄿")     /* UM.I = write-going = simple/non-recursive write */
+AKK_PR("file-exists?",          "ṭuppum-ibašši?",             "𒂍𒀸?")    /* E2.AŠ2? = does the tablet-house exist? */
+AKK_PR("delete-file",           "ḫepûm-ṭuppi",                "𒋻𒂍")     /* TAR.E2 = cut-house = destroy the tablet */
+AKK_PR("call-with-input-file",  "šemûm-ina-ṭuppi",            "𒂍𒅆")     /* E2.IGI = file-read */
+AKK_PR("call-with-output-file", "šaṭārum-ina-ṭuppi",          "𒂍𒌝")     /* E2.UM = file-write */
+AKK_PR("with-input-from-file",  "ina-ṭuppi-šemûm",            "𒂍𒅆𒁹")   /* E2.IGI.DIŠ = from-file-read-one */
+AKK_PR("with-output-to-file",   "ana-ṭuppi-šaṭārum",          "𒂍𒌝𒁹")   /* E2.UM.DIŠ = to-file-write-one */
 
 /* ---- Procedures: strings ---- */
 
@@ -211,6 +235,24 @@ AKK_PR("string=?",        "mitḫārum-ṭuppim?",  "𒌝𒈠?")
 AKK_PR("string<?",        "ṣeḫērum-ṭuppim?",   "𒌝𒉡?")
 AKK_PR("string->symbol",  "ṭuppum-ana-šumim",  "𒌝𒀸")   /* UM.AŠ2 = tablet-to-one */
 AKK_PR("symbol->string",  "šumum-ana-ṭuppi",   "𒌋𒊕")   /* U.SAG = ten-head = name */
+AKK_PR("string<=?",    "ṣeḫērum-mitḫārum-ṭuppim?",           "𒌝𒉡𒁹?")  /* UM.NU.DIŠ? = not-great-one-tablet? */
+AKK_PR("string>?",     "rabûm-ṭuppim?",                        "𒌝𒃲?")    /* UM.GAL? = great-tablet? */
+AKK_PR("string>=?",    "rabûm-mitḫārum-ṭuppim?",              "𒌝𒃲𒁹?")  /* UM.GAL.DIŠ? = great-one-tablet? */
+/* mithāriš: "uniformly, indifferently" — treating upper and lower case as the same sign */
+AKK_PR("string-ci=?",  "mithāriš-mitḫārum-ṭuppim?",           "𒈠𒌝𒈠?")  /* MA.UM.MA? = same-tablet-equal? */
+AKK_PR("string-ci<?",  "mithāriš-ṣeḫērum-ṭuppim?",            "𒈠𒌝𒉡?")  /* MA.UM.NU? */
+AKK_PR("string-ci>?",  "mithāriš-rabûm-ṭuppim?",              "𒈠𒌝𒃲?")  /* MA.UM.GAL? */
+AKK_PR("string-ci<=?", "mithāriš-ṣeḫērum-mitḫārum-ṭuppim?",  "𒈠𒌝𒉡𒁹?") /* MA.UM.NU.DIŠ? */
+AKK_PR("string-ci>=?", "mithāriš-rabûm-mitḫārum-ṭuppim?",     "𒈠𒌝𒃲𒁹?") /* MA.UM.GAL.DIŠ? */
+AKK_PR("string-set!",  "šakānum-ṭuppim",                       "𒌝𒋻")     /* UM.TAR = tablet-set */
+AKK_PR("string-copy!", "katābum-ṭuppim",                        "𒌝𒌑𒋻")   /* UM.UD.TAR = overwrite tablet */
+AKK_PR("string-for-each","ana-kālāma-ṭuppim",                  "𒀀𒌝")     /* A.UM = for-tablet */
+AKK_PR("string-fill!",  "malûm-ṭuppim",                        "𒌝𒌋𒁹")   /* UM.U.DIŠ = fill-tablet-one (malûm = to fill) */
+/* string-foldcase: ṭuppum-mithāriš — render the tablet uniformly regardless of case */
+AKK_PR("string-foldcase","ṭuppum-mithāriš",                    "𒌑𒌝")     /* UD.UM = time-tablet = folded tablet */
+/* ṣibtātum: plural of ṣibtum (sign/character) — a sequence of raw byte-signs */
+AKK_PR("string->utf8",  "ṭuppum-ana-ṣibtātim",                "𒌝𒁀")     /* UM.BA = tablet-to-bytes */
+AKK_PR("utf8->string",  "ṣibtātum-ana-ṭuppi",                 "𒁀𒌝")     /* BA.UM = bytes-to-tablet */
 
 /* ---- Procedures: vectors ---- */
 
@@ -225,11 +267,41 @@ AKK_PR("vector-fill!",    "malûm-ṣindim",      "𒀸𒌋𒁹")
 AKK_PR("vector-copy",     "šutur-ṣindim",      "𒀸𒁹𒁹")
 AKK_PR("vector-map",      "šutakūlum-ṣindim",  "𒈧𒀸")
 AKK_PR("vector-for-each", "ana-kālāma-ṣindim", "𒀀𒀸")
+AKK_PR("vector-append", "redûm-ṣindim",          "𒀸𒄿")     /* AŠ2.I = one-going = vector-continuing */
+AKK_PR("vector-copy!",  "šutur-ṣindim-ina",       "𒀸𒄿𒁹")   /* AŠ2.I.DIŠ = one-going-into = copy into */
+
+/* ---- Procedures: bytevectors ---- */
+
+/* ṭuppi-ṣibtātim: "tablet of signs/bytes" — a fixed-length sequence of raw byte-values,
+ * analogous to a clay tablet inscribed with a fixed number of cuneiform wedges. */
+AKK_PR("make-bytevector",      "epēšum-ṭuppi-ṣibtātim",   "𒇽𒌝𒁀")   /* LU2.UM.BA = make byte-tablet */
+AKK_PR("bytevector",           "ṭuppum-ṣibtātim",          "𒌑𒌝𒁀")   /* UD.UM.BA = the byte-tablet (constructor) */
+AKK_PR("bytevector-length",    "mīnum-ṭuppi-ṣibtātim",     "𒈠𒌝𒁀")   /* MA.UM.BA = count of the byte-tablet */
+AKK_PR("bytevector-u8-ref",    "maḫārum-ṭuppi-ṣibtātim",   "𒌝𒁀𒊕")   /* UM.BA.SAG = byte-tablet head/index */
+AKK_PR("bytevector-u8-set!",   "šakānum-ṭuppi-ṣibtātim",   "𒌝𒁀𒋻")   /* UM.BA.TAR = set in byte-tablet */
+AKK_PR("bytevector-copy",      "šutur-ṭuppi-ṣibtātim",     "𒌝𒁀𒁹𒁹") /* UM.BA.DIŠ.DIŠ = copy byte-tablet */
+AKK_PR("bytevector-copy!",     "šutur-ṭuppi-ṣibtātim-ina", "𒌝𒁀𒄿𒁹") /* UM.BA.I.DIŠ = copy-into byte-tablet */
+AKK_PR("bytevector-append",    "redûm-ṭuppi-ṣibtātim",     "𒌝𒁀𒄿")   /* UM.BA.I = byte-tablet-continuing */
 
 /* ---- Procedures: characters ---- */
 
 AKK_PR("char->integer",   "ṣibtum-ana-nikkassim","𒁀𒈷")   /* BA.ME = give essence */
 AKK_PR("integer->char",   "nikkassum-ana-ṣibtim","𒈷𒁹")
+/* Character comparators — ṣibtum (the sign/character) + comparator */
+AKK_PR("char=?",      "mitḫārum-ṣibtim?",                "𒁀𒈠?")      /* BA.MA? = sign-equal? */
+AKK_PR("char<?",      "ṣeḫērum-ṣibtim?",                 "𒁀𒉡𒃲?")    /* BA.NU.GAL? = sign-not-great? */
+AKK_PR("char<=?",     "ṣeḫērum-ū-mitḫārum-ṣibtim?",      "𒁀𒉡𒃲𒁹?")  /* BA.NU.GAL.DIŠ? */
+AKK_PR("char>?",      "rabûm-ṣibtim?",                    "𒁀𒃲?")      /* BA.GAL? = sign-great? */
+AKK_PR("char>=?",     "rabûm-ū-mitḫārum-ṣibtim?",        "𒁀𒃲𒁹?")    /* BA.GAL.DIŠ? */
+/* mithāriš: "uniformly" — case-insensitive = treating all forms of a sign as the same */
+AKK_PR("char-ci=?",   "mithāriš-mitḫārum-ṣibtim?",       "𒁀𒈠𒈠?")    /* BA.MA.MA? = sign-uniform-equal? */
+AKK_PR("char-ci<?",   "mithāriš-ṣeḫērum-ṣibtim?",        "𒁀𒈠𒉡𒃲?")  /* BA.MA.NU.GAL? */
+AKK_PR("char-ci>?",   "mithāriš-rabûm-ṣibtim?",           "𒁀𒈠𒃲?")    /* BA.MA.GAL? */
+AKK_PR("char-ci<=?",  "mithāriš-ṣeḫērum-mitḫārum-ṣibtim?","𒁀𒈠𒉡𒃲𒁹?")/* BA.MA.NU.GAL.DIŠ? */
+AKK_PR("char-ci>=?",  "mithāriš-rabûm-mitḫārum-ṣibtim?",  "𒁀𒈠𒃲𒁹?")  /* BA.MA.GAL.DIŠ? */
+/* digit-value: nikkassum-ša-ṣibtim — "the count of the sign" */
+AKK_PR("digit-value", "nikkassum-ša-ṣibtim",               "𒈷𒁀")      /* ME.BA = essence of the sign */
+AKK_PR("char-foldcase","ṣibtum-mithāriš",                  "𒁀𒈠")      /* BA.MA = sign-uniform */
 
 /* ---- Procedures: booleans ---- */
 
@@ -375,6 +447,34 @@ AKK_PR("quaternion?",     "rebûm?",              "𒅁𒈷?")   /* IB.ME? = is 
 AKK_PR("make-octonion",   "epēšum-samānûm",      "𒅁𒈷𒈷")  /* IB.ME.ME  = double-hold-essence = 8D */
 AKK_PR("octonion?",       "samānûm?",            "𒅁𒈷𒈷?") /* IB.ME.ME? = is it eightfold? */
 AKK_PR("octonion-ref",    "maḫārum-samānûm",     "𒅁𒈷𒊕")  /* IB.ME.SAG = eightfold-head */
+
+/* ---- Procedures: lists (additional) ---- */
+
+AKK_PR("make-list",    "epēšum-nindabîm",    "𒇽𒄿𒌝")   /* LU2.I.UM = person-going-tablet = make list */
+
+/* ---- Procedures: process context (R7RS §6.13) ---- */
+
+/* awātum bītim: "the word of the house" — awātum = word/command, bītum = house.
+ * An environment variable is a named word belonging to the surrounding context. */
+AKK_PR("get-environment-variable",  "awāt-bīti",    "𒂍𒈷")    /* E2.ME = house-essence = one env var */
+AKK_PR("get-environment-variables", "awātāt-bīti",  "𒂍𒈷𒈷")  /* E2.ME.ME = all-house-essences */
+/* aṣûm-dannum: "forceful exit" — aṣûm = to go out, dannum = strong/forceful */
+AKK_PR("emergency-exit",            "aṣûm-dannum",  "𒄿𒃲")    /* I.GAL = going-great = urgent/forced exit */
+
+/* ---- Procedures: time (R7RS §6.14) ---- */
+
+/* Akkadian has no atomic time units below the day.  These use existing vocabulary
+ * as modern neologisms: ṭarādum (a stroke/beat) for a jiffy, ūmum (day) for elapsed time. */
+AKK_PR("current-second",     "ūmum-ēṭum-inanna",  "𒌑𒄿")   /* UD.I = day-going = elapsed seconds */
+AKK_PR("current-jiffy",      "ṭarādum-inanna",     "𒌑𒁹")   /* UD.DIŠ = day-one = one time-beat now */
+AKK_PR("jiffies-per-second", "ṭarādū-ina-ūmim",   "𒌑𒌑")   /* UD.UD = beats-per-elapsed analogue */
+
+/* ---- Procedures: error objects (R7RS §6.11) ---- */
+
+/* awāt-ḫiṭītim: "the word of the fault" — the error's message string */
+AKK_PR("error-object-message",  "awāt-ḫiṭītim",   "𒄷𒌝")   /* ḪI.UM = fault-tablet = the error's word */
+AKK_PR("read-error?",           "ḫiṭītum-šemûm?", "𒄷𒅆?")  /* ḪI.IGI? = fault-eye? = reading fault? */
+AKK_PR("file-error?",           "ḫiṭītum-ṭuppi?", "𒄷𒂍?")  /* ḪI.E2? = fault-house? = tablet/file fault? */
 
 #undef AKK_SF
 #undef AKK_PR
