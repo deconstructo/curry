@@ -136,6 +136,7 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 (sym-var 'x 'real)         ; assumption: real
 (sym-var 'x 'integer)      ; assumption: integer (implies real)
 (sym-var 'x 'nonzero)      ; assumption: nonzero
+(sym-var 'q 'quaternion)   ; assumption: quaternion — multiplication routes through SX_NCMUL (non-commutative ordered product)
 (sym-assumption? v 'positive) ; test assumption flag on a sym-var
 (symbolic x y)             ; bind x, y as symbolic unknowns in scope
 (sym-var? v)               ; predicate
@@ -150,11 +151,14 @@ Overflow from fixnum goes to bignum automatically. When any arithmetic operand i
 **Assumption flags** are stored in `SymVar.hdr.flags` and guide algebraic simplification:
 - `(sym-var 'x 'positive)`: `abs(x) = x`, `sqrt(x²) = x`, `log(x^n) = n·log(x)`, `sign(x) = 1`
 - `(sym-var 'x 'negative)`: `abs(x) = -x`, `sign(x) = -1`
+- `(sym-var 'q 'quaternion)` (`SYM_ASSUME_QUATERNION = 1u<<5`): `sx_mul` routes to `sx_ncmul` → `SX_NCMUL` ordered product node. Real scalars (fixnum/flonum/bignum/rational) commute out as a leading coefficient; complex/quaternion/octonion concretes and other quaternion sym-vars maintain left-to-right order. Differentiation uses the ordered product rule. `expand` uses `expand_ncmul2` (recursive, analogous to `expand_mul2`).
 - Assumptions propagate through `∂`, `∫`, `limit`, `simplify`
+
+**Numeric quaternion transcendentals** — every function in the numeric tower now handles `T_QUAT` via the complex-plane projection `q = a + v̂·‖v‖ → (a, ‖v‖)` in complex. `abs(quaternion)` returns the Euclidean norm `√(a²+b²+c²+d²)`. Concrete arithmetic via `num_sub` and `num_div` (Hamilton right-division `a·conj(b)/‖b‖²`) also handle quaternions.
 
 **Differentiation** — `(∂ expr var)` where `var` is a sym-var:
 
-Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs, sinh, cosh, tanh, asin, acos, atan, asinh, acosh, atanh, cot, sec, csc. Unknown operators leave an unevaluated `(∂ expr var)` node.
+Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs, sinh, cosh, tanh, asin, acos, atan, asinh, acosh, atanh, cot, sec, csc. For `SX_NCMUL` nodes the ordered product rule is applied — each factor's derivative is inserted in position while the remaining factors keep their order. Unknown operators leave an unevaluated `(∂ expr var)` node.
 
 **Integration** — `(∫ expr var)` or `(integrate expr var)`:
 

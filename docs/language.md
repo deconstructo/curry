@@ -428,25 +428,32 @@ See [surreal.md](surreal.md) for the full reference.
 
 The CAS (symbolic layer) treats numbers as constants. **Fixnum, bignum, rational, flonum, complex, quaternion, octonion, and surreal** values are all recognized as constants — arithmetic operations on them alongside symbolic variables produce symbolic expression trees.
 
-However, there are gaps at the upper end of the tower:
-
-**Quaternions and octonions**: basic arithmetic (`+`, `-`, `*`) works. Transcendental functions (`sin`, `cos`, `exp`, `log`, `sqrt`) applied to a quaternion or octonion in a symbolic context will crash (the CAS attempts to reduce them to a flonum via `num_to_double`, which falls through). Do not mix quaternions or octonions with CAS transcendentals.
-
-**Surreals**: `+`, `-`, `*` work as CAS constants. `sqrt` is special-cased and works. `sin`, `cos`, `exp`, and `log` of a surreal will crash.
-
-**Multivectors**: not recognized as numeric constants by the CAS. Mixing a multivector with any symbolic expression will crash. Multivectors must be kept in their own computational layer, separate from the CAS.
+**Quaternions**: fully supported as both CAS constants and symbolic variable types. All arithmetic and transcendental functions work on concrete quaternion values. Declare a quaternion-valued symbolic variable with `(sym-var 'q 'quaternion)` — this routes multiplication through the non-commutative `nc*` product node, preserving factor order.
 
 ```scheme
-; Safe: symbolic variable + quaternion constant via arithmetic
+; Quaternion constants work in symbolic expressions
 (symbolic x)
-(+ x (make-quaternion 1 0 0 0))     ; works, builds symbolic ADD node
+(+ x (make-quaternion 1 0 0 0))     ; => (+ x 1+0i+0j+0k)
 
-; Unsafe: transcendental of quaternion in CAS context
-(sin (make-quaternion 1 0 0 0))     ; crashes — do not do this
+; Transcendentals on concrete quaternion values work directly
+(sin (make-quaternion 1.0 0.5 0.0 0.0))   ; => quaternion result
+(exp (make-quaternion 0.0 3.14159 0.0 0.0)) ; ≈ −1  (Euler identity on i-axis)
 
+; Quaternion symbolic variables: multiplication is non-commutative
+(define q (sym-var 'q 'quaternion))
+(define p (sym-var 'p 'quaternion))
+(equal? (* q p) (* p q))  ; => #f
+(∂ (* q p) q)             ; => p   (ordered product rule)
+```
+
+**Surreals**: `+`, `-`, `*` work as CAS constants. `sqrt` is special-cased and works. `sin`, `cos`, `exp`, and `log` of a surreal are not supported.
+
+**Multivectors**: not recognized as numeric constants by the CAS. Mixing a multivector with any symbolic expression will raise an error. Multivectors must be kept in their own computational layer, separate from the CAS.
+
+```scheme
 ; Unsafe: multivector in symbolic expression
 (symbolic x)
-(+ x (make-mv 3 0 0))              ; crashes — multivectors are opaque to CAS
+(+ x (mv-e 3 0 0 1))    ; error — multivectors are opaque to the CAS
 ```
 
 ### Arithmetic procedures

@@ -1,5 +1,40 @@
 # Changelog
 
+### 0.8.5 — Quaternion trig, non-commutative CAS, Akkadian expansion
+
+**Quaternion numeric tower — transcendental functions**
+
+All nine transcendental functions now handle quaternion arguments. Every `q = a + v̂·‖v‖` is embedded in the complex plane spanned by `{1, v̂}`, the complex formula is applied, and the result is reconstructed:
+
+- `sin`, `cos`, `sinh`, `cosh`: direct closed-form in the {1, v̂} plane
+- `tan`, `tanh`: routed through sin/cos
+- `asin`, `acos`, `atan`: complex embedding via `z = a + ‖v‖·i`, apply formula, reconstruct
+- `asinh`, `acosh`, `atanh`: extended condition covers quaternion alongside complex
+- `exp`, `log`, `sqrt`: new quaternion branches using `quat_assemble()` helper
+- `abs(quaternion)` now returns the Euclidean norm `√(a²+b²+c²+d²)` (previously returned the quaternion unchanged)
+- `num_sub` and `num_div` (Hamilton right-division `a·conj(b)/‖b‖²`) were missing quaternion branches — added
+
+Euler's identity `exp(πv̂) = −1` holds for any unit pure-imaginary quaternion `v̂`. The Pythagorean identity `sin²(q)+cos²(q) = 1` holds for all quaternions.
+
+**Symbolic CAS — non-commutative products**
+
+- `SYM_ASSUME_QUATERNION` flag on `sym-var`: `(sym-var 'q 'quaternion)` declares a quaternion-valued variable
+- `SX_NCMUL` operator: an ordered, non-commutative product node. `sx_mul()` routes to `SX_NCMUL` whenever any operand is a concrete quaternion/octonion or a quaternion-flagged sym-var
+- Real scalars (fixnum/flonum/bignum/rational) commute out as a leading coefficient; all other factors maintain left-to-right order
+- Differentiation: ordered product rule — `∂(f₁·f₂·…·fₙ)/∂x = Σᵢ f₁·…·(∂fᵢ/∂x)·…·fₙ`
+- `expand`: `expand_ncmul2()` recursively distributes NC products over sums, so `(q+p)²` yields four terms (`q²+qp+pq+p²`) rather than the commutative three
+- Integer exponent expansion (`expt q n`) uses NC multiplication when the base is quaternion-flagged
+- `num_is_zero`, `num_is_one`, `num_cmp` extended for quaternions so simplification rules fire correctly on quaternion coefficients
+
+**Akkadian / cuneiform**
+
+- `sym-assumption?` → `ṣimdat-la-idûm?` / `𒋻𒉡𒅆?` ("decree of the unknown?")
+- Assumption keywords accepted in both English and Akkadian in `sym-var` and `sym-assumption?`: `ṣīrum`/real, `damqum`/positive, `lemnûm`/negative, `nikkassum`/integer, `la-ṣifrum`/nonzero, `rebûm`/quaternion
+
+**Tests**
+
+60 new assertions in `tests/numeric_ext_tests.scm` covering: assumption flags and Akkadian aliases, NC non-commutativity, real-scalar commutativity, ordered product rule (all orderings including triple products and mixed real/quaternion), full NC expansion, substitution order preservation, return types for all nine transcendentals, exact values at zero, Euler's identity on all three imaginary axes, and the Pythagorean and hyperbolic Pythagorean identities.
+
 ### 0.8.4 — GPIO interrupts and Akkadian completeness
 
 **GPIO interrupt support** (`(curry rpi)` module):

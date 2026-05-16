@@ -1,6 +1,6 @@
 # Symbolic Expressions — Computer Algebra in Curry
 
-*v0.7.9 — 2026-05-15*
+*v0.8.5 — 2026-05-16*
 
 Curry's numeric tower includes a built-in computer algebra system (CAS). Any operation that would normally fail with "wrong type" when applied to an unbound symbol instead builds a symbolic expression tree. The evaluator becomes a CAS by default.
 
@@ -40,10 +40,12 @@ Predicates:
 (define xr (sym-var 'x 'real))       ; x ∈ ℝ
 (define xi (sym-var 'x 'integer))    ; x ∈ ℤ  (implies real)
 (define xz (sym-var 'x 'nonzero))    ; x ≠ 0
+(define q  (sym-var 'q 'quaternion)) ; q ∈ ℍ  (non-commutative)
 
 (sym-assumption? xp 'positive)       ; => #t
 (sym-assumption? xp 'real)           ; => #t  (implied)
 (sym-assumption? xp 'nonzero)        ; => #t  (implied)
+(sym-assumption? q  'quaternion)     ; => #t
 ```
 
 **Simplification rules enabled by assumptions:**
@@ -56,6 +58,7 @@ Predicates:
 | `(log (expt xp n))` | `positive` | `(* n (log xp))` |
 | `(sign xp)` | `positive` | `1` |
 | `(sign xn)` | `negative` | `-1` |
+| `(* q p)` | `quaternion` | `(nc* q p)` (non-commutative — order preserved) |
 
 ```scheme
 (define xp (sym-var 'x 'positive))
@@ -144,7 +147,77 @@ atanh(z) = (1/2) · ln((1+z)/(1−z))
 (atanh (make-rectangular 0 2))   ; ≈ 0+1.1071i
 ```
 
-For quaternions and higher tower levels, the result is left as a symbolic expression node.
+Quaternion trig is handled numerically using the complex-plane projection formula — see the next section.
+
+## Quaternion symbolic variables and non-commutative products
+
+The `'quaternion` assumption on a sym-var changes how `*` works: the product becomes an ordered, non-commutative node (`nc*`) rather than the flat commutative bag used for real-valued expressions.
+
+```scheme
+(define q (sym-var 'q 'quaternion))
+(define p (sym-var 'p 'quaternion))
+
+(* q p)                 ; => (nc* q p)
+(* p q)                 ; => (nc* p q)
+(equal? (* q p) (* p q)) ; => #f  — order is preserved
+
+; Real scalars always commute out to a leading coefficient
+(equal? (* 2 q) (* q 2)) ; => #t  — both give (nc* 2 q)
+(* 3 q p)               ; => (nc* 3 q p)
+(* q 3 p)               ; => (nc* 3 q p)  — same thing
+```
+
+**Differentiation** applies the ordered product rule — the derivative of each factor is inserted in place, with all other factors maintaining their left-to-right order:
+
+```scheme
+(∂ (* q p) q)    ; => p          — (∂q/∂q)·p = 1·p = p
+(∂ (* p q) q)    ; => p          — p·(∂q/∂q) = p·1 = p
+(∂ (* q p) p)    ; => q          — q·(∂p/∂p) = q·1 = q
+(∂ (* q q) q)    ; => (+ q q)   — two terms; each position contributes once
+(∂ (* q p q) q)  ; => (+ (nc* p q) (nc* q p))   — positions 0 and 2 contribute
+(∂ (* q p q) p)  ; => (nc* q q)                  — only position 1 contributes
+```
+
+**`expand`** distributes over sums preserving order, so `(q+p)²` yields four terms rather than three:
+
+```scheme
+(expand (* (+ q p) (+ q p)))
+; => (+ (nc* q q) (nc* q p) (nc* p q) (nc* p p))
+; q*p and p*q are distinct — they do NOT cancel or combine
+```
+
+**Concrete quaternion values** fold correctly within NC products: if `qi = 0+1i+0j+0k` and `qj = 0+0i+1j+0k`, then `(* qi qj)` evaluates to `qk = 0+0i+0j+1k` (the Hamilton product), while `(* qj qi)` gives `-qk`.
+
+**`substitute`** maintains factor order:
+
+```scheme
+(define qi (make-quaternion 0 1 0 0))
+(substitute (* q p) q qi)   ; => (nc* 0+1i+0j+0k p)  — qi in left position
+(substitute (* p q) q qi)   ; => (nc* p 0+1i+0j+0k)  — qi in right position
+```
+
+**Numeric quaternion transcendentals** work directly on concrete quaternion values — these are not symbolic operations but numeric computations. Every quaternion `q = a + v̂·‖v‖` is embedded in the complex plane spanned by `{1, v̂}`:
+
+```scheme
+(define q (make-quaternion 1.0 2.0 3.0 4.0))
+(sin  q)    ; => quaternion: sin(a)·cosh(‖v‖) + v̂·cos(a)·sinh(‖v‖)
+(cos  q)    ; => quaternion: cos(a)·cosh(‖v‖) − v̂·sin(a)·sinh(‖v‖)
+(exp  q)    ; => quaternion: eᵃ·(cos‖v‖ + v̂·sin‖v‖)
+(log  q)    ; => quaternion: ln‖q‖ + v̂·arccos(a/‖q‖)
+(sqrt q)    ; => quaternion: √((‖q‖+a)/2) + v̂·√((‖q‖−a)/2)
+
+; Euler identity holds on every pure-imaginary axis:
+(define pi 3.141592653589793)
+(exp (make-quaternion 0.0 pi 0.0 0.0))   ; ≈ −1  (i-axis)
+(exp (make-quaternion 0.0 0.0 pi 0.0))   ; ≈ −1  (j-axis)
+(exp (make-quaternion 0.0 0.0 0.0 pi))   ; ≈ −1  (k-axis)
+
+; Pythagorean identity:
+(abs (- (+ (* (sin q) (sin q)) (* (cos q) (cos q)))
+        (make-quaternion 1.0 0.0 0.0 0.0)))  ; < 1e-10
+```
+
+`abs` of a quaternion returns its Euclidean norm `√(a²+b²+c²+d²)`.
 
 ## Simplification
 
@@ -978,6 +1051,7 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(sym-expr? v)` | Is v a symbolic expression? |
 | `(symbolic? v)` | Is v symbolic (var or expr)? |
 | `(sym-var-name v)` | Variable name as string |
+| `(sym-assumption? v flag)` | Does sym-var `v` carry assumption `flag`? Flags: `real`, `positive`, `negative`, `integer`, `nonzero`, `quaternion` |
 | `(∂ expr var)` | Differentiate expr w.r.t. var |
 | `(sym-diff expr var)` | ASCII alias for ∂ |
 | `(∫ expr var)` | Indefinite integral of expr w.r.t. var |
