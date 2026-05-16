@@ -1,5 +1,32 @@
 # Changelog
 
+### 0.8.4 — GPIO interrupts and Akkadian completeness
+
+**GPIO interrupt support** (`(curry rpi)` module):
+
+- `gpio-open` now accepts `'rising`, `'falling`, and `'both` as direction modes, configuring a line for libgpiod edge-event monitoring instead of plain input/output.
+- **`(gpio-wait-edge handle [timeout-ms])`** — blocking wait for a GPIO edge using `poll()` on the libgpiod event fd. Returns `'rising`, `'falling`, or `#f` on timeout. Pass `-1` (default) to wait indefinitely. Designed to be wrapped in `spawn` for async use.
+- **`(gpio-watch handle proc)`** — spawns a background C thread that calls `(proc edge timestamp-ns)` on each interrupt. The Scheme callback is kept alive as a Boehm GC root for the lifetime of the watcher. Returns a watcher handle.
+- **`(gpio-unwatch watcher)`** — signals the watcher thread via a stop-pipe, joins it, removes the GC root, and frees the struct.
+- **`(watcher? v)`** — predicate.
+
+**Akkadian/cuneiform completeness** — ~69 new transliterated and cuneiform aliases added to cover all R7RS procedures introduced in v0.8.3 (plus several from v0.7.7 that were missing):
+
+- Arithmetic: `square` (*mitḫartum*), `exact-integer?`, `truncate/`, `truncate-quotient`, `truncate-remainder`, `exact-integer-sqrt` (*ibum-kinattu*)
+- I/O: binary port procedures (`read-u8`, `write-u8`, `peek-u8`, `u8-ready?`), `read-string`, `read-bytevector`, `write-bytevector`, file operations (`file-exists?`, `delete-file`, `call-with-input-file`, `call-with-output-file`, `with-input-from-file`, `with-output-to-file`)
+- Strings: all ordering comparators (`string<=?` through `string-ci>=?`), `string-set!`, `string-copy!`, `string-for-each`, `string-fill!`, `string-foldcase`, `string->utf8`, `utf8->string`
+- Bytevectors: complete suite (`make-bytevector`, `bytevector`, `bytevector-length`, `bytevector-u8-ref`, `bytevector-u8-set!`, `bytevector-copy`, `bytevector-copy!`, `bytevector-append`)
+- Characters: all comparators (`char=?` through `char>=?`), all case-insensitive variants, `digit-value`, `char-foldcase`
+- Vectors: `vector-append`, `vector-copy!`
+- Process context: `get-environment-variable`, `get-environment-variables`, `emergency-exit`
+- Time: `current-second`, `current-jiffy`, `jiffies-per-second`
+- Error objects: `error-object-message`, `read-error?`, `file-error?`
+- Lists: `make-list`
+
+**Internal**: `src/builtins.c` split into `src/builtins.c` (R7RS standard procedures) and `src/builtins_curry.c` (CAS, vector calculus, quantum, surreal, quadrature extensions). `defprim()` made non-static for cross-file use.
+
+---
+
 ### 0.8.3 — R7RS compliance gap-fill and RPi test suite
 
 **R7RS compliance** — ~50 new procedures filling the remaining gaps in `(scheme base)`, `(scheme char)`, `(scheme file)`, `(scheme process-context)`, `(scheme time)`, and `(scheme write)`:
