@@ -246,6 +246,7 @@ val_t sx_real(val_t a);
 val_t sx_imag(val_t a);
 
 /* ---- CAS operations ---- */
+val_t sx_trigsimp(val_t expr);                               /* trig identities: sin²+cos²=1, etc. */
 val_t sx_diff(val_t expr, val_t var);                        /* ∂/∂var (real variable) */
 val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar);     /* ∂/∂z or ∂/∂z̄ */
 val_t sx_integrate(val_t expr, val_t var);                   /* antiderivative ∫ ... dx */

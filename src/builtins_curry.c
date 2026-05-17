@@ -22,6 +22,8 @@ static val_t prim_sx_diff(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_diff(av[0], av[1]); }
 static val_t prim_sx_simplify(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_simplify(av[0]); }
+static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_substitute(av[0], av[1], av[2]); }
 static val_t prim_sx_integrate(int ac, val_t *av, void *ud) {
@@ -795,6 +797,7 @@ void builtins_curry_register(val_t env) {
     DEF("wirtinger-d",    prim_wirtinger_d,     2, 2);
     DEF("wirtinger-dbar", prim_wirtinger_dbar,  2, 2);
     DEF("simplify",       prim_sx_simplify,     1, 1);
+    DEF("trigsimp",       prim_sx_trigsimp,     1, 1);
     DEF("substitute",     prim_sx_substitute,   3, 3);
     DEF("conjugate",      prim_conjugate,       1, 1);
     DEF("conj",           prim_conjugate,       1, 1);

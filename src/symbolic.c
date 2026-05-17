@@ -160,6 +160,56 @@ static bool is_zero(val_t v) { return vis_number(v) && num_is_zero(v); }
 static bool is_one(val_t v)  { return vis_number(v) && !vis_symbolic(v) && num_is_one(v); }
 static bool is_two(val_t v)  { return vis_fixnum(v) && vunfix(v) == 2; }
 
+/* Returns true if v is (expt (trig_op f) 2); sets *f_out to the argument f */
+static bool is_trig_sq(val_t v, val_t trig_op, val_t *f_out) {
+    if (!vis_symexpr(v)) return false;
+    SymExpr *se = as_symexpr(v);
+    if (se->op != SX_EXPT || se->nargs != 2) return false;
+    if (!is_two(se->args[1])) return false;
+    if (!vis_symexpr(se->args[0])) return false;
+    SymExpr *inner = as_symexpr(se->args[0]);
+    if (inner->op != trig_op || inner->nargs != 1) return false;
+    if (f_out) *f_out = inner->args[0];
+    return true;
+}
+
+/* Decompose an ADD term as coeff * trig_op(f)^2.
+   Handles: sin²(f), cos²(f), neg(sin²(f)), neg(cos²(f)), c*sin²(f), c*cos²(f). */
+static bool decompose_trig_sq(val_t term,
+                               val_t *coeff_out, val_t *trig_op_out, val_t *f_out) {
+    val_t f;
+    if (is_trig_sq(term, SX_SIN, &f)) {
+        *coeff_out = vfix(1); *trig_op_out = SX_SIN; *f_out = f; return true;
+    }
+    if (is_trig_sq(term, SX_COS, &f)) {
+        *coeff_out = vfix(1); *trig_op_out = SX_COS; *f_out = f; return true;
+    }
+    if (vis_symexpr(term) && as_symexpr(term)->op == SX_NEG && as_symexpr(term)->nargs == 1) {
+        val_t inner = as_symexpr(term)->args[0];
+        if (is_trig_sq(inner, SX_SIN, &f)) {
+            *coeff_out = vfix(-1); *trig_op_out = SX_SIN; *f_out = f; return true;
+        }
+        if (is_trig_sq(inner, SX_COS, &f)) {
+            *coeff_out = vfix(-1); *trig_op_out = SX_COS; *f_out = f; return true;
+        }
+    }
+    if (vis_symexpr(term) && as_symexpr(term)->op == SX_MUL && as_symexpr(term)->nargs >= 2) {
+        SymExpr *se = as_symexpr(term);
+        if (vis_number(se->args[0]) && !vis_symbolic(se->args[0])) {
+            /* Build the rest of the product as the potential trig-sq term */
+            val_t sq = se->nargs == 2 ? se->args[1]
+                     : sx_make_expr(SX_MUL, (int)se->nargs - 1, se->args + 1);
+            if (is_trig_sq(sq, SX_SIN, &f)) {
+                *coeff_out = se->args[0]; *trig_op_out = SX_SIN; *f_out = f; return true;
+            }
+            if (is_trig_sq(sq, SX_COS, &f)) {
+                *coeff_out = se->args[0]; *trig_op_out = SX_COS; *f_out = f; return true;
+            }
+        }
+    }
+    return false;
+}
+
 
 val_t sx_simplify(val_t expr) {
     if (!vis_symexpr(expr)) {
@@ -274,6 +324,38 @@ val_t sx_simplify(val_t expr) {
                 nsym = new_nsym;
                 if (nsym == 0) return num_acc;
             }
+        }
+
+        /* ---- Pythagorean: c*sin²(f) + c*cos²(f) → c ---- */
+        {
+            bool reduced = true;
+            while (reduced && nsym >= 2) {
+                reduced = false;
+                for (int i = 0; i < nsym && !reduced; i++) {
+                    val_t ci, op_i, fi;
+                    if (!decompose_trig_sq(syms[i], &ci, &op_i, &fi)) continue;
+                    val_t match_op = (op_i == SX_SIN) ? SX_COS : SX_SIN;
+                    for (int k2 = i + 1; k2 < nsym; k2++) {
+                        val_t ck, op_k, fk;
+                        if (!decompose_trig_sq(syms[k2], &ck, &op_k, &fk)) continue;
+                        if (op_k != match_op) continue;
+                        if (!sx_equal(fi, fk)) continue;
+                        if (!num_eq(ci, ck)) continue;
+                        /* c*sin²(f) + c*cos²(f) → c */
+                        num_acc = num_add(num_acc, ci);
+                        size_t new_n = (nsym >= 2) ? (size_t)(nsym - 2) : 0;
+                        val_t *new_syms = new_n ? (val_t *)gc_alloc(new_n * sizeof(val_t))
+                                                : (val_t *)gc_alloc(sizeof(val_t));
+                        int m = 0;
+                        for (int j = 0; j < nsym; j++)
+                            if (j != i && j != k2) new_syms[m++] = syms[j];
+                        syms = new_syms; nsym -= 2;
+                        reduced = true;
+                        break;
+                    }
+                }
+            }
+            if (nsym == 0) return num_acc;
         }
 
         if (is_zero(num_acc)) {
@@ -556,6 +638,184 @@ val_t sx_simplify(val_t expr) {
     }
 
     return sx_make_expr(op, n, sa);
+}
+
+/* ---- Trigonometric simplification (trigsimp) ----
+ *
+ * Applies trig identities beyond what sx_simplify catches.
+ * Called via (trigsimp expr) from Scheme.
+ *
+ * Identities applied:
+ *   sin²(f) + cos²(f)  →  1          (Pythagorean — also in sx_simplify)
+ *   1 − sin²(f)        →  cos²(f)
+ *   1 − cos²(f)        →  sin²(f)
+ *   n − sin²(f)        →  (n−1) + cos²(f)    (n exact integer ≥ 1)
+ *   n − cos²(f)        →  (n−1) + sin²(f)
+ *   2·sin(f)·cos(f)    →  sin(2·f)   (double-angle contraction)
+ *   cos²(f) − sin²(f)  →  cos(2·f)
+ */
+val_t sx_trigsimp(val_t expr) {
+    if (!vis_symexpr(expr)) return expr;
+
+    SymExpr *se = as_symexpr(expr);
+    val_t op = se->op;
+    int n = (int)se->nargs;
+
+    /* Recursively apply trigsimp to children */
+    val_t *sa = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    for (int i = 0; i < n; i++) sa[i] = sx_trigsimp(se->args[i]);
+
+    /* Rebuild and run standard simplification (which includes Pythagorean in ADD) */
+    val_t e = sx_simplify(sx_make_expr(op, n, sa));
+
+    /* Re-examine the simplified expression */
+    if (!vis_symexpr(e)) return e;
+    SymExpr *es = as_symexpr(e);
+    val_t eop = es->op;
+    int en = (int)es->nargs;
+
+    /* ---- SUB: n − sin²(f) → (n−1) + cos²(f), etc. ---- */
+    if (eop == SX_SUB && en == 2) {
+        val_t a = es->args[0], b = es->args[1];
+        val_t f, g;
+        /* n − sin²(f) → (n−1) + cos²(f)  (integer n ≥ 1) */
+        if (vis_fixnum(a) && vunfix(a) >= 1 && is_trig_sq(b, SX_SIN, &f))
+            return sx_trigsimp(sx_add(num_add(a, vfix(-1)),
+                                     sx_expt(sx_cos(f), vfix(2))));
+        if (vis_fixnum(a) && vunfix(a) >= 1 && is_trig_sq(b, SX_COS, &f))
+            return sx_trigsimp(sx_add(num_add(a, vfix(-1)),
+                                     sx_expt(sx_sin(f), vfix(2))));
+        /* cos²(f) − sin²(f) → cos(2·f) */
+        if (is_trig_sq(a, SX_COS, &f) && is_trig_sq(b, SX_SIN, &g) && sx_equal(f, g))
+            return sx_cos(sx_mul(vfix(2), f));
+        /* sin²(f) − cos²(f) → −cos(2·f) */
+        if (is_trig_sq(a, SX_SIN, &f) && is_trig_sq(b, SX_COS, &g) && sx_equal(f, g))
+            return sx_neg(sx_cos(sx_mul(vfix(2), f)));
+    }
+
+    /* ---- ADD: borrow from integer part to complete Pythagorean ----
+     * If num_acc is an integer k ≥ 1 and there's a (neg sin²(f)) term,
+     * rewrite k + (-1)*sin²(f) → (k-1) + cos²(f), and similarly for cos². */
+    if (eop == SX_ADD) {
+        /* Collect numeric and symbolic terms */
+        val_t num_part = vfix(0);
+        int nsym_e = 0;
+        for (int i = 0; i < en; i++)
+            if (vis_number(es->args[i])) num_part = num_add(num_part, es->args[i]);
+            else nsym_e++;
+        val_t *syms_e = (val_t *)gc_alloc((size_t)nsym_e * sizeof(val_t));
+        int j = 0;
+        for (int i = 0; i < en; i++)
+            if (!vis_number(es->args[i])) syms_e[j++] = es->args[i];
+
+        /* Look for neg(trig²(f)) term that can be turned into (comp²(f) - 1) */
+        if (vis_fixnum(num_part) && vunfix(num_part) >= 1) {
+            for (int i = 0; i < nsym_e; i++) {
+                val_t ci, op_i, fi;
+                if (!decompose_trig_sq(syms_e[i], &ci, &op_i, &fi)) continue;
+                if (!num_eq(ci, vfix(-1))) continue;
+                /* k + (-1)*sin²(f)  → (k-1) + cos²(f) */
+                val_t comp_op = (op_i == SX_SIN) ? SX_COS : SX_SIN;
+                val_t comp_sq = sx_expt(sx_make_expr(comp_op, 1, &fi), vfix(2));
+                syms_e[i] = comp_sq;
+                num_part = num_add(num_part, vfix(-1));
+                /* Rebuild and re-simplify (catches further Pythagorean reductions) */
+                val_t *all2 = (val_t *)gc_alloc((size_t)(nsym_e + 1) * sizeof(val_t));
+                all2[0] = num_part;
+                for (int k2 = 0; k2 < nsym_e; k2++) all2[k2 + 1] = syms_e[k2];
+                return sx_trigsimp(sx_simplify(
+                    sx_make_expr(SX_ADD, nsym_e + 1, all2)));
+            }
+        }
+    }
+
+    /* ---- MUL: 2·sin(f)·cos(f) → sin(2·f), with optional sign flips ---- */
+    if (eop == SX_MUL) {
+        /* Scan for numeric factor of 2, sin(f) or neg(sin(f)), cos(f) or neg(cos(f)) */
+        bool has_two = false;
+        val_t sin_f = V_FALSE, cos_f = V_FALSE;
+        bool neg_sin = false, neg_cos = false;
+        for (int i = 0; i < en; i++) {
+            val_t v = es->args[i];
+            if (is_two(v)) { has_two = true; continue; }
+            if (!vis_symexpr(v)) continue;
+            SymExpr *fi = as_symexpr(v);
+            /* direct sin/cos */
+            if (fi->op == SX_SIN && fi->nargs == 1 && vis_false(sin_f)) {
+                sin_f = fi->args[0]; continue;
+            }
+            if (fi->op == SX_COS && fi->nargs == 1 && vis_false(cos_f)) {
+                cos_f = fi->args[0]; continue;
+            }
+            /* neg(sin(f)) or neg(cos(f)) */
+            if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0])) {
+                SymExpr *inner = as_symexpr(fi->args[0]);
+                if (inner->op == SX_SIN && inner->nargs == 1 && vis_false(sin_f)) {
+                    sin_f = inner->args[0]; neg_sin = true; continue;
+                }
+                if (inner->op == SX_COS && inner->nargs == 1 && vis_false(cos_f)) {
+                    cos_f = inner->args[0]; neg_cos = true; continue;
+                }
+            }
+        }
+        if (has_two && !vis_false(sin_f) && !vis_false(cos_f) && sx_equal(sin_f, cos_f)) {
+            /* sign = product of individual signs */
+            int sign = (neg_sin ? -1 : 1) * (neg_cos ? -1 : 1);
+            val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
+            int rn = 0;
+            bool used_two = false, used_sin = false, used_cos = false;
+            for (int i = 0; i < en; i++) {
+                val_t v = es->args[i];
+                if (!used_two && is_two(v)) { used_two = true; continue; }
+                if (!used_sin && vis_symexpr(v)) {
+                    SymExpr *fi = as_symexpr(v);
+                    if (fi->op == SX_SIN) { used_sin = true; continue; }
+                    if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
+                        as_symexpr(fi->args[0])->op == SX_SIN) { used_sin = true; continue; }
+                }
+                if (!used_cos && vis_symexpr(v)) {
+                    SymExpr *fi = as_symexpr(v);
+                    if (fi->op == SX_COS) { used_cos = true; continue; }
+                    if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
+                        as_symexpr(fi->args[0])->op == SX_COS) { used_cos = true; continue; }
+                }
+                rest[rn++] = v;
+            }
+            val_t two_f = sx_mul(vfix(2), sin_f);
+            val_t sin2f = sx_sin(two_f);
+            val_t result = (sign < 0) ? sx_neg(sin2f) : sin2f;
+            if (rn == 0) return result;
+            rest[rn++] = result;
+            return sx_simplify(sx_make_expr(SX_MUL, rn, rest));
+        }
+    }
+
+    /* ---- ADD: cos²(f) − sin²(f) → cos(2f) ---- */
+    if (eop == SX_ADD && en >= 2) {
+        for (int i = 0; i < en; i++) {
+            val_t f1;
+            if (!is_trig_sq(es->args[i], SX_COS, &f1)) continue;
+            for (int k2 = 0; k2 < en; k2++) {
+                if (k2 == i) continue;
+                val_t ck2, op_k2, f2;
+                if (!decompose_trig_sq(es->args[k2], &ck2, &op_k2, &f2)) continue;
+                if (op_k2 != SX_SIN) continue;
+                if (!num_eq(ck2, vfix(-1))) continue;
+                if (!sx_equal(f1, f2)) continue;
+                /* cos²(f) + (-1)*sin²(f) → cos(2f) */
+                val_t cos2f = sx_cos(sx_mul(vfix(2), f1));
+                val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
+                int rn = 0;
+                for (int j = 0; j < en; j++)
+                    if (j != i && j != k2) rest[rn++] = es->args[j];
+                if (rn == 0) return cos2f;
+                rest[rn++] = cos2f;
+                return sx_trigsimp(sx_simplify(sx_make_expr(SX_ADD, rn, rest)));
+            }
+        }
+    }
+
+    return e;
 }
 
 /* ---- Symbolic arithmetic (these return simplified expressions) ---- */
