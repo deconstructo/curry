@@ -397,6 +397,17 @@ void scm_write(val_t v, val_t port) {
         }
         return;
     }
+    if (vis_tuple(v)) {
+        Tuple *t = as_tuple(v);
+        const char *tag = vis_up(v) ? "(up" : "(down";
+        port_write_string(port, tag, (uint32_t)strlen(tag));
+        for (uint32_t i = 0; i < t->len; i++) {
+            port_write_char(port, ' ');
+            scm_write(t->data[i], port);
+        }
+        port_write_char(port, ')');
+        return;
+    }
     /* fallback */
     int n = snprintf(buf, sizeof(buf), "#<object %u>", vtype(v));
     port_write_string(port, buf, (uint32_t)n);

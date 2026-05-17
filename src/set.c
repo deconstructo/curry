@@ -52,6 +52,13 @@ bool scm_equal(val_t a, val_t b) {
     }
     if (vis_symbolic(a) && vis_symbolic(b))
         return sx_equal(a, b);
+    if (vis_tuple(a) && vis_tuple(b)) {
+        Tuple *ta = as_tuple(a), *tb = as_tuple(b);
+        if (ta->hdr.type != tb->hdr.type || ta->len != tb->len) return false;
+        for (uint32_t i = 0; i < ta->len; i++)
+            if (!scm_equal(ta->data[i], tb->data[i])) return false;
+        return true;
+    }
     if (vis_f64vec(a) && vis_f64vec(b)) {
         F64Vec *fa = as_f64v(a), *fb = as_f64v(b);
         return fa->len == fb->len &&

@@ -142,6 +142,15 @@ val_t num_make_oct(const double e[8]) {
     return vptr(o);
 }
 
+val_t num_make_tuple(int type, uint32_t n, val_t *data) {
+    Tuple *t = CURRY_NEW_FLEX(Tuple, n);
+    t->hdr.type  = (uint32_t)type;
+    t->hdr.flags = 0;
+    t->len       = n;
+    for (uint32_t i = 0; i < n; i++) t->data[i] = data[i];
+    return vptr(t);
+}
+
 /* ---- Coercions ---- */
 
 double num_to_double(val_t v) {
@@ -329,6 +338,19 @@ val_t num_add(val_t a, val_t b) {
         else e[0] += num_to_double(b);
         return num_make_oct(e);
     }
+    if (vis_tuple(a) || vis_tuple(b)) {
+        /* 0 + tuple = tuple  (identity, needed by variadic + accumulator) */
+        if (!vis_tuple(a) && num_is_zero(a)) return b;
+        if (!vis_tuple(b) && num_is_zero(b)) return a;
+        if (!vis_tuple(a) || !vis_tuple(b))
+            scm_raise(V_FALSE, "tuple +: cannot add tuple with non-zero scalar");
+        Tuple *ta = as_tuple(a), *tb = as_tuple(b);
+        if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
+            scm_raise(V_FALSE, "tuple +: type/dimension mismatch");
+        val_t buf[256]; uint32_t n = ta->len < 256 ? ta->len : 256;
+        for (uint32_t i = 0; i < n; i++) buf[i] = num_add(ta->data[i], tb->data[i]);
+        return num_make_tuple((int)ta->hdr.type, n, buf);
+    }
     return arith2(a, b, add_fix, add_big, add_rat, add_flo);
 }
 
@@ -337,6 +359,12 @@ val_t num_neg(val_t a) {
     if (vis_symbolic(a)) return sx_neg(a);
     if (vis_quantum(a))  return quantum_mul_scalar(a, vfix(-1));
     if (vis_surreal(a))  return sur_neg(a);
+    if (vis_tuple(a)) {
+        Tuple *t = as_tuple(a);
+        val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
+        for (uint32_t i = 0; i < n; i++) buf[i] = num_neg(t->data[i]);
+        return num_make_tuple((int)t->hdr.type, n, buf);
+    }
     return num_sub(vfix(0), a);
 }
 
@@ -384,6 +412,18 @@ val_t num_sub(val_t a, val_t b) {
         if (vis_quat(b)) { Quaternion *q = as_quat(b); qb[0]=q->a; qb[1]=q->b; qb[2]=q->c; qb[3]=q->d; }
         else qb[0] = num_to_double(b);
         return num_make_quat(qa[0]-qb[0], qa[1]-qb[1], qa[2]-qb[2], qa[3]-qb[3]);
+    }
+    if (vis_tuple(a) || vis_tuple(b)) {
+        /* tuple - 0 = tuple */
+        if (!vis_tuple(b) && num_is_zero(b)) return a;
+        if (!vis_tuple(a) || !vis_tuple(b))
+            scm_raise(V_FALSE, "tuple -: cannot subtract tuple and non-zero scalar");
+        Tuple *ta = as_tuple(a), *tb = as_tuple(b);
+        if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
+            scm_raise(V_FALSE, "tuple -: type/dimension mismatch");
+        val_t buf[256]; uint32_t n = ta->len < 256 ? ta->len : 256;
+        for (uint32_t i = 0; i < n; i++) buf[i] = num_sub(ta->data[i], tb->data[i]);
+        return num_make_tuple((int)ta->hdr.type, n, buf);
     }
     return arith2(a, b, sub_fix, sub_big, sub_rat, sub_flo);
 }
@@ -466,6 +506,30 @@ val_t num_mul(val_t a, val_t b) {
             z[idx] += sgn * x[i] * y[j];
         }
         return num_make_oct(z);
+    }
+    /* Tuple: scalar*tuple, tuple*scalar, or down·up contraction */
+    if (vis_tuple(a) || vis_tuple(b)) {
+        if (vis_tuple(a) && vis_tuple(b)) {
+            /* down * up → scalar contraction */
+            if (!vis_down(a) || !vis_up(b))
+                scm_raise(V_FALSE, "tuple *: only (down)*(up) contraction is defined");
+            Tuple *ta = as_tuple(a), *tb = as_tuple(b);
+            if (ta->len != tb->len)
+                scm_raise(V_FALSE, "tuple *: dimension mismatch in contraction");
+            val_t acc = vfix(0);
+            for (uint32_t i = 0; i < ta->len; i++)
+                acc = num_add(acc, num_mul(ta->data[i], tb->data[i]));
+            return acc;
+        }
+        /* 1 * tuple = tuple  (identity, needed by variadic * accumulator) */
+        if (!vis_tuple(a) && num_is_one(a)) return b;
+        if (!vis_tuple(b) && num_is_one(b)) return a;
+        /* scalar * tuple or tuple * scalar */
+        val_t scalar = vis_tuple(a) ? b : a;
+        Tuple  *t    = vis_tuple(a) ? as_tuple(a) : as_tuple(b);
+        val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
+        for (uint32_t i = 0; i < n; i++) buf[i] = num_mul(scalar, t->data[i]);
+        return num_make_tuple((int)t->hdr.type, n, buf);
     }
     return arith2(a, b, mul_fix, mul_big, mul_rat, mul_flo);
 }

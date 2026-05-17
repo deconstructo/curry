@@ -573,6 +573,66 @@ static val_t prim_fn_apply(int ac, val_t *av, void *ud) {
     return sx_make_apply(av[0], ac - 1, av + 1);
 }
 
+/* ---- Up / Down tuples (contravariant / covariant) ---- */
+
+static val_t prim_up(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    return num_make_tuple(T_UP, (uint32_t)argc, argv);
+}
+static val_t prim_down(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    return num_make_tuple(T_DOWN, (uint32_t)argc, argv);
+}
+static val_t prim_up_p(int argc, val_t *argv, void *ud)
+    { (void)argc; (void)ud; return vis_up(argv[0]) ? V_TRUE : V_FALSE; }
+static val_t prim_down_p(int argc, val_t *argv, void *ud)
+    { (void)argc; (void)ud; return vis_down(argv[0]) ? V_TRUE : V_FALSE; }
+static val_t prim_tuple_p(int argc, val_t *argv, void *ud)
+    { (void)argc; (void)ud; return vis_tuple(argv[0]) ? V_TRUE : V_FALSE; }
+
+static val_t prim_ref(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    if (!vis_tuple(argv[0])) scm_raise(V_FALSE, "ref: not a tuple");
+    if (!vis_fixnum(argv[1])) scm_raise(V_FALSE, "ref: index must be an exact integer");
+    Tuple *t = as_tuple(argv[0]);
+    intptr_t i = vunfix(argv[1]);
+    if (i < 0 || (uint32_t)i >= t->len)
+        scm_raise(V_FALSE, "ref: index %ld out of range (tuple length %u)", (long)i, t->len);
+    return t->data[(uint32_t)i];
+}
+static val_t prim_dimension(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    if (!vis_tuple(argv[0])) scm_raise(V_FALSE, "dimension: not a tuple");
+    return vfix((intptr_t)as_tuple(argv[0])->len);
+}
+static val_t prim_tuple_to_list(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    if (!vis_tuple(argv[0])) scm_raise(V_FALSE, "tuple->list: not a tuple");
+    Tuple *t = as_tuple(argv[0]);
+    val_t lst = V_NIL;
+    for (uint32_t i = t->len; i-- > 0;)
+        lst = scm_cons(t->data[i], lst);
+    return lst;
+}
+static val_t prim_list_to_up(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    val_t lst = argv[0]; uint32_t n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    val_t buf[256]; if (n > 256) n = 256;
+    uint32_t k = 0;
+    for (val_t p = lst; vis_pair(p) && k < n; p = vcdr(p)) buf[k++] = vcar(p);
+    return num_make_tuple(T_UP, k, buf);
+}
+static val_t prim_list_to_down(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    val_t lst = argv[0]; uint32_t n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    val_t buf[256]; if (n > 256) n = 256;
+    uint32_t k = 0;
+    for (val_t p = lst; vis_pair(p) && k < n; p = vcdr(p)) buf[k++] = vcar(p);
+    return num_make_tuple(T_DOWN, k, buf);
+}
+
 /* ---- D operator (functional derivative) ----
  *
  * (D f) → a function g such that (g x) = f'(x).
@@ -675,6 +735,17 @@ void builtins_curry_register(val_t env) {
     DEF("sym-fn?",        prim_sym_fn_p,        1,  1);
     DEF("sym-fn-name",    prim_sym_fn_name,     1,  1);
     DEF("fn-apply",       prim_fn_apply,        1, -1);
+    /* Tuples */
+    DEF("up",             prim_up,              0, -1);
+    DEF("down",           prim_down,            0, -1);
+    DEF("up?",            prim_up_p,            1, 1);
+    DEF("down?",          prim_down_p,          1, 1);
+    DEF("tuple?",         prim_tuple_p,         1, 1);
+    DEF("ref",            prim_ref,             2, 2);
+    DEF("dimension",      prim_dimension,       1, 1);
+    DEF("tuple->list",    prim_tuple_to_list,   1, 1);
+    DEF("list->up",       prim_list_to_up,      1, 1);
+    DEF("list->down",     prim_list_to_down,    1, 1);
     DEF("D",              prim_D,               1,  1);
     DEF("laplace",        prim_laplace,         3,  3);
     DEF("ilaplace",       prim_ilaplace,        3,  3);

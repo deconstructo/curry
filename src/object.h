@@ -62,6 +62,8 @@ typedef enum {
     T_TENSOR        = 36,  /* N-dimensional tensor of doubles (row-major) */
     T_F64VEC        = 37,  /* typed flat double[] — bulk C arithmetic (f64vector) */
     T_SYMFN         = 38,  /* symbolic unknown function: u(x,y,t) → unevaluated derivatives */
+    T_UP            = 39,  /* contravariant up-tuple:   (up   a b c ...) */
+    T_DOWN          = 40,  /* covariant   down-tuple:   (down a b c ...) */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -117,6 +119,9 @@ static inline uint32_t vtype(val_t v) {
 #define vis_matrix(v)   vis_type(v, T_MATRIX)
 #define vis_tensor(v)   vis_type(v, T_TENSOR)
 #define vis_f64vec(v)   vis_type(v, T_F64VEC)
+#define vis_up(v)       vis_type(v, T_UP)
+#define vis_down(v)     vis_type(v, T_DOWN)
+#define vis_tuple(v)    (vis_up(v) || vis_down(v))
 
 #define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v) || vis_traced(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
@@ -414,6 +419,14 @@ typedef struct {
     val_t d_param; /* sym-var this was differentiated w.r.t. (element of parent's params); V_FALSE */
 } SymFn;
 
+/* Tuple: up (contravariant) or down (covariant) ordered collection.
+ * Componentwise addition/negation; (down u) · (up v) = Σ uᵢvᵢ (contraction). */
+typedef struct {
+    Hdr      hdr;    /* type = T_UP or T_DOWN */
+    uint32_t len;
+    val_t    data[]; /* len components */
+} Tuple;
+
 /* Quantum superposition: Σᵢ αᵢ|vᵢ⟩
  * data layout: amp0, val0, amp1, val1, ... (2n entries) */
 typedef struct {
@@ -503,6 +516,7 @@ typedef struct {
 #define as_symvar(v)  vunptr(SymVar,      v)
 #define as_symexpr(v) vunptr(SymExpr,     v)
 #define as_symfn(v)   vunptr(SymFn,       v)
+#define as_tuple(v)   vunptr(Tuple,       v)
 #define as_quantum(v) vunptr(Quantum,     v)
 #define as_surreal(v) vunptr(Surreal,     v)
 #define as_mv(v)      vunptr(Multivector, v)

@@ -162,7 +162,16 @@ static bool is_two(val_t v)  { return vis_fixnum(v) && vunfix(v) == 2; }
 
 
 val_t sx_simplify(val_t expr) {
-    if (!vis_symexpr(expr)) return expr;
+    if (!vis_symexpr(expr)) {
+        /* Tuple: simplify each component */
+        if (vis_tuple(expr)) {
+            Tuple *t = as_tuple(expr);
+            val_t *simp = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+            for (uint32_t i = 0; i < t->len; i++) simp[i] = sx_simplify(t->data[i]);
+            return num_make_tuple((int)t->hdr.type, t->len, simp);
+        }
+        return expr;
+    }
 
     SymExpr *se = as_symexpr(expr);
     val_t op = se->op;
@@ -681,6 +690,14 @@ val_t sx_diff(val_t expr, val_t var) {
         return (as_symvar(expr)->name == as_symvar(var)->name) ? vfix(1) : vfix(0);
     }
 
+    /* Tuple (up/down): differentiate componentwise */
+    if (vis_tuple(expr)) {
+        Tuple *t = as_tuple(expr);
+        val_t *diffs = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+        for (uint32_t i = 0; i < t->len; i++) diffs[i] = sx_diff(t->data[i], var);
+        return num_make_tuple((int)t->hdr.type, t->len, diffs);
+    }
+
     if (!vis_symexpr(expr)) return vfix(0);
 
     SymExpr *se = as_symexpr(expr);
@@ -1060,6 +1077,13 @@ val_t sx_substitute(val_t expr, val_t var, val_t val) {
         if (as_symvar(expr)->name == as_symvar(var)->name) return val;
         return expr;
     }
+    /* Tuple: substitute componentwise */
+    if (vis_tuple(expr)) {
+        Tuple *t = as_tuple(expr);
+        val_t *subs = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+        for (uint32_t i = 0; i < t->len; i++) subs[i] = sx_substitute(t->data[i], var, val);
+        return num_make_tuple((int)t->hdr.type, t->len, subs);
+    }
     if (vis_symexpr(expr)) {
         SymExpr *se = as_symexpr(expr);
         val_t *sargs = (val_t *)gc_alloc((size_t)se->nargs * sizeof(val_t));
@@ -1077,6 +1101,12 @@ bool sx_depends_on(val_t expr, val_t var) {
     if (vis_symvar(expr))
         return as_symvar(expr)->name == as_symvar(var)->name;
     if (vis_symfn(expr)) return false;  /* sym-fn is a function object, not a variable */
+    if (vis_tuple(expr)) {
+        Tuple *t = as_tuple(expr);
+        for (uint32_t i = 0; i < t->len; i++)
+            if (sx_depends_on(t->data[i], var)) return true;
+        return false;
+    }
     if (vis_symexpr(expr)) {
         SymExpr *se = as_symexpr(expr);
         for (uint32_t i = 0; i < se->nargs; i++)

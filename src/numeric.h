@@ -38,6 +38,7 @@ val_t num_make_float(double d);
 val_t num_make_complex(val_t real, val_t imag);
 val_t num_make_quat(double a, double b, double c, double d);
 val_t num_make_oct(const double e[8]);
+val_t num_make_tuple(int type, uint32_t n, val_t *data); /* T_UP or T_DOWN */
 
 /* ---- Coercions ---- */
 double     num_to_double(val_t v);   /* any number -> double (may lose precision) */
