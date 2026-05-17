@@ -532,6 +532,57 @@ static val_t prim_auto_diff(int ac, val_t *av, void *ud) {
     return vfix(0);
 }
 
+/* ---- Symbolic function objects ---- */
+
+/* (sym-fn 'name) or (sym-fn 'name x y t ...) */
+static val_t prim_sym_fn(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_symbol(av[0]))
+        scm_raise(V_FALSE, "sym-fn: first argument must be a symbol");
+    val_t name = av[0];
+    /* Remaining args are sym-vars forming the params list */
+    for (int i = 1; i < ac; i++) {
+        if (!vis_symvar(av[i]))
+            scm_raise(V_FALSE, "sym-fn: parameters must be symbolic variables");
+    }
+    /* Build params list in order */
+    val_t params = V_NIL;
+    val_t *tail  = &params;
+    for (int i = 1; i < ac; i++) {
+        Pair *cell = CURRY_NEW(Pair);
+        cell->hdr.type = T_PAIR; cell->hdr.flags = 0;
+        cell->car = av[i]; cell->cdr = V_NIL;
+        *tail = vptr(cell); tail = &cell->cdr;
+    }
+    return sx_make_fn(name, params);
+}
+
+static val_t prim_sym_fn_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(vis_symfn(av[0])); }
+
+static val_t prim_sym_fn_name(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symfn(av[0])) scm_raise(V_FALSE, "sym-fn-name: not a symbolic function");
+    return sx_fn_name(av[0]);
+}
+
+/* (fn-apply f arg0 arg1 ...) — explicit application */
+static val_t prim_fn_apply(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_symfn(av[0])) scm_raise(V_FALSE, "fn-apply: first argument must be a sym-fn");
+    return sx_make_apply(av[0], ac - 1, av + 1);
+}
+
+/* ---- Integral transforms ---- */
+static val_t prim_laplace(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return sx_laplace(av[0], av[1], av[2]); }
+static val_t prim_ilaplace(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return sx_ilaplace(av[0], av[1], av[2]); }
+static val_t prim_fourier(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return sx_fourier(av[0], av[1], av[2]); }
+static val_t prim_ifourier(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return sx_ifourier(av[0], av[1], av[2]); }
+
 /* ---- Registration ---- */
 
 void builtins_curry_register(val_t env) {
@@ -571,6 +622,14 @@ void builtins_curry_register(val_t env) {
     DEF("leading-coeff",  prim_leading_coeff,   2, 2);
     DEF("limit",          prim_sx_limit,        3, 4);
     DEF("series",         prim_sx_series,       4, 4);
+    DEF("sym-fn",         prim_sym_fn,          1, -1);
+    DEF("sym-fn?",        prim_sym_fn_p,        1,  1);
+    DEF("sym-fn-name",    prim_sym_fn_name,     1,  1);
+    DEF("fn-apply",       prim_fn_apply,        1, -1);
+    DEF("laplace",        prim_laplace,         3,  3);
+    DEF("ilaplace",       prim_ilaplace,        3,  3);
+    DEF("fourier",        prim_fourier,         3,  3);
+    DEF("ifourier",       prim_ifourier,        3,  3);
     DEF("grad",           prim_grad,            2, 2);
     DEF("gradient",       prim_grad,            2, 2);
     DEF("divergence",     prim_divergence,      2, 2);

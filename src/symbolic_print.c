@@ -100,9 +100,14 @@ static void sp_pos_mul_latex(val_t v, val_t port) {
  * expression is wrapped in parentheses so the caller's context is respected.
  */
 static void sp_infix(val_t expr, int ctx, val_t port) {
-    if (!vis_symbolic(expr)) { scm_display(expr, port); return; }
+    if (!vis_symbolic(expr) && !vis_symfn(expr)) { scm_display(expr, port); return; }
     if (vis_symvar(expr)) {
         Symbol *s = as_sym(as_symvar(expr)->name);
+        port_write_string(port, s->data, s->len);
+        return;
+    }
+    if (vis_symfn(expr)) {
+        Symbol *s = as_sym(as_symfn(expr)->name);
         port_write_string(port, s->data, s->len);
         return;
     }
@@ -219,6 +224,27 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
         sp_infix(a[0], SP_ADD, port);
         pws(port, " d");
         sp_infix(a[1], SP_LOW, port);
+    } else if (op == SX_APPLY && n >= 1 && vis_symfn(a[0])) {
+        Symbol *fsym = as_sym(as_symfn(a[0])->name);
+        port_write_string(port, fsym->data, fsym->len);
+        port_write_char(port, '(');
+        for (int i = 1; i < n; i++) {
+            if (i > 1) pws(port, ", ");
+            sp_infix(a[i], SP_LOW, port);
+        }
+        port_write_char(port, ')');
+    } else if (op == SX_LAPLACE && n >= 2) {
+        pws(port, "L{");
+        sp_infix(a[0], SP_LOW, port);
+        pws(port, ", d");
+        sp_infix(a[1], SP_LOW, port);
+        port_write_char(port, '}');
+    } else if (op == SX_FOURIER && n >= 2) {
+        pws(port, "F{");
+        sp_infix(a[0], SP_LOW, port);
+        pws(port, ", d");
+        sp_infix(a[1], SP_LOW, port);
+        port_write_char(port, '}');
     } else {
         Symbol *ops = as_sym(op);
         /* Unevaluated ∂ node: U+2202 = 0xE2 0x88 0x82 */
@@ -321,8 +347,13 @@ static void sl_num(val_t v, val_t port) {
  * is wrapped in \left(\right) for proper grouping.
  */
 static void sl_latex(val_t expr, int ctx, val_t port) {
-    if (!vis_symbolic(expr)) { sl_num(expr, port); return; }
+    if (!vis_symbolic(expr) && !vis_symfn(expr)) { sl_num(expr, port); return; }
     if (vis_symvar(expr)) { sl_varname(expr, port); return; }
+    if (vis_symfn(expr)) {
+        Symbol *s = as_sym(as_symfn(expr)->name);
+        port_write_string(port, s->data, s->len);
+        return;
+    }
 
     SymExpr *se    = as_symexpr(expr);
     val_t    op    = se->op;
@@ -434,6 +465,23 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
         sl_latex(a[0], SP_ADD, port);
         pws(port, " \\, \\mathrm{d}");
         sl_latex(a[1], SP_LOW, port);
+    } else if (op == SX_APPLY && n >= 1 && vis_symfn(a[0])) {
+        Symbol *fsym = as_sym(as_symfn(a[0])->name);
+        port_write_string(port, fsym->data, fsym->len);
+        pws(port, "\\!\\left(");
+        for (int i = 1; i < n; i++) {
+            if (i > 1) pws(port, ",\\,");
+            sl_latex(a[i], SP_LOW, port);
+        }
+        pws(port, "\\right)");
+    } else if (op == SX_LAPLACE && n >= 2) {
+        pws(port, "\\mathcal{L}\\!\\left\\{");
+        sl_latex(a[0], SP_LOW, port);
+        pws(port, "\\right\\}");
+    } else if (op == SX_FOURIER && n >= 2) {
+        pws(port, "\\mathcal{F}\\!\\left\\{");
+        sl_latex(a[0], SP_LOW, port);
+        pws(port, "\\right\\}");
     } else {
         Symbol *ops = as_sym(op);
         /* Unevaluated ∂ node */
@@ -469,6 +517,13 @@ void sx_write(val_t expr, val_t port) {
     if (vis_symvar(expr)) {
         Symbol *s = as_sym(as_symvar(expr)->name);
         port_write_string(port, s->data, s->len);
+        return;
+    }
+    if (vis_symfn(expr)) {
+        Symbol *s = as_sym(as_symfn(expr)->name);
+        pws(port, "#<sym-fn:");
+        port_write_string(port, s->data, s->len);
+        port_write_char(port, '>');
         return;
     }
     if (vis_symexpr(expr)) {

@@ -200,6 +200,10 @@ void symbolic_init(void);
 val_t sx_make_var(val_t name);                          /* T_SYMVAR from symbol */
 val_t sx_make_var_flags(val_t name, uint32_t flags);    /* T_SYMVAR with assumption flags */
 val_t sx_make_expr(val_t op, int nargs, val_t *args);   /* T_SYMEXPR */
+val_t sx_make_fn(val_t name, val_t params);              /* T_SYMFN: symbolic function object */
+val_t sx_make_apply(val_t fn, int nargs, val_t *args);   /* SX_APPLY: fn applied to args */
+val_t sx_fn_name(val_t fn);                              /* name symbol from T_SYMFN */
+val_t sx_fn_params(val_t fn);                            /* params list from T_SYMFN */
 
 /* ---- Accessors ---- */
 val_t sx_var_name(val_t v);                /* for T_SYMVAR */
@@ -256,6 +260,12 @@ val_t sx_limit(val_t expr, val_t var, val_t point, int dir);
 /* Taylor series: Σ f^(k)(point)/k! · (x−point)^k  for k=0..n */
 val_t sx_series(val_t expr, val_t var, val_t point, int n);
 
+/* Integral transforms */
+val_t sx_laplace(val_t expr, val_t t_var, val_t s_var);  /* Laplace transform L{expr}(s) */
+val_t sx_ilaplace(val_t expr, val_t s_var, val_t t_var); /* inverse Laplace */
+val_t sx_fourier(val_t expr, val_t t_var, val_t w_var);  /* Fourier transform F{expr}(ω) */
+val_t sx_ifourier(val_t expr, val_t w_var, val_t t_var); /* inverse Fourier */
+
 /* ---- Polynomial / structural operations ---- */
 val_t sx_expand(val_t expr);                                 /* distribute * over +, expand integer powers */
 val_t sx_degree(val_t expr, val_t var);                      /* polynomial degree in var (fixnum) */
@@ -279,6 +289,9 @@ extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 extern val_t SX_COT, SX_SEC, SX_CSC;
 extern val_t SX_LIMIT;
 extern val_t SX_SIGN;
+extern val_t SX_APPLY;   /* symbolic function application: (apply fn arg0 arg1 ...) */
+extern val_t SX_LAPLACE; /* unevaluated Laplace transform node */
+extern val_t SX_FOURIER; /* unevaluated Fourier transform node */
 
 val_t sx_fracdiff(val_t expr, val_t alpha, val_t var); /* D^α fractional derivative */
 val_t sx_fracint (val_t expr, val_t alpha, val_t var); /* I^α fractional integral   */

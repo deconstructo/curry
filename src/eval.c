@@ -1030,6 +1030,11 @@ tail:
             return apply_arr(proc, argc, arr);
         }
 
+        if (vis_symfn(proc)) {
+            /* Applying a symbolic function — create SX_APPLY node */
+            return sx_make_apply(proc, argc, arr);
+        }
+
         scm_raise(V_FALSE, "not a procedure: %s",
                   vis_symbol(op) ? sym_cstr(op) : "#<value>");
     }

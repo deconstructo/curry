@@ -23,6 +23,9 @@ val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 val_t SX_COT, SX_SEC, SX_CSC;
 val_t SX_LIMIT;
 val_t SX_SIGN;
+val_t SX_APPLY;
+val_t SX_LAPLACE;
+val_t SX_FOURIER;
 
 void symbolic_init(void) {
     SX_ADD       = sym_intern_cstr("+");
@@ -59,6 +62,9 @@ void symbolic_init(void) {
     SX_CSC       = sym_intern_cstr("csc");
     SX_LIMIT     = sym_intern_cstr("limit");
     SX_SIGN      = sym_intern_cstr("sign");
+    SX_APPLY     = sym_intern_cstr("apply");
+    SX_LAPLACE   = sym_intern_cstr("laplace");
+    SX_FOURIER   = sym_intern_cstr("fourier");
 }
 
 /* ---- Constructors ---- */
@@ -77,6 +83,29 @@ val_t sx_make_var_flags(val_t name, uint32_t flags) {
     v->hdr.flags = flags;
     v->name      = name;
     return vptr(v);
+}
+
+val_t sx_make_fn(val_t name, val_t params) {
+    SymFn *f = CURRY_NEW(SymFn);
+    f->hdr.type  = T_SYMFN;
+    f->hdr.flags = 0;
+    f->name      = name;
+    f->params    = params;
+    f->parent    = V_FALSE;
+    f->d_param   = V_FALSE;
+    return vptr(f);
+}
+
+val_t sx_fn_name(val_t fn)   { return as_symfn(fn)->name; }
+val_t sx_fn_params(val_t fn) { return as_symfn(fn)->params; }
+
+val_t sx_make_apply(val_t fn, int nargs, val_t *args) {
+    /* SX_APPLY: args[0]=T_SYMFN, args[1..nargs]=applied arguments */
+    int total = nargs + 1;
+    val_t *all = (val_t *)gc_alloc((size_t)total * sizeof(val_t));
+    all[0] = fn;
+    for (int i = 0; i < nargs; i++) all[i + 1] = args[i];
+    return sx_make_expr(SX_APPLY, total, all);
 }
 
 val_t sx_make_expr(val_t op, int nargs, val_t *args) {
@@ -117,6 +146,8 @@ bool sx_equal(val_t a, val_t b) {
         return true;
     }
     if (vis_number(a) && vis_number(b)) return num_eq(a, b);
+    if (vis_symfn(a) && vis_symfn(b))
+        return as_symfn(a)->name == as_symfn(b)->name;
     return false;
 }
 
@@ -592,6 +623,49 @@ val_t sx_imag(val_t a) {
     return sx_simplify(sx_expr1(SX_IMAG, a));
 }
 
+/* ---- Symbolic function (T_SYMFN) derivative helpers ---- */
+
+/* Create the partial derivative of fn w.r.t. param_var (a sym-var from fn's params).
+ * Name: "<fn_name>_<param_name>" (e.g. u → u_x).  Inherits fn's params and records lineage. */
+static val_t sx_diff_symfn(val_t fn, val_t param_var) {
+    SymFn   *sf      = as_symfn(fn);
+    Symbol  *fn_sym  = as_sym(sf->name);
+    Symbol  *par_sym = as_sym(as_symvar(param_var)->name);
+    /* Build "<fn_name>_<param_name>" */
+    size_t  total    = fn_sym->len + 1 + par_sym->len;
+    char   *buf      = (char *)gc_alloc(total + 1);
+    memcpy(buf, fn_sym->data, fn_sym->len);
+    buf[fn_sym->len] = '_';
+    memcpy(buf + fn_sym->len + 1, par_sym->data, par_sym->len);
+    buf[total] = '\0';
+    val_t   dname = sym_intern_cstr(buf);
+    SymFn  *d     = CURRY_NEW(SymFn);
+    d->hdr.type   = T_SYMFN;
+    d->hdr.flags  = 0;
+    d->name       = dname;
+    d->params     = sf->params;
+    d->parent     = fn;
+    d->d_param    = param_var;
+    return vptr(d);
+}
+
+/* Like sx_diff_symfn but using an integer index when params are unavailable.
+ * Name: "<fn_name>_<index>" (e.g. f_0, f_1). */
+static val_t sx_diff_symfn_idx(val_t fn, int idx) {
+    SymFn  *sf     = as_symfn(fn);
+    Symbol *fn_sym = as_sym(sf->name);
+    char    buf[128];
+    snprintf(buf, sizeof(buf), "%.*s_%d", (int)fn_sym->len, fn_sym->data, idx);
+    SymFn  *d    = CURRY_NEW(SymFn);
+    d->hdr.type  = T_SYMFN;
+    d->hdr.flags = 0;
+    d->name      = sym_intern_cstr(buf);
+    d->params    = sf->params;
+    d->parent    = fn;
+    d->d_param   = V_FALSE;
+    return vptr(d);
+}
+
 /* ---- Symbolic differentiation ---- */
 
 val_t sx_diff(val_t expr, val_t var) {
@@ -773,6 +847,32 @@ val_t sx_diff(val_t expr, val_t var) {
     /* ∂imag(f)/∂x = imag(∂f/∂x) */
     if (op == SX_IMAG && n == 1)
         return sx_imag(sx_diff(args[0], var));
+
+    /* ---- SX_APPLY: chain rule over function arguments ---- */
+    if (op == SX_APPLY && n >= 1) {
+        val_t fn      = args[0];  /* T_SYMFN */
+        int   nf      = n - 1;   /* number of applied arguments */
+        val_t *fargs  = args + 1;
+        val_t params  = as_symfn(fn)->params;
+        val_t sum     = vfix(0);
+        for (int i = 0; i < nf; i++) {
+            val_t darg = sx_diff(fargs[i], var);
+            if (is_zero(darg)) continue;
+            /* Find i-th param sym-var for derivative naming */
+            val_t param_i = V_FALSE;
+            val_t pl = params;
+            for (int j = 0; vis_pair(pl); j++, pl = vcdr(pl)) {
+                if (j == i) { param_i = vcar(pl); break; }
+            }
+            val_t d_fn = vis_symvar(param_i)
+                       ? sx_diff_symfn(fn, param_i)
+                       : sx_diff_symfn_idx(fn, i);
+            val_t d_apply = sx_make_apply(d_fn, nf, fargs);
+            val_t term    = sx_simplify(sx_mul(d_apply, darg));
+            sum           = sx_simplify(sx_add(sum, term));
+        }
+        return sum;
+    }
 
     /* Unknown op — return unevaluated ∂ notation */
     val_t diff_sym = sym_intern_cstr("∂");
@@ -976,6 +1076,7 @@ bool sx_depends_on(val_t expr, val_t var) {
     if (vis_number(expr)) return false;
     if (vis_symvar(expr))
         return as_symvar(expr)->name == as_symvar(var)->name;
+    if (vis_symfn(expr)) return false;  /* sym-fn is a function object, not a variable */
     if (vis_symexpr(expr)) {
         SymExpr *se = as_symexpr(expr);
         for (uint32_t i = 0; i < se->nargs; i++)
@@ -1135,7 +1236,7 @@ val_t sx_degree(val_t expr, val_t var) {
 
 /*
  * Decompose a single monomial term into (coefficient × var^degree).
- * Returns true and fills *coeff/*deg on success.
+ * Returns true and fills *coeff / *deg on success.
  * Returns false if the term is not a recognizable monomial in var.
  */
 static bool decomp_monomial(val_t term, val_t var, val_t *coeff, long *deg) {
@@ -2309,4 +2410,459 @@ val_t sx_series(val_t expr, val_t var, val_t point, int n) {
     if (nterms == 0) return vfix(0);
     if (nterms == 1) return terms[0];
     return sx_simplify(sx_make_expr(SX_ADD, nterms, terms));
+}
+
+/* ---- Integral transforms ---- */
+
+/* Helper: test if two sym-vars have the same name */
+static bool sx_same_var(val_t a, val_t b) {
+    return vis_symvar(a) && vis_symvar(b) &&
+           as_symvar(a)->name == as_symvar(b)->name;
+}
+
+/* Create the Laplace-transform function of fn: name "L_<fn_name>", same params
+ * but with t replaced by s in the params list. */
+static val_t sx_laplace_fn(val_t fn, val_t t_var, val_t s_var) {
+    SymFn  *sf     = as_symfn(fn);
+    Symbol *fn_sym = as_sym(sf->name);
+    char    buf[256];
+    snprintf(buf, sizeof(buf), "L_%.*s", (int)fn_sym->len, fn_sym->data);
+    /* Build new params: replace t with s */
+    val_t old_params = sf->params, new_params = V_NIL;
+    val_t *tail = &new_params;
+    while (vis_pair(old_params)) {
+        val_t p = vcar(old_params);
+        Pair *cell = CURRY_NEW(Pair);
+        cell->hdr.type = T_PAIR; cell->hdr.flags = 0;
+        cell->car = sx_same_var(p, t_var) ? s_var : p;
+        cell->cdr = V_NIL;
+        *tail = vptr(cell); tail = &cell->cdr;
+        old_params = vcdr(old_params);
+    }
+    return sx_make_fn(sym_intern_cstr(buf), new_params);
+}
+
+/* Replace t_var with s_var in the arg list of a SX_APPLY node */
+static void sx_replace_var_in_args(val_t *dst, val_t *src, int n,
+                                   val_t t_var, val_t s_var) {
+    for (int i = 0; i < n; i++)
+        dst[i] = sx_same_var(src[i], t_var) ? s_var : src[i];
+}
+
+/* Extract the linear coefficient of var in expr, i.e. return a such that
+ * expr == a*var + b, or return V_FALSE if not of that form. */
+static val_t sx_linear_coeff(val_t expr, val_t var) {
+    if (sx_same_var(expr, var)) return vfix(1);
+    if (!vis_symexpr(expr)) return V_FALSE;
+    SymExpr *se = as_symexpr(expr);
+    if (se->op == SX_MUL && se->nargs == 2) {
+        if (sx_same_var(se->args[0], var) && !sx_depends_on(se->args[1], var))
+            return se->args[1];
+        if (sx_same_var(se->args[1], var) && !sx_depends_on(se->args[0], var))
+            return se->args[0];
+    }
+    return V_FALSE;
+}
+
+val_t sx_laplace(val_t expr, val_t t_var, val_t s_var) {
+    if (!vis_symvar(t_var))
+        scm_raise(V_FALSE, "laplace: t argument must be a symbolic variable");
+    if (!vis_symvar(s_var))
+        scm_raise(V_FALSE, "laplace: s argument must be a symbolic variable");
+
+    /* Constant (doesn't depend on t): L{c} = c/s */
+    if (!sx_depends_on(expr, t_var))
+        return sx_div(expr, s_var);
+
+    /* The t variable itself: L{t} = 1/s^2 */
+    if (sx_same_var(expr, t_var))
+        return sx_div(vfix(1), sx_expt(s_var, vfix(2)));
+
+    if (vis_symexpr(expr)) {
+        SymExpr *se = as_symexpr(expr);
+        val_t    op = se->op;
+        int      n  = (int)se->nargs;
+        val_t   *a  = se->args;
+
+        /* Linearity: L{f+g} = L{f}+L{g} */
+        if (op == SX_ADD) {
+            val_t acc = vfix(0);
+            for (int i = 0; i < n; i++)
+                acc = sx_add(acc, sx_laplace(a[i], t_var, s_var));
+            return acc;
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_sub(sx_laplace(a[0], t_var, s_var),
+                          sx_laplace(a[1], t_var, s_var));
+        if (op == SX_NEG && n == 1)
+            return sx_neg(sx_laplace(a[0], t_var, s_var));
+
+        /* Constant multiple: L{c*f} = c*L{f} */
+        if ((op == SX_MUL || op == SX_NCMUL) && n == 2) {
+            if (!sx_depends_on(a[0], t_var))
+                return sx_mul(a[0], sx_laplace(a[1], t_var, s_var));
+            if (!sx_depends_on(a[1], t_var))
+                return sx_mul(a[1], sx_laplace(a[0], t_var, s_var));
+        }
+
+        /* t^n: L{t^n} = n!/s^{n+1} */
+        if (op == SX_EXPT && n == 2 && sx_same_var(a[0], t_var) &&
+            vis_fixnum(a[1]) && vunfix(a[1]) >= 0) {
+            long nv = vunfix(a[1]);
+            /* compute n! as a fixnum (safe for small n) */
+            val_t fact = vfix(1);
+            for (long k = 2; k <= nv; k++) fact = num_mul(fact, vfix(k));
+            return sx_div(fact, sx_expt(s_var, vfix(nv + 1)));
+        }
+
+        /* e^{a*t}: L{exp(a*t)} = 1/(s-a) */
+        if (op == SX_EXP && n == 1) {
+            val_t coeff = sx_linear_coeff(a[0], t_var);
+            if (!vis_false(coeff))
+                return sx_div(vfix(1), sx_sub(s_var, coeff));
+        }
+
+        /* sin(omega*t): L{sin} = omega/(s^2+omega^2) */
+        if (op == SX_SIN && n == 1) {
+            val_t coeff = sx_linear_coeff(a[0], t_var);
+            if (!vis_false(coeff)) {
+                val_t w2 = sx_expt(coeff, vfix(2));
+                return sx_div(coeff, sx_add(sx_expt(s_var, vfix(2)), w2));
+            }
+        }
+
+        /* cos(omega*t): L{cos} = s/(s^2+omega^2) */
+        if (op == SX_COS && n == 1) {
+            val_t coeff = sx_linear_coeff(a[0], t_var);
+            if (!vis_false(coeff)) {
+                val_t w2 = sx_expt(coeff, vfix(2));
+                return sx_div(s_var, sx_add(sx_expt(s_var, vfix(2)), w2));
+            }
+        }
+
+        /* sinh(omega*t): L{sinh} = omega/(s^2-omega^2) */
+        if (op == SX_SINH && n == 1) {
+            val_t coeff = sx_linear_coeff(a[0], t_var);
+            if (!vis_false(coeff)) {
+                val_t w2 = sx_expt(coeff, vfix(2));
+                return sx_div(coeff, sx_sub(sx_expt(s_var, vfix(2)), w2));
+            }
+        }
+
+        /* cosh(omega*t): L{cosh} = s/(s^2-omega^2) */
+        if (op == SX_COSH && n == 1) {
+            val_t coeff = sx_linear_coeff(a[0], t_var);
+            if (!vis_false(coeff)) {
+                val_t w2 = sx_expt(coeff, vfix(2));
+                return sx_div(s_var, sx_sub(sx_expt(s_var, vfix(2)), w2));
+            }
+        }
+
+        /* SX_APPLY: symbolic function application */
+        if (op == SX_APPLY && n >= 1 && vis_symfn(a[0])) {
+            val_t fn  = a[0];
+            int   nf  = n - 1;
+            val_t *fa = a + 1;
+            SymFn *sf = as_symfn(fn);
+
+            /* Derivative property: L{u_t(x,t)} = s*L{u(x,t)} - u(x,0) */
+            if (!vis_false(sf->parent) && vis_symvar(sf->d_param) &&
+                as_symvar(sf->d_param)->name == as_symvar(t_var)->name) {
+                /* Replace t with s in args for L{parent} call */
+                val_t *la = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+                val_t *za = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+                sx_replace_var_in_args(la, fa, nf, t_var, s_var);
+                sx_replace_var_in_args(za, fa, nf, t_var, vfix(0));
+                val_t L_fn       = sx_laplace_fn(sf->parent, t_var, s_var);
+                val_t L_of_par   = sx_make_apply(L_fn, nf, la);
+                val_t par_at_0   = sx_make_apply(sf->parent, nf, za);
+                /* s * L{parent}(x,s) - parent(x,0) */
+                return sx_sub(sx_mul(s_var, L_of_par), par_at_0);
+            }
+
+            /* Simple case: u(x,t) -> L_u(x,s) */
+            val_t *na = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+            sx_replace_var_in_args(na, fa, nf, t_var, s_var);
+            val_t L_fn = sx_laplace_fn(fn, t_var, s_var);
+            return sx_make_apply(L_fn, nf, na);
+        }
+    }
+
+    /* Fallback: unevaluated node (laplace expr t s) */
+    val_t largs[3] = {expr, t_var, s_var};
+    return sx_make_expr(SX_LAPLACE, 3, largs);
+}
+
+/* ---- Inverse Laplace (table-based) ---- */
+
+val_t sx_ilaplace(val_t expr, val_t s_var, val_t t_var) {
+    if (!vis_symvar(s_var))
+        scm_raise(V_FALSE, "ilaplace: s argument must be a symbolic variable");
+    if (!vis_symvar(t_var))
+        scm_raise(V_FALSE, "ilaplace: t argument must be a symbolic variable");
+
+    /* Constant (doesn't depend on s): L^{-1}{c} -> unevaluated */
+    if (!sx_depends_on(expr, s_var)) {
+        val_t largs[3] = {expr, s_var, t_var};
+        return sx_make_expr(SX_LAPLACE, 3, largs);
+    }
+
+    if (vis_symexpr(expr)) {
+        SymExpr *se = as_symexpr(expr);
+        val_t    op = se->op;
+        int      n  = (int)se->nargs;
+        val_t   *a  = se->args;
+
+        /* Linearity */
+        if (op == SX_ADD) {
+            val_t acc = vfix(0);
+            for (int i = 0; i < n; i++)
+                acc = sx_add(acc, sx_ilaplace(a[i], s_var, t_var));
+            return acc;
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_sub(sx_ilaplace(a[0], s_var, t_var),
+                          sx_ilaplace(a[1], s_var, t_var));
+        if (op == SX_NEG && n == 1)
+            return sx_neg(sx_ilaplace(a[0], s_var, t_var));
+
+        /* Constant multiple */
+        if ((op == SX_MUL || op == SX_NCMUL) && n == 2) {
+            if (!sx_depends_on(a[0], s_var))
+                return sx_mul(a[0], sx_ilaplace(a[1], s_var, t_var));
+            if (!sx_depends_on(a[1], s_var))
+                return sx_mul(a[1], sx_ilaplace(a[0], s_var, t_var));
+        }
+
+        /* c/s -> c (step function * constant) */
+        if (op == SX_DIV && n == 2 && vis_number(a[0]) && sx_same_var(a[1], s_var))
+            return a[0];
+
+        /* c/s^n -> c * t^{n-1}/(n-1)! */
+        if (op == SX_DIV && n == 2 && vis_number(a[0]) && !sx_depends_on(a[0], s_var)) {
+            val_t den = a[1];
+            if (vis_symexpr(den) && as_symexpr(den)->op == SX_EXPT &&
+                sx_same_var(as_symexpr(den)->args[0], s_var) &&
+                vis_fixnum(as_symexpr(den)->args[1])) {
+                long nv = vunfix(as_symexpr(den)->args[1]);
+                if (nv >= 1) {
+                    /* c * t^{n-1}/(n-1)! — try to reduce c/(n-1)! exactly */
+                    val_t fact = vfix(1);
+                    for (long k = 2; k <= nv - 1; k++) fact = num_mul(fact, vfix(k));
+                    val_t coeff = vis_number(a[0]) ? num_div(a[0], fact) : sx_div(a[0], fact);
+                    if (num_is_one(coeff))
+                        return sx_expt(t_var, vfix(nv - 1));
+                    return sx_mul(coeff, sx_expt(t_var, vfix(nv - 1)));
+                }
+            }
+        }
+
+        /* c/(s-a) -> c*e^{at} */
+        if (op == SX_DIV && n == 2 && vis_number(a[0]) && !sx_depends_on(a[0], s_var)) {
+            val_t den = a[1];
+            if (vis_symexpr(den) && as_symexpr(den)->op == SX_SUB &&
+                (int)as_symexpr(den)->nargs == 2 &&
+                sx_same_var(as_symexpr(den)->args[0], s_var) &&
+                !sx_depends_on(as_symexpr(den)->args[1], s_var)) {
+                val_t pole = as_symexpr(den)->args[1];
+                val_t base_e = sx_exp(sx_mul(pole, t_var));
+                return num_is_one(a[0]) ? base_e : sx_mul(a[0], base_e);
+            }
+        }
+
+        /* omega/(s^2+omega^2) -> sin(omega*t)
+         * omega/(s^2-omega^2) -> sinh(omega*t)
+         * s/(s^2+omega^2)     -> cos(omega*t)
+         * s/(s^2-omega^2)     -> cosh(omega*t)
+         * Also handles simplifier-reordered forms: (+ c s^2) or (+ s^2 c)
+         * num_v may be s itself (for cos/cosh) or a constant (for sin/sinh) */
+        if (op == SX_DIV && n == 2 &&
+            (!sx_depends_on(a[0], s_var) || sx_same_var(a[0], s_var))) {
+            val_t num_v = a[0], den = a[1];
+            if (vis_symexpr(den)) {
+                val_t dop = as_symexpr(den)->op;
+                int   dn  = (int)as_symexpr(den)->nargs;
+                if ((dop == SX_ADD || dop == SX_SUB) && dn == 2) {
+                    val_t d0 = as_symexpr(den)->args[0];
+                    val_t d1 = as_symexpr(den)->args[1];
+                    /* Find which of d0, d1 is s^2 and which is the constant part.
+                     * The simplifier places numeric constants first, so s^2 may be d1. */
+                    val_t s2_term = V_FALSE, c_term = V_FALSE;
+                    if (vis_symexpr(d0) && as_symexpr(d0)->op == SX_EXPT &&
+                        (int)as_symexpr(d0)->nargs == 2 &&
+                        sx_same_var(as_symexpr(d0)->args[0], s_var) &&
+                        vis_fixnum(as_symexpr(d0)->args[1]) &&
+                        vunfix(as_symexpr(d0)->args[1]) == 2 &&
+                        !sx_depends_on(d1, s_var)) {
+                        s2_term = d0; c_term = d1;
+                    } else if (dop == SX_ADD &&
+                               vis_symexpr(d1) && as_symexpr(d1)->op == SX_EXPT &&
+                               (int)as_symexpr(d1)->nargs == 2 &&
+                               sx_same_var(as_symexpr(d1)->args[0], s_var) &&
+                               vis_fixnum(as_symexpr(d1)->args[1]) &&
+                               vunfix(as_symexpr(d1)->args[1]) == 2 &&
+                               !sx_depends_on(d0, s_var)) {
+                        s2_term = d1; c_term = d0;
+                    }
+                    if (!vis_false(s2_term)) {
+                        /* c_term is omega^2 or a constant; extract omega */
+                        val_t w = V_FALSE;
+                        if (vis_symexpr(c_term) && as_symexpr(c_term)->op == SX_EXPT &&
+                            (int)as_symexpr(c_term)->nargs == 2 &&
+                            vis_fixnum(as_symexpr(c_term)->args[1]) &&
+                            vunfix(as_symexpr(c_term)->args[1]) == 2)
+                            w = as_symexpr(c_term)->args[0];  /* omega from omega^2 */
+                        if (vis_false(w)) w = sx_simplify(sx_sqrt(c_term)); /* omega = sqrt(c_term) */
+                        if (dop == SX_ADD) {
+                            if (sx_equal(num_v, w))
+                                return sx_sin(sx_mul(w, t_var));
+                            if (sx_same_var(num_v, s_var))
+                                return sx_cos(sx_mul(w, t_var));
+                            /* c/(s^2+w^2) where c != w: return c/w * sin(w*t) */
+                            if (vis_number(num_v) && !vis_false(w) && !vis_symbolic(w))
+                                return sx_mul(sx_div(num_v, w), sx_sin(sx_mul(w, t_var)));
+                        } else { /* SX_SUB: hyperbolic */
+                            if (sx_equal(num_v, w))
+                                return sx_sinh(sx_mul(w, t_var));
+                            if (sx_same_var(num_v, s_var))
+                                return sx_cosh(sx_mul(w, t_var));
+                            /* c/(s^2-w^2) where c != w: return c/w * sinh(w*t) */
+                            if (vis_number(num_v) && !vis_false(w) && !vis_symbolic(w))
+                                return sx_mul(sx_div(num_v, w), sx_sinh(sx_mul(w, t_var)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Fallback: unevaluated */
+    val_t largs[3] = {expr, s_var, t_var};
+    return sx_make_expr(SX_LAPLACE, 3, largs);
+}
+
+/* ---- Fourier transform ---- */
+
+/* Create the Fourier-transform function of fn: name "F_<fn_name>" */
+static val_t sx_fourier_fn(val_t fn, val_t t_var, val_t w_var) {
+    SymFn  *sf     = as_symfn(fn);
+    Symbol *fn_sym = as_sym(sf->name);
+    char    buf[256];
+    snprintf(buf, sizeof(buf), "F_%.*s", (int)fn_sym->len, fn_sym->data);
+    /* Replace t with omega in params */
+    val_t old_params = sf->params, new_params = V_NIL;
+    val_t *tail = &new_params;
+    while (vis_pair(old_params)) {
+        val_t p = vcar(old_params);
+        Pair *cell = CURRY_NEW(Pair);
+        cell->hdr.type = T_PAIR; cell->hdr.flags = 0;
+        cell->car = sx_same_var(p, t_var) ? w_var : p;
+        cell->cdr = V_NIL;
+        *tail = vptr(cell); tail = &cell->cdr;
+        old_params = vcdr(old_params);
+    }
+    return sx_make_fn(sym_intern_cstr(buf), new_params);
+}
+
+val_t sx_fourier(val_t expr, val_t t_var, val_t w_var) {
+    if (!vis_symvar(t_var))
+        scm_raise(V_FALSE, "fourier: t argument must be a symbolic variable");
+    if (!vis_symvar(w_var))
+        scm_raise(V_FALSE, "fourier: omega argument must be a symbolic variable");
+
+    /* Constant: F{c} -> unevaluated (needs Dirac delta) */
+    if (!sx_depends_on(expr, t_var)) {
+        val_t fargs[3] = {expr, t_var, w_var};
+        return sx_make_expr(SX_FOURIER, 3, fargs);
+    }
+
+    if (vis_symexpr(expr)) {
+        SymExpr *se = as_symexpr(expr);
+        val_t    op = se->op;
+        int      n  = (int)se->nargs;
+        val_t   *a  = se->args;
+
+        /* Linearity */
+        if (op == SX_ADD) {
+            val_t acc = vfix(0);
+            for (int i = 0; i < n; i++)
+                acc = sx_add(acc, sx_fourier(a[i], t_var, w_var));
+            return acc;
+        }
+        if (op == SX_SUB && n == 2)
+            return sx_sub(sx_fourier(a[0], t_var, w_var),
+                          sx_fourier(a[1], t_var, w_var));
+        if (op == SX_NEG && n == 1)
+            return sx_neg(sx_fourier(a[0], t_var, w_var));
+
+        /* Constant multiple */
+        if ((op == SX_MUL || op == SX_NCMUL) && n == 2) {
+            if (!sx_depends_on(a[0], t_var))
+                return sx_mul(a[0], sx_fourier(a[1], t_var, w_var));
+            if (!sx_depends_on(a[1], t_var))
+                return sx_mul(a[1], sx_fourier(a[0], t_var, w_var));
+        }
+
+        /* SX_APPLY: symbolic function application */
+        if (op == SX_APPLY && n >= 1 && vis_symfn(a[0])) {
+            val_t fn  = a[0];
+            int   nf  = n - 1;
+            val_t *fa = a + 1;
+            SymFn *sf = as_symfn(fn);
+
+            /* Derivative property: F{u_t(x,t)} = i*omega * F{u(x,t)} */
+            if (!vis_false(sf->parent) && vis_symvar(sf->d_param) &&
+                as_symvar(sf->d_param)->name == as_symvar(t_var)->name) {
+                val_t *wa = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+                sx_replace_var_in_args(wa, fa, nf, t_var, w_var);
+                val_t F_fn     = sx_fourier_fn(sf->parent, t_var, w_var);
+                val_t F_of_par = sx_make_apply(F_fn, nf, wa);
+                /* i*omega * F{parent} — use complex i */
+                val_t i_val = num_make_complex(vfix(0), vfix(1));  /* 0+1i */
+                return sx_mul(sx_mul(i_val, w_var), F_of_par);
+            }
+
+            /* Simple case: u(x,t) -> F_u(x,omega) */
+            val_t *wa = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+            sx_replace_var_in_args(wa, fa, nf, t_var, w_var);
+            val_t F_fn = sx_fourier_fn(fn, t_var, w_var);
+            return sx_make_apply(F_fn, nf, wa);
+        }
+    }
+
+    /* Fallback: unevaluated */
+    val_t fargs[3] = {expr, t_var, w_var};
+    return sx_make_expr(SX_FOURIER, 3, fargs);
+}
+
+val_t sx_ifourier(val_t expr, val_t w_var, val_t t_var) {
+    /* Minimal inverse: linearity only, fallback unevaluated */
+    if (!vis_symvar(w_var))
+        scm_raise(V_FALSE, "ifourier: omega argument must be a symbolic variable");
+    if (!vis_symvar(t_var))
+        scm_raise(V_FALSE, "ifourier: t argument must be a symbolic variable");
+
+    if (!sx_depends_on(expr, w_var)) {
+        val_t fa[3] = {expr, w_var, t_var};
+        return sx_make_expr(SX_FOURIER, 3, fa);
+    }
+
+    if (vis_symexpr(expr)) {
+        SymExpr *se = as_symexpr(expr);
+        val_t op = se->op;
+        int n = (int)se->nargs;
+        val_t *a = se->args;
+        if (op == SX_ADD) {
+            val_t acc = vfix(0);
+            for (int i = 0; i < n; i++) acc = sx_add(acc, sx_ifourier(a[i], w_var, t_var));
+            return acc;
+        }
+        if (op == SX_NEG && n == 1) return sx_neg(sx_ifourier(a[0], w_var, t_var));
+        if ((op == SX_MUL || op == SX_NCMUL) && n == 2) {
+            if (!sx_depends_on(a[0], w_var)) return sx_mul(a[0], sx_ifourier(a[1], w_var, t_var));
+            if (!sx_depends_on(a[1], w_var)) return sx_mul(a[1], sx_ifourier(a[0], w_var, t_var));
+        }
+    }
+    val_t fa[3] = {expr, w_var, t_var};
+    return sx_make_expr(SX_FOURIER, 3, fa);
 }

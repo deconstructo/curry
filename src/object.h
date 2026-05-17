@@ -61,6 +61,7 @@ typedef enum {
     T_MATRIX        = 35,  /* 2D matrix of doubles (row-major) */
     T_TENSOR        = 36,  /* N-dimensional tensor of doubles (row-major) */
     T_F64VEC        = 37,  /* typed flat double[] — bulk C arithmetic (f64vector) */
+    T_SYMFN         = 38,  /* symbolic unknown function: u(x,y,t) → unevaluated derivatives */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -107,6 +108,7 @@ static inline uint32_t vtype(val_t v) {
 #define vis_param(v)    vis_type(v, T_PARAMETER)
 #define vis_symvar(v)   vis_type(v, T_SYMVAR)
 #define vis_symexpr(v)  vis_type(v, T_SYMEXPR)
+#define vis_symfn(v)    vis_type(v, T_SYMFN)
 #define vis_symbolic(v) (vis_symvar(v) || vis_symexpr(v))
 #define vis_quantum(v)  vis_type(v, T_QUANTUM)
 #define vis_surreal(v)  vis_type(v, T_SURREAL)
@@ -403,6 +405,15 @@ typedef struct {
     val_t    args[];   /* flex array of sub-expressions */
 } SymExpr;
 
+/* Symbolic function object: an unknown function f(x,y,...) whose ∂ produces derivative sym-fns */
+typedef struct {
+    Hdr   hdr;
+    val_t name;    /* interned symbol — 'u, 'f, etc. */
+    val_t params;  /* Scheme list of sym-vars (natural variables); V_NIL if none */
+    val_t parent;  /* parent T_SYMFN if this is a derivative of another; V_FALSE otherwise */
+    val_t d_param; /* sym-var this was differentiated w.r.t. (element of parent's params); V_FALSE */
+} SymFn;
+
 /* Quantum superposition: Σᵢ αᵢ|vᵢ⟩
  * data layout: amp0, val0, amp1, val1, ... (2n entries) */
 typedef struct {
@@ -491,6 +502,7 @@ typedef struct {
 #define as_param(v)   vunptr(Parameter,  v)
 #define as_symvar(v)  vunptr(SymVar,      v)
 #define as_symexpr(v) vunptr(SymExpr,     v)
+#define as_symfn(v)   vunptr(SymFn,       v)
 #define as_quantum(v) vunptr(Quantum,     v)
 #define as_surreal(v) vunptr(Surreal,     v)
 #define as_mv(v)      vunptr(Multivector, v)
