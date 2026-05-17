@@ -573,6 +573,55 @@ static val_t prim_fn_apply(int ac, val_t *av, void *ud) {
     return sx_make_apply(av[0], ac - 1, av + 1);
 }
 
+/* ---- D operator (functional derivative) ----
+ *
+ * (D f) → a function g such that (g x) = f'(x).
+ *
+ * Works by applying f to a fresh symbolic variable, differentiating
+ * the resulting expression, and returning a closure that substitutes
+ * a concrete argument for that variable.  All of Curry's numeric tower
+ * participates: (D sin) → cos, (D (lambda (x) (* x x))) → 2x, etc.
+ * Higher-order: (D (D f)) differentiates again through the closure.
+ */
+
+typedef struct { val_t expr; val_t var; } DCapture;
+
+static val_t d_call(int argc, val_t *argv, void *ud) {
+    (void)argc;
+    DCapture *cap = (DCapture *)ud;
+    return sx_substitute(cap->expr, cap->var, argv[0]);
+}
+
+static val_t make_d_closure(val_t expr, val_t var) {
+    DCapture *cap = CURRY_NEW(DCapture);
+    cap->expr = expr;
+    cap->var  = var;
+    Primitive *p  = CURRY_NEW(Primitive);
+    p->hdr.type   = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name       = "D-result";
+    p->min_args   = 1; p->max_args = 1;
+    p->fn         = d_call;
+    p->ud         = cap;
+    return vptr(p);
+}
+
+static val_t prim_D(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)ud;
+    val_t f = argv[0];
+
+    /* Mint a fresh sym-var _D0, _D1, ... as the formal argument */
+    static int d_counter = 0;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "_D%d", d_counter++);
+    val_t var = sx_make_var(sym_intern_cstr(buf));
+
+    /* Apply f to the sym-var — the numeric tower lifts to symbolic */
+    val_t expr = apply_arr(f, 1, &var);
+
+    /* Differentiate and wrap in a substituting closure */
+    return make_d_closure(sx_diff(expr, var), var);
+}
+
 /* ---- Integral transforms ---- */
 static val_t prim_laplace(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return sx_laplace(av[0], av[1], av[2]); }
@@ -626,6 +675,7 @@ void builtins_curry_register(val_t env) {
     DEF("sym-fn?",        prim_sym_fn_p,        1,  1);
     DEF("sym-fn-name",    prim_sym_fn_name,     1,  1);
     DEF("fn-apply",       prim_fn_apply,        1, -1);
+    DEF("D",              prim_D,               1,  1);
     DEF("laplace",        prim_laplace,         3,  3);
     DEF("ilaplace",       prim_ilaplace,        3,  3);
     DEF("fourier",        prim_fourier,         3,  3);

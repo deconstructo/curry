@@ -1096,10 +1096,17 @@ val_t apply(val_t proc, val_t args) {
         port_write_char(PORT_STDERR, '\n');
         return result;
     }
+    if (vis_symfn(proc)) {
+        int n = list_length(args);
+        val_t arr[64];
+        list_to_arr(args, arr, 64);
+        return sx_make_apply(proc, n, arr);
+    }
     scm_raise(V_FALSE, "apply: not a procedure");
 }
 
 val_t apply_arr(val_t proc, int argc, val_t *argv) {
+    if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
         return prim->fn(argc, argv, prim->ud);
