@@ -385,6 +385,17 @@ val_t sx_simplify(val_t expr) {
         if (vis_number(a)) return num_neg(a);
         if (vis_symexpr(a) && as_symexpr(a)->op == SX_NEG)
             return as_symexpr(a)->args[0];
+        /* neg(c * rest) → (-c) * rest — fold into leading numeric */
+        if (vis_symexpr(a) && as_symexpr(a)->op == SX_MUL
+            && as_symexpr(a)->nargs >= 2 && vis_number(as_symexpr(a)->args[0])
+            && !vis_symbolic(as_symexpr(a)->args[0])) {
+            SymExpr *m = as_symexpr(a);
+            val_t neg_c = num_neg(m->args[0]);
+            val_t *na = (val_t *)gc_alloc((size_t)m->nargs * sizeof(val_t));
+            na[0] = neg_c;
+            for (uint32_t k = 1; k < m->nargs; k++) na[k] = m->args[k];
+            return sx_simplify(sx_make_expr(SX_MUL, (int)m->nargs, na));
+        }
     }
 
     /* ---- MUL: fold numerics, strip ones, detect zero ---- */
@@ -407,6 +418,88 @@ val_t sx_simplify(val_t expr) {
             else nsyms[j++] = sa[i];
         }
         if (is_zero(coeff)) return vfix(0);
+
+        /* ---- Collect repeated factors: a*a→a², a²*a³→a⁵ ---- */
+        if (nsym >= 2) {
+            val_t *bases = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            val_t *exps  = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            for (int i = 0; i < nsym; i++) {
+                val_t s = nsyms[i];
+                if (vis_symexpr(s) && as_symexpr(s)->op == SX_EXPT
+                    && as_symexpr(s)->nargs == 2) {
+                    bases[i] = as_symexpr(s)->args[0];
+                    exps[i]  = as_symexpr(s)->args[1];
+                } else {
+                    bases[i] = s;
+                    exps[i]  = vfix(1);
+                }
+            }
+            bool any_merged = false;
+            for (int i = 0; i < nsym; i++) {
+                if (vis_false(bases[i])) continue;
+                for (int k = i + 1; k < nsym; k++) {
+                    if (vis_false(bases[k])) continue;
+                    if (!sx_equal(bases[i], bases[k])) continue;
+                    exps[i]  = sx_add(exps[i], exps[k]);
+                    bases[k] = V_FALSE;
+                    any_merged = true;
+                }
+            }
+            if (any_merged) {
+                int new_n = 0;
+                for (int i = 0; i < nsym; i++) {
+                    if (vis_false(bases[i])) continue;
+                    val_t e = exps[i];
+                    if (is_zero(e)) continue;            /* base^0 = 1 */
+                    if (is_one(e)) nsyms[new_n++] = bases[i];
+                    else nsyms[new_n++] = sx_simplify(sx_expt(bases[i], e));
+                }
+                nsym = new_n;
+                if (nsym == 0) return coeff;
+            }
+        }
+
+        /* ---- Canonical factor order: sym-vars before exprs, lex within ----
+         * This ensures a*b and b*a produce the same node, enabling ADD
+         * like-term detection to work across different creation orders. */
+        if (nsym >= 2) {
+            /* Compute a string sort-key for each factor */
+            char **keys = (char **)gc_alloc((size_t)nsym * sizeof(char *));
+            for (int i = 0; i < nsym; i++) {
+                char kbuf[128];
+                val_t v = nsyms[i];
+                /* Unwrap expt for sorting by base */
+                val_t base = v;
+                if (vis_symexpr(v) && as_symexpr(v)->op == SX_EXPT
+                    && as_symexpr(v)->nargs == 2) base = as_symexpr(v)->args[0];
+                /* Assign sort prefix: 0=symvar, 1=symfn-apply, 2=other */
+                if (vis_symvar(base)) {
+                    Symbol *s = as_sym(as_symvar(base)->name);
+                    snprintf(kbuf, sizeof(kbuf), "0:%.*s", (int)s->len, s->data);
+                } else if (vis_symexpr(base) && as_symexpr(base)->op == SX_APPLY
+                           && as_symexpr(base)->nargs >= 1
+                           && vis_symfn(as_symexpr(base)->args[0])) {
+                    Symbol *fn = as_sym(as_symfn(as_symexpr(base)->args[0])->name);
+                    snprintf(kbuf, sizeof(kbuf), "1:%.*s", (int)fn->len, fn->data);
+                } else if (vis_symexpr(base)) {
+                    Symbol *op = as_sym(as_symexpr(base)->op);
+                    snprintf(kbuf, sizeof(kbuf), "2:%.*s", (int)op->len, op->data);
+                } else {
+                    snprintf(kbuf, sizeof(kbuf), "3:");
+                }
+                keys[i] = gc_alloc(strlen(kbuf) + 1);
+                memcpy(keys[i], kbuf, strlen(kbuf) + 1);
+            }
+            /* Insertion sort (nsym is small in practice) */
+            for (int i = 1; i < nsym; i++) {
+                val_t tv = nsyms[i]; char *tk = keys[i]; int k = i;
+                while (k > 0 && strcmp(keys[k-1], tk) > 0) {
+                    nsyms[k] = nsyms[k-1]; keys[k] = keys[k-1]; k--;
+                }
+                nsyms[k] = tv; keys[k] = tk;
+            }
+        }
+
         if (is_one(coeff)) {
             if (nsym == 1) return nsyms[0];
             /* (a/b) * c → (a*c)/b */
@@ -1429,8 +1522,11 @@ val_t sx_expand(val_t expr) {
     if (op == SX_ADD)
         return sx_simplify(sx_make_expr(SX_ADD, n, ea));
 
-    if (op == SX_SUB && n == 2)
-        return sx_sub(ea[0], ea[1]);
+    if (op == SX_SUB && n == 2) {
+        /* Distribute: A − B  →  A + (−B), pushing neg into sums */
+        val_t neg_b = sx_expand(sx_neg(ea[1]));
+        return sx_simplify(sx_add(ea[0], neg_b));
+    }
 
     /* Push NEG into ADD */
     if (op == SX_NEG && n == 1) {

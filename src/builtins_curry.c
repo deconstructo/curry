@@ -652,6 +652,29 @@ typedef struct { val_t f; intptr_t idx; } PartialFn;
 static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
     PartialFn *cap = (PartialFn *)ud;
     intptr_t i = cap->idx;
+
+    /* SICM-style: single tuple argument — differentiate w.r.t. component i */
+    if (argc == 1 && vis_tuple(argv[0])) {
+        Tuple *tup = as_tuple(argv[0]);
+        uint32_t n = tup->len;
+        if (i < 0 || (uint32_t)i >= n)
+            scm_raise(V_FALSE,
+                "partial: index %ld out of range for tuple of dimension %u", (long)i, n);
+        static int partial_tup_ctr = 0;
+        val_t *syms = (val_t *)gc_alloc(n * sizeof(val_t));
+        for (uint32_t k = 0; k < n; k++) {
+            char buf[32]; snprintf(buf, sizeof(buf), "_∂p%u_%d", k, partial_tup_ctr);
+            syms[k] = sx_make_var(sym_intern_cstr(buf));
+        }
+        partial_tup_ctr++;
+        val_t sym_tup = num_make_tuple((int)tup->hdr.type, n, syms);
+        val_t expr  = apply_arr(cap->f, 1, &sym_tup);
+        val_t deriv = sx_diff(expr, syms[(uint32_t)i]);
+        for (uint32_t k = 0; k < n; k++)
+            deriv = sx_substitute(deriv, syms[k], tup->data[k]);
+        return sx_simplify(deriv);
+    }
+
     if (i < 0 || (intptr_t)argc <= i)
         scm_raise(V_FALSE,
             "partial: index %ld out of range for %d-argument call", (long)i, argc);

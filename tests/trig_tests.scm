@@ -116,7 +116,7 @@
 
 (check-infix "SICM KE simplifies to ½r²ω²"
              (simplify KE)
-             "1/2 * r^2 * omega^2")
+             "1/2 * omega^2 * r^2")
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 5  Interaction with ∂

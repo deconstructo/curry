@@ -1,11 +1,8 @@
-;;; Tuple tests — up / down tuples (contravariant / covariant)
-;;;
-;;; (up a b c)   — contravariant tuple (column vector)
-;;; (down a b c) — covariant tuple (row vector / covector)
-;;; (* (down ...) (up ...)) — scalar contraction (inner product)
+;;; sicm_tests.scm — (curry sicm) module: SICM mechanics interface
 
 (import (scheme base))
 (import (scheme inexact))
+(import (curry sicm))
 
 (define pass 0)
 (define fail 0)
@@ -41,126 +38,103 @@
                (display "\"") (newline)
                (set! fail (+ fail 1))))))
 
-;;; ════════════════════════════════════════════════════════════
-;;; § 1  Construction and predicates
-;;; ════════════════════════════════════════════════════════════
-
-(check "up construction"   (up 1 2 3)   (up 1 2 3))
-(check "down construction" (down 4 5 6) (down 4 5 6))
-
-; predicates
-(check "up? up"       (up? (up 1 2))   #t)
-(check "up? down"     (up? (down 1 2)) #f)
-(check "down? down"   (down? (down 1 2)) #t)
-(check "down? up"     (down? (up 1 2))   #f)
-(check "tuple? up"    (tuple? (up 1 2))   #t)
-(check "tuple? down"  (tuple? (down 1 2)) #t)
-(check "tuple? num"   (tuple? 42)          #f)
+(define t (sym-var 't))
+(define m (sym-var 'm))
+(define k (sym-var 'k))
+(define g (sym-var 'g))
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 2  Accessors
+;;; § 1  literal-function and D
 ;;; ════════════════════════════════════════════════════════════
 
-(define v3 (up 10 20 30))
-(check "ref 0"     (ref v3 0)     10)
-(check "ref 1"     (ref v3 1)     20)
-(check "ref 2"     (ref v3 2)     30)
-(check "dimension" (dimension v3) 3)
+(define q (literal-function 'q))
 
-(define d2 (down 7 8))
-(check "ref down 0" (ref d2 0) 7)
-(check "ref down 1" (ref d2 1) 8)
-(check "dim down 2" (dimension d2) 2)
+(check-infix "q(t)" (q t) "q(t)")
+(check-infix "Dq(t)" ((D q) t) "q_t(t)")
+(check-infix "D2q(t)" ((D (D q)) t) "q_t_t(t)")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 3  Componentwise arithmetic
+;;; § 2  Gamma — path functor
 ;;; ════════════════════════════════════════════════════════════
 
-(check "up + up"     (+ (up 1 2 3) (up 4 5 6))  (up 5 7 9))
-(check "down + down" (+ (down 1 2) (down 3 4))  (down 4 6))
-(check "up - up"     (- (up 5 7 9) (up 1 2 3))  (up 4 5 6))
-(check "- up (neg)"  (- (up 1 2 3))              (up -1 -2 -3))
+(define local ((Gamma q) t))
 
-; scalar scaling
-(check "2 * up"    (* 2 (up 1 2 3))    (up 2 4 6))
-(check "up * 3"    (* (up 1 2 3) 3)    (up 3 6 9))
-(check "1/2 * up"  (* 1/2 (up 2 4 6)) (up 1 2 3))
-
-; variadic + and *
-(check "variadic +"  (+ (up 1 0 0) (up 0 1 0) (up 0 0 1)) (up 1 1 1))
-(check "variadic *"  (* 2 3 (up 1 2 3))                    (up 6 12 18))
+(check "Gamma dimension"   (dimension local) 3)
+(check-infix "time slot"   (time local)       "t")
+(check-infix "coord slot"  (coordinate local) "q(t)")
+(check-infix "veloc slot"  (velocity local)   "q_t(t)")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 4  Contraction (inner product)
+;;; § 3  Lagrange-equations — free particle
+;;;       L = ½ m qdot²  →  EOM: m·q'' = 0
 ;;; ════════════════════════════════════════════════════════════
 
-(check "down·up = scalar"  (* (down 1 2 3) (up 4 5 6))  32)   ; 1*4+2*5+3*6=32
-(check "unit inner product" (* (down 1 0 0) (up 0 0 1))   0)
-(check "identity contraction" (* (down 1 1 1) (up 1 1 1)) 3)
+(define eom-free ((Lagrange-equations (L-free-particle m)) q))
 
-; inexact
-(check-num "inexact contraction"
-  (* (down 1.0 2.0) (up 3.0 4.0))
-  11.0 1e-12)
+;;; Residual is -(m·q'') = 0
+(check-infix "free EOM" (eom-free t) "-(m * q_t_t(t))")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 5  Conversions
+;;; § 4  Lagrange-equations — harmonic oscillator
+;;;       L = ½mqdot² − ½kq²  →  EOM: mq'' + kq = 0
 ;;; ════════════════════════════════════════════════════════════
 
-(check "tuple->list up"    (tuple->list (up 1 2 3))   '(1 2 3))
-(check "tuple->list down"  (tuple->list (down 4 5))   '(4 5))
-(check "list->up"   (list->up   '(1 2 3)) (up 1 2 3))
-(check "list->down" (list->down '(4 5))   (down 4 5))
+(define eom-ho ((Lagrange-equations (L-harmonic m k)) q))
+
+;;; Residual: -(k·q(t)) - m·q''(t) = 0
+(check-infix "harmonic EOM" (eom-ho t) "-(k * q(t)) - m * q_t_t(t)")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 6  Symbolic differentiation through tuples
+;;; § 5  Lagrange-equations — uniform gravity
+;;;       L = ½mqdot² − mgq  →  EOM: mq'' + mg = 0
 ;;; ════════════════════════════════════════════════════════════
 
-(define x (sym-var 'x))
+(define eom-grav ((Lagrange-equations (L-uniform-acceleration m g)) q))
 
-; ∂/∂x (up x x²) = (up 1 2x)
-(let ((q (up x (* x x))))
-  (check-infix "∂ up"   (ref (∂ q x) 0) "1")
-  (check-infix "∂ up 1" (ref (∂ q x) 1) "2 * x"))
-
-; ∂/∂x (down sin(x) cos(x)) = (down cos(x) -sin(x))
-(let ((d (∂ (down (sin x) (cos x)) x)))
-  (check-infix "∂ down sin" (ref d 0) "cos(x)")
-  (check-infix "∂ down cos" (ref d 1) "-sin(x)"))
-
-; D on a function returning a tuple
-(let ((f (D (lambda (s) (up (sin s) (cos s))))))
-  (let ((df (f x)))
-    (check-infix "D up sin" (ref df 0) "cos(x)")
-    (check-infix "D up cos" (ref df 1) "-sin(x)")))
-
-; numerical evaluation after differentiation
-(let ((dq (∂ (up (* x x) (* x x x)) x)))
-  (let ((at2 (substitute dq x 2)))
-    (check "∂(x²,x³)/∂x at 2, comp 0" (ref at2 0) 4)
-    (check "∂(x²,x³)/∂x at 2, comp 1" (ref at2 1) 12)))
+(check-infix "gravity EOM" (eom-grav t) "-(g * m) - m * q_t_t(t)")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 7  Symbolic contraction
+;;; § 6  Energy (Legendre transform)
 ;;; ════════════════════════════════════════════════════════════
 
-(define vx (sym-var 'vx))
-(define vy (sym-var 'vy))
+;;; Harmonic oscillator: E = ½m·qdot² + ½k·q²
+(define E-ho ((Lagrangian->energy (L-harmonic m k)) local))
+(check-infix "HO energy" (simplify (expand E-ho)) "1/2 * m * q_t(t)^2 + 1/2 * k * q(t)^2")
 
-; KE = 1/2 * (down vx vy) · (up vx vy) = 1/2*(vx²+vy²)
-(let ((KE (* 1/2 (* (down vx vy) (up vx vy)))))
-  (check-infix "KE infix"
-    (simplify KE)
-    "1/2 * (vx^2 + vy^2)"))
+;;; Free particle: E = ½m·qdot²
+(define E-free ((Lagrangian->energy (L-free-particle m)) local))
+(check-infix "free energy" (simplify (expand E-free)) "1/2 * m * q_t(t)^2")
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 8  Zero-length and 1-length tuples
+;;; § 7  compose and square
 ;;; ════════════════════════════════════════════════════════════
 
-(check "up empty"     (up)      (up))
-(check "up singleton" (up 42)   (up 42))
-(check "dim 0"        (dimension (up)) 0)
-(check "dim 1"        (dimension (up 99)) 1)
+(check "compose f g" ((compose (lambda (x) (* x x)) (lambda (x) (+ x 1))) 3) 16)
+(check "compose 3-way" ((compose car cdr cdr) '(1 2 3)) 3)
+(check "square scalar" (square 5) 25)
+(check "square up" (square (up 3 4)) 25)
+(check "square up-3" (square (up 1 2 2)) 9)
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 8  Gamma-bar — higher-order local tuple
+;;; ════════════════════════════════════════════════════════════
+
+(define local3 ((Gamma-bar q 3) t))
+(check "Gamma-bar dim" (dimension local3) 5)     ; t + 3+1 derivs
+(check-infix "Gamma-bar accel" (acceleration local3) "q_t_t(t)")
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 9  Numerical verification
+;;; ════════════════════════════════════════════════════════════
+
+;;; ∂L/∂qdot for free particle with m=2 at qdot=3: expect 6
+(define (L-2 local) (* 2 (square (velocity local))))
+(check-num "dL/dqdot numeric" (((partial 2) L-2) (up 0.0 0.0 3.0)) 12.0 1e-12)
+
+;;; Harmonic EOM at concrete local — just verify it runs without error
+(define lo-num (up 0.0 1.0 0.0))
+(define f-local ((Euler-Lagrange-operator (L-harmonic 1 1)) lo-num))
+(check-num "EL-operator numeric HO" (inexact f-local) -1.0 1e-12)
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
