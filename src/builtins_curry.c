@@ -633,6 +633,88 @@ static val_t prim_list_to_down(int argc, val_t *argv, void *ud) {
     return num_make_tuple(T_DOWN, k, buf);
 }
 
+/* ---- partial operator (partial derivative by argument index) ----
+ *
+ * (partial i) → an operator P such that (P f) is a function g where
+ * (g a0 a1 ... an-1) = ∂f/∂aᵢ evaluated at (a0, ..., an-1).
+ *
+ * Works by minting a fresh sym-var for argument i, applying f with that
+ * substituted, differentiating symbolically, then substituting the actual
+ * argument back.  Concrete numeric results are returned for concrete args.
+ *
+ * Typical SICM usage:  ((partial 2) L) — returns ∂L/∂qdot as a function.
+ */
+
+typedef struct { val_t f; intptr_t idx; } PartialFn;
+
+static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
+    PartialFn *cap = (PartialFn *)ud;
+    intptr_t i = cap->idx;
+    if (i < 0 || (intptr_t)argc <= i)
+        scm_raise(V_FALSE,
+            "partial: index %ld out of range for %d-argument call", (long)i, argc);
+
+    static int partial_counter = 0;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "_∂%d", partial_counter++);
+    val_t var = sx_make_var(sym_intern_cstr(buf));
+
+    /* Build arg list with argv[i] replaced by fresh sym-var */
+    val_t *args2 = (val_t *)gc_alloc((size_t)argc * sizeof(val_t));
+    for (int j = 0; j < argc; j++) args2[j] = argv[j];
+    val_t orig  = args2[(uint32_t)i];
+    args2[(uint32_t)i] = var;
+
+    /* Apply f, differentiate, substitute original back */
+    val_t expr   = apply_arr(cap->f, argc, args2);
+    val_t dexpr  = sx_diff(expr, var);
+    return sx_substitute(dexpr, var, orig);
+}
+
+static val_t make_partial_fn(val_t f, intptr_t idx) {
+    PartialFn *cap   = CURRY_NEW(PartialFn);
+    cap->f           = f;
+    cap->idx         = idx;
+    Primitive *p     = CURRY_NEW(Primitive);
+    p->hdr.type      = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name          = "partial-derivative";
+    p->min_args      = 0; p->max_args = -1;
+    p->fn            = partial_fn_call;
+    p->ud            = cap;
+    return vptr(p);
+}
+
+typedef struct { intptr_t idx; } PartialOp;
+
+static val_t partial_op_call(int argc, val_t *argv, void *ud) {
+    (void)argc;
+    PartialOp *op = (PartialOp *)ud;
+    return make_partial_fn(argv[0], op->idx);
+}
+
+static val_t prim_partial(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    if (!vis_fixnum(argv[0]))
+        scm_raise(V_FALSE, "partial: argument must be an exact integer index");
+    intptr_t i = vunfix(argv[0]);
+
+    /* 1-arg form: (partial i) → operator that takes f */
+    if (argc == 1) {
+        PartialOp *op    = CURRY_NEW(PartialOp);
+        op->idx          = i;
+        Primitive *p     = CURRY_NEW(Primitive);
+        p->hdr.type      = T_PRIMITIVE; p->hdr.flags = 0;
+        p->name          = "partial-op";
+        p->min_args      = 1; p->max_args = 1;
+        p->fn            = partial_op_call;
+        p->ud            = op;
+        return vptr(p);
+    }
+
+    /* 2-arg form: (partial i f) → the operator applied to f immediately */
+    return make_partial_fn(argv[1], i);
+}
+
 /* ---- D operator (functional derivative) ----
  *
  * (D f) → a function g such that (g x) = f'(x).
@@ -746,6 +828,7 @@ void builtins_curry_register(val_t env) {
     DEF("tuple->list",    prim_tuple_to_list,   1, 1);
     DEF("list->up",       prim_list_to_up,      1, 1);
     DEF("list->down",     prim_list_to_down,    1, 1);
+    DEF("partial",        prim_partial,          1,  2);
     DEF("D",              prim_D,               1,  1);
     DEF("laplace",        prim_laplace,         3,  3);
     DEF("ilaplace",       prim_ilaplace,        3,  3);

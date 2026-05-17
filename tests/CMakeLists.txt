@@ -11,10 +11,11 @@ add_test(NAME ode            COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/ode_tests
 add_test(NAME pde_numerical COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/pde_numerical_tests.scm)
 add_test(NAME d_operator    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/d_operator_tests.scm)
 add_test(NAME tuples        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/tuple_tests.scm)
+add_test(NAME partial       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/partial_tests.scm)
 
 # Module tests need the build-tree module directory on the search path
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
-set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples PROPERTIES
+set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 
 if(BUILD_MODULE_GIT AND TARGET curry_git)
