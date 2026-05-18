@@ -1,5 +1,25 @@
 # Changelog
 
+### 0.8.7 — VM robustness and BcClosure interop
+
+**VM safety**
+
+- Value stack overflow (`PUSH` with > 4096 entries) now raises a proper Scheme
+  error instead of silently writing past the stack array.
+- Call-frame overflow (> 256 nested calls) now raises a Scheme error at both the
+  `vm_run` entry point and the `OP_CALL` dispatch site; previously the check
+  printed to stderr and returned `void` without unwinding.
+
+**BcClosure interoperability**
+
+- `procedure?` now returns `#t` for compiled (`BcClosure`) procedures.  Previously
+  only tree-walker closures, primitives, continuations, and traced values were
+  recognised.
+- `apply_arr` (the cross-engine dispatch used by `apply`, `map`, `for-each`, etc.)
+  now correctly handles `BcClosure` callees by pushing arguments onto the VM stack
+  and delegating to `vm_run`.  Previously a compiled lambda passed to `map` would
+  raise "not a procedure".
+
 ### 0.8.6 — Bytecode compiler and VM
 
 Curry now executes via a **stack-based bytecode VM** instead of the
