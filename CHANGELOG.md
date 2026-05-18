@@ -1,5 +1,70 @@
 # Changelog
 
+### 0.8.6 — Bytecode compiler and VM
+
+Curry now executes via a **stack-based bytecode VM** instead of the
+tree-walking interpreter.  All top-level evaluation — REPL, `-e`, file
+load — goes through the new pipeline.
+
+**Compiler** (`src/compiler.c`)
+
+- Single-pass AST → `Chunk` bytecode compiler; each `lambda` produces one
+  `Chunk` object with a constant pool, byte stream, and line table.
+- Variable resolution at compile time: local → upvalue → global.  Upvalue
+  capture marks enclosing locals and emits `[is_local, index]` capture
+  descriptors after `OP_CLOSURE`.
+- Lambda bodies pre-scanned for internal `(define …)` forms; pre-declared
+  with a sentinel depth of `-1` giving **letrec\*** semantics.
+- All scope-forming constructs (`let`, `let*`, `letrec`, `do`, named `let`)
+  compiled as **lambda calls** rather than inlined scopes, preventing
+  slot-index collisions when they appear as call arguments.
+- Full special-form coverage: `quote`, `if`, `begin`, `define`, `set!`,
+  `lambda`, `let`, `let*`, `letrec`, `letrec*`, named `let`, `and`, `or`,
+  `cond` (including `=>`), `when`, `unless`, `do`, `values`, `apply`.
+- Akkadian/cuneiform synonyms translated via `akk_translate()` before
+  dispatch — Akkadian source compiles identically to its English equivalent.
+
+**VM** (`src/vm.c`, `src/vm.h`)
+
+- Flat value stack of `val_t` (`VM_STACK_MAX` = 4096); call stack of
+  `CallFrame` (`VM_FRAMES_MAX` = 256).
+- Calling convention: callee at `slots[-1]`, args at `slots[0..N-1]`.
+  `OP_RETURN` replaces the callee+args window with the result.
+- **Tail-call optimisation**: `OP_TAIL_CALL` reuses the current `CallFrame`
+  for `BcClosure` callees — `memmove` args over slots, reset `ip`.
+  Non-`BcClosure` callables tail-call via `apply_arr()`.
+- **Upvalue protocol** (same as Lua 5): open upvalues point into the live
+  stack; `vm_close_upvalues` copies them to `Upvalue.closed` on scope exit.
+- `OP_CLOSE_UP A` closes the upvalue for `frame->slots[A]` without popping.
+  `OP_SLIDE N` drops N locals below TOS in one step (scope-exit cleanup).
+- `vm_reset()` sanitises stack state after a caught exception.
+- Interoperability: primitives and tree-walker closures are dispatched
+  via `apply_arr()`; both engines share `GLOBAL_ENV`.
+
+**Opcode set** (`src/opcode.h`, `src/chunk.c`)
+
+70 opcodes covering constants, locals, globals, upvalues, stack
+manipulation, full numeric tower arithmetic, comparison, pairs/lists,
+strings/chars, type predicates, vectors, control flow, calls, closures,
+apply/values, exception handling, and I/O.  New opcodes: `OP_SLIDE`
+(scope cleanup) and a corrected `OP_CLOSE_UP` (slot-addressed, non-popping).
+
+**Bug fixes during development**
+
+- `end_compiler` was emitting `OP_VOID` before `OP_RETURN`, causing all
+  lambdas to return void.
+- `OP_JUMP_FALSE` / `OP_JUMP_TRUE` always pop their condition; spurious
+  `OP_POP` instructions after them in `compile_cond`, `compile_when`, and
+  `compile_unless` were removed.
+- `cond =>` clause now `DUP`s the test before `JUMP_FALSE` so the test
+  value survives the pop for the `(proc test)` call.
+
+**Documentation**
+
+`docs/vm.md` — full architecture reference: calling convention, TCO,
+upvalue open/closed protocol, compiler scope model, special-form
+compilation strategies, complete opcode table, known limitations.
+
 ### 0.8.5 — Quaternion trig, non-commutative CAS, Akkadian expansion
 
 **Quaternion numeric tower — transcendental functions**
