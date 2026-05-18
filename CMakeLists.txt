@@ -87,6 +87,7 @@ find_path(READLINE_INCLUDE NAMES readline/readline.h)
 
 set(CORE_SOURCES
   src/gc.c
+  src/chunk.c
   src/symbol.c
   src/numeric.c
   src/port.c
@@ -106,6 +107,8 @@ set(CORE_SOURCES
   src/matrix.c
   src/syntax_rules.c
   src/profiling.c
+  src/compiler.c
+  src/vm.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})
