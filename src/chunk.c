@@ -48,6 +48,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_POP]            = "POP",
     [OP_DUP]            = "DUP",
     [OP_SWAP]           = "SWAP",
+    [OP_SLIDE]          = "SLIDE",
     [OP_ADD]            = "ADD",
     [OP_SUB]            = "SUB",
     [OP_MUL]            = "MUL",
@@ -191,7 +192,8 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_LOAD_UP: case OP_STORE_UP:
     case OP_CALL: case OP_TAIL_CALL:
     case OP_CLOSURE: case OP_CLOSE_UP:
-    case OP_VALUES: case OP_MAKEVEC: case OP_APPLY: {
+    case OP_VALUES: case OP_MAKEVEC: case OP_APPLY:
+    case OP_SLIDE: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||

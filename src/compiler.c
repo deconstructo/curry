@@ -60,6 +60,7 @@
 #include "env.h"
 #include "eval.h"
 #include "vm.h"
+#include "builtins.h"
 #include "akkadian_eval.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
@@ -110,8 +111,9 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
 }
 
 static Chunk *end_compiler(Compiler *c) {
-    /* Implicit (void) return if body didn't tail-return */
-    chunk_emit(c->chunk, OP_VOID,   0);
+    /* Return whatever the body left on the stack (compile_seq always leaves
+       one value; for tail-called BcClosures the frame is reused so OP_RETURN
+       here is dead code, but it still needs to be well-formed). */
     chunk_emit(c->chunk, OP_RETURN, 0);
     c->chunk->upval_count = c->upval_count;
     return c->chunk;
@@ -160,14 +162,18 @@ static void begin_scope(Compiler *c) { c->scope_depth++; }
 
 static void end_scope(Compiler *c, int line) {
     c->scope_depth--;
+    int n = 0;
     while (c->local_count > 0 &&
            c->locals[c->local_count - 1].depth > c->scope_depth) {
         if (c->locals[c->local_count - 1].captured)
-            emit(c, OP_CLOSE_UP, line);
-        else
-            emit(c, OP_POP, line);
+            /* Close the upvalue for this specific slot without popping. */
+            emit_ab(c, OP_CLOSE_UP, (uint8_t)(c->local_count - 1), line);
         c->local_count--;
+        n++;
     }
+    /* Slide TOS (the scope's result) past all the local slots below it. */
+    if (n > 0)
+        emit_ab(c, OP_SLIDE, (uint8_t)n, line);
 }
 
 static int add_local(Compiler *c, val_t name) {
@@ -440,136 +446,174 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
-    /* Named let: (let loop ((x v) ...) body) */
+    /* Named let: (let loop ((x v) ...) body)
+       Semantics: letrec ((loop (lambda (x ...) body))) (loop v ...)
+
+       Compiled as a zero-arg outer wrapper to isolate the loop's frame:
+         outer-wrapper:
+           slot 0 = loop (void initially, then the closure)
+           push void placeholder
+           push OP_CLOSURE for loop (captures slot 0 as upvalue)
+           OP_STORE_LOCAL 0        ; slot 0 = closure
+           OP_LOAD_LOCAL 0         ; push closure as callee
+           compile each init value  ; push args
+           OP_TAIL_CALL N          ; jump into the loop
+         parent: OP_CLOSURE outer-wrapper; OP_CALL/OP_TAIL_CALL 0 */
     if (vis_symbol(bindings)) {
         val_t loop_name = bindings;
         bindings = vcar(body);
         body     = vcdr(body);
 
-        /* Collect init values before declaring locals */
+        int argc = 0;
         val_t b = bindings;
+        while (vis_pair(b)) { argc++; b = vcdr(b); }
+
+        /* Build forward-order params list */
+        val_t params = V_NIL;
+        b = bindings;
+        while (vis_pair(b)) { params = scm_cons(vcar(vcar(b)), params); b = vcdr(b); }
+        val_t fwd = V_NIL;
+        while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
+
+        /* Zero-arg outer wrapper */
+        Compiler outer;
+        init_compiler(&outer, c, as_sym(loop_name)->data);
+        outer.chunk->arity = 0;
+
+        /* Slot 0 = loop name (void placeholder) */
+        add_local(&outer, loop_name);
+        mark_initialised(&outer);
+        emit(&outer, OP_VOID, line);
+
+        /* Inner loop lambda; loop_name resolves as upvalue from outer's slot 0 */
+        compile_lambda(&outer, fwd, body, as_sym(loop_name)->data, line);
+        emit_ab(&outer, OP_STORE_LOCAL, 0, line);  /* store closure → slot 0 */
+        emit_ab(&outer, OP_LOAD_LOCAL,  0, line);  /* callee */
+        b = bindings;
+        while (vis_pair(b)) {
+            compile(&outer, vcar(vcdr(vcar(b))), false, line);
+            b = vcdr(b);
+        }
+        emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, line);
+        Chunk *och = end_compiler(&outer);
+
+        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
+        emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
+        for (int i = 0; i < outer.upval_count; i++) {
+            chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, line);
+            chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   line);
+        }
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
+        return;
+    }
+
+    /* Plain let: compile as ((lambda (x y ...) body) v_x v_y ...)
+       The lambda creates a fresh frame, so slot 0 = first init arg
+       regardless of what else is on the caller's stack. */
+    {
+        /* Build params list in forward order */
+        val_t params = V_NIL;
+        int argc = 0;
+        val_t b = bindings;
+        while (vis_pair(b)) { params = scm_cons(vcar(vcar(b)), params); argc++; b = vcdr(b); }
+        val_t fwd = V_NIL;
+        while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
+
+        /* Closure pushed first (callee), then init values */
+        compile_lambda(c, fwd, body, NULL, line);
+        b = bindings;
         while (vis_pair(b)) {
             compile(c, vcar(vcdr(vcar(b))), false, line);
             b = vcdr(b);
         }
-
-        /* Build a self-referential closure */
-        Compiler lc;
-        init_compiler(&lc, c, as_sym(loop_name)->data);
-        b = bindings;
-        while (vis_pair(b)) {
-            val_t param = vcar(vcar(b));
-            add_local(&lc, param);
-            mark_initialised(&lc);
-            b = vcdr(b);
-        }
-        lc.chunk->arity = lc.local_count;
-
-        /* Body of named-let loop — loop_name is a local referencing the closure */
-        add_local(&lc, loop_name);
-        mark_initialised(&lc);
-        compile_seq(&lc, body, true, line);
-        Chunk *lch = end_compiler(&lc);
-
-        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)lch);
-        emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
-        for (int i = 0; i < lc.upval_count; i++) {
-            chunk_emit(c->chunk, lc.upvals[i].is_local ? 1 : 0, line);
-            chunk_emit(c->chunk, (uint8_t)lc.upvals[i].index,   line);
-        }
-
-        /* Now call it with the init values already on stack */
-        int argc = 0;
-        b = bindings; while (vis_pair(b)) { argc++; b = vcdr(b); }
-        /* Stack: [v1 v2 ... vN closure] — need to reorder */
-        /* Actually: emit closure first then call with arity */
-        /* Simpler: put closure first, then args */
-        /* We emitted args first above — put closure below them via DUP trick */
-        /* Cleanest: just call (TAIL_CALL if tail) */
-        if (tail) emit_ab(c, OP_TAIL_CALL, (uint8_t)argc, line);
-        else      emit_ab(c, OP_CALL,      (uint8_t)argc, line);
-        return;
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, line);
     }
-
-    begin_scope(c);
-
-    /* Evaluate all init expressions BEFORE declaring locals (parallel binding) */
-    val_t b = bindings;
-    while (vis_pair(b)) {
-        val_t binding = vcar(b);
-        val_t init    = vcar(vcdr(binding));
-        compile(c, init, false, line);
-        b = vcdr(b);
-    }
-
-    /* Now declare locals (values already on stack in order) */
-    b = bindings;
-    while (vis_pair(b)) {
-        val_t binding = vcar(b);
-        val_t name    = vcar(binding);
-        add_local(c, name);
-        mark_initialised(c);
-        b = vcdr(b);
-    }
-
-    compile_seq(c, body, tail, line);
-    end_scope(c, line);
 }
 
 static void compile_let_star(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
-    begin_scope(c);
-    val_t b = bindings;
-    while (vis_pair(b)) {
-        val_t binding = vcar(b);
-        val_t name    = vcar(binding);
-        val_t init    = vcar(vcdr(binding));
-        compile(c, init, false, line);
-        add_local(c, name);
-        mark_initialised(c);
-        b = vcdr(b);
+    /* Compile as nested single-binding lambdas:
+       (let* ((x v) rest...) body) → ((lambda (x) (let* rest... body)) v)
+       This avoids slot-index mismatches when let* appears as a call argument. */
+    if (vis_nil(bindings)) {
+        compile_seq(c, body, tail, line);
+        return;
     }
-    compile_seq(c, body, tail, line);
-    end_scope(c, line);
+    val_t binding  = vcar(bindings);
+    val_t name     = vcar(binding);
+    val_t init     = vcar(vcdr(binding));
+    val_t rest     = vcdr(bindings);
+    /* Build inner let*: (let* rest... body) as the lambda body.
+       We nest it by constructing a synthetic list form. */
+    val_t inner_body;
+    if (vis_nil(rest)) {
+        inner_body = body;
+    } else {
+        /* Construct (let* rest body) as a list to pass to compile_seq */
+        val_t let_star_sym = sym_intern_cstr("let*");
+        val_t inner_form   = scm_cons(let_star_sym,
+                                      scm_cons(rest, body));
+        inner_body = scm_cons(inner_form, V_NIL);
+    }
+    val_t params = scm_cons(name, V_NIL);
+    compile_lambda(c, params, inner_body, NULL, line);
+    compile(c, init, false, line);
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
 }
 
 static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
-    begin_scope(c);
+    /* Wrap in a zero-arg lambda to get a clean frame, so slot 0 = first
+       letrec binding regardless of what is already on the caller's stack. */
+    Compiler lc;
+    init_compiler(&lc, c, "<letrec>");
+    lc.chunk->arity = 0;
+
+    begin_scope(&lc);
+
+    /* Count bindings */
+    int nb = 0;
+    val_t bcount = bindings;
+    while (vis_pair(bcount)) { nb++; bcount = vcdr(bcount); }
 
     /* Pre-declare all locals with void placeholders */
     val_t b = bindings;
     while (vis_pair(b)) {
         val_t name = vcar(vcar(b));
-        add_local(c, name);
-        mark_initialised(c);
-        emit(c, OP_VOID, line);   /* placeholder on stack */
+        add_local(&lc, name);
+        mark_initialised(&lc);
+        emit(&lc, OP_VOID, line);
         b = vcdr(b);
     }
 
-    /* Now compile and store each init (they can reference each other) */
-    b = bindings;
-    int slot = c->local_count - c->upval_count;
-    /* find the starting slot */
-    val_t bcount = bindings; int nb = 0;
-    while (vis_pair(bcount)) { nb++; bcount = vcdr(bcount); }
-    int base_slot = c->local_count - nb;
+    int base_slot = lc.local_count - nb;
 
-    b = bindings; int i = 0;
+    /* Compile and store each init (they can reference each other via upvalues) */
+    b = bindings;
+    int i = 0;
     while (vis_pair(b)) {
         val_t init = vcar(vcdr(vcar(b)));
-        compile(c, init, false, line);
-        emit_ab(c, OP_STORE_LOCAL, (uint8_t)(base_slot + i), line);
+        compile(&lc, init, false, line);
+        emit_ab(&lc, OP_STORE_LOCAL, (uint8_t)(base_slot + i), line);
         b = vcdr(b); i++;
     }
-    (void)slot;
 
-    compile_seq(c, body, tail, line);
-    end_scope(c, line);
+    compile_seq(&lc, body, true, line);
+    end_scope(&lc, line);
+
+    Chunk *lch = end_compiler(&lc);
+
+    int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)lch);
+    emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
+    for (int k = 0; k < lc.upval_count; k++) {
+        chunk_emit(c->chunk, lc.upvals[k].is_local ? 1 : 0, line);
+        chunk_emit(c->chunk, (uint8_t)lc.upvals[k].index, line);
+    }
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
 
 static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
@@ -607,17 +651,22 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
         val_t S_ARROW = sym_intern_cstr("=>");
         if (vis_pair(exprs) && vcar(exprs) == S_ARROW && vis_pair(vcdr(exprs))) {
             val_t proc = vcar(vcdr(exprs));
+            /* DUP so test value survives the JUMP_FALSE pop */
+            emit(c, OP_DUP, line);
             int skip = emit_jump(c, OP_JUMP_FALSE, line);
+            /* truthy: original test is on stack; push proc and swap */
             compile(c, proc, false, line);
-            emit(c, OP_SWAP, line);   /* proc result→ (proc test) */
+            emit(c, OP_SWAP, line);   /* (proc test) */
             emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
             if (!last) end_patches[np++] = emit_jump(c, OP_JUMP, line);
             patch_jump(c, skip);
+            /* #f path: JUMP_FALSE already popped dup; original #f is on stack */
+            emit(c, OP_POP, line);
             continue;
         }
 
         int skip = emit_jump(c, OP_JUMP_FALSE, line);
-        emit(c, OP_POP, line);   /* discard test value */
+        /* JUMP_FALSE already popped the test — no OP_POP needed */
         compile_seq(c, exprs, tail && last, line);
         if (!last) end_patches[np++] = emit_jump(c, OP_JUMP, line);
         patch_jump(c, skip);
@@ -633,11 +682,11 @@ static void compile_when(Compiler *c, val_t args, bool tail, int line) {
     val_t body = vcdr(args);
     compile(c, test, false, line);
     int skip = emit_jump(c, OP_JUMP_FALSE, line);
-    emit(c, OP_POP, line);
+    /* JUMP_FALSE already popped test; compile body for truthy path */
     compile_seq(c, body, tail, line);
     int end = emit_jump(c, OP_JUMP, line);
     patch_jump(c, skip);
-    emit(c, OP_POP,  line);
+    /* #f path: test already popped, push void */
     emit(c, OP_VOID, line);
     patch_jump(c, end);
 }
@@ -647,53 +696,57 @@ static void compile_unless(Compiler *c, val_t args, bool tail, int line) {
     val_t body = vcdr(args);
     compile(c, test, false, line);
     int skip = emit_jump(c, OP_JUMP_TRUE, line);
-    emit(c, OP_POP, line);
+    /* JUMP_TRUE already popped test; compile body for #f path */
     compile_seq(c, body, tail, line);
     int end = emit_jump(c, OP_JUMP, line);
     patch_jump(c, skip);
-    emit(c, OP_POP,  line);
+    /* truthy path: test already popped, push void */
     emit(c, OP_VOID, line);
     patch_jump(c, end);
 }
 
 static void compile_do(Compiler *c, val_t args, bool tail, int line) {
-    /* (do ((var init step) ...) (test expr...) body...) */
+    /* (do ((var init step) ...) (test expr...) body...)
+       Wrap in a zero-arg lambda so do vars start at slot 0, avoiding
+       slot-index conflicts when do appears as a call argument. */
     val_t var_specs = vcar(args);
     val_t term      = vcar(vcdr(args));
     val_t body      = vcdr(vcdr(args));
     val_t test_expr = vcar(term);
     val_t result    = vcdr(term);
 
-    begin_scope(c);
+    Compiler lc;
+    init_compiler(&lc, c, "<do>");
+    lc.chunk->arity = 0;
+    Compiler *d = &lc;       /* alias so the rest of the function is readable */
+    begin_scope(d);
 
     /* Evaluate and bind init values */
     val_t vs = var_specs;
     while (vis_pair(vs)) {
         val_t spec = vcar(vs);
         val_t init = vcar(vcdr(spec));
-        compile(c, init, false, line);
-        add_local(c, vcar(spec));
-        mark_initialised(c);
+        compile(d, init, false, line);
+        add_local(d, vcar(spec));
+        mark_initialised(d);
         vs = vcdr(vs);
     }
 
     /* Loop head */
-    int loop_start = chunk_pos(c->chunk);
+    int loop_start = chunk_pos(d->chunk);
 
-    /* Test */
-    compile(c, test_expr, false, line);
-    int exit_jmp = emit_jump(c, OP_JUMP_TRUE, line);
-    emit(c, OP_POP, line);
+    /* Test — OP_JUMP_TRUE pops its condition in both branches */
+    compile(d, test_expr, false, line);
+    int exit_jmp = emit_jump(d, OP_JUMP_TRUE, line);
 
-    /* Body */
+    /* Body (loop-continues path) */
     vs = body;
     while (vis_pair(vs)) {
         val_t next = vcdr(vs);
-        compile(c, vcar(vs), false, line);
-        if (!vis_nil(next)) emit(c, OP_POP, line);
+        compile(d, vcar(vs), false, line);
+        emit(d, OP_POP, line);   /* discard body expression results */
         vs = next;
     }
-    if (!vis_nil(body)) emit(c, OP_POP, line);
 
     /* Compute all step values first (so they don't see their own update) */
     int nv = 0;
@@ -704,29 +757,35 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     while (vis_pair(vs)) {
         val_t spec = vcar(vs);
         val_t step = vis_pair(vcdr(vcdr(spec))) ? vcar(vcdr(vcdr(spec))) : vcar(spec);
-        compile(c, step, false, line);
+        compile(d, step, false, line);
         vs = vcdr(vs);
     }
-    /* Stack now has: ... [local_0 .. local_nv-1] [step_0 .. step_nv-1]
-       Store in reverse order: top-of-stack (step_nv-1) → local[base+nv-1] etc. */
-    int base = c->local_count - nv;
+    int base = d->local_count - nv;
     for (int i = nv - 1; i >= 0; i--)
-        emit_ab(c, OP_STORE_LOCAL, (uint8_t)(base + i), line);
+        emit_ab(d, OP_STORE_LOCAL, (uint8_t)(base + i), line);
 
     /* Jump back to loop head */
-    int back = emit_jump(c, OP_JUMP, line);
-    chunk_patch16(c->chunk, back, (uint16_t)loop_start);
+    int back = emit_jump(d, OP_JUMP, line);
+    chunk_patch16(d->chunk, back, (uint16_t)loop_start);
 
-    /* Exit: test was true, test value on stack */
-    patch_jump(c, exit_jmp);
-    emit(c, OP_POP, line);   /* discard test */
+    /* Exit (condition already popped by JUMP_TRUE) */
+    patch_jump(d, exit_jmp);
 
     if (vis_nil(result))
-        emit(c, OP_VOID, line);
+        emit(d, OP_VOID, line);
     else
-        compile_seq(c, result, tail, line);
+        compile_seq(d, result, true, line);
 
-    end_scope(c, line);
+    end_scope(d, line);
+
+    Chunk *dch = end_compiler(d);
+    int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)dch);
+    emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
+    for (int k = 0; k < lc.upval_count; k++) {
+        chunk_emit(c->chunk, lc.upvals[k].is_local ? 1 : 0, line);
+        chunk_emit(c->chunk, (uint8_t)lc.upvals[k].index, line);
+    }
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
 
 /* ── Application compilation ─────────────────────────────────────────── */

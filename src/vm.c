@@ -207,6 +207,12 @@ void vm_free(void) {
     vm = NULL;
 }
 
+void vm_reset(void) {
+    vm->sp = vm->stack;
+    vm->frame_count = 0;
+    vm->open_upvalues = NULL;
+}
+
 /* ── BcClosure allocation ────────────────────────────────────────────── */
 
 BcClosure *vm_make_closure(Chunk *chunk, int nupvals) {
@@ -567,9 +573,23 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
         case OP_CLOSE_UP: {
-            /* Close any open upvalue pointing at TOS, then pop. */
-            vm_close_upvalues(vm->sp - 1);
-            POP();
+            /* Close the open upvalue for frame->slots[A] (no stack pop).
+               vm_close_upvalues closes all upvalues >= that address; since
+               end_scope processes locals from highest slot down, any higher
+               slots have already been closed before this is reached. */
+            uint8_t slot = READ_U8();
+            vm_close_upvalues(&frame->slots[slot]);
+            break;
+        }
+
+        case OP_SLIDE: {
+            /* Move TOS past A items below it (scope-exit cleanup).
+               Stack before: [... | local0 | ... | localN-1 | result]
+               Stack after:  [... | result]                           */
+            uint8_t n = READ_U8();
+            val_t result = POP();
+            vm->sp -= n;
+            PUSH(result);
             break;
         }
 

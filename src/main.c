@@ -10,6 +10,8 @@
 #include "modules.h"
 #include "object.h"
 #include "profiling.h"
+#include "vm.h"
+#include "compiler.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +40,7 @@ static void init_all(void) {
     actors_init();
     modules_init();
     profiling_init(GLOBAL_ENV);
+    vm_init();
 }
 
 /* ---- REPL ---- */
@@ -216,11 +219,13 @@ static void eval_port_exprs(val_t port, bool print) {
 
         h.prev = current_handler; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
-            val_t result = eval(expr, GLOBAL_ENV);
+            val_t cl     = compiler_compile(expr);
+            val_t result = vm_run(as_bcclosure(cl), 0);
             current_handler = h.prev;
             if (print) print_result(result);
         } else {
             current_handler = h.prev;
+            vm_reset();
             fprintf(stderr, "Error: ");
             if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
             else scm_write(h.exn, PORT_STDERR);
@@ -295,9 +300,13 @@ int main(int argc, char **argv) {
                 else { current_handler = h.prev; break; }
                 if (vis_eof(expr)) break;
                 h.prev = current_handler; current_handler = &h;
-                if (setjmp(h.jmp) == 0) { last = eval(expr, GLOBAL_ENV); current_handler = h.prev; }
-                else {
+                if (setjmp(h.jmp) == 0) {
+                    val_t cl = compiler_compile(expr);
+                    last = vm_run(as_bcclosure(cl), 0);
                     current_handler = h.prev;
+                } else {
+                    current_handler = h.prev;
+                    vm_reset();
                     fprintf(stderr, "Error: ");
                     if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
                     else scm_write(h.exn, PORT_STDERR);

@@ -69,6 +69,9 @@ extern VM *vm;
 void vm_init(void);
 void vm_free(void);
 
+/* Reset stack after a caught exception (longjmp leaves VM in unknown state). */
+void vm_reset(void);
+
 /* Execute a closure with argc arguments already on the stack.
    Returns the result value. */
 val_t vm_run(BcClosure *closure, int argc);

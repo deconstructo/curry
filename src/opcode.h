@@ -40,6 +40,7 @@ typedef enum {
     OP_POP,         /* discard top of stack                              */
     OP_DUP,         /* duplicate top of stack                            */
     OP_SWAP,        /* swap top two stack values                         */
+    OP_SLIDE,       /* A: move TOS past A items below it (scope cleanup) */
 
     /* ── Arithmetic (numeric tower, same semantics as num_add etc.) ─── */
     OP_ADD,         /* push num_add(pop(), pop())   (order: b=pop a=pop) */
@@ -106,7 +107,7 @@ typedef enum {
     /* ── Closures ───────────────────────────────────────────────────── */
     OP_CLOSURE,     /* A: push new closure wrapping constants[A] (Chunk*)
                          followed by A upvalue capture instructions      */
-    OP_CLOSE_UP,    /* A: close upvalue slot A (move stack val to heap)  */
+    OP_CLOSE_UP,    /* A: close open upvalue for frame->slots[A] (no pop)*/
 
     /* ── apply / values ─────────────────────────────────────────────── */
     OP_APPLY,       /* (apply f args-list) — f and list on stack         */
