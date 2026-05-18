@@ -1,6 +1,7 @@
 #include "builtins.h"
 #include "object.h"
 #include "eval.h"
+#include "vm.h"
 #include "syntax_rules.h"
 #include "env.h"
 #include "symbol.h"
@@ -145,7 +146,10 @@ PRED1(real_p,     vis_number)
 PRED1(complex_p,  vis_number)
 PRED1(exact_p,    vis_exact)
 PRED1(inexact_p,  vis_inexact)
-PRED1(procedure_p,vis_proc)
+static val_t prim_procedure_p(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    return vbool(vis_proc(av[0]) || vis_bcclosure(av[0]));
+}
 PRED1(traced_p,   vis_traced)
 PRED1(port_p,     vis_port)
 PRED1(eof_object_p,vis_eof)

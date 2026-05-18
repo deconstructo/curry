@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "vm.h"
 #include "object.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -1106,6 +1107,10 @@ val_t apply(val_t proc, val_t args) {
 }
 
 val_t apply_arr(val_t proc, int argc, val_t *argv) {
+    if (vis_bcclosure(proc)) {
+        for (int i = 0; i < argc; i++) vm_push(argv[i]);
+        return vm_run(as_bcclosure(proc), argc);
+    }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);

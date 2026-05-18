@@ -286,10 +286,8 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
-    if (vm->frame_count >= VM_FRAMES_MAX) {
-        fprintf(stderr, "vm: call stack overflow\n");
-        return V_VOID;
-    }
+    if (vm->frame_count >= VM_FRAMES_MAX)
+        scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
     CallFrame *frame  = &vm->frames[vm->frame_count++];
     frame->closure    = top_closure;
     frame->ip         = top_closure->chunk->code;
@@ -301,7 +299,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                       (uint16_t)(frame->ip[-2] | ((unsigned)frame->ip[-1] << 8)))
 #define JUMP_ABS(t)  (frame->ip = frame->closure->chunk->code + (t))
 #define CONSTS       (frame->closure->chunk->constants)
-#define PUSH(v)      (*vm->sp++ = (v))
+#define PUSH(v)      do { \
+    if (vm->sp >= vm->stack + VM_STACK_MAX) \
+        scm_raise(V_FALSE, "value stack overflow (max %d slots)", VM_STACK_MAX); \
+    *vm->sp++ = (v); } while (0)
 #define POP()        (*--vm->sp)
 #define PEEK(n)      (vm->sp[-1-(n)])
 
@@ -508,10 +509,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
-                if (vm->frame_count >= VM_FRAMES_MAX) {
-                    fprintf(stderr, "vm: call stack overflow\n");
-                    return V_VOID;
-                }
+                if (vm->frame_count >= VM_FRAMES_MAX)
+                    scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->ip         = cl->chunk->code;
