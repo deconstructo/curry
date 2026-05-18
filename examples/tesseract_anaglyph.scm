@@ -1,5 +1,5 @@
 ;;; tesseract_anaglyph.scm — Animated 4D hypercube with anaglyph 3D rendering.
-;;; Version: 1.1
+;;; Version: 1.2
 ;;;
 ;;; Wear red-cyan glasses and the tesseract floats in real 3D space.
 ;;;
@@ -28,9 +28,10 @@
 ;;;
 ;;; Run:  ./build/curry examples/tesseract_anaglyph.scm
 ;;;
-;;; Enjoy!  (Red-cyan glasses recommended.)
+;;; Enjoy!  (Red-Blue glasses recommended.)
+;;; 	    (Can be configured for Red-Cyan)
 
-(import (curry qt6))
+:import (curry qt6))
 (import (scheme base))
 (import (scheme inexact))
 
@@ -161,7 +162,10 @@
               (lambda () (color-fn r g b))
               (lambda (r* g* b*)
                 (gfx-set-pen-color! painter r* g* b* 0.88)
-                (gfx-set-pen-width! painter 1.6)
+
+		;; Tweek this for line length
+
+                (gfx-set-pen-width! painter 3)
                 (gfx-draw-line! painter (vector-ref sx ia) (vector-ref sy ia)
                                         (vector-ref sx ib) (vector-ref sy ib))))))))
     ;; Vertices
@@ -201,11 +205,15 @@
           (lambda (r g b)
             (let ((L (luma r g b)))
               (values L 0.0 0.0))))
-        ;; Right eye — cyan channel only
+        ;; Right eye — cyan or blue channel only
+
         (draw-pass painter right
           (lambda (r g b)
             (let ((L (luma r g b)))
-              (values 0.0 L L))))
+	      ;; For Red-Cyan
+              ;; (values 0.0 L L))))
+	      ;; For Red-blue
+	      (values 0.0 0.0 L))))
         (gfx-set-blend! painter 'src))
 
       ;; ── Flat mode: single pass, original colours ───────────────────────
