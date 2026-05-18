@@ -107,6 +107,8 @@ set(CORE_SOURCES
   src/matrix.c
   src/syntax_rules.c
   src/profiling.c
+  src/compiler.c
+  src/vm.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})

@@ -1,3 +1,26 @@
+/*
+ * chunk.c — Bytecode chunk: allocation, constant pool, disassembler.
+ *
+ * PURPOSE
+ *   A Chunk is the compiled unit of execution — it holds:
+ *     code[]      byte stream of OpCode instructions and their operands
+ *     constants[] pool of val_t values referenced by index in the code
+ *     lines[]     source line number for each byte (parallel to code[])
+ *
+ *   chunk_new()      allocates an empty Chunk on the GC heap.
+ *   chunk_emit()     appends a single byte with its source line.
+ *   chunk_emit16()   appends a 2-byte little-endian value.
+ *   chunk_patch16()  back-patches a 2-byte field (used by jump fixup).
+ *   chunk_add_const() adds a constant to the pool; deduplicates where
+ *                    possible (same pointer / numeric equality / string
+ *                    content) to keep the pool compact.
+ *   chunk_disasm()   pretty-prints bytecode to stderr for debugging.
+ *
+ * The Chunk* itself is stored as a raw val_t (cast to uintptr_t) in the
+ * parent chunk's constant pool when OP_CLOSURE is emitted; the VM
+ * extracts it back with vunptr(Chunk, v).
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +47,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_STORE_UP]       = "STORE_UP",
     [OP_POP]            = "POP",
     [OP_DUP]            = "DUP",
+    [OP_SWAP]           = "SWAP",
     [OP_ADD]            = "ADD",
     [OP_SUB]            = "SUB",
     [OP_MUL]            = "MUL",
@@ -167,7 +191,7 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_LOAD_UP: case OP_STORE_UP:
     case OP_CALL: case OP_TAIL_CALL:
     case OP_CLOSURE: case OP_CLOSE_UP:
-    case OP_VALUES: case OP_MAKEVEC: {
+    case OP_VALUES: case OP_MAKEVEC: case OP_APPLY: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||

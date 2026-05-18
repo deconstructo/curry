@@ -39,6 +39,7 @@ typedef enum {
     /* ── Stack manipulation ─────────────────────────────────────────── */
     OP_POP,         /* discard top of stack                              */
     OP_DUP,         /* duplicate top of stack                            */
+    OP_SWAP,        /* swap top two stack values                         */
 
     /* ── Arithmetic (numeric tower, same semantics as num_add etc.) ─── */
     OP_ADD,         /* push num_add(pop(), pop())   (order: b=pop a=pop) */
