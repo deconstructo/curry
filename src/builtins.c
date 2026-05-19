@@ -1550,9 +1550,37 @@ static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
     if(vis_error(av[0])) return as_err(av[0])->message;
     val_t p=port_open_output_string(); scm_write(av[0],p); return port_get_output_string(p);
 }
+static val_t prim_call_cc(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    Continuation *cont = CURRY_NEW(Continuation);
+    cont->hdr.type = T_CONTINUATION; cont->hdr.flags = 0;
+    cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
+    cont->result   = V_VOID;
+    cont->wind_top = current_wind;
+    int saved_fc   = vm->frame_count;
+    val_t *saved_sp = vm->sp;
+    Upvalue *saved_uv = vm->open_upvalues;
+    val_t ret;
+    if (setjmp(*(jmp_buf *)cont->jmpbuf) == 0) {
+        val_t cont_val = vptr(cont);
+        ret = apply_arr(proc, 1, &cont_val);
+    } else {
+        vm->frame_count   = saved_fc;
+        vm->sp            = saved_sp;
+        vm->open_upvalues = saved_uv;
+        ret = cont->result;
+    }
+    return ret;
+}
+
 static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     (void)ud; val_t handler=av[0], thunk=av[1];
     val_t result = V_VOID;
+    /* Save VM state — a longjmp from inside the thunk may skip vm_run cleanup */
+    int saved_frame_count = vm->frame_count;
+    val_t *saved_sp       = vm->sp;
+    Upvalue *saved_upvals = vm->open_upvalues;
     ExnHandler h;
     h.prev = current_handler; current_handler = &h;
     if (setjmp(h.jmp) == 0) {
@@ -1560,6 +1588,9 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        vm->frame_count   = saved_frame_count;
+        vm->sp            = saved_sp;
+        vm->open_upvalues = saved_upvals;
         result = apply(handler, scm_cons(h.exn, V_NIL));
     }
     return result;
@@ -1722,6 +1753,15 @@ static val_t prim_values(int ac, val_t *av, void *ud) {
     mv->hdr.type=T_VALUES; mv->hdr.flags=0; mv->count=(uint32_t)ac;
     for(int i=0;i<ac;i++) mv->vals[i]=av[i];
     return vptr(mv);
+}
+static val_t prim_call_with_values(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t produced = apply_arr(av[0], 0, NULL);
+    if (vis_values(produced)) {
+        Values *mv = as_vals(produced);
+        return apply_arr(av[1], (int)mv->count, mv->vals);
+    }
+    return apply_arr(av[1], 1, &produced);
 }
 static val_t prim_void(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return V_VOID;}
 static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(av[i-1]!=av[i]) return V_FALSE; return V_TRUE;}
@@ -1949,6 +1989,9 @@ void builtins_register(val_t env) {
     DEF("dynamic-wind",           prim_dynamic_wind,           3,3);
     DEF("call-with-port",         prim_call_with_port,         2,2);
     DEF("values",prim_values,0,-1);
+    DEF("call-with-values",prim_call_with_values,2,2);
+    DEF("call-with-current-continuation",prim_call_cc,1,1);
+    DEF("call/cc",prim_call_cc,1,1);
     DEF("boolean=?",prim_boolean_eq,2,-1);
 
     /* Sets */

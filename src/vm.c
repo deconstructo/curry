@@ -192,7 +192,7 @@
 
 /* ── Global VM state ─────────────────────────────────────────────────── */
 
-VM *vm = NULL;
+_Thread_local VM *vm = NULL;
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
@@ -286,6 +286,7 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
+    int entry_depth = vm->frame_count;  /* used to detect return from nested calls */
     if (vm->frame_count >= VM_FRAMES_MAX)
         scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
     CallFrame *frame  = &vm->frames[vm->frame_count++];
@@ -545,6 +546,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 val_t result     = call_foreign(callee, (int)argc2, call_args);
                 vm->sp -= argc2 + 1;
                 if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
             }
             break;
         }
@@ -552,6 +554,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         case OP_RETURN: {
             val_t result = POP();
             if (pop_frame(&frame, result)) return *--vm->sp;
+            /* Nested vm_run: all our frames are done — return the result. */
+            if (vm->frame_count == entry_depth) return *--vm->sp;
             break;
         }
 
@@ -627,23 +631,31 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         /* ── Multiple values ─────────────────────────────────────────── */
         case OP_VALUES: {
             uint8_t n = READ_U8();
-            /* Single value: already on stack, nothing to do. */
             if (n == 1) break;
-            /* Multiple values: bundle into a list for now.
-               A proper T_VALUES object will be added when call-with-values
-               is used heavily through the compiler path. */
-            val_t list = V_NIL;
-            for (int i = 0; i < (int)n; i++) list = scm_cons(POP(), list);
-            PUSH(list);
+            /* n == 0: push void (rarely needed but keep consistent) */
+            if (n == 0) { PUSH(V_VOID); break; }
+            Values *mv = (Values *)gc_alloc(sizeof(Values) + (size_t)n * sizeof(val_t));
+            mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = n;
+            val_t *base = vm->sp - n;
+            for (int i = 0; i < (int)n; i++) mv->vals[i] = base[i];
+            vm->sp -= n;
+            PUSH(vptr(mv));
             break;
         }
 
         case OP_CALL_WITH_VALUES: {
             val_t consumer = POP();
             val_t thunk    = POP();
-            val_t result   = call_foreign(thunk, 0, NULL);
-            val_t cargs[1] = {result};
-            PUSH(call_foreign(consumer, 1, cargs));
+            val_t produced = call_foreign(thunk, 0, NULL);
+            val_t result;
+            if (vis_values(produced)) {
+                Values *mv = as_vals(produced);
+                result = call_foreign(consumer, (int)mv->count, mv->vals);
+            } else {
+                val_t cargs[1] = {produced};
+                result = call_foreign(consumer, 1, cargs);
+            }
+            PUSH(result);
             break;
         }
 

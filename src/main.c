@@ -339,12 +339,27 @@ int main(int argc, char **argv) {
 
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
-        if (setjmp(h.jmp) == 0) { scm_load(argv[i], GLOBAL_ENV); current_handler = h.prev; }
-        else { current_handler = h.prev;
-               fprintf(stderr, "Error: ");
-               if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-               else scm_write(h.exn, PORT_STDERR);
-               fputs("\n", stderr); return 1; }
+        if (setjmp(h.jmp) == 0) {
+            /* Compile and run each top-level form via the VM. */
+            val_t port = port_open_file(argv[i], PORT_INPUT);
+            if (vis_false(port)) {
+                fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
+                return 1;
+            }
+            val_t v;
+            while (!vis_eof((v = scm_read(port)))) {
+                val_t cl = compiler_compile(v);
+                vm_run(as_bcclosure(cl), 0);
+            }
+            port_close(port);
+            current_handler = h.prev;
+        } else {
+            current_handler = h.prev;
+            fprintf(stderr, "Error: ");
+            if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
+            else scm_write(h.exn, PORT_STDERR);
+            fputs("\n", stderr); return 1;
+        }
         ran_something = true;
         break;
     }

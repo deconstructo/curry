@@ -2,6 +2,7 @@
 #include "object.h"
 #include "eval.h"
 #include "gc.h"
+#include "vm.h"
 #include "port.h"
 #include "symbol.h"
 #include <stdlib.h>
@@ -84,6 +85,7 @@ typedef struct {
 static void *actor_thread(void *arg) {
     ActorStart *start = (ActorStart *)arg;
     gc_register_thread();
+    vm_init();
 
     Actor *self = start->actor;
     current_actor = self;

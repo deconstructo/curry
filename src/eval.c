@@ -1,5 +1,6 @@
 #include "eval.h"
 #include "vm.h"
+#include "compiler.h"
 #include "object.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -137,9 +138,9 @@ static val_t make_prim_thunk(PrimFn fn, void *ud) {
 
 /* ---- Quasiquote expansion ---- */
 
-static val_t expand_qq(val_t form, val_t env, int depth);
+val_t expand_qq(val_t form, val_t env, int depth);
 
-static val_t expand_qq(val_t form, val_t env, int depth) {
+val_t expand_qq(val_t form, val_t env, int depth) {
     if (!vis_pair(form)) return make_pair(S_QUOTE, make_pair(form, V_NIL));
 
     val_t head = vcar(form);
@@ -1031,6 +1032,10 @@ tail:
             return apply_arr(proc, argc, arr);
         }
 
+        if (vis_bcclosure(proc)) {
+            return apply_arr(proc, argc, arr);
+        }
+
         if (vis_symfn(proc)) {
             /* Applying a symbolic function — create SX_APPLY node */
             return sx_make_apply(proc, argc, arr);
@@ -1044,6 +1049,17 @@ tail:
 /* ---- Apply ---- */
 
 val_t apply(val_t proc, val_t args) {
+    if (vis_bcclosure(proc)) {
+        int n = list_length(args);
+        val_t arr[64];
+        list_to_arr(args, arr, 64);
+        val_t *saved_sp = vm->sp;               /* save stack pointer */
+        vm_push(proc);                          /* dummy callee for pop_frame */
+        for (int i = 0; i < n; i++) vm_push(arr[i]);
+        val_t result = vm_run(as_bcclosure(proc), n);
+        vm->sp = saved_sp;                      /* restore stack pointer */
+        return result;
+    }
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
         int argc = list_length(args);
@@ -1108,8 +1124,12 @@ val_t apply(val_t proc, val_t args) {
 
 val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_bcclosure(proc)) {
+        val_t *saved_sp = vm->sp;               /* save stack pointer */
+        vm_push(proc);                          /* dummy callee for pop_frame */
         for (int i = 0; i < argc; i++) vm_push(argv[i]);
-        return vm_run(as_bcclosure(proc), argc);
+        val_t result = vm_run(as_bcclosure(proc), argc);
+        vm->sp = saved_sp;                      /* restore stack pointer */
+        return result;
     }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
@@ -1157,6 +1177,7 @@ val_t scm_load(const char *path, val_t env) {
     val_t port = port_open_file(path, PORT_INPUT);
     if (vis_false(port))
         scm_raise(V_FALSE, "load: cannot open file: %s", path);
+
     val_t result = V_VOID;
     val_t v;
     while (!vis_eof((v = scm_read(port)))) {

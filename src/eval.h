@@ -99,4 +99,7 @@ void scm_raise_val(val_t exn) __attribute__((noreturn));
 /* ---- Load / include ---- */
 val_t scm_load(const char *path, val_t env);
 
+/* ---- Quasiquote expansion (used by compiler) ---- */
+val_t expand_qq(val_t form, val_t env, int depth);
+
 #endif /* CURRY_EVAL_H */

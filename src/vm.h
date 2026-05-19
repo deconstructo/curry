@@ -62,8 +62,8 @@ typedef struct VM {
     Upvalue   *open_upvalues;        /* linked list of open upvalues     */
 } VM;
 
-/* Global VM instance (thread-local in future) */
-extern VM *vm;
+/* Per-thread VM instance — each thread must call vm_init() before use */
+extern _Thread_local VM *vm;
 
 /* Lifecycle */
 void vm_init(void);

@@ -799,6 +799,13 @@ static val_t prim_fourier(int ac, val_t *av, void *ud)
 static val_t prim_ifourier(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return sx_ifourier(av[0], av[1], av[2]); }
 
+/* ---- tree-eval: force evaluation through the tree-walking interpreter ---- */
+
+static val_t prim_tree_eval(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return eval(av[0], GLOBAL_ENV);
+}
+
 /* ---- Registration ---- */
 
 void builtins_curry_register(val_t env) {
@@ -894,6 +901,7 @@ void builtins_curry_register(val_t env) {
     DEF("quad",                 prim_quad,                  3, 4);
     DEF("quad-frac-diff",       prim_quad_frac_diff,        3, 4);
     DEF("quad-frac-int",        prim_quad_frac_int,         3, 4);
+    DEF("tree-eval",            prim_tree_eval,             1, 1);
 
     /* Second AKK_PR pass — registers Akkadian aliases for CAS, surreal, quantum,
      * multivector, and quaternion procedures that are defined after the first pass. */

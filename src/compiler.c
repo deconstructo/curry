@@ -284,6 +284,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
 
     int arity = compile_params(&c, params);
     c.chunk->arity = arity;
+    begin_scope(&c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
 
     /* Scan for internal defines and pre-declare as locals (letrec* semantics) */
     val_t bscan = body;
@@ -295,13 +296,13 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
             if (vis_symbol(defname)) {
                 /* simple (define x ...) */
                 add_local(&c, defname);
-                /* value is initialised below; mark depth to prevent use
-                   before initialisation (leave at depth+1 sentinel) */
                 c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                emit(&c, OP_VOID, line); /* reserve stack slot */
             } else if (vis_pair(defname)) {
                 /* (define (f ...) ...) sugar */
                 add_local(&c, vcar(defname));
                 c.locals[c.local_count - 1].depth = -1;
+                emit(&c, OP_VOID, line); /* reserve stack slot */
             }
         }
         bscan = vcdr(bscan);
@@ -788,6 +789,102 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
 
+/* ── parameterize desugaring ─────────────────────────────────────────── */
+
+static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
+    /* (parameterize ((p1 v1) (p2 v2) ...) body ...)
+     * Desugar to:
+     *   (let ((%%p0 p1) (%%p1 p2) ...)
+     *     (let ((%%old0 (%%p0)) (%%old1 (%%p1)) ...)
+     *       (dynamic-wind
+     *         (lambda () (%%p0 v1) (%%p1 v2) ...)
+     *         (lambda () body ...)
+     *         (lambda () (%%p0 %%old0) (%%p1 %%old1) ...))))
+     * so local variables in body are captured as upvalues, not looked up
+     * in GLOBAL_ENV. */
+    val_t param_list = vcar(args);
+    val_t body       = vcdr(args);
+
+    /* Count bindings */
+    int n = 0;
+    { val_t b = param_list; while (vis_pair(b)) { n++; b = vcdr(b); } }
+
+    if (n == 0) {
+        compile_seq(c, body, tail, line);
+        return;
+    }
+
+    /* Extract per-binding data and generate gensym names */
+#define MAX_PARAMS 32
+    val_t pref[MAX_PARAMS], oref[MAX_PARAMS];
+    val_t param_expr[MAX_PARAMS], val_expr[MAX_PARAMS];
+    char namebuf[32];
+    if (n > MAX_PARAMS) n = MAX_PARAMS;
+
+    val_t b = param_list;
+    for (int i = 0; i < n; i++, b = vcdr(b)) {
+        val_t binding = vcar(b);
+        param_expr[i] = vcar(binding);
+        val_expr[i]   = vcar(vcdr(binding));
+        snprintf(namebuf, sizeof(namebuf), "%%prm%d", i);
+        pref[i] = sym_intern_cstr(namebuf);
+        snprintf(namebuf, sizeof(namebuf), "%%old%d", i);
+        oref[i] = sym_intern_cstr(namebuf);
+    }
+#undef MAX_PARAMS
+
+    val_t S_DW = sym_intern_cstr("dynamic-wind");
+
+    /* Build outer let bindings: ((%%p0 p1) ...) */
+    val_t outer_bindings = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        outer_bindings = scm_cons(scm_cons(pref[i],
+                                  scm_cons(param_expr[i], V_NIL)),
+                                  outer_bindings);
+
+    /* Build inner let bindings: ((%%old0 (%%p0)) ...) */
+    val_t inner_bindings = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        inner_bindings = scm_cons(scm_cons(oref[i],
+                                  scm_cons(scm_cons(pref[i], V_NIL), V_NIL)),
+                                  inner_bindings);
+
+    /* before-lambda body: ((%%p0 v1) ...) */
+    val_t before_body = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        before_body = scm_cons(scm_cons(pref[i], scm_cons(val_expr[i], V_NIL)),
+                               before_body);
+    val_t before_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, before_body));
+
+    /* after-lambda body: ((%%p0 %%old0) ...) */
+    val_t after_body = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        after_body = scm_cons(scm_cons(pref[i], scm_cons(oref[i], V_NIL)),
+                              after_body);
+    val_t after_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, after_body));
+
+    /* thunk-lambda: (lambda () body ...) */
+    val_t thunk_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, body));
+
+    /* (dynamic-wind before thunk after) */
+    val_t dwind = scm_cons(S_DW,
+                   scm_cons(before_lam,
+                    scm_cons(thunk_lam,
+                     scm_cons(after_lam, V_NIL))));
+
+    /* (let inner-bindings (dynamic-wind ...)) */
+    val_t inner_let = scm_cons(S_LET,
+                       scm_cons(inner_bindings,
+                        scm_cons(dwind, V_NIL)));
+
+    /* (let outer-bindings inner-let) */
+    val_t outer_let = scm_cons(S_LET,
+                       scm_cons(outer_bindings,
+                        scm_cons(inner_let, V_NIL)));
+
+    compile(c, outer_let, tail, line);
+}
+
 /* ── Application compilation ─────────────────────────────────────────── */
 
 static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int line) {
@@ -844,6 +941,13 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     /* quote */
     if (head == S_QUOTE) {
         emit_const(c, vis_pair(args) ? vcar(args) : V_NIL, line);
+        return;
+    }
+
+    /* quasiquote — expand to list-construction code, then compile that */
+    if (head == S_QUASIQUOTE) {
+        val_t expanded = expand_qq(vis_pair(args) ? vcar(args) : V_NIL, GLOBAL_ENV, 0);
+        compile(c, expanded, tail, line);
         return;
     }
 
@@ -908,6 +1012,31 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
             n++; a = vcdr(a);
         }
         emit_ab(c, OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
+        return;
+    }
+
+    /* parameterize — desugar to let + dynamic-wind in the compiler so that
+       local variables in the body are captured as upvalues, not looked up
+       in GLOBAL_ENV (which would fail for BcClosure-local bindings). */
+    if (head == S_PARAMETERIZE) {
+        compile_parameterize(c, args, tail, line);
+        return;
+    }
+
+    /* Forms the compiler delegates to the tree-walker at runtime:
+       import, define-syntax, let-syntax, letrec-syntax,
+       define-record-type, guard, receive, syntax-rules.
+       Emitted as: (tree-eval '<form>) */
+    if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
+        head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
+        head == S_DEFINE_RECORD_TYPE ||
+        head == S_GUARD         || head == S_RECEIVE        ||
+        head == S_SYNTAX_RULES) {
+        val_t tree_eval_sym = sym_intern_cstr("tree-eval");
+        emit_ab(c, OP_LOAD_GLOBAL,
+                (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
+        emit_const(c, expr, line);
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
         return;
     }
 
