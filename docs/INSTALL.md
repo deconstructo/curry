@@ -1,6 +1,6 @@
 # Installation & Building
 
-*v0.7.5 — 2026-05-12*
+*v0.8.8 — 2026-05-19*
 
 ## Install via Homebrew (macOS)
 
@@ -179,7 +179,7 @@ Optional modules can be enabled at configure time before packaging — any modul
 cmake --build build && ctest --test-dir build -V
 ```
 
-The test suite comprises four suites (262 tests total):
+The test suite comprises multiple suites (500+ tests):
 
 | Suite | File | What it covers |
 |-------|------|----------------|
@@ -187,3 +187,4 @@ The test suite comprises four suites (262 tests total):
 | `scheme_r7rs` | `tests/r7rs_tests.scm` | R7RS conformance: all standard types, arithmetic, rounding, string/char ops, I/O ports, error objects, apply, fold, predicates, bytevectors, sets, hash tables |
 | `numeric_ext` | `tests/numeric_ext_tests.scm` | Clifford algebra (Cl(3,0,0) basis blades, geometric product, wedge, grade, reverse, norms), symbolic CAS (∂, simplify, substitute), surreal numbers (ω, ε, arithmetic), auto-differentiation |
 | `actors` | `tests/actors_tests.scm` | Actor spawn/alive?/send!, semaphore-coordinated result passing, mutex-protected shared state, condvar signal/wait |
+| `dynamic_wind` | `tests/dynamic_wind_tests.scm` | `dynamic-wind`, `parameterize`, `make-parameter`, `call/cc` interaction, nested parameterize, converter callbacks |

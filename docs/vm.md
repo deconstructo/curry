@@ -184,6 +184,7 @@ an error.
 | Form | Compilation strategy |
 |------|----------------------|
 | `quote` | `emit_const` of the literal value |
+| `quasiquote` | `expand_qq()` in `eval.c` expands the template to list-construction code; result is compiled normally |
 | `if` | compile test → `JUMP_FALSE` → then → `JUMP` → else |
 | `begin` | `compile_seq` (sequence, last in tail position) |
 | `define` | compile value → `DEF_GLOBAL` (top level) or `STORE_LOCAL` (internal) → push void |
@@ -199,8 +200,9 @@ an error.
 | `when` | `JUMP_FALSE` → body / void |
 | `unless` | `JUMP_TRUE` → body / void |
 | `do` | zero-arg lambda wrapper; step values computed before assignment; `JUMP_TRUE` exits |
-| `values` | `OP_VALUES N` |
+| `values` | `OP_VALUES N` — bundles N values into a `T_VALUES` object |
 | `apply` | `OP_APPLY N` |
+| `parameterize` | `compile_parameterize()` desugars at compile time to `let + dynamic-wind` so body locals are captured as upvalues, not looked up in `GLOBAL_ENV` |
 
 Akkadian/cuneiform synonyms are translated via `akk_translate()` before
 dispatch, so Akkadian source compiles identically to its English equivalent.
@@ -406,16 +408,24 @@ conditional jump must not emit a separate `OP_POP` for the test value.
 
 ## Interoperability with the tree-walker
 
-During the transition period, both execution engines coexist and can call
-each other freely:
+Both execution engines coexist and call each other freely:
 
 - **VM → tree-walker**: Any non-`BcClosure` callable (tree-walker `Closure`,
   primitive, continuation) is dispatched via `apply_arr()` from `eval.c`.
   The VM pushes the result and continues.
-- **Tree-walker → VM**: Not yet wired.  Top-level evaluation goes exclusively
-  through the VM path (`compiler_compile` + `vm_run`).
+- **Tree-walker → VM**: `apply()` and `apply_arr()` in `eval.c` detect
+  `BcClosure` callees and dispatch to `vm_run()`.  This means that tree-walker
+  code (used by `import`, `define-syntax`, etc. via `tree-eval`) can call
+  compiled closures seamlessly.
 - **Shared global environment**: Both engines read and write `GLOBAL_ENV`, so
   `define` from either side is immediately visible to the other.
+- **Thread-local VM**: `vm` is `_Thread_local`; each thread (including actor
+  threads) must call `vm_init()` before invoking `vm_run()`.  This ensures
+  actors don't race on a shared VM state.
+- **Exception safety**: `prim_call_cc` and `prim_with_exception_handler` save
+  and restore `vm->frame_count`, `vm->sp`, and `vm->open_upvalues` around
+  `setjmp`/`longjmp` so that a `longjmp` that skips nested `vm_run` frames
+  leaves the VM in a consistent state.
 
 ---
 
@@ -441,11 +451,15 @@ global opcodes) the constant value.
 
 ## Known limitations
 
-- **`call/cc`**: escape-only continuations work (they use `setjmp`/`longjmp`
-  in the tree-walker path).  Full first-class continuations are not
-  implemented — they require a copying or CPS-transformed evaluator.
+- **`call/cc`**: escape (upward-only) continuations work from both the VM and
+  tree-walker paths via `prim_call_cc`, which uses `setjmp`/`longjmp` and
+  saves/restores the VM stack state.  Full first-class (re-entrant) continuations
+  are not implemented — they require a copying or CPS-transformed evaluator.
 - **Jump range**: jump targets are 16-bit absolute offsets, limiting chunk
   size to 65535 bytes.  Extremely large generated functions may hit this
   limit.
 - **Upvalue count**: capped at 256 per closure by `MAX_UPVALS`.
 - **Local count**: capped at 256 per frame by `MAX_LOCALS`.
+- **`parameterize` gensym cap**: `compile_parameterize` handles at most 32
+  bindings per form (a compile-time constant `MAX_PARAMS`).  Pathological
+  uses beyond that are silently truncated.

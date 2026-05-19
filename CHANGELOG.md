@@ -1,5 +1,69 @@
 # Changelog
 
+### 0.8.8 — VM as primary engine; call/cc, parameterize, quasiquote in compiler
+
+**VM is now the primary script execution engine**
+
+- `main.c` now loads scripts through `compiler_compile + vm_run` per top-level
+  form instead of `scm_load` (the tree-walker).  REPL, `-e`, and file execution
+  all route through the bytecode VM.
+
+**Thread-local VM state**
+
+- `VM *vm` changed from a process-global to `_Thread_local`; each thread must
+  call `vm_init()` before using `vm_run`.  Actor threads now call `vm_init()`
+  at startup, fixing a data-race SEGFAULT when actors used compiled closures.
+
+**`call/cc` as a first-class builtin**
+
+- `call-with-current-continuation` and `call/cc` are now registered C
+  primitives (`prim_call_cc`) rather than tree-walker special forms.  They
+  work correctly when called from compiled (VM) code.
+- `prim_call_cc` saves and restores `vm->frame_count`, `vm->sp`, and
+  `vm->open_upvalues` around `setjmp`/`longjmp` so that a longjmp escaping
+  nested `vm_run` frames leaves the VM in a consistent state.  The same
+  save/restore was added to `prim_with_exception_handler`.
+
+**`parameterize` compiled natively**
+
+- `parameterize` is removed from the eval-delegate list and compiled by a new
+  `compile_parameterize()` function that desugars it at compile time to
+  `let + dynamic-wind`.  Local variables referenced in the body (e.g. a
+  continuation `k`) are now captured as upvalues rather than looked up in
+  `GLOBAL_ENV`, fixing "unbound variable" errors when `parameterize` enclosed
+  a `call/cc`-bound variable.
+
+**`quasiquote` in the compiler**
+
+- The compiler now handles `` ` `` / `quasiquote` directly: it calls `expand_qq()`
+  from `eval.c` to expand the template into ordinary list-construction code
+  and compiles the result.  `expand_qq` is now a public symbol declared in
+  `eval.h`.
+
+**Multiple-values fixes**
+
+- `OP_VALUES N` now produces a proper `T_VALUES` object instead of a plain
+  list, so `call-with-values` can distinguish a single-list return from
+  multiple values.
+- `OP_CALL_WITH_VALUES` and the new `prim_call_with_values` builtin both
+  unpack `T_VALUES` objects and spread the values as separate arguments to
+  the consumer.
+
+**`OP_TAIL_CALL` entry-depth guard**
+
+- The non-`BcClosure` path of `OP_TAIL_CALL` was missing the `entry_depth`
+  check that detects when a nested `vm_run` call has completed.  This caused
+  a SEGFAULT (executing garbage as opcodes) whenever a primitive was in tail
+  position inside a nested call.  The check is now present on all return paths.
+
+**New test suite**
+
+- `tests/dynamic_wind_tests.scm` (16 tests) covering `make-parameter`,
+  `parameterize` (normal and escape-via-`call/cc`), nested `parameterize`,
+  converter callbacks, and `dynamic-wind` ordering.
+
+---
+
 ### 0.8.7 — VM robustness and BcClosure interop
 
 **VM safety**
