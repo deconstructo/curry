@@ -151,10 +151,10 @@ cmake --build build-release -j$(nproc)
 cd build-release && cpack -G DEB
 ```
 
-This produces `curry-scheme_0.7.5_arm64.deb` (architecture auto-detected). Install it with:
+This produces `curry-scheme_0.8.8_arm64.deb` (architecture auto-detected). Install it with:
 
 ```bash
-sudo dpkg -i curry-scheme_0.7.5_arm64.deb
+sudo dpkg -i curry-scheme_0.8.8_arm64.deb
 ```
 
 The package installs to standard system paths:
