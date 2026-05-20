@@ -31,7 +31,7 @@
 ;;; Enjoy!  (Red-Blue glasses recommended.)
 ;;; 	    (Can be configured for Red-Cyan)
 
-:import (curry qt6))
+(import (curry qt6))
 (import (scheme base))
 (import (scheme inexact))
 
