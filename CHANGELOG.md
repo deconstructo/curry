@@ -1,5 +1,24 @@
 # Changelog
 
+### 0.8.12 — `case` compiled natively by the bytecode compiler
+
+**`case` special form in the bytecode compiler**
+
+- `case` was handled by the tree-walking evaluator but not by the bytecode
+  compiler.  Any script using `case` inside a compiled lambda would fail with
+  `unbound variable: case`.
+- Fixed by adding `compile_case` to `compiler.c`, which desugars `(case key
+  clause...)` into `(let ((%%case-key%% key)) (cond ...))` at compile time and
+  recurses into the existing `compile_let` / `compile_cond` paths.  This gives
+  correct tail-call semantics for free: a `case` in tail position compiles its
+  matching body in tail position.
+- All three clause forms are supported:
+  - `((datum...) expr...)` — eqv? match via `memv`, body compiled in sequence
+  - `(else expr...)` — unconditional fallthrough
+  - `((datum...) => proc)` — calls `(proc key)` on a match
+
+---
+
 ### 0.8.11 — REPL ,vm command: GC heap stats and VM introspection
 
 **New REPL command: `,vm`**

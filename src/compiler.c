@@ -678,6 +678,51 @@ cond_done:
     for (int i = 0; i < np; i++) patch_jump(c, end_patches[i]);
 }
 
+static void compile_case(Compiler *c, val_t args, bool tail, int line) {
+    /* Desugar: (case key clause...) →
+     *   (let ((%%k key)) (cond (clause') ...))
+     * where non-else clause ((d...) body...) → ((memv %%k '(d...)) body...)
+     * and   arrow clause ((d...) => proc)    → ((memv %%k '(d...)) (proc %%k)) */
+    val_t key     = vcar(args);
+    val_t clauses = vcdr(args);
+    val_t ksym    = sym_intern_cstr("%%case-key%%");
+    val_t memv    = sym_intern_cstr("memv");
+
+    /* Build cond clauses */
+    val_t cond_head = V_NIL, *cond_tail = &cond_head;
+    while (vis_pair(clauses)) {
+        val_t clause = vcar(clauses);  clauses = vcdr(clauses);
+        val_t datums = vcar(clause);
+        val_t body   = vcdr(clause);
+
+        val_t test;
+        if (datums == S_ELSE) {
+            test = S_ELSE;
+        } else {
+            val_t quoted = scm_cons(S_QUOTE, scm_cons(datums, V_NIL));
+            test = scm_cons(memv, scm_cons(ksym, scm_cons(quoted, V_NIL)));
+        }
+
+        val_t cond_body;
+        if (vis_pair(body) && vcar(body) == S_ARROW && vis_pair(vcdr(body))) {
+            /* (case key ((d) => proc)) → call (proc %%k) */
+            val_t proc = vcar(vcdr(body));
+            cond_body = scm_cons(scm_cons(proc, scm_cons(ksym, V_NIL)), V_NIL);
+        } else {
+            cond_body = body;
+        }
+
+        val_t cc = scm_cons(test, cond_body);
+        *cond_tail = scm_cons(cc, V_NIL);
+        cond_tail  = &as_pair(*cond_tail)->cdr;
+    }
+
+    val_t cond_expr = scm_cons(S_COND, cond_head);
+    val_t binding   = scm_cons(scm_cons(ksym, scm_cons(key, V_NIL)), V_NIL);
+    val_t let_expr  = scm_cons(S_LET, scm_cons(binding, scm_cons(cond_expr, V_NIL)));
+    compile(c, let_expr, tail, line);
+}
+
 static void compile_when(Compiler *c, val_t args, bool tail, int line) {
     val_t test = vcar(args);
     val_t body = vcdr(args);
@@ -1055,8 +1100,9 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_AND) { compile_and(c, args, tail, line); return; }
     if (head == S_OR)  { compile_or(c, args, tail, line);  return; }
 
-    /* cond */
+    /* cond / case */
     if (head == S_COND) { compile_cond(c, args, tail, line); return; }
+    if (head == S_CASE) { compile_case(c, args, tail, line); return; }
 
     /* when / unless */
     if (head == S_WHEN)   { compile_when(c, args, tail, line);   return; }
