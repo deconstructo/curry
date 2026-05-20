@@ -95,15 +95,18 @@ static curry_val fn_ldap_bind(int ac, curry_val *av, void *ud) {
 /* Escape a string for safe embedding in an LDAP filter value (RFC 4515).
  * Returns a malloc'd string the caller must free. */
 static char *ldap_escape_filter_value(const char *s) {
-    /* Worst case: every byte expands to \XX (3 chars) */
+    /* Worst case: every byte expands to \XX (3 chars).
+     * calloc(len+1, 4) allocates (len+1)*4 bytes which always exceeds len*3+1;
+     * calloc checks nmemb*size overflow internally. */
     size_t len = strlen(s);
-    char *out = malloc(len * 3 + 1);
+    char *out = calloc(len + 1, 4);
+    if (!out) return NULL;
     char *p = out;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)s[i];
         /* RFC 4515: escape NUL, '(', ')', '*', '\' */
         if (c == '\0' || c == '(' || c == ')' || c == '*' || c == '\\') {
-            p += sprintf(p, "\\%02x", c);
+            p += snprintf(p, 4, "\\%02x", c);
         } else {
             *p++ = (char)c;
         }
@@ -126,7 +129,7 @@ static char **attrs_from_val(curry_val v) {
     int n = 0;
     curry_val tmp = v;
     while (!curry_is_nil(tmp)) { n++; tmp = curry_cdr(tmp); }
-    char **arr = malloc((size_t)(n + 1) * sizeof(char *));
+    char **arr = calloc((size_t)(n + 1), sizeof(char *));
     for (int i = 0; i < n; i++) {
         arr[i] = (char *)curry_string(curry_car(v));
         v = curry_cdr(v);
