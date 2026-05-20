@@ -37,6 +37,7 @@
 #include "eval.h"    /* SCM_PROTECT, ExnHandler, current_handler */
 #include "object.h"  /* ErrorObj, vis_error, as_err */
 #include "gc.h"      /* gc_register_thread */
+#include "vm.h"      /* vm_init — each SSE thread needs its own VM */
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -849,6 +850,7 @@ static void *conn_thread(void *arg) {
     free(ca);
 
     gc_register_thread();
+    vm_init();
 
     HttpReq req;
     if (!http_recv(fd, &req)) { close(fd); return NULL; }
