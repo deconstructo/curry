@@ -182,10 +182,26 @@ static void eval_port_exprs(val_t port, bool print) {
                     exit(0);
                 }
                 if (!strcmp(name, "help")) {
-                    puts("Commands: ,quit  ,help  ,gc  ,env  ,profile");
+                    puts("Commands: ,quit  ,help  ,gc  ,env  ,profile  ,vm");
                     continue;
                 }
                 if (!strcmp(name, "gc")) { gc_collect(); puts("GC complete."); continue; }
+                if (!strcmp(name, "vm")) {
+                    size_t heap  = GC_get_heap_size();
+                    size_t free_ = GC_get_free_bytes();
+                    size_t used  = heap > free_ ? heap - free_ : 0;
+                    size_t life  = GC_get_total_bytes();
+                    int    sp    = (int)(vm->sp - vm->stack);
+                    printf("  heap:    %.1f MB used / %.1f MB total\n",
+                           used / 1048576.0, heap / 1048576.0);
+                    printf("  alloc:   %.1f MB lifetime\n", life / 1048576.0);
+                    printf("  gc:      %lu collection%s\n",
+                           (unsigned long)GC_gc_no,
+                           GC_gc_no == 1 ? "" : "s");
+                    printf("  stack:   %d / %d slots\n",  sp, VM_STACK_MAX);
+                    printf("  frames:  %d / %d\n", vm->frame_count, VM_FRAMES_MAX);
+                    continue;
+                }
                 if (!strcmp(name, "profile")) {
                     val_t report = profiling_report();
                     if (vis_nil(report)) {
