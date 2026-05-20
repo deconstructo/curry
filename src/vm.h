@@ -1,6 +1,7 @@
 #ifndef CURRY_VM_H
 #define CURRY_VM_H
 
+#include <stdint.h>
 #include "value.h"
 #include "object.h"
 #include "chunk.h"
@@ -34,7 +35,6 @@ typedef struct {
     Upvalue *upvals[];    /* flexible array                               */
 } BcClosure;
 
-#define T_BCCLOSURE 41
 #define vis_bcclosure(v)  vis_type(v, T_BCCLOSURE)
 #define as_bcclosure(v)   vunptr(BcClosure, v)
 
@@ -46,6 +46,7 @@ typedef struct {
     uint8_t  *ip;         /* instruction pointer into closure->chunk     */
     val_t    *slots;      /* base of this frame's window into vm->stack  */
     int       slot_count; /* number of slots (locals + args)             */
+    uint64_t  prof_start_ns; /* profiling: call entry time (level 2+)   */
 } CallFrame;
 
 /*

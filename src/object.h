@@ -64,6 +64,7 @@ typedef enum {
     T_SYMFN         = 38,  /* symbolic unknown function: u(x,y,t) → unevaluated derivatives */
     T_UP            = 39,  /* contravariant up-tuple:   (up   a b c ...) */
     T_DOWN          = 40,  /* covariant   down-tuple:   (down a b c ...) */
+    T_BCCLOSURE     = 41,  /* bytecode closure (chunk + upvalues)        */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -123,7 +124,7 @@ static inline uint32_t vtype(val_t v) {
 #define vis_down(v)     vis_type(v, T_DOWN)
 #define vis_tuple(v)    (vis_up(v) || vis_down(v))
 
-#define vis_proc(v)     (vis_closure(v) || vis_prim(v) || vis_cont(v) || vis_traced(v))
+#define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
                          vis_rational(v) || vis_complex(v) || \
                          vis_quat(v) || vis_oct(v) || vis_surreal(v))

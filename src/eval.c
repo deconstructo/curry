@@ -1050,21 +1050,34 @@ tail:
 
 val_t apply(val_t proc, val_t args) {
     if (vis_bcclosure(proc)) {
+        BcClosure *cl = as_bcclosure(proc);
         int n = list_length(args);
         val_t arr[64];
         list_to_arr(args, arr, 64);
-        val_t *saved_sp = vm->sp;               /* save stack pointer */
-        vm_push(proc);                          /* dummy callee for pop_frame */
+        val_t *saved_sp = vm->sp;
+        vm_push(proc);
         for (int i = 0; i < n; i++) vm_push(arr[i]);
-        val_t result = vm_run(as_bcclosure(proc), n);
-        vm->sp = saved_sp;                      /* restore stack pointer */
+        if (curry_profiling_level >= 1 && cl->chunk->name) {
+            val_t sym = sym_intern_cstr(cl->chunk->name);
+            if (curry_profiling_level >= 2) {
+                uint64_t t0 = profiling_now_ns();
+                val_t result = vm_run(cl, n);
+                vm->sp = saved_sp;
+                profiling_record_timed(sym, t0);
+                return result;
+            }
+            profiling_record_call(sym);
+        }
+        val_t result = vm_run(cl, n);
+        vm->sp = saved_sp;
         return result;
     }
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
-        int argc = list_length(args);
         val_t arr[64];
         int n = list_to_arr(args, arr, 64);
+        if (curry_profiling_level >= 3 && prim->name)
+            profiling_record_prim(sym_intern_cstr(prim->name));
         return prim->fn(n, arr, prim->ud);
     }
     if (vis_closure(proc)) {
@@ -1124,16 +1137,30 @@ val_t apply(val_t proc, val_t args) {
 
 val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_bcclosure(proc)) {
-        val_t *saved_sp = vm->sp;               /* save stack pointer */
-        vm_push(proc);                          /* dummy callee for pop_frame */
+        BcClosure *cl = as_bcclosure(proc);
+        val_t *saved_sp = vm->sp;
+        vm_push(proc);
         for (int i = 0; i < argc; i++) vm_push(argv[i]);
-        val_t result = vm_run(as_bcclosure(proc), argc);
-        vm->sp = saved_sp;                      /* restore stack pointer */
+        if (curry_profiling_level >= 1 && cl->chunk->name) {
+            val_t sym = sym_intern_cstr(cl->chunk->name);
+            if (curry_profiling_level >= 2) {
+                uint64_t t0 = profiling_now_ns();
+                val_t result = vm_run(cl, argc);
+                vm->sp = saved_sp;
+                profiling_record_timed(sym, t0);
+                return result;
+            }
+            profiling_record_call(sym);
+        }
+        val_t result = vm_run(cl, argc);
+        vm->sp = saved_sp;
         return result;
     }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
+        if (curry_profiling_level >= 3 && prim->name)
+            profiling_record_prim(sym_intern_cstr(prim->name));
         return prim->fn(argc, argv, prim->ud);
     }
     if (vis_closure(proc)) {

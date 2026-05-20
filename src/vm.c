@@ -177,6 +177,7 @@
 #include <string.h>
 
 #include "vm.h"
+#include "profiling.h"
 #include "compiler.h"
 #include "chunk.h"
 #include "opcode.h"
@@ -517,6 +518,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 nf->ip         = cl->chunk->code;
                 nf->slots      = vm->sp - argc2;
                 nf->slot_count = argc2;
+                nf->prof_start_ns = 0;
+                if (curry_profiling_level >= 1 && cl->chunk->name) {
+                    val_t sym = sym_intern_cstr(cl->chunk->name);
+                    if (curry_profiling_level >= 2)
+                        nf->prof_start_ns = profiling_now_ns();
+                    else
+                        profiling_record_call(sym);
+                }
                 frame = nf;
             } else {
                 val_t *call_args = vm->sp - argc2;
@@ -533,6 +542,17 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
+                /* Record timing for the outgoing frame before reuse */
+                if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                        frame->closure->chunk->name) {
+                    val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                    profiling_record_timed(sym, frame->prof_start_ns);
+                }
+                /* Count cross-function tail calls (not self-tail-call loops) */
+                if (curry_profiling_level >= 1 && cl != frame->closure &&
+                        cl->chunk->name) {
+                    profiling_record_call_tco(sym_intern_cstr(cl->chunk->name));
+                }
                 val_t *new_args = vm->sp - argc2;
                 vm_close_upvalues(frame->slots);
                 memmove(frame->slots, new_args, argc2 * sizeof(val_t));
@@ -540,6 +560,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 frame->closure    = cl;
                 frame->ip         = cl->chunk->code;
                 frame->slot_count = argc2;
+                frame->prof_start_ns = 0;
+                if (curry_profiling_level >= 2 && cl->chunk->name)
+                    frame->prof_start_ns = profiling_now_ns();
             } else {
                 /* Non-BcClosure in tail position: call then return. */
                 val_t *call_args = vm->sp - argc2;
@@ -553,6 +576,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
         case OP_RETURN: {
             val_t result = POP();
+            if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                    frame->closure->chunk->name) {
+                val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                profiling_record_timed(sym, frame->prof_start_ns);
+                frame->prof_start_ns = 0;
+            }
             if (pop_frame(&frame, result)) return *--vm->sp;
             /* Nested vm_run: all our frames are done — return the result. */
             if (vm->frame_count == entry_depth) return *--vm->sp;

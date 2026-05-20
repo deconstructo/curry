@@ -791,6 +791,80 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
 
 /* ── parameterize desugaring ─────────────────────────────────────────── */
 
+static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
+    /* (guard (var clause...) body...)
+     * Expands to:
+     *   (call/cc (lambda (%guard-k)
+     *     (with-exception-handler
+     *       (lambda (var)
+     *         (cond (test (%guard-k expr)) ... (else (raise var))))
+     *       (lambda () body...))))
+     * Each (else expr) clause wraps expr in (%guard-k ...) rather than raise. */
+    val_t var_and_clauses = vcar(args);
+    val_t body            = vcdr(args);
+    val_t var             = vcar(var_and_clauses);
+    val_t clauses         = vcdr(var_and_clauses);
+
+    val_t S_WEH   = sym_intern_cstr("with-exception-handler");
+    val_t S_RAISE = sym_intern_cstr("raise");
+    val_t S_COND2 = sym_intern_cstr("cond");
+    val_t S_ELSE2 = sym_intern_cstr("else");
+    val_t gk      = sym_intern_cstr("%guard-k");
+
+    /* Count clauses and check for else */
+    int n_clauses = 0;
+    bool has_else = false;
+    val_t cl = clauses;
+    while (vis_pair(cl)) {
+        val_t test = vcar(vcar(cl));
+        if (test == S_ELSE2) has_else = true;
+        n_clauses++; cl = vcdr(cl);
+    }
+
+    /* Build cond clauses in forward order (collect into array, then cons) */
+    val_t clause_arr[64];
+    int ci = 0;
+    cl = clauses;
+    while (vis_pair(cl) && ci < 64) {
+        val_t clause = vcar(cl);
+        val_t test   = vcar(clause);
+        val_t expr   = vis_pair(vcdr(clause)) ? vcar(vcdr(clause)) : V_VOID;
+        val_t wrapped = scm_cons(gk, scm_cons(expr, V_NIL));
+        if (test == S_ELSE2)
+            clause_arr[ci++] = scm_cons(S_ELSE2, scm_cons(wrapped, V_NIL));
+        else
+            clause_arr[ci++] = scm_cons(test, scm_cons(wrapped, V_NIL));
+        cl = vcdr(cl);
+    }
+    /* Append default (else (raise var)) if no else clause present */
+    if (!has_else && ci < 64) {
+        val_t raise_form = scm_cons(S_RAISE, scm_cons(var, V_NIL));
+        clause_arr[ci++] = scm_cons(S_ELSE2, scm_cons(raise_form, V_NIL));
+    }
+    /* Build cond form from clause_arr in reverse (cons builds reversed list) */
+    val_t cond_list = V_NIL;
+    for (int i = ci - 1; i >= 0; i--)
+        cond_list = scm_cons(clause_arr[i], cond_list);
+    val_t handler_cond = scm_cons(S_COND2, cond_list);
+
+    /* (lambda (var) cond-form) */
+    val_t handler_lam = scm_cons(S_LAMBDA,
+                            scm_cons(scm_cons(var, V_NIL),
+                                scm_cons(handler_cond, V_NIL)));
+    /* (lambda () body...) */
+    val_t thunk_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, body));
+    /* (with-exception-handler handler thunk) */
+    val_t weh_form = scm_cons(S_WEH,
+                        scm_cons(handler_lam, scm_cons(thunk_lam, V_NIL)));
+    /* (lambda (%guard-k) weh-form) */
+    val_t outer_lam = scm_cons(S_LAMBDA,
+                         scm_cons(scm_cons(gk, V_NIL),
+                             scm_cons(weh_form, V_NIL)));
+    /* (call/cc outer-lam) */
+    val_t expanded = scm_cons(S_CALL_CC, scm_cons(outer_lam, V_NIL));
+    compile(c, expanded, tail, line);
+}
+
 static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
     /* (parameterize ((p1 v1) (p2 v2) ...) body ...)
      * Desugar to:
@@ -1023,6 +1097,11 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_GUARD) {
+        compile_guard(c, args, tail, line);
+        return;
+    }
+
     /* Forms the compiler delegates to the tree-walker at runtime:
        import, define-syntax, let-syntax, letrec-syntax,
        define-record-type, guard, receive, syntax-rules.
@@ -1030,14 +1109,42 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
         head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
         head == S_DEFINE_RECORD_TYPE ||
-        head == S_GUARD         || head == S_RECEIVE        ||
-        head == S_SYNTAX_RULES) {
+        head == S_RECEIVE       || head == S_SYNTAX_RULES) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
         emit_const(c, expr, line);
         emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
         return;
+    }
+
+    /* Macro expansion: if head is a symbol bound to T_SYNTAX in GLOBAL_ENV
+       (i.e. a user-defined syntax-rules macro), expand and recompile.
+       Expansion errors are deferred to runtime via (raise ...) so that
+       guard forms inside lambdas can catch zero-clause or no-match errors. */
+    if (vis_symbol(head)) {
+        val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
+        if (vis_syntax(macro)) {
+            ExnHandler h;
+            val_t expanded = V_FALSE;
+            val_t exn_val  = V_FALSE;
+            SCM_PROTECT(h,
+                expanded = apply(as_syntax(macro)->transformer,
+                                 scm_cons(expr, V_NIL)),
+                exn_val  = h.exn);
+            if (exn_val != V_FALSE) {
+                /* Expansion failed — emit (raise <error>) to defer to runtime */
+                val_t raise_sym = sym_intern_cstr("raise");
+                val_t raise_form = scm_cons(raise_sym,
+                                       scm_cons(scm_cons(S_QUOTE,
+                                                    scm_cons(exn_val, V_NIL)),
+                                                V_NIL));
+                compile(c, raise_form, tail, line);
+            } else {
+                compile(c, expanded, tail, line);
+            }
+            return;
+        }
     }
 
     /* Fallthrough: function call */

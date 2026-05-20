@@ -30,6 +30,7 @@
 #include "numeric.h"
 #include "symbol.h"
 #include "object.h"
+#include "set.h"
 
 const char *opcode_name[OP_COUNT] = {
     [OP_CONST]          = "CONST",
@@ -158,7 +159,7 @@ int chunk_add_const(Chunk *c, val_t v) {
     for (int i = 0; i < c->const_len; i++) {
         val_t e = c->constants[i];
         if (e == v) return i;                       /* same pointer / immediate */
-        if (vis_number(e) && vis_number(v) && num_eq(e, v)) return i;
+        if (vis_number(e) && vis_number(v) && scm_eqv(e, v)) return i;
         if (vis_symbol(e) && vis_symbol(v) && e == v)  return i; /* interned */
         if (vis_string(e) && vis_string(v) &&
             strcmp(as_str(e)->data, as_str(v)->data) == 0) return i;
