@@ -1,5 +1,23 @@
 # Changelog
 
+### 0.8.11 — REPL ,vm command: GC heap stats and VM introspection
+
+**New REPL command: `,vm`**
+
+- Prints a snapshot of the Boehm GC heap and VM execution state:
+  - `heap:` — bytes currently in use vs total heap committed to the process
+  - `alloc:` — total lifetime bytes allocated (monotonically increasing)
+  - `gc:` — number of GC collection cycles completed since startup
+  - `stack:` — current VM value-stack depth vs the 4096-slot ceiling
+  - `frames:` — current call-frame depth vs the 256-frame ceiling
+- Useful for spotting memory growth, GC pressure, or unexpectedly deep
+  recursion without reaching for an external profiler.
+- Implemented via `GC_get_heap_size`, `GC_get_free_bytes`,
+  `GC_get_total_bytes`, and `GC_gc_no` from the Boehm GC public API.
+- `,help` updated to list `,vm` alongside the existing commands.
+
+---
+
 ### 0.8.10 — GC root fix for VM struct; vm_push overflow check; Qt6 exception safety
 
 **Critical: VM struct protected from Boehm GC collection**
