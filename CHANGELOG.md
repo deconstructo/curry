@@ -1,5 +1,56 @@
 # Changelog
 
+### 0.8.9 — VM bug-fixes: exactness, guard, macro expansion, profiling, MCP SSE
+
+**Constant pool exactness preserved**
+
+- `chunk_add_const` used `num_eq` to deduplicate constants, which ignores
+  exactness — `num_eq(2, 2.0)` returns true, causing flonum `2.0` literals to be
+  silently replaced by fixnum `2` in the constant pool.  Replaced with `scm_eqv`,
+  which respects type: `(eqv? 2 2.0) = #f`.  Fixes the Redis test suite where
+  `zscore` expected a flonum but received a fixnum.
+
+**`T_BCCLOSURE` in the `ObjType` enum**
+
+- `T_BCCLOSURE` was only a `#define` in `vm.h`, not a member of the `ObjType`
+  enum in `object.h`.  The `vis_proc` macro did not include it, so C extensions
+  (e.g. the MCP module) could not recognise VM-compiled closures as procedures.
+  `T_BCCLOSURE = 41` is now in the enum and `vis_proc` checks for it.
+
+**`guard` compiled natively**
+
+- `guard` was delegated to the tree-walking evaluator, so bindings introduced by
+  `let`/`define` in the surrounding VM frame were invisible to the guard body
+  (looked up in `GLOBAL_ENV` and raised "unbound variable").  `guard` is now
+  desugared at compile time into `call/cc + with-exception-handler + cond`,
+  allowing it to capture local upvalues correctly.
+
+**Macro expansion at compile time**
+
+- The compiler now consults `GLOBAL_ENV` for syntax transformers before
+  attempting to compile a call.  If the operator is a `syntax-rules` macro,
+  the transformer is applied at compile time and the result compiled.  Expansion
+  errors are wrapped in a `(raise ...)` form so they surface at runtime with
+  full context.  Fixes `syntax_rules` test cases that called macros from
+  compiled (VM) code.
+
+**BcClosure profiling**
+
+- Profiling hooks (level 1 call-count, level 2 timed) are now wired into
+  `OP_CALL`, `OP_TAIL_CALL`, and `OP_RETURN` in `vm.c`, and into the
+  `vis_bcclosure` branch of `apply()`/`apply_arr()` in `eval.c`.  `CallFrame`
+  carries a `prof_start_ns` field for level-2 timing.
+
+**MCP SSE threads: `vm_init()` on entry**
+
+- Each SSE connection spawns a `conn_thread` (pthread).  `gc_register_thread()`
+  was called but `vm_init()` was not, leaving the thread-local `vm == NULL`.
+  Any `tools/call` request that invoked a BcClosure dereferenced `vm->sp` →
+  SIGSEGV.  `vm_init()` is now called immediately after `gc_register_thread()`
+  in `conn_thread`.
+
+---
+
 ### 0.8.8 — VM as primary engine; call/cc, parameterize, quasiquote in compiler
 
 **VM is now the primary script execution engine**

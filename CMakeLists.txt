@@ -546,13 +546,13 @@ set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
 
 # Hard runtime deps — always required regardless of which modules are built
+# libsqlite3-0 is included because the sqlite module is always compiled into the package
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libgc1t64 | libgc1 | libgc2, libgmp10, libreadline8 | libreadline8t64 | libreadline9")
+    "libgc1t64 | libgc1 | libgc2, libgmp10, libreadline8 | libreadline8t64 | libreadline9, libsqlite3-0")
 
-# Always-on optional modules (network, redis, sqlite, regex, sync, vecdb, json, mqtt)
+# Optional modules — only needed if those modules were built into this package
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "libsqlite3-0, \
-     libssl3 | libssl1.1, \
+    "libssl3 | libssl1.1, \
      libcurl4 | libcurl4t64, \
      libgit2-1.1 | libgit2-1.5 | libgit2-1.7 | libgit2-1.9, \
      libpng16-16 | libpng16-16t64, \
