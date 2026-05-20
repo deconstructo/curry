@@ -1,5 +1,47 @@
 # Changelog
 
+### 0.8.10 — GC root fix for VM struct; vm_push overflow check; Qt6 exception safety
+
+**Critical: VM struct protected from Boehm GC collection**
+
+- `_Thread_local VM *vm` is not scanned by Boehm GC's conservative collector
+  (TLS is not in the stack, globals, or register set that GC scans).  When any
+  allocation inside a primitive (e.g. `vector`) triggered a collection cycle,
+  Boehm GC could determine the VM struct was unreachable, collect it, and reuse
+  the memory — overwriting `vm->sp` with zero.  The subsequent `vm->sp -= argc + 1`
+  wrapped to `0xffffffffffffffxx`, causing a SIGSEGV on the next stack write.
+  Fixed by allocating the VM struct with `GC_MALLOC_UNCOLLECTABLE` so GC scans
+  its interior for live `val_t` references but never frees it.  `vm_free` now
+  calls `GC_FREE` explicitly.
+
+**`vm_push` overflow check**
+
+- The inline `vm_push` in `vm.h` (used by `apply_arr` and `apply` in `eval.c`)
+  had no bounds check, unlike the `PUSH` macro inside `vm_run`.  Added a call to
+  a new `vm_stack_overflow()` function (noreturn, raises a Scheme error) when
+  `vm->sp` reaches the stack ceiling.
+
+**Public API: `curry_is_error` / `curry_error_message`**
+
+- Two new functions added to `include/curry.h` and implemented in `src/api.c`:
+  - `curry_is_error(v)` — returns true if `v` is a Scheme error object (`T_ERROR`)
+  - `curry_error_message(v)` — extracts the string message from an error object,
+    or `NULL` if the message is not a string
+
+**Qt6: VM state save/restore and exception reporting**
+
+- When a Scheme exception fires inside `curry_apply()` from a Qt callback,
+  `longjmp` bypasses the VM's normal `vm->sp` restoration, leaving the stack
+  pointer corrupted for all subsequent callbacks.  `SCHEME_CALL` now saves
+  `vm->sp`, `frame_count`, and `open_upvalues` via `curry_vm_state_save` before
+  each callback and restores them in the exception handler.  The same save/restore
+  is applied directly in `paintEvent`.
+- New `qt6_print_exn(where, exn)` helper prints a human-readable error message
+  (using the new `curry_error_message` API) to stderr whenever a Scheme exception
+  is caught at a Qt boundary.
+
+---
+
 ### 0.8.9 — VM bug-fixes: exactness, guard, macro expansion, profiling, MCP SSE
 
 **Constant pool exactness preserved**

@@ -195,16 +195,27 @@
 
 _Thread_local VM *vm = NULL;
 
+__attribute__((noreturn)) void vm_stack_overflow(void) {
+    fprintf(stderr, "[vm] vm_stack_overflow: sp=%p stack_end=%p\n",
+            (void *)vm->sp, (void *)(vm->stack + VM_STACK_MAX));
+    fflush(stderr);
+    scm_raise(V_FALSE, "value stack overflow (max %d slots)", VM_STACK_MAX);
+}
+
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
 void vm_init(void) {
-    vm = CURRY_NEW(VM);
+    /* Use GC_MALLOC_UNCOLLECTABLE so Boehm GC never frees the VM struct even
+     * though the only reference is a _Thread_local pointer (TLS is not scanned
+     * as a GC root).  GC still scans the struct's interior for live val_t refs. */
+    vm = (VM *)GC_MALLOC_UNCOLLECTABLE(sizeof(VM));
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
 }
 
 void vm_free(void) {
+    if (vm) GC_FREE(vm);
     vm = NULL;
 }
 

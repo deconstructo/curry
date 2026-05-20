@@ -37,14 +37,35 @@
  * Cross-platform: Linux X11/Wayland, macOS (Metal via Qt), Windows (D3D/ANGLE).
  */
 
+#include <cstdio>
 #include <curry.h>
 #include "eval.h"   /* SCM_PROTECT — catches longjmp-based Scheme exceptions */
 
 /* Wrap every curry_apply at a C++→Scheme boundary.  Any Scheme exception
  * (longjmp) must not escape into Qt's C++ event machinery, as Qt does not
- * handle foreign non-local exits and the result is undefined behaviour. */
-#define SCHEME_CALL(call) do { ExnHandler _sch_h_; \
-    SCM_PROTECT(_sch_h_, (call), (void)0); } while(0)
+ * handle foreign non-local exits and the result is undefined behaviour.
+ *
+ * We also save/restore VM state on exception: if an exception fires inside
+ * curry_apply(), the vm->sp restoration inside apply() is bypassed via
+ * longjmp, leaving vm->sp corrupted.  Restoring it here prevents the
+ * corruption from cascading into heap corruption on subsequent callbacks. */
+static void qt6_print_exn(const char *where, curry_val exn) {
+    const char *msg = curry_error_message(exn);
+    if (msg) fprintf(stderr, "%s exception: %s\n", where, msg);
+    else if (curry_is_string(exn)) fprintf(stderr, "%s exception: %s\n", where, curry_string(exn));
+    else fprintf(stderr, "%s exception\n", where);
+    fflush(stderr);
+}
+
+#define SCHEME_CALL(call) do { \
+    ExnHandler _sch_h_; \
+    CurryVMState _vm_state_; \
+    curry_vm_state_save(&_vm_state_); \
+    SCM_PROTECT(_sch_h_, (call), { \
+        qt6_print_exn("[qt6]", _sch_h_.exn); \
+        curry_vm_state_restore(&_vm_state_); \
+    }); \
+} while(0)
 
 #include <QApplication>
 #include <QMainWindow>
@@ -386,15 +407,13 @@ void CurryCanvas::paintEvent(QPaintEvent *) {
         curry_make_fixnum(ws->cur_w),
         curry_make_fixnum(ws->cur_h)
     };
-    /* Wrap curry_apply with SCM_PROTECT so a Scheme exception (longjmp) does
-     * not escape past this stack frame.  Without this, any error thrown from
-     * the draw callback would bypass the QPainter destructor and leave the
-     * QOpenGLWidget in a permanently-painting state, crashing the next frame. */
     ExnHandler h;
+    CurryVMState vm_state;
+    curry_vm_state_save(&vm_state);
     SCM_PROTECT(h,
         curry_apply(ws->draw_proc, 3, argv),
-        /* on Scheme error: swallow, finish the paint event normally */
-        (void)0);
+        ({ qt6_print_exn("[qt6] paint", h.exn);
+           curry_vm_state_restore(&vm_state); }));
     ws->live_painter = nullptr;
 }
 

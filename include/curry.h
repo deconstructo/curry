@@ -67,6 +67,8 @@ bool       curry_is_void(curry_val v);
 bool       curry_is_eof(curry_val v);
 bool       curry_is_procedure(curry_val v);
 bool       curry_is_true(curry_val v);
+bool       curry_is_error(curry_val v);
+const char *curry_error_message(curry_val v); /* NULL if message is not a string */
 
 intptr_t   curry_fixnum(curry_val v);
 double     curry_float(curry_val v);
@@ -79,6 +81,27 @@ curry_val  curry_cdr(curry_val v);
 
 /* ---- Calling Scheme from C ---- */
 curry_val  curry_apply(curry_val proc, int argc, curry_val *argv);
+
+/* ---- VM state save/restore (for C++ event boundaries) ----
+ *
+ * When curry_apply is wrapped in a setjmp exception handler (e.g. SCM_PROTECT),
+ * a Scheme exception longjmps past the vm->sp restoration inside apply().
+ * Save the VM state before the call and restore it in the exception handler to
+ * prevent stack-pointer corruption from cascading into heap corruption.
+ *
+ *   CurryVMState s;
+ *   curry_vm_state_save(&s);
+ *   SCM_PROTECT(h, curry_apply(...), curry_vm_state_restore(&s));
+ */
+typedef struct {
+    void *sp;
+    int   frame_count;
+    void *open_upvalues;
+} CurryVMState;
+
+void curry_vm_state_save(CurryVMState *s);
+void curry_vm_state_restore(const CurryVMState *s);
+void *curry_vm_sp(void);  /* diagnostic: current vm->sp value */
 
 /* ---- Error handling ---- */
 /* Call from within a CurryFn to raise an error */

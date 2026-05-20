@@ -12,6 +12,7 @@
 #include "symbol.h"
 #include "numeric.h"
 #include "eval.h"
+#include "vm.h"
 #include "builtins.h"
 #include "gc.h"
 #include <string.h>
@@ -60,6 +61,12 @@ bool curry_is_void(curry_val v)      { return vis_void(v); }
 bool curry_is_eof(curry_val v)       { return vis_eof(v); }
 bool curry_is_procedure(curry_val v) { return vis_proc(v); }
 bool curry_is_true(curry_val v)      { return vis_true(v); }
+bool curry_is_error(curry_val v)     { return vis_error(v); }
+const char *curry_error_message(curry_val v) {
+    if (!vis_error(v)) return NULL;
+    val_t msg = as_err(v)->message;
+    return vis_string(msg) ? as_str(msg)->data : NULL;
+}
 
 /* ---- Value accessors ---- */
 
@@ -80,6 +87,22 @@ curry_val curry_apply(curry_val proc, int argc, curry_val *argv) {
         args = scm_cons(argv[i], args);
     return apply(proc, args);
 }
+
+/* ---- VM state save/restore ---- */
+
+void curry_vm_state_save(CurryVMState *s) {
+    s->sp             = (void *)vm->sp;
+    s->frame_count    = vm->frame_count;
+    s->open_upvalues  = (void *)vm->open_upvalues;
+}
+
+void curry_vm_state_restore(const CurryVMState *s) {
+    vm->sp            = (val_t *)s->sp;
+    vm->frame_count   = s->frame_count;
+    vm->open_upvalues = (Upvalue *)s->open_upvalues;
+}
+
+void *curry_vm_sp(void) { return (void *)vm->sp; }
 
 /* ---- Error handling ---- */
 

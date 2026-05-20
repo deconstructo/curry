@@ -80,8 +80,14 @@ val_t vm_run(BcClosure *closure, int argc);
 /* Convenience: compile and run a top-level expression */
 val_t vm_eval(val_t expr, val_t env);
 
+/* Stack overflow — noreturn, defined in vm.c */
+void vm_stack_overflow(void);
+
 /* Stack helpers (inline for speed) */
-static inline void   vm_push(val_t v)  { *vm->sp++ = v; }
+static inline void   vm_push(val_t v)  {
+    if (vm->sp >= vm->stack + VM_STACK_MAX) vm_stack_overflow();
+    *vm->sp++ = v;
+}
 static inline val_t  vm_pop(void)      { return *--vm->sp; }
 static inline val_t  vm_peek(int dist) { return vm->sp[-1 - dist]; }
 
