@@ -1,5 +1,36 @@
 # Changelog
 
+### 0.8.13 — `.scc` bytecode cache; Qt6 scroll/click fixes
+
+**Bytecode cache (`.scc` files)**
+
+- Compiled `Chunk` arrays are now cached alongside their source as
+  `<script>.scc`, skipping recompilation on subsequent runs when the
+  source file's mtime and size are unchanged.
+- Two-tier lookup: source-adjacent `.scc` first; falls back to
+  `~/.cache/curry/<mirrored-abs-path>.scc` when the source directory is
+  not writable (system-installed scripts, read-only mounts, etc.).
+- Cache is invalidated automatically on any content change or Curry
+  version bump.  One chunk per top-level form preserves
+  macro-expansion semantics across the file.
+- `src/version.h` extracted so the version string is shared between
+  `main.c` and `scc.c` without repetition.
+
+**Qt6 / mandelbrot fixes**
+
+- `setAttribute(WA_AcceptTouchEvents, false)` prevents macOS from
+  swallowing trackpad scroll events as native gestures before they reach
+  `wheelEvent`.
+- `canvas->raise()` fixes click hit-testing on macOS where the native
+  `NSScrollView` sits above `QOpenGLWidget` in the z-order.
+- `timer-start!` is now idempotent — calling it on an already-running
+  timer is a no-op, preventing duplicate ticks.
+- `request-render!` no longer spawns actors directly; it sets a
+  `*view-dirty*` flag and lets the 16 ms render timer gate actual spawns,
+  preventing an O(n) thread explosion on rapid mouse-move events.
+
+---
+
 ### 0.8.12 — `case` compiled natively by the bytecode compiler
 
 **`case` special form in the bytecode compiler**
