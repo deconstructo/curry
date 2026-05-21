@@ -12,6 +12,8 @@
 #include "profiling.h"
 #include "vm.h"
 #include "compiler.h"
+#include "scc.h"
+#include "version.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +24,6 @@
 #  include <readline/history.h>
 #endif
 
-#define CURRY_VERSION "0.8.12"
 #define BANNER \
     "𒋗𒈬 𒌝 𒄿𒈾 𒋗  |  šulmu — šiprī ina qātīka\n" \
     "Greetings — my service is in your hands\n\n"\
@@ -356,25 +357,47 @@ int main(int argc, char **argv) {
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
-            /* Compile and run each top-level form via the VM. */
-            val_t port = port_open_file(argv[i], PORT_INPUT);
-            if (vis_false(port)) {
-                fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
-                return 1;
+            Chunk **chunks = NULL;
+            int n_chunks = 0;
+            if (scc_load(argv[i], &chunks, &n_chunks)) {
+                /* Cache hit: run each chunk in order */
+                for (int k = 0; k < n_chunks; k++)
+                    vm_run(vm_make_closure(chunks[k], 0), 0);
+                free(chunks);
+            } else {
+                /* Cache miss: compile one form at a time (preserves macro semantics),
+                   collect chunks, write cache; each form is run as compiled */
+                val_t port = port_open_file(argv[i], PORT_INPUT);
+                if (vis_false(port)) {
+                    fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
+                    return 1;
+                }
+                int cap = 64;
+                chunks = malloc((size_t)cap * sizeof(Chunk *));
+                val_t v;
+                while (!vis_eof((v = scm_read(port)))) {
+                    val_t cl = compiler_compile(v);
+                    BcClosure *bc = as_bcclosure(cl);
+                    if (n_chunks == cap) {
+                        cap *= 2;
+                        chunks = realloc(chunks, (size_t)cap * sizeof(Chunk *));
+                    }
+                    chunks[n_chunks++] = bc->chunk;
+                    vm_run(bc, 0);
+                }
+                port_close(port);
+                scc_write(argv[i], chunks, n_chunks);
+                free(chunks);
             }
-            val_t v;
-            while (!vis_eof((v = scm_read(port)))) {
-                val_t cl = compiler_compile(v);
-                vm_run(as_bcclosure(cl), 0);
-            }
-            port_close(port);
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
+            vm_reset();
             fprintf(stderr, "Error: ");
             if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
             else scm_write(h.exn, PORT_STDERR);
-            fputs("\n", stderr); return 1;
+            fputs("\n", stderr);
+            return 1;
         }
         ran_something = true;
         break;

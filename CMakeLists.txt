@@ -109,6 +109,7 @@ set(CORE_SOURCES
   src/profiling.c
   src/compiler.c
   src/vm.c
+  src/scc.c
 )
 
 add_library(curry_core STATIC ${CORE_SOURCES})
