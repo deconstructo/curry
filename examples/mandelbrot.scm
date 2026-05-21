@@ -60,6 +60,7 @@
 (define *display-bh*  0)
 (define *rendering*   #f)   ; #t while workers are running
 (define *render-tag*  0)    ; incremented on each new request (stale-worker detection)
+(define *view-dirty*  #f)   ; #t when view changed but render not yet started
 
 (define *canvas* #f)
 (define *render-timer* #f)
@@ -259,9 +260,9 @@
          (vzoom *zoom*)
          (n     (min *NUM-WORKERS* (max 1 bh)))
          (tag   *render-tag*))
-    ;; Coordinator: waits for N 'done messages, then swaps the display buffer
-    ;; and clears *rendering*.  Tag check prevents a stale coordinator from a
-    ;; superseded render from clobbering the state of a newer one.
+    ;; Coordinator: waits for N 'done messages, then swaps the display buffer.
+    ;; Tag check prevents a stale coordinator from clobbering a newer frame.
+    ;; *rendering* is always cleared so the timer can start the next render.
     (let ((coord (spawn
                    (lambda ()
                      (let loop ((rem n))
@@ -271,8 +272,8 @@
                      (when (= tag *render-tag*)
                        (set! *display-buf* buf)
                        (set! *display-bw*  bw)
-                       (set! *display-bh*  bh)
-                       (set! *rendering* #f))))))
+                       (set! *display-bh*  bh))
+                     (set! *rendering* #f)))))
       ;; Spawn N workers, each owning a horizontal band of block-rows.
       (do ((i 0 (+ i 1)))
           ((= i n))
@@ -284,17 +285,28 @@
               (send! coord 'done))))))))
 
 (define (request-render!)
-  (set! *render-tag* (+ *render-tag* 1))
-  (set! *rendering*  #t)
-  (alloc-frame-buf!)
-  (do-render!)
+  ;; Mark the view dirty and ensure the render timer is running.
+  ;; Actual actor spawn happens in render-tick! so rapid calls (e.g. every
+  ;; mouse-move event) do not create an O(n) thread explosion — at most one
+  ;; render runs at a time and the timer fires at the 16 ms display rate.
+  (set! *view-dirty* #t)
   (when *render-timer* (timer-start! *render-timer*)))
 
-;;; ── Timer tick: redraw while workers run, stop when done ─────────────────────
+(define (start-render!)
+  (set! *view-dirty*  #f)
+  (set! *render-tag*  (+ *render-tag* 1))
+  (set! *rendering*   #t)
+  (alloc-frame-buf!)
+  (do-render!))
+
+;;; ── Timer tick: start a pending render, redraw, stop when idle ──────────────
 
 (define (render-tick!)
+  (when (and *view-dirty* (not *rendering*))
+    (start-render!))
   (when *canvas* (canvas-redraw! *canvas*))
-  (unless *rendering* (when *render-timer* (timer-stop! *render-timer*))))
+  (unless (or *rendering* *view-dirty*)
+    (when *render-timer* (timer-stop! *render-timer*))))
 
 ;;; ── Draw ─────────────────────────────────────────────────────────────────────
 

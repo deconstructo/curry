@@ -241,6 +241,9 @@ public:
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
+        /* On macOS, prevent Qt from consuming trackpad events as native gestures
+         * before they reach wheelEvent as scroll deltas. */
+        setAttribute(Qt::WA_AcceptTouchEvents, false);
     }
 protected:
     void initializeGL() override { ws->gpu_ok = true; }
@@ -490,6 +493,12 @@ static curry_val fn_make_window(int ac, curry_val *av, void *ud) {
     hbox->addWidget(canvas, 1);
     cwin->setCentralWidget(central);
 
+    /* On macOS, QScrollArea's native NSScrollView can sit above the
+     * QOpenGLWidget in the native view z-order and absorb mouse press/release
+     * events while letting scroll events through.  raise() brings the canvas
+     * NSView to the top within their shared parent so click hit-testing works. */
+    canvas->raise();
+
     ws->win            = cwin;
     ws->canvas         = canvas;
     ws->sidebar_layout = sbl;
@@ -531,11 +540,16 @@ static curry_val fn_quit_event_loop(int ac, curry_val *av, void *ud) {
 static curry_val fn_canvas_on_draw(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->draw_proc = av[1]; return curry_void(); }
 static curry_val fn_canvas_on_mouse(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->mouse_proc = av[1]; return curry_void(); }
+    (void)ud;(void)ac; keep_alive(av[1]);
+    val_to_canvas(av[0])->mouse_proc = av[1];
+    return curry_void(); }
 static curry_val fn_canvas_on_scroll(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; keep_alive(av[1]); val_to_canvas(av[0])->scroll_proc = av[1]; return curry_void(); }
+    (void)ud;(void)ac; keep_alive(av[1]);
+    val_to_canvas(av[0])->scroll_proc = av[1];
+    return curry_void(); }
 static curry_val fn_canvas_redraw(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; val_to_canvas(av[0])->canvas->update(); return curry_void(); }
+    (void)ud;(void)ac;
+    val_to_canvas(av[0])->canvas->update(); return curry_void(); }
 
 /* =========================================================================
  * Layer 3 — Layout boxes
@@ -990,7 +1004,10 @@ static curry_val fn_make_timer(int ac, curry_val *av, void *ud) {
     return timer_to_val(t);
 }
 static curry_val fn_timer_start(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; val_to_timer(av[0])->start(); return curry_void();
+    (void)ud;(void)ac;
+    auto *t = val_to_timer(av[0]);
+    if (!t->isActive()) t->start();
+    return curry_void();
 }
 static curry_val fn_timer_stop(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; val_to_timer(av[0])->stop(); return curry_void();
