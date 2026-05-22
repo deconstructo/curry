@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 0.8.16 LANGUAGES C CXX)
+project(curry VERSION 0.8.17 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -176,6 +176,7 @@ option(BUILD_MODULE_REGEX     "Build POSIX regex module"            ON)
 option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 option(BUILD_MODULE_MCP       "Build MCP server module"              ON)
 option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
+option(BUILD_MODULE_TTS       "Build text-to-speech module (eSpeak NG)" ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -495,6 +496,21 @@ if(BUILD_MODULE_RPI)
   endif()
 endif()
 
+if(BUILD_MODULE_TTS)
+  find_library(ESPEAK_NG_LIB NAMES espeak-ng
+    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  find_path(ESPEAK_NG_INCLUDE NAMES espeak-ng/speak_lib.h
+    HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  if(ESPEAK_NG_LIB AND ESPEAK_NG_INCLUDE)
+    curry_c_module(tts)
+    target_include_directories(curry_tts PRIVATE ${ESPEAK_NG_INCLUDE})
+    target_link_libraries(curry_tts PRIVATE ${ESPEAK_NG_LIB})
+    message(STATUS "TTS module enabled (eSpeak NG)")
+  else()
+    message(STATUS "TTS module disabled -- install: brew install espeak-ng / sudo apt install libespeak-ng-dev")
+  endif()
+endif()
+
 # ---- Tests ----
 
 enable_testing()
@@ -539,8 +555,8 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_PACKAGE_VERSION           "0.8.16")      # overridden by bump-release.sh
-set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.16_<arch>.deb
+set(CPACK_PACKAGE_VERSION           "0.8.17")      # overridden by bump-release.sh
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.17_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")

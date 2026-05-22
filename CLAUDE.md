@@ -44,10 +44,11 @@ brew install bdw-gc gmp cmake
 
 # Optional modules — Linux
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
-                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev
+                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev \
+                 libespeak-ng-dev
 
 # Optional modules — macOS
-brew install openssl sqlite libgit2 libpng jpeg-turbo
+brew install openssl sqlite libgit2 libpng jpeg-turbo espeak-ng
 # curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with macOS
 ```
 
@@ -286,7 +287,7 @@ Two kinds of modules:
 2. **Scheme `.sld` / `.scm`** — evaluated in a fresh environment; exports all top-level definitions.
 
 Always-on modules (no build flag needed): `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`.  
-Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`.
+Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`, `tts` (eSpeak NG).
 
 Module search order: `CURRY_MODULE_PATH` env var (colon-separated), then `lib/curry/modules/`. Module names map to paths, e.g. `(curry json)` → `curry/json.so`.
 
@@ -465,6 +466,33 @@ Key points:
 - Queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
 - No external C dependencies beyond the standard socket API.
 - Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/module-neo4j.md`.
+
+## TTS module (`modules/tts/tts.c`)
+
+Text-to-speech via **eSpeak NG** (`libespeak-ng`). Enable with `-DBUILD_MODULE_TTS=ON`.
+
+```scheme
+(import (curry tts))
+
+(tts-speak "hello world")            ; synchronous playback, default English voice
+(tts-speak "bonjour" "fr")           ; speak in French (sets voice for session)
+
+(tts-set-rate!   150)                ; words per minute (80-450; default 175)
+(tts-set-pitch!   60)                ; pitch 0-100 (default 50)
+(tts-set-volume! 120)                ; volume 0-200 (default 100)
+(tts-set-voice! "en-us")            ; set voice by name
+
+(tts-voices)                         ; -> list of voice-name strings (141 voices)
+(tts-sample-rate)                    ; -> integer Hz (22050 typical)
+
+(define pcm (tts->pcm "hello"))      ; -> bytevector of 16-bit LE PCM samples
+(bytevector-length pcm)              ; -> number of bytes (samples * 2)
+```
+
+Constants: `tts-rate-min` (80), `tts-rate-max` (450), `tts-rate-normal` (175).
+
+`tts-speak` uses `AUDIO_OUTPUT_SYNCH_PLAYBACK` and blocks until audio finishes.  
+`tts->pcm` uses `AUDIO_OUTPUT_SYNCHRONOUS` (no hardware playback) and reinitializes if called after `tts-speak`.
 
 ## R7RS compliance gaps
 

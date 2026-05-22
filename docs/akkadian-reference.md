@@ -1,6 +1,6 @@
 # Akkadian Language Reference
 
-*v0.8.16 — 2026-05-22*
+*v0.8.17 — 2026-05-22*
 
 Curry Scheme accepts three equivalent notations for every name. You can mix them freely within a single program.
 

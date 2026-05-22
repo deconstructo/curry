@@ -1,5 +1,19 @@
 # Changelog
 
+### 0.8.17 — TTS module (eSpeak NG)
+
+**New module: `(curry tts)`**
+
+- `(tts-speak text)` / `(tts-speak text lang)` — synchronous speech playback via eSpeak NG (`AUDIO_OUTPUT_SYNCH_PLAYBACK`). Blocks until audio completes. Optional `lang` argument sets the voice for the session (e.g. `"en"`, `"fr"`, `"de"`).
+- `(tts->pcm text)` — returns a bytevector of 16-bit little-endian PCM samples (`AUDIO_OUTPUT_SYNCHRONOUS`, no hardware output). Switches mode on the fly if needed.
+- `(tts-set-rate! wpm)` / `(tts-set-pitch! n)` / `(tts-set-volume! n)` / `(tts-set-voice! name)` — session-level parameter setters; applied immediately if eSpeak is already initialised.
+- `(tts-voices)` — returns the full list of installed voice names (141 voices in a standard eSpeak NG install).
+- `(tts-sample-rate)` — sample rate in Hz (typically 22050).
+- Constants: `tts-rate-min` (80), `tts-rate-max` (450), `tts-rate-normal` (175).
+- Build flag: `-DBUILD_MODULE_TTS=ON`; dependency: `libespeak-ng` (`brew install espeak-ng` / `apt install libespeak-ng-dev`).
+
+---
+
 ### 0.8.16 — Phase 11: multi-DOF Lagrangian + Hamiltonian mechanics
 
 **Core C fixes**
