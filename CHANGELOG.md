@@ -1,5 +1,41 @@
 # Changelog
 
+### 0.8.15 — SICM module fixes and test coverage
+
+**`(curry sicm)` bug fixes**
+
+- `Lagrangian->V` was listed in the module header as a supported procedure
+  but was never implemented. It now correctly extracts the potential energy
+  from a Lagrangian by evaluating L at zero velocity (`V = −L(t,q,0)`),
+  which works because kinetic energy vanishes when nothing is moving.
+- `Lagrangian->T` previously required the potential function V to be passed
+  explicitly as a second argument. It now derives V from the Lagrangian
+  itself (`T = L + V`) and takes only L.
+- `literal-function*` used `iota`, which is not implemented in Curry.
+  Replaced with an explicit loop.
+
+**Test coverage**
+
+- `tests/sicm_tests.scm` expanded from 21 to 35 assertions, covering the
+  previously untested procedures: `literal-function*`, `Lagrangian->V`,
+  `Lagrangian->T`, `make-Lagrangian`, `square` on `down` tuples,
+  `Euler-Lagrange-operator` with free particle and gravity Lagrangians, and
+  numeric `Lagrange-equations` verified against an exact analytic solution.
+
+**Refactoring**
+
+- `src/scc.c`: extracted shared `load_chunks_from_file` helper from the
+  near-duplicate `read_scc` and `scc_load_direct` functions.
+
+**Documentation**
+
+- `docs/pkg-design.md` — design evaluation and recommendation for the
+  `curry pkg` package manager (registry model, lock files, environments,
+  C extension handling, versioning, package identity, manifest format,
+  security).
+
+---
+
 ### 0.8.14 — Akkadian/CLI test suites; SCC cache GC bug fix
 
 **Test suites**

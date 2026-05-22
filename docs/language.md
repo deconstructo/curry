@@ -1,6 +1,6 @@
 # Curry Scheme Language Reference
 
-*v0.8.3 — 2026-05-16*
+*v0.8.15 — 2026-05-22*
 
 Curry is an R7RS Scheme interpreter with a numeric tower that extends through the hypercomplex numbers, a built-in computer algebra system, an actor-model concurrency layer, and a modular C extension interface. Error messages are rendered in Standard Babylonian Akkadian, as scribal tradition demands.
 
