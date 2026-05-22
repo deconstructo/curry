@@ -1,5 +1,42 @@
 # Changelog
 
+### 0.8.14 — Akkadian/CLI test suites; SCC cache GC bug fix
+
+**Test suites**
+
+- `tests/akkadian_tests.scm` — 205 assertions covering every entry in
+  `akkadian_names.h` in both transliterated Akkadian (e.g. `šakānum`) and
+  cuneiform (e.g. `𒁹`) forms, for all AKK_SF special-form synonyms and
+  AKK_PR procedure aliases.
+- `tests/test_cli.sh` — 30 shell-level assertions for CLI features:
+  shebang handling in `.scm` files, `-c` compile-to-`.scc`, `-c -o`
+  custom output path, `-c -x` executable flag (shebang prepend + chmod),
+  combined getopt flags (`-xc FILE`), magic-byte detection for
+  extension-less `.scc` files, `-l` load-before-eval, script argument
+  passing via `command-line-args`.
+- Both suites are registered in `tests/CMakeLists.txt` and run via
+  `ctest`.
+
+**SCC cache GC bug fix**
+
+- `read_scc` and `scc_load_direct` allocated the `Chunk**` pointer array
+  with plain `malloc`.  Boehm GC does not scan non-GC heap memory for
+  interior pointers, so the `Chunk` objects could be collected while the
+  run loop was still executing them.  This manifested as a non-deterministic
+  `unbound variable: <garbled>` error on the second run of any script that
+  triggered a GC collection mid-loop (reproducibly hit by the 274-chunk
+  akkadian test suite).  Fixed by using `GC_MALLOC` for both arrays.
+
+**Documentation**
+
+- `docs/vm.md` — new Bytecode Cache section: `.scc` format, constant-pool
+  tags, cache validation, and the `GC_MALLOC` requirement.
+- `docs/akkadian-reference.md` — bumped to v0.8.14; added test-coverage
+  section.
+- `CLAUDE.md` — expanded test suite table.
+
+---
+
 ### 0.8.13 — `.scc` bytecode cache; Qt6 scroll/click fixes
 
 **Bytecode cache (`.scc` files)**
