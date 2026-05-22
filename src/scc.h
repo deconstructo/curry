@@ -38,4 +38,8 @@ void scc_write(const char *src_path, Chunk **chunks, int n_chunks);
    returns true.  Returns false if no valid cache found. */
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out);
 
+/* Load a .scc file directly by path, skipping source mtime/size validation.
+   Used when running a .scc file explicitly (no corresponding .scm present). */
+bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out);
+
 #endif /* CURRY_SCC_H */

@@ -652,3 +652,50 @@ bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
     free(fb);
     return hit;
 }
+
+bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
+    FILE *f = fopen(scc_path, "rb");
+    if (!f) return false;
+
+    bool ok = false;
+    Chunk **chunks = NULL;
+    int n = 0;
+
+    char magic[8];
+    if (fread(magic, 1, 8, f) != 8) goto done;
+    if (memcmp(magic, SCC_MAGIC, 7) != 0) goto done;
+    if (magic[7] != SCC_FMT_VER) goto done;
+
+    uint8_t vlen;
+    if (fread(&vlen, 1, 1, f) != 1) goto done;
+    char vbuf[256];
+    if (fread(vbuf, 1, vlen, f) != vlen) goto done;
+    vbuf[vlen] = '\0';
+    if (strcmp(vbuf, CURRY_VERSION) != 0) goto done;
+
+    if (fseek(f, 16, SEEK_CUR) != 0) goto done;  /* skip mtime + size */
+
+    uint32_t n_chunks;
+    if (!ru32(f, &n_chunks)) goto done;
+
+    chunks = malloc(n_chunks * sizeof(Chunk *));
+    if (!chunks && n_chunks > 0) goto done;
+
+    for (uint32_t i = 0; i < n_chunks; i++) {
+        chunks[i] = chunk_new();
+        if (!read_chunk(f, chunks[i])) { n = (int)i; goto done; }
+    }
+    n = (int)n_chunks;
+
+    uint32_t sentinel;
+    if (!ru32(f, &sentinel) || sentinel != SCC_SENTINEL) goto done;
+
+    ok = true;
+
+done:
+    fclose(f);
+    if (!ok) { free(chunks); chunks = NULL; n = 0; }
+    *chunks_out = chunks;
+    *n_out = n;
+    return ok;
+}

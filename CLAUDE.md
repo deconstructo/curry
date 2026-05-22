@@ -75,12 +75,15 @@ The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS
 ## CLI flags
 
 ```
-./build/curry [options] [script.scm] [args...]
+./build/curry [options] [script.scm|script.scc] [args...]
   -e EXPR    Evaluate expression and print result
   -l FILE    Load file before entering REPL
   -i         Force interactive REPL after loading scripts
+  -c FILE    Compile FILE to .scc bytecode without executing it
   -v         Print version
 ```
+
+Passing a `.scc` file as the positional argument runs it directly from bytecode without needing the original `.scm` source.
 
 Script arguments are bound to `command-line-args` in the global environment.
 

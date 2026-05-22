@@ -273,6 +273,24 @@ static void repl(void) {
 #endif
 }
 
+/* ---- Compile-time execution filter ---- */
+
+/* Returns true for forms that must be run during -c compilation because
+   they affect the macro/import environment for subsequent forms. */
+static bool affects_compile_env(val_t form) {
+    if (!vis_pair(form)) return false;
+    val_t head = vcar(form);
+    if (head == S_IMPORT || head == S_DEFINE_SYNTAX) return true;
+    if (head == S_BEGIN) {
+        val_t rest = vcdr(form);
+        while (vis_pair(rest)) {
+            if (affects_compile_env(vcar(rest))) return true;
+            rest = vcdr(rest);
+        }
+    }
+    return false;
+}
+
 /* ---- Usage ---- */
 
 static void usage(const char *argv0) {
@@ -359,7 +377,8 @@ int main(int argc, char **argv) {
                         chunks = realloc(chunks, (size_t)cap * sizeof(Chunk *));
                     }
                     chunks[n_chunks++] = bc->chunk;
-                    vm_run(bc, 0);  /* must execute: imports and define-syntax affect later compilation */
+                    if (affects_compile_env(v))
+                        vm_run(bc, 0);
                 }
                 current_handler = h.prev;
             } else {
@@ -404,7 +423,19 @@ int main(int argc, char **argv) {
         if (setjmp(h.jmp) == 0) {
             Chunk **chunks = NULL;
             int n_chunks = 0;
-            if (scc_load(argv[i], &chunks, &n_chunks)) {
+            size_t arglen = strlen(argv[i]);
+            bool is_scc = arglen > 4 && strcmp(argv[i] + arglen - 4, ".scc") == 0;
+            if (is_scc) {
+                /* Direct .scc run — no source file, skip mtime check */
+                if (!scc_load_direct(argv[i], &chunks, &n_chunks)) {
+                    fprintf(stderr, "Error: cannot load bytecode file: %s\n", argv[i]);
+                    current_handler = h.prev;
+                    return 1;
+                }
+                for (int k = 0; k < n_chunks; k++)
+                    vm_run(vm_make_closure(chunks[k], 0), 0);
+                free(chunks);
+            } else if (scc_load(argv[i], &chunks, &n_chunks)) {
                 /* Cache hit: run each chunk in order */
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
