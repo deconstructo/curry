@@ -56,6 +56,13 @@ chmod +x hello.scm
 
 `#!` is treated as a line comment by the reader, so the same file runs correctly with `curry hello.scm` too.
 
+Compiled `.scc` bytecode files also support direct execution. `curry -c` prepends the shebang and sets the executable bit automatically:
+
+```bash
+curry -c hello.scm   # produces hello.scc (executable, shebang included)
+./hello.scc          # runs directly
+```
+
 See [INSTALL.md](INSTALL.md) for full dependency and build instructions, including optional modules and the Homebrew formula.
 
 ---

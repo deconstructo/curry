@@ -35,6 +35,7 @@
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
 #define SCC_FMT_VER     '\x01'
 #define SCC_SENTINEL    0xCAFEBEEFu
+#define SCC_SHEBANG     "#!/usr/bin/env curry\n"
 
 /* Constant-pool type tags written before each constant */
 #define CTAG_IMM        0
@@ -80,6 +81,16 @@ static bool wbytes(FILE *f, const void *p, uint32_t n) {
 
 static bool wstr(FILE *f, const char *s, uint32_t len) {
     return wu32(f, len) && wbytes(f, s, len);
+}
+
+/* Skip a shebang line (#! ...\n) if present; rewind to 0 otherwise. */
+static void skip_shebang(FILE *f) {
+    int c1 = fgetc(f);
+    if (c1 != '#') { fseek(f, 0, SEEK_SET); return; }
+    int c2 = fgetc(f);
+    if (c2 != '!') { fseek(f, 0, SEEK_SET); return; }
+    int c;
+    while ((c = fgetc(f)) != EOF && c != '\n') {}
 }
 
 /* ── Read helpers ───────────────────────────────────────────────────────── */
@@ -546,6 +557,7 @@ static int write_scc(const char *scc_path, const char *src_path,
     if (!f) return -1;
 
     bool ok = true;
+    ok = ok && (fwrite(SCC_SHEBANG, 1, sizeof(SCC_SHEBANG)-1, f) == sizeof(SCC_SHEBANG)-1);
     ok = ok && (fwrite(SCC_MAGIC, 1, 7, f) == 7);
     ok = ok && wb(f, (uint8_t)SCC_FMT_VER);
 
@@ -564,6 +576,7 @@ static int write_scc(const char *scc_path, const char *src_path,
 
     fclose(f);
     if (!ok) { remove(scc_path); return -1; }
+    chmod(scc_path, 0755);
     return 0;
 }
 
@@ -574,6 +587,8 @@ static bool read_scc(const char *scc_path, const char *src_path,
 
     FILE *f = fopen(scc_path, "rb");
     if (!f) return false;
+
+    skip_shebang(f);
 
     bool ok = false;
     Chunk **chunks = NULL;
@@ -656,6 +671,8 @@ bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
 bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
     FILE *f = fopen(scc_path, "rb");
     if (!f) return false;
+
+    skip_shebang(f);
 
     bool ok = false;
     Chunk **chunks = NULL;

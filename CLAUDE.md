@@ -87,6 +87,8 @@ Passing a `.scc` file as the positional argument runs it directly from bytecode 
 
 Scripts support shebang lines — `#!` is treated as a line comment, so `#!/usr/bin/env curry` works correctly. Make the file executable with `chmod +x script.scm` and invoke it directly.
 
+Compiled `.scc` files also support direct execution: `curry -c script.scm` produces `script.scc` with a shebang prepended and the executable bit set, so `./script.scc` works immediately.
+
 Script arguments are bound to `command-line-args` in the global environment.
 
 ## REPL commands
