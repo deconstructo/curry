@@ -549,7 +549,7 @@ static char *fallback_path(const char *src_path) {
 /* ── Low-level write / read a single .scc file ──────────────────────────── */
 
 static int write_scc(const char *scc_path, const char *src_path,
-                     Chunk **chunks, int n_chunks) {
+                     Chunk **chunks, int n_chunks, bool executable) {
     int64_t mtime, size;
     if (!src_stat(src_path, &mtime, &size)) return -1;
 
@@ -557,7 +557,8 @@ static int write_scc(const char *scc_path, const char *src_path,
     if (!f) return -1;
 
     bool ok = true;
-    ok = ok && (fwrite(SCC_SHEBANG, 1, sizeof(SCC_SHEBANG)-1, f) == sizeof(SCC_SHEBANG)-1);
+    if (executable)
+        ok = ok && (fwrite(SCC_SHEBANG, 1, sizeof(SCC_SHEBANG)-1, f) == sizeof(SCC_SHEBANG)-1);
     ok = ok && (fwrite(SCC_MAGIC, 1, 7, f) == 7);
     ok = ok && wb(f, (uint8_t)SCC_FMT_VER);
 
@@ -576,7 +577,7 @@ static int write_scc(const char *scc_path, const char *src_path,
 
     fclose(f);
     if (!ok) { remove(scc_path); return -1; }
-    chmod(scc_path, 0755);
+    if (executable) chmod(scc_path, 0755);
     return 0;
 }
 
@@ -639,7 +640,7 @@ done:
 
 void scc_write(const char *src_path, Chunk **chunks, int n_chunks) {
     char *p = primary_path(src_path);
-    if (p && write_scc(p, src_path, chunks, n_chunks) == 0) {
+    if (p && write_scc(p, src_path, chunks, n_chunks, false) == 0) {
         free(p);
         return;
     }
@@ -648,13 +649,14 @@ void scc_write(const char *src_path, Chunk **chunks, int n_chunks) {
     char *fb = fallback_path(src_path);
     if (fb) {
         mkdirs_for(fb);
-        write_scc(fb, src_path, chunks, n_chunks);
+        write_scc(fb, src_path, chunks, n_chunks, false);
         free(fb);
     }
 }
 
-void scc_write_to(const char *out_path, const char *src_path, Chunk **chunks, int n_chunks) {
-    write_scc(out_path, src_path, chunks, n_chunks);
+void scc_write_to(const char *out_path, const char *src_path,
+                  Chunk **chunks, int n_chunks, bool executable) {
+    write_scc(out_path, src_path, chunks, n_chunks, executable);
 }
 
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {

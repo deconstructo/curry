@@ -300,6 +300,7 @@ static void usage(const char *argv0) {
         "  -l FILE    Load file\n"
         "  -c FILE    Compile FILE to .scc bytecode without executing\n"
         "  -o OUT     Output path for -c (default: FILE with .scc extension)\n"
+        "  -x         Make -c output executable (shebang + chmod +x)\n"
         "  -i         Force interactive REPL after loading scripts\n"
         "  -v         Print version\n"
         "  --         End of options\n",
@@ -314,10 +315,14 @@ int main(int argc, char **argv) {
     bool interactive = false;
     bool ran_something = false;
 
-    /* Pre-scan for -o so it works regardless of position relative to -c. */
+    /* Pre-scan for -o and -x so they work regardless of position relative to -c. */
     const char *compile_out = NULL;
+    bool compile_executable = false;
     for (int i = 1; i < argc - 1; i++) {
         if (!strcmp(argv[i], "-o")) { compile_out = argv[i + 1]; break; }
+    }
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-x")) { compile_executable = true; break; }
     }
 
     for (int i = 1; i < argc; i++) {
@@ -330,6 +335,7 @@ int main(int argc, char **argv) {
         }
         if (!strcmp(argv[i], "-i")) { interactive = true; continue; }
         if (!strcmp(argv[i], "-o")) { i++; continue; } /* consumed by pre-scan */
+        if (!strcmp(argv[i], "-x")) { continue; }      /* consumed by pre-scan */
         if (!strcmp(argv[i], "--")) { i++; break; }
 
         if (!strcmp(argv[i], "-e")) {
@@ -400,7 +406,7 @@ int main(int argc, char **argv) {
             }
             port_close(port);
             if (compile_out) {
-                scc_write_to(compile_out, argv[i], chunks, n_chunks);
+                scc_write_to(compile_out, argv[i], chunks, n_chunks, compile_executable);
                 fprintf(stderr, "Compiled %s -> %s (%d chunk%s)\n",
                         argv[i], compile_out, n_chunks, n_chunks == 1 ? "" : "s");
                 compile_out = NULL;
