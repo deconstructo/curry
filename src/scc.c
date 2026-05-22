@@ -581,14 +581,11 @@ static int write_scc(const char *scc_path, const char *src_path,
     return 0;
 }
 
-static bool read_scc(const char *scc_path, const char *src_path,
-                     Chunk ***chunks_out, int *n_out) {
-    int64_t src_mtime, src_size;
-    if (!src_stat(src_path, &src_mtime, &src_size)) return false;
-
-    FILE *f = fopen(scc_path, "rb");
-    if (!f) return false;
-
+/* Load chunks from an already-open SCC file.  If src_path is non-NULL,
+   validates the cached mtime/size against the source file; otherwise skips
+   those 16 bytes (used when loading a .scc directly without a source). */
+static bool load_chunks_from_file(FILE *f, const char *src_path,
+                                   Chunk ***chunks_out, int *n_out) {
     skip_shebang(f);
 
     bool ok = false;
@@ -607,9 +604,15 @@ static bool read_scc(const char *scc_path, const char *src_path,
     vbuf[vlen] = '\0';
     if (strcmp(vbuf, CURRY_VERSION) != 0) goto done;
 
-    int64_t cached_mtime, cached_size;
-    if (!ri64(f, &cached_mtime) || !ri64(f, &cached_size)) goto done;
-    if (cached_mtime != src_mtime || cached_size != src_size) goto done;
+    if (src_path) {
+        int64_t src_mtime, src_size;
+        if (!src_stat(src_path, &src_mtime, &src_size)) goto done;
+        int64_t cached_mtime, cached_size;
+        if (!ri64(f, &cached_mtime) || !ri64(f, &cached_size)) goto done;
+        if (cached_mtime != src_mtime || cached_size != src_size) goto done;
+    } else {
+        if (fseek(f, 16, SEEK_CUR) != 0) goto done;
+    }
 
     uint32_t n_chunks;
     if (!ru32(f, &n_chunks)) goto done;
@@ -629,10 +632,18 @@ static bool read_scc(const char *scc_path, const char *src_path,
     ok = true;
 
 done:
-    fclose(f);
     if (!ok) { chunks = NULL; n = 0; }
     *chunks_out = chunks;
     *n_out = n;
+    return ok;
+}
+
+static bool read_scc(const char *scc_path, const char *src_path,
+                     Chunk ***chunks_out, int *n_out) {
+    FILE *f = fopen(scc_path, "rb");
+    if (!f) return false;
+    bool ok = load_chunks_from_file(f, src_path, chunks_out, n_out);
+    fclose(f);
     return ok;
 }
 
@@ -677,48 +688,7 @@ bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
 bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
     FILE *f = fopen(scc_path, "rb");
     if (!f) return false;
-
-    skip_shebang(f);
-
-    bool ok = false;
-    Chunk **chunks = NULL;
-    int n = 0;
-
-    char magic[8];
-    if (fread(magic, 1, 8, f) != 8) goto done;
-    if (memcmp(magic, SCC_MAGIC, 7) != 0) goto done;
-    if (magic[7] != SCC_FMT_VER) goto done;
-
-    uint8_t vlen;
-    if (fread(&vlen, 1, 1, f) != 1) goto done;
-    char vbuf[256];
-    if (fread(vbuf, 1, vlen, f) != vlen) goto done;
-    vbuf[vlen] = '\0';
-    if (strcmp(vbuf, CURRY_VERSION) != 0) goto done;
-
-    if (fseek(f, 16, SEEK_CUR) != 0) goto done;  /* skip mtime + size */
-
-    uint32_t n_chunks;
-    if (!ru32(f, &n_chunks)) goto done;
-
-    chunks = GC_MALLOC(n_chunks * sizeof(Chunk *));
-    if (!chunks && n_chunks > 0) goto done;
-
-    for (uint32_t i = 0; i < n_chunks; i++) {
-        chunks[i] = chunk_new();
-        if (!read_chunk(f, chunks[i])) { n = (int)i; goto done; }
-    }
-    n = (int)n_chunks;
-
-    uint32_t sentinel;
-    if (!ru32(f, &sentinel) || sentinel != SCC_SENTINEL) goto done;
-
-    ok = true;
-
-done:
+    bool ok = load_chunks_from_file(f, NULL, chunks_out, n_out);
     fclose(f);
-    if (!ok) { chunks = NULL; n = 0; }
-    *chunks_out = chunks;
-    *n_out = n;
     return ok;
 }
