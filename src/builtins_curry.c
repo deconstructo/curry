@@ -227,14 +227,22 @@ static val_t prim_vec_laplacian(int ac, val_t *av, void *ud) {
     return result;
 }
 
-/* dot-product(A, B) — symbolic dot product of two same-length lists. */
+/* dot-product(A, B) — symbolic dot product of two same-length tuples or lists. */
 static val_t prim_dot_product(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t A = av[0], B = av[1];
     val_t acc = vfix(0);
-    while (vis_pair(A) && vis_pair(B)) {
-        acc = sx_add(acc, sx_mul(vcar(A), vcar(B)));
-        A = vcdr(A); B = vcdr(B);
+    if (vis_tuple(A) && vis_tuple(B)) {
+        Tuple *ta = as_tuple(A), *tb = as_tuple(B);
+        if (ta->len != tb->len)
+            scm_raise(V_FALSE, "dot-product: tuple length mismatch (%u vs %u)", ta->len, tb->len);
+        for (uint32_t i = 0; i < ta->len; i++)
+            acc = sx_add(acc, sx_mul(ta->data[i], tb->data[i]));
+    } else {
+        while (vis_pair(A) && vis_pair(B)) {
+            acc = sx_add(acc, sx_mul(vcar(A), vcar(B)));
+            A = vcdr(A); B = vcdr(B);
+        }
     }
     return sx_simplify(acc);
 }
@@ -653,7 +661,14 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
     PartialFn *cap = (PartialFn *)ud;
     intptr_t i = cap->idx;
 
-    /* SICM-style: single tuple argument — differentiate w.r.t. component i */
+    /* SICM-style: single tuple argument — differentiate w.r.t. component i.
+     *
+     * Each slot may itself be a tuple (multi-DOF case).  For tuple-valued
+     * slots we create a nested tuple of fresh sym-vars so the Lagrangian can
+     * call dot-product / ref on them normally.  For slot i we differentiate
+     * w.r.t. every inner sym-var and return a tuple of those partials;
+     * for scalar slot i we differentiate w.r.t. the single sym-var.
+     */
     if (argc == 1 && vis_tuple(argv[0])) {
         Tuple *tup = as_tuple(argv[0]);
         uint32_t n = tup->len;
@@ -661,18 +676,74 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
             scm_raise(V_FALSE,
                 "partial: index %ld out of range for tuple of dimension %u", (long)i, n);
         static int partial_tup_ctr = 0;
-        val_t *syms = (val_t *)gc_alloc(n * sizeof(val_t));
+        int ctr = partial_tup_ctr++;
+
+        /* Build a replacement tuple where each slot becomes sym-vars.
+         * slot_syms[k] is either a single sym-var or a sym-tuple. */
+        val_t *slot_syms = (val_t *)gc_alloc(n * sizeof(val_t));
+        /* diff_vars[j] are the sym-vars we differentiate w.r.t. (slot i's vars) */
+        uint32_t m_i = vis_tuple(tup->data[(uint32_t)i])
+                       ? as_tuple(tup->data[(uint32_t)i])->len : 1;
+        val_t *diff_vars = (val_t *)gc_alloc(m_i * sizeof(val_t));
+
         for (uint32_t k = 0; k < n; k++) {
-            char buf[32]; snprintf(buf, sizeof(buf), "_∂p%u_%d", k, partial_tup_ctr);
-            syms[k] = sx_make_var(sym_intern_cstr(buf));
+            if (vis_tuple(tup->data[k])) {
+                Tuple *inner = as_tuple(tup->data[k]);
+                val_t *isyms = (val_t *)gc_alloc(inner->len * sizeof(val_t));
+                for (uint32_t j = 0; j < inner->len; j++) {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "_∂p%u_%u_%d", k, j, ctr);
+                    isyms[j] = sx_make_var(sym_intern_cstr(buf));
+                }
+                slot_syms[k] = num_make_tuple((int)inner->hdr.type, inner->len, isyms);
+                if ((intptr_t)k == i)
+                    for (uint32_t j = 0; j < inner->len; j++) diff_vars[j] = isyms[j];
+            } else {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "_∂p%u_%d", k, ctr);
+                val_t sv = sx_make_var(sym_intern_cstr(buf));
+                slot_syms[k] = sv;
+                if ((intptr_t)k == i) diff_vars[0] = sv;
+            }
         }
-        partial_tup_ctr++;
-        val_t sym_tup = num_make_tuple((int)tup->hdr.type, n, syms);
-        val_t expr  = apply_arr(cap->f, 1, &sym_tup);
-        val_t deriv = sx_diff(expr, syms[(uint32_t)i]);
-        for (uint32_t k = 0; k < n; k++)
-            deriv = sx_substitute(deriv, syms[k], tup->data[k]);
-        return sx_simplify(deriv);
+
+        val_t sym_tup = num_make_tuple((int)tup->hdr.type, n, slot_syms);
+        val_t expr    = apply_arr(cap->f, 1, &sym_tup);
+
+        /* Substitute all slot sym-vars back with their actual values */
+#define SUBST_ALL_SLOTS(dval) \
+    do { \
+        for (uint32_t k = 0; k < n; k++) { \
+            if (vis_tuple(slot_syms[k])) { \
+                Tuple *ss = as_tuple(slot_syms[k]); \
+                Tuple *ts = as_tuple(tup->data[k]); \
+                for (uint32_t j2 = 0; j2 < ss->len; j2++) \
+                    (dval) = sx_substitute((dval), ss->data[j2], ts->data[j2]); \
+            } else { \
+                (dval) = sx_substitute((dval), slot_syms[k], tup->data[k]); \
+            } \
+        } \
+    } while (0)
+
+        if (vis_tuple(tup->data[(uint32_t)i])) {
+            /* Multi-DOF: return a tuple of partial derivatives */
+            Tuple *inner_i = as_tuple(tup->data[(uint32_t)i]);
+            val_t *diffs = (val_t *)gc_alloc(m_i * sizeof(val_t));
+            for (uint32_t j = 0; j < m_i; j++) {
+                val_t dj = sx_diff(expr, diff_vars[j]);
+                SUBST_ALL_SLOTS(dj);
+                diffs[j] = sx_simplify(dj);
+            }
+            /* Gradient of scalar w.r.t. up-tuple is a down-tuple */
+            int ret_type = vis_up(tup->data[(uint32_t)i]) ? T_DOWN : T_UP;
+            return num_make_tuple(ret_type, m_i, diffs);
+        } else {
+            /* Scalar slot: original behaviour */
+            val_t deriv = sx_diff(expr, diff_vars[0]);
+            SUBST_ALL_SLOTS(deriv);
+            return sx_simplify(deriv);
+        }
+#undef SUBST_ALL_SLOTS
     }
 
     if (i < 0 || (intptr_t)argc <= i)

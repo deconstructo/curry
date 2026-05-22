@@ -405,6 +405,21 @@ val_t sx_simplify(val_t expr) {
             for (int i = 0; i < n; i++) acc = num_mul(acc, sa[i]);
             return acc;
         }
+        /* Distribute over tuple: scalar * tuple → component-wise product */
+        {
+            int ti = -1;
+            for (int i = 0; i < n; i++) if (vis_tuple(sa[i])) { ti = i; break; }
+            if (ti >= 0) {
+                Tuple *t = as_tuple(sa[ti]);
+                val_t buf[256]; uint32_t tlen = t->len < 256 ? t->len : 256;
+                val_t scalar_acc = vfix(1);
+                for (int i = 0; i < n; i++)
+                    if (i != ti) scalar_acc = sx_simplify(sx_expr2(SX_MUL, scalar_acc, sa[i]));
+                for (uint32_t k = 0; k < tlen; k++)
+                    buf[k] = sx_simplify(sx_expr2(SX_MUL, scalar_acc, t->data[k]));
+                return num_make_tuple((int)t->hdr.type, tlen, buf);
+            }
+        }
         /* Any zero factor? */
         for (int i = 0; i < n; i++) if (is_zero(sa[i])) return vfix(0);
         /* Fold numeric factors and strip ones */
@@ -555,6 +570,55 @@ val_t sx_simplify(val_t expr) {
                 all[0] = nc;
                 for (int i = 0; i < msym; i++) all[i+1] = msyms[i];
                 return sx_make_expr(SX_MUL, msym + 1, all);
+            }
+        }
+        /* (/ (* c1 . syms_n) (* c2 . syms_d)) — cancel leading numeric coefficients */
+        if (vis_symexpr(b) && as_symexpr(b)->op == SX_MUL) {
+            SymExpr *dmul = as_symexpr(b);
+            /* Extract numeric coefficient from denominator */
+            val_t dcoeff = vfix(1); bool d_has_num = false;
+            int dn = (int)dmul->nargs, dsym = 0;
+            for (int i = 0; i < dn; i++) if (vis_number(dmul->args[i])) { d_has_num = true; break; }
+            if (d_has_num) {
+                val_t *dsyms = (val_t *)gc_alloc((size_t)dn * sizeof(val_t));
+                for (int i = 0; i < dn; i++) {
+                    if (vis_number(dmul->args[i])) dcoeff = num_mul(dcoeff, dmul->args[i]);
+                    else dsyms[dsym++] = dmul->args[i];
+                }
+                /* Extract numeric coefficient from numerator */
+                val_t ncoeff = vfix(1); bool n_has_num = false;
+                val_t new_num = a;
+                if (vis_symexpr(a) && as_symexpr(a)->op == SX_MUL) {
+                    SymExpr *nmul = as_symexpr(a);
+                    int nn = (int)nmul->nargs, nsym = 0;
+                    for (int i = 0; i < nn; i++) if (vis_number(nmul->args[i])) { n_has_num = true; break; }
+                    if (n_has_num) {
+                        val_t *nsyms = (val_t *)gc_alloc((size_t)nn * sizeof(val_t));
+                        for (int i = 0; i < nn; i++) {
+                            if (vis_number(nmul->args[i])) ncoeff = num_mul(ncoeff, nmul->args[i]);
+                            else nsyms[nsym++] = nmul->args[i];
+                        }
+                        val_t nc = num_div(ncoeff, dcoeff);
+                        val_t new_den = dsym == 0 ? vfix(1) :
+                                        (dsym == 1 ? dsyms[0] : sx_make_expr(SX_MUL, dsym, dsyms));
+                        new_num = nsym == 0 ? nc :
+                                  (nsym == 1 && is_one(nc) ? nsyms[0] :
+                                   ({ val_t *all = gc_alloc((size_t)(nsym + (is_one(nc)?0:1)) * sizeof(val_t));
+                                      int k = 0;
+                                      if (!is_one(nc)) all[k++] = nc;
+                                      for (int i = 0; i < nsym; i++) all[k++] = nsyms[i];
+                                      sx_make_expr(SX_MUL, k, all); }));
+                        if (is_one(new_den)) return sx_simplify(new_num);
+                        return sx_simplify(sx_expr2(SX_DIV, new_num, new_den));
+                    }
+                } else if (vis_number(a)) {
+                    /* numerator is a plain number */
+                    val_t nc = num_div(a, dcoeff);
+                    val_t new_den = dsym == 0 ? vfix(1) :
+                                    (dsym == 1 ? dsyms[0] : sx_make_expr(SX_MUL, dsym, dsyms));
+                    if (is_one(new_den)) return nc;
+                    return sx_simplify(sx_expr2(SX_DIV, nc, new_den));
+                }
             }
         }
     }
@@ -929,15 +993,25 @@ static bool sx_is_nc(val_t v) {
 
 val_t sx_neg(val_t a) {
     if (vis_number(a)) return num_neg(a);
+    if (vis_tuple(a))  return num_neg(a);   /* distribute negation over tuple components */
     return sx_simplify(sx_expr1(SX_NEG, a));
 }
 val_t sx_abs(val_t a) {
     if (vis_number(a)) return num_abs(a);
     return sx_simplify(sx_expr1(SX_ABS, a));
 }
-val_t sx_add(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_ADD, a, b)); }
-val_t sx_sub(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_SUB, a, b)); }
+val_t sx_add(val_t a, val_t b) {
+    /* tuple + tuple (with symbolic elements) distributes via num_add */
+    if (vis_tuple(a) || vis_tuple(b)) return num_add(a, b);
+    return sx_simplify(sx_expr2(SX_ADD, a, b));
+}
+val_t sx_sub(val_t a, val_t b) {
+    if (vis_tuple(a) || vis_tuple(b)) return num_sub(a, b);
+    return sx_simplify(sx_expr2(SX_SUB, a, b));
+}
 val_t sx_mul(val_t a, val_t b) {
+    /* scalar (including symbolic) × tuple distributes component-wise */
+    if (vis_tuple(a) || vis_tuple(b)) return num_mul(a, b);
     if (sx_is_nc(a) || sx_is_nc(b)) return sx_ncmul(a, b);
     return sx_simplify(sx_expr2(SX_MUL, a, b));
 }

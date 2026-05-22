@@ -240,6 +240,119 @@
 (check-num "numeric Lagrange-equations at t=0.5" (eom-numeric 0.5) 0.0 1e-10)
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 16  Multi-DOF: 2D harmonic oscillator Lagrange-equations
+;;; ════════════════════════════════════════════════════════════
+
+(define x-fn (literal-function 'x))
+(define y-fn (literal-function 'y))
+(define q-path-2d (lambda (tau) (up (x-fn tau) (y-fn tau))))
+
+(define eom-2d-ho ((Lagrange-equations (L-harmonic-nd m k)) q-path-2d))
+(define result-2d (eom-2d-ho t))
+
+(check "2D HO EOM is down-tuple"  (down? result-2d) #t)
+(check "2D HO EOM dimension"      (dimension result-2d) 2)
+(check-infix "2D HO EOM x-component" (ref result-2d 0) "-(k * x(t)) - m * x_t_t(t)")
+(check-infix "2D HO EOM y-component" (ref result-2d 1) "-(k * y(t)) - m * y_t_t(t)")
+
+;;; 2D free particle: EOM = -m*x'' = 0, -m*y'' = 0
+(define eom-2d-free ((Lagrange-equations (L-free-particle-nd m)) q-path-2d))
+(define result-2d-free (eom-2d-free t))
+(check-infix "2D free EOM x" (ref result-2d-free 0) "-(m * x_t_t(t))")
+(check-infix "2D free EOM y" (ref result-2d-free 1) "-(m * y_t_t(t))")
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 17  Kepler problem in polar coordinates
+;;; ════════════════════════════════════════════════════════════
+
+(define GM (sym-var 'GM))
+(define r-fn   (literal-function 'r))
+(define theta-fn (literal-function 'θ))
+(define q-polar (lambda (tau) (up (r-fn tau) (theta-fn tau))))
+
+(define eom-kepler ((Lagrange-equations (L-Kepler-polar m GM)) q-polar))
+(define result-kepler (eom-kepler t))
+
+(check-infix "Kepler radial EOM"
+             (simplify (expand (ref result-kepler 0)))
+             "m * r(t) * θ_t(t)^2 + -GM/r(t)^2 - m * r_t_t(t)")
+(check-infix "Kepler angular EOM"
+             (simplify (expand (ref result-kepler 1)))
+             "-2 * m * r(t) * r_t(t) * θ_t(t) - m * r(t)^2 * θ_t_t(t)")
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 18  Hamiltonian mechanics — Legendre transform
+;;; ════════════════════════════════════════════════════════════
+
+;;; sym-vars for Hamiltonian state
+(define q-sym (sym-var 'q))
+(define p-sym (sym-var 'p))
+
+;;; 1-DOF harmonic oscillator: H = p²/(2m) + ½kq²
+(define H-ho-fn (Lagrangian->Hamiltonian (L-harmonic m k)))
+(check-infix "1D HO Hamiltonian"
+             (H-ho-fn (up t q-sym p-sym))
+             "p^2/(2 * m) + 1/2 * k * q^2")
+
+;;; 1-DOF free particle: H = p²/(2m)
+(define H-free-fn (Lagrangian->Hamiltonian (L-free-particle m)))
+(check-infix "1D free Hamiltonian"
+             (H-free-fn (up t q-sym p-sym))
+             "p^2/(2 * m)")
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 19  Hamilton equations
+;;; ════════════════════════════════════════════════════════════
+
+(define H-state-1d (up t q-sym p-sym))
+(define dH-1d ((Hamilton-equations H-ho-fn) H-state-1d))
+
+(check-infix "1D HO dq/dt" (simplify (ref dH-1d 0)) "p/m")
+(check-infix "1D HO dp/dt" (simplify (ref dH-1d 1)) "-(k * q)")
+
+;;; 2-DOF case
+(define qx (sym-var 'qx))
+(define qy (sym-var 'qy))
+(define px (sym-var 'px))
+(define py (sym-var 'py))
+(define H-2d-fn (Lagrangian->Hamiltonian (L-harmonic-nd m k)))
+(define H-state-2d (up t (up qx qy) (down px py)))
+(define dH-2d ((Hamilton-equations H-2d-fn) H-state-2d))
+
+(check-infix "2D HO dqx/dt" (simplify (ref (ref dH-2d 0) 0)) "px/m")
+(check-infix "2D HO dqy/dt" (simplify (ref (ref dH-2d 0) 1)) "py/m")
+(check-infix "2D HO dpx/dt" (simplify (ref (ref dH-2d 1) 0)) "-(k * qx)")
+(check-infix "2D HO dpy/dt" (simplify (ref (ref dH-2d 1) 1)) "-(k * qy)")
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 20  Poisson bracket
+;;; ════════════════════════════════════════════════════════════
+
+(define pb-q (lambda (s) (coordinate s)))
+(define pb-p (lambda (s) (momentum s)))
+
+;;; {q, H} = dH/dp = p/m  (Hamilton's equation for q)
+(check-infix "{q,H}=dq/dt"
+             (simplify ((Poisson-bracket pb-q H-ho-fn) H-state-1d))
+             "p/m")
+
+;;; {p, H} = -dH/dq = -kq  (Hamilton's equation for p)
+(check-infix "{p,H}=dp/dt"
+             (simplify ((Poisson-bracket pb-p H-ho-fn) H-state-1d))
+             "-(k * q)")
+
+;;; Canonical commutation: {q, p} = 1
+(check "{q,p}=1"
+       ((Poisson-bracket pb-q pb-p) H-state-1d)
+       1)
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 21  momentum selector
+;;; ════════════════════════════════════════════════════════════
+
+(check "momentum selector" (momentum (up t q-sym p-sym)) p-sym)
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
