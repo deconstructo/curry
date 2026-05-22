@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <getopt.h>
 
 #ifdef HAVE_READLINE
 #  include <readline/readline.h>
@@ -302,8 +303,7 @@ static void usage(const char *argv0) {
         "  -o OUT     Output path for -c (default: FILE with .scc extension)\n"
         "  -x         Make -c output executable (shebang + chmod +x)\n"
         "  -i         Force interactive REPL after loading scripts\n"
-        "  -v         Print version\n"
-        "  --         End of options\n",
+        "  -v         Print version\n",
         argv0);
 }
 
@@ -314,33 +314,35 @@ int main(int argc, char **argv) {
 
     bool interactive = false;
     bool ran_something = false;
+    const char *compile_file = NULL;
+    const char *compile_out  = NULL;
+    bool compile_executable  = false;
 
-    /* Pre-scan for -o and -x so they work regardless of position relative to -c. */
-    const char *compile_out = NULL;
-    bool compile_executable = false;
-    for (int i = 1; i < argc - 1; i++) {
-        if (!strcmp(argv[i], "-o")) { compile_out = argv[i + 1]; break; }
-    }
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-x")) { compile_executable = true; break; }
-    }
+    static const struct option long_opts[] = {
+        { "version", no_argument, NULL, 'v' },
+        { "help",    no_argument, NULL, 'h' },
+        { NULL, 0, NULL, 0 }
+    };
 
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
+    int opt;
+    /* '+' prefix: stop at first non-option so script args aren't consumed */
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvh", long_opts, NULL)) != -1) {
+        switch (opt) {
+        case 'v':
             printf("Curry Scheme %s\n", CURRY_VERSION);
             return 0;
-        }
-        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+        case 'h':
             usage(argv[0]); return 0;
-        }
-        if (!strcmp(argv[i], "-i")) { interactive = true; continue; }
-        if (!strcmp(argv[i], "-o")) { i++; continue; } /* consumed by pre-scan */
-        if (!strcmp(argv[i], "-x")) { continue; }      /* consumed by pre-scan */
-        if (!strcmp(argv[i], "--")) { i++; break; }
-
-        if (!strcmp(argv[i], "-e")) {
-            if (++i >= argc) { fputs("-e requires an argument\n", stderr); return 1; }
-            val_t str_port = port_open_input_string(argv[i], (uint32_t)strlen(argv[i]));
+        case 'i':
+            interactive = true; break;
+        case 'x':
+            compile_executable = true; break;
+        case 'o':
+            compile_out = optarg; break;
+        case 'c':
+            compile_file = optarg; break;
+        case 'e': {
+            val_t str_port = port_open_input_string(optarg, (uint32_t)strlen(optarg));
             val_t last = V_VOID;
             for (;;) {
                 val_t expr;
@@ -366,72 +368,76 @@ int main(int argc, char **argv) {
             }
             print_result(last);
             ran_something = true;
-            continue;
+            break;
         }
-
-        if (!strcmp(argv[i], "-c")) {
-            if (++i >= argc) { fputs("-c requires an argument\n", stderr); return 1; }
-            val_t port = port_open_file(argv[i], PORT_INPUT);
-            if (vis_false(port)) {
-                fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
-                return 1;
-            }
-            int cap = 64;
-            Chunk **chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
-            int n_chunks = 0;
+        case 'l': {
             ExnHandler h;
             h.prev = current_handler; current_handler = &h;
-            if (setjmp(h.jmp) == 0) {
-                val_t v;
-                while (!vis_eof((v = scm_read(port)))) {
-                    val_t cl = compiler_compile(v);
-                    BcClosure *bc = as_bcclosure(cl);
-                    if (n_chunks == cap) {
-                        cap *= 2;
-                        chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
-                    }
-                    chunks[n_chunks++] = bc->chunk;
-                    if (affects_compile_env(v))
-                        vm_run(bc, 0);
+            if (setjmp(h.jmp) == 0) { scm_load(optarg, GLOBAL_ENV); current_handler = h.prev; }
+            else {
+                current_handler = h.prev;
+                fprintf(stderr, "Error loading %s: ", optarg);
+                scm_write(h.exn, PORT_STDERR); fputs("\n", stderr); return 1;
+            }
+            ran_something = true;
+            break;
+        }
+        default:
+            usage(argv[0]); return 1;
+        }
+    }
+
+    /* Run pending compilation (-c, with optional -o and -x) */
+    if (compile_file) {
+        val_t port = port_open_file(compile_file, PORT_INPUT);
+        if (vis_false(port)) {
+            fprintf(stderr, "Error: cannot open file: %s\n", compile_file);
+            return 1;
+        }
+        int cap = 64;
+        Chunk **chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
+        int n_chunks = 0;
+        ExnHandler h;
+        h.prev = current_handler; current_handler = &h;
+        if (setjmp(h.jmp) == 0) {
+            val_t v;
+            while (!vis_eof((v = scm_read(port)))) {
+                val_t cl = compiler_compile(v);
+                BcClosure *bc = as_bcclosure(cl);
+                if (n_chunks == cap) {
+                    cap *= 2;
+                    chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
                 }
-                current_handler = h.prev;
-            } else {
-                current_handler = h.prev;
-                vm_reset();
-                fprintf(stderr, "Error: ");
-                if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-                else scm_write(h.exn, PORT_STDERR);
-                fputs("\n", stderr);
-                return 1;
+                chunks[n_chunks++] = bc->chunk;
+                if (affects_compile_env(v))
+                    vm_run(bc, 0);
             }
-            port_close(port);
-            if (compile_out) {
-                scc_write_to(compile_out, argv[i], chunks, n_chunks, compile_executable);
-                fprintf(stderr, "Compiled %s -> %s (%d chunk%s)\n",
-                        argv[i], compile_out, n_chunks, n_chunks == 1 ? "" : "s");
-                compile_out = NULL;
-            } else {
-                scc_write(argv[i], chunks, n_chunks);
-                fprintf(stderr, "Compiled %s (%d chunk%s)\n",
-                        argv[i], n_chunks, n_chunks == 1 ? "" : "s");
-            }
-            ran_something = true;
-            continue;
+            current_handler = h.prev;
+        } else {
+            current_handler = h.prev;
+            vm_reset();
+            fprintf(stderr, "Error: ");
+            if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
+            else scm_write(h.exn, PORT_STDERR);
+            fputs("\n", stderr);
+            return 1;
         }
-
-        if (!strcmp(argv[i], "-l")) {
-            if (++i >= argc) { fputs("-l requires an argument\n", stderr); return 1; }
-            ExnHandler h;
-            h.prev = current_handler; current_handler = &h;
-            if (setjmp(h.jmp) == 0) { scm_load(argv[i], GLOBAL_ENV); current_handler = h.prev; }
-            else { current_handler = h.prev;
-                   fprintf(stderr, "Error loading %s: ", argv[i]);
-                   scm_write(h.exn, PORT_STDERR); fputs("\n", stderr); return 1; }
-            ran_something = true;
-            continue;
+        port_close(port);
+        if (compile_out) {
+            scc_write_to(compile_out, compile_file, chunks, n_chunks, compile_executable);
+            fprintf(stderr, "Compiled %s -> %s (%d chunk%s)\n",
+                    compile_file, compile_out, n_chunks, n_chunks == 1 ? "" : "s");
+        } else {
+            scc_write(compile_file, chunks, n_chunks);
+            fprintf(stderr, "Compiled %s (%d chunk%s)\n",
+                    compile_file, n_chunks, n_chunks == 1 ? "" : "s");
         }
+        ran_something = true;
+    }
 
-        /* Positional argument: script file */
+    /* Positional argument: script file (first non-option) */
+    if (optind < argc) {
+        int i = optind;
         val_t cmd_line = V_NIL;
         for (int j = argc-1; j >= i; j--)
             cmd_line = scm_cons(sym_intern_cstr(argv[j]), cmd_line);
@@ -510,7 +516,6 @@ int main(int argc, char **argv) {
             return 1;
         }
         ran_something = true;
-        break;
     }
 
     if (!ran_something || interactive) {
