@@ -614,7 +614,7 @@ static bool read_scc(const char *scc_path, const char *src_path,
     uint32_t n_chunks;
     if (!ru32(f, &n_chunks)) goto done;
 
-    chunks = malloc(n_chunks * sizeof(Chunk *));
+    chunks = GC_MALLOC(n_chunks * sizeof(Chunk *));
     if (!chunks && n_chunks > 0) goto done;
 
     for (uint32_t i = 0; i < n_chunks; i++) {
@@ -630,7 +630,7 @@ static bool read_scc(const char *scc_path, const char *src_path,
 
 done:
     fclose(f);
-    if (!ok) { free(chunks); chunks = NULL; n = 0; }
+    if (!ok) { chunks = NULL; n = 0; }
     *chunks_out = chunks;
     *n_out = n;
     return ok;
@@ -701,7 +701,7 @@ bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
     uint32_t n_chunks;
     if (!ru32(f, &n_chunks)) goto done;
 
-    chunks = malloc(n_chunks * sizeof(Chunk *));
+    chunks = GC_MALLOC(n_chunks * sizeof(Chunk *));
     if (!chunks && n_chunks > 0) goto done;
 
     for (uint32_t i = 0; i < n_chunks; i++) {
@@ -717,7 +717,7 @@ bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
 
 done:
     fclose(f);
-    if (!ok) { free(chunks); chunks = NULL; n = 0; }
+    if (!ok) { chunks = NULL; n = 0; }
     *chunks_out = chunks;
     *n_out = n;
     return ok;

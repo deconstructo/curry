@@ -480,12 +480,10 @@ int main(int argc, char **argv) {
                 }
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
-                free(chunks);
             } else if (scc_load(argv[i], &chunks, &n_chunks)) {
                 /* Cache hit: run each chunk in order */
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
-                free(chunks);
             } else {
                 /* Cache miss: compile one form at a time (preserves macro semantics),
                    collect chunks, write cache; each form is run as compiled */
