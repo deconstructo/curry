@@ -80,6 +80,7 @@ The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS
   -l FILE    Load file before entering REPL
   -i         Force interactive REPL after loading scripts
   -c FILE    Compile FILE to .scc bytecode without executing it
+  -o OUT     Output path for -c (default: FILE with .scc extension)
   -v         Print version
 ```
 

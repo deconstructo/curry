@@ -653,6 +653,10 @@ void scc_write(const char *src_path, Chunk **chunks, int n_chunks) {
     }
 }
 
+void scc_write_to(const char *out_path, const char *src_path, Chunk **chunks, int n_chunks) {
+    write_scc(out_path, src_path, chunks, n_chunks);
+}
+
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
     char *p = primary_path(src_path);
     if (p && read_scc(p, src_path, chunks_out, n_out)) {

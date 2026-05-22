@@ -298,7 +298,8 @@ static void usage(const char *argv0) {
         "Usage: %s [options] [script.scm] [args...]\n"
         "  -e EXPR    Evaluate expression\n"
         "  -l FILE    Load file\n"
-        "  -c FILE    Compile FILE to .scc bytecode cache without executing\n"
+        "  -c FILE    Compile FILE to .scc bytecode without executing\n"
+        "  -o OUT     Output path for -c (default: FILE with .scc extension)\n"
         "  -i         Force interactive REPL after loading scripts\n"
         "  -v         Print version\n"
         "  --         End of options\n",
@@ -313,6 +314,12 @@ int main(int argc, char **argv) {
     bool interactive = false;
     bool ran_something = false;
 
+    /* Pre-scan for -o so it works regardless of position relative to -c. */
+    const char *compile_out = NULL;
+    for (int i = 1; i < argc - 1; i++) {
+        if (!strcmp(argv[i], "-o")) { compile_out = argv[i + 1]; break; }
+    }
+
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
             printf("Curry Scheme %s\n", CURRY_VERSION);
@@ -322,6 +329,7 @@ int main(int argc, char **argv) {
             usage(argv[0]); return 0;
         }
         if (!strcmp(argv[i], "-i")) { interactive = true; continue; }
+        if (!strcmp(argv[i], "-o")) { i++; continue; } /* consumed by pre-scan */
         if (!strcmp(argv[i], "--")) { i++; break; }
 
         if (!strcmp(argv[i], "-e")) {
@@ -391,9 +399,16 @@ int main(int argc, char **argv) {
                 return 1;
             }
             port_close(port);
-            scc_write(argv[i], chunks, n_chunks);
-            fprintf(stderr, "Compiled %s (%d chunk%s)\n",
-                    argv[i], n_chunks, n_chunks == 1 ? "" : "s");
+            if (compile_out) {
+                scc_write_to(compile_out, argv[i], chunks, n_chunks);
+                fprintf(stderr, "Compiled %s -> %s (%d chunk%s)\n",
+                        argv[i], compile_out, n_chunks, n_chunks == 1 ? "" : "s");
+                compile_out = NULL;
+            } else {
+                scc_write(argv[i], chunks, n_chunks);
+                fprintf(stderr, "Compiled %s (%d chunk%s)\n",
+                        argv[i], n_chunks, n_chunks == 1 ? "" : "s");
+            }
             ran_something = true;
             continue;
         }
@@ -423,6 +438,22 @@ int main(int argc, char **argv) {
             int n_chunks = 0;
             size_t arglen = strlen(argv[i]);
             bool is_scc = arglen > 4 && strcmp(argv[i] + arglen - 4, ".scc") == 0;
+            /* Also detect bytecode by magic bytes (supports -o with no .scc ext) */
+            if (!is_scc) {
+                FILE *probe = fopen(argv[i], "rb");
+                if (probe) {
+                    char buf[24]; int c;
+                    int n = 0;
+                    /* skip optional shebang */
+                    int c1 = fgetc(probe), c2 = fgetc(probe);
+                    if (c1 == '#' && c2 == '!')
+                        while ((c = fgetc(probe)) != EOF && c != '\n') {}
+                    else { buf[n++] = (char)c1; if (c2 != EOF) buf[n++] = (char)c2; }
+                    n += (int)fread(buf + n, 1, (size_t)(7 - n), probe);
+                    if (n >= 7 && memcmp(buf, "CURRYBC", 7) == 0) is_scc = true;
+                    fclose(probe);
+                }
+            }
             if (is_scc) {
                 /* Direct .scc run — no source file, skip mtime check */
                 if (!scc_load_direct(argv[i], &chunks, &n_chunks)) {
