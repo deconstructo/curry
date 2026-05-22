@@ -1,5 +1,30 @@
 # Changelog
 
+### 0.8.16 — Phase 11: multi-DOF Lagrangian + Hamiltonian mechanics
+
+**Core C fixes**
+
+- `dot-product` now accepts up/down tuples (previously only handled linked lists and silently returned 0 for tuples).
+- `(partial i)`: tuple-valued slots in the local tuple (coordinate, velocity) are now replaced with nested sym-var tuples so that Lagrangians can call `dot-product`/`ref` on them symbolically. For an up-tuple slot, returns a down-tuple of partial derivatives (the covariant gradient).
+- `sx_simplify` SX_DIV: common numeric coefficients in `(c1·A)/(c2·B)` are now cancelled — e.g. `(2·px)/(2·m) → px/m`. This fixes Hamiltonian output and Hamilton equation simplification.
+- `num_mul`/`num_add`/`num_sub` and `sx_neg`/`sx_add`/`sx_sub`/`sx_mul`: tuple check now fires before symbolic check, enabling scalar×tuple distribution throughout the CAS layer.
+
+**`(curry sicm)` additions**
+
+- `L-free-particle-nd`, `L-harmonic-nd`: n-DOF isotropic Lagrangians using `dot-product`.
+- `L-central-rectangular`: central force in 2D Cartesian coordinates.
+- `L-Kepler-polar`: Kepler problem in polar coordinates `(up r θ)`.
+- `momentum`: selector for slot 2 of a Hamiltonian state `(up t q p)`.
+- `Lagrangian->Hamiltonian`: Legendre transform for diagonal mass matrices. Computes mass coefficients from `∂(∂L/∂qdot)/∂qdot`, then builds `H = Σ pᵢ²/(2mᵢ) + V(q)`.
+- `Hamilton-equations`: returns `(up dH/dp, −dH/dq)` at a Hamiltonian state.
+- `make-Hamiltonian`: direct `T*(p) + V(q)` Hamiltonian constructor.
+- `Poisson-bracket`: `{f,g} = Σ (∂f/∂qᵢ · ∂g/∂pᵢ − ∂f/∂pᵢ · ∂g/∂qᵢ)`.
+- `commutator`: `[A,B]f = A(Bf) − B(Af)`.
+
+**Tests:** `sicm_tests.scm` expanded from 35 to 55 assertions (added §§16–21: 2D harmonic oscillator EOM, Kepler EOM, 1D/2D Hamiltonians, Hamilton equations, Poisson bracket identities including `{q,p}=1`).
+
+---
+
 ### 0.8.15 — SICM module fixes and test coverage
 
 **`(curry sicm)` bug fixes**
