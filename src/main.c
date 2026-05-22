@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <sys/stat.h>
 
 #ifdef HAVE_READLINE
 #  include <readline/readline.h>
@@ -450,20 +451,24 @@ int main(int argc, char **argv) {
             int n_chunks = 0;
             size_t arglen = strlen(argv[i]);
             bool is_scc = arglen > 4 && strcmp(argv[i] + arglen - 4, ".scc") == 0;
-            /* Also detect bytecode by magic bytes (supports -o with no .scc ext) */
+            /* Also detect bytecode by magic bytes (supports -o with no .scc ext).
+               Only probe regular files — pipes/FDs (e.g. process substitution)
+               cannot be re-read after probing. */
             if (!is_scc) {
-                FILE *probe = fopen(argv[i], "rb");
-                if (probe) {
-                    char buf[24]; int c;
-                    int n = 0;
-                    /* skip optional shebang */
-                    int c1 = fgetc(probe), c2 = fgetc(probe);
-                    if (c1 == '#' && c2 == '!')
-                        while ((c = fgetc(probe)) != EOF && c != '\n') {}
-                    else { buf[n++] = (char)c1; if (c2 != EOF) buf[n++] = (char)c2; }
-                    n += (int)fread(buf + n, 1, (size_t)(7 - n), probe);
-                    if (n >= 7 && memcmp(buf, "CURRYBC", 7) == 0) is_scc = true;
-                    fclose(probe);
+                struct stat _st;
+                if (stat(argv[i], &_st) == 0 && S_ISREG(_st.st_mode)) {
+                    FILE *probe = fopen(argv[i], "rb");
+                    if (probe) {
+                        char buf[24]; int c;
+                        int n = 0;
+                        int c1 = fgetc(probe), c2 = fgetc(probe);
+                        if (c1 == '#' && c2 == '!')
+                            while ((c = fgetc(probe)) != EOF && c != '\n') {}
+                        else { buf[n++] = (char)c1; if (c2 != EOF) buf[n++] = (char)c2; }
+                        n += (int)fread(buf + n, 1, (size_t)(7 - n), probe);
+                        if (n >= 7 && memcmp(buf, "CURRYBC", 7) == 0) is_scc = true;
+                        fclose(probe);
+                    }
                 }
             }
             if (is_scc) {
