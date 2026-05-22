@@ -70,7 +70,19 @@ cmake --build build && ctest --test-dir build -V
 ./build/curry -e '(display (+ 1 2)) (newline)'
 ```
 
-The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS conformance), `numeric_ext` (Clifford algebra, symbolic CAS — differentiation/integration/Wirtinger/complex operators, surreal numbers, auto-diff, numeric tower exactness), and `actors` (concurrency primitives).
+The test suites registered in `ctest`:
+
+| Name | Command | What it covers |
+|------|---------|----------------|
+| `core` | `curry_test` (C binary) | C-level value/numeric/GC primitives |
+| `scheme_r7rs` | `r7rs_tests.scm` | R7RS conformance |
+| `numeric_ext` | `numeric_ext_tests.scm` | Clifford algebra, symbolic CAS, surreal numbers, auto-diff, numeric tower |
+| `actors` | `actors_tests.scm` | Concurrency primitives (spawn/send!/receive) |
+| `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |
+| `syntax_rules` | `syntax_rules_tests.scm` | `define-syntax`/`syntax-rules` hygiene |
+| `akkadian` | `akkadian_tests.scm` | Every Akkadian/cuneiform synonym (both transliterated and cuneiform forms) for all AKK_SF and AKK_PR entries in `akkadian_names.h` — 205 assertions |
+| `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
+| `ode`, `pde_numerical`, `d_operator`, `tuples`, `partial`, `trig`, `sicm` | individual `.scm` files | Numeric/physics modules |
 
 ## CLI flags
 

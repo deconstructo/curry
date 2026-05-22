@@ -449,6 +449,60 @@ global opcodes) the constant value.
 
 ---
 
+## Bytecode cache (.scc files)
+
+When curry runs a `.scm` script it compiles each top-level form to a `Chunk`
+and immediately executes it.  After the last form it serialises all chunks to
+a `.scc` (Scheme Compiled Cache) file adjacent to the source, so subsequent
+runs skip recompilation.
+
+### Cache format
+
+```
+"CURRYBC" (7 bytes)  format-version (u8)
+version-string-len (u8)  version-string (N bytes)
+source-mtime (i64 LE)  source-size (i64 LE)
+n_chunks (u32 LE)
+chunk[0] … chunk[n_chunks-1]    -- each serialised with write_chunk()
+0xCAFEBEEF (u32 LE sentinel)
+```
+
+A cache hit requires an exact match on `CURRY_VERSION`, source `mtime`, and
+source byte-size.  Any mismatch falls through to recompilation.
+
+Compiled `.scc` files can also be made directly executable (`curry -c -x`),
+which prepends a `#!/usr/bin/env curry` shebang and sets the file's executable
+bit.  Extension-less executables are detected by the `CURRYBC` magic bytes.
+
+### Constant pool tags
+
+Each constant in a `Chunk`'s pool is preceded by a one-byte tag:
+
+| Tag | Type | Notes |
+|-----|------|-------|
+| 0 | Immediate | raw `val_t` (fixnum, bool, char, nil, void, eof) |
+| 1 | Flonum | 8-byte IEEE 754 double |
+| 2 | Bignum | hex string (GMP `mpz`) |
+| 3 | Rational | `"num/den"` hex string (GMP `mpq`) |
+| 4 | Complex | two recursive constants (real, imag) |
+| 5 | Quaternion | four doubles |
+| 6 | Octonion | eight doubles |
+| 7 | String | u32 byte-length + UTF-8 bytes |
+| 8 | Symbol | u32 byte-length + UTF-8 bytes; re-interned on load |
+| 9 | Chunk | recursive `write_chunk` / `read_chunk` (for `OP_CLOSURE`) |
+| 10 | Pair | two recursive constants (car, cdr) |
+| 11 | Vector | u32 element-count + recursive elements |
+| 12 | Bytevector | u32 byte-length + raw bytes |
+
+### GC note
+
+The `Chunk**` array returned by `scc_load` / `scc_load_direct` is allocated
+with `GC_MALLOC` (not plain `malloc`) so that Boehm GC's conservative heap
+scan finds the interior `Chunk*` pointers and keeps the chunk objects alive
+across GC collections that may occur while the run loop is executing them.
+
+---
+
 ## Known limitations
 
 - **`call/cc`**: escape (upward-only) continuations work from both the VM and

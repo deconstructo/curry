@@ -1,6 +1,6 @@
 # Akkadian Language Reference
 
-*v0.7.6.1 — 2026-05-14*
+*v0.8.14 — 2026-05-22*
 
 Curry Scheme accepts three equivalent notations for every name. You can mix them freely within a single program.
 
@@ -363,6 +363,23 @@ Differentiating a polynomial, integrating, simplifying — in the language of th
 - **kibrātum** (𒆠𒃲) for multivectors: the royal epithet *šar kibrāt arba'im* — "king of the four quarters" — meant dominion over all three-dimensional space. A Clifford multivector element is precisely an element of that full geometric space.
 - **dāriš** (𒀭𒀭) for ω: the adverb *dāriš* means "forever, for eternity." Surreal ω is the simplest number greater than all naturals — the first eternity past the finite.
 - **NU.NU.NU** (𒉡𒉡𒉡) for ε: three negations — not, not, not — for a number that is not zero, not negative, and not anything you can reach from zero by finite steps. The infinitesimal that defies all ordinary measure.
+
+---
+
+## Test coverage
+
+Every entry in `akkadian_names.h` is exercised by `tests/akkadian_tests.scm`,
+which runs as part of `ctest` under the `akkadian` target.  The suite tests
+both transliterated and cuneiform forms of every special form (AKK_SF) and
+procedure alias (AKK_PR) — 205 assertions in total.
+
+```bash
+# Run just the Akkadian synonym tests
+CURRY_MODULE_PATH=build/mods build/curry tests/akkadian_tests.scm
+
+# Or via ctest
+ctest --test-dir build -R akkadian -V
+```
 
 ---
 
