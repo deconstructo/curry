@@ -280,6 +280,7 @@ static void usage(const char *argv0) {
         "Usage: %s [options] [script.scm] [args...]\n"
         "  -e EXPR    Evaluate expression\n"
         "  -l FILE    Load file\n"
+        "  -c FILE    Compile FILE to .scc bytecode cache without executing\n"
         "  -i         Force interactive REPL after loading scripts\n"
         "  -v         Print version\n"
         "  --         End of options\n",
@@ -332,6 +333,50 @@ int main(int argc, char **argv) {
                 }
             }
             print_result(last);
+            ran_something = true;
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-c")) {
+            if (++i >= argc) { fputs("-c requires an argument\n", stderr); return 1; }
+            val_t port = port_open_file(argv[i], PORT_INPUT);
+            if (vis_false(port)) {
+                fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
+                return 1;
+            }
+            int cap = 64;
+            Chunk **chunks = malloc((size_t)cap * sizeof(Chunk *));
+            int n_chunks = 0;
+            ExnHandler h;
+            h.prev = current_handler; current_handler = &h;
+            if (setjmp(h.jmp) == 0) {
+                val_t v;
+                while (!vis_eof((v = scm_read(port)))) {
+                    val_t cl = compiler_compile(v);
+                    BcClosure *bc = as_bcclosure(cl);
+                    if (n_chunks == cap) {
+                        cap *= 2;
+                        chunks = realloc(chunks, (size_t)cap * sizeof(Chunk *));
+                    }
+                    chunks[n_chunks++] = bc->chunk;
+                    vm_run(bc, 0);  /* must execute: imports and define-syntax affect later compilation */
+                }
+                current_handler = h.prev;
+            } else {
+                current_handler = h.prev;
+                vm_reset();
+                free(chunks);
+                fprintf(stderr, "Error: ");
+                if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
+                else scm_write(h.exn, PORT_STDERR);
+                fputs("\n", stderr);
+                return 1;
+            }
+            port_close(port);
+            scc_write(argv[i], chunks, n_chunks);
+            free(chunks);
+            fprintf(stderr, "Compiled %s (%d chunk%s)\n",
+                    argv[i], n_chunks, n_chunks == 1 ? "" : "s");
             ran_something = true;
             continue;
         }

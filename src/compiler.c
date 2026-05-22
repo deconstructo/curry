@@ -1155,7 +1155,8 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
         head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
         head == S_DEFINE_RECORD_TYPE ||
-        head == S_RECEIVE       || head == S_SYNTAX_RULES) {
+        head == S_RECEIVE       || head == S_SYNTAX_RULES   ||
+        head == S_SYMBOLIC) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
