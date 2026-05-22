@@ -1768,6 +1768,26 @@ static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
+static val_t prim_gc_heap_size(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_heap_size());}
+static val_t prim_gc_free_bytes(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_free_bytes());}
+static val_t prim_gc_total_bytes(int ac, val_t *av, void *ud){(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_total_bytes());}
+static val_t prim_gc_enable_incremental(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud; gc_enable_incremental(); return V_VOID;
+}
+static val_t prim_gc_set_fsd(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_fixnum(av[0]) || vunfix(av[0]) < 1)
+        scm_raise(V_FALSE, "gc-set-free-space-divisor!: expected positive integer");
+    gc_set_free_space_divisor((int)vunfix(av[0]));
+    return V_VOID;
+}
+static val_t prim_gc_set_max_heap(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_fixnum(av[0]) || vunfix(av[0]) < 0)
+        scm_raise(V_FALSE, "gc-set-max-heap!: expected non-negative integer (bytes); 0 = unlimited");
+    gc_set_max_heap((size_t)vunfix(av[0]));
+    return V_VOID;
+}
 static val_t prim_profiling_report(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return profiling_report();}
 static val_t prim_profiling_reset(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; profiling_reset(); return V_VOID;}
 static val_t prim_floor_div(int ac, val_t *av, void *ud) {
@@ -2036,7 +2056,13 @@ void builtins_register(val_t env) {
     DEF("current-second",      prim_current_second,      0,0);
     DEF("current-jiffy",       prim_current_jiffy,       0,0);
     DEF("jiffies-per-second",  prim_jiffies_per_second,  0,0);
-    DEF("gc",                prim_gc,               0,0);
+    DEF("gc",                          prim_gc,                    0,0);
+    DEF("gc-heap-size",                prim_gc_heap_size,          0,0);
+    DEF("gc-free-bytes",               prim_gc_free_bytes,         0,0);
+    DEF("gc-total-bytes",              prim_gc_total_bytes,        0,0);
+    DEF("gc-enable-incremental!",      prim_gc_enable_incremental, 0,0);
+    DEF("gc-set-free-space-divisor!",  prim_gc_set_fsd,            1,1);
+    DEF("gc-set-max-heap!",            prim_gc_set_max_heap,       1,1);
     DEF("profiling-report",  prim_profiling_report, 0,0);
     DEF("profiling-reset",   prim_profiling_reset,  0,0);
     DEF("eof-object", prim_void,    0,0); /* placeholder; EOF created by reader */

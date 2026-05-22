@@ -24,6 +24,14 @@ void gc_init(void);
 void gc_register_thread(void);
 void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd);
 
+/* GC tuning — safe to call after gc_init() */
+void   gc_set_max_heap(size_t bytes);       /* 0 = unlimited */
+void   gc_set_free_space_divisor(int n);    /* default 3; lower = more aggressive */
+void   gc_enable_incremental(void);         /* lower pause times, slight overhead */
+size_t gc_heap_size(void);
+size_t gc_free_bytes(void);
+size_t gc_total_bytes(void);
+
 static inline void *gc_alloc(size_t n)        { return GC_MALLOC(n);          }
 static inline void *gc_alloc_atomic(size_t n) { return GC_MALLOC_ATOMIC(n);   }
 static inline void  gc_collect(void)           { GC_gcollect();                }

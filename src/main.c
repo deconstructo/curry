@@ -298,14 +298,25 @@ static bool affects_compile_env(val_t form) {
 static void usage(const char *argv0) {
     fprintf(stderr,
         "Usage: %s [options] [script.scm] [args...]\n"
-        "  -e EXPR    Evaluate expression\n"
-        "  -l FILE    Load file\n"
-        "  -c FILE    Compile FILE to .scc bytecode without executing\n"
-        "  -o OUT     Output path for -c (default: FILE with .scc extension)\n"
-        "  -x         Make -c output executable (shebang + chmod +x)\n"
-        "  -i         Force interactive REPL after loading scripts\n"
-        "  -v         Print version\n",
+        "  -e EXPR           Evaluate expression\n"
+        "  -l FILE           Load file\n"
+        "  -c FILE           Compile FILE to .scc bytecode without executing\n"
+        "  -o OUT            Output path for -c (default: FILE with .scc extension)\n"
+        "  -x                Make -c output executable (shebang + chmod +x)\n"
+        "  -i                Force interactive REPL after loading scripts\n"
+        "  -v                Print version\n"
+        "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n",
         argv0);
+}
+
+/* Parse a size string like "256M", "1G", "512K", or a plain integer (bytes). */
+static size_t parse_size(const char *s) {
+    char *end;
+    unsigned long long v = strtoull(s, &end, 10);
+    if      (*end == 'K' || *end == 'k') v *= 1024ULL;
+    else if (*end == 'M' || *end == 'm') v *= 1024ULL * 1024;
+    else if (*end == 'G' || *end == 'g') v *= 1024ULL * 1024 * 1024;
+    return (size_t)v;
 }
 
 /* ---- Entry point ---- */
@@ -320,20 +331,23 @@ int main(int argc, char **argv) {
     bool compile_executable  = false;
 
     static const struct option long_opts[] = {
-        { "version", no_argument, NULL, 'v' },
-        { "help",    no_argument, NULL, 'h' },
+        { "version",      no_argument,       NULL, 'v' },
+        { "help",         no_argument,       NULL, 'h' },
+        { "gc-max-heap",  required_argument, NULL, 'G' },
         { NULL, 0, NULL, 0 }
     };
 
     int opt;
     /* '+' prefix: stop at first non-option so script args aren't consumed */
-    while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvh", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvhG:", long_opts, NULL)) != -1) {
         switch (opt) {
         case 'v':
             printf("Curry Scheme %s\n", CURRY_VERSION);
             return 0;
         case 'h':
             usage(argv[0]); return 0;
+        case 'G':
+            gc_set_max_heap(parse_size(optarg)); break;
         case 'i':
             interactive = true; break;
         case 'x':
