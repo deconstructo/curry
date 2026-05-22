@@ -419,6 +419,12 @@ static val_t read_datum(val_t port) {
             }
             return read_datum(port); /* continue reading */
         }
+        case '!': {
+            /* Shebang line (#! ...) — treat as line comment */
+            int ch;
+            while ((ch = next_char(port)) != -1 && ch != '\n') {}
+            return read_datum(port);
+        }
         case ';': /* datum comment: skip next datum */
             read_datum(port);
             return read_datum(port);

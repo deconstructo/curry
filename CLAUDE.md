@@ -85,6 +85,8 @@ The four test suites are: `core` (C-level value/numeric/GC), `scheme_r7rs` (R7RS
 
 Passing a `.scc` file as the positional argument runs it directly from bytecode without needing the original `.scm` source.
 
+Scripts support shebang lines — `#!` is treated as a line comment, so `#!/usr/bin/env curry` works correctly. Make the file executable with `chmod +x script.scm` and invoke it directly.
+
 Script arguments are bound to `command-line-args` in the global environment.
 
 ## REPL commands

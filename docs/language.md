@@ -41,6 +41,21 @@ cmake -B build && cmake --build build -j$(sysctl -n hw.logicalcpu)
 ./build/curry -e '(display (+ 1 2))' # evaluate expression
 ```
 
+Scripts can be made directly executable with a shebang line:
+
+```scheme
+#!/usr/bin/env curry
+(display "hello")
+(newline)
+```
+
+```bash
+chmod +x hello.scm
+./hello.scm
+```
+
+`#!` is treated as a line comment by the reader, so the same file runs correctly with `curry hello.scm` too.
+
 See [INSTALL.md](INSTALL.md) for full dependency and build instructions, including optional modules and the Homebrew formula.
 
 ---
