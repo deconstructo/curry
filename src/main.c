@@ -363,7 +363,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             int cap = 64;
-            Chunk **chunks = malloc((size_t)cap * sizeof(Chunk *));
+            Chunk **chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
             int n_chunks = 0;
             ExnHandler h;
             h.prev = current_handler; current_handler = &h;
@@ -374,7 +374,7 @@ int main(int argc, char **argv) {
                     BcClosure *bc = as_bcclosure(cl);
                     if (n_chunks == cap) {
                         cap *= 2;
-                        chunks = realloc(chunks, (size_t)cap * sizeof(Chunk *));
+                        chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
                     }
                     chunks[n_chunks++] = bc->chunk;
                     if (affects_compile_env(v))
@@ -384,7 +384,6 @@ int main(int argc, char **argv) {
             } else {
                 current_handler = h.prev;
                 vm_reset();
-                free(chunks);
                 fprintf(stderr, "Error: ");
                 if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
                 else scm_write(h.exn, PORT_STDERR);
@@ -393,7 +392,6 @@ int main(int argc, char **argv) {
             }
             port_close(port);
             scc_write(argv[i], chunks, n_chunks);
-            free(chunks);
             fprintf(stderr, "Compiled %s (%d chunk%s)\n",
                     argv[i], n_chunks, n_chunks == 1 ? "" : "s");
             ran_something = true;
@@ -449,21 +447,20 @@ int main(int argc, char **argv) {
                     return 1;
                 }
                 int cap = 64;
-                chunks = malloc((size_t)cap * sizeof(Chunk *));
+                chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
                 val_t v;
                 while (!vis_eof((v = scm_read(port)))) {
                     val_t cl = compiler_compile(v);
                     BcClosure *bc = as_bcclosure(cl);
                     if (n_chunks == cap) {
                         cap *= 2;
-                        chunks = realloc(chunks, (size_t)cap * sizeof(Chunk *));
+                        chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
                     }
                     chunks[n_chunks++] = bc->chunk;
                     vm_run(bc, 0);
                 }
                 port_close(port);
                 scc_write(argv[i], chunks, n_chunks);
-                free(chunks);
             }
             current_handler = h.prev;
         } else {

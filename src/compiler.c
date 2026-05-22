@@ -1214,6 +1214,9 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 val_t compiler_compile(val_t expr) {
+    static bool akk_ready = false;
+    if (!akk_ready) { akk_eval_setup(); akk_ready = true; }
+
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
