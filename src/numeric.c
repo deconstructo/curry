@@ -250,6 +250,33 @@ bool num_is_integer(val_t v) {
     return false;
 }
 
+/* ---- Tuple helpers ---- */
+
+/* Unpack a quaternion or scalar-coerced value into four doubles.
+ * Scalar → (val, 0, 0, 0).  Used by num_add/sub/mul/div/cmp. */
+#define UNPACK_QUAT(v, r0, r1, r2, r3) \
+    do { if (vis_quat(v)) { Quaternion *_q = as_quat(v); \
+             (r0)=_q->a; (r1)=_q->b; (r2)=_q->c; (r3)=_q->d; } \
+         else { (r0)=num_to_double(v); (r1)=(r2)=(r3)=0.0; } } while (0)
+
+/* Apply a binary numeric op element-wise to two same-type tuples. */
+static val_t tuple_binop(val_t a, val_t b, val_t (*op)(val_t, val_t), const char *ctx) {
+    Tuple *ta = as_tuple(a), *tb = as_tuple(b);
+    if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
+        scm_raise(V_FALSE, "tuple %s: type/dimension mismatch", ctx);
+    val_t buf[256]; uint32_t n = ta->len < 256 ? ta->len : 256;
+    for (uint32_t i = 0; i < n; i++) buf[i] = op(ta->data[i], tb->data[i]);
+    return num_make_tuple((int)ta->hdr.type, n, buf);
+}
+
+/* Apply a unary numeric op element-wise to a tuple. */
+static val_t tuple_unop(val_t a, val_t (*op)(val_t)) {
+    Tuple *t = as_tuple(a);
+    val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
+    for (uint32_t i = 0; i < n; i++) buf[i] = op(t->data[i]);
+    return num_make_tuple((int)t->hdr.type, n, buf);
+}
+
 /* ---- Arithmetic helpers for exact/inexact promotion ---- */
 
 /* Promote both operands to the same type and apply fn */
@@ -316,12 +343,7 @@ val_t num_add(val_t a, val_t b) {
         if (!vis_tuple(b) && num_is_zero(b)) return a;
         if (!vis_tuple(a) || !vis_tuple(b))
             scm_raise(V_FALSE, "tuple +: cannot add tuple with non-zero scalar");
-        Tuple *ta = as_tuple(a), *tb = as_tuple(b);
-        if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
-            scm_raise(V_FALSE, "tuple +: type/dimension mismatch");
-        val_t buf[256]; uint32_t n = ta->len < 256 ? ta->len : 256;
-        for (uint32_t i = 0; i < n; i++) buf[i] = num_add(ta->data[i], tb->data[i]);
-        return num_make_tuple((int)ta->hdr.type, n, buf);
+        return tuple_binop(a, b, num_add, "+");
     }
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_add(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
@@ -337,12 +359,10 @@ val_t num_add(val_t a, val_t b) {
         return num_make_complex(num_add(ar, br), num_add(ai, bi));
     }
     if (vis_quat(a) || vis_quat(b)) {
-        double qa[4] = {0,0,0,0}, qb[4] = {0,0,0,0};
-        if (vis_quat(a)) { Quaternion *q = as_quat(a); qa[0]=q->a; qa[1]=q->b; qa[2]=q->c; qa[3]=q->d; }
-        else qa[0] = num_to_double(a);
-        if (vis_quat(b)) { Quaternion *q = as_quat(b); qb[0]=q->a; qb[1]=q->b; qb[2]=q->c; qb[3]=q->d; }
-        else qb[0] = num_to_double(b);
-        return num_make_quat(qa[0]+qb[0], qa[1]+qb[1], qa[2]+qb[2], qa[3]+qb[3]);
+        double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
+        UNPACK_QUAT(a, a0,a1,a2,a3);
+        UNPACK_QUAT(b, b0,b1,b2,b3);
+        return num_make_quat(a0+b0, a1+b1, a2+b2, a3+b3);
     }
     if (vis_oct(a) || vis_oct(b)) {
         double e[8] = {0};
@@ -360,12 +380,7 @@ val_t num_neg(val_t a) {
     if (vis_symbolic(a)) return sx_neg(a);
     if (vis_quantum(a))  return quantum_mul_scalar(a, vfix(-1));
     if (vis_surreal(a))  return sur_neg(a);
-    if (vis_tuple(a)) {
-        Tuple *t = as_tuple(a);
-        val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
-        for (uint32_t i = 0; i < n; i++) buf[i] = num_neg(t->data[i]);
-        return num_make_tuple((int)t->hdr.type, n, buf);
-    }
+    if (vis_tuple(a))    return tuple_unop(a, num_neg);
     return num_sub(vfix(0), a);
 }
 
@@ -400,12 +415,7 @@ val_t num_sub(val_t a, val_t b) {
         if (!vis_tuple(b) && num_is_zero(b)) return a;
         if (!vis_tuple(a) || !vis_tuple(b))
             scm_raise(V_FALSE, "tuple -: cannot subtract tuple and non-zero scalar");
-        Tuple *ta = as_tuple(a), *tb = as_tuple(b);
-        if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
-            scm_raise(V_FALSE, "tuple -: type/dimension mismatch");
-        val_t buf[256]; uint32_t n = ta->len < 256 ? ta->len : 256;
-        for (uint32_t i = 0; i < n; i++) buf[i] = num_sub(ta->data[i], tb->data[i]);
-        return num_make_tuple((int)ta->hdr.type, n, buf);
+        return tuple_binop(a, b, num_sub, "-");
     }
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_sub(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
@@ -419,12 +429,10 @@ val_t num_sub(val_t a, val_t b) {
         return num_make_complex(num_sub(ar, br), num_sub(ai, bi));
     }
     if (vis_quat(a) || vis_quat(b)) {
-        double qa[4] = {0,0,0,0}, qb[4] = {0,0,0,0};
-        if (vis_quat(a)) { Quaternion *q = as_quat(a); qa[0]=q->a; qa[1]=q->b; qa[2]=q->c; qa[3]=q->d; }
-        else qa[0] = num_to_double(a);
-        if (vis_quat(b)) { Quaternion *q = as_quat(b); qb[0]=q->a; qb[1]=q->b; qb[2]=q->c; qb[3]=q->d; }
-        else qb[0] = num_to_double(b);
-        return num_make_quat(qa[0]-qb[0], qa[1]-qb[1], qa[2]-qb[2], qa[3]-qb[3]);
+        double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
+        UNPACK_QUAT(a, a0,a1,a2,a3);
+        UNPACK_QUAT(b, b0,b1,b2,b3);
+        return num_make_quat(a0-b0, a1-b1, a2-b2, a3-b3);
     }
     return arith2(a, b, sub_fix, sub_big, sub_rat, sub_flo);
 }
@@ -471,7 +479,7 @@ val_t num_mul(val_t a, val_t b) {
         if (!vis_tuple(a) && num_is_one(a)) return b;
         if (!vis_tuple(b) && num_is_one(b)) return a;
         val_t scalar = vis_tuple(a) ? b : a;
-        Tuple  *t    = vis_tuple(a) ? as_tuple(a) : as_tuple(b);
+        Tuple *t     = vis_tuple(a) ? as_tuple(a) : as_tuple(b);
         val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
         for (uint32_t i = 0; i < n; i++) buf[i] = num_mul(scalar, t->data[i]);
         return num_make_tuple((int)t->hdr.type, n, buf);
@@ -484,11 +492,9 @@ val_t num_mul(val_t a, val_t b) {
     if (vis_surreal(a) || vis_surreal(b)) return sur_mul(a, b);
     /* Quaternion multiplication (non-commutative: Hamilton product) */
     if (vis_quat(a) || vis_quat(b)) {
-        double a0,a1,a2,a3, b0,b1,b2,b3;
-        if (vis_quat(a)) { a0=as_quat(a)->a; a1=as_quat(a)->b; a2=as_quat(a)->c; a3=as_quat(a)->d; }
-        else { a0=num_to_double(a); a1=a2=a3=0; }
-        if (vis_quat(b)) { b0=as_quat(b)->a; b1=as_quat(b)->b; b2=as_quat(b)->c; b3=as_quat(b)->d; }
-        else { b0=num_to_double(b); b1=b2=b3=0; }
+        double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
+        UNPACK_QUAT(a, a0,a1,a2,a3);
+        UNPACK_QUAT(b, b0,b1,b2,b3);
         return num_make_quat(
             a0*b0 - a1*b1 - a2*b2 - a3*b3,
             a0*b1 + a1*b0 + a2*b3 - a3*b2,
@@ -546,11 +552,9 @@ val_t num_div(val_t a, val_t b) {
     if (vis_surreal(a) || vis_surreal(b)) return sur_div(a, b);
     /* Quaternion division: a/b = a · conj(b) / ‖b‖² */
     if (vis_quat(a) || vis_quat(b)) {
-        double a0,a1,a2,a3, b0,b1,b2,b3;
-        if (vis_quat(a)) { a0=as_quat(a)->a; a1=as_quat(a)->b; a2=as_quat(a)->c; a3=as_quat(a)->d; }
-        else { a0=num_to_double(a); a1=a2=a3=0; }
-        if (vis_quat(b)) { b0=as_quat(b)->a; b1=as_quat(b)->b; b2=as_quat(b)->c; b3=as_quat(b)->d; }
-        else { b0=num_to_double(b); b1=b2=b3=0; }
+        double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
+        UNPACK_QUAT(a, a0,a1,a2,a3);
+        UNPACK_QUAT(b, b0,b1,b2,b3);
         double n2 = b0*b0 + b1*b1 + b2*b2 + b3*b3;
         return num_make_quat(
             ( a0*b0 + a1*b1 + a2*b2 + a3*b3) / n2,
@@ -604,10 +608,8 @@ int num_cmp(val_t a, val_t b) {
     /* Quaternions have no total order — only equality is meaningful */
     if (vis_quat(a) || vis_quat(b)) {
         double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
-        if (vis_quat(a)) { a0=as_quat(a)->a; a1=as_quat(a)->b; a2=as_quat(a)->c; a3=as_quat(a)->d; }
-        else a0 = num_to_double(a);
-        if (vis_quat(b)) { b0=as_quat(b)->a; b1=as_quat(b)->b; b2=as_quat(b)->c; b3=as_quat(b)->d; }
-        else b0 = num_to_double(b);
+        UNPACK_QUAT(a, a0,a1,a2,a3);
+        UNPACK_QUAT(b, b0,b1,b2,b3);
         return (a0==b0 && a1==b1 && a2==b2 && a3==b3) ? 0 : 1;
     }
     /* Fast paths */

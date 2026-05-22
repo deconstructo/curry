@@ -1018,24 +1018,36 @@ val_t sx_mul(val_t a, val_t b) {
 val_t sx_ncmul(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_NCMUL, a, b)); }
 val_t sx_div(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_DIV, a, b)); }
 val_t sx_expt(val_t base, val_t exp) { return sx_simplify(sx_expr2(SX_EXPT, base, exp)); }
-val_t sx_sqrt(val_t a) { return sx_simplify(sx_expr1(SX_SQRT, a)); }
-val_t sx_sin(val_t a)  { return sx_simplify(sx_expr1(SX_SIN,  a)); }
-val_t sx_cos(val_t a)  { return sx_simplify(sx_expr1(SX_COS,  a)); }
-val_t sx_tan(val_t a)  { return sx_simplify(sx_expr1(SX_TAN,  a)); }
-val_t sx_exp(val_t a)  { return sx_simplify(sx_expr1(SX_EXP,  a)); }
-val_t sx_log(val_t a)  { return sx_simplify(sx_expr1(SX_LOG,  a)); }
-val_t sx_sinh(val_t a)  { if (vis_number(a)) return num_sinh(a);  return sx_simplify(sx_expr1(SX_SINH,  a)); }
-val_t sx_cosh(val_t a)  { if (vis_number(a)) return num_cosh(a);  return sx_simplify(sx_expr1(SX_COSH,  a)); }
-val_t sx_tanh(val_t a)  { if (vis_number(a)) return num_tanh(a);  return sx_simplify(sx_expr1(SX_TANH,  a)); }
-val_t sx_asin(val_t a)  { if (vis_number(a)) return num_asin(a);  return sx_simplify(sx_expr1(SX_ASIN,  a)); }
-val_t sx_acos(val_t a)  { if (vis_number(a)) return num_acos(a);  return sx_simplify(sx_expr1(SX_ACOS,  a)); }
-val_t sx_atan(val_t a)  { if (vis_number(a)) return num_atan(a);  return sx_simplify(sx_expr1(SX_ATAN,  a)); }
-val_t sx_asinh(val_t a) { if (vis_number(a)) return num_asinh(a); return sx_simplify(sx_expr1(SX_ASINH, a)); }
-val_t sx_acosh(val_t a) { if (vis_number(a)) return num_acosh(a); return sx_simplify(sx_expr1(SX_ACOSH, a)); }
-val_t sx_atanh(val_t a) { if (vis_number(a)) return num_atanh(a); return sx_simplify(sx_expr1(SX_ATANH, a)); }
-val_t sx_cot(val_t a)   { if (vis_number(a)) return num_cot(a);   return sx_simplify(sx_expr1(SX_COT,   a)); }
-val_t sx_sec(val_t a)   { if (vis_number(a)) return num_sec(a);   return sx_simplify(sx_expr1(SX_SEC,   a)); }
-val_t sx_csc(val_t a)   { if (vis_number(a)) return num_csc(a);   return sx_simplify(sx_expr1(SX_CSC,   a)); }
+
+/* Unary transcendentals: symbolic when arg is symbolic, numeric otherwise.
+ * SX_UNARY: sx_simplify handles numeric evaluation via its operator table.
+ * SX_UNARY_NUM: explicit numeric early-exit for ops not in sx_simplify's table. */
+#define SX_UNARY(name, op) \
+    val_t sx_##name(val_t a) { return sx_simplify(sx_expr1(op, a)); }
+#define SX_UNARY_NUM(name, op, fn) \
+    val_t sx_##name(val_t a) { if (vis_number(a)) return fn(a); return sx_simplify(sx_expr1(op, a)); }
+
+SX_UNARY(sqrt,  SX_SQRT)
+SX_UNARY(sin,   SX_SIN)
+SX_UNARY(cos,   SX_COS)
+SX_UNARY(tan,   SX_TAN)
+SX_UNARY(exp,   SX_EXP)
+SX_UNARY(log,   SX_LOG)
+SX_UNARY_NUM(sinh,  SX_SINH,  num_sinh)
+SX_UNARY_NUM(cosh,  SX_COSH,  num_cosh)
+SX_UNARY_NUM(tanh,  SX_TANH,  num_tanh)
+SX_UNARY_NUM(asin,  SX_ASIN,  num_asin)
+SX_UNARY_NUM(acos,  SX_ACOS,  num_acos)
+SX_UNARY_NUM(atan,  SX_ATAN,  num_atan)
+SX_UNARY_NUM(asinh, SX_ASINH, num_asinh)
+SX_UNARY_NUM(acosh, SX_ACOSH, num_acosh)
+SX_UNARY_NUM(atanh, SX_ATANH, num_atanh)
+SX_UNARY_NUM(cot,   SX_COT,   num_cot)
+SX_UNARY_NUM(sec,   SX_SEC,   num_sec)
+SX_UNARY_NUM(csc,   SX_CSC,   num_csc)
+
+#undef SX_UNARY
+#undef SX_UNARY_NUM
 
 val_t sx_sign(val_t a) {
     if (vis_number(a)) {
