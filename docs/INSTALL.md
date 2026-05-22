@@ -1,6 +1,6 @@
 # Installation & Building
 
-*v0.8.17 — 2026-05-22*
+*v0.8.16 — 2026-05-22*
 
 ## Install via Homebrew (macOS)
 
@@ -151,10 +151,10 @@ cmake --build build-release -j$(nproc)
 cd build-release && cpack -G DEB
 ```
 
-This produces `curry-scheme_0.8.17_arm64.deb` (architecture auto-detected). Install it with:
+This produces `curry-scheme_0.8.16_arm64.deb` (architecture auto-detected). Install it with:
 
 ```bash
-sudo dpkg -i curry-scheme_0.8.17_arm64.deb
+sudo dpkg -i curry-scheme_0.8.16_arm64.deb
 ```
 
 The package installs to standard system paths:

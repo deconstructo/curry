@@ -1,6 +1,6 @@
 # Symbolic Expressions — Computer Algebra in Curry
 
-*v0.8.17 — 2026-05-22*
+*v0.8.16 — 2026-05-22*
 
 Curry's numeric tower includes a built-in computer algebra system (CAS). Any operation that would normally fail with "wrong type" when applied to an unbound symbol instead builds a symbolic expression tree. The evaluator becomes a CAS by default.
 
