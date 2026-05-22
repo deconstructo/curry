@@ -201,6 +201,26 @@ static curry_val fn_tts_voices(int ac, curry_val *av, void *ud) {
     return result;
 }
 
+/* ---- (tts-voice-table) -> list of (name . identifier) pairs ---- */
+static curry_val fn_tts_voice_table(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    if (g_mode == MODE_NONE) ensure_playback();
+    const espeak_VOICE **vlist = espeak_ListVoices(NULL);
+    curry_val result = curry_nil();
+    if (!vlist) return result;
+    int n = 0;
+    while (vlist[n]) n++;
+    for (int i = n - 1; i >= 0; i--) {
+        if (vlist[i]->name && vlist[i]->identifier) {
+            curry_val pair = curry_make_pair(
+                curry_make_string(vlist[i]->name),
+                curry_make_string(vlist[i]->identifier));
+            result = curry_make_pair(pair, result);
+        }
+    }
+    return result;
+}
+
 /* ---- Module init ---- */
 void curry_module_init(CurryVM *vm) {
 #define DEF(n, f, mn, mx) curry_define_fn(vm, n, f, mn, mx, NULL)
@@ -212,6 +232,7 @@ void curry_module_init(CurryVM *vm) {
     DEF("tts-set-volume!", fn_tts_set_volume,  1, 1);
     DEF("tts-set-voice!",  fn_tts_set_voice,   1, 1);
     DEF("tts-voices",      fn_tts_voices,      0, 0);
+    DEF("tts-voice-table", fn_tts_voice_table, 0, 0);
 #undef DEF
 
     curry_define_val(vm, "tts-rate-min",    curry_make_fixnum(espeakRATE_MINIMUM));

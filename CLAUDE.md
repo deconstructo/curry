@@ -494,6 +494,8 @@ Constants: `tts-rate-min` (80), `tts-rate-max` (450), `tts-rate-normal` (175).
 `tts-speak` uses `AUDIO_OUTPUT_SYNCH_PLAYBACK` and blocks until audio finishes.  
 `tts->pcm` uses `AUDIO_OUTPUT_SYNCHRONOUS` (no hardware playback) and reinitializes if called after `tts-speak`.
 
+Full documentation including all 141 voice names and identifiers: `docs/module-tts.md`.
+
 ## R7RS compliance gaps
 
 The following standard procedures are **not yet implemented**. Everything else in `(scheme base)`, `(scheme char)`, `(scheme file)`, `(scheme inexact)`, `(scheme complex)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, and `(scheme write)` is present.

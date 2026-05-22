@@ -8,9 +8,11 @@
 - `(tts->pcm text)` — returns a bytevector of 16-bit little-endian PCM samples (`AUDIO_OUTPUT_SYNCHRONOUS`, no hardware output). Switches mode on the fly if needed.
 - `(tts-set-rate! wpm)` / `(tts-set-pitch! n)` / `(tts-set-volume! n)` / `(tts-set-voice! name)` — session-level parameter setters; applied immediately if eSpeak is already initialised.
 - `(tts-voices)` — returns the full list of installed voice names (141 voices in a standard eSpeak NG install).
+- `(tts-voice-table)` — returns `((name . identifier) ...)` pairs; identifiers (e.g. `"roa/fr"`, `"gmw/en-GB-x-rp"`) are accepted by `tts-set-voice!` and the `lang` argument of `tts-speak`.
 - `(tts-sample-rate)` — sample rate in Hz (typically 22050).
 - Constants: `tts-rate-min` (80), `tts-rate-max` (450), `tts-rate-normal` (175).
 - Build flag: `-DBUILD_MODULE_TTS=ON`; dependency: `libespeak-ng` (`brew install espeak-ng` / `apt install libespeak-ng-dev`).
+- Full documentation with all 141 voices: `docs/module-tts.md`.
 
 ---
 
