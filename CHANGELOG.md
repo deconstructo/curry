@@ -23,6 +23,11 @@
 
 **Tests:** `sicm_tests.scm` expanded from 35 to 55 assertions (added §§16–21: 2D harmonic oscillator EOM, Kepler EOM, 1D/2D Hamiltonians, Hamilton equations, Poisson bracket identities including `{q,p}=1`).
 
+**Internal simplifications**
+
+- `numeric.c`: `tuple_binop` / `tuple_unop` helpers replace copy-pasted element-wise loops in `num_add`, `num_sub`, `num_neg`. `UNPACK_QUAT` macro replaces a 4-line quaternion-or-scalar extraction at five sites.
+- `symbolic.c`: 18 transcendental one-liners (`sx_sqrt` … `sx_csc`) replaced by `SX_UNARY` / `SX_UNARY_NUM` macro table — adding a new transcendental now takes one line.
+
 ---
 
 ### 0.8.15 — SICM module fixes and test coverage
