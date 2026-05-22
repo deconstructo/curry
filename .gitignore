@@ -21,6 +21,7 @@ build_*/
 *.o
 *.a
 *.so
+*.scc
 *.so.*
 *.dylib
 *.dll
