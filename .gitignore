@@ -27,6 +27,9 @@ build_*/
 *.dll
 *.exe
 
+# ---- Redis ----
+dump.rdb
+
 # ---- REPL history ----
 .curry_history
 
