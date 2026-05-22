@@ -107,12 +107,12 @@ sedi "s|# curry-scheme_[0-9][0-9._]*_|# curry-scheme_${NEW_VER}_|" \
   "$CMAKELISTS"
 ok "CMakeLists.txt updated"
 
-# ── update src/main.c ─────────────────────────────────────────────────────────
-MAIN_C="$REPO_ROOT/src/main.c"
-info "Updating $MAIN_C"
+# ── update src/version.h ──────────────────────────────────────────────────────
+VERSION_H="$REPO_ROOT/src/version.h"
+info "Updating $VERSION_H"
 sedi "s|#define CURRY_VERSION \"[^\"]*\"|#define CURRY_VERSION \"${NEW_VER}\"|" \
-  "$MAIN_C"
-ok "src/main.c updated"
+  "$VERSION_H"
+ok "src/version.h updated"
 
 # ── update formula ────────────────────────────────────────────────────────────
 info "Updating $FORMULA"
@@ -142,7 +142,7 @@ echo
 
 # ── commit ────────────────────────────────────────────────────────────────────
 info "Committing version files"
-git add "$FORMULA" "$CMAKELISTS" "$MAIN_C"
+git add "$FORMULA" "$CMAKELISTS" "$VERSION_H"
 git commit -m "chore: bump version to ${NEW_VER}"
 ok "Committed"
 

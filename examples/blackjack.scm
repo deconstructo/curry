@@ -1,3 +1,4 @@
+#!/usr/bin/env curry
 ;;; Blackjack (21) - terminal, single deck, basic rules
 
 (define suits '("S" "H" "D" "C"))
