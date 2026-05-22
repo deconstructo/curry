@@ -7,13 +7,13 @@
 ;;; Mechanics" (2nd ed., MIT Press).  Procedure names follow Chapter 1.
 ;;;
 ;;; Supported:
-;;;   literal-function   time  coordinate  velocity  acceleration
+;;;   literal-function  literal-function*
+;;;   time  coordinate  velocity  acceleration
 ;;;   square  compose
 ;;;   Gamma  Gamma-bar
-;;;   Lagrange-equations
+;;;   Lagrange-equations  Euler-Lagrange-operator
 ;;;   Lagrangian->energy  Lagrangian->T  Lagrangian->V
-;;;   Euler-Lagrange-operator
-;;;   L-free-particle  L-harmonic  L-uniform-acceleration
+;;;   L-free-particle  L-harmonic  L-uniform-acceleration  make-Lagrangian
 
 (import (scheme base))
 (import (scheme inexact))
@@ -55,11 +55,13 @@
 ;;; Multi-argument literal function: (literal-function* 'f n)
 ;;; produces a symbolic function of n arguments.
 (define (literal-function* name n)
-  (apply sym-fn name
-         (map (lambda (i)
-                (sym-var (string->symbol
-                          (string-append "_arg" (number->string i)))))
-              (iota n))))
+  (let loop ((i 0) (args '()))
+    (if (= i n)
+        (apply sym-fn name (reverse args))
+        (loop (+ i 1)
+              (cons (sym-var (string->symbol
+                              (string-append "_arg" (number->string i))))
+                    args)))))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 3  Local tuple selectors
@@ -135,11 +137,16 @@
           (dL   (((partial 2) L) local)))
       (simplify (- (* qdot dL) (L local))))))
 
-;;; Extract kinetic energy: T = L + V (assuming L = T - V)
-;;; Requires the potential function V.
-(define (Lagrangian->T L V)
+;;; Extract potential energy: V(local) = −L(local with qdot=0)
+;;; Works because T vanishes at zero velocity for standard Lagrangians.
+(define (Lagrangian->V L)
   (lambda (local)
-    (simplify (+ (L local) (V (coordinate local))))))
+    (simplify (- (L (up (time local) (coordinate local) 0))))))
+
+;;; Extract kinetic energy: T = L + V  (since L = T − V)
+(define (Lagrangian->T L)
+  (lambda (local)
+    (simplify (+ (L local) ((Lagrangian->V L) local)))))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 7  Standard Lagrangians
