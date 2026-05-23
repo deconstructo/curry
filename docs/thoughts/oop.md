@@ -19,24 +19,146 @@ The motivating use cases:
 
 ---
 
-## Chosen model: CLOS-style generic functions
+## Evaluating the options
 
-### Why not message-passing?
+### Option 1 — Closure-based message-passing (SICP style)
 
-The closure-based message-passing style (`(obj 'method arg)`) is idiomatic in toy Scheme OOP but doesn't compose. You cannot write a generic `distance` function that dispatches on *both* of its arguments without embedding the dispatch logic inside every object. It also makes the method body invisible to the toolchain.
+```scheme
+(define (make-point x y)
+  (lambda (msg . args)
+    (case msg
+      ((x) x)
+      ((distance) (let ((b (car args)))
+                    (sqrt (+ (square (- (b 'x) x)) ...)))))))
+```
 
-### Why not single dispatch?
+**Pros:** Zero infrastructure, pure Scheme, teaches the pattern beautifully.
 
-Single dispatch (Python / Ruby style) is familiar but artificially constrains the model. Curry's numeric tower already does something richer — `(+ quaternion symbolic)` dispatches on the combination of types, not just the first argument. A single-dispatch OOP layer would be a step backwards.
+**Cons:** Disqualified by the requirements. You cannot dispatch `(+ polynomial symbolic)` on both argument types without embedding the dispatch table inside every object, and the method bodies are invisible to any tool or documentation system. Not viable.
 
-### CLOS-style
+---
 
-Generic functions own the dispatch. Methods are attached to generic functions and specialise on zero or more argument types. Any module can add a new method to an existing generic function — the system is *open*.
+### Option 2 — Single dispatch (Python / Ruby / Smalltalk style)
 
-This fits Curry naturally:
-- The numeric tower's internal type dispatch becomes visible at the Scheme level.
-- Users can extend `+`, `*`, `simplify`, `display` for their own types.
-- Multiple inheritance with C3 linearisation avoids the diamond problem.
+One designated receiver argument drives method lookup; all other arguments are untyped.
+
+**Pros:** Familiar, fast, straightforward to implement, excellent tooling story (introspection, reflection, autocomplete).
+
+**Cons — and this needs to be specific, not just dismissed:**
+
+The real problem for Curry is that the motivating operations are all multi-argument. `(inner-product u v)` on a manifold, `(+ polynomial symbolic)`, `(Lagrange-equations L)` where `L` is itself a typed structure — none of these fit cleanly into "receiver.method(arg)". You end up writing double-dispatch by hand for every cross-type operation, which is exactly what generic functions solve.
+
+*If* the use cases were primarily hardware abstraction and UI — typed handles, event handlers, widget hierarchies — single dispatch would be fine and considerably simpler. The deciding factor is the CAS and SICM. Those domains require multi-argument dispatch as a first-class primitive.
+
+---
+
+### Option 3 — Full CLOS
+
+Generic functions with multiple dispatch, C3 linearisation across an inheritance hierarchy, method combination qualifiers (`:before` / `:after` / `:around` / `call-next-method`), and an optional metaobject protocol (MOP).
+
+**Pros:** The theoretically correct answer for the use cases. scmutils — the original system behind SICM — is built on CLOS. The numeric tower already does implicit CLOS-style dispatch at the C level; surfacing this at the Scheme level is a natural move.
+
+**Cons — and these are real:**
+
+- Method combination (`:before`, `:after`, `:around`) is almost never used in practice. In years of Common Lisp production code it shows up mainly in frameworks, not user code. The complexity is real; the payoff is rare.
+- The full metaobject protocol is enormous. *The Art of the Metaobject Protocol* is a book. Metaclasses, `compute-applicable-methods`, `make-method-lambda` — you almost certainly don't want to build or maintain this.
+- The MOP creates a genuine bootstrapping problem: you need classes to define classes.
+- Debugging CLOS dispatch failures is unpleasant. Error messages are deep and hard to trace.
+
+The core dispatch model is sound. The method combination and MOP are the parts that should not be built.
+
+---
+
+### Option 4 — Slim CLOS (no MOP, no method qualifiers)
+
+This is what TinyCLOS (Gregor Kiczales, ~600 lines of Scheme) implements, and what Swindle refined for PLT Scheme. The core:
+
+- `define-class` with single or multiple inheritance
+- `define-generic` / `define-method` with multiple dispatch
+- `make`, `slot-ref`, `slot-set!`, `is-a?`, `class-of`
+- C3 linearisation for the method resolution order
+- `call-next-method` in primary methods
+- **No MOP. No method combination qualifiers.**
+
+This covers 98% of real use cases. Method combination can be added later if there is demonstrated need; leaving it out now costs nothing.
+
+---
+
+### Option 5 — Clojure protocols
+
+Separate the data definition from the dispatch mechanism entirely:
+
+```scheme
+(define-record-type <point> ...)      ; data only
+
+(define-protocol Metric               ; named interface
+  (distance a b)
+  (norm a))
+
+(extend-type <point> Metric           ; attach implementation to type
+  (distance (a b) ...)
+  (norm (a) ...))
+```
+
+**Pros:** Very clean separation of concerns. Easily toolable — you can enumerate all implementations of a protocol. Simpler dispatch than CLOS. Easier to optimise (one dispatch table per protocol per type). This is what Clojure converged on after years of production use.
+
+**Cons:** Protocols are single-dispatch. `(distance <point-3d> <quaternion>)` dispatches on the first argument only. For Curry's multi-argument operations — any place in the CAS or SICM where the operation depends on the types of two or more arguments — this is a fundamental limitation. You would need a separate multi-method mechanism alongside protocols, making the system a partial solution.
+
+Protocols are an excellent complement to generic functions. They are not a replacement.
+
+---
+
+### Option 6 — Julia style: structs + pure multiple dispatch, no class hierarchy
+
+Julia separates "having data" from "being dispatchable":
+
+```scheme
+(define-abstract <metric-space>)              ; dispatch anchor, no slots
+(define-struct <point> (<metric-space>)       ; concrete, inherits dispatch tag
+  (x y))
+
+(define-method distance ((a <metric-space>) (b <metric-space>)) ...)
+```
+
+Structs carry data. Abstract types exist only for dispatch. Methods live on functions, never on types. There is no concept of "a method belonging to a class." Field inheritance is not permitted — only dispatch inheritance.
+
+**Pros:** Very clean for mathematical code. No object identity confusion. Methods are always global and composable. Fits Curry's functional orientation — values are immutable data, functions dispatch generically. Julia chose this model after careful thought about scientific computing, which is precisely Curry's target domain.
+
+**Cons:** "No field inheritance" surprises people who come from class-based OOP. Abstract types without slots feel slightly alien in Scheme. The model is less familiar to the Scheme community than a CLOS-derived one.
+
+---
+
+## Recommendation: Slim CLOS, informed by Julia's field/method separation
+
+The conclusion across the options:
+
+- Closure-based message-passing: too limited.
+- Single dispatch: wrong fit for multi-argument operations.
+- Full CLOS: the dispatch core is right; the MOP and method combination are complexity that should not be built.
+- Protocols: excellent complement, not a full solution.
+- Julia-style: the cleanest design for scientific computing, but the "no field inheritance" constraint may be unnecessarily strict.
+
+The right design is **Slim CLOS with no MOP and no method combination qualifiers**, with one non-obvious choice borrowed from Julia and functional Scheme style: **slots are immutable by default**.
+
+### Immutable slots by default
+
+Standard CLOS uses mutable slots. This document proposes the opposite: slots are read-only after `make` unless declared `#:mutable`.
+
+The reason is specific to Curry's domain. A `<rigid-body>` or `<coordinate-system>` whose state can be accidentally mutated is a worse simulation primitive than one that cannot. Immutable objects can be freely shared across actors without synchronisation. The functional style of CAS expressions (build a new expression tree, don't patch the old one) generalises cleanly to user-defined types.
+
+Mutable slots remain available for hardware handles and UI state where mutation is the point.
+
+### What is *not* being built
+
+- No metaobject protocol.
+- No method combination qualifiers (`:before`, `:after`, `:around`). `call-next-method` in primary methods only.
+- No metaclasses.
+
+These can be added later with demonstrated need. Leaving them out now is not a limitation — it is a decision.
+
+### Note on scmutils compatibility
+
+If Curry's primary users are physicists who know scmutils, they expect CLOS and expect it to behave like CLOS including method combination. In that case, following scmutils more closely may outweigh elegance. This is worth revisiting once there are real users writing real physics code.
 
 ---
 
@@ -59,7 +181,7 @@ This fits Curry naturally:
 
 ; Slot access.
 (slot-ref  p 'x)          ; → 3
-(slot-set! p 'x 10)
+(slot-set! p 'x 10)       ; error unless slot declared #:mutable
 
 ; Generated accessors (optional, declared in define-class).
 (define-class <point> ()
@@ -87,20 +209,11 @@ This fits Curry naturally:
 ; Unspecialised argument — matches anything.
 (define-method describe ((x <object>))
   (display (class-of x)) (newline))
-```
 
-### Method combination
-
-```scheme
-; call-next-method — invoke the next most specific method.
-(define-method area ((s <square>))
-  (* (side s) (side s)))
-
-(define-method area :before ((s <shape>))
-  (assert (> (side s) 0)))
-
-; Standard method combination: primary, :before, :after, :around.
-; Default combination: run :before chain, then primary, then :after chain.
+; call-next-method — invoke the next most specific primary method.
+(define-method describe ((x <point>))
+  (display "point: ")
+  (call-next-method))
 ```
 
 ### Predicates and introspection
@@ -118,7 +231,7 @@ This fits Curry naturally:
 
 ## Built-in type hierarchy
 
-All existing Curry types sit in the class hierarchy as pre-defined classes. This means generic functions can dispatch on them without any wrapper.
+All existing Curry types sit in the class hierarchy as pre-defined classes. Generic functions can dispatch on them without any wrapper.
 
 ```
 <object>
@@ -162,10 +275,9 @@ This lets you write:
 
 ## Integration with the numeric tower
 
-The most important integration point. Currently `+`, `*`, etc. are C-level functions that dispatch by tag. The OOP layer should make this dispatch visible and extensible:
+Currently `+`, `*`, etc. are C-level functions that dispatch by tag. The OOP layer should make this dispatch visible and extensible:
 
 ```scheme
-; A user-defined polynomial type participates in arithmetic.
 (define-class <polynomial> ()
   (coeffs #:accessor poly-coeffs))
 
@@ -178,7 +290,7 @@ The most important integration point. Currently `+`, `*`, etc. are C-level funct
     #:coeffs (map (lambda (c) (* c b)) (poly-coeffs a))))
 ```
 
-The C-level numeric operators would call the generic function machinery when neither argument is a known built-in type — a fast-path / slow-path split.
+The C-level numeric operators call the generic function machinery when neither argument is a known built-in type — a fast-path / slow-path split.
 
 ---
 
@@ -186,7 +298,7 @@ The C-level numeric operators would call the generic function machinery when nei
 
 Two options:
 
-1. **Replace** — `define-class` supersedes `define-record-type`. Existing code using `define-record-type` continues to work via a compatibility shim that translates it to `define-class`.
+1. **Replace** — `define-class` supersedes `define-record-type`. Existing code using `define-record-type` continues to work via a compatibility shim.
 
 2. **Coexist** — `define-record-type` remains for low-level use; `define-class` is the high-level OOP layer. Records created with `define-record-type` do not participate in the generic function dispatch unless explicitly wrapped.
 
@@ -200,7 +312,7 @@ Option 1 is cleaner long-term. Option 2 is safer for backward compatibility. Lea
 
 `define-class`, `define-generic`, `define-method`, `make`, `slot-ref`, `slot-set!`, `is-a?`, `class-of` as a Scheme library (`lib/curry/modules/curry/oop.scm`). Dispatch via a hash table of method tables keyed by argument type tags. No C changes required.
 
-This gives us the full API at the cost of some dispatch overhead — acceptable for application-level code.
+This gives the full API at the cost of some dispatch overhead — acceptable for application-level code.
 
 ### Layer 2 — C-level dispatch cache
 
@@ -214,17 +326,19 @@ Wire the numeric tower's internal C-level type dispatch through the generic func
 
 ## Open questions
 
-1. **Slot mutability** — should slots be immutable by default (functional style) with `#:mutable` to opt in? Or mutable by default (Smalltalk style)?
+1. **scmutils compatibility** — do we follow scmutils closely enough to include method combination? If the primary audience is SICM users who know the original system, diverging from it has a real cost.
 
-2. **Metaclasses** — do we expose metaclass protocol (class-of a class, methods on classes)? Powerful but adds significant complexity. Defer.
+2. **Slot mutability** — immutable by default with `#:mutable` to opt in (recommended above), or mutable by default? This is the most consequential design choice after the dispatch model itself.
 
 3. **`initialize` method** — called by `make` after slot population, lets subclasses run setup logic. Needed for non-trivial constructors.
 
 4. **Method visibility** — are methods global (CLOS) or module-scoped? Global is simpler; module-scoped prevents accidental interference but requires an export mechanism for generic functions.
 
-5. **Performance baseline** — before implementing, benchmark the pure Scheme macro layer against direct record access to understand the overhead budget.
+5. **Protocols as a complement** — should there be a `define-protocol` form for declaring named sets of generic functions that a type "implements"? This gives tooling a handle (list all types implementing `<Metric>`) without changing the dispatch model.
 
-6. **Serialisation** — do class instances participate in `write`/`read` round-trips? Requires a `print-object` generic and a reader extension.
+6. **Performance baseline** — before implementing, benchmark the pure Scheme macro layer against direct record access to understand the overhead budget.
+
+7. **Serialisation** — do class instances participate in `write`/`read` round-trips? Requires a `print-object` generic and a reader extension.
 
 ---
 
@@ -249,5 +363,6 @@ Implement Layer 1 as `(curry oop)` — a pure-Scheme module with no C changes. W
 - `call-next-method`
 - Dispatch on built-in types (`<number>`, `<string>`)
 - Extension of `+` for a user-defined type
+- Immutable slot enforcement
 
 Get the API right before optimising anything.
