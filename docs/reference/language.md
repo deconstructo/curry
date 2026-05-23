@@ -77,7 +77,7 @@ Curry has three layers:
 
 **Core language** — compiled directly into the interpreter. Always present, no import needed. Includes the full R7RS base library plus Curry's extensions: the extended numeric tower (through multivectors and symbolic expressions), the actor system, math constants (`e`, `pi`, `exact-pi`, `exact-e`), CAS procedures (`∂`, `∫`, `symbolic`, `simplify`, `substitute`, `expand`, `collect`, …), and tracing.
 
-**Standard modules** — separate `.so` or `.scm` files that are always installed alongside the interpreter. Import with `(import (curry name))`. These are: `json`, `network`, `redis`, `regex`, `sync`, `sqlite`, `mcp`, `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ode`.
+**Standard modules** — separate `.so` or `.scm` files that are always installed alongside the interpreter. Import with `(import (curry name))`. These are: `json`, `network`, `redis`, `regex`, `sync`, `sqlite`, `mcp`, `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ode`, `pde`, `pde-symbolic`.
 
 **Optional modules** — built only when the required external library is present at compile time (or when the Homebrew formula is installed with `--with-*`). These are: `qt6` (GUI and 2D graphics), `plplot` (scientific plotting), `symengine` (SymEngine CAS backend), `neo4j` (graph database), `mqtt` (messaging), `vecdb` (approximate nearest neighbours).
 
@@ -90,7 +90,7 @@ Module documentation lives in separate files; see [the module docs](#module-refe
 | Tier | Members | Import |
 |------|---------|--------|
 | Core (always in scope) | numeric tower, CAS, actors, I/O, R7RS base | no import needed |
-| Standard | `json` `network` `redis` `regex` `sync` `sqlite` `mcp` `crypto` `ldap` `storage` `graphql` `image` `git` `ode` | `(import (curry name))` |
+| Standard | `json` `network` `redis` `regex` `sync` `sqlite` `mcp` `crypto` `ldap` `storage` `graphql` `image` `git` `ode` `pde` `pde-symbolic` | `(import (curry name))` |
 | Optional (build flag / brew option) | `qt6` `plplot` `symengine` `neo4j` `mqtt` `vecdb` | `(import (curry name))` |
 
 Trying to import a module that was not built raises an error. The Homebrew formula enables all standard modules and accepts `--with-qt6`, `--with-plplot`, `--with-symengine`, `--with-neo4j`, `--with-mqtt` at install time.
@@ -932,6 +932,8 @@ Each directory is tried for `.so`, `.dylib`, `.sld`, `.scm` in that order.
 | [`(curry image)`](module-image.md) | Standard | PNG/JPEG/GIF image I/O |
 | [`(curry git)`](module-git.md) | Standard | Git repository access (libgit2) |
 | [`(curry ode)`](module-ode.md) | Standard | ODE solvers (RK45, Euler) |
+| [`(curry pde)`](module-pde.md) | Standard | PDE solvers: heat, wave, Poisson, method of lines |
+| [`(curry pde-symbolic)`](module-pde-symbolic.md) | Standard | Symbolic PDE analysis: separation of variables, characteristics |
 | [`(curry qt6)`](module-qt6.md) | Optional | Qt6 windowing, 2D graphics, widgets |
 | [`(curry plplot)`](module-plplot.md) | Optional | PLplot scientific plotting |
 | [`(curry mqtt)`](module-mqtt.md) | Optional | MQTT client with TLS |
