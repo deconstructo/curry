@@ -11,6 +11,9 @@ tests/curry_test
 b
 .claude/
 
+# ---- attic ----
+attic
+
 # ---- Out-of-source build directories ----
 build/
 build-*/

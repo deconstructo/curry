@@ -93,6 +93,9 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QSplitter>
+#include <QFileDialog>
 #include <QProgressBar>
 #include <QFrame>
 #include <QPainter>
@@ -289,8 +292,8 @@ protected:
         ev->ignore();  /* Scheme decides whether to quit */
     }
     void keyPressEvent(QKeyEvent *ev) override {
-        /* Forward to canvas via the public event dispatcher */
-        QApplication::sendEvent(ws->canvas, ev);
+        if (ws->canvas)
+            QApplication::sendEvent(ws->canvas, ev);
     }
 };
 
@@ -1408,6 +1411,180 @@ static curry_val fn_rotate_4d_xw(int ac, curry_val *av, void *ud) {
 }
 
 /* =========================================================================
+ * Layer 3 — Plain window (no preset canvas/sidebar)
+ * ========================================================================= */
+
+static curry_val fn_make_plain_window(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    ensure_app();
+    const char *title = curry_string(av[0]);
+    int w = (int)curry_float(av[1]);
+    int h = (int)curry_float(av[2]);
+
+    auto *ws           = new WinState();
+    ws->draw_proc      = curry_make_bool(false);
+    ws->key_proc       = curry_make_bool(false);
+    ws->mouse_proc     = curry_make_bool(false);
+    ws->scroll_proc    = curry_make_bool(false);
+    ws->realize_proc   = curry_make_bool(false);
+    ws->close_proc     = curry_make_bool(false);
+    ws->live_painter   = nullptr;
+    ws->cur_w = w; ws->cur_h = h;
+    ws->realized       = false;
+    ws->gpu_ok         = false;
+    ws->canvas         = nullptr;
+    ws->sidebar_layout = nullptr;
+
+    auto *cwin = new CurryWindow(ws);
+    cwin->setWindowTitle(QString::fromUtf8(title));
+    cwin->resize(w, h);
+    ws->win = cwin;
+
+    return win_to_val(ws);
+}
+
+static curry_val fn_window_set_central(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    val_to_win(av[0])->win->setCentralWidget(val_to_widget(av[1]));
+    return curry_void();
+}
+
+/* =========================================================================
+ * Layer 3 — Splitter
+ * ========================================================================= */
+
+static QSplitter *widget_to_splitter(curry_val v) {
+    QWidget *w = val_to_widget(v);
+    QVariant qv = w->property("_qt6_sp");
+    if (!qv.isValid()) curry_error("qt6: not a splitter widget");
+    return (QSplitter *)qv.value<quintptr>();
+}
+
+/* (make-splitter ['vertical|'horizontal]) */
+static curry_val fn_make_splitter(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    Qt::Orientation orient = Qt::Vertical;
+    if (ac >= 1 && curry_is_symbol(av[0]))
+        if (strcmp(curry_symbol(av[0]), "horizontal") == 0)
+            orient = Qt::Horizontal;
+    auto *sp = new QSplitter(orient);
+    sp->setChildrenCollapsible(false);
+    sp->setProperty("_qt6_sp", QVariant((quintptr)(void *)sp));
+    return widget_to_val(sp);
+}
+
+static curry_val fn_splitter_add(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    widget_to_splitter(av[0])->addWidget(val_to_widget(av[1]));
+    return curry_void();
+}
+
+/* (splitter-set-sizes! splitter '(h1 h2 ...)) */
+static curry_val fn_splitter_set_sizes(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    QList<int> sizes;
+    for (curry_val p = av[1]; !curry_is_nil(p); p = curry_cdr(p))
+        sizes << (int)curry_float(curry_car(p));
+    widget_to_splitter(av[0])->setSizes(sizes);
+    return curry_void();
+}
+
+/* =========================================================================
+ * Layer 3 — Multi-line text editor (QPlainTextEdit)
+ * ========================================================================= */
+
+static QPlainTextEdit *widget_to_textedit(curry_val v) {
+    QWidget *w = val_to_widget(v);
+    QVariant qv = w->property("_qt6_te");
+    if (!qv.isValid()) curry_error("qt6: not a text-edit widget");
+    return (QPlainTextEdit *)qv.value<quintptr>();
+}
+
+static curry_val fn_make_text_edit(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac; (void)av;
+    ensure_app();
+    auto *te = new QPlainTextEdit();
+    QFont f;
+    f.setFamily("Menlo");
+    f.setStyleHint(QFont::Monospace);
+    f.setFixedPitch(true);
+    f.setPointSize(13);
+    te->setFont(f);
+    te->setTabStopDistance(4 * QFontMetrics(f).horizontalAdvance(' '));
+    te->setProperty("_qt6_te", QVariant((quintptr)(void *)te));
+    return widget_to_val(te);
+}
+
+static curry_val fn_text_edit_text(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    QByteArray ba = widget_to_textedit(av[0])->toPlainText().toUtf8();
+    return curry_make_string(ba.constData());
+}
+
+static curry_val fn_text_edit_set_text(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    widget_to_textedit(av[0])->setPlainText(
+        QString::fromUtf8(curry_string(av[1])));
+    return curry_void();
+}
+
+static curry_val fn_text_edit_append(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    widget_to_textedit(av[0])->appendPlainText(
+        QString::fromUtf8(curry_string(av[1])));
+    return curry_void();
+}
+
+static curry_val fn_text_edit_clear(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    widget_to_textedit(av[0])->clear();
+    return curry_void();
+}
+
+static curry_val fn_text_edit_set_read_only(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    widget_to_textedit(av[0])->setReadOnly(curry_bool(av[1]));
+    return curry_void();
+}
+
+static curry_val fn_text_edit_on_change(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    auto      *te   = widget_to_textedit(av[0]);
+    curry_val  proc = av[1];
+    keep_alive(proc);
+    QObject::connect(te, &QPlainTextEdit::textChanged, [proc]() {
+        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+    });
+    return curry_void();
+}
+
+/* =========================================================================
+ * Layer 3 — File dialogs
+ * ========================================================================= */
+
+/* (file-open-dialog [title [filter]]) → path-string | #f */
+static curry_val fn_file_open_dialog(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    ensure_app();
+    QString title  = (ac >= 1) ? QString::fromUtf8(curry_string(av[0])) : "Open File";
+    QString filter = (ac >= 2) ? QString::fromUtf8(curry_string(av[1])) : "All Files (*)";
+    QString path   = QFileDialog::getOpenFileName(nullptr, title, QString(), filter);
+    if (path.isEmpty()) return curry_make_bool(false);
+    return curry_make_string(path.toUtf8().constData());
+}
+
+/* (file-save-dialog [title [filter]]) → path-string | #f */
+static curry_val fn_file_save_dialog(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    ensure_app();
+    QString title  = (ac >= 1) ? QString::fromUtf8(curry_string(av[0])) : "Save File";
+    QString filter = (ac >= 2) ? QString::fromUtf8(curry_string(av[1])) : "All Files (*)";
+    QString path   = QFileDialog::getSaveFileName(nullptr, title, QString(), filter);
+    if (path.isEmpty()) return curry_make_bool(false);
+    return curry_make_string(path.toUtf8().constData());
+}
+
+/* =========================================================================
  * Module registration
  * ========================================================================= */
 
@@ -1417,8 +1594,10 @@ extern "C" void curry_module_init(CurryVM *vm) {
     s_proc_roots = curry_nil();
 
     /* --- Layer 3: Window --- */
-    curry_define_fn(vm, "make-window",          fn_make_window,         3, 3, NULL);
-    curry_define_fn(vm, "window-on-close!",     fn_window_on_close,     2, 2, NULL);
+    curry_define_fn(vm, "make-window",               fn_make_window,          3, 3, NULL);
+    curry_define_fn(vm, "make-plain-window",          fn_make_plain_window,    3, 3, NULL);
+    curry_define_fn(vm, "window-set-central-widget!", fn_window_set_central,   2, 2, NULL);
+    curry_define_fn(vm, "window-on-close!",           fn_window_on_close,      2, 2, NULL);
     curry_define_fn(vm, "window-on-key!",       fn_window_on_key,       2, 2, NULL);
     curry_define_fn(vm, "window-on-realize!",   fn_window_on_realize,   2, 2, NULL);
     curry_define_fn(vm, "window-canvas",        fn_window_canvas,       1, 1, NULL);
@@ -1443,6 +1622,9 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "make-tabs",            fn_make_tabs,           0, 0, NULL);
     curry_define_fn(vm, "tabs-add!",            fn_tabs_add,            3, 3, NULL);
     curry_define_fn(vm, "make-group-box",       fn_make_group_box,      1, 1, NULL);
+    curry_define_fn(vm, "make-splitter",        fn_make_splitter,       0, 1, NULL);
+    curry_define_fn(vm, "splitter-add!",        fn_splitter_add,        2, 2, NULL);
+    curry_define_fn(vm, "splitter-set-sizes!",  fn_splitter_set_sizes,  2, 2, NULL);
 
     /* --- Layer 3: Widgets --- */
     curry_define_fn(vm, "make-label",           fn_make_label,          1, 1, NULL);
@@ -1466,8 +1648,15 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "text-set-value!",      fn_text_set_value,      2, 2, NULL);
     curry_define_fn(vm, "make-progress-bar",    fn_make_progress,       3, 3, NULL);
     curry_define_fn(vm, "progress-set!",        fn_progress_set,        2, 2, NULL);
-    curry_define_fn(vm, "make-separator",       fn_make_separator,      0, 0, NULL);
-    curry_define_fn(vm, "widget-set-style!",    fn_widget_set_style,    2, 2, NULL);
+    curry_define_fn(vm, "make-separator",            fn_make_separator,         0, 0, NULL);
+    curry_define_fn(vm, "make-text-edit",            fn_make_text_edit,         0, 0, NULL);
+    curry_define_fn(vm, "text-edit-text",            fn_text_edit_text,         1, 1, NULL);
+    curry_define_fn(vm, "text-edit-set-text!",       fn_text_edit_set_text,     2, 2, NULL);
+    curry_define_fn(vm, "text-edit-append!",         fn_text_edit_append,       2, 2, NULL);
+    curry_define_fn(vm, "text-edit-clear!",          fn_text_edit_clear,        1, 1, NULL);
+    curry_define_fn(vm, "text-edit-set-read-only!",  fn_text_edit_set_read_only,2, 2, NULL);
+    curry_define_fn(vm, "text-edit-on-change!",      fn_text_edit_on_change,    2, 2, NULL);
+    curry_define_fn(vm, "widget-set-style!",         fn_widget_set_style,       2, 2, NULL);
     curry_define_fn(vm, "widget-set-enabled!",  fn_widget_set_enabled,  2, 2, NULL);
     curry_define_fn(vm, "widget-set-visible!",  fn_widget_set_visible,  2, 2, NULL);
     curry_define_fn(vm, "widget-set-tooltip!",  fn_widget_set_tooltip,  2, 2, NULL);
@@ -1489,6 +1678,10 @@ extern "C" void curry_module_init(CurryVM *vm) {
     /* --- Layer 3: Status bar --- */
     curry_define_fn(vm, "window-status-bar",    fn_window_status_bar,   1, 1, NULL);
     curry_define_fn(vm, "statusbar-set-text!",  fn_statusbar_set_text,  2, 2, NULL);
+
+    /* --- File dialogs --- */
+    curry_define_fn(vm, "file-open-dialog",     fn_file_open_dialog,    0, 2, NULL);
+    curry_define_fn(vm, "file-save-dialog",     fn_file_save_dialog,    0, 2, NULL);
 
     /* --- Layer 3: Timer --- */
     curry_define_fn(vm, "make-timer",           fn_make_timer,          2, 2, NULL);

@@ -312,7 +312,7 @@ The qt6 module has three API layers:
 
 - **Layer 1** (`qt-*`): Raw Qt6 queries — painter/widget dimensions, `qt-gpu?` (OpenGL init check), `qt-process-events`.
 - **Layer 2** (`gfx-*`): GPU-accelerated 2D graphics via `QPainter` on `QOpenGLWidget`. Primitives: clear, color, pen, shapes (rect, circle, ellipse, arc, pie, polygon), text, transforms (translate/rotate/scale), and batch drawing (`gfx-draw-points!`, `gfx-draw-lines!`, `gfx-fill-triangles!`). CPU software rendering falls back automatically via Mesa/llvmpipe when no GPU is present.
-- **Layer 3** (natural names): Full UI framework — windows (`make-window`), canvas (`canvas-on-draw!`, `canvas-on-mouse!`), menus, toolbars, status bars, layout boxes (`make-vbox`, `make-hbox`), tabs, group boxes, and widgets (labels, buttons, checkboxes, sliders, dropdowns, radio groups, spin boxes, text inputs, progress bars, timers).
+- **Layer 3** (natural names): Full UI framework — windows (`make-window`, `make-plain-window`), canvas (`canvas-on-draw!`, `canvas-on-mouse!`), menus, toolbars, status bars, layout boxes (`make-vbox`, `make-hbox`), splitter (`make-splitter`, `splitter-add!`, `splitter-set-sizes!`), tabs, group boxes, widgets (labels, buttons, checkboxes, sliders, dropdowns, radio groups, spin boxes, single-line text inputs, multi-line text editor `make-text-edit`, progress bars, timers), and file dialogs (`file-open-dialog`, `file-save-dialog`). `make-plain-window` creates a QMainWindow without the preset sidebar/canvas layout; use `window-set-central-widget!` to attach any widget as the central area.
 
 4D projection math is also included (pure C++, no Qt dependency): `project_4d_to_3d` uses perspective division on the w-axis. Scheme API: `make-4d-projector`, `project-4d`, `rotate-4d-xw`.
 
