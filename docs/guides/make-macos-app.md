@@ -1,4 +1,4 @@
-# `scripts/make-macos-app.sh` — macOS Application Bundler
+# `tools/make-macos-app.sh` — macOS Application Bundler
 
 Packages a Curry Scheme script as a self-contained macOS `.app` bundle.
 The result can be double-clicked in Finder, distributed as a `.dmg`, or
@@ -19,7 +19,7 @@ all modules, and all non-system dylib dependencies are embedded in the bundle.
 ## Usage
 
 ```
-scripts/make-macos-app.sh [options] [output-dir]
+tools/make-macos-app.sh [options] [output-dir]
 ```
 
 `output-dir` defaults to the current directory if omitted.
@@ -43,10 +43,10 @@ scripts/make-macos-app.sh [options] [output-dir]
 
 ```bash
 # Minimal — non-GUI script
-scripts/make-macos-app.sh --script examples/mcp_math.scm
+tools/make-macos-app.sh --script examples/mcp_math.scm
 
 # Named app dropped onto the Desktop
-scripts/make-macos-app.sh \
+tools/make-macos-app.sh \
   --script myapp.scm \
   --name "My App" \
   --version 1.0 \
@@ -59,7 +59,7 @@ open ~/Desktop/MyApp.app
 ## Qt6 GUI application
 
 ```bash
-scripts/make-macos-app.sh \
+tools/make-macos-app.sh \
   --script examples/mandelbrot.scm \
   --name Mandelbrot \
   --icon art/mandelbrot.png \
@@ -74,7 +74,7 @@ The animated hypercube example bundles the same way — it requires Qt6 for
 rendering and benefits from a generous heap for the 4D projection math:
 
 ```bash
-scripts/make-macos-app.sh \
+tools/make-macos-app.sh \
   --script examples/tesseract_anaglyph.scm \
   --name "3D Tesseract" \
   --icon examples/tesseract_anaglyph_icon.png \
@@ -179,7 +179,7 @@ By default the bundle is **ad-hoc signed** (`--sign -`). Ad-hoc signing:
 For public distribution, provide a Developer ID:
 
 ```bash
-scripts/make-macos-app.sh --script myapp.scm \
+tools/make-macos-app.sh --script myapp.scm \
   --sign "Developer ID Application: Your Name (XXXXXXXXXX)"
 ```
 
@@ -189,7 +189,7 @@ After signing with a Developer ID, notarize the bundle with
 To skip signing entirely (useful in CI before a separate signing step):
 
 ```bash
-scripts/make-macos-app.sh --script myapp.scm --sign ""
+tools/make-macos-app.sh --script myapp.scm --sign ""
 ```
 
 ## Icons
@@ -199,10 +199,10 @@ automatically using `sips` and `iconutil` (both ship with macOS):
 
 ```bash
 # PNG: generates all required resolutions (16×16 through 512×512@2x)
-scripts/make-macos-app.sh --script myapp.scm --icon artwork/icon.png
+tools/make-macos-app.sh --script myapp.scm --icon artwork/icon.png
 
 # Pre-built .icns: used as-is
-scripts/make-macos-app.sh --script myapp.scm --icon artwork/icon.icns
+tools/make-macos-app.sh --script myapp.scm --icon artwork/icon.icns
 ```
 
 For best results, provide a PNG of at least 1024×1024 pixels.
@@ -214,7 +214,7 @@ These are accessible from the script at runtime via a path relative to the
 compiled `.scc`:
 
 ```bash
-scripts/make-macos-app.sh \
+tools/make-macos-app.sh \
   --script myapp.scm \
   --extra data/config.json \
   --extra data/wordlist.txt
@@ -244,7 +244,7 @@ For compute-heavy applications (numerical simulations, large symbolic CAS
 expressions), bake in a heap cap so the OS doesn't page-swap under the user:
 
 ```bash
-scripts/make-macos-app.sh \
+tools/make-macos-app.sh \
   --script sicm-explorer.scm \
   --gc-max-heap 2G
 ```
