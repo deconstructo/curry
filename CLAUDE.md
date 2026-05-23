@@ -464,7 +464,7 @@ Key points:
 - Bolt 5.1+ authentication uses split HELLO / LOGON; earlier versions use combined HELLO.
 - Queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
 - No external C dependencies beyond the standard socket API.
-- Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/module-neo4j.md`.
+- Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/reference/module-neo4j.md`.
 
 ## R7RS compliance gaps
 

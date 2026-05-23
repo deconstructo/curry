@@ -8,16 +8,26 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 ## Documents
 
-### Language
+Documentation is split into two directories:
 
-- [Language reference](docs/language.md) — syntax, types, special forms, numeric tower, symbolic math, quantum values, Akkadian syntax, actors, module system
-- [Symbolic expressions](docs/symbolic.md) — CAS reference: variables, differentiation, integration, simplification, substitution, complex operators, Wirtinger calculus, auto-diff
-- [Quantum superposition](docs/quantum.md) — quantum value type: construction, observation, arithmetic
-- [Surreal numbers](docs/surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
-- [Multivectors](docs/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
-- [Akkadian / Cuneiform reference](docs/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
-- [MCP server](docs/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients; stdio and SSE transports
-- [Raspberry Pi / embedded hardware](docs/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM with the `(curry rpi)` module
+- **[`docs/reference/`](docs/reference/)** — language specification, numeric tower, CAS, module APIs
+- **[`docs/guides/`](docs/guides/)** — installation, tutorials, how-tos, worked examples
+
+### Language reference
+
+- [Language reference](docs/reference/language.md) — syntax, types, special forms, numeric tower, symbolic math, quantum values, Akkadian syntax, actors, module system
+- [Symbolic expressions](docs/reference/symbolic.md) — CAS reference: variables, differentiation, integration, simplification, substitution, complex operators, Wirtinger calculus, auto-diff
+- [Quantum superposition](docs/reference/quantum.md) — quantum value type: construction, observation, arithmetic
+- [Surreal numbers](docs/reference/surreal.md) — Hahn-series surreals: ω, ε, exact infinitesimals, auto-diff
+- [Multivectors](docs/reference/multivec.md) — Clifford algebra Cl(p,q,r): geometric product, rotors, PGA, CGA
+- [Akkadian / Cuneiform reference](docs/reference/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages
+
+### Guides
+
+- [Installation](docs/guides/INSTALL.md) — Homebrew (macOS), build from source, Qt6, test suite
+- [Raspberry Pi / embedded hardware](docs/guides/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM
+- [MCP server](docs/guides/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients
+- [macOS app bundler](docs/guides/make-macos-app.md) — bundle any Curry script as a `.app` with Qt frameworks embedded
 
 ### Extended numeric tower
 
@@ -67,33 +77,34 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 
 | Module | Import | Description | Extra deps |
 |--------|--------|-------------|------------|
-| [json](docs/module-json.md) | `(curry json)` | JSON parse / stringify | — |
-| [sqlite](docs/module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
-| [network](docs/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
-| [crypto](docs/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
-| [ldap](docs/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
-| [storage](docs/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
-| [graphql](docs/module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
-| [redis](docs/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
-| [neo4j](docs/module-neo4j.md) | `(curry neo4j)` | Neo4j graph database client (Bolt 4.x/5.x, no libneo4j) | — |
-| [image](docs/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
-| [git](docs/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
-| [qt6](docs/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
-| [plplot](docs/module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
-| [vecdb](docs/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
-| [regex](docs/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
-| [sync](docs/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
-| [mqtt](docs/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
-| [ode](docs/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
-| [mcp](docs/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
-| [profiling](docs/module-profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
-| [rpi](docs/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
+| [json](docs/reference/module-json.md) | `(curry json)` | JSON parse / stringify | — |
+| [sqlite](docs/reference/module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
+| [network](docs/reference/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
+| [crypto](docs/reference/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
+| [ldap](docs/reference/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
+| [storage](docs/reference/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
+| [graphql](docs/reference/module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
+| [redis](docs/reference/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
+| [neo4j](docs/reference/module-neo4j.md) | `(curry neo4j)` | Neo4j graph database client (Bolt 4.x/5.x, no libneo4j) | — |
+| [image](docs/reference/module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
+| [git](docs/reference/module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
+| [qt6](docs/reference/module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
+| [plplot](docs/reference/module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
+| [vecdb](docs/reference/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
+| [regex](docs/reference/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
+| [sync](docs/reference/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
+| [mqtt](docs/reference/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
+| [ode](docs/reference/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
+| [mcp](docs/guides/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
+| [profiling](docs/reference/module-profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
+| [rpi](docs/reference/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
+| [sicm](docs/reference/module-sicm.md) | `(curry sicm)` | Classical mechanics (SICM): Lagrangian, Hamiltonian, Poisson brackets | — |
 
 ---
 
 ## Installation & Building
 
-See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew installation (macOS), building from source on Linux and macOS (including Qt6 and `.deb` packaging), and running the test suite.
+See [docs/guides/INSTALL.md](docs/guides/INSTALL.md) for Homebrew installation (macOS), building from source on Linux and macOS (including Qt6 and `.deb` packaging), and running the test suite.
 
 ---
 
