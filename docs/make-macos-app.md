@@ -68,6 +68,30 @@ scripts/make-macos-app.sh \
   ~/Desktop
 ```
 
+### 4D Tesseract anaglyph viewer
+
+The animated hypercube example bundles the same way — it requires Qt6 for
+rendering and benefits from a generous heap for the 4D projection math:
+
+```bash
+scripts/make-macos-app.sh \
+  --script examples/tesseract_anaglyph.scm \
+  --name "3D Tesseract" \
+  --icon examples/tesseract_anaglyph_icon.png \
+  --version 1.2 \
+  --gc-max-heap 256M \
+  ~/Desktop
+
+open ~/Desktop/3D\ Tesseract.app
+```
+
+The icon (`examples/tesseract_anaglyph_icon.png`) is a 1024×1024 PNG showing
+the hypercube wireframe rendered in red-cyan anaglyph on a dark background.
+`sips` and `iconutil` convert it to a full `.icns` with all required sizes
+(16×16 through 512×512@2x) automatically.
+
+Wear red-cyan anaglyph glasses — the hypercube rotates in real 3D space.
+
 Qt6 is detected automatically: if `build/mods/curry/qt6.so` exists and
 `--no-qt` is not passed, `macdeployqt` is run to pull in all Qt frameworks,
 platform plugins (`platforms/libqcocoa.dylib`), image format plugins,
