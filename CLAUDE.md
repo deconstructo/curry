@@ -368,6 +368,13 @@ their tools callable by Claude Code and other MCP clients.  Two transports are s
 ; Fraction = current/total.  message is an optional status string.
 (mcp-notify-progress current total message)
 
+; Require a Bearer token on all SSE endpoints (GET /sse and POST /message).
+; Call before (mcp-serve-sse ...).  Clients must send:
+;   Authorization: Bearer <token>
+; Unauthenticated requests receive HTTP 401.  No-op for stdio transport.
+; Omitting this call (or calling with "") disables auth — any client may connect.
+(mcp-set-auth-token! "my-secret-token")
+
 ; stdio transport — blocks reading JSON-RPC from stdin, writing to stdout.
 ; name and version are reported during the MCP initialize handshake.
 (mcp-serve)                         ; defaults to name "curry-mcp"
