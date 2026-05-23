@@ -6,6 +6,8 @@
 ;;; Reference: Sussman & Wisdom, "Structure and Interpretation of Classical
 ;;; Mechanics" (2nd ed., MIT Press).  Procedure names follow Chapter 1.
 ;;;
+;;; scmutils compatibility shim included — see § 0.
+;;;
 ;;; Supported:
 ;;;   literal-function  literal-function*
 ;;;   time  coordinate  velocity  acceleration  momentum
@@ -17,9 +19,40 @@
 ;;;   L-free-particle  L-harmonic  L-uniform-acceleration  make-Lagrangian
 ;;;   L-central-rectangular  L-Kepler-polar
 ;;;   Poisson-bracket  commutator
+;;;   pe  print-expression  show-expression  define-symbolic  literal-number
 
 (import (scheme base))
 (import (scheme inexact))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 0  scmutils compatibility shim
+;;; ════════════════════════════════════════════════════════════
+
+;;; Pretty-print a symbolic expression — scmutils calls this pe / print-expression.
+;;; Uses sym->infix for readable output; falls back to write for non-symbolic values.
+(define (pe expr)
+  (if (or (symbolic? expr) (sym-var? expr))
+      (display (sym->infix expr))
+      (write expr))
+  (newline))
+
+(define print-expression pe)
+(define show-expression   pe)
+
+;;; Declare one or more symbolic variables in one go.
+;;;   (define-symbolic t x y z)
+;;; is equivalent to:
+;;;   (define t (sym-var 't))  (define x (sym-var 'x))  ...
+(define-syntax define-symbolic
+  (syntax-rules ()
+    ((_ var)
+     (define var (sym-var 'var)))
+    ((_ var rest ...)
+     (begin (define var (sym-var 'var))
+            (define-symbolic rest ...)))))
+
+;;; scmutils alias: (literal-number 'x) ≡ (sym-var 'x)
+(define literal-number sym-var)
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 1  Utilities
@@ -52,8 +85,13 @@
 ;;;   (D (literal-function 'f)) → f_t (velocity function)
 ;;;   ((partial i) L) where L calls literal-function → symbolic EOM
 
-(define (literal-function name)
-  (sym-fn name (sym-var 't)))
+;;; (literal-function 'f)                    — 1-arg function of t (scmutils default)
+;;; (literal-function 'f n)                  — n-arg function (integer arity)
+;;; (literal-function 'f (-> ...))           — scmutils type annotation, ignored
+(define (literal-function name . rest)
+  (if (and (not (null? rest)) (integer? (car rest)))
+      (literal-function* name (car rest))
+      (sym-fn name (sym-var 't))))
 
 ;;; Multi-argument literal function: (literal-function* 'f n)
 ;;; produces a symbolic function of n arguments.
