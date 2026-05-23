@@ -422,6 +422,7 @@ static void compile_and(Compiler *c, val_t args, bool tail, int line) {
 }
 
 static void compile_or(Compiler *c, val_t args, bool tail, int line) {
+    (void)tail;
     if (vis_nil(args)) { emit(c, OP_FALSE, line); return; }
 
     int patches[MAX_LOCALS]; int np = 0;
@@ -857,13 +858,12 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t gk      = sym_intern_cstr("%guard-k");
 
     /* Count clauses and check for else */
-    int n_clauses = 0;
     bool has_else = false;
     val_t cl = clauses;
     while (vis_pair(cl)) {
         val_t test = vcar(vcar(cl));
         if (test == S_ELSE2) has_else = true;
-        n_clauses++; cl = vcdr(cl);
+        cl = vcdr(cl);
     }
 
     /* Build cond clauses in forward order (collect into array, then cons) */

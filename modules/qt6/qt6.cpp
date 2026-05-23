@@ -418,8 +418,7 @@ void CurryCanvas::paintEvent(QPaintEvent *) {
     curry_vm_state_save(&vm_state);
     SCM_PROTECT(h,
         curry_apply(ws->draw_proc, 3, argv),
-        ({ qt6_print_exn("[qt6] paint", h.exn);
-           curry_vm_state_restore(&vm_state); }));
+        (qt6_print_exn("[qt6] paint", h.exn), curry_vm_state_restore(&vm_state)));
     ws->live_painter = nullptr;
 }
 

@@ -124,7 +124,7 @@ val_t scm_symbol_to_string(val_t sym) {
 }
 
 /* ---- Type predicates ---- */
-#define PRED1(name, test) static val_t prim_##name(int ac, val_t *av, void *ud) { (void)ud; return vbool(test(av[0])); }
+#define PRED1(name, test) static val_t prim_##name(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(test(av[0])); }
 
 PRED1(pair_p,     vis_pair)
 PRED1(null_p,     vis_nil)
@@ -405,7 +405,7 @@ static val_t prim_magnitude(int ac, val_t *av, void *ud) {(void)ac;(void)ud; ret
 static val_t prim_angle(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_angle(av[0]);}
 
 /* Quaternion */
-static val_t prim_make_quat(int ac, val_t *av, void *ud) {(void)ud;
+static val_t prim_make_quat(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     double a=num_to_double(av[0]),b=num_to_double(av[1]),c=num_to_double(av[2]),d=num_to_double(av[3]);
     return num_make_quat(a,b,c,d);
 }
@@ -486,7 +486,6 @@ static val_t prim_bitor(int ac, val_t *av, void *ud) {(void)ud; val_t r=vfix(0);
 static val_t prim_bitxor(int ac, val_t *av, void *ud) {(void)ud; val_t r=vfix(0); for(int i=0;i<ac;i++) r=num_bitxor(r,av[i]); return r;}
 static val_t prim_bitnot(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_bitnot(av[0]);}
 static val_t prim_shl(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_shl(av[0],(int)vunfix(av[1]));}
-static val_t prim_shr(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_shr(av[0],(int)vunfix(av[1]));}
 
 /* number<->string */
 static val_t prim_num_str(int ac, val_t *av, void *ud) {
@@ -975,7 +974,7 @@ static val_t prim_read_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_r
 static val_t prim_peek_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_peek_char(ac>0?av[0]:PORT_STDIN); return c<0?V_EOF:vchr((uint32_t)c);}
 static val_t prim_read_line(int ac, val_t *av, void *ud) {(void)ud; return port_read_line(ac>0?av[0]:PORT_STDIN);}
 static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-string: not a string"); return port_open_input_string(as_str(av[0])->data,as_str(av[0])->len);}
-static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_open_output_string();}
+static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return port_open_output_string();}
 static val_t prim_get_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_string(av[0]);}
 static val_t prim_open_input_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-file: not a string");
@@ -996,7 +995,7 @@ static val_t prim_square(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return
 static val_t prim_exact_integer_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_fixnum(av[0]) || vis_bignum(av[0]));}
 
 static val_t prim_truncate_div(int ac, val_t *av, void *ud) {
-    (void)ud;
+    (void)ac;(void)ud;
     val_t q = num_quotient(av[0], av[1]);
     val_t r = num_remainder(av[0], av[1]);
     Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
@@ -1477,13 +1476,13 @@ static val_t prim_list_head(int ac, val_t *av, void *ud) {
     return scm_reverse(r);
 }
 static val_t prim_filter(int ac, val_t *av, void *ud) {
-    (void)ud; val_t pred=av[0], lst=av[1], r=V_NIL;
+    (void)ac;(void)ud; val_t pred=av[0], lst=av[1], r=V_NIL;
     while(vis_pair(lst)) { if(vis_true(apply(pred,scm_cons(vcar(lst),V_NIL)))) r=scm_cons(vcar(lst),r); lst=vcdr(lst); }
     return scm_reverse(r);
 }
 static val_t prim_fold(int ac, val_t *av, void *ud) {
     /* fold-left: (proc acc element) — R6RS / standard left-fold convention */
-    (void)ud; val_t proc=av[0], init=av[1], lst=av[2];
+    (void)ac;(void)ud; val_t proc=av[0], init=av[1], lst=av[2];
     while(vis_pair(lst)) { init=apply(proc,scm_cons(init,scm_cons(vcar(lst),V_NIL))); lst=vcdr(lst); }
     return init;
 }
@@ -1575,7 +1574,7 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
 }
 
 static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
-    (void)ud; val_t handler=av[0], thunk=av[1];
+    (void)ac;(void)ud; val_t handler=av[0], thunk=av[1];
     val_t result = V_VOID;
     /* Save VM state — a longjmp from inside the thunk may skip vm_run cleanup */
     int saved_frame_count = vm->frame_count;
@@ -1700,18 +1699,6 @@ static val_t prim_make_parameter(int ac, val_t *av, void *ud) {
     /* We return the Parameter object; the evaluator handles parameterize */
     return vptr(p);
 }
-static val_t prim_call_parameter(int ac, val_t *av, void *ud) {
-    (void)ud;
-    /* This is called when a parameter object is invoked as a procedure */
-    Parameter *p = as_param(av[0]);
-    if (ac == 1) return p->init;
-    /* 2 args: set value */
-    val_t newval = av[1];
-    if (!vis_false(p->converter)) newval = apply(p->converter, scm_cons(newval, V_NIL));
-    p->init = newval;
-    return V_VOID;
-}
-
 /* ---- Record types (internal primitives) ---- */
 static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -1724,7 +1711,7 @@ static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     return vptr(r);
 }
 static val_t prim_record_pred(int ac, val_t *av, void *ud) {
-    (void)ud; RecordType *rtd=vunptr(RecordType,av[0]);
+    (void)ac;(void)ud; RecordType *rtd=vunptr(RecordType,av[0]);
     return vbool(vis_record(av[1]) && as_rec(av[1])->rtd == rtd);
 }
 static val_t prim_record_ref(int ac, val_t *av, void *ud) {

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <inttypes.h>
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
@@ -366,7 +367,7 @@ void scm_write(val_t v, val_t port) {
         return;
     }
     if (vis_prim(v))   { int n=snprintf(buf,sizeof(buf),"#<primitive %s>",as_prim(v)->name); port_write_string(port,buf,(uint32_t)n); return; }
-    if (vis_actor(v))  { int n=snprintf(buf,sizeof(buf),"#<actor %lu>",as_actor(v)->id); port_write_string(port,buf,(uint32_t)n); return; }
+    if (vis_actor(v))  { int n=snprintf(buf,sizeof(buf),"#<actor %"PRIu64">",as_actor(v)->id); port_write_string(port,buf,(uint32_t)n); return; }
     if (vis_port(v))   { port_write_string(port, "#<port>", 7); return; }
     if (vis_error(v))  { port_write_string(port, "#<error>", 8); return; }
     if (vis_promise(v)){ port_write_string(port, "#<promise>", 10); return; }

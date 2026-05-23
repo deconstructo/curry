@@ -38,7 +38,7 @@
 
 typedef struct { char *data; size_t len; size_t cap; } Buf;
 
-static size_t buf_write(void *ptr, size_t sz, size_t n, void *ud) {
+static size_t buf_write(const void *ptr, size_t sz, size_t n, void *ud) {
     Buf *b = (Buf *)ud;
     size_t total = sz * n;
     if (b->len + total + 1 > b->cap) {

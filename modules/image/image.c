@@ -342,6 +342,16 @@ static void save_jpeg(const char *path, curry_val img, int quality) {
 /* ---- GIF decoder (pure C, no dependencies) ---- */
 /* Supports GIF87a and GIF89a; returns first frame as RGB image. */
 
+static inline uint32_t gif_getbits(const uint8_t *data, size_t dlen, size_t *bit_pos, int n) {
+    uint32_t v = 0;
+    for (int i = 0; i < n; i++) {
+        size_t bp = *bit_pos + (size_t)i;
+        if (bp / 8 < dlen) v |= (uint32_t)((data[bp / 8] >> (bp % 8)) & 1) << i;
+    }
+    *bit_pos += (size_t)n;
+    return v;
+}
+
 static curry_val load_gif(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return curry_make_bool(false);
@@ -440,20 +450,9 @@ static curry_val load_gif(const char *path) {
     size_t bit_pos = 0;
     uint32_t out_pos = 0;
 
-    /* Read bits from data[] */
-    #define GETBITS(n) ({ \
-        uint32_t __v = 0; \
-        for (int __i = 0; __i < (n); __i++) { \
-            size_t __bp = bit_pos + __i; \
-            if (__bp/8 < dlen) __v |= ((data[__bp/8] >> (__bp%8)) & 1) << __i; \
-        } \
-        bit_pos += (n); \
-        __v; \
-    })
-
     for (;;) {
         if (bit_pos/8 >= dlen) break;
-        int code = (int)GETBITS(bits_used);
+        int code = (int)gif_getbits(data, dlen, &bit_pos, bits_used);
         if (code == eoi) break;
         if (code == cc) {
             /* Reset */
@@ -494,7 +493,6 @@ static curry_val load_gif(const char *path) {
         prev_code = code;
     }
     free(data);
-    #undef GETBITS
 
     /* Map palette indices to RGB */
     curry_val img = make_image(w, h, 3);

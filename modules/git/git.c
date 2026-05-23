@@ -51,6 +51,8 @@
 
 #include <curry.h>
 #include <git2.h>
+/* libgit2 _INIT macros only set version fields; suppress spurious missing-init warnings */
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>

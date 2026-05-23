@@ -601,13 +601,17 @@ val_t sx_simplify(val_t expr) {
                         val_t nc = num_div(ncoeff, dcoeff);
                         val_t new_den = dsym == 0 ? vfix(1) :
                                         (dsym == 1 ? dsyms[0] : sx_make_expr(SX_MUL, dsym, dsyms));
-                        new_num = nsym == 0 ? nc :
-                                  (nsym == 1 && is_one(nc) ? nsyms[0] :
-                                   ({ val_t *all = gc_alloc((size_t)(nsym + (is_one(nc)?0:1)) * sizeof(val_t));
-                                      int k = 0;
-                                      if (!is_one(nc)) all[k++] = nc;
-                                      for (int i = 0; i < nsym; i++) all[k++] = nsyms[i];
-                                      sx_make_expr(SX_MUL, k, all); }));
+                        if (nsym == 0) {
+                            new_num = nc;
+                        } else if (nsym == 1 && is_one(nc)) {
+                            new_num = nsyms[0];
+                        } else {
+                            val_t *all = gc_alloc((size_t)(nsym + (is_one(nc)?0:1)) * sizeof(val_t));
+                            int k = 0;
+                            if (!is_one(nc)) all[k++] = nc;
+                            for (int i = 0; i < nsym; i++) all[k++] = nsyms[i];
+                            new_num = sx_make_expr(SX_MUL, k, all);
+                        }
                         if (is_one(new_den)) return sx_simplify(new_num);
                         return sx_simplify(sx_expr2(SX_DIV, new_num, new_den));
                     }

@@ -52,10 +52,6 @@ static val_t prim_frac_int(int ac, val_t *av, void *ud) {
 }
 static val_t prim_conjugate(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return num_conjugate(av[0]); }
-static val_t prim_sx_real(int ac, val_t *av, void *ud)
-    { (void)ac;(void)ud; return num_real_part(av[0]); }
-static val_t prim_sx_imag(int ac, val_t *av, void *ud)
-    { (void)ac;(void)ud; return num_imag_part(av[0]); }
 static val_t prim_wirtinger_d(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_wirtinger(av[0], av[1], false); }
 static val_t prim_wirtinger_dbar(int ac, val_t *av, void *ud)
@@ -341,7 +337,7 @@ static val_t prim_surreal_nterms(int ac, val_t *av, void *ud)
 
 /* Build a surreal from a list of (exponent . coefficient) pairs */
 static val_t prim_make_surreal(int ac, val_t *av, void *ud) {
-    (void)ud;
+    (void)ac;(void)ud;
     val_t lst = av[0];
     int n = 0;
     val_t p = lst;
@@ -366,7 +362,7 @@ static val_t prim_make_surreal(int ac, val_t *av, void *ud) {
 
 /* Return list of (exponent . coefficient) pairs */
 static val_t prim_surreal_terms(int ac, val_t *av, void *ud) {
-    (void)ud;
+    (void)ac;(void)ud;
     if (!vis_surreal(av[0])) {
         /* wrap a plain number as a single-term list */
         val_t pair = scm_cons(vfix(0), av[0]);
@@ -533,7 +529,7 @@ static val_t prim_quad_frac_int(int ac, val_t *av, void *ud) {
 
 /* Auto-differentiation: f'(x) via f(x + ε) */
 static val_t prim_auto_diff(int ac, val_t *av, void *ud) {
-    (void)ud;
+    (void)ac;(void)ud;
     val_t f = av[0];
     val_t x = av[1];
     val_t x_eps = sur_add(sur_from_val(x), SUR_EPSILON);
@@ -727,7 +723,6 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
 
         if (vis_tuple(tup->data[(uint32_t)i])) {
             /* Multi-DOF: return a tuple of partial derivatives */
-            Tuple *inner_i = as_tuple(tup->data[(uint32_t)i]);
             val_t *diffs = (val_t *)gc_alloc(m_i * sizeof(val_t));
             for (uint32_t j = 0; j < m_i; j++) {
                 val_t dj = sx_diff(expr, diff_vars[j]);

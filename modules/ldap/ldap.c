@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* macOS LDAP API deprecated since 10.11 — suppress warnings; no viable alternative */
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <ldap.h>
 
 /* ---- Handle packing ---- */

@@ -25,15 +25,6 @@ typedef struct { sqlite3 *db; } ScmDB;
 typedef struct { sqlite3_stmt *stmt; ScmDB *db; } ScmStmt;
 
 static curry_val make_opaque(void *ptr, const char *tag) {
-    /* Store as a pair (#tag . pointer-as-fixnum) for simplicity */
-    /* In production, use a proper opaque record type */
-    (void)tag;
-    /* Pack pointer as bytevector */
-    curry_val bv = curry_make_bytevector(sizeof(void *), 0);
-    memcpy((void *)curry_bytevector_ref(bv, 0), &ptr, sizeof(void *)); /* broken - just use alist */
-    (void)bv;
-    /* Simpler: just use a pair with a symbol tag and the pointer as fixnum */
-    /* On 64-bit systems, pointers may not fit in fixnum - use bytevector */
     curry_val bv2 = curry_make_bytevector(sizeof(ptr), 0);
     for (size_t i = 0; i < sizeof(ptr); i++)
         curry_bytevector_set(bv2, (uint32_t)i, ((uint8_t *)&ptr)[i]);

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#
+# Scath wa here
+#
 # make-macos-app.sh — bundle a Curry Scheme script as a self-contained macOS .app
 #
 # Assembles MyApp.app with the curry binary, all modules, their non-system

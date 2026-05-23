@@ -199,8 +199,8 @@ static void eval_port_exprs(val_t port, bool print) {
                            used / 1048576.0, heap / 1048576.0);
                     printf("  alloc:   %.1f MB lifetime\n", life / 1048576.0);
                     printf("  gc:      %lu collection%s\n",
-                           (unsigned long)GC_gc_no,
-                           GC_gc_no == 1 ? "" : "s");
+                           (unsigned long)GC_get_gc_no(),
+                           GC_get_gc_no() == 1 ? "" : "s");
                     printf("  stack:   %d / %d slots\n",  sp, VM_STACK_MAX);
                     printf("  frames:  %d / %d\n", vm->frame_count, VM_FRAMES_MAX);
                     continue;
