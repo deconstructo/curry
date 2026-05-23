@@ -14,6 +14,7 @@ add_test(NAME tuples        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/tuple_test
 add_test(NAME partial       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/partial_tests.scm)
 add_test(NAME trig              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/trig_tests.scm)
 add_test(NAME transcendental   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/transcendental_tests.scm)
+add_test(NAME pde_symbolic     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/pde_symbolic_tests.scm)
 add_test(NAME sicm              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
 add_test(NAME akkadian     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_tests.scm)
 add_test(NAME cli
@@ -24,7 +25,7 @@ add_test(NAME cli
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
 set_tests_properties(akkadian PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
-set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig sicm PROPERTIES
+set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 
 if(BUILD_MODULE_GIT AND TARGET curry_git)

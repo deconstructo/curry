@@ -422,15 +422,24 @@ val_t sx_simplify(val_t expr) {
         }
         /* Any zero factor? */
         for (int i = 0; i < n; i++) if (is_zero(sa[i])) return vfix(0);
-        /* Fold numeric factors and strip ones */
+        /* Fold numeric factors and strip ones; unwrap NEG(X) as -1*X */
         val_t coeff = vfix(1);
         int nsym = 0;
         for (int i = 0; i < n; i++) if (!vis_number(sa[i])) nsym++;
         val_t *nsyms = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
         int j = 0;
         for (int i = 0; i < n; i++) {
-            if (vis_number(sa[i])) coeff = num_mul(coeff, sa[i]);
-            else nsyms[j++] = sa[i];
+            if (vis_number(sa[i])) {
+                coeff = num_mul(coeff, sa[i]);
+            } else if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == SX_NEG
+                       && as_symexpr(sa[i])->nargs == 1
+                       && !vis_number(as_symexpr(sa[i])->args[0])) {
+                /* NEG(sym) → fold -1 into coefficient, keep inner sym */
+                coeff = num_mul(coeff, vfix(-1));
+                nsyms[j++] = as_symexpr(sa[i])->args[0];
+            } else {
+                nsyms[j++] = sa[i];
+            }
         }
         if (is_zero(coeff)) return vfix(0);
 
@@ -890,15 +899,20 @@ val_t sx_trigsimp(val_t expr) {
         }
     }
 
-    /* ---- MUL: 2·sin(f)·cos(f) → sin(2·f), with optional sign flips ---- */
+    /* ---- MUL: c·sin(f)·cos(f) → (c/2)·sin(2·f), with optional sign flips ----
+     * Matches both ±2·sin·cos (traditional) and ±2·MUL→NEG-free form produced
+     * after MUL canonicalisation absorbs any NEG factors into a numeric coeff. */
     if (eop == SX_MUL) {
-        /* Scan for numeric factor of 2, sin(f) or neg(sin(f)), cos(f) or neg(cos(f)) */
-        bool has_two = false;
+        /* Extract leading numeric coefficient (may be ±2 after NEG-absorption) */
+        val_t lead_num = V_FALSE;
+        int lead_idx   = -1;
         val_t sin_f = V_FALSE, cos_f = V_FALSE;
         bool neg_sin = false, neg_cos = false;
         for (int i = 0; i < en; i++) {
             val_t v = es->args[i];
-            if (is_two(v)) { has_two = true; continue; }
+            if (vis_number(v) && vis_false(lead_num)) {
+                lead_num = v; lead_idx = i; continue;
+            }
             if (!vis_symexpr(v)) continue;
             SymExpr *fi = as_symexpr(v);
             /* direct sin/cos */
@@ -908,7 +922,7 @@ val_t sx_trigsimp(val_t expr) {
             if (fi->op == SX_COS && fi->nargs == 1 && vis_false(cos_f)) {
                 cos_f = fi->args[0]; continue;
             }
-            /* neg(sin(f)) or neg(cos(f)) */
+            /* neg(sin(f)) or neg(cos(f)) — still emitted by trigsimp sub-exprs */
             if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0])) {
                 SymExpr *inner = as_symexpr(fi->args[0]);
                 if (inner->op == SX_SIN && inner->nargs == 1 && vis_false(sin_f)) {
@@ -919,35 +933,39 @@ val_t sx_trigsimp(val_t expr) {
                 }
             }
         }
-        if (has_two && !vis_false(sin_f) && !vis_false(cos_f) && sx_equal(sin_f, cos_f)) {
-            /* sign = product of individual signs */
-            int sign = (neg_sin ? -1 : 1) * (neg_cos ? -1 : 1);
-            val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
-            int rn = 0;
-            bool used_two = false, used_sin = false, used_cos = false;
-            for (int i = 0; i < en; i++) {
-                val_t v = es->args[i];
-                if (!used_two && is_two(v)) { used_two = true; continue; }
-                if (!used_sin && vis_symexpr(v)) {
-                    SymExpr *fi = as_symexpr(v);
-                    if (fi->op == SX_SIN) { used_sin = true; continue; }
-                    if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
-                        as_symexpr(fi->args[0])->op == SX_SIN) { used_sin = true; continue; }
+        /* Need |coeff| == 2, plus matching sin and cos of the same argument */
+        if (!vis_false(lead_num) && !vis_false(sin_f) && !vis_false(cos_f)
+                && sx_equal(sin_f, cos_f)) {
+            double cv = num_to_double(lead_num);
+            if (cv == 2.0 || cv == -2.0) {
+                int sign = (cv < 0 ? -1 : 1) * (neg_sin ? -1 : 1) * (neg_cos ? -1 : 1);
+                val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
+                int rn = 0;
+                bool used_num = false, used_sin = false, used_cos = false;
+                for (int i = 0; i < en; i++) {
+                    val_t v = es->args[i];
+                    if (!used_num && i == lead_idx) { used_num = true; continue; }
+                    if (!used_sin && vis_symexpr(v)) {
+                        SymExpr *fi = as_symexpr(v);
+                        if (fi->op == SX_SIN) { used_sin = true; continue; }
+                        if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
+                            as_symexpr(fi->args[0])->op == SX_SIN) { used_sin = true; continue; }
+                    }
+                    if (!used_cos && vis_symexpr(v)) {
+                        SymExpr *fi = as_symexpr(v);
+                        if (fi->op == SX_COS) { used_cos = true; continue; }
+                        if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
+                            as_symexpr(fi->args[0])->op == SX_COS) { used_cos = true; continue; }
+                    }
+                    rest[rn++] = v;
                 }
-                if (!used_cos && vis_symexpr(v)) {
-                    SymExpr *fi = as_symexpr(v);
-                    if (fi->op == SX_COS) { used_cos = true; continue; }
-                    if (fi->op == SX_NEG && fi->nargs == 1 && vis_symexpr(fi->args[0]) &&
-                        as_symexpr(fi->args[0])->op == SX_COS) { used_cos = true; continue; }
-                }
-                rest[rn++] = v;
+                val_t two_f = sx_mul(vfix(2), sin_f);
+                val_t sin2f = sx_sin(two_f);
+                val_t result = (sign < 0) ? sx_neg(sin2f) : sin2f;
+                if (rn == 0) return result;
+                rest[rn++] = result;
+                return sx_simplify(sx_make_expr(SX_MUL, rn, rest));
             }
-            val_t two_f = sx_mul(vfix(2), sin_f);
-            val_t sin2f = sx_sin(two_f);
-            val_t result = (sign < 0) ? sx_neg(sin2f) : sin2f;
-            if (rn == 0) return result;
-            rest[rn++] = result;
-            return sx_simplify(sx_make_expr(SX_MUL, rn, rest));
         }
     }
 
@@ -2163,6 +2181,11 @@ val_t sx_integrate(val_t expr, val_t var) {
                     }
                 }
             }
+        } else if (!sx_depends_on(den, var)) {
+            /* ∫ f(x)/c dx = (1/c) * ∫ f(x) dx  (constant denominator) */
+            val_t inner = sx_integrate(num_v, var);
+            if (!(vis_symexpr(inner) && as_symexpr(inner)->op == SX_INTEGRATE))
+                return sx_div(inner, den);
         }
     }
 
