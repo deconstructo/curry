@@ -168,6 +168,9 @@ bundle_dylib_deps() {
     [[ "$dep" == /usr/local/lib/libreadline* ]] && continue
     [[ "$dep" == @* ]]            && continue
     [[ -z "$dep" ]]               && continue
+    # Qt .framework bundles are handled entirely by macdeployqt — skip them
+    # here to avoid copying flat dylibs that conflict with the framework layout.
+    [[ "$dep" == *".framework/"* ]] && continue
     [[ ! -f "$dep" ]]             && { warn "Dep not found: $dep (skipping)"; continue; }
 
     local libname
@@ -211,17 +214,39 @@ ok "Dylib dependencies bundled"
 # ── Qt6 frameworks via macdeployqt ────────────────────────────────────────────
 if $BUNDLE_QT; then
   info "Bundling Qt6 frameworks via macdeployqt"
-  # macdeployqt must find the main executable in MacOS/ to write Info.plist
-  # paths correctly.  We give it both curry and qt6.so so it discovers all
-  # Qt framework dependencies.
+
+  # macdeployqt reads CFBundleExecutable from Info.plist to locate the main
+  # Mach-O binary.  Write a stub plist pointing at 'curry' before running it;
+  # we overwrite with the real plist (pointing at the launcher) afterwards.
+  cat > "$CONTENTS/Info.plist" <<STUB
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>${APP_NAME}</string>
+  <key>CFBundleIdentifier</key>
+  <string>${BUNDLE_ID}</string>
+  <key>CFBundleVersion</key>
+  <string>${APP_VERSION}</string>
+  <key>CFBundleExecutable</key>
+  <string>curry</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+STUB
+
+  # Pass qt6.so as an extra executable so macdeployqt discovers Qt framework
+  # deps that aren't visible from the curry binary itself.
   "$MACDEPLOYQT" "$APP_BUNDLE" \
-    -executable="$CONTENTS/MacOS/curry" \
     -executable="$CONTENTS/Resources/mods/curry/qt6.so" \
     -no-strip \
     2>&1 | sed 's/^/  /'
 
-  # macdeployqt may not add @executable_path/../Frameworks to modules it
-  # patched — ensure it's present so Qt framework @rpath lookups succeed.
+  # Ensure @executable_path/../Frameworks is in the rpath of the curry binary
+  # and every module — macdeployqt may not add it to non-Qt binaries.
   add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/curry"
   for so in "$CONTENTS/Resources/mods/curry"/*.so; do
     [[ -f "$so" ]] || continue
