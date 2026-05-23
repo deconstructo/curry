@@ -12,8 +12,9 @@ add_test(NAME pde_numerical COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/pde_numeri
 add_test(NAME d_operator    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/d_operator_tests.scm)
 add_test(NAME tuples        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/tuple_tests.scm)
 add_test(NAME partial       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/partial_tests.scm)
-add_test(NAME trig         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/trig_tests.scm)
-add_test(NAME sicm         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
+add_test(NAME trig              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/trig_tests.scm)
+add_test(NAME transcendental   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/transcendental_tests.scm)
+add_test(NAME sicm              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
 add_test(NAME akkadian     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_tests.scm)
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
