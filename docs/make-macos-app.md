@@ -243,8 +243,6 @@ A full bundle with Qt6 is typically 120–160 MB. To reduce it:
 
 ## Limitations
 
-- **macOS only.** For Linux, use the CPack `.deb`/`.rpm` targets:
-  `cmake --build build && cpack --config build/CPackConfig.cmake`.
 - **No App Store sandboxing.** The bundle as produced is not sandboxed
   and cannot be submitted to the Mac App Store without additional
   entitlements, capability declarations, and review of each module's
