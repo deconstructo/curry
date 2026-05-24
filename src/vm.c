@@ -175,6 +175,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <setjmp.h>
 
 #include "vm.h"
 #include "profiling.h"
@@ -212,6 +213,7 @@ void vm_init(void) {
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
+    vm->handler_count = 0;
 }
 
 void vm_free(void) {
@@ -223,6 +225,7 @@ void vm_reset(void) {
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
+    vm->handler_count = 0;
 }
 
 /* ── BcClosure allocation ────────────────────────────────────────────── */
@@ -298,6 +301,16 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
+    /* jmp_bufs for OP_PUSH_HANDLER frames active in this vm_run invocation.
+     * Indexed by vm->handler_count at push time.  Must live on this C frame
+     * so that longjmp targets remain valid for the duration of this call.
+     *
+     * Invariant: vm->handler_count at entry is entry_handler_count.  After
+     * vm_run returns, handler_count is restored (handlers are always paired
+     * with OP_POP_HANDLER in normal execution; longjmp unwinds the rest). */
+    ExnHandler vm_exn_handlers[VM_HANDLERS_MAX];
+    (void)vm_exn_handlers; /* suppress unused-var warning if no handlers pushed */
+
     int entry_depth = vm->frame_count;  /* used to detect return from nested calls */
     if (vm->frame_count >= VM_FRAMES_MAX)
         scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
@@ -701,17 +714,67 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
         /* ── Exception handling ──────────────────────────────────────── */
         case OP_PUSH_HANDLER: {
-            READ_U16(); /* reserved — full handler integration pending */
+            /* Layout emitted by compile_with_exception_handler:
+             *   <handler on stack>
+             *   OP_PUSH_HANDLER catch_off   ← here; sp saved past handler
+             *   <thunk on stack>
+             *   OP_CALL 0                   ← runs thunk; result replaces it
+             *   OP_POP_HANDLER
+             *   OP_SWAP; OP_POP; OP_JUMP end
+             *  catch_off:
+             *   <exception pushed by recovery, handler still below>
+             *   OP_CALL 1                   ← calls handler(exn)
+             *  end: */
+            uint16_t catch_off = READ_U16();
+            int hi = vm->handler_count;
+            if (hi >= VM_HANDLERS_MAX)
+                scm_raise(V_FALSE, "handler stack overflow (max %d)", VM_HANDLERS_MAX);
+
+            /* Save VM state so the catch block can restore it. */
+            vm->handler_stack[hi].frame_count   = vm->frame_count;
+            vm->handler_stack[hi].sp            = vm->sp;
+            vm->handler_stack[hi].open_upvalues = vm->open_upvalues;
+            vm->handler_stack[hi].catch_offset  = catch_off;
+            vm->handler_stack[hi].frame_idx     = (int)(frame - vm->frames);
+            vm->handler_count++;
+
+            /* Link ExnHandler into the current_handler chain.  The jmp_buf
+             * lives in vm_exn_handlers[] on this C frame (valid until vm_run
+             * returns), so longjmp back here is always safe. */
+            ExnHandler *eh = &vm_exn_handlers[hi];
+            eh->exn  = V_FALSE;
+            eh->prev = current_handler;
+            current_handler = eh;
+
+            if (setjmp(eh->jmp) != 0) {
+                /* An exception was raised and caught by this handler.
+                 * Restore VM state from the saved snapshot. */
+                int chi = vm->handler_count - 1;
+                val_t caught = vm_exn_handlers[chi].exn;
+                current_handler   = vm_exn_handlers[chi].prev;
+                vm->handler_count = chi;
+                vm->frame_count   = vm->handler_stack[chi].frame_count;
+                vm->sp            = vm->handler_stack[chi].sp;
+                vm->open_upvalues = vm->handler_stack[chi].open_upvalues;
+                frame = &vm->frames[vm->handler_stack[chi].frame_idx];
+                PUSH(caught);
+                JUMP_ABS(vm->handler_stack[chi].catch_offset);
+            }
             break;
         }
-        case OP_POP_HANDLER: break;
+        case OP_POP_HANDLER: {
+            /* Normal exit from a protected region — remove the handler. */
+            if (vm->handler_count > 0) {
+                vm->handler_count--;
+                current_handler = vm_exn_handlers[vm->handler_count].prev;
+            }
+            break;
+        }
         case OP_RAISE: {
-            /* Route through the tree-walker's exception machinery. */
-            val_t exn  = POP();
-            val_t rfn  = env_lookup(GLOBAL_ENV, sym_intern_cstr("raise"));
-            val_t args[1] = {exn};
-            call_foreign(rfn, 1, args);
-            break; /* unreachable if raise unwinds */
+            /* Raise TOS as an exception through the current_handler chain. */
+            val_t exn = POP();
+            scm_raise_val(exn);
+            break; /* unreachable */
         }
 
         /* ── I/O ─────────────────────────────────────────────────────── */

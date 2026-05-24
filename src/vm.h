@@ -50,6 +50,21 @@ typedef struct {
 } CallFrame;
 
 /*
+ * VmHandlerInfo — saved VM state for one OP_PUSH_HANDLER frame.
+ * The jmp_buf lives in vm_run()'s local vm_exn_handlers[] array (C stack),
+ * indexed by the same handler_count slot.  That array stays valid until
+ * vm_run() returns, which is always after any longjmp that targets it.
+ */
+#define VM_HANDLERS_MAX 64
+typedef struct {
+    int      frame_count;    /* vm->frame_count at push time             */
+    val_t   *sp;             /* vm->sp at push time (before pushing thunk) */
+    Upvalue *open_upvalues;  /* vm->open_upvalues at push time           */
+    uint16_t catch_offset;   /* bytecode byte offset for the catch block */
+    int      frame_idx;      /* which vm->frames[] entry is catching     */
+} VmHandlerInfo;
+
+/*
  * VM — the top-level execution state.
  * One VM per thread (thread-local in the future; global for now).
  */
@@ -61,6 +76,9 @@ typedef struct VM {
     int        frame_count;
 
     Upvalue   *open_upvalues;        /* linked list of open upvalues     */
+
+    VmHandlerInfo handler_stack[VM_HANDLERS_MAX]; /* exception save state */
+    int           handler_count;                  /* active handler depth */
 } VM;
 
 /* Per-thread VM instance — each thread must call vm_init() before use */

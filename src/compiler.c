@@ -835,6 +835,51 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
 
+/* ── with-exception-handler native compilation ───────────────────────── */
+
+static void compile_with_exception_handler(Compiler *c, val_t args,
+                                           bool tail, int line) {
+    /* (with-exception-handler handler thunk)
+     *
+     * Emitted bytecode:
+     *   <handler>               ← pushed first; lives below the call
+     *   OP_PUSH_HANDLER catch   ← installs setjmp; saves sp (past handler)
+     *   <thunk>                 ← pushed after the save point
+     *   OP_CALL 0               ← (thunk) → result; stack: [handler result]
+     *   OP_POP_HANDLER          ← normal exit: remove handler
+     *   OP_SWAP; OP_POP         ← discard handler, keep result
+     *   OP_JUMP end
+     *  catch:
+     *   ; sp restored to past handler, exception pushed → [handler exn]
+     *   OP_CALL 1               ← (handler exn) → result
+     *  end:
+     */
+    val_t handler_expr = vcar(args);
+    val_t thunk_expr   = vcar(vcdr(args));
+
+    /* Compile handler (stays below the protected call on the stack) */
+    compile(c, handler_expr, false, line);
+
+    /* OP_PUSH_HANDLER: saves sp at this point (past handler, before thunk) */
+    int catch_placeholder = emit_jump(c, OP_PUSH_HANDLER, line);
+
+    /* Compile thunk and call it with no arguments */
+    compile(c, thunk_expr, false, line);
+    emit_ab(c, OP_CALL, 0, line);          /* (thunk) → result */
+
+    /* Normal path: remove handler, discard it, keep result */
+    emit(c, OP_POP_HANDLER, line);
+    emit(c, OP_SWAP, line);                /* [result handler] */
+    emit(c, OP_POP, line);                 /* [result] */
+    int end_jmp = emit_jump(c, OP_JUMP, line);
+
+    /* Catch path: exception is on top, handler is below */
+    patch_jump(c, catch_placeholder);
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line); /* (handler exn) */
+
+    patch_jump(c, end_jmp);
+}
+
 /* ── parameterize desugaring ─────────────────────────────────────────── */
 
 static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
@@ -1145,6 +1190,11 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     if (head == S_GUARD) {
         compile_guard(c, args, tail, line);
+        return;
+    }
+
+    if (head == S_WITH_EXCEPTION_HANDLER) {
+        compile_with_exception_handler(c, args, tail, line);
         return;
     }
 

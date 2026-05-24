@@ -51,6 +51,7 @@ SYM(S_VALUES,             "values")
 SYM(S_CALL_WITH_VALUES,   "call-with-values")
 SYM(S_CALL_CC,            "call/cc")
 SYM(S_CALL_WITH_CC,       "call-with-current-continuation")
+SYM(S_WITH_EXCEPTION_HANDLER, "with-exception-handler")
 
 /* Module system */
 SYM(S_DEFINE_LIBRARY,     "define-library")
