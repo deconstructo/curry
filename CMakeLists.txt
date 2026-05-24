@@ -462,8 +462,27 @@ if(BUILD_MODULE_SYNC)
 endif()
 
 if(BUILD_MODULE_MCP)
-  curry_c_module(mcp)
-  message(STATUS "Building MCP server module")
+  find_package(OpenSSL REQUIRED)
+  # Multi-source module — expand the macro manually so we can add mcp_auth.c
+  add_library(curry_mcp MODULE
+    modules/mcp/mcp.c
+    modules/mcp/mcp_auth.c)
+  if(APPLE)
+    target_link_options(curry_mcp PRIVATE -undefined dynamic_lookup)
+  endif()
+  target_include_directories(curry_mcp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${GC_INCLUDE_DIRS}
+    ${GMP_INCLUDE}
+    ${OPENSSL_INCLUDE_DIR})
+  target_link_libraries(curry_mcp PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+  set_target_properties(curry_mcp PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "mcp"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mods/curry")
+  install(TARGETS curry_mcp DESTINATION lib/curry/modules/curry)
+  message(STATUS "Building MCP server module (OAuth2, OpenSSL ${OPENSSL_VERSION})")
 endif()
 
 if(BUILD_MODULE_PROFILING)

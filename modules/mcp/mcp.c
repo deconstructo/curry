@@ -15,18 +15,23 @@
  * calling mcp-serve / mcp-serve-sse.  Boehm GC keeps handler procs and
  * schemas alive via static globals.
  *
- * Scheme API:
+ * Scheme API — transport / tool / resource:
  *   (mcp-tool name description schema handler)    — register a callable tool
  *   (mcp-resource uri description handler)        — register a browseable resource
  *   (mcp-text string)                             — return text from a handler
  *   (mcp-json value)                              — return any Scheme value as JSON
  *   (mcp-notify-progress current total message)   — emit a progress notification
- *   (mcp-set-auth-token! token)                   — require Bearer token on SSE endpoints
  *   (mcp-serve)                                   — stdio, blocks until EOF
  *   (mcp-serve server-name version)               — stdio with custom identity
  *   (mcp-serve-sse port)                          — SSE on port, blocks forever
  *   (mcp-serve-sse port server-name)              — SSE with custom name
  *   (mcp-serve-sse port server-name version)      — SSE with custom name+version
+ *
+ * Authentication — see mcp_auth.h / mcp_auth.c:
+ *   (mcp-auth-mode! 'none|'self-contained|'introspect|'jwt)
+ *   Mode A (self-contained):   (mcp-register-client! id secret)
+ *   Mode B1 (introspect):      (mcp-introspection-endpoint! url)
+ *   Mode B2 (jwt):             (mcp-jwt-algorithm! 'hs256|'rs256)  etc.
  *
  * Schema format — alist mapping param names to property alists:
  *   '((query . ((type . "string") (description . "Search terms")))
@@ -35,6 +40,7 @@
  */
 
 #include <curry.h>
+#include "mcp_auth.h"
 #include "eval.h"    /* SCM_PROTECT, ExnHandler, current_handler */
 #include "object.h"  /* ErrorObj, vis_error, as_err */
 #include "gc.h"      /* gc_register_thread */
@@ -44,6 +50,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+
+#include <openssl/rand.h>
 
 #ifndef _WIN32
 #  include <sys/socket.h>
@@ -87,8 +95,6 @@ static int      s_nres  = 0;
 
 static char s_server_name[128] = "curry-mcp";
 static char s_server_ver[32]   = "0.7.2";
-/* Optional Bearer token — empty string means no auth is required. */
-static char s_auth_token[256]  = "";
 
 /* Thread-local: request-id of the current tool call, for mcp-notify-progress.
  * Thread-local so concurrent SSE sessions don't clobber each other. */
@@ -130,9 +136,7 @@ static void ensure_sess_init(void) {
 
 static void gen_uuid(char out[37]) {
     uint8_t b[16];
-    int rfd = open("/dev/urandom", O_RDONLY);
-    if (rfd >= 0) { (void)read(rfd, b, 16); close(rfd); }
-    else { for (int i = 0; i < 16; i++) b[i] = (uint8_t)rand(); }
+    RAND_bytes(b, 16);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     snprintf(out, 37,
@@ -633,13 +637,6 @@ static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
-static curry_val fn_mcp_set_auth_token(int ac, curry_val *av, void *ud) {
-    (void)ud; (void)ac;
-    if (!curry_is_string(av[0])) curry_error("mcp-set-auth-token!: expected string");
-    strncpy(s_auth_token, curry_string(av[0]), sizeof(s_auth_token) - 1);
-    return curry_void();
-}
-
 /* (mcp-serve) or (mcp-serve name version) — stdio transport */
 static curry_val fn_mcp_serve(int ac, curry_val *av, void *ud) {
     (void)ud;
@@ -769,12 +766,6 @@ static const char *CORS_PREFLIGHT =
     "Content-Length: 0\r\n"
     "\r\n";
 
-static const char *UNAUTHORIZED =
-    "HTTP/1.1 401 Unauthorized\r\n"
-    "WWW-Authenticate: Bearer\r\n"
-    "Content-Length: 0\r\n"
-    "Access-Control-Allow-Origin: *\r\n"
-    "\r\n";
 
 static const char *NOT_FOUND =
     "HTTP/1.1 404 Not Found\r\n"
@@ -865,12 +856,24 @@ static void handle_sse_post(int fd, HttpReq *req) {
     t_sse_session = NULL;
 }
 
-/* Returns true if the request passes the Bearer-token check.
- * When no token is configured (s_auth_token is empty) every request passes. */
-static bool auth_ok(const char *auth_header) {
-    if (s_auth_token[0] == '\0') return true;
-    if (strncasecmp(auth_header, "bearer ", 7) != 0) return false;
-    return strcmp(auth_header + 7, s_auth_token) == 0;
+/* Extract the raw Bearer token from an Authorization header value.
+ * Returns a pointer into auth_header (after "Bearer "), or "" if absent. */
+static const char *extract_bearer(const char *auth_header) {
+    if (!auth_header || strncasecmp(auth_header, "bearer ", 7) != 0) return "";
+    return auth_header + 7;
+}
+
+/* Send a 401 response with a properly formatted WWW-Authenticate challenge. */
+static void send_unauthorized(int fd, const char *error, const char *description) {
+    const char *www = mcp_auth_www_authenticate(error, description);
+    char resp[512];
+    int n = snprintf(resp, sizeof(resp),
+        "HTTP/1.1 401 Unauthorized\r\n"
+        "WWW-Authenticate: %s\r\n"
+        "Content-Length: 0\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n", www);
+    send(fd, resp, (size_t)n, MSG_NOSIGNAL);
 }
 
 typedef struct { int fd; } ConnArg;
@@ -886,7 +889,7 @@ static void *conn_thread(void *arg) {
     HttpReq req;
     if (!http_recv(fd, &req)) { close(fd); return NULL; }
 
-    /* OPTIONS preflight carries no credentials — allow without auth. */
+    /* OPTIONS preflight carries no credentials — bypass auth for CORS. */
     if (strcmp(req.method, "OPTIONS") == 0) {
         send(fd, CORS_PREFLIGHT, strlen(CORS_PREFLIGHT), MSG_NOSIGNAL);
         close(fd);
@@ -894,8 +897,22 @@ static void *conn_thread(void *arg) {
         return NULL;
     }
 
-    if (!auth_ok(req.auth)) {
-        send(fd, UNAUTHORIZED, strlen(UNAUTHORIZED), MSG_NOSIGNAL);
+    /* POST /token is the unauthenticated token-issuance endpoint (mode A). */
+    if (mcp_auth_has_token_endpoint() &&
+            strcmp(req.method, "POST") == 0 &&
+            strcmp(req.path,   "/token") == 0) {
+        mcp_auth_handle_token_endpoint(fd, req.body ? req.body : "", req.body_len);
+        close(fd);
+        free(req.body);
+        return NULL;
+    }
+
+    /* All other endpoints require a valid Bearer token. */
+    const char *bearer = extract_bearer(req.auth);
+    if (!mcp_auth_validate(bearer)) {
+        send_unauthorized(fd,
+            bearer[0] ? "invalid_token" : NULL,
+            bearer[0] ? "The access token is invalid or has expired" : NULL);
         close(fd);
         free(req.body);
         return NULL;
@@ -988,15 +1005,15 @@ static curry_val fn_mcp_serve_sse(int ac, curry_val *av, void *ud) {
 
 void curry_module_init(CurryVM *vm) {
 #define DEF(n,f,a,b) curry_define_fn(vm,n,f,a,b,NULL)
-    DEF("mcp-tool",             fn_mcp_tool,           4, 4);
-    DEF("mcp-resource",         fn_mcp_resource,       3, 3);
-    DEF("mcp-text",             fn_mcp_text,           1, 1);
-    DEF("mcp-json",             fn_mcp_json,           1, 1);
-    DEF("mcp-notify-progress",  fn_mcp_progress,       3, 3);
-    DEF("mcp-set-auth-token!",  fn_mcp_set_auth_token, 1, 1);
-    DEF("mcp-serve",            fn_mcp_serve,          0, 2);
+    DEF("mcp-tool",            fn_mcp_tool,     4, 4);
+    DEF("mcp-resource",        fn_mcp_resource, 3, 3);
+    DEF("mcp-text",            fn_mcp_text,     1, 1);
+    DEF("mcp-json",            fn_mcp_json,     1, 1);
+    DEF("mcp-notify-progress", fn_mcp_progress, 3, 3);
+    DEF("mcp-serve",           fn_mcp_serve,    0, 2);
 #ifdef HAVE_SSE
     DEF("mcp-serve-sse",       fn_mcp_serve_sse, 1, 3);
 #endif
 #undef DEF
+    mcp_auth_register(vm);
 }

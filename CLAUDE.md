@@ -368,20 +368,35 @@ their tools callable by Claude Code and other MCP clients.  Two transports are s
 ; Fraction = current/total.  message is an optional status string.
 (mcp-notify-progress current total message)
 
-; Require a Bearer token on all SSE endpoints (GET /sse and POST /message).
-; Call before (mcp-serve-sse ...).  Clients must send:
-;   Authorization: Bearer <token>
-; Unauthenticated requests receive HTTP 401.  No-op for stdio transport.
-; Omitting this call (or calling with "") disables auth — any client may connect.
-(mcp-set-auth-token! "my-secret-token")
+; --- Authentication (call before mcp-serve-sse; no-op for stdio) ---
+; Select mode: 'none (default), 'self-contained, 'introspect, or 'jwt
+(mcp-auth-mode! 'self-contained)
 
-; stdio transport — blocks reading JSON-RPC from stdin, writing to stdout.
-; name and version are reported during the MCP initialize handshake.
+; Mode A — self-contained (server issues tokens via POST /token)
+(mcp-register-client! "client-id" "client-secret")
+(mcp-token-ttl! 3600)                ; optional token lifetime in seconds
+
+; Mode B1 — introspect (RFC 7662 external IdP)
+(mcp-introspection-endpoint! "https://auth.example.com/oauth2/introspect")
+(mcp-introspection-credentials! "rs-id" "rs-secret")  ; optional client auth
+(mcp-introspection-cache-ttl! 60)    ; cache TTL in seconds
+
+; Mode B2 — jwt (RFC 7519 local validation)
+(mcp-jwt-algorithm! 'hs256)          ; or 'rs256
+(mcp-jwt-secret! "hmac-secret")      ; HS256
+(mcp-jwt-public-key! "/path/to/pub.pem")     ; RS256: from file
+(mcp-jwt-public-key-pem! "-----BEGIN...")    ; RS256: inline PEM
+(mcp-jwt-issuer!   "https://auth.example.com")  ; optional iss check
+(mcp-jwt-audience! "my-mcp-server")             ; optional aud check
+
+; --- Transports ---
+; stdio — blocks reading JSON-RPC from stdin, writing to stdout.
 (mcp-serve)                         ; defaults to name "curry-mcp"
 (mcp-serve name version)
 
-; SSE transport — HTTP server on port, blocks forever, supports many clients.
+; SSE — HTTP server on port, blocks forever, supports many clients.
 ; Each client GETs /sse to open a stream, then POSTs to /message?sessionId=X.
+; When self-contained mode is active, POST /token issues access tokens.
 (mcp-serve-sse port)
 (mcp-serve-sse port name)
 (mcp-serve-sse port name version)
