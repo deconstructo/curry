@@ -29,6 +29,7 @@
 #include <string.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* ── Format constants ───────────────────────────────────────────────────── */
 
@@ -575,9 +576,11 @@ static int write_scc(const char *scc_path, const char *src_path,
 
     ok = ok && wu32(f, SCC_SENTINEL);
 
+    if (executable)
+        ok = ok && (fchmod(fileno(f), 0755) == 0);
+
     fclose(f);
     if (!ok) { remove(scc_path); return -1; }
-    if (executable) chmod(scc_path, 0755);
     return 0;
 }
 
