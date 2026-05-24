@@ -3,6 +3,7 @@
 (import (scheme base))
 (import (scheme inexact))
 (import (curry sicm))
+(import (curry ode))
 
 (define pass 0)
 (define fail 0)
@@ -351,6 +352,156 @@
 ;;; ════════════════════════════════════════════════════════════
 
 (check "momentum selector" (momentum (up t q-sym p-sym)) p-sym)
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 22  rotation-matrix-from-Euler — structure and orthogonality
+;;; ════════════════════════════════════════════════════════════
+
+;;; Identity at phi=theta=psi=0
+(let ((R (rotation-matrix-from-Euler 0.0 0.0 0.0)))
+  (check-num "R-Euler identity [0,0]" (mat-ref R 0 0) 1.0 1e-15)
+  (check-num "R-Euler identity [0,1]" (mat-ref R 0 1) 0.0 1e-15)
+  (check-num "R-Euler identity [1,0]" (mat-ref R 1 0) 0.0 1e-15)
+  (check-num "R-Euler identity [1,1]" (mat-ref R 1 1) 1.0 1e-15)
+  (check-num "R-Euler identity [2,2]" (mat-ref R 2 2) 1.0 1e-15))
+
+;;; At theta=psi=0 the matrix reduces to Rz(phi).
+(let* ((phi0 1.2)
+       (R    (rotation-matrix-from-Euler phi0 0 0)))
+  (check-num "R-Euler Rz [0,0]" (mat-ref R 0 0) (cos phi0)  1e-12)
+  (check-num "R-Euler Rz [0,1]" (mat-ref R 0 1) (- (sin phi0)) 1e-12)
+  (check-num "R-Euler Rz [1,0]" (mat-ref R 1 0) (sin phi0)  1e-12)
+  (check-num "R-Euler Rz [1,1]" (mat-ref R 1 1) (cos phi0)  1e-12)
+  (check-num "R-Euler Rz [2,2]" (mat-ref R 2 2) 1.0         1e-12))
+
+;;; Orthogonality: R * R^T = I at arbitrary Euler angles.
+(let* ((R   (rotation-matrix-from-Euler 1.1 0.7 0.3))
+       (RRT (mat-mat-mul R (mat-transpose R))))
+  (check-num "R*R^T [0,0]" (mat-ref RRT 0 0) 1.0 1e-12)
+  (check-num "R*R^T [1,1]" (mat-ref RRT 1 1) 1.0 1e-12)
+  (check-num "R*R^T [2,2]" (mat-ref RRT 2 2) 1.0 1e-12)
+  (check-num "R*R^T [0,1]" (mat-ref RRT 0 1) 0.0 1e-12)
+  (check-num "R*R^T [0,2]" (mat-ref RRT 0 2) 0.0 1e-12)
+  (check-num "R*R^T [1,2]" (mat-ref RRT 1 2) 0.0 1e-12))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 23  Euler->omega-body
+;;; ════════════════════════════════════════════════════════════
+
+;;; Pure psi-dot spin (body z-axis): omega-body = (0, 0, psi-dot)
+;;; regardless of Euler angles.
+(let* ((state (up 0.0 (up 0.5 1.0 0.3) (up 0.0 0.0 2.0)))
+       (omega (Euler->omega-body state)))
+  (check-num "omega-body psi-spin w1" (ref omega 0) 0.0 1e-12)
+  (check-num "omega-body psi-spin w2" (ref omega 1) 0.0 1e-12)
+  (check-num "omega-body psi-spin w3" (ref omega 2) 2.0 1e-12))
+
+;;; Pure theta-dot at psi=0: omega-body = (theta-dot, 0, 0).
+(let* ((state (up 0.0 (up 0.5 1.0 0.0) (up 0.0 1.5 0.0)))
+       (omega (Euler->omega-body state)))
+  (check-num "omega-body theta-spin w1" (ref omega 0) 1.5 1e-12)
+  (check-num "omega-body theta-spin w2" (ref omega 1) 0.0 1e-12)
+  (check-num "omega-body theta-spin w3" (ref omega 2) 0.0 1e-12))
+
+;;; phi-dot precession at theta=pi/2, psi=0: omega-body = (0, phi-dot, 0).
+(let* ((pi/2  (/ (acos -1.0) 2))
+       (state (up 0.0 (up 0.0 pi/2 0.0) (up 1.0 0.0 0.0)))
+       (omega (Euler->omega-body state)))
+  (check-num "omega-body phi-prec w1" (ref omega 0) 0.0 1e-12)
+  (check-num "omega-body phi-prec w2" (ref omega 1) 1.0 1e-12)
+  (check-num "omega-body phi-prec w3" (ref omega 2) 0.0 1e-12))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 24  Euler->omega-space
+;;; ════════════════════════════════════════════════════════════
+
+;;; Pure phi-dot spin (space z-axis): omega-space = (0, 0, phi-dot)
+;;; regardless of Euler angles.
+(let* ((state (up 0.0 (up 0.7 1.2 0.4) (up 3.0 0.0 0.0)))
+       (omega (Euler->omega-space state)))
+  (check-num "omega-space phi-spin w1" (ref omega 0) 0.0 1e-12)
+  (check-num "omega-space phi-spin w2" (ref omega 1) 0.0 1e-12)
+  (check-num "omega-space phi-spin w3" (ref omega 2) 3.0 1e-12))
+
+;;; Pure theta-dot at phi=0: omega-space = (theta-dot, 0, 0).
+(let* ((state (up 0.0 (up 0.0 1.2 0.4) (up 0.0 2.5 0.0)))
+       (omega (Euler->omega-space state)))
+  (check-num "omega-space theta-spin w1" (ref omega 0) 2.5 1e-12)
+  (check-num "omega-space theta-spin w2" (ref omega 1) 0.0 1e-12)
+  (check-num "omega-space theta-spin w3" (ref omega 2) 0.0 1e-12))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 25  T-rigid-body and L-rigid-body
+;;; ════════════════════════════════════════════════════════════
+
+;;; At theta=pi/2, psi=0, phi-dot=1: omega-body=(0,1,0).
+;;; With B=2: T = ½·B·1² = 1.0
+(let* ((pi/2  (/ (acos -1.0) 2))
+       (state (up 0.0 (up 0.0 pi/2 0.0) (up 1.0 0.0 0.0)))
+       (T     ((T-rigid-body 1.0 2.0 3.0) state)))
+  (check-num "T-rigid-body phi-prec" T 1.0 1e-12))
+
+;;; Pure psi-dot spin, psi-dot=2: omega-body=(0,0,2).
+;;; With C=3: T = ½·C·4 = 6.0
+(let* ((state (up 0.0 (up 0.5 1.0 0.3) (up 0.0 0.0 2.0)))
+       (T     ((T-rigid-body 1.0 2.0 3.0) state)))
+  (check-num "T-rigid-body psi-spin" T 6.0 1e-12))
+
+;;; L-rigid-body = T-rigid-body (torque-free).
+(let* ((pi/2  (/ (acos -1.0) 2))
+       (state (up 0.0 (up 0.0 pi/2 0.0) (up 1.0 0.0 0.0))))
+  (check-num "L-rigid-body = T" ((L-rigid-body 1.0 2.0 3.0) state)
+             ((T-rigid-body 1.0 2.0 3.0) state) 1e-15))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 26  principal-value — angle normalisation
+;;; ════════════════════════════════════════════════════════════
+
+(let* ((pi     (acos -1.0))
+       (norm   (principal-value pi)))
+  (check-num "principal-value identity"   (norm 0.5)            0.5       1e-15)
+  (check-num "principal-value wrap +"     (norm (* 3.0 pi))     pi        1e-12)
+  (check-num "principal-value wrap -"     (norm (- (* 1.5 pi))) (* 0.5 pi) 1e-12))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 27  Euler's equations via ODE — rigid body dynamics
+;;; ════════════════════════════════════════════════════════════
+
+;;; Torque-free Euler equations in body frame:
+;;;   A·dω1/dt = (B−C)·ω2·ω3
+;;;   B·dω2/dt = (C−A)·ω3·ω1
+;;;   C·dω3/dt = (A−B)·ω1·ω2
+;;; State is a 3-list (omega1 omega2 omega3).
+(define (euler-body-rhs A B C)
+  (lambda (time-arg omega)
+    (let ((w1 (list-ref omega 0))
+          (w2 (list-ref omega 1))
+          (w3 (list-ref omega 2)))
+      (list (/ (* (- B C) w2 w3) A)
+            (/ (* (- C A) w3 w1) B)
+            (/ (* (- A B) w1 w2) C)))))
+
+;;; Symmetric top (A=B=1, C=2): ω3 is an exact first integral.
+;;; Initial omega=(0.1, 0, 1): ω3 must remain 1.0 throughout.
+(let* ((omega-fin (ode-rk4 (euler-body-rhs 1.0 1.0 2.0)
+                           '(0.1 0.0 1.0) 0.0 10.0 0.01)))
+  (check-num "symmetric-top ω3 conserved"
+             (list-ref omega-fin 2) 1.0 1e-6))
+
+;;; Asymmetric top (A=1, B=2, C=3), wobbling-book initial condition.
+;;; Both 2T = A·ω1²+B·ω2²+C·ω3² and |L|² = A²·ω1²+B²·ω2²+C²·ω3² are conserved.
+(let* ((A 1.0) (B 2.0) (C 3.0)
+       (w0 '(0.01 1.0 0.0))
+       (omega-fin (ode-rk4 (euler-body-rhs A B C) w0 0.0 20.0 0.001))
+       (w1 (list-ref omega-fin 0))
+       (w2 (list-ref omega-fin 1))
+       (w3 (list-ref omega-fin 2))
+       (two-T-0  (+ (* A 0.01 0.01) (* B 1.0 1.0) (* C 0.0 0.0)))
+       (two-T-f  (+ (* A w1 w1)    (* B w2 w2)    (* C w3 w3)))
+       (L2-0     (+ (* A A 0.01 0.01) (* B B 1.0 1.0) (* C C 0.0 0.0)))
+       (L2-f     (+ (* A A w1 w1)    (* B B w2 w2)    (* C C w3 w3))))
+  (check-num "wobbling-book 2T conserved" two-T-f two-T-0 1e-5)
+  (check-num "wobbling-book |L|² conserved" L2-f L2-0 1e-5))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary

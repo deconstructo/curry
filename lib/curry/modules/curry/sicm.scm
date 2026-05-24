@@ -20,6 +20,11 @@
 ;;;   L-central-rectangular  L-Kepler-polar
 ;;;   Poisson-bracket  commutator
 ;;;   pe  print-expression  show-expression  define-symbolic  literal-number
+;;;
+;;; Rigid body (Ch 2):
+;;;   rotation-matrix-from-Euler  Euler->omega-body  Euler->omega-space
+;;;   T-rigid-body  L-rigid-body  principal-value
+;;;   mat-ref  mat-transpose  mat-vec-mul  mat-mat-mul
 
 (import (scheme base))
 (import (scheme inexact))
@@ -367,3 +372,108 @@
   (lambda (f)
     (lambda (x)
       (- ((A (B f)) x) ((B (A f)) x)))))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 11  3×3 matrix helpers (internal)
+;;;        Matrices are represented as (list row0 row1 row2)
+;;;        where each row is (list e0 e1 e2).
+;;; ════════════════════════════════════════════════════════════
+
+(define (mat-ref M i j) (list-ref (list-ref M i) j))
+
+(define (mat-transpose M)
+  (list (list (mat-ref M 0 0) (mat-ref M 1 0) (mat-ref M 2 0))
+        (list (mat-ref M 0 1) (mat-ref M 1 1) (mat-ref M 2 1))
+        (list (mat-ref M 0 2) (mat-ref M 1 2) (mat-ref M 2 2))))
+
+;;; Multiply a 3×3 matrix by a 3-list vector.
+(define (mat-vec-mul M v)
+  (map (lambda (row)
+         (+ (* (list-ref row 0) (list-ref v 0))
+            (* (list-ref row 1) (list-ref v 1))
+            (* (list-ref row 2) (list-ref v 2))))
+       M))
+
+;;; Multiply two 3×3 matrices.
+(define (mat-mat-mul M1 M2)
+  (let ((M2t (mat-transpose M2)))
+    (map (lambda (row1)
+           (map (lambda (col2)
+                  (apply + (map * row1 col2)))
+                M2t))
+         M1)))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 12  Rigid body mechanics (SICM Ch 2)
+;;;
+;;;  ZXZ Euler angles: first rotate by phi around space Z,
+;;;  then by theta around the nodal X axis, then by psi around body Z.
+;;;  Reference: Sussman & Wisdom SICM 2nd ed., Chapter 2.
+;;; ════════════════════════════════════════════════════════════
+
+;;; 3×3 rotation matrix for ZXZ Euler angles (phi, theta, psi).
+;;; R = Rz(phi) * Rx(theta) * Rz(psi)
+;;; Returns a list of 3 rows, each a list of 3 elements.
+(define (rotation-matrix-from-Euler phi theta psi)
+  (let ((cphi   (cos phi))   (sphi   (sin phi))
+        (ctheta (cos theta)) (stheta (sin theta))
+        (cpsi   (cos psi))   (spsi   (sin psi)))
+    (list
+      (list (- (* cphi cpsi) (* sphi ctheta spsi))
+            (- (- (* cphi spsi)) (* sphi ctheta cpsi))
+            (* sphi stheta))
+      (list (+ (* sphi cpsi) (* cphi ctheta spsi))
+            (+ (- (* sphi spsi)) (* cphi ctheta cpsi))
+            (- (* cphi stheta)))
+      (list (* stheta spsi)
+            (* stheta cpsi)
+            ctheta))))
+
+;;; Angular velocity in the body frame, from a ZXZ Euler-angle local tuple.
+;;; local = (up t (up phi theta psi) (up phidot thetadot psidot))
+;;; Returns (up omega1 omega2 omega3) in principal-axis coordinates.
+(define (Euler->omega-body local)
+  (let* ((q        (coordinate local))
+         (qdot     (velocity local))
+         (phi      (ref q 0)) (theta (ref q 1)) (psi   (ref q 2))
+         (phidot   (ref qdot 0))
+         (thetadot (ref qdot 1))
+         (psidot   (ref qdot 2)))
+    (up (+ (* phidot (sin theta) (sin psi)) (* thetadot (cos psi)))
+        (- (* phidot (sin theta) (cos psi)) (* thetadot (sin psi)))
+        (+ (* phidot (cos theta)) psidot))))
+
+;;; Angular velocity in the space frame, from a ZXZ Euler-angle local tuple.
+;;; local = (up t (up phi theta psi) (up phidot thetadot psidot))
+;;; Returns (up omega1 omega2 omega3) in space-frame coordinates.
+(define (Euler->omega-space local)
+  (let* ((q        (coordinate local))
+         (qdot     (velocity local))
+         (phi      (ref q 0)) (theta (ref q 1)) (psi   (ref q 2))
+         (phidot   (ref qdot 0))
+         (thetadot (ref qdot 1))
+         (psidot   (ref qdot 2)))
+    (up (+ (* thetadot (cos phi)) (* psidot (sin theta) (sin phi)))
+        (- (* thetadot (sin phi)) (* psidot (sin theta) (cos phi)))
+        (+ phidot (* psidot (cos theta))))))
+
+;;; Kinetic energy of a rigid body in its principal-axis frame.
+;;; A, B, C are the three principal moments of inertia.
+;;; T = ½(A·ω1² + B·ω2² + C·ω3²)
+(define (T-rigid-body A B C)
+  (lambda (local)
+    (let* ((omega (Euler->omega-body local))
+           (w1 (ref omega 0)) (w2 (ref omega 1)) (w3 (ref omega 2)))
+      (* 1/2 (+ (* A w1 w1) (* B w2 w2) (* C w3 w3))))))
+
+;;; Torque-free rigid body Lagrangian: L = T (no potential energy).
+(define (L-rigid-body A B C)
+  (T-rigid-body A B C))
+
+;;; Reduce angle x to the principal interval (−xmax, xmax].
+;;; Example: ((principal-value (/ pi 2)) angle) normalises to (-pi/2, pi/2].
+(define (principal-value xmax)
+  (let ((two-xmax (* 2 xmax)))
+    (lambda (x)
+      (let ((y (- x (* two-xmax (floor (/ x two-xmax))))))
+        (if (> y xmax) (- y two-xmax) y)))))
