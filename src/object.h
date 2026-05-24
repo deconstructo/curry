@@ -354,6 +354,7 @@ typedef struct EnvFrame {
     struct EnvFrame *parent;
     uint32_t        *hidx;   /* hash index: hcap slots → index in syms/vals, or UINT32_MAX */
     uint32_t         hcap;   /* power-of-2; 0 = no hash */
+    uint32_t         version; /* bumped on frame_grow, used to invalidate glob caches */
 } EnvFrame;
 
 /* Multiple return values */

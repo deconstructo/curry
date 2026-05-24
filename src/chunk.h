@@ -15,6 +15,11 @@
  * arrays are resized via realloc during compilation then frozen.
  */
 
+/* Monomorphic inline cache entry for OP_LOAD_GLOBAL / OP_STORE_GLOBAL.
+ * slot points directly into the EnvFrame vals array; version mirrors
+ * the root frame's version so we can detect if it reallocated. */
+typedef struct { val_t *slot; uint32_t version; } GlobCacheEntry;
+
 typedef struct {
     uint8_t  *code;       /* bytecode stream                             */
     int       code_len;   /* used bytes                                  */
@@ -32,6 +37,8 @@ typedef struct {
     int       local_count;/* number of local variable slots              */
     int       upval_count;/* number of captured upvalues                 */
     const char *name;     /* function name for error messages (or NULL)  */
+
+    GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
 } Chunk;
 
 /* Allocate a fresh empty chunk */

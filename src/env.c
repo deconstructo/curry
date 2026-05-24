@@ -75,6 +75,7 @@ EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
     f->parent = parent;
     f->hidx   = NULL;
     f->hcap   = 0;
+    f->version = 0;
     return f;
 }
 
@@ -85,6 +86,7 @@ static void frame_grow(EnvFrame *f) {
     memcpy(ns, f->syms, f->size * sizeof(val_t));
     memcpy(nv, f->vals, f->size * sizeof(val_t));
     f->syms = ns; f->vals = nv; f->cap = new_cap;
+    f->version++;
 }
 
 bool frame_define(EnvFrame *f, val_t sym, val_t val) {
@@ -189,6 +191,16 @@ val_t env_lookup_or_false(val_t env, val_t sym) {
         f = f->parent;
     }
     return V_FALSE;
+}
+
+val_t *env_lookup_slot(val_t env, val_t sym) {
+    EnvFrame *f = as_env(env);
+    while (f) {
+        val_t *slot = frame_lookup(f, sym);
+        if (slot && *slot != V_UNDEF) return slot;
+        f = f->parent;
+    }
+    return NULL;
 }
 
 val_t env_bind_args(val_t parent_env, val_t params, val_t args) {

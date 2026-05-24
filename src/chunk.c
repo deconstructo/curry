@@ -119,6 +119,7 @@ Chunk *chunk_new(void) {
     c->local_count = 0;
     c->upval_count = 0;
     c->name       = NULL;
+    c->glob_cache = NULL;
     return c;
 }
 
@@ -168,6 +169,14 @@ int chunk_add_const(Chunk *c, val_t v) {
         int cap = c->const_cap < 8 ? 8 : c->const_cap * 2;
         c->constants = GC_REALLOC(c->constants, (size_t)cap * sizeof(val_t));
         c->const_cap = cap;
+        /* grow glob_cache parallel to constants — use gc_alloc (not atomic) so
+         * Boehm GC traces the interior val_t* slot pointers */
+        GlobCacheEntry *new_gc = (GlobCacheEntry *)gc_alloc((size_t)cap * sizeof(GlobCacheEntry));
+        if (c->glob_cache)
+            memcpy(new_gc, c->glob_cache, (size_t)c->const_len * sizeof(GlobCacheEntry));
+        memset(new_gc + c->const_len, 0,
+               (size_t)(cap - c->const_len) * sizeof(GlobCacheEntry));
+        c->glob_cache = new_gc;
     }
     int idx = c->const_len++;
     c->constants[idx] = v;

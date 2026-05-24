@@ -43,6 +43,9 @@ val_t env_lookup(val_t env, val_t sym);
 /* Look up a symbol - returns V_FALSE if not found (no error) */
 val_t env_lookup_or_false(val_t env, val_t sym);
 
+/* Returns a pointer into the frame's vals array, NULL if unbound */
+val_t *env_lookup_slot(val_t env, val_t sym);
+
 /* Bind multiple parameters to arguments (for function call) */
 val_t env_bind_args(val_t parent_env, val_t params, val_t args);
 
