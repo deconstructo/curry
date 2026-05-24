@@ -231,17 +231,17 @@ typedef struct {
 } Port;
 
 /* Forward declarations */
-struct Env;
+struct EnvFrame;
 struct Actor;
 struct VM;
 
 /* Closure: compiled lambda */
 typedef struct {
-    Hdr        hdr;
-    val_t      params;   /* symbol, or list of symbols, or improper list for rest */
-    val_t      body;     /* list of expressions (implicit begin) */
-    struct Env *env;
-    val_t      name;     /* symbol or #f */
+    Hdr              hdr;
+    val_t            params;   /* symbol, or list of symbols, or improper list for rest */
+    val_t            body;     /* list of expressions (implicit begin) */
+    struct EnvFrame *env;
+    val_t            name;     /* symbol or #f */
 } Closure;
 
 /* Primitive: built-in C procedure */
@@ -333,32 +333,28 @@ typedef struct {
 
 /* Module */
 typedef struct {
-    Hdr        hdr;
-    val_t      name;      /* symbol or list */
-    struct Env *env;
-    val_t      exports;   /* list of symbols */
-    void      *dl_handle; /* dlopen handle for C modules, NULL otherwise */
+    Hdr              hdr;
+    val_t            name;      /* symbol or list */
+    struct EnvFrame *env;
+    val_t            exports;   /* list of symbols */
+    void            *dl_handle; /* dlopen handle for C modules, NULL otherwise */
 } Module;
 
-/* Environment frame: one lexical scope level.
+/* Environment frame — also the T_ENV heap object.
  * Small frames (< FRAME_HASH_THRESHOLD) use linear scan.
- * Large frames build a parallel open-addressing hash index for O(1) lookup. */
+ * Large frames build a parallel open-addressing hash index for O(1) lookup.
+ * The frame IS the GC-managed env value; no separate Env wrapper is needed. */
 #define FRAME_HASH_THRESHOLD 16
 typedef struct EnvFrame {
-    uint32_t        size;
-    uint32_t        cap;
-    val_t          *syms;
-    val_t          *vals;
+    Hdr              hdr;    /* type = T_ENV; must be first */
+    uint32_t         size;
+    uint32_t         cap;
+    val_t           *syms;
+    val_t           *vals;
     struct EnvFrame *parent;
-    uint32_t       *hidx;   /* hash index: hcap slots → index in syms/vals, or UINT32_MAX */
-    uint32_t        hcap;   /* power-of-2; 0 = no hash */
+    uint32_t        *hidx;   /* hash index: hcap slots → index in syms/vals, or UINT32_MAX */
+    uint32_t         hcap;   /* power-of-2; 0 = no hash */
 } EnvFrame;
-
-/* GC-tracked environment */
-typedef struct Env {
-    Hdr       hdr;
-    EnvFrame *frame;
-} Env;
 
 /* Multiple return values */
 typedef struct {
@@ -508,7 +504,7 @@ typedef struct {
 #define as_rtd(v)     vunptr(RecordType, v)
 #define as_rec(v)     vunptr(Record,     v)
 #define as_module(v)  vunptr(Module,     v)
-#define as_env(v)     vunptr(Env,        v)
+#define as_env(v)     vunptr(EnvFrame,   v)
 #define as_vals(v)    vunptr(Values,     v)
 #define as_syntax(v)  vunptr(Syntax,     v)
 #define as_err(v)     vunptr(ErrorObj,   v)

@@ -66,6 +66,8 @@ static void frame_hash_rehash(EnvFrame *f) {
 
 EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
     EnvFrame *f = CURRY_NEW(EnvFrame);
+    f->hdr.type  = T_ENV;
+    f->hdr.flags = 0;
     f->size   = 0;
     f->cap    = cap ? cap : 8;
     f->syms   = (val_t *)gc_alloc(f->cap * sizeof(val_t));
@@ -143,29 +145,21 @@ val_t *frame_lookup(EnvFrame *f, val_t sym) {
 
 /* ---- Environment ---- */
 
-static val_t make_env(EnvFrame *frame) {
-    Env *e = CURRY_NEW(Env);
-    e->hdr.type  = T_ENV;
-    e->hdr.flags = 0;
-    e->frame     = frame;
-    return vptr(e);
-}
-
 val_t env_new_root(void) {
-    return make_env(frame_new(64, NULL));
+    return vptr(frame_new(64, NULL));
 }
 
 val_t env_extend(val_t parent) {
-    EnvFrame *pf = vis_env(parent) ? as_env(parent)->frame : NULL;
-    return make_env(frame_new(8, pf));
+    EnvFrame *pf = vis_env(parent) ? as_env(parent) : NULL;
+    return vptr(frame_new(8, pf));
 }
 
 void env_define(val_t env, val_t sym, val_t val) {
-    frame_define(as_env(env)->frame, sym, val);
+    frame_define(as_env(env), sym, val);
 }
 
 bool env_set(val_t env, val_t sym, val_t val) {
-    EnvFrame *f = as_env(env)->frame;
+    EnvFrame *f = as_env(env);
     while (f) {
         if (frame_set(f, sym, val)) return true;
         f = f->parent;
@@ -174,7 +168,7 @@ bool env_set(val_t env, val_t sym, val_t val) {
 }
 
 val_t env_lookup(val_t env, val_t sym) {
-    EnvFrame *f = as_env(env)->frame;
+    EnvFrame *f = as_env(env);
     while (f) {
         val_t *slot = frame_lookup(f, sym);
         if (slot) {
@@ -188,7 +182,7 @@ val_t env_lookup(val_t env, val_t sym) {
 }
 
 val_t env_lookup_or_false(val_t env, val_t sym) {
-    EnvFrame *f = as_env(env)->frame;
+    EnvFrame *f = as_env(env);
     while (f) {
         val_t *slot = frame_lookup(f, sym);
         if (slot && *slot != V_UNDEF) return *slot;
@@ -198,8 +192,7 @@ val_t env_lookup_or_false(val_t env, val_t sym) {
 }
 
 val_t env_bind_args(val_t parent_env, val_t params, val_t args) {
-    val_t new_env = env_extend(parent_env);
-    EnvFrame *f = as_env(new_env)->frame;
+    EnvFrame *f = frame_new(8, vis_env(parent_env) ? as_env(parent_env) : NULL);
     val_t p = params, a = args;
     while (vis_pair(p)) {
         if (vis_nil(a)) scm_raise(V_FALSE, "too few arguments");
@@ -210,13 +203,12 @@ val_t env_bind_args(val_t parent_env, val_t params, val_t args) {
         frame_define(f, p, a);          /* rest arg */
     else if (!vis_nil(a))
         scm_raise(V_FALSE, "too many arguments");
-    return new_env;
+    return vptr(f);
 }
 
 /* Bind parameters from a C array — avoids building an intermediate cons list. */
 val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv) {
-    val_t new_env = env_extend(parent_env);
-    EnvFrame *f = as_env(new_env)->frame;
+    EnvFrame *f = frame_new(8, vis_env(parent_env) ? as_env(parent_env) : NULL);
     val_t p = params;
     int i = 0;
     while (vis_pair(p)) {
@@ -233,7 +225,7 @@ val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv) {
     } else if (i < argc) {
         scm_raise(V_FALSE, "too many arguments");
     }
-    return new_env;
+    return vptr(f);
 }
 
 void env_init(void) {

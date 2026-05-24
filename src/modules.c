@@ -287,7 +287,7 @@ val_t modules_import(val_t spec, val_t env) {
     val_t mod_env_val = vptr(mod->env);
 
     /* Determine which names to import */
-    EnvFrame *f = mod->env->frame;
+    EnvFrame *f = mod->env;
     while (f) {
         for (uint32_t i = 0; i < f->size; i++) {
             val_t sym = f->syms[i];

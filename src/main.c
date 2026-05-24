@@ -224,7 +224,7 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "env")) {
-                    EnvFrame *f = as_env(GLOBAL_ENV)->frame;
+                    EnvFrame *f = as_env(GLOBAL_ENV);
                     for (uint32_t i = 0; i < f->size; i++) {
                         scm_display(f->syms[i], PORT_STDOUT);
                         scm_newline(PORT_STDOUT);

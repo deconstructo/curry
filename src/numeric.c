@@ -331,11 +331,15 @@ static val_t add_rat(val_t a, val_t b) {
 static val_t add_flo(double a, double b) { return num_make_float(a + b); }
 
 val_t num_add(val_t a, val_t b) {
-    /* Fast paths: skip the full tower dispatch for the common cases */
-    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) + vfloat(b));
-    if (vis_fixnum(a) && vis_fixnum(b)) return add_fix(vunfix(a), vunfix(b));
-    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) + vfloat(b));
-    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) + (double)vunfix(b));
+    /* Fast paths: fixnum check is a single tag-bit test (no memory dereference);
+     * flonum check requires loading the type header — so fixnum always goes first. */
+    if (vis_fixnum(a)) {
+        if (vis_fixnum(b)) return add_fix(vunfix(a), vunfix(b));
+        if (vis_flonum(b)) return num_make_float((double)vunfix(a) + vfloat(b));
+    } else if (vis_flonum(a)) {
+        if (vis_fixnum(b)) return num_make_float(vfloat(a) + (double)vunfix(b));
+        if (vis_flonum(b)) return num_make_float(vfloat(a) + vfloat(b));
+    }
     /* Tuple addition distributes before symbolic so that 0+tuple and tuple+0
        work correctly when the zero is symbolic (e.g. from variadic accumulator). */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -406,10 +410,13 @@ static val_t sub_rat(val_t a, val_t b) {
 static val_t sub_flo(double a, double b) { return num_make_float(a - b); }
 
 val_t num_sub(val_t a, val_t b) {
-    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) - vfloat(b));
-    if (vis_fixnum(a) && vis_fixnum(b)) return sub_fix(vunfix(a), vunfix(b));
-    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) - vfloat(b));
-    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) - (double)vunfix(b));
+    if (vis_fixnum(a)) {
+        if (vis_fixnum(b)) return sub_fix(vunfix(a), vunfix(b));
+        if (vis_flonum(b)) return num_make_float((double)vunfix(a) - vfloat(b));
+    } else if (vis_flonum(a)) {
+        if (vis_fixnum(b)) return num_make_float(vfloat(a) - (double)vunfix(b));
+        if (vis_flonum(b)) return num_make_float(vfloat(a) - vfloat(b));
+    }
     /* Tuple subtraction before symbolic for same reason as num_add. */
     if (vis_tuple(a) || vis_tuple(b)) {
         if (!vis_tuple(b) && num_is_zero(b)) return a;
@@ -458,10 +465,13 @@ static val_t mul_rat(val_t a, val_t b) {
 static val_t mul_flo(double a, double b) { return num_make_float(a * b); }
 
 val_t num_mul(val_t a, val_t b) {
-    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) * vfloat(b));
-    if (vis_fixnum(a) && vis_fixnum(b)) return mul_fix(vunfix(a), vunfix(b));
-    if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) * vfloat(b));
-    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) * (double)vunfix(b));
+    if (vis_fixnum(a)) {
+        if (vis_fixnum(b)) return mul_fix(vunfix(a), vunfix(b));
+        if (vis_flonum(b)) return num_make_float((double)vunfix(a) * vfloat(b));
+    } else if (vis_flonum(a)) {
+        if (vis_fixnum(b)) return num_make_float(vfloat(a) * (double)vunfix(b));
+        if (vis_flonum(b)) return num_make_float(vfloat(a) * vfloat(b));
+    }
     /* Tuple distribution takes priority over symbolic so that sym-var × up-tuple
        distributes component-wise rather than wrapping in a CAS expression. */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -541,9 +551,11 @@ val_t num_mul(val_t a, val_t b) {
 
 /* ---- div ---- */
 val_t num_div(val_t a, val_t b) {
-    if (vis_flonum(a) && vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
     if (vis_fixnum(a) && vis_flonum(b)) return num_make_float((double)vunfix(a) / vfloat(b));
-    if (vis_flonum(a) && vis_fixnum(b)) return num_make_float(vfloat(a) / (double)vunfix(b));
+    if (vis_flonum(a)) {
+        if (vis_fixnum(b)) return num_make_float(vfloat(a) / (double)vunfix(b));
+        if (vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
+    }
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && !vis_quantum(b)) return quantum_div_scalar(a, b);
