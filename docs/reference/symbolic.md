@@ -268,6 +268,20 @@ For quaternion symbolic variables, the same pass applies to `nc*` products:
 
 `simplify` is called automatically by `∂`, `∫`, and `substitute` on their results.
 
+### `trigsimp`
+
+`(trigsimp expr)` applies trigonometric identities on top of `simplify`. It recognises the Pythagorean identity sin²(f) + cos²(f) = 1 and its variants, and rewrites double-angle forms:
+
+```scheme
+(symbolic x)
+
+(trigsimp (+ (expt (sin x) 2) (expt (cos x) 2)))   ; => 1
+(trigsimp (- 1 (expt (sin x) 2)))                   ; => (expt (cos x) 2)
+(trigsimp (- (expt (cos x) 2) (expt (sin x) 2)))    ; => (cos (* 2 x))
+```
+
+`trigsimp` calls `simplify` internally, so it subsumes algebraic simplification. Use it when an expression involves trigonometric terms that `simplify` leaves unevaluated.
+
 ## Symbolic differentiation
 
 `(∂ expr var)` differentiates `expr` with respect to `var`. The result is automatically simplified.
@@ -952,6 +966,74 @@ You can use symbolic differentiation to produce a derivative expression, then co
 (df 2)    ; => 20   [4x³ − 6x at x=2]
 ```
 
+## Symbolic functions
+
+A **symbolic function** is an opaque named callable that can appear inside symbolic expressions without being evaluated. This lets the CAS represent unknown functions and apply differentiation rules through them.
+
+```scheme
+(sym-fn 'f)              ; unnamed function f (no declared parameters)
+(sym-fn 'u x t)          ; function u of sym-vars x and t
+(sym-fn? v)              ; predicate
+(sym-fn-name f)          ; returns the name symbol
+```
+
+Applying a symbolic function to arguments builds an `SX_APPLY` node:
+
+```scheme
+(symbolic x t)
+(define u (sym-fn 'u x t))
+
+(fn-apply u x t)                     ; => (u x t)
+(∂ (fn-apply u x t) x)              ; => (∂ (u x t) / ∂x)  — chain rule applied
+```
+
+`fn-apply` is the explicit application form; the same node is produced when the SICM layer or the PDE module builds derivative relationships. The result is a full symbolic expression: you can differentiate it, substitute into it, or pass it to `sym->latex`.
+
+`sym-fn` objects are used heavily by `literal-function` in the SICM module and by the Laplace/Fourier transforms to represent transformed functions (e.g. `L_u`, `F_u`).
+
+## Integral transforms
+
+### Laplace transform
+
+`(laplace expr t s)` computes the **symbolic Laplace transform** ℒ{expr(t)} in the frequency variable `s`. Both `t` and `s` must be sym-vars.
+
+Supported rules: linearity, `t^n → n!/sⁿ⁺¹`, `e^(at) → 1/(s−a)`, `sin(ωt) → ω/(s²+ω²)`, `cos(ωt) → s/(s²+ω²)`, derivative property `ℒ{u_t} = s·L_u − u(0)`, sym-fn application. Unknown forms return an unevaluated `(laplace …)` node.
+
+```scheme
+(symbolic t s)
+
+(laplace (exp (* -2 t)) t s)          ; => (/ 1 (+ s 2))
+(laplace t t s)                       ; => (/ 1 (expt s 2))
+(laplace (sin (* 3 t)) t s)           ; => (/ 3 (+ (expt s 2) 9))
+(laplace (cos t) t s)                 ; => (/ s (+ (expt s 2) 1))
+```
+
+`(ilaplace expr s t)` is the **inverse Laplace transform** ℒ⁻¹{expr(s)}. It recognises simple rational forms and their multiples; unknown forms are left unevaluated.
+
+```scheme
+(ilaplace (/ 1 (+ s 2)) s t)         ; => (exp (* -2 t))
+(ilaplace (/ 1 (expt s 2)) s t)      ; => t
+(ilaplace (/ 3 (+ (expt s 2) 9)) s t); => (sin (* 3 t))
+```
+
+### Fourier transform
+
+`(fourier expr t ω)` computes the **symbolic Fourier transform** ℱ{expr(t)} in the frequency variable `ω`. Uses the convention ∫ f(t) e^{−iωt} dt.
+
+Supported rules: linearity, exponential `e^(iωt)`, `sin`/`cos`, derivative property `ℱ{u_t} = iω · F_u`, sym-fn application. Constants (no Dirac delta support) leave an unevaluated node.
+
+```scheme
+(symbolic t omega)
+
+(fourier (exp (* +1i t)) t omega)    ; => (fourier ...)  — needs delta support
+; Derivative property:
+(define u (sym-fn 'u t))
+(define ut (sym-fn 'u_t t))         ; manually declare derivative
+(fourier (fn-apply ut t) t omega)   ; => (* (+ 0 (* +1i omega)) (F_u omega))
+```
+
+`(ifourier expr ω t)` is the inverse Fourier transform; it applies linearity and leaves other forms unevaluated.
+
 ## Fractional calculus
 
 Curry extends the symbolic CAS with **fractional derivatives and integrals**, generalising the standard differential operators to non-integer order α. This is useful in viscoelasticity, anomalous diffusion, signal processing, and control theory.
@@ -1103,6 +1185,7 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(∫ expr var a b)` | Definite integral from a to b |
 | `(integrate expr var)` | ASCII alias for ∫ |
 | `(simplify expr)` | Algebraic simplification |
+| `(trigsimp expr)` | Trigonometric simplification (subsumes `simplify`) |
 | `(substitute expr var val)` | Replace var with val |
 | `(conj expr)` / `(conjugate expr)` | Complex conjugate |
 | `(real-part expr)` | Real part (symbolic-aware) |
@@ -1130,6 +1213,14 @@ Symbolic expressions display in standard Scheme prefix notation:
 | `(vec-laplacian F vars)` | Vector Laplacian (component-wise) |
 | `(dot-product A B)` | Symbolic dot product |
 | `(cross-product A B)` | Symbolic 3-D cross product |
+| `(sym-fn 'name var ...)` | Create a symbolic function object |
+| `(sym-fn? v)` | Is v a symbolic function? |
+| `(sym-fn-name f)` | Name symbol of a sym-fn |
+| `(fn-apply f arg ...)` | Apply sym-fn to args; builds `SX_APPLY` node |
+| `(laplace expr t s)` | Symbolic Laplace transform ℒ{expr} |
+| `(ilaplace expr s t)` | Inverse Laplace transform ℒ⁻¹{expr} |
+| `(fourier expr t ω)` | Symbolic Fourier transform ℱ{expr} |
+| `(ifourier expr ω t)` | Inverse Fourier transform ℱ⁻¹{expr} |
 | `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 - 2*x + 1` |
 | `(sym->latex expr)` | LaTeX string: `x^{2} - 2 x + 1` |
 

@@ -427,6 +427,18 @@ Both execution engines coexist and call each other freely:
   `setjmp`/`longjmp` so that a `longjmp` that skips nested `vm_run` frames
   leaves the VM in a consistent state.
 
+### `tree-eval`
+
+`(tree-eval expr)` forces evaluation of `expr` through the **tree-walking interpreter** rather than the bytecode VM. This is used internally by `import`, `define-syntax`, and macro expansion, where the tree-walker must remain the authoritative evaluator. It is also available as a Scheme primitive for cases where you hold a raw expression tree (e.g. produced by `read` or a macro) and want to evaluate it without going through the compiler:
+
+```scheme
+(tree-eval '(+ 1 2))                ; => 3
+(tree-eval '(define x 42))          ; defines x in GLOBAL_ENV
+(tree-eval (list '+ 1 2))           ; => 3  — works on any list structure
+```
+
+Ordinary code should use `eval` instead; `tree-eval` bypasses compilation and is slower for code that runs many times.
+
 ---
 
 ## Debugging

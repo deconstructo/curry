@@ -176,7 +176,10 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 | Surreal | `surreal?` | `omega`, `epsilon`, `(make-surreal ...)` |
 | Symbolic variable | `sym-var?` | `(symbolic x)` then `x` |
 | Symbolic expression | `sym-expr?` | `(+ x 1)` when x is symbolic |
+| Up-tuple | `up?` | `(up 1 2 3)` |
+| Down-tuple | `down?` | `(down 1 2 3)` |
 | Quantum value | `quantum?` | `(quantum-uniform '(a b c))` |
+| Unspecified | `unspecified?` | result of `define`, `set!`, `display`, … |
 | Pair | `pair?` | `(a . b)` |
 | List | `list?` | `(1 2 3)` |
 | Vector | `vector?` | `#(1 2 3)` |

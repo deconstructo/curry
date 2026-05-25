@@ -81,6 +81,37 @@ A local tuple is `(up t q qdot ...)`. Selectors:
 (momentum     state)       ; slot 2 of a Hamiltonian state (up t q p)
 ```
 
+### Tuple constructors, predicates, and accessors
+
+Up-tuples represent contravariant (column) vectors; down-tuples represent covariant (row) vectors.
+
+```scheme
+(up   v0 v1 ...)           ; construct an up-tuple (contravariant)
+(down v0 v1 ...)           ; construct a down-tuple (covariant)
+
+(up?    v)                 ; #t if v is an up-tuple
+(down?  v)                 ; #t if v is a down-tuple
+(tuple? v)                 ; #t if v is either kind of tuple
+
+(ref   tup i)              ; 0-based element access
+(dimension tup)            ; number of components
+
+(tuple->list tup)          ; convert to a Scheme list
+(list->up    lst)          ; build an up-tuple from a list
+(list->down  lst)          ; build a down-tuple from a list
+```
+
+Example:
+
+```scheme
+(define q (up 1 2 3))
+(up? q)           ; => #t
+(dimension q)     ; => 3
+(ref q 1)         ; => 2
+(tuple->list q)   ; => (1 2 3)
+(list->down '(4 5 6))  ; => (down 4 5 6)
+```
+
 ## Path functor Γ
 
 ```scheme
