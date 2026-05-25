@@ -1,5 +1,14 @@
 # Changelog
 
+### 0.8.17 — Clang/Linux build fixes
+
+**Build fixes**
+
+- Release builds with upstream LLVM Clang on Linux now pass `-fno-omit-frame-pointer`. Clang at `-O2` omits frame pointers for register pressure, which prevents Boehm GC's conservative stack scanner from walking frames correctly and causes use-after-free segfaults. Apple Clang is unaffected (it always preserves frame pointers for Instruments compatibility).
+- `prim_call_cc` (`call/cc`): the local `ret` variable is now `volatile` and the function is marked `__attribute__((noinline))`. Without these, Clang's optimizer cached `ret` in a caller-save register across the `setjmp`/`longjmp` boundary, returning garbage on continuation invocation. Again, Apple Clang's AArch64 calling convention masked this on macOS.
+
+---
+
 ### 0.8.16 — Phase 11: multi-DOF Lagrangian + Hamiltonian mechanics
 
 **Core C fixes**

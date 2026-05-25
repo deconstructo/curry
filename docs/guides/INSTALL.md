@@ -140,6 +140,11 @@ cmake --build build -j$(sysctl -n hw.logicalcpu)
 
 - Modules build as `.so` bundles on both Linux and macOS; `(import (curry qt6))` works identically on both platforms.
 - Apple Silicon and x86_64 are both supported natively.
+- Apple Clang always preserves frame pointers (required for Instruments), so the Boehm GC stack-walk issue described below does not apply on macOS.
+
+### Compiler notes (Linux)
+
+GCC and upstream LLVM Clang are both supported. When building a Release build with Clang, the CMake configuration automatically adds `-fno-omit-frame-pointer`. This is required because Boehm GC's conservative stack scanner walks frame-pointer chains to find live heap objects; Clang at `-O2` omits them by default, which breaks the GC and causes segfaults. GCC is unaffected.
 
 ### 5. Create a .deb package
 
