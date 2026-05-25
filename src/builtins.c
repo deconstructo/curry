@@ -1550,9 +1550,13 @@ static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
     val_t p=port_open_output_string(); scm_write(av[0],p); return port_get_output_string(p);
 }
 /* noinline: the setjmp jmp_buf must stay on this function's stack frame.
-   volatile ret: longjmp restores registers to setjmp-time values, so any
-   local modified between setjmp and longjmp must be volatile to prevent
-   clang from optimising the post-longjmp assignment into dead code. */
+ * Avoid a volatile-ret pattern: clang (ARM64 -O2) replaces `ret = cont->result`
+ * with V_VOID after longjmp even with volatile, because cont->result was
+ * V_VOID at setjmp time and the optimizer caches it.  Instead use an early-
+ * return structure: if setjmp returns non-zero the function returns cont->result
+ * directly; otherwise falls through to apply_arr and returns its result.
+ * All variables read in the longjmp path (cont, saved_*) are in callee-saved
+ * registers and are therefore valid after longjmp restores the register file. */
 __attribute__((noinline))
 static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
@@ -1565,17 +1569,18 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     int saved_fc   = vm->frame_count;
     val_t *saved_sp = vm->sp;
     Upvalue *saved_uv = vm->open_upvalues;
-    volatile val_t ret = V_VOID;
-    if (setjmp(*(jmp_buf *)cont->jmpbuf) == 0) {
-        val_t cont_val = vptr(cont);
-        ret = apply_arr(proc, 1, &cont_val);
-    } else {
+    if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
+        /* Continuation was invoked — restore VM state and return captured value.
+         * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
+         * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
+         * comment for the full explanation. */
         vm->frame_count   = saved_fc;
         vm->sp            = saved_sp;
         vm->open_upvalues = saved_uv;
-        ret = cont->result;
+        return *(volatile val_t *)&cont->result;
     }
-    return ret;
+    val_t cont_val = vptr(cont);
+    return apply_arr(proc, 1, &cont_val);
 }
 
 static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {

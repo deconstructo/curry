@@ -50,6 +50,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+#include <time.h>
 
 #include <openssl/rand.h>
 
@@ -799,9 +801,12 @@ static void handle_sse_get(int fd) {
 
     /* Keep the stream alive with periodic comment pings.  Exit when the client
      * disconnects (send fails) or when the session is marked inactive by a
-     * concurrent write failure on the POST side. */
+     * concurrent write failure on the POST side.
+     * Use nanosleep with EINTR retry so Boehm GC signals (stop-the-world)
+     * don't truncate the 15-second interval and fire a premature keepalive. */
     while (true) {
-        sleep(15);
+        struct timespec ts = {15, 0}, rem;
+        while (nanosleep(&ts, &rem) < 0 && errno == EINTR) ts = rem;
         pthread_mutex_lock(&sess->wlock);
         bool alive = sess->active;
         if (alive) {

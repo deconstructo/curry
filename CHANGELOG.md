@@ -1,5 +1,19 @@
 # Changelog
 
+### 0.8.18 — Release-build call/cc and MCP SSE fixes
+
+**Bug fixes**
+
+- **`call/cc` — clang ARM64 dead-store elimination**: `cont->result = value` before `longjmp()` was silently eliminated by clang (ARM64 `-O2`) because `longjmp` is declared `[[noreturn]]` and the store appeared dead. Added `__asm__ volatile("" ::: "memory")` barriers in both `eval()`'s TCO loop and `apply()` before each `longjmp` on continuation invocation. Both tree-walker (`eval_call_cc`) and bytecode VM (`prim_call_cc`) paths also now use `*(volatile val_t *)&cont->result` to force a memory reload after `longjmp`, since clang constant-folded the non-volatile read to `V_VOID` at setjmp time. These issues only manifested in release builds; debug builds (`-O0`) were unaffected.
+
+- **`call/cc` — tree-walker optimizer frame instability**: `eval_call_cc()` was split from `eval()`'s giant goto-loop into a dedicated `__attribute__((noinline))` helper so the setjmp frame is stable and all variables accessed in the longjmp path land in callee-saved registers.
+
+- **`guard` / R7RS exception tests**: `guard`'s expansion via `call/cc` depended on working continuation capture; the fixes above unblock `guard`, `with-exception-handler`, `raise`, `raise-continuable`, and `error-object?` tests in `r7rs_tests.scm`.
+
+- **MCP SSE keepalive — Boehm GC signal interruption**: `sleep(15)` in `handle_sse_get`'s keepalive loop was cut short by Boehm GC's stop-the-world signal (EINTR), causing a premature keepalive to be sent — which the SSE isolation test detected as session-1 data leaking to session-2. Replaced with `nanosleep()` + EINTR retry so the full 15-second interval is always observed.
+
+---
+
 ### 0.8.17 — Clang/Linux build fixes
 
 **Build fixes**

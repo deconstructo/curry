@@ -175,6 +175,42 @@ val_t expand_qq(val_t form, val_t env, int depth) {
 /* ---- Let helpers ---- */
 
 
+/* ---- call/cc helper ---- */
+
+/* noinline ensures the setjmp jmp_buf lives in this function's own stable
+ * stack frame.  eval() uses a goto-based TCO loop, so the optimizer may
+ * allocate locals in caller-saved registers that longjmp doesn't restore;
+ * isolating the setjmp in a dedicated noinline function avoids that.
+ * All variables used in the longjmp path (cont, saved_*) are in callee-saved
+ * registers for this smaller function and are valid after longjmp. */
+__attribute__((noinline))
+static val_t eval_call_cc(val_t proc) {
+    Continuation *cont = CURRY_NEW(Continuation);
+    cont->hdr.type = T_CONTINUATION; cont->hdr.flags = 0;
+    cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
+    cont->result   = V_VOID;
+    cont->wind_top = current_wind;
+    /* VM state — only meaningful when the VM is active (vm may be NULL in
+     * pure tree-walker mode, e.g. test_core.c which skips vm_init). */
+    int saved_fc   = vm ? vm->frame_count : 0;
+    val_t *saved_sp = vm ? vm->sp : NULL;
+    Upvalue *saved_uv = vm ? vm->open_upvalues : NULL;
+    if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
+        if (vm) {
+            vm->frame_count   = saved_fc;
+            vm->sp            = saved_sp;
+            vm->open_upvalues = saved_uv;
+        }
+        /* Force a real memory load: clang (ARM64 -O2) constant-folds cont->result
+         * to V_VOID because it was V_VOID at setjmp time and doesn't see the write
+         * done by invoke_continuation before longjmp.  The volatile cast prevents
+         * that folding and guarantees an ldr instruction. */
+        return *(volatile val_t *)&cont->result;
+    }
+    return apply(proc, make_pair(vptr(cont), V_NIL));
+}
+
+
 /* ---- Evaluator ---- */
 
 val_t eval(val_t expr, val_t env) {
@@ -757,23 +793,7 @@ tail:
 
     if (op == S_CALL_CC || op == S_CALL_WITH_CC) {
         val_t proc = eval(vcar(rest), env);
-        /* Allocate escape continuation */
-        Continuation *cont = CURRY_NEW(Continuation);
-        cont->hdr.type=T_CONTINUATION; cont->hdr.flags=0;
-        cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
-        cont->result   = V_UNDEF;
-        cont->wind_top = current_wind;
-        ExnHandler h;
-        val_t ret;
-        h.prev = current_handler; current_handler = &h;
-        if (setjmp(*(jmp_buf *)cont->jmpbuf) == 0) {
-            ret = apply(proc, make_pair(vptr(cont), V_NIL));
-            current_handler = h.prev;
-        } else {
-            current_handler = h.prev;
-            ret = cont->result;
-        }
-        return ret;
+        return eval_call_cc(proc);
     }
 
     if (op == S_PARAMETERIZE) {
@@ -1015,6 +1035,11 @@ tail:
         if (vis_cont(proc)) {
             Continuation *cont = as_cont(proc);
             cont->result = argc > 0 ? arr[0] : V_VOID;
+            /* Memory barrier: clang (ARM64 -O2) dead-store-eliminates the write
+             * to cont->result because longjmp() is declared noreturn and the
+             * store appears dead.  The barrier forces the write to memory so
+             * eval_call_cc's volatile reload sees the correct value after longjmp. */
+            __asm__ volatile("" ::: "memory");
             wind_unwind_to((WindFrame *)cont->wind_top);
             longjmp(*(jmp_buf *)cont->jmpbuf, 1);
         }
@@ -1097,6 +1122,7 @@ val_t apply(val_t proc, val_t args) {
     if (vis_cont(proc)) {
         Continuation *cont = as_cont(proc);
         cont->result = vis_pair(args) ? vcar(args) : V_VOID;
+        __asm__ volatile("" ::: "memory");
         wind_unwind_to((WindFrame *)cont->wind_top);
         longjmp(*(jmp_buf *)cont->jmpbuf, 1);
     }
