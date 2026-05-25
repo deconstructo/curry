@@ -18,6 +18,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   add_compile_options(-O2)
+  # Boehm GC is a conservative stack scanner: it walks C stack frames to find
+  # live heap pointers.  Clang omits frame pointers at -O2, which prevents the
+  # GC from walking frames correctly and causes use-after-free segfaults.
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-fno-omit-frame-pointer)
+  endif()
 endif()
 
 # On macOS, prefer the Homebrew arm64 OpenSSL over any x86_64 copy in /usr/local.
