@@ -455,8 +455,9 @@ int main(int argc, char **argv) {
         int i = optind;
         val_t cmd_line = V_NIL;
         for (int j = argc-1; j >= i; j--)
-            cmd_line = scm_cons(sym_intern_cstr(argv[j]), cmd_line);
+            cmd_line = scm_cons(scm_symbol_to_string(sym_intern_cstr(argv[j])), cmd_line);
         env_define(GLOBAL_ENV, sym_intern_cstr("command-line-args"), cmd_line);
+        env_define(GLOBAL_ENV, sym_intern_cstr("command-line"), cmd_line);
 
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
