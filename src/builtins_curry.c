@@ -102,6 +102,8 @@ static val_t prim_sym_assumption_p(int ac, val_t *av, void *ud) {
 }
 static val_t prim_sx_sign(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return sx_sign(av[0]); }
+static val_t prim_unspecified_p(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return vbool(vis_void(av[0])); }
 static val_t prim_sym_var_p(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return vbool(vis_symvar(av[0])); }
 static val_t prim_sym_expr_p(int ac, val_t *av, void *ud)
@@ -901,6 +903,7 @@ void builtins_curry_register(val_t env) {
     DEF("sym->infix",     prim_sym_to_string,   1, 1);
     DEF("sym->latex",     prim_sym_to_latex,    1, 1);
     DEF("sym-var",        prim_sym_var,         1, 2);
+    DEF("unspecified?",   prim_unspecified_p,   1, 1);
     DEF("sym-var?",       prim_sym_var_p,       1, 1);
     DEF("sym-assumption?",prim_sym_assumption_p,2, 2);
     DEF("sym-expr?",      prim_sym_expr_p,      1, 1);
