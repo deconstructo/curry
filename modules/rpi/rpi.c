@@ -17,6 +17,7 @@
  *   PWM:  sysfs — no extra library
  */
 
+#define _POSIX_C_SOURCE 200809L
 #include <curry.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,7 @@
 #include <linux/i2c-dev.h>
 #include <linux/spi/spidev.h>
 #include <gpiod.h>
+#define GC_THREADS
 #include <gc/gc.h>
 
 /* ---- pointer packing (same idiom as sync module) ---- */
@@ -513,7 +515,7 @@ static curry_val fn_pwm_open(int ac, curry_val *av, void *ud) {
     /* brief wait for sysfs node to appear */
     for (int i = 0; i < 20; i++) {
         if (access(base, F_OK) == 0) break;
-        usleep(10000);
+        nanosleep(&(struct timespec){0, 10000000}, NULL);
     }
     if (access(base, F_OK) != 0)
         curry_error("pwm-open: sysfs node %s did not appear", base);
