@@ -118,6 +118,9 @@ set(CORE_SOURCES
   src/scc.c
 )
 
+# vm.c uses computed gotos (GCC/Clang extension) for the dispatch table.
+set_source_files_properties(src/vm.c PROPERTIES COMPILE_FLAGS "-Wno-gnu-label-as-value")
+
 add_library(curry_core STATIC ${CORE_SOURCES})
 set_target_properties(curry_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(curry_core PUBLIC
