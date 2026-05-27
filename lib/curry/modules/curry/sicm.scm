@@ -25,6 +25,10 @@
 ;;;   rotation-matrix-from-Euler  Euler->omega-body  Euler->omega-space
 ;;;   T-rigid-body  L-rigid-body  principal-value
 ;;;   mat-ref  mat-transpose  mat-vec-mul  mat-mat-mul
+;;;
+;;; Numerical trajectory evolution (Ch 3–4):
+;;;   evolve-Hamiltonian  evolve-Lagrangian  lagrangian->hamiltonian-state
+;;;   stoermer-verlet-step  poincare-section
 
 (import (scheme base))
 (import (scheme inexact))
@@ -477,3 +481,206 @@
     (lambda (x)
       (let ((y (- x (* two-xmax (floor (/ x two-xmax))))))
         (if (> y xmax) (- y two-xmax) y)))))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 13  Numerical trajectory evolution (SICM Ch 3–4)
+;;;
+;;; Symplectic Störmer-Verlet integration of Hamiltonian systems.
+;;; Key property: the integrator is symplectic — it preserves the
+;;; phase-space volume form.  Energy error is bounded (no secular
+;;; drift), unlike non-symplectic methods (e.g. plain RK4) which
+;;; show unbounded energy drift on long runs.
+;;;
+;;; State representation: (up t q p)
+;;;   t — time (flonum)
+;;;   q — generalised coordinates (flonum or up-tuple of flonums)
+;;;   p — conjugate momenta     (flonum or up-tuple of flonums)
+;;; ════════════════════════════════════════════════════════════
+
+;;; ── Internal helpers ──────────────────────────────────────────────────────
+
+;;; Integer list 0 .. n−1.
+(define (sv-iota n)
+  (let loop ((i (- n 1)) (acc '()))
+    (if (< i 0) acc (loop (- i 1) (cons i acc)))))
+
+;;; Element-wise binary op on two scalars-or-up-tuples of same shape.
+(define (sv-map2 f a b)
+  (if (tuple? a)
+      (apply up (map (lambda (i) (f (ref a i) (ref b i))) (sv-iota (dimension a))))
+      (f a b)))
+
+;;; Element-wise unary op on a scalar-or-up-tuple.
+(define (sv-map1 f a)
+  (if (tuple? a)
+      (apply up (map (lambda (i) (f (ref a i))) (sv-iota (dimension a))))
+      (f a)))
+
+;;; Scalar/tuple arithmetic.  Dispatch on operand type.
+(define (sv+ a b) (sv-map2 + a b))
+(define (sv- a b) (sv-map2 - a b))
+(define (sv* s x) (sv-map1 (lambda (xi) (* s xi)) x))
+
+;;; ── Finite-difference gradient ────────────────────────────────────────────
+
+(define sv-eps 1e-7)   ; central-difference step
+
+;;; Perturb component i of x (scalar or up-tuple) by eps.
+(define (sv-perturb x i eps)
+  (if (tuple? x)
+      (apply up (map (lambda (j) (if (= j i) (+ (ref x j) eps) (ref x j)))
+                     (sv-iota (dimension x))))
+      (+ x eps)))   ; scalar: i must be 0
+
+;;; Central-difference gradient of f: ℝⁿ → ℝ with respect to x.
+;;; Returns the same shape as x (scalar or up-tuple).
+(define (fd-grad f x)
+  (if (tuple? x)
+      (apply up
+        (map (lambda (i)
+               (/ (- (f (sv-perturb x i sv-eps))
+                     (f (sv-perturb x i (- sv-eps))))
+                  (* 2.0 sv-eps)))
+             (sv-iota (dimension x))))
+      (/ (- (f (+ x sv-eps)) (f (- x sv-eps)))
+         (* 2.0 sv-eps))))
+
+;;; ∂H/∂q at a Hamiltonian state — vary coordinate only.
+(define (sv-dH-dq H state)
+  (let ((t (time state)) (p (momentum state)))
+    (fd-grad (lambda (q) (H (up t q p))) (coordinate state))))
+
+;;; ∂H/∂p at a Hamiltonian state — vary momentum only.
+(define (sv-dH-dp H state)
+  (let ((t (time state)) (q (coordinate state)))
+    (fd-grad (lambda (p) (H (up t q p))) (momentum state))))
+
+;;; ── Störmer-Verlet symplectic step ───────────────────────────────────────
+;;;
+;;;   p_{n+1/2} = p_n       − (h/2) ∂H/∂q(t_n,   q_n,   p_n)
+;;;   q_{n+1}   = q_n       + h     ∂H/∂p(t_n,   q_n,   p_{n+1/2})
+;;;   p_{n+1}   = p_{n+1/2} − (h/2) ∂H/∂q(t_{n+1}, q_{n+1}, p_{n+1/2})
+;;;   t_{n+1}   = t_n       + h
+;;;
+;;; Two evaluations of ∂H/∂q and one of ∂H/∂p per step.
+;;; Time-reversible and volume-preserving by construction.
+
+(define (stoermer-verlet-step H dt state)
+  (let* ((h2    (* 0.5 (inexact dt)))
+         (t     (time state))
+         (q     (coordinate state))
+         (p     (momentum state))
+         ;; half-kick: update momentum by half a step
+         (p-mid (sv- p (sv* h2 (sv-dH-dq H state))))
+         ;; drift: advance position a full step using half-kicked momentum
+         (dtf   (inexact dt))
+         (q1    (sv+ q (sv* dtf (sv-dH-dp H (up t q p-mid)))))
+         (t1    (+ t dtf))
+         ;; half-kick: complete the momentum update
+         (p1    (sv- p-mid (sv* h2 (sv-dH-dq H (up t1 q1 p-mid))))))
+    (up t1 q1 p1)))
+
+;;; ── evolve-Hamiltonian ────────────────────────────────────────────────────
+
+;;; (evolve-Hamiltonian H state0 dt n-steps) → list of (up t q p)
+;;;
+;;; H      — Hamiltonian function  (up t q p) → real
+;;; state0 — initial state         (up t q p)
+;;; dt     — time step             (flonum, or exact converted to flonum)
+;;; n-steps — number of integration steps
+;;;
+;;; Returns a list of (n-steps + 1) states, including state0.
+;;; Uses the symplectic Störmer-Verlet integrator.
+
+(define (evolve-Hamiltonian H state0 dt n-steps)
+  (let ((dtf (inexact dt)))
+    (let loop ((i 0) (state state0) (acc (list state0)))
+      (if (>= i n-steps)
+          (reverse acc)
+          (let ((next (stoermer-verlet-step H dtf state)))
+            (loop (+ i 1) next (cons next acc)))))))
+
+;;; ── evolve-Lagrangian ─────────────────────────────────────────────────────
+
+;;; Convert a Lagrangian local tuple (up t q qdot) to a Hamiltonian
+;;; state (up t q p) by numerically computing p = ∂L/∂qdot.
+
+(define (lagrangian->hamiltonian-state L local)
+  (let* ((t    (time local))
+         (q    (coordinate local))
+         (qdot (velocity local))
+         (p    (fd-grad (lambda (v) (L (up t q v))) qdot)))
+    (up t q p)))
+
+;;; (evolve-Lagrangian L local0 dt n-steps) → list of (up t q p)
+;;;
+;;; L      — Lagrangian function   (up t q qdot) → real
+;;; local0 — initial local tuple   (up t q qdot)
+;;; dt     — time step
+;;; n-steps — number of steps
+;;;
+;;; Converts to Hamiltonian using Lagrangian->Hamiltonian (symbolic mass
+;;; extraction), then integrates symplectically.  Works for standard
+;;; T−V Lagrangians with diagonal kinetic energy (T = Σ ½ mᵢ qdotᵢ²).
+;;; Returns Hamiltonian states (up t q p).
+
+(define (evolve-Lagrangian L local0 dt n-steps)
+  (let ((H      (Lagrangian->Hamiltonian L))
+        (state0 (lagrangian->hamiltonian-state L local0)))
+    (evolve-Hamiltonian H state0 dt n-steps)))
+
+;;; ── Poincaré surface of section ───────────────────────────────────────────
+
+;;; (poincare-section H state0 dt n-steps) → list of (cons q₁ p₁)
+;;;
+;;; Evolves the system for n-steps and collects phase-space points at
+;;; each upward crossing of the section plane q₀ = 0 (i.e. whenever the
+;;; first coordinate component crosses zero from below).
+;;;
+;;; For a 2-DOF system with q = (up x y) and p = (up px py):
+;;;   section plane: x = 0 (upward crossing)
+;;;   recorded point: (y . py) at the interpolated crossing
+;;;
+;;; For a 1-DOF system (scalar q, p):
+;;;   records (q . p) at each upward zero crossing of q.
+;;;
+;;; Linear interpolation in t is used to locate the exact crossing.
+;;; Returns a list of (cons q1 p1) pairs; use (map car pts) / (map cdr pts)
+;;; to separate the two components.
+;;;
+;;; Typical use — Hénon-Heiles with low energy (regular) orbit:
+;;;   (poincare-section H-hh s0 0.005 20000)
+;;; yields a set of points lying on smooth invariant curves.
+;;; At higher energy (chaotic), points fill the available area.
+
+(define (poincare-section H state0 dt n-steps)
+  (let ((dtf (inexact dt)))
+    (let loop ((i 0) (state state0) (acc '()))
+      (if (>= i n-steps)
+          (reverse acc)
+          (let* ((next   (stoermer-verlet-step H dtf state))
+                 (q-cur  (coordinate state))
+                 (q-nxt  (coordinate next))
+                 ;; section coordinate: first component
+                 (q0-cur (if (tuple? q-cur) (ref q-cur 0) q-cur))
+                 (q0-nxt (if (tuple? q-nxt) (ref q-nxt 0) q-nxt))
+                 ;; upward zero crossing: q0 goes from negative to non-negative
+                 (cross? (and (< q0-cur 0.0) (>= q0-nxt 0.0))))
+            (loop (+ i 1) next
+                  (if (not cross?)
+                      acc
+                      ;; linear interpolation fraction to the exact crossing
+                      (let* ((frac   (/ (- q0-cur) (- q0-nxt q0-cur)))
+                             (p-cur  (momentum state))
+                             (p-nxt  (momentum next))
+                             ;; interpolated second component (or scalar)
+                             (q1     (if (tuple? q-cur)
+                                         (+ (ref q-cur 1)
+                                            (* frac (- (ref q-nxt 1) (ref q-cur 1))))
+                                         (+ q-cur (* frac (- q-nxt q-cur)))))
+                             (p1     (if (tuple? p-cur)
+                                         (+ (ref p-cur 1)
+                                            (* frac (- (ref p-nxt 1) (ref p-cur 1))))
+                                         (+ p-cur (* frac (- p-nxt p-cur))))))
+                        (cons (cons q1 p1) acc)))))))))
+

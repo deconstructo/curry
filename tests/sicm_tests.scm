@@ -504,6 +504,200 @@
   (check-num "wobbling-book |L|² conserved" L2-f L2-0 1e-5))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 28  evolve-Hamiltonian — 1-DOF harmonic oscillator
+;;; ════════════════════════════════════════════════════════════
+
+;;; H = p²/(2m) + ½kq²  (m=k=1 → ω=1, T=2π)
+(define (H-harmonic-1d m k)
+  (lambda (state)
+    (let ((q (coordinate state))
+          (p (momentum state)))
+      (+ (/ (* p p) (* 2.0 m))
+         (* 0.5 k q q)))))
+
+;;; Energy must be conserved to machine precision by symplectic integrator.
+(let* ((H      (H-harmonic-1d 1.0 1.0))
+       (s0     (up 0.0 1.0 0.0))
+       (E0     (H s0))
+       (states (evolve-Hamiltonian H s0 0.01 1000))
+       (EN     (H (car (reverse states)))))
+  (check-num "harmonic-1d energy conserved" EN E0 1e-5))
+
+;;; After one full period T=2π the state must return to its initial value.
+(let* ((pi     (acos -1.0))
+       (H      (H-harmonic-1d 1.0 1.0))
+       (s0     (up 0.0 1.0 0.0))
+       (dt     0.001)
+       (n      (exact (round (/ (* 2.0 pi) dt))))
+       (states (evolve-Hamiltonian H s0 dt n))
+       (sf     (car (reverse states))))
+  (check-num "harmonic-1d returns to q0 after period" (coordinate sf) 1.0 1e-3)
+  (check-num "harmonic-1d returns to p0 after period" (momentum sf)   0.0 1e-3))
+
+;;; Phase portrait: after half period, q should be negated.
+(let* ((pi     (acos -1.0))
+       (H      (H-harmonic-1d 1.0 1.0))
+       (s0     (up 0.0 1.0 0.0))
+       (dt     0.001)
+       (n      (exact (round (/ pi dt))))
+       (states (evolve-Hamiltonian H s0 dt n))
+       (sf     (car (reverse states))))
+  (check-num "harmonic-1d q negated at half period" (coordinate sf) -1.0 1e-3)
+  (check-num "harmonic-1d p≈0 at half period"       (momentum sf)    0.0 1e-3))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 29  evolve-Hamiltonian — nonlinear pendulum
+;;; ════════════════════════════════════════════════════════════
+
+;;; H = p²/(2m) − mg·cos(θ).  Energy must be bounded.
+(define (H-pendulum m g)
+  (lambda (state)
+    (let ((theta (coordinate state))
+          (p     (momentum state)))
+      (+ (/ (* p p) (* 2.0 m))
+         (* (- m) g (cos theta))))))
+
+(let* ((H      (H-pendulum 1.0 9.8))
+       (s0     (up 0.0 0.5 0.0))          ; small-angle IC
+       (E0     (H s0))
+       (states (evolve-Hamiltonian H s0 0.005 2000))
+       (EN     (H (car (reverse states)))))
+  (check-num "pendulum energy conserved (2000 steps)" EN E0 1e-4))
+
+;;; Large amplitude (θ₀ = 2.5 rad, close to separatrix): still conserved.
+(let* ((H      (H-pendulum 1.0 9.8))
+       (s0     (up 0.0 2.5 0.0))
+       (E0     (H s0))
+       (states (evolve-Hamiltonian H s0 0.001 5000))
+       (EN     (H (car (reverse states)))))
+  (check-num "pendulum energy conserved (large angle)" EN E0 1e-5))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 30  evolve-Hamiltonian — 2-DOF harmonic oscillator
+;;; ════════════════════════════════════════════════════════════
+
+;;; H = (px²+py²)/2 + ½(x²+y²)  (uncoupled isotropic, m=k=1)
+(define (H-harmonic-2d)
+  (lambda (state)
+    (let ((q  (coordinate state))
+          (p  (momentum state)))
+      (+ (* 0.5 (+ (* (ref p 0) (ref p 0)) (* (ref p 1) (ref p 1))))
+         (* 0.5 (+ (* (ref q 0) (ref q 0)) (* (ref q 1) (ref q 1))))))))
+
+(let* ((H      (H-harmonic-2d))
+       (s0     (up 0.0 (up 1.0 0.5) (up 0.0 1.0)))
+       (E0     (H s0))
+       (states (evolve-Hamiltonian H s0 0.01 500))
+       (EN     (H (car (reverse states)))))
+  (check-num "harmonic-2d energy conserved" EN E0 1e-5))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 31  evolve-Lagrangian
+;;; ════════════════════════════════════════════════════════════
+
+;;; L-harmonic (m=k=1): L = ½qdot² − ½q².  Initial q=1, qdot=0 → p=0.
+;;; Lagrangian and direct Hamiltonian paths must agree.
+(let* ((m       1.0) (k 1.0)
+       (L       (L-harmonic m k))
+       (local0  (up 0.0 1.0 0.0))        ; t=0, q=1, qdot=0
+       (dt      0.01)
+       (n       200)
+       ;; Hamiltonian path
+       (H       (H-harmonic-1d m k))
+       (states-H (evolve-Hamiltonian H (up 0.0 1.0 0.0) dt n))
+       ;; Lagrangian path (converts to H internally)
+       (states-L (evolve-Lagrangian L local0 dt n))
+       (sf-H    (car (reverse states-H)))
+       (sf-L    (car (reverse states-L))))
+  (check-num "evolve-Lagrangian q matches" (coordinate sf-L) (coordinate sf-H) 1e-5)
+  (check-num "evolve-Lagrangian p matches" (momentum sf-L)   (momentum sf-H)   1e-5))
+
+;;; lagrangian->hamiltonian-state: p = ∂L/∂qdot = m·qdot = 1·2 = 2 for qdot=2.
+(let* ((L   (L-harmonic 1.0 1.0))
+       (loc (up 0.0 0.5 2.0))
+       (hs  (lagrangian->hamiltonian-state L loc)))
+  (check-num "lagrangian->hamiltonian-state p=m·qdot"
+             (momentum hs) 2.0 1e-6))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 32  Hénon-Heiles: energy conservation
+;;; ════════════════════════════════════════════════════════════
+
+;;; H = ½(px²+py²) + ½(x²+y²) + x²y − ⅓y³
+;;; Integrable below E≈1/12, chaotic above E≈1/6.
+
+(define (H-henon-heiles)
+  (lambda (state)
+    (let* ((q  (coordinate state))
+           (p  (momentum state))
+           (x  (ref q 0)) (y  (ref q 1))
+           (px (ref p 0)) (py (ref p 1)))
+      (+ (* 0.5 (+ (* px px) (* py py)))
+         (* 0.5 (+ (* x x) (* y y)))
+         (* x x y)
+         (* (/ -1.0 3.0) y y y)))))
+
+;;; Regular regime E=1/24.
+(let* ((H   (H-henon-heiles))
+       (E0  (/ 1.0 24.0))
+       ;; IC: x=0, y=0, px=0, py=sqrt(2E) — on the energy surface
+       (py0 (sqrt (* 2.0 E0)))
+       (s0  (up 0.0 (up 0.0 0.0) (up 0.0 py0)))
+       (states (evolve-Hamiltonian H s0 0.005 4000))
+       (EN  (H (car (reverse states)))))
+  (check-num "Henon-Heiles energy conserved E=1/24" EN E0 1e-5))
+
+;;; Mid-energy regime E=1/12 (onset of chaos).
+(let* ((H   (H-henon-heiles))
+       (E0  (/ 1.0 12.0))
+       (py0 (sqrt (* 2.0 E0)))
+       (s0  (up 0.0 (up 0.0 0.0) (up 0.0 py0)))
+       (states (evolve-Hamiltonian H s0 0.005 4000))
+       (EN  (H (car (reverse states)))))
+  (check-num "Henon-Heiles energy conserved E=1/12" EN E0 1e-4))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 33  Poincaré section
+;;; ════════════════════════════════════════════════════════════
+
+;;; Regular orbit should produce crossings (non-empty section).
+;;; IC: x=0.2, y=0, py=0; px from energy conservation.
+;;; V(0.2,0) = ½(0.04+0)+0-0 = 0.02; E=1/12 → px=sqrt(2*(E-V)).
+(let* ((H    (H-henon-heiles))
+       (E0   (/ 1.0 12.0))
+       (V0   0.02)
+       (px0  (sqrt (* 2.0 (- E0 V0))))
+       (s0   (up 0.0 (up 0.2 0.0) (up px0 0.0)))
+       (pts  (poincare-section H s0 0.005 15000)))
+  (check "poincare section non-empty" (> (length pts) 0) #t))
+
+;;; All recorded y values should stay within the energy-bounded region.
+;;; For E=1/12 the accessible region has |y| < ~0.8.
+(let* ((H    (H-henon-heiles))
+       (E0   (/ 1.0 12.0))
+       (V0   0.02)
+       (px0  (sqrt (* 2.0 (- E0 V0))))
+       (s0   (up 0.0 (up 0.2 0.0) (up px0 0.0)))
+       (pts  (poincare-section H s0 0.005 15000)))
+  (check "poincare section y bounded"
+         (let lp ((ps pts))
+           (or (null? ps)
+               (and (< (abs (car (car ps))) 0.8)
+                    (lp (cdr ps)))))
+         #t))
+
+;;; stoermer-verlet-step: one explicit step of the pendulum.
+;;; p should decrease (gravity pulling θ towards 0).
+(let* ((H     (H-pendulum 1.0 9.8))
+       (s0    (up 0.0 0.5 0.0))      ; θ=0.5, p=0
+       (s1    (stoermer-verlet-step H 0.01 s0)))
+  (check "stoermer-verlet-step advances time"
+         (> (time s1) (time s0)) #t)
+  (check-num "stoermer-verlet-step t" (time s1) 0.01 1e-12)
+  ;; p should become negative: pendulum pulls θ toward 0
+  (check "stoermer-verlet-step p sign" (< (momentum s1) 0.0) #t))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
