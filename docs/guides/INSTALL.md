@@ -18,13 +18,12 @@ Optional modules can be enabled at install time with `--with-*` flags:
 ```bash
 brew install deconstructo/curry/curry --with-qt6       # Qt6 GUI + canvas
 brew install deconstructo/curry/curry --with-plplot    # scientific plotting
-brew install deconstructo/curry/curry --with-symengine # SymEngine CAS backend
 brew install deconstructo/curry/curry --with-neo4j     # Neo4j client
 brew install deconstructo/curry/curry --with-graphql   # GraphQL HTTP client
 
 # All of the above at once
 brew install deconstructo/curry/curry \
-  --with-qt6 --with-plplot --with-symengine --with-neo4j --with-graphql
+  --with-qt6 --with-plplot --with-neo4j --with-graphql
 ```
 
 To install the latest development build straight from the `main` branch:

@@ -79,7 +79,7 @@ Curry has three layers:
 
 **Standard modules** — separate `.so` or `.scm` files that are always installed alongside the interpreter. Import with `(import (curry name))`. These are: `json`, `network`, `redis`, `regex`, `sync`, `sqlite`, `mcp`, `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ode`, `pde`, `pde-symbolic`.
 
-**Optional modules** — built only when the required external library is present at compile time (or when the Homebrew formula is installed with `--with-*`). These are: `qt6` (GUI and 2D graphics), `plplot` (scientific plotting), `symengine` (SymEngine CAS backend), `neo4j` (graph database), `mqtt` (messaging), `vecdb` (approximate nearest neighbours).
+**Optional modules** — built only when the required external library is present at compile time (or when the Homebrew formula is installed with `--with-*`). These are: `qt6` (GUI and 2D graphics), `plplot` (scientific plotting), `neo4j` (graph database), `mqtt` (messaging), `vecdb` (approximate nearest neighbours).
 
 Module documentation lives in separate files; see [the module docs](#module-reference).
 
@@ -91,9 +91,9 @@ Module documentation lives in separate files; see [the module docs](#module-refe
 |------|---------|--------|
 | Core (always in scope) | numeric tower, CAS, actors, I/O, R7RS base | no import needed |
 | Standard | `json` `network` `redis` `regex` `sync` `sqlite` `mcp` `crypto` `ldap` `storage` `graphql` `image` `git` `ode` `pde` `pde-symbolic` | `(import (curry name))` |
-| Optional (build flag / brew option) | `qt6` `plplot` `symengine` `neo4j` `mqtt` `vecdb` | `(import (curry name))` |
+| Optional (build flag / brew option) | `qt6` `plplot` `neo4j` `mqtt` `vecdb` | `(import (curry name))` |
 
-Trying to import a module that was not built raises an error. The Homebrew formula enables all standard modules and accepts `--with-qt6`, `--with-plplot`, `--with-symengine`, `--with-neo4j`, `--with-mqtt` at install time.
+Trying to import a module that was not built raises an error. The Homebrew formula enables all standard modules and accepts `--with-qt6`, `--with-plplot`, `--with-neo4j`, `--with-mqtt` at install time.
 
 ---
 
