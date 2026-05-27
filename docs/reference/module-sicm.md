@@ -1,6 +1,6 @@
 # Module: `(curry sicm)`
 
-*v0.8.17 — 2026-05-23*
+*v0.9.0 — 2026-05-27*
 
 Structure and Interpretation of Classical Mechanics — symbolic mechanics on top of Curry's CAS. Procedure names follow Sussman & Wisdom, *SICM* 2nd ed. (MIT Press). Includes a scmutils compatibility shim so most Ch 1 examples run with minimal adaptation.
 
@@ -240,12 +240,187 @@ A Hamiltonian state is `(up t q p)`.
 ; => 1
 ```
 
+## Rigid body mechanics (Ch 2)
+
+Matrices are represented as lists of rows, each a list of three elements.
+
+### Rotation matrix
+
+```scheme
+; ZXZ Euler angles (φ, θ, ψ) → 3×3 rotation matrix R = Rz(φ)·Rx(θ)·Rz(ψ)
+(rotation-matrix-from-Euler phi theta psi)
+```
+
+### Angular velocity
+
+```scheme
+; Angular velocity in body frame from Euler-angle local tuple
+; local = (up t (up φ θ ψ) (up φ̇ θ̇ ψ̇))
+; Returns (up ω₁ ω₂ ω₃) in principal-axis coordinates.
+(Euler->omega-body local)
+
+; Angular velocity in space frame
+(Euler->omega-space local)
+```
+
+### Kinetic energy and Lagrangian
+
+```scheme
+; T = ½(A·ω₁² + B·ω₂² + C·ω₃²)  — principal moments A, B, C
+(T-rigid-body A B C)   ; local → kinetic energy
+
+; Torque-free Lagrangian L = T  (same function, different name)
+(L-rigid-body A B C)
+```
+
+### Matrix helpers
+
+```scheme
+(mat-ref      M i j)   ; element access (0-based)
+(mat-transpose M)      ; 3×3 transpose
+(mat-vec-mul   M v)    ; 3×3 × 3-list → 3-list
+(mat-mat-mul  M1 M2)   ; 3×3 × 3×3 → 3×3
+```
+
+### Angle normalisation
+
+```scheme
+; Reduce angle x to (−xmax, xmax].
+((principal-value xmax) x)
+
+; Example: normalise to (−π, π]
+(define norm (principal-value (acos -1.0)))
+(norm (* 3.0 (acos -1.0)))   ; => π
+```
+
+### Example — torque-free symmetric top
+
+```scheme
+(import (curry sicm))
+(import (curry ode))
+
+(define (euler-rhs A B C)
+  (lambda (t omega)
+    (list (/ (* (- B C) (list-ref omega 1) (list-ref omega 2)) A)
+          (/ (* (- C A) (list-ref omega 2) (list-ref omega 0)) B)
+          (/ (* (- A B) (list-ref omega 0) (list-ref omega 1)) C))))
+
+; Symmetric top A=B=1, C=2: ω₃ is conserved.
+(define omega-fin
+  (ode-rk4 (euler-rhs 1.0 1.0 2.0) '(0.1 0.0 1.0) 0.0 10.0 0.01))
+(list-ref omega-fin 2)   ; => ≈ 1.0  (conserved)
+```
+
+---
+
+## Numerical trajectory evolution (Ch 3–4)
+
+Uses a **symplectic Störmer-Verlet** (leapfrog) integrator. Unlike plain RK4, the
+symplectic integrator preserves the phase-space volume form, so energy error
+is bounded O(h²) rather than drifting secularly. Essential for Poincaré
+sections and any long-run integration.
+
+State representation: `(up t q p)` where `q` and `p` are either flonums
+(1-DOF) or up-tuples of flonums (multi-DOF). Gradients ∂H/∂q and ∂H/∂p
+are computed by central finite differences, so `H` can be any Scheme
+function returning a real number — no symbolic form required.
+
+### Integration
+
+```scheme
+; Integrate H for n-steps starting from state0.
+; Returns a list of (n-steps + 1) states including state0.
+(evolve-Hamiltonian H state0 dt n-steps)
+
+; Convert Lagrangian initial tuple (up t q qdot) to (up t q p),
+; build H via Lagrangian->Hamiltonian, then call evolve-Hamiltonian.
+; Works for standard T−V Lagrangians with diagonal kinetic energy.
+(evolve-Lagrangian L local0 dt n-steps)
+
+; Single step — useful for custom integration loops.
+(stoermer-verlet-step H dt state)    ; → (up t q p)
+```
+
+### State conversion
+
+```scheme
+; Numerically compute p = ∂L/∂qdot and return (up t q p).
+(lagrangian->hamiltonian-state L local)
+```
+
+### Poincaré surface of section
+
+```scheme
+; Collect phase-space points at upward crossings of q₀ = 0.
+; Returns a list of (cons q₁ p₁) pairs.
+; For 1-DOF: records (cons q p) at each upward zero crossing of q.
+(poincare-section H state0 dt n-steps)
+```
+
+### Example — harmonic oscillator
+
+```scheme
+(import (curry sicm))
+
+(define (H-ho m k)
+  (lambda (state)
+    (+ (/ (* (momentum   state) (momentum   state)) (* 2.0 m))
+       (* 0.5 k (coordinate state) (coordinate state)))))
+
+(define H  (H-ho 1.0 1.0))
+(define s0 (up 0.0 1.0 0.0))        ; t=0, q=1, p=0
+
+; Integrate for 2π seconds (one period)
+(define pi (acos -1.0))
+(define states (evolve-Hamiltonian H s0 0.001 (exact (round (/ (* 2 pi) 0.001)))))
+
+; Energy is conserved to O(h²) ≈ 1e-6
+(H s0)                               ; => 0.5
+(H (car (reverse states)))           ; => ≈ 0.5
+```
+
+### Example — Hénon-Heiles Poincaré section
+
+```scheme
+(define (H-hh)
+  (lambda (state)
+    (let* ((q (coordinate state)) (p (momentum state))
+           (x (ref q 0)) (y (ref q 1))
+           (px (ref p 0)) (py (ref p 1)))
+      (+ (* 0.5 (+ (* px px) (* py py)))
+         (* 0.5 (+ (* x x) (* y y)))
+         (* x x y)
+         (* (/ -1.0 3.0) y y y)))))
+
+; IC on the energy surface E=1/12, starts off the y-axis so x oscillates.
+(define E (/ 1.0 12.0))
+(define s0 (up 0.0 (up 0.2 0.0) (up (sqrt (* 2.0 (- E 0.02))) 0.0)))
+
+; Collect ~50 crossings of x=0 over 15000 steps.
+(define pts (poincare-section (H-hh) s0 0.005 15000))
+
+; pts is a list of (y . py) pairs lying on invariant curves.
+(length pts)   ; => O(50) for regular orbit
+```
+
+### Notes on accuracy
+
+- Energy error is O(h²) per step and bounded (does not grow with time).
+  For h=0.01 expect |ΔE/E| ≲ 10⁻⁵ over thousands of steps.
+- Gradients use central differences with step ε = 10⁻⁷. For ill-conditioned
+  Hamiltonians with very small or very large scales, adjust `sv-eps` in the
+  module source.
+- `evolve-Lagrangian` requires `Lagrangian->Hamiltonian` to succeed symbolically.
+  This works for any Lagrangian of the form T(qdot) − V(q) with diagonal T.
+
+---
+
 ## Coverage by chapter
 
 | Chapter | Status |
 |---|---|
 | Ch 1 — Lagrangian mechanics | ✓ Complete |
-| Ch 2 — Rigid body mechanics | Planned (Phase 12) |
-| Ch 3–4 — Numerical integration | Planned (Phase 13) |
+| Ch 2 — Rigid body mechanics | ✓ Complete |
+| Ch 3–4 — Numerical trajectory evolution | ✓ Complete |
 | Ch 5 — Canonical transformations | Planned (Phase 14) |
-| Ch 6–7 — Perturbation theory | Planned (Phase 15) |
+| Ch 6–7 — Perturbation theory / Lie transforms | Planned (Phase 15) |
