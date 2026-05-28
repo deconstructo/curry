@@ -33,6 +33,10 @@
 ;;; Canonical transformations (Ch 5):
 ;;;   ct-jacobian  symplectic-transform?  canonical?
 ;;;   F->C  F2->CT  rectangular->polar  action-angle
+;;;
+;;; Lie transforms and perturbation theory (Ch 6–7):
+;;;   pb  Lie-derivative  Lie-transform
+;;;   secular-average  secular-perturbation
 
 (import (scheme base))
 (import (scheme inexact))
@@ -939,3 +943,119 @@
            (theta (atan (- p) (* omega q))))
       (up (time state) theta I))))
 
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 15  Lie transforms and first-order perturbation theory
+;;;        (SICM Ch 6–7)
+;;;
+;;; Public: pb  Lie-derivative  Lie-transform
+;;;         secular-average  secular-perturbation
+;;; ════════════════════════════════════════════════════════════
+
+;;; Finite-difference step for Lie-derivative Poisson bracket.
+;;; Larger than sv-eps (1e-7) to keep k=2 nested-difference errors
+;;; below ~1e-4.  Optimal for double precision: sqrt(eps_mach*|H|) ≈ 1e-5.
+(define lie-eps 1e-5)
+
+;;; Dot product of two scalars or up-tuples of the same shape.
+(define (pb-dot a b)
+  (if (tuple? a)
+      (let lp ((i 0) (s 0.0))
+        (if (= i (dimension a)) s
+            (lp (+ i 1) (+ s (* (ref a i) (ref b i))))))
+      (* a b)))
+
+;;; ∂f/∂q at state using lie-eps (scalar or up-tuple result).
+(define (pb-grad-q f state)
+  (let* ((t (time state)) (q (coordinate state)) (p (momentum state)))
+    (if (tuple? q)
+        (apply up
+          (map (lambda (i)
+                 (/ (- (f (up t (sv-perturb q i lie-eps) p))
+                       (f (up t (sv-perturb q i (- lie-eps)) p)))
+                    (* 2.0 lie-eps)))
+               (sv-iota (dimension q))))
+        (/ (- (f (up t (+ q lie-eps) p))
+              (f (up t (- q lie-eps) p)))
+           (* 2.0 lie-eps)))))
+
+;;; ∂f/∂p at state using lie-eps (scalar or up-tuple result).
+(define (pb-grad-p f state)
+  (let* ((t (time state)) (q (coordinate state)) (p (momentum state)))
+    (if (tuple? p)
+        (apply up
+          (map (lambda (i)
+                 (/ (- (f (up t q (sv-perturb p i lie-eps)))
+                       (f (up t q (sv-perturb p i (- lie-eps)))))
+                    (* 2.0 lie-eps)))
+               (sv-iota (dimension p))))
+        (/ (- (f (up t q (+ p lie-eps)))
+              (f (up t q (- p lie-eps))))
+           (* 2.0 lie-eps)))))
+
+;;; Numerical Poisson bracket {f, g}(state) = Σᵢ (∂f/∂qᵢ ∂g/∂pᵢ − ∂f/∂pᵢ ∂g/∂qᵢ).
+;;; f, g: (up t q p) → real.  Uses lie-eps central differences.
+;;; Accurate for single applications; nested use (k≥3) accumulates noise.
+(define (pb f g)
+  (lambda (state)
+    (- (pb-dot (pb-grad-q f state) (pb-grad-p g state))
+       (pb-dot (pb-grad-p f state) (pb-grad-q g state)))))
+
+;;; Lie derivative operator along the Hamiltonian vector field of W.
+;;; Returns an operator: given f, produces the function {f, W}.
+;;; ((Lie-derivative W) f)(state) = {f, W}(state)
+(define (Lie-derivative W)
+  (lambda (f)
+    (pb f W)))
+
+;;; Lie series exp(ε L_W) applied to f, evaluated at state.
+;;; Computes Σ_{k=0}^{n-1} (ε^k / k!) (L_W^k f)(state).
+;;; Default n-terms = 8.
+;;;
+;;; Accuracy notes:
+;;;   k=0,1: error O(lie-eps²) ≈ 1e-10 — highly accurate.
+;;;   k=2:   nested FD error O(lie-eps^(-1) · eps_machine · |f|) ≈ 1e-4.
+;;;   k≥3:   errors amplify rapidly; use small ε or truncate early.
+;;; Best practice: choose W so the series terminates at k≤2, or use
+;;; small enough ε that higher terms are negligible.
+(define (Lie-transform W epsilon . rest)
+  (let ((n-terms (if (null? rest) 8 (car rest))))
+    (lambda (f)
+      (lambda (state)
+        (let loop ((Lkf f) (k 0) (coeff 1.0) (acc 0.0))
+          (if (>= k n-terms)
+              acc
+              (loop ((Lie-derivative W) Lkf)
+                    (+ k 1)
+                    (* coeff (/ (inexact epsilon) (+ k 1)))
+                    (+ acc (* coeff (Lkf state))))))))))
+
+;;; ── Secular averaging ─────────────────────────────────────────────────────
+
+;;; Angle-average <f>(I) = (1/(2π)) ∫₀^{2π} f(up t θ I) dθ.
+;;; f-aa: function of action-angle state (up t theta I).
+;;; Uses the trapezoidal rule with n-pts quadrature points (default 64).
+;;; Exact for any Fourier mode cos(nθ) or sin(nθ) with n < n-pts/2
+;;; (exploits the DFT cancellation property of equispaced nodes).
+(define (secular-average f-aa . rest)
+  (let ((n-pts (if (null? rest) 64 (car rest))))
+    (lambda (state)
+      (let* ((I   (momentum state))
+             (t   (time state))
+             (dth (/ (* 2.0 (acos -1.0)) n-pts)))
+        (/ (let lp ((j 0) (s 0.0))
+             (if (= j n-pts) s
+                 (lp (+ j 1)
+                     (+ s (f-aa (up t (* j dth) I))))))
+           n-pts)))))
+
+;;; First-order secular perturbation.
+;;; For H = H0(I) + epsilon * H1(theta, I) in action-angle coordinates,
+;;; returns the angle-averaged Hamiltonian H0(I) + epsilon * <H1>(I).
+;;;
+;;; H0, H1: (up t theta I) → real.
+;;; Returns a function of the same form.
+(define (secular-perturbation H0 H1 epsilon . rest)
+  (let ((avg-H1 (apply secular-average H1 rest)))
+    (lambda (state)
+      (+ (H0 state) (* (inexact epsilon) (avg-H1 state))))))

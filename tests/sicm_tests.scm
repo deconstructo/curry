@@ -816,6 +816,115 @@
   (check "composition of canonical CTs is canonical" (canonical? C12 s0) #t))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; §35  Lie transforms and perturbation theory (Ch 6–7)
+;;; ════════════════════════════════════════════════════════════
+
+;;; ── Numerical Poisson bracket ────────────────────────────────────────────
+
+;;; Canonical relation: {q, p} = 1.
+(let* ((q-fn (lambda (s) (coordinate s)))
+       (p-fn (lambda (s) (momentum s)))
+       (s0   (up 0.0 1.5 2.5)))
+  (check-num "pb {q,p}=1"  ((pb q-fn p-fn) s0)  1.0 1e-5)
+  (check-num "pb {p,q}=-1" ((pb p-fn q-fn) s0) -1.0 1e-5))
+
+;;; Self-bracket vanishes: {H, H} = 0.
+(let* ((H  (lambda (s)
+              (+ (* 0.5 (momentum s) (momentum s))
+                 (* 0.5 (coordinate s) (coordinate s)))))
+       (s0 (up 0.0 1.0 2.0)))
+  (check-num "pb {H,H}=0" ((pb H H) s0) 0.0 1e-8))
+
+;;; ── Lie derivative ───────────────────────────────────────────────────────
+
+;;; Free particle H = ½p²: L_H q = {q, H} = p.
+(let* ((H  (lambda (s) (* 0.5 (momentum s) (momentum s))))
+       (q  (lambda (s) (coordinate s)))
+       (LD ((Lie-derivative H) q))
+       (s0 (up 0.0 1.5 2.5)))
+  (check-num "Lie-derivative L_H q = p" (LD s0) (momentum s0) 1e-5))
+
+;;; ── Lie-transform series ─────────────────────────────────────────────────
+
+;;; Generator W = p (coordinate momentum function).
+;;; {H, p} = ω²q; {ω²q, p} = ω²; {ω², p} = 0 — series terminates at k=2.
+;;; exp(ε L_p) H(q,p) = H(q+ε, p) exactly.
+;;; Use n-terms=3 (k=0,1,2) to avoid nested-FD noise at k≥3.
+(let* ((omega 1.0)
+       (eps   0.3)
+       (H     (lambda (s)
+                (+ (* 0.5 (momentum s) (momentum s))
+                   (* 0.5 omega omega (coordinate s) (coordinate s)))))
+       (p-fn  (lambda (s) (momentum s)))
+       (s0    (up 0.0 1.0 2.0))
+       (LT-H  ((Lie-transform p-fn eps 3) H))   ; n-terms=3: k=0..2 only
+       ;; Expected: H(q+eps, p)
+       (q+e   (+ (coordinate s0) eps))
+       (p     (momentum s0))
+       (expected (+ (* 0.5 p p) (* 0.5 omega omega q+e q+e))))
+  (check-num "Lie-transform exp(ε L_p) H = H(q+ε,p)" (LT-H s0) expected 1e-3))
+
+;;; Generator W = q (coordinate function).
+;;; L_q H = {H, q} = -p; L_q² H = {-p, q} = 1; L_q³ H = 0.
+;;; exp(ε L_q) H(q,p) = ½p² - εp + ε²/2 exactly (free particle H = ½p²).
+;;; Use n-terms=3 (k=0,1,2) to avoid nested-FD noise at k≥3.
+(let* ((eps   0.2)
+       (H     (lambda (s) (* 0.5 (momentum s) (momentum s))))
+       (q-fn  (lambda (s) (coordinate s)))
+       (s0    (up 0.0 1.5 3.0))
+       (LT-H  ((Lie-transform q-fn eps 3) H))   ; n-terms=3: k=0..2 only
+       (p     (momentum s0))
+       (expected (+ (* 0.5 p p) (* -1.0 eps p) (* 0.5 eps eps))))
+  (check-num "Lie-transform exp(ε L_q) H = ½p²-εp+ε²/2" (LT-H s0) expected 1e-6))
+
+;;; Free particle: exp(ε L_H) q = q + εp (series terminates at k=1).
+;;; L_H q = p; L_H² q = {p, H} = 0.
+(let* ((eps  0.5)
+       (H    (lambda (s) (* 0.5 (momentum s) (momentum s))))
+       (q-fn (lambda (s) (coordinate s)))
+       (s0   (up 0.0 1.5 2.0))
+       (LT-q ((Lie-transform H eps 8) q-fn))
+       (expected (+ (coordinate s0) (* eps (momentum s0)))))
+  (check-num "Lie-transform free particle exp(ε L_H) q = q+εp" (LT-q s0) expected 1e-5))
+
+;;; ── Secular averaging ────────────────────────────────────────────────────
+
+;;; <cos θ> = 0: n=64 points, exact for frequency 1 < 32.
+(let* ((cos-f   (lambda (s) (cos (coordinate s))))
+       (avg-cos (secular-average cos-f 64))
+       (s0      (up 0.0 0.0 1.5)))  ; t=0, θ=0 (ignored), I=1.5
+  (check-num "secular-average <cos θ>=0" (avg-cos s0) 0.0 1e-10))
+
+;;; <I²> = I²: momentum is angle-independent, passes through exactly.
+(let* ((I-sq-f (lambda (s) (* (momentum s) (momentum s))))
+       (avg    (secular-average I-sq-f 64))
+       (I      2.5)
+       (s0     (up 0.0 0.0 I)))
+  (check-num "secular-average <I²>=I²" (avg s0) (* I I) 1e-10))
+
+;;; ── Secular perturbation ─────────────────────────────────────────────────
+
+;;; H0 = I, H1 = I² (angle-independent).  H_sec = I + ε·I².
+(let* ((H0    (lambda (s) (momentum s)))
+       (H1    (lambda (s) (* (momentum s) (momentum s))))
+       (eps   0.1)
+       (H-sec (secular-perturbation H0 H1 eps 64))
+       (I     2.5)
+       (s0    (up 0.0 1.0 I)))
+  (check-num "secular-perturbation H0+ε<I²>"
+             (H-sec s0) (+ I (* eps I I)) 1e-8))
+
+;;; H1 = cos(2θ) averages to 0: H_sec = H0 = I.
+(let* ((H0    (lambda (s) (momentum s)))
+       (H1    (lambda (s) (cos (* 2.0 (coordinate s)))))
+       (eps   0.1)
+       (H-sec (secular-perturbation H0 H1 eps 64))
+       (I     2.5)
+       (s0    (up 0.0 1.0 I)))
+  (check-num "secular-perturbation <cos 2θ>=0 => H_sec=I"
+             (H-sec s0) I 1e-10))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
