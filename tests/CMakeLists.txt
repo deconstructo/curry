@@ -68,7 +68,12 @@ if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
 endif()
 
 if(BUILD_MODULE_RPI AND TARGET curry_rpi)
-    add_test(NAME rpi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_rpi.scm)
+    # rpi_tests.scm: hardware-free simulation tests + API surface check (Linux)
+    add_test(NAME rpi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rpi_tests.scm)
     set_tests_properties(rpi PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    # test_rpi.scm: smoke tests that open real device nodes (skipped if absent)
+    add_test(NAME rpi_hw COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_rpi.scm)
+    set_tests_properties(rpi_hw PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()

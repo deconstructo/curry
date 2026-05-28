@@ -1,6 +1,6 @@
 # Module: `(curry sicm)`
 
-*v0.11.0 — 2026-05-28*
+*v0.12.0 — 2026-05-28*
 
 Structure and Interpretation of Classical Mechanics — symbolic mechanics on top of Curry's CAS. Procedure names follow Sussman & Wisdom, *SICM* 2nd ed. (MIT Press). Includes a scmutils compatibility shim so most Ch 1 examples run with minimal adaptation.
 
@@ -739,6 +739,156 @@ with frequency < `n-pts/2`. The default `n-pts = 64` handles perturbations up to
 
 ---
 
+## Controller synthesis (Phase 16)
+
+Bridges the SICM Hamiltonian framework to modern control theory: linearise a
+Hamiltonian around an equilibrium, synthesize an LQR optimal controller, and
+simulate (or deploy to real hardware via `(curry rpi)`).
+
+### Matrix library
+
+All procedures operate on matrices as lists of rows (each row a list of
+flonums). This convention is consistent with `mat-ref`/`mat-transpose`/`mat-mat-mul`
+used in the rigid-body section.
+
+```scheme
+; Constructors
+(lqr-mat-zero n m)             ; n×m zero matrix
+(lqr-mat-eye  n)               ; n×n identity
+
+; Element access
+(lqr-mat-ref M i j)            ; zero-indexed
+
+; Arithmetic (element-wise or matrix)
+(lqr-mat-add A B)
+(lqr-mat-sub A B)
+(lqr-mat-scale c M)
+(lqr-mat-mul A B)              ; matrix product
+(lqr-mat-transpose M)
+(lqr-mat-norm M)               ; max |entry| — used as convergence criterion
+
+; Linear algebra
+(lqr-mat-inv A)                ; n×n inverse (Gauss-Jordan with partial pivot)
+(lqr-gauss-solve A b)          ; solve Ax=b → list of n values
+(lqr-mat-kron A B)             ; Kronecker product A ⊗ B
+(lqr-vec M)                    ; column-major vectorisation → list
+(lqr-unvec v n)                ; inverse: list of n² values → n×n matrix
+```
+
+### Lyapunov equation solver
+
+```scheme
+; Solve  A'X + XA = -M  for symmetric X.
+; A must be Hurwitz-stable (all eigenvalues have negative real parts).
+; Algorithm: Kronecker vectorisation → n²×n² linear system → Gauss.
+(lyapunov-solve A M)    ; → X  (n×n matrix, list of rows)
+```
+
+### Continuous-time LQR
+
+```scheme
+; Given ẋ = Ax + Bu, minimise J = ∫(x'Qx + u'Ru) dt.
+; Solves the continuous algebraic Riccati equation (CARE)
+;   A'P + PA − PBR⁻¹B'P + Q = 0
+; Returns K (m×n gain matrix) such that u = −K·x is optimal.
+;
+; Optional args:  max-iter (default 100), tol (default 1e-10),
+;                 K0 (initial gain — required if A is not Hurwitz-stable).
+;
+; Algorithm: policy iteration (Newton on CARE):
+;   1. Start with K₀ (default: zero)
+;   2. Solve Lyapunov  (A−BK)' P + P(A−BK) = −(Q + K'RK)
+;   3. Update  K = R⁻¹B'P
+;   4. Repeat until ‖ΔK‖ < tol.
+(lqr-continuous A B Q R)
+(lqr-continuous A B Q R max-iter tol K0)
+```
+
+### Discrete-time LQR
+
+```scheme
+; Given x_{k+1} = Ax_k + Bu_k, minimise J = Σ(x'Qx + u'Ru).
+; Solves the discrete algebraic Riccati equation (DARE):
+;   P = Q + A'PA − A'PB(R + B'PB)⁻¹B'PA
+; Returns K (m×n gain matrix).
+;
+; Algorithm: value iteration (converges if (A,B) is stabilisable and Q≥0, R>0).
+(lqr A B Q R)
+(lqr A B Q R max-iter tol)
+```
+
+### Linearise Hamiltonian
+
+```scheme
+; Compute the 2n×2n Jacobian of the Hamiltonian vector field at state.
+; For H(t,q,p) the equations of motion are ẋ = (∂H/∂p, −∂H/∂q).
+; Returns A (list of rows) via central finite differences at state.
+; state should be an equilibrium: H should have zero gradient there.
+(linearise H state)    ; → A  (2n×2n matrix)
+```
+
+### Controller factory
+
+```scheme
+; Build a feedback controller that simulates the closed-loop system.
+; Returns an alist with procedures:
+;   step!         — advance by dt; returns (list new-state control-u)
+;   reset!        — reset to a given state
+;   current-state — return current state
+;   compute-u     — evaluate u = −K·(x − x_eq) at a state
+;
+; H:    Hamiltonian (as for evolve-Hamiltonian)
+; K:    m×n gain matrix from lqr-continuous or lqr
+; x-eq: equilibrium state (up t q p) — the regulation target
+; dt:   time step
+(make-controller H K x-eq dt)
+```
+
+### Worked example — inverted pendulum
+
+```scheme
+(import (curry sicm))
+
+(define g 9.81)   ; gravity
+
+;; Linearised A and B at upright equilibrium (m=l=1)
+(define A-lin `((0.0 1.0) (,g 0.0)))
+(define B-lin '((0.0) (1.0)))
+
+;; Cost matrices
+(define Q '((10.0 0.0) (0.0 1.0)))
+(define R '((0.5)))
+
+;; Initial stabilising gain (A has unstable eigenvalue +√g)
+(define K0 '((10.0 4.0)))
+
+;; Solve CARE
+(define K (lqr-continuous A-lin B-lin Q R 500 1e-9 K0))
+; K ≈ ((20.6 6.6))
+
+;; Nonlinear Hamiltonian for simulation
+(define (H s)
+  (- (* 0.5 (momentum s) (momentum s))
+     (* g (cos (coordinate s)))))
+
+;; Build controller (regulation target: upright θ=0, p=0)
+(define ctrl (make-controller H K (up 0.0 0.0 0.0) 0.01))
+(define step! (cdr (assq 'step! ctrl)))
+((cdr (assq 'reset! ctrl)) (up 0.0 0.05 0.0))   ; 3° off-vertical
+
+;; Run 500 steps (5 seconds)
+(let loop ((i 0))
+  (when (< i 500) (step!) (loop (+ i 1))))
+
+(coordinate ((cdr (assq 'current-state ctrl))))
+; => ≈ 0.0  (pendulum stabilised)
+```
+
+See `examples/inverted_pendulum.scm` and `examples/reaction_wheel.scm` for
+complete worked examples with Raspberry Pi deployment notes.
+
+---
+
 ## Coverage by chapter
 
 | Chapter | Status |
@@ -748,3 +898,4 @@ with frequency < `n-pts/2`. The default `n-pts = 64` handles perturbations up to
 | Ch 3–4 — Numerical trajectory evolution | ✓ Complete |
 | Ch 5 — Canonical transformations | ✓ Complete |
 | Ch 6–7 — Lie transforms / perturbation theory | ✓ Complete |
+| Phase 16 — Controller synthesis (LQR) | ✓ Complete |

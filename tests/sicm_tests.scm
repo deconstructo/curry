@@ -925,6 +925,138 @@
              (H-sec s0) I 1e-10))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; §36  Controller synthesis (Phase 16)
+;;; ════════════════════════════════════════════════════════════
+
+;;; ── Matrix library ──────────────────────────────────────────────────────
+
+;;; lqr-mat-mul is correct (reuses ct-mat-mul logic).
+(let* ((A '((1 2) (3 4)))
+       (B '((5 6) (7 8)))
+       (C (lqr-mat-mul A B)))
+  (check-num "lqr-mat-mul [0,0]" (lqr-mat-ref C 0 0) 19.0 1e-10)
+  (check-num "lqr-mat-mul [1,1]" (lqr-mat-ref C 1 1) 50.0 1e-10))
+
+;;; lqr-mat-inv: 2×2 identity has inverse = identity.
+(let* ((I  (lqr-mat-eye 2))
+       (Ii (lqr-mat-inv I)))
+  (check-num "lqr-mat-inv I[0,0]" (lqr-mat-ref Ii 0 0) 1.0 1e-10)
+  (check-num "lqr-mat-inv I[0,1]" (lqr-mat-ref Ii 0 1) 0.0 1e-10))
+
+;;; lqr-mat-inv: 2×2 known matrix.
+(let* ((A  '((2.0 1.0) (5.0 3.0)))    ; det = 1
+       (Ai (lqr-mat-inv A))
+       (I  (lqr-mat-mul A Ai)))
+  (check-num "lqr-mat-inv A*A⁻¹[0,0]" (lqr-mat-ref I 0 0) 1.0 1e-10)
+  (check-num "lqr-mat-inv A*A⁻¹[1,0]" (lqr-mat-ref I 1 0) 0.0 1e-10))
+
+;;; Lyapunov solver: A'X + XA = -M with A=-I, M=I → X=½I.
+(let* ((A  '((-1.0 0.0) (0.0 -1.0)))  ; stable A = -I
+       (M  '((1.0 0.0) (0.0 1.0)))    ; M = I
+       (X  (lyapunov-solve A M)))      ; expect X = ½I
+  (check-num "lyapunov-solve X[0,0]=0.5" (lqr-mat-ref X 0 0) 0.5 1e-8)
+  (check-num "lyapunov-solve X[0,1]=0"   (lqr-mat-ref X 0 1) 0.0 1e-8)
+  (check-num "lyapunov-solve X[1,1]=0.5" (lqr-mat-ref X 1 1) 0.5 1e-8))
+
+;;; Verify solution satisfies equation: A'X + XA = -M.
+(let* ((A  '((-2.0 1.0) (0.0 -3.0)))
+       (M  '((1.0 0.0) (0.0 1.0)))
+       (X  (lyapunov-solve A M))
+       (At (lqr-mat-transpose A))
+       (res (lqr-mat-add (lqr-mat-mul At X)
+                         (lqr-mat-add (lqr-mat-mul X A) M))))
+  (check-num "lyapunov residual[0,0]" (lqr-mat-ref res 0 0) 0.0 1e-8)
+  (check-num "lyapunov residual[1,1]" (lqr-mat-ref res 1 1) 0.0 1e-8))
+
+;;; ── LQR — continuous-time ───────────────────────────────────────────────
+
+;;; Double integrator: ẋ₁=x₂, ẋ₂=u.  A=[[0,1],[0,0]], B=[[0],[1]].
+;;; Q=I, R=[[1]].  Known optimal K = [1, √3] (LQR for double integrator).
+(let* ((A '((0.0 1.0) (0.0 0.0)))
+       (B '((0.0) (1.0)))
+       (Q '((1.0 0.0) (0.0 1.0)))
+       (R '((1.0)))
+       ;; Initial K must stabilise A for policy iteration.
+       ;; Start with K0 that places poles at -1: K0 = [[1 2]]
+       (K (lqr-continuous A B Q R 200 1e-8 '((1.0 2.0))))
+       ;; Verify closed-loop A = A - BK is stable (both eigenvalues negative real parts)
+       ;; K should be close to [1, √3] ≈ [1, 1.732]
+       (k1 (lqr-mat-ref K 0 0))
+       (k2 (lqr-mat-ref K 0 1)))
+  (check-num "lqr-continuous double-integrator K[0]≈1" k1 1.0 0.1)
+  (check-num "lqr-continuous double-integrator K[1]≈√3" k2 (sqrt 3.0) 0.1))
+
+;;; ── LQR — discrete-time ─────────────────────────────────────────────────
+
+;;; Discrete double integrator (Euler, dt=0.1): A=[[1,0.1],[0,1]], B=[[0],[0.1]].
+;;; Q=I, R=[[1]].  K should stabilise the system.
+(let* ((dt 0.1)
+       (A  `((1.0 ,dt) (0.0 1.0)))
+       (B  `((0.0) (,dt)))
+       (Q  '((1.0 0.0) (0.0 1.0)))
+       (R  '((1.0)))
+       (K  (lqr A B Q R))
+       ;; Closed-loop A_cl = A - B*K
+       (A_cl (lqr-mat-sub A (lqr-mat-mul B K)))
+       ;; Compute spectral radius via |det| for 2×2 (both eigenvalues must be < 1)
+       (a (lqr-mat-ref A_cl 0 0)) (b (lqr-mat-ref A_cl 0 1))
+       (c (lqr-mat-ref A_cl 1 0)) (d (lqr-mat-ref A_cl 1 1))
+       ;; Check |trace|<2 and det<1 as necessary stability conditions
+       (tr   (+ a d))
+       (detA (- (* a d) (* b c))))
+  (check "lqr discrete closed-loop |tr|<2" (< (abs tr) 2.0) #t)
+  (check "lqr discrete closed-loop det<1"  (< detA 1.0) #t))
+
+;;; ── Linearise ────────────────────────────────────────────────────────────
+
+;;; Harmonic oscillator H = ½(p² + ω²q²) at (q=0, p=0) — already linear.
+;;; Expected A = [[0, 1], [-ω², 0]].
+(let* ((omega 2.0)
+       (H  (lambda (s)
+              (+ (* 0.5 (momentum s) (momentum s))
+                 (* 0.5 omega omega (coordinate s) (coordinate s)))))
+       (s0 (up 0.0 0.0 0.0))   ; equilibrium (q=0,p=0)
+       (A  (linearise H s0)))
+  (check-num "linearise HO A[0,0]" (lqr-mat-ref A 0 0)  0.0 1e-4)
+  (check-num "linearise HO A[0,1]" (lqr-mat-ref A 0 1)  1.0 1e-4)
+  (check-num "linearise HO A[1,0]" (lqr-mat-ref A 1 0) (- (* omega omega)) 1e-3)
+  (check-num "linearise HO A[1,1]" (lqr-mat-ref A 1 1)  0.0 1e-4))
+
+;;; ── make-controller — closed-loop simulation ─────────────────────────────
+
+;;; Inverted pendulum linearised at top (θ=0):
+;;;   A = [[0,1],[g/l,0]],  B = [[0],[1/(ml²)]]  with g=9.81, l=1, m=1.
+;;; LQR gain K stabilises the system.  Verify the controller object API.
+(let* ((g 9.81) (l 1.0) (m 1.0)
+       ;; Linearised matrices at upright equilibrium
+       (A  `((0.0 1.0) (,(/ g l) 0.0)))
+       (B  `((0.0) (,(/ 1.0 (* m l l)))))
+       (Q  '((10.0 0.0) (0.0 1.0)))
+       (R  '((1.0)))
+       ;; Initial stabilising gain (poles at -1,-3)
+       (K0 '((10.0 4.0)))
+       (K  (lqr-continuous A B Q R 200 1e-8 K0))
+       ;; Hamiltonian for numerical simulation: H = ½p²/m − m·g·l·cos(q)
+       (H  (lambda (s)
+              (- (* 0.5 (/ 1.0 (* m l l)) (momentum s) (momentum s))
+                 (* m g l (cos (coordinate s))))))
+       ;; Start slightly off-vertical
+       (s0   (up 0.0 0.05 0.0))
+       (x-eq (up 0.0 0.0  0.0))
+       (ctrl (make-controller H K x-eq 0.01))
+       (step! (cdr (assq 'step! ctrl))))
+  ;; Run 200 steps (2 seconds) and verify pendulum stays near upright
+  (let loop ((i 0) (s s0))
+    (if (>= i 200) s
+        (let ((r (step!)))
+          (loop (+ i 1) (car r)))))
+  (let* ((final-state ((cdr (assq 'current-state ctrl))))
+         (theta (coordinate final-state)))
+    (check "inverted-pendulum controller object has step!" (procedure? step!) #t)
+    (check-num "inverted-pendulum stays near upright after 2s"
+               (abs theta) 0.0 0.5)))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

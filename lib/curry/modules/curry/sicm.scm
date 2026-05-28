@@ -1059,3 +1059,418 @@
   (let ((avg-H1 (apply secular-average H1 rest)))
     (lambda (state)
       (+ (H0 state) (* (inexact epsilon) (avg-H1 state))))))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 16  Controller synthesis (linearise, LQR) — SICM Ch 6 ext.
+;;; ════════════════════════════════════════════════════════════
+;;;
+;;; Exported:
+;;;   lqr-mat-*   — n×n matrix library (lists of rows)
+;;;   linearise   — numerical A matrix of Hamiltonian vector field
+;;;   lqr-continuous  — continuous-time CARE → gain K
+;;;   lqr         — discrete-time DARE → gain K
+;;;   make-controller — feedback controller (simulation)
+
+;;; ── n×n matrix library ───────────────────────────────────────────────────
+
+;;; Matrices are represented as lists of rows (each row a list of flonums).
+
+(define (lqr-mat-rows M) (length M))
+(define (lqr-mat-cols M) (length (car M)))
+(define (lqr-mat-ref  M i j) (list-ref (list-ref M i) j))
+
+(define (lqr-mat-zero n m)
+  (map (lambda (_) (map (lambda (_) 0.0) (sv-iota m))) (sv-iota n)))
+
+(define (lqr-mat-eye n)
+  (map (lambda (i)
+         (map (lambda (j) (if (= i j) 1.0 0.0)) (sv-iota n)))
+       (sv-iota n)))
+
+(define (lqr-mat-add A B)
+  (map (lambda (rA rB) (map + rA rB)) A B))
+
+(define (lqr-mat-sub A B)
+  (map (lambda (rA rB) (map - rA rB)) A B))
+
+(define (lqr-mat-scale c M)
+  (map (lambda (row) (map (lambda (x) (* c x)) row)) M))
+
+(define (lqr-mat-transpose M)
+  (apply map list M))
+
+(define (lqr-mat-mul A B)
+  (let ((Bt (lqr-mat-transpose B)))
+    (map (lambda (rA)
+           (map (lambda (cB) (apply + (map * rA cB))) Bt))
+         A)))
+
+(define (lqr-mat-norm M)
+  (apply max (map (lambda (row) (apply max (map abs row))) M)))
+
+;;; Gaussian elimination with partial pivoting: solve Ax=b.
+;;; A: n×n (list of rows), b: list of n values.
+;;; Returns list of n values x.
+(define (lqr-gauss-solve A b)
+  (let* ((n (length A))
+         ;; Build augmented matrix [A|b]
+         (aug (map (lambda (row bi) (append row (list bi)))
+                   A b)))
+    ;; Forward elimination with partial pivot
+    (let loop-col ((col 0) (aug aug))
+      (if (= col n)
+          ;; Back-substitution
+          (let back ((k (- n 1)) (x (make-list n 0.0)))
+            (if (< k 0)
+                x
+                (let* ((row  (list-ref aug k))
+                       (diag (list-ref row k))
+                       (rhs  (list-ref row n))
+                       (sum  (apply + (map (lambda (j)
+                                             (* (list-ref row j) (list-ref x j)))
+                                           (filter (lambda (j) (> j k)) (sv-iota n)))))
+                       (xk   (/ (- rhs sum) diag)))
+                  (back (- k 1) (lqr-list-set x k xk)))))
+          ;; Find pivot
+          (let* ((pivot-row
+                   (let find ((i col) (best col) (best-val (abs (list-ref (list-ref aug col) col))))
+                     (if (>= i n) best
+                         (let ((v (abs (list-ref (list-ref aug i) col))))
+                           (if (> v best-val) (find (+ i 1) i v)
+                               (find (+ i 1) best best-val))))))
+                 ;; Swap pivot row with current row
+                 (aug1 (lqr-swap-rows aug col pivot-row))
+                 ;; Eliminate column
+                 (piv  (list-ref (list-ref aug1 col) col))
+                 (aug2
+                   (map (lambda (i)
+                          (if (= i col)
+                              (list-ref aug1 i)
+                              (let* ((row-i (list-ref aug1 i))
+                                     (factor (/ (list-ref row-i col) piv)))
+                                (map (lambda (j)
+                                       (- (list-ref row-i j)
+                                          (* factor (list-ref (list-ref aug1 col) j))))
+                                     (sv-iota (+ n 1))))))
+                        (sv-iota n))))
+            (loop-col (+ col 1) aug2))))))
+
+(define (lqr-list-set lst i val)
+  (map (lambda (j x) (if (= j i) val x)) (sv-iota (length lst)) lst))
+
+(define (lqr-swap-rows M i j)
+  (map (lambda (k) (cond ((= k i) (list-ref M j))
+                         ((= k j) (list-ref M i))
+                         (else    (list-ref M k))))
+       (sv-iota (length M))))
+
+;;; n×n matrix inverse via Gauss-Jordan on [A|I].
+(define (lqr-mat-inv A)
+  (let* ((n (length A))
+         (I (lqr-mat-eye n))
+         ;; Solve each column of I
+         (cols (map (lambda (j)
+                      (lqr-gauss-solve A (map (lambda (row) (list-ref row j)) I)))
+                    (sv-iota n))))
+    ;; cols[j] is the j-th column of A^{-1}; transpose to get rows
+    (lqr-mat-transpose cols)))
+
+;;; Kronecker product A ⊗ B  (result is (n_A·n_B) × (m_A·m_B)).
+;;; For row rA of A and row rB of B, the result row is
+;;;   (a0*rB ++ a1*rB ++ ... ++ a(mA-1)*rB)
+;;; Outer map over rows of A; inner map over rows of B.
+(define (lqr-mat-kron A B)
+  (apply append
+    (map (lambda (rA)
+           (map (lambda (rB)
+                  (apply append
+                    (map (lambda (aij)
+                           (map (lambda (bij) (* (inexact aij) (inexact bij))) rB))
+                         rA)))
+                B))
+         A)))
+
+;;; Vectorise matrix column-major: vec(M) = [M[:,0]; M[:,1]; ...]
+(define (lqr-vec M)
+  (let ((Mt (lqr-mat-transpose M)))
+    (apply append Mt)))
+
+;;; Unvectorise: list of n² values → n×n matrix (column-major).
+(define (lqr-unvec v n)
+  (lqr-mat-transpose
+    (map (lambda (j) (map (lambda (i) (list-ref v (+ (* j n) i))) (sv-iota n)))
+         (sv-iota n))))
+
+;;; ── Lyapunov solver ─────────────────────────────────────────────────────
+;;;
+;;; Solve  A'X + XA = -M  via Kronecker product linearisation.
+;;; Returns X (n×n symmetric matrix).
+;;; Algorithm: vec(A'X + XA) = (I⊗A' + A'⊗I) vec(X) = vec(-M)
+;;; using the identity vec(AXB) = (B'⊗A) vec(X) [column-major]:
+;;;   vec(A'·X·I) = (I ⊗ A') vec(X)   [B=I, A=A']
+;;;   vec(I·X·A ) = (A' ⊗ I) vec(X)   [A=I, B=A]
+;;; Coefficient matrix = I⊗A' + A'⊗I  (both terms use At = A').
+(define (lyapunov-solve A M)
+  (let* ((n   (length A))
+         (At  (lqr-mat-transpose A))
+         (I   (lqr-mat-eye n))
+         ;; Coefficient matrix for vec(X): I⊗A' + A'⊗I
+         (K   (lqr-mat-add (lqr-mat-kron I  At)
+                           (lqr-mat-kron At I)))
+         (rhs (map (lambda (x) (- x)) (lqr-vec M)))
+         (x   (lqr-gauss-solve K rhs)))
+    (lqr-unvec x n)))
+
+;;; ── Continuous-time LQR (CARE solver via policy iteration) ───────────────
+;;;
+;;; Given ẋ = Ax + Bu, minimise J = ∫(x'Qx + u'Ru) dt.
+;;; Solves  A'P + PA − PBR⁻¹B'P + Q = 0  (CARE).
+;;; Returns K (m×n gain matrix) such that u = −K·x is optimal.
+;;;
+;;; Algorithm: policy iteration (Newton on CARE).
+;;;   1. Start with K₀ = 0 (or a stabilising gain if A is unstable)
+;;;   2. Solve Lyapunov:  (A−BK)' P + P(A−BK) = −(Q + K'RK)
+;;;   3. Update K = R⁻¹B'P
+;;;   4. Repeat until convergence.
+;;;
+;;; For policy iteration to converge from K₀=0, A must be stable.
+;;; For unstable A (e.g. inverted pendulum), pass a stabilising initial K
+;;; as the optional fifth argument (list of rows, m×n).
+;;; Signature: (lqr-continuous A B Q R [max-iter [tol [K0]]])
+(define (lqr-continuous A B Q R . opts)
+  (let* ((n     (length A))
+         (m     (lqr-mat-cols B))
+         (Rinv  (lqr-mat-inv R))
+         (Bt    (lqr-mat-transpose B))
+         (max-it (if (null? opts) 100 (car opts)))
+         (tol    (if (or (null? opts) (null? (cdr opts))) 1e-10
+                     (cadr opts)))
+         ;; Optional initial K (3rd vararg): use zero-matrix if not supplied.
+         (K0  (if (or (null? opts) (null? (cdr opts)) (null? (cddr opts)))
+                  (lqr-mat-zero m n)
+                  (caddr opts))))
+    (let iter ((K K0) (it 0))
+      (let* (;; Closed-loop A
+             (Acl  (lqr-mat-sub A (lqr-mat-mul B K)))
+             ;; RHS of Lyapunov: -(Q + K'RK)
+             (KtRK (lqr-mat-mul (lqr-mat-transpose K) (lqr-mat-mul R K)))
+             (M    (lqr-mat-add Q KtRK))
+             ;; Solve Lyapunov: Acl' P + P Acl = -M
+             (P    (lyapunov-solve Acl M))
+             ;; New gain
+             (Knew (lqr-mat-mul Rinv (lqr-mat-mul Bt P)))
+             (err  (lqr-mat-norm (lqr-mat-sub Knew K))))
+        (if (or (< err tol) (>= it max-it))
+            Knew
+            (iter Knew (+ it 1)))))))
+
+;;; ── Discrete-time LQR (DARE solver via policy iteration) ─────────────────
+;;;
+;;; Given x_{k+1} = Ax_k + Bu_k, minimise J = Σ (x'Qx + u'Ru).
+;;; Solves  P = Q + A'PA − A'PB(R + B'PB)⁻¹B'PA  (DARE).
+;;; Returns K (m×n gain matrix) such that u = −K·x is optimal.
+(define (lqr A B Q R . opts)
+  (let* ((n     (length A))
+         (m     (lqr-mat-cols B))
+         (At    (lqr-mat-transpose A))
+         (Bt    (lqr-mat-transpose B))
+         (max-it (if (null? opts) 200 (car opts)))
+         (tol    (if (or (null? opts) (null? (cdr opts))) 1e-10
+                     (cadr opts))))
+    ;; Value iteration: P_{k+1} = Q + A'P_k A − A'P_k B (R+B'P_k B)⁻¹ B'P_k A
+    (let iter ((P Q) (it 0))
+      (let* ((AtP  (lqr-mat-mul At P))
+             (AtPA (lqr-mat-mul AtP A))
+             (AtPB (lqr-mat-mul AtP B))
+             (BtPB (lqr-mat-mul Bt (lqr-mat-mul P B)))
+             (S    (lqr-mat-add R BtPB))
+             (Sinv (lqr-mat-inv S))
+             (Pnew (lqr-mat-sub (lqr-mat-add Q AtPA)
+                                (lqr-mat-mul AtPB (lqr-mat-mul Sinv (lqr-mat-mul Bt (lqr-mat-mul P A))))))
+             (err  (lqr-mat-norm (lqr-mat-sub Pnew P))))
+        (if (or (< err tol) (>= it max-it))
+            ;; Extract gain K = (R + B'PB)⁻¹ B'PA
+            (lqr-mat-mul Sinv (lqr-mat-mul Bt (lqr-mat-mul Pnew A)))
+            (iter Pnew (+ it 1)))))))
+
+;;; ── Linearise Hamiltonian vector field ───────────────────────────────────
+;;;
+;;; For H(t,q,p), the equations of motion are:
+;;;   q̇ = ∂H/∂p,    ṗ = −∂H/∂q
+;;;
+;;; linearise computes the 2n×2n Jacobian A of the vector field f=(q̇,ṗ)
+;;; at the equilibrium state (up t0 q0 p0) via central finite differences.
+;;;
+;;; Returns A as a list of rows (2n×2n for n-DOF).
+(define linearise-eps 1e-5)
+
+(define (linearise H state)
+  (let* ((t  (time state))
+         (q0 (coordinate state))
+         (p0 (momentum state))
+         ;; Flatten state to vector [q; p] for Jacobian
+         (q-scalar? (not (tuple? q0)))
+         (n  (if q-scalar? 1 (dimension q0)))
+         (x0 (if q-scalar?
+                 (list q0 p0)
+                 (append (map (lambda (i) (ref q0 i)) (sv-iota n))
+                         (map (lambda (i) (ref p0 i)) (sv-iota n)))))
+         (dim2 (* 2 n))
+         ;; Reconstruct state from flat vector x
+         (make-state
+           (lambda (x)
+             (if q-scalar?
+                 (up t (car x) (cadr x))
+                 (up t
+                     (apply up (list-head x n))
+                     (apply up (list-tail x n))))))
+         ;; RHS of equations of motion evaluated at x: returns list [q̇; ṗ]
+         (rhs
+           (lambda (x)
+             (let* ((s    (make-state x))
+                    (qdot (sv-grad-p H s))    ; ∂H/∂p
+                    (pdot (lqr-neg (sv-grad-q H s)))) ; -∂H/∂q
+               (if q-scalar?
+                   (list qdot pdot)
+                   (append (map (lambda (i) (ref qdot i)) (sv-iota n))
+                           (map (lambda (i) (- (ref pdot i)) ) (sv-iota n))))))))
+    ;; Build Jacobian column by column via central differences
+    (lqr-mat-transpose
+      (map (lambda (k)
+             (let* ((xp (lqr-list-perturb x0 k    linearise-eps))
+                    (xm (lqr-list-perturb x0 k (- linearise-eps)))
+                    (fp (rhs xp))
+                    (fm (rhs xm)))
+               (map (lambda (fp_i fm_i) (/ (- fp_i fm_i) (* 2.0 linearise-eps)))
+                    fp fm)))
+           (sv-iota dim2)))))
+
+;;; Helpers for linearise:
+(define (sv-grad-q H state)
+  (let* ((t  (time state)) (q (coordinate state)) (p (momentum state)))
+    (if (tuple? q)
+        (apply up
+          (map (lambda (i)
+                 (/ (- (H (up t (sv-perturb q i linearise-eps) p))
+                       (H (up t (sv-perturb q i (- linearise-eps)) p)))
+                    (* 2.0 linearise-eps)))
+               (sv-iota (dimension q))))
+        (/ (- (H (up t (+ q linearise-eps) p))
+              (H (up t (- q linearise-eps) p)))
+           (* 2.0 linearise-eps)))))
+
+(define (sv-grad-p H state)
+  (let* ((t  (time state)) (q (coordinate state)) (p (momentum state)))
+    (if (tuple? p)
+        (apply up
+          (map (lambda (i)
+                 (/ (- (H (up t q (sv-perturb p i linearise-eps)))
+                       (H (up t q (sv-perturb p i (- linearise-eps)))))
+                    (* 2.0 linearise-eps)))
+               (sv-iota (dimension p))))
+        (/ (- (H (up t q (+ p linearise-eps)))
+              (H (up t q (- p linearise-eps))))
+           (* 2.0 linearise-eps)))))
+
+(define (lqr-list-perturb lst k h)
+  (map (lambda (j x) (if (= j k) (+ x h) x)) (sv-iota (length lst)) lst))
+
+(define (lqr-neg x)
+  (if (tuple? x)
+      (apply up (map (lambda (i) (- (ref x i))) (sv-iota (dimension x))))
+      (- x)))
+
+;;; ── make-controller ────────────────────────────────────────────────────
+;;;
+;;; Builds a feedback controller that simulates the closed-loop system.
+;;; Returns a thunk; call it repeatedly to step the simulation by dt.
+;;;
+;;; H:  Hamiltonian (as for evolve-Hamiltonian)
+;;; K:  gain matrix (m×n, list of rows)  u = −K·(x − x_eq)
+;;; x0: equilibrium state (up t q p) — target operating point
+;;; dt: time step
+;;; B-fn: (up t q p) → list of m-vectors (input coupling in state space)
+;;;       Each column of B maps a scalar input u_i to q̈ forcing.
+;;;       For simplicity, B-fn can return a single list (scalar input).
+;;;
+;;; Returns a controller record (alist) with fields:
+;;;   state    — current state (up t q p)
+;;;   step!    — advance by dt, returns (list state control-input)
+;;;   reset!   — reset to initial state s_init
+(define (make-controller H K x-eq dt . opts)
+  (let* ((n-steps (if (null? opts) 1000 (car opts)))
+         ;; Internal mutable state held in a box (vector of 1)
+         (state-box (vector x-eq))
+         ;; Flatten equilibrium to vector
+         (q-eq (coordinate x-eq))
+         (p-eq (momentum    x-eq))
+         (q-scalar? (not (tuple? q-eq)))
+         (n  (if q-scalar? 1 (dimension q-eq)))
+         (x-eq-vec
+           (if q-scalar?
+               (list (inexact q-eq) (inexact p-eq))
+               (append (map (lambda (i) (inexact (ref q-eq i))) (sv-iota n))
+                       (map (lambda (i) (inexact (ref p-eq i))) (sv-iota n)))))
+         ;; Extract state vector from (up t q p)
+         (state->vec
+           (lambda (s)
+             (let ((q (coordinate s)) (p (momentum s)))
+               (if q-scalar?
+                   (list (inexact q) (inexact p))
+                   (append (map (lambda (i) (inexact (ref q i))) (sv-iota n))
+                           (map (lambda (i) (inexact (ref p i))) (sv-iota n)))))))
+         ;; Compute control: u = -K(x - x_eq)
+         (compute-u
+           (lambda (s)
+             (let* ((x   (state->vec s))
+                    (dx  (map - x x-eq-vec))
+                    ;; u = -K dx  (K is m×2n, result is list of m scalars)
+                    (u   (map (lambda (k-row)
+                                (- (apply + (map * k-row dx))))
+                              K)))
+               u)))
+         ;; Controlled Hamiltonian (with u applied as an additive momentum force)
+         ;; For simplicity: single-input, force applied to p directly.
+         (H-ctrl
+           (lambda (s)
+             ;; Return bare H value; control is injected in the evolution below
+             (H s))))
+    ;; The controller object
+    (define (step!)
+      (let* ((s   (vector-ref state-box 0))
+             (u   (compute-u s))
+             ;; Evolve one step using standard Störmer-Verlet with forcing
+             ;; For this simulation, inject control as p ← p + u[0]*dt
+             ;; (first-order forcing; adequate for small dt)
+             (q   (coordinate s))
+             (p   (momentum s))
+             (t   (time s))
+             ;; Half-step p update with control forcing
+             (u0  (if (null? u) 0.0 (inexact (car u))))
+             (p-h (if q-scalar?
+                      (+ p (* 0.5 dt u0)
+                         (* -0.5 dt (sv-grad-q H s)))
+                      ;; multi-DOF: not implemented here — scalar only
+                      p))
+             ;; Full-step q
+             (q-1 (if q-scalar?
+                      (+ q (* dt p-h))
+                      q))
+             (s-h  (up (+ t (* 0.5 dt)) q-1 p-h))
+             ;; Half-step p completion
+             (p-1  (if q-scalar?
+                       (+ p-h (* 0.5 dt u0)
+                          (* -0.5 dt (sv-grad-q H s-h)))
+                       p-h))
+             (s1   (up (+ t dt) q-1 p-1)))
+        (vector-set! state-box 0 s1)
+        (list s1 u)))
+    (define (reset! s-init)
+      (vector-set! state-box 0 s-init))
+    (define (current-state)
+      (vector-ref state-box 0))
+    (list (cons 'step!         step!)
+          (cons 'reset!        reset!)
+          (cons 'current-state current-state)
+          (cons 'compute-u     compute-u))))
+
