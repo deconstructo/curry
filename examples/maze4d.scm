@@ -2,15 +2,15 @@
 ;;; maze4d.scm — Wander a 4D maze as a 3D creature.
 ;;;
 ;;; The maze has passages in ±x, ±z within each w-slice, plus ±w connections
-;;; between slices.  At any moment you see a first-person wireframe view of
-;;; the 3D cross-section at your current w.  Press Q/E to step through w —
-;;; the maze dissolves and reforms around you.
+;;; between slices.  At any moment you see a first-person view (Doom-style
+;;; column raycaster) of the 3D cross-section at your current w.
+;;; Press Q/E to step through w — the maze instantly resets around you.
 ;;;
-;;; Goal: reach cell (DX-1, DZ-1) on w-slice (DW-1).  Yellow star on minimap.
+;;; Goal: reach cell (DX-1, DZ-1) on w-slice (DW-1).  Yellow dot on minimap.
 ;;;
 ;;; Controls:
-;;;   W / ↑    move forward        Q   step −w (red flash if blocked)
-;;;   S / ↓    move back           E   step +w (red flash if blocked)
+;;;   W / ↑    move forward        Q   step −w
+;;;   S / ↓    move back           E   step +w
 ;;;   A / ←    turn left           Esc quit
 ;;;   D / →    turn right
 
@@ -20,14 +20,15 @@
 
 (define DX 8)  (define DZ 8)  (define DW 4)
 
-(define WALL-H      1.0)
-(define EYE-H       0.5)
-(define NEAR-CLIP   0.15)
+(define WALL-H      1.0)   ; wall height in world units
 (define MOVE-SPEED  0.12)
 (define TURN-SPEED  0.07)
-(define EYE-SEP     0.10)   ; anaglyph inter-ocular distance (world units)
-(define MAP-CELL    12)     ; minimap pixels per cell
-(define MAP-PAD      8)     ; minimap padding from edge
+(define *eye-sep*   0.10)  ; anaglyph inter-ocular distance (world units)
+(define HALF-FOV    0.66)  ; camera-plane half-width (≈65° FOV)
+(define COLUMN-W    3)     ; screen pixels per raycaster column
+(define FOG-DIST    7.0)
+(define MAP-CELL    12)
+(define MAP-PAD      8)
 
 ;;; ── Random (LCG) ──────────────────────────────────────────────────────────
 
@@ -148,79 +149,63 @@
          (passage? (player-ix) (player-iz) *pw* bit)
          (begin (set! *pw* nw) #t))))
 
-;;; ── Camera & projection ───────────────────────────────────────────────────
+;;; ── Raycaster ─────────────────────────────────────────────────────────────
 
-; World → camera space.  Forward = (sin yaw, 0, cos yaw).
-; Returns #(cx cy cz).
-(define (world->cam wx wy wz)
-  (let* ((dx (- wx *px*)) (dy (- wy EYE-H)) (dz (- wz *pz*))
-         (sy (sin *yaw*)) (cy (cos *yaw*)))
-    (vector (- (* dx cy) (* dz sy))
-            dy
-            (+ (* dx sy) (* dz cy)))))
+; DDA raycaster. Returns (perp-dist x-side?) or #f if no wall within range.
+; px/pz: eye position; cam: camera-plane x in [-1, 1].
+; Uses the perpendicular-distance formula (Lode's method) to avoid fisheye.
+(define (cast-ray px pz cam)
+  (let* ((sy  (sin *yaw*)) (cy (cos *yaw*))
+         ; Ray direction = view_dir + cam * camera_plane_dir
+         ; View dir = (sy, cy), camera plane dir (rightward) = (cy, -sy)
+         (rdx (+ sy (* cy cam HALF-FOV)))
+         (rdz (- cy (* sy cam HALF-FOV)))
+         (ddx (if (= rdx 0.0) 1e30 (abs (/ 1.0 rdx))))
+         (ddz (if (= rdz 0.0) 1e30 (abs (/ 1.0 rdz))))
+         (ix  (inexact->exact (floor px)))
+         (iz  (inexact->exact (floor pz)))
+         (sx  (if (> rdx 0) 1 -1))
+         (sz  (if (> rdz 0) 1 -1))
+         ; Initial side distances: distance along ray to first boundary crossing
+         (sdx (if (> rdx 0) (* (- (+ ix 1.0) px) ddx) (* (- px ix) ddx)))
+         (sdz (if (> rdz 0) (* (- (+ iz 1.0) pz) ddz) (* (- pz iz) ddz))))
+    (let loop ((ix ix) (iz iz) (sdx sdx) (sdz sdz))
+      (cond
+        ((> (min sdx sdz) 18.0) #f)
+        ; X boundary is closer — check for wall in step direction
+        ((< sdx sdz)
+         (if (not (passage? ix iz *pw* (if (> sx 0) B+X B-X)))
+             (list (max 0.01 (- sdx ddx)) #t)   ; perp-dist, x-side
+             (loop (+ ix sx) iz (+ sdx ddx) sdz)))
+        ; Z boundary is closer
+        (else
+         (if (not (passage? ix iz *pw* (if (> sz 0) B+Z B-Z)))
+             (list (max 0.01 (- sdz ddz)) #f)   ; perp-dist, z-side
+             (loop ix (+ iz sz) sdx (+ sdz ddz))))))))
 
-; Clip line c1→c2 (each a #(cx cy cz)) against near plane.
-; Returns #(ax ay az bx by bz) or #f if fully behind.
-(define (clip-near c1 c2)
-  (let ((az (vector-ref c1 2)) (bz (vector-ref c2 2)))
-    (cond
-      ((and (<= az NEAR-CLIP) (<= bz NEAR-CLIP)) #f)
-      ((and (> az NEAR-CLIP) (> bz NEAR-CLIP))
-       (vector (vector-ref c1 0) (vector-ref c1 1) az
-               (vector-ref c2 0) (vector-ref c2 1) bz))
-      (else
-       (let* ((t  (/ (- NEAR-CLIP az) (- bz az)))
-              (ax (vector-ref c1 0)) (ay (vector-ref c1 1))
-              (bx (vector-ref c2 0)) (by (vector-ref c2 1))
-              (ix (+ ax (* t (- bx ax))))
-              (iy (+ ay (* t (- by ay)))))
-         (if (<= az NEAR-CLIP)
-             (vector ix iy NEAR-CLIP bx by bz)
-             (vector ax ay az ix iy NEAR-CLIP)))))))
-
-;;; ── Wireframe drawing ─────────────────────────────────────────────────────
-
-(define (draw-line-3d! painter x1 y1 z1 x2 y2 z2 sw sh fov eye-x)
-  (let* ((clipped (clip-near (world->cam x1 y1 z1)
-                              (world->cam x2 y2 z2))))
-    (when clipped
-      (let* ((ax (vector-ref clipped 0)) (ay (vector-ref clipped 1)) (az (vector-ref clipped 2))
-             (bx (vector-ref clipped 3)) (by (vector-ref clipped 4)) (bz (vector-ref clipped 5))
-             (hw (/ sw 2.0)) (hh (/ sh 2.0)))
-        (gfx-draw-line! painter
-          (+ hw (* fov (/ (+ ax eye-x) az)))
-          (- hh (* fov (/ ay az)))
-          (+ hw (* fov (/ (+ bx eye-x) bz)))
-          (- hh (* fov (/ by bz))))))))
-
-; Draw a wall face: base runs from (x0,z0) to (x1,z1) at floor level, rises WALL-H.
-(define (draw-wall! painter x0 z0 x1 z1 sw sh fov eye-x)
-  (draw-line-3d! painter x0 0.0    z0 x1 0.0    z1 sw sh fov eye-x)
-  (draw-line-3d! painter x0 WALL-H z0 x1 WALL-H z1 sw sh fov eye-x)
-  (draw-line-3d! painter x0 0.0    z0 x0 WALL-H z0 sw sh fov eye-x)
-  (draw-line-3d! painter x1 0.0    z1 x1 WALL-H z1 sw sh fov eye-x))
-
-; Draw all walls for the current w-slice.
-(define (draw-maze-pass! painter sw sh fov eye-x)
-  (let ((iw *pw*))
-    ; Walls perpendicular to x-axis, at x = k  (k = 0..DX)
-    (do ((k 0 (+ k 1))) ((> k DX))
-      (do ((iz 0 (+ iz 1))) ((= iz DZ))
-        (when (or (= k 0) (= k DX)
-                  (not (passage? (- k 1) iz iw B+X)))
-          (draw-wall! painter
-            (exact->inexact k) (exact->inexact iz)
-            (exact->inexact k) (exact->inexact (+ iz 1))
-            sw sh fov eye-x))))
-    ; Walls perpendicular to z-axis, at z = k  (k = 0..DZ)
-    (do ((k 0 (+ k 1))) ((> k DZ))
-      (do ((ix 0 (+ ix 1))) ((= ix DX))
-        (when (or (= k 0) (= k DZ)
-                  (not (passage? ix (- k 1) iw B+Z)))
-          (draw-wall! painter
-            (exact->inexact ix)       (exact->inexact k)
-            (exact->inexact (+ ix 1)) (exact->inexact k)
-            sw sh fov eye-x))))))
+; Render one eye as Doom-style vertical column strips.
+; er eg eb = eye colour channel (red eye: 1 0 0 / blue eye: 0 0 1).
+; X-walls are full brightness; Z-walls are 70% — distinguishes wall orientation.
+(define (draw-doom-pass! painter sw sh px pz er eg eb)
+  (let* ((sw-f  (exact->inexact sw))
+         (sh-f  (exact->inexact sh))
+         (hsh   (/ sh-f 2.0))
+         (ncols (quotient sw COLUMN-W)))
+    (do ((ci 0 (+ ci 1))) ((= ci ncols))
+      (let* ((cx  (exact->inexact (+ (* ci COLUMN-W) (quotient COLUMN-W 2))))
+             (cam (- (* 2.0 (/ cx sw-f)) 1.0))
+             (hit (cast-ray px pz cam)))
+        (when hit
+          (let* ((perp    (car hit))
+                 (x-side? (cadr hit))
+                 (half-h  (/ (* WALL-H hsh) perp))
+                 (top     (max 0.0 (- hsh half-h)))
+                 (bot     (min sh-f (+ hsh half-h)))
+                 (fog     (max 0.0 (- 1.0 (/ perp FOG-DIST))))
+                 (b       (* fog (if x-side? 1.0 0.7))))
+            (gfx-set-color! painter (* er b) (* eg b) (* eb b) 1.0)
+            (gfx-fill-rect! painter (exact->inexact (* ci COLUMN-W))
+                            top (exact->inexact COLUMN-W) (- bot top))))))))
 
 ;;; ── HUD: minimap ──────────────────────────────────────────────────────────
 
@@ -286,25 +271,34 @@
 ;;; ── Main draw ─────────────────────────────────────────────────────────────
 
 (define (draw-frame! painter sw sh)
-  (gfx-clear! painter 0.02 0.0 0.05)
-  (gfx-set-antialias! painter #t)
+  (let* ((sy       (sin *yaw*))
+         (cy       (cos *yaw*))
+         (half-sep (/ *eye-sep* 2.0))
+         ; Eye positions, offset laterally ⊥ to view direction.
+         ; Right direction in (x,z) = (cy, -sy).
+         (lpx (- *px* (* half-sep cy)))
+         (lpz (+ *pz* (* half-sep sy)))
+         (rpx (+ *px* (* half-sep cy)))
+         (rpz (- *pz* (* half-sep sy)))
+         (sw-f (exact->inexact sw))
+         (sh-f (exact->inexact sh))
+         (hsh  (/ sh-f 2.0)))
 
-  (let* ((fov      (/ sw 2.0))
-         (half-sep (/ EYE-SEP 2.0)))
+    ; Ceiling and floor background drawn once in normal blend
+    (gfx-set-blend! painter 'src)
+    (gfx-clear! painter 0.0 0.0 0.0)
+    (gfx-set-color! painter 0.04 0.03 0.06 1.0)   ; dark ceiling
+    (gfx-fill-rect! painter 0.0 0.0 sw-f hsh)
+    (gfx-set-color! painter 0.09 0.08 0.06 1.0)   ; dark floor (slightly warmer)
+    (gfx-fill-rect! painter 0.0 hsh sw-f hsh)
 
-    (gfx-set-blend!     painter 'add)
-    (gfx-set-pen-width! painter 1.5)
-
-    ; Left eye — red
-    (gfx-set-pen-color! painter 1.0 0.0 0.0 0.9)
-    (draw-maze-pass! painter sw sh fov (- half-sep))
-
-    ; Right eye — cyan
-    (gfx-set-pen-color! painter 0.0 1.0 1.0 0.9)
-    (draw-maze-pass! painter sw sh fov half-sep)
-
+    ; Walls: additive blend for red/blue anaglyph
+    (gfx-set-blend! painter 'add)
+    (draw-doom-pass! painter sw sh lpx lpz 1.0 0.0 0.0)   ; left eye  — red
+    (draw-doom-pass! painter sw sh rpx rpz 0.0 0.0 1.0)   ; right eye — blue
     (gfx-set-blend! painter 'src))
 
+  ; HUD always in normal blend
   (draw-minimap!     painter sw sh)
   (draw-w-indicator! painter)
 
@@ -332,8 +326,19 @@
 
 ;;; ── Window ────────────────────────────────────────────────────────────────
 
-(define win    (make-window "4D Maze" 960 640))
-(define canvas (window-canvas win))
+(define win     (make-window "4D Maze" 1080 640))
+(define canvas  (window-canvas win))
+(define sidebar (window-sidebar win))
+
+(box-add! sidebar (make-label "Stereo (red/blue)"))
+(box-add! sidebar
+  (make-slider "Eye separation" 0 50 1 10
+    (lambda (v) (set! *eye-sep* (* v 0.01)))))
+(box-add! sidebar (make-separator))
+(box-add! sidebar (make-label "Controls"))
+(box-add! sidebar (make-label "W/S/↑/↓  move"))
+(box-add! sidebar (make-label "A/D/←/→  turn"))
+(box-add! sidebar (make-label "Q/E      step ±w"))
 
 (canvas-on-draw!  canvas draw-frame!)
 (window-on-key!   win    handle-key!)
