@@ -698,6 +698,124 @@
   (check "stoermer-verlet-step p sign" (< (momentum s1) 0.0) #t))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 34  Canonical transformations
+;;; ════════════════════════════════════════════════════════════
+
+;;; Identity transformation is trivially canonical.
+(let* ((C  (lambda (s) s))
+       (s0 (up 0.0 (up 1.0 0.5) (up 0.3 0.7))))
+  (check "identity CT canonical (2-DOF)" (canonical? C s0) #t))
+
+(let* ((C  (lambda (s) s))
+       (s0 (up 0.0 0.8 1.2)))
+  (check "identity CT canonical (1-DOF)" (canonical? C s0) #t))
+
+;;; ── F->C ────────────────────────────────────────────────────────────────
+
+;;; 1-DOF coordinate scaling: F(t,q) = α·q → Q=αq, P=p/α
+(let* ((alpha 2.5)
+       (C    (F->C (lambda (t q) (* alpha q))))
+       (s0   (up 0.0 0.7 1.3))
+       (sf   (C s0)))
+  (check     "F->C scaling 1-DOF canonical" (canonical? C s0) #t)
+  (check-num "F->C scaling Q=α·q" (coordinate sf) (* alpha (coordinate s0)) 1e-5)
+  (check-num "F->C scaling P=p/α" (momentum sf)   (/ (momentum s0) alpha)   1e-5))
+
+;;; 1-DOF negation: F(t,q) = -q → Q=-q, P=-p
+(let* ((C   (F->C (lambda (t q) (- q))))
+       (s0  (up 0.0 1.0 2.0))
+       (sf  (C s0)))
+  (check     "F->C negation canonical" (canonical? C s0) #t)
+  (check-num "F->C negation Q=-q" (coordinate sf) (- (coordinate s0)) 1e-5)
+  (check-num "F->C negation P=-p" (momentum sf)   (- (momentum s0))   1e-5))
+
+;;; 2-DOF rectangular → polar is canonical (tested at non-degenerate point).
+(let* ((C    (F->C rectangular->polar))
+       (s0   (up 0.0 (up 1.0 0.5) (up 0.3 0.7))))
+  (check "F->C rectangular->polar canonical" (canonical? C s0) #t))
+
+;;; Verify rectangular→polar values: r=√(x²+y²), θ=atan2(y,x).
+(let* ((C    (F->C rectangular->polar))
+       (s0   (up 0.0 (up 3.0 4.0) (up 0.1 0.2)))
+       (sf   (C s0)))
+  (check-num "rectangular->polar r=5" (ref (coordinate sf) 0) 5.0 1e-5)
+  (check-num "rectangular->polar θ"   (ref (coordinate sf) 1) (atan 4.0 3.0) 1e-5))
+
+;;; ── Action-angle ────────────────────────────────────────────────────────
+
+;;; action-angle is canonical for the harmonic oscillator.
+(let* ((omega 1.0)
+       (C     (action-angle omega))
+       (s0    (up 0.0 1.0 0.5)))
+  (check "action-angle canonical" (canonical? C s0) #t))
+
+;;; I = (p² + ω²q²) / (2ω) = H/ω.  In new coordinates H = ω·I.
+(let* ((omega 2.0)
+       (C     (action-angle omega))
+       (s0    (up 0.0 1.0 0.5))
+       (H-old (+ (* 0.5 (momentum s0) (momentum s0))
+                 (* 0.5 omega omega (coordinate s0) (coordinate s0))))
+       (I     (momentum (C s0))))
+  (check-num "action-angle I=H/ω" I (/ H-old omega) 1e-10))
+
+;;; θ evolves correctly: (D (action-angle-state)) = 1 in units of ω.
+;;; Verify θ at q=1, p=0 for ω=1: p=-ωq·... θ=atan2(0,ω)=0
+(let* ((omega 1.0)
+       (C     (action-angle omega))
+       (sf    (C (up 0.0 1.0 0.0))))   ; q=1, p=0
+  (check-num "action-angle θ at (q=1,p=0)" (coordinate sf) 0.0 1e-10))
+
+;;; Verify action-angle θ at T/4: q→0, p→−1, θ=atan2(1,0)=π/2.
+;;; Using a quarter-period avoids atan2 wrap-around at the full period.
+(let* ((omega  1.0)
+       (pi     (acos -1.0))
+       (H      (lambda (s)
+                 (+ (* 0.5 (momentum s) (momentum s))
+                    (* 0.5 omega omega (coordinate s) (coordinate s)))))
+       (C      (action-angle omega))
+       (s0     (up 0.0 1.0 0.0))
+       (nsteps (exact (round (/ (/ (* 2.0 pi) 4.0) 0.001))))
+       (sf     (car (reverse (evolve-Hamiltonian H s0 0.001 nsteps)))))
+  (check-num "action-angle θ at T/4 = π/2"
+             (coordinate (C sf)) (/ pi 2) 1e-2))
+
+;;; ── F2->CT ────────────────────────────────────────────────────────────────
+
+;;; Identity generating function F2(t,q,P) = q·P → (Q,P) = (q,p).
+(let* ((F2  (lambda (t q P) (* q P)))
+       (C   (F2->CT F2))
+       (s0  (up 0.0 0.8 1.5))
+       (sf  (C s0)))
+  (check     "F2 identity canonical"  (canonical? C s0) #t)
+  (check-num "F2 identity Q=q" (coordinate sf) (coordinate s0) 1e-5)
+  (check-num "F2 identity P=p" (momentum sf)   (momentum s0)   1e-5))
+
+;;; Momentum-shift F2(t,q,P) = q·P + α·q² → P=p−2αq, Q=q.
+(let* ((alpha 0.5)
+       (F2   (lambda (t q P) (+ (* q P) (* alpha q q))))
+       (C    (F2->CT F2))
+       (s0   (up 0.0 1.0 2.0))
+       (sf   (C s0))
+       (q    (coordinate s0))
+       (p    (momentum s0)))
+  (check     "F2 momentum-shift canonical"    (canonical? C s0) #t)
+  (check-num "F2 momentum-shift Q=q"          (coordinate sf) q                      1e-5)
+  (check-num "F2 momentum-shift P=p−2αq"      (momentum sf)   (- p (* 2.0 alpha q))  1e-5))
+
+;;; ── Composition ─────────────────────────────────────────────────────────
+
+;;; Composition of canonical transformations is canonical.
+(let* ((alpha  1.5)
+       (C1    (F->C (lambda (t q) (* alpha q))))
+       (C2    (action-angle 1.0))
+       ;; compose: apply C1 first, then C2
+       ;; But action-angle wants 1-DOF state, C1 returns 1-DOF state — fine.
+       ;; Note: action-angle assumes H=½(p²+ω²q²) — we just check symplecticity.
+       (C12   (lambda (s) (C2 (C1 s))))
+       (s0    (up 0.0 0.7 1.3)))
+  (check "composition of canonical CTs is canonical" (canonical? C12 s0) #t))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

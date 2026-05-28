@@ -29,6 +29,10 @@
 ;;; Numerical trajectory evolution (Ch 3–4):
 ;;;   evolve-Hamiltonian  evolve-Lagrangian  lagrangian->hamiltonian-state
 ;;;   stoermer-verlet-step  poincare-section
+;;;
+;;; Canonical transformations (Ch 5):
+;;;   ct-jacobian  symplectic-transform?  canonical?
+;;;   F->C  F2->CT  rectangular->polar  action-angle
 
 (import (scheme base))
 (import (scheme inexact))
@@ -683,4 +687,255 @@
                                             (* frac (- (ref p-nxt 1) (ref p-cur 1))))
                                          (+ p-cur (* frac (- p-nxt p-cur))))))
                         (cons (cons q1 p1) acc)))))))))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 14  Canonical transformations (SICM Ch 5)
+;;;
+;;; A canonical transformation (CT) C: (up t q p) → (up t Q P)
+;;; preserves Hamilton's equations.  The algebraic condition is that
+;;; the 2n×2n phase-space Jacobian M = DC satisfies:
+;;;
+;;;   Mᵀ J M = J     where J = [[0, Iₙ], [−Iₙ, 0]]
+;;;
+;;; All Jacobians are computed by central finite differences, so C,
+;;; F, and F2 can be arbitrary Scheme functions.
+;;; ════════════════════════════════════════════════════════════
+
+;;; ── Matrix helpers (matrices as lists of rows) ────────────────────────────
+
+(define (ct-mat-transpose M)
+  (apply map list M))
+
+(define (ct-mat-mul A B)
+  (let ((Bt (ct-mat-transpose B)))
+    (map (lambda (rA)
+           (map (lambda (cB) (apply + (map * rA cB))) Bt))
+         A)))
+
+(define (ct-mat-vec-mul M v)
+  (map (lambda (row) (apply + (map * row v))) M))
+
+;;; Inverse of a 1×1 or 2×2 matrix.
+(define (ct-mat-inv M)
+  (cond
+    ((= (length M) 1)
+     (list (list (/ 1.0 (caar M)))))
+    ((= (length M) 2)
+     (let* ((a (list-ref (list-ref M 0) 0)) (b (list-ref (list-ref M 0) 1))
+            (c (list-ref (list-ref M 1) 0)) (d (list-ref (list-ref M 1) 1))
+            (det (- (* a d) (* b c))))
+       (if (< (abs det) 1e-14)
+           (error "ct-mat-inv: singular matrix")
+           (list (list (/ d det) (/ (- b) det))
+                 (list (/ (- c) det) (/ a det))))))
+    (else (error "ct-mat-inv: only 1×1 and 2×2 supported"))))
+
+;;; Max absolute entry (used as error norm).
+(define (ct-mat-max-abs M)
+  (apply max (map (lambda (row) (apply max (map abs row))) M)))
+
+;;; ── Phase-space helpers ───────────────────────────────────────────────────
+
+;;; Number of degrees of freedom.
+(define (ct-ndof state)
+  (let ((q (coordinate state)))
+    (if (tuple? q) (dimension q) 1)))
+
+;;; Perturb element j of a list by eps.
+(define (ct-list-perturb lst j eps)
+  (let lp ((i 0) (v lst) (acc '()))
+    (if (null? v) (reverse acc)
+        (lp (+ i 1) (cdr v)
+            (cons (if (= i j) (+ (car v) eps) (car v)) acc)))))
+
+;;; Flatten (q, p) into a list of 2n numbers: (q₀…q_{n−1} p₀…p_{n−1}).
+(define (ct-phase-vec state)
+  (let* ((q (coordinate state)) (p (momentum state))
+         (n (ct-ndof state)))
+    (append (if (tuple? q) (map (lambda (i) (ref q i)) (sv-iota n)) (list q))
+            (if (tuple? p) (map (lambda (i) (ref p i)) (sv-iota n)) (list p)))))
+
+;;; Rebuild state from t, n, and a flat phase-space list of 2n numbers.
+(define (ct-state-from-vec t n vec)
+  (let* ((q-lst (let lp ((i 0) (a '()))
+                  (if (= i n) (reverse a) (lp (+ i 1) (cons (list-ref vec i) a)))))
+         (p-lst (let lp ((i 0) (a '()))
+                  (if (= i n) (reverse a) (lp (+ i 1) (cons (list-ref vec (+ n i)) a)))))
+         (q (if (= n 1) (car q-lst) (apply up q-lst)))
+         (p (if (= n 1) (car p-lst) (apply up p-lst))))
+    (up t q p)))
+
+;;; ── Symplectic matrix and Jacobian ────────────────────────────────────────
+
+(define ct-eps 1e-4)   ; finite-difference step for CT Jacobian
+; NOTE: kept larger than sv-eps (1e-7) to suppress amplification of the inner
+; fd-grad noise when computing F2->CT Jacobians.  At h=1e-4 the central-difference
+; truncation error is O(h²)≈1e-8 — negligible vs. the 1e-4 symplecticity tolerance.
+
+;;; Standard symplectic matrix J for n-DOF (2n × 2n):
+;;;   J = [[0ₙ, Iₙ], [−Iₙ, 0ₙ]]
+(define (ct-symplectic-J n)
+  (let ((dim (* 2 n)))
+    (map (lambda (i)
+           (map (lambda (j)
+                  (cond ((= j (+ i n)) 1.0)
+                        ((= i (+ j n)) -1.0)
+                        (else 0.0)))
+                (sv-iota dim)))
+         (sv-iota dim))))
+
+;;; Numerical 2n × 2n Jacobian of C: (up t q p) → (up t Q P).
+;;; Returns a list of 2n rows, each a list of 2n values.
+(define (ct-jacobian C state)
+  (let* ((n   (ct-ndof state))
+         (t   (time state))
+         (dim (* 2 n))
+         (v0  (ct-phase-vec state))
+         (cols (map (lambda (j)
+                      (let* ((v+ (ct-list-perturb v0 j ct-eps))
+                             (v- (ct-list-perturb v0 j (- ct-eps)))
+                             (o+ (ct-phase-vec (C (ct-state-from-vec t n v+))))
+                             (o- (ct-phase-vec (C (ct-state-from-vec t n v-)))))
+                        (map (lambda (a b) (/ (- a b) (* 2.0 ct-eps))) o+ o-)))
+                    (sv-iota dim))))
+    (ct-mat-transpose cols)))
+
+;;; ── Canonicality tests ────────────────────────────────────────────────────
+
+;;; (symplectic-transform? C state [tol])
+;;; Returns #t if the phase-space Jacobian of C at state satisfies Mᵀ J M = J.
+(define (symplectic-transform? C state . rest)
+  (let* ((tol  (if (null? rest) 1e-4 (car rest)))
+         (n    (ct-ndof state))
+         (M    (ct-jacobian C state))
+         (Mt   (ct-mat-transpose M))
+         (J    (ct-symplectic-J n))
+         (MtJM (ct-mat-mul Mt (ct-mat-mul J M)))
+         (diff (map (lambda (ra rb) (map - ra rb)) MtJM J)))
+    (<= (ct-mat-max-abs diff) tol)))
+
+;;; (canonical? C state [tol])
+;;; Alias for symplectic-transform? — canonical ↔ symplectic.
+(define (canonical? C state . rest)
+  (apply symplectic-transform? C state rest))
+
+;;; ── F->C: canonical lift of a coordinate transformation ──────────────────
+
+;;; Given F: (t q) → Q, return the canonical transformation C:
+;;;   Q = F(t, q)
+;;;   P = (∂F/∂q)⁻ᵀ · p
+;;;
+;;; Numerically computes the n×n coordinate Jacobian ∂F/∂q by central
+;;; differences.  Works for 1-DOF (scalar q) and 2-DOF (2-tuple q).
+
+(define (F->C F)
+  (lambda (state)
+    (let* ((t    (time state))
+           (q    (coordinate state))
+           (p    (momentum state))
+           (n    (ct-ndof state))
+           ;; Q
+           (Q    (F t q))
+           ;; n×n Jacobian ∂F/∂q: row i = ∂Q_i/∂q_j for j=0..n-1
+           (q-lst (if (tuple? q) (map (lambda (i) (ref q i)) (sv-iota n)) (list q)))
+           (dF   (map (lambda (i)
+                        (map (lambda (j)
+                               (let* ((q+ (ct-list-perturb q-lst j ct-eps))
+                                      (q- (ct-list-perturb q-lst j (- ct-eps)))
+                                      (Q+v (F t (if (= n 1) (car q+) (apply up q+))))
+                                      (Q-v (F t (if (= n 1) (car q-) (apply up q-))))
+                                      (Qi+ (if (tuple? Q+v) (ref Q+v i) Q+v))
+                                      (Qi- (if (tuple? Q-v) (ref Q-v i) Q-v)))
+                                 (/ (- Qi+ Qi-) (* 2.0 ct-eps))))
+                             (sv-iota n)))
+                      (sv-iota n)))
+           ;; P = (dF⁻¹)ᵀ · p
+           (dFT-inv (ct-mat-transpose (ct-mat-inv dF)))
+           (p-lst  (if (tuple? p) (map (lambda (i) (ref p i)) (sv-iota n)) (list p)))
+           (P-lst  (ct-mat-vec-mul dFT-inv p-lst))
+           (P      (if (= n 1) (car P-lst) (apply up P-lst))))
+      (up t Q P))))
+
+;;; ── F2->CT: canonical transformation from a type-2 generating function ───
+
+;;; Given F2: (t q P) → real, the transformation is:
+;;;   p = ∂F2/∂q  and  Q = ∂F2/∂P
+;;;
+;;; To find (Q, P) from (q, p):
+;;;   1. Solve  p = ∂F2/∂q(t, q, P)  for P  (Newton iteration, up to 10 steps)
+;;;   2. Compute  Q = ∂F2/∂P(t, q, P)
+;;;
+;;; Converges for well-conditioned F2.  Initial guess P₀ = p.
+
+;;; Row i, column j of the mixed partial ∂(∂F2/∂q_i)/∂P_j (n×n matrix).
+(define (ct-f2-mixed-jac F2 t q P n)
+  (let* ((P-lst (if (tuple? P) (map (lambda (i) (ref P i)) (sv-iota n)) (list P))))
+    (map (lambda (i)
+           (map (lambda (j)
+                  (let* ((P+v (let ((v (ct-list-perturb P-lst j ct-eps)))
+                                (if (= n 1) (car v) (apply up v))))
+                         (P-v (let ((v (ct-list-perturb P-lst j (- ct-eps))))
+                                (if (= n 1) (car v) (apply up v))))
+                         (g+  (fd-grad (lambda (qq) (F2 t qq P+v)) q))
+                         (g-  (fd-grad (lambda (qq) (F2 t qq P-v)) q))
+                         (g+i (if (tuple? g+) (ref g+ i) g+))
+                         (g-i (if (tuple? g-) (ref g- i) g-)))
+                    (/ (- g+i g-i) (* 2.0 ct-eps))))
+                (sv-iota n)))
+         (sv-iota n))))
+
+(define (F2->CT F2)
+  (lambda (state)
+    (let* ((t  (time state))
+           (q  (coordinate state))
+           (p  (momentum state))
+           (n  (ct-ndof state))
+           ;; Newton: solve ∂F2/∂q(t, q, P) = p for P
+           (P  (let loop ((P p) (iter 0))
+                 (let* ((grad-q   (fd-grad (lambda (qq) (F2 t qq P)) q))
+                        (residual (sv- grad-q p))
+                        (r-norm   (if (tuple? residual)
+                                      (sqrt (apply + (map (lambda (i) (* (ref residual i) (ref residual i)))
+                                                          (sv-iota n))))
+                                      (abs residual))))
+                   (cond
+                     ((< r-norm 1e-12) P)
+                     ((>= iter 10) P)
+                     (else
+                      (let* ((J     (ct-f2-mixed-jac F2 t q P n))
+                             (J-inv (ct-mat-inv J))
+                             (r-lst (if (tuple? residual)
+                                        (map (lambda (i) (ref residual i)) (sv-iota n))
+                                        (list residual)))
+                             (dP-lst (ct-mat-vec-mul J-inv (map - r-lst)))
+                             (dP    (if (= n 1) (car dP-lst) (apply up dP-lst))))
+                        (loop (sv+ P dP) (+ iter 1))))))))
+           ;; Q = ∂F2/∂P
+           (Q  (fd-grad (lambda (PP) (F2 t q PP)) P)))
+      (up t Q P))))
+
+;;; ── Standard canonical transformations ───────────────────────────────────
+
+;;; 2D Cartesian → polar point transformation for use with F->C.
+;;; F(t, q) where q = (up x y) → (up r θ).
+(define (rectangular->polar t q)
+  (let ((x (ref q 0)) (y (ref q 1)))
+    (up (sqrt (+ (* x x) (* y y)))
+        (atan y x))))
+
+;;; (action-angle omega) → canonical transformation for the 1-DOF harmonic
+;;; oscillator H = ½(p² + ω²q²).
+;;;
+;;;   I = (p² + ω²q²) / (2ω)     [action = H/ω]
+;;;   θ = atan2(−p, ωq)           [angle]
+;;;
+;;; In action-angle coordinates H = ω·I (integrable, no θ dependence).
+;;; The angle evolves uniformly: θ(t) = ω·t + θ₀.
+(define (action-angle omega)
+  (lambda (state)
+    (let* ((q (coordinate state))
+           (p (momentum state))
+           (I (/ (+ (* p p) (* omega omega q q)) (* 2.0 omega)))
+           (theta (atan (- p) (* omega q))))
+      (up (time state) theta I))))
 

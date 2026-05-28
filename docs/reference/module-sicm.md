@@ -1,6 +1,6 @@
 # Module: `(curry sicm)`
 
-*v0.9.0 — 2026-05-27*
+*v0.10.0 — 2026-05-28*
 
 Structure and Interpretation of Classical Mechanics — symbolic mechanics on top of Curry's CAS. Procedure names follow Sussman & Wisdom, *SICM* 2nd ed. (MIT Press). Includes a scmutils compatibility shim so most Ch 1 examples run with minimal adaptation.
 
@@ -415,6 +415,144 @@ function returning a real number — no symbolic form required.
 
 ---
 
+## Canonical transformations (Ch 5)
+
+A **canonical transformation** (CT) is a phase-space map `C: (up t q p) → (up t Q P)` that
+preserves the symplectic structure, i.e. its Jacobian matrix M satisfies Mᵀ J M = J where
+J = [[0, I], [-I, 0]] is the standard symplectic matrix.
+
+### Canonicality test
+
+```scheme
+; Returns #t if the phase-space Jacobian of C at state satisfies Mᵀ J M = J.
+; Optional third argument overrides the default tolerance 1e-4.
+(symplectic-transform? C state)
+(symplectic-transform? C state tol)
+
+; Alias for symplectic-transform?
+(canonical? C state)
+(canonical? C state tol)
+```
+
+### Jacobian and symplectic matrix
+
+```scheme
+; Numerical 2n × 2n phase-space Jacobian of C at state.
+; Returns a list of 2n rows (each a list of 2n values).
+(ct-jacobian C state)
+
+; Standard symplectic matrix J for n-DOF (2n × 2n).
+(ct-symplectic-J n)
+```
+
+### Canonical lift of a coordinate transformation
+
+```scheme
+; Given F: (t q) → Q, lift it to a canonical transformation.
+;   Q = F(t, q)
+;   P = (∂F/∂q)⁻ᵀ · p
+; Works for 1-DOF (scalar q) and 2-DOF (up-tuple q).
+(F->C F)
+```
+
+### Type-2 generating function
+
+```scheme
+; Given F2: (t q P) → real, the transformation is defined by:
+;   p = ∂F2/∂q,   Q = ∂F2/∂P
+; (F2->CT F2) solves for P via Newton iteration, then computes Q.
+(F2->CT F2)
+
+; Row i, column j of the mixed partial ∂(∂F2/∂q_i)/∂P_j — used internally
+; by F2->CT but also available for custom Newton schemes.
+(ct-f2-mixed-jac F2 t q P n)
+```
+
+### Standard canonical transformations
+
+```scheme
+; Point transformation: 2D Cartesian → polar.
+; For use as the F argument of F->C.
+;   F(t, (up x y)) → (up r θ)
+(rectangular->polar t q)
+
+; Action-angle variables for the 1-DOF harmonic oscillator H = ½(p² + ω²q²).
+;   I = (p² + ω²q²) / (2ω)     [action = H/ω]
+;   θ = atan2(−p, ωq)           [angle]
+; In action-angle coordinates H = ω·I, so θ evolves uniformly.
+(action-angle omega)
+```
+
+### Worked examples
+
+#### Scaling transformation via F->C
+
+```scheme
+(import (curry sicm))
+
+(define alpha 2.0)
+(define C (F->C (lambda (t q) (* alpha q))))   ; Q = 2q, P = p/2
+
+(define s0 (up 0.0 1.0 3.0))
+(canonical? C s0)           ; => #t
+(coordinate (C s0))         ; => 2.0
+(momentum   (C s0))         ; => 1.5
+```
+
+#### Rectangular → polar via F->C
+
+```scheme
+(define C-polar (F->C rectangular->polar))
+
+(define s0 (up 0.0 (up 1.0 0.0) (up 0.0 1.0)))
+(canonical? C-polar s0)     ; => #t
+```
+
+#### Momentum shift via F2->CT
+
+```scheme
+; F2(t,q,P) = q·P + α·q²  →  P_new = p − 2αq,  Q_new = q
+(define alpha 0.5)
+(define F2 (lambda (t q P) (+ (* q P) (* alpha q q))))
+(define C  (F2->CT F2))
+
+(define s0 (up 0.0 1.0 2.0))
+(canonical? C s0)           ; => #t  (with default tolerance 1e-4)
+(coordinate (C s0))         ; => 1.0   (Q = q)
+(momentum   (C s0))         ; => 1.0   (P = p − 2αq = 2 − 1 = 1)
+```
+
+#### Action-angle for the harmonic oscillator
+
+```scheme
+(define-symbolic t m k)
+(define omega 1.0)
+(define C     (action-angle omega))
+(define s0    (up 0.0 1.0 0.0))   ; q=1, p=0 → I=½, θ=0
+
+(canonical? C s0)           ; => #t
+(coordinate (C s0))         ; θ = 0.0
+(momentum   (C s0))         ; I = 0.5 = H/ω
+
+; Composition of CTs is canonical
+(define alpha 1.5)
+(define C12 (lambda (s) (C ((F->C (lambda (t q) (* alpha q))) s))))
+(canonical? C12 s0)         ; => #t
+```
+
+### Notes on numerical accuracy
+
+`canonical?` evaluates `symplectic-transform?`, which computes the Jacobian M via
+central finite differences (`ct-eps = 1e-4`) and checks max|Mᵀ J M − J| ≤ 1e-4.
+
+`F2->CT` uses nested finite differences (outer `ct-eps`, inner `sv-eps = 1e-7`).
+The larger `ct-eps = 1e-4` prevents the inner noise from being amplified into the
+outer Jacobian. For general well-behaved F2 this gives symplecticity errors ≲ 1e-5.
+For pathological F2 with very small or very large scales, pass an explicit tolerance
+to `canonical?` as its third argument.
+
+---
+
 ## Coverage by chapter
 
 | Chapter | Status |
@@ -422,5 +560,5 @@ function returning a real number — no symbolic form required.
 | Ch 1 — Lagrangian mechanics | ✓ Complete |
 | Ch 2 — Rigid body mechanics | ✓ Complete |
 | Ch 3–4 — Numerical trajectory evolution | ✓ Complete |
-| Ch 5 — Canonical transformations | Planned (Phase 14) |
+| Ch 5 — Canonical transformations | ✓ Complete |
 | Ch 6–7 — Perturbation theory / Lie transforms | Planned (Phase 15) |
