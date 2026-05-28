@@ -634,7 +634,7 @@ typedef struct {
 } Camera;
 
 static curry_val wrap_camera(Camera *c) {
-    return curry_cons(curry_intern("camera"), pack_ptr(c));
+    return curry_make_pair(curry_make_symbol("camera"), pack_ptr(c));
 }
 static Camera *get_camera(curry_val v, const char *ctx) {
     if (!has_tag(v, "camera")) curry_error("%s: not a camera handle", ctx);
@@ -831,7 +831,7 @@ static curry_val fn_camera_height(int ac, curry_val *av, void *ud) {
 static curry_val fn_camera_format(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     Camera *c = get_camera(av[0], "camera-format");
-    return curry_intern(pixfmt_name(c->pixfmt));
+    return curry_make_symbol(pixfmt_name(c->pixfmt));
 }
 
 /* ============================================================
@@ -839,7 +839,7 @@ static curry_val fn_camera_format(int ac, curry_val *av, void *ud) {
  * ============================================================ */
 
 static curry_val wrap_uart(int fd) {
-    return curry_cons(curry_intern("uart"), pack_fd(fd));
+    return curry_make_pair(curry_make_symbol("uart"), pack_fd(fd));
 }
 static int get_uart(curry_val v, const char *ctx) {
     if (!has_tag(v, "uart")) curry_error("%s: not a uart handle", ctx);
@@ -1012,7 +1012,7 @@ static curry_val fn_w1_devices(int ac, curry_val *av, void *ud) {
         if (strncmp(ent->d_name, "w1_bus_master", 13) == 0) continue;
         char path[256];
         snprintf(path, sizeof(path), "/sys/bus/w1/devices/%s", ent->d_name);
-        head = curry_cons(curry_make_string(path), head);
+        head = curry_make_pair(curry_make_string(path), head);
     }
     closedir(dir);
     return head;
@@ -1046,7 +1046,7 @@ static curry_val fn_w1_temperature(int ac, curry_val *av, void *ud) {
         curry_error("w1-temperature: cannot find t= in %s", slave_path);
 
     long raw = strtol(t_pos + 2, NULL, 10);
-    return curry_make_flonum((double)raw / 1000.0);
+    return curry_make_float((double)raw / 1000.0);
 }
 
 /* (w1-raw path) → string (raw content of w1_slave file) */
@@ -1072,7 +1072,7 @@ static curry_val fn_w1_raw(int ac, curry_val *av, void *ud) {
  * ============================================================ */
 
 static curry_val wrap_watchdog(int fd) {
-    return curry_cons(curry_intern("watchdog"), pack_fd(fd));
+    return curry_make_pair(curry_make_symbol("watchdog"), pack_fd(fd));
 }
 static int get_watchdog(curry_val v, const char *ctx) {
     if (!has_tag(v, "watchdog")) curry_error("%s: not a watchdog handle", ctx);
@@ -1135,18 +1135,6 @@ static curry_val fn_watchdog_p(int ac, curry_val *av, void *ud) {
  * Board detection (sysfs / procfs)
  * ============================================================ */
 
-static curry_val read_first_line(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) return curry_make_bool(0);
-    char buf[256];
-    if (!fgets(buf, sizeof(buf), f)) { fclose(f); return curry_make_bool(0); }
-    fclose(f);
-    /* Trim trailing newline and null bytes. */
-    size_t n = strlen(buf);
-    while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == '\0'))
-        buf[--n] = '\0';
-    return curry_make_string(buf);
-}
 
 /* (rpi-model) → string, e.g. "Raspberry Pi 4 Model B Rev 1.4"
  *   Reads /proc/device-tree/model.  Returns #f if unavailable. */
@@ -1239,8 +1227,8 @@ static curry_val fn_rpi_os_info(int ac, curry_val *av, void *ud) {
                 kv += 14;
                 char *sp = strchr(kv, ' ');
                 if (sp) *sp = '\0';
-                result = curry_cons(
-                    curry_cons(curry_intern("kernel"), curry_make_string(kv)),
+                result = curry_make_pair(
+                    curry_make_pair(curry_make_symbol("kernel"), curry_make_string(kv)),
                     result);
             }
         }
@@ -1258,8 +1246,8 @@ static curry_val fn_rpi_os_info(int ac, curry_val *av, void *ud) {
                 size_t n = strlen(val);
                 while (n > 0 && (val[n-1] == '"' || val[n-1] == '\n' || val[n-1] == '\r'))
                     val[--n] = '\0';
-                result = curry_cons(
-                    curry_cons(curry_intern("distro"), curry_make_string(val)),
+                result = curry_make_pair(
+                    curry_make_pair(curry_make_symbol("distro"), curry_make_string(val)),
                     result);
                 break;
             }
