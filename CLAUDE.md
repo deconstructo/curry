@@ -325,17 +325,19 @@ macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary use
 
 Thin wrappers around internal types for use from C extension modules. Key functions: `curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. These live in `curry_core` and resolve via `--export-dynamic`.
 
-## Parallel map and reduce (`src/builtins_curry.c`)
+## Parallel map, reduce, and for-each (`src/builtins_curry.c`, `src/workpool.c`)
 
-`map` and `reduce` dispatch to a parallel implementation when the list exceeds `map_par_threshold` (default 8). Thread count is `min(n_elements, hw_concurrency())`. Each thread calls `gc_register_thread()` + `vm_init()` before doing any Scheme work, handles a contiguous slice of the input, and signals completion via a shared mutex+condvar counter.
+`map` and `reduce` dispatch to a parallel implementation when the list exceeds `map_par_threshold` (default 8). `for-each/par` is an explicit opt-in parallel variant for independent side effects. `for-each` itself stays always sequential.
 
-Exceptions in worker threads are propagated back to the caller: any thread that catches an exception sets a `bool error` flag and stores the exception value in a shared `val_t exn`; the main thread re-raises it after joining all workers.
+Parallelism is handled by a **persistent thread pool with Chase-Lev work-stealing deques** (`src/workpool.h`, `src/workpool.c`). The pool is created once at startup (`pool_init()` called from `builtins_curry_register()`), with `hw_concurrency()` worker threads that call `gc_register_thread()` + `vm_init()` once and then loop for the process lifetime. This eliminates the ~1 ms per-call thread-spawn overhead of the previous approach.
 
-Sequential variants `map/seq` and `reduce/seq` bypass the thread machinery and are useful when per-element cost is too small (thread overhead dominates), or when side effects must be ordered.
+Work is split into `min(n, n_workers × 4)` chunks (4× oversubscription for load balancing) and distributed round-robin across worker deques. Each deque is a lock-free Chase-Lev structure: the owner pushes/pops from the bottom (LIFO, cache-warm), thieves CAS the top (FIFO, oldest-first). Workers with empty deques attempt to steal from random victims before parking on a `park_cond` condvar.
 
-`for-each` remains always sequential (R7RS). `for-each/par` is an explicit opt-in parallel variant for independent side effects — same thread/exception infrastructure as parallel map, but returns `#<void>`. Multi-list form of `for-each/par` falls back to sequential.
+Exceptions propagate back to the caller: each `WorkItem` has `bool error` and `val_t exn`; the worker sets these and signals completion normally; the dispatcher re-raises after all chunks are done.
 
-`reduce` requires a true identity element: each worker initialises its accumulator to its first element (not to `identity`), so `identity` is applied once total (to combine the per-thread accumulators), not once per thread. This means `(reduce + 0 '(1 2 3)) = 6` and `(reduce + 0 '()) = 0` both work correctly.
+Sequential variants `map/seq` and `reduce/seq` bypass the pool entirely. `(hardware-concurrency)` returns the logical CPU count used by the pool.
+
+`reduce` requires a true identity element: each worker initialises its accumulator to its first element (not to `identity`), so `identity` is applied once total (to combine per-chunk accumulators), not once per chunk. `(reduce + 0 '(1 2 3)) = 6` and `(reduce + 0 '()) = 0` both work correctly.
 
 ## Adding a new built-in procedure
 

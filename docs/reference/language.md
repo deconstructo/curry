@@ -880,6 +880,7 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 | `(for-each/par f lst1 lst2 ...)` | Multi-list form: always sequential |
 | `(map-parallel-threshold)` | Return the current threshold (default: 8) |
 | `(set-map-parallel-threshold! n)` | Set threshold to positive integer `n` |
+| `(hardware-concurrency)` | Number of logical CPUs (= pool thread count) |
 
 ```scheme
 ; Map over a million elements — parallelises automatically
@@ -911,7 +912,7 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 (set-map-parallel-threshold! 10000)
 ```
 
-Thread count is capped at `min(list-length, hw-logical-cpus)`. For `map`, results are assembled in the original order regardless of completion order. For `for-each/par`, side effects may occur in any order — use `(curry sync)` mutexes when accessing shared mutable state. Exceptions in worker threads propagate back to the caller.
+Parallelism is implemented with a **persistent thread pool** (one thread per logical CPU, created once at startup) backed by **Chase-Lev work-stealing deques**. Work is split into 4× more chunks than there are threads; idle workers steal excess chunks from busy workers, eliminating static load imbalance. There is no per-call thread-spawn overhead — the pool is always warm. For `map`, results are assembled in the original order regardless of completion order. For `for-each/par`, side effects may occur in any order — use `(curry sync)` mutexes when accessing shared mutable state. Exceptions in worker threads propagate back to the caller. Use `(hardware-concurrency)` to query the pool thread count (= logical CPUs).
 
 **`reduce` identity contract**: `identity` must satisfy `(f identity x) = x` for all `x` in the list. It is used only for the empty-list case — it is not used as a per-thread seed, so it is applied at most once regardless of thread count. This means `(reduce + 0 '())` returns `0` and `(reduce + 0 '(1 2 3))` returns `6`, as expected.
 

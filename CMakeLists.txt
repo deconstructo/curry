@@ -103,6 +103,7 @@ set(CORE_SOURCES
   src/eval.c
   src/builtins.c
   src/builtins_curry.c
+  src/workpool.c
   src/set.c
   src/actors.c
   src/modules.c
