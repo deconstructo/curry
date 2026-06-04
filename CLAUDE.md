@@ -333,6 +333,8 @@ Exceptions in worker threads are propagated back to the caller: any thread that 
 
 Sequential variants `map/seq` and `reduce/seq` bypass the thread machinery and are useful when per-element cost is too small (thread overhead dominates), or when side effects must be ordered.
 
+`for-each` remains always sequential (R7RS). `for-each/par` is an explicit opt-in parallel variant for independent side effects — same thread/exception infrastructure as parallel map, but returns `#<void>`. Multi-list form of `for-each/par` falls back to sequential.
+
 `reduce` requires a true identity element: each worker initialises its accumulator to its first element (not to `identity`), so `identity` is applied once total (to combine the per-thread accumulators), not once per thread. This means `(reduce + 0 '(1 2 3)) = 6` and `(reduce + 0 '()) = 0` both work correctly.
 
 ## Adding a new built-in procedure

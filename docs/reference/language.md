@@ -19,7 +19,7 @@ Curry is an R7RS Scheme interpreter with a numeric tower that extends through th
 - [Vectors and bytevectors](#vectors)
 - [I/O](#input--output)
 - [Continuations](#tail-calls-and-continuations)
-- [Parallel map and reduce](#parallel-map-and-reduce)
+- [Parallel map, reduce, and for-each](#parallel-map-reduce-and-for-each)
 - [Random numbers](#random-numbers-srfi-27)
 - [Actor model](#actor-model)
 - [Procedure tracing](#procedure-tracing)
@@ -864,9 +864,9 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 
 ---
 
-## Parallel map and reduce
+## Parallel map, reduce, and for-each
 
-`map` and `reduce` automatically parallelise over multiple CPU cores when the list is long enough. The multi-list form of `map` (`(map f lst1 lst2 ...)`) always runs sequentially; parallelism applies to the single-list form only.
+`map` and `reduce` automatically parallelise over multiple CPU cores when the list is long enough. `for-each/par` is an explicit opt-in parallel variant of `for-each` for independent side effects. The multi-list form of `map` and `for-each/par` always runs sequentially; parallelism applies to the single-list form only.
 
 | Procedure | Description |
 |-----------|-------------|
@@ -875,6 +875,9 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 | `(map/seq f lst ...)` | Always sequential; same contract as R7RS `map` |
 | `(reduce f identity lst)` | Parallel reduce when list is long enough |
 | `(reduce/seq f identity lst)` | Always sequential |
+| `(for-each f lst ...)` | Always sequential; R7RS `for-each` |
+| `(for-each/par f lst)` | Parallel — elements processed concurrently, order unspecified |
+| `(for-each/par f lst1 lst2 ...)` | Multi-list form: always sequential |
 | `(map-parallel-threshold)` | Return the current threshold (default: 8) |
 | `(set-map-parallel-threshold! n)` | Set threshold to positive integer `n` |
 
@@ -882,7 +885,7 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 ; Map over a million elements — parallelises automatically
 (map (lambda (x) (* x x)) (iota 1000000))
 
-; Force sequential (side-effects, or per-element cost too small)
+; Force sequential (ordered side-effects, or per-element cost too small)
 (map/seq display (iota 10))
 
 ; Sum a million numbers in parallel
@@ -891,15 +894,28 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 ; Sequential reduce
 (reduce/seq + 0 '(1 2 3))
 
+; Parallel for-each — fire off independent work concurrently
+; (use a mutex when accessing shared state)
+(import (curry sync))
+(define mu (make-mutex))
+(define results (make-vector 1000 0))
+(for-each/par
+  (lambda (i)
+    (let ((v (expensive-compute i)))   ; parallel: each i computed concurrently
+      (mutex-lock! mu)
+      (vector-set! results i v)        ; serialised: shared state write
+      (mutex-unlock! mu)))
+  (iota 1000))
+
 ; Raise threshold to avoid parallelism for cheap operations
 (set-map-parallel-threshold! 10000)
 ```
 
-Thread count is capped at `min(list-length, hw-logical-cpus)`. Each worker thread handles a contiguous slice and results are assembled in the original order. Exceptions in worker threads propagate back to the caller.
+Thread count is capped at `min(list-length, hw-logical-cpus)`. For `map`, results are assembled in the original order regardless of completion order. For `for-each/par`, side effects may occur in any order — use `(curry sync)` mutexes when accessing shared mutable state. Exceptions in worker threads propagate back to the caller.
 
 **`reduce` identity contract**: `identity` must satisfy `(f identity x) = x` for all `x` in the list. It is used only for the empty-list case — it is not used as a per-thread seed, so it is applied at most once regardless of thread count. This means `(reduce + 0 '())` returns `0` and `(reduce + 0 '(1 2 3))` returns `6`, as expected.
 
-Use `map/seq` or `reduce/seq` when:
+Use sequential variants (`map/seq`, `reduce/seq`, `for-each`) when:
 - The operation has ordered side-effects (`display`, I/O, actor sends)
 - Per-element cost is very small (fixnum arithmetic, list access) — thread overhead dominates below ~10 µs/element
 - You need predictable single-threaded behaviour in tests

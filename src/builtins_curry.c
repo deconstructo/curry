@@ -1135,6 +1135,117 @@ static val_t prim_set_map_threshold(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 
+/* ---- Parallel for-each ---- */
+
+typedef struct {
+    val_t    fn;
+    val_t   *elems;
+    int      start;
+    int      end;
+    bool     error;
+    val_t    exn;
+    int            *n_done;
+    pthread_mutex_t *mutex;
+    pthread_cond_t  *cond;
+} ForEachRange;
+
+static void *for_each_range_thread(void *arg) {
+    ForEachRange *r = arg;
+    gc_register_thread();
+    vm_init();
+
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        for (int i = r->start; i < r->end; i++)
+            apply(r->fn, scm_cons(r->elems[i], V_NIL));
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        r->error = true;
+        r->exn   = h.exn;
+    }
+
+    pthread_mutex_lock(r->mutex);
+    (*r->n_done)++;
+    pthread_cond_signal(r->cond);
+    pthread_mutex_unlock(r->mutex);
+    return NULL;
+}
+
+static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t proc = av[0];
+
+    /* Multi-list form: sequential (parallelism is over a single list's elements) */
+    if (ac != 2) {
+        int nlists = ac - 1;
+        val_t *lists = av + 1;
+        for (;;) {
+            for (int i = 0; i < nlists; i++)
+                if (!vis_pair(lists[i])) return V_VOID;
+            val_t args = V_NIL;
+            for (int i = nlists - 1; i >= 0; i--)
+                args = scm_cons(vcar(lists[i]), args);
+            apply(proc, args);
+            for (int i = 0; i < nlists; i++)
+                lists[i] = vcdr(lists[i]);
+        }
+    }
+
+    val_t lst = av[1];
+    int n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+
+    /* Below threshold: sequential */
+    if (n < map_par_threshold) {
+        for (val_t p = lst; vis_pair(p); p = vcdr(p))
+            apply(proc, scm_cons(vcar(p), V_NIL));
+        return V_VOID;
+    }
+
+    val_t *elems = (val_t *)gc_alloc(n * sizeof(val_t));
+    { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
+
+    int nthreads = hw_concurrency();
+    if (nthreads > n) nthreads = n;
+
+    int n_done = 0;
+    pthread_mutex_t mutex; pthread_mutex_init(&mutex, NULL);
+    pthread_cond_t  cond;  pthread_cond_init(&cond,  NULL);
+
+    ForEachRange *ranges  = (ForEachRange *)gc_alloc(nthreads * sizeof(ForEachRange));
+    pthread_t    *threads = (pthread_t    *)gc_alloc(nthreads * sizeof(pthread_t));
+
+    int base = n / nthreads, extra = n % nthreads, pos = 0;
+    for (int t = 0; t < nthreads; t++) {
+        int sz = base + (t < extra ? 1 : 0);
+        ranges[t] = (ForEachRange){
+            .fn=proc, .elems=elems, .start=pos, .end=pos+sz,
+            .error=false, .exn=V_FALSE,
+            .n_done=&n_done, .mutex=&mutex, .cond=&cond
+        };
+        pos += sz;
+        pthread_create(&threads[t], NULL, for_each_range_thread, &ranges[t]);
+    }
+
+    pthread_mutex_lock(&mutex);
+    while (n_done < nthreads)
+        pthread_cond_wait(&cond, &mutex);
+    pthread_mutex_unlock(&mutex);
+
+    for (int t = 0; t < nthreads; t++)
+        pthread_join(threads[t], NULL);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&cond);
+
+    for (int t = 0; t < nthreads; t++)
+        if (ranges[t].error) scm_raise(V_FALSE, "for-each/par: error in parallel worker");
+
+    return V_VOID;
+}
+
 /* ---- SRFI-27 random number primitives ---- */
 
 /* xoshiro256+ PRNG state — global, seeded lazily */
@@ -1312,6 +1423,7 @@ void builtins_curry_register(val_t env) {
     DEF("reduce/seq",                 prim_reduce_seq,        3, 3);
     DEF("map-parallel-threshold",     prim_get_map_threshold, 0, 0);
     DEF("set-map-parallel-threshold!",prim_set_map_threshold, 1, 1);
+    DEF("for-each/par",               prim_for_each_par,      2,-1);
 
     /* SRFI-27 random numbers */
     DEF("random-real",                    prim_random_real,           0,0);

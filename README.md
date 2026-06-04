@@ -83,10 +83,11 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 | `(map/seq f lst ...)` | Always sequential; full multi-list R7RS `map` |
 | `(reduce f identity lst)` | Parallel associative fold |
 | `(reduce/seq f identity lst)` | Always sequential |
+| `(for-each/par f lst)` | Parallel for-each — opt-in, order unspecified |
 | `(map-parallel-threshold)` | Return current threshold |
 | `(set-map-parallel-threshold! n)` | Set threshold |
 
-Thread count is `min(list-length, hw-logical-cpus)`. Exceptions in worker threads propagate to the caller. `reduce` requires a true identity element; it is not used as a per-thread seed.
+Thread count is `min(list-length, hw-logical-cpus)`. Exceptions in worker threads propagate to the caller. `reduce` requires a true identity element; it is not used as a per-thread seed. `for-each` remains sequential; `for-each/par` is the explicit opt-in for independent side effects.
 
 ### Random numbers (SRFI-27)
 
