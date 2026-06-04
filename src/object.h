@@ -65,6 +65,8 @@ typedef enum {
     T_UP            = 39,  /* contravariant up-tuple:   (up   a b c ...) */
     T_DOWN          = 40,  /* covariant   down-tuple:   (down a b c ...) */
     T_BCCLOSURE     = 41,  /* bytecode closure (chunk + upvalues)        */
+    T_TVAR          = 42,  /* STM transactional variable                 */
+    T_CHANNEL       = 43,  /* CSP buffered channel                       */
 } ObjType;
 
 /* All heap objects start with this header */
@@ -292,6 +294,36 @@ typedef struct Actor {
     bool            alive;
     pthread_mutex_t lock;
 } Actor;
+
+/* STM transactional variable */
+typedef struct TVar {
+    Hdr              hdr;
+    val_t            value;     /* current committed value                */
+    uint64_t         version;   /* global-clock version when last written */
+    pthread_mutex_t  lock;      /* held only during commit                */
+    pthread_cond_t   changed;   /* signalled after every successful write */
+    int              n_waiters; /* count of threads blocked in retry      */
+} TVar;
+
+#define vis_tvar(v)   vis_type(v, T_TVAR)
+#define as_tvar(v)    vunptr(TVar, v)
+
+/* CSP buffered channel — ring buffer protected by one mutex + two condvars */
+typedef struct Channel {
+    Hdr             hdr;
+    pthread_mutex_t lock;
+    pthread_cond_t  not_full;   /* senders wait here when buf is full     */
+    pthread_cond_t  not_empty;  /* receivers wait here when buf is empty  */
+    val_t          *buf;        /* GC-managed ring buffer                 */
+    uint32_t        head;
+    uint32_t        tail;
+    uint32_t        count;
+    uint32_t        cap;        /* 0 = synchronous (rendezvous)           */
+    bool            closed;
+} Channel;
+
+#define vis_channel(v)  vis_type(v, T_CHANNEL)
+#define as_channel(v)   vunptr(Channel, v)
 
 /* Hash-based set (open addressing) */
 #define SET_CMP_EQ     0  /* eq?     - pointer identity */

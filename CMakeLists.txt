@@ -50,6 +50,7 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Boehm GC — the .pc file may live in /usr/local/lib/pkgconfig which CMake
 # doesn't search by default.  Extend PKG_CONFIG_PATH then try pkg-config,
@@ -290,13 +291,8 @@ if(BUILD_MODULE_NETWORK)
 endif()
 
 if(BUILD_MODULE_CRYPTO)
-  find_package(OpenSSL QUIET)
-  if(OpenSSL_FOUND)
-    curry_c_module(crypto)
-    target_link_libraries(curry_crypto PRIVATE OpenSSL::Crypto)
-  else()
-    message(WARNING "OpenSSL not found, skipping crypto module")
-  endif()
+  curry_c_module(crypto)
+  target_link_libraries(curry_crypto PRIVATE OpenSSL::Crypto)
 endif()
 
 if(BUILD_MODULE_LDAP)
@@ -319,12 +315,11 @@ endif()
 
 if(BUILD_MODULE_STORAGE)
   find_package(CURL QUIET)
-  find_package(OpenSSL QUIET)
-  if(CURL_FOUND AND OpenSSL_FOUND)
+  if(CURL_FOUND)
     curry_c_module(storage)
     target_link_libraries(curry_storage PRIVATE CURL::libcurl OpenSSL::Crypto)
   else()
-    message(WARNING "libcurl or OpenSSL not found — run: sudo apt install libcurl4-openssl-dev")
+    message(WARNING "libcurl not found — run: sudo apt install libcurl4-openssl-dev")
   endif()
 endif()
 
