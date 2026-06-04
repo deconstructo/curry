@@ -327,7 +327,7 @@ log  ; => (out in)
 (import (prefix (curry network) net-))
 ```
 
-### define-library
+### define-library (R7RS)
 
 ```scheme
 (define-library (mylib util)
@@ -337,6 +337,34 @@ log  ; => (out in)
     (define (helper x) ...)
     (define (transform x) ...)))
 ```
+
+### library (R6RS)
+
+R6RS `library` form is also supported. Body forms are inline rather than wrapped in `(begin ...)`:
+
+```scheme
+(library (mylib util)
+  (export helper transform)
+  (import (rnrs))
+  (define (helper x) ...)
+  (define (transform x) ...))
+```
+
+`(rnrs)` and all standard R6RS sub-library names (`(rnrs base)`, `(rnrs lists)`, `(rnrs io simple)`, `(rnrs records syntactic)`, `(rnrs arithmetic bitwise)`, etc.) are aliases for the global environment — R6RS and R7RS procedure names are almost entirely identical.
+
+R6RS `define-record-type` with `(fields ...)` syntax is also supported, with auto-generated names:
+
+```scheme
+(define-record-type point
+  (fields (mutable x)
+          (mutable y)))
+
+; generates: make-point  point?  point-x  point-y  point-x-set!  point-y-set!
+(define p (make-point 3 4))
+(point-x-set! p 10)
+```
+
+R7RS `define-record-type` (with explicit constructor, predicate, and field specs) continues to work unchanged.
 
 ---
 

@@ -76,6 +76,7 @@ The test suites registered in `ctest`:
 |------|---------|----------------|
 | `core` | `curry_test` (C binary) | C-level value/numeric/GC primitives |
 | `scheme_r7rs` | `r7rs_tests.scm` | R7RS conformance |
+| `scheme_r6rs` | `r6rs_tests.scm` | R6RS compatibility: `library` form, `(rnrs)` imports, R6RS `define-record-type`, SRFI-27 random |
 | `numeric_ext` | `numeric_ext_tests.scm` | Clifford algebra, symbolic CAS, surreal numbers, auto-diff, numeric tower |
 | `actors` | `actors_tests.scm` | Concurrency primitives (spawn/send!/receive) |
 | `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |
@@ -487,6 +488,31 @@ Key points:
 - Queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
 - No external C dependencies beyond the standard socket API.
 - Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/reference/module-neo4j.md`.
+
+## R6RS compatibility
+
+Curry supports a practical subset of R6RS sufficient to run R6RS library code without modification.
+
+### What is supported
+
+- **`library` form** — R6RS `(library (name) (export ...) (import ...) body...)` is a recognised special form. Body forms are inline (not wrapped in `begin`), matching the R6RS spec. Libraries self-register by name, and the module loader defers to that registration.
+
+- **`(rnrs)` and sub-libraries** — `(import (rnrs))`, `(import (rnrs base))`, `(import (rnrs lists))`, `(import (rnrs io simple))`, `(import (rnrs records syntactic))`, `(import (rnrs arithmetic bitwise))`, etc. all resolve as aliases for the global environment. R6RS and R7RS procedure names are almost entirely identical.
+
+- **R6RS `define-record-type`** — the `(fields (mutable f) ...)` / `(fields (immutable f) ...)` syntax is detected automatically and auto-generates `make-<name>`, `<name>?`, `<name>-<field>`, and `<name>-<field>-set!`. The R7RS form (explicit constructor, predicate, and field specs) continues to work unchanged.
+
+- **Import filters** — `(only ...)`, `(except ...)`, `(rename ...)`, `(prefix ...)` work with `(rnrs ...)` library names as well as `(scheme ...)` and `(curry ...)` names.
+
+- **`(for lib phase)` wrappers** — the phase annotation is stripped and the library is imported unconditionally. Compile-time vs run-time phase distinction is not meaningful in an interpreter.
+
+- **SRFI-27 random numbers** — `random-real`, `random-integer`, `default-random-source`, `random-source-randomize!`, `make-random-source`, `random-source->random-real`. Uses xoshiro256+ seeded from `/dev/urandom`.
+
+### What is not (yet) supported
+
+- **`syntax-case`** and **`identifier-syntax`** — R6RS procedural macro system. `define-syntax`/`syntax-rules` works; the full `syntax-case` transformer protocol does not.
+- **`(for lib (meta 1))` phase imports** — the phase is ignored (library is imported at run time), so macros that depend on compile-time bindings may not expand correctly.
+- **R6RS condition system** — `(rnrs conditions)` is aliased to the global env, but the R6RS condition hierarchy (`&error`, `&violation`, etc.) is not separately implemented.
+- **`.sps` top-level program files** — R6RS programs use a `(import ...)` form at the top level without a `library` wrapper. This works in curry if the imports resolve; the `.sps` file extension has no special treatment.
 
 ## R7RS compliance gaps
 
