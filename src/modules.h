@@ -4,7 +4,7 @@
 /*
  * Module / library system for Curry Scheme.
  *
- * Implements R7RS define-library / import.
+ * Implements R7RS define-library / import and R6RS library form.
  * Also supports loading compiled C extension modules as shared libraries.
  *
  * Module names are lists of symbols, e.g. (curry json) or (scheme base).
@@ -38,8 +38,11 @@ val_t modules_import(val_t spec, val_t env);
 /* Register a built-in module */
 void modules_register_builtin(val_t name_list, val_t env);
 
-/* Define-library: install a library form */
+/* Define-library: install a library form (R7RS) */
 val_t modules_define_library(val_t form, val_t env);
+
+/* R6RS library form */
+val_t modules_define_r6rs_library(val_t form, val_t env);
 
 /* ---- C extension API ---- */
 

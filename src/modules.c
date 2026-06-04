@@ -168,6 +168,13 @@ static Module *load_scheme_module(val_t name, const char *path) {
     return mod;
 }
 
+/* Strip R6RS (for lib phase ...) wrapper from an import spec. */
+static val_t strip_for(val_t spec) {
+    if (vis_pair(spec) && vcar(spec) == S_FOR)
+        return vcadr(spec);
+    return spec;
+}
+
 /* ---- Public API ---- */
 
 void modules_init(void) {
@@ -227,6 +234,39 @@ void modules_init(void) {
                         scm_cons(sym_intern_cstr(scheme_libs[i]), V_NIL));
         modules_register_builtin(name, GLOBAL_ENV);
     }
+
+    /* Register R6RS (rnrs) and sub-libraries as aliases for the global env.
+     * R6RS procedures are almost identical to R7RS; aliasing to global env
+     * covers the vast majority of (rnrs) usage. */
+    val_t rnrs_sym = sym_intern_cstr("rnrs");
+    /* (rnrs) itself */
+    modules_register_builtin(scm_cons(rnrs_sym, V_NIL), GLOBAL_ENV);
+    /* Two-segment (rnrs X) names */
+    static const char *rnrs2[] = {
+        "base", "bytevectors", "conditions", "control", "eval",
+        "exceptions", "files", "hashtables", "lists", "programs",
+        "r5rs", "sorting", "unicode",
+        NULL
+    };
+    for (int i = 0; rnrs2[i]; i++) {
+        val_t name = scm_cons(rnrs_sym,
+                        scm_cons(sym_intern_cstr(rnrs2[i]), V_NIL));
+        modules_register_builtin(name, GLOBAL_ENV);
+    }
+    /* Three-segment (rnrs X Y) names */
+    static const struct { const char *a; const char *b; } rnrs3[] = {
+        {"arithmetic", "bitwise"}, {"arithmetic", "fixnums"}, {"arithmetic", "flonums"},
+        {"io",         "ports"},   {"io",         "simple"},
+        {"mutable",    "pairs"},   {"mutable",    "strings"},
+        {"records",    "procedural"}, {"records", "syntactic"}, {"records", "inspection"},
+        {NULL, NULL}
+    };
+    for (int i = 0; rnrs3[i].a; i++) {
+        val_t name = scm_cons(rnrs_sym,
+                        scm_cons(sym_intern_cstr(rnrs3[i].a),
+                        scm_cons(sym_intern_cstr(rnrs3[i].b), V_NIL)));
+        modules_register_builtin(name, GLOBAL_ENV);
+    }
 }
 
 val_t modules_load(val_t name_list) {
@@ -253,12 +293,25 @@ val_t modules_load(val_t name_list) {
         /* Try .sld (Scheme library definition) */
         snprintf(full, sizeof(full), "%s/%s.sld", search_dirs[i], path_base);
         mod = load_scheme_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return vptr(mod); }
+        if (mod) {
+            /* Prefer self-registration: if the file contained (library ...) or
+             * (define-library ...), those forms already registered the module
+             * under the correct env.  Don't overwrite with the file-level wrapper. */
+            Module *self_reg = registry_lookup(name_list);
+            if (self_reg) return vptr(self_reg);
+            registry_insert(name_list, mod);
+            return vptr(mod);
+        }
 
         /* Try .scm */
         snprintf(full, sizeof(full), "%s/%s.scm", search_dirs[i], path_base);
         mod = load_scheme_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return vptr(mod); }
+        if (mod) {
+            Module *self_reg = registry_lookup(name_list);
+            if (self_reg) return vptr(self_reg);
+            registry_insert(name_list, mod);
+            return vptr(mod);
+        }
     }
 
     scm_raise(V_FALSE, "module not found: %s", path_base);
@@ -338,7 +391,7 @@ void modules_register_builtin(val_t name_list, val_t mod_env) {
     registry_insert(name_list, mod);
 }
 
-/* (define-library (name) export-spec... body...) */
+/* (define-library (name) clause...) — R7RS */
 val_t modules_define_library(val_t form, val_t env) {
     val_t rest    = vcdr(form);
     val_t name    = vcar(rest);   rest = vcdr(rest);
@@ -352,10 +405,15 @@ val_t modules_define_library(val_t form, val_t env) {
         if (clause_type == S_EXPORT) {
             val_t es = vcdr(clause);
             while (vis_pair(es)) { exports = scm_cons(vcar(es), exports); es = vcdr(es); }
-            (void)exports; /* will be used when importing */
+            (void)exports;
         } else if (clause_type == S_IMPORT) {
-            modules_import(vcadr(clause), lib_env);
-        } else if (clause_type == sym_intern_cstr("begin")) {
+            /* (import spec ...) — one or more import specs */
+            val_t specs = vcdr(clause);
+            while (vis_pair(specs)) {
+                modules_import(vcar(specs), lib_env);
+                specs = vcdr(specs);
+            }
+        } else if (clause_type == S_BEGIN) {
             val_t body = vcdr(clause);
             while (vis_pair(body)) { eval(vcar(body), lib_env); body = vcdr(body); }
         } else if (clause_type == S_INCLUDE) {
@@ -364,6 +422,50 @@ val_t modules_define_library(val_t form, val_t env) {
                 scm_load(as_str(vcar(files))->data, lib_env);
                 files = vcdr(files);
             }
+        }
+    }
+    (void)env;
+    modules_register_builtin(name, lib_env);
+    return V_VOID;
+}
+
+/* (library (name) clause...) — R6RS
+ *
+ * Differs from R7RS define-library in two ways:
+ *   1. The keyword is 'library', not 'define-library'.
+ *   2. Body forms are inline after export/import clauses, not wrapped in (begin ...).
+ *   3. (import spec ...) may contain multiple specs in one clause.
+ *   4. (for lib phase) wrappers on import specs are stripped (phase is ignored
+ *      in an interpreter — compile-time vs run-time is not meaningful here).
+ */
+val_t modules_define_r6rs_library(val_t form, val_t env) {
+    val_t rest    = vcdr(form);
+    val_t name    = vcar(rest);   rest = vcdr(rest);
+    val_t lib_env = env_new_root();
+    val_t exports = V_NIL;
+
+    while (vis_pair(rest)) {
+        val_t clause = vcar(rest); rest = vcdr(rest);
+        if (!vis_pair(clause)) {
+            eval(clause, lib_env);
+            continue;
+        }
+        val_t clause_type = vcar(clause);
+
+        if (clause_type == S_EXPORT) {
+            val_t es = vcdr(clause);
+            while (vis_pair(es)) { exports = scm_cons(vcar(es), exports); es = vcdr(es); }
+            (void)exports;
+        } else if (clause_type == S_IMPORT) {
+            /* R6RS: (import import-spec ...) — multiple specs per clause */
+            val_t specs = vcdr(clause);
+            while (vis_pair(specs)) {
+                modules_import(strip_for(vcar(specs)), lib_env);
+                specs = vcdr(specs);
+            }
+        } else {
+            /* Inline body form */
+            eval(clause, lib_env);
         }
     }
     (void)env;

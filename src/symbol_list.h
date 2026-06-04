@@ -55,6 +55,7 @@ SYM(S_WITH_EXCEPTION_HANDLER, "with-exception-handler")
 
 /* Module system */
 SYM(S_DEFINE_LIBRARY,     "define-library")
+SYM(S_LIBRARY,            "library")
 SYM(S_IMPORT,             "import")
 SYM(S_EXPORT,             "export")
 SYM(S_ONLY,               "only")
@@ -62,6 +63,12 @@ SYM(S_EXCEPT,             "except")
 SYM(S_RENAME,             "rename")
 SYM(S_PREFIX,             "prefix")
 SYM(S_DEFINED_P,          "defined?")
+SYM(S_FOR,                "for")
+
+/* R6RS record syntax */
+SYM(S_FIELDS,             "fields")
+SYM(S_MUTABLE,            "mutable")
+SYM(S_IMMUTABLE,          "immutable")
 
 /* Syntax helpers */
 SYM(S_ELSE,               "else")

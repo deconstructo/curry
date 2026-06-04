@@ -1811,6 +1811,82 @@ static val_t make_decimal_rat(const char *digits) {
     return result;
 }
 
+/* ---- SRFI-27 random number primitives ---- */
+
+/* xoshiro256+ PRNG state — global, seeded lazily */
+static uint64_t rng_s[4] = { 0x123456789abcdef0ULL, 0xdeadbeefcafeULL,
+                              0x0123456789ULL,        0xfedcba9876543210ULL };
+static bool rng_seeded = false;
+
+static uint64_t rng_rotl(const uint64_t x, int k) {
+    return (x << k) | (x >> (64 - k));
+}
+
+static uint64_t rng_next(void) {
+    const uint64_t result = rng_s[0] + rng_s[3];
+    const uint64_t t = rng_s[1] << 17;
+    rng_s[2] ^= rng_s[0]; rng_s[3] ^= rng_s[1];
+    rng_s[1] ^= rng_s[2]; rng_s[0] ^= rng_s[3];
+    rng_s[2] ^= t;
+    rng_s[3] = rng_rotl(rng_s[3], 45);
+    return result;
+}
+
+static void rng_seed_from_os(void) {
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f) {
+        (void)fread(rng_s, sizeof(rng_s), 1, f);
+        fclose(f);
+    } else {
+        /* Fallback: mix time and address bits */
+        uint64_t t = (uint64_t)time(NULL);
+        rng_s[0] ^= t; rng_s[1] ^= t * 6364136223846793005ULL;
+        rng_s[2] ^= ~t; rng_s[3] ^= t ^ (t >> 33);
+    }
+    rng_seeded = true;
+}
+
+static val_t prim_random_real(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    if (!rng_seeded) rng_seed_from_os();
+    /* Convert 64-bit integer to double in [0,1) */
+    uint64_t bits = (rng_next() >> 11) | 0x3FF0000000000000ULL;
+    double   d;
+    memcpy(&d, &bits, sizeof(d));
+    return num_make_float(d - 1.0);
+}
+
+static val_t prim_random_seed(int ac, val_t *av, void *ud) {
+    /* (random-source-randomize! src) — src is ignored, seeds global state */
+    (void)ac; (void)av; (void)ud;
+    rng_seed_from_os();
+    return V_VOID;
+}
+
+static val_t prim_make_random_source(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return sym_intern_cstr("default-random-source");
+}
+
+static val_t prim_random_source_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return vis_symbol(av[0]) ? V_TRUE : V_FALSE;
+}
+
+static val_t prim_random_source_to_real(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    /* Returns a thunk that produces random reals */
+    return env_lookup(GLOBAL_ENV, sym_intern_cstr("random-real"));
+}
+
+static val_t prim_random_integer(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!rng_seeded) rng_seed_from_os();
+    intptr_t n = vunfix(av[0]);
+    if (n <= 0) return vfix(0);
+    return vfix((intptr_t)(rng_next() % (uint64_t)n));
+}
+
 void builtins_register(val_t env) {
     /* Type predicates */
     DEF("pair?",        prim_pair_p,      1,1); DEF("null?",       prim_null_p,      1,1); DEF("list?", prim_list_p, 1,1);
@@ -2039,6 +2115,18 @@ void builtins_register(val_t env) {
     DEF("%record-pred?",  prim_record_pred, 2,2);
     DEF("%record-ref",    prim_record_ref,  2,2);
     DEF("%record-set!",   prim_record_set,  3,3);
+
+    /* SRFI-27 random numbers */
+    DEF("random-real",                   prim_random_real,            0,0);
+    DEF("random-integer",                prim_random_integer,         1,1);
+    DEF("make-random-source",            prim_make_random_source,     0,0);
+    DEF("random-source?",                prim_random_source_p,        1,1);
+    DEF("random-source-randomize!",      prim_random_seed,            1,1);
+    DEF("random-source-pseudo-randomize!",prim_random_seed,           3,3);
+    DEF("random-source->random-real",    prim_random_source_to_real,  1,1);
+    DEF("random-source->random-integer", prim_random_source_to_real,  1,1);
+    env_define(env, sym_intern_cstr("default-random-source"),
+               sym_intern_cstr("default-random-source"));
 
     /* Misc */
     DEF("gensym",     prim_gensym,  0,1);

@@ -36,8 +36,10 @@ extern val_t
     S_VALUES, S_CALL_WITH_VALUES, S_CALL_CC, S_CALL_WITH_CC,
     S_WITH_EXCEPTION_HANDLER,
     /* module system */
-    S_DEFINE_LIBRARY, S_IMPORT, S_EXPORT, S_ONLY, S_EXCEPT, S_RENAME, S_PREFIX,
-    S_DEFINED_P,
+    S_DEFINE_LIBRARY, S_LIBRARY, S_IMPORT, S_EXPORT,
+    S_ONLY, S_EXCEPT, S_RENAME, S_PREFIX, S_DEFINED_P, S_FOR,
+    /* R6RS record syntax */
+    S_FIELDS, S_MUTABLE, S_IMMUTABLE,
     /* syntax helpers */
     S_ELSE, S_ARROW, S_DOT, S_REST,
     /* actor primitives */

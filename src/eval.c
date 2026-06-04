@@ -658,8 +658,148 @@ tail:
     }
 
     if (op == S_DEFINE_RECORD_TYPE) {
-        /* (define-record-type <name> (<constructor> <field>...) <predicate> <field-spec>...) */
-        val_t name_sym  = vcar(rest);
+        /* Detect R6RS vs R7RS syntax.
+         * R7RS: (define-record-type name (ctor-name field...) pred (field acc [mut])...)
+         * R6RS: (define-record-type name (fields (mutable/immutable f)...) ...)
+         *   — second element's car is 'fields (or another R6RS clause keyword). */
+        val_t name_sym = vcar(rest);
+        bool is_r6rs = vis_pair(vcdr(rest)) &&
+                       vis_pair(vcadr(rest)) &&
+                       (vcar(vcadr(rest)) == S_FIELDS  ||
+                        vcar(vcadr(rest)) == sym_intern_cstr("parent") ||
+                        vcar(vcadr(rest)) == sym_intern_cstr("protocol") ||
+                        vcar(vcadr(rest)) == sym_intern_cstr("sealed") ||
+                        vcar(vcadr(rest)) == sym_intern_cstr("opaque") ||
+                        vcar(vcadr(rest)) == sym_intern_cstr("nongenerative"));
+
+        if (is_r6rs) {
+            /* R6RS define-record-type: auto-generate make-<name>, <name>?, <name>-<field>,
+             * and <name>-<field>-set! from the (fields ...) clause. */
+            const char *ns = sym_cstr(name_sym);
+            char buf[256];
+
+            /* Find (fields ...) clause */
+            val_t field_list = V_NIL;
+            val_t c = vcdr(rest);
+            while (vis_pair(c)) {
+                val_t cl = vcar(c);
+                if (vis_pair(cl) && vcar(cl) == S_FIELDS) { field_list = vcdr(cl); break; }
+                c = vcdr(c);
+            }
+
+            uint32_t nfields = (uint32_t)list_length(field_list);
+            RecordType *rtd = (RecordType *)gc_alloc(
+                sizeof(RecordType) + nfields * sizeof(val_t));
+            rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
+            rtd->name = name_sym; rtd->nfields = nfields;
+
+            /* Fill field names in RTD */
+            val_t fs = field_list; uint32_t fi = 0;
+            while (vis_pair(fs)) {
+                val_t fspec = vcar(fs);
+                val_t fname = vis_pair(fspec) ? vcadr(fspec) : fspec;
+                rtd->field_names[fi++] = fname;
+                fs = vcdr(fs);
+            }
+            val_t rtd_val = vptr(rtd);
+
+            /* Build ordered field-name param list for constructor */
+            val_t ctor_fields = V_NIL;
+            fs = field_list;
+            while (vis_pair(fs)) {
+                val_t fspec = vcar(fs);
+                val_t fname = vis_pair(fspec) ? vcadr(fspec) : fspec;
+                ctor_fields = make_pair(fname, ctor_fields);
+                fs = vcdr(fs);
+            }
+            /* reverse to restore declaration order */
+            { val_t rev = V_NIL, p = ctor_fields;
+              while (vis_pair(p)) { rev = make_pair(vcar(p), rev); p = vcdr(p); }
+              ctor_fields = rev; }
+
+            /* Constructor: make-<name> */
+            snprintf(buf, sizeof(buf), "make-%s", ns);
+            val_t ctor_name = sym_intern_cstr(buf);
+            {
+                Closure *c2 = CURRY_NEW(Closure);
+                c2->hdr.type = T_CLOSURE; c2->hdr.flags = 0;
+                c2->params = ctor_fields;
+                c2->body   = make_pair(
+                    make_pair(sym_intern_cstr("%record-ctor"),
+                        make_pair(make_pair(S_QUOTE, make_pair(rtd_val, V_NIL)),
+                                  ctor_fields)),
+                    V_NIL);
+                c2->env  = as_env(env);
+                c2->name = ctor_name;
+                env_define(env, ctor_name, vptr(c2));
+            }
+
+            /* Predicate: <name>? */
+            snprintf(buf, sizeof(buf), "%s?", ns);
+            val_t pred_name = sym_intern_cstr(buf);
+            {
+                Closure *c2 = CURRY_NEW(Closure);
+                c2->hdr.type = T_CLOSURE; c2->hdr.flags = 0;
+                val_t x = sym_intern_cstr("x");
+                c2->params = make_pair(x, V_NIL);
+                c2->body   = make_pair(
+                    make_pair(sym_intern_cstr("%record-pred?"),
+                        make_pair(make_pair(S_QUOTE, make_pair(rtd_val, V_NIL)),
+                                  make_pair(x, V_NIL))),
+                    V_NIL);
+                c2->env  = as_env(env);
+                c2->name = pred_name;
+                env_define(env, pred_name, vptr(c2));
+            }
+
+            /* Accessors and mutators */
+            fs = field_list; fi = 0;
+            while (vis_pair(fs)) {
+                val_t fspec   = vcar(fs);
+                val_t fname   = vis_pair(fspec) ? vcadr(fspec) : fspec;
+                bool  is_mutable = !vis_pair(fspec) || (vcar(fspec) == S_MUTABLE);
+                val_t fi_val  = vfix((intptr_t)fi);
+                val_t x = sym_intern_cstr("x");
+
+                /* Accessor: <name>-<field> */
+                snprintf(buf, sizeof(buf), "%s-%s", ns, sym_cstr(fname));
+                val_t getter_name = sym_intern_cstr(buf);
+                Closure *getter = CURRY_NEW(Closure);
+                getter->hdr.type = T_CLOSURE; getter->hdr.flags = 0;
+                getter->params = make_pair(x, V_NIL);
+                getter->body   = make_pair(
+                    make_pair(sym_intern_cstr("%record-ref"),
+                        make_pair(x,
+                        make_pair(make_pair(S_QUOTE, make_pair(fi_val, V_NIL)), V_NIL))),
+                    V_NIL);
+                getter->env  = as_env(env);
+                getter->name = getter_name;
+                env_define(env, getter_name, vptr(getter));
+
+                if (is_mutable) {
+                    /* Mutator: <name>-<field>-set! */
+                    snprintf(buf, sizeof(buf), "%s-%s-set!", ns, sym_cstr(fname));
+                    val_t setter_name = sym_intern_cstr(buf);
+                    val_t v = sym_intern_cstr("v");
+                    Closure *setter = CURRY_NEW(Closure);
+                    setter->hdr.type = T_CLOSURE; setter->hdr.flags = 0;
+                    setter->params = make_pair(x, make_pair(v, V_NIL));
+                    setter->body   = make_pair(
+                        make_pair(sym_intern_cstr("%record-set!"),
+                            make_pair(x,
+                            make_pair(make_pair(S_QUOTE, make_pair(fi_val, V_NIL)),
+                            make_pair(v, V_NIL)))),
+                        V_NIL);
+                    setter->env  = as_env(env);
+                    setter->name = setter_name;
+                    env_define(env, setter_name, vptr(setter));
+                }
+                fi++; fs = vcdr(fs);
+            }
+            return V_VOID;
+        }
+
+        /* R7RS define-record-type — original implementation below */
         val_t ctor_form = vcadr(rest);
         val_t pred_sym  = vcaddr(rest);
         val_t field_specs = vcdr(vcddr(rest));
@@ -960,6 +1100,11 @@ tail:
     if (op == S_DEFINE_LIBRARY) {
         extern val_t modules_define_library(val_t form, val_t env);
         return modules_define_library(expr, env);
+    }
+
+    if (op == S_LIBRARY) {
+        extern val_t modules_define_r6rs_library(val_t form, val_t env);
+        return modules_define_r6rs_library(expr, env);
     }
 
     /* ---- (symbolic x y z ...) — bind names as symbolic unknowns ---- */
