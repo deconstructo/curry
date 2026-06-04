@@ -5,10 +5,10 @@ class Curry < Formula
 
   # Update url + sha256 after tagging a release:
   #   git tag v0.8.7 && git push origin v0.8.7
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.8.18.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.8.18.tar.gz"
-  sha256 "e0beba87fffa9131f67917a3515fc4332d6acd5273d4d38f662cee6952240ee9"
-  version "0.8.18"
+  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v0.8.19.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v0.8.19.tar.gz"
+  sha256 "b490e49efb39defe00868a3de9fa74c54171a63bb171392ef9e751b83c43ec74"
+  version "0.8.19"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
