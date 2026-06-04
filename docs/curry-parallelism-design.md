@@ -125,8 +125,203 @@ Because Curry cannot make ParaSail's eliminations (no globals, no aliasing) with
 
 ## Open Questions
 
-- Threshold value for `map` parallelism fallback: what is the right default, and should it be runtime-tunable or compile-time?
-- Interaction of work-stealing scheduler with Boehm GC pause behaviour across worker threads.
-- Whether `for-each` follows the same parallel-by-default decision as `map`.
+- Threshold value for `map` parallelism fallback: what is the right default, and should it be runtime-tunable or compile-time? *(resolved: tunable at runtime via `set-map-parallel-threshold!`, default 8)*
+- Interaction of work-stealing scheduler with Boehm GC pause behaviour across worker threads. *(addressed below)*
+- Whether `for-each` follows the same parallel-by-default decision as `map`. *(resolved: `for-each` stays sequential; `for-each/par` is explicit opt-in)*
 - Hand-off ownership semantics: at the language level (Cill type system) or as a convention enforced by the actor runtime?
 - Whether the epistemological plugin system (Nyāya, songline, whakapapa etc.) evaluators running as actors gives implicit parallelism across epistemological modules for free.
+
+---
+
+## Thread Pool + Work-Stealing Scheduler
+
+*Design session, June 2026. Implementation target: Curry 0.9.x.*
+
+### Status quo and its cost
+
+The current parallel `map`/`reduce`/`for-each/par` implementation (introduced in 0.8.19–0.8.20) spawns N fresh pthreads per call and joins them on completion. Thread creation on Linux/macOS costs ~50–200 µs each; with 8 threads that is ~1 ms of overhead per `map` call regardless of list size, paid every time. For programs that call `map` in a loop — render loops, simulation ticks, server request processing — this dominates.
+
+The fix is a **persistent thread pool**: create threads once at process startup, keep them alive between calls, and dispatch work via a queue rather than by spawning.
+
+### Architecture
+
+Two layers:
+
+1. **Thread pool** — N persistent worker threads (N = `hw_concurrency()`), each owning a work deque and a `VM` + GC registration that persists for the process lifetime.
+
+2. **Work-stealing scheduler** — when a worker's deque is empty, it steals work from another worker's deque rather than blocking. This eliminates static load imbalance (a slow chunk in one thread is picked up by idle threads) without programmer involvement.
+
+The public API (`map`, `reduce`, `for-each/par`) is unchanged. The pool is an implementation detail.
+
+### Data structures
+
+```c
+/* A single unit of work — function applied to a slice of an element array */
+typedef struct WorkItem {
+    val_t    fn;
+    val_t   *elems;       /* NULL for reduce */
+    val_t   *results;     /* NULL for for-each/par and reduce workers */
+    int      start;
+    int      end;
+    bool     error;
+    val_t    exn;
+    /* completion bookkeeping (shared with dispatcher) */
+    atomic_int     *n_done;
+    pthread_mutex_t *done_mutex;
+    pthread_cond_t  *done_cond;
+} WorkItem;
+```
+
+**Chase-Lev work-stealing deque** (one per worker thread):
+
+```c
+typedef struct {
+    _Atomic int64_t  top;     /* thieves steal from here (FIFO end) */
+    _Atomic int64_t  bottom;  /* owner pushes/pops here  (LIFO end) */
+    WorkItem       **buf;     /* power-of-2 circular buffer          */
+    int64_t          mask;    /* buf_size - 1                        */
+} WSDeque;
+```
+
+- Owner pushes and pops from `bottom` — no contention with thieves, no lock needed for the common case.
+- Thieves CAS `top` — contention only between thieves, and only when a deque is nearly empty.
+- When `bottom - top ≤ 1` the deque is empty or has one item; the owner uses a CAS to resolve the race with a potential thief.
+
+**Thread pool:**
+
+```c
+typedef struct {
+    int         n_workers;
+    pthread_t  *threads;
+    WSDeque    *deques;       /* one per worker */
+    atomic_bool  shutdown;
+    /* fallback: workers with empty deques park here */
+    pthread_mutex_t park_mutex;
+    pthread_cond_t  park_cond;
+    atomic_int      n_parked;
+} WorkPool;
+
+static WorkPool *global_pool = NULL;  /* initialised in pool_init() */
+```
+
+### Lifecycle
+
+**Initialisation** (`pool_init()`, called from `builtins_curry_register`):
+
+```c
+void pool_init(void) {
+    int n = hw_concurrency();
+    global_pool = /* allocate */;
+    global_pool->n_workers = n;
+    for (int i = 0; i < n; i++) {
+        deque_init(&global_pool->deques[i], 256);   /* initial capacity */
+        pthread_create(&global_pool->threads[i], NULL, worker_loop,
+                       (void*)(intptr_t)i);
+    }
+}
+```
+
+Each worker calls `gc_register_thread()` and `vm_init()` once on startup, then enters its loop — these are never called again for the lifetime of the pool.
+
+**Worker loop:**
+
+```c
+static void *worker_loop(void *arg) {
+    int id = (int)(intptr_t)arg;
+    gc_register_thread();
+    vm_init();
+
+    while (!atomic_load(&global_pool->shutdown)) {
+        WorkItem *item = deque_pop(&global_pool->deques[id]);
+
+        if (!item) {
+            /* try to steal from a random other worker */
+            item = steal_from_random(id);
+        }
+
+        if (item) {
+            execute_item(item);   /* run fn over [start, end) */
+        } else {
+            /* no work anywhere — park on condvar */
+            park(global_pool);
+        }
+    }
+    return NULL;
+}
+```
+
+**Dispatching a `map` call:**
+
+```c
+/* Split into OVERSUBSCRIPTION_FACTOR × n_workers chunks for finer granularity */
+#define OVERSUBSCRIPTION_FACTOR 4
+
+val_t parallel_map(val_t fn, val_t *elems, int n, val_t *results) {
+    int nw    = global_pool->n_workers;
+    int nchunks = min(n, nw * OVERSUBSCRIPTION_FACTOR);
+
+    atomic_int n_done = 0;
+    pthread_mutex_t done_mutex; pthread_mutex_init(&done_mutex, NULL);
+    pthread_cond_t  done_cond;  pthread_cond_init(&done_cond,  NULL);
+
+    /* Push chunks onto the *calling thread's* deque if it's a worker,
+     * else distribute round-robin across all worker deques */
+    int pos = 0;
+    for (int c = 0; c < nchunks; c++) {
+        int sz = (n - pos) / (nchunks - c);   /* even distribution */
+        WorkItem *item = make_work_item(fn, elems, results,
+                                        pos, pos+sz, &n_done,
+                                        &done_mutex, &done_cond);
+        deque_push(&global_pool->deques[c % nw], item);
+        pos += sz;
+    }
+
+    /* Wake parked workers */
+    pthread_cond_broadcast(&global_pool->park_cond);
+
+    /* Wait for all chunks to complete */
+    pthread_mutex_lock(&done_mutex);
+    while (atomic_load(&n_done) < nchunks)
+        pthread_cond_wait(&done_cond, &done_mutex);
+    pthread_mutex_unlock(&done_mutex);
+}
+```
+
+The oversubscription factor (4×) means there are more chunks than threads. If one chunk is slow (e.g., a deep mandelbrot region), idle threads steal its neighbours rather than sitting idle for the duration.
+
+### GC interaction
+
+Boehm GC stops all registered threads for collection. This is already handled correctly: pool threads call `gc_register_thread()` once at startup, so GC knows about them permanently. The concern from the original open questions — pause behaviour across worker threads — resolves cleanly because:
+
+- Pool threads are always registered; no registration/deregistration per `map` call.
+- During a GC stop-the-world, all pool threads are suspended at safe points (they're either blocked in `pthread_cond_wait` while parked, or executing Scheme via the evaluator which allocates through GC-visible paths).
+- The `WorkItem` structs themselves are allocated via `gc_alloc` (interior pointers) so the GC can trace them.
+
+One subtlety: `WorkItem` is stack-allocated in the current implementation. Moving to a pool means items need to live on the heap long enough for a thief to execute them. Allocate via `GC_NEW(WorkItem)` — the GC will keep them live as long as any deque references them.
+
+### Exception propagation
+
+Unchanged from the current model: each `WorkItem` has `bool error` and `val_t exn` fields. If a worker catches an exception, it sets these and signals completion normally. The dispatcher checks all items after `n_done == nchunks` and re-raises the first error it finds.
+
+With stealing, the same item might be partially executed by a thief — but work items are indivisible (one item = one contiguous slice, executed atomically by whoever picks it up). There is no partial execution of a single item.
+
+### Stealing strategy
+
+`steal_from_random(id)` picks a victim thread at random (excluding self) and attempts `deque_steal`. On failure (empty or lost CAS race), it tries up to `n_workers - 1` victims before giving up and parking. Random victim selection is sufficient for the target workloads; round-robin or locality-aware strategies are not worth the complexity here.
+
+### Granularity guidance for callers
+
+The oversubscription factor of 4 is a compile-time constant, not user-tunable. The existing `map-parallel-threshold` controls whether the pool is used at all. These two knobs are independent:
+
+- **Threshold**: is this list long enough to bother with parallelism? (default: 8 elements)
+- **Oversubscription**: given we're going parallel, how many chunks? (fixed: 4× workers)
+
+### Path to M:N actors
+
+Once the pool exists, the actor system can be migrated onto it incrementally:
+
+1. **Phase 1 (current):** actors are 1:1 OS threads. Pool is used only by `map`/`reduce`/`for-each/par`.
+2. **Phase 2:** actors become lightweight coroutines. `spawn` pushes a coroutine onto the pool's deques rather than creating an OS thread. `receive` yields the coroutine back to the pool when no message is available. Pool workers run coroutines to completion or until they yield.
+3. **Phase 3:** blocking I/O in actors is handled by a separate I/O thread that wakes the coroutine when data is available, rather than blocking a pool worker.
+
+Phase 2 is the substantial rearchitecting previously deferred. Phase 1 (this design) is self-contained and delivers most of the performance benefit without touching the actor system.
