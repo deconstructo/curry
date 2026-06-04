@@ -325,7 +325,7 @@ macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary use
 
 Thin wrappers around internal types for use from C extension modules. Key functions: `curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. These live in `curry_core` and resolve via `--export-dynamic`.
 
-## Parallel map and reduce (`src/builtins.c`)
+## Parallel map and reduce (`src/builtins_curry.c`)
 
 `map` and `reduce` dispatch to a parallel implementation when the list exceeds `map_par_threshold` (default 8). Thread count is `min(n_elements, hw_concurrency())`. Each thread calls `gc_register_thread()` + `vm_init()` before doing any Scheme work, handles a contiguous slice of the input, and signals completion via a shared mutex+condvar counter.
 
