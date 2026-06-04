@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 0.8.17 LANGUAGES C CXX)
+project(curry VERSION 0.8.18 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -551,8 +551,8 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_PACKAGE_VERSION           "0.8.17")      # overridden by bump-release.sh
-set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.17_<arch>.deb
+set(CPACK_PACKAGE_VERSION           "0.8.18")      # overridden by bump-release.sh
+set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.18_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")
 set(CPACK_DEBIAN_PACKAGE_SECTION    "interpreters")
