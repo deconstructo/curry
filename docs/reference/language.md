@@ -862,6 +862,35 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 
 ---
 
+## Parallel map and reduce
+
+`map` and `reduce` automatically parallelise over multiple CPU cores when the list is long enough. Sequential variants are also available for cases where order of side-effects matters or the per-element cost is too small to justify thread overhead.
+
+```scheme
+; Parallel map (default threshold: 8 elements)
+(map (lambda (x) (* x x)) (iota 1000000))
+
+; Always sequential — same contract as R7RS map
+(map/seq f lst ...)
+
+; Parallel reduce (threshold: 8 elements)
+; identity must be a true identity element for fn (fn id x) = x
+(reduce + 0 (iota 1000000))
+
+; Always sequential
+(reduce/seq fn identity lst)
+
+; Tune the parallel threshold (elements below this go sequential)
+(map-parallel-threshold)           ; => current value (default 8)
+(set-map-parallel-threshold! 64)   ; raise threshold
+```
+
+Thread count is capped at `min(list-length, hw-logical-cpus)`. Each worker thread handles a contiguous slice and results are merged in order. Exceptions propagate from worker threads back to the caller.
+
+`reduce` requires that `identity` is a true left identity for `fn` — i.e. `(fn identity x) = x` for all `x` in the list. The same threshold as `map` applies.
+
+---
+
 ## Actor model
 
 Actors are lightweight concurrent processes. Each actor runs in its own thread sharing the GC heap.

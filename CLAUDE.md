@@ -325,6 +325,16 @@ macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary use
 
 Thin wrappers around internal types for use from C extension modules. Key functions: `curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. These live in `curry_core` and resolve via `--export-dynamic`.
 
+## Parallel map and reduce (`src/builtins.c`)
+
+`map` and `reduce` dispatch to a parallel implementation when the list exceeds `map_par_threshold` (default 8). Thread count is `min(n_elements, hw_concurrency())`. Each thread calls `gc_register_thread()` + `vm_init()` before doing any Scheme work, handles a contiguous slice of the input, and signals completion via a shared mutex+condvar counter.
+
+Exceptions in worker threads are propagated back to the caller: any thread that catches an exception sets a `bool error` flag and stores the exception value in a shared `val_t exn`; the main thread re-raises it after joining all workers.
+
+Sequential variants `map/seq` and `reduce/seq` bypass the thread machinery and are useful when per-element cost is too small (thread overhead dominates), or when side effects must be ordered.
+
+`reduce` requires a true identity element: each worker initialises its accumulator to its first element (not to `identity`), so `identity` is applied once total (to combine the per-thread accumulators), not once per thread. This means `(reduce + 0 '(1 2 3)) = 6` and `(reduce + 0 '()) = 0` both work correctly.
+
 ## Adding a new built-in procedure
 
 In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *argv, void *ud)` and register it with `DEF("name", fn, min_args, max_args)` inside `builtins_register()`.

@@ -24,6 +24,10 @@
 #include <assert.h>
 #include <math.h>
 #include <ctype.h>
+#include <pthread.h>
+#ifdef __APPLE__
+#  include <sys/sysctl.h>
+#endif
 
 /* ---- Registration helper ---- */
 
@@ -1426,11 +1430,64 @@ static val_t prim_apply(int ac, val_t *av, void *ud) {
     (void)args;
     return apply(proc, last);
 }
-static val_t prim_map(int ac, val_t *av, void *ud) {
+/* ---- Parallel map ---- */
+
+static int map_par_threshold = 8;
+
+static int hw_concurrency(void) {
+#ifdef __APPLE__
+    int n = 4; size_t sz = sizeof(n);
+    sysctlbyname("hw.logicalcpu", &n, &sz, NULL, 0);
+    return n;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? (int)n : 4;
+#endif
+}
+
+typedef struct {
+    val_t    fn;
+    val_t   *elems;
+    val_t   *results;
+    int      start;
+    int      end;
+    bool     error;
+    val_t    exn;
+    int            *n_done;
+    pthread_mutex_t *mutex;
+    pthread_cond_t  *cond;
+} MapRange;
+
+static void *map_range_thread(void *arg) {
+    MapRange *r = arg;
+    gc_register_thread();
+    vm_init();
+
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        for (int i = r->start; i < r->end; i++)
+            r->results[i] = apply(r->fn, scm_cons(r->elems[i], V_NIL));
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        r->error = true;
+        r->exn   = h.exn;
+    }
+
+    pthread_mutex_lock(r->mutex);
+    (*r->n_done)++;
+    pthread_cond_signal(r->cond);
+    pthread_mutex_unlock(r->mutex);
+    return NULL;
+}
+
+/* Sequential map — also exported as map/seq */
+static val_t prim_map_seq(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t proc = av[0];
     int nlists = ac - 1;
-    val_t *lists = av + 1; /* safe to advance in-place; av is caller's stack frame */
+    val_t *lists = av + 1;
     val_t result = V_NIL;
     for (;;) {
         for (int i = 0; i < nlists; i++)
@@ -1443,6 +1500,196 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
             lists[i] = vcdr(lists[i]);
     }
 }
+
+static val_t prim_map(int ac, val_t *av, void *ud) {
+    /* Multi-list form and below-threshold: use sequential path */
+    if (ac != 2) return prim_map_seq(ac, av, ud);
+
+    val_t proc = av[0];
+    val_t lst  = av[1];
+
+    /* Count elements */
+    int n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    if (n < map_par_threshold) return prim_map_seq(ac, av, ud);
+
+    /* Flatten list into an array for indexed access */
+    val_t *elems   = (val_t *)gc_alloc(n * sizeof(val_t));
+    val_t *results = (val_t *)gc_alloc(n * sizeof(val_t));
+    { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
+
+    int nthreads = hw_concurrency();
+    if (nthreads > n) nthreads = n;
+
+    int n_done = 0;
+    pthread_mutex_t mutex; pthread_mutex_init(&mutex, NULL);
+    pthread_cond_t  cond;  pthread_cond_init(&cond,  NULL);
+
+    MapRange  *ranges  = (MapRange  *)gc_alloc(nthreads * sizeof(MapRange));
+    pthread_t *threads = (pthread_t *)gc_alloc(nthreads * sizeof(pthread_t));
+
+    /* Distribute elements across threads as evenly as possible */
+    int base = n / nthreads, extra = n % nthreads, pos = 0;
+    for (int t = 0; t < nthreads; t++) {
+        int sz = base + (t < extra ? 1 : 0);
+        ranges[t] = (MapRange){
+            .fn=proc, .elems=elems, .results=results,
+            .start=pos, .end=pos+sz,
+            .error=false, .exn=V_FALSE,
+            .n_done=&n_done, .mutex=&mutex, .cond=&cond
+        };
+        pos += sz;
+        pthread_create(&threads[t], NULL, map_range_thread, &ranges[t]);
+    }
+
+    /* Wait for all threads to finish */
+    pthread_mutex_lock(&mutex);
+    while (n_done < nthreads)
+        pthread_cond_wait(&cond, &mutex);
+    pthread_mutex_unlock(&mutex);
+
+    for (int t = 0; t < nthreads; t++)
+        pthread_join(threads[t], NULL);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&cond);
+
+    /* Re-raise the first error encountered, if any */
+    for (int t = 0; t < nthreads; t++)
+        if (ranges[t].error) scm_raise(V_FALSE, "map: error in parallel worker");
+
+    /* Assemble result list in original order */
+    val_t result = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        result = scm_cons(results[i], result);
+    return result;
+}
+
+/* ---- Parallel reduce ---- */
+
+/* (reduce f ridentity lst)
+ * f must be associative — the programmer's contract, not enforced.
+ * ridentity is returned only for the empty list; it is NOT used as a
+ * per-thread seed (that would apply it nthreads times).
+ * Each thread reduces its chunk starting from the chunk's first element.
+ * Partial results are combined left-to-right with f. */
+
+typedef struct {
+    val_t    fn;
+    val_t   *elems;
+    int      start;
+    int      end;
+    val_t    result;
+    bool     error;
+    val_t    exn;
+    int            *n_done;
+    pthread_mutex_t *mutex;
+    pthread_cond_t  *cond;
+} ReduceRange;
+
+static void *reduce_range_thread(void *arg) {
+    ReduceRange *r = arg;
+    gc_register_thread();
+    vm_init();
+
+    ExnHandler h;
+    h.prev = current_handler; current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        val_t acc = r->elems[r->start];
+        for (int i = r->start + 1; i < r->end; i++)
+            acc = apply(r->fn, scm_cons(acc, scm_cons(r->elems[i], V_NIL)));
+        r->result = acc;
+        current_handler = h.prev;
+    } else {
+        current_handler = h.prev;
+        r->error = true;
+        r->exn   = h.exn;
+    }
+
+    pthread_mutex_lock(r->mutex);
+    (*r->n_done)++;
+    pthread_cond_signal(r->cond);
+    pthread_mutex_unlock(r->mutex);
+    return NULL;
+}
+
+static val_t prim_reduce_seq(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t fn = av[0], ridentity = av[1], lst = av[2];
+    if (!vis_pair(lst)) return ridentity;
+    val_t acc = vcar(lst);
+    for (lst = vcdr(lst); vis_pair(lst); lst = vcdr(lst))
+        acc = apply(fn, scm_cons(acc, scm_cons(vcar(lst), V_NIL)));
+    return acc;
+}
+
+static val_t prim_reduce(int ac, val_t *av, void *ud) {
+    val_t fn = av[0], ridentity = av[1], lst = av[2];
+    if (!vis_pair(lst)) return ridentity;
+
+    int n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    if (n < map_par_threshold) return prim_reduce_seq(ac, av, ud);
+
+    val_t *elems = (val_t *)gc_alloc(n * sizeof(val_t));
+    { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
+
+    int nthreads = hw_concurrency();
+    if (nthreads > n) nthreads = n;
+
+    int n_done = 0;
+    pthread_mutex_t mutex; pthread_mutex_init(&mutex, NULL);
+    pthread_cond_t  cond;  pthread_cond_init(&cond,  NULL);
+
+    ReduceRange *ranges  = (ReduceRange *)gc_alloc(nthreads * sizeof(ReduceRange));
+    pthread_t   *threads = (pthread_t   *)gc_alloc(nthreads * sizeof(pthread_t));
+
+    int base = n / nthreads, extra = n % nthreads, pos = 0;
+    for (int t = 0; t < nthreads; t++) {
+        int sz = base + (t < extra ? 1 : 0);
+        ranges[t] = (ReduceRange){
+            .fn=fn, .elems=elems, .start=pos, .end=pos+sz,
+            .error=false, .exn=V_FALSE,
+            .n_done=&n_done, .mutex=&mutex, .cond=&cond
+        };
+        pos += sz;
+        pthread_create(&threads[t], NULL, reduce_range_thread, &ranges[t]);
+    }
+
+    pthread_mutex_lock(&mutex);
+    while (n_done < nthreads)
+        pthread_cond_wait(&cond, &mutex);
+    pthread_mutex_unlock(&mutex);
+
+    for (int t = 0; t < nthreads; t++)
+        pthread_join(threads[t], NULL);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&cond);
+
+    for (int t = 0; t < nthreads; t++)
+        if (ranges[t].error) scm_raise(V_FALSE, "reduce: error in parallel worker");
+
+    /* Combine partial results left-to-right (order irrelevant given associativity) */
+    val_t acc = ranges[0].result;
+    for (int t = 1; t < nthreads; t++)
+        acc = apply(fn, scm_cons(acc, scm_cons(ranges[t].result, V_NIL)));
+    return acc;
+}
+
+static val_t prim_get_map_threshold(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return vfix(map_par_threshold);
+}
+
+static val_t prim_set_map_threshold(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_fixnum(av[0]) || vunfix(av[0]) < 1)
+        scm_raise(V_FALSE, "set-map-parallel-threshold!: expected positive integer");
+    map_par_threshold = (int)vunfix(av[0]);
+    return V_VOID;
+}
+
 static val_t prim_for_each(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t proc = av[0];
@@ -2066,7 +2313,11 @@ void builtins_register(val_t env) {
 
     /* Control */
     DEF("eval",prim_eval,1,2); DEF("interaction-environment",prim_interaction_env,0,0);
-    DEF("apply",prim_apply,2,-1); DEF("map",prim_map,2,-1); DEF("for-each",prim_for_each,2,-1);
+    DEF("apply",prim_apply,2,-1); DEF("map",prim_map,2,-1); DEF("map/seq",prim_map_seq,2,-1);
+    DEF("reduce",prim_reduce,3,3); DEF("reduce/seq",prim_reduce_seq,3,3);
+    DEF("map-parallel-threshold",     prim_get_map_threshold, 0,0);
+    DEF("set-map-parallel-threshold!",prim_set_map_threshold, 1,1);
+    DEF("for-each",prim_for_each,2,-1);
     DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right,3,3);
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
