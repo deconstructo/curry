@@ -71,6 +71,10 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 #include <QMainWindow>
 #include <QWidget>
 #include <QOpenGLWidget>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVertexArrayObject>
 #include <QSurfaceFormat>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -161,6 +165,8 @@ static QApplication *s_app = nullptr;
 static void ensure_app() {
     if (s_app) return;
     QSurfaceFormat fmt;
+    fmt.setVersion(3, 3);
+    fmt.setProfile(QSurfaceFormat::CoreProfile);
     fmt.setSamples(4);
     fmt.setDepthBufferSize(24);
     fmt.setStencilBufferSize(8);
@@ -1035,6 +1041,204 @@ static curry_val fn_timer_set_interval(int ac, curry_val *av, void *ud) {
  * efficient rendering of many primitives (particles, trajectories, meshes).
  * ========================================================================= */
 
+/* =========================================================================
+ * GPU Mandelbrot — lazy-initialised GLSL shader
+ *
+ * gfx-mandelbrot-gpu! painter cx cy zoom max-iter algebra theta phi
+ *
+ * Uses beginNativePainting/endNativePainting so the QPainter remains
+ * active for HUD text drawn afterwards with gfx-draw-text! etc.
+ *
+ * The vertex shader generates a fullscreen quad from gl_VertexID (no VBO).
+ * The fragment shader handles complex (2D), quaternion (4D slice), and
+ * octonion (8D slice) algebras via the Cayley-Dickson formula (a+v)²=(a²−|v|²)+2a·v.
+ * Smooth escape-time colouring matches the Scheme CPU path: n+1−log₂(log₂|z|).
+ * ========================================================================= */
+
+static QOpenGLShaderProgram     *s_mandel_prog = nullptr;
+static QOpenGLVertexArrayObject *s_mandel_vao  = nullptr;
+
+static const char k_mandel_vert[] = R"(
+#version 330 core
+void main() {
+    const vec2 verts[4] = vec2[4](
+        vec2(-1.0, -1.0), vec2( 1.0, -1.0),
+        vec2(-1.0,  1.0), vec2( 1.0,  1.0));
+    gl_Position = vec4(verts[gl_VertexID], 0.0, 1.0);
+}
+)";
+
+static const char k_mandel_frag[] = R"(
+#version 330 core
+out vec4 frag_color;
+
+uniform vec2  u_resolution;   /* (W, H) in pixels                       */
+uniform vec2  u_center;       /* (cx, cy) world-space                   */
+uniform float u_zoom;         /* pixels per world unit                  */
+uniform int   u_max_iter;
+uniform int   u_algebra;      /* 0=complex  1=quaternion  2=octonion    */
+uniform float u_theta;        /* slice rotation θ (quaternion/octonion) */
+uniform float u_phi;          /* slice rotation φ                       */
+
+/* Cyclic RGB palette — same phase/period as the Scheme CPU path */
+vec3 palette(float t) {
+    float a = mod(t * 7.3, 512.0) / 512.0 * 6.28318530718;
+    return vec3(0.5 + 0.5*sin(a),
+                0.5 + 0.5*sin(a + 2.09439510239),
+                0.5 + 0.5*sin(a + 4.18879020479));
+}
+
+/* Smooth escape-time: n + 1 − log₂(log₂|z|)  (safe: |z| > 2 at escape) */
+float smooth_n(float i_f, float ns) {
+    return i_f + 1.0 - log2(log2(sqrt(ns)));
+}
+
+/* ── Complex (2D) ──────────────────────────────────────────────────────── */
+float mandel_2d(vec2 c) {
+    vec2 z = vec2(0.0);
+    for (int i = 0; i < u_max_iter; i++) {
+        float x2 = z.x*z.x, y2 = z.y*z.y;
+        if (x2 + y2 > 4.0) return smooth_n(float(i), x2+y2);
+        z = vec2(x2 - y2 + c.x, 2.0*z.x*z.y + c.y);
+    }
+    return -1.0;
+}
+
+/* ── Quaternion (4D) — (a+v)² = (a²−|v|²) + 2a·v ─────────────────────── */
+float mandel_4d(vec4 c) {
+    vec4 z = vec4(0.0);
+    for (int i = 0; i < u_max_iter; i++) {
+        float ns = dot(z, z);
+        if (ns > 4.0) return smooth_n(float(i), ns);
+        float a = z.x;
+        z = vec4(a*a - dot(z.yzw, z.yzw), 2.0*a*z.yzw) + c;
+    }
+    return -1.0;
+}
+
+/* ── Octonion (8D) — same Cayley-Dickson formula, 8 components ─────────── */
+/* Packed as (z0, zl.xyzw, zh.xyz, 0) — zh.w is zero padding              */
+float mandel_8d(float c0, vec4 c_lo, vec4 c_hi) {
+    float z0 = 0.0;
+    vec4  zl  = vec4(0.0);
+    vec4  zh  = vec4(0.0);
+    for (int i = 0; i < u_max_iter; i++) {
+        float ns = z0*z0 + dot(zl,zl) + dot(zh,zh);
+        if (ns > 4.0) return smooth_n(float(i), ns);
+        float nv2   = dot(zl,zl) + dot(zh,zh);
+        float new_z0 = z0*z0 - nv2 + c0;
+        zl = 2.0*z0*zl + c_lo;
+        zh = 2.0*z0*zh + c_hi;
+        z0 = new_z0;
+    }
+    return -1.0;
+}
+
+void main() {
+    /* OpenGL gl_FragCoord: y=0 at bottom.  Qt/screen: y=0 at top.
+     * Negate wy so positive wy = screen down, matching the Scheme convention. */
+    float wx = ( gl_FragCoord.x - u_resolution.x * 0.5) / u_zoom;
+    float wy = -(gl_FragCoord.y - u_resolution.y * 0.5) / u_zoom;
+
+    float t;
+    if (u_algebra == 0) {
+        t = mandel_2d(vec2(u_center.x + wx, u_center.y + wy));
+
+    } else if (u_algebra == 1) {
+        /* Quaternion slice: u=(cosθ,0,sinθ,0)·wx, v=(0,cosφ,0,sinφ)·wy */
+        t = mandel_4d(vec4(wx*cos(u_theta) + u_center.x,
+                           wy*cos(u_phi)   + u_center.y,
+                           wx*sin(u_theta),
+                           wy*sin(u_phi)));
+    } else {
+        /* Octonion — same slice axes, remaining dimensions zero */
+        float c0  = wx*cos(u_theta) + u_center.x;
+        vec4  c_lo = vec4(wy*cos(u_phi) + u_center.y,
+                          wx*sin(u_theta),
+                          wy*sin(u_phi),
+                          0.0);
+        t = mandel_8d(c0, c_lo, vec4(0.0));
+    }
+
+    frag_color = (t < 0.0) ? vec4(0.0, 0.0, 0.0, 1.0)
+                            : vec4(palette(t), 1.0);
+}
+)";
+
+static bool mandel_shader_init() {
+    s_mandel_prog = new QOpenGLShaderProgram();
+    if (!s_mandel_prog->addShaderFromSourceCode(QOpenGLShader::Vertex, k_mandel_vert)) {
+        fprintf(stderr, "[qt6] mandelbrot vertex shader: %s\n",
+                s_mandel_prog->log().toUtf8().constData());
+        delete s_mandel_prog; s_mandel_prog = nullptr; return false;
+    }
+    if (!s_mandel_prog->addShaderFromSourceCode(QOpenGLShader::Fragment, k_mandel_frag)) {
+        fprintf(stderr, "[qt6] mandelbrot fragment shader: %s\n",
+                s_mandel_prog->log().toUtf8().constData());
+        delete s_mandel_prog; s_mandel_prog = nullptr; return false;
+    }
+    if (!s_mandel_prog->link()) {
+        fprintf(stderr, "[qt6] mandelbrot shader link: %s\n",
+                s_mandel_prog->log().toUtf8().constData());
+        delete s_mandel_prog; s_mandel_prog = nullptr; return false;
+    }
+    s_mandel_vao = new QOpenGLVertexArrayObject();
+    s_mandel_vao->create();
+    return true;
+}
+
+static curry_val fn_gfx_mandelbrot_gpu(int argc, curry_val *av, void *) {
+    QPainter *p   = val_to_painter(av[0]);
+    double cx     = curry_float(av[1]);
+    double cy     = curry_float(av[2]);
+    double zoom   = curry_float(av[3]);
+    int max_iter  = (int)curry_fixnum(av[4]);
+    int algebra   = 0;
+    if (curry_is_symbol(av[5])) {
+        const char *s = curry_symbol(av[5]);
+        if (strcmp(s, "quaternion") == 0) algebra = 1;
+        else if (strcmp(s, "octonion") == 0) algebra = 2;
+    }
+    double theta  = (argc > 6) ? curry_float(av[6]) : 0.0;
+    double phi    = (argc > 7) ? curry_float(av[7]) : 0.0;
+    /* Physical pixel dimensions — gl_FragCoord is in physical pixels on HiDPI. */
+    qreal dpr = p->device()->devicePixelRatioF();
+    int pw = qRound(p->device()->width()  * dpr);
+    int ph = qRound(p->device()->height() * dpr);
+
+    p->beginNativePainting();
+
+    if (!s_mandel_prog && !mandel_shader_init()) {
+        p->endNativePainting();
+        return curry_void();
+    }
+
+    QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
+    gl->glViewport(0, 0, pw, ph);
+    gl->glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+
+    s_mandel_prog->bind();
+    /* u_resolution and u_zoom in physical pixels so gl_FragCoord arithmetic works */
+    s_mandel_prog->setUniformValue("u_resolution", QVector2D((float)pw, (float)ph));
+    s_mandel_prog->setUniformValue("u_center",     QVector2D((float)cx, (float)cy));
+    s_mandel_prog->setUniformValue("u_zoom",       (float)(zoom * dpr));
+    s_mandel_prog->setUniformValue("u_max_iter",   max_iter);
+    s_mandel_prog->setUniformValue("u_algebra",    algebra);
+    s_mandel_prog->setUniformValue("u_theta",      (float)theta);
+    s_mandel_prog->setUniformValue("u_phi",        (float)phi);
+
+    s_mandel_vao->bind();
+    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    s_mandel_vao->release();
+    s_mandel_prog->release();
+
+    p->endNativePainting();
+    return curry_void();
+}
+
+/* ========================================================================= */
+
 #define P val_to_painter(av[0])
 
 static curry_val fn_gfx_clear(int ac, curry_val *av, void *ud) {
@@ -1687,6 +1891,9 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "timer-start!",         fn_timer_start,         1, 1, NULL);
     curry_define_fn(vm, "timer-stop!",          fn_timer_stop,          1, 1, NULL);
     curry_define_fn(vm, "timer-set-interval!",  fn_timer_set_interval,  2, 2, NULL);
+
+    /* --- GPU Mandelbrot --- */
+    curry_define_fn(vm, "gfx-mandelbrot-gpu!",  fn_gfx_mandelbrot_gpu,  6, 8, NULL);
 
     /* --- Layer 2: gfx-* graphics --- */
     curry_define_fn(vm, "gfx-clear!",           fn_gfx_clear,           1, 5, NULL);
