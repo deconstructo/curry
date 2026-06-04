@@ -19,6 +19,8 @@ Curry is an R7RS Scheme interpreter with a numeric tower that extends through th
 - [Vectors and bytevectors](#vectors)
 - [I/O](#input--output)
 - [Continuations](#tail-calls-and-continuations)
+- [Parallel map and reduce](#parallel-map-and-reduce)
+- [Random numbers](#random-numbers-srfi-27)
 - [Actor model](#actor-model)
 - [Procedure tracing](#procedure-tracing)
 - [Module search path](#module-search-path)
@@ -864,30 +866,87 @@ Continuations interact correctly with `dynamic-wind`: invoking an escape continu
 
 ## Parallel map and reduce
 
-`map` and `reduce` automatically parallelise over multiple CPU cores when the list is long enough. Sequential variants are also available for cases where order of side-effects matters or the per-element cost is too small to justify thread overhead.
+`map` and `reduce` automatically parallelise over multiple CPU cores when the list is long enough. The multi-list form of `map` (`(map f lst1 lst2 ...)`) always runs sequentially; parallelism applies to the single-list form only.
+
+| Procedure | Description |
+|-----------|-------------|
+| `(map f lst)` | Parallel map when `(length lst) ≥ threshold`; sequential otherwise |
+| `(map f lst1 lst2 ...)` | Always sequential (multi-list form) |
+| `(map/seq f lst ...)` | Always sequential; same contract as R7RS `map` |
+| `(reduce f identity lst)` | Parallel reduce when list is long enough |
+| `(reduce/seq f identity lst)` | Always sequential |
+| `(map-parallel-threshold)` | Return the current threshold (default: 8) |
+| `(set-map-parallel-threshold! n)` | Set threshold to positive integer `n` |
 
 ```scheme
-; Parallel map (default threshold: 8 elements)
+; Map over a million elements — parallelises automatically
 (map (lambda (x) (* x x)) (iota 1000000))
 
-; Always sequential — same contract as R7RS map
-(map/seq f lst ...)
+; Force sequential (side-effects, or per-element cost too small)
+(map/seq display (iota 10))
 
-; Parallel reduce (threshold: 8 elements)
-; identity must be a true identity element for fn (fn id x) = x
+; Sum a million numbers in parallel
 (reduce + 0 (iota 1000000))
 
-; Always sequential
-(reduce/seq fn identity lst)
+; Sequential reduce
+(reduce/seq + 0 '(1 2 3))
 
-; Tune the parallel threshold (elements below this go sequential)
-(map-parallel-threshold)           ; => current value (default 8)
-(set-map-parallel-threshold! 64)   ; raise threshold
+; Raise threshold to avoid parallelism for cheap operations
+(set-map-parallel-threshold! 10000)
 ```
 
-Thread count is capped at `min(list-length, hw-logical-cpus)`. Each worker thread handles a contiguous slice and results are merged in order. Exceptions propagate from worker threads back to the caller.
+Thread count is capped at `min(list-length, hw-logical-cpus)`. Each worker thread handles a contiguous slice and results are assembled in the original order. Exceptions in worker threads propagate back to the caller.
 
-`reduce` requires that `identity` is a true left identity for `fn` — i.e. `(fn identity x) = x` for all `x` in the list. The same threshold as `map` applies.
+**`reduce` identity contract**: `identity` must satisfy `(f identity x) = x` for all `x` in the list. It is used only for the empty-list case — it is not used as a per-thread seed, so it is applied at most once regardless of thread count. This means `(reduce + 0 '())` returns `0` and `(reduce + 0 '(1 2 3))` returns `6`, as expected.
+
+Use `map/seq` or `reduce/seq` when:
+- The operation has ordered side-effects (`display`, I/O, actor sends)
+- Per-element cost is very small (fixnum arithmetic, list access) — thread overhead dominates below ~10 µs/element
+- You need predictable single-threaded behaviour in tests
+
+---
+
+## Random numbers (SRFI-27)
+
+Curry provides the SRFI-27 random-number API. The global source is seeded from `/dev/urandom` on first use.
+
+| Procedure | Description |
+|-----------|-------------|
+| `(random-real)` | Uniform flonum in \[0, 1) |
+| `(random-integer n)` | Uniform exact integer in \[0, n) |
+| `(random-source-randomize! src)` | Re-seed from `/dev/urandom` |
+| `(random-source-pseudo-randomize! src i j)` | Accepted (seeds ignored — same as randomize!) |
+| `(make-random-source)` | Returns `default-random-source` |
+| `(random-source? v)` | Predicate — true for any symbol |
+| `(random-source->random-real src)` | Returns the `random-real` procedure |
+| `(random-source->random-integer src)` | Returns the `random-real` procedure |
+| `default-random-source` | The global random source (a symbol) |
+
+```scheme
+; Roll a d20
+(+ 1 (random-integer 20))
+
+; Random flonum
+(random-real)   ; => e.g. 0.7341...
+
+; Re-seed the global source
+(random-source-randomize! default-random-source)
+
+; Build a shuffler
+(define (shuffle lst)
+  (let* ((v (list->vector lst))
+         (n (vector-length v)))
+    (do ((i (- n 1) (- i 1)))
+        ((= i 0) (vector->list v))
+      (let* ((j (random-integer (+ i 1)))
+             (tmp (vector-ref v i)))
+        (vector-set! v i (vector-ref v j))
+        (vector-set! v j tmp)))))
+
+(shuffle '(1 2 3 4 5))   ; => some permutation
+```
+
+The underlying generator is xoshiro256+, a fast, high-quality 256-bit PRNG. It is not cryptographically secure; use `(curry crypto)` for that.
 
 ---
 

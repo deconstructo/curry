@@ -73,6 +73,32 @@ Arithmetic automatically promotes through the tower. `(+ 1/3 0.5)` → flonum. `
 
 `∂` and `∫` are Unicode (U+2202, U+222B); ASCII aliases `sym-diff` and `integrate` are equivalent. All standard numeric operators lift automatically over symbolic values.
 
+### Parallel map and reduce
+
+`map` and `reduce` automatically parallelise over multiple CPU cores; sequential variants are always available.
+
+| Procedure | Description |
+|-----------|-------------|
+| `(map f lst)` | Parallel when list exceeds threshold (default: 8 elements) |
+| `(map/seq f lst ...)` | Always sequential; full multi-list R7RS `map` |
+| `(reduce f identity lst)` | Parallel associative fold |
+| `(reduce/seq f identity lst)` | Always sequential |
+| `(map-parallel-threshold)` | Return current threshold |
+| `(set-map-parallel-threshold! n)` | Set threshold |
+
+Thread count is `min(list-length, hw-logical-cpus)`. Exceptions in worker threads propagate to the caller. `reduce` requires a true identity element; it is not used as a per-thread seed.
+
+### Random numbers (SRFI-27)
+
+The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
+
+| Procedure | Description |
+|-----------|-------------|
+| `(random-real)` | Uniform flonum in \[0, 1) |
+| `(random-integer n)` | Uniform exact integer in \[0, n) |
+| `(random-source-randomize! src)` | Re-seed from `/dev/urandom` |
+| `default-random-source` | The global random source |
+
 ### Modules
 
 | Module | Import | Description | Extra deps |
