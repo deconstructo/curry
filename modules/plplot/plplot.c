@@ -61,7 +61,10 @@ static double to_double(curry_val v, const char *ctx) {
 /* ---- Setup / teardown ---- */
 
 static curry_val fn_plot_init(int ac, curry_val *av, void *ud) {
-    (void)ac; (void)av; (void)ud; plinit(); return curry_void();
+    (void)ac; (void)av; (void)ud;
+    plspause(0);  /* never pause for user interaction — this is a batch API */
+    plinit();
+    return curry_void();
 }
 static curry_val fn_plot_end(int ac, curry_val *av, void *ud) {
     (void)ac; (void)av; (void)ud; plend(); return curry_void();

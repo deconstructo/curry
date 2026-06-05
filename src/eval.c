@@ -1345,7 +1345,7 @@ _Thread_local int g_jit_call_depth = 0;
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
  * values as constants so the JIT compiles them in without needing runtime
  * cell indirection. */
-static val_t jit_wrap_upvals(BcClosure *cl) {
+val_t jit_wrap_upvals(BcClosure *cl) {
     val_t bindings = V_NIL;
     for (int i = cl->upval_count - 1; i >= 0; i--) {
         val_t uval    = *cl->upvals[i]->location;

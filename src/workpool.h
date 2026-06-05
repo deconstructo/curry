@@ -63,6 +63,12 @@ typedef struct {
 /* Called once from builtins_curry_register().  Idempotent. */
 void pool_init(void);
 
+/* True on worker threads; false on the main thread and any non-pool thread.
+ * Used by prim_map / prim_reduce to avoid nested parallel dispatch, which
+ * would deadlock: all workers blocked waiting on nested work items that
+ * can never run because every worker is already occupied. */
+extern _Thread_local bool pool_is_worker;
+
 /* Number of logical CPUs (same value the pool uses for its thread count). */
 int pool_hw_concurrency(void);
 

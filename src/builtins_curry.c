@@ -921,7 +921,7 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
     val_t proc = av[0], lst = av[1];
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) return prim_map_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker) return prim_map_seq(ac, av, ud);
 
     val_t *elems   = gc_alloc(n * sizeof(val_t));
     val_t *results = gc_alloc(n * sizeof(val_t));
@@ -964,7 +964,7 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     if (!vis_pair(lst)) return ridentity;
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) return prim_reduce_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker) return prim_reduce_seq(ac, av, ud);
 
     val_t *elems = gc_alloc(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
@@ -1016,7 +1016,7 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     val_t lst = av[1];
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) {
+    if (n < map_par_threshold || pool_is_worker) {
         for (val_t p = lst; vis_pair(p); p = vcdr(p))
             apply(proc, scm_cons(vcar(p), V_NIL));
         return V_VOID;
@@ -1154,7 +1154,12 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
     if (!vis_bcclosure(proc)) return proc;
     BcClosure *cl = as_bcclosure(proc);
     if (cl->chunk->src_lambda == V_VOID) return proc;
-    val_t compiled = curry_llvm_jit_compile(cl->chunk->src_lambda);
+    if (cl->upval_count > 0 && !cl->chunk->upval_names) return proc;
+    extern val_t jit_wrap_upvals(BcClosure *);
+    val_t src = (cl->upval_count > 0)
+        ? jit_wrap_upvals(cl)
+        : cl->chunk->src_lambda;
+    val_t compiled = curry_llvm_jit_compile(src);
     if (vis_jitclosure(compiled))
         __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
     return proc;
