@@ -383,7 +383,7 @@ Both procedures return a path string on confirmation, or `#f` if the user cancel
 (timer-set-interval! t ms)
 ```
 
-## GLSL fragment shaders
+## GLSL shaders and textures
 
 Write full OpenGL 3.3 Core Profile fragment shaders directly in Scheme strings. The module handles context setup, HiDPI scaling, and QPainter interleaving automatically.
 
@@ -410,9 +410,34 @@ Uniform value dispatch by Scheme type:
 | 2-element list | `vec2` |
 | 3-element list | `vec3` |
 | 4-element list | `vec4` |
+| `gl-texture` handle | `sampler2D` (bound to next available texture unit) |
 | flonum / other numeric | `float` |
 
 The default vertex shader generates a fullscreen quad from `gl_VertexID` — no VBO or vertex attributes needed. After `gl-shader-draw!` returns, `endNativePainting()` has been called and QPainter is fully restored, so `gfx-draw-text!` etc. work normally for HUD overlays.
+
+### GL textures
+
+Upload pixel data to the GPU as a 2D texture. Pass the texture handle as a uniform value and `gl-shader-draw!` binds it to a `sampler2D` automatically.
+
+```scheme
+; Create a texture from a bytevector
+(make-gl-texture bv w h)          ; R8 (single channel, default)
+(make-gl-texture bv w h 'rgba)    ; RGBA8 (four channels)
+
+; Replace the pixel data and schedule a re-upload on the next draw
+(gl-texture-update! tex bv)
+```
+
+The texture is uploaded lazily on the first `gl-shader-draw!` call after creation (or after `gl-texture-update!`). Filter is `GL_NEAREST`; wrap mode is `GL_CLAMP_TO_EDGE`.
+
+In the uniforms alist, pass the handle directly as the value:
+```scheme
+(gl-shader-draw! prog painter
+  (list (cons "u_my_tex" my-texture)   ; bound to texture unit 0
+        (cons "u_other"  other-tex)))  ; bound to texture unit 1
+```
+
+Multiple textures in one draw call are each assigned the next available texture unit (starting from 0).
 
 **Example** (from `examples/mandelbrot.scm`):
 
@@ -475,3 +500,4 @@ All module callbacks are safe to call from non-Qt threads via `send!`. Scheme pr
 | `examples/solar-system-qt6.scm` | N-body simulation with 15 concurrent actors |
 | `examples/mandelbrot.scm` | Hypercomplex Mandelbrot GPU explorer (complex/quaternion/octonion) |
 | `examples/tesseract.scm` | Rotating 4D hypercube |
+| `examples/maze4d.scm` | First-person 4D maze — GPU DDA raycaster with anaglyph stereo |

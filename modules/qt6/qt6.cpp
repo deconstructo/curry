@@ -1068,6 +1068,40 @@ void main() {
 }
 )";
 
+/* ── GL constant fallbacks (defined by platform GL headers on all targets,
+ * but spelled out here so the compiler doesn't need a version-specific
+ * versioned-functions header). ────────────────────────────────────────── */
+#ifndef GL_R8
+#  define GL_R8              0x8229u
+#endif
+#ifndef GL_RED
+#  define GL_RED             0x1903u
+#endif
+#ifndef GL_RGBA8
+#  define GL_RGBA8           0x8058u
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#  define GL_CLAMP_TO_EDGE   0x812Fu
+#endif
+#ifndef GL_TEXTURE0
+#  define GL_TEXTURE0        0x84C0u
+#endif
+#ifndef GL_UNPACK_ALIGNMENT
+#  define GL_UNPACK_ALIGNMENT 0x0CF5u
+#endif
+
+/* GlTexture: CPU-side image data + lazy GL texture object.
+ * Created with make-gl-texture, updated with gl-texture-update!.
+ * Uploaded to the GPU on first use inside gl-shader-draw!. */
+struct GlTexture {
+    std::vector<uint8_t> data;
+    GLsizei  w, h;
+    GLenum   ifmt;   /* GL_R8 or GL_RGBA8  */
+    GLenum   fmt;    /* GL_RED or GL_RGBA  */
+    GLuint   id;     /* 0 until first draw */
+    bool     dirty;
+};
+
 struct GlShader {
     char                    *vert_src;
     char                    *frag_src;
@@ -1157,14 +1191,47 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
     sh->prog->setUniformValue("u_resolution", QVector2D((float)pw, (float)ph));
     sh->prog->setUniformValue("u_dpr",        (GLfloat)dpr);
 
+    int tex_unit = 0;
     for (curry_val it = uniforms; curry_is_pair(it); it = curry_cdr(it)) {
         curry_val entry = curry_car(it);
         if (!curry_is_pair(entry)) continue;
         curry_val key = curry_car(entry);
+        curry_val val = curry_cdr(entry);
         const char *name = curry_is_symbol(key) ? curry_symbol(key)
                                                  : curry_string(key);
-        set_uniform(sh->prog, name, curry_cdr(entry));
+        /* Detect "gl-texture" handle — must check before set_uniform since
+         * handles are pairs and would be mis-dispatched as vec2. */
+        if (curry_is_pair(val) && curry_is_symbol(curry_car(val)) &&
+            !strcmp(curry_symbol(curry_car(val)), "gl-texture")) {
+            GlTexture *tex = (GlTexture *)val_to_ptr("gl-texture", val);
+            if (tex->id == 0) {
+                gl->glGenTextures(1, &tex->id);
+                gl->glBindTexture(GL_TEXTURE_2D, tex->id);
+                gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                gl->glTexImage2D(GL_TEXTURE_2D, 0, tex->ifmt, tex->w, tex->h, 0,
+                                 tex->fmt, GL_UNSIGNED_BYTE, tex->data.data());
+                tex->dirty = false;
+            } else if (tex->dirty) {
+                gl->glBindTexture(GL_TEXTURE_2D, tex->id);
+                gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                gl->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->w, tex->h,
+                                    tex->fmt, GL_UNSIGNED_BYTE, tex->data.data());
+                tex->dirty = false;
+            }
+            gl->glActiveTexture(GL_TEXTURE0 + (GLenum)tex_unit);
+            gl->glBindTexture(GL_TEXTURE_2D, tex->id);
+            sh->prog->setUniformValue(name, (GLint)tex_unit);
+            tex_unit++;
+        } else {
+            set_uniform(sh->prog, name, val);
+        }
     }
+    if (tex_unit > 0)
+        gl->glActiveTexture(GL_TEXTURE0);
 
     s_quad_vao->bind();
     gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1172,6 +1239,41 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
     sh->prog->release();
 
     painter->endNativePainting();
+    return curry_void();
+}
+
+/* ── make-gl-texture / gl-texture-update! ──────────────────────────────── */
+
+/* (make-gl-texture bv w h)        ; R8 single-channel (default)
+ * (make-gl-texture bv w h 'rgba)  ; RGBA8 four-channel              */
+static curry_val fn_make_gl_texture(int argc, curry_val *av, void *) {
+    uint32_t n = curry_bytevector_length(av[0]);
+    int w = (int)curry_fixnum(av[1]);
+    int h = (int)curry_fixnum(av[2]);
+    bool rgba = (argc > 3) && curry_is_symbol(av[3]) &&
+                !strcmp(curry_symbol(av[3]), "rgba");
+    GlTexture *tex = new GlTexture{};
+    tex->data.resize(n);
+    for (uint32_t i = 0; i < n; i++)
+        tex->data[i] = curry_bytevector_ref(av[0], i);
+    tex->w     = (GLsizei)w;
+    tex->h     = (GLsizei)h;
+    tex->ifmt  = rgba ? (GLenum)GL_RGBA8 : (GLenum)GL_R8;
+    tex->fmt   = rgba ? (GLenum)GL_RGBA  : (GLenum)GL_RED;
+    tex->id    = 0;
+    tex->dirty = true;
+    return ptr_to_val("gl-texture", tex);
+}
+
+/* (gl-texture-update! tex bv) — replace pixel data; re-uploaded on next draw */
+static curry_val fn_gl_texture_update(int argc, curry_val *av, void *) {
+    (void)argc;
+    GlTexture *tex = (GlTexture *)val_to_ptr("gl-texture", av[0]);
+    uint32_t n = curry_bytevector_length(av[1]);
+    tex->data.resize(n);
+    for (uint32_t i = 0; i < n; i++)
+        tex->data[i] = curry_bytevector_ref(av[1], i);
+    tex->dirty = true;
     return curry_void();
 }
 
@@ -1833,6 +1935,8 @@ extern "C" void curry_module_init(CurryVM *vm) {
     /* --- General GLSL shader API --- */
     curry_define_fn(vm, "make-gl-shader",        fn_make_gl_shader,      1, 2, NULL);
     curry_define_fn(vm, "gl-shader-draw!",       fn_gl_shader_draw,      2, 3, NULL);
+    curry_define_fn(vm, "make-gl-texture",       fn_make_gl_texture,     3, 4, NULL);
+    curry_define_fn(vm, "gl-texture-update!",    fn_gl_texture_update,   2, 2, NULL);
 
     /* --- Layer 2: gfx-* graphics --- */
     curry_define_fn(vm, "gfx-clear!",           fn_gfx_clear,           1, 5, NULL);
