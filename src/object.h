@@ -69,11 +69,29 @@ typedef enum {
     T_CHANNEL       = 43,  /* CSP buffered channel                       */
 } ObjType;
 
-/* All heap objects start with this header */
+/*
+ * All heap objects start with this header.
+ *
+ * fwd: zero during normal execution.  During a copying/compacting GC pass the
+ * collector sets fwd to the new address and sets type = GC_FORWARDED.  The
+ * mutator must never read fwd directly — use vis_forwarded() / hdr_fwd().
+ * Placing fwd here (not in the first payload word) makes concurrent GC
+ * safe: a concurrent mutator can always read type to detect a forwarded
+ * object without racing with a payload write.
+ *
+ * Size: 16 bytes on all 64-bit platforms.  This is the price of compaction.
+ */
 typedef struct {
-    uint32_t type;   /* ObjType */
-    uint32_t flags;  /* type-specific bit flags */
+    uint32_t  type;   /* ObjType, or GC_FORWARDED when object has been moved */
+    uint32_t  flags;  /* type-specific bit flags                              */
+    uintptr_t fwd;    /* forwarding address (GC only); 0 = not forwarded      */
 } Hdr;
+
+/* Sentinel type tag written by the GC when an object is evacuated. */
+#define GC_FORWARDED  0xFFFFFFFFu
+
+#define vis_forwarded(v) (vis_ptr(v) && ((Hdr *)(uintptr_t)(v))->type == GC_FORWARDED)
+#define hdr_fwd(v)       (((Hdr *)(uintptr_t)(v))->fwd)
 
 /* Get the type of a heap value (0 if not a heap pointer) */
 static inline uint32_t vtype(val_t v) {

@@ -2,51 +2,149 @@
 #define CURRY_GC_H
 
 /*
- * Thin wrapper around the Boehm-Demers-Weiser garbage collector.
+ * Garbage collector abstraction for Curry Scheme — v2 design.
  *
- * Boehm GC is conservative, thread-safe (with GC_allow_register_threads),
- * and requires no explicit rooting for stack-allocated pointers.  Heap
- * objects may contain val_t fields freely.
+ * Architecture
+ * ─────────────
+ * Three layers:
  *
- * Allocation conventions:
- *   gc_alloc        - object may contain GC pointers
- *   gc_alloc_atomic - object contains no GC pointers (strings, bignums, ...)
+ *   1. Per-thread nursery (GcNursery) — bump-pointer allocation, no locks.
+ *      Fast path: pointer increment in thread-local storage.
+ *      When the nursery is exhausted, gc_nursery_refill() is called; it either
+ *      minor-collects and resets the nursery, or falls back to gc_ops->alloc.
  *
- * GC_NEW / GC_NEW_FLEX are the primary allocation macros used throughout the
- * interpreter.
+ *   2. GC vtable (gc_ops_t) — all GC operations go through here.
+ *      The initial backend is Boehm; it can be replaced with a precise
+ *      generational collector without touching allocation call sites.
+ *
+ *   3. Object header forwarding (see object.h) — every heap object carries
+ *      a `fwd` field that the GC writes when evacuating an object.  Zero
+ *      during normal execution.
+ *
+ * C/C++ module interop
+ * ─────────────────────
+ * Boehm conservatively scans C stack frames, so existing C modules need no
+ * changes.  When a precise GC replaces Boehm, C modules that store Scheme
+ * pointers in heap-allocated structs or globals must use gc_pin/gc_unpin or
+ * gc_register_root/gc_unregister_root to keep those references live.
+ *
+ * Thread safety
+ * ─────────────
+ * Each thread owns its own GcNursery — allocation is lock-free on the fast
+ * path.  The shared tenured space is protected by the GC implementation.
+ * Call gc_register_thread() at the start of every new pthread.
  */
 
 #define GC_THREADS
 #include <gc/gc.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-void gc_init(void);
-void gc_register_thread(void);
+/* ── GC vtable ────────────────────────────────────────────────────────────── */
+
+typedef struct gc_ops {
+    /*
+     * Allocate `bytes` bytes.  `has_ptrs` true means the object may contain
+     * GC-managed pointers (use GC_MALLOC); false means it is atomic (use
+     * GC_MALLOC_ATOMIC or equivalent — no interior pointer scan needed).
+     */
+    void *(*alloc)(size_t bytes, bool has_ptrs);
+
+    /* Trigger a collection cycle. */
+    void  (*collect)(void);
+
+    /* Called once per new pthread before any allocation on that thread. */
+    void  (*register_thread)(void);
+
+    /*
+     * Pin/unpin: prevent the collector from moving `obj`.
+     * Required when a C extension stores a raw Scheme pointer in a struct or
+     * global that lives across a GC point and is not on the C stack.
+     * Pin/unpin calls must be balanced.  Pinning is a no-op under Boehm.
+     */
+    void  (*pin)(void *obj);
+    void  (*unpin)(void *obj);
+
+    /*
+     * Register a val_t slot as a GC root.  The slot must remain valid until
+     * gc_unregister_root is called.  No-op under Boehm (conservative scan
+     * finds it anyway), but required for precise GC.
+     */
+    void  (*register_root)(void *slot);
+    void  (*unregister_root)(void *slot);
+
+    /* Optional: GC heap statistics. */
+    size_t (*heap_size)(void);
+    size_t (*free_bytes)(void);
+} gc_ops_t;
+
+/* Active GC backend.  Set during gc_init(); never NULL after that. */
+extern gc_ops_t *gc_ops;
+
+/* ── Per-thread nursery ───────────────────────────────────────────────────── */
+
+typedef struct {
+    uint8_t *base;   /* start of nursery buffer                  */
+    uint8_t *limit;  /* one past the end                         */
+    uint8_t *top;    /* bump pointer; next allocation starts here */
+} GcNursery;
+
+extern _Thread_local GcNursery gc_nursery;
+
+/* Slow path: called when top + n > limit.  Returns a pointer to n bytes.
+ * May trigger a minor collection, refill the nursery, or fall back to
+ * gc_ops->alloc for large objects. */
+void *gc_nursery_refill(size_t n, bool has_ptrs);
+
+/*
+ * Fast-path nursery allocation.
+ * Inline bump-pointer; falls through to gc_nursery_refill on exhaustion.
+ * `has_ptrs` must be a compile-time constant for the branch to be folded.
+ */
+static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
+    /* Align to 8 bytes (all Curry heap objects require 8-byte alignment). */
+    n = (n + 7u) & ~7u;
+    uint8_t *p = gc_nursery.top;
+    uint8_t *next = p + n;
+    if (__builtin_expect(next > gc_nursery.limit, 0))
+        return gc_nursery_refill(n, has_ptrs);
+    gc_nursery.top = next;
+    return p;
+}
+
+/* ── Lifecycle ────────────────────────────────────────────────────────────── */
+
+void gc_init(void);              /* call once at startup, before any allocation */
+void gc_register_thread(void);   /* call once per new pthread                   */
 void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd);
 
 /* GC tuning — safe to call after gc_init() */
-void   gc_set_max_heap(size_t bytes);       /* 0 = unlimited */
-void   gc_set_free_space_divisor(int n);    /* default 3; lower = more aggressive */
-void   gc_enable_incremental(void);         /* lower pause times, slight overhead */
+void   gc_set_max_heap(size_t bytes);
+void   gc_set_free_space_divisor(int n);
+void   gc_enable_incremental(void);
 size_t gc_heap_size(void);
 size_t gc_free_bytes(void);
 size_t gc_total_bytes(void);
 
-static inline void *gc_alloc(size_t n)        { return GC_MALLOC(n);          }
-static inline void *gc_alloc_atomic(size_t n) { return GC_MALLOC_ATOMIC(n);   }
-static inline void  gc_collect(void)           { GC_gcollect();                }
+/* ── Convenience wrappers (keep same names so call sites don't change) ────── */
 
-/* Allocate a fixed-size struct that may contain pointers */
-#define CURRY_NEW(T)           ((T *)gc_alloc(sizeof(T)))
+static inline void *gc_alloc(size_t n)        { return gc_nursery_alloc(n, true);  }
+static inline void *gc_alloc_atomic(size_t n) { return gc_nursery_alloc(n, false); }
+static inline void  gc_collect(void)          { gc_ops->collect();                  }
 
-/* Allocate a struct with a flexible array member 'data' of element type E */
-#define CURRY_NEW_FLEX(T, n)   ((T *)gc_alloc(sizeof(T) + (n) * sizeof(((T *)0)->data[0])))
+/* ── Allocation macros (unchanged API) ────────────────────────────────────── */
 
-/* Allocate a fixed-size struct with no interior GC pointers */
-#define CURRY_NEW_ATOM(T)      ((T *)gc_alloc_atomic(sizeof(T)))
+#define CURRY_NEW(T)                  ((T *)gc_alloc(sizeof(T)))
+#define CURRY_NEW_FLEX(T, n)          ((T *)gc_alloc(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+#define CURRY_NEW_ATOM(T)             ((T *)gc_alloc_atomic(sizeof(T)))
+#define CURRY_NEW_FLEX_ATOM(T, n)     ((T *)gc_alloc_atomic(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
 
-/* Allocate an atomic flexible-array struct */
-#define CURRY_NEW_FLEX_ATOM(T, n) \
-    ((T *)gc_alloc_atomic(sizeof(T) + (n) * sizeof(((T *)0)->data[0])))
+/* ── Root registration helpers ────────────────────────────────────────────── */
+
+static inline void gc_pin(void *obj)               { gc_ops->pin(obj);   }
+static inline void gc_unpin(void *obj)             { gc_ops->unpin(obj); }
+static inline void gc_register_root(void *slot)    { gc_ops->register_root(slot);   }
+static inline void gc_unregister_root(void *slot)  { gc_ops->unregister_root(slot); }
 
 #endif /* CURRY_GC_H */
