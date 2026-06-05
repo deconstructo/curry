@@ -66,6 +66,7 @@ bool       curry_is_nil(curry_val v);
 bool       curry_is_void(curry_val v);
 bool       curry_is_eof(curry_val v);
 bool       curry_is_procedure(curry_val v);
+bool       curry_is_vector(curry_val v);
 bool       curry_is_bytevector(curry_val v);
 bool       curry_is_true(curry_val v);
 bool       curry_is_error(curry_val v);

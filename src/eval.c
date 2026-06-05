@@ -20,6 +20,15 @@
 #include <stdarg.h>
 #include <assert.h>
 
+/* ---- Body validation ---- */
+
+static bool is_definition(val_t form) {
+    if (!vis_pair(form)) return false;
+    val_t op = vcar(form);
+    return op == S_DEFINE || op == S_DEFINE_SYNTAX ||
+           op == S_DEFINE_VALUES || op == S_DEFINE_RECORD_TYPE;
+}
+
 /* ---- Exception handling and dynamic wind ---- */
 
 _Thread_local ExnHandler *current_handler = NULL;
@@ -1173,7 +1182,16 @@ tail:
                 profiling_record_call_tco(c->name);
             env = env_bind_arr(vptr(c->env), c->params, argc, arr);
             val_t body = c->body;
-            while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+            bool body_in_body = false;
+            while (vis_pair(vcdr(body))) {
+                val_t bform = vcar(body);
+                if (is_definition(bform)) {
+                    if (body_in_body)
+                        scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
+                } else { body_in_body = true; }
+                eval(bform, env);
+                body = vcdr(body);
+            }
             expr = vcar(body); goto tail;
         }
 
@@ -1368,8 +1386,16 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
 
 val_t eval_body(val_t exprs, val_t env) {
     if (vis_nil(exprs)) return V_VOID;
+    bool in_body = false;
     while (vis_pair(vcdr(exprs))) {
-        eval(vcar(exprs), env);
+        val_t form = vcar(exprs);
+        if (is_definition(form)) {
+            if (in_body)
+                scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
+        } else {
+            in_body = true;
+        }
+        eval(form, env);
         exprs = vcdr(exprs);
     }
     return eval(vcar(exprs), env);

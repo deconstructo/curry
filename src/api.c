@@ -60,6 +60,7 @@ bool curry_is_nil(curry_val v)       { return vis_nil(v); }
 bool curry_is_void(curry_val v)      { return vis_void(v); }
 bool curry_is_eof(curry_val v)       { return vis_eof(v); }
 bool curry_is_procedure(curry_val v)  { return vis_proc(v); }
+bool curry_is_vector(curry_val v)     { return vis_vector(v); }
 bool curry_is_bytevector(curry_val v) { return vis_bytes(v); }
 bool curry_is_true(curry_val v)      { return vis_true(v); }
 bool curry_is_error(curry_val v)     { return vis_error(v); }

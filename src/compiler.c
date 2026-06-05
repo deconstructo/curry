@@ -286,12 +286,20 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
     c.chunk->arity = arity;
     begin_scope(&c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
 
-    /* Scan for internal defines and pre-declare as locals (letrec* semantics) */
+    /* Scan for internal defines and pre-declare as locals (letrec* semantics).
+     * Also enforce R7RS: definitions must precede all expressions in the body. */
     val_t bscan = body;
+    bool body_has_expr = false;
     while (vis_pair(bscan)) {
         val_t form = vcar(bscan);
-        if (vis_pair(form) && vis_symbol(vcar(form)) &&
-            akk_translate(vcar(form)) == S_DEFINE) {
+        bool is_def = vis_pair(form) && vis_symbol(vcar(form)) &&
+                      (akk_translate(vcar(form)) == S_DEFINE ||
+                       akk_translate(vcar(form)) == S_DEFINE_SYNTAX ||
+                       akk_translate(vcar(form)) == S_DEFINE_VALUES ||
+                       akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE);
+        if (is_def) {
+            if (body_has_expr)
+                scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
             val_t defname = vcar(vcdr(form));
             if (vis_symbol(defname)) {
                 /* simple (define x ...) */
@@ -304,6 +312,8 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                 c.locals[c.local_count - 1].depth = -1;
                 emit(&c, OP_VOID, line); /* reserve stack slot */
             }
+        } else {
+            body_has_expr = true;
         }
         bscan = vcdr(bscan);
     }

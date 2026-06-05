@@ -168,6 +168,16 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
         }
         sb_char(out,len,cap,'"'); return;
     }
+    if (curry_is_vector(v)) {
+        /* Vector -> JSON array */
+        uint32_t n = curry_vector_length(v);
+        sb_char(out,len,cap,'[');
+        for (uint32_t i = 0; i < n; i++) {
+            if (i) sb_char(out,len,cap,',');
+            json_write_value(curry_vector_ref(v, i), out, len, cap);
+        }
+        sb_char(out,len,cap,']'); return;
+    }
     if (curry_is_pair(v)) {
         /* Alist -> JSON object */
         sb_char(out,len,cap,'{');
