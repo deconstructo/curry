@@ -127,7 +127,7 @@
           (cond
             ((eq? provider 'claude) "claude-opus-4-7")
             ((eq? provider 'openai) "gpt-4o")
-            ((eq? provider 'ollama) "llama3.2")
+            ((eq? provider 'ollama) "llama3.1")
             (else "default"))))
     (define key
       (or api-key
@@ -150,7 +150,7 @@
   (make-llm-client 'openai model api-key))
 
 (define (make-llm-client/ollama . args)
-  (define model    (if (> (length args) 0) (car args) "llama3.2"))
+  (define model    (if (> (length args) 0) (car args) "llama3.1"))
   (define endpoint (if (> (length args) 1) (cadr args) "http://localhost:11434/v1/chat/completions"))
   (make-llm-client endpoint model #f))
 
@@ -295,14 +295,14 @@
               (list (list (cons "role" "assistant")
                           (cons "content" content)))))
 
-    (define text-parts
-      (let collect ((i 0) (acc '()))
-        (if (= i (vector-length content)) (reverse acc)
-            (let ((block (vector-ref content i)))
-              (collect (+ i 1)
-                       (if (equal? (jget block "type") "text")
-                           (cons (jget block "text") acc)
-                           acc))))))
+    (let ((text-parts
+           (let collect ((i 0) (acc '()))
+             (if (= i (vector-length content)) (reverse acc)
+                 (let ((block (vector-ref content i)))
+                   (collect (+ i 1)
+                            (if (equal? (jget block "type") "text")
+                                (cons (jget block "text") acc)
+                                acc)))))))
 
     (if (equal? stop-reason "tool_use")
         ;; Execute tool calls and continue
@@ -341,7 +341,7 @@
         ;; Done
         (let ((reply (str-join text-parts "\n")))
           (vector-set! conv CONV-REPLY reply)
-          reply))))
+          reply)))))
 
 ;;; ─── OpenAI-compatible provider ─────────────────────────────────────────────
 
@@ -422,29 +422,26 @@
           ;; Execute each tool call and append results
           (let loop2 ((i 0))
             (when (< i (vector-length tool-calls))
-              (define tc      (vector-ref tool-calls i))
-              (define tc-id   (jget tc "id"))
-              (define fn-obj  (jget tc "function"))
-              (define fn-name (jget fn-obj "name"))
-              (define fn-args (jget fn-obj "arguments"))  ; JSON string
-              (define parsed-args
-                (if (string? fn-args) (json-parse fn-args) '()))
-              (define tool
-                (list-find (lambda (t) (equal? (car t) fn-name))
-                           (vector-ref conv CONV-TOOLS)))
-              (define result
-                (if tool
-                    (let* ((handler  (list-ref tool 3))
-                           (sym-args (string-keys->symbols parsed-args))
-                           (r        (handler sym-args)))
-                      (if (string? r) r (j r)))
-                    (string-append "Error: unknown tool " fn-name)))
-              (vector-set! conv CONV-MESSAGES
-                (append (vector-ref conv CONV-MESSAGES)
-                        (list (list (cons "role" "tool")
-                                    (cons "tool_call_id" tc-id)
-                                    (cons "content" result)))))
-              (loop2 (+ i 1))))
+              (let* ((tc         (vector-ref tool-calls i))
+                     (tc-id      (jget tc "id"))
+                     (fn-obj     (jget tc "function"))
+                     (fn-name    (jget fn-obj "name"))
+                     (fn-args    (jget fn-obj "arguments"))
+                     (parsed-args (if (string? fn-args) (json-parse fn-args) '()))
+                     (tool       (list-find (lambda (t) (equal? (car t) fn-name))
+                                            (vector-ref conv CONV-TOOLS)))
+                     (result     (if tool
+                                     (let* ((handler  (list-ref tool 3))
+                                            (sym-args (string-keys->symbols parsed-args))
+                                            (r        (handler sym-args)))
+                                       (if (string? r) r (j r)))
+                                     (string-append "Error: unknown tool " fn-name))))
+                (vector-set! conv CONV-MESSAGES
+                  (append (vector-ref conv CONV-MESSAGES)
+                          (list (list (cons "role" "tool")
+                                      (cons "tool_call_id" tc-id)
+                                      (cons "content" result)))))
+                (loop2 (+ i 1)))))
           (loop))
 
         ;; Done
