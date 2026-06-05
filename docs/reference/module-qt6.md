@@ -383,6 +383,60 @@ Both procedures return a path string on confirmation, or `#f` if the user cancel
 (timer-set-interval! t ms)
 ```
 
+## GLSL fragment shaders
+
+Write full OpenGL 3.3 Core Profile fragment shaders directly in Scheme strings. The module handles context setup, HiDPI scaling, and QPainter interleaving automatically.
+
+```scheme
+; Compile a program (lazy — actual GL compilation on first draw)
+(define prog (make-gl-shader frag-src))          ; default fullscreen-quad vert shader
+(define prog (make-gl-shader vert-src frag-src)) ; custom vertex shader
+
+; Draw: runs inside canvas-on-draw! callback
+(gl-shader-draw! prog painter)                   ; no extra uniforms
+(gl-shader-draw! prog painter uniforms-alist)    ; uniforms as ((name . value) ...)
+```
+
+`gl-shader-draw!` auto-sets two uniforms before processing the alist:
+- `u_resolution` — physical pixel dimensions `(vec2 w h)` (HiDPI-correct)
+- `u_dpr` — device pixel ratio (float)
+
+Uniform value dispatch by Scheme type:
+
+| Scheme type | GLSL type |
+|------------|-----------|
+| fixnum | `int` |
+| `#t`/`#f` | `int` (1/0) |
+| 2-element list | `vec2` |
+| 3-element list | `vec3` |
+| 4-element list | `vec4` |
+| flonum / other numeric | `float` |
+
+The default vertex shader generates a fullscreen quad from `gl_VertexID` — no VBO or vertex attributes needed. After `gl-shader-draw!` returns, `endNativePainting()` has been called and QPainter is fully restored, so `gfx-draw-text!` etc. work normally for HUD overlays.
+
+**Example** (from `examples/mandelbrot.scm`):
+
+```scheme
+(define prog (make-gl-shader "#version 330 core
+out vec4 frag_color;
+uniform vec2 u_resolution;
+uniform vec2 u_center;
+uniform float u_zoom;
+uniform float u_dpr;
+void main() {
+    float pzoom = u_zoom * u_dpr;
+    vec2 c = u_center + vec2(gl_FragCoord.x - u_resolution.x*0.5,
+                            -(gl_FragCoord.y - u_resolution.y*0.5)) / pzoom;
+    frag_color = vec4(length(c) < 2.0 ? vec3(0.0) : vec3(1.0), 1.0);
+}"))
+
+(canvas-on-draw! canvas
+  (lambda (painter w h)
+    (gl-shader-draw! prog painter
+      (list (cons "u_center" (list 0.0 0.0))
+            (cons "u_zoom"   200.0)))))
+```
+
 ## 4D projection math
 
 Pure math — no GPU required.
@@ -419,5 +473,5 @@ All module callbacks are safe to call from non-Qt threads via `send!`. Scheme pr
 | File | Description |
 |------|-------------|
 | `examples/solar-system-qt6.scm` | N-body simulation with 15 concurrent actors |
-| `examples/mandelbrot_qt6.scm` | Mandelbrot set explorer |
+| `examples/mandelbrot.scm` | Hypercomplex Mandelbrot GPU explorer (complex/quaternion/octonion) |
 | `examples/tesseract.scm` | Rotating 4D hypercube |

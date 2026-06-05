@@ -1330,6 +1330,12 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
+        if (prim->min_args >= 0 && argc < prim->min_args)
+            scm_raise(V_FALSE, "%s: too few arguments (got %d, need %d)",
+                      prim->name, argc, prim->min_args);
+        if (prim->max_args >= 0 && argc > prim->max_args)
+            scm_raise(V_FALSE, "%s: too many arguments (got %d, max %d)",
+                      prim->name, argc, prim->max_args);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
         return prim->fn(argc, argv, prim->ud);
