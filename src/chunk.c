@@ -120,6 +120,8 @@ Chunk *chunk_new(void) {
     c->upval_count = 0;
     c->name       = NULL;
     c->glob_cache = NULL;
+    c->src_lambda  = V_VOID;
+    c->upval_names = NULL;
     return c;
 }
 

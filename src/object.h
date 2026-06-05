@@ -67,6 +67,7 @@ typedef enum {
     T_BCCLOSURE     = 41,  /* bytecode closure (chunk + upvalues)        */
     T_TVAR          = 42,  /* STM transactional variable                 */
     T_CHANNEL       = 43,  /* CSP buffered channel                       */
+    T_JITCLOSURE    = 44,  /* JIT-compiled native closure (LLVM backend) */
 } ObjType;
 
 /*
@@ -144,7 +145,8 @@ static inline uint32_t vtype(val_t v) {
 #define vis_down(v)     vis_type(v, T_DOWN)
 #define vis_tuple(v)    (vis_up(v) || vis_down(v))
 
-#define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v))
+#define vis_jitclosure(v) vis_type(v, T_JITCLOSURE)
+#define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v) || vis_jitclosure(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
                          vis_rational(v) || vis_complex(v) || \
                          vis_quat(v) || vis_oct(v) || vis_surreal(v))
@@ -275,6 +277,15 @@ typedef struct {
     PrimFn      fn;
     void       *ud;
 } Primitive;
+
+/* JIT-compiled native closure produced by the LLVM backend.
+ * fn: i64 (*)(i32 argc, i64 *argv, i64 *caps) */
+typedef struct {
+    Hdr      hdr;
+    void    *fn;
+    uint32_t n_caps;
+    val_t    caps[];
+} JitClosure;
 
 /* Continuation: captured for call/cc.
  * Phase 1: escape-only continuations via setjmp/longjmp.
@@ -548,6 +559,7 @@ typedef struct {
 #define as_clos(v)    vunptr(Closure,    v)
 #define as_prim(v)    vunptr(Primitive,  v)
 #define as_cont(v)    vunptr(Continuation, v)
+#define as_jitclos(v) vunptr(JitClosure, v)
 #define as_actor(v)   vunptr(Actor,      v)
 #define as_mbox(v)    vunptr(Mailbox,    v)
 #define as_set(v)     vunptr(Set,        v)

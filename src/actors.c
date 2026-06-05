@@ -145,6 +145,9 @@ val_t actor_spawn(val_t closure, val_t args) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    /* 8 MB stacks: JIT-compiled frames are significantly larger than
+     * interpreter frames due to LLVM codegen alignment and IR scaffolding. */
+    pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
     pthread_create(&a->thread, &attr, actor_thread, start);
     pthread_attr_destroy(&attr);
 

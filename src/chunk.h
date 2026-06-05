@@ -39,6 +39,12 @@ typedef struct {
     const char *name;     /* function name for error messages (or NULL)  */
 
     GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
+
+    /* Tiered JIT: source AST preserved for hot-swap to native code.
+     * src_lambda = (lambda params body...) form; V_VOID if unavailable.
+     * upval_names[i] = interned symbol for upvalue i; NULL if unavailable. */
+    val_t  src_lambda;
+    val_t *upval_names;
 } Chunk;
 
 /* Allocate a fresh empty chunk */

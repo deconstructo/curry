@@ -75,9 +75,10 @@ typedef struct {
 } Local;
 
 typedef struct {
-    bool is_local;     /* captures from enclosing frame locals (true)
+    bool  is_local;    /* captures from enclosing frame locals (true)
                           or from enclosing closure's upvalues (false)  */
-    int  index;
+    int   index;
+    val_t name;        /* interned symbol — for JIT upval_names table   */
 } UpvalDesc;
 
 typedef struct Compiler {
@@ -196,7 +197,7 @@ static void mark_initialised(Compiler *c) {
 
 /* ── Upvalue resolution ───────────────────────────────────────────────── */
 
-static int add_upvalue(Compiler *c, int index, bool is_local) {
+static int add_upvalue(Compiler *c, int index, bool is_local, val_t name) {
     for (int i = 0; i < c->upval_count; i++)
         if (c->upvals[i].index == index && c->upvals[i].is_local == is_local)
             return i;
@@ -206,6 +207,7 @@ static int add_upvalue(Compiler *c, int index, bool is_local) {
     }
     c->upvals[c->upval_count].index    = index;
     c->upvals[c->upval_count].is_local = is_local;
+    c->upvals[c->upval_count].name     = name;
     c->chunk->upval_count = ++c->upval_count;
     return c->upval_count - 1;
 }
@@ -221,10 +223,10 @@ static int resolve_upvalue(Compiler *c, val_t name) {
     int local = resolve_local(c->enclosing, name);
     if (local >= 0) {
         c->enclosing->locals[local].captured = true;
-        return add_upvalue(c, local, true);
+        return add_upvalue(c, local, true, name);
     }
     int up = resolve_upvalue(c->enclosing, name);
-    if (up >= 0) return add_upvalue(c, up, false);
+    if (up >= 0) return add_upvalue(c, up, false, name);
     return -1;
 }
 
@@ -320,6 +322,14 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
 
     compile_seq(&c, body, true, line);
     Chunk *ch = end_compiler(&c);
+
+    /* Preserve source AST and upvalue names for tiered JIT hot-swap. */
+    ch->src_lambda = scm_cons(S_LAMBDA, scm_cons(params, body));
+    if (c.upval_count > 0) {
+        ch->upval_names = (val_t *)gc_alloc((size_t)c.upval_count * sizeof(val_t));
+        for (int i = 0; i < c.upval_count; i++)
+            ch->upval_names[i] = c.upvals[i].name;
+    }
 
     /* In parent: emit OP_CLOSURE followed by upvalue descriptors */
     int ci = chunk_add_const(parent->chunk, (val_t)(uintptr_t)ch);

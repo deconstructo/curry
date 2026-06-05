@@ -164,6 +164,43 @@ else()
   message(STATUS "readline not found — REPL uses basic line editing")
 endif()
 
+# ---- LLVM JIT backend (tiered compilation) ----
+
+option(BUILD_LLVM "Build LLVM ORC JIT backend (tiered native compilation)" OFF)
+if(BUILD_LLVM)
+  find_package(LLVM REQUIRED CONFIG)
+  message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} — JIT backend enabled")
+  message(STATUS "LLVM include dirs: ${LLVM_INCLUDE_DIRS}")
+
+  # Source files for the JIT backend (C++ compilation units)
+  set(LLVM_BACKEND_SOURCES
+    src/llvm/gc_strategy.cpp
+    src/llvm/jit.cpp
+    src/llvm/curry_llvm.cpp
+    src/llvm/codegen.cpp
+  )
+
+  target_sources(curry_core PRIVATE ${LLVM_BACKEND_SOURCES})
+  target_compile_definitions(curry_core PUBLIC BUILD_LLVM)
+  target_include_directories(curry_core PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_compile_definitions(curry_core PRIVATE ${LLVM_DEFINITIONS})
+
+  llvm_map_components_to_libnames(LLVM_LIBS
+    core
+    support
+    irreader
+    orcjit
+    executionengine
+    runtimedyld
+    native
+    nativecodegen
+    passes
+    bitwriter
+  )
+  target_link_libraries(curry_core PUBLIC ${LLVM_LIBS})
+  message(STATUS "LLVM JIT libs: ${LLVM_LIBS}")
+endif()
+
 # ---- Optional modules (shared libraries loaded at runtime) ----
 
 option(BUILD_MODULE_F64VECTOR "Build f64vector typed numeric array module" ON)
