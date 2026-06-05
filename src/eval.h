@@ -79,6 +79,12 @@ extern "C" ExnHandler **curry_current_handler_ptr(void);
 extern _Thread_local ExnHandler *current_handler;
 #endif
 
+/* JIT call depth guard: prevents C-stack overflow for deeply-recursive
+ * JIT-compiled functions.  Declared extern so vm.c and jit.cpp can read it.
+ * Defined in eval.c.  Always a plain int — never accessed via C++ TLS wrapper. */
+extern _Thread_local int g_jit_call_depth;
+#define JIT_CALL_DEPTH_LIMIT 512
+
 /* Raise an exception (never returns) */
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 void scm_raise_val(val_t exn) __attribute__((noreturn));

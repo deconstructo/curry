@@ -77,7 +77,7 @@ static FunctionType *scheme_fn_type(LLVMContext &ctx) {
         false);
 }
 
-static Function *declare_helper(Module &M, const char *name, FunctionType *ft) {
+static Function *declare_helper(llvm::Module &M, const char *name, FunctionType *ft) {
     if (auto *f = M.getFunction(name)) return f;
     auto *f = Function::Create(ft, Function::ExternalLinkage, name, M);
     f->setCallingConv(CallingConv::C);
@@ -103,8 +103,8 @@ struct NamedLetCtx {
 };
 
 struct CompileCtx {
-    LLVMContext  &llvm_ctx;
-    Module       &M;
+    LLVMContext    &llvm_ctx;
+    llvm::Module   &M;
     IRBuilder<>   B;
     Function     *fn;
     bool          top_level;   /* true in file/expr context, false inside lambda */
@@ -121,7 +121,7 @@ struct CompileCtx {
     Constant *V_TRUE_c;
     Constant *V_NIL_c;
 
-    CompileCtx(LLVMContext &ctx, Module &mod, Function *f, bool tl = false)
+    CompileCtx(LLVMContext &ctx, llvm::Module &mod, Function *f, bool tl = false)
         : llvm_ctx(ctx), M(mod), B(ctx), fn(f), top_level(tl)
         , i64_t(Type::getInt64Ty(ctx))
         , i32_t(Type::getInt32Ty(ctx))
@@ -1235,15 +1235,15 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
 
 /* ---- Module entry points ---- */
 
-static std::unique_ptr<Module> make_module(LLVMContext &llvm_ctx,
-                                            const std::string &name) {
+static std::unique_ptr<llvm::Module> make_module(LLVMContext &llvm_ctx,
+                                                   const std::string &name) {
     register_gc_strategy();
-    auto M = std::make_unique<Module>(name, llvm_ctx);
+    auto M = std::make_unique<llvm::Module>(name, llvm_ctx);
     M->setDataLayout("");
     return M;
 }
 
-static Function *make_fn(Module &M, LLVMContext &ctx,
+static Function *make_fn(llvm::Module &M, LLVMContext &ctx,
                           const std::string &name,
                           FunctionType *ft) {
     auto *f = Function::Create(ft, Function::ExternalLinkage, name, M);
@@ -1253,7 +1253,7 @@ static Function *make_fn(Module &M, LLVMContext &ctx,
     return f;
 }
 
-std::unique_ptr<Module> codegen_thunk(LLVMContext &llvm_ctx,
+std::unique_ptr<llvm::Module> codegen_thunk(LLVMContext &llvm_ctx,
                                        val_t thunk,
                                        const std::string &name) {
     if (!vis_closure(thunk))
@@ -1277,7 +1277,7 @@ std::unique_ptr<Module> codegen_thunk(LLVMContext &llvm_ctx,
     return M;
 }
 
-std::unique_ptr<Module> codegen_procedure(LLVMContext &llvm_ctx,
+std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
                                            val_t proc,
                                            const std::string &name) {
     if (!vis_closure(proc))

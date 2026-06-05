@@ -1334,6 +1334,13 @@ extern val_t scm_cons(val_t, val_t);
 /* After this many calls, a BcClosure is compiled to native code. */
 #define JIT_THRESHOLD 50
 
+/* Max C-stack depth for JIT→JIT calls.  Once exceeded, apply_arr falls
+ * back to the bytecode interpreter which uses O(1) C-stack via OP_TAIL_CALL.
+ * This prevents stack overflow for deeply-recursive functions that hit the
+ * JIT threshold before the recursion unwinds. */
+#define JIT_CALL_DEPTH_LIMIT 512
+_Thread_local int g_jit_call_depth = 0;
+
 #ifdef BUILD_LLVM
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
  * values as constants so the JIT compiles them in without needing runtime
@@ -1391,13 +1398,20 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_bcclosure(proc)) {
         BcClosure *cl = as_bcclosure(proc);
 
-        /* Tiered JIT: redirect to native code once compiled. */
-        if (vis_jitclosure(cl->jit_val)) {
+        /* Tiered JIT: redirect to native code once compiled.
+         * Depth guard prevents C-stack overflow for deeply-recursive functions:
+         * beyond JIT_CALL_DEPTH_LIMIT we fall through to the bytecode
+         * interpreter which reuses its frame via OP_TAIL_CALL (O(1) C-stack). */
+        if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+            && curry_profiling_level == 0) {
             JitClosure *jc = as_jitclos(cl->jit_val);
             typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-            return (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
-                                              (uint64_t *)argv,
-                                              (uint64_t *)jc->caps);
+            g_jit_call_depth++;
+            val_t r = (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
+                                                  (uint64_t *)argv,
+                                                  (uint64_t *)jc->caps);
+            g_jit_call_depth--;
+            return r;
         }
         maybe_jit_bcc(cl);
         val_t *saved_sp = vm->sp;

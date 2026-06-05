@@ -29,6 +29,7 @@
 
 extern "C" {
 #include "../eval.h"
+/* g_jit_call_depth and JIT_CALL_DEPTH_LIMIT are declared in eval.h */
 #include "../value.h"
 #include "../object.h"
 #include "../gc.h"
@@ -62,9 +63,15 @@ using namespace llvm::orc;
 
 extern "C" {
 
-/* Apply a Scheme procedure to argc/argv. */
+/* Apply a Scheme procedure to argc/argv.  Depth-guarded: when
+ * g_jit_call_depth reaches JIT_CALL_DEPTH_LIMIT the JIT redirect in
+ * apply_arr is bypassed and the bytecode interpreter runs instead, giving
+ * proper O(1) C-stack tail-call semantics for deep recursion. */
 static uint64_t curry_jit_apply_arr(uint64_t proc_val, int argc, uint64_t *argv) {
-    return (uint64_t)apply_arr((val_t)proc_val, argc, (val_t *)argv);
+    g_jit_call_depth++;
+    uint64_t r = (uint64_t)apply_arr((val_t)proc_val, argc, (val_t *)argv);
+    g_jit_call_depth--;
+    return r;
 }
 
 /* ---- Numeric comparison wrappers (bool → val_t) ---- */
@@ -260,7 +267,7 @@ void JITSession::register_runtime_symbols() {
     check(jd.define(absoluteSymbols(std::move(syms))));
 }
 
-void JITSession::add_module(std::unique_ptr<Module> M,
+void JITSession::add_module(std::unique_ptr<llvm::Module> M,
                              std::unique_ptr<LLVMContext> ctx) {
     /* Stamp the data layout so codegen matches the JIT target. */
     M->setDataLayout(lljit_->getDataLayout());

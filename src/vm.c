@@ -693,13 +693,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
-                if (vis_jitclosure(cl->jit_val)) {
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0) {
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
                     val_t result = ((jit_fn_t)jc->fn)((int32_t)argc2,
                                                        (uint64_t *)call_args,
                                                        (uint64_t *)jc->caps);
+                    g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     PUSH(result);
                     NEXT;
@@ -737,13 +740,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
-                if (vis_jitclosure(cl->jit_val)) {
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0) {
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
                     val_t result = ((jit_fn_t)jc->fn)((int32_t)argc2,
                                                        (uint64_t *)call_args,
                                                        (uint64_t *)jc->caps);
+                    g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     if (pop_frame(&frame, result)) return *--vm->sp;
                     if (vm->frame_count == entry_depth) return *--vm->sp;
