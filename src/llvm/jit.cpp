@@ -227,10 +227,16 @@ void JITSession::register_runtime_symbols() {
 
     SymbolMap syms;
     auto add = [&](const char *name, void *ptr) {
+#if LLVM_VERSION_MAJOR >= 17
         syms[es.intern(mangle(name))] = {
             ExecutorAddr::fromPtr(ptr),
             JITSymbolFlags::Exported | JITSymbolFlags::Callable
         };
+#else
+        syms[es.intern(mangle(name))] = JITEvaluatedSymbol(
+            ExecutorAddr::fromPtr(ptr).getValue(),
+            JITSymbolFlags::Exported | JITSymbolFlags::Callable);
+#endif
     };
 
     add("curry_jit_apply_arr",     (void *)curry_jit_apply_arr);

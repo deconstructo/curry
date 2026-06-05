@@ -90,7 +90,11 @@ typedef struct {
     uint8_t *top;    /* bump pointer; next allocation starts here */
 } GcNursery;
 
+#ifdef __cplusplus
+extern thread_local GcNursery gc_nursery;
+#else
 extern _Thread_local GcNursery gc_nursery;
+#endif
 
 /* Slow path: called when top + n > limit.  Returns a pointer to n bytes.
  * May trigger a minor collection, refill the nursery, or fall back to

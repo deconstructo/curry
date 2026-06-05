@@ -580,16 +580,43 @@ deadlock).
 
 ### Build requirements
 
+Requires LLVM ≥ 15 with the ORC JIT components. The single package `llvm-XX-dev`
+provides headers, static libraries, and the CMake config file (`LLVMConfig.cmake`)
+that the build system needs.
+
+**macOS (Homebrew)**
+
 ```bash
-# macOS
 brew install llvm
 cmake -B build -DBUILD_LLVM=ON \
   -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
-
-# Debian/Ubuntu
-sudo apt install llvm-dev
-cmake -B build -DBUILD_LLVM=ON
 ```
+
+**Ubuntu 24.04 / Debian bookworm** — LLVM 18 is available in the main repository:
+
+```bash
+sudo apt install llvm-18-dev
+cmake -B build -DBUILD_LLVM=ON \
+  -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+```
+
+**Ubuntu 22.04 (jammy)** — the default repo only ships LLVM 14, which is too old.
+Add the LLVM project's apt repository first:
+
+```bash
+wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+  | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+  | sudo tee /etc/apt/sources.list.d/llvm.list
+sudo apt update
+sudo apt install llvm-18-dev
+cmake -B build -DBUILD_LLVM=ON \
+  -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+```
+
+Replace `18` with any LLVM version ≥ 15 (e.g. `19`, `20`). The `-DLLVM_DIR` flag
+is needed whenever the system hosts multiple LLVM versions so CMake picks the right
+`LLVMConfig.cmake` rather than an older one on `PATH`.
 
 ---
 

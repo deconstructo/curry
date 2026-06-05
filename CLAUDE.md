@@ -18,6 +18,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_GIT=ON \
   -DBUILD_MODULE_PLPLOT=ON \
   -DBUILD_MODULE_QT6=ON \
+  -DBUILD_LLVM=ON \
   -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6
 
 # Build
@@ -46,9 +47,26 @@ brew install bdw-gc gmp cmake
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
                  libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev
 
+# LLVM JIT backend — Linux (requires LLVM ≥ 15)
+# Ubuntu 24.04 / Debian bookworm: LLVM 18 is in the main repo
+sudo apt install llvm-18-dev
+cmake -B build -DBUILD_LLVM=ON -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+
+# Ubuntu 22.04 (jammy): default repo only has LLVM 14; add the LLVM apt repo first
+wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+  | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+  | sudo tee /etc/apt/sources.list.d/llvm.list
+sudo apt update && sudo apt install llvm-18-dev
+cmake -B build -DBUILD_LLVM=ON -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+
 # Optional modules — macOS
 brew install openssl sqlite libgit2 libpng jpeg-turbo
 # curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with macOS
+
+# LLVM JIT backend — macOS
+brew install llvm
+cmake -B build -DBUILD_LLVM=ON -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
 ```
 
 ## Tests

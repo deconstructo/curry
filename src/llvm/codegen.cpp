@@ -30,6 +30,7 @@
 
 #include "codegen.h"
 #include "gc_strategy.h"
+#include <optional>
 
 extern "C" {
 #include "../object.h"
@@ -180,11 +181,16 @@ static Value *emit_body(CompileCtx &cc, val_t forms);
 static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
                                    FunctionType *ftype,
                                    ArrayRef<Value *> call_args) {
+#if LLVM_VERSION_MAJOR >= 17
+    std::optional<ArrayRef<Value *>> deopt_args;
+#else
+    llvm::Optional<ArrayRef<Value *>> deopt_args;
+#endif
     auto *sp = cc.B.CreateGCStatepointCall(
         /*ID=*/0, /*NumPatchBytes=*/0,
         FunctionCallee(ftype, callee),
         SmallVector<Value *, 8>(call_args.begin(), call_args.end()),
-        /*DeoptArgs=*/std::nullopt,
+        deopt_args,
         /*GCArgs=*/ArrayRef<Value *>{});
 
     if (ftype->getReturnType()->isVoidTy())
