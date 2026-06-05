@@ -287,7 +287,9 @@ Two kinds of modules:
 2. **Scheme `.sld` / `.scm`** — evaluated in a fresh environment; exports all top-level definitions.
 
 Always-on modules (no build flag needed): `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`.  
-Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`.
+Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`.
+
+The `(curry llm)` module is a pure Scheme library (no build step) that sits on top of `(curry http)` and `(curry json)`. See `lib/curry/modules/curry/llm.scm`.
 
 Module search order: `CURRY_MODULE_PATH` env var (colon-separated), then `lib/curry/modules/`. Module names map to paths, e.g. `(curry json)` → `curry/json.so`.
 
