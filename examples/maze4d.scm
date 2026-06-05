@@ -172,8 +172,6 @@ uniform int   u_DX;
 uniform int   u_DZ;
 uniform int   u_DW;
 
-/* Return passage-bitmask for cell (ix, iz) on the current w-slice.
- * Out-of-bounds cells return 0 (all walls). */
 int cell_bits(int ix, int iz) {
     if (ix < 0 || ix >= u_DX || iz < 0 || iz >= u_DZ) return 0;
     float u = (float(ix) + 0.5) / float(u_DX);
@@ -181,9 +179,6 @@ int cell_bits(int ix, int iz) {
     return int(texture(u_maze, vec2(u, v)).r * 255.0 + 0.5);
 }
 
-/* DDA raycaster. Returns perpendicular distance to the nearest wall, or
- * -1.0 if nothing hits within MAX_DIST.  x_side is set true for ±X walls
- * (used to shade X-walls brighter than Z-walls). */
 float cast_ray(vec2 pos, vec2 rd, out bool x_side) {
     float ddx = abs(rd.x) < 1e-10 ? 1e30 : abs(1.0 / rd.x);
     float ddz = abs(rd.y) < 1e-10 ? 1e30 : abs(1.0 / rd.y);
@@ -198,22 +193,36 @@ float cast_ray(vec2 pos, vec2 rd, out bool x_side) {
     for (int i = 0; i < 64; i++) {
         if (min(sdx, sdz) > 18.0) { x_side = false; return -1.0; }
         if (sdx < sdz) {
-            int bit = sx > 0 ? 1 : 2;          /* B+X=1  B-X=2 */
-            if ((cell_bits(ix, iz) & bit) == 0) {
-                x_side = true;
-                return max(0.01, sdx - ddx);
-            }
+            int bit = sx > 0 ? 1 : 2;
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = true;  return max(0.01, sdx - ddx); }
             ix += sx; sdx += ddx;
         } else {
-            int bit = sz > 0 ? 4 : 8;          /* B+Z=4  B-Z=8 */
-            if ((cell_bits(ix, iz) & bit) == 0) {
-                x_side = false;
-                return max(0.01, sdz - ddz);
-            }
+            int bit = sz > 0 ? 4 : 8;
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = false; return max(0.01, sdz - ddz); }
             iz += sz; sdz += ddz;
         }
     }
     x_side = false; return -1.0;
+}
+
+/* Brick/masonry pattern on walls.
+ *   tx  = fractional position along the wall (one cell = 1.0)
+ *   ty  = fractional position top→bottom within the wall stripe
+ * Returns a brightness multiplier:
+ *   mortar gaps → 0.25  (dark recessed lines)
+ *   brick faces → 0.80–0.95  (random per-brick variation)
+ *
+ * Mortar lines run horizontally every ¼ wall height and vertically every
+ * ½ world unit with a half-brick stagger per row.  The mortar lines
+ * compress together as distance grows — the strongest depth cue.
+ * Brick faces are slightly randomised so long corridors don't look uniform. */
+float brick(float tx, float ty) {
+    float row = floor(ty * 4.0);
+    float fy  = fract(ty * 4.0);
+    float fx  = fract(tx * 2.0 + mod(row, 2.0) * 0.5);
+    if (fy < 0.07 || fx < 0.06) return 0.25;          /* mortar */
+    float col = floor(tx * 2.0 + mod(row, 2.0) * 0.5);
+    return 0.80 + fract(sin(row * 7.31 + col * 13.17) * 43758.55) * 0.15;
 }
 
 void main() {
@@ -223,39 +232,60 @@ void main() {
     float ly  = sh - gl_FragCoord.y / u_dpr;   /* flip Y: 0 = top */
     float hsh = sh * 0.5;
 
-    float cam = 2.0 * lx / sw - 1.0;           /* ∈ [-1, 1] */
+    float cam = 2.0 * lx / sw - 1.0;
     float sy  = sin(u_yaw);
     float cy  = cos(u_yaw);
+    vec2  rd  = vec2(sy + cy * cam * u_half_fov, cy - sy * cam * u_half_fov);
+    float hs  = u_eye_sep * 0.5;
+    vec2 l_pos = u_pos + vec2(-cy,  sy) * hs;
+    vec2 r_pos = u_pos + vec2( cy, -sy) * hs;
 
-    /* Ray direction: same for both eyes (parallel-axis stereo) */
-    vec2 rd = vec2(sy + cy * cam * u_half_fov,
-                   cy - sy * cam * u_half_fov);
+    /* ── Background ─────────────────────────────────────────────────────── */
+    vec3 bg;
+    if (ly < hsh) {
+        /* Ceiling: plain dark purple */
+        bg = vec3(0.04, 0.03, 0.06);
+    } else {
+        /* Floor: perspective grid.
+         * row_dist = perpendicular distance to the floor at this screen row.
+         * Player eye is at height 0.5 (mid-wall), floor at 0.
+         * lp = 0.5 / (ly/hsh - 1)  →  infinity at horizon, 0.5 at feet. */
+        float row_dist = 0.5 / max(0.001, ly / hsh - 1.0);
+        vec2  nrd = normalize(rd);
+        float fx  = fract(u_pos.x + row_dist * nrd.x);
+        float fz  = fract(u_pos.y + row_dist * nrd.y);
+        bool  gline = fx < 0.05 || fz < 0.05;
+        /* Grid lines stay at the base dark colour; open tiles lighten slightly
+         * near the player so the lines read as recessed cracks. */
+        float fog_f = max(0.0, 1.0 - row_dist / u_fog);
+        float extra = gline ? 0.0 : fog_f * 0.07;
+        bg = vec3(0.09 + extra, 0.08 + extra, 0.06 + extra);
+    }
 
-    /* Eye positions: laterally offset ⊥ to view direction.
-     * Right direction in (x,z) = (cy, -sy). */
-    float hs    = u_eye_sep * 0.5;
-    vec2 l_pos  = u_pos + vec2(-cy,  sy) * hs;
-    vec2 r_pos  = u_pos + vec2( cy, -sy) * hs;
-
-    /* Ceiling (top half) / floor (bottom half) background */
-    vec3 bg = ly < hsh ? vec3(0.04, 0.03, 0.06)
-                       : vec3(0.09, 0.08, 0.06);
-
+    /* ── Wall rays ───────────────────────────────────────────────────────── */
     bool lxs, rxs;
     float lp = cast_ray(l_pos, rd, lxs);
     float rp = cast_ray(r_pos, rd, rxs);
 
-    /* Accumulate red (left eye) and blue (right eye) wall contributions */
+    /* hit.coord = pos + dist * rd  (exact: rd·view_dir = 1 by construction) */
     float ra = 0.0, ba = 0.0;
     if (lp > 0.0) {
         float h = u_wall_h * hsh / lp;
-        if (ly >= hsh - h && ly <= hsh + h)
-            ra = max(0.0, 1.0 - lp / u_fog) * (lxs ? 1.0 : 0.7);
+        if (ly >= hsh - h && ly <= hsh + h) {
+            float tx  = lxs ? fract(l_pos.y + lp * rd.y) : fract(l_pos.x + lp * rd.x);
+            float ty  = (ly - (hsh - h)) / (2.0 * h);
+            float fog = max(0.0, 1.0 - lp / u_fog);
+            ra = fog * (lxs ? 1.0 : 0.7) * brick(tx, ty);
+        }
     }
     if (rp > 0.0) {
         float h = u_wall_h * hsh / rp;
-        if (ly >= hsh - h && ly <= hsh + h)
-            ba = max(0.0, 1.0 - rp / u_fog) * (rxs ? 1.0 : 0.7);
+        if (ly >= hsh - h && ly <= hsh + h) {
+            float tx  = rxs ? fract(r_pos.y + rp * rd.y) : fract(r_pos.x + rp * rd.x);
+            float ty  = (ly - (hsh - h)) / (2.0 * h);
+            float fog = max(0.0, 1.0 - rp / u_fog);
+            ba = fog * (rxs ? 1.0 : 0.7) * brick(tx, ty);
+        }
     }
 
     frag_color = vec4(clamp(bg.r + ra, 0.0, 1.0),
