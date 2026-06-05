@@ -34,7 +34,7 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x01'
+#define SCC_FMT_VER     '\x02'
 #define SCC_SENTINEL    0xCAFEBEEFu
 #define SCC_SHEBANG     "#!/usr/bin/env curry\n"
 

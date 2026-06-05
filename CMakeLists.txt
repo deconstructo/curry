@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 0.8.22 LANGUAGES C CXX)
+project(curry VERSION 1.0.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -162,6 +162,43 @@ if(READLINE_LIB AND READLINE_INCLUDE)
   message(STATUS "readline found — REPL will use readline")
 else()
   message(STATUS "readline not found — REPL uses basic line editing")
+endif()
+
+# ---- LLVM JIT backend (tiered compilation) ----
+
+option(BUILD_LLVM "Build LLVM ORC JIT backend (tiered native compilation)" OFF)
+if(BUILD_LLVM)
+  find_package(LLVM REQUIRED CONFIG)
+  message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} — JIT backend enabled")
+  message(STATUS "LLVM include dirs: ${LLVM_INCLUDE_DIRS}")
+
+  # Source files for the JIT backend (C++ compilation units)
+  set(LLVM_BACKEND_SOURCES
+    src/llvm/gc_strategy.cpp
+    src/llvm/jit.cpp
+    src/llvm/curry_llvm.cpp
+    src/llvm/codegen.cpp
+  )
+
+  target_sources(curry_core PRIVATE ${LLVM_BACKEND_SOURCES})
+  target_compile_definitions(curry_core PUBLIC BUILD_LLVM)
+  target_include_directories(curry_core PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_compile_definitions(curry_core PRIVATE ${LLVM_DEFINITIONS})
+
+  llvm_map_components_to_libnames(LLVM_LIBS
+    core
+    support
+    irreader
+    orcjit
+    executionengine
+    runtimedyld
+    native
+    nativecodegen
+    passes
+    bitwriter
+  )
+  target_link_libraries(curry_core PUBLIC ${LLVM_LIBS})
+  message(STATUS "LLVM JIT libs: ${LLVM_LIBS}")
 endif()
 
 # ---- Optional modules (shared libraries loaded at runtime) ----
@@ -563,7 +600,7 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_PACKAGE_VERSION           "0.8.22")      # overridden by bump-release.sh
+set(CPACK_PACKAGE_VERSION           "1.0.0")
 set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.22_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")

@@ -67,13 +67,32 @@ typedef enum {
     T_BCCLOSURE     = 41,  /* bytecode closure (chunk + upvalues)        */
     T_TVAR          = 42,  /* STM transactional variable                 */
     T_CHANNEL       = 43,  /* CSP buffered channel                       */
+    T_JITCLOSURE    = 44,  /* JIT-compiled native closure (LLVM backend) */
 } ObjType;
 
-/* All heap objects start with this header */
+/*
+ * All heap objects start with this header.
+ *
+ * fwd: zero during normal execution.  During a copying/compacting GC pass the
+ * collector sets fwd to the new address and sets type = GC_FORWARDED.  The
+ * mutator must never read fwd directly — use vis_forwarded() / hdr_fwd().
+ * Placing fwd here (not in the first payload word) makes concurrent GC
+ * safe: a concurrent mutator can always read type to detect a forwarded
+ * object without racing with a payload write.
+ *
+ * Size: 16 bytes on all 64-bit platforms.  This is the price of compaction.
+ */
 typedef struct {
-    uint32_t type;   /* ObjType */
-    uint32_t flags;  /* type-specific bit flags */
+    uint32_t  type;   /* ObjType, or GC_FORWARDED when object has been moved */
+    uint32_t  flags;  /* type-specific bit flags                              */
+    uintptr_t fwd;    /* forwarding address (GC only); 0 = not forwarded      */
 } Hdr;
+
+/* Sentinel type tag written by the GC when an object is evacuated. */
+#define GC_FORWARDED  0xFFFFFFFFu
+
+#define vis_forwarded(v) (vis_ptr(v) && ((Hdr *)(uintptr_t)(v))->type == GC_FORWARDED)
+#define hdr_fwd(v)       (((Hdr *)(uintptr_t)(v))->fwd)
 
 /* Get the type of a heap value (0 if not a heap pointer) */
 static inline uint32_t vtype(val_t v) {
@@ -126,7 +145,8 @@ static inline uint32_t vtype(val_t v) {
 #define vis_down(v)     vis_type(v, T_DOWN)
 #define vis_tuple(v)    (vis_up(v) || vis_down(v))
 
-#define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v))
+#define vis_jitclosure(v) vis_type(v, T_JITCLOSURE)
+#define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v) || vis_jitclosure(v))
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
                          vis_rational(v) || vis_complex(v) || \
                          vis_quat(v) || vis_oct(v) || vis_surreal(v))
@@ -257,6 +277,15 @@ typedef struct {
     PrimFn      fn;
     void       *ud;
 } Primitive;
+
+/* JIT-compiled native closure produced by the LLVM backend.
+ * fn: i64 (*)(i32 argc, i64 *argv, i64 *caps) */
+typedef struct {
+    Hdr      hdr;
+    void    *fn;
+    uint32_t n_caps;
+    val_t    caps[];
+} JitClosure;
 
 /* Continuation: captured for call/cc.
  * Phase 1: escape-only continuations via setjmp/longjmp.
@@ -530,6 +559,7 @@ typedef struct {
 #define as_clos(v)    vunptr(Closure,    v)
 #define as_prim(v)    vunptr(Primitive,  v)
 #define as_cont(v)    vunptr(Continuation, v)
+#define as_jitclos(v) vunptr(JitClosure, v)
 #define as_actor(v)   vunptr(Actor,      v)
 #define as_mbox(v)    vunptr(Mailbox,    v)
 #define as_set(v)     vunptr(Set,        v)

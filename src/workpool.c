@@ -89,6 +89,8 @@ static WorkItem *deque_steal(WSDeque *d) {
 
 static WorkPool *global_pool = NULL;
 
+_Thread_local bool pool_is_worker = false;
+
 static void execute_item(WorkItem *item) {
     ExnHandler h;
     h.prev = current_handler; current_handler = &h;
@@ -146,6 +148,7 @@ static WorkItem *try_steal(int my_id) {
 
 static void *worker_loop(void *arg) {
     int id = (int)(intptr_t)arg;
+    pool_is_worker = true;
     gc_register_thread();
     vm_init();
 
@@ -242,12 +245,13 @@ WorkItem **pool_submit(WorkKind kind, val_t fn,
         pos += sz;
     }
 
-    /* Wake any parked workers. */
-    if (atomic_load_explicit(&global_pool->n_parked, memory_order_relaxed) > 0) {
-        pthread_mutex_lock(&global_pool->park_mutex);
+    /* Wake any parked workers.  The lock must be held while checking n_parked
+     * to close the race where a worker increments n_parked and then calls
+     * cond_wait between our relaxed load above and the broadcast. */
+    pthread_mutex_lock(&global_pool->park_mutex);
+    if (atomic_load_explicit(&global_pool->n_parked, memory_order_relaxed) > 0)
         pthread_cond_broadcast(&global_pool->park_cond);
-        pthread_mutex_unlock(&global_pool->park_mutex);
-    }
+    pthread_mutex_unlock(&global_pool->park_mutex);
 
     return items;
 }

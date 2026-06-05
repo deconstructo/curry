@@ -152,9 +152,9 @@
 
     ; Text
     (gfx-set-color! painter 0.9 0.9 0.9 0.9)
-    (gfx-set-font! painter "Sans" 14)
+    (gfx-set-font! painter "Helvetica" 14)
     (gfx-draw-text! painter 10 (- h 40) *text-input*)
-    (gfx-set-font! painter "Monospace" 11)
+    (gfx-set-font! painter "Menlo" 11)
     (gfx-draw-text! painter 10 (- h 20)
       (string-append "spin=" (number->string *spin-val*) "  pen=" (number->string *pen-width*)))))
 
@@ -195,7 +195,7 @@
 
     ; HUD
     (gfx-set-color! painter 0.7 0.7 0.7 0.8)
-    (gfx-set-font! painter "Monospace" 11)
+    (gfx-set-font! painter "Menlo" 11)
     (gfx-draw-text! painter 10 16
       (string-append "angle = " (number->string (inexact->exact (round (* *angle* 57.296))))
                      "°"))))
@@ -225,7 +225,7 @@
 
     ; Label
     (gfx-set-color! painter 0.2 0.2 0.2 1.0)
-    (gfx-set-font! painter "Sans" 13 #t)
+    (gfx-set-font! painter "Helvetica" 13 #t)
     (gfx-draw-text! painter (/ cx 2.0) (- h 20)
       (string-append "Blend mode: " *blend*))))
 
@@ -262,7 +262,7 @@
     (gfx-draw-points! painter xv yv b r g 0.5 2.0)
 
     (gfx-set-color! painter 0.6 0.6 0.6 0.7)
-    (gfx-set-font! painter "Monospace" 11)
+    (gfx-set-font! painter "Menlo" 11)
     (gfx-draw-text! painter 10 16 (string-append "1000 points, batch rendered  n=" (number->string n)))))
 
 ;;; Demo 4: Filled triangles
@@ -297,7 +297,7 @@
     (gfx-draw-circle! painter cx cy (* *size* 0.45))
 
     (gfx-set-color! painter 0.7 0.7 0.7 0.7)
-    (gfx-set-font! painter "Monospace" 11)
+    (gfx-set-font! painter "Menlo" 11)
     (gfx-draw-text! painter 10 16
       (string-append (number->string n) " triangles in one gfx-fill-triangles! call"))))
 
@@ -316,7 +316,7 @@
 
   ; Layer 1 demo: show GPU status and device dimensions
   (gfx-set-color! painter 0.4 0.4 0.4 0.7)
-  (gfx-set-font! painter "Monospace" 10)
+  (gfx-set-font! painter "Menlo" 10)
   (gfx-draw-text! painter 10 (- h 6)
     (string-append "qt-painter: " (number->string (qt-painter-width painter))
                    "×" (number->string (qt-painter-height painter)))))

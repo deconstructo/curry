@@ -32,6 +32,8 @@ typedef struct {
     Hdr      hdr;         /* T_BCCLOSURE                                 */
     Chunk   *chunk;
     int      upval_count;
+    uint32_t call_count;  /* tiered JIT: invocation counter              */
+    val_t    jit_val;     /* V_VOID until compiled; T_JITCLOSURE after   */
     Upvalue *upvals[];    /* flexible array                               */
 } BcClosure;
 

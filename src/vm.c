@@ -228,6 +228,18 @@ void vm_reset(void) {
     vm->handler_count = 0;
 }
 
+/* Forward declaration — defined in eval.c where scm_cons / symbol.h are available. */
+void maybe_jit_bcc(BcClosure *cl);
+
+/* Quick inline guard: skip the call for the common case where jit_val is
+ * already decided, or where no source AST was preserved. */
+static inline void vm_maybe_jit(BcClosure *cl) {
+    if (cl->jit_val != V_VOID) return;
+    if (cl->chunk->src_lambda == V_VOID) return;
+    if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
+    maybe_jit_bcc(cl);
+}
+
 /* ── BcClosure allocation ────────────────────────────────────────────── */
 
 BcClosure *vm_make_closure(Chunk *chunk, int nupvals) {
@@ -235,8 +247,11 @@ BcClosure *vm_make_closure(Chunk *chunk, int nupvals) {
         sizeof(BcClosure) + (size_t)nupvals * sizeof(Upvalue *));
     cl->hdr.type    = T_BCCLOSURE;
     cl->hdr.flags   = 0;
+    cl->hdr.fwd     = 0;
     cl->chunk       = chunk;
     cl->upval_count = nupvals;
+    cl->call_count  = 0;
+    cl->jit_val     = V_VOID;
     for (int i = 0; i < nupvals; i++) cl->upvals[i] = NULL;
     return cl;
 }
@@ -677,6 +692,22 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
+                /* Tiered JIT: hot-swap to native code once compiled. */
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0) {
+                    JitClosure *jc = as_jitclos(cl->jit_val);
+                    val_t *call_args = vm->sp - argc2;
+                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
+                    val_t result = ((jit_fn_t)jc->fn)((int32_t)argc2,
+                                                       (uint64_t *)call_args,
+                                                       (uint64_t *)jc->caps);
+                    g_jit_call_depth--;
+                    vm->sp -= argc2 + 1;
+                    PUSH(result);
+                    NEXT;
+                }
+                vm_maybe_jit(cl);
                 if (vm->frame_count >= VM_FRAMES_MAX)
                     scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
@@ -708,6 +739,23 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
+                /* Tiered JIT: hot-swap to native code once compiled. */
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0) {
+                    JitClosure *jc = as_jitclos(cl->jit_val);
+                    val_t *call_args = vm->sp - argc2;
+                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
+                    val_t result = ((jit_fn_t)jc->fn)((int32_t)argc2,
+                                                       (uint64_t *)call_args,
+                                                       (uint64_t *)jc->caps);
+                    g_jit_call_depth--;
+                    vm->sp -= argc2 + 1;
+                    if (pop_frame(&frame, result)) return *--vm->sp;
+                    if (vm->frame_count == entry_depth) return *--vm->sp;
+                    NEXT;
+                }
+                vm_maybe_jit(cl);
                 /* Record timing for the outgoing frame before reuse */
                 if (curry_profiling_level >= 2 && frame->prof_start_ns &&
                         frame->closure->chunk->name) {

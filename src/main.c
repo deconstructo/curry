@@ -1,4 +1,7 @@
 #include "gc.h"
+#ifdef BUILD_LLVM
+#  include "llvm/curry_llvm.h"
+#endif
 #include "symbol.h"
 #include "numeric.h"
 #include "port.h"
@@ -44,6 +47,9 @@ static void init_all(void) {
     modules_init();
     profiling_init(GLOBAL_ENV);
     vm_init();
+#ifdef BUILD_LLVM
+    curry_llvm_init();
+#endif
 }
 
 /* ---- REPL ---- */

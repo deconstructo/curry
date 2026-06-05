@@ -1,5 +1,8 @@
 #include "builtins.h"
 #include "object.h"
+#ifdef BUILD_LLVM
+#  include "llvm/curry_llvm.h"
+#endif
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
@@ -918,7 +921,7 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
     val_t proc = av[0], lst = av[1];
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) return prim_map_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker) return prim_map_seq(ac, av, ud);
 
     val_t *elems   = gc_alloc(n * sizeof(val_t));
     val_t *results = gc_alloc(n * sizeof(val_t));
@@ -961,7 +964,7 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     if (!vis_pair(lst)) return ridentity;
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) return prim_reduce_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker) return prim_reduce_seq(ac, av, ud);
 
     val_t *elems = gc_alloc(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
@@ -1013,7 +1016,7 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     val_t lst = av[1];
     int n = 0;
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
-    if (n < map_par_threshold) {
+    if (n < map_par_threshold || pool_is_worker) {
         for (val_t p = lst; vis_pair(p); p = vcdr(p))
             apply(proc, scm_cons(vcar(p), V_NIL));
         return V_VOID;
@@ -1105,6 +1108,63 @@ static val_t prim_random_integer(int ac, val_t *av, void *ud) {
     if (n <= 0) return vfix(0);
     return vfix((intptr_t)(rng_next() % (uint64_t)n));
 }
+
+/* ---- LLVM JIT builtins (compiled in only when BUILD_LLVM=ON) ---- */
+
+#ifdef BUILD_LLVM
+static val_t prim_llvm_available(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return curry_llvm_available() ? V_TRUE : V_FALSE;
+}
+static val_t prim_llvm_dump_last(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    curry_llvm_dump_last();
+    return V_VOID;
+}
+static val_t prim_jit_call(int ac, val_t *av, void *ud) {
+    /* (curry-jit-call proc) — force-JIT-compile proc then call it.
+     * For BcClosure: extract src_lambda, compile, hot-swap jit_val, then call.
+     * Falls back to apply_arr if JIT unavailable or src_lambda not stored. */
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (vis_bcclosure(proc)) {
+        BcClosure *cl = as_bcclosure(proc);
+        if (cl->chunk->src_lambda != V_VOID) {
+            val_t compiled = curry_llvm_jit_compile(cl->chunk->src_lambda);
+            if (vis_jitclosure(compiled))
+                __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
+        }
+        return apply_arr(proc, 0, NULL);
+    }
+    return curry_jit_call(proc);
+}
+static val_t prim_jit_eval(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_jit_eval_expr(av[0]);
+}
+static val_t prim_jit_call_depth(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return vfix(g_jit_call_depth);
+}
+static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
+    /* (jit-compile proc) — force immediate JIT compilation of proc.
+     * Returns the same proc (with jit_val set) or proc unchanged on failure. */
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (!vis_bcclosure(proc)) return proc;
+    BcClosure *cl = as_bcclosure(proc);
+    if (cl->chunk->src_lambda == V_VOID) return proc;
+    if (cl->upval_count > 0 && !cl->chunk->upval_names) return proc;
+    extern val_t jit_wrap_upvals(BcClosure *);
+    val_t src = (cl->upval_count > 0)
+        ? jit_wrap_upvals(cl)
+        : cl->chunk->src_lambda;
+    val_t compiled = curry_llvm_jit_compile(src);
+    if (vis_jitclosure(compiled))
+        __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
+    return proc;
+}
+#endif /* BUILD_LLVM */
 
 /* ---- Registration ---- */
 
@@ -1232,6 +1292,16 @@ void builtins_curry_register(val_t env) {
     DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
     env_define(env, sym_intern_cstr("default-random-source"),
                sym_intern_cstr("default-random-source"));
+
+    /* LLVM JIT control procedures */
+#ifdef BUILD_LLVM
+    DEF("curry-llvm-available?", prim_llvm_available,    0, 0);
+    DEF("curry-llvm-dump-last",  prim_llvm_dump_last,    0, 0);
+    DEF("curry-jit-call",        prim_jit_call,          1, 1);
+    DEF("curry-jit-eval",        prim_jit_eval,          1, 1);
+    DEF("jit-call-depth",        prim_jit_call_depth,    0, 0);
+    DEF("jit-compile!",          prim_jit_compile,       1, 1);
+#endif
 
     /* Second AKK_PR pass — registers Akkadian aliases for CAS, surreal, quantum,
      * multivector, and quaternion procedures that are defined after the first pass. */

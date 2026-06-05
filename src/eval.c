@@ -1,6 +1,9 @@
 #include "eval.h"
 #include "vm.h"
 #include "compiler.h"
+#ifdef BUILD_LLVM
+#  include "llvm/curry_llvm.h"
+#endif
 #include "object.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -1324,9 +1327,93 @@ val_t apply(val_t proc, val_t args) {
     scm_raise(V_FALSE, "apply: not a procedure");
 }
 
+/* ── Tiered JIT ──────────────────────────────────────────────────────── */
+
+extern val_t scm_cons(val_t, val_t);
+
+/* After this many calls, a BcClosure is compiled to native code. */
+#define JIT_THRESHOLD 50
+
+/* Max C-stack depth for JIT→JIT calls.  Once exceeded, apply_arr falls
+ * back to the bytecode interpreter which uses O(1) C-stack via OP_TAIL_CALL.
+ * This prevents stack overflow for deeply-recursive functions that hit the
+ * JIT threshold before the recursion unwinds. */
+#define JIT_CALL_DEPTH_LIMIT 512
+_Thread_local int g_jit_call_depth = 0;
+
+#ifdef BUILD_LLVM
+/* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
+ * values as constants so the JIT compiles them in without needing runtime
+ * cell indirection. */
+val_t jit_wrap_upvals(BcClosure *cl) {
+    val_t bindings = V_NIL;
+    for (int i = cl->upval_count - 1; i >= 0; i--) {
+        val_t uval    = *cl->upvals[i]->location;
+        val_t name    = cl->chunk->upval_names[i];
+        val_t quoted  = scm_cons(S_QUOTE, scm_cons(uval, V_NIL));
+        val_t binding = scm_cons(name, scm_cons(quoted, V_NIL));
+        bindings = scm_cons(binding, bindings);
+    }
+    return scm_cons(S_LET, scm_cons(bindings, scm_cons(cl->chunk->src_lambda, V_NIL)));
+}
+#endif /* BUILD_LLVM */
+
+/* Called from eval.c (apply_arr) and vm.c (OP_CALL / OP_TAIL_CALL inline). */
+void maybe_jit_bcc(BcClosure *cl) {
+#ifdef BUILD_LLVM
+    if (__atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE) != V_VOID) return;
+    if (cl->chunk->src_lambda == V_VOID) return;
+    if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
+    /* Skip JIT for self-referencing closures (named-let loops that capture
+     * themselves as an upvalue).  The bytecode tail-call reuse gives O(1)
+     * stack; JIT would bake the self-reference as a constant and recurse via
+     * apply_arr → vm_run, growing the C stack by one frame per iteration. */
+    for (int i = 0; i < cl->upval_count; i++) {
+        if (*cl->upvals[i]->location == vptr(cl)) {
+            __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
+            return;
+        }
+    }
+    if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < JIT_THRESHOLD) return;
+    /* CAS V_VOID → V_FALSE: only the winning thread compiles this closure.
+     * Losers see V_FALSE and fall back to bytecode until the result is stored. */
+    val_t expected = V_VOID;
+    if (!__atomic_compare_exchange_n(&cl->jit_val, &expected, V_FALSE,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return;
+    val_t src = (cl->upval_count > 0)
+        ? jit_wrap_upvals(cl)
+        : cl->chunk->src_lambda;
+    val_t compiled = curry_llvm_jit_compile(src);
+    __atomic_store_n(&cl->jit_val,
+                     vis_jitclosure(compiled) ? compiled : V_FALSE,
+                     __ATOMIC_RELEASE);
+#else
+    (void)cl;
+#endif
+}
+
 val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_bcclosure(proc)) {
         BcClosure *cl = as_bcclosure(proc);
+
+        /* Tiered JIT: redirect to native code once compiled.
+         * Depth guard prevents C-stack overflow for deeply-recursive functions:
+         * beyond JIT_CALL_DEPTH_LIMIT we fall through to the bytecode
+         * interpreter which reuses its frame via OP_TAIL_CALL (O(1) C-stack). */
+        if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+            && curry_profiling_level == 0) {
+            JitClosure *jc = as_jitclos(cl->jit_val);
+            typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+            g_jit_call_depth++;
+            val_t r = (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
+                                                  (uint64_t *)argv,
+                                                  (uint64_t *)jc->caps);
+            g_jit_call_depth--;
+            return r;
+        }
+        maybe_jit_bcc(cl);
         val_t *saved_sp = vm->sp;
         vm_push(proc);
         for (int i = 0; i < argc; i++) vm_push(argv[i]);
@@ -1344,6 +1431,13 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
         val_t result = vm_run(cl, argc);
         vm->sp = saved_sp;
         return result;
+    }
+    if (vis_jitclosure(proc)) {
+        JitClosure *jc = as_jitclos(proc);
+        typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+        return (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
+                                          (uint64_t *)argv,
+                                          (uint64_t *)jc->caps);
     }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {
