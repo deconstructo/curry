@@ -62,6 +62,10 @@ if(BUILD_MODULE_MCP AND TARGET curry_mcp)
                 ${MOD_PATH})
 endif()
 
+if(BUILD_LLVM)
+    add_test(NAME jit COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
+endif()
+
 if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
     add_test(NAME profiling COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/profiling_tests.scm)
     set_tests_properties(profiling PROPERTIES
