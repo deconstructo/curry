@@ -5,6 +5,10 @@ compiles Scheme ASTs to `Chunk` bytecode objects and executes them in a tight
 dispatch loop.  It replaces the original tree-walking interpreter for all
 code entered at the REPL, loaded from files, or passed via `-e`.
 
+When built with `-DBUILD_LLVM=ON`, the VM gains a **tiered JIT layer**: hot
+`BcClosure` objects are compiled to native code by the LLVM ORC v2 backend
+and called directly on subsequent invocations.  See the [JIT backend](#jit-backend-llvm-orc-v2) section below.
+
 ---
 
 ## Architecture overview
@@ -512,6 +516,80 @@ The `Chunk**` array returned by `scc_load` / `scc_load_direct` is allocated
 with `GC_MALLOC` (not plain `malloc`) so that Boehm GC's conservative heap
 scan finds the interior `Chunk*` pointers and keeps the chunk objects alive
 across GC collections that may occur while the run loop is executing them.
+
+---
+
+## JIT backend (LLVM ORC v2)
+
+Available when the build is configured with `-DBUILD_LLVM=ON` (requires LLVM ≥ 15; tested with LLVM 22).
+
+### How it works
+
+Every `BcClosure` has an atomic `jit_val` field, initially `V_VOID`.  The
+VM's call dispatch checks this field on each `BcClosure` invocation:
+
+1. **Cold** (`jit_val == V_VOID`, call count < threshold): increment the
+   call counter on the chunk.
+2. **Warm** (call count ≥ `JIT_THRESHOLD = 50`): call `maybe_jit_bcc()`,
+   which fires `curry_llvm_jit_compile()` on the closure's `src_lambda` AST
+   (the original Scheme expression tree stored at compile time).  If
+   compilation succeeds the resulting `T_JITCLOSURE` is stored atomically in
+   `jit_val`.
+3. **Hot** (`jit_val` is a `T_JITCLOSURE`): call the native function pointer
+   directly, bypassing the bytecode interpreter entirely.
+
+Upvalues are handled by `jit_wrap_upvals()`: captured variable values are
+baked into a `(let ((name val) …) src_lambda)` wrapper before codegen, so
+the JIT-compiled function is self-contained and does not access the upvalue
+array at runtime.  This means JIT compilation is only safe for closures with
+**immutable** upvalues (the common case for pure functions).
+
+### Scheme API
+
+```scheme
+(curry-llvm-available?)   ; => #t if JIT is compiled in, #f otherwise
+(jit-compile! proc)       ; force-compile proc to native code now
+(jit-compiled? proc)      ; #t if proc has already been JIT-compiled
+```
+
+`jit-compile!` is a no-op if:
+- the closure has no `src_lambda` (some internal closures), or
+- the closure has upvalues but `upval_names` was not recorded (rare).
+
+### Detecting JIT at runtime
+
+```scheme
+(define jit?
+  (guard (e (#t #f))
+    (curry-llvm-available?)))
+
+(when jit?
+  (jit-compile! my-hot-fn))
+```
+
+Using `guard` avoids an "unbound variable" error when running the same
+script in a non-JIT build.
+
+### Parallel-map interaction
+
+JIT-compiled closures are safe to use as the mapped function in parallel
+`map` — the `T_JITCLOSURE` dispatch path is lock-free.  However, `map`
+**inside** a JIT-compiled function will execute sequentially (the
+`pool_is_worker` flag prevents nested parallel dispatch, which would
+deadlock).
+
+### Build requirements
+
+```bash
+# macOS
+brew install llvm
+cmake -B build -DBUILD_LLVM=ON \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
+
+# Debian/Ubuntu
+sudo apt install llvm-dev
+cmake -B build -DBUILD_LLVM=ON
+```
 
 ---
 

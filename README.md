@@ -2,7 +2,7 @@
 
 Curry is an R7RS Scheme implementation with practical R6RS compatibility, a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices and tensors, an actor-model concurrency system, a modular C extension interface, and a built-in LLM client that can talk to Claude, GPT-4o, Ollama, or any OpenAI-compatible endpoint — with multi-turn conversation, tool use, and a full agentic loop.
 
-Source is compiled to bytecode and executed on a stack-based VM. Compiled chunks are cached in `.scc` files (source-adjacent, or `~/.cache/curry/` for read-only paths) and reused on subsequent runs, invalidated automatically on source change or version bump. Use `-c file.scm` to pre-compile without running; `.scc` files can also be passed directly as the script argument.
+Source is compiled to bytecode and executed on a stack-based VM. When built with LLVM (`-DBUILD_LLVM=ON`), hot closures are automatically compiled to native machine code after 50 calls via an ORC v2 JIT backend. Compiled chunks are cached in `.scc` files (source-adjacent, or `~/.cache/curry/` for read-only paths) and reused on subsequent runs, invalidated automatically on source change or version bump. Use `-c file.scm` to pre-compile without running; `.scc` files can also be passed directly as the script argument.
 
 Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands.
 
@@ -166,6 +166,40 @@ Give the model **tools** it can actually call:
 The library runs the full **agentic loop** automatically — send, detect tool calls, execute lambdas, feed results back, repeat. Supports Anthropic's native tool-use protocol and the OpenAI function-calling protocol; Ollama and any OpenAI-compatible endpoint use the OpenAI path.
 
 See [docs/guides/guide-llm.md](docs/guides/guide-llm.md) for ten progressively interesting examples: database queries, parallel actor pipelines, structured output, MCP servers backed by local models, CAS-assisted maths tutors, and more.
+
+---
+
+### LLVM JIT backend
+
+When built with `-DBUILD_LLVM=ON`, Curry adds a tiered native-compilation layer on top of the bytecode VM.
+
+| Procedure | Description |
+|-----------|-------------|
+| `(curry-llvm-available?)` | `#t` if the JIT backend is compiled in |
+| `(jit-compile! proc)` | Force-compile a bytecode closure to native code immediately |
+| `(jit-compiled? proc)` | `#t` if the closure has been JIT-compiled |
+
+**Auto-JIT**: any `BcClosure` called ≥ 50 times is automatically compiled to native ARM64 or x86-64 on the next call. The compiled version replaces the bytecode interpreter transparently — no source changes needed.
+
+Typical speedups (Apple M-series, recursive and loop-heavy code):
+
+| Benchmark | Bytecode | JIT | Speedup |
+|-----------|----------|-----|---------|
+| `(fib 25)` recursive | 54 ms | 9.2 ms | **5.9×** |
+| `named-let` tight loop (10 000 iters) | 2.3 ms | 0.16 ms | **14×** |
+| flonum arithmetic loop | 3.9 ms | 3.4 ms | 1.1× |
+
+See [`examples/bench_jit.scm`](examples/bench_jit.scm) to run the comparison on your machine.
+
+Build with JIT + Qt6 + all optional modules:
+
+```bash
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_LLVM=ON \
+  -DBUILD_MODULE_QT6=ON \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix llvm);$(brew --prefix qt@6)"
+cmake --build build-release -j$(sysctl -n hw.logicalcpu)
+```
 
 ---
 

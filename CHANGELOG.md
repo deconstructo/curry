@@ -1,5 +1,31 @@
 # Changelog
 
+### 1.0.0 — LLVM ORC v2 JIT backend; work-stealing thread pool; Qt6 confirmed
+
+**New features**
+
+- **LLVM ORC v2 JIT backend** (`-DBUILD_LLVM=ON`): hot `BcClosure` objects are automatically compiled to native ARM64 / x86-64 after 50 calls. The compiled version replaces the bytecode interpreter transparently. `(jit-compile! proc)` force-compiles immediately; `(jit-compiled? proc)` and `(curry-llvm-available?)` let Scheme code detect and drive JIT compilation. Typical speedups: ~6× for recursive functions, ~14× for tight named-let loops.
+
+- **Persistent work-stealing thread pool** (Chase-Lev deques): `map` and `reduce` now dispatch through a pool of `hw_concurrency` worker threads that are created once at startup and parked on a condvar between jobs. Eliminates the ~1 ms per-call thread-spawn overhead of the previous approach. `for-each/par` is an explicit opt-in for parallel side-effects; `for-each` remains always sequential.
+
+- **Qt6 6.x confirmed** alongside LLVM JIT in the same binary (`build-release`). The build script (`/Users/yvain/src/b`) now passes both `$(brew --prefix llvm)` and `$(brew --prefix qt@6)` in `CMAKE_PREFIX_PATH`.
+
+**Bug fixes**
+
+- **Nested parallel-map deadlock**: worker threads calling `map` on lists longer than the parallel threshold would submit nested work items and then block on the pool condvar — with no remaining workers to service those items. Fixed by adding a `_Thread_local bool pool_is_worker` flag; `prim_map`, `prim_reduce`, and `prim_for_each_par` fall back to sequential execution when called from inside a worker thread.
+
+- **Park-broadcast race condition** in `pool_submit`: `n_parked` was read without holding `park_mutex`, so a worker could increment the counter and call `cond_wait` between the load and the broadcast, missing the wake-up permanently. Fixed by acquiring `park_mutex` before checking `n_parked`.
+
+- **`jit-compile!` upvalue crash**: force-compiling a closure with captured upvalues via `jit-compile!` produced "unbound variable" errors because `prim_jit_compile` did not call `jit_wrap_upvals`, unlike the auto-JIT path in `maybe_jit_bcc`. Fixed; `jit_wrap_upvals` is now non-static so `builtins_curry.c` can reach it.
+
+- **Stale bytecode cache** after binary rebuilds: `SCC_FMT_VER` bumped from `0x01` to `0x02` to force recompilation of all cached `.scc` files when the binary changes.
+
+- **PLplot batch-mode hang**: `plinit()` in the plplot module defaulted to `plspause(1)`, causing every `plot-end` call to wait indefinitely for user input even with the `svg` headless device. Fixed with `plspause(0)` before each `plinit()`.
+
+- **Qt6 font warnings on macOS**: test harness used generic font names (`"Sans"`, `"Monospace"`) that do not exist on macOS. Replaced with `"Helvetica"` and `"Menlo"`.
+
+---
+
 ### 0.8.18 — Release-build call/cc and MCP SSE fixes
 
 **Bug fixes**
