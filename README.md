@@ -1,6 +1,6 @@
 # Curry Scheme
 
-Curry is an R7RS Scheme implementation with practical R6RS compatibility, a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices and tensors, an actor-model concurrency system, and a modular C extension interface.
+Curry is an R7RS Scheme implementation with practical R6RS compatibility, a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices and tensors, an actor-model concurrency system, a modular C extension interface, and a built-in LLM client that can talk to Claude, GPT-4o, Ollama, or any OpenAI-compatible endpoint — with multi-turn conversation, tool use, and a full agentic loop.
 
 Source is compiled to bytecode and executed on a stack-based VM. Compiled chunks are cached in `.scc` files (source-adjacent, or `~/.cache/curry/` for read-only paths) and reused on subsequent runs, invalidated automatically on source change or version bump. Use `-c file.scm` to pre-compile without running; `.scc` files can also be passed directly as the script argument.
 
@@ -25,6 +25,7 @@ Documentation is split into two directories:
 ### Guides
 
 - [Installation](docs/guides/INSTALL.md) — Homebrew (macOS), build from source, Qt6, test suite
+- [LLM integration](docs/guide-llm.md) — talking to Claude, OpenAI, and Ollama; tool use, agentic loops, structured output, MCP servers, CAS-backed AI
 - [Raspberry Pi / embedded hardware](docs/guides/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM
 - [MCP server](docs/guides/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients
 - [macOS app bundler](docs/guides/make-macos-app.md) — bundle any Curry script as a `.app` with Qt frameworks embedded
@@ -110,6 +111,8 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [network](docs/reference/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
 | [crypto](docs/reference/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
 | [ldap](docs/reference/module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
+| [http](docs/reference/module-http.md) | `(curry http)` | General-purpose HTTP client — any method, headers, body | `libcurl4-openssl-dev` |
+| [llm](docs/reference/module-llm.md) | `(curry llm)` | LLM client: Claude, OpenAI, Ollama, any OpenAI-compat endpoint; tool use, agentic loop *(pure Scheme, no build step)* | `(curry http)` |
 | [storage](docs/reference/module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
 | [graphql](docs/reference/module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
 | [redis](docs/reference/module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
@@ -127,6 +130,42 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [profiling](docs/reference/module-profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
 | [rpi](docs/reference/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
 | [sicm](docs/reference/module-sicm.md) | `(curry sicm)` | Classical mechanics (SICM): Lagrangian, Hamiltonian, Poisson brackets | — |
+
+---
+
+## LLM / AI integration
+
+Curry can talk to any LLM out of the box. No API wrappers, no external packages — just import and go.
+
+```scheme
+(import (curry llm))
+
+; One-shot question (Ollama, local, no key needed)
+(display (llm-ask (make-llm-client 'ollama "llama3.1") "What is a monad?"))
+
+; Claude or OpenAI (reads key from env)
+(display (llm-ask (make-llm-client 'claude) "Explain tail-call optimisation."))
+```
+
+Give the model **tools** it can actually call:
+
+```scheme
+(define conv (make-conversation (make-llm-client 'claude)))
+
+(conv-system! conv "Use tools to answer accurately.")
+
+(conv-tool! conv "sqrt"
+  "Compute the square root of a number."
+  '((n "number" "The number"))
+  (lambda (args) (number->string (sqrt (cdr (assq 'n args))))))
+
+; The model calls sqrt(144), gets "12.0", incorporates it into its reply
+(display (conv-send! conv "What is the square root of 144? Use the sqrt tool."))
+```
+
+The library runs the full **agentic loop** automatically — send, detect tool calls, execute lambdas, feed results back, repeat. Supports Anthropic's native tool-use protocol and the OpenAI function-calling protocol; Ollama and any OpenAI-compatible endpoint use the OpenAI path.
+
+See [docs/guide-llm.md](docs/guide-llm.md) for ten progressively interesting examples: database queries, parallel actor pipelines, structured output, MCP servers backed by local models, CAS-assisted maths tutors, and more.
 
 ---
 
