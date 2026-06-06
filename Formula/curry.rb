@@ -12,6 +12,7 @@ class Curry < Formula
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
+  option "with-llvm",      "Build LLVM ORC JIT backend (tiered native compilation)"
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
   option "with-symengine", "Build SymEngine symbolic CAS module"
@@ -35,6 +36,7 @@ class Curry < Formula
   # curl ships with macOS; no separate dep needed for graphql/storage
 
   # Option-gated deps
+  depends_on "llvm"      if build.with? "llvm"
   depends_on "qt@6"      if build.with? "qt6"
   depends_on "plplot"    if build.with? "plplot"
   depends_on "symengine" if build.with? "symengine"
@@ -46,6 +48,7 @@ class Curry < Formula
       Formula["openldap"].opt_prefix,
       Formula["libpaho-mqtt"].opt_prefix,
     ]
+    prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
     prefix_paths << Formula["symengine"].opt_prefix if build.with? "symengine"
@@ -63,6 +66,7 @@ class Curry < Formula
       -DBUILD_MODULE_GIT=ON
       -DBUILD_MODULE_MCP=ON
       -DBUILD_MODULE_PROFILING=ON
+      -DBUILD_LLVM=#{build.with?("llvm")             ? "ON" : "OFF"}
       -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
       -DBUILD_MODULE_SYMENGINE=#{build.with?("symengine") ? "ON" : "OFF"}
