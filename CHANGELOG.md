@@ -1,5 +1,32 @@
 # Changelog
 
+### 1.2.1 — Pollard rho bug fixes; expanded test coverage
+
+**Bug fixes**
+
+- **Pollard rho infinite loop** (`src/numtheory.c`): two bugs caused `factor`
+  to loop forever on semiprimes whose prime factors exceed the trial-division
+  limit (100 000): (1) `factor_into` modifies its `mpz_t n` argument (reduces
+  to 1 when done), so the recursive call `factor_into(f, ...)` was destroying
+  `f` before `mpz_divexact(n, n, f)` could use it — dividing by 1 instead of
+  the actual factor; fixed by saving a copy before recursing. (2) The batch
+  product accumulator `q` was never initialised to 1 — `mpz_inits` zeroes
+  everything, so every batch GCD returned n; fixed by explicit `mpz_set_ui(q,
+  1)` at init and on each batch boundary.
+
+**Tests**
+
+- `tests/numtheory_tests.scm` (111 → 120 assertions): large-semiprime factoring
+  (`(* 100003 100019)`, `(* 999983 999979)`), `factor` of 2²⁰, flonum
+  `continued-fraction` input, three additional `best-rational-approx` cases.
+- `tests/mpfr_tests.scm` (34 → 65 assertions): standard arithmetic dispatch to
+  MPFR, `inexact` promotion inside `with-precision`, `number->string` on MPFR,
+  binary radix fix (`(number->string 255 2)` → `"11111111"`),
+  `floor`/`ceiling`/`truncate` MPFR dispatch, `mpfr-erfc`/`mpfr-hypot`/
+  `mpfr-fma`, precision propagation in binary ops.
+
+---
+
 ### 1.2.0 — arbitrary-precision floats (MPFR) and number theory
 
 **New features**

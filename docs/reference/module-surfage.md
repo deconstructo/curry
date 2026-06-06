@@ -1,6 +1,6 @@
 # SRFI Compatibility: `(surfage sN …)`
 
-*v1.2.0 — 2026-06-06*
+*v1.2.1 — 2026-06-06*
 
 Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfage sN name)` namespace — a naming convention used by several Scheme implementations so that the same `(import …)` line works across them. The libraries delegate to Curry's built-ins wherever the procedure is already present; only missing names are defined in Scheme.
 

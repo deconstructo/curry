@@ -1,6 +1,6 @@
 # Module: (curry ode)
 
-*v1.2.0 — 2026-06-06*
+*v1.2.1 — 2026-06-06*
 
 Ordinary differential equation solvers for initial-value problems of the form **dy/dt = f(t, y)**. Pure Scheme — no C extension, no extra dependencies.
 

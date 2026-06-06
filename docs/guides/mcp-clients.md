@@ -1,6 +1,6 @@
 # Connecting AI clients to a Curry MCP server
 
-*v1.2.0 — 2026-06-06*
+*v1.2.1 — 2026-06-06*
 
 Curry MCP servers use **stdio transport**: the client spawns the `curry` binary as a
 subprocess and communicates with it over stdin/stdout using newline-delimited JSON-RPC 2.0.
