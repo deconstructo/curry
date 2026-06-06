@@ -1,6 +1,6 @@
 # Curry Scheme
 
-Curry is an R7RS Scheme implementation with practical R6RS compatibility, a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices and tensors, an actor-model concurrency system, a modular C extension interface, and a built-in LLM client that can talk to Claude, GPT-4o, Ollama, or any OpenAI-compatible endpoint — with multi-turn conversation, tool use, and a full agentic loop.
+Curry is an R7RS Scheme implementation with practical R6RS compatibility, a numeric tower extending through the hypercomplex numbers into Clifford algebra, a built-in computer algebra system, quantum superposition values, first-class matrices, tensors, and spinors, a CL-style condition system with restarts, a general C FFI, STM and CSP channels alongside the actor-model concurrency system, a modular C extension interface, and a built-in LLM client that can talk to Claude, GPT-4o, Ollama, or any OpenAI-compatible endpoint — with multi-turn conversation, tool use, and a full agentic loop.
 
 Source is compiled to bytecode and executed on a stack-based VM. When built with LLVM (`-DBUILD_LLVM=ON`), hot closures are automatically compiled to native machine code after 50 calls via an ORC v2 JIT backend. Compiled chunks are cached in `.scc` files (source-adjacent, or `~/.cache/curry/` for read-only paths) and reused on subsequent runs, invalidated automatically on source change or version bump. Use `-c file.scm` to pre-compile without running; `.scc` files can also be passed directly as the script argument.
 
@@ -124,6 +124,9 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [vecdb](docs/reference/module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [regex](docs/reference/module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
 | [sync](docs/reference/module-sync.md) | `(curry sync)` | Mutex, condition variable, semaphore | — |
+| [stm](docs/reference/concurrency.md) | `(curry stm)` | STM (`atomically`/`retry`/`or-else`), CSP channels, `select` macro | — |
+| [conditions](docs/reference/language.md#condition-system-cl-style----import-curry-conditions) | `(curry conditions)` | CL condition system: `handler-bind`, `with-restarts`, `invoke-restart`, `handler-case` | — |
+| [ffi](docs/reference/module-ffi.md) | `(curry ffi)` | General C FFI: `define-foreign`, zero-copy matrix/tensor passthrough | `libffi-dev` (`-DBUILD_FFI=ON`) |
 | [mqtt](docs/reference/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
 | [ode](docs/reference/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
 | [mcp](docs/guides/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
@@ -200,6 +203,39 @@ cmake -B build-release -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$(brew --prefix llvm);$(brew --prefix qt@6)"
 cmake --build build-release -j$(sysctl -n hw.logicalcpu)
 ```
+
+---
+
+### C FFI
+
+When built with `-DBUILD_FFI=ON`, Curry can call any C library directly from Scheme with no glue code.
+
+```scheme
+(import (curry ffi))
+
+(define-foreign-library libm "libm.so")     ; Linux
+; (define-foreign-library libm "libm.dylib") ; macOS
+
+(define-foreign (c-sin  (x double)) → double #:from libm #:c-name "sin")
+(define-foreign (c-sqrt (x double)) → double #:from libm #:c-name "sqrt")
+
+(c-sin 1.5707963)   ; → 1.0
+(c-sqrt 2.0)        ; → 1.41421...
+```
+
+**Zero-copy matrix passthrough** — pass a matrix or tensor's raw `double*` directly to C (e.g. BLAS) with no copying:
+
+```scheme
+(with-pinned-matrix A pa
+  (with-pinned-matrix B pb
+    (with-pinned-matrix C pc
+      (cblas-dgemm CblasRowMajor CblasNoTrans CblasNoTrans
+                   rows cols inner 1.0 pa cols pb cols 0.0 pc cols))))
+```
+
+Supported types: `int`, `uint`, `long`, `size-t`, `double`, `float`, `c-ptr`, `string`, `bool`, `void`. Requires `libffi-dev` on Linux; found automatically via Homebrew on macOS.
+
+See [`docs/reference/module-ffi.md`](docs/reference/module-ffi.md) for the full API.
 
 ---
 

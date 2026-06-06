@@ -34,8 +34,10 @@ static bool is_definition(val_t form) {
 
 /* ---- Exception handling and dynamic wind ---- */
 
-_Thread_local ExnHandler *current_handler = NULL;
-_Thread_local WindFrame  *current_wind    = NULL;
+_Thread_local ExnHandler  *current_handler      = NULL;
+_Thread_local WindFrame   *current_wind         = NULL;
+_Thread_local CondHandler *current_cond_handler = NULL;
+_Thread_local RestartFrame *current_restart_frame = NULL;
 
 /* C accessors for TLS vars — used by C++ dylibs (eval.h) to avoid the
  * C++ TLS wrappers (__ZTW...) which are not exported from the main binary. */
@@ -52,7 +54,44 @@ static void wind_unwind_to(WindFrame *target) {
     }
 }
 
+/* Walk the non-unwinding handler chain.  Each matching handler is called
+ * with the chain below it active (prevents re-entrance on the same handler).
+ * If a handler calls invoke-restart it longjmps away and never returns here.
+ * If all handlers return normally, this function returns. */
+void walk_cond_handlers(val_t exn, CondHandler *h) {
+    if (!h) return;
+    bool matches = vis_false(h->type_sym);  /* V_FALSE = catch-all */
+    if (!matches) {
+        /* Match by condition type symbol or parent hierarchy.
+         * condition_is_a is declared in condition.h and defined in condition.c. */
+        extern bool condition_is_a(val_t exn, val_t type_sym);
+        matches = condition_is_a(exn, h->type_sym);
+    }
+    if (matches) {
+        CondHandler *saved    = current_cond_handler;
+        current_cond_handler  = h->prev; /* prevent re-entrance on this handler */
+        bool  raised = false;
+        val_t rexn   = V_FALSE;
+        ExnHandler eh;
+        SCM_PROTECT(eh, { apply_arr(h->proc, 1, &exn); }, {
+            raised = true; rexn = eh.exn;
+        });
+        current_cond_handler = saved;
+        if (raised) scm_raise_val(rexn); /* handler itself raised — propagate */
+        /* Handler returned normally: continue with handlers below h */
+        walk_cond_handlers(exn, h->prev);
+        return;
+    }
+    walk_cond_handlers(exn, h->prev);
+}
+
 void scm_raise_val(val_t exn) {
+    /* Step 1: offer to non-unwinding handler-bind handlers.
+     * If any handler calls invoke-restart, we never reach step 2. */
+    if (current_cond_handler)
+        walk_cond_handlers(exn, current_cond_handler);
+
+    /* Step 2: unwind to the nearest ExnHandler (guard / handler-case). */
     if (current_handler) {
         current_handler->exn = exn;
         longjmp(current_handler->jmp, 1);

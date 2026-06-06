@@ -1,6 +1,6 @@
 # Module: (curry vecdb)
 
-*v0.7.5 — 2026-05-12*
+*v1.1.0 — 2026-06-06*
 
 In-memory vector database for nearest-neighbour search. Useful for semantic similarity, embedding retrieval, and clustering. Uses brute-force search by default; can use the `usearch` library for approximate nearest neighbours if available.
 

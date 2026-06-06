@@ -108,6 +108,7 @@ set(CORE_SOURCES
   src/actors.c
   src/stm.c
   src/channel.c
+  src/condition.c
   src/modules.c
   src/symbolic.c
   src/symbolic_print.c
@@ -165,6 +166,41 @@ if(READLINE_LIB AND READLINE_INCLUDE)
   message(STATUS "readline found — REPL will use readline")
 else()
   message(STATUS "readline not found — REPL uses basic line editing")
+endif()
+
+# ---- FFI (libffi-backed foreign function interface) ----
+
+option(BUILD_FFI "Build general C FFI (requires libffi)" OFF)
+if(BUILD_FFI)
+  find_package(PkgConfig REQUIRED)
+  # On macOS/Homebrew libffi is keg-only; its pkgconfig is not on the default path.
+  execute_process(
+    COMMAND brew --prefix libffi
+    OUTPUT_VARIABLE HOMEBREW_LIBFFI_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(HOMEBREW_LIBFFI_PREFIX)
+    set(ENV{PKG_CONFIG_PATH} "${HOMEBREW_LIBFFI_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  endif()
+  pkg_check_modules(LIBFFI REQUIRED libffi)
+  message(STATUS "Found libffi ${LIBFFI_VERSION} — FFI enabled")
+  message(STATUS "libffi include dirs: ${LIBFFI_INCLUDE_DIRS}")
+  message(STATUS "libffi libraries: ${LIBFFI_LIBRARIES}")
+
+  target_sources(curry_core PRIVATE src/ffi.c)
+  target_compile_definitions(curry_core PUBLIC BUILD_FFI)
+  # pkg_check_modules may return an empty INCLUDE_DIRS if the path is
+  # considered standard; fall back to the homebrew prefix explicitly.
+  if(LIBFFI_INCLUDE_DIRS)
+    target_include_directories(curry_core PRIVATE ${LIBFFI_INCLUDE_DIRS})
+  elseif(HOMEBREW_LIBFFI_PREFIX)
+    target_include_directories(curry_core PRIVATE "${HOMEBREW_LIBFFI_PREFIX}/include")
+  endif()
+  target_link_libraries(curry_core PUBLIC ${LIBFFI_LIBRARIES})
+  if(LIBFFI_LIBRARY_DIRS)
+    target_link_directories(curry_core PUBLIC ${LIBFFI_LIBRARY_DIRS})
+  elseif(HOMEBREW_LIBFFI_PREFIX)
+    target_link_directories(curry_core PUBLIC "${HOMEBREW_LIBFFI_PREFIX}/lib")
+  endif()
 endif()
 
 # ---- LLVM JIT backend (tiered compilation) ----

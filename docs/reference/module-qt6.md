@@ -1,6 +1,6 @@
 # Module: `(curry qt6)`
 
-*v0.7.7 — 2026-05-23*
+*v1.1.0 — 2026-06-06*
 
 Qt6-based windowing, 2D graphics, widgets, and 4D projection math.
 

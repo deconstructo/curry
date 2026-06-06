@@ -1,6 +1,6 @@
 # Module: (curry storage)
 
-*v0.7.5 — 2026-05-12*
+*v1.1.0 — 2026-06-06*
 
 Object storage: AWS S3, OpenStack Swift, and Azure Blob Storage. GCS is supported via S3 interoperability mode.
 

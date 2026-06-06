@@ -4,15 +4,16 @@ class Curry < Formula
   license "GPL-3.0-only"
 
   # Update url + sha256 after tagging a release:
-  #   git tag v1.0.1 && git push origin v1.0.1
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.0.1.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.0.1.tar.gz"
-  sha256 "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
-  version "1.0.1"
+  #   git tag v1.1.0 && git push origin v1.1.0
+  #   curl -L https://github.com/deconstructao/curry/archive/refs/tags/v1.1.0.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.1.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"  # update after tag
+  version "1.1.0"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
   option "with-llvm",      "Build LLVM ORC JIT backend (tiered native compilation)"
+  option "with-ffi",       "Build general C FFI (libffi backend)"
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
 
@@ -35,9 +36,10 @@ class Curry < Formula
   # curl ships with macOS; no separate dep needed for graphql/storage
 
   # Option-gated deps
-  depends_on "llvm"      if build.with? "llvm"
-  depends_on "qt@6"      if build.with? "qt6"
-  depends_on "plplot"    if build.with? "plplot"
+  depends_on "llvm"    if build.with? "llvm"
+  depends_on "libffi"  if build.with? "ffi"
+  depends_on "qt@6"    if build.with? "qt6"
+  depends_on "plplot"  if build.with? "plplot"
 
   def install
     prefix_paths = [
@@ -47,6 +49,7 @@ class Curry < Formula
       Formula["libpaho-mqtt"].opt_prefix,
     ]
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
+    prefix_paths << Formula["libffi"].opt_prefix    if build.with? "ffi"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
 
@@ -64,6 +67,7 @@ class Curry < Formula
       -DBUILD_MODULE_MCP=ON
       -DBUILD_MODULE_PROFILING=ON
       -DBUILD_LLVM=#{build.with?("llvm")             ? "ON" : "OFF"}
+      -DBUILD_FFI=#{build.with?("ffi")               ? "ON" : "OFF"}
       -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
       -DBUILD_MODULE_NEO4J=ON

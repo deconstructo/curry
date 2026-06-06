@@ -1,6 +1,6 @@
 # Module: `(curry mcp)`
 
-*v0.8.17 — 2026-05-24*
+*v1.1.0 — 2026-06-06*
 
 MCP (Model Context Protocol) server for Curry Scheme. Exposes Scheme functions
 as MCP tools and resources callable by Claude Code and other MCP clients.

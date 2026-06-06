@@ -1,14 +1,14 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-06 for v1.1.0. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.0.1. This document maps the path from here to a compiled Scheme
+Curry is at v1.1.0. This document maps the path from here to a compiled Scheme
 for scientific computing — the full cill specification. It is ordered by
 dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.0.1)
+## Where we are now (v1.1.0)
 
 | Capability | Status |
 |---|---|
@@ -18,13 +18,13 @@ dependency, not ambition; each phase unblocks the phases above it.
 | Actors, STM, CSP channels | ✓ complete |
 | Parallel map/reduce (Chase-Lev work-stealing) | ✓ complete |
 | Qt6, PLplot visualisation | ✓ complete |
-| Matrices, tensors, spinors | ✓ complete |
+| Matrices, tensors (+ transpose/contract/einsum), spinors | ✓ complete |
 | GC vtable abstraction + nursery bump-pointer | ✓ skeleton (Boehm backend) |
 | Basic profiling (call counts, wall-clock) | ✓ basic |
 | CAS rule engine (internal, not user-extensible) | ✓ partial |
 | Polynomial ops (expand, collect, degree) | ✓ partial |
-| Condition system | ✗ setjmp/longjmp only — no restarts |
-| FFI (general C interop) | ✗ |
+| **CL-style condition system with restarts** | ✓ **v1.1** |
+| **General C FFI (libffi, zero-copy matrix/tensor)** | ✓ **v1.1** (`BUILD_FFI=ON`) |
 | MPFR arbitrary precision floats | ✗ |
 | Moving / generational GC | ✗ |
 | Green threads | ✗ |

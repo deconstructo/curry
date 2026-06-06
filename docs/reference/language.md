@@ -1,6 +1,6 @@
 # Curry Scheme Language Reference
 
-*v0.8.16 — 2026-05-22*
+*v1.1.0 — 2026-06-06*
 
 Curry is an R7RS Scheme interpreter with a numeric tower that extends through the hypercomplex numbers, a built-in computer algebra system, an actor-model concurrency layer, and a modular C extension interface. Error messages are rendered in Standard Babylonian Akkadian, as scribal tradition demands.
 
@@ -265,7 +265,7 @@ All tail positions are optimised — proper tail recursion is guaranteed. Named 
 (define-values (q r) (floor/ 17 5))
 ```
 
-### Exception handling
+### Exception handling (R7RS)
 
 ```scheme
 (guard (exn
@@ -279,6 +279,148 @@ All tail positions are optimised — proper tail recursion is guaranteed. Named 
 (error "message" irritant...)
 (raise obj)
 (raise-continuable obj)        ; note: currently identical to raise — see R7RS deviations
+```
+
+### Condition system (CL-style) — `(import (curry conditions))`
+
+Curry adds a Common Lisp-style condition and restart system on top of R7RS
+exceptions.  The key property: **`signal` does not unwind the stack**.
+Handlers run in the dynamic context of the signaller; if a handler calls
+`invoke-restart`, execution jumps to the matching `with-restarts` frame.
+
+This makes it possible to recover from a singular matrix in the middle of a
+geodesic integrator without discarding the accumulated trajectory.
+
+#### Condition types and hierarchy
+
+```scheme
+; Register a custom condition type
+(%condition-type-register! 'singular-matrix '(math-error))
+(%condition-type-register! 'math-error      '(error))
+
+; Check hierarchy
+(condition-is-a? c 'math-error)      ; → #t if c is math-error or subtype
+```
+
+Built-in types (all in `(curry conditions)`): `condition`, `error`,
+`warning`, `math-error`, `singular-matrix`, `no-elementary-form`,
+`gc-pressure`, `type-error`, `arity-error`, `unbound-variable`,
+`division-by-zero`, `file-error`, `read-error`.
+
+#### Conditions
+
+```scheme
+(make-condition 'singular-matrix
+  (list (cons 'matrix M) (cons 'rank r))
+  "Matrix is singular")              ; → condition object
+
+(condition?          c)              ; predicate
+(condition-type      c)              ; → symbol
+(condition-fields    c)              ; → alist
+(condition-message   c)              ; → string or #f
+(condition-field     c 'rank)        ; → field value
+(condition-is-a?     c 'math-error)  ; → bool (walks hierarchy)
+(condition-backtrace c)              ; → list (full traces in v2.2)
+```
+
+#### Signalling
+
+```scheme
+(signal cond)                      ; non-unwinding: walk handlers, return normally
+(warn   'gc-pressure '() "heap")   ; signal a warning condition
+(condition-error 'math-error       ; signal then raise if unclaimed
+  (list (cons 'expr expr)) "bad")
+```
+
+#### handler-bind — non-unwinding handlers
+
+Handlers are called with the full call stack intact.  If a handler returns
+normally the next handler in the chain is tried.  Handlers should call
+`invoke-restart` rather than return to take meaningful action.
+
+```scheme
+(handler-bind
+  (('singular-matrix (lambda (c)
+      (invoke-restart 'use-pseudoinverse)))
+   ('math-error      (lambda (c)
+      (display "math error: ") (display (condition-message c)) (newline))))
+  body ...)
+```
+
+#### with-restarts — named recovery points
+
+Establishes named restarts that `invoke-restart` can jump to.  Returns the
+result of `body` or the result of the chosen restart's body.
+
+```scheme
+(with-restarts
+  ((use-pseudoinverse "Use Moore-Penrose pseudoinverse"
+     (pseudoinverse M))
+   (use-identity "Use identity matrix"
+     (matrix-identity (matrix-rows M)))
+   (return-zero "Return zero matrix"
+     (make-matrix (matrix-rows M) (matrix-cols M))))
+  (matrix-inverse M))
+```
+
+```scheme
+(invoke-restart 'use-pseudoinverse)  ; jumps to matching with-restarts
+(find-restart   'use-pseudoinverse)  ; → restart or #f
+```
+
+#### handler-case — unwinding handlers
+
+Like `guard` but dispatches on condition type hierarchy.  Unwinds the stack
+when a clause matches.
+
+```scheme
+(handler-case
+  (matrix-inverse M)
+  ((singular-matrix c) (pseudoinverse M))
+  ((math-error      c) (error "math failed" (condition-message c)))
+  ((error           c) (matrix-identity 2)))
+```
+
+The most specific matching type wins.  Unmatched exceptions propagate.
+
+#### ignore-errors
+
+```scheme
+(define-values (result err)
+  (ignore-errors (matrix-inverse M)))
+; result = #f and err = condition if an error was raised
+; result = value and err = #f on success
+```
+
+#### Standard restarts (available everywhere)
+
+| Name | Meaning |
+|---|---|
+| `'abort` | Return to top level |
+| `'continue` | Continue from signal point |
+| `'use-value` | Supply a value and continue |
+
+#### Full example — recovery without losing state
+
+```scheme
+(import (curry conditions))
+
+(define (integrate-geodesic metric ic n-steps)
+  (let loop ((step 0) (state ic))
+    (if (= step n-steps)
+        state
+        (loop (+ step 1)
+          (with-restarts
+            ((use-last-state "Continue with current state" state)
+             (skip-step      "Skip this step"              state))
+            (handler-bind
+              (('singular-matrix (lambda (c)
+                  ; handler runs with full stack — can log, then recover
+                  (display "Warning: singular at step ") (display step) (newline)
+                  (invoke-restart 'use-last-state)))
+               ('math-error (lambda (c)
+                  (invoke-restart 'skip-step))))
+              (geodesic-step metric state)))))))
 ```
 
 ### dynamic-wind

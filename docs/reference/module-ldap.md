@@ -1,6 +1,6 @@
 # Module: (curry ldap)
 
-*v0.7.5 — 2026-05-12*
+*v1.1.0 — 2026-06-06*
 
 LDAP and LDAPS directory access.
 
