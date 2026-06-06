@@ -1,5 +1,7 @@
 #include "builtins.h"
 #include "object.h"
+#include "stm.h"
+#include "channel.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -1109,6 +1111,54 @@ static val_t prim_random_integer(int ac, val_t *av, void *ud) {
     return vfix((intptr_t)(rng_next() % (uint64_t)n));
 }
 
+/* ---- STM primitives ---- */
+
+static val_t prim_make_tvar(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return stm_make_tvar(av[0]); }
+static val_t prim_tvar_read(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return stm_tvar_read(av[0]); }
+static val_t prim_tvar_write(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; stm_tvar_write(av[0], av[1]); return V_VOID; }
+static val_t prim_tvar_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(vis_tvar(av[0])); }
+static val_t prim_atomically(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return stm_atomically(av[0]); }
+static val_t prim_stm_retry(int ac, val_t *av, void *ud)
+    { (void)ac; (void)av; (void)ud; stm_retry(); }
+static val_t prim_or_else(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return stm_or_else(av[0], av[1]); }
+
+/* ---- Channel primitives ---- */
+
+static val_t prim_make_channel(int ac, val_t *av, void *ud) {
+    (void)ud;
+    uint32_t cap = 0;
+    if (ac == 1) {
+        if (!vis_fixnum(av[0]))
+            scm_raise(V_FALSE, "make-channel: capacity must be an exact integer");
+        intptr_t n = vunfix(av[0]);
+        if (n < 0) scm_raise(V_FALSE, "make-channel: capacity must be >= 0");
+        cap = (uint32_t)n;
+    }
+    return channel_make(cap);
+}
+static val_t prim_channel_send(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; channel_send(av[0], av[1]); return V_VOID; }
+static val_t prim_channel_recv(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return channel_recv(av[0]); }
+static val_t prim_channel_close(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; channel_close(av[0]); return V_VOID; }
+static val_t prim_channel_closed_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(channel_closed(av[0])); }
+static val_t prim_channel_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(vis_channel(av[0])); }
+static val_t prim_channel_try_send(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return channel_try_send(av[0], av[1]); }
+static val_t prim_channel_try_recv(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return channel_try_recv(av[0]); }
+static val_t prim_channel_blocked_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(av[0] == V_UNDEF); }
+
 /* ---- LLVM JIT builtins (compiled in only when BUILD_LLVM=ON) ---- */
 
 #ifdef BUILD_LLVM
@@ -1292,6 +1342,26 @@ void builtins_curry_register(val_t env) {
     DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
     env_define(env, sym_intern_cstr("default-random-source"),
                sym_intern_cstr("default-random-source"));
+
+    /* STM — transactional variables */
+    DEF("make-tvar",          prim_make_tvar,          1, 1);
+    DEF("tvar-read",          prim_tvar_read,          1, 1);
+    DEF("tvar-write!",        prim_tvar_write,         2, 2);
+    DEF("tvar?",              prim_tvar_p,             1, 1);
+    DEF("atomically",         prim_atomically,         1, 1);
+    DEF("retry",              prim_stm_retry,          0, 0);
+    DEF("%or-else",           prim_or_else,            2, 2);
+
+    /* Channels — CSP buffered communication */
+    DEF("make-channel",       prim_make_channel,       0, 1);
+    DEF("channel-send!",      prim_channel_send,       2, 2);
+    DEF("channel-recv!",      prim_channel_recv,       1, 1);
+    DEF("channel-close!",     prim_channel_close,      1, 1);
+    DEF("channel-closed?",    prim_channel_closed_p,   1, 1);
+    DEF("channel?",           prim_channel_p,          1, 1);
+    DEF("%channel-try-send",  prim_channel_try_send,   2, 2);
+    DEF("%channel-try-recv",  prim_channel_try_recv,   1, 1);
+    DEF("%channel-blocked?",  prim_channel_blocked_p,  1, 1);
 
     /* LLVM JIT control procedures */
 #ifdef BUILD_LLVM

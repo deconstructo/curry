@@ -106,6 +106,8 @@ set(CORE_SOURCES
   src/workpool.c
   src/set.c
   src/actors.c
+  src/stm.c
+  src/channel.c
   src/modules.c
   src/symbolic.c
   src/symbolic_print.c
