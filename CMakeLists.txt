@@ -108,6 +108,7 @@ set(CORE_SOURCES
   src/actors.c
   src/stm.c
   src/channel.c
+  src/condition.c
   src/modules.c
   src/symbolic.c
   src/symbolic_print.c

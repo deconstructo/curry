@@ -91,6 +91,37 @@ extern _Thread_local int g_jit_call_depth;
 #define JIT_CALL_DEPTH_LIMIT 512
 #endif
 
+/* ---- CL-style condition / restart chains ---- */
+
+/* Non-unwinding handler established by handler-bind.
+ * Handlers are called in-place (stack intact); if a handler returns
+ * normally the next handler in the chain is tried. */
+typedef struct CondHandler {
+    val_t              type_sym; /* condition type to match, or V_FALSE = any */
+    val_t              proc;     /* 1-arg Scheme procedure */
+    struct CondHandler *prev;
+} CondHandler;
+
+/* Restart frame established by with-restarts.
+ *
+ * invoke-restart raises the Restart object itself as an exception rather than
+ * longjmping directly.  The SCM_PROTECT inside with-restarts catches it; if
+ * it belongs to this frame the thunk is run, otherwise it is re-raised.  This
+ * uses the normal ExnHandler unwind path so the VM state is never corrupted. */
+typedef struct RestartFrame {
+    val_t               restarts;   /* list of Restart objects */
+    struct RestartFrame *prev;
+} RestartFrame;
+
+#ifndef __cplusplus
+extern _Thread_local CondHandler  *current_cond_handler;
+extern _Thread_local RestartFrame *current_restart_frame;
+#endif
+
+/* Walk the non-unwinding CondHandler chain; called by scm_raise_val and
+ * condition_signal.  Defined in eval.c. */
+void walk_cond_handlers(val_t exn, CondHandler *h);
+
 /* Raise an exception (never returns) */
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 void scm_raise_val(val_t exn) __attribute__((noreturn));

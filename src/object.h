@@ -69,6 +69,8 @@ typedef enum {
     T_CHANNEL       = 43,  /* CSP buffered channel                       */
     T_JITCLOSURE    = 44,  /* JIT-compiled native closure (LLVM backend) */
     T_SPINOR        = 45,  /* Weyl/Dirac/Majorana spinor                 */
+    T_CONDITION     = 46,  /* CL-style condition object                  */
+    T_RESTART       = 47,  /* Named restart established by with-restarts */
 } ObjType;
 
 /*
@@ -458,6 +460,28 @@ typedef struct {
     val_t irritants; /* list */
     val_t kind;      /* symbol: error | file-error | read-error */
 } ErrorObj;
+
+/* CL-style condition object */
+typedef struct {
+    Hdr   hdr;
+    val_t type_sym;  /* symbol naming the condition type */
+    val_t fields;    /* alist of (field-name . value) pairs */
+    val_t message;   /* string or #f */
+} Condition;
+
+#define vis_condition(v)  vis_type(v, T_CONDITION)
+#define as_condition(v)   vunptr(Condition, v)
+
+/* Named restart */
+typedef struct {
+    Hdr   hdr;
+    val_t name;        /* symbol */
+    val_t description; /* string */
+    val_t thunk;       /* 0-arg procedure */
+} Restart;
+
+#define vis_restart(v)  vis_type(v, T_RESTART)
+#define as_restart(v)   vunptr(Restart, v)
 
 /* Promise (delay / delay-force) */
 #define PROMISE_LAZY   0  /* not yet forced */

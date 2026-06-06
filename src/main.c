@@ -12,6 +12,7 @@
 #include "actors.h"
 #include "stm.h"
 #include "channel.h"
+#include "condition.h"
 #include "modules.h"
 #include "object.h"
 #include "profiling.h"
@@ -54,6 +55,7 @@ static void init_all(void) {
     actors_init();
     stm_init();
     channel_init();
+    condition_init();
     modules_init();
     profiling_init(GLOBAL_ENV);
     vm_init();

@@ -2116,6 +2116,10 @@ void builtins_register(val_t env) {
     extern void mv_register_builtins(val_t env);
     mv_register_builtins(env);
 
+    /* Condition system */
+    extern void condition_register_builtins(val_t env);
+    condition_register_builtins(env);
+
     /* Matrices, tensors, and spinors */
     extern void mat_register_builtins(val_t env);
     mat_register_builtins(env);
