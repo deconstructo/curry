@@ -39,6 +39,10 @@ dependency, not ambition; each phase unblocks the phases above it.
 | Scientific I/O (HDF5, NetCDF, FITS) | ✗ |
 | Package manager | ✗ |
 | Notebook interface | ✗ |
+| Units and dimensions system | ✗ |
+| Step-by-step CAS (`explain-simplify`) | ✗ |
+| LLM-integrated notebook | ✗ (LLM module exists; notebook does not yet) |
+| Exploration sharing (`.curry-nb` format) | ✗ |
 
 ---
 
@@ -518,7 +522,7 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 
 ---
 
-## Phase 10 — v3.0: Package Manager + Notebook Interface
+## Phase 10 — v3.0: Package Manager + Notebook Interface + Learning Tools
 
 **Package manager** (`curry pkg`):
 - Registry: git-index model (Julia General style) — metadata only, source at
@@ -539,9 +543,116 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
   `3x²sin(x) + x³cos(x)` not `(+ (* 3 (expt x 2) (sin x)) ...)`
 - Inline PLplot figures, embedded in notebook
 - Export: PDF, HTML, LaTeX
-- Primary interface for interactive scientific sessions
+- Primary interface for interactive scientific sessions and the Anarchist's
+  Cookbook
 
-**Effort:** 5–6 months combined.
+**Units and dimensions system:**
+
+First-class dimensional analysis. Physical quantities carry their units; the
+type system catches dimensional errors before the mathematics does.
+
+```scheme
+(define v  (quantity 3 'm/s))
+(define v2 (quantity 5 'm/s))
+(+ v v2)                  ; → 8 m/s
+(* v (quantity 10 's))    ; → 30 m
+(+ v (quantity 2 'kg))    ; error: dimension mismatch (length/time vs mass)
+
+; SI base dimensions inferred
+(define F (quantity 10 'N))
+(define m (quantity 2  'kg))
+(/ F m)                   ; → 5 m/s²  (acceleration)
+
+; Declare named units
+(define-unit 'parsec (* 3.0857e16 'm))
+(define-unit 'solar-mass (* 1.989e30 'kg))
+
+; Works with the numeric tower — quantities of exact rationals, MPFR, symbolic
+(define G (quantity 6.674e-11 'N⋅m²/kg²))
+(* G (quantity 'M 'solar-mass) (quantity 'r 'm))  ; symbolic quantity
+```
+
+Dimensions propagate through all arithmetic, CAS operations, and ODE solvers.
+`(ode-integrate rhs ic)` checks that the RHS has consistent units before
+integrating. Physical constants (`speed-of-light`, `planck`, `boltzmann`,
+`gravitational-constant`) are pre-defined as quantities.
+
+**Step-by-step CAS evaluator:**
+
+Makes the rule engine transparent — shows each simplification step so you
+understand *why* a result holds, not just *that* it does. Essential for
+learning, and for debugging custom rule sets.
+
+```scheme
+(explain-simplify (+ (* x x) (* x x)))
+; Step 1: (+ (* x x) (* x x))
+;   rule: (+ ?a ?a) → (* 2 ?a)   [addition identity]
+; Step 2: (* 2 (* x x))
+;   rule: (* ?a (?op ?b ?c)) → (?op (* ?a ?b) (* ?a ?c))  [distributivity]
+;         — not applicable, no sum in second argument
+;   rule: (* ?n (expt ?x ?k)) → (expt ?x (+ ?k 1))   — not applicable
+; Result: (* 2 (expt x 2))
+
+(explain-simplify (sqrt (* x x)) #:assuming [(real? x) (>= x 0)])
+; Step 1: (sqrt (* x x))
+;   rule: (sqrt (expt ?x 2)) → ?x   #:assuming (real? ?x) (>= ?x 0)
+;   assumption (real? x): satisfied
+;   assumption (>= x 0): satisfied
+; Result: x
+
+; Compact mode — just the rules that fired
+(explain-simplify expr #:mode 'rules)
+; (+ ?a ?a) → (* 2 ?a)
+; (expt (sqrt ?x) 2) → ?x  [with assumptions]
+```
+
+`explain-simplify` is also how ruleset debugging works — `(explain-simplify
+expr #:using my-ruleset)` shows exactly which rules in your custom set are
+firing and in what order.
+
+**LLM-integrated notebook:**
+
+The `(curry llm)` module already handles Anthropic and OpenAI. The notebook
+wires the live session into a conversation so you can ask questions grounded
+in what you're actually running.
+
+```scheme
+; In a notebook code cell
+(define g (schwarzschild-metric 1.0))   ; M = 1 solar mass
+(define traj (geodesic g '(6 0 0 0) '(0 1 0 0) #:steps 1000))
+(pl:line (map car traj) (map cadr traj))
+
+; In a prose cell — asks about the plot you just produced
+; "Why does the orbit precess? The initial conditions look circular."
+```
+
+The LLM receives: the current session environment (what's defined), the last
+N code cells and their outputs, any PLplot figures as descriptions, and your
+question. It answers in the context of the actual computation — not generic
+physics, but *this geodesic*, *these initial conditions*, *this precession*.
+
+It can also generate code: "show me what happens if I add a small angular
+momentum perturbation" produces a new code cell you can run immediately.
+
+The session context is opt-in and clearly marked — the LLM sees only what you
+send it.
+
+**Exploration sharing:**
+
+Notebooks are plain text (Markdown + fenced Curry code blocks with metadata).
+They can be:
+- Committed to git (diff-friendly format)
+- Published as static HTML with `curry notebook export`
+- Shared as runnable `.curry-nb` files — recipient opens and runs them locally
+- Annotated with `#:requires` metadata so `curry pkg install` fetches
+  dependencies automatically before running
+
+This is the orthopraxis layer: someone learns something, writes a notebook
+that demonstrates it, shares it. Another person runs it, modifies it, learns
+from the exploration rather than the explanation. No institution required.
+
+**Effort:** 7–9 months combined (notebook + units + explain-simplify +
+LLM integration + sharing).
 
 ---
 
@@ -558,7 +669,7 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 | **v2.1** | Types + Sets | Slim CLOS, pluggable set theory foundations, topology | 4–5 mo |
 | **v2.2** | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower | 3–4 mo |
 | **v2.3** | Testing + I/O | Property-based testing, HDF5/NetCDF/FITS | 2–3 mo |
-| **v3.0** | Ecosystem | Package manager + notebook interface | 5–6 mo |
+| **v3.0** | Ecosystem | Package manager; notebook (Qt6, mathematical rendering); units system; step-by-step CAS (`explain-simplify`); LLM-integrated notebook; exploration sharing | 7–9 mo |
 
 **⚠ v2.0 is a breaking version** for C extension authors: moving GC requires
 `gc_pin`/`gc_unpin` for off-stack Scheme pointers. The FFI `with-pinned-*`
@@ -579,8 +690,15 @@ first.
 | Set foundations (`curry_foundations_ops_t`) | naïve, ZFC (v2.1), constructive, HoTT (future) |
 | Profiling backend | in-process (v2.2), Tracy, Perfetto |
 
-**Total sequential estimate (single implementor):** 36–48 months for all ten
+**Total sequential estimate (single implementor):** 40–56 months for all ten
 phases. In practice the mathematics, concurrency, and tooling tracks are
 parallel. The critical path — v1.1 through v2.0 — is 18–24 months and
 delivers a genuinely useful compiled Scheme for scientific computing before
 the full ecosystem is complete.
+
+**Design intent:** This is an instrument for learning by doing — orthopraxis
+rather than orthodoxy. The units system catches physical nonsense before the
+mathematics does. `explain-simplify` shows the reasoning, not just the result.
+The LLM-integrated notebook means you can ask "why did this geodesic diverge?"
+with your actual computation in scope, not a generic textbook answer. Sharing
+means knowledge moves horizontally. No institution required.
