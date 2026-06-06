@@ -185,20 +185,20 @@ if(BUILD_LLVM)
   target_include_directories(curry_core PRIVATE ${LLVM_INCLUDE_DIRS})
   target_compile_definitions(curry_core PRIVATE ${LLVM_DEFINITIONS})
 
-  llvm_map_components_to_libnames(LLVM_LIBS
-    core
-    support
-    irreader
-    orcjit
-    executionengine
-    runtimedyld
-    native
-    nativecodegen
-    passes
-    bitwriter
-  )
-  target_link_libraries(curry_core PUBLIC ${LLVM_LIBS})
-  message(STATUS "LLVM JIT libs: ${LLVM_LIBS}")
+  # Prefer the single shared libLLVM dylib to avoid duplicate-symbol crashes
+  # when Mesa/llvmpipe also loads LLVM at runtime (e.g. Qt6 OpenGL on ARM).
+  find_library(LLVM_DYLIB NAMES LLVM LLVM-${LLVM_VERSION_MAJOR}
+               HINTS ${LLVM_LIBRARY_DIRS})
+  if(LLVM_DYLIB)
+    target_link_libraries(curry_core PUBLIC ${LLVM_DYLIB})
+    message(STATUS "LLVM JIT libs: ${LLVM_DYLIB} (shared dylib)")
+  else()
+    llvm_map_components_to_libnames(LLVM_LIBS
+      core support irreader orcjit executionengine runtimedyld
+      native nativecodegen passes bitwriter)
+    target_link_libraries(curry_core PUBLIC ${LLVM_LIBS})
+    message(STATUS "LLVM JIT libs: ${LLVM_LIBS}")
+  endif()
 endif()
 
 # ---- Optional modules (shared libraries loaded at runtime) ----
