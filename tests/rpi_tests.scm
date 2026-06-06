@@ -105,8 +105,8 @@
     (check "rpi-model returns string or #f"
            (or (string? model) (equal? model #f)) #t))
   (let ((mem (rpi-memory-mb)))
-    (check "rpi-memory-mb returns non-negative fixnum"
-           (and (fixnum? mem) (>= mem 0)) #t)))
+    (check "rpi-memory-mb returns non-negative integer"
+           (and (exact-integer? mem) (>= mem 0)) #t)))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 2  YUYV frame processing
