@@ -15,7 +15,6 @@ class Curry < Formula
   option "with-llvm",      "Build LLVM ORC JIT backend (tiered native compilation)"
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
-  option "with-symengine", "Build SymEngine symbolic CAS module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -39,7 +38,6 @@ class Curry < Formula
   depends_on "llvm"      if build.with? "llvm"
   depends_on "qt@6"      if build.with? "qt6"
   depends_on "plplot"    if build.with? "plplot"
-  depends_on "symengine" if build.with? "symengine"
 
   def install
     prefix_paths = [
@@ -51,7 +49,6 @@ class Curry < Formula
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
-    prefix_paths << Formula["symengine"].opt_prefix if build.with? "symengine"
 
     args = std_cmake_args + %W[
       -DCMAKE_BUILD_TYPE=Release
@@ -69,7 +66,6 @@ class Curry < Formula
       -DBUILD_LLVM=#{build.with?("llvm")             ? "ON" : "OFF"}
       -DBUILD_MODULE_QT6=#{build.with?("qt6")        ? "ON" : "OFF"}
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot")   ? "ON" : "OFF"}
-      -DBUILD_MODULE_SYMENGINE=#{build.with?("symengine") ? "ON" : "OFF"}
       -DBUILD_MODULE_NEO4J=ON
       -DBUILD_MODULE_VECDB=OFF
     ]
