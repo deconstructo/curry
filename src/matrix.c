@@ -346,6 +346,21 @@ static void mat_def(val_t env, const char *name, PrimFn fn, int mn, int mx) {
     env_define(env, sym_intern_cstr(name), vptr(p));
 }
 
+/* Parse a Scheme list of non-negative fixnums (axis indices) into a C array */
+static uint32_t list_to_axes(val_t lst, uint32_t *out, uint32_t maxn, const char *who) {
+    uint32_t n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) {
+        if (n >= maxn)
+            scm_raise(V_FALSE, "%s: too many axes (max %u)", who, maxn);
+        val_t d = vcar(p);
+        if (!vis_fixnum(d) || vunfix(d) < 0)
+            scm_raise(V_FALSE, "%s: axis must be a non-negative integer", who);
+        out[n++] = (uint32_t)vunfix(d);
+    }
+    if (n == 0) scm_raise(V_FALSE, "%s: axis list is empty", who);
+    return n;
+}
+
 /* Parse a Scheme list of fixnums into a C array; returns count */
 static uint32_t list_to_dims(val_t lst, uint32_t *out, uint32_t maxn, const char *who) {
     uint32_t n = 0;
@@ -792,6 +807,220 @@ static val_t prim_tensor_to_matrix(int argc, val_t *av, void *ud) {
  * Registration
  * ========================================================================= */
 
+/* =========================================================================
+ * Tensor index-structure operations
+ * ========================================================================= */
+
+val_t tensor_transpose(val_t tv, const uint32_t *perm) {
+    Tensor *src = as_tensor(tv);
+    uint32_t ndim = src->ndim;
+    uint32_t out_dims[MAX_TENSOR_DIMS];
+    for (uint32_t k = 0; k < ndim; k++)
+        out_dims[k] = src->dims[perm[k]];
+    val_t rv = tensor_make(ndim, out_dims);
+    Tensor *dst = as_tensor(rv);
+    double *sd = tensor_data(src), *dd = tensor_data(dst);
+
+    uint32_t out_idx[MAX_TENSOR_DIMS], in_idx[MAX_TENSOR_DIMS];
+    for (uint32_t flat = 0; flat < dst->size; flat++) {
+        uint32_t tmp = flat;
+        for (int k = (int)ndim - 1; k >= 0; k--) {
+            out_idx[k] = tmp % out_dims[k];
+            tmp /= out_dims[k];
+        }
+        for (uint32_t k = 0; k < ndim; k++)
+            in_idx[perm[k]] = out_idx[k];
+        dd[flat] = sd[tensor_flat_index(src, in_idx)];
+    }
+    return rv;
+}
+
+val_t tensor_contract(val_t tv, uint32_t ax1, uint32_t ax2) {
+    Tensor *src = as_tensor(tv);
+    if (ax1 >= src->ndim || ax2 >= src->ndim)
+        scm_raise(V_FALSE, "tensor-contract: axis out of range");
+    if (ax1 == ax2)
+        scm_raise(V_FALSE, "tensor-contract: axes must be distinct");
+    if (src->dims[ax1] != src->dims[ax2])
+        scm_raise(V_FALSE, "tensor-contract: axes %u and %u have different sizes (%u vs %u)",
+                  ax1, ax2, src->dims[ax1], src->dims[ax2]);
+    uint32_t out_ndim = src->ndim - 2;
+    uint32_t out_dims[MAX_TENSOR_DIMS];
+    uint32_t k = 0;
+    for (uint32_t d = 0; d < src->ndim; d++)
+        if (d != ax1 && d != ax2) out_dims[k++] = src->dims[d];
+
+    double scalar = 0.0;
+    val_t  rv = V_FALSE;
+    double *dd = NULL;
+    if (out_ndim > 0) {
+        rv = tensor_make(out_ndim, out_dims);
+        dd = tensor_data(as_tensor(rv));
+    }
+
+    uint32_t in_idx[MAX_TENSOR_DIMS];
+    for (uint32_t flat = 0; flat < src->size; flat++) {
+        uint32_t tmp = flat;
+        for (int d = (int)src->ndim - 1; d >= 0; d--) {
+            in_idx[d] = tmp % src->dims[d]; tmp /= src->dims[d];
+        }
+        if (in_idx[ax1] != in_idx[ax2]) continue;
+        double v = tensor_data(src)[flat];
+        if (out_ndim == 0) {
+            scalar += v;
+        } else {
+            uint32_t out_flat = 0; k = 0;
+            for (uint32_t d = 0; d < src->ndim; d++) {
+                if (d == ax1 || d == ax2) continue;
+                out_flat = out_flat * out_dims[k] + in_idx[d]; k++;
+            }
+            dd[out_flat] += v;
+        }
+    }
+    if (out_ndim == 0) return num_make_float(scalar);
+    return rv;
+}
+
+#define MAX_EINSUM_INPUTS  8
+#define MAX_EINSUM_IDXLEN 16
+
+val_t tensor_einsum(const char *notation, val_t *tensors, int n_tensors) {
+    const char *arrow = strstr(notation, "->");
+    if (!arrow) scm_raise(V_FALSE, "tensor-einsum: notation missing '->'");
+
+    char input_specs[MAX_EINSUM_INPUTS][MAX_EINSUM_IDXLEN];
+    char output_spec[MAX_EINSUM_IDXLEN];
+    int  n_inputs = 0;
+    strncpy(output_spec, arrow + 2, MAX_EINSUM_IDXLEN - 1);
+    output_spec[MAX_EINSUM_IDXLEN - 1] = '\0';
+
+    const char *p = notation;
+    while (p < arrow) {
+        if (n_inputs >= MAX_EINSUM_INPUTS)
+            scm_raise(V_FALSE, "tensor-einsum: too many input tensors (max %d)", MAX_EINSUM_INPUTS);
+        int len = 0;
+        while (p < arrow && *p != ',') {
+            if (len < MAX_EINSUM_IDXLEN - 1) input_specs[n_inputs][len++] = *p;
+            p++;
+        }
+        input_specs[n_inputs][len] = '\0'; n_inputs++;
+        if (p < arrow) p++;
+    }
+    if (n_inputs != n_tensors)
+        scm_raise(V_FALSE, "tensor-einsum: notation has %d inputs but %d tensors given",
+                  n_inputs, n_tensors);
+
+    uint32_t idx_size[26] = {0};
+    for (int t = 0; t < n_tensors; t++) {
+        if (!vis_tensor(tensors[t]))
+            scm_raise(V_FALSE, "tensor-einsum: argument %d is not a tensor", t + 1);
+        Tensor *ten = as_tensor(tensors[t]);
+        const char *spec = input_specs[t];
+        uint32_t slen = (uint32_t)strlen(spec);
+        if (slen != ten->ndim)
+            scm_raise(V_FALSE, "tensor-einsum: spec '%s' has %u indices but tensor has %u dims",
+                      spec, slen, ten->ndim);
+        for (uint32_t d = 0; d < ten->ndim; d++) {
+            int c = spec[d] - 'a';
+            if (c < 0 || c >= 26)
+                scm_raise(V_FALSE, "tensor-einsum: invalid index letter '%c'", spec[d]);
+            if (idx_size[c] == 0) idx_size[c] = ten->dims[d];
+            else if (idx_size[c] != ten->dims[d])
+                scm_raise(V_FALSE, "tensor-einsum: index '%c' has inconsistent size (%u vs %u)",
+                          spec[d], idx_size[c], ten->dims[d]);
+        }
+    }
+
+    uint32_t out_ndim = (uint32_t)strlen(output_spec);
+    uint32_t out_dims[MAX_EINSUM_IDXLEN];
+    for (uint32_t k2 = 0; k2 < out_ndim; k2++) {
+        int c = output_spec[k2] - 'a';
+        if (c < 0 || c >= 26 || idx_size[c] == 0)
+            scm_raise(V_FALSE, "tensor-einsum: output index '%c' not defined by any input",
+                      output_spec[k2]);
+        out_dims[k2] = idx_size[c];
+    }
+
+    char     all_letters[26]; uint32_t all_sizes[26]; int n_letters = 0;
+    for (int c = 0; c < 26; c++) {
+        if (idx_size[c] > 0) {
+            all_letters[n_letters] = (char)('a' + c);
+            all_sizes[n_letters]   = idx_size[c]; n_letters++;
+        }
+    }
+
+    double scalar2 = 0.0; val_t rv2 = V_FALSE; double *dd2 = NULL;
+    if (out_ndim > 0) {
+        rv2 = tensor_make(out_ndim, out_dims);
+        dd2 = tensor_data(as_tensor(rv2));
+    }
+
+    uint32_t cur[26] = {0};
+    uint64_t total = 1;
+    for (int i = 0; i < n_letters; i++) total *= all_sizes[i];
+
+    for (uint64_t iter = 0; iter < total; iter++) {
+        double prod = 1.0;
+        for (int t = 0; t < n_tensors; t++) {
+            Tensor *ten = as_tensor(tensors[t]);
+            const char *spec = input_specs[t];
+            uint32_t in_idx[MAX_EINSUM_IDXLEN];
+            for (uint32_t d = 0; d < ten->ndim; d++)
+                in_idx[d] = cur[(int)(spec[d] - 'a')];
+            prod *= tensor_data(ten)[tensor_flat_index(ten, in_idx)];
+        }
+        if (out_ndim == 0) {
+            scalar2 += prod;
+        } else {
+            uint32_t out_idx[MAX_EINSUM_IDXLEN];
+            for (uint32_t k2 = 0; k2 < out_ndim; k2++)
+                out_idx[k2] = cur[(int)(output_spec[k2] - 'a')];
+            dd2[tensor_flat_index(as_tensor(rv2), out_idx)] += prod;
+        }
+        for (int i = n_letters - 1; i >= 0; i--) {
+            int c = (int)(all_letters[i] - 'a');
+            if (++cur[c] < all_sizes[i]) break;
+            cur[c] = 0;
+        }
+    }
+    if (out_ndim == 0) return num_make_float(scalar2);
+    return rv2;
+}
+
+static val_t prim_tensor_transpose(int argc, val_t *av, void *ud) {
+    (void)ud; (void)argc;
+    if (!vis_tensor(av[0])) scm_raise(V_FALSE, "tensor-transpose: not a tensor");
+    Tensor *t = as_tensor(av[0]);
+    uint32_t perm[MAX_TENSOR_DIMS];
+    uint32_t ndim = list_to_axes(av[1], perm, MAX_TENSOR_DIMS, "tensor-transpose");
+    if (ndim != t->ndim)
+        scm_raise(V_FALSE, "tensor-transpose: permutation length %u != tensor ndim %u", ndim, t->ndim);
+    uint8_t seen[MAX_TENSOR_DIMS] = {0};
+    for (uint32_t k = 0; k < ndim; k++) {
+        if (perm[k] >= ndim)
+            scm_raise(V_FALSE, "tensor-transpose: permutation value %u out of range", perm[k]);
+        if (seen[perm[k]])
+            scm_raise(V_FALSE, "tensor-transpose: duplicate axis %u in permutation", perm[k]);
+        seen[perm[k]] = 1;
+    }
+    return tensor_transpose(av[0], perm);
+}
+
+static val_t prim_tensor_contract(int argc, val_t *av, void *ud) {
+    (void)ud; (void)argc;
+    if (!vis_tensor(av[0])) scm_raise(V_FALSE, "tensor-contract: not a tensor");
+    if (!vis_fixnum(av[1]) || !vis_fixnum(av[2]))
+        scm_raise(V_FALSE, "tensor-contract: axis indices must be integers");
+    return tensor_contract(av[0], (uint32_t)vunfix(av[1]), (uint32_t)vunfix(av[2]));
+}
+
+static val_t prim_tensor_einsum(int argc, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0]))
+        scm_raise(V_FALSE, "tensor-einsum: first argument must be a notation string");
+    return tensor_einsum(as_str(av[0])->data, av + 1, argc - 1);
+}
+
 void mat_register_matrix_builtins(val_t env) {
     mat_def(env, "make-matrix",      prim_make_matrix,      2,  3);
     mat_def(env, "matrix-identity",  prim_matrix_identity,  1,  1);
@@ -834,6 +1063,9 @@ void mat_register_tensor_builtins(val_t env) {
     mat_def(env, "tensor->list",     prim_tensor_to_list,   1,  1);
     mat_def(env, "matrix->tensor",   prim_matrix_to_tensor, 1,  1);
     mat_def(env, "tensor->matrix",   prim_tensor_to_matrix, 1,  1);
+    mat_def(env, "tensor-transpose", prim_tensor_transpose, 2,  2);
+    mat_def(env, "tensor-contract",  prim_tensor_contract,  3,  3);
+    mat_def(env, "tensor-einsum",    prim_tensor_einsum,    2, -1);
 }
 
 void mat_register_builtins(val_t env) {

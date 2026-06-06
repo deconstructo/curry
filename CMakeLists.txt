@@ -115,6 +115,7 @@ set(CORE_SOURCES
   src/surreal.c
   src/multivec.c
   src/matrix.c
+  src/spinor.c
   src/syntax_rules.c
   src/profiling.c
   src/compiler.c

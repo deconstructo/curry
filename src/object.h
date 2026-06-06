@@ -68,6 +68,7 @@ typedef enum {
     T_TVAR          = 42,  /* STM transactional variable                 */
     T_CHANNEL       = 43,  /* CSP buffered channel                       */
     T_JITCLOSURE    = 44,  /* JIT-compiled native closure (LLVM backend) */
+    T_SPINOR        = 45,  /* Weyl/Dirac/Majorana spinor                 */
 } ObjType;
 
 /*
@@ -353,6 +354,25 @@ typedef struct Channel {
 
 #define vis_channel(v)  vis_type(v, T_CHANNEL)
 #define as_channel(v)   vunptr(Channel, v)
+
+/* Spinor kinds — stored in Spinor.kind */
+#define SPINOR_WEYL_L   0   /* left-handed Weyl ψ_α  (2 complex components) */
+#define SPINOR_WEYL_R   1   /* right-handed Weyl ψ̄_α̇ (2 complex components) */
+#define SPINOR_DIRAC    2   /* Dirac bispinor (ψ_L, ψ_R); 4 complex components */
+#define SPINOR_MAJORANA 3   /* Majorana (self-conjugate Dirac); 4 complex components */
+
+/* Spinor: complex spinor with proper SL(2,C) / Lorentz transform law.
+ * Spinors are NOT tensors — the transform law is distinct and enforced by type.
+ * Layout: Spinor header + 2*ncomp doubles (re0,im0, re1,im1, ...). */
+typedef struct {
+    Hdr     hdr;
+    uint8_t kind;    /* SPINOR_WEYL_L / _R / SPINOR_DIRAC / SPINOR_MAJORANA */
+    uint8_t ncomp;   /* 2 for Weyl, 4 for Dirac/Majorana */
+    double  data[];  /* 2*ncomp doubles: re0,im0,re1,im1,... */
+} Spinor;
+
+#define vis_spinor(v)   vis_type(v, T_SPINOR)
+#define as_spinor(v)    vunptr(Spinor, v)
 
 /* Hash-based set (open addressing) */
 #define SET_CMP_EQ     0  /* eq?     - pointer identity */

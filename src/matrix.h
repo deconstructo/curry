@@ -57,6 +57,9 @@
  *     (tensor-outer a b)               -> outer product; shape = concat shapes
  *     (matrix->tensor m)               -> 2D tensor from matrix
  *     (tensor->matrix t)               -> matrix from 2D tensor
+ *     (tensor-transpose t perm)        -> permute axes; perm is a list of axis indices
+ *     (tensor-contract t i j)          -> sum over diagonal of axes i and j; scalar if 2D
+ *     (tensor-einsum str t1 t2 ...)    -> Einstein summation, e.g. "ij,jk->ik"
  */
 
 #include "value.h"
@@ -94,6 +97,9 @@ val_t tensor_neg(val_t a);
 val_t tensor_scale(val_t t, double s);
 val_t tensor_outer(val_t a, val_t b);
 val_t tensor_reshape(val_t t, uint32_t ndim, const uint32_t *new_dims);
+val_t tensor_transpose(val_t t, const uint32_t *perm);
+val_t tensor_contract(val_t t, uint32_t ax1, uint32_t ax2);
+val_t tensor_einsum(const char *notation, val_t *tensors, int n);
 
 /* Write a tensor to a port */
 void tensor_write(val_t v, val_t port);
