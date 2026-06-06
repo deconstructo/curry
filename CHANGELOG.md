@@ -1,5 +1,16 @@
 # Changelog
 
+### 1.1.1 — SRFI compatibility layer (surfage)
+
+**New features**
+
+- **`(surfage s1 lists)`** — SRFI-1 list library: `iota`, `any`, `every`, `remove`, `delete`, `fold`, `append-map`, `filter-map`, `flat-map`, `take`, `drop`, `take-while`, `drop-while`, `count`, `partition`, `last-pair`, `first`–`fifth`, plus re-exports of all list procedures already in the global environment.
+- **`(surfage s27 random-bits)`** — SRFI-27 random-number source API: re-exports Curry's built-in xoshiro256+ implementation (`default-random-source`, `make-random-source`, `random-source-randomize!`, `random-source-pseudo-randomize!`, `random-source->random-integer`, `random-source->random-real`, `random-integer`, `random-real`) under the portable `(surfage s27 random-bits)` name.
+
+Code using `(import (surfage s1 lists))` or `(import (surfage s27 random-bits))` is now portable across Curry, Guile, Chicken, Chibi-Scheme, and other implementations that follow the surfage naming convention.
+
+---
+
 ### 1.1.0 — CL condition system · C FFI · STM · channels · spinors · tensor ops
 
 **New features**

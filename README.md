@@ -134,6 +134,15 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [rpi](docs/reference/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
 | [sicm](docs/reference/module-sicm.md) | `(curry sicm)` | Classical mechanics (SICM): Lagrangian, Hamiltonian, Poisson brackets | — |
 
+### SRFI compatibility (`surfage`)
+
+Portable SRFI libraries under the `(surfage sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme:
+
+| Library | Import | Description |
+|---------|--------|-------------|
+| [s1 lists](docs/reference/module-surfage.md) | `(surfage s1 lists)` | SRFI-1: `iota`, `any`, `every`, `fold`, `take/drop`, `partition`, … |
+| [s27 random-bits](docs/reference/module-surfage.md) | `(surfage s27 random-bits)` | SRFI-27: random sources, `random-integer`, `random-real` |
+
 ---
 
 ## LLM / AI integration
