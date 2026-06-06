@@ -168,20 +168,50 @@
 (check "partition-count 20" (partition-count 20) 627)
 
 ;;; ----------------------------------------------------------------------
-;;; Continued fractions
+;;; Factoring — large semiprimes (exercises Pollard rho path)
+;;; ----------------------------------------------------------------------
+;;; 999983 and 999979 are both prime; their product needs rho factoring
+(check "factor large semiprime"
+       (factor (* 999983 999979))
+       '(999979 999983))
+(check "factor 2^20"
+       (factor (expt 2 20))
+       (make-list 20 2))
+(check "prime-factors large semiprime"
+       (prime-factors (* 999983 999979))
+       '(999979 999983))
+
+;;; ----------------------------------------------------------------------
+;;; Continued fractions — flonum input
 ;;; ----------------------------------------------------------------------
 (check "continued-fraction 3/7"  (continued-fraction 3/7) '(0 2 3))
 (check "continued-fraction 22/7" (continued-fraction 22/7) '(3 7))
+;;; CF of a flonum — first term must be floor, result is a list of fixnums
+(check-pred "continued-fraction 1.5 starts 1"
+            (= (car (continued-fraction 1.5)) 1))
+(check-pred "continued-fraction 1.5 is list"
+            (list? (continued-fraction 1.5)))
+;;; sqrt(2) ≈ [1; 2, 2, 2, ...] — first two terms correct
+(check-pred "continued-fraction sqrt(2) starts 1 2"
+            (let ((cf (continued-fraction (sqrt 2.0))))
+              (and (= (car cf) 1) (= (cadr cf) 2))))
 
 ;;; convergents of [3; 7, 15, 1, ...]: 3/1, 22/7, 333/106, 355/113
 (check "convergents (3 7)"     (convergents '(3 7))    '(3 22/7))
 (check "convergents (3 7 15)"  (convergents '(3 7 15)) '(3 22/7 333/106))
 
 ;;; 22/7 is the best with denom ≤ 7; 311/99 is best with denom ≤ 100
+;;; 355/113 is the famous Milü approximation (denom ≤ 113)
 (check "best-rational-approx π 7"
        (best-rational-approx 3.141592653589793 7) 22/7)
 (check "best-rational-approx π 100"
        (best-rational-approx 3.141592653589793 100) 311/99)
+(check "best-rational-approx π 113"
+       (best-rational-approx 3.141592653589793 113) 355/113)
+(check "best-rational-approx 1/3 10"
+       (best-rational-approx 1/3 10) 1/3)
+(check "best-rational-approx √2 5"
+       (best-rational-approx (sqrt 2.0) 5) 7/5)
 
 ;;; ----------------------------------------------------------------------
 ;;; Number predicates

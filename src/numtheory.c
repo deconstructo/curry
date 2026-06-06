@@ -87,58 +87,79 @@ static val_t prim_prev_prime(int ac, val_t *av, void *ud) {
 /* Brent's variant of Pollard rho.  Returns true on success and writes the
  * factor into `factor`.  Returns false if no factor was found (caller may
  * retry with a different `c`). */
+/* Pollard rho — Floyd's cycle detection with batch GCDs and backtrack.
+ * For a factor p the expected steps is O(sqrt(p)). */
+/* Advance one step of the rho iteration: v = (v*v + c) mod n.
+ * Uses a dedicated temporary to avoid aliasing issues with the tmp
+ * variable used elsewhere in brent_pollard. */
+static void rho_step(mpz_t v, const mpz_t c_val, const mpz_t n_val) {
+    mpz_mul(v, v, v);
+    mpz_add(v, v, c_val);
+    mpz_mod(v, v, n_val);
+}
+
 static bool brent_pollard(mpz_t factor, const mpz_t n, unsigned long c_init) {
-    /* If n is even, 2 is a factor. */
     if (mpz_even_p(n)) { mpz_set_ui(factor, 2); return true; }
     if (mpz_cmp_ui(n, 1) <= 0) return false;
 
-    mpz_t x, y, ys, q, c, d, tmp;
-    mpz_inits(x, y, ys, q, c, d, tmp, NULL);
-    mpz_set_ui(y, 2);
-    mpz_set_ui(c, c_init);
-    mpz_set_ui(q, 1);
+    mpz_t x, y, xs, ys, d, c_val, q, diff;
+    mpz_inits(x, y, xs, ys, d, c_val, q, diff, NULL);
+    mpz_set_ui(x,     2 + c_init);
+    mpz_set_ui(y,     2 + c_init);
+    mpz_set_ui(c_val, c_init);
+    mpz_set_ui(q,     1);
 
-    unsigned long r_step = 1;
-    const unsigned long M = 128;
+    const unsigned long BATCH     = 128;
+    const unsigned long MAX_STEPS = 2000000UL;
     bool found = false;
 
-    /* Outer loop: scale r_step by 2 each iteration. */
-    for (int iter = 0; iter < 40 && !found; iter++) {
-        mpz_set(x, y);
-        for (unsigned long i = 0; i < r_step; i++) {
-            /* y = (y*y + c) mod n */
-            mpz_mul(tmp, y, y); mpz_add(tmp, tmp, c); mpz_mod(y, tmp, n);
-        }
-        unsigned long k = 0;
-        while (k < r_step && !found) {
+    for (unsigned long step = 0; step < MAX_STEPS && !found; step++) {
+        if (step % BATCH == 0) {
+            mpz_set(xs, x);
             mpz_set(ys, y);
-            unsigned long step = (r_step - k < M) ? (r_step - k) : M;
-            for (unsigned long i = 0; i < step; i++) {
-                mpz_mul(tmp, y, y); mpz_add(tmp, tmp, c); mpz_mod(y, tmp, n);
-                mpz_sub(tmp, x, y); mpz_abs(tmp, tmp);
-                mpz_mul(q, q, tmp); mpz_mod(q, q, n);
-            }
+            mpz_set_ui(q, 1);
+        }
+
+        rho_step(x, c_val, n);
+        rho_step(y, c_val, n);
+        rho_step(y, c_val, n);
+
+        mpz_sub(diff, x, y);
+        mpz_abs(diff, diff);
+        if (mpz_sgn(diff) == 0) break;
+
+        mpz_mul(q, q, diff);
+        mpz_mod(q, q, n);
+
+        if ((step + 1) % BATCH == 0 || step == MAX_STEPS - 1) {
             mpz_gcd(d, q, n);
-            if (mpz_cmp_ui(d, 1) > 0) {
-                if (mpz_cmp(d, n) == 0) {
-                    /* Backtrack: replay with single-step gcd. */
-                    do {
-                        mpz_mul(tmp, ys, ys); mpz_add(tmp, tmp, c); mpz_mod(ys, tmp, n);
-                        mpz_sub(tmp, x, ys); mpz_abs(tmp, tmp);
-                        mpz_gcd(d, tmp, n);
-                    } while (mpz_cmp_ui(d, 1) <= 0);
-                    if (mpz_cmp(d, n) == 0) break;  /* failure */
-                }
+            if (mpz_cmp_ui(d, 1) == 0) continue;
+
+            if (mpz_cmp(d, n) != 0) {
                 mpz_set(factor, d);
                 found = true;
-                break;
+            } else {
+                /* Collapsed: replay batch step-by-step from saved positions. */
+                mpz_set(x, xs);
+                mpz_set(y, ys);
+                for (unsigned long b = 0; b < BATCH && !found; b++) {
+                    rho_step(x, c_val, n);
+                    rho_step(y, c_val, n);
+                    rho_step(y, c_val, n);
+                    mpz_sub(diff, x, y);
+                    mpz_abs(diff, diff);
+                    mpz_gcd(d, diff, n);
+                    if (mpz_cmp_ui(d, 1) > 0 && mpz_cmp(d, n) != 0) {
+                        mpz_set(factor, d);
+                        found = true;
+                    }
+                }
+                if (!found) break;
             }
-            k += step;
         }
-        r_step *= 2;
     }
 
-    mpz_clears(x, y, ys, q, c, d, tmp, NULL);
+    mpz_clears(x, y, xs, ys, d, c_val, q, diff, NULL);
     return found;
 }
 
@@ -184,20 +205,22 @@ static void factor_into(mpz_t n, val_t *factor_list, bool *sorted) {
         }
         mpz_t f; mpz_init(f);
         bool ok = false;
-        for (unsigned long c = 1; c < 32 && !ok; c++) ok = brent_pollard(f, n, c);
+        for (unsigned long c = 1; c < 32 && !ok; c++)
+            ok = brent_pollard(f, n, c);
         if (!ok) {
-            /* Should not happen for moderate inputs.  Give up. */
             *factor_list = scm_cons(z_to_val(n), *factor_list);
             mpz_set_ui(n, 1);
             *sorted = false;
             mpz_clear(f);
             break;
         }
-        /* Recurse on the found factor. */
+        /* Save f before recursing: factor_into modifies its first argument
+         * (sets it to 1 when done), which would corrupt the divexact below. */
+        mpz_t f_saved; mpz_init(f_saved); mpz_set(f_saved, f);
         factor_into(f, factor_list, sorted);
-        /* And on the cofactor. */
-        mpz_divexact(n, n, f);
+        mpz_divexact(n, n, f_saved);
         mpz_clear(f);
+        mpz_clear(f_saved);
     }
 }
 
