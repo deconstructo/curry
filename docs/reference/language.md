@@ -994,7 +994,11 @@ Actors are lightweight concurrent processes. Each actor runs in its own thread s
 (actor-alive? a)
 ```
 
-Actors communicate exclusively through message passing. There are no shared mutable variables (except the GC heap — use actors as the synchronization boundary). The `sync` module provides mutexes, condition variables, and semaphores for cases where shared state is required.
+Actors communicate exclusively through message passing. There are no shared mutable variables (except the GC heap — use actors as the synchronization boundary).
+
+Curry also provides **CSP channels** (`make-channel`, `channel-send!`, `channel-recv!`) for pipeline-style communication, and **Software Transactional Memory** (`atomically`, `tvar-read`, `tvar-write!`, `retry`) for composable atomic updates to shared state. All three models — actors, channels, and STM — share the same GC heap and can be freely combined. See the [concurrency reference](concurrency.md) for the full API and guidance on choosing between them.
+
+The `sync` module provides low-level mutexes, condition variables, and semaphores for C interop or building higher-level primitives.
 
 ---
 
@@ -1058,6 +1062,7 @@ Each directory is tried for `.so`, `.dylib`, `.sld`, `.scm` in that order.
 | [`(curry network)`](module-network.md) | Standard | TCP/UDP sockets |
 | [`(curry redis)`](module-redis.md) | Standard | Redis client (RESP2) |
 | [`(curry regex)`](module-regex.md) | Standard | POSIX extended regular expressions |
+| [`(curry stm)`](concurrency.md) | Standard | STM tvars, `atomically`, `retry`, `or-else`, `select` |
 | [`(curry sync)`](module-sync.md) | Standard | Mutex, condvar, semaphore |
 | [`(curry sqlite)`](module-sqlite.md) | Standard | SQLite3 |
 | [`(curry mcp)`](mcp-clients.md) | Standard | Model Context Protocol server |
