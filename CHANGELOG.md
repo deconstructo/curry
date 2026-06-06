@@ -1,5 +1,51 @@
 # Changelog
 
+### 1.1.0 — CL condition system · C FFI · STM · channels · spinors · tensor ops
+
+**New features**
+
+- **CL-style condition system** (`src/condition.c`, `(import (curry conditions))`): Common
+  Lisp-style non-unwinding error handling. `handler-bind` installs handlers that run with
+  the full call stack intact; `with-restarts` establishes named recovery points;
+  `invoke-restart` jumps to a recovery option without unwinding; `handler-case` is the
+  unwinding fallback. A condition type hierarchy (BFS over parent lists) lets handlers match
+  by type family. `signal` returns normally if no handler claims the condition; `condition-error`
+  signals then raises. `ignore-errors` returns `(values result-or-#f condition-or-#f)`.
+  Built-in types: `error`, `warning`, `math-error`, `singular-matrix`, `no-elementary-form`,
+  `gc-pressure`, and others. See `docs/reference/language.md` and `examples/conditions_demo.scm`.
+
+- **General C FFI** (`-DBUILD_FFI=ON`, `src/ffi.c`, `(import (curry ffi))`): Call any C
+  function from Scheme via libffi. `define-foreign-library` loads a shared library;
+  `define-foreign` declares a typed function binding; `with-pinned-matrix` / `with-pinned-tensor`
+  pass matrix/tensor data pointers to C with zero copying (no marshal overhead for BLAS etc.).
+  Type system handles `int`, `uint`, `long`, `size_t` (and Scheme-style `size-t`), `double`,
+  `float`, `c-ptr`, `string`, `bool`, and `void`. Requires `libffi-dev` on Linux,
+  automatically found via Homebrew on macOS.
+
+- **STM + CSP channels** (ported from cill): TL2 software transactional memory
+  (`atomically`, `make-tvar`, `tvar-read`, `tvar-write!`, `retry`, `or-else`, `select`);
+  CSP buffered channels with synchronous rendezvous (`make-channel`, `channel-send!`,
+  `channel-recv!`, `channel-close!`, non-blocking `%channel-try-*`). All primitives in
+  global env; `(curry stm)` adds `or-else` and `select` macros. See
+  `docs/reference/concurrency.md`.
+
+- **Spinor type** (`T_SPINOR=45`, ported from cill): Weyl (left/right-handed), Dirac, and
+  Majorana spinors with correct SL(2,C)/Lorentz transform law. `make-spinor`, `spinor-ref/set!`,
+  `spinor+/-`, `spinor-scale`, `spinor-transform`, `spinor-conjugate`, `spinor-adjoint`
+  (Dirac γ⁰), `spinor-inner` (Hermitian), `spinor->list`.
+
+- **Tensor index-structure operations** (ported from cill): `tensor-transpose` (axis
+  permutation), `tensor-contract` (generalised trace over two axes), `tensor-einsum`
+  (Einstein summation notation — `"ij,jk->ik"` for matrix multiply, up to 8 tensors).
+
+**Build changes**
+
+- `BUILD_FFI=ON` CMake option; requires `libffi-dev` / Homebrew libffi.
+- Banner and `-v` output now show `(LLVM Enabled)` and `(FFI)` capability tags.
+- `src/curry_ffi.h` replaces `src/ffi.h` (renamed to avoid collision with `<ffi.h>`).
+
+---
+
 ### 1.0.1 — macOS arm64 LLVM release-build fix; CMake cleanup
 
 **Bug fixes**

@@ -1,6 +1,6 @@
 # Installation & Building
 
-*v1.0.1 — 2026-06-06*
+*v1.1.0 — 2026-06-06*
 
 ## Install via Homebrew (macOS)
 
@@ -57,6 +57,7 @@ sudo apt install libldap-dev           # ldap
 sudo apt install libpng-dev libjpeg-dev # image
 sudo apt install libgit2-dev           # git
 sudo apt install libplplot-dev         # plplot
+sudo apt install libffi-dev            # ffi (BUILD_FFI=ON)
 ```
 
 ### 2. Build
@@ -75,8 +76,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_IMAGE=ON \
   -DBUILD_MODULE_GIT=ON \
   -DBUILD_MODULE_PLPLOT=ON \
-  -DBUILD_MODULE_MQTT=ON \  
-  -DBUILD_MODULE_QT6=ON
+  -DBUILD_MODULE_MQTT=ON \
+  -DBUILD_MODULE_QT6=ON \
+  -DBUILD_FFI=ON          # general C FFI (requires libffi-dev)
 cmake --build build -j$(nproc)
 ```
 

@@ -1,6 +1,6 @@
 # Module: (curry crypto)
 
-*v1.0.1 — 2026-06-06*
+*v1.1.0 — 2026-06-06*
 
 Cryptographic primitives: base64, MD5, SHA-1, SHA-256, HMAC-SHA-256.
 

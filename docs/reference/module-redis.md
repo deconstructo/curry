@@ -1,6 +1,6 @@
 # Module: (curry redis)
 
-*v1.0.1 — 2026-06-06*
+*v1.1.0 — 2026-06-06*
 
 Redis client using the RESP2 wire protocol directly. No hiredis dependency — pure POSIX sockets.
 

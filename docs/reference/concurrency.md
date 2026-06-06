@@ -1,6 +1,6 @@
 # Concurrency in Curry
 
-*v1.0.1 — 2026-06-06*
+*v1.1.0 — 2026-06-06*
 
 Curry provides three complementary concurrency models. Choose the one that
 matches your problem:
