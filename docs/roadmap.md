@@ -1,6 +1,6 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Updated 2026-06-06 for v1.2.1. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-07 for v1.2.1. Source: cill_spec.pdf + design sessions.*
 
 Curry is at v1.2.1. This document maps the path from here to a compiled Scheme
 for scientific computing — the full cill specification. It is ordered by
@@ -23,9 +23,14 @@ dependency, not ambition; each phase unblocks the phases above it.
 | Basic profiling (call counts, wall-clock) | ✓ basic |
 | CAS rule engine (internal, not user-extensible) | ✓ partial |
 | Polynomial ops (expand, collect, degree) | ✓ partial |
-| **CL-style condition system with restarts** | ✓ **v1.1** |
-| **General C FFI (libffi, zero-copy matrix/tensor)** | ✓ **v1.1** (`BUILD_FFI=ON`) |
-| MPFR arbitrary precision floats | ✗ |
+| **CL-style condition system with restarts** | ✓ **v1.1.0** |
+| **General C FFI (libffi, zero-copy matrix/tensor)** | ✓ **v1.1.0** (`BUILD_FFI=ON`) |
+| **SRFI compatibility layer (`surfage s1`, `surfage s27`)** | ✓ **v1.1.1** |
+| **MPFR arbitrary-precision floats + interval arithmetic** | ✓ **v1.2.0** (`BUILD_MPFR=ON`) |
+| **Number theory** (primality, factoring, modular arithmetic, combinatorics, CF) | ✓ **v1.2.0** |
+| **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
+| Sexagesimal / Babylonian number system | ✗ (v1.2.5 — spec written) |
+| Extensible CAS (`define-rule`, `define-algebra`, Groebner, Risch) | ✗ |
 | Moving / generational GC | ✗ |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
@@ -46,10 +51,11 @@ dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Phase 1 — v1.1: Condition System + FFI
+## Phase 1 — v1.1: Condition System + FFI ✓ done
 
-*The two features that unblock everything else. No new dependencies for the
-condition system; LIBFFI for FFI.*
+*Shipped in v1.1.0 (2026-06-06). v1.1.1 added SRFI compatibility (`surfage s1
+lists`, `surfage s27 random-bits`). The two features that unblock everything
+else. No new dependencies for the condition system; LIBFFI for FFI.*
 
 **1a. Common Lisp condition system with restarts**
 
@@ -114,13 +120,16 @@ recovery in all mathematical code.
 
 ---
 
-## Phase 2 — v1.2: Extended Numeric Tower (MPFR + Number Theory)
+## Phase 2 — v1.2: Extended Numeric Tower (MPFR + Number Theory) ✓ done
+
+*Shipped in v1.2.0 (2026-06-07); Pollard rho bug fixes and expanded test
+coverage in v1.2.1. Decimal floating-point excluded: Curry's exact rational
+tower already covers the "0.1 + 0.2 = 0.3" use case without a third inexact
+type.*
 
 MPFR is a hard dependency for GR at physically meaningful precision — IEEE 754
 double gives you ~15 significant digits; Schwarzschild geodesics near the
-horizon need more. Decimal floating-point is excluded: Curry's exact rational
-tower already covers the "0.1 + 0.2 = 0.3" use case without a third inexact
-type.
+horizon need more.
 
 MPFR sits between `rational` and `complex` in the tower — an arbitrary-precision
 inexact real. Mixed arithmetic with an MPFR operand returns MPFR. At ≤53 bits
@@ -155,7 +164,7 @@ cryptographic number theory.
 
 ---
 
-## Phase 2.5 — v1.2.5: Babylonian/Sumerian Number System
+## Phase 2.5 — v1.2.5: Babylonian/Sumerian Number System ← next
 
 *See full design spec: `docs/thoughts/babylonian-numbers.md`.*
 
@@ -205,13 +214,14 @@ commas separate sexagesimal digits, semicolon is the sexagesimal point.
 (+ 1/2 1/3)  ; REPL displays: 0;50
 ```
 
-**Binary bug fix** (bundled here): `(number->string 255 2)` currently
-returns `"255"` instead of `"11111111"`.
-
 Deliverables: cuneiform lexer extension, `#s` reader prefix, `number->string`
 and `string->number` cuneiform/Neugebauer branches, `(curry sexagesimal)` pure
 Scheme module, `current-number-notation`, test suite, reference doc, YBC 7289
 and Plimpton 322 worked examples.
+
+Note: the `number->string` binary radix bug (`(number->string 255 2)` →
+`"11111111"`) was already fixed in v1.2.0 and is no longer part of this
+deliverable.
 
 **Effort:** 2–3 weeks.
 **Unlocks:** Nothing critical — this is cultural infrastructure. But it means
@@ -732,11 +742,13 @@ LLM integration + sharing).
 
 ## Summary timeline
 
-| Version | Name | Highlights | Effort |
+| Version | Name | Highlights | Status |
 |---------|------|-----------|--------|
-| **v1.1** | Foundation | Condition system + restarts; FFI + zero-copy | 10–14 wk |
-| **v1.2** | Precision | MPFR + number theory (decimal excluded — rationals cover it) | 6–8 wk |
-| **v1.2.5** | Babylon | Sexagesimal numbers: cuneiform reader/writer, Neugebauer notation, `(curry sexagesimal)`, binary-print fix | 2–3 wk |
+| ~~**v1.1.0**~~ | Foundation | Condition system + restarts; FFI + zero-copy matrix/tensor | ✓ shipped |
+| ~~**v1.1.1**~~ | SRFI compat | `(surfage s1 lists)`, `(surfage s27 random-bits)` | ✓ shipped |
+| ~~**v1.2.0**~~ | Precision | MPFR + interval arithmetic; number theory (185 new tests) | ✓ shipped |
+| ~~**v1.2.1**~~ | Bug fixes | Pollard rho infinite-loop fix; expanded test coverage | ✓ shipped |
+| **v1.2.5** ← | Babylon | Sexagesimal: cuneiform reader/writer, Neugebauer notation, `(curry sexagesimal)` | next |
 | **v1.3** | Algebra | Extensible CAS, Groebner, Risch (partial), special functions | 4–5 mo |
 | **v1.4** | Moving GC | Semispace collector, write barriers, GC stats | 6–8 wk |
 | **v1.5** | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
@@ -751,10 +763,10 @@ LLM integration + sharing).
 macros (v1.1) handle this automatically for FFI callers. Hand-written C modules
 need a one-time audit.
 
-**Critical path:** v1.1 (condition system + FFI) is the bottleneck. Everything
-from the GR library onward — LAPACK eigensolvers, BLAS for tensors, HDF5 for
-scientific data, GSL for special functions — routes through the FFI. Do that
-first.
+**Critical path:** v1.1 (condition system + FFI) was the bottleneck — it has
+shipped. Everything from the GR library onward — LAPACK eigensolvers, BLAS for
+tensors, HDF5 for scientific data, GSL for special functions — routes through
+the FFI, which is now available.
 
 **Pluggable interfaces shipped by this roadmap:**
 
