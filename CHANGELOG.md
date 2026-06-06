@@ -1,5 +1,17 @@
 # Changelog
 
+### 1.0.1 — macOS arm64 LLVM release-build fix; CMake cleanup
+
+**Bug fixes**
+
+- **macOS arm64 TLS ABI mismatch** (Release build with `BUILD_LLVM=ON`): C++ translation units (`jit.cpp`) referenced `extern thread_local gc_nursery` and `g_jit_call_depth`, causing the linker to look for C++ TLS wrapper symbols (`_ZTW10gc_nursery`, `_ZTW16g_jit_call_depth`) that the C compiler never emits — only `$tlv$init`-style symbols. Fixed by routing C++ callers through plain `extern "C"` functions: `gc_alloc_impl()` in `gc.c` and `jit_depth_push()`/`jit_depth_pop()` in `eval.c`. TLS variables and their inline accessors are now hidden from C++ via `#ifndef __cplusplus`. Linux is unaffected (ELF TLS is C/C++ ABI-compatible).
+
+- **Deprecated CMake SQLite target**: `SQLite::SQLite3` → `SQLite3::SQLite3` (new canonical name in CMake's FindSQLite3 module).
+
+- **CMake syntax warning**: missing whitespace between the crypto option description string and `ON` in `CMakeLists.txt`.
+
+---
+
 ### 1.0.0 — LLVM ORC v2 JIT backend; work-stealing thread pool; Qt6 confirmed
 
 **New features**

@@ -90,9 +90,7 @@ typedef struct {
     uint8_t *top;    /* bump pointer; next allocation starts here */
 } GcNursery;
 
-#ifdef __cplusplus
-extern thread_local GcNursery gc_nursery;
-#else
+#ifndef __cplusplus
 extern _Thread_local GcNursery gc_nursery;
 #endif
 
@@ -101,11 +99,21 @@ extern _Thread_local GcNursery gc_nursery;
  * gc_ops->alloc for large objects. */
 void *gc_nursery_refill(size_t n, bool has_ptrs);
 
+/* C-linkage allocator entry points used by C++ callers (avoids C++ TLS
+ * wrapper generation for gc_nursery which is incompatible with the C TLS ABI
+ * on macOS/arm64). */
+#ifdef __cplusplus
+extern "C" {
+    void *gc_alloc_impl(size_t n, int has_ptrs);
+}
+#endif
+
 /*
- * Fast-path nursery allocation.
+ * Fast-path nursery allocation (C only — C++ uses gc_alloc_impl).
  * Inline bump-pointer; falls through to gc_nursery_refill on exhaustion.
  * `has_ptrs` must be a compile-time constant for the branch to be folded.
  */
+#ifndef __cplusplus
 static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     /* Align to 8 bytes (all Curry heap objects require 8-byte alignment). */
     n = (n + 7u) & ~7u;
@@ -116,6 +124,7 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     gc_nursery.top = next;
     return p;
 }
+#endif
 
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
@@ -133,8 +142,13 @@ size_t gc_total_bytes(void);
 
 /* ── Convenience wrappers (keep same names so call sites don't change) ────── */
 
+#ifdef __cplusplus
+static inline void *gc_alloc(size_t n)        { return gc_alloc_impl(n, 1); }
+static inline void *gc_alloc_atomic(size_t n) { return gc_alloc_impl(n, 0); }
+#else
 static inline void *gc_alloc(size_t n)        { return gc_nursery_alloc(n, true);  }
 static inline void *gc_alloc_atomic(size_t n) { return gc_nursery_alloc(n, false); }
+#endif
 static inline void  gc_collect(void)          { gc_ops->collect();                  }
 
 /* ── Allocation macros (unchanged API) ────────────────────────────────────── */

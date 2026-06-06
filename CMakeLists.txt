@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 1.0.0 LANGUAGES C CXX)
+project(curry VERSION 1.0.1 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -207,7 +207,7 @@ option(BUILD_MODULE_F64VECTOR "Build f64vector typed numeric array module" ON)
 option(BUILD_MODULE_JSON      "Build JSON module"                  ON)
 option(BUILD_MODULE_SQLITE    "Build SQLite module"                ON)
 option(BUILD_MODULE_NETWORK   "Build network module"               ON)
-option(BUILD_MODULE_CRYPTO    "Build crypto module (base64/MD5/SHA)"ON)
+option(BUILD_MODULE_CRYPTO    "Build crypto module (base64/MD5/SHA)" ON)
 option(BUILD_MODULE_LDAP      "Build LDAP/LDAPS module"            ON)
 option(BUILD_MODULE_STORAGE   "Build object storage module (S3/GCS/Azure/Swift)" ON)
 option(BUILD_MODULE_HTTP      "Build HTTP client module (libcurl)"  ON)
@@ -319,7 +319,7 @@ if(BUILD_MODULE_SQLITE)
   find_package(SQLite3 QUIET)
   if(SQLite3_FOUND)
     curry_c_module(sqlite)
-    target_link_libraries(curry_sqlite PRIVATE SQLite::SQLite3)
+    target_link_libraries(curry_sqlite PRIVATE SQLite3::SQLite3)
   else()
     message(WARNING "SQLite3 not found, skipping sqlite module")
   endif()
@@ -600,7 +600,7 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_PACKAGE_VERSION           "1.0.0")
+set(CPACK_PACKAGE_VERSION           "1.0.1")
 set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.22_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")

@@ -93,6 +93,14 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
     return gc_ops->alloc(n, has_ptrs);
 }
 
+/* C-linkage allocator called from C++ translation units (jit.cpp).
+ * C++ code cannot safely reference gc_nursery via 'extern thread_local' because
+ * the C++ TLS wrapper symbol (_ZTW…) is ABI-incompatible with the C TLS symbol
+ * ($tlv$init) on macOS/arm64. */
+void *gc_alloc_impl(size_t n, int has_ptrs) {
+    return gc_nursery_alloc(n, (bool)has_ptrs);
+}
+
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 
 void gc_init(void) {

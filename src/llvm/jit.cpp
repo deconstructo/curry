@@ -29,7 +29,7 @@
 
 extern "C" {
 #include "../eval.h"
-/* g_jit_call_depth and JIT_CALL_DEPTH_LIMIT are declared in eval.h */
+/* jit_depth_push/pop are declared in eval.h (C-linkage wrappers for the TLS counter) */
 #include "../value.h"
 #include "../object.h"
 #include "../gc.h"
@@ -68,9 +68,9 @@ extern "C" {
  * apply_arr is bypassed and the bytecode interpreter runs instead, giving
  * proper O(1) C-stack tail-call semantics for deep recursion. */
 static uint64_t curry_jit_apply_arr(uint64_t proc_val, int argc, uint64_t *argv) {
-    g_jit_call_depth++;
+    jit_depth_push();
     uint64_t r = (uint64_t)apply_arr((val_t)proc_val, argc, (val_t *)argv);
-    g_jit_call_depth--;
+    jit_depth_pop();
     return r;
 }
 

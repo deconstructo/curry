@@ -1341,6 +1341,10 @@ extern val_t scm_cons(val_t, val_t);
 #define JIT_CALL_DEPTH_LIMIT 512
 _Thread_local int g_jit_call_depth = 0;
 
+/* C-linkage wrappers for jit.cpp — avoids C++ TLS wrapper ABI mismatch. */
+void jit_depth_push(void) { g_jit_call_depth++; }
+void jit_depth_pop(void)  { g_jit_call_depth--; }
+
 #ifdef BUILD_LLVM
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
  * values as constants so the JIT compiles them in without needing runtime
