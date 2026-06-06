@@ -18,6 +18,7 @@ add_test(NAME transcendental   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/transce
 add_test(NAME pde_symbolic     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/pde_symbolic_tests.scm)
 add_test(NAME sicm              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
 add_test(NAME akkadian     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_tests.scm)
+add_test(NAME conditions   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/conditions_tests.scm)
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)

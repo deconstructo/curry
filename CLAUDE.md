@@ -292,6 +292,13 @@ Tree-walking interpreter with proper tail-call optimization via `goto tail` (ite
 
 Exception handling uses `setjmp`/`longjmp` through the `ExnHandler` chain (`current_handler` thread-local). The `SCM_PROTECT(h, body, on_exn)` macro wraps a body with a handler frame. `call/cc` captures an escape continuation backed by a heap-allocated `jmp_buf`; upward escapes work, full first-class continuations are deferred.
 
+**CL-style condition system** (`src/condition.h`, `src/condition.c`): Two additional thread-local chains extend the exception system:
+
+- `current_cond_handler` (`CondHandler *`) — non-unwinding handlers installed by `handler-bind`. `scm_raise_val` walks this chain via `walk_cond_handlers()` *before* longjmping. Each handler is called with the stack intact; `condition_is_a()` checks type hierarchy.
+- `current_restart_frame` (`RestartFrame *`) — restart frames installed by `with-restarts`. Each frame holds a list of `T_RESTART` objects. `invoke-restart` raises the `Restart` object itself via `scm_raise_val`; the owning `with-restarts` frame catches it via SCM_PROTECT and runs the thunk. **Key invariant:** `with-restarts` snapshots `vm->sp`, `vm->frame_count`, `vm->open_upvalues`, and `vm->handler_count` before calling the body thunk and restores them before running the restart thunk — necessary because a longjmp through nested `vm_run` calls leaves the VM's heap-allocated state inconsistent.
+
+`T_CONDITION = 46` (type-sym, fields alist, message string) and `T_RESTART = 47` (name, description, thunk). The condition type hierarchy is a global hash table mapping type symbols to parent lists; `condition_is_a()` walks it with BFS.
+
 Before dispatching special forms, `eval()` calls `akk_translate(op)` (`src/akkadian_eval.h`) to remap Akkadian/cuneiform synonyms to their canonical English symbols — so code can be written in Standard Babylonian Akkadian and it evaluates identically.
 
 ### Environments (`src/env.h`, `src/env.c`)
