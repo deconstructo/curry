@@ -2120,6 +2120,12 @@ void builtins_register(val_t env) {
     extern void condition_register_builtins(val_t env);
     condition_register_builtins(env);
 
+#ifdef BUILD_FFI
+    /* FFI */
+    extern void ffi_register_builtins(val_t env);
+    ffi_register_builtins(env);
+#endif
+
     /* Matrices, tensors, and spinors */
     extern void mat_register_builtins(val_t env);
     mat_register_builtins(env);
