@@ -1,6 +1,6 @@
 # Surreal Numbers
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 Curry has a first-class surreal number type integrated into the numeric tower. Surreal numbers extend the real line with ω (the first infinite ordinal) and ε = 1/ω (the first positive infinitesimal), plus all arithmetic combinations.
 

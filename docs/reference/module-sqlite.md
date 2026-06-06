@@ -1,6 +1,6 @@
 # Module: (curry sqlite)
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 SQLite3 database access.
 

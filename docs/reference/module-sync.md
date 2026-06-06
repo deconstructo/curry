@@ -1,6 +1,6 @@
 # Module: (curry sync)
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 Low-level synchronisation primitives: mutex, condition variable, and counting semaphore, built directly over POSIX pthreads. No external library required.
 

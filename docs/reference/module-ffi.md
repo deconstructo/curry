@@ -1,6 +1,6 @@
 # Module: (curry ffi)
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 General C foreign function interface backed by libffi.  Requires `-DBUILD_FFI=ON`
 at build time; links `libffi`.

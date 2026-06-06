@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(curry VERSION 1.1.1 LANGUAGES C CXX)
+project(curry VERSION 1.2.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -659,7 +659,7 @@ set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # DEB-specific
 set(CPACK_GENERATOR                 "DEB")
-set(CPACK_PACKAGE_VERSION           "1.0.1")
+set(CPACK_PACKAGE_VERSION           "1.2.0")
 set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.22_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
 set(CPACK_PACKAGING_INSTALL_PREFIX  "/usr")

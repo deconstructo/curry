@@ -1,6 +1,6 @@
 # Module: (curry git)
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 Git repository access via libgit2.
 

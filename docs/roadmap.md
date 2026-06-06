@@ -1,14 +1,14 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Updated 2026-06-06 for v1.1.0. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-06 for v1.2.0. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.1.0. This document maps the path from here to a compiled Scheme
+Curry is at v1.2.0. This document maps the path from here to a compiled Scheme
 for scientific computing — the full cill specification. It is ordered by
 dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.1.0)
+## Where we are now (v1.2.0)
 
 | Capability | Status |
 |---|---|

@@ -1,6 +1,6 @@
 # Module: (curry regex)
 
-*v1.1.0 — 2026-06-06*
+*v1.2.0 — 2026-06-06*
 
 POSIX extended regular expressions using the system `<regex.h>` (glibc, musl, Darwin). No external library required.
 
