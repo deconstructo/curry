@@ -114,11 +114,18 @@ recovery in all mathematical code.
 
 ---
 
-## Phase 2 — v1.2: Extended Numeric Tower (MPFR + Decimal)
+## Phase 2 — v1.2: Extended Numeric Tower (MPFR + Number Theory)
 
 MPFR is a hard dependency for GR at physically meaningful precision — IEEE 754
 double gives you ~15 significant digits; Schwarzschild geodesics near the
-horizon need more.
+horizon need more. Decimal floating-point is excluded: Curry's exact rational
+tower already covers the "0.1 + 0.2 = 0.3" use case without a third inexact
+type.
+
+MPFR sits between `rational` and `complex` in the tower — an arbitrary-precision
+inexact real. Mixed arithmetic with an MPFR operand returns MPFR. At ≤53 bits
+of precision, `(with-precision N ...)` returns a `double` instead of MPFR to
+avoid two representations of the same value.
 
 ```scheme
 (mpfr-pi #:precision 10000)            ; π to 10000 bits
@@ -132,17 +139,84 @@ horizon need more.
   (+ (interval 1/3) (interval (mpfr-pi #:precision 53))))
 ```
 
-Also: decimal arithmetic (exact decimal fractions for measurement/financial
-contexts), extended number theory (`prime?`, `next-prime`, `factor`,
-`modular-expt`, `jacobi`, `continued-fraction`, `convergents`).
+MPFR carries naturally through complex (stored as val_t pairs — both components
+become MPFR). Quaternion, octonion, and multivector remain double-only; the
+precision they require for geometric computation does not justify the
+implementation cost of MPFR component arrays.
 
 Deliverables: `T_MPFR` type in numeric tower, `(with-precision N ...)`,
 `mpfr-pi/e/phi/log2/catalan`, rounding modes, interval arithmetic,
-`(decimal ...)`, number theory functions.
+number theory functions (`prime?`, `next-prime`, `factor`, `modular-expt`,
+`jacobi`, `continued-fraction`, `convergents`).
 
 **Effort:** 6–8 weeks.
 **Unlocks:** GR at correct precision, interval-certified numerical results,
 cryptographic number theory.
+
+---
+
+## Phase 2.5 — v1.2.5: Babylonian/Sumerian Number System
+
+*See full design spec: `docs/thoughts/babylonian-numbers.md`.*
+
+Curry already translates Akkadian/cuneiform operator names in the evaluator.
+Numbers are the other half of a written language. This phase adds sexagesimal
+(base-60) number I/O in two representations, the convenience layer for
+time/angle arithmetic, and fixes a latent binary-printing bug.
+
+**Two representations:**
+
+*Neugebauer notation* — the modern scholarly standard (Neugebauer 1935):
+commas separate sexagesimal digits, semicolon is the sexagesimal point.
+
+```scheme
+#s1,24,51,10         ; → rational 1 + 24/60 + 51/3600 + 10/216000
+                     ;   the YBC 7289 tablet approximation of √2
+
+(number->string (sqrt 2) 'neugebauer #:places 4)  ; → "1;24,51,10"
+(string->number "1;30" 'neugebauer)                ; → 3/2
+```
+
+*Cuneiform Unicode* — 𒁹 (ASH, U+12079) = 1, 𒌋 (U, U+1230B) = 10,
+𒑊 (SHAR2, U+12469) = 0 (Seleucid placeholder):
+
+```scheme
+𒁹𒌋𒌋𒁹              ; reader recognises cuneiform glyphs → 23
+(number->string 71 'cuneiform)   ; → "𒁹 𒌋𒁹"   (1×60 + 11)
+```
+
+**Convenience layer (pure Scheme module):**
+
+```scheme
+(import (curry sexagesimal))
+
+(hms->seconds '(1 30 0))          ; → 5400
+(seconds->hms 5400)               ; → (1 30 0)
+(dms->degrees '(23 27 0))         ; → 23.45
+(rational->sexagesimal (sqrt 2) #:places 4)  ; → (1 24 51 10)
+(cuneiform->neugebauer "𒁹 𒌋𒁹")  ; → "1,11"
+```
+
+**Dynamic notation:**
+
+```scheme
+(current-number-notation 'neugebauer)
+(* 60 60)    ; REPL displays: 1,0,0
+(+ 1/2 1/3)  ; REPL displays: 0;50
+```
+
+**Binary bug fix** (bundled here): `(number->string 255 2)` currently
+returns `"255"` instead of `"11111111"`.
+
+Deliverables: cuneiform lexer extension, `#s` reader prefix, `number->string`
+and `string->number` cuneiform/Neugebauer branches, `(curry sexagesimal)` pure
+Scheme module, `current-number-notation`, test suite, reference doc, YBC 7289
+and Plimpton 322 worked examples.
+
+**Effort:** 2–3 weeks.
+**Unlocks:** Nothing critical — this is cultural infrastructure. But it means
+Curry can read and write mathematics the way it was written when mathematics
+was invented.
 
 ---
 
@@ -661,7 +735,8 @@ LLM integration + sharing).
 | Version | Name | Highlights | Effort |
 |---------|------|-----------|--------|
 | **v1.1** | Foundation | Condition system + restarts; FFI + zero-copy | 10–14 wk |
-| **v1.2** | Precision | MPFR, decimal, number theory | 6–8 wk |
+| **v1.2** | Precision | MPFR + number theory (decimal excluded — rationals cover it) | 6–8 wk |
+| **v1.2.5** | Babylon | Sexagesimal numbers: cuneiform reader/writer, Neugebauer notation, `(curry sexagesimal)`, binary-print fix | 2–3 wk |
 | **v1.3** | Algebra | Extensible CAS, Groebner, Risch (partial), special functions | 4–5 mo |
 | **v1.4** | Moving GC | Semispace collector, write barriers, GC stats | 6–8 wk |
 | **v1.5** | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
