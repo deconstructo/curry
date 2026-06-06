@@ -12,6 +12,10 @@
 #include "actors.h"
 #include "gc.h"
 #include "profiling.h"
+#include "numtheory.h"
+#ifdef BUILD_MPFR
+#include "mpfr_num.h"
+#endif
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1778,6 +1782,172 @@ static val_t prim_floor_div(int ac, val_t *av, void *ud) {
     return vptr(mv);
 }
 
+#ifdef BUILD_MPFR
+/* ============================================================ */
+/* MPFR primitives                                              */
+/* ============================================================ */
+
+static mpfr_prec_t opt_prec_arg(int ac, val_t *av, int idx) {
+    if (ac > idx) {
+        if (!vis_fixnum(av[idx])) scm_raise(V_FALSE, "precision must be a fixnum");
+        long p = (long)vunfix(av[idx]);
+        if (p < MPFR_PREC_MIN || p > MPFR_PREC_MAX)
+            scm_raise(V_FALSE, "precision out of range");
+        return (mpfr_prec_t)p;
+    }
+    return 0;
+}
+
+static val_t prim_mpfr(int ac, val_t *av, void *ud) {
+    (void)ud;
+    mpfr_prec_t p = opt_prec_arg(ac, av, 1);
+    return mpfr_coerce(av[0], p);
+}
+
+static val_t prim_mpfr_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return vbool(vis_mpfr(av[0]));
+}
+
+static val_t prim_mpfr_prec(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_mpfr(av[0])) scm_raise(V_FALSE, "mpfr-precision: not an mpfr");
+    return num_make_bignum_i((long)mpfr_precision(av[0]));
+}
+
+static val_t prim_mpfr_set_prec(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "mpfr-set-precision: precision must be a fixnum");
+    return mpfr_set_precision(av[0], (mpfr_prec_t)vunfix(av[1]));
+}
+
+/* Constants — variadic optional-precision form */
+#define MPFR_CONST_PRIM(NAME, FN)                                              \
+static val_t NAME(int ac, val_t *av, void *ud) {                               \
+    (void)ud;                                                                  \
+    return FN(opt_prec_arg(ac, av, 0));                                        \
+}
+MPFR_CONST_PRIM(prim_mpfr_pi,      mpfr_c_pi)
+MPFR_CONST_PRIM(prim_mpfr_e,       mpfr_c_e)
+MPFR_CONST_PRIM(prim_mpfr_phi,     mpfr_c_phi)
+MPFR_CONST_PRIM(prim_mpfr_log2c,   mpfr_c_log2)
+MPFR_CONST_PRIM(prim_mpfr_euler,   mpfr_c_euler)
+MPFR_CONST_PRIM(prim_mpfr_catalan, mpfr_c_catalan)
+MPFR_CONST_PRIM(prim_mpfr_apery,   mpfr_c_apery)
+
+/* Dynamic precision via call-with-precision. */
+static val_t prim_call_with_precision(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "call-with-precision: precision must be a fixnum");
+    long p = (long)vunfix(av[0]);
+    if (p < MPFR_PREC_MIN || p > MPFR_PREC_MAX)
+        scm_raise(V_FALSE, "call-with-precision: precision out of range");
+    mpfr_prec_t saved = tl_mpfr_prec;
+    tl_mpfr_prec = (mpfr_prec_t)p;
+    val_t result = V_VOID;
+    /* Reset the precision even on exceptional exit. */
+    ExnHandler h;
+    SCM_PROTECT(h,
+        result = apply_arr(av[1], 0, NULL),
+        { tl_mpfr_prec = saved; scm_raise_val(h.exn); });
+    tl_mpfr_prec = saved;
+    return result;
+}
+
+static val_t prim_current_precision(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return num_make_bignum_i((long)mpfr_ctx_prec());
+}
+
+static val_t prim_mpfr_rnd_mode(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (ac == 0) {
+        const char *s;
+        switch (tl_mpfr_rnd) {
+            case MPFR_RNDN: s = "rndn"; break;
+            case MPFR_RNDZ: s = "rndz"; break;
+            case MPFR_RNDU: s = "rndu"; break;
+            case MPFR_RNDD: s = "rndd"; break;
+            case MPFR_RNDA: s = "rnda"; break;
+            default: s = "rndn"; break;
+        }
+        return sym_intern_cstr(s);
+    }
+    if (!vis_symbol(av[0])) scm_raise(V_FALSE, "mpfr-rounding-mode: expected symbol");
+    const char *n = as_sym(av[0])->data;
+    if      (strcmp(n, "rndn") == 0) tl_mpfr_rnd = MPFR_RNDN;
+    else if (strcmp(n, "rndz") == 0) tl_mpfr_rnd = MPFR_RNDZ;
+    else if (strcmp(n, "rndu") == 0) tl_mpfr_rnd = MPFR_RNDU;
+    else if (strcmp(n, "rndd") == 0) tl_mpfr_rnd = MPFR_RNDD;
+    else if (strcmp(n, "rnda") == 0) tl_mpfr_rnd = MPFR_RNDA;
+    else scm_raise(V_FALSE, "mpfr-rounding-mode: unknown mode");
+    return V_VOID;
+}
+
+/* MPFR-specific transcendentals */
+#define MPFR_UNARY_PRIM(NAME, FN)                                              \
+static val_t NAME(int ac, val_t *av, void *ud) {                               \
+    (void)ac; (void)ud; return FN(av[0]);                                      \
+}
+MPFR_UNARY_PRIM(prim_mpfr_gamma,  mpfr_num_gamma)
+MPFR_UNARY_PRIM(prim_mpfr_lgamma, mpfr_num_lgamma)
+MPFR_UNARY_PRIM(prim_mpfr_zeta,   mpfr_num_zeta)
+MPFR_UNARY_PRIM(prim_mpfr_erf,    mpfr_num_erf)
+MPFR_UNARY_PRIM(prim_mpfr_erfc,   mpfr_num_erfc)
+MPFR_UNARY_PRIM(prim_mpfr_j0,     mpfr_num_j0)
+MPFR_UNARY_PRIM(prim_mpfr_j1,     mpfr_num_j1)
+MPFR_UNARY_PRIM(prim_mpfr_log2,   mpfr_num_log2)
+MPFR_UNARY_PRIM(prim_mpfr_log10,  mpfr_num_log10)
+MPFR_UNARY_PRIM(prim_mpfr_sqrt,   mpfr_num_sqrt)
+MPFR_UNARY_PRIM(prim_mpfr_exp,    mpfr_num_exp)
+MPFR_UNARY_PRIM(prim_mpfr_log,    mpfr_num_log)
+
+static val_t prim_mpfr_hypot(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return mpfr_num_hypot(av[0], av[1]);
+}
+static val_t prim_mpfr_fma(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return mpfr_num_fma(av[0], av[1], av[2]);
+}
+
+/* Interval arithmetic */
+static val_t prim_make_interval(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return interval_make(av[0], av[1]);
+}
+static val_t prim_interval_point(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return interval_from_number(av[0]);
+}
+static val_t prim_interval_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud; return vbool(vis_ival(av[0]));
+}
+static val_t prim_interval_lo(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_ival(av[0])) scm_raise(V_FALSE, "interval-lo: not an interval");
+    return as_ival(av[0])->lo;
+}
+static val_t prim_interval_hi(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_ival(av[0])) scm_raise(V_FALSE, "interval-hi: not an interval");
+    return as_ival(av[0])->hi;
+}
+static val_t prim_interval_mid(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_ival(av[0])) scm_raise(V_FALSE, "interval-midpoint: not an interval");
+    Interval *iv = as_ival(av[0]);
+    return num_div(num_add(iv->lo, iv->hi), vfix(2));
+}
+static val_t prim_interval_width(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_ival(av[0])) scm_raise(V_FALSE, "interval-width: not an interval");
+    Interval *iv = as_ival(av[0]);
+    return num_sub(iv->hi, iv->lo);
+}
+static val_t prim_interval_contains(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_ival(av[0])) scm_raise(V_FALSE, "interval-contains?: not an interval");
+    Interval *iv = as_ival(av[0]);
+    return vbool(num_le(iv->lo, av[1]) && num_le(av[1], iv->hi));
+}
+#endif /* BUILD_MPFR */
+
 /* ---- Registration ---- */
 
 /* Build exact rational: decimal_digits / 10^(strlen(decimal_digits) - 1).
@@ -2137,4 +2307,66 @@ void builtins_register(val_t env) {
 
     builtins_curry_register(env);
 
+    /* Number theory (GMP-only; always built) */
+    builtins_numtheory_register(env);
+
+#ifdef BUILD_MPFR
+    /* MPFR constructors / predicates */
+    DEF("mpfr",                 prim_mpfr,             1, 2);
+    DEF("mpfr?",                prim_mpfr_p,           1, 1);
+    DEF("mpfr-precision",       prim_mpfr_prec,        1, 1);
+    DEF("mpfr-set-precision",   prim_mpfr_set_prec,    2, 2);
+    /* Constants */
+    DEF("mpfr-pi",              prim_mpfr_pi,          0, 1);
+    DEF("mpfr-e",               prim_mpfr_e,           0, 1);
+    DEF("mpfr-phi",             prim_mpfr_phi,         0, 1);
+    DEF("mpfr-log2",            prim_mpfr_log2c,       0, 1);
+    DEF("mpfr-euler",           prim_mpfr_euler,       0, 1);
+    DEF("mpfr-catalan",         prim_mpfr_catalan,     0, 1);
+    DEF("mpfr-apery",           prim_mpfr_apery,       0, 1);
+    /* Dynamic precision */
+    DEF("call-with-precision",  prim_call_with_precision, 2, 2);
+    DEF("current-precision",    prim_current_precision,   0, 0);
+    DEF("mpfr-rounding-mode",   prim_mpfr_rnd_mode,       0, 1);
+    /* MPFR-specific math */
+    DEF("mpfr-sqrt",            prim_mpfr_sqrt,        1, 1);
+    DEF("mpfr-exp",             prim_mpfr_exp,         1, 1);
+    DEF("mpfr-log",             prim_mpfr_log,         1, 1);
+    DEF("mpfr-gamma",           prim_mpfr_gamma,       1, 1);
+    DEF("mpfr-lgamma",          prim_mpfr_lgamma,      1, 1);
+    DEF("mpfr-zeta",            prim_mpfr_zeta,        1, 1);
+    DEF("mpfr-erf",             prim_mpfr_erf,         1, 1);
+    DEF("mpfr-erfc",            prim_mpfr_erfc,        1, 1);
+    DEF("mpfr-j0",              prim_mpfr_j0,          1, 1);
+    DEF("mpfr-j1",              prim_mpfr_j1,          1, 1);
+    DEF("mpfr-log2-of",         prim_mpfr_log2,        1, 1);
+    DEF("mpfr-log10",           prim_mpfr_log10,       1, 1);
+    DEF("mpfr-hypot",           prim_mpfr_hypot,       2, 2);
+    DEF("mpfr-fma",             prim_mpfr_fma,         3, 3);
+    /* Interval arithmetic */
+    DEF("make-interval",        prim_make_interval,    2, 2);
+    DEF("interval",             prim_interval_point,   1, 1);
+    DEF("interval?",            prim_interval_p,       1, 1);
+    DEF("interval-lo",          prim_interval_lo,      1, 1);
+    DEF("interval-hi",          prim_interval_hi,      1, 1);
+    DEF("interval-midpoint",    prim_interval_mid,     1, 1);
+    DEF("interval-width",       prim_interval_width,   1, 1);
+    DEF("interval-contains?",   prim_interval_contains, 2, 2);
+
+    /* Install `(with-precision N body ...)` as syntax-rules sugar.
+     * Safety: the `form` argument is a fixed compile-time literal — it is the
+     * curry-Scheme syntax-rules definition of the macro itself.  No user input
+     * reaches this eval(); it is the standard mechanism for installing
+     * Scheme-level macros from C startup code. */
+    {
+        val_t form = scm_read_cstr(
+            "(define-syntax with-precision"
+            "  (syntax-rules ()"
+            "    ((_ bits body ...)"
+            "     (call-with-precision bits (lambda () body ...)))))");
+        if (!vis_eof(form)) eval(form, env);
+    }
+
+    mpfr_num_init();
+#endif
 }

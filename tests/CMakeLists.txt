@@ -19,6 +19,10 @@ add_test(NAME pde_symbolic     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/pde_sym
 add_test(NAME sicm              COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
 add_test(NAME akkadian     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_tests.scm)
 add_test(NAME conditions   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/conditions_tests.scm)
+add_test(NAME numtheory    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numtheory_tests.scm)
+if(BUILD_MPFR)
+  add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
+endif()
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)

@@ -1,5 +1,47 @@
 # Changelog
 
+### 1.2.0 — arbitrary-precision floats (MPFR) and number theory
+
+**New features**
+
+- **MPFR arbitrary-precision floats** (`-DBUILD_MPFR=ON`, `src/mpfr_num.c`).
+  Adds `T_MPFR` to the numeric tower with `(mpfr x [prec])`, constants
+  `(mpfr-pi)`, `(mpfr-e)`, `(mpfr-phi)`, `(mpfr-log2)`, `(mpfr-euler)`,
+  `(mpfr-catalan)`, `(mpfr-apery)`, and MPFR-specific transcendentals
+  (`mpfr-gamma`, `mpfr-zeta`, `mpfr-erf`, `mpfr-erfc`, `mpfr-j0`, `mpfr-j1`,
+  `mpfr-hypot`, `mpfr-fma`, …).  Dynamic precision via `(with-precision N body
+  ...)` / `(call-with-precision N thunk)` / `(current-precision)`.  Selectable
+  rounding mode via `(mpfr-rounding-mode 'rndn|'rndz|'rndu|'rndd|'rnda)`.
+  Standard tower transcendentals (`sin`, `cos`, `exp`, `log`, `sqrt`, …)
+  dispatch to MPFR when given an MPFR operand.
+
+- **Interval arithmetic** (with MPFR): `make-interval`, `interval`,
+  `interval-lo`, `interval-hi`, `interval-midpoint`, `interval-width`,
+  `interval-contains?`.  Endpoints use directed-rounded MPFR for certified
+  bounds.
+
+- **Number theory library** (`src/numtheory.c`, always built — GMP only).
+  Primality and factoring (`prime?`, `next-prime`, `factor`, `prime-factors`),
+  arithmetic functions (`totient`, `carmichael`, `mobius`, `divisors`,
+  `divisor-count`, `divisor-sum`, `perfect?`/`abundant?`/`deficient?`, `omega`,
+  `big-omega`), modular arithmetic (`mod-expt`, `mod-inverse`, `jacobi-symbol`,
+  `kronecker-symbol`, `legendre-symbol`, `extended-gcd`, `chinese-remainder`),
+  combinatorial sequences (`fibonacci`, `lucas`, `binomial`, `multinomial`,
+  `catalan`, `bernoulli`, `euler-number`, `stirling1`, `stirling2`, `bell`,
+  `partition-count`), continued fractions (`continued-fraction`, `convergents`,
+  `best-rational-approx`), and number predicates (`squarefree?`,
+  `perfect-power?`, `smooth?`).
+
+**Bug fixes**
+
+- `number->string` for radix 2 (and any radix other than 8, 10, 16) on
+  fixnum inputs incorrectly emitted decimal digits using `%ld`; now routes
+  through `mpz_get_str` so every radix is honoured.
+
+See `docs/reference/numeric-precision.md`.
+
+---
+
 ### 1.1.1 — SRFI compatibility layer (surfage)
 
 **New features**

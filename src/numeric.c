@@ -5,6 +5,9 @@
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
+#ifdef BUILD_MPFR
+#include "mpfr_num.h"
+#endif
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -160,6 +163,9 @@ double num_to_double(val_t v) {
     if (vis_rational(v)) return mpq_get_d(as_rat(v)->q);
     if (vis_complex(v))  return num_to_double(as_cpx(v)->real); /* drop imag */
     if (vis_surreal(v))  return sur_to_double(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))     return mpfr_to_double(v);
+#endif
     scm_raise(V_FALSE, "not a number: %s",
               vis_pair(v) ? "#<pair>" :
               vis_nil(v)  ? "()"      :
@@ -175,10 +181,18 @@ long num_to_long(val_t v) {
 
 val_t num_inexact(val_t v) {
     if (vis_flonum(v)) return v;
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return v;
+    if (tl_mpfr_prec > 53)
+        return mpfr_coerce(v, tl_mpfr_prec);
+#endif
     return num_make_float(num_to_double(v));
 }
 
 val_t num_exact(val_t v) {
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_to_exact(v);
+#endif
     if (!vis_flonum(v)) return v;
     double d = vfloat(v);
     /* Convert double to exact rational via GMP */
@@ -200,6 +214,9 @@ bool num_is_zero(val_t v) {
     if (vis_complex(v))  return num_is_zero(as_cpx(v)->real) && num_is_zero(as_cpx(v)->imag);
     if (vis_quat(v))    { Quaternion *q = as_quat(v); return q->a==0.0 && q->b==0.0 && q->c==0.0 && q->d==0.0; }
     if (vis_surreal(v))  return sur_is_zero(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))     return mpfr_is_zero(v);
+#endif
     return false;
 }
 
@@ -219,6 +236,9 @@ bool num_is_positive(val_t v) {
     if (vis_bignum(v))   return mpz_sgn(as_big(v)->z) > 0;
     if (vis_rational(v)) return mpq_sgn(as_rat(v)->q) > 0;
     if (vis_surreal(v))  return sur_is_positive(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))     return mpfr_is_positive(v);
+#endif
     return false;
 }
 
@@ -228,25 +248,42 @@ bool num_is_negative(val_t v) {
     if (vis_bignum(v))   return mpz_sgn(as_big(v)->z) < 0;
     if (vis_rational(v)) return mpq_sgn(as_rat(v)->q) < 0;
     if (vis_surreal(v))  return sur_is_negative(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))     return mpfr_is_negative(v);
+#endif
     return false;
 }
 
 bool num_is_finite(val_t v)   {
     if (vis_surreal(v)) return sur_finite_p(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))    return !mpfr_is_nan(v) && !mpfr_is_inf(v);
+#endif
     return !vis_flonum(v) || isfinite(vfloat(v));
 }
 
 bool num_is_infinite(val_t v) {
     if (vis_surreal(v)) return sur_infinite_p(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))    return mpfr_is_inf(v);
+#endif
     return vis_flonum(v) && isinf(vfloat(v));
 }
 
-bool num_is_nan(val_t v)      { return vis_flonum(v) && isnan(vfloat(v)); }
+bool num_is_nan(val_t v)      {
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_is_nan(v);
+#endif
+    return vis_flonum(v) && isnan(vfloat(v));
+}
 
 bool num_is_integer(val_t v) {
     if (vis_fixnum(v) || vis_bignum(v)) return true;
     if (vis_flonum(v)) { double d = vfloat(v); return isfinite(d) && d == trunc(d); }
     if (vis_rational(v)) return mpz_cmp_ui(mpq_denref(as_rat(v)->q), 1) == 0;
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))     return mpfr_is_integer(v);
+#endif
     return false;
 }
 
@@ -340,6 +377,9 @@ val_t num_add(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) + (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) + vfloat(b));
     }
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_add(a, b);
+#endif
     /* Tuple addition distributes before symbolic so that 0+tuple and tuple+0
        work correctly when the zero is symbolic (e.g. from variadic accumulator). */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -385,6 +425,9 @@ val_t num_neg(val_t a) {
     if (vis_quantum(a))  return quantum_mul_scalar(a, vfix(-1));
     if (vis_surreal(a))  return sur_neg(a);
     if (vis_tuple(a))    return tuple_unop(a, num_neg);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a))     return mpfr_num_neg(a);
+#endif
     return num_sub(vfix(0), a);
 }
 
@@ -417,6 +460,9 @@ val_t num_sub(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) - (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) - vfloat(b));
     }
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_sub(a, b);
+#endif
     /* Tuple subtraction before symbolic for same reason as num_add. */
     if (vis_tuple(a) || vis_tuple(b)) {
         if (!vis_tuple(b) && num_is_zero(b)) return a;
@@ -472,6 +518,9 @@ val_t num_mul(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) * (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) * vfloat(b));
     }
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_mul(a, b);
+#endif
     /* Tuple distribution takes priority over symbolic so that sym-var × up-tuple
        distributes component-wise rather than wrapping in a CAS expression. */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -556,6 +605,9 @@ val_t num_div(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) / (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
     }
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_div(a, b);
+#endif
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && !vis_quantum(b)) return quantum_div_scalar(a, b);
@@ -601,6 +653,9 @@ val_t num_div(val_t a, val_t b) {
 val_t num_abs(val_t a) {
     if (vis_symbolic(a)) return sx_abs(a);
     if (vis_surreal(a))  return sur_abs(a);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a))     return mpfr_num_abs(a);
+#endif
     if (vis_fixnum(a)) {
         intptr_t n = vunfix(a);
         return n < 0 ? (in_fixnum_range(-n) ? vfix(-n) : num_make_bignum_i(-n)) : a;
@@ -642,6 +697,9 @@ int num_cmp(val_t a, val_t b) {
         return da < db ? -1 : da > db ? 1 : 0;
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_compare(a, b);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_cmp(a, b);
+#endif
     if (vis_flonum(a) || vis_flonum(b)) {
         double da = num_to_double(a), db = num_to_double(b);
         return da < db ? -1 : da > db ? 1 : 0;
@@ -725,6 +783,9 @@ val_t num_lcm(val_t a, val_t b) {
 /* ---- Rounding ---- */
 val_t num_floor(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))  return mpfr_num_floor(v);
+#endif
     if (vis_flonum(v)) return num_make_float(floor(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -735,6 +796,9 @@ val_t num_floor(val_t v) {
 }
 val_t num_ceiling(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))  return mpfr_num_ceiling(v);
+#endif
     if (vis_flonum(v)) return num_make_float(ceil(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -745,6 +809,9 @@ val_t num_ceiling(val_t v) {
 }
 val_t num_truncate(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))  return mpfr_num_truncate(v);
+#endif
     if (vis_flonum(v)) return num_make_float(trunc(vfloat(v)));
     if (vis_rational(v)) {
         mpz_t r; mpz_init(r);
@@ -755,6 +822,9 @@ val_t num_truncate(val_t v) {
 }
 val_t num_round(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v))  return mpfr_num_round(v);
+#endif
     if (vis_flonum(v)) {
         double d = vfloat(v);
         double rounded = round(d);
@@ -841,6 +911,16 @@ static val_t quat_assemble(const Quaternion *q, double scalar, double vscale) {
 val_t num_sqrt(val_t v) {
     if (vis_symbolic(v)) return sx_sqrt(v);
     if (vis_surreal(v))  return sur_expt(v, num_make_rational(vfix(1), vfix(2)));
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) {
+        if (mpfr_sgn(as_mpfr(v)->x) < 0) {
+            /* sqrt of negative real → imaginary result */
+            val_t neg = mpfr_num_neg(v);
+            return num_make_complex(num_make_float(0.0), mpfr_num_sqrt(neg));
+        }
+        return mpfr_num_sqrt(v);
+    }
+#endif
     if (vis_quat(v)) {
         /* sqrt(q) = sqrt((|q|+a)/2) + v̂·sqrt((|q|−a)/2)  (principal root) */
         Quaternion *q = as_quat(v);
@@ -874,6 +954,9 @@ val_t num_sqrt(val_t v) {
 
 val_t num_asin(val_t v) {
     if (vis_symbolic(v)) return sx_asin(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_asin(v);
+#endif
     if (vis_quat(v)) {
         /* Project to complex plane of q, apply complex asin, reconstruct. */
         Quaternion *q = as_quat(v);
@@ -895,6 +978,9 @@ val_t num_asin(val_t v) {
 }
 val_t num_acos(val_t v) {
     if (vis_symbolic(v)) return sx_acos(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_acos(v);
+#endif
     if (vis_quat(v)) {
         Quaternion *q = as_quat(v);
         double b = q->b, c = q->c, d = q->d;
@@ -915,6 +1001,9 @@ val_t num_acos(val_t v) {
 }
 val_t num_atan(val_t v) {
     if (vis_symbolic(v)) return sx_atan(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_atan(v);
+#endif
     if (vis_quat(v)) {
         Quaternion *q = as_quat(v);
         double b = q->b, c = q->c, d = q->d;
@@ -938,6 +1027,9 @@ val_t num_atan(val_t v) {
 /* Complex-aware transcendentals */
 val_t num_exp(val_t v) {
     if (vis_symbolic(v)) return sx_exp(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_exp(v);
+#endif
     if (vis_quat(v)) {
         /* exp(q) = e^a · (cos‖v‖ + v̂·sin‖v‖) */
         Quaternion *q = as_quat(v);
@@ -955,6 +1047,15 @@ val_t num_exp(val_t v) {
 }
 val_t num_log(val_t v) {
     if (vis_symbolic(v)) return sx_log(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) {
+        if (mpfr_sgn(as_mpfr(v)->x) < 0) {
+            val_t neg = mpfr_num_neg(v);
+            return num_make_complex(mpfr_num_log(neg), num_make_float(M_PI));
+        }
+        return mpfr_num_log(v);
+    }
+#endif
     if (vis_quat(v)) {
         /* log(q) = ln‖q‖ + v̂·arccos(a/‖q‖)  (principal branch) */
         Quaternion *q = as_quat(v);
@@ -973,6 +1074,9 @@ val_t num_log(val_t v) {
 }
 val_t num_sin(val_t v) {
     if (vis_symbolic(v)) return sx_sin(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_sin(v);
+#endif
     if (vis_quat(v)) {
         /* sin(q) = sin(a)·cosh‖v‖ + v̂·cos(a)·sinh‖v‖ */
         Quaternion *q = as_quat(v);
@@ -988,6 +1092,9 @@ val_t num_sin(val_t v) {
 }
 val_t num_cos(val_t v) {
     if (vis_symbolic(v)) return sx_cos(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_cos(v);
+#endif
     if (vis_quat(v)) {
         /* cos(q) = cos(a)·cosh‖v‖ − v̂·sin(a)·sinh‖v‖ */
         Quaternion *q = as_quat(v);
@@ -1003,14 +1110,25 @@ val_t num_cos(val_t v) {
 }
 val_t num_tan(val_t v) {
     if (vis_symbolic(v)) return sx_tan(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_tan(v);
+#endif
     /* sin(q) and cos(q) share the same imaginary axis v̂, so they commute */
     if (vis_quat(v) || vis_complex(v)) return num_div(num_sin(v), num_cos(v));
     return num_make_float(tan(num_to_double(v)));
 }
-val_t num_atan2(val_t y, val_t x) { return num_make_float(atan2(num_to_double(y), num_to_double(x))); }
+val_t num_atan2(val_t y, val_t x) {
+#ifdef BUILD_MPFR
+    if (vis_mpfr(y) || vis_mpfr(x)) return mpfr_num_atan2(y, x);
+#endif
+    return num_make_float(atan2(num_to_double(y), num_to_double(x)));
+}
 
 val_t num_sinh(val_t v) {
     if (vis_symbolic(v)) return sx_sinh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_sinh(v);
+#endif
     if (vis_quat(v)) {
         /* sinh(q) = sinh(a)·cos‖v‖ + v̂·cosh(a)·sin‖v‖ */
         Quaternion *q = as_quat(v);
@@ -1026,6 +1144,9 @@ val_t num_sinh(val_t v) {
 }
 val_t num_cosh(val_t v) {
     if (vis_symbolic(v)) return sx_cosh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_cosh(v);
+#endif
     if (vis_quat(v)) {
         /* cosh(q) = cosh(a)·cos‖v‖ + v̂·sinh(a)·sin‖v‖ */
         Quaternion *q = as_quat(v);
@@ -1041,6 +1162,9 @@ val_t num_cosh(val_t v) {
 }
 val_t num_tanh(val_t v) {
     if (vis_symbolic(v)) return sx_tanh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_tanh(v);
+#endif
     /* sinh(q) and cosh(q) share the same imaginary axis v̂, so they commute */
     if (vis_quat(v)) return num_div(num_sinh(v), num_cosh(v));
     if (vis_complex(v)) {
@@ -1052,6 +1176,9 @@ val_t num_tanh(val_t v) {
 }
 val_t num_asinh(val_t v) {
     if (vis_symbolic(v)) return sx_asinh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_asinh(v);
+#endif
     if (vis_quat(v) || vis_complex(v))
         /* asinh(q) = ln(q + √(q²+1)) — works for quaternions via num_log/num_sqrt */
         return num_log(num_add(v, num_sqrt(num_add(num_mul(v, v), vfix(1)))));
@@ -1059,6 +1186,9 @@ val_t num_asinh(val_t v) {
 }
 val_t num_acosh(val_t v) {
     if (vis_symbolic(v)) return sx_acosh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_acosh(v);
+#endif
     if (vis_quat(v) || vis_complex(v))
         /* acosh(q) = ln(q + √(q²−1)) */
         return num_log(num_add(v, num_sqrt(num_sub(num_mul(v, v), vfix(1)))));
@@ -1066,6 +1196,9 @@ val_t num_acosh(val_t v) {
 }
 val_t num_atanh(val_t v) {
     if (vis_symbolic(v)) return sx_atanh(v);
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return mpfr_num_atanh(v);
+#endif
     if (vis_quat(v) || vis_complex(v))
         /* atanh(q) = (1/2) · ln((1+q)/(1−q)) */
         return num_mul(num_make_float(0.5),
@@ -1216,7 +1349,19 @@ val_t num_oct_inverse(val_t v) {
 val_t num_to_string(val_t v, int radix) {
     char buf[128];
     if (vis_fixnum(v)) {
-        snprintf(buf, sizeof(buf), radix==16?"%lx":radix==8?"%lo":"%ld", (long)vunfix(v));
+        /* GMP handles every radix uniformly, including binary.  Earlier code
+         * used printf's %ld for radix==2 which silently produced decimal. */
+        if (radix == 10) {
+            snprintf(buf, sizeof(buf), "%ld", (long)vunfix(v));
+        } else {
+            mpz_t z; mpz_init_set_si(z, (long)vunfix(v));
+            char *s = mpz_get_str(NULL, radix, z);
+            uint32_t len = (uint32_t)strlen(s);
+            String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+            str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len;
+            memcpy(str->data, s, len+1); free(s); mpz_clear(z);
+            return vptr(str);
+        }
     } else if (vis_bignum(v)) {
         char *s = mpz_get_str(NULL, radix, as_big(v)->z);
         /* wrap in String */
@@ -1226,6 +1371,10 @@ val_t num_to_string(val_t v, int radix) {
         memcpy(str->data, s, len+1); free(s); return vptr(str);
     } else if (vis_flonum(v)) {
         snprintf(buf, sizeof(buf), "%g", vfloat(v));
+#ifdef BUILD_MPFR
+    } else if (vis_mpfr(v)) {
+        return mpfr_to_string(v, 0, radix);
+#endif
     } else {
         snprintf(buf, sizeof(buf), "#<number>");
     }

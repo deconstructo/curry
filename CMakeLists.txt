@@ -86,6 +86,9 @@ endif()
 find_library(GMP_LIB NAMES gmp REQUIRED)
 find_path(GMP_INCLUDE NAMES gmp.h REQUIRED)
 
+# MPFR — arbitrary precision floating-point (built on GMP)
+option(BUILD_MPFR "Build MPFR arbitrary-precision float support" OFF)
+
 # readline — optional, enhances the REPL with history and line editing
 find_library(READLINE_LIB NAMES readline)
 find_path(READLINE_INCLUDE NAMES readline/readline.h)
@@ -97,6 +100,7 @@ set(CORE_SOURCES
   src/chunk.c
   src/symbol.c
   src/numeric.c
+  src/numtheory.c
   src/port.c
   src/reader.c
   src/env.c
@@ -166,6 +170,22 @@ if(READLINE_LIB AND READLINE_INCLUDE)
   message(STATUS "readline found — REPL will use readline")
 else()
   message(STATUS "readline not found — REPL uses basic line editing")
+endif()
+
+# ---- MPFR (arbitrary precision floating-point) ----
+
+if(BUILD_MPFR)
+  find_library(MPFR_LIB NAMES mpfr REQUIRED)
+  find_path(MPFR_INCLUDE NAMES mpfr.h REQUIRED)
+  if(MPFR_LIB AND MPFR_INCLUDE)
+    message(STATUS "Found MPFR — arbitrary precision float enabled")
+    target_sources(curry_core PRIVATE src/mpfr_num.c)
+    target_compile_definitions(curry_core PUBLIC BUILD_MPFR)
+    target_include_directories(curry_core PUBLIC ${MPFR_INCLUDE})
+    target_link_libraries(curry_core PUBLIC ${MPFR_LIB})
+  else()
+    message(FATAL_ERROR "MPFR not found. Install libmpfr-dev or brew install mpfr")
+  endif()
 endif()
 
 # ---- FFI (libffi-backed foreign function interface) ----
