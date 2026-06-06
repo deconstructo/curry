@@ -1,6 +1,6 @@
 # Module: (curry network)
 
-*v0.7.5 — 2026-05-12*
+*v1.0.1 — 2026-06-06*
 
 TCP and UDP socket primitives. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows.
 

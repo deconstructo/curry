@@ -1,6 +1,6 @@
 # Module: `(curry sicm)`
 
-*v0.12.0 — 2026-05-28*
+*v1.0.1 — 2026-06-06*
 
 Structure and Interpretation of Classical Mechanics — symbolic mechanics on top of Curry's CAS. Procedure names follow Sussman & Wisdom, *SICM* 2nd ed. (MIT Press). Includes a scmutils compatibility shim so most Ch 1 examples run with minimal adaptation.
 

@@ -1,6 +1,6 @@
 # Module: (curry graphql)
 
-*v0.7.5 — 2026-05-12*
+*v1.0.1 — 2026-06-06*
 
 GraphQL client over HTTP/HTTPS. Queries and mutations share the same wire protocol (JSON POST); subscriptions are not supported.
 

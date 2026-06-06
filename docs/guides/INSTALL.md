@@ -1,6 +1,6 @@
 # Installation & Building
 
-*v0.8.16 — 2026-05-22*
+*v1.0.1 — 2026-06-06*
 
 ## Install via Homebrew (macOS)
 

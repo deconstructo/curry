@@ -1,6 +1,6 @@
 # Quantum Superposition Values
 
-*v0.7.5 — 2026-05-12*
+*v1.0.1 — 2026-06-06*
 
 Curry has a first-class quantum superposition type. A quantum value is a normalized probability amplitude distribution over ordinary Scheme values. It can be operated on arithmetically without collapsing, and collapses to a single value only when explicitly observed.
 
