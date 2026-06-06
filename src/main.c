@@ -29,11 +29,17 @@
 #  include <readline/history.h>
 #endif
 
+#ifdef BUILD_LLVM
+#  define LLVM_TAG " (LLVM Enabled)"
+#else
+#  define LLVM_TAG ""
+#endif
+
 #define BANNER \
     "𒋗𒈬 𒌝 𒄿𒈾 𒋗  |  šulmu — šiprī ina qātīka\n" \
     "Greetings — my service is in your hands\n\n"\
-    "Curry Scheme " CURRY_VERSION " (R7RS)\n" \
-    "Type ,quit to exit, ,help for help.\n\n" 
+    "Curry Scheme " CURRY_VERSION " (R7RS)" LLVM_TAG "\n" \
+    "Type ,quit to exit, ,help for help.\n\n"
 
 
 static void init_all(void) {
@@ -348,7 +354,7 @@ int main(int argc, char **argv) {
     while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvhG:", long_opts, NULL)) != -1) {
         switch (opt) {
         case 'v':
-            printf("Curry Scheme %s\n", CURRY_VERSION);
+            printf("Curry Scheme %s (R7RS)" LLVM_TAG "\n", CURRY_VERSION);
             return 0;
         case 'h':
             usage(argv[0]); return 0;
