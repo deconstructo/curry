@@ -13,6 +13,10 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+#include <ctype.h>
+
+/* Global: current display notation — 0 = decimal, else a Scheme symbol value */
+val_t g_number_notation = 0;
 
 /* ---- Helpers ---- */
 
@@ -1391,4 +1395,357 @@ val_t num_normalize(val_t v) {
         if (in_fixnum_range(n)) return vfix(n);
     }
     return v;
+}
+
+/* ===================================================================
+ * Sexagesimal (Babylonian/Neugebauer) number support — v1.2.5
+ *
+ * Two representations:
+ *  1. Neugebauer notation: digits,separated,by,commas[;fractional,digits]
+ *  2. Cuneiform Unicode:   𒁹 (ASH=1), 𒌋 (U=10), 𒑊 (SHAR2=0)
+ *     digit groups separated by spaces; ASH and U additive within group.
+ * =================================================================== */
+
+/* Cuneiform Unicode codepoints */
+#define CP_ASH   0x12079u   /* 𒁹 U+12079 CUNEIFORM SIGN ASH = 1 */
+#define CP_U     0x1230Bu   /* 𒌋 U+1230B CUNEIFORM SIGN U    = 10 */
+#define CP_SHAR2 0x1244Au   /* 𒑊 U+1244A CUNEIFORM NUMERIC SIGN TWO ASH TENU = 0
+                             * (Seleucid zero placeholder; the glyph commonly
+                             * labelled "𒑊" in Assyriology tools maps to U+1244A,
+                             * not U+12469 SHAR2 which denotes 3600 in astronomy) */
+
+/* ---- UTF-8 helpers ---- */
+
+/* Decode one codepoint from *s; advance *s past the bytes. Returns -1 at end. */
+static int sex_decode_cp(const char **s) {
+    const unsigned char *p = (const unsigned char *)*s;
+    if (!*p) return -1;
+    uint32_t cp; int n;
+    if      (*p < 0x80) { cp = *p;        n = 1; }
+    else if (*p < 0xE0) { cp = *p & 0x1F; n = 2; }
+    else if (*p < 0xF0) { cp = *p & 0x0F; n = 3; }
+    else                { cp = *p & 0x07; n = 4; }
+    for (int i = 1; i < n; i++) {
+        if ((p[i] & 0xC0) != 0x80) return -1;
+        cp = (cp << 6) | (p[i] & 0x3F);
+    }
+    *s += n;
+    return (int)cp;
+}
+
+/* Encode one codepoint to UTF-8 bytes in buf (must have ≥5 bytes). Returns byte count. */
+static int sex_encode_cp(uint32_t cp, char *buf) {
+    if (cp < 0x80)    { buf[0]=(char)cp; return 1; }
+    if (cp < 0x800)   { buf[0]=(char)(0xC0|(cp>>6));   buf[1]=(char)(0x80|(cp&0x3F)); return 2; }
+    if (cp < 0x10000) { buf[0]=(char)(0xE0|(cp>>12));  buf[1]=(char)(0x80|((cp>>6)&0x3F)); buf[2]=(char)(0x80|(cp&0x3F)); return 3; }
+    buf[0]=(char)(0xF0|(cp>>18)); buf[1]=(char)(0x80|((cp>>12)&0x3F));
+    buf[2]=(char)(0x80|((cp>>6)&0x3F)); buf[3]=(char)(0x80|(cp&0x3F)); return 4;
+}
+
+/* ---- Dynamic string builder for sexagesimal output ---- */
+typedef struct { char *buf; size_t len; size_t cap; } SexBuf;
+
+static void sexbuf_init(SexBuf *b) {
+    b->cap = 256; b->len = 0;
+    b->buf = (char *)malloc(b->cap);
+    b->buf[0] = '\0';
+}
+static void sexbuf_ensure(SexBuf *b, size_t extra) {
+    while (b->len + extra + 1 >= b->cap) { b->cap *= 2; b->buf = (char *)realloc(b->buf, b->cap); }
+}
+static void sexbuf_push(SexBuf *b, char c) {
+    sexbuf_ensure(b, 1); b->buf[b->len++] = c; b->buf[b->len] = '\0';
+}
+static void sexbuf_push_str(SexBuf *b, const char *s, size_t n) {
+    sexbuf_ensure(b, n); memcpy(b->buf + b->len, s, n); b->len += n; b->buf[b->len] = '\0';
+}
+static void sexbuf_push_cp(SexBuf *b, uint32_t cp) {
+    char tmp[5]; int n = sex_encode_cp(cp, tmp); sexbuf_push_str(b, tmp, (size_t)n);
+}
+static void sexbuf_push_int(SexBuf *b, int d) {
+    char tmp[8]; int n = snprintf(tmp, sizeof(tmp), "%d", d);
+    sexbuf_push_str(b, tmp, (size_t)n);
+}
+static val_t sexbuf_to_val(SexBuf *b) {
+    uint32_t len = (uint32_t)b->len;
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->hash = 0;
+    memcpy(str->data, b->buf, len + 1);
+    free(b->buf); b->buf = NULL;
+    return vptr(str);
+}
+
+/* ---- Base-60 digit extraction (MSB-first, using GMP) ---- */
+
+/* Fill digits[] with base-60 representation of non-negative mpz n, MSB first.
+ * Returns count. digits[] must have room for at least 30 entries. */
+static int mpz_to_base60_digits(mpz_t n, int *digits) {
+    if (mpz_sgn(n) == 0) { digits[0] = 0; return 1; }
+    int buf[64], cnt = 0;
+    mpz_t tmp; mpz_init_set(tmp, n);
+    while (mpz_sgn(tmp) > 0 && cnt < 64) {
+        buf[cnt++] = (int)mpz_tdiv_q_ui(tmp, tmp, 60);
+    }
+    mpz_clear(tmp);
+    /* Reverse to get MSB first */
+    for (int i = 0; i < cnt / 2; i++) { int t = buf[i]; buf[i] = buf[cnt-1-i]; buf[cnt-1-i] = t; }
+    memcpy(digits, buf, (size_t)cnt * sizeof(int));
+    return cnt;
+}
+
+/* ---- Rendering helpers ---- */
+
+static void sex_render_neugebauer_digits(SexBuf *b, int *digs, int n) {
+    for (int i = 0; i < n; i++) {
+        if (i) sexbuf_push(b, ',');
+        sexbuf_push_int(b, digs[i]);
+    }
+}
+
+static void sex_render_cuneiform_digit(SexBuf *b, int digit) {
+    if (digit == 0) { sexbuf_push_cp(b, CP_SHAR2); return; }
+    for (int i = 0; i < digit / 10; i++) sexbuf_push_cp(b, CP_U);
+    for (int i = 0; i < digit % 10; i++) sexbuf_push_cp(b, CP_ASH);
+}
+
+static void sex_render_cuneiform_digits(SexBuf *b, int *digs, int n) {
+    for (int i = 0; i < n; i++) {
+        if (i) sexbuf_push(b, ' ');
+        sex_render_cuneiform_digit(b, digs[i]);
+    }
+}
+
+/* ---- Shared digit-extraction for a Scheme number ---- */
+
+/* digits[] must have room for ~30 integer + ~30 fractional entries each. */
+typedef struct {
+    bool     neg;
+    int      int_digs[32];
+    int      nint;
+    int      frac_digs[32];
+    int      nfrac;
+    bool     valid;
+} SexDigs;
+
+static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
+    out->neg = false; out->nint = 0; out->nfrac = 0; out->valid = true;
+    if (max_frac < 0) max_frac = 20;   /* auto = up to 20 fractional places */
+
+    if (vis_fixnum(v) || vis_bignum(v)) {
+        mpz_t tmp;
+        if (vis_fixnum(v)) mpz_init_set_si(tmp, vunfix(v));
+        else               mpz_init_set(tmp, as_big(v)->z);
+        out->neg = mpz_sgn(tmp) < 0;
+        if (out->neg) mpz_neg(tmp, tmp);
+        out->nint = mpz_to_base60_digits(tmp, out->int_digs);
+        mpz_clear(tmp);
+    } else if (vis_rational(v)) {
+        mpq_t q; mpq_init(q); mpq_set(q, as_rat(v)->q);
+        out->neg = mpq_sgn(q) < 0;
+        if (out->neg) mpq_neg(q, q);
+
+        mpz_t ip, num, den, rem;
+        mpz_init(ip); mpz_init(num); mpz_init(den); mpz_init(rem);
+        mpz_set(num, mpq_numref(q)); mpz_set(den, mpq_denref(q));
+        mpz_fdiv_q(ip, num, den);
+        /* rem = num - ip * den */
+        mpz_mul(rem, ip, den); mpz_sub(rem, num, rem);
+
+        out->nint = mpz_to_base60_digits(ip, out->int_digs);
+
+        for (int i = 0; i < max_frac && i < 32; i++) {
+            mpz_mul_ui(rem, rem, 60);
+            mpz_t fd; mpz_init(fd);
+            mpz_fdiv_q(fd, rem, den);
+            out->frac_digs[out->nfrac++] = (int)mpz_get_ui(fd);
+            mpz_mul(fd, fd, den); mpz_sub(rem, rem, fd);
+            mpz_clear(fd);
+            if (mpz_sgn(rem) == 0) break;
+        }
+
+        mpz_clear(ip); mpz_clear(num); mpz_clear(den); mpz_clear(rem);
+        mpq_clear(q);
+    } else if (vis_flonum(v)) {
+        double d = vfloat(v);
+        if (d != d || d == 1.0/0.0 || d == -1.0/0.0) { out->valid = false; return; }
+        out->neg = d < 0; if (out->neg) d = -d;
+        double int_d, frac_d = modf(d, &int_d);
+        if (max_frac < 0 || max_frac > 4) max_frac = 4;  /* flonum default = 4 places */
+
+        mpz_t tmp; mpz_init_set_si(tmp, (long)int_d);
+        out->nint = mpz_to_base60_digits(tmp, out->int_digs);
+        mpz_clear(tmp);
+
+        for (int i = 0; i < max_frac && i < 32; i++) {
+            frac_d *= 60.0;
+            double fi; frac_d = modf(frac_d, &fi);
+            out->frac_digs[out->nfrac++] = (int)fi;
+            if (frac_d == 0.0) break;
+        }
+    } else {
+        out->valid = false;
+    }
+}
+
+/* ---- Public API ---- */
+
+/* Parse Neugebauer string "d0,d1,...[;f0,f1,...]" to a Scheme number.
+ * No semicolon → pure base-60 integer.
+ * With semicolon → integer.fractional exact rational. */
+val_t sex_parse_neugebauer(const char *s) {
+    /* Quick validation: only digits, commas, semicolons */
+    for (const char *p = s; *p; p++) {
+        if (!isdigit((unsigned char)*p) && *p != ',' && *p != ';') return V_FALSE;
+    }
+
+    const char *semi = strchr(s, ';');
+    mpq_t result; mpq_init(result); mpq_set_ui(result, 0, 1);
+
+    /* Integer digits */
+    const char *p = s;
+    const char *int_end = semi ? semi : (s + strlen(s));
+    while (p < int_end) {
+        char *next;
+        long digit = strtol(p, &next, 10);
+        if (next == p || digit < 0 || digit > 59) { mpq_clear(result); return V_FALSE; }
+        mpq_t tmp; mpq_init(tmp);
+        mpq_set_ui(tmp, 60, 1); mpq_mul(result, result, tmp);
+        mpq_set_si(tmp, digit, 1); mpq_add(result, result, tmp);
+        mpq_clear(tmp);
+        p = next;
+        if (p < int_end) {
+            if (*p == ',') p++;
+            else { mpq_clear(result); return V_FALSE; }
+        }
+    }
+
+    /* Fractional digits */
+    if (semi) {
+        p = semi + 1;
+        mpq_t denom; mpq_init(denom); mpq_set_ui(denom, 60, 1);
+        bool ok = true;
+        while (*p && ok) {
+            char *next;
+            long digit = strtol(p, &next, 10);
+            if (next == p || digit < 0 || digit > 59) { ok = false; break; }
+            mpq_t frac; mpq_init(frac);
+            mpq_set_si(frac, digit, 1); mpq_div(frac, frac, denom);
+            mpq_add(result, result, frac); mpq_clear(frac);
+            mpq_t s60; mpq_init(s60); mpq_set_ui(s60, 60, 1);
+            mpq_mul(denom, denom, s60); mpq_clear(s60);
+            p = next;
+            if (*p == ',') p++;
+            else if (*p) { ok = false; break; }
+        }
+        mpq_clear(denom);
+        if (!ok) { mpq_clear(result); return V_FALSE; }
+    }
+
+    val_t r = make_rat_from_mpq(result);
+    mpq_clear(result);
+    return r;
+}
+
+/* Parse a cuneiform glyph string to an exact integer.
+ * Groups (space-separated) are sexagesimal digits; within each group
+ * count ASH (=1) and U (=10), or SHAR2 (=0). */
+val_t sex_parse_cuneiform(const char *s) {
+    mpz_t total; mpz_init_set_ui(total, 0);
+    bool got_any = false;
+    const char *p = s;
+
+    while (*p) {
+        /* Skip inter-group spaces */
+        while (*p == ' ') p++;
+        if (!*p) break;
+
+        /* Decode first glyph of group */
+        const char *before = p;
+        int cp = sex_decode_cp(&p);
+        if (cp < 0) break;
+        uint32_t ucp = (uint32_t)cp;
+        if (ucp != CP_ASH && ucp != CP_U && ucp != CP_SHAR2) {
+            p = before; break; /* not a cuneiform glyph — stop */
+        }
+
+        /* Read the full group (until space or end) */
+        int tens = 0, ones = 0;
+        bool is_zero_ph = false;
+        p = before; /* re-read from start of group */
+        while (*p && *p != ' ') {
+            const char *gp = p;
+            int gcp = sex_decode_cp(&p);
+            if (gcp < 0) { p = gp; break; }
+            uint32_t ugcp = (uint32_t)gcp;
+            if      (ugcp == CP_U)     tens++;
+            else if (ugcp == CP_ASH)   ones++;
+            else if (ugcp == CP_SHAR2) is_zero_ph = true;
+            else { p = gp; break; }
+        }
+
+        int digit = is_zero_ph ? 0 : tens * 10 + ones;
+        if (digit > 59) { mpz_clear(total); return V_FALSE; }
+
+        if (got_any) mpz_mul_ui(total, total, 60);
+        mpz_add_ui(total, total, (unsigned long)digit);
+        got_any = true;
+    }
+
+    val_t r = make_big_from_mpz(total);
+    mpz_clear(total);
+    return got_any ? r : V_FALSE;
+}
+
+/* Format a number in Neugebauer notation.
+ * max_frac: max fractional sexagesimal places; <0 = auto (exact for rationals, 4 for floats).
+ * Returns a Scheme string. */
+val_t sex_to_neugebauer(val_t v, int max_frac) {
+    /* Special flonum checks */
+    if (vis_flonum(v)) {
+        double d = vfloat(v);
+        if (d != d)        return num_to_string(v, 10);  /* NaN */
+        if (d == 1.0/0.0)  return num_to_string(v, 10);  /* +inf.0 */
+        if (d == -1.0/0.0) return num_to_string(v, 10);  /* -inf.0 */
+        if (max_frac < 0) max_frac = 4;
+    }
+
+    SexDigs digs;
+    sex_get_digits(v, max_frac, &digs);
+    if (!digs.valid) return num_to_string(v, 10);
+
+    SexBuf b; sexbuf_init(&b);
+    if (digs.neg) sexbuf_push(&b, '-');
+    sex_render_neugebauer_digits(&b, digs.int_digs, digs.nint);
+    if (digs.nfrac > 0) {
+        sexbuf_push(&b, ';');
+        sex_render_neugebauer_digits(&b, digs.frac_digs, digs.nfrac);
+    }
+    return sexbuf_to_val(&b);
+}
+
+/* Format a number as cuneiform glyph string.
+ * Returns a Scheme string. */
+val_t sex_to_cuneiform(val_t v) {
+    int max_frac = 6;
+    if (vis_flonum(v)) {
+        double d = vfloat(v);
+        if (d != d || d == 1.0/0.0 || d == -1.0/0.0) return num_to_string(v, 10);
+    }
+
+    SexDigs digs;
+    sex_get_digits(v, max_frac, &digs);
+    if (!digs.valid) return num_to_string(v, 10);
+
+    SexBuf b; sexbuf_init(&b);
+    if (digs.neg) sexbuf_push(&b, '-');
+    sex_render_cuneiform_digits(&b, digs.int_digs, digs.nint);
+    if (digs.nfrac > 0) {
+        /* Radix point indicated by '·' separator between integer and fractional groups */
+        sexbuf_push(&b, ' ');
+        sexbuf_push_cp(&b, 0xB7u); /* U+00B7 MIDDLE DOT as radix separator */
+        sexbuf_push(&b, ' ');
+        sex_render_cuneiform_digits(&b, digs.frac_digs, digs.nfrac);
+    }
+    return sexbuf_to_val(&b);
 }

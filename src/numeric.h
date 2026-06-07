@@ -150,4 +150,16 @@ val_t num_from_string(val_t s, int radix);
 /* ---- Promotion helpers (internal use) ---- */
 val_t num_normalize(val_t v);  /* reduce e.g. bignum that fits in fixnum */
 
+/* ---- Sexagesimal (Babylonian/Neugebauer) I/O — v1.2.5 ---- */
+/* Check whether a codepoint is in the Cuneiform Unicode block */
+#define SEX_IS_CUNEIFORM(cp) ((uint32_t)(cp) >= 0x12000u && (uint32_t)(cp) <= 0x1247Fu)
+
+val_t sex_parse_neugebauer(const char *s);   /* "1;30" → 3/2, "1,0,0" → 3600 */
+val_t sex_parse_cuneiform(const char *s);    /* "𒁹 𒌋𒁹" → 71 */
+val_t sex_to_neugebauer(val_t v, int max_frac); /* < 0 = auto */
+val_t sex_to_cuneiform(val_t v);
+
+/* Current number notation global — 0 = decimal, else a symbol */
+extern val_t g_number_notation;
+
 #endif /* CURRY_NUMERIC_H */

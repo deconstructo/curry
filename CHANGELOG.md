@@ -1,5 +1,54 @@
 # Changelog
 
+### 1.2.5 — Babylonian/Sexagesimal Number System
+
+**Sexagesimal (base-60) I/O** — first-class Babylonian arithmetic, faithful to
+Otto Neugebauer's 1935 transcription conventions.
+
+- **`#s` reader prefix** — Neugebauer literal notation in source code.
+  Commas separate integer sexagesimal places; semicolons mark the radix point.
+  `#s1;30` → exact `3/2`, `#s1,0,0` → `3600`, `#s1;24,51,10` → `30547/21600`
+  (the YBC 7289 approximation of √2, accurate to six decimal digits, c. 1800 BCE).
+  The semicolon is **not** treated as a delimiter inside `#s` literals.
+
+- **Cuneiform Unicode reader** — Babylonian cuneiform numerals are valid tokens:
+  - 𒁹 (U+12079 ASH) = 1–9 repeated strokes
+  - 𒌋 (U+1230B U) = tens
+  - 𒑊 (U+1244A) = zero placeholder (SHAR2 tenu)
+  - Adjacent glyphs within a sexagesimal group are written contiguously;
+    groups are separated by spaces. `𒁹 𒌋𒁹` → `71`.
+
+- **`(number->string n 'neugebauer)`** — format any exact or inexact number
+  in Neugebauer notation. `(number->string 3600 'neugebauer)` → `"1,0,0"`.
+  Optional `#:places k` keyword argument limits fractional sexagesimal digits
+  for flonums: `(number->string (sqrt 2) 'neugebauer #:places 3)` → `"1;24,51,10"`.
+
+- **`(number->string n 'cuneiform)`** — format as cuneiform glyph string.
+
+- **`(string->number s 'neugebauer)`** / **`(string->number s 'cuneiform)`** —
+  parse Neugebauer or cuneiform strings to exact Scheme numbers.
+
+- **`(current-number-notation)`** / **`(current-number-notation sym)`** —
+  global notation parameter (default `#f` = decimal). Setting to `'neugebauer`
+  or `'cuneiform` makes `display` and `write` emit numbers in that notation.
+
+- **`(curry sexagesimal)` module** — pure Scheme convenience library:
+  `rational->sexagesimal`, `sexagesimal->rational`, `hms->seconds`,
+  `seconds->hms`, `dms->degrees`, `degrees->dms`, `cuneiform->neugebauer`,
+  `neugebauer->cuneiform`, `sex:ybc7289`.
+
+- **`#:keyword` symbols are now self-evaluating** — fixed in both the
+  tree-walking evaluator (`eval.c`) and the bytecode compiler (`compiler.c`).
+  `#:foo` no longer triggers "unbound variable".
+
+- **Full UTF-8 lookahead for file ports** — `port_peek_char` now returns a
+  complete Unicode codepoint (not just the first byte) enabling multi-byte
+  cuneiform glyph dispatch in the reader.
+
+- **Test suite** — 76 assertions in `tests/sexagesimal_tests.scm` covering
+  reader literals, cuneiform parsing, `number->string`, `string->number`,
+  round-trips, `current-number-notation`, and the `(curry sexagesimal)` module.
+
 ### 1.2.2 — Qt6 GPU extensions; 4D cave explorer; release tooling
 
 **Qt6 module — 13 new bindings**

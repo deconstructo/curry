@@ -493,14 +493,48 @@ static val_t prim_shl(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return nu
 
 /* number<->string */
 static val_t prim_num_str(int ac, val_t *av, void *ud) {
-    (void)ud; int radix = ac>1 ? (int)vunfix(av[1]) : 10;
+    (void)ud;
+    /* Check for symbol second arg (notation name) */
+    if (ac > 1 && vis_symbol(av[1])) {
+        const char *note = as_sym(av[1])->data;
+        int places = -1; /* auto */
+        /* Check for #:places keyword: (number->string n 'neugebauer #:places k) */
+        if (ac >= 4 && vis_symbol(av[2]) && strcmp(as_sym(av[2])->data, "#:places") == 0
+                && vis_fixnum(av[3]))
+            places = (int)vunfix(av[3]);
+        if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
+            return sex_to_neugebauer(av[0], places);
+        if (strcmp(note, "cuneiform") == 0)
+            return sex_to_cuneiform(av[0]);
+        scm_raise(V_FALSE, "number->string: unknown notation '%s'", note);
+    }
+    int radix = ac > 1 ? (int)vunfix(av[1]) : 10;
     return num_to_string(av[0], radix);
 }
 static val_t prim_str_num(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string->number: not a string");
-    int radix = ac>1 ? (int)vunfix(av[1]) : 10;
-    return parse_number(as_str(av[0])->data, radix, false, false);
+    const char *s = as_str(av[0])->data;
+    if (ac > 1 && vis_symbol(av[1])) {
+        const char *note = as_sym(av[1])->data;
+        if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
+            return sex_parse_neugebauer(s);
+        if (strcmp(note, "cuneiform") == 0)
+            return sex_parse_cuneiform(s);
+        scm_raise(V_FALSE, "string->number: unknown notation '%s'", note);
+    }
+    int radix = ac > 1 ? (int)vunfix(av[1]) : 10;
+    return parse_number(s, radix, false, false);
+}
+/* (current-number-notation) → current notation symbol
+ * (current-number-notation 'neugebauer) → set notation */
+static val_t prim_current_number_notation(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (ac == 0) return g_number_notation == 0 ? V_FALSE : g_number_notation;
+    if (!vis_symbol(av[0]) && !vis_false(av[0]))
+        scm_raise(V_FALSE, "current-number-notation: expected symbol or #f");
+    g_number_notation = vis_false(av[0]) ? 0 : av[0];
+    return V_VOID;
 }
 
 /* ---- Characters ---- */
@@ -2037,7 +2071,8 @@ void builtins_register(val_t env) {
     DEF("make-polar",prim_make_polar,2,2);
     DEF("real-part",prim_real_part,1,1); DEF("imag-part",prim_imag_part,1,1);
     DEF("magnitude",prim_magnitude,1,1); DEF("angle",prim_angle,1,1);
-    DEF("number->string",prim_num_str,1,2); DEF("string->number",prim_str_num,1,2);
+    DEF("number->string",prim_num_str,1,4); DEF("string->number",prim_str_num,1,2);
+    DEF("current-number-notation",prim_current_number_notation,0,1);
     /* Bitwise (SRFI-151 / R7RS-large) */
     DEF("bitwise-and",prim_bitand,0,-1); DEF("bitwise-or",prim_bitor,0,-1);
     DEF("bitwise-xor",prim_bitxor,0,-1); DEF("bitwise-not",prim_bitnot,1,1);

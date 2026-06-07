@@ -271,7 +271,13 @@ tail:
     /* Heap object: dispatch on type */
     {
         uint32_t t = ((Hdr *)(void *)expr)->type;
-        if (t == T_SYMBOL) return env_lookup(env, expr);
+        if (t == T_SYMBOL) {
+            /* #:keyword symbols (Guile/Racket-style) are self-evaluating */
+            Symbol *sym = as_sym(expr);
+            if (sym->len >= 2 && sym->data[0] == '#' && sym->data[1] == ':')
+                return expr;
+            return env_lookup(env, expr);
+        }
         if (t != T_PAIR)   return expr;   /* string, number, vector, etc. — self-eval */
     }
 

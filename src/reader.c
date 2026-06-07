@@ -471,12 +471,61 @@ static val_t read_datum(val_t port) {
             val_t v = read_datum(port);
             return num_inexact(v);
         }
+        case 's': case 'S': {
+            /* #s — Neugebauer/sexagesimal literal: digits,commas[;frac,digits]
+             * ';' is the Neugebauer radix point (NOT a comment delimiter here).
+             * Read until whitespace or list-punctuation, but NOT ';'. */
+            StrBuf sb; sb_init(&sb);
+            int ch;
+            while ((ch = peek_char_port(port)) != -1
+                   && !isspace(ch) && ch != '(' && ch != ')' && ch != '"'
+                   && ch != '[' && ch != ']')
+                sb_push(&sb, (char)next_char(port));
+            sb.buf[sb.len] = '\0';
+            val_t result = sex_parse_neugebauer(sb.buf);
+            if (vis_false(result))
+                read_error("invalid sexagesimal literal after #s");
+            return result;
+        }
         default:
             read_error("unknown # syntax");
         }
         break;
     }
     default: {
+        /* Cuneiform token: if first codepoint is in the Cuneiform Unicode block,
+         * read additional glyphs (and inter-group spaces if the next token is also
+         * cuneiform), then parse as a sexagesimal number.
+         * port_peek_char now returns a full codepoint (post v1.2.5 Port fix). */
+        if (SEX_IS_CUNEIFORM((uint32_t)c)) {
+            StrBuf sb; sb_init(&sb);
+            sb_push_utf8(&sb, (uint32_t)c);
+            while (true) {
+                int nxt = peek_char_port(port);
+                if (nxt == -1) break;
+                if (SEX_IS_CUNEIFORM((uint32_t)nxt)) {
+                    /* Another glyph in the same or next group */
+                    sb_push_utf8(&sb, (uint32_t)next_char(port));
+                } else if (nxt == ' ') {
+                    /* Tentatively consume the space; check what follows */
+                    next_char(port);                  /* eat space */
+                    int after = peek_char_port(port);
+                    if (SEX_IS_CUNEIFORM((uint32_t)after)) {
+                        sb_push(&sb, ' ');            /* inter-group space */
+                    } else {
+                        break;                        /* real delimiter */
+                    }
+                } else {
+                    break;
+                }
+            }
+            sb.buf[sb.len] = '\0';
+            val_t result = sex_parse_cuneiform(sb.buf);
+            if (vis_false(result))
+                read_error("invalid cuneiform number literal");
+            return result;
+        }
+
         /* Symbol or number */
         StrBuf sb; sb_init(&sb);
         sb_push_utf8(&sb, (uint32_t)c);

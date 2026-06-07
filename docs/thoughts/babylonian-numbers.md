@@ -31,7 +31,9 @@ cuneiform wedge signs:
 
 So 23 = two 𒌋 + three 𒁹 = 𒌋𒌋𒁹𒁹𒁹. For zero, early Babylonian left a
 gap (context-dependent magnitude); the Seleucid period introduced 𒑊
-(U+12469 CUNEIFORM NUMERIC SIGN SHAR2) as an explicit placeholder.
+(U+1244A CUNEIFORM NUMERIC SIGN TWO ASH TENU, commonly rendered as 𒑊) as
+an explicit placeholder. Note: U+12469 (CUNEIFORM NUMERIC SIGN SHAR2) is a
+different glyph; the zero placeholder actually used in curry is U+1244A.
 
 Fractional positions work the same way — the sexagesimal point is positional
 and was originally inferred from context. Modern transcription uses a semicolon

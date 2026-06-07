@@ -1108,6 +1108,12 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* ── Symbol → variable load ── */
     if (vis_symbol(expr)) {
+        /* #:keyword symbols (Guile/Racket-style) are self-evaluating */
+        Symbol *ksym = as_sym(expr);
+        if (ksym->len >= 2 && ksym->data[0] == '#' && ksym->data[1] == ':') {
+            emit_const(c, expr, line);
+            return;
+        }
         emit_load(c, expr, line);
         return;
     }

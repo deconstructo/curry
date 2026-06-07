@@ -100,6 +100,7 @@ The test suites registered in `ctest`:
 | `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |
 | `syntax_rules` | `syntax_rules_tests.scm` | `define-syntax`/`syntax-rules` hygiene |
 | `akkadian` | `akkadian_tests.scm` | Every Akkadian/cuneiform synonym (both transliterated and cuneiform forms) for all AKK_SF and AKK_PR entries in `akkadian_names.h` — 205 assertions |
+| `sexagesimal` | `sexagesimal_tests.scm` | Babylonian base-60 I/O: `#s` reader, cuneiform Unicode reader, `number->string`/`string->number` with `'neugebauer`/`'cuneiform`, `current-number-notation`, `(curry sexagesimal)` module — 76 assertions |
 | `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
 | `ode`, `pde_numerical`, `d_operator`, `tuples`, `partial`, `trig`, `sicm` | individual `.scm` files | Numeric/physics modules |
 
@@ -162,6 +163,44 @@ fixnum → bignum (GMP mpz) → rational (GMP mpq) → flonum (double)
 ```
 
 Overflow from fixnum goes to bignum automatically. When any arithmetic operand is symbolic the result is a symbolic expression rather than an error. Octonion multiplication uses the Graves/Cayley convention.
+
+### Sexagesimal (Babylonian base-60) I/O (`src/numeric.c`, `src/reader.c`)
+
+Neugebauer notation (Otto Neugebauer, 1935) and cuneiform Unicode glyphs are
+first-class in the reader and in `number->string`/`string->number`.
+
+**Reader**:
+- `#s1;30` → exact `3/2`; `#s1,0,0` → `3600`; `#s1;24,51,10` → `30547/21600` (YBC 7289 √2 approximation, c. 1800 BCE). Semicolon is the radix point (not a delimiter inside `#s` literals).
+- Cuneiform tokens: 𒁹 (U+12079, ASH) = 1s; 𒌋 (U+1230B, U) = 10s; 𒑊 (U+1244A) = zero placeholder. Adjacent glyphs form one group; spaces separate sexagesimal groups. `𒁹 𒌋𒁹` → `71`.
+
+**Scheme API**:
+```scheme
+(number->string n 'neugebauer)              ; → "1,11", "1;30", "1;24,51,10"
+(number->string n 'neugebauer #:places k)  ; limit flonum fractional digits
+(number->string n 'cuneiform)              ; → "𒁹 𒌋𒁹"
+(string->number "1;30" 'neugebauer)        ; → 3/2
+(string->number "𒁹 𒌋𒁹" 'cuneiform)      ; → 71
+(current-number-notation)                  ; → #f (decimal)
+(current-number-notation 'neugebauer)      ; set REPL display notation
+(current-number-notation 'cuneiform)
+(current-number-notation #f)               ; reset to decimal
+```
+
+**`(curry sexagesimal)` module** (`lib/curry/modules/curry/sexagesimal.scm`):
+```scheme
+(import (curry sexagesimal))
+(rational->sexagesimal 3/2)        ; → '(1 30)
+(sexagesimal->rational '(1 30))    ; → 3/2
+(hms->seconds '(1 30 0))           ; → 5400
+(seconds->hms 5400)                ; → '(1 30 0)
+(dms->degrees '(23 27 0))          ; → 14049/600 (≈ 23.45°)
+(degrees->dms 23.45)               ; → '(23 27 0)
+(cuneiform->neugebauer "𒁹 𒌋𒁹")   ; → "1,11"
+(neugebauer->cuneiform "1,11")     ; → "𒁹 𒌋𒁹"
+(sex:ybc7289)                      ; → 30547/21600 (√2 from YBC 7289)
+```
+
+**Codepoint note**: The zero placeholder glyph is U+1244A (CUNEIFORM NUMERIC SIGN TWO ASH TENU), not U+12469 as earlier design specs stated. `SEX_IS_CUNEIFORM(cp)` covers `0x12000`–`0x1247F`.
 
 ### Symbolic CAS (`src/symbolic.h`, `src/symbolic.c`)
 

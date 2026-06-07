@@ -16,7 +16,8 @@ static val_t make_port(int flags) {
     Port *p = CURRY_NEW(Port);
     p->hdr.type  = T_PORT;
     p->hdr.flags = 0;
-    p->flags = (uint8_t)flags;
+    p->flags     = (uint8_t)flags;
+    p->peeked_cp = -2;   /* -2 = lookahead empty; -1 = EOF; ≥0 = codepoint */
     return vptr(p);
 }
 
@@ -121,23 +122,31 @@ static int read_utf8_codepoint(Port *p) {
 int port_read_char(val_t v) {
     Port *p = as_port(v);
     if (p->flags & PORT_CLOSED) return -1;
+    /* Drain the one-codepoint lookahead if present */
+    if (p->peeked_cp != -2) {
+        int cp = p->peeked_cp;
+        p->peeked_cp = -2;
+        return cp;  /* -1 (EOF) or the codepoint */
+    }
     return read_utf8_codepoint(p);
 }
 
 int port_peek_char(val_t v) {
     Port *p = as_port(v);
     if (p->flags & PORT_CLOSED) return -1;
+    /* If lookahead is already filled, return it without consuming */
+    if (p->peeked_cp != -2) return p->peeked_cp;
+    /* Read and buffer a full codepoint */
     if (p->flags & PORT_STRING) {
-        if (p->u.str.pos >= p->u.str.len) return -1;
+        if (p->u.str.pos >= p->u.str.len) { p->peeked_cp = -1; return -1; }
         size_t saved = p->u.str.pos;
         int c = read_utf8_codepoint(p);
-        p->u.str.pos = saved;
-        return c;
+        p->u.str.pos = saved;          /* restore — no lookahead needed for strings */
+        return c;                       /* string ports can restore position directly */
     }
-    /* For file ports, use ungetc trick */
-    int c = fgetc(p->u.fp);
-    if (c != EOF) ungetc(c, p->u.fp);
-    return c;  /* ASCII approximation - full peek requires buffering */
+    /* File port: read a full UTF-8 codepoint into the lookahead */
+    p->peeked_cp = read_utf8_codepoint(p);
+    return p->peeked_cp;
 }
 
 bool port_char_ready(val_t v) {
@@ -280,6 +289,28 @@ static void write_string_escaped(val_t port, const char *s, uint32_t len) {
     port_write_char(port, '"');
 }
 
+/* Write a number val (fixnum/bignum/rational/flonum) respecting current-number-notation. */
+static void write_number_notation(val_t v, val_t port) {
+    if (g_number_notation != 0 && vis_symbol(g_number_notation)) {
+        const char *note = as_sym(g_number_notation)->data;
+        val_t s = V_FALSE;
+        if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
+            s = sex_to_neugebauer(v, -1);
+        else if (strcmp(note, "cuneiform") == 0)
+            s = sex_to_cuneiform(v);
+        if (!vis_false(s)) {
+            port_write_string(port, as_str(s)->data, as_str(s)->len);
+            return;
+        }
+    }
+    /* Fallback: decimal */
+    char buf[64];
+    if (vis_fixnum(v))   { int n=snprintf(buf,sizeof(buf),"%ld",(long)vunfix(v)); port_write_string(port,buf,(uint32_t)n); }
+    else if (vis_bignum(v))   { char *s=mpz_get_str(NULL,10,as_big(v)->z); port_write_string(port,s,(uint32_t)strlen(s)); free(s); }
+    else if (vis_rational(v)) { char *s=mpq_get_str(NULL,10,as_rat(v)->q); port_write_string(port,s,(uint32_t)strlen(s)); free(s); }
+    else if (vis_flonum(v))   { int n=snprintf(buf,sizeof(buf),"%g",vfloat(v)); port_write_string(port,buf,(uint32_t)n); }
+}
+
 void scm_write(val_t v, val_t port) {
     char buf[64];
     if (vis_nil(v))      { port_write_string(port, "()", 2); return; }
@@ -287,7 +318,7 @@ void scm_write(val_t v, val_t port) {
     if (vis_eof(v))      { port_write_string(port, "#<eof>", 6); return; }
     if (v == V_FALSE)    { port_write_string(port, "#f", 2); return; }
     if (v == V_TRUE)     { port_write_string(port, "#t", 2); return; }
-    if (vis_fixnum(v))   { int n=snprintf(buf,sizeof(buf),"%ld",(long)vunfix(v)); port_write_string(port,buf,(uint32_t)n); return; }
+    if (vis_fixnum(v))   { write_number_notation(v, port); return; }
     if (vis_char(v))     {
         uint32_t cp = vunchr(v);
         port_write_string(port, "#\\", 2);
@@ -299,12 +330,9 @@ void scm_write(val_t v, val_t port) {
     }
     if (vis_string(v))   { write_string_escaped(port, as_str(v)->data, as_str(v)->len); return; }
     if (vis_symbol(v))   { port_write_string(port, as_sym(v)->data, as_sym(v)->len); return; }
-    if (vis_flonum(v))   { int n=snprintf(buf,sizeof(buf),"%g",vfloat(v)); port_write_string(port,buf,(uint32_t)n); return; }
-    if (vis_bignum(v))   { char *s=mpz_get_str(NULL,10,as_big(v)->z); port_write_string(port,s,(uint32_t)strlen(s)); free(s); return; }
-    if (vis_rational(v)) {
-        char *s = mpq_get_str(NULL, 10, as_rat(v)->q);
-        port_write_string(port, s, (uint32_t)strlen(s)); free(s); return;
-    }
+    if (vis_flonum(v))   { write_number_notation(v, port); return; }
+    if (vis_bignum(v))   { write_number_notation(v, port); return; }
+    if (vis_rational(v)) { write_number_notation(v, port); return; }
     if (vis_complex(v)) {
         scm_write(as_cpx(v)->real, port);
         val_t im = as_cpx(v)->imag;

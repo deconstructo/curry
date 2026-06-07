@@ -278,6 +278,7 @@ typedef struct {
 typedef struct {
     Hdr     hdr;
     uint8_t flags;
+    int     peeked_cp;   /* one-codepoint lookahead buffer; -2 = empty */
     union {
         FILE *fp;
         struct {
