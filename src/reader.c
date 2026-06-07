@@ -11,6 +11,26 @@
 #include <assert.h>
 #include <errno.h>
 
+/* ---- Akkadian cuneiform symbol table ----
+ * Cuneiform glyphs overlap with sexagesimal digits (e.g. 𒁹=1 and 𒌋=10 are
+ * also used as synonyms for `define` and `and`).  Before parsing a cuneiform
+ * token as a sexagesimal number, check whether it is a known Akkadian synonym;
+ * if so, return it as an interned symbol and let eval/builtins handle it. */
+static const char *_akk_cuneiform_table[] = {
+#define AKK(e,t,c)
+#define AKK_SF(e,t,c) c,
+#define AKK_PR(e,t,c) c,
+#include "akkadian_names.h"
+#undef AKK
+    NULL
+};
+
+static bool akk_is_cuneiform_sym(const char *s) {
+    for (int i = 0; _akk_cuneiform_table[i]; i++)
+        if (strcmp(_akk_cuneiform_table[i], s) == 0) return true;
+    return false;
+}
+
 /* ---- Error handling ---- */
 /* Defined in eval.c; raises a read-error exception */
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
@@ -494,36 +514,53 @@ static val_t read_datum(val_t port) {
     }
     default: {
         /* Cuneiform token: if first codepoint is in the Cuneiform Unicode block,
-         * read additional glyphs (and inter-group spaces if the next token is also
-         * cuneiform), then parse as a sexagesimal number.
-         * port_peek_char now returns a full codepoint (post v1.2.5 Port fix). */
+         * read additional glyphs (and inter-group spaces if the next group is also
+         * cuneiform), then any trailing non-delimiter ASCII (e.g. '?' in 𒈷?),
+         * then resolve: Akkadian synonym → symbol; otherwise sexagesimal number.
+         *
+         * space_consumed tracks whether we tentatively consumed a space that turned
+         * out to NOT precede another cuneiform group; in that case the next char
+         * is already a real token delimiter so we must NOT read trailing ASCII. */
         if (SEX_IS_CUNEIFORM((uint32_t)c)) {
             StrBuf sb; sb_init(&sb);
             sb_push_utf8(&sb, (uint32_t)c);
+            bool space_consumed = false;
             while (true) {
                 int nxt = peek_char_port(port);
                 if (nxt == -1) break;
                 if (SEX_IS_CUNEIFORM((uint32_t)nxt)) {
-                    /* Another glyph in the same or next group */
                     sb_push_utf8(&sb, (uint32_t)next_char(port));
+                    space_consumed = false;
                 } else if (nxt == ' ') {
-                    /* Tentatively consume the space; check what follows */
-                    next_char(port);                  /* eat space */
+                    next_char(port);                  /* tentatively eat space */
                     int after = peek_char_port(port);
                     if (SEX_IS_CUNEIFORM((uint32_t)after)) {
                         sb_push(&sb, ' ');            /* inter-group space */
+                        space_consumed = false;
                     } else {
-                        break;                        /* real delimiter */
+                        space_consumed = true;        /* space before real delimiter */
+                        break;
                     }
                 } else {
+                    space_consumed = false;           /* broke at adjacent non-cuneiform */
                     break;
                 }
             }
+            /* Append trailing non-delimiter ASCII chars (e.g. '?', '!') only when
+             * the last thing read was cuneiform (not a space before another token). */
+            if (!space_consumed) {
+                while (!is_delimiter(peek_char_port(port)) &&
+                       !SEX_IS_CUNEIFORM((uint32_t)peek_char_port(port))) {
+                    sb_push(&sb, (char)next_char(port));
+                }
+            }
             sb.buf[sb.len] = '\0';
+            if (akk_is_cuneiform_sym(sb.buf))
+                return sym_intern(sb.buf, (uint32_t)sb.len);
             val_t result = sex_parse_cuneiform(sb.buf);
-            if (vis_false(result))
-                read_error("invalid cuneiform number literal");
-            return result;
+            if (!vis_false(result)) return result;
+            /* Unknown cuneiform token — intern as symbol */
+            return sym_intern(sb.buf, (uint32_t)sb.len);
         }
 
         /* Symbol or number */

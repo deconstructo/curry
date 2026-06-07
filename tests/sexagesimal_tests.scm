@@ -39,10 +39,10 @@
 
 ;;; ---- Cuneiform reader ----
 
-;; Single-group: 𒁹 = 1
-(check "cuneiform 1"    𒁹     1)
-;; Single-group: 𒌋 = 10
-(check "cuneiform 10"   𒌋     10)
+;; Single-group: 𒁹 = 1 (𒁹 also serves as Akkadian 'define', so use string->number)
+(check "cuneiform 1"    (string->number "𒁹" 'cuneiform)   1)
+;; Single-group: 𒌋 = 10 (𒌋 also serves as Akkadian 'and', so use string->number)
+(check "cuneiform 10"   (string->number "𒌋" 'cuneiform)   10)
 ;; Single-group: 𒌋𒌋𒁹𒁹𒁹 = 23
 (check "cuneiform 23"   𒌋𒌋𒁹𒁹𒁹  23)
 ;; Two groups with space: 𒁹 𒌋𒁹 = 1*60+11 = 71
