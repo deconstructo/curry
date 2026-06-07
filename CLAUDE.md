@@ -352,6 +352,93 @@ The qt6 module has three API layers:
 - **Raw GLSL shaders** (`make-gl-shader`, `gl-shader-draw!`, `make-gl-texture`, `gl-texture-update!`): General-purpose GPU shader API. The OpenGL context is requested as Core Profile 3.3 at startup (4.1 on macOS, 3.3–4.6 on Linux). HiDPI is handled automatically — `gl-shader-draw!` auto-sets `u_resolution` (physical px) and `u_dpr` so shaders can convert logical zoom to physical pixels. `(make-gl-shader frag-src)` or `(make-gl-shader vert-src frag-src)` — lazy compilation on first draw. `(gl-shader-draw! prog painter uniforms-alist)` binds the shader, sets uniforms, draws a fullscreen quad via `gl_VertexID` (no VBO needed), then calls `endNativePainting()` so QPainter is fully restored for HUD overlays. Uniform dispatch: fixnum→`int`, bool→`int`, `gl-texture` handle→`sampler2D` (auto-bound to next texture unit starting at 0), pair-of-2/3/4→`vec2/3/4`, else→`float`. GL textures: `(make-gl-texture bv w h)` (R8) or `(make-gl-texture bv w h 'rgba)` (RGBA8) — lazy upload on first draw; `(gl-texture-update! tex bv)` marks dirty for re-upload. Default vertex shader renders a fullscreen quad using `gl_VertexID`.
 - **Layer 3** (natural names): Full UI framework — windows (`make-window`, `make-plain-window`), canvas (`canvas-on-draw!`, `canvas-on-mouse!`), menus, toolbars, status bars, layout boxes (`make-vbox`, `make-hbox`), splitter (`make-splitter`, `splitter-add!`, `splitter-set-sizes!`), tabs, group boxes, widgets (labels, buttons, checkboxes, sliders, dropdowns, radio groups, spin boxes, single-line text inputs, multi-line text editor `make-text-edit`, progress bars, timers), and file dialogs (`file-open-dialog`, `file-save-dialog`). `make-plain-window` creates a QMainWindow without the preset sidebar/canvas layout; use `window-set-central-widget!` to attach any widget as the central area.
 
+**Key events** — `window-on-key!` / `canvas-on-key!` register a `(lambda (key mods) ...)` called on key press. `window-on-key-up!` / `canvas-on-key-up!` register the same signature called on physical key release (auto-repeat fake releases are filtered). Use press+release to maintain a held-key set for smooth WASD movement:
+
+```scheme
+(define *held* (make-equal-hash-table))
+(window-on-key!    win (lambda (k m) (hash-table-set! *held* k #t)))
+(window-on-key-up! win (lambda (k m) (hash-table-delete! *held* k)))
+(define (key-held? k) (hash-table-ref/default *held* k #f))
+```
+
+**Mouse capture** — for first-person camera (relative-delta mode):
+
+```scheme
+; Register grab-move handler before grabbing
+(canvas-on-grab-move! canvas (lambda (dx dy)
+  (set! *yaw*   (+ *yaw*   (* dx SENSITIVITY)))
+  (set! *pitch* (+ *pitch* (* dy SENSITIVITY)))))
+
+; Grab on right-click, release on Escape
+(canvas-on-mouse! canvas (lambda (event btn x y mods)
+  (when (and (eq? event 'press) (eq? btn 'right))
+    (canvas-grab-mouse! canvas))))
+(window-on-key-up! win (lambda (key mods)
+  (when (equal? key "Escape") (canvas-release-mouse! canvas))))
+
+(canvas-grab-mouse!    canvas)  ; hide cursor, enter relative-delta mode
+(canvas-release-mouse! canvas)  ; restore cursor, return to absolute mode
+(canvas-mouse-grabbed? canvas)  ; => #t / #f
+```
+
+While grabbed, cursor is hidden and warped back to canvas center after each move; `canvas-on-mouse!` move events are suppressed. The `grab-move` handler receives integer pixel deltas `(dx dy)` relative to canvas center.
+
+**Mouse move events** now emit `'drag` (instead of `'move`) when any mouse button is held during the move. Hover (no button held) still emits `'move`. Existing code handling `'press`/`'release` is unaffected.
+
+**Resize events** — `(canvas-on-resize! canvas (lambda (w h) ...))` fires whenever the canvas is resized (logical pixel dimensions). Use to resize FBOs or rebuild projection matrices.
+
+**Timer with delta-t** — for frame-rate-independent physics:
+```scheme
+(define t (make-timer/dt 16 (lambda (dt-ms) (move-by! (* speed (/ dt-ms 1000.0))))))
+(timer/dt-start! t)
+(timer/dt-stop! t)
+```
+
+**Clipboard**:
+```scheme
+(clipboard-text)              ; → string or #f
+(clipboard-set-text! "...")   ; set clipboard
+```
+
+**GPU vertex buffers (VBO)** — upload geometry to GPU for real 3D rendering:
+```scheme
+; Pack [x y z r g b] per vertex into a flat f64vector or Scheme vector
+(define vbo (make-gl-buffer packed-data))
+(gl-buffer-update! vbo new-data)   ; update (re-uploaded on next draw)
+
+; Vertex shader using attribute inputs:
+(define prog (make-gl-shader vert-src frag-src))
+
+; Draw with attributes: (name . (buffer n-components stride-floats offset-floats))
+(gl-shader-draw-arrays! prog painter vertex-count 'points
+  `((u_mvp . ,mvp-mat4))                        ; uniforms alist
+  `((a_pos   . (,vbo 3 6 0))                    ; attribs alist
+    (a_color . (,vbo 3 6 3))))
+
+; Primitives: 'points 'lines 'line-strip 'triangles 'triangle-strip 'triangle-fan
+; mat4 uniform: pass a 16-element Scheme vector (column-major)
+```
+
+**Framebuffer objects (FBO)** — offscreen render-to-texture for post-processing:
+```scheme
+(define fbo (make-gl-framebuffer 1920 1080))
+
+; In canvas-on-resize! handler:
+(canvas-on-resize! canvas (lambda (w h) (gl-framebuffer-resize! fbo w h)))
+
+; In draw callback — two-pass rendering:
+(canvas-on-draw! canvas (lambda (painter w h)
+  ; Pass 1: render scene to FBO
+  (gl-shader-to! scene-prog fbo painter scene-uniforms)
+  ; Pass 2: post-process FBO texture to screen
+  (gl-shader-draw! post-prog painter
+    `((u_scene . ,(gl-framebuffer-texture fbo))
+      (u_blur  . ,blur-amount)))))
+
+(gl-framebuffer-texture fbo)     ; → gl-texture (use as sampler2D uniform)
+(gl-framebuffer-resize! fbo w h) ; resize after window resize
+```
+
 4D projection math is also included (pure C++, no Qt dependency): `project_4d_to_3d` uses perspective division on the w-axis. Scheme API: `make-4d-projector`, `project-4d`, `rotate-4d-xw`.
 
 Cross-platform: Linux X11/Wayland (OpenGL 3.3+ Core Profile via Mesa/NVIDIA/AMD), macOS (OpenGL 4.1 Core Profile), Windows (D3D/ANGLE). On Linux in VMs or CI without GPU passthrough, Mesa llvmpipe provides software OpenGL 3.3; `(qt-gpu? canvas)` returns `#f` when `initializeGL` was never called (no display), allowing scripts to detect and warn.

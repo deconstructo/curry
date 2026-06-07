@@ -21,8 +21,9 @@
 (define DX 8)  (define DZ 8)  (define DW 4)
 
 (define WALL-H      1.0)
-(define MOVE-SPEED  0.12)
-(define TURN-SPEED  0.07)
+(define MOVE-SPEED   0.12)
+(define TURN-SPEED   0.07)
+(define MOUSE-SENS   0.003)  ; radians per pixel
 (define *eye-sep*   0.10)   ; anaglyph inter-ocular distance (world units)
 (define HALF-FOV    0.66)   ; camera-plane half-width (≈65° FOV)
 (define FOG-DIST    7.0)
@@ -59,7 +60,11 @@
 (define (cidx ix iz iw) (+ (* iw DX DZ) (* iz DX) ix))
 
 (define (in-bounds? ix iz iw)
-  (and (< -1 ix DX) (< -1 iz DZ) (< -1 iw DW)))
+  ; Note: 3-arg < triggers a Curry VM bug after repeated calls from recursive fns;
+  ; split each into two 2-arg comparisons as a workaround.
+  (and (< -1 ix) (< ix DX)
+       (< -1 iz) (< iz DZ)
+       (< -1 iw) (< iw DW)))
 
 (define (open-bit! idx bit)
   (vector-set! *cells* idx (bitwise-or (vector-ref *cells* idx) bit)))
@@ -387,21 +392,36 @@ void main() {
 
 ;;; ── Input ─────────────────────────────────────────────────────────────────
 
-(define (handle-key! key mods)
+(define *held* (make-hash-table equal?))  ; currently held keys
+
+(define (key-held? k) (hash-table-ref *held* k #f))
+
+(define (handle-key-down! key mods)
+  (hash-table-set! *held* key #t)
+  (cond
+    ((equal? key "q") (try-step-w! -1))
+    ((equal? key "e") (try-step-w!  1))
+    ((equal? key "Escape")
+     (if (canvas-mouse-grabbed? canvas)
+         (canvas-release-mouse! canvas)
+         (quit-event-loop)))
+    ((equal? key "Q") (quit-event-loop))))
+
+(define (handle-key-up! key mods)
+  (hash-table-delete! *held* key))
+
+(define (tick-movement!)
   (let* ((sy (sin *yaw*)) (cy (cos *yaw*)))
-    (cond
-      ((or (equal? key "w") (equal? key "Up"))
-       (try-move! (* MOVE-SPEED sy) (* MOVE-SPEED cy)))
-      ((or (equal? key "s") (equal? key "Down"))
-       (try-move! (- (* MOVE-SPEED sy)) (- (* MOVE-SPEED cy))))
-      ((or (equal? key "a") (equal? key "Left"))
-       (set! *yaw* (- *yaw* TURN-SPEED)))
-      ((or (equal? key "d") (equal? key "Right"))
-       (set! *yaw* (+ *yaw* TURN-SPEED)))
-      ((equal? key "q") (try-step-w! -1))
-      ((equal? key "e") (try-step-w!  1))
-      ((or (equal? key "Escape") (equal? key "Q"))
-       (quit-event-loop)))))
+    (when (or (key-held? "w") (key-held? "Up"))
+      (try-move! (* MOVE-SPEED sy) (* MOVE-SPEED cy)))
+    (when (or (key-held? "s") (key-held? "Down"))
+      (try-move! (- (* MOVE-SPEED sy)) (- (* MOVE-SPEED cy))))
+    ; Arrow/AD turning only active when mouse is NOT grabbed
+    (when (not (canvas-mouse-grabbed? canvas))
+      (when (or (key-held? "a") (key-held? "Left"))
+        (set! *yaw* (- *yaw* TURN-SPEED)))
+      (when (or (key-held? "d") (key-held? "Right"))
+        (set! *yaw* (+ *yaw* TURN-SPEED))))))
 
 ;;; ── Window ────────────────────────────────────────────────────────────────
 
@@ -416,14 +436,30 @@ void main() {
 (box-add! sidebar (make-separator))
 (box-add! sidebar (make-label "Controls"))
 (box-add! sidebar (make-label "W/S/↑/↓  move"))
-(box-add! sidebar (make-label "A/D/←/→  turn"))
+(box-add! sidebar (make-label "Click     grab mouse"))
+(box-add! sidebar (make-label "Mouse     look"))
+(box-add! sidebar (make-label "A/D/←/→  turn (ungrabbed)"))
 (box-add! sidebar (make-label "Q/E      step ±w"))
+(box-add! sidebar (make-label "Esc      release / quit"))
 
 (canvas-on-draw!  canvas draw-frame!)
-(window-on-key!   win    handle-key!)
-(window-on-close! win    (lambda () (quit-event-loop)))
+(window-on-key!    win handle-key-down!)
+(window-on-key-up! win handle-key-up!)
+(window-on-close!  win (lambda () (quit-event-loop)))
 
-(define timer (make-timer 16 (lambda () (canvas-redraw! canvas))))
+(canvas-on-grab-move! canvas
+  (lambda (dx dy)
+    (set! *yaw* (+ *yaw* (* dx MOUSE-SENS)))))
+
+(canvas-on-mouse! canvas
+  (lambda (event btn x y mods)
+    (when (eq? event 'press)
+      (canvas-grab-mouse! canvas))))
+
+(define timer
+  (make-timer 16 (lambda ()
+    (tick-movement!)
+    (canvas-redraw! canvas))))
 
 (window-on-realize! win
   (lambda ()
