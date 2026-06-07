@@ -1,5 +1,13 @@
 # Changelog
 
+### 1.2.6 — Security patch
+
+- **Fix stack buffer overflow in `number->string` with `'neugebauer`/`'cuneiform`**:
+  `SexDigs.int_digs` and `SexDigs.frac_digs` were declared with 32 entries but
+  `mpz_to_base60_digits` could write up to 64, corrupting the stack for integers
+  ≥ 60³² (~2.68×10⁵⁷). Arrays expanded to 64 entries. (Reported by internal
+  security review of v1.2.5.)
+
 ### 1.2.5 — Babylonian/Sexagesimal Number System
 
 **Sexagesimal (base-60) I/O** — first-class Babylonian arithmetic, faithful to
