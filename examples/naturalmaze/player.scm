@@ -80,9 +80,6 @@
         (when (not (= move-x 0)) (try-move-x! move-x))
         (when (not (= move-z 0)) (try-move-z! move-z))))
 
-    ;; Keyboard turn (when mouse not grabbed)
-    (when (key-held? "q-turn") (set! *yaw* (- *yaw* (* TURN-SPEED dt))))
-    (when (key-held? "e-turn") (set! *yaw* (+ *yaw* (* TURN-SPEED dt))))
 
     ;; Smooth W visual lerp
     (let ((diff (- (exact->inexact *pw*) *pw-vis*)))
