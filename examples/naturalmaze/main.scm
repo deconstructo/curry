@@ -25,12 +25,10 @@
         (else (loop (- i 1)))))))
 
 (define (load-module name)
-  (let* ((base  *base*)
-         (scc   (string-append base name ".scc"))
-         (scm   (string-append base name ".scm")))
-    (if (file-exists? scc)
-        (load scc)
-        (load scm))))
+  ; (load ...) cannot parse .scc bytecode — always load .scm source.
+  ; The Makefile's .scc targets are for running individual modules via the CLI
+  ; (e.g. `curry world.scc`) not for use with load.
+  (load (string-append *base* name ".scm")))
 
 (load-module "world")
 (load-module "player")

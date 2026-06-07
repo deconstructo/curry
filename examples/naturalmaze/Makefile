@@ -13,6 +13,8 @@ run:
 	$(CURRY) main.scm
 
 run-compiled: all
+	# .scc files can be run individually from the CLI (e.g. curry world.scc),
+	# but multi-file programs must still use (load ...) with .scm source.
 	$(CURRY) main.scm
 
 clean:
