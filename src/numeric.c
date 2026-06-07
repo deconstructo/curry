@@ -1479,7 +1479,7 @@ static val_t sexbuf_to_val(SexBuf *b) {
 /* ---- Base-60 digit extraction (MSB-first, using GMP) ---- */
 
 /* Fill digits[] with base-60 representation of non-negative mpz n, MSB first.
- * Returns count. digits[] must have room for at least 30 entries. */
+ * Returns count. digits[] must have room for at least 64 entries. */
 static int mpz_to_base60_digits(mpz_t n, int *digits) {
     if (mpz_sgn(n) == 0) { digits[0] = 0; return 1; }
     int buf[64], cnt = 0;
@@ -1518,12 +1518,13 @@ static void sex_render_cuneiform_digits(SexBuf *b, int *digs, int n) {
 
 /* ---- Shared digit-extraction for a Scheme number ---- */
 
-/* digits[] must have room for ~30 integer + ~30 fractional entries each. */
+/* digits[] must have room for 64 integer + 64 fractional entries each
+ * (matches the buf[64] capacity in mpz_to_base60_digits). */
 typedef struct {
     bool     neg;
-    int      int_digs[32];
+    int      int_digs[64];
     int      nint;
-    int      frac_digs[32];
+    int      frac_digs[64];
     int      nfrac;
     bool     valid;
 } SexDigs;
