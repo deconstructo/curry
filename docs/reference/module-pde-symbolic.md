@@ -1,6 +1,6 @@
 # Module: `(curry pde-symbolic)`
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 Symbolic tools for exact analysis of linear PDEs: separation of variables, Fourier coefficient computation, method of characteristics, and Laplace-transform ODE reduction. Pure Scheme — operates entirely on top of Curry's CAS layer (`sym-var`, `∂`, `∫`, `substitute`, `simplify`).
 

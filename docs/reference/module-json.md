@@ -1,6 +1,6 @@
 # Module: (curry json)
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 Pure-C JSON parser and serialiser. No external dependencies.
 

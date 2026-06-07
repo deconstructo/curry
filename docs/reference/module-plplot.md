@@ -1,6 +1,6 @@
 # Module: (curry plplot)
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 Scientific 2D/3D plotting using [PLplot](http://plplot.sourceforge.net/) — a cross-platform plotting library that can render to PNG, PDF, SVG, X11, and Qt windows among other drivers.
 

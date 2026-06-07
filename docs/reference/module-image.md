@@ -1,6 +1,6 @@
 # Module: (curry image)
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 PNG, JPEG, and GIF image loading, saving, and pixel manipulation.
 

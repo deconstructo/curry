@@ -1,6 +1,6 @@
 # Module: `(curry pde)`
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 Numerical PDE solvers for 1D time-dependent and elliptic problems. Pure Scheme — no C extension, no extra dependencies.
 

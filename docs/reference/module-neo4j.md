@@ -1,6 +1,6 @@
 # Module: (curry neo4j)
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 Neo4j graph database client using the Bolt 4.x/5.x wire protocol directly.
 No external C dependencies — pure POSIX sockets with PackStream binary encoding,

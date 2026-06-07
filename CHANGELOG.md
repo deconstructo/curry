@@ -1,5 +1,77 @@
 # Changelog
 
+### 1.2.2 — Qt6 GPU extensions; 4D cave explorer; release tooling
+
+**Qt6 module — 13 new bindings**
+
+- **Key-up events** (`window-on-key-up!`, `canvas-on-key!`, `canvas-on-key-up!`):
+  fire on physical key release only; Qt auto-repeat fake releases are filtered.
+  Enables held-key state tables for smooth WASD movement.
+- **Mouse capture** (`canvas-grab-mouse!`, `canvas-release-mouse!`,
+  `canvas-on-grab-move!`, `canvas-mouse-grabbed?`): cursor-lock + relative-delta
+  mode for first-person camera. Cursor hidden and warped back to canvas centre
+  after each event; `canvas-on-mouse!` move events suppressed while grabbed.
+- **Mouse move semantics**: move events now emit `'drag` when a button is held,
+  `'move` on hover — previously always `'move`.
+- **Resize callback** (`canvas-on-resize!`): `(lambda (w h) …)` fires from
+  `resizeEvent`; use to resize FBOs or rebuild projection matrices.
+- **Timer with delta-t** (`make-timer/dt`, `timer/dt-start!`, `timer/dt-stop!`):
+  callback receives elapsed ms since last tick via `QElapsedTimer` for
+  frame-rate-independent physics.
+- **Clipboard** (`clipboard-text`, `clipboard-set-text!`).
+- **GPU vertex buffers** (`make-gl-buffer`, `gl-buffer-update!`,
+  `gl-shader-draw-arrays!`): upload `f64vector` or Scheme vector to GPU; draw
+  with per-vertex attribute VBOs. Primitives: `'points`, `'lines`,
+  `'line-strip`, `'triangles`, `'triangle-strip`, `'triangle-fan`. 16-element
+  Scheme vector maps to `mat4` uniform.
+- **Framebuffer objects** (`make-gl-framebuffer`, `gl-framebuffer-texture`,
+  `gl-framebuffer-resize!`, `gl-shader-to!`): offscreen render-to-texture for
+  post-processing passes; `gl-shader-to!` restores Qt's default FBO after drawing.
+
+**naturalmaze — `examples/naturalmaze/`**
+
+Multi-file 4D cave explorer (`make run` from the directory). Each `.scm` can
+be independently compiled to bytecode with `make`.
+
+- 16×16×4 maze: DFS spanning tree + 28 % extra passages for open-world feel,
+  2×2 clearing rooms, ~22 % W-passage density between dimension layers.
+- GLSL 330 DDA raycaster with pitch (look up/down), procedural cave textures:
+  rock fbm, moss by wall height, hanging vines, per-cell fungi spots with
+  per-biome glow colour and sin-pulse animation.
+- Floor: earthy dirt, scattered mushrooms (5 hash candidates per cell), puddle
+  reflections, W-rift mandala runes (pulsing ring + 6-spoke pattern) on cells
+  with 4th-dimension passages.
+- Ceiling: stalactite noise, slowly breathing bioluminescent patches.
+- Four biomes by W-slice: amber / cyan / violet / crimson fungi glow.
+- Dimensional ripple overlay during W-transitions (chromatic tint toward
+  destination biome proportional to visual-W fractional part).
+- Mouse-grab look, smooth WASD with wall-sliding collision, Q/E step through
+  the 4th dimension, scroll-wheel W-step, minimap HUD with W-rift indicators.
+
+**Release tooling**
+
+- `.claude/commands/release.md`: `/release <version>` slash command — 5-checkpoint
+  end-to-end pipeline (preflight → bump commit → tag + SHA256 → formula → brew verify).
+- `.claude/hooks/pre-push` (symlinked to `.git/hooks/pre-push`): blocks push if
+  `src/version.h`, Formula URL tag, Formula `version` field, or most recent git
+  tag disagree, or if the sha256 is still the zero placeholder.
+- `scripts/release-verify.sh`: post-release brew verification (uninstall, tap
+  update, reinstall, `curry --version` assert, smoke test).
+
+**Bug fixes**
+
+- Formula/curry.rb `version` field was `"1.2.0"` while the URL and
+  `src/version.h` both said `1.2.1`; corrected. The pre-push hook now catches
+  this class of drift automatically.
+- Curry VM: 3-argument `(< a b c)` inside a top-level recursive function called
+  repeatedly from a named-let loop silently receives a non-numeric value after
+  enough iterations (`to_mpz` error). Worked around in `naturalmaze/world.scm`
+  by splitting into two 2-argument comparisons; VM bug documented for future fix.
+- `(load "file.scc")` parses bytecode as Scheme source text and errors on the
+  magic header; `naturalmaze/main.scm` updated to always load `.scm` source.
+
+---
+
 ### 1.2.1 — Pollard rho bug fixes; expanded test coverage
 
 **Bug fixes**

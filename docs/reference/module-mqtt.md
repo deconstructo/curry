@@ -1,6 +1,6 @@
 # Module: (curry mqtt)
 
-*v1.2.1 — 2026-06-06*
+*v1.2.2 — 2026-06-07*
 
 MQTT client built on the [Eclipse Paho C](https://github.com/eclipse/paho.mqtt.c) synchronous API (`MQTTClient`). Supports MQTT 3.1.1, QoS 0/1/2, wildcard subscriptions, and TLS when linked against `libpaho-mqtt3cs`.
 
