@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# pre-push hook: validates that src/version.h, Formula/curry.rb (URL tag and
+# version field), and the most recent git tag all agree before any push lands.
+#
+# Install:  ln -sf ../../.claude/hooks/pre-push .git/hooks/pre-push
+# Test:     bash .claude/hooks/pre-push  (runs in static-check mode, no stdin)
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ERRORS=0
+
+# ── extract versions ─────────────────────────────────────────────────────────
+
+VERSION_H=$(grep -o '"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"' \
+            "$REPO_ROOT/src/version.h" | tr -d '"')
+
+FORMULA_URL_VER=$(grep '^\s*url\s\+\"https://' "$REPO_ROOT/Formula/curry.rb" \
+                  | grep -o 'v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*' \
+                  | head -1 | tr -d 'v')
+
+FORMULA_VER=$(grep '^  version ' "$REPO_ROOT/Formula/curry.rb" \
+              | grep -o '"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"' \
+              | tr -d '"')
+
+LATEST_TAG=$(git -C "$REPO_ROOT" tag -l 'v[0-9]*' | sort -V | tail -1)
+TAG_VER="${LATEST_TAG#v}"
+
+FORMULA_SHA=$(grep '^  sha256' "$REPO_ROOT/Formula/curry.rb" \
+              | grep -o '"[0-9a-f]*"' | tr -d '"')
+PLACEHOLDER="0000000000000000000000000000000000000000000000000000000000000000"
+
+# ── parse what git is asking us to push ──────────────────────────────────────
+
+PUSHING_MAIN=false
+PUSHING_TAG=""
+
+if [ -t 0 ]; then
+    # Called directly (e.g., `bash .claude/hooks/pre-push`): assume worst case.
+    PUSHING_MAIN=true
+else
+    while IFS=' ' read -r _lref _lsha remote_ref _rsha; do
+        case "$remote_ref" in
+            refs/heads/main|refs/heads/master) PUSHING_MAIN=true ;;
+            refs/tags/v*)                      PUSHING_TAG="${remote_ref#refs/tags/}" ;;
+        esac
+    done
+fi
+
+# ── checks ───────────────────────────────────────────────────────────────────
+
+fail() { echo "❌  $*" >&2; ERRORS=$((ERRORS + 1)); }
+info() { echo "    $*" >&2; }
+
+# version.h must match formula URL tag — always
+if [[ "$VERSION_H" != "$FORMULA_URL_VER" ]]; then
+    fail "src/version.h ($VERSION_H) ≠ Formula/curry.rb URL tag ($FORMULA_URL_VER)"
+    info "Update the formula url line to refs/tags/v${VERSION_H}.tar.gz"
+fi
+
+# version.h must match formula version field — always
+if [[ "$VERSION_H" != "$FORMULA_VER" ]]; then
+    fail "src/version.h ($VERSION_H) ≠ Formula/curry.rb version field ($FORMULA_VER)"
+    info "Update:  version \"$VERSION_H\"  in Formula/curry.rb"
+fi
+
+if $PUSHING_MAIN; then
+    # the annotated tag must exist
+    if [[ "$TAG_VER" != "$VERSION_H" ]]; then
+        fail "src/version.h ($VERSION_H) ≠ latest git tag ($LATEST_TAG)"
+        info "Create the tag first:  git tag -a v$VERSION_H -m 'Release v$VERSION_H'"
+    fi
+
+    # sha256 must not be the placeholder
+    if [[ "$FORMULA_SHA" == "$PLACEHOLDER" ]]; then
+        fail "Formula/curry.rb sha256 is still the zero placeholder"
+        info "Push the tag, compute SHA256, then commit the real hash before pushing main"
+        info "  curl -sL https://github.com/deconstructo/curry/archive/refs/tags/v${VERSION_H}.tar.gz | shasum -a 256"
+    fi
+fi
+
+if [[ -n "$PUSHING_TAG" ]]; then
+    # sanity: tag being pushed must match version.h
+    TAG_BEING_PUSHED_VER="${PUSHING_TAG#v}"
+    if [[ "$TAG_BEING_PUSHED_VER" != "$VERSION_H" ]]; then
+        fail "Tag being pushed ($PUSHING_TAG) ≠ src/version.h ($VERSION_H)"
+        info "Bump version.h before pushing this tag, or push the right tag"
+    fi
+fi
+
+# ── report ───────────────────────────────────────────────────────────────────
+
+if [[ $ERRORS -gt 0 ]]; then
+    echo "" >&2
+    echo "pre-push: $ERRORS version inconsistenc$([ $ERRORS -eq 1 ] && echo y || echo ies) found — push aborted" >&2
+    echo "Run /release $VERSION_H to use the automated pipeline" >&2
+    exit 1
+fi
+
+if $PUSHING_MAIN; then
+    echo "pre-push: ✓  v$VERSION_H — version.h, formula URL, formula version, sha256, tag all consistent" >&2
+fi

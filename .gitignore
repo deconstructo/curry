@@ -9,7 +9,12 @@ install_manifest.txt
 Testing/
 tests/curry_test
 b
-.claude/
+.claude/*
+!.claude/commands
+!.claude/hooks
+!.claude/settings.json
+.claude/skills/
+.claude/worktrees/
 
 # ---- attic ----
 attic
