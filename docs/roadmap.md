@@ -1,14 +1,14 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Updated 2026-06-07 for v1.2.2. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-08 for v1.3.0. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.2.2. This document maps the path from here to a compiled Scheme
+Curry is at v1.3.0. This document maps the path from here to a compiled Scheme
 for scientific computing — the full cill specification. It is ordered by
 dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.2.2)
+## Where we are now (v1.3.0)
 
 | Capability | Status |
 |---|---|
@@ -19,7 +19,6 @@ dependency, not ambition; each phase unblocks the phases above it.
 | Parallel map/reduce (Chase-Lev work-stealing) | ✓ complete |
 | Qt6, PLplot visualisation | ✓ complete |
 | Matrices, tensors (+ transpose/contract/einsum), spinors | ✓ complete |
-| GC vtable abstraction + nursery bump-pointer | ✓ skeleton (Boehm backend) |
 | Basic profiling (call counts, wall-clock) | ✓ basic |
 | CAS rule engine (internal, not user-extensible) | ✓ partial |
 | Polynomial ops (expand, collect, degree) | ✓ partial |
@@ -29,9 +28,10 @@ dependency, not ambition; each phase unblocks the phases above it.
 | **MPFR arbitrary-precision floats + interval arithmetic** | ✓ **v1.2.0** (`BUILD_MPFR=ON`) |
 | **Number theory** (primality, factoring, modular arithmetic, combinatorics, CF) | ✓ **v1.2.0** |
 | **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
-| Sexagesimal / Babylonian number system | ✗ (v1.2.5 — spec written) |
+| **Sexagesimal / Babylonian number system** | ✓ **v1.2.5** |
+| **Cheney semispace GC** (`--gc semispace`, `gc-collect!`, `gc-stats`) | ✓ **v1.3.0** (`BUILD_MPFR=ON`) |
 | Extensible CAS (`define-rule`, `define-algebra`, Groebner, Risch) | ✗ |
-| Moving / generational GC | ✗ |
+| Generational / moving GC (green threads, incremental) | ✗ |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
 | Slim CLOS | ✗ |
@@ -164,7 +164,7 @@ cryptographic number theory.
 
 ---
 
-## Phase 2.5 — v1.2.5: Babylonian/Sumerian Number System ← next
+## Phase 2.5 — v1.2.5: Babylonian/Sumerian Number System ✓ done
 
 *See full design spec: `docs/thoughts/babylonian-numbers.md`.*
 
@@ -230,7 +230,35 @@ was invented.
 
 ---
 
-## Phase 3 — v1.3: Extensible CAS
+## Phase 3 — v1.3: Pluggable GC — Semispace ✓ done
+
+*Shipped in v1.3.0 (2026-06-08).*  See `docs/reference/gc.md` for the full reference.
+
+Two 32 MB semispaces (Cheney stop-the-world). Bump-pointer allocation;
+on exhaustion or explicit `(gc-collect!)` all live objects are evacuated
+to to-space; spaces swap. Root set: VM value stack, GLOBAL_ENV, pinned-list
+(Actor/TVar/Channel/Mailbox/Continuation), module-registry ext-scanner.
+Type-specific scanners for all 54 ObjTypes. Boehm remains the default
+(`--gc boehm`); semispace selected with `--gc semispace`.
+
+Pinned types (Boehm, never moved): Symbol, Bignum, Rational, Mpfr, Port,
+Actor, Mailbox, TVar, Channel, Continuation, Primitive. All others moveable.
+All raw C-array allocation sites updated to `gc_alloc_raw_pinned`.
+
+Deliverables: `gc_ss_ops`, `gc-collect!`, `gc-stats`, `gc-on-collection`,
+`gc_ss_register_ext_scanner` hook, T_CHUNK/T_UPVALUE type tags.
+
+Known limitation: sicm tests partially pass (93/167) under `--gc semispace`
+due to stale-pointer residuals in complex multi-level closure environments
+under ODE integration GC pressure. All other suites pass.
+
+**Unlocks:** Phase 5 (generational GC) can build directly on this vtable.
+**Version note:** C extensions must use `gc_pin`/`gc_unpin` for heap pointers
+stored off the C stack; the FFI `with-pinned-*` macros handle this automatically.
+
+---
+
+## Phase 4 — v1.4: Extensible CAS
 
 The current CAS has rules hard-coded in C. This phase makes it user-extensible
 with declared algebraic structure — essential for user-defined rings, groups,
@@ -270,37 +298,6 @@ Fourier, Z-transform), Laurent/Puiseux series.
 **Effort:** 4–5 months.
 **Unlocks:** User-defined algebraic structures, GR symbolic computation,
 QM operator algebra.
-
----
-
-## Phase 4 — v1.4: Pluggable GC — Semispace ✓ done
-
-*Merged to branch `phase4-semispace-gc` (2026-06-08).*
-
-Two 32 MB semispaces (Cheney stop-the-world). Bump-pointer allocation;
-on exhaustion or explicit `(gc-collect!)` all live objects are evacuated
-to to-space; spaces swap. Root set: vm->stack, GLOBAL_ENV, pinned-list
-(Actor/TVar/Channel/Mailbox/Continuation), module-registry ext-scanner.
-Type-specific scanners for all 54 ObjTypes. Boehm remains the default
-(`--gc boehm`); semispace selected with `--gc semispace`.
-
-Pinned types (Boehm, never moved): Symbol, Bignum, Rational, Mpfr, Port,
-Actor, Mailbox, TVar, Channel, Continuation, Primitive. All others moveable.
-All raw C-array allocation sites updated to `gc_alloc_raw_pinned`.
-
-Deliverables shipped: `gc_ss_ops`, `gc-collect!`, `gc-stats`,
-`gc-on-collection`, `gc_ss_register_ext_scanner` hook.
-
-Known limitation: sicm tests partially pass (93/167) under `--gc semispace`
-due to stale-pointer residuals in complex multi-level closure environments
-under ODE integration GC pressure. All other test suites (r7rs/r6rs/
-numeric_ext/actors/dynamic_wind/syntax_rules/akkadian/sexagesimal) pass.
-Root cause deferred to Phase 6 (generational GC + full precise root set).
-
-**Effort:** Done.
-**Version note:** C extension modules must use `gc_pin`/`gc_unpin` for
-pointers stored off the stack once a moving GC is active. The FFI
-`with-pinned-*` macros handle this automatically.
 
 ---
 
