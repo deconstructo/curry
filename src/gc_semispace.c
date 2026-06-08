@@ -81,18 +81,21 @@ static void pinned_add(void *obj) {
     /* No free slot: grow the array */
     if (pinned_count == pinned_cap) {
         size_t new_cap = pinned_cap * 2;
-        void **new_slots = GC_MALLOC(new_cap * sizeof(void *));
+        void **new_slots = GC_MALLOC_UNCOLLECTABLE(new_cap * sizeof(void *));
         memcpy(new_slots, pinned_slots, pinned_count * sizeof(void *));
         memset(new_slots + pinned_count, 0,
                (new_cap - pinned_count) * sizeof(void *));
-        /* Re-register disappearing links for all existing slots */
+        /* Re-register disappearing links: register new before unregistering
+         * old to avoid a window where a Boehm collection sees no link. */
         for (size_t i = 0; i < pinned_count; i++) {
             if (pinned_slots[i]) {
-                GC_unregister_disappearing_link(&pinned_slots[i]);
                 GC_general_register_disappearing_link(&new_slots[i],
                                                        new_slots[i]);
+                GC_unregister_disappearing_link(&pinned_slots[i]);
             }
         }
+        /* Free old (GC_MALLOC_UNCOLLECTABLE) array. */
+        GC_FREE(pinned_slots);
         pinned_slots = new_slots;
         pinned_cap   = new_cap;
     }
@@ -688,15 +691,22 @@ static void ss_collect(void) {
             cf->closure = (BcClosure *)evacuate_obj(cf->closure);
         }
         vm->open_upvalues = (Upvalue *)evacuate_obj(vm->open_upvalues);
+        /* Update saved open_upvalues in each active exception handler frame. */
+        for (int hi = 0; hi < vm->handler_count; hi++)
+            vm->handler_stack[hi].open_upvalues =
+                (Upvalue *)evacuate_obj(vm->handler_stack[hi].open_upvalues);
     }
 
-    /* ── 3. Cheney scan loop ── */
-    while (ss_to_scan < ss_to_top) {
-        Hdr *h = (Hdr *)ss_to_scan;
-        size_t sz = obj_size(h);
-        scan_object(ss_to_scan);
-        ss_to_scan += sz;
+#define SS_DRAIN_LOOP() \
+    while (ss_to_scan < ss_to_top) { \
+        Hdr *_h = (Hdr *)ss_to_scan; \
+        size_t _sz = obj_size(_h); \
+        scan_object(ss_to_scan); \
+        ss_to_scan += _sz; \
     }
+
+    /* ── 3. Cheney scan loop (first drain) ── */
+    SS_DRAIN_LOOP();
 
     /* ── 4. Scan pinned objects for cross-heap refs ── */
     for (size_t i = 0; i < pinned_count; i++) {
@@ -707,6 +717,10 @@ static void ss_collect(void) {
     /* ── 4b. External root scanners (module registry, etc.) ── */
     for (size_t i = 0; i < ext_scan_count; i++)
         ext_scanners[i]();
+
+    /* ── 4c. Re-drain: pinned/ext scanners may have added objects ── */
+    SS_DRAIN_LOOP();
+#undef SS_DRAIN_LOOP
 
     /* ── 5. Update raw C pointer roots ── */
     for (size_t i = 0; i < rawptrs_count; i++) {
@@ -735,7 +749,6 @@ static void ss_collect(void) {
 /* ── vtable implementation ───────────────────────────────────────────────── */
 
 static void *ss_alloc(size_t n, bool has_ptrs) {
-    (void)has_ptrs;
     n = (n + 7u) & ~7u;
     if (ss_top + n > ss_from_base() + ss_size) {
         ss_collect();
