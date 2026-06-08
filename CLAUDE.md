@@ -26,8 +26,11 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_GIT=ON \
   -DBUILD_MODULE_PLPLOT=ON \
   -DBUILD_MODULE_QT6=ON \
+  -DBUILD_FFI=ON \
   -DBUILD_LLVM=ON \
   -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6
+
+
 
 # Build
 cmake --build build -j$(nproc)                  # Linux
