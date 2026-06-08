@@ -143,578 +143,119 @@ All heap objects begin with `Hdr { uint32_t type; uint32_t flags; }`. The type t
 
 ### Memory management (`src/gc.h`)
 
-Boehm GC (conservative, thread-safe). Allocation macros:
-- `GC_NEW(T)` — struct with interior GC pointers
-- `GC_NEW_ATOM(T)` — struct with no GC pointers (strings, numbers)
-- `GC_NEW_FLEX(T, n)` — flexible-array struct (`T` must have `data[]` member)
-- `GC_NEW_FLEX_ATOM(T, n)` — atomic flexible-array (bytevectors)
-
-No explicit rooting needed on the stack. Call `gc_register_thread()` at the start of every new pthread.
+Boehm GC (conservative, thread-safe). Allocation macros: `GC_NEW(T)`, `GC_NEW_ATOM(T)`, `GC_NEW_FLEX(T, n)`, `GC_NEW_FLEX_ATOM(T, n)`. No explicit rooting needed on the stack. Call `gc_register_thread()` at the start of every new pthread.
 
 ### Numeric tower (`src/numeric.h`, `src/numeric.c`)
 
-Hierarchy (auto-promotes upward):
-
 ```
 fixnum → bignum (GMP mpz) → rational (GMP mpq) → flonum (double)
-       → complex (val_t pair) → quaternion (4×double) → octonion (8×double)
+       → complex → quaternion (4×double) → octonion (8×double)
        → multivector (Clifford Cl(p,q,r)) → surreal (Hahn series)
        → symbolic (CAS expression tree)
 ```
 
-Overflow from fixnum goes to bignum automatically. When any arithmetic operand is symbolic the result is a symbolic expression rather than an error. Octonion multiplication uses the Graves/Cayley convention.
+Overflow promotes automatically. When any operand is symbolic the result is a symbolic expression tree. See `docs/reference/symbolic.md` for the full CAS API.
 
-### Sexagesimal (Babylonian base-60) I/O (`src/numeric.c`, `src/reader.c`)
+### Sexagesimal / Babylonian base-60 (`src/numeric.c`, `src/reader.c`)
 
-Neugebauer notation (Otto Neugebauer, 1935) and cuneiform Unicode glyphs are
-first-class in the reader and in `number->string`/`string->number`.
-
-**Reader**:
-- `#s1;30` → exact `3/2`; `#s1,0,0` → `3600`; `#s1;24,51,10` → `30547/21600` (YBC 7289 √2 approximation, c. 1800 BCE). Semicolon is the radix point (not a delimiter inside `#s` literals).
-- Cuneiform tokens: 𒁹 (U+12079, ASH) = 1s; 𒌋 (U+1230B, U) = 10s; 𒑊 (U+1244A) = zero placeholder. Adjacent glyphs form one group; spaces separate sexagesimal groups. `𒁹 𒌋𒁹` → `71`.
-
-**Scheme API**:
-```scheme
-(number->string n 'neugebauer)              ; → "1,11", "1;30", "1;24,51,10"
-(number->string n 'neugebauer #:places k)  ; limit flonum fractional digits
-(number->string n 'cuneiform)              ; → "𒁹 𒌋𒁹"
-(string->number "1;30" 'neugebauer)        ; → 3/2
-(string->number "𒁹 𒌋𒁹" 'cuneiform)      ; → 71
-(current-number-notation)                  ; → #f (decimal)
-(current-number-notation 'neugebauer)      ; set REPL display notation
-(current-number-notation 'cuneiform)
-(current-number-notation #f)               ; reset to decimal
-```
-
-**`(curry sexagesimal)` module** (`lib/curry/modules/curry/sexagesimal.scm`):
-```scheme
-(import (curry sexagesimal))
-(rational->sexagesimal 3/2)        ; → '(1 30)
-(sexagesimal->rational '(1 30))    ; → 3/2
-(hms->seconds '(1 30 0))           ; → 5400
-(seconds->hms 5400)                ; → '(1 30 0)
-(dms->degrees '(23 27 0))          ; → 14049/600 (≈ 23.45°)
-(degrees->dms 23.45)               ; → '(23 27 0)
-(cuneiform->neugebauer "𒁹 𒌋𒁹")   ; → "1,11"
-(neugebauer->cuneiform "1,11")     ; → "𒁹 𒌋𒁹"
-(sex:ybc7289)                      ; → 30547/21600 (√2 from YBC 7289)
-```
-
-**Codepoint note**: The zero placeholder glyph is U+1244A (CUNEIFORM NUMERIC SIGN TWO ASH TENU), not U+12469 as earlier design specs stated. `SEX_IS_CUNEIFORM(cp)` covers `0x12000`–`0x1247F`.
+`#s1;30` → `3/2`; `#s1,0,0` → `3600`. Cuneiform Unicode tokens (`𒁹𒌋𒑊`) are also valid reader tokens. `number->string`/`string->number` accept `'neugebauer` and `'cuneiform` as a second argument. `current-number-notation` sets REPL display mode. The `(curry sexagesimal)` module (`lib/curry/modules/curry/sexagesimal.scm`) provides `rational->sexagesimal`, `hms->seconds`, `dms->degrees`, and notation-conversion helpers. See `docs/reference/module-sexagesimal.md`.
 
 ### Symbolic CAS (`src/symbolic.h`, `src/symbolic.c`)
 
-`T_SYMVAR` and `T_SYMEXPR` extend the numeric tower. When any arithmetic operand is symbolic the result is a symbolic expression tree rather than an error.
-
-**Variables and expressions**
-
-```scheme
-(sym-var 'x)               ; create symbolic variable (no assumptions)
-(sym-var 'x 'positive)     ; create symbolic variable with assumption: positive, real, nonzero
-(sym-var 'x 'negative)     ; assumption: negative, real
-(sym-var 'x 'real)         ; assumption: real
-(sym-var 'x 'integer)      ; assumption: integer (implies real)
-(sym-var 'x 'nonzero)      ; assumption: nonzero
-(sym-var 'q 'quaternion)   ; assumption: quaternion — multiplication routes through SX_NCMUL (non-commutative ordered product)
-(sym-assumption? v 'positive) ; test assumption flag on a sym-var
-(symbolic x y)             ; bind x, y as symbolic unknowns in scope
-(sym-var? v)               ; predicate
-(sym-expr? v)              ; predicate
-(symbolic? v)              ; true for both T_SYMVAR and T_SYMEXPR
-(sym-var-name v)           ; recover the symbol name
-(substitute expr var val)  ; replace var with val and simplify
-(simplify expr)            ; algebraic simplification pass
-(sign expr)                ; sign function: 1, -1, or 0; simplifies with assumption flags
-```
-
-**Assumption flags** are stored in `SymVar.hdr.flags` and guide algebraic simplification:
-- `(sym-var 'x 'positive)`: `abs(x) = x`, `sqrt(x²) = x`, `log(x^n) = n·log(x)`, `sign(x) = 1`
-- `(sym-var 'x 'negative)`: `abs(x) = -x`, `sign(x) = -1`
-- `(sym-var 'q 'quaternion)` (`SYM_ASSUME_QUATERNION = 1u<<5`): `sx_mul` routes to `sx_ncmul` → `SX_NCMUL` ordered product node. Real scalars (fixnum/flonum/bignum/rational) commute out as a leading coefficient; complex/quaternion/octonion concretes and other quaternion sym-vars maintain left-to-right order. Differentiation uses the ordered product rule. `expand` uses `expand_ncmul2` (recursive, analogous to `expand_mul2`).
-- Assumptions propagate through `∂`, `∫`, `limit`, `simplify`
-
-**Numeric quaternion transcendentals** — every function in the numeric tower now handles `T_QUAT` via the complex-plane projection `q = a + v̂·‖v‖ → (a, ‖v‖)` in complex. `abs(quaternion)` returns the Euclidean norm `√(a²+b²+c²+d²)`. Concrete arithmetic via `num_sub` and `num_div` (Hamilton right-division `a·conj(b)/‖b‖²`) also handle quaternions.
-
-**Differentiation** — `(∂ expr var)` where `var` is a sym-var:
-
-Rules: linearity, product, quotient, power, chain rule through sin, cos, tan, exp, log, sqrt, abs, sinh, cosh, tanh, asin, acos, atan, asinh, acosh, atanh, cot, sec, csc. For `SX_NCMUL` nodes the ordered product rule is applied — each factor's derivative is inserted in position while the remaining factors keep their order. Unknown operators leave an unevaluated `(∂ expr var)` node.
-
-**Integration** — `(∫ expr var)` or `(integrate expr var)`:
-
-Returns the antiderivative (no constant of integration). Definite form: `(∫ expr var a b)` computes `F(b) − F(a)`. Works with all numeric tower types for bounds: fixnum, bignum, rational, flonum, complex.
-
-Rules: linearity (sum/difference/neg/constant-multiple), power rule `x^n → x^(n+1)/(n+1)` (n ≠ −1), `x^−1 → ln|x|`, linear-substitution form for `(ax+b)^n`, sin, cos, tan, exp, ln, sqrt, sinh, cosh, tanh, cot, sec, csc, sec², csc², asin/acos/atan/asinh/acosh/atanh (IBP, linear arg), sin²/cos² (half-angle identity → ∫sin²(f)dx = x/2 − sin(2f)/(4f′)), log×polynomial (IBP, LIATE order, closed form for x^n·ln(x)), 1/(ax²+bx+c) with positive discriminant (completing the square → atan form). Unknown forms leave an unevaluated `(∫ expr var)` node.
-
-**Complex operators** — symbolic-aware; return expression trees on sym-vars:
-
-```scheme
-(conj expr)        ; complex conjugate — also (conjugate expr)
-(real-part expr)   ; Re(expr) — returns symbolic when expr is symbolic
-(imag-part expr)   ; Im(expr) — returns symbolic when expr is symbolic
-```
-
-Simplification identities: `conj(conj(f)) = f`, `conj(real(f)) = real(f)`, `imag(real(f)) = 0`, `imag(conj(f)) = -imag(f)`, etc.
-
-For a real variable `x`: `∂conj(f)/∂x = conj(∂f/∂x)`, `∫conj(f) dx = conj(∫f dx)` (same for real-part/imag-part).
-
-**Wirtinger calculus** — treats `z` and `z̄ = conj(z)` as independent variables:
-
-```scheme
-(wirtinger-d    expr z)   ; ∂/∂z:  ∂z/∂z = 1,  ∂conj(z)/∂z = 0
-(wirtinger-dbar expr z)   ; ∂/∂z̄: ∂z/∂z̄ = 0, ∂conj(z)/∂z̄ = 1
-```
-
-Key rules: `∂conj(f)/∂z = conj(∂f/∂z̄)`, `∂Re(f)/∂z = ½(∂f/∂z + conj(∂f/∂z̄))`, `∂Im(f)/∂z = (∂f/∂z − conj(∂f/∂z̄))/(2i)`. Arithmetic and holomorphic transcendentals follow the standard chain rule. A function is holomorphic iff `(wirtinger-dbar f z)` simplifies to 0.
-
-**Limits** — `(limit expr var point)` or `(limit expr var point dir)`:
-
-Evaluates `lim_{var→point} expr`. `dir` is `'left` (−1) or `'right` (+1) for one-sided limits; omit for two-sided. Algorithm: direct substitution first; if 0/0 or ∞/∞ form, applies L'Hôpital's rule (up to 5 iterations). Indeterminate 0·∞ forms are rewritten as ratios before L'Hôpital. Indeterminate power forms (1^∞, 0^0, ∞^0) are rewritten as `exp(g·log(f))`. Distributes over sums, products, and negation. Leaves unevaluated `(limit expr var point)` nodes for unresolved forms.
-
-```scheme
-(limit (/ (sin x) x) x 0)             ; => 1
-(limit (/ (- (exp x) 1) x) x 0)       ; => 1
-(limit (* x (log x)) x 0.0 'right)    ; => 0  (0·∞ form)
-(limit (expt x x) x 0.0 'right)       ; => 1  (0^0 form)
-(limit (expt x (/ 1 x)) x +inf.0)     ; => 1  (∞^0 form)
-(limit (expt (+ 1 (/ 1 x)) x) x +inf.0) ; => e  (1^∞ form)
-```
-
-**Polynomial / structural operations**:
-
-```scheme
-(expand expr)              ; distribute * over +; expand integer powers 2..16
-(degree expr var)          ; polynomial degree in var (exact fixnum)
-(leading-coeff expr var)   ; coefficient of highest-degree term (expands internally)
-(collect expr var)         ; group like-degree terms, sorted by descending degree
-```
-
-`expand` fully distributes multiplications over sums and expands `(expt base n)` for integer n ∈ [2,16] by repeated distribution. `collect` calls `expand` internally and then groups terms into `(coeff * var^k)` buckets, combining coefficients of equal degree. Non-monomial sub-expressions (e.g. transcendentals of var) are left uncollected at the end of the sum.
-
-**Vector calculus (Cartesian)** — operate on lists of symbolic expressions representing fields:
-
-```scheme
-(grad f vars)              ; gradient: list of ∂f/∂vᵢ for each var in vars
-(gradient f vars)          ; alias for grad
-(divergence F vars)        ; divergence: Σ ∂Fᵢ/∂vᵢ
-(curl F vars)              ; curl (3-vector): (∂F₃/∂v₂−∂F₂/∂v₃, ...)
-(laplacian f vars)         ; scalar Laplacian: Σ ∂²f/∂vᵢ²
-(vec-laplacian F vars)     ; vector Laplacian: component-wise Laplacian
-(dot-product A B)          ; Σ Aᵢ·Bᵢ (symbolic)
-(cross-product A B)        ; 3D cross product (list of 3 symbolic expressions)
-```
-
-All operators work on lists of sym-vars or symbolic expressions. Results are simplified with `sx_simplify`. Useful for verifying PDE identities: `div(curl F) = 0`, `curl(grad f) = (0 0 0)`, Maxwell's equations, etc.
-
-**Auto-differentiation** via dual-number surreals: `(auto-diff f x)` evaluates `f(x + ε)` and extracts the ε coefficient = f′(x). Works for algebraic lambdas; C-level primitives (sin, cos, exp) do not propagate surreals.
-
-Operator symbols (`SX_ADD`, `SX_MUL`, `SX_CONJ`, `SX_REAL`, `SX_IMAG`, `SX_INTEGRATE`, `SX_LIMIT`, etc.) are interned at `symbolic_init()` time. `equal?` correctly compares symbolic expressions structurally and complex numbers by value.
+`T_SYMVAR` / `T_SYMEXPR` extend the numeric tower. Key entry points: `sym-var`, `symbolic`, `substitute`, `simplify`, `∂`, `∫`, `limit`, `expand`, `collect`, `grad`, `divergence`, `curl`, `laplacian`, `wirtinger-d`, `wirtinger-dbar`. Assumptions (`'positive`, `'real`, `'quaternion`, etc.) are stored in `SymVar.hdr.flags` and guide simplification. See `docs/reference/symbolic.md`.
 
 ### Surreal numbers (`src/surreal.h`, `src/surreal.c`)
 
-Hahn-series representation: a sorted list of `(exponent, coefficient)` pairs. Constants `SUR_OMEGA` (ω, infinite) and `SUR_EPSILON` (ε = 1/ω, infinitesimal) are available after `surreal_init()`. Forward-mode auto-diff falls out naturally: `f(x + ε)` gives `f(x) + f'(x)·ε`.
+Hahn-series representation: sorted `(exponent, coefficient)` pairs. `SUR_OMEGA` (ω) and `SUR_EPSILON` (ε = 1/ω) available after `surreal_init()`. Forward-mode auto-diff: `f(x + ε)` gives `f(x) + f′(x)·ε`.
 
 ### Multivectors / Clifford algebra (`src/multivec.h`, `src/multivec.c`)
 
-`T_MULTIVEC` elements of Cl(p,q,r) with up to 8 basis vectors (2⁸ = 256 components). Blade indices are bitmaps. Supports geometric product (`mv_geom`), wedge (`mv_wedge`), left contraction, reverse, grade involution, dual, and grade projection. Useful algebras: Cl(3,0,0) 3D Euclidean, Cl(3,1,0) Minkowski, Cl(3,0,1) PGA, Cl(4,1,0) CGA.
+`T_MULTIVEC` elements of Cl(p,q,r) with up to 8 basis vectors (256 components). Blade indices are bitmaps. Operations: geometric product, wedge, left contraction, reverse, grade projection, dual.
 
 ### Quantum superposition (`src/quantum.h`, `src/quantum.c`)
 
-`T_QUANTUM` represents `|ψ⟩ = Σ αᵢ|xᵢ⟩` with complex amplitudes. `(observe q)` collapses probabilistically; arithmetic maps over branches. `(superpose pairs)` builds from `(amplitude . value)` lists.
+`T_QUANTUM` represents `|ψ⟩ = Σ αᵢ|xᵢ⟩` with complex amplitudes. `(observe q)` collapses probabilistically; arithmetic maps over branches.
 
 ### Symbols (`src/symbol.h`, `src/symbol.c`)
 
-All symbols are interned — pointer equality is identity. Pre-interned special-form symbols are declared via the X-macro `symbol_list.h` and available as globals (`S_DEFINE`, `S_LAMBDA`, etc.) after `sym_init()`.
+All symbols are interned — pointer equality is identity. Pre-interned special-form symbols declared via `symbol_list.h`; available as globals (`S_DEFINE`, `S_LAMBDA`, …) after `sym_init()`.
 
 ### Evaluator (`src/eval.h`, `src/eval.c`)
 
-Tree-walking interpreter with proper tail-call optimization via `goto tail` (iterative dispatch loop). All R7RS special forms are handled as cases in `eval()`. Function application always goes through the tail of the loop for closures, enabling TCO.
+Tree-walking interpreter with TCO via `goto tail`. Exception handling: `setjmp`/`longjmp` through `ExnHandler` chain; `SCM_PROTECT` macro wraps handler frames. `call/cc` gives upward-only escape continuations (full first-class continuations are deferred).
 
-Exception handling uses `setjmp`/`longjmp` through the `ExnHandler` chain (`current_handler` thread-local). The `SCM_PROTECT(h, body, on_exn)` macro wraps a body with a handler frame. `call/cc` captures an escape continuation backed by a heap-allocated `jmp_buf`; upward escapes work, full first-class continuations are deferred.
+CL-style condition system (`src/condition.h`): `handler-bind` installs non-unwinding handlers; `with-restarts` / `invoke-restart` provide restarts. `with-restarts` snapshots VM state before the body and restores it before running a restart thunk.
 
-**CL-style condition system** (`src/condition.h`, `src/condition.c`): Two additional thread-local chains extend the exception system:
+C FFI (`src/ffi.c`, `BUILD_FFI=ON`): libffi-backed. Types `T_CPTR`, `T_FOREIGN_LIB`, `T_FOREIGN_FN`. `curry_ffi.h` (renamed from `ffi.h` to avoid collision with libffi's `<ffi.h>`).
 
-- `current_cond_handler` (`CondHandler *`) — non-unwinding handlers installed by `handler-bind`. `scm_raise_val` walks this chain via `walk_cond_handlers()` *before* longjmping. Each handler is called with the stack intact; `condition_is_a()` checks type hierarchy.
-- `current_restart_frame` (`RestartFrame *`) — restart frames installed by `with-restarts`. Each frame holds a list of `T_RESTART` objects. `invoke-restart` raises the `Restart` object itself via `scm_raise_val`; the owning `with-restarts` frame catches it via SCM_PROTECT and runs the thunk. **Key invariant:** `with-restarts` snapshots `vm->sp`, `vm->frame_count`, `vm->open_upvalues`, and `vm->handler_count` before calling the body thunk and restores them before running the restart thunk — necessary because a longjmp through nested `vm_run` calls leaves the VM's heap-allocated state inconsistent.
-
-`T_CONDITION = 46` (type-sym, fields alist, message string) and `T_RESTART = 47` (name, description, thunk). The condition type hierarchy is a global hash table mapping type symbols to parent lists; `condition_is_a()` walks it with BFS.
-
-**C FFI** (`src/ffi.c`, `src/curry_ffi.h` — optional, `BUILD_FFI=ON`): libffi-backed foreign function interface.
-
-- `T_CPTR = 48` — opaque `void*` box.
-- `T_FOREIGN_LIB = 49` — `dlopen` handle + path string.
-- `T_FOREIGN_FN = 50` — `ffi_cif*` + resolved function pointer + Scheme type tag lists. `ffi_cif` and the `ffi_type**` arg array are `malloc`'d (permanent, never freed). `arg_tags` and `ret_tag` are `val_t` fields so the GC keeps them alive.
-- `norm_tag()` normalises hyphen→underscore in type names so `size-t` and `size_t` both work.
-- `with-pinned-matrix` / `with-pinned-tensor` extract the raw `double*` from `Matrix.data[]` or the tensor's trailing double array. `gc_pin/gc_unpin` are called as protocol (no-op under Boehm; semantically correct for future moving GC).
-- **Header naming:** curry's `src/curry_ffi.h` was renamed from `src/ffi.h` to avoid collision with libffi's `<ffi.h>` — both end up on the `-I` search path.
-
-Before dispatching special forms, `eval()` calls `akk_translate(op)` (`src/akkadian_eval.h`) to remap Akkadian/cuneiform synonyms to their canonical English symbols — so code can be written in Standard Babylonian Akkadian and it evaluates identically.
+Before dispatching special forms, `eval()` calls `akk_translate(op)` to remap Akkadian/cuneiform synonyms to their canonical English symbols.
 
 ### Environments (`src/env.h`, `src/env.c`)
 
-Linked list of `EnvFrame` structs (flat symbol/value arrays). `env_bind_args()` extends the closure's environment with parameter bindings on each call. `env_lookup()` raises an error on unbound variables. The global environment is `GLOBAL_ENV`.
+Linked list of `EnvFrame` structs (flat symbol/value arrays). `env_lookup()` raises on unbound variables. Global environment is `GLOBAL_ENV`.
 
 ### Module system (`src/modules.h`, `src/modules.c`)
 
-Two kinds of modules:
-1. **C extension `.so`** — exports `void curry_module_init(CurryVM *vm)`. Loaded with `dlopen`. Call `curry_define_fn` / `curry_define_val` to register bindings.
-2. **Scheme `.sld` / `.scm`** — evaluated in a fresh environment; exports all top-level definitions.
-
-Always-on modules (no build flag needed): `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`.  
-Optional modules (require `-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui` (GTK4), `plplot`, `qt6`.
-
-The `(curry llm)` module is a pure Scheme library (no build step) that sits on top of `(curry http)` and `(curry json)`. See `lib/curry/modules/curry/llm.scm`.
-
-Module search order: `CURRY_MODULE_PATH` env var (colon-separated), then `lib/curry/modules/`. Module names map to paths, e.g. `(curry json)` → `curry/json.so`.
+Two kinds: C extension `.so` (exports `curry_module_init`) and Scheme `.sld`/`.scm`. Always-on: `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`. Optional (`-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui`, `plplot`, `qt6`. Search order: `CURRY_MODULE_PATH`, then `lib/curry/modules/`.
 
 ### Actor system (`src/actors.h`, `src/actors.c`)
 
-Each actor (`T_ACTOR`) runs in a detached POSIX thread. Actors communicate exclusively via `actor_send` / `actor_receive` through per-actor `Mailbox` objects (mutex + condvar + ring buffer). The Boehm GC shared heap is thread-safe; actors do not need per-actor heaps. `current_actor` is thread-local.
-
-Scheme primitives: `spawn`, `send!`, `receive`, `self`, `actor-alive?`.
+Each actor (`T_ACTOR`) runs in a detached POSIX thread communicating via per-actor `Mailbox` (mutex + condvar + ring buffer). Primitives: `spawn`, `send!`, `receive`, `self`, `actor-alive?`.
 
 ### Sets and hash tables (`src/set.h`, `src/set.c`)
 
-Open-addressing hash tables with 75% max load and tombstone deletion. Three comparator modes: `SET_CMP_EQ` (pointer), `SET_CMP_EQV`, `SET_CMP_EQUAL` (structural). Both `Set` and `Hashtable` use the same `val_hash` / `slot_matches` infrastructure.
+Open-addressing hash tables, 75% max load, tombstone deletion. Comparator modes: `SET_CMP_EQ`, `SET_CMP_EQV`, `SET_CMP_EQUAL`.
 
 ### Initialization order
 
 `gc_init() → sym_init() → num_init() → port_init() → env_init() → eval_init() → actors_init() → modules_init()`
 
-`modules_init()` calls `builtins_register(GLOBAL_ENV)` to populate the top-level environment.
-
 ### Graphics / UI (`modules/qt6/qt6.cpp`)
 
-The qt6 module has three API layers:
+Three layers: `qt-*` (raw queries), `gfx-*` (2D GPU via QPainter/QOpenGLWidget), and Layer 3 (full UI: windows, canvas, menus, widgets, timers, dialogs). GLSL shader API: `make-gl-shader`, `gl-shader-draw!`, `make-gl-texture`, `make-gl-buffer`, `make-gl-framebuffer`. Key/mouse events, mouse capture (`canvas-grab-mouse!`), HiDPI, cross-platform (Linux/macOS/Windows). See `docs/reference/module-qt6.md`.
 
-- **Layer 1** (`qt-*`): Raw Qt6 queries — painter/widget dimensions, `(qt-gpu? canvas)` (OpenGL init check for a given canvas), `qt-process-events`.
-- **Layer 2** (`gfx-*`): GPU-accelerated 2D graphics via `QPainter` on `QOpenGLWidget`. Primitives: clear, color, pen, shapes (rect, circle, ellipse, arc, pie, polygon), text, transforms (translate/rotate/scale), and batch drawing (`gfx-draw-points!`, `gfx-draw-lines!`, `gfx-fill-triangles!`). CPU software rendering falls back automatically via Mesa/llvmpipe when no GPU is present.
-- **Raw GLSL shaders** (`make-gl-shader`, `gl-shader-draw!`, `make-gl-texture`, `gl-texture-update!`): General-purpose GPU shader API. The OpenGL context is requested as Core Profile 3.3 at startup (4.1 on macOS, 3.3–4.6 on Linux). HiDPI is handled automatically — `gl-shader-draw!` auto-sets `u_resolution` (physical px) and `u_dpr` so shaders can convert logical zoom to physical pixels. `(make-gl-shader frag-src)` or `(make-gl-shader vert-src frag-src)` — lazy compilation on first draw. `(gl-shader-draw! prog painter uniforms-alist)` binds the shader, sets uniforms, draws a fullscreen quad via `gl_VertexID` (no VBO needed), then calls `endNativePainting()` so QPainter is fully restored for HUD overlays. Uniform dispatch: fixnum→`int`, bool→`int`, `gl-texture` handle→`sampler2D` (auto-bound to next texture unit starting at 0), pair-of-2/3/4→`vec2/3/4`, else→`float`. GL textures: `(make-gl-texture bv w h)` (R8) or `(make-gl-texture bv w h 'rgba)` (RGBA8) — lazy upload on first draw; `(gl-texture-update! tex bv)` marks dirty for re-upload. Default vertex shader renders a fullscreen quad using `gl_VertexID`.
-- **Layer 3** (natural names): Full UI framework — windows (`make-window`, `make-plain-window`), canvas (`canvas-on-draw!`, `canvas-on-mouse!`), menus, toolbars, status bars, layout boxes (`make-vbox`, `make-hbox`), splitter (`make-splitter`, `splitter-add!`, `splitter-set-sizes!`), tabs, group boxes, widgets (labels, buttons, checkboxes, sliders, dropdowns, radio groups, spin boxes, single-line text inputs, multi-line text editor `make-text-edit`, progress bars, timers), and file dialogs (`file-open-dialog`, `file-save-dialog`). `make-plain-window` creates a QMainWindow without the preset sidebar/canvas layout; use `window-set-central-widget!` to attach any widget as the central area.
-
-**Key events** — `window-on-key!` / `canvas-on-key!` register a `(lambda (key mods) ...)` called on key press. `window-on-key-up!` / `canvas-on-key-up!` register the same signature called on physical key release (auto-repeat fake releases are filtered). Use press+release to maintain a held-key set for smooth WASD movement:
-
-```scheme
-(define *held* (make-equal-hash-table))
-(window-on-key!    win (lambda (k m) (hash-table-set! *held* k #t)))
-(window-on-key-up! win (lambda (k m) (hash-table-delete! *held* k)))
-(define (key-held? k) (hash-table-ref/default *held* k #f))
-```
-
-**Mouse capture** — for first-person camera (relative-delta mode):
-
-```scheme
-; Register grab-move handler before grabbing
-(canvas-on-grab-move! canvas (lambda (dx dy)
-  (set! *yaw*   (+ *yaw*   (* dx SENSITIVITY)))
-  (set! *pitch* (+ *pitch* (* dy SENSITIVITY)))))
-
-; Grab on right-click, release on Escape
-(canvas-on-mouse! canvas (lambda (event btn x y mods)
-  (when (and (eq? event 'press) (eq? btn 'right))
-    (canvas-grab-mouse! canvas))))
-(window-on-key-up! win (lambda (key mods)
-  (when (equal? key "Escape") (canvas-release-mouse! canvas))))
-
-(canvas-grab-mouse!    canvas)  ; hide cursor, enter relative-delta mode
-(canvas-release-mouse! canvas)  ; restore cursor, return to absolute mode
-(canvas-mouse-grabbed? canvas)  ; => #t / #f
-```
-
-While grabbed, cursor is hidden and warped back to canvas center after each move; `canvas-on-mouse!` move events are suppressed. The `grab-move` handler receives integer pixel deltas `(dx dy)` relative to canvas center.
-
-**Mouse move events** now emit `'drag` (instead of `'move`) when any mouse button is held during the move. Hover (no button held) still emits `'move`. Existing code handling `'press`/`'release` is unaffected.
-
-**Resize events** — `(canvas-on-resize! canvas (lambda (w h) ...))` fires whenever the canvas is resized (logical pixel dimensions). Use to resize FBOs or rebuild projection matrices.
-
-**Timer with delta-t** — for frame-rate-independent physics:
-```scheme
-(define t (make-timer/dt 16 (lambda (dt-ms) (move-by! (* speed (/ dt-ms 1000.0))))))
-(timer/dt-start! t)
-(timer/dt-stop! t)
-```
-
-**Clipboard**:
-```scheme
-(clipboard-text)              ; → string or #f
-(clipboard-set-text! "...")   ; set clipboard
-```
-
-**GPU vertex buffers (VBO)** — upload geometry to GPU for real 3D rendering:
-```scheme
-; Pack [x y z r g b] per vertex into a flat f64vector or Scheme vector
-(define vbo (make-gl-buffer packed-data))
-(gl-buffer-update! vbo new-data)   ; update (re-uploaded on next draw)
-
-; Vertex shader using attribute inputs:
-(define prog (make-gl-shader vert-src frag-src))
-
-; Draw with attributes: (name . (buffer n-components stride-floats offset-floats))
-(gl-shader-draw-arrays! prog painter vertex-count 'points
-  `((u_mvp . ,mvp-mat4))                        ; uniforms alist
-  `((a_pos   . (,vbo 3 6 0))                    ; attribs alist
-    (a_color . (,vbo 3 6 3))))
-
-; Primitives: 'points 'lines 'line-strip 'triangles 'triangle-strip 'triangle-fan
-; mat4 uniform: pass a 16-element Scheme vector (column-major)
-```
-
-**Framebuffer objects (FBO)** — offscreen render-to-texture for post-processing:
-```scheme
-(define fbo (make-gl-framebuffer 1920 1080))
-
-; In canvas-on-resize! handler:
-(canvas-on-resize! canvas (lambda (w h) (gl-framebuffer-resize! fbo w h)))
-
-; In draw callback — two-pass rendering:
-(canvas-on-draw! canvas (lambda (painter w h)
-  ; Pass 1: render scene to FBO
-  (gl-shader-to! scene-prog fbo painter scene-uniforms)
-  ; Pass 2: post-process FBO texture to screen
-  (gl-shader-draw! post-prog painter
-    `((u_scene . ,(gl-framebuffer-texture fbo))
-      (u_blur  . ,blur-amount)))))
-
-(gl-framebuffer-texture fbo)     ; → gl-texture (use as sampler2D uniform)
-(gl-framebuffer-resize! fbo w h) ; resize after window resize
-```
-
-4D projection math is also included (pure C++, no Qt dependency): `project_4d_to_3d` uses perspective division on the w-axis. Scheme API: `make-4d-projector`, `project-4d`, `rotate-4d-xw`.
-
-Cross-platform: Linux X11/Wayland (OpenGL 3.3+ Core Profile via Mesa/NVIDIA/AMD), macOS (OpenGL 4.1 Core Profile), Windows (D3D/ANGLE). On Linux in VMs or CI without GPU passthrough, Mesa llvmpipe provides software OpenGL 3.3; `(qt-gpu? canvas)` returns `#f` when `initializeGL` was never called (no display), allowing scripts to detect and warn.
-
-macOS notes: modules build as `.so` bundles (`MODULE` type). The main binary uses `ENABLE_EXPORTS ON` (`-rdynamic` / `-Wl,-export_dynamic`). Module `.so` targets link with `-undefined dynamic_lookup` so `curry_*` symbols resolve from the main binary at `dlopen` time.
+macOS: modules build as `.so` bundles with `-undefined dynamic_lookup`; main binary uses `ENABLE_EXPORTS ON`.
 
 ## Public embedding API (`include/curry.h`, `src/api.c`)
 
-Thin wrappers around internal types for use from C extension modules. Key functions: `curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. These live in `curry_core` and resolve via `--export-dynamic`.
+`curry_define_fn`, `curry_define_val`, `curry_make_fixnum`, `curry_make_string`, `curry_make_pair`, `curry_call`, `curry_error`. Live in `curry_core`, resolve via `--export-dynamic`.
 
 ## Parallel map, reduce, and for-each (`src/builtins_curry.c`, `src/workpool.c`)
 
-`map` and `reduce` dispatch to a parallel implementation when the list exceeds `map_par_threshold` (default 8). `for-each/par` is an explicit opt-in parallel variant for independent side effects. `for-each` itself stays always sequential.
-
-Parallelism is handled by a **persistent thread pool with Chase-Lev work-stealing deques** (`src/workpool.h`, `src/workpool.c`). The pool is created once at startup (`pool_init()` called from `builtins_curry_register()`), with `hw_concurrency()` worker threads that call `gc_register_thread()` + `vm_init()` once and then loop for the process lifetime. This eliminates the ~1 ms per-call thread-spawn overhead of the previous approach.
-
-Work is split into `min(n, n_workers × 4)` chunks (4× oversubscription for load balancing) and distributed round-robin across worker deques. Each deque is a lock-free Chase-Lev structure: the owner pushes/pops from the bottom (LIFO, cache-warm), thieves CAS the top (FIFO, oldest-first). Workers with empty deques attempt to steal from random victims before parking on a `park_cond` condvar.
-
-Exceptions propagate back to the caller: each `WorkItem` has `bool error` and `val_t exn`; the worker sets these and signals completion normally; the dispatcher re-raises after all chunks are done.
-
-Sequential variants `map/seq` and `reduce/seq` bypass the pool entirely. `(hardware-concurrency)` returns the logical CPU count used by the pool.
-
-`reduce` requires a true identity element: each worker initialises its accumulator to its first element (not to `identity`), so `identity` is applied once total (to combine per-chunk accumulators), not once per chunk. `(reduce + 0 '(1 2 3)) = 6` and `(reduce + 0 '()) = 0` both work correctly.
+`map` and `reduce` go parallel above `map_par_threshold` (default 8); `for-each/par` is the explicit parallel variant. Backed by a persistent Chase-Lev work-stealing thread pool (`hw_concurrency()` workers). Sequential variants: `map/seq`, `reduce/seq`. `(hardware-concurrency)` returns the pool size. `reduce` identity is applied once total, not per-chunk.
 
 ## Adding a new built-in procedure
 
-In `src/builtins.c`, write a `PrimFn` with signature `val_t fn(int argc, val_t *argv, void *ud)` and register it with `DEF("name", fn, min_args, max_args)` inside `builtins_register()`.
+In `src/builtins.c`, write `val_t fn(int argc, val_t *argv, void *ud)` and register with `DEF("name", fn, min_args, max_args)` inside `builtins_register()`.
 
 ## Adding a new C module
 
 1. Create `modules/<name>/<name>.c` (or `.cpp`).
-2. Implement `void curry_module_init(CurryVM *vm)` calling `curry_define_fn` / `curry_define_val`.
-3. Add a `curry_c_module(<name>)` (or `curry_cxx_module`) call in `CMakeLists.txt` under the appropriate `option` guard.
-4. Load from Scheme with `(import (curry <name>))`.
+2. Implement `void curry_module_init(CurryVM *vm)`.
+3. Add `curry_c_module(<name>)` in `CMakeLists.txt` under the appropriate `option` guard.
+4. Load with `(import (curry <name>))`.
 
 ## MCP server module (`modules/mcp/mcp.c`)
 
-Curry scripts can be offered as [Model Context Protocol](https://modelcontextprotocol.io/) servers, making
-their tools callable by Claude Code and other MCP clients.  Two transports are supported:
-
-- **stdio** — one client per process, JSON-RPC 2.0 over stdin/stdout.  Used by Claude Code's `mcpServers` config.
-- **SSE** — HTTP + Server-Sent Events, multiple concurrent clients.  `GET /sse` opens a stream; `POST /message?sessionId=X` sends requests; responses arrive via the SSE stream.
-
-### Scheme API
-
-```scheme
-(import (curry mcp))
-
-; Register a tool.
-; schema is an alist: ((param-name . ((type . "string") (description . "...") ...)) ...)
-; Required params have no (default . ...) entry.  Optional ones do.
-; handler receives an alist of (symbol . value) pairs — one per param.
-(mcp-tool name description schema handler)
-
-; Register a resource (static or dynamic URI).
-; handler receives the URI string and must return (mcp-text ...) or (mcp-json ...).
-(mcp-resource uri description handler)
-
-; Return a plain-text result from a tool or resource handler.
-(mcp-text string)
-
-; Return a pre-serialised JSON result.
-(mcp-json string)
-
-; Emit a progress notification during a long tool call.
-; Fraction = current/total.  message is an optional status string.
-(mcp-notify-progress current total message)
-
-; --- Authentication (call before mcp-serve-sse; no-op for stdio) ---
-; Select mode: 'none (default), 'self-contained, 'introspect, or 'jwt
-(mcp-auth-mode! 'self-contained)
-
-; Mode A — self-contained (server issues tokens via POST /token)
-(mcp-register-client! "client-id" "client-secret")
-(mcp-token-ttl! 3600)                ; optional token lifetime in seconds
-
-; Mode B1 — introspect (RFC 7662 external IdP)
-(mcp-introspection-endpoint! "https://auth.example.com/oauth2/introspect")
-(mcp-introspection-credentials! "rs-id" "rs-secret")  ; optional client auth
-(mcp-introspection-cache-ttl! 60)    ; cache TTL in seconds
-
-; Mode B2 — jwt (RFC 7519 local validation)
-(mcp-jwt-algorithm! 'hs256)          ; or 'rs256
-(mcp-jwt-secret! "hmac-secret")      ; HS256
-(mcp-jwt-public-key! "/path/to/pub.pem")     ; RS256: from file
-(mcp-jwt-public-key-pem! "-----BEGIN...")    ; RS256: inline PEM
-(mcp-jwt-issuer!   "https://auth.example.com")  ; optional iss check
-(mcp-jwt-audience! "my-mcp-server")             ; optional aud check
-
-; --- Transports ---
-; stdio — blocks reading JSON-RPC from stdin, writing to stdout.
-(mcp-serve)                         ; defaults to name "curry-mcp"
-(mcp-serve name version)
-
-; SSE — HTTP server on port, blocks forever, supports many clients.
-; Each client GETs /sse to open a stream, then POSTs to /message?sessionId=X.
-; When self-contained mode is active, POST /token issues access tokens.
-(mcp-serve-sse port)
-(mcp-serve-sse port name)
-(mcp-serve-sse port name version)
-```
-
-### Schema format
-
-Each parameter entry is an alist with these keys:
-
-| Key | Required | Notes |
-|-----|----------|-------|
-| `type` | yes | `"string"`, `"number"`, `"integer"`, `"boolean"`, `"array"`, `"object"` |
-| `description` | yes | Shown in tool descriptions |
-| `default` | no | Makes the parameter optional (absent → required) |
-
-Parameters without `default` are listed under `required` in the emitted JSON Schema.
-
-### Handler argument alist
-
-The handler lambda receives one argument: an alist of `(symbol . value)` pairs.
-Values are decoded from the JSON call arguments:
-
-- JSON string → Scheme string
-- JSON number → Scheme number (exact integer if no decimal point, flonum otherwise)
-- JSON boolean → `#t` / `#f`
-- JSON array → Scheme list
-- JSON null → `'()`
-
-Use `(assq 'param-name args)` to retrieve values, or the idioms:
-
-```scheme
-(define (arg  args name)         (cdr (assq name args)))
-(define (arg? args name default) (let ((p (assq name args))) (if p (cdr p) default)))
-```
-
-### Connecting from Claude Code
-
-**stdio** (one client, spawned per session):
-
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "command": "/path/to/build/curry",
-      "args":    ["/path/to/examples/mcp_math.scm"]
-    }
-  }
-}
-```
-
-**SSE** (persistent process, many clients):
-
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "url": "http://localhost:8080/sse"
-    }
-  }
-}
-```
-
-Start the SSE server with `(mcp-serve-sse 8080)` in the script.  A `[mcp] SSE server listening on port N` line is printed to stderr when ready.
-
-### Example servers
-
-| File | Description |
-|------|-------------|
-| `examples/mcp_server.scm` | Minimal demo: eval, factorial, stateful define, count-to with progress |
-| `examples/mcp_math.scm` | Symbolic CAS: diff, simplify, substitute, evaluate, auto-diff, Taylor series |
-| `examples/mcp_nbody.scm` | N-body gravity in D spatial dimensions (D may be non-integer) |
-
-### Protocol notes
-
-- **stdio** — newline-delimited JSON-RPC 2.0; one client only; dispatch is synchronous.
-- **SSE** — one thread per HTTP connection; up to 32 concurrent sessions (compile-time `MAX_SESSIONS`); tool calls are serialised by a mutex (Scheme evaluator is not re-entrant); progress notifications are routed to the correct session's stream; keepalive comments sent every 15 s.
-- Tool errors (caught exceptions) are returned as JSON-RPC error responses; the server continues running normally after an error.
-- Global Scheme state persists across calls for the lifetime of the server process.
-- `(self)` is not available from tool handlers (main thread is not an actor).
+Curry scripts serve as [Model Context Protocol](https://modelcontextprotocol.io/) servers. Two transports: **stdio** (one client, JSON-RPC over stdin/stdout) and **SSE** (HTTP + Server-Sent Events, up to 32 concurrent clients). Auth modes: `none`, `self-contained`, `introspect` (RFC 7662), `jwt` (RFC 7519). Entry points: `mcp-tool`, `mcp-resource`, `mcp-serve`, `mcp-serve-sse`. Examples in `examples/mcp_*.scm`. See `docs/reference/module-mcp.md`.
 
 ## Neo4j module (`modules/neo4j/neo4j.c`)
 
-Fully implemented. Uses the **raw Bolt 4.x/5.x protocol** with PackStream binary encoding — no `libneo4j-client` dependency. Modelled on the Redis module.
-
-Key points:
-- Bolt version negotiated at connect time; proposes 5.4, 5.0, and the 4.0–4.4 range.
-- Bolt 5.1+ authentication uses split HELLO / LOGON; earlier versions use combined HELLO.
-- Queries use `RUN` + `PULL`; transactions use `BEGIN`/`COMMIT`/`ROLLBACK`.
-- No external C dependencies beyond the standard socket API.
-- Enable with `-DBUILD_MODULE_NEO4J=ON`; documented in `docs/reference/module-neo4j.md`.
+Raw Bolt 4.x/5.x protocol with PackStream encoding — no `libneo4j-client` dependency. Bolt version negotiated at connect time; Bolt 5.1+ uses split HELLO/LOGON. Enable with `-DBUILD_MODULE_NEO4J=ON`. See `docs/reference/module-neo4j.md`.
 
 ## R6RS compatibility
 
-Curry supports a practical subset of R6RS sufficient to run R6RS library code without modification.
-
-### What is supported
-
-- **`library` form** — R6RS `(library (name) (export ...) (import ...) body...)` is a recognised special form. Body forms are inline (not wrapped in `begin`), matching the R6RS spec. Libraries self-register by name, and the module loader defers to that registration.
-
-- **`(rnrs)` and sub-libraries** — `(import (rnrs))`, `(import (rnrs base))`, `(import (rnrs lists))`, `(import (rnrs io simple))`, `(import (rnrs records syntactic))`, `(import (rnrs arithmetic bitwise))`, etc. all resolve as aliases for the global environment. R6RS and R7RS procedure names are almost entirely identical.
-
-- **R6RS `define-record-type`** — the `(fields (mutable f) ...)` / `(fields (immutable f) ...)` syntax is detected automatically and auto-generates `make-<name>`, `<name>?`, `<name>-<field>`, and `<name>-<field>-set!`. The R7RS form (explicit constructor, predicate, and field specs) continues to work unchanged.
-
-- **Import filters** — `(only ...)`, `(except ...)`, `(rename ...)`, `(prefix ...)` work with `(rnrs ...)` library names as well as `(scheme ...)` and `(curry ...)` names.
-
-- **`(for lib phase)` wrappers** — the phase annotation is stripped and the library is imported unconditionally. Compile-time vs run-time phase distinction is not meaningful in an interpreter.
-
-- **SRFI-27 random numbers** — `random-real`, `random-integer`, `default-random-source`, `random-source-randomize!`, `make-random-source`, `random-source->random-real`. Uses xoshiro256+ seeded from `/dev/urandom`.
-
-### What is not (yet) supported
-
-- **`syntax-case`** and **`identifier-syntax`** — R6RS procedural macro system. `define-syntax`/`syntax-rules` works; the full `syntax-case` transformer protocol does not.
-- **`(for lib (meta 1))` phase imports** — the phase is ignored (library is imported at run time), so macros that depend on compile-time bindings may not expand correctly.
-- **R6RS condition system** — `(rnrs conditions)` is aliased to the global env, but the R6RS condition hierarchy (`&error`, `&violation`, etc.) is not separately implemented.
-- **`.sps` top-level program files** — R6RS programs use a `(import ...)` form at the top level without a `library` wrapper. This works in curry if the imports resolve; the `.sps` file extension has no special treatment.
+Supported: `library` form, `(rnrs)` sub-library aliases, R6RS `define-record-type` (`fields (mutable/immutable …)`), import filters (`only`, `except`, `rename`, `prefix`), `(for lib phase)` (phase stripped), SRFI-27 random numbers. Not supported: `syntax-case`, `identifier-syntax`, R6RS condition hierarchy, `.sps` phase semantics.
 
 ## R7RS compliance gaps
 
-The following standard procedures are **not yet implemented**. Everything else in `(scheme base)`, `(scheme char)`, `(scheme file)`, `(scheme inexact)`, `(scheme complex)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, and `(scheme write)` is present.
-
-### Needs new port infrastructure (`src/port.c`)
-
-- `open-input-bytevector`, `open-output-bytevector`, `get-output-bytevector` — bytevector ports (analogous to string ports which already exist; `port_get_output_bytevector` is declared in `port.h` but not implemented)
-
-### Needs cycle detection
-
-- `write-shared` — like `write` but labels shared/cyclic structure with `#0=`/`#0#` datum labels; requires a pointer→label hash table pass before printing
-
-### Needs `src/main.c` change
-
-- `command-line` — R7RS requires a list of **strings**; currently `command-line-args` stores **symbols** (interned via `sym_intern_cstr`). Fix: store with `scm_make_string` instead, then alias `command-line` to `command-line-args`.
-
-### Known limitation in implemented procedures
-
-- `string-set!` and `string-copy!` only work correctly when the replacement character has the same UTF-8 byte width as the original (1–4 bytes). Replacing an ASCII character with a multi-byte one (or vice versa) raises an error, because curry strings are stored as a flat UTF-8 byte array with no room to grow. Full fix requires either a UCS-4 (fixed-width) internal representation or an indirect `char *` pointer in `String`.
-
-### Deferred by design
-
-- Full first-class continuations (`call/cc` beyond upward escape) — requires a copying or CPS-transformed evaluator; the current tree-walker with `setjmp`/`longjmp` only supports escape continuations.
+Not yet implemented:
+- `open-input-bytevector`, `open-output-bytevector`, `get-output-bytevector` — bytevector ports (`port_get_output_bytevector` declared but not implemented in `src/port.c`)
+- `write-shared` — needs pointer→label hash table for shared/cyclic datum labels
+- `command-line` — currently `command-line-args` stores symbols; needs `scm_make_string` + alias
+- `string-set!` / `string-copy!` — only correct when replacement char has same UTF-8 byte width (flat UTF-8 storage)
+- Full first-class continuations — requires CPS or copying evaluator; current `setjmp`/`longjmp` supports upward-only escape
 
 ## Akkadian error messages
 
-All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) selected by keyword-matching the error string against `akkadian_table[]` in `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms registered in `src/akkadian_names.h` and translated transparently in `eval()` — Akkadian code is valid Curry Scheme.
+All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) from `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms in `src/akkadian_names.h`; `eval()` translates them transparently — Akkadian code is valid Curry Scheme.
