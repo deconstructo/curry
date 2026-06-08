@@ -50,7 +50,7 @@ static mpfr_prec_t un_prec(val_t a) {
 /* ---------------------------------------------------------------------- */
 
 val_t mpfr_make(mpfr_prec_t prec) {
-    Mpfr *m = CURRY_NEW_ATOM(Mpfr);
+    Mpfr *m = CURRY_NEW_PINNED_ATOM(Mpfr);
     m->hdr.type  = T_MPFR;
     m->hdr.flags = 0;
     mpfr_init2(m->x, prec);

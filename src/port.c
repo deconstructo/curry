@@ -13,7 +13,7 @@ extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn)
 val_t PORT_STDIN, PORT_STDOUT, PORT_STDERR;
 
 static val_t make_port(int flags) {
-    Port *p = CURRY_NEW(Port);
+    Port *p = CURRY_NEW_PINNED(Port);
     p->hdr.type  = T_PORT;
     p->hdr.flags = 0;
     p->flags     = (uint8_t)flags;
@@ -62,7 +62,7 @@ val_t port_open_file(const char *path, int flags) {
 val_t port_open_input_string(const char *str, uint32_t len) {
     val_t v = make_port(PORT_INPUT | PORT_STRING);
     Port *p = as_port(v);
-    p->u.str.buf = (char *)gc_alloc_atomic(len + 1);
+    p->u.str.buf = (char *)gc_alloc_raw_pinned_atomic(len + 1);
     memcpy(p->u.str.buf, str, len);
     p->u.str.buf[len] = '\0';
     p->u.str.pos = 0;
@@ -75,7 +75,7 @@ val_t port_open_output_string(void) {
     val_t v = make_port(PORT_OUTPUT | PORT_STRING);
     Port *p = as_port(v);
     p->u.str.cap = 64;
-    p->u.str.buf = (char *)gc_alloc_atomic(64);
+    p->u.str.buf = (char *)gc_alloc_raw_pinned_atomic(64);
     p->u.str.buf[0] = '\0';  /* gc_alloc_atomic doesn't zero memory */
     p->u.str.pos = 0;
     p->u.str.len = 0;
@@ -169,7 +169,7 @@ void port_write_char(val_t v, int cp) {
     if (p->flags & PORT_STRING) {
         while (p->u.str.len + (size_t)len + 1 >= p->u.str.cap) {
             p->u.str.cap *= 2;
-            char *nb = (char *)gc_alloc_atomic(p->u.str.cap);
+            char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
             memcpy(nb, p->u.str.buf, p->u.str.len);
             p->u.str.buf = nb;
         }
@@ -187,7 +187,7 @@ void port_write_string(val_t v, const char *s, uint32_t len) {
     if (p->flags & PORT_STRING) {
         while (p->u.str.len + len + 1 >= p->u.str.cap) {
             p->u.str.cap *= 2;
-            char *nb = (char *)gc_alloc_atomic(p->u.str.cap);
+            char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
             memcpy(nb, p->u.str.buf, p->u.str.len);
             p->u.str.buf = nb;
         }

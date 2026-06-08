@@ -18,14 +18,14 @@ static _Atomic uint64_t next_actor_id = 1;
 /* ---- Mailbox ---- */
 
 static Mailbox *mailbox_new(void) {
-    Mailbox *m = CURRY_NEW(Mailbox);
+    Mailbox *m = CURRY_NEW_PINNED(Mailbox);
     m->hdr.type  = T_MAILBOX;
     m->hdr.flags = 0;
     pthread_mutex_init(&m->mutex, NULL);
     pthread_cond_init(&m->cond, NULL);
     m->q.cap  = 8;
     m->q.head = m->q.tail = 0;
-    m->q.msgs = (val_t *)gc_alloc(8 * sizeof(val_t));
+    m->q.msgs = (val_t *)gc_alloc_raw_pinned(8 * sizeof(val_t));
     return m;
 }
 
@@ -35,7 +35,7 @@ static void mailbox_push(Mailbox *m, val_t msg) {
     if (next == m->q.head) {
         /* Grow */
         size_t new_cap = m->q.cap * 2;
-        val_t *new_msgs = (val_t *)gc_alloc(new_cap * sizeof(val_t));
+        val_t *new_msgs = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
         size_t i = 0, j = m->q.head;
         while (j != m->q.tail) { new_msgs[i++] = m->q.msgs[j]; j = (j + 1) % m->q.cap; }
         m->q.msgs = new_msgs;
@@ -126,7 +126,7 @@ void actors_init(void) {
 }
 
 val_t actor_spawn(val_t closure, val_t args) {
-    Actor *a = CURRY_NEW(Actor);
+    Actor *a = CURRY_NEW_PINNED(Actor);
     a->hdr.type  = T_ACTOR;
     a->hdr.flags = 0;
     a->id        = atomic_fetch_add(&next_actor_id, 1);
@@ -137,7 +137,7 @@ val_t actor_spawn(val_t closure, val_t args) {
     a->alive     = true;
     pthread_mutex_init(&a->lock, NULL);
 
-    ActorStart *start = (ActorStart *)gc_alloc(sizeof(ActorStart));
+    ActorStart *start = (ActorStart *)gc_alloc_raw_pinned(sizeof(ActorStart));
     start->actor   = a;
     start->closure = closure;
     start->args    = args;

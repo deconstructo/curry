@@ -37,7 +37,7 @@ static void frame_build_hash(EnvFrame *f) {
     /* hcap = smallest power-of-2 >= size * 2 (≤ 75% load) */
     uint32_t hcap = 4;
     while (hcap < f->size * 2) hcap <<= 1;
-    uint32_t *hidx = (uint32_t *)gc_alloc_atomic(hcap * sizeof(uint32_t));
+    uint32_t *hidx = (uint32_t *)gc_alloc_raw_pinned_atomic(hcap * sizeof(uint32_t));
     memset(hidx, 0xFF, hcap * sizeof(uint32_t)); /* UINT32_MAX = empty */
     for (uint32_t i = 0; i < f->size; i++)
         hash_insert(hidx, hcap, f->syms, i);
@@ -54,7 +54,7 @@ static void frame_hash_rehash(EnvFrame *f) {
         return;
     }
     /* Need larger table */
-    uint32_t *hidx = (uint32_t *)gc_alloc_atomic(hcap * sizeof(uint32_t));
+    uint32_t *hidx = (uint32_t *)gc_alloc_raw_pinned_atomic(hcap * sizeof(uint32_t));
     memset(hidx, 0xFF, hcap * sizeof(uint32_t));
     for (uint32_t i = 0; i < f->size; i++)
         hash_insert(hidx, hcap, f->syms, i);
@@ -70,8 +70,8 @@ EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
     f->hdr.flags = 0;
     f->size   = 0;
     f->cap    = cap ? cap : 8;
-    f->syms   = (val_t *)gc_alloc(f->cap * sizeof(val_t));
-    f->vals   = (val_t *)gc_alloc(f->cap * sizeof(val_t));
+    f->syms   = (val_t *)gc_alloc_raw_pinned(f->cap * sizeof(val_t));
+    f->vals   = (val_t *)gc_alloc_raw_pinned(f->cap * sizeof(val_t));
     f->parent = parent;
     f->hidx   = NULL;
     f->hcap   = 0;
@@ -81,8 +81,8 @@ EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
 
 static void frame_grow(EnvFrame *f) {
     uint32_t new_cap = f->cap * 2;
-    val_t *ns = (val_t *)gc_alloc(new_cap * sizeof(val_t));
-    val_t *nv = (val_t *)gc_alloc(new_cap * sizeof(val_t));
+    val_t *ns = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
+    val_t *nv = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     memcpy(ns, f->syms, f->size * sizeof(val_t));
     memcpy(nv, f->vals, f->size * sizeof(val_t));
     f->syms = ns; f->vals = nv; f->cap = new_cap;

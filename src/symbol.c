@@ -66,7 +66,7 @@ val_t sym_intern(const char *name, uint32_t len) {
     }
 
     /* Not found: allocate new symbol (atomic: no interior GC pointers) */
-    Symbol *sym = (Symbol *)gc_alloc_atomic(sizeof(Symbol) + len + 1);
+    Symbol *sym = (Symbol *)gc_alloc_pinned_atomic(sizeof(Symbol) + len + 1);
     sym->hdr.type  = T_SYMBOL;
     sym->hdr.flags = 0;
     sym->len  = len;

@@ -30,7 +30,7 @@ int pool_hw_concurrency(void) {
 /* ── Chase-Lev deque ────────────────────────────────────────────────────── */
 
 static void deque_init(WSDeque *d) {
-    d->buf = gc_alloc(DEQUE_CAP * sizeof(WorkItem *));
+    d->buf = gc_alloc_raw_pinned(DEQUE_CAP * sizeof(WorkItem *));
     atomic_init(&d->bottom, 0);
     atomic_init(&d->top,    0);
 }
@@ -186,8 +186,8 @@ void pool_init(void) {
     int n = pool_hw_concurrency();
     global_pool = CURRY_NEW(WorkPool);
     global_pool->n_workers = n;
-    global_pool->threads   = gc_alloc(n * sizeof(pthread_t));
-    global_pool->deques    = gc_alloc(n * sizeof(WSDeque));
+    global_pool->threads   = gc_alloc_raw_pinned(n * sizeof(pthread_t));
+    global_pool->deques    = gc_alloc_raw_pinned(n * sizeof(WSDeque));
     atomic_init(&global_pool->shutdown, false);
     atomic_init(&global_pool->n_parked, 0);
     pthread_mutex_init(&global_pool->park_mutex, NULL);
@@ -215,7 +215,7 @@ WorkItem **pool_submit(WorkKind kind, val_t fn,
                                     ? n : nw * OVERSUBSCRIPTION);
     *nchunks_out = nchunks;
 
-    WorkItem **items = gc_alloc(nchunks * sizeof(WorkItem *));
+    WorkItem **items = gc_alloc_raw_pinned(nchunks * sizeof(WorkItem *));
 
     int pos = 0;
     for (int c = 0; c < nchunks; c++) {

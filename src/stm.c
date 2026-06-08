@@ -70,10 +70,10 @@ static _Thread_local TxState *current_tx = NULL;
 /* ---- TxState helpers ---- */
 
 static TxState *tx_new(void) {
-    TxState *tx = CURRY_NEW(TxState);
-    tx->rset = gc_alloc(TX_INIT_CAP * sizeof(REntry));
+    TxState *tx = (TxState *)gc_alloc_raw_pinned(sizeof(TxState));
+    tx->rset = gc_alloc_raw_pinned(TX_INIT_CAP * sizeof(REntry));
     tx->rcap = TX_INIT_CAP;
-    tx->wset = gc_alloc(TX_INIT_CAP * sizeof(WEntry));
+    tx->wset = gc_alloc_raw_pinned(TX_INIT_CAP * sizeof(WEntry));
     tx->wcap = TX_INIT_CAP;
     return tx;
 }
@@ -89,7 +89,7 @@ static void rset_add(TxState *tx, TVar *tv, uint64_t ver) {
         if (tx->rset[i].tv == tv) return;
     if (tx->rlen == tx->rcap) {
         size_t nc  = tx->rcap * 2;
-        REntry *nb = gc_alloc(nc * sizeof(REntry));
+        REntry *nb = gc_alloc_raw_pinned(nc * sizeof(REntry));
         memcpy(nb, tx->rset, tx->rlen * sizeof(REntry));
         tx->rset = nb;
         tx->rcap = nc;
@@ -109,7 +109,7 @@ static void wset_put(TxState *tx, TVar *tv, val_t val) {
     }
     if (tx->wlen == tx->wcap) {
         size_t nc  = tx->wcap * 2;
-        WEntry *nb = gc_alloc(nc * sizeof(WEntry));
+        WEntry *nb = gc_alloc_raw_pinned(nc * sizeof(WEntry));
         memcpy(nb, tx->wset, tx->wlen * sizeof(WEntry));
         tx->wset = nb;
         tx->wcap = nc;
@@ -199,7 +199,7 @@ void stm_init(void) {
 }
 
 val_t stm_make_tvar(val_t init) {
-    TVar *tv = CURRY_NEW(TVar);
+    TVar *tv = CURRY_NEW_PINNED(TVar);
     tv->hdr.type  = T_TVAR;
     tv->hdr.flags = 0;
     tv->value     = init;

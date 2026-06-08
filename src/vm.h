@@ -17,6 +17,7 @@
  * Closed: location points to the closed field within this struct
  */
 typedef struct Upvalue {
+    Hdr            hdr;      /* type = T_UPVALUE; must be first           */
     val_t        *location; /* points to the live value                  */
     val_t         closed;   /* storage once closed off the stack         */
     struct Upvalue *next;   /* intrusive list of open upvalues           */

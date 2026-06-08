@@ -51,6 +51,23 @@ typedef struct gc_ops {
      */
     void *(*alloc)(size_t bytes, bool has_ptrs);
 
+    /*
+     * Allocate a TYPED heap object that must never be moved by a copying GC.
+     * Use for objects with embedded mutexes, GMP data, FILE*, or jmp_buf.
+     * When has_ptrs=true the object is added to the semispace pinned-list so
+     * its val_t fields are scanned during collection; when false it is not.
+     * Under Boehm this is identical to alloc().
+     */
+    void *(*alloc_pinned)(size_t bytes, bool has_ptrs);
+
+    /*
+     * Allocate an UNTYPED raw array (no Hdr, no ObjType) in non-moving space.
+     * Use for val_t[], uint32_t[], uint8_t[] helper arrays owned by a heap
+     * object.  Never added to the pinned-list.
+     * Under Boehm identical to alloc().
+     */
+    void *(*alloc_raw_pinned)(size_t bytes, bool has_ptrs);
+
     /* Trigger a collection cycle. */
     void  (*collect)(void);
 
@@ -105,6 +122,7 @@ void *gc_nursery_refill(size_t n, bool has_ptrs);
 #ifdef __cplusplus
 extern "C" {
     void *gc_alloc_impl(size_t n, int has_ptrs);
+    void *gc_alloc_pinned_impl(size_t n, int has_ptrs);
 }
 #endif
 
@@ -143,20 +161,35 @@ size_t gc_total_bytes(void);
 /* ── Convenience wrappers (keep same names so call sites don't change) ────── */
 
 #ifdef __cplusplus
-static inline void *gc_alloc(size_t n)        { return gc_alloc_impl(n, 1); }
-static inline void *gc_alloc_atomic(size_t n) { return gc_alloc_impl(n, 0); }
+static inline void *gc_alloc(size_t n)               { return gc_alloc_impl(n, 1); }
+static inline void *gc_alloc_atomic(size_t n)        { return gc_alloc_impl(n, 0); }
+static inline void *gc_alloc_pinned(size_t n)        { return gc_alloc_pinned_impl(n, 1); }
+static inline void *gc_alloc_pinned_atomic(size_t n) { return gc_alloc_pinned_impl(n, 0); }
+static inline void *gc_alloc_raw_pinned(size_t n)        { return gc_ops->alloc_raw_pinned(n, true);  }
+static inline void *gc_alloc_raw_pinned_atomic(size_t n) { return gc_ops->alloc_raw_pinned(n, false); }
 #else
-static inline void *gc_alloc(size_t n)        { return gc_nursery_alloc(n, true);  }
-static inline void *gc_alloc_atomic(size_t n) { return gc_nursery_alloc(n, false); }
+static inline void *gc_alloc(size_t n)               { return gc_nursery_alloc(n, true);  }
+static inline void *gc_alloc_atomic(size_t n)        { return gc_nursery_alloc(n, false); }
+static inline void *gc_alloc_pinned(size_t n)        { return gc_ops->alloc_pinned(n, true);  }
+static inline void *gc_alloc_pinned_atomic(size_t n) { return gc_ops->alloc_pinned(n, false); }
+static inline void *gc_alloc_raw_pinned(size_t n)        { return gc_ops->alloc_raw_pinned(n, true);  }
+static inline void *gc_alloc_raw_pinned_atomic(size_t n) { return gc_ops->alloc_raw_pinned(n, false); }
 #endif
-static inline void  gc_collect(void)          { gc_ops->collect();                  }
+static inline void  gc_collect(void)                 { gc_ops->collect(); }
 
-/* ── Allocation macros (unchanged API) ────────────────────────────────────── */
+/* ── Allocation macros ────────────────────────────────────────────────────── */
 
-#define CURRY_NEW(T)                  ((T *)gc_alloc(sizeof(T)))
-#define CURRY_NEW_FLEX(T, n)          ((T *)gc_alloc(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
-#define CURRY_NEW_ATOM(T)             ((T *)gc_alloc_atomic(sizeof(T)))
-#define CURRY_NEW_FLEX_ATOM(T, n)     ((T *)gc_alloc_atomic(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+/* Standard (semispace-eligible): */
+#define CURRY_NEW(T)              ((T *)gc_alloc(sizeof(T)))
+#define CURRY_NEW_FLEX(T, n)      ((T *)gc_alloc(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+#define CURRY_NEW_ATOM(T)         ((T *)gc_alloc_atomic(sizeof(T)))
+#define CURRY_NEW_FLEX_ATOM(T, n) ((T *)gc_alloc_atomic(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+
+/* Pinned typed objects (never moved; under Boehm same as above): */
+#define CURRY_NEW_PINNED(T)              ((T *)gc_alloc_pinned(sizeof(T)))
+#define CURRY_NEW_FLEX_PINNED(T, n)      ((T *)gc_alloc_pinned(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+#define CURRY_NEW_PINNED_ATOM(T)         ((T *)gc_alloc_pinned_atomic(sizeof(T)))
+#define CURRY_NEW_FLEX_PINNED_ATOM(T, n) ((T *)gc_alloc_pinned_atomic(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
 
 /* ── Root registration helpers ────────────────────────────────────────────── */
 
@@ -164,5 +197,23 @@ static inline void gc_pin(void *obj)               { gc_ops->pin(obj);   }
 static inline void gc_unpin(void *obj)             { gc_ops->unpin(obj); }
 static inline void gc_register_root(void *slot)    { gc_ops->register_root(slot);   }
 static inline void gc_unregister_root(void *slot)  { gc_ops->unregister_root(slot); }
+
+/*
+ * Register a raw C pointer (not a val_t) that may point to a semispace object.
+ * The GC updates *rawptr after collection if the target was moved.
+ * No-op under Boehm.  rawptr must be stable (not itself in the semispace).
+ */
+void gc_register_rawptr(void **rawptr);
+void gc_unregister_rawptr(void **rawptr);
+
+/*
+ * Register a VM value stack as a bulk root range.
+ * base: fixed bottom of the val_t[] stack.
+ * sp_ptr: pointer to the stack pointer (volatile — advances with each push).
+ * The GC scans [base, *sp_ptr) on every collection.
+ * No-op under Boehm.
+ */
+void gc_register_stack(void *base, void **sp_ptr);
+void gc_unregister_stack(void *base);
 
 #endif /* CURRY_GC_H */

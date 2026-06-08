@@ -48,8 +48,8 @@ val_t quantum_from_pairs(val_t pair_list) {
     while (vis_pair(p)) { n++; p = vcdr(p); }
     if (n == 0) scm_raise(V_FALSE, "superpose: empty state list");
 
-    val_t *amps = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-    val_t *vals = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *amps = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+    val_t *vals = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
 
     p = pair_list;
     for (int i = 0; i < n; i++) {
@@ -88,8 +88,8 @@ val_t quantum_uniform(val_t value_list) {
     if (n == 0) scm_raise(V_FALSE, "quantum-uniform: empty list");
 
     double amp = 1.0 / sqrt((double)n);
-    val_t *amps = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-    val_t *vals = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *amps = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+    val_t *vals = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     p = value_list;
     for (int i = 0; i < n; i++) {
         amps[i] = num_make_float(amp);
@@ -116,8 +116,8 @@ val_t quantum_observe(val_t q) {
 
 val_t quantum_map_fn(val_t q, val_t (*fn)(val_t, void *), void *ud) {
     Quantum *qv = as_quantum(q);
-    val_t *amps = (val_t *)gc_alloc((size_t)qv->n * sizeof(val_t));
-    val_t *vals = (val_t *)gc_alloc((size_t)qv->n * sizeof(val_t));
+    val_t *amps = (val_t *)gc_alloc_raw_pinned((size_t)qv->n * sizeof(val_t));
+    val_t *vals = (val_t *)gc_alloc_raw_pinned((size_t)qv->n * sizeof(val_t));
     for (int i = 0; i < qv->n; i++) {
         amps[i] = qv->data[2*i];
         vals[i] = fn(qv->data[2*i+1], ud);
@@ -144,8 +144,8 @@ val_t quantum_superpose(val_t a, val_t b) {
     int na = qa->n, nb = qb->n, n = na + nb;
     /* Scale each by 1/√2 to maintain normalization */
     double scale = 1.0 / sqrt(2.0);
-    val_t *amps = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-    val_t *vals = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *amps = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+    val_t *vals = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < na; i++) {
         amps[i] = num_mul(qa->data[2*i], num_make_float(scale));
         vals[i] = qa->data[2*i+1];

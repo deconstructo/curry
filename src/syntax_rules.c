@@ -112,8 +112,8 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
             int npv = scm_list_length(pvlist);
 
             /* Allocate accumulator arrays (in-order, built by prepend then reverse) */
-            val_t *pnames = npv > 0 ? gc_alloc((size_t)npv * sizeof(val_t)) : NULL;
-            val_t *paccs  = npv > 0 ? gc_alloc((size_t)npv * sizeof(val_t)) : NULL;
+            val_t *pnames = npv > 0 ? gc_alloc_raw_pinned((size_t)npv * sizeof(val_t)) : NULL;
+            val_t *paccs  = npv > 0 ? gc_alloc_raw_pinned((size_t)npv * sizeof(val_t)) : NULL;
             int pi = 0;
             for (val_t pv = pvlist; vis_pair(pv); pv = vcdr(pv), pi++) {
                 pnames[pi] = vcar(pv);
@@ -288,7 +288,7 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     }
     compiled = scm_reverse(compiled);
 
-    SyntaxRulesData *sr = gc_alloc(sizeof(SyntaxRulesData));
+    SyntaxRulesData *sr = gc_alloc_raw_pinned(sizeof(SyntaxRulesData));
     sr->literals = literals;
     sr->rules    = compiled;
 

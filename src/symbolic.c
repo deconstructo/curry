@@ -102,7 +102,7 @@ val_t sx_fn_params(val_t fn) { return as_symfn(fn)->params; }
 val_t sx_make_apply(val_t fn, int nargs, val_t *args) {
     /* SX_APPLY: args[0]=T_SYMFN, args[1..nargs]=applied arguments */
     int total = nargs + 1;
-    val_t *all = (val_t *)gc_alloc((size_t)total * sizeof(val_t));
+    val_t *all = (val_t *)gc_alloc_raw_pinned((size_t)total * sizeof(val_t));
     all[0] = fn;
     for (int i = 0; i < nargs; i++) all[i + 1] = args[i];
     return sx_make_expr(SX_APPLY, total, all);
@@ -216,7 +216,7 @@ val_t sx_simplify(val_t expr) {
         /* Tuple: simplify each component */
         if (vis_tuple(expr)) {
             Tuple *t = as_tuple(expr);
-            val_t *simp = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+            val_t *simp = (val_t *)gc_alloc_raw_pinned((size_t)t->len * sizeof(val_t));
             for (uint32_t i = 0; i < t->len; i++) simp[i] = sx_simplify(t->data[i]);
             return num_make_tuple((int)t->hdr.type, t->len, simp);
         }
@@ -228,7 +228,7 @@ val_t sx_simplify(val_t expr) {
     int n = (int)se->nargs;
 
     /* Recursively simplify all arguments */
-    val_t *sa = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < n; i++) sa[i] = sx_simplify(se->args[i]);
 
     /* Flatten nested ADD or MUL into one level */
@@ -241,7 +241,7 @@ val_t sx_simplify(val_t expr) {
             else total += 1;
         }
         if (total > n) {
-            val_t *flat = (val_t *)gc_alloc((size_t)total * sizeof(val_t));
+            val_t *flat = (val_t *)gc_alloc_raw_pinned((size_t)total * sizeof(val_t));
             int k = 0;
             for (int i = 0; i < n; i++) {
                 if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == op) {
@@ -268,7 +268,7 @@ val_t sx_simplify(val_t expr) {
         val_t num_acc = vfix(0);
         int nsym = 0;
         for (int i = 0; i < n; i++) if (!vis_number(sa[i])) nsym++;
-        val_t *syms = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+        val_t *syms = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
         int j = 0;
         for (int i = 0; i < n; i++) {
             if (vis_number(sa[i])) num_acc = num_add(num_acc, sa[i]);
@@ -285,8 +285,8 @@ val_t sx_simplify(val_t expr) {
                - plain sym-var or sym-expr (not neg, not coeff*base): coeff=1, base=self
                - neg(e):                                               coeff=-1, base=e
                - (* n e) or (nc* n e) where n is numeric, e is non-numeric: coeff=n, base=e */
-            val_t *bases  = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
-            val_t *coeffs = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            val_t *bases  = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
+            val_t *coeffs = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
             for (int i = 0; i < nsym; i++) {
                 val_t s = syms[i];
                 bases[i] = s; coeffs[i] = vfix(1);
@@ -344,8 +344,8 @@ val_t sx_simplify(val_t expr) {
                         /* c*sin²(f) + c*cos²(f) → c */
                         num_acc = num_add(num_acc, ci);
                         size_t new_n = (nsym >= 2) ? (size_t)(nsym - 2) : 0;
-                        val_t *new_syms = new_n ? (val_t *)gc_alloc(new_n * sizeof(val_t))
-                                                : (val_t *)gc_alloc(sizeof(val_t));
+                        val_t *new_syms = new_n ? (val_t *)gc_alloc_raw_pinned(new_n * sizeof(val_t))
+                                                : (val_t *)gc_alloc_raw_pinned(sizeof(val_t));
                         int m = 0;
                         for (int j = 0; j < nsym; j++)
                             if (j != i && j != k2) new_syms[m++] = syms[j];
@@ -363,7 +363,7 @@ val_t sx_simplify(val_t expr) {
             return sx_make_expr(SX_ADD, nsym, syms);
         }
         /* prepend numeric sum */
-        val_t *all = (val_t *)gc_alloc((size_t)(nsym + 1) * sizeof(val_t));
+        val_t *all = (val_t *)gc_alloc_raw_pinned((size_t)(nsym + 1) * sizeof(val_t));
         all[0] = num_acc;
         for (int i = 0; i < nsym; i++) all[i+1] = syms[i];
         if (nsym + 1 == 1) return all[0];
@@ -391,7 +391,7 @@ val_t sx_simplify(val_t expr) {
             && !vis_symbolic(as_symexpr(a)->args[0])) {
             SymExpr *m = as_symexpr(a);
             val_t neg_c = num_neg(m->args[0]);
-            val_t *na = (val_t *)gc_alloc((size_t)m->nargs * sizeof(val_t));
+            val_t *na = (val_t *)gc_alloc_raw_pinned((size_t)m->nargs * sizeof(val_t));
             na[0] = neg_c;
             for (uint32_t k = 1; k < m->nargs; k++) na[k] = m->args[k];
             return sx_simplify(sx_make_expr(SX_MUL, (int)m->nargs, na));
@@ -426,7 +426,7 @@ val_t sx_simplify(val_t expr) {
         val_t coeff = vfix(1);
         int nsym = 0;
         for (int i = 0; i < n; i++) if (!vis_number(sa[i])) nsym++;
-        val_t *nsyms = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+        val_t *nsyms = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
         int j = 0;
         for (int i = 0; i < n; i++) {
             if (vis_number(sa[i])) {
@@ -445,8 +445,8 @@ val_t sx_simplify(val_t expr) {
 
         /* ---- Collect repeated factors: a*a→a², a²*a³→a⁵ ---- */
         if (nsym >= 2) {
-            val_t *bases = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
-            val_t *exps  = (val_t *)gc_alloc((size_t)nsym * sizeof(val_t));
+            val_t *bases = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
+            val_t *exps  = (val_t *)gc_alloc_raw_pinned((size_t)nsym * sizeof(val_t));
             for (int i = 0; i < nsym; i++) {
                 val_t s = nsyms[i];
                 if (vis_symexpr(s) && as_symexpr(s)->op == SX_EXPT
@@ -488,7 +488,7 @@ val_t sx_simplify(val_t expr) {
          * like-term detection to work across different creation orders. */
         if (nsym >= 2) {
             /* Compute a string sort-key for each factor */
-            char **keys = (char **)gc_alloc((size_t)nsym * sizeof(char *));
+            char **keys = (char **)gc_alloc_raw_pinned((size_t)nsym * sizeof(char *));
             for (int i = 0; i < nsym; i++) {
                 char kbuf[128];
                 val_t v = nsyms[i];
@@ -511,7 +511,7 @@ val_t sx_simplify(val_t expr) {
                 } else {
                     snprintf(kbuf, sizeof(kbuf), "3:");
                 }
-                keys[i] = gc_alloc(strlen(kbuf) + 1);
+                keys[i] = gc_alloc_raw_pinned_atomic(strlen(kbuf) + 1);
                 memcpy(keys[i], kbuf, strlen(kbuf) + 1);
             }
             /* Insertion sort (nsym is small in practice) */
@@ -545,7 +545,7 @@ val_t sx_simplify(val_t expr) {
             val_t inner = nsym == 1 ? nsyms[0] : sx_make_expr(SX_MUL, nsym, nsyms);
             return sx_neg(inner);
         }
-        val_t *all = (val_t *)gc_alloc((size_t)(nsym + 1) * sizeof(val_t));
+        val_t *all = (val_t *)gc_alloc_raw_pinned((size_t)(nsym + 1) * sizeof(val_t));
         all[0] = coeff;
         for (int i = 0; i < nsym; i++) all[i+1] = nsyms[i];
         if (nsym + 1 == 1) return all[0];
@@ -566,7 +566,7 @@ val_t sx_simplify(val_t expr) {
             if (mnum > 0) {
                 val_t coeff = vfix(1);
                 int msym = mn - mnum;
-                val_t *msyms = (val_t *)gc_alloc((size_t)msym * sizeof(val_t));
+                val_t *msyms = (val_t *)gc_alloc_raw_pinned((size_t)msym * sizeof(val_t));
                 int j = 0;
                 for (int i = 0; i < mn; i++) {
                     if (vis_number(mul->args[i])) coeff = num_mul(coeff, mul->args[i]);
@@ -575,7 +575,7 @@ val_t sx_simplify(val_t expr) {
                 val_t nc = num_div(coeff, b);
                 if (msym == 0) return nc;
                 if (is_one(nc)) return msym == 1 ? msyms[0] : sx_make_expr(SX_MUL, msym, msyms);
-                val_t *all = (val_t *)gc_alloc((size_t)(msym + 1) * sizeof(val_t));
+                val_t *all = (val_t *)gc_alloc_raw_pinned((size_t)(msym + 1) * sizeof(val_t));
                 all[0] = nc;
                 for (int i = 0; i < msym; i++) all[i+1] = msyms[i];
                 return sx_make_expr(SX_MUL, msym + 1, all);
@@ -589,7 +589,7 @@ val_t sx_simplify(val_t expr) {
             int dn = (int)dmul->nargs, dsym = 0;
             for (int i = 0; i < dn; i++) if (vis_number(dmul->args[i])) { d_has_num = true; break; }
             if (d_has_num) {
-                val_t *dsyms = (val_t *)gc_alloc((size_t)dn * sizeof(val_t));
+                val_t *dsyms = (val_t *)gc_alloc_raw_pinned((size_t)dn * sizeof(val_t));
                 for (int i = 0; i < dn; i++) {
                     if (vis_number(dmul->args[i])) dcoeff = num_mul(dcoeff, dmul->args[i]);
                     else dsyms[dsym++] = dmul->args[i];
@@ -602,7 +602,7 @@ val_t sx_simplify(val_t expr) {
                     int nn = (int)nmul->nargs, nsym = 0;
                     for (int i = 0; i < nn; i++) if (vis_number(nmul->args[i])) { n_has_num = true; break; }
                     if (n_has_num) {
-                        val_t *nsyms = (val_t *)gc_alloc((size_t)nn * sizeof(val_t));
+                        val_t *nsyms = (val_t *)gc_alloc_raw_pinned((size_t)nn * sizeof(val_t));
                         for (int i = 0; i < nn; i++) {
                             if (vis_number(nmul->args[i])) ncoeff = num_mul(ncoeff, nmul->args[i]);
                             else nsyms[nsym++] = nmul->args[i];
@@ -615,7 +615,7 @@ val_t sx_simplify(val_t expr) {
                         } else if (nsym == 1 && is_one(nc)) {
                             new_num = nsyms[0];
                         } else {
-                            val_t *all = gc_alloc((size_t)(nsym + (is_one(nc)?0:1)) * sizeof(val_t));
+                            val_t *all = gc_alloc_raw_pinned((size_t)(nsym + (is_one(nc)?0:1)) * sizeof(val_t));
                             int k = 0;
                             if (!is_one(nc)) all[k++] = nc;
                             for (int i = 0; i < nsym; i++) all[k++] = nsyms[i];
@@ -648,7 +648,7 @@ val_t sx_simplify(val_t expr) {
         /* Separate real scalars (commute freely with quaternions) from ordered
            non-commutative factors.  Adjacent NC concretes are folded in place. */
         val_t scalar = vfix(1); bool has_scalar = false;
-        val_t *nc = (val_t *)gc_alloc((size_t)n * sizeof(val_t)); int nc_n = 0;
+        val_t *nc = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t)); int nc_n = 0;
         for (int i = 0; i < n; i++) {
             val_t v = sa[i];
             if (is_zero(v)) return vfix(0);
@@ -680,7 +680,7 @@ val_t sx_simplify(val_t expr) {
             return sx_neg(inner);
         }
         /* Rebuild: leading real scalar then ordered NC factors */
-        val_t *res = (val_t *)gc_alloc((size_t)(nc_n + 1) * sizeof(val_t)); int rn = 0;
+        val_t *res = (val_t *)gc_alloc_raw_pinned((size_t)(nc_n + 1) * sizeof(val_t)); int rn = 0;
         if (has_scalar && !is_one(scalar)) res[rn++] = scalar;
         for (int i = 0; i < nc_n; i++) if (!is_one(nc[i])) res[rn++] = nc[i];
         if (rn == 0) return vfix(1);
@@ -832,7 +832,7 @@ val_t sx_trigsimp(val_t expr) {
     int n = (int)se->nargs;
 
     /* Recursively apply trigsimp to children */
-    val_t *sa = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < n; i++) sa[i] = sx_trigsimp(se->args[i]);
 
     /* Rebuild and run standard simplification (which includes Pythagorean in ADD) */
@@ -873,7 +873,7 @@ val_t sx_trigsimp(val_t expr) {
         for (int i = 0; i < en; i++)
             if (vis_number(es->args[i])) num_part = num_add(num_part, es->args[i]);
             else nsym_e++;
-        val_t *syms_e = (val_t *)gc_alloc((size_t)nsym_e * sizeof(val_t));
+        val_t *syms_e = (val_t *)gc_alloc_raw_pinned((size_t)nsym_e * sizeof(val_t));
         int j = 0;
         for (int i = 0; i < en; i++)
             if (!vis_number(es->args[i])) syms_e[j++] = es->args[i];
@@ -890,7 +890,7 @@ val_t sx_trigsimp(val_t expr) {
                 syms_e[i] = comp_sq;
                 num_part = num_add(num_part, vfix(-1));
                 /* Rebuild and re-simplify (catches further Pythagorean reductions) */
-                val_t *all2 = (val_t *)gc_alloc((size_t)(nsym_e + 1) * sizeof(val_t));
+                val_t *all2 = (val_t *)gc_alloc_raw_pinned((size_t)(nsym_e + 1) * sizeof(val_t));
                 all2[0] = num_part;
                 for (int k2 = 0; k2 < nsym_e; k2++) all2[k2 + 1] = syms_e[k2];
                 return sx_trigsimp(sx_simplify(
@@ -939,7 +939,7 @@ val_t sx_trigsimp(val_t expr) {
             double cv = num_to_double(lead_num);
             if (cv == 2.0 || cv == -2.0) {
                 int sign = (cv < 0 ? -1 : 1) * (neg_sin ? -1 : 1) * (neg_cos ? -1 : 1);
-                val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
+                val_t *rest = (val_t *)gc_alloc_raw_pinned((size_t)en * sizeof(val_t));
                 int rn = 0;
                 bool used_num = false, used_sin = false, used_cos = false;
                 for (int i = 0; i < en; i++) {
@@ -983,7 +983,7 @@ val_t sx_trigsimp(val_t expr) {
                 if (!sx_equal(f1, f2)) continue;
                 /* cos²(f) + (-1)*sin²(f) → cos(2f) */
                 val_t cos2f = sx_cos(sx_mul(vfix(2), f1));
-                val_t *rest = (val_t *)gc_alloc((size_t)en * sizeof(val_t));
+                val_t *rest = (val_t *)gc_alloc_raw_pinned((size_t)en * sizeof(val_t));
                 int rn = 0;
                 for (int j = 0; j < en; j++)
                     if (j != i && j != k2) rest[rn++] = es->args[j];
@@ -1103,7 +1103,7 @@ static val_t sx_diff_symfn(val_t fn, val_t param_var) {
     Symbol  *par_sym = as_sym(as_symvar(param_var)->name);
     /* Build "<fn_name>_<param_name>" */
     size_t  total    = fn_sym->len + 1 + par_sym->len;
-    char   *buf      = (char *)gc_alloc(total + 1);
+    char   *buf      = (char *)gc_alloc_raw_pinned_atomic(total + 1);
     memcpy(buf, fn_sym->data, fn_sym->len);
     buf[fn_sym->len] = '_';
     memcpy(buf + fn_sym->len + 1, par_sym->data, par_sym->len);
@@ -1154,7 +1154,7 @@ val_t sx_diff(val_t expr, val_t var) {
     /* Tuple (up/down): differentiate componentwise */
     if (vis_tuple(expr)) {
         Tuple *t = as_tuple(expr);
-        val_t *diffs = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+        val_t *diffs = (val_t *)gc_alloc_raw_pinned((size_t)t->len * sizeof(val_t));
         for (uint32_t i = 0; i < t->len; i++) diffs[i] = sx_diff(t->data[i], var);
         return num_make_tuple((int)t->hdr.type, t->len, diffs);
     }
@@ -1168,7 +1168,7 @@ val_t sx_diff(val_t expr, val_t var) {
 
     /* ---- d/dx (a + b + ...) = da/dx + db/dx + ... ---- */
     if (op == SX_ADD) {
-        val_t *dargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *dargs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         for (int i = 0; i < n; i++) dargs[i] = sx_diff(args[i], var);
         return sx_simplify(sx_make_expr(SX_ADD, n, dargs));
     }
@@ -1183,9 +1183,9 @@ val_t sx_diff(val_t expr, val_t var) {
 
     /* ---- Product rule: d/dx (f*g*h*...) = Σᵢ (product with fᵢ replaced by dfᵢ/dx) ---- */
     if (op == SX_MUL) {
-        val_t *sum_terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *sum_terms = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         for (int i = 0; i < n; i++) {
-            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *factors = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int j = 0; j < n; j++)
                 factors[j] = (j == i) ? sx_diff(args[j], var) : args[j];
             sum_terms[i] = sx_simplify(sx_make_expr(SX_MUL, n, factors));
@@ -1195,12 +1195,12 @@ val_t sx_diff(val_t expr, val_t var) {
 
     /* ---- NC product rule: order of remaining factors must be preserved ---- */
     if (op == SX_NCMUL) {
-        val_t *sum_terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *sum_terms = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         int nterms = 0;
         for (int i = 0; i < n; i++) {
             val_t di = sx_diff(args[i], var);
             if (is_zero(di)) continue;
-            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *factors = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int j = 0; j < n; j++)
                 factors[j] = (j == i) ? di : args[j];
             sum_terms[nterms++] = sx_simplify(sx_make_expr(SX_NCMUL, n, factors));
@@ -1411,7 +1411,7 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
 
     /* Linearity -----------------------------------------------------------  */
     if (op == SX_ADD) {
-        val_t *dargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *dargs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         for (int i = 0; i < n; i++) dargs[i] = sx_wirtinger(args[i], var, is_dbar);
         return sx_simplify(sx_make_expr(SX_ADD, n, dargs));
     }
@@ -1423,9 +1423,9 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
 
     /* Product rule --------------------------------------------------------- */
     if (op == SX_MUL) {
-        val_t *terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         for (int i = 0; i < n; i++) {
-            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *factors = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int j = 0; j < n; j++)
                 factors[j] = (j == i) ? sx_wirtinger(args[j], var, is_dbar) : args[j];
             terms[i] = sx_simplify(sx_make_expr(SX_MUL, n, factors));
@@ -1433,12 +1433,12 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
         return sx_simplify(sx_make_expr(SX_ADD, n, terms));
     }
     if (op == SX_NCMUL) {
-        val_t *terms = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         int nterms = 0;
         for (int i = 0; i < n; i++) {
             val_t di = sx_wirtinger(args[i], var, is_dbar);
             if (is_zero(di)) continue;
-            val_t *factors = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *factors = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int j = 0; j < n; j++)
                 factors[j] = (j == i) ? di : args[j];
             terms[nterms++] = sx_simplify(sx_make_expr(SX_NCMUL, n, factors));
@@ -1541,13 +1541,13 @@ val_t sx_substitute(val_t expr, val_t var, val_t val) {
     /* Tuple: substitute componentwise */
     if (vis_tuple(expr)) {
         Tuple *t = as_tuple(expr);
-        val_t *subs = (val_t *)gc_alloc((size_t)t->len * sizeof(val_t));
+        val_t *subs = (val_t *)gc_alloc_raw_pinned((size_t)t->len * sizeof(val_t));
         for (uint32_t i = 0; i < t->len; i++) subs[i] = sx_substitute(t->data[i], var, val);
         return num_make_tuple((int)t->hdr.type, t->len, subs);
     }
     if (vis_symexpr(expr)) {
         SymExpr *se = as_symexpr(expr);
-        val_t *sargs = (val_t *)gc_alloc((size_t)se->nargs * sizeof(val_t));
+        val_t *sargs = (val_t *)gc_alloc_raw_pinned((size_t)se->nargs * sizeof(val_t));
         for (uint32_t i = 0; i < se->nargs; i++)
             sargs[i] = sx_substitute(se->args[i], var, val);
         return sx_simplify(sx_make_expr(se->op, (int)se->nargs, sargs));
@@ -1583,14 +1583,14 @@ static val_t expand_mul2(val_t a, val_t b) {
     if (vis_symexpr(a) && as_symexpr(a)->op == SX_ADD) {
         SymExpr *aa = as_symexpr(a);
         int m = (int)aa->nargs;
-        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)m * sizeof(val_t));
         for (int i = 0; i < m; i++) terms[i] = expand_mul2(aa->args[i], b);
         return sx_simplify(sx_make_expr(SX_ADD, m, terms));
     }
     if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
         SymExpr *ab = as_symexpr(b);
         int m = (int)ab->nargs;
-        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)m * sizeof(val_t));
         for (int i = 0; i < m; i++) terms[i] = expand_mul2(a, ab->args[i]);
         return sx_simplify(sx_make_expr(SX_ADD, m, terms));
     }
@@ -1602,14 +1602,14 @@ static val_t expand_ncmul2(val_t a, val_t b) {
     if (vis_symexpr(a) && as_symexpr(a)->op == SX_ADD) {
         SymExpr *aa = as_symexpr(a);
         int m = (int)aa->nargs;
-        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)m * sizeof(val_t));
         for (int i = 0; i < m; i++) terms[i] = expand_ncmul2(aa->args[i], b);
         return sx_simplify(sx_make_expr(SX_ADD, m, terms));
     }
     if (vis_symexpr(b) && as_symexpr(b)->op == SX_ADD) {
         SymExpr *ab = as_symexpr(b);
         int m = (int)ab->nargs;
-        val_t *terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+        val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)m * sizeof(val_t));
         for (int i = 0; i < m; i++) terms[i] = expand_ncmul2(a, ab->args[i]);
         return sx_simplify(sx_make_expr(SX_ADD, m, terms));
     }
@@ -1624,7 +1624,7 @@ val_t sx_expand(val_t expr) {
     val_t op = se->op;
     int n = (int)se->nargs;
 
-    val_t *ea = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *ea = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < n; i++) ea[i] = sx_expand(se->args[i]);
 
     if (op == SX_ADD)
@@ -1642,7 +1642,7 @@ val_t sx_expand(val_t expr) {
         if (vis_symexpr(inner) && as_symexpr(inner)->op == SX_ADD) {
             SymExpr *ia = as_symexpr(inner);
             int m = (int)ia->nargs;
-            val_t *neg_terms = (val_t *)gc_alloc((size_t)m * sizeof(val_t));
+            val_t *neg_terms = (val_t *)gc_alloc_raw_pinned((size_t)m * sizeof(val_t));
             for (int i = 0; i < m; i++) neg_terms[i] = sx_neg(ia->args[i]);
             return sx_simplify(sx_make_expr(SX_ADD, m, neg_terms));
         }
@@ -1809,9 +1809,9 @@ val_t sx_collect(val_t expr, val_t var) {
     }
 
     /* degree → accumulated coefficient table */
-    long  *degs    = (long  *)gc_alloc((size_t)nterms * sizeof(long));
-    val_t *coeffs  = (val_t *)gc_alloc((size_t)nterms * sizeof(val_t));
-    val_t *unc     = (val_t *)gc_alloc((size_t)nterms * sizeof(val_t));
+    long  *degs    = (long *)gc_alloc_raw_pinned_atomic((size_t)nterms * sizeof(long));
+    val_t *coeffs  = (val_t *)gc_alloc_raw_pinned((size_t)nterms * sizeof(val_t));
+    val_t *unc     = (val_t *)gc_alloc_raw_pinned((size_t)nterms * sizeof(val_t));
     int ndeg = 0, nunc = 0;
 
     for (int i = 0; i < nterms; i++) {
@@ -1837,7 +1837,7 @@ val_t sx_collect(val_t expr, val_t var) {
     }
 
     /* Build result terms */
-    val_t *result = (val_t *)gc_alloc((size_t)(ndeg + nunc) * sizeof(val_t));
+    val_t *result = (val_t *)gc_alloc_raw_pinned((size_t)(ndeg + nunc) * sizeof(val_t));
     int ri = 0;
     for (int i = 0; i < ndeg; i++) {
         val_t c = coeffs[i];
@@ -1910,7 +1910,7 @@ val_t sx_integrate(val_t expr, val_t var) {
 
     /* Linearity: ∫(f+g+...) = ∫f + ∫g + ... */
     if (op == SX_ADD) {
-        val_t *iargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+        val_t *iargs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
         for (int i = 0; i < n; i++) iargs[i] = sx_integrate(args[i], var);
         return sx_simplify(sx_make_expr(SX_ADD, n, iargs));
     }
@@ -1933,8 +1933,8 @@ val_t sx_integrate(val_t expr, val_t var) {
         if (nconst == n)
             return sx_mul(expr, var);
         if (nconst > 0) {
-            val_t *consts = (val_t *)gc_alloc((size_t)nconst * sizeof(val_t));
-            val_t *deps   = (val_t *)gc_alloc((size_t)ndep   * sizeof(val_t));
+            val_t *consts = (val_t *)gc_alloc_raw_pinned((size_t)nconst * sizeof(val_t));
+            val_t *deps   = (val_t *)gc_alloc_raw_pinned((size_t)ndep   * sizeof(val_t));
             int ci = 0, di = 0;
             for (int i = 0; i < n; i++) {
                 if (sx_depends_on(args[i], var)) deps[di++] = args[i];
@@ -2020,7 +2020,7 @@ val_t sx_integrate(val_t expr, val_t var) {
                 if (n == 2) {
                     f_part = args[1 - u_idx];
                 } else {
-                    val_t *rargs = (val_t *)gc_alloc((size_t)(n - 1) * sizeof(val_t));
+                    val_t *rargs = (val_t *)gc_alloc_raw_pinned((size_t)(n - 1) * sizeof(val_t));
                     int ri = 0;
                     for (int i = 0; i < n; i++)
                         if (i != u_idx) rargs[ri++] = args[i];
@@ -2406,7 +2406,7 @@ val_t sx_fracdiff(val_t expr, val_t alpha, val_t var) {
 
         /* Linearity: D^α(f+g+...) */
         if (op == SX_ADD) {
-            val_t *dargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *dargs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int i = 0; i < n; i++) dargs[i] = sx_fracdiff(args[i], alpha, var);
             return sx_simplify(sx_make_expr(SX_ADD, n, dargs));
         }
@@ -2423,8 +2423,8 @@ val_t sx_fracdiff(val_t expr, val_t alpha, val_t var) {
                 if (!sx_depends_on(args[i], var)) nconst++;
             if (nconst == n) return vfix(0);  /* whole product is constant */
             if (nconst > 0) {
-                val_t *consts = (val_t *)gc_alloc((size_t)nconst * sizeof(val_t));
-                val_t *deps   = (val_t *)gc_alloc((size_t)(n - nconst) * sizeof(val_t));
+                val_t *consts = (val_t *)gc_alloc_raw_pinned((size_t)nconst * sizeof(val_t));
+                val_t *deps   = (val_t *)gc_alloc_raw_pinned((size_t)(n - nconst) * sizeof(val_t));
                 int ci = 0, di = 0;
                 for (int i = 0; i < n; i++) {
                     if (sx_depends_on(args[i], var)) deps[di++] = args[i];
@@ -2542,7 +2542,7 @@ val_t sx_fracint(val_t expr, val_t alpha, val_t var) {
 
         /* Linearity: I^α(f+g+...) */
         if (op == SX_ADD) {
-            val_t *iargs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *iargs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int i = 0; i < n; i++) iargs[i] = sx_fracint(args[i], alpha, var);
             return sx_simplify(sx_make_expr(SX_ADD, n, iargs));
         }
@@ -2558,8 +2558,8 @@ val_t sx_fracint(val_t expr, val_t alpha, val_t var) {
             for (int i = 0; i < n; i++)
                 if (!sx_depends_on(args[i], var)) nconst++;
             if (nconst > 0 && nconst < n) {
-                val_t *consts = (val_t *)gc_alloc((size_t)nconst * sizeof(val_t));
-                val_t *deps   = (val_t *)gc_alloc((size_t)(n - nconst) * sizeof(val_t));
+                val_t *consts = (val_t *)gc_alloc_raw_pinned((size_t)nconst * sizeof(val_t));
+                val_t *deps   = (val_t *)gc_alloc_raw_pinned((size_t)(n - nconst) * sizeof(val_t));
                 int ci = 0, di = 0;
                 for (int i = 0; i < n; i++) {
                     if (sx_depends_on(args[i], var)) deps[di++] = args[i];
@@ -2669,7 +2669,7 @@ static val_t sx_ratio_simplify(val_t num, val_t den) {
                 int nn = (int)mul->nargs - 1;
                 if (nn == 0) return vfix(1);
                 if (nn == 1) return sx_simplify((i == 0) ? mul->args[1] : mul->args[0]);
-                val_t *nf = (val_t *)gc_alloc((size_t)nn * sizeof(val_t));
+                val_t *nf = (val_t *)gc_alloc_raw_pinned((size_t)nn * sizeof(val_t));
                 int k = 0;
                 for (uint32_t j = 0; j < mul->nargs; j++)
                     if (j != i) nf[k++] = mul->args[j];
@@ -2800,7 +2800,7 @@ static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int dep
 
         /* ADD/SUB/MUL/NEG: substitute into each subterm and reassemble */
         if (op == SX_ADD) {
-            val_t *la = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *la = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int i = 0; i < n; i++)
                 la[i] = sx_limit_inner(args[i], var, point, dir, depth);
             return sx_simplify(sx_make_expr(SX_ADD, n, la));
@@ -2811,7 +2811,7 @@ static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int dep
         if (op == SX_NEG && n == 1)
             return sx_simplify(sx_neg(sx_limit_inner(args[0], var, point, dir, depth)));
         if (op == SX_MUL) {
-            val_t *la = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+            val_t *la = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
             for (int i = 0; i < n; i++)
                 la[i] = sx_limit_inner(args[i], var, point, dir, depth);
             /* 0·∞: detect after taking individual limits and rewrite as ratio.
@@ -2874,7 +2874,7 @@ val_t sx_series(val_t expr, val_t var, val_t point, int n) {
         scm_raise(V_FALSE, "series: second argument must be a symbolic variable");
     if (n < 0) n = 0;
 
-    val_t *terms = (val_t *)gc_alloc((size_t)(n + 1) * sizeof(val_t));
+    val_t *terms = (val_t *)gc_alloc_raw_pinned((size_t)(n + 1) * sizeof(val_t));
     int nterms = 0;
     val_t fk = expr;
     val_t fact = vfix(1);  /* k! */
@@ -3068,8 +3068,8 @@ val_t sx_laplace(val_t expr, val_t t_var, val_t s_var) {
             if (!vis_false(sf->parent) && vis_symvar(sf->d_param) &&
                 as_symvar(sf->d_param)->name == as_symvar(t_var)->name) {
                 /* Replace t with s in args for L{parent} call */
-                val_t *la = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
-                val_t *za = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+                val_t *la = (val_t *)gc_alloc_raw_pinned((size_t)nf * sizeof(val_t));
+                val_t *za = (val_t *)gc_alloc_raw_pinned((size_t)nf * sizeof(val_t));
                 sx_replace_var_in_args(la, fa, nf, t_var, s_var);
                 sx_replace_var_in_args(za, fa, nf, t_var, vfix(0));
                 val_t L_fn       = sx_laplace_fn(sf->parent, t_var, s_var);
@@ -3080,7 +3080,7 @@ val_t sx_laplace(val_t expr, val_t t_var, val_t s_var) {
             }
 
             /* Simple case: u(x,t) -> L_u(x,s) */
-            val_t *na = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+            val_t *na = (val_t *)gc_alloc_raw_pinned((size_t)nf * sizeof(val_t));
             sx_replace_var_in_args(na, fa, nf, t_var, s_var);
             val_t L_fn = sx_laplace_fn(fn, t_var, s_var);
             return sx_make_apply(L_fn, nf, na);
@@ -3312,7 +3312,7 @@ val_t sx_fourier(val_t expr, val_t t_var, val_t w_var) {
             /* Derivative property: F{u_t(x,t)} = i*omega * F{u(x,t)} */
             if (!vis_false(sf->parent) && vis_symvar(sf->d_param) &&
                 as_symvar(sf->d_param)->name == as_symvar(t_var)->name) {
-                val_t *wa = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+                val_t *wa = (val_t *)gc_alloc_raw_pinned((size_t)nf * sizeof(val_t));
                 sx_replace_var_in_args(wa, fa, nf, t_var, w_var);
                 val_t F_fn     = sx_fourier_fn(sf->parent, t_var, w_var);
                 val_t F_of_par = sx_make_apply(F_fn, nf, wa);
@@ -3322,7 +3322,7 @@ val_t sx_fourier(val_t expr, val_t t_var, val_t w_var) {
             }
 
             /* Simple case: u(x,t) -> F_u(x,omega) */
-            val_t *wa = (val_t *)gc_alloc((size_t)nf * sizeof(val_t));
+            val_t *wa = (val_t *)gc_alloc_raw_pinned((size_t)nf * sizeof(val_t));
             sx_replace_var_in_args(wa, fa, nf, t_var, w_var);
             val_t F_fn = sx_fourier_fn(fn, t_var, w_var);
             return sx_make_apply(F_fn, nf, wa);

@@ -452,7 +452,7 @@ static bool read_chunk(FILE *f, Chunk *c) {
 
     /* Lines */
     c->line_cap = c->code_len;
-    c->lines = (int *)gc_alloc((size_t)c->code_len * sizeof(int));
+    c->lines = (int *)gc_alloc_raw_pinned((size_t)c->code_len * sizeof(int));
     if (c->code_len && !c->lines) return false;
     for (int i = 0; i < c->code_len; i++)
         if (!ri32(f, &c->lines[i])) return false;
@@ -461,7 +461,7 @@ static bool read_chunk(FILE *f, Chunk *c) {
     if (!ri32(f, &c->const_len)) return false;
     if (c->const_len < 0) return false;
     c->const_cap = c->const_len;
-    c->constants = (val_t *)gc_alloc((size_t)c->const_len * sizeof(val_t));
+    c->constants = (val_t *)gc_alloc_raw_pinned((size_t)c->const_len * sizeof(val_t));
     if (c->const_len && !c->constants) return false;
     for (int i = 0; i < c->const_len; i++)
         if (!read_const(f, &c->constants[i])) return false;

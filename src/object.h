@@ -76,6 +76,8 @@ typedef enum {
     T_FOREIGN_FN    = 50,  /* Foreign C function descriptor (libffi cif) */
     T_MPFR          = 51,  /* MPFR arbitrary-precision float              */
     T_INTERVAL      = 52,  /* Interval [lo, hi] for certified arithmetic  */
+    T_CHUNK         = 53,  /* compiled bytecode chunk (compiler + VM)     */
+    T_UPVALUE       = 54,  /* captured variable cell (open or closed)     */
 } ObjType;
 
 /*

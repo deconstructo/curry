@@ -47,7 +47,7 @@ static Module *registry_lookup(val_t name) {
 }
 
 static void registry_insert(val_t name, Module *mod) {
-    ModuleEntry *e = CURRY_NEW(ModuleEntry);
+    ModuleEntry *e = (ModuleEntry *)gc_alloc_raw_pinned(sizeof(ModuleEntry));
     e->name   = name;
     e->module = mod;
     e->next   = registry;
@@ -88,7 +88,7 @@ struct CurryVM {
 };
 
 CurryVM *curry_vm_new(val_t module_env) {
-    CurryVM *vm = CURRY_NEW(CurryVM);
+    CurryVM *vm = (CurryVM *)gc_alloc_raw_pinned(sizeof(CurryVM));
     vm->env = module_env;
     return vm;
 }

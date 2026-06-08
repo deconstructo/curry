@@ -265,7 +265,7 @@ val_t ffi_call_fn(val_t ff_val, val_t args) {
 
 static void ffi_def(val_t env, const char *name,
                     val_t (*fn)(int, val_t *, void *), int mn, int mx) {
-    Primitive *p = (Primitive *)gc_alloc(sizeof(Primitive));
+    Primitive *p = (Primitive *)gc_alloc_pinned(sizeof(Primitive));
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
     p->name = name; p->fn = fn; p->min_args = mn; p->max_args = mx; p->ud = NULL;
     env_define(env, sym_intern_cstr(name), vptr(p));

@@ -30,7 +30,7 @@ void channel_init(void) {}
 /* ---- Allocation ---- */
 
 val_t channel_make(uint32_t cap) {
-    Channel *ch   = CURRY_NEW(Channel);
+    Channel *ch   = CURRY_NEW_PINNED(Channel);
     ch->hdr.type  = T_CHANNEL;
     ch->hdr.flags = 0;
     ch->head      = 0;
@@ -40,7 +40,7 @@ val_t channel_make(uint32_t cap) {
     ch->closed    = false;
 
     uint32_t ring_cap = (cap == 0) ? 1 : cap;
-    ch->buf = gc_alloc(ring_cap * sizeof(val_t));
+    ch->buf = (val_t *)gc_alloc_raw_pinned(ring_cap * sizeof(val_t));
 
     pthread_mutex_init(&ch->lock,      NULL);
     pthread_cond_init(&ch->not_full,   NULL);

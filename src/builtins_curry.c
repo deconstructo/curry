@@ -356,8 +356,8 @@ static val_t prim_make_surreal(int ac, val_t *av, void *ud) {
     while (vis_pair(p)) { n++; p = vcdr(p); }
     if (n == 0) return SUR_ZERO;
 
-    val_t *exps   = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
-    val_t *coeffs = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    val_t *exps   = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+    val_t *coeffs = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     p = lst;
     for (int i = 0; i < n; i++) {
         val_t pair = vcar(p);
@@ -448,7 +448,7 @@ static val_t prim_quad(int ac, val_t *av, void *ud) {
     double b  = num_to_double(av[2]);
     double tol = (ac > 3) ? num_to_double(av[3]) : 1e-8;
 
-    QInterval *stk = (QInterval *)gc_alloc(QUAD_STACK_MAX * sizeof(QInterval));
+    QInterval *stk = (QInterval *)gc_alloc_raw_pinned(QUAD_STACK_MAX * sizeof(QInterval));
     int top = 0;
     double err0;
     double v0 = gk15(f, a, b, &err0);
@@ -688,16 +688,16 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
 
         /* Build a replacement tuple where each slot becomes sym-vars.
          * slot_syms[k] is either a single sym-var or a sym-tuple. */
-        val_t *slot_syms = (val_t *)gc_alloc(n * sizeof(val_t));
+        val_t *slot_syms = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
         /* diff_vars[j] are the sym-vars we differentiate w.r.t. (slot i's vars) */
         uint32_t m_i = vis_tuple(tup->data[(uint32_t)i])
                        ? as_tuple(tup->data[(uint32_t)i])->len : 1;
-        val_t *diff_vars = (val_t *)gc_alloc(m_i * sizeof(val_t));
+        val_t *diff_vars = (val_t *)gc_alloc_raw_pinned(m_i * sizeof(val_t));
 
         for (uint32_t k = 0; k < n; k++) {
             if (vis_tuple(tup->data[k])) {
                 Tuple *inner = as_tuple(tup->data[k]);
-                val_t *isyms = (val_t *)gc_alloc(inner->len * sizeof(val_t));
+                val_t *isyms = (val_t *)gc_alloc_raw_pinned(inner->len * sizeof(val_t));
                 for (uint32_t j = 0; j < inner->len; j++) {
                     char buf[64];
                     snprintf(buf, sizeof(buf), "_∂p%u_%u_%d", k, j, ctr);
@@ -735,7 +735,7 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
 
         if (vis_tuple(tup->data[(uint32_t)i])) {
             /* Multi-DOF: return a tuple of partial derivatives */
-            val_t *diffs = (val_t *)gc_alloc(m_i * sizeof(val_t));
+            val_t *diffs = (val_t *)gc_alloc_raw_pinned(m_i * sizeof(val_t));
             for (uint32_t j = 0; j < m_i; j++) {
                 val_t dj = sx_diff(expr, diff_vars[j]);
                 SUBST_ALL_SLOTS(dj);
@@ -763,7 +763,7 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
     val_t var = sx_make_var(sym_intern_cstr(buf));
 
     /* Build arg list with argv[i] replaced by fresh sym-var */
-    val_t *args2 = (val_t *)gc_alloc((size_t)argc * sizeof(val_t));
+    val_t *args2 = (val_t *)gc_alloc_raw_pinned((size_t)argc * sizeof(val_t));
     for (int j = 0; j < argc; j++) args2[j] = argv[j];
     val_t orig  = args2[(uint32_t)i];
     args2[(uint32_t)i] = var;
@@ -925,8 +925,8 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
     if (n < map_par_threshold || pool_is_worker) return prim_map_seq(ac, av, ud);
 
-    val_t *elems   = gc_alloc(n * sizeof(val_t));
-    val_t *results = gc_alloc(n * sizeof(val_t));
+    val_t *elems   = gc_alloc_raw_pinned(n * sizeof(val_t));
+    val_t *results = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
     atomic_int n_done; atomic_init(&n_done, 0);
@@ -968,7 +968,7 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
     if (n < map_par_threshold || pool_is_worker) return prim_reduce_seq(ac, av, ud);
 
-    val_t *elems = gc_alloc(n * sizeof(val_t));
+    val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
     atomic_int n_done; atomic_init(&n_done, 0);
@@ -1023,7 +1023,7 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
             apply(proc, scm_cons(vcar(p), V_NIL));
         return V_VOID;
     }
-    val_t *elems = gc_alloc(n * sizeof(val_t));
+    val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
     atomic_int n_done; atomic_init(&n_done, 0);
