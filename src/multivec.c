@@ -304,7 +304,7 @@ static val_t mv_cons(val_t car, val_t cdr) {
 }
 
 static void mv_def(val_t env, const char *name, PrimFn fn, int mn, int mx) {
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
     p->name = name; p->fn = fn; p->min_args = mn; p->max_args = mx; p->ud = NULL;
     env_define(env, sym_intern_cstr(name), vptr(p));

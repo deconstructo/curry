@@ -5,6 +5,7 @@
 #include "symbol.h"
 #include "builtins.h"
 #include "gc.h"
+#include "gc_semispace.h"
 #include "reader.h"
 #include "port.h"
 #include <dlfcn.h>
@@ -47,7 +48,7 @@ static Module *registry_lookup(val_t name) {
 }
 
 static void registry_insert(val_t name, Module *mod) {
-    ModuleEntry *e = CURRY_NEW(ModuleEntry);
+    ModuleEntry *e = (ModuleEntry *)gc_alloc_raw_pinned(sizeof(ModuleEntry));
     e->name   = name;
     e->module = mod;
     e->next   = registry;
@@ -88,7 +89,7 @@ struct CurryVM {
 };
 
 CurryVM *curry_vm_new(val_t module_env) {
-    CurryVM *vm = CURRY_NEW(CurryVM);
+    CurryVM *vm = (CurryVM *)gc_alloc_raw_pinned(sizeof(CurryVM));
     vm->env = module_env;
     return vm;
 }
@@ -97,7 +98,7 @@ val_t curry_vm_env(CurryVM *vm) { return vm->env; }
 
 void curry_define_fn(CurryVM *vm, const char *name, CurryFn fn,
                      int min_args, int max_args, void *ud) {
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type  = T_PRIMITIVE; p->hdr.flags = 0;
     p->name      = name;
     p->min_args  = min_args;
@@ -175,9 +176,19 @@ static val_t strip_for(val_t spec) {
     return spec;
 }
 
+/* ---- GC scanner for module registry ---- */
+
+static void scan_module_registry(void) {
+    for (ModuleEntry *e = registry; e; e = e->next) {
+        e->name   = (val_t)gc_ss_evac((uintptr_t)e->name);
+        e->module = (Module *)gc_ss_fwd(e->module);
+    }
+}
+
 /* ---- Public API ---- */
 
 void modules_init(void) {
+    gc_ss_register_ext_scanner(scan_module_registry);
     /* Add search dir relative to executable (handles build-tree and install) */
 #if defined(__linux__) || defined(__APPLE__)
     {

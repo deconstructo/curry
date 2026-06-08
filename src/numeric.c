@@ -36,7 +36,7 @@ val_t make_big_from_mpz(mpz_t z) {
         long n = mpz_get_si(z);
         if (in_fixnum_range(n)) return vfix(n);
     }
-    Bignum *b = CURRY_NEW_ATOM(Bignum);
+    Bignum *b = CURRY_NEW_PINNED_ATOM(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set(b->z, z);
@@ -49,7 +49,7 @@ static val_t make_rat_from_mpq(mpq_t q) {
     /* If denominator is 1, return exact integer */
     if (mpz_cmp_ui(mpq_denref(q), 1) == 0)
         return make_big_from_mpz(mpq_numref(q));
-    Rational *r = CURRY_NEW_ATOM(Rational);
+    Rational *r = CURRY_NEW_PINNED_ATOM(Rational);
     r->hdr.type  = T_RATIONAL;
     r->hdr.flags = 0;
     mpq_init(r->q);
@@ -84,7 +84,7 @@ void num_init(void) { /* GMP available; finalizers handle mpz/mpq cleanup */ }
 
 val_t num_make_bignum_i(long n) {
     if (in_fixnum_range(n)) return vfix(n);
-    Bignum *b = CURRY_NEW_ATOM(Bignum);
+    Bignum *b = CURRY_NEW_PINNED_ATOM(Bignum);
     b->hdr.type  = T_BIGNUM;
     b->hdr.flags = 0;
     mpz_init_set_si(b->z, n);

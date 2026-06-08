@@ -32,7 +32,7 @@
 /* ---- Registration helper ---- */
 
 void defprim(val_t env, const char *name, PrimFn fn, int min, int max) {
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type  = T_PRIMITIVE; p->hdr.flags = 0;
     p->name      = name;
     p->min_args  = min; p->max_args = max;
@@ -1582,9 +1582,9 @@ __attribute__((noinline))
 static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t proc = av[0];
-    Continuation *cont = CURRY_NEW(Continuation);
+    Continuation *cont = CURRY_NEW_PINNED(Continuation);
     cont->hdr.type = T_CONTINUATION; cont->hdr.flags = 0;
-    cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
+    cont->jmpbuf   = gc_alloc_raw_pinned(sizeof(jmp_buf));
     cont->result   = V_VOID;
     cont->wind_top = current_wind;
     int saved_fc   = vm->frame_count;
@@ -1634,7 +1634,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
 
     /* GC-heap allocation: longjmp cannot invalidate a stack frame we no
      * longer own, so WindFrame must outlive any potential escape longjmp. */
-    WindFrame *wf = gc_alloc(sizeof(WindFrame));
+    WindFrame *wf = gc_alloc_raw_pinned(sizeof(WindFrame));
     wf->before = before;
     wf->after  = after;
     wf->prev   = current_wind;

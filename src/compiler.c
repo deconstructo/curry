@@ -326,7 +326,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
     /* Preserve source AST and upvalue names for tiered JIT hot-swap. */
     ch->src_lambda = scm_cons(S_LAMBDA, scm_cons(params, body));
     if (c.upval_count > 0) {
-        ch->upval_names = (val_t *)gc_alloc((size_t)c.upval_count * sizeof(val_t));
+        ch->upval_names = (val_t *)gc_alloc_raw_pinned((size_t)c.upval_count * sizeof(val_t));
         for (int i = 0; i < c.upval_count; i++)
             ch->upval_names[i] = c.upvals[i].name;
     }

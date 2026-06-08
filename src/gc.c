@@ -30,6 +30,11 @@
 static void *boehm_alloc(size_t n, bool has_ptrs) {
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
+/* Under Boehm, pinned allocation is identical to regular allocation.
+ * The semispace backend overrides these to bypass the nursery. */
+static void *boehm_alloc_pinned(size_t n, bool has_ptrs)     { return boehm_alloc(n, has_ptrs); }
+static void *boehm_alloc_raw_pinned(size_t n, bool has_ptrs) { return boehm_alloc(n, has_ptrs); }
+
 static void  boehm_collect(void)           { GC_gcollect(); }
 static void  boehm_register_thread(void) {
     struct GC_stack_base sb;
@@ -46,6 +51,8 @@ static size_t boehm_free_bytes(void) { return (size_t)GC_get_free_bytes(); }
 
 static gc_ops_t gc_boehm_ops = {
     .alloc             = boehm_alloc,
+    .alloc_pinned      = boehm_alloc_pinned,
+    .alloc_raw_pinned  = boehm_alloc_raw_pinned,
     .collect           = boehm_collect,
     .register_thread   = boehm_register_thread,
     .pin               = boehm_pin,
@@ -100,6 +107,16 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
 void *gc_alloc_impl(size_t n, int has_ptrs) {
     return gc_nursery_alloc(n, (bool)has_ptrs);
 }
+void *gc_alloc_pinned_impl(size_t n, int has_ptrs) {
+    return gc_ops->alloc_pinned(n, (bool)has_ptrs);
+}
+
+/* ── Raw-pointer and stack root registration (no-ops under Boehm) ─────────── */
+
+void gc_register_rawptr(void **rawptr)   { (void)rawptr; }
+void gc_unregister_rawptr(void **rawptr) { (void)rawptr; }
+void gc_register_stack(void *base, void **sp_ptr) { (void)base; (void)sp_ptr; }
+void gc_unregister_stack(void *base)     { (void)base; }
 
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 

@@ -267,6 +267,7 @@ static Upvalue *open_upvalue(val_t *slot) {
     if (up && up->location == slot) return up;   /* already open */
 
     Upvalue *n  = CURRY_NEW(Upvalue);
+    n->hdr.type = T_UPVALUE; n->hdr.flags = 0; n->hdr.fwd = 0;
     n->location = slot;
     n->closed   = V_VOID;
     n->next     = up;
@@ -859,7 +860,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t buf[64];
             val_t *call_args = (total_args <= 64)
                 ? buf
-                : (val_t *)gc_alloc((size_t)total_args * sizeof(val_t));
+                : (val_t *)gc_alloc_raw_pinned((size_t)total_args * sizeof(val_t));
 
             for (int k = 0; k < n_fixed; k++) call_args[k] = base[1 + k];
             val_t lp = last_list;

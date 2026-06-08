@@ -112,8 +112,8 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
             int npv = scm_list_length(pvlist);
 
             /* Allocate accumulator arrays (in-order, built by prepend then reverse) */
-            val_t *pnames = npv > 0 ? gc_alloc((size_t)npv * sizeof(val_t)) : NULL;
-            val_t *paccs  = npv > 0 ? gc_alloc((size_t)npv * sizeof(val_t)) : NULL;
+            val_t *pnames = npv > 0 ? gc_alloc_raw_pinned((size_t)npv * sizeof(val_t)) : NULL;
+            val_t *paccs  = npv > 0 ? gc_alloc_raw_pinned((size_t)npv * sizeof(val_t)) : NULL;
             int pi = 0;
             for (val_t pv = pvlist; vis_pair(pv); pv = vcdr(pv), pi++) {
                 pnames[pi] = vcar(pv);
@@ -288,11 +288,11 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     }
     compiled = scm_reverse(compiled);
 
-    SyntaxRulesData *sr = gc_alloc(sizeof(SyntaxRulesData));
+    SyntaxRulesData *sr = gc_alloc_raw_pinned(sizeof(SyntaxRulesData));
     sr->literals = literals;
     sr->rules    = compiled;
 
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
     p->name     = "syntax-rules-transformer";
     p->min_args = 1; p->max_args = 1;
@@ -311,7 +311,7 @@ void syntax_rules_register(val_t env) {
      * sr_compile_fn, which returns a T_PRIMITIVE transformer.  That primitive
      * self-evaluates (non-pair heap object), so define-syntax receives it
      * directly and wraps it in its own T_SYNTAX struct. */
-    Primitive *compile_prim = CURRY_NEW(Primitive);
+    Primitive *compile_prim = CURRY_NEW_PINNED(Primitive);
     compile_prim->hdr.type = T_PRIMITIVE; compile_prim->hdr.flags = 0;
     compile_prim->name     = "syntax-rules-compile";
     compile_prim->min_args = 1; compile_prim->max_args = 1;

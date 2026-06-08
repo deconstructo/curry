@@ -1,5 +1,56 @@
 # Changelog
 
+### 1.3.0 — Cheney Semispace GC
+
+First moving garbage collector.  The Boehm conservative GC remains the default;
+pass `--gc semispace` at startup to activate the Cheney backend.
+
+**New GC backend: `--gc semispace`**
+
+- Two 32 MB semispaces with bump-pointer allocation.  On exhaustion, a
+  stop-the-world Cheney copy evacuates all live objects to to-space and swaps
+  the spaces.
+- Precise root set: VM value stack, `GLOBAL_ENV`, per-object pinned list
+  (Actor/TVar/Channel/Mailbox/Continuation), module-registry external scanner.
+- Type-specific scanners for all 54 `ObjType` values including raw C pointer
+  fields (`Closure::env`, `BcClosure::chunk/upvals`, `EnvFrame::parent`,
+  `Module::env`, `Record::rtd`, `Upvalue::next`).
+- **Pinned types** (allocated in Boehm, never moved): `Symbol`, `Bignum`,
+  `Rational`, `Mpfr`, `Port`, `Actor`, `Mailbox`, `TVar`, `Channel`,
+  `Continuation`, `Primitive`.
+
+**New Scheme procedures**
+
+- **`(gc-collect!)`** — trigger an immediate collection cycle.
+- **`(gc-stats)`** — return a GC statistics alist: `collections`,
+  `bytes-allocated`, `bytes-survived`, `from-used`, `space-size`,
+  `pinned-count` (semispace); `heap-size`, `free-bytes` (Boehm).
+- **`(gc-on-collection proc)`** — register a zero-argument post-collection hook.
+
+**C API additions**
+
+- `gc_alloc_pinned` / `gc_alloc_raw_pinned` vtable entries and corresponding
+  `CURRY_NEW_PINNED` macros — allocate typed or untyped objects in Boehm,
+  bypassing the semispace nursery.
+- `gc_ss_register_ext_scanner` — register an external root-scanner callback
+  for C modules that hold `val_t` in non-GC-managed structs.
+- `T_CHUNK` (53) and `T_UPVALUE` (54) added to `ObjType`; `Hdr` header
+  prepended to `Chunk` and `Upvalue` structs.
+
+**Documentation**
+
+- `docs/reference/gc.md` — full GC reference: backends, Scheme API, C API,
+  performance notes.
+
+**Test results**
+
+All 27 ctest suites pass.  Core language suites (r7rs, r6rs, numeric_ext,
+actors, dynamic_wind, syntax_rules, akkadian, sexagesimal) all pass under
+`--gc semispace`.  SICM ODE-integration tests: 93/167 under semispace — a
+known stale-pointer residual deferred to Phase 6 (generational GC).
+
+---
+
 ### 1.2.6 — Security patch
 
 - **Fix stack buffer overflow in `number->string` with `'neugebauer`/`'cuneiform`**:

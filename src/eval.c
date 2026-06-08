@@ -180,7 +180,7 @@ static val_t param_after_fn(int ac, val_t *av, void *ud) {
 }
 
 static val_t make_prim_thunk(PrimFn fn, void *ud) {
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
     p->name = "thunk"; p->min_args = 0; p->max_args = 0;
     p->fn = fn; p->ud = ud;
@@ -236,9 +236,9 @@ val_t expand_qq(val_t form, val_t env, int depth) {
  * registers for this smaller function and are valid after longjmp. */
 __attribute__((noinline))
 static val_t eval_call_cc(val_t proc) {
-    Continuation *cont = CURRY_NEW(Continuation);
+    Continuation *cont = CURRY_NEW_PINNED(Continuation);
     cont->hdr.type = T_CONTINUATION; cont->hdr.flags = 0;
-    cont->jmpbuf   = gc_alloc(sizeof(jmp_buf));
+    cont->jmpbuf   = gc_alloc_raw_pinned(sizeof(jmp_buf));
     cont->result   = V_VOID;
     cont->wind_top = current_wind;
     /* VM state — only meaningful when the VM is active (vm may be NULL in
@@ -1000,11 +1000,11 @@ tail:
         val_t bindings = vcar(rest), body = vcdr(rest);
         int n = list_length(bindings);
 
-        ParamBindings *pb = gc_alloc(sizeof(ParamBindings));
+        ParamBindings *pb = gc_alloc_raw_pinned(sizeof(ParamBindings));
         pb->n       = n;
-        pb->params  = gc_alloc((size_t)n * sizeof(val_t));
-        pb->newvals = gc_alloc((size_t)n * sizeof(val_t));
-        pb->oldvals = gc_alloc((size_t)n * sizeof(val_t));
+        pb->params  = gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+        pb->newvals = gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+        pb->oldvals = gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
 
         val_t b = bindings;
         for (int i = 0; i < n; i++, b = vcdr(b)) {
@@ -1019,7 +1019,7 @@ tail:
         }
 
         /* GC-heap WindFrame so longjmp cannot invalidate it. */
-        WindFrame *wf = gc_alloc(sizeof(WindFrame));
+        WindFrame *wf = gc_alloc_raw_pinned(sizeof(WindFrame));
         wf->before = make_prim_thunk(param_before_fn, pb);
         wf->after  = make_prim_thunk(param_after_fn,  pb);
         wf->prev   = current_wind;

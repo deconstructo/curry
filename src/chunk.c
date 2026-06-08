@@ -111,7 +111,8 @@ const char *opcode_name[OP_COUNT] = {
 /* ── Chunk allocation ────────────────────────────────────────────────── */
 
 Chunk *chunk_new(void) {
-    Chunk *c = GC_NEW(Chunk);
+    Chunk *c = (Chunk *)gc_alloc(sizeof(Chunk));
+    c->hdr.type   = T_CHUNK; c->hdr.flags = 0; c->hdr.fwd = 0;
     c->code       = NULL; c->code_len = 0; c->code_cap = 0;
     c->constants  = NULL; c->const_len = 0; c->const_cap = 0;
     c->lines      = NULL; c->line_cap = 0;
@@ -173,7 +174,7 @@ int chunk_add_const(Chunk *c, val_t v) {
         c->const_cap = cap;
         /* grow glob_cache parallel to constants — use gc_alloc (not atomic) so
          * Boehm GC traces the interior val_t* slot pointers */
-        GlobCacheEntry *new_gc = (GlobCacheEntry *)gc_alloc((size_t)cap * sizeof(GlobCacheEntry));
+        GlobCacheEntry *new_gc = (GlobCacheEntry *)gc_alloc_raw_pinned((size_t)cap * sizeof(GlobCacheEntry));
         if (c->glob_cache)
             memcpy(new_gc, c->glob_cache, (size_t)c->const_len * sizeof(GlobCacheEntry));
         memset(new_gc + c->const_len, 0,

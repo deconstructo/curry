@@ -109,7 +109,7 @@ static bool slot_matches(val_t a, val_t b, int cmp) {
 
 static void set_rehash(Set *s) {
     uint32_t new_cap = s->cap ? s->cap * 2 : 16;
-    val_t *new_bkt   = (val_t *)gc_alloc(new_cap * sizeof(val_t));
+    val_t *new_bkt   = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     for (uint32_t i = 0; i < new_cap; i++) new_bkt[i] = EMPTY_SLOT;
     uint32_t mask = new_cap - 1;
     for (uint32_t i = 0; i < s->cap; i++) {
@@ -242,8 +242,8 @@ bool set_equal(val_t a, val_t b) {
 
 static void hash_rehash(Hashtable *h) {
     uint32_t new_cap = h->cap ? h->cap * 2 : 16;
-    val_t *nk = (val_t *)gc_alloc(new_cap * sizeof(val_t));
-    val_t *nv = (val_t *)gc_alloc(new_cap * sizeof(val_t));
+    val_t *nk = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
+    val_t *nv = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     for (uint32_t i = 0; i < new_cap; i++) { nk[i]=EMPTY_SLOT; nv[i]=V_VOID; }
     uint32_t mask = new_cap - 1;
     for (uint32_t i = 0; i < h->cap; i++) {

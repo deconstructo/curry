@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "value.h"
 #include "opcode.h"
+#include "object.h"
 
 /*
  * Chunk — a compiled unit of bytecode.
@@ -21,6 +22,7 @@
 typedef struct { val_t *slot; uint32_t version; } GlobCacheEntry;
 
 typedef struct {
+    Hdr       hdr;        /* type = T_CHUNK; must be first               */
     uint8_t  *code;       /* bytecode stream                             */
     int       code_len;   /* used bytes                                  */
     int       code_cap;   /* allocated bytes                             */

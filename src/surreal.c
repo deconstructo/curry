@@ -140,8 +140,8 @@ val_t sur_add(val_t a, val_t b) {
     if (nb == 0) return a;
 
     int cap = na + nb;
-    val_t *exps   = (val_t *)gc_alloc((size_t)cap * sizeof(val_t));
-    val_t *coeffs = (val_t *)gc_alloc((size_t)cap * sizeof(val_t));
+    val_t *exps   = (val_t *)gc_alloc_raw_pinned((size_t)cap * sizeof(val_t));
+    val_t *coeffs = (val_t *)gc_alloc_raw_pinned((size_t)cap * sizeof(val_t));
     int n = 0, i = 0, j = 0;
 
     while (i < na && j < nb) {
@@ -183,8 +183,8 @@ val_t sur_mul(val_t a, val_t b) {
 
     int nc = na * nb;
     if (nc > MAX_TERMS * MAX_TERMS) nc = MAX_TERMS * MAX_TERMS;
-    val_t *exps   = (val_t *)gc_alloc((size_t)nc * sizeof(val_t));
-    val_t *coeffs = (val_t *)gc_alloc((size_t)nc * sizeof(val_t));
+    val_t *exps   = (val_t *)gc_alloc_raw_pinned((size_t)nc * sizeof(val_t));
+    val_t *coeffs = (val_t *)gc_alloc_raw_pinned((size_t)nc * sizeof(val_t));
 
     int n = 0;
     for (int i = 0; i < na && n < nc; i++) {
@@ -206,8 +206,8 @@ val_t sur_div(val_t a, val_t b) {
     if (sb->nterms == 0)
         scm_raise(V_FALSE, "𒀭 ḫiṭītu — ina ṣifri pašāṭum lā leqû: surreal division by zero");
 
-    val_t *qexps   = (val_t *)gc_alloc(MAX_TERMS * sizeof(val_t));
-    val_t *qcoeffs = (val_t *)gc_alloc(MAX_TERMS * sizeof(val_t));
+    val_t *qexps   = (val_t *)gc_alloc_raw_pinned(MAX_TERMS * sizeof(val_t));
+    val_t *qcoeffs = (val_t *)gc_alloc_raw_pinned(MAX_TERMS * sizeof(val_t));
     int qn = 0;
 
     val_t r = a;
