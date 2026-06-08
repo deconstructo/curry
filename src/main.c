@@ -1,4 +1,5 @@
 #include "gc.h"
+#include "gc_semispace.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -352,6 +353,20 @@ static size_t parse_size(const char *s) {
 /* ---- Entry point ---- */
 
 int main(int argc, char **argv) {
+    /* Pre-scan for --gc before any GC initialisation. */
+    for (int i = 1; i < argc - 1; i++) {
+        if (strcmp(argv[i], "--gc") == 0) {
+            if (strcmp(argv[i+1], "semispace") == 0) {
+                gc_semispace_init(0);   /* 0 = use default space size */
+                gc_ops = &gc_ss_ops;
+            } else if (strcmp(argv[i+1], "boehm") != 0) {
+                fprintf(stderr, "curry: unknown GC backend '%s' (use 'boehm' or 'semispace')\n",
+                        argv[i+1]);
+                return 1;
+            }
+            break;
+        }
+    }
     init_all();
 
     bool interactive = false;
@@ -364,6 +379,7 @@ int main(int argc, char **argv) {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
         { "gc-max-heap",  required_argument, NULL, 'G' },
+        { "gc",           required_argument, NULL, 0   },  /* handled pre-scan */
         { NULL, 0, NULL, 0 }
     };
 
@@ -371,6 +387,7 @@ int main(int argc, char **argv) {
     /* '+' prefix: stop at first non-option so script args aren't consumed */
     while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvhG:", long_opts, NULL)) != -1) {
         switch (opt) {
+        case 0:   break;   /* long option with no short form (e.g. --gc) — already handled */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;

@@ -242,4 +242,5 @@ val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv) {
 
 void env_init(void) {
     GLOBAL_ENV = env_new_root();
+    gc_register_root(&GLOBAL_ENV);
 }

@@ -5,6 +5,7 @@
 #include "symbol.h"
 #include "builtins.h"
 #include "gc.h"
+#include "gc_semispace.h"
 #include "reader.h"
 #include "port.h"
 #include <dlfcn.h>
@@ -97,7 +98,7 @@ val_t curry_vm_env(CurryVM *vm) { return vm->env; }
 
 void curry_define_fn(CurryVM *vm, const char *name, CurryFn fn,
                      int min_args, int max_args, void *ud) {
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type  = T_PRIMITIVE; p->hdr.flags = 0;
     p->name      = name;
     p->min_args  = min_args;
@@ -175,9 +176,19 @@ static val_t strip_for(val_t spec) {
     return spec;
 }
 
+/* ---- GC scanner for module registry ---- */
+
+static void scan_module_registry(void) {
+    for (ModuleEntry *e = registry; e; e = e->next) {
+        e->name   = (val_t)gc_ss_evac((uintptr_t)e->name);
+        e->module = (Module *)gc_ss_fwd(e->module);
+    }
+}
+
 /* ---- Public API ---- */
 
 void modules_init(void) {
+    gc_ss_register_ext_scanner(scan_module_registry);
     /* Add search dir relative to executable (handles build-tree and install) */
 #if defined(__linux__) || defined(__APPLE__)
     {

@@ -292,7 +292,7 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     sr->literals = literals;
     sr->rules    = compiled;
 
-    Primitive *p = CURRY_NEW(Primitive);
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
     p->name     = "syntax-rules-transformer";
     p->min_args = 1; p->max_args = 1;
@@ -311,7 +311,7 @@ void syntax_rules_register(val_t env) {
      * sr_compile_fn, which returns a T_PRIMITIVE transformer.  That primitive
      * self-evaluates (non-pair heap object), so define-syntax receives it
      * directly and wraps it in its own T_SYNTAX struct. */
-    Primitive *compile_prim = CURRY_NEW(Primitive);
+    Primitive *compile_prim = CURRY_NEW_PINNED(Primitive);
     compile_prim->hdr.type = T_PRIMITIVE; compile_prim->hdr.flags = 0;
     compile_prim->name     = "syntax-rules-compile";
     compile_prim->min_args = 1; compile_prim->max_args = 1;
