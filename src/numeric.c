@@ -1479,12 +1479,15 @@ static val_t sexbuf_to_val(SexBuf *b) {
 /* ---- Base-60 digit extraction (MSB-first, using GMP) ---- */
 
 /* Fill digits[] with base-60 representation of non-negative mpz n, MSB first.
- * Returns count. digits[] must have room for at least 64 entries. */
+ * Returns count, or -1 if n requires more than 64 base-60 digits (≥ 60^64).
+ * digits[] must have room for at least 64 entries. */
 static int mpz_to_base60_digits(mpz_t n, int *digits) {
+    assert(mpz_sgn(n) >= 0);          /* caller must negate before calling */
     if (mpz_sgn(n) == 0) { digits[0] = 0; return 1; }
     int buf[64], cnt = 0;
     mpz_t tmp; mpz_init_set(tmp, n);
-    while (mpz_sgn(tmp) > 0 && cnt < 64) {
+    while (mpz_sgn(tmp) > 0) {
+        if (cnt >= 64) { mpz_clear(tmp); return -1; } /* overflow */
         buf[cnt++] = (int)mpz_tdiv_q_ui(tmp, tmp, 60);
     }
     mpz_clear(tmp);
@@ -1541,6 +1544,7 @@ static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
         if (out->neg) mpz_neg(tmp, tmp);
         out->nint = mpz_to_base60_digits(tmp, out->int_digs);
         mpz_clear(tmp);
+        if (out->nint < 0) { out->valid = false; return; }
     } else if (vis_rational(v)) {
         mpq_t q; mpq_init(q); mpq_set(q, as_rat(v)->q);
         out->neg = mpq_sgn(q) < 0;
@@ -1554,6 +1558,10 @@ static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
         mpz_mul(rem, ip, den); mpz_sub(rem, num, rem);
 
         out->nint = mpz_to_base60_digits(ip, out->int_digs);
+        if (out->nint < 0) {
+            mpz_clear(ip); mpz_clear(num); mpz_clear(den); mpz_clear(rem);
+            mpq_clear(q); out->valid = false; return;
+        }
 
         for (int i = 0; i < max_frac && i < 32; i++) {
             mpz_mul_ui(rem, rem, 60);
@@ -1577,6 +1585,7 @@ static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
         mpz_t tmp; mpz_init_set_si(tmp, (long)int_d);
         out->nint = mpz_to_base60_digits(tmp, out->int_digs);
         mpz_clear(tmp);
+        if (out->nint < 0) { out->valid = false; return; }
 
         for (int i = 0; i < max_frac && i < 32; i++) {
             frac_d *= 60.0;

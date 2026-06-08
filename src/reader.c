@@ -50,7 +50,7 @@ static void skip_whitespace(val_t port) {
         if (c == ';') {
             /* Line comment: skip to end of line */
             while ((c = next_char(port)) != -1 && c != '\n') {}
-        } else if (isspace(c)) {
+        } else if (c >= 0 && c <= 127 && isspace((unsigned char)c)) {
             next_char(port);
         } else {
             break;
@@ -493,14 +493,23 @@ static val_t read_datum(val_t port) {
         }
         case 's': case 'S': {
             /* #s — Neugebauer/sexagesimal literal: digits,commas[;frac,digits]
-             * ';' is the Neugebauer radix point (NOT a comment delimiter here).
-             * Read until whitespace or list-punctuation, but NOT ';'. */
+             * ';' is the Neugebauer radix point, but only ONE is allowed per
+             * literal (everything after a second ';' is a Scheme line comment).
+             * Read until whitespace or list-punctuation; stop at ';' once the
+             * radix-point semicolon has already been consumed. */
             StrBuf sb; sb_init(&sb);
+            bool seen_semi = false;
             int ch;
             while ((ch = peek_char_port(port)) != -1
-                   && !isspace(ch) && ch != '(' && ch != ')' && ch != '"'
-                   && ch != '[' && ch != ']')
+                   && !isspace((unsigned char)ch)
+                   && ch != '(' && ch != ')' && ch != '"'
+                   && ch != '[' && ch != ']'
+                   && !(ch == ';' && seen_semi)) {
+                if (ch == ';') seen_semi = true;
                 sb_push(&sb, (char)next_char(port));
+            }
+            if (sb.len == 0)
+                read_error("empty sexagesimal literal after #s");
             sb.buf[sb.len] = '\0';
             val_t result = sex_parse_neugebauer(sb.buf);
             if (vis_false(result))
@@ -549,8 +558,9 @@ static val_t read_datum(val_t port) {
             /* Append trailing non-delimiter ASCII chars (e.g. '?', '!') only when
              * the last thing read was cuneiform (not a space before another token). */
             if (!space_consumed) {
-                while (!is_delimiter(peek_char_port(port)) &&
-                       !SEX_IS_CUNEIFORM((uint32_t)peek_char_port(port))) {
+                int nxt;
+                while (nxt = peek_char_port(port),
+                       !is_delimiter(nxt) && !SEX_IS_CUNEIFORM((uint32_t)nxt)) {
                     sb_push(&sb, (char)next_char(port));
                 }
             }

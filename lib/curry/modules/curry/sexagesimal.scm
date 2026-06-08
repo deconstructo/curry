@@ -18,16 +18,19 @@
 ;;; Convert an exact rational (or integer) to a list of sexagesimal digit
 ;;; groups:  (integer-digit frac-digit-1 frac-digit-2 ...).
 ;;; The first element is the integer part (≥ 0), subsequent elements are
-;;; fractional sexagesimal digits, each 0–59.
+;;; fractional sexagesimal digits, each 0–59.  Negative values are first
+;;; converted to their absolute value; the caller is responsible for sign.
 ;;; #:places controls maximum fractional digits (default: auto/exact).
 (define (rational->sexagesimal r . opts)
-  (let* ((places (let loop ((lst opts))
+  (let* ((neg? (< r 0))
+         (r    (if neg? (- r) r))
+         (places (let loop ((lst opts))
                    (cond ((null? lst) -1)
                          ((and (pair? lst) (eq? (car lst) #:places)
                                (pair? (cdr lst)))
                           (cadr lst))
                          (else (loop (cdr lst))))))
-         ;; Use Neugebauer string as the source of truth
+         ;; Use Neugebauer string of the absolute value as source of truth
          (s (if (>= places 0)
                 (number->string r 'neugebauer #:places places)
                 (number->string r 'neugebauer)))
@@ -50,9 +53,10 @@
          (int-str  (if semi-pos (substring s 0 semi-pos) s))
          (frac-str (if semi-pos (substring s (+ semi-pos 1) (string-length s)) ""))
          (int-digs  (parse-comma-digits int-str))
-         (frac-digs (if (string=? frac-str "" ) '()
-                        (parse-comma-digits frac-str))))
-    (append int-digs frac-digs)))
+         (frac-digs (if (string=? frac-str "") '()
+                        (parse-comma-digits frac-str)))
+         (digs (append int-digs frac-digs)))
+    (if neg? (cons (- (car digs)) (cdr digs)) digs)))
 
 ;;; Convert a sexagesimal digit list to an exact rational.
 ;;; The first element is the integer sexagesimal digit (integer part);
