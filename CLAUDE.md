@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Commits
+
+Commit after each meaningful task step, not just at the end. This keeps the history bisectable and lets either party revert to a known-good state if something goes wrong mid-task.
+
 ## Code review
 
 After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `/code-review` skill) to review it before declaring the task done. The subagent should not share context with the writing session — the point is an independent read. Pay particular attention to: array bounds vs loop bounds, off-by-one errors in sexagesimal/numeric code, and cuneiform reader edge cases.
