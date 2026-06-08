@@ -171,7 +171,7 @@ void main() {
 (define (on-mouse-move! x y)
   (when *drag-x*
     (set! *cx* (- *drag-cx* (/ (- x *drag-x*) *zoom*)))
-    (set! *cy* (+ *drag-cy* (/ (- y *drag-y*) *zoom*)))
+    (set! *cy* (- *drag-cy* (/ (- y *drag-y*) *zoom*)))
     (canvas-redraw! *canvas*)))
 
 (define (reset-view!)
@@ -187,7 +187,7 @@ void main() {
          (wy (/ (- (inexact sy) (/ (inexact *H*) 2.0)) *zoom*))
          (nz (* *zoom* factor)))
     (set! *cx* (- (+ *cx* wx) (/ (- (inexact sx) (/ (inexact *W*) 2.0)) nz)))
-    (set! *cy* (+ (- *cy* wy) (/ (- (inexact sy) (/ (inexact *H*) 2.0)) nz)))
+    (set! *cy* (- (+ *cy* wy) (/ (- (inexact sy) (/ (inexact *H*) 2.0)) nz)))
     (set! *zoom* nz)
     (canvas-redraw! *canvas*)))
 
