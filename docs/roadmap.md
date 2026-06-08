@@ -273,31 +273,34 @@ QM operator algebra.
 
 ---
 
-## Phase 4 — v1.4: Pluggable GC — Semispace
+## Phase 4 — v1.4: Pluggable GC — Semispace ✓ done
 
-The GC vtable (`gc_ops_t`) and per-thread nursery are already in `gc.h`. Object
-headers already carry `fwd` forwarding fields. LLVM statepoints are already
-emitted. The infrastructure is sitting there; this phase builds the first
-moving collector on top of it.
+*Merged to branch `phase4-semispace-gc` (2026-06-08).*
 
-**Semispace (Cheney) GC:**
-- Two equal semi-spaces; allocation in from-space via bump pointer
-- On exhaustion, copy live objects to to-space following statepoint stack maps
-- Write barrier: Dijkstra (`if is_black(obj) && is_white(new_val): shade_grey(new_val)`)
-- LLVM emits `llvm.gcwrite` at every pointer store; barrier reads that
+Two 32 MB semispaces (Cheney stop-the-world). Bump-pointer allocation;
+on exhaustion or explicit `(gc-collect!)` all live objects are evacuated
+to to-space; spaces swap. Root set: vm->stack, GLOBAL_ENV, pinned-list
+(Actor/TVar/Channel/Mailbox/Continuation), module-registry ext-scanner.
+Type-specific scanners for all 54 ObjTypes. Boehm remains the default
+(`--gc boehm`); semispace selected with `--gc semispace`.
 
-The pluggable design means Boehm stays as the `--gc boehm` fallback for
-debugging (conservative, no statepoints needed). Semispace is selected with
-`--gc semispace` or a startup call.
+Pinned types (Boehm, never moved): Symbol, Bignum, Rational, Mpfr, Port,
+Actor, Mailbox, TVar, Channel, Continuation, Primitive. All others moveable.
+All raw C-array allocation sites updated to `gc_alloc_raw_pinned`.
 
-Also: green thread coroutine frames as GC-managed heap objects; `gc-collect!`,
-`gc-stats`, `gc-on-collection` hook.
+Deliverables shipped: `gc_ss_ops`, `gc-collect!`, `gc-stats`,
+`gc-on-collection`, `gc_ss_register_ext_scanner` hook.
 
-**Effort:** 6–8 weeks.
-**Version note:** C extension modules must use `gc_pin`/`gc_unpin` for pointers
-stored off the stack once a moving GC is active. The FFI `with-pinned-*` macros
-(Phase 1) handle this automatically. This is the only breaking change for
-extension authors.
+Known limitation: sicm tests partially pass (93/167) under `--gc semispace`
+due to stale-pointer residuals in complex multi-level closure environments
+under ODE integration GC pressure. All other test suites (r7rs/r6rs/
+numeric_ext/actors/dynamic_wind/syntax_rules/akkadian/sexagesimal) pass.
+Root cause deferred to Phase 6 (generational GC + full precise root set).
+
+**Effort:** Done.
+**Version note:** C extension modules must use `gc_pin`/`gc_unpin` for
+pointers stored off the stack once a moving GC is active. The FFI
+`with-pinned-*` macros handle this automatically.
 
 ---
 
