@@ -1,5 +1,28 @@
 # Changelog
 
+### 1.3.1 — Housekeeping
+
+**Packaging**
+- RPM CPack generator added alongside DEB; `cpack` now produces both
+  `curry-scheme_*.deb` and `curry-scheme-*.rpm` from the same build.
+- CMake project and CPack version now derived from `src/version.h` (single
+  source of truth).
+
+**CLI**
+- `--gc BACKEND` was missing from `--help`; now listed alongside `--gc-max-heap`.
+
+**Bug fixes**
+- Mandelbrot explorer: left-drag pan and zoom-to-cursor y-axis were inverted;
+  drag event name typo caused pan to not register.
+
+**Housekeeping**
+- `scripts/` directory merged into `tools/`; all references updated.
+- LLVM "Enabled" banner text cleaned up.
+- `docs/guides/INSTALL.md` documents both `.deb` and `.rpm` packaging with
+  dependency tables for each format.
+
+---
+
 ### 1.3.0 — Cheney Semispace GC
 
 First moving garbage collector.  The Boehm conservative GC remains the default;
