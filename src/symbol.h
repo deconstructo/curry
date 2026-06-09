@@ -49,6 +49,7 @@ extern val_t
     S_APPLY, S_MAP, S_FOR_EACH,
     /* symbolic / CAS */
     S_SYMBOLIC,
+    S_DEFINE_RULE, S_DEFINE_RULESET, S_RULE_ARROW, S_KW_WHEN, S_UNDERSCORE,
     /* runtime profiling */
     S_EVAL_PROFILER, S_GC_PROFILER;
 

@@ -86,6 +86,11 @@ SYM(S_MONITOR,            "monitor!")
 
 /* Symbolic / CAS */
 SYM(S_SYMBOLIC,           "symbolic")
+SYM(S_DEFINE_RULE,        "define-rule")
+SYM(S_DEFINE_RULESET,     "define-ruleset")
+SYM(S_RULE_ARROW,         "→")
+SYM(S_KW_WHEN,            "#:when")
+SYM(S_UNDERSCORE,         "_")
 
 /* Runtime profiling control */
 SYM(S_EVAL_PROFILER,      "**eval-profiler**")

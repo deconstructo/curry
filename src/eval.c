@@ -1,4 +1,6 @@
 #include "eval.h"
+#include "sx_rules.h"
+#include "sx_pattern.h"
 #include "vm.h"
 #include "compiler.h"
 #ifdef BUILD_LLVM
@@ -29,7 +31,8 @@ static bool is_definition(val_t form) {
     if (!vis_pair(form)) return false;
     val_t op = vcar(form);
     return op == S_DEFINE || op == S_DEFINE_SYNTAX ||
-           op == S_DEFINE_VALUES || op == S_DEFINE_RECORD_TYPE;
+           op == S_DEFINE_VALUES || op == S_DEFINE_RECORD_TYPE ||
+           op == S_DEFINE_RULE || op == S_DEFINE_RULESET;
 }
 
 /* ---- Exception handling and dynamic wind ---- */
@@ -1178,6 +1181,75 @@ tail:
     }
 
     /* ---- Macro / syntax transformer ---- */
+    /* ---- define-rule / define-ruleset ---- */
+
+    if (op == S_DEFINE_RULE) {
+        /* (define-rule PATTERN → TEMPLATE [#:when GUARD]) */
+        if (!vis_pair(rest) || !vis_pair(vcdr(rest)) || !vis_pair(vcddr(rest)))
+            scm_raise(V_FALSE, "define-rule: expected (define-rule pattern → template)");
+        val_t pattern  = vcar(rest);
+        /* skip → (second element) */
+        val_t tmpl     = vcar(vcddr(rest));
+        val_t trailing = vcdr(vcddr(rest));
+
+        val_t guard_expr = V_FALSE;
+        if (vis_pair(trailing) && vcar(trailing) == S_KW_WHEN && vis_pair(vcdr(trailing)))
+            guard_expr = vcadr(trailing);
+
+        val_t pvars = sx_pattern_vars(pattern);
+
+        /* Compile action: (lambda (pvars...) template) */
+        val_t lam_form = make_pair(S_LAMBDA, make_pair(pvars, make_pair(tmpl, V_NIL)));
+        val_t action_fn = eval(lam_form, env);
+
+        val_t guard_fn = V_FALSE;
+        if (guard_expr != V_FALSE) {
+            val_t g_form = make_pair(S_LAMBDA, make_pair(pvars, make_pair(guard_expr, V_NIL)));
+            guard_fn = eval(g_form, env);
+        }
+
+        sx_rule_add(pattern, pvars, guard_fn, action_fn, V_FALSE);
+        return V_VOID;
+    }
+
+    if (op == S_DEFINE_RULESET) {
+        /* (define-ruleset NAME [PATTERN → TEMPLATE [#:when GUARD]] ...) */
+        if (!vis_pair(rest))
+            scm_raise(V_FALSE, "define-ruleset: expected (define-ruleset name clause ...)");
+        val_t name    = vcar(rest);
+        val_t clauses = vcdr(rest);
+
+        while (vis_pair(clauses)) {
+            val_t clause = vcar(clauses);
+            clauses = vcdr(clauses);
+            if (!vis_pair(clause) || !vis_pair(vcdr(clause)) || !vis_pair(vcddr(clause)))
+                continue; /* skip malformed clause */
+
+            val_t pattern  = vcar(clause);
+            /* skip → */
+            val_t tmpl     = vcar(vcddr(clause));
+            val_t trailing = vcdr(vcddr(clause));
+
+            val_t guard_expr = V_FALSE;
+            if (vis_pair(trailing) && vcar(trailing) == S_KW_WHEN && vis_pair(vcdr(trailing)))
+                guard_expr = vcadr(trailing);
+
+            val_t pvars = sx_pattern_vars(pattern);
+
+            val_t lam_form  = make_pair(S_LAMBDA, make_pair(pvars, make_pair(tmpl, V_NIL)));
+            val_t action_fn = eval(lam_form, env);
+
+            val_t guard_fn = V_FALSE;
+            if (guard_expr != V_FALSE) {
+                val_t g_form = make_pair(S_LAMBDA, make_pair(pvars, make_pair(guard_expr, V_NIL)));
+                guard_fn = eval(g_form, env);
+            }
+
+            sx_rule_add(pattern, pvars, guard_fn, action_fn, name);
+        }
+        return V_VOID;
+    }
+
     val_t op_val = vis_symbol(op) ? env_lookup(env, op) : eval(op, env);
     if (vis_syntax(op_val)) {
         /* Apply transformer */

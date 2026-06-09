@@ -1,4 +1,5 @@
 #include "symbolic.h"
+#include "sx_rules.h"
 #include "object.h"
 #include "gc.h"
 #include "symbol.h"
@@ -230,6 +231,14 @@ val_t sx_simplify(val_t expr) {
     /* Recursively simplify all arguments */
     val_t *sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < n; i++) sa[i] = sx_simplify(se->args[i]);
+
+    /* User-defined rules — consulted before built-in dispatch so that custom
+       algebras (e.g. Dirac γ-matrix anti-commutation) take precedence. */
+    {
+        val_t user_expr   = sx_make_expr(op, n, sa);
+        val_t user_result = sx_rule_try(user_expr);
+        if (user_result != V_VOID) return sx_simplify(user_result);
+    }
 
     /* Flatten nested ADD or MUL into one level */
     if (op == SX_ADD || op == SX_MUL || op == SX_NCMUL) {

@@ -1,4 +1,5 @@
 #include "builtins.h"
+#include "sx_rules.h"
 #include "object.h"
 #include "stm.h"
 #include "channel.h"
@@ -33,6 +34,10 @@ static val_t prim_sx_diff(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_diff(av[0], av[1]); }
 static val_t prim_sx_simplify(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_simplify(av[0]); }
+static val_t prim_list_rules(int ac, val_t *av, void *ud)
+    { (void)ud; return sx_rules_list(ac > 0 ? av[0] : V_FALSE); }
+static val_t prim_clear_rules(int ac, val_t *av, void *ud)
+    { (void)ud; sx_rules_clear(ac > 0 ? av[0] : V_FALSE); return V_VOID; }
 static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
@@ -1404,6 +1409,10 @@ void builtins_curry_register(val_t env) {
     DEF("random-source-pseudo-randomize!",prim_random_seed,           3,3);
     DEF("random-source->random-real",     prim_random_source_to_real, 1,1);
     DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
+
+    /* User-defined rewrite rules */
+    DEF("list-rules",   prim_list_rules,  0, 1);
+    DEF("clear-rules!", prim_clear_rules, 0, 1);
     env_define(env, sym_intern_cstr("default-random-source"),
                sym_intern_cstr("default-random-source"));
 
