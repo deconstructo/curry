@@ -163,7 +163,7 @@ be independently compiled to bytecode with `make`.
 - `.claude/hooks/pre-push` (symlinked to `.git/hooks/pre-push`): blocks push if
   `src/version.h`, Formula URL tag, Formula `version` field, or most recent git
   tag disagree, or if the sha256 is still the zero placeholder.
-- `scripts/release-verify.sh`: post-release brew verification (uninstall, tap
+- `tools/release-verify.sh`: post-release brew verification (uninstall, tap
   update, reinstall, `curry --version` assert, smoke test).
 
 **Bug fixes**

@@ -122,7 +122,7 @@ Wait 8 seconds, then fetch the SHA256 with up to 4 retries (10 s apart):
 curl -sL --fail https://github.com/deconstructo/curry/archive/refs/tags/vNEW.tar.gz | shasum -a 256
 ```
 
-If the curl returns a non-200 or empty output on all attempts, stop and tell the user to run `scripts/release-verify.sh` manually once the tarball is available.
+If the curl returns a non-200 or empty output on all attempts, stop and tell the user to run `tools/release-verify.sh` manually once the tarball is available.
 
 Display the SHA256. Verify it is exactly 64 lowercase hex characters and is not all zeros.
 
@@ -151,7 +151,7 @@ Run `git log --oneline -3` to confirm the push landed.
 ## Checkpoint 4: Post-release verification
 
 ```bash
-bash scripts/release-verify.sh vNEW
+bash tools/release-verify.sh vNEW
 ```
 
 Report the full output. If verification fails, display the error and suggest manual steps.
