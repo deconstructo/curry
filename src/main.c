@@ -336,6 +336,7 @@ static void usage(const char *argv0) {
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
         "  -v                Print version\n"
+        "  --gc BACKEND      GC backend: boehm (default) or semispace\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n",
         argv0);
 }
