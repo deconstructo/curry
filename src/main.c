@@ -37,7 +37,7 @@
 #endif
 
 #ifdef BUILD_LLVM
-#  define LLVM_TAG " (LLVM Enabled)"
+#  define LLVM_TAG " (LLVM)"
 #else
 #  define LLVM_TAG ""
 #endif
