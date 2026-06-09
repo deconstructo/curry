@@ -662,8 +662,8 @@ R7RS Scheme interpreter featuring Boehm GC, GMP arbitrary-precision\
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README      "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-# DEB-specific
-set(CPACK_GENERATOR                 "DEB")
+# DEB + RPM
+set(CPACK_GENERATOR                 "DEB;RPM")
 set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
 set(CPACK_DEBIAN_FILE_NAME          DEB-DEFAULT)   # curry-scheme_0.8.22_<arch>.deb
 set(CPACK_DEBIAN_PACKAGE_RELEASE    "1")           # bump for packaging-only changes; reset to 1 on upstream bumps
@@ -690,5 +690,17 @@ set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS
     "libqt6widgets6, libqt6opengl6, \
      libplplot19 | libplplot17")
+
+# RPM-specific
+set(CPACK_RPM_FILE_NAME             RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_RELEASE       "1")
+set(CPACK_RPM_PACKAGE_LICENSE       "GPL-3.0-only")
+set(CPACK_RPM_PACKAGE_GROUP         "Development/Languages")
+set(CPACK_RPM_PACKAGE_REQUIRES
+    "gc >= 8.0, gmp >= 6.0, readline >= 8.0, sqlite-libs")
+set(CPACK_RPM_PACKAGE_RECOMMENDS
+    "openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap")
+set(CPACK_RPM_PACKAGE_SUGGESTS
+    "qt6-qtbase, plplot")
 
 include(CPack)
