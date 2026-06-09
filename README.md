@@ -250,7 +250,7 @@ See [`docs/reference/module-ffi.md`](docs/reference/module-ffi.md) for the full 
 
 ## Installation & Building
 
-See [docs/guides/INSTALL.md](docs/guides/INSTALL.md) for Homebrew installation (macOS), building from source on Linux and macOS (including Qt6 and `.deb` packaging), and running the test suite.
+See [docs/guides/INSTALL.md](docs/guides/INSTALL.md) for Homebrew installation (macOS), building from source on Linux and macOS (including Qt6 and `.deb`/`.rpm` packaging), and running the test suite.
 
 ---
 

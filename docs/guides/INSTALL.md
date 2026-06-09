@@ -147,23 +147,47 @@ cmake --build build -j$(sysctl -n hw.logicalcpu)
 
 GCC and upstream LLVM Clang are both supported. When building a Release build with Clang, the CMake configuration automatically adds `-fno-omit-frame-pointer`. This is required because Boehm GC's conservative stack scanner walks frame-pointer chains to find live heap objects; Clang at `-O2` omits them by default, which breaks the GC and causes segfaults. GCC is unaffected.
 
-### 5. Create a .deb package
+### 5. Create a .deb or .rpm package
 
-Build in Release mode, then run CPack from the build directory:
+CPack can produce both a Debian (`.deb`) and an RPM (`.rpm`) package from the same build. Build in Release mode first, then invoke CPack from the build directory:
 
 ```bash
 cmake -B build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release -j$(nproc)
-cd build-release && cpack -G DEB
+cd build-release
 ```
 
-This produces `curry-scheme_0.8.16_arm64.deb` (architecture auto-detected). Install it with:
+**Debian/Ubuntu — build both formats at once:**
 
 ```bash
-sudo dpkg -i curry-scheme_0.8.16_arm64.deb
+cpack                    # produces .deb and .rpm
 ```
 
-The package installs to standard system paths:
+**Build only one format:**
+
+```bash
+cpack -G DEB             # Debian/Ubuntu
+cpack -G RPM             # Fedora/RHEL/openSUSE
+```
+
+This produces files named after the project version and host architecture, e.g.:
+
+- `curry-scheme_1.3.0_amd64.deb`
+- `curry-scheme-1.3.0-1.x86_64.rpm`
+
+**Install:**
+
+```bash
+# Debian/Ubuntu
+sudo dpkg -i curry-scheme_*.deb
+
+# Fedora/RHEL
+sudo rpm -i curry-scheme-*.rpm
+# or
+sudo dnf install ./curry-scheme-*.rpm   # resolves dependencies automatically
+```
+
+Both packages install to standard system paths:
 
 | Path | Contents |
 |------|----------|
@@ -173,7 +197,12 @@ The package installs to standard system paths:
 | `/usr/lib/curry/modules/curry/` | Extension modules (`.so` + `.scm`) |
 | `/usr/share/doc/curry/` | All documentation (Markdown + PDF) |
 
-Runtime dependencies (`libgc`, `libgmp`) are declared as `Depends`; the optional module libraries (SQLite, OpenSSL, libcurl, etc.) appear as `Recommends`.
+**Runtime dependencies:**
+
+| Package type | Hard deps | Recommended | Suggested |
+|---|---|---|---|
+| `.deb` | `libgc2`, `libgmp10`, `libreadline8`, `libsqlite3-0` | OpenSSL, libcurl, libgit2, libpng, libjpeg, paho-c, libldap | Qt6, PLplot |
+| `.rpm` | `gc >= 8.0`, `gmp >= 6.0`, `readline >= 8.0`, `sqlite-libs` | openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap | qt6-qtbase, plplot |
 
 Optional modules can be enabled at configure time before packaging — any module whose library is present will be built and included in the package automatically.
 
