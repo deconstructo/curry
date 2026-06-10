@@ -621,9 +621,22 @@ val_t sx_simplify(val_t expr) {
     /* ---- DIV ---- */
     if (op == SX_DIV && n == 2) {
         val_t a = sa[0], b = sa[1];
-        if (num_count == 2) return num_div(a, b);
+        if (num_count == 2) {
+            if (num_is_zero(b)) {
+                /* Float zero: let IEEE 754 produce ±inf (needed by limit/series) */
+                if (vis_flonum(b)) return num_div(a, b);
+                /* Exact zero denominator */
+                if (!num_is_zero(a))
+                    scm_raise(V_FALSE, "/: division by zero");
+                /* 0/0: return unevaluated to let limit/series handle it */
+                return sx_make_expr(SX_DIV, 2, sa);
+            } else {
+                return num_div(a, b);
+            }
+        }
         if (is_zero(a)) return vfix(0);
         if (is_one(b)) return a;
+        if (sx_equal(a, b)) return vfix(1);  /* f/f = 1 */
         /* (/ (* c . syms) d) → fold numeric factors: (* (c/d) . syms) */
         if (vis_number(b) && vis_symexpr(a) && as_symexpr(a)->op == SX_MUL) {
             SymExpr *mul = as_symexpr(a);
@@ -701,7 +714,6 @@ val_t sx_simplify(val_t expr) {
             }
         }
     }
-
     /* ---- NCMUL: ordered (non-commutative) product ---- */
     if (op == SX_NCMUL) {
         if (n == 1) return sa[0];
@@ -2963,7 +2975,28 @@ val_t sx_series(val_t expr, val_t var, val_t point, int n) {
             fact = num_mul(fact, vfix(k));
         }
 
-        val_t ck = sx_simplify(sx_substitute(fk, var, point));
+        /* Evaluate f^(k)(point), falling back to limit on exception or 0/0 */
+        val_t ck;
+        {
+            ExnHandler _sh;
+            bool _subst_ok = false;
+            SCM_PROTECT(_sh, {
+                ck = sx_simplify(sx_substitute(fk, var, point));
+                _subst_ok = true;
+            }, { (void)0; });
+            if (!_subst_ok) {
+                ck = sx_limit(fk, var, point, 0);
+            } else if (vis_symexpr(ck) && as_symexpr(ck)->op == SX_DIV) {
+                /* 0/0: check if denominator is zero at point, guarding against poles */
+                bool _denom_zero = false;
+                ExnHandler _sh2;
+                SCM_PROTECT(_sh2, {
+                    _denom_zero = num_is_zero(sx_simplify(
+                        sx_substitute(as_symexpr(ck)->args[1], var, point)));
+                }, { (void)0; });
+                if (_denom_zero) ck = sx_limit(fk, var, point, 0);
+            }
+        }
         if (vis_number(ck) && num_is_zero(ck)) continue;
 
         /* Promote integer-valued flonums to fixnum for exact rational output */

@@ -124,6 +124,7 @@ set(CORE_SOURCES
   src/sx_rules.c
   src/sx_algebra.c
   src/sx_poly.c
+  src/sx_special.c
   src/symbolic_print.c
   src/quantum.c
   src/surreal.c
