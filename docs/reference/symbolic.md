@@ -30,7 +30,7 @@ Predicates:
 (sym-var-name x)       ; "x"  — the variable name as a string
 ```
 
-### Assumption flags
+### Assumption flags (static)
 
 `sym-var` accepts an optional second argument declaring a domain assumption. Assumptions unlock additional algebraic simplification rules.
 
@@ -68,6 +68,52 @@ Predicates:
 (simplify (log (expt xp 3)))      ; => (* 3 (log x))
 (sign xp)                         ; => 1
 (sign (sym-var 'y 'negative))     ; => -1
+```
+
+### Dynamic assumptions — `with-assumptions`
+
+*Added in v1.4.0 (Phase 4b).*
+
+`with-assumptions` temporarily adds assumption flags to sym-vars for the duration of a body expression, then restores the original flags — even if an exception is raised.
+
+```scheme
+(define x (sym-var 'x))          ; no assumptions
+
+; Without assumption: stays symbolic
+(simplify (sqrt (expt x 2)))     ; => (sqrt (expt x 2))
+
+; With assumption: simplifies
+(with-assumptions ((x positive))
+  (simplify (sqrt (expt x 2))))  ; => x
+
+; Multiple vars and assumptions
+(with-assumptions ((x positive real)
+                   (y integer))
+  (simplify (log (expt x 3))))   ; => (* 3 (log x))
+
+; Assumption is gone after the form
+(can-assume? x 'positive)        ; => #f
+```
+
+Syntax: each clause is `(VAR ASSUMPTION ...)` where `VAR` evaluates to a sym-var and each `ASSUMPTION` is one of `positive`, `negative`, `real`, `integer`, `nonzero`, `quaternion`.
+
+### Mutable assumptions
+
+*Added in v1.4.0 (Phase 4b).*
+
+Assumptions can also be added and removed permanently:
+
+```scheme
+(define x (sym-var 'x))
+
+(assume! x 'positive)            ; set flag
+(can-assume? x 'positive)        ; => #t
+(can-assume? x 'real)            ; => #f  (not implied; set separately if needed)
+
+(assume! x 'real)
+(drop-assumption! x 'positive)   ; remove one flag
+(can-assume? x 'positive)        ; => #f
+(can-assume? x 'real)            ; => #t
 ```
 
 ## Symbolic arithmetic
@@ -267,6 +313,105 @@ For quaternion symbolic variables, the same pass applies to `nc*` products:
 ```
 
 `simplify` is called automatically by `∂`, `∫`, and `substitute` on their results.
+
+### User-defined rewrite rules — `define-rule`, `define-ruleset`
+
+*Added in v1.4.0 (Phase 4a).*
+
+User rules fire **before** built-in simplification, so custom algebras can override the default behaviour for any operator.
+
+```scheme
+; Single rule — no guard
+(define-rule (* 0 ?x) → 0)
+
+; Rule with #:when guard
+(define-rule (sqrt (expt ?x 2)) → ?x
+  #:when (positive? ?x))
+
+; Rule with multiple pattern variables in the template
+(define-rule (log (expt ?base ?n)) → (* ?n (log ?base))
+  #:when (positive? ?base))
+
+; Named ruleset (all-or-nothing clear)
+(define-ruleset trig-ids
+  [(+ (expt (sin ?u) 2) (expt (cos ?u) 2)) → 1]
+  [(sin (* 2 ?u)) → (* 2 (sin ?u) (cos ?u))])
+```
+
+**Pattern language:**
+
+| Pattern element | Meaning |
+|----------------|---------|
+| `?x` | Matches any sub-expression; binds name `?x` |
+| `_`  | Matches any sub-expression; discards (no binding) |
+| `0`, `1`, … | Matches that exact number |
+| `'sym` | Matches the symbol `sym` literally |
+| `(op p1 p2 …)` | Matches a SymExpr with operator `op` and matching args |
+
+Pattern variables bound in the pattern are available in the template and in `#:when`. The template is ordinary Scheme code — `(* ?n (log ?base))` evaluates `*` and `log` normally with `?n` and `?base` substituted.
+
+**Inspection and cleanup:**
+
+```scheme
+(list-rules)          ; list all registered rules as ((pattern ruleset) ...)
+(list-rules '+)       ; filter to rules for operator +
+(clear-rules!)        ; remove all rules
+(clear-rules! 'trig-ids)  ; remove rules belonging to named ruleset only
+```
+
+### User-defined operator algebras — `define-algebra`
+
+*Added in v1.4.0 (Phase 4b).*
+
+`define-algebra` declares the algebraic properties of an operator **and** automatically creates a Scheme procedure for that operator in the current environment.
+
+```scheme
+(define-algebra 'wedge
+  #:associative? #t
+  #:identity     1
+  #:absorbing    0)
+
+; 'wedge is now a procedure:
+(simplify (wedge x (wedge y z)))   ; → (wedge x y z)  [associative flattening]
+(simplify (wedge x 1))             ; → x               [identity elimination]
+(simplify (wedge x 0))             ; → 0               [absorbing element]
+```
+
+**Keyword arguments:**
+
+| Keyword | Type | Effect |
+|---------|------|--------|
+| `#:commutative? #t` | bool | (reserved; planned: canonical reordering) |
+| `#:associative? #t` | bool | Flatten nested applications |
+| `#:identity VAL` | val | Eliminate identity elements from argument lists |
+| `#:absorbing VAL` | bool | Return absorbing element if any argument equals it |
+| `#:relations FN` | callable | `(fn expr)` → replacement or `(void)` |
+
+**Custom rewriting via `#:relations`:**
+
+```scheme
+(define (meet-rules expr)
+  ; Idempotent: (meet x x) → x
+  (if (equal? (sym-expr-arg expr 0) (sym-expr-arg expr 1))
+      (sym-expr-arg expr 0)
+      (void)))   ; void = no match, fall through
+
+(define-algebra 'meet #:commutative? #t #:associative? #t
+                       #:relations meet-rules)
+
+(simplify (meet x x))   ; → x
+(simplify (meet x y))   ; → (meet x y)  [unchanged]
+```
+
+**Low-level SymExpr access** (useful in `#:relations` functions):
+
+```scheme
+(sym-expr?       e)      ; #t if e is a composite expression
+(sym-expr-op     e)      ; operator symbol
+(sym-expr-nargs  e)      ; number of arguments
+(sym-expr-arg    e i)    ; i-th argument (0-based)
+(sym-expr 'op a b …)     ; construct and simplify a SymExpr directly
+```
 
 ### `trigsimp`
 
