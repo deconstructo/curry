@@ -1,6 +1,9 @@
 #include "symbolic.h"
 #include "sx_rules.h"
+#include "sx_algebra.h"
 #include "object.h"
+#include "set.h"    /* scm_equal */
+#include "eval.h"   /* apply_arr */
 #include "gc.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -238,6 +241,59 @@ val_t sx_simplify(val_t expr) {
         val_t user_expr   = sx_make_expr(op, n, sa);
         val_t user_result = sx_rule_try(user_expr);
         if (user_result != V_VOID) return sx_simplify(user_result);
+    }
+
+    /* Declared algebra properties for user-defined operators.
+       Built-in operators (+, *, etc.) are not in the algebra table and fall
+       through to the hard-coded dispatch below. */
+    {
+        AlgebraInfo *alg = sx_algebra_lookup(op);
+        if (alg) {
+            /* Absorbing element: (op ... abs ...) → abs */
+            if (alg->absorbing != V_VOID) {
+                for (int i = 0; i < n; i++)
+                    if (scm_equal(sa[i], alg->absorbing)) return alg->absorbing;
+            }
+            /* Identity elimination: remove all identity elements from args */
+            if (alg->identity != V_VOID) {
+                int new_n = 0;
+                val_t *new_sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+                for (int i = 0; i < n; i++)
+                    if (!scm_equal(sa[i], alg->identity)) new_sa[new_n++] = sa[i];
+                if (new_n == 0) return alg->identity;
+                if (new_n == 1) return new_sa[0];
+                if (new_n < n)  return sx_simplify(sx_make_expr(op, new_n, new_sa));
+            }
+            /* Associative flattening: (op (op a b) c) → (op a b c) */
+            if (alg->associative) {
+                int total = 0;
+                for (int i = 0; i < n; i++) {
+                    if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == op)
+                        total += (int)as_symexpr(sa[i])->nargs;
+                    else total++;
+                }
+                if (total > n) {
+                    val_t *flat = (val_t *)gc_alloc_raw_pinned((size_t)total * sizeof(val_t));
+                    int k = 0;
+                    for (int i = 0; i < n; i++) {
+                        if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == op) {
+                            SymExpr *sub = as_symexpr(sa[i]);
+                            for (uint32_t j = 0; j < sub->nargs; j++) flat[k++] = sub->args[j];
+                        } else flat[k++] = sa[i];
+                    }
+                    sa = flat; n = total;
+                }
+            }
+            /* Custom relations function */
+            if (alg->relations_fn != V_FALSE) {
+                val_t rel_expr   = sx_make_expr(op, n, sa);
+                val_t rel_result = apply_arr(alg->relations_fn, 1, &rel_expr);
+                if (rel_result != V_VOID && rel_result != rel_expr)
+                    return sx_simplify(rel_result);
+            }
+            /* No built-in dispatch for user operators — return simplified form */
+            return sx_make_expr(op, n, sa);
+        }
     }
 
     /* Flatten nested ADD or MUL into one level */

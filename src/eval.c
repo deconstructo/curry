@@ -1,6 +1,7 @@
 #include "eval.h"
 #include "sx_rules.h"
 #include "sx_pattern.h"
+#include "sx_algebra.h"
 #include "vm.h"
 #include "compiler.h"
 #ifdef BUILD_LLVM
@@ -32,7 +33,8 @@ static bool is_definition(val_t form) {
     val_t op = vcar(form);
     return op == S_DEFINE || op == S_DEFINE_SYNTAX ||
            op == S_DEFINE_VALUES || op == S_DEFINE_RECORD_TYPE ||
-           op == S_DEFINE_RULE || op == S_DEFINE_RULESET;
+           op == S_DEFINE_RULE || op == S_DEFINE_RULESET ||
+           op == S_DEFINE_ALGEBRA;
 }
 
 /* ---- Exception handling and dynamic wind ---- */
@@ -1248,6 +1250,101 @@ tail:
             sx_rule_add(pattern, pvars, guard_fn, action_fn, name);
         }
         return V_VOID;
+    }
+
+    if (op == S_DEFINE_ALGEBRA) {
+        /* (define-algebra 'OP [#:commutative? BOOL] [#:associative? BOOL]
+                              [#:identity VAL] [#:absorbing VAL] [#:relations FN]) */
+        if (!vis_pair(rest))
+            scm_raise(V_FALSE, "define-algebra: expected operator as first argument");
+        val_t op_name = eval(vcar(rest), env);
+        if (!vis_symbol(op_name))
+            scm_raise(V_FALSE, "define-algebra: operator must be a symbol");
+
+        bool commutative = false, associative = false;
+        val_t identity = V_VOID, absorbing = V_VOID, relations_fn = V_FALSE;
+
+        val_t kws = vcdr(rest);
+        while (vis_pair(kws) && vis_pair(vcdr(kws))) {
+            val_t kw  = vcar(kws);
+            val_t val = eval(vcadr(kws), env);
+            kws = vcdr(vcdr(kws));
+            if (kw == S_KW_COMMUTATIVE) commutative  = !vis_false(val);
+            else if (kw == S_KW_ASSOCIATIVE) associative = !vis_false(val);
+            else if (kw == S_KW_IDENTITY)    identity     = val;
+            else if (kw == S_KW_ABSORBING)   absorbing    = val;
+            else if (kw == S_KW_RELATIONS)   relations_fn = val;
+        }
+        sx_algebra_define(op_name, commutative, associative,
+                          identity, absorbing, relations_fn);
+        /* Auto-bind operator name → (lambda args (apply sym-expr op args)) */
+        {
+            val_t sym_expr_sym = sym_intern_cstr("sym-expr");
+            val_t apply_sym    = sym_intern_cstr("apply");
+            val_t args_sym     = sym_intern_cstr("args");
+            val_t op_quoted    = make_pair(S_QUOTE, make_pair(op_name, V_NIL));
+            /* body: (apply sym-expr op 'args) → actually:
+               (lambda args (apply sym-expr 'op args)) */
+            val_t body = make_pair(apply_sym,
+                           make_pair(sym_expr_sym,
+                             make_pair(op_quoted,
+                               make_pair(args_sym, V_NIL))));
+            val_t rest_params = make_pair(args_sym, V_NIL);  /* dotted: just rest */
+            /* (lambda args body) — variadic, rest args bound to 'args */
+            val_t lam  = make_pair(S_LAMBDA,
+                           make_pair(args_sym,     /* dotted rest parameter */
+                             make_pair(body, V_NIL)));
+            val_t proc = eval(lam, env);
+            env_define(env, op_name, proc);
+        }
+        return V_VOID;
+    }
+
+    if (op == S_WITH_ASSUMPTIONS) {
+        /* (with-assumptions ((VAR ASSUMPTION...) ...) BODY...) */
+        if (!vis_pair(rest))
+            scm_raise(V_FALSE, "with-assumptions: missing binding list");
+        val_t clauses = vcar(rest);
+        val_t body    = vcdr(rest);
+
+        /* Save flags and apply new assumptions */
+        val_t    saved_vars[32];
+        uint32_t saved_flags[32];
+        int nv = 0;
+        val_t cl = clauses;
+        while (vis_pair(cl) && nv < 32) {
+            val_t clause = vcar(cl);
+            if (!vis_pair(clause)) { cl = vcdr(cl); continue; }
+            val_t var = eval(vcar(clause), env);
+            if (!vis_symvar(var)) { cl = vcdr(cl); continue; }
+            saved_vars[nv]  = var;
+            saved_flags[nv] = as_symvar(var)->hdr.flags;
+            val_t assumptions = vcdr(clause);
+            while (vis_pair(assumptions)) {
+                uint32_t flag = sx_assumption_flag(vcar(assumptions));
+                if (flag) as_symvar(var)->hdr.flags |= flag;
+                assumptions = vcdr(assumptions);
+            }
+            nv++;
+            cl = vcdr(cl);
+        }
+
+        val_t result = V_VOID;
+        ExnHandler h;
+        h.prev = current_handler; current_handler = &h;
+        if (setjmp(h.jmp) == 0) {
+            result = eval_body(body, env);
+            current_handler = h.prev;
+        } else {
+            current_handler = h.prev;
+            /* Restore flags before re-raising */
+            for (int i = 0; i < nv; i++)
+                as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
+            scm_raise_val(h.exn);
+        }
+        for (int i = 0; i < nv; i++)
+            as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
+        return result;
     }
 
     val_t op_val = vis_symbol(op) ? env_lookup(env, op) : eval(op, env);

@@ -22,6 +22,7 @@ add_test(NAME conditions    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/conditions
 add_test(NAME numtheory     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numtheory_tests.scm)
 add_test(NAME sexagesimal   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sexagesimal_tests.scm)
 add_test(NAME sx_rules      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_rules_tests.scm)
+add_test(NAME sx_algebra    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_algebra_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()

@@ -1,5 +1,6 @@
 #include "builtins.h"
 #include "sx_rules.h"
+#include "sx_algebra.h"
 #include "object.h"
 #include "stm.h"
 #include "channel.h"
@@ -38,6 +39,52 @@ static val_t prim_list_rules(int ac, val_t *av, void *ud)
     { (void)ud; return sx_rules_list(ac > 0 ? av[0] : V_FALSE); }
 static val_t prim_clear_rules(int ac, val_t *av, void *ud)
     { (void)ud; sx_rules_clear(ac > 0 ? av[0] : V_FALSE); return V_VOID; }
+
+static val_t prim_sym_expr(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_symbol(av[0]))
+        scm_raise(V_FALSE, "sym-expr: first argument must be an operator symbol");
+    return sx_simplify(sx_make_expr(av[0], ac - 1, av + 1));
+}
+static val_t prim_sym_expr_nargs(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-nargs: not a sym-expr");
+    return vfix((intptr_t)as_symexpr(av[0])->nargs);
+}
+static val_t prim_sym_expr_arg(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-arg: not a sym-expr");
+    SymExpr *se = as_symexpr(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || i >= (intptr_t)se->nargs)
+        scm_raise(V_FALSE, "sym-expr-arg: index out of range");
+    return se->args[i];
+}
+static val_t prim_sym_expr_op(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-op: not a sym-expr");
+    return as_symexpr(av[0])->op;
+}
+static val_t prim_assume(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    if (flag) as_symvar(av[0])->hdr.flags |= flag;
+    return V_VOID;
+}
+static val_t prim_can_assume(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_FALSE;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    return (flag && (as_symvar(av[0])->hdr.flags & flag)) ? V_TRUE : V_FALSE;
+}
+static val_t prim_drop_assumption(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    if (flag) as_symvar(av[0])->hdr.flags &= ~flag;
+    return V_VOID;
+}
 static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
@@ -1413,6 +1460,17 @@ void builtins_curry_register(val_t env) {
     /* User-defined rewrite rules */
     DEF("list-rules",   prim_list_rules,  0, 1);
     DEF("clear-rules!", prim_clear_rules, 0, 1);
+
+    /* Assumptions on sym-vars */
+    DEF("assume!",          prim_assume,          2, 2);
+    DEF("can-assume?",      prim_can_assume,       2, 2);
+    DEF("drop-assumption!", prim_drop_assumption,  2, 2);
+
+    /* Low-level SymExpr constructor and accessors */
+    DEF("sym-expr",       prim_sym_expr,       1, -1);
+    DEF("sym-expr-nargs", prim_sym_expr_nargs, 1,  1);
+    DEF("sym-expr-arg",   prim_sym_expr_arg,   2,  2);
+    DEF("sym-expr-op",    prim_sym_expr_op,    1,  1);
     env_define(env, sym_intern_cstr("default-random-source"),
                sym_intern_cstr("default-random-source"));
 

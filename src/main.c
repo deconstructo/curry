@@ -18,6 +18,7 @@
 #  include "curry_ffi.h"
 #endif
 #include "sx_rules.h"
+#include "sx_algebra.h"
 #include "modules.h"
 #include "object.h"
 #include "profiling.h"
@@ -64,6 +65,7 @@ static void init_all(void) {
     env_init();
     eval_init();
     sx_rules_init();
+    sx_algebra_init();
     actors_init();
     stm_init();
     channel_init();
