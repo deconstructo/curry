@@ -1,6 +1,7 @@
 #include "symbolic.h"
 #include "sx_rules.h"
 #include "sx_algebra.h"
+#include "sx_poly.h"
 #include "object.h"
 #include "set.h"    /* scm_equal */
 #include "eval.h"   /* apply_arr */
@@ -2402,6 +2403,18 @@ val_t sx_integrate(val_t expr, val_t var) {
                                sx_div(sx_log(sx_sub(vfix(1), sx_expt(f, vfix(2)))), vfix(2)));
             return sx_div(res, df);
         }
+    }
+
+    /* ---- Risch: rational function integration ---- */
+    if (op == SX_DIV) {
+        val_t rat = sx_integrate_rational(expr, var);
+        if (rat != V_VOID) return rat;
+    }
+
+    /* ---- Risch: log of a polynomial ---- */
+    if (op == SX_LOG && n == 1) {
+        val_t logp = sx_integrate_log_poly(args[0], var);
+        if (logp != V_VOID) return logp;
     }
 
     /* Fallback: unevaluated (∫ expr var) */

@@ -36,6 +36,19 @@ val_t sx_solve(val_t expr, val_t var);
    Returns an alist ((var . solution) ...) or #f if no unique solution. */
 val_t sx_solve_system(val_t eqs, val_t vars);
 
+/* ---- Risch integration (Phase 4e) ----
+
+   Try to integrate expr w.r.t. var using rational function methods.
+   Returns V_VOID if the expression is not a rational function or the
+   integration cannot be completed in elementary terms.
+   Otherwise returns the antiderivative as a SymExpr. */
+val_t sx_integrate_rational(val_t expr, val_t var);
+
+/* Integrate log(f(x)) w.r.t. var where f is a polynomial.
+   Uses IBP: ∫ log(f) dx = x·log(f) - ∫ x·f'/f dx.
+   Returns V_VOID if f is not a polynomial in var. */
+val_t sx_integrate_log_poly(val_t f_arg, val_t var);
+
 /* ---- Groebner basis ----
    polys — Scheme list of polynomials (symbolic expressions = 0 implicitly)
    vars  — Scheme list of sym-vars (lex ordering: first var is highest)

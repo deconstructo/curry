@@ -817,26 +817,43 @@ val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
                 }
             }
         } else {
-            /* Irreducible higher-degree factor: use Bezout coefficient */
-            int dd2; val_t *cd2 = expr_to_poly(den_expr, var, &dd2);
-            val_t comp = (cd2 && df <= dd2) ?
-                poly_exact_div(den_expr, f, var) : den_expr;
+            /* Irreducible higher-degree factor (e.g. x²+1).
+               Find comp = den / f^m (complementary denominator).
+               The coefficient A satisfies: A·comp + B·f^m = N for some B.
+               If comp = 1 (f^m = den), then A = N directly (reduce mod f^m). */
+            val_t fk = sx_expt(f, Q(m));
+            val_t comp = poly_exact_div(den_expr, sx_simplify(fk), var);
             int dcomp; val_t *ccomp = expr_to_poly(comp, var, &dcomp);
-            if (!ccomp) { result = sx_add(result, sx_div(N, sx_expt(f, Q(m)))); continue; }
-            val_t *s_b; int ds; val_t *t_b; int dt;
-            poly_extended_gcd(cf, df, ccomp, dcomp, var, &s_b, &ds, &t_b, &dt);
-            val_t A = sx_simplify(sx_mul(
-                poly_to_expr(t_b, dt < 0 ? 0 : dt, var), N));
+
+            val_t A;
+            if (!ccomp || dcomp == 0) {
+                /* comp is a constant — A = N / comp (mod f^m) */
+                val_t comp_val = (!ccomp || dcomp < 0) ? Q(1) : ccomp[0];
+                A = poly_to_expr(cn, dn, var); /* A = N */
+                if (!qone(comp_val)) {
+                    int da; val_t *ca = expr_to_poly(
+                        sx_simplify(num_div(A, comp_val)), var, &da);
+                    A = ca ? poly_to_expr(ca, da, var) : A;
+                }
+            } else {
+                /* General case: use extended GCD */
+                val_t *s_b; int ds; val_t *t_b; int dt;
+                poly_extended_gcd(cf, df, ccomp, dcomp, var,
+                                  &s_b, &ds, &t_b, &dt);
+                A = sx_simplify(sx_mul(
+                    poly_to_expr(t_b, dt < 0 ? 0 : dt, var), N));
+            }
             /* Reduce A modulo f */
+            A = sx_simplify(A);
             int da; val_t *ca = expr_to_poly(A, var, &da);
             if (ca && da >= df) {
                 val_t *qr; int dqr; val_t *rr; int drr;
                 poly_pseudo_div(ca, da, cf, df, &qr, &dqr, &rr, &drr);
-                A = poly_to_expr(rr, drr, var);
+                A = poly_to_expr(rr, drr < 0 ? 0 : drr, var);
+                A = sx_simplify(A);
             }
-            A = sx_simplify(A);
             if (!num_is_zero(A))
-                result = sx_add(result, sx_div(A, sx_expt(f, Q(m))));
+                result = sx_add(result, sx_div(A, sx_simplify(fk)));
         }
     }
 
@@ -1217,3 +1234,215 @@ val_t sx_groebner(val_t polys, val_t vars_list) {
 }
 
 void sx_poly_init(void) { /* no-op for now */ }
+
+/* ========================================================================== */
+/* PART 11: Risch integration — rational functions (Phase 4e)                 */
+/* ========================================================================== */
+
+/*
+ * Integrate a single partial-fraction term of the form A / f^k, where f is a
+ * polynomial (linear or quadratic) and A is a constant or linear numerator.
+ *
+ * Linear factor  f = ax + b,  k ≥ 1:
+ *   k = 1:  A/(ax+b)      → (A/a) * log|ax+b|
+ *   k > 1:  A/(ax+b)^k    → A / (a*(1-k)*(ax+b)^(k-1))
+ *
+ * Quadratic factor  f = ax² + bx + c  (irreducible, k = 1):
+ *   Numerator A (constant):
+ *     → 2A/√disc * atan((2ax+b)/√disc)   (disc = 4ac-b²)
+ *   Numerator Mx + N (linear):
+ *     Split into (M/2a)*f'/f + (N - Mb/2a)/f
+ *     → (M/2a)*log|f| + ∫(N - Mb/2a)/f dx   (atan case)
+ *
+ * Returns V_VOID if the term can't be handled here.
+ */
+static val_t integrate_pf_term(val_t A, val_t f, long k, val_t var) {
+    int df; val_t *cf = expr_to_poly(f, var, &df);
+    if (!cf) return V_VOID;
+
+    if (df == 1) {
+        /* Linear factor: f = c[1]*var + c[0] */
+        val_t a = cf[1], b = cf[0];
+        if (qzero(a)) return V_VOID;
+        if (k == 1) {
+            /* (A/a) * log|f| */
+            val_t coeff = num_div(A, a);
+            return sx_simplify(sx_mul(coeff, sx_log(sx_abs(f))));
+        } else {
+            /* A / (a*(1-k)*f^(k-1)) */
+            val_t exp_v = Q(k - 1);
+            val_t denom = num_mul(a, Q(1 - k));
+            return sx_simplify(sx_div(A, sx_mul(denom, sx_expt(f, exp_v))));
+        }
+    }
+
+    if (df == 2 && k == 1) {
+        /* Irreducible quadratic f = c[2]*x² + c[1]*x + c[0] */
+        val_t a2 = cf[2], b2 = cf[1], c2 = cf[0];
+        val_t disc = num_sub(num_mul(num_mul(Q(4), a2), c2),
+                             num_mul(b2, b2));
+        if (!vis_number(disc) || num_to_double(disc) <= 0.0) return V_VOID;
+
+        /* Check numerator shape */
+        int dA; val_t *cA = expr_to_poly(A, var, &dA);
+        if (!cA) return V_VOID;
+
+        if (dA <= 0) {
+            /* Constant numerator: 2*A/sqrt(disc) * atan((2a*x+b)/sqrt(disc)) */
+            val_t sq   = sx_sqrt(disc);
+            val_t inner = sx_div(
+                sx_add(sx_mul(num_mul(Q(2), a2), var), b2), sq);
+            return sx_simplify(
+                sx_mul(num_div(num_mul(Q(2), A), sq), sx_atan(inner)));
+        }
+
+        if (dA == 1) {
+            /* Linear numerator A = M*x + N */
+            val_t M = cA[1], N = cA[0];
+            /* Split: (M/2a)*d(f)/dx*1/f  +  (N - M*b/2a)/f */
+            val_t M_over_2a   = num_div(M, num_mul(Q(2), a2));
+            val_t N_minus     = num_sub(N, num_mul(M, num_div(b2, num_mul(Q(2), a2))));
+            /* ∫ (M/2a)*f'/f dx = (M/2a)*log|f| */
+            val_t log_part = sx_mul(M_over_2a, sx_log(sx_abs(f)));
+            /* ∫ N_minus/f dx — constant/quadratic → atan */
+            val_t atan_part = integrate_pf_term(N_minus, f, 1, var);
+            if (atan_part == V_VOID) return V_VOID;
+            return sx_simplify(sx_add(log_part, atan_part));
+        }
+    }
+
+    return V_VOID;
+}
+
+/*
+ * Integrate a polynomial expression (all integer powers of var) term-by-term.
+ * Returns V_VOID if expr is not a polynomial in var.
+ */
+static val_t integrate_poly(val_t expr, val_t var) {
+    int dp; val_t *cp = expr_to_poly(expr, var, &dp);
+    if (!cp) return V_VOID;
+    if (dp < 0) return Q(0);
+    /* ∫ Σ c[i]*x^i dx = Σ c[i]*x^(i+1)/(i+1) */
+    val_t result = Q(0);
+    for (int i = 0; i <= dp; i++) {
+        if (qzero(cp[i])) continue;
+        if (i == 0) {
+            result = sx_add(result, sx_mul(cp[i], var));
+        } else {
+            val_t ip1 = Q(i + 1);
+            result = sx_add(result,
+                sx_simplify(sx_div(sx_mul(cp[i], sx_expt(var, ip1)), ip1)));
+        }
+    }
+    return sx_simplify(result);
+}
+
+val_t sx_integrate_rational(val_t expr, val_t var) {
+    val_t ex = sx_simplify(sx_expand(expr));
+
+    /* Is it a DIV expression? */
+    if (!vis_symexpr(ex) || as_symexpr(ex)->op != SX_DIV ||
+        (int)as_symexpr(ex)->nargs != 2)
+        return V_VOID;
+
+    val_t num_ex = as_symexpr(ex)->args[0];
+    val_t den_ex = as_symexpr(ex)->args[1];
+
+    /* Both must be polynomials in var */
+    int dn, dd;
+    val_t *cn = expr_to_poly(num_ex, var, &dn);
+    val_t *cd = expr_to_poly(den_ex, var, &dd);
+    if (!cn || !cd || dd <= 0) return V_VOID;
+
+    /* Polynomial part */
+    val_t result = Q(0);
+    if (dn >= dd) {
+        val_t *quot; int dq; val_t *rem2; int dr2;
+        poly_pseudo_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
+        val_t poly_part = integrate_poly(poly_to_expr(quot, dq < 0 ? 0 : dq, var), var);
+        if (poly_part == V_VOID) return V_VOID;
+        result = poly_part;
+        cn = rem2; dn = dr2;
+        if (dn < 0) return sx_simplify(result);
+    }
+
+    val_t N = poly_to_expr(cn, dn, var);
+    val_t D = poly_to_expr(cd, dd, var);
+
+    /* Partial fraction decomposition */
+    val_t pf = sx_partial_fractions(N, D, var);
+    if (num_is_zero(pf)) return V_VOID; /* decomposition failed */
+
+    /* Integrate each partial fraction term.
+       pf is a sum of A/f^k and possibly a polynomial part. */
+    val_t pf_ex = sx_simplify(sx_expand(pf));
+
+    /* Collect additive terms */
+    int nterms; val_t *terms; val_t single[1];
+    if (vis_symexpr(pf_ex) && as_symexpr(pf_ex)->op == SX_ADD) {
+        nterms = (int)as_symexpr(pf_ex)->nargs;
+        terms  = as_symexpr(pf_ex)->args;
+    } else { single[0] = pf_ex; nterms = 1; terms = single; }
+
+    for (int i = 0; i < nterms; i++) {
+        val_t t = terms[i];
+        val_t int_t = V_VOID;
+
+        /* Pure number or polynomial-in-var term */
+        if (vis_number(t)) {
+            int_t = sx_mul(t, var);
+        } else if (!vis_symexpr(t)) {
+            int_t = V_VOID;
+        } else {
+            SymExpr *se = as_symexpr(t);
+
+            /* A / f^k */
+            if (se->op == SX_DIV && (int)se->nargs == 2) {
+                val_t A = se->args[0];
+                val_t denom = se->args[1];
+                /* Extract f and k from denom = f^k */
+                val_t f; long k = 1;
+                if (vis_symexpr(denom) && as_symexpr(denom)->op == SX_EXPT &&
+                    (int)as_symexpr(denom)->nargs == 2 &&
+                    vis_fixnum(as_symexpr(denom)->args[1])) {
+                    f = as_symexpr(denom)->args[0];
+                    k = vunfix(as_symexpr(denom)->args[1]);
+                } else {
+                    f = denom;
+                }
+                int_t = integrate_pf_term(A, f, k, var);
+            }
+            /* Polynomial term: x^k or (c * x^k) etc. */
+            else {
+                int_t = integrate_poly(t, var);
+            }
+        }
+
+        if (int_t == V_VOID) {
+            /* Can't integrate this term — give up */
+            return V_VOID;
+        }
+        result = sx_add(result, int_t);
+    }
+
+    return sx_simplify(result);
+}
+
+val_t sx_integrate_log_poly(val_t f_arg, val_t var) {
+    /* ∫ log(f(x)) dx = x*log(f) - ∫ x*f'(x)/f(x) dx
+       The tail ∫ x*f'/f dx is a rational function (if f is a polynomial). */
+    int df; val_t *cf = expr_to_poly(f_arg, var, &df);
+    if (!cf || df <= 0) return V_VOID;
+
+    val_t fp     = sx_simplify(sx_expand(sx_diff(f_arg, var)));
+    val_t log_f  = sx_log(f_arg);
+    val_t head   = sx_mul(var, log_f);       /* x * log(f) */
+    val_t tail_integrand = sx_simplify(      /* x * f'/f */
+        sx_div(sx_mul(var, fp), f_arg));
+
+    /* tail_integrand is rational — try rational integration */
+    val_t tail = sx_integrate_rational(tail_integrand, var);
+    if (tail == V_VOID) return V_VOID;
+
+    return sx_simplify(sx_sub(head, tail));
+}
