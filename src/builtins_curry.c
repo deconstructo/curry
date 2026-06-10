@@ -1,6 +1,7 @@
 #include "builtins.h"
 #include "sx_rules.h"
 #include "sx_algebra.h"
+#include "sx_poly.h"
 #include "object.h"
 #include "stm.h"
 #include "channel.h"
@@ -39,6 +40,24 @@ static val_t prim_list_rules(int ac, val_t *av, void *ud)
     { (void)ud; return sx_rules_list(ac > 0 ? av[0] : V_FALSE); }
 static val_t prim_clear_rules(int ac, val_t *av, void *ud)
     { (void)ud; sx_rules_clear(ac > 0 ? av[0] : V_FALSE); return V_VOID; }
+
+/* ---- Phase 4c/4d: polynomial machinery and equation solving ---- */
+static val_t prim_poly_gcd(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_gcd(av[0], av[1], av[2]); }
+static val_t prim_poly_resultant(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_resultant(av[0], av[1], av[2]); }
+static val_t prim_poly_squarefree(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_squarefree(av[0], av[1]); }
+static val_t prim_poly_factor(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_factor(av[0], av[1]); }
+static val_t prim_partial_fractions(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_partial_fractions(av[0], av[1], av[2]); }
+static val_t prim_solve(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_solve(av[0], av[1]); }
+static val_t prim_solve_system(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_solve_system(av[0], av[1]); }
+static val_t prim_groebner(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_groebner(av[0], av[1]); }
 
 static val_t prim_sym_expr(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -1456,6 +1475,16 @@ void builtins_curry_register(val_t env) {
     DEF("random-source-pseudo-randomize!",prim_random_seed,           3,3);
     DEF("random-source->random-real",     prim_random_source_to_real, 1,1);
     DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
+
+    /* Polynomial machinery (Phase 4c) and equation solving (Phase 4d) */
+    DEF("poly-gcd",          prim_poly_gcd,          3, 3);
+    DEF("poly-resultant",    prim_poly_resultant,     3, 3);
+    DEF("poly-squarefree",   prim_poly_squarefree,    2, 2);
+    DEF("poly-factor",       prim_poly_factor,        2, 2);
+    DEF("partial-fractions", prim_partial_fractions,  3, 3);
+    DEF("solve",             prim_solve,              2, 2);
+    DEF("solve-system",      prim_solve_system,       2, 2);
+    DEF("groebner",          prim_groebner,           2, 2);
 
     /* User-defined rewrite rules */
     DEF("list-rules",   prim_list_rules,  0, 1);

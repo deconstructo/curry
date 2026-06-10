@@ -1748,7 +1748,7 @@ val_t sx_expand(val_t expr) {
 }
 
 /* Internal: degree as a C long (−1 for transcendentals of var, 0 for constants). */
-static long sx_degree_long(val_t expr, val_t var) {
+long sx_degree_long(val_t expr, val_t var) {
     if (vis_number(expr)) return 0;
     if (vis_symvar(expr))
         return (as_symvar(expr)->name == as_symvar(var)->name) ? 1 : 0;
