@@ -1241,9 +1241,10 @@ void main() {
 struct GlTexture {
     std::vector<uint8_t> data;
     GLsizei  w, h;
-    GLenum   ifmt;   /* GL_R8 or GL_RGBA8  */
-    GLenum   fmt;    /* GL_RED or GL_RGBA  */
-    GLuint   id;     /* 0 until first draw */
+    GLenum   ifmt;   /* GL_R8, GL_RGBA8, or GL_RGBA32F  */
+    GLenum   fmt;    /* GL_RED or GL_RGBA                */
+    GLenum   typ;    /* GL_UNSIGNED_BYTE or GL_FLOAT     */
+    GLuint   id;     /* 0 until first draw               */
     bool     dirty;
 };
 
@@ -1366,13 +1367,13 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
                 gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                 gl->glTexImage2D(GL_TEXTURE_2D, 0, tex->ifmt, tex->w, tex->h, 0,
-                                 tex->fmt, GL_UNSIGNED_BYTE, tex->data.data());
+                                 tex->fmt, tex->typ, tex->data.data());
                 tex->dirty = false;
             } else if (tex->dirty) {
                 gl->glBindTexture(GL_TEXTURE_2D, tex->id);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                 gl->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->w, tex->h,
-                                    tex->fmt, GL_UNSIGNED_BYTE, tex->data.data());
+                                    tex->fmt, tex->typ, tex->data.data());
                 tex->dirty = false;
             }
             gl->glActiveTexture(GL_TEXTURE0 + (GLenum)tex_unit);
@@ -1397,22 +1398,27 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
 
 /* ── make-gl-texture / gl-texture-update! ──────────────────────────────── */
 
-/* (make-gl-texture bv w h)        ; R8 single-channel (default)
- * (make-gl-texture bv w h 'rgba)  ; RGBA8 four-channel              */
+/* (make-gl-texture bv w h)          ; R8 single-channel (default)
+ * (make-gl-texture bv w h 'rgba)    ; RGBA8 four-channel
+ * (make-gl-texture bv w h 'rgba32f) ; RGBA 32-bit float (raw float bytes) */
 static curry_val fn_make_gl_texture(int argc, curry_val *av, void *) {
     uint32_t n = curry_bytevector_length(av[0]);
     int w = (int)curry_fixnum(av[1]);
     int h = (int)curry_fixnum(av[2]);
-    bool rgba = (argc > 3) && curry_is_symbol(av[3]) &&
-                !strcmp(curry_symbol(av[3]), "rgba");
+    const char *sym = (argc > 3 && curry_is_symbol(av[3])) ? curry_symbol(av[3]) : "";
+    bool rgba    = !strcmp(sym, "rgba");
+    bool rgba32f = !strcmp(sym, "rgba32f");
     GlTexture *tex = new GlTexture{};
     tex->data.resize(n);
     for (uint32_t i = 0; i < n; i++)
         tex->data[i] = curry_bytevector_ref(av[0], i);
     tex->w     = (GLsizei)w;
     tex->h     = (GLsizei)h;
-    tex->ifmt  = rgba ? (GLenum)GL_RGBA8 : (GLenum)GL_R8;
-    tex->fmt   = rgba ? (GLenum)GL_RGBA  : (GLenum)GL_RED;
+    tex->ifmt  = rgba32f ? (GLenum)GL_RGBA32F
+               : rgba    ? (GLenum)GL_RGBA8
+               :            (GLenum)GL_R8;
+    tex->fmt   = (rgba || rgba32f) ? (GLenum)GL_RGBA : (GLenum)GL_RED;
+    tex->typ   = rgba32f ? (GLenum)GL_FLOAT : (GLenum)GL_UNSIGNED_BYTE;
     tex->id    = 0;
     tex->dirty = true;
     return ptr_to_val("gl-texture", tex);
@@ -1563,12 +1569,12 @@ static curry_val fn_gl_shader_draw_arrays(int argc, curry_val *av, void *) {
                 gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                gl->glTexImage2D(GL_TEXTURE_2D,0,tex->ifmt,tex->w,tex->h,0,tex->fmt,GL_UNSIGNED_BYTE,tex->data.data());
+                gl->glTexImage2D(GL_TEXTURE_2D,0,tex->ifmt,tex->w,tex->h,0,tex->fmt,tex->typ,tex->data.data());
                 tex->dirty = false;
             } else if (tex->dirty) {
                 gl->glBindTexture(GL_TEXTURE_2D, tex->id);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                gl->glTexSubImage2D(GL_TEXTURE_2D,0,0,0,tex->w,tex->h,tex->fmt,GL_UNSIGNED_BYTE,tex->data.data());
+                gl->glTexSubImage2D(GL_TEXTURE_2D,0,0,0,tex->w,tex->h,tex->fmt,tex->typ,tex->data.data());
                 tex->dirty = false;
             }
             gl->glActiveTexture(GL_TEXTURE0 + (GLenum)tex_unit);
@@ -1676,6 +1682,7 @@ static curry_val fn_make_gl_framebuffer(int ac, curry_val *av, void *) {
     fb->h      = (int)curry_fixnum(av[1]);
     fb->color  = new GlTexture{};
     fb->color->ifmt = GL_RGBA8; fb->color->fmt = GL_RGBA;
+    fb->color->typ  = GL_UNSIGNED_BYTE;
     fb->color->w = (GLsizei)fb->w; fb->color->h = (GLsizei)fb->h;
     fb->color->id = 0; fb->color->dirty = false;
     return glfbo_to_val(fb);
@@ -1750,12 +1757,12 @@ static curry_val fn_gl_shader_to(int argc, curry_val *av, void *) {
                 gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                gl->glTexImage2D(GL_TEXTURE_2D,0,tex->ifmt,tex->w,tex->h,0,tex->fmt,GL_UNSIGNED_BYTE,tex->data.data());
+                gl->glTexImage2D(GL_TEXTURE_2D,0,tex->ifmt,tex->w,tex->h,0,tex->fmt,tex->typ,tex->data.data());
                 tex->dirty = false;
             } else if (tex->dirty) {
                 gl->glBindTexture(GL_TEXTURE_2D, tex->id);
                 gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                gl->glTexSubImage2D(GL_TEXTURE_2D,0,0,0,tex->w,tex->h,tex->fmt,GL_UNSIGNED_BYTE,tex->data.data());
+                gl->glTexSubImage2D(GL_TEXTURE_2D,0,0,0,tex->w,tex->h,tex->fmt,tex->typ,tex->data.data());
                 tex->dirty = false;
             }
             gl->glActiveTexture(GL_TEXTURE0 + (GLenum)tex_unit);
