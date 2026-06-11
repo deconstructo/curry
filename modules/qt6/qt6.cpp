@@ -124,6 +124,7 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 
 #include <QOpenGLBuffer>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLPaintDevice>
 #include <QClipboard>
 #include <QElapsedTimer>
 
@@ -653,15 +654,66 @@ static curry_val fn_canvas_mouse_grabbed_p(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     return curry_make_bool(val_to_canvas(av[0])->mouse_grabbed); }
 
-/* (canvas-save-png! canvas path) — grab the current OpenGL framebuffer and
-   save it as a PNG file.  Returns #t on success, #f on failure. */
+/* (canvas-save-png! canvas path) — render into an explicit off-screen FBO
+   and save as PNG.  Using grabFramebuffer() returns black on macOS because
+   the Metal compositor claims the widget's FBO before we can read it; an
+   explicit FBO bypasses that entirely.  Returns #t on success, #f on failure. */
 static curry_val fn_canvas_save_png(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    WinState *ws   = val_to_canvas(av[0]);
+    WinState   *ws   = val_to_canvas(av[0]);
     const char *path = curry_string(av[1]);
-    QImage img = ws->canvas->grabFramebuffer();
-    bool ok = img.save(QString::fromUtf8(path), "PNG");
-    return curry_make_bool(ok); }
+
+    if (curry_is_bool(ws->draw_proc))
+        return curry_make_bool(false);
+
+    ws->canvas->makeCurrent();
+
+    qreal dpr = ws->canvas->devicePixelRatioF();
+    int   lw  = ws->canvas->width();
+    int   lh  = ws->canvas->height();
+    int   pw  = qRound(lw * dpr);
+    int   ph  = qRound(lh * dpr);
+
+    QOpenGLFramebufferObjectFormat fmt;
+    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    QOpenGLFramebufferObject fbo(pw, ph, fmt);
+    if (!fbo.isValid()) {
+        ws->canvas->doneCurrent();
+        return curry_make_bool(false);
+    }
+    fbo.bind();
+
+    /* QOpenGLPaintDevice renders to the currently bound FBO (ours).
+       Setting DPR so the device reports logical dimensions — the shader
+       then reads devicePixelRatioF() and multiplies to get physical pixels,
+       matching the on-screen paintEvent path exactly. */
+    QOpenGLPaintDevice paint_dev(pw, ph);
+    paint_dev.setDevicePixelRatio(dpr);
+    QPainter painter(&paint_dev);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+    curry_val argv[3] = {
+        ptr_to_val("qt6-painter", &painter),
+        curry_make_fixnum(lw),
+        curry_make_fixnum(lh)
+    };
+    ExnHandler h;
+    CurryVMState vm_state;
+    curry_vm_state_save(&vm_state);
+    SCM_PROTECT(h,
+        curry_apply(ws->draw_proc, 3, argv),
+        (qt6_print_exn("[canvas-save-png]", h.exn),
+         curry_vm_state_restore(&vm_state)));
+    painter.end();
+
+    QImage img = fbo.toImage();
+    fbo.release();
+    ws->canvas->doneCurrent();
+
+    bool ok = !img.isNull() && img.save(QString::fromUtf8(path), "PNG");
+    return curry_make_bool(ok);
+}
 
 /* =========================================================================
  * Layer 3 — Layout boxes
