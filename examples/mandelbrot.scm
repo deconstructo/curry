@@ -299,7 +299,7 @@ void main() {
             (not (= *orbit-cx* *cx*))
             (not (= *orbit-cy* *cy*))
             (not (= *orbit-iters* *max-iter*)))
-    (let* ((iters *max-iter*)
+    (let* ((iters (inexact->exact *max-iter*))
            (bv    (make-bytevector (* 4 4 iters) 0))  ; 4 floats × 4 bytes
            (cx-dd (dd-split *cx*))
            (cy-dd (dd-split *cy*))
@@ -466,7 +466,7 @@ void main() {
 (box-add! sidebar
   (make-slider "Iterations" 20 800 10 150
     (lambda (v)
-      (set! *max-iter* v)
+      (set! *max-iter* (inexact->exact v))
       (set! *orbit-iters* 0)   ; force orbit recompute
       (canvas-redraw! *canvas*))))
 
