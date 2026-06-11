@@ -86,6 +86,18 @@ SYM(S_MONITOR,            "monitor!")
 
 /* Symbolic / CAS */
 SYM(S_SYMBOLIC,           "symbolic")
+SYM(S_DEFINE_RULE,        "define-rule")
+SYM(S_DEFINE_RULESET,     "define-ruleset")
+SYM(S_RULE_ARROW,         "→")
+SYM(S_KW_WHEN,            "#:when")
+SYM(S_UNDERSCORE,         "_")
+SYM(S_DEFINE_ALGEBRA,     "define-algebra")
+SYM(S_WITH_ASSUMPTIONS,   "with-assumptions")
+SYM(S_KW_COMMUTATIVE,     "#:commutative?")
+SYM(S_KW_ASSOCIATIVE,     "#:associative?")
+SYM(S_KW_IDENTITY,        "#:identity")
+SYM(S_KW_ABSORBING,       "#:absorbing")
+SYM(S_KW_RELATIONS,       "#:relations")
 
 /* Runtime profiling control */
 SYM(S_EVAL_PROFILER,      "**eval-profiler**")

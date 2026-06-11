@@ -1,8 +1,8 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Updated 2026-06-08 for v1.3.0. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-10 for v1.4.0 (in progress). Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.3.0. This document maps the path from here to a compiled Scheme
+Curry is at v1.3.1 (released); v1.4.0 (Phase 4) is in active development on branch `phase4-extensible-cas`. This document maps the path from here to a compiled Scheme
 for scientific computing — the full cill specification. It is ordered by
 dependency, not ambition; each phase unblocks the phases above it.
 
@@ -30,7 +30,9 @@ dependency, not ambition; each phase unblocks the phases above it.
 | **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
 | **Sexagesimal / Babylonian number system** | ✓ **v1.2.5** |
 | **Cheney semispace GC** (`--gc semispace`, `gc-collect!`, `gc-stats`) | ✓ **v1.3.0** (`BUILD_MPFR=ON`) |
-| Extensible CAS (`define-rule`, `define-algebra`, Groebner, Risch) | ✗ |
+| User rewrite rules (`define-rule`, `define-ruleset`) | ✓ **v1.4.0 Phase 4a** |
+| User algebra declarations (`define-algebra`, `with-assumptions`) | ✓ **v1.4.0 Phase 4b** |
+| Extensible CAS — polynomial, Groebner, Risch, special functions | ✗ (4c–4g in progress) |
 | Generational / moving GC (green threads, incremental) | ✗ |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
@@ -258,44 +260,35 @@ stored off the C stack; the FFI `with-pinned-*` macros handle this automatically
 
 ---
 
-## Phase 4 — v1.4: Extensible CAS
+## Phase 4 — v1.4: Extensible CAS (in progress on `phase4-extensible-cas`)
 
-The current CAS has rules hard-coded in C. This phase makes it user-extensible
-with declared algebraic structure — essential for user-defined rings, groups,
-and quantum operators.
+Makes the CAS user-extensible with pattern-matching rewrite rules and declared
+algebraic structure — essential for user-defined rings, groups, and quantum
+operators.
 
-```scheme
-(define-algebra 'addition
-  #:commutative? #t #:associative? #t #:identity 0)
-(define-algebra 'clifford
-  #:commutative? #f #:associative? #t
-  #:relations gamma-anticommutator)
-(define-algebra 'octonion-multiply
-  #:commutative? #f #:associative? #f)  ; bracketing is structural
+### Phase 4a — User rewrite rules ✓ done (2026-06-10)
 
-(define-rule (* 0 _)     → 0)
-(define-rule (* 1 ?x)    → ?x)
-(define-rule (+ ?x ?x)   → (* 2 ?x))
+`define-rule`, `define-ruleset`, `list-rules`, `clear-rules!`.
+Pattern language: `?x` variables, `_` wildcard, structural matching,
+optional `#:when` guard. Rules fire before built-in dispatch.
+See `docs/reference/symbolic.md` § User-defined rewrite rules.
 
-(define-ruleset trig-identities
-  [(+ (expt (sin ?x) 2) (expt (cos ?x) 2)) → 1]
-  [(sin (* 2 ?x)) → (* 2 (sin ?x) (cos ?x))])
+### Phase 4b — Algebra declarations + dynamic assumptions ✓ done (2026-06-10)
 
-(with-assumptions [(real? 'x) (> 'x 0)]
-  (simplify (sqrt (* x x))))   ; → x (not |x|)
+`define-algebra` (`#:commutative?`, `#:associative?`, `#:identity`,
+`#:absorbing`, `#:relations`). Auto-creates operator procedure.
+`with-assumptions`, `assume!`, `can-assume?`, `drop-assumption!`.
+`sym-expr`, `sym-expr-op`, `sym-expr-nargs`, `sym-expr-arg`.
+See `docs/reference/symbolic.md` § User-defined operator algebras.
 
-(assume! (real? 'x))
-(can-assume? (> 'x 0))
-```
+### Phase 4c–4g — Remaining (planned)
 
-Also: polynomial machinery (`poly-gcd`, `poly-factor`, `poly-roots`,
+Polynomial machinery (`poly-gcd`, `poly-factor`, `poly-roots`,
 `poly-resultant`, `partial-fractions`, Groebner bases), equation solving
 (`solve`, `solve-system`), Risch algorithm (partial — rational + log/exp tower),
 special functions (`gamma`, `bessel-j`, `hermite`, `legendre`,
-`spherical-harmonic`, elliptic integrals), integral transforms (Laplace,
-Fourier, Z-transform), Laurent/Puiseux series.
+`spherical-harmonic`, elliptic integrals), Laurent/Puiseux series.
 
-**Effort:** 4–5 months.
 **Unlocks:** User-defined algebraic structures, GR symbolic computation,
 QM operator algebra.
 

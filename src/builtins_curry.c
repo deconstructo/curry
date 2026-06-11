@@ -1,4 +1,8 @@
 #include "builtins.h"
+#include "sx_rules.h"
+#include "sx_algebra.h"
+#include "sx_poly.h"
+#include "sx_special.h"
 #include "object.h"
 #include "stm.h"
 #include "channel.h"
@@ -33,6 +37,129 @@ static val_t prim_sx_diff(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_diff(av[0], av[1]); }
 static val_t prim_sx_simplify(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_simplify(av[0]); }
+static val_t prim_list_rules(int ac, val_t *av, void *ud)
+    { (void)ud; return sx_rules_list(ac > 0 ? av[0] : V_FALSE); }
+static val_t prim_clear_rules(int ac, val_t *av, void *ud)
+    { (void)ud; sx_rules_clear(ac > 0 ? av[0] : V_FALSE); return V_VOID; }
+
+/* ---- Phase 4f: special functions ---- */
+static val_t prim_legendre(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_legendre(av[0], av[1]); }
+static val_t prim_assoc_legendre(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_assoc_legendre(av[0], av[1], av[2]); }
+static val_t prim_hermite(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_hermite(av[0], av[1]); }
+static val_t prim_hermite_prob(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_hermite_prob(av[0], av[1]); }
+static val_t prim_chebyshev_t(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_chebyshev_t(av[0], av[1]); }
+static val_t prim_chebyshev_u(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_chebyshev_u(av[0], av[1]); }
+static val_t prim_laguerre(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_laguerre(av[0], av[1]); }
+static val_t prim_assoc_laguerre(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_assoc_laguerre(av[0], av[1], av[2]); }
+static val_t prim_spherical_harmonic(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_spherical_harmonic(av[0], av[1], av[2], av[3]); }
+static val_t prim_gamma(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_gamma(av[0]); }
+static val_t prim_log_gamma(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_log_gamma(av[0]); }
+static val_t prim_digamma(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_digamma(av[0]); }
+static val_t prim_beta_fn(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_beta(av[0], av[1]); }
+static val_t prim_bessel_j(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_bessel_j(av[0], av[1]); }
+static val_t prim_bessel_y(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_bessel_y(av[0], av[1]); }
+static val_t prim_bessel_i(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_bessel_i(av[0], av[1]); }
+static val_t prim_bessel_k(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_bessel_k(av[0], av[1]); }
+static val_t prim_elliptic_k(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_elliptic_k(av[0]); }
+static val_t prim_elliptic_e(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_elliptic_e(av[0]); }
+static val_t prim_elliptic_f(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_elliptic_f(av[0], av[1]); }
+static val_t prim_elliptic_pi(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_elliptic_pi(av[0], av[1]); }
+static val_t prim_laurent(int ac, val_t *av, void *ud) {
+    (void)ud;
+    int n = (ac >= 4 && vis_fixnum(av[3])) ? (int)vunfix(av[3]) : 6;
+    return sx_laurent(av[0], av[1], av[2], n);
+}
+static val_t prim_puiseux(int ac, val_t *av, void *ud) {
+    (void)ud;
+    int n     = (ac >= 4 && vis_fixnum(av[3])) ? (int)vunfix(av[3]) : 6;
+    int denom = (ac >= 5 && vis_fixnum(av[4])) ? (int)vunfix(av[4]) : 2;
+    return sx_puiseux(av[0], av[1], av[2], n, denom);
+}
+
+/* ---- Phase 4c/4d: polynomial machinery and equation solving ---- */
+static val_t prim_poly_gcd(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_gcd(av[0], av[1], av[2]); }
+static val_t prim_poly_resultant(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_resultant(av[0], av[1], av[2]); }
+static val_t prim_poly_squarefree(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_squarefree(av[0], av[1]); }
+static val_t prim_poly_factor(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_poly_factor(av[0], av[1]); }
+static val_t prim_partial_fractions(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_partial_fractions(av[0], av[1], av[2]); }
+static val_t prim_solve(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_solve(av[0], av[1]); }
+static val_t prim_solve_system(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_solve_system(av[0], av[1]); }
+static val_t prim_groebner(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_groebner(av[0], av[1]); }
+
+static val_t prim_sym_expr(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_symbol(av[0]))
+        scm_raise(V_FALSE, "sym-expr: first argument must be an operator symbol");
+    return sx_simplify(sx_make_expr(av[0], ac - 1, av + 1));
+}
+static val_t prim_sym_expr_nargs(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-nargs: not a sym-expr");
+    return vfix((intptr_t)as_symexpr(av[0])->nargs);
+}
+static val_t prim_sym_expr_arg(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-arg: not a sym-expr");
+    SymExpr *se = as_symexpr(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || i >= (intptr_t)se->nargs)
+        scm_raise(V_FALSE, "sym-expr-arg: index out of range");
+    return se->args[i];
+}
+static val_t prim_sym_expr_op(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symexpr(av[0])) scm_raise(V_FALSE, "sym-expr-op: not a sym-expr");
+    return as_symexpr(av[0])->op;
+}
+static val_t prim_assume(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    if (flag) as_symvar(av[0])->hdr.flags |= flag;
+    return V_VOID;
+}
+static val_t prim_can_assume(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_FALSE;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    return (flag && (as_symvar(av[0])->hdr.flags & flag)) ? V_TRUE : V_FALSE;
+}
+static val_t prim_drop_assumption(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    uint32_t flag = sx_assumption_flag(av[1]);
+    if (flag) as_symvar(av[0])->hdr.flags &= ~flag;
+    return V_VOID;
+}
 static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
@@ -1404,6 +1531,57 @@ void builtins_curry_register(val_t env) {
     DEF("random-source-pseudo-randomize!",prim_random_seed,           3,3);
     DEF("random-source->random-real",     prim_random_source_to_real, 1,1);
     DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
+
+    /* Special functions (Phase 4f) */
+    DEF("legendre",           prim_legendre,          2, 2);
+    DEF("assoc-legendre",     prim_assoc_legendre,    3, 3);
+    DEF("hermite",            prim_hermite,           2, 2);
+    DEF("hermite-prob",       prim_hermite_prob,      2, 2);
+    DEF("chebyshev-t",        prim_chebyshev_t,       2, 2);
+    DEF("chebyshev-u",        prim_chebyshev_u,       2, 2);
+    DEF("laguerre",           prim_laguerre,          2, 2);
+    DEF("assoc-laguerre",     prim_assoc_laguerre,    3, 3);
+    DEF("spherical-harmonic", prim_spherical_harmonic,4, 4);
+    DEF("gamma",              prim_gamma,             1, 1);
+    DEF("log-gamma",          prim_log_gamma,         1, 1);
+    DEF("digamma",            prim_digamma,           1, 1);
+    DEF("beta",               prim_beta_fn,           2, 2);
+    DEF("bessel-j",           prim_bessel_j,          2, 2);
+    DEF("bessel-y",           prim_bessel_y,          2, 2);
+    DEF("bessel-i",           prim_bessel_i,          2, 2);
+    DEF("bessel-k",           prim_bessel_k,          2, 2);
+    DEF("elliptic-k",         prim_elliptic_k,        1, 1);
+    DEF("elliptic-e",         prim_elliptic_e,        1, 1);
+    DEF("elliptic-f",         prim_elliptic_f,        2, 2);
+    DEF("elliptic-pi",        prim_elliptic_pi,       2, 2);
+    /* Series (Phase 4g) */
+    DEF("laurent",            prim_laurent,           3, 4);
+    DEF("puiseux",            prim_puiseux,           3, 5);
+
+    /* Polynomial machinery (Phase 4c) and equation solving (Phase 4d) */
+    DEF("poly-gcd",          prim_poly_gcd,          3, 3);
+    DEF("poly-resultant",    prim_poly_resultant,     3, 3);
+    DEF("poly-squarefree",   prim_poly_squarefree,    2, 2);
+    DEF("poly-factor",       prim_poly_factor,        2, 2);
+    DEF("partial-fractions", prim_partial_fractions,  3, 3);
+    DEF("solve",             prim_solve,              2, 2);
+    DEF("solve-system",      prim_solve_system,       2, 2);
+    DEF("groebner",          prim_groebner,           2, 2);
+
+    /* User-defined rewrite rules */
+    DEF("list-rules",   prim_list_rules,  0, 1);
+    DEF("clear-rules!", prim_clear_rules, 0, 1);
+
+    /* Assumptions on sym-vars */
+    DEF("assume!",          prim_assume,          2, 2);
+    DEF("can-assume?",      prim_can_assume,       2, 2);
+    DEF("drop-assumption!", prim_drop_assumption,  2, 2);
+
+    /* Low-level SymExpr constructor and accessors */
+    DEF("sym-expr",       prim_sym_expr,       1, -1);
+    DEF("sym-expr-nargs", prim_sym_expr_nargs, 1,  1);
+    DEF("sym-expr-arg",   prim_sym_expr_arg,   2,  2);
+    DEF("sym-expr-op",    prim_sym_expr_op,    1,  1);
     env_define(env, sym_intern_cstr("default-random-source"),
                sym_intern_cstr("default-random-source"));
 

@@ -1,5 +1,10 @@
 #include "symbolic.h"
+#include "sx_rules.h"
+#include "sx_algebra.h"
+#include "sx_poly.h"
 #include "object.h"
+#include "set.h"    /* scm_equal */
+#include "eval.h"   /* apply_arr */
 #include "gc.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -230,6 +235,67 @@ val_t sx_simplify(val_t expr) {
     /* Recursively simplify all arguments */
     val_t *sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
     for (int i = 0; i < n; i++) sa[i] = sx_simplify(se->args[i]);
+
+    /* User-defined rules — consulted before built-in dispatch so that custom
+       algebras (e.g. Dirac γ-matrix anti-commutation) take precedence. */
+    {
+        val_t user_expr   = sx_make_expr(op, n, sa);
+        val_t user_result = sx_rule_try(user_expr);
+        if (user_result != V_VOID) return sx_simplify(user_result);
+    }
+
+    /* Declared algebra properties for user-defined operators.
+       Built-in operators (+, *, etc.) are not in the algebra table and fall
+       through to the hard-coded dispatch below. */
+    {
+        AlgebraInfo *alg = sx_algebra_lookup(op);
+        if (alg) {
+            /* Absorbing element: (op ... abs ...) → abs */
+            if (alg->absorbing != V_VOID) {
+                for (int i = 0; i < n; i++)
+                    if (scm_equal(sa[i], alg->absorbing)) return alg->absorbing;
+            }
+            /* Identity elimination: remove all identity elements from args */
+            if (alg->identity != V_VOID) {
+                int new_n = 0;
+                val_t *new_sa = (val_t *)gc_alloc_raw_pinned((size_t)n * sizeof(val_t));
+                for (int i = 0; i < n; i++)
+                    if (!scm_equal(sa[i], alg->identity)) new_sa[new_n++] = sa[i];
+                if (new_n == 0) return alg->identity;
+                if (new_n == 1) return new_sa[0];
+                if (new_n < n)  return sx_simplify(sx_make_expr(op, new_n, new_sa));
+            }
+            /* Associative flattening: (op (op a b) c) → (op a b c) */
+            if (alg->associative) {
+                int total = 0;
+                for (int i = 0; i < n; i++) {
+                    if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == op)
+                        total += (int)as_symexpr(sa[i])->nargs;
+                    else total++;
+                }
+                if (total > n) {
+                    val_t *flat = (val_t *)gc_alloc_raw_pinned((size_t)total * sizeof(val_t));
+                    int k = 0;
+                    for (int i = 0; i < n; i++) {
+                        if (vis_symexpr(sa[i]) && as_symexpr(sa[i])->op == op) {
+                            SymExpr *sub = as_symexpr(sa[i]);
+                            for (uint32_t j = 0; j < sub->nargs; j++) flat[k++] = sub->args[j];
+                        } else flat[k++] = sa[i];
+                    }
+                    sa = flat; n = total;
+                }
+            }
+            /* Custom relations function */
+            if (alg->relations_fn != V_FALSE) {
+                val_t rel_expr   = sx_make_expr(op, n, sa);
+                val_t rel_result = apply_arr(alg->relations_fn, 1, &rel_expr);
+                if (rel_result != V_VOID && rel_result != rel_expr)
+                    return sx_simplify(rel_result);
+            }
+            /* No built-in dispatch for user operators — return simplified form */
+            return sx_make_expr(op, n, sa);
+        }
+    }
 
     /* Flatten nested ADD or MUL into one level */
     if (op == SX_ADD || op == SX_MUL || op == SX_NCMUL) {
@@ -555,9 +621,22 @@ val_t sx_simplify(val_t expr) {
     /* ---- DIV ---- */
     if (op == SX_DIV && n == 2) {
         val_t a = sa[0], b = sa[1];
-        if (num_count == 2) return num_div(a, b);
+        if (num_count == 2) {
+            if (num_is_zero(b)) {
+                /* Float zero: let IEEE 754 produce ±inf (needed by limit/series) */
+                if (vis_flonum(b)) return num_div(a, b);
+                /* Exact zero denominator */
+                if (!num_is_zero(a))
+                    scm_raise(V_FALSE, "/: division by zero");
+                /* 0/0: return unevaluated to let limit/series handle it */
+                return sx_make_expr(SX_DIV, 2, sa);
+            } else {
+                return num_div(a, b);
+            }
+        }
         if (is_zero(a)) return vfix(0);
         if (is_one(b)) return a;
+        if (sx_equal(a, b)) return vfix(1);  /* f/f = 1 */
         /* (/ (* c . syms) d) → fold numeric factors: (* (c/d) . syms) */
         if (vis_number(b) && vis_symexpr(a) && as_symexpr(a)->op == SX_MUL) {
             SymExpr *mul = as_symexpr(a);
@@ -635,7 +714,6 @@ val_t sx_simplify(val_t expr) {
             }
         }
     }
-
     /* ---- NCMUL: ordered (non-commutative) product ---- */
     if (op == SX_NCMUL) {
         if (n == 1) return sa[0];
@@ -1683,7 +1761,7 @@ val_t sx_expand(val_t expr) {
 }
 
 /* Internal: degree as a C long (−1 for transcendentals of var, 0 for constants). */
-static long sx_degree_long(val_t expr, val_t var) {
+long sx_degree_long(val_t expr, val_t var) {
     if (vis_number(expr)) return 0;
     if (vis_symvar(expr))
         return (as_symvar(expr)->name == as_symvar(var)->name) ? 1 : 0;
@@ -2339,6 +2417,18 @@ val_t sx_integrate(val_t expr, val_t var) {
         }
     }
 
+    /* ---- Risch: rational function integration ---- */
+    if (op == SX_DIV) {
+        val_t rat = sx_integrate_rational(expr, var);
+        if (rat != V_VOID) return rat;
+    }
+
+    /* ---- Risch: log of a polynomial ---- */
+    if (op == SX_LOG && n == 1) {
+        val_t logp = sx_integrate_log_poly(args[0], var);
+        if (logp != V_VOID) return logp;
+    }
+
     /* Fallback: unevaluated (∫ expr var) */
     val_t i_args[2] = {expr, var};
     return sx_make_expr(SX_INTEGRATE, 2, i_args);
@@ -2885,7 +2975,28 @@ val_t sx_series(val_t expr, val_t var, val_t point, int n) {
             fact = num_mul(fact, vfix(k));
         }
 
-        val_t ck = sx_simplify(sx_substitute(fk, var, point));
+        /* Evaluate f^(k)(point), falling back to limit on exception or 0/0 */
+        val_t ck;
+        {
+            ExnHandler _sh;
+            bool _subst_ok = false;
+            SCM_PROTECT(_sh, {
+                ck = sx_simplify(sx_substitute(fk, var, point));
+                _subst_ok = true;
+            }, { (void)0; });
+            if (!_subst_ok) {
+                ck = sx_limit(fk, var, point, 0);
+            } else if (vis_symexpr(ck) && as_symexpr(ck)->op == SX_DIV) {
+                /* 0/0: check if denominator is zero at point, guarding against poles */
+                bool _denom_zero = false;
+                ExnHandler _sh2;
+                SCM_PROTECT(_sh2, {
+                    _denom_zero = num_is_zero(sx_simplify(
+                        sx_substitute(as_symexpr(ck)->args[1], var, point)));
+                }, { (void)0; });
+                if (_denom_zero) ck = sx_limit(fk, var, point, 0);
+            }
+        }
         if (vis_number(ck) && num_is_zero(ck)) continue;
 
         /* Promote integer-valued flonums to fixnum for exact rational output */

@@ -298,7 +298,10 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                       (akk_translate(vcar(form)) == S_DEFINE ||
                        akk_translate(vcar(form)) == S_DEFINE_SYNTAX ||
                        akk_translate(vcar(form)) == S_DEFINE_VALUES ||
-                       akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE);
+                       akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE ||
+                       akk_translate(vcar(form)) == S_DEFINE_RULE ||
+                       akk_translate(vcar(form)) == S_DEFINE_RULESET ||
+                       akk_translate(vcar(form)) == S_DEFINE_ALGEBRA);
         if (is_def) {
             if (body_has_expr)
                 scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
@@ -1233,7 +1236,9 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         head == S_DEFINE_RECORD_TYPE ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
         head == S_RECEIVE       || head == S_SYNTAX_RULES   ||
-        head == S_SYMBOLIC) {
+        head == S_SYMBOLIC      ||
+        head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
+        head == S_DEFINE_ALGEBRA || head == S_WITH_ASSUMPTIONS) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);

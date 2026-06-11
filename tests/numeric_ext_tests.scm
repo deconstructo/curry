@@ -832,6 +832,98 @@
        (equal? (∫ (* q (expt t 2)) t) (* q (/ (expt t 3) 3))) #t)
 
 ;;; =========================================================================
+;;; Phase 4f: special functions
+;;; =========================================================================
+
+;;; Orthogonal polynomials — numeric evaluation
+(check-approx "legendre P_2(0)"       (legendre 2 0.0)     -0.5         1e-12)
+(check-approx "legendre P_2(1)"       (legendre 2 1.0)      1.0         1e-12)
+(check-approx "hermite H_2(0)"        (hermite 2 0.0)       -2.0        1e-12)
+(check-approx "hermite H_3(1)"        (hermite 3 1.0)       -4.0        1e-12) ; 8-12=-4
+(check-approx "hermite-prob He_2(0)"  (hermite-prob 2 0.0)  -1.0        1e-12)
+(check-approx "chebyshev-t T_2(0.5)"  (chebyshev-t 2 0.5)  -0.5        1e-12)
+(check-approx "chebyshev-t T_2(1)"    (chebyshev-t 2 1.0)   1.0        1e-12)
+(check-approx "chebyshev-u U_2(0.5)"  (chebyshev-u 2 0.5)   0.0        1e-12)
+(check-approx "laguerre L_2(0)"       (exact->inexact (substitute (laguerre 2 (sym-var 'x)) (sym-var 'x) 0)) 1.0 1e-12)
+
+;;; Orthogonal polynomials — symbolic result is a polynomial
+(define lx (sym-var 'x))
+(check "legendre P_0 = 1"  (equal? (legendre 0 lx) 1) #t)
+(check "legendre P_1 = x"  (equal? (legendre 1 lx) lx) #t)
+(check "legendre P_2 sym"  (symbolic? (legendre 2 lx)) #t)
+(check "hermite H_0 = 1"   (equal? (hermite 0 lx) 1) #t)
+(check "hermite H_1 = 2x"  (equal? (hermite 1 lx) (* 2 lx)) #t)
+(check "chebyshev-t T_0=1" (equal? (chebyshev-t 0 lx) 1) #t)
+(check "chebyshev-t T_1=x" (equal? (chebyshev-t 1 lx) lx) #t)
+(check "laguerre L_0 = 1"  (equal? (laguerre 0 lx) 1) #t)
+
+;;; Gamma function
+(check "gamma(1) = 1"     (equal? (gamma 1) 1) #t)
+(check "gamma(5) = 24"    (equal? (gamma 5) 24) #t)
+(check "gamma(1/2)=√π"    (symbolic? (gamma 1/2)) #t)
+(check "gamma(3/2)=1/2√π" (symbolic? (gamma 3/2)) #t)
+(check-approx "gamma(1.5)" (gamma 1.5) 0.886227 1e-5)
+(check-approx "gamma(0.5)" (gamma 0.5) 1.772454 1e-5)
+;;; Large half-integer (previously overflowed long)
+(check "gamma(37/2) is symbolic" (symbolic? (gamma 37/2)) #t)
+
+;;; Beta function
+(check "beta(2,3) = 1/12" (equal? (beta 2 3) 1/12) #t)
+(check-approx "beta(1.5,2.5)" (beta 1.5 2.5) 0.19634954 1e-6)
+
+;;; Bessel J — numeric
+(check-approx "bessel-j(0,0)" (bessel-j 0 0.0)  1.0      1e-12)
+(check-approx "bessel-j(0,1)" (bessel-j 0 1.0)  0.765198 1e-5)
+(check-approx "bessel-j(1,1)" (bessel-j 1 1.0)  0.440051 1e-5)
+
+;;; Bessel K — numeric (previously inaccurate for small x)
+(check-approx "bessel-k(0,1)"   (bessel-k 0 1.0)  0.421024 1e-5)
+(check-approx "bessel-k(1,1)"   (bessel-k 1 1.0)  0.601907 1e-5)
+(check-approx "bessel-k(0,0.5)" (bessel-k 0 0.5)  0.924419 1e-4)
+(check-approx "bessel-k(2,1)"   (bessel-k 2 1.0)  1.624839 1e-4)
+
+;;; Bessel J/K — symbolic fallback
+(check "bessel-j symbolic" (symbolic? (bessel-j (sym-var 'n) lx)) #t)
+(check "bessel-k symbolic" (symbolic? (bessel-k (sym-var 'n) lx)) #t)
+
+;;; Elliptic integrals
+(check-approx "elliptic-k(0)=π/2"    (elliptic-k 0.0)       1.570796 1e-5)
+(check-approx "elliptic-e(0)=π/2"    (elliptic-e 0.0)       1.570796 1e-5)
+(check-approx "elliptic-k(0.5)"      (elliptic-k 0.5)       1.685750 1e-4)
+(check-approx "elliptic-pi(0,0)=K(0)"(elliptic-pi 0.0 0.0)  1.570796 1e-5)
+
+;;; assoc-laguerre validation
+(let ((x (sym-var 'x)))
+  (check "assoc-laguerre L_0^0 = 1"  (equal? (assoc-laguerre 0 0 x) 1) #t)
+  (check "assoc-laguerre L_1^1"      (symbolic? (assoc-laguerre 1 1 x)) #t))
+(check "assoc-laguerre negative k raises"
+       (guard (e (#t #t)) (assoc-laguerre 2 -1 (sym-var 'x))) #t)
+
+;;; =========================================================================
+;;; Phase 4g: Laurent and Puiseux series
+;;; =========================================================================
+
+(define xv (sym-var 'x))
+
+;;; Laurent: simple poles
+(check "laurent 1/x at 0"
+       (equal? (laurent (/ 1 xv) xv 0 3) (/ 1 xv)) #t)
+(check "laurent 1/x^2 at 0"
+       (equal? (laurent (/ 1 (expt xv 2)) xv 0 3) (/ 1 (expt xv 2))) #t)
+
+;;; Laurent: regular function — same as Taylor
+(let ((s (laurent (sin xv) xv 0 4)))
+  (check "laurent sin(x) at 0 is symbolic" (symbolic? s) #t)
+  (check-approx "laurent sin(x) at 0.1"
+    (exact->inexact (substitute s xv 0.1)) (sin 0.1) 1e-4))
+
+;;; Puiseux: sqrt(1+x) — verified via half-integer substitution (denom=2)
+(let ((s (puiseux (sqrt (+ 1 xv)) xv 0 4 2)))
+  (check "puiseux sqrt(1+x) symbolic" (symbolic? s) #t)
+  (check-approx "puiseux sqrt(1+x) at x=0.04"
+    (exact->inexact (substitute s xv 0.04)) (sqrt 1.04) 1e-6))
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

@@ -254,6 +254,7 @@ val_t sx_simplify(val_t expr);                               /* algebraic simpli
 val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=val */
 bool  sx_equal(val_t a, val_t b);                            /* structural equality */
 bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */
+long  sx_degree_long(val_t expr, val_t var);                 /* degree as C long (internal) */
 
 /* limit: dir = 0 (both), -1 (left), +1 (right) */
 val_t sx_limit(val_t expr, val_t var, val_t point, int dir);
