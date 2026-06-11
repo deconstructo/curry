@@ -461,6 +461,8 @@ void main() {
              (set! *bookmarks*
                (append *bookmarks* (list (list name *cx* *cy* *zoom*))))
              (save-bookmarks!)
+             (dropdown-add-item! bm-dropdown name)
+             (dropdown-set-index! bm-dropdown (- (dropdown-count bm-dropdown) 1))
              (text-set-value! name-field "")
              (display (string-append "Bookmark saved: " name "\n")))))))
 

@@ -866,6 +866,20 @@ static curry_val fn_dropdown_set_index(int ac, curry_val *av, void *ud) {
 static curry_val fn_dropdown_selected(int ac, curry_val *av, void *ud) {
     return fn_dropdown_index(ac, av, ud);
 }
+static curry_val fn_dropdown_add_item(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;
+    ((QComboBox *)val_to_widget(av[0]))->addItem(QString::fromUtf8(curry_string(av[1])));
+    return curry_void();
+}
+static curry_val fn_dropdown_clear(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;
+    ((QComboBox *)val_to_widget(av[0]))->clear();
+    return curry_void();
+}
+static curry_val fn_dropdown_count(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;
+    return curry_make_fixnum(((QComboBox *)val_to_widget(av[0]))->count());
+}
 
 /* (make-radio-group items initial-index callback) */
 static curry_val fn_make_radio_group(int ac, curry_val *av, void *ud) {
@@ -2428,6 +2442,9 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "dropdown-index",       fn_dropdown_index,      1, 1, NULL);
     curry_define_fn(vm, "dropdown-set-index!",  fn_dropdown_set_index,  2, 2, NULL);
     curry_define_fn(vm, "dropdown-selected",    fn_dropdown_selected,   1, 1, NULL);
+    curry_define_fn(vm, "dropdown-add-item!",   fn_dropdown_add_item,   2, 2, NULL);
+    curry_define_fn(vm, "dropdown-clear!",      fn_dropdown_clear,      1, 1, NULL);
+    curry_define_fn(vm, "dropdown-count",       fn_dropdown_count,      1, 1, NULL);
     curry_define_fn(vm, "make-radio-group",     fn_make_radio_group,    3, 3, NULL);
     curry_define_fn(vm, "radio-index",          fn_radio_index,         1, 1, NULL);
     curry_define_fn(vm, "make-spin-box",        fn_make_spin_box,       5, 5, NULL);
