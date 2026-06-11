@@ -256,10 +256,10 @@ void main() {
     (list "Real-axis spike"       -2.0                  0.0                  500.0)
     (list "Deep spiral"           -0.10109636384        0.95628651080        80000.0)
     (list "Seahorse head"         -0.74364388703        0.13182590421        100000.0)))
-(define (bookmark-name b) (car b))
-(define (bookmark-cx b)   (cadr b))
-(define (bookmark-cy b)   (caddr b))
-(define (bookmark-zoom b) (cadddr b))
+(define (bookmark-name b) (list-ref b 0))
+(define (bookmark-cx b)   (list-ref b 1))
+(define (bookmark-cy b)   (list-ref b 2))
+(define (bookmark-zoom b) (list-ref b 3))
 (define *n-builtins* 10)
 
 (define *bookmarks-path*
