@@ -1,5 +1,44 @@
 # Changelog
 
+### 1.4.0 — Extensible CAS
+
+**User-extensible rewrite engine (Phase 4a)**
+- `define-rule` / `define-ruleset` / `apply-rules` — pattern-matching rewrite rules with optional guards
+- `list-rules`, `clear-rules` — inspect and reset rule sets
+
+**Algebra declarations and assumptions (Phase 4b)**
+- `define-algebra` — declare operator commutativity, associativity, identity, inverse
+- `with-assumptions` — temporarily attach domain flags (`positive`, `real`, `integer`, `nonzero`, `quaternion`) to sym-vars
+- `assume!` / `retract!` / `can-assume?` — permanent mutable assumptions
+
+**Polynomial machinery (Phase 4c)**
+- `poly-gcd`, `poly-resultant`, `poly-pseudo-remainder`, `poly-factor` (Yun squarefree + Kronecker)
+- `poly-roots` (companion-matrix eigenvalues for degree ≤ 8)
+
+**Equation solving (Phase 4d)**
+- `solve` — univariate polynomial and simple transcendental equations
+- `solve-system` — linear systems via Gaussian elimination
+
+**Risch integration (Phase 4e)**
+- Rational function integration (partial fractions over ℚ)
+- Log-polynomial extension: integrates `f(x)·log(g(x))` forms
+
+**Special functions (Phase 4f)**
+- Orthogonal polynomials: `legendre`, `assoc-legendre`, `hermite`, `hermite-prob`, `chebyshev-t`, `chebyshev-u`, `laguerre`, `assoc-laguerre`
+- `spherical-harmonic` — Y_l^m(θ,φ)
+- Gamma family: `gamma` (exact integers/half-integers, symbolic), `log-gamma`, `digamma`, `beta`
+- Bessel: `bessel-j`, `bessel-y`, `bessel-i`, `bessel-k` (Maclaurin series for small x)
+- Elliptic integrals: `elliptic-k`, `elliptic-e`, `elliptic-f`, `elliptic-pi`
+
+**Extended series (Phase 4g)**
+- `laurent` — Laurent series around poles; pole order detected via guarded substitution
+- `puiseux` — Puiseux (fractional-power) series via t-substitution
+
+**Bug fixes**
+- `sx_simplify`: exact `n/0` now raises; exact `0/0` returns unevaluated node; float `a/0.0` returns IEEE ±∞
+- `sx_series`: guarded against unhandled exceptions when coefficient evaluation encounters poles
+- `bessel-k`: replaced asymptotic-only seeds (up to 20% error at x=1) with Maclaurin series for x≤8
+
 ### 1.3.1 — Housekeeping
 
 **Packaging**
