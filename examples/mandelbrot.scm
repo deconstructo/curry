@@ -222,27 +222,28 @@ void main() {
 
 ;;; ── Double-double arithmetic in Scheme (for reference orbit) ─────────────────
 
+;;; DD arithmetic returning (hi . lo) cons pairs — avoids let*-values.
+
 (define (scheme-two-sum a b)
   (let* ((s (+ a b)) (v (- s a)))
-    (values s (+ (- a (- s v)) (- b v)))))
+    (cons s (+ (- a (- s v)) (- b v)))))
 
 (define (scheme-two-prod a b)
-  ;; Veltkamp split for float64 → two float64 halves
   (let* ((p  (* a b))
-         (c  (* 134217729.0 a))  ; 2^27+1
+         (c  (* 134217729.0 a))   ; 2^27+1 Veltkamp factor
          (ah (- c (- c a))) (al (- a ah))
          (c2 (* 134217729.0 b))
          (bh (- c2 (- c2 b))) (bl (- b bh))
          (e  (+ (+ (- (* ah bh) p) (* ah bl)) (+ (* al bh) (* al bl)))))
-    (values p e)))
+    (cons p e)))
 
 (define (dd+ ah al bh bl)
-  (let*-values (((s e) (scheme-two-sum ah bh)))
-    (scheme-two-sum s (+ e al bl))))
+  (let* ((s (scheme-two-sum ah bh)))
+    (scheme-two-sum (car s) (+ (cdr s) al bl))))
 
 (define (dd* ah al bh bl)
-  (let*-values (((p e) (scheme-two-prod ah bh)))
-    (scheme-two-sum p (+ e (* ah bl) (* al bh)))))
+  (let* ((p (scheme-two-prod ah bh)))
+    (scheme-two-sum (car p) (+ (cdr p) (* ah bl) (* al bh)))))
 
 ;;; ── Reference orbit ──────────────────────────────────────────────────────────
 ;;; Computes the reference orbit at (*cx*, *cy*) in double-double Scheme
@@ -316,14 +317,19 @@ void main() {
           ;; Escape check
           (let ((ns (+ (* zx-hi zx-hi) (* zy-hi zy-hi))))
             (when (< ns 4.0)
-              ;; Z_{n+1} = Z_n² + C  (DD)
-              (let*-values
-                (((zx2h zx2l) (dd* zx-hi zx-lo zx-hi zx-lo))
-                 ((zy2h zy2l) (dd* zy-hi zy-lo zy-hi zy-lo))
-                 ((zxzyh zxzyl) (dd* zx-hi zx-lo zy-hi zy-lo))
-                 ((nzxh nzxl) (dd+ (- zx2h zy2h) (- zx2l zy2l) cx-hi cx-lo))
-                 ((nzyh nzyl) (dd+ (* 2.0 zxzyh) (* 2.0 zxzyl) cy-hi cy-lo)))
-                (loop nzxh nzxl nzyh nzyl (+ n 1)))))))
+              ;; Z_{n+1} = Z_n² + C  (DD), results as (hi . lo) cons
+              (let* ((zx2  (dd* zx-hi zx-lo zx-hi zx-lo))
+                     (zy2  (dd* zy-hi zy-lo zy-hi zy-lo))
+                     (zxzy (dd* zx-hi zx-lo zy-hi zy-lo))
+                     (nzx  (dd+ (- (car zx2) (car zy2))
+                                (- (cdr zx2) (cdr zy2))
+                                cx-hi cx-lo))
+                     (nzy  (dd+ (* 2.0 (car zxzy))
+                                (* 2.0 (cdr zxzy))
+                                cy-hi cy-lo)))
+                (loop (car nzx) (cdr nzx)
+                      (car nzy) (cdr nzy)
+                      (+ n 1)))))))
       ;; Upload to GPU
       (set! *orbit-bv* bv)
       (if *orbit-tex*
