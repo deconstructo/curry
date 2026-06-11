@@ -230,6 +230,21 @@ void main() {
 
 (define *canvas* #f)
 
+;;; Format a coordinate with enough decimal places for the current zoom.
+;;; Uses exact integer arithmetic to avoid the 6-digit limit of number->string.
+(define (coord->string x)
+  (let* ((places (min 15 (+ 2 (inexact->exact (ceiling (/ (log (max *zoom* 1.0)) (log 10.0)))))))
+         (neg    (< x 0.0))
+         (ax     (if neg (- x) x))
+         (scaled (inexact->exact (round (* ax (expt 10.0 places)))))
+         (s      (number->string scaled))
+         (padded (let loop ((s s))
+                   (if (>= (string-length s) places) s (loop (string-append "0" s)))))
+         (ilen   (- (string-length padded) places))
+         (ipart  (if (= ilen 0) "0" (substring padded 0 ilen)))
+         (fpart  (substring padded ilen (string-length padded))))
+    (string-append (if neg "-" "") ipart "." fpart)))
+
 ;;; ── Draw ─────────────────────────────────────────────────────────────────────
 
 (define (draw-frame painter w h)
@@ -257,7 +272,8 @@ void main() {
         (else         "O  8D slice"))
       "  iter=" (number->string *max-iter*)
       "  zoom×" (number->string (inexact->exact (round *zoom*)))
-      (if (and (eq? *algebra* 'complex) (> *zoom* 1e6)) "  DD" ""))))
+      (if (and (eq? *algebra* 'complex) (> *zoom* 1e6)) "  DD" "")
+      "  (" (coord->string *cx*) ", " (coord->string *cy*) "i)"))))
 
 ;;; ── Input ────────────────────────────────────────────────────────────────────
 
