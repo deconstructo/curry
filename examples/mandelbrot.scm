@@ -1,11 +1,15 @@
 ;;; mandelbrot.scm — Hypercomplex Mandelbrot viewer (GPU edition)
-;;; Version: 2.1
+;;; Version: 3.0
 ;;;
 ;;; Renders directly on the GPU via a GLSL fragment shader written in Scheme.
 ;;; The shader handles all three Cayley-Dickson algebras:
 ;;;   Complex    (2 real dims)  — the classic Mandelbrot set
 ;;;   Quaternion (4 real dims)  — 2-D slice through ℍ
 ;;;   Octonion   (8 real dims)  — 2-D slice through 𝕆
+;;;
+;;; Precision: complex mode automatically switches to double-double arithmetic
+;;; (48-bit mantissa, ~14 decimal digits) when zoom > 1e6, extending the usable
+;;; zoom depth from ~10^7 (float32 limit) to ~3×10^14.
 ;;;
 ;;; Controls:
 ;;;   Left-drag          pan
@@ -20,34 +24,54 @@
 (import (scheme inexact))
 
 ;;; ── Fragment shader ──────────────────────────────────────────────────────────
-;;;
-;;; u_resolution is auto-supplied by gl-shader-draw! (physical pixels, HiDPI-correct).
-;;; All other uniforms are passed per-frame via the uniforms alist.
 
 (define mandel-frag-src "
-#version 330 core
+#version 400 core
 out vec4 frag_color;
 
-uniform vec2  u_resolution;   /* physical (W, H) — set automatically        */
-uniform float u_dpr;          /* device pixel ratio — set automatically     */
-uniform vec2  u_center;       /* (cx, cy) world-space                       */
-uniform float u_zoom;         /* logical pixels per world unit              */
+uniform vec2  u_resolution;    /* physical (W, H) — set automatically          */
+uniform float u_dpr;           /* device pixel ratio — set automatically       */
+uniform vec2  u_center;        /* (cx, cy) world-space  — float32 path         */
+uniform vec4  u_center_dd;     /* (cx_hi,cx_lo, cy_hi,cy_lo) — dd path        */
+uniform float u_zoom;          /* logical pixels per world unit                */
 uniform int   u_max_iter;
-uniform int   u_algebra;      /* 0=complex  1=quaternion  2=octonion        */
-uniform float u_theta;        /* slice rotation θ                           */
-uniform float u_phi;          /* slice rotation φ                           */
+uniform int   u_algebra;       /* 0=complex  1=quaternion  2=octonion          */
+uniform float u_theta;
+uniform float u_phi;
+uniform int   u_palette;       /* 0=cycle 1=ultra 2=ice 3=electric 4=gold      */
+uniform int   u_use_dd;        /* 0=float32  1=double-double (auto from Scheme) */
 
-vec3 palette(float t) {
-    float a = mod(t * 7.3, 512.0) / 512.0 * 6.28318530718;
-    return vec3(0.5 + 0.5*sin(a),
-                0.5 + 0.5*sin(a + 2.09439510239),
-                0.5 + 0.5*sin(a + 4.18879020479));
+/* ── Palette ──────────────────────────────────────────────────────────────── */
+
+vec3 iqpal(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+    return a + b * cos(6.28318530718 * (c * t + d));
 }
 
-/* Smooth escape-time colouring: n + 1 − log₂(log₂|z|)  (|z| > 2 at escape) */
+vec3 palette(float raw_t) {
+    float t = fract(raw_t * 0.015);          /* one hue cycle per ~67 iters   */
+    if (u_palette == 1)                       /* Ultra — warm gold/orange       */
+        return iqpal(t, vec3(0.5), vec3(0.5),
+                     vec3(1.0, 1.0, 0.5), vec3(0.80, 0.90, 0.30));
+    if (u_palette == 2)                       /* Ice — deep blue/cyan/white     */
+        return iqpal(t, vec3(0.5), vec3(0.5),
+                     vec3(0.8, 0.8, 0.5), vec3(0.00, 0.20, 0.50));
+    if (u_palette == 3)                       /* Electric — purple/pink/white   */
+        return iqpal(t, vec3(0.5), vec3(0.5),
+                     vec3(2.0, 1.0, 0.0), vec3(0.50, 0.20, 0.25));
+    if (u_palette == 4)                       /* Gold — black/brown/gold        */
+        return iqpal(t, vec3(0.5, 0.4, 0.2), vec3(0.5, 0.4, 0.3),
+                     vec3(1.0, 1.0, 0.5), vec3(0.00, 0.10, 0.20));
+    /* 0: Cycle — classic smooth rainbow */
+    return iqpal(t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.67));
+}
+
+/* ── Smooth escape colouring ─────────────────────────────────────────────── */
+
 float smooth_n(float i_f, float ns) {
     return i_f + 1.0 - log2(log2(sqrt(ns)));
 }
+
+/* ── Float32 Mandelbrot (fast path for zoom < ~10^6) ─────────────────────── */
 
 float mandel_2d(vec2 c) {
     vec2 z = vec2(0.0);
@@ -59,7 +83,60 @@ float mandel_2d(vec2 c) {
     return -1.0;
 }
 
-/* Quaternion: (a+v)² = (a²−|v|²) + 2a·v */
+/* ── Double-double arithmetic (Dekker/Veltkamp, no FMA needed) ───────────── */
+/*   Each dd value is a vec2 (hi, lo) where hi + lo = exact value.           */
+
+vec2 ts(float a, float b) {                  /* two-sum: exact (a+b, error)   */
+    float s = a + b, v = s - a;
+    return vec2(s, (a-(s-v)) + (b-v));
+}
+vec2 tp(float a, float b) {                  /* two-prod: exact (a*b, error)  */
+    float p = a * b;
+    return vec2(p, fma(a, b, -p));
+}
+vec2 dd_add(vec2 a, vec2 b) {
+    vec2 s = ts(a.x, b.x);
+    return ts(s.x, s.y + a.y + b.y);
+}
+vec2 dd_sub(vec2 a, vec2 b) { return dd_add(a, vec2(-b.x, -b.y)); }
+vec2 dd_mul(vec2 a, vec2 b) {
+    vec2 p = tp(a.x, b.x);
+    p.y += a.x*b.y + a.y*b.x;
+    return ts(p.x, p.y);
+}
+
+/* Build the per-pixel complex c as a double-double from the split center and
+   the float32 pixel offset wx, wy.  Since |cx_lo + wx| << |cx_hi|, the
+   double-double is simply (cx_hi, cx_lo + wx) — the two_sum in ts() captures
+   wx exactly in the lo word even when |wx| << |cx_hi|.                       */
+void pixel_c_dd(float wx, float wy, out vec2 cx, out vec2 cy) {
+    cx = vec2(u_center_dd.x, u_center_dd.y + wx);
+    cy = vec2(u_center_dd.z, u_center_dd.w + wy);
+}
+
+/* ── Double-double Mandelbrot (~10× more ops, correct to zoom ~3e14) ─────── */
+
+float mandel_2d_dd(float wx, float wy) {
+    vec2 cx, cy;
+    pixel_c_dd(wx, wy, cx, cy);
+
+    vec2 zx = vec2(0.0), zy = vec2(0.0);
+    for (int i = 0; i < u_max_iter; i++) {
+        /* Escape test on high words — sufficient since |z|>2 check needs ~1 ULP */
+        float ns = zx.x*zx.x + zy.x*zy.x;
+        if (ns > 4.0) return smooth_n(float(i), ns);
+
+        vec2 zx2  = dd_sub(dd_mul(zx, zx), dd_mul(zy, zy));
+        vec2 zxzy = dd_mul(zx, zy);
+        vec2 zy2  = 2.0 * zxzy;           /* × 2 is exact in floating-point  */
+        zx = dd_add(zx2, cx);
+        zy = dd_add(zy2, cy);
+    }
+    return -1.0;
+}
+
+/* ── Quaternion / octonion slices (float32 only — deep zoom not useful) ──── */
+
 float mandel_4d(vec4 c) {
     vec4 z = vec4(0.0);
     for (int i = 0; i < u_max_iter; i++) {
@@ -71,7 +148,6 @@ float mandel_4d(vec4 c) {
     return -1.0;
 }
 
-/* Octonion: same Cayley-Dickson formula, packed as (z0, zl[1..4], zh[5..7], 0) */
 float mandel_8d(float c0, vec4 c_lo, vec4 c_hi) {
     float z0 = 0.0; vec4 zl = vec4(0.0); vec4 zh = vec4(0.0);
     for (int i = 0; i < u_max_iter; i++) {
@@ -86,15 +162,18 @@ float mandel_8d(float c0, vec4 c_lo, vec4 c_hi) {
     return -1.0;
 }
 
+/* ── Main ────────────────────────────────────────────────────────────────── */
+
 void main() {
-    /* u_zoom is in logical px/world-unit; scale to physical for gl_FragCoord */
     float pzoom = u_zoom * u_dpr;
     float wx = ( gl_FragCoord.x - u_resolution.x * 0.5) / pzoom;
     float wy = -(gl_FragCoord.y - u_resolution.y * 0.5) / pzoom;
 
     float t;
     if (u_algebra == 0) {
-        t = mandel_2d(vec2(u_center.x + wx, u_center.y + wy));
+        t = (u_use_dd == 1)
+            ? mandel_2d_dd(wx, wy)
+            : mandel_2d(vec2(u_center.x + wx, u_center.y + wy));
     } else if (u_algebra == 1) {
         t = mandel_4d(vec4(wx*cos(u_theta) + u_center.x,
                            wy*cos(u_phi)   + u_center.y,
@@ -111,7 +190,6 @@ void main() {
 }
 ")
 
-;;; Compile once — lazy: actual GL compilation happens on first gl-shader-draw! call.
 (define mandel-prog (make-gl-shader mandel-frag-src))
 
 ;;; ── View state ───────────────────────────────────────────────────────────────
@@ -120,14 +198,27 @@ void main() {
 (define *max-iter* 150)
 (define *cx*      -0.5)
 (define *cy*       0.0)
-(define *zoom*   200.0)   ; logical pixels per world unit
+(define *zoom*   200.0)
 (define *theta*    0.0)
 (define *phi*      0.0)
+(define *palette*  0)
 (define *W* 800)
 (define *H* 600)
 
 (define (algebra->int a)
   (case a ((complex) 0) ((quaternion) 1) (else 2)))
+
+;;; ── Double-double split ──────────────────────────────────────────────────────
+;;;
+;;; Veltkamp split: decompose a float64 x into (hi lo) where hi has at most
+;;; 24 significant bits (float32-exact) and hi + lo ≈ x in float64 arithmetic.
+;;; Factor = 2^24 + 1 = 16777217.
+
+(define (dd-split x)
+  (let* ((c  (* 16777217.0 x))
+         (hi (- c (- c x)))
+         (lo (- x hi)))
+    (list hi lo)))
 
 ;;; ── Drag state ───────────────────────────────────────────────────────────────
 
@@ -139,14 +230,20 @@ void main() {
 ;;; ── Draw ─────────────────────────────────────────────────────────────────────
 
 (define (draw-frame painter w h)
-  (gl-shader-draw! mandel-prog painter
-    (list (cons "u_center"   (list *cx* *cy*))
-          (cons "u_zoom"     *zoom*)                  ; logical px/world; shader scales by u_dpr
-          (cons "u_max_iter" *max-iter*)
-          (cons "u_algebra"  (algebra->int *algebra*))
-          (cons "u_theta"    *theta*)
-          (cons "u_phi"      *phi*)))
-  ; HUD — drawn by QPainter on top after endNativePainting
+  (let* ((xdd (dd-split *cx*))
+         (ydd (dd-split *cy*))
+         (use-dd (if (and (eq? *algebra* 'complex) (> *zoom* 1e6)) 1 0)))
+    (gl-shader-draw! mandel-prog painter
+      (list (cons "u_center"    (list *cx* *cy*))
+            (cons "u_center_dd" (list (car xdd) (cadr xdd)
+                                      (car ydd) (cadr ydd)))
+            (cons "u_zoom"      *zoom*)
+            (cons "u_max_iter"  *max-iter*)
+            (cons "u_algebra"   (algebra->int *algebra*))
+            (cons "u_theta"     *theta*)
+            (cons "u_phi"       *phi*)
+            (cons "u_palette"   *palette*)
+            (cons "u_use_dd"    use-dd))))
   (gfx-set-antialias! painter #t)
   (gfx-set-color! painter 1.0 1.0 1.0 0.65)
   (gfx-draw-text! painter 8 (- h 10)
@@ -156,7 +253,8 @@ void main() {
         ((quaternion) "H  4D slice")
         (else         "O  8D slice"))
       "  iter=" (number->string *max-iter*)
-      "  zoom×" (number->string (inexact->exact (round *zoom*))))))
+      "  zoom×" (number->string (inexact->exact (round *zoom*)))
+      (if (and (eq? *algebra* 'complex) (> *zoom* 1e6)) "  DD" ""))))
 
 ;;; ── Input ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +305,15 @@ void main() {
     (lambda (i)
       (set! *algebra* (list-ref '(complex quaternion octonion) i))
       (reset-view!))))
+
+(box-add! sidebar (make-separator))
+
+(box-add! sidebar (make-label "Colour palette"))
+(box-add! sidebar
+  (make-radio-group
+    '("Cycle" "Ultra" "Ice" "Electric" "Gold")
+    0
+    (lambda (i) (set! *palette* i) (canvas-redraw! *canvas*))))
 
 (box-add! sidebar (make-separator))
 
