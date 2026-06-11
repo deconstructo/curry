@@ -653,6 +653,16 @@ static curry_val fn_canvas_mouse_grabbed_p(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     return curry_make_bool(val_to_canvas(av[0])->mouse_grabbed); }
 
+/* (canvas-save-png! canvas path) — grab the current OpenGL framebuffer and
+   save it as a PNG file.  Returns #t on success, #f on failure. */
+static curry_val fn_canvas_save_png(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    WinState *ws   = val_to_canvas(av[0]);
+    const char *path = curry_string(av[1]);
+    QImage img = ws->canvas->grabFramebuffer();
+    bool ok = img.save(QString::fromUtf8(path), "PNG");
+    return curry_make_bool(ok); }
+
 /* =========================================================================
  * Layer 3 — Layout boxes
  * ========================================================================= */
@@ -2380,6 +2390,7 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "canvas-grab-mouse!",     fn_canvas_grab_mouse,       1, 1, NULL);
     curry_define_fn(vm, "canvas-release-mouse!",  fn_canvas_release_mouse,    1, 1, NULL);
     curry_define_fn(vm, "canvas-mouse-grabbed?",  fn_canvas_mouse_grabbed_p,  1, 1, NULL);
+    curry_define_fn(vm, "canvas-save-png!",       fn_canvas_save_png,         2, 2, NULL);
     curry_define_fn(vm, "make-timer/dt",          fn_make_timer_dt,           2, 2, NULL);
     curry_define_fn(vm, "timer/dt-start!",        fn_timer_dt_start,          1, 1, NULL);
     curry_define_fn(vm, "timer/dt-stop!",         fn_timer_dt_stop,           1, 1, NULL);
