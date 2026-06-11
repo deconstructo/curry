@@ -210,12 +210,15 @@ void main() {
 
 ;;; ── Double-double split ──────────────────────────────────────────────────────
 ;;;
-;;; Veltkamp split: decompose a float64 x into (hi lo) where hi has at most
-;;; 24 significant bits (float32-exact) and hi + lo ≈ x in float64 arithmetic.
-;;; Factor = 2^24 + 1 = 16777217.
+;;; Veltkamp split: decompose a float64 x into (hi lo) where hi is exactly
+;;; representable as float32 (24 significant bits) and hi + lo = x in float64.
+;;; Factor = 2^(53-24) + 1 = 2^29 + 1 = 536870913.
+;;; With factor 2^s+1 in p-bit arithmetic, hi gets p-s bits.  We want 24, so
+;;; s = 53-24 = 29 → factor 536870913.  (Using 2^24+1 would give hi 29 bits,
+;;; which is NOT float32-representable, breaking DD precision after ~zoom 10^7.)
 
 (define (dd-split x)
-  (let* ((c  (* 16777217.0 x))
+  (let* ((c  (* 536870913.0 x))
          (hi (- c (- c x)))
          (lo (- x hi)))
     (list hi lo)))
