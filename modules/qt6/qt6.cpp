@@ -110,6 +110,7 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 #include <QFont>
 #include <QPolygonF>
 #include <QImage>
+#include <QPixmap>
 #include <QTimer>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -2250,6 +2251,31 @@ static curry_val fn_qt_process_events(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
+/* (call-with-painter w h proc) — create a w×h QPixmap-backed QPainter,
+   call (proc painter), return its result.  No GL context or window needed —
+   useful for measuring text metrics, drawing to memory buffers, and testing
+   gfx-* procedures without a display. */
+static curry_val fn_call_with_painter(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;
+    int w = qMax(1, (int)curry_float(av[0]));
+    int h = qMax(1, (int)curry_float(av[1]));
+    curry_val proc = av[2];
+    QPixmap pix(w, h);
+    pix.fill(Qt::transparent);
+    QPainter painter(&pix);
+    curry_val argv[1] = { ptr_to_val("qt6-painter", &painter) };
+    ExnHandler exn;
+    CurryVMState vm;
+    curry_vm_state_save(&vm);
+    curry_val result = V_VOID;
+    SCM_PROTECT(exn,
+        result = curry_apply(proc, 1, argv),
+        (qt6_print_exn("[call-with-painter]", exn.exn),
+         curry_vm_state_restore(&vm)));
+    painter.end();
+    return result;
+}
+
 /* =========================================================================
  * 4D projection math (no Qt dependency — preserved from original stub)
  * ========================================================================= */
@@ -2480,6 +2506,10 @@ static curry_val fn_file_save_dialog(int ac, curry_val *av, void *ud) {
 
 extern "C" void curry_module_init(CurryVM *vm) {
 
+    /* Create QApplication immediately so widget constructors work at any
+       time after (import (curry qt6)), not just after make-window. */
+    ensure_app();
+
     /* Anchor the proc-roots list on the GC heap so Boehm can trace it */
     s_proc_roots = curry_nil();
 
@@ -2651,6 +2681,7 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "qt-widget-height",     fn_qt_widget_height,    1, 1, NULL);
     curry_define_fn(vm, "qt-gpu?",              fn_qt_gpu_p,            1, 1, NULL);
     curry_define_fn(vm, "qt-process-events",    fn_qt_process_events,   0, 0, NULL);
+    curry_define_fn(vm, "call-with-painter",    fn_call_with_painter,   3, 3, NULL);
 
     /* --- 4D projection --- */
     curry_define_fn(vm, "make-4d-projector",    fn_make_4d_projector,   0, 2, NULL);

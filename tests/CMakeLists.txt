@@ -92,3 +92,13 @@ if(BUILD_MODULE_RPI AND TARGET curry_rpi)
     set_tests_properties(rpi_hw PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
+
+if(BUILD_MODULE_QT6 AND TARGET curry_qt6)
+    # Phase 1 (widget creation) runs immediately; Phase 2 (painter / text
+    # metrics) triggers an offscreen render via canvas-save-png!.
+    # QT_QPA_PLATFORM=offscreen lets this run in CI without a display.
+    add_test(NAME qt6 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/test_qt6_new.scm)
+    set_tests_properties(qt6 PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 30)
+endif()
