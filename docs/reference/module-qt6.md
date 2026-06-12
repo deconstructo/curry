@@ -738,5 +738,6 @@ All module callbacks are safe to call from non-Qt threads via `send!`. Scheme pr
 |------|-------------|
 | `examples/solar-system-qt6.scm` | N-body simulation with 15 concurrent actors |
 | `examples/mandelbrot.scm` | Hypercomplex Mandelbrot GPU explorer (complex/quaternion/octonion) |
+| `examples/holo_explorer.scm` | Arbitrary-polynomial fractal explorer — parameter space, Julia sets, orbit traps |
 | `examples/tesseract.scm` | Rotating 4D hypercube |
 | `examples/maze4d.scm` | First-person 4D maze — GPU DDA raycaster with anaglyph stereo |
