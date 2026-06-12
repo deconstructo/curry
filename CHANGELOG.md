@@ -1,5 +1,65 @@
 # Changelog
 
+### 1.4.1 — Mandelbrot polish + Tetrabrot explorer
+
+**New example: `examples/tetrabrot.scm`** — Bicomplex (ℂ²) Tetrabrot explorer
+
+The bicomplex number system ℂ(i₁,i₂) extends ℂ to four real dimensions by
+adding a second imaginary unit i₂ that commutes with i₁.  The Mandelbrot
+iteration w → w² + c in this algebra lives in ℝ⁴ and is called the Tetrabrot.
+
+The explorer lets you navigate any 2D cross-section of the four-dimensional
+parameter space interactively:
+
+- **Axis-pair dropdown** — six choices (x₀×x₁ … x₂×x₃); the (x₀,x₁) slice
+  is the ordinary Mandelbrot set
+- **Fixed-axis sliders** — sweep the two non-displayed ℝ⁴ components through
+  the range −2 … 2 to move the slice through the solid
+- Full pan, zoom-to-cursor, palette, iteration count, bookmarks, and PNG export
+  (same feature set as the Mandelbrot explorer)
+- GPU-accelerated bicomplex squaring shader — runs at full resolution even at
+  high iteration counts
+
+**Qt6 module — three new dropdown procedures**
+
+`dropdown-add-item! dd label` — append a new item to an existing dropdown
+without rebuilding it.  Used by the bookmark system to grow the list as the
+user saves views.
+
+`dropdown-clear! dd` — remove all items.
+
+`dropdown-count dd` — return the number of items currently in the dropdown.
+
+**Qt6 module — `canvas-save-png!` bug fixes**
+
+Two HiDPI rendering bugs fixed in `canvas-save-png!` on Retina/HiDPI displays
+(device pixel ratio ≥ 2):
+
+- *Quarter-image bug* — the off-screen FBO was rendered into only the
+  upper-right quadrant of the saved PNG.  Root cause: `gl-shader-draw!`
+  computed the physical pixel size as `device->width() × dpr`, which is correct
+  for a `QWidget` (logical width) but double-scales for `QOpenGLPaintDevice`
+  (already physical width).  Fix: read the viewport Qt set in
+  `beginNativePainting()` via `glGetIntegerv(GL_VIEWPORT)` instead.
+
+- *Blurry HUD text* — QPainter-rendered text (coordinates, zoom level) was
+  blurry in the saved PNG because the glyph cache rasterised at 1× density.
+  Root cause: `setDevicePixelRatio(dpr)` moves the DPR scale into the
+  projection matrix, leaving `state->matrix` as identity, so
+  `pixelToDeviceTransformDensity()` returns 1 and glyphs are upscaled 2×.
+  Fix: use `setWindow(0, 0, lw, lh)` / `setViewport(0, 0, pw, ph)` instead,
+  which puts the DPR scale into `state->matrix` directly.  `gl-shader-draw!`
+  and `gl-shader-draw-arrays!` now derive `u_dpr` from the larger of the
+  device DPR and the painter world-transform scale so both the on-screen
+  (`QWidget`) and off-screen (`QOpenGLPaintDevice`) paths give the same result.
+
+**Bug fixes**
+
+- `examples/mandelbrot.scm`: `cadddr` replaced with `list-ref` (Curry does not
+  export `cadddr`)
+
+---
+
 ### 1.4.0 — Extensible CAS
 
 **User-extensible rewrite engine (Phase 4a)**

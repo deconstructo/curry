@@ -1,6 +1,6 @@
 # Module: `(curry qt6)`
 
-*v1.2.2 — 2026-06-07*
+*v1.4.1 — 2026-06-12*
 
 Qt6-based windowing, 2D graphics, widgets, and 4D projection math.
 
@@ -131,6 +131,25 @@ Modifier list: `'(shift ctrl alt meta)` (subset present).
 (qt-widget-width   widget)       ; → number
 (qt-widget-height  widget)
 (qt-gpu?           canvas)       ; → #t if OpenGL initialised successfully
+
+(canvas-save-png!  canvas path)  ; → #t on success, #f on failure
+```
+
+`canvas-save-png!` renders the canvas into an off-screen FBO at full device
+resolution (HiDPI-correct — a Retina display at 2× DPR produces a 2× physical
+pixel PNG) and saves it to `path` as PNG.  It calls the canvas's registered
+`draw-proc` exactly once off-screen, so the saved image matches what is shown
+on screen including any QPainter HUD overlays drawn after `gl-shader-draw!`.
+
+```scheme
+(canvas-on-draw! canvas draw-frame)
+
+; Export button handler
+(make-button "Save PNG…"
+  (lambda ()
+    (let ((path (file-save-dialog "Save PNG" "Images (*.png)")))
+      (when path
+        (canvas-save-png! canvas path)))))
 ```
 
 ## 2D graphics — painter API
@@ -273,9 +292,23 @@ A resizable pane divider. The result is a plain widget and can be passed to `win
 ```scheme
 (make-dropdown items initial-index proc)   ; items: list of strings
                                            ; proc: (lambda (index) ...)
-(dropdown-index     dd)                    ; → selected index
-(dropdown-set-index! dd i)
+(dropdown-index     dd)                    ; → selected index (integer)
+(dropdown-set-index! dd i)                 ; programmatically select item i
 (dropdown-selected  dd)                    ; alias for dropdown-index
+(dropdown-count     dd)                    ; → number of items
+(dropdown-add-item! dd label)              ; append a new item without rebuilding
+(dropdown-clear!    dd)                    ; remove all items
+```
+
+`dropdown-add-item!` appends to an existing dropdown in O(1).  Use it to grow
+a bookmark list or history as the user saves entries:
+
+```scheme
+(define dd (make-dropdown '("Default") 0 navigate-to!))
+
+; Later, when the user saves a new location:
+(dropdown-add-item! dd "My favourite zoom")
+(dropdown-set-index! dd (- (dropdown-count dd) 1))
 ```
 
 ### Radio group

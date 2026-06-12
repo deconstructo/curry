@@ -683,15 +683,18 @@ static curry_val fn_canvas_save_png(int ac, curry_val *av, void *ud) {
     }
     fbo.bind();
 
-    /* QOpenGLPaintDevice renders to the currently bound FBO (ours).
-       Setting DPR so the device reports logical dimensions — the shader
-       then reads devicePixelRatioF() and multiplies to get physical pixels,
-       matching the on-screen paintEvent path exactly. */
+    /* QOpenGLPaintDevice at physical size, no DPR override.
+       setWindow/setViewport maps logical (lw×lh) → physical (pw×ph), which
+       puts scale(dpr,dpr) into state->matrix.  This gives the glyph cache the
+       full DPR density so QPainter-drawn text is sharp.  setDevicePixelRatio
+       would move the scale out of state->matrix (into the projection), leaving
+       state->matrix as identity and glyphs rasterized at 1× → blurry text. */
     QOpenGLPaintDevice paint_dev(pw, ph);
-    paint_dev.setDevicePixelRatio(dpr);
     QPainter painter(&paint_dev);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setWindow(0, 0, lw, lh);
+    painter.setViewport(0, 0, pw, ph);
 
     curry_val argv[3] = {
         ptr_to_val("qt6-painter", &painter),
@@ -1376,11 +1379,25 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
     QPainter  *painter = val_to_painter(av[1]);
     curry_val  uniforms = (argc > 2) ? av[2] : V_NIL;
 
+    /* Effective DPR: on-screen the device carries it; off-screen (PNG save path)
+       the painter carries it via setWindow/setViewport scale.  Take whichever
+       is larger so both paths work without special-casing. */
     qreal dpr = painter->device()->devicePixelRatioF();
-    int pw = qRound(painter->device()->width()  * dpr);
-    int ph = qRound(painter->device()->height() * dpr);
+    {
+        qreal s = qMax(qAbs(painter->worldTransform().m11()),
+                       qAbs(painter->worldTransform().m22()));
+        if (s > dpr) dpr = s;
+    }
 
     painter->beginNativePainting();
+
+    /* Physical pixel size: read the viewport Qt set in beginNativePainting().
+       This avoids double-scaling when painter->device() is QOpenGLPaintDevice,
+       which stores physical pixels in width() unlike QWidget (logical). */
+    QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
+    GLint vp[4];
+    gl->glGetIntegerv(GL_VIEWPORT, vp);
+    int pw = vp[2], ph = vp[3];
 
     if (!sh->prog && !sh->failed) {
         sh->prog = new QOpenGLShaderProgram();
@@ -1413,7 +1430,6 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
         s_quad_vao->create();
     }
 
-    QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
     gl->glViewport(0, 0, pw, ph);
 
     sh->prog->bind();
@@ -1602,10 +1618,17 @@ static curry_val fn_gl_shader_draw_arrays(int argc, curry_val *av, void *) {
     }
 
     qreal dpr = painter->device()->devicePixelRatioF();
-    int pw = qRound(painter->device()->width()  * dpr);
-    int ph = qRound(painter->device()->height() * dpr);
-
+    {
+        qreal s = qMax(qAbs(painter->worldTransform().m11()),
+                       qAbs(painter->worldTransform().m22()));
+        if (s > dpr) dpr = s;
+    }
     painter->beginNativePainting();
+
+    QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
+    GLint vp[4];
+    gl->glGetIntegerv(GL_VIEWPORT, vp);
+    int pw = vp[2], ph = vp[3];
 
     if (!sh->prog && !sh->failed) {
         sh->prog = new QOpenGLShaderProgram();
@@ -1620,7 +1643,6 @@ static curry_val fn_gl_shader_draw_arrays(int argc, curry_val *av, void *) {
     }
     if (sh->failed || !sh->prog) { painter->endNativePainting(); return curry_void(); }
 
-    QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
     gl->glViewport(0, 0, pw, ph);
 
     sh->prog->bind();
