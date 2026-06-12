@@ -210,6 +210,37 @@ All `gfx-*` procedures take `painter` as the first argument. `painter` is valid 
 (gfx-draw-text! painter x y string)
 ```
 
+`(x, y)` is the **left baseline** of the first character (QPainter convention).
+To centre or right-align text, measure it first with the metrics functions below.
+
+### Text metrics
+
+All four procedures query the painter's **current font** (set by `gfx-set-font!`).
+Coordinates are in the same logical pixel space as drawing operations.
+
+```scheme
+(gfx-text-width   painter string)  ; → flonum: advance width of string
+(gfx-font-ascent  painter)         ; → flonum: distance from baseline to top of cap-height
+(gfx-font-descent painter)         ; → flonum: distance from baseline down to descenders
+(gfx-font-height  painter)         ; → flonum: full line height (ascent + descent + leading)
+```
+
+Common usage patterns:
+
+```scheme
+; Horizontally centred text
+(let ((tw (gfx-text-width painter label)))
+  (gfx-draw-text! painter (- (/ w 2) (/ tw 2)) y label))
+
+; Right-aligned text with 8px margin
+(let ((tw (gfx-text-width painter label)))
+  (gfx-draw-text! painter (- w tw 8) y label))
+
+; Vertically centred text within a box of height bh
+(let ((mid-y (+ box-y (/ bh 2) (/ (gfx-font-ascent painter) 2))))
+  (gfx-draw-text! painter x mid-y label))
+```
+
 ### Batch drawing (efficient for many primitives)
 
 ```scheme
@@ -239,10 +270,24 @@ All widgets are opaque values that can be placed in layout containers.
 (make-hbox)                        ; horizontal row
 (make-group-box title)             ; titled group with vbox inside
 (make-tabs)                        ; tab widget
+(make-scroll-area)                 ; vertically scrollable vbox panel
 
 (box-add!    sidebar-or-vbox widget)
-(layout-add! vbox-or-hbox widget)
+(layout-add! vbox-or-hbox-or-scroll-area widget)
 (tabs-add!   tabs widget label)
+```
+
+`make-scroll-area` creates a `QScrollArea` wrapping an inner vertical box.
+`layout-add!` works on it identically to `make-vbox` — the scroll area is
+transparent at the API level.  Use it for sidebars or panels that may grow
+beyond the window height:
+
+```scheme
+(define panel (make-scroll-area))
+(layout-add! panel widget-a)
+(layout-add! panel widget-b)
+; ... add many widgets; a scrollbar appears automatically if they overflow
+(window-set-central-widget! win panel)
 ```
 
 ### Splitter

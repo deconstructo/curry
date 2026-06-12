@@ -757,6 +757,23 @@ static curry_val fn_layout_add(int ac, curry_val *av, void *ud) {
     curry_error("qt6: not a vbox or hbox widget");
 }
 
+/* Scrollable container — wraps a vbox in a QScrollArea so that long panels
+   gain a vertical scrollbar automatically.  layout-add! treats it identically
+   to make-vbox: the _qt6_vl property points at the inner vbox. */
+static curry_val fn_make_scroll_area(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;(void)av;
+    auto *sa  = new QScrollArea();
+    auto *sbw = new QWidget();
+    auto *sbl = new QVBoxLayout(sbw);
+    sbl->setContentsMargins(0,0,0,0); sbl->setSpacing(4); sbl->setAlignment(Qt::AlignTop);
+    sa->setWidget(sbw);
+    sa->setWidgetResizable(true);
+    sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sa->setFrameShape(QFrame::NoFrame);
+    sa->setProperty("_qt6_vl", QVariant((quintptr)(void*)sbl));
+    return widget_to_val(sa);
+}
+
 /* Tabbed widget */
 static curry_val fn_make_tabs(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;(void)av;
@@ -2087,6 +2104,22 @@ static curry_val fn_gfx_draw_text(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
+/* Text metrics — all measure using the painter's current font.
+   Coordinates match the logical (DPR-independent) coordinate space. */
+static curry_val fn_gfx_text_width(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac;
+    if (!curry_is_string(av[1]))
+        curry_error("gfx-text-width: arg 2 must be a string");
+    return curry_make_float(
+        QFontMetricsF(P->font()).horizontalAdvance(QString::fromUtf8(curry_string(av[1]))));
+}
+static curry_val fn_gfx_font_ascent(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac; return curry_make_float(QFontMetricsF(P->font()).ascent()); }
+static curry_val fn_gfx_font_descent(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac; return curry_make_float(QFontMetricsF(P->font()).descent()); }
+static curry_val fn_gfx_font_height(int ac, curry_val *av, void *ud) {
+    (void)ud;(void)ac; return curry_make_float(QFontMetricsF(P->font()).height()); }
+
 /* Blit a raw RGBA image from a bytevector */
 static curry_val fn_gfx_draw_image(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
@@ -2500,6 +2533,7 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "make-tabs",            fn_make_tabs,           0, 0, NULL);
     curry_define_fn(vm, "tabs-add!",            fn_tabs_add,            3, 3, NULL);
     curry_define_fn(vm, "make-group-box",       fn_make_group_box,      1, 1, NULL);
+    curry_define_fn(vm, "make-scroll-area",     fn_make_scroll_area,    0, 0, NULL);
     curry_define_fn(vm, "make-splitter",        fn_make_splitter,       0, 1, NULL);
     curry_define_fn(vm, "splitter-add!",        fn_splitter_add,        2, 2, NULL);
     curry_define_fn(vm, "splitter-set-sizes!",  fn_splitter_set_sizes,  2, 2, NULL);
@@ -2601,6 +2635,10 @@ extern "C" void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "gfx-fill-polygon!",    fn_gfx_fill_polygon,    2, 2, NULL);
     curry_define_fn(vm, "gfx-draw-polygon!",    fn_gfx_draw_polygon,    2, 2, NULL);
     curry_define_fn(vm, "gfx-draw-text!",       fn_gfx_draw_text,       4, 4, NULL);
+    curry_define_fn(vm, "gfx-text-width",       fn_gfx_text_width,      2, 2, NULL);
+    curry_define_fn(vm, "gfx-font-ascent",      fn_gfx_font_ascent,     1, 1, NULL);
+    curry_define_fn(vm, "gfx-font-descent",     fn_gfx_font_descent,    1, 1, NULL);
+    curry_define_fn(vm, "gfx-font-height",      fn_gfx_font_height,     1, 1, NULL);
     curry_define_fn(vm, "gfx-draw-image!",      fn_gfx_draw_image,      8, 8, NULL);
     curry_define_fn(vm, "gfx-draw-points!",     fn_gfx_draw_points,     8, 8, NULL);
     curry_define_fn(vm, "gfx-draw-lines!",      fn_gfx_draw_lines,      7, 7, NULL);
