@@ -100,6 +100,7 @@ Creates a `QMainWindow` with no preset central widget. Use `window-set-central-w
 
 (window-on-close!   win proc)    ; proc called (no args) when ✕ is clicked
 (window-on-key!     win proc)    ; proc: (lambda (key-string modifiers) ...)
+(window-on-key-up!  win proc)    ; proc: (lambda (key-string modifiers) ...)  fired on key release
 (window-on-realize! win proc)    ; proc called once after the window first appears
 
 (window-canvas     win)          ; → canvas  (make-window only)
@@ -124,6 +125,9 @@ Modifier list: `'(shift ctrl alt meta)` (subset present).
                                  ;   event: 'press | 'release | 'move | 'double-press
                                  ;   button: 'left | 'right | 'middle | 'none
 (canvas-on-scroll! canvas proc)  ; proc: (lambda (dx dy x y mods) ...)
+(canvas-on-key!    canvas proc)  ; proc: (lambda (key-string modifiers) ...)
+(canvas-on-key-up! canvas proc)  ; proc: (lambda (key-string modifiers) ...)  fired on key release
+(canvas-on-resize! canvas proc)  ; proc: (lambda (w h) ...)  fired when canvas is resized
 (canvas-redraw!    canvas)       ; schedule a repaint
 
 (qt-painter-width  painter)      ; → number
@@ -133,6 +137,38 @@ Modifier list: `'(shift ctrl alt meta)` (subset present).
 (qt-gpu?           canvas)       ; → #t if OpenGL initialised successfully
 
 (canvas-save-png!  canvas path)  ; → #t on success, #f on failure
+```
+
+### Mouse capture (first-person / drag mode)
+
+Grab the mouse to receive unlimited relative motion without the cursor leaving the window. The cursor is hidden while grabbed. Use this for first-person camera controls or precision drag gestures.
+
+```scheme
+(canvas-grab-mouse!     canvas)      ; hide cursor and start capturing relative motion
+(canvas-release-mouse!  canvas)      ; release capture and restore cursor
+(canvas-mouse-grabbed?  canvas)      ; → #t if currently grabbed
+
+(canvas-on-grab-move!   canvas proc) ; proc: (lambda (dx dy) ...)  fired while grabbed
+```
+
+`dx`/`dy` are pixel deltas since the last event. The mouse position is warped back to the canvas centre on each event so motion is unbounded.
+
+```scheme
+; First-person camera pattern
+(canvas-on-mouse! canvas
+  (lambda (event btn x y mods)
+    (when (eq? event 'press)
+      (canvas-grab-mouse! canvas))))
+
+(canvas-on-key! canvas
+  (lambda (key mods)
+    (when (equal? key "Escape")
+      (canvas-release-mouse! canvas))))
+
+(canvas-on-grab-move! canvas
+  (lambda (dx dy)
+    (set! *yaw*   (+ *yaw*   (* dx 0.003)))
+    (set! *pitch* (+ *pitch* (* dy 0.003)))))
 ```
 
 `canvas-save-png!` renders the canvas into an off-screen FBO at full device
@@ -152,9 +188,28 @@ on screen including any QPainter HUD overlays drawn after `gl-shader-draw!`.
         (canvas-save-png! canvas path)))))
 ```
 
+### Headless painter
+
+Create a `QPainter` backed by an off-screen pixmap — no window, no event loop, no GL context required. Useful for text-metric queries and server-side image generation.
+
+```scheme
+(call-with-painter w h proc)   ; proc: (lambda (painter) ...)
+```
+
+`painter` is valid only for the dynamic extent of `proc`. The pixmap is discarded afterwards; use `gfx-draw-image!` or write to a file if you need the pixels.
+
+```scheme
+; Query text metrics without a window
+(define w #f)
+(call-with-painter 1 1
+  (lambda (p)
+    (gfx-set-font! p "Helvetica" 14)
+    (set! w (gfx-text-width p "Hello"))))
+```
+
 ## 2D graphics — painter API
 
-All `gfx-*` procedures take `painter` as the first argument. `painter` is valid only inside a `canvas-on-draw!` callback. Color components are floats 0.0–1.0.
+All `gfx-*` procedures take `painter` as the first argument. `painter` is valid only inside a `canvas-on-draw!` or `call-with-painter` callback. Color components are floats 0.0–1.0.
 
 ### Color and pen
 
@@ -452,6 +507,13 @@ Both procedures return a path string on confirmation, or `#f` if the user cancel
 (file-save-dialog title filter)
 ```
 
+## Clipboard
+
+```scheme
+(clipboard-text)           ; → string, or #f if clipboard is empty
+(clipboard-set-text! text) ; place text on the system clipboard
+```
+
 ## Timer
 
 ```scheme
@@ -459,6 +521,27 @@ Both procedures return a path string on confirmation, or `#f` if the user cancel
 (timer-start!        t)
 (timer-stop!         t)
 (timer-set-interval! t ms)
+```
+
+### Delta-time timer
+
+`make-timer/dt` is like `make-timer` but passes the elapsed milliseconds since the last tick to the callback. Use it for frame-rate-independent physics and animation.
+
+```scheme
+(define t (make-timer/dt interval-ms proc))  ; proc: (lambda (dt-ms) ...)
+(timer/dt-start! t)
+(timer/dt-stop!  t)
+```
+
+`dt-ms` is an exact integer (milliseconds). The clock is reset on `timer/dt-start!` so the first callback receives the time from start, not from construction.
+
+```scheme
+(define t
+  (make-timer/dt 16
+    (lambda (dt)
+      (set! *pos* (+ *pos* (* *vel* (/ dt 1000.0))))
+      (canvas-redraw! canvas))))
+(timer/dt-start! t)
 ```
 
 ## GLSL shaders and textures
@@ -488,6 +571,7 @@ Uniform value dispatch by Scheme type:
 | 2-element list | `vec2` |
 | 3-element list | `vec3` |
 | 4-element list | `vec4` |
+| 16-element vector | `mat4` (column-major) |
 | `gl-texture` handle | `sampler2D` (bound to next available texture unit) |
 | flonum / other numeric | `float` |
 
@@ -538,6 +622,83 @@ void main() {
     (gl-shader-draw! prog painter
       (list (cons "u_center" (list 0.0 0.0))
             (cons "u_zoom"   200.0)))))
+```
+
+### GL vertex buffers and custom draw calls
+
+For geometry-heavy rendering (point clouds, meshes, particle systems) use explicit vertex buffers and `gl-shader-draw-arrays!` to issue a `glDrawArrays` call with custom vertex attributes.
+
+```scheme
+; Create a buffer from a Scheme vector or f64vector of floats
+(make-gl-buffer data)          ; → gl-buffer
+
+; Replace the data (upload happens lazily on next draw)
+(gl-buffer-update! buf data)
+
+; Draw arrays — runs inside canvas-on-draw! callback
+(gl-shader-draw-arrays! prog painter vertex-count primitive)
+(gl-shader-draw-arrays! prog painter vertex-count primitive uniforms)
+(gl-shader-draw-arrays! prog painter vertex-count primitive uniforms attribs)
+```
+
+`primitive` is one of `'points`, `'lines`, `'line-strip`, `'triangles`, `'triangle-strip`, `'triangle-fan`.
+
+`attribs` is an alist mapping GLSL attribute names to buffer specs:
+
+```scheme
+; ((attr-name . (buffer n-components stride-floats offset-floats)) ...)
+(list (cons "a_pos"   (list pos-buf   2 2 0))
+      (cons "a_color" (list color-buf 4 4 0)))
+```
+
+`stride-floats` and `offset-floats` are in units of floats (not bytes). If omitted, stride defaults to `n-components` and offset to `0`.
+
+```scheme
+; Example: draw 1000 coloured points
+(define positions (make-gl-buffer (make-vector 2000 0.0)))  ; (x y) × 1000
+(define colors    (make-gl-buffer (make-vector 4000 1.0)))  ; (r g b a) × 1000
+
+(canvas-on-draw! canvas
+  (lambda (painter w h)
+    (gl-shader-draw-arrays! prog painter 1000 'points
+      (list (cons "u_size" 4.0))
+      (list (cons "a_pos"   (list positions 2 2 0))
+            (cons "a_color" (list colors    4 4 0))))))
+```
+
+### GL framebuffers (render-to-texture)
+
+Render into an off-screen RGBA texture and then use the result as a `sampler2D` in a second pass. Useful for post-processing, blurs, and multi-pass effects.
+
+```scheme
+(make-gl-framebuffer w h)          ; → gl-framebuffer  (RGBA + depth/stencil)
+(gl-framebuffer-texture fbo)       ; → gl-texture  (the colour attachment)
+(gl-framebuffer-resize! fbo w h)   ; resize on canvas resize; call from canvas-on-resize!
+
+; Render prog's fullscreen quad into fbo instead of the screen
+(gl-shader-to! prog fbo painter)
+(gl-shader-to! prog fbo painter uniforms)
+```
+
+`gl-shader-to!` accepts the same uniforms alist as `gl-shader-draw!`. `u_resolution` is set to the FBO dimensions (not the canvas), and `u_dpr` is always `1.0`.
+
+```scheme
+; Two-pass blur example
+(define fbo  (make-gl-framebuffer 800 600))
+(define pass1 (make-gl-shader horiz-blur-src))
+(define pass2 (make-gl-shader vert-blur-src))
+
+(canvas-on-resize! canvas
+  (lambda (w h)
+    (gl-framebuffer-resize! fbo w h)))
+
+(canvas-on-draw! canvas
+  (lambda (painter w h)
+    ; First pass: render scene into FBO
+    (gl-shader-to! pass1 fbo painter scene-uniforms)
+    ; Second pass: sample FBO texture to screen
+    (gl-shader-draw! pass2 painter
+      (list (cons "u_tex" (gl-framebuffer-texture fbo))))))
 ```
 
 ## 4D projection math
