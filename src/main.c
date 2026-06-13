@@ -341,8 +341,10 @@ static void usage(const char *argv0) {
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
         "  -v                Print version\n"
-        "  --gc BACKEND      GC backend: boehm (default), semispace, or generational\n"
-        "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n",
+        "  --gc BACKEND           GC backend: boehm (default), semispace, generational\n"
+        "  --gc-max-heap N        Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
+        "  --gc-nursery-size N    Nursery size for generational GC (default 2M)\n"
+        "  --gc-tenured-size N    Tenured region size for generational GC (default 128M)\n",
         argv0);
 }
 
@@ -359,21 +361,29 @@ static size_t parse_size(const char *s) {
 /* ---- Entry point ---- */
 
 int main(int argc, char **argv) {
-    /* Pre-scan for --gc before any GC initialisation. */
-    for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--gc") == 0) {
-            if (strcmp(argv[i+1], "semispace") == 0) {
-                gc_semispace_init(0);   /* 0 = use default space size */
-                gc_ops = &gc_ss_ops;
-            } else if (strcmp(argv[i+1], "generational") == 0) {
-                gc_gen_init(0, 0);      /* 0 = use default nursery/tenured sizes */
-            } else if (strcmp(argv[i+1], "boehm") != 0) {
-                fprintf(stderr, "curry: unknown GC backend '%s' "
-                        "(use 'boehm', 'semispace', or 'generational')\n",
-                        argv[i+1]);
-                return 1;
-            }
-            break;
+    /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
+    {
+        const char *gc_backend    = "boehm";
+        size_t      nursery_bytes = 0;   /* 0 = default */
+        size_t      tenured_bytes = 0;   /* 0 = default */
+        for (int i = 1; i < argc; i++) {
+            if (i + 1 < argc && strcmp(argv[i], "--gc") == 0)
+                gc_backend = argv[++i];
+            else if (i + 1 < argc && strcmp(argv[i], "--gc-nursery-size") == 0)
+                nursery_bytes = parse_size(argv[++i]);
+            else if (i + 1 < argc && strcmp(argv[i], "--gc-tenured-size") == 0)
+                tenured_bytes = parse_size(argv[++i]);
+        }
+        if (strcmp(gc_backend, "semispace") == 0) {
+            gc_semispace_init(0);
+            gc_ops = &gc_ss_ops;
+        } else if (strcmp(gc_backend, "generational") == 0) {
+            gc_gen_init(nursery_bytes, tenured_bytes);
+        } else if (strcmp(gc_backend, "boehm") != 0) {
+            fprintf(stderr, "curry: unknown GC backend '%s' "
+                    "(use 'boehm', 'semispace', or 'generational')\n",
+                    gc_backend);
+            return 1;
         }
     }
     init_all();
@@ -387,8 +397,10 @@ int main(int argc, char **argv) {
     static const struct option long_opts[] = {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
-        { "gc-max-heap",  required_argument, NULL, 'G' },
-        { "gc",           required_argument, NULL, 0   },  /* handled pre-scan */
+        { "gc-max-heap",       required_argument, NULL, 'G' },
+        { "gc",                required_argument, NULL, 0   },  /* pre-scanned */
+        { "gc-nursery-size",   required_argument, NULL, 0   },  /* pre-scanned */
+        { "gc-tenured-size",   required_argument, NULL, 0   },  /* pre-scanned */
         { NULL, 0, NULL, 0 }
     };
 

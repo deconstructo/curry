@@ -7,6 +7,7 @@
 #include "stm.h"
 #include "channel.h"
 #include "gc_semispace.h"
+#include "gc_generational.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -1355,7 +1356,25 @@ static val_t prim_gc_collect(int ac, val_t *av, void *ud) {
 static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
     extern gc_ops_t gc_ss_ops;
-    if (gc_ops == &gc_ss_ops) {
+    if (gc_ops == &gc_gen_ops) {
+        GcGenStats s = gc_gen_stats();
+        val_t lst = V_NIL;
+#define CONS_STAT(key, val) do { \
+    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
+    p->cdr = lst; \
+    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
+    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
+    p->car = vptr(kv); lst = vptr(p); } while(0)
+        CONS_STAT("pinned-count",    s.pinned_count);
+        CONS_STAT("tenured-capacity",s.tenured_capacity);
+        CONS_STAT("tenured-used",    s.tenured_used);
+        CONS_STAT("nursery-used",    s.nursery_used);
+        CONS_STAT("nursery-bytes",   s.nursery_bytes);
+        CONS_STAT("major-collections", s.major_collections);
+        CONS_STAT("minor-collections", s.minor_collections);
+#undef CONS_STAT
+        return lst;
+    } else if (gc_ops == &gc_ss_ops) {
         GcSsStats s = gc_ss_stats();
         /* Return alist: ((collections . N) (bytes-allocated . N) ...) */
         val_t lst = V_NIL;
