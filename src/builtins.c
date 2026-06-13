@@ -222,8 +222,20 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 static val_t prim_cons(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_cons(av[0], av[1]); }
 static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"car: not a pair"); return vcar(av[0]); }
 static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"cdr: not a pair"); return vcdr(av[0]); }
-static val_t prim_set_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair"); as_pair(av[0])->car=av[1]; return V_VOID; }
-static val_t prim_set_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-cdr!: not a pair"); as_pair(av[0])->cdr=av[1]; return V_VOID; }
+static val_t prim_set_car(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair");
+    Pair *p = as_pair(av[0]);
+    GC_WRITE_BARRIER(p, &p->car, av[1]);
+    return V_VOID;
+}
+static val_t prim_set_cdr(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-cdr!: not a pair");
+    Pair *p = as_pair(av[0]);
+    GC_WRITE_BARRIER(p, &p->cdr, av[1]);
+    return V_VOID;
+}
 #define CXR1(n,a)     static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(av[0]);}
 #define CXR2(n,a,b)   static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(av[0]));}
 #define CXR3(n,a,b,c) static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(c(av[0])));}
@@ -804,7 +816,7 @@ static val_t prim_vector_set(int ac, val_t *av, void *ud) {
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= v->len)
         scm_raise(V_FALSE, "vector-set!: index %ld out of bounds (length %u)", (long)i, v->len);
-    v->data[i] = av[2];
+    GC_WRITE_BARRIER(v, &v->data[i], av[2]);
     return V_VOID;
 }
 static val_t prim_vector_to_list(int ac, val_t *av, void *ud) {
@@ -1525,10 +1537,11 @@ static val_t prim_force(int ac, val_t *av, void *ud) {
         if (vis_promise(r)) {
             Promise *q = as_promise(r);
             if (q->state == PROMISE_FORCED) r = q->val;
-            else { p->val = q->val; return apply(p->val, V_NIL); }
+            else { GC_WRITE_BARRIER(p, &p->val, q->val); return apply(p->val, V_NIL); }
         }
     }
-    p->val = r; p->state = PROMISE_FORCED;
+    GC_WRITE_BARRIER(p, &p->val, r);
+    p->state = PROMISE_FORCED;
     return p->val;
 }
 static val_t prim_make_promise(int ac, val_t *av, void *ud) {

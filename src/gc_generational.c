@@ -751,25 +751,47 @@ static void gen_minor_collect(void) {
         }
     }
 
-    /* 6. External root scanners */
+    /* 6. Scan tenured objects with external val_t arrays.
+     * T_ENV (EnvFrame.vals/syms), T_SET (Set.buckets), and T_HASHTABLE
+     * (Hashtable.keys/vals) store their value arrays in Boehm-managed memory
+     * outside the tenured region, so the conservative card scan (step 5) cannot
+     * reach them.  Walk all pre-existing tenured objects and call gen_scan_object
+     * on every such type so their external arrays are updated. */
+    {
+        uint8_t *p = gc_gen_tenured_base;
+        while (p < tenured_before) {
+            Hdr *h = (Hdr *)p;
+            size_t sz = obj_size(h);
+            switch (h->type) {
+            case T_ENV:
+            case T_SET:
+            case T_HASHTABLE:
+                gen_scan_object(p);
+                break;
+            default:
+                break;
+            }
+            p += sz;
+        }
+    }
+
+    /* 7. External root scanners */
     for (int i = 0; i < ext_scanner_count; i++)
         ext_scanners[i]();
 
-    /* 7. Re-drain after pinned/card/ext passes */
+    /* 8. Re-drain after all non-Cheney passes */
     GEN_DRAIN_LOOP();
 
-    /* 8. Clear dirty cards (all tenured objects now have updated pointers) */
+    /* 9. Clear dirty cards (all tenured objects now have updated pointers) */
     memset(gc_gen_card_table, 0, card_count);
 
-    /* 9. Zero and reset the nursery */
+    /* 10. Zero and reset the nursery */
     memset(nursery_base, 0, nursery_size);
     nursery_top = nursery_base;
 
     if (gen_hook) gen_hook();
 
     gc_gen_start_the_world();
-
-    (void)tenured_before;
 }
 
 /* ── Evacuation stub for ext scanners (milestone 4) ─────────────────────── */

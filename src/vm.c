@@ -287,8 +287,8 @@ static Upvalue *open_upvalue(val_t *slot) {
    Called on scope exit (OP_CLOSE_UP) and frame pop (RETURN / TAIL_CALL). */
 void vm_close_upvalues(val_t *last) {
     while (vm->open_upvalues && vm->open_upvalues->location >= last) {
-        Upvalue *up  = vm->open_upvalues;
-        up->closed   = *up->location;
+        Upvalue *up = vm->open_upvalues;
+        GC_WRITE_BARRIER(up, &up->closed, *up->location);
         up->location = &up->closed;
         vm->open_upvalues = up->next;
     }
