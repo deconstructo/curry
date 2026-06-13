@@ -66,6 +66,18 @@ void gc_gen_start_the_world(void);
  * Installed as a pthread_cleanup_push handler by actor_thread(). */
 void gc_gen_unregister_thread(void);
 
+/* ── VM registry ──────────────────────────────────────────────────────────── */
+
+/*
+ * Register/unregister a VM instance with the GC.  The minor collector
+ * traces all registered VMs for root scanning.
+ * vm_init() calls gc_gen_register_vm(); vm_free() calls gc_gen_unregister_vm().
+ * These are no-ops when gc_gen_active == 0.
+ */
+struct VM;  /* forward declaration */
+void gc_gen_register_vm(struct VM *v);
+void gc_gen_unregister_vm(struct VM *v);
+
 /* ── Tenured allocator ────────────────────────────────────────────────────── */
 
 /*

@@ -185,6 +185,7 @@
 #include "value.h"
 #include "object.h"
 #include "gc.h"
+#include "gc_generational.h"
 #include "numeric.h"
 #include "symbol.h"
 #include "env.h"
@@ -214,10 +215,16 @@ void vm_init(void) {
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
+    if (gc_gen_active)
+        gc_gen_register_vm(vm);
 }
 
 void vm_free(void) {
-    if (vm) GC_FREE(vm);
+    if (vm) {
+        if (gc_gen_active)
+            gc_gen_unregister_vm(vm);
+        GC_FREE(vm);
+    }
     vm = NULL;
 }
 

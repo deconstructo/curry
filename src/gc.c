@@ -99,8 +99,6 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
      */
     /* Check for a pending STW pause before allocating. */
     gc_gen_safepoint();
-    if (__builtin_expect(gc_nursery_refill_fn != NULL, 0))
-        return gc_nursery_refill_fn(n, has_ptrs);
     return gc_ops->alloc(n, has_ptrs);
 }
 

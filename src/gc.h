@@ -170,11 +170,6 @@ extern _Thread_local GcNursery gc_nursery;
  */
 void *gc_nursery_refill(size_t n, bool has_ptrs);
 
-/*
- * Pluggable nursery-exhaustion hook.  NULL until the generational backend
- * installs its minor-collection function here (milestone 4).
- */
-extern void *(*gc_nursery_refill_fn)(size_t n, bool has_ptrs);
 
 /* C-linkage allocator entry points used by C++ callers (avoids C++ TLS
  * wrapper generation for gc_nursery which is incompatible with the C TLS ABI
