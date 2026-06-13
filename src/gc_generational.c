@@ -351,21 +351,37 @@ static size_t obj_size(const Hdr *h) {
 static uint8_t *gen_to_scan;
 
 /*
- * gen_evacuate — evacuate a nursery val_t to tenured space.
- * Leaves a GC_FORWARDED marker in the nursery copy.
- * Non-nursery val_t values are returned unchanged.
+ * During a major (full) collection the old tenured region is additional
+ * from-space.  extra_from_base..extra_from_limit covers it; both are NULL
+ * during minor collections so the check is branch-predicted-not-taken.
+ */
+static uint8_t *extra_from_base  = NULL;
+static uint8_t *extra_from_limit = NULL;
+
+static inline bool in_from_space(const void *p) {
+    if (in_nursery(p)) return true;
+    return extra_from_base &&
+           (const uint8_t *)p >= extra_from_base &&
+           (const uint8_t *)p <  extra_from_limit;
+}
+
+/*
+ * gen_evacuate — evacuate a from-space val_t to tenured space.
+ * From-space is: nursery (always) + old tenured during major GC.
+ * Leaves a GC_FORWARDED marker in the source copy.
+ * Values not in from-space are returned unchanged.
  */
 static val_t gen_evacuate(val_t v) {
     if (!vis_ptr(v)) return v;
     Hdr *h = (Hdr *)((uintptr_t)v & ~(uintptr_t)3);
-    if (!in_nursery(h)) return v;
+    if (!in_from_space(h)) return v;
     if (h->type == GC_FORWARDED)
         return vptr((void *)h->fwd);
 
     size_t sz = obj_size(h);
     void *new_obj = gen_tenured_alloc(sz);
     if (!new_obj) {
-        /* Tenured full — leave in nursery; major GC will handle it (milestone 6). */
+        /* Tenured full during minor GC — major GC will handle it. */
         return v;
     }
     memcpy(new_obj, h, sz);
@@ -387,11 +403,11 @@ static val_t gen_evacuate(val_t v) {
     return vptr(new_obj);
 }
 
-/* Evacuate a raw C pointer to a nursery object (no tag bits). */
+/* Evacuate a raw C pointer to a from-space object (no tag bits). */
 static void *gen_evacuate_obj(void *p) {
     if (!p) return p;
     Hdr *h = (Hdr *)p;
-    if (!in_nursery(h)) return p;
+    if (!in_from_space(h)) return p;
     if (h->type == GC_FORWARDED) return (void *)h->fwd;
 
     size_t sz = obj_size(h);
@@ -794,13 +810,124 @@ static void gen_minor_collect(void) {
     gc_gen_start_the_world();
 }
 
-/* ── Evacuation stub for ext scanners (milestone 4) ─────────────────────── */
+/* ── Evacuation stub for ext scanners ────────────────────────────────────── */
 
 uintptr_t gc_gen_evac(uintptr_t v) {
     return (uintptr_t)gen_evacuate((val_t)v);
 }
 
+/* ── Major collection ────────────────────────────────────────────────────── */
+
+/*
+ * Full Cheney collection over both nursery and tenured generations.
+ *
+ * Algorithm:
+ *   1. STW pause.
+ *   2. Allocate a fresh tenured to-space.
+ *   3. Set extra_from_* to cover the OLD tenured region so gen_evacuate
+ *      treats it as from-space alongside the nursery.
+ *   4. Run the same root + Cheney + pinned + card + ext-scanner passes as
+ *      minor_collect — gen_evacuate now moves objects from BOTH nursery and
+ *      old tenured into the fresh to-space.
+ *   5. Remove the old tenured region from Boehm's root set and munmap it.
+ *   6. Register the new region; rebuild the card table; reset the nursery.
+ *   7. Clear extra_from_* and resume.
+ *
+ * The card table scan (step 4, inner) is skipped: the old tenured region is
+ * the from-space, so its cards are meaningless — all old-tenured objects are
+ * evacuated by the tenured walk and Cheney drain.
+ */
+static void gen_major_collect(void) {
+    gc_gen_stop_the_world();
+    stat_major++;
+
+    /* 1. Allocate new tenured to-space */
+    void *new_mem = mmap(NULL, tenured_cap,
+                         PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (new_mem == MAP_FAILED) {
+        perror("[gc_gen] major GC: mmap new tenured");
+        abort();
+    }
+
+    /* 2. Save old tenured region; swap to new space */
+    uint8_t *old_base  = gc_gen_tenured_base;
+    uint8_t *old_limit = gc_gen_tenured_limit;
+
+    extra_from_base  = old_base;
+    extra_from_limit = old_limit;
+
+    /* gen_tenured_alloc uses gc_gen_tenured_base/limit and tenured_top. */
+    pthread_mutex_lock(&tenured_lock);
+    gc_gen_tenured_base  = (uint8_t *)new_mem;
+    gc_gen_tenured_limit = (uint8_t *)new_mem + tenured_cap;
+    tenured_top          = (uint8_t *)new_mem;
+    pthread_mutex_unlock(&tenured_lock);
+
+    gen_to_scan = gc_gen_tenured_base;
+
+    /* 3. Evacuate registered val_t* roots */
+    for (size_t i = 0; i < gen_roots_count; i++) {
+        if (gen_roots[i])
+            *gen_roots[i] = gen_evacuate(*gen_roots[i]);
+    }
+
+    /* 4. Evacuate all VM stacks and frame closures */
+    for (int vi = 0; vi < gen_vm_count; vi++) {
+        VM *v = gen_vms[vi];
+        if (!v) continue;
+        for (val_t *slot = v->stack; slot < v->sp; slot++)
+            *slot = gen_evacuate(*slot);
+        for (int fi = 0; fi < v->frame_count; fi++)
+            v->frames[fi].closure = (BcClosure *)gen_evacuate_obj(v->frames[fi].closure);
+        v->open_upvalues = (Upvalue *)gen_evacuate_obj(v->open_upvalues);
+        for (int hi = 0; hi < v->handler_count; hi++)
+            v->handler_stack[hi].open_upvalues =
+                (Upvalue *)gen_evacuate_obj(v->handler_stack[hi].open_upvalues);
+    }
+
+    /* 5. First Cheney drain */
+    GEN_DRAIN_LOOP();
+
+    /* 6. Scan pinned objects for cross-heap refs */
+    for (size_t i = 0; i < pinned_count; i++) {
+        if (pinned_slots[i]) gen_scan_pinned(pinned_slots[i]);
+    }
+
+    /* 7. External root scanners */
+    for (int i = 0; i < ext_scanner_count; i++)
+        ext_scanners[i]();
+
+    /* 8. Re-drain */
+    GEN_DRAIN_LOOP();
+
+    /* 9. Clear card table (rebuilt for new tenured region). */
+    memset(gc_gen_card_table, 0, card_count);
+
+    /* 10. Reset nursery */
+    memset(nursery_base, 0, nursery_size);
+    nursery_top = nursery_base;
+
+    /* 11. Swap Boehm roots: remove old tenured, register new */
+    GC_remove_roots((char *)old_base, (char *)old_limit);
+    GC_add_roots((char *)gc_gen_tenured_base, (char *)gc_gen_tenured_limit);
+
+    /* 12. Free old tenured region */
+    munmap(old_base, (size_t)(old_limit - old_base));
+
+    /* 13. Clear major-GC from-space markers */
+    extra_from_base  = NULL;
+    extra_from_limit = NULL;
+
+    if (gen_hook) gen_hook();
+
+    gc_gen_start_the_world();
+}
+
 /* ── gc_ops_t backend ────────────────────────────────────────────────────── */
+
+/* Tenured fill percentage at which a major GC is triggered. */
+#define GEN_MAJOR_TRIGGER_PCT GC_TENURED_FILL_PCT
 
 static void *gen_alloc(size_t n, bool has_ptrs) {
     n = (n + 7u) & ~7u;
@@ -809,9 +936,14 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
         pthread_mutex_unlock(&nursery_lock);
         /* Nursery full: trigger minor GC (also handles STW). */
         gen_minor_collect();
+
+        /* After minor GC, check if tenured is above the fill threshold. */
+        if (gen_tenured_used() * 100 / tenured_cap >= GEN_MAJOR_TRIGGER_PCT)
+            gen_major_collect();
+
         pthread_mutex_lock(&nursery_lock);
         if (nursery_top + n > nursery_base + nursery_size) {
-            /* Still no room — fall through to Boehm (tenured overflow, milestone 6). */
+            /* Nursery still full after GC — object too large; use Boehm. */
             pthread_mutex_unlock(&nursery_lock);
             return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
         }
@@ -834,7 +966,11 @@ static void *gen_alloc_pinned(size_t n, bool has_ptrs) {
 static void *gen_alloc_raw_pinned(size_t n, bool has_ptrs) {
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
-static void gen_collect(void) { gen_minor_collect(); }
+static void gen_collect(void) {
+    gen_minor_collect();
+    if (gen_tenured_used() * 100 / tenured_cap >= GEN_MAJOR_TRIGGER_PCT)
+        gen_major_collect();
+}
 static void gen_register_thread(void) {
     struct GC_stack_base sb;
     GC_get_stack_base(&sb);
