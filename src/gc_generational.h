@@ -51,7 +51,20 @@
  * collection, then clears gc_stop_world and broadcasts the condvar.
  */
 extern volatile int gc_stop_world;
+
+/* Check for a pending STW pause; park if gc_stop_world is set. */
 void gc_gen_safepoint(void);
+
+/* Acquire the STW pause (set flag, wait for all threads to park).
+ * The caller holds the internal STW mutex on return. */
+void gc_gen_stop_the_world(void);
+
+/* Release the STW pause; wake all parked threads. */
+void gc_gen_start_the_world(void);
+
+/* Call at thread exit to decrement the registered-thread count.
+ * Installed as a pthread_cleanup_push handler by actor_thread(). */
+void gc_gen_unregister_thread(void);
 
 /* ── Tenured allocator ────────────────────────────────────────────────────── */
 

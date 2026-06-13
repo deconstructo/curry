@@ -21,6 +21,7 @@
 
 #define GC_THREADS
 #include "gc.h"
+#include "gc_generational.h"
 #include <gc/gc.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +97,8 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
      * installed to trigger a minor collection, reset the per-thread nursery,
      * and return the newly allocated object from the fresh nursery.
      */
+    /* Check for a pending STW pause before allocating. */
+    gc_gen_safepoint();
     if (__builtin_expect(gc_nursery_refill_fn != NULL, 0))
         return gc_nursery_refill_fn(n, has_ptrs);
     return gc_ops->alloc(n, has_ptrs);

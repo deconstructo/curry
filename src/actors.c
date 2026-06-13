@@ -2,6 +2,7 @@
 #include "object.h"
 #include "eval.h"
 #include "gc.h"
+#include "gc_generational.h"
 #include "vm.h"
 #include "port.h"
 #include "symbol.h"
@@ -71,6 +72,8 @@ static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
     val_t msg = m->q.msgs[m->q.head];
     m->q.head = (m->q.head + 1) % m->q.cap;
     pthread_mutex_unlock(&m->mutex);
+    /* Safepoint: check for a pending GC STW pause before returning to mutator. */
+    gc_gen_safepoint();
     return msg;
 }
 
@@ -82,9 +85,15 @@ typedef struct {
     val_t  args;
 } ActorStart;
 
+static void actor_thread_cleanup(void *arg) {
+    (void)arg;
+    gc_gen_unregister_thread();
+}
+
 static void *actor_thread(void *arg) {
     ActorStart *start = (ActorStart *)arg;
     gc_register_thread();
+    pthread_cleanup_push(actor_thread_cleanup, NULL);
     vm_init();
 
     Actor *self = start->actor;
@@ -116,6 +125,7 @@ static void *actor_thread(void *arg) {
     /* Notify linked actors with {'EXIT, self, reason} */
     /* (simplified: just mark dead; full linking requires a registry) */
 
+    pthread_cleanup_pop(1);  /* execute gc_gen_unregister_thread */
     return NULL;
 }
 

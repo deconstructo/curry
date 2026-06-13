@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 
 /* ── Write barrier globals (extern in gc.h) ──────────────────────────────── */
 
@@ -85,14 +86,64 @@ size_t gen_tenured_used(void) {
  */
 void *(*gc_nursery_refill_fn)(size_t n, bool has_ptrs) = NULL;
 
-/* ── Safepoint ────────────────────────────────────────────────────────────── */
+/* ── Safepoint — polling STW ─────────────────────────────────────────────── */
 
 volatile int gc_stop_world = 0;
 
+/* Count of threads registered with the generational backend. */
+static _Atomic int gc_gen_thread_count  = 0;
+/* Count of threads currently parked at a safepoint. */
+static _Atomic int gc_gen_parked_count  = 0;
+
+/* Mutex held during STW pause; threads block on gc_stw_resume when parked. */
+static pthread_mutex_t gc_stw_mutex  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  gc_stw_resume = PTHREAD_COND_INITIALIZER; /* broadcast to wake */
+static pthread_cond_t  gc_stw_parked = PTHREAD_COND_INITIALIZER; /* signal when parked */
+
+/*
+ * gc_gen_safepoint — called at yield points (nursery refill, actor receive).
+ *
+ * If gc_stop_world is set, the calling thread parks until the collector
+ * broadcasts gc_stw_resume.  Fast path: the flag is false (predicted).
+ */
 void gc_gen_safepoint(void) {
-    /* Milestone 3: threads park here during STW pause.
-     * For now this is a no-op — all collections run only on the allocating
-     * thread, which is safe in the single-threaded phase of development. */
+    if (!gc_stop_world) return;
+    pthread_mutex_lock(&gc_stw_mutex);
+    if (gc_stop_world) {
+        atomic_fetch_add(&gc_gen_parked_count, 1);
+        pthread_cond_signal(&gc_stw_parked);
+        while (gc_stop_world)
+            pthread_cond_wait(&gc_stw_resume, &gc_stw_mutex);
+        atomic_fetch_sub(&gc_gen_parked_count, 1);
+    }
+    pthread_mutex_unlock(&gc_stw_mutex);
+}
+
+/*
+ * gc_gen_stop_the_world — set gc_stop_world, wait for all other threads.
+ *
+ * Called by the minor/major collector before touching heap memory.
+ * The calling thread holds gc_stw_mutex on return.
+ * Must be paired with gc_gen_start_the_world().
+ */
+void gc_gen_stop_the_world(void) {
+    pthread_mutex_lock(&gc_stw_mutex);
+    gc_stop_world = 1;
+    int others = atomic_load(&gc_gen_thread_count) - 1;
+    while (atomic_load(&gc_gen_parked_count) < others)
+        pthread_cond_wait(&gc_stw_parked, &gc_stw_mutex);
+    /* All other registered threads are now parked. */
+}
+
+/*
+ * gc_gen_start_the_world — clear gc_stop_world and wake all parked threads.
+ *
+ * Must be called after gc_gen_stop_the_world(); releases gc_stw_mutex.
+ */
+void gc_gen_start_the_world(void) {
+    gc_stop_world = 0;
+    pthread_cond_broadcast(&gc_stw_resume);
+    pthread_mutex_unlock(&gc_stw_mutex);
 }
 
 /* ── External root scanners ──────────────────────────────────────────────── */
@@ -153,6 +204,13 @@ static void gen_register_thread(void) {
     struct GC_stack_base sb;
     GC_get_stack_base(&sb);
     GC_register_my_thread(&sb);
+    atomic_fetch_add(&gc_gen_thread_count, 1);
+}
+
+/* Call at thread exit (before pthread cleanup) to decrement the thread count.
+ * Installed as a pthread_cleanup_push handler by actor_thread() in actors.c. */
+void gc_gen_unregister_thread(void) {
+    atomic_fetch_sub(&gc_gen_thread_count, 1);
 }
 static void gen_pin(void *obj)              { (void)obj; }
 static void gen_unpin(void *obj)            { (void)obj; }
@@ -210,6 +268,9 @@ void gc_gen_init(size_t nursery_bytes, size_t tenured_bytes) {
 
     gc_ops        = &gc_gen_ops;
     gc_gen_active = 1;
+
+    /* Count the main thread — it calls gc_gen_init() but not gc_register_thread(). */
+    atomic_fetch_add(&gc_gen_thread_count, 1);
 }
 
 /* ── Stats ────────────────────────────────────────────────────────────────── */
