@@ -94,10 +94,59 @@ typedef struct gc_ops {
     /* Optional: GC heap statistics. */
     size_t (*heap_size)(void);
     size_t (*free_bytes)(void);
+
+    /*
+     * Mark the card containing obj dirty (generational GC only).
+     * Called by the GC_WRITE_BARRIER macro on the slow path.
+     * No-op under Boehm and semispace — implementations may be NULL.
+     * obj must be a raw heap pointer (not a val_t).
+     */
+    void (*write_barrier)(void *obj);
 } gc_ops_t;
 
 /* Active GC backend.  Set during gc_init(); never NULL after that. */
 extern gc_ops_t *gc_ops;
+
+/* ── Write barrier (generational GC) ─────────────────────────────────────── */
+
+/*
+ * Fast-path write barrier globals.  Set by gc_gen_init(); zero/NULL under
+ * Boehm and semispace.  Declared here so GC_WRITE_BARRIER can be inlined at
+ * every mutation site without including gc_generational.h.
+ */
+extern volatile int  gc_gen_active;       /* 1 when generational GC is live  */
+extern uint8_t      *gc_gen_tenured_base; /* start of tenured region         */
+extern uint8_t      *gc_gen_tenured_limit;/* one past end of tenured region  */
+extern uint8_t      *gc_gen_card_table;   /* one dirty byte per 512-byte card */
+
+#define GC_CARD_SHIFT 9u /* 1 card = 2^9 = 512 bytes */
+
+/*
+ * GC_WRITE_BARRIER(obj, field_ptr, new_val)
+ *
+ * Must wrap every store of a val_t pointer into a heap-allocated object.
+ * Under Boehm and semispace (gc_gen_active == 0) this compiles to a single
+ * store — the branch is predicted-not-taken and eliminated by the optimiser.
+ *
+ * obj:       raw C pointer to the object being mutated (not a val_t)
+ * field_ptr: pointer to the val_t field (val_t *)
+ * new_val:   the value being stored
+ *
+ * When the generational backend is active and obj is in tenured space, the
+ * 512-byte card containing obj is marked dirty so the next minor collection
+ * scans it for old→young pointers (the remembered set).
+ */
+#define GC_WRITE_BARRIER(obj, field_ptr, new_val)                              \
+    do {                                                                        \
+        if (__builtin_expect(gc_gen_active, 0)) {                              \
+            uint8_t *_gcwb_o = (uint8_t *)(void *)(obj);                      \
+            if (_gcwb_o >= gc_gen_tenured_base &&                              \
+                    _gcwb_o < gc_gen_tenured_limit)                            \
+                gc_gen_card_table[(_gcwb_o - gc_gen_tenured_base)              \
+                                  >> GC_CARD_SHIFT] = 1;                       \
+        }                                                                       \
+        *(field_ptr) = (new_val);                                               \
+    } while (0)
 
 /* ── Per-thread nursery ───────────────────────────────────────────────────── */
 

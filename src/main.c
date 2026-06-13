@@ -1,5 +1,6 @@
 #include "gc.h"
 #include "gc_semispace.h"
+#include "gc_generational.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -340,7 +341,7 @@ static void usage(const char *argv0) {
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
         "  -v                Print version\n"
-        "  --gc BACKEND      GC backend: boehm (default) or semispace\n"
+        "  --gc BACKEND      GC backend: boehm (default), semispace, or generational\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n",
         argv0);
 }
@@ -364,8 +365,11 @@ int main(int argc, char **argv) {
             if (strcmp(argv[i+1], "semispace") == 0) {
                 gc_semispace_init(0);   /* 0 = use default space size */
                 gc_ops = &gc_ss_ops;
+            } else if (strcmp(argv[i+1], "generational") == 0) {
+                gc_gen_init(0, 0);      /* 0 = use default nursery/tenured sizes */
             } else if (strcmp(argv[i+1], "boehm") != 0) {
-                fprintf(stderr, "curry: unknown GC backend '%s' (use 'boehm' or 'semispace')\n",
+                fprintf(stderr, "curry: unknown GC backend '%s' "
+                        "(use 'boehm', 'semispace', or 'generational')\n",
                         argv[i+1]);
                 return 1;
             }
