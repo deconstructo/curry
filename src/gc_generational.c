@@ -2,11 +2,14 @@
  * gc_generational.c — Two-generation GC for Curry Scheme.
  *
  * Milestone 1: card table, write barrier globals, tenured space mmap.
- *   Collection is not yet implemented; allocation falls through to Boehm.
+ * Milestone 2: GC age bits (object.h), tenured bump-pointer allocator,
+ *   nursery refill hook (gc_nursery_refill_fn).
  *
- * Milestone 2 (next): tenured bump-pointer allocator, nursery refill minor GC.
- * Milestone 3 (next): polling safepoints for STW pause.
- * Milestone 4 (next): full minor collection with remembered set.
+ * Pending milestones:
+ *   3 — polling safepoints (gc_stop_world / gc_gen_safepoint)
+ *   4 — minor collection: Cheney nursery→tenured + remembered set
+ *   5 — write barrier instrumentation at all mutation sites
+ *   6 — major collection trigger (tenured > GC_TENURED_FILL_PCT)
  *
  * See gc_generational.h for the design overview.
  */
@@ -15,7 +18,6 @@
 #include "gc_generational.h"
 #include "gc.h"
 #include "object.h"
-#include "value.h"
 #include <gc/gc.h>
 #include <sys/mman.h>
 #include <pthread.h>
@@ -34,19 +36,64 @@ uint8_t      *gc_gen_card_table    = NULL;
 
 /* ── Tenured space ───────────────────────────────────────────────────────── */
 
-static uint8_t *tenured_top  = NULL;
-static size_t   tenured_cap  = 0;
-static size_t   card_count   = 0;
-/* tenured_lock protects the bump pointer against concurrent promotion;
- * wired in at milestone 3 (minor collection). */
-static pthread_mutex_t tenured_lock __attribute__((unused)) = PTHREAD_MUTEX_INITIALIZER;
+static uint8_t        *tenured_top  = NULL;
+static size_t          tenured_cap  = 0;
+static size_t          card_count   = 0;
+static pthread_mutex_t tenured_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * gen_tenured_alloc — thread-safe bump-pointer allocation in Gen1.
+ *
+ * Called from minor collection (milestone 4) when promoting a live nursery
+ * object to Gen1.  Returns NULL when tenured space is full; the caller must
+ * then trigger a major collection before retrying.
+ *
+ * Objects allocated here are marked GC_AGE_GEN1 in their Hdr.flags by the
+ * minor collector after copying.
+ */
+void *gen_tenured_alloc(size_t n) {
+    n = (n + 7u) & ~7u;  /* 8-byte align */
+    pthread_mutex_lock(&tenured_lock);
+    uint8_t *p = tenured_top;
+    if (p + n > gc_gen_tenured_limit) {
+        pthread_mutex_unlock(&tenured_lock);
+        return NULL;  /* tenured full — caller triggers major GC */
+    }
+    tenured_top += n;
+    pthread_mutex_unlock(&tenured_lock);
+    return p;
+}
+
+/* Current tenured usage in bytes (safe to call without the lock for stats). */
+size_t gen_tenured_used(void) {
+    return tenured_top ? (size_t)(tenured_top - gc_gen_tenured_base) : 0;
+}
+
+/* ── Nursery refill hook ─────────────────────────────────────────────────── */
+
+/*
+ * gc_nursery_refill_fn — pluggable slow path for nursery exhaustion.
+ *
+ * Set by the generational backend in gc_gen_init().  Called by
+ * gc_nursery_refill() in gc.c when the per-thread nursery bump pointer
+ * reaches its limit.
+ *
+ * NULL (the default) means "fall through to gc_ops->alloc()" — the Boehm
+ * and semispace behaviours.  Milestone 4 installs a function here that
+ * triggers a minor collection, resets the nursery, and returns the
+ * newly-allocated object from the fresh nursery.
+ */
+void *(*gc_nursery_refill_fn)(size_t n, bool has_ptrs) = NULL;
 
 /* ── Safepoint ────────────────────────────────────────────────────────────── */
 
 volatile int gc_stop_world = 0;
 
-/* Implemented in milestone 3. */
-void gc_gen_safepoint(void) { /* TODO: parking lot for STW pause */ }
+void gc_gen_safepoint(void) {
+    /* Milestone 3: threads park here during STW pause.
+     * For now this is a no-op — all collections run only on the allocating
+     * thread, which is safe in the single-threaded phase of development. */
+}
 
 /* ── External root scanners ──────────────────────────────────────────────── */
 
@@ -70,31 +117,38 @@ static void (*gen_hook)(void) = NULL;
 
 void gc_gen_set_hook(void (*hook)(void)) { gen_hook = hook; }
 
-/* ── Evacuation stub (implemented in milestone 4) ────────────────────────── */
+void gc_gen_bump_minor(void) { stat_minor++; if (gen_hook) gen_hook(); }
+void gc_gen_bump_major(void) { stat_major++; if (gen_hook) gen_hook(); }
+
+/* ── Evacuation (implemented in milestone 4) ─────────────────────────────── */
 
 uintptr_t gc_gen_evac(uintptr_t v) { return v; }
 
-/* ── Boehm fall-through backend (milestones 1–3) ────────────────────────── */
+/* ── gc_ops_t backend (Boehm fall-through until milestone 4) ─────────────── */
 /*
- * Until nursery and tenured allocators are wired in (milestones 2–4),
- * allocation goes straight through Boehm.  The nursery fast path remains
- * disabled (top == limit == NULL), so every alloc hits gc_nursery_refill()
- * which calls gc_ops->alloc — i.e., gen_alloc() below.
+ * Until minor/major collection are wired in, all allocation goes through
+ * Boehm.  The nursery fast path remains disabled (gc_nursery.top == NULL).
+ * This changes in milestone 4 when gc_nursery_refill_fn is installed and
+ * gen_register_thread() allocates a per-thread nursery slab.
  */
 
 static void *gen_alloc(size_t n, bool has_ptrs) {
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
 static void *gen_alloc_pinned(size_t n, bool has_ptrs) {
-    stat_pinned++;
-    return gen_alloc(n, has_ptrs);
+    void *p = has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
+    if (p) {
+        stat_pinned++;
+        /* Mark pinned so the minor collector skips it. */
+        if (has_ptrs)
+            hdr_set_age((Hdr *)p, GC_AGE_PINNED >> GC_AGE_SHIFT);
+    }
+    return p;
 }
 static void *gen_alloc_raw_pinned(size_t n, bool has_ptrs) {
-    return gen_alloc(n, has_ptrs);
+    return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
-static void gen_collect(void) {
-    GC_gcollect();
-}
+static void gen_collect(void) { GC_gcollect(); }
 static void gen_register_thread(void) {
     struct GC_stack_base sb;
     GC_get_stack_base(&sb);
@@ -104,14 +158,12 @@ static void gen_pin(void *obj)              { (void)obj; }
 static void gen_unpin(void *obj)            { (void)obj; }
 static void gen_register_root(void *slot)   { (void)slot; }
 static void gen_unregister_root(void *slot) { (void)slot; }
-static void gen_write_barrier(void *obj)    { (void)obj; }   /* fast path in macro */
+static void gen_write_barrier(void *obj)    { (void)obj; }  /* fast path in macro */
 static size_t gen_heap_size(void) {
-    size_t tu = (size_t)(tenured_top ? tenured_top - gc_gen_tenured_base : 0);
-    return (size_t)GC_get_heap_size() + tu;
+    return (size_t)GC_get_heap_size() + gen_tenured_used();
 }
 static size_t gen_free_bytes(void) {
-    size_t tu = (size_t)(tenured_top ? tenured_top - gc_gen_tenured_base : 0);
-    return (size_t)GC_get_free_bytes() + (tenured_cap - tu);
+    return (size_t)GC_get_free_bytes() + (tenured_cap - gen_tenured_used());
 }
 
 gc_ops_t gc_gen_ops = {
@@ -156,7 +208,7 @@ void gc_gen_init(size_t nursery_bytes, size_t tenured_bytes) {
         abort();
     }
 
-    gc_ops       = &gc_gen_ops;
+    gc_ops        = &gc_gen_ops;
     gc_gen_active = 1;
 }
 
@@ -164,13 +216,12 @@ void gc_gen_init(size_t nursery_bytes, size_t tenured_bytes) {
 
 GcGenStats gc_gen_stats(void) {
     size_t nu = gc_nursery.top ? (size_t)(gc_nursery.top - gc_nursery.base) : 0;
-    size_t tu = tenured_top   ? (size_t)(tenured_top - gc_gen_tenured_base) : 0;
     return (GcGenStats){
         .minor_collections = stat_minor,
         .major_collections = stat_major,
         .nursery_bytes     = cfg_nursery_bytes,
         .nursery_used      = nu,
-        .tenured_used      = tu,
+        .tenured_used      = gen_tenured_used(),
         .tenured_capacity  = tenured_cap,
         .pinned_count      = stat_pinned,
     };

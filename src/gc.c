@@ -85,20 +85,19 @@ _Thread_local GcNursery gc_nursery = { NULL, NULL, NULL };
  */
 void *gc_nursery_refill(size_t n, bool has_ptrs) {
     /*
-     * Boehm backend: the nursery slab is disabled.
+     * Under Boehm and semispace: the nursery is permanently exhausted
+     * (top == limit == NULL).  Packing multiple Scheme objects into one
+     * Boehm-allocated slab is unsafe because Boehm tracks the atomic/pointer
+     * distinction and finaliser registration per individual allocation, not
+     * per interior offset.  Every allocation therefore hits this refill path
+     * and goes straight to gc_ops->alloc().
      *
-     * Interior pointers into a single GC_MALLOC slab are not individually
-     * tracked by Boehm — finalisers can only be registered on the start of
-     * an allocation, and the atomic/non-atomic distinction applies per-object.
-     * Packing multiple Scheme objects into one slab is therefore unsafe under
-     * Boehm; each object must be its own GC_MALLOC call.
-     *
-     * The nursery stays permanently exhausted (top == limit == NULL) so every
-     * allocation hits this refill path and goes straight to gc_ops->alloc.
-     * The slab mechanism becomes active when a precise generational GC backend
-     * is installed — at that point objects within the slab are individually
-     * understood by the collector, and the fast bump-pointer path becomes real.
+     * Under the generational backend (milestone 4+): gc_nursery_refill_fn is
+     * installed to trigger a minor collection, reset the per-thread nursery,
+     * and return the newly allocated object from the fresh nursery.
      */
+    if (__builtin_expect(gc_nursery_refill_fn != NULL, 0))
+        return gc_nursery_refill_fn(n, has_ptrs);
     return gc_ops->alloc(n, has_ptrs);
 }
 

@@ -104,6 +104,26 @@ typedef struct {
 #define vis_forwarded(v) (vis_ptr(v) && ((Hdr *)(uintptr_t)(v))->type == GC_FORWARDED)
 #define hdr_fwd(v)       (((Hdr *)(uintptr_t)(v))->fwd)
 
+/*
+ * GC age bits — top 2 bits of Hdr.flags, reserved across all object types.
+ * Type-specific flags must use bits 0–29 only.
+ *
+ *   00 = Gen0 (nursery) — newly allocated, not yet collected
+ *   01 = survived one minor GC
+ *   10 = Gen1 (tenured) — promoted; lives in the tenured bump-pointer region
+ *   11 = pinned — never moved; lives in Boehm-managed memory
+ */
+#define GC_AGE_SHIFT  30u
+#define GC_AGE_MASK   (3u << GC_AGE_SHIFT)
+#define GC_AGE_GEN0   (0u << GC_AGE_SHIFT)
+#define GC_AGE_GEN0_1 (1u << GC_AGE_SHIFT)  /* survived 1 minor GC */
+#define GC_AGE_GEN1   (2u << GC_AGE_SHIFT)  /* tenured */
+#define GC_AGE_PINNED (3u << GC_AGE_SHIFT)  /* pinned / Boehm-managed */
+
+#define hdr_age(h)         (((h)->flags & GC_AGE_MASK) >> GC_AGE_SHIFT)
+#define hdr_set_age(h, a)  ((h)->flags = ((h)->flags & ~GC_AGE_MASK) | \
+                            (((uint32_t)(a) << GC_AGE_SHIFT) & GC_AGE_MASK))
+
 /* Get the type of a heap value (0 if not a heap pointer) */
 static inline uint32_t vtype(val_t v) {
     if (!vis_ptr(v)) return 0;

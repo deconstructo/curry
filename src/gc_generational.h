@@ -53,6 +53,21 @@
 extern volatile int gc_stop_world;
 void gc_gen_safepoint(void);
 
+/* ── Tenured allocator ────────────────────────────────────────────────────── */
+
+/*
+ * Thread-safe bump-pointer allocation in Gen1 (tenured space).
+ * Called by the minor collector when promoting a live nursery object.
+ * Returns NULL if tenured space is full (caller must trigger major GC).
+ * Callers must set GC_AGE_GEN1 in the object's Hdr.flags after copying.
+ */
+void  *gen_tenured_alloc(size_t n);
+size_t gen_tenured_used(void);
+
+/* Increment collection counters and invoke the on-collection hook. */
+void gc_gen_bump_minor(void);
+void gc_gen_bump_major(void);
+
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
 /*

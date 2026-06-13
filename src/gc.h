@@ -160,10 +160,21 @@ typedef struct {
 extern _Thread_local GcNursery gc_nursery;
 #endif
 
-/* Slow path: called when top + n > limit.  Returns a pointer to n bytes.
- * May trigger a minor collection, refill the nursery, or fall back to
- * gc_ops->alloc for large objects. */
+/*
+ * Slow path: called when top + n > limit.  Returns a pointer to n bytes.
+ *
+ * If gc_nursery_refill_fn is non-NULL (set by the generational backend),
+ * it is called to trigger a minor collection, reset the nursery, and
+ * return the newly allocated object.  Otherwise falls through to
+ * gc_ops->alloc (Boehm / semispace behaviour).
+ */
 void *gc_nursery_refill(size_t n, bool has_ptrs);
+
+/*
+ * Pluggable nursery-exhaustion hook.  NULL until the generational backend
+ * installs its minor-collection function here (milestone 4).
+ */
+extern void *(*gc_nursery_refill_fn)(size_t n, bool has_ptrs);
 
 /* C-linkage allocator entry points used by C++ callers (avoids C++ TLS
  * wrapper generation for gc_nursery which is incompatible with the C TLS ABI
