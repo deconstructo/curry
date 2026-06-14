@@ -40,6 +40,10 @@
 #include <cstdio>
 #include <curry.h>
 #include "eval.h"   /* SCM_PROTECT — catches longjmp-based Scheme exceptions */
+extern "C" {
+#include "gc.h"             /* gc_register_root */
+#include "gc_generational.h" /* gc_gen_active */
+}
 
 /* Wrap every curry_apply at a C++→Scheme boundary.  Any Scheme exception
  * (longjmp) must not escape into Qt's C++ event machinery, as Qt does not
@@ -238,6 +242,22 @@ struct WinState {
     bool           mouse_grabbed;
     QPoint         grab_warp_target; /* set before warping to filter the resulting move event */
 };
+
+/* Register all curry_val callback fields of a WinState as precise GC roots.
+ * Under Boehm this is a no-op; under the generational backend the .so data
+ * segment is not updated by the collector, so s_proc_roots and these fields
+ * must be registered explicitly so nursery closures are forwarded on promotion. */
+static void ws_register_gc_roots(WinState *ws) {
+    gc_register_root(&ws->draw_proc);
+    gc_register_root(&ws->key_proc);
+    gc_register_root(&ws->key_up_proc);
+    gc_register_root(&ws->mouse_proc);
+    gc_register_root(&ws->scroll_proc);
+    gc_register_root(&ws->grab_move_proc);
+    gc_register_root(&ws->realize_proc);
+    gc_register_root(&ws->close_proc);
+    gc_register_root(&ws->resize_proc);
+}
 
 /* Per-slider state — stores mapping from integer tick → float value. */
 struct SliderState {
@@ -528,6 +548,7 @@ static curry_val fn_make_window(int ac, curry_val *av, void *ud) {
     ws->gpu_ok            = false;
     ws->mouse_grabbed     = false;
     ws->grab_warp_target  = QPoint(-1, -1);
+    ws_register_gc_roots(ws);
 
     auto *cwin = new CurryWindow(ws);
     cwin->setWindowTitle(QString::fromUtf8(title));
@@ -2348,6 +2369,7 @@ static curry_val fn_make_plain_window(int ac, curry_val *av, void *ud) {
     ws->gpu_ok            = false;
     ws->mouse_grabbed     = false;
     ws->grab_warp_target  = QPoint(-1, -1);
+    ws_register_gc_roots(ws);
     ws->canvas            = nullptr;
     ws->sidebar_layout    = nullptr;
 
@@ -2510,8 +2532,14 @@ extern "C" void curry_module_init(CurryVM *vm) {
        time after (import (curry qt6)), not just after make-window. */
     ensure_app();
 
-    /* Anchor the proc-roots list on the GC heap so Boehm can trace it */
+    /* Anchor the proc-roots list on the GC heap so Boehm can trace it.
+     * Also register as an explicit GC root for the generational backend:
+     * s_proc_roots lives in the .so data segment which Boehm conservatively
+     * scans, but the generational collector only updates registered roots, so
+     * without this registration it would not update s_proc_roots after
+     * promoting nursery pairs — leaving a stale pointer into zeroed memory. */
     s_proc_roots = curry_nil();
+    gc_register_root(&s_proc_roots);
 
     /* --- Layer 3: Window --- */
     curry_define_fn(vm, "make-window",               fn_make_window,          3, 3, NULL);
