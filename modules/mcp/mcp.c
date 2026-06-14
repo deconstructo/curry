@@ -594,8 +594,8 @@ static curry_val fn_mcp_tool(int ac, curry_val *av, void *ud) {
     Tool *t=&s_tools[s_ntool++];
     strncpy(t->name,curry_string(av[0]),sizeof(t->name)-1);
     strncpy(t->desc,curry_string(av[1]),sizeof(t->desc)-1);
-    t->schema=av[2];
-    t->handler=av[3];
+    t->schema=av[2];  gc_register_root(&t->schema);
+    t->handler=av[3]; gc_register_root(&t->handler);
     return curry_void();
 }
 
@@ -608,7 +608,7 @@ static curry_val fn_mcp_resource(int ac, curry_val *av, void *ud) {
     Resource *r=&s_res[s_nres++];
     strncpy(r->uri, curry_string(av[0]),sizeof(r->uri)-1);
     strncpy(r->desc,curry_string(av[1]),sizeof(r->desc)-1);
-    r->handler=av[2];
+    r->handler=av[2]; gc_register_root(&r->handler);
     return curry_void();
 }
 

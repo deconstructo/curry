@@ -1017,12 +1017,56 @@ static val_t prim_tree_eval(int ac, val_t *av, void *ud) {
 
 static int map_par_threshold = 8;
 
+/*
+ * GC root scanner for parallel jobs.  The elems/results arrays and the
+ * per-chunk WorkItem val_t fields (fn, result, exn) live in Boehm-managed
+ * memory that the generational GC's write barrier cannot track.  We
+ * register this callback with gc_gen_register_ext_scanner once at init
+ * and fill / clear the statics around every parallel dispatch.
+ *
+ * Only one parallel dispatch can be active at a time on the main thread
+ * (pool_is_worker prevents recursion), so a single set of statics suffices.
+ */
+static val_t      par_fn      = V_FALSE;
+static val_t     *par_elems   = NULL;
+static val_t     *par_results = NULL;
+static int        par_n       = 0;
+static WorkItem **par_items   = NULL;
+static int        par_nchunks = 0;
+
+static void par_scan_roots(void) {
+    if (!par_elems && !par_items && !par_results) return;
+    par_fn = (val_t)gc_gen_evac((uintptr_t)par_fn);
+    if (par_elems)
+        for (int i = 0; i < par_n; i++)
+            par_elems[i] = (val_t)gc_gen_evac((uintptr_t)par_elems[i]);
+    if (par_results)
+        for (int i = 0; i < par_n; i++)
+            par_results[i] = (val_t)gc_gen_evac((uintptr_t)par_results[i]);
+    if (par_items)
+        for (int c = 0; c < par_nchunks; c++) {
+            par_items[c]->fn     = (val_t)gc_gen_evac((uintptr_t)par_items[c]->fn);
+            par_items[c]->result = (val_t)gc_gen_evac((uintptr_t)par_items[c]->result);
+            par_items[c]->exn    = (val_t)gc_gen_evac((uintptr_t)par_items[c]->exn);
+        }
+}
+
 /* Shared wait pattern: submit, wait, check errors. */
 #define POOL_WAIT(n_done_var, nchunks_var, done_mutex_var, done_cond_var) \
     do { \
         pthread_mutex_lock(&(done_mutex_var)); \
-        while (atomic_load(&(n_done_var)) < (nchunks_var)) \
+        while (atomic_load(&(n_done_var)) < (nchunks_var)) { \
+            /* Tell STW not to wait for us while we sleep on done_cond. */  \
+            if (gc_gen_active) gc_gen_thread_park(); \
             pthread_cond_wait(&(done_cond_var), &(done_mutex_var)); \
+            /* Release done_mutex BEFORE servicing STW: if a worker has        \
+             * triggered a minor GC, it waits for us via gc_gen_safepoint(),   \
+             * and that worker also needs done_mutex to signal completion.      \
+             * Holding done_mutex here would deadlock. */                       \
+            pthread_mutex_unlock(&(done_mutex_var)); \
+            if (gc_gen_active) gc_gen_thread_unpark(); \
+            pthread_mutex_lock(&(done_mutex_var)); \
+        } \
         pthread_mutex_unlock(&(done_mutex_var)); \
         pthread_mutex_destroy(&(done_mutex_var)); \
         pthread_cond_destroy(&(done_cond_var)); \
@@ -1058,20 +1102,29 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
     val_t *results = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
+    par_fn = proc; par_elems = elems; par_results = results; par_n = n;
+
     atomic_int n_done; atomic_init(&n_done, 0);
     pthread_mutex_t mu; pthread_mutex_init(&mu, NULL);
     pthread_cond_t  cv; pthread_cond_init(&cv,  NULL);
     int nchunks;
-    WorkItem **items = pool_submit(WORK_MAP, proc, elems, results, n,
+    WorkItem **items = pool_submit(WORK_MAP, par_fn, elems, results, n,
                                    &nchunks, &n_done, &mu, &cv);
+    par_items = items; par_nchunks = nchunks;
     POOL_WAIT(n_done, nchunks, mu, cv);
 
+    /* Clear everything except par_results: result list assembly below allocates
+     * pairs, which can trigger a minor GC.  The scanner must keep results[i]
+     * updated until every element has been moved into the Scheme list. */
+    par_elems = NULL; par_items = NULL; par_nchunks = 0;
+
     for (int c = 0; c < nchunks; c++)
-        if (items[c]->error) scm_raise(V_FALSE, "map: error in parallel worker");
+        if (items[c]->error) { par_results = NULL; scm_raise(V_FALSE, "map: error in parallel worker"); }
 
     val_t result = V_NIL;
     for (int i = n - 1; i >= 0; i--)
         result = scm_cons(results[i], result);
+    par_results = NULL;
     return result;
 }
 
@@ -1100,20 +1153,28 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
+    par_fn = fn; par_elems = elems; par_results = NULL; par_n = n;
+
     atomic_int n_done; atomic_init(&n_done, 0);
     pthread_mutex_t mu; pthread_mutex_init(&mu, NULL);
     pthread_cond_t  cv; pthread_cond_init(&cv,  NULL);
     int nchunks;
-    WorkItem **items = pool_submit(WORK_REDUCE, fn, elems, NULL, n,
+    WorkItem **items = pool_submit(WORK_REDUCE, par_fn, elems, NULL, n,
                                    &nchunks, &n_done, &mu, &cv);
+    par_items = items; par_nchunks = nchunks;
     POOL_WAIT(n_done, nchunks, mu, cv);
 
+    /* Keep par_items alive through result combination: apply() can allocate
+     * and trigger GC, which must be able to update items[c]->result. */
+    par_elems = NULL;
+
     for (int c = 0; c < nchunks; c++)
-        if (items[c]->error) scm_raise(V_FALSE, "reduce: error in parallel worker");
+        if (items[c]->error) { par_items = NULL; par_nchunks = 0; scm_raise(V_FALSE, "reduce: error in parallel worker"); }
 
     val_t acc = items[0]->result;
     for (int c = 1; c < nchunks; c++)
-        acc = apply(fn, scm_cons(acc, scm_cons(items[c]->result, V_NIL)));
+        acc = apply(par_fn, scm_cons(acc, scm_cons(items[c]->result, V_NIL)));
+    par_items = NULL; par_nchunks = 0;
     return acc;
 }
 
@@ -1155,13 +1216,18 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
 
+    par_fn = proc; par_elems = elems; par_results = NULL; par_n = n;
+
     atomic_int n_done; atomic_init(&n_done, 0);
     pthread_mutex_t mu; pthread_mutex_init(&mu, NULL);
     pthread_cond_t  cv; pthread_cond_init(&cv,  NULL);
     int nchunks;
-    WorkItem **items = pool_submit(WORK_FOREACH, proc, elems, NULL, n,
+    WorkItem **items = pool_submit(WORK_FOREACH, par_fn, elems, NULL, n,
                                    &nchunks, &n_done, &mu, &cv);
+    par_items = items; par_nchunks = nchunks;
     POOL_WAIT(n_done, nchunks, mu, cv);
+
+    par_elems = NULL; par_items = NULL; par_nchunks = 0;
 
     for (int c = 0; c < nchunks; c++)
         if (items[c]->error) scm_raise(V_FALSE, "for-each/par: error in parallel worker");
@@ -1435,6 +1501,7 @@ static val_t prim_hardware_concurrency(int ac, val_t *av, void *ud) {
 
 void builtins_curry_register(val_t env) {
     pool_init();   /* start the work-stealing thread pool */
+    if (gc_gen_active) gc_gen_register_ext_scanner(par_scan_roots);
 
     /* Surreal Akkadian/cuneiform constants */
     env_define(env, sym_intern_cstr("dāriš"),         SUR_OMEGA);   /* ω: the eternal */

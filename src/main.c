@@ -374,11 +374,11 @@ int main(int argc, char **argv) {
             else if (i + 1 < argc && strcmp(argv[i], "--gc-tenured-size") == 0)
                 tenured_bytes = parse_size(argv[++i]);
         }
-        if (strcmp(gc_backend, "semispace") == 0) {
+        if (strcmp(gc_backend, "generational") == 0) {
+            gc_gen_init(nursery_bytes, tenured_bytes);
+        } else if (strcmp(gc_backend, "semispace") == 0) {
             gc_semispace_init(0);
             gc_ops = &gc_ss_ops;
-        } else if (strcmp(gc_backend, "generational") == 0) {
-            gc_gen_init(nursery_bytes, tenured_bytes);
         } else if (strcmp(gc_backend, "boehm") != 0) {
             fprintf(stderr, "curry: unknown GC backend '%s' "
                     "(use 'boehm', 'semispace', or 'generational')\n",

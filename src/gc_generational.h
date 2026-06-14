@@ -66,6 +66,15 @@ void gc_gen_start_the_world(void);
  * Installed as a pthread_cleanup_push handler by actor_thread(). */
 void gc_gen_unregister_thread(void);
 
+/* Call before blocking on a non-GC condvar (e.g. a work-queue park).
+ * Decrements the thread count so STW does not wait for this thread.
+ * Call gc_gen_thread_unpark() after the condvar returns. */
+void gc_gen_thread_park(void);
+
+/* Call after waking from a non-GC condvar.
+ * Services any pending STW pause, then increments the thread count. */
+void gc_gen_thread_unpark(void);
+
 /* ── VM registry ──────────────────────────────────────────────────────────── */
 
 /*

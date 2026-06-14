@@ -1,5 +1,6 @@
 #include "workpool.h"
 #include "gc.h"
+#include "gc_generational.h"
 #include "vm.h"
 #include "eval.h"
 #include "builtins.h"
@@ -98,19 +99,25 @@ static void execute_item(WorkItem *item) {
     if (setjmp(h.jmp) == 0) {
         switch (item->kind) {
         case WORK_MAP:
-            for (int i = item->start; i < item->end; i++)
+            for (int i = item->start; i < item->end; i++) {
+                if (gc_gen_active) gc_gen_safepoint();
                 item->results[i] = apply(item->fn,
                                          scm_cons(item->elems[i], V_NIL));
+            }
             break;
         case WORK_FOREACH:
-            for (int i = item->start; i < item->end; i++)
+            for (int i = item->start; i < item->end; i++) {
+                if (gc_gen_active) gc_gen_safepoint();
                 apply(item->fn, scm_cons(item->elems[i], V_NIL));
+            }
             break;
         case WORK_REDUCE: {
             val_t acc = item->elems[item->start];
-            for (int i = item->start + 1; i < item->end; i++)
+            for (int i = item->start + 1; i < item->end; i++) {
+                if (gc_gen_active) gc_gen_safepoint();
                 acc = apply(item->fn,
                             scm_cons(acc, scm_cons(item->elems[i], V_NIL)));
+            }
             item->result = acc;
             break;
         }
@@ -161,9 +168,10 @@ static void *worker_loop(void *arg) {
             continue;
         }
 
-        /* Nothing to do — park on the condvar.
+        /* Nothing to do — service any pending GC pause, then park.
          * Re-check under the lock to close the window between "found nothing"
          * and "parked" in which the dispatcher might broadcast and be missed. */
+        if (gc_gen_active) gc_gen_safepoint();
         pthread_mutex_lock(&global_pool->park_mutex);
         item = deque_pop(&global_pool->deques[id]);
         if (!item) item = try_steal(id);
@@ -172,7 +180,11 @@ static void *worker_loop(void *arg) {
             execute_item(item);
         } else {
             atomic_fetch_add(&global_pool->n_parked, 1);
+            /* Tell the generational GC not to wait for us while we sleep. */
+            if (gc_gen_active) gc_gen_thread_park();
             pthread_cond_wait(&global_pool->park_cond, &global_pool->park_mutex);
+            /* Re-register and service any STW pause before doing real work. */
+            if (gc_gen_active) gc_gen_thread_unpark();
             atomic_fetch_sub(&global_pool->n_parked, 1);
             pthread_mutex_unlock(&global_pool->park_mutex);
         }
@@ -184,7 +196,10 @@ void pool_init(void) {
     if (global_pool) return;
 
     int n = pool_hw_concurrency();
-    global_pool = CURRY_NEW(WorkPool);
+    /* WorkPool lives for the process lifetime and is pointed to by the raw C
+     * global `global_pool`.  It must be pinned so the generational GC never
+     * moves it and leaves `global_pool` dangling after a nursery reset. */
+    global_pool = gc_alloc_raw_pinned(sizeof(WorkPool));
     global_pool->n_workers = n;
     global_pool->threads   = gc_alloc_raw_pinned(n * sizeof(pthread_t));
     global_pool->deques    = gc_alloc_raw_pinned(n * sizeof(WSDeque));
@@ -220,7 +235,9 @@ WorkItem **pool_submit(WorkKind kind, val_t fn,
     int pos = 0;
     for (int c = 0; c < nchunks; c++) {
         int sz = (n - pos) / (nchunks - c);
-        WorkItem *item = CURRY_NEW(WorkItem);
+        /* WorkItem is pointed to by a raw C pointer in the deque's buf[].
+         * Pin it so the deque pointer stays valid across nursery resets. */
+        WorkItem *item = gc_alloc_raw_pinned(sizeof(WorkItem));
         *item = (WorkItem){
             .kind       = kind,
             .fn         = fn,

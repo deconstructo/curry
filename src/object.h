@@ -78,6 +78,7 @@ typedef enum {
     T_INTERVAL      = 52,  /* Interval [lo, hi] for certified arithmetic  */
     T_CHUNK         = 53,  /* compiled bytecode chunk (compiler + VM)     */
     T_UPVALUE       = 54,  /* captured variable cell (open or closed)     */
+    T_OBJTYPE_COUNT        /* sentinel — always last; used by GC validity checks */
 } ObjType;
 
 /*
