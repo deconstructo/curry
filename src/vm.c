@@ -278,8 +278,19 @@ static Upvalue *open_upvalue(val_t *slot) {
     n->location = slot;
     n->closed   = V_VOID;
     n->next     = up;
-    if (prev) prev->next = n;
-    else      vm->open_upvalues = n;
+    if (prev) {
+        /* Write barrier: prev may be in tenured space; n is a new nursery
+         * object.  Mark prev's card dirty so the next minor GC updates
+         * prev->next via the conservative card scan. */
+        if (gc_gen_active) {
+            uint8_t *_o = (uint8_t *)(void *)prev;
+            if (_o >= gc_gen_tenured_base && _o < gc_gen_tenured_limit)
+                gc_gen_card_table[(_o - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
+        }
+        prev->next = n;
+    } else {
+        vm->open_upvalues = n;
+    }
     return n;
 }
 
@@ -821,14 +832,34 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci  = READ_U8();
             Chunk *ch   = vunptr(Chunk, CONSTS[ci]);
             BcClosure *cl = vm_make_closure(ch, ch->upval_count);
+            /* Push cl onto the VM stack BEFORE the upvalue loop so the
+             * generational GC can find and update it if open_upvalue()
+             * triggers a minor collection (CURRY_NEW inside open_upvalue
+             * can exhaust the nursery).  Re-read cl from the stack after
+             * each potentially-allocating call. */
+            PUSH(vptr(cl));
             for (int i = 0; i < ch->upval_count; i++) {
                 uint8_t is_local = READ_U8();
                 uint8_t idx      = READ_U8();
-                cl->upvals[i] = is_local
-                    ? open_upvalue(&frame->slots[idx])
-                    : frame->closure->upvals[idx];
+                Upvalue *uv;
+                if (is_local) {
+                    uv = open_upvalue(&frame->slots[idx]);
+                    /* Re-read cl: GC may have promoted it to tenured. */
+                    cl = as_bcclosure(PEEK(0));
+                } else {
+                    uv = frame->closure->upvals[idx];
+                }
+                /* Write barrier: if cl is in tenured space and uv is a
+                 * nursery pointer, mark cl's card dirty so the next minor
+                 * GC's card scan updates cl->upvals[i]. */
+                if (gc_gen_active) {
+                    uint8_t *_o = (uint8_t *)(void *)cl;
+                    if (_o >= gc_gen_tenured_base && _o < gc_gen_tenured_limit)
+                        gc_gen_card_table[(_o - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
+                }
+                cl->upvals[i] = uv;
             }
-            PUSH(vptr(cl));
+            /* cl is already on the stack from the PUSH above. */
             NEXT;
         }
 
