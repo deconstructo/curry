@@ -130,11 +130,16 @@ extern uint8_t      *gc_gen_card_table;   /* one dirty byte per 512-byte card */
  */
 #define GC_WRITE_BARRIER(obj, field_ptr, new_val)                              \
     do {                                                                        \
+        (void)(obj);                                                            \
         if (__builtin_expect(gc_gen_active, 0)) {                              \
-            uint8_t *_gcwb_o = (uint8_t *)(void *)(obj);                      \
-            if (_gcwb_o >= gc_gen_tenured_base &&                              \
-                    _gcwb_o < gc_gen_tenured_limit)                            \
-                gc_gen_card_table[(_gcwb_o - gc_gen_tenured_base)              \
+            /* Mark the card that contains field_ptr, not the object header.  \
+             * For large objects (e.g. big vectors), the mutated element may   \
+             * be in a different 512-byte card than the object header; marking \
+             * the header's card would leave the element unscanned. */         \
+            uint8_t *_gcwb_f = (uint8_t *)(void *)(field_ptr);                \
+            if (_gcwb_f >= gc_gen_tenured_base &&                              \
+                    _gcwb_f < gc_gen_tenured_limit)                            \
+                gc_gen_card_table[(_gcwb_f - gc_gen_tenured_base)              \
                                   >> GC_CARD_SHIFT] = 1;                       \
         }                                                                       \
         *(field_ptr) = (new_val);                                               \

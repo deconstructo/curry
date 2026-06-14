@@ -279,13 +279,12 @@ static Upvalue *open_upvalue(val_t *slot) {
     n->closed   = V_VOID;
     n->next     = up;
     if (prev) {
-        /* Write barrier: prev may be in tenured space; n is a new nursery
-         * object.  Mark prev's card dirty so the next minor GC updates
-         * prev->next via the conservative card scan. */
+        /* Write barrier: mark the card of &prev->next so the card scan
+         * updates this pointer when prev is tenured and n is nursery. */
         if (gc_gen_active) {
-            uint8_t *_o = (uint8_t *)(void *)prev;
-            if (_o >= gc_gen_tenured_base && _o < gc_gen_tenured_limit)
-                gc_gen_card_table[(_o - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
+            uint8_t *_f = (uint8_t *)(void *)&prev->next;
+            if (_f >= gc_gen_tenured_base && _f < gc_gen_tenured_limit)
+                gc_gen_card_table[(_f - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
         }
         prev->next = n;
     } else {
@@ -829,37 +828,38 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
         /* ── Closures ────────────────────────────────────────────────── */
         CASE(OP_CLOSURE) {
-            uint8_t ci  = READ_U8();
-            Chunk *ch   = vunptr(Chunk, CONSTS[ci]);
-            BcClosure *cl = vm_make_closure(ch, ch->upval_count);
-            /* Push cl onto the VM stack BEFORE the upvalue loop so the
-             * generational GC can find and update it if open_upvalue()
-             * triggers a minor collection (CURRY_NEW inside open_upvalue
-             * can exhaust the nursery).  Re-read cl from the stack after
-             * each potentially-allocating call. */
+            uint8_t ci    = READ_U8();
+            int nupvals   = vunptr(Chunk, CONSTS[ci])->upval_count;
+            BcClosure *cl = vm_make_closure(vunptr(Chunk, CONSTS[ci]), nupvals);
+            /* vm_make_closure calls gc_alloc which can trigger a minor GC.
+             * After GC the chunk constant may have moved from nursery to
+             * tenured; re-read it from the updated constants table so that
+             * cl->chunk is never a stale nursery pointer. */
+            cl->chunk = vunptr(Chunk, CONSTS[ci]);
+            /* Push cl BEFORE the upvalue loop so GC can track and update it
+             * if open_upvalue() exhausts the nursery.  Re-read cl from the
+             * stack after each allocating call. */
             PUSH(vptr(cl));
-            for (int i = 0; i < ch->upval_count; i++) {
+            for (int i = 0; i < nupvals; i++) {
                 uint8_t is_local = READ_U8();
                 uint8_t idx      = READ_U8();
                 Upvalue *uv;
                 if (is_local) {
                     uv = open_upvalue(&frame->slots[idx]);
-                    /* Re-read cl: GC may have promoted it to tenured. */
-                    cl = as_bcclosure(PEEK(0));
+                    cl = as_bcclosure(PEEK(0));  /* re-read: GC may have promoted cl */
                 } else {
                     uv = frame->closure->upvals[idx];
                 }
-                /* Write barrier: if cl is in tenured space and uv is a
-                 * nursery pointer, mark cl's card dirty so the next minor
-                 * GC's card scan updates cl->upvals[i]. */
+                /* Write barrier: mark the card containing &cl->upvals[i] so
+                 * the next minor GC's card scan updates this pointer if cl is
+                 * in tenured space and uv is a fresh nursery object. */
                 if (gc_gen_active) {
-                    uint8_t *_o = (uint8_t *)(void *)cl;
-                    if (_o >= gc_gen_tenured_base && _o < gc_gen_tenured_limit)
-                        gc_gen_card_table[(_o - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
+                    uint8_t *_f = (uint8_t *)(void *)&cl->upvals[i];
+                    if (_f >= gc_gen_tenured_base && _f < gc_gen_tenured_limit)
+                        gc_gen_card_table[(_f - gc_gen_tenured_base) >> GC_CARD_SHIFT] = 1;
                 }
                 cl->upvals[i] = uv;
             }
-            /* cl is already on the stack from the PUSH above. */
             NEXT;
         }
 
