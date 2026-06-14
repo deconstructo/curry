@@ -491,7 +491,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
         CASE(OP_STORE_UP) {
             uint8_t i = READ_U8();
-            *frame->closure->upvals[i]->location = POP();
+            Upvalue *_uv = frame->closure->upvals[i];
+            val_t _v = POP();
+            /* Write barrier: when the upvalue is closed, location == &closed.
+             * Without this, set! on a captured variable stored in tenured space
+             * creates an old→young reference invisible to the card-table scan. */
+            GC_WRITE_BARRIER(_uv, _uv->location, _v);
+            *_uv->location = _v;
             NEXT;
         }
 
