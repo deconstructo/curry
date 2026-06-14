@@ -61,21 +61,6 @@ static size_t          nursery_size  = 0;
 static uint8_t        *nursery_top   = NULL;
 static pthread_mutex_t nursery_lock  = PTHREAD_MUTEX_INITIALIZER;
 
-/* Object-start bitmap: 1 bit per 8-byte nursery slot.
- * Set when an object is allocated; cleared when the nursery is reset.
- * Used by the conservative C-stack scan to reject interior-pointer false positives. */
-static uint8_t        *nursery_obj_bitmap = NULL;
-
-static inline void nursery_bitmap_set(const void *obj) {
-    size_t slot = ((const uint8_t *)obj - nursery_base) >> 3;
-    nursery_obj_bitmap[slot >> 3] |= (uint8_t)(1u << (slot & 7));
-}
-
-static inline bool nursery_bitmap_get(const void *obj) {
-    size_t slot = ((const uint8_t *)obj - nursery_base) >> 3;
-    return (nursery_obj_bitmap[slot >> 3] >> (slot & 7)) & 1u;
-}
-
 static inline bool in_nursery(const void *p) {
     return (const uint8_t *)p >= nursery_base &&
            (const uint8_t *)p <  nursery_base + nursery_size;
@@ -243,10 +228,13 @@ void gc_gen_thread_park(void) {
 }
 
 void gc_gen_thread_unpark(void) {
-    /* Caller just woke from a non-GC condvar.  Service any pending STW
-     * pause, then re-register this thread with the STW count. */
-    gc_gen_safepoint();
+    /* Re-register BEFORE calling safepoint so that any STW that starts
+     * between now and the safepoint call correctly waits for this thread.
+     * Order matters: if we safepointed first, a new STW could start in the
+     * window after safepoint exits but before the count increment, and would
+     * proceed without waiting for this (now-running) thread. */
     atomic_fetch_add(&gc_gen_thread_count, 1);
+    gc_gen_safepoint();
 }
 
 /* ── External root scanners ──────────────────────────────────────────────── */
@@ -733,8 +721,6 @@ static void gen_scan_stack_range(void *lo, void *hi) {
         if ((v & 7u) != 0) continue;
         void *raw = (void *)(uintptr_t)v;
         if (!in_nursery(raw)) continue;
-        /* Reject interior pointers: only promote addresses recorded as object starts. */
-        if (!nursery_bitmap_get(raw)) continue;
         /* Reject false positives: a double or integer on the stack may coincidentally
          * match a nursery address.  Valid Hdr.type values are in [1, T_OBJTYPE_COUNT).
          * type==0 means gen_alloc ran but the caller hasn't set the type yet — use
@@ -836,6 +822,7 @@ static void gen_minor_collect(void) {
 
     stat_minor++;
 
+    uint8_t *nursery_hi    = nursery_top;   /* high-water mark before reset */
     uint8_t *tenured_before = tenured_top;
     gen_to_scan = tenured_top;
 
@@ -932,9 +919,8 @@ static void gen_minor_collect(void) {
     /* 9. Clear dirty cards (all tenured objects now have updated pointers) */
     memset(gc_gen_card_table, 0, card_count);
 
-    /* 10. Zero and reset the nursery */
-    memset(nursery_base, 0, nursery_size);
-    memset(nursery_obj_bitmap, 0, (nursery_size >> 3) / 8 + 1);
+    /* 10. Zero and reset the nursery (only the portion that was used). */
+    memset(nursery_base, 0, (size_t)(nursery_hi - nursery_base));
     nursery_top = nursery_base;
 
     if (gen_hook) gen_hook();
@@ -972,6 +958,7 @@ uintptr_t gc_gen_evac(uintptr_t v) {
 static void gen_major_collect(void) {
     gc_gen_stop_the_world();
     stat_major++;
+    uint8_t *nursery_hi = nursery_top;  /* high-water mark before reset */
 
     /* 1. Allocate new tenured to-space */
     void *new_mem = mmap(NULL, tenured_cap,
@@ -1036,9 +1023,8 @@ static void gen_major_collect(void) {
     /* 9. Clear card table (rebuilt for new tenured region). */
     memset(gc_gen_card_table, 0, card_count);
 
-    /* 10. Reset nursery */
-    memset(nursery_base, 0, nursery_size);
-    memset(nursery_obj_bitmap, 0, (nursery_size >> 3) / 8 + 1);
+    /* 10. Reset nursery (only zero the portion that was used). */
+    memset(nursery_base, 0, (size_t)(nursery_hi - nursery_base));
     nursery_top = nursery_base;
 
     /* 11. Swap Boehm roots: remove old tenured, register new */
@@ -1083,7 +1069,6 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
     }
     void *p = nursery_top;
     nursery_top += n;
-    nursery_bitmap_set(p);
     pthread_mutex_unlock(&nursery_lock);
     memset(p, 0, n);
     /* Store allocation size in fwd so obj_size can handle type==0 objects
@@ -1116,7 +1101,6 @@ static void gen_register_thread(void) {
 }
 static void gen_pin(void *obj)   { (void)obj; }
 static void gen_unpin(void *obj) { (void)obj; }
-static void gen_write_barrier(void *obj) { (void)obj; }  /* fast path in macro */
 static size_t gen_heap_size(void) {
     return (size_t)GC_get_heap_size() + gen_tenured_used();
 }
@@ -1140,7 +1124,6 @@ gc_ops_t gc_gen_ops = {
     .unregister_root   = gen_unregister_root_impl,
     .heap_size         = gen_heap_size,
     .free_bytes        = gen_free_bytes,
-    .write_barrier     = gen_write_barrier,
 };
 
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
@@ -1162,11 +1145,6 @@ void gc_gen_init(size_t nursery_bytes, size_t tenured_bytes) {
     nursery_base = (uint8_t *)n;
     nursery_top  = (uint8_t *)n;
     GC_add_roots((char *)n, (char *)n + nursery_bytes);
-
-    /* Object-start bitmap: 1 bit per 8-byte slot = nursery_bytes / 64 bytes */
-    size_t bitmap_bytes = (nursery_bytes >> 3) / 8 + 1;
-    nursery_obj_bitmap = (uint8_t *)calloc(bitmap_bytes, 1);
-    if (!nursery_obj_bitmap) { perror("[gc_gen] nursery bitmap"); abort(); }
 
     /* Tenured region */
     void *t = mmap(NULL, tenured_bytes,

@@ -1119,12 +1119,12 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
     par_elems = NULL; par_items = NULL; par_nchunks = 0;
 
     for (int c = 0; c < nchunks; c++)
-        if (items[c]->error) { par_results = NULL; scm_raise(V_FALSE, "map: error in parallel worker"); }
+        if (items[c]->error) { par_results = NULL; par_fn = V_FALSE; scm_raise(V_FALSE, "map: error in parallel worker"); }
 
     val_t result = V_NIL;
     for (int i = n - 1; i >= 0; i--)
         result = scm_cons(results[i], result);
-    par_results = NULL;
+    par_results = NULL; par_fn = V_FALSE;
     return result;
 }
 
@@ -1169,12 +1169,12 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     par_elems = NULL;
 
     for (int c = 0; c < nchunks; c++)
-        if (items[c]->error) { par_items = NULL; par_nchunks = 0; scm_raise(V_FALSE, "reduce: error in parallel worker"); }
+        if (items[c]->error) { par_items = NULL; par_nchunks = 0; par_fn = V_FALSE; scm_raise(V_FALSE, "reduce: error in parallel worker"); }
 
     val_t acc = items[0]->result;
     for (int c = 1; c < nchunks; c++)
         acc = apply(par_fn, scm_cons(acc, scm_cons(items[c]->result, V_NIL)));
-    par_items = NULL; par_nchunks = 0;
+    par_items = NULL; par_nchunks = 0; par_fn = V_FALSE;
     return acc;
 }
 
@@ -1230,7 +1230,8 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     par_elems = NULL; par_items = NULL; par_nchunks = 0;
 
     for (int c = 0; c < nchunks; c++)
-        if (items[c]->error) scm_raise(V_FALSE, "for-each/par: error in parallel worker");
+        if (items[c]->error) { par_fn = V_FALSE; scm_raise(V_FALSE, "for-each/par: error in parallel worker"); }
+    par_fn = V_FALSE;
     return V_VOID;
 }
 
@@ -1419,60 +1420,43 @@ static val_t prim_gc_collect(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 
+static val_t gc_stat_cons(val_t lst, const char *key, intptr_t v) {
+    Pair *kv = CURRY_NEW(Pair); kv->hdr.type = T_PAIR; kv->hdr.flags = 0;
+    kv->car = sym_intern_cstr(key); kv->cdr = vfix(v);
+    Pair *p  = CURRY_NEW(Pair); p->hdr.type  = T_PAIR; p->hdr.flags  = 0;
+    p->cdr = lst; p->car = vptr(kv);
+    return vptr(p);
+}
+
 static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
     extern gc_ops_t gc_ss_ops;
+    val_t lst = V_NIL;
+#define CS(k,v) lst = gc_stat_cons(lst, k, (intptr_t)(v))
     if (gc_ops == &gc_gen_ops) {
         GcGenStats s = gc_gen_stats();
-        val_t lst = V_NIL;
-#define CONS_STAT(key, val) do { \
-    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
-    p->cdr = lst; \
-    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
-    p->car = vptr(kv); lst = vptr(p); } while(0)
-        CONS_STAT("pinned-count",    s.pinned_count);
-        CONS_STAT("tenured-capacity",s.tenured_capacity);
-        CONS_STAT("tenured-used",    s.tenured_used);
-        CONS_STAT("nursery-used",    s.nursery_used);
-        CONS_STAT("nursery-bytes",   s.nursery_bytes);
-        CONS_STAT("major-collections", s.major_collections);
-        CONS_STAT("minor-collections", s.minor_collections);
-#undef CONS_STAT
-        return lst;
+        CS("pinned-count",      s.pinned_count);
+        CS("tenured-capacity",  s.tenured_capacity);
+        CS("tenured-used",      s.tenured_used);
+        CS("nursery-used",      s.nursery_used);
+        CS("nursery-bytes",     s.nursery_bytes);
+        CS("major-collections", s.major_collections);
+        CS("minor-collections", s.minor_collections);
     } else if (gc_ops == &gc_ss_ops) {
         GcSsStats s = gc_ss_stats();
-        /* Return alist: ((collections . N) (bytes-allocated . N) ...) */
-        val_t lst = V_NIL;
-#define CONS_STAT(key, val) do { \
-    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
-    p->cdr = lst; \
-    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
-    p->car = vptr(kv); lst = vptr(p); } while(0)
-        CONS_STAT("pinned-count",    s.pinned_count);
-        CONS_STAT("space-size",      s.space_size);
-        CONS_STAT("from-used",       s.from_used);
-        CONS_STAT("bytes-survived",  s.bytes_survived);
-        CONS_STAT("bytes-allocated", s.bytes_allocated);
-        CONS_STAT("collections",     s.collections);
-#undef CONS_STAT
-        return lst;
+        CS("pinned-count",    s.pinned_count);
+        CS("space-size",      s.space_size);
+        CS("from-used",       s.from_used);
+        CS("bytes-survived",  s.bytes_survived);
+        CS("bytes-allocated", s.bytes_allocated);
+        CS("collections",     s.collections);
     } else {
-        /* Boehm backend */
-        val_t lst = V_NIL;
-#define CONS_STAT(key, val) do { \
-    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
-    p->cdr = lst; \
-    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
-    p->car = vptr(kv); lst = vptr(p); } while(0)
-        CONS_STAT("free-bytes",  gc_free_bytes());
-        CONS_STAT("heap-size",   gc_heap_size());
-        CONS_STAT("backend",     0);
-#undef CONS_STAT
-        return lst;
+        CS("free-bytes", gc_free_bytes());
+        CS("heap-size",  gc_heap_size());
+        CS("backend",    0);
     }
+#undef CS
+    return lst;
 }
 
 static val_t prim_gc_on_coll(int ac, val_t *av, void *ud) {

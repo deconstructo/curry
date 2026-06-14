@@ -125,6 +125,7 @@ static void *actor_thread(void *arg) {
     /* Notify linked actors with {'EXIT, self, reason} */
     /* (simplified: just mark dead; full linking requires a registry) */
 
+    vm_free();
     pthread_cleanup_pop(1);  /* execute gc_gen_unregister_thread */
     return NULL;
 }

@@ -49,8 +49,6 @@ static void  boehm_register_root(void *slot)   { (void)slot; }
 static void  boehm_unregister_root(void *slot) { (void)slot; }
 static size_t boehm_heap_size(void)  { return (size_t)GC_get_heap_size();  }
 static size_t boehm_free_bytes(void) { return (size_t)GC_get_free_bytes(); }
-static void   boehm_write_barrier(void *obj) { (void)obj; }
-
 static gc_ops_t gc_boehm_ops = {
     .alloc             = boehm_alloc,
     .alloc_pinned      = boehm_alloc_pinned,
@@ -63,7 +61,6 @@ static gc_ops_t gc_boehm_ops = {
     .unregister_root   = boehm_unregister_root,
     .heap_size         = boehm_heap_size,
     .free_bytes        = boehm_free_bytes,
-    .write_barrier     = boehm_write_barrier,
 };
 
 gc_ops_t *gc_ops = &gc_boehm_ops;

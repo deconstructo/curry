@@ -189,6 +189,7 @@ static void *worker_loop(void *arg) {
             pthread_mutex_unlock(&global_pool->park_mutex);
         }
     }
+    vm_free();
     return NULL;
 }
 

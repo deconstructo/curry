@@ -816,8 +816,6 @@ static size_t ss_free_bytes(void) {
     return ss_size - (size_t)(ss_top - ss_from_base());
 }
 
-static void ss_write_barrier(void *obj) { (void)obj; }
-
 gc_ops_t gc_ss_ops = {
     .alloc             = ss_alloc,
     .alloc_pinned      = ss_alloc_pinned,
@@ -830,7 +828,6 @@ gc_ops_t gc_ss_ops = {
     .unregister_root   = ss_unregister_root,
     .heap_size         = ss_heap_size,
     .free_bytes        = ss_free_bytes,
-    .write_barrier     = ss_write_barrier,
 };
 
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */

@@ -94,14 +94,6 @@ typedef struct gc_ops {
     /* Optional: GC heap statistics. */
     size_t (*heap_size)(void);
     size_t (*free_bytes)(void);
-
-    /*
-     * Mark the card containing obj dirty (generational GC only).
-     * Called by the GC_WRITE_BARRIER macro on the slow path.
-     * No-op under Boehm and semispace — implementations may be NULL.
-     * obj must be a raw heap pointer (not a val_t).
-     */
-    void (*write_barrier)(void *obj);
 } gc_ops_t;
 
 /* Active GC backend.  Set during gc_init(); never NULL after that. */
