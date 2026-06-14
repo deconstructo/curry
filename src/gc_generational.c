@@ -129,15 +129,23 @@ static void pinned_add(void *obj) {
 
 /* ── VM registry ─────────────────────────────────────────────────────────── */
 
-#define VM_REG_CAP 64
-static VM     *gen_vms[VM_REG_CAP];
+#define VM_REG_INIT_CAP 64
+static VM    **gen_vms     = NULL;
 static int     gen_vm_count = 0;
+static int     gen_vm_cap   = 0;
 static pthread_mutex_t vm_reg_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void gc_gen_register_vm(VM *v) {
     pthread_mutex_lock(&vm_reg_lock);
-    if (gen_vm_count < VM_REG_CAP)
-        gen_vms[gen_vm_count++] = v;
+    if (gen_vm_count == gen_vm_cap) {
+        int nc = gen_vm_cap ? gen_vm_cap * 2 : VM_REG_INIT_CAP;
+        VM **s = (VM **)GC_MALLOC_UNCOLLECTABLE(nc * sizeof(VM *));
+        if (gen_vm_count) memcpy(s, gen_vms, gen_vm_count * sizeof(VM *));
+        if (gen_vms) GC_FREE(gen_vms);
+        gen_vms   = s;
+        gen_vm_cap = nc;
+    }
+    gen_vms[gen_vm_count++] = v;
     pthread_mutex_unlock(&vm_reg_lock);
 }
 
