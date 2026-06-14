@@ -162,8 +162,22 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 
 static curry_val s_proc_roots = 0;  /* 0 until module_init sets it to nil */
 
-static void keep_alive(curry_val v) {
+/* Allocate a stable heap slot for a Scheme procedure so Qt connect lambdas
+ * can safely hold a pointer to it across GC collections.
+ *
+ * Under Boehm the slot is found conservatively via the lambda's capture.
+ * Under the generational backend gc_register_root ensures the slot is updated
+ * when the procedure is promoted from nursery to tenured space, so lambdas
+ * that capture (curry_val *proc) and call *proc always see the current address.
+ *
+ * Returns the registered slot pointer for capture in QObject::connect lambdas. */
+static curry_val *keep_alive(curry_val v) {
+    /* Belt-and-suspenders: also keep the value reachable via s_proc_roots so
+     * Boehm's conservative scan finds it through the .so data segment. */
     s_proc_roots = curry_make_pair(v, s_proc_roots);
+    curry_val *slot = new curry_val(v);
+    gc_register_root(slot);
+    return slot;
 }
 
 /* =========================================================================
@@ -839,10 +853,9 @@ static curry_val fn_label_set_text(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_button(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *btn  = new QPushButton(QString::fromUtf8(curry_string(av[0])));
-    curry_val proc = av[1];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[1]);
     QObject::connect(btn, &QPushButton::clicked, [proc]() {
-        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+        SCHEME_CALL(curry_apply(*proc, 0, nullptr));
     });
     return widget_to_val(btn);
 }
@@ -851,11 +864,10 @@ static curry_val fn_make_toggle(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *cb   = new QCheckBox(QString::fromUtf8(curry_string(av[0])));
     cb->setChecked(curry_bool(av[1]));
-    curry_val proc = av[2];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[2]);
     QObject::connect(cb, &QCheckBox::toggled, [proc](bool on) {
         curry_val argv[1] = { curry_make_bool(on) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     return widget_to_val(cb);
 }
@@ -896,11 +908,10 @@ static curry_val fn_make_slider(int ac, curry_val *av, void *ud) {
 
     /* Optional callback */
     if (ac >= 6 && !curry_is_bool(av[5])) {
-        curry_val proc = av[5];
-        keep_alive(proc);
+        curry_val *proc = keep_alive(av[5]);
         QObject::connect(slider, &QSlider::valueChanged, [proc, ss](int) {
             curry_val argv[1] = { curry_make_float(ss->value()) };
-            SCHEME_CALL(curry_apply(proc, 1, argv));
+            SCHEME_CALL(curry_apply(*proc, 1, argv));
         });
     }
 
@@ -937,12 +948,11 @@ static curry_val fn_make_dropdown(int ac, curry_val *av, void *ud) {
         combo->addItem(QString::fromUtf8(curry_string(curry_car(p))));
     int sel = (int)curry_float(av[1]);
     if (sel >= 0 && sel < combo->count()) combo->setCurrentIndex(sel);
-    curry_val proc = av[2];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[2]);
     QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
                      [proc](int i) {
         curry_val argv[1] = { curry_make_fixnum(i) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     return widget_to_val(combo);
 }
@@ -989,11 +999,10 @@ static curry_val fn_make_radio_group(int ac, curry_val *av, void *ud) {
         vbox->addWidget(rb);
         if (idx == initial) rb->setChecked(true);
     }
-    curry_val proc = av[2];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[2]);
     QObject::connect(group, &QButtonGroup::idClicked, [proc](int id) {
         curry_val argv[1] = { curry_make_fixnum(id) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     container->setProperty("_qt6_bg", QVariant((quintptr)(void*)group));
     return widget_to_val(container);
@@ -1013,12 +1022,11 @@ static curry_val fn_make_spin_box(int ac, curry_val *av, void *ud) {
     sb->setRange(curry_float(av[0]), curry_float(av[1]));
     sb->setSingleStep(curry_float(av[2]));
     sb->setValue(curry_float(av[3]));
-    curry_val proc = av[4];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[4]);
     QObject::connect(sb, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                      [proc](double val) {
         curry_val argv[1] = { curry_make_float(val) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     return widget_to_val(sb);
 }
@@ -1038,12 +1046,11 @@ static curry_val fn_make_text_input(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *le = new QLineEdit();
     le->setPlaceholderText(QString::fromUtf8(curry_string(av[0])));
-    curry_val proc = av[1];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[1]);
     QObject::connect(le, &QLineEdit::textChanged, [proc](const QString &s) {
         QByteArray ba = s.toUtf8();
         curry_val argv[1] = { curry_make_string(ba.constData()) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     return widget_to_val(le);
 }
@@ -1103,10 +1110,9 @@ static curry_val fn_menu_add_action(int ac, curry_val *av, void *ud) {
     auto   *act  = menu->addAction(QString::fromUtf8(curry_string(av[1])));
     if (ac >= 4)
         act->setShortcut(QKeySequence(QString::fromUtf8(curry_string(av[3]))));
-    curry_val proc = av[2];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[2]);
     QObject::connect(act, &QAction::triggered, [proc]() {
-        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+        SCHEME_CALL(curry_apply(*proc, 0, nullptr));
     });
     return curry_void();
 }
@@ -1140,10 +1146,9 @@ static curry_val fn_toolbar_add_action(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *tb  = (QToolBar *)val_to_ptr("qt6-toolbar", av[0]);
     auto *act = tb->addAction(QString::fromUtf8(curry_string(av[1])));
-    curry_val proc = av[2];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[2]);
     QObject::connect(act, &QAction::triggered, [proc]() {
-        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+        SCHEME_CALL(curry_apply(*proc, 0, nullptr));
     });
     return curry_void();
 }
@@ -1214,12 +1219,11 @@ static curry_val fn_widget_set_max_size(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_timer(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     int ms     = (int)curry_float(av[0]);
-    curry_val proc = av[1];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[1]);
     auto *t    = new QTimer();
     t->setInterval(ms);
     QObject::connect(t, &QTimer::timeout, [proc]() {
-        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+        SCHEME_CALL(curry_apply(*proc, 0, nullptr));
     });
     return timer_to_val(t);
 }
@@ -1250,8 +1254,7 @@ struct TimerDt {
 static curry_val fn_make_timer_dt(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     int ms = (int)curry_float(av[0]);
-    curry_val proc = av[1];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[1]);
     auto *td = new TimerDt{};
     td->timer = new QTimer();
     td->timer->setInterval(ms);
@@ -1259,7 +1262,7 @@ static curry_val fn_make_timer_dt(int ac, curry_val *av, void *ud) {
     QObject::connect(td->timer, &QTimer::timeout, [proc, td]() {
         qint64 dt = td->clock.restart();
         curry_val argv[1] = { curry_make_fixnum((intptr_t)dt) };
-        SCHEME_CALL(curry_apply(proc, 1, argv));
+        SCHEME_CALL(curry_apply(*proc, 1, argv));
     });
     return timer_dt_to_val(td);
 }
@@ -2488,10 +2491,9 @@ static curry_val fn_text_edit_set_read_only(int ac, curry_val *av, void *ud) {
 static curry_val fn_text_edit_on_change(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     auto      *te   = widget_to_textedit(av[0]);
-    curry_val  proc = av[1];
-    keep_alive(proc);
+    curry_val *proc = keep_alive(av[1]);
     QObject::connect(te, &QPlainTextEdit::textChanged, [proc]() {
-        SCHEME_CALL(curry_apply(proc, 0, nullptr));
+        SCHEME_CALL(curry_apply(*proc, 0, nullptr));
     });
     return curry_void();
 }
