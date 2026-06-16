@@ -6,7 +6,7 @@ Curry ships three GC backends, selected at startup with `--gc`:
 |---|---|---|
 | **Boehm** (default) | `--gc boehm` | Conservative, non-moving, thread-safe |
 | **Semispace** | `--gc semispace` | Precise, moving, Cheney copy |
-| **Generational** | `--gc generational` | Two-generation, Cheney minor + major |
+| **Generational** *(experimental)* | `--gc generational` | Two-generation, Cheney minor + major |
 
 All three implement the same `gc_ops_t` vtable; C extension modules are
 unaffected by the choice.
@@ -51,7 +51,11 @@ a GC point must use `gc_pin` / `gc_unpin`, or register the slot with
 `gc_register_root`. The FFI `with-pinned-matrix` and `with-pinned-tensor`
 macros handle this automatically for BLAS/LAPACK calls.
 
-### Generational (two-generation Cheney)
+### Generational (two-generation Cheney) *(experimental)*
+
+> **Experimental.** The generational backend is under active development and has
+> known correctness limitations (see [Known limitation](#known-limitation) below).
+> Do not use in production. The default Boehm backend is stable.
 
 Precise, stop-the-world, moving. Designed for allocation-heavy workloads (CAS
 rewrites, ODE integrators, parallel map/reduce) where most objects die young.
@@ -286,9 +290,9 @@ needed. Pause times scale with heap size.
 `GC_MALLOC`). Pause time proportional to live objects, not heap size. Best for
 allocation-heavy functional code with a small live set.
 
-**Generational** — lowest average pause for workloads with high allocation
-rates and young-object mortality (CAS rewrites, list processing, parallel map).
-Minor collections pause for milliseconds; major collections are rarer and
-proportional to total live set. Current limitation: tree-walking eval/apply
-C stack is not scanned; use `--gc-nursery-size 16M` or larger for
+**Generational** *(experimental)* — lowest average pause for workloads with
+high allocation rates and young-object mortality (CAS rewrites, list processing,
+parallel map). Minor collections pause for milliseconds; major collections are
+rarer and proportional to total live set. Current limitation: tree-walking
+eval/apply C stack is not scanned; use `--gc-nursery-size 16M` or larger for
 computation-heavy scripts until this is resolved.

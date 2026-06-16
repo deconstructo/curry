@@ -411,6 +411,20 @@ static val_t gen_evacuate(val_t v) {
     if (h->type == GC_FORWARDED)
         return vptr((void *)h->fwd);
 
+    /* The conservative card scan can produce false positives: a raw C pointer
+     * (e.g. a Boehm heap address) that coincidentally falls within the nursery
+     * address range.  Reject anything that is not a valid ObjType.
+     *
+     * type == 0 is also rejected here: gen_alloc stores the size in fwd and
+     * returns with type still 0, but the caller sets the real type before any
+     * further allocation, so no type-0 object can be in the nursery when the
+     * card scan runs (GC only fires during gen_alloc, not between gen_alloc
+     * returning and the caller setting the type).  A Boehm address that
+     * happens to be in the nursery range could have 0x00000000 at the type
+     * field offset and any garbage at the fwd offset — allowing type 0 would
+     * call obj_size with that garbage size, mis-advancing gen_to_scan. */
+    if (h->type == 0 || h->type >= (uint32_t)T_OBJTYPE_COUNT) return v;
+
     size_t sz = obj_size(h);
     void *new_obj = gen_tenured_alloc(sz);
     if (!new_obj) {
@@ -442,6 +456,7 @@ static void *gen_evacuate_obj(void *p) {
     Hdr *h = (Hdr *)p;
     if (!in_from_space(h)) return p;
     if (h->type == GC_FORWARDED) return (void *)h->fwd;
+    if (h->type >= (uint32_t)T_OBJTYPE_COUNT && h->type != 0u) return p;
 
     size_t sz = obj_size(h);
     void *new_obj = gen_tenured_alloc(sz);

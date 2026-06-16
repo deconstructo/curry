@@ -2,7 +2,7 @@
 
 *Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.5.0 (released); generational GC (Phase 6) shipped. This document maps the path from here to a compiled Scheme for scientific computing — the full cill specification. It is ordered by dependency, not ambition; each phase unblocks the phases above it.
+Curry is at v1.5.0 (released); generational GC (Phase 6) shipped as experimental. This document maps the path from here to a compiled Scheme for scientific computing — the full cill specification. It is ordered by dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
