@@ -7,7 +7,7 @@ class Curry < Formula
   #   git tag v1.2.6 && git push origin v1.2.6
   #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.2.6.tar.gz | shasum -a 256
   url "https://github.com/deconstructo/curry/archive/refs/tags/v1.5.1.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "78b2b094a0455ba56e8124c150ba3b4275d756567e19c33aee508a5a78e1b397"
   version "1.5.1"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
