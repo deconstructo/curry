@@ -102,6 +102,23 @@ size_t gen_tenured_used(void);
 void gc_gen_bump_minor(void);
 void gc_gen_bump_major(void);
 
+/* ── GC inhibit ───────────────────────────────────────────────────────────── */
+
+/*
+ * Inhibit / uninhibit minor collection.  While the inhibit count is > 0,
+ * nursery exhaustion in gen_alloc falls back to direct tenured allocation
+ * instead of triggering a minor collection.
+ *
+ * Used by C extension callbacks (Qt6 event handlers, etc.) to prevent minor GC
+ * from firing while val_t values are live only in C locals on the native call
+ * stack, which the generational collector does not scan.
+ *
+ * Calls must be balanced.  The count is a depth counter so inhibit/uninhibit
+ * may be nested.
+ */
+void gc_gen_inhibit(void);
+void gc_gen_uninhibit(void);
+
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
 /*

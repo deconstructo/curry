@@ -180,7 +180,11 @@ static void gen_unregister_root_impl(void *slot) {
 
 /* ── Safepoint ────────────────────────────────────────────────────────────── */
 
-volatile int gc_stop_world = 0;
+volatile int gc_stop_world   = 0;
+static _Atomic int gc_inhibit_count = 0;
+
+void gc_gen_inhibit(void)   { atomic_fetch_add(&gc_inhibit_count, 1); }
+void gc_gen_uninhibit(void) { atomic_fetch_sub(&gc_inhibit_count, 1); }
 
 static _Atomic int gc_gen_thread_count  = 0;
 static _Atomic int gc_gen_parked_count  = 0;
@@ -1068,6 +1072,19 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
     pthread_mutex_lock(&nursery_lock);
     if (nursery_top + n > nursery_base + nursery_size) {
         pthread_mutex_unlock(&nursery_lock);
+
+        /* Nursery full while a C extension callback holds live val_t values in
+         * C locals that are not on the Scheme VM stack.  Minor GC would zero the
+         * nursery and turn those locals into dangling pointers.  Instead promote
+         * the object directly into tenured space for the duration of the callback. */
+        if (atomic_load(&gc_inhibit_count) > 0) {
+            void *p = gen_tenured_alloc(n);
+            if (!p) { fprintf(stderr, "[gc_gen] tenured full during inhibited alloc\n"); abort(); }
+            memset(p, 0, n);
+            ((Hdr *)p)->fwd = (uintptr_t)n;
+            return p;
+        }
+
         /* Nursery full: trigger minor GC (also handles STW). */
         gen_minor_collect();
 

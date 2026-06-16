@@ -64,11 +64,13 @@ static void qt6_print_exn(const char *where, curry_val exn) {
 #define SCHEME_CALL(call) do { \
     ExnHandler _sch_h_; \
     CurryVMState _vm_state_; \
+    if (gc_gen_active) gc_gen_inhibit(); \
     curry_vm_state_save(&_vm_state_); \
     SCM_PROTECT(_sch_h_, (call), { \
         qt6_print_exn("[qt6]", _sch_h_.exn); \
         curry_vm_state_restore(&_vm_state_); \
     }); \
+    if (gc_gen_active) gc_gen_uninhibit(); \
 } while(0)
 
 #include <QApplication>
@@ -504,10 +506,12 @@ void CurryCanvas::paintEvent(QPaintEvent *) {
     };
     ExnHandler h;
     CurryVMState vm_state;
+    if (gc_gen_active) gc_gen_inhibit();
     curry_vm_state_save(&vm_state);
     SCM_PROTECT(h,
         curry_apply(ws->draw_proc, 3, argv),
         (qt6_print_exn("[qt6] paint", h.exn), curry_vm_state_restore(&vm_state)));
+    if (gc_gen_active) gc_gen_uninhibit();
     ws->live_painter = nullptr;
 }
 
@@ -739,11 +743,13 @@ static curry_val fn_canvas_save_png(int ac, curry_val *av, void *ud) {
     };
     ExnHandler h;
     CurryVMState vm_state;
+    if (gc_gen_active) gc_gen_inhibit();
     curry_vm_state_save(&vm_state);
     SCM_PROTECT(h,
         curry_apply(ws->draw_proc, 3, argv),
         (qt6_print_exn("[canvas-save-png]", h.exn),
          curry_vm_state_restore(&vm_state)));
+    if (gc_gen_active) gc_gen_uninhibit();
     painter.end();
 
     QImage img = fbo.toImage();
