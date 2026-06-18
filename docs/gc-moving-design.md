@@ -77,6 +77,7 @@ pointer from outside the GC-managed root set.
 | `T_CPTR` | Holds a `void*` but it is opaque user data, not a GC pointer |
 | `T_RECORD_TYPE`, `T_RECORD` | Only `val_t` fields |
 | `T_SET`, `T_HASHTABLE` | Buckets are `GC_MALLOC` arrays of `val_t` — scan in place |
+| `T_INTERVAL` | `lo` and `hi` are `val_t` fields (not raw MPFR); MPFR values pointed to by those fields are themselves pinned |
 
 ### 3b. Pinned objects (always in Boehm, never moved)
 
@@ -102,7 +103,6 @@ changes, may be referenced by raw C pointer from outside the GC.
 | `T_CONTINUATION` | `setjmp` buffer; must not move |
 | `T_JITCLOSURE` | Native code pointer; JIT page must not move |
 | `T_CPTR` (if used as raw handle) | Already in moveable list as data-only; revisit if used as handle |
-| `T_INTERVAL` (MPFR) | `mpfr_t` internals; same rationale as bignum |
 
 > **Rule**: if any C file outside the GC holds a raw typed pointer to the object,
 > it must be pinned.  When in doubt, pin it.
@@ -118,7 +118,7 @@ crash.
 |------|----------------------|
 | `T_ENV` | `f->vals[0..f->size-1]` |
 | `T_CLOSURE` | `params`, `body`, `name` |
-| `T_BCCLOSURE` | `jit_val`; also `upvals[i]->closed` if open upvalues are pinned |
+| `T_BCCLOSURE` | `jit_val` |
 | `T_CHUNK` | `constants[0..const_len-1]`, `src_lambda` |
 | `T_MODULE` | `name`, `exports` |
 | `T_ACTOR` | `closure`, `name` |
@@ -128,7 +128,9 @@ crash.
 | `T_CONTINUATION` | `result` |
 | `T_FOREIGN_LIB` | `path` |
 | `T_FOREIGN_FN` | `arg_tags`, `ret_tag` |
-| `T_RECORD_TYPE` | `name`, `field_names[0..nfields-1]` |
+
+Note: `T_RECORD_TYPE` and `T_RECORD` are **moveable**, so their `val_t` fields are
+handled by `scan_object()` in the Cheney loop — they do not appear here.
 
 > **Implementation note**: `scan_pinned_object()` must have an explicit `case`
 > for every type in this table.  The `default:` branch must be a no-op (for types

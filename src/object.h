@@ -22,62 +22,75 @@
 #include <stdbool.h>
 #include <pthread.h>
 
+/*
+ * GC classification for moving collectors (see docs/gc-moving-design.md §3):
+ *
+ *   GC:MOVE  — may live in the nursery/semispace; only referenced via val_t.
+ *   GC:PIN   — always in Boehm; raw C pointer from outside GC, or OS resource,
+ *              or GMP/MPFR internal pointer.  Address never changes.
+ *   GC:PIN val_t: <fields>  — pinned AND contains val_t fields that point into
+ *              the moveable heap; scan_pinned_object() MUST handle this type.
+ *
+ * Every type must be assigned to exactly one class.  When in doubt, PIN.
+ * Allocation macros must match: CURRY_NEW → MOVE, CURRY_NEW_PINNED → PIN.
+ */
+
 /* ---- Object type tags ---- */
 typedef enum {
-    T_PAIR          =  1,
-    T_VECTOR        =  2,
-    T_STRING        =  3,
-    T_SYMBOL        =  4,
-    T_FLONUM        =  5,
-    T_BIGNUM        =  6,
-    T_RATIONAL      =  7,
-    T_COMPLEX       =  8,
-    T_QUATERNION    =  9,
-    T_OCTONION      = 10,
-    T_BYTEVECTOR    = 11,
-    T_PORT          = 12,
-    T_CLOSURE       = 13,
-    T_PRIMITIVE     = 14,
-    T_CONTINUATION  = 15,
-    T_ACTOR         = 16,
-    T_MAILBOX       = 17,
-    T_SET           = 18,
-    T_HASHTABLE     = 19,
-    T_RECORD_TYPE   = 20,
-    T_RECORD        = 21,
-    T_MODULE        = 22,
-    T_ENV           = 23,
-    T_VALUES        = 24,
-    T_SYNTAX        = 25,
-    T_ERROR         = 26,
-    T_PROMISE       = 27,
-    T_PARAMETER     = 28,  /* dynamic parameter (make-parameter) */
-    T_SYMVAR        = 29,  /* symbolic unknown (a variable in an expression) */
-    T_SYMEXPR       = 30,  /* symbolic compound expression */
-    T_QUANTUM       = 31,  /* quantum superposition of values */
-    T_SURREAL       = 32,  /* surreal number (Hahn-series form) */
-    T_MULTIVECTOR   = 33,  /* Clifford algebra element in Cl(p,q,r) */
-    T_TRACED        = 34,  /* procedure wrapped with trace instrumentation */
-    T_MATRIX        = 35,  /* 2D matrix of doubles (row-major) */
-    T_TENSOR        = 36,  /* N-dimensional tensor of doubles (row-major) */
-    T_F64VEC        = 37,  /* typed flat double[] — bulk C arithmetic (f64vector) */
-    T_SYMFN         = 38,  /* symbolic unknown function: u(x,y,t) → unevaluated derivatives */
-    T_UP            = 39,  /* contravariant up-tuple:   (up   a b c ...) */
-    T_DOWN          = 40,  /* covariant   down-tuple:   (down a b c ...) */
-    T_BCCLOSURE     = 41,  /* bytecode closure (chunk + upvalues)        */
-    T_TVAR          = 42,  /* STM transactional variable                 */
-    T_CHANNEL       = 43,  /* CSP buffered channel                       */
-    T_JITCLOSURE    = 44,  /* JIT-compiled native closure (LLVM backend) */
-    T_SPINOR        = 45,  /* Weyl/Dirac/Majorana spinor                 */
-    T_CONDITION     = 46,  /* CL-style condition object                  */
-    T_RESTART       = 47,  /* Named restart established by with-restarts */
-    T_CPTR          = 48,  /* Opaque C pointer (void*)                   */
-    T_FOREIGN_LIB   = 49,  /* Loaded shared library (dlopen handle)      */
-    T_FOREIGN_FN    = 50,  /* Foreign C function descriptor (libffi cif) */
-    T_MPFR          = 51,  /* MPFR arbitrary-precision float              */
-    T_INTERVAL      = 52,  /* Interval [lo, hi] for certified arithmetic  */
-    T_CHUNK         = 53,  /* compiled bytecode chunk (compiler + VM)     */
-    T_UPVALUE       = 54,  /* captured variable cell (open or closed)     */
+    T_PAIR          =  1,  /* GC:MOVE */
+    T_VECTOR        =  2,  /* GC:MOVE */
+    T_STRING        =  3,  /* GC:MOVE */
+    T_SYMBOL        =  4,  /* GC:PIN  — interned; pointer equality is identity */
+    T_FLONUM        =  5,  /* GC:MOVE */
+    T_BIGNUM        =  6,  /* GC:PIN  — GMP mpz_t internal limb pointer */
+    T_RATIONAL      =  7,  /* GC:PIN  — GMP mpq_t internal limb pointer */
+    T_COMPLEX       =  8,  /* GC:MOVE */
+    T_QUATERNION    =  9,  /* GC:MOVE */
+    T_OCTONION      = 10,  /* GC:MOVE */
+    T_BYTEVECTOR    = 11,  /* GC:MOVE */
+    T_PORT          = 12,  /* GC:PIN  — OS file descriptor */
+    T_CLOSURE       = 13,  /* GC:PIN val_t: params, body, name — eval.c holds raw Closure* */
+    T_PRIMITIVE     = 14,  /* GC:PIN  — function pointer, no heap data */
+    T_CONTINUATION  = 15,  /* GC:PIN val_t: result — setjmp buffer cannot move */
+    T_ACTOR         = 16,  /* GC:PIN val_t: closure, name — POSIX thread reference */
+    T_MAILBOX       = 17,  /* GC:PIN val_t: q.msgs[] — mutex/condvar inside */
+    T_SET           = 18,  /* GC:MOVE — buckets[] is GC_MALLOC, scanned in place */
+    T_HASHTABLE     = 19,  /* GC:MOVE — keys[]/vals[] are GC_MALLOC, scanned in place */
+    T_RECORD_TYPE   = 20,  /* GC:MOVE */
+    T_RECORD        = 21,  /* GC:MOVE */
+    T_MODULE        = 22,  /* GC:PIN val_t: name, exports — module registry holds raw Module* */
+    T_ENV           = 23,  /* GC:PIN val_t: vals[] — eval.c holds raw EnvFrame* */
+    T_VALUES        = 24,  /* GC:MOVE */
+    T_SYNTAX        = 25,  /* GC:MOVE */
+    T_ERROR         = 26,  /* GC:MOVE */
+    T_PROMISE       = 27,  /* GC:MOVE */
+    T_PARAMETER     = 28,  /* GC:MOVE — dynamic parameter (make-parameter) */
+    T_SYMVAR        = 29,  /* GC:MOVE — symbolic unknown (a variable in an expression) */
+    T_SYMEXPR       = 30,  /* GC:MOVE — symbolic compound expression */
+    T_QUANTUM       = 31,  /* GC:MOVE — quantum superposition of values */
+    T_SURREAL       = 32,  /* GC:MOVE — surreal number (Hahn-series form) */
+    T_MULTIVECTOR   = 33,  /* GC:MOVE — Clifford algebra element in Cl(p,q,r) */
+    T_TRACED        = 34,  /* GC:MOVE — procedure wrapped with trace instrumentation */
+    T_MATRIX        = 35,  /* GC:MOVE — 2D matrix of doubles (row-major) */
+    T_TENSOR        = 36,  /* GC:MOVE — N-dimensional tensor of doubles (row-major) */
+    T_F64VEC        = 37,  /* GC:MOVE — typed flat double[] */
+    T_SYMFN         = 38,  /* GC:MOVE — symbolic unknown function */
+    T_UP            = 39,  /* GC:MOVE — contravariant up-tuple */
+    T_DOWN          = 40,  /* GC:MOVE — covariant down-tuple */
+    T_BCCLOSURE     = 41,  /* GC:PIN val_t: jit_val — vm.c frames hold raw BcClosure* */
+    T_TVAR          = 42,  /* GC:PIN val_t: value — mutex/condvar inside */
+    T_CHANNEL       = 43,  /* GC:PIN val_t: buf[] — mutex/condvar inside */
+    T_JITCLOSURE    = 44,  /* GC:PIN  — JIT native code page cannot move */
+    T_SPINOR        = 45,  /* GC:MOVE — Weyl/Dirac/Majorana spinor */
+    T_CONDITION     = 46,  /* GC:MOVE — CL-style condition object */
+    T_RESTART       = 47,  /* GC:MOVE — named restart */
+    T_CPTR          = 48,  /* GC:MOVE — opaque user void* (not a GC pointer) */
+    T_FOREIGN_LIB   = 49,  /* GC:PIN val_t: path — dlopen handle inside */
+    T_FOREIGN_FN    = 50,  /* GC:PIN val_t: arg_tags, ret_tag — libffi CIF inside */
+    T_MPFR          = 51,  /* GC:PIN  — MPFR mpfr_t internal pointer */
+    T_INTERVAL      = 52,  /* GC:MOVE — lo/hi are val_t (the MPFR values they point to are pinned) */
+    T_CHUNK         = 53,  /* GC:PIN val_t: constants[], src_lambda — BcClosure.chunk is raw ptr */
+    T_UPVALUE       = 54,  /* GC:PIN  — vm->open_upvalues raw linked list; location is interior ptr */
 } ObjType;
 
 /*
