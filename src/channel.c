@@ -63,7 +63,7 @@ void channel_send(val_t v, val_t val) {
     }
 
     if (ch->cap == 0) {
-        ch->buf[0] = val;
+        gc_wb_slot(&ch->buf[0], val);
         ch->hdr.flags |= CH_SYNC_WAITING_SEND;
         pthread_cond_signal(&ch->not_empty);
         while ((ch->hdr.flags & CH_SYNC_WAITING_SEND) && !ch->closed)
@@ -77,7 +77,7 @@ void channel_send(val_t v, val_t val) {
             scm_raise(V_FALSE, "channel-send!: channel closed while waiting");
         }
 
-        ch->buf[ch->tail] = val;
+        gc_wb_slot(&ch->buf[ch->tail], val);
         ch->tail = (ch->tail + 1) % ch->cap;
         ch->count++;
         pthread_cond_signal(&ch->not_empty);
@@ -166,7 +166,7 @@ val_t channel_try_send(val_t v, val_t val) {
     val_t ret = V_UNDEF;
 
     if (!ch->closed && ch->cap > 0 && ch->count < ch->cap) {
-        ch->buf[ch->tail] = val;
+        gc_wb_slot(&ch->buf[ch->tail], val);
         ch->tail = (ch->tail + 1) % ch->cap;
         ch->count++;
         pthread_cond_signal(&ch->not_empty);

@@ -152,7 +152,7 @@ static bool tx_commit(TxState *tx) {
 
     for (size_t i = 0; i < tx->wlen; i++) {
         TVar *tv  = tx->wset[i].tv;
-        tv->value = tx->wset[i].val;
+        gc_wb_slot(&tv->value, tx->wset[i].val);
         atomic_store_explicit(
             (_Atomic uint64_t *)&tv->version, write_ver, memory_order_release);
     }
@@ -242,7 +242,7 @@ void stm_tvar_write(val_t v, val_t val) {
 
     if (!tx) {
         pthread_mutex_lock(&tv->lock);
-        tv->value = val;
+        gc_wb_slot(&tv->value, val);
         atomic_fetch_add_explicit(&g_vclock, 1, memory_order_acq_rel);
         uint64_t new_ver = atomic_load_explicit(&g_vclock, memory_order_acquire);
         atomic_store_explicit(

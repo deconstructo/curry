@@ -281,7 +281,7 @@ static Upvalue *open_upvalue(val_t *slot) {
 void vm_close_upvalues(val_t *last) {
     while (vm->open_upvalues && vm->open_upvalues->location >= last) {
         Upvalue *up  = vm->open_upvalues;
-        up->closed   = *up->location;
+        gc_wb_slot(&up->closed, *up->location);
         up->location = &up->closed;
         vm->open_upvalues = up->next;
     }
@@ -449,13 +449,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             EnvFrame *root = as_env(GLOBAL_ENV);
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
                                  cache[ci].version == root->version, 1)) {
-                *cache[ci].slot = val;
+                gc_wb_slot(cache[ci].slot, val);
             } else {
                 val_t sym = CONSTS[ci];
                 val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
                 if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
                 else {
-                    *slot = val;
+                    gc_wb_slot(slot, val);
                     if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
                 }
             }
@@ -484,7 +484,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
         CASE(OP_STORE_UP) {
             uint8_t i = READ_U8();
-            *frame->closure->upvals[i]->location = POP();
+            val_t v = POP();
+            gc_wb_slot(frame->closure->upvals[i]->location, v);
             NEXT;
         }
 
@@ -592,13 +593,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_CDR)  { PUSH(vcdr(POP())); NEXT; }
         CASE(OP_SETCAR) {
             val_t v = POP(), p = POP();
-            as_pair(p)->car = v;
+            GC_WB(as_pair(p), car, v);
             PUSH(V_VOID);
             NEXT;
         }
         CASE(OP_SETCDR) {
             val_t v = POP(), p = POP();
-            as_pair(p)->cdr = v;
+            GC_WB(as_pair(p), cdr, v);
             PUSH(V_VOID);
             NEXT;
         }
@@ -658,7 +659,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
         CASE(OP_VECSET) {
             val_t val = POP(), idx = POP(), vec = POP();
-            as_vec(vec)->data[vunfix(idx)] = val;
+            gc_wb_slot(&as_vec(vec)->data[vunfix(idx)], val);
             PUSH(V_VOID);
             NEXT;
         }

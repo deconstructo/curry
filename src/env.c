@@ -95,16 +95,16 @@ bool frame_define(EnvFrame *f, val_t sym, val_t val) {
         uint32_t h = sym_hash(sym, f->hcap);
         while (f->hidx[h] != UINT32_MAX) {
             uint32_t idx = f->hidx[h];
-            if (f->syms[idx] == sym) { f->vals[idx] = val; return true; }
+            if (f->syms[idx] == sym) { gc_wb_slot(&f->vals[idx], val); return true; }
             h = (h + 1) & (f->hcap - 1);
         }
     } else {
         for (uint32_t i = 0; i < f->size; i++)
-            if (f->syms[i] == sym) { f->vals[i] = val; return true; }
+            if (f->syms[i] == sym) { gc_wb_slot(&f->vals[i], val); return true; }
     }
     if (f->size >= f->cap) frame_grow(f);
     f->syms[f->size] = sym;
-    f->vals[f->size] = val;
+    gc_wb_slot(&f->vals[f->size], val);
     f->size++;
     /* Build or update hash index */
     if (f->hcap) {
@@ -120,13 +120,13 @@ bool frame_set(EnvFrame *f, val_t sym, val_t val) {
         uint32_t h = sym_hash(sym, f->hcap);
         while (f->hidx[h] != UINT32_MAX) {
             uint32_t idx = f->hidx[h];
-            if (f->syms[idx] == sym) { f->vals[idx] = val; return true; }
+            if (f->syms[idx] == sym) { gc_wb_slot(&f->vals[idx], val); return true; }
             h = (h + 1) & (f->hcap - 1);
         }
         return false;
     }
     for (uint32_t i = 0; i < f->size; i++)
-        if (f->syms[i] == sym) { f->vals[i] = val; return true; }
+        if (f->syms[i] == sym) { gc_wb_slot(&f->vals[i], val); return true; }
     return false;
 }
 

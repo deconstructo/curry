@@ -43,7 +43,7 @@ static void mailbox_push(Mailbox *m, val_t msg) {
         m->q.cap  = new_cap;
         next = (m->q.tail + 1) % m->q.cap;
     }
-    m->q.msgs[m->q.tail] = msg;
+    gc_wb_slot(&m->q.msgs[m->q.tail], msg);
     m->q.tail = next;
     pthread_cond_signal(&m->cond);
     pthread_mutex_unlock(&m->mutex);
