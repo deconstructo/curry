@@ -111,7 +111,7 @@ const char *opcode_name[OP_COUNT] = {
 /* ── Chunk allocation ────────────────────────────────────────────────── */
 
 Chunk *chunk_new(void) {
-    Chunk *c = (Chunk *)gc_alloc(sizeof(Chunk));
+    Chunk *c = (Chunk *)gc_alloc_pinned(sizeof(Chunk));
     c->hdr.type   = T_CHUNK; c->hdr.flags = 0; c->hdr.fwd = 0;
     c->code       = NULL; c->code_len = 0; c->code_cap = 0;
     c->constants  = NULL; c->const_len = 0; c->const_cap = 0;

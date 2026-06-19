@@ -243,7 +243,7 @@ static inline void vm_maybe_jit(BcClosure *cl) {
 /* ── BcClosure allocation ────────────────────────────────────────────── */
 
 BcClosure *vm_make_closure(Chunk *chunk, int nupvals) {
-    BcClosure *cl = (BcClosure *)gc_alloc(
+    BcClosure *cl = (BcClosure *)gc_alloc_pinned(
         sizeof(BcClosure) + (size_t)nupvals * sizeof(Upvalue *));
     cl->hdr.type    = T_BCCLOSURE;
     cl->hdr.flags   = 0;
@@ -266,7 +266,7 @@ static Upvalue *open_upvalue(val_t *slot) {
     while (up && up->location > slot) { prev = up; up = up->next; }
     if (up && up->location == slot) return up;   /* already open */
 
-    Upvalue *n  = CURRY_NEW(Upvalue);
+    Upvalue *n  = CURRY_NEW_PINNED(Upvalue);
     n->hdr.type = T_UPVALUE; n->hdr.flags = 0; n->hdr.fwd = 0;
     n->location = slot;
     n->closed   = V_VOID;

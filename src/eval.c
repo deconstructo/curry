@@ -315,7 +315,7 @@ tail:
     }
 
     if (op == S_LAMBDA) {
-        Closure *c = CURRY_NEW(Closure);
+        Closure *c = CURRY_NEW_PINNED(Closure);
         c->hdr.type  = T_CLOSURE;
         c->hdr.flags = 0;
         c->params = vcar(rest);
@@ -346,7 +346,7 @@ tail:
             /* (define (name params...) body...) */
             val_t name   = vcar(name_form);
             val_t params = vcdr(name_form);
-            Closure *c   = CURRY_NEW(Closure);
+            Closure *c   = CURRY_NEW_PINNED(Closure);
             c->hdr.type  = T_CLOSURE; c->hdr.flags = 0;
             c->params = params;
             c->body   = vcdr(rest);
@@ -419,7 +419,7 @@ tail:
             while (vis_pair(b)) { ri = make_pair(vcar(b), ri); b = vcdr(b); }
             inits_list = ri;
 
-            Closure *c = CURRY_NEW(Closure);
+            Closure *c = CURRY_NEW_PINNED(Closure);
             c->hdr.type=T_CLOSURE; c->hdr.flags=0;
             c->params=params; c->body=body; c->env=as_env(new_env); c->name=loop_name;
             env_define(new_env, loop_name, vptr(c));
@@ -675,7 +675,7 @@ tail:
         p->hdr.type=T_PROMISE; p->hdr.flags=0;
         p->state = PROMISE_LAZY;
         /* Wrap body in a thunk */
-        Closure *c = CURRY_NEW(Closure);
+        Closure *c = CURRY_NEW_PINNED(Closure);
         c->hdr.type=T_CLOSURE; c->hdr.flags=0;
         c->params=V_NIL; c->body=rest; c->env=as_env(env); c->name=V_FALSE;
         p->val = vptr(c);
@@ -686,7 +686,7 @@ tail:
         Promise *p = CURRY_NEW(Promise);
         p->hdr.type=T_PROMISE; p->hdr.flags=0;
         p->state = PROMISE_LAZY;
-        Closure *c = CURRY_NEW(Closure);
+        Closure *c = CURRY_NEW_PINNED(Closure);
         c->hdr.type=T_CLOSURE; c->hdr.flags=0;
         c->params=V_NIL; c->body=rest; c->env=as_env(env); c->name=V_FALSE;
         p->hdr.flags = 1; /* lazy-force flag */
@@ -790,7 +790,7 @@ tail:
             snprintf(buf, sizeof(buf), "make-%s", ns);
             val_t ctor_name = sym_intern_cstr(buf);
             {
-                Closure *c2 = CURRY_NEW(Closure);
+                Closure *c2 = CURRY_NEW_PINNED(Closure);
                 c2->hdr.type = T_CLOSURE; c2->hdr.flags = 0;
                 c2->params = ctor_fields;
                 c2->body   = make_pair(
@@ -807,7 +807,7 @@ tail:
             snprintf(buf, sizeof(buf), "%s?", ns);
             val_t pred_name = sym_intern_cstr(buf);
             {
-                Closure *c2 = CURRY_NEW(Closure);
+                Closure *c2 = CURRY_NEW_PINNED(Closure);
                 c2->hdr.type = T_CLOSURE; c2->hdr.flags = 0;
                 val_t x = sym_intern_cstr("x");
                 c2->params = make_pair(x, V_NIL);
@@ -833,7 +833,7 @@ tail:
                 /* Accessor: <name>-<field> */
                 snprintf(buf, sizeof(buf), "%s-%s", ns, sym_cstr(fname));
                 val_t getter_name = sym_intern_cstr(buf);
-                Closure *getter = CURRY_NEW(Closure);
+                Closure *getter = CURRY_NEW_PINNED(Closure);
                 getter->hdr.type = T_CLOSURE; getter->hdr.flags = 0;
                 getter->params = make_pair(x, V_NIL);
                 getter->body   = make_pair(
@@ -850,7 +850,7 @@ tail:
                     snprintf(buf, sizeof(buf), "%s-%s-set!", ns, sym_cstr(fname));
                     val_t setter_name = sym_intern_cstr(buf);
                     val_t v = sym_intern_cstr("v");
-                    Closure *setter = CURRY_NEW(Closure);
+                    Closure *setter = CURRY_NEW_PINNED(Closure);
                     setter->hdr.type = T_CLOSURE; setter->hdr.flags = 0;
                     setter->params = make_pair(x, make_pair(v, V_NIL));
                     setter->body   = make_pair(
@@ -894,7 +894,7 @@ tail:
         /* Simpler: pre-build it as a closure */
         {
             /* Constructor lambda */
-            Closure *c = CURRY_NEW(Closure);
+            Closure *c = CURRY_NEW_PINNED(Closure);
             c->hdr.type=T_CLOSURE; c->hdr.flags=0;
             c->params = ctor_fields;
             /* Body: (%record-ctor rtd field0 field1 ...) */
@@ -910,7 +910,7 @@ tail:
 
         /* Predicate */
         {
-            Closure *c = CURRY_NEW(Closure);
+            Closure *c = CURRY_NEW_PINNED(Closure);
             c->hdr.type=T_CLOSURE; c->hdr.flags=0;
             val_t x_sym = sym_intern_cstr("x");
             c->params = make_pair(x_sym, V_NIL);
@@ -933,7 +933,7 @@ tail:
             val_t x_sym = sym_intern_cstr("x");
             val_t fi_val = vfix((intptr_t)fi);
 
-            Closure *getter = CURRY_NEW(Closure);
+            Closure *getter = CURRY_NEW_PINNED(Closure);
             getter->hdr.type=T_CLOSURE; getter->hdr.flags=0;
             getter->params = make_pair(x_sym, V_NIL);
             getter->body   = make_pair(
@@ -948,7 +948,7 @@ tail:
             if (vis_pair(vcddr(spec))) {
                 val_t setter_name = vcaddr(spec);
                 val_t v_sym = sym_intern_cstr("v");
-                Closure *setter = CURRY_NEW(Closure);
+                Closure *setter = CURRY_NEW_PINNED(Closure);
                 setter->hdr.type=T_CLOSURE; setter->hdr.flags=0;
                 setter->params = make_pair(x_sym, make_pair(v_sym, V_NIL));
                 setter->body   = make_pair(
