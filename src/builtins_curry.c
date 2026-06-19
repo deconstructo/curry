@@ -6,7 +6,6 @@
 #include "object.h"
 #include "stm.h"
 #include "channel.h"
-#include "gc_semispace.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -1354,56 +1353,22 @@ static val_t prim_gc_collect(int ac, val_t *av, void *ud) {
 
 static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
-    extern gc_ops_t gc_ss_ops;
-    if (gc_ops == &gc_ss_ops) {
-        GcSsStats s = gc_ss_stats();
-        /* Return alist: ((collections . N) (bytes-allocated . N) ...) */
-        val_t lst = V_NIL;
-#define CONS_STAT(key, val) do { \
+    val_t lst = V_NIL;
+#define CONS_STAT(key, v) do { \
     Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
     p->cdr = lst; \
     Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
+    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(v)); \
     p->car = vptr(kv); lst = vptr(p); } while(0)
-        CONS_STAT("pinned-count",    s.pinned_count);
-        CONS_STAT("space-size",      s.space_size);
-        CONS_STAT("from-used",       s.from_used);
-        CONS_STAT("bytes-survived",  s.bytes_survived);
-        CONS_STAT("bytes-allocated", s.bytes_allocated);
-        CONS_STAT("collections",     s.collections);
+    CONS_STAT("free-bytes",  gc_free_bytes());
+    CONS_STAT("heap-size",   gc_heap_size());
 #undef CONS_STAT
-        return lst;
-    } else {
-        /* Boehm backend */
-        val_t lst = V_NIL;
-#define CONS_STAT(key, val) do { \
-    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
-    p->cdr = lst; \
-    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(val)); \
-    p->car = vptr(kv); lst = vptr(p); } while(0)
-        CONS_STAT("free-bytes",  gc_free_bytes());
-        CONS_STAT("heap-size",   gc_heap_size());
-        CONS_STAT("backend",     0);
-#undef CONS_STAT
-        return lst;
-    }
+    return lst;
 }
 
 static val_t prim_gc_on_coll(int ac, val_t *av, void *ud) {
-    (void)ac; (void)ud;
-    extern gc_ops_t gc_ss_ops;
-    if (!vis_proc(av[0]))
-        scm_raise(V_FALSE, "gc-on-collection: not a procedure");
-    if (gc_ops == &gc_ss_ops) {
-        /* Store callback in a Scheme-accessible global and wrap it */
-        val_t proc = av[0];
-        gc_ss_set_hook(NULL);  /* clear previous */
-        /* We can't call a Scheme proc directly from C without the VM, so
-         * we store the proc and invoke it via a trampoline in the collection
-         * hook.  For now register a no-op and note this is a TODO. */
-        (void)proc;
-    }
+    (void)ac; (void)av; (void)ud;
+    /* gc-on-collection is a no-op until Phase 5 wires a collection hook. */
     return V_VOID;
 }
 

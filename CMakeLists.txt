@@ -101,7 +101,7 @@ find_path(READLINE_INCLUDE NAMES readline/readline.h)
 
 set(CORE_SOURCES
   src/gc.c
-  src/gc_semispace.c
+  src/gc_gen.c
   src/chunk.c
   src/symbol.c
   src/numeric.c

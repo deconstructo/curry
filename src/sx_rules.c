@@ -3,7 +3,6 @@
 #include "symbol.h"
 #include "object.h"
 #include "gc.h"
-#include "gc_semispace.h"
 #include "builtins.h"  /* scm_cons */
 #include "eval.h"      /* apply_arr */
 

@@ -1,5 +1,5 @@
 #include "gc.h"
-#include "gc_semispace.h"
+#include "gc_gen.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -340,8 +340,9 @@ static void usage(const char *argv0) {
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
         "  -v                Print version\n"
-        "  --gc BACKEND      GC backend: boehm (default) or semispace\n"
-        "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n",
+        "  --gc BACKEND      GC backend: boehm (default) or generational\n"
+        "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
+        "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n",
         argv0);
 }
 
@@ -358,19 +359,26 @@ static size_t parse_size(const char *s) {
 /* ---- Entry point ---- */
 
 int main(int argc, char **argv) {
-    /* Pre-scan for --gc before any GC initialisation. */
+    /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
+    size_t nursery_size = 0;   /* 0 = use gc_gen default */
+    bool use_gen_gc = false;
     for (int i = 1; i < argc - 1; i++) {
         if (strcmp(argv[i], "--gc") == 0) {
-            if (strcmp(argv[i+1], "semispace") == 0) {
-                gc_semispace_init(0);   /* 0 = use default space size */
-                gc_ops = &gc_ss_ops;
+            if (strcmp(argv[i+1], "generational") == 0) {
+                use_gen_gc = true;
             } else if (strcmp(argv[i+1], "boehm") != 0) {
-                fprintf(stderr, "curry: unknown GC backend '%s' (use 'boehm' or 'semispace')\n",
-                        argv[i+1]);
+                fprintf(stderr,
+                    "curry: unknown GC backend '%s' (use 'boehm' or 'generational')\n",
+                    argv[i+1]);
                 return 1;
             }
-            break;
+        } else if (strcmp(argv[i], "--gc-nursery-size") == 0) {
+            nursery_size = parse_size(argv[i+1]);
         }
+    }
+    if (use_gen_gc) {
+        gc_gen_init(nursery_size);
+        gc_ops = &gc_gen_ops;
     }
     init_all();
 
@@ -384,7 +392,8 @@ int main(int argc, char **argv) {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
         { "gc-max-heap",  required_argument, NULL, 'G' },
-        { "gc",           required_argument, NULL, 0   },  /* handled pre-scan */
+        { "gc",              required_argument, NULL, 0   },  /* handled pre-scan */
+        { "gc-nursery-size", required_argument, NULL, 0   },  /* handled pre-scan */
         { NULL, 0, NULL, 0 }
     };
 

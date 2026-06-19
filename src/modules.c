@@ -5,7 +5,6 @@
 #include "symbol.h"
 #include "builtins.h"
 #include "gc.h"
-#include "gc_semispace.h"
 #include "reader.h"
 #include "port.h"
 #include <dlfcn.h>

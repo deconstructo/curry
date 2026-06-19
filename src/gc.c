@@ -48,6 +48,10 @@ static void  boehm_register_root(void *slot)   { (void)slot; }
 static void  boehm_unregister_root(void *slot) { (void)slot; }
 static size_t boehm_heap_size(void)  { return (size_t)GC_get_heap_size();  }
 static size_t boehm_free_bytes(void) { return (size_t)GC_get_free_bytes(); }
+/* Boehm objects never live in the nursery — promote is a no-op. */
+static void *boehm_promote(void *obj, size_t bytes, bool has_ptrs) {
+    (void)bytes; (void)has_ptrs; return obj;
+}
 
 static gc_ops_t gc_boehm_ops = {
     .alloc             = boehm_alloc,
@@ -61,6 +65,7 @@ static gc_ops_t gc_boehm_ops = {
     .unregister_root   = boehm_unregister_root,
     .heap_size         = boehm_heap_size,
     .free_bytes        = boehm_free_bytes,
+    .promote           = boehm_promote,
 };
 
 gc_ops_t *gc_ops = &gc_boehm_ops;
@@ -94,21 +99,22 @@ uintptr_t gc_tenured_base = 0;
  */
 void *gc_nursery_refill(size_t n, bool has_ptrs) {
     /*
-     * Boehm backend: the nursery slab is disabled.
+     * Slow path: nursery exhausted (or disabled under Boehm where top==NULL).
      *
-     * Interior pointers into a single GC_MALLOC slab are not individually
-     * tracked by Boehm — finalisers can only be registered on the start of
-     * an allocation, and the atomic/non-atomic distinction applies per-object.
-     * Packing multiple Scheme objects into one slab is therefore unsafe under
-     * Boehm; each object must be its own GC_MALLOC call.
+     * Under Boehm: nursery is disabled (top == limit == NULL), so every
+     * allocation reaches here.  We allocate directly via GC_MALLOC so that
+     * each Scheme object is its own Boehm allocation — required for correct
+     * finaliser registration and atomic/non-atomic distinction.
      *
-     * The nursery stays permanently exhausted (top == limit == NULL) so every
-     * allocation hits this refill path and goes straight to gc_ops->alloc.
-     * The slab mechanism becomes active when a precise generational GC backend
-     * is installed — at that point objects within the slab are individually
-     * understood by the collector, and the fast bump-pointer path becomes real.
+     * Under the generational GC (Phase 3): nursery slab is full; fall back to
+     * Boehm for this object (no minor collection yet — that's Phase 4, which
+     * will trigger a minor GC here and then retry the bump pointer).
+     *
+     * We call GC_MALLOC directly rather than gc_ops->alloc() to avoid
+     * infinite recursion: gc_ops->alloc under the generational backend calls
+     * gc_nursery_alloc which calls us again.
      */
-    return gc_ops->alloc(n, has_ptrs);
+    return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
 
 /* C-linkage allocator called from C++ translation units (jit.cpp).
@@ -128,6 +134,21 @@ void gc_register_rawptr(void **rawptr)   { (void)rawptr; }
 void gc_unregister_rawptr(void **rawptr) { (void)rawptr; }
 void gc_register_stack(void *base, void **sp_ptr) { (void)base; (void)sp_ptr; }
 void gc_unregister_stack(void *base)     { (void)base; }
+
+/* ── External root scanners ───────────────────────────────────────────────── */
+
+/*
+ * Under Boehm: conservative scan finds all roots, so ext_scanners are no-ops.
+ * Under the generational GC (gc_gen.c), gc_register_ext_scanner is overridden
+ * to store callbacks that are called during minor GC (Phase 4).
+ *
+ * gc_ss_evac / gc_ss_fwd are identity functions until Phase 4 wires up the
+ * minor GC evacuation engine.  The names preserve compatibility with the
+ * existing scanner callbacks in modules.c and sx_rules.c.
+ */
+void gc_register_ext_scanner(void (*cb)(void)) { (void)cb; }
+uintptr_t gc_ss_evac(uintptr_t v)             { return v; }
+void     *gc_ss_fwd(void *p)                  { return p; }
 
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 

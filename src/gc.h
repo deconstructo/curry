@@ -94,6 +94,14 @@ typedef struct gc_ops {
     /* Optional: GC heap statistics. */
     size_t (*heap_size)(void);
     size_t (*free_bytes)(void);
+
+    /*
+     * Promote an object from the nursery into the tenured generation.
+     * Called during minor GC to copy a live nursery object into Boehm.
+     * Returns the new tenured address; the caller stamps GC_FORWARDED in the
+     * old nursery copy.  No-op under Boehm (objects are never in nursery).
+     */
+    void *(*promote)(void *obj, size_t bytes, bool has_ptrs);
 } gc_ops_t;
 
 /* Active GC backend.  Set during gc_init(); never NULL after that. */
@@ -224,6 +232,35 @@ void gc_unregister_rawptr(void **rawptr);
 void gc_register_stack(void *base, void **sp_ptr);
 void gc_unregister_stack(void *base);
 
+/*
+ * External root scanner registry.
+ *
+ * Modules that hold val_t references outside the standard root set (e.g.
+ * global rule tables, the module registry) register a scanner callback here.
+ * The callback is invoked during minor GC; it must call gc_evac_val / gc_fwd_ptr
+ * on every such reference so the GC can update them after nursery evacuation.
+ *
+ * No-op under Boehm (conservative scan finds roots anyway).
+ * Phase 4 will wire these into the minor GC scan loop.
+ */
+void gc_register_ext_scanner(void (*cb)(void));
+
+/*
+ * Called from inside an ext_scanner callback to evacuate a single val_t or
+ * raw pointer from the nursery.  Returns the updated value/pointer.
+ * Under Boehm / Phase 3 these are identity functions.
+ *
+ * Historical names (gc_ss_evac, gc_ss_fwd) kept for compatibility with
+ * existing scanner callbacks in modules.c and sx_rules.c.
+ */
+uintptr_t gc_ss_evac(uintptr_t v);
+void     *gc_ss_fwd(void *p);
+
+/* Alias for gc_register_ext_scanner — matches name used in existing code. */
+static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
+    gc_register_ext_scanner(cb);
+}
+
 /* ── Shadow stack (precise GC) ───────────────────────────────────────────── */
 
 /*
@@ -268,36 +305,43 @@ static inline void gc_pop_frame(GcFrame **fp) {
 #  define GC_AUTOFRAME(n, ...) ((void)0)
 #endif
 
-/* ── Write barrier (precise GC) ──────────────────────────────────────────── */
+/* ── Card table (always declared; populated only under generational GC) ───── */
+
+/*
+ * Card table covers the Boehm tenured heap.  Each byte represents one 512-byte
+ * card; set to 1 when a tenured object stores a nursery reference.
+ * Both globals are NULL/0 under Boehm and set by gc_gen_init().
+ */
+#define GC_CARD_BYTES 512u
+extern uint8_t  *gc_card_table;
+extern uintptr_t gc_tenured_base;
+
+/* ── Write barrier ────────────────────────────────────────────────────────── */
 
 /*
  * GC_WB(obj, field, val): write val into obj->field and mark the card dirty
- * if obj is in tenured space (old→young reference).  Under Boehm reduces to
- * the bare assignment.
+ * if obj is in tenured space (old→young reference).  Under Boehm gc_card_table
+ * is NULL so the barrier reduces to the bare assignment.
  *
  * val must be a val_t.  Example: GC_WB(as_pair(p), car, new_car_val)
- *
  * For array-element writes use gc_wb_slot(&arr[i], new_val) directly.
  */
-
-#ifdef CURRY_GC_PRECISE
-extern uint8_t  *gc_card_table;
-extern uintptr_t gc_tenured_base;
-#define GC_CARD_BYTES 512u
-
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
-    if (vis_ptr(newval)) {
+#ifdef CURRY_GC_PRECISE
+    if (gc_card_table && vis_ptr(newval)) {
         uintptr_t addr = (uintptr_t)slot;
         if (addr >= gc_tenured_base)
             gc_card_table[(addr - gc_tenured_base) / GC_CARD_BYTES] = 1;
     }
+#endif
 }
-#define GC_WB(obj, field, newval) \
-    do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
+
+#ifdef CURRY_GC_PRECISE
+#  define GC_WB(obj, field, newval) \
+       do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
 #else
-static inline void gc_wb_slot(val_t *slot, val_t newval) { *slot = newval; }
-#define GC_WB(obj, field, newval) ((obj)->field = (newval))
+#  define GC_WB(obj, field, newval) ((obj)->field = (newval))
 #endif
 
 #endif /* CURRY_GC_H */
