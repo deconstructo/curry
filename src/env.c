@@ -65,7 +65,7 @@ static void frame_hash_rehash(EnvFrame *f) {
 /* ---- Frame ---- */
 
 EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
-    EnvFrame *f = CURRY_NEW(EnvFrame);
+    EnvFrame *f = CURRY_NEW_PINNED(EnvFrame);
     f->hdr.type  = T_ENV;
     f->hdr.flags = 0;
     f->size   = 0;

@@ -270,6 +270,13 @@ static val_t eval_call_cc(val_t proc) {
 /* ---- Evaluator ---- */
 
 val_t eval(val_t expr, val_t env) {
+    /* Shadow stack: register the two persistent locals so a moving GC can
+     * update them after nursery evacuation.  op/rest are declared here so
+     * they are in scope for GC_AUTOFRAME; goto tail re-assigns them each
+     * iteration without crossing their declarations.
+     * Under Boehm GC_AUTOFRAME is a no-op. */
+    val_t op = V_NIL, rest = V_NIL;
+    GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
@@ -286,8 +293,8 @@ tail:
         if (t != T_PAIR)   return expr;   /* string, number, vector, etc. — self-eval */
     }
 
-    val_t op   = akk_translate(vcar(expr));   /* Akkadian/cuneiform → English */
-    val_t rest = vcdr(expr);
+    op   = akk_translate(vcar(expr));   /* Akkadian/cuneiform → English */
+    rest = vcdr(expr);
 
     /* ---- Special forms ---- */
 

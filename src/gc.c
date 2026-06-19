@@ -69,6 +69,17 @@ gc_ops_t *gc_ops = &gc_boehm_ops;
 
 _Thread_local GcNursery gc_nursery = { NULL, NULL, NULL };
 
+/* Shadow stack TLS root — head of the per-thread GcFrame linked list.
+ * NULL when no eval() frame is active (e.g. at top level between expressions).
+ * Under Boehm this is never read by the GC; it exists so that GC_AUTOFRAME
+ * in eval.c compiles cleanly and a debug assertion can verify balance. */
+_Thread_local GcFrame *gc_shadow_stack = NULL;
+
+/* Globals required by the write barrier when CURRY_GC_PRECISE is defined.
+ * Under Boehm they are never read; they are NULL/0 by default. */
+uint8_t  *gc_card_table   = NULL;
+uintptr_t gc_tenured_base = 0;
+
 #define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */
 
 /*

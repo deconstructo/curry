@@ -136,7 +136,7 @@ static Module *load_c_module(val_t name, const char *so_path) {
     CurryVM *vm = curry_vm_new(mod_env);
     init_fn(vm);
 
-    Module *mod = CURRY_NEW(Module);
+    Module *mod = CURRY_NEW_PINNED(Module);
     mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
     mod->name      = name;
     mod->env       = as_env(mod_env);
@@ -160,7 +160,7 @@ static Module *load_scheme_module(val_t name, const char *path) {
     port_close(port);
     (void)result;
 
-    Module *mod = CURRY_NEW(Module);
+    Module *mod = CURRY_NEW_PINNED(Module);
     mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
     mod->name      = name;
     mod->env       = as_env(mod_env);
@@ -393,7 +393,7 @@ val_t modules_import(val_t spec, val_t env) {
 }
 
 void modules_register_builtin(val_t name_list, val_t mod_env) {
-    Module *mod = CURRY_NEW(Module);
+    Module *mod = CURRY_NEW_PINNED(Module);
     mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
     mod->name      = name_list;
     mod->env       = as_env(mod_env);

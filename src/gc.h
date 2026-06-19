@@ -198,6 +198,14 @@ static inline void gc_unpin(void *obj)             { gc_ops->unpin(obj); }
 static inline void gc_register_root(void *slot)    { gc_ops->register_root(slot);   }
 static inline void gc_unregister_root(void *slot)  { gc_ops->unregister_root(slot); }
 
+/* val_t-taking pin/unpin for FFI use: C extensions call these to protect
+ * Scheme values they hold in heap-allocated structs across GC points.
+ * Under Boehm these are no-ops (conservative scan finds them anyway).
+ * Under a moving GC they prevent the referenced object from being relocated. */
+#include "value.h"
+static inline void gc_val_pin(val_t v)   { if (vis_ptr(v)) gc_ops->pin((void *)(uintptr_t)v);   }
+static inline void gc_val_unpin(val_t v) { if (vis_ptr(v)) gc_ops->unpin((void *)(uintptr_t)v); }
+
 /*
  * Register a raw C pointer (not a val_t) that may point to a semispace object.
  * The GC updates *rawptr after collection if the target was moved.
@@ -215,5 +223,81 @@ void gc_unregister_rawptr(void **rawptr);
  */
 void gc_register_stack(void *base, void **sp_ptr);
 void gc_unregister_stack(void *base);
+
+/* ── Shadow stack (precise GC) ───────────────────────────────────────────── */
+
+/*
+ * When CURRY_GC_PRECISE is defined, C scopes in eval.c that hold val_t locals
+ * across an allocation point must register them here so a moving collector can
+ * update them after evacuation.
+ *
+ * Usage — one per function that can trigger collection:
+ *   val_t x = V_NIL, y = V_NIL;
+ *   GC_AUTOFRAME(2, &x, &y);   // push frame; auto-pops on scope exit
+ *   x = eval(...);             // might allocate and move nursery objects
+ *   y = eval(...);             // x is still valid — GC updated it via frame
+ *
+ * Under Boehm (default): all macros expand to nothing; gc_shadow_stack unused.
+ */
+
+typedef struct GcFrame {
+    val_t         **slots;
+    int             count;
+    struct GcFrame *prev;
+} GcFrame;
+
+#ifndef __cplusplus
+extern _Thread_local GcFrame *gc_shadow_stack;
+#endif
+
+static inline void gc_pop_frame(GcFrame **fp) {
+#ifdef CURRY_GC_PRECISE
+    gc_shadow_stack = (*fp)->prev;
+#else
+    (void)fp;
+#endif
+}
+
+#ifdef CURRY_GC_PRECISE
+#  define GC_AUTOFRAME(n, ...) \
+       val_t *_gc_frame_roots[] = {__VA_ARGS__}; \
+       GcFrame _gc_frame = {_gc_frame_roots, (n), gc_shadow_stack}; \
+       gc_shadow_stack = &_gc_frame; \
+       __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
+#else
+#  define GC_AUTOFRAME(n, ...) ((void)0)
+#endif
+
+/* ── Write barrier (precise GC) ──────────────────────────────────────────── */
+
+/*
+ * GC_WB(obj, field, val): write val into obj->field and mark the card dirty
+ * if obj is in tenured space (old→young reference).  Under Boehm reduces to
+ * the bare assignment.
+ *
+ * val must be a val_t.  Example: GC_WB(as_pair(p), car, new_car_val)
+ *
+ * For array-element writes use gc_wb_slot(&arr[i], new_val) directly.
+ */
+
+#ifdef CURRY_GC_PRECISE
+extern uint8_t  *gc_card_table;
+extern uintptr_t gc_tenured_base;
+#define GC_CARD_BYTES 512u
+
+static inline void gc_wb_slot(val_t *slot, val_t newval) {
+    *slot = newval;
+    if (vis_ptr(newval)) {
+        uintptr_t addr = (uintptr_t)slot;
+        if (addr >= gc_tenured_base)
+            gc_card_table[(addr - gc_tenured_base) / GC_CARD_BYTES] = 1;
+    }
+}
+#define GC_WB(obj, field, newval) \
+    do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
+#else
+static inline void gc_wb_slot(val_t *slot, val_t newval) { *slot = newval; }
+#define GC_WB(obj, field, newval) ((obj)->field = (newval))
+#endif
 
 #endif /* CURRY_GC_H */
