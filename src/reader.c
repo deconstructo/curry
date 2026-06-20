@@ -599,15 +599,22 @@ static val_t read_datum(val_t port) {
 }
 
 val_t scm_read(val_t port) {
-    return read_datum(port);
+    gc_inhibit_minor();
+    val_t result = read_datum(port);
+    gc_resume_minor();
+    return result;
 }
 
 val_t scm_read_cstr(const char *src) {
     val_t p = port_open_input_string(src, (uint32_t)strlen(src));
-    return read_datum(p);
+    gc_inhibit_minor();
+    val_t result = read_datum(p);
+    gc_resume_minor();
+    return result;
 }
 
 val_t scm_read_all(val_t port) {
+    gc_inhibit_minor();
     /* Build list of all datums in reverse, then reverse */
     val_t head = V_NIL;
     val_t v;
@@ -625,5 +632,6 @@ val_t scm_read_all(val_t port) {
         p->car = vcar(head); p->cdr = result;
         result = vptr(p); head = vcdr(head);
     }
+    gc_resume_minor();
     return result;
 }

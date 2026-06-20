@@ -588,7 +588,15 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
         /* ── Pairs ──────────────────────────────────────────────────── */
-        CASE(OP_CONS) { val_t d = POP(), a = POP(); PUSH(scm_cons(a, d)); NEXT; }
+        CASE(OP_CONS) {
+            /* Allocate first: args still on VM stack so GC (if triggered)
+             * can update them.  Re-read from stack after allocation. */
+            Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+            p->hdr.type = T_PAIR; p->hdr.flags = 0;
+            p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
+            vm->sp -= 2; *vm->sp++ = vptr(p);
+            NEXT;
+        }
         CASE(OP_CAR)  { PUSH(vcar(POP())); NEXT; }
         CASE(OP_CDR)  { PUSH(vcdr(POP())); NEXT; }
         CASE(OP_SETCAR) {

@@ -140,6 +140,12 @@ extern "C" {
  * `has_ptrs` must be a compile-time constant for the branch to be folded.
  */
 #ifndef __cplusplus
+/* Ring buffer of last 16 nursery allocations for GC crash forensics */
+#define GC_ALLOC_TRACE_N 16
+extern void *gc_alloc_trace[GC_ALLOC_TRACE_N];
+extern size_t gc_alloc_trace_idx;
+extern size_t gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
+
 static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     /* Align to 8 bytes (all Curry heap objects require 8-byte alignment). */
     n = (n + 7u) & ~7u;
@@ -148,6 +154,10 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     if (__builtin_expect(next > gc_nursery.limit, 0))
         return gc_nursery_refill(n, has_ptrs);
     gc_nursery.top = next;
+    /* Trace ring buffer */
+    gc_alloc_trace[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = p;
+    gc_alloc_trace_sz[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = n;
+    gc_alloc_trace_idx++;
     return p;
 }
 #endif
@@ -288,6 +298,36 @@ extern _Thread_local GcFrame *gc_shadow_stack;
 
 static inline void gc_pop_frame(GcFrame **fp) {
     gc_shadow_stack = (*fp)->prev;
+}
+
+/*
+ * gc_inhibit_minor() / gc_resume_minor() — safe-point inhibit counter.
+ *
+ * Any C code that holds val_t locals across nursery allocation points but has
+ * NOT been shadow-stacked (compiler.c, reader.c, builtins etc.) must call
+ * gc_inhibit_minor() on entry and gc_resume_minor() on exit.  This increments
+ * a counter checked by gc_nursery_refill(); while the counter is positive,
+ * nursery overflow falls back to Boehm rather than triggering minor GC.
+ *
+ * eval() already handles this implicitly: GC_AUTOFRAME pushes a shadow stack
+ * frame; gc_nursery_refill checks gc_shadow_stack != NULL as the primary gate,
+ * and gc_inhibit_count > 0 as a secondary gate for non-eval code.
+ *
+ * Calls are nestable and balanced.
+ */
+#ifndef __cplusplus
+extern _Thread_local int gc_inhibit_count;
+#endif
+
+static inline void gc_inhibit_minor(void) {
+#ifndef __cplusplus
+    gc_inhibit_count++;
+#endif
+}
+static inline void gc_resume_minor(void) {
+#ifndef __cplusplus
+    if (gc_inhibit_count > 0) gc_inhibit_count--;
+#endif
 }
 
 #define GC_AUTOFRAME(n, ...) \

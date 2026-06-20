@@ -74,11 +74,20 @@ gc_ops_t *gc_ops = &gc_boehm_ops;
 
 _Thread_local GcNursery gc_nursery = { NULL, NULL, NULL };
 
+void   *gc_alloc_trace[GC_ALLOC_TRACE_N];
+size_t  gc_alloc_trace_idx;
+size_t  gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
+
 /* Shadow stack TLS root — head of the per-thread GcFrame linked list.
  * NULL when no eval() frame is active (e.g. at top level between expressions).
  * Under Boehm this is never read by the GC; it exists so that GC_AUTOFRAME
  * in eval.c compiles cleanly and a debug assertion can verify balance. */
 _Thread_local GcFrame *gc_shadow_stack = NULL;
+
+/* Counter for gc_inhibit_minor() / gc_resume_minor().
+ * > 0 means we're inside compiler/reader/other unsafe C code;
+ * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
+_Thread_local int gc_inhibit_count = 0;
 
 /* Globals required by the write barrier when CURRY_GC_PRECISE is defined.
  * Under Boehm they are never read; they are NULL/0 by default. */
@@ -131,7 +140,7 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
          * fall back to Boehm (same as Phase 3).  They are collected by Boehm's
          * own major GC.
          */
-        if (gc_shadow_stack == NULL) {
+        if (gc_shadow_stack == NULL && gc_inhibit_count == 0) {
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
             /* Retry bump pointer after collection */

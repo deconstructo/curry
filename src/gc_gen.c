@@ -62,10 +62,6 @@ static void init_card_table(void) {
     gc_card_table   = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
     if (!gc_card_table) { fprintf(stderr, "[gc_gen] FATAL: card table OOM\n"); abort(); }
     memset(gc_card_table, 0, ncards);
-    /* Store card count in a static for the reset pass */
-    static size_t g_ncards;
-    g_ncards = ncards;
-    (void)g_ncards;
 }
 
 static size_t card_table_ncards(void) {
@@ -235,6 +231,21 @@ static size_t obj_size(const Hdr *h) {
     default:
         fprintf(stderr, "[gc_gen] FATAL: unknown GC:MOVE type %u at %p\n",
                 h->type, (const void *)h);
+        /* Dump last 16 nursery allocations */
+        {
+            fprintf(stderr, "[gc_gen] last nursery allocations (oldest→newest):\n");
+            size_t n_trace = gc_alloc_trace_idx < GC_ALLOC_TRACE_N
+                           ? gc_alloc_trace_idx : GC_ALLOC_TRACE_N;
+            for (size_t k = 0; k < n_trace; k++) {
+                size_t slot = (gc_alloc_trace_idx - n_trace + k) % GC_ALLOC_TRACE_N;
+                void *addr = gc_alloc_trace[slot];
+                size_t sz  = gc_alloc_trace_sz[slot];
+                uint32_t tp = 0;
+                if (addr) { memcpy(&tp, addr, 4); }
+                fprintf(stderr, "  [%2zu] addr=%p sz=%zu type=%u%s\n",
+                        k, addr, sz, tp, addr == (void*)h ? " <-- CRASH" : "");
+            }
+        }
         abort();
     }
 }
@@ -260,7 +271,6 @@ static val_t evacuate(val_t v) {
     Hdr *h = (Hdr *)(uintptr_t)v;
     if (!in_nursery(h)) return v;
     if (h->type == GC_FORWARDED) return vptr((void *)h->fwd);
-
     size_t sz = obj_size(h);
     bool has_ptrs = type_has_ptrs(h->type);
     void *dst = has_ptrs ? GC_MALLOC(sz) : GC_MALLOC_ATOMIC(sz);
@@ -553,30 +563,37 @@ void gc_gen_minor_collect(void) {
         pthread_mutex_unlock(&minor_gc_lock);
         return;
     }
-
     wl_len = 0;
+
+    /*
+     * Inhibit Boehm major GC for the duration of this minor collection.
+     * We call GC_MALLOC many times to promote objects; on macOS arm64,
+     * Boehm's stop-the-world uses thread_suspend which fails if our thread
+     * is mid-collection with minor_gc_lock held.  GC_disable/enable brackets
+     * this region so Boehm defers any major collection until after we finish.
+     */
+    GC_disable();
 
     /* Install evacuation bridges for gc_ss_evac/gc_ss_fwd */
     gc_evac_fn = gen_evac_fn;
     gc_fwd_fn  = gen_fwd_fn;
 
-    /* ── 1. Evacuate shadow stack (current thread) ── */
+    /* 1. Evacuate shadow stack (current thread) */
     for (GcFrame *f = gc_shadow_stack; f; f = f->prev)
         for (int i = 0; i < f->count; i++)
             *f->slots[i] = evacuate(*f->slots[i]);
 
-    /* ── 2. Evacuate VM value stack (current thread) ── */
+    /* 2. Evacuate VM value stack (current thread) */
     if (vm) {
         for (val_t *slot = vm->stack; slot < vm->sp; slot++)
             *slot = evacuate(*slot);
-        /* Call frame closures are GC:PIN (BcClosure) — addresses stable. */
     }
 
-    /* ── 3. Evacuate registered val_t roots ── */
+    /* 3. Evacuate registered val_t roots */
     for (size_t i = 0; i < g_roots_count; i++)
         *g_roots[i] = evacuate(*g_roots[i]);
 
-    /* ── 4. Evacuate registered VM stack ranges ── */
+    /* 4. Evacuate registered VM stack ranges */
     for (size_t i = 0; i < g_stacks_count; i++) {
         val_t *base = g_stacks[i].base;
         val_t *sp   = *g_stacks[i].sp_ptr;
@@ -584,22 +601,22 @@ void gc_gen_minor_collect(void) {
             *slot = evacuate(*slot);
     }
 
-    /* ── 5. Drain work list (BFS over promoted objects) ── */
+    /* 5. Drain work list (BFS over promoted objects) */
     size_t wl_scan = 0;
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
-    /* ── 6. Scan pinned objects for cross-heap refs ── */
+    /* 6. Scan pinned objects for cross-heap refs */
     for (size_t i = 0; i < pinned_count; i++) {
         void *obj = pinned_slots[i];
         if (obj) scan_pinned_object(obj);
     }
 
-    /* ── 7. Call ext_scanner callbacks ── */
+    /* 7. Call ext_scanner callbacks */
     for (size_t i = 0; i < g_ext_count; i++)
         g_ext_scanners[i]();
 
-    /* ── 8. Drain again (scanners may have added objects) ── */
+    /* 8. Drain again (scanners may have added objects) */
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
@@ -615,6 +632,9 @@ void gc_gen_minor_collect(void) {
     size_t ncards = card_table_ncards();
     if (gc_card_table && ncards)
         memset(gc_card_table, 0, ncards);
+
+    /* Re-enable Boehm major GC now that we're done with the promotion loop. */
+    GC_enable();
 
     pthread_mutex_unlock(&minor_gc_lock);
 }

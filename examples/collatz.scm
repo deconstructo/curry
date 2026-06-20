@@ -94,3 +94,5 @@
             (if (> steps worst-steps)
                 (loop (+ n 1) n steps)
                 (loop (+ n 1) worst-n worst-steps)))))))
+
+(test-collatz 1 1000000)

@@ -65,14 +65,22 @@ val_t scm_list_tail(val_t lst, int n) {
     return lst;
 }
 
-val_t scm_append(val_t a, val_t b) {
+static val_t scm_append_inner(val_t a, val_t b) {
     if (vis_nil(a)) return b;
-    return scm_cons(vcar(a), scm_append(vcdr(a), b));
+    return scm_cons(vcar(a), scm_append_inner(vcdr(a), b));
+}
+val_t scm_append(val_t a, val_t b) {
+    gc_inhibit_minor();
+    val_t r = scm_append_inner(a, b);
+    gc_resume_minor();
+    return r;
 }
 
 val_t scm_reverse(val_t lst) {
     val_t r = V_NIL;
+    gc_inhibit_minor();
     while (vis_pair(lst)) { r = scm_cons(vcar(lst), r); lst = vcdr(lst); }
+    gc_resume_minor();
     return r;
 }
 
@@ -219,7 +227,15 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Pairs and lists ---- */
-static val_t prim_cons(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_cons(av[0], av[1]); }
+static val_t prim_cons(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
+     * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
+    Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+    p->hdr.type = T_PAIR; p->hdr.flags = 0;
+    p->car = av[0]; p->cdr = av[1];
+    return vptr(p);
+}
 static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"car: not a pair"); return vcar(av[0]); }
 static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"cdr: not a pair"); return vcdr(av[0]); }
 static val_t prim_set_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair"); as_pair(av[0])->car=av[1]; return V_VOID; }
@@ -238,13 +254,17 @@ CXR3(dda, vcdr, vcdr, vcar) CXR3(ddd, vcdr, vcdr, vcdr)
 
 static val_t prim_list(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = V_NIL;
+    gc_inhibit_minor();
     for (int i = ac-1; i >= 0; i--) r = scm_cons(av[i], r);
+    gc_resume_minor();
     return r;
 }
 static val_t prim_list_star(int ac, val_t *av, void *ud) {
     (void)ud; if (ac == 0) return V_NIL;
     val_t r = av[ac-1];
+    gc_inhibit_minor();
     for (int i = ac-2; i >= 0; i--) r = scm_cons(av[i], r);
+    gc_resume_minor();
     return r;
 }
 static val_t prim_length(int ac, val_t *av, void *ud) {
