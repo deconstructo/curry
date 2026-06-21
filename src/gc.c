@@ -24,6 +24,7 @@
 #include <gc/gc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ── Boehm backend ──────────────────────────────────────────────────────── */
 
@@ -188,6 +189,14 @@ val_t       **g_roots;         /* registered val_t* roots                     */
 size_t        g_roots_count;
 size_t        g_roots_cap;
 
+/*
+ * Shadow copy of root VALUES (not pointers) in a GC_MALLOC_UNCOLLECTABLE block.
+ * Boehm's conservative scan sees this block and marks the val_t heap targets live.
+ * Without this, val_t* roots in .data/.bss are below Boehm's plausible heap range
+ * and are invisible to Boehm's conservative scan, so referenced objects can be freed.
+ */
+val_t         *g_roots_shadow;  /* GC_MALLOC_UNCOLLECTABLE, holds copies of *g_roots[i] */
+
 GcStackRange *g_stacks;        /* registered VM value-stack ranges            */
 size_t        g_stacks_count;
 size_t        g_stacks_cap;
@@ -203,7 +212,8 @@ void     *(*gc_fwd_fn)(void *)      = NULL;
 
 static void ensure_roots(void) {
     if (!g_roots) {
-        g_roots = GC_MALLOC_UNCOLLECTABLE(GC_ROOTS_INIT_CAP * sizeof(val_t *));
+        g_roots        = GC_MALLOC_UNCOLLECTABLE(GC_ROOTS_INIT_CAP * sizeof(val_t *));
+        g_roots_shadow = GC_MALLOC_UNCOLLECTABLE(GC_ROOTS_INIT_CAP * sizeof(val_t));
         g_roots_cap = GC_ROOTS_INIT_CAP;
     }
 }
@@ -228,17 +238,37 @@ void gc_register_root(void *slot) {
     if (g_roots_count == g_roots_cap) {
         size_t nc = g_roots_cap * 2;
         val_t **nr = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t *));
-        memcpy(nr, g_roots, g_roots_count * sizeof(val_t *));
-        GC_FREE(g_roots);
-        g_roots = nr; g_roots_cap = nc;
+        val_t  *ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t));
+        memcpy(nr, g_roots,        g_roots_count * sizeof(val_t *));
+        memcpy(ns, g_roots_shadow, g_roots_count * sizeof(val_t));
+        GC_FREE(g_roots); GC_FREE(g_roots_shadow);
+        g_roots = nr; g_roots_shadow = ns; g_roots_cap = nc;
     }
-    g_roots[g_roots_count++] = (val_t *)slot;
+    size_t idx = g_roots_count++;
+    g_roots[idx]        = (val_t *)slot;
+    val_t cur = *(val_t *)slot;
+    g_roots_shadow[idx] = cur;
+    /* Register the val_t slot itself as a root range (covers .data/.bss addresses). */
+    GC_add_roots(slot, (char *)slot + sizeof(val_t));
+    /*
+     * Also register the OBJECT pointed to by the root value as a root range.
+     * Boehm's GC_add_roots_inner checks if the base is a heap pointer and
+     * explicitly marks the containing block as live — this is the reliable
+     * mechanism for .data-resident val_t roots on macOS arm64.
+     */
+    if (cur & ~3u) {  /* quick heap-ptr check: non-zero and tag==0 */
+        uintptr_t p = cur & ~(uintptr_t)3u;
+        GC_add_roots((char *)p, (char *)p + sizeof(val_t));
+    }
 }
 
 void gc_unregister_root(void *slot) {
     for (size_t i = 0; i < g_roots_count; i++) {
         if (g_roots[i] == (val_t *)slot) {
-            g_roots[i] = g_roots[--g_roots_count];
+            size_t last = --g_roots_count;
+            g_roots[i]        = g_roots[last];
+            g_roots_shadow[i] = g_roots_shadow[last];
+            GC_remove_roots(slot, (char *)slot + sizeof(val_t));
             return;
         }
     }

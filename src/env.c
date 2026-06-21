@@ -2,14 +2,20 @@
 #include "object.h"
 #include "gc.h"
 #include "symbol.h"
+#include <gc/gc.h>
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 // Scath was here
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
 val_t GLOBAL_ENV;
+/* Raw C pointer to the root EnvFrame, kept in .data so Boehm's conservative
+ * segment scan finds it and keeps the frame alive across major GCs. */
+void *gc_env_frame_pin = NULL;
 
 /* ---- Pair construction (needed for rest-arg list building) ---- */
 
@@ -151,6 +157,38 @@ val_t env_new_root(void) {
     return vptr(frame_new(64, NULL));
 }
 
+/*
+ * Allocate the global root EnvFrame as GC_MALLOC_UNCOLLECTABLE so Boehm
+ * never frees it (Boehm's conservative scan of .data/.bss variables and
+ * GC_MALLOC_UNCOLLECTABLE blocks reliably finds ordinary allocations but
+ * can miss static pointers inside C .data sections on some macOS arm64
+ * configurations when a Boehm GC fires during nursery-fill execution).
+ * The root frame lives for the entire program lifetime — making it
+ * uncollectable is both correct and leak-free.
+ */
+static val_t env_new_root_permanent(void) {
+    EnvFrame *f = (EnvFrame *)GC_MALLOC_UNCOLLECTABLE(sizeof(EnvFrame));
+    if (!f) { fprintf(stderr, "OOM: root EnvFrame\n"); abort(); }
+    f->hdr.type  = T_ENV;
+    f->hdr.flags = 0;
+    f->size      = 0;
+    f->cap       = 64;
+    /* Use GC_MALLOC_UNCOLLECTABLE for the arrays too so Boehm's scan of
+     * the uncollectable frame block keeps them reachable.  They are
+     * effectively leaked (intentionally — they live for the process lifetime). */
+    f->syms = (val_t *)GC_MALLOC_UNCOLLECTABLE(64 * sizeof(val_t));
+    f->vals = (val_t *)GC_MALLOC_UNCOLLECTABLE(64 * sizeof(val_t));
+    f->parent  = NULL;
+    f->hidx    = NULL;
+    f->hcap    = 0;
+    f->version = 0;
+    /* Register in pinned_slots so scan_pinned_object updates f->vals during
+     * minor GC (required even though the frame is uncollectable). */
+    extern void gc_gen_pin_permanent(void *);
+    gc_gen_pin_permanent(f);
+    return vptr(f);
+}
+
 val_t env_extend(val_t parent) {
     EnvFrame *pf = vis_env(parent) ? as_env(parent) : NULL;
     return vptr(frame_new(8, pf));
@@ -241,6 +279,7 @@ val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv) {
 }
 
 void env_init(void) {
-    GLOBAL_ENV = env_new_root();
+    GLOBAL_ENV = env_new_root_permanent();
+    gc_env_frame_pin = (void *)(uintptr_t)GLOBAL_ENV;
     gc_register_root(&GLOBAL_ENV);
 }

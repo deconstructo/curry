@@ -42,6 +42,7 @@ void gc_gen_minor_collect(void);
 typedef struct { val_t *base; val_t **sp_ptr; } GcStackRange;
 
 extern val_t       **g_roots;
+extern val_t        *g_roots_shadow;
 extern size_t        g_roots_count;
 extern GcStackRange *g_stacks;
 extern size_t        g_stacks_count;

@@ -1,6 +1,7 @@
 #include "symbol.h"
 #include "object.h"
 #include "gc.h"
+#include <gc/gc.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -65,8 +66,9 @@ val_t sym_intern(const char *name, uint32_t len) {
         idx = (idx + 1) & mask;
     }
 
-    /* Not found: allocate new symbol (atomic: no interior GC pointers) */
-    Symbol *sym = (Symbol *)gc_alloc_pinned_atomic(sizeof(Symbol) + len + 1);
+    /* Symbols are permanent (never unintern'd) — use GC_MALLOC_UNCOLLECTABLE so
+     * Boehm never frees them even under the generational GC's GC_disable window. */
+    Symbol *sym = (Symbol *)GC_MALLOC_UNCOLLECTABLE(sizeof(Symbol) + len + 1);
     sym->hdr.type  = T_SYMBOL;
     sym->hdr.flags = 0;
     sym->len  = len;

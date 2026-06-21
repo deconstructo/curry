@@ -185,6 +185,7 @@
 #include "value.h"
 #include "object.h"
 #include "gc.h"
+#include <gc/gc_mark.h>
 #include "numeric.h"
 #include "symbol.h"
 #include "env.h"
@@ -430,16 +431,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci = READ_U8();
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(GLOBAL_ENV);
+            val_t loaded_gval;
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
                                  cache[ci].version == root->version, 1)) {
-                PUSH(*cache[ci].slot);
+                loaded_gval = *cache[ci].slot;
             } else {
                 val_t sym = CONSTS[ci];
                 val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
                 if (!slot) scm_raise(V_FALSE, "unbound variable: %s", sym_cstr(sym));
                 if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
-                PUSH(*slot);
+                loaded_gval = *slot;
             }
+            PUSH(loaded_gval);
             NEXT;
         }
         CASE(OP_STORE_GLOBAL) {
@@ -746,7 +749,6 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_TAIL_CALL) {
             uint8_t argc2 = READ_U8();
             val_t callee  = PEEK(argc2);
-
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */

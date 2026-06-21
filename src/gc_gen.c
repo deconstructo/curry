@@ -84,12 +84,17 @@ static size_t   pinned_count;
 static size_t   pinned_cap;
 static pthread_mutex_t pinned_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Exposed so env.c can register the root EnvFrame (allocated
+ * GC_MALLOC_UNCOLLECTABLE) into the pinned scan list. */
+void gc_gen_pin_permanent(void *obj);
+
 static void pinned_add(void *obj) {
     pthread_mutex_lock(&pinned_lock);
     for (size_t i = 0; i < pinned_count; i++) {
         if (!pinned_slots[i]) {
             pinned_slots[i] = obj;
-            GC_general_register_disappearing_link(&pinned_slots[i], obj);
+            /* No disappearing link — pinned_slots is GC_MALLOC_UNCOLLECTABLE and
+             * keeps the pointed-to object alive via Boehm's scan. */
             pthread_mutex_unlock(&pinned_lock);
             return;
         }
@@ -99,17 +104,10 @@ static void pinned_add(void *obj) {
         void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
         memcpy(ns, pinned_slots, pinned_count * sizeof(void *));
         memset(ns + pinned_count, 0, (nc - pinned_count) * sizeof(void *));
-        for (size_t i = 0; i < pinned_count; i++) {
-            if (pinned_slots[i]) {
-                GC_general_register_disappearing_link(&ns[i], ns[i]);
-                GC_unregister_disappearing_link(&pinned_slots[i]);
-            }
-        }
         GC_FREE(pinned_slots);
         pinned_slots = ns; pinned_cap = nc;
     }
     pinned_slots[pinned_count] = obj;
-    GC_general_register_disappearing_link(&pinned_slots[pinned_count], obj);
     pinned_count++;
     pthread_mutex_unlock(&pinned_lock);
 }
@@ -466,8 +464,15 @@ static void scan_pinned_object(void *obj) {
     switch (h->type) {
     /* Types without val_t fields — nothing to do */
     case T_SYMBOL: case T_BIGNUM: case T_RATIONAL: case T_PORT:
-    case T_PRIMITIVE: case T_MPFR: case T_JITCLOSURE: case T_UPVALUE:
+    case T_PRIMITIVE: case T_MPFR: case T_JITCLOSURE:
         break;
+    case T_UPVALUE: {
+        Upvalue *up = (Upvalue *)obj;
+        /* When closed, location == &up->closed; evacuate the stored value. */
+        if (up->location == &up->closed)
+            up->closed = evacuate(up->closed);
+        break;
+    }
 
     case T_ENV: {
         EnvFrame *f = (EnvFrame *)obj;
@@ -559,7 +564,6 @@ void gc_gen_minor_collect(void) {
 
     collect_top = gc_nursery.top;
     if (collect_top == gc_nursery.base) {
-        /* Nursery empty — nothing to collect. */
         pthread_mutex_unlock(&minor_gc_lock);
         return;
     }
@@ -574,24 +578,25 @@ void gc_gen_minor_collect(void) {
      */
     GC_disable();
 
-    /* Install evacuation bridges for gc_ss_evac/gc_ss_fwd */
     gc_evac_fn = gen_evac_fn;
     gc_fwd_fn  = gen_fwd_fn;
 
-    /* 1. Evacuate shadow stack (current thread) */
+    /* 1. Evacuate shadow stack */
     for (GcFrame *f = gc_shadow_stack; f; f = f->prev)
         for (int i = 0; i < f->count; i++)
             *f->slots[i] = evacuate(*f->slots[i]);
 
-    /* 2. Evacuate VM value stack (current thread) */
+    /* 2. Evacuate VM value stack */
     if (vm) {
         for (val_t *slot = vm->stack; slot < vm->sp; slot++)
             *slot = evacuate(*slot);
     }
 
     /* 3. Evacuate registered val_t roots */
-    for (size_t i = 0; i < g_roots_count; i++)
+    for (size_t i = 0; i < g_roots_count; i++) {
         *g_roots[i] = evacuate(*g_roots[i]);
+        g_roots_shadow[i] = *g_roots[i];
+    }
 
     /* 4. Evacuate registered VM stack ranges */
     for (size_t i = 0; i < g_stacks_count; i++) {
@@ -616,25 +621,28 @@ void gc_gen_minor_collect(void) {
     for (size_t i = 0; i < g_ext_count; i++)
         g_ext_scanners[i]();
 
-    /* 8. Drain again (scanners may have added objects) */
+    /* 8. Drain again (scanners may have promoted more objects) */
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
-    /* ── 9. Clear evacuation bridges ── */
     gc_evac_fn = NULL;
     gc_fwd_fn  = NULL;
 
-    /* ── 10. Reset nursery ── */
+    /* 9. Reset nursery */
     memset(gc_nursery.base, 0, (size_t)(collect_top - gc_nursery.base));
     gc_nursery.top = gc_nursery.base;
 
-    /* ── 11. Clear dirty cards ── */
+    /* 10. Clear dirty cards */
     size_t ncards = card_table_ncards();
     if (gc_card_table && ncards)
         memset(gc_card_table, 0, ncards);
 
-    /* Re-enable Boehm major GC now that we're done with the promotion loop. */
+    /* Sync root shadows before Boehm's major GC can see them */
+    for (size_t i = 0; i < g_roots_count; i++)
+        g_roots_shadow[i] = *g_roots[i];
+
     GC_enable();
+    GC_invoke_finalizers();
 
     pthread_mutex_unlock(&minor_gc_lock);
 }
@@ -646,7 +654,13 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
 }
 
 static void *gen_alloc_pinned(size_t n, bool has_ptrs) {
-    void *obj = has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
+    /* Use GC_MALLOC_UNCOLLECTABLE for pinned objects with pointer fields.
+     * Under GC_disable()/GC_enable() bracket used during minor GC, Boehm's
+     * conservative scan can miss GC_MALLOC blocks that are only reachable
+     * through uncollectable pinned_slots on macOS ARM64.  Using uncollectable
+     * for the pinned objects themselves makes sub-allocations (code buffers,
+     * constant arrays) reachable through the pinned scan list unconditionally. */
+    void *obj = has_ptrs ? GC_MALLOC_UNCOLLECTABLE(n) : GC_MALLOC_ATOMIC(n);
     if (obj && has_ptrs) pinned_add(obj);
     return obj;
 }
@@ -710,4 +724,13 @@ void gc_gen_init(size_t nursery_bytes) {
 
     init_card_table();
     alloc_thread_nursery();
+}
+
+/*
+ * Add an externally-allocated object (e.g. GC_MALLOC_UNCOLLECTABLE) to the
+ * pinned scan list so scan_pinned_object keeps its val_t fields current during
+ * minor GC.  Called from env.c for the root EnvFrame.
+ */
+void gc_gen_pin_permanent(void *obj) {
+    if (obj) pinned_add(obj);
 }
