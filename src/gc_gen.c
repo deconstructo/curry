@@ -90,15 +90,8 @@ void gc_gen_pin_permanent(void *obj);
 
 static void pinned_add(void *obj) {
     pthread_mutex_lock(&pinned_lock);
-    for (size_t i = 0; i < pinned_count; i++) {
-        if (!pinned_slots[i]) {
-            pinned_slots[i] = obj;
-            /* No disappearing link — pinned_slots is GC_MALLOC_UNCOLLECTABLE and
-             * keeps the pointed-to object alive via Boehm's scan. */
-            pthread_mutex_unlock(&pinned_lock);
-            return;
-        }
-    }
+    /* All pinned objects are GC_MALLOC_UNCOLLECTABLE and are never freed by
+     * Boehm, so no slot is ever zeroed; always append. */
     if (pinned_count == pinned_cap) {
         size_t nc = pinned_cap * 2;
         void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
@@ -611,11 +604,15 @@ void gc_gen_minor_collect(void) {
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
-    /* 6. Scan pinned objects for cross-heap refs */
+    /* 6. Scan pinned objects for cross-heap refs.
+     * Hold pinned_lock to prevent concurrent pinned_add from reallocating
+     * pinned_slots under us (pinned_add GC_FREEs the old array on growth). */
+    pthread_mutex_lock(&pinned_lock);
     for (size_t i = 0; i < pinned_count; i++) {
         void *obj = pinned_slots[i];
         if (obj) scan_pinned_object(obj);
     }
+    pthread_mutex_unlock(&pinned_lock);
 
     /* 7. Call ext_scanner callbacks */
     for (size_t i = 0; i < g_ext_count; i++)
