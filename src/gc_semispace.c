@@ -684,14 +684,15 @@ static void ss_collect(void) {
             *slot = evacuate(*slot);
     }
 
-    /* Expose VM call frames so closure/BcClosure raw ptrs get fixed. */
+    /* Scan the VM: value stack, call-frame closures, open upvalues. */
     if (vm) {
-        for (int fi = 0; fi < vm->frame_count; fi++) {
-            CallFrame *cf = &vm->frames[fi];
-            cf->closure = (BcClosure *)evacuate_obj(cf->closure);
-        }
+        /* Value stack — all live slots from bottom to sp. */
+        for (val_t *slot = vm->stack; slot < vm->sp; slot++)
+            *slot = evacuate(*slot);
+        /* Raw C-pointer fields in call frames. */
+        for (int fi = 0; fi < vm->frame_count; fi++)
+            vm->frames[fi].closure = (BcClosure *)evacuate_obj(vm->frames[fi].closure);
         vm->open_upvalues = (Upvalue *)evacuate_obj(vm->open_upvalues);
-        /* Update saved open_upvalues in each active exception handler frame. */
         for (int hi = 0; hi < vm->handler_count; hi++)
             vm->handler_stack[hi].open_upvalues =
                 (Upvalue *)evacuate_obj(vm->handler_stack[hi].open_upvalues);

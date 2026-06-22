@@ -75,7 +75,7 @@ void symbolic_init(void) {
 /* ---- Constructors ---- */
 
 val_t sx_make_var(val_t name) {
-    SymVar *v = CURRY_NEW(SymVar);
+    SymVar *v = CURRY_NEW_PINNED(SymVar);
     v->hdr.type  = T_SYMVAR;
     v->hdr.flags = 0;
     v->name      = name;
@@ -83,7 +83,7 @@ val_t sx_make_var(val_t name) {
 }
 
 val_t sx_make_var_flags(val_t name, uint32_t flags) {
-    SymVar *v = CURRY_NEW(SymVar);
+    SymVar *v = CURRY_NEW_PINNED(SymVar);
     v->hdr.type  = T_SYMVAR;
     v->hdr.flags = flags;
     v->name      = name;
@@ -91,7 +91,7 @@ val_t sx_make_var_flags(val_t name, uint32_t flags) {
 }
 
 val_t sx_make_fn(val_t name, val_t params) {
-    SymFn *f = CURRY_NEW(SymFn);
+    SymFn *f = CURRY_NEW_PINNED(SymFn);
     f->hdr.type  = T_SYMFN;
     f->hdr.flags = 0;
     f->name      = name;
@@ -114,7 +114,10 @@ val_t sx_make_apply(val_t fn, int nargs, val_t *args) {
 }
 
 val_t sx_make_expr(val_t op, int nargs, val_t *args) {
-    SymExpr *e = (SymExpr *)gc_alloc(sizeof(SymExpr) + (size_t)nargs * sizeof(val_t));
+    /* Pinned (Boehm-managed, non-moving): C built-ins hold val_t locals pointing
+     * to symbolic nodes across nursery allocations; pinning ensures they stay valid
+     * if a minor GC fires mid-computation. */
+    SymExpr *e = (SymExpr *)gc_alloc_pinned(sizeof(SymExpr) + (size_t)nargs * sizeof(val_t));
     e->hdr.type  = T_SYMEXPR;
     e->hdr.flags = 0;
     e->op        = op;

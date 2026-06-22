@@ -1,5 +1,61 @@
 # Changelog
 
+### 1.5.0 — Generational GC
+
+Two-generation Cheney garbage collector available as `--gc generational`.
+
+**Architecture**
+- Gen0 (nursery): shared 2 MB `mmap` region with mutex-protected bump pointer.
+  All non-pinned objects are born here.
+- Gen1 (tenured): 128 MB `mmap` region. Live nursery objects are promoted
+  here via Cheney copy during minor collection.
+- Minor collection: stop-the-world Cheney copy of the nursery into tenured
+  space. Includes dirty-card scan (remembered set), tenured walk for
+  `T_ENV`/`T_SET`/`T_HASHTABLE` (whose value arrays live in Boehm memory
+  outside the card-table range), pinned-object scan, and ext-scanner pass.
+- Major collection: full Cheney copy of both nursery and tenured space into
+  a fresh tenured region, triggered when tenured exceeds 85% fill.
+- Write barrier: `GC_WRITE_BARRIER(obj, field, val)` macro marks 512-byte
+  cards dirty; under Boehm and semispace compiles to a single store.
+  Instrumented at all mutable sites: `set-car!`, `set-cdr!`, `vector-set!`,
+  `force`, `parameterize`, parameter-object calls, upvalue closing in the VM.
+- Safepoints: polling (`gc_stop_world` flag). Threads yield at nursery
+  exhaustion, actor receive/send!, and between work items in the parallel pool.
+- Thread cooperation: `gc_gen_thread_park`/`unpark` let workers and the
+  parallel-map dispatch thread opt out of STW while blocked on condvars.
+- Parallel map/reduce: `par_scan_roots` ext-scanner covers `elems[]`,
+  `results[]`, and per-chunk `WorkItem` val_t fields during dispatch.
+- `WorkPool` and `WorkItem` pinned via Boehm so raw C pointers in the
+  work-stealing deque stay valid across nursery resets.
+- Symbolic CAS nodes (`SymVar`, `SymFn`, `SymExpr`) pinned; their val_t
+  fields scanned during minor collection.
+- Dynamic VM registry: no longer capped at 64; grows on demand, so programs
+  spawning more than ~47 actors on a 16-core machine no longer silently drop
+  VM roots (was a use-after-free).
+
+**New CLI flags**
+- `--gc generational` — select the two-generation backend
+- `--gc-nursery-size N` — set nursery size (default `2M`; supports `K`/`M`/`G`)
+- `--gc-tenured-size N` — set tenured region capacity (default `128M`)
+
+**`(gc-stats)` generational alist**
+
+Returns `((minor-collections . N) (major-collections . N) (nursery-bytes . N)
+(nursery-used . N) (tenured-used . N) (tenured-capacity . N) (pinned-count . N))`.
+
+**Known limitation**
+
+The tree-walking eval/apply interpreter keeps intermediate `val_t` values as C
+locals not tracked by any GC root. A minor GC firing during a deep numeric
+computation corrupts those locals. Workaround: `--gc-nursery-size 16M`. A
+precise or stack-mapping approach is the planned fix.
+
+**SICM**: 167/167 pass under Boehm (default); 93/167 under `--gc generational`
+with the default 2 MB nursery, 93/167 with `--gc-nursery-size 16M` (the C-stack
+limitation affects the remaining 74 tests regardless of nursery size).
+
+---
+
 ### 1.4.1 — Mandelbrot polish + Tetrabrot explorer
 
 **New example: `examples/tetrabrot.scm`** — Bicomplex (ℂ²) Tetrabrot explorer

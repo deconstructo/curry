@@ -82,9 +82,14 @@ typedef struct {
     val_t  args;
 } ActorStart;
 
+static void actor_thread_cleanup(void *arg) {
+    (void)arg;
+}
+
 static void *actor_thread(void *arg) {
     ActorStart *start = (ActorStart *)arg;
     gc_register_thread();
+    pthread_cleanup_push(actor_thread_cleanup, NULL);
     vm_init();
 
     Actor *self = start->actor;
@@ -116,6 +121,8 @@ static void *actor_thread(void *arg) {
     /* Notify linked actors with {'EXIT, self, reason} */
     /* (simplified: just mark dead; full linking requires a registry) */
 
+    vm_free();
+    pthread_cleanup_pop(1);  /* execute gc_gen_unregister_thread */
     return NULL;
 }
 
