@@ -97,4 +97,6 @@
 
 (define s (expt 2 71))
 (define end (+ s 10000000))
-(display "over to you mofo") (newline)
+(newline) (newline)
+(display "s is defined as (expt 2 71) and end as (+ s 1000000)") (newline) (newline)
+(display "run (test-collatz start end)") (newline) (newline)
