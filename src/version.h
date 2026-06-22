@@ -1,4 +1,4 @@
 #ifndef CURRY_VERSION_H
 #define CURRY_VERSION_H
-#define CURRY_VERSION "1.5.2"
+#define CURRY_VERSION "1.5.3"
 #endif /* CURRY_VERSION_H */
