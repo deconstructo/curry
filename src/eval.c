@@ -757,7 +757,7 @@ tail:
             }
 
             uint32_t nfields = (uint32_t)list_length(field_list);
-            RecordType *rtd = (RecordType *)gc_alloc(
+            RecordType *rtd = (RecordType *)gc_alloc_pinned(
                 sizeof(RecordType) + nfields * sizeof(val_t));
             rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
             rtd->name = name_sym; rtd->nfields = nfields;
@@ -874,7 +874,7 @@ tail:
         val_t field_specs = vcdr(vcddr(rest));
 
         uint32_t nfields = (uint32_t)list_length(field_specs);
-        RecordType *rtd = (RecordType *)gc_alloc(sizeof(RecordType) + nfields * sizeof(val_t));
+        RecordType *rtd = (RecordType *)gc_alloc_pinned(sizeof(RecordType) + nfields * sizeof(val_t));
         rtd->hdr.type=T_RECORD_TYPE; rtd->hdr.flags=0;
         rtd->name = name_sym; rtd->nfields = nfields;
         val_t fs = field_specs; uint32_t fi = 0;

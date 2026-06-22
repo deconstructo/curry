@@ -1806,6 +1806,12 @@ static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
+static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    extern gc_ops_t gc_gen_ops;
+    extern gc_ops_t *gc_ops;
+    return sym_intern_cstr(gc_ops == &gc_gen_ops ? "generational" : "boehm");
+}
 static val_t prim_gc_heap_size(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_heap_size());}
 static val_t prim_gc_free_bytes(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_free_bytes());}
 static val_t prim_gc_total_bytes(int ac, val_t *av, void *ud){(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_total_bytes());}
@@ -2263,6 +2269,7 @@ void builtins_register(val_t env) {
     DEF("current-jiffy",       prim_current_jiffy,       0,0);
     DEF("jiffies-per-second",  prim_jiffies_per_second,  0,0);
     DEF("gc",                          prim_gc,                    0,0);
+    DEF("gc-mode",                     prim_gc_mode,               0,0);
     DEF("gc-heap-size",                prim_gc_heap_size,          0,0);
     DEF("gc-free-bytes",               prim_gc_free_bytes,         0,0);
     DEF("gc-total-bytes",              prim_gc_total_bytes,        0,0);

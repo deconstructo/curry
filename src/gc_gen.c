@@ -51,6 +51,8 @@ static void alloc_thread_nursery(void) {
 
 /* ── Card table ───────────────────────────────────────────────────────────── */
 
+static size_t gc_card_table_ncards;  /* fixed at alloc time — never re-derived */
+
 static void init_card_table(void) {
     uintptr_t base = (uintptr_t)GC_least_plausible_heap_addr;
     uintptr_t top  = (uintptr_t)GC_greatest_plausible_heap_addr;
@@ -59,17 +61,17 @@ static void init_card_table(void) {
     if (top <= base) { base = 0; top = (uintptr_t)4 * 1024 * 1024 * 1024; }
     size_t ncards = (top - base) / GC_CARD_BYTES;
     gc_tenured_base = base;
+    gc_card_table_ncards = ncards;
     gc_card_table   = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
     if (!gc_card_table) { fprintf(stderr, "[gc_gen] FATAL: card table OOM\n"); abort(); }
     memset(gc_card_table, 0, ncards);
 }
 
 static size_t card_table_ncards(void) {
-    uintptr_t base = gc_tenured_base;
-    uintptr_t top  = (uintptr_t)GC_greatest_plausible_heap_addr;
-    top = (top + GC_CARD_BYTES - 1u) & ~(uintptr_t)(GC_CARD_BYTES - 1u);
-    if (top <= base) return 0;
-    return (top - base) / GC_CARD_BYTES;
+    /* Return the count fixed at init_card_table() time.  Boehm may grow its
+     * heap beyond GC_greatest_plausible_heap_addr, but re-deriving ncards from
+     * the current plausible-heap bounds would exceed the allocated card table. */
+    return gc_card_table_ncards;
 }
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
@@ -95,6 +97,7 @@ static void pinned_add(void *obj) {
     if (pinned_count == pinned_cap) {
         size_t nc = pinned_cap * 2;
         void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
+        if (!ns) { fprintf(stderr, "[gc_gen] FATAL: pinned_slots OOM\n"); abort(); }
         memcpy(ns, pinned_slots, pinned_count * sizeof(void *));
         memset(ns + pinned_count, 0, (nc - pinned_count) * sizeof(void *));
         GC_FREE(pinned_slots);
@@ -153,7 +156,11 @@ static size_t obj_size(const Hdr *h) {
     case T_HASHTABLE:   return (sizeof(Hashtable)     + 7u) & ~7u;
     case T_MATRIX: {
         const Matrix *m = (const Matrix *)h;
-        return ((sizeof(Matrix) + (size_t)m->rows * m->cols * sizeof(double)) + 7u) & ~7u;
+        size_t elems;
+        if (__builtin_mul_overflow((size_t)m->rows, (size_t)m->cols, &elems) ||
+            elems > gen_nursery_size / sizeof(double))
+            goto obj_size_overflow;
+        return ((sizeof(Matrix) + elems * sizeof(double)) + 7u) & ~7u;
     }
     case T_MULTIVECTOR: {
         const Multivector *mv = (const Multivector *)h;
@@ -161,10 +168,16 @@ static size_t obj_size(const Hdr *h) {
     }
     case T_SPINOR: {
         const Spinor *s = (const Spinor *)h;
-        return ((sizeof(Spinor) + 2u * s->ncomp * sizeof(double)) + 7u) & ~7u;
+        size_t elems;
+        if (__builtin_mul_overflow(2u, (size_t)s->ncomp, &elems) ||
+            elems > gen_nursery_size / sizeof(double))
+            goto obj_size_overflow;
+        return ((sizeof(Spinor) + elems * sizeof(double)) + 7u) & ~7u;
     }
     case T_TENSOR: {
         const Tensor *t = (const Tensor *)h;
+        if (t->size > gen_nursery_size / sizeof(double))
+            goto obj_size_overflow;
         return ((sizeof(Tensor) + t->ndim * sizeof(uint32_t) +
                  t->size * sizeof(double)) + 7u) & ~7u;
     }
@@ -205,10 +218,6 @@ static size_t obj_size(const Hdr *h) {
         const Tuple *t = (const Tuple *)h;
         return ((sizeof(Tuple) + t->len * sizeof(val_t)) + 7u) & ~7u;
     }
-    case T_RECORD_TYPE: {
-        const RecordType *rt = (const RecordType *)h;
-        return ((sizeof(RecordType) + rt->nfields * sizeof(val_t)) + 7u) & ~7u;
-    }
     case T_RECORD: {
         const Record *r = (const Record *)h;
         uint32_t nf = r->rtd ? r->rtd->nfields : 0;
@@ -219,6 +228,10 @@ static size_t obj_size(const Hdr *h) {
         return (sizeof(Interval) + 7u) & ~7u;
     }
 #endif
+    obj_size_overflow:
+        fprintf(stderr, "[gc_gen] FATAL: obj_size overflow for type %u at %p\n",
+                h->type, (const void *)h);
+        abort();
     default:
         fprintf(stderr, "[gc_gen] FATAL: unknown GC:MOVE type %u at %p\n",
                 h->type, (const void *)h);
@@ -402,13 +415,6 @@ static void scan_object(void *obj) {
             t->data[i] = evacuate(t->data[i]);
         break;
     }
-    case T_RECORD_TYPE: {
-        RecordType *rt = (RecordType *)obj;
-        rt->name = evacuate(rt->name);
-        for (uint32_t i = 0; i < rt->nfields; i++)
-            rt->field_names[i] = evacuate(rt->field_names[i]);
-        break;
-    }
     case T_RECORD: {
         Record *r = (Record *)obj;
         uint32_t nf = r->rtd ? r->rtd->nfields : 0;
@@ -418,16 +424,18 @@ static void scan_object(void *obj) {
     }
     case T_SET: {
         Set *s = (Set *)obj;
-        for (uint32_t i = 0; i < s->cap; i++)
-            s->buckets[i] = evacuate(s->buckets[i]);
+        if (s->buckets)
+            for (uint32_t i = 0; i < s->cap; i++)
+                s->buckets[i] = evacuate(s->buckets[i]);
         break;
     }
     case T_HASHTABLE: {
         Hashtable *h2 = (Hashtable *)obj;
-        for (uint32_t i = 0; i < h2->cap; i++) {
-            h2->keys[i] = evacuate(h2->keys[i]);
-            h2->vals[i] = evacuate(h2->vals[i]);
-        }
+        if (h2->keys)
+            for (uint32_t i = 0; i < h2->cap; i++) {
+                h2->keys[i] = evacuate(h2->keys[i]);
+                h2->vals[i] = evacuate(h2->vals[i]);
+            }
         break;
     }
 #ifdef BUILD_MPFR
@@ -459,6 +467,13 @@ static void scan_pinned_object(void *obj) {
     case T_SYMBOL: case T_BIGNUM: case T_RATIONAL: case T_PORT:
     case T_PRIMITIVE: case T_MPFR: case T_JITCLOSURE:
         break;
+    case T_RECORD_TYPE: {
+        RecordType *rt = (RecordType *)obj;
+        rt->name = evacuate(rt->name);
+        for (uint32_t i = 0; i < rt->nfields; i++)
+            rt->field_names[i] = evacuate(rt->field_names[i]);
+        break;
+    }
     case T_UPVALUE: {
         Upvalue *up = (Upvalue *)obj;
         /* When closed, location == &up->closed; evacuate the stored value. */
