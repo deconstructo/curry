@@ -24,6 +24,7 @@
 #include <gc/gc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ── Boehm backend ──────────────────────────────────────────────────────── */
 
@@ -74,11 +75,20 @@ gc_ops_t *gc_ops = &gc_boehm_ops;
 
 _Thread_local GcNursery gc_nursery = { NULL, NULL, NULL };
 
+void   *gc_alloc_trace[GC_ALLOC_TRACE_N];
+size_t  gc_alloc_trace_idx;
+size_t  gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
+
 /* Shadow stack TLS root — head of the per-thread GcFrame linked list.
  * NULL when no eval() frame is active (e.g. at top level between expressions).
  * Under Boehm this is never read by the GC; it exists so that GC_AUTOFRAME
  * in eval.c compiles cleanly and a debug assertion can verify balance. */
 _Thread_local GcFrame *gc_shadow_stack = NULL;
+
+/* Counter for gc_inhibit_minor() / gc_resume_minor().
+ * > 0 means we're inside compiler/reader/other unsafe C code;
+ * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
+_Thread_local int gc_inhibit_count = 0;
 
 /* Globals required by the write barrier when CURRY_GC_PRECISE is defined.
  * Under Boehm they are never read; they are NULL/0 by default. */
@@ -101,19 +111,50 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
     /*
      * Slow path: nursery exhausted (or disabled under Boehm where top==NULL).
      *
-     * Under Boehm: nursery is disabled (top == limit == NULL), so every
-     * allocation reaches here.  We allocate directly via GC_MALLOC so that
-     * each Scheme object is its own Boehm allocation — required for correct
-     * finaliser registration and atomic/non-atomic distinction.
+     * Under Boehm: top==limit==NULL, so every allocation reaches here.
+     * Call GC_MALLOC directly so each object is its own Boehm allocation
+     * (required for correct finaliser registration and atomic distinction).
      *
-     * Under the generational GC (Phase 3): nursery slab is full; fall back to
-     * Boehm for this object (no minor collection yet — that's Phase 4, which
-     * will trigger a minor GC here and then retry the bump pointer).
+     * Under the generational GC (Phase 4): trigger a minor collection, reset
+     * the nursery, then retry the bump pointer.  If the object is larger than
+     * the nursery slab, promote it directly to Boehm.
      *
-     * We call GC_MALLOC directly rather than gc_ops->alloc() to avoid
-     * infinite recursion: gc_ops->alloc under the generational backend calls
-     * gc_nursery_alloc which calls us again.
+     * Do NOT call gc_ops->alloc() — that recurses back through gc_nursery_alloc
+     * and causes infinite recursion.
      */
+    if (gc_nursery.base) {
+        /*
+         * Generational backend.
+         *
+         * Safe-point check: only fire minor GC when the tree-walking evaluator
+         * is NOT active.  The tree-walker (eval.c) pushes a GcFrame onto
+         * gc_shadow_stack at entry; when the shadow stack is non-empty we are
+         * inside an eval() call that holds untracked C-local val_t pointers.
+         * Triggering a minor GC at that point would leave those locals stale.
+         *
+         * The bytecode VM dispatch loop runs with gc_shadow_stack == NULL
+         * (no eval() frame active), so it IS a safe point for collection.
+         * When the VM calls call_foreign() → apply_arr() → eval(), the shadow
+         * stack becomes non-NULL and minor GC is inhibited until eval() returns.
+         *
+         * Allocations during tree-walker execution that overflow the nursery
+         * fall back to Boehm (same as Phase 3).  They are collected by Boehm's
+         * own major GC.
+         */
+        if (gc_shadow_stack == NULL && gc_inhibit_count == 0) {
+            extern void gc_gen_minor_collect(void);
+            gc_gen_minor_collect();
+            /* Retry bump pointer after collection */
+            n = (n + 7u) & ~7u;
+            if (gc_nursery.top + n <= gc_nursery.limit) {
+                void *p = gc_nursery.top;
+                gc_nursery.top += n;
+                return p;
+            }
+        }
+        /* Inside tree-walker (shadow stack non-empty), or object too large
+         * for the slab after collection — fall back to Boehm directly. */
+    }
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
 
@@ -128,27 +169,150 @@ void *gc_alloc_pinned_impl(size_t n, int has_ptrs) {
     return gc_ops->alloc_pinned(n, (bool)has_ptrs);
 }
 
-/* ── Raw-pointer and stack root registration (no-ops under Boehm) ─────────── */
+/* ── Global root/stack/ext-scanner registries ────────────────────────────── */
+/*
+ * These registries are always maintained regardless of GC backend.  Under Boehm
+ * they are never read (conservative scan handles everything).  Under the
+ * generational GC, gc_gen_minor_collect() reads them to find all roots.
+ *
+ * Capacities start small; arrays are realloc'd as needed.
+ */
+
+#define GC_ROOTS_INIT_CAP   32
+#define GC_STACKS_INIT_CAP   4
+#define GC_EXT_INIT_CAP     16
+
+typedef struct { val_t *base; val_t **sp_ptr; } GcStackRange;
+
+/* Non-static so gc_gen.c can read them via extern declarations in gc_gen.h. */
+val_t       **g_roots;         /* registered val_t* roots                     */
+size_t        g_roots_count;
+size_t        g_roots_cap;
+
+/*
+ * Shadow copy of root VALUES (not pointers) in a GC_MALLOC_UNCOLLECTABLE block.
+ * Boehm's conservative scan sees this block and marks the val_t heap targets live.
+ * Without this, val_t* roots in .data/.bss are below Boehm's plausible heap range
+ * and are invisible to Boehm's conservative scan, so referenced objects can be freed.
+ */
+val_t         *g_roots_shadow;  /* GC_MALLOC_UNCOLLECTABLE, holds copies of *g_roots[i] */
+
+GcStackRange *g_stacks;        /* registered VM value-stack ranges            */
+size_t        g_stacks_count;
+size_t        g_stacks_cap;
+
+void        (**g_ext_scanners)(void);  /* external scanner callbacks          */
+size_t        g_ext_count;
+size_t        g_ext_cap;
+
+/* Function pointers set during minor GC so gc_ss_evac/gc_ss_fwd delegate to
+ * gc_gen.c's evacuator without a circular dependency.  NULL outside collection. */
+uintptr_t (*gc_evac_fn)(uintptr_t) = NULL;
+void     *(*gc_fwd_fn)(void *)      = NULL;
+
+static void ensure_roots(void) {
+    if (!g_roots) {
+        g_roots        = GC_MALLOC_UNCOLLECTABLE(GC_ROOTS_INIT_CAP * sizeof(val_t *));
+        g_roots_shadow = GC_MALLOC_UNCOLLECTABLE(GC_ROOTS_INIT_CAP * sizeof(val_t));
+        g_roots_cap = GC_ROOTS_INIT_CAP;
+    }
+}
+static void ensure_stacks(void) {
+    if (!g_stacks) {
+        g_stacks = GC_MALLOC_UNCOLLECTABLE(GC_STACKS_INIT_CAP * sizeof(GcStackRange));
+        g_stacks_cap = GC_STACKS_INIT_CAP;
+    }
+}
+static void ensure_ext(void) {
+    if (!g_ext_scanners) {
+        g_ext_scanners = GC_MALLOC_UNCOLLECTABLE(GC_EXT_INIT_CAP * sizeof(void (*)(void)));
+        g_ext_cap = GC_EXT_INIT_CAP;
+    }
+}
 
 void gc_register_rawptr(void **rawptr)   { (void)rawptr; }
 void gc_unregister_rawptr(void **rawptr) { (void)rawptr; }
-void gc_register_stack(void *base, void **sp_ptr) { (void)base; (void)sp_ptr; }
-void gc_unregister_stack(void *base)     { (void)base; }
 
-/* ── External root scanners ───────────────────────────────────────────────── */
+void gc_register_root(void *slot) {
+    ensure_roots();
+    if (g_roots_count == g_roots_cap) {
+        size_t nc = g_roots_cap * 2;
+        val_t **nr = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t *));
+        val_t  *ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t));
+        memcpy(nr, g_roots,        g_roots_count * sizeof(val_t *));
+        memcpy(ns, g_roots_shadow, g_roots_count * sizeof(val_t));
+        GC_FREE(g_roots); GC_FREE(g_roots_shadow);
+        g_roots = nr; g_roots_shadow = ns; g_roots_cap = nc;
+    }
+    size_t idx = g_roots_count++;
+    g_roots[idx]        = (val_t *)slot;
+    val_t cur = *(val_t *)slot;
+    g_roots_shadow[idx] = cur;
+    /* Register the val_t slot itself as a root range (covers .data/.bss addresses). */
+    GC_add_roots(slot, (char *)slot + sizeof(val_t));
+    /*
+     * Also register the OBJECT pointed to by the root value as a root range.
+     * Boehm's GC_add_roots_inner checks if the base is a heap pointer and
+     * explicitly marks the containing block as live — this is the reliable
+     * mechanism for .data-resident val_t roots on macOS arm64.
+     */
+    if (cur & ~3u) {  /* quick heap-ptr check: non-zero and tag==0 */
+        uintptr_t p = cur & ~(uintptr_t)3u;
+        GC_add_roots((char *)p, (char *)p + sizeof(val_t));
+    }
+}
 
-/*
- * Under Boehm: conservative scan finds all roots, so ext_scanners are no-ops.
- * Under the generational GC (gc_gen.c), gc_register_ext_scanner is overridden
- * to store callbacks that are called during minor GC (Phase 4).
- *
- * gc_ss_evac / gc_ss_fwd are identity functions until Phase 4 wires up the
- * minor GC evacuation engine.  The names preserve compatibility with the
- * existing scanner callbacks in modules.c and sx_rules.c.
- */
-void gc_register_ext_scanner(void (*cb)(void)) { (void)cb; }
-uintptr_t gc_ss_evac(uintptr_t v)             { return v; }
-void     *gc_ss_fwd(void *p)                  { return p; }
+void gc_unregister_root(void *slot) {
+    for (size_t i = 0; i < g_roots_count; i++) {
+        if (g_roots[i] == (val_t *)slot) {
+            size_t last = --g_roots_count;
+            g_roots[i]        = g_roots[last];
+            g_roots_shadow[i] = g_roots_shadow[last];
+            GC_remove_roots(slot, (char *)slot + sizeof(val_t));
+            return;
+        }
+    }
+}
+
+void gc_register_stack(void *base, void **sp_ptr) {
+    ensure_stacks();
+    if (g_stacks_count == g_stacks_cap) {
+        size_t nc = g_stacks_cap * 2;
+        GcStackRange *ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(GcStackRange));
+        memcpy(ns, g_stacks, g_stacks_count * sizeof(GcStackRange));
+        GC_FREE(g_stacks);
+        g_stacks = ns; g_stacks_cap = nc;
+    }
+    g_stacks[g_stacks_count].base   = (val_t *)base;
+    g_stacks[g_stacks_count].sp_ptr = (val_t **)sp_ptr;
+    g_stacks_count++;
+}
+
+void gc_unregister_stack(void *base) {
+    for (size_t i = 0; i < g_stacks_count; i++) {
+        if (g_stacks[i].base == (val_t *)base) {
+            g_stacks[i] = g_stacks[--g_stacks_count];
+            return;
+        }
+    }
+}
+
+void gc_register_ext_scanner(void (*cb)(void)) {
+    ensure_ext();
+    if (g_ext_count == g_ext_cap) {
+        size_t nc = g_ext_cap * 2;
+        void (**ns)(void) = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void (*)(void)));
+        memcpy(ns, g_ext_scanners, g_ext_count * sizeof(void (*)(void)));
+        GC_FREE(g_ext_scanners);
+        g_ext_scanners = ns; g_ext_cap = nc;
+    }
+    g_ext_scanners[g_ext_count++] = cb;
+}
+
+/* gc_gen.c accesses the registries via extern declarations in gc_gen.h */
+
+uintptr_t gc_ss_evac(uintptr_t v) { return gc_evac_fn ? gc_evac_fn(v) : v; }
+void     *gc_ss_fwd(void *p)      { return gc_fwd_fn  ? gc_fwd_fn(p)  : p; }
 
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 

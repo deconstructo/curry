@@ -423,13 +423,15 @@ int main(int argc, char **argv) {
             for (;;) {
                 val_t expr;
                 ExnHandler h;
+                gc_inhibit_minor();
                 h.prev = current_handler; current_handler = &h;
                 if (setjmp(h.jmp) == 0) { expr = scm_read(str_port); current_handler = h.prev; }
-                else { current_handler = h.prev; break; }
-                if (vis_eof(expr)) break;
+                else { gc_resume_minor(); current_handler = h.prev; break; }
+                if (vis_eof(expr)) { gc_resume_minor(); break; }
                 h.prev = current_handler; current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
                     val_t cl = compiler_compile(expr);
+                    gc_resume_minor();
                     last = vm_run(as_bcclosure(cl), 0);
                     current_handler = h.prev;
                 } else {
@@ -571,8 +573,10 @@ int main(int argc, char **argv) {
                 int cap = 64;
                 chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
                 val_t v;
+                gc_inhibit_minor();
                 while (!vis_eof((v = scm_read(port)))) {
                     val_t cl = compiler_compile(v);
+                    gc_resume_minor();   /* safe region: vm_run */
                     BcClosure *bc = as_bcclosure(cl);
                     if (n_chunks == cap) {
                         cap *= 2;
@@ -580,7 +584,9 @@ int main(int argc, char **argv) {
                     }
                     chunks[n_chunks++] = bc->chunk;
                     vm_run(bc, 0);
+                    gc_inhibit_minor(); /* back to unsafe for next read/compile */
                 }
+                gc_resume_minor();   /* EOF exit: leave inhibit balanced */
                 port_close(port);
                 scc_write(argv[i], chunks, n_chunks);
             }

@@ -140,6 +140,12 @@ extern "C" {
  * `has_ptrs` must be a compile-time constant for the branch to be folded.
  */
 #ifndef __cplusplus
+/* Ring buffer of last 16 nursery allocations for GC crash forensics */
+#define GC_ALLOC_TRACE_N 16
+extern void *gc_alloc_trace[GC_ALLOC_TRACE_N];
+extern size_t gc_alloc_trace_idx;
+extern size_t gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
+
 static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     /* Align to 8 bytes (all Curry heap objects require 8-byte alignment). */
     n = (n + 7u) & ~7u;
@@ -148,6 +154,10 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     if (__builtin_expect(next > gc_nursery.limit, 0))
         return gc_nursery_refill(n, has_ptrs);
     gc_nursery.top = next;
+    /* Trace ring buffer */
+    gc_alloc_trace[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = p;
+    gc_alloc_trace_sz[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = n;
+    gc_alloc_trace_idx++;
     return p;
 }
 #endif
@@ -201,10 +211,12 @@ static inline void  gc_collect(void)                 { gc_ops->collect(); }
 
 /* ── Root registration helpers ────────────────────────────────────────────── */
 
-static inline void gc_pin(void *obj)               { gc_ops->pin(obj);   }
-static inline void gc_unpin(void *obj)             { gc_ops->unpin(obj); }
-static inline void gc_register_root(void *slot)    { gc_ops->register_root(slot);   }
-static inline void gc_unregister_root(void *slot)  { gc_ops->unregister_root(slot); }
+static inline void gc_pin(void *obj)   { gc_ops->pin(obj);   }
+static inline void gc_unpin(void *obj) { gc_ops->unpin(obj); }
+/* gc_register_root/unregister_root are plain functions defined in gc.c
+ * (they maintain a global list read by gc_gen_minor_collect). */
+void gc_register_root(void *slot);
+void gc_unregister_root(void *slot);
 
 /* val_t-taking pin/unpin for FFI use: C extensions call these to protect
  * Scheme values they hold in heap-allocated structs across GC points.
@@ -261,20 +273,17 @@ static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
     gc_register_ext_scanner(cb);
 }
 
-/* ── Shadow stack (precise GC) ───────────────────────────────────────────── */
+/* ── Shadow stack ─────────────────────────────────────────────────────────── */
 
 /*
- * When CURRY_GC_PRECISE is defined, C scopes in eval.c that hold val_t locals
- * across an allocation point must register them here so a moving collector can
- * update them after evacuation.
+ * Always active — lightweight enough that the overhead under Boehm is
+ * negligible (~4 pointer stores per eval() call).
  *
  * Usage — one per function that can trigger collection:
  *   val_t x = V_NIL, y = V_NIL;
  *   GC_AUTOFRAME(2, &x, &y);   // push frame; auto-pops on scope exit
- *   x = eval(...);             // might allocate and move nursery objects
+ *   x = eval(...);             // might move nursery objects
  *   y = eval(...);             // x is still valid — GC updated it via frame
- *
- * Under Boehm (default): all macros expand to nothing; gc_shadow_stack unused.
  */
 
 typedef struct GcFrame {
@@ -288,22 +297,44 @@ extern _Thread_local GcFrame *gc_shadow_stack;
 #endif
 
 static inline void gc_pop_frame(GcFrame **fp) {
-#ifdef CURRY_GC_PRECISE
     gc_shadow_stack = (*fp)->prev;
-#else
-    (void)fp;
+}
+
+/*
+ * gc_inhibit_minor() / gc_resume_minor() — safe-point inhibit counter.
+ *
+ * Any C code that holds val_t locals across nursery allocation points but has
+ * NOT been shadow-stacked (compiler.c, reader.c, builtins etc.) must call
+ * gc_inhibit_minor() on entry and gc_resume_minor() on exit.  This increments
+ * a counter checked by gc_nursery_refill(); while the counter is positive,
+ * nursery overflow falls back to Boehm rather than triggering minor GC.
+ *
+ * eval() already handles this implicitly: GC_AUTOFRAME pushes a shadow stack
+ * frame; gc_nursery_refill checks gc_shadow_stack != NULL as the primary gate,
+ * and gc_inhibit_count > 0 as a secondary gate for non-eval code.
+ *
+ * Calls are nestable and balanced.
+ */
+#ifndef __cplusplus
+extern _Thread_local int gc_inhibit_count;
+#endif
+
+static inline void gc_inhibit_minor(void) {
+#ifndef __cplusplus
+    gc_inhibit_count++;
+#endif
+}
+static inline void gc_resume_minor(void) {
+#ifndef __cplusplus
+    if (gc_inhibit_count > 0) gc_inhibit_count--;
 #endif
 }
 
-#ifdef CURRY_GC_PRECISE
-#  define GC_AUTOFRAME(n, ...) \
-       val_t *_gc_frame_roots[] = {__VA_ARGS__}; \
-       GcFrame _gc_frame = {_gc_frame_roots, (n), gc_shadow_stack}; \
-       gc_shadow_stack = &_gc_frame; \
-       __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
-#else
-#  define GC_AUTOFRAME(n, ...) ((void)0)
-#endif
+#define GC_AUTOFRAME(n, ...) \
+    val_t *_gc_frame_roots[] = {__VA_ARGS__}; \
+    GcFrame _gc_frame = {_gc_frame_roots, (n), gc_shadow_stack}; \
+    gc_shadow_stack = &_gc_frame; \
+    __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
 
 /* ── Card table (always declared; populated only under generational GC) ───── */
 

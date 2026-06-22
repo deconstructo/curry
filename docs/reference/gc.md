@@ -1,180 +1,260 @@
 # Garbage Collector Reference
 
-Curry uses the **Boehm conservative GC** by default and ships a second backend,
-the **Cheney semispace GC**, selectable at startup with `--gc semispace`.
-Both implement the same `gc_ops_t` vtable so C extension modules are unaffected.
+Curry has two GC backends selectable at startup via `--gc`:
 
-## Backends
+| Flag | Backend | Moving? | Default? |
+|------|---------|---------|---------|
+| `--gc boehm` | Boehm conservative GC | No | Yes |
+| `--gc generational` | Generational (nursery + Boehm tenured) | Nursery only | No |
 
-### Boehm (default)
+Both implement the same `gc_ops_t` vtable, so C extension modules work unchanged under either backend.
 
-Conservative, stop-the-world, non-moving.  All allocations go through
-`GC_MALLOC` / `GC_MALLOC_ATOMIC`.  No configuration needed; no C-extension
-source changes required.
+---
+
+## Boehm (default)
+
+Conservative, stop-the-world, non-moving. All allocations go directly through
+`GC_MALLOC` / `GC_MALLOC_ATOMIC`. No configuration required.
 
 ```
 curry script.scm              # Boehm (default)
 curry --gc boehm script.scm   # explicit
 ```
 
-### Semispace (Cheney)
+The conservative scan covers the C stack, global data segments, and all
+`GC_MALLOC_UNCOLLECTABLE` blocks. No write barriers. No root registration
+required for stack-resident pointers.
 
-Precise, stop-the-world, moving.  Two equal semispaces (32 MB each by default).
-Allocation uses a per-thread bump pointer in from-space.  On exhaustion, or
-when `(gc-collect!)` is called, all live objects are evacuated to to-space via
-Cheney's algorithm, then the spaces are swapped.
+---
+
+## Generational
+
+A two-generation design:
+
+- **Gen 0 (nursery):** per-thread bump-pointer slab (default 512 KB, `GC_MALLOC_UNCOLLECTABLE`). Allocation is a single pointer increment — no lock, no function call.
+- **Gen 1 (tenured):** Boehm GC. Objects promoted from the nursery via `memcpy` into `GC_MALLOC` blocks.
 
 ```
-curry --gc semispace script.scm
+curry --gc generational script.scm
+curry --gc gen script.scm          # shorthand
 ```
 
-**Semispace size** is controlled by the `GC_SS_SPACE_BYTES` compile-time
-constant (default `32 * 1024 * 1024`).  Redefine it in `gc_semispace.h` and
-rebuild to change.
+### Minor GC
 
-**Pinned types** — these are allocated in Boehm and never moved by the
-semispace collector: `Symbol`, `Bignum`, `Rational`, `Mpfr`, `Port`,
-`Actor`, `Mailbox`, `TVar`, `Channel`, `Continuation`, `Primitive`.
+A minor collection fires when the nursery is exhausted and the thread is at a
+safe-point (between bytecode instructions, outside the tree-walking evaluator).
+It runs stop-the-world under a `GC_disable()` / `GC_enable()` bracket:
 
-**C extension compatibility** — when the semispace backend is active, any C
-code that stores a Scheme pointer in a struct field or global that lives across
-a GC point must use `gc_pin` / `gc_unpin`, or register the slot with
-`gc_register_root`.  The FFI `with-pinned-matrix` and `with-pinned-tensor`
-macros handle this automatically for BLAS/LAPACK calls.
+1. Snapshot nursery extent.
+2. Evacuate shadow-stack roots (tree-walker eval frames).
+3. Evacuate VM value-stack slots.
+4. Evacuate registered `val_t` roots.
+5. BFS drain — scan promoted objects for nursery references.
+6. Scan pinned objects for cross-heap (tenured → nursery) references.
+7. Call registered external scanner callbacks.
+8. Second BFS drain.
+9. Zero and reset nursery.
+10. Clear write-barrier card table.
+
+Boehm manages the tenured generation; a major Boehm collection is triggered
+as normal by allocation pressure after `GC_enable()` returns.
+
+### Object classes
+
+**GC:MOVE** — allocated in the nursery, evacuated to Boehm on minor GC:
+`Pair`, `Vector`, `String`, `Bytevector`, `Flonum`, `Complex`,
+`Quaternion`, `Octonion`, `F64Vec`, `Values`, `Matrix`, `Tensor`,
+`Multivector`, `Spinor`, `SymVar`, `SymExpr`, `Surreal`, `Quantum`,
+`Tuple (up/down)`, `Record`, `RecordType`, `Set`, `Hashtable`,
+`Promise`, `Parameter`, `Traced`, `Syntax`, `ErrorObj`, `Condition`,
+`Restart`, `SymFn`, `CPtr`.
+
+**GC:PIN** — allocated directly in Boehm (`GC_MALLOC_UNCOLLECTABLE`), never
+moved: `Symbol`, `Bignum`, `Rational`, `Mpfr`, `Port`, `Primitive`,
+`BcClosure`, `Chunk`, `Upvalue`, `EnvFrame`, `Closure`, `Module`,
+`Actor`, `Mailbox`, `TVar`, `Channel`, `Continuation`,
+`ForeignLib`, `ForeignFn`, `JitClosure`.
+
+Pinned objects are registered in an internal `pinned_slots` array so that
+their `val_t` fields are updated during each minor GC.
+
+### Safe-point discipline
+
+Minor GC only fires when **both** conditions hold:
+
+- `gc_shadow_stack == NULL` — the tree-walking evaluator is not active.
+- `gc_inhibit_count == 0` — no `gc_inhibit_minor()` / `gc_resume_minor()` guard is held.
+
+The bytecode VM dispatch loop is the primary safe-point. Allocations that
+occur inside the reader, compiler, or tree-walker fall back to Boehm directly.
+
+### Nursery size
+
+The default 512 KB nursery holds roughly 16 000 pairs. It can be adjusted
+with `--gc-nursery-size BYTES`:
+
+```
+curry --gc generational --gc-nursery-size 4194304 script.scm  # 4 MB
+```
+
+### Known limitations
+
+**Pinned objects are never freed by Boehm.** `GC_MALLOC_UNCOLLECTABLE`
+blocks (BcClosure, Upvalue, Chunk, etc.) accumulate for the process lifetime.
+Programs that create closures in tight loops will leak memory proportional to
+the number of closures created. A `gc_gen_unpin` / `GC_FREE` mechanism is
+planned for a future release.
+
+**Bignum-heavy workloads are slower than Boehm.** The generational GC
+assumes most objects are short-lived (the "generational hypothesis"). Bignum
+(`T_BIGNUM`) arithmetic — such as Collatz sequences starting from large
+numbers — allocates many objects that survive multiple minor GC cycles, making
+evacuation expensive. Measured overhead in this regime is approximately 60%
+vs. Boehm. For bignum-intensive programs, use the default Boehm backend.
+
+**The generational hypothesis is workload-dependent.** Programs dominated
+by list processing and short-lived functional values benefit from the nursery.
+Programs with large live sets or long-lived allocations (numerical
+simulations accumulating results, programs with many persistent actors) may
+see no benefit or a small regression.
+
+### When to use `--gc generational`
+
+Use it for programs that:
+- Build and discard many short-lived list structures.
+- Do functional-style tree transformations (CAS rewrites, symbolic computation).
+- Are allocation-heavy but with low survivor rates (most allocated objects
+  become unreachable before the next minor GC).
+
+Stick with Boehm (default) for:
+- Bignum / arbitrary-precision arithmetic.
+- Programs that accumulate large live sets.
+- Programs where allocation is infrequent (most compute is on fixnums).
+
+---
 
 ## Scheme API
 
-All procedures in this section are available without any import form.
+All procedures below are available without any import form.
 
 ---
 
-### `(gc-collect!)`
+### `(gc)`
 
-Trigger an immediate collection cycle.  Under Boehm this calls `GC_gcollect()`;
-under semispace it runs a full Cheney evacuation.  Returns `#<void>`.
+Force an immediate collection. Under Boehm calls `GC_gcollect()`; under
+generational triggers a minor GC followed by a Boehm major collection.
+Returns `#<void>`.
 
 ```scheme
-(gc-collect!)
+(gc)
 ```
 
 ---
 
-### `(gc-stats)`
+### `(gc-mode)`
 
-Return a snapshot of GC statistics as an association list.
+Return a symbol identifying the active GC backend: `boehm` or `generational`.
 
 ```scheme
-(gc-stats)
-; Under semispace:
-; ((collections . 3) (bytes-allocated . 1048576) (bytes-survived . 262144)
-;  (from-used . 262144) (space-size . 33554432) (pinned-count . 611))
-;
-; Under Boehm:
-; ((heap-size . 4194304) (free-bytes . 2097152) (backend . 0))
+(gc-mode)   ; ⇒ boehm
 ```
-
-**Semispace fields:**
-
-| Key | Description |
-|---|---|
-| `collections` | Total number of Cheney collections since startup |
-| `bytes-allocated` | Cumulative bytes allocated via `gc_alloc` |
-| `bytes-survived` | Bytes surviving the most recent collection |
-| `from-used` | Bytes currently in use in from-space |
-| `space-size` | Size of each semispace in bytes |
-| `pinned-count` | Number of live objects in the pinned (Boehm) list |
 
 ---
 
-### `(gc-on-collection proc)`
+### `(gc-heap-size)`
 
-Register `proc` (a zero-argument procedure) as a post-collection hook.  `proc`
-is called after every collection cycle.  Replaces any previously registered
-hook; pass `#f` to clear.  No-op under Boehm.
+Return the current Boehm heap size in bytes (fixnum).
 
-```scheme
-(gc-on-collection
-  (lambda ()
-    (display "GC fired: ")
-    (display (cdr (assq 'collections (gc-stats))))
-    (newline)))
-```
+---
 
-> **Note:** The hook runs synchronously inside the collector, before the
-> mutator resumes.  Keep it short; avoid allocations in the hook body.
+### `(gc-free-bytes)`
+
+Return the estimated free bytes in the Boehm heap (fixnum).
+
+---
+
+### `(gc-total-bytes)`
+
+Return total bytes allocated since process start (fixnum).
+
+---
+
+### `(gc-enable-incremental!)`
+
+Switch Boehm to incremental (step-by-step) collection mode. Reduces
+stop-the-world pause length at the cost of slightly higher overall overhead.
+No-op if already incremental.
+
+---
+
+### `(gc-set-free-space-divisor! n)`
+
+Set Boehm's free-space divisor (default 3). Higher values trigger GC more
+aggressively, reducing heap size at the cost of more frequent pauses.
+
+---
+
+### `(gc-set-max-heap! bytes)`
+
+Cap the Boehm heap at `bytes` bytes. Pass `0` for no limit (default).
 
 ---
 
 ## C API
 
-### `gc_alloc` / `gc_alloc_atomic`
-
-Standard allocation — objects with GC-traced pointer fields use `gc_alloc`;
-atomic objects (no interior pointers) use `gc_alloc_atomic`.  Under semispace
-these go into the bump-pointer nursery.
-
-### `gc_alloc_pinned` / `gc_alloc_pinned_atomic`
-
-Allocate a typed Scheme object (with `Hdr`) that must never be moved.  Under
-Boehm these are identical to `gc_alloc`; under semispace they allocate via
-Boehm and the object is registered in the pinned list so its `val_t` fields
-are updated after each collection.
-
-Use `CURRY_NEW_PINNED(T)`, `CURRY_NEW_PINNED_ATOM(T)`,
-`CURRY_NEW_FLEX_PINNED(T, n)` macros.
-
-### `gc_alloc_raw_pinned` / `gc_alloc_raw_pinned_atomic`
-
-Allocate a raw C array (no `Hdr`, no `ObjType`) in non-moving space.  Never
-added to the pinned-list — the owning typed object's scanner is responsible
-for iterating the array's `val_t` entries.
-
-Use for `val_t[]`, `uint32_t[]`, `uint8_t[]` helper arrays owned by typed heap
-objects.
-
-### `gc_register_root(val_t *slot)`
-
-Register a `val_t` slot as a GC root.  Under Boehm this is a no-op (conservative
-scan covers it); under semispace the slot is added to the root list and updated
-after each collection.  Must call `gc_unregister_root` when the slot is
-no longer valid.
-
-### `gc_ss_register_ext_scanner(void (*cb)(void))`
-
-Register an external root scanner callback.  Called after the main root
-evacuation phase and after the pinned-list scan during each semispace
-collection.  The callback must call `gc_ss_evac(v)` on every `val_t` it holds,
-assigning the result back, and `gc_ss_fwd(p)` for raw C pointers to semispace
-objects.
+### Allocation
 
 ```c
-static void my_scanner(void) {
-    for (MyEntry *e = my_registry; e; e = e->next) {
-        e->val = (val_t)gc_ss_evac((uintptr_t)e->val);
-        e->obj = gc_ss_fwd(e->obj);
-    }
-}
-
-/* Call once at module init: */
-gc_ss_register_ext_scanner(my_scanner);
+void *gc_alloc(size_t n);              /* GC:MOVE — goes to nursery */
+void *gc_alloc_atomic(size_t n);       /* GC:MOVE, no interior pointers */
+void *gc_alloc_pinned(size_t n);       /* GC:PIN — Boehm uncollectable */
+void *gc_alloc_pinned_atomic(size_t n);
+void *gc_alloc_raw_pinned(size_t n);   /* raw array, no Hdr, no pinned-list */
+void *gc_alloc_raw_pinned_atomic(size_t n);
 ```
 
-Under Boehm `gc_ss_register_ext_scanner` is a no-op.
+Convenience macros: `CURRY_NEW(T)`, `CURRY_NEW_PINNED(T)`,
+`CURRY_NEW_FLEX(T, n)`, `CURRY_NEW_FLEX_PINNED(T, n)`.
+
+### Root registration
+
+```c
+void gc_register_root(val_t *slot);    /* register a val_t GC root */
+void gc_unregister_root(val_t *slot);
+void gc_register_stack(void *base, void **sp_ptr);  /* register a val_t stack */
+void gc_unregister_stack(void *base);
+void gc_register_ext_scanner(void (*cb)(void));     /* external scanner */
+```
+
+Under Boehm, root registration is supplementary — the conservative scan
+already covers stack and global data. Under the generational backend,
+registered roots are evacuated explicitly during minor GC.
+
+### Safe-point guards
+
+```c
+gc_inhibit_minor();   /* prevent minor GC until matching gc_resume_minor() */
+gc_resume_minor();
+```
+
+Use these when C code holds raw `val_t` pointers that are not on the Scheme
+stack and not covered by the shadow stack or root registry. The reader,
+compiler, and several builtins use these guards internally.
 
 ---
 
-## Performance notes
+## Roadmap
 
-The semispace backend eliminates per-object allocation overhead (a single
-pointer increment vs. a Boehm `GC_MALLOC` call) and improves cache locality
-for short-lived objects.  It is most beneficial for allocation-heavy functional
-code (list processing, CAS rewrites, numeric computations).
+Planned improvements to the generational GC:
 
-Collection pause time is proportional to the number of **live** objects, not
-total heap size — programs with a small live set collect cheaply regardless of
-how many objects have been allocated.
-
-The 32 MB default semispace is generous for interactive use.  For long-running
-simulations that accumulate large live sets (GR geodesic integrators, rigid-body
-ODE solvers), consider increasing `GC_SS_SPACE_BYTES` or switching to Boehm for
-those workloads until the generational GC (Phase 6) ships.
+- **`gc_gen_unpin` / `GC_FREE`** — explicit lifetime management for pinned
+  objects so that ephemeral closures and upvalues are eventually freed.
+- **Pin `T_BIGNUM` / `T_RATIONAL`** — making numeric tower bignums GC:PIN
+  would eliminate evacuation overhead for arithmetic-heavy programs and close
+  the performance gap with Boehm.
+- **Remembered set / card table scanning** — the card table infrastructure
+  exists (`gc_card_table`, `gc_wb_slot`) but is compiled out unless
+  `CURRY_GC_PRECISE` is defined. Enabling it would allow minor GC to scan
+  only dirty cards instead of all pinned objects.
+- **Green threads / concurrent GC** — long-term; requires safepoint
+  coordination across multiple OS threads.

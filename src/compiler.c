@@ -1299,6 +1299,7 @@ val_t compiler_compile(val_t expr) {
     static bool akk_ready = false;
     if (!akk_ready) { akk_eval_setup(); akk_ready = true; }
 
+    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
@@ -1307,10 +1308,12 @@ val_t compiler_compile(val_t expr) {
     c.chunk->upval_count = 0;
 
     BcClosure *cl = vm_make_closure(c.chunk, 0);
+    gc_resume_minor();
     return vptr(cl);
 }
 
 val_t compiler_compile_script(val_t expr_list) {
+    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<script>");
     c.chunk->arity = 0;
@@ -1320,5 +1323,6 @@ val_t compiler_compile_script(val_t expr_list) {
     c.chunk->upval_count = 0;
 
     BcClosure *cl = vm_make_closure(c.chunk, 0);
+    gc_resume_minor();
     return vptr(cl);
 }

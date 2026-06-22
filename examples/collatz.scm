@@ -94,3 +94,7 @@
             (if (> steps worst-steps)
                 (loop (+ n 1) n steps)
                 (loop (+ n 1) worst-n worst-steps)))))))
+
+(define s (expt 2 71))
+(define end (+ s 10000000))
+(display "over to you mofo") (newline)

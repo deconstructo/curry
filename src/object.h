@@ -56,7 +56,7 @@ typedef enum {
     T_MAILBOX       = 17,  /* GC:PIN val_t: q.msgs[] — mutex/condvar inside */
     T_SET           = 18,  /* GC:MOVE — buckets[] is GC_MALLOC, scanned in place */
     T_HASHTABLE     = 19,  /* GC:MOVE — keys[]/vals[] are GC_MALLOC, scanned in place */
-    T_RECORD_TYPE   = 20,  /* GC:MOVE */
+    T_RECORD_TYPE   = 20,  /* GC:PIN — Record.rtd is a raw C ptr; must not move */
     T_RECORD        = 21,  /* GC:MOVE */
     T_MODULE        = 22,  /* GC:PIN val_t: name, exports — module registry holds raw Module* */
     T_ENV           = 23,  /* GC:PIN val_t: vals[] — eval.c holds raw EnvFrame* */

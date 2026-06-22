@@ -65,14 +65,22 @@ val_t scm_list_tail(val_t lst, int n) {
     return lst;
 }
 
-val_t scm_append(val_t a, val_t b) {
+static val_t scm_append_inner(val_t a, val_t b) {
     if (vis_nil(a)) return b;
-    return scm_cons(vcar(a), scm_append(vcdr(a), b));
+    return scm_cons(vcar(a), scm_append_inner(vcdr(a), b));
+}
+val_t scm_append(val_t a, val_t b) {
+    gc_inhibit_minor();
+    val_t r = scm_append_inner(a, b);
+    gc_resume_minor();
+    return r;
 }
 
 val_t scm_reverse(val_t lst) {
     val_t r = V_NIL;
+    gc_inhibit_minor();
     while (vis_pair(lst)) { r = scm_cons(vcar(lst), r); lst = vcdr(lst); }
+    gc_resume_minor();
     return r;
 }
 
@@ -219,7 +227,15 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Pairs and lists ---- */
-static val_t prim_cons(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_cons(av[0], av[1]); }
+static val_t prim_cons(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
+     * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
+    Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+    p->hdr.type = T_PAIR; p->hdr.flags = 0;
+    p->car = av[0]; p->cdr = av[1];
+    return vptr(p);
+}
 static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"car: not a pair"); return vcar(av[0]); }
 static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"cdr: not a pair"); return vcdr(av[0]); }
 static val_t prim_set_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair"); as_pair(av[0])->car=av[1]; return V_VOID; }
@@ -238,13 +254,17 @@ CXR3(dda, vcdr, vcdr, vcar) CXR3(ddd, vcdr, vcdr, vcdr)
 
 static val_t prim_list(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = V_NIL;
+    gc_inhibit_minor();
     for (int i = ac-1; i >= 0; i--) r = scm_cons(av[i], r);
+    gc_resume_minor();
     return r;
 }
 static val_t prim_list_star(int ac, val_t *av, void *ud) {
     (void)ud; if (ac == 0) return V_NIL;
     val_t r = av[ac-1];
+    gc_inhibit_minor();
     for (int i = ac-2; i >= 0; i--) r = scm_cons(av[i], r);
+    gc_resume_minor();
     return r;
 }
 static val_t prim_length(int ac, val_t *av, void *ud) {
@@ -1786,6 +1806,12 @@ static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
+static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    extern gc_ops_t gc_gen_ops;
+    extern gc_ops_t *gc_ops;
+    return sym_intern_cstr(gc_ops == &gc_gen_ops ? "generational" : "boehm");
+}
 static val_t prim_gc_heap_size(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_heap_size());}
 static val_t prim_gc_free_bytes(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_free_bytes());}
 static val_t prim_gc_total_bytes(int ac, val_t *av, void *ud){(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_total_bytes());}
@@ -2243,6 +2269,7 @@ void builtins_register(val_t env) {
     DEF("current-jiffy",       prim_current_jiffy,       0,0);
     DEF("jiffies-per-second",  prim_jiffies_per_second,  0,0);
     DEF("gc",                          prim_gc,                    0,0);
+    DEF("gc-mode",                     prim_gc_mode,               0,0);
     DEF("gc-heap-size",                prim_gc_heap_size,          0,0);
     DEF("gc-free-bytes",               prim_gc_free_bytes,         0,0);
     DEF("gc-total-bytes",              prim_gc_total_bytes,        0,0);

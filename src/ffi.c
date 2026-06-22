@@ -174,7 +174,7 @@ val_t ffi_load_library(const char *path) {
     void *h = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
     if (!h) scm_raise(V_FALSE, "foreign-load-library: cannot open '%s': %s",
                       path, dlerror());
-    ForeignLib *lib = CURRY_NEW(ForeignLib);
+    ForeignLib *lib = CURRY_NEW_PINNED(ForeignLib);
     lib->hdr.type  = T_FOREIGN_LIB;
     lib->hdr.flags = 0;
     lib->handle    = h;
@@ -212,7 +212,7 @@ val_t ffi_make_fn(val_t lib_val, const char *c_name, val_t ret_tag, val_t arg_ta
                      nargs ? atypes : NULL) != FFI_OK)
         scm_raise(V_FALSE, "ffi-make-fn: ffi_prep_cif failed for %s", c_name);
 
-    ForeignFn *ff = CURRY_NEW(ForeignFn);
+    ForeignFn *ff = CURRY_NEW_PINNED(ForeignFn);
     ff->hdr.type   = T_FOREIGN_FN;
     ff->hdr.flags  = 0;
     ff->fn         = fn;

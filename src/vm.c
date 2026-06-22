@@ -185,6 +185,7 @@
 #include "value.h"
 #include "object.h"
 #include "gc.h"
+#include <gc/gc_mark.h>
 #include "numeric.h"
 #include "symbol.h"
 #include "env.h"
@@ -243,7 +244,7 @@ static inline void vm_maybe_jit(BcClosure *cl) {
 /* ── BcClosure allocation ────────────────────────────────────────────── */
 
 BcClosure *vm_make_closure(Chunk *chunk, int nupvals) {
-    BcClosure *cl = (BcClosure *)gc_alloc(
+    BcClosure *cl = (BcClosure *)gc_alloc_pinned(
         sizeof(BcClosure) + (size_t)nupvals * sizeof(Upvalue *));
     cl->hdr.type    = T_BCCLOSURE;
     cl->hdr.flags   = 0;
@@ -266,7 +267,7 @@ static Upvalue *open_upvalue(val_t *slot) {
     while (up && up->location > slot) { prev = up; up = up->next; }
     if (up && up->location == slot) return up;   /* already open */
 
-    Upvalue *n  = CURRY_NEW(Upvalue);
+    Upvalue *n  = CURRY_NEW_PINNED(Upvalue);
     n->hdr.type = T_UPVALUE; n->hdr.flags = 0; n->hdr.fwd = 0;
     n->location = slot;
     n->closed   = V_VOID;
@@ -430,16 +431,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci = READ_U8();
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(GLOBAL_ENV);
+            val_t loaded_gval;
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
                                  cache[ci].version == root->version, 1)) {
-                PUSH(*cache[ci].slot);
+                loaded_gval = *cache[ci].slot;
             } else {
                 val_t sym = CONSTS[ci];
                 val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
                 if (!slot) scm_raise(V_FALSE, "unbound variable: %s", sym_cstr(sym));
                 if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
-                PUSH(*slot);
+                loaded_gval = *slot;
             }
+            PUSH(loaded_gval);
             NEXT;
         }
         CASE(OP_STORE_GLOBAL) {
@@ -588,7 +591,15 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
         /* ── Pairs ──────────────────────────────────────────────────── */
-        CASE(OP_CONS) { val_t d = POP(), a = POP(); PUSH(scm_cons(a, d)); NEXT; }
+        CASE(OP_CONS) {
+            /* Allocate first: args still on VM stack so GC (if triggered)
+             * can update them.  Re-read from stack after allocation. */
+            Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+            p->hdr.type = T_PAIR; p->hdr.flags = 0;
+            p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
+            vm->sp -= 2; *vm->sp++ = vptr(p);
+            NEXT;
+        }
         CASE(OP_CAR)  { PUSH(vcar(POP())); NEXT; }
         CASE(OP_CDR)  { PUSH(vcdr(POP())); NEXT; }
         CASE(OP_SETCAR) {
@@ -738,7 +749,6 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_TAIL_CALL) {
             uint8_t argc2 = READ_U8();
             val_t callee  = PEEK(argc2);
-
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */

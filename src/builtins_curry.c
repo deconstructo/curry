@@ -902,7 +902,7 @@ static val_t partial_fn_call(int argc, val_t *argv, void *ud) {
 }
 
 static val_t make_partial_fn(val_t f, intptr_t idx) {
-    PartialFn *cap   = CURRY_NEW(PartialFn);
+    PartialFn *cap   = (PartialFn *)gc_alloc_raw_pinned(sizeof(PartialFn));
     cap->f           = f;
     cap->idx         = idx;
     Primitive *p     = CURRY_NEW_PINNED(Primitive);
@@ -930,7 +930,7 @@ static val_t prim_partial(int argc, val_t *argv, void *ud) {
 
     /* 1-arg form: (partial i) → operator that takes f */
     if (argc == 1) {
-        PartialOp *op    = CURRY_NEW(PartialOp);
+        PartialOp *op    = (PartialOp *)gc_alloc_raw_pinned_atomic(sizeof(PartialOp));
         op->idx          = i;
         Primitive *p     = CURRY_NEW_PINNED(Primitive);
         p->hdr.type      = T_PRIMITIVE; p->hdr.flags = 0;
@@ -965,7 +965,7 @@ static val_t d_call(int argc, val_t *argv, void *ud) {
 }
 
 static val_t make_d_closure(val_t expr, val_t var) {
-    DCapture *cap = CURRY_NEW(DCapture);
+    DCapture *cap = (DCapture *)gc_alloc_raw_pinned(sizeof(DCapture));
     cap->expr = expr;
     cap->var  = var;
     Primitive *p  = CURRY_NEW_PINNED(Primitive);
