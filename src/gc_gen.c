@@ -49,23 +49,13 @@ static void alloc_thread_nursery(void) {
     gc_nursery.limit = slab + sz;
 }
 
-/* ── Card table ───────────────────────────────────────────────────────────── */
+/* ── Dirty-slot buffer allocation ────────────────────────────────────────── */
 
-/* gc_card_table_ncards is defined in gc.c (alongside gc_card_table / gc_tenured_base)
- * and declared in gc.h so the write barrier can do a bounds check inline. */
-
-static void init_card_table(void) {
-    uintptr_t base = (uintptr_t)GC_least_plausible_heap_addr;
-    uintptr_t top  = (uintptr_t)GC_greatest_plausible_heap_addr;
-    base &= ~(uintptr_t)(GC_CARD_BYTES - 1u);
-    top   = (top + GC_CARD_BYTES - 1u) & ~(uintptr_t)(GC_CARD_BYTES - 1u);
-    if (top <= base) { base = 0; top = (uintptr_t)4 * 1024 * 1024 * 1024; }
-    size_t ncards = (top - base) / GC_CARD_BYTES;
-    gc_tenured_base      = base;
-    gc_card_table_ncards = ncards;
-    gc_card_table        = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
-    if (!gc_card_table) { fprintf(stderr, "[gc_gen] FATAL: card table OOM\n"); abort(); }
-    memset(gc_card_table, 0, ncards);
+static void init_dirty_slots(void) {
+    gc_dirty_slots = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_CAP * sizeof(val_t *));
+    if (!gc_dirty_slots) { fprintf(stderr, "[gc_gen] FATAL: dirty_slots OOM\n"); abort(); }
+    gc_dirty_count    = 0;
+    gc_dirty_overflow = false;
 }
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
@@ -616,15 +606,45 @@ void gc_gen_minor_collect(void) {
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
-    /* 6. Scan pinned objects for cross-heap refs.
-     * Hold pinned_lock to prevent concurrent pinned_add from reallocating
-     * pinned_slots under us (pinned_add GC_FREEs the old array on growth). */
-    pthread_mutex_lock(&pinned_lock);
-    for (size_t i = 0; i < pinned_count; i++) {
-        void *obj = pinned_slots[i];
-        if (obj) scan_pinned_object(obj);
+    /* 6. Process dirty slots + initial scan of new pinned objects.
+     *
+     * Fast path (no overflow): update each recorded slot directly, then scan
+     * only objects added since the last compact.  The stable range [0,
+     * pinned_stable) is skipped because (a) their initial fields were Boehm
+     * pointers at creation time (inhibit protocol), and (b) any subsequent
+     * mutations were captured in gc_dirty_slots.
+     *
+     * Overflow fallback: more than GC_DIRTY_CAP tenured→nursery writes fired
+     * since the last GC — fall back to a full pinned scan for correctness,
+     * then compact.
+     */
+    if (gc_dirty_overflow) {
+        pthread_mutex_lock(&pinned_lock);
+        for (size_t i = 0; i < pinned_count; i++) {
+            void *obj = pinned_slots[i];
+            if (obj) scan_pinned_object(obj);
+        }
+        pinned_count  = 0;
+        pinned_stable = 0;
+        pthread_mutex_unlock(&pinned_lock);
+    } else {
+        /* Update the recorded dirty slots in-place. */
+        for (size_t i = 0; i < gc_dirty_count; i++)
+            *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
+        /* Scan new pinned objects (those added since the last compact). */
+        pthread_mutex_lock(&pinned_lock);
+        for (size_t i = pinned_stable; i < pinned_count; i++) {
+            void *obj = pinned_slots[i];
+            if (obj) scan_pinned_object(obj);
+        }
+        /* Compact: future mutations tracked via dirty_slots; no need to keep
+         * these entries around for the next minor GC. */
+        pinned_count  = 0;
+        pinned_stable = 0;
+        pthread_mutex_unlock(&pinned_lock);
     }
-    pthread_mutex_unlock(&pinned_lock);
+    gc_dirty_count    = 0;
+    gc_dirty_overflow = false;
 
     /* 7. Call ext_scanner callbacks */
     for (size_t i = 0; i < g_ext_count; i++)
@@ -639,10 +659,6 @@ void gc_gen_minor_collect(void) {
 
     /* 9. Reset nursery */
     gc_nursery.top = gc_nursery.base;
-
-    /* 10. Clear dirty cards */
-    if (gc_card_table && gc_card_table_ncards)
-        memset(gc_card_table, 0, gc_card_table_ncards);
 
     /* Sync root shadows before Boehm's major GC can see them */
     for (size_t i = 0; i < g_roots_count; i++)
@@ -729,7 +745,7 @@ void gc_gen_init(size_t nursery_bytes) {
     memset(pinned_slots, 0, PINNED_INIT_CAP * sizeof(void *));
     pinned_cap = PINNED_INIT_CAP;
 
-    init_card_table();
+    init_dirty_slots();
     alloc_thread_nursery();
 }
 

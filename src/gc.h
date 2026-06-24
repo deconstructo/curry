@@ -337,43 +337,54 @@ static inline void gc_resume_minor(void) {
     gc_shadow_stack = &_gc_frame; \
     __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
 
-/* ── Card table (always declared; populated only under generational GC) ───── */
+/* ── Card table (retained for backwards compat; no longer written by barrier) */
 
-/*
- * Card table covers the Boehm tenured heap.  Each byte represents one 512-byte
- * card; set to 1 when a tenured object stores a nursery reference.
- * All three globals are NULL/0 under Boehm and set by gc_gen_init().
- */
 #define GC_CARD_BYTES 512u
 extern uint8_t  *gc_card_table;
 extern uintptr_t gc_tenured_base;
-extern size_t    gc_card_table_ncards;  /* number of entries in gc_card_table */
+extern size_t    gc_card_table_ncards;
+
+/* ── Write-buffer remembered set ─────────────────────────────────────────── */
+
+/*
+ * When gc_dirty_slots is non-NULL (generational GC active), gc_wb_slot records
+ * the address of each slot that receives a tenured→nursery write.  Minor GC
+ * iterates these slot addresses to update forwarding pointers instead of
+ * scanning the entire pinned list every collection.
+ *
+ * The buffer is a plain global (not TLS) because only the main thread executes
+ * VM code without gc_inhibit_count > 0, and minor GC also runs on the main
+ * thread.  Worker threads are always inhibited inside execute_item(), so they
+ * never produce nursery pointers and never write to this buffer.
+ */
+#define GC_DIRTY_CAP 4096
+extern val_t  **gc_dirty_slots;    /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
+extern size_t   gc_dirty_count;    /* number of valid entries                         */
+extern bool     gc_dirty_overflow; /* set when buffer is full (fall back to full scan) */
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
 /*
- * GC_WB(obj, field, val): write val into obj->field and mark the card dirty
- * if obj is in tenured space (old→young reference).  Under Boehm gc_card_table
- * is NULL so the barrier reduces to the bare assignment.
+ * GC_WB(obj, field, val): write val into obj->field and record the slot if it
+ * is a tenured→nursery write.  Under Boehm gc_dirty_slots is NULL so the
+ * barrier reduces to the bare assignment.
  *
  * val must be a val_t.  Example: GC_WB(as_pair(p), car, new_car_val)
  * For array-element writes use gc_wb_slot(&arr[i], new_val) directly.
  */
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
-    /* Only dirty the card when the written VALUE is actually in this thread's
-     * nursery (old→young reference).  Tenured→tenured writes (common during
-     * tree-walker execution where minor GC is inhibited and all allocations
-     * fall back to Boehm) are skipped cheaply by the nursery range check. */
-    if (gc_card_table && vis_ptr(newval)) {
+    /* Only record when the written VALUE is in this thread's nursery
+     * (tenured→nursery write).  Tenured→tenured writes (common during
+     * tree-walker execution where all allocs fall back to Boehm) are skipped
+     * cheaply by the nursery range check. */
+    if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
         if (p >= gc_nursery.base && p < gc_nursery.limit) {
-            uintptr_t addr = (uintptr_t)slot;
-            if (addr >= gc_tenured_base) {
-                size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
-                if (card < gc_card_table_ncards)
-                    gc_card_table[card] = 1;
-            }
+            if (gc_dirty_count < GC_DIRTY_CAP)
+                gc_dirty_slots[gc_dirty_count++] = slot;
+            else
+                gc_dirty_overflow = true;
         }
     }
 }

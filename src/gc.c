@@ -90,10 +90,18 @@ _Thread_local GcFrame *gc_shadow_stack = NULL;
  * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
 _Thread_local int gc_inhibit_count = 0;
 
-/* Globals required by the write barrier when CURRY_GC_PRECISE is defined.
- * Under Boehm they are never read; they are NULL/0 by default. */
-uint8_t  *gc_card_table   = NULL;
-uintptr_t gc_tenured_base = 0;
+/* Card table globals — retained for backwards compat; all stay NULL/0.
+ * The write barrier no longer writes to the card table; it uses gc_dirty_slots. */
+uint8_t  *gc_card_table        = NULL;
+uintptr_t gc_tenured_base      = 0;
+size_t    gc_card_table_ncards = 0;
+
+/* Write-buffer remembered set.
+ * gc_dirty_slots is allocated by gc_gen_init() and stays NULL under Boehm,
+ * causing gc_wb_slot to reduce to a bare assignment. */
+val_t  **gc_dirty_slots    = NULL;
+size_t   gc_dirty_count    = 0;
+bool     gc_dirty_overflow = false;
 
 #define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */
 
