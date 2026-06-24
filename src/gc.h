@@ -348,19 +348,22 @@ extern size_t    gc_card_table_ncards;
 
 /*
  * When gc_dirty_slots is non-NULL (generational GC active), gc_wb_slot records
- * the address of each slot that receives a tenured→nursery write.  Minor GC
- * iterates these slot addresses to update forwarding pointers instead of
- * scanning the entire pinned list every collection.
+ * the address of each slot that receives a main-thread-nursery→tenured write.
+ * Minor GC iterates these slot addresses to update forwarding pointers instead
+ * of scanning the entire pinned list every collection.
  *
- * The buffer is a plain global (not TLS) because only the main thread executes
- * VM code without gc_inhibit_count > 0, and minor GC also runs on the main
- * thread.  Worker threads are always inhibited inside execute_item(), so they
- * never produce nursery pointers and never write to this buffer.
+ * The buffer is a plain global because only the main thread can produce nursery
+ * pointers (actor and worker threads run the tree-walker or hold gc_inhibit, so
+ * their allocations go to Boehm).  Using the MAIN thread's nursery bounds
+ * (gc_main_nursery_base/limit, set once in gc_gen_init) as the range check
+ * ensures no other thread ever matches, making the global non-TLS safe.
  */
 #define GC_DIRTY_CAP 4096
-extern val_t  **gc_dirty_slots;    /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
-extern size_t   gc_dirty_count;    /* number of valid entries                         */
-extern bool     gc_dirty_overflow; /* set when buffer is full (fall back to full scan) */
+extern val_t  **gc_dirty_slots;      /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
+extern size_t   gc_dirty_count;      /* number of valid entries                          */
+extern bool     gc_dirty_overflow;   /* set when buffer is full (fall back to full scan) */
+extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm    */
+extern uint8_t *gc_main_nursery_limit; /* ditto                                          */
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
@@ -374,13 +377,15 @@ extern bool     gc_dirty_overflow; /* set when buffer is full (fall back to full
  */
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
-    /* Only record when the written VALUE is in this thread's nursery
-     * (tenured→nursery write).  Tenured→tenured writes (common during
-     * tree-walker execution where all allocs fall back to Boehm) are skipped
-     * cheaply by the nursery range check. */
+    /* Only record when the written VALUE is in the MAIN thread's nursery.
+     * Using gc_main_nursery_base/limit (globals set once at init, never
+     * modified) rather than TLS gc_nursery ensures that actor threads and
+     * workpool workers — whose allocations go to Boehm and can never land in
+     * the main-thread slab — never touch gc_dirty_count, eliminating the
+     * need for any lock on the write path. */
     if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
-        if (p >= gc_nursery.base && p < gc_nursery.limit) {
+        if (p >= gc_main_nursery_base && p < gc_main_nursery_limit) {
             if (gc_dirty_count < GC_DIRTY_CAP)
                 gc_dirty_slots[gc_dirty_count++] = slot;
             else

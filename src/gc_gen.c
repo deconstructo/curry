@@ -747,6 +747,11 @@ void gc_gen_init(size_t nursery_bytes) {
 
     init_dirty_slots();
     alloc_thread_nursery();
+    /* Expose the main thread's nursery bounds as globals so gc_wb_slot can use
+     * them without touching TLS — non-main threads check these globals and never
+     * match (their Boehm allocations land outside this slab). */
+    gc_main_nursery_base  = gc_nursery.base;
+    gc_main_nursery_limit = gc_nursery.limit;
 }
 
 /*
