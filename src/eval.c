@@ -1490,7 +1490,10 @@ val_t apply(val_t proc, val_t args) {
         int n = list_to_arr(args, arr, 64);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        return prim->fn(n, arr, prim->ud);
+        gc_inhibit_minor();
+        val_t r = prim->fn(n, arr, prim->ud);
+        gc_resume_minor();
+        return r;
     }
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);
@@ -1675,7 +1678,10 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
                       prim->name, argc, prim->max_args);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        return prim->fn(argc, argv, prim->ud);
+        gc_inhibit_minor();
+        val_t r = prim->fn(argc, argv, prim->ud);
+        gc_resume_minor();
+        return r;
     }
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);
