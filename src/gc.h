@@ -361,12 +361,19 @@ extern size_t    gc_card_table_ncards;  /* number of entries in gc_card_table */
  */
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
+    /* Only dirty the card when the written VALUE is actually in this thread's
+     * nursery (old→young reference).  Tenured→tenured writes (common during
+     * tree-walker execution where minor GC is inhibited and all allocations
+     * fall back to Boehm) are skipped cheaply by the nursery range check. */
     if (gc_card_table && vis_ptr(newval)) {
-        uintptr_t addr = (uintptr_t)slot;
-        if (addr >= gc_tenured_base) {
-            size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
-            if (card < gc_card_table_ncards)
-                gc_card_table[card] = 1;
+        const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
+        if (p >= gc_nursery.base && p < gc_nursery.limit) {
+            uintptr_t addr = (uintptr_t)slot;
+            if (addr >= gc_tenured_base) {
+                size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
+                if (card < gc_card_table_ncards)
+                    gc_card_table[card] = 1;
+            }
         }
     }
 }
