@@ -12,7 +12,7 @@
  *   4. Scan pinned objects (cross-heap refs from Boehm → nursery).
  *   5. Call ext_scanner callbacks.
  *   6. Drain work list again.
- *   7. Reset nursery: zero [base, collect_top), set top = base.
+ *   7. Reset nursery: set top = base (no zeroing needed; scan is [base,collect_top)).
  *   8. Clear dirty cards.
  */
 
@@ -51,7 +51,8 @@ static void alloc_thread_nursery(void) {
 
 /* ── Card table ───────────────────────────────────────────────────────────── */
 
-static size_t gc_card_table_ncards;  /* fixed at alloc time — never re-derived */
+/* gc_card_table_ncards is defined in gc.c (alongside gc_card_table / gc_tenured_base)
+ * and declared in gc.h so the write barrier can do a bounds check inline. */
 
 static void init_card_table(void) {
     uintptr_t base = (uintptr_t)GC_least_plausible_heap_addr;
@@ -60,18 +61,11 @@ static void init_card_table(void) {
     top   = (top + GC_CARD_BYTES - 1u) & ~(uintptr_t)(GC_CARD_BYTES - 1u);
     if (top <= base) { base = 0; top = (uintptr_t)4 * 1024 * 1024 * 1024; }
     size_t ncards = (top - base) / GC_CARD_BYTES;
-    gc_tenured_base = base;
+    gc_tenured_base      = base;
     gc_card_table_ncards = ncards;
-    gc_card_table   = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
+    gc_card_table        = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
     if (!gc_card_table) { fprintf(stderr, "[gc_gen] FATAL: card table OOM\n"); abort(); }
     memset(gc_card_table, 0, ncards);
-}
-
-static size_t card_table_ncards(void) {
-    /* Return the count fixed at init_card_table() time.  Boehm may grow its
-     * heap beyond GC_greatest_plausible_heap_addr, but re-deriving ncards from
-     * the current plausible-heap bounds would exceed the allocated card table. */
-    return gc_card_table_ncards;
 }
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
@@ -84,6 +78,9 @@ static size_t card_table_ncards(void) {
 static void   **pinned_slots;
 static size_t   pinned_count;
 static size_t   pinned_cap;
+static size_t   pinned_stable;   /* pinned objects below this index were fully
+                                    scanned in the last minor GC and have clean
+                                    cards unless re-dirtied by GC_WB */
 static pthread_mutex_t pinned_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Exposed so env.c can register the root EnvFrame (allocated
@@ -105,6 +102,15 @@ static void pinned_add(void *obj) {
     }
     pinned_slots[pinned_count] = obj;
     pinned_count++;
+    /* Dirty this object's card so the next minor GC scans its initial fields. */
+    if (gc_card_table) {
+        uintptr_t addr = (uintptr_t)obj;
+        if (addr >= gc_tenured_base) {
+            size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
+            if (card < gc_card_table_ncards)
+                gc_card_table[card] = 1;
+        }
+    }
     pthread_mutex_unlock(&pinned_lock);
 }
 
@@ -641,13 +647,11 @@ void gc_gen_minor_collect(void) {
     gc_fwd_fn  = NULL;
 
     /* 9. Reset nursery */
-    memset(gc_nursery.base, 0, (size_t)(collect_top - gc_nursery.base));
     gc_nursery.top = gc_nursery.base;
 
     /* 10. Clear dirty cards */
-    size_t ncards = card_table_ncards();
-    if (gc_card_table && ncards)
-        memset(gc_card_table, 0, ncards);
+    if (gc_card_table && gc_card_table_ncards)
+        memset(gc_card_table, 0, gc_card_table_ncards);
 
     /* Sync root shadows before Boehm's major GC can see them */
     for (size_t i = 0; i < g_roots_count; i++)

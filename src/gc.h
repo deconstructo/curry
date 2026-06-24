@@ -154,10 +154,11 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     if (__builtin_expect(next > gc_nursery.limit, 0))
         return gc_nursery_refill(n, has_ptrs);
     gc_nursery.top = next;
-    /* Trace ring buffer */
+#ifdef CURRY_GC_DEBUG_TRACE
     gc_alloc_trace[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = p;
     gc_alloc_trace_sz[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = n;
     gc_alloc_trace_idx++;
+#endif
     return p;
 }
 #endif
@@ -341,11 +342,12 @@ static inline void gc_resume_minor(void) {
 /*
  * Card table covers the Boehm tenured heap.  Each byte represents one 512-byte
  * card; set to 1 when a tenured object stores a nursery reference.
- * Both globals are NULL/0 under Boehm and set by gc_gen_init().
+ * All three globals are NULL/0 under Boehm and set by gc_gen_init().
  */
 #define GC_CARD_BYTES 512u
 extern uint8_t  *gc_card_table;
 extern uintptr_t gc_tenured_base;
+extern size_t    gc_card_table_ncards;  /* number of entries in gc_card_table */
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
@@ -359,20 +361,17 @@ extern uintptr_t gc_tenured_base;
  */
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
-#ifdef CURRY_GC_PRECISE
     if (gc_card_table && vis_ptr(newval)) {
         uintptr_t addr = (uintptr_t)slot;
-        if (addr >= gc_tenured_base)
-            gc_card_table[(addr - gc_tenured_base) / GC_CARD_BYTES] = 1;
+        if (addr >= gc_tenured_base) {
+            size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
+            if (card < gc_card_table_ncards)
+                gc_card_table[card] = 1;
+        }
     }
-#endif
 }
 
-#ifdef CURRY_GC_PRECISE
-#  define GC_WB(obj, field, newval) \
-       do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
-#else
-#  define GC_WB(obj, field, newval) ((obj)->field = (newval))
-#endif
+#define GC_WB(obj, field, newval) \
+    do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
 
 #endif /* CURRY_GC_H */
