@@ -102,15 +102,6 @@ static void pinned_add(void *obj) {
     }
     pinned_slots[pinned_count] = obj;
     pinned_count++;
-    /* Dirty this object's card so the next minor GC scans its initial fields. */
-    if (gc_card_table) {
-        uintptr_t addr = (uintptr_t)obj;
-        if (addr >= gc_tenured_base) {
-            size_t card = (addr - gc_tenured_base) / GC_CARD_BYTES;
-            if (card < gc_card_table_ncards)
-                gc_card_table[card] = 1;
-        }
-    }
     pthread_mutex_unlock(&pinned_lock);
 }
 
