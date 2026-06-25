@@ -108,6 +108,18 @@ bool     gc_dirty_overflow   = false;
 uint8_t *gc_main_nursery_base  = NULL;
 uint8_t *gc_main_nursery_limit = NULL;
 
+/* ── GC statistics ──────────────────────────────────────────────────────────── */
+
+_Atomic uint64_t gc_stat_minor_count    = 0;
+_Atomic uint64_t gc_stat_major_count    = 0;
+_Atomic uint64_t gc_stat_minor_total_us = 0;
+_Atomic uint64_t gc_stat_minor_max_us   = 0;
+
+static void gc_boehm_event_cb(GC_EventType ev) {
+    if (ev == GC_EVENT_END)
+        atomic_fetch_add_explicit(&gc_stat_major_count, 1, memory_order_relaxed);
+}
+
 #define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */
 
 /*
@@ -332,6 +344,7 @@ void     *gc_ss_fwd(void *p)      { return gc_fwd_fn  ? gc_fwd_fn(p)  : p; }
 void gc_init(void) {
     GC_INIT();
     GC_allow_register_threads();
+    GC_set_on_collection_event(gc_boehm_event_cb);
 }
 
 void gc_register_thread(void) {

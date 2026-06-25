@@ -1832,6 +1832,48 @@ static val_t prim_gc_set_max_heap(int ac, val_t *av, void *ud) {
     gc_set_max_heap((size_t)vunfix(av[0]));
     return V_VOID;
 }
+/* (gc-stats) → alist of GC counters and the pause ring as a vector of fixnums.
+ * Works under both Boehm (minor-count always 0) and generational backends. */
+static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+
+    /* Pause ring: copy into a Scheme vector */
+    uint64_t ring_buf[GC_PAUSE_RING_N];
+    size_t   ring_n = gc_get_pause_ring(ring_buf);
+    Vector  *rv = CURRY_NEW_FLEX(Vector, (uint32_t)ring_n);
+    rv->hdr.type = T_VECTOR; rv->hdr.flags = 0; rv->len = (uint32_t)ring_n;
+    for (size_t i = 0; i < ring_n; i++)
+        rv->data[i] = vfix((intptr_t)ring_buf[i]);
+    val_t ring_val = vptr(rv);
+
+    /* Nursery used (main thread) */
+    size_t nursery_used = (size_t)(gc_nursery.top - gc_nursery.base);
+
+    /* Build alist front-to-back (will be reversed — canonical key order) */
+#define APAIR(k, v) result = scm_cons(scm_cons(sym_intern_cstr(k), (v)), result)
+    val_t result = V_NIL;
+    APAIR("nursery-used",     vfix((intptr_t)nursery_used));
+    APAIR("free-bytes",       vfix((intptr_t)gc_free_bytes()));
+    APAIR("heap-size-bytes",  vfix((intptr_t)gc_heap_size()));
+    APAIR("pause-ring-us",    ring_val);
+    APAIR("minor-max-us",     vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_max_us,   memory_order_relaxed)));
+    APAIR("minor-total-us",   vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_total_us, memory_order_relaxed)));
+    APAIR("major-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_major_count,    memory_order_relaxed)));
+    APAIR("minor-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_count,    memory_order_relaxed)));
+#undef APAIR
+    return result;
+}
+
+static val_t prim_gc_stats_reset(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    atomic_store_explicit(&gc_stat_minor_count,    0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_major_count,    0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_minor_total_us, 0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_minor_max_us,   0, memory_order_relaxed);
+    gc_reset_pause_ring();
+    return V_VOID;
+}
+
 static val_t prim_profiling_report(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return profiling_report();}
 static val_t prim_profiling_reset(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; profiling_reset(); return V_VOID;}
 static val_t prim_floor_div(int ac, val_t *av, void *ud) {
@@ -2275,6 +2317,8 @@ void builtins_register(val_t env) {
     DEF("gc-total-bytes",              prim_gc_total_bytes,        0,0);
     DEF("gc-enable-incremental!",      prim_gc_enable_incremental, 0,0);
     DEF("gc-set-free-space-divisor!",  prim_gc_set_fsd,            1,1);
+    DEF("gc-stats",                    prim_gc_stats,              0,0);
+    DEF("gc-stats-reset!",             prim_gc_stats_reset,        0,0);
     DEF("gc-set-max-heap!",            prim_gc_set_max_heap,       1,1);
     DEF("profiling-report",  prim_profiling_report, 0,0);
     DEF("profiling-reset",   prim_profiling_reset,  0,0);

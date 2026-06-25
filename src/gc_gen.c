@@ -27,6 +27,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <time.h>
+#include <stdatomic.h>
+
+/* ── Pause ring buffer ───────────────────────────────────────────────────── */
+
+static uint64_t      gc_pause_ring[GC_PAUSE_RING_N];
+static _Atomic size_t gc_pause_ring_head = 0;  /* next slot to write (mod N) */
+
+size_t gc_get_pause_ring(uint64_t *out) {
+    size_t head = atomic_load_explicit(&gc_pause_ring_head, memory_order_relaxed);
+    size_t n    = head < GC_PAUSE_RING_N ? head : GC_PAUSE_RING_N;
+    size_t start = head < GC_PAUSE_RING_N ? 0 : head % GC_PAUSE_RING_N;
+    for (size_t i = 0; i < n; i++)
+        out[i] = gc_pause_ring[(start + i) % GC_PAUSE_RING_N];
+    return n;
+}
+
+void gc_reset_pause_ring(void) {
+    atomic_store_explicit(&gc_pause_ring_head, 0, memory_order_relaxed);
+}
 
 /* ── Nursery size ─────────────────────────────────────────────────────────── */
 
@@ -564,6 +584,9 @@ void gc_gen_minor_collect(void) {
     }
     wl_len = 0;
 
+    struct timespec _t0;
+    clock_gettime(CLOCK_MONOTONIC, &_t0);
+
     /*
      * Inhibit Boehm major GC for the duration of this minor collection.
      * We call GC_MALLOC many times to promote objects; on macOS arm64,
@@ -663,6 +686,29 @@ void gc_gen_minor_collect(void) {
     /* Sync root shadows before Boehm's major GC can see them */
     for (size_t i = 0; i < g_roots_count; i++)
         g_roots_shadow[i] = *g_roots[i];
+
+    /* ── Update GC statistics ── */
+    {
+        struct timespec _t1;
+        clock_gettime(CLOCK_MONOTONIC, &_t1);
+        uint64_t us = (uint64_t)(_t1.tv_sec  - _t0.tv_sec)  * 1000000u
+                    + (uint64_t)(_t1.tv_nsec - _t0.tv_nsec) / 1000u;
+
+        atomic_fetch_add_explicit(&gc_stat_minor_count,    1,  memory_order_relaxed);
+        atomic_fetch_add_explicit(&gc_stat_minor_total_us, us, memory_order_relaxed);
+
+        /* Update max pause with a CAS loop */
+        uint64_t old = atomic_load_explicit(&gc_stat_minor_max_us, memory_order_relaxed);
+        while (us > old &&
+               !atomic_compare_exchange_weak_explicit(&gc_stat_minor_max_us, &old, us,
+                                                      memory_order_relaxed,
+                                                      memory_order_relaxed))
+            ;
+
+        /* Write into the pause ring */
+        size_t idx = atomic_fetch_add_explicit(&gc_pause_ring_head, 1, memory_order_relaxed);
+        gc_pause_ring[idx % GC_PAUSE_RING_N] = us;
+    }
 
     GC_enable();
     GC_invoke_finalizers();

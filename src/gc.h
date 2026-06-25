@@ -337,6 +337,26 @@ static inline void gc_resume_minor(void) {
     gc_shadow_stack = &_gc_frame; \
     __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
 
+/* ── GC statistics (available under both Boehm and generational backends) ── */
+
+/*
+ * Atomic counters updated on every minor/major collection.
+ * Read from Scheme via (gc-stats); reset via (gc-stats-reset!).
+ * All are 0 under Boehm (minor GC never fires; major count tracked via
+ * GC_set_on_collection_event hook installed in gc_init).
+ */
+#include <stdatomic.h>
+extern _Atomic uint64_t gc_stat_minor_count;    /* minor GC invocations         */
+extern _Atomic uint64_t gc_stat_major_count;    /* Boehm major GC completions   */
+extern _Atomic uint64_t gc_stat_minor_total_us; /* cumulative minor GC wall time */
+extern _Atomic uint64_t gc_stat_minor_max_us;   /* max single minor GC pause    */
+
+/* Number of valid entries in the pause ring (up to GC_PAUSE_RING_N).
+ * gc_get_pause_ring() copies them out in chronological order. */
+#define GC_PAUSE_RING_N 256
+extern size_t gc_get_pause_ring(uint64_t *out); /* defined in gc_gen.c; 0 under Boehm */
+extern void   gc_reset_pause_ring(void);        /* resets ring head to 0        */
+
 /* ── Card table (retained for backwards compat; no longer written by barrier) */
 
 #define GC_CARD_BYTES 512u
