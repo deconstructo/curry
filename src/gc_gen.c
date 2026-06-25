@@ -32,15 +32,16 @@
 
 /* ── Pause ring buffer ───────────────────────────────────────────────────── */
 
-static uint64_t      gc_pause_ring[GC_PAUSE_RING_N];
-static _Atomic size_t gc_pause_ring_head = 0;  /* next slot to write (mod N) */
+static _Atomic uint64_t gc_pause_ring[GC_PAUSE_RING_N];
+static _Atomic size_t   gc_pause_ring_head = 0;  /* next slot to write (mod N) */
 
 size_t gc_get_pause_ring(uint64_t *out) {
-    size_t head = atomic_load_explicit(&gc_pause_ring_head, memory_order_relaxed);
-    size_t n    = head < GC_PAUSE_RING_N ? head : GC_PAUSE_RING_N;
+    size_t head  = atomic_load_explicit(&gc_pause_ring_head, memory_order_acquire);
+    size_t n     = head < GC_PAUSE_RING_N ? head : GC_PAUSE_RING_N;
     size_t start = head < GC_PAUSE_RING_N ? 0 : head % GC_PAUSE_RING_N;
     for (size_t i = 0; i < n; i++)
-        out[i] = gc_pause_ring[(start + i) % GC_PAUSE_RING_N];
+        out[i] = atomic_load_explicit(&gc_pause_ring[(start + i) % GC_PAUSE_RING_N],
+                                      memory_order_acquire);
     return n;
 }
 
@@ -705,9 +706,10 @@ void gc_gen_minor_collect(void) {
                                                       memory_order_relaxed))
             ;
 
-        /* Write into the pause ring */
+        /* Write into the pause ring — release so readers see the slot value */
         size_t idx = atomic_fetch_add_explicit(&gc_pause_ring_head, 1, memory_order_relaxed);
-        gc_pause_ring[idx % GC_PAUSE_RING_N] = us;
+        atomic_store_explicit(&gc_pause_ring[idx % GC_PAUSE_RING_N], us,
+                              memory_order_release);
     }
 
     GC_enable();
