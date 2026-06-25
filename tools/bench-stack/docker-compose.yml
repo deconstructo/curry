@@ -1,0 +1,47 @@
+services:
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  influxdb:
+    image: influxdb:2
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE:         setup
+      DOCKER_INFLUXDB_INIT_USERNAME:     admin
+      DOCKER_INFLUXDB_INIT_PASSWORD:     currybench
+      DOCKER_INFLUXDB_INIT_ORG:          curry
+      DOCKER_INFLUXDB_INIT_BUCKET:       benchmarks
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN:  curry-bench-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  telegraf:
+    image: telegraf:1
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - mosquitto
+      - influxdb
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - influxdb
+
+volumes:
+  influxdb-data:
+  grafana-data:
