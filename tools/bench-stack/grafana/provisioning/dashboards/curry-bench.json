@@ -5,191 +5,335 @@
     { "type": "datasource", "id": "influxdb", "name": "InfluxDB", "version": "1.0.0" }
   ],
   "annotations": { "list": [] },
-  "description": "Curry Scheme GC benchmark telemetry — real-time view of bench.scm results",
+  "description": "Curry Scheme GC benchmark telemetry — live view of the current run",
   "editable": true,
-  "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
   "panels": [
     {
-      "id": 1,
-      "type": "timeseries",
-      "title": "Mean time per benchmark (ms)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "multi" }
-      },
-      "fieldConfig": {
-        "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } }
-      },
-      "targets": [
-        {
-          "datasource": { "type": "influxdb" },
-          "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"mean\" and r[\"event\"] == \"result\")\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \"/\" + r.gc + \"/\" + r.mode }))\n  |> group(columns: [\"_field\"])"
-        }
-      ]
+      "collapsed": false,
+      "id": 100,
+      "type": "row",
+      "title": "Current run — results per benchmark (populates as tests complete)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
     },
     {
-      "id": 2,
-      "type": "timeseries",
-      "title": "p99 latency (ms)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 1,
+      "type": "table",
+      "title": "Results so far this run",
+      "description": "Each row appears when a benchmark finishes and publishes its result. Refreshes every 5 s.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 1 },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "multi" }
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Time", "desc": false } ]
       },
       "fieldConfig": {
-        "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } },
+        "defaults": {
+          "custom": { "align": "left", "displayMode": "auto" },
+          "decimals": 2
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "boehm" },
-            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ]
+            "matcher": { "id": "byName", "options": "mean" },
+            "properties": [
+              { "id": "displayName", "value": "mean (ms)" },
+              { "id": "unit", "value": "ms" },
+              { "id": "custom.width", "value": 110 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 100 },
+                { "color": "orange", "value": 500 },
+                { "color": "red", "value": 1000 }
+              ]}},
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "generational" },
-            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ]
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "displayName", "value": "p99 (ms)" },
+              { "id": "unit", "value": "ms" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "stddev" },
+            "properties": [
+              { "id": "displayName", "value": "±stddev" },
+              { "id": "unit", "value": "ms" },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gc_major_count" },
+            "properties": [
+              { "id": "displayName", "value": "major GC" },
+              { "id": "custom.width", "value": 90 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 50 },
+                { "color": "red", "value": 200 }
+              ]}},
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gc_minor_count" },
+            "properties": [
+              { "id": "displayName", "value": "minor GC" },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gc_heap_bytes" },
+            "properties": [
+              { "id": "displayName", "value": "heap" },
+              { "id": "unit", "value": "bytes" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "benchmark" },
+            "properties": [ { "id": "custom.width", "value": 200 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "mode" },
+            "properties": [ { "id": "custom.width", "value": 60 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gc" },
+            "properties": [ { "id": "custom.width", "value": 100 } ]
           }
         ]
       },
       "targets": [
         {
-          "datasource": { "type": "influxdb" },
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
           "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"p99\" and r[\"event\"] == \"result\")\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \"/\" + r.gc }))\n  |> group(columns: [\"_field\"])"
+          "query": "import \"date\"\nfrom(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"event\"] == \"result\" and (r[\"_field\"] == \"mean\" or r[\"_field\"] == \"p99\" or r[\"_field\"] == \"stddev\" or r[\"_field\"] == \"gc_major_count\" or r[\"_field\"] == \"gc_minor_count\" or r[\"_field\"] == \"gc_heap_bytes\"))\n  |> group(columns: [\"benchmark\", \"mode\", \"gc\", \"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _time: date.truncate(t: r._time, unit: 1s), _value: float(v: r._value) }))\n  |> group(columns: [\"benchmark\", \"mode\", \"gc\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"benchmark\", \"mode\", \"gc\", \"mean\", \"p99\", \"stddev\", \"gc_major_count\", \"gc_minor_count\", \"gc_heap_bytes\"])"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 101,
+      "type": "row",
+      "title": "Current run — visual breakdown",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Mean time per benchmark (ms)",
+      "description": "One bar per completed benchmark. Bars appear as tests finish.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 12 },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "orange", "value": 500 },
+              { "color": "red",    "value": 1000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "refId": "A",
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"mean\" and r[\"event\"] == \"result\")\n  |> group(columns: [\"benchmark\", \"mode\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
         }
       ]
     },
     {
       "id": 3,
-      "type": "timeseries",
-      "title": "Minor GC count per run",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "type": "bargauge",
+      "title": "Major GC collections per benchmark",
+      "description": "High = heavy allocation pressure. Boehm GC ran this many full collections during the test.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 12 },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" }
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 10
       },
       "fieldConfig": {
-        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "orange", "value": 200 },
+              { "color": "red",    "value": 500 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "influxdb" },
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
           "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_minor_count\" and r[\"event\"] == \"result\")\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \"/\" + r.gc }))\n  |> group(columns: [\"_field\"])"
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_major_count\" and r[\"event\"] == \"result\")\n  |> group(columns: [\"benchmark\", \"mode\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
         }
       ]
     },
     {
       "id": 4,
-      "type": "gauge",
-      "title": "Max minor GC pause (µs)",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 16 },
+      "type": "bargauge",
+      "title": "p99 latency per benchmark (ms)",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 22 },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
         "orientation": "horizontal",
-        "showThresholdMarkers": true
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 10
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "µs",
+          "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1000 },
-              { "color": "red", "value": 5000 }
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "orange", "value": 800 },
+              { "color": "red",    "value": 2000 }
             ]
-          }
+          },
+          "color": { "mode": "thresholds" }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "influxdb" },
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
           "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_minor_max_us\" and r[\"event\"] == \"result\")\n  |> last()"
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"p99\" and r[\"event\"] == \"result\")\n  |> group(columns: [\"benchmark\", \"mode\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
         }
       ]
     },
     {
       "id": 5,
-      "type": "gauge",
-      "title": "GC p99 pause (µs)",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 16 },
+      "type": "bargauge",
+      "title": "Heap size at end of benchmark",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 22 },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
         "orientation": "horizontal",
-        "showThresholdMarkers": true
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 10
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "µs",
+          "unit": "bytes",
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1000 },
-              { "color": "red", "value": 5000 }
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 10000000 },
+              { "color": "orange", "value": 50000000 },
+              { "color": "red",    "value": 200000000 }
             ]
-          }
+          },
+          "color": { "mode": "thresholds" }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "influxdb" },
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
           "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_p99_us\" and r[\"event\"] == \"result\")\n  |> last()"
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_heap_bytes\" and r[\"event\"] == \"result\")\n  |> group(columns: [\"benchmark\", \"mode\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
         }
       ]
     },
     {
-      "id": 6,
-      "type": "stat",
-      "title": "Last major GC count",
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 16 },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": { "unit": "short" }
-      },
-      "targets": [
+      "collapsed": true,
+      "id": 102,
+      "type": "row",
+      "title": "History — how performance changed across runs (expand to view)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "panels": [
         {
-          "datasource": { "type": "influxdb" },
-          "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_major_count\" and r[\"event\"] == \"result\")\n  |> last()"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "type": "table",
-      "title": "Latest results — boehm vs generational",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
-      "options": {
-        "sortBy": [ { "displayName": "benchmark", "desc": false } ],
-        "footer": { "show": false }
-      },
-      "fieldConfig": {
-        "defaults": { "custom": { "align": "left" } },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "mean" },
-            "properties": [
-              { "id": "unit", "value": "ms" },
-              { "id": "decimals", "value": 2 }
-            ]
-          }
-        ]
-      },
-      "targets": [
+          "id": 6,
+          "type": "timeseries",
+          "title": "Mean time — all runs (ms)",
+          "description": "Each point = one benchmark completing. X-axis is wall clock, so repeated runs fan out to the right.",
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 33 },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "right", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "spanNulls": false
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": {
+                "lineWidth": 2,
+                "pointSize": 6,
+                "showPoints": "always",
+                "spanNulls": false
+              }
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+              "refId": "A",
+              "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"mean\" and r[\"event\"] == \"result\")\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
+            }
+          ]
+        },
         {
-          "datasource": { "type": "influxdb" },
-          "refId": "A",
-          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"mean\" and r[\"event\"] == \"result\")\n  |> group(columns: [\"benchmark\", \"gc\", \"mode\"])\n  |> last()\n  |> pivot(rowKey: [\"benchmark\", \"mode\"], columnKey: [\"gc\"], valueColumn: \"_value\")"
+          "id": 7,
+          "type": "timeseries",
+          "title": "Major GC count — all runs",
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "right", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 2, "pointSize": 5, "showPoints": "always" }
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+              "refId": "A",
+              "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"gc_major_count\" and r[\"event\"] == \"result\")\n  |> map(fn: (r) => ({ r with _field: r.benchmark + \" [\" + r.mode + \"]\" }))\n  |> group(columns: [\"_field\"])"
+            }
+          ]
         }
       ]
     }
@@ -198,10 +342,10 @@
   "schemaVersion": 38,
   "tags": ["curry", "gc", "benchmark"],
   "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-2h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "Curry Bench",
   "uid": "curry-bench-01",
-  "version": 1
+  "version": 3
 }

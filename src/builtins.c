@@ -1854,7 +1854,7 @@ static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     val_t result = V_NIL;
     APAIR("nursery-used",     vfix((intptr_t)nursery_used));
     APAIR("free-bytes",       vfix((intptr_t)gc_free_bytes()));
-    APAIR("heap-size-bytes",  vfix((intptr_t)gc_heap_size()));
+    APAIR("heap-size",        vfix((intptr_t)gc_heap_size()));
     APAIR("pause-ring-us",    ring_val);
     APAIR("minor-max-us",     vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_max_us,   memory_order_relaxed)));
     APAIR("minor-total-us",   vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_total_us, memory_order_relaxed)));

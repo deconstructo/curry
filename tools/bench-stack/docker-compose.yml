@@ -22,7 +22,7 @@ services:
       - influxdb-data:/var/lib/influxdb2
 
   telegraf:
-    image: telegraf:1
+    image: telegraf:latest
     volumes:
       - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
     depends_on:
