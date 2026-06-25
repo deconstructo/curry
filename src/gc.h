@@ -119,10 +119,16 @@ typedef struct {
 extern _Thread_local GcNursery gc_nursery;
 #endif
 
-/* Slow path: called when top + n > limit.  Returns a pointer to n bytes.
- * May trigger a minor collection, refill the nursery, or fall back to
- * gc_ops->alloc for large objects. */
+/*
+ * Slow path: called when top + n > limit.  Returns a pointer to n bytes.
+ *
+ * If gc_nursery_refill_fn is non-NULL (set by the generational backend),
+ * it is called to trigger a minor collection, reset the nursery, and
+ * return the newly allocated object.  Otherwise falls through to
+ * gc_ops->alloc (Boehm / semispace behaviour).
+ */
 void *gc_nursery_refill(size_t n, bool has_ptrs);
+
 
 /* C-linkage allocator entry points used by C++ callers (avoids C++ TLS
  * wrapper generation for gc_nursery which is incompatible with the C TLS ABI
@@ -297,9 +303,11 @@ typedef struct GcFrame {
 extern _Thread_local GcFrame *gc_shadow_stack;
 #endif
 
+#ifndef __cplusplus
 static inline void gc_pop_frame(GcFrame **fp) {
     gc_shadow_stack = (*fp)->prev;
 }
+#endif
 
 /*
  * gc_inhibit_minor() / gc_resume_minor() — safe-point inhibit counter.

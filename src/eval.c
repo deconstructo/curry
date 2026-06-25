@@ -171,16 +171,20 @@ typedef struct {
 static val_t param_before_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)av;
     ParamBindings *pb = ud;
-    for (int i = 0; i < pb->n; i++)
-        as_param(pb->params[i])->init = pb->newvals[i];
+    for (int i = 0; i < pb->n; i++) {
+        Parameter *p = as_param(pb->params[i]);
+        gc_wb_slot(&p->init, pb->newvals[i]);
+    }
     return V_VOID;
 }
 
 static val_t param_after_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)av;
     ParamBindings *pb = ud;
-    for (int i = 0; i < pb->n; i++)
-        as_param(pb->params[i])->init = pb->oldvals[i];
+    for (int i = 0; i < pb->n; i++) {
+        Parameter *p = as_param(pb->params[i]);
+        gc_wb_slot(&p->init, pb->oldvals[i]);
+    }
     return V_VOID;
 }
 
@@ -1436,7 +1440,7 @@ tail:
             if (argc == 0) return p->init;
             val_t newval = arr[0];
             if (!vis_false(p->converter)) newval = apply(p->converter, make_pair(newval, V_NIL));
-            p->init = newval;
+            gc_wb_slot(&p->init, newval);
             return V_VOID;
         }
 
@@ -1521,7 +1525,7 @@ val_t apply(val_t proc, val_t args) {
         if (vis_nil(args)) return p->init;
         val_t newval = vcar(args);
         if (!vis_false(p->converter)) newval = apply(p->converter, make_pair(newval, V_NIL));
-        p->init = newval;
+        gc_wb_slot(&p->init, newval);
         return V_VOID;
     }
     if (vis_traced(proc)) {

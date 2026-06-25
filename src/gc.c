@@ -339,6 +339,11 @@ void gc_register_ext_scanner(void (*cb)(void)) {
 uintptr_t gc_ss_evac(uintptr_t v) { return gc_evac_fn ? gc_evac_fn(v) : v; }
 void     *gc_ss_fwd(void *p)      { return gc_fwd_fn  ? gc_fwd_fn(p)  : p; }
 
+/* ── longjmp-safe shadow-stack helpers (called from SCM_PROTECT) ──────── */
+
+void *gc_shadow_save(void)        { return gc_shadow_stack; }
+void  gc_shadow_restore(void *p)  { gc_shadow_stack = (GcFrame *)p; }
+
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 
 void gc_init(void) {
