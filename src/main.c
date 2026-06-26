@@ -340,9 +340,11 @@ static void usage(const char *argv0) {
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
         "  -v                Print version\n"
-        "  --gc BACKEND      GC backend: boehm (default) or generational\n"
+        "  --gc BACKEND      GC backend: boehm (default) or generational (experimental)\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
-        "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n",
+        "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n"
+        "                    Note: generational backend is experimental. Actor-heavy workloads\n"
+        "                    may accumulate nursery garbage between main-thread GC cycles.\n",
         argv0);
 }
 

@@ -719,7 +719,11 @@ void gc_gen_minor_collect(void) {
     gc_dirty_count    = 0;
     gc_dirty_overflow = false;
 
-    /* 7. Call ext_scanner callbacks */
+    /* 7. Call ext_scanner callbacks.
+     * minor_gc_lock is non-recursive — ext_scanners must not allocate from
+     * the nursery (deadlock: gc_nursery_refill → gc_gen_minor_collect →
+     * pthread_mutex_lock(&minor_gc_lock)).  gc_register_ext_scanner() prints
+     * a warning when the first scanner is registered under the gen backend. */
     for (size_t i = 0; i < g_ext_count; i++)
         g_ext_scanners[i]();
 

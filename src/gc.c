@@ -333,6 +333,13 @@ void gc_unregister_stack(void *base) {
 
 void gc_register_ext_scanner(void (*cb)(void)) {
     ensure_ext();
+    if (g_ext_count == 0 && gc_dirty_slots != NULL) {
+        /* gc_dirty_slots is non-NULL only under --gc generational.  Warn once:
+         * minor_gc_lock is non-recursive, so ext_scanners must not allocate
+         * from the nursery or they will deadlock. */
+        fprintf(stderr, "[gc] WARNING: ext_scanner registered under generational "
+                "backend — scanner must not allocate from the nursery\n");
+    }
     if (g_ext_count == g_ext_cap) {
         size_t nc = g_ext_cap * 2;
         void (**ns)(void) = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void (*)(void)));
