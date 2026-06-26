@@ -29,8 +29,9 @@ Documentation is split into two directories:
 - [Raspberry Pi / embedded hardware](docs/guides/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM
 - [MCP server](docs/guides/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients
 - [macOS app bundler](docs/guides/make-macos-app.md) — bundle any Curry script as a `.app` with Qt frameworks embedded
-- [Benchmarking](docs/reference/benchmarking.md) — bench suites, real-time Grafana stack, MQTT event schema, writing custom benchmarks
-- [Profiling](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
+- [Monitoring guide](docs/guides/guide-monitoring.md) — using `(gc-stats)`, running the Grafana stack (Docker and Apple Containers), customizing dashboards, publishing custom metrics
+- [Benchmarking reference](docs/reference/benchmarking.md) — bench suites, MQTT event schema, all GC stat fields
+- [Profiling reference](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
 
 ### Extended numeric tower
 
