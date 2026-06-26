@@ -27,7 +27,7 @@ LATEST_TAG=$(git -C "$REPO_ROOT" tag -l 'v[0-9]*' | sort -V | tail -1)
 TAG_VER="${LATEST_TAG#v}"
 
 FORMULA_SHA=$(grep '^  sha256' "$REPO_ROOT/Formula/curry.rb" \
-              | grep -o '"[0-9a-f]*"' | tr -d '"')
+              | grep -o '"[0-9a-f]*"' | tr -d '"' || true)
 PLACEHOLDER="0000000000000000000000000000000000000000000000000000000000000000"
 
 # ── parse what git is asking us to push ──────────────────────────────────────
@@ -71,9 +71,9 @@ if $PUSHING_MAIN; then
         info "Create the tag first:  git tag -a v$VERSION_H -m 'Release v$VERSION_H'"
     fi
 
-    # sha256 must not be the placeholder
-    if [[ "$FORMULA_SHA" == "$PLACEHOLDER" ]]; then
-        fail "Formula/curry.rb sha256 is still the zero placeholder"
+    # sha256 must be a real 64-char hex hash (not a placeholder or empty)
+    if [[ "$FORMULA_SHA" == "$PLACEHOLDER" ]] || [[ ${#FORMULA_SHA} -ne 64 ]]; then
+        fail "Formula/curry.rb sha256 is missing or placeholder (got: '${FORMULA_SHA:-empty}')"
         info "Push the tag, compute SHA256, then commit the real hash before pushing main"
         info "  curl -sL https://github.com/deconstructo/curry/archive/refs/tags/v${VERSION_H}.tar.gz | shasum -a 256"
     fi
