@@ -690,6 +690,7 @@ void gc_gen_minor_collect(void) {
         for (size_t i = 0; i < pc; i++) {
             void *obj = pinned_slots[i];
             if (obj) scan_pinned_object(obj);
+            pinned_slots[i] = NULL;  /* release reference so Boehm can reclaim dead objects */
         }
         atomic_store_explicit(&pinned_count, 0, memory_order_release);
         pinned_stable = 0;
@@ -705,8 +706,12 @@ void gc_gen_minor_collect(void) {
             void *obj = pinned_slots[i];
             if (obj) scan_pinned_object(obj);
         }
-        /* Compact: future mutations tracked via dirty_slots; no need to keep
-         * these entries around for the next minor GC. */
+        /* Null ALL slots [0, pc) so Boehm can reclaim dead objects.  The stable
+         * range [0, pinned_stable) was already scanned in a prior cycle but still
+         * holds stale pointers; clearing them is necessary now that pinned objects
+         * are GC_MALLOC (not GC_MALLOC_UNCOLLECTABLE). */
+        memset(pinned_slots, 0, pc * sizeof(void *));
+        /* Compact: future mutations tracked via dirty_slots. */
         atomic_store_explicit(&pinned_count, 0, memory_order_release);
         pinned_stable = 0;
         pthread_mutex_unlock(&pinned_lock);
@@ -769,13 +774,19 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
 }
 
 static void *gen_alloc_pinned(size_t n, bool has_ptrs) {
-    /* Use GC_MALLOC_UNCOLLECTABLE for pinned objects with pointer fields.
-     * Under GC_disable()/GC_enable() bracket used during minor GC, Boehm's
-     * conservative scan can miss GC_MALLOC blocks that are only reachable
-     * through uncollectable pinned_slots on macOS ARM64.  Using uncollectable
-     * for the pinned objects themselves makes sub-allocations (code buffers,
-     * constant arrays) reachable through the pinned scan list unconditionally. */
-    void *obj = has_ptrs ? GC_MALLOC_UNCOLLECTABLE(n) : GC_MALLOC_ATOMIC(n);
+    /* Use GC_MALLOC so that dead pinned objects (closures, environments, …)
+     * can be collected by Boehm's major GC once they are no longer reachable
+     * from any live root.
+     *
+     * Live objects are always reachable through Boehm-visible roots:
+     *   vm->stack (GC_MALLOC_UNCOLLECTABLE) carries val_t closures on-stack;
+     *   GLOBAL_ENV and EnvFrame chains are themselves GC_MALLOC objects found
+     *   by conservative scan; sub-allocations (Chunk code buffers, constant
+     *   arrays) are reachable through their parent pinned object.
+     *
+     * Step 6 of gc_gen_minor_collect nulls out each slot after scanning it,
+     * so pinned_slots no longer holds spurious references after a GC cycle. */
+    void *obj = has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
     if (obj && has_ptrs) pinned_add(obj);
     return obj;
 }
