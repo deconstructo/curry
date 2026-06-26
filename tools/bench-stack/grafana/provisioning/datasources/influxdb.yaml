@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    jsonData:
+      version: Flux
+      organization: curry
+      defaultBucket: benchmarks
+    secureJsonData:
+      token: curry-bench-token
+    isDefault: true
+    editable: false

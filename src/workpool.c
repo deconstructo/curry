@@ -95,6 +95,12 @@ static void execute_item(WorkItem *item) {
     ExnHandler h;
     h.prev = current_handler; current_handler = &h;
 
+    /* Worker threads have no shadow stack and no registered roots for C-local
+     * val_t variables.  Inhibit minor GC for the duration of the work item so
+     * intermediate nursery pointers (e.g. the scm_cons arg pairs and REDUCE's
+     * acc) are not silently invalidated by a nursery reset. */
+    gc_inhibit_minor();
+
     if (setjmp(h.jmp) == 0) {
         switch (item->kind) {
         case WORK_MAP:
@@ -124,6 +130,8 @@ static void execute_item(WorkItem *item) {
         item->error = true;
         item->exn   = h.exn;
     }
+
+    gc_resume_minor();
 
     /* Signal one completion to the dispatcher. */
     pthread_mutex_lock(item->done_mutex);

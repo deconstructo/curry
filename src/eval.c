@@ -282,6 +282,14 @@ val_t eval(val_t expr, val_t env) {
     val_t op = V_NIL, rest = V_NIL;
     GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
+    /* Minor GC safe point: all four GC_AUTOFRAME slots are updated by the
+     * collector; op and rest are overwritten before use, so their values here
+     * don't matter.  The provably-live roots (expr, env) are both tracked. */
+    if (__builtin_expect(gc_minor_pending & (gc_inhibit_count == 0), 0)) {
+        gc_minor_pending = false;
+        extern void gc_gen_minor_collect(void);
+        gc_gen_minor_collect();
+    }
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
     /* Heap object: dispatch on type */
@@ -1494,7 +1502,10 @@ val_t apply(val_t proc, val_t args) {
         int n = list_to_arr(args, arr, 64);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        return prim->fn(n, arr, prim->ud);
+        gc_inhibit_minor();
+        val_t r = prim->fn(n, arr, prim->ud);
+        gc_resume_minor();
+        return r;
     }
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);
@@ -1679,7 +1690,10 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
                       prim->name, argc, prim->max_args);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        return prim->fn(argc, argv, prim->ud);
+        gc_inhibit_minor();
+        val_t r = prim->fn(argc, argv, prim->ud);
+        gc_resume_minor();
+        return r;
     }
     if (vis_closure(proc)) {
         Closure *c = as_clos(proc);

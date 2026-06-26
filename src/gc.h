@@ -160,10 +160,11 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
     if (__builtin_expect(next > gc_nursery.limit, 0))
         return gc_nursery_refill(n, has_ptrs);
     gc_nursery.top = next;
-    /* Trace ring buffer */
+#ifdef CURRY_GC_DEBUG_TRACE
     gc_alloc_trace[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = p;
     gc_alloc_trace_sz[gc_alloc_trace_idx % GC_ALLOC_TRACE_N] = n;
     gc_alloc_trace_idx++;
+#endif
     return p;
 }
 #endif
@@ -292,6 +293,32 @@ static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
  *   y = eval(...);             // x is still valid — GC updated it via frame
  */
 
+/*
+ * gc_minor_pending — deferred minor GC flag.
+ *
+ * Set by gc_nursery_refill() when the nursery overflowed but minor GC
+ * could not fire immediately.  Two cases:
+ *
+ *   1. gc_shadow_stack != NULL (tree-walking evaluator): C-local val_t
+ *      temporaries exist in eval() frames that are not tracked by the GC.
+ *
+ *   2. gc_inhibit_count > 0 (inside a primitive call): apply_arr() calls
+ *      gc_inhibit_minor() before every primitive dispatch so that C call
+ *      stacks in builtins are not interrupted mid-execution.  This is the
+ *      common case during VM execution (shadow stack is NULL, but inhibit > 0).
+ *
+ * The VM's L_DISPATCH safepoint fires between every pair of bytecode
+ * instructions, after the current op has committed all results to
+ * vm->stack[0..sp) — the registered GC root range.  The tree-walker's
+ * tail: label is a comparable safepoint in the eval() loop.
+ *
+ * Only set when gc_nursery.base is non-NULL (gen backend active).
+ * Thread-local so each thread manages its own nursery independently.
+ */
+#ifndef __cplusplus
+extern _Thread_local bool gc_minor_pending;
+#endif
+
 typedef struct GcFrame {
     val_t         **slots;
     int             count;
@@ -344,43 +371,84 @@ static inline void gc_resume_minor(void) {
     gc_shadow_stack = &_gc_frame; \
     __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
 
-/* ── Card table (always declared; populated only under generational GC) ───── */
+/* ── GC statistics (available under both Boehm and generational backends) ── */
 
 /*
- * Card table covers the Boehm tenured heap.  Each byte represents one 512-byte
- * card; set to 1 when a tenured object stores a nursery reference.
- * Both globals are NULL/0 under Boehm and set by gc_gen_init().
+ * Atomic counters updated on every minor/major collection.
+ * Read from Scheme via (gc-stats); reset via (gc-stats-reset!).
+ * All are 0 under Boehm (minor GC never fires; major count tracked via
+ * GC_set_on_collection_event hook installed in gc_init).
  */
+#include <stdatomic.h>
+extern _Atomic uint64_t gc_stat_minor_count;    /* minor GC invocations         */
+extern _Atomic uint64_t gc_stat_major_count;    /* Boehm major GC completions   */
+extern _Atomic uint64_t gc_stat_minor_total_us; /* cumulative minor GC wall time */
+extern _Atomic uint64_t gc_stat_minor_max_us;   /* max single minor GC pause    */
+
+/* Number of valid entries in the pause ring (up to GC_PAUSE_RING_N).
+ * gc_get_pause_ring() copies them out in chronological order. */
+#define GC_PAUSE_RING_N 256
+extern size_t gc_get_pause_ring(uint64_t *out); /* defined in gc_gen.c; 0 under Boehm */
+extern void   gc_reset_pause_ring(void);        /* resets ring head to 0        */
+
+/* ── Card table (retained for backwards compat; no longer written by barrier) */
+
 #define GC_CARD_BYTES 512u
 extern uint8_t  *gc_card_table;
 extern uintptr_t gc_tenured_base;
+extern size_t    gc_card_table_ncards;
+
+/* ── Write-buffer remembered set ─────────────────────────────────────────── */
+
+/*
+ * When gc_dirty_slots is non-NULL (generational GC active), gc_wb_slot records
+ * the address of each slot that receives a main-thread-nursery→tenured write.
+ * Minor GC iterates these slot addresses to update forwarding pointers instead
+ * of scanning the entire pinned list every collection.
+ *
+ * The buffer is a plain global because only the main thread can produce nursery
+ * pointers (actor and worker threads run the tree-walker or hold gc_inhibit, so
+ * their allocations go to Boehm).  Using the MAIN thread's nursery bounds
+ * (gc_main_nursery_base/limit, set once in gc_gen_init) as the range check
+ * ensures no other thread ever matches, making the global non-TLS safe.
+ */
+#define GC_DIRTY_CAP 4096
+extern val_t  **gc_dirty_slots;      /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
+extern size_t   gc_dirty_count;      /* number of valid entries                          */
+extern bool     gc_dirty_overflow;   /* set when buffer is full (fall back to full scan) */
+extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm    */
+extern uint8_t *gc_main_nursery_limit; /* ditto                                          */
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
 /*
- * GC_WB(obj, field, val): write val into obj->field and mark the card dirty
- * if obj is in tenured space (old→young reference).  Under Boehm gc_card_table
- * is NULL so the barrier reduces to the bare assignment.
+ * GC_WB(obj, field, val): write val into obj->field and record the slot if it
+ * is a tenured→nursery write.  Under Boehm gc_dirty_slots is NULL so the
+ * barrier reduces to the bare assignment.
  *
  * val must be a val_t.  Example: GC_WB(as_pair(p), car, new_car_val)
  * For array-element writes use gc_wb_slot(&arr[i], new_val) directly.
  */
 static inline void gc_wb_slot(val_t *slot, val_t newval) {
     *slot = newval;
-#ifdef CURRY_GC_PRECISE
-    if (gc_card_table && vis_ptr(newval)) {
-        uintptr_t addr = (uintptr_t)slot;
-        if (addr >= gc_tenured_base)
-            gc_card_table[(addr - gc_tenured_base) / GC_CARD_BYTES] = 1;
+    /* Only record when the written VALUE is in the MAIN thread's nursery.
+     * Using gc_main_nursery_base/limit (globals set once at init, never
+     * modified) rather than TLS gc_nursery ensures that actor threads and
+     * workpool workers — whose allocations go to Boehm and can never land in
+     * the main-thread slab — never touch gc_dirty_count, eliminating the
+     * need for any lock on the write path. */
+    if (gc_dirty_slots && vis_ptr(newval)) {
+        const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
+        if (p >= gc_main_nursery_base && p < gc_main_nursery_limit) {
+            if (gc_dirty_count < GC_DIRTY_CAP)
+                gc_dirty_slots[gc_dirty_count++] = slot;
+            else
+                gc_dirty_overflow = true;
+        }
     }
-#endif
 }
 
-#ifdef CURRY_GC_PRECISE
-#  define GC_WB(obj, field, newval) \
-       do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
-#else
-#  define GC_WB(obj, field, newval) ((obj)->field = (newval))
-#endif
+#define GC_WB(obj, field, newval) \
+    do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
 
 #endif /* CURRY_GC_H */

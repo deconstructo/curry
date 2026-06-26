@@ -45,8 +45,9 @@ void   actor_exit(val_t reason) __attribute__((noreturn));
 void   actor_link(val_t a, val_t b);     /* bidirectional */
 void   actor_monitor(val_t monitor, val_t target);
 
-bool   actor_alive(val_t actor);
+bool     actor_alive(val_t actor);
 uint64_t actor_id(val_t actor);
+val_t    actor_stats(val_t actor);   /* alist of profiling counters */
 
 /* Thread-local current actor (NULL in main thread) */
 extern _Thread_local Actor *current_actor;

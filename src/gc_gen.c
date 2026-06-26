@@ -12,7 +12,7 @@
  *   4. Scan pinned objects (cross-heap refs from Boehm → nursery).
  *   5. Call ext_scanner callbacks.
  *   6. Drain work list again.
- *   7. Reset nursery: zero [base, collect_top), set top = base.
+ *   7. Reset nursery: set top = base (no zeroing needed; scan is [base,collect_top)).
  *   8. Clear dirty cards.
  */
 
@@ -27,6 +27,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <time.h>
+#include <stdatomic.h>
+
+/* ── Pause ring buffer ───────────────────────────────────────────────────── */
+
+static _Atomic uint64_t gc_pause_ring[GC_PAUSE_RING_N];
+static _Atomic size_t   gc_pause_ring_head = 0;  /* next slot to write (mod N) */
+
+size_t gc_get_pause_ring(uint64_t *out) {
+    size_t head  = atomic_load_explicit(&gc_pause_ring_head, memory_order_acquire);
+    size_t n     = head < GC_PAUSE_RING_N ? head : GC_PAUSE_RING_N;
+    size_t start = head < GC_PAUSE_RING_N ? 0 : head % GC_PAUSE_RING_N;
+    for (size_t i = 0; i < n; i++)
+        out[i] = atomic_load_explicit(&gc_pause_ring[(start + i) % GC_PAUSE_RING_N],
+                                      memory_order_acquire);
+    return n;
+}
+
+void gc_reset_pause_ring(void) {
+    atomic_store_explicit(&gc_pause_ring_head, 0, memory_order_relaxed);
+}
 
 /* ── Nursery size ─────────────────────────────────────────────────────────── */
 
@@ -49,62 +70,91 @@ static void alloc_thread_nursery(void) {
     gc_nursery.limit = slab + sz;
 }
 
-/* ── Card table ───────────────────────────────────────────────────────────── */
+/* ── Dirty-slot buffer allocation ────────────────────────────────────────── */
 
-static size_t gc_card_table_ncards;  /* fixed at alloc time — never re-derived */
-
-static void init_card_table(void) {
-    uintptr_t base = (uintptr_t)GC_least_plausible_heap_addr;
-    uintptr_t top  = (uintptr_t)GC_greatest_plausible_heap_addr;
-    base &= ~(uintptr_t)(GC_CARD_BYTES - 1u);
-    top   = (top + GC_CARD_BYTES - 1u) & ~(uintptr_t)(GC_CARD_BYTES - 1u);
-    if (top <= base) { base = 0; top = (uintptr_t)4 * 1024 * 1024 * 1024; }
-    size_t ncards = (top - base) / GC_CARD_BYTES;
-    gc_tenured_base = base;
-    gc_card_table_ncards = ncards;
-    gc_card_table   = (uint8_t *)GC_MALLOC_ATOMIC(ncards);
-    if (!gc_card_table) { fprintf(stderr, "[gc_gen] FATAL: card table OOM\n"); abort(); }
-    memset(gc_card_table, 0, ncards);
-}
-
-static size_t card_table_ncards(void) {
-    /* Return the count fixed at init_card_table() time.  Boehm may grow its
-     * heap beyond GC_greatest_plausible_heap_addr, but re-deriving ncards from
-     * the current plausible-heap bounds would exceed the allocated card table. */
-    return gc_card_table_ncards;
+static void init_dirty_slots(void) {
+    gc_dirty_slots = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_CAP * sizeof(val_t *));
+    if (!gc_dirty_slots) { fprintf(stderr, "[gc_gen] FATAL: dirty_slots OOM\n"); abort(); }
+    gc_dirty_count    = 0;
+    gc_dirty_overflow = false;
 }
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
 /*
- * GC:PIN objects with val_t fields are added here so we can scan them during
- * minor GC.  Uses Boehm disappearing links so that when a pinned object is
- * collected by Boehm, its slot is automatically zeroed.
+ * Pinned objects (closures, environments, upvalues, …) have val_t fields that
+ * may point into the nursery and must be updated during minor GC.  We record
+ * them here so gc_gen_minor_collect() can scan them.
+ *
+ * Lock-free fast path:
+ *   pinned_count is _Atomic.  pinned_add() claims a slot with atomic_fetch_add
+ *   then writes the pointer without holding pinned_lock.  The only structural
+ *   invariant required is that pinned_slots[i] is valid memory for any i that
+ *   has been claimed (i < pinned_cap).
+ *
+ * Resize slow path:
+ *   When pinned_count reaches pinned_cap the caller falls back to pinned_lock,
+ *   copies the array, and updates pinned_slots/pinned_cap atomically under the
+ *   lock.  Fast-path callers already past the capacity check are not affected
+ *   (they claimed valid indices before the resize).
+ *
+ * GC reset:
+ *   gc_gen_minor_collect() holds pinned_lock around the step-6 scan and count
+ *   reset (pinned_count = 0).  A fast-path add that claimed slot c just before
+ *   the reset may write pinned_slots[c] after the count has been zeroed; that
+ *   slot is effectively orphaned for one GC cycle.  This is safe because:
+ *     (a) Initial fields of all pinned objects are Boehm pointers — they are
+ *         set under gc_inhibit_minor(), which prevents the nursery from being
+ *         collected while those fields are written.  Skipping their initial
+ *         scan therefore loses nothing nursery-live.
+ *     (b) Any post-construction mutation that stores a nursery pointer goes
+ *         through gc_wb_slot(), which records it in gc_dirty_slots.  The next
+ *         minor GC processes gc_dirty_slots and updates those fields regardless
+ *         of whether the object was in the pinned scan list.
+ *   In practice the race window is <10 CPU cycles; it cannot occur in
+ *   single-threaded execution (GC fires on the same thread at L_DISPATCH,
+ *   after gc_inhibit_count has already returned to zero).
  */
 #define PINNED_INIT_CAP 256
-static void   **pinned_slots;
-static size_t   pinned_count;
-static size_t   pinned_cap;
+static void         **pinned_slots;
+static _Atomic size_t pinned_count;
+static size_t         pinned_cap;
+static size_t         pinned_stable;   /* objects below this index were fully
+                                          scanned in the last minor GC */
 static pthread_mutex_t pinned_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Exposed so env.c can register the root EnvFrame (allocated
- * GC_MALLOC_UNCOLLECTABLE) into the pinned scan list. */
+/* Exposed so env.c can register the root EnvFrame into the pinned scan list. */
 void gc_gen_pin_permanent(void *obj);
 
 static void pinned_add(void *obj) {
-    pthread_mutex_lock(&pinned_lock);
-    /* All pinned objects are GC_MALLOC_UNCOLLECTABLE and are never freed by
-     * Boehm, so no slot is ever zeroed; always append. */
-    if (pinned_count == pinned_cap) {
-        size_t nc = pinned_cap * 2;
-        void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
-        if (!ns) { fprintf(stderr, "[gc_gen] FATAL: pinned_slots OOM\n"); abort(); }
-        memcpy(ns, pinned_slots, pinned_count * sizeof(void *));
-        memset(ns + pinned_count, 0, (nc - pinned_count) * sizeof(void *));
-        GC_FREE(pinned_slots);
-        pinned_slots = ns; pinned_cap = nc;
+    /* Fast path: claim a slot without the lock. */
+    size_t c = atomic_fetch_add_explicit(&pinned_count, 1, memory_order_relaxed);
+    if (__builtin_expect(c < pinned_cap, 1)) {
+        pinned_slots[c] = obj;
+        return;
     }
-    pinned_slots[pinned_count] = obj;
-    pinned_count++;
+
+    /* Slow path: capacity exceeded.  Back out and resize under pinned_lock. */
+    atomic_fetch_sub_explicit(&pinned_count, 1, memory_order_relaxed);
+    pthread_mutex_lock(&pinned_lock);
+    /* Re-check after acquiring the lock — another thread may have already
+     * resized.  If capacity is sufficient, just retry the fast path. */
+    if (atomic_load_explicit(&pinned_count, memory_order_relaxed) < pinned_cap) {
+        pthread_mutex_unlock(&pinned_lock);
+        pinned_add(obj);   /* one recursive retry is enough */
+        return;
+    }
+    size_t nc = pinned_cap * 2;
+    void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
+    if (!ns) { fprintf(stderr, "[gc_gen] FATAL: pinned_slots OOM\n"); abort(); }
+    size_t cur = atomic_load_explicit(&pinned_count, memory_order_relaxed);
+    memcpy(ns, pinned_slots, cur * sizeof(void *));
+    memset(ns + cur, 0, (nc - cur) * sizeof(void *));
+    GC_FREE(pinned_slots);
+    pinned_slots = ns;
+    pinned_cap   = nc;
+    /* Claim a slot now that the array is large enough. */
+    c = atomic_fetch_add_explicit(&pinned_count, 1, memory_order_relaxed);
+    pinned_slots[c] = obj;
     pthread_mutex_unlock(&pinned_lock);
 }
 
@@ -577,6 +627,9 @@ void gc_gen_minor_collect(void) {
     }
     wl_len = 0;
 
+    struct timespec _t0;
+    clock_gettime(CLOCK_MONOTONIC, &_t0);
+
     /*
      * Inhibit Boehm major GC for the duration of this minor collection.
      * We call GC_MALLOC many times to promote objects; on macOS arm64,
@@ -619,17 +672,58 @@ void gc_gen_minor_collect(void) {
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
 
-    /* 6. Scan pinned objects for cross-heap refs.
-     * Hold pinned_lock to prevent concurrent pinned_add from reallocating
-     * pinned_slots under us (pinned_add GC_FREEs the old array on growth). */
-    pthread_mutex_lock(&pinned_lock);
-    for (size_t i = 0; i < pinned_count; i++) {
-        void *obj = pinned_slots[i];
-        if (obj) scan_pinned_object(obj);
+    /* 6. Process dirty slots + initial scan of new pinned objects.
+     *
+     * Fast path (no overflow): update each recorded slot directly, then scan
+     * only objects added since the last compact.  The stable range [0,
+     * pinned_stable) is skipped because (a) their initial fields were Boehm
+     * pointers at creation time (inhibit protocol), and (b) any subsequent
+     * mutations were captured in gc_dirty_slots.
+     *
+     * Overflow fallback: more than GC_DIRTY_CAP tenured→nursery writes fired
+     * since the last GC — fall back to a full pinned scan for correctness,
+     * then compact.
+     */
+    if (gc_dirty_overflow) {
+        pthread_mutex_lock(&pinned_lock);
+        size_t pc = atomic_load_explicit(&pinned_count, memory_order_acquire);
+        for (size_t i = 0; i < pc; i++) {
+            void *obj = pinned_slots[i];
+            if (obj) scan_pinned_object(obj);
+            pinned_slots[i] = NULL;  /* release reference so Boehm can reclaim dead objects */
+        }
+        atomic_store_explicit(&pinned_count, 0, memory_order_release);
+        pinned_stable = 0;
+        pthread_mutex_unlock(&pinned_lock);
+    } else {
+        /* Update the recorded dirty slots in-place. */
+        for (size_t i = 0; i < gc_dirty_count; i++)
+            *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
+        /* Scan new pinned objects (those added since the last compact). */
+        pthread_mutex_lock(&pinned_lock);
+        size_t pc = atomic_load_explicit(&pinned_count, memory_order_acquire);
+        for (size_t i = pinned_stable; i < pc; i++) {
+            void *obj = pinned_slots[i];
+            if (obj) scan_pinned_object(obj);
+        }
+        /* Null ALL slots [0, pc) so Boehm can reclaim dead objects.  The stable
+         * range [0, pinned_stable) was already scanned in a prior cycle but still
+         * holds stale pointers; clearing them is necessary now that pinned objects
+         * are GC_MALLOC (not GC_MALLOC_UNCOLLECTABLE). */
+        memset(pinned_slots, 0, pc * sizeof(void *));
+        /* Compact: future mutations tracked via dirty_slots. */
+        atomic_store_explicit(&pinned_count, 0, memory_order_release);
+        pinned_stable = 0;
+        pthread_mutex_unlock(&pinned_lock);
     }
-    pthread_mutex_unlock(&pinned_lock);
+    gc_dirty_count    = 0;
+    gc_dirty_overflow = false;
 
-    /* 7. Call ext_scanner callbacks */
+    /* 7. Call ext_scanner callbacks.
+     * minor_gc_lock is non-recursive — ext_scanners must not allocate from
+     * the nursery (deadlock: gc_nursery_refill → gc_gen_minor_collect →
+     * pthread_mutex_lock(&minor_gc_lock)).  gc_register_ext_scanner() prints
+     * a warning when the first scanner is registered under the gen backend. */
     for (size_t i = 0; i < g_ext_count; i++)
         g_ext_scanners[i]();
 
@@ -641,17 +735,35 @@ void gc_gen_minor_collect(void) {
     gc_fwd_fn  = NULL;
 
     /* 9. Reset nursery */
-    memset(gc_nursery.base, 0, (size_t)(collect_top - gc_nursery.base));
     gc_nursery.top = gc_nursery.base;
-
-    /* 10. Clear dirty cards */
-    size_t ncards = card_table_ncards();
-    if (gc_card_table && ncards)
-        memset(gc_card_table, 0, ncards);
 
     /* Sync root shadows before Boehm's major GC can see them */
     for (size_t i = 0; i < g_roots_count; i++)
         g_roots_shadow[i] = *g_roots[i];
+
+    /* ── Update GC statistics ── */
+    {
+        struct timespec _t1;
+        clock_gettime(CLOCK_MONOTONIC, &_t1);
+        uint64_t us = (uint64_t)(_t1.tv_sec  - _t0.tv_sec)  * 1000000u
+                    + (uint64_t)(_t1.tv_nsec - _t0.tv_nsec) / 1000u;
+
+        atomic_fetch_add_explicit(&gc_stat_minor_count,    1,  memory_order_relaxed);
+        atomic_fetch_add_explicit(&gc_stat_minor_total_us, us, memory_order_relaxed);
+
+        /* Update max pause with a CAS loop */
+        uint64_t old = atomic_load_explicit(&gc_stat_minor_max_us, memory_order_relaxed);
+        while (us > old &&
+               !atomic_compare_exchange_weak_explicit(&gc_stat_minor_max_us, &old, us,
+                                                      memory_order_relaxed,
+                                                      memory_order_relaxed))
+            ;
+
+        /* Write into the pause ring — release so readers see the slot value */
+        size_t idx = atomic_fetch_add_explicit(&gc_pause_ring_head, 1, memory_order_relaxed);
+        atomic_store_explicit(&gc_pause_ring[idx % GC_PAUSE_RING_N], us,
+                              memory_order_release);
+    }
 
     GC_enable();
     GC_invoke_finalizers();
@@ -666,13 +778,19 @@ static void *gen_alloc(size_t n, bool has_ptrs) {
 }
 
 static void *gen_alloc_pinned(size_t n, bool has_ptrs) {
-    /* Use GC_MALLOC_UNCOLLECTABLE for pinned objects with pointer fields.
-     * Under GC_disable()/GC_enable() bracket used during minor GC, Boehm's
-     * conservative scan can miss GC_MALLOC blocks that are only reachable
-     * through uncollectable pinned_slots on macOS ARM64.  Using uncollectable
-     * for the pinned objects themselves makes sub-allocations (code buffers,
-     * constant arrays) reachable through the pinned scan list unconditionally. */
-    void *obj = has_ptrs ? GC_MALLOC_UNCOLLECTABLE(n) : GC_MALLOC_ATOMIC(n);
+    /* Use GC_MALLOC so that dead pinned objects (closures, environments, …)
+     * can be collected by Boehm's major GC once they are no longer reachable
+     * from any live root.
+     *
+     * Live objects are always reachable through Boehm-visible roots:
+     *   vm->stack (GC_MALLOC_UNCOLLECTABLE) carries val_t closures on-stack;
+     *   GLOBAL_ENV and EnvFrame chains are themselves GC_MALLOC objects found
+     *   by conservative scan; sub-allocations (Chunk code buffers, constant
+     *   arrays) are reachable through their parent pinned object.
+     *
+     * Step 6 of gc_gen_minor_collect nulls out each slot after scanning it,
+     * so pinned_slots no longer holds spurious references after a GC cycle. */
+    void *obj = has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
     if (obj && has_ptrs) pinned_add(obj);
     return obj;
 }
@@ -734,8 +852,13 @@ void gc_gen_init(size_t nursery_bytes) {
     memset(pinned_slots, 0, PINNED_INIT_CAP * sizeof(void *));
     pinned_cap = PINNED_INIT_CAP;
 
-    init_card_table();
+    init_dirty_slots();
     alloc_thread_nursery();
+    /* Expose the main thread's nursery bounds as globals so gc_wb_slot can use
+     * them without touching TLS — non-main threads check these globals and never
+     * match (their Boehm allocations land outside this slab). */
+    gc_main_nursery_base  = gc_nursery.base;
+    gc_main_nursery_limit = gc_nursery.limit;
 }
 
 /*

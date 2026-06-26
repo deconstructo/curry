@@ -90,10 +90,40 @@ _Thread_local GcFrame *gc_shadow_stack = NULL;
  * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
 _Thread_local int gc_inhibit_count = 0;
 
-/* Globals required by the write barrier when CURRY_GC_PRECISE is defined.
- * Under Boehm they are never read; they are NULL/0 by default. */
-uint8_t  *gc_card_table   = NULL;
-uintptr_t gc_tenured_base = 0;
+/* Deferred minor GC flag.  Set by gc_nursery_refill() when the nursery
+ * overflowed but minor GC couldn't fire (shadow stack non-NULL or inhibited).
+ * Cleared and acted on by eval() at the next tail-call safe point. */
+_Thread_local bool gc_minor_pending = false;
+
+/* Card table globals — retained for backwards compat; all stay NULL/0.
+ * The write barrier no longer writes to the card table; it uses gc_dirty_slots. */
+uint8_t  *gc_card_table        = NULL;
+uintptr_t gc_tenured_base      = 0;
+size_t    gc_card_table_ncards = 0;
+
+/* Write-buffer remembered set.
+ * gc_dirty_slots is allocated by gc_gen_init() and stays NULL under Boehm,
+ * causing gc_wb_slot to reduce to a bare assignment.
+ * gc_main_nursery_base/limit are set once in gc_gen_init to the main thread's
+ * nursery slab bounds; gc_wb_slot uses these globals instead of TLS gc_nursery
+ * so that actor/worker threads never trigger dirty-slot recording. */
+val_t  **gc_dirty_slots      = NULL;
+size_t   gc_dirty_count      = 0;
+bool     gc_dirty_overflow   = false;
+uint8_t *gc_main_nursery_base  = NULL;
+uint8_t *gc_main_nursery_limit = NULL;
+
+/* ── GC statistics ──────────────────────────────────────────────────────────── */
+
+_Atomic uint64_t gc_stat_minor_count    = 0;
+_Atomic uint64_t gc_stat_major_count    = 0;
+_Atomic uint64_t gc_stat_minor_total_us = 0;
+_Atomic uint64_t gc_stat_minor_max_us   = 0;
+
+static void gc_boehm_event_cb(GC_EventType ev) {
+    if (ev == GC_EVENT_END)
+        atomic_fetch_add_explicit(&gc_stat_major_count, 1, memory_order_relaxed);
+}
 
 #define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */
 
@@ -151,9 +181,13 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
                 gc_nursery.top += n;
                 return p;
             }
+        } else {
+            /* Inside tree-walker (shadow stack non-empty) or inhibited: defer
+             * collection to the next eval() tail-call safe point, where only
+             * expr and env are live.  The allocation falls back to Boehm. */
+            gc_minor_pending = true;
         }
-        /* Inside tree-walker (shadow stack non-empty), or object too large
-         * for the slab after collection — fall back to Boehm directly. */
+        /* Object too large for slab after collection, or Boehm fallback. */
     }
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
@@ -299,6 +333,13 @@ void gc_unregister_stack(void *base) {
 
 void gc_register_ext_scanner(void (*cb)(void)) {
     ensure_ext();
+    if (g_ext_count == 0 && gc_dirty_slots != NULL) {
+        /* gc_dirty_slots is non-NULL only under --gc generational.  Warn once:
+         * minor_gc_lock is non-recursive, so ext_scanners must not allocate
+         * from the nursery or they will deadlock. */
+        fprintf(stderr, "[gc] WARNING: ext_scanner registered under generational "
+                "backend — scanner must not allocate from the nursery\n");
+    }
     if (g_ext_count == g_ext_cap) {
         size_t nc = g_ext_cap * 2;
         void (**ns)(void) = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void (*)(void)));
@@ -324,6 +365,7 @@ void  gc_shadow_restore(void *p)  { gc_shadow_stack = (GcFrame *)p; }
 void gc_init(void) {
     GC_INIT();
     GC_allow_register_threads();
+    GC_set_on_collection_event(gc_boehm_event_cb);
 }
 
 void gc_register_thread(void) {

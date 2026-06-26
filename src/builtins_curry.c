@@ -1351,20 +1351,7 @@ static val_t prim_gc_collect(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 
-static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
-    (void)ac; (void)av; (void)ud;
-    val_t lst = V_NIL;
-#define CONS_STAT(key, v) do { \
-    Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0; \
-    p->cdr = lst; \
-    Pair *kv = CURRY_NEW(Pair); kv->hdr.type=T_PAIR; kv->hdr.flags=0; \
-    kv->car = sym_intern_cstr(key); kv->cdr = vfix((intptr_t)(v)); \
-    p->car = vptr(kv); lst = vptr(p); } while(0)
-    CONS_STAT("free-bytes",  gc_free_bytes());
-    CONS_STAT("heap-size",   gc_heap_size());
-#undef CONS_STAT
-    return lst;
-}
+/* gc-stats is defined in builtins.c with full instrumentation */
 
 static val_t prim_gc_on_coll(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
@@ -1582,7 +1569,7 @@ void builtins_curry_register(val_t env) {
 
     /* ── GC builtins ───────────────────────────────────────────────────────── */
     DEF("gc-collect!",      prim_gc_collect,    0, 0);
-    DEF("gc-stats",         prim_gc_stats,      0, 0);
+    /* gc-stats registered in builtins.c */
     DEF("gc-on-collection", prim_gc_on_coll,    1, 1);
 
     /* Second AKK_PR pass — registers Akkadian aliases for CAS, surreal, quantum,
