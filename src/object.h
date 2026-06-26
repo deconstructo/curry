@@ -375,6 +375,12 @@ typedef struct Actor {
     val_t           name;     /* symbol or #f */
     bool            alive;
     pthread_mutex_t lock;
+    /* profiling counters — written by actor thread, readable from any thread */
+    _Atomic uint64_t msgs_received;   /* total messages dequeued via receive */
+    _Atomic uint64_t msgs_sent;       /* total messages sent by this actor   */
+    _Atomic uint64_t ns_in_body;      /* nanoseconds spent running user code  */
+    _Atomic uint32_t mailbox_depth;   /* current queue depth (snapshot)      */
+    uint64_t         spawn_ns;        /* monotonic ns at spawn time           */
 } Actor;
 
 /* STM transactional variable */

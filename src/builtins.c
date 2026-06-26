@@ -1752,6 +1752,23 @@ static val_t prim_receive(int ac, val_t *av, void *ud) {(void)ud;
 static val_t prim_self(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return actor_self();}
 static val_t prim_actor_alive(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(actor_alive(av[0]));}
 
+static val_t prim_actor_stats(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return actor_stats(av[0]);
+}
+
+static val_t prim_actor_set_name(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_actor(av[0])) return V_VOID;
+    as_actor(av[0])->name = av[1];
+    return V_VOID;
+}
+
+static val_t prim_actor_id(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return vfix((intptr_t)actor_id(av[0]));
+}
+
 /* ---- Dynamic parameters ---- */
 static val_t prim_make_parameter(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -2299,7 +2316,10 @@ void builtins_register(val_t env) {
     /* Actors */
     DEF("spawn",      prim_spawn,       1,-1); DEF("send!",      prim_send,        2,2);
     DEF("receive",    prim_receive,     0,1);  DEF("self",       prim_self,        0,0);
-    DEF("actor-alive?",prim_actor_alive,1,1);
+    DEF("actor-alive?",   prim_actor_alive,   1,1);
+    DEF("actor-stats",    prim_actor_stats,   1,1);
+    DEF("actor-set-name!",prim_actor_set_name,2,2);
+    DEF("actor-id",       prim_actor_id,      1,1);
 
     /* Parameters */
     DEF("make-parameter", prim_make_parameter, 1,2);

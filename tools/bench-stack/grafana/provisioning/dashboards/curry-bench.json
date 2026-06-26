@@ -274,11 +274,200 @@
       ]
     },
     {
+      "collapsed": false,
+      "id": 103,
+      "type": "row",
+      "title": "Function profiling — top functions by call count (populated after each phase)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Top functions per phase",
+      "description": "Published by profiler-report/top at the end of each torture phase. fn_name is a tag — one row per function.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 33 },
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [ { "displayName": "calls", "desc": true } ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "left", "displayMode": "auto" },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "calls" },
+            "properties": [
+              { "id": "custom.width", "value": 110 },
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 100000 },
+                { "color": "orange", "value": 1000000 },
+                { "color": "red", "value": 10000000 }
+              ]}}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "mean_us" },
+            "properties": [
+              { "id": "displayName", "value": "mean (µs)" },
+              { "id": "unit", "value": "µs" },
+              { "id": "custom.width", "value": 110 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total_ns" },
+            "properties": [
+              { "id": "displayName", "value": "total (ns)" },
+              { "id": "custom.width", "value": 120 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "fn_name" },
+            "properties": [ { "id": "custom.width", "value": 240 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "benchmark" },
+            "properties": [ { "id": "custom.width", "value": 200 } ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "refId": "A",
+          "query": "import \"date\"\nfrom(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"event\"] == \"profile\" and (r[\"_field\"] == \"calls\" or r[\"_field\"] == \"total_ns\" or r[\"_field\"] == \"mean_us\"))\n  |> group(columns: [\"benchmark\", \"fn_name\", \"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _time: date.truncate(t: r._time, unit: 1s), _value: float(v: r._value) }))\n  |> group(columns: [\"benchmark\", \"fn_name\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"benchmark\", \"fn_name\", \"calls\", \"total_ns\", \"mean_us\"])"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 104,
+      "type": "row",
+      "title": "Actor stats — messages & time in body per actor",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Messages received per actor",
+      "description": "One bar per actor in the ring benchmark. Equal bars = good load balance.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 46 },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "refId": "A",
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"event\"] == \"actor-stats\" and r[\"_field\"] == \"msgs_received\")\n  |> group(columns: [\"actor_id\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: \"actor \" + r.actor_id }))\n  |> group(columns: [\"_field\"])"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "bargauge",
+      "title": "Time in body per actor (ms)",
+      "description": "Total wall-clock ns the actor spent executing (not blocking in receive). Skewed = one actor doing more work.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 46 },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ns",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000000 },
+              { "color": "red", "value": 10000000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "refId": "A",
+          "query": "from(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"event\"] == \"actor-stats\" and r[\"_field\"] == \"ns_in_body\")\n  |> group(columns: [\"actor_id\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _field: \"actor \" + r.actor_id }))\n  |> group(columns: [\"_field\"])"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Actor stats table",
+      "description": "Full per-actor detail: msgs received, msgs sent, time in body, mailbox depth, age.",
+      "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 56 },
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [ { "displayName": "msgs_received", "desc": true } ]
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "displayMode": "auto" }, "decimals": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ns_in_body" },
+            "properties": [ { "id": "unit", "value": "ns" }, { "id": "custom.width", "value": 120 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "age_ns" },
+            "properties": [ { "id": "unit", "value": "ns" }, { "id": "custom.width", "value": 120 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "actor_id" },
+            "properties": [ { "id": "custom.width", "value": 80 } ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
+          "refId": "A",
+          "query": "import \"date\"\nfrom(bucket: \"benchmarks\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\" and r[\"event\"] == \"actor-stats\" and (r[\"_field\"] == \"msgs_received\" or r[\"_field\"] == \"msgs_sent\" or r[\"_field\"] == \"ns_in_body\" or r[\"_field\"] == \"mailbox_depth\" or r[\"_field\"] == \"age_ns\"))\n  |> group(columns: [\"actor_id\", \"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _time: date.truncate(t: r._time, unit: 1s), _value: float(v: r._value) }))\n  |> group(columns: [\"actor_id\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"actor_id\", \"benchmark\", \"msgs_received\", \"msgs_sent\", \"ns_in_body\", \"mailbox_depth\", \"age_ns\"])"
+        }
+      ]
+    },
+    {
       "collapsed": true,
       "id": 102,
       "type": "row",
       "title": "History — how performance changed across runs (expand to view)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 66 },
       "panels": [
         {
           "id": 6,
@@ -286,7 +475,7 @@
           "title": "Mean time — all runs (ms)",
           "description": "Each point = one benchmark completing. X-axis is wall clock, so repeated runs fan out to the right.",
           "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
-          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 33 },
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 67 },
           "options": {
             "legend": { "displayMode": "list", "placement": "right", "calcs": ["lastNotNull"] },
             "tooltip": { "mode": "multi", "sort": "desc" },
@@ -316,7 +505,7 @@
           "type": "timeseries",
           "title": "Major GC count — all runs",
           "datasource": { "type": "influxdb", "uid": "P951FEA4DE68E13C5" },
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 76 },
           "options": {
             "legend": { "displayMode": "list", "placement": "right", "calcs": ["lastNotNull"] },
             "tooltip": { "mode": "multi", "sort": "desc" }
@@ -347,5 +536,5 @@
   "timezone": "browser",
   "title": "Curry Bench",
   "uid": "curry-bench-01",
-  "version": 3
+  "version": 4
 }
