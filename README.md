@@ -29,6 +29,8 @@ Documentation is split into two directories:
 - [Raspberry Pi / embedded hardware](docs/guides/RPI.md) — setup guide for Pi; GPIO, I2C, SPI, PWM
 - [MCP server](docs/guides/mcp-clients.md) — expose Curry procedures as Model Context Protocol tools callable from Claude Code and other AI clients
 - [macOS app bundler](docs/guides/make-macos-app.md) — bundle any Curry script as a `.app` with Qt frameworks embedded
+- [Benchmarking](docs/reference/benchmarking.md) — bench suites, real-time Grafana stack, MQTT event schema, writing custom benchmarks
+- [Profiling](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
 
 ### Extended numeric tower
 
@@ -130,7 +132,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [mqtt](docs/reference/module-mqtt.md) | `(curry mqtt)` | MQTT client: publish, subscribe, QoS 0/1/2, TLS | `libpaho-mqtt-dev` |
 | [ode](docs/reference/module-ode.md) | `(curry ode)` | ODE solvers: Euler, RK4, Dormand-Prince RK45, Verlet | — |
 | [mcp](docs/guides/mcp-clients.md) | `(curry mcp)` | MCP server: expose Curry tools to AI clients via stdio or SSE | — |
-| [profiling](docs/reference/module-profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
+| [profiling](docs/reference/profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
 | [rpi](docs/reference/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
 | [sicm](docs/reference/module-sicm.md) | `(curry sicm)` | Classical mechanics (SICM): Lagrangian, Hamiltonian, Poisson brackets | — |
 
@@ -245,6 +247,35 @@ When built with `-DBUILD_FFI=ON`, Curry can call any C library directly from Sch
 Supported types: `int`, `uint`, `long`, `size-t`, `double`, `float`, `c-ptr`, `string`, `bool`, `void`. Requires `libffi-dev` on Linux; found automatically via Homebrew on macOS.
 
 See [`docs/reference/module-ffi.md`](docs/reference/module-ffi.md) for the full API.
+
+---
+
+### Garbage collector
+
+Curry ships two GC backends, selectable at runtime:
+
+| Flag | Backend | Notes |
+|------|---------|-------|
+| `--gc boehm` | Boehm conservative GC | Default; battle-tested, no configuration needed |
+| `--gc generational` | Per-thread nursery + Boehm tenured | Experimental; lower pause times for allocation-heavy workloads |
+
+The generational backend uses a 512 KB per-thread bump-pointer nursery with a minor GC safepoint at every VM instruction boundary. Surviving objects are promoted into Boehm's managed heap. Tune with `--gc-nursery-size N` (supports `K`/`M`/`G`; default `512K`).
+
+**GC statistics**
+
+```scheme
+(gc-stats)        ; → alist of counters and pause ring
+(gc-stats-reset!) ; zero counters between runs
+```
+
+`(gc-stats)` returns:
+```
+((minor-count . N) (major-count . N) (minor-total-us . N) (minor-max-us . N)
+ (pause-ring . #(u64 ...))   ; last 256 minor pause times in µs
+ (heap-size-bytes . N) (free-bytes . N) (nursery-used . N))
+```
+
+See [docs/reference/benchmarking.md](docs/reference/benchmarking.md) for the real-time Grafana monitoring stack and [docs/reference/profiling.md](docs/reference/profiling.md) for the runtime profiler.
 
 ---
 

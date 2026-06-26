@@ -1,5 +1,76 @@
 # Changelog
 
+### 1.6.1 — GC header C++ compatibility fix
+
+Patch release fixing a build regression for users building the Qt6 module.
+
+**Bug fixes**
+- `src/gc.h`: wrap `#include <stdatomic.h>` and the `_Atomic` extern declarations
+  in `#ifndef __cplusplus` so Qt6's C++ translation units no longer see conflicting
+  `_Atomic` qualifiers from both `<stdatomic.h>` and `<atomic>` (20 compiler errors
+  on Homebrew Qt6).
+- MQTT retain test: switched to QoS 1 so the broker acknowledgement is awaited
+  before the subscriber connects; previously QoS 0 fire-and-forget caused a race
+  between publisher and subscriber.
+- Pre-push hook: `|| true` guard prevents `set -euo pipefail` from killing the
+  script when the formula SHA256 is a placeholder (grep finds no hex string);
+  also extended check to catch any non-64-char value, not just the zero sentinel.
+
+---
+
+### 1.6.0 — GC performance instrumentation and real-time benchmarking
+
+**GC statistics**
+- New atomic counters in `src/gc.c`: `gc_stat_minor_count`, `gc_stat_major_count`,
+  `gc_stat_minor_total_us`, `gc_stat_minor_max_us`.
+- Pause ring buffer in `src/gc_gen.c`: last 256 minor GC pause times (µs) for
+  computing p50/p95/p99 without sorting full history.
+- Boehm major GC counted via `GC_set_on_collection_event` callback.
+- New builtins `(gc-stats)` and `(gc-stats-reset!)` expose all counters and the
+  pause ring as a Scheme alist.
+
+**`(gc-stats)` alist**
+
+```
+((minor-count . N) (major-count . N) (minor-total-us . N) (minor-max-us . N)
+ (pause-ring . #(u64 ...))   ; last 256 minor pause times in µs
+ (heap-size-bytes . N) (free-bytes . N) (nursery-used . N))
+```
+
+**GC robustness (gc-perf work)**
+- Lock-free `pinned_add`: atomic fast path; mutex only on resize.  Eliminates
+  contention on the pinned slot list under concurrent minor GC + parallel map.
+- Minor GC safepoint at VM `L_DISPATCH`: deferred minor GC fires between bytecode
+  instructions rather than mid-instruction, preventing corruption of live C locals.
+- Pinned slot nulling: after each scan the full `[0, pinned_count)` range is
+  zeroed so Boehm can reclaim dead pinned objects between major collections.
+
+**Real-time benchmarking stack**
+
+`tools/bench-stack/` — one-command Docker Compose observability pipeline:
+```
+bench.scm → MQTT (mosquitto) → Telegraf → InfluxDB → Grafana (live dashboard)
+```
+Watch benchmark runs live at `http://localhost:3000` while `bench.scm` publishes
+results.  Dashboard panels: mean time by benchmark, p99 over time, minor GC
+count per run, max pause gauge, comparison table (boehm vs generational).
+
+Three benchmark suites:
+- `tests/bench.scm` — core throughput + GC-specific workloads (short-lived alloc,
+  medium-lived promotion, large-object bypass, write-barrier mutation, mixed)
+- `tests/bench_heavy.scm` — longer warm-up, actor ring, larger allocation budgets
+- `tests/bench_torture.scm` — stress suite (1M alloc loop, deep recursion, etc.)
+
+**New documentation**
+- [`docs/reference/benchmarking.md`](docs/reference/benchmarking.md) — benchmark
+  suite reference: build prereqs, quick start, all suites and panels, MQTT event
+  schema, writing custom benchmarks
+- [`docs/reference/profiling.md`](docs/reference/profiling.md) — profiler
+  reference: `**eval-profiler**` levels, `(curry profiling)` API, `,profile` REPL
+  command, timing workflows and limitations
+
+---
+
 ### 1.5.0 — Generational GC
 
 Two-generation Cheney garbage collector available as `--gc generational`.
