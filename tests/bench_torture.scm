@@ -87,22 +87,22 @@
 (define (publish-actor-stats actor label)
   (let ((s (actor-stats actor)))
     (when (pair? s)
-      (define (ref k) (let ((p (assoc k s))) (if p (cdr p) 0)))
-      (publish
-        (list (cons "event"          "actor-stats")
-              (cons "benchmark"      label)
-              (cons "gc"             bench-gc-tag)
-              (cons "mode"           "vm")
-              (cons "actor_id"       (ref "id"))
-              (cons "msgs_received"  (ref "msgs-received"))
-              (cons "msgs_sent"      (ref "msgs-sent"))
-              (cons "ns_in_body"     (ref "ns-in-body"))
-              (cons "mailbox_depth"  (ref "mailbox-depth"))
-              (cons "age_ns"         (ref "age-ns"))
-              (cons "mean"           (let ((rx (ref "msgs-received"))
-                                          (ns (ref "ns-in-body")))
-                                       (if (> rx 0) (/ ns rx 1000.0) 0.0)))
-              (cons "timestamp_ms"   (unix-ms)))))))
+      (let ((get (lambda (k) (let ((p (assoc k s))) (if p (cdr p) 0)))))
+        (publish
+          (list (cons "event"          "actor-stats")
+                (cons "benchmark"      label)
+                (cons "gc"             bench-gc-tag)
+                (cons "mode"           "vm")
+                (cons "actor_id"       (get 'id))
+                (cons "msgs_received"  (get 'msgs-received))
+                (cons "msgs_sent"      (get 'msgs-sent))
+                (cons "ns_in_body"     (get 'ns-in-body))
+                (cons "mailbox_depth"  (get 'mailbox-depth))
+                (cons "age_ns"         (get 'age-ns))
+                (cons "mean"           (let ((rx (get 'msgs-received))
+                                             (ns (get 'ns-in-body)))
+                                          (if (> rx 0) (/ ns rx 1000.0) 0.0)))
+                (cons "timestamp_ms"   (unix-ms))))))))
 
 ;; ── Timing ───────────────────────────────────────────────────────────────────
 
@@ -389,7 +389,7 @@
       (let pub ((i 0))
         (when (< i n-actors)
           (publish-actor-stats (vector-ref vec i) "actors [torture]")
-          (pub (+ i 1))))))
+          (pub (+ i 1)))))))
 
 ;; ── Phase 7: Retained graph + pointer chasing ────────────────────────────────
 ;; Build a 500K-node doubly-linked list in tenured space, then walk it
