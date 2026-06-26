@@ -7,7 +7,10 @@
 ;;; Each benchmark is calibrated to run 2–15 seconds, produce serious
 ;;; GC pressure, and exercise different allocation patterns.
 
-(import (curry mqtt))
+(define %have-mqtt #f)
+(guard (exn (#t #f))
+  (import (curry mqtt))
+  (set! %have-mqtt #t))
 (import (curry json))
 (import (curry sync))
 

@@ -9,7 +9,10 @@
 ;;;   ./build/curry tests/bench_torture.scm --duration 120   # 2 min per phase
 ;;;   ./build/curry tests/bench_torture.scm --phase heap     # single phase
 
-(import (curry mqtt))
+(define %have-mqtt #f)
+(guard (exn (#t #f))
+  (import (curry mqtt))
+  (set! %have-mqtt #t))
 (import (curry json))
 (import (curry sync))
 (import (curry profiling))

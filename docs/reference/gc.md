@@ -69,11 +69,17 @@ as normal by allocation pressure after `GC_enable()` returns.
 `Promise`, `Parameter`, `Traced`, `Syntax`, `ErrorObj`, `Condition`,
 `Restart`, `SymFn`, `CPtr`.
 
-**GC:PIN** — allocated directly in Boehm (`GC_MALLOC_UNCOLLECTABLE`), never
-moved: `Symbol`, `Bignum`, `Rational`, `Mpfr`, `Port`, `Primitive`,
+**GC:PIN** — allocated directly in Boehm (`GC_MALLOC`), never moved:
+`Symbol`, `Bignum`, `Rational`, `Mpfr`, `Port`, `Primitive`,
 `BcClosure`, `Chunk`, `Upvalue`, `EnvFrame`, `Closure`, `Module`,
 `Actor`, `Mailbox`, `TVar`, `Channel`, `Continuation`,
 `ForeignLib`, `ForeignFn`, `JitClosure`.
+
+Pinned objects with pointer fields are tracked in an internal `pinned_slots`
+array.  After each minor GC the slots are nulled, releasing Boehm's reference
+so that dead pinned objects (closures, environments, upvalues that are no
+longer reachable from any live root) can be collected by the next Boehm major
+GC cycle.
 
 Pinned objects are registered in an internal `pinned_slots` array so that
 their `val_t` fields are updated during each minor GC.
@@ -98,12 +104,6 @@ curry --gc generational --gc-nursery-size 4194304 script.scm  # 4 MB
 ```
 
 ### Known limitations
-
-**Pinned objects are never freed by Boehm.** `GC_MALLOC_UNCOLLECTABLE`
-blocks (BcClosure, Upvalue, Chunk, etc.) accumulate for the process lifetime.
-Programs that create closures in tight loops will leak memory proportional to
-the number of closures created. A `gc_gen_unpin` / `GC_FREE` mechanism is
-planned for a future release.
 
 **Bignum-heavy workloads are slower than Boehm.** The generational GC
 assumes most objects are short-lived (the "generational hypothesis"). Bignum
@@ -179,6 +179,46 @@ Return total bytes allocated since process start (fixnum).
 
 ---
 
+### `(gc-stats)`
+
+Return an alist of GC statistics for the current run.  All counters are reset
+by `(gc-stats-reset!)` and accumulate until the next reset.
+
+```scheme
+(gc-stats)
+; ⇒ ((minor-count    . 3)
+;     (major-count    . 1)
+;     (minor-total-us . 55)
+;     (minor-max-us   . 32)
+;     (pause-ring-us  . #(32 12 11))   ; last ≤256 minor GC pause times, µs
+;     (heap-size      . 9125888)
+;     (free-bytes     . 2293760)
+;     (nursery-used   . 32304))
+```
+
+`minor-count` and `minor-*-us` fields are 0 under `--gc boehm` (no minor
+GC).  `nursery-used` is 0 under Boehm; a non-zero value confirms the
+generational backend is active.
+
+The `pause-ring-us` vector holds the last 256 minor GC pause times in
+microseconds, oldest to newest.  Use it to compute p50/p95/p99 pause
+percentiles without sorting the full history.
+
+---
+
+### `(gc-stats-reset!)`
+
+Zero all `gc-stats` counters and clear the pause ring.  Call before each
+benchmark run to isolate measurements.
+
+```scheme
+(gc-stats-reset!)
+(my-benchmark)
+(display (gc-stats))
+```
+
+---
+
 ### `(gc-enable-incremental!)`
 
 Switch Boehm to incremental (step-by-step) collection mode. Reduces
@@ -247,14 +287,16 @@ compiler, and several builtins use these guards internally.
 
 Planned improvements to the generational GC:
 
-- **`gc_gen_unpin` / `GC_FREE`** — explicit lifetime management for pinned
-  objects so that ephemeral closures and upvalues are eventually freed.
-- **Pin `T_BIGNUM` / `T_RATIONAL`** — making numeric tower bignums GC:PIN
-  would eliminate evacuation overhead for arithmetic-heavy programs and close
-  the performance gap with Boehm.
-- **Remembered set / card table scanning** — the card table infrastructure
-  exists (`gc_card_table`, `gc_wb_slot`) but is compiled out unless
-  `CURRY_GC_PRECISE` is defined. Enabling it would allow minor GC to scan
-  only dirty cards instead of all pinned objects.
-- **Green threads / concurrent GC** — long-term; requires safepoint
-  coordination across multiple OS threads.
+- **Per-actor independent minor GC** — actor threads have their own nurseries
+  but currently cannot minor-GC them independently; garbage accumulates until
+  the main thread triggers a cycle.  Requires a unified safepoint protocol
+  across OS threads.
+- **Unified safepoint protocol** — signal-based STW coordination so all
+  threads park at safe points before collection, enabling per-actor and
+  concurrent collection.
+- **Precise old-gen mark-sweep** — replace Boehm's conservative scan with a
+  precise BFS mark over the typed object graph, eliminating false retention
+  from integers that look like pointers.
+- **Concurrent old-gen marking (SATB)** — snapshot-at-the-beginning write
+  barrier to allow the mark phase to run concurrently with mutators, removing
+  long major GC pauses.

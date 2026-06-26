@@ -16,7 +16,10 @@
 ;;; (gc-stats) alist to detect which backend is active and tags results
 ;;; accordingly.
 
-(import (curry mqtt))
+(define %have-mqtt #f)
+(guard (exn (#t #f))
+  (import (curry mqtt))
+  (set! %have-mqtt #t))
 (import (curry json))
 (import (curry sync))
 
