@@ -10,6 +10,59 @@ For the profiling API see [`docs/reference/profiling.md`](../reference/profiling
 
 ---
 
+## Prerequisites
+
+### Curry build
+
+`(gc-stats)` and `(gc-stats-reset!)` are always available — no build flags needed.
+
+The MQTT telemetry pipeline (Parts 2–5) requires Curry to be built with MQTT support:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_MODULE_MQTT=ON
+cmake --build build -j$(sysctl -n hw.logicalcpu)   # macOS
+# cmake --build build -j$(nproc)                    # Linux
+```
+
+If `BUILD_MODULE_MQTT=OFF`, the benchmark suites still run and print JSON to
+stderr — MQTT publishing is silently skipped, and the Grafana stack receives
+nothing.
+
+### Monitoring stack — Docker Compose path (Part 2, Option A)
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS / Windows / Linux), or Docker Engine + the Compose plugin on Linux.
+- Ports 1883, 3000, and 8086 must be free on localhost.
+
+Verify:
+
+```bash
+docker compose version   # should print Compose version 2.x or later
+```
+
+### Monitoring stack — Apple Containers path (Part 2, Option B)
+
+- macOS 26 or later, Apple Silicon.
+- The `container` CLI (ships with Xcode Command Line Tools for macOS 26):
+
+```bash
+xcode-select --install   # if not already installed
+container version        # should print the runtime version
+```
+
+- Ports 1883, 3000, and 8086 must be free on localhost.
+- The `host.containers.internal` hostname must resolve from inside containers
+  (built into the Apple container runtime — no manual configuration needed).
+
+### Optional tools
+
+| Tool | Used for | Install |
+|------|----------|---------|
+| `mosquitto_sub` | Subscribe to raw MQTT events for debugging | `brew install mosquitto` |
+| `jq` | Pretty-print JSON from `mosquitto_sub` | `brew install jq` |
+| `curl` | Query InfluxDB schema directly (Part 5) | Ships with macOS |
+
+---
+
 ## Part 1 — Measuring GC behaviour in your own code
 
 ### The `(gc-stats)` primitive
