@@ -117,13 +117,40 @@
 (define (alist-ref key alist default)
   (let ((p (assoc key alist))) (if p (cdr p) default)))
 
+; Sort a vector in place using insertion sort (small vectors only).
+(define (vector-sort! v <?)
+  (let ((n (vector-length v)))
+    (let outer ((i 1))
+      (when (< i n)
+        (let ((key (vector-ref v i)))
+          (let inner ((j (- i 1)))
+            (if (and (>= j 0) (<? key (vector-ref v j)))
+                (begin (vector-set! v (+ j 1) (vector-ref v j))
+                       (inner (- j 1)))
+                (vector-set! v (+ j 1) key))))
+        (outer (+ i 1))))))
+
+; Compute a percentile (0.0–1.0) from a sorted vector.
+(define (vector-percentile sorted-v p)
+  (let ((n (vector-length sorted-v)))
+    (if (= n 0) 0
+        (let ((idx (inexact->exact (floor (* p (- n 1))))))
+          (vector-ref sorted-v idx)))))
+
+; Snapshot GC stats + pause-ring percentiles in one call.
 (define (gc-snap)
-  (let ((s (gc-stats)))
-    (list (cons "gc_minor_count"  (alist-ref 'minor-count    s 0))
-          (cons "gc_major_count"  (alist-ref 'major-count    s 0))
-          (cons "gc_heap_bytes"   (alist-ref 'heap-size      s 0))
-          (cons "gc_nursery_used" (alist-ref 'nursery-used   s 0))
-          (cons "gc_minor_max_us" (alist-ref 'minor-max-us   s 0)))))
+  (let* ((s      (gc-stats))
+         (ring   (alist-ref 'pause-ring-us s (make-vector 0)))
+         (sorted (vector-copy ring)))
+    (vector-sort! sorted <)
+    (list (cons "gc_minor_count"    (alist-ref 'minor-count    s 0))
+          (cons "gc_major_count"    (alist-ref 'major-count    s 0))
+          (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0))
+          (cons "gc_nursery_used"   (alist-ref 'nursery-used   s 0))
+          (cons "gc_minor_max_us"   (alist-ref 'minor-max-us   s 0))
+          (cons "gc_pause_p50_us"   (vector-percentile sorted 0.50))
+          (cons "gc_pause_p95_us"   (vector-percentile sorted 0.95))
+          (cons "gc_pause_p99_us"   (vector-percentile sorted 0.99)))))
 
 ;; ── Phase runner — publishes heartbeats every 5 s ────────────────────────────
 ;;
@@ -166,7 +193,9 @@
                                         (inexact->exact
                                           (round (/ (cdr (assoc "gc_heap_bytes" snap))
                                                     1048576.0))))
-                             "MiB\n"))
+                             "MiB"
+                             "  p99=" (number->string (cdr (assoc "gc_pause_p99_us" snap)))
+                             "µs\n"))
             (publish
               (append
                 (list (cons "event"        "heartbeat")
