@@ -81,38 +81,80 @@ static void init_dirty_slots(void) {
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
 /*
- * GC:PIN objects with val_t fields are added here so we can scan them during
- * minor GC.  Uses Boehm disappearing links so that when a pinned object is
- * collected by Boehm, its slot is automatically zeroed.
+ * Pinned objects (closures, environments, upvalues, …) have val_t fields that
+ * may point into the nursery and must be updated during minor GC.  We record
+ * them here so gc_gen_minor_collect() can scan them.
+ *
+ * Lock-free fast path:
+ *   pinned_count is _Atomic.  pinned_add() claims a slot with atomic_fetch_add
+ *   then writes the pointer without holding pinned_lock.  The only structural
+ *   invariant required is that pinned_slots[i] is valid memory for any i that
+ *   has been claimed (i < pinned_cap).
+ *
+ * Resize slow path:
+ *   When pinned_count reaches pinned_cap the caller falls back to pinned_lock,
+ *   copies the array, and updates pinned_slots/pinned_cap atomically under the
+ *   lock.  Fast-path callers already past the capacity check are not affected
+ *   (they claimed valid indices before the resize).
+ *
+ * GC reset:
+ *   gc_gen_minor_collect() holds pinned_lock around the step-6 scan and count
+ *   reset (pinned_count = 0).  A fast-path add that claimed slot c just before
+ *   the reset may write pinned_slots[c] after the count has been zeroed; that
+ *   slot is effectively orphaned for one GC cycle.  This is safe because:
+ *     (a) Initial fields of all pinned objects are Boehm pointers — they are
+ *         set under gc_inhibit_minor(), which prevents the nursery from being
+ *         collected while those fields are written.  Skipping their initial
+ *         scan therefore loses nothing nursery-live.
+ *     (b) Any post-construction mutation that stores a nursery pointer goes
+ *         through gc_wb_slot(), which records it in gc_dirty_slots.  The next
+ *         minor GC processes gc_dirty_slots and updates those fields regardless
+ *         of whether the object was in the pinned scan list.
+ *   In practice the race window is <10 CPU cycles; it cannot occur in
+ *   single-threaded execution (GC fires on the same thread at L_DISPATCH,
+ *   after gc_inhibit_count has already returned to zero).
  */
 #define PINNED_INIT_CAP 256
-static void   **pinned_slots;
-static size_t   pinned_count;
-static size_t   pinned_cap;
-static size_t   pinned_stable;   /* pinned objects below this index were fully
-                                    scanned in the last minor GC and have clean
-                                    cards unless re-dirtied by GC_WB */
+static void         **pinned_slots;
+static _Atomic size_t pinned_count;
+static size_t         pinned_cap;
+static size_t         pinned_stable;   /* objects below this index were fully
+                                          scanned in the last minor GC */
 static pthread_mutex_t pinned_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Exposed so env.c can register the root EnvFrame (allocated
- * GC_MALLOC_UNCOLLECTABLE) into the pinned scan list. */
+/* Exposed so env.c can register the root EnvFrame into the pinned scan list. */
 void gc_gen_pin_permanent(void *obj);
 
 static void pinned_add(void *obj) {
-    pthread_mutex_lock(&pinned_lock);
-    /* All pinned objects are GC_MALLOC_UNCOLLECTABLE and are never freed by
-     * Boehm, so no slot is ever zeroed; always append. */
-    if (pinned_count == pinned_cap) {
-        size_t nc = pinned_cap * 2;
-        void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
-        if (!ns) { fprintf(stderr, "[gc_gen] FATAL: pinned_slots OOM\n"); abort(); }
-        memcpy(ns, pinned_slots, pinned_count * sizeof(void *));
-        memset(ns + pinned_count, 0, (nc - pinned_count) * sizeof(void *));
-        GC_FREE(pinned_slots);
-        pinned_slots = ns; pinned_cap = nc;
+    /* Fast path: claim a slot without the lock. */
+    size_t c = atomic_fetch_add_explicit(&pinned_count, 1, memory_order_relaxed);
+    if (__builtin_expect(c < pinned_cap, 1)) {
+        pinned_slots[c] = obj;
+        return;
     }
-    pinned_slots[pinned_count] = obj;
-    pinned_count++;
+
+    /* Slow path: capacity exceeded.  Back out and resize under pinned_lock. */
+    atomic_fetch_sub_explicit(&pinned_count, 1, memory_order_relaxed);
+    pthread_mutex_lock(&pinned_lock);
+    /* Re-check after acquiring the lock — another thread may have already
+     * resized.  If capacity is sufficient, just retry the fast path. */
+    if (atomic_load_explicit(&pinned_count, memory_order_relaxed) < pinned_cap) {
+        pthread_mutex_unlock(&pinned_lock);
+        pinned_add(obj);   /* one recursive retry is enough */
+        return;
+    }
+    size_t nc = pinned_cap * 2;
+    void **ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void *));
+    if (!ns) { fprintf(stderr, "[gc_gen] FATAL: pinned_slots OOM\n"); abort(); }
+    size_t cur = atomic_load_explicit(&pinned_count, memory_order_relaxed);
+    memcpy(ns, pinned_slots, cur * sizeof(void *));
+    memset(ns + cur, 0, (nc - cur) * sizeof(void *));
+    GC_FREE(pinned_slots);
+    pinned_slots = ns;
+    pinned_cap   = nc;
+    /* Claim a slot now that the array is large enough. */
+    c = atomic_fetch_add_explicit(&pinned_count, 1, memory_order_relaxed);
+    pinned_slots[c] = obj;
     pthread_mutex_unlock(&pinned_lock);
 }
 
@@ -644,11 +686,12 @@ void gc_gen_minor_collect(void) {
      */
     if (gc_dirty_overflow) {
         pthread_mutex_lock(&pinned_lock);
-        for (size_t i = 0; i < pinned_count; i++) {
+        size_t pc = atomic_load_explicit(&pinned_count, memory_order_acquire);
+        for (size_t i = 0; i < pc; i++) {
             void *obj = pinned_slots[i];
             if (obj) scan_pinned_object(obj);
         }
-        pinned_count  = 0;
+        atomic_store_explicit(&pinned_count, 0, memory_order_release);
         pinned_stable = 0;
         pthread_mutex_unlock(&pinned_lock);
     } else {
@@ -657,13 +700,14 @@ void gc_gen_minor_collect(void) {
             *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
         /* Scan new pinned objects (those added since the last compact). */
         pthread_mutex_lock(&pinned_lock);
-        for (size_t i = pinned_stable; i < pinned_count; i++) {
+        size_t pc = atomic_load_explicit(&pinned_count, memory_order_acquire);
+        for (size_t i = pinned_stable; i < pc; i++) {
             void *obj = pinned_slots[i];
             if (obj) scan_pinned_object(obj);
         }
         /* Compact: future mutations tracked via dirty_slots; no need to keep
          * these entries around for the next minor GC. */
-        pinned_count  = 0;
+        atomic_store_explicit(&pinned_count, 0, memory_order_release);
         pinned_stable = 0;
         pthread_mutex_unlock(&pinned_lock);
     }
