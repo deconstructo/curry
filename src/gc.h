@@ -293,6 +293,32 @@ static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
  *   y = eval(...);             // x is still valid — GC updated it via frame
  */
 
+/*
+ * gc_minor_pending — deferred minor GC flag.
+ *
+ * Set by gc_nursery_refill() when the nursery overflowed but minor GC
+ * could not fire immediately.  Two cases:
+ *
+ *   1. gc_shadow_stack != NULL (tree-walking evaluator): C-local val_t
+ *      temporaries exist in eval() frames that are not tracked by the GC.
+ *
+ *   2. gc_inhibit_count > 0 (inside a primitive call): apply_arr() calls
+ *      gc_inhibit_minor() before every primitive dispatch so that C call
+ *      stacks in builtins are not interrupted mid-execution.  This is the
+ *      common case during VM execution (shadow stack is NULL, but inhibit > 0).
+ *
+ * The VM's L_DISPATCH safepoint fires between every pair of bytecode
+ * instructions, after the current op has committed all results to
+ * vm->stack[0..sp) — the registered GC root range.  The tree-walker's
+ * tail: label is a comparable safepoint in the eval() loop.
+ *
+ * Only set when gc_nursery.base is non-NULL (gen backend active).
+ * Thread-local so each thread manages its own nursery independently.
+ */
+#ifndef __cplusplus
+extern _Thread_local bool gc_minor_pending;
+#endif
+
 typedef struct GcFrame {
     val_t         **slots;
     int             count;

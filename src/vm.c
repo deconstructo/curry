@@ -290,7 +290,6 @@ void vm_close_upvalues(val_t *last) {
 
 /* ── Foreign call helper ─────────────────────────────────────────────── */
 
-/* Call any non-BcClosure callable using the tree-walker's apply_arr(). */
 static val_t call_foreign(val_t callee, int argc, val_t *args) {
     return apply_arr(callee, argc, args);
 }
@@ -398,12 +397,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_NEWLINE]     = &&L_OP_NEWLINE,     [OP_NOP]          = &&L_OP_NOP,
     };
 #   define CASE(op)  L_##op:
-#   define NEXT      goto *dt[READ_U8()]
-    NEXT;   /* prime the pump */
+#   define NEXT      goto L_DISPATCH
+    goto L_DISPATCH;  /* prime the pump */
 #else /* no computed goto */
-    for (;;) { switch (READ_U8()) {
 #   define CASE(op)  case op:
 #   define NEXT      break
+    for (;;) {
+        if (__builtin_expect(gc_minor_pending, 0)) {
+            gc_minor_pending = false;
+            extern void gc_gen_minor_collect(void);
+            gc_gen_minor_collect();
+        }
+        switch (READ_U8()) {
 #endif
 
         /* ── Constants ──────────────────────────────────────────────── */
@@ -1004,7 +1009,19 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             NEXT;
         }
 
-#ifndef __GNUC__
+#ifdef __GNUC__
+    /* Minor-GC safepoint: fires between instructions, after the current op has
+     * fully committed its result to vm->stack and before the next op begins.
+     * At this point all Scheme values are on vm->stack[0..sp) — the registered
+     * GC root range — so gc_gen_minor_collect() sees every live root. */
+    L_DISPATCH:
+        if (__builtin_expect(gc_minor_pending, 0)) {
+            gc_minor_pending = false;
+            extern void gc_gen_minor_collect(void);
+            gc_gen_minor_collect();
+        }
+        goto *dt[READ_U8()];
+#else  /* no computed goto */
         default:
             fprintf(stderr, "vm: unknown opcode %d at offset %d\n",
                     op, (int)(frame->ip - 1 - frame->closure->chunk->code));

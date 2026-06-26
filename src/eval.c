@@ -282,6 +282,14 @@ val_t eval(val_t expr, val_t env) {
     val_t op = V_NIL, rest = V_NIL;
     GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
+    /* Minor GC safe point: all four GC_AUTOFRAME slots are updated by the
+     * collector; op and rest are overwritten before use, so their values here
+     * don't matter.  The provably-live roots (expr, env) are both tracked. */
+    if (__builtin_expect(gc_minor_pending & (gc_inhibit_count == 0), 0)) {
+        gc_minor_pending = false;
+        extern void gc_gen_minor_collect(void);
+        gc_gen_minor_collect();
+    }
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
     /* Heap object: dispatch on type */

@@ -90,6 +90,11 @@ _Thread_local GcFrame *gc_shadow_stack = NULL;
  * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
 _Thread_local int gc_inhibit_count = 0;
 
+/* Deferred minor GC flag.  Set by gc_nursery_refill() when the nursery
+ * overflowed but minor GC couldn't fire (shadow stack non-NULL or inhibited).
+ * Cleared and acted on by eval() at the next tail-call safe point. */
+_Thread_local bool gc_minor_pending = false;
+
 /* Card table globals — retained for backwards compat; all stay NULL/0.
  * The write barrier no longer writes to the card table; it uses gc_dirty_slots. */
 uint8_t  *gc_card_table        = NULL;
@@ -176,9 +181,13 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
                 gc_nursery.top += n;
                 return p;
             }
+        } else {
+            /* Inside tree-walker (shadow stack non-empty) or inhibited: defer
+             * collection to the next eval() tail-call safe point, where only
+             * expr and env are live.  The allocation falls back to Boehm. */
+            gc_minor_pending = true;
         }
-        /* Inside tree-walker (shadow stack non-empty), or object too large
-         * for the slab after collection — fall back to Boehm directly. */
+        /* Object too large for slab after collection, or Boehm fallback. */
     }
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
