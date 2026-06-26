@@ -176,9 +176,13 @@
   (set! c-sub (mqtt-connect "127.0.0.1" plain-port "curry-test-retain-sub")))
 
 (when (and c-pub c-sub)
-  ;;; Clear any existing retained message first
-  (mqtt-publish c-pub "curry/test/retain" "" 0 #t)
-  (mqtt-publish c-pub "curry/test/retain" "sticky" 0 #t)  ; retain=true
+  ;;; Clear any existing retained message first, then publish "sticky".
+  ;;; QoS 1 so MQTTClient_waitForCompletion fires and the broker has committed
+  ;;; the retained message before mqtt-subscribe is called.  QoS 0 is fire-and-
+  ;;; forget — the broker may not have processed the publish by subscribe time,
+  ;;; causing the subscriber to receive the previous (empty) retained payload.
+  (mqtt-publish c-pub "curry/test/retain" "" 1 #t)
+  (mqtt-publish c-pub "curry/test/retain" "sticky" 1 #t)
 
   ;;; Fresh subscriber should receive retained message without publisher sending again
   (mqtt-subscribe c-sub "curry/test/retain" 0)
@@ -187,7 +191,7 @@
     (check "retain:payload" (cdr msg) "sticky"))
 
   ;;; Clear retained message
-  (mqtt-publish c-pub "curry/test/retain" "" 0 #t)
+  (mqtt-publish c-pub "curry/test/retain" "" 1 #t)
   (mqtt-disconnect c-pub)
   (mqtt-disconnect c-sub))
 
