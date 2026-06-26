@@ -378,12 +378,23 @@ static inline void gc_resume_minor(void) {
  * Read from Scheme via (gc-stats); reset via (gc-stats-reset!).
  * All are 0 under Boehm (minor GC never fires; major count tracked via
  * GC_set_on_collection_event hook installed in gc_init).
+ *
+ * <stdatomic.h> is incompatible with <atomic> in C++ before C++23.
+ * C++ translation units (Qt6 module) must not see the C11 _Atomic keyword;
+ * they only use the extern declarations, which are valid plain uint64_t in C++.
  */
-#include <stdatomic.h>
-extern _Atomic uint64_t gc_stat_minor_count;    /* minor GC invocations         */
-extern _Atomic uint64_t gc_stat_major_count;    /* Boehm major GC completions   */
-extern _Atomic uint64_t gc_stat_minor_total_us; /* cumulative minor GC wall time */
-extern _Atomic uint64_t gc_stat_minor_max_us;   /* max single minor GC pause    */
+#ifndef __cplusplus
+#  include <stdatomic.h>
+   extern _Atomic uint64_t gc_stat_minor_count;
+   extern _Atomic uint64_t gc_stat_major_count;
+   extern _Atomic uint64_t gc_stat_minor_total_us;
+   extern _Atomic uint64_t gc_stat_minor_max_us;
+#else
+   extern uint64_t gc_stat_minor_count;
+   extern uint64_t gc_stat_major_count;
+   extern uint64_t gc_stat_minor_total_us;
+   extern uint64_t gc_stat_minor_max_us;
+#endif
 
 /* Number of valid entries in the pause ring (up to GC_PAUSE_RING_N).
  * gc_get_pause_ring() copies them out in chronological order. */
