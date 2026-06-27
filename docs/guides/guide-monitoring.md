@@ -180,31 +180,7 @@ docker compose -f tools/bench-stack/docker-compose.yml down
 docker compose -f tools/bench-stack/docker-compose.yml down -v
 ```
 
-### Option B: Apple Containers (macOS 26+, Apple Silicon)
 
-Apple's native container runtime (`container` CLI, available in macOS 26+)
-runs OCI images directly on the Virtualization.framework with no Docker Desktop
-needed.  The CLI is similar to Docker's, but each container is an independent
-lightweight VM — there is no Compose equivalent and no shared DNS-based
-inter-container networking.
-
-The approach below uses host-port binding for each service and the
-`host.containers.internal` hostname (which resolves to the host machine from
-inside any container) for inter-service communication.
-
-#### Step 1 — Install the `container` CLI
-
-The `container` command ships with macOS 26 developer tools.  Verify:
-
-```bash
-container version
-```
-
-If not found, install the Command Line Tools package:
-
-```bash
-xcode-select --install
-```
 
 #### Step 2 — Pull images
 
