@@ -60,7 +60,8 @@ typedef struct ExnHandler {
     jmp_buf         jmp;
     val_t           exn;    /* filled on raise */
     struct ExnHandler *prev;
-    void           *saved_shadow; /* gc_shadow_stack at setjmp time — restored on longjmp */
+    void           *saved_shadow;  /* gc_shadow_stack at setjmp time — restored on longjmp */
+    int             saved_inhibit; /* gc_inhibit_count at setjmp time — restored on longjmp */
 } ExnHandler;
 
 /* Thread-local current exception handler chain.
@@ -128,32 +129,37 @@ void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 void scm_raise_val(val_t exn) __attribute__((noreturn));
 
 /*
- * longjmp-safe shadow-stack helpers.  Declared here (with C linkage so C++
- * modules can use SCM_PROTECT) and defined in gc.c.  Under C++ the save
- * returns NULL and restore is a no-op; C++ modules never use GC_AUTOFRAME.
+ * longjmp-safe shadow-stack and inhibit-counter helpers.
+ * Declared here (with C linkage so C++ modules can use SCM_PROTECT) and
+ * defined in gc.c.  Under C++ the shadow save returns NULL and restore is a
+ * no-op; C++ modules never use GC_AUTOFRAME.
  */
 #ifdef __cplusplus
 extern "C" {
 #endif
 void *gc_shadow_save(void);
 void  gc_shadow_restore(void *saved);
+int   gc_inhibit_save(void);
+void  gc_inhibit_restore(int saved);
 #ifdef __cplusplus
 }
 #endif
 
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
-#define SCM_PROTECT(h, body, on_exn) do {          \
-    (h).prev          = current_handler;            \
-    (h).saved_shadow  = gc_shadow_save();           \
-    current_handler   = &(h);                       \
-    if (setjmp((h).jmp) == 0) {                     \
-        body;                                       \
-        current_handler = (h).prev;                 \
-    } else {                                        \
-        current_handler = (h).prev;                 \
-        gc_shadow_restore((h).saved_shadow);        \
-        on_exn;                                     \
-    }                                               \
+#define SCM_PROTECT(h, body, on_exn) do {              \
+    (h).prev           = current_handler;               \
+    (h).saved_shadow   = gc_shadow_save();              \
+    (h).saved_inhibit  = gc_inhibit_save();             \
+    current_handler    = &(h);                          \
+    if (setjmp((h).jmp) == 0) {                        \
+        body;                                           \
+        current_handler = (h).prev;                     \
+    } else {                                            \
+        current_handler = (h).prev;                     \
+        gc_shadow_restore((h).saved_shadow);            \
+        gc_inhibit_restore((h).saved_inhibit);          \
+        on_exn;                                         \
+    }                                                   \
 } while (0)
 
 /* ---- Load / include ---- */

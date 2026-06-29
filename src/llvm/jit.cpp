@@ -137,6 +137,17 @@ static uint64_t curry_jit_list_tail(uint64_t *argv, int32_t n) {
     return (uint64_t)lst;
 }
 
+/* ---- GC inhibit wrappers (callable from JIT-compiled LLVM IR) ---- */
+/*
+ * gc_inhibit_minor() / gc_resume_minor() are no-ops in C++ (TLS gc_inhibit_count
+ * is not visible from __cplusplus).  These plain-C-linkage wrappers delegate to
+ * the C implementations in gc.c so JIT code can inhibit minor GC around every
+ * statepoint call (preventing minor GC from firing while live nursery pointers
+ * reside in JIT alloca slots that the GC cannot yet enumerate).
+ */
+static void curry_gc_inhibit_minor_jit(void) { gc_inhibit_minor_fn(); }
+static void curry_gc_resume_minor_jit(void)  { gc_resume_minor_fn(); }
+
 } /* extern "C" */
 
 namespace curry {
@@ -239,12 +250,14 @@ void JITSession::register_runtime_symbols() {
 #endif
     };
 
-    add("curry_jit_apply_arr",     (void *)curry_jit_apply_arr);
-    add("curry_jit_global_lookup", (void *)curry_jit_global_lookup);
-    add("curry_jit_global_define", (void *)curry_jit_global_define);
-    add("curry_jit_alloc_cell",    (void *)curry_jit_alloc_cell);
-    add("curry_jit_make_closure",  (void *)curry_jit_make_closure);
-    add("curry_jit_list_tail",     (void *)curry_jit_list_tail);
+    add("curry_jit_apply_arr",          (void *)curry_jit_apply_arr);
+    add("curry_jit_global_lookup",      (void *)curry_jit_global_lookup);
+    add("curry_jit_global_define",      (void *)curry_jit_global_define);
+    add("curry_jit_alloc_cell",         (void *)curry_jit_alloc_cell);
+    add("curry_jit_make_closure",       (void *)curry_jit_make_closure);
+    add("curry_jit_list_tail",          (void *)curry_jit_list_tail);
+    add("curry_gc_inhibit_minor_jit",   (void *)curry_gc_inhibit_minor_jit);
+    add("curry_gc_resume_minor_jit",    (void *)curry_gc_resume_minor_jit);
 
     /* Comparison wrappers (bool → val_t). */
     add("curry_jit_lt",            (void *)curry_jit_lt);

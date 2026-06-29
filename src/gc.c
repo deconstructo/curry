@@ -360,6 +360,15 @@ void     *gc_ss_fwd(void *p)      { return gc_fwd_fn  ? gc_fwd_fn(p)  : p; }
 void *gc_shadow_save(void)        { return gc_shadow_stack; }
 void  gc_shadow_restore(void *p)  { gc_shadow_stack = (GcFrame *)p; }
 
+/* ── inhibit-counter wrappers for C++ and JIT code ─────────────────────── */
+/* gc_inhibit_minor() is a no-op in C++ (TLS not accessible from C++).
+ * These plain-C functions provide the same semantics to C++ callers. */
+
+void gc_inhibit_minor_fn(void) { gc_inhibit_count++; }
+void gc_resume_minor_fn(void)  { if (gc_inhibit_count > 0) gc_inhibit_count--; }
+int  gc_inhibit_save(void)     { return gc_inhibit_count; }
+void gc_inhibit_restore(int v) { gc_inhibit_count = v; }
+
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 
 void gc_init(void) {
