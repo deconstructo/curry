@@ -367,12 +367,20 @@ static inline void gc_resume_minor(void) {
 
 /* C-linkage wrappers callable from C++ and JIT-compiled code.
  * gc_inhibit_minor() / gc_resume_minor() are no-ops under __cplusplus
- * (TLS not accessible); these functions are compiled in gc.c (C) and work. */
+ * (TLS not accessible); these functions are compiled in gc.c (C) and work.
+ * Note: gc_inhibit_save / gc_inhibit_restore are also declared in eval.h
+ * (the header C++ callers include for SCM_PROTECT); the duplication is
+ * intentional so each header is independently self-contained. */
+#ifdef __cplusplus
+extern "C" {
+#endif
 void gc_inhibit_minor_fn(void);
 void gc_resume_minor_fn(void);
-/* Save/restore the inhibit counter across longjmp (used by SCM_PROTECT). */
 int  gc_inhibit_save(void);
 void gc_inhibit_restore(int saved);
+#ifdef __cplusplus
+}
+#endif
 
 #define GC_AUTOFRAME(n, ...) \
     val_t *_gc_frame_roots[] = {__VA_ARGS__}; \
