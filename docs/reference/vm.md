@@ -570,6 +570,15 @@ array at runtime.  This means JIT compilation is only safe for closures with
 Using `guard` avoids an "unbound variable" error when running the same
 script in a non-JIT build.
 
+### Generational GC interaction
+
+JIT-compiled code is safe to use with `--gc generational`.  Every call site
+in JIT IR is wrapped in an `llvm.experimental.gc.statepoint`; the statepoint
+emitter automatically inhibits minor GC before each call and resumes it after,
+preventing the collector from seeing stale nursery pointers in JIT alloca slots.
+If a Scheme exception unwinds through a JIT frame, `SCM_PROTECT` restores the
+inhibit counter so minor GC is never permanently suppressed.
+
 ### Parallel-map interaction
 
 JIT-compiled closures are safe to use as the mapped function in parallel

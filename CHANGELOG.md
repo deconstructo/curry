@@ -1,5 +1,31 @@
 # Changelog
 
+### 1.6.2 — Generational GC + LLVM JIT correctness fix
+
+Patch release fixing a use-after-free when running `--gc generational` with
+the LLVM JIT backend (`--llvm` / `-DBUILD_LLVM=ON`).
+
+**Bug fixes**
+- **JIT statepoints inhibit minor GC** (`src/llvm/codegen.cpp`): every
+  allocating call emitted as an `llvm.experimental.gc.statepoint` now
+  brackets itself with `curry_gc_inhibit_minor_jit` / `curry_gc_resume_minor_jit`.
+  Previously minor GC could fire mid-statepoint while live nursery pointers
+  sat in JIT alloca slots invisible to the collector, producing stale
+  references and potential use-after-free.
+- **`ExnHandler` saves inhibit counter** (`src/eval.h`): the `SCM_PROTECT`
+  macro now saves `gc_inhibit_count` at `setjmp` time and restores it on the
+  `longjmp` path.  Without this, a Scheme exception propagating through a JIT
+  frame would skip the resume call, permanently elevating the inhibit counter
+  and preventing future minor collections.
+- **C-linkage inhibit wrappers** (`src/gc.c`, `src/gc.h`):
+  `gc_inhibit_minor_fn`, `gc_resume_minor_fn`, `gc_inhibit_save`, and
+  `gc_inhibit_restore` are new plain-C functions exposing the
+  `_Thread_local gc_inhibit_count` counter to C++ and JIT callers.
+  The existing `gc_inhibit_minor()` / `gc_resume_minor()` inlines are
+  guarded by `#ifndef __cplusplus` and were no-ops in C++ translation units.
+
+---
+
 ### 1.6.1 — GC header C++ compatibility fix
 
 Patch release fixing a build regression for users building the Qt6 module.

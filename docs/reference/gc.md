@@ -89,10 +89,19 @@ their `val_t` fields are updated during each minor GC.
 Minor GC only fires when **both** conditions hold:
 
 - `gc_shadow_stack == NULL` — the tree-walking evaluator is not active.
-- `gc_inhibit_count == 0` — no `gc_inhibit_minor()` / `gc_resume_minor()` guard is held.
+- `gc_inhibit_count == 0` — no inhibit guard is held.
 
 The bytecode VM dispatch loop is the primary safe-point. Allocations that
 occur inside the reader, compiler, or tree-walker fall back to Boehm directly.
+
+**LLVM JIT interaction**: when the JIT backend is enabled (`-DBUILD_LLVM=ON`),
+every call site in JIT-compiled code is wrapped in an
+`llvm.experimental.gc.statepoint`.  Each statepoint automatically inhibits
+minor GC before the call and resumes it after, preventing the collector from
+seeing stale nursery pointers in JIT alloca slots that are not yet enumerated
+in the statepoint's GC-args list.  If a Scheme exception (`scm_raise`) unwinds
+through a JIT frame via `longjmp`, `SCM_PROTECT` restores `gc_inhibit_count`
+to its pre-entry value so the counter is never permanently elevated.
 
 ### Nursery size
 
@@ -281,19 +290,40 @@ Use these when C code holds raw `val_t` pointers that are not on the Scheme
 stack and not covered by the shadow stack or root registry. The reader,
 compiler, and several builtins use these guards internally.
 
+**C++ and JIT callers** cannot use these inlines directly — they are guarded
+by `#ifndef __cplusplus` because the TLS variable `gc_inhibit_count` is not
+accessible from C++ translation units. Use the plain-C wrapper functions
+instead:
+
+```c
+/* Declared in gc.h inside extern "C" { }; defined in gc.c. */
+void gc_inhibit_minor_fn(void);
+void gc_resume_minor_fn(void);
+
+/* Save/restore the counter across longjmp (used by SCM_PROTECT internally). */
+int  gc_inhibit_save(void);
+void gc_inhibit_restore(int saved);
+```
+
 ---
 
 ## Roadmap
 
-Planned improvements to the generational GC:
+Planned improvements to the generational GC (✓ = shipped):
 
+- ✓ **LLVM JIT statepoint safety** (v1.6.2) — minor GC is inhibited across
+  every JIT statepoint call so nursery pointers in JIT alloca slots are never
+  stale.  `SCM_PROTECT` restores the inhibit counter on `longjmp`.
+- **Unified safepoint protocol** — signal-based STW coordination so all
+  threads park at safe points before collection, enabling per-actor and
+  concurrent collection.
+- **Precise LLVM stack maps** — populate GCArgs in statepoints from
+  `cc.gc_roots` and use `gc.relocate` projections so the GC can enumerate
+  (and eventually move) JIT-stack nursery pointers precisely.
 - **Per-actor independent minor GC** — actor threads have their own nurseries
   but currently cannot minor-GC them independently; garbage accumulates until
   the main thread triggers a cycle.  Requires a unified safepoint protocol
   across OS threads.
-- **Unified safepoint protocol** — signal-based STW coordination so all
-  threads park at safe points before collection, enabling per-actor and
-  concurrent collection.
 - **Precise old-gen mark-sweep** — replace Boehm's conservative scan with a
   precise BFS mark over the typed object graph, eliminating false retention
   from integers that look like pointers.
