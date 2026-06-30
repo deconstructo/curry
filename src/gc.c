@@ -282,18 +282,18 @@ void gc_register_root(void *slot) {
     g_roots[idx]        = (val_t *)slot;
     val_t cur = *(val_t *)slot;
     g_roots_shadow[idx] = cur;
-    /* Register the val_t slot itself as a root range (covers .data/.bss addresses). */
+    /* Register the val_t slot itself as a root range.
+     * Boehm will read the 8 bytes at `slot` during every GC cycle and follow
+     * whatever heap pointer is stored there — this is sufficient to keep the
+     * pointed-to object alive even when `slot` lives in malloc/C++ memory
+     * outside Boehm's conservatively scanned heap.
+     *
+     * Do NOT also register the first 8 bytes of the pointed-to object: those
+     * bytes are the Hdr {type, flags} field, which contains small integers
+     * (e.g. T_COMPLEX = 8).  Boehm would try to follow those small integers
+     * as pointer candidates, look them up in GC_top_index[0] (which is NULL
+     * for addresses near zero), dereference NULL + 8 = 0x8, and crash. */
     GC_add_roots(slot, (char *)slot + sizeof(val_t));
-    /*
-     * Also register the OBJECT pointed to by the root value as a root range.
-     * Boehm's GC_add_roots_inner checks if the base is a heap pointer and
-     * explicitly marks the containing block as live — this is the reliable
-     * mechanism for .data-resident val_t roots on macOS arm64.
-     */
-    if (cur & ~3u) {  /* quick heap-ptr check: non-zero and tag==0 */
-        uintptr_t p = cur & ~(uintptr_t)3u;
-        GC_add_roots((char *)p, (char *)p + sizeof(val_t));
-    }
 }
 
 void gc_unregister_root(void *slot) {

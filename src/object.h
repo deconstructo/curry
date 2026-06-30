@@ -339,10 +339,14 @@ typedef struct {
 } Primitive;
 
 /* JIT-compiled native closure produced by the LLVM backend.
- * fn: i64 (*)(i32 argc, i64 *argv, i64 *caps) */
+ * fn: i64 (*)(i32 argc, i64 *argv, i64 *caps)
+ *
+ * fn is stored as GC_HIDE_POINTER(real_fn) so Boehm's conservative scanner
+ * does not follow it as a heap pointer into JIT code pages.  Use
+ * GC_REVEAL_POINTER(jc->fn) before calling. */
 typedef struct {
     Hdr      hdr;
-    void    *fn;
+    void    *fn;     /* GC_HIDE_POINTER'd — not a raw callable pointer */
     uint32_t n_caps;
     val_t    caps[];
 } JitClosure;

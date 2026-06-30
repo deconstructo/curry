@@ -1647,9 +1647,9 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
             JitClosure *jc = as_jitclos(cl->jit_val);
             typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
             g_jit_call_depth++;
-            val_t r = (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
-                                                  (uint64_t *)argv,
-                                                  (uint64_t *)jc->caps);
+            val_t r = (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
+                                                                    (uint64_t *)argv,
+                                                                    (uint64_t *)jc->caps);
             g_jit_call_depth--;
             return r;
         }
@@ -1675,9 +1675,9 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_jitclosure(proc)) {
         JitClosure *jc = as_jitclos(proc);
         typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-        return (val_t)((jit_fn_t)jc->fn)((int32_t)argc,
-                                          (uint64_t *)argv,
-                                          (uint64_t *)jc->caps);
+        return (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
+                                                            (uint64_t *)argv,
+                                                            (uint64_t *)jc->caps);
     }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
     if (vis_prim(proc)) {

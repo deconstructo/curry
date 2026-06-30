@@ -118,7 +118,7 @@ static uint64_t curry_jit_make_closure(void *fn, int32_t n_caps, uint64_t *caps)
     jc->hdr.type  = T_JITCLOSURE;
     jc->hdr.flags = 0;
     jc->hdr.fwd   = 0;
-    jc->fn        = fn;
+    jc->fn        = (void *)GC_HIDE_POINTER(fn);
     jc->n_caps    = (uint32_t)n_caps;
     for (int32_t i = 0; i < n_caps; i++)
         jc->caps[i] = (val_t)caps[i];
