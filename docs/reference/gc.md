@@ -279,6 +279,14 @@ Under Boehm, root registration is supplementary — the conservative scan
 already covers stack and global data. Under the generational backend,
 registered roots are evacuated explicitly during minor GC.
 
+**Important:** `gc_register_root` registers the *slot address* as a root
+range.  Boehm reads the 8 bytes at the slot on every GC cycle and follows
+whatever heap pointer is currently stored there — so slot reassignments are
+automatically visible to subsequent collections.  Do not try to also
+register the pointed-to object's first bytes; those bytes are the `Hdr
+{type, flags}` header (a small integer), which Boehm would misinterpret as
+a near-null pointer candidate and crash on.
+
 ### Safe-point guards
 
 ```c
@@ -311,6 +319,10 @@ void gc_inhibit_restore(int saved);
 
 Planned improvements to the generational GC (✓ = shipped):
 
+- ✓ **`gc_register_root` crash fix** (v1.6.3) — removed a second
+  `GC_add_roots` call that registered object header bytes (small integers)
+  as root ranges, causing Boehm to dereference `NULL + 8 = 0x8` and crash
+  whenever `(gc)` was called after `(import (curry qt6))`.
 - ✓ **LLVM JIT statepoint safety** (v1.6.2) — minor GC is inhibited across
   every JIT statepoint call so nursery pointers in JIT alloca slots are never
   stale.  `SCM_PROTECT` restores the inhibit counter on `longjmp`.

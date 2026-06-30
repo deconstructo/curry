@@ -1,5 +1,29 @@
 # Changelog
 
+### 1.6.3 — Fix GC crash when calling (gc) after (import (curry qt6))
+
+Patch release fixing a `SIGSEGV` at address `0x8` in Boehm's `GC_mark_from`
+that occurred whenever `(gc)` was called after importing the Qt6 module.
+
+**Bug fix**
+- **`gc_register_root` bad `GC_add_roots` for pointee header** (`src/gc.c`):
+  A second `GC_add_roots` call registered the first 8 bytes of the
+  pointed-to heap object as a Boehm root.  Those 8 bytes are the `Hdr
+  {type, flags}` field — a small integer on little-endian ARM64 (e.g.
+  `T_COMPLEX = 8`).  The check `cur & ~3u` also incorrectly passed for
+  fixnums (fixnum 2 encodes as `9`, and `9 & ~3 = 8`), registering
+  near-null addresses as root ranges.  When Boehm scanned those "roots" it
+  read from address `0x8` and crashed.  The slot registration at line 286
+  (`GC_add_roots(slot, slot+8)`) is sufficient on its own — removed the
+  broken second call.
+- **`JitClosure.fn` hidden from Boehm** (`src/llvm/jit.cpp`, `src/eval.c`,
+  `src/vm.c`, `src/object.h`): the JIT function pointer is now stored as
+  `GC_HIDE_POINTER(fn)` and revealed at all four call sites with
+  `GC_REVEAL_POINTER`, preventing Boehm's conservative scanner from
+  mistaking JIT code addresses for heap pointers.
+
+---
+
 ### 1.6.2 — Generational GC + LLVM JIT correctness fix
 
 Patch release fixing a use-after-free when running `--gc generational` with
