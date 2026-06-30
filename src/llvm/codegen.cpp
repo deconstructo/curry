@@ -38,6 +38,7 @@ extern "C" {
 #include "../symbol.h"
 #include "../env.h"
 #include "../builtins.h"
+#include "../gc.h"
 }
 
 #include <llvm/IR/IRBuilder.h>
@@ -225,14 +226,29 @@ static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
 /* ---- Literal emission ---- */
 
 static Value *emit_literal(CompileCtx &cc, val_t v) {
-    if (vis_fixnum(v)) return ConstantInt::get(cc.i64_t, (uint64_t)v);
-    if (vis_nil(v))    return cc.V_NIL_c;
-    if (vis_false(v))  return cc.V_FALSE_c;
-    if (v == V_TRUE)   return cc.V_TRUE_c;
-    if (vis_void(v))   return cc.V_VOID_c;
-    /* Heap objects: embed the pointer.  Boehm scans conservatively, so the
-     * object stays alive.  When we move to a compacting GC, use gc.root. */
-    return ConstantInt::get(cc.i64_t, (uint64_t)v);
+    /* Non-pointer values (fixnums, chars, booleans, nil, void) are immediates
+     * encoded in the val_t itself — always safe to embed as 64-bit constants. */
+    if (!vis_ptr(v))   return ConstantInt::get(cc.i64_t, (uint64_t)v);
+    /* Symbols are pinned Boehm objects (gc_alloc_pinned) — they never enter
+     * the nursery and never move, so embedding is safe. */
+    if (vis_symbol(v)) return ConstantInt::get(cc.i64_t, (uint64_t)v);
+    /* General heap objects (flonums, pairs, strings, etc.) may be allocated
+     * in the nursery.  Baking the raw pointer as a constant is wrong for
+     * generational GC: a subsequent minor collection would evacuate the object
+     * and reset the nursery, leaving the baked address stale.
+     *
+     * Instead: allocate a stable GC-root cell in uncollectable Boehm memory,
+     * store the current val_t there, and register it with gc_register_root so
+     * minor GC updates the cell when the object is promoted.  Emit a load
+     * instruction so JIT'd code reads the (possibly updated) address at
+     * runtime.  Under Boehm-only GC the pointer never changes, so this is
+     * just one extra memory load. */
+    val_t *root = (val_t *)GC_MALLOC_UNCOLLECTABLE(sizeof(val_t));
+    *root = v;
+    gc_register_root(root);
+    auto *root_addr = ConstantInt::get(cc.i64_t, (uint64_t)root);
+    auto *root_ptr  = cc.B.CreateIntToPtr(root_addr, cc.ptr_t);
+    return cc.B.CreateLoad(cc.i64_t, root_ptr, "heap_const");
 }
 
 /* ---- Global helpers ---- */

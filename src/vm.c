@@ -403,7 +403,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #   define CASE(op)  case op:
 #   define NEXT      break
     for (;;) {
-        if (__builtin_expect(gc_minor_pending, 0)) {
+        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
             gc_minor_pending = false;
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
@@ -717,9 +717,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
+                    /* Inhibit minor GC for the duration of the JIT call.
+                     * JIT'd code holds intermediate nursery pointers in registers
+                     * and alloca slots that the GC cannot enumerate without full
+                     * stackmap support.  While inhibited, nursery overflow falls
+                     * back to Boehm rather than moving objects under JIT code. */
+                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
+                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     PUSH(result);
@@ -763,9 +770,11 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
+                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
+                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     if (pop_frame(&frame, result)) return *--vm->sp;
@@ -1015,7 +1024,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
      * At this point all Scheme values are on vm->stack[0..sp) — the registered
      * GC root range — so gc_gen_minor_collect() sees every live root. */
     L_DISPATCH:
-        if (__builtin_expect(gc_minor_pending, 0)) {
+        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
             gc_minor_pending = false;
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
