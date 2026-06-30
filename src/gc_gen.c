@@ -515,8 +515,18 @@ static void scan_pinned_object(void *obj) {
     switch (h->type) {
     /* Types without val_t fields — nothing to do */
     case T_SYMBOL: case T_BIGNUM: case T_RATIONAL: case T_PORT:
-    case T_PRIMITIVE: case T_MPFR: case T_JITCLOSURE:
+    case T_PRIMITIVE: case T_MPFR:
         break;
+    case T_JITCLOSURE: {
+        /* caps[] is a mixed array: direct val_t captures and raw cell pointers
+         * (Boehm heap addresses stored as uint64_t).  evacuate() is safe for
+         * both: cell pointers are in Boehm (not nursery), so they pass through
+         * unchanged; direct val_t caps are promoted normally. */
+        JitClosure *j = (JitClosure *)obj;
+        for (uint32_t i = 0; i < j->n_caps; i++)
+            j->caps[i] = evacuate(j->caps[i]);
+        break;
+    }
     case T_RECORD_TYPE: {
         RecordType *rt = (RecordType *)obj;
         rt->name = evacuate(rt->name);

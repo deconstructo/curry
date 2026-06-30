@@ -99,21 +99,33 @@ static void curry_jit_global_define(uint64_t sym_val, uint64_t val) {
     env_define(GLOBAL_ENV, (val_t)sym_val, (val_t)val);
 }
 
-/* Allocate a GC-managed heap cell holding one i64.  Returns the cell address
- * as a raw integer.  Used by JIT code to implement cell-based variable capture
- * so that recursive closures (named let, letrec) see mutations. */
+/* Allocate a mutable cell holding one i64 for cell-based variable capture.
+ *
+ * The cell lives in Boehm (GC_MALLOC) rather than the nursery because:
+ *  a) it has no Hdr type tag, so the nursery evacuator cannot size it;
+ *  b) under the generational backend the cell's VALUE (a val_t) may point
+ *     into the nursery — gc_register_root ensures minor GC updates it.
+ *
+ * Returns the cell address as a raw integer captured in JitClosure.caps[]. */
 static uint64_t curry_jit_alloc_cell(uint64_t v) {
-    uint64_t *cell = (uint64_t *)gc_alloc(sizeof(uint64_t));
+    uint64_t *cell = (uint64_t *)GC_MALLOC(sizeof(uint64_t));
     *cell = v;
+    gc_register_root(cell);  /* keep cell VALUE updated after nursery promotion */
     return (uint64_t)cell;
 }
 
 /* Allocate a JIT closure wrapping a native function with a captured environment.
  * fn:     i64 (*)(i32 argc, i64 *argv, i64 *caps)
  * n_caps: number of captured values
- * caps:   pointer to array of captured val_t values (copied into the closure) */
+ * caps:   pointer to array of captured val_t values (copied into the closure)
+ *
+ * JitClosure is GC:PIN — it must never enter the nursery because:
+ *  a) the native function pointer (fn) must not move;
+ *  b) BcClosure.jit_val holds a raw JitClosure* — if the closure moved,
+ *     all BcClosures with that raw pointer would dangle.
+ * Use gc_alloc_pinned so the generational backend keeps it in Boehm. */
 static uint64_t curry_jit_make_closure(void *fn, int32_t n_caps, uint64_t *caps) {
-    JitClosure *jc = (JitClosure *)gc_alloc(
+    JitClosure *jc = (JitClosure *)gc_alloc_pinned(
         sizeof(JitClosure) + (size_t)n_caps * sizeof(val_t));
     jc->hdr.type  = T_JITCLOSURE;
     jc->hdr.flags = 0;
