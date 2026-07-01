@@ -292,13 +292,10 @@ static void register_root_locked(void *slot) {
     size_t idx = g_roots_count++;
     g_roots[idx]        = (val_t *)slot;
     g_roots_shadow[idx] = *(val_t *)slot;
-    /* Register the val_t slot itself as a root range with Boehm so it
-     * keeps the pointed-to object alive via conservative scanning.
-     * Do NOT register the first 8 bytes of the pointed-to object: those
-     * bytes are the Hdr {type, flags} field (small integers); Boehm would
-     * follow them as pointer candidates, hit GC_top_index[0] == NULL, and
-     * crash. */
-    GC_add_roots(slot, (char *)slot + sizeof(val_t));
+    /* No GC_add_roots call needed: the slot is GC_MALLOC_UNCOLLECTABLE, so
+     * Boehm conservatively scans it and keeps the pointed-to object alive.
+     * GC_add_roots has a fixed-size table (~1024 entries) that overflows when
+     * many JIT literals are registered. */
 }
 
 void gc_register_root(void *slot) {
@@ -324,7 +321,6 @@ void gc_unregister_root(void *slot) {
             size_t last = --g_roots_count;
             g_roots[i]        = g_roots[last];
             g_roots_shadow[i] = g_roots_shadow[last];
-            GC_remove_roots(slot, (char *)slot + sizeof(val_t));
             pthread_mutex_unlock(&g_roots_lock_mtx);
             return;
         }
