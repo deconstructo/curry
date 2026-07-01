@@ -517,16 +517,14 @@ void main() {
   (canvas-redraw! *canvas*))
 
 ;;; Zoom centred on screen position (sx, sy), keeping that point fixed.
-;;; The pan delta is exact float64 arithmetic; at realistic zoom levels the
-;;; double-double addition absorbs it without precision loss.
+;;; Screen-y and math-y are opposite (shader: wy = -(screen_y - H/2)/zoom),
+;;; so the Y pan delta must be negated relative to the X delta.
 (define (zoom-to-cursor! factor sx sy)
   (let* ((nz  (* *zoom* factor))
-         ;; offset of cursor from canvas centre in fractal coords
-         (wx  (/ (- (inexact sx) (/ (inexact *W*) 2.0)) *zoom*))
-         (wy  (/ (- (inexact sy) (/ (inexact *H*) 2.0)) *zoom*))
-         ;; how much the centre must shift so the cursor stays on the same point
-         (dx  (- wx (/ (- (inexact sx) (/ (inexact *W*) 2.0)) nz)))
-         (dy  (- wy (/ (- (inexact sy) (/ (inexact *H*) 2.0)) nz)))
+         (inv-diff (- (/ 1.0 *zoom*) (/ 1.0 nz)))
+         (dx  (* (- (inexact sx) (/ (inexact *W*) 2.0)) inv-diff))
+         ;; negate: cursor moving down in screen-y means math-y increases
+         (dy  (* (- (inexact sy) (/ (inexact *H*) 2.0)) (- inv-diff)))
          (nx  (dd+f *cx-hi* *cx-lo* dx))
          (ny  (dd+f *cy-hi* *cy-lo* dy)))
     (set! *cx-hi* (car nx)) (set! *cx-lo* (cdr nx))
@@ -537,32 +535,48 @@ void main() {
 
 ;;; ── Input handlers ───────────────────────────────────────────────────────────
 
+(define *drag-moved* #f)  ; becomes #t only after cursor moves past threshold
+
 (define (on-mouse-press! x y btn)
   (when (equal? btn 'left)
     (set! *drag-x*     x) (set! *drag-y*     y)
     (set! *drag-cx-hi* *cx-hi*) (set! *drag-cx-lo* *cx-lo*)
     (set! *drag-cy-hi* *cy-hi*) (set! *drag-cy-lo* *cy-lo*)
-    (set! *is-dragging* #t)))
+    (set! *drag-moved*  #f)
+    ;; Don't set *is-dragging* yet — wait for actual movement so a plain
+    ;; click doesn't flip the render mode away from PERTURB.
+    ))
 
 (define (on-mouse-release! x y btn)
   (when (equal? btn 'left)
-    (set! *drag-x* #f)
+    (set! *drag-x*      #f)
+    (set! *drag-moved*  #f)
     (set! *is-dragging* #f)
     ;; Full-quality redraw after pan (triggers orbit recompute if needed)
     (canvas-redraw! *canvas*)))
 
 (define (on-mouse-move! x y)
   (when *drag-x*
-    ;; Pan delta relative to drag-start — accumulated into a DD centre.
-    ;; Dividing by *zoom* is fine at float64: the drag pixel count is << 1e15.
-    (let* ((dx (/ (- (inexact x) (inexact *drag-x*)) *zoom*))
-           (dy (/ (- (inexact y) (inexact *drag-y*)) *zoom*))
-           (nx (dd+f *drag-cx-hi* *drag-cx-lo* (- dx)))
-           (ny (dd+f *drag-cy-hi* *drag-cy-lo* (- dy))))
-      (set! *cx-hi* (car nx)) (set! *cx-lo* (cdr nx))
-      (set! *cy-hi* (car ny)) (set! *cy-lo* (cdr ny))
-      (set! *orbit-cx-hi* #f)
-      (canvas-redraw! *canvas*))))
+    ;; Engage drag mode after the cursor has moved at least 2 px.
+    (unless *drag-moved*
+      (let* ((ddx (- (inexact x) (inexact *drag-x*)))
+             (ddy (- (inexact y) (inexact *drag-y*))))
+        (when (> (+ (* ddx ddx) (* ddy ddy)) 4.0)
+          (set! *drag-moved*  #t)
+          (set! *is-dragging* #t))))
+    (when *drag-moved*
+      ;; Pan delta relative to drag-start — accumulated into a DD centre.
+      ;; Dividing by *zoom* is fine at float64: the drag pixel count is << 1e15.
+      ;; cx moves opposite to drag-x (- dx); cy moves same as drag-y (+ dy)
+      ;; because screen-y increases downward while math-y increases upward.
+      (let* ((dx (/ (- (inexact x) (inexact *drag-x*)) *zoom*))
+             (dy (/ (- (inexact y) (inexact *drag-y*)) *zoom*))
+             (nx (dd+f *drag-cx-hi* *drag-cx-lo* (- dx)))
+             (ny (dd+f *drag-cy-hi* *drag-cy-lo*    dy)))
+        (set! *cx-hi* (car nx)) (set! *cx-lo* (cdr nx))
+        (set! *cy-hi* (car ny)) (set! *cy-lo* (cdr ny))
+        (set! *orbit-cx-hi* #f)
+        (canvas-redraw! *canvas*)))))
 
 ;;; ── Window ───────────────────────────────────────────────────────────────────
 
