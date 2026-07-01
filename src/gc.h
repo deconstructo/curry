@@ -221,15 +221,29 @@ static inline void  gc_collect(void)                 { gc_ops->collect(); }
 static inline void gc_pin(void *obj)   { gc_ops->pin(obj);   }
 static inline void gc_unpin(void *obj) { gc_ops->unpin(obj); }
 /* gc_register_root/unregister_root are plain functions defined in gc.c
- * (they maintain a global list read by gc_gen_minor_collect). */
+ * (they maintain a global list read by gc_gen_minor_collect).
+ *
+ * gc_register_root_val(slot, v) is the preferred form for concurrent callers:
+ * it atomically stores v into *slot and registers the slot under g_roots_lock,
+ * preventing a minor GC from observing the store without the corresponding root
+ * registration (which would leave *slot stale after nursery reset).
+ *
+ * gc_roots_lock / gc_roots_unlock are called by gc_gen_minor_collect around its
+ * g_roots[] scan so that concurrent registrations cannot race with evacuation. */
 void gc_register_root(void *slot);
 void gc_unregister_root(void *slot);
+void gc_roots_lock(void);
+void gc_roots_unlock(void);
 
 /* val_t-taking pin/unpin for FFI use: C extensions call these to protect
  * Scheme values they hold in heap-allocated structs across GC points.
  * Under Boehm these are no-ops (conservative scan finds them anyway).
  * Under a moving GC they prevent the referenced object from being relocated. */
 #include "value.h"
+/* gc_register_root_val(slot, v) stores v into *slot and registers it as a root
+ * in one atomic step (under g_roots_lock).  Preferred over a bare store +
+ * gc_register_root() when the caller may race with concurrent minor GC. */
+void gc_register_root_val(void *slot, val_t v);
 static inline void gc_val_pin(val_t v)   { if (vis_ptr(v)) gc_ops->pin((void *)(uintptr_t)v);   }
 static inline void gc_val_unpin(val_t v) { if (vis_ptr(v)) gc_ops->unpin((void *)(uintptr_t)v); }
 

@@ -244,8 +244,12 @@ static Value *emit_literal(CompileCtx &cc, val_t v) {
      * runtime.  Under Boehm-only GC the pointer never changes, so this is
      * just one extra memory load. */
     val_t *root = (val_t *)GC_MALLOC_UNCOLLECTABLE(sizeof(val_t));
-    *root = v;
-    gc_register_root(root);
+    /* Use gc_register_root_val to atomically store v and register root
+     * under g_roots_lock.  A bare "*root = v; gc_register_root(root)"
+     * would race: a concurrent minor GC between the store and registration
+     * could evacuate the nursery object and reset the slab, leaving *root
+     * stale for all future JIT loads from this root cell. */
+    gc_register_root_val(root, v);
     auto *root_addr = ConstantInt::get(cc.i64_t, (uint64_t)root);
     auto *root_ptr  = cc.B.CreateIntToPtr(root_addr, cc.ptr_t);
     return cc.B.CreateLoad(cc.i64_t, root_ptr, "heap_const");

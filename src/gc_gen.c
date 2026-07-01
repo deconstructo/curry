@@ -663,7 +663,18 @@ void gc_gen_minor_collect(void) {
             *slot = evacuate(*slot);
     }
 
-    /* 3. Evacuate registered val_t roots */
+    /* 3. Evacuate registered val_t roots.
+     * Hold g_roots_lock from here through step 9 (nursery reset).
+     *
+     * Invariant required: no new root may be registered with a nursery
+     * address while the GC is between the root scan and the nursery reset.
+     * If a concurrent gc_register_root_val() stored a nursery address after
+     * we scanned roots but before we reset the nursery, that address would
+     * become a dangling pointer the moment the nursery slab is reused.
+     * Holding g_roots_lock for the entire critical section prevents this:
+     * concurrent callers block until AFTER the nursery is reset, at which
+     * point any fresh allocation they make comes from the clean nursery. */
+    gc_roots_lock();
     for (size_t i = 0; i < g_roots_count; i++) {
         *g_roots[i] = evacuate(*g_roots[i]);
         g_roots_shadow[i] = *g_roots[i];
@@ -744,12 +755,17 @@ void gc_gen_minor_collect(void) {
     gc_evac_fn = NULL;
     gc_fwd_fn  = NULL;
 
-    /* 9. Reset nursery */
+    /* 9. Reset nursery — still holding g_roots_lock (acquired at step 3).
+     * The lock prevents concurrent gc_register_root_val from storing a
+     * nursery address between the root scan and the reset; callers unblock
+     * after the reset and allocate from the clean (fresh) nursery slab. */
     gc_nursery.top = gc_nursery.base;
 
-    /* Sync root shadows before Boehm's major GC can see them */
+    /* Sync root shadows before Boehm's major GC can see them, then release
+     * the roots lock so blocked registrations can proceed. */
     for (size_t i = 0; i < g_roots_count; i++)
         g_roots_shadow[i] = *g_roots[i];
+    gc_roots_unlock();
 
     /* ── Update GC statistics ── */
     {

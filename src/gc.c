@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 
 /* ── Boehm backend ──────────────────────────────────────────────────────── */
 
@@ -267,7 +268,17 @@ static void ensure_ext(void) {
 void gc_register_rawptr(void **rawptr)   { (void)rawptr; }
 void gc_unregister_rawptr(void **rawptr) { (void)rawptr; }
 
-void gc_register_root(void *slot) {
+/* Protects concurrent access to g_roots[] / g_roots_shadow[].
+ * Callers: gc_register_root, gc_register_root_val, gc_unregister_root.
+ * gc_gen_minor_collect acquires this (via gc_roots_lock/unlock) around its
+ * g_roots[] evacuation loop so that a concurrent registration cannot observe
+ * a partially-updated root array or a stale nursery address in a new root. */
+static pthread_mutex_t g_roots_lock_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+void gc_roots_lock(void)   { pthread_mutex_lock(&g_roots_lock_mtx); }
+void gc_roots_unlock(void) { pthread_mutex_unlock(&g_roots_lock_mtx); }
+
+static void register_root_locked(void *slot) {
     ensure_roots();
     if (g_roots_count == g_roots_cap) {
         size_t nc = g_roots_cap * 2;
@@ -280,32 +291,45 @@ void gc_register_root(void *slot) {
     }
     size_t idx = g_roots_count++;
     g_roots[idx]        = (val_t *)slot;
-    val_t cur = *(val_t *)slot;
-    g_roots_shadow[idx] = cur;
-    /* Register the val_t slot itself as a root range.
-     * Boehm will read the 8 bytes at `slot` during every GC cycle and follow
-     * whatever heap pointer is stored there — this is sufficient to keep the
-     * pointed-to object alive even when `slot` lives in malloc/C++ memory
-     * outside Boehm's conservatively scanned heap.
-     *
-     * Do NOT also register the first 8 bytes of the pointed-to object: those
-     * bytes are the Hdr {type, flags} field, which contains small integers
-     * (e.g. T_COMPLEX = 8).  Boehm would try to follow those small integers
-     * as pointer candidates, look them up in GC_top_index[0] (which is NULL
-     * for addresses near zero), dereference NULL + 8 = 0x8, and crash. */
+    g_roots_shadow[idx] = *(val_t *)slot;
+    /* Register the val_t slot itself as a root range with Boehm so it
+     * keeps the pointed-to object alive via conservative scanning.
+     * Do NOT register the first 8 bytes of the pointed-to object: those
+     * bytes are the Hdr {type, flags} field (small integers); Boehm would
+     * follow them as pointer candidates, hit GC_top_index[0] == NULL, and
+     * crash. */
     GC_add_roots(slot, (char *)slot + sizeof(val_t));
 }
 
+void gc_register_root(void *slot) {
+    pthread_mutex_lock(&g_roots_lock_mtx);
+    register_root_locked(slot);
+    pthread_mutex_unlock(&g_roots_lock_mtx);
+}
+
+/* Stores v into *slot and registers it as a root in one critical section.
+ * This prevents a minor GC from running between the store and the registration
+ * (which would leave *slot holding a stale nursery address after nursery reset). */
+void gc_register_root_val(void *slot, val_t v) {
+    pthread_mutex_lock(&g_roots_lock_mtx);
+    *(val_t *)slot = v;
+    register_root_locked(slot);
+    pthread_mutex_unlock(&g_roots_lock_mtx);
+}
+
 void gc_unregister_root(void *slot) {
+    pthread_mutex_lock(&g_roots_lock_mtx);
     for (size_t i = 0; i < g_roots_count; i++) {
         if (g_roots[i] == (val_t *)slot) {
             size_t last = --g_roots_count;
             g_roots[i]        = g_roots[last];
             g_roots_shadow[i] = g_roots_shadow[last];
             GC_remove_roots(slot, (char *)slot + sizeof(val_t));
+            pthread_mutex_unlock(&g_roots_lock_mtx);
             return;
         }
     }
+    pthread_mutex_unlock(&g_roots_lock_mtx);
 }
 
 void gc_register_stack(void *base, void **sp_ptr) {
