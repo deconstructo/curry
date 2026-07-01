@@ -316,7 +316,7 @@ void main() {
                      (biased (+ e-raw 127)))
                 (store! (bitwise-or sign
                                     (arithmetic-shift (max 0 (min 255 biased)) 23)
-                                    (max 0 (min #x7fffff mant-i))))))))
+                                    (max 0 (min #x7fffff mant-i))))))))))
 
 (define (compute-reference-orbit!)
   (when (or (not *orbit-cx-hi*)
