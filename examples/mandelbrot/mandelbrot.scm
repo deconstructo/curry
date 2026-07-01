@@ -572,7 +572,7 @@ void main() {
       (let* ((dx (/ (- (inexact x) (inexact *drag-x*)) *zoom*))
              (dy (/ (- (inexact y) (inexact *drag-y*)) *zoom*))
              (nx (dd+f *drag-cx-hi* *drag-cx-lo* (- dx)))
-             (ny (dd+f *drag-cy-hi* *drag-cy-lo*    dy)))
+             (ny (dd+f *drag-cy-hi* *drag-cy-lo* (- dy))))
         (set! *cx-hi* (car nx)) (set! *cx-lo* (cdr nx))
         (set! *cy-hi* (car ny)) (set! *cy-lo* (cdr ny))
         (set! *orbit-cx-hi* #f)
