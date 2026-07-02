@@ -1,29 +1,52 @@
 ;;; langs/warlpiri.scm — Warlpiri language pack for Curry Scheme.
 ;;;
 ;;; Language: Warlpiri (Yapa kurlangu yimi) — Central Australian
-;;; Status:   EXPANDED DRAFT — documented vocabulary, community review essential.
 ;;;
-;;; Warlpiri is a Pama-Nyungan language spoken by ~2,500 people in the Northern
-;;; Territory around Yuendumu, Lajamanu, Willowra, and Nyirrpi. It has a rich
-;;; tradition of spatial reasoning, kinship systems, and relational thinking that
-;;; maps naturally onto many computing concepts.
+;;; ── This is a beginning, not a finished thing. ──────────────────────────────
 ;;;
-;;; Vocabulary sources used:
+;;; This file is an experiment and an offer.
+;;;
+;;; We — the Curry project — built a system that lets programs be written in
+;;; any language, not just English or Akkadian. When we thought about who that
+;;; was for, we thought about Warlpiri kids at Yuendumu, Lajamanu, Willowra,
+;;; Nyirrpi — young people who might find it easier, more natural, or simply
+;;; more joyful to write code in their own language.
+;;;
+;;; So we made a start. We used published dictionaries and learner materials
+;;; to put together the mappings below. Some will be right. Some will be
+;;; wrong. Some might feel awkward, or miss the point, or use a word in a
+;;; context it doesn't belong in. We don't know what we don't know.
+;;;
+;;; This file belongs to Warlpiri people, not to us.
+;;;
+;;; If it's useful — take it, fix it, make it yours. The format is plain
+;;; text (each line is just: warlpiri-name  english-name  "a note").
+;;; A teacher, linguist, or fluent speaker can open this in any editor.
+;;; You don't need to be a programmer to improve it.
+;;;
+;;; If it's not useful — if the approach is wrong, if the words don't sit
+;;; right, if there's a better way to think about this — tell us and we'll
+;;; remove it and work with you on something that actually helps. We would
+;;; rather do nothing than do the wrong thing.
+;;;
+;;; ── Contact / contribute ────────────────────────────────────────────────────
+;;;
+;;;   File a GitHub issue, or email the maintainer.
+;;;   Pull requests welcome — especially from community members and educators.
+;;;   ngalikirlangu — this is for all of us, together.
+;;;
+;;; ── A note on this draft ────────────────────────────────────────────────────
+;;;
+;;; Vocabulary drawn from:
 ;;;   - Warlpiri–English Dictionary (Laughren, Hoogenraad, Hale, Granites, 1996)
 ;;;   - AIATSIS Warlpiri materials
 ;;;   - Warlpiri learner resources, NTDE
 ;;;   - Jukurrpa Media Warlpiri curriculum materials
 ;;;
-;;; ⚠  COMMUNITY REVIEW NEEDED before use in teaching:
-;;;   - Some terms are compounds not in standard dictionaries.
-;;;   - Tonal / register nuance is not captured in transliteration.
-;;;   - Please review with a fluent speaker, particularly for kinship and
-;;;     sacred concepts — some terms have restricted use.
-;;;
-;;; To add your own terms or correct mistakes:
-;;;   1. Edit this file (entries are plain text: (warlpiri-name english-name "note"))
-;;;   2. Or use the CSV tool: tools/lang-pack-gen --id warlpiri --csv warlpiri.csv
-;;;   3. Send corrections to the community — ngalikirlangu (ours, together)
+;;; ⚠  Some entries are compounds not in standard dictionaries — invented to
+;;;    fill a gap. These are marked in the notes. Tonal and register nuance is
+;;;    not captured. Some words have restricted or ceremonial uses that this
+;;;    file cannot know — please review with a fluent speaker before teaching.
 ;;;
 ;;; Usage:
 ;;;   (import (curry lang))
