@@ -29,19 +29,20 @@
 
     ;;; Registry base URL — override with CURRY_LANG_REGISTRY_URL env var.
     (define lang:registry-url
-      (let ((env (getenv "CURRY_LANG_REGISTRY_URL")))
+      (let ((env (get-environment-variable "CURRY_LANG_REGISTRY_URL")))
         (if (and env (not (string=? env "")))
             env
             "https://raw.githubusercontent.com/your-org/curry/main/langs")))
 
     ;;; Local cache directory (~/.curry/langs/).
     (define lang:cache-dir
-      (let ((home (or (getenv "HOME") ".")))
+      (let ((home (or (get-environment-variable "HOME") ".")))
         (string-append home "/.curry/langs")))
 
     (define (ensure-cache-dir!)
+      ;; POSIX mkdir via shell — only needed for lang:install!
       (when (not (file-exists? lang:cache-dir))
-        (make-directory lang:cache-dir)))
+        (system (string-append "mkdir -p " lang:cache-dir))))
 
     (define (cache-path id)
       (string-append lang:cache-dir "/" id ".scm"))
@@ -77,11 +78,12 @@
 
     ;;; Load from any local .scm file path.
     (define (lang:load-file! path)
-      (let ((p (open-input-file path)))
+      (let ((p (open-input-file path))
+            (env (interaction-environment)))
         (let loop ()
           (let ((form (read p)))
             (unless (eof-object? form)
-              (eval form (the-environment))
+              (eval form env)
               (loop))))
         (close-input-port p)))
 
