@@ -32,7 +32,7 @@
       (let ((env (get-environment-variable "CURRY_LANG_REGISTRY_URL")))
         (if (and env (not (string=? env "")))
             env
-            "https://raw.githubusercontent.com/deconstructo/curry/main/langs")))
+            "https://raw.githubusercontent.com/deconstructo/curry/@CURRY_GIT_BRANCH@/langs")))
 
     ;;; Local cache directory (~/.curry/langs/).
     (define lang:cache-dir

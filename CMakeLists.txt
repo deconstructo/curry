@@ -342,6 +342,23 @@ option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/mods/curry)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/mods/curry/math)
 
+# Generate (curry lang) with the current git branch baked into the registry URL.
+# On main the URL resolves to .../main/langs; on a feature branch it resolves to
+# .../feat/lang-packs/langs (or whatever).  No manual edit needed at merge time.
+execute_process(
+  COMMAND git rev-parse --abbrev-ref HEAD
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  OUTPUT_VARIABLE CURRY_GIT_BRANCH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET)
+if(NOT CURRY_GIT_BRANCH OR CURRY_GIT_BRANCH STREQUAL "HEAD")
+  set(CURRY_GIT_BRANCH "main")   # detached HEAD / CI shallow clone fallback
+endif()
+configure_file(
+  ${CMAKE_SOURCE_DIR}/lib/curry/modules/curry/lang.scm.in
+  ${CMAKE_BINARY_DIR}/mods/curry/lang.scm
+  @ONLY)
+
 # Sub-module helper for (curry math <name>) → curry/math/<name>.so
 function(curry_math_module name)
   add_library(curry_math_${name} MODULE modules/math/${name}.c)
@@ -676,7 +693,11 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/curry)
 install(DIRECTORY lib/curry/modules/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/curry/modules
         OPTIONAL
-        FILES_MATCHING PATTERN "*.scm")
+        FILES_MATCHING PATTERN "*.scm"
+        PATTERN "*.scm.in" EXCLUDE)
+# Install the configured lang.scm (branch-aware URL) over the template
+install(FILES ${CMAKE_BINARY_DIR}/mods/curry/lang.scm
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/curry/modules/curry)
 
 # Documentation
 install(DIRECTORY docs/
