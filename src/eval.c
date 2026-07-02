@@ -16,6 +16,7 @@
 #include "gc.h"
 #include "akkadian.h"
 #include "akkadian_eval.h"
+#include "i18n.h"
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
@@ -113,9 +114,9 @@ void scm_raise(val_t kind, const char *fmt, ...) {
     char msg[512];
     va_list ap; va_start(ap, fmt); vsnprintf(msg, sizeof(msg), fmt, ap); va_end(ap);
 
-    /* Prepend Akkadian preamble — as the scribes demanded */
+    /* Prepend localised error preamble (Akkadian by default) */
     char preamble[256];
-    akkadian_preamble(preamble, sizeof(preamble), msg);
+    lang_preamble(preamble, sizeof(preamble), msg);
     char full[800];
     snprintf(full, sizeof(full), "%s:\n  %s", preamble, msg);
 

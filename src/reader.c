@@ -5,31 +5,18 @@
 #include "numeric.h"
 #include "gc.h"
 #include "eval.h"
+#include "i18n.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <assert.h>
 #include <errno.h>
 
-/* ---- Akkadian cuneiform symbol table ----
+/* ---- Cuneiform symbol detection ----
  * Cuneiform glyphs overlap with sexagesimal digits (e.g. 𒁹=1 and 𒌋=10 are
- * also used as synonyms for `define` and `and`).  Before parsing a cuneiform
- * token as a sexagesimal number, check whether it is a known Akkadian synonym;
- * if so, return it as an interned symbol and let eval/builtins handle it. */
-static const char *_akk_cuneiform_table[] = {
-#define AKK(e,t,c)
-#define AKK_SF(e,t,c) c,
-#define AKK_PR(e,t,c) c,
-#include "akkadian_names.h"
-#undef AKK
-    NULL
-};
-
-static bool akk_is_cuneiform_sym(const char *s) {
-    for (int i = 0; _akk_cuneiform_table[i]; i++)
-        if (strcmp(_akk_cuneiform_table[i], s) == 0) return true;
-    return false;
-}
+ * also language synonyms for `define` and `and`).  Before parsing a cuneiform
+ * token as a sexagesimal number, check whether it is a symbol in any
+ * registered language pack; if so, return it as an interned symbol. */
 
 /* ---- Error handling ---- */
 /* Defined in eval.c; raises a read-error exception */
@@ -565,7 +552,7 @@ static val_t read_datum(val_t port) {
                 }
             }
             sb.buf[sb.len] = '\0';
-            if (akk_is_cuneiform_sym(sb.buf))
+            if (lang_is_known_sym(sb.buf))
                 return sym_intern(sb.buf, (uint32_t)sb.len);
             val_t result = sex_parse_cuneiform(sb.buf);
             if (!vis_false(result)) return result;

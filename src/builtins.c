@@ -1,6 +1,7 @@
 #include "builtins.h"
 #include "object.h"
 #include "eval.h"
+#include "i18n.h"
 #include "vm.h"
 #include "syntax_rules.h"
 #include "env.h"
@@ -133,6 +134,14 @@ val_t scm_symbol_to_string(val_t sym) {
     s->hdr.type=T_STRING; s->hdr.flags=0; s->len=len; s->hash=0;
     memcpy(s->data, name, len + 1);
     return vptr(s);
+}
+
+val_t scm_make_string_cstr(const char *s) {
+    uint32_t len = s ? (uint32_t)strlen(s) : 0;
+    String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    r->hdr.type = T_STRING; r->hdr.flags = 0; r->len = len; r->hash = 0;
+    if (s) memcpy(r->data, s, len + 1); else r->data[0] = '\0';
+    return vptr(r);
 }
 
 /* ---- Type predicates ---- */
@@ -2096,6 +2105,149 @@ static val_t make_decimal_rat(const char *digits) {
     return result;
 }
 
+/* ── Language pack primitives ────────────────────────────────────────────── */
+
+/* (register-language! spec)
+ * spec is an alist with keys: id, display-name, intro, error-preamble, mappings
+ * mappings is a list of (foreign-name canonical-name) or
+ *                       (foreign-name canonical-name "description") triples. */
+static val_t prim_register_language(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    if (argc != 1 || !vis_pair(argv[0]))
+        scm_raise(V_FALSE, "register-language! requires one alist argument");
+
+    LangPack tmp;
+    memset(&tmp, 0, sizeof(tmp));
+
+    val_t spec = argv[0];
+    while (vis_pair(spec)) {
+        val_t kv = vcar(spec); spec = vcdr(spec);
+        if (!vis_pair(kv)) continue;
+        val_t k = vcar(kv), v = vcdr(kv);
+        if (!vis_symbol(k)) continue;
+        const char *key = sym_cstr(k);
+
+        if (strcmp(key, "id") == 0 && vis_string(v))
+            strncpy(tmp.id, as_str(v)->data, sizeof(tmp.id)-1);
+        else if (strcmp(key, "display-name") == 0 && vis_string(v))
+            strncpy(tmp.display_name, as_str(v)->data, sizeof(tmp.display_name)-1);
+        else if (strcmp(key, "intro") == 0 && vis_string(v))
+            strncpy(tmp.intro, as_str(v)->data, sizeof(tmp.intro)-1);
+        else if (strcmp(key, "error-preamble") == 0 && vis_string(v))
+            strncpy(tmp.error_prefix, as_str(v)->data, sizeof(tmp.error_prefix)-1);
+        else if (strcmp(key, "mappings") == 0 && vis_pair(v)) {
+            /* Count mappings */
+            size_t n = 0;
+            val_t t = v; while (vis_pair(t)) { n++; t = vcdr(t); }
+            tmp.mappings = GC_MALLOC(n * sizeof(LangMapping));
+            tmp.count = 0; tmp.cap = n;
+            t = v;
+            while (vis_pair(t)) {
+                val_t entry = vcar(t); t = vcdr(t);
+                if (!vis_pair(entry)) continue;
+                val_t foreign   = vcar(entry);
+                val_t rest      = vcdr(entry);
+                if (!vis_pair(rest)) continue;
+                val_t canonical = vcar(rest);
+                val_t desc_v    = vcdr(rest);
+                if (!vis_symbol(foreign) || !vis_symbol(canonical)) continue;
+                size_t i = tmp.count++;
+                tmp.mappings[i].foreign   = foreign;
+                tmp.mappings[i].canonical = canonical;
+                tmp.mappings[i].description =
+                    (vis_pair(desc_v) && vis_string(vcar(desc_v)))
+                    ? as_str(vcar(desc_v))->data : NULL;
+            }
+        }
+    }
+
+    if (!tmp.id[0])
+        scm_raise(V_FALSE, "register-language!: spec must include 'id key");
+    if (!tmp.display_name[0])
+        strncpy(tmp.display_name, tmp.id, sizeof(tmp.display_name)-1);
+
+    lang_register(&tmp);
+    return V_VOID;
+}
+
+/* (set-active-language! id-string) — activates pack and registers env aliases */
+static val_t prim_set_active_language(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    if (argc != 1) scm_raise(V_FALSE, "set-active-language! requires 1 argument");
+    if (vis_false(argv[0])) { lang_set_active(NULL); return V_VOID; }
+    if (!vis_string(argv[0]))
+        scm_raise(V_FALSE, "set-active-language!: expected string or #f");
+    const char *id = as_str(argv[0])->data;
+    if (!lang_set_active(id))
+        scm_raise(V_FALSE, "set-active-language!: language not registered: %s", id);
+    return V_VOID;
+}
+
+/* (active-language) → string or #f */
+static val_t prim_active_language(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)argv; (void)ud;
+    const char *id = lang_active_id();
+    return id ? scm_make_string_cstr(id) : V_FALSE;
+}
+
+/* (registered-languages) → list of strings */
+static val_t prim_registered_languages(int argc, val_t *argv, void *ud) {
+    (void)argc; (void)argv; (void)ud;
+    val_t ids = lang_list_registered();
+    /* Convert symbol list to string list */
+    val_t result = V_NIL;
+    val_t tail = ids;
+    /* rebuild with string values, preserving order via reversal */
+    val_t rev = V_NIL;
+    while (vis_pair(tail)) {
+        val_t id_sym = vcar(tail); tail = vcdr(tail);
+        rev = scm_cons(scm_make_string_cstr(sym_cstr(id_sym)), rev);
+    }
+    /* reverse back */
+    while (vis_pair(rev)) {
+        val_t s = vcar(rev); rev = vcdr(rev);
+        result = scm_cons(s, result);
+    }
+    return result;
+}
+
+/* (language-info id-string) → alist or #f */
+static val_t prim_language_info(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    if (argc != 1 || !vis_string(argv[0]))
+        scm_raise(V_FALSE, "language-info requires a string argument");
+    const LangPack *p = lang_find(as_str(argv[0])->data);
+    if (!p) return V_FALSE;
+    val_t alist = V_NIL;
+#define ACONS(k,v) alist = scm_cons(scm_cons(sym_intern_cstr(k),(v)), alist)
+    ACONS("id",           scm_make_string_cstr(p->id));
+    ACONS("display-name", scm_make_string_cstr(p->display_name));
+    ACONS("intro",        scm_make_string_cstr(p->intro));
+    ACONS("error-preamble", scm_make_string_cstr(p->error_prefix));
+    val_t mlist = V_NIL;
+    for (size_t i = p->count; i-- > 0;) {
+        val_t desc = p->mappings[i].description
+            ? (val_t)scm_make_string_cstr(p->mappings[i].description) : V_FALSE;
+        val_t entry = scm_cons(p->mappings[i].foreign,
+                      scm_cons(p->mappings[i].canonical,
+                      scm_cons(desc, V_NIL)));
+        mlist = scm_cons(entry, mlist);
+    }
+    ACONS("mappings", mlist);
+#undef ACONS
+    return alist;
+}
+
+/* (language-intro id-string) → string or #f */
+static val_t prim_language_intro(int argc, val_t *argv, void *ud) {
+    (void)ud;
+    if (argc != 1 || !vis_string(argv[0]))
+        scm_raise(V_FALSE, "language-intro requires a string argument");
+    const LangPack *p = lang_find(as_str(argv[0])->data);
+    if (!p || !p->intro[0]) return V_FALSE;
+    return scm_make_string_cstr(p->intro);
+}
+
 void builtins_register(val_t env) {
     /* Type predicates */
     DEF("pair?",        prim_pair_p,      1,1); DEF("null?",       prim_null_p,      1,1); DEF("list?", prim_list_p, 1,1);
@@ -2394,24 +2546,19 @@ void builtins_register(val_t env) {
     env_define(env, sym_intern_cstr("SET-EQV"),   vfix(SET_CMP_EQV));
     env_define(env, sym_intern_cstr("SET-EQUAL"), vfix(SET_CMP_EQUAL));
 
-    /* ---- Akkadian and cuneiform procedure aliases ---- */
-    /* For each AKK_PR entry, look up the English binding and register
-     * both transliterated and cuneiform names pointing to the same value. */
-    {
-#define AKK(e, t, c)    /* special form — handled in eval.c */
-#define AKK_SF(e, t, c) /* special form — skip */
-#define AKK_PR(e, t, c) \
-        { \
-            val_t _v = env_lookup_or_false(env, sym_intern_cstr(e)); \
-            if (!vis_false(_v)) { \
-                env_define(env, sym_intern_cstr(t), _v); \
-                env_define(env, sym_intern_cstr(c), _v); \
-            } \
-        }
-#include "akkadian_names.h"
-        /* macros cleaned up by akkadian_names.h */
-#undef AKK
-    }
+    /* ---- Language pack primitives ---- */
+    DEF("register-language!",   prim_register_language,    1, 1);
+    DEF("set-active-language!", prim_set_active_language,  1, 1);
+    DEF("active-language",      prim_active_language,      0, 0);
+    DEF("registered-languages", prim_registered_languages, 0, 0);
+    DEF("language-info",        prim_language_info,        1, 1);
+    DEF("language-intro",       prim_language_intro,       1, 1);
+
+    /* ---- Language pack env aliases ---- */
+    /* Register all procedure-name mappings from the active language pack.
+     * For Akkadian (the default) this reproduces the old AKK_PR behaviour.
+     * For other packs it makes their foreign names available in the env. */
+    lang_apply_active_aliases(NULL);
 
     /* Cuneiform/Akkadian constants */
     env_define(env, sym_intern_cstr("𒌋𒉡"),  V_TRUE);   /* U.NU = "and-not" = #t (truth) */
