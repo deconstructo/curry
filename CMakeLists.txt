@@ -93,6 +93,13 @@ find_path(GMP_INCLUDE NAMES gmp.h REQUIRED)
 # MPFR — arbitrary precision floating-point (built on GMP)
 option(BUILD_MPFR "Build MPFR arbitrary-precision float support" OFF)
 
+# Language packs to embed in the binary.
+# "akkadian" is always available at runtime (registered in lang_init()).
+# Set EMBED_LANGS to a semicolon-separated list of additional pack IDs to
+# compile in as static strings (requires tools/lang-pack-gen and the pack
+# to exist in langs/<id>.scm at configure time).
+set(EMBED_LANGS "" CACHE STRING "Semicolon-separated list of extra language pack IDs to embed")
+
 # readline — optional, enhances the REPL with history and line editing
 find_library(READLINE_LIB NAMES readline)
 find_path(READLINE_INCLUDE NAMES readline/readline.h)
@@ -141,6 +148,35 @@ set(CORE_SOURCES
 
 # vm.c uses computed gotos (GCC/Clang extension) for the dispatch table.
 set_source_files_properties(src/vm.c PROPERTIES COMPILE_FLAGS "-Wno-gnu-label-as-value")
+
+# ---- Embedded language packs ------------------------------------------------
+# For each ID in EMBED_LANGS, generate a C file that auto-registers the pack
+# as a built-in at startup.  The generated file calls lang_register() from a
+# constructor attribute so no source change is needed to add a new language.
+if(EMBED_LANGS)
+  find_program(CURRY_EXE curry HINTS "${CMAKE_CURRENT_BINARY_DIR}" DOC "curry interpreter for code generation")
+  foreach(_lang_id IN LISTS EMBED_LANGS)
+    set(_lang_src "${CMAKE_CURRENT_SOURCE_DIR}/langs/${_lang_id}.scm")
+    set(_lang_gen "${CMAKE_CURRENT_BINARY_DIR}/langs/${_lang_id}_embedded.c")
+    if(EXISTS "${_lang_src}" AND CURRY_EXE)
+      add_custom_command(
+        OUTPUT  "${_lang_gen}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/langs"
+        COMMAND "${CURRY_EXE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/lang-pack-gen"
+                --id "${_lang_id}"
+                --csv "${CMAKE_CURRENT_SOURCE_DIR}/langs/${_lang_id}.csv"
+                --emit-c
+                --output "${_lang_gen}"
+        DEPENDS "${_lang_src}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/lang-pack-gen"
+        COMMENT "Embedding language pack: ${_lang_id}"
+        VERBATIM)
+      list(APPEND CORE_SOURCES "${_lang_gen}")
+      message(STATUS "Embedding language pack: ${_lang_id}")
+    else()
+      message(WARNING "EMBED_LANGS: langs/${_lang_id}.scm not found or curry not built yet; skipping ${_lang_id}")
+    endif()
+  endforeach()
+endif()
 
 add_library(curry_core STATIC ${CORE_SOURCES})
 set_target_properties(curry_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

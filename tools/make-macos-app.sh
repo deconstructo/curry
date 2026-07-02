@@ -153,6 +153,23 @@ info "Copying modules"
 cp "$MODS_DIR"/*.so "$CONTENTS/Resources/mods/curry/" 2>/dev/null || true
 step "$(ls "$CONTENTS/Resources/mods/curry/"*.so 2>/dev/null | wc -l | tr -d ' ') modules copied"
 
+# ── bundle language packs ─────────────────────────────────────────────────────
+# Copy installed packs from ~/.curry/langs/ and the repo langs/ directory.
+# Packs in ~/.curry/langs/ take precedence (loaded first at runtime).
+LANGS_DIR="$CONTENTS/Resources/langs"
+mkdir -p "$LANGS_DIR"
+LANGS_COPIED=0
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -d "$SCRIPT_DIR/langs" ]]; then
+  cp "$SCRIPT_DIR/langs"/*.scm "$LANGS_DIR/" 2>/dev/null || true
+  LANGS_COPIED=$(ls "$LANGS_DIR"/*.scm 2>/dev/null | wc -l | tr -d ' ')
+fi
+if [[ -d "$HOME/.curry/langs" ]]; then
+  cp "$HOME/.curry/langs"/*.scm "$LANGS_DIR/" 2>/dev/null || true
+  LANGS_COPIED=$(ls "$LANGS_DIR"/*.scm 2>/dev/null | wc -l | tr -d ' ')
+fi
+step "$LANGS_COPIED language pack(s) bundled"
+
 # ── bundle non-system Homebrew dylibs ─────────────────────────────────────────
 # Recursively copies Homebrew dylibs into Contents/Frameworks/ and rewires
 # @install_name references to use @rpath so the bundle is self-contained.
@@ -343,6 +360,7 @@ cat > "$LAUNCHER" <<LAUNCHER
 # Auto-generated launcher for ${APP_NAME}.app — do not edit by hand.
 DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 export CURRY_MODULE_PATH="\$DIR/../Resources/mods"
+export CURRY_LANG_REGISTRY_URL="file://\$DIR/../Resources/langs"
 exec "\$DIR/curry" ${GC_FLAG} "\$DIR/../Resources/main.scc" "\$@"
 LAUNCHER
 chmod 755 "$LAUNCHER"
