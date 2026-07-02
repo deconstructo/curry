@@ -2,8 +2,17 @@
  * i18n.c — Pluggable language pack runtime.
  *
  * One pack is active at a time.  Translation (lang_translate) is the hot
- * path; it does a linear scan of the active pack only, with no locks.
- * Registration and activation are infrequent and take g_lang_mtx.
+ * path; it loads g_active with acquire semantics and does a lock-free linear
+ * scan.  Registration and activation are infrequent and take g_lang_mtx.
+ *
+ * Thread safety:
+ *  - g_active is _Atomic(LangPack *).  Writers use release, readers acquire,
+ *    so the fully-constructed LangPack is visible before the pointer update.
+ *  - apply_aliases() must NOT be called while holding g_lang_mtx: it calls
+ *    env_define() which may trigger GC or acquire internal env locks.
+ *    Callers capture the pack pointer, release g_lang_mtx, then call
+ *    apply_aliases().  Applying aliases for a transiently-wrong pack is
+ *    harmless — it just adds extra env bindings.
  */
 
 #include "i18n.h"
@@ -13,6 +22,7 @@
 #include "builtins.h"   /* scm_cons */
 #include "akkadian.h"   /* akkadian_preamble fallback */
 
+#include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,10 +34,20 @@
 
 static LangPack  *g_packs[LANG_MAX_PACKS];
 static int        g_packs_count   = 0;
-static LangPack  *g_active        = NULL;
-static bool       g_builtins_ready = false;
+/* Atomic pointer-to-LangPack: writers use release, readers use acquire. */
+static _Atomic(LangPack *) g_active = NULL;
+static bool       g_builtins_ready  = false;
 
 static pthread_mutex_t g_lang_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+/* Convenience: load g_active with acquire semantics. */
+static inline LangPack *active_load(void) {
+    return atomic_load_explicit(&g_active, memory_order_acquire);
+}
+/* Convenience: store to g_active with release semantics (call under g_lang_mtx). */
+static inline void active_store(LangPack *p) {
+    atomic_store_explicit(&g_active, p, memory_order_release);
+}
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
@@ -65,9 +85,9 @@ static LangPack *pack_find_locked(const char *id) {
     return NULL;
 }
 
-/* Register env aliases for all mappings in pack into GLOBAL_ENV. */
-static void apply_aliases_locked(LangPack *pack) {
-    if (!g_builtins_ready) return;
+/* Apply env aliases for pack — MUST be called WITHOUT holding g_lang_mtx. */
+static void apply_aliases(LangPack *pack) {
+    if (!g_builtins_ready || !pack) return;
     for (size_t i = 0; i < pack->count; i++) {
         val_t val = env_lookup_or_false(GLOBAL_ENV, pack->mappings[i].canonical);
         if (!vis_false(val))
@@ -133,8 +153,9 @@ void lang_apply_active_aliases(void *env_frame) {
     (void)env_frame;   /* we use GLOBAL_ENV directly */
     pthread_mutex_lock(&g_lang_mtx);
     g_builtins_ready = true;
-    if (g_active) apply_aliases_locked(g_active);
+    LangPack *active = active_load();
     pthread_mutex_unlock(&g_lang_mtx);
+    apply_aliases(active);   /* env_define called outside the lock */
 }
 
 /* ── Registration ────────────────────────────────────────────────────────── */
@@ -142,12 +163,17 @@ void lang_apply_active_aliases(void *env_frame) {
 int lang_register(const LangPack *pack) {
     if (!pack || !pack->id[0]) return -1;
     pthread_mutex_lock(&g_lang_mtx);
+    LangPack *replaced_active = NULL;
     for (int i = 0; i < g_packs_count; i++) {
         if (strcmp(g_packs[i]->id, pack->id) == 0) {
-            bool was_active = (g_active == g_packs[i]);
+            bool was_active = (active_load() == g_packs[i]);
             g_packs[i] = pack_alloc(pack);
-            if (was_active) { g_active = g_packs[i]; apply_aliases_locked(g_packs[i]); }
+            if (was_active) {
+                active_store(g_packs[i]);
+                replaced_active = g_packs[i];
+            }
             pthread_mutex_unlock(&g_lang_mtx);
+            if (replaced_active) apply_aliases(replaced_active);
             return 0;
         }
     }
@@ -165,7 +191,7 @@ void lang_unregister(const char *id) {
     pthread_mutex_lock(&g_lang_mtx);
     for (int i = 0; i < g_packs_count; i++) {
         if (strcmp(g_packs[i]->id, id) == 0) {
-            if (g_active == g_packs[i]) g_active = NULL;
+            if (active_load() == g_packs[i]) active_store(NULL);
             g_packs[i] = g_packs[--g_packs_count];
             break;
         }
@@ -178,28 +204,30 @@ void lang_unregister(const char *id) {
 bool lang_set_active(const char *id) {
     pthread_mutex_lock(&g_lang_mtx);
     if (!id) {
-        g_active = NULL;
+        active_store(NULL);
         pthread_mutex_unlock(&g_lang_mtx);
         return true;
     }
     LangPack *p = pack_find_locked(id);
     if (!p) { pthread_mutex_unlock(&g_lang_mtx); return false; }
-    g_active = p;
-    apply_aliases_locked(p);
+    active_store(p);
     pthread_mutex_unlock(&g_lang_mtx);
+    apply_aliases(p);   /* env_define outside the lock */
     return true;
 }
 
 const char *lang_active_id(void) {
-    return g_active ? g_active->id : NULL;
+    LangPack *p = active_load();
+    return p ? p->id : NULL;
 }
 
 const char *lang_active_display_name(void) {
-    return g_active ? g_active->display_name : NULL;
+    LangPack *p = active_load();
+    return p ? p->display_name : NULL;
 }
 
 const char *lang_active_intro(void) {
-    LangPack *p = g_active;
+    LangPack *p = active_load();
     return (p && p->intro[0]) ? p->intro : NULL;
 }
 
@@ -207,7 +235,7 @@ const char *lang_active_intro(void) {
 
 val_t lang_translate(val_t sym) {
     if (!vis_symbol(sym)) return sym;
-    LangPack *p = g_active;
+    LangPack *p = active_load();
     if (!p) return sym;
     for (size_t i = 0; i < p->count; i++)
         if (p->mappings[i].foreign == sym) return p->mappings[i].canonical;
@@ -232,7 +260,7 @@ bool lang_is_known_sym(const char *utf8) {
 /* ── Error preamble ──────────────────────────────────────────────────────── */
 
 void lang_preamble(char *buf, size_t bufsz, const char *errmsg) {
-    LangPack *p = g_active;
+    LangPack *p = active_load();
     if (p && p->error_prefix[0]) {
         snprintf(buf, bufsz, "%s", p->error_prefix);
     } else {
