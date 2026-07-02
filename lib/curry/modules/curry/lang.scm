@@ -42,7 +42,7 @@
     (define (ensure-cache-dir!)
       ;; POSIX mkdir via shell — only needed for lang:install!
       (when (not (file-exists? lang:cache-dir))
-        (system (string-append "mkdir -p " lang:cache-dir))))
+        (system (string-append "mkdir -p '" lang:cache-dir "'"))))
 
     (define (cache-path id)
       (string-append lang:cache-dir "/" id ".scm"))
@@ -80,12 +80,15 @@
     (define (lang:load-file! path)
       (let ((p (open-input-file path))
             (env (interaction-environment)))
-        (let loop ()
-          (let ((form (read p)))
-            (unless (eof-object? form)
-              (eval form env)
-              (loop))))
-        (close-input-port p)))
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (let loop ()
+              (let ((form (read p)))
+                (unless (eof-object? form)
+                  (eval form env)
+                  (loop)))))
+          (lambda () (close-input-port p)))))
 
     ;;; Generate .scm source from an alist spec (same format as register-language!).
     ;;; Returns the source as a string, suitable for writing to a file.
