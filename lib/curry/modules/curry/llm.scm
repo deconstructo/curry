@@ -133,10 +133,10 @@
       (or api-key
           (cond
             ((eq? prov 'claude)
-             (let ((k (getenv "ANTHROPIC_API_KEY")))
+             (let ((k (get-environment-variable "ANTHROPIC_API_KEY")))
                (if (and k (> (string-length k) 0)) k #f)))
             ((eq? provider 'openai)
-             (let ((k (getenv "OPENAI_API_KEY")))
+             (let ((k (get-environment-variable "OPENAI_API_KEY")))
                (if (and k (> (string-length k) 0)) k #f)))
             (else #f))))
     (vector prov ep key default-model)))
