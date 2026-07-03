@@ -1470,7 +1470,7 @@ static val_t sexbuf_to_val(SexBuf *b) {
     uint32_t len = (uint32_t)b->len;
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     str->hdr.type = T_STRING; str->hdr.flags = 0;
-    str->len = len; str->hash = 0;
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
     memcpy(str->data, b->buf, len + 1);
     free(b->buf); b->buf = NULL;
     return vptr(str);

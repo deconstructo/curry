@@ -720,7 +720,7 @@ static val_t prim_string_foldcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-foldcase: not a string");
     String *s = as_str(av[0]);
-    val_t port_in  = port_open_input_string(s->data, s->len);
+    val_t port_in  = port_open_input_string(str_data(s), s->len);
     val_t port_out = port_open_output_string();
     int cp;
     while ((cp = port_read_char(port_in)) != -1)
