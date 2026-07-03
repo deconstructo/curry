@@ -37,7 +37,7 @@ bool scm_equal(val_t a, val_t b) {
         return scm_equal(vcar(a), vcar(b)) && scm_equal(vcdr(a), vcdr(b));
     if (vis_string(a) && vis_string(b)) {
         String *sa = as_str(a), *sb = as_str(b);
-        return sa->len == sb->len && memcmp(sa->data, sb->data, sa->len) == 0;
+        return sa->len == sb->len && memcmp(str_data(sa), str_data(sb), sa->len) == 0;
     }
     if (vis_vector(a) && vis_vector(b)) {
         Vector *va = as_vec(a), *vb = as_vec(b);
@@ -86,7 +86,8 @@ uint32_t val_hash(val_t v, int cmp_type) {
         /* FNV-1a over bytes */
         String *s = as_str(v);
         uint32_t h = 2166136261u;
-        for (uint32_t i = 0; i < s->len; i++) { h ^= (uint8_t)s->data[i]; h *= 16777619u; }
+        const char *sd = str_data(s);
+        for (uint32_t i = 0; i < s->len; i++) { h ^= (uint8_t)sd[i]; h *= 16777619u; }
         return h;
     }
     if (vis_symbol(v)) return as_sym(v)->hash;

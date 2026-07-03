@@ -126,7 +126,7 @@ void scm_raise(val_t kind, const char *fmt, ...) {
 
     uint32_t len = (uint32_t)strlen(full);
     String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    s->hdr.type=T_STRING; s->hdr.flags=0; s->len=len; s->hash=0;
+    s->hdr.type=T_STRING; s->hdr.flags=0; s->len=len; s->hash=0; s->orig_cap=len; s->ext=NULL;
     memcpy(s->data, full, len+1);
     e->message   = vptr(s);
     e->irritants = V_NIL;
@@ -983,7 +983,7 @@ tail:
         while (vis_pair(rest)) {
             if (!vis_string(vcar(rest)))
                 scm_raise(V_FALSE, "include: filename must be a string");
-            r = scm_load(as_str(vcar(rest))->data, env);
+            r = scm_load(str_data(as_str(vcar(rest))), env);
             rest = vcdr(rest);
         }
         return r;

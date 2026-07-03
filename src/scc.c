@@ -225,7 +225,7 @@ static bool write_const(FILE *f, val_t v) {
     }
     case CTAG_STRING: {
         String *s = as_str(v);
-        return wstr(f, s->data, s->len);
+        return wstr(f, str_data(s), s->len);
     }
     case CTAG_SYMBOL: {
         Symbol *s = as_sym(v);
@@ -358,7 +358,7 @@ static bool read_const(FILE *f, val_t *out) {
         if (!buf) return false;
         String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
         s->hdr.type = T_STRING; s->hdr.flags = 0;
-        s->len = len; s->hash = 0;
+        s->len = len; s->hash = 0; s->orig_cap = len; s->ext = NULL;
         memcpy(s->data, buf, len + 1);
         free(buf);
         *out = vptr(s);

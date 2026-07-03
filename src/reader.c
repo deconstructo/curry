@@ -255,6 +255,7 @@ static val_t read_string(val_t port) {
     str->hdr.flags = 0;
     str->len  = (uint32_t)sb.len;
     str->hash = 0;
+    str->orig_cap = (uint32_t)sb.len; str->ext = NULL;
     memcpy(str->data, sb.buf, sb.len + 1);
     return vptr(str);
 }

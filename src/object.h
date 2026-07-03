@@ -214,10 +214,15 @@ typedef struct {
 
 typedef struct {
     Hdr      hdr;
-    uint32_t len;   /* byte length, excluding NUL */
+    uint32_t len;      /* current byte length, excluding NUL */
     uint32_t hash;
-    char     data[];  /* UTF-8, NUL-terminated */
+    uint32_t orig_cap; /* inline data[] capacity set at allocation; never shrinks */
+    char    *ext;      /* NULL → use inline data[]; set by string-set! on width change */
+    char     data[];   /* original inline storage */
 } String;
+
+/* Access the live byte content of a String (may be in ext or inline data[]). */
+static inline char *str_data(String *s) { return s->ext ? s->ext : s->data; }
 
 typedef struct {
     Hdr      hdr;

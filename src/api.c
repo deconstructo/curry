@@ -34,7 +34,7 @@ curry_val curry_make_string(const char *s) {
     size_t len = strlen(s);
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     str->hdr.type = T_STRING; str->hdr.flags = 0;
-    str->len = (uint32_t)len; str->hash = 0;
+    str->len = (uint32_t)len; str->hash = 0; str->orig_cap = (uint32_t)len; str->ext = NULL;
     memcpy(str->data, s, len + 1);
     return vptr(str);
 }
@@ -67,7 +67,7 @@ bool curry_is_error(curry_val v)     { return vis_error(v); }
 const char *curry_error_message(curry_val v) {
     if (!vis_error(v)) return NULL;
     val_t msg = as_err(v)->message;
-    return vis_string(msg) ? as_str(msg)->data : NULL;
+    return vis_string(msg) ? str_data(as_str(msg)) : NULL;
 }
 
 /* ---- Value accessors ---- */
@@ -76,7 +76,7 @@ intptr_t    curry_fixnum(curry_val v)  { return vunfix(v); }
 double      curry_float(curry_val v)   { return vis_fixnum(v) ? (double)vunfix(v) : vfloat(v); }
 bool        curry_bool(curry_val v)    { return v != V_FALSE; }
 uint32_t    curry_char(curry_val v)    { return vunchr(v); }
-const char *curry_string(curry_val v)  { return as_str(v)->data; }
+const char *curry_string(curry_val v)  { return str_data(as_str(v)); }
 const char *curry_symbol(curry_val v)  { return sym_cstr(v); }
 curry_val   curry_car(curry_val v)     { return vcar(v); }
 curry_val   curry_cdr(curry_val v)     { return vcdr(v); }

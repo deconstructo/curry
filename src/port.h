@@ -19,6 +19,8 @@
 val_t port_open_file(const char *path, int flags);  /* PORT_INPUT | PORT_OUTPUT | PORT_BINARY */
 val_t port_open_input_string(const char *str, uint32_t len);
 val_t port_open_output_string(void);
+val_t port_open_input_bytevector(const uint8_t *data, uint32_t len);
+val_t port_open_output_bytevector(void);
 val_t port_wrap_file(FILE *fp, int flags);
 
 /* ---- Standard ports ---- */
@@ -53,8 +55,9 @@ val_t port_get_output_string(val_t p);  /* for string output ports */
 val_t port_get_output_bytevector(val_t p);
 
 /* ---- Scheme-level display / write ---- */
-void  scm_display(val_t v, val_t port);  /* (display obj port) */
-void  scm_write(val_t v, val_t port);    /* (write obj port) - readable output */
+void  scm_display(val_t v, val_t port);       /* (display obj port) */
+void  scm_write(val_t v, val_t port);         /* (write obj port) - readable output */
+void  scm_write_shared(val_t v, val_t port);  /* (write-shared obj port) */
 void  scm_newline(val_t port);
 
 #endif /* CURRY_PORT_H */

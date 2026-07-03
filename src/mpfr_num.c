@@ -385,7 +385,7 @@ val_t mpfr_to_string(val_t v, int digits, int base) {
         const char *s = "+nan.0";
         size_t L = strlen(s);
         String *str = (String *)gc_alloc_atomic(sizeof(String) + L + 1);
-        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=(uint32_t)L;
+        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=(uint32_t)L; str->orig_cap=(uint32_t)L; str->ext=NULL;
         memcpy(str->data, s, L+1); return vptr(str);
     }
     if (strncmp(signptr, "@Inf@", 5) == 0 || strncmp(signptr, "Inf", 3) == 0) {
@@ -393,7 +393,7 @@ val_t mpfr_to_string(val_t v, int digits, int base) {
         const char *s = sign ? "-inf.0" : "+inf.0";
         size_t L = strlen(s);
         String *str = (String *)gc_alloc_atomic(sizeof(String) + L + 1);
-        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=(uint32_t)L;
+        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=(uint32_t)L; str->orig_cap=(uint32_t)L; str->ext=NULL;
         memcpy(str->data, s, L+1); return vptr(str);
     }
 
@@ -415,7 +415,7 @@ val_t mpfr_to_string(val_t v, int digits, int base) {
 
     uint32_t len = (uint32_t)pos;
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len;
+    str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
     memcpy(str->data, out, len); str->data[len] = '\0';
     free(out);
     return vptr(str);

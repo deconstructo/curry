@@ -166,7 +166,7 @@ int chunk_add_const(Chunk *c, val_t v) {
         if (vis_number(e) && vis_number(v) && scm_eqv(e, v)) return i;
         if (vis_symbol(e) && vis_symbol(v) && e == v)  return i; /* interned */
         if (vis_string(e) && vis_string(v) &&
-            strcmp(as_str(e)->data, as_str(v)->data) == 0) return i;
+            strcmp(str_data(as_str(e)), str_data(as_str(v))) == 0) return i;
     }
     if (c->const_len == c->const_cap) {
         int cap = c->const_cap < 8 ? 8 : c->const_cap * 2;

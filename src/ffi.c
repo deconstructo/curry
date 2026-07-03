@@ -107,7 +107,7 @@ static bool marshal_arg(val_t v, val_t tag, void *buf) {
         memcpy(buf, &p, sizeof(p)); return true;
     }
     if (!strcmp(t,"string") || !strcmp(t,"c-string")) {
-        const char *s = vis_string(v)  ? as_str(v)->data
+        const char *s = vis_string(v)  ? str_data(as_str(v))
                       : vis_false(v)   ? NULL
                       : NULL;
         memcpy(buf, &s, sizeof(s)); return true;
@@ -150,7 +150,7 @@ static val_t unmarshal_ret(void *buf, val_t tag) {
         uint32_t len = (uint32_t)strlen(s);
         String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
         str->hdr.type = T_STRING; str->hdr.flags = 0;
-        str->len = len; str->hash = 0;
+        str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
         memcpy(str->data, s, len + 1);
         return vptr(str);
     }
@@ -274,7 +274,7 @@ static void ffi_def(val_t env, const char *name,
 static val_t prim_ffi_load(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "%ffi-load: path must be a string");
-    val_t lib = ffi_load_library(as_str(av[0])->data);
+    val_t lib = ffi_load_library(str_data(as_str(av[0])));
     as_foreignlib(lib)->path = av[0];
     return lib;
 }
@@ -283,7 +283,7 @@ static val_t prim_ffi_make_fn(int ac, val_t *av, void *ud) {
     if (!vis_foreignlib(av[0])) scm_raise(V_FALSE, "%ffi-make-fn: not a foreign-lib");
     if (!vis_string(av[1]))     scm_raise(V_FALSE, "%ffi-make-fn: c-name must be a string");
     if (!vis_symbol(av[2]))     scm_raise(V_FALSE, "%ffi-make-fn: ret-type must be a symbol");
-    return ffi_make_fn(av[0], as_str(av[1])->data, av[2], av[3]);
+    return ffi_make_fn(av[0], str_data(as_str(av[1])), av[2], av[3]);
 }
 static val_t prim_ffi_call(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return ffi_call_fn(av[0], av[1]); }

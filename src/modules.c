@@ -429,7 +429,7 @@ val_t modules_define_library(val_t form, val_t env) {
         } else if (clause_type == S_INCLUDE) {
             val_t files = vcdr(clause);
             while (vis_pair(files)) {
-                scm_load(as_str(vcar(files))->data, lib_env);
+                scm_load(str_data(as_str(vcar(files))), lib_env);
                 files = vcdr(files);
             }
         }

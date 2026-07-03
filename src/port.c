@@ -242,7 +242,19 @@ void port_write_byte(val_t v, uint8_t b) {
     Port *p = as_port(v);
     if (p->flags & PORT_CLOSED) return;
     if (p->flags & PORT_STRING) {
-        port_write_char(v, b);
+        /* Binary string port: append raw byte without UTF-8 encoding. */
+        if (p->flags & PORT_BINARY) {
+            while (p->u.str.len + 2 >= p->u.str.cap) {
+                p->u.str.cap = p->u.str.cap < 16 ? 16 : p->u.str.cap * 2;
+                char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
+                memcpy(nb, p->u.str.buf, p->u.str.len);
+                p->u.str.buf = nb;
+            }
+            p->u.str.buf[p->u.str.len++] = (char)b;
+            p->u.str.buf[p->u.str.len]   = '\0';
+        } else {
+            port_write_char(v, b);
+        }
     } else {
         fputc(b, p->u.fp);
     }
@@ -259,6 +271,29 @@ void port_close(val_t v) {
     p->flags |= PORT_CLOSED;
 }
 
+val_t port_open_input_bytevector(const uint8_t *data, uint32_t len) {
+    val_t v = make_port(PORT_INPUT | PORT_BINARY | PORT_STRING);
+    Port *p = as_port(v);
+    p->u.str.buf = (char *)gc_alloc_raw_pinned_atomic(len + 1);
+    memcpy(p->u.str.buf, data, len);
+    p->u.str.buf[len] = '\0';
+    p->u.str.pos = 0;
+    p->u.str.len = len;
+    p->u.str.cap = len;
+    return v;
+}
+
+val_t port_open_output_bytevector(void) {
+    val_t v = make_port(PORT_OUTPUT | PORT_BINARY | PORT_STRING);
+    Port *p = as_port(v);
+    p->u.str.cap = 64;
+    p->u.str.buf = (char *)gc_alloc_raw_pinned_atomic(64);
+    p->u.str.buf[0] = '\0';
+    p->u.str.pos = 0;
+    p->u.str.len = 0;
+    return v;
+}
+
 val_t port_get_output_string(val_t v) {
     Port *p = as_port(v);
     if (!(p->flags & PORT_STRING))
@@ -269,8 +304,23 @@ val_t port_get_output_string(val_t v) {
     s->hdr.flags = 0;
     s->len  = len;
     s->hash = 0;
+    s->orig_cap = len;
+    s->ext = NULL;
     memcpy(s->data, p->u.str.buf, len + 1);
     return vptr(s);
+}
+
+val_t port_get_output_bytevector(val_t v) {
+    Port *p = as_port(v);
+    if (!(p->flags & PORT_STRING) || !(p->flags & PORT_BINARY))
+        scm_raise(V_FALSE, "get-output-bytevector: not a binary output port");
+    uint32_t len = (uint32_t)p->u.str.len;
+    Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + len);
+    bv->hdr.type  = T_BYTEVECTOR;
+    bv->hdr.flags = 0;
+    bv->len = len;
+    memcpy(bv->data, p->u.str.buf, len);
+    return vptr(bv);
 }
 
 /* ---- Display / Write ---- */
@@ -299,7 +349,7 @@ static void write_number_notation(val_t v, val_t port) {
         else if (strcmp(note, "cuneiform") == 0)
             s = sex_to_cuneiform(v);
         if (!vis_false(s)) {
-            port_write_string(port, as_str(s)->data, as_str(s)->len);
+            port_write_string(port, str_data(as_str(s)), as_str(s)->len);
             return;
         }
     }
@@ -328,7 +378,7 @@ void scm_write(val_t v, val_t port) {
         else                 { port_write_char(port, (int)cp);          }
         return;
     }
-    if (vis_string(v))   { write_string_escaped(port, as_str(v)->data, as_str(v)->len); return; }
+    if (vis_string(v))   { write_string_escaped(port, str_data(as_str(v)), as_str(v)->len); return; }
     if (vis_symbol(v))   { port_write_string(port, as_sym(v)->data, as_sym(v)->len); return; }
     if (vis_flonum(v))   { write_number_notation(v, port); return; }
     if (vis_bignum(v))   { write_number_notation(v, port); return; }
@@ -442,10 +492,166 @@ void scm_write(val_t v, val_t port) {
     port_write_string(port, buf, (uint32_t)n);
 }
 
+/* ---- write-shared: write with datum labels for shared/cyclic structure ---- */
+
+/*
+ * Two-pass algorithm:
+ *   Pass 1: walk the structure; for each heap compound (pair, vector, string,
+ *           bytevector), count references.  Objects seen more than once get a
+ *           label.
+ *   Pass 2: write, emitting "#N=" before the first occurrence of a labeled
+ *           object and "#N#" for subsequent references.
+ *
+ * We only label compound mutable objects (pairs, vectors, strings, bytevectors).
+ * Symbols are unique by interning; immediates are value-equal, never shared.
+ */
+
+#define WSHARED_CAP_INIT 32
+
+typedef struct {
+    val_t  key;    /* heap pointer; 0 = empty */
+    int    count;  /* reference count (pass 1) */
+    int    label;  /* -1 = unlabeled, >= 0 = assigned label (pass 2) */
+} WSharedEntry;
+
+typedef struct {
+    WSharedEntry *entries;
+    int           cap;
+    int           count;
+    int           next_label;
+} WSharedMap;
+
+static WSharedMap *ws_new(void) {
+    WSharedMap *m = (WSharedMap *)gc_alloc(sizeof(WSharedMap));
+    m->cap = WSHARED_CAP_INIT;
+    m->entries = (WSharedEntry *)gc_alloc(m->cap * sizeof(WSharedEntry));
+    memset(m->entries, 0, (size_t)m->cap * sizeof(WSharedEntry));
+    m->count = 0;
+    m->next_label = 0;
+    return m;
+}
+
+static WSharedEntry *ws_find(WSharedMap *m, val_t key) {
+    int h = (int)((uint64_t)(uintptr_t)key % (unsigned)m->cap);
+    for (int i = 0; i < m->cap; i++) {
+        int idx = (h + i) % m->cap;
+        if (m->entries[idx].key == 0) return NULL;
+        if (m->entries[idx].key == key) return &m->entries[idx];
+    }
+    return NULL;
+}
+
+static WSharedEntry *ws_insert(WSharedMap *m, val_t key) {
+    if (m->count * 2 >= m->cap) {
+        int old_cap = m->cap;
+        WSharedEntry *old = m->entries;
+        m->cap *= 2;
+        m->entries = (WSharedEntry *)gc_alloc(m->cap * sizeof(WSharedEntry));
+        memset(m->entries, 0, (size_t)m->cap * sizeof(WSharedEntry));
+        for (int i = 0; i < old_cap; i++) {
+            if (old[i].key) {
+                int h2 = (int)((uint64_t)(uintptr_t)old[i].key % (unsigned)m->cap);
+                for (int j = 0; j < m->cap; j++) {
+                    int idx = (h2 + j) % m->cap;
+                    if (!m->entries[idx].key) { m->entries[idx] = old[i]; break; }
+                }
+            }
+        }
+    }
+    int h = (int)((uint64_t)(uintptr_t)key % (unsigned)m->cap);
+    for (int i = 0; i < m->cap; i++) {
+        int idx = (h + i) % m->cap;
+        if (!m->entries[idx].key) {
+            m->entries[idx].key   = key;
+            m->entries[idx].count = 0;
+            m->entries[idx].label = -1;
+            m->count++;
+            return &m->entries[idx];
+        }
+        if (m->entries[idx].key == key) return &m->entries[idx];
+    }
+    return NULL;
+}
+
+static bool ws_is_compound(val_t v) {
+    return vis_pair(v) || vis_vector(v) || vis_string(v) || vis_bytes(v);
+}
+
+static void ws_count_refs(val_t v, WSharedMap *m) {
+    if (!ws_is_compound(v)) return;
+    WSharedEntry *e = ws_find(m, v);
+    if (e) { e->count++; return; }
+    e = ws_insert(m, v);
+    e->count = 1;
+    if (vis_pair(v)) {
+        ws_count_refs(vcar(v), m);
+        ws_count_refs(vcdr(v), m);
+    } else if (vis_vector(v)) {
+        Vector *vec = as_vec(v);
+        for (uint32_t i = 0; i < vec->len; i++) ws_count_refs(vec->data[i], m);
+    }
+    /* strings and bytevectors have no sub-values */
+}
+
+static void ws_write(val_t v, val_t port, WSharedMap *m);
+
+static void ws_write_list(val_t v, val_t port, WSharedMap *m) {
+    port_write_char(port, '(');
+    ws_write(vcar(v), port, m);
+    val_t rest = vcdr(v);
+    while (vis_pair(rest)) {
+        WSharedEntry *e2 = ws_find(m, rest);
+        if (e2 && e2->count > 1) {
+            port_write_string(port, " . ", 3);
+            ws_write(rest, port, m);
+            port_write_char(port, ')');
+            return;
+        }
+        port_write_char(port, ' ');
+        ws_write(vcar(rest), port, m);
+        rest = vcdr(rest);
+    }
+    if (!vis_nil(rest)) { port_write_string(port, " . ", 3); ws_write(rest, port, m); }
+    port_write_char(port, ')');
+}
+
+static void ws_write(val_t v, val_t port, WSharedMap *m) {
+    if (!ws_is_compound(v)) { scm_write(v, port); return; }
+    WSharedEntry *e = ws_find(m, v);
+    if (e && e->count > 1) {
+        if (e->label >= 0) {
+            char buf[32]; int n = snprintf(buf, sizeof(buf), "#%d#", e->label);
+            port_write_string(port, buf, (uint32_t)n);
+            return;
+        }
+        e->label = m->next_label++;
+        char buf[32]; int n = snprintf(buf, sizeof(buf), "#%d=", e->label);
+        port_write_string(port, buf, (uint32_t)n);
+    }
+    if (vis_pair(v))   { ws_write_list(v, port, m); return; }
+    if (vis_vector(v)) {
+        Vector *vec = as_vec(v);
+        port_write_string(port, "#(", 2);
+        for (uint32_t i = 0; i < vec->len; i++) {
+            if (i) port_write_char(port, ' ');
+            ws_write(vec->data[i], port, m);
+        }
+        port_write_char(port, ')');
+        return;
+    }
+    scm_write(v, port);
+}
+
+void scm_write_shared(val_t v, val_t port) {
+    WSharedMap *m = ws_new();
+    ws_count_refs(v, m);
+    ws_write(v, port, m);
+}
+
 void scm_display(val_t v, val_t port) {
     /* Like write but strings/chars printed without quotes/escapes */
     if (vis_string(v)) {
-        port_write_string(port, as_str(v)->data, as_str(v)->len);
+        port_write_string(port, str_data(as_str(v)), as_str(v)->len);
         return;
     }
     if (vis_char(v)) {

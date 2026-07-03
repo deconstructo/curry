@@ -237,7 +237,7 @@ static size_t obj_size(const Hdr *h) {
     }
     case T_STRING: {
         const String *s = (const String *)h;
-        return ((sizeof(String) + s->len + 1u) + 7u) & ~7u;
+        return ((sizeof(String) + s->orig_cap + 1u) + 7u) & ~7u;
     }
     case T_BYTEVECTOR: {
         const Bytevector *b = (const Bytevector *)h;

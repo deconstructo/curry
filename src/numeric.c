@@ -1362,7 +1362,7 @@ val_t num_to_string(val_t v, int radix) {
             char *s = mpz_get_str(NULL, radix, z);
             uint32_t len = (uint32_t)strlen(s);
             String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-            str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len;
+            str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
             memcpy(str->data, s, len+1); free(s); mpz_clear(z);
             return vptr(str);
         }
@@ -1371,7 +1371,7 @@ val_t num_to_string(val_t v, int radix) {
         /* wrap in String */
         uint32_t len = (uint32_t)strlen(s);
         String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len;
+        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
         memcpy(str->data, s, len+1); free(s); return vptr(str);
     } else if (vis_flonum(v)) {
         snprintf(buf, sizeof(buf), "%g", vfloat(v));
@@ -1384,7 +1384,7 @@ val_t num_to_string(val_t v, int radix) {
     }
     uint32_t len = (uint32_t)strlen(buf);
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len;
+    str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
     memcpy(str->data, buf, len+1);
     return vptr(str);
 }

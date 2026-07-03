@@ -1018,7 +1018,7 @@ static val_t prim_tensor_einsum(int argc, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0]))
         scm_raise(V_FALSE, "tensor-einsum: first argument must be a notation string");
-    return tensor_einsum(as_str(av[0])->data, av + 1, argc - 1);
+    return tensor_einsum(str_data(as_str(av[0])), av + 1, argc - 1);
 }
 
 void mat_register_matrix_builtins(val_t env) {

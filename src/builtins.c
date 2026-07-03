@@ -91,6 +91,7 @@ val_t scm_make_string(uint32_t len, int fill) {
     uint32_t total = len * (uint32_t)bytes_per;
     String *s = (String *)gc_alloc_atomic(sizeof(String) + total + 1);
     s->hdr.type=T_STRING; s->hdr.flags=0; s->len=total; s->hash=0;
+    s->orig_cap=total; s->ext=NULL;
     /* Fill with UTF-8 encoded fill_char */
     char enc[5]; int elen;
     uint32_t u = (uint32_t)fill;
@@ -105,8 +106,11 @@ val_t scm_make_string(uint32_t len, int fill) {
 
 val_t scm_string_copy(val_t sv) {
     String *s = as_str(sv);
+    const char *sdata = str_data(s);
     String *c = (String *)gc_alloc_atomic(sizeof(String) + s->len + 1);
-    *c = *s; memcpy(c->data, s->data, s->len + 1);
+    c->hdr.type = T_STRING; c->hdr.flags = 0; c->len = s->len; c->hash = s->hash;
+    c->orig_cap = s->len; c->ext = NULL;
+    memcpy(c->data, sdata, s->len + 1);
     return vptr(c);
 }
 
@@ -114,23 +118,23 @@ val_t scm_string_append(val_t a, val_t b) {
     String *sa = as_str(a), *sb = as_str(b);
     uint32_t len = sa->len + sb->len;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
-    memcpy(r->data, sa->data, sa->len);
-    memcpy(r->data + sa->len, sb->data, sb->len);
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
+    memcpy(r->data, str_data(sa), sa->len);
+    memcpy(r->data + sa->len, str_data(sb), sb->len);
     r->data[len] = '\0';
     return vptr(r);
 }
 
 val_t scm_string_to_symbol(val_t sv) {
     String *s = as_str(sv);
-    return sym_intern(s->data, s->len);
+    return sym_intern(str_data(s), s->len);
 }
 
 val_t scm_symbol_to_string(val_t sym) {
     const char *name = sym_cstr(sym);
     uint32_t len = sym_len(sym);
     String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    s->hdr.type=T_STRING; s->hdr.flags=0; s->len=len; s->hash=0;
+    s->hdr.type=T_STRING; s->hdr.flags=0; s->len=len; s->hash=0; s->orig_cap=len; s->ext=NULL;
     memcpy(s->data, name, len + 1);
     return vptr(s);
 }
@@ -546,7 +550,7 @@ static val_t prim_num_str(int ac, val_t *av, void *ud) {
 static val_t prim_str_num(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string->number: not a string");
-    const char *s = as_str(av[0])->data;
+    const char *s = str_data(as_str(av[0]));
     if (ac > 1 && vis_symbol(av[1])) {
         const char *note = as_sym(av[1])->data;
         if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
@@ -598,7 +602,7 @@ static val_t prim_string_length(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     /* UTF-8 character count (not byte length) */
     String *s = as_str(av[0]);
-    uint32_t n=0; const char *p=s->data, *end=p+s->len;
+    uint32_t n=0; const char *p=str_data(s), *end=p+s->len;
     while (p < end) { if ((*p & 0xC0) != 0x80) n++; p++; }
     return vfix(n);
 }
@@ -607,7 +611,8 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-ref: not a string");
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-ref: not an exact integer");
     String *s = as_str(av[0]); intptr_t idx = vunfix(av[1]);
-    const char *p = s->data, *end = p + s->len;
+    const char *sd = str_data(s);
+    const char *p = sd, *end = p + s->len;
     intptr_t n = 0;
     uint32_t cp = 0;
     while (p < end) {
@@ -615,8 +620,8 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
         p++;
     }
     /* Simplified: iterate to idx-th char */
-    p = s->data; n = 0;
-    while (p < (const char *)(s->data + s->len) && n < idx) {
+    p = sd; n = 0;
+    while (p < (const char *)(sd + s->len) && n < idx) {
         if ((*p & 0xC0) != 0x80) n++;
         p++;
     }
@@ -643,16 +648,17 @@ static val_t prim_string_copy(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-copy: not a string");
     String *s = as_str(av[0]);
-    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
-    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    const char *sd = str_data(s);
+    uint32_t sb = ac > 1 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[2])) : s->len;
     uint32_t len = eb - sb;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
-    memcpy(r->data, s->data + sb, len); r->data[len] = '\0';
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
+    memcpy(r->data, sd + sb, len); r->data[len] = '\0';
     return vptr(r);
 }
 static val_t prim_string_append(int ac, val_t *av, void *ud) {
-    (void)ud; if(ac==0) { String *e=CURRY_NEW_ATOM(String); e->hdr.type=T_STRING; e->hdr.flags=0; e->len=0; e->hash=0; e->data[0]=0; return vptr(e); }
+    (void)ud; if(ac==0) { String *e=CURRY_NEW_ATOM(String); e->hdr.type=T_STRING; e->hdr.flags=0; e->len=0; e->hash=0; e->orig_cap=0; e->ext=NULL; e->data[0]=0; return vptr(e); }
     val_t r = av[0];
     for(int i=1;i<ac;i++) r = scm_string_append(r, av[i]);
     return r;
@@ -661,9 +667,10 @@ static val_t prim_string_to_list(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string->list: not a string");
     String *s = as_str(av[0]);
-    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
-    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
-    val_t port = port_open_input_string(s->data + sb, eb - sb);
+    const char *sd = str_data(s);
+    uint32_t sb = ac > 1 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    val_t port = port_open_input_string(sd + sb, eb - sb);
     val_t chars = V_NIL; int cp;
     while((cp=port_read_char(port))!=-1) chars=scm_cons(vchr((uint32_t)cp),chars);
     return scm_reverse(chars);
@@ -676,7 +683,7 @@ static val_t prim_string_for_each(int ac, val_t *av, void *ud) {
     val_t *ports = (val_t *)alloca((size_t)nstrs * sizeof(val_t));
     for (int i = 0; i < nstrs; i++) {
         String *s = as_str(av[i+1]);
-        ports[i] = port_open_input_string(s->data, s->len);
+        ports[i] = port_open_input_string(str_data(s), s->len);
     }
     for (;;) {
         val_t args = V_NIL; bool any_eof = false;
@@ -695,8 +702,9 @@ static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-fill!: not a string");
     if (!vis_char(av[1]))   scm_raise(V_FALSE, "string-fill!: not a character");
     String *s = as_str(av[0]);
-    uint32_t sb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : 0;
-    uint32_t eb = ac > 3 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[3])) : s->len;
+    char *sd = str_data(s);
+    uint32_t sb = ac > 2 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[2])) : 0;
+    uint32_t eb = ac > 3 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[3])) : s->len;
     /* Encode fill char */
     uint32_t u = vunchr(av[1]); char enc[4]; int elen;
     if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
@@ -705,7 +713,7 @@ static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
     else { enc[0]=(char)(0xF0|(u>>18)); enc[1]=(char)(0x80|((u>>12)&0x3F)); enc[2]=(char)(0x80|((u>>6)&0x3F)); enc[3]=(char)(0x80|(u&0x3F)); elen=4; }
     /* Fill byte-by-byte within range (only safe for same-width chars) */
     for (uint32_t b = sb; b + (uint32_t)elen <= eb; b += (uint32_t)elen)
-        memcpy(s->data + b, enc, (size_t)elen);
+        memcpy(sd + b, enc, (size_t)elen);
     return V_VOID;
 }
 static val_t prim_string_foldcase(int ac, val_t *av, void *ud) {
@@ -729,10 +737,10 @@ static val_t prim_list_to_string(int ac, val_t *av, void *ud) {
 static val_t prim_string_to_symbol(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_string_to_symbol(av[0]);}
 static val_t prim_symbol_to_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_symbol_to_string(av[0]);}
 static val_t prim_string_eq(int ac, val_t *av, void *ud) {
-    (void)ud; for(int i=1;i<ac;i++) { String *a=as_str(av[i-1]),*b=as_str(av[i]); if(a->len!=b->len||memcmp(a->data,b->data,a->len)!=0) return V_FALSE; } return V_TRUE;
+    (void)ud; for(int i=1;i<ac;i++) { String *a=as_str(av[i-1]),*b=as_str(av[i]); if(a->len!=b->len||memcmp(str_data(a),str_data(b),a->len)!=0) return V_FALSE; } return V_TRUE;
 }
 static val_t prim_string_lt(int ac, val_t *av, void *ud) {
-    (void)ud; for(int i=1;i<ac;i++) { if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)>=0) return V_FALSE; } return V_TRUE;
+    (void)ud; for(int i=1;i<ac;i++) { if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; } return V_TRUE;
 }
 static val_t prim_substring(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -741,17 +749,18 @@ static val_t prim_substring(int ac, val_t *av, void *ud) {
     if (ac > 2 && !vis_fixnum(av[2])) scm_raise(V_FALSE, "substring: end must be exact integer");
     /* Byte-level substring for now; TODO: Unicode character indices */
     String *s = as_str(av[0]);
+    const char *sd = str_data(s);
     uint32_t start = (uint32_t)vunfix(av[1]);
     uint32_t end   = ac>2 ? (uint32_t)vunfix(av[2]) : s->len;
     uint32_t len   = end - start;
     String *r = (String *)gc_alloc_atomic(sizeof(String)+len+1);
-    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
-    memcpy(r->data, s->data+start, len); r->data[len]='\0';
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
+    memcpy(r->data, sd+start, len); r->data[len]='\0';
     return vptr(r);
 }
 static val_t prim_string_contains(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    const char *haystack=as_str(av[0])->data, *needle=as_str(av[1])->data;
+    const char *haystack=str_data(as_str(av[0])), *needle=str_data(as_str(av[1]));
     const char *p = strstr(haystack, needle);
     return p ? vfix((intptr_t)(p - haystack)) : V_FALSE;
 }
@@ -759,22 +768,24 @@ static val_t prim_write_string(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "write-string: not a string");
     String *s = as_str(av[0]);
+    const char *sd = str_data(s);
     val_t port = ac > 1 ? av[1] : PORT_STDOUT;
-    uint32_t sb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : 0;
-    uint32_t eb = ac > 3 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[3])) : s->len;
-    for (uint32_t i = sb; i < eb; i++) port_write_byte(port, (uint8_t)s->data[i]);
+    uint32_t sb = ac > 2 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[2])) : 0;
+    uint32_t eb = ac > 3 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[3])) : s->len;
+    for (uint32_t i = sb; i < eb; i++) port_write_byte(port, (uint8_t)sd[i]);
     return V_VOID;
 }
 static val_t prim_string_to_utf8(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string->utf8: not a string");
     String *s = as_str(av[0]);
-    uint32_t sb = ac > 1 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1])) : 0;
-    uint32_t eb = ac > 2 ? utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[2])) : s->len;
+    const char *sd = str_data(s);
+    uint32_t sb = ac > 1 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[1])) : 0;
+    uint32_t eb = ac > 2 ? utf8_char_offset(sd, s->len, (uint32_t)vunfix(av[2])) : s->len;
     uint32_t len = eb - sb;
     Bytevector *b = CURRY_NEW_FLEX_ATOM(Bytevector, len);
     b->hdr.type=T_BYTEVECTOR; b->hdr.flags=0; b->len=len;
-    memcpy(b->data, s->data + sb, len);
+    memcpy(b->data, sd + sb, len);
     return vptr(b);
 }
 static val_t prim_utf8_to_string(int ac, val_t *av, void *ud) {
@@ -785,7 +796,7 @@ static val_t prim_utf8_to_string(int ac, val_t *av, void *ud) {
     uint32_t eb = ac > 2 ? (uint32_t)vunfix(av[2]) : bv->len;
     uint32_t len = eb - sb;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0;
+    r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
     memcpy(r->data, bv->data + sb, len); r->data[len] = '\0';
     return vptr(r);
 }
@@ -1043,19 +1054,28 @@ static val_t prim_read(int ac, val_t *av, void *ud) {(void)ud; return scm_read(a
 static val_t prim_read_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_read_char(ac>0?av[0]:PORT_STDIN); return c<0?V_EOF:vchr((uint32_t)c);}
 static val_t prim_peek_char(int ac, val_t *av, void *ud) {(void)ud; int c=port_peek_char(ac>0?av[0]:PORT_STDIN); return c<0?V_EOF:vchr((uint32_t)c);}
 static val_t prim_read_line(int ac, val_t *av, void *ud) {(void)ud; return port_read_line(ac>0?av[0]:PORT_STDIN);}
-static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-string: not a string"); return port_open_input_string(as_str(av[0])->data,as_str(av[0])->len);}
+static val_t prim_open_input_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-string: not a string"); return port_open_input_string(str_data(as_str(av[0])),as_str(av[0])->len);}
 static val_t prim_open_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return port_open_output_string();}
 static val_t prim_get_output_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_string(av[0]);}
+static val_t prim_open_input_bytevector(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "open-input-bytevector: not a bytevector");
+    Bytevector *bv = as_bytes(av[0]);
+    return port_open_input_bytevector(bv->data, bv->len);
+}
+static val_t prim_open_output_bytevector(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return port_open_output_bytevector();}
+static val_t prim_get_output_bytevector(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return port_get_output_bytevector(av[0]);}
+static val_t prim_write_shared(int ac, val_t *av, void *ud) {(void)ud; scm_write_shared(av[0], ac>1?av[1]:PORT_STDOUT); return V_VOID;}
 static val_t prim_open_input_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "open-input-file: not a string");
-    val_t p = port_open_file(as_str(av[0])->data, PORT_INPUT);
-    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-input-file: cannot open '%s'", as_str(av[0])->data);
+    val_t p = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
+    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-input-file: cannot open '%s'", str_data(as_str(av[0])));
     return p;
 }
 static val_t prim_open_output_file(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "open-output-file: not a string");
-    val_t p = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
-    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-output-file: cannot create '%s'", as_str(av[0])->data);
+    val_t p = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
+    if (p == V_FALSE) scm_raise(S_FILE_ERROR, "open-output-file: cannot create '%s'", str_data(as_str(av[0])));
     return p;
 }
 /* ---- R7RS gap-fill ---- */
@@ -1125,9 +1145,9 @@ static val_t prim_digit_value(int ac, val_t *av, void *ud) {
 }
 
 /* Strings — missing comparators */
-static val_t prim_string_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(as_str(av[i-1])->data,as_str(av[i])->data)<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 /* Case-insensitive string comparisons (scheme char library) */
 static int str_ci_cmp(const char *a, const char *b) {
@@ -1138,17 +1158,17 @@ static int str_ci_cmp(const char *a, const char *b) {
     }
     return tolower((unsigned char)*a) - tolower((unsigned char)*b);
 }
-static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)!=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)>=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(as_str(av[i-1])->data,as_str(av[i])->data)<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))!=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 static val_t prim_string_upcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-upcase: not a string");
     String *s = as_str(av[0]);
-    val_t in = port_open_input_string(s->data, s->len), out = port_open_output_string();
+    val_t in = port_open_input_string(str_data(s), s->len), out = port_open_output_string();
     int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, toupper(cp));
     return port_get_output_string(out);
 }
@@ -1156,29 +1176,43 @@ static val_t prim_string_downcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-downcase: not a string");
     String *s = as_str(av[0]);
-    val_t in = port_open_input_string(s->data, s->len), out = port_open_output_string();
+    val_t in = port_open_input_string(str_data(s), s->len), out = port_open_output_string();
     int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, tolower(cp));
     return port_get_output_string(out);
 }
 
-/* (string-set! str k char) — in-place for same-width UTF-8; reallocates otherwise */
+/* (string-set! str k char) — in-place when same UTF-8 byte width; reallocates ext otherwise */
 static val_t prim_string_set_bang(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-set!: not a string");
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-set!: index must be exact integer");
     if (!vis_char(av[2]))   scm_raise(V_FALSE, "string-set!: not a character");
     String *s = as_str(av[0]);
-    uint32_t bstart = utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1]));
-    uint32_t bend   = utf8_char_offset(s->data, s->len, (uint32_t)vunfix(av[1]) + 1);
+    char *sd = str_data(s);
+    uint32_t k = (uint32_t)vunfix(av[1]);
+    uint32_t bstart = utf8_char_offset(sd, s->len, k);
+    uint32_t bend   = utf8_char_offset(sd, s->len, k + 1);
     uint32_t old_blen = bend - bstart;
     uint32_t u = vunchr(av[2]); char enc[4]; int elen;
     if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
     else if (u < 0x800)   { enc[0]=(char)(0xC0|(u>>6)); enc[1]=(char)(0x80|(u&0x3F)); elen=2; }
     else if (u < 0x10000) { enc[0]=(char)(0xE0|(u>>12)); enc[1]=(char)(0x80|((u>>6)&0x3F)); enc[2]=(char)(0x80|(u&0x3F)); elen=3; }
     else                  { enc[0]=(char)(0xF0|(u>>18)); enc[1]=(char)(0x80|((u>>12)&0x3F)); enc[2]=(char)(0x80|((u>>6)&0x3F)); enc[3]=(char)(0x80|(u&0x3F)); elen=4; }
-    if ((uint32_t)elen != old_blen)
-        scm_raise(V_FALSE, "string-set!: new character has different UTF-8 byte width than old (use string-append to build a new string)");
-    memcpy(s->data + bstart, enc, (size_t)elen);
+    if ((uint32_t)elen == old_blen) {
+        /* Same width: mutate in-place (works on both inline data[] and ext buffer). */
+        memcpy(sd + bstart, enc, (size_t)elen);
+    } else {
+        /* Different width: allocate a new buffer, copy surrounding bytes, redirect. */
+        uint32_t new_len = s->len - old_blen + (uint32_t)elen;
+        char *new_buf = (char *)gc_alloc_raw_pinned_atomic(new_len + 1);
+        memcpy(new_buf, sd, bstart);
+        memcpy(new_buf + bstart, enc, (size_t)elen);
+        memcpy(new_buf + bstart + elen, sd + bend, s->len - bend);
+        new_buf[new_len] = '\0';
+        s->ext = new_buf;
+        s->len = new_len;
+    }
+    s->hash = 0;
     return V_VOID;
 }
 
@@ -1190,13 +1224,15 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
     if (!vis_string(av[2])) scm_raise(V_FALSE, "string-copy!: from not a string");
     String *to   = as_str(av[0]);
     String *from = as_str(av[2]);
-    uint32_t at_b = utf8_char_offset(to->data,   to->len,   (uint32_t)vunfix(av[1]));
-    uint32_t sb   = ac > 3 ? utf8_char_offset(from->data, from->len, (uint32_t)vunfix(av[3])) : 0;
-    uint32_t eb   = ac > 4 ? utf8_char_offset(from->data, from->len, (uint32_t)vunfix(av[4])) : from->len;
+    char       *tod  = str_data(to);
+    const char *fromd = str_data(from);
+    uint32_t at_b = utf8_char_offset(tod,   to->len,   (uint32_t)vunfix(av[1]));
+    uint32_t sb   = ac > 3 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[3])) : 0;
+    uint32_t eb   = ac > 4 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[4])) : from->len;
     uint32_t n    = eb - sb;
     if (at_b + n > to->len)
         scm_raise(V_FALSE, "string-copy!: would exceed destination length");
-    memmove(to->data + at_b, from->data + sb, n);
+    memmove(tod + at_b, fromd + sb, n);
     to->hash = 0;
     return V_VOID;
 }
@@ -1347,15 +1383,15 @@ static val_t prim_write_simple(int ac, val_t *av, void *ud) {(void)ud; scm_write
 static val_t prim_delete_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "delete-file: not a string");
-    if (unlink(as_str(av[0])->data) != 0)
-        scm_raise(S_FILE_ERROR, "delete-file: %s: %s", as_str(av[0])->data, strerror(errno));
+    if (unlink(str_data(as_str(av[0]))) != 0)
+        scm_raise(S_FILE_ERROR, "delete-file: %s: %s", str_data(as_str(av[0])), strerror(errno));
     return V_VOID;
 }
 static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-input-file: not a string");
-    val_t port = port_open_file(as_str(av[0])->data, PORT_INPUT);
-    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-input-file: cannot open '%s'", as_str(av[0])->data);
+    val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-input-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t result = apply(av[1], scm_cons(port, V_NIL));
     port_close(port);
     return result;
@@ -1363,8 +1399,8 @@ static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
 static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-output-file: not a string");
-    val_t port = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
-    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-output-file: cannot open '%s'", as_str(av[0])->data);
+    val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-output-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t result = apply(av[1], scm_cons(port, V_NIL));
     port_close(port);
     return result;
@@ -1372,8 +1408,8 @@ static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
 static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "with-input-from-file: not a string");
-    val_t port = port_open_file(as_str(av[0])->data, PORT_INPUT);
-    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-input-from-file: cannot open '%s'", as_str(av[0])->data);
+    val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-input-from-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t saved = PORT_STDIN; PORT_STDIN = port;
     ExnHandler h; h.prev = current_handler; current_handler = &h;
     val_t result = V_VOID;
@@ -1385,8 +1421,8 @@ static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
 static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "with-output-to-file: not a string");
-    val_t port = port_open_file(as_str(av[0])->data, PORT_OUTPUT);
-    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-output-to-file: cannot open '%s'", as_str(av[0])->data);
+    val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
+    if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-output-to-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t saved = PORT_STDOUT; PORT_STDOUT = port;
     ExnHandler h; h.prev = current_handler; current_handler = &h;
     val_t result = V_VOID;
@@ -1400,11 +1436,11 @@ static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
 static val_t prim_get_env_var(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "get-environment-variable: not a string");
-    const char *val = getenv(as_str(av[0])->data);
+    const char *val = getenv(str_data(as_str(av[0])));
     if (!val) return V_FALSE;
     uint32_t len = (uint32_t)strlen(val);
     String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    s->hdr.type = T_STRING; s->hdr.flags = 0; s->len = len; s->hash = 0;
+    s->hdr.type = T_STRING; s->hdr.flags = 0; s->len = len; s->hash = 0; s->orig_cap = len; s->ext = NULL;
     memcpy(s->data, val, len + 1);
     return vptr(s);
 }
@@ -1418,10 +1454,10 @@ static val_t prim_get_env_vars(int ac, val_t *av, void *ud) {
         uint32_t nlen = (uint32_t)(eq - *e);
         uint32_t vlen = (uint32_t)strlen(eq + 1);
         String *name  = (String *)gc_alloc_atomic(sizeof(String) + nlen + 1);
-        name->hdr.type=T_STRING; name->hdr.flags=0; name->len=nlen; name->hash=0;
+        name->hdr.type=T_STRING; name->hdr.flags=0; name->len=nlen; name->hash=0; name->orig_cap=nlen; name->ext=NULL;
         memcpy(name->data, *e, nlen); name->data[nlen] = '\0';
         String *value = (String *)gc_alloc_atomic(sizeof(String) + vlen + 1);
-        value->hdr.type=T_STRING; value->hdr.flags=0; value->len=vlen; value->hash=0;
+        value->hdr.type=T_STRING; value->hdr.flags=0; value->len=vlen; value->hash=0; value->orig_cap=vlen; value->ext=NULL;
         memcpy(value->data, eq + 1, vlen + 1);
         result = scm_cons(scm_cons(vptr(name), vptr(value)), result);
     }
@@ -1449,7 +1485,7 @@ static val_t prim_jiffies_per_second(int ac, val_t *av, void *ud) {
 }
 static val_t prim_file_exists_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "file-exists?: not a string");
-    return vbool(access(as_str(av[0])->data, F_OK) == 0);
+    return vbool(access(str_data(as_str(av[0])), F_OK) == 0);
 }
 
 static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
@@ -1482,7 +1518,7 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
 
 static val_t prim_system(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "system: not a string");
-    return vfix(system(as_str(av[0])->data));
+    return vfix(system(str_data(as_str(av[0]))));
 }
 
 /* ---- Control ---- */
@@ -1811,7 +1847,7 @@ static val_t prim_record_set(int ac, val_t *av, void *ud) {
 static val_t prim_gensym(int ac, val_t *av, void *ud) {
     (void)ud; static int counter = 0;
     char buf[32];
-    const char *pfx = (ac>0 && vis_string(av[0])) ? as_str(av[0])->data : "g";
+    const char *pfx = (ac>0 && vis_string(av[0])) ? str_data(as_str(av[0])) : "g";
     snprintf(buf, sizeof(buf), "%s%d", pfx, counter++);
     return sym_intern_cstr(buf);
 }
@@ -1833,7 +1869,7 @@ static val_t prim_call_with_values(int ac, val_t *av, void *ud) {
 }
 static val_t prim_void(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return V_VOID;}
 static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(av[i-1]!=av[i]) return V_FALSE; return V_TRUE;}
-static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(as_str(av[0])->data, GLOBAL_ENV);}
+static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(str_data(as_str(av[0])), GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
@@ -2257,6 +2293,10 @@ void builtins_register(val_t env) {
     DEF("open-input-string",prim_open_input_string,1,1);
     DEF("open-output-string",prim_open_output_string,0,0);
     DEF("get-output-string",prim_get_output_string,1,1);
+    DEF("open-input-bytevector",prim_open_input_bytevector,1,1);
+    DEF("open-output-bytevector",prim_open_output_bytevector,0,0);
+    DEF("get-output-bytevector",prim_get_output_bytevector,1,1);
+    DEF("write-shared",prim_write_shared,1,2);
     DEF("open-input-file",prim_open_input_file,1,1);
     DEF("open-output-file",prim_open_output_file,1,1);
     DEF("file-exists?",prim_file_exists_p,1,1);
