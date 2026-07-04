@@ -747,15 +747,22 @@ static val_t prim_substring(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "substring: not a string");
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "substring: start must be exact integer");
     if (ac > 2 && !vis_fixnum(av[2])) scm_raise(V_FALSE, "substring: end must be exact integer");
-    /* Byte-level substring for now; TODO: Unicode character indices */
     String *s = as_str(av[0]);
     const char *sd = str_data(s);
-    uint32_t start = (uint32_t)vunfix(av[1]);
-    uint32_t end   = ac>2 ? (uint32_t)vunfix(av[2]) : s->len;
-    uint32_t len   = end - start;
-    String *r = (String *)gc_alloc_atomic(sizeof(String)+len+1);
+    intptr_t istart = vunfix(av[1]);
+    /* Count total characters for bounds check and default end */
+    uint32_t nchars = 0;
+    for (const char *p = sd, *e = sd + s->len; p < e; p++)
+        if (((unsigned char)*p & 0xC0) != 0x80) nchars++;
+    intptr_t iend = ac > 2 ? vunfix(av[2]) : (intptr_t)nchars;
+    if (istart < 0 || iend < istart || (uint32_t)iend > nchars)
+        scm_raise(V_FALSE, "substring: index out of range");
+    uint32_t sb  = utf8_char_offset(sd, s->len, (uint32_t)istart);
+    uint32_t eb  = utf8_char_offset(sd, s->len, (uint32_t)iend);
+    uint32_t len = eb - sb;
+    String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
-    memcpy(r->data, sd+start, len); r->data[len]='\0';
+    memcpy(r->data, sd + sb, len); r->data[len] = '\0';
     return vptr(r);
 }
 static val_t prim_string_contains(int ac, val_t *av, void *ud) {
