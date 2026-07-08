@@ -1229,17 +1229,43 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-copy!: to not a string");
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-copy!: at not exact integer");
     if (!vis_string(av[2])) scm_raise(V_FALSE, "string-copy!: from not a string");
-    String *to   = as_str(av[0]);
-    String *from = as_str(av[2]);
-    char       *tod  = str_data(to);
+    String *to    = as_str(av[0]);
+    String *from  = as_str(av[2]);
+    char       *tod   = str_data(to);
     const char *fromd = str_data(from);
-    uint32_t at_b = utf8_char_offset(tod,   to->len,   (uint32_t)vunfix(av[1]));
-    uint32_t sb   = ac > 3 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[3])) : 0;
-    uint32_t eb   = ac > 4 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[4])) : from->len;
-    uint32_t n    = eb - sb;
-    if (at_b + n > to->len)
+    uint32_t at_char = (uint32_t)vunfix(av[1]);
+    uint32_t sb = ac > 3 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[3])) : 0;
+    uint32_t eb = ac > 4 ? utf8_char_offset(fromd, from->len, (uint32_t)vunfix(av[4])) : from->len;
+
+    /* Count characters in the source slice to find the matching dest range. */
+    uint32_t char_count = 0;
+    for (uint32_t b = sb; b < eb; b++)
+        if (((unsigned char)fromd[b] & 0xC0) != 0x80) char_count++;
+
+    /* Validate against to's character count before utf8_char_offset clamps. */
+    uint32_t to_chars = 0;
+    for (uint32_t b = 0; b < to->len; b++)
+        if (((unsigned char)tod[b] & 0xC0) != 0x80) to_chars++;
+    if (at_char + char_count > to_chars)
         scm_raise(V_FALSE, "string-copy!: would exceed destination length");
-    memmove(tod + at_b, fromd + sb, n);
+
+    uint32_t at_b     = utf8_char_offset(tod, to->len, at_char);
+    uint32_t at_end_b = utf8_char_offset(tod, to->len, at_char + char_count);
+
+    uint32_t src_bytes = eb - sb;
+    uint32_t dst_bytes = at_end_b - at_b;
+    if (src_bytes == dst_bytes) {
+        memmove(tod + at_b, fromd + sb, src_bytes);
+    } else {
+        uint32_t new_len = to->len - dst_bytes + src_bytes;
+        char *new_buf = (char *)gc_alloc_raw_pinned_atomic(new_len + 1);
+        memcpy(new_buf, tod, at_b);
+        memcpy(new_buf + at_b, fromd + sb, src_bytes);
+        memcpy(new_buf + at_b + src_bytes, tod + at_end_b, to->len - at_end_b);
+        new_buf[new_len] = '\0';
+        to->ext = new_buf;
+        to->len = new_len;
+    }
     to->hash = 0;
     return V_VOID;
 }

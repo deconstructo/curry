@@ -10,6 +10,10 @@ Commit after each meaningful task step, not just at the end. This keeps the hist
 
 After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `/code-review` skill) to review it before declaring the task done. The subagent should not share context with the writing session — the point is an independent read. Pay particular attention to: array bounds vs loop bounds, off-by-one errors in sexagesimal/numeric code, and cuneiform reader edge cases.
 
+## Security review
+
+After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `/security-review` skill) to review it before declaring the task done. The subagent should not share context with the writing session — the point is an independent read. Pay particular attention to: array bounds vs loop bounds, off-by-one errors in sexagesimal/numeric code, and cuneiform reader edge cases.
+
 ## Build
 
 ```bash
