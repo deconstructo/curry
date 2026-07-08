@@ -17,6 +17,7 @@ class Curry < Formula
   option "with-mpfr",      "Build MPFR arbitrary-precision float support"
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
+  option "with-ldap",      "Build LDAP/LDAPS module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -35,23 +36,21 @@ class Curry < Formula
   depends_on "libpaho-mqtt"
   # curl ships with macOS; no separate dep needed for graphql/storage
 
-  # Optional module deps (always enabled in the formula)
-  depends_on "openldap"
-
   # Option-gated deps
-  depends_on "llvm"    if build.with? "llvm"
-  depends_on "libffi"  if build.with? "ffi"
-  depends_on "mpfr"    if build.with? "mpfr"
-  depends_on "qt@6"    if build.with? "qt6"
-  depends_on "plplot"  if build.with? "plplot"
+  depends_on "openldap" if build.with? "ldap"
+  depends_on "llvm"     if build.with? "llvm"
+  depends_on "libffi"   if build.with? "ffi"
+  depends_on "mpfr"     if build.with? "mpfr"
+  depends_on "qt@6"     if build.with? "qt6"
+  depends_on "plplot"   if build.with? "plplot"
 
   def install
     prefix_paths = [
       Formula["openssl@3"].opt_prefix,
       Formula["readline"].opt_prefix,
-      Formula["openldap"].opt_prefix,  # always enabled in formula
       Formula["libpaho-mqtt"].opt_prefix,
     ]
+    prefix_paths << Formula["openldap"].opt_prefix  if build.with? "ldap"
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
     prefix_paths << Formula["libffi"].opt_prefix    if build.with? "ffi"
     prefix_paths << Formula["mpfr"].opt_prefix      if build.with? "mpfr"
@@ -62,7 +61,7 @@ class Curry < Formula
       -DCMAKE_BUILD_TYPE=Release
       -DCMAKE_PREFIX_PATH=#{prefix_paths.join(";")}
       -DBUILD_MODULE_CRYPTO=ON
-      -DBUILD_MODULE_LDAP=ON
+      -DBUILD_MODULE_LDAP=#{build.with?("ldap") ? "ON" : "OFF"}
       -DBUILD_MODULE_STORAGE=ON
       -DBUILD_MODULE_GRAPHQL=ON
       -DBUILD_MODULE_REDIS=ON
