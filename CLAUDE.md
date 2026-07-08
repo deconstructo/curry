@@ -134,7 +134,7 @@ Scripts support shebang lines — `#!` is treated as a line comment, so `#!/usr/
 
 Compiled `.scc` files also support direct execution: `curry -c script.scm` produces `script.scc` with a shebang prepended and the executable bit set, so `./script.scc` works immediately.
 
-Script arguments are bound to `command-line-args` in the global environment.
+Script arguments are available as `(command-line)` (R7RS thunk returning a list of strings) and as `command-line-args` (legacy variable, same list).
 
 ## REPL commands
 
@@ -261,10 +261,6 @@ Supported: `library` form, `(rnrs)` sub-library aliases, R6RS `define-record-typ
 ## R7RS compliance gaps
 
 Not yet implemented:
-- `open-input-bytevector`, `open-output-bytevector`, `get-output-bytevector` — bytevector ports (`port_get_output_bytevector` declared but not implemented in `src/port.c`)
-- `write-shared` — needs pointer→label hash table for shared/cyclic datum labels
-- `command-line` — currently `command-line-args` stores symbols; needs `scm_make_string` + alias
-- `string-set!` / `string-copy!` — only correct when replacement char has same UTF-8 byte width (flat UTF-8 storage)
 - Full first-class continuations — requires CPS or copying evaluator; current `setjmp`/`longjmp` supports upward-only escape
 
 ## Akkadian error messages

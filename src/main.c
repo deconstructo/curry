@@ -349,6 +349,11 @@ static void usage(const char *argv0) {
 }
 
 /* Parse a size string like "256M", "1G", "512K", or a plain integer (bytes). */
+static val_t prim_command_line(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av;
+    return (val_t)(uintptr_t)ud;
+}
+
 static size_t parse_size(const char *s) {
     char *end;
     unsigned long long v = strtoull(s, &end, 10);
@@ -522,7 +527,11 @@ int main(int argc, char **argv) {
         for (int j = argc-1; j >= i; j--)
             cmd_line = scm_cons(scm_symbol_to_string(sym_intern_cstr(argv[j])), cmd_line);
         env_define(GLOBAL_ENV, sym_intern_cstr("command-line-args"), cmd_line);
-        env_define(GLOBAL_ENV, sym_intern_cstr("command-line"), cmd_line);
+        Primitive *cmd_prim = CURRY_NEW_PINNED(Primitive);
+        cmd_prim->hdr.type = T_PRIMITIVE; cmd_prim->hdr.flags = 0;
+        cmd_prim->name = "command-line"; cmd_prim->min_args = 0; cmd_prim->max_args = 0;
+        cmd_prim->fn = prim_command_line; cmd_prim->ud = (void *)(uintptr_t)cmd_line;
+        env_define(GLOBAL_ENV, sym_intern_cstr("command-line"), vptr(cmd_prim));
 
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
