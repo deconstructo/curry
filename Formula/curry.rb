@@ -28,13 +28,15 @@ class Curry < Formula
 
   # Always-on modules
   depends_on "openssl@3"
-  depends_on "openldap"
   depends_on "sqlite"
   depends_on "libgit2"
   depends_on "libpng"
   depends_on "jpeg-turbo"
   depends_on "libpaho-mqtt"
   # curl ships with macOS; no separate dep needed for graphql/storage
+
+  # Optional module deps (always enabled in the formula)
+  depends_on "openldap"
 
   # Option-gated deps
   depends_on "llvm"    if build.with? "llvm"
@@ -47,7 +49,7 @@ class Curry < Formula
     prefix_paths = [
       Formula["openssl@3"].opt_prefix,
       Formula["readline"].opt_prefix,
-      Formula["openldap"].opt_prefix,
+      Formula["openldap"].opt_prefix,  # always enabled in formula
       Formula["libpaho-mqtt"].opt_prefix,
     ]
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
