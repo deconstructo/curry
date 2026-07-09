@@ -239,6 +239,14 @@ bool set_equal(val_t a, val_t b) {
     return as_set(a)->size == as_set(b)->size && set_subset(a, b);
 }
 
+val_t set_copy(val_t sv) {
+    return list_to_set(set_to_list(sv), as_set(sv)->cmp);
+}
+
+val_t set_sym_diff(val_t a, val_t b) {
+    return set_union(set_difference(a, b), set_difference(b, a));
+}
+
 /* ---- Hash table ---- */
 
 static void hash_rehash(Hashtable *h) {

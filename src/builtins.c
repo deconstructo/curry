@@ -1793,6 +1793,118 @@ static val_t prim_set_inter(int ac, val_t *av, void *ud) {(void)ac;(void)ud; ret
 static val_t prim_set_diff(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return set_difference(av[0],av[1]);}
 static val_t prim_set_subset(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(set_subset(av[0],av[1]));}
 static val_t prim_set_size(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(set_size(av[0]));}
+static val_t prim_set_equal(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(set_equal(av[0],av[1]));}
+static val_t prim_set_empty(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(set_size(av[0])==0);}
+static val_t prim_set_copy(int ac, val_t *av, void *ud)  {(void)ac;(void)ud; return set_copy(av[0]);}
+static val_t prim_set_sym_diff(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return set_sym_diff(av[0],av[1]);}
+
+static val_t prim_set_adjoin(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t r = set_copy(av[0]);
+    for (int i = 1; i < ac; i++) set_add_mut(r, av[i]);
+    return r;
+}
+static val_t prim_set_adjoin_mut(int ac, val_t *av, void *ud) {
+    (void)ud;
+    for (int i = 1; i < ac; i++) set_add_mut(av[0], av[i]);
+    return V_VOID;
+}
+static val_t prim_set_delete_one(int ac, val_t *av, void *ud) {
+    /* Non-destructive single-element delete */
+    (void)ac;(void)ud;
+    val_t r = set_copy(av[0]);
+    set_delete_mut(r, av[1]);
+    return r;
+}
+static val_t prim_set_for_each(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t proc = av[0], lst = set_to_list(av[1]);
+    while (vis_pair(lst)) { apply(proc, scm_cons(vcar(lst), V_NIL)); lst = vcdr(lst); }
+    return V_VOID;
+}
+static val_t prim_set_map(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t proc = av[0], sv = av[1];
+    val_t r = set_make(as_set(sv)->cmp);
+    val_t lst = set_to_list(sv);
+    while (vis_pair(lst)) {
+        set_add_mut(r, apply(proc, scm_cons(vcar(lst), V_NIL)));
+        lst = vcdr(lst);
+    }
+    return r;
+}
+static val_t prim_set_filter(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t pred = av[0], sv = av[1];
+    val_t r = set_make(as_set(sv)->cmp);
+    val_t lst = set_to_list(sv);
+    while (vis_pair(lst)) {
+        val_t e = vcar(lst);
+        if (vis_true(apply(pred, scm_cons(e, V_NIL)))) set_add_mut(r, e);
+        lst = vcdr(lst);
+    }
+    return r;
+}
+static val_t prim_set_filter_mut(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t pred = av[0], sv = av[1];
+    val_t lst = set_to_list(sv);  /* snapshot before mutating */
+    while (vis_pair(lst)) {
+        val_t e = vcar(lst);
+        if (!vis_true(apply(pred, scm_cons(e, V_NIL)))) set_delete_mut(sv, e);
+        lst = vcdr(lst);
+    }
+    return V_VOID;
+}
+static val_t prim_set_fold(int ac, val_t *av, void *ud) {
+    /* (set-fold proc init set) — (proc acc elem) */
+    (void)ac;(void)ud;
+    val_t proc = av[0], acc = av[1], lst = set_to_list(av[2]);
+    while (vis_pair(lst)) {
+        acc = apply(proc, scm_cons(acc, scm_cons(vcar(lst), V_NIL)));
+        lst = vcdr(lst);
+    }
+    return acc;
+}
+static val_t prim_set_any(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t pred = av[0], lst = set_to_list(av[1]);
+    while (vis_pair(lst)) {
+        if (vis_true(apply(pred, scm_cons(vcar(lst), V_NIL)))) return V_TRUE;
+        lst = vcdr(lst);
+    }
+    return V_FALSE;
+}
+static val_t prim_set_every(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t pred = av[0], lst = set_to_list(av[1]);
+    while (vis_pair(lst)) {
+        if (!vis_true(apply(pred, scm_cons(vcar(lst), V_NIL)))) return V_FALSE;
+        lst = vcdr(lst);
+    }
+    return V_TRUE;
+}
+static val_t prim_set_count(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t pred = av[0], lst = set_to_list(av[1]);
+    intptr_t n = 0;
+    while (vis_pair(lst)) {
+        if (vis_true(apply(pred, scm_cons(vcar(lst), V_NIL)))) n++;
+        lst = vcdr(lst);
+    }
+    return vfix(n);
+}
+static val_t prim_set_find(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t pred = av[0], lst = set_to_list(av[1]);
+    val_t def  = ac > 2 ? av[2] : V_FALSE;
+    while (vis_pair(lst)) {
+        val_t e = vcar(lst);
+        if (vis_true(apply(pred, scm_cons(e, V_NIL)))) return e;
+        lst = vcdr(lst);
+    }
+    return def;
+}
 
 /* ---- Hash tables ---- */
 static val_t prim_make_hash(int ac, val_t *av, void *ud) {(void)ud; int cmp=ac>0?(int)vunfix(av[0]):SET_CMP_EQUAL; return hash_make(cmp);}
@@ -2371,13 +2483,25 @@ void builtins_register(val_t env) {
     DEF("call/cc",prim_call_cc,1,1);
     DEF("boolean=?",prim_boolean_eq,2,-1);
 
-    /* Sets */
+    /* Sets — core */
     DEF("make-set",        prim_make_set,    0,1); DEF("set-add!",     prim_set_add,     2,2);
     DEF("set-delete!",     prim_set_del,     2,2); DEF("set-member?",  prim_set_member,  2,2);
     DEF("set->list",       prim_set_to_list, 1,1); DEF("list->set",    prim_list_to_set, 1,2);
     DEF("set-union",       prim_set_union,   2,2); DEF("set-intersection",prim_set_inter,2,2);
     DEF("set-difference",  prim_set_diff,    2,2); DEF("set-subset?",  prim_set_subset,  2,2);
     DEF("set-size",        prim_set_size,    1,1);
+    /* Sets — structural */
+    DEF("set=?",           prim_set_equal,   2,2); DEF("set-empty?",   prim_set_empty,   1,1);
+    DEF("set-copy",        prim_set_copy,    1,1);
+    DEF("set-adjoin",      prim_set_adjoin,  1,-1); DEF("set-adjoin!", prim_set_adjoin_mut, 1,-1);
+    DEF("set-delete",      prim_set_delete_one, 2,2);
+    DEF("set-symmetric-difference", prim_set_sym_diff, 2,2);
+    /* Sets — higher-order */
+    DEF("set-for-each",    prim_set_for_each,2,2); DEF("set-map",      prim_set_map,     2,2);
+    DEF("set-filter",      prim_set_filter,  2,2); DEF("set-filter!",  prim_set_filter_mut,2,2);
+    DEF("set-fold",        prim_set_fold,    3,3);
+    DEF("set-any?",        prim_set_any,     2,2); DEF("set-every?",   prim_set_every,   2,2);
+    DEF("set-count",       prim_set_count,   2,2); DEF("set-find",     prim_set_find,    2,3);
 
     /* Hash tables */
     DEF("make-hash-table", prim_make_hash,   0,1); DEF("hash-table-set!", prim_hash_set, 3,3);

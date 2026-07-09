@@ -33,8 +33,10 @@ uint32_t set_size(val_t s);
 val_t set_union(val_t a, val_t b);
 val_t set_intersection(val_t a, val_t b);
 val_t set_difference(val_t a, val_t b);
+val_t set_sym_diff(val_t a, val_t b);    /* (A\B)∪(B\A) */
 bool  set_subset(val_t a, val_t b);   /* is a a subset of b? */
 bool  set_equal(val_t a, val_t b);
+val_t set_copy(val_t s);
 
 /* ---- Hash table ---- */
 val_t hash_make(int cmp_type);
