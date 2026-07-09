@@ -27,6 +27,7 @@ add_test(NAME sx_poly       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_poly_te
 add_test(NAME sx_risch      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_risch_tests.scm)
 add_test(NAME logic        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/logic_tests.scm)
 add_test(NAME sets         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/set_tests.scm)
+add_test(NAME sets_module  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sets_module_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
@@ -38,7 +39,7 @@ add_test(NAME cli
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
 set_tests_properties(akkadian PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
-set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic PROPERTIES
+set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic sets_module PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 
 if(BUILD_MODULE_GIT AND TARGET curry_git)
