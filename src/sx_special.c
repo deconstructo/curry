@@ -296,6 +296,20 @@ val_t sx_beta(val_t a, val_t b) {
     return make_sym_expr("B", 2, args);
 }
 
+val_t sx_erf(val_t x) {
+    if (vis_flonum(x)) return num_make_float(erf(num_to_double(x)));
+    if (vis_fixnum(x) && vunfix(x) == 0) return vfix(0);
+    val_t args[1] = {x};
+    return make_sym_expr("erf", 1, args);
+}
+
+val_t sx_erfc(val_t x) {
+    if (vis_flonum(x)) return num_make_float(erfc(num_to_double(x)));
+    if (vis_fixnum(x) && vunfix(x) == 0) return vfix(1);
+    val_t args[1] = {x};
+    return make_sym_expr("erfc", 1, args);
+}
+
 /* ========================================================================== */
 /* PART 4: Bessel functions                                                    */
 /* ========================================================================== */

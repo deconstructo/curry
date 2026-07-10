@@ -24,6 +24,10 @@ val_t sx_log_gamma(val_t z);       /* log Γ(z) */
 val_t sx_digamma(val_t z);         /* ψ(z) = Γ'(z)/Γ(z) */
 val_t sx_beta(val_t a, val_t b);   /* B(a,b) = Γ(a)Γ(b)/Γ(a+b) */
 
+/* ---- Error function ---- */
+val_t sx_erf(val_t x);             /* erf(x) — symbolic-aware */
+val_t sx_erfc(val_t x);            /* erfc(x) = 1 - erf(x) */
+
 /* ---- Bessel functions ---- */
 val_t sx_bessel_j(val_t n, val_t x); /* J_n(x) — first kind */
 val_t sx_bessel_y(val_t n, val_t x); /* Y_n(x) — second kind */

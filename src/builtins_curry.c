@@ -68,6 +68,10 @@ static val_t prim_digamma(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_digamma(av[0]); }
 static val_t prim_beta_fn(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_beta(av[0], av[1]); }
+static val_t prim_erf(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_erf(av[0]); }
+static val_t prim_erfc(int ac, val_t *av, void *ud)
+    { (void)ac;(void)ud; return sx_erfc(av[0]); }
 static val_t prim_bessel_j(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_bessel_j(av[0], av[1]); }
 static val_t prim_bessel_y(int ac, val_t *av, void *ud)
@@ -1498,6 +1502,8 @@ void builtins_curry_register(val_t env) {
     DEF("log-gamma",          prim_log_gamma,         1, 1);
     DEF("digamma",            prim_digamma,           1, 1);
     DEF("beta",               prim_beta_fn,           2, 2);
+    DEF("erf",                prim_erf,               1, 1);
+    DEF("erfc",               prim_erfc,              1, 1);
     DEF("bessel-j",           prim_bessel_j,          2, 2);
     DEF("bessel-y",           prim_bessel_y,          2, 2);
     DEF("bessel-i",           prim_bessel_i,          2, 2);
