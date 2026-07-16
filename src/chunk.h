@@ -35,7 +35,9 @@ typedef struct {
     int      *lines;      /* source line number per bytecode byte        */
     int       line_cap;
 
-    int       arity;      /* expected argument count (-1 = variadic)     */
+    int       arity;      /* >=0: exact required arg count.
+                             <0: variadic; fixed (required) count is
+                             -arity-1, plus one rest-list parameter.       */
     int       local_count;/* number of local variable slots              */
     int       upval_count;/* number of captured upvalues                 */
     const char *name;     /* function name for error messages (or NULL)  */

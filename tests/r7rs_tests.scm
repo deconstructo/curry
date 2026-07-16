@@ -105,6 +105,46 @@
   (if (= n 0) 'done (count-down (- n 1))))
 (check "tail recursion" (count-down 1000000) 'done)
 
+;;; Variadic procedures and arity checking
+;;; Regression coverage for a bug where the VM's OP_CALL/OP_TAIL_CALL never
+;;; checked argument count: a fixed-arity closure called with the wrong
+;;; number of args silently read uninitialized stack slots, and a variadic
+;;; closure's rest parameter ended up holding the raw last argument instead
+;;; of a proper list.
+(define (rest-of a . rest) rest)
+(check "variadic: rest param collects trailing args"
+       (rest-of 1 2 3 4) '(2 3 4))
+(check "variadic: rest param empty when no extra args"
+       (rest-of 1) '())
+(define (all-args . args) args)
+(check "variadic: pure rest (no fixed params)"
+       (all-args 1 2 3) '(1 2 3))
+(check "variadic: pure rest with zero args"
+       (all-args) '())
+(check "variadic: apply with rest param"
+       (apply rest-of '(1 2 3 4 5)) '(2 3 4 5))
+(define (variadic-tail-sum n . acc)
+  (if (= n 0) (if (null? acc) 0 (car acc))
+      (variadic-tail-sum (- n 1) (+ n (if (null? acc) 0 (car acc))))))
+(check "variadic: tail call re-collects rest each iteration"
+       (variadic-tail-sum 100) 5050)
+
+(define (exact-two x y) (+ x y))
+(check "arity: exact match still works"
+       (exact-two 1 2) 3)
+(check "arity: too few arguments raises wrong-number-of-arguments"
+       (guard (e (#t (error-object-code e))) (exact-two 1))
+       'wrong-number-of-arguments)
+(check "arity: too many arguments raises wrong-number-of-arguments"
+       (guard (e (#t (error-object-code e))) (exact-two 1 2 3))
+       'wrong-number-of-arguments)
+(define (need-two-rest a b . rest) (list a b rest))
+(check "arity: variadic too few required args raises"
+       (guard (e (#t (error-object-code e))) (need-two-rest 1))
+       'wrong-number-of-arguments)
+(check "arity: variadic exact required args, empty rest"
+       (need-two-rest 1 2) '(1 2 ()))
+
 ;;; Quasiquote
 (let ((x 42))
   (check "quasiquote" `(a ,x c) '(a 42 c))

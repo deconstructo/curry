@@ -348,6 +348,52 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
     return false;
 }
 
+/*
+ * Validate the argument count for a call to `cl` and, for variadic
+ * closures, repack the trailing arguments into a proper list.
+ *
+ * `base` points at the `argc` already-pushed argument values (the callee's
+ * about-to-be local-variable window). For a fixed-arity closure this only
+ * checks argc == chunk->arity (raising EC_WRONG_NUMBER_OF_ARGUMENTS
+ * otherwise) and leaves the stack untouched. For a variadic closure
+ * (chunk->arity < 0, meaning `fixed = -arity-1` required params plus one
+ * rest-list param), the trailing `argc - fixed` values at base[fixed..argc)
+ * are consed into a list stored at base[fixed], and vm->sp is truncated to
+ * base+fixed+1 — the exact local-window size compile_params() declared.
+ *
+ * Without this, OP_CALL/OP_TAIL_CALL/vm_run previously just set
+ * slots=base, slot_count=argc unconditionally: a fixed-arity closure called
+ * with the wrong argc silently read uninitialized stack slots for missing
+ * params (or left extra args as live but unreferenced stack cells), and a
+ * variadic closure's rest parameter ended up holding the raw last-pushed
+ * argument instead of a list. Both bugs stem from the same missing
+ * validation, fixed together here.
+ *
+ * Returns the slot_count to store in the CallFrame.
+ */
+static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
+    int arity = cl->chunk->arity;
+    const char *nm = cl->chunk->name ? cl->chunk->name : "#<procedure>";
+    if (arity >= 0) {
+        if (argc < arity)
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                "%s: too few arguments (got %d, need %d)", nm, argc, arity);
+        if (argc > arity)
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                "%s: too many arguments (got %d, need %d)", nm, argc, arity);
+        return argc;
+    }
+    int fixed = -arity - 1;
+    if (argc < fixed)
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+            "%s: too few arguments (got %d, need at least %d)", nm, argc, fixed);
+    val_t rest = V_NIL;
+    for (int i = argc - 1; i >= fixed; i--) rest = scm_cons(base[i], rest);
+    base[fixed] = rest;
+    vm->sp = base + fixed + 1;
+    return fixed + 1;
+}
+
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
@@ -368,7 +414,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
     frame->closure    = top_closure;
     frame->ip         = top_closure->chunk->code;
     frame->slots      = vm->sp - argc;
-    frame->slot_count = argc;
+    frame->slot_count = vm_bind_args(top_closure, frame->slots, argc);
 
 #define READ_U8()    (*frame->ip++)
 #define READ_U16()   (frame->ip += 2, \
@@ -773,7 +819,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 nf->closure    = cl;
                 nf->ip         = cl->chunk->code;
                 nf->slots      = vm->sp - argc2;
-                nf->slot_count = argc2;
+                nf->slot_count = vm_bind_args(cl, nf->slots, argc2);
                 nf->prof_start_ns = 0;
                 if (curry_profiling_level >= 1 && cl->chunk->name) {
                     val_t sym = sym_intern_cstr(cl->chunk->name);
@@ -833,7 +879,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 vm->sp            = frame->slots + argc2;
                 frame->closure    = cl;
                 frame->ip         = cl->chunk->code;
-                frame->slot_count = argc2;
+                frame->slot_count = vm_bind_args(cl, frame->slots, argc2);
                 frame->prof_start_ns = 0;
                 if (curry_profiling_level >= 2 && cl->chunk->name)
                     frame->prof_start_ns = profiling_now_ns();
