@@ -214,6 +214,48 @@
 (check "condition-backtrace: (error ...) also captured"
        (pair? bt-err-result) #t)
 
+;;; ---- error codes ----
+
+(define (code-of thunk)
+  (call/cc (lambda (k)
+    (with-exception-handler
+      (lambda (e) (k (error-object-code e)))
+      thunk))))
+
+(check "code: wrong-type-argument (car)"
+       (code-of (lambda () (car 5))) 'wrong-type-argument)
+(check "code: wrong-type-argument (vector-ref not a vector)"
+       (code-of (lambda () (vector-ref 5 0))) 'wrong-type-argument)
+(check "code: unbound-variable"
+       (code-of (lambda () (eval 'totally-unbound-xyz (interaction-environment))))
+       'unbound-variable)
+(check "code: not-a-procedure"
+       (code-of (lambda () (5 6))) 'not-a-procedure)
+(check "code: wrong-number-of-arguments (primitive, too few)"
+       (code-of (lambda () (cons 1))) 'wrong-number-of-arguments)
+(check "code: wrong-number-of-arguments (primitive, too many)"
+       (code-of (lambda () (cons 1 2 3))) 'wrong-number-of-arguments)
+(check "code: division-by-zero (/)"
+       (code-of (lambda () (/ 1 0))) 'division-by-zero)
+(check "code: division-by-zero (quotient)"
+       (code-of (lambda () (quotient 5 0))) 'division-by-zero)
+(check "code: division-by-zero (remainder)"
+       (code-of (lambda () (remainder 5 0))) 'division-by-zero)
+(check "code: division-by-zero (modulo)"
+       (code-of (lambda () (modulo 5 0))) 'division-by-zero)
+(check "code: index-out-of-range (vector-ref)"
+       (code-of (lambda () (vector-ref (vector 1 2 3) 10))) 'index-out-of-range)
+(check "code: index-out-of-range (substring)"
+       (code-of (lambda () (substring "hi" 0 5))) 'index-out-of-range)
+(check "code: uncoded site returns #f"
+       (code-of (lambda () (error "plain user error"))) #f)
+(check "condition-code matches error-object-code"
+       (call/cc (lambda (k)
+         (with-exception-handler
+           (lambda (e) (k (condition-code e)))
+           (lambda () (car 5)))))
+       'wrong-type-argument)
+
 ;;; ---- Summary ----
 
 (newline)

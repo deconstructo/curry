@@ -128,6 +128,10 @@ void walk_cond_handlers(val_t exn, CondHandler *h);
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 void scm_raise_val(val_t exn) __attribute__((noreturn));
 
+/* Like scm_raise, but stamps a stable machine-legible symbol code (e.g.
+ * 'wrong-type-argument) on the error object; see docs/reference/error-codes.md. */
+void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn));
+
 /*
  * longjmp-safe shadow-stack and inhibit-counter helpers.
  * Declared here (with C linkage so C++ modules can use SCM_PROTECT) and

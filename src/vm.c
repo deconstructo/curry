@@ -201,7 +201,7 @@ __attribute__((noreturn)) void vm_stack_overflow(void) {
     fprintf(stderr, "[vm] vm_stack_overflow: sp=%p stack_end=%p\n",
             (void *)vm->sp, (void *)(vm->stack + VM_STACK_MAX));
     fflush(stderr);
-    scm_raise(V_FALSE, "value stack overflow (max %d slots)", VM_STACK_MAX);
+    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
 }
 
 static val_t vm_cstr_to_string(const char *s) {
@@ -363,7 +363,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
     int entry_depth = vm->frame_count;  /* used to detect return from nested calls */
     if (vm->frame_count >= VM_FRAMES_MAX)
-        scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+        scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
     CallFrame *frame  = &vm->frames[vm->frame_count++];
     frame->closure    = top_closure;
     frame->ip         = top_closure->chunk->code;
@@ -378,7 +378,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #define GCACHE       (frame->closure->chunk->glob_cache)
 #define PUSH(v)      do { \
     if (vm->sp >= vm->stack + VM_STACK_MAX) \
-        scm_raise(V_FALSE, "value stack overflow (max %d slots)", VM_STACK_MAX); \
+        scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX); \
     *vm->sp++ = (v); } while (0)
 #define POP()        (*--vm->sp)
 #define PEEK(n)      (vm->sp[-1-(n)])
@@ -477,7 +477,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             } else {
                 val_t sym = CONSTS[ci];
                 val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
-                if (!slot) scm_raise(V_FALSE, "unbound variable: %s", sym_cstr(sym));
+                if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
                 if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
                 loaded_gval = *slot;
             }
@@ -768,7 +768,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 }
                 vm_maybe_jit(cl);
                 if (vm->frame_count >= VM_FRAMES_MAX)
-                    scm_raise(V_FALSE, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->ip         = cl->chunk->code;
@@ -978,7 +978,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint16_t catch_off = READ_U16();
             int hi = vm->handler_count;
             if (hi >= VM_HANDLERS_MAX)
-                scm_raise(V_FALSE, "handler stack overflow (max %d)", VM_HANDLERS_MAX);
+                scm_raise_code(EC_STACK_OVERFLOW, "handler stack overflow (max %d)", VM_HANDLERS_MAX);
 
             /* Save VM state so the catch block can restore it. */
             vm->handler_stack[hi].frame_count   = vm->frame_count;

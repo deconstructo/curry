@@ -31,6 +31,8 @@
  *   (condition-backtrace c)   → list of (name file line) frames, innermost
  *                                first; V_NIL for user-signalled conditions
  *                                or errors raised outside the VM
+ *   (condition-code c)        → stable symbol (e.g. 'wrong-type-argument) or
+ *                                #f; see docs/reference/error-codes.md
  *   (%condition-type-register! type-sym parent-list)
  *   (condition-is-a? c type-sym)
  *   (%signal c)               → void  (non-unwinding)

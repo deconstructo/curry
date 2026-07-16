@@ -267,6 +267,11 @@ static val_t prim_condition_backtrace(int ac, val_t *av, void *ud) {
     if (vis_error(av[0])) return as_err(av[0])->backtrace;
     return V_NIL; /* user-signalled Condition objects don't capture frames yet */
 }
+static val_t prim_condition_code(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (vis_error(av[0])) return as_err(av[0])->code;
+    return V_FALSE; /* user-signalled Condition objects don't carry a stable code */
+}
 static val_t prim_condition_field(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     return condition_field(av[0], av[1]);
@@ -318,6 +323,7 @@ void condition_register_builtins(val_t env) {
     cond_def(env, "condition-fields",        prim_condition_fields,  1, 1);
     cond_def(env, "condition-message",       prim_condition_message, 1, 1);
     cond_def(env, "condition-backtrace",     prim_condition_backtrace,1,1);
+    cond_def(env, "condition-code",          prim_condition_code,    1, 1);
     cond_def(env, "condition-field",         prim_condition_field,   2, 2);
     cond_def(env, "condition-is-a?",         prim_condition_is_a,    2, 2);
     cond_def(env, "%condition-type-register!",prim_condition_register,2,2);

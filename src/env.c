@@ -11,6 +11,7 @@
 // Scath was here
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
+extern void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn));
 
 val_t GLOBAL_ENV;
 /* Raw C pointer to the root EnvFrame, kept in .data so Boehm's conservative
@@ -218,7 +219,7 @@ val_t env_lookup(val_t env, val_t sym) {
         }
         f = f->parent;
     }
-    scm_raise(V_FALSE, "unbound variable: %s", sym_cstr(sym));
+    scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
 }
 
 val_t env_lookup_or_false(val_t env, val_t sym) {
@@ -245,14 +246,14 @@ val_t env_bind_args(val_t parent_env, val_t params, val_t args) {
     EnvFrame *f = frame_new(8, vis_env(parent_env) ? as_env(parent_env) : NULL);
     val_t p = params, a = args;
     while (vis_pair(p)) {
-        if (vis_nil(a)) scm_raise(V_FALSE, "too few arguments");
+        if (vis_nil(a)) scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "too few arguments");
         frame_define(f, vcar(p), vcar(a));
         p = vcdr(p); a = vcdr(a);
     }
     if (!vis_nil(p))
         frame_define(f, p, a);          /* rest arg */
     else if (!vis_nil(a))
-        scm_raise(V_FALSE, "too many arguments");
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "too many arguments");
     return vptr(f);
 }
 
@@ -273,7 +274,7 @@ val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv) {
             rest = env_cons(argv[j], rest);
         frame_define(f, p, rest);
     } else if (i < argc) {
-        scm_raise(V_FALSE, "too many arguments");
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "too many arguments");
     }
     return vptr(f);
 }

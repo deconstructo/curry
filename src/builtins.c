@@ -247,18 +247,18 @@ static val_t prim_cons(int ac, val_t *av, void *ud) {
     p->car = av[0]; p->cdr = av[1];
     return vptr(p);
 }
-static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"car: not a pair"); return vcar(av[0]); }
-static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise(V_FALSE,"cdr: not a pair"); return vcdr(av[0]); }
+static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"car: not a pair"); return vcar(av[0]); }
+static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"cdr: not a pair"); return vcdr(av[0]); }
 static val_t prim_set_car(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-car!: not a pair");
+    if (!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-car!: not a pair");
     Pair *p = as_pair(av[0]);
     gc_wb_slot(&p->car, av[1]);
     return V_VOID;
 }
 static val_t prim_set_cdr(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_pair(av[0])) scm_raise(V_FALSE, "set-cdr!: not a pair");
+    if (!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-cdr!: not a pair");
     Pair *p = as_pair(av[0]);
     gc_wb_slot(&p->cdr, av[1]);
     return V_VOID;
@@ -622,8 +622,8 @@ static val_t prim_string_length(int ac, val_t *av, void *ud) {
 }
 static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_string(av[0])) scm_raise(V_FALSE, "string-ref: not a string");
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "string-ref: not an exact integer");
+    if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-ref: not a string");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-ref: not an exact integer");
     String *s = as_str(av[0]); intptr_t idx = vunfix(av[1]);
     const char *sd = str_data(s);
     const char *p = sd, *end = p + s->len;
@@ -770,7 +770,7 @@ static val_t prim_substring(int ac, val_t *av, void *ud) {
         if (((unsigned char)*p & 0xC0) != 0x80) nchars++;
     intptr_t iend = ac > 2 ? vunfix(av[2]) : (intptr_t)nchars;
     if (istart < 0 || iend < istart || (uint32_t)iend > nchars)
-        scm_raise(V_FALSE, "substring: index out of range");
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "substring: index out of range");
     uint32_t sb  = utf8_char_offset(sd, s->len, (uint32_t)istart);
     uint32_t eb  = utf8_char_offset(sd, s->len, (uint32_t)iend);
     uint32_t len = eb - sb;
@@ -852,22 +852,22 @@ static val_t prim_vector(int ac, val_t *av, void *ud) {
 static val_t prim_vector_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-length: not a vector"); return vfix(as_vec(av[0])->len);}
 static val_t prim_vector_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-ref: not a vector");
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-ref: not an exact integer");
+    if (!vis_vector(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector-ref: not a vector");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector-ref: not an exact integer");
     Vector *v = as_vec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= v->len)
-        scm_raise(V_FALSE, "vector-ref: index %ld out of bounds (length %u)", (long)i, v->len);
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "vector-ref: index %ld out of bounds (length %u)", (long)i, v->len);
     return v->data[i];
 }
 static val_t prim_vector_set(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-set!: not a vector");
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-set!: not an exact integer");
+    if (!vis_vector(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector-set!: not a vector");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector-set!: not an exact integer");
     Vector *v = as_vec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= v->len)
-        scm_raise(V_FALSE, "vector-set!: index %ld out of bounds (length %u)", (long)i, v->len);
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "vector-set!: index %ld out of bounds (length %u)", (long)i, v->len);
     gc_wb_slot(&v->data[i], av[2]);
     return V_VOID;
 }
@@ -1669,6 +1669,7 @@ static val_t prim_error(int ac, val_t *av, void *ud) {
     e->hdr.type=T_ERROR; e->hdr.flags=0;
     e->message=msg; e->irritants=irritants; e->kind=S_ERROR;
     e->backtrace = vm_capture_backtrace();
+    e->code = V_FALSE; /* (error ...) is user-authored text, not a stable code site */
     scm_raise_val(vptr(e));
 }
 static val_t prim_eval(int ac, val_t *av, void *ud) {
@@ -1680,6 +1681,7 @@ static val_t prim_interaction_env(int ac, val_t *av, void *ud) { (void)ac;(void)
 static val_t prim_error_message(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->message;}
 static val_t prim_error_object_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_error(av[0]));}
 static val_t prim_error_irritants(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->irritants;}
+static val_t prim_error_code(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->code;}
 static val_t prim_raise(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
 static val_t prim_raise_continuable(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
 static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
@@ -2487,6 +2489,7 @@ void builtins_register(val_t env) {
     DEF("error-object-message",prim_error_message,1,1);
     DEF("error-object?",prim_error_object_p,1,1);
     DEF("error-object-irritants",prim_error_irritants,1,1);
+    DEF("error-object-code",prim_error_code,1,1);
     DEF("read-error?",prim_read_error_p,1,1); DEF("file-error?",prim_file_error_p,1,1);
     DEF("error-object->string",prim_error_to_string,1,1);
     DEF("with-exception-handler",prim_with_exception_handler,2,2);

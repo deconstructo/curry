@@ -108,10 +108,12 @@ void scm_raise_val(val_t exn) {
     abort();
 }
 
-void scm_raise(val_t kind, const char *fmt, ...) {
-    (void)kind;
+static void raise_formatted(val_t kind, val_t code, const char *fmt, va_list ap)
+    __attribute__((noreturn));
+
+static void raise_formatted(val_t kind, val_t code, const char *fmt, va_list ap) {
     char msg[512];
-    va_list ap; va_start(ap, fmt); vsnprintf(msg, sizeof(msg), fmt, ap); va_end(ap);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
 
     /* Prepend Akkadian preamble — as the scribes demanded */
     char preamble[256];
@@ -132,7 +134,25 @@ void scm_raise(val_t kind, const char *fmt, ...) {
     e->irritants = V_NIL;
     e->kind      = vis_symbol(kind) ? kind : S_ERROR;
     e->backtrace = vm_capture_backtrace();
+    e->code      = code;
     scm_raise_val(vptr(e));
+}
+
+void scm_raise(val_t kind, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    raise_formatted(kind, V_FALSE, fmt, ap);
+    va_end(ap); /* unreachable: raise_formatted never returns */
+}
+
+/* Like scm_raise, but stamps a stable machine-legible code (e.g.
+ * 'wrong-type-argument) on the resulting error object, readable via
+ * (error-object-code e) / (condition-code e). Used at the call sites most
+ * frequently hit in practice; most scm_raise() sites remain uncoded — see
+ * docs/reference/error-codes.md for the registry and rationale. */
+void scm_raise_code(val_t code, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    raise_formatted(V_FALSE, code, fmt, ap);
+    va_end(ap); /* unreachable: raise_formatted never returns */
 }
 
 /* ---- Helpers ---- */
@@ -378,7 +398,7 @@ tail:
         val_t sym = vcar(rest);
         val_t val = eval(vcadr(rest), env);
         if (!env_set(env, sym, val))
-            scm_raise(V_FALSE, "set!: unbound variable: %s", sym_cstr(sym));
+            scm_raise_code(EC_UNBOUND_VARIABLE, "set!: unbound variable: %s", sym_cstr(sym));
         if (sym == S_EVAL_PROFILER && vis_fixnum(val))
             profiling_set_level((int)vunfix(val));
         else if (sym == S_GC_PROFILER && vis_fixnum(val))
@@ -1387,10 +1407,10 @@ tail:
         if (vis_prim(proc)) {
             Primitive *prim = as_prim(proc);
             if (prim->min_args >= 0 && argc < prim->min_args)
-                scm_raise(V_FALSE, "%s: too few arguments (got %d, need %d)",
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: too few arguments (got %d, need %d)",
                           prim->name, argc, prim->min_args);
             if (prim->max_args >= 0 && argc > prim->max_args)
-                scm_raise(V_FALSE, "%s: too many arguments (got %d, max %d)",
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: too many arguments (got %d, max %d)",
                           prim->name, argc, prim->max_args);
             if (curry_profiling_level >= 3)
                 profiling_record_prim(sym_intern_cstr(prim->name));
@@ -1466,7 +1486,7 @@ tail:
             return sx_make_apply(proc, argc, arr);
         }
 
-        scm_raise(V_FALSE, "not a procedure: %s",
+        scm_raise_code(EC_NOT_A_PROCEDURE, "not a procedure: %s",
                   vis_symbol(op) ? sym_cstr(op) : "#<value>");
     }
 }
@@ -1561,7 +1581,7 @@ val_t apply(val_t proc, val_t args) {
         list_to_arr(args, arr, 64);
         return sx_make_apply(proc, n, arr);
     }
-    scm_raise(V_FALSE, "apply: not a procedure");
+    scm_raise_code(EC_NOT_A_PROCEDURE, "apply: not a procedure");
 }
 
 /* ── Tiered JIT ──────────────────────────────────────────────────────── */
@@ -1689,10 +1709,10 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
         if (prim->min_args >= 0 && argc < prim->min_args)
-            scm_raise(V_FALSE, "%s: too few arguments (got %d, need %d)",
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: too few arguments (got %d, need %d)",
                       prim->name, argc, prim->min_args);
         if (prim->max_args >= 0 && argc > prim->max_args)
-            scm_raise(V_FALSE, "%s: too many arguments (got %d, max %d)",
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: too many arguments (got %d, max %d)",
                       prim->name, argc, prim->max_args);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));

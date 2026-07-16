@@ -535,6 +535,9 @@ typedef struct {
     val_t kind;      /* symbol: error | file-error | read-error */
     val_t backtrace; /* list of (name file line) frames, innermost first;
                          V_NIL if captured outside the VM or unavailable */
+    val_t code;      /* stable machine-legible symbol (e.g. 'wrong-type-argument),
+                         or V_FALSE for the (still large) majority of call sites
+                         not yet assigned one — see docs/reference/error-codes.md */
 } ErrorObj;
 
 /* CL-style condition object */

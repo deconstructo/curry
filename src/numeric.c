@@ -2,6 +2,7 @@
 #include "object.h"
 #include "gc.h"
 #include "eval.h"
+#include "symbol.h"
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
@@ -643,7 +644,10 @@ val_t num_div(val_t a, val_t b) {
     }
     if (vis_flonum(a) || vis_flonum(b))
         return num_make_float(num_to_double(a) / num_to_double(b));
-    /* Exact division -> rational */
+    /* Exact division -> rational. GMP's mpq_div on a zero divisor is
+     * undefined behavior (SIGFPE on most platforms) — must check first. */
+    if (num_is_zero(b))
+        scm_raise_code(EC_DIVISION_BY_ZERO, "/: division by zero");
     mpq_t qa, qb, qr;
     mpq_init(qa); mpq_init(qb); mpq_init(qr);
     to_mpq(qa, a); to_mpq(qb, b);
@@ -746,15 +750,22 @@ val_t num_max(val_t a, val_t b) {
 val_t num_quotient(val_t a, val_t b) {
     if (vis_fixnum(a) && vis_fixnum(b)) {
         intptr_t ia = vunfix(a), ib = vunfix(b);
+        if (ib == 0) scm_raise_code(EC_DIVISION_BY_ZERO, "quotient: division by zero");
         return vfix(ia / ib);  /* C11 truncation towards zero */
     }
+    if (num_is_zero(b)) scm_raise_code(EC_DIVISION_BY_ZERO, "quotient: division by zero");
     mpz_t za,zb,zr; mpz_init(za); mpz_init(zb); mpz_init(zr);
     to_mpz(za,a); to_mpz(zb,b); mpz_tdiv_q(zr,za,zb);
     val_t r=make_big_from_mpz(zr); mpz_clear(za); mpz_clear(zb); mpz_clear(zr); return r;
 }
 
 val_t num_remainder(val_t a, val_t b) {
-    if (vis_fixnum(a) && vis_fixnum(b)) return vfix(vunfix(a) % vunfix(b));
+    if (vis_fixnum(a) && vis_fixnum(b)) {
+        intptr_t ib = vunfix(b);
+        if (ib == 0) scm_raise_code(EC_DIVISION_BY_ZERO, "remainder: division by zero");
+        return vfix(vunfix(a) % ib);
+    }
+    if (num_is_zero(b)) scm_raise_code(EC_DIVISION_BY_ZERO, "remainder: division by zero");
     mpz_t za,zb,zr; mpz_init(za); mpz_init(zb); mpz_init(zr);
     to_mpz(za,a); to_mpz(zb,b); mpz_tdiv_r(zr,za,zb);
     val_t r=make_big_from_mpz(zr); mpz_clear(za); mpz_clear(zb); mpz_clear(zr); return r;

@@ -107,6 +107,16 @@ SYM(S_GC_PROFILER,        "**gc-profiler**")
 SYM(S_ERROR,              "error")
 SYM(S_FILE_ERROR,         "file-error")
 SYM(S_READ_ERROR,         "read-error")
+
+/* Stable machine-legible error codes — see docs/reference/error-codes.md */
+SYM(EC_WRONG_TYPE_ARGUMENT,       "wrong-type-argument")
+SYM(EC_WRONG_NUMBER_OF_ARGUMENTS, "wrong-number-of-arguments")
+SYM(EC_UNBOUND_VARIABLE,          "unbound-variable")
+SYM(EC_NOT_A_PROCEDURE,           "not-a-procedure")
+SYM(EC_DIVISION_BY_ZERO,          "division-by-zero")
+SYM(EC_INDEX_OUT_OF_RANGE,        "index-out-of-range")
+SYM(EC_STACK_OVERFLOW,            "stack-overflow")
+
 SYM(S_APPLY,              "apply")
 SYM(S_MAP,                "map")
 SYM(S_FOR_EACH,           "for-each")

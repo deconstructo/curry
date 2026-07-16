@@ -87,7 +87,9 @@ static void init_all(void) {
    (name file line) frames captured at raise time. Shared by every
    top-level catch site (script, REPL, -e, -c, .scc loading). */
 static void print_scheme_error(val_t exn) {
-    fprintf(stderr, "Error: ");
+    val_t code = vis_error(exn) ? as_err(exn)->code : V_FALSE;
+    if (vis_symbol(code)) fprintf(stderr, "Error [%s]: ", sym_cstr(code));
+    else fprintf(stderr, "Error: ");
     if (vis_error(exn)) scm_display(as_err(exn)->message, PORT_STDERR);
     else scm_write(exn, PORT_STDERR);
     fputs("\n", stderr);

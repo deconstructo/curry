@@ -404,6 +404,7 @@ static void scan_object(void *obj) {
         e->irritants = evacuate(e->irritants);
         e->kind      = evacuate(e->kind);
         e->backtrace = evacuate(e->backtrace);
+        e->code      = evacuate(e->code);
         break;
     }
     case T_CONDITION: {
