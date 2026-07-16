@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgc-dev libgmp-dev cmake build-essential pkg-config \
+            libssl-dev libsqlite3-dev libcurl4-openssl-dev \
+            libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
+            redis-server mosquitto
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install bdw-gc gmp cmake pkg-config \
+            openssl sqlite libgit2 libpng jpeg-turbo plplot \
+            redis mosquitto
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)
