@@ -104,6 +104,12 @@ val_t vm_eval(val_t expr, val_t env);
 /* Stack overflow — noreturn, defined in vm.c */
 void vm_stack_overflow(void);
 
+/* Capture the current call stack as a list of (name file line) frames,
+   innermost first, for attaching to a raised error. name/file are strings
+   or #f when unknown; line is a fixnum or #f. Returns V_NIL if no VM frame
+   is active (e.g. error raised outside vm_run, such as during read). */
+val_t vm_capture_backtrace(void);
+
 /* Stack helpers (inline for speed) */
 static inline void   vm_push(val_t v)  {
     if (vm->sp >= vm->stack + VM_STACK_MAX) vm_stack_overflow();

@@ -131,6 +131,7 @@ void scm_raise(val_t kind, const char *fmt, ...) {
     e->message   = vptr(s);
     e->irritants = V_NIL;
     e->kind      = vis_symbol(kind) ? kind : S_ERROR;
+    e->backtrace = vm_capture_backtrace();
     scm_raise_val(vptr(e));
 }
 

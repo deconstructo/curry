@@ -1668,6 +1668,7 @@ static val_t prim_error(int ac, val_t *av, void *ud) {
     ErrorObj *e = CURRY_NEW(ErrorObj);
     e->hdr.type=T_ERROR; e->hdr.flags=0;
     e->message=msg; e->irritants=irritants; e->kind=S_ERROR;
+    e->backtrace = vm_capture_backtrace();
     scm_raise_val(vptr(e));
 }
 static val_t prim_eval(int ac, val_t *av, void *ud) {

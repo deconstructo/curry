@@ -28,7 +28,9 @@
  *   (condition-type c)        → symbol
  *   (condition-fields c)      → alist
  *   (condition-message c)     → string or #f
- *   (condition-backtrace c)   → list (basic; full traces in v2.2)
+ *   (condition-backtrace c)   → list of (name file line) frames, innermost
+ *                                first; V_NIL for user-signalled conditions
+ *                                or errors raised outside the VM
  *   (%condition-type-register! type-sym parent-list)
  *   (condition-is-a? c type-sym)
  *   (%signal c)               → void  (non-unwinding)

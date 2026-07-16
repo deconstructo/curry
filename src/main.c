@@ -81,6 +81,38 @@ static void init_all(void) {
 #endif
 }
 
+/* ---- Error reporting ---- */
+
+/* Print "Error: <message>" plus, when available, a backtrace of
+   (name file line) frames captured at raise time. Shared by every
+   top-level catch site (script, REPL, -e, -c, .scc loading). */
+static void print_scheme_error(val_t exn) {
+    fprintf(stderr, "Error: ");
+    if (vis_error(exn)) scm_display(as_err(exn)->message, PORT_STDERR);
+    else scm_write(exn, PORT_STDERR);
+    fputs("\n", stderr);
+
+    val_t bt = vis_error(exn) ? as_err(exn)->backtrace : V_NIL;
+    for (val_t f = bt; vis_pair(f); f = vcdr(f)) {
+        val_t frame = vcar(f);
+        val_t name  = vcar(frame);
+        val_t file  = vcadr(frame);
+        val_t line  = vcaddr(frame);
+        fputs("  at ", stderr);
+        if (vis_string(name)) scm_display(name, PORT_STDERR);
+        else fputs("?", stderr);
+        if (vis_string(file)) {
+            fputs(" (", stderr);
+            scm_display(file, PORT_STDERR);
+            if (vis_fixnum(line)) fprintf(stderr, ":%ld", (long)vunfix(line));
+            fputs(")", stderr);
+        } else if (vis_fixnum(line)) {
+            fprintf(stderr, " (line %ld)", (long)vunfix(line));
+        }
+        fputs("\n", stderr);
+    }
+}
+
 /* ---- REPL ---- */
 
 static void print_result(val_t v) {
@@ -188,6 +220,7 @@ static char *rl_read_expr(void) {
 #endif /* HAVE_READLINE */
 
 static void eval_port_exprs(val_t port, bool print) {
+    compiler_set_source_name("<repl>");
     for (;;) {
         val_t expr;
         ExnHandler h;
@@ -280,10 +313,7 @@ static void eval_port_exprs(val_t port, bool print) {
         } else {
             current_handler = h.prev;
             vm_reset();
-            fprintf(stderr, "Error: ");
-            if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-            else scm_write(h.exn, PORT_STDERR);
-            fprintf(stderr, "\n");
+            print_scheme_error(h.exn);
         }
     }
 }
@@ -425,6 +455,7 @@ int main(int argc, char **argv) {
         case 'c':
             compile_file = optarg; break;
         case 'e': {
+            compiler_set_source_name("<expr>");
             val_t str_port = port_open_input_string(optarg, (uint32_t)strlen(optarg));
             val_t last = V_VOID;
             for (;;) {
@@ -444,10 +475,7 @@ int main(int argc, char **argv) {
                 } else {
                     current_handler = h.prev;
                     vm_reset();
-                    fprintf(stderr, "Error: ");
-                    if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-                    else scm_write(h.exn, PORT_STDERR);
-                    fputs("\n", stderr);
+                    print_scheme_error(h.exn);
                     return 1;
                 }
             }
@@ -482,6 +510,7 @@ int main(int argc, char **argv) {
         int cap = 64;
         Chunk **chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
         int n_chunks = 0;
+        compiler_set_source_name(compile_file);
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
@@ -501,10 +530,7 @@ int main(int argc, char **argv) {
         } else {
             current_handler = h.prev;
             vm_reset();
-            fprintf(stderr, "Error: ");
-            if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-            else scm_write(h.exn, PORT_STDERR);
-            fputs("\n", stderr);
+            print_scheme_error(h.exn);
             return 1;
         }
         port_close(port);
@@ -561,21 +587,28 @@ int main(int argc, char **argv) {
                 }
             }
             if (is_scc) {
-                /* Direct .scc run — no source file, skip mtime check */
+                /* Direct .scc run — no source file, skip mtime check.
+                   .scc caching doesn't persist source_name (see scc.c), so
+                   stamp it post-load for backtraces; argv[] outlives the run. */
                 if (!scc_load_direct(argv[i], &chunks, &n_chunks)) {
                     fprintf(stderr, "Error: cannot load bytecode file: %s\n", argv[i]);
                     current_handler = h.prev;
                     return 1;
                 }
                 for (int k = 0; k < n_chunks; k++)
+                    chunk_set_source_name_recursive(chunks[k], argv[i]);
+                for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
             } else if (scc_load(argv[i], &chunks, &n_chunks)) {
                 /* Cache hit: run each chunk in order */
+                for (int k = 0; k < n_chunks; k++)
+                    chunk_set_source_name_recursive(chunks[k], argv[i]);
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
             } else {
                 /* Cache miss: compile one form at a time (preserves macro semantics),
                    collect chunks, write cache; each form is run as compiled */
+                compiler_set_source_name(argv[i]);
                 val_t port = port_open_file(argv[i], PORT_INPUT);
                 if (vis_false(port)) {
                     fprintf(stderr, "Error: cannot open file: %s\n", argv[i]);
@@ -605,10 +638,7 @@ int main(int argc, char **argv) {
         } else {
             current_handler = h.prev;
             vm_reset();
-            fprintf(stderr, "Error: ");
-            if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDERR);
-            else scm_write(h.exn, PORT_STDERR);
-            fputs("\n", stderr);
+            print_scheme_error(h.exn);
             return 1;
         }
         ran_something = true;

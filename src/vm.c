@@ -204,6 +204,40 @@ __attribute__((noreturn)) void vm_stack_overflow(void) {
     scm_raise(V_FALSE, "value stack overflow (max %d slots)", VM_STACK_MAX);
 }
 
+static val_t vm_cstr_to_string(const char *s) {
+    if (!s) return V_FALSE;
+    uint32_t len = (uint32_t)strlen(s);
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, s, len + 1);
+    return vptr(str);
+}
+
+val_t vm_capture_backtrace(void) {
+    if (!vm) return V_NIL;
+    val_t bt = V_NIL;
+    for (int i = 0; i < vm->frame_count; i++) {
+        CallFrame *fr = &vm->frames[i];
+        Chunk *ch = fr->closure->chunk;
+        int off = (int)(fr->ip - ch->code);
+        int line = 0;
+        bool have_line = ch->lines && ch->code_len > 0;
+        if (have_line) {
+            int idx = off - 1;
+            if (idx < 0) idx = 0;
+            if (idx >= ch->code_len) idx = ch->code_len - 1;
+            line = ch->lines[idx];
+        }
+        val_t name = vm_cstr_to_string(ch->name);
+        val_t file = vm_cstr_to_string(ch->source_name);
+        val_t lineval = have_line ? vfix(line) : V_FALSE;
+        val_t frame = scm_cons(name, scm_cons(file, scm_cons(lineval, V_NIL)));
+        bt = scm_cons(frame, bt);
+    }
+    return bt;
+}
+
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
 void vm_init(void) {

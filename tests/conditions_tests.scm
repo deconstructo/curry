@@ -184,6 +184,36 @@
 (check "find-restart: correct name"        (restart-name fr-result) 'find-me)
 (check "find-restart: outside frame = #f"  (find-restart 'find-me) #f)
 
+;;; ---- condition-backtrace on a real VM-raised error ----
+
+(define (bt-inner x) (car x))
+(define (bt-outer x) (bt-inner x))
+
+(define bt-result #f)
+(call/cc (lambda (k)
+  (with-exception-handler
+    (lambda (e) (set! bt-result (condition-backtrace e)) (k #f))
+    (lambda () (bt-outer 5)))))
+
+(check "condition-backtrace: non-empty for VM error"
+       (pair? bt-result) #t)
+(check "condition-backtrace: innermost frame name"
+       (car (car bt-result)) "bt-inner")
+(check "condition-backtrace: frame is (name file line)"
+       (length (car bt-result)) 3)
+(check "condition-backtrace: line is a fixnum"
+       (integer? (caddr (car bt-result))) #t)
+
+;;; error-object? conditions from (error ...) also carry a backtrace
+(define (bt-error-fn) (error "boom" 1 2))
+(define bt-err-result #f)
+(call/cc (lambda (k)
+  (with-exception-handler
+    (lambda (e) (set! bt-err-result (condition-backtrace e)) (k #f))
+    (lambda () (bt-error-fn)))))
+(check "condition-backtrace: (error ...) also captured"
+       (pair? bt-err-result) #t)
+
 ;;; ---- Summary ----
 
 (newline)

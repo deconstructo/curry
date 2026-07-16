@@ -62,6 +62,7 @@
 #include "vm.h"
 #include "builtins.h"
 #include "akkadian_eval.h"
+#include "reader.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -101,6 +102,10 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line);
 
 /* ── Compiler lifecycle ──────────────────────────────────────────────── */
 
+static _Thread_local const char *g_compile_source_name = NULL;
+
+void compiler_set_source_name(const char *name) { g_compile_source_name = name; }
+
 static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->enclosing   = enc;
     c->chunk       = chunk_new();
@@ -109,6 +114,7 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->scope_depth = 0;
     c->upval_count = 0;
     c->chunk->name = name;
+    c->chunk->source_name = g_compile_source_name;
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -1303,8 +1309,9 @@ val_t compiler_compile(val_t expr) {
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
-    compile(&c, expr, false, 0);
-    chunk_emit(c.chunk, OP_RETURN, 0);
+    int line = g_reader_last_line;
+    compile(&c, expr, false, line);
+    chunk_emit(c.chunk, OP_RETURN, line);
     c.chunk->upval_count = 0;
 
     BcClosure *cl = vm_make_closure(c.chunk, 0);

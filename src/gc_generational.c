@@ -537,6 +537,7 @@ static void gen_scan_object(void *obj) {
         e->message   = gen_evacuate(e->message);
         e->irritants = gen_evacuate(e->irritants);
         e->kind      = gen_evacuate(e->kind);
+        e->backtrace = gen_evacuate(e->backtrace);
         break;
     }
     case T_CONDITION: {

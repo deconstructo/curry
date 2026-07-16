@@ -39,6 +39,8 @@ typedef struct {
     int       local_count;/* number of local variable slots              */
     int       upval_count;/* number of captured upvalues                 */
     const char *name;     /* function name for error messages (or NULL)  */
+    const char *source_name; /* source file/unit for backtraces (or NULL);
+                                 caller-owned, must outlive the chunk     */
 
     GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
 
@@ -51,6 +53,11 @@ typedef struct {
 
 /* Allocate a fresh empty chunk */
 Chunk *chunk_new(void);
+
+/* Stamp source_name on this chunk and every nested chunk reachable through
+ * its constant pool (lambdas compiled inside it). Used to attach a source
+ * file to chunks loaded from .scc, which does not persist source_name. */
+void chunk_set_source_name_recursive(Chunk *c, const char *name);
 
 /* Emit one byte; returns byte offset of the emitted byte */
 int chunk_emit(Chunk *c, uint8_t byte, int line);

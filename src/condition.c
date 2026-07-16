@@ -262,8 +262,11 @@ static val_t prim_condition_message(int ac, val_t *av, void *ud) {
     if (vis_error(av[0]))     return as_err(av[0])->message;
     return V_FALSE;
 }
-static val_t prim_condition_backtrace(int ac, val_t *av, void *ud)
-    { (void)ac; (void)ud; (void)av; return V_NIL; /* full traces in v2.2 */ }
+static val_t prim_condition_backtrace(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (vis_error(av[0])) return as_err(av[0])->backtrace;
+    return V_NIL; /* user-signalled Condition objects don't capture frames yet */
+}
 static val_t prim_condition_field(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     return condition_field(av[0], av[1]);

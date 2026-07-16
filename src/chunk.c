@@ -120,10 +120,21 @@ Chunk *chunk_new(void) {
     c->local_count = 0;
     c->upval_count = 0;
     c->name       = NULL;
+    c->source_name = NULL;
     c->glob_cache = NULL;
     c->src_lambda  = V_VOID;
     c->upval_names = NULL;
     return c;
+}
+
+void chunk_set_source_name_recursive(Chunk *c, const char *name) {
+    if (!c || c->source_name == name) return; /* already stamped: avoid re-walking */
+    c->source_name = name;
+    for (int i = 0; i < c->const_len; i++) {
+        val_t v = c->constants[i];
+        if (vis_type(v, T_CHUNK))
+            chunk_set_source_name_recursive(vunptr(Chunk, v), name);
+    }
 }
 
 /* ── Emit ────────────────────────────────────────────────────────────── */

@@ -18,6 +18,7 @@ static val_t make_port(int flags) {
     p->hdr.flags = 0;
     p->flags     = (uint8_t)flags;
     p->peeked_cp = -2;   /* -2 = lookahead empty; -1 = EOF; ≥0 = codepoint */
+    p->line      = 1;
     return vptr(p);
 }
 
@@ -122,14 +123,19 @@ static int read_utf8_codepoint(Port *p) {
 int port_read_char(val_t v) {
     Port *p = as_port(v);
     if (p->flags & PORT_CLOSED) return -1;
+    int cp;
     /* Drain the one-codepoint lookahead if present */
     if (p->peeked_cp != -2) {
-        int cp = p->peeked_cp;
+        cp = p->peeked_cp;
         p->peeked_cp = -2;
-        return cp;  /* -1 (EOF) or the codepoint */
+    } else {
+        cp = read_utf8_codepoint(p);
     }
-    return read_utf8_codepoint(p);
+    if (cp == '\n') p->line++;
+    return cp;  /* -1 (EOF) or the codepoint */
 }
+
+int port_line(val_t v) { return as_port(v)->line; }
 
 int port_peek_char(val_t v) {
     Port *p = as_port(v);

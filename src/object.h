@@ -306,6 +306,8 @@ typedef struct {
     Hdr     hdr;
     uint8_t flags;
     int     peeked_cp;   /* one-codepoint lookahead buffer; -2 = empty */
+    int     line;        /* 1-based line of the next unread character;
+                             tracked for reader backtraces (see reader.c) */
     union {
         FILE *fp;
         struct {
@@ -531,6 +533,8 @@ typedef struct {
     val_t message;   /* string */
     val_t irritants; /* list */
     val_t kind;      /* symbol: error | file-error | read-error */
+    val_t backtrace; /* list of (name file line) frames, innermost first;
+                         V_NIL if captured outside the VM or unavailable */
 } ErrorObj;
 
 /* CL-style condition object */

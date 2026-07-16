@@ -39,6 +39,7 @@ int   port_peek_char(val_t p);
 bool  port_char_ready(val_t p);
 void  port_unread_char(val_t p, int ch);
 void  port_write_char(val_t p, int ch);   /* writes UTF-8 encoding */
+int   port_line(val_t p);                 /* 1-based line of the next unread char */
 
 /* ---- String / line I/O ---- */
 val_t port_read_line(val_t p);            /* returns string or eof */
