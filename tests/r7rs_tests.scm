@@ -64,6 +64,22 @@
 (check "list-ref" (list-ref '(a b c) 1) 'b)
 (check "assoc" (assoc 2 '((1 a) (2 b) (3 c))) '(2 b))
 (check "member" (member 2 '(1 2 3)) '(2 3))
+(check "list? proper" (list? '(1 2 3)) #t)
+(check "list? empty" (list? '()) #t)
+(check "list? dotted" (list? '(1 . 2)) #f)
+(check "list? non-pair" (list? 5) #f)
+(define circ (list 1 2 3))
+(set-cdr! (cddr circ) circ)
+(check "list? circular" (list? circ) #f)
+(define circ1 (list 1))
+(set-cdr! circ1 circ1)
+(check "list? self-loop" (list? circ1) #f)
+(check "length circular raises"
+       (call/cc (lambda (k)
+         (with-exception-handler
+           (lambda (e) (k 'raised))
+           (lambda () (length circ)))))
+       'raised)
 
 ;;; Vectors
 (define v (make-vector 3 0))

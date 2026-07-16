@@ -146,9 +146,16 @@ PRED1(pair_p,     vis_pair)
 PRED1(null_p,     vis_nil)
 static val_t prim_list_p(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    val_t v = av[0];
-    while (vis_pair(v)) v = vcdr(v);
-    return vis_nil(v) ? V_TRUE : V_FALSE;
+    /* Floyd tortoise-and-hare: circular lists must yield #f, not hang */
+    val_t slow = av[0], fast = av[0];
+    while (vis_pair(fast)) {
+        fast = vcdr(fast);
+        if (!vis_pair(fast)) break;
+        fast = vcdr(fast);
+        slow = vcdr(slow);
+        if (fast == slow) return V_FALSE;
+    }
+    return vis_nil(fast) ? V_TRUE : V_FALSE;
 }
 PRED1(boolean_p,  vis_bool)
 PRED1(symbol_p,   vis_symbol)
@@ -285,9 +292,16 @@ static val_t prim_list_star(int ac, val_t *av, void *ud) {
 }
 static val_t prim_length(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    int n = 0; val_t l = av[0];
-    while (vis_pair(l)) { n++; l = vcdr(l); }
-    if (!vis_nil(l)) scm_raise(V_FALSE, "length: not a proper list");
+    /* Floyd tortoise-and-hare: raise on circular lists instead of hanging */
+    long n = 0; val_t slow = av[0], fast = av[0];
+    while (vis_pair(fast)) {
+        fast = vcdr(fast); n++;
+        if (!vis_pair(fast)) break;
+        fast = vcdr(fast); n++;
+        slow = vcdr(slow);
+        if (fast == slow) scm_raise(V_FALSE, "length: circular list");
+    }
+    if (!vis_nil(fast)) scm_raise(V_FALSE, "length: not a proper list");
     return vfix(n);
 }
 static val_t prim_append(int ac, val_t *av, void *ud) {
