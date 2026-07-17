@@ -90,6 +90,13 @@
         (guard (e (#t #t)) (tcp-connect-tls "self-signed.badssl.com" 443) #f)
         #t)
 
+      ;; A valid, chain-trusted cert issued for a *different* hostname —
+      ;; the specific case SSL_get_verify_result alone does not catch;
+      ;; only SSL_set1_host's hostname verification does.
+      (check "valid-but-wrong-hostname cert is rejected"
+        (guard (e (#t #t)) (tcp-connect-tls "wrong.host.badssl.com" 443) #f)
+        #t)
+
       (check "valid cert is accepted, HTTPS round-trip works"
         (let* ((conn (tcp-connect-tls "example.com" 443))
                (in (car conn)) (out (cdr conn)))

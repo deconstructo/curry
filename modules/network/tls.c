@@ -38,6 +38,7 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 
 typedef struct {
     SSL *ssl;
@@ -166,6 +167,19 @@ static curry_val fn_tcp_connect_tls(int ac, curry_val *av, void *ud) {
     if (!ssl) { close(fd); curry_error("tcp-connect-tls: SSL_new failed"); }
     SSL_set_fd(ssl, fd);
     SSL_set_tlsext_host_name(ssl, host);   /* SNI */
+
+    /* SSL_get_verify_result alone only checks that the certificate chain
+     * is trusted -- it says nothing about whether the certificate is
+     * actually FOR this host. Without hostname verification, any host
+     * holding a valid cert for any domain could impersonate `host` via
+     * a MITM'd connection. SSL_set1_host makes the handshake itself fail
+     * on a mismatch, matching what SSL_get_verify_result's callers below
+     * assume it already covers. */
+    SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+    if (!SSL_set1_host(ssl, host)) {
+        SSL_free(ssl); close(fd);
+        curry_error("tcp-connect-tls: SSL_set1_host failed");
+    }
 
     if (SSL_connect(ssl) != 1) {
         unsigned long e = ERR_get_error();
