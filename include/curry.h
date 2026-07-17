@@ -144,6 +144,11 @@ curry_val  curry_make_port_from_fd(int fd, bool output, bool binary);
  * whatever close callback it was created with. */
 curry_val  curry_make_port_from_file(FILE *fp, bool output, bool binary);
 
+/* Extract the underlying OS file descriptor from a file-backed port, for
+ * callers that want to poll/select on its readiness. Returns -1 for a
+ * string port or a closed port. */
+int        curry_port_fd(curry_val port);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
