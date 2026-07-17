@@ -9,7 +9,7 @@
  *   (udp-socket)                    -> socket
  *   (udp-bind sock port)            -> void
  *   (udp-send sock data host port)  -> void
- *   (udp-recv sock maxbytes)        -> bytevector
+ *   (udp-recv sock maxbytes)        -> (data host port)
  *
  * Non-blocking I/O and async support are planned via integration
  * with the actor system (each connection runs in its own actor).
@@ -130,6 +130,11 @@ static curry_val fn_udp_socket(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac; (void)av;
     sock_t fd = socket(AF_INET6, SOCK_DGRAM, 0);
     if (fd == SOCK_INVALID) curry_error("udp-socket: failed");
+    /* Dual-stack: udp-send resolves IPv4 destinations as v4-mapped IPv6
+     * addresses, which a V6ONLY socket rejects on BSD/macOS (the default
+     * there, unlike Linux) even before any udp-bind call. */
+    int off = 0;
+    setsockopt((int)fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
     return sock_to_val(fd);
 }
 
@@ -150,16 +155,23 @@ static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t fd = val_to_sock(av[0]);
     uint32_t dlen = curry_bytevector_length(av[1]);
-    uint8_t *data = malloc(dlen);
+    uint8_t *data = malloc(dlen > 0 ? dlen : 1);
+    if (!data) curry_error("udp-send: out of memory");
     for (uint32_t i = 0; i < dlen; i++) data[i] = curry_bytevector_ref(av[1], i);
     const char *host = curry_string(av[2]);
     int port = (int)curry_fixnum(av[3]);
     char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", port);
     struct addrinfo hints = {0}, *res;
-    hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_DGRAM;
-    getaddrinfo(host, port_str, &hints, &res);
-    sendto((int)fd, data, dlen, 0, res->ai_addr, (socklen_t)res->ai_addrlen);
+    hints.ai_family   = AF_INET6;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags    = AI_V4MAPPED | AI_ALL;
+    if (getaddrinfo(host, port_str, &hints, &res) != 0) {
+        free(data);
+        curry_error("udp-send: could not resolve %s", host);
+    }
+    ssize_t sent = sendto((int)fd, data, dlen, 0, res->ai_addr, (socklen_t)res->ai_addrlen);
     freeaddrinfo(res); free(data);
+    if (sent < 0) curry_error("udp-send: sendto failed");
     return curry_void();
 }
 
@@ -167,13 +179,30 @@ static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t fd = val_to_sock(av[0]);
     int maxbytes = (int)curry_fixnum(av[1]);
+    if (maxbytes <= 0) curry_error("udp-recv: maxbytes must be positive");
     uint8_t *buf = malloc((size_t)maxbytes);
-    ssize_t n = recv((int)fd, buf, (size_t)maxbytes, 0);
-    if (n < 0) { free(buf); curry_error("udp-recv: recv failed"); }
+    if (!buf) curry_error("udp-recv: out of memory");
+    struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+    ssize_t n = recvfrom((int)fd, buf, (size_t)maxbytes, 0,
+                          (struct sockaddr *)&addr, &addrlen);
+    if (n < 0) { free(buf); curry_error("udp-recv: recvfrom failed"); }
     curry_val bv = curry_make_bytevector((uint32_t)n, 0);
     for (ssize_t i = 0; i < n; i++) curry_bytevector_set(bv, (uint32_t)i, buf[i]);
     free(buf);
-    return bv;
+
+    char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
+    if (getnameinfo((struct sockaddr *)&addr, addrlen, hostbuf, sizeof(hostbuf),
+                     portbuf, sizeof(portbuf), NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
+        curry_error("udp-recv: getnameinfo failed");
+    }
+
+    /* Our sockets are dual-stack (IPV6_V6ONLY off), so an IPv4 sender shows up
+     * as an IPv4-mapped IPv6 address ("::ffff:1.2.3.4"). Report the plain
+     * dotted-quad form instead, since that's what the caller actually dialed. */
+    const char *host = hostbuf;
+    if (strncmp(hostbuf, "::ffff:", 7) == 0) host = hostbuf + 7;
+
+    return curry_list(3, bv, curry_make_string(host), curry_make_fixnum(atoi(portbuf)));
 }
 
 void curry_module_init(CurryVM *vm) {
