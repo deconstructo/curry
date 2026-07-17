@@ -1,5 +1,117 @@
 # Changelog
 
+### 1.7.0 — Machine-legible errors, real backtraces, and a VM arity/JIT correctness pass
+
+The headline of this release is diagnostics: errors finally carry a file,
+line, call stack, and a stable machine-readable code instead of a bare
+prose string. That work led straight into two serious correctness bugs —
+one that could corrupt data silently on every wrong-arity or variadic
+call through the bytecode VM, and one that crashed the process outright
+on `(/ x 0)` — both fixed here, along with a five-commit chain closing a
+JIT-only counter leak that review kept turning up one more instance of.
+Also new: a `(curry logic)` module with six pluggable non-classical
+logics, a `(curry sets)` module (multisets + logic-parameterized set
+theories), Mandelbrot v6.0 with double-double navigation, and CI that
+actually builds and tests the project on every push.
+
+**Diagnostics**
+- **Source location and real call-stack backtraces.** Errors previously
+  printed a bare message with no file, line, or call stack —
+  `condition-backtrace` was a literal stub returning `'()`. Errors now
+  report `Error: ... \n  at <proc> (file:line)` chains, and
+  `(condition-backtrace e)` returns the real frame list. Covers scripts,
+  the REPL, `-e`, `-c`, and compiled `.scc` files (including nested
+  lambda chunks). Known limitation: line accuracy is per-top-level-form,
+  not per-statement — a bug on line 5 of a 10-line function reports the
+  `define`'s line, not line 5.
+- **Stable machine-legible error codes.** `(error-object-code e)` /
+  `(condition-code e)` return a stable symbol (`'wrong-type-argument`,
+  `'unbound-variable`, `'wrong-number-of-arguments`, `'not-a-procedure`,
+  `'division-by-zero`, `'index-out-of-range`, `'stack-overflow`) at the
+  ~30 call sites hit most often in practice, so tooling (an LSP, the MCP
+  server, an LLM client) can match on a code instead of scraping prose.
+  See `docs/reference/error-codes.md` for the registry and how to extend
+  it — most of curry's ~540 raise sites remain uncoded by design.
+- **Fixed a `SIGFPE` crash.** While wiring up `'division-by-zero`, found
+  that `(/ 1 0)`, `(quotient 5 0)`, `(remainder 5 0)`, and `(modulo 5 0)`
+  didn't raise a Scheme condition at all — they crashed the whole
+  process. Raw C `/`/`%` on the fixnum path and GMP's `mpq_div` on the
+  exact-rational path are both undefined behavior on a zero divisor.
+  All four now raise cleanly.
+- **Fixed `list?`/`length` hanging forever on circular lists.** Both now
+  use Floyd's tortoise-and-hare; `list?` returns `#f` and `length` raises
+  on a cycle, per R7RS, instead of spinning.
+
+**VM correctness (the scary one)**
+- **The bytecode VM never checked argument count.** `OP_CALL`,
+  `OP_TAIL_CALL`, and `vm_run` set up a closure's local-variable window
+  from however many arguments happened to be pushed, with no check
+  against the closure's declared arity. A fixed-arity closure called
+  with too few arguments silently read uninitialized stack memory for
+  the missing parameters; called with too many, the extras were just
+  abandoned. Worse: a variadic closure's rest parameter — `(lambda (a .
+  rest) ...)` — ended up holding the raw last-pushed argument instead of
+  a list. `(f 1 2 3 4)` bound `rest` to `2`, not `(2 3 4)`. Neither bug
+  crashed or errored; both silently produced wrong values, which is why
+  the full test suite kept passing. Fixed with one shared validation
+  helper wired into all three call sites; wrong arity now raises
+  `wrong-number-of-arguments` and rest-arg collection is correct.
+- **The same bug, and the same fix, in the LLVM JIT fast path.** Once
+  hot-swapped to native code (`-DBUILD_LLVM=ON`), a closure had no arity
+  check either — `(g 1)` on a two-argument `g` returned a garbage value
+  (a leftover stack slot) instead of raising. Fixed the same way, at all
+  three JIT call sites.
+- **That fix leaked a counter across caught exceptions.** Raising from
+  inside a JIT-to-JIT call is now reachable (previous bullet), but
+  nothing restored the JIT call-depth counter on `longjmp`, so a caught
+  exception from nested JIT calls permanently inflated it — eventually
+  pinning it at the depth limit and silently disabling the JIT fast path
+  for the rest of the thread's lifetime. No crash, no wrong value, just
+  a severe silent performance cliff. Fixed with the same save/restore
+  pattern already used for the GC inhibit counter and shadow stack,
+  wired into every place curry installs an exception handler — which,
+  after three successive review passes each finding another hand-rolled
+  site (`with-exception-handler`, `dynamic-wind`, `call-with-port`,
+  `parameterize`, `with-assumptions`, the actor thread entry point, the
+  parallel work-pool, `with-mutex`), turned out to be nineteen call
+  sites, not the four the first pass assumed.
+
+**New modules**
+- **`(curry logic)`** — six first-class non-classical logics (classical,
+  Belnap FOUR, fuzzy, intuitionistic, probabilistic, defeasible) behind
+  one shared knowledge-base API (`kb-assert!`, `kb-close!`,
+  `kb-consistent?`, forward-chaining rules).
+- **`(curry sets)`** — multisets (hash-backed element→count bags) and
+  set theories parameterized by any `(curry logic)` logic, so swapping
+  the underlying logic changes what "membership" means.
+- **`(curry random)`** — continuous probability distributions.
+
+**R7RS compliance fixes**
+- `string-copy!` no longer corrupts strings when source/destination
+  character ranges have different UTF-8 byte widths.
+- `substring` now uses Unicode character indices, not byte offsets.
+- `(command-line)` is a thunk per R7RS §6.14, not a raise.
+- Bytevector ports, `write-shared`, and `string-set!` width-change
+  support added.
+
+**Infrastructure**
+- **CI.** `.github/workflows/ci.yml` builds and runs the full `ctest`
+  suite on every push/PR, Ubuntu + macOS × Debug + Release. Previously
+  the only workflow was CodeQL scanning — nothing actually built curry
+  or ran its tests before merge.
+- LDAP module is now opt-in (`BUILD_MODULE_LDAP` defaults `OFF`,
+  Homebrew formula gained `--with-ldap`), matching how other heavyweight
+  optional modules already behaved.
+- Several generational-GC + JIT interaction fixes: JIT no longer bakes
+  nursery pointers as IR constants under `--gc generational`, root
+  registration is now lock-protected against concurrent minor GC, and
+  `JitClosure` allocation is correctly pinned rather than nursery-placed.
+
+**Mandelbrot v6.0**
+- Double-double precision navigation (drag/zoom accumulate via two-sum),
+  faithful to ~10²⁸ zoom depth; auto-perturbation, Julia set mode,
+  adaptive iteration; several pan/zoom sign-convention fixes.
+
 ### 1.6.3 — Fix GC crash when calling (gc) after (import (curry qt6))
 
 Patch release fixing a `SIGSEGV` at address `0x8` in Boehm's `GC_mark_from`
