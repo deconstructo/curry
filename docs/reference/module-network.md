@@ -4,6 +4,9 @@
 
 TCP and UDP socket primitives, plus non-blocking mode and readiness
 polling. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows.
+*v1.2.2 — 2026-06-07; TLS client support added later.*
+
+TCP, TLS, and UDP socket primitives. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows; TLS via OpenSSL.
 
 ## Installation
 
@@ -41,6 +44,24 @@ underlying connection. Close each with `close-port` when done.
 stream, so not a port) — close it with `tcp-close`. Each accepted
 connection from `tcp-accept` is a port pair like `tcp-connect`'s, closed
 with `close-port` on each end.
+
+### TLS client
+
+```scheme
+(tcp-connect-tls host port)   ; connect + TLS handshake, return (in-port . out-port)
+```
+
+Same port-pair contract as `tcp-connect`, but the connection is TLS-wrapped
+via OpenSSL. Certificate verification is **on** by default (system trust
+store, `SSL_VERIFY_PEER`) — connecting to a host with an invalid or
+self-signed certificate raises rather than silently connecting insecurely.
+SNI (`SSL_set_tlsext_host_name`) is sent automatically using the `host`
+argument, needed by most modern HTTPS servers that multiplex by hostname.
+
+No TLS server side (`tls-listen`/`tls-accept`) yet — client-side was the
+actually-blocking gap (talking to HTTPS-only APIs over raw sockets); see
+[issue #14](https://github.com/deconstructo/curry/issues/14) if you need
+server-side TLS.
 
 ## UDP
 
@@ -89,6 +110,27 @@ fuller reactor, if/when green threads make it worthwhile.
 (define out (cdr conn))
 
 (write-string "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n" out)
+(flush-output-port out)
+
+(let loop ((line (read-line in)))
+  (unless (eof-object? line)
+    (display line) (newline)
+    (loop (read-line in))))
+
+(close-port in)
+(close-port out)
+```
+
+### HTTPS GET (manual, TLS)
+
+```scheme
+(import (curry network))
+
+(define conn (tcp-connect-tls "example.com" 443))
+(define in  (car conn))
+(define out (cdr conn))
+
+(write-string "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n" out)
 (flush-output-port out)
 
 (let loop ((line (read-line in)))
@@ -184,7 +226,5 @@ fuller reactor, if/when green threads make it worthwhile.
   (output ports are buffered by default, same as any other Curry port).
 - `tcp-listen` binds to `0.0.0.0`/`::` (all interfaces, dual-stack). To
   bind to a specific interface, use the raw C extension API.
-- For TLS, wrap a `tcp-connect` socket with the crypto module (OpenSSL BIO)
-  — not yet exposed in the Scheme API; use `system` to call
-  `openssl s_client` as a workaround. See
-  [issue #14](https://github.com/deconstructo/curry/issues/14).
+- `tcp-connect-tls` requires `BUILD_MODULE_NETWORK=ON` (default) and links
+  OpenSSL (already a dependency via `(curry crypto)`) — no extra CMake flag.

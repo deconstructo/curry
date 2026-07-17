@@ -399,6 +399,11 @@ endif()
 
 if(BUILD_MODULE_NETWORK)
   curry_c_module(network)
+  # TLS client support (tcp-connect-tls) lives in its own file to keep
+  # OpenSSL's includes/link isolated from the plain-socket code, but
+  # compiles into the same curry_network.so target.
+  target_sources(curry_network PRIVATE modules/network/tls.c)
+  target_link_libraries(curry_network PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
 if(BUILD_MODULE_CRYPTO)

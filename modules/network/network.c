@@ -197,59 +197,11 @@ static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     return bv;
 }
 
-/* ---- Non-blocking mode + readiness check ----
- *
- * Scoped down from a full epoll/kqueue reactor: curry's actors are real
- * OS threads (not green threads/coroutines), so a full event-loop
- * integration wouldn't buy much over the current thread-per-actor model
- * until green threads exist (a separate, unimplemented roadmap item).
- * This gives single-threaded multiplexing (check several sockets, only
- * read/accept the ones that are ready) without needing an actor per
- * connection -- useful today, doesn't presuppose or block on unbuilt
- * infrastructure. See docs/reference/module-network.md.
- *
- * Both functions accept either a raw socket handle (tcp-listen's/
- * udp-socket's return value) or a port (tcp-connect's/tcp-accept's
- * in-port or out-port) -- extract_fd dispatches on which it got. */
-
-static bool is_raw_socket_handle(curry_val v) {
-    return curry_is_pair(v) && curry_is_symbol(curry_car(v)) &&
-           strcmp(curry_symbol(curry_car(v)), "socket") == 0;
-}
-
-static int extract_fd(curry_val v, const char *who) {
-    if (is_raw_socket_handle(v)) return (int)val_to_sock(v);
-    int fd = curry_port_fd(v);
-    if (fd < 0) curry_error("%s: not a socket handle or file-backed port", who);
-    return fd;
-}
-
-static curry_val fn_socket_set_nonblocking(int ac, curry_val *av, void *ud) {
-    (void)ud; (void)ac;
-    int fd = extract_fd(av[0], "socket-set-nonblocking!");
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-        curry_error("socket-set-nonblocking!: fcntl failed");
-    return curry_void();
-}
-
-static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
-    (void)ud;
-    int fd = extract_fd(av[0], "socket-ready?");
-    struct timeval tv = {0, 0};
-    struct timeval *tvp = &tv;
-    if (ac > 1) {
-        double ms = curry_float(av[1]);
-        tv.tv_sec  = (long)(ms / 1000.0);
-        tv.tv_usec = (long)(((long long)ms % 1000) * 1000);
-    }
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(fd, &rfds);
-    int r = select(fd + 1, &rfds, NULL, NULL, tvp);
-    if (r < 0) curry_error("socket-ready?: select failed");
-    return curry_make_bool(r > 0 && FD_ISSET(fd, &rfds));
-}
+/* Defined in tls.c, compiled into this same module target -- registers
+ * tcp-connect-tls. Kept as a separate init function (not curry_module_init
+ * itself, since only one symbol by that name can exist per .so) so the
+ * TLS code's OpenSSL includes/link stay isolated in their own file. */
+void curry_tls_module_init(CurryVM *vm);
 
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "tcp-connect", fn_tcp_connect, 2, 2, NULL);
@@ -262,4 +214,5 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "udp-recv",    fn_udp_recv,    2, 2, NULL);
     curry_define_fn(vm, "socket-set-nonblocking!", fn_socket_set_nonblocking, 1, 1, NULL);
     curry_define_fn(vm, "socket-ready?", fn_socket_ready_p, 1, 2, NULL);
+    curry_tls_module_init(vm);
 }

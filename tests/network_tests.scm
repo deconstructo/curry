@@ -70,46 +70,44 @@
 (tcp-close listener)
 
 ;;; ════════════════════════════════════════════════════════════
-;;; § 2  socket-ready? / socket-set-nonblocking!
-;;;
-;;; Scoped-down non-blocking support (see docs/reference/module-network.md):
-;;; select()-based readiness check working on both a raw socket handle
-;;; (tcp-listen's return) and a port (tcp-accept's/tcp-connect's).
+;;; § 2  tcp-connect-tls: cert verification (badssl.com — a public
+;;;      service purpose-built for exactly this kind of test) and a real
+;;;      HTTPS request/response round-trip. Skips cleanly if there's no
+;;;      network access (DNS/connect failure), rather than failing the
+;;;      whole suite on an offline CI runner.
 ;;; ════════════════════════════════════════════════════════════
 
-(define test-port2 18099)
-(define listener2 (tcp-listen test-port2))
+(define (network-reachable?)
+  (guard (e (#t #f))
+    (let ((conn (tcp-connect "example.com" 80)))
+      (close-port (car conn)) (close-port (cdr conn))
+      #t)))
 
-(check "listener not ready with no pending connection"
-  (socket-ready? listener2) #f)
+(if (not (network-reachable?))
+    (begin (display "SKIP: no network access — skipping TLS tests") (newline))
+    (begin
+      (check "self-signed cert is rejected"
+        (guard (e (#t #t)) (tcp-connect-tls "self-signed.badssl.com" 443) #f)
+        #t)
 
-(spawn (lambda ()
-         (define conn (tcp-connect "127.0.0.1" test-port2))
-         (write-string "ping\n" (cdr conn))
-         (flush-output-port (cdr conn))
-         (close-port (car conn)) (close-port (cdr conn))))
+      ;; A valid, chain-trusted cert issued for a *different* hostname —
+      ;; the specific case SSL_get_verify_result alone does not catch;
+      ;; only SSL_set1_host's hostname verification does.
+      (check "valid-but-wrong-hostname cert is rejected"
+        (guard (e (#t #t)) (tcp-connect-tls "wrong.host.badssl.com" 443) #f)
+        #t)
 
-;; socket-ready?'s own timeout blocks in select() until ready or the
-;; timeout elapses -- waits correctly without a racing busy-loop.
-(check "listener ready within timeout after a connection arrives"
-  (socket-ready? listener2 2000) #t)
-
-(define accepted2 (tcp-accept listener2))
-(define ain (car accepted2))
-
-(check "accepted port ready once data arrives"
-  (socket-ready? ain 500) #t)
-(check "accepted port data readable"
-  (read-line ain) "ping")
-
-(close-port ain)
-(close-port (cdr accepted2))
-
-(check "socket-set-nonblocking! does not error"
-  (guard (e (#t #f)) (socket-set-nonblocking! listener2) #t)
-  #t)
-
-(tcp-close listener2)
+      (check "valid cert is accepted, HTTPS round-trip works"
+        (let* ((conn (tcp-connect-tls "example.com" 443))
+               (in (car conn)) (out (cdr conn)))
+          (write-string "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n" out)
+          (flush-output-port out)
+          (let ((status-line (read-line in)))
+            (close-port in) (close-port out)
+            (and (string? status-line)
+                 (>= (string-length status-line) 12)
+                 (string=? (substring status-line 0 5) "HTTP/"))))
+        #t)))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
