@@ -60,6 +60,21 @@ val_t port_open_file(const char *path, int flags) {
     return v;
 }
 
+val_t port_wrap_fd(int fd, int flags) {
+    const char *mode;
+    if ((flags & PORT_BINARY)) {
+        mode = (flags & PORT_OUTPUT) ? "wb" : "rb";
+    } else {
+        mode = (flags & PORT_OUTPUT) ? "w" : "r";
+    }
+    FILE *fp = fdopen(fd, mode);
+    if (!fp) return V_FALSE;
+    val_t v = make_port(flags);
+    as_port(v)->u.fp = fp;
+    gc_finalizer(as_port(v), port_gc_finalize, NULL);
+    return v;
+}
+
 val_t port_open_input_string(const char *str, uint32_t len) {
     val_t v = make_port(PORT_INPUT | PORT_STRING);
     Port *p = as_port(v);

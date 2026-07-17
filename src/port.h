@@ -23,6 +23,12 @@ val_t port_open_input_bytevector(const uint8_t *data, uint32_t len);
 val_t port_open_output_bytevector(void);
 val_t port_wrap_file(FILE *fp, int flags);
 
+/* Wrap an existing file descriptor (e.g. a socket) as a port: fdopen()s it
+ * with a mode string chosen from flags (mirroring port_open_file's mode
+ * logic) and registers a GC finalizer to close it, same as a file opened
+ * via port_open_file. Returns V_FALSE if fdopen fails. */
+val_t port_wrap_fd(int fd, int flags);
+
 /* ---- Standard ports ---- */
 extern val_t PORT_STDIN, PORT_STDOUT, PORT_STDERR;
 void port_init(void);

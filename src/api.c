@@ -15,6 +15,7 @@
 #include "vm.h"
 #include "builtins.h"
 #include "gc.h"
+#include "port.h"
 #include <string.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -162,6 +163,13 @@ curry_val curry_make_octonion(const double e[8]) {
 }
 
 /* ---- List helpers ---- */
+
+/* ---- Ports ---- */
+
+curry_val curry_make_port_from_fd(int fd, bool output, bool binary) {
+    int flags = (output ? PORT_OUTPUT : PORT_INPUT) | (binary ? PORT_BINARY : 0);
+    return port_wrap_fd(fd, flags);
+}
 
 curry_val curry_list(int n, ...) {
     va_list ap;

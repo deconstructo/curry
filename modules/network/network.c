@@ -4,12 +4,18 @@
  * Scheme API:
  *   (tcp-connect host port)         -> port-pair (in-port . out-port)
  *   (tcp-listen port backlog)       -> server-socket
- *   (tcp-accept server)             -> port-pair
- *   (tcp-close server)              -> void
+ *   (tcp-accept server)             -> port-pair (in-port . out-port)
+ *   (tcp-close server)              -> void      (closes tcp-listen's raw socket;
+ *                                                  port pairs use close-port)
  *   (udp-socket)                    -> socket
  *   (udp-bind sock port)            -> void
  *   (udp-send sock data host port)  -> void
  *   (udp-recv sock maxbytes)        -> (data host port)
+ *
+ * tcp-connect/tcp-accept return an actual (in-port . out-port) pair now
+ * (see curry_make_port_from_fd in the public API) — close each end with
+ * close-port. tcp-listen's own listening socket is not a stream and stays
+ * a raw handle, closed with tcp-close.
  *
  * Non-blocking I/O and async support are planned via integration
  * with the actor system (each connection runs in its own actor).
@@ -75,12 +81,17 @@ static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
     }
     freeaddrinfo(res);
 
-    /* Wrap as FILE* for use as Scheme ports */
-    FILE *rfp = fdopen((int)fd, "r");
-    FILE *wfp = fdopen((int)dup((int)fd), "w");
-    (void)rfp; (void)wfp;
-    /* Return sock handle; caller uses port wrappers */
-    return sock_to_val(fd);
+    /* Wrap as a port pair: (in-port . out-port). Two independent FILE*
+     * streams over dup()'d fds (not one bidirectional stream) since a
+     * Curry port is one-directional — matches the doc comment's
+     * `-> port-pair (in-port . out-port)` contract. */
+    int wfd = dup((int)fd);
+    if (wfd < 0) { sock_close(fd); curry_error("tcp-connect: dup failed"); }
+    curry_val in_port  = curry_make_port_from_fd((int)fd, false, false);
+    curry_val out_port = curry_make_port_from_fd(wfd, true, false);
+    if (!curry_is_true(in_port) || !curry_is_true(out_port))
+        curry_error("tcp-connect: fdopen failed");
+    return curry_make_pair(in_port, out_port);
 }
 
 static curry_val fn_tcp_listen(int ac, curry_val *av, void *ud) {
@@ -117,7 +128,15 @@ static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
     sock_t client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
     if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
-    return sock_to_val(client);
+
+    /* Port pair, same rationale as fn_tcp_connect. */
+    int wfd = dup((int)client);
+    if (wfd < 0) { sock_close(client); curry_error("tcp-accept: dup failed"); }
+    curry_val in_port  = curry_make_port_from_fd((int)client, false, false);
+    curry_val out_port = curry_make_port_from_fd(wfd, true, false);
+    if (!curry_is_true(in_port) || !curry_is_true(out_port))
+        curry_error("tcp-accept: fdopen failed");
+    return curry_make_pair(in_port, out_port);
 }
 
 static curry_val fn_tcp_close(int ac, curry_val *av, void *ud) {
