@@ -70,6 +70,39 @@
 (tcp-close listener)
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 2  tcp-connect-tls: cert verification (badssl.com — a public
+;;;      service purpose-built for exactly this kind of test) and a real
+;;;      HTTPS request/response round-trip. Skips cleanly if there's no
+;;;      network access (DNS/connect failure), rather than failing the
+;;;      whole suite on an offline CI runner.
+;;; ════════════════════════════════════════════════════════════
+
+(define (network-reachable?)
+  (guard (e (#t #f))
+    (let ((conn (tcp-connect "example.com" 80)))
+      (close-port (car conn)) (close-port (cdr conn))
+      #t)))
+
+(if (not (network-reachable?))
+    (begin (display "SKIP: no network access — skipping TLS tests") (newline))
+    (begin
+      (check "self-signed cert is rejected"
+        (guard (e (#t #t)) (tcp-connect-tls "self-signed.badssl.com" 443) #f)
+        #t)
+
+      (check "valid cert is accepted, HTTPS round-trip works"
+        (let* ((conn (tcp-connect-tls "example.com" 443))
+               (in (car conn)) (out (cdr conn)))
+          (write-string "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n" out)
+          (flush-output-port out)
+          (let ((status-line (read-line in)))
+            (close-port in) (close-port out)
+            (and (string? status-line)
+                 (>= (string-length status-line) 12)
+                 (string=? (substring status-line 0 5) "HTTP/"))))
+        #t)))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

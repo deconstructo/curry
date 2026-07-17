@@ -195,6 +195,12 @@ static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     return bv;
 }
 
+/* Defined in tls.c, compiled into this same module target -- registers
+ * tcp-connect-tls. Kept as a separate init function (not curry_module_init
+ * itself, since only one symbol by that name can exist per .so) so the
+ * TLS code's OpenSSL includes/link stay isolated in their own file. */
+void curry_tls_module_init(CurryVM *vm);
+
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "tcp-connect", fn_tcp_connect, 2, 2, NULL);
     curry_define_fn(vm, "tcp-listen",  fn_tcp_listen,  1, 2, NULL);
@@ -204,4 +210,5 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "udp-bind",    fn_udp_bind,    2, 2, NULL);
     curry_define_fn(vm, "udp-send",    fn_udp_send,    4, 4, NULL);
     curry_define_fn(vm, "udp-recv",    fn_udp_recv,    2, 2, NULL);
+    curry_tls_module_init(vm);
 }
