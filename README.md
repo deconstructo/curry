@@ -6,6 +6,8 @@ Source is compiled to bytecode and executed on a stack-based VM. When built with
 
 Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands.
 
+See [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) for why the project is built this way — pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
+
 ## Documents
 
 Documentation is split into two directories:
