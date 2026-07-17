@@ -40,6 +40,8 @@ typedef SOCKET sock_t;
 #  include <netdb.h>
 #  include <unistd.h>
 #  include <arpa/inet.h>
+#  include <fcntl.h>
+#  include <sys/select.h>
 typedef int sock_t;
 #  define SOCK_INVALID (-1)
 #  define sock_close close
@@ -210,5 +212,7 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "udp-bind",    fn_udp_bind,    2, 2, NULL);
     curry_define_fn(vm, "udp-send",    fn_udp_send,    4, 4, NULL);
     curry_define_fn(vm, "udp-recv",    fn_udp_recv,    2, 2, NULL);
+    curry_define_fn(vm, "socket-set-nonblocking!", fn_socket_set_nonblocking, 1, 1, NULL);
+    curry_define_fn(vm, "socket-ready?", fn_socket_ready_p, 1, 2, NULL);
     curry_tls_module_init(vm);
 }

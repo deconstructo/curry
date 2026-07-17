@@ -1,5 +1,9 @@
 # Module: (curry network)
 
+*v1.2.2 — 2026-06-07; non-blocking mode + readiness check added later.*
+
+TCP and UDP socket primitives, plus non-blocking mode and readiness
+polling. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows.
 *v1.2.2 — 2026-06-07; TLS client support added later.*
 
 TCP, TLS, and UDP socket primitives. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows; TLS via OpenSSL.
@@ -71,6 +75,29 @@ server-side TLS.
 UDP is datagram-oriented, not stream-oriented, so `udp-socket` stays a raw
 handle — there's no port wrapping for it.
 
+## Non-blocking mode and readiness
+
+```scheme
+(socket-set-nonblocking! sock)     ; fcntl O_NONBLOCK
+(socket-ready? sock)               ; immediate poll, #t if data/connection pending
+(socket-ready? sock timeout-ms)    ; block up to timeout-ms waiting for readiness
+```
+
+Both accept either a raw socket handle (`tcp-listen`'s/`udp-socket`'s
+return value) or a port (`tcp-connect`'s/`tcp-accept`'s in-port or
+out-port) — whichever you have on hand. `socket-ready?` on a listening
+socket means "`tcp-accept` would not block"; on a connected port it means
+"there's data to read without blocking."
+
+This is deliberately **not** a full epoll/kqueue event-loop reactor.
+curry's actors are real OS threads (not green threads/coroutines — those
+are a separate, unimplemented roadmap item), so a full reactor integration
+wouldn't buy much over the current thread-per-actor model yet. What's here
+covers a real, immediately useful case: multiplexing a handful of sockets
+on one thread without needing an actor per connection. See
+[issue #15](https://github.com/deconstructo/curry/issues/15) for the
+fuller reactor, if/when green threads make it worthwhile.
+
 ## Examples
 
 ### HTTP GET (manual)
@@ -138,6 +165,36 @@ handle — there's no port wrapping for it.
         (echo)))
     (close-port in)
     (close-port out)))
+  (loop))
+```
+
+### Single-threaded multiplexed server (no actor per connection)
+
+```scheme
+(import (curry network))
+(import (scheme base))
+
+(define listener (tcp-listen 7778))
+(define conns '())   ; list of (in . out) pairs currently connected
+
+(let loop ()
+  ;; Accept a new connection if one is pending, without blocking.
+  (when (socket-ready? listener)
+    (set! conns (cons (tcp-accept listener) conns)))
+  ;; Service whichever existing connections have data ready.
+  (set! conns
+    (filter
+      (lambda (conn)
+        (if (socket-ready? (car conn))
+            (let ((line (read-line (car conn))))
+              (if (eof-object? line)
+                  (begin (close-port (car conn)) (close-port (cdr conn)) #f)
+                  (begin (write-string line (cdr conn))
+                         (write-string "\n" (cdr conn))
+                         (flush-output-port (cdr conn))
+                         #t)))
+            #t))
+      conns))
   (loop))
 ```
 
