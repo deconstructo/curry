@@ -35,6 +35,9 @@ endif()
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)
+add_test(NAME debugger
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_debugger.sh
+            $<TARGET_FILE:curry>)
 
 # Module tests need the build-tree module directory on the search path
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
