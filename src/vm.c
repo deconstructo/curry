@@ -1162,10 +1162,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
 /* Compile a single Scheme expression and immediately run it in the VM.
    The `env` argument is accepted for API compatibility with the tree-walker
-   but is ignored; all global operations use GLOBAL_ENV. */
+   but is ignored; all global operations use GLOBAL_ENV.
+
+   The closure is pushed as the callee before vm_run: pop_frame's normal
+   return path does sp = slots - 1 to drop callee + args, so a frame
+   entered without a pushed callee eats one slot of the caller's stack.
+   Top-level callers never noticed (the frame_count == 0 path resets sp
+   to the stack base), but nested evaluation — the debugger's p command
+   runs inside a paused vm_run — corrupts the suspended frame without it. */
 val_t vm_eval(val_t expr, val_t env) {
     (void)env;
     val_t cl_val  = compiler_compile(expr);
     BcClosure *cl = as_bcclosure(cl_val);
+    vm_push(cl_val);
     return vm_run(cl, 0);
 }
