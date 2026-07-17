@@ -29,6 +29,14 @@ val_t port_wrap_file(FILE *fp, int flags);
  * via port_open_file. Returns V_FALSE if fdopen fails. */
 val_t port_wrap_fd(int fd, int flags);
 
+/* Wrap an already-open FILE* (e.g. a funopen/fopencookie custom stream
+ * backed by something other than a plain fd, such as a TLS session) as a
+ * port, taking ownership: registers the same auto-close-on-GC finalizer
+ * port_open_file/port_wrap_fd do. Unlike port_wrap_file (used only for
+ * stdin/stdout/stderr, which must never be auto-closed), this is for
+ * "this FILE* is the port's exclusive property." */
+val_t port_wrap_file_owned(FILE *fp, int flags);
+
 /* ---- Standard ports ---- */
 extern val_t PORT_STDIN, PORT_STDOUT, PORT_STDERR;
 void port_init(void);

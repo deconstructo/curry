@@ -45,34 +45,33 @@ static void port_gc_finalize(void *obj, void *cd) {
     }
 }
 
-val_t port_open_file(const char *path, int flags) {
-    const char *mode;
-    if ((flags & PORT_BINARY)) {
-        mode = (flags & PORT_OUTPUT) ? "wb" : "rb";
-    } else {
-        mode = (flags & PORT_OUTPUT) ? "w" : "r";
-    }
-    FILE *fp = fopen(path, mode);
-    if (!fp) return V_FALSE;
+/* Wrap an already-open FILE* (any kind — plain fd, funopen/fopencookie
+ * custom stream, etc.) as a port and register the auto-close finalizer,
+ * same as port_open_file's own bookkeeping. The single place that owns
+ * "this port is responsible for eventually fclose()-ing its FILE*". */
+val_t port_wrap_file_owned(FILE *fp, int flags) {
     val_t v = make_port(flags);
     as_port(v)->u.fp = fp;
     gc_finalizer(as_port(v), port_gc_finalize, NULL);
     return v;
 }
 
-val_t port_wrap_fd(int fd, int flags) {
-    const char *mode;
-    if ((flags & PORT_BINARY)) {
-        mode = (flags & PORT_OUTPUT) ? "wb" : "rb";
-    } else {
-        mode = (flags & PORT_OUTPUT) ? "w" : "r";
-    }
-    FILE *fp = fdopen(fd, mode);
+static const char *mode_str(int flags) {
+    if ((flags & PORT_BINARY))
+        return (flags & PORT_OUTPUT) ? "wb" : "rb";
+    return (flags & PORT_OUTPUT) ? "w" : "r";
+}
+
+val_t port_open_file(const char *path, int flags) {
+    FILE *fp = fopen(path, mode_str(flags));
     if (!fp) return V_FALSE;
-    val_t v = make_port(flags);
-    as_port(v)->u.fp = fp;
-    gc_finalizer(as_port(v), port_gc_finalize, NULL);
-    return v;
+    return port_wrap_file_owned(fp, flags);
+}
+
+val_t port_wrap_fd(int fd, int flags) {
+    FILE *fp = fdopen(fd, mode_str(flags));
+    if (!fp) return V_FALSE;
+    return port_wrap_file_owned(fp, flags);
 }
 
 val_t port_open_input_string(const char *str, uint32_t len) {
