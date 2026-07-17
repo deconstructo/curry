@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +136,13 @@ curry_val  curry_list(int n, ...);  /* curry_list(3, a, b, c) -> (a b c) */
  * closed) — do not close fd yourself after this call. Returns a false-y
  * value (curry_is_true false) if fdopen() fails. */
 curry_val  curry_make_port_from_fd(int fd, bool output, bool binary);
+
+/* Wrap an already-open FILE* (e.g. a funopen/fopencookie custom stream
+ * backed by something other than a plain fd, such as a TLS session) as a
+ * port, taking ownership — the port's GC finalizer (or an explicit
+ * close-port) will fclose(fp), which for a custom stream invokes
+ * whatever close callback it was created with. */
+curry_val  curry_make_port_from_file(FILE *fp, bool output, bool binary);
 
 #ifdef __cplusplus
 } /* extern "C" */
