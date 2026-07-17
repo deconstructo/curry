@@ -1,8 +1,12 @@
 # Module: (curry network)
 
-*v1.2.2 — 2026-06-07*
+*v1.2.2 — 2026-06-07; non-blocking mode + readiness check added later.*
 
-TCP and UDP socket primitives. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows.
+TCP and UDP socket primitives, plus non-blocking mode and readiness
+polling. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows.
+*v1.2.2 — 2026-06-07; TLS client support added later.*
+
+TCP, TLS, and UDP socket primitives. Uses POSIX sockets on Linux/macOS and Winsock2 on Windows; TLS via OpenSSL.
 
 ## Installation
 
@@ -41,6 +45,24 @@ stream, so not a port) — close it with `tcp-close`. Each accepted
 connection from `tcp-accept` is a port pair like `tcp-connect`'s, closed
 with `close-port` on each end.
 
+### TLS client
+
+```scheme
+(tcp-connect-tls host port)   ; connect + TLS handshake, return (in-port . out-port)
+```
+
+Same port-pair contract as `tcp-connect`, but the connection is TLS-wrapped
+via OpenSSL. Certificate verification is **on** by default (system trust
+store, `SSL_VERIFY_PEER`) — connecting to a host with an invalid or
+self-signed certificate raises rather than silently connecting insecurely.
+SNI (`SSL_set_tlsext_host_name`) is sent automatically using the `host`
+argument, needed by most modern HTTPS servers that multiplex by hostname.
+
+No TLS server side (`tls-listen`/`tls-accept`) yet — client-side was the
+actually-blocking gap (talking to HTTPS-only APIs over raw sockets); see
+[issue #14](https://github.com/deconstructo/curry/issues/14) if you need
+server-side TLS.
+
 ## UDP
 
 ```scheme
@@ -52,6 +74,29 @@ with `close-port` on each end.
 
 UDP is datagram-oriented, not stream-oriented, so `udp-socket` stays a raw
 handle — there's no port wrapping for it.
+
+## Non-blocking mode and readiness
+
+```scheme
+(socket-set-nonblocking! sock)     ; fcntl O_NONBLOCK
+(socket-ready? sock)               ; immediate poll, #t if data/connection pending
+(socket-ready? sock timeout-ms)    ; block up to timeout-ms waiting for readiness
+```
+
+Both accept either a raw socket handle (`tcp-listen`'s/`udp-socket`'s
+return value) or a port (`tcp-connect`'s/`tcp-accept`'s in-port or
+out-port) — whichever you have on hand. `socket-ready?` on a listening
+socket means "`tcp-accept` would not block"; on a connected port it means
+"there's data to read without blocking."
+
+This is deliberately **not** a full epoll/kqueue event-loop reactor.
+curry's actors are real OS threads (not green threads/coroutines — those
+are a separate, unimplemented roadmap item), so a full reactor integration
+wouldn't buy much over the current thread-per-actor model yet. What's here
+covers a real, immediately useful case: multiplexing a handful of sockets
+on one thread without needing an actor per connection. See
+[issue #15](https://github.com/deconstructo/curry/issues/15) for the
+fuller reactor, if/when green threads make it worthwhile.
 
 ## Examples
 
@@ -65,6 +110,27 @@ handle — there's no port wrapping for it.
 (define out (cdr conn))
 
 (write-string "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n" out)
+(flush-output-port out)
+
+(let loop ((line (read-line in)))
+  (unless (eof-object? line)
+    (display line) (newline)
+    (loop (read-line in))))
+
+(close-port in)
+(close-port out)
+```
+
+### HTTPS GET (manual, TLS)
+
+```scheme
+(import (curry network))
+
+(define conn (tcp-connect-tls "example.com" 443))
+(define in  (car conn))
+(define out (cdr conn))
+
+(write-string "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n" out)
 (flush-output-port out)
 
 (let loop ((line (read-line in)))
@@ -102,6 +168,36 @@ handle — there's no port wrapping for it.
   (loop))
 ```
 
+### Single-threaded multiplexed server (no actor per connection)
+
+```scheme
+(import (curry network))
+(import (scheme base))
+
+(define listener (tcp-listen 7778))
+(define conns '())   ; list of (in . out) pairs currently connected
+
+(let loop ()
+  ;; Accept a new connection if one is pending, without blocking.
+  (when (socket-ready? listener)
+    (set! conns (cons (tcp-accept listener) conns)))
+  ;; Service whichever existing connections have data ready.
+  (set! conns
+    (filter
+      (lambda (conn)
+        (if (socket-ready? (car conn))
+            (let ((line (read-line (car conn))))
+              (if (eof-object? line)
+                  (begin (close-port (car conn)) (close-port (cdr conn)) #f)
+                  (begin (write-string line (cdr conn))
+                         (write-string "\n" (cdr conn))
+                         (flush-output-port (cdr conn))
+                         #t)))
+            #t))
+      conns))
+  (loop))
+```
+
 ### UDP echo
 
 > **Currently broken** — `udp-recv` uses `recv()`, not `recvfrom()`, so it
@@ -130,7 +226,5 @@ handle — there's no port wrapping for it.
   (output ports are buffered by default, same as any other Curry port).
 - `tcp-listen` binds to `0.0.0.0`/`::` (all interfaces, dual-stack). To
   bind to a specific interface, use the raw C extension API.
-- For TLS, wrap a `tcp-connect` socket with the crypto module (OpenSSL BIO)
-  — not yet exposed in the Scheme API; use `system` to call
-  `openssl s_client` as a workaround. See
-  [issue #14](https://github.com/deconstructo/curry/issues/14).
+- `tcp-connect-tls` requires `BUILD_MODULE_NETWORK=ON` (default) and links
+  OpenSSL (already a dependency via `(curry crypto)`) — no extra CMake flag.
