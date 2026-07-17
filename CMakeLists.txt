@@ -682,7 +682,11 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "libgc1t64 | libgc1 | libgc2, libgmp10, libreadline8 | libreadline8t64 | libreadline9, libsqlite3-0")
 
-# Optional modules — only needed if those modules were built into this package
+# Optional modules — only needed if those modules were built into this package.
+# libhdf5 is the one exception: (curry hdf5) is pure Scheme + FFI and dlopen's
+# it at runtime rather than linking at build time, so it's recommended
+# regardless of build configuration — package name suffixes drift across
+# Debian/Ubuntu releases (worth re-checking against current targets).
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
     "libssl3 | libssl1.1, \
      libcurl4 | libcurl4t64, \
@@ -690,7 +694,8 @@ set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
      libpng16-16 | libpng16-16t64, \
      libjpeg-turbo8 | libjpeg62-turbo | libjpeg-turbo9, \
      libpaho-mqtt3cs1 | libpaho-mqtt3c1, \
-     libldap-2.5-0 | libldap-2.4-2")
+     libldap-2.5-0 | libldap-2.4-2, \
+     libhdf5-103 | libhdf5-200 | libhdf5-cpp-103")
 
 # Heavy optional modules — useful but not installed by default
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS
@@ -705,7 +710,7 @@ set(CPACK_RPM_PACKAGE_GROUP         "Development/Languages")
 set(CPACK_RPM_PACKAGE_REQUIRES
     "gc >= 8.0, gmp >= 6.0, readline >= 8.0, sqlite-libs")
 set(CPACK_RPM_PACKAGE_RECOMMENDS
-    "openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap")
+    "openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap, hdf5")
 set(CPACK_RPM_PACKAGE_SUGGESTS
     "qt6-qtbase, plplot")
 

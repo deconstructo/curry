@@ -201,10 +201,10 @@ Both packages install to standard system paths:
 
 | Package type | Hard deps | Recommended | Suggested |
 |---|---|---|---|
-| `.deb` | `libgc2`, `libgmp10`, `libreadline8`, `libsqlite3-0` | OpenSSL, libcurl, libgit2, libpng, libjpeg, paho-c, libldap | Qt6, PLplot |
-| `.rpm` | `gc >= 8.0`, `gmp >= 6.0`, `readline >= 8.0`, `sqlite-libs` | openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap | qt6-qtbase, plplot |
+| `.deb` | `libgc2`, `libgmp10`, `libreadline8`, `libsqlite3-0` | OpenSSL, libcurl, libgit2, libpng, libjpeg, paho-c, libldap, libhdf5 | Qt6, PLplot |
+| `.rpm` | `gc >= 8.0`, `gmp >= 6.0`, `readline >= 8.0`, `sqlite-libs` | openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap, hdf5 | qt6-qtbase, plplot |
 
-Optional modules can be enabled at configure time before packaging — any module whose library is present will be built and included in the package automatically.
+Optional modules can be enabled at configure time before packaging — any module whose library is present will be built and included in the package automatically. `libhdf5` is the one exception: `(curry hdf5)` is pure Scheme + FFI and `dlopen`s it at runtime rather than linking at build time, so it's recommended regardless of build configuration — `(curry fits)` and `(curry netcdf)` need no extra library at all.
 
 ---
 

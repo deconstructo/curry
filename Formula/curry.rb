@@ -35,6 +35,12 @@ class Curry < Formula
   depends_on "jpeg-turbo"
   depends_on "libpaho-mqtt"
   # curl ships with macOS; no separate dep needed for graphql/storage
+  #
+  # (curry hdf5) is pure Scheme + FFI — it dlopen's libhdf5 at runtime rather
+  # than linking at build time, so it's deliberately not a depends_on here
+  # (Homebrew's dependency types are all build-time gates, with no "runtime
+  # recommends" concept the way apt/dnf's Recommends: fields have). Users who
+  # want (curry hdf5) should separately `brew install hdf5`.
 
   # Option-gated deps
   depends_on "openldap" if build.with? "ldap"

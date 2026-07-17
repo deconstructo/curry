@@ -83,6 +83,16 @@ if(BUILD_LLVM)
     add_test(NAME jit COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
 endif()
 
+# Pure-Scheme scientific I/O modules (fits/netcdf) plus the FFI-based hdf5
+# wrapper (requires BUILD_FFI=ON to compile; libhdf5 itself is a
+# runtime-only dlopen dependency, so hdf5_tests.scm skips cleanly if it's
+# not installed rather than needing a build-time gate here).
+add_test(NAME fits    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fits_tests.scm)
+add_test(NAME netcdf  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/netcdf_tests.scm)
+if(BUILD_FFI)
+    add_test(NAME hdf5 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hdf5_tests.scm)
+endif()
+
 if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
     add_test(NAME profiling COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/profiling_tests.scm)
     set_tests_properties(profiling PROPERTIES

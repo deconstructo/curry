@@ -137,6 +137,9 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [profiling](docs/reference/profiling.md) | `(curry profiling)` | Runtime call-count and wall-clock profiler for named closures and primitives | — |
 | [rpi](docs/reference/module-rpi.md) | `(curry rpi)` | GPIO, I2C, SPI, PWM for Raspberry Pi and Linux embedded boards *(Linux only)* | `libgpiod-dev` |
 | [sicm](docs/reference/module-sicm.md) | `(curry sicm)` | Classical mechanics (SICM): Lagrangian, Hamiltonian, Poisson brackets | — |
+| [fits](docs/reference/module-fits.md) | `(curry fits)` | FITS scientific image read/write *(pure Scheme, no build step)* | — |
+| [netcdf](docs/reference/module-netcdf.md) | `(curry netcdf)` | NetCDF classic format reader *(pure Scheme, no build step)* | — |
+| [hdf5](docs/reference/module-hdf5.md) | `(curry hdf5)` | HDF5 dataset/attribute read/write via FFI *(pure Scheme + FFI, no build step)* | `libhdf5` installed at runtime (`-DBUILD_FFI=ON`) |
 
 ### SRFI compatibility (`surfage`)
 
