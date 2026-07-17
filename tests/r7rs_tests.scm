@@ -47,6 +47,19 @@
 (check "char-upcase" (char-upcase #\a) #\A)
 (check "char-alphabetic?" (char-alphabetic? #\a) #t)
 
+;;; Unicode character classification and case mapping (beyond ASCII/Latin-1
+;;; ctype.h range — see docs/reference issue on char-alphabetic? etc.
+;;; misusing locale-dependent <ctype.h> for full Unicode codepoints)
+(check "char-alphabetic? Greek"       (char-alphabetic? (integer->char 955)) #t)   ; λ
+(check "char-alphabetic? Latin-1"     (char-alphabetic? #\é) #t)
+(check "char-numeric? Arabic-Indic"   (char-numeric? (integer->char 1635)) #t)     ; ٣ (3)
+(check "char-upcase Greek"            (char-upcase (integer->char 955)) (integer->char 923))   ; λ -> Λ
+(check "char-downcase Greek"          (char-downcase (integer->char 923)) (integer->char 955))  ; Λ -> λ
+(check "char-alphabetic? Cuneiform"   (char-alphabetic? (integer->char #x12000)) #t) ; 𒀀 (category Lo)
+(check "char-foldcase Kelvin sign"    (char-foldcase (integer->char 8490)) #\k)      ; U+212A -> k
+(check "char-upcase literal reads full codepoint"
+       (char->integer #\λ) 955)
+
 ;;; Strings
 (check "string-length" (string-length "hello") 5)
 (check "string-ref" (string-ref "hello" 1) #\e)

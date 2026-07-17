@@ -267,6 +267,12 @@ static val_t read_char_literal(val_t port) {
     StrBuf sb; sb_init(&sb);
     int c = next_char(port);
     if (c == -1) read_error("unexpected EOF in character literal");
+    int first_cp = c;   /* next_char() already decodes full UTF-8 codepoints;
+                          * sb_push below truncates to a byte, so the single-
+                          * character case (sb.len == 1) must return this,
+                          * not a byte reconstructed from the truncated
+                          * buffer — named literals ("space", "newline", ...)
+                          * and \xHHHH escapes are ASCII-only and unaffected. */
     sb_push(&sb, (char)c);
     /* Peek: if more non-delimiter chars follow, it's a named char */
     while (!is_delimiter(peek_char_port(port))) {
@@ -274,7 +280,7 @@ static val_t read_char_literal(val_t port) {
     }
     sb.buf[sb.len] = '\0';
 
-    if (sb.len == 1)              return vchr((uint32_t)(unsigned char)sb.buf[0]);
+    if (sb.len == 1)              return vchr((uint32_t)first_cp);
     if (!strcmp(sb.buf,"space"))  return vchr(' ');
     if (!strcmp(sb.buf,"newline"))return vchr('\n');
     if (!strcmp(sb.buf,"tab"))    return vchr('\t');

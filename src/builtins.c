@@ -14,6 +14,7 @@
 #include "gc.h"
 #include "profiling.h"
 #include "numtheory.h"
+#include "unicode.h"
 #ifdef BUILD_MPFR
 #include "mpfr_num.h"
 #endif
@@ -591,12 +592,12 @@ static val_t prim_current_number_notation(int ac, val_t *av, void *ud) {
 /* ---- Characters ---- */
 static val_t prim_char_to_int(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix((intptr_t)vunchr(av[0]));}
 static val_t prim_int_to_char(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "integer->char: not an exact integer"); return vchr((uint32_t)vunfix(av[0]));}
-static val_t prim_char_upcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)toupper((int)vunchr(av[0])));}
-static val_t prim_char_downcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)tolower((int)vunchr(av[0])));}
-static val_t prim_char_foldcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr((uint32_t)tolower((int)vunchr(av[0])));}
-#define CHAR_PRED(nm,test) static val_t prim_char_##nm(int ac, val_t *av, void *ud){(void)ac;(void)ud; return vbool(test((int)vunchr(av[0])));}
-CHAR_PRED(alpha_p, isalpha) CHAR_PRED(numeric_p, isdigit) CHAR_PRED(whitespace_p, isspace)
-CHAR_PRED(upper_p, isupper) CHAR_PRED(lower_p, islower)
+static val_t prim_char_upcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_to_upper(vunchr(av[0])));}
+static val_t prim_char_downcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_to_lower(vunchr(av[0])));}
+static val_t prim_char_foldcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_fold_case(vunchr(av[0])));}
+#define CHAR_PRED(nm,test) static val_t prim_char_##nm(int ac, val_t *av, void *ud){(void)ac;(void)ud; return vbool(test(vunchr(av[0])));}
+CHAR_PRED(alpha_p, unicode_is_alphabetic) CHAR_PRED(numeric_p, unicode_is_numeric) CHAR_PRED(whitespace_p, unicode_is_whitespace)
+CHAR_PRED(upper_p, unicode_is_upper) CHAR_PRED(lower_p, unicode_is_lower)
 static val_t prim_char_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])!=vunchr(av[i])) return V_FALSE; return V_TRUE;}
 static val_t prim_char_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])>=vunchr(av[i])) return V_FALSE; return V_TRUE;}
 
