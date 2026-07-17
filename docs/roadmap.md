@@ -1,12 +1,24 @@
 # Curry — Implementation Roadmap
 
-*Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Source: cill_spec.pdf + design sessions.*
+*Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Corrected 2026-07-17
+against actual shipped state through v1.8.0 — see "Where we are now" and
+"Decided against" below. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.5.0 (released); generational GC (Phase 6) shipped as experimental. This document maps the path from here to a compiled Scheme for scientific computing — the full cill specification. It is ordered by dependency, not ambition; each phase unblocks the phases above it.
+Curry is at v1.8.0 (released). Since this roadmap was last updated: Phase 4
+(Extensible CAS) finished completely, generational GC shipped as an
+experimental opt-in backend, a `(curry sets)`/`(curry logic)` pair of
+modules realized part of Phase 7's pluggable-foundations idea in pure
+Scheme, real error backtraces + machine-legible error codes landed, and an
+interactive debugger shipped standalone ahead of Phase 8. Some things were
+also explicitly decided *against* rather than simply not gotten to yet —
+see the "Decided against" section before the summary timeline. This
+document maps the path from here to a compiled Scheme for scientific
+computing — the full cill specification. It is ordered by dependency, not
+ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.3.0)
+## Where we are now (v1.8.0)
 
 | Capability | Status |
 |---|---|
@@ -27,22 +39,26 @@ Curry is at v1.5.0 (released); generational GC (Phase 6) shipped as experimental
 | **Number theory** (primality, factoring, modular arithmetic, combinatorics, CF) | ✓ **v1.2.0** |
 | **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
 | **Sexagesimal / Babylonian number system** | ✓ **v1.2.5** |
-| **Cheney semispace GC** (`--gc semispace`, `gc-collect!`, `gc-stats`) | ✓ **v1.3.0** (`BUILD_MPFR=ON`) |
+| **Cheney semispace GC** (`--gc semispace`, `gc-collect!`, `gc-stats`) | ✓ **v1.3.0** |
 | User rewrite rules (`define-rule`, `define-ruleset`) | ✓ **v1.4.0 Phase 4a** |
 | User algebra declarations (`define-algebra`, `with-assumptions`) | ✓ **v1.4.0 Phase 4b** |
-| Extensible CAS — polynomial, Groebner, Risch, special functions | ✗ (4c–4g in progress) |
-| Generational / moving GC (green threads, incremental) | ✗ |
+| **Extensible CAS — polynomial, Groebner, Risch (partial), special functions** | ✓ **v1.4.0 Phase 4c–4g, complete** |
+| **Generational GC** (nursery+tenured Cheney, write barriers, safepoints) | ✓ **v1.5.0–1.6.3, experimental** (`--gc generational`; Boehm remains default) |
+| **Real error backtraces + machine-legible error codes** | ✓ **v1.7.0** |
+| **`(curry sets)` + `(curry logic)` modules** (multisets, 6 pluggable logics) | ✓ **v1.7.0** — partial, differently-shaped realization of "pluggable set theory foundations" below |
+| **Interactive debugger** (breakpoints, step/next/finish/continue, locals, backtrace) | ✓ **v1.8.0** — a slice of Phase 8 below, arrived standalone/early |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
+| Pluggable scheduler | ✗ |
 | Slim CLOS | ✗ |
-| Pluggable set theory foundations | ✗ |
+| Pluggable set theory foundations (C-level `curry_foundations_ops_t`) | ✗ (see `(curry sets)`/`(curry logic)` above for the Scheme-level equivalent) |
 | Topology | ✗ |
 | GR / QM libraries | ✗ |
-| Introspection (heap, compiler IR, actor debug) | ✗ |
-| Sampling profiler, Tracy/Perfetto tracing | ✗ |
+| Full introspection (heap-walk, compiler IR, actor debug) | ✗ (debugger above covers breakpoints/locals only) |
+| Sampling profiler, Tracy/Perfetto tracing, SIMD tower | ✗ |
 | Property-based testing | ✗ |
 | Scientific I/O (HDF5, NetCDF, FITS) | ✗ |
-| Package manager | ✗ |
+| Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/pkg-design.md` and "Decided against" below |
 | Notebook interface | ✗ |
 | Units and dimensions system | ✗ |
 | Step-by-step CAS (`explain-simplify`) | ✗ |
@@ -258,11 +274,12 @@ stored off the C stack; the FFI `with-pinned-*` macros handle this automatically
 
 ---
 
-## Phase 4 — v1.4: Extensible CAS (in progress on `phase4-extensible-cas`)
+## Phase 4 — v1.4: Extensible CAS ✓ done (v1.4.0)
 
 Makes the CAS user-extensible with pattern-matching rewrite rules and declared
 algebraic structure — essential for user-defined rings, groups, and quantum
-operators.
+operators. **All of 4a–4g shipped in v1.4.0** (2026-06-10); nothing remains
+open on this phase.
 
 ### Phase 4a — User rewrite rules ✓ done (2026-06-10)
 
@@ -279,16 +296,33 @@ See `docs/reference/symbolic.md` § User-defined rewrite rules.
 `sym-expr`, `sym-expr-op`, `sym-expr-nargs`, `sym-expr-arg`.
 See `docs/reference/symbolic.md` § User-defined operator algebras.
 
-### Phase 4c–4g — Remaining (planned)
+### Phase 4c–4g — ✓ done (v1.4.0, 2026-06-10)
 
-Polynomial machinery (`poly-gcd`, `poly-factor`, `poly-roots`,
-`poly-resultant`, `partial-fractions`, Groebner bases), equation solving
-(`solve`, `solve-system`), Risch algorithm (partial — rational + log/exp tower),
-special functions (`gamma`, `bessel-j`, `hermite`, `legendre`,
-`spherical-harmonic`, elliptic integrals), Laurent/Puiseux series.
+**Polynomial machinery (4c):** `poly-gcd`, `poly-resultant`,
+`poly-pseudo-remainder`, `poly-factor` (Yun squarefree + Kronecker),
+`poly-roots` (companion-matrix eigenvalues, degree ≤ 8), Groebner bases
+(`groebner`, Buchberger's algorithm, lex ordering — shipped alongside the
+rest of 4c but missed the v1.4.0 CHANGELOG entry, which is why this
+roadmap had it marked as still-planned).
 
-**Unlocks:** User-defined algebraic structures, GR symbolic computation,
-QM operator algebra.
+**Equation solving (4d):** `solve` (univariate polynomial + simple
+transcendental), `solve-system` (linear, Gaussian elimination).
+
+**Risch integration (4e) — partial:** rational-function integration
+(partial fractions over ℚ) and the log-polynomial extension
+(`f(x)·log(g(x))` forms). Not the full Risch algorithm — no exponential
+tower, no Liouvillian-extension general case.
+
+**Special functions (4f):** orthogonal polynomials (`legendre`,
+`assoc-legendre`, `hermite`, `hermite-prob`, `chebyshev-t`, `chebyshev-u`,
+`laguerre`, `assoc-laguerre`), `spherical-harmonic`, gamma family (`gamma`,
+`log-gamma`, `digamma`, `beta`), Bessel (`bessel-j/y/i/k`), elliptic
+integrals (`elliptic-k/e/f/pi`).
+
+**Extended series (4g):** `laurent`, `puiseux`.
+
+**Unlocked:** User-defined algebraic structures, GR symbolic computation,
+QM operator algebra — all now available for Phase 5 to build on.
 
 ---
 
@@ -333,19 +367,66 @@ parallel ensemble → Qt/PLplot visualisation.
 
 ## Phase 6 — v2.0: Generational GC + Green Threads + Pluggable Scheduler
 
-**Major version bump.** Two architectural changes that interact: the generational
-GC needs to know about green thread stacks; the green thread scheduler is itself
-a pluggable component.
+**Status: generational GC shipped, differently than planned here. Green
+threads, hot reload, and the pluggable scheduler are still entirely
+unstarted.** This phase originally bundled all of these into one breaking
+"v2.0" release where the GC needed to understand green-thread stacks. In
+practice the GC work shipped alone, non-breaking, four versions ago:
 
-**Generational GC:**
-- Nursery (young gen) — bump-pointer, collected frequently
-- Survivor spaces — objects surviving one nursery collection
-- Old generation — tri-colour incremental marking, infrequently collected
-- Large object space — tensors, matrices above threshold; bypasses nursery
-- Dijkstra write barrier at every heap-to-heap pointer store (`llvm.gcwrite`)
-- GC thread separate from mutator threads; incremental to bound pause times
+### ✓ Generational GC — shipped v1.5.0, refined through v1.6.3 (experimental)
 
-**Green threads via LLVM coroutines:**
+What actually got built, and how it differs from the sketch below:
+- **Two generations, not three** — nursery (2 MB `mmap`, bump-pointer) and
+  a single tenured generation (128 MB `mmap`, Cheney copy on promotion).
+  No separate survivor space, no tri-colour incremental marking for the
+  old generation — both minor and major collections are stop-the-world
+  Cheney copies, not incremental.
+- **Card-marking write barrier** (`GC_WRITE_BARRIER`, 512-byte dirty
+  cards), not the Dijkstra/`llvm.gcwrite` barrier originally sketched.
+- **Polling safepoints**, landed at the VM's `L_DISPATCH` bytecode
+  dispatch point specifically (between instructions, so no live C local
+  can be caught mid-computation by a minor collection) plus actor
+  send/receive and parallel-pool work-item boundaries — not a dedicated
+  GC thread running concurrently with mutators.
+- **Opt-in, not default:** `--gc generational` / `--gc-nursery-size N` /
+  `--gc-tenured-size N`. Boehm (conservative, non-moving) remains the
+  default backend. This was never a breaking v2.0 release — no C
+  extension had to change.
+- **Known limitation, still open:** the tree-walking `eval`/`apply`
+  interpreter keeps intermediate `val_t`s as untracked C locals; a minor
+  GC firing mid-computation there can corrupt them. SICM suite: 167/167
+  under Boehm, 93/167 under `--gc generational` regardless of nursery
+  size — this is the actual current blocker, not incidental polish.
+- Large-object space, generational hashtable/env promotion, and a proper
+  concurrent/precise design **were not built** as part of this — see the
+  in-progress rewrite below, which picks these up properly instead of
+  patching the v1.5.0 design further.
+
+**The actual current GC roadmap is a separate, more ambitious rewrite**
+in progress on the `gc-rewrite`/`gc-perf` branches, informed by
+`docs/thoughts/performance-chez-kaappi.md` (Chez/Kaappi lessons,
+2026-07-16): P0 benchmarking+CI → P1 LLVM statepoints → P2 safepoint
+protocol → P3 three-zone/BiBOP heap (homogeneous type+generation segments,
+replacing the ad hoc two-generation `mmap` regions above) → P4 precise
+mark-sweep (closing the tree-walker gap noted above) → P5 concurrent
+marking → P6 per-actor minor GC. This supersedes the generational-GC
+sketch in this section; treat the section above as historical record of
+what v1.5.0–1.6.3 actually shipped, not as the forward plan.
+
+### ✗ Green threads, hot reload, pluggable scheduler — not started
+
+Nothing below has a branch, a commit, or a design doc yet. Kept as the
+original design sketch since it's still the intended shape, but note one
+open dependency: the continuation strategy this depends on (`(yield)`,
+coroutine frames as GC roots) needs to be checked against the hybrid
+`call/cc` decision in `docs/thoughts/performance-chez-kaappi.md` §4.4
+(VM frame-stack copying for multi-shot capture, native + `setjmp` for the
+escape-only case, explicitly **not** CPS) before implementation starts —
+see "Decided against" below. LLVM coroutines and that continuation
+strategy are not obviously the same mechanism and this was never
+reconciled.
+
+**Green threads via LLVM coroutines** *(original sketch, unstarted)*:
 - `(spawn thunk)` creates a green thread; returns a thread-id
 - `(yield)`, `(sleep-ms n)`, `(thread-join tid)`
 - Coroutine frames are GC-managed heap objects, always treated as GC roots
@@ -415,6 +496,21 @@ Layer 2: polymorphic inline cache in VM for hot dispatch paths.
 Layer 3: numeric tower operators (`+`, `*`, `simplify`, `∂`) become generic.
 
 **Pluggable set theory foundations:**
+
+*Status: the underlying idea — set semantics parameterized by a pluggable
+foundation — shipped in v1.7.0, but as a pure-Scheme realization rather
+than this C vtable.* `(curry sets)` provides multisets (hash-backed
+element→count bags); `(curry logic)` provides six first-class
+non-classical logics, and set operations (membership, comprehension,
+etc.) can be parameterized by any of them — the same shape as swapping
+`FOUNDATIONS` below, just implemented at the Scheme level instead of via
+a C ops-table. Ordinals/cardinals, ZFC-style bounded comprehension
+enforcement, and ambient fuzzy sets (as opposed to logic-parameterized
+ones) were not part of what shipped. The C-level interface below remains
+useful only if a future need for non-Scheme-level pluggability (e.g. a
+foundation implemented in a C extension) actually arises — treat it as
+optional, not required follow-up work.
+
 ```c
 typedef struct curry_foundations_ops {
     val_t (*member)(val_t x, val_t S);
@@ -472,6 +568,18 @@ GR/QM computations, manifold layer for differential geometry.
 ---
 
 ## Phase 8 — v2.2: Introspection + Profiling + SIMD
+
+**Status: a slice of this shipped standalone in v1.8.0, well ahead of and
+separately from the rest of the phase.** An interactive bytecode debugger
+landed with breakpoints (by function name or `file:line`), step/next/
+finish/continue, named locals (including captured upvalues), backtrace,
+and expression printing at a `dbg>` prompt (`,break`/`,unbreak`/`,breaks`/
+`,debug` REPL commands, `-b` CLI flag, `(breakpoint)` builtin — see
+`docs/reference/debugger.md`). Everything else in this phase — heap-walk,
+compiler-IR dumps (`compile->ast/hir/mir/llvm/asm`), the sampling
+profiler, Tracy/Perfetto tracing, the SIMD tower — remains unstarted;
+only basic call-count/wall-clock profiling (already listed as "✓ basic"
+above) exists beyond the debugger.
 
 **Introspection** — the running system fully inspectable from Scheme:
 
@@ -599,7 +707,13 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 
 ## Phase 10 — v3.0: Package Manager + Notebook Interface + Learning Tools
 
-**Package manager** (`curry pkg`):
+**Package manager** (`curry pkg`) — **explicitly deferred by decision, not
+just unstarted.** A design evaluation already exists —
+`docs/pkg-design.md` — comparing registry models, lock files, environments,
+C extension handling, versioning, package identity, and security across
+CHICKEN/Akku/cargo/pip/npm/Julia/Quicklisp. The decision was to finish
+that survey before writing any implementation; the sketch below is a
+candidate design from that evaluation, not a committed spec:
 - Registry: git-index model (Julia General style) — metadata only, source at
   author-hosted URLs, checksums in index
 - Manifest: `curry.pkg` (what you write) + `curry.lock` (what the resolver
@@ -731,48 +845,97 @@ LLM integration + sharing).
 
 ---
 
+## Decided against
+
+Not everything below "not started" is simply un-gotten-to. Three things
+were evaluated and explicitly ruled out, recorded in
+`docs/thoughts/performance-chez-kaappi.md` (2026-07-16, surveying Chez
+Scheme and the Kaappi implementation for lessons applicable to curry):
+
+- **No NaN-boxing migration.** Kaappi's flonum-unboxing win comes from
+  NaN-boxing `val_t`; curry gets the same win more cheaply by unboxing
+  flonums at the compiler/IR level across proven-flonum expression chains,
+  keeping the current 2-bit low-tag `val_t` representation and avoiding a
+  rewrite of every module that touches values directly.
+- **No register-VM rewrite.** Kaappi's register VM avoids push/pop
+  dispatch traffic, but curry gets most of the same win from
+  superinstructions on the existing stack VM (a fused self-tail-call
+  opcode, fused global-call-and-lookup) at a fraction of the engineering
+  cost of migrating `compiler.c` and `vm.c` to registers.
+- **No CPS conversion for `call/cc`.** Both Kaappi and Chez were surveyed
+  here (Kaappi rejected CPS outright — every call pays, two IR flavors to
+  maintain; Chez's segmented-stack approach is the eventual endgame but
+  only if capture cost ever shows up hot in profiling). The adopted
+  strategy is Kaappi's: VM frame-stack copying for multi-shot `call/cc`,
+  native direct-style + `setjmp` for the escape-only common case
+  (`call/ec`, `guard`, `dynamic-wind` exits). This directly affects Phase
+  6's green-threads sketch above (`(yield)` via LLVM coroutines) — that
+  sketch predates this decision and the two haven't been reconciled;
+  don't assume coroutine-based green threads slot in cleanly on top of
+  the frame-copying continuation strategy without checking first.
+
+**Package manager** (Phase 10) is deferred by decision pending the
+comparative survey in `docs/pkg-design.md`, not because nobody's gotten to
+it — see that phase's section above.
+
+---
+
 ## Summary timeline
 
-| Version | Name | Highlights | Status |
-|---------|------|-----------|--------|
-| ~~**v1.1.0**~~ | Foundation | Condition system + restarts; FFI + zero-copy matrix/tensor | ✓ shipped |
-| ~~**v1.1.1**~~ | SRFI compat | `(surfage s1 lists)`, `(surfage s27 random-bits)` | ✓ shipped |
-| ~~**v1.2.0**~~ | Precision | MPFR + interval arithmetic; number theory (185 new tests) | ✓ shipped |
-| ~~**v1.2.1**~~ | Bug fixes | Pollard rho infinite-loop fix; expanded test coverage | ✓ shipped |
-| **v1.2.5** ← | Babylon | Sexagesimal: cuneiform reader/writer, Neugebauer notation, `(curry sexagesimal)` | next |
-| **v1.3** | Algebra | Extensible CAS, Groebner, Risch (partial), special functions | 4–5 mo |
-| **v1.4** | Moving GC | Semispace collector, write barriers, GC stats | 6–8 wk |
-| **v1.5** | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
-| **v2.0** ⚠ | Architecture | Generational GC, green threads, pluggable scheduler, hot reload | 5–7 mo |
-| **v2.1** | Types + Sets | Slim CLOS, pluggable set theory foundations, topology | 4–5 mo |
-| **v2.2** | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower | 3–4 mo |
-| **v2.3** | Testing + I/O | Property-based testing, HDF5/NetCDF/FITS | 2–3 mo |
-| **v3.0** | Ecosystem | Package manager; notebook (Qt6, mathematical rendering); units system; step-by-step CAS (`explain-simplify`); LLM-integrated notebook; exploration sharing | 7–9 mo |
+What's actually shipped, by version (supersedes the original
+phase-to-version mapping below, which held through v1.4.0 and then
+diverged — v1.5.0 shipped a Phase 6 item, generational GC, not the Phase 5
+GR/QM library the original mapping promised for that slot):
 
-**⚠ v2.0 is a breaking version** for C extension authors: moving GC requires
-`gc_pin`/`gc_unpin` for off-stack Scheme pointers. The FFI `with-pinned-*`
-macros (v1.1) handle this automatically for FFI callers. Hand-written C modules
-need a one-time audit.
+| Version | Highlights | Status |
+|---------|-----------|--------|
+| ~~**v1.1.0**~~ | Condition system + restarts; FFI + zero-copy matrix/tensor | ✓ shipped |
+| ~~**v1.1.1**~~ | SRFI compat: `(surfage s1 lists)`, `(surfage s27 random-bits)` | ✓ shipped |
+| ~~**v1.2.0**~~ | MPFR + interval arithmetic; number theory | ✓ shipped |
+| ~~**v1.2.1**~~ | Pollard rho fix; expanded test coverage | ✓ shipped |
+| ~~**v1.2.5**~~ | Sexagesimal/Babylonian numbers: cuneiform reader/writer, Neugebauer notation | ✓ shipped |
+| ~~**v1.3.0**~~ | Cheney semispace GC (`--gc semispace`) | ✓ shipped |
+| ~~**v1.4.0**~~ | Extensible CAS complete (4a–4g: rules, algebra declarations, polynomial machinery + Groebner, equation solving, partial Risch, special functions, Laurent/Puiseux) | ✓ shipped |
+| ~~**v1.5.0**~~ | Generational GC (experimental, opt-in) — *not* GR/QM as originally mapped to this slot | ✓ shipped |
+| ~~**v1.6.0–1.6.3**~~ | GC instrumentation, benchmarking stack, JIT/GC correctness fixes | ✓ shipped |
+| ~~**v1.7.0**~~ | Real error backtraces + machine-legible error codes; `(curry logic)` + `(curry sets)` (partial Phase 7) | ✓ shipped |
+| ~~**v1.8.0**~~ | Interactive debugger (partial Phase 8); per-statement source lines | ✓ shipped |
 
-**Critical path:** v1.1 (condition system + FFI) was the bottleneck — it has
-shipped. Everything from the GR library onward — LAPACK eigensolvers, BLAS for
-tensors, HDF5 for scientific data, GSL for special functions — routes through
-the FFI, which is now available.
+Remaining phases, in the dependency order from the top of this document —
+not pinned to specific version numbers, since the original numbering
+broke after v1.4.0 and re-pinning invites the same drift:
 
-**Pluggable interfaces shipped by this roadmap:**
+| Phase | Name | Highlights | Estimated effort |
+|---|---|---|---|
+| 5 | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
+| 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload — GC portion already shipped, see above; heavier rewrite in progress on `gc-rewrite` branch | 5–7 mo |
+| 7 (remainder) | Types + Sets | Slim CLOS, topology — pluggable-foundations portion already shipped differently, see above | 4–5 mo |
+| 8 (remainder) | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower — debugger portion already shipped, see above | 3–4 mo |
+| 9 | Testing + I/O | Property-based testing, HDF5/NetCDF/FITS | 2–3 mo |
+| 10 | Ecosystem | Package manager (deferred by decision); notebook (Qt6, mathematical rendering); units system; `explain-simplify`; LLM-integrated notebook; exploration sharing | 7–9 mo |
+
+**Breaking-change note:** the *next* moving/precise GC milestone (on the
+`gc-rewrite` branch, not the v1.5.0 generational GC already shipped) is
+still expected to require a C-extension audit — `gc_pin`/`gc_unpin` for
+off-stack Scheme pointers, same as originally described for "v2.0" above.
+The FFI `with-pinned-*` macros (v1.1) already handle this automatically
+for FFI callers; hand-written C modules will need a one-time look when
+that milestone lands.
+
+**Critical path:** v1.1 (condition system + FFI) was the original
+bottleneck and has long since shipped. Everything from the GR library
+onward — LAPACK eigensolvers, BLAS for tensors, HDF5 for scientific data,
+GSL for special functions — routes through the FFI, which has been
+available since v1.1.0.
+
+**Pluggable interfaces:**
 
 | Interface | Backends |
 |---|---|
-| GC (`gc_ops_t`) | Boehm (now), semispace (v1.4), generational (v2.0) |
-| Scheduler (`curry_sched_ops_t`) | work-stealing (v2.0), cooperative, priority |
-| Set foundations (`curry_foundations_ops_t`) | naïve, ZFC (v2.1), constructive, HoTT (future) |
-| Profiling backend | in-process (v2.2), Tracy, Perfetto |
-
-**Total sequential estimate (single implementor):** 40–56 months for all ten
-phases. In practice the mathematics, concurrency, and tooling tracks are
-parallel. The critical path — v1.1 through v2.0 — is 18–24 months and
-delivers a genuinely useful compiled Scheme for scientific computing before
-the full ecosystem is complete.
+| GC (`gc_ops_t`) | Boehm (default), semispace (`--gc semispace`, v1.3.0), generational (`--gc generational`, v1.5.0, experimental) |
+| Scheduler (`curry_sched_ops_t`) | not started (Phase 6 remainder) |
+| Set foundations | `(curry sets)` + `(curry logic)`, pure Scheme (v1.7.0) — no C-level `curry_foundations_ops_t` vtable exists or is currently planned to be needed |
+| Profiling backend | in-process call-count/wall-clock only (basic); Tracy/Perfetto not started (Phase 8 remainder) |
 
 **Design intent:** This is an instrument for learning by doing — orthopraxis
 rather than orthodoxy. The units system catches physical nonsense before the
