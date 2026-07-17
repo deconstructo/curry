@@ -106,6 +106,8 @@ set(CORE_SOURCES
   src/symbol.c
   src/numeric.c
   src/numtheory.c
+  src/unicode.c
+  src/unicode_tables.c
   src/port.c
   src/reader.c
   src/env.c

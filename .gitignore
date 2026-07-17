@@ -19,6 +19,9 @@ b
 # ---- attic ----
 attic
 
+# ---- Unicode Character Database cache (tools/gen-unicode-tables.py) ----
+.unicode-cache/
+
 # ---- Out-of-source build directories ----
 build/
 build-*/
