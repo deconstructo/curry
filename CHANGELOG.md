@@ -1,5 +1,38 @@
 # Changelog
 
+### Unreleased
+
+**Interactive debugger**
+- **gdb-style debugger for VM-compiled code.** Breakpoints by function
+  name (fire at frame entry) or `file:line`; set via `,break` /
+  `,unbreak` / `,breaks` in the REPL, a repeatable `-b SPEC` CLI flag
+  for scripts, or the new `(breakpoint)` procedure from source. At a
+  stop: `step` / `next` / `finish` / `continue`, `bt`, `locals` (by
+  name, including captured upvalues), `p <expr>` (live locals by name,
+  anything else evaluated globally with full VM-state protection), and
+  `q` to abort. `,debug <expr>` single-steps an expression. Costs one
+  predicted-not-taken branch per dispatch when idle — same pattern as
+  the minor-GC safepoint. The JIT tier is bypassed while armed so
+  breakpoints always fire. Tree-walker code (`load`, `tree-eval`
+  passthrough) is invisible to it; main thread only. See
+  `docs/reference/debugger.md`.
+- **Per-statement source lines.** 1.7.0's known limitation ("a bug on
+  line 5 of a 10-line function reports the `define`'s line") is fixed:
+  the reader stamps each cons cell with the line its datum starts on
+  and the compiler consumes it, so error backtraces and the debugger
+  both resolve to the exact sub-form. Plain-`let`/`let*` frames are now
+  named after their enclosing function instead of `<anonymous>`.
+- **`.scc` format v3.** Compiled bytecode now persists local-variable
+  scope tables and upvalue names, so scripts running from the
+  transparent cache debug identically to fresh compiles. Old caches are
+  invalidated automatically (format version bump).
+- **Fixed a nested-`vm_eval` stack corruption.** `vm_eval` never pushed
+  its closure as the callee, so `pop_frame`'s `sp = slots - 1` return
+  path consumed one slot of the caller's stack. Invisible at top level
+  (the `frame_count == 0` path resets `sp`), corrupting when nested
+  inside a running VM — which the debugger's `p` command is the first
+  caller to do.
+
 ### 1.7.0 — Machine-legible errors, real backtraces, and a VM arity/JIT correctness pass
 
 The headline of this release is diagnostics: errors finally carry a file,

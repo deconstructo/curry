@@ -129,6 +129,8 @@ The test suites registered in `ctest`:
   -c FILE    Compile FILE to .scc bytecode without executing it
   -o OUT     Output path for -c (default: FILE with .scc extension)
   -x         Make -c output executable (prepends shebang, sets +x)
+  -b SPEC    Set a debugger breakpoint before running (function name
+             or file:line; repeatable)
   -v         Print version
 ```
 
@@ -142,7 +144,11 @@ Script arguments are available as `(command-line)` (R7RS thunk returning a list 
 
 ## REPL commands
 
-Inside the REPL, comma-prefixed commands are available: `,quit`, `,help`, `,gc` (force GC), `,env` (list all global bindings). Readline history is saved to `~/.curry_history` (last 500 entries) when readline is present.
+Inside the REPL, comma-prefixed commands are available: `,quit`, `,help`, `,gc` (force GC), `,env` (list all global bindings), `,vm` (VM/heap stats), `,profile`, and the debugger commands `,break <fn|file:line>`, `,unbreak <n>`, `,breaks`, `,debug <expr>`. Readline history is saved to `~/.curry_history` (last 500 entries) when readline is present.
+
+## Interactive debugger
+
+gdb-style debugger for VM-compiled code: breakpoints by function name or file:line (`,break` in the REPL, `-b SPEC` on the CLI, `(breakpoint)` in source), step/next/finish/continue, `bt`, `locals` (named, including captured upvalues), `p <expr>`. One flag check per dispatch when idle; JIT tier bypassed while armed; tree-walker code (`load`, `tree-eval`) is invisible to it; main thread only. `.scc` v3 persists all debug metadata so cached script runs debug identically. See `docs/reference/debugger.md`.
 
 ## Architecture
 
