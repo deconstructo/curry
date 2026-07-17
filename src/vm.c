@@ -1065,6 +1065,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             ExnHandler *eh = &vm_exn_handlers[hi];
             eh->exn  = V_FALSE;
             eh->prev = current_handler;
+            eh->saved_jit_depth = jit_depth_save();
             current_handler = eh;
 
             if (setjmp(eh->jmp) != 0) {
@@ -1073,6 +1074,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 int chi = vm->handler_count - 1;
                 val_t caught = vm_exn_handlers[chi].exn;
                 current_handler   = vm_exn_handlers[chi].prev;
+                jit_depth_restore(vm_exn_handlers[chi].saved_jit_depth);
                 vm->handler_count = chi;
                 vm->frame_count   = vm->handler_stack[chi].frame_count;
                 vm->sp            = vm->handler_stack[chi].sp;

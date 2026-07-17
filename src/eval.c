@@ -1102,7 +1102,9 @@ tail:
 
         val_t result = V_VOID;
         ExnHandler h;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
             result = eval(vcar(body), env);
@@ -1110,6 +1112,7 @@ tail:
             return result;
         }
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         val_t exn = h.exn;
 
         /* Try each clause */
@@ -1601,6 +1604,12 @@ _Thread_local int g_jit_call_depth = 0;
 /* C-linkage wrappers for jit.cpp — avoids C++ TLS wrapper ABI mismatch. */
 void jit_depth_push(void) { g_jit_call_depth++; }
 void jit_depth_pop(void)  { g_jit_call_depth--; }
+
+/* Used by every exception-unwind path to keep g_jit_call_depth from leaking
+ * across a caught exception raised from inside a JIT-to-JIT call chain —
+ * see ExnHandler.saved_jit_depth in eval.h. */
+int  jit_depth_save(void)        { return g_jit_call_depth; }
+void jit_depth_restore(int saved) { g_jit_call_depth = saved; }
 
 #ifdef BUILD_LLVM
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue

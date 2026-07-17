@@ -122,6 +122,29 @@
        (guard (e (#t (error-object-code e))) (jit-auto-exact 1 2 3))
        'wrong-number-of-arguments)
 
+;;; 12. jit-call-depth does not leak across a caught exception raised from
+;;; inside a JIT-to-JIT call (curry_jit_apply_arr → apply_arr → longjmp) ──────
+;;; Regression coverage: before ExnHandler gained saved_jit_depth (restored
+;;; by SCM_PROTECT, the VM's OP_PUSH_HANDLER, and eval.c's guard), a caught
+;;; exception raised from a JIT'd closure calling another JIT'd closure never
+;;; ran the matching jit_depth_pop(), permanently inflating g_jit_call_depth
+;;; until it pinned at JIT_CALL_DEPTH_LIMIT and silently disabled the JIT
+;;; fast path for the rest of the thread's lifetime.
+(define (leak-callee x y) (+ x y))
+(jit-compile! leak-callee)
+(define (leak-caller) (leak-callee 1)) ; always wrong arity
+(jit-compile! leak-caller)
+(let loop ((i 0))
+  (when (< i 260) ; well past JIT_CALL_DEPTH_LIMIT (512) if each leaks by 2
+    (guard (e (#t #f)) (leak-caller))
+    (loop (+ i 1))))
+(check "jit-call-depth does not leak across caught nested-JIT exceptions"
+       (jit-call-depth) 0)
+(define (leak-good-caller x y) (leak-callee x y))
+(jit-compile! leak-good-caller)
+(check "JIT fast path still functional after leak scenario"
+       (leak-good-caller 3 4) 7)
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")

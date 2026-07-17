@@ -306,7 +306,9 @@ static void eval_port_exprs(val_t port, bool print) {
             }
         }
 
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             val_t cl     = compiler_compile(expr);
             val_t result = vm_run(as_bcclosure(cl), 0);
@@ -314,6 +316,7 @@ static void eval_port_exprs(val_t port, bool print) {
             if (print) print_result(result);
         } else {
             current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
             vm_reset();
             print_scheme_error(h.exn);
         }
@@ -468,7 +471,9 @@ int main(int argc, char **argv) {
                 if (setjmp(h.jmp) == 0) { expr = scm_read(str_port); current_handler = h.prev; }
                 else { gc_resume_minor(); current_handler = h.prev; break; }
                 if (vis_eof(expr)) { gc_resume_minor(); break; }
-                h.prev = current_handler; current_handler = &h;
+                h.prev = current_handler;
+                h.saved_jit_depth = jit_depth_save();
+                current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
                     val_t cl = compiler_compile(expr);
                     gc_resume_minor();
@@ -476,6 +481,7 @@ int main(int argc, char **argv) {
                     current_handler = h.prev;
                 } else {
                     current_handler = h.prev;
+                    jit_depth_restore(h.saved_jit_depth);
                     vm_reset();
                     print_scheme_error(h.exn);
                     return 1;
@@ -487,10 +493,13 @@ int main(int argc, char **argv) {
         }
         case 'l': {
             ExnHandler h;
-            h.prev = current_handler; current_handler = &h;
+            h.prev = current_handler;
+            h.saved_jit_depth = jit_depth_save();
+            current_handler = &h;
             if (setjmp(h.jmp) == 0) { scm_load(optarg, GLOBAL_ENV); current_handler = h.prev; }
             else {
                 current_handler = h.prev;
+                jit_depth_restore(h.saved_jit_depth);
                 fprintf(stderr, "Error loading %s: ", optarg);
                 scm_write(h.exn, PORT_STDERR); fputs("\n", stderr); return 1;
             }
@@ -514,7 +523,9 @@ int main(int argc, char **argv) {
         int n_chunks = 0;
         compiler_set_source_name(compile_file);
         ExnHandler h;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             val_t v;
             while (!vis_eof((v = scm_read(port)))) {
@@ -531,6 +542,7 @@ int main(int argc, char **argv) {
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
             vm_reset();
             print_scheme_error(h.exn);
             return 1;
@@ -562,7 +574,9 @@ int main(int argc, char **argv) {
         env_define(GLOBAL_ENV, sym_intern_cstr("command-line"), vptr(cmd_prim));
 
         ExnHandler h;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             Chunk **chunks = NULL;
             int n_chunks = 0;
@@ -639,6 +653,7 @@ int main(int argc, char **argv) {
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
             vm_reset();
             print_scheme_error(h.exn);
             return 1;

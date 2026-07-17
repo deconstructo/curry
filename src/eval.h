@@ -62,6 +62,13 @@ typedef struct ExnHandler {
     struct ExnHandler *prev;
     void           *saved_shadow;  /* gc_shadow_stack at setjmp time — restored on longjmp */
     int             saved_inhibit; /* gc_inhibit_count at setjmp time — restored on longjmp */
+    int             saved_jit_depth; /* g_jit_call_depth at setjmp time — restored on longjmp;
+                                         without this, an exception raised from inside a
+                                         JIT-to-JIT call chain (curry_jit_apply_arr) skips the
+                                         matching jit_depth_pop()/g_jit_call_depth-- on unwind,
+                                         permanently inflating the counter until it pins at
+                                         JIT_CALL_DEPTH_LIMIT and silently disables the JIT
+                                         fast path for the rest of the thread's lifetime. */
 } ExnHandler;
 
 /* Thread-local current exception handler chain.
@@ -82,14 +89,21 @@ extern _Thread_local ExnHandler *current_handler;
 #endif
 
 /* JIT call depth guard — defined in eval.c, C-linkage helpers used by jit.cpp
- * to avoid C++ TLS wrapper ABI mismatch on macOS/arm64. */
+ * to avoid C++ TLS wrapper ABI mismatch on macOS/arm64. save/restore are used
+ * by every exception-unwind path (SCM_PROTECT, the VM's OP_PUSH_HANDLER, and
+ * eval.c's guard) to keep g_jit_call_depth from leaking across a caught
+ * exception raised from inside a JIT-to-JIT call. */
 #ifdef __cplusplus
 extern "C" {
     void jit_depth_push(void);
     void jit_depth_pop(void);
+    int  jit_depth_save(void);
+    void jit_depth_restore(int saved);
 }
 #else
 extern _Thread_local int g_jit_call_depth;
+int  jit_depth_save(void);
+void jit_depth_restore(int saved);
 #define JIT_CALL_DEPTH_LIMIT 512
 #endif
 
@@ -154,6 +168,7 @@ void  gc_inhibit_restore(int saved);
     (h).prev           = current_handler;               \
     (h).saved_shadow   = gc_shadow_save();              \
     (h).saved_inhibit  = gc_inhibit_save();             \
+    (h).saved_jit_depth = jit_depth_save();             \
     current_handler    = &(h);                          \
     if (setjmp((h).jmp) == 0) {                        \
         body;                                           \
@@ -162,6 +177,7 @@ void  gc_inhibit_restore(int saved);
         current_handler = (h).prev;                     \
         gc_shadow_restore((h).saved_shadow);            \
         gc_inhibit_restore((h).saved_inhibit);          \
+        jit_depth_restore((h).saved_jit_depth);         \
         on_exn;                                         \
     }                                                   \
 } while (0)
