@@ -178,6 +178,7 @@
 #include <setjmp.h>
 
 #include "vm.h"
+#include "debug.h"
 #include "profiling.h"
 #include "compiler.h"
 #include "chunk.h"
@@ -269,6 +270,7 @@ void maybe_jit_bcc(BcClosure *cl);
 /* Quick inline guard: skip the call for the common case where jit_val is
  * already decided, or where no source AST was preserved. */
 static inline void vm_maybe_jit(BcClosure *cl) {
+    if (vm_debug_active) return;  /* JIT'd code bypasses breakpoints */
     if (cl->jit_val != V_VOID) return;
     if (cl->chunk->src_lambda == V_VOID) return;
     if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
@@ -511,6 +513,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
         }
+        if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         switch (READ_U8()) {
 #endif
 
@@ -815,7 +818,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
-                    && curry_profiling_level == 0) {
+                    && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
@@ -869,7 +872,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
-                    && curry_profiling_level == 0) {
+                    && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
@@ -1136,6 +1139,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
         }
+        if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         goto *dt[READ_U8()];
 #else  /* no computed goto */
         default:

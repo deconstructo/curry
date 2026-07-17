@@ -34,7 +34,7 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x02'
+#define SCC_FMT_VER     '\x03'   /* v3: + per-chunk local_debug table */
 #define SCC_SENTINEL    0xCAFEBEEFu
 #define SCC_SHEBANG     "#!/usr/bin/env curry\n"
 
@@ -273,6 +273,27 @@ static bool write_chunk(FILE *f, const Chunk *c) {
     for (int i = 0; i < c->const_len; i++)
         if (!write_const(f, c->constants[i])) return false;
 
+    /* Local-variable debug table (v3+): the debugger's slot→name map */
+    if (!wi32(f, c->local_debug_len)) return false;
+    for (int i = 0; i < c->local_debug_len; i++) {
+        const LocalDebugEntry *e = &c->local_debug[i];
+        Symbol *s = as_sym(e->name);
+        if (!wstr(f, s->data, s->len)) return false;
+        if (!wu32(f, e->slot))         return false;
+        if (!wi32(f, e->start_pc))     return false;
+        if (!wi32(f, e->end_pc))       return false;
+    }
+
+    /* Upvalue names (v3+): debugger + JIT metadata; may be absent */
+    uint8_t have_upnames = (c->upval_names != NULL);
+    if (!wb(f, have_upnames)) return false;
+    if (have_upnames) {
+        for (int i = 0; i < c->upval_count; i++) {
+            Symbol *s = as_sym(c->upval_names[i]);
+            if (!wstr(f, s->data, s->len)) return false;
+        }
+    }
+
     return true;
 }
 
@@ -465,6 +486,45 @@ static bool read_chunk(FILE *f, Chunk *c) {
     if (c->const_len && !c->constants) return false;
     for (int i = 0; i < c->const_len; i++)
         if (!read_const(f, &c->constants[i])) return false;
+
+    /* Local-variable debug table (v3+) */
+    if (!ri32(f, &c->local_debug_len)) return false;
+    if (c->local_debug_len < 0) return false;
+    c->local_debug_cap = c->local_debug_len;
+    if (c->local_debug_len) {
+        c->local_debug = (LocalDebugEntry *)
+            gc_alloc_raw_pinned((size_t)c->local_debug_len * sizeof(LocalDebugEntry));
+        if (!c->local_debug) return false;
+        for (int i = 0; i < c->local_debug_len; i++) {
+            LocalDebugEntry *e = &c->local_debug[i];
+            uint32_t len;
+            char *buf = rstr(f, &len);
+            if (!buf) return false;
+            e->name = sym_intern(buf, len);
+            free(buf);
+            uint32_t slot;
+            if (!ru32(f, &slot)) return false;
+            e->slot = (uint16_t)slot;
+            if (!ri32(f, &e->start_pc)) return false;
+            if (!ri32(f, &e->end_pc))   return false;
+        }
+    }
+
+    /* Upvalue names (v3+) */
+    uint8_t have_upnames;
+    if (!rb(f, &have_upnames)) return false;
+    if (have_upnames) {
+        c->upval_names = (val_t *)
+            gc_alloc_raw_pinned((size_t)c->upval_count * sizeof(val_t));
+        if (c->upval_count && !c->upval_names) return false;
+        for (int i = 0; i < c->upval_count; i++) {
+            uint32_t len;
+            char *buf = rstr(f, &len);
+            if (!buf) return false;
+            c->upval_names[i] = sym_intern(buf, len);
+            free(buf);
+        }
+    }
 
     return true;
 }

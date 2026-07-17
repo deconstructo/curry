@@ -118,6 +118,7 @@ set(CORE_SOURCES
   src/stm.c
   src/channel.c
   src/condition.c
+  src/debug.c
   src/modules.c
   src/symbolic.c
   src/sx_pattern.c

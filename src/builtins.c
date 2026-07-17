@@ -2,6 +2,7 @@
 #include "object.h"
 #include "eval.h"
 #include "vm.h"
+#include "debug.h"
 #include "syntax_rules.h"
 #include "env.h"
 #include "symbol.h"
@@ -2048,6 +2049,14 @@ static val_t prim_void(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud;
 static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(av[i-1]!=av[i]) return V_FALSE; return V_TRUE;}
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(str_data(as_str(av[0])), GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
+
+/* (breakpoint) — drop into the interactive debugger at the next VM
+ * instruction after this call returns. */
+static val_t prim_breakpoint(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    vm_debug_request_step();
+    return V_VOID;
+}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
@@ -2566,6 +2575,7 @@ void builtins_register(val_t env) {
     DEF("load",       prim_load,    1,1);
     DEF("exit",       prim_exit,    0,1);
     DEF("quit",       prim_exit,    0,1);
+    DEF("breakpoint", prim_breakpoint, 0,0);
     DEF("emergency-exit",prim_emergency_exit,0,1);
     DEF("system",     prim_system,  1,1);
     DEF("get-environment-variable", prim_get_env_var,  1,1);

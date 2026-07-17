@@ -23,6 +23,7 @@
 #include "object.h"
 #include "profiling.h"
 #include "vm.h"
+#include "debug.h"
 #include "compiler.h"
 #include "scc.h"
 #include "version.h"
@@ -76,6 +77,7 @@ static void init_all(void) {
     modules_init();
     profiling_init(GLOBAL_ENV);
     vm_init();
+    vm_debug_init();
 #ifdef BUILD_LLVM
     curry_llvm_init();
 #endif
@@ -256,6 +258,7 @@ static void eval_port_exprs(val_t port, bool print) {
                 }
                 if (!strcmp(name, "help")) {
                     puts("Commands: ,quit  ,help  ,gc  ,env  ,profile  ,vm");
+                    puts("Debugger: ,break <fn|file:line>  ,unbreak <n>  ,breaks  ,debug <expr>");
                     continue;
                 }
                 if (!strcmp(name, "gc")) { gc_collect(); puts("GC complete."); continue; }
@@ -301,11 +304,38 @@ static void eval_port_exprs(val_t port, bool print) {
                     }
                     continue;
                 }
+                if (!strcmp(name, "break")) {
+                    val_t arg = scm_read(port);
+                    if (vis_symbol(arg)) {
+                        int idx = vm_debug_break_add(sym_cstr(arg));
+                        if (idx >= 0) printf("Breakpoint #%d set.\n", idx);
+                    } else if (vis_string(arg)) {
+                        int idx = vm_debug_break_add(str_data(as_str(arg)));
+                        if (idx >= 0) printf("Breakpoint #%d set.\n", idx);
+                    } else {
+                        fprintf(stderr, "usage: ,break <function|file:line>\n");
+                    }
+                    continue;
+                }
+                if (!strcmp(name, "unbreak")) {
+                    val_t arg = scm_read(port);
+                    if (!vis_fixnum(arg) || !vm_debug_break_remove((int)vunfix(arg)))
+                        fprintf(stderr, "usage: ,unbreak <index>  (see ,breaks)\n");
+                    continue;
+                }
+                if (!strcmp(name, "breaks")) { vm_debug_break_list(); continue; }
+                if (!strcmp(name, "debug")) {
+                    expr = scm_read(port);
+                    if (vis_eof(expr)) break;
+                    vm_debug_request_step();
+                    goto eval_expr;   /* run it under single-step */
+                }
                 fprintf(stderr, "Unknown REPL command: ,%s\n", name);
                 continue;
             }
         }
 
+    eval_expr:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
         current_handler = &h;
@@ -374,6 +404,8 @@ static void usage(const char *argv0) {
         "  -o OUT            Output path for -c (default: FILE with .scc extension)\n"
         "  -x                Make -c output executable (shebang + chmod +x)\n"
         "  -i                Force interactive REPL after loading scripts\n"
+        "  -b SPEC           Set a debugger breakpoint before running (function\n"
+        "                    name or file:line; repeatable)\n"
         "  -v                Print version\n"
         "  --gc BACKEND      GC backend: boehm (default) or generational (experimental)\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
@@ -441,7 +473,7 @@ int main(int argc, char **argv) {
 
     int opt;
     /* '+' prefix: stop at first non-option so script args aren't consumed */
-    while ((opt = getopt_long(argc, argv, "+e:l:c:o:ixvhG:", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhG:", long_opts, NULL)) != -1) {
         switch (opt) {
         case 0:   break;   /* long option with no short form (e.g. --gc) — already handled */
         case 'v':
@@ -453,6 +485,12 @@ int main(int argc, char **argv) {
             gc_set_max_heap(parse_size(optarg)); break;
         case 'i':
             interactive = true; break;
+        case 'b':
+            if (vm_debug_break_add(optarg) < 0) {
+                fprintf(stderr, "Error: bad breakpoint spec: %s\n", optarg);
+                return 1;
+            }
+            break;
         case 'x':
             compile_executable = true; break;
         case 'o':
