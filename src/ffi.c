@@ -62,9 +62,9 @@ static ffi_type *ffi_type_for_tag(val_t tag) {
         !strcmp(s,"uintptr"))                           return &ffi_type_uint64;
     if (!strcmp(s,"float"))                             return &ffi_type_float;
     if (!strcmp(s,"double"))                            return &ffi_type_double;
-    if (!strcmp(s,"c-ptr") || !strcmp(s,"pointer") ||
+    if (!strcmp(s,"c_ptr") || !strcmp(s,"pointer") ||
         !strcmp(s,"void*") || !strcmp(s,"string")  ||
-        !strcmp(s,"c-string"))                          return &ffi_type_pointer;
+        !strcmp(s,"c_string"))                          return &ffi_type_pointer;
     return NULL;
 }
 
@@ -99,14 +99,14 @@ static bool marshal_arg(val_t v, val_t tag, void *buf) {
         float f = (float)num_to_double(v);
         memcpy(buf, &f, sizeof(f)); return true;
     }
-    if (!strcmp(t,"c-ptr") || !strcmp(t,"pointer") || !strcmp(t,"void*")) {
+    if (!strcmp(t,"c_ptr") || !strcmp(t,"pointer") || !strcmp(t,"void*")) {
         void *p = vis_cptr(v)   ? as_cptr(v)->ptr
                 : vis_false(v)  ? NULL
                 : vis_fixnum(v) ? (void *)(uintptr_t)vunfix(v)
                 : NULL;
         memcpy(buf, &p, sizeof(p)); return true;
     }
-    if (!strcmp(t,"string") || !strcmp(t,"c-string")) {
+    if (!strcmp(t,"string") || !strcmp(t,"c_string")) {
         const char *s = vis_string(v)  ? str_data(as_str(v))
                       : vis_false(v)   ? NULL
                       : NULL;
@@ -141,10 +141,10 @@ static val_t unmarshal_ret(void *buf, val_t tag) {
     if (!strcmp(t,"float")) {
         float f; memcpy(&f, buf, sizeof(f)); return num_make_float((double)f);
     }
-    if (!strcmp(t,"c-ptr") || !strcmp(t,"pointer") || !strcmp(t,"void*")) {
+    if (!strcmp(t,"c_ptr") || !strcmp(t,"pointer") || !strcmp(t,"void*")) {
         void *p; memcpy(&p, buf, sizeof(p)); return ffi_make_cptr(p);
     }
-    if (!strcmp(t,"string") || !strcmp(t,"c-string")) {
+    if (!strcmp(t,"string") || !strcmp(t,"c_string")) {
         char *s; memcpy(&s, buf, sizeof(s));
         if (!s) return V_FALSE;
         uint32_t len = (uint32_t)strlen(s);
@@ -323,6 +323,43 @@ static val_t prim_ffi_tensor_unpin(int ac, val_t *av, void *ud) {
     if (vis_tensor(av[0])) gc_unpin(as_tensor(av[0]));
     return V_VOID;
 }
+/* General raw-buffer pinning: a bytevector's own bytes, read/writable by a
+ * foreign call, for the FFI needs matrix/tensor pinning don't cover — input
+ * arrays of a non-double element type (e.g. HDF5's hsize_t dimension list)
+ * and out-parameters a C function writes results into. Callers decode the
+ * written bytes back in Scheme (e.g. the u64be/f64be helpers already used
+ * for FITS/NetCDF) rather than this exposing typed accessors itself. */
+static val_t prim_ffi_bytevector_ptr(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "%ffi-bytevector-ptr: not a bytevector");
+    gc_pin(as_bytes(av[0]));
+    return ffi_make_cptr(as_bytes(av[0])->data);
+}
+static val_t prim_ffi_bytevector_unpin(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (vis_bytes(av[0])) gc_unpin(as_bytes(av[0]));
+    return V_VOID;
+}
+/* Read n bytes from an arbitrary address into a fresh bytevector — needed
+ * when a C function hands back a pointer to its own heap memory (e.g.
+ * HDF5's variable-length string attributes are returned as a char* the
+ * caller must copy out, not written inline into a caller-supplied buffer
+ * the way fixed-size out-params are). av[0] is a c-ptr or a raw fixnum
+ * address, matching marshal_arg's existing c-ptr acceptance of either. */
+static val_t prim_ffi_peek_bytes(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    void *src = vis_cptr(av[0])   ? as_cptr(av[0])->ptr
+              : vis_fixnum(av[0]) ? (void *)(uintptr_t)vunfix(av[0])
+              : NULL;
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "%ffi-peek-bytes: n must be exact integer");
+    intptr_t n = vunfix(av[1]);
+    if (n < 0) scm_raise(V_FALSE, "%ffi-peek-bytes: n must be non-negative");
+    if (!src && n > 0) scm_raise(V_FALSE, "%ffi-peek-bytes: NULL pointer");
+    Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + (size_t)n);
+    bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = (uint32_t)n;
+    if (n > 0) memcpy(bv->data, src, (size_t)n);
+    return vptr(bv);
+}
 static val_t prim_cptr_p(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return vbool(vis_cptr(av[0])); }
 static val_t prim_foreignlib_p(int ac, val_t *av, void *ud)
@@ -345,6 +382,9 @@ void ffi_register_builtins(val_t env) {
     ffi_def(env, "%ffi-matrix-unpin",   prim_ffi_matrix_unpin,  1, 1);
     ffi_def(env, "%ffi-tensor-ptr",     prim_ffi_tensor_ptr,    1, 1);
     ffi_def(env, "%ffi-tensor-unpin",   prim_ffi_tensor_unpin,  1, 1);
+    ffi_def(env, "%ffi-bytevector-ptr", prim_ffi_bytevector_ptr, 1, 1);
+    ffi_def(env, "%ffi-bytevector-unpin", prim_ffi_bytevector_unpin, 1, 1);
+    ffi_def(env, "%ffi-peek-bytes",     prim_ffi_peek_bytes,    2, 2);
     ffi_def(env, "c-ptr?",              prim_cptr_p,            1, 1);
     ffi_def(env, "foreign-lib?",        prim_foreignlib_p,      1, 1);
     ffi_def(env, "foreign-fn?",         prim_foreignfn_p,       1, 1);

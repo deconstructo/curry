@@ -122,6 +122,34 @@ Binds `var` to a `c-ptr` pointing to `m`'s `double[]` data.
 
 Same for `T_TENSOR` objects.
 
+### `(with-pinned-bytevector bv var body ...)`
+
+Binds `var` to a `c-ptr` pointing to `bv`'s raw bytes — a general-purpose
+buffer for foreign calls the double-only matrix/tensor pinning above
+doesn't cover: input arrays of a non-double element type, and
+out-parameters a C function writes results into (an `int*`/`size_t*` the
+callee fills in, a fixed-size struct to populate, etc.). Read the written
+bytes back with `bytevector-u8-ref`, or decode multi-byte values by hand
+(there is no built-in endian-aware accessor — see `(curry private
+binary-io)` inside the `fits`/`netcdf` modules for a worked example of
+writing one).
+
+```scheme
+; an out-parameter: an HDF5 call that writes an int32 rank into our buffer
+(define rank-bv (make-bytevector 4 0))
+(with-pinned-bytevector rank-bv rank-ptr
+  (h5lt-get-dataset-ndims file-id "temperature" rank-ptr))
+```
+
+### `(peek-bytes ptr n)` → *bytevector*
+
+Copy `n` bytes starting at `ptr` (a `c-ptr` or raw fixnum address) into a
+fresh bytevector. For dereferencing a pointer a C function has handed
+*back* to its own heap memory — e.g. a library that returns
+variable-length string data as a `char*` rather than writing into a
+caller-supplied buffer. Not for out-parameters; `with-pinned-bytevector`
+covers those.
+
 ---
 
 ## Raw pointer utilities
@@ -163,6 +191,9 @@ high-level macros above are built from them.
 | `(%ffi-matrix-unpin m)` | Unpin after `%ffi-matrix-ptr` |
 | `(%ffi-tensor-ptr t)` | `T_CPTR` to tensor data; pins `t` |
 | `(%ffi-tensor-unpin t)` | Unpin after `%ffi-tensor-ptr` |
+| `(%ffi-bytevector-ptr bv)` | `T_CPTR` to bytevector's raw bytes; pins `bv` |
+| `(%ffi-bytevector-unpin bv)` | Unpin after `%ffi-bytevector-ptr` |
+| `(%ffi-peek-bytes ptr n)` | Copy `n` bytes at `ptr`/address into a fresh bytevector |
 
 ---
 

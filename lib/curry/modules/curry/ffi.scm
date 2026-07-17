@@ -7,6 +7,8 @@
 ;;;   %ffi-make-cptr  %ffi-cptr-address
 ;;;   %ffi-matrix-ptr  %ffi-matrix-unpin
 ;;;   %ffi-tensor-ptr  %ffi-tensor-unpin
+;;;   %ffi-bytevector-ptr  %ffi-bytevector-unpin
+;;;   %ffi-peek-bytes
 ;;;   c-ptr?  foreign-lib?  foreign-fn?  foreign-lib-path
 
 ;;; ── Loading libraries ────────────────────────────────────────────────────────
@@ -78,6 +80,29 @@
        (let ((result (begin body ...)))
          (%ffi-tensor-unpin t*)
          result)))))
+
+;;; (with-pinned-bytevector bv var body ...)
+;;;   Binds var to a c-ptr pointing to bv's raw bytes — a general-purpose
+;;;   buffer for foreign calls matrix/tensor pinning doesn't cover: input
+;;;   arrays of a non-double element type, and out-parameters a C function
+;;;   writes results into. Read written bytes back with bytevector-u8-ref
+;;;   or the endian-decode helpers in (curry private binary-io).
+(define-syntax with-pinned-bytevector
+  (syntax-rules ()
+    ((_ bv var body ...)
+     (let* ((bv* bv)
+            (var (%ffi-bytevector-ptr bv*)))
+       (let ((result (begin body ...)))
+         (%ffi-bytevector-unpin bv*)
+         result)))))
+
+;;; (peek-bytes ptr n) — copy n bytes starting at ptr (a c-ptr or raw fixnum
+;;;   address) into a fresh bytevector. For dereferencing a pointer a C
+;;;   function has handed back to its own heap memory (e.g. HDF5's
+;;;   variable-length string attributes) — not for out-parameters a
+;;;   function writes into a caller-supplied buffer, which
+;;;   with-pinned-bytevector already covers.
+(define (peek-bytes ptr n) (%ffi-peek-bytes ptr n))
 
 ;;; ── Raw pointer utilities ────────────────────────────────────────────────────
 
