@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # Single source of truth: src/version.h
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" _ver_h)
 string(REGEX MATCH "CURRY_VERSION \"([0-9]+\\.[0-9]+\\.[0-9]+)\"" _ "${_ver_h}")
-project(curry VERSION 1.8.1 LANGUAGES C CXX)
+project(curry VERSION 1.8.2 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
