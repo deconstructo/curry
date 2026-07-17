@@ -21,6 +21,17 @@
  * the root frame's version so we can detect if it reallocated. */
 typedef struct { val_t *slot; uint32_t version; } GlobCacheEntry;
 
+/* Debug info: one local variable's name and the bytecode range where its
+ * stack slot holds it.  Slots are reused across scopes, so the same slot
+ * may appear in several entries with disjoint [start_pc, end_pc) ranges.
+ * Not persisted in .scc files (matching name/source_name). */
+typedef struct {
+    val_t    name;      /* interned symbol                              */
+    uint16_t slot;      /* frame slot index                             */
+    int      start_pc;  /* first bytecode offset where the local exists */
+    int      end_pc;    /* one past the last offset; -1 until closed    */
+} LocalDebugEntry;
+
 typedef struct {
     Hdr       hdr;        /* type = T_CHUNK; must be first               */
     uint8_t  *code;       /* bytecode stream                             */
@@ -45,6 +56,10 @@ typedef struct {
                                  caller-owned, must outlive the chunk     */
 
     GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
+
+    LocalDebugEntry *local_debug; /* debugger's slot→name map; may be NULL */
+    int       local_debug_len;
+    int       local_debug_cap;
 
     /* Tiered JIT: source AST preserved for hot-swap to native code.
      * src_lambda = (lambda params body...) form; V_VOID if unavailable.
@@ -72,6 +87,14 @@ int chunk_add_const(Chunk *c, val_t v);
 
 /* Patch a 16-bit jump target at offset `at` */
 void chunk_patch16(Chunk *c, int at, uint16_t target);
+
+/* Record a local variable for the debugger; returns the entry index.
+ * end_pc starts at -1; close it with chunk_local_debug_end when the local
+ * leaves scope, or leave it for chunk_local_debug_finalize. */
+int  chunk_local_debug_add(Chunk *c, val_t name, int slot, int start_pc);
+void chunk_local_debug_end(Chunk *c, int idx, int end_pc);
+/* Stamp code_len as end_pc on every still-open entry (params, top-levels). */
+void chunk_local_debug_finalize(Chunk *c);
 
 /* Current write position (for computing jump offsets) */
 static inline int chunk_pos(const Chunk *c) { return c->code_len; }

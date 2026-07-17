@@ -73,6 +73,7 @@ typedef struct {
     val_t  name;       /* interned symbol                                */
     int    depth;      /* scope depth at declaration                     */
     bool   captured;   /* captured by an inner closure?                  */
+    int    dbg_idx;    /* index into chunk->local_debug for this local   */
 } Local;
 
 typedef struct {
@@ -123,6 +124,7 @@ static Chunk *end_compiler(Compiler *c) {
        here is dead code, but it still needs to be well-formed). */
     chunk_emit(c->chunk, OP_RETURN, 0);
     c->chunk->upval_count = c->upval_count;
+    chunk_local_debug_finalize(c->chunk);
     return c->chunk;
 }
 
@@ -175,6 +177,9 @@ static void end_scope(Compiler *c, int line) {
         if (c->locals[c->local_count - 1].captured)
             /* Close the upvalue for this specific slot without popping. */
             emit_ab(c, OP_CLOSE_UP, (uint8_t)(c->local_count - 1), line);
+        chunk_local_debug_end(c->chunk,
+                              c->locals[c->local_count - 1].dbg_idx,
+                              chunk_pos(c->chunk));
         c->local_count--;
         n++;
     }
@@ -192,6 +197,8 @@ static int add_local(Compiler *c, val_t name) {
     l->name     = name;
     l->depth    = c->scope_depth;
     l->captured = false;
+    l->dbg_idx  = chunk_local_debug_add(c->chunk, name, c->local_count,
+                                        chunk_pos(c->chunk));
     return c->local_count++;
 }
 
@@ -550,8 +557,10 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
-        /* Closure pushed first (callee), then init values */
-        compile_lambda(c, fwd, body, NULL, line);
+        /* Closure pushed first (callee), then init values.  Named with the
+           enclosing chunk's name: a let frame is still lexically "in" it,
+           which is what a backtrace should say. */
+        compile_lambda(c, fwd, body, c->name, line);
         b = bindings;
         while (vis_pair(b)) {
             compile(c, vcar(vcdr(vcar(b))), false, line);
@@ -589,7 +598,7 @@ static void compile_let_star(Compiler *c, val_t args, bool tail, int line) {
         inner_body = scm_cons(inner_form, V_NIL);
     }
     val_t params = scm_cons(name, V_NIL);
-    compile_lambda(c, params, inner_body, NULL, line);
+    compile_lambda(c, params, inner_body, c->name, line);
     compile(c, init, false, line);
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
 }
@@ -1103,6 +1112,12 @@ static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int lin
 
 static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
+    /* Reader-annotated source line: the reader stamps each cons cell's
+       hdr.flags with the 1-based line its car's datum started on (0 for
+       pairs built by macros/runtime, which inherit the enclosing line). */
+    if (vis_pair(expr) && as_pair(expr)->hdr.flags)
+        line = (int)as_pair(expr)->hdr.flags;
+
     /* ── Self-evaluating atoms ── */
     if (vis_fixnum(expr) || vis_flonum(expr) || vis_bignum(expr) ||
         vis_rational(expr) || vis_complex(expr) || vis_string(expr) ||
@@ -1293,6 +1308,10 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
         val_t expr = vcar(list);
         val_t rest = vcdr(list);
         bool  last = vis_nil(rest);
+        /* track the sequence's own cons-cell line so glue ops (OP_POP)
+           are stamped with the form they follow, not the seq's first line */
+        if (as_pair(list)->hdr.flags)
+            line = (int)as_pair(list)->hdr.flags;
         compile(c, expr, tail && last, line);
         if (!last) emit(c, OP_POP, line);
         list = rest;

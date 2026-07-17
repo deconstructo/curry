@@ -302,6 +302,10 @@ static val_t read_list(val_t port, int close_ch) {
     if (c == close_ch) { next_char(port); return V_NIL; }
     if (c == -1)  read_error("unexpected EOF in list");
 
+    /* Source line of this element, stamped on its cons cell's hdr.flags
+       (pairs never use flags otherwise) for compiler line tracking. */
+    int elem_line = port_line(port);
+
     val_t head = read_datum(port);
     skip_whitespace(port);
 
@@ -317,7 +321,7 @@ static val_t read_list(val_t port, int close_ch) {
             if (next_char(port) != close_ch) read_error("expected closing paren after dot");
             /* Make a pair */
             Pair *p = CURRY_NEW(Pair);
-            p->hdr.type = T_PAIR; p->hdr.flags = 0;
+            p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
             p->car = head; p->cdr = cdr;
             return vptr(p);
         }
@@ -332,15 +336,15 @@ static val_t read_list(val_t port, int close_ch) {
         val_t sym = sym_intern(sb.buf, (uint32_t)sb.len);
         val_t rest2 = read_list(port, close_ch);
         Pair *p2 = CURRY_NEW(Pair);
-        p2->hdr.type=T_PAIR; p2->hdr.flags=0; p2->car=sym; p2->cdr=rest2;
+        p2->hdr.type=T_PAIR; p2->hdr.flags=(uint32_t)elem_line; p2->car=sym; p2->cdr=rest2;
         Pair *outer = CURRY_NEW(Pair);
-        outer->hdr.type=T_PAIR; outer->hdr.flags=0; outer->car=head; outer->cdr=vptr(p2);
+        outer->hdr.type=T_PAIR; outer->hdr.flags=(uint32_t)elem_line; outer->car=head; outer->cdr=vptr(p2);
         return vptr(outer);
     }
 
     val_t rest = read_list(port, close_ch);
     Pair *p = CURRY_NEW(Pair);
-    p->hdr.type = T_PAIR; p->hdr.flags = 0;
+    p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
     p->car = head; p->cdr = rest;
     return vptr(p);
 }

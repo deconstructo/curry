@@ -122,6 +122,9 @@ Chunk *chunk_new(void) {
     c->name       = NULL;
     c->source_name = NULL;
     c->glob_cache = NULL;
+    c->local_debug = NULL;
+    c->local_debug_len = 0;
+    c->local_debug_cap = 0;
     c->src_lambda  = V_VOID;
     c->upval_names = NULL;
     return c;
@@ -165,6 +168,39 @@ void chunk_emit16(Chunk *c, uint16_t val, int line) {
 void chunk_patch16(Chunk *c, int at, uint16_t target) {
     c->code[at]     = (uint8_t)(target & 0xFF);
     c->code[at + 1] = (uint8_t)(target >> 8);
+}
+
+/* ── Local-variable debug info ───────────────────────────────────────── */
+
+int chunk_local_debug_add(Chunk *c, val_t name, int slot, int start_pc) {
+    if (c->local_debug_len == c->local_debug_cap) {
+        int cap = c->local_debug_cap < 8 ? 8 : c->local_debug_cap * 2;
+        /* holds val_t names — allocate traced+pinned like glob_cache */
+        LocalDebugEntry *ne =
+            (LocalDebugEntry *)gc_alloc_raw_pinned((size_t)cap * sizeof(LocalDebugEntry));
+        if (c->local_debug)
+            memcpy(ne, c->local_debug,
+                   (size_t)c->local_debug_len * sizeof(LocalDebugEntry));
+        c->local_debug = ne;
+        c->local_debug_cap = cap;
+    }
+    int idx = c->local_debug_len++;
+    c->local_debug[idx].name     = name;
+    c->local_debug[idx].slot     = (uint16_t)slot;
+    c->local_debug[idx].start_pc = start_pc;
+    c->local_debug[idx].end_pc   = -1;
+    return idx;
+}
+
+void chunk_local_debug_end(Chunk *c, int idx, int end_pc) {
+    if (idx >= 0 && idx < c->local_debug_len)
+        c->local_debug[idx].end_pc = end_pc;
+}
+
+void chunk_local_debug_finalize(Chunk *c) {
+    for (int i = 0; i < c->local_debug_len; i++)
+        if (c->local_debug[i].end_pc < 0)
+            c->local_debug[i].end_pc = c->code_len;
 }
 
 /* ── Constants ───────────────────────────────────────────────────────── */
