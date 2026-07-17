@@ -349,29 +349,23 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
 }
 
 /*
- * Validate the argument count for a call to `cl` and, for variadic
- * closures, repack the trailing arguments into a proper list.
+ * Validate argc against cl's declared arity, raising
+ * EC_WRONG_NUMBER_OF_ARGUMENTS on mismatch. Fixed-arity (chunk->arity >= 0):
+ * argc must equal arity exactly. Variadic (chunk->arity < 0, meaning
+ * `fixed = -arity-1` required params plus one rest-list param): argc must
+ * be >= fixed. Does not touch the stack or build the rest-arg list —
+ * callers that need that done (the bytecode interpreter's calling
+ * convention, see vm_bind_args below) do it themselves; the LLVM JIT's
+ * generated function prologue does it internally via curry_jit_list_tail
+ * once this check has confirmed argc is valid (src/llvm/codegen.cpp
+ * emit_lambda, src/llvm/jit.cpp curry_jit_list_tail).
  *
- * `base` points at the `argc` already-pushed argument values (the callee's
- * about-to-be local-variable window). For a fixed-arity closure this only
- * checks argc == chunk->arity (raising EC_WRONG_NUMBER_OF_ARGUMENTS
- * otherwise) and leaves the stack untouched. For a variadic closure
- * (chunk->arity < 0, meaning `fixed = -arity-1` required params plus one
- * rest-list param), the trailing `argc - fixed` values at base[fixed..argc)
- * are consed into a list stored at base[fixed], and vm->sp is truncated to
- * base+fixed+1 — the exact local-window size compile_params() declared.
- *
- * Without this, OP_CALL/OP_TAIL_CALL/vm_run previously just set
- * slots=base, slot_count=argc unconditionally: a fixed-arity closure called
- * with the wrong argc silently read uninitialized stack slots for missing
- * params (or left extra args as live but unreferenced stack cells), and a
- * variadic closure's rest parameter ended up holding the raw last-pushed
- * argument instead of a list. Both bugs stem from the same missing
- * validation, fixed together here.
- *
- * Returns the slot_count to store in the CallFrame.
+ * Shared by vm_bind_args and every JIT-fast-path call site (apply_arr in
+ * eval.c, and the vis_jitclosure branches of OP_CALL/OP_TAIL_CALL below) —
+ * before this existed, JIT-compiled closures had no arity check at all,
+ * same bug class as the bytecode interpreter, fixed the same way.
  */
-static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
+void vm_check_arity(BcClosure *cl, int argc) {
     int arity = cl->chunk->arity;
     const char *nm = cl->chunk->name ? cl->chunk->name : "#<procedure>";
     if (arity >= 0) {
@@ -381,12 +375,41 @@ static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
         if (argc > arity)
             scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
                 "%s: too many arguments (got %d, need %d)", nm, argc, arity);
-        return argc;
+        return;
     }
     int fixed = -arity - 1;
     if (argc < fixed)
         scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
             "%s: too few arguments (got %d, need at least %d)", nm, argc, fixed);
+}
+
+/*
+ * Validate (via vm_check_arity) and, for variadic closures, repack the
+ * trailing arguments into a proper list — the bytecode interpreter's
+ * calling convention, where arguments live as raw values in the callee's
+ * local-variable window on vm->stack.
+ *
+ * `base` points at the `argc` already-pushed argument values (the callee's
+ * about-to-be local-variable window). For a fixed-arity closure this
+ * leaves the stack untouched. For a variadic closure the trailing
+ * `argc - fixed` values at base[fixed..argc) are consed into a list stored
+ * at base[fixed], and vm->sp is truncated to base+fixed+1 — the exact
+ * local-window size compile_params() declared.
+ *
+ * Without this, OP_CALL/OP_TAIL_CALL/vm_run previously just set
+ * slots=base, slot_count=argc unconditionally: a fixed-arity closure called
+ * with the wrong argc silently read uninitialized stack slots for missing
+ * params (or left extra args as live but unreferenced stack cells), and a
+ * variadic closure's rest parameter ended up holding the raw last-pushed
+ * argument instead of a list.
+ *
+ * Returns the slot_count to store in the CallFrame.
+ */
+static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
+    vm_check_arity(cl, argc);
+    int arity = cl->chunk->arity;
+    if (arity >= 0) return argc;
+    int fixed = -arity - 1;
     val_t rest = V_NIL;
     for (int i = argc - 1; i >= fixed; i--) rest = scm_cons(base[i], rest);
     base[fixed] = rest;
@@ -793,6 +816,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 /* Tiered JIT: hot-swap to native code once compiled. */
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
                     && curry_profiling_level == 0) {
+                    vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
@@ -846,6 +870,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 /* Tiered JIT: hot-swap to native code once compiled. */
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
                     && curry_profiling_level == 0) {
+                    vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);

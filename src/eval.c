@@ -1665,6 +1665,7 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
          * interpreter which reuses its frame via OP_TAIL_CALL (O(1) C-stack). */
         if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
             && curry_profiling_level == 0) {
+            vm_check_arity(cl, argc);
             JitClosure *jc = as_jitclos(cl->jit_val);
             typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
             g_jit_call_depth++;

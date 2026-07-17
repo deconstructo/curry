@@ -104,6 +104,15 @@ val_t vm_eval(val_t expr, val_t env);
 /* Stack overflow — noreturn, defined in vm.c */
 void vm_stack_overflow(void);
 
+/* Validate argc against cl's declared arity, raising
+ * EC_WRONG_NUMBER_OF_ARGUMENTS on mismatch (exact match if fixed-arity,
+ * argc >= required-fixed-count if variadic). Used by every call path that
+ * bypasses the bytecode interpreter's own argument binding — currently the
+ * LLVM JIT fast path in apply_arr (eval.c) and the vis_jitclosure branches
+ * of OP_CALL/OP_TAIL_CALL (vm.c) — since the JIT-compiled function's own
+ * prologue handles rest-arg collection but never checked argc first. */
+void vm_check_arity(BcClosure *cl, int argc);
+
 /* Capture the current call stack as a list of (name file line) frames,
    innermost first, for attaching to a raised error. name/file are strings
    or #f when unknown; line is a fixnum or #f. Returns V_NIL if no VM frame
