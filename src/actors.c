@@ -121,6 +121,7 @@ static void *actor_thread(void *arg) {
     val_t result = V_VOID;
 
     h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
     current_handler = &h;
     uint64_t t0 = mono_ns();
     if (setjmp(h.jmp) == 0) {
@@ -128,6 +129,7 @@ static void *actor_thread(void *arg) {
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         reason = h.exn;
         fprintf(stderr, "Actor %lu died: ", (unsigned long)self->id);
         scm_write(reason, PORT_STDERR);

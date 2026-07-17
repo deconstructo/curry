@@ -1458,10 +1458,12 @@ static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-input-from-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t saved = PORT_STDIN; PORT_STDIN = port;
-    ExnHandler h; h.prev = current_handler; current_handler = &h;
+    ExnHandler h; h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
-    else { current_handler = h.prev; PORT_STDIN = saved; port_close(port); scm_raise_val(h.exn); }
+    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDIN = saved; port_close(port); scm_raise_val(h.exn); }
     PORT_STDIN = saved; port_close(port);
     return result;
 }
@@ -1471,10 +1473,12 @@ static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-output-to-file: cannot open '%s'", str_data(as_str(av[0])));
     val_t saved = PORT_STDOUT; PORT_STDOUT = port;
-    ExnHandler h; h.prev = current_handler; current_handler = &h;
+    ExnHandler h; h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
-    else { current_handler = h.prev; PORT_STDOUT = saved; port_close(port); scm_raise_val(h.exn); }
+    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDOUT = saved; port_close(port); scm_raise_val(h.exn); }
     PORT_STDOUT = saved; port_close(port);
     return result;
 }
@@ -1550,12 +1554,14 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     PORT_STDOUT = port;
     ExnHandler h;
     h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
     current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         apply(av[0], V_NIL);
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         PORT_STDOUT = saved;
         scm_raise_val(h.exn);
     }
@@ -1731,12 +1737,15 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     val_t *saved_sp       = vm->sp;
     Upvalue *saved_upvals = vm->open_upvalues;
     ExnHandler h;
-    h.prev = current_handler; current_handler = &h;
+    h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         result = apply(thunk, V_NIL);
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         vm->frame_count   = saved_frame_count;
         vm->sp            = saved_sp;
         vm->open_upvalues = saved_upvals;
@@ -1761,7 +1770,9 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
 
     val_t result = V_VOID;
     ExnHandler h;
-    h.prev = current_handler; current_handler = &h;
+    h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
     bool raised = false;
     val_t exn_val = V_VOID;
     if (setjmp(h.jmp) == 0) {
@@ -1769,6 +1780,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         raised = true; exn_val = h.exn;
     }
 
@@ -1784,13 +1796,16 @@ static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     val_t port = av[0], proc = av[1];
     val_t result = V_VOID;
     ExnHandler h;
-    h.prev = current_handler; current_handler = &h;
+    h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
     bool raised = false; val_t exn_val = V_VOID;
     if (setjmp(h.jmp) == 0) {
         result = apply(proc, scm_cons(port, V_NIL));
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         raised = true; exn_val = h.exn;
     }
     port_close(port);

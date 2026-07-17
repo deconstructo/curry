@@ -93,7 +93,9 @@ _Thread_local bool pool_is_worker = false;
 
 static void execute_item(WorkItem *item) {
     ExnHandler h;
-    h.prev = current_handler; current_handler = &h;
+    h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    current_handler = &h;
 
     /* Worker threads have no shadow stack and no registered roots for C-local
      * val_t variables.  Inhibit minor GC for the duration of the work item so
@@ -127,6 +129,7 @@ static void execute_item(WorkItem *item) {
         current_handler = h.prev;
     } else {
         current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
         item->error = true;
         item->exn   = h.exn;
     }

@@ -145,6 +145,24 @@
 (check "JIT fast path still functional after leak scenario"
        (leak-good-caller 3 4) 7)
 
+;;; 13. Same leak check via with-exception-handler, not just guard ─────────────
+;;; with-exception-handler's primitive (prim_with_exception_handler in
+;;; builtins.c) hand-rolls its own ExnHandler install rather than going
+;;; through the VM's OP_PUSH_HANDLER or the SCM_PROTECT macro — a distinct
+;;; call site that needed its own saved_jit_depth fix.
+(define (weh-callee x y) (+ x y))
+(jit-compile! weh-callee)
+(define (weh-caller) (weh-callee 1)) ; always wrong arity
+(jit-compile! weh-caller)
+(let loop ((i 0))
+  (when (< i 260)
+    (with-exception-handler
+      (lambda (e) 'caught)
+      (lambda () (guard (e2 (#t #f)) (weh-caller))))
+    (loop (+ i 1))))
+(check "jit-call-depth does not leak across with-exception-handler"
+       (jit-call-depth) 0)
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
