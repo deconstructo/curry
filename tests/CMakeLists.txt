@@ -32,6 +32,9 @@ add_test(NAME sets_module  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sets_module
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
+if(TARGET curry_network)
+  add_test(NAME network COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/network_tests.scm)
+endif()
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)
