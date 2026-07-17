@@ -83,6 +83,11 @@ if(BUILD_LLVM)
     add_test(NAME jit COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
 endif()
 
+if(BUILD_MODULE_NETWORK AND TARGET curry_network)
+    add_test(NAME network COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/network_tests.scm)
+    set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 # Pure-Scheme scientific I/O modules (fits/netcdf) plus the FFI-based hdf5
 # wrapper (requires BUILD_FFI=ON to compile; libhdf5 itself is a
 # runtime-only dlopen dependency, so hdf5_tests.scm skips cleanly if it's

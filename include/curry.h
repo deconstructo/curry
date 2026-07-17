@@ -128,6 +128,14 @@ curry_val  curry_make_octonion(const double e[8]);
 /* ---- List building helpers ---- */
 curry_val  curry_list(int n, ...);  /* curry_list(3, a, b, c) -> (a b c) */
 
+/* ---- Ports ----
+ * Wrap an existing file descriptor (e.g. a socket) as a Curry port, usable
+ * directly with read-line/write-string/read-char/etc. Takes ownership of
+ * fd (closes it via GC finalizer, or when the returned port is explicitly
+ * closed) — do not close fd yourself after this call. Returns a false-y
+ * value (curry_is_true false) if fdopen() fails. */
+curry_val  curry_make_port_from_fd(int fd, bool output, bool binary);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
