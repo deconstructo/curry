@@ -163,6 +163,24 @@
 (check "jit-call-depth does not leak across with-exception-handler"
        (jit-call-depth) 0)
 
+;;; 14. Same leak check via parameterize ────────────────────────────────────────
+;;; S_PARAMETERIZE in eval.c hand-rolls its own ExnHandler install (to run
+;;; the parameter-restoring after-thunk before re-raising) rather than going
+;;; through SCM_PROTECT — another distinct call site found on a second,
+;;; more exhaustive completeness pass.
+(define pz-param (make-parameter 10))
+(define (pz-callee x y) (+ x y))
+(jit-compile! pz-callee)
+(define (pz-caller) (pz-callee 1)) ; always wrong arity
+(jit-compile! pz-caller)
+(let loop ((i 0))
+  (when (< i 260)
+    (guard (e (#t #f))
+      (parameterize ((pz-param 99)) (pz-caller)))
+    (loop (+ i 1))))
+(check "jit-call-depth does not leak across parameterize"
+       (jit-call-depth) 0)
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")

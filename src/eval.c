@@ -1076,13 +1076,16 @@ tail:
         ExnHandler h;
         bool raised = false;
         val_t exn_val = V_VOID;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
             result = eval(vcar(body), env);
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
             raised = true; exn_val = h.exn;
         }
 
@@ -1374,12 +1377,15 @@ tail:
 
         val_t result = V_VOID;
         ExnHandler h;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler;
+        h.saved_jit_depth = jit_depth_save();
+        current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             result = eval_body(body, env);
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
             /* Restore flags before re-raising */
             for (int i = 0; i < nv; i++)
                 as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
