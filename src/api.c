@@ -171,6 +171,18 @@ curry_val curry_make_port_from_fd(int fd, bool output, bool binary) {
     return port_wrap_fd(fd, flags);
 }
 
+/* Extract the underlying OS file descriptor from a file-backed port (not
+ * a string port). Needed by callers that want to poll/select on a port's
+ * readiness (e.g. socket-ready? in (curry network)) without curry itself
+ * needing to know about select()/poll() at the port layer. Returns -1 for
+ * a string port or a closed port. */
+int curry_port_fd(curry_val port) {
+    if (!vis_port(port)) return -1;
+    Port *p = as_port(port);
+    if ((p->flags & PORT_STRING) || (p->flags & PORT_CLOSED) || !p->u.fp) return -1;
+    return fileno(p->u.fp);
+}
+
 curry_val curry_list(int n, ...) {
     va_list ap;
     va_start(ap, n);

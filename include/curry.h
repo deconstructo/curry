@@ -136,6 +136,11 @@ curry_val  curry_list(int n, ...);  /* curry_list(3, a, b, c) -> (a b c) */
  * value (curry_is_true false) if fdopen() fails. */
 curry_val  curry_make_port_from_fd(int fd, bool output, bool binary);
 
+/* Extract the underlying OS file descriptor from a file-backed port, for
+ * callers that want to poll/select on its readiness. Returns -1 for a
+ * string port or a closed port. */
+int        curry_port_fd(curry_val port);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

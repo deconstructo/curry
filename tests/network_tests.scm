@@ -70,6 +70,48 @@
 (tcp-close listener)
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 2  socket-ready? / socket-set-nonblocking!
+;;;
+;;; Scoped-down non-blocking support (see docs/reference/module-network.md):
+;;; select()-based readiness check working on both a raw socket handle
+;;; (tcp-listen's return) and a port (tcp-accept's/tcp-connect's).
+;;; ════════════════════════════════════════════════════════════
+
+(define test-port2 18099)
+(define listener2 (tcp-listen test-port2))
+
+(check "listener not ready with no pending connection"
+  (socket-ready? listener2) #f)
+
+(spawn (lambda ()
+         (define conn (tcp-connect "127.0.0.1" test-port2))
+         (write-string "ping\n" (cdr conn))
+         (flush-output-port (cdr conn))
+         (close-port (car conn)) (close-port (cdr conn))))
+
+;; socket-ready?'s own timeout blocks in select() until ready or the
+;; timeout elapses -- waits correctly without a racing busy-loop.
+(check "listener ready within timeout after a connection arrives"
+  (socket-ready? listener2 2000) #t)
+
+(define accepted2 (tcp-accept listener2))
+(define ain (car accepted2))
+
+(check "accepted port ready once data arrives"
+  (socket-ready? ain 500) #t)
+(check "accepted port data readable"
+  (read-line ain) "ping")
+
+(close-port ain)
+(close-port (cdr accepted2))
+
+(check "socket-set-nonblocking! does not error"
+  (guard (e (#t #f)) (socket-set-nonblocking! listener2) #t)
+  #t)
+
+(tcp-close listener2)
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
