@@ -2635,25 +2635,6 @@ void builtins_register(val_t env) {
     env_define(env, sym_intern_cstr("SET-EQV"),   vfix(SET_CMP_EQV));
     env_define(env, sym_intern_cstr("SET-EQUAL"), vfix(SET_CMP_EQUAL));
 
-    /* ---- Akkadian and cuneiform procedure aliases ---- */
-    /* For each AKK_PR entry, look up the English binding and register
-     * both transliterated and cuneiform names pointing to the same value. */
-    {
-#define AKK(e, t, c)    /* special form — handled in eval.c */
-#define AKK_SF(e, t, c) /* special form — skip */
-#define AKK_PR(e, t, c) \
-        { \
-            val_t _v = env_lookup_or_false(env, sym_intern_cstr(e)); \
-            if (!vis_false(_v)) { \
-                env_define(env, sym_intern_cstr(t), _v); \
-                env_define(env, sym_intern_cstr(c), _v); \
-            } \
-        }
-#include "akkadian_names.h"
-        /* macros cleaned up by akkadian_names.h */
-#undef AKK
-    }
-
     /* Cuneiform/Akkadian constants */
     env_define(env, sym_intern_cstr("𒌋𒉡"),  V_TRUE);   /* U.NU = "and-not" = #t (truth) */
     env_define(env, sym_intern_cstr("𒉡"),    V_FALSE);  /* NU = "not" = #f */
@@ -2749,4 +2730,32 @@ void builtins_register(val_t env) {
 
     mpfr_num_init();
 #endif
+
+    /* ---- Akkadian and cuneiform procedure aliases ---- */
+    /* For each AKK_PR entry, look up the English binding and register both
+     * transliterated and cuneiform names pointing to the same value. This
+     * must run LAST in builtins_register() — every other registration call
+     * above (condition_register_builtins, builtins_numtheory_register,
+     * mv/ffi/mat/spinor_register_builtins, syntax_rules_register,
+     * builtins_curry_register, the MPFR block) defines names this loop
+     * looks up; running the loop any earlier silently drops aliases for
+     * whatever hasn't been registered yet (env_lookup_or_false just
+     * returns false and the alias is skipped, no error). This bit us once
+     * already for a stray syntax-rules entry (commit 31c71a9) and would
+     * otherwise silently drop every numtheory/condition alias too. */
+    {
+#define AKK(e, t, c)    /* special form — handled in eval.c */
+#define AKK_SF(e, t, c) /* special form — skip */
+#define AKK_PR(e, t, c) \
+        { \
+            val_t _v = env_lookup_or_false(env, sym_intern_cstr(e)); \
+            if (!vis_false(_v)) { \
+                env_define(env, sym_intern_cstr(t), _v); \
+                env_define(env, sym_intern_cstr(c), _v); \
+            } \
+        }
+#include "akkadian_names.h"
+        /* macros cleaned up by akkadian_names.h */
+#undef AKK
+    }
 }

@@ -166,6 +166,96 @@ AKK_PR("exp",             "napḫarum-ṣīrum",    "𒈷𒁹𒀸")
 AKK_PR("log",             "naṭālum-ṣīrum",     "𒅆𒁹")
 AKK_PR("atan",            "šapaltu-ippeš",     "𒁹𒀸𒀸")
 
+/* ---- Procedures: number theory ---- */
+/* Old Babylonian scribes kept reciprocal tables (igûm/igibûm) and worked
+ * extensively with fractions, shares (zittu), and surplus/deficit
+ * accounting — genuine anchors for most of this section. A few entries
+ * (Bernoulli/Euler/Stirling/Bell/Carmichael/Catalan numbers, the Jacobi/
+ * Legendre/Kronecker symbols) are 18th-20th century constructs with no
+ * Old Babylonian analog; those get an honestly-labeled evocative word,
+ * the same treatment already given to quantum superposition (kalāma) and
+ * surreal numbers (dāriš) elsewhere in this file. */
+
+/* ēdum: "one, alone, sole" — a prime has no factors but itself and one. */
+AKK_PR("prime?",          "ēdum?",             "𒁹𒉡?")   /* DIŠ.NU? = one-not[-divisible]? */
+/* zittum: "share, portion" — the attested term for a division of property
+ * or inheritance on OB legal tablets; a factor is the number's share. */
+AKK_PR("factor",          "zittum",            "𒁀𒋻𒌑")   /* BA.TAR.UD = give-cut-day = a share */
+AKK_PR("prime-factors",   "zittu-ēdûtim",      "𒁀𒋻𒉡")   /* BA.TAR.NU = the sole shares */
+AKK_PR("divisors",        "zittū",             "𒁀𒋻𒌋")   /* BA.TAR.U = shares (plural) */
+AKK_PR("divisor-count",   "mīnu-zittī",        "𒈠𒁀𒋻")   /* MA.BA.TAR = count of shares */
+AKK_PR("num-divisors",    "mīnu-zittim",       "𒈠𒁀𒋻𒁹")  /* alias of divisor-count, distinct glyph required */
+/* kamārum: "to gather, to heap up" — an OB accounting verb for summing. */
+AKK_PR("divisor-sum",     "kamār-zittī",       "𒃲𒁀𒋻")   /* GAL.BA.TAR = great-gathering of shares */
+AKK_PR("sum-divisors",    "kamāru-zittim",     "𒃲𒁀𒋻𒌋")  /* alias, distinct glyph required */
+/* šalmum: "whole, complete, sound" — a perfect number equals the sum of
+ * its proper divisors, "whole" in the same sense the word already covers. */
+AKK_PR("perfect?",        "šalmum?",           "𒈠𒃲?")    /* MA.GAL? = greatly-whole? */
+/* watrum: "surplus, excess" — an abundant number exceeds its divisor-sum. */
+AKK_PR("abundant?",       "watrum?",           "𒃲𒌋?")    /* GAL.U? = great-and-more? */
+/* muṭṭû: "deficient, lacking" — the opposite of watrum. */
+AKK_PR("deficient?",      "muṭṭûm?",           "𒉡𒃲?")    /* NU.GAL? = not-great? = lacking */
+AKK_PR("perfect-power?",  "šalmu-napḫarim?",   "𒈠𒈷?")    /* MA.ME? = wholly-powered? */
+AKK_PR("squarefree?",     "lā-mitḫartim?",     "𒉡𒈠𒋻?")  /* NU.MA.TAR? = not-squared? */
+/* damqum: "good, fine" — a smooth number has only small ("fine") prime
+ * factors, unlike a "rough" number with a large prime factor. */
+AKK_PR("smooth?",         "damqu-zittim?",     "𒌋𒁀𒋻?")   /* U.BA.TAR? = good-shared? */
+/* ibru: "friend, companion, partner" — the totient counts the numbers
+ * coprime to n, i.e. n's "partners" below it. */
+AKK_PR("totient",         "mīnu-ibrī",         "𒈠𒅁𒁹")   /* MA.IB.DIŠ = count of partners */
+/* têrtum: "omen, oracular sign" — the Möbius function's famously
+ * unpredictable ±1/0 pattern is as good a fit for "omen" as any. */
+AKK_PR("mobius",          "têrtum",            "𒂗𒉡𒁹")   /* EN.NU.DIŠ = the lordly single sign */
+/* kabrum already denotes gcd; extended-gcd additionally returns the
+ * Bézout coefficients — the gcd "with extras" (watrum, surplus). */
+AKK_PR("extended-gcd",    "kabru-watrum",      "𒃲𒁹𒁹𒌋") /* GAL.DIŠ.DIŠ.U = gcd-and-more */
+/* igûm: the actual OB term for a tabulated reciprocal (as in the
+ * reciprocal tables scribes memorized); mod-inverse is exactly that,
+ * generalized to modular arithmetic. */
+AKK_PR("mod-inverse",     "igûm",              "𒌋𒃲𒌋")   /* U.GAL.U = the great reciprocal */
+AKK_PR("mod-expt",        "kippat-napḫarim",   "𒄀𒌋𒈷")   /* GI.U.ME = modulo-power */
+/* puḫrum: "assembly, gathering" — CRT gathers several modular constraints
+ * into one; kippatu (modulo) already covers the individual constraint. */
+AKK_PR("chinese-remainder","kippātu-puḫrum",   "𒄀𒌋𒅁𒌋") /* GI.U.IB.U = assembly of moduli */
+/* têrtum family: successive generalizations of the quadratic-residue
+ * "omen"-symbol (Legendre -> Jacobi -> Kronecker). */
+AKK_PR("legendre-symbol", "têrtu-maḫrītum",    "𒂗𒉡𒁹𒁹") /* first/foremost omen */
+AKK_PR("jacobi-symbol",   "têrtu-watartum",    "𒂗𒉡𒁹𒌋") /* extended omen */
+AKK_PR("kronecker-symbol","têrtu-gamartum",    "𒂗𒉡𒁹𒃲") /* gamārum = to complete; the complete omen */
+/* ḫepûm already denotes "rational" (to break/divide); continued fractions
+ * and their convergents are repeated, successive breakings. */
+AKK_PR("continued-fraction","ḫepû-šanûtum",    "𒇲𒁹𒌋𒌋")  /* repeated fraction */
+AKK_PR("convergents",     "ḫepû-qerbūtum",     "𒇲𒁹𒂗𒉡") /* qerēbum = to approach; the approaching fractions */
+AKK_PR("best-rational-approx","ḫepû-qerbum",   "𒇲𒁹𒂗")   /* the nearest fraction */
+/* arkûm: "following, later" — the recurrence relation each term follows
+ * from those before it. */
+AKK_PR("fibonacci",       "arkiātum",          "𒀸𒋻𒁹")   /* AŠ2.TAR.DIŠ = the following-ones */
+AKK_PR("lucas",           "arkiātu-eššum",     "𒀸𒋻𒌋")   /* eššu = new; the other following-sequence */
+/* purussûm: "decision, verdict" — Catalan numbers count the ways to
+ * parenthesize/decide an association order. */
+AKK_PR("catalan",         "mīnu-purussî",      "𒈠𒁀𒋻𒃲") /* count of decisions */
+/* sarrum: "false, lying" — Carmichael numbers pass Fermat's primality
+ * test while being composite: false primes. */
+AKK_PR("carmichael",      "ēdu-sarrum",        "𒁹𒉡𒃲")   /* DIŠ.NU.GAL = the lying sole-one */
+/* puḫrum (assembly) again, split into the two classical kinds. */
+AKK_PR("stirling1",       "puḫur-maḫrûm",      "𒅁𒌋𒃲")   /* first assembly */
+AKK_PR("stirling2",       "puḫur-arkûm",       "𒅁𒌋𒉡")   /* later/second assembly */
+/* ḫisbu: "allotment, share-count" — a genuine administrative term for
+ * counted-out portions, i.e. the number of ways to choose a share. */
+AKK_PR("binomial",        "ḫisbum",            "𒅁𒉡𒃲")   /* the allotment */
+AKK_PR("multinomial",     "ḫisbu-kalāma",      "𒅁𒉡𒃲𒌋") /* kalāma = everything; the allotment of everything */
+AKK_PR("partition-count", "puḫur-mala",        "𒅁𒌋𒉡𒌋") /* mala = "as much as"; assembly of however-many */
+AKK_PR("next-prime",      "ēdu-arkûm",         "𒁹𒉡𒉡")   /* the next sole-one */
+AKK_PR("prev-prime",      "ēdu-maḫrûm",        "𒁹𒉡𒃲𒉡") /* the former sole-one */
+/* Bernoulli/Euler numbers: genuinely modern, no OB analog. Reusing
+ * minûtu (an abstract "reckoning/count") flags them honestly as named
+ * numeric sequences rather than claiming false ancient pedigree. */
+AKK_PR("bernoulli",       "minûtu-maḫrītum",   "𒈠𒈾𒁹")   /* the first reckoning-sequence */
+AKK_PR("euler-number",    "minûtu-šanītum",    "𒈠𒈾𒌋")   /* the second reckoning-sequence */
+AKK_PR("bell",            "puḫur-kalāma",      "𒅁𒌋𒌋𒉡") /* assembly-of-everything (set partitions) */
+AKK_PR("big-omega",       "mīnu-zitti-kalāma", "𒈠𒁀𒋻𒉡") /* count of ALL prime shares, with multiplicity */
+AKK_PR("omega",           "mīnu-zitti-ēdûtim", "𒈠𒁀𒋻𒌋𒉡") /* count of DISTINCT prime shares */
+
 /* ---- Procedures: type predicates ---- */
 
 AKK_PR("number?",         "nikkassum?",        "𒈷?")    /* ME? = is essence? */
@@ -476,6 +566,33 @@ AKK_PR("jiffies-per-second", "ṭarādū-ina-ūmim",   "𒌑𒌑")   /* UD.UD = 
 AKK_PR("error-object-message",  "awāt-ḫiṭītim",   "𒄷𒌝")   /* ḪI.UM = fault-tablet = the error's word */
 AKK_PR("read-error?",           "ḫiṭītum-šemûm?", "𒄷𒅆?")  /* ḪI.IGI? = fault-eye? = reading fault? */
 AKK_PR("file-error?",           "ḫiṭītum-ṭuppi?", "𒄷𒂍?")  /* ḪI.E2? = fault-house? = tablet/file fault? */
+
+/* ---- Conditions and restarts (CL-style condition system) ---- */
+/* Continuing the ḫiṭītum ("fault") root already used for error/error-object,
+ * extended with genuine attribute/trace/remedy vocabulary. */
+
+/* ṣabātum: "to seize, to take hold of" — a caught/signaled condition. */
+AKK_PR("condition?",            "ḫiṭītu-ṣabtum?",     "𒄷𒅁?")   /* ḪI.IB? = held fault? */
+/* zikru: "utterance, name, designation" — the condition's classification. */
+AKK_PR("condition-type",        "zikru-ḫiṭītim",      "𒌋𒄷")    /* U.ḪI = the fault's designation */
+/* atmû: "utterance, word" (distinct root from error-object-message's awātum,
+ * since these are two different accessors on two different object kinds). */
+AKK_PR("condition-message",     "atmû-ḫiṭītim",       "𒄷𒀸")    /* ḪI.AŠ2 = the fault's utterance */
+/* simtu: "fitting quality, characteristic attribute" — genuine OB term for
+ * an intrinsic property, a good fit for a condition's field set. */
+AKK_PR("condition-fields",      "simāt-ḫiṭītim",      "𒄷𒈠𒈠")  /* ḪI.MA.MA = the fault's attributes */
+AKK_PR("condition-field",       "simtu-ḫiṭītim",      "𒄷𒈠")    /* ḪI.MA = one attribute of the fault */
+AKK_PR("condition-is-a?",       "zikru-mitḫārum?",    "𒌋𒄷𒈠?")  /* is its designation the same? */
+/* šumu: "name" (reused root, as in symbol->string's šumum). */
+AKK_PR("condition-code",        "šumu-ḫiṭītim",       "𒌋𒄷𒁹")   /* the fault's stable name */
+/* redûm: "to follow, to trace" + ašru: "place, location" — the trail of
+ * call-frame locations back to the signal site. */
+AKK_PR("condition-backtrace",   "redû-ašrī",          "𒆠𒄷𒌋")   /* KI.ḪI.U = the trace of places */
+/* terṣītu: "correction, remedy" — a restart is exactly that: an offered
+ * way to correct and resume past the fault. */
+AKK_PR("restart?",              "terṣītum?",          "𒋻𒄷?")    /* TAR.ḪI? = a decided remedy? */
+AKK_PR("restart-name",          "šumu-terṣītim",      "𒌋𒋻𒄷")   /* the remedy's name */
+AKK_PR("restart-description",   "atmû-terṣītim",      "𒋻𒄷𒀸")   /* the remedy's description */
 
 #undef AKK_SF
 #undef AKK_PR
