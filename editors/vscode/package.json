@@ -1,0 +1,38 @@
+{
+  "name": "curry-scheme",
+  "displayName": "Curry Scheme",
+  "description": "Syntax highlighting for Curry Scheme: R7RS plus Akkadian/cuneiform synonyms, Babylonian sexagesimal literals, and the symbolic CAS.",
+  "version": "0.1.0",
+  "publisher": "curry-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "curry",
+        "aliases": [
+          "Curry Scheme",
+          "curry"
+        ],
+        "extensions": [
+          ".scm",
+          ".sld"
+        ],
+        "firstLine": "^#!.*\\bcurry\\b",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "curry",
+        "scopeName": "source.curry",
+        "path": "./syntaxes/curry.tmLanguage.json"
+      }
+    ]
+  }
+}
