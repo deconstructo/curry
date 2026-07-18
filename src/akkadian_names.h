@@ -149,7 +149,7 @@ AKK_PR("lcm",             "qallum",            "𒉡𒃲𒌑")  /* NU.GAL.UD = l
 /* mitḫartum: "the equal-sided figure" — the canonical OB term for x², the area of
  * a square of side x as computed on mathematical tablets. */
 AKK_PR("square",             "mitḫartum",          "𒈠𒋻𒁹")   /* MA.TAR.DIŠ = equal-cut-one = x² */
-AKK_PR("exact-integer?",     "kinattu-nikkassum?", "𒆠𒀸?")    /* KI.AŠ2? = earth-first = whole & exact? */
+AKK_PR("exact-integer?",     "kinattu-nikkassum?", "𒆠𒋻?")    /* KI.TAR? = grounded-decided? = fixed whole & exact? */
 AKK_PR("truncate-quotient",  "qātum-ḫarāṣim",      "𒁀𒋻𒁹")   /* BA.TAR.DIŠ = give-cut-one */
 AKK_PR("truncate-remainder", "šērum-ḫarāṣim",      "𒊕𒋻")     /* SAG.TAR = head-cut */
 AKK_PR("truncate/",          "ḫarāṣum-kala",       "𒋻𒈷𒈷")   /* TAR.ME.ME = cut-both = both results */
@@ -195,12 +195,12 @@ AKK_PR("read",            "šemûm",             "𒅆𒀸")   /* IGI.AŠ2 = to 
 AKK_PR("read-line",       "šemûm-ašrum",       "𒅆𒌋")
 AKK_PR("read-char",       "šemûm-ṣibtum",      "𒅆𒁀")   /* IGI.BA = see-give = read one */
 AKK_PR("write-char",      "šaṭārum-ṣibtum",    "𒌝𒅆")
-AKK_PR("write-string",    "šaṭārum-ṭuppam",    "𒅆𒌝")   /* IGI.UM = see-tablet */
+AKK_PR("write-string",    "šaṭārum-ṭuppam",    "𒌝𒄀")   /* UM.GI = write-establish (was miscopied from read-string) */
 AKK_PR("open-input-file", "petûm-ṭuppi-erēbim","𒂍𒂗")
 AKK_PR("open-output-file","petûm-ṭuppi-waṣîm", "𒂍𒉡")
 AKK_PR("close-port",      "sakārum",           "𒂍𒇲")   /* E2.LAL = bind the house */
 AKK_PR("flush-output-port","pašārum-bābim",    "𒂍𒁀")
-AKK_PR("eof-object?",     "qātum?",            "𒉡𒌝?")  /* NU.UM = no more tablet */
+AKK_PR("eof-object?",     "qātum?",            "𒉡𒌝𒀸?")  /* NU.UM.AŠ2 = no-more-tablet-first? */
 AKK_PR("char-ready?",           "ṣibtum-maḫrum?",             "𒅆𒁀?")    /* IGI.BA? = seen-ready? */
 AKK_PR("u8-ready?",             "ṣibtum-riqqi-maḫrum?",       "𒅆𒁹?")    /* IGI.DIŠ? = raw-byte ready? */
 AKK_PR("read-u8",               "šemûm-ṣibtum-riqqi",         "𒅆𒁀𒁹")   /* IGI.BA.DIŠ = read one raw byte */
@@ -209,19 +209,19 @@ AKK_PR("read-string",           "šemûm-ṭuppam",               "𒅆𒌝")   
 AKK_PR("read-bytevector",       "šemûm-ṭuppi-ṣibtātim",       "𒅆𒌝𒁀")   /* IGI.UM.BA = read byte-tablet */
 AKK_PR("read-bytevector!",      "šemûm-ṭuppi-ṣibtātim-ina",   "𒅆𒌝𒁀𒁹") /* IGI.UM.BA.DIŠ = read into existing */
 AKK_PR("write-u8",              "šaṭārum-ṣibtum-riqqi",       "𒌝𒁀𒁹")   /* UM.BA.DIŠ = write one raw byte */
-AKK_PR("write-bytevector",      "šaṭārum-ṭuppi-ṣibtātim",     "𒌝𒁀")     /* UM.BA = write byte-tablet */
-AKK_PR("write-simple",          "šaṭārum-ṣīrum",              "𒌝𒄿")     /* UM.I = write-going = simple/non-recursive write */
+AKK_PR("write-bytevector",      "šaṭārum-ṭuppi-ṣibtātim",     "𒌝𒁀𒃲")   /* UM.BA.GAL = write-many-bytes */
+AKK_PR("write-simple",          "šaṭārum-ṣīrum",              "𒌝𒄿𒀸")   /* UM.I.AŠ2 = write-going-plain = simple/non-recursive write */
 AKK_PR("file-exists?",          "ṭuppum-ibašši?",             "𒂍𒀸?")    /* E2.AŠ2? = does the tablet-house exist? */
 AKK_PR("delete-file",           "ḫepûm-ṭuppi",                "𒋻𒂍")     /* TAR.E2 = cut-house = destroy the tablet */
 AKK_PR("call-with-input-file",  "šemûm-ina-ṭuppi",            "𒂍𒅆")     /* E2.IGI = file-read */
-AKK_PR("call-with-output-file", "šaṭārum-ina-ṭuppi",          "𒂍𒌝")     /* E2.UM = file-write */
+AKK_PR("call-with-output-file", "šaṭārum-ina-ṭuppi",          "𒌝𒁀𒂍")   /* UM.BA.E2 = write-into-house = file-write (distinct from define-library's E2.UM, which always wins in call position) */
 AKK_PR("with-input-from-file",  "ina-ṭuppi-šemûm",            "𒂍𒅆𒁹")   /* E2.IGI.DIŠ = from-file-read-one */
 AKK_PR("with-output-to-file",   "ana-ṭuppi-šaṭārum",          "𒂍𒌝𒁹")   /* E2.UM.DIŠ = to-file-write-one */
 
 /* ---- Procedures: strings ---- */
 
 AKK_PR("make-string",     "epēšum-ṭuppam",     "𒇽𒌝")
-AKK_PR("string",          "ṭuppum",            "𒌑𒌝")   /* UD.UM = day-tablet */
+AKK_PR("string",          "ṭuppum",            "𒌑𒌋")   /* UD.U = the day's record = the written document */
 AKK_PR("string-length",   "mīnum-ṭuppim",      "𒈠𒌝")
 AKK_PR("string-ref",      "maḫārum-ṭuppim",    "𒌑𒊕")   /* UD.SAG = time-head */
 AKK_PR("string-append",   "redûm-ṭuppim",      "𒌝𒄿")   /* UM.I = tablet-going */
@@ -252,7 +252,7 @@ AKK_PR("string-fill!",  "malûm-ṭuppim",                        "𒌝𒌋𒁹"
 AKK_PR("string-foldcase","ṭuppum-mithāriš",                    "𒌑𒌝")     /* UD.UM = time-tablet = folded tablet */
 /* ṣibtātum: plural of ṣibtum (sign/character) — a sequence of raw byte-signs */
 AKK_PR("string->utf8",  "ṭuppum-ana-ṣibtātim",                "𒌝𒁀")     /* UM.BA = tablet-to-bytes */
-AKK_PR("utf8->string",  "ṣibtātum-ana-ṭuppi",                 "𒁀𒌝")     /* BA.UM = bytes-to-tablet */
+AKK_PR("utf8->string",  "ṣibtātum-ana-ṭuppi",                 "𒁀𒁹𒌝")   /* BA.DIŠ.UM = bytes-to-one-tablet (distinct from include's B.UM, which always wins in call position) */
 
 /* ---- Procedures: vectors ---- */
 
