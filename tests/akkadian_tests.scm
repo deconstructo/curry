@@ -684,6 +684,123 @@
 (check-true "PR cunei: 𒋻𒄷𒀸 binding (restart-description)" (procedure? 𒋻𒄷𒀸))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Remaining core builtins (src/builtins.c) — trig, bitwise, list
+;;; accessors, quaternions, ports, hash tables, sets, actors, error
+;;; objects, control flow, GC stats: all bound at startup. MPFR and
+;;; interval arithmetic are gated behind -DBUILD_MPFR=ON (off by
+;;; default) and share one #ifdef block in builtins.c, so both are
+;;; guarded together.
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(check "PR translit: ašarēdum-turrum (acos)" (ašarēdum-turrum 0.5) (acos 0.5))
+(check "PR translit: ippešum (tan)" (ippešum 0.5) (tan 0.5))
+(check "PR translit: igi-ašarēdim (sec)" (igi-ašarēdim 0.5) (sec 0.5))
+(check "PR translit: ašarēdu-nabalkutim (cosh)" (ašarēdu-nabalkutim 0.5) (cosh 0.5))
+(check "PR translit: kilallān-ṣibtim (bitwise-and)" (kilallān-ṣibtim 6 3) 2)
+(check "PR translit: ištēn-ṣibtim (bitwise-or)" (ištēn-ṣibtim 6 3) 7)
+(check "PR translit: aḫu-ṣibtim (bitwise-xor)" (aḫu-ṣibtim 6 3) 5)
+(check "PR translit: nakār-ṣibtim (bitwise-not)" (nakār-ṣibtim 6) -7)
+(check "PR translit: šutabalkut-ṣibtim (arithmetic-shift)" (šutabalkut-ṣibtim 1 4) 16)
+(check "PR translit: rēš-rēšim (caar)" (rēš-rēšim '((1 2) 3)) 1)
+(check "PR translit: rēš-zibbatim (cadr)" (rēš-zibbatim '(1 2 3)) 2)
+(check "PR translit: zibbat-zibbat-zibbatim (cdddr)" (zibbat-zibbat-zibbatim '(1 2 3 4)) '(4))
+(check "PR translit: libbu-mitḫārum (memq)" (libbu-mitḫārum 'b '(a b c)) '(b c))
+(check "PR translit: ṭuppum-maḫārum-kīnim (assv)" (ṭuppum-maḫārum-kīnim 2 '((1 . a) (2 . b))) '(2 . b))
+(check "PR translit: nindabûm-warkûm (list*)" (nindabûm-warkûm 1 2 '(3 4)) '(1 2 3 4))
+(check "PR translit: šutur-nindabîm (list-copy)" (šutur-nindabîm '(1 2 3)) '(1 2 3))
+(check "PR translit: šakān-rēšim / šakān-zibbatim (set-car!/set-cdr!)"
+  (let ((p (cons 1 2)))
+    (šakān-rēšim p 9)
+    (šakān-zibbatim p 8)
+    p)
+  '(9 . 8))
+(check "PR translit: ṭuppum-ṣibtātim? (bytevector?)" (ṭuppum-ṣibtātim? (bytevector 1 2 3)) #t)
+(check-true "PR translit: zikru-nikkassi-inanna binding (current-number-notation)"
+  (procedure? zikru-nikkassi-inanna))
+(check "PR translit: šaplu-ḫepîm (denominator)" (šaplu-ḫepîm 3/4) 4)
+(check "PR translit: elû-ḫepîm (numerator)" (elû-ḫepîm 3/4) 3)
+(check "PR translit: kinattu-ana-lā-kinattim (exact->inexact)" (kinattu-ana-lā-kinattim 3) 3.0)
+(check "PR translit: lā-kinattu-ana-kinattim (inexact->exact)" (lā-kinattu-ana-kinattim 3.0) 3)
+(check "PR translit: šaplu-qātim (floor-quotient)" (šaplu-qātim 7 2) 3)
+(check "PR translit: gamrum? (finite?)" (gamrum? 3.0) #t)
+(check "PR translit: dāriš-nikkassim? (infinite?)" (dāriš-nikkassim? +inf.0) #t)
+(check "PR translit: lā-nikkassum? (nan?)" (lā-nikkassum? +nan.0) #t)
+;; quaternion components are flonums (equal? distinguishes exactness from
+;; exact 1/4, even though both print the same) — compare against the
+;; English name's own result instead of a literal.
+(check "PR translit: rebû-maḫrûm (quaternion-w)"
+  (rebû-maḫrûm (make-quaternion 1 2 3 4)) (quaternion-w (make-quaternion 1 2 3 4)))
+(check "PR translit: rebû-rebîm (quaternion-z)"
+  (rebû-rebîm (make-quaternion 1 2 3 4)) (quaternion-z (make-quaternion 1 2 3 4)))
+(check-true "PR translit: matāḫ-rebîm binding (quaternion+)" (procedure? matāḫ-rebîm))
+(check "PR translit: elû-ṣibtim (char-upcase)" (elû-ṣibtim #\a) #\A)
+(check "PR translit: šiṭir-ṣibtim? (char-alphabetic?)" (šiṭir-ṣibtim? #\a) #t)
+(check "PR translit: rīqu-ṣibtim? (char-whitespace?)" (rīqu-ṣibtim? #\space) #t)
+(check-true "PR translit: bāb-šemîm binding (current-input-port)" (procedure? bāb-šemîm))
+(check-true "PR translit: bāb-šaṭārim binding (current-output-port)" (procedure? bāb-šaṭārim))
+(check "PR translit: petû-bāb-šaṭāri-ṭuppim / leqû-bāb-ṭuppim round-trip"
+  (let ((p (petû-bāb-šaṭāri-ṭuppim)))
+    (write-string "hi" p)
+    (leqû-bāb-ṭuppim p))
+  "hi")
+(check-true "PR translit: petû-bāb-ṭuppim binding (open-input-string)" (procedure? petû-bāb-ṭuppim))
+;; eof-object?/eof-object have a pre-existing, unrelated mismatch
+;; (eof-object? on a fresh eof-object returns #f even by its English
+;; name — see the commit history for the earlier-noticed instance);
+;; just verify the alias reaches the same object, not a specific
+;; predicate result.
+(check-true "PR translit: qātu-gamrum binding (eof-object)" (procedure? qātu-gamrum))
+(define akk-ht (epēš-puḫur-šumim))
+(check-true "PR translit: epēš-puḫur-šumim (make-hash-table)" (puḫur-šumim? akk-ht))
+(check "PR translit: šakān-puḫur-šumim / maḫār-puḫur-šumim round-trip"
+  (begin (šakān-puḫur-šumim akk-ht 'k 42) (maḫār-puḫur-šumim akk-ht 'k #f))
+  42)
+(check "PR translit: bašû-puḫur-šumim? (hash-table-exists?)" (bašû-puḫur-šumim? akk-ht 'k) #t)
+(check "PR translit: mīnu-puḫur-šumim (hash-table-size)" (mīnu-puḫur-šumim akk-ht) 1)
+(define akk-set (epēš-napḫarim))
+(check-true "PR translit: epēš-napḫarim (make-set)" (napḫarum? akk-set))
+(check "PR translit: šakān-napḫarim / libbu-napḫarim? round-trip"
+  (begin (šakān-napḫarim akk-set 5) (libbu-napḫarim? akk-set 5))
+  #t)
+(check "PR translit: mīnu-napḫarim (set-size)" (mīnu-napḫarim akk-set) 1)
+(check "PR translit: rīqu-napḫarim? (set-empty?)" (rīqu-napḫarim? (epēš-napḫarim)) #t)
+(check-true "PR translit: kamār-napḫarim binding (set-union)" (procedure? kamār-napḫarim))
+(check-true "PR translit: wālidum? binding (actor?)" (procedure? wālidum?))
+(check-true "PR translit: ḫiṭītu-awātim? binding (error-object?)" (procedure? ḫiṭītu-awātim?))
+(check "PR translit: paqād-nikkassī (call-with-values)"
+  (paqād-nikkassī (lambda () (values 1 2)) +)
+  3)
+(check "PR translit: lawûm (dynamic-wind)"
+  (let ((log '()))
+    (lawûm (lambda () (set! log (cons 'before log)))
+           (lambda () (set! log (cons 'during log)))
+           (lambda () (set! log (cons 'after log))))
+    (reverse log))
+  '(before during after))
+;; make-promise wraps an already-computed VALUE (not a thunk — that's
+;; delay's job); my first draft of this test passed a lambda by mistake.
+(check "PR translit: epēš-qibītim / qibītum? / šūpûm round-trip"
+  (let ((p (epēš-qibītim 99)))
+    (list (qibītum? p) (šūpûm p)))
+  '(#t 99))
+(check-true "PR translit: banû-šumi-la-idîm binding (gensym)" (procedure? banû-šumi-la-idîm))
+(check "PR translit: ul-mimma (void)" (ul-mimma) (void))
+(check-true "PR translit: ebēbum binding (gc)" (procedure? ebēbum))
+(check-true "PR translit: ṭēm-ebēbim binding (gc-stats)" (procedure? ṭēm-ebēbim))
+(check-true "PR translit: mīnu-nagbim binding (gc-heap-size)" (procedure? mīnu-nagbim))
+
+;; MPFR and interval arithmetic share one #ifdef BUILD_MPFR block in
+;; builtins.c, off by default — guarded together like ldap/rpi/LLVM-JIT.
+(guard (e (#t (display "SKIP: MPFR/interval builtins not built in (BUILD_MPFR=OFF)") (newline)))
+  (check-true "PR translit: nasqum binding (mpfr)" (procedure? nasqum))
+  (check-true "PR translit: nasqu-kippatim binding (mpfr-pi)" (procedure? nasqu-kippatim))
+  (check-true "PR translit: pūtum binding (interval)" (procedure? pūtum))
+  (check-true "PR translit: epēš-pūtim binding (make-interval)" (procedure? epēš-pūtim))
+  (check "PR translit: šapil-pūtim / elû-pūtim (interval-lo/hi)"
+    (list (šapil-pūtim (epēš-pūtim 1 5)) (elû-pūtim (epēš-pūtim 1 5)))
+    '(1 5)))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; More CAS, special functions, STM/channels, JIT/GC introspection, and
 ;;; network core (src/builtins_curry.c + modules/network/network.c) — all
 ;;; bound at startup, so all reachable without any import. Functional

@@ -97,6 +97,8 @@ AKK_SF("receive",         "maḫārum",           "𒈠𒄭")   /* MA.ḪI = to 
 AKK_PR("cons",            "rakāsum",           "𒇲")     /* LAL = to bind */
 AKK_PR("car",             "rēšum",             "𒊕")     /* SAG = head! */
 AKK_PR("cdr",             "zibbatum",          "𒆜")     /* KUN = tail! */
+AKK_PR("set-car!",        "šakān-rēšim",       "𒁹𒊕")   /* place the head (šakānum, reused) */
+AKK_PR("set-cdr!",        "šakān-zibbatim",    "𒁹𒆜")   /* place the tail */
 AKK_PR("list",            "nindabûm",          "𒄿𒌝")   /* I.UM = proceeding tablets */
 AKK_PR("length",          "mīnum",             "𒈠𒈾")   /* MA.NA = mana (weight/measure) */
 AKK_PR("append",          "redûm",             "𒈠𒂗")   /* MA.EN = follow-on */
@@ -158,6 +160,9 @@ AKK_PR("exact",           "kinattu",           "𒆠𒋻")
 AKK_PR("inexact",         "lā-kinattu",        "𒉡𒆠𒋻")
 AKK_PR("number->string",  "nikkassum-ana-ṭuppi","𒈷𒌝")
 AKK_PR("string->number",  "ṭuppum-ana-nikkassim","𒌝𒈷")
+/* zikru (designation, reused) of the current numeric display mode
+ * (decimal/sexagesimal/cuneiform notation). */
+AKK_PR("current-number-notation", "zikru-nikkassi-inanna", "𒌋𒈷𒉡𒉡")
 
 /* Transcendental */
 AKK_PR("sin",             "šapaltu-ṣīrum",     "𒁹𒀸𒁹")
@@ -366,6 +371,7 @@ AKK_PR("vector-copy!",  "šutur-ṣindim-ina",       "𒀸𒄿𒁹")   /* AŠ2.I
  * analogous to a clay tablet inscribed with a fixed number of cuneiform wedges. */
 AKK_PR("make-bytevector",      "epēšum-ṭuppi-ṣibtātim",   "𒇽𒌝𒁀")   /* LU2.UM.BA = make byte-tablet */
 AKK_PR("bytevector",           "ṭuppum-ṣibtātim",          "𒌑𒌝𒁀")   /* UD.UM.BA = the byte-tablet (constructor) */
+AKK_PR("bytevector?",          "ṭuppum-ṣibtātim?",         "𒌑𒌝𒁀𒉡?")  /* is it a byte-tablet? */
 AKK_PR("bytevector-length",    "mīnum-ṭuppi-ṣibtātim",     "𒈠𒌝𒁀")   /* MA.UM.BA = count of the byte-tablet */
 AKK_PR("bytevector-u8-ref",    "maḫārum-ṭuppi-ṣibtātim",   "𒌝𒁀𒊕")   /* UM.BA.SAG = byte-tablet head/index */
 AKK_PR("bytevector-u8-set!",   "šakānum-ṭuppi-ṣibtātim",   "𒌝𒁀𒋻")   /* UM.BA.TAR = set in byte-tablet */
@@ -469,6 +475,284 @@ AKK_PR("conj",            "tawirtum-ṣīrum",      "𒅆𒋻𒁹")  /* IGI.TAR.
 AKK_PR("sym->string",     "ṭuppi-la-idûm",       "𒉡𒅆𒌝")  /* NU.IGI.UM */
 AKK_PR("sym->infix",      "ṭuppi-la-idûm-išārum","𒉡𒅆𒌝𒌋") /* NU.IGI.UM.U = infix tablet */
 AKK_PR("sym->latex",      "ṭuppi-ṣīrum-la-idûm", "𒉡𒅆𒌝𒁹") /* NU.IGI.UM.DIŠ = formal tablet */
+
+/* ---- Remaining core builtins (src/builtins.c) ---- */
+
+/* Trig: inverse forms via turrum (turn-back, reused); hyperbolic forms
+ * via nabalkutu (to cross over, reused from image-flip); reciprocal
+ * forms via igûm (the attested OB reciprocal-table term, reused). */
+AKK_PR("acos",  "ašarēdum-turrum",  "𒁹𒁹𒀸𒄀")
+AKK_PR("asin",  "šapaltu-turrum",   "𒁹𒀸𒁹𒄀")
+AKK_PR("cosh",  "ašarēdu-nabalkutim", "𒁹𒁹𒀸𒉡𒁀")
+AKK_PR("sinh",  "šapalti-nabalkutim", "𒁹𒀸𒁹𒉡𒁀")
+AKK_PR("tanh",  "ippeš-nabalkutim",   "𒁹𒀸𒀸𒉡𒁀")
+AKK_PR("acosh", "ašarēdu-nabalkuti-turrum", "𒁹𒁹𒀸𒉡𒁀𒄀")
+AKK_PR("asinh", "šapalti-nabalkuti-turrum", "𒁹𒀸𒁹𒉡𒁀𒄀")
+AKK_PR("atanh", "ippeš-nabalkuti-turrum",   "𒁹𒀸𒀸𒉡𒁀𒄀")
+AKK_PR("tan",   "ippešum",          "𒁹𒀸𒀸𒉡")
+AKK_PR("cot",   "igi-ippešim",      "𒌋𒃲𒁹𒀸𒀸")
+AKK_PR("csc",   "igi-šapaltim",     "𒌋𒃲𒁹𒀸𒁹")
+AKK_PR("sec",   "igi-ašarēdim",     "𒌋𒃲𒁹𒁹𒀸")
+
+/* Bitwise: šutabalkutu (to keep shifting/rolling over, a genuine derived
+ * verb form of nabalkutu, reused) for shift; ṣibtu (sign/character,
+ * reused) stands in for "bit". */
+AKK_PR("arithmetic-shift", "šutabalkut-ṣibtim", "𒉡𒁀𒁹𒁹")
+AKK_PR("bitwise-and",      "kilallān-ṣibtim",   "𒌋𒁹𒁹")
+AKK_PR("bitwise-or",       "ištēn-ṣibtim",      "𒀸𒁹𒁹𒁹")
+AKK_PR("bitwise-xor",      "aḫu-ṣibtim",        "𒅁𒁹𒁹")
+AKK_PR("bitwise-not",      "nakār-ṣibtim",      "𒉡𒄿𒁹𒁹")
+
+/* c[ad]+r family: rēšum (head, reused) / zibbatum (tail, reused). */
+AKK_PR("caar",  "rēš-rēšim",           "𒊕𒊕")
+AKK_PR("cadr",  "rēš-zibbatim",        "𒊕𒆜")
+AKK_PR("cdar",  "zibbat-rēšim",        "𒆜𒊕")
+AKK_PR("cddr",  "zibbat-zibbatim",     "𒆜𒆜")
+AKK_PR("caaar", "rēš-rēš-rēšim",       "𒊕𒊕𒊕𒊕")
+AKK_PR("caadr", "rēš-rēš-zibbatim",   "𒊕𒊕𒆜")
+AKK_PR("cadar", "rēš-zibbat-rēšim",   "𒊕𒆜𒊕")
+AKK_PR("caddr", "rēš-zibbat-zibbatim","𒊕𒆜𒆜")
+AKK_PR("cdaar", "zibbat-rēš-rēšim",   "𒆜𒊕𒊕")
+AKK_PR("cdadr", "zibbat-rēš-zibbatim","𒆜𒊕𒆜")
+AKK_PR("cddar", "zibbat-zibbat-rēšim","𒆜𒆜𒊕")
+AKK_PR("cdddr", "zibbat-zibbat-zibbatim", "𒆜𒆜𒆜")
+AKK_PR("memq",  "libbu-mitḫārum",     "𒉡𒈠𒁹𒁹𒁹")
+AKK_PR("memv",  "libbu-kīnim",        "𒉡𒆠𒁹")
+AKK_PR("assv",  "ṭuppum-maḫārum-kīnim", "𒌝𒈠𒆠")
+AKK_PR("list*",      "nindabûm-warkûm",  "𒇽𒉡𒉡𒉡")
+AKK_PR("list-copy",  "šutur-nindabîm",   "𒇽𒁹𒁹𒉡")
+AKK_PR("list-head",  "mīnu-rēš-nindabîm","𒈠𒊕𒇽")
+AKK_PR("list->set",  "nindabûm-ana-napḫarim", "𒇽𒀀𒈷𒈷")
+
+/* Numeric misc: šaplu/elû (below/above, reused) split a fraction into
+ * denominator/numerator; kinattu (exact, reused) negated round-trips
+ * with inexact. */
+AKK_PR("denominator",     "šaplu-ḫepîm",       "𒆠𒇲")
+AKK_PR("numerator",       "elû-ḫepîm",         "𒀭𒇲")
+AKK_PR("exact->inexact",  "kinattu-ana-lā-kinattim", "𒆠𒉡𒆠")
+AKK_PR("inexact->exact",  "lā-kinattu-ana-kinattim", "𒉡𒆠𒀀𒆠")
+AKK_PR("floor-quotient",  "šaplu-qātim",       "𒆠𒁀𒁹")
+AKK_PR("floor-remainder", "šaplu-šērim",       "𒆠𒊕𒌝")
+AKK_PR("floor/",          "šaplu-kalāma",      "𒆠𒉡𒉡")
+/* išāru (complex, reused) — magnitude/angle/real/imaginary parts. */
+AKK_PR("magnitude",       "ibu-išārim",        "𒅁𒁹𒌝𒉡")
+AKK_PR("angle",           "idât-išārim",       "𒀸𒁹𒌝𒉡")
+AKK_PR("real-part",       "ṣīru-išārim",       "𒀀𒌝𒉡")
+AKK_PR("imag-part",       "lā-ṣīru-išārim",    "𒉡𒀀𒌝𒉡")
+AKK_PR("make-rectangular","banû-išārim",       "𒉡𒌋𒌝𒉡")
+AKK_PR("make-polar",      "banû-išāri-idātim", "𒉡𒌋𒌝𒉡𒀸")
+AKK_PR("finite?",         "gamrum?",           "𒃲𒉡𒉡?")
+AKK_PR("infinite?",       "dāriš-nikkassim?",  "𒀭𒀭𒈷?")
+AKK_PR("nan?",            "lā-nikkassum?",     "𒉡𒈷𒉡?")
+
+/* Quaternion arithmetic: rebûm (fourfold, reused); components ordered
+ * by genuine cardinal ordinals (maḫrûm/šanûm/šalšum first-third, reused;
+ * the fourth reuses rebûm itself, the "fourfold" word doing double duty
+ * as both the type name and its own last component). */
+AKK_PR("quaternion+",              "matāḫ-rebîm",       "𒂗𒌋𒁹")
+AKK_PR("quaternion*",              "šutakūl-rebîm",     "𒈧𒁹𒌋𒁹")
+AKK_PR("quaternion-conjugate",     "tawirtu-rebîm",     "𒅆𒋻𒌋𒁹")
+AKK_PR("quaternion-inverse",       "igi-rebîm",         "𒌋𒃲𒌋𒁹")
+AKK_PR("quaternion-norm",          "ibu-napḫar-rebîm",  "𒅁𒁹𒈷𒌋𒁹")
+AKK_PR("quaternion-normalize",     "ibu-ṣīr-rebîm",     "𒅁𒁹𒀸𒌋𒁹")
+AKK_PR("quaternion-rotate-vector", "saḫār-rebîm",       "𒀭𒀸𒄷𒌋𒁹")
+AKK_PR("quaternion-w", "rebû-maḫrûm", "𒌋𒁹𒉌")
+AKK_PR("quaternion-x", "rebû-šanûm",  "𒌋𒁹𒁀")
+AKK_PR("quaternion-y", "rebû-šalšum", "𒌋𒁹𒋻")
+AKK_PR("quaternion-z", "rebû-rebîm",  "𒌋𒁹𒌋")
+
+/* Char predicates/case: ṣibtu (sign/character, reused). */
+AKK_PR("char-alphabetic?",  "šiṭir-ṣibtim?",  "𒌝𒁹𒁹?")
+AKK_PR("char-numeric?",     "nikkassu-ṣibtim?","𒈷𒁹𒁹?")
+/* rīqu: "empty, void" — genuine adjective. */
+AKK_PR("char-whitespace?",  "rīqu-ṣibtim?",   "𒉡𒁹𒁹?")
+AKK_PR("char-upcase",       "elû-ṣibtim",     "𒀭𒁹𒁹")
+AKK_PR("char-downcase",     "šaplû-ṣibtim",   "𒆠𒁹𒁹𒁹")
+AKK_PR("char-upper-case?",  "elû-ṣibtim?",    "𒀭𒁹𒁹?")
+AKK_PR("char-lower-case?",  "šaplû-ṣibtim?",  "𒆠𒁹𒁹?")
+
+/* Ports: bābu (gate, reused) for a port; petûm/sakārum (open/close,
+ * reused) for lifecycle. */
+AKK_PR("current-input-port",  "bāb-šemîm",      "𒂍𒅆𒌝")
+AKK_PR("current-output-port", "bāb-šaṭārim",    "𒂍𒌝𒁹𒁹")
+AKK_PR("current-error-port",  "bāb-ḫiṭītim",    "𒂍𒄷𒁹")
+AKK_PR("close-input-port",    "sakār-bāb-šemîm","𒂍𒂍𒅆𒌝")
+AKK_PR("close-output-port",   "sakār-bāb-šaṭārim","𒂍𒂍𒌝𒁹𒁹")
+AKK_PR("input-port?",         "bāb-šemîm?",     "𒂍𒅆𒌝?")
+AKK_PR("output-port?",        "bāb-šaṭārim?",   "𒂍𒌝𒁹𒁹?")
+AKK_PR("input-port-open?",    "petê-bāb-šemîm?","𒂍𒂍𒅆𒌝?")
+AKK_PR("output-port-open?",   "petê-bāb-šaṭārim?","𒂍𒂍𒌝𒁹?")
+AKK_PR("call-with-port",      "epēš-ina-bābim", "𒇽𒂍𒉌")
+AKK_PR("open-input-string",   "petû-bāb-ṭuppim",     "𒂍𒂍𒌝")
+AKK_PR("open-output-string",  "petû-bāb-šaṭāri-ṭuppim","𒂍𒂍𒌝𒁹")
+AKK_PR("open-input-bytevector",  "petû-bāb-ṣibtātim",  "𒂍𒂍𒁀")
+AKK_PR("open-output-bytevector", "petû-bāb-šaṭāri-ṣibtātim","𒂍𒂍𒌝𒁀")
+AKK_PR("get-output-string",      "leqû-bāb-ṭuppim",    "𒅁𒂍𒌝")
+AKK_PR("get-output-bytevector",  "leqû-bāb-ṣibtātim",  "𒅁𒂍𒁀𒁀")
+AKK_PR("eof-object",   "qātu-gamrum",     "𒉡𒌝𒃲")
+AKK_PR("peek-char",    "naṭāl-ṣibtim",    "𒅆𒉡𒁹𒁹")
+AKK_PR("with-output-to-string", "ana-ṭuppi-šaṭāru-libbim", "𒂍𒌝𒁹𒉡")
+/* riksu (bond/link, reused) — write-shared preserves the shared structure. */
+AKK_PR("write-shared", "šaṭāru-riksim",   "𒌝𒁹𒇲𒁹")
+
+/* Hash tables: puḫur šumim, "assembly of names" (both roots reused). */
+AKK_PR("make-hash-table",     "epēš-puḫur-šumim", "𒇽𒉌𒌋𒉌")
+AKK_PR("hash-table?",         "puḫur-šumim?",     "𒉌𒌋?")
+AKK_PR("hash-table-set!",     "šakān-puḫur-šumim","𒁹𒉌𒌋")
+AKK_PR("hash-table-ref",      "maḫār-puḫur-šumim","𒌝𒉌𒌋𒉌")
+AKK_PR("hash-table-delete!",  "nasāḫ-puḫur-šumim","𒋻𒉌𒌋")
+AKK_PR("hash-table-exists?",  "bašû-puḫur-šumim?","𒀸𒉌𒌋?")
+AKK_PR("hash-table-keys",     "šumū-puḫur-šumim", "𒌋𒉌𒌋")
+AKK_PR("hash-table-values",   "ṭuppū-puḫur-šumim","𒌝𒉌𒌋𒉡𒉌")
+AKK_PR("hash-table-size",     "mīnu-puḫur-šumim", "𒈠𒉌𒌋𒉌")
+AKK_PR("hash-table->alist",   "puḫur-šumi-ana-ṭuppim", "𒉌𒌋𒀀𒌝")
+
+/* Sets (SRFI 113): napḫaru, "the gathered whole" — genuine, distinct
+ * from puḫru (used above for hash tables and redis) to keep this
+ * separate generic-set abstraction unambiguous. */
+AKK_PR("make-set",         "epēš-napḫarim",     "𒇽𒈷𒈷")
+AKK_PR("set->list",        "napḫarum-ana-nindabîm", "𒈷𒈷𒀀𒇽")
+AKK_PR("set?",             "napḫarum?",         "𒈷𒈷?")
+AKK_PR("set-empty?",       "rīqu-napḫarim?",    "𒉡𒈷𒈷𒌋?")
+AKK_PR("set-size",         "mīnu-napḫarim",     "𒈠𒈷𒈷")
+AKK_PR("set-count",        "mīnu-napḫari-šanûm","𒈠𒈷𒈷𒁀")
+AKK_PR("set-member?",      "libbu-napḫarim?",   "𒉡𒈷𒈷?")
+AKK_PR("set-add!",         "šakān-napḫarim",    "𒁹𒈷𒈷")
+AKK_PR("set-adjoin",       "šakān-napḫari-šanûm",  "𒁹𒈷𒈷𒁀")
+AKK_PR("set-adjoin!",      "šakān-napḫari-šalšum", "𒁹𒈷𒈷𒋻")
+AKK_PR("set-delete",       "nasāḫ-napḫarim",       "𒋻𒈷𒈷𒌋")
+AKK_PR("set-delete!",      "nasāḫ-napḫari-šanûm",  "𒋻𒈷𒈷𒁀𒉌")
+AKK_PR("set-copy",         "šutur-napḫarim",    "𒁹𒁹𒈷𒈷")
+AKK_PR("set-union",        "kamār-napḫarim",    "𒃲𒈷𒈷")
+AKK_PR("set-intersection", "libbu-kilallān-napḫarim", "𒉡𒌋𒈷𒈷")
+AKK_PR("set-difference",   "ḫarāṣ-napḫarim",    "𒇲𒌑𒈷𒈷")
+AKK_PR("set-symmetric-difference", "aḫu-napḫarim", "𒅁𒈷𒈷𒉌")
+AKK_PR("set-subset?",      "qerbu-napḫarim?",   "𒂗𒈷𒈷?")
+AKK_PR("set=?",            "mitḫāru-napḫarim?", "𒈠𒋻𒈷𒈷?")
+AKK_PR("set-any?",         "ištēn-napḫarim?",   "𒀸𒈷𒈷?")
+AKK_PR("set-every?",       "gabbu-napḫarim?",   "𒃲𒉡𒈷𒈷?")
+AKK_PR("set-find",         "šeʾû-napḫarim",     "𒅆𒅁𒈷𒈷")
+AKK_PR("set-filter",       "ṣêru-napḫarim",     "𒋻𒈷𒈷𒉌")
+AKK_PR("set-filter!",      "ṣêru-napḫari-šanûm","𒋻𒈷𒈷𒁀")
+AKK_PR("set-fold",         "puḫur-napḫarim",    "𒉌𒈷𒈷")
+AKK_PR("set-for-each",     "ana-kālāma-napḫarim", "𒀀𒌋𒈷𒈷")
+AKK_PR("set-map",          "epēš-kalāma-napḫarim","𒇽𒉡𒈷𒈷")
+
+/* Actors: wālidum, agent noun "the begotten one" from wālādum (to beget,
+ * reused from spawn). */
+AKK_PR("actor?",           "wālidum?",       "𒅁𒀀?")
+AKK_PR("actor-id",         "šumu-wālidim",   "𒌋𒅁𒀀")
+AKK_PR("actor-set-name!",  "šakān-šumi-wālidim","𒁹𒌋𒅁𒀀")
+AKK_PR("actor-stats",      "ṭēm-wālidim",    "𒅆𒅁𒀀")
+
+/* Error objects: ḫiṭītu (fault, reused). */
+AKK_PR("error-object?",           "ḫiṭītu-awātim?", "𒄷𒀸𒁹?")
+AKK_PR("error-object-irritants",  "zumur-ḫiṭītim",  "𒄷𒂍𒉡")   /* zumru, reused from redis-smembers */
+AKK_PR("error-object-code",       "zikru-awāt-ḫiṭītim", "𒌋𒄷𒀸")
+AKK_PR("error-object->string",    "ṭuppi-ḫiṭītim",  "𒉡𒅆𒄷")
+/* labīru: "old, ancient, former" — genuine, marking this as the legacy form. */
+AKK_PR("error-message",           "awāt-ḫiṭīti-labīrtim", "𒄷𒌝𒉡")
+
+/* Control flow. */
+AKK_PR("call-with-values", "paqād-nikkassī", "𒇽𒄿𒈷𒈷")
+/* lawûm: "to surround, to encircle" — genuine, an exact fit for wind-
+ * before/after wrapping a body. */
+AKK_PR("dynamic-wind",  "lawûm",          "𒇲𒀀𒌋")
+AKK_PR("eval",          "epēš-awātim",    "𒇽𒀸𒁹")
+AKK_PR("exit",          "waṣû-gamrum",    "𒉡𒉡𒃲")
+AKK_PR("quit",          "waṣû-ḫamṭum",    "𒉡𒉡𒉡")
+/* šūpûm: "to reveal, to make manifest" — genuine, forcing a promise
+ * reveals its value. qibītu: "utterance, command, promise" — genuine
+ * noun, an actual word for "promise". */
+AKK_PR("force",         "šūpûm",          "𒉡𒅆𒉡")
+AKK_PR("make-promise",  "epēš-qibītim",   "𒇽𒁹𒉡")
+AKK_PR("promise?",      "qibītum?",       "𒁹𒉡𒉡?")
+AKK_PR("gensym",        "banû-šumi-la-idîm", "𒉡𒌋𒌋𒅆")
+/* mātu: "land, country" — genuine, "the interior of the land" for the
+ * current environment. */
+AKK_PR("interaction-environment", "libbu-mātim", "𒉡𒈠𒌝")
+AKK_PR("load",          "šemû-ṭuppim",    "𒅆𒌝𒉌")
+/* šīmtu (fate/determined value, reused from redis-ttl) — a parameter
+ * object holds a dynamically-scoped "fate". */
+AKK_PR("make-parameter", "epēš-šīmtim",   "𒇽𒁹𒌑")
+AKK_PR("raise-continuable", "našû-turrum", "𒃲𒁹𒌋𒄀")
+/* naṣārum (to guard, reused) — an exception handler guards against faults. */
+AKK_PR("with-exception-handler", "naṣār-ḫiṭītim", "𒉡𒂗𒄷")
+/* "ul mimma": genuine Akkadian idiom, "nothing at all". */
+AKK_PR("void",          "ul-mimma",       "𒉡𒉡𒉡𒉡𒉌")
+AKK_PR("trace",         "šutar-redîm",          "𒈠𒂗𒉡")
+AKK_PR("traced?",       "redûm?",         "𒈠𒂗?")
+AKK_PR("untrace",       "paṭār-redîm",    "𒇲𒈠𒂗")
+/* manzāzu (position/station, reused from plot-device) — a marked halt point. */
+AKK_PR("breakpoint",    "manzāzum",       "𒈠𒉡𒌋𒉡𒉌")
+AKK_PR("system",        "epēš-bītim",     "𒇽𒂍")
+
+/* GC stats (distinct from gc-collect!/gc-on-collection, already covered). */
+AKK_PR("gc",                      "ebēbum",             "𒁀𒉡𒉡")
+AKK_PR("gc-stats",                "ṭēm-ebēbim",         "𒅆𒉡𒉡𒉡𒉌")
+AKK_PR("gc-stats-reset!",         "turru-ṭēm-ebēbim",   "𒄀𒅆𒉡𒉡")
+AKK_PR("gc-total-bytes",          "mīnu-ṣibtātim",      "𒈠𒁀𒉡")
+AKK_PR("gc-free-bytes",           "mīnu-ṣibtāti-paṭārim","𒈠𒁀𒉡𒇲")
+/* nagbu: "the deep; totality; the underground water source" — genuine,
+ * a fitting metaphor for a vast reserve. */
+AKK_PR("gc-heap-size",            "mīnu-nagbim",        "𒈠𒉡𒃲𒉡")
+AKK_PR("gc-mode",                 "zikru-ebēbim",       "𒌋𒉡𒉡𒉡")
+AKK_PR("gc-enable-incremental!",  "šitkun-ebēbi-mala",  "𒁹𒉡𒉡𒉡𒉡")
+AKK_PR("gc-set-free-space-divisor!", "šakān-puluggi-paṭārim", "𒁹𒇲𒉌𒇲")
+AKK_PR("gc-set-max-heap!",        "šakān-rabûti-nagbim","𒁹𒃲𒉡𒃲𒉡")
+
+/* ---- MPFR (BUILD_MPFR=ON) ---- */
+/* nasqu: "chosen, select, precise" — genuine adjective, an apt root for
+ * arbitrary-precision arithmetic. */
+AKK_PR("mpfr",              "nasqum",             "𒉡𒀸𒌋")
+AKK_PR("mpfr?",             "nasqum?",            "𒉡𒀸𒌋?")
+AKK_PR("mpfr-precision",    "mīnu-nasqim",        "𒈠𒉡𒀸𒌋")
+AKK_PR("mpfr-set-precision","šakān-mīni-nasqim",  "𒁹𒈠𒉡𒀸𒌋")
+AKK_PR("mpfr-pi",           "nasqu-kippatim",     "𒉡𒀸𒌋𒄀")
+AKK_PR("mpfr-e",            "nasqu-napḫarim",     "𒉡𒀸𒌋𒈷")
+AKK_PR("mpfr-phi",          "nasqu-mitḫartim",    "𒉡𒀸𒌋𒈠𒋻")
+AKK_PR("mpfr-euler",        "nasqu-kamārim",      "𒉡𒀸𒌋𒃲")
+AKK_PR("mpfr-catalan",      "nasqu-purussîm",     "𒉡𒀸𒌋𒁀𒋻")
+AKK_PR("mpfr-apery",        "nasqu-kamāri-šalšim","𒉡𒀸𒌋𒃲𒋻")
+AKK_PR("mpfr-sqrt",         "nasqu-ibum",         "𒉡𒀸𒌋𒅁")
+AKK_PR("mpfr-exp",          "nasqu-napḫar-ṣīrim", "𒉡𒀸𒌋𒈷𒁹")
+AKK_PR("mpfr-log",          "nasqu-naṭāl-ṣīrim",  "𒉡𒀸𒌋𒅆𒁹")
+AKK_PR("mpfr-gamma",        "nasqu-rabûtim",      "𒉡𒀸𒌋𒃲𒉡")
+AKK_PR("mpfr-lgamma",       "nasqu-naṭāl-rabûtim","𒉡𒀸𒌋𒅆𒃲")
+AKK_PR("mpfr-zeta",         "nasqu-kamāri-mala",  "𒉡𒀸𒌋𒃲𒉡𒉡")
+AKK_PR("mpfr-erf",          "nasqu-pūru-gamrim",  "𒉡𒀸𒌋𒁀𒌋")
+AKK_PR("mpfr-erfc",         "nasqu-pūru-gamru-šanûm", "𒉡𒀸𒌋𒁀𒌋𒁀")
+AKK_PR("mpfr-j0",           "nasqu-zīqi-ṣifrim",  "𒉡𒀸𒌋𒌋𒉌")
+AKK_PR("mpfr-j1",           "nasqu-zīqi-ištēn",   "𒉡𒀸𒌋𒌋𒉌𒀸")
+AKK_PR("mpfr-log2",         "nasqu-naṭāl-šinaim", "𒉡𒀸𒌋𒅆𒁹𒁹")
+AKK_PR("mpfr-log2-of",      "nasqu-naṭāl-šanûm",  "𒉡𒀸𒌋𒅆𒁀")
+AKK_PR("mpfr-log10",        "nasqu-naṭāl-ešrim",  "𒉡𒀸𒌋𒅆𒌋")
+AKK_PR("mpfr-hypot",        "nasqu-ibu-kilallān", "𒉡𒀸𒌋𒅁𒌋")
+AKK_PR("mpfr-fma",          "nasqu-šutakūl-matāḫim", "𒉡𒀸𒌋𒈧𒋻")
+AKK_PR("mpfr-rounding-mode","zikru-nasqi-turrim", "𒌋𒉡𒀸𒌋𒄀")
+AKK_PR("call-with-precision", "epēš-ina-nasqim",  "𒇽𒀀𒉡𒀸𒌋")
+/* inanna: "now" — genuine adverb, matching current-second's convention. */
+AKK_PR("current-precision",   "nasqu-inanna",     "𒉡𒀸𒌋𒉡𒉡")
+
+/* ---- Interval arithmetic ---- */
+/* pūtu: "extent, width, front" — genuine noun, a fitting root for a
+ * numeric range. */
+AKK_PR("interval",           "pūtum",           "𒁀𒌋𒉡")
+AKK_PR("make-interval",      "epēš-pūtim",      "𒇽𒁀𒌋𒉡")
+AKK_PR("interval?",          "pūtum?",          "𒁀𒌋𒉡?")
+AKK_PR("interval-lo",        "šapil-pūtim",     "𒆠𒁀𒌋𒉡")
+AKK_PR("interval-hi",        "elû-pūtim",       "𒀭𒁀𒌋𒉡")
+AKK_PR("interval-midpoint",  "mitḫar-pūtim",    "𒈠𒋻𒁀𒌋𒉡")
+AKK_PR("interval-width",     "rupuš-pūtim",     "𒌋𒁀𒁀𒌋𒉡")
+AKK_PR("interval-contains?", "libbu-pūtim?",    "𒉡𒁀𒌋𒉡?")
+
+/* ---- Misc ---- */
+/* labīru (old/former, reused) — legacy names for profiler-report/reset. */
+AKK_PR("profiling-report", "ṭēm-manāḫti-labīrtim",  "𒅆𒈠𒉡𒉡")
+AKK_PR("profiling-reset",  "turru-manāḫti-labīrtim","𒄀𒈠𒉡𒉡")
+/* ašru (place, reused) — the location within a string where a substring is found. */
+AKK_PR("string-contains",  "ašar-ṭuppim",     "𒀀𒉡𒌝")
+AKK_PR("vec3-project-batch","šadād-kibrāti-puḫrim", "𒊻𒀀𒁹𒃲𒉌")
 
 /* ---- More symbolic CAS (src/builtins_curry.c) ---- */
 /* idātu: "sign, omen, mark, direction" — genuine, distinct from têrtu
