@@ -112,6 +112,7 @@ set(CORE_SOURCES
   src/reader.c
   src/env.c
   src/eval.c
+  src/akkadian_eval.c
   src/builtins.c
   src/builtins_curry.c
   src/workpool.c

@@ -567,6 +567,12 @@ AKK_PR("error-object-message",  "awāt-ḫiṭītim",   "𒄷𒌝")   /* ḪI.UM
 AKK_PR("read-error?",           "ḫiṭītum-šemûm?", "𒄷𒅆?")  /* ḪI.IGI? = fault-eye? = reading fault? */
 AKK_PR("file-error?",           "ḫiṭītum-ṭuppi?", "𒄷𒂍?")  /* ḪI.E2? = fault-house? = tablet/file fault? */
 
+/* ---- Procedures: (curry json) module ---- */
+/* No genuine OB analogue for JSON — ṭuppum (tablet/document) already
+ * covers "structured written record" well enough to reuse honestly. */
+AKK_PR("json-parse",     "ṭuppu-šemûm",     "𒌝𒅆𒌋")   /* read a tablet-document */
+AKK_PR("json-stringify", "ṭuppu-šaṭārum",   "𒌝𒌝𒁹")   /* write a tablet-document */
+
 /* ---- Conditions and restarts (CL-style condition system) ---- */
 /* Continuing the ḫiṭītum ("fault") root already used for error/error-object,
  * extended with genuine attribute/trace/remedy vocabulary. */

@@ -7,6 +7,7 @@
 #include "gc.h"
 #include "reader.h"
 #include "port.h"
+#include "akkadian_eval.h"
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
@@ -353,7 +354,8 @@ val_t modules_import(val_t spec, val_t env) {
     EnvFrame *f = mod->env;
     while (f) {
         for (uint32_t i = 0; i < f->size; i++) {
-            val_t sym = f->syms[i];
+            val_t orig_sym = f->syms[i];   /* the module's own export name */
+            val_t sym = orig_sym;
             val_t val = f->vals[i];
 
             if (filter == S_ONLY) {
@@ -384,6 +386,22 @@ val_t modules_import(val_t spec, val_t env) {
                 sym = sym_intern_cstr(buf);
             }
             env_define(env, sym, val);
+
+            /* Akkadian/cuneiform aliases: builtins.c's own startup loop only
+             * ever sees names already bound in the global env at that point
+             * (see the comment on that loop) — it never sees names that live
+             * only inside a module's own environment until something
+             * imports them, which is now. Alias under the module's ORIGINAL
+             * export name (orig_sym), not whatever a rename/prefix filter
+             * turned the local binding into — the synonym is a property of
+             * what the module exports, not of the importer's local nickname
+             * for it. only/except still apply, since we've already
+             * `continue`d past excluded names above. */
+            val_t translit, cuneiform;
+            if (akk_pr_lookup(orig_sym, &translit, &cuneiform)) {
+                env_define(env, translit, val);
+                env_define(env, cuneiform, val);
+            }
         }
         f = f->parent;
     }

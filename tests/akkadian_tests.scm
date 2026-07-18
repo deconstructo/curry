@@ -684,6 +684,19 @@
 (check-true "PR cunei: 𒋻𒄷𒀸 binding (restart-description)" (procedure? 𒋻𒄷𒀸))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Import-time module aliasing (src/modules.c's modules_import calling
+;;; akk_pr_lookup) — procedures that live only inside a module's own
+;;; environment until imported, unlike everything above which is bound
+;;; directly in the global env at startup.
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(import (curry json))
+(check "PR translit: ṭuppu-šemûm (json-parse)" (ṭuppu-šemûm "42") 42)
+(check "PR cunei: 𒌝𒅆𒌋 (json-parse)" (𒌝𒅆𒌋 "42") 42)
+(check "PR translit: ṭuppu-šaṭārum (json-stringify)" (ṭuppu-šaṭārum 42) "42")
+(check "PR cunei: 𒌝𒌝𒁹 (json-stringify)" (𒌝𒌝𒁹 42) "42")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Summary
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
