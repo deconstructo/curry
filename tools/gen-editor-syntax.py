@@ -84,12 +84,24 @@ def parse_symbol_list() -> set:
 
 
 def parse_akkadian():
-    """(english, translit, cuneiform) rows, split by SF/PR."""
+    """(english, translit, cuneiform) rows, split by SF/PR.
+
+    A synonym containing whitespace can never be a single reader token (the
+    reader delimits on whitespace), so it is unreachable as real code and is
+    dropped here rather than emitted as a misleading multi-word match rule.
+    Every other multi-word transliteration in the table uses a hyphen; a
+    stray space is a data bug worth fixing at the source, not papering over.
+    """
     text = (SRC / "akkadian_names.h").read_text(encoding="utf-8")
     rows = re.findall(
         r'(AKK_SF|AKK_PR)\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)', text)
     sf, pr = [], []
     for kind, eng, tr, cu in rows:
+        if any(ch.isspace() for ch in tr) or any(ch.isspace() for ch in cu):
+            print(f"warning: skipping unreachable synonym with embedded "
+                  f"whitespace for {eng!r}: {tr!r} / {cu!r}",
+                  file=sys.stderr)
+            continue
         (sf if kind == "AKK_SF" else pr).append((eng, tr, cu))
     return sf, pr
 
