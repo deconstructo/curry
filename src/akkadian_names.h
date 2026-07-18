@@ -593,6 +593,143 @@ AKK_PR("graphql-client", "šāʾilum",        "𒅆𒀀𒇽")   /* the asker */
 AKK_PR("graphql-query",  "šâlum",          "𒅆𒀀")     /* to ask */
 AKK_PR("graphql-mutate", "šanûm-šâlim",    "𒅆𒀀𒁀")   /* a changing ask (šanûm, reused) */
 
+/* ---- (curry sqlite) ---- */
+/* nikkassu: "account(s)" (reused, as in number->string's nikkassum) —
+ * genuine fit for a relational database. */
+AKK_PR("sqlite-open",              "petû-nikkassim",       "𒂍𒈷𒉡")
+AKK_PR("sqlite-open-memory",       "petû-nikkassi-ramāni", "𒂍𒈷𒍪")   /* ramānu = self, reused */
+AKK_PR("sqlite-close",             "sakār-nikkassim",      "𒂍𒈷𒇲")   /* sakārum, reused */
+AKK_PR("sqlite-exec",              "epēš-nikkassim",       "𒇽𒈷")
+/* šitkunu: Gt-stem of šakānu, "to set in place, prepare" — genuine. */
+AKK_PR("sqlite-prepare",           "šitkun-nikkassim",     "𒁹𒈷𒁹")
+AKK_PR("sqlite-bind",              "rakās-nikkassim",      "𒇲𒈷")     /* rakāsum = bind, reused */
+AKK_PR("sqlite-step",              "alāk-nikkassim",       "𒄿𒈷")     /* alākum = to go, reused */
+AKK_PR("sqlite-finalize",          "gamār-nikkassim",      "𒃲𒈷𒃲")   /* gamārum, reused */
+/* warkûm: "last, latest" — genuine. */
+AKK_PR("sqlite-last-insert-rowid", "warki-nikkassim",      "𒉡𒈷")
+AKK_PR("sqlite-changes",           "nakru-nikkassim",      "𒉡𒄿𒈷")   /* nakārum root, reused */
+
+/* ---- (curry storage) — S3 / Swift / Azure object storage ---- */
+/* maškanu: "storage place, threshing floor" — genuine, reused from
+ * mcp-introspection-cache-ttl!. Distinguished per cloud by genuine OB
+ * ordinals (šanûm "second"/"other" already reused elsewhere; šalšu
+ * "third" introduced here). */
+AKK_PR("s3-client",     "erēb-maškanim",         "𒂗𒂍")
+AKK_PR("s3-put!",       "šakān-maškanim",        "𒁹𒂍")
+AKK_PR("s3-get",        "leqû-maškanim",         "𒅁𒂍")     /* leqûm = to take, reused (let) */
+AKK_PR("s3-delete!",    "nasāḫ-maškanim",        "𒋻𒂍𒉡")     /* nasāḫum = to tear out, genuine */
+AKK_PR("swift-client",  "erēb-maškanim-šanûm",   "𒂗𒂍𒁀")
+AKK_PR("swift-put!",    "šakān-maškanim-šanûm",  "𒁹𒂍𒁀")
+AKK_PR("swift-get",     "leqû-maškanim-šanûm",   "𒅁𒂍𒁀")
+/* šalšu: "third" — genuine cardinal ordinal. */
+AKK_PR("azure-client",  "erēb-maškanim-šalšum",  "𒂗𒂍𒋻")
+AKK_PR("azure-put!",    "šakān-maškanim-šalšum", "𒁹𒂍𒋻")
+AKK_PR("azure-get",     "leqû-maškanim-šalšum",  "𒅁𒂍𒋻")
+AKK_PR("azure-delete!", "nasāḫ-maškanim-šalšum", "𒋻𒂍𒋻")
+
+/* ---- (curry sync) — mutex/condvar/semaphore ---- */
+/* kanākum: "to seal" (reused) — locking IS sealing, a very natural fit. */
+AKK_PR("make-mutex",         "epēš-kanākim",     "𒇽𒁀𒌑")
+AKK_PR("mutex-destroy!",     "ḫepû-kanākim",     "𒇲𒁀𒌑")   /* ḫepûm = break, reused */
+AKK_PR("mutex-lock!",        "kanākum",          "𒁀𒌑")
+AKK_PR("mutex-unlock!",      "petû-kanākim",     "𒂍𒁀𒌑")   /* petûm = open, reused */
+/* maṣûm: "to suffice, to be possible" — genuine, fits a non-blocking attempt. */
+AKK_PR("mutex-trylock!",     "kanāk-maṣîm",      "𒁀𒌑𒉌")
+AKK_PR("mutex?",             "kanākum?",         "𒁀𒌑?")
+AKK_PR("with-mutex",         "ina-kanākim",      "𒀀𒁀𒌑")
+/* dagālum: "to watch, to look out for" — genuine, a condvar waiter watches
+ * for a signal. */
+AKK_PR("make-condvar",       "epēš-dāgilim",     "𒇽𒅆𒉌")
+AKK_PR("condvar-destroy!",   "ḫepû-dāgilim",     "𒇲𒅆𒉌")
+AKK_PR("cond-wait!",         "dagālum",          "𒅆𒉌")
+AKK_PR("cond-wait-timeout!", "dagāl-adannim",    "𒅆𒉌𒌑")   /* adannu = deadline, reused */
+AKK_PR("cond-signal!",       "šūdû-dāgilim",     "𒅆𒉌𒅆")   /* šūdûm = announce, reused */
+AKK_PR("cond-broadcast!",    "šūdû-dāgilim-kalāma", "𒅆𒉌𒅆𒉡") /* to ALL watchers, kalāma reused */
+AKK_PR("condvar?",           "dāgilum?",         "𒅆𒉌?")
+AKK_PR("make-semaphore",     "epēš-maṣîm",       "𒇽𒉌")
+AKK_PR("semaphore-destroy!", "ḫepû-maṣîm",       "𒇲𒉌")
+AKK_PR("sem-wait!",          "maṣûm",            "𒉌")
+AKK_PR("sem-post!",          "nadān-maṣîm",      "𒁀𒉌")     /* nadānum = to give, reused */
+/* mala: "as much as" (reused from partition-count) — a non-blocking
+ * attempt takes as much permit as is currently available. */
+AKK_PR("sem-trywait!",       "maṣû-mala",        "𒉌𒉡")
+AKK_PR("sem-value",          "mīnu-maṣîm",       "𒈠𒉌")     /* mīnum = count, reused */
+AKK_PR("semaphore?",         "maṣûm?",           "𒉌?")
+
+/* ---- (curry git) ---- */
+/* puḫur-ṭuppi: "assembly of tablets" (both roots reused) — a genuine-
+ * feeling compound for a repository. */
+AKK_PR("git-open",          "petû-puḫur-ṭuppi",      "𒂍𒅁𒌋𒌝")
+AKK_PR("git-init",          "šurrû-puḫur-ṭuppi",     "𒋻𒅁𒌋𒌝")   /* šurrûm = begin, reused */
+AKK_PR("git-clone",         "šanā-puḫur-ṭuppi",      "𒁀𒅁𒌋𒌝")   /* šanûm = other/duplicate, reused */
+AKK_PR("git-close!",        "sakār-puḫur-ṭuppi",     "𒇲𒅁𒌋𒌝")
+/* ittu: "sign, mark, present condition" — genuine, a fit for status. */
+AKK_PR("git-status",        "itti-puḫur-ṭuppi",      "𒀸𒅁𒌋𒌝")
+AKK_PR("git-head",          "rēš-puḫur-ṭuppi",       "𒊕𒅁𒌋𒌝")   /* rēšum = head, reused — literal match */
+/* šiṭru: "inscription, writing" — genuine, the historical record. */
+AKK_PR("git-log",           "šiṭir-puḫur-ṭuppi",     "𒌝𒁹𒅁𒌋𒌝")
+AKK_PR("git-add!",          "šakān-puḫur-ṭuppi",     "𒁹𒅁𒌋𒌝")   /* šakānum = place/stage, reused */
+AKK_PR("git-add-all!",      "šakān-puḫur-ṭuppi-kalāma", "𒁹𒅁𒌋𒌝𒉡")
+AKK_PR("git-reset-file!",   "turru-puḫur-ṭuppi",     "𒄀𒅁𒌋𒌝")   /* turrum = turn back, reused */
+/* kanākum (reused): a commit "seals" a snapshot, matching the JWT/mutex use. */
+AKK_PR("git-commit!",       "kanāk-puḫur-ṭuppi",     "𒁀𒌑𒅁𒌋𒌝")
+/* aḫu: "side, arm; branch (of a river/canal)" — genuine, and a fitting
+ * irrigation-canal metaphor for a version-control branch. */
+AKK_PR("git-branches",      "aḫū-puḫur-ṭuppi",       "𒅁𒌋𒌝𒁹")
+AKK_PR("git-current-branch","aḫu-ina-qātim",         "𒅁𒌋𒌝𒁀")   /* qātu = hand, genuine: "in hand" */
+AKK_PR("git-checkout!",     "ṣabāt-aḫim",            "𒅁𒌋𒁹")     /* ṣabātum = seize, reused */
+/* banûm: "to build, to create" — genuine. */
+AKK_PR("git-branch-create!","banû-aḫim",             "𒅁𒌋𒉡𒌋𒉡")
+AKK_PR("git-diff",          "lā-mitḫārum",           "𒉡𒈠𒁹")
+/* šaknu: passive participle of šakānu, "placed, set" — the staged diff. */
+AKK_PR("git-diff-staged",   "lā-mitḫāru-šaknum",     "𒉡𒈠𒁹𒁹")
+AKK_PR("git-tags",          "šumū-puḫur-ṭuppi",      "𒌋𒅁𒌋𒌝")   /* šumu = name, reused, pluralized */
+AKK_PR("git-tag-create!",   "banû-šumim",            "𒅁𒌋𒉡𒁹")
+/* rūqu: "distant, far" — genuine, a remote really is "the distant one". */
+AKK_PR("git-remotes",       "rūqūtum",               "𒉡𒌋𒉡")
+AKK_PR("git-fetch!",        "leqû-rūqim",            "𒅁𒉡𒌋")     /* leqûm = to take, reused */
+AKK_PR("git-push!",         "šapār-rūqim",           "𒌝𒉡𒌋")     /* šapārum = to send, reused */
+
+/* ---- (curry image) ---- */
+/* ṣalmu: "image, statue, likeness" — genuine, exact fit. */
+AKK_PR("image-load",            "leqû-ṣalmim",      "𒅁𒍪")
+AKK_PR("image-save",            "šakān-ṣalmim",     "𒁹𒍪𒉡")
+AKK_PR("image-make",            "banû-ṣalmim",      "𒉡𒌋𒍪")
+/* rupšu: "width, breadth" — genuine. */
+AKK_PR("image-width",           "rupuš-ṣalmim",     "𒌋𒁀𒍪")
+/* šaqûm: "to be high" — genuine, root for height. */
+AKK_PR("image-height",          "šaqût-ṣalmim",     "𒋻𒀸𒍪")
+/* aḫu (reused, "side/branch"): an image's color channels are its "sides". */
+AKK_PR("image-channels",        "aḫū-ṣalmim",       "𒅁𒌋𒍪")
+AKK_PR("image-pixels",          "ṣibtū-ṣalmim",     "𒁹𒍪")     /* ṣibtu = sign/character, reused */
+AKK_PR("image-ref",             "maḫār-ṣalmim",     "𒌝𒍪")
+AKK_PR("image-set!",            "šakān-ṣibti-ṣalmim","𒁹𒁹𒍪")
+AKK_PR("image-crop",            "ḫarāṣ-ṣalmim",     "𒇲𒌑𒍪")   /* ḫarāṣum = to cut, reused */
+AKK_PR("image-scale",           "mašālu-ṣalmim",    "𒈠𒃲𒍪")   /* mašālum = resemble, reused */
+/* nabalkutu: "to cross over, to overturn" — genuine verb, an exact fit. */
+AKK_PR("image-flip-horizontal", "nabalkut-ṣalmim",  "𒉡𒁀𒍪")
+AKK_PR("image-flip-vertical",   "nabalkut-ṣalmi-šaplānu", "𒉡𒁀𒍪𒆠") /* šaplānu = below, genuine */
+/* peṣûm: "to be white, pale" — genuine adjective root. */
+AKK_PR("image-grayscale",       "peṣû-ṣalmim",      "𒁀𒉡𒍪")
+AKK_PR("image-format",          "zikru-ṣalmim",     "𒌋𒍪")     /* zikru = designation, reused */
+
+/* ---- (curry mqtt) ---- */
+/* bīt šipri: "house of messages" (both roots reused) — a fitting compound
+ * for a broker connection. */
+AKK_PR("mqtt-connect",      "erēb-bīt-šipri",        "𒂗𒂍𒉌𒌋")
+AKK_PR("mqtt-connect*",     "erēb-bīt-šipri-šanûm",  "𒂗𒂍𒉌𒌋𒁀")
+AKK_PR("mqtt-disconnect",   "waṣê-bīt-šipri",        "𒉡𒂍𒉌𒌋")
+AKK_PR("mqtt-connected?",   "erēb-bīt-šipri?",       "𒂗𒂍𒉌𒌋?")
+/* maqtu: passive participle of maqātu, "to fall" — genuine, for dropped
+ * (undelivered) messages. */
+AKK_PR("mqtt-dropped",      "maqtū-šipri",           "𒈠𒉌𒌋𒉡")
+AKK_PR("mqtt-publish",      "šūdû-šipri",            "𒅆𒉌𒌋")     /* šūdûm = announce, reused */
+AKK_PR("mqtt-subscribe",    "šeʾû-šipri",            "𒅆𒅁𒉌𒌋")   /* šeʾûm = to seek, reused */
+/* pašārum: "to release, to loosen" — reused (also unquote's root). */
+AKK_PR("mqtt-unsubscribe",  "pašār-šipri",           "𒉡𒉌𒌋")
+AKK_PR("mqtt-receive",      "maḫār-šipri",           "𒌝𒉌𒌋𒉡")     /* maḫārum = receive, reused */
+AKK_PR("mqtt-connect-tls",  "erēb-bīt-šipri-puzri",  "𒂗𒂍𒉌𒌋𒉡")
+
 /* ---- Surreal numbers ---- */
 
 /* dāriš: "forever, for eternity" — appears in royal inscriptions as "ana dāriš"

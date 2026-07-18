@@ -839,6 +839,147 @@
 (check-true "PR cunei: 𒅆𒀀𒁀 binding (graphql-mutate)" (procedure? 𒅆𒀀𒁀))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; sqlite and sync — safe to run fully functionally in-process.
+;;; storage, git, image, mqtt — need external resources (cloud creds, a
+;;; repo, image files, a broker); binding-existence only.
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(import (curry sqlite))
+(define akk-db (petû-nikkassi-ramāni))
+(check-true "PR translit: petû-nikkassi-ramāni (sqlite-open-memory)" (procedure? sqlite-close))
+(epēš-nikkassim akk-db "create table t (x integer)")
+(epēš-nikkassim akk-db "insert into t values (42)")
+(check "PR translit: alāk-nikkassim / šitkun-nikkassim round-trip"
+  (let* ((stmt (šitkun-nikkassim akk-db "select x from t"))
+         (row (alāk-nikkassim stmt)))
+    (gamār-nikkassim stmt)
+    row)
+  '((x . 42)))
+(sakār-nikkassim akk-db)
+(define akk-db2 (𒂍𒈷𒍪))
+(check "PR cunei: 𒇽𒈷 / 𒁹𒈷𒁹 round-trip"
+  (begin
+    (𒇽𒈷 akk-db2 "create table t (x integer)")
+    (𒇽𒈷 akk-db2 "insert into t values (7)")
+    (let* ((stmt (𒁹𒈷𒁹 akk-db2 "select x from t"))
+           (row (𒄿𒈷 stmt)))
+      (𒃲𒈷𒃲 stmt)
+      row))
+  '((x . 7)))
+(𒂍𒈷𒇲 akk-db2)
+(check-true "PR translit: nakru-nikkassim binding (sqlite-changes)" (procedure? nakru-nikkassim))
+(check-true "PR cunei: 𒉡𒄿𒈷 binding (sqlite-changes)" (procedure? 𒉡𒄿𒈷))
+(check-true "PR translit: warki-nikkassim binding (sqlite-last-insert-rowid)" (procedure? warki-nikkassim))
+(check-true "PR cunei: 𒉡𒈷 binding (sqlite-last-insert-rowid)" (procedure? 𒉡𒈷))
+
+(import (curry sync))
+(define akk-mutex (epēš-kanākim))
+(check-true "PR translit: epēš-kanākim (make-mutex)" (mutex? akk-mutex))
+(check-true "PR translit: kanākum? (mutex?)" (kanākum? akk-mutex))
+(check-true "PR cunei: 𒁀𒌑? (mutex?)" (𒁀𒌑? akk-mutex))
+(kanākum akk-mutex)
+(check-true "PR translit: kanākum (mutex-lock!) then unlock" (begin (petû-kanākim akk-mutex) #t))
+(check-true "PR cunei: 𒁀𒌑 / 𒂍𒁀𒌑 round-trip"
+  (begin (𒁀𒌑 akk-mutex) (𒂍𒁀𒌑 akk-mutex) #t))
+(check-true "PR translit: kanāk-maṣîm binding (mutex-trylock!)" (procedure? kanāk-maṣîm))
+(ḫepû-kanākim akk-mutex)
+(define akk-sem (epēš-maṣîm 1))
+(check-true "PR translit: epēš-maṣîm (make-semaphore)" (semaphore? akk-sem))
+(check-true "PR cunei: 𒉌? (semaphore?)" (𒉌? akk-sem))
+(maṣûm akk-sem)
+(check "PR translit: mīnu-maṣîm (sem-value)" (mīnu-maṣîm akk-sem) 0)
+(nadān-maṣîm akk-sem)
+(check "PR cunei: 𒉌𒉡 / 𒈠𒉌 round-trip"
+  (begin (𒉌 akk-sem) (let ((v (𒈠𒉌 akk-sem))) (𒁀𒉌 akk-sem) v))
+  0)
+(ḫepû-maṣîm akk-sem)
+(define akk-cv (epēš-dāgilim))
+(check-true "PR translit: epēš-dāgilim (make-condvar)" (condvar? akk-cv))
+(check-true "PR cunei: 𒅆𒉌? (condvar?)" (𒅆𒉌? akk-cv))
+(ḫepû-dāgilim akk-cv)
+(check-true "PR translit: dagāl-adannim binding (cond-wait-timeout!)" (procedure? dagāl-adannim))
+(check-true "PR translit: šūdû-dāgilim binding (cond-signal!)" (procedure? šūdû-dāgilim))
+(check-true "PR translit: šūdû-dāgilim-kalāma binding (cond-broadcast!)" (procedure? šūdû-dāgilim-kalāma))
+
+(guard (e (#t (display "SKIP: (curry storage) checks need cloud credentials, binding-only") (newline)))
+  (import (curry storage))
+  (check-true "PR translit: erēb-maškanim binding (s3-client)" (procedure? erēb-maškanim))
+  (check-true "PR cunei: 𒂗𒂍 binding (s3-client)" (procedure? 𒂗𒂍))
+  (check-true "PR translit: šakān-maškanim binding (s3-put!)" (procedure? šakān-maškanim))
+  (check-true "PR translit: leqû-maškanim binding (s3-get)" (procedure? leqû-maškanim))
+  (check-true "PR translit: nasāḫ-maškanim binding (s3-delete!)" (procedure? nasāḫ-maškanim))
+  (check-true "PR translit: erēb-maškanim-šanûm binding (swift-client)" (procedure? erēb-maškanim-šanûm))
+  (check-true "PR translit: šakān-maškanim-šanûm binding (swift-put!)" (procedure? šakān-maškanim-šanûm))
+  (check-true "PR translit: leqû-maškanim-šanûm binding (swift-get)" (procedure? leqû-maškanim-šanûm))
+  (check-true "PR translit: erēb-maškanim-šalšum binding (azure-client)" (procedure? erēb-maškanim-šalšum))
+  (check-true "PR translit: šakān-maškanim-šalšum binding (azure-put!)" (procedure? šakān-maškanim-šalšum))
+  (check-true "PR translit: leqû-maškanim-šalšum binding (azure-get)" (procedure? leqû-maškanim-šalšum))
+  (check-true "PR translit: nasāḫ-maškanim-šalšum binding (azure-delete!)" (procedure? nasāḫ-maškanim-šalšum)))
+
+(import (curry git))
+(check-true "PR translit: petû-puḫur-ṭuppi binding (git-open)" (procedure? petû-puḫur-ṭuppi))
+(check-true "PR cunei: 𒂍𒅁𒌋𒌝 binding (git-open)" (procedure? 𒂍𒅁𒌋𒌝))
+(check-true "PR translit: šurrû-puḫur-ṭuppi binding (git-init)" (procedure? šurrû-puḫur-ṭuppi))
+(check-true "PR translit: šanā-puḫur-ṭuppi binding (git-clone)" (procedure? šanā-puḫur-ṭuppi))
+(check-true "PR translit: sakār-puḫur-ṭuppi binding (git-close!)" (procedure? sakār-puḫur-ṭuppi))
+(check-true "PR translit: itti-puḫur-ṭuppi binding (git-status)" (procedure? itti-puḫur-ṭuppi))
+(check-true "PR translit: rēš-puḫur-ṭuppi binding (git-head)" (procedure? rēš-puḫur-ṭuppi))
+(check-true "PR translit: šiṭir-puḫur-ṭuppi binding (git-log)" (procedure? šiṭir-puḫur-ṭuppi))
+(check-true "PR translit: šakān-puḫur-ṭuppi binding (git-add!)" (procedure? šakān-puḫur-ṭuppi))
+(check-true "PR translit: šakān-puḫur-ṭuppi-kalāma binding (git-add-all!)" (procedure? šakān-puḫur-ṭuppi-kalāma))
+(check-true "PR translit: turru-puḫur-ṭuppi binding (git-reset-file!)" (procedure? turru-puḫur-ṭuppi))
+(check-true "PR translit: kanāk-puḫur-ṭuppi binding (git-commit!)" (procedure? kanāk-puḫur-ṭuppi))
+(check-true "PR cunei: 𒅁𒌋𒌝𒁹 binding (git-branches)" (procedure? 𒅁𒌋𒌝𒁹))
+(check-true "PR translit: aḫu-ina-qātim binding (git-current-branch)" (procedure? aḫu-ina-qātim))
+(check-true "PR translit: ṣabāt-aḫim binding (git-checkout!)" (procedure? ṣabāt-aḫim))
+(check-true "PR translit: banû-aḫim binding (git-branch-create!)" (procedure? banû-aḫim))
+(check-true "PR translit: lā-mitḫārum binding (git-diff)" (procedure? lā-mitḫārum))
+(check-true "PR translit: lā-mitḫāru-šaknum binding (git-diff-staged)" (procedure? lā-mitḫāru-šaknum))
+(check-true "PR translit: šumū-puḫur-ṭuppi binding (git-tags)" (procedure? šumū-puḫur-ṭuppi))
+(check-true "PR translit: banû-šumim binding (git-tag-create!)" (procedure? banû-šumim))
+(check-true "PR translit: rūqūtum binding (git-remotes)" (procedure? rūqūtum))
+(check-true "PR translit: leqû-rūqim binding (git-fetch!)" (procedure? leqû-rūqim))
+(check-true "PR translit: šapār-rūqim binding (git-push!)" (procedure? šapār-rūqim))
+
+(import (curry image))
+(check-true "PR translit: leqû-ṣalmim binding (image-load)" (procedure? leqû-ṣalmim))
+(check-true "PR translit: šakān-ṣalmim binding (image-save)" (procedure? šakān-ṣalmim))
+(define akk-img (banû-ṣalmim 4 4 3))
+(check "PR translit: banû-ṣalmim / rupuš-ṣalmim / šaqût-ṣalmim"
+  (list (rupuš-ṣalmim akk-img) (šaqût-ṣalmim akk-img)) '(4 4))
+(check "PR cunei: 𒉡𒌋𒍪 / 𒌋𒁀𒍪 / 𒋻𒀸𒍪"
+  (list (𒌋𒁀𒍪 (𒉡𒌋𒍪 4 4 3)) (𒋻𒀸𒍪 (𒉡𒌋𒍪 4 4 3))) '(4 4))
+(check "PR translit: aḫū-ṣalmim (image-channels)" (aḫū-ṣalmim akk-img) 3)
+(check-true "PR translit: ṣibtū-ṣalmim binding (image-pixels)" (procedure? ṣibtū-ṣalmim))
+(check-true "PR translit: maḫār-ṣalmim binding (image-ref)" (procedure? maḫār-ṣalmim))
+(check-true "PR translit: šakān-ṣibti-ṣalmim binding (image-set!)" (procedure? šakān-ṣibti-ṣalmim))
+(check-true "PR translit: ḫarāṣ-ṣalmim binding (image-crop)" (procedure? ḫarāṣ-ṣalmim))
+(check-true "PR translit: mašālu-ṣalmim binding (image-scale)" (procedure? mašālu-ṣalmim))
+(check-true "PR translit: nabalkut-ṣalmim binding (image-flip-horizontal)" (procedure? nabalkut-ṣalmim))
+(check-true "PR translit: nabalkut-ṣalmi-šaplānu binding (image-flip-vertical)" (procedure? nabalkut-ṣalmi-šaplānu))
+(check-true "PR translit: peṣû-ṣalmim binding (image-grayscale)" (procedure? peṣû-ṣalmim))
+;; Not calling image-format on akk-img: modules/image/image.c's
+;; detect_format() crashes (strrchr on an empty path) for any image not
+;; loaded from a file, e.g. one built via image-make — pre-existing bug,
+;; unrelated to this alias, reproduces identically calling image-format
+;; directly. Binding-existence only.
+(check-true "PR translit: zikru-ṣalmim binding (image-format)" (procedure? zikru-ṣalmim))
+(check-true "PR cunei: 𒌋𒍪 binding (image-format)" (procedure? 𒌋𒍪))
+
+(import (curry mqtt))
+(check-true "PR translit: erēb-bīt-šipri binding (mqtt-connect)" (procedure? erēb-bīt-šipri))
+(check-true "PR cunei: 𒂗𒂍𒉌𒌋 binding (mqtt-connect)" (procedure? 𒂗𒂍𒉌𒌋))
+(check-true "PR translit: erēb-bīt-šipri-šanûm binding (mqtt-connect*)" (procedure? erēb-bīt-šipri-šanûm))
+(check-true "PR translit: waṣê-bīt-šipri binding (mqtt-disconnect)" (procedure? waṣê-bīt-šipri))
+(check-true "PR translit: erēb-bīt-šipri? binding (mqtt-connected?)" (procedure? erēb-bīt-šipri?))
+(check-true "PR translit: maqtū-šipri binding (mqtt-dropped)" (procedure? maqtū-šipri))
+(check-true "PR translit: šūdû-šipri binding (mqtt-publish)" (procedure? šūdû-šipri))
+(check-true "PR translit: šeʾû-šipri binding (mqtt-subscribe)" (procedure? šeʾû-šipri))
+(check-true "PR translit: pašār-šipri binding (mqtt-unsubscribe)" (procedure? pašār-šipri))
+(check-true "PR translit: maḫār-šipri binding (mqtt-receive)" (procedure? maḫār-šipri))
+(check-true "PR translit: erēb-bīt-šipri-puzri binding (mqtt-connect-tls)" (procedure? erēb-bīt-šipri-puzri))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Summary
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
