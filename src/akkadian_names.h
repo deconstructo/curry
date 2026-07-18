@@ -470,6 +470,129 @@ AKK_PR("sym->string",     "ṭuppi-la-idûm",       "𒉡𒅆𒌝")  /* NU.IGI.U
 AKK_PR("sym->infix",      "ṭuppi-la-idûm-išārum","𒉡𒅆𒌝𒌋") /* NU.IGI.UM.U = infix tablet */
 AKK_PR("sym->latex",      "ṭuppi-ṣīrum-la-idûm", "𒉡𒅆𒌝𒁹") /* NU.IGI.UM.DIŠ = formal tablet */
 
+/* ---- Optional C modules ---- */
+/* These bind only inside a module's own environment until (import ...)
+ * copies them into the importer's env — see modules_import()'s call to
+ * akk_pr_lookup() in src/modules.c. Most of these concepts (LDAP, MCP,
+ * TLS, HTTP, GraphQL, cryptographic hashing) have no Old Babylonian
+ * referent at all; real dictionary words are chosen for their core
+ * meaning (šâlum "to ask" for a GraphQL query, erištu "request/petition"
+ * for an HTTP request, riksu "bond/link" for a graph edge, kunukku
+ * "cylinder seal" for a cryptographic hash/signature) and compounded
+ * honestly rather than invented from whole cloth. */
+
+/* ---- (curry regex) ---- */
+/* mašālum: "to resemble, to be like" — genuine verb for pattern matching. */
+AKK_PR("regex-compile",      "mašālu-epēšum",   "𒈠𒃲𒇽")   /* prepare a resemblance-rule */
+AKK_PR("regex-match",        "mašālum",         "𒈠𒃲")     /* does it resemble? */
+AKK_PR("regex-match-string", "mašālu-ṭuppim",   "𒈠𒃲𒌝")   /* resemblance within the tablet */
+AKK_PR("regex-replace",      "mašālu-šanûm",    "𒈠𒃲𒁀")   /* resemblance, then changed */
+AKK_PR("regex-split",        "mašālu-zâzum",    "𒈠𒃲𒈧")   /* resemblance-divide */
+AKK_PR("regex?",             "mašālum?",        "𒈠𒃲𒉡?")   /* is it a resemblance-rule? */
+/* paṭārum: "to release, set free" — genuine verb for releasing a resource. */
+AKK_PR("regex-free",         "mašālu-paṭārum",  "𒈠𒃲𒇲")   /* release the resemblance-rule */
+
+/* ---- (curry ldap) ---- */
+/* puḫru: "assembly" (reused) stands in for a directory of entries; nišū
+ * ("people") specializes it to a directory-of-persons. */
+AKK_PR("ldap-connect",      "erēb-puḫur-nišī",   "𒂗𒅁𒌋")   /* enter the assembly of people */
+/* kanākum: "to seal" — the genuine OB verb for authenticating a document. */
+AKK_PR("ldap-bind!",        "kanāk-puḫrim",      "𒁀𒅁𒌋")   /* seal oneself to the assembly */
+/* šeʾûm: "to seek, to search for" — genuine verb. */
+AKK_PR("ldap-search",       "šeʾû-puḫrim",       "𒅆𒅁𒌋")   /* seek within the assembly */
+AKK_PR("ldap-close!",       "sakār-puḫrim",      "𒂍𒅁𒌋")   /* close (reused sakārum) the assembly */
+AKK_PR("ldap-set-option!",  "šakān-ṭēm-puḫrim",  "𒁹𒅁𒌋")   /* ṭēmu = instruction/report */
+/* naṣārum: "to guard, protect" — escaping a value guards against injection. */
+AKK_PR("ldap-escape-value", "naṣār-puḫrim",      "𒉡𒅁𒌋")
+
+/* ---- (curry neo4j) ---- */
+/* riksu: "bond, knot, link" — the genuine word for a graph edge/relationship. */
+AKK_PR("neo4j-connect",    "erēb-riksī",   "𒂗𒇲𒁹")   /* enter the bonds */
+AKK_PR("neo4j-disconnect", "waṣê-riksī",   "𒉡𒇲𒁹")   /* exit the bonds (waṣûm, reused) */
+AKK_PR("neo4j-run",        "epēš-riksī",   "𒇽𒇲𒁹")   /* perform upon the bonds */
+/* šurrûm: "to begin" — genuine verb. */
+AKK_PR("neo4j-begin-tx",   "šurrû-riksī",  "𒋻𒇲𒁹")
+/* kânu: "to make firm, establish" (reused). */
+AKK_PR("neo4j-commit",     "kunnu-riksī",  "𒆠𒇲𒁹")
+/* turrum: "to turn back" (reused, as in mv-reverse). */
+AKK_PR("neo4j-rollback",   "turru-riksī",  "𒄀𒇲𒁹")
+
+/* ---- (curry mcp) ---- */
+/* unūtu: "tool, implement, equipment"; šipru: "task, message, work" — both genuine. */
+AKK_PR("mcp-tool",             "unūt-šipri",      "𒌋𒉡𒌋")
+/* makkūru: "property, goods, resource" — genuine. */
+AKK_PR("mcp-resource",         "makkūr-šipri",    "𒈠𒉌𒌋")
+AKK_PR("mcp-text",             "awât-šipri",      "𒀸𒉌𒌋")   /* awātu = word (reused) */
+AKK_PR("mcp-json",             "ṭuppu-šipri",     "𒌝𒉌𒌋")   /* tablet of the task */
+/* šūdûm: "to announce, proclaim" — genuine causative verb. */
+AKK_PR("mcp-notify-progress",  "šūdû-alāki",      "𒅆𒉌𒄿")   /* announce the going (alākum, reused) */
+AKK_PR("mcp-serve",            "epēš-šipri",      "𒇽𒉌𒌋")   /* perform the task */
+AKK_PR("mcp-serve-sse",        "epēš-šipri-šanûm","𒇽𒉌𒌋𒁀") /* the alternate/streaming form */
+
+/* ---- (curry mcp) auth configuration ---- */
+AKK_PR("mcp-auth-mode!",                 "šakān-kanāki",         "𒁹𒁀𒃲")
+/* mār šipri: literally "son of the message" — the genuine OB term for a
+ * messenger/agent, an apt fit for an API client. */
+AKK_PR("mcp-register-client!",           "šaṭār-mār-šipri",      "𒌝𒉌𒌋𒁹")
+/* adannu: "appointed time, deadline"; kanīku: "sealed document" — a token
+ * IS a signed/sealed document with an expiry. */
+AKK_PR("mcp-token-ttl!",                 "adan-kanīki",          "𒌑𒁀𒃲")
+AKK_PR("mcp-introspection-endpoint!",    "bāb-amārim",           "𒂍𒅆𒄿")   /* gate of seeing */
+AKK_PR("mcp-introspection-credentials!", "kanīk-amārim",         "𒁀𒃲𒅆𒄿")
+/* maškanu: "storage place, threshing floor" — genuine word for a depot/cache. */
+AKK_PR("mcp-introspection-cache-ttl!",   "adan-maškanim",        "𒌑𒌝𒂍")
+/* epištu: "procedure, method, deed" — genuine. */
+AKK_PR("mcp-jwt-algorithm!",             "epšet-kanīki",         "𒇽𒁀𒃲")
+/* pirištu: "secret, mystery" — genuine. */
+AKK_PR("mcp-jwt-secret!",                "pirišti-kanīki",       "𒉡𒁀𒃲")
+/* pattû: "opener" (agent noun from petûm, reused) — the public key opens/
+ * verifies what the private key sealed. */
+AKK_PR("mcp-jwt-public-key!",            "pattu-kanīki",         "𒂍𒁀𒃲")
+AKK_PR("mcp-jwt-public-key-pem!",        "pattu-kanīki-ṭuppam",  "𒂍𒁀𒃲𒌝")
+/* nādinu: "giver" (agent noun from nadānu). */
+AKK_PR("mcp-jwt-issuer!",                "nadin-kanīki",         "𒁀𒁀𒃲")
+/* māḫiru: "receiver" (agent noun from maḫārum, reused). */
+AKK_PR("mcp-jwt-audience!",              "māḫir-kanīki",         "𒌝𒁀𒃲𒉡")
+
+/* ---- (curry profiling) ---- */
+/* manaḫtu: "toil, labor, effort" — genuine word for exertion. */
+AKK_PR("profiler-start",       "šurrû-manāḫtim",       "𒋻𒈠𒉡")   /* šurrûm = begin, reused */
+AKK_PR("profiler-stop",        "gamār-manāḫtim",       "𒃲𒈠𒉡")   /* gamārum = to complete, genuine */
+AKK_PR("profiler-reset",       "turru-manāḫtim",       "𒄀𒈠𒉡")   /* turrum = turn back, reused */
+AKK_PR("profiler-level",       "šinīpat-manāḫtim",     "𒀸𒈠𒉡")   /* reused mv-grade root */
+AKK_PR("profiler-report",      "ṭēm-manāḫtim",         "𒅆𒈠𒉡")   /* ṭēmu = report, genuine */
+AKK_PR("profiler-report/top",  "ṭēm-manāḫtim-elûm",    "𒅆𒈠𒉡𒃲") /* the topmost report (elûm, reused) */
+
+/* ---- (curry crypto) ---- */
+AKK_PR("base64-encode",  "ṭuppu-šutēšurum", "𒌝𒋻𒌋")   /* put the document in order */
+AKK_PR("base64-decode",  "ṭuppu-turrum",    "𒌝𒄀𒌋")   /* turn the document back */
+/* kunukku: "cylinder seal" — the genuine OB authenticating device, a
+ * natural metaphor for a cryptographic hash/checksum. */
+AKK_PR("md5",            "kunukku-maḫrûm",       "𒁀𒃲𒁹")   /* the elder/former seal */
+AKK_PR("md5-hex",        "kunukku-maḫrûm-ṭuppam","𒁀𒃲𒁹𒌝")
+/* ištēn: "one" — the genuine cardinal numeral (distinct root from the
+ * DIŠ-based ēdum used for "sole/prime" elsewhere in this file). */
+AKK_PR("sha1",           "kunukku-ištēn",        "𒁀𒃲𒀸")
+AKK_PR("sha1-hex",       "kunukku-ištēn-ṭuppam", "𒁀𒃲𒀸𒌝")
+/* kabtu: "heavy, weighty, important" — genuine, marking the "heavier" hash. */
+AKK_PR("sha256",         "kunukku-kabtum",       "𒁀𒃲𒆠")
+AKK_PR("sha256-hex",     "kunukku-kabtum-ṭuppam","𒁀𒃲𒆠𒌝")
+AKK_PR("hmac-sha256",    "kunukku-kabti-pirišti","𒁀𒃲𒆠𒉡") /* the heavy seal, of the secret */
+
+/* ---- (curry network) TLS ---- */
+/* puzru: "hidden thing, secret" — genuine noun. */
+AKK_PR("tcp-connect-tls", "erēb-puzri",     "𒂗𒉡𒌋")   /* enter under secrecy */
+
+/* ---- (curry http) ---- */
+/* erištu: "request, petition" — genuine noun, an exact fit. */
+AKK_PR("http-request",   "erištum",        "𒂍𒉡𒁹")
+
+/* ---- (curry graphql) ---- */
+/* šâlum: "to ask, to inquire"; šāʾilu: agent noun, "one who asks". */
+AKK_PR("graphql-client", "šāʾilum",        "𒅆𒀀𒇽")   /* the asker */
+AKK_PR("graphql-query",  "šâlum",          "𒅆𒀀")     /* to ask */
+AKK_PR("graphql-mutate", "šanûm-šâlim",    "𒅆𒀀𒁀")   /* a changing ask (šanûm, reused) */
+
 /* ---- Surreal numbers ---- */
 
 /* dāriš: "forever, for eternity" — appears in royal inscriptions as "ana dāriš"
