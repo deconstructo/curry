@@ -149,15 +149,37 @@ static void sb_str(char **out, size_t *len, size_t *cap, const char *s) {
     while (*s) sb_char(out, len, cap, *s++);
 }
 
-/* A proper list where every element is itself a pair -- the shape
- * json-parse produces for a JSON object. Any other pair-headed value
- * (a plain list, or an improper list) is not an alist. */
+/* A proper list where every element is a (key . val) pair whose key is
+ * a string or symbol -- the shape json-parse produces for a JSON
+ * object (json_parse_string keys). "Is the element a pair" alone is
+ * NOT sufficient: in Scheme a plain 2+-element list like (1 2) is
+ * itself a pair (1 . (2 . ())), so a list-of-lists such as
+ * ((1 2) (3 4)) would otherwise misclassify as an alist and silently
+ * stringify as {1:[2],3:[4]} instead of [[1,2],[3,4]]. Requiring a
+ * string/symbol key is what actually distinguishes a genuine
+ * association from an ordinary nested list. */
 static bool looks_like_alist(curry_val v) {
     while (curry_is_pair(v)) {
-        if (!curry_is_pair(curry_car(v))) return false;
+        curry_val kv = curry_car(v);
+        if (!curry_is_pair(kv)) return false;
+        curry_val key = curry_car(kv);
+        if (!curry_is_string(key) && !curry_is_symbol(key)) return false;
         v = curry_cdr(v);
     }
     return curry_is_nil(v);
+}
+
+static void write_json_string(const char *s, char **out, size_t *len, size_t *cap) {
+    sb_char(out,len,cap,'"');
+    while (*s) {
+        if (*s=='"') sb_str(out,len,cap,"\\\"");
+        else if (*s=='\\') sb_str(out,len,cap,"\\\\");
+        else if (*s=='\n') sb_str(out,len,cap,"\\n");
+        else if (*s=='\t') sb_str(out,len,cap,"\\t");
+        else sb_char(out,len,cap,*s);
+        s++;
+    }
+    sb_char(out,len,cap,'"');
 }
 
 static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) {
@@ -166,19 +188,11 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_bool(v)) { sb_str(out,len,cap,curry_bool(v)?"true":"false"); return; }
     if (curry_is_fixnum(v)) { snprintf(buf,sizeof(buf),"%ld",(long)curry_fixnum(v)); sb_str(out,len,cap,buf); return; }
     if (curry_is_float(v)) { snprintf(buf,sizeof(buf),"%g",curry_float(v)); sb_str(out,len,cap,buf); return; }
-    if (curry_is_string(v)) {
-        sb_char(out,len,cap,'"');
-        const char *s = curry_string(v);
-        while (*s) {
-            if (*s=='"') sb_str(out,len,cap,"\\\"");
-            else if (*s=='\\') sb_str(out,len,cap,"\\\\");
-            else if (*s=='\n') sb_str(out,len,cap,"\\n");
-            else if (*s=='\t') sb_str(out,len,cap,"\\t");
-            else sb_char(out,len,cap,*s);
-            s++;
-        }
-        sb_char(out,len,cap,'"'); return;
-    }
+    if (curry_is_string(v)) { write_json_string(curry_string(v), out, len, cap); return; }
+    /* A symbol used as an alist key (looks_like_alist now permits this,
+     * matching how such an alist would actually be built) must still
+     * serialize as a proper JSON string key, not fall through to null. */
+    if (curry_is_symbol(v)) { write_json_string(curry_symbol(v), out, len, cap); return; }
     if (curry_is_vector(v)) {
         /* Vector -> JSON array */
         uint32_t n = curry_vector_length(v);

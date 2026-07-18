@@ -512,6 +512,8 @@ static curry_val load_gif(const char *path) {
 
 static curry_val fn_load(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    if (!curry_is_string(av[0]))
+        curry_error("image-load: not a string (expected a path)");
     const char *path = curry_string(av[0]);
     switch (detect_format(path)) {
     case FMT_PNG:  return load_png(path);
@@ -523,6 +525,8 @@ static curry_val fn_load(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_save(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    if (!curry_is_string(av[0]))
+        curry_error("image-save: not a string (expected a path)");
     const char *path = curry_string(av[0]);
     curry_val img    = av[1];
     check_image(img);

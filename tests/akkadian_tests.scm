@@ -889,6 +889,15 @@
   (ṭuppu-šaṭārum (list 1 2 3)) "[1,2,3]")
 (check "PR cunei: 𒌝𒌝𒁹 on an alist (still an object)"
   (𒌝𒌝𒁹 (list (cons "a" 1))) "{\"a\":1}")
+;; "any pair is an alist entry" isn't sufficient: a plain 2+-element
+;; list like (1 2) IS a pair (1 . (2 . ())), so a list-of-lists could
+;; misclassify as an alist unless the key is also checked to look like
+;; a JSON key (string/symbol) -- caught by an independent review of the
+;; first fix, before it shipped.
+(check "PR translit: ṭuppu-šaṭārum on a list-of-lists (not an alist either)"
+  (ṭuppu-šaṭārum (list (list 1 2) (list 3 4))) "[[1,2],[3,4]]")
+(check "PR translit: ṭuppu-šaṭārum on a symbol-keyed alist"
+  (ṭuppu-šaṭārum (list (cons 'a 1) (cons 'b 2))) "{\"a\":1,\"b\":2}")
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Optional C modules — regex, profiling, crypto (safe to run functionally);
@@ -1164,6 +1173,13 @@
 (check "PR cunei: 𒌋𒍪 (image-format)" (𒌋𒍪 "photo.png") 'png)
 (check-true "PR translit: zikru-ṣalmim raises cleanly on wrong type"
   (guard (e (#t #t)) (zikru-ṣalmim akk-img) #f))
+;; fn_load/fn_save had the identical unchecked curry_string() bug --
+;; found during an independent review of the image-format fix and
+;; fixed at the same time.
+(check-true "PR translit: leqû-ṣalmim raises cleanly on wrong type (image-load)"
+  (guard (e (#t #t)) (leqû-ṣalmim 42) #f))
+(check-true "PR translit: šakān-ṣalmim raises cleanly on wrong type (image-save)"
+  (guard (e (#t #t)) (šakān-ṣalmim 42 akk-img) #f))
 
 (import (curry mqtt))
 (check-true "PR translit: erēb-bīt-šipri binding (mqtt-connect)" (procedure? erēb-bīt-šipri))
