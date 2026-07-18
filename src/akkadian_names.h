@@ -730,6 +730,239 @@ AKK_PR("mqtt-unsubscribe",  "pašār-šipri",           "𒉡𒉌𒌋")
 AKK_PR("mqtt-receive",      "maḫār-šipri",           "𒌝𒉌𒌋𒉡")     /* maḫārum = receive, reused */
 AKK_PR("mqtt-connect-tls",  "erēb-bīt-šipri-puzri",  "𒂗𒂍𒉌𒌋𒉡")
 
+/* ---- (curry redis) ---- */
+/* ḫamṭu: "quick, swift" — genuine adjective; redis is exactly a fast
+ * key-value tablet-store, reusing ṭuppu (tablet) for a stored value. */
+AKK_PR("redis-connect",     "erēb-ṭuppi-ḫamṭi",      "𒂗𒌝𒉡")
+AKK_PR("redis-connect-tls", "erēb-ṭuppi-ḫamṭi-puzri","𒂗𒌝𒉡𒌋")
+AKK_PR("redis-close!",      "sakār-ṭuppi-ḫamṭi",     "𒂍𒌝𒉡")
+/* šulmu: "peace, well-being" — genuine, a health-check is asking after
+ * well-being. */
+AKK_PR("redis-ping",        "šapār-šulmim",          "𒌝𒉡𒂗")
+/* ašābum: "to sit, to dwell" — genuine, selecting a DB is "dwelling" in it. */
+AKK_PR("redis-select",      "ašāb-ṭuppi-ḫamṭi",      "𒀸𒌝𒉡")
+AKK_PR("redis-command",     "epēš-ṭuppi-ḫamṭi",      "𒇽𒌝𒉡")
+AKK_PR("redis-set!",        "šakān-ṭuppi-ḫamṭi",     "𒁹𒌝𒉡")
+AKK_PR("redis-get",         "leqû-ṭuppi-ḫamṭi",      "𒅁𒌝𒉡")
+AKK_PR("redis-del!",        "nasāḫ-ṭuppi-ḫamṭi",     "𒋻𒌝𒉡")
+/* bašûm: "to exist, to be" — genuine. */
+AKK_PR("redis-exists?",     "bašû-ṭuppi-ḫamṭi?",     "𒀸𒌝𒉡?")
+AKK_PR("redis-incr!",       "matāḫ-ištēn",           "𒋻𒁹𒀸")   /* add one (ištēn, reused) */
+AKK_PR("redis-incrby!",     "matāḫ-mala",            "𒋻𒁹𒉡")   /* add as-much-as (mala, reused) */
+AKK_PR("redis-expire!",     "adan-ṭuppi-ḫamṭi",      "𒌑𒌝𒉡")   /* adannu, reused */
+/* šīmtu: "fate, determined lifespan" — genuine, an apt fit for TTL. */
+AKK_PR("redis-ttl",         "šīm-adannim",           "𒁹𒌑𒌝")
+AKK_PR("redis-keys",        "šumū-ṭuppi-ḫamṭi",      "𒌋𒌝𒉡")
+/* libbu: "heart, interior" — genuine, a hash's fields live "inside" it. */
+AKK_PR("redis-hset!",       "šakān-libbi",           "𒁹𒉡𒂗")
+AKK_PR("redis-hget",        "leqû-libbi",            "𒅁𒉡𒂗")
+AKK_PR("redis-hgetall",     "leqû-libbi-kalāma",     "𒅁𒉡𒂗𒉡")
+AKK_PR("redis-hdel!",       "nasāḫ-libbi",           "𒋻𒉡𒂗")
+AKK_PR("redis-hkeys",       "šumū-libbi",            "𒌋𒉡𒂗")
+AKK_PR("redis-hvals",       "ṭuppū-libbi",           "𒌝𒉡𒂗𒉡")
+AKK_PR("redis-hexists?",    "bašû-libbi?",           "𒀸𒉡𒂗?")
+/* nindabûm: "list" (reused) — a redis LIST really is one. */
+AKK_PR("redis-lpush!",      "šakān-rēš-nindabîm",    "𒁹𒊕𒇽")
+AKK_PR("redis-rpush!",      "šakān-zibbat-nindabîm", "𒁹𒆜𒇽")
+AKK_PR("redis-lpop",        "leqû-rēš-nindabîm",     "𒅁𒊕𒇽")
+AKK_PR("redis-rpop",        "leqû-zibbat-nindabîm",  "𒅁𒆜𒇽")
+AKK_PR("redis-llen",        "mīnu-nindabîm",         "𒈠𒇽")
+AKK_PR("redis-lrange",      "zittu-nindabîm",        "𒁀𒋻𒇽")
+/* puḫru: "assembly" (reused) — a redis SET is a genuine assembly. */
+AKK_PR("redis-sadd!",       "šakān-puḫri",           "𒁹𒉌")
+AKK_PR("redis-srem!",       "nasāḫ-puḫri",           "𒋻𒉌")
+/* zumru: "body; also members (of a group)" — genuine. */
+AKK_PR("redis-smembers",    "zumur-puḫrim",          "𒂍𒉌")
+AKK_PR("redis-sismember",   "zumur-puḫrim?",         "𒂍𒉌?")
+AKK_PR("redis-scard",       "mīnu-puḫrim",           "𒈠𒉌𒉡")
+/* manûm: "to count, to reckon" — genuine, fits a ranked/scored set. */
+AKK_PR("redis-zadd!",       "šakān-manîm",           "𒁹𒈠𒉌")
+AKK_PR("redis-zrange",      "zittu-manîm",           "𒁀𒋻𒈠𒉌")
+AKK_PR("redis-zrange-withscores", "zittu-manî-kalāma","𒁀𒋻𒈠𒉌𒉡")
+AKK_PR("redis-zscore",      "manûm",                 "𒈠𒉌𒉌")
+AKK_PR("redis-zcard",       "mīnu-manîm",            "𒈠𒈠𒉌")
+/* ašru: "place, location" (reused) — one's rank IS one's place. */
+AKK_PR("redis-zrank",       "ašar-manîm",            "𒀀𒈠𒉌")
+AKK_PR("redis-publish",     "šūdû-kalāma",           "𒅆𒉡𒉡")
+AKK_PR("redis-flushdb",     "ḫepû-ṭuppi-ḫamṭi-kalāma","𒇲𒌝𒉡𒉡")
+AKK_PR("redis-dbsize",      "mīnu-ṭuppi-ḫamṭim",     "𒈠𒌝𒉡")
+AKK_PR("redis-info",        "ṭēm-ṭuppi-ḫamṭi",       "𒅆𒌝𒉡")
+
+/* ---- (curry rpi) — GPIO / I2C / SPI / PWM / camera / UART / 1-wire / watchdog ---- */
+/* bābu: "gate" (reused) — a GPIO pin genuinely is a gate. */
+AKK_PR("gpio-open",      "petû-bābim",       "𒂍𒁀𒉌")
+AKK_PR("gpio-read",      "amār-bābim",       "𒅆𒁀𒉌")
+AKK_PR("gpio-write",     "šakān-bābim",      "𒁹𒁀𒉌")
+AKK_PR("gpio-close",     "sakār-bābim",      "𒂍𒁀𒉌𒉡")
+AKK_PR("gpio?",          "bāb-šipri?",           "𒂍𒃲𒉌?")
+AKK_PR("gpio-wait-edge", "dagāl-bābim",      "𒅆𒉌𒁀𒉌")
+AKK_PR("gpio-watch",     "naṣār-bābim",      "𒉡𒁀𒉌")
+AKK_PR("gpio-unwatch",   "paṭār-bābim",      "𒇲𒁀𒉌")
+/* nāṣiru: agent noun from naṣārum, "guardian, watcher" — genuine. */
+AKK_PR("watcher?",       "nāṣirum?",         "𒉡𒁀𒉌?")
+/* atappu: "irrigation ditch, channel" — genuine, apt for a comms bus. */
+AKK_PR("i2c-open",       "petû-atappim",     "𒂍𒀀𒉌")
+AKK_PR("i2c-read",       "amār-atappim",     "𒅆𒀀𒉌")
+AKK_PR("i2c-write",      "šakān-atappim",    "𒁹𒀀𒉌")
+AKK_PR("i2c-close",      "sakār-atappim",    "𒂍𒀀𒉌𒉡")
+AKK_PR("i2c?",           "atappum?",         "𒀀𒉌?")
+/* palgu: "canal, channel" — genuine, a second irrigation term for SPI. */
+AKK_PR("spi-open",       "petû-palgim",      "𒂍𒉡𒉌")
+AKK_PR("spi-transfer",   "šapār-palgim",     "𒌝𒉡𒉌")
+AKK_PR("spi-close",      "sakār-palgim",     "𒂍𒉡𒉌𒉡")
+AKK_PR("spi?",           "palgum?",          "𒉡𒉌?")
+/* zīqu: "breath, breeze, waft" — genuine, evokes a rhythmic pulsed signal. */
+AKK_PR("pwm-open",       "petû-zīqim",       "𒂍𒌋𒉌")
+AKK_PR("pwm-set!",       "šakān-zīqim",      "𒁹𒌋𒉌")
+/* napāḫu: "to blow, to kindle" — genuine verb, apt for enabling a pulse. */
+AKK_PR("pwm-enable!",    "napāḫ-zīqim",      "𒈷𒌋𒉌")
+/* pašāḫu: "to become calm, to rest" — genuine antonym of napāḫu. */
+AKK_PR("pwm-disable!",   "pašāḫ-zīqim",      "𒉡𒌋𒉌")
+AKK_PR("pwm-close",      "sakār-zīqim",      "𒂍𒌋𒉌𒉡")
+AKK_PR("pwm?",           "zīqum?",           "𒌋𒉌?")
+/* ṣalmu (image, reused) + nāṣiru (guardian/watcher, reused) — a camera
+ * is the device that watches and keeps images. */
+AKK_PR("camera-open",    "petû-ṣalmi-nāṣirim", "𒂍𒍪𒉡")
+/* ṣabātum: "to seize" (reused) — to capture IS to seize. */
+AKK_PR("camera-capture", "ṣabāt-ṣalmim",       "𒅁𒍪𒉌")
+AKK_PR("camera-close",   "sakār-ṣalmi-nāṣirim","𒂍𒍪𒉡𒉡")
+AKK_PR("camera?",        "ṣalmi-nāṣirum?",     "𒍪𒉡?")
+AKK_PR("camera-width",   "rupuš-ṣalmi-nāṣirim","𒌋𒁀𒍪𒉡")
+AKK_PR("camera-height",  "šaqût-ṣalmi-nāṣirim","𒋻𒀸𒍪𒉡")
+AKK_PR("camera-format",  "zikru-ṣalmi-nāṣirim","𒌋𒍪𒉡")
+/* egertu: "letter, message" — genuine noun for serial correspondence. */
+AKK_PR("uart-open",       "petû-egertim",       "𒂍𒂗𒁹")
+AKK_PR("uart-read",       "amār-egertim",       "𒅆𒂗𒁹")
+AKK_PR("uart-write",      "šapār-egertim",      "𒌝𒂗𒁹𒉡")
+AKK_PR("uart-read-line",  "amār-šiṭir-egertim", "𒅆𒁹𒂗𒁹")   /* šiṭru = line/writing, reused */
+AKK_PR("uart-available?", "bašû-egertim?",      "𒀸𒂗𒁹?")
+AKK_PR("uart-close",      "sakār-egertim",      "𒂍𒂗𒁹𒉡")
+AKK_PR("uart?",           "egertum?",           "𒂗𒁹?")
+/* qû: "thread, cord, string" — genuine, a literal fit for a 1-Wire bus. */
+AKK_PR("w1-devices",     "nāṣirū-qîm",  "𒉡𒌋𒌑")
+/* ummu: "heat, fever, warmth" — genuine noun covering temperature. */
+AKK_PR("w1-temperature", "ummu-qîm",    "𒌋𒌑𒌑")
+/* ebbu: "pure, unrefined, as-is" — genuine adjective, fits raw data. */
+AKK_PR("w1-raw",         "ebbu-qîm",    "𒌋𒌑𒁀")
+/* maṣṣartu: "watch, guard duty" (the act, distinct from nāṣiru the agent). */
+AKK_PR("watchdog-open",    "petû-maṣṣartim",    "𒂍𒈧𒉌")
+AKK_PR("watchdog-kick",    "šūdû-maṣṣartim",    "𒅆𒈧𒉌")   /* "announce I'm alive" */
+AKK_PR("watchdog-timeout", "adan-maṣṣartim",    "𒌑𒈧𒉌")
+AKK_PR("watchdog-close",   "sakār-maṣṣartim",   "𒂍𒈧𒉌𒉡")
+AKK_PR("watchdog?",        "maṣṣartum?",        "𒈧𒉌?")
+/* lē'u: "writing board" — genuine, a fitting metaphor for a circuit board. */
+AKK_PR("rpi-model",      "zikru-lē'im",         "𒌋𒇲𒉌")
+AKK_PR("rpi-serial",     "šumu-lē'im",          "𒌋𒇲𒉌𒉡")
+/* ḫasīsu: "understanding, memory, wisdom" — genuine noun for memory. */
+AKK_PR("rpi-memory-mb",  "mīnu-ḫasīsi-lē'im",   "𒈠𒄷𒇲")
+AKK_PR("rpi-os-info",    "ṭēm-lē'im",           "𒅆𒇲𒉌")
+
+/* ---- (curry f64vector) ---- */
+/* minâtu: plural of mīnum, "measures, counts, dimensions" — genuine,
+ * a fitting root for a numeric vector/array. */
+AKK_PR("make-f64vector",     "epēš-minâtim",       "𒇽𒈠𒉡")
+AKK_PR("f64vector",          "minâtum",            "𒈠𒉡")
+AKK_PR("f64vector-copy",     "šutur-minâtim",      "𒁹𒁹𒈠𒉡")
+AKK_PR("f64vector-iota",     "minât-mala",         "𒈠𒉡𒉌")
+/* mīšaru: "equity, straightness, evenness" — genuine, apt for linspace. */
+AKK_PR("f64vector-linspace", "minât-mīšarim",      "𒈠𒉡𒈠𒉌")
+AKK_PR("f64vector?",         "minâtum?",           "𒈠𒉡?")
+AKK_PR("f64vector-length",   "mīnu-minâtim",       "𒈠𒈠𒉡")
+AKK_PR("f64vector-ref",      "maḫār-minâtim",      "𒌝𒈠𒉡")
+AKK_PR("f64vector-set!",     "šakān-minâtim",      "𒁹𒈠𒉡")
+AKK_PR("f64vector->list",    "minâtum-ana-nindabîm","𒈠𒉡𒀀𒇽")
+AKK_PR("list->f64vector",    "nindabûm-ana-minâtim","𒇽𒀀𒈠𒉡")
+AKK_PR("f64vector->vector",  "minâtum-ana-ṣindim", "𒈠𒉡𒀀𒀸")
+AKK_PR("vector->f64vector",  "ṣindum-ana-minâtim", "𒀸𒀀𒈠𒉡")
+AKK_PR("f64vector-fill!",    "malû-minâtim",       "𒌋𒁹𒈠𒉡")
+AKK_PR("f64vector-scale!",   "šutakūl-minâtim",    "𒈧𒁹𒈠𒉡")
+AKK_PR("f64vector-offset!",  "matāḫ-minâtim",      "𒋻𒁹𒈠𒉡")
+AKK_PR("f64vector-fma!",     "šutakūl-matāḫ-minâtim","𒈧𒁹𒋻𒈠𒉡")
+/* nakārum: "to become other" (reused) — a fitting sign-flip metaphor. */
+AKK_PR("f64vector-neg!",     "nakār-minâtim",      "𒉡𒄿𒈠𒉡")
+/* puluggu: "boundary, district" — genuine, clamping bounds a value. */
+AKK_PR("f64vector-clamp!",   "pulug-minâtim",      "𒇲𒉡𒈠𒉡")
+AKK_PR("f64vector-abs!",     "kīttu-minâtim",      "𒆠𒀸𒈠𒉡")
+AKK_PR("f64vector-sqrt!",    "ibu-minâtim",        "𒅁𒁹𒈠𒉡")
+AKK_PR("f64vector-exp!",     "napḫar-ṣīr-minâtim", "𒈷𒁹𒀸𒈠𒉡")
+AKK_PR("f64vector-log!",     "naṭāl-ṣīr-minâtim",  "𒅆𒁹𒈠𒉡")
+AKK_PR("f64vector-sin!",     "šapalti-ṣīr-minâtim","𒁹𒀸𒁹𒈠𒉡")
+AKK_PR("f64vector-cos!",     "ašarēdi-ṣīr-minâtim","𒁹𒁹𒀸𒈠𒉡")
+AKK_PR("f64vector-tan!",     "ippeš-minâtim",      "𒁹𒀸𒀸𒈠𒉡")
+/* kilallān: "both (of two)" — genuine dual-number word, apt for binary
+ * elementwise operations. */
+AKK_PR("f64vector-add!",     "matāḫ-minâti-kilallān", "𒋻𒁹𒈠𒉡𒌋")
+AKK_PR("f64vector-sub!",     "ḫarāṣ-minâti-kilallān", "𒇲𒌑𒈠𒉡𒌋")
+AKK_PR("f64vector-mul!",     "šutakūl-minâti-kilallān","𒈧𒁹𒈠𒉡𒌋")
+AKK_PR("f64vector-div!",     "zâzu-minâti-kilallān",  "𒈧𒈠𒉡𒌋")
+AKK_PR("f64vector-sum",      "kamār-minâtim",      "𒃲𒈠𒉡𒌋")
+/* gimru: "totality, entirety" — genuine. */
+AKK_PR("f64vector-product",  "šutakūl-gimri-minâtim","𒈧𒁹𒌋𒈠𒉡")
+AKK_PR("f64vector-min",      "ṣiḫru-minâtim",      "𒉡𒃲𒈠𒉡")
+AKK_PR("f64vector-max",      "rabû-minâtim",       "𒃲𒈠𒉡𒉡")
+AKK_PR("f64vector-mean",     "mitḫar-minâtim",     "𒈠𒋻𒈠𒉡")
+AKK_PR("f64vector-dot",      "napḫar-kilallān-minâtim","𒈷𒁹𒌋𒈠𒉡𒉡")
+AKK_PR("f64vector-norm",     "ibu-napḫar-minâtim", "𒅁𒁹𒈷𒁹𒈠𒉡")
+AKK_PR("f64vector-argmin",   "ašar-ṣiḫri-minâtim", "𒀀𒉡𒃲𒈠𒉡")
+AKK_PR("f64vector-argmax",   "ašar-rabîm-minâtim", "𒀀𒃲𒈠𒉡")
+AKK_PR("f64vector-map",      "epēš-kalāma-minâtim","𒇽𒉡𒈠𒉡")
+AKK_PR("f64vector-map2",     "epēš-kalāma-minâti-kilallān","𒇽𒉡𒈠𒉡𒌋")
+AKK_PR("f64vector-for-each", "ana-kālāma-minâtim", "𒀀𒌋𒈠𒉡")
+AKK_PR("f64vector-slice",    "zittu-minâtim",      "𒁀𒋻𒈠𒉡")
+AKK_PR("f64vector-append",   "redû-minâtim",       "𒈠𒂗𒈠𒉡")
+AKK_PR("f64vector-reverse",  "turru-minâtim",      "𒋻𒀀𒈠𒉡")
+/* šutēšuru: "to put in order" — genuine, reused concept from base64. */
+AKK_PR("f64vector-sort",     "šutēšur-minâtim",    "𒋻𒌋𒈠𒉡")
+AKK_PR("f64vector=",         "mitḫar-minâtim?",    "𒈠𒋻𒈠𒉡?")
+
+/* ---- (curry plplot) ---- */
+/* uṣurtu: "drawing, plan, design" — genuine, a direct fit for a plot. */
+AKK_PR("plot-init",  "šurrû-uṣurtim", "𒋻𒉡𒌋")
+AKK_PR("plot-end",   "gamār-uṣurtim", "𒃲𒉡𒌋")
+/* manzāzu: "position, station" — genuine, the device/station a plot renders to. */
+AKK_PR("plot-device","manzāz-uṣurtim","𒈠𒉡𒌋𒉡")
+AKK_PR("plot-output","waṣê-uṣurtim",  "𒉡𒉡𒌋")
+AKK_PR("plot-font-size", "rabi-šiṭrim",     "𒃲𒁹𒉡𒌋")   /* size of the writing (šiṭru, reused) */
+AKK_PR("plot-env",       "šitkun-uṣurtim",  "𒁹𒉡𒌋𒉡")     /* šitkunu, reused from sqlite-prepare */
+/* eliš: "above, upward" — genuine adverb, suggests log-scale growth. */
+AKK_PR("plot-env-log",   "šitkun-uṣurti-elîš","𒁹𒉡𒌋𒌋")
+AKK_PR("plot-labels",    "šumū-uṣurtim",    "𒌋𒉡𒌋𒉡")
+/* kilīlu: "wreath, frame, enclosure" — genuine, apt for a plot box. */
+AKK_PR("plot-box",       "kilīl-uṣurtim",   "𒆜𒉡𒌋")
+/* melammu: "radiance, splendor" — genuine noun, loosely covers appearance/color. */
+AKK_PR("plot-color",     "melam-uṣurtim",   "𒈠𒇲𒈷𒉡𒌋")
+AKK_PR("plot-color-rgb", "melam-uṣurti-šalšim", "𒈠𒇲𒈷𒉡𒌋𒋻")
+/* qanû: "reed, stalk; a measuring rod/line" — genuine, apt for a drawn line. */
+AKK_PR("plot-width",     "rupuš-qanîm",     "𒌋𒁀𒌋𒉡")
+/* kutallu: "back, rear" — genuine, a fitting background metaphor. */
+AKK_PR("plot-background-color", "melam-kutalli-uṣurtim", "𒈠𒇲𒈷𒉡𒌋𒉡")
+AKK_PR("plot-line",      "qanûm",           "𒌋𒉡𒉌")
+AKK_PR("plot-points",    "ṣibtū-uṣurtim",   "𒁹𒉡𒌋")
+AKK_PR("plot-histogram", "kilīlū-mināti",   "𒆜𒉡𒌋𒈠𒉡")
+/* ḫiṭītu (fault/error, reused) — error bars are exactly that: fault margins. */
+AKK_PR("plot-error-y",   "ḫiṭīt-uṣurti-šaplānim", "𒄷𒉡𒌋𒆠")   /* šaplānu = below, genuine */
+/* mēḫru: "opposite, counterpart, corresponding" — genuine, loosely the
+ * horizontal counterpart to šaplānu's vertical. */
+AKK_PR("plot-error-x",   "ḫiṭīt-uṣurti-mēḫrim",   "𒄷𒉡𒌋𒉡𒉡")
+AKK_PR("plot-3d-init",    "šurrû-uṣurti-kibrātim",   "𒋻𒉡𒌋𒃲")
+AKK_PR("plot-3d-box",     "kilīl-uṣurti-kibrātim",   "𒆜𒉡𒌋𒃲")
+AKK_PR("plot-3d-line",    "qanû-kibrātim",           "𒌋𒉡𒉌𒃲")
+/* pānu: "face" (reused from mv-e) — a surface is a face of space. */
+AKK_PR("plot-3d-surface", "pānu-kibrātim-uṣurtim",   "𒅆𒃲𒉡𒌋")
+/* riksu: "bond, link" (reused from neo4j) — a mesh is a network of links. */
+AKK_PR("plot-3d-mesh",    "riksū-kibrāti-uṣurtim",   "𒇲𒁹𒃲𒉡𒌋")
+AKK_PR("plot-subplot",    "zittu-uṣurtim",   "𒁀𒋻𒉡𒌋")
+AKK_PR("plot-advance",    "alāk-uṣurtim",    "𒄿𒉡𒌋")
+AKK_PR("plot-text",       "šaṭār-uṣurtim",   "𒌝𒉡𒌋𒉡")
+AKK_PR("plot-mtex",       "šaṭār-uṣurti-kilīlim", "𒌝𒉡𒌋𒆜")
+/* ebēbu: "to become clean/pure" — genuine verb, distinct from the
+ * adjective ebbu used for w1-raw. */
+AKK_PR("plot-clear",      "ebēb-uṣurtim",    "𒁀𒉡𒌋𒉡")
+/* šūṣû: causative of waṣûm, "to bring out, force out" — genuine, apt for flush. */
+AKK_PR("plot-flush",      "šūṣû-uṣurtim",    "𒉡𒉡𒌋𒉡")
+AKK_PR("plot-version",    "zikru-uṣurtim",   "𒌋𒉡𒌋𒌋")
+AKK_PR("plot-page-dimensions", "minât-uṣurtim", "𒈠𒉡𒉡𒌋")
+
 /* ---- Surreal numbers ---- */
 
 /* dāriš: "forever, for eternity" — appears in royal inscriptions as "ana dāriš"
