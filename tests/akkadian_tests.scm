@@ -684,6 +684,76 @@
 (check-true "PR cunei: 𒋻𒄷𒀸 binding (restart-description)" (procedure? 𒋻𒄷𒀸))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; More CAS, special functions, STM/channels, JIT/GC introspection, and
+;;; network core (src/builtins_curry.c + modules/network/network.c) — all
+;;; bound at startup, so all reachable without any import. Functional
+;;; checks where cheap and unambiguous; binding-existence otherwise.
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(check "PR translit: idâtum (sign)" (idâtum -5) -1)
+(check "PR translit: rabûtum (gamma)" (rabûtum 5) (gamma 5))
+(check "PR translit: gerru-maḫrûm (legendre)" (gerru-maḫrûm 2 0.5) (legendre 2 0.5))
+(check "PR translit: zīqu-maḫrûm (bessel-j)" (zīqu-maḫrûm 0 1.0) (bessel-j 0 1.0))
+(check "PR translit: kippat-gamrum (elliptic-k)" (kippat-gamrum 0.5) (elliptic-k 0.5))
+(check "PR translit: pūru-gamrum (erf)" (pūru-gamrum 1.0) (erf 1.0))
+(define akk-x (sym-var 'x))
+(check "PR translit: purussûm (solve) parity"
+  (equal? (purussûm (list (list '= akk-x 5)) (list akk-x))
+          (solve (list (list '= akk-x 5)) (list akk-x)))
+  #t)
+(check "PR translit: kamār-nindabîm (reduce)" (kamār-nindabîm + 0 '(1 2 3)) 6)
+(check "PR translit: pūrum? (random-source?)" (pūrum? (epēš-pūrim)) #t)
+(check-true "PR translit: epēš-maškatti (make-tvar)" (tvar? (epēš-maškatti 0)))
+(check-true "PR translit: maškattum? binding" (procedure? maškattum?))
+(check "PR translit: leqû-maškatti / šakān-maškatti round-trip"
+  (let ((tv (epēš-maškatti 1)))
+    (šakān-maškatti tv 42)
+    (leqû-maškatti tv))
+  42)
+(check-true "PR translit: ana-ištēniš binding (atomically)" (procedure? ana-ištēniš))
+;; buffer size 1: an unbuffered channel's send blocks until a receiver is
+;; ready, which never happens in this single-threaded sequential script.
+(check "PR translit: epēš-atapp-šipri / šapār-atapp-šipri / maḫār-atapp-šipri round-trip"
+  (let ((ch (epēš-atapp-šipri 1)))
+    (šapār-atapp-šipri ch 7)
+    (maḫār-atapp-šipri ch))
+  7)
+(check-true "PR translit: sakru-atapp-šipri? binding (channel-closed?)" (procedure? sakru-atapp-šipri?))
+
+;; CAS operators — binding existence (argument shapes vary; correctness is
+;; covered by symbolic_tests.scm, this only verifies the alias resolves).
+(check-true "PR translit: māḫir-ḫepîm binding (∂)" (procedure? māḫir-ḫepîm))
+(check-true "PR translit: eqlu-kalāma binding (∫)" (procedure? eqlu-kalāma))
+(check-true "PR translit: qerbu-dūrim binding (limit)" (procedure? qerbu-dūrim))
+(check-true "PR translit: šadādum binding (grad)" (procedure? šadādum))
+(check-true "PR translit: saḫārum binding (curl)" (procedure? saḫārum))
+(check-true "PR translit: nabalkut-eqlim binding (laplace)" (procedure? nabalkut-eqlim))
+(check-true "PR translit: purussu-puḫrim binding (solve-system)" (procedure? purussu-puḫrim))
+(check-true "PR translit: purussu-kalāma binding (groebner)" (procedure? purussu-kalāma))
+(check-true "PR translit: qabûm binding (assume!)" (procedure? qabûm))
+(check-true "PR translit: elû-malîm binding (up)" (procedure? elû-malîm))
+(check-true "PR translit: šapil-malîm binding (down)" (procedure? šapil-malîm))
+(check-true "PR translit: epēš-iṣim binding (tree-eval)" (procedure? epēš-iṣim))
+
+;; JIT introspection is compiled in only with -DBUILD_LLVM=ON (off by
+;; default, per CLAUDE.md's cmake flags); guard like ldap/rpi.
+(guard (e (#t (display "SKIP: LLVM JIT builtins not built in (BUILD_LLVM=OFF)") (newline)))
+  (check-true "PR translit: bašû-ḫamṭim? binding (curry-llvm-available?)" (procedure? bašû-ḫamṭim?))
+  (check-true "PR translit: epēš-ḫamṭim binding (curry-jit-call)" (procedure? epēš-ḫamṭim))
+  (check-true "PR translit: šupul-ḫamṭim binding (jit-call-depth)" (procedure? šupul-ḫamṭim)))
+;; gc-collect!/gc-on-collection are unconditional.
+(check-true "PR translit: ebēb-kalāma binding (gc-collect!)" (procedure? ebēb-kalāma))
+(check-true "PR translit: šūdû-ebēbim binding (gc-on-collection)" (procedure? šūdû-ebēbim))
+
+;; Network core — binding existence only (an actual connection needs a
+;; live peer).
+(import (curry network))
+(check-true "PR translit: qerēbum binding (tcp-connect)" (procedure? qerēbum))
+(check-true "PR translit: maṣṣar-bābim binding (tcp-listen)" (procedure? maṣṣar-bābim))
+(check-true "PR translit: epēš-bābi-lā-kīnim binding (udp-socket)" (procedure? epēš-bābi-lā-kīnim))
+(check-true "PR translit: bašû-bābim? binding (socket-ready?)" (procedure? bašû-bābim?))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Import-time module aliasing (src/modules.c's modules_import calling
 ;;; akk_pr_lookup) — procedures that live only inside a module's own
 ;;; environment until imported, unlike everything above which is bound

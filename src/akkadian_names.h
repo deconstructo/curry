@@ -470,6 +470,181 @@ AKK_PR("sym->string",     "ṭuppi-la-idûm",       "𒉡𒅆𒌝")  /* NU.IGI.U
 AKK_PR("sym->infix",      "ṭuppi-la-idûm-išārum","𒉡𒅆𒌝𒌋") /* NU.IGI.UM.U = infix tablet */
 AKK_PR("sym->latex",      "ṭuppi-ṣīrum-la-idûm", "𒉡𒅆𒌝𒁹") /* NU.IGI.UM.DIŠ = formal tablet */
 
+/* ---- More symbolic CAS (src/builtins_curry.c) ---- */
+/* idātu: "sign, omen, mark, direction" — genuine, distinct from têrtu
+ * (used for mobius/omens) and apt for a numeric sign function. */
+AKK_PR("sign",          "idâtum",          "𒀸𒁹𒉡")
+AKK_PR("∂",             "māḫir-ḫepîm",     "𒄭𒊕𒇲")   /* māḫirum (rate, reused) of a fraction */
+AKK_PR("∫",             "eqlu-kalāma",     "𒀭𒆠𒉡")   /* eqlum (field/integral, reused), of everything */
+AKK_PR("trigsimp",      "šuklul-šapaltim", "𒁹𒆠𒁹𒁹𒀸")
+/* dūru: "wall, boundary, fortification" — genuine, approaching a boundary
+ * is exactly a limit. */
+AKK_PR("limit",         "qerbu-dūrim",     "𒂗𒉡𒁀𒌋")
+AKK_PR("series",        "šiṭir-mala",      "𒌝𒁹𒉡")
+AKK_PR("D",             "māḫir-kalāma",    "𒄭𒊕𒉡")
+AKK_PR("partial",       "ḫepû-māḫirim",    "𒇲𒄭𒊕")
+/* šadādu: "to pull, to drag" — genuine verb, a gradient pulls toward
+ * steepest ascent. */
+AKK_PR("grad",          "šadādum",         "𒊻𒀀𒁹")
+AKK_PR("gradient",      "šadādu-arkûm",    "𒊻𒀀𒁹𒉡")
+AKK_PR("divergence",    "waṣê-šadādim",    "𒉡𒉡𒊻𒀀")
+/* saḫāru: "to turn around, to circle" — genuine, a direct fit for curl. */
+AKK_PR("curl",          "saḫārum",         "𒀭𒀸𒄷")
+AKK_PR("laplacian",     "šadādu-šanûm",    "𒊻𒀀𒁹𒁀")
+AKK_PR("vec-laplacian", "šadādu-šanî-kibrātim", "𒊻𒀀𒁹𒁀𒃲")
+AKK_PR("dot-product",   "napḫar-kilallān-ṣindim", "𒈷𒁹𒌋𒀸𒉡")
+AKK_PR("cross-product", "ṣilip-ṣindim",    "𒆠𒃲𒌋𒀸")
+/* nabalkutu: "to cross over" (reused from image-flip) — a transform
+ * crosses from one domain to another. */
+AKK_PR("laplace",       "nabalkut-eqlim",       "𒉡𒁀𒀭𒆠")
+AKK_PR("ilaplace",      "nabalkut-eqli-turrum", "𒉡𒁀𒀭𒆠𒄀")
+AKK_PR("fourier",       "nabalkut-eqli-šanûm",  "𒉡𒁀𒀭𒆠𒁀")
+AKK_PR("ifourier",      "nabalkut-eqli-šanî-turrum", "𒉡𒁀𒀭𒆠𒁀𒄀")
+AKK_PR("laurent",       "šiṭir-lā-kīnim",  "𒌝𒁹𒉡𒆠")   /* series admitting negative powers */
+AKK_PR("puiseux",       "šiṭir-ḫepîm",     "𒌝𒁹𒇲")     /* series with fractional powers */
+AKK_PR("poly-gcd",         "kabru-šiṭrim",       "𒃲𒁹𒁹𒌝𒁹")
+AKK_PR("poly-resultant",   "napḫar-šiṭrim",      "𒈷𒈷𒌝𒁹")
+AKK_PR("poly-squarefree",  "lā-mitḫartu-šiṭrim", "𒉡𒈠𒋻𒌝𒁹")
+AKK_PR("poly-factor",      "zittu-šiṭrim",       "𒁀𒋻𒌝𒁹")
+AKK_PR("partial-fractions","ḫepû-zittim",        "𒇲𒁀𒋻")
+/* purussûm: "decision, verdict" (reused from catalan) — solving reaches
+ * a verdict. */
+AKK_PR("solve",        "purussûm",       "𒁀𒋻𒉌")
+AKK_PR("solve-system",  "purussu-puḫrim", "𒁀𒋻𒉌𒉌")
+AKK_PR("groebner",      "purussu-kalāma", "𒁀𒋻𒉌𒉡")
+/* parṣu: "rite, ordinance, prescribed procedure" — genuine, a rule is a
+ * prescribed procedure. */
+AKK_PR("list-rules",    "šumū-parṣim",    "𒌋𒇲𒉌𒌋")
+AKK_PR("clear-rules!",  "paṭār-parṣim",   "𒇲𒉌𒇲𒌋")
+/* qabûm: "to say, to speak, to declare" — genuine, an assumption is a
+ * declared premise. */
+AKK_PR("assume!",           "qabûm",         "𒀸𒁀𒌋")
+AKK_PR("can-assume?",       "qabû-maṣûm?",   "𒀸𒁀𒌋𒉌?")
+AKK_PR("drop-assumption!",  "paṭār-qabîm",   "𒇲𒉌𒀸𒁀𒌋")
+/* la-idûm (the unknown, reused) — CAS expression accessors. */
+AKK_PR("sym-expr",       "banû-la-idûm",   "𒉡𒌋𒉡𒅆")
+AKK_PR("sym-expr-nargs", "mīnu-la-idûm",   "𒈠𒉡𒅆")
+AKK_PR("sym-expr-arg",   "leqû-la-idûm",   "𒅁𒉡𒅆")
+AKK_PR("sym-expr-op",    "zikru-la-idûm",  "𒌋𒉡𒅆")
+AKK_PR("sym-fn",         "šumu-pārisim",   "𒌋𒇽𒉌")
+AKK_PR("sym-fn?",        "šumu-pārisim?",  "𒌋𒇽𒉌?")
+AKK_PR("sym-fn-name",    "zikru-pārisim",  "𒌋𒇽𒉌𒉡")
+AKK_PR("fn-apply",       "paqād-pārisim",  "𒇽𒄿𒇽𒉌")
+AKK_PR("unspecified?",   "lā-zikrum?",     "𒉡𒌋𒉡?")
+/* SICM classical-mechanics tuples: elûm/šaplûm (high/low, reused) mark
+ * contravariant ("up") / covariant ("down") index position. */
+AKK_PR("up",            "elû-malîm",       "𒀭𒉡𒉌")
+AKK_PR("down",          "šapil-malîm",     "𒆠𒉌𒉌")
+AKK_PR("up?",           "elû-malîm?",      "𒀭𒉡𒉌?")
+AKK_PR("down?",         "šapil-malîm?",    "𒆠𒉌𒉌?")
+/* riksum (bond/link, reused) — a tuple is a bound-together set of values. */
+AKK_PR("tuple?",        "riksu-malîm?",    "𒇲𒁹𒉌?")
+AKK_PR("ref",           "maḫār-malîm",     "𒌝𒉌𒉌")
+AKK_PR("dimension",     "mīnu-malîm",      "𒈠𒉌𒉌𒉌")
+AKK_PR("tuple->list",   "malûm-ana-nindabîm",      "𒉌𒀀𒇽")
+AKK_PR("list->up",      "nindabûm-ana-elî-malîm",  "𒇽𒀀𒀭𒉌")
+AKK_PR("list->down",    "nindabûm-ana-šapil-malîm","𒇽𒀀𒆠𒉌")
+AKK_PR("quad",           "eqlu-nikkassim",       "𒀭𒆠𒈷𒉡")
+AKK_PR("quad-frac-diff", "māḫir-ḫepî-nikkassim", "𒄭𒊕𒇲𒈷𒉡")
+AKK_PR("quad-frac-int",  "eqlu-ḫepî-nikkassim",  "𒀭𒆠𒇲𒈷𒉡")
+/* iṣu: "tree, wood" — genuine noun, the fallback tree-walking evaluator. */
+AKK_PR("tree-eval",     "epēš-iṣim",       "𒇽𒄿𒍾")
+
+/* ---- Parallel map/reduce (src/workpool.c via builtins_curry.c) ---- */
+/* ēdiš: "alone, singly" — genuine adverb from ēdu, apt for sequential. */
+AKK_PR("map/seq",       "šutakūlu-nindabî-ēdiš", "𒈷𒅆𒀸𒉡")
+AKK_PR("reduce",        "kamār-nindabîm",        "𒃲𒇽")
+AKK_PR("reduce/seq",    "kamār-nindabî-ēdiš",    "𒃲𒇽𒀸𒉡")
+AKK_PR("map-parallel-threshold",     "puluggu-šutakūlim", "𒇲𒉡𒈷𒅆")
+AKK_PR("set-map-parallel-threshold!","šakān-puluggi-šutakūlim", "𒁹𒇲𒉡𒈷𒅆")
+/* gabbiš: "totally, entirely" — genuine adverb from gabbu, apt for "all
+ * branches at once" = parallel. */
+AKK_PR("for-each/par",  "ana-kālāma-gabbiš", "𒀀𒌋𒉡𒃲")
+AKK_PR("hardware-concurrency", "mīnu-gabbêm", "𒈠𒉡𒃲")
+
+/* ---- Random sources (src/builtins_curry.c) ---- */
+/* pūrum: "lot" (as in casting lots) — genuine and apt: this is literally
+ * how the Babylonians generated a random outcome. */
+AKK_PR("random-real",     "pūrum",           "𒁀𒌋𒌝")
+AKK_PR("random-integer",  "pūru-nikkassim",  "𒁀𒌋𒌝𒈷")
+AKK_PR("make-random-source", "epēš-pūrim",   "𒇽𒁀𒌋𒌝")
+AKK_PR("random-source?",     "pūrum?",       "𒁀𒌋𒌝?")
+/* dalāḫu: "to stir up, to disturb" — genuine verb, apt for re-seeding. */
+AKK_PR("random-source-randomize!",        "dalāḫ-pūrim",         "𒁀𒌑𒁀𒌋𒌝")
+AKK_PR("random-source-pseudo-randomize!",  "dalāḫ-pūri-lā-kīnim", "𒁀𒌑𒁀𒌋𒌝𒆠")
+AKK_PR("random-source->random-real",      "pūrum-ana-nikkassim",     "𒁀𒌋𒌝𒀀𒈷")
+AKK_PR("random-source->random-integer",   "pūrum-ana-nikkassi-gamrim","𒁀𒌋𒌝𒀀𒈷𒃲")
+
+/* ---- Special functions (src/builtins_curry.c) — genuinely modern,
+ * no OB analog; gerru ("way, path, course") names families of
+ * orthogonal polynomials, each distinguished by a genuine ordinal. */
+AKK_PR("legendre",         "gerru-maḫrûm",         "𒁺𒋻𒉌")
+AKK_PR("assoc-legendre",   "gerru-maḫrî-itâtim",   "𒁺𒋻𒉌𒁹")
+AKK_PR("hermite",          "gerru-šanûm",          "𒁺𒋻𒉌𒁀")
+AKK_PR("hermite-prob",     "gerru-šanî-kīnim",     "𒁺𒋻𒉌𒁀𒆠")
+AKK_PR("chebyshev-t",      "gerru-šalšum",         "𒁺𒋻𒉌𒋻")
+AKK_PR("chebyshev-u",      "gerru-rebûm",          "𒁺𒋻𒉌𒉡")
+/* ḫamšu: "five" — genuine cardinal. */
+AKK_PR("laguerre",         "gerru-ḫamšum",         "𒁺𒋻𒉌𒀸")
+AKK_PR("assoc-laguerre",   "gerru-ḫamši-itâtim",   "𒁺𒋻𒉌𒀸𒁹")
+AKK_PR("spherical-harmonic","gerru-kibrātim",      "𒁺𒋻𒉌𒃲")
+/* rabûtu: "greatness" (abstract noun from rabû, distinct usage from the
+ * adjective already used for max/great) — Gamma generalizes factorial. */
+AKK_PR("gamma",        "rabûtum",         "𒃲𒉡𒌝")
+AKK_PR("log-gamma",    "naṭāl-rabûtim",   "𒅆𒁹𒃲𒉡𒌝")
+AKK_PR("digamma",      "rabûtu-šanītum",  "𒃲𒉡𒌝𒁀")
+AKK_PR("beta",         "rabûtu-kilallān", "𒃲𒉡𒌝𒌋")
+/* pūrum (lot/chance, reused) — erf relates to the normal distribution. */
+AKK_PR("erf",          "pūru-gamrum",     "𒁀𒌋𒌝𒃲")
+AKK_PR("erfc",         "pūru-gamru-šanûm","𒁀𒌋𒌝𒃲𒁀")
+/* zīqu: "breath, waft" (reused from pwm) — Bessel functions arise in
+ * wave equations. */
+AKK_PR("bessel-j",     "zīqu-maḫrûm",     "𒌋𒉌𒉌𒉌")
+AKK_PR("bessel-y",     "zīqu-šanûm",      "𒌋𒉌𒉌𒁀")
+AKK_PR("bessel-i",     "zīqu-šalšum",     "𒌋𒉌𒉌𒋻")
+AKK_PR("bessel-k",     "zīqu-rebûm",      "𒌋𒉌𒉌𒉡")
+/* kippatu (circle/modulo, reused) — elliptic integrals measure arc length. */
+AKK_PR("elliptic-k",   "kippat-gamrum",       "𒄀𒌋𒃲")
+AKK_PR("elliptic-e",   "kippat-gamru-šanûm",  "𒄀𒌋𒃲𒁀")
+AKK_PR("elliptic-f",   "kippat-ḫepûm",        "𒄀𒌋𒇲")
+AKK_PR("elliptic-pi",  "kippat-ḫepû-šalšum",  "𒄀𒌋𒇲𒋻")
+
+/* ---- STM / channels (src/stm.c, src/channel.c via builtins_curry.c) ---- */
+/* maškattu: "deposit, pledge" — genuine noun, a transactional variable
+ * holds a value like a bank deposit until the transaction commits. */
+AKK_PR("make-tvar",   "epēš-maškatti", "𒇽𒈠𒂍")
+AKK_PR("tvar-read",   "leqû-maškatti", "𒅁𒈠𒂍")
+AKK_PR("tvar-write!", "šakān-maškatti","𒁹𒈠𒂍")
+AKK_PR("tvar?",       "maškattum?",    "𒈠𒂍?")
+/* ištēniš: "together, as one" — genuine adverb from ištēn (one, reused). */
+AKK_PR("atomically",  "ana-ištēniš",   "𒀀𒀸𒌋𒉡")
+AKK_PR("retry",       "šanā-epēšim",   "𒁀𒇽𒉌")
+/* atappu (channel/irrigation-ditch, reused from i2c) — a fitting root
+ * for a message channel too. */
+AKK_PR("make-channel",   "epēš-atapp-šipri", "𒇽𒀀𒉌")
+AKK_PR("channel-send!",  "šapār-atapp-šipri","𒌝𒀀𒉌")
+AKK_PR("channel-recv!",  "maḫār-atapp-šipri","𒌝𒀀𒉌𒉡")
+AKK_PR("channel-close!", "sakār-atapp-šipri","𒂍𒀀𒉌𒌋")
+/* sakru: passive participle "closed, shut" — genuine, distinct from the
+ * verb sakārum already reused throughout. */
+AKK_PR("channel-closed?","sakru-atapp-šipri?","𒂍𒀀𒉌?")
+AKK_PR("channel?",       "atapp-šipri?",      "𒀀𒉌𒉡?")
+
+/* ---- LLVM JIT introspection (src/builtins_curry.c) ---- */
+/* ḫamṭu (swift, reused from redis) — a fitting root for a JIT: literally
+ * "just in time" = swift compiled execution. */
+AKK_PR("curry-llvm-available?", "bašû-ḫamṭim?",       "𒀸𒉡𒉡?")
+AKK_PR("curry-llvm-dump-last",  "šaṭār-ḫamṭi-warkîm",  "𒌝𒉡𒉡𒉡")
+AKK_PR("curry-jit-call",        "epēš-ḫamṭim",         "𒇽𒉡𒉡")
+AKK_PR("curry-jit-eval",        "epēš-ḫamṭi-awātim",   "𒇽𒉡𒉡𒀸")
+/* šuplu: "depth" — genuine noun. */
+AKK_PR("jit-call-depth",        "šupul-ḫamṭim",        "𒋻𒉡𒉡")
+AKK_PR("jit-compile!",          "banû-ḫamṭim",         "𒉡𒉡𒉡𒉡")
+
+/* ---- GC control (src/builtins_curry.c) ---- */
+AKK_PR("gc-collect!",      "ebēb-kalāma",  "𒁀𒉡𒉡𒉡𒉡")   /* ebēbu, reused from plot-clear */
+AKK_PR("gc-on-collection", "šūdû-ebēbim",  "𒅆𒉡𒉡𒉡")
+
 /* ---- Optional C modules ---- */
 /* These bind only inside a module's own environment until (import ...)
  * copies them into the importer's env — see modules_import()'s call to
@@ -582,6 +757,22 @@ AKK_PR("hmac-sha256",    "kunukku-kabti-pirišti","𒁀𒃲𒆠𒉡") /* the hea
 /* ---- (curry network) TLS ---- */
 /* puzru: "hidden thing, secret" — genuine noun. */
 AKK_PR("tcp-connect-tls", "erēb-puzri",     "𒂗𒉡𒌋")   /* enter under secrecy */
+/* qerēbum: "to approach, to draw near" — genuine, distinct from erēbum
+ * (to enter) already used for import/connect-under-tls. */
+AKK_PR("tcp-connect",  "qerēbum",         "𒂗𒉡𒁀")
+/* maṣṣartu (watch-duty, reused) at a gate (bābu, reused) — listening. */
+AKK_PR("tcp-listen",   "maṣṣar-bābim",    "𒈧𒉌𒂍𒉌")
+AKK_PR("tcp-accept",   "maḫār-qerbim",    "𒌝𒉡𒂗𒁀")
+AKK_PR("tcp-close",    "sakār-qerbim",    "𒂍𒉡𒂗𒉡")
+/* kīnu (true/fixed, reused) negated — UDP is connectionless, "not fixed". */
+AKK_PR("udp-socket",   "epēš-bābi-lā-kīnim",  "𒇽𒂍𒉡𒆠")
+AKK_PR("udp-bind",     "rakās-bābi-lā-kīnim", "𒇲𒂍𒉡𒆠")
+AKK_PR("udp-send",     "šapār-bābi-lā-kīnim", "𒌝𒂍𒉡𒆠")
+AKK_PR("udp-recv",     "maḫār-bābi-lā-kīnim", "𒌝𒂍𒉡𒆠𒉡")
+/* kalûm: "to hold back, to detain, to delay" — genuine, non-blocking is
+ * "not delaying". */
+AKK_PR("socket-set-nonblocking!", "bābum-lā-kalûm", "𒂍𒉡𒉡𒆠𒌋")
+AKK_PR("socket-ready?",           "bašû-bābim?",    "𒀸𒂍𒉌?")
 
 /* ---- (curry http) ---- */
 /* erištu: "request, petition" — genuine noun, an exact fit. */
