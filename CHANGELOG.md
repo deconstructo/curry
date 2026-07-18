@@ -1,5 +1,54 @@
 # Changelog
 
+### 1.8.3 — Editor syntax highlighting, full Akkadian coverage, three bug fixes
+
+**Editor support**
+- **Syntax highlighting for Vim/Neovim, Kate (and every
+  KSyntaxHighlighting consumer: KWrite, KDevelop, Qt Creator), and VS
+  Code.** Generated from the actual runtime tables
+  (`src/symbol_list.h`, `src/akkadian_names.h`,
+  `DEF`/`cond_def`/`curry_define_fn` registrations across `src/*.c` and
+  `modules/*/*.c`) by `tools/gen-editor-syntax.py`, so it stays in sync
+  as builtins are added. Covers special forms, all builtins, Akkadian
+  transliterated + cuneiform synonyms, Neugebauer sexagesimal literals,
+  and cuneiform numerals — matching the reader's own priority rule that
+  a lone cuneiform glyph resolves as a synonym while a
+  single-space-joined multi-glyph run is a number. See `editors/README.md`.
+
+**Complete Akkadian/cuneiform coverage**
+- **Every C-level procedure and special form now has a working
+  Akkadian and cuneiform synonym** — all 970 names across every
+  `src/*.c` core file and every `modules/*/*.c` C extension (previously
+  only ~25%, concentrated in the original R7RS core). New import-time
+  aliasing mechanism (`akk_pr_lookup()` called from `modules_import()`)
+  makes this possible for the first time: names that only exist inside
+  a lazily-loaded module's own environment (every optional C module,
+  and every Scheme `(curry ...)` library) get their synonyms installed
+  at the point of import instead of never, since the previous
+  mechanism only ever saw names already bound at global-startup time.
+- Fixed a registration-order bug that silently dropped aliases for any
+  core file registered late in `builtins_register()` (numtheory,
+  condition, and any future addition), and 8 pre-existing cuneiform
+  collisions where two unrelated procedures shared one cuneiform
+  spelling, silently shadowing one of them.
+- New `tools/check-akkadian-table.py` validates the whole table after
+  every change (no duplicate translit/cuneiform strings, no embedded
+  whitespace, all cuneiform codepoints in-block); 1011 rows, zero
+  collisions.
+
+**Bug fixes** (found incidentally while writing coverage tests, fixed on request)
+- `json-stringify` segfaulted on a plain list (it treated any Scheme
+  pair as a `(key . val)` alist entry unconditionally); now correctly
+  distinguishes genuine alists (string/symbol-keyed) from plain and
+  nested lists, rendering the latter as JSON arrays.
+- `image-format` (plus `image-load`/`image-save`) segfaulted when
+  passed the wrong argument type (e.g. an image object where a path
+  string was expected) via an unchecked `curry_string()` call; all
+  three now raise a clean, catchable error instead.
+- `(eof-object)` returned void instead of the actual EOF value, so
+  `(eof-object? (eof-object))` was `#f` even by its own English name;
+  the constructor was still wired to a copy-paste placeholder.
+
 ### Unreleased
 
 **Interactive debugger**
