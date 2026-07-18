@@ -744,12 +744,10 @@
     (leqû-bāb-ṭuppim p))
   "hi")
 (check-true "PR translit: petû-bāb-ṭuppim binding (open-input-string)" (procedure? petû-bāb-ṭuppim))
-;; eof-object?/eof-object have a pre-existing, unrelated mismatch
-;; (eof-object? on a fresh eof-object returns #f even by its English
-;; name — see the commit history for the earlier-noticed instance);
-;; just verify the alias reaches the same object, not a specific
-;; predicate result.
-(check-true "PR translit: qātu-gamrum binding (eof-object)" (procedure? qātu-gamrum))
+;; eof-object was wired to prim_void (a copy-paste placeholder) instead
+;; of returning V_EOF, so eof-object? on a fresh eof-object used to
+;; return #f even by its English name -- fixed in src/builtins.c.
+(check "PR translit: qātu-gamrum (eof-object)" (eof-object? (qātu-gamrum)) #t)
 (define akk-ht (epēš-puḫur-šumim))
 (check-true "PR translit: epēš-puḫur-šumim (make-hash-table)" (puḫur-šumim? akk-ht))
 (check "PR translit: šakān-puḫur-šumim / maḫār-puḫur-šumim round-trip"
@@ -882,6 +880,15 @@
 (check "PR cunei: 𒌝𒅆𒌋 (json-parse)" (𒌝𒅆𒌋 "42") 42)
 (check "PR translit: ṭuppu-šaṭārum (json-stringify)" (ṭuppu-šaṭārum 42) "42")
 (check "PR cunei: 𒌝𒌝𒁹 (json-stringify)" (𒌝𒌝𒁹 42) "42")
+;; json_write_value used to treat any Scheme pair as an alist-shaped JSON
+;; object unconditionally; a plain list (not an alist) crashed calling
+;; car/cdr on its non-pair elements. Fixed in modules/json/json.c to
+;; check looks_like_alist first and render a genuine plain list as a
+;; JSON array, matching how vectors already map to arrays.
+(check "PR translit: ṭuppu-šaṭārum on a plain list (not an alist)"
+  (ṭuppu-šaṭārum (list 1 2 3)) "[1,2,3]")
+(check "PR cunei: 𒌝𒌝𒁹 on an alist (still an object)"
+  (𒌝𒌝𒁹 (list (cons "a" 1))) "{\"a\":1}")
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Optional C modules — regex, profiling, crypto (safe to run functionally);
@@ -1145,13 +1152,18 @@
 (check-true "PR translit: nabalkut-ṣalmim binding (image-flip-horizontal)" (procedure? nabalkut-ṣalmim))
 (check-true "PR translit: nabalkut-ṣalmi-šaplānu binding (image-flip-vertical)" (procedure? nabalkut-ṣalmi-šaplānu))
 (check-true "PR translit: peṣû-ṣalmim binding (image-grayscale)" (procedure? peṣû-ṣalmim))
-;; Not calling image-format on akk-img: modules/image/image.c's
-;; detect_format() crashes (strrchr on an empty path) for any image not
-;; loaded from a file, e.g. one built via image-make — pre-existing bug,
-;; unrelated to this alias, reproduces identically calling image-format
-;; directly. Binding-existence only.
-(check-true "PR translit: zikru-ṣalmim binding (image-format)" (procedure? zikru-ṣalmim))
-(check-true "PR cunei: 𒌋𒍪 binding (image-format)" (procedure? 𒌋𒍪))
+;; image-format takes a path STRING per its own doc comment, not an
+;; image object (unlike every other image-* function) — fn_format used
+;; to call curry_string() on whatever it was given with no type check,
+;; so passing an image record (an easy mistake, since it looks like
+;; every other accessor here) read the image's vector header as string
+;; data and segfaulted in strrchr. Fixed with a curry_is_string check
+;; in modules/image/image.c; verify both the correct usage and that
+;; misuse now raises a clean error instead of crashing.
+(check "PR translit: zikru-ṣalmim (image-format)" (zikru-ṣalmim "photo.png") 'png)
+(check "PR cunei: 𒌋𒍪 (image-format)" (𒌋𒍪 "photo.png") 'png)
+(check-true "PR translit: zikru-ṣalmim raises cleanly on wrong type"
+  (guard (e (#t #t)) (zikru-ṣalmim akk-img) #f))
 
 (import (curry mqtt))
 (check-true "PR translit: erēb-bīt-šipri binding (mqtt-connect)" (procedure? erēb-bīt-šipri))

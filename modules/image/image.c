@@ -667,6 +667,14 @@ static curry_val fn_grayscale(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_format(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    /* image-format takes a path string (per the doc comment above), not
+     * an image object -- unlike every other fn_ in this file. Passing an
+     * image record here used to segfault: curry_string() is an unchecked
+     * accessor (str_data(as_str(v))), so it read the image's vector
+     * header as if it were a string's, and detect_format's strrchr walked
+     * off wherever that garbage pointer landed. */
+    if (!curry_is_string(av[0]))
+        curry_error("image-format: not a string (expected a path, e.g. \"photo.png\")");
     switch (detect_format(curry_string(av[0]))) {
     case FMT_PNG:  return curry_make_symbol("png");
     case FMT_JPEG: return curry_make_symbol("jpeg");

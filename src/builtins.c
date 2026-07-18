@@ -2047,6 +2047,7 @@ static val_t prim_call_with_values(int ac, val_t *av, void *ud) {
     return apply_arr(av[1], 1, &produced);
 }
 static val_t prim_void(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return V_VOID;}
+static val_t prim_eof_object(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return V_EOF;}
 static val_t prim_boolean_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(av[i-1]!=av[i]) return V_FALSE; return V_TRUE;}
 static val_t prim_load(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_string(av[0])) scm_raise(V_FALSE, "load: not a string"); return scm_load(str_data(as_str(av[0])), GLOBAL_ENV);}
 static val_t prim_exit(int ac, val_t *av, void *ud) {(void)ud; exit(ac>0 ? (int)vunfix(av[0]) : 0);}
@@ -2596,7 +2597,7 @@ void builtins_register(val_t env) {
     DEF("gc-set-max-heap!",            prim_gc_set_max_heap,       1,1);
     DEF("profiling-report",  prim_profiling_report, 0,0);
     DEF("profiling-reset",   prim_profiling_reset,  0,0);
-    DEF("eof-object", prim_void,    0,0); /* placeholder; EOF created by reader */
+    DEF("eof-object", prim_eof_object, 0,0);
 
     /* Constants */
     env_define(env, sym_intern_cstr("#t"),    V_TRUE);

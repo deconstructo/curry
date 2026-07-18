@@ -149,6 +149,17 @@ static void sb_str(char **out, size_t *len, size_t *cap, const char *s) {
     while (*s) sb_char(out, len, cap, *s++);
 }
 
+/* A proper list where every element is itself a pair -- the shape
+ * json-parse produces for a JSON object. Any other pair-headed value
+ * (a plain list, or an improper list) is not an alist. */
+static bool looks_like_alist(curry_val v) {
+    while (curry_is_pair(v)) {
+        if (!curry_is_pair(curry_car(v))) return false;
+        v = curry_cdr(v);
+    }
+    return curry_is_nil(v);
+}
+
 static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) {
     char buf[64];
     if (curry_is_nil(v)) { sb_str(out,len,cap,"null"); return; }
@@ -175,6 +186,18 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
         for (uint32_t i = 0; i < n; i++) {
             if (i) sb_char(out,len,cap,',');
             json_write_value(curry_vector_ref(v, i), out, len, cap);
+        }
+        sb_char(out,len,cap,']'); return;
+    }
+    if (curry_is_pair(v) && !looks_like_alist(v)) {
+        /* Plain list -> JSON array, matching how vectors already map to arrays. */
+        sb_char(out,len,cap,'[');
+        bool first = true;
+        while (curry_is_pair(v)) {
+            if (!first) sb_char(out,len,cap,',');
+            json_write_value(curry_car(v), out, len, cap);
+            first = false;
+            v = curry_cdr(v);
         }
         sb_char(out,len,cap,']'); return;
     }
