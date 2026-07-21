@@ -786,25 +786,131 @@
       <item>∫</item>
     </list>
     <list name="akkbuiltins">
+      <item>adan-kanīki</item>
+      <item>adan-maškanim</item>
+      <item>adan-maṣṣartim</item>
+      <item>adan-ṭuppi-ḫamṭi</item>
+      <item>alāk-nikkassim</item>
+      <item>alāk-uṣurtim</item>
+      <item>amār-atappim</item>
+      <item>amār-bābim</item>
+      <item>amār-egertim</item>
+      <item>amār-šiṭir-egertim</item>
       <item>amārum</item>
+      <item>ana-ištēniš</item>
       <item>ana-kālāma</item>
+      <item>ana-kālāma-gabbiš</item>
+      <item>ana-kālāma-minâtim</item>
+      <item>ana-kālāma-napḫarim</item>
       <item>ana-kālāma-ṣindim</item>
       <item>ana-kālāma-ṭuppim</item>
+      <item>ana-ṭuppi-šaṭāru-libbim</item>
       <item>ana-ṭuppi-šaṭārum</item>
+      <item>arkiātu-eššum</item>
+      <item>arkiātum</item>
+      <item>atapp-šipri?</item>
+      <item>atappum?</item>
+      <item>atmû-terṣītim</item>
+      <item>atmû-ḫiṭītim</item>
       <item>awât-la-idûm?</item>
+      <item>awât-šipri</item>
       <item>awāt-bīti</item>
+      <item>awāt-ḫiṭīti-labīrtim</item>
       <item>awāt-ḫiṭītim</item>
       <item>awātāt-bīti</item>
+      <item>ašar-manîm</item>
+      <item>ašar-rabîm-minâtim</item>
+      <item>ašar-ṣiḫri-minâtim</item>
+      <item>ašar-ṭuppim</item>
+      <item>ašarēdi-ṣīr-minâtim</item>
+      <item>ašarēdu-nabalkuti-turrum</item>
+      <item>ašarēdu-nabalkutim</item>
       <item>ašarēdum</item>
+      <item>ašarēdum-turrum</item>
       <item>ašarēdum-ṣīrum</item>
+      <item>ašāb-ṭuppi-ḫamṭi</item>
+      <item>aḫu-ina-qātim</item>
+      <item>aḫu-napḫarim</item>
+      <item>aḫu-ṣibtim</item>
+      <item>aḫū-puḫur-ṭuppi</item>
+      <item>aḫū-ṣalmim</item>
       <item>aṣûm-dannum</item>
       <item>balāṭum?</item>
+      <item>banû-aḫim</item>
+      <item>banû-išāri-idātim</item>
+      <item>banû-išārim</item>
+      <item>banû-la-idûm</item>
+      <item>banû-šumi-la-idîm</item>
+      <item>banû-šumim</item>
+      <item>banû-ḫamṭim</item>
+      <item>banû-ṣalmim</item>
+      <item>bašû-bābim?</item>
+      <item>bašû-egertim?</item>
+      <item>bašû-libbi?</item>
+      <item>bašû-puḫur-šumim?</item>
+      <item>bašû-ḫamṭim?</item>
+      <item>bašû-ṭuppi-ḫamṭi?</item>
+      <item>bāb-amārim</item>
+      <item>bāb-šaṭārim</item>
+      <item>bāb-šaṭārim?</item>
+      <item>bāb-šemîm</item>
+      <item>bāb-šemîm?</item>
+      <item>bāb-šipri?</item>
+      <item>bāb-ḫiṭītim</item>
+      <item>bābum-lā-kalûm</item>
       <item>bābum?</item>
+      <item>dagāl-adannim</item>
+      <item>dagāl-bābim</item>
+      <item>dagālum</item>
+      <item>dalāḫ-pūri-lā-kīnim</item>
+      <item>dalāḫ-pūrim</item>
+      <item>damqu-zittim?</item>
       <item>damqum?</item>
+      <item>dāgilum?</item>
+      <item>dāriš-nikkassim?</item>
       <item>dāriš?</item>
+      <item>ebbu-qîm</item>
+      <item>ebēb-kalāma</item>
+      <item>ebēb-uṣurtim</item>
+      <item>ebēbum</item>
+      <item>egertum?</item>
+      <item>elû-malîm</item>
+      <item>elû-malîm?</item>
+      <item>elû-pūtim</item>
+      <item>elû-ḫepîm</item>
+      <item>elû-ṣibtim</item>
+      <item>elû-ṣibtim?</item>
       <item>elûm</item>
       <item>elûm-ṣīrum</item>
       <item>elûm-ṭuppim</item>
+      <item>epēš-atapp-šipri</item>
+      <item>epēš-awātim</item>
+      <item>epēš-bābi-lā-kīnim</item>
+      <item>epēš-bītim</item>
+      <item>epēš-dāgilim</item>
+      <item>epēš-ina-bābim</item>
+      <item>epēš-ina-nasqim</item>
+      <item>epēš-iṣim</item>
+      <item>epēš-kalāma-minâti-kilallān</item>
+      <item>epēš-kalāma-minâtim</item>
+      <item>epēš-kalāma-napḫarim</item>
+      <item>epēš-kanākim</item>
+      <item>epēš-maškatti</item>
+      <item>epēš-maṣîm</item>
+      <item>epēš-minâtim</item>
+      <item>epēš-napḫarim</item>
+      <item>epēš-nikkassim</item>
+      <item>epēš-puḫur-šumim</item>
+      <item>epēš-pūrim</item>
+      <item>epēš-pūtim</item>
+      <item>epēš-qibītim</item>
+      <item>epēš-riksī</item>
+      <item>epēš-šipri</item>
+      <item>epēš-šipri-šanûm</item>
+      <item>epēš-šīmtim</item>
+      <item>epēš-ḫamṭi-awātim</item>
+      <item>epēš-ḫamṭim</item>
+      <item>epēš-ṭuppi-ḫamṭi</item>
       <item>epēšum-kibrātim</item>
       <item>epēšum-nindabîm</item>
       <item>epēšum-rebûm</item>
@@ -813,29 +919,114 @@
       <item>epēšum-ṣindum</item>
       <item>epēšum-ṭuppam</item>
       <item>epēšum-ṭuppi-ṣibtātim</item>
+      <item>epšet-kanīki</item>
+      <item>eqlu-kalāma</item>
+      <item>eqlu-nikkassim</item>
+      <item>eqlu-ḫepî-nikkassim</item>
       <item>eqlum</item>
       <item>eqlum-ḫepûm</item>
+      <item>erištum</item>
+      <item>erēb-bīt-šipri</item>
+      <item>erēb-bīt-šipri-puzri</item>
+      <item>erēb-bīt-šipri-šanûm</item>
+      <item>erēb-bīt-šipri?</item>
+      <item>erēb-maškanim</item>
+      <item>erēb-maškanim-šalšum</item>
+      <item>erēb-maškanim-šanûm</item>
+      <item>erēb-puzri</item>
+      <item>erēb-puḫur-nišī</item>
+      <item>erēb-riksī</item>
+      <item>erēb-ṭuppi-ḫamṭi</item>
+      <item>erēb-ṭuppi-ḫamṭi-puzri</item>
+      <item>gabbu-napḫarim?</item>
+      <item>gamrum?</item>
+      <item>gamār-manāḫtim</item>
+      <item>gamār-nikkassim</item>
+      <item>gamār-uṣurtim</item>
+      <item>gerru-kibrātim</item>
+      <item>gerru-maḫrî-itâtim</item>
+      <item>gerru-maḫrûm</item>
+      <item>gerru-rebûm</item>
+      <item>gerru-šalšum</item>
+      <item>gerru-šanî-kīnim</item>
+      <item>gerru-šanûm</item>
+      <item>gerru-ḫamši-itâtim</item>
+      <item>gerru-ḫamšum</item>
+      <item>ibu-išārim</item>
+      <item>ibu-minâtim</item>
+      <item>ibu-napḫar-minâtim</item>
+      <item>ibu-napḫar-rebîm</item>
+      <item>ibu-ṣīr-rebîm</item>
       <item>ibum</item>
       <item>ibum-kibrātim</item>
       <item>ibum-kinattu</item>
       <item>ibum-ṣīrum-kibrātim</item>
+      <item>idât-išārim</item>
+      <item>idâtum</item>
+      <item>igi-ašarēdim</item>
+      <item>igi-ippešim</item>
+      <item>igi-rebîm</item>
+      <item>igi-šapaltim</item>
+      <item>igûm</item>
+      <item>ina-kanākim</item>
       <item>ina-ṭuppi-šemûm</item>
+      <item>ippeš-minâtim</item>
+      <item>ippeš-nabalkuti-turrum</item>
+      <item>ippeš-nabalkutim</item>
+      <item>ippešum</item>
+      <item>itti-puḫur-ṭuppi</item>
+      <item>ištēn-napḫarim?</item>
+      <item>ištēn-ṣibtim</item>
       <item>išārum?</item>
+      <item>kabru-watrum</item>
+      <item>kabru-šiṭrim</item>
       <item>kabrum</item>
       <item>kalāma</item>
       <item>kalāma-mitḫārum</item>
       <item>kalāma-nindabûm</item>
       <item>kalāma?</item>
+      <item>kamār-minâtim</item>
+      <item>kamār-napḫarim</item>
+      <item>kamār-nindabî-ēdiš</item>
+      <item>kamār-nindabîm</item>
+      <item>kamār-zittī</item>
+      <item>kamāru-zittim</item>
+      <item>kanāk-maṣîm</item>
+      <item>kanāk-puḫrim</item>
+      <item>kanāk-puḫur-ṭuppi</item>
+      <item>kanākum</item>
+      <item>kanākum?</item>
+      <item>kanīk-amārim</item>
       <item>katābum-ṭuppim</item>
       <item>kibrātim-maḫārum</item>
       <item>kibrātim?</item>
       <item>kibrātum-ana-rebîm</item>
+      <item>kilallān-ṣibtim</item>
+      <item>kilīl-uṣurti-kibrātim</item>
+      <item>kilīl-uṣurtim</item>
+      <item>kilīlū-mināti</item>
       <item>kinattu</item>
+      <item>kinattu-ana-lā-kinattim</item>
       <item>kinattu-nikkassum?</item>
       <item>kinattu?</item>
+      <item>kippat-gamru-šanûm</item>
+      <item>kippat-gamrum</item>
+      <item>kippat-napḫarim</item>
+      <item>kippat-ḫepû-šalšum</item>
+      <item>kippat-ḫepûm</item>
       <item>kippatum</item>
+      <item>kippātu-puḫrum</item>
+      <item>kunnu-riksī</item>
+      <item>kunukku-ištēn</item>
+      <item>kunukku-ištēn-ṭuppam</item>
+      <item>kunukku-kabti-pirišti</item>
+      <item>kunukku-kabtum</item>
+      <item>kunukku-kabtum-ṭuppam</item>
+      <item>kunukku-maḫrûm</item>
+      <item>kunukku-maḫrûm-ṭuppam</item>
       <item>kânum</item>
       <item>kēnum?</item>
+      <item>kīttu-minâtim</item>
       <item>kīttum</item>
       <item>la-dāriš?</item>
       <item>la-idûm</item>
@@ -844,21 +1035,96 @@
       <item>labārum</item>
       <item>lapātum-imittam</item>
       <item>lapātum-šumēlam</item>
+      <item>lawûm</item>
       <item>lemnûm?</item>
+      <item>leqû-bāb-ṣibtātim</item>
+      <item>leqû-bāb-ṭuppim</item>
+      <item>leqû-la-idûm</item>
+      <item>leqû-libbi</item>
+      <item>leqû-libbi-kalāma</item>
+      <item>leqû-maškanim</item>
+      <item>leqû-maškanim-šalšum</item>
+      <item>leqû-maškanim-šanûm</item>
+      <item>leqû-maškatti</item>
+      <item>leqû-rēš-nindabîm</item>
+      <item>leqû-rūqim</item>
+      <item>leqû-zibbat-nindabîm</item>
+      <item>leqû-ṣalmim</item>
+      <item>leqû-ṭuppi-ḫamṭi</item>
+      <item>libbu-kilallān-napḫarim</item>
+      <item>libbu-kīnim</item>
+      <item>libbu-mitḫārum</item>
+      <item>libbu-mātim</item>
+      <item>libbu-napḫarim?</item>
+      <item>libbu-pūtim?</item>
       <item>libbum-maḫārum</item>
       <item>libbum-ṭuppim</item>
       <item>lā</item>
       <item>lā-kinattu</item>
+      <item>lā-kinattu-ana-kinattim</item>
       <item>lā-kinattu?</item>
+      <item>lā-mitḫartim?</item>
+      <item>lā-mitḫartu-šiṭrim</item>
+      <item>lā-mitḫāru-šaknum</item>
+      <item>lā-mitḫārum</item>
+      <item>lā-nikkassum?</item>
+      <item>lā-zikrum?</item>
+      <item>lā-ṣīru-išārim</item>
+      <item>makkūr-šipri</item>
+      <item>malû-minâtim</item>
+      <item>malûm-ana-nindabîm</item>
       <item>malûm-ṣindim</item>
       <item>malûm-ṭuppim</item>
+      <item>manzāz-uṣurtim</item>
+      <item>manzāzum</item>
+      <item>manûm</item>
+      <item>maqtū-šipri</item>
+      <item>matāḫ-ištēn</item>
+      <item>matāḫ-mala</item>
+      <item>matāḫ-minâti-kilallān</item>
+      <item>matāḫ-minâtim</item>
+      <item>matāḫ-rebîm</item>
       <item>matāḫum</item>
       <item>matāḫum-kibrātim</item>
+      <item>maškattum?</item>
+      <item>mašālu-epēšum</item>
+      <item>mašālu-paṭārum</item>
+      <item>mašālu-zâzum</item>
+      <item>mašālu-šanûm</item>
+      <item>mašālu-ṣalmim</item>
+      <item>mašālu-ṭuppim</item>
+      <item>mašālum</item>
+      <item>mašālum?</item>
+      <item>maḫār-atapp-šipri</item>
+      <item>maḫār-bābi-lā-kīnim</item>
+      <item>maḫār-malîm</item>
+      <item>maḫār-minâtim</item>
+      <item>maḫār-puḫur-šumim</item>
+      <item>maḫār-qerbim</item>
+      <item>maḫār-šipri</item>
+      <item>maḫār-ṣalmim</item>
       <item>maḫārum-kibrātim</item>
       <item>maḫārum-samānûm</item>
       <item>maḫārum-ṣindim</item>
       <item>maḫārum-ṭuppi-ṣibtātim</item>
       <item>maḫārum-ṭuppim</item>
+      <item>maṣû-mala</item>
+      <item>maṣûm</item>
+      <item>maṣûm?</item>
+      <item>maṣṣar-bābim</item>
+      <item>maṣṣartum?</item>
+      <item>melam-kutalli-uṣurtim</item>
+      <item>melam-uṣurti-šalšim</item>
+      <item>melam-uṣurtim</item>
+      <item>minât-mala</item>
+      <item>minât-mīšarim</item>
+      <item>minât-uṣurtim</item>
+      <item>minâtum</item>
+      <item>minâtum-ana-nindabîm</item>
+      <item>minâtum-ana-ṣindim</item>
+      <item>minâtum?</item>
+      <item>minûtu-maḫrītum</item>
+      <item>minûtu-šanītum</item>
       <item>mithāriš-mitḫārum-ṣibtim?</item>
       <item>mithāriš-mitḫārum-ṭuppim?</item>
       <item>mithāriš-rabûm-mitḫārum-ṣibtim?</item>
@@ -869,8 +1135,12 @@
       <item>mithāriš-ṣeḫērum-mitḫārum-ṭuppim?</item>
       <item>mithāriš-ṣeḫērum-ṣibtim?</item>
       <item>mithāriš-ṣeḫērum-ṭuppim?</item>
+      <item>mitḫar-minâtim</item>
+      <item>mitḫar-minâtim?</item>
+      <item>mitḫar-pūtim</item>
       <item>mitḫartum</item>
       <item>mitḫurtum-kibrātim</item>
+      <item>mitḫāru-napḫarim?</item>
       <item>mitḫārum</item>
       <item>mitḫārum-eq?</item>
       <item>mitḫārum-eqv?</item>
@@ -878,91 +1148,427 @@
       <item>mitḫārum-šalim?</item>
       <item>mitḫārum-ṣibtim?</item>
       <item>mitḫārum-ṭuppim?</item>
+      <item>muṭṭûm?</item>
+      <item>māḫir-kalāma</item>
+      <item>māḫir-kanīki</item>
+      <item>māḫir-ḫepî-nikkassim</item>
+      <item>māḫir-ḫepîm</item>
       <item>māḫirum</item>
       <item>māḫirum-išārum</item>
       <item>māḫirum-la</item>
       <item>māḫirum-ramāni</item>
       <item>māḫirum-ḫepûm</item>
+      <item>mīnu-gabbêm</item>
+      <item>mīnu-ibrī</item>
+      <item>mīnu-la-idûm</item>
+      <item>mīnu-malîm</item>
+      <item>mīnu-manîm</item>
+      <item>mīnu-maṣîm</item>
+      <item>mīnu-minâtim</item>
+      <item>mīnu-nagbim</item>
+      <item>mīnu-napḫari-šanûm</item>
+      <item>mīnu-napḫarim</item>
+      <item>mīnu-nasqim</item>
+      <item>mīnu-nindabîm</item>
+      <item>mīnu-purussî</item>
+      <item>mīnu-puḫrim</item>
+      <item>mīnu-puḫur-šumim</item>
+      <item>mīnu-rēš-nindabîm</item>
+      <item>mīnu-zitti-kalāma</item>
+      <item>mīnu-zitti-ēdûtim</item>
+      <item>mīnu-zittim</item>
+      <item>mīnu-zittī</item>
+      <item>mīnu-ḫasīsi-lē'im</item>
+      <item>mīnu-ṣibtāti-paṭārim</item>
+      <item>mīnu-ṣibtātim</item>
+      <item>mīnu-ṭuppi-ḫamṭim</item>
       <item>mīnum</item>
       <item>mīnum-kalāma</item>
       <item>mīnum-ša-dāriš</item>
       <item>mīnum-ṣindim</item>
       <item>mīnum-ṭuppi-ṣibtātim</item>
       <item>mīnum-ṭuppim</item>
+      <item>nabalkut-eqli-turrum</item>
+      <item>nabalkut-eqli-šanî-turrum</item>
+      <item>nabalkut-eqli-šanûm</item>
+      <item>nabalkut-eqlim</item>
+      <item>nabalkut-ṣalmi-šaplānu</item>
+      <item>nabalkut-ṣalmim</item>
+      <item>nadin-kanīki</item>
+      <item>nadān-maṣîm</item>
+      <item>nakru-nikkassim</item>
+      <item>nakār-minâtim</item>
+      <item>nakār-ṣibtim</item>
       <item>nakārum-kibrātim</item>
+      <item>napāḫ-zīqim</item>
+      <item>napḫar-kilallān-minâtim</item>
+      <item>napḫar-kilallān-ṣindim</item>
+      <item>napḫar-šiṭrim</item>
+      <item>napḫar-ṣīr-minâtim</item>
       <item>napḫarum</item>
+      <item>napḫarum-ana-nindabîm</item>
       <item>napḫarum-kibrātim</item>
       <item>napḫarum-ṣīrum</item>
+      <item>napḫarum?</item>
+      <item>nasqu-ibu-kilallān</item>
+      <item>nasqu-ibum</item>
+      <item>nasqu-inanna</item>
+      <item>nasqu-kamāri-mala</item>
+      <item>nasqu-kamāri-šalšim</item>
+      <item>nasqu-kamārim</item>
+      <item>nasqu-kippatim</item>
+      <item>nasqu-mitḫartim</item>
+      <item>nasqu-napḫar-ṣīrim</item>
+      <item>nasqu-napḫarim</item>
+      <item>nasqu-naṭāl-ešrim</item>
+      <item>nasqu-naṭāl-rabûtim</item>
+      <item>nasqu-naṭāl-šanûm</item>
+      <item>nasqu-naṭāl-šinaim</item>
+      <item>nasqu-naṭāl-ṣīrim</item>
+      <item>nasqu-purussîm</item>
+      <item>nasqu-pūru-gamrim</item>
+      <item>nasqu-pūru-gamru-šanûm</item>
+      <item>nasqu-rabûtim</item>
+      <item>nasqu-zīqi-ištēn</item>
+      <item>nasqu-zīqi-ṣifrim</item>
+      <item>nasqu-šutakūl-matāḫim</item>
+      <item>nasqum</item>
+      <item>nasqum?</item>
+      <item>nasāḫ-libbi</item>
+      <item>nasāḫ-maškanim</item>
+      <item>nasāḫ-maškanim-šalšum</item>
+      <item>nasāḫ-napḫari-šanûm</item>
+      <item>nasāḫ-napḫarim</item>
+      <item>nasāḫ-puḫri</item>
+      <item>nasāḫ-puḫur-šumim</item>
+      <item>nasāḫ-ṭuppi-ḫamṭi</item>
+      <item>našû-turrum</item>
       <item>našûm</item>
+      <item>naṣār-bābim</item>
+      <item>naṣār-puḫrim</item>
+      <item>naṣār-ḫiṭītim</item>
+      <item>naṭāl-rabûtim</item>
+      <item>naṭāl-ṣibtim</item>
+      <item>naṭāl-ṣīr-minâtim</item>
       <item>naṭālum</item>
       <item>naṭālum-ṣibtum-riqqi</item>
       <item>naṭālum-ṣīrum</item>
+      <item>nikkassu-ṣibtim?</item>
       <item>nikkassum-ana-ṣibtim</item>
       <item>nikkassum-ana-ṭuppi</item>
       <item>nikkassum-ša-ṣibtim</item>
       <item>nikkassum-šalim?</item>
       <item>nikkassum?</item>
       <item>nindabûm</item>
+      <item>nindabûm-ana-elî-malîm</item>
+      <item>nindabûm-ana-minâtim</item>
+      <item>nindabûm-ana-napḫarim</item>
+      <item>nindabûm-ana-šapil-malîm</item>
       <item>nindabûm-ana-ṣindim</item>
       <item>nindabûm-ana-ṭuppi</item>
       <item>nindabûm-maḫārum</item>
+      <item>nindabûm-warkûm</item>
       <item>nindabûm-zibbat</item>
       <item>nindabûm-ša-dāriš</item>
       <item>nindabûm-šupur?</item>
       <item>nindabûm?</item>
       <item>nukkurum</item>
+      <item>nāṣirum?</item>
+      <item>nāṣirū-qîm</item>
+      <item>palgum?</item>
+      <item>paqād-nikkassī</item>
+      <item>paqād-pārisim</item>
       <item>paqādum</item>
+      <item>pattu-kanīki</item>
+      <item>pattu-kanīki-ṭuppam</item>
+      <item>pašār-šipri</item>
       <item>pašārum-bābim</item>
+      <item>pašāḫ-zīqim</item>
+      <item>paṭār-bābim</item>
+      <item>paṭār-parṣim</item>
+      <item>paṭār-qabîm</item>
+      <item>paṭār-redîm</item>
+      <item>petê-bāb-šaṭārim?</item>
+      <item>petê-bāb-šemîm?</item>
+      <item>petû-atappim</item>
+      <item>petû-bāb-šaṭāri-ṣibtātim</item>
+      <item>petû-bāb-šaṭāri-ṭuppim</item>
+      <item>petû-bāb-ṣibtātim</item>
+      <item>petû-bāb-ṭuppim</item>
+      <item>petû-bābim</item>
+      <item>petû-egertim</item>
+      <item>petû-kanākim</item>
+      <item>petû-maṣṣartim</item>
+      <item>petû-nikkassi-ramāni</item>
+      <item>petû-nikkassim</item>
+      <item>petû-palgim</item>
+      <item>petû-puḫur-ṭuppi</item>
+      <item>petû-zīqim</item>
+      <item>petû-ṣalmi-nāṣirim</item>
       <item>petûm-ṭuppi-erēbim</item>
       <item>petûm-ṭuppi-waṣîm</item>
+      <item>peṣû-ṣalmim</item>
+      <item>pirišti-kanīki</item>
       <item>pirištu</item>
+      <item>pulug-minâtim</item>
+      <item>puluggu-šutakūlim</item>
+      <item>purussu-kalāma</item>
+      <item>purussu-puḫrim</item>
+      <item>purussûm</item>
+      <item>puḫur-arkûm</item>
+      <item>puḫur-kalāma</item>
+      <item>puḫur-mala</item>
+      <item>puḫur-maḫrûm</item>
+      <item>puḫur-napḫarim</item>
+      <item>puḫur-šumi-ana-ṭuppim</item>
+      <item>puḫur-šumim?</item>
+      <item>pānu-kibrātim-uṣurtim</item>
       <item>pānum-kibrātim</item>
       <item>pārisum?</item>
+      <item>pūru-gamru-šanûm</item>
+      <item>pūru-gamrum</item>
+      <item>pūru-nikkassim</item>
+      <item>pūrum</item>
+      <item>pūrum-ana-nikkassi-gamrim</item>
+      <item>pūrum-ana-nikkassim</item>
+      <item>pūrum?</item>
+      <item>pūtum</item>
+      <item>pūtum?</item>
+      <item>qabû-maṣûm?</item>
+      <item>qabûm</item>
       <item>qallum</item>
+      <item>qanû-kibrātim</item>
+      <item>qanûm</item>
+      <item>qerbu-dūrim</item>
+      <item>qerbu-napḫarim?</item>
+      <item>qerēbum</item>
+      <item>qibītum?</item>
       <item>qitnūm?</item>
+      <item>qātu-gamrum</item>
       <item>qātum</item>
       <item>qātum-ḫarāṣim</item>
       <item>qātum?</item>
+      <item>rabi-šiṭrim</item>
+      <item>rabû-minâtim</item>
       <item>rabûm</item>
       <item>rabûm-mitḫārum</item>
       <item>rabûm-mitḫārum-ṭuppim?</item>
       <item>rabûm-ū-mitḫārum-ṣibtim?</item>
       <item>rabûm-ṣibtim?</item>
       <item>rabûm-ṭuppim?</item>
+      <item>rabûtu-kilallān</item>
+      <item>rabûtu-šanītum</item>
+      <item>rabûtum</item>
+      <item>rakās-bābi-lā-kīnim</item>
+      <item>rakās-nikkassim</item>
       <item>rakāsum</item>
       <item>ramānī</item>
       <item>rapāšum</item>
+      <item>rebû-maḫrûm</item>
+      <item>rebû-rebîm</item>
+      <item>rebû-šalšum</item>
+      <item>rebû-šanûm</item>
       <item>rebûm-ana-kibrātim</item>
       <item>rebûm?</item>
+      <item>redû-ašrī</item>
+      <item>redû-minâtim</item>
       <item>redûm</item>
       <item>redûm-ṣindim</item>
       <item>redûm-ṭuppi-ṣibtātim</item>
       <item>redûm-ṭuppim</item>
+      <item>redûm?</item>
+      <item>riksu-malîm?</item>
+      <item>riksū-kibrāti-uṣurtim</item>
+      <item>rupuš-pūtim</item>
+      <item>rupuš-qanîm</item>
+      <item>rupuš-ṣalmi-nāṣirim</item>
+      <item>rupuš-ṣalmim</item>
+      <item>rēš-puḫur-ṭuppi</item>
+      <item>rēš-rēš-rēšim</item>
+      <item>rēš-rēš-zibbatim</item>
+      <item>rēš-rēšim</item>
+      <item>rēš-zibbat-rēšim</item>
+      <item>rēš-zibbat-zibbatim</item>
+      <item>rēš-zibbatim</item>
       <item>rēšum</item>
       <item>rēšum-nikkassī</item>
+      <item>rīqu-napḫarim?</item>
+      <item>rīqu-ṣibtim?</item>
+      <item>rūqūtum</item>
+      <item>sakru-atapp-šipri?</item>
+      <item>sakār-atapp-šipri</item>
+      <item>sakār-atappim</item>
+      <item>sakār-bāb-šaṭārim</item>
+      <item>sakār-bāb-šemîm</item>
+      <item>sakār-bābim</item>
+      <item>sakār-egertim</item>
+      <item>sakār-maṣṣartim</item>
+      <item>sakār-nikkassim</item>
+      <item>sakār-palgim</item>
+      <item>sakār-puḫrim</item>
+      <item>sakār-puḫur-ṭuppi</item>
+      <item>sakār-qerbim</item>
+      <item>sakār-zīqim</item>
+      <item>sakār-ṣalmi-nāṣirim</item>
+      <item>sakār-ṭuppi-ḫamṭi</item>
       <item>sakārum</item>
       <item>samānûm?</item>
+      <item>saḫār-rebîm</item>
+      <item>saḫārum</item>
+      <item>simtu-ḫiṭītim</item>
+      <item>simāt-ḫiṭītim</item>
+      <item>tawirtu-rebîm</item>
       <item>tawirtum</item>
       <item>tawirtum-ṣīrum</item>
+      <item>terṣītum?</item>
+      <item>turru-manāḫti-labīrtim</item>
+      <item>turru-manāḫtim</item>
+      <item>turru-minâtim</item>
+      <item>turru-puḫur-ṭuppi</item>
+      <item>turru-riksī</item>
+      <item>turru-ṭēm-ebēbim</item>
       <item>turrum</item>
       <item>turrum-kibrātim</item>
+      <item>têrtu-gamartum</item>
+      <item>têrtu-maḫrītum</item>
+      <item>têrtu-watartum</item>
+      <item>têrtum</item>
+      <item>ul-mimma</item>
+      <item>ummu-qîm</item>
+      <item>unūt-šipri</item>
+      <item>warki-nikkassim</item>
+      <item>watrum?</item>
+      <item>waṣê-bīt-šipri</item>
+      <item>waṣê-riksī</item>
+      <item>waṣê-uṣurtim</item>
+      <item>waṣê-šadādim</item>
+      <item>waṣû-gamrum</item>
+      <item>waṣû-ḫamṭum</item>
+      <item>wālidum?</item>
+      <item>zibbat-rēš-rēšim</item>
+      <item>zibbat-rēš-zibbatim</item>
+      <item>zibbat-rēšim</item>
+      <item>zibbat-zibbat-rēšim</item>
+      <item>zibbat-zibbat-zibbatim</item>
+      <item>zibbat-zibbatim</item>
       <item>zibbatum</item>
+      <item>zikru-awāt-ḫiṭītim</item>
+      <item>zikru-ebēbim</item>
+      <item>zikru-la-idûm</item>
+      <item>zikru-lē'im</item>
+      <item>zikru-mitḫārum?</item>
+      <item>zikru-nasqi-turrim</item>
+      <item>zikru-nikkassi-inanna</item>
+      <item>zikru-pārisim</item>
+      <item>zikru-uṣurtim</item>
+      <item>zikru-ḫiṭītim</item>
+      <item>zikru-ṣalmi-nāṣirim</item>
+      <item>zikru-ṣalmim</item>
+      <item>zittu-manî-kalāma</item>
+      <item>zittu-manîm</item>
+      <item>zittu-minâtim</item>
+      <item>zittu-nindabîm</item>
+      <item>zittu-uṣurtim</item>
+      <item>zittu-ēdûtim</item>
+      <item>zittu-šiṭrim</item>
+      <item>zittum</item>
+      <item>zittū</item>
+      <item>zumur-puḫrim</item>
+      <item>zumur-puḫrim?</item>
+      <item>zumur-ḫiṭītim</item>
+      <item>zâzu-minâti-kilallān</item>
       <item>zâzum</item>
       <item>zâzum-kibrātim</item>
       <item>zûzum?</item>
+      <item>zīqu-maḫrûm</item>
+      <item>zīqu-rebûm</item>
+      <item>zīqu-šalšum</item>
+      <item>zīqu-šanûm</item>
+      <item>zīqum?</item>
+      <item>ēdu-arkûm</item>
+      <item>ēdu-maḫrûm</item>
+      <item>ēdu-sarrum</item>
+      <item>ēdum?</item>
       <item>ša-dāriš-ana-nikkassim</item>
       <item>ša-dāriš-kīnum</item>
       <item>ša-dāriš?</item>
       <item>ša-ṣiḫrim</item>
+      <item>šadād-kibrāti-puḫrim</item>
+      <item>šadādu-arkûm</item>
+      <item>šadādu-šanî-kibrātim</item>
+      <item>šadādu-šanûm</item>
+      <item>šadādum</item>
+      <item>šakān-atappim</item>
+      <item>šakān-bābim</item>
+      <item>šakān-kanāki</item>
+      <item>šakān-libbi</item>
+      <item>šakān-manîm</item>
+      <item>šakān-maškanim</item>
+      <item>šakān-maškanim-šalšum</item>
+      <item>šakān-maškanim-šanûm</item>
+      <item>šakān-maškatti</item>
+      <item>šakān-minâtim</item>
+      <item>šakān-mīni-nasqim</item>
+      <item>šakān-napḫari-šalšum</item>
+      <item>šakān-napḫari-šanûm</item>
+      <item>šakān-napḫarim</item>
+      <item>šakān-puluggi-paṭārim</item>
+      <item>šakān-puluggi-šutakūlim</item>
+      <item>šakān-puḫri</item>
+      <item>šakān-puḫur-šumim</item>
+      <item>šakān-puḫur-ṭuppi</item>
+      <item>šakān-puḫur-ṭuppi-kalāma</item>
+      <item>šakān-rabûti-nagbim</item>
+      <item>šakān-rēš-nindabîm</item>
+      <item>šakān-rēšim</item>
+      <item>šakān-zibbat-nindabîm</item>
+      <item>šakān-zibbatim</item>
+      <item>šakān-zīqim</item>
+      <item>šakān-šumi-wālidim</item>
+      <item>šakān-ṣalmim</item>
+      <item>šakān-ṣibti-ṣalmim</item>
+      <item>šakān-ṭuppi-ḫamṭi</item>
+      <item>šakān-ṭēm-puḫrim</item>
       <item>šakānum-kibrātim</item>
       <item>šakānum-ṣindim</item>
       <item>šakānum-ṭuppi-ṣibtātim</item>
       <item>šakānum-ṭuppim</item>
+      <item>šalmu-napḫarim?</item>
+      <item>šalmum?</item>
       <item>šanûm-kibrātim</item>
+      <item>šanûm-šâlim</item>
+      <item>šanā-epēšim</item>
+      <item>šanā-puḫur-ṭuppi</item>
+      <item>šapalti-nabalkuti-turrum</item>
+      <item>šapalti-nabalkutim</item>
+      <item>šapalti-ṣīr-minâtim</item>
       <item>šapaltu-ippeš</item>
+      <item>šapaltu-turrum</item>
       <item>šapaltu-ṣīrum</item>
+      <item>šapil-malîm</item>
+      <item>šapil-malîm?</item>
+      <item>šapil-pūtim</item>
+      <item>šaplu-kalāma</item>
+      <item>šaplu-qātim</item>
+      <item>šaplu-šērim</item>
+      <item>šaplu-ḫepîm</item>
+      <item>šaplû-ṣibtim</item>
+      <item>šaplû-ṣibtim?</item>
       <item>šaplûm</item>
       <item>šaplûm-ṭuppim</item>
+      <item>šapār-atapp-šipri</item>
+      <item>šapār-bābi-lā-kīnim</item>
+      <item>šapār-egertim</item>
+      <item>šapār-palgim</item>
+      <item>šapār-rūqim</item>
+      <item>šapār-šulmim</item>
+      <item>šaqût-ṣalmi-nāṣirim</item>
+      <item>šaqût-ṣalmim</item>
+      <item>šaṭār-mār-šipri</item>
+      <item>šaṭār-uṣurti-kilīlim</item>
+      <item>šaṭār-uṣurtim</item>
+      <item>šaṭār-ḫamṭi-warkîm</item>
+      <item>šaṭāru-riksim</item>
       <item>šaṭārum</item>
       <item>šaṭārum-ina-ṭuppi</item>
       <item>šaṭārum-ṣibtum</item>
@@ -970,6 +1576,7 @@
       <item>šaṭārum-ṣīrum</item>
       <item>šaṭārum-ṭuppam</item>
       <item>šaṭārum-ṭuppi-ṣibtātim</item>
+      <item>šemû-ṭuppim</item>
       <item>šemûm</item>
       <item>šemûm-ašrum</item>
       <item>šemûm-ina-ṭuppi</item>
@@ -978,35 +1585,112 @@
       <item>šemûm-ṭuppam</item>
       <item>šemûm-ṭuppi-ṣibtātim</item>
       <item>šemûm-ṭuppi-ṣibtātim-ina</item>
+      <item>šeʾû-napḫarim</item>
+      <item>šeʾû-puḫrim</item>
+      <item>šeʾû-šipri</item>
       <item>šinûm?</item>
       <item>šinīpat-kibrātim</item>
+      <item>šinīpat-manāḫtim</item>
+      <item>šitkun-ebēbi-mala</item>
+      <item>šitkun-nikkassim</item>
+      <item>šitkun-uṣurti-elîš</item>
+      <item>šitkun-uṣurtim</item>
+      <item>šiṭir-lā-kīnim</item>
+      <item>šiṭir-mala</item>
+      <item>šiṭir-puḫur-ṭuppi</item>
+      <item>šiṭir-ḫepîm</item>
+      <item>šiṭir-ṣibtim?</item>
+      <item>šuklul-šapaltim</item>
       <item>šuklulum</item>
       <item>šum-la-idûm</item>
+      <item>šumu-lē'im</item>
+      <item>šumu-pārisim</item>
+      <item>šumu-pārisim?</item>
+      <item>šumu-terṣītim</item>
+      <item>šumu-wālidim</item>
+      <item>šumu-ḫiṭītim</item>
       <item>šumum-ana-ṭuppi</item>
       <item>šumum?</item>
+      <item>šumū-libbi</item>
+      <item>šumū-parṣim</item>
+      <item>šumū-puḫur-šumim</item>
+      <item>šumū-puḫur-ṭuppi</item>
+      <item>šumū-uṣurtim</item>
+      <item>šumū-ṭuppi-ḫamṭi</item>
+      <item>šupul-ḫamṭim</item>
+      <item>šurrû-manāḫtim</item>
+      <item>šurrû-puḫur-ṭuppi</item>
+      <item>šurrû-riksī</item>
+      <item>šurrû-uṣurti-kibrātim</item>
+      <item>šurrû-uṣurtim</item>
+      <item>šutabalkut-ṣibtim</item>
+      <item>šutakūl-gimri-minâtim</item>
+      <item>šutakūl-matāḫ-minâtim</item>
+      <item>šutakūl-minâti-kilallān</item>
+      <item>šutakūl-minâtim</item>
+      <item>šutakūl-rebîm</item>
+      <item>šutakūlu-nindabî-ēdiš</item>
       <item>šutakūlum</item>
       <item>šutakūlum-kibrātim</item>
       <item>šutakūlum-nindabî</item>
       <item>šutakūlum-ṣindim</item>
+      <item>šutar-redîm</item>
+      <item>šutur-minâtim</item>
+      <item>šutur-napḫarim</item>
+      <item>šutur-nindabîm</item>
       <item>šutur-ṣindim</item>
       <item>šutur-ṣindim-ina</item>
       <item>šutur-ṭuppi-ṣibtātim</item>
       <item>šutur-ṭuppi-ṣibtātim-ina</item>
       <item>šutur-ṭuppim</item>
+      <item>šutēšur-minâtim</item>
+      <item>šâlum</item>
+      <item>šāʾilum</item>
       <item>šērum</item>
       <item>šērum-ḫarāṣim</item>
+      <item>šīm-adannim</item>
+      <item>šūdû-alāki</item>
+      <item>šūdû-dāgilim</item>
+      <item>šūdû-dāgilim-kalāma</item>
+      <item>šūdû-ebēbim</item>
+      <item>šūdû-kalāma</item>
+      <item>šūdû-maṣṣartim</item>
+      <item>šūdû-šipri</item>
       <item>šūnum?</item>
+      <item>šūpûm</item>
+      <item>šūṣû-uṣurtim</item>
       <item>ūm-wulludim</item>
       <item>ūmum-ēṭum-inanna</item>
+      <item>ḫarāṣ-minâti-kilallān</item>
+      <item>ḫarāṣ-napḫarim</item>
+      <item>ḫarāṣ-ṣalmim</item>
       <item>ḫarāṣum</item>
       <item>ḫarāṣum-kala</item>
       <item>ḫarāṣum-kibrātim</item>
       <item>ḫarāṣum-warkûm</item>
+      <item>ḫepû-dāgilim</item>
+      <item>ḫepû-kanākim</item>
+      <item>ḫepû-maṣîm</item>
+      <item>ḫepû-māḫirim</item>
+      <item>ḫepû-qerbum</item>
+      <item>ḫepû-qerbūtum</item>
+      <item>ḫepû-zittim</item>
+      <item>ḫepû-šanûtum</item>
+      <item>ḫepû-ṭuppi-ḫamṭi-kalāma</item>
       <item>ḫepûm-ṭuppi</item>
       <item>ḫepûm?</item>
+      <item>ḫisbu-kalāma</item>
+      <item>ḫisbum</item>
+      <item>ḫiṭīt-uṣurti-mēḫrim</item>
+      <item>ḫiṭīt-uṣurti-šaplānim</item>
+      <item>ḫiṭītu-awātim?</item>
+      <item>ḫiṭītu-ṣabtum?</item>
       <item>ḫiṭītum</item>
       <item>ḫiṭītum-šemûm?</item>
       <item>ḫiṭītum-ṭuppi?</item>
+      <item>ṣabāt-aḫim</item>
+      <item>ṣabāt-ṣalmim</item>
+      <item>ṣalmi-nāṣirum?</item>
       <item>ṣeḫērum</item>
       <item>ṣeḫērum-mitḫārum</item>
       <item>ṣeḫērum-mitḫārum-ṭuppim?</item>
@@ -1019,24 +1703,38 @@
       <item>ṣibtum-riqqi-maḫrum?</item>
       <item>ṣibtum?</item>
       <item>ṣibtātum-ana-ṭuppi</item>
+      <item>ṣibtū-uṣurtim</item>
+      <item>ṣibtū-ṣalmim</item>
       <item>ṣibûm-kibrātim</item>
       <item>ṣifrum-kibrātim</item>
       <item>ṣifrum?</item>
+      <item>ṣilip-ṣindim</item>
       <item>ṣilippum-kibrātim</item>
       <item>ṣimdat-kibrātim</item>
       <item>ṣimdat-la-idûm?</item>
+      <item>ṣindum-ana-minâtim</item>
       <item>ṣindānum</item>
       <item>ṣindānum-ana-nindabî</item>
+      <item>ṣiḫru-minâtim</item>
       <item>ṣiḫrum</item>
       <item>ṣiḫrum-ṣīrum?</item>
+      <item>ṣêru-napḫari-šanûm</item>
+      <item>ṣêru-napḫarim</item>
       <item>ṣêrum</item>
+      <item>ṣīru-išārim</item>
       <item>ṣīrum-ša-dāriš</item>
       <item>ṣīrum?</item>
       <item>ṭarādum-inanna</item>
       <item>ṭarādū-ina-ūmim</item>
       <item>ṭuppi-la-idûm</item>
       <item>ṭuppi-la-idûm-išārum</item>
+      <item>ṭuppi-ḫiṭītim</item>
       <item>ṭuppi-ṣīrum-la-idûm</item>
+      <item>ṭuppu-turrum</item>
+      <item>ṭuppu-šaṭārum</item>
+      <item>ṭuppu-šemûm</item>
+      <item>ṭuppu-šipri</item>
+      <item>ṭuppu-šutēšurum</item>
       <item>ṭuppum</item>
       <item>ṭuppum-ana-nikkassim</item>
       <item>ṭuppum-ana-nindabî</item>
@@ -1045,37 +1743,104 @@
       <item>ṭuppum-ibašši?</item>
       <item>ṭuppum-maḫārum</item>
       <item>ṭuppum-maḫārum-eq</item>
+      <item>ṭuppum-maḫārum-kīnim</item>
       <item>ṭuppum-mithāriš</item>
       <item>ṭuppum-ṣibtātim</item>
+      <item>ṭuppum-ṣibtātim?</item>
+      <item>ṭuppū-libbi</item>
+      <item>ṭuppū-puḫur-šumim</item>
       <item>ṭupšarrum?</item>
+      <item>ṭēm-ebēbim</item>
+      <item>ṭēm-lē'im</item>
+      <item>ṭēm-manāḫti-labīrtim</item>
+      <item>ṭēm-manāḫtim</item>
+      <item>ṭēm-manāḫtim-elûm</item>
+      <item>ṭēm-wālidim</item>
+      <item>ṭēm-ṭuppi-ḫamṭi</item>
       <item>𒀀𒀸</item>
+      <item>𒀀𒀸𒌋𒉡</item>
+      <item>𒀀𒁀𒌑</item>
+      <item>𒀀𒃲𒈠𒉡</item>
+      <item>𒀀𒈠𒉌</item>
       <item>𒀀𒈾𒆠</item>
+      <item>𒀀𒉌?</item>
+      <item>𒀀𒉌𒉡?</item>
+      <item>𒀀𒉡𒃲𒈠𒉡</item>
+      <item>𒀀𒉡𒌝</item>
+      <item>𒀀𒌋𒈠𒉡</item>
+      <item>𒀀𒌋𒈷𒈷</item>
+      <item>𒀀𒌋𒉡𒃲</item>
       <item>𒀀𒌝</item>
+      <item>𒀀𒌝𒉡</item>
       <item>𒀭𒀭?</item>
       <item>𒀭𒀭𒁹</item>
+      <item>𒀭𒀭𒈷?</item>
       <item>𒀭𒀸</item>
+      <item>𒀭𒀸𒄷</item>
+      <item>𒀭𒀸𒄷𒌋𒁹</item>
+      <item>𒀭𒁀𒌋𒉡</item>
       <item>𒀭𒁹?</item>
+      <item>𒀭𒁹𒁹</item>
+      <item>𒀭𒁹𒁹?</item>
       <item>𒀭𒄿</item>
       <item>𒀭𒆠</item>
+      <item>𒀭𒆠𒇲𒈷𒉡</item>
       <item>𒀭𒆠𒈠</item>
+      <item>𒀭𒆠𒈷𒉡</item>
+      <item>𒀭𒆠𒉡</item>
+      <item>𒀭𒇲</item>
       <item>𒀭𒇽</item>
       <item>𒀭𒈠</item>
       <item>𒀭𒈷</item>
+      <item>𒀭𒉡𒉌</item>
+      <item>𒀭𒉡𒉌?</item>
       <item>𒀭𒌑</item>
       <item>𒀭𒌝</item>
+      <item>𒀸𒀀𒈠𒉡</item>
       <item>𒀸𒀸</item>
+      <item>𒀸𒁀𒌋</item>
+      <item>𒀸𒁀𒌋𒉌?</item>
       <item>𒀸𒁹</item>
       <item>𒀸𒁹𒁹</item>
+      <item>𒀸𒁹𒁹𒁹</item>
+      <item>𒀸𒁹𒉡</item>
+      <item>𒀸𒁹𒌝𒉡</item>
+      <item>𒀸𒂍𒉌?</item>
+      <item>𒀸𒂗𒁹?</item>
       <item>𒀸𒄿</item>
       <item>𒀸𒄿𒁹</item>
+      <item>𒀸𒅁𒌋𒌝</item>
       <item>𒀸𒇽</item>
+      <item>𒀸𒈠𒉡</item>
+      <item>𒀸𒈷𒈷?</item>
+      <item>𒀸𒉌𒌋</item>
+      <item>𒀸𒉌𒌋?</item>
+      <item>𒀸𒉡𒂗?</item>
+      <item>𒀸𒉡𒉡?</item>
       <item>𒀸𒊕</item>
       <item>𒀸𒋻</item>
+      <item>𒀸𒋻𒁹</item>
+      <item>𒀸𒋻𒌋</item>
       <item>𒀸𒌋</item>
       <item>𒀸𒌋𒁹</item>
+      <item>𒀸𒌝𒉡</item>
+      <item>𒀸𒌝𒉡?</item>
+      <item>𒁀𒁀𒃲</item>
       <item>𒁀𒁹</item>
+      <item>𒁀𒁹𒌝</item>
       <item>𒁀𒃲?</item>
+      <item>𒁀𒃲𒀸</item>
+      <item>𒁀𒃲𒀸𒌝</item>
+      <item>𒁀𒃲𒁹</item>
       <item>𒁀𒃲𒁹?</item>
+      <item>𒁀𒃲𒁹𒌝</item>
+      <item>𒁀𒃲𒅆𒄿</item>
+      <item>𒁀𒃲𒆠</item>
+      <item>𒁀𒃲𒆠𒉡</item>
+      <item>𒁀𒃲𒆠𒌝</item>
+      <item>𒁀𒅁𒌋</item>
+      <item>𒁀𒅁𒌋𒌝</item>
+      <item>𒁀𒇽𒉌</item>
       <item>𒁀𒈠</item>
       <item>𒁀𒈠?</item>
       <item>𒁀𒈠𒃲?</item>
@@ -1084,78 +1849,372 @@
       <item>𒁀𒈠𒉡𒃲?</item>
       <item>𒁀𒈠𒉡𒃲𒁹?</item>
       <item>𒁀𒈷</item>
+      <item>𒁀𒉌</item>
       <item>𒁀𒉡𒃲?</item>
       <item>𒁀𒉡𒃲𒁹?</item>
+      <item>𒁀𒉡𒉡</item>
+      <item>𒁀𒉡𒉡𒉡𒉡</item>
+      <item>𒁀𒉡𒌋𒉡</item>
+      <item>𒁀𒉡𒍪</item>
       <item>𒁀𒋻</item>
       <item>𒁀𒋻𒁹</item>
+      <item>𒁀𒋻𒇽</item>
+      <item>𒁀𒋻𒈠𒉌</item>
+      <item>𒁀𒋻𒈠𒉌𒉡</item>
+      <item>𒁀𒋻𒈠𒉡</item>
+      <item>𒁀𒋻𒉌</item>
+      <item>𒁀𒋻𒉌𒉌</item>
+      <item>𒁀𒋻𒉌𒉡</item>
+      <item>𒁀𒋻𒉡</item>
+      <item>𒁀𒋻𒉡𒌋</item>
+      <item>𒁀𒋻𒌋</item>
+      <item>𒁀𒋻𒌑</item>
+      <item>𒁀𒋻𒌝𒁹</item>
+      <item>𒁀𒌋𒉡</item>
+      <item>𒁀𒌋𒉡?</item>
+      <item>𒁀𒌋𒌝</item>
+      <item>𒁀𒌋𒌝?</item>
+      <item>𒁀𒌋𒌝𒀀𒈷</item>
+      <item>𒁀𒌋𒌝𒀀𒈷𒃲</item>
+      <item>𒁀𒌋𒌝𒃲</item>
+      <item>𒁀𒌋𒌝𒃲𒁀</item>
+      <item>𒁀𒌋𒌝𒈷</item>
+      <item>𒁀𒌑</item>
+      <item>𒁀𒌑?</item>
+      <item>𒁀𒌑𒁀𒌋𒌝</item>
+      <item>𒁀𒌑𒁀𒌋𒌝𒆠</item>
+      <item>𒁀𒌑𒅁𒌋𒌝</item>
+      <item>𒁀𒌑𒉌</item>
       <item>𒁹?</item>
+      <item>𒁹𒀀𒉌</item>
       <item>𒁹𒀸𒀸</item>
+      <item>𒁹𒀸𒀸𒈠𒉡</item>
+      <item>𒁹𒀸𒀸𒉡</item>
+      <item>𒁹𒀸𒀸𒉡𒁀</item>
+      <item>𒁹𒀸𒀸𒉡𒁀𒄀</item>
       <item>𒁹𒀸𒁹</item>
+      <item>𒁹𒀸𒁹𒄀</item>
+      <item>𒁹𒀸𒁹𒈠𒉡</item>
+      <item>𒁹𒀸𒁹𒉡𒁀</item>
+      <item>𒁹𒀸𒁹𒉡𒁀𒄀</item>
+      <item>𒁹𒁀𒃲</item>
+      <item>𒁹𒁀𒉌</item>
       <item>𒁹𒁹𒀸</item>
+      <item>𒁹𒁹𒀸𒄀</item>
+      <item>𒁹𒁹𒀸𒈠𒉡</item>
+      <item>𒁹𒁹𒀸𒉡𒁀</item>
+      <item>𒁹𒁹𒀸𒉡𒁀𒄀</item>
       <item>𒁹𒁹𒁹</item>
+      <item>𒁹𒁹𒈠𒉡</item>
+      <item>𒁹𒁹𒈷𒈷</item>
+      <item>𒁹𒁹𒍪</item>
+      <item>𒁹𒂍</item>
+      <item>𒁹𒂍𒁀</item>
+      <item>𒁹𒂍𒋻</item>
+      <item>𒁹𒃲𒉡𒃲𒉡</item>
+      <item>𒁹𒅁𒌋</item>
+      <item>𒁹𒅁𒌋𒌝</item>
+      <item>𒁹𒅁𒌋𒌝𒉡</item>
+      <item>𒁹𒆜</item>
+      <item>𒁹𒆜𒇽</item>
       <item>𒁹𒆠𒁹</item>
+      <item>𒁹𒆠𒁹𒁹𒀸</item>
+      <item>𒁹𒇲𒉌𒇲</item>
+      <item>𒁹𒇲𒉡𒈷𒅆</item>
+      <item>𒁹𒈠𒂍</item>
+      <item>𒁹𒈠𒉌</item>
+      <item>𒁹𒈠𒉡</item>
+      <item>𒁹𒈠𒉡𒀸𒌋</item>
+      <item>𒁹𒈷𒁹</item>
+      <item>𒁹𒈷𒈷</item>
+      <item>𒁹𒈷𒈷𒁀</item>
+      <item>𒁹𒈷𒈷𒋻</item>
+      <item>𒁹𒉌</item>
+      <item>𒁹𒉌𒌋</item>
+      <item>𒁹𒉡?</item>
+      <item>𒁹𒉡𒂗</item>
+      <item>𒁹𒉡𒃲</item>
+      <item>𒁹𒉡𒃲𒉡</item>
+      <item>𒁹𒉡𒉡</item>
+      <item>𒁹𒉡𒉡?</item>
+      <item>𒁹𒉡𒉡𒉡𒉡</item>
+      <item>𒁹𒉡𒌋</item>
+      <item>𒁹𒉡𒌋𒉡</item>
+      <item>𒁹𒉡𒌋𒌋</item>
+      <item>𒁹𒊕</item>
+      <item>𒁹𒊕𒇽</item>
+      <item>𒁹𒌋𒅁𒀀</item>
+      <item>𒁹𒌋𒉌</item>
+      <item>𒁹𒌑𒌝</item>
       <item>𒁹𒌝?</item>
+      <item>𒁹𒌝𒉡</item>
+      <item>𒁹𒍪</item>
+      <item>𒁹𒍪𒉡</item>
+      <item>𒁺𒋻𒉌</item>
+      <item>𒁺𒋻𒉌𒀸</item>
+      <item>𒁺𒋻𒉌𒀸𒁹</item>
+      <item>𒁺𒋻𒉌𒁀</item>
+      <item>𒁺𒋻𒉌𒁀𒆠</item>
+      <item>𒁺𒋻𒉌𒁹</item>
+      <item>𒁺𒋻𒉌𒃲</item>
+      <item>𒁺𒋻𒉌𒉡</item>
+      <item>𒁺𒋻𒉌𒋻</item>
       <item>𒂍?</item>
+      <item>𒂍𒀀𒉌</item>
+      <item>𒂍𒀀𒉌?</item>
+      <item>𒂍𒀀𒉌𒉡</item>
+      <item>𒂍𒀀𒉌𒌋</item>
       <item>𒂍𒀸?</item>
       <item>𒂍𒁀</item>
+      <item>𒂍𒁀𒃲</item>
+      <item>𒂍𒁀𒃲𒌝</item>
+      <item>𒂍𒁀𒉌</item>
+      <item>𒂍𒁀𒉌𒉡</item>
+      <item>𒂍𒁀𒌑</item>
+      <item>𒂍𒂍𒁀</item>
+      <item>𒂍𒂍𒅆𒌝</item>
+      <item>𒂍𒂍𒅆𒌝?</item>
+      <item>𒂍𒂍𒌝</item>
+      <item>𒂍𒂍𒌝𒁀</item>
+      <item>𒂍𒂍𒌝𒁹</item>
+      <item>𒂍𒂍𒌝𒁹?</item>
+      <item>𒂍𒂍𒌝𒁹𒁹</item>
       <item>𒂍𒂗</item>
+      <item>𒂍𒂗𒁹</item>
+      <item>𒂍𒂗𒁹𒉡</item>
+      <item>𒂍𒃲𒉌?</item>
+      <item>𒂍𒄷𒁹</item>
+      <item>𒂍𒅁𒌋</item>
+      <item>𒂍𒅁𒌋𒌝</item>
       <item>𒂍𒅆</item>
       <item>𒂍𒅆𒁹</item>
+      <item>𒂍𒅆𒄿</item>
+      <item>𒂍𒅆𒌝</item>
+      <item>𒂍𒅆𒌝?</item>
       <item>𒂍𒇲</item>
+      <item>𒂍𒈧𒉌</item>
+      <item>𒂍𒈧𒉌𒉡</item>
       <item>𒂍𒈷</item>
+      <item>𒂍𒈷𒇲</item>
       <item>𒂍𒈷𒈷</item>
+      <item>𒂍𒈷𒉡</item>
+      <item>𒂍𒈷𒍪</item>
+      <item>𒂍𒉌</item>
+      <item>𒂍𒉌?</item>
       <item>𒂍𒉡</item>
+      <item>𒂍𒉡𒁹</item>
+      <item>𒂍𒉡𒂗𒉡</item>
+      <item>𒂍𒉡𒉌</item>
+      <item>𒂍𒉡𒉌𒉡</item>
+      <item>𒂍𒉡𒉡𒆠𒌋</item>
+      <item>𒂍𒌋𒉌</item>
+      <item>𒂍𒌋𒉌𒉡</item>
       <item>𒂍𒌝𒁹</item>
+      <item>𒂍𒌝𒁹𒁹</item>
+      <item>𒂍𒌝𒁹𒁹?</item>
+      <item>𒂍𒌝𒁹𒉡</item>
+      <item>𒂍𒌝𒉡</item>
+      <item>𒂍𒍪𒉡</item>
+      <item>𒂍𒍪𒉡𒉡</item>
+      <item>𒂗𒁹?</item>
+      <item>𒂗𒂍</item>
+      <item>𒂗𒂍𒁀</item>
+      <item>𒂗𒂍𒉌𒌋</item>
+      <item>𒂗𒂍𒉌𒌋?</item>
+      <item>𒂗𒂍𒉌𒌋𒁀</item>
+      <item>𒂗𒂍𒉌𒌋𒉡</item>
+      <item>𒂗𒂍𒋻</item>
       <item>𒂗𒂗?</item>
+      <item>𒂗𒅁𒌋</item>
+      <item>𒂗𒇲𒁹</item>
+      <item>𒂗𒈷𒈷?</item>
+      <item>𒂗𒉡𒁀</item>
+      <item>𒂗𒉡𒁀𒌋</item>
+      <item>𒂗𒉡𒁹</item>
+      <item>𒂗𒉡𒁹𒁹</item>
+      <item>𒂗𒉡𒁹𒃲</item>
+      <item>𒂗𒉡𒁹𒌋</item>
+      <item>𒂗𒉡𒌋</item>
+      <item>𒂗𒌋𒁹</item>
+      <item>𒂗𒌝𒉡</item>
+      <item>𒂗𒌝𒉡𒌋</item>
       <item>𒃲</item>
       <item>𒃲𒀀</item>
+      <item>𒃲𒁀𒋻</item>
+      <item>𒃲𒁀𒋻𒌋</item>
       <item>𒃲𒁹</item>
       <item>𒃲𒁹𒁹</item>
+      <item>𒃲𒁹𒁹𒌋</item>
+      <item>𒃲𒁹𒁹𒌝𒁹</item>
+      <item>𒃲𒁹𒉡𒌋</item>
       <item>𒃲𒁹𒌋</item>
+      <item>𒃲𒁹𒌋𒄀</item>
       <item>𒃲𒃲</item>
+      <item>𒃲𒇽</item>
+      <item>𒃲𒇽𒀸𒉡</item>
+      <item>𒃲𒈠𒉡</item>
+      <item>𒃲𒈠𒉡𒉡</item>
+      <item>𒃲𒈠𒉡𒌋</item>
+      <item>𒃲𒈷𒃲</item>
+      <item>𒃲𒈷𒈷</item>
+      <item>𒃲𒉡𒈷𒈷?</item>
+      <item>𒃲𒉡𒉡?</item>
+      <item>𒃲𒉡𒌋</item>
+      <item>𒃲𒉡𒌝</item>
+      <item>𒃲𒉡𒌝𒁀</item>
+      <item>𒃲𒉡𒌝𒌋</item>
+      <item>𒃲𒌋?</item>
       <item>𒃲𒌑</item>
       <item>𒄀𒁹</item>
+      <item>𒄀𒅁𒌋𒌝</item>
+      <item>𒄀𒅆𒉡𒉡</item>
+      <item>𒄀𒇲𒁹</item>
+      <item>𒄀𒈠𒉡</item>
+      <item>𒄀𒈠𒉡𒉡</item>
       <item>𒄀𒌋</item>
+      <item>𒄀𒌋𒃲</item>
+      <item>𒄀𒌋𒃲𒁀</item>
+      <item>𒄀𒌋𒅁𒌋</item>
+      <item>𒄀𒌋𒇲</item>
+      <item>𒄀𒌋𒇲𒋻</item>
+      <item>𒄀𒌋𒈷</item>
       <item>𒄭𒁹</item>
       <item>𒄭𒈠</item>
       <item>𒄭𒉡</item>
       <item>𒄭𒊕</item>
+      <item>𒄭𒊕𒇲</item>
+      <item>𒄭𒊕𒇲𒈷𒉡</item>
+      <item>𒄭𒊕𒉡</item>
       <item>𒄭𒍪</item>
+      <item>𒄷𒀸</item>
+      <item>𒄷𒀸𒁹?</item>
       <item>𒄷𒁹</item>
       <item>𒄷𒂍?</item>
+      <item>𒄷𒂍𒉡</item>
+      <item>𒄷𒅁?</item>
       <item>𒄷𒅆?</item>
+      <item>𒄷𒈠</item>
+      <item>𒄷𒈠𒈠</item>
+      <item>𒄷𒉡𒌋𒆠</item>
+      <item>𒄷𒉡𒌋𒉡𒉡</item>
       <item>𒄷𒌝</item>
+      <item>𒄷𒌝𒉡</item>
       <item>𒄿𒃲</item>
+      <item>𒄿𒈷</item>
+      <item>𒄿𒉡𒌋</item>
       <item>𒄿𒌝</item>
+      <item>𒅁𒀀?</item>
       <item>𒅁𒁹</item>
+      <item>𒅁𒁹𒀸𒌋𒁹</item>
+      <item>𒅁𒁹𒁹</item>
+      <item>𒅁𒁹𒈠𒉡</item>
+      <item>𒅁𒁹𒈷𒁹𒈠𒉡</item>
+      <item>𒅁𒁹𒈷𒌋𒁹</item>
+      <item>𒅁𒁹𒌝𒉡</item>
+      <item>𒅁𒂍</item>
+      <item>𒅁𒂍𒁀</item>
+      <item>𒅁𒂍𒁀𒁀</item>
+      <item>𒅁𒂍𒋻</item>
+      <item>𒅁𒂍𒌝</item>
       <item>𒅁𒃲?</item>
+      <item>𒅁𒆜𒇽</item>
       <item>𒅁𒆠𒁹</item>
+      <item>𒅁𒈠𒂍</item>
       <item>𒅁𒈷</item>
       <item>𒅁𒈷?</item>
       <item>𒅁𒈷𒈷</item>
       <item>𒅁𒈷𒈷?</item>
+      <item>𒅁𒈷𒈷𒉌</item>
       <item>𒅁𒈷𒊕</item>
+      <item>𒅁𒉡𒂗</item>
+      <item>𒅁𒉡𒂗𒉡</item>
+      <item>𒅁𒉡𒃲</item>
+      <item>𒅁𒉡𒃲𒌋</item>
+      <item>𒅁𒉡𒅆</item>
+      <item>𒅁𒉡𒌋</item>
+      <item>𒅁𒊕𒇽</item>
+      <item>𒅁𒌋𒁹</item>
+      <item>𒅁𒌋𒃲</item>
+      <item>𒅁𒌋𒉡</item>
+      <item>𒅁𒌋𒉡𒁹</item>
+      <item>𒅁𒌋𒉡𒌋</item>
+      <item>𒅁𒌋𒉡𒌋𒉡</item>
+      <item>𒅁𒌋𒌋𒉡</item>
+      <item>𒅁𒌋𒌝𒁀</item>
+      <item>𒅁𒌋𒌝𒁹</item>
+      <item>𒅁𒌋𒍪</item>
+      <item>𒅁𒌝𒉡</item>
+      <item>𒅁𒍪</item>
+      <item>𒅁𒍪𒉌</item>
       <item>𒅆</item>
+      <item>𒅆𒀀</item>
+      <item>𒅆𒀀𒁀</item>
+      <item>𒅆𒀀𒇽</item>
+      <item>𒅆𒀀𒉌</item>
       <item>𒅆𒀸</item>
       <item>𒅆𒁀</item>
       <item>𒅆𒁀?</item>
       <item>𒅆𒁀𒁹</item>
+      <item>𒅆𒁀𒉌</item>
       <item>𒅆𒁹</item>
       <item>𒅆𒁹?</item>
+      <item>𒅆𒁹𒂗𒁹</item>
+      <item>𒅆𒁹𒃲𒉡𒌝</item>
+      <item>𒅆𒁹𒈠𒉡</item>
+      <item>𒅆𒂗𒁹</item>
+      <item>𒅆𒃲𒉡𒌋</item>
       <item>𒅆𒄿</item>
+      <item>𒅆𒅁𒀀</item>
+      <item>𒅆𒅁𒈷𒈷</item>
+      <item>𒅆𒅁𒉌𒌋</item>
+      <item>𒅆𒅁𒌋</item>
+      <item>𒅆𒇲𒉌</item>
+      <item>𒅆𒈠𒉡</item>
+      <item>𒅆𒈠𒉡𒃲</item>
+      <item>𒅆𒈠𒉡𒉡</item>
+      <item>𒅆𒈧𒉌</item>
+      <item>𒅆𒉌</item>
+      <item>𒅆𒉌?</item>
+      <item>𒅆𒉌𒁀𒉌</item>
+      <item>𒅆𒉌𒄿</item>
+      <item>𒅆𒉌𒅆</item>
+      <item>𒅆𒉌𒅆𒉡</item>
+      <item>𒅆𒉌𒌋</item>
+      <item>𒅆𒉌𒌑</item>
       <item>𒅆𒉡𒁹</item>
+      <item>𒅆𒉡𒁹𒁹</item>
+      <item>𒅆𒉡𒉡</item>
+      <item>𒅆𒉡𒉡𒉡</item>
+      <item>𒅆𒉡𒉡𒉡𒉌</item>
       <item>𒅆𒋻</item>
       <item>𒅆𒋻𒁹</item>
+      <item>𒅆𒋻𒌋𒁹</item>
       <item>𒅆𒌋</item>
       <item>𒅆𒌝</item>
       <item>𒅆𒌝𒁀</item>
       <item>𒅆𒌝𒁀𒁹</item>
+      <item>𒅆𒌝𒉌</item>
+      <item>𒅆𒌝𒉡</item>
       <item>𒆜</item>
+      <item>𒆜𒆜</item>
+      <item>𒆜𒆜𒆜</item>
+      <item>𒆜𒆜𒊕</item>
+      <item>𒆜𒉡𒌋</item>
+      <item>𒆜𒉡𒌋𒃲</item>
+      <item>𒆜𒉡𒌋𒈠𒉡</item>
+      <item>𒆜𒊕</item>
+      <item>𒆜𒊕𒆜</item>
+      <item>𒆜𒊕𒊕</item>
       <item>𒆠</item>
       <item>𒆠?</item>
       <item>𒆠𒀸</item>
       <item>𒆠𒀸?</item>
+      <item>𒆠𒀸𒈠𒉡</item>
+      <item>𒆠𒁀𒁹</item>
+      <item>𒆠𒁀𒌋𒉡</item>
       <item>𒆠𒁹𒁹</item>
+      <item>𒆠𒁹𒁹?</item>
+      <item>𒆠𒁹𒁹𒁹</item>
       <item>𒆠𒃲?</item>
       <item>𒆠𒃲𒀸</item>
       <item>𒆠𒃲𒁀𒀀</item>
@@ -1179,39 +2238,177 @@
       <item>𒆠𒃲𒋻</item>
       <item>𒆠𒃲𒋻𒁹</item>
       <item>𒆠𒃲𒌋</item>
+      <item>𒆠𒃲𒌋𒀸</item>
       <item>𒆠𒃲𒌝</item>
+      <item>𒆠𒄷𒌋</item>
       <item>𒆠𒆠?</item>
+      <item>𒆠𒇲</item>
+      <item>𒆠𒇲𒁹</item>
+      <item>𒆠𒉌𒉌</item>
+      <item>𒆠𒉌𒉌?</item>
+      <item>𒆠𒉡𒆠</item>
+      <item>𒆠𒉡𒉡</item>
+      <item>𒆠𒊕𒌝</item>
       <item>𒆠𒋻</item>
+      <item>𒆠𒋻?</item>
       <item>𒇲</item>
+      <item>𒇲𒀀𒌋</item>
+      <item>𒇲𒁀𒉌</item>
+      <item>𒇲𒁀𒋻</item>
+      <item>𒇲𒁀𒌑</item>
+      <item>𒇲𒁹𒂗</item>
+      <item>𒇲𒁹𒂗𒉡</item>
+      <item>𒇲𒁹𒃲𒉡𒌋</item>
+      <item>𒇲𒁹𒉌?</item>
+      <item>𒇲𒁹𒌋𒌋</item>
+      <item>𒇲𒂍𒉡𒆠</item>
+      <item>𒇲𒄭𒊕</item>
+      <item>𒇲𒅁𒌋𒌝</item>
+      <item>𒇲𒅆𒉌</item>
       <item>𒇲𒆠</item>
       <item>𒇲𒇲</item>
+      <item>𒇲𒈠𒂗</item>
+      <item>𒇲𒈷</item>
+      <item>𒇲𒉌</item>
+      <item>𒇲𒉌𒀸𒁀𒌋</item>
+      <item>𒇲𒉌𒇲𒌋</item>
+      <item>𒇲𒉡𒈠𒉡</item>
+      <item>𒇲𒉡𒈷𒅆</item>
       <item>𒇲𒌋</item>
       <item>𒇲𒌑</item>
+      <item>𒇲𒌑𒈠𒉡𒌋</item>
+      <item>𒇲𒌑𒈷𒈷</item>
+      <item>𒇲𒌑𒍪</item>
+      <item>𒇲𒌝𒉡𒉡</item>
       <item>𒇽?</item>
+      <item>𒇽𒀀𒀭𒉌</item>
+      <item>𒇽𒀀𒆠𒉌</item>
+      <item>𒇽𒀀𒈠𒉡</item>
+      <item>𒇽𒀀𒈷𒈷</item>
+      <item>𒇽𒀀𒉌</item>
+      <item>𒇽𒀀𒉡𒀸𒌋</item>
       <item>𒇽𒀸</item>
+      <item>𒇽𒀸𒁹</item>
+      <item>𒇽𒁀𒃲</item>
+      <item>𒇽𒁀𒌋𒉡</item>
+      <item>𒇽𒁀𒌋𒌝</item>
+      <item>𒇽𒁀𒌑</item>
+      <item>𒇽𒁹𒁹𒉡</item>
+      <item>𒇽𒁹𒉡</item>
+      <item>𒇽𒁹𒌑</item>
+      <item>𒇽𒂍</item>
+      <item>𒇽𒂍𒉌</item>
+      <item>𒇽𒂍𒉡𒆠</item>
       <item>𒇽𒄿</item>
+      <item>𒇽𒄿𒇽𒉌</item>
+      <item>𒇽𒄿𒈷𒈷</item>
       <item>𒇽𒄿𒌝</item>
+      <item>𒇽𒄿𒍾</item>
+      <item>𒇽𒅆𒉌</item>
+      <item>𒇽𒇲𒁹</item>
       <item>𒇽𒇽𒀸</item>
       <item>𒇽𒇽𒌝</item>
+      <item>𒇽𒈠𒂍</item>
+      <item>𒇽𒈠𒉡</item>
+      <item>𒇽𒈷</item>
+      <item>𒇽𒈷𒈷</item>
+      <item>𒇽𒉌</item>
+      <item>𒇽𒉌𒌋</item>
+      <item>𒇽𒉌𒌋𒁀</item>
+      <item>𒇽𒉌𒌋𒉌</item>
+      <item>𒇽𒉡𒈠𒉡</item>
+      <item>𒇽𒉡𒈠𒉡𒌋</item>
+      <item>𒇽𒉡𒈷𒈷</item>
+      <item>𒇽𒉡𒉡</item>
+      <item>𒇽𒉡𒉡𒀸</item>
+      <item>𒇽𒉡𒉡𒉡</item>
       <item>𒇽𒌝</item>
       <item>𒇽𒌝𒁀</item>
+      <item>𒇽𒌝𒉡</item>
       <item>𒈠𒀸</item>
+      <item>𒈠𒁀𒉡</item>
+      <item>𒈠𒁀𒉡𒇲</item>
+      <item>𒈠𒁀𒋻</item>
+      <item>𒈠𒁀𒋻𒁹</item>
+      <item>𒈠𒁀𒋻𒃲</item>
+      <item>𒈠𒁀𒋻𒉡</item>
+      <item>𒈠𒁀𒋻𒌋𒉡</item>
+      <item>𒈠𒂍?</item>
       <item>𒈠𒂗</item>
+      <item>𒈠𒂗?</item>
+      <item>𒈠𒂗𒈠𒉡</item>
+      <item>𒈠𒂗𒉡</item>
+      <item>𒈠𒃲</item>
+      <item>𒈠𒃲?</item>
+      <item>𒈠𒃲𒁀</item>
+      <item>𒈠𒃲𒇲</item>
+      <item>𒈠𒃲𒇽</item>
+      <item>𒈠𒃲𒈧</item>
+      <item>𒈠𒃲𒉡?</item>
+      <item>𒈠𒃲𒌝</item>
+      <item>𒈠𒃲𒍪</item>
+      <item>𒈠𒄷𒇲</item>
+      <item>𒈠𒅁𒁹</item>
+      <item>𒈠𒇲𒈷𒉡𒌋</item>
+      <item>𒈠𒇲𒈷𒉡𒌋𒉡</item>
+      <item>𒈠𒇲𒈷𒉡𒌋𒋻</item>
+      <item>𒈠𒇽</item>
       <item>𒈠𒈠?</item>
+      <item>𒈠𒈠𒉌</item>
+      <item>𒈠𒈠𒉡</item>
+      <item>𒈠𒈷?</item>
+      <item>𒈠𒈷𒈷</item>
+      <item>𒈠𒈷𒈷𒁀</item>
       <item>𒈠𒈾</item>
+      <item>𒈠𒈾𒁹</item>
+      <item>𒈠𒈾𒌋</item>
+      <item>𒈠𒉌</item>
+      <item>𒈠𒉌𒉌</item>
+      <item>𒈠𒉌𒉌𒉌</item>
+      <item>𒈠𒉌𒉡</item>
+      <item>𒈠𒉌𒌋</item>
+      <item>𒈠𒉌𒌋𒉌</item>
+      <item>𒈠𒉌𒌋𒉡</item>
+      <item>𒈠𒉡</item>
+      <item>𒈠𒉡?</item>
+      <item>𒈠𒉡𒀀𒀸</item>
+      <item>𒈠𒉡𒀀𒇽</item>
+      <item>𒈠𒉡𒀸𒌋</item>
+      <item>𒈠𒉡𒃲</item>
+      <item>𒈠𒉡𒃲𒉡</item>
+      <item>𒈠𒉡𒅆</item>
+      <item>𒈠𒉡𒈠𒉌</item>
+      <item>𒈠𒉡𒉌</item>
+      <item>𒈠𒉡𒉡𒌋</item>
+      <item>𒈠𒉡𒌋𒉡</item>
+      <item>𒈠𒉡𒌋𒉡𒉌</item>
+      <item>𒈠𒊕𒇽</item>
       <item>𒈠𒋻</item>
       <item>𒈠𒋻?</item>
+      <item>𒈠𒋻𒁀𒌋𒉡</item>
       <item>𒈠𒋻𒁹</item>
+      <item>𒈠𒋻𒈠𒉡</item>
+      <item>𒈠𒋻𒈠𒉡?</item>
+      <item>𒈠𒋻𒈷𒈷?</item>
       <item>𒈠𒌝</item>
       <item>𒈠𒌝𒁀</item>
       <item>𒈠𒌝𒃲?</item>
       <item>𒈠𒌝𒃲𒁹?</item>
       <item>𒈠𒌝𒈠?</item>
+      <item>𒈠𒌝𒉡</item>
       <item>𒈠𒌝𒉡?</item>
       <item>𒈠𒌝𒉡𒁹?</item>
       <item>𒈧</item>
       <item>𒈧𒀸</item>
       <item>𒈧𒁹</item>
+      <item>𒈧𒁹𒈠𒉡</item>
+      <item>𒈧𒁹𒈠𒉡𒌋</item>
+      <item>𒈧𒁹𒋻𒈠𒉡</item>
+      <item>𒈧𒁹𒌋𒁹</item>
+      <item>𒈧𒁹𒌋𒈠𒉡</item>
+      <item>𒈧𒈠𒉡𒌋</item>
+      <item>𒈧𒉌?</item>
+      <item>𒈧𒉌𒂍𒉌</item>
       <item>𒈷?</item>
       <item>𒈷𒀀?</item>
       <item>𒈷𒀸?</item>
@@ -1219,91 +2416,320 @@
       <item>𒈷𒁹</item>
       <item>𒈷𒁹?</item>
       <item>𒈷𒁹𒀸</item>
+      <item>𒈷𒁹𒀸𒈠𒉡</item>
+      <item>𒈷𒁹𒁹?</item>
+      <item>𒈷𒁹𒌋𒀸𒉡</item>
+      <item>𒈷𒁹𒌋𒈠𒉡𒉡</item>
       <item>𒈷𒅆</item>
+      <item>𒈷𒅆𒀸𒉡</item>
       <item>𒈷𒈷</item>
+      <item>𒈷𒈷?</item>
+      <item>𒈷𒈷𒀀𒇽</item>
+      <item>𒈷𒈷𒌝𒁹</item>
+      <item>𒈷𒌋𒉌</item>
       <item>𒈷𒌝</item>
       <item>𒈷𒌝?</item>
+      <item>𒉌</item>
+      <item>𒉌?</item>
+      <item>𒉌𒀀𒇽</item>
+      <item>𒉌𒈷𒈷</item>
+      <item>𒉌𒉡</item>
+      <item>𒉌𒌋?</item>
+      <item>𒉌𒌋𒀀𒌝</item>
       <item>𒉡</item>
+      <item>𒉡𒀀𒌝𒉡</item>
       <item>𒉡𒀭?</item>
+      <item>𒉡𒀸𒌋</item>
+      <item>𒉡𒀸𒌋?</item>
+      <item>𒉡𒀸𒌋𒁀𒋻</item>
+      <item>𒉡𒀸𒌋𒁀𒌋</item>
+      <item>𒉡𒀸𒌋𒁀𒌋𒁀</item>
+      <item>𒉡𒀸𒌋𒃲</item>
+      <item>𒉡𒀸𒌋𒃲𒉡</item>
+      <item>𒉡𒀸𒌋𒃲𒉡𒉡</item>
+      <item>𒉡𒀸𒌋𒃲𒋻</item>
+      <item>𒉡𒀸𒌋𒄀</item>
+      <item>𒉡𒀸𒌋𒅁</item>
+      <item>𒉡𒀸𒌋𒅁𒌋</item>
+      <item>𒉡𒀸𒌋𒅆𒁀</item>
+      <item>𒉡𒀸𒌋𒅆𒁹</item>
+      <item>𒉡𒀸𒌋𒅆𒁹𒁹</item>
+      <item>𒉡𒀸𒌋𒅆𒃲</item>
+      <item>𒉡𒀸𒌋𒅆𒌋</item>
+      <item>𒉡𒀸𒌋𒈠𒋻</item>
+      <item>𒉡𒀸𒌋𒈧𒋻</item>
+      <item>𒉡𒀸𒌋𒈷</item>
+      <item>𒉡𒀸𒌋𒈷𒁹</item>
+      <item>𒉡𒀸𒌋𒉡𒉡</item>
+      <item>𒉡𒀸𒌋𒌋𒉌</item>
+      <item>𒉡𒀸𒌋𒌋𒉌𒀸</item>
+      <item>𒉡𒁀𒀭𒆠</item>
+      <item>𒉡𒁀𒀭𒆠𒁀</item>
+      <item>𒉡𒁀𒀭𒆠𒁀𒄀</item>
+      <item>𒉡𒁀𒀭𒆠𒄀</item>
+      <item>𒉡𒁀𒁹𒁹</item>
+      <item>𒉡𒁀𒃲</item>
+      <item>𒉡𒁀𒉌</item>
+      <item>𒉡𒁀𒉌?</item>
+      <item>𒉡𒁀𒌋𒉡?</item>
+      <item>𒉡𒁀𒍪</item>
+      <item>𒉡𒁀𒍪𒆠</item>
       <item>𒉡𒁹</item>
+      <item>𒉡𒁹𒁹?</item>
+      <item>𒉡𒂍𒉌𒌋</item>
+      <item>𒉡𒂗𒄷</item>
       <item>𒉡𒃲</item>
+      <item>𒉡𒃲?</item>
       <item>𒉡𒃲𒁹</item>
+      <item>𒉡𒃲𒈠𒉡</item>
       <item>𒉡𒃲𒌑</item>
       <item>𒉡𒄿</item>
+      <item>𒉡𒄿𒁹𒁹</item>
+      <item>𒉡𒄿𒈠𒉡</item>
+      <item>𒉡𒄿𒈷</item>
+      <item>𒉡𒅁𒌋</item>
       <item>𒉡𒅆</item>
       <item>𒉡𒅆?</item>
       <item>𒉡𒅆𒁹?</item>
+      <item>𒉡𒅆𒄷</item>
+      <item>𒉡𒅆𒉡</item>
       <item>𒉡𒅆𒌝</item>
       <item>𒉡𒅆𒌝𒁹</item>
       <item>𒉡𒅆𒌝𒌋</item>
       <item>𒉡𒆠?</item>
+      <item>𒉡𒆠𒀀𒆠</item>
+      <item>𒉡𒆠𒁹</item>
       <item>𒉡𒆠𒋻</item>
+      <item>𒉡𒇲𒁹</item>
+      <item>𒉡𒈠𒁹</item>
+      <item>𒉡𒈠𒁹𒁹</item>
+      <item>𒉡𒈠𒁹𒁹𒁹</item>
+      <item>𒉡𒈠𒋻?</item>
+      <item>𒉡𒈠𒋻𒌝𒁹</item>
+      <item>𒉡𒈠𒌝</item>
+      <item>𒉡𒈷</item>
+      <item>𒉡𒈷𒈷?</item>
+      <item>𒉡𒈷𒈷𒌋?</item>
+      <item>𒉡𒈷𒉡?</item>
+      <item>𒉡𒉌?</item>
+      <item>𒉡𒉌𒌋</item>
       <item>𒉡𒉡</item>
       <item>𒉡𒉡𒀀?</item>
       <item>𒉡𒉡𒁹</item>
+      <item>𒉡𒉡𒃲</item>
       <item>𒉡𒉡𒈷</item>
+      <item>𒉡𒉡𒉡</item>
+      <item>𒉡𒉡𒉡𒉡</item>
+      <item>𒉡𒉡𒉡𒉡𒉌</item>
+      <item>𒉡𒉡𒊻𒀀</item>
+      <item>𒉡𒉡𒌋</item>
+      <item>𒉡𒉡𒌋𒉡</item>
       <item>𒉡𒊕</item>
+      <item>𒉡𒌋𒈷𒈷</item>
+      <item>𒉡𒌋𒉌</item>
+      <item>𒉡𒌋𒉡</item>
+      <item>𒉡𒌋𒉡?</item>
+      <item>𒉡𒌋𒉡𒅆</item>
+      <item>𒉡𒌋𒌋𒅆</item>
+      <item>𒉡𒌋𒌑</item>
+      <item>𒉡𒌋𒌝𒉡</item>
+      <item>𒉡𒌋𒌝𒉡𒀸</item>
+      <item>𒉡𒌋𒍪</item>
       <item>𒉡𒌝?</item>
+      <item>𒉡𒌝𒀸?</item>
+      <item>𒉡𒌝𒃲</item>
       <item>𒊕</item>
+      <item>𒊕𒅁𒌋𒌝</item>
+      <item>𒊕𒆜</item>
+      <item>𒊕𒆜𒆜</item>
+      <item>𒊕𒆜𒊕</item>
       <item>𒊕𒈷</item>
+      <item>𒊕𒊕</item>
       <item>𒊕𒊕?</item>
       <item>𒊕𒊕𒁹</item>
       <item>𒊕𒊕𒄿</item>
+      <item>𒊕𒊕𒆜</item>
       <item>𒊕𒊕𒊕</item>
+      <item>𒊕𒊕𒊕𒊕</item>
       <item>𒊕𒊕𒌝</item>
       <item>𒊕𒋻</item>
       <item>𒊕𒌝</item>
+      <item>𒊻𒀀𒁹</item>
+      <item>𒊻𒀀𒁹𒁀</item>
+      <item>𒊻𒀀𒁹𒁀𒃲</item>
+      <item>𒊻𒀀𒁹𒃲𒉌</item>
+      <item>𒊻𒀀𒁹𒉡</item>
       <item>𒋻</item>
       <item>𒋻𒀀</item>
+      <item>𒋻𒀀𒈠𒉡</item>
+      <item>𒋻𒀸𒍪</item>
+      <item>𒋻𒀸𒍪𒉡</item>
       <item>𒋻𒁹</item>
+      <item>𒋻𒁹𒀸</item>
+      <item>𒋻𒁹𒈠𒉡</item>
+      <item>𒋻𒁹𒈠𒉡𒌋</item>
+      <item>𒋻𒁹𒉡</item>
       <item>𒋻𒂍</item>
+      <item>𒋻𒂍𒉡</item>
+      <item>𒋻𒂍𒋻</item>
+      <item>𒋻𒄷?</item>
+      <item>𒋻𒄷𒀸</item>
+      <item>𒋻𒅁𒌋𒌝</item>
       <item>𒋻𒇲</item>
+      <item>𒋻𒇲𒁹</item>
+      <item>𒋻𒈠𒉡</item>
       <item>𒋻𒈷𒈷</item>
+      <item>𒋻𒈷𒈷𒁀</item>
+      <item>𒋻𒈷𒈷𒁀𒉌</item>
+      <item>𒋻𒈷𒈷𒉌</item>
+      <item>𒋻𒈷𒈷𒌋</item>
+      <item>𒋻𒉌</item>
+      <item>𒋻𒉌𒌋</item>
+      <item>𒋻𒉡𒂗</item>
       <item>𒋻𒉡𒅆?</item>
+      <item>𒋻𒉡𒉡</item>
+      <item>𒋻𒉡𒌋</item>
+      <item>𒋻𒉡𒌋𒃲</item>
+      <item>𒋻𒌋𒈠𒉡</item>
+      <item>𒋻𒌝𒉡</item>
+      <item>𒌋𒁀𒁀𒌋𒉡</item>
+      <item>𒌋𒁀𒋻?</item>
+      <item>𒌋𒁀𒌋𒉡</item>
+      <item>𒌋𒁀𒍪</item>
+      <item>𒌋𒁀𒍪𒉡</item>
+      <item>𒌋𒁹𒁀</item>
+      <item>𒌋𒁹𒁹</item>
+      <item>𒌋𒁹𒈠𒉡</item>
+      <item>𒌋𒁹𒉌</item>
+      <item>𒌋𒁹𒋻</item>
+      <item>𒌋𒁹𒌋</item>
+      <item>𒌋𒃲𒁹𒀸𒀸</item>
+      <item>𒌋𒃲𒁹𒀸𒁹</item>
+      <item>𒌋𒃲𒁹𒁹𒀸</item>
+      <item>𒌋𒃲𒌋</item>
+      <item>𒌋𒃲𒌋𒁹</item>
+      <item>𒌋𒄷</item>
+      <item>𒌋𒄷𒀸</item>
+      <item>𒌋𒄷𒁹</item>
+      <item>𒌋𒄷𒈠?</item>
+      <item>𒌋𒅁𒀀</item>
+      <item>𒌋𒅁𒌋𒌝</item>
+      <item>𒌋𒇲𒉌</item>
+      <item>𒌋𒇲𒉌𒉡</item>
+      <item>𒌋𒇲𒉌𒌋</item>
+      <item>𒌋𒇽𒉌</item>
+      <item>𒌋𒇽𒉌?</item>
+      <item>𒌋𒇽𒉌𒉡</item>
+      <item>𒌋𒈷𒉡𒉡</item>
+      <item>𒌋𒉌?</item>
+      <item>𒌋𒉌𒉌𒁀</item>
+      <item>𒌋𒉌𒉌𒉌</item>
+      <item>𒌋𒉌𒉌𒉡</item>
+      <item>𒌋𒉌𒉌𒋻</item>
+      <item>𒌋𒉌𒌋</item>
+      <item>𒌋𒉡𒀸𒌋𒄀</item>
+      <item>𒌋𒉡𒂗</item>
+      <item>𒌋𒉡𒅆</item>
+      <item>𒌋𒉡𒉌</item>
+      <item>𒌋𒉡𒉌𒃲</item>
+      <item>𒌋𒉡𒉡𒉡</item>
+      <item>𒌋𒉡𒌋</item>
+      <item>𒌋𒉡𒌋𒉡</item>
+      <item>𒌋𒉡𒌋𒌋</item>
       <item>𒌋𒊕</item>
+      <item>𒌋𒋻𒄷</item>
+      <item>𒌋𒌑𒁀</item>
+      <item>𒌋𒌑𒌑</item>
+      <item>𒌋𒌝𒉡</item>
+      <item>𒌋𒍪</item>
+      <item>𒌋𒍪𒉡</item>
+      <item>𒌑𒁀𒃲</item>
       <item>𒌑𒁹</item>
       <item>𒌑𒄿</item>
       <item>𒌑𒅁</item>
+      <item>𒌑𒈧𒉌</item>
       <item>𒌑𒊕</item>
+      <item>𒌑𒌋</item>
       <item>𒌑𒌑</item>
       <item>𒌑𒌝</item>
       <item>𒌑𒌝𒁀</item>
+      <item>𒌑𒌝𒁀𒉡?</item>
+      <item>𒌑𒌝𒂍</item>
+      <item>𒌑𒌝𒉡</item>
       <item>𒌝?</item>
+      <item>𒌝𒀀𒉌</item>
+      <item>𒌝𒀀𒉌𒉡</item>
       <item>𒌝𒀸</item>
       <item>𒌝𒀸?</item>
       <item>𒌝𒁀</item>
       <item>𒌝𒁀𒁹</item>
       <item>𒌝𒁀𒁹𒁹</item>
+      <item>𒌝𒁀𒂍</item>
+      <item>𒌝𒁀𒃲</item>
+      <item>𒌝𒁀𒃲𒉡</item>
       <item>𒌝𒁀𒄿</item>
       <item>𒌝𒁀𒄿𒁹</item>
       <item>𒌝𒁀𒊕</item>
       <item>𒌝𒁀𒋻</item>
       <item>𒌝𒁹</item>
       <item>𒌝𒁹𒁹</item>
+      <item>𒌝𒁹𒁹?</item>
+      <item>𒌝𒁹𒅁𒌋𒌝</item>
+      <item>𒌝𒁹𒇲</item>
+      <item>𒌝𒁹𒇲𒁹</item>
+      <item>𒌝𒁹𒉡</item>
+      <item>𒌝𒁹𒉡𒆠</item>
+      <item>𒌝𒂍𒉡𒆠</item>
+      <item>𒌝𒂍𒉡𒆠𒉡</item>
       <item>𒌝𒂗</item>
       <item>𒌝𒂗𒁹</item>
+      <item>𒌝𒂗𒁹𒉡</item>
       <item>𒌝𒃲</item>
       <item>𒌝𒃲?</item>
       <item>𒌝𒃲𒁹?</item>
+      <item>𒌝𒄀</item>
+      <item>𒌝𒄀𒌋</item>
       <item>𒌝𒄿</item>
+      <item>𒌝𒄿𒀸</item>
       <item>𒌝𒅁</item>
       <item>𒌝𒅆</item>
+      <item>𒌝𒅆𒌋</item>
       <item>𒌝𒆜</item>
       <item>𒌝𒆠</item>
       <item>𒌝𒇽</item>
       <item>𒌝𒈠</item>
       <item>𒌝𒈠?</item>
       <item>𒌝𒈠𒁹</item>
+      <item>𒌝𒈠𒆠</item>
+      <item>𒌝𒈠𒉡</item>
       <item>𒌝𒈷</item>
+      <item>𒌝𒉌𒉌</item>
+      <item>𒌝𒉌𒌋</item>
+      <item>𒌝𒉌𒌋𒁹</item>
+      <item>𒌝𒉌𒌋𒉌</item>
+      <item>𒌝𒉌𒌋𒉡</item>
+      <item>𒌝𒉌𒌋𒉡𒉌</item>
       <item>𒌝𒉡?</item>
       <item>𒌝𒉡𒁹?</item>
+      <item>𒌝𒉡𒂗</item>
+      <item>𒌝𒉡𒂗𒁀</item>
+      <item>𒌝𒉡𒂗𒉡</item>
+      <item>𒌝𒉡𒉌</item>
+      <item>𒌝𒉡𒉡𒉡</item>
+      <item>𒌝𒉡𒌋</item>
+      <item>𒌝𒉡𒌋𒆜</item>
+      <item>𒌝𒉡𒌋𒉡</item>
       <item>𒌝𒊕</item>
       <item>𒌝𒊕𒊕</item>
       <item>𒌝𒋻</item>
+      <item>𒌝𒋻𒌋</item>
       <item>𒌝𒌋𒁹</item>
       <item>𒌝𒌑𒋻</item>
       <item>𒌝𒌝</item>
+      <item>𒌝𒌝𒁹</item>
+      <item>𒌝𒍪</item>
       <item>𒍪</item>
+      <item>𒍪𒉡?</item>
     </list>
     <contexts>
       <context name="Normal" attribute="Normal" lineEndContext="#stay">
