@@ -79,6 +79,13 @@ if(BUILD_MODULE_MCP AND TARGET curry_mcp)
                 ${MOD_PATH})
 endif()
 
+if(BUILD_MODULE_LSP AND TARGET curry_lsp)
+    add_test(NAME lsp
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_lsp.sh
+                $<TARGET_FILE:curry>
+                ${MOD_PATH})
+endif()
+
 if(BUILD_LLVM)
     add_test(NAME jit COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
 endif()

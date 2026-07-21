@@ -117,6 +117,7 @@ The test suites registered in `ctest`:
 | `akkadian` | `akkadian_tests.scm` | Every Akkadian/cuneiform synonym (both transliterated and cuneiform forms) for all AKK_SF and AKK_PR entries in `akkadian_names.h` — 205 assertions |
 | `sexagesimal` | `sexagesimal_tests.scm` | Babylonian base-60 I/O: `#s` reader, cuneiform Unicode reader, `number->string`/`string->number` with `'neugebauer`/`'cuneiform`, `current-number-notation`, `(curry sexagesimal)` module — 76 assertions |
 | `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
+| `lsp` | `test_lsp.sh` | `(curry lsp)` over real Content-Length-framed stdio: `initialize` capabilities, reader-driven diagnostics (raise + clear on `didChange`), hover (special forms/builtins/Akkadian synonyms), completion (static table + structurally-collected local bindings), the nesting-depth crash guard (including the `#\"`/`#\;` character-literal bypass), `didClose`, unknown-method errors — 27 assertions |
 | `ode`, `pde_numerical`, `d_operator`, `tuples`, `partial`, `trig`, `sicm` | individual `.scm` files | Numeric/physics modules |
 
 ## CLI flags
