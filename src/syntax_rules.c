@@ -11,15 +11,38 @@
 
 /* ---- Interned symbols ---- */
 
-static val_t SR_ELLIPSIS;   /* "..." */
-static val_t SR_UNDERSCORE; /* "_"   */
+static val_t SR_DEFAULT_ELLIPSIS; /* "..." */
+static val_t SR_UNDERSCORE;       /* "_"   */
 
 /* ---- Compiled transformer data ---- */
 
 typedef struct {
     val_t literals; /* list of literal symbols */
     val_t rules;    /* list of (pattern . template) pairs */
+    val_t ellipsis; /* the ellipsis identifier this instance uses (usually
+                        SR_DEFAULT_ELLIPSIS, but overridable per R7RS
+                        4.3.2's (syntax-rules ellipsis (literal ...) rule ...)
+                        form) */
 } SyntaxRulesData;
+
+/* ---- Vector <-> list helpers, so patterns/templates need only be taught
+ * about pairs; a vector pattern/template is handled by converting to/from
+ * a list at the entry point and reusing all the list logic unchanged. ---- */
+
+static val_t sr_vector_to_list(val_t v) {
+    Vector *vec = as_vec(v);
+    val_t r = V_NIL;
+    for (int i = (int)vec->len - 1; i >= 0; i--) r = scm_cons(vec->data[i], r);
+    return r;
+}
+
+static val_t sr_list_to_vector(val_t lst) {
+    int n = scm_list_length(lst);
+    Vector *v = CURRY_NEW_FLEX(Vector, (uint32_t)n);
+    v->hdr.type = T_VECTOR; v->hdr.flags = 0; v->len = (uint32_t)n;
+    for (int i = 0; i < n; i++) { v->data[i] = vcar(lst); lst = vcdr(lst); }
+    return vptr(v);
+}
 
 /* ---- Pattern helpers ---- */
 
@@ -29,31 +52,32 @@ static bool sr_is_literal(val_t sym, val_t literals) {
     return false;
 }
 
-static bool sr_is_pvar(val_t sym, val_t literals) {
+static bool sr_is_pvar(val_t sym, val_t literals, val_t ellipsis) {
     if (!vis_symbol(sym)) return false;
-    if (sym == SR_ELLIPSIS || sym == SR_UNDERSCORE) return false;
+    if (sym == ellipsis || sym == SR_UNDERSCORE) return false;
     return !sr_is_literal(sym, literals);
 }
 
 /* Collect all pattern variable names from a pattern into a Scheme list. */
-static val_t sr_pvars(val_t pat, val_t literals) {
+static val_t sr_pvars(val_t pat, val_t literals, val_t ellipsis) {
+    if (vis_vector(pat)) pat = sr_vector_to_list(pat);
     if (vis_symbol(pat))
-        return sr_is_pvar(pat, literals) ? scm_cons(pat, V_NIL) : V_NIL;
+        return sr_is_pvar(pat, literals, ellipsis) ? scm_cons(pat, V_NIL) : V_NIL;
     if (!vis_pair(pat)) return V_NIL;
     val_t result = V_NIL;
     while (vis_pair(pat)) {
         val_t elem = vcar(pat);
         val_t next = vcdr(pat);
-        if (vis_pair(next) && vcar(next) == SR_ELLIPSIS) {
-            result = scm_append(result, sr_pvars(elem, literals));
+        if (vis_pair(next) && vcar(next) == ellipsis) {
+            result = scm_append(result, sr_pvars(elem, literals, ellipsis));
             pat = vcdr(next);
         } else {
-            result = scm_append(result, sr_pvars(elem, literals));
+            result = scm_append(result, sr_pvars(elem, literals, ellipsis));
             pat = next;
         }
     }
     /* dotted tail */
-    if (vis_symbol(pat) && sr_is_pvar(pat, literals))
+    if (vis_symbol(pat) && sr_is_pvar(pat, literals, ellipsis))
         result = scm_append(result, scm_cons(pat, V_NIL));
     return result;
 }
@@ -62,11 +86,11 @@ static val_t sr_pvars(val_t pat, val_t literals) {
 
 /* Forward declaration */
 static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
-                          val_t *bindings, val_t *ell_bindings);
+                          val_t ellipsis, val_t *bindings, val_t *ell_bindings);
 
 /* Match a single pattern element against a single form value.
  * Appends to *bindings (non-ellipsis vars) and *ell_bindings (ellipsis vars). */
-static bool sr_match_one(val_t pat, val_t form, val_t literals,
+static bool sr_match_one(val_t pat, val_t form, val_t literals, val_t ellipsis,
                          val_t *bindings, val_t *ell_bindings) {
     if (vis_symbol(pat)) {
         if (pat == SR_UNDERSCORE) return true;
@@ -76,9 +100,14 @@ static bool sr_match_one(val_t pat, val_t form, val_t literals,
         *bindings = scm_cons(scm_cons(pat, form), *bindings);
         return true;
     }
+    if (vis_vector(pat)) {
+        if (!vis_vector(form)) return false;
+        return sr_match_list(sr_vector_to_list(pat), sr_vector_to_list(form),
+                              literals, ellipsis, bindings, ell_bindings);
+    }
     if (vis_pair(pat)) {
         if (!vis_pair(form) && !vis_nil(form)) return false;
-        return sr_match_list(pat, form, literals, bindings, ell_bindings);
+        return sr_match_list(pat, form, literals, ellipsis, bindings, ell_bindings);
     }
     /* Datum: must be eqv? */
     return scm_equal(pat, form);
@@ -87,13 +116,13 @@ static bool sr_match_one(val_t pat, val_t form, val_t literals,
 /* Match the rest of a pattern list against the rest of a form list.
  * Handles ellipsis sub-patterns. */
 static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
-                          val_t *bindings, val_t *ell_bindings) {
+                          val_t ellipsis, val_t *bindings, val_t *ell_bindings) {
     while (vis_pair(pat_rest)) {
         val_t pat_elem = vcar(pat_rest);
         val_t pat_next = vcdr(pat_rest);
 
         /* Check for ellipsis following this element */
-        if (vis_pair(pat_next) && vcar(pat_next) == SR_ELLIPSIS) {
+        if (vis_pair(pat_next) && vcar(pat_next) == ellipsis) {
             val_t after_ellipsis = vcdr(pat_next);
 
             /* Count required elements after the ellipsis */
@@ -108,7 +137,7 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
             if (n_ell < 0) return false;
 
             /* Discover pattern variables in pat_elem */
-            val_t pvlist = sr_pvars(pat_elem, literals);
+            val_t pvlist = sr_pvars(pat_elem, literals, ellipsis);
             int npv = scm_list_length(pvlist);
 
             /* Allocate accumulator arrays (in-order, built by prepend then reverse) */
@@ -123,7 +152,7 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
             /* Match each of the n_ell elements against pat_elem */
             for (int i = 0; i < n_ell; i++) {
                 val_t sb = V_NIL, se = V_NIL;
-                if (!sr_match_one(pat_elem, vcar(form_rest), literals, &sb, &se))
+                if (!sr_match_one(pat_elem, vcar(form_rest), literals, ellipsis, &sb, &se))
                     return false;
                 /* Prepend each matched value to its accumulator */
                 for (int j = 0; j < npv; j++) {
@@ -146,7 +175,7 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
 
         /* Non-ellipsis element: form must have a matching element */
         if (!vis_pair(form_rest)) return false;
-        if (!sr_match_one(pat_elem, vcar(form_rest), literals, bindings, ell_bindings))
+        if (!sr_match_one(pat_elem, vcar(form_rest), literals, ellipsis, bindings, ell_bindings))
             return false;
 
         pat_rest  = vcdr(pat_rest);
@@ -155,7 +184,7 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
 
     /* Dotted pattern tail: match remaining form against the tail symbol */
     if (vis_symbol(pat_rest))
-        return sr_match_one(pat_rest, form_rest, literals, bindings, ell_bindings);
+        return sr_match_one(pat_rest, form_rest, literals, ellipsis, bindings, ell_bindings);
 
     /* Both must be exhausted */
     return vis_nil(pat_rest) && vis_nil(form_rest);
@@ -165,6 +194,7 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
 
 /* Return the subset of ell_bindings whose names appear in tmpl. */
 static val_t sr_ell_refs(val_t tmpl, val_t ell_bindings) {
+    if (vis_vector(tmpl)) tmpl = sr_vector_to_list(tmpl);
     if (vis_symbol(tmpl)) {
         for (val_t e = ell_bindings; vis_pair(e); e = vcdr(e))
             if (vcar(vcar(e)) == tmpl) return scm_cons(vcar(e), V_NIL);
@@ -185,27 +215,39 @@ static val_t sr_ell_refs(val_t tmpl, val_t ell_bindings) {
     return result;
 }
 
-/* Expand a template given non-ellipsis bindings and ellipsis bindings. */
-static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings) {
-    if (vis_symbol(tmpl)) {
-        /* Look up in simple bindings first */
-        for (val_t b = bindings; vis_pair(b); b = vcdr(b))
-            if (vcar(vcar(b)) == tmpl) return vcdr(vcar(b));
-        /* Introduced identifier — emit as-is (unhygienic) */
-        return tmpl;
-    }
+/* Forward declaration */
+static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings,
+                       val_t ellipsis, bool literal_mode);
 
-    if (!vis_pair(tmpl)) return tmpl; /* self-evaluating datum */
-
-    /* Template is a list — process element by element */
+/* Expand a template list (car/cdr chain, not yet unwrapped from any vector)
+ * element by element, honoring ellipsis repetition unless literal_mode. */
+static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
+                            val_t ellipsis, bool literal_mode) {
     val_t result = V_NIL;
     val_t t = tmpl;
     while (vis_pair(t)) {
         val_t elem = vcar(t);
         val_t rest = vcdr(t);
 
+        /* (ellipsis template) escape: expand template with repetition
+         * disabled throughout its subtree, so a macro can emit a literal
+         * "..." (or generate another ellipsis-using macro) instead of
+         * triggering repetition. Per R7RS 4.3.2. Only recognized when not
+         * already inside an escape — nested (ellipsis (ellipsis t)) does
+         * not re-enable repetition; that double-escape corner case is not
+         * supported. */
+        if (!literal_mode && vis_pair(elem) && vcar(elem) == ellipsis &&
+            vis_pair(vcdr(elem)) && vis_nil(vcddr(elem))) {
+            result = scm_append(result,
+                         scm_cons(sr_expand(vcadr(elem), bindings, ell_bindings,
+                                             ellipsis, true),
+                                  V_NIL));
+            t = rest;
+            continue;
+        }
+
         /* Ellipsis following this element? */
-        if (vis_pair(rest) && vcar(rest) == SR_ELLIPSIS) {
+        if (!literal_mode && vis_pair(rest) && vcar(rest) == ellipsis) {
             /* Find ellipsis-bound vars referenced by elem */
             val_t refs = sr_ell_refs(elem, ell_bindings);
             if (vis_pair(refs)) {
@@ -219,7 +261,8 @@ static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings) {
                         iter_bindings = scm_cons(scm_cons(name, val), iter_bindings);
                     }
                     result = scm_append(result,
-                                 scm_cons(sr_expand(elem, iter_bindings, ell_bindings),
+                                 scm_cons(sr_expand(elem, iter_bindings, ell_bindings,
+                                                     ellipsis, literal_mode),
                                           V_NIL));
                 }
             }
@@ -229,15 +272,41 @@ static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings) {
         }
 
         result = scm_append(result,
-                     scm_cons(sr_expand(elem, bindings, ell_bindings), V_NIL));
+                     scm_cons(sr_expand(elem, bindings, ell_bindings, ellipsis, literal_mode),
+                              V_NIL));
         t = rest;
     }
 
     /* Dotted template tail */
     if (!vis_nil(t))
-        result = scm_append(result, sr_expand(t, bindings, ell_bindings));
+        result = scm_append(result, sr_expand(t, bindings, ell_bindings, ellipsis, literal_mode));
 
     return result;
+}
+
+/* Expand a template given non-ellipsis bindings and ellipsis bindings.
+ * literal_mode, once entered via an (ellipsis template) escape, suppresses
+ * ellipsis-triggered repetition for the whole subtree — "..." tokens and
+ * elem-followed-by-"..." pairs are then just ordinary data — while pattern
+ * variable substitution still happens normally throughout. */
+static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings,
+                       val_t ellipsis, bool literal_mode) {
+    if (vis_symbol(tmpl)) {
+        /* Look up in simple bindings first */
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+            if (vcar(vcar(b)) == tmpl) return vcdr(vcar(b));
+        /* Introduced identifier — emit as-is (unhygienic) */
+        return tmpl;
+    }
+
+    if (vis_vector(tmpl))
+        return sr_list_to_vector(
+            sr_expand_list(sr_vector_to_list(tmpl), bindings, ell_bindings,
+                           ellipsis, literal_mode));
+
+    if (!vis_pair(tmpl)) return tmpl; /* self-evaluating datum */
+
+    return sr_expand_list(tmpl, bindings, ell_bindings, ellipsis, literal_mode);
 }
 
 /* ---- Transformer function (called when the macro is used) ---- */
@@ -257,8 +326,9 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
         val_t form_rest = vcdr(form);
 
         val_t bindings = V_NIL, ell_bindings = V_NIL;
-        if (sr_match_list(pat_rest, form_rest, sr->literals, &bindings, &ell_bindings))
-            return sr_expand(tmpl, bindings, ell_bindings);
+        if (sr_match_list(pat_rest, form_rest, sr->literals, sr->ellipsis,
+                           &bindings, &ell_bindings))
+            return sr_expand(tmpl, bindings, ell_bindings, sr->ellipsis, false);
     }
 
     val_t kw = vis_pair(form) ? vcar(form) : V_FALSE;
@@ -270,13 +340,27 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
 /* ---- Compile function (registered as the T_SYNTAX transformer) ---- */
 
 /* Called by eval when it sees (syntax-rules ...) in a T_SYNTAX position.
- * av[0] = the whole unevaluated (syntax-rules literals rule...) form.
- * Returns a T_PRIMITIVE that acts as the macro transformer. */
+ * av[0] = the whole unevaluated
+ *   (syntax-rules literals rule...)
+ * or, with a custom ellipsis identifier (R7RS 4.3.2):
+ *   (syntax-rules ellipsis literals rule...)
+ * form. Returns a T_PRIMITIVE that acts as the macro transformer. */
 static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    val_t form     = av[0];
-    val_t literals = vcadr(form);
-    val_t rules_kv = vcddr(form);
+    val_t form = av[0];
+    val_t second = vcadr(form);
+
+    val_t ellipsis, literals, rules_kv;
+    if (vis_symbol(second)) {
+        /* (syntax-rules ellipsis (literal ...) rule ...) */
+        ellipsis = second;
+        literals = vcaddr(form);
+        rules_kv = vcdr(vcddr(form));
+    } else {
+        ellipsis = SR_DEFAULT_ELLIPSIS;
+        literals = second;
+        rules_kv = vcddr(form);
+    }
 
     /* Compile rules into (pattern . template) pairs */
     val_t compiled = V_NIL;
@@ -291,6 +375,7 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     SyntaxRulesData *sr = gc_alloc_raw_pinned(sizeof(SyntaxRulesData));
     sr->literals = literals;
     sr->rules    = compiled;
+    sr->ellipsis = ellipsis;
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
@@ -304,8 +389,8 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
 /* ---- Registration ---- */
 
 void syntax_rules_register(val_t env) {
-    SR_ELLIPSIS   = sym_intern_cstr("...");
-    SR_UNDERSCORE = sym_intern_cstr("_");
+    SR_DEFAULT_ELLIPSIS = sym_intern_cstr("...");
+    SR_UNDERSCORE        = sym_intern_cstr("_");
 
     /* syntax-rules is itself a T_SYNTAX: eval passes the unevaluated form to
      * sr_compile_fn, which returns a T_PRIMITIVE transformer.  That primitive

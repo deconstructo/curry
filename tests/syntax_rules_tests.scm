@@ -141,6 +141,96 @@
 
 ;;; ;;HYGIENE: (if #f (begin ... ))
 
+;;; ---- SRFI 149: template extensions ----
+
+;;; (... template) escapes ellipsis-as-operator so a macro can generate
+;;; code that itself uses "...", e.g. a macro that expands into another
+;;; define-syntax whose own patterns/templates need a real ellipsis.
+(define-syntax gen-list-macro
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules ()
+         ((_ a (... ...)) (list a (... ...))))))))
+
+(gen-list-macro generated-list)
+(check "ellipsis escape: generated macro works" (generated-list 1 2 3) '(1 2 3))
+
+;;; Escaping without any pattern variables inside — pure literal passthrough.
+(define-syntax literal-dots
+  (syntax-rules ()
+    ((_) '(... (a b c)))))
+
+(check "ellipsis escape: literal passthrough" (literal-dots) '(a b c))
+
+;;; Pattern variables still substitute normally inside an escaped template.
+(define-syntax echo-then-dots
+  (syntax-rules ()
+    ((_ x) (list x '(... (p ...))))))
+
+(check "ellipsis escape: pvar substitution still applies" (echo-then-dots 'hi)
+       '(hi (p ...)))
+
+;;; ---- SRFI 149: custom ellipsis identifier ----
+
+;;; (syntax-rules ellipsis (literals ...) rule ...) — a non-"..." token
+;;; used as the repetition operator instead.
+(define-syntax my-list-custom-ell
+  (syntax-rules ::: ()
+    ((_ a :::) (list a :::))))
+
+(check "custom ellipsis: basic repetition" (my-list-custom-ell 1 2 3) '(1 2 3))
+(check "custom ellipsis: zero repetitions" (my-list-custom-ell) '())
+
+;;; With a custom ellipsis identifier, "..." itself is no longer special
+;;; and can appear as ordinary literal data without escaping.
+(define-syntax dots-as-data
+  (syntax-rules ::: ()
+    ((_ x) (list x '...))))
+
+(check "custom ellipsis: literal ... as data" (dots-as-data 5) '(5 ...))
+
+;;; Nested/recursive macro using a custom ellipsis, mirroring my-or above.
+(define-syntax my-or-custom-ell
+  (syntax-rules @@ ()
+    ((_) #f)
+    ((_ e) e)
+    ((_ e1 e2 @@)
+     (let ((t e1))
+       (if t t (my-or-custom-ell e2 @@))))))
+
+(check "custom ellipsis: recursive macro" (my-or-custom-ell #f 7 #f) 7)
+
+;;; ---- SRFI 149: vector patterns and templates ----
+
+(define-syntax vec-swap
+  (syntax-rules ()
+    ((_ #(a b)) #(b a))))
+
+(check "vector pattern/template: fixed arity" (vec-swap #(1 2)) #(2 1))
+
+(define-syntax vec-collect
+  (syntax-rules ()
+    ((_ a ...) #(a ...))))
+
+(check "vector template: ellipsis"       (vec-collect)        #())
+(check "vector template: ellipsis one"   (vec-collect 1)      #(1))
+(check "vector template: ellipsis many"  (vec-collect 1 2 3)  #(1 2 3))
+
+(define-syntax vec-pat-ellipsis
+  (syntax-rules ()
+    ((_ #(a ...)) (list a ...))))
+
+(check "vector pattern: ellipsis" (vec-pat-ellipsis #(1 2 3)) '(1 2 3))
+
+;;; Mixed: a vector pattern containing a fixed head and an ellipsis tail.
+(define-syntax vec-head-tail
+  (syntax-rules ()
+    ((_ #(first rest ...)) (list first (list rest ...)))))
+
+(check "vector pattern: head + ellipsis tail"
+       (vec-head-tail #(1 2 3 4)) '(1 (2 3 4)))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
