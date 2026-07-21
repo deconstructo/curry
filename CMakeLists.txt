@@ -296,6 +296,7 @@ option(BUILD_MODULE_PLPLOT    "Build PLplot scientific plotting module" ON)
 option(BUILD_MODULE_REGEX     "Build POSIX regex module"            ON)
 option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 option(BUILD_MODULE_MCP       "Build MCP server module"              ON)
+option(BUILD_MODULE_LSP       "Build Language Server Protocol module" ON)
 option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
@@ -603,6 +604,11 @@ if(BUILD_MODULE_MCP)
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mods/curry")
   install(TARGETS curry_mcp DESTINATION lib/curry/modules/curry)
   message(STATUS "Building MCP server module (OAuth2, OpenSSL ${OPENSSL_VERSION})")
+endif()
+
+if(BUILD_MODULE_LSP)
+  curry_c_module(lsp)
+  message(STATUS "Building Language Server Protocol module")
 endif()
 
 if(BUILD_MODULE_PROFILING)
