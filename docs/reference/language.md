@@ -246,6 +246,79 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 `(a ,b ,@c)     ; quasiquote / unquote / unquote-splicing
 ```
 
+### Macros — `define-syntax` / `syntax-rules`
+
+```scheme
+(define-syntax name
+  (syntax-rules (literal...)
+    (pattern template) ...))
+
+(let-syntax    ((name transformer) ...) body...)
+(letrec-syntax ((name transformer) ...) body...)
+```
+
+`syntax-rules` is pattern-matching, not procedural — no `syntax-case`,
+no arbitrary transformer procedures. **Unhygienic by design**:
+identifiers introduced by a template are emitted as-is and resolved at
+the macro's use-site, not its definition-site, so a template variable
+can be captured by (or capture) a use-site binding of the same name —
+the classic footgun a hygienic expander would prevent. Write macros
+defensively (e.g. avoid common names like `tmp` for template-internal
+bindings) until curry has a hygienic expander.
+
+```scheme
+(define-syntax my-or
+  (syntax-rules ()
+    ((_) #f)
+    ((_ e) e)
+    ((_ e1 e2 ...)
+     (let ((t e1)) (if t t (my-or e2 ...))))))
+```
+
+**Ellipsis escape** — `(... template)` copies `template` verbatim,
+treating `...` within it as ordinary data rather than the repetition
+operator, so a macro can generate code that itself uses `...` (e.g. a
+macro that expands into another `define-syntax`):
+
+```scheme
+(define-syntax gen-list-macro
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules () ((_ a (... ...)) (list a (... ...))))))))
+```
+
+Nested escapes (`(... (... template))`) are not supported — a single
+level of escaping covers the practical cases.
+
+**Custom ellipsis identifier** — `(syntax-rules ellipsis (literal...) rule...)`
+uses `ellipsis` as the repetition operator instead of `...`, which
+frees `...` itself to appear as ordinary literal data without needing
+the escape form above:
+
+```scheme
+(define-syntax my-list
+  (syntax-rules ::: ()
+    ((_ a :::) (list a :::))))
+
+(define-syntax dots-as-data
+  (syntax-rules ::: ()
+    ((_ x) (list x '...))))          ; "..." is just data here
+```
+
+**Vector patterns and templates** match/generate vectors the same way
+list patterns do, including ellipsis sub-patterns:
+
+```scheme
+(define-syntax vec-swap
+  (syntax-rules ()
+    ((_ #(a b)) #(b a))))
+
+(define-syntax vec-collect
+  (syntax-rules ()
+    ((_ a ...) #(a ...))))
+```
+
 ### Tail calls
 
 All tail positions are optimised — proper tail recursion is guaranteed. Named `let` is idiomatic for loops:
