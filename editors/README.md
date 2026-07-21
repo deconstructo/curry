@@ -65,3 +65,9 @@ Then reload VS Code. The extension claims `.scm`/`.sld`; if you also work
 with other Schemes, use `"files.associations"` per-workspace instead.
 
 To build a distributable `.vsix`: `cd editors/vscode && npx vsce package`.
+
+## Beyond syntax highlighting
+
+For diagnostics and hover (not just coloring), curry also ships an LSP
+server — `(curry lsp)`, any LSP-capable editor can use it. See
+[`docs/reference/module-lsp.md`](../docs/reference/module-lsp.md).
