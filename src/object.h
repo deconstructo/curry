@@ -493,7 +493,11 @@ typedef struct {
     Hdr              hdr;
     val_t            name;      /* symbol or list */
     struct EnvFrame *env;
-    val_t            exports;   /* list of symbols */
+    val_t            exports;   /* list of exported symbol names */
+    bool             has_exports; /* true if an explicit (export ...) clause was
+                                    * seen — false means "no export list", which
+                                    * exports every binding (C modules, plain
+                                    * .scm files loaded without define-library) */
     void            *dl_handle; /* dlopen handle for C modules, NULL otherwise */
 } Module;
 

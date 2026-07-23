@@ -112,6 +112,24 @@ void curry_define_val(CurryVM *vm, const char *name, val_t value) {
     env_define(vm->env, sym_intern_cstr(name), value);
 }
 
+/* ---- Module allocation ---- */
+
+/* has_exports = false means "no export list" — every binding in mod_env is
+ * importable (C modules, plain .scm files loaded without define-library, and
+ * always-on builtin module aliases). has_exports = true means only the
+ * symbols in `exports` are importable. */
+static Module *make_module(val_t name, val_t mod_env, val_t exports,
+                            bool has_exports, void *dl_handle) {
+    Module *mod = CURRY_NEW_PINNED(Module);
+    mod->hdr.type    = T_MODULE; mod->hdr.flags = 0;
+    mod->name        = name;
+    mod->env         = as_env(mod_env);
+    mod->exports     = exports;
+    mod->has_exports = has_exports;
+    mod->dl_handle   = dl_handle;
+    return mod;
+}
+
 /* ---- Load a C extension .so ---- */
 
 static Module *load_c_module(val_t name, const char *so_path) {
@@ -136,13 +154,7 @@ static Module *load_c_module(val_t name, const char *so_path) {
     CurryVM *vm = curry_vm_new(mod_env);
     init_fn(vm);
 
-    Module *mod = CURRY_NEW_PINNED(Module);
-    mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
-    mod->name      = name;
-    mod->env       = as_env(mod_env);
-    mod->exports   = V_NIL;  /* export everything for now */
-    mod->dl_handle = handle;
-    return mod;
+    return make_module(name, mod_env, V_NIL, false, handle);
 }
 
 /* ---- Load a Scheme .sld / .scm library file ---- */
@@ -160,13 +172,7 @@ static Module *load_scheme_module(val_t name, const char *path) {
     port_close(port);
     (void)result;
 
-    Module *mod = CURRY_NEW_PINNED(Module);
-    mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
-    mod->name      = name;
-    mod->env       = as_env(mod_env);
-    mod->exports   = V_NIL;
-    mod->dl_handle = NULL;
-    return mod;
+    return make_module(name, mod_env, V_NIL, false, NULL);
 }
 
 /* Strip R6RS (for lib phase ...) wrapper from an import spec. */
@@ -328,6 +334,59 @@ val_t modules_load(val_t name_list) {
     scm_raise(V_FALSE, "module not found: %s", path_base);
 }
 
+/* Apply an importer's filter (only/except/rename/prefix) to one binding and,
+ * if it survives, define it in the importing env. orig_sym is the module's
+ * own name for the binding (used for the Akkadian/cuneiform alias lookup
+ * below, which keys off canonical names, not import-side renames/prefixes). */
+static void import_binding(val_t orig_sym, val_t val, val_t spec, val_t filter, val_t env) {
+    val_t sym = orig_sym;
+
+    if (filter == S_ONLY) {
+        /* (only name sym...) */
+        val_t syms = vcddr(spec);
+        bool found = false;
+        while (vis_pair(syms)) { if (vcar(syms) == sym) { found = true; break; } syms = vcdr(syms); }
+        if (!found) return;
+    } else if (filter == S_EXCEPT) {
+        /* (except name sym...) */
+        val_t syms = vcddr(spec);
+        bool found = false;
+        while (vis_pair(syms)) { if (vcar(syms) == sym) { found = true; break; } syms = vcdr(syms); }
+        if (found) return;
+    } else if (filter == S_RENAME) {
+        /* (rename name (old new)...) - translate sym */
+        val_t renames = vcddr(spec);
+        while (vis_pair(renames)) {
+            val_t pair = vcar(renames);
+            if (vcar(pair) == sym) { sym = vcadr(pair); break; }
+            renames = vcdr(renames);
+        }
+    } else if (filter == S_PREFIX) {
+        /* (prefix name pfx) */
+        val_t pfx = vcaddr(spec);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s%s", sym_cstr(pfx), sym_cstr(sym));
+        sym = sym_intern_cstr(buf);
+    }
+    env_define(env, sym, val);
+
+    /* Akkadian/cuneiform aliases: builtins.c's own startup loop only
+     * ever sees names already bound in the global env at that point
+     * (see the comment on that loop) — it never sees names that live
+     * only inside a module's own environment until something
+     * imports them, which is now. Alias under the module's ORIGINAL
+     * export name (orig_sym), not whatever a rename/prefix filter
+     * turned the local binding into — the synonym is a property of
+     * what the module exports, not of the importer's local nickname
+     * for it. only/except still apply, since we've already
+     * returned past excluded names above. */
+    val_t translit, cuneiform;
+    if (akk_pr_lookup(orig_sym, &translit, &cuneiform)) {
+        env_define(env, translit, val);
+        env_define(env, cuneiform, val);
+    }
+}
+
 /* Import a single spec into env.
  * Specs: (name) | (only name sym...) | (except name sym...) |
  *        (rename name (old new)...) | (prefix name pfx) */
@@ -348,75 +407,44 @@ val_t modules_import(val_t spec, val_t env) {
         scm_raise(V_FALSE, "import: module load failed");
 
     Module *mod = as_module(mod_val);
-    val_t mod_env_val = vptr(mod->env);
 
-    /* Determine which names to import */
-    EnvFrame *f = mod->env;
-    while (f) {
-        for (uint32_t i = 0; i < f->size; i++) {
-            val_t orig_sym = f->syms[i];   /* the module's own export name */
-            val_t sym = orig_sym;
-            val_t val = f->vals[i];
-
-            if (filter == S_ONLY) {
-                /* (only name sym...) */
-                val_t syms = vcddr(spec);
-                bool found = false;
-                while (vis_pair(syms)) { if (vcar(syms) == sym) { found = true; break; } syms = vcdr(syms); }
-                if (!found) continue;
-            } else if (filter == S_EXCEPT) {
-                /* (except name sym...) */
-                val_t syms = vcddr(spec);
-                bool found = false;
-                while (vis_pair(syms)) { if (vcar(syms) == sym) { found = true; break; } syms = vcdr(syms); }
-                if (found) continue;
-            } else if (filter == S_RENAME) {
-                /* (rename name (old new)...) - translate sym */
-                val_t renames = vcddr(spec);
-                while (vis_pair(renames)) {
-                    val_t pair = vcar(renames);
-                    if (vcar(pair) == sym) { sym = vcadr(pair); break; }
-                    renames = vcdr(renames);
-                }
-            } else if (filter == S_PREFIX) {
-                /* (prefix name pfx) */
-                val_t pfx = vcaddr(spec);
-                char buf[256];
-                snprintf(buf, sizeof(buf), "%s%s", sym_cstr(pfx), sym_cstr(sym));
-                sym = sym_intern_cstr(buf);
-            }
-            env_define(env, sym, val);
-
-            /* Akkadian/cuneiform aliases: builtins.c's own startup loop only
-             * ever sees names already bound in the global env at that point
-             * (see the comment on that loop) — it never sees names that live
-             * only inside a module's own environment until something
-             * imports them, which is now. Alias under the module's ORIGINAL
-             * export name (orig_sym), not whatever a rename/prefix filter
-             * turned the local binding into — the synonym is a property of
-             * what the module exports, not of the importer's local nickname
-             * for it. only/except still apply, since we've already
-             * `continue`d past excluded names above. */
-            val_t translit, cuneiform;
-            if (akk_pr_lookup(orig_sym, &translit, &cuneiform)) {
-                env_define(env, translit, val);
-                env_define(env, cuneiform, val);
-            }
+    if (mod->has_exports) {
+        /* Explicit (export ...) clause: the export list is normally far
+         * smaller than the module's full set of internal bindings, so look
+         * each exported name up directly instead of scanning every binding
+         * the module happens to define. */
+        val_t mod_env_val = vptr(mod->env);
+        for (val_t es = mod->exports; vis_pair(es); es = vcdr(es)) {
+            val_t sym = vcar(es);
+            val_t *slot = env_lookup_slot(mod_env_val, sym);
+            if (!slot) continue; /* declared exported but never defined */
+            import_binding(sym, *slot, spec, filter, env);
         }
-        f = f->parent;
+    } else {
+        /* No export list: every binding in the module's own environment is
+         * importable (C modules, plain .scm files loaded without
+         * define-library, and always-on builtin module aliases). */
+        EnvFrame *f = mod->env;
+        while (f) {
+            for (uint32_t i = 0; i < f->size; i++)
+                import_binding(f->syms[i], f->vals[i], spec, filter, env);
+            f = f->parent;
+        }
     }
-    (void)mod_env_val;
     return mod_val;
 }
 
 void modules_register_builtin(val_t name_list, val_t mod_env) {
-    Module *mod = CURRY_NEW_PINNED(Module);
-    mod->hdr.type  = T_MODULE; mod->hdr.flags = 0;
-    mod->name      = name_list;
-    mod->env       = as_env(mod_env);
-    mod->exports   = V_NIL;
-    mod->dl_handle = NULL;
-    registry_insert(name_list, mod);
+    registry_insert(name_list, make_module(name_list, mod_env, V_NIL, false, NULL));
+}
+
+/* Register a library whose export list has already been determined by an
+ * (export ...) clause in define-library / library. exports is a list of
+ * exported symbol names (the library's own binding names — R7RS/R6RS export
+ * renaming is not supported). */
+static void register_library(val_t name_list, val_t mod_env, val_t exports,
+                              bool has_exports) {
+    registry_insert(name_list, make_module(name_list, mod_env, exports, has_exports, NULL));
 }
 
 /* (define-library (name) clause...) — R7RS */
@@ -425,15 +453,16 @@ val_t modules_define_library(val_t form, val_t env) {
     val_t name    = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
+    bool  has_exports = false;
 
     while (vis_pair(rest)) {
         val_t clause = vcar(rest); rest = vcdr(rest);
         val_t clause_type = vcar(clause);
 
         if (clause_type == S_EXPORT) {
+            has_exports = true;
             val_t es = vcdr(clause);
             while (vis_pair(es)) { exports = scm_cons(vcar(es), exports); es = vcdr(es); }
-            (void)exports;
         } else if (clause_type == S_IMPORT) {
             /* (import spec ...) — one or more import specs */
             val_t specs = vcdr(clause);
@@ -453,7 +482,7 @@ val_t modules_define_library(val_t form, val_t env) {
         }
     }
     (void)env;
-    modules_register_builtin(name, lib_env);
+    register_library(name, lib_env, exports, has_exports);
     return V_VOID;
 }
 
@@ -471,6 +500,7 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
     val_t name    = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
+    bool  has_exports = false;
 
     while (vis_pair(rest)) {
         val_t clause = vcar(rest); rest = vcdr(rest);
@@ -481,9 +511,9 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
         val_t clause_type = vcar(clause);
 
         if (clause_type == S_EXPORT) {
+            has_exports = true;
             val_t es = vcdr(clause);
             while (vis_pair(es)) { exports = scm_cons(vcar(es), exports); es = vcdr(es); }
-            (void)exports;
         } else if (clause_type == S_IMPORT) {
             /* R6RS: (import import-spec ...) — multiple specs per clause */
             val_t specs = vcdr(clause);
@@ -497,6 +527,6 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
         }
     }
     (void)env;
-    modules_register_builtin(name, lib_env);
+    register_library(name, lib_env, exports, has_exports);
     return V_VOID;
 }

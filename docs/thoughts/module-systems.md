@@ -15,12 +15,14 @@ registered in `builtins_register`. No re-export. No composition.
 
 **Scheme modules**: a `.sld` or `.scm` file found on `CURRY_MODULE_PATH`. `import` is
 handled as a special form in `eval.c`, which calls `modules_import`. Files are loaded
-once (single instantiation). No explicit export declaration — whatever the file defines
-at top level is exported. No re-export, no filtering, no aliasing.
+once (single instantiation). A plain `.sld`/`.scm` file with no `define-library`/`library`
+wrapper has no explicit export declaration — whatever it defines at top level is exported.
+`define-library` and `library` forms do have an enforced `(export ...)` clause: only the
+listed names are importable, everything else stays private to the library body. No
+re-export, no aliasing beyond the standard `only`/`except`/`rename`/`prefix` import filters.
 
 What's missing that will matter as the system grows:
 
-- No way to say "export these names but not those"
 - No way to compose two modules or parameterize one by another
 - No way to have multiple instances of the same module with different configuration
 - No phase separation — macros and values live in the same namespace
