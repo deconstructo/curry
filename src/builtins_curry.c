@@ -163,6 +163,29 @@ static val_t prim_drop_assumption(int ac, val_t *av, void *ud) {
     if (flag) as_symvar(av[0])->hdr.flags &= ~flag;
     return V_VOID;
 }
+/* ---- with-assumptions support (native compiler codegen, compiler.c) ----
+ * The three primitives below back compile_with_assumptions's dynamic-wind
+ * desugaring: capture current flags, OR in the new ones, overwrite back to
+ * the captured value on the way out. All three silently no-op on a
+ * non-SymVar argument, matching the tree-walker's S_WITH_ASSUMPTIONS case
+ * (eval.c) which skips non-SymVar clause targets rather than erroring. */
+static val_t prim_assumption_flags(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return vfix(0);
+    return vfix((intptr_t)as_symvar(av[0])->hdr.flags);
+}
+static val_t prim_assumption_set(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    as_symvar(av[0])->hdr.flags |= (uint32_t)vunfix(av[1]);
+    return V_VOID;
+}
+static val_t prim_assumption_restore(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    if (!vis_symvar(av[0])) return V_VOID;
+    as_symvar(av[0])->hdr.flags = (uint32_t)vunfix(av[1]);
+    return V_VOID;
+}
 static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
@@ -1534,6 +1557,11 @@ void builtins_curry_register(val_t env) {
     DEF("assume!",          prim_assume,          2, 2);
     DEF("can-assume?",      prim_can_assume,       2, 2);
     DEF("drop-assumption!", prim_drop_assumption,  2, 2);
+
+    /* with-assumptions support — see compile_with_assumptions (compiler.c) */
+    DEF("%assumption-flags",   prim_assumption_flags,   1, 1);
+    DEF("%assumption-set!",    prim_assumption_set,     2, 2);
+    DEF("%assumption-restore!",prim_assumption_restore, 2, 2);
 
     /* Low-level SymExpr constructor and accessors */
     DEF("sym-expr",       prim_sym_expr,       1, -1);

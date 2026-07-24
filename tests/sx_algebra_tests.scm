@@ -71,6 +71,41 @@
 (set! restored? (not (can-assume? x 'positive)))
 (assert-equal "with-assumptions restores flags on exception" restored? #t)
 
+;;; with-assumptions inside a lambda body (local/lexical scope, tail
+;;; position) — regression coverage for compile_with_assumptions
+;;; (native codegen, compiler.c), which desugars to a let/dynamic-wind
+;;; nest rather than the tree-walker's eval-based S_WITH_ASSUMPTIONS.
+(define (sqrt-abs v)
+  (with-assumptions ((v positive))
+    (simplify (sqrt (expt v 2)))))
+(assert-equal "with-assumptions in tail position of a lambda body"
+  (sqrt-abs x) x)
+(assert-equal "assumption removed after returning from lambda body"
+  (can-assume? x 'positive) #f)
+
+;;; Multiple clauses in one with-assumptions, each independently
+;;; restored — regression coverage for the multi-clause let/dynamic-wind
+;;; nest generated per with-assumptions form.
+(with-assumptions ((x positive) (y negative))
+  (assert-equal "multi-clause: x positive" (can-assume? x 'positive) #t)
+  (assert-equal "multi-clause: y negative" (can-assume? y 'negative) #t))
+(assert-equal "multi-clause: x restored" (can-assume? x 'positive) #f)
+(assert-equal "multi-clause: y restored" (can-assume? y 'negative) #f)
+
+;;; Same SymVar repeated across clauses in one with-assumptions form.
+;;; The tree-walker (eval.c) interleaves per-clause snapshot-then-set, so
+;;; a repeated var's later-clause snapshot already includes the earlier
+;;; clause's flags, leaving a residual flag set after exit. The compiled
+;;; form (compile_with_assumptions) snapshots ALL clauses' original flags
+;;; upfront, so a repeated var is restored to its true original state —
+;;; a deliberate, documented improvement. Locked in here so it doesn't
+;;; silently regress either way.
+(with-assumptions ((x positive) (x integer))
+  (assert-equal "duplicate clause: both flags active inside"
+    (list (can-assume? x 'positive) (can-assume? x 'integer)) '(#t #t)))
+(assert-equal "duplicate clause: fully restored after exit"
+  (list (can-assume? x 'positive) (can-assume? x 'integer)) '(#f #f))
+
 ;;; ============================================================
 ;;; 3. define-algebra — user-defined operators
 ;;; ============================================================

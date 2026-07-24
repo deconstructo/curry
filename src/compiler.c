@@ -65,6 +65,7 @@
 #include "reader.h"
 #include "record_type.h"
 #include "syntax_rules.h"
+#include "sx_algebra.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -1493,6 +1494,126 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
     compile(c, outer_let, tail, line);
 }
 
+/* (with-assumptions ((var assumption...) ...) body...) — mirrors
+ * compile_parameterize immediately above almost exactly: same
+ * capture-old/set-new/dynamic-wind-restore shape, just swapping the
+ * parameter-procedure call for two tiny new primitives
+ * (%assumption-flags, %assumption-set!, %assumption-restore! — see
+ * builtins_curry.c) that read/OR-in/overwrite a SymVar's assumption
+ * bits directly, matching the tree-walker's S_WITH_ASSUMPTIONS case
+ * (eval.c) which this replaces for compiled code. Each clause's
+ * assumption keywords (bare symbols, never evaluated — matching the
+ * tree-walker) are resolved to a flag bitmask at COMPILE time via
+ * sx_assumption_flag and embedded as a self-evaluating fixnum
+ * constant, so there's no runtime keyword-lookup cost per entry.
+ *
+ * One deliberate behavioral divergence from the tree-walker, found by
+ * review: eval.c's S_WITH_ASSUMPTIONS interleaves each clause's
+ * snapshot-then-set, so if the SAME SymVar appears in two clauses of
+ * one with-assumptions form, the second clause's snapshot already
+ * includes the first clause's flags, and only the first clause's
+ * original value is restored — leaving a residual flag set after the
+ * form exits. Here all clauses' original flags are snapshotted
+ * upfront (the inner let, before any %assumption-set! runs), so a
+ * repeated var is restored to its TRUE original state. Strictly more
+ * correct; not expected to be relied upon either way, so not treated
+ * as a compatibility break — see tests/sx_algebra_tests.scm.
+ * Desugars to:
+ *   (let ((%%wa-v0 var-expr0) ...)
+ *     (let ((%%wa-o0 (%assumption-flags %%wa-v0)) ...)
+ *       (dynamic-wind
+ *         (lambda () (%assumption-set! %%wa-v0 FLAGS0) ...)
+ *         (lambda () body...)
+ *         (lambda () (%assumption-restore! %%wa-v0 %%wa-o0) ...)))) */
+static void compile_with_assumptions(Compiler *c, val_t args, bool tail, int line) {
+    if (!vis_pair(args)) {
+        fprintf(stderr, "compiler: with-assumptions: missing binding list\n");
+        emit(c, OP_VOID, line);
+        return;
+    }
+    val_t clauses = vcar(args);
+    val_t body    = vcdr(args);
+
+    int n = 0;
+    { val_t cl = clauses; while (vis_pair(cl)) { n++; cl = vcdr(cl); } }
+
+#define WA_MAX_CLAUSES 32
+    val_t vref[WA_MAX_CLAUSES], oref[WA_MAX_CLAUSES];
+    val_t var_expr[WA_MAX_CLAUSES], flags_const[WA_MAX_CLAUSES];
+    char namebuf[32];
+    if (n > WA_MAX_CLAUSES) n = WA_MAX_CLAUSES;
+
+    val_t cl = clauses;
+    for (int i = 0; i < n; i++, cl = vcdr(cl)) {
+        val_t clause = vcar(cl);
+        if (!vis_pair(clause)) { i--; n--; continue; }
+        var_expr[i] = vcar(clause);
+        uint32_t flags = 0;
+        for (val_t a = vcdr(clause); vis_pair(a); a = vcdr(a))
+            flags |= sx_assumption_flag(vcar(a));
+        flags_const[i] = vfix((intptr_t)flags);
+        snprintf(namebuf, sizeof(namebuf), "%%wa-v%d", i);
+        vref[i] = sym_intern_cstr(namebuf);
+        snprintf(namebuf, sizeof(namebuf), "%%wa-o%d", i);
+        oref[i] = sym_intern_cstr(namebuf);
+    }
+#undef WA_MAX_CLAUSES
+
+    if (n == 0) {
+        compile_seq(c, body, tail, line);
+        return;
+    }
+
+    val_t flags_sym   = sym_intern_cstr("%assumption-flags");
+    val_t set_sym     = sym_intern_cstr("%assumption-set!");
+    val_t restore_sym = sym_intern_cstr("%assumption-restore!");
+    val_t S_DW        = sym_intern_cstr("dynamic-wind");
+
+    /* Outer let bindings: ((%wa-v0 var-expr0) ...) */
+    val_t outer_bindings = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        outer_bindings = scm_cons(scm_cons(vref[i], scm_cons(var_expr[i], V_NIL)),
+                                  outer_bindings);
+
+    /* Inner let bindings: ((%wa-o0 (%assumption-flags %wa-v0)) ...) */
+    val_t inner_bindings = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        inner_bindings = scm_cons(
+            scm_cons(oref[i],
+             scm_cons(scm_cons(flags_sym, scm_cons(vref[i], V_NIL)), V_NIL)),
+            inner_bindings);
+
+    /* before-lambda body: ((%assumption-set! %wa-v0 FLAGS0) ...) */
+    val_t before_body = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        before_body = scm_cons(
+            scm_cons(set_sym, scm_cons(vref[i], scm_cons(flags_const[i], V_NIL))),
+            before_body);
+    val_t before_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, before_body));
+
+    /* after-lambda body: ((%assumption-restore! %wa-v0 %wa-o0) ...) */
+    val_t after_body = V_NIL;
+    for (int i = n - 1; i >= 0; i--)
+        after_body = scm_cons(
+            scm_cons(restore_sym, scm_cons(vref[i], scm_cons(oref[i], V_NIL))),
+            after_body);
+    val_t after_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, after_body));
+
+    /* thunk-lambda: (lambda () body...) */
+    if (body == V_NIL) body = scm_cons(V_VOID, V_NIL);
+    val_t thunk_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, body));
+
+    val_t dwind = scm_cons(S_DW,
+                   scm_cons(before_lam,
+                    scm_cons(thunk_lam,
+                     scm_cons(after_lam, V_NIL))));
+
+    val_t inner_let = scm_cons(S_LET, scm_cons(inner_bindings, scm_cons(dwind, V_NIL)));
+    val_t outer_let = scm_cons(S_LET, scm_cons(outer_bindings, scm_cons(inner_let, V_NIL)));
+
+    compile(c, outer_let, tail, line);
+}
+
 /* (receive formals producer-expr body...) — R7RS sugar over
  * call-with-values, which is already a plain builtin primitive (no VM
  * support needed).  Desugar to:
@@ -1704,6 +1825,11 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_WITH_ASSUMPTIONS) {
+        compile_with_assumptions(c, args, tail, line);
+        return;
+    }
+
     /* Note: syntax-rules itself is deliberately NOT special-cased here.
      * syntax_rules_register() binds the symbol `syntax-rules` to a T_SYNTAX
      * in GLOBAL_ENV whose transformer (sr_compile_fn) takes the raw
@@ -1719,7 +1845,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_IMPORT        ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
         head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
-        head == S_DEFINE_ALGEBRA || head == S_WITH_ASSUMPTIONS) {
+        head == S_DEFINE_ALGEBRA) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);

@@ -1,5 +1,31 @@
 # Changelog
 
+### Unreleased
+
+**Compiler — eval-elimination phase 3, continued**
+- `with-assumptions` now compiles to native bytecode instead of punting to
+  `(tree-eval '<form>)`, the last of the phase-3 special forms (`import`,
+  `define-library`, and `library` remain permanently tree-walked by design —
+  those bodies are load-time-only and never compiled).
+  `(with-assumptions ((var assumption...) ...) body...)` desugars to a
+  `let`/`dynamic-wind` nest mirroring the pre-existing `parameterize`
+  codegen (same capture-old/set-new/restore shape), backed by three new
+  primitives — `%assumption-flags`, `%assumption-set!`,
+  `%assumption-restore!` — that read/OR-in/overwrite a `SymVar`'s
+  assumption bits directly. Each clause's assumption keywords are resolved
+  to a flag bitmask at compile time, so there's no runtime keyword-lookup
+  cost.
+- One deliberate, documented behavioral improvement over the tree-walker
+  found during review: if the same `SymVar` appears in two clauses of one
+  `with-assumptions` form, the tree-walker's interleaved snapshot-then-set
+  left a residual flag set after the form exited; the native codegen
+  snapshots all clauses' original flags upfront, so a repeated variable is
+  restored to its true original state. Locked in by a regression test.
+- Regression coverage added to `tests/sx_algebra_tests.scm`: lambda-body/
+  tail-position usage (the class of internal-define leak bug the earlier
+  phase-3 migrations fixed), independent multi-clause restore, and the
+  duplicate-clause case above.
+
 ### 1.9.1 — Fix a 1.9.0 regression: segfault calling the actor-mailbox `receive` primitive
 
 **Compiler**
