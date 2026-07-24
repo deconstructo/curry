@@ -1,0 +1,222 @@
+#include "record_type.h"
+#include "object.h"
+#include "symbol.h"
+#include "gc.h"
+#include <string.h>
+#include <stdio.h>
+
+/* Cons without going through the Scheme-level allocator wrappers — same
+ * shape as runtime_internal.h's make_pair, duplicated here rather than
+ * shared across a third translation unit since it's a one-line helper. */
+static val_t rp_cons(val_t car, val_t cdr) {
+    Pair *p = CURRY_NEW(Pair);
+    p->hdr.type = T_PAIR; p->hdr.flags = 0;
+    p->car = car; p->cdr = cdr;
+    return vptr(p);
+}
+
+static int rp_list_length(val_t lst) {
+    int n = 0;
+    while (vis_pair(lst)) { n++; lst = vcdr(lst); }
+    return n;
+}
+
+/* (%record-ctor 'rtd field0 field1 ...) */
+static val_t rp_ctor_body(val_t rtd_val, val_t ctor_fields) {
+    return rp_cons(
+        rp_cons(sym_intern_cstr("%record-ctor"),
+            rp_cons(rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)),
+                    ctor_fields)),
+        V_NIL);
+}
+
+/* (%record-pred? 'rtd x) */
+static val_t rp_pred_body(val_t rtd_val, val_t x_sym) {
+    return rp_cons(
+        rp_cons(sym_intern_cstr("%record-pred?"),
+            rp_cons(rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)),
+                    rp_cons(x_sym, V_NIL))),
+        V_NIL);
+}
+
+/* (%record-ref x 'field-index) */
+static val_t rp_getter_body(val_t x_sym, val_t fi_val) {
+    return rp_cons(
+        rp_cons(sym_intern_cstr("%record-ref"),
+            rp_cons(x_sym,
+                rp_cons(rp_cons(S_QUOTE, rp_cons(fi_val, V_NIL)), V_NIL))),
+        V_NIL);
+}
+
+/* (%record-set! x 'field-index v) */
+static val_t rp_setter_body(val_t x_sym, val_t fi_val, val_t v_sym) {
+    return rp_cons(
+        rp_cons(sym_intern_cstr("%record-set!"),
+            rp_cons(x_sym,
+                rp_cons(rp_cons(S_QUOTE, rp_cons(fi_val, V_NIL)),
+                        rp_cons(v_sym, V_NIL)))),
+        V_NIL);
+}
+
+void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
+    val_t name_sym = vcar(rest);
+    bool is_r6rs = vis_pair(vcdr(rest)) &&
+                   vis_pair(vcadr(rest)) &&
+                   (vcar(vcadr(rest)) == S_FIELDS  ||
+                    vcar(vcadr(rest)) == sym_intern_cstr("parent") ||
+                    vcar(vcadr(rest)) == sym_intern_cstr("protocol") ||
+                    vcar(vcadr(rest)) == sym_intern_cstr("sealed") ||
+                    vcar(vcadr(rest)) == sym_intern_cstr("opaque") ||
+                    vcar(vcadr(rest)) == sym_intern_cstr("nongenerative"));
+
+    val_t x_sym = sym_intern_cstr("x");
+    val_t v_sym = sym_intern_cstr("v");
+
+    if (is_r6rs) {
+        /* R6RS define-record-type: auto-generate make-<name>, <name>?,
+         * <name>-<field>, and <name>-<field>-set! from the (fields ...)
+         * clause. */
+        const char *ns = sym_cstr(name_sym);
+        char buf[256];
+
+        val_t field_list = V_NIL;
+        val_t c = vcdr(rest);
+        while (vis_pair(c)) {
+            val_t cl = vcar(c);
+            if (vis_pair(cl) && vcar(cl) == S_FIELDS) { field_list = vcdr(cl); break; }
+            c = vcdr(c);
+        }
+
+        uint32_t nfields = (uint32_t)rp_list_length(field_list);
+        RecordType *rtd = (RecordType *)gc_alloc_pinned(
+            sizeof(RecordType) + nfields * sizeof(val_t));
+        rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
+        rtd->name = name_sym; rtd->nfields = nfields;
+
+        val_t fs = field_list; uint32_t fi = 0;
+        while (vis_pair(fs)) {
+            val_t fspec = vcar(fs);
+            val_t fname = vis_pair(fspec) ? vcadr(fspec) : fspec;
+            rtd->field_names[fi++] = fname;
+            fs = vcdr(fs);
+        }
+        val_t rtd_val = vptr(rtd);
+        spec->rtd_val = rtd_val;
+
+        /* Build ordered field-name param list for constructor */
+        val_t ctor_fields = V_NIL;
+        fs = field_list;
+        while (vis_pair(fs)) {
+            val_t fspec = vcar(fs);
+            val_t fname = vis_pair(fspec) ? vcadr(fspec) : fspec;
+            ctor_fields = rp_cons(fname, ctor_fields);
+            fs = vcdr(fs);
+        }
+        { val_t rev = V_NIL, p = ctor_fields;
+          while (vis_pair(p)) { rev = rp_cons(vcar(p), rev); p = vcdr(p); }
+          ctor_fields = rev; }
+
+        spec->bindings = (RecordBinding *)gc_alloc_raw_pinned(
+            (size_t)(2 + 2 * (int)nfields) * sizeof(RecordBinding));
+        int n = 0;
+
+        /* Constructor: make-<name> */
+        snprintf(buf, sizeof(buf), "make-%s", ns);
+        spec->bindings[n].name   = sym_intern_cstr(buf);
+        spec->bindings[n].params = ctor_fields;
+        spec->bindings[n].body   = rp_ctor_body(rtd_val, ctor_fields);
+        n++;
+
+        /* Predicate: <name>? */
+        snprintf(buf, sizeof(buf), "%s?", ns);
+        spec->bindings[n].name   = sym_intern_cstr(buf);
+        spec->bindings[n].params = rp_cons(x_sym, V_NIL);
+        spec->bindings[n].body   = rp_pred_body(rtd_val, x_sym);
+        n++;
+
+        /* Accessors and mutators */
+        fs = field_list; fi = 0;
+        while (vis_pair(fs)) {
+            val_t fspec      = vcar(fs);
+            val_t fname      = vis_pair(fspec) ? vcadr(fspec) : fspec;
+            bool  is_mutable = !vis_pair(fspec) || (vcar(fspec) == S_MUTABLE);
+            val_t fi_val     = vfix((intptr_t)fi);
+
+            snprintf(buf, sizeof(buf), "%s-%s", ns, sym_cstr(fname));
+            spec->bindings[n].name   = sym_intern_cstr(buf);
+            spec->bindings[n].params = rp_cons(x_sym, V_NIL);
+            spec->bindings[n].body   = rp_getter_body(x_sym, fi_val);
+            n++;
+
+            if (is_mutable) {
+                snprintf(buf, sizeof(buf), "%s-%s-set!", ns, sym_cstr(fname));
+                spec->bindings[n].name   = sym_intern_cstr(buf);
+                spec->bindings[n].params = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
+                spec->bindings[n].body   = rp_setter_body(x_sym, fi_val, v_sym);
+                n++;
+            }
+            fi++; fs = vcdr(fs);
+        }
+        spec->count = n;
+        return;
+    }
+
+    /* R7RS: (define-record-type name (ctor-name field...) pred
+     *        (field acc [mut])...) */
+    val_t ctor_form    = vcadr(rest);
+    val_t pred_sym     = vcaddr(rest);
+    val_t field_specs  = vcdr(vcddr(rest));
+
+    uint32_t nfields = (uint32_t)rp_list_length(field_specs);
+    RecordType *rtd = (RecordType *)gc_alloc_pinned(sizeof(RecordType) + nfields * sizeof(val_t));
+    rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
+    rtd->name = name_sym; rtd->nfields = nfields;
+    val_t fs = field_specs; uint32_t fi = 0;
+    while (vis_pair(fs)) { rtd->field_names[fi++] = vcar(vcar(fs)); fs = vcdr(fs); }
+
+    val_t rtd_val = vptr(rtd);
+    spec->rtd_val = rtd_val;
+
+    val_t ctor_name   = vcar(ctor_form);
+    val_t ctor_fields = vcdr(ctor_form);
+
+    spec->bindings = (RecordBinding *)gc_alloc_raw_pinned(
+        (size_t)(2 + 2 * (int)nfields) * sizeof(RecordBinding));
+    int n = 0;
+
+    /* Constructor */
+    spec->bindings[n].name   = ctor_name;
+    spec->bindings[n].params = ctor_fields;
+    spec->bindings[n].body   = rp_ctor_body(rtd_val, ctor_fields);
+    n++;
+
+    /* Predicate */
+    spec->bindings[n].name   = pred_sym;
+    spec->bindings[n].params = rp_cons(x_sym, V_NIL);
+    spec->bindings[n].body   = rp_pred_body(rtd_val, x_sym);
+    n++;
+
+    /* Field accessors and mutators */
+    fs = field_specs; fi = 0;
+    while (vis_pair(fs)) {
+        val_t fspec       = vcar(fs);
+        /* fspec = (field-name getter [setter]) */
+        val_t getter_name = vcadr(fspec);
+        val_t fi_val      = vfix((intptr_t)fi);
+
+        spec->bindings[n].name   = getter_name;
+        spec->bindings[n].params = rp_cons(x_sym, V_NIL);
+        spec->bindings[n].body   = rp_getter_body(x_sym, fi_val);
+        n++;
+
+        if (vis_pair(vcddr(fspec))) {
+            val_t setter_name = vcaddr(fspec);
+            spec->bindings[n].name   = setter_name;
+            spec->bindings[n].params = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
+            spec->bindings[n].body   = rp_setter_body(x_sym, fi_val, v_sym);
+            n++;
+        }
+        fi++; fs = vcdr(fs);
+    }
+    spec->count = n;
+}

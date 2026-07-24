@@ -223,6 +223,25 @@
 (set-person-age! alice 31)
 (check "record-mutator" (person-age alice) 31)
 
+;;; define-record-type as an internal (local) definition — compiled natively,
+;;; must stay local to the enclosing lambda rather than leaking to the
+;;; global environment.
+(define (make-local-record-counter)
+  (define-record-type <ctr>
+    (mk-ctr n)
+    ctr?
+    (n ctr-n set-ctr-n!))
+  (define c (mk-ctr 0))
+  (lambda ()
+    (set-ctr-n! c (+ (ctr-n c) 1))
+    (ctr-n c)))
+(define counter1 (make-local-record-counter))
+(check "local define-record-type: first call"  (counter1) 1)
+(check "local define-record-type: second call" (counter1) 2)
+(check "local define-record-type: ctor not leaked to global"
+  (guard (e (#t 'unbound)) (mk-ctr 0) 'leaked)
+  'unbound)
+
 ;;; Numeric: floor/ceiling/truncate/round on rationals (R7RS exact)
 (check "floor rational"    (floor 13/4)     3)
 (check "floor neg rational" (floor -13/4)  -4)

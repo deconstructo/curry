@@ -113,6 +113,7 @@ set(CORE_SOURCES
   src/env.c
   src/eval.c
   src/runtime.c
+  src/record_type.c
   src/akkadian_eval.c
   src/builtins.c
   src/builtins_curry.c

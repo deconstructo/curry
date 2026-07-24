@@ -63,6 +63,7 @@
 #include "builtins.h"
 #include "akkadian_eval.h"
 #include "reader.h"
+#include "record_type.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -318,17 +319,33 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
         if (is_def) {
             if (body_has_expr)
                 scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
-            val_t defname = vcar(vcdr(form));
-            if (vis_symbol(defname)) {
-                /* simple (define x ...) */
-                add_local(&c, defname);
-                c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                emit(&c, OP_VOID, line); /* reserve stack slot */
-            } else if (vis_pair(defname)) {
-                /* (define (f ...) ...) sugar */
-                add_local(&c, vcar(defname));
-                c.locals[c.local_count - 1].depth = -1;
-                emit(&c, OP_VOID, line); /* reserve stack slot */
+            if (akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE) {
+                /* define-record-type doesn't bind its own type-name symbol
+                 * (matching record_type_build_spec/eval.c) — it binds a
+                 * constructor, a predicate, and one accessor/mutator pair
+                 * per field.  Reserve locals for all of those so the record
+                 * type is usable as an internal definition, not just at
+                 * top level. */
+                RecordTypeSpec spec;
+                record_type_build_spec(vcdr(form), &spec);
+                for (int i = 0; i < spec.count; i++) {
+                    add_local(&c, spec.bindings[i].name);
+                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                }
+            } else {
+                val_t defname = vcar(vcdr(form));
+                if (vis_symbol(defname)) {
+                    /* simple (define x ...) */
+                    add_local(&c, defname);
+                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                } else if (vis_pair(defname)) {
+                    /* (define (f ...) ...) sugar */
+                    add_local(&c, vcar(defname));
+                    c.locals[c.local_count - 1].depth = -1;
+                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                }
             }
         } else {
             body_has_expr = true;
@@ -418,6 +435,25 @@ static void compile_define(Compiler *c, val_t args, int line) {
         }
     }
     emit(c, OP_VOID, line);   /* define returns void */
+}
+
+/* (define-record-type name ctor-form pred field-spec...) — R7RS, or
+ * (define-record-type name (fields ...) ...) — R6RS. record_type_build_spec
+ * (shared with eval.c's tree-walker case, still needed for library bodies)
+ * builds the RTD and every (name params body) triple that needs binding;
+ * compile each as an ordinary define so the usual local/global/upvalue
+ * machinery in compile_define applies — including the letrec* semantics
+ * from this function's pre-declared locals when used inside a lambda body. */
+static void compile_define_record_type(Compiler *c, val_t rest, int line) {
+    RecordTypeSpec spec;
+    record_type_build_spec(rest, &spec);
+    for (int i = 0; i < spec.count; i++) {
+        val_t lam = scm_cons(S_LAMBDA,
+                     scm_cons(spec.bindings[i].params, spec.bindings[i].body));
+        val_t def_args = scm_cons(spec.bindings[i].name, scm_cons(lam, V_NIL));
+        compile_define(c, def_args, line);
+        if (i + 1 < spec.count) emit(c, OP_POP, line); /* discard intermediate OP_VOID */
+    }
 }
 
 static void compile_set(Compiler *c, val_t args, int line) {
@@ -1271,13 +1307,17 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_DEFINE_RECORD_TYPE) {
+        compile_define_record_type(c, args, line);
+        return;
+    }
+
     /* Forms the compiler delegates to the tree-walker at runtime:
        import, define-syntax, let-syntax, letrec-syntax,
-       define-record-type, syntax-rules.
+       define-library, library, syntax-rules.
        Emitted as: (tree-eval '<form>) */
     if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
         head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
-        head == S_DEFINE_RECORD_TYPE ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
         head == S_SYNTAX_RULES   ||
         head == S_SYMBOLIC      ||
