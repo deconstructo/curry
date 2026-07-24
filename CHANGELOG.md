@@ -1,5 +1,24 @@
 # Changelog
 
+### 1.9.1 — Fix a 1.9.0 regression: segfault calling the actor-mailbox `receive` primitive
+
+**Compiler**
+- `(receive ...)` is ambiguous: it names both the R7RS special form
+  (`(receive formals producer-expr body...)`) and — pre-existing in this
+  codebase — the actor-mailbox primitive `receive` (arity 0–1, optional
+  timeout). 1.9.0's native `receive` codegen (see 1.9.0 below) unconditionally
+  compiled every `(receive ...)` call as the special form, so
+  `compile_receive`'s unchecked `vcar(args)`/`vcar(vcdr(args))` segfaulted on
+  `(receive)` and `(receive timeout)` — real code, e.g.
+  `examples/solar-system-qt6.scm`'s actor loops.
+- The two are fully disambiguated by argument count alone (the special form
+  needs at least 2 forms after the keyword; the primitive takes 0–1), so the
+  compiler now only takes the special-form path when at least two argument
+  forms are present, falling through to an ordinary call — resolving
+  `receive` to the primitive — otherwise.
+- Regression coverage added to `tests/actors_tests.scm` for both the
+  zero-arg and one-arg mailbox forms.
+
 ### 1.9.0 — Eval-elimination phase 3: native codegen for receive, define-record-type, define-syntax, and symbolic
 
 **Compiler — retiring the tree-walker punt, one special form at a time**
