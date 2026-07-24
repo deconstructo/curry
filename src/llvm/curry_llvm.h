@@ -68,7 +68,7 @@ void curry_llvm_dump_last(void);
 /* Tiered JIT: compile a (lambda params body...) AST to a T_JITCLOSURE.
  * Returns V_VOID (and is silent) if JIT is unavailable or compilation fails.
  * Closures with captures are wrapped in a (let ...) that injects the current
- * upvalue values — see jit_wrap_upvals() in eval.c. */
+ * upvalue values — see jit_wrap_upvals() in runtime.c. */
 val_t curry_llvm_jit_compile(val_t src_lambda);
 
 /*
