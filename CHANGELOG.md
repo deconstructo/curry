@@ -1,6 +1,57 @@
 # Changelog
 
-### Unreleased
+### 1.9.0 — Eval-elimination phase 3: native codegen for receive, define-record-type, define-syntax, and symbolic
+
+**Compiler — retiring the tree-walker punt, one special form at a time**
+- `receive`, `define-record-type`, `define-syntax`/`let-syntax`/`letrec-syntax`, and
+  `symbolic` now compile to native bytecode instead of desugaring to
+  `(tree-eval '<form>)` at runtime. Each of these punts had a real correctness
+  bug behind it, not just a performance cost:
+  - `receive` used inside compiled code resolved to the unrelated
+    actor-mailbox `receive` primitive instead of its own special form, since
+    the tree-walker had no `S_RECEIVE` case — well-formed R7RS `receive` was
+    silently wrong or raised unbound-variable errors.
+  - internal `define-record-type` always leaked its
+    constructor/predicate/accessor/mutator bindings into the global
+    environment instead of staying lexically local, because `tree-eval`
+    always evaluates against `GLOBAL_ENV`.
+  - `define-syntax` inside a compiled unit could fail with "apply: not a
+    procedure" (macro not yet registered when the use site compiled) or leak
+    into the global environment when used internally.
+  - `symbolic` had the same internal-define leak as `define-record-type`.
+- Fixing `define-syntax` surfaced a chain of deeper bugs along the way:
+  reentrant-VM stack corruption in compile-time macro evaluation (reachable
+  from the debugger's `,debug`/`p`), a `gc_inhibit_count` leak on a bad
+  transformer expression, and `.scc` cache-hit replay silently losing
+  top-level macros — now fixed by reconstructing `syntax-rules` transformers
+  from serializable pattern/template data at runtime instead of re-evaluating
+  source.
+- Also fixed a real `.scc` identity bug surfaced while native-compiling
+  `symbolic`: `define-record-type`'s record type descriptor (RTD) was
+  serialized independently at each of its four use sites, so a `.scc`
+  cache-hit reload produced four non-`eq?` RTDs and broke `%record-pred?`.
+  `scc.c` gained explicit `T_RECORD_TYPE` (de)serialization, and the compiler
+  now shares one RTD binding across all four generated closures.
+- `eval.c` was split into `runtime.c` (exception/condition system,
+  `dynamic-wind`, the JIT call-depth guard, and the `apply`/`apply_arr`
+  trampoline shared by the VM/FFI/stdlib) and a slim tree-walker retained
+  only for `library`/`define-library` bodies, which are never compiled.
+- New internal primitives `%make-record-type` and `%rebuild-syntax-rules` are
+  ordinary discoverable globals and now validate their arguments rather than
+  crashing on misuse.
+- Extensive regression coverage added across `tests/r7rs_tests.scm`,
+  `tests/syntax_rules_tests.scm`, `tests/numeric_ext_tests.scm`,
+  `tests/test_cli.sh`, and `tests/test_debugger.sh`.
+
+**Qt6**
+- Fixed a macOS regression where mouse press/release (drag-pan, double-click
+  zoom) stopped responding while scroll-wheel events kept working:
+  `QScrollArea`'s native `NSScrollView` doesn't get backed by a real native
+  view until the window is actually shown, so a one-time `raise()` at
+  window-creation time couldn't reliably fix the canvas's native z-order.
+  The canvas is now re-raised on every `showEvent`.
+
+### 1.8.4 — Language Server Protocol module, SRFI 149 macro extensions, module export enforcement
 
 **Language Server Protocol** — new `(curry lsp)` module
 - **`(lsp-serve)`** drives a Content-Length-framed JSON-RPC stdio
@@ -36,6 +87,15 @@
   Documented in `docs/reference/language.md` under Special forms,
   alongside a note that `syntax-rules` remains intentionally
   unhygienic — this SRFI doesn't change that.
+
+**Modules — real export enforcement**
+- `define-library`/`library` export clauses were parsed and then discarded,
+  so every binding in a library environment was importable regardless of
+  what it declared exported — there was effectively no module
+  encapsulation. `modules_import` now filters against the declared export
+  list when one exists, falling back to export-everything for C modules and
+  plain `.scm` files with no `define-library`/`library` wrapper, matching
+  prior behavior there.
 
 ### 1.8.3 — Editor syntax highlighting, full Akkadian coverage, three bug fixes
 
