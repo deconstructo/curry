@@ -21,21 +21,19 @@ static int rp_list_length(val_t lst) {
     return n;
 }
 
-/* (%record-ctor 'rtd field0 field1 ...) */
-static val_t rp_ctor_body(val_t rtd_val, val_t ctor_fields) {
+/* (%record-ctor <rtd-ref-expr> field0 field1 ...) */
+static val_t rp_ctor_body(val_t rtd_ref_expr, val_t ctor_fields) {
     return rp_cons(
         rp_cons(sym_intern_cstr("%record-ctor"),
-            rp_cons(rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)),
-                    ctor_fields)),
+            rp_cons(rtd_ref_expr, ctor_fields)),
         V_NIL);
 }
 
-/* (%record-pred? 'rtd x) */
-static val_t rp_pred_body(val_t rtd_val, val_t x_sym) {
+/* (%record-pred? <rtd-ref-expr> x) */
+static val_t rp_pred_body(val_t rtd_ref_expr, val_t x_sym) {
     return rp_cons(
         rp_cons(sym_intern_cstr("%record-pred?"),
-            rp_cons(rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)),
-                    rp_cons(x_sym, V_NIL))),
+            rp_cons(rtd_ref_expr, rp_cons(x_sym, V_NIL))),
         V_NIL);
 }
 
@@ -58,7 +56,7 @@ static val_t rp_setter_body(val_t x_sym, val_t fi_val, val_t v_sym) {
         V_NIL);
 }
 
-void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
+void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
     val_t name_sym = vcar(rest);
     bool is_r6rs = vis_pair(vcdr(rest)) &&
                    vis_pair(vcadr(rest)) &&
@@ -102,6 +100,8 @@ void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
         }
         val_t rtd_val = vptr(rtd);
         spec->rtd_val = rtd_val;
+        val_t rtd_ref_expr = vis_false(rtd_ref)
+            ? rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)) : rtd_ref;
 
         /* Build ordered field-name param list for constructor */
         val_t ctor_fields = V_NIL;
@@ -124,14 +124,14 @@ void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
         snprintf(buf, sizeof(buf), "make-%s", ns);
         spec->bindings[n].name   = sym_intern_cstr(buf);
         spec->bindings[n].params = ctor_fields;
-        spec->bindings[n].body   = rp_ctor_body(rtd_val, ctor_fields);
+        spec->bindings[n].body   = rp_ctor_body(rtd_ref_expr, ctor_fields);
         n++;
 
         /* Predicate: <name>? */
         snprintf(buf, sizeof(buf), "%s?", ns);
         spec->bindings[n].name   = sym_intern_cstr(buf);
         spec->bindings[n].params = rp_cons(x_sym, V_NIL);
-        spec->bindings[n].body   = rp_pred_body(rtd_val, x_sym);
+        spec->bindings[n].body   = rp_pred_body(rtd_ref_expr, x_sym);
         n++;
 
         /* Accessors and mutators */
@@ -176,6 +176,8 @@ void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
 
     val_t rtd_val = vptr(rtd);
     spec->rtd_val = rtd_val;
+    val_t rtd_ref_expr = vis_false(rtd_ref)
+        ? rp_cons(S_QUOTE, rp_cons(rtd_val, V_NIL)) : rtd_ref;
 
     val_t ctor_name   = vcar(ctor_form);
     val_t ctor_fields = vcdr(ctor_form);
@@ -187,13 +189,13 @@ void record_type_build_spec(val_t rest, RecordTypeSpec *spec) {
     /* Constructor */
     spec->bindings[n].name   = ctor_name;
     spec->bindings[n].params = ctor_fields;
-    spec->bindings[n].body   = rp_ctor_body(rtd_val, ctor_fields);
+    spec->bindings[n].body   = rp_ctor_body(rtd_ref_expr, ctor_fields);
     n++;
 
     /* Predicate */
     spec->bindings[n].name   = pred_sym;
     spec->bindings[n].params = rp_cons(x_sym, V_NIL);
-    spec->bindings[n].body   = rp_pred_body(rtd_val, x_sym);
+    spec->bindings[n].body   = rp_pred_body(rtd_ref_expr, x_sym);
     n++;
 
     /* Field accessors and mutators */

@@ -14,7 +14,15 @@
  *   T_PAIR      — two recursively-tagged constants (car, cdr); from quoted lists
  *   T_VECTOR    — uint32_t len + recursively-tagged elements; from quoted vectors
  *   T_BYTEVECTOR— uint32_t len + raw bytes; from #u8(...) literals
+ *   T_RECORD_TYPE — name (recursively-tagged) + uint32_t nfields +
+ *                   nfields recursively-tagged field names; from
+ *                   define-record-type's compiled RTD constant
  *   Chunk*      — stored as raw val_t for OP_CLOSURE; serialized recursively
+ *
+ * const_kind() is a closed enumeration by design: any OTHER heap type
+ * embedded as a bytecode constant (a Closure, Primitive, etc.) has no
+ * serializable representation and is a compiler bug, not something this
+ * format degrades gracefully for — see const_kind()'s default case.
  */
 
 #include "scc.h"
@@ -52,6 +60,7 @@
 #define CTAG_PAIR       10
 #define CTAG_VECTOR     11
 #define CTAG_BYTEVEC    12
+#define CTAG_RECORD_TYPE 13
 
 /* ── Write helpers ──────────────────────────────────────────────────────── */
 
@@ -172,7 +181,25 @@ static int const_kind(val_t v) {
         case T_PAIR:        return CTAG_PAIR;
         case T_VECTOR:      return CTAG_VECTOR;
         case T_BYTEVECTOR:  return CTAG_BYTEVEC;
-        default:            return CTAG_CHUNK;  /* Chunk* stored as val_t */
+        case T_RECORD_TYPE: return CTAG_RECORD_TYPE;
+        case T_CHUNK:       return CTAG_CHUNK;
+        default:
+            /* Every other heap type (Closure, Primitive, Continuation, ...)
+             * has no serializable representation and must never reach here
+             * as a bytecode constant — falling through to CTAG_CHUNK (as
+             * this used to do, relying on Chunk* being the only "leftover"
+             * case) would reinterpret an unrelated struct's bytes as a
+             * Chunk and crash or corrupt the .scc file on write (found by
+             * testing: define-record-type's compiled RTD constant hit
+             * exactly this path before T_RECORD_TYPE got its own case
+             * above). Any future compiler.c codegen that embeds a new kind
+             * of heap object as a constant needs a matching case here —
+             * this default is deliberately a hard stop, not a silent
+             * guess. */
+            fprintf(stderr,
+                "scc: internal error: constant of type %d has no .scc "
+                "serialization support (not written)\n", (int)vtype(v));
+            return -1;
     }
 }
 
@@ -245,6 +272,19 @@ static bool write_const(FILE *f, val_t v) {
     case CTAG_BYTEVEC: {
         Bytevector *bv = as_bytes(v);
         return wu32(f, bv->len) && wbytes(f, bv->data, bv->len);
+    }
+    case CTAG_RECORD_TYPE: {
+        /* define-record-type embeds its compile-time-built RTD as a
+         * quoted constant (see record_type.c/compile_define_record_type);
+         * name and field_names are always plain symbols, so this is fully
+         * reconstructible on load — see the CTAG_RECORD_TYPE read_const
+         * case. */
+        RecordType *rtd = vunptr(RecordType, v);
+        if (!write_const(f, rtd->name)) return false;
+        if (!wu32(f, rtd->nfields)) return false;
+        for (uint32_t i = 0; i < rtd->nfields; i++)
+            if (!write_const(f, rtd->field_names[i])) return false;
+        return true;
     }
     case CTAG_CHUNK:
         return write_chunk(f, vunptr(Chunk, v));
@@ -426,6 +466,20 @@ static bool read_const(FILE *f, val_t *out) {
         if (len) memcpy(bv->data, buf, len);
         if (buf) free(buf);
         *out = vptr(bv);
+        return true;
+    }
+    case CTAG_RECORD_TYPE: {
+        val_t name;
+        if (!read_const(f, &name)) return false;
+        uint32_t nfields;
+        if (!ru32(f, &nfields)) return false;
+        RecordType *rtd = (RecordType *)gc_alloc_pinned(
+            sizeof(RecordType) + nfields * sizeof(val_t));
+        rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
+        rtd->name = name; rtd->nfields = nfields;
+        for (uint32_t i = 0; i < nfields; i++)
+            if (!read_const(f, &rtd->field_names[i])) return false;
+        *out = vptr(rtd);
         return true;
     }
     case CTAG_CHUNK: {

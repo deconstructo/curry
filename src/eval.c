@@ -585,7 +585,7 @@ tail:
          * support, because library/define-library bodies (modules.c) are
          * always tree-walked, never compiled. */
         RecordTypeSpec spec;
-        record_type_build_spec(rest, &spec);
+        record_type_build_spec(rest, V_FALSE, &spec);
         for (int i = 0; i < spec.count; i++) {
             Closure *c = CURRY_NEW_PINNED(Closure);
             c->hdr.type = T_CLOSURE; c->hdr.flags = 0;

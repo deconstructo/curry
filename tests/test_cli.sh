@@ -269,6 +269,56 @@ check_file_exists "cache-miss run wrote .scc" "$TMPDIR_CLI/macro_cache.scc"
 out=$(printf '(display (my-double 21))\n(newline)\n' | "$CURRY" -i "$MACRO_SCM")
 check_contains "define-syntax usable from -i REPL on cache-hit run" "$out" "42"
 
+# ─── (symbolic ...) survives .scc cache-hit reruns ─────────────────────────────
+# Regression test: an earlier fix for symbolic's compiler codegen embedded
+# the resolved sym-var primitive directly as a bytecode constant to make it
+# immune to local shadowing. That crashed .scc serialization (a Primitive
+# closes over a C function pointer, which can't be written to a cache file)
+# on EVERY run, not just a cache-hit one — so this exercises both a fresh
+# compile-and-write and a cache-hit reload.
+SYMBOLIC_SCM="$TMPDIR_CLI/symbolic_cache.scm"
+cat > "$SYMBOLIC_SCM" << 'SCHEME'
+(symbolic x)
+(display (symbolic? x))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/symbolic_cache.scc"
+out=$("$CURRY" "$SYMBOLIC_SCM")
+check "symbolic works on cache-miss run" "$out" "#t"
+check_file_exists "symbolic cache-miss run wrote .scc" "$TMPDIR_CLI/symbolic_cache.scc"
+out=$("$CURRY" "$SYMBOLIC_SCM")
+check "symbolic works on cache-hit run" "$out" "#t"
+
+# ─── define-record-type survives .scc cache-hit reruns ────────────────────────
+# Regression test: define-record-type's compiler codegen embeds the built
+# RecordType (RTD) as an independent quoted constant in each of the
+# constructor/predicate/accessor/mutator closures. In memory that's the
+# same pointer referenced four times (harmless); serialized to a .scc file
+# and read back, each becomes an INDEPENDENT reconstruction — four
+# non-eq? RecordType objects — breaking the predicate's pointer-equality
+# check. The cache-MISS run (same process that compiled it) doesn't
+# exercise this, since it never round-trips through the file; only a
+# cache-HIT run (a fresh process loading the .scc) does.
+RECORD_SCM="$TMPDIR_CLI/record_cache.scm"
+cat > "$RECORD_SCM" << 'SCHEME'
+(define-record-type <point>
+  (make-point x y)
+  point?
+  (x point-x)
+  (y point-y))
+(define p (make-point 3 4))
+(display (point? p))
+(display " ")
+(display (point-x p))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/record_cache.scc"
+out=$("$CURRY" "$RECORD_SCM")
+check "define-record-type works on cache-miss run" "$out" "#t 3"
+check_file_exists "record cache-miss run wrote .scc" "$TMPDIR_CLI/record_cache.scc"
+out=$("$CURRY" "$RECORD_SCM")
+check "define-record-type predicate survives cache-hit run" "$out" "#t 3"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

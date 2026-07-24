@@ -242,6 +242,17 @@
   (guard (e (#t 'unbound)) (mk-ctr 0) 'leaked)
   'unbound)
 
+;;; %make-record-type: internal primitive define-record-type's codegen uses
+;;; to reconstruct the RTD at runtime (see compile_define_record_type in
+;;; compiler.c). It's an ordinary, discoverable global primitive, so direct
+;;; misuse must raise a normal Scheme error rather than crash.
+(check "%make-record-type with non-list fields raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%make-record-type 'foo 5))
+  'caught)
+(check "%make-record-type with improper list fields raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%make-record-type 'foo (cons 1 2)))
+  'caught)
+
 ;;; Numeric: floor/ceiling/truncate/round on rationals (R7RS exact)
 (check "floor rational"    (floor 13/4)     3)
 (check "floor neg rational" (floor -13/4)  -4)

@@ -369,6 +369,28 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                        akk_translate(vcar(form)) == S_DEFINE_RULE ||
                        akk_translate(vcar(form)) == S_DEFINE_RULESET ||
                        akk_translate(vcar(form)) == S_DEFINE_ALGEBRA);
+        /* (symbolic x y z ...) binds each name as a fresh runtime value
+         * (see compile_symbolic) — not an R7RS-style internal definition
+         * (no ordering restriction relative to expressions, matching its
+         * pre-existing tree-walker behavior), but it DOES need its bound
+         * names reserved as locals ahead of time: compile_define's
+         * "New local" fallback (used for a name with no pre-declared slot)
+         * assumes the compiled value is already at the correct physical VM
+         * stack position for OP_STORE_LOCAL, which only holds when reached
+         * through the same prescan-then-store protocol ordinary internal
+         * defines use — skipping that reservation corrupted the local slot
+         * layout (confirmed: a local `symbolic` variable read back an
+         * unrelated value). */
+        if (vis_pair(form) && vis_symbol(vcar(form)) &&
+            akk_translate(vcar(form)) == S_SYMBOLIC) {
+            for (val_t p = vcdr(form); vis_pair(p); p = vcdr(p)) {
+                if (!vis_symbol(vcar(p))) continue;
+                add_local(&c, vcar(p));
+                c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                emit(&c, OP_VOID, line); /* reserve stack slot */
+            }
+        }
+
         if (is_def) {
             if (body_has_expr)
                 scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
@@ -380,7 +402,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                  * type is usable as an internal definition, not just at
                  * top level. */
                 RecordTypeSpec spec;
-                record_type_build_spec(vcdr(form), &spec);
+                record_type_build_spec(vcdr(form), V_FALSE, &spec);
                 for (int i = 0; i < spec.count; i++) {
                     add_local(&c, spec.bindings[i].name);
                     c.locals[c.local_count - 1].depth = -1; /* uninitialised */
@@ -450,6 +472,33 @@ static void compile_if(Compiler *c, val_t args, bool tail, int line) {
     patch_jump(c, end_jmp);
 }
 
+/* Emit the store half of a define: the computed value must already be on
+ * top of the stack. Shared by compile_define (after compiling an ordinary
+ * value expression) and compile_symbolic (after emitting hand-rolled,
+ * lookup-hygienic call bytecode instead of a compilable AST value). */
+static void emit_define_store(Compiler *c, val_t name, int line) {
+    if (c->scope_depth == 0) {
+        /* Top-level: DEF_GLOBAL */
+        emit_ab(c, OP_DEF_GLOBAL, (uint8_t)chunk_add_const(c->chunk, name), line);
+    } else {
+        /* Internal define: check if pre-declared local slot exists */
+        int slot = resolve_local(c, name);
+        if (slot >= 0 && c->locals[slot].depth < 0) {
+            /* Initialise the pre-declared slot */
+            c->locals[slot].depth = c->scope_depth;
+            emit_ab(c, OP_STORE_LOCAL, (uint8_t)slot, line);
+        } else {
+            /* New local */
+            add_local(c, name);
+            mark_initialised(c);
+            /* value already on stack; STORE_LOCAL to new slot */
+            emit_ab(c, OP_STORE_LOCAL,
+                    (uint8_t)(c->local_count - 1), line);
+        }
+    }
+    emit(c, OP_VOID, line);   /* define returns void */
+}
+
 static void compile_define(Compiler *c, val_t args, int line) {
     val_t target = vcar(args);
     val_t rest   = vcdr(args);
@@ -473,27 +522,7 @@ static void compile_define(Compiler *c, val_t args, int line) {
         return;
     }
 
-    /* Emit store */
-    if (c->scope_depth == 0) {
-        /* Top-level: DEF_GLOBAL */
-        emit_ab(c, OP_DEF_GLOBAL, (uint8_t)chunk_add_const(c->chunk, name), line);
-    } else {
-        /* Internal define: check if pre-declared local slot exists */
-        int slot = resolve_local(c, name);
-        if (slot >= 0 && c->locals[slot].depth < 0) {
-            /* Initialise the pre-declared slot */
-            c->locals[slot].depth = c->scope_depth;
-            emit_ab(c, OP_STORE_LOCAL, (uint8_t)slot, line);
-        } else {
-            /* New local */
-            add_local(c, name);
-            mark_initialised(c);
-            /* value already on stack; STORE_LOCAL to new slot */
-            emit_ab(c, OP_STORE_LOCAL,
-                    (uint8_t)(c->local_count - 1), line);
-        }
-    }
-    emit(c, OP_VOID, line);   /* define returns void */
+    emit_define_store(c, name, line);
 }
 
 /* (define-record-type name ctor-form pred field-spec...) — R7RS, or
@@ -502,17 +531,120 @@ static void compile_define(Compiler *c, val_t args, int line) {
  * builds the RTD and every (name params body) triple that needs binding;
  * compile each as an ordinary define so the usual local/global/upvalue
  * machinery in compile_define applies — including the letrec* semantics
- * from this function's pre-declared locals when used inside a lambda body. */
+ * from this function's pre-declared locals when used inside a lambda body.
+ *
+ * Passes a gensym'd local/global name as record_type_build_spec's rtd_ref,
+ * rather than V_FALSE (which would embed the built RTD as a quoted
+ * constant independently in each of the ctor/pred/accessor/mutator
+ * closures — safe in memory, but each gets serialized to a .scc file as an
+ * independent copy and reconstructed into a non-eq? object on load,
+ * breaking %record-pred?'s pointer-equality check; found by testing: a
+ * cache-hit run of a script using define-record-type failed its own
+ * predicate). Emitting (define <gensym> (%make-record-type 'name
+ * 'field-names)) once, ahead of the bindings, and having every binding
+ * reference that single shared variable instead keeps identity correct
+ * within one execution (fresh or replayed from cache) without embedding
+ * the RTD as a constant at all.
+ *
+ * The gensym'd variable itself is NOT covered by compile_lambda's prescan
+ * (which only reserves slots for the record's real, user-visible bindings)
+ * — so, when local, its own local slot is reserved right here, immediately
+ * before compiling its value, rather than relying on compile_define's
+ * "New local" fallback (add a slot, store into it, immediately followed by
+ * emit_define_store's trailing OP_VOID). That fallback silently corrupts
+ * the slot when nothing reserved it ahead of time: OP_STORE_LOCAL writes
+ * to a frame-relative position that, at that exact moment, coincides with
+ * the current stack top, and the very next instruction — the trailing
+ * OP_VOID — pushes onto that same now-freed position, overwriting the
+ * value that was just stored (the same bug found and fixed for `symbolic`,
+ * confirmed by re-deriving OP_STORE_LOCAL's frame-relative semantics in
+ * vm.c). Reserving first (add_local + a placeholder OP_VOID, mirroring
+ * what a prescan reservation does) separates the reserved slot from the
+ * position the trailing OP_VOID lands at, avoiding the collision — done
+ * inline here rather than by extending the prescan, since the gensym only
+ * needs to be unique within this one function call, not coordinated across
+ * two separate passes over the body. */
 static void compile_define_record_type(Compiler *c, val_t rest, int line) {
+    static int gensym_counter = 0;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%%%%rtd%d", gensym_counter++);
+    val_t rtd_ref = sym_intern_cstr(buf);
+
     RecordTypeSpec spec;
-    record_type_build_spec(rest, &spec);
+    record_type_build_spec(rest, rtd_ref, &spec);
+
+    RecordType *rtd = as_rtd(spec.rtd_val);
+    val_t field_names = V_NIL;
+    for (int i = (int)rtd->nfields - 1; i >= 0; i--)
+        field_names = scm_cons(rtd->field_names[i], field_names);
+    val_t make_rtd_call = scm_cons(sym_intern_cstr("%make-record-type"),
+        scm_cons(scm_cons(S_QUOTE, scm_cons(rtd->name, V_NIL)),
+         scm_cons(scm_cons(S_QUOTE, scm_cons(field_names, V_NIL)), V_NIL)));
+
+    if (c->scope_depth > 0) {
+        add_local(c, rtd_ref);
+        c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+        emit(c, OP_VOID, line); /* reserve stack slot */
+    }
+    compile_define(c, scm_cons(rtd_ref, scm_cons(make_rtd_call, V_NIL)), line);
+
     for (int i = 0; i < spec.count; i++) {
+        emit(c, OP_POP, line); /* discard the previous binding's OP_VOID */
         val_t lam = scm_cons(S_LAMBDA,
                      scm_cons(spec.bindings[i].params, spec.bindings[i].body));
         val_t def_args = scm_cons(spec.bindings[i].name, scm_cons(lam, V_NIL));
         compile_define(c, def_args, line);
-        if (i + 1 < spec.count) emit(c, OP_POP, line); /* discard intermediate OP_VOID */
     }
+}
+
+/* (symbolic x y z ...) — bind each name as a fresh symbolic unknown.
+ * Unlike define-syntax's transformer, sym-var produces an ordinary RUNTIME
+ * value (a SymVar), not a compile-time macro, so this needs no
+ * compile_time_eval — it's a plain (sym-var 'name) call per name, using
+ * emit_define_store for the same local/global store logic compile_define
+ * uses, exactly like define-record-type's bindings.
+ *
+ * The call to sym-var is emitted by hand — OP_LOAD_GLOBAL for the symbol
+ * `sym-var`, bypassing the local/upvalue checks emit_load would otherwise
+ * do — rather than compiling an ordinary AST call form referencing the
+ * symbol `sym-var`. This isn't optional: a local variable literally named
+ * sym-var would otherwise shadow the primitive and silently change what
+ * `symbolic` does (found by review — `(let ((sym-var ...)) (symbolic a)
+ * a)` returned the shadowing lambda's result instead of a SymVar). The
+ * tree-walker's S_SYMBOLIC case never had this hazard: it calls
+ * sx_make_var(name) directly in C, never through a Scheme-level binding.
+ *
+ * An earlier version of this fix instead embedded the ALREADY-RESOLVED
+ * sym-var Primitive value directly as a bytecode constant (compile-time
+ * env_lookup_or_false, then quote the result). That's wrong for a
+ * different reason: a Primitive closes over a C function pointer, which
+ * cannot be serialized into a .scc file — confirmed by testing, it
+ * segfaults even on a single fresh (non-cached) run, since the
+ * script-execution loop unconditionally writes a .scc cache after
+ * compiling each top-level form. OP_LOAD_GLOBAL only embeds the SYMBOL
+ * `sym-var` (always plain, serializable data) and looks it up in
+ * GLOBAL_ENV fresh at runtime — hygienic (bypasses local shadowing) without
+ * embedding a non-serializable object, and it still calls sym-var fresh
+ * each time this code executes (not caching/sharing sym-var's RESULT,
+ * which would incorrectly share one SymVar across repeated calls to an
+ * enclosing function — a different, worse bug avoided by construction). */
+static void compile_symbolic(Compiler *c, val_t rest, int line) {
+    val_t sym_var_sym = sym_intern_cstr("sym-var");
+    bool first = true;
+    for (val_t p = rest; vis_pair(p); p = vcdr(p)) {
+        val_t name = vcar(p);
+        if (!vis_symbol(name)) {
+            fprintf(stderr, "compiler: symbolic: expected symbol, got non-symbol\n");
+            continue;
+        }
+        if (!first) emit(c, OP_POP, line); /* discard previous intermediate OP_VOID */
+        emit_ab(c, OP_LOAD_GLOBAL, (uint8_t)chunk_add_const(c->chunk, sym_var_sym), line);
+        emit_const(c, name, line);
+        emit_ab(c, OP_CALL, 1, line);
+        emit_define_store(c, name, line);
+        first = false;
+    }
+    if (first) emit(c, OP_VOID, line); /* (symbolic) with no names */
 }
 
 /* Compile expr as an independent, parent-less top-level unit and run it
@@ -1560,6 +1692,11 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_SYMBOLIC) {
+        compile_symbolic(c, args, line);
+        return;
+    }
+
     /* Note: syntax-rules itself is deliberately NOT special-cased here.
      * syntax_rules_register() binds the symbol `syntax-rules` to a T_SYNTAX
      * in GLOBAL_ENV whose transformer (sr_compile_fn) takes the raw
@@ -1574,7 +1711,6 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
        Emitted as: (tree-eval '<form>) */
     if (head == S_IMPORT        ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
-        head == S_SYMBOLIC      ||
         head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
         head == S_DEFINE_ALGEBRA || head == S_WITH_ASSUMPTIONS) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");

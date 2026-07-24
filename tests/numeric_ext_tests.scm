@@ -112,6 +112,60 @@
 (check "sym-var-name" (sym-var-name x)  'x)
 (check "sym-expr?"    (sym-expr? (* x x)) #t)
 
+;;; (symbolic ...) special form, compiled natively (not tree-eval punted).
+;;; Regression coverage for two behaviors the native compiler codegen had to
+;;; get right: an internal (symbolic ...) inside a lambda body must produce
+;;; correctly-slotted local bindings (an earlier version of the codegen
+;;; skipped reserving VM stack slots ahead of time, corrupting the local
+;;; variable layout — a bound name read back an unrelated value entirely),
+;;; and it must stay local rather than leaking into the global environment.
+(symbolic sx sy)
+(check "top-level symbolic?" (symbolic? sx) #t)
+(check "top-level symbolic arithmetic"
+  (sym-expr? (* sx sy)) #t)
+
+(define (local-symbolic-test)
+  (symbolic la lb)
+  (list (symbolic? la) (symbolic? lb) (sym-var-name la)))
+(check "internal symbolic binds correctly-slotted locals"
+  (local-symbolic-test) (list #t #t 'la))
+(check "internal symbolic does not leak to global"
+  (guard (e (#t 'unbound)) la)
+  'unbound)
+
+;;; Further slot-layout coverage: symbolic mixed with ordinary internal
+;;; defines, multiple symbolic forms in one body, and symbolic after a
+;;; real (non-definition) expression — all exercise the same prescan
+;;; reservation path, with different orderings that could plausibly expose
+;;; slot-index miscounting if the fix were only correct for the single
+;;; two-name case originally tested.
+(define (mixed-symbolic-test)
+  (define n 10)
+  (symbolic ma mb)
+  (symbolic mc)
+  (+ n (if (symbolic? ma) 1 0) (if (symbolic? mb) 1 0) (if (symbolic? mc) 1 0)))
+(check "symbolic mixed with ordinary defines and multiple forms"
+  (mixed-symbolic-test) 13)
+
+(define (symbolic-after-expr-test)
+  (display "") ; a real expression before symbolic — must not raise
+  (symbolic sae)
+  (symbolic? sae))
+(check "symbolic after a real expression does not raise"
+  (symbolic-after-expr-test) #t)
+
+;;; sym-var hygiene: (symbolic ...) must call the primitive directly,
+;;; immune to a local variable shadowing the name `sym-var` — the native
+;;; compiler codegen desugars to a call form, which could otherwise resolve
+;;; `sym-var` through ordinary (shadowable) variable lookup at the call
+;;; site, unlike the tree-walker's direct C-level sx_make_var() call.
+(define (shadowed-sym-var-test)
+  (let ((sym-var (lambda (x) 'shadowed)))
+    (symbolic ssv)
+    (symbolic? ssv)))
+(check "symbolic is immune to a local sym-var shadow"
+  (shadowed-sym-var-test) #t)
+
 ;;; Arithmetic builds expression trees
 (check "x+1 sym-expr"  (sym-expr? (+ x 1))  #t)
 (check "x*y sym-expr"  (sym-expr? (* x y))  #t)

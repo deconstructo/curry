@@ -2021,6 +2021,35 @@ static val_t prim_record_set(int ac, val_t *av, void *ud) {
     as_rec(av[0])->fields[vunfix(av[1])] = av[2];
     return V_VOID;
 }
+/* Build a fresh RecordType (RTD) from a name and a list of field-name
+ * symbols. Used by the compiler's define-record-type codegen to
+ * reconstruct the RTD at runtime — see compile_define_record_type in
+ * compiler.c — rather than ever embedding a RecordType* as a bytecode
+ * constant, which cannot survive .scc serialization with identity
+ * preserved across the constructor/predicate/accessor/mutator closures
+ * that all need to agree it's the same type. */
+static val_t prim_make_record_type(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t name = av[0];
+    int len = scm_list_length(av[1]);
+    /* An ordinary, addressable global primitive — nothing stops user code
+     * from calling it directly (matching a real bug already found and
+     * fixed for %rebuild-syntax-rules): scm_list_length returns -1 for a
+     * non-list/improper-list argument, and casting that to uint32_t before
+     * using it as an allocation size and a vcar/vcdr loop bound would walk
+     * off the end of an arbitrary value (or attempt a ~4-billion-entry
+     * allocation) instead of raising a normal Scheme error. */
+    if (len < 0)
+        scm_raise(V_FALSE, "%%make-record-type: field names must be a proper list");
+    uint32_t nfields = (uint32_t)len;
+    RecordType *rtd = (RecordType *)gc_alloc_pinned(
+        sizeof(RecordType) + nfields * sizeof(val_t));
+    rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
+    rtd->name = name; rtd->nfields = nfields;
+    val_t f = av[1];
+    for (uint32_t i = 0; i < nfields; i++) { rtd->field_names[i] = vcar(f); f = vcdr(f); }
+    return vptr(rtd);
+}
 
 /* ---- Misc ---- */
 static val_t prim_gensym(int ac, val_t *av, void *ud) {
@@ -2570,6 +2599,7 @@ void builtins_register(val_t env) {
     DEF("%record-pred?",  prim_record_pred, 2,2);
     DEF("%record-ref",    prim_record_ref,  2,2);
     DEF("%record-set!",   prim_record_set,  3,3);
+    DEF("%make-record-type", prim_make_record_type, 2,2);
 
     /* Misc */
     DEF("gensym",     prim_gensym,  0,1);
