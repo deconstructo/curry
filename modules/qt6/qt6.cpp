@@ -339,6 +339,21 @@ public:
 protected:
     void showEvent(QShowEvent *ev) override {
         QMainWindow::showEvent(ev);
+        /* Re-assert the canvas's native view stacking order on every show,
+         * not just once at window-creation time (fn_make_window also calls
+         * canvas->raise() there, but that happens before the window has
+         * ever been shown — on macOS the QOpenGLWidget/QScrollArea don't
+         * get native NSView backing until the widget is actually realized,
+         * so an early raise() can't reliably affect native z-order, and
+         * Qt may reconstruct native views back to insertion order (scroll
+         * area before canvas) once the window is finally shown, silently
+         * undoing it. Symptom when this regresses: scroll-wheel zoom still
+         * works (delivered via a different event path) but mouse press/
+         * release (drag-pan, double-click zoom) stop responding, because
+         * the scroll area's NSScrollView is back on top intercepting
+         * clicks. Doing it here too, unconditionally on every showEvent
+         * (cheap, idempotent), is the reliable fix. */
+        if (ws->canvas) ws->canvas->raise();
         if (!ws->realized) {
             ws->realized = true;
             if (!curry_is_bool(ws->realize_proc))
