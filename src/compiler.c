@@ -1672,7 +1672,14 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
-    if (head == S_RECEIVE) {
+    /* `receive` is ambiguous: it's both the R7RS special form (requires at
+     * least 2 forms after it: formals and a producer expression, body...
+     * optional) and — pre-existing in this codebase — the actor-mailbox
+     * primitive (arity 0-1: optional timeout). The two are unambiguous by
+     * argument count alone, so only treat it as the special form when the
+     * shape can't be the primitive; otherwise fall through to an ordinary
+     * call so (receive) and (receive timeout) keep working. */
+    if (head == S_RECEIVE && vis_pair(args) && vis_pair(vcdr(args))) {
         compile_receive(c, args, tail, line);
         return;
     }

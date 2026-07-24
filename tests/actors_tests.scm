@@ -63,6 +63,31 @@
 (send! a2 'hello)
 (check "send! no crash" #t #t)
 
+;;; (receive) — the actor-mailbox primitive, zero args. This shares its name
+;;; with the R7RS `receive` special form (formals producer body...); the
+;;; compiler must disambiguate by argument count instead of always compiling
+;;; a bare `(receive ...)` as the special form, which previously segfaulted
+;;; on args this shape (see solar-system-qt6.scm's actor loops).
+(define result-recv0 #f)
+(define sem-recv0 (make-semaphore 0))
+(define a3 (spawn (lambda ()
+                     (set! result-recv0 (receive))
+                     (sem-post! sem-recv0))))
+(send! a3 'mailbox-msg)
+(sem-wait! sem-recv0)
+(check "(receive) zero-arg mailbox primitive" result-recv0 'mailbox-msg)
+
+;;; (receive timeout) — the primitive's one-arg form (also disambiguated by
+;;; argument count, not just zero vs. nonzero).
+(define result-recv1 #f)
+(define sem-recv1 (make-semaphore 0))
+(define a4 (spawn (lambda ()
+                     (set! result-recv1 (receive 5000))
+                     (sem-post! sem-recv1))))
+(send! a4 'timed-msg)
+(sem-wait! sem-recv1)
+(check "(receive timeout) one-arg mailbox primitive" result-recv1 'timed-msg)
+
 ;;; Mutex: protected shared counter
 ;;; sync module names: make-mutex, mutex-lock!, mutex-unlock!
 (define mtx (make-mutex))
