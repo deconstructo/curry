@@ -248,6 +248,27 @@ SCHEME
 out=$("$CURRY" "$PASSTHROUGH_SCM" --not-a-curry-flag)
 check "flags after script path are passed as args, not parsed" "$out" "1"
 
+# ─── define-syntax survives .scc cache-hit reruns ─────────────────────────────
+# Regression test for a bug in native (compiler-driven, not tree-eval-punted)
+# define-syntax codegen: a top-level macro must still be usable from the
+# post-script REPL (-i) on a SECOND run of the same script, once its .scc
+# cache exists — not just on the first run, which compiles (and thus
+# eagerly registers) the macro fresh.
+MACRO_SCM="$TMPDIR_CLI/macro_cache.scm"
+cat > "$MACRO_SCM" << 'SCHEME'
+(define-syntax my-double
+  (syntax-rules ()
+    ((_ x) (* 2 x))))
+(display (my-double 5))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/macro_cache.scc"
+out=$(printf '(display (my-double 21))\n(newline)\n' | "$CURRY" -i "$MACRO_SCM")
+check_contains "define-syntax usable from -i REPL on cache-miss run" "$out" "42"
+check_file_exists "cache-miss run wrote .scc" "$TMPDIR_CLI/macro_cache.scc"
+out=$(printf '(display (my-double 21))\n(newline)\n' | "$CURRY" -i "$MACRO_SCM")
+check_contains "define-syntax usable from -i REPL on cache-hit run" "$out" "42"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

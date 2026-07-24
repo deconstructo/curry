@@ -66,6 +66,18 @@ check "p resolves local by name"           "$out" "42"
 check "p evaluates globally"               "$out" "  42"
 check "program completes after continue"   "$out" "63"
 
+# Regression test: `p (define-syntax ...)` at a breakpoint used to corrupt
+# the paused frame's VM stack by one slot, because compile_time_eval (the
+# compiler's helper for evaluating macro-transformer expressions) omitted
+# the "push closure as callee before vm_run" step that reentrant evaluation
+# requires — invisible for a normal top-level compile (frame_count == 0
+# takes a different, unaffected reset path) but corrupting for nested
+# evaluation while paused mid-frame, which is exactly what `p`/`,debug` do.
+out=$(printf 'p (define-syntax mac (syntax-rules () ((_ a) a)))\nlocals\np y\np x\nc\n' | "$CURRY" "$TMP/bp.scm" 2>&1)
+check "define-syntax via p does not corrupt paused frame: locals y" "$out" "y = 42"
+check "define-syntax via p does not corrupt paused frame: locals x" "$out" "x = 21"
+check "define-syntax via p does not corrupt paused frame: continue" "$out" "63"
+
 # ── Cache-hit run must behave identically (.scc round-trips debug info) ────
 out=$(printf 'locals\nc\n' | "$CURRY" "$TMP/bp.scm" 2>&1)
 [ -f "$TMP/bp.scc" ] || echo "note: no .scc cache written; cache-hit test degenerates to recompile"

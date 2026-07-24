@@ -377,8 +377,24 @@ static void repl(void) {
 
 /* ---- Compile-time execution filter ---- */
 
-/* Returns true for forms that must be run during -c compilation because
-   they affect the macro/import environment for subsequent forms. */
+/* Returns true for forms that must be RUN (not just compiled) during -c
+   compilation because they affect the macro/import environment for
+   subsequent forms in the same -c session — e.g. so a later top-level use
+   of a macro defined earlier in the same file sees it.
+
+   Note this is about running the compiled BYTECODE; it doesn't gate
+   whether -c's "without executing" guarantee holds for macro-related
+   forms in general. It never fully has: compiling ANY macro use site
+   already evaluates that macro's transformer procedure (via apply()) at
+   compile time, -c included — that's inherent to how syntax-rules/macro
+   expansion works in any Scheme, not something -c can opt out of. compiler.c's
+   compile_define_syntax/compile_let_syntax extend this the same way for
+   macro DEFINITION (not just use): a define-syntax/let-syntax/letrec-syntax
+   form's transformer-expr is evaluated during compilation regardless of -c,
+   so a pathological transformer-expr with an observable side effect (I/O, a
+   counter, etc.) runs once per compile even under -c. This is a pre-existing
+   characteristic of compiling this language, not a gap this filter is meant
+   to close — Curry source is fully trusted, comparable to any Scheme eval. */
 static bool affects_compile_env(val_t form) {
     if (!vis_pair(form)) return false;
     val_t head = vcar(form);

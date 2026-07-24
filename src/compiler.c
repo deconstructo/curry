@@ -64,11 +64,13 @@
 #include "akkadian_eval.h"
 #include "reader.h"
 #include "record_type.h"
+#include "syntax_rules.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
 #define MAX_LOCALS  256
 #define MAX_UPVALS  256
+#define MAX_SYNTAX_LOCALS 64
 
 typedef struct {
     val_t  name;       /* interned symbol                                */
@@ -84,6 +86,17 @@ typedef struct {
     val_t name;        /* interned symbol — for JIT upval_names table   */
 } UpvalDesc;
 
+/* A macro visible only within this compilation and its nested lambdas —
+ * established by let-syntax/letrec-syntax or an internal (non-top-level)
+ * define-syntax.  Pure compile-time bookkeeping: `transformer` is the
+ * already-evaluated callable (a Closure/Primitive/BcClosure val_t), never
+ * touching the VM stack the way a Local does.  See resolve_syntax_local. */
+typedef struct {
+    val_t name;
+    val_t transformer;
+    int   depth;
+} SyntaxLocal;
+
 typedef struct Compiler {
     struct Compiler *enclosing;
 
@@ -96,6 +109,9 @@ typedef struct Compiler {
 
     UpvalDesc  upvals[MAX_UPVALS];
     int        upval_count;
+
+    SyntaxLocal syntax_locals[MAX_SYNTAX_LOCALS];
+    int         syntax_local_count;
 } Compiler;
 
 /* ── Forward declarations ────────────────────────────────────────────── */
@@ -115,6 +131,7 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->local_count = 0;
     c->scope_depth = 0;
     c->upval_count = 0;
+    c->syntax_local_count = 0;
     c->chunk->name = name;
     c->chunk->source_name = g_compile_source_name;
 }
@@ -187,6 +204,42 @@ static void end_scope(Compiler *c, int line) {
     /* Slide TOS (the scope's result) past all the local slots below it. */
     if (n > 0)
         emit_ab(c, OP_SLIDE, (uint8_t)n, line);
+    /* Local macros (let-syntax/letrec-syntax/internal define-syntax) leave
+     * no VM stack footprint — just drop them from compile-time bookkeeping. */
+    while (c->syntax_local_count > 0 &&
+           c->syntax_locals[c->syntax_local_count - 1].depth > c->scope_depth)
+        c->syntax_local_count--;
+}
+
+/* Register a macro visible from here to the end of the enclosing scope
+ * (and to any nested lambda compiled within it, via resolve_syntax_local's
+ * walk up ->enclosing) — used by internal define-syntax and by
+ * let-syntax/letrec-syntax. */
+static int add_syntax_local(Compiler *c, val_t name, val_t transformer) {
+    if (c->syntax_local_count == MAX_SYNTAX_LOCALS) {
+        fprintf(stderr, "compiler: too many local macros\n");
+        return 0;
+    }
+    SyntaxLocal *s = &c->syntax_locals[c->syntax_local_count];
+    s->name        = name;
+    s->transformer = transformer;
+    s->depth       = c->scope_depth;
+    return c->syntax_local_count++;
+}
+
+/* Walk this compiler's local macro table, then each enclosing compiler in
+ * turn (a nested lambda sees its parent's local macros, same as upvalues).
+ * Inner bindings shadow outer ones. Returns false (not found) if no local
+ * macro matches — the caller should then fall back to a GLOBAL_ENV lookup. */
+static bool resolve_syntax_local(Compiler *c, val_t name, val_t *out_transformer) {
+    for (Compiler *cc = c; cc; cc = cc->enclosing) {
+        for (int i = cc->syntax_local_count - 1; i >= 0; i--)
+            if (cc->syntax_locals[i].name == name) {
+                *out_transformer = cc->syntax_locals[i].transformer;
+                return true;
+            }
+    }
+    return false;
 }
 
 static int add_local(Compiler *c, val_t name) {
@@ -333,6 +386,12 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                     c.locals[c.local_count - 1].depth = -1; /* uninitialised */
                     emit(&c, OP_VOID, line); /* reserve stack slot */
                 }
+            } else if (akk_translate(vcar(form)) == S_DEFINE_SYNTAX) {
+                /* Macro registration is pure compile-time bookkeeping (see
+                 * add_syntax_local/resolve_syntax_local) — no VM stack slot
+                 * to reserve.  compile_define_syntax registers it into
+                 * c.syntax_locals sequentially as compile_seq reaches this
+                 * form for real, so later forms in this same body see it. */
             } else {
                 val_t defname = vcar(vcdr(form));
                 if (vis_symbol(defname)) {
@@ -454,6 +513,185 @@ static void compile_define_record_type(Compiler *c, val_t rest, int line) {
         compile_define(c, def_args, line);
         if (i + 1 < spec.count) emit(c, OP_POP, line); /* discard intermediate OP_VOID */
     }
+}
+
+/* Compile expr as an independent, parent-less top-level unit and run it
+ * immediately — used to evaluate macro-transformer expressions
+ * (define-syntax/let-syntax/letrec-syntax) at compile time.  Having no
+ * parent Compiler means expr cannot resolve an enclosing lambda's locals or
+ * upvalues as compiler-tracked variables; it can only see GLOBAL_ENV,
+ * exactly like top-level define-syntax always could.  That's not a new
+ * restriction: a transformer-constructing expression referencing a
+ * not-yet-computed runtime-only local is meaningless anyway, since macro
+ * expansion happens at compile time, before the enclosing function has ever
+ * run.  compiler_compile()/vm_run() are already invoked reentrantly
+ * elsewhere (e.g. apply() during use-site macro expansion below can itself
+ * trigger vm_run for a compiled transformer), so nesting them here follows
+ * an established pattern rather than introducing a new one — but that
+ * pattern requires pushing the closure as the callee before vm_run (see
+ * vm_eval's own comment in vm.c): pop_frame's return path assumes a pushed
+ * callee+args below the frame, so a reentrant vm_run entered without one
+ * (e.g. this call firing while the debugger's `,debug`/`p` command has
+ * vm_run paused mid-frame) would corrupt the suspended frame's stack by one
+ * slot. Top-level (non-reentrant) callers wouldn't have noticed, since
+ * frame_count == 0 takes pop_frame's full-reset path instead.
+ *
+ * Exception-safe: compiler_compile() brackets its work in
+ * gc_inhibit_minor()/gc_resume_minor(), so a transformer expression that
+ * raises during compilation or evaluation (a bad syntax-rules form, an
+ * unbound reference, etc.) would otherwise longjmp past the matching
+ * gc_resume_minor() with nothing to rebalance it — permanently leaking
+ * gc_inhibit_count and disabling minor-GC safepoints for the rest of the
+ * process.  SCM_PROTECT snapshots and restores it (along with the shadow
+ * stack and JIT call depth) regardless of how many nested inhibit/resume
+ * calls happened inside, then this re-raises the same exception so normal
+ * error reporting (REPL, guard, etc.) is unaffected. */
+static val_t compile_time_eval(val_t expr) {
+    ExnHandler h;
+    val_t result = V_VOID;
+    bool  raised = false;
+    SCM_PROTECT(h, {
+        val_t cl_val  = compiler_compile(expr);
+        BcClosure *cl = as_bcclosure(cl_val);
+        vm_push(cl_val);
+        result = vm_run(cl, 0);
+    }, {
+        raised = true;
+    });
+    if (raised) scm_raise_val(h.exn);
+    return result;
+}
+
+/* (define-syntax name transformer-expr). At top level (scope_depth == 0)
+ * this registers into GLOBAL_ENV immediately — eagerly, at compile time,
+ * rather than ONLY deferring to a runtime tree-eval call — so a macro
+ * defined and used within the very same compiled unit (e.g. the same
+ * top-level begin block or script) is visible to its own later forms,
+ * which the old tree-eval-punt behavior could not do (it only ever took
+ * effect once the *next separately compiled* top-level form ran).
+ *
+ * The eager registration alone doesn't survive a .scc cache-hit replay,
+ * though: on a cache hit the compiler never runs again, so if that were
+ * the ONLY effect, the macro would silently vanish from GLOBAL_ENV on
+ * every run except the one that originally produced the cache (e.g.
+ * breaking `-i` dropping into a REPL after a cached script run). So this
+ * ALSO emits runtime bytecode that re-registers the same macro when the
+ * bytecode executes (fresh or replayed from cache) — deliberately NOT by
+ * embedding the compile-time-evaluated `transformer` procedure value
+ * directly as a constant: a syntax-rules transformer is a Primitive
+ * closing over a C function pointer, which cannot be serialized into a
+ * .scc file (confirmed by testing: doing so segfaults on the next
+ * process's cache-hit load).
+ *
+ * Two cases, both wired through emitting (tree-eval '(define-syntax name
+ * runtime-xfm-expr)) — i.e. always going through define-syntax's own
+ * single Syntax-wrapping step (in the tree-walker's S_DEFINE_SYNTAX case),
+ * never building or embedding a Syntax struct here directly. An earlier
+ * version of this code called %rebuild-syntax-rules via a plain (define
+ * ...) and wrapped its result in a second, redundant Syntax struct; since
+ * %rebuild-syntax-rules is an ordinary, discoverable global primitive, a
+ * user writing (define-syntax bogus (%rebuild-syntax-rules ...)) directly
+ * produced a Syntax-wrapping-a-Syntax value nothing else expected,
+ * corrupting VM state when used (found by review). Routing everything
+ * through one (define-syntax ...) form, and having %rebuild-syntax-rules
+ * return a bare transformer (the same shape (syntax-rules ...) itself
+ * evaluates to — see sr_rebuild_syntax's doc comment), fixes that: direct
+ * misuse now just produces an ordinary, correctly-single-wrapped macro (or
+ * a normal Scheme error, if the literals/rules/ellipsis are malformed).
+ *
+ *   - transformer-expr produced an ordinary syntax-rules transformer (by
+ *     far the common case): sr_transformer_data extracts its underlying
+ *     literals/rules/ellipsis — always plain, serializable pattern/
+ *     template data, never evaluated Scheme code — and runtime-xfm-expr
+ *     becomes (%rebuild-syntax-rules 'literals 'rules 'ellipsis). This
+ *     never re-runs transformer-expr itself, so a transformer-expr with
+ *     side-effecting code around the (syntax-rules ...) form (e.g.
+ *     `(begin (side-effect!) (syntax-rules ...))`) only actually executes
+ *     once, at compile time.
+ *   - Anything else (a procedural transformer): there's no way to
+ *     decompose an arbitrary closure into serializable pure data, so
+ *     runtime-xfm-expr is just the ORIGINAL transformer-expr, re-evaluated
+ *     at runtime — exactly what the pre-existing tree-eval punt already
+ *     did. This DOES mean transformer-expr's side effects (if any) run
+ *     twice on a fresh run: once via compile_time_eval, once via the
+ *     runtime tree-eval call. Accepted for this rare case: define-syntax
+ *     is a one-shot, load-time form, never a hot path, and a procedural
+ *     transformer genuinely cannot survive a .scc cache reload any other
+ *     way.
+ *
+ * Inside a lambda/let-syntax body, the macro is scoped to this
+ * compilation's syntax_locals instead of leaking into GLOBAL_ENV (fixing
+ * the same local-scope leak that define-record-type had), and needs no
+ * runtime reconstruction at all: an internal macro is fully consumed by
+ * the compiler expanding its use sites within the same lambda body, which
+ * are already baked into that body's bytecode by the time compilation
+ * ends — nothing outside that (lexically-scoped, one-shot) compilation
+ * could ever need it to exist again later. */
+static void compile_define_syntax(Compiler *c, val_t args, int line) {
+    val_t name        = vcar(args);
+    val_t xfm_expr    = vcar(vcdr(args));
+    val_t transformer = compile_time_eval(xfm_expr);
+
+    if (c->scope_depth == 0) {
+        Syntax *syn = CURRY_NEW(Syntax);
+        syn->hdr.type = T_SYNTAX; syn->hdr.flags = 0;
+        syn->transformer = transformer;
+        env_define(GLOBAL_ENV, name, vptr(syn));
+
+        val_t literals, rules, ellipsis;
+        val_t runtime_xfm_expr;
+        if (sr_transformer_data(transformer, &literals, &rules, &ellipsis)) {
+            runtime_xfm_expr = scm_cons(sym_intern_cstr("%rebuild-syntax-rules"),
+                scm_cons(scm_cons(S_QUOTE, scm_cons(literals, V_NIL)),
+                 scm_cons(scm_cons(S_QUOTE, scm_cons(rules, V_NIL)),
+                  scm_cons(scm_cons(S_QUOTE, scm_cons(ellipsis, V_NIL)), V_NIL))));
+        } else {
+            runtime_xfm_expr = xfm_expr;
+        }
+
+        val_t whole_form    = scm_cons(S_DEFINE_SYNTAX,
+                                scm_cons(name, scm_cons(runtime_xfm_expr, V_NIL)));
+        val_t tree_eval_sym = sym_intern_cstr("tree-eval");
+        emit_ab(c, OP_LOAD_GLOBAL,
+                (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
+        emit_const(c, whole_form, line);
+        emit_ab(c, OP_CALL, 1, line);
+    } else {
+        add_syntax_local(c, name, transformer);
+        emit(c, OP_VOID, line); /* define-syntax returns void */
+    }
+}
+
+/* (let-syntax ((name xfm-expr)...) body...)
+ * (letrec-syntax ((name xfm-expr)...) body...)
+ * Uses the SAME Compiler `c` (no nested lambda/closure, unlike let/letrec):
+ * macros carry no runtime stack footprint, so there is no slot-layout
+ * hazard to isolate — begin_scope/end_scope's local-macro trimming (see
+ * end_scope) is all the isolation this needs, exactly as it already is for
+ * a plain nested block. R7RS distinguishes let-syntax (transformer
+ * expressions see only the OUTER scope) from letrec-syntax (transformer
+ * expressions see each other too, for mutually-recursive macros); in
+ * practice that distinction is moot here, since compile_time_eval compiles
+ * each transformer expression as an independent parent-less unit that
+ * cannot observe this Compiler's syntax_locals either way — a transformer
+ * that itself needs to invoke a sibling local macro during its own
+ * construction is an exotic case this implementation doesn't support, no
+ * differently for let-syntax vs. letrec-syntax. */
+static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+
+    begin_scope(c);
+    val_t b = bindings;
+    while (vis_pair(b)) {
+        val_t bind = vcar(b);
+        val_t name = vcar(bind);
+        val_t xfm  = compile_time_eval(vcar(vcdr(bind)));
+        add_syntax_local(c, name, xfm);
+        b = vcdr(b);
+    }
+    compile_seq(c, body, tail, line);
+    end_scope(c, line);
 }
 
 static void compile_set(Compiler *c, val_t args, int line) {
@@ -1312,14 +1550,30 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_DEFINE_SYNTAX) {
+        compile_define_syntax(c, args, line);
+        return;
+    }
+
+    if (head == S_LET_SYNTAX || head == S_LETREC_SYNTAX) {
+        compile_let_syntax(c, args, tail, line);
+        return;
+    }
+
+    /* Note: syntax-rules itself is deliberately NOT special-cased here.
+     * syntax_rules_register() binds the symbol `syntax-rules` to a T_SYNTAX
+     * in GLOBAL_ENV whose transformer (sr_compile_fn) takes the raw
+     * (syntax-rules literals rule...) form and returns a self-evaluating
+     * T_PRIMITIVE transformer — so a (syntax-rules ...) expression, e.g. as
+     * define-syntax's transformer-expr, already gets handled by the
+     * ordinary "macro expansion" check below like any other macro use,
+     * with no eval()/tree-eval dependency at all. */
+
     /* Forms the compiler delegates to the tree-walker at runtime:
-       import, define-syntax, let-syntax, letrec-syntax,
-       define-library, library, syntax-rules.
+       import, define-library, library.
        Emitted as: (tree-eval '<form>) */
-    if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
-        head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
+    if (head == S_IMPORT        ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
-        head == S_SYNTAX_RULES   ||
         head == S_SYMBOLIC      ||
         head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
         head == S_DEFINE_ALGEBRA || head == S_WITH_ASSUMPTIONS) {
@@ -1331,19 +1585,26 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
-    /* Macro expansion: if head is a symbol bound to T_SYNTAX in GLOBAL_ENV
-       (i.e. a user-defined syntax-rules macro), expand and recompile.
+    /* Macro expansion: if head is a symbol bound to a macro, expand and
+       recompile. A local macro (let-syntax/letrec-syntax/internal
+       define-syntax, tracked in c->syntax_locals — see resolve_syntax_local)
+       shadows a same-named global one, matching ordinary lexical scoping.
        Expansion errors are deferred to runtime via (raise ...) so that
        guard forms inside lambdas can catch zero-clause or no-match errors. */
     if (vis_symbol(head)) {
-        val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
-        if (vis_syntax(macro)) {
+        val_t transformer;
+        bool is_macro = resolve_syntax_local(c, head, &transformer);
+        if (!is_macro) {
+            val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
+        if (is_macro) {
             ExnHandler h;
             val_t expanded = V_FALSE;
             val_t exn_val  = V_FALSE;
             SCM_PROTECT(h,
-                expanded = apply(as_syntax(macro)->transformer,
-                                 scm_cons(expr, V_NIL)),
+                expanded = apply(transformer, scm_cons(expr, V_NIL)),
                 exn_val  = h.exn);
             if (exn_val != V_FALSE) {
                 /* Expansion failed — emit (raise <error>) to defer to runtime */

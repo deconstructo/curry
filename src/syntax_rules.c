@@ -316,6 +316,19 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
     val_t form = av[0]; /* entire unevaluated use-site form */
     SyntaxRulesData *sr = ud;
 
+    /* Normal macro expansion always passes a pair (the whole use-site
+     * form). But this Primitive is an ordinary first-class value once
+     * obtained via (syntax-rules ...) or %rebuild-syntax-rules — nothing
+     * stops user code from calling it directly as a procedure with an
+     * arbitrary (non-pair) argument, e.g. a fixnum. vcdr(form) below would
+     * blindly reinterpret that value's bits as a Pair* and crash; guard
+     * against it with a clean error instead (latent bug, pre-existing
+     * before %rebuild-syntax-rules — confirmed reachable via plain
+     * (syntax-rules ...) too — made newly easy to hit by exposing the raw
+     * transformer more directly, so fixed here). */
+    if (!vis_pair(form))
+        scm_raise(V_FALSE, "syntax-rules transformer: expected a use-site form, got a non-pair value");
+
     for (val_t rules = sr->rules; vis_pair(rules); rules = vcdr(rules)) {
         val_t rule = vcar(rules);
         val_t pat  = vcar(rule);
@@ -386,6 +399,73 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     return vptr(p);
 }
 
+/* ---- Extraction / direct reconstruction (compiler.c's define-syntax) ---- */
+
+bool sr_transformer_data(val_t transformer, val_t *literals, val_t *rules,
+                          val_t *ellipsis) {
+    if (!vis_prim(transformer)) return false;
+    Primitive *p = as_prim(transformer);
+    if (p->fn != sr_transformer_fn) return false;
+    SyntaxRulesData *sr = p->ud;
+    *literals = sr->literals;
+    *rules    = sr->rules;
+    *ellipsis = sr->ellipsis;
+    return true;
+}
+
+/* Returns the bare transformer procedure — the same shape sr_compile_fn's
+ * (syntax-rules ...) produces, deliberately NOT wrapped in a Syntax struct.
+ * The caller (compiler.c's compile_define_syntax, or the tree-walker's own
+ * S_DEFINE_SYNTAX, both unconditionally wrap whatever a transformer-expr
+ * evaluates to in exactly one Syntax layer) is the only place that should
+ * ever do that wrapping — %rebuild-syntax-rules (below) is an ordinary,
+ * discoverable global primitive, so if it returned an already-Syntax-wrapped
+ * value, a user writing (define-syntax bogus (%rebuild-syntax-rules ...))
+ * directly would end up with a Syntax-wrapping-a-Syntax value that nothing
+ * else in the codebase expects, corrupting VM state when the resulting
+ * "macro" is used (found by review). Matching sr_compile_fn's return shape
+ * makes direct misuse behave exactly like using (syntax-rules ...) with
+ * malformed literals/rules/ellipsis — validated below, then a normal
+ * Scheme error, never a crash. */
+val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis) {
+    if (scm_list_length(literals) < 0)
+        scm_raise(V_FALSE, "%%rebuild-syntax-rules: literals must be a proper list");
+    if (scm_list_length(rules) < 0)
+        scm_raise(V_FALSE, "%%rebuild-syntax-rules: rules must be a proper list");
+    for (val_t r = rules; vis_pair(r); r = vcdr(r))
+        if (!vis_pair(vcar(r)))
+            scm_raise(V_FALSE, "%%rebuild-syntax-rules: each rule must be a (pattern . template) pair");
+    if (!vis_symbol(ellipsis))
+        scm_raise(V_FALSE, "%%rebuild-syntax-rules: ellipsis must be a symbol");
+
+    SyntaxRulesData *sr = gc_alloc_raw_pinned(sizeof(SyntaxRulesData));
+    sr->literals = literals;
+    sr->rules    = rules;
+    sr->ellipsis = ellipsis;
+
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
+    p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name     = "syntax-rules-transformer";
+    p->min_args = 1; p->max_args = 1;
+    p->fn  = sr_transformer_fn;
+    p->ud  = sr;
+    return vptr(p);
+}
+
+/* Bytecode-callable wrapper around sr_rebuild_syntax — see compiler.c's
+ * compile_define_syntax, which emits a call to this (with literals/rules/
+ * ellipsis embedded as quoted constants) as a compiled top-level macro's
+ * runtime re-registration, instead of re-evaluating the original
+ * transformer-expression source, whenever that expression turns out to
+ * have produced an ordinary syntax-rules transformer. Its result is wired
+ * back through (define-syntax name (%rebuild-syntax-rules ...)), not a
+ * plain define, so it goes through the same single Syntax-wrapping step as
+ * every other transformer-expr. */
+static val_t prim_rebuild_syntax_rules(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return sr_rebuild_syntax(av[0], av[1], av[2]);
+}
+
 /* ---- Registration ---- */
 
 void syntax_rules_register(val_t env) {
@@ -408,4 +488,12 @@ void syntax_rules_register(val_t env) {
     syn->transformer = vptr(compile_prim);
 
     env_define(env, sym_intern_cstr("syntax-rules"), vptr(syn));
+
+    Primitive *rebuild_prim = CURRY_NEW_PINNED(Primitive);
+    rebuild_prim->hdr.type = T_PRIMITIVE; rebuild_prim->hdr.flags = 0;
+    rebuild_prim->name     = "%rebuild-syntax-rules";
+    rebuild_prim->min_args = 3; rebuild_prim->max_args = 3;
+    rebuild_prim->fn  = prim_rebuild_syntax_rules;
+    rebuild_prim->ud  = NULL;
+    env_define(env, sym_intern_cstr("%rebuild-syntax-rules"), vptr(rebuild_prim));
 }
