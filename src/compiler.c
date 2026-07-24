@@ -1087,6 +1087,24 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
     compile(c, outer_let, tail, line);
 }
 
+/* (receive formals producer-expr body...) — R7RS sugar over
+ * call-with-values, which is already a plain builtin primitive (no VM
+ * support needed).  Desugar to:
+ *   (call-with-values (lambda () producer-expr) (lambda formals body...)) */
+static void compile_receive(Compiler *c, val_t args, bool tail, int line) {
+    val_t formals  = vcar(args);
+    val_t producer = vcar(vcdr(args));
+    val_t body     = vcdr(vcdr(args));
+
+    val_t producer_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, scm_cons(producer, V_NIL)));
+    val_t consumer_lam = scm_cons(S_LAMBDA, scm_cons(formals, body));
+    val_t cwv = scm_cons(S_CALL_WITH_VALUES,
+                 scm_cons(producer_lam,
+                  scm_cons(consumer_lam, V_NIL)));
+
+    compile(c, cwv, tail, line);
+}
+
 /* ── Application compilation ─────────────────────────────────────────── */
 
 static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int line) {
@@ -1248,15 +1266,20 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_RECEIVE) {
+        compile_receive(c, args, tail, line);
+        return;
+    }
+
     /* Forms the compiler delegates to the tree-walker at runtime:
        import, define-syntax, let-syntax, letrec-syntax,
-       define-record-type, guard, receive, syntax-rules.
+       define-record-type, syntax-rules.
        Emitted as: (tree-eval '<form>) */
     if (head == S_IMPORT        || head == S_DEFINE_SYNTAX  ||
         head == S_LET_SYNTAX    || head == S_LETREC_SYNTAX  ||
         head == S_DEFINE_RECORD_TYPE ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
-        head == S_RECEIVE       || head == S_SYNTAX_RULES   ||
+        head == S_SYNTAX_RULES   ||
         head == S_SYMBOLIC      ||
         head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
         head == S_DEFINE_ALGEBRA || head == S_WITH_ASSUMPTIONS) {

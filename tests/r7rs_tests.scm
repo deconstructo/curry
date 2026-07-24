@@ -104,6 +104,21 @@
 ;;; Control
 (check "values" (call-with-values (lambda () (values 1 2)) +) 3)
 
+;;; receive (R7RS sugar over call-with-values, compiled natively)
+(check "receive proper formals"
+  (receive (a b) (values 1 2) (+ a b)) 3)
+(check "receive dotted formals"
+  (receive (a . rest) (values 1 2 3) (list a rest)) '(1 (2 3)))
+(check "receive rest-only formals"
+  (receive all (values 1 2 3) all) '(1 2 3))
+(check "receive single value"
+  (receive (a) (values 42) a) 42)
+(check "receive tail position"
+  (let loop ((n 3) (acc 0))
+    (if (= n 0) acc
+        (receive (n1) (values (- n 1))
+          (loop n1 (+ acc n))))) 6)
+
 ;;; Let forms
 (check "let" (let ((x 1) (y 2)) (+ x y)) 3)
 (check "let*" (let* ((x 1) (y (+ x 1))) y) 2)
