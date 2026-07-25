@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+**Strings — missing bounds checks; one live SIGSEGV, one silent corruption bug**
+
+`string-ref`/`string-set!` (`src/builtins.c`) had no index bounds checking at all, found in the same full-codebase audit as the other fixes in this file. `string-ref` could read past the end of a string's byte buffer (a leftover dead loop plus a second loop that could land its pointer exactly at the buffer end before unconditionally dereferencing it to decode a codepoint there); `string-set!` cast a negative index straight to `uint32_t` with no check first, wrapping it to a huge offset that `utf8_char_offset` — a helper that clamps its own internal walk safely, but doesn't tell its caller anything went out of range — then silently clamped to the buffer end, splicing the new character in at the wrong place instead of raising.
+
+An independent review of the initial fix (scoped to just those two primitives) found the identical unguarded pattern in six sibling primitives, and reproduced a live crash: `(string-copy "abc" 1000 2)` segfaulted (an out-of-range start clamped to the buffer end while a smaller explicit end didn't, underflowing a length computation to ~4GB and driving a massive OOB `memcpy`), and `(string-copy! s -1 f)` produced silent data corruption (a negative index wrapped past a `uint32_t`-only overflow check). Fixed `string-copy`, `string->list`, `string-fill!`, `write-string`, `string->utf8`, `substring`, and `string-copy!` the same way, via a new shared `string_range_to_bytes()` helper that validates a `[start,end)` character range against the string's real character count — comparing the end index *widened* against the count rather than the count *narrowed* to match the index, specifically so an index larger than `UINT32_MAX` can't wrap to something small and slip past the check. `utf8->string` (byte-indexed, not character-indexed, so it doesn't go through the shared helper) and `string-copy!`'s destination index got the equivalent direct fix.
+
+A second independent review of the widened fix confirmed it correct end to end, but flagged that the identical bug class is still live, untouched, in the vector and bytevector primitives (`vector-copy`, `vector->list`, `vector-copy!`, `vector-fill!`, `bytevector-copy`, and likely `bytevector-copy!`/`read-bytevector!`/`write-bytevector`) — reproduced further live SIGSEGVs and an information-disclosure read there. That family is fixed separately, see below.
+
+Added regression coverage to `tests/r7rs_tests.scm` for every primitive touched (negative/out-of-range/multibyte cases, plus confirming the original string is left uncorrupted after a rejected `string-set!`). Reviewed independently twice per CLAUDE.md's callout on array-bounds/off-by-one specifically — round two is what caught the sibling-primitive gap round one left open. ctest 220/220 (`scheme_r7rs`, was 208), full suite 44/44, test_cli.sh 67/67.
+
 **Surreal numbers — non-canonical construction and silent multiplication truncation**
 
 Two bugs in `src/surreal.c` from the same full-codebase audit, both violating the canonical-form invariant (sorted descending by exponent, no duplicate exponents, no zero coefficients) the rest of the arithmetic — `sur_add`'s merge in particular — assumes every live `Surreal` object already has:

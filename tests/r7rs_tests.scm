@@ -63,8 +63,61 @@
 ;;; Strings
 (check "string-length" (string-length "hello") 5)
 (check "string-ref" (string-ref "hello" 1) #\e)
+(check "string-ref multibyte" (string-ref "héllo" 1) #\é)
+(check "string-ref negative index raises"
+       (guard (exn (#t 'raised)) (string-ref "hello" -1)) 'raised)
+(check "string-ref out-of-range index raises"
+       (guard (exn (#t 'raised)) (string-ref "hello" 5)) 'raised)
+(check "string-ref empty string raises"
+       (guard (exn (#t 'raised)) (string-ref "" 0)) 'raised)
+(check "string-set! basic"
+       (let ((s (string-copy "hello"))) (string-set! s 0 #\H) s) "Hello")
+(check "string-set! multibyte"
+       (let ((s (string-copy "héllo"))) (string-set! s 1 #\e) s) "hello")
+(check "string-set! negative index raises"
+       (guard (exn (#t 'raised))
+         (let ((s (string-copy "hello"))) (string-set! s -1 #\z) 'no-error))
+       'raised)
+(check "string-set! out-of-range index raises"
+       (guard (exn (#t 'raised))
+         (let ((s (string-copy "hello"))) (string-set! s 5 #\z) 'no-error))
+       'raised)
+(check "string-set! out-of-range doesn't corrupt the string"
+       (let ((s (string-copy "hello")))
+         (guard (exn (#t #t)) (string-set! s 5 #\z))
+         s)
+       "hello")
 (check "substring" (substring "hello" 1 3) "el")
+(check "substring out-of-range end raises"
+       (guard (exn (#t 'raised)) (substring "hello" 0 1000)) 'raised)
+(check "substring negative start raises"
+       (guard (exn (#t 'raised)) (substring "hello" -1 3)) 'raised)
 (check "string->list" (string->list "abc") '(#\a #\b #\c))
+(check "string->list out-of-range end raises"
+       (guard (exn (#t 'raised)) (string->list "abc" 0 100)) 'raised)
+(check "string-copy out-of-range raises instead of crashing"
+       (guard (exn (#t 'raised)) (string-copy "abc" 1000 2)) 'raised)
+(check "string-copy! negative at raises instead of corrupting"
+       (guard (exn (#t 'raised))
+         (let ((s (string-copy "hello"))) (string-copy! s -1 "X") 'no-error))
+       'raised)
+(check "string-copy! basic still works"
+       (let ((s (string-copy "hello"))) (string-copy! s 1 "XY") s) "hXYlo")
+(check "string-fill! negative start raises"
+       (guard (exn (#t 'raised))
+         (let ((s (string-copy "hello"))) (string-fill! s #\z -1) 'no-error))
+       'raised)
+(check "string-fill! basic still works"
+       (let ((s (string-copy "hello"))) (string-fill! s #\z 1 3) s) "hzzlo")
+(check "write-string out-of-range raises"
+       (guard (exn (#t 'raised))
+         (write-string "abc" (open-output-string) 0 100)) 'raised)
+(check "string->utf8 out-of-range raises"
+       (guard (exn (#t 'raised)) (string->utf8 "abc" 0 100)) 'raised)
+(check "utf8->string out-of-range raises"
+       (guard (exn (#t 'raised)) (utf8->string (string->utf8 "abc") 0 100)) 'raised)
+(check "utf8->string basic still works"
+       (utf8->string (string->utf8 "abc")) "abc")
 (check "list->string" (list->string '(#\h #\i)) "hi")
 (check "string->symbol" (string->symbol "foo") 'foo)
 (check "symbol->string" (symbol->string 'bar) "bar")
