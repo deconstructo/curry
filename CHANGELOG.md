@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.10.3 — Fix `.scc` cache never being written for GUI/`(exit)`-ending scripts
 
 **`.scc` cache — GUI/`(exit)`-ending scripts now actually get cached**
 - Same root cause as the `--timings` fix below, for the transparent
