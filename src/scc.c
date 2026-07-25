@@ -449,9 +449,16 @@ static bool read_const(FILE *f, val_t *out) {
         return true;
     }
     case CTAG_BYTEVEC: {
+        /* rstr() only writes *len_out on its success path (every other
+         * call site checks `if (!buf) return false;` without touching
+         * len — this one read len on the failure path too, an
+         * uninitialized-variable read (UB), and even in the case where
+         * the garbage happened to be 0, `!buf && len > 0` is false, so a
+         * genuine decode failure fell through to silently building an
+         * empty bytevector instead of reporting the error. */
         uint32_t len;
         char *buf = rstr(f, &len);
-        if (!buf && len > 0) return false;
+        if (!buf) return false;
         Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + len);
         bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = len;
         if (len) memcpy(bv->data, buf, len);
