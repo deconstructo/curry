@@ -319,6 +319,69 @@ check_file_exists "record cache-miss run wrote .scc" "$TMPDIR_CLI/record_cache.s
 out=$("$CURRY" "$RECORD_SCM")
 check "define-record-type predicate survives cache-hit run" "$out" "#t 3"
 
+# ─── --timings: read/expand/compile/execute pipeline report ───────────────────
+TIMINGS_SCM="$TMPDIR_CLI/timings_test.scm"
+cat > "$TIMINGS_SCM" << 'SCHEME'
+(define-syntax my-macro
+  (syntax-rules ()
+    [(my-macro x) (* x x)]))
+(display (my-macro 21))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/timings_test.scc"
+
+# Disabled by default: no report, stdout unaffected.
+out=$("$CURRY" "$TIMINGS_SCM")
+check "no --timings: report absent" "$out" "441"
+
+# Cache-miss run: goes through read+expand+compile+execute for real.
+out=$("$CURRY" --timings "$TIMINGS_SCM" 2>&1 >/dev/null)
+check_contains "--timings: report header present" "$out" "--timings (ms):"
+check_contains "--timings: read line present"    "$out" "read"
+check_contains "--timings: expand line present"  "$out" "expand"
+check_contains "--timings: compile line present" "$out" "compile"
+check_contains "--timings: execute line present" "$out" "execute"
+check_contains "--timings: total line present"   "$out" "total"
+out=$("$CURRY" --timings "$TIMINGS_SCM" 2>/dev/null)
+check "--timings: stdout unaffected by report (report goes to stderr)" "$out" "441"
+
+# Cache-hit run: compiled work should collapse to (near) zero, matching a
+# skipped compile stage — this is the whole point of the instrumentation.
+out=$("$CURRY" --timings "$TIMINGS_SCM" 2>&1 >/dev/null | grep 'compile')
+check_contains "--timings: compile stage near-zero on .scc cache hit" "$out" "0.000"
+
+# -e also reports.
+out=$("$CURRY" --timings -e '(display (+ 1 2))' 2>&1 >/dev/null)
+check_contains "--timings: works with -e" "$out" "--timings (ms):"
+
+# -c (compile-only) must report real read/compile numbers too, not just
+# expand — regression test for a review finding: the -c loop's
+# scm_read/compiler_compile calls were originally uninstrumented, so
+# --timings -c on a file using a macro silently showed read/compile/execute
+# all at 0.000 while expand alone reported nonzero, misleadingly implying
+# no real compiler work happened.
+CTIMINGS_SCM="$TMPDIR_CLI/ctimings_test.scm"
+cat > "$CTIMINGS_SCM" << 'SCHEME'
+(define-syntax my-macro
+  (syntax-rules ()
+    [(my-macro x) (* x x)]))
+(display (my-macro 21))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/ctimings_test.scc"
+out=$("$CURRY" --timings -c "$CTIMINGS_SCM" -o "$TMPDIR_CLI/ctimings_test.scc" 2>&1 >/dev/null)
+check_contains "--timings -c: read line present"    "$out" "read"
+read_val=$(printf '%s\n' "$out" | grep 'read' | awk '{print $2}')
+compile_val=$(printf '%s\n' "$out" | grep 'compile' | awk '{print $2}')
+[ "$read_val" != "0.000" ] && check "--timings -c: read is nonzero" "nonzero" "nonzero" \
+    || check "--timings -c: read is nonzero" "$read_val" "nonzero"
+[ "$compile_val" != "0.000" ] && check "--timings -c: compile is nonzero" "nonzero" "nonzero" \
+    || check "--timings -c: compile is nonzero" "$compile_val" "nonzero"
+
+# --help documents it.
+out=$("$CURRY" --help 2>&1 || true)
+check_contains "--help documents --timings" "$out" "--timings"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

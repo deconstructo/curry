@@ -229,7 +229,13 @@ static void eval_port_exprs(val_t port, bool print) {
         val_t expr;
         ExnHandler h;
         h.prev = current_handler; current_handler = &h;
-        if (setjmp(h.jmp) == 0) { expr = scm_read(port); current_handler = h.prev; }
+        uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
+        if (setjmp(h.jmp) == 0) {
+            expr = scm_read(port);
+            current_handler = h.prev;
+            if (curry_timings_enabled)
+                curry_timing_read_ns += profiling_now_ns() - _read_t0;
+        }
         else {
             current_handler = h.prev;
             fprintf(stderr, "Read error: ");
@@ -254,6 +260,7 @@ static void eval_port_exprs(val_t port, bool print) {
 #ifdef HAVE_READLINE
                     rl_save_history();
 #endif
+                    curry_timings_report();
                     exit(0);
                 }
                 if (!strcmp(name, "help")) {
@@ -340,8 +347,16 @@ static void eval_port_exprs(val_t port, bool print) {
         h.saved_jit_depth = jit_depth_save();
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
+            uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
             val_t cl     = compiler_compile(expr);
+            if (curry_timings_enabled) {
+                uint64_t _t1 = profiling_now_ns();
+                curry_timing_compile_ns += _t1 - _t0;
+                _t0 = _t1;
+            }
             val_t result = vm_run(as_bcclosure(cl), 0);
+            if (curry_timings_enabled)
+                curry_timing_execute_ns += profiling_now_ns() - _t0;
             current_handler = h.prev;
             if (print) print_result(result);
         } else {
@@ -411,6 +426,18 @@ static bool affects_compile_env(val_t form) {
 
 /* ---- Usage ---- */
 
+/* Timed scm_read wrapper — for call sites (like the cache-miss script-load
+ * loop below) where the read happens inline in a while-condition and can't
+ * be bracketed with explicit before/after timestamps without restructuring
+ * the loop. A read that itself raises (longjmp) skips the accumulator add,
+ * same as any other error path — harmless, just under-counts that one call. */
+static val_t timed_scm_read(val_t port) {
+    uint64_t t0 = curry_timings_enabled ? profiling_now_ns() : 0;
+    val_t v = scm_read(port);
+    if (curry_timings_enabled) curry_timing_read_ns += profiling_now_ns() - t0;
+    return v;
+}
+
 static void usage(const char *argv0) {
     fprintf(stderr,
         "Usage: %s [options] [script.scm] [args...]\n"
@@ -427,7 +454,9 @@ static void usage(const char *argv0) {
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
         "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n"
         "                    Note: generational backend is experimental. Actor-heavy workloads\n"
-        "                    may accumulate nursery garbage between main-thread GC cycles.\n",
+        "                    may accumulate nursery garbage between main-thread GC cycles.\n"
+        "  --timings         Print a read/expand/compile/execute pipeline timing\n"
+        "                    report to stderr on exit\n",
         argv0);
 }
 
@@ -484,14 +513,20 @@ int main(int argc, char **argv) {
         { "gc-max-heap",  required_argument, NULL, 'G' },
         { "gc",              required_argument, NULL, 0   },  /* handled pre-scan */
         { "gc-nursery-size", required_argument, NULL, 0   },  /* handled pre-scan */
+        { "timings",         no_argument,       NULL, 0   },
         { NULL, 0, NULL, 0 }
     };
 
     int opt;
+    int long_idx;
     /* '+' prefix: stop at first non-option so script args aren't consumed */
-    while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhG:", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhG:", long_opts, &long_idx)) != -1) {
         switch (opt) {
-        case 0:   break;   /* long option with no short form (e.g. --gc) — already handled */
+        case 0:
+            /* long option with no short form */
+            if (!strcmp(long_opts[long_idx].name, "timings"))
+                curry_timings_enabled = true;
+            break;   /* --gc / --gc-nursery-size already handled in the pre-scan */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;
@@ -522,16 +557,30 @@ int main(int argc, char **argv) {
                 ExnHandler h;
                 gc_inhibit_minor();
                 h.prev = current_handler; current_handler = &h;
-                if (setjmp(h.jmp) == 0) { expr = scm_read(str_port); current_handler = h.prev; }
+                uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
+                if (setjmp(h.jmp) == 0) {
+                    expr = scm_read(str_port);
+                    current_handler = h.prev;
+                    if (curry_timings_enabled)
+                        curry_timing_read_ns += profiling_now_ns() - _read_t0;
+                }
                 else { gc_resume_minor(); current_handler = h.prev; break; }
                 if (vis_eof(expr)) { gc_resume_minor(); break; }
                 h.prev = current_handler;
                 h.saved_jit_depth = jit_depth_save();
                 current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
+                    uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(expr);
                     gc_resume_minor();
+                    if (curry_timings_enabled) {
+                        uint64_t _t1 = profiling_now_ns();
+                        curry_timing_compile_ns += _t1 - _t0;
+                        _t0 = _t1;
+                    }
                     last = vm_run(as_bcclosure(cl), 0);
+                    if (curry_timings_enabled)
+                        curry_timing_execute_ns += profiling_now_ns() - _t0;
                     current_handler = h.prev;
                 } else {
                     current_handler = h.prev;
@@ -582,16 +631,25 @@ int main(int argc, char **argv) {
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             val_t v;
-            while (!vis_eof((v = scm_read(port)))) {
+            while (!vis_eof((v = timed_scm_read(port)))) {
+                uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 val_t cl = compiler_compile(v);
+                if (curry_timings_enabled) {
+                    uint64_t _t1 = profiling_now_ns();
+                    curry_timing_compile_ns += _t1 - _t0;
+                    _t0 = _t1;
+                }
                 BcClosure *bc = as_bcclosure(cl);
                 if (n_chunks == cap) {
                     cap *= 2;
                     chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
                 }
                 chunks[n_chunks++] = bc->chunk;
-                if (affects_compile_env(v))
+                if (affects_compile_env(v)) {
                     vm_run(bc, 0);
+                    if (curry_timings_enabled)
+                        curry_timing_execute_ns += profiling_now_ns() - _t0;
+                }
             }
             current_handler = h.prev;
         } else {
@@ -667,14 +725,20 @@ int main(int argc, char **argv) {
                 }
                 for (int k = 0; k < n_chunks; k++)
                     chunk_set_source_name_recursive(chunks[k], argv[i]);
+                uint64_t _exec_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
+                if (curry_timings_enabled)
+                    curry_timing_execute_ns += profiling_now_ns() - _exec_t0;
             } else if (scc_load(argv[i], &chunks, &n_chunks)) {
                 /* Cache hit: run each chunk in order */
                 for (int k = 0; k < n_chunks; k++)
                     chunk_set_source_name_recursive(chunks[k], argv[i]);
+                uint64_t _exec_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 for (int k = 0; k < n_chunks; k++)
                     vm_run(vm_make_closure(chunks[k], 0), 0);
+                if (curry_timings_enabled)
+                    curry_timing_execute_ns += profiling_now_ns() - _exec_t0;
             } else {
                 /* Cache miss: compile one form at a time (preserves macro semantics),
                    collect chunks, write cache; each form is run as compiled */
@@ -688,9 +752,15 @@ int main(int argc, char **argv) {
                 chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
                 val_t v;
                 gc_inhibit_minor();
-                while (!vis_eof((v = scm_read(port)))) {
+                while (!vis_eof((v = timed_scm_read(port)))) {
+                    uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(v);
                     gc_resume_minor();   /* safe region: vm_run */
+                    if (curry_timings_enabled) {
+                        uint64_t _t1 = profiling_now_ns();
+                        curry_timing_compile_ns += _t1 - _t0;
+                        _t0 = _t1;
+                    }
                     BcClosure *bc = as_bcclosure(cl);
                     if (n_chunks == cap) {
                         cap *= 2;
@@ -698,6 +768,8 @@ int main(int argc, char **argv) {
                     }
                     chunks[n_chunks++] = bc->chunk;
                     vm_run(bc, 0);
+                    if (curry_timings_enabled)
+                        curry_timing_execute_ns += profiling_now_ns() - _t0;
                     gc_inhibit_minor(); /* back to unsafe for next read/compile */
                 }
                 gc_resume_minor();   /* EOF exit: leave inhibit balanced */
@@ -718,5 +790,6 @@ int main(int argc, char **argv) {
     if (!ran_something || interactive) {
         repl();
     }
+    curry_timings_report();
     return 0;
 }

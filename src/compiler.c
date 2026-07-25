@@ -62,6 +62,7 @@
 #include "vm.h"
 #include "builtins.h"
 #include "akkadian_eval.h"
+#include "profiling.h"
 #include "reader.h"
 #include "record_type.h"
 #include "syntax_rules.h"
@@ -2111,9 +2112,12 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
             ExnHandler h;
             val_t expanded = V_FALSE;
             val_t exn_val  = V_FALSE;
+            uint64_t _expand_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
             SCM_PROTECT(h,
                 expanded = apply(transformer, scm_cons(expr, V_NIL)),
                 exn_val  = h.exn);
+            if (curry_timings_enabled)
+                curry_timing_expand_ns += profiling_now_ns() - _expand_t0;
             if (exn_val != V_FALSE) {
                 /* Expansion failed — emit (raise <error>) to defer to runtime */
                 val_t raise_sym = sym_intern_cstr("raise");

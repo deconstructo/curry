@@ -12,6 +12,32 @@
 int curry_profiling_level    = 0;
 int curry_gc_profiling_level = 0;
 
+/* ---- Pipeline stage timings (--timings) ---- */
+
+bool     curry_timings_enabled   = false;
+uint64_t curry_timing_read_ns    = 0;
+uint64_t curry_timing_expand_ns  = 0;
+uint64_t curry_timing_compile_ns = 0;
+uint64_t curry_timing_execute_ns = 0;
+
+static double ns_to_ms(uint64_t ns) { return (double)ns / 1000000.0; }
+
+void curry_timings_report(void) {
+    if (!curry_timings_enabled) return;
+    /* compile_ns includes expand_ns (macro transformers run inside
+     * compiler_compile) — subtract so the printed lines don't double-count. */
+    uint64_t compile_only_ns = curry_timing_compile_ns > curry_timing_expand_ns
+        ? curry_timing_compile_ns - curry_timing_expand_ns : 0;
+    uint64_t total_ns = curry_timing_read_ns + curry_timing_expand_ns +
+                        compile_only_ns + curry_timing_execute_ns;
+    fprintf(stderr, "\n--timings (ms):\n");
+    fprintf(stderr, "  read     %12.3f\n", ns_to_ms(curry_timing_read_ns));
+    fprintf(stderr, "  expand   %12.3f\n", ns_to_ms(curry_timing_expand_ns));
+    fprintf(stderr, "  compile  %12.3f\n", ns_to_ms(compile_only_ns));
+    fprintf(stderr, "  execute  %12.3f\n", ns_to_ms(curry_timing_execute_ns));
+    fprintf(stderr, "  total    %12.3f\n", ns_to_ms(total_ns));
+}
+
 /* ---- Hash table ---- */
 
 #define PROF_SLOTS  4096

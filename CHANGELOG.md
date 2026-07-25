@@ -2,6 +2,30 @@
 
 ### Unreleased
 
+**CLI — `--timings` pipeline report**
+- New `--timings` flag prints a read/expand/compile/execute breakdown (ms)
+  to stderr on exit, covering the REPL, `-e`, `-c`, and positional
+  script-file (`.scc` cache-hit, cache-miss, and direct-run) paths.
+  "expand" (macro-transformer application, timed at its `apply()` call
+  site inside `compile()`'s dispatch) is a subset of "compile" time, not
+  additional to it, so the report subtracts it out before printing —
+  the four lines sum to the real total instead of double-counting nested
+  work. Zero overhead when disabled (single branch per call site, same
+  discipline as the existing closure profiler). See `tests/test_cli.sh`.
+- A review finding was fixed before landing: the `-c` (compile-only) path
+  was missing read/compile instrumentation entirely — only "expand" was
+  wired up there, so `--timings -c` on a file using a macro silently
+  showed `read`/`compile`/`execute` all at `0.000` while `expand` reported
+  real nonzero time, misleadingly implying no compiler work happened.
+
+**CI — benchmark suite with per-commit trends and a PR regression gate**
+- `tests/bench_ci.scm` (previously written but never wired up) now runs in
+  a new `.github/workflows/benchmark.yml` job on every push to `main` and
+  every PR, via `benchmark-action/github-action-benchmark`. Pushes to
+  `main` publish a new baseline point to the `gh-pages` branch; PRs compare
+  against the stored baseline and fail (with a PR comment) if any
+  benchmark regresses past 130% of baseline.
+
 **Compiler — eval-elimination phase 3 complete**
 - `with-assumptions` now compiles to native bytecode instead of punting to
   `(tree-eval '<form>)`. `(with-assumptions ((var assumption...) ...)
