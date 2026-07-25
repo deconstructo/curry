@@ -2,6 +2,18 @@
 
 ### Unreleased
 
+**Security/correctness — public C module API silently truncated strings at embedded NUL bytes**
+
+Curry strings are length-prefixed, not NUL-terminated at the language level — `(string #\a (integer->char 0) #\b)` is a legitimate 3-byte string. The public embedding API (`include/curry.h`, used by every loadable module) only exposed a strlen-based `curry_make_string(const char*)` and a bare-pointer `curry_string()` with no length accessor, so any module round-tripping binary or attacker/user-controlled data silently dropped everything after the first embedded NUL instead of erroring — a correctness bug in the ordinary case, and a data-integrity/security bug for any module treating the truncation point as significant. Found in the same full-codebase audit as the other fixes in this file. Added `curry_string_length()` and `curry_make_string_n(const char*, uint32_t len)` to the public API; `curry_make_string()` is now defined in terms of the latter. Fixed every call site across the tree that read or wrote data of a known byte length through the old strlen-based functions instead:
+
+- **`(curry redis)`** — every RESP command argument built from a Scheme value (write side) and the bulk-string reply parser (read side) now carry the real length end to end. Verified against a live `redis-server`: a `redis-set!`/`redis-get` round trip of a string with an embedded NUL now round-trips exactly instead of truncating.
+- **`(curry sqlite)`** — `TEXT` column reads now use `sqlite3_column_bytes` instead of strlen, and `sqlite-bind` now passes the real string length to `sqlite3_bind_text` instead of `-1` (strlen). Verified with an in-memory DB round trip.
+- **`(curry ldap)`** — attribute values were already read via the length-aware `ldap_get_values_len`/`berval` (specifically because LDAP values, e.g. binary ones like `jpegPhoto`, aren't NUL-terminated), but the `bv_len` was then discarded by a strlen-based string construction. Now uses the real length.
+- **`(curry mqtt)`** — a received message payload's tracked length (`paylen`, already captured at enqueue time) was discarded by a strlen-based string construction; MQTT payloads are explicitly allowed to be arbitrary binary. Now uses the real length.
+- **`(curry http)`** — an HTTP response body's tracked length was discarded the same way; response bodies are frequently binary content types. Now uses the real length.
+
+Reviewed independently per CLAUDE.md, given the change touches public API surface shared by every module. Added a regression test to `tests/redis_tests.scm` (live-server round trip) and a new `tests/sqlite_tests.scm` (registered in `tests/CMakeLists.txt`); ctest 44/44, test_cli.sh 67/67.
+
 **Concurrency — `spawn` could silently hand an actor a wrong/stale captured value**
 
 A correctness bug from the same full-codebase audit as the security fixes below, now fixed: a closure passed to `spawn` could still have an upvalue open into the *spawning* thread's live stack at the moment the new actor thread started running it. If the spawning thread was a tail-recursive loop reusing that exact stack slot for its next iteration (which TCO does by design), the actor could read the wrong value — no crash, no error, just silently wrong data. Confirmed on a plain release build with no sanitizer: 2000 actors spawned from a loop capturing the loop variable produced several actors reading a duplicated/skipped value across repeated runs.

@@ -101,7 +101,11 @@ static curry_val fn_http_request(int ac, curry_val *av, void *ud) {
     if (rc != CURLE_OK)
         curry_error("http: %s — %s", method, curl_easy_strerror(rc));
 
-    curry_val body_str = curry_make_string(resp.data);
+    /* curry_make_string_n + resp.len, not curry_make_string: an HTTP
+     * response body is arbitrary bytes (binary content types are common)
+     * and may contain embedded NUL bytes; strlen-based construction would
+     * silently truncate at the first one. */
+    curry_val body_str = curry_make_string_n(resp.data, (uint32_t)resp.len);
     free(resp.data);
     return curry_make_pair(curry_make_fixnum((intptr_t)code), body_str);
 }

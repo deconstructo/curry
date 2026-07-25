@@ -48,7 +48,15 @@ curry_val curry_make_fixnum(intptr_t n);
 curry_val curry_make_float(double d);
 curry_val curry_make_bool(bool b);
 curry_val curry_make_char(uint32_t codepoint);
-curry_val curry_make_string(const char *s);    /* copies s */
+curry_val curry_make_string(const char *s);    /* copies s (NUL-terminated C string) */
+/* Copies exactly `len` bytes of s (which need not itself be NUL-terminated,
+ * and may contain embedded NUL bytes — Curry strings are length-prefixed,
+ * not NUL-terminated at the language level). Use this instead of
+ * curry_make_string() whenever the source buffer's length is already
+ * known and isn't guaranteed free of embedded NULs — e.g. a length-
+ * prefixed wire-protocol read — so a NUL byte partway through doesn't
+ * silently truncate the result. */
+curry_val curry_make_string_n(const char *s, uint32_t len);
 curry_val curry_make_symbol(const char *s);
 curry_val curry_make_pair(curry_val car, curry_val cdr);
 curry_val curry_nil(void);
@@ -78,6 +86,14 @@ double     curry_float(curry_val v);
 bool       curry_bool(curry_val v);
 uint32_t   curry_char(curry_val v);
 const char *curry_string(curry_val v);    /* pointer into GC heap */
+/* True byte length of a string, INCLUDING any embedded NUL bytes (Curry
+ * strings are length-prefixed, not NUL-terminated at the language level —
+ * `(string-length (string #\a (integer->char 0) #\b))` is 3). Modules
+ * that pass a curry_string() pointer to a strlen()-based C API silently
+ * truncate any string containing an embedded NUL at the first one; use
+ * this length explicitly with a length-aware API instead wherever a
+ * module can't rule that out. */
+uint32_t   curry_string_length(curry_val v);
 const char *curry_symbol(curry_val v);
 curry_val  curry_car(curry_val v);
 curry_val  curry_cdr(curry_val v);

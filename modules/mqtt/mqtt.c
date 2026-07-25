@@ -461,8 +461,12 @@ static curry_val fn_receive(int ac, curry_val *av, void *ud) {
         return curry_make_pair(curry_make_symbol("disconnect"), cause);
     }
 
+    /* curry_make_string_n + paylen, not curry_make_string: an MQTT payload
+     * is an arbitrary byte string (binary payloads are explicitly allowed
+     * by the protocol) and may contain embedded NUL bytes; strlen-based
+     * construction would silently truncate at the first one. */
     curry_val topic   = curry_make_string(e.topic);
-    curry_val payload = curry_make_string(e.payload);
+    curry_val payload = curry_make_string_n(e.payload, (uint32_t)e.paylen);
     free(e.topic);
     free(e.payload);
     return curry_make_pair(topic, payload);

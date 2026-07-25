@@ -31,13 +31,17 @@ curry_val curry_nil(void)               { return V_NIL; }
 curry_val curry_void(void)              { return V_VOID; }
 curry_val curry_eof(void)               { return V_EOF; }
 
-curry_val curry_make_string(const char *s) {
-    size_t len = strlen(s);
+curry_val curry_make_string_n(const char *s, uint32_t len) {
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     str->hdr.type = T_STRING; str->hdr.flags = 0;
-    str->len = (uint32_t)len; str->hash = 0; str->orig_cap = (uint32_t)len; str->ext = NULL;
-    memcpy(str->data, s, len + 1);
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, s, len);
+    str->data[len] = '\0';
     return vptr(str);
+}
+
+curry_val curry_make_string(const char *s) {
+    return curry_make_string_n(s, (uint32_t)strlen(s));
 }
 
 curry_val curry_make_symbol(const char *s) {
@@ -78,6 +82,7 @@ double      curry_float(curry_val v)   { return vis_fixnum(v) ? (double)vunfix(v
 bool        curry_bool(curry_val v)    { return v != V_FALSE; }
 uint32_t    curry_char(curry_val v)    { return vunchr(v); }
 const char *curry_string(curry_val v)  { return str_data(as_str(v)); }
+uint32_t    curry_string_length(curry_val v) { return as_str(v)->len; }
 const char *curry_symbol(curry_val v)  { return sym_cstr(v); }
 curry_val   curry_car(curry_val v)     { return vcar(v); }
 curry_val   curry_cdr(curry_val v)     { return vcdr(v); }

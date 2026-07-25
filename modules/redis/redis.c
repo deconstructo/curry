@@ -175,6 +175,18 @@ static void resp_arg_cstr(RedisConn *c, const char *s) {
     resp_arg(c, s, strlen(s));
 }
 
+/* Length-aware: use for any curry_val that came from Scheme (a key,
+ * value, channel name, etc.), never resp_arg_cstr (strlen-based). Curry
+ * strings are length-prefixed, not NUL-terminated at the language level —
+ * (string #\a (integer->char 0) #\b) is a real 3-byte string — and
+ * resp_arg_cstr silently truncated at the first embedded NUL with no
+ * error, corrupting data instead of failing loudly. resp_arg_cstr is
+ * still correct (and fine) for our OWN literal ASCII command names like
+ * "SET"/"GET", which can never contain one. */
+static void resp_arg_val(RedisConn *c, curry_val v) {
+    resp_arg(c, curry_string(v), curry_string_length(v));
+}
+
 static void resp_arg_int(RedisConn *c, long long n) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%lld", n);
@@ -237,6 +249,7 @@ static curry_val resp_read(RedisConn *c) {
         line = rbuf_readline(c);
         long long len = atoll(line);
         if (len < 0) return curry_make_bool(false);   /* nil bulk string */
+        if (len > UINT32_MAX) curry_error("redis: bulk string too large (%lld bytes)", len);
         char *buf = malloc((size_t)len + 1);
         if (!buf) curry_error("redis: out of memory");
         size_t got = 0;
@@ -247,7 +260,11 @@ static curry_val resp_read(RedisConn *c) {
         buf[len] = '\0';
         rbuf_getc(c);  /* \r */
         rbuf_getc(c);  /* \n */
-        curry_val result = curry_make_string(buf);
+        /* curry_make_string_n, not curry_make_string: `buf` is read using
+         * RESP's own length prefix and may contain embedded NUL bytes —
+         * curry_make_string (strlen-based) would silently truncate at the
+         * first one instead of returning the full value actually stored. */
+        curry_val result = curry_make_string_n(buf, (uint32_t)len);
         free(buf);
         return result;
     }
@@ -298,7 +315,7 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     (void)ud;
     const char *host = curry_string(av[0]);
     int port = (int)curry_fixnum(av[1]);
-    const char *password = (ac >= 3 && curry_is_string(av[2])) ? curry_string(av[2]) : NULL;
+    bool has_password = ac >= 3 && curry_is_string(av[2]);
 
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
@@ -321,10 +338,10 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     if (!c) { sock_close(fd); curry_error("redis-connect: out of memory"); }
     c->fd = fd;
 
-    if (password) {
+    if (has_password) {
         resp_start(c, 2);
         resp_arg_cstr(c, "AUTH");
-        resp_arg_cstr(c, password);
+        resp_arg_val(c, av[2]);
         curry_val r = resp_read(c);
         (void)r;
     }
@@ -393,10 +410,8 @@ static curry_val fn_command(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     int n = ac - 1;   /* arguments after client */
     resp_start(c, n);
-    for (int i = 1; i < ac; i++) {
-        const char *s = curry_string(av[i]);
-        resp_arg_cstr(c, s);
-    }
+    for (int i = 1; i < ac; i++)
+        resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -405,22 +420,20 @@ static curry_val fn_command(int ac, curry_val *av, void *ud) {
 static curry_val fn_set(int ac, curry_val *av, void *ud) {
     (void)ud;
     RedisConn *c = val_to_conn(av[0]);
-    const char *key = curry_string(av[1]);
-    const char *val = curry_string(av[2]);
     if (ac >= 4) {
         /* SET key value EX ttl */
         long long ttl = (long long)curry_fixnum(av[3]);
         resp_start(c, 5);
         resp_arg_cstr(c, "SET");
-        resp_arg_cstr(c, key);
-        resp_arg_cstr(c, val);
+        resp_arg_val(c, av[1]);
+        resp_arg_val(c, av[2]);
         resp_arg_cstr(c, "EX");
         resp_arg_int(c, ttl);
     } else {
         resp_start(c, 3);
         resp_arg_cstr(c, "SET");
-        resp_arg_cstr(c, key);
-        resp_arg_cstr(c, val);
+        resp_arg_val(c, av[1]);
+        resp_arg_val(c, av[2]);
     }
     resp_read(c);
     return curry_void();
@@ -431,7 +444,7 @@ static curry_val fn_get(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "GET");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -441,7 +454,7 @@ static curry_val fn_del(int ac, curry_val *av, void *ud) {
     int n = ac - 1;
     resp_start(c, n + 1);
     resp_arg_cstr(c, "DEL");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -450,7 +463,7 @@ static curry_val fn_exists(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "EXISTS");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     curry_val r = resp_read(c);
     return curry_make_bool(curry_fixnum(r) > 0);
 }
@@ -460,7 +473,7 @@ static curry_val fn_incr(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "INCR");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -469,7 +482,7 @@ static curry_val fn_incrby(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "INCRBY");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_int(c, (long long)curry_fixnum(av[2]));
     return resp_read(c);
 }
@@ -479,7 +492,7 @@ static curry_val fn_expire(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "EXPIRE");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_int(c, (long long)curry_fixnum(av[2]));
     curry_val r = resp_read(c);
     return curry_make_bool(curry_fixnum(r) == 1);
@@ -490,7 +503,7 @@ static curry_val fn_ttl(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "TTL");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -499,7 +512,7 @@ static curry_val fn_keys(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "KEYS");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -512,8 +525,8 @@ static curry_val fn_hset(int ac, curry_val *av, void *ud) {
     int n = ac - 2;   /* field/value args */
     resp_start(c, 2 + n);
     resp_arg_cstr(c, "HSET");
-    resp_arg_cstr(c, curry_string(av[1]));
-    for (int i = 2; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    resp_arg_val(c, av[1]);
+    for (int i = 2; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -522,8 +535,8 @@ static curry_val fn_hget(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "HGET");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     return resp_read(c);
 }
 
@@ -533,7 +546,7 @@ static curry_val fn_hgetall(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "HGETALL");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     curry_val flat = resp_read(c);
 
     curry_val alist = curry_nil();
@@ -557,7 +570,7 @@ static curry_val fn_hdel(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, ac);
     resp_arg_cstr(c, "HDEL");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -566,7 +579,7 @@ static curry_val fn_hkeys(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "HKEYS");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -575,7 +588,7 @@ static curry_val fn_hvals(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "HVALS");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -584,8 +597,8 @@ static curry_val fn_hexists(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "HEXISTS");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     curry_val r = resp_read(c);
     return curry_make_bool(curry_fixnum(r) == 1);
 }
@@ -597,7 +610,7 @@ static curry_val fn_lpush(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, ac);
     resp_arg_cstr(c, "LPUSH");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -606,7 +619,7 @@ static curry_val fn_rpush(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, ac);
     resp_arg_cstr(c, "RPUSH");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -615,7 +628,7 @@ static curry_val fn_lpop(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "LPOP");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -624,7 +637,7 @@ static curry_val fn_rpop(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "RPOP");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -633,7 +646,7 @@ static curry_val fn_llen(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "LLEN");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -642,7 +655,7 @@ static curry_val fn_lrange(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 4);
     resp_arg_cstr(c, "LRANGE");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_int(c, (long long)curry_fixnum(av[2]));
     resp_arg_int(c, (long long)curry_fixnum(av[3]));
     return resp_read(c);
@@ -655,7 +668,7 @@ static curry_val fn_sadd(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, ac);
     resp_arg_cstr(c, "SADD");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -664,7 +677,7 @@ static curry_val fn_srem(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, ac);
     resp_arg_cstr(c, "SREM");
-    for (int i = 1; i < ac; i++) resp_arg_cstr(c, curry_string(av[i]));
+    for (int i = 1; i < ac; i++) resp_arg_val(c, av[i]);
     return resp_read(c);
 }
 
@@ -673,7 +686,7 @@ static curry_val fn_smembers(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "SMEMBERS");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -682,8 +695,8 @@ static curry_val fn_sismember(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "SISMEMBER");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     curry_val r = resp_read(c);
     return curry_make_bool(curry_fixnum(r) == 1);
 }
@@ -693,7 +706,7 @@ static curry_val fn_scard(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "SCARD");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -707,9 +720,9 @@ static curry_val fn_zadd(int ac, curry_val *av, void *ud) {
     snprintf(score_str, sizeof(score_str), "%.17g", score);
     resp_start(c, 4);
     resp_arg_cstr(c, "ZADD");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_cstr(c, score_str);
-    resp_arg_cstr(c, curry_string(av[3]));
+    resp_arg_val(c, av[3]);
     return resp_read(c);
 }
 
@@ -718,7 +731,7 @@ static curry_val fn_zrange(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 4);
     resp_arg_cstr(c, "ZRANGE");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_int(c, (long long)curry_fixnum(av[2]));
     resp_arg_int(c, (long long)curry_fixnum(av[3]));
     return resp_read(c);
@@ -730,7 +743,7 @@ static curry_val fn_zrange_withscores(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 5);
     resp_arg_cstr(c, "ZRANGE");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     resp_arg_int(c, (long long)curry_fixnum(av[2]));
     resp_arg_int(c, (long long)curry_fixnum(av[3]));
     resp_arg_cstr(c, "WITHSCORES");
@@ -754,8 +767,8 @@ static curry_val fn_zscore(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "ZSCORE");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     curry_val r = resp_read(c);
     if (!curry_is_string(r)) return curry_make_bool(false);
     return curry_make_float(atof(curry_string(r)));
@@ -766,7 +779,7 @@ static curry_val fn_zcard(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 2);
     resp_arg_cstr(c, "ZCARD");
-    resp_arg_cstr(c, curry_string(av[1]));
+    resp_arg_val(c, av[1]);
     return resp_read(c);
 }
 
@@ -775,8 +788,8 @@ static curry_val fn_zrank(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "ZRANK");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     return resp_read(c);
 }
 
@@ -787,8 +800,8 @@ static curry_val fn_publish(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     resp_start(c, 3);
     resp_arg_cstr(c, "PUBLISH");
-    resp_arg_cstr(c, curry_string(av[1]));
-    resp_arg_cstr(c, curry_string(av[2]));
+    resp_arg_val(c, av[1]);
+    resp_arg_val(c, av[2]);
     return resp_read(c);
 }
 
@@ -823,7 +836,7 @@ static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     (void)ud;
     const char *host     = curry_string(av[0]);
     int         port     = (int)curry_fixnum(av[1]);
-    const char *password = (ac >= 3 && curry_is_string(av[2])) ? curry_string(av[2]) : NULL;
+    bool        has_password = ac >= 3 && curry_is_string(av[2]);
     const char *ca_cert  = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : NULL;
 
     char port_str[16];
@@ -872,10 +885,10 @@ static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     c->ssl_ctx = ctx;
     c->ssl     = ssl;
 
-    if (password) {
+    if (has_password) {
         resp_start(c, 2);
         resp_arg_cstr(c, "AUTH");
-        resp_arg_cstr(c, password);
+        resp_arg_val(c, av[2]);
         curry_val r = resp_read(c);
         (void)r;
     }

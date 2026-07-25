@@ -49,7 +49,15 @@ static curry_val row_to_alist(sqlite3_stmt *stmt) {
         switch (sqlite3_column_type(stmt, i)) {
         case SQLITE_INTEGER: val = curry_make_fixnum(sqlite3_column_int64(stmt, i)); break;
         case SQLITE_FLOAT:   val = curry_make_float(sqlite3_column_double(stmt, i)); break;
-        case SQLITE_TEXT:    val = curry_make_string((const char *)sqlite3_column_text(stmt, i)); break;
+        case SQLITE_TEXT: {
+            /* curry_make_string_n + sqlite3_column_bytes, not curry_make_string
+             * (strlen-based): a TEXT column can itself contain embedded NUL
+             * bytes, which strlen would silently truncate at. */
+            const char *txt = (const char *)sqlite3_column_text(stmt, i);
+            int tsz = sqlite3_column_bytes(stmt, i);
+            val = curry_make_string_n(txt, (uint32_t)tsz);
+            break;
+        }
         case SQLITE_BLOB: {
             int sz = sqlite3_column_bytes(stmt, i);
             val = curry_make_bytevector((uint32_t)sz, 0);
@@ -139,7 +147,12 @@ static curry_val fn_bind(int ac, curry_val *av, void *ud) {
     if (curry_is_bool(val) && !curry_bool(val)) sqlite3_bind_null(w->stmt, idx);
     else if (curry_is_fixnum(val)) sqlite3_bind_int64(w->stmt, idx, curry_fixnum(val));
     else if (curry_is_float(val))  sqlite3_bind_double(w->stmt, idx, curry_float(val));
-    else if (curry_is_string(val)) sqlite3_bind_text(w->stmt, idx, curry_string(val), -1, SQLITE_TRANSIENT);
+    else if (curry_is_string(val)) {
+        /* Explicit length, not -1 (strlen): a bound string can itself
+         * contain embedded NUL bytes, which -1 would silently truncate at. */
+        sqlite3_bind_text(w->stmt, idx, curry_string(val),
+                           (int)curry_string_length(val), SQLITE_TRANSIENT);
+    }
     return curry_void();
 }
 

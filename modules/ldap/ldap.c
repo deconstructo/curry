@@ -174,7 +174,13 @@ static curry_val fn_ldap_search(int ac, curry_val *av, void *ud) {
             curry_val vlist = curry_nil();
             if (vals) {
                 for (int i = ldap_count_values_len(vals) - 1; i >= 0; i--) {
-                    curry_val s = curry_make_string(vals[i]->bv_val);
+                    /* curry_make_string_n + bv_len, not curry_make_string:
+                     * berval exists specifically because LDAP attribute
+                     * values (e.g. binary ones like jpegPhoto) aren't
+                     * NUL-terminated; strlen-based construction would
+                     * silently truncate at the first embedded NUL. */
+                    curry_val s = curry_make_string_n(vals[i]->bv_val,
+                                                       (uint32_t)vals[i]->bv_len);
                     vlist = curry_make_pair(s, vlist);
                 }
                 ldap_value_free_len(vals);

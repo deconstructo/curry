@@ -141,6 +141,12 @@
   (redis-flushdb c)
   (redis-select c 0)
 
+  ;;; embedded NUL byte: strings are length-prefixed, not NUL-terminated
+  (let ((nul-str (string #\a #\b (integer->char 0) #\c #\d)))
+    (redis-set! c "t:nul" nul-str)
+    (check "nul-byte-roundtrip" (redis-get c "t:nul") nul-str)
+    (redis-del! c "t:nul"))
+
   ;;; raw command passthrough
   (redis-set! c "t:raw" "rawval")
   (check "raw-command"       (redis-command c "GET" "t:raw")   "rawval")

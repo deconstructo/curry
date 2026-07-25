@@ -3,6 +3,7 @@ target_link_libraries(curry_test PRIVATE curry_core)
 
 add_test(NAME core           COMMAND curry_test)
 add_test(NAME json           COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/json_tests.scm)
+add_test(NAME sqlite         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sqlite_tests.scm)
 add_test(NAME scheme_r7rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r7rs_tests.scm)
 add_test(NAME scheme_r6rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r6rs_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
