@@ -68,6 +68,29 @@
 (check "n->s flonum sqrt2"  (number->string (sqrt 2) 'neugebauer #:places 3) "1;24,51,10")
 (check "n->s flonum 1.5"    (number->string 1.5 'neugebauer #:places 2) "1;30")
 
+;; Large-magnitude flonums whose integer part exceeds LONG_MAX/LONG_MIN
+;; used to hit undefined behavior on a (long) cast before conversion;
+;; just checking these don't crash and round-trip through the digit
+;; extractor is the regression coverage (exact digit string isn't the
+;; point here, not-crashing and staying finite is).
+(check "n->s flonum 1e19 no crash"
+       (string? (number->string 1e19 'neugebauer)) #t)
+(check "n->s flonum -1e19 no crash"
+       (string? (number->string -1e19 'neugebauer)) #t)
+(check "n->s flonum 1e19 parses back to an exact integer"
+       (exact? (string->number (number->string 1e19 'neugebauer) 'neugebauer)) #t)
+;; Right at the LONG_MAX boundary (~9.2e18) - the old (long) cast was still
+;; technically well-defined just below it, so this pins the boundary itself.
+(check "n->s flonum near LONG_MAX no crash"
+       (string? (number->string 9.2e18 'neugebauer)) #t)
+;; Past the mpz_to_base60_digits 64-digit overflow guard (unrelated to and
+;; unaffected by this fix, but exercised via the same flonum entry point) -
+;; falls back to plain scientific-notation printing rather than crashing.
+(check "n->s flonum 1e300 falls back without crashing"
+       (number->string 1e300 'neugebauer) (number->string 1e300))
+(check "n->s flonum 1e308 falls back without crashing"
+       (number->string 1e308 'neugebauer) (number->string 1e308))
+
 ;;; ---- number->string with 'cuneiform ----
 
 ;; Integer → cuneiform

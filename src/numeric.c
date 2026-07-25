@@ -1593,7 +1593,11 @@ static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
         double int_d, frac_d = modf(d, &int_d);
         if (max_frac < 0 || max_frac > 4) max_frac = 4;  /* flonum default = 4 places */
 
-        mpz_t tmp; mpz_init_set_si(tmp, (long)int_d);
+        /* mpz_init_set_d, not (long)int_d: int_d can exceed LONG_MAX/LONG_MIN
+         * for a large finite flonum (e.g. 1e300), and casting an
+         * out-of-range double to long is undefined behavior. mpz_set_d
+         * handles any finite double magnitude directly. */
+        mpz_t tmp; mpz_init_set_d(tmp, int_d);
         out->nint = mpz_to_base60_digits(tmp, out->int_digs);
         mpz_clear(tmp);
         if (out->nint < 0) { out->valid = false; return; }
