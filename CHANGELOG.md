@@ -2,6 +2,19 @@
 
 ### Unreleased
 
+**Vectors/bytevectors/misc — the same missing-bounds-check bug class found in strings, chased down across three review rounds**
+
+The independent reviews of the string bounds-checking fix (above) kept turning up the identical unguarded-index-cast pattern in sibling primitives, each round finding the next one. Rather than stop at "strings are fixed," followed it to ground:
+
+- **Vectors/bytevectors** (live SIGSEGVs reproduced): `vector-copy`, `vector->list` (an information-disclosure read, not a crash — returned garbage heap contents as list elements instead of erroring), `vector-fill!`, `vector-copy!`, `bytevector-copy`, `bytevector-copy!`, `read-bytevector!`, `write-bytevector` all cast a possibly-negative or possibly-huge fixnum index straight to `uint32_t` with no check. Fixed via a new shared `validate_index_range()` helper (the non-UTF-8 sibling of the string fix's `string_range_to_bytes`) plus, for the two `-copy!` primitives' destination index, a parallel direct check — same technique throughout: compare the *widened* index against the length rather than the length narrowed to match a cast index, so an oversized fixnum can't wrap past the check.
+- **Constructors** (live SIGSEGVs reproduced): `make-string`, `make-bytevector`, and `read-bytevector` had no size validation at all — `(make-string -1)` and `(make-bytevector -1)` both segfaulted; `make-vector` already had the right guard, these were missed. Fixed with the same negative/`> UINT32_MAX` rejection.
+- **`integer->char`** (not memory-unsafe on its own, but produced an invalid Unicode value that could corrupt UTF-8 output wherever later encoded): now rejects negative, beyond-`0x10FFFF`, and surrogate-range (`0xD800`-`0xDFFF`) code points instead of silently accepting them.
+- **`octonion-ref`** (live SIGSEGV reproduced, plus a bignum-index information leak): had no type check on its argument and no bounds check on its index, directly indexing a fixed 8-element array. Now type- and bounds-checked like the rest of the numeric-ref family.
+
+One item flagged at low confidence and deliberately left alone: `src/vm.c`'s `OP_FIXTOCHAR` bytecode opcode has the same unguarded cast `prim_int_to_char` was just fixed for, but no compiler emission site for it was found anywhere in the tree — appears to be a dead/reserved opcode, not currently reachable from Scheme source.
+
+Reviewed independently three times in sequence per CLAUDE.md's callout on array-bounds/off-by-one specifically — each round is what surfaced the next primitive family still exposed, until a final pass came back with only the one low-confidence dead-code item. Added regression coverage to `tests/r7rs_tests.scm` and `tests/numeric_ext_tests.scm` for every primitive fixed across all rounds. `scheme_r7rs` ctest 235/235 (was 208 before this whole investigation started), `numeric_ext` 363/363, full suite 44/44, test_cli.sh 67/67.
+
 **Strings — missing bounds checks; one live SIGSEGV, one silent corruption bug**
 
 `string-ref`/`string-set!` (`src/builtins.c`) had no index bounds checking at all, found in the same full-codebase audit as the other fixes in this file. `string-ref` could read past the end of a string's byte buffer (a leftover dead loop plus a second loop that could land its pointer exactly at the buffer end before unconditionally dereferencing it to decode a codepoint there); `string-set!` cast a negative index straight to `uint32_t` with no check first, wrapping it to a huge offset that `utf8_char_offset` — a helper that clamps its own internal walk safely, but doesn't tell its caller anything went out of range — then silently clamped to the buffer end, splicing the new character in at the wrong place instead of raising.

@@ -44,6 +44,12 @@
 ;;; Characters
 (check "char->integer" (char->integer #\A) 65)
 (check "integer->char" (integer->char 65) #\A)
+(check "integer->char negative raises instead of a bogus codepoint"
+       (guard (exn (#t 'raised)) (integer->char -1)) 'raised)
+(check "integer->char beyond Unicode range raises"
+       (guard (exn (#t 'raised)) (integer->char #x110000)) 'raised)
+(check "integer->char surrogate raises"
+       (guard (exn (#t 'raised)) (integer->char #xD800)) 'raised)
 (check "char-upcase" (char-upcase #\a) #\A)
 (check "char-alphabetic?" (char-alphabetic? #\a) #t)
 
@@ -395,6 +401,8 @@
 (check "string-contains" (string-contains "hello world" "world") 6)
 (check "string-contains miss" (string-contains "hello" "xyz") #f)
 (check "make-string"    (make-string 3 #\x) "xxx")
+(check "make-string negative size raises instead of crashing"
+       (guard (exn (#t 'raised)) (make-string -1)) 'raised)
 (check "string"         (string #\h #\i) "hi")
 (check "string-copy"    (string-copy "hello") "hello")
 
@@ -419,8 +427,20 @@
 (let ((v3 (make-vector 3 0)))
   (vector-fill! v3 7 0 2)
   (check "vector-fill!" (vector->list v3) '(7 7 0)))
+(check "vector-copy out-of-range raises instead of crashing"
+       (guard (exn (#t 'raised)) (vector-copy (vector 1 2 3) 1000 2)) 'raised)
+(check "vector->list out-of-range raises instead of leaking heap contents"
+       (guard (exn (#t 'raised)) (vector->list (vector 1 2 3) 0 100)) 'raised)
+(check "vector-fill! out-of-range raises instead of crashing"
+       (guard (exn (#t 'raised)) (vector-fill! (vector 1 2 3) 99 0 100)) 'raised)
+(check "vector-copy! negative at raises instead of crashing"
+       (guard (exn (#t 'raised)) (vector-copy! (vector 1 2 3) -1 (vector 9 9))) 'raised)
+(check "vector-copy! basic still works"
+       (let ((v (vector 1 2 3))) (vector-copy! v 0 (vector 9 8)) v) '#(9 8 3))
 
 ;;; Bytevectors
+(check "make-bytevector negative size raises instead of crashing"
+       (guard (exn (#t 'raised)) (make-bytevector -1)) 'raised)
 (define bv (make-bytevector 4 0))
 (bytevector-u8-set! bv 2 255)
 (check "bytevector-u8-ref"  (bytevector-u8-ref bv 2) 255)
@@ -428,6 +448,25 @@
 (check "bytevector-length"  (bytevector-length bv) 4)
 (check "bytevector?"  (bytevector? bv) #t)
 (check "bytevector? no" (bytevector? "str") #f)
+(check "bytevector-copy out-of-range raises instead of crashing"
+       (guard (exn (#t 'raised)) (bytevector-copy (bytevector 1 2 3) 1000 2)) 'raised)
+(check "bytevector-copy! negative at raises instead of crashing"
+       (guard (exn (#t 'raised)) (bytevector-copy! (bytevector 1 2 3) -1 (bytevector 9 9))) 'raised)
+(check "bytevector-copy! basic still works"
+       (let ((b (bytevector 1 2 3))) (bytevector-copy! b 0 (bytevector 9 8))
+            (list (bytevector-u8-ref b 0) (bytevector-u8-ref b 1) (bytevector-u8-ref b 2)))
+       '(9 8 3))
+(check "read-bytevector! out-of-range raises"
+       (guard (exn (#t 'raised))
+         (read-bytevector! (make-bytevector 4 0) (open-input-string "ab") 0 100))
+       'raised)
+(check "write-bytevector out-of-range raises"
+       (guard (exn (#t 'raised)) (write-bytevector (bytevector 1 2 3) (open-output-string) 0 100))
+       'raised)
+(check "read-bytevector negative size raises instead of crashing"
+       (guard (exn (#t 'raised)) (read-bytevector -1)) 'raised)
+(check "read-bytevector basic still works"
+       (bytevector-u8-ref (read-bytevector 2 (open-input-string "ab")) 0) 97)
 
 ;;; Predicates
 (check "vector?"    (vector? '#(1 2)) #t)

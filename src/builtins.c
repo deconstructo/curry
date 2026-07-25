@@ -30,6 +30,7 @@
 #include <assert.h>
 #include <math.h>
 #include <ctype.h>
+#include <limits.h>
 
 /* ---- Registration helper ---- */
 
@@ -534,7 +535,14 @@ static val_t prim_make_oct(int ac, val_t *av, void *ud) {
     return num_make_oct(e);
 }
 static val_t prim_oct_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_oct(av[0]));}
-static val_t prim_oct_ref(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_oct_ref(av[0],(int)vunfix(av[1]));}
+static val_t prim_oct_ref(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_oct(av[0])) scm_raise(V_FALSE, "octonion-ref: not an octonion");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "octonion-ref: index must be exact integer");
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || i >= 8) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "octonion-ref: index out of range (0..7)");
+    return num_oct_ref(av[0], (int)i);
+}
 
 /* Bitwise */
 static val_t prim_bitand(int ac, val_t *av, void *ud) {(void)ud; val_t r=ac?av[0]:vfix(-1); for(int i=1;i<ac;i++) r=num_bitand(r,av[i]); return r;}
@@ -591,7 +599,19 @@ static val_t prim_current_number_notation(int ac, val_t *av, void *ud) {
 
 /* ---- Characters ---- */
 static val_t prim_char_to_int(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix((intptr_t)vunchr(av[0]));}
-static val_t prim_int_to_char(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "integer->char: not an exact integer"); return vchr((uint32_t)vunfix(av[0]));}
+static val_t prim_int_to_char(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "integer->char: not an exact integer");
+    intptr_t cp = vunfix(av[0]);
+    /* Rejected outright rather than cast straight to uint32_t: a negative
+     * or too-large value would otherwise silently become a bogus (but not
+     * memory-unsafe on its own) codepoint outside valid Unicode, which
+     * could then produce garbage UTF-8 output wherever the character is
+     * later encoded. */
+    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "integer->char: not a valid Unicode code point");
+    return vchr((uint32_t)cp);
+}
 static val_t prim_char_upcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_to_upper(vunchr(av[0])));}
 static val_t prim_char_downcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_to_lower(vunchr(av[0])));}
 static val_t prim_char_foldcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vchr(unicode_fold_case(vunchr(av[0])));}
@@ -605,8 +625,15 @@ static val_t prim_char_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<
 static val_t prim_make_string(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "make-string: not an exact integer");
+    intptr_t k = vunfix(av[0]);
+    /* Negative rejected outright (would otherwise wrap to a huge size on
+     * the (uint32_t) cast below and attempt a multi-GB allocation); a size
+     * beyond UINT32_MAX rejected too, since it would silently wrap down
+     * to a small in-range value on that same cast instead of erroring. */
+    if (k < 0 || k > (intptr_t)UINT32_MAX)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "make-string: invalid size");
     int fill = ac>1 ? (int)vunchr(av[1]) : ' ';
-    return scm_make_string((uint32_t)vunfix(av[0]), fill);
+    return scm_make_string((uint32_t)k, fill);
 }
 static val_t prim_string(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -899,12 +926,34 @@ static val_t prim_vector_set(int ac, val_t *av, void *ud) {
     gc_wb_slot(&v->data[i], av[2]);
     return V_VOID;
 }
+/* Validate a [start,end) index range against len (a vector's/bytevector's
+ * real element/byte count) and reject anything out of range instead of
+ * silently proceeding with a garbage-clamped or wrapped range — the same
+ * bug class fixed for the UTF-8 string primitives' string_range_to_bytes
+ * (this is the non-UTF-8 sibling: a plain index range, no multi-byte
+ * char-to-byte conversion needed). Compares s/e as intptr_t widened
+ * against len rather than len narrowed to match a cast index, so a
+ * fixnum index larger than UINT32_MAX can't wrap to something small and
+ * slip past the check; a negative index is rejected outright rather than
+ * silently becoming a huge uint32_t offset. */
+static void validate_index_range(int ac, val_t *av, int start_idx, uint32_t len,
+                                  const char *who, uint32_t *s_out, uint32_t *e_out) {
+    if (ac > start_idx && !vis_fixnum(av[start_idx]))
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: start must be exact integer", who);
+    if (ac > start_idx + 1 && !vis_fixnum(av[start_idx + 1]))
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: end must be exact integer", who);
+    intptr_t s = ac > start_idx     ? vunfix(av[start_idx])     : 0;
+    intptr_t e = ac > start_idx + 1 ? vunfix(av[start_idx + 1]) : (intptr_t)len;
+    if (s < 0 || e < s || e > (intptr_t)len)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%s: index out of range", who);
+    *s_out = (uint32_t)s; *e_out = (uint32_t)e;
+}
 static val_t prim_vector_to_list(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector->list: not a vector");
     Vector *v = as_vec(av[0]);
-    uint32_t s = ac > 1 ? (uint32_t)vunfix(av[1]) : 0;
-    uint32_t e = ac > 2 ? (uint32_t)vunfix(av[2]) : v->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 1, v->len, "vector->list", &s, &e);
     val_t r = V_NIL;
     for (int i = (int)e - 1; i >= (int)s; i--) r = scm_cons(v->data[i], r);
     return r;
@@ -921,17 +970,17 @@ static val_t prim_vector_fill(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-fill!: not a vector");
     Vector *v=as_vec(av[0]); val_t fill=av[1];
-    uint32_t s=ac>2?(uint32_t)vunfix(av[2]):0, e=ac>3?(uint32_t)vunfix(av[3]):v->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 2, v->len, "vector-fill!", &s, &e);
     for(uint32_t i=s;i<e;i++) v->data[i]=fill;
     return V_VOID;
 }
 static val_t prim_vector_copy(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_vector(av[0])) scm_raise(V_FALSE, "vector-copy: not a vector");
-    if (ac > 1 && !vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-copy: start must be exact integer");
-    if (ac > 2 && !vis_fixnum(av[2])) scm_raise(V_FALSE, "vector-copy: end must be exact integer");
     Vector *v=as_vec(av[0]);
-    uint32_t s=ac>1?(uint32_t)vunfix(av[1]):0, e=ac>2?(uint32_t)vunfix(av[2]):v->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 1, v->len, "vector-copy", &s, &e);
     uint32_t n=e-s; Vector *r=CURRY_NEW_FLEX(Vector,n);
     r->hdr.type=T_VECTOR; r->hdr.flags=0; r->len=n;
     memcpy(r->data, v->data+s, n*sizeof(val_t));
@@ -944,12 +993,17 @@ static val_t prim_vector_copy_bang(int ac, val_t *av, void *ud) {
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "vector-copy!: at must be exact integer");
     if (!vis_vector(av[2])) scm_raise(V_FALSE, "vector-copy!: from must be a vector");
     Vector *to   = as_vec(av[0]);
-    uint32_t at  = (uint32_t)vunfix(av[1]);
     Vector *from = as_vec(av[2]);
-    uint32_t s   = ac > 3 ? (uint32_t)vunfix(av[3]) : 0;
-    uint32_t e   = ac > 4 ? (uint32_t)vunfix(av[4]) : from->len;
-    uint32_t n   = e - s;
-    if (at + n > to->len) scm_raise(V_FALSE, "vector-copy!: would exceed destination length");
+    uint32_t s, e;
+    validate_index_range(ac, av, 3, from->len, "vector-copy!", &s, &e);
+    uint32_t n = e - s;
+    /* `at` compared as intptr_t against to->len/n (both widened, no
+     * uint32_t narrowing beforehand) so an oversized fixnum can't wrap
+     * past the check the way a plain (uint32_t) cast would. */
+    intptr_t iat = vunfix(av[1]);
+    if (iat < 0 || iat > (intptr_t)to->len || iat + (intptr_t)n > (intptr_t)to->len)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "vector-copy!: at/length out of range");
+    uint32_t at = (uint32_t)iat;
     memmove(to->data + at, from->data + s, n * sizeof(val_t));
     return V_VOID;
 }
@@ -1084,7 +1138,13 @@ static val_t prim_vec3_project_batch(int ac, val_t *av, void *ud) {
 static val_t prim_make_bytes(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "make-bytevector: not an exact integer");
-    uint32_t n=(uint32_t)vunfix(av[0]); uint8_t fill=ac>1?(uint8_t)vunfix(av[1]):0;
+    intptr_t k = vunfix(av[0]);
+    /* Same guard as make-string: negative wraps to a huge (uint32_t) size
+     * (multi-GB allocation attempt) and beyond UINT32_MAX wraps down to a
+     * small in-range value, both silently, without this check. */
+    if (k < 0 || k > (intptr_t)UINT32_MAX)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "make-bytevector: invalid size");
+    uint32_t n=(uint32_t)k; uint8_t fill=ac>1?(uint8_t)vunfix(av[1]):0;
     Bytevector *b=CURRY_NEW_FLEX_ATOM(Bytevector,n);
     b->hdr.type=T_BYTEVECTOR; b->hdr.flags=0; b->len=n;
     memset(b->data,fill,n);
@@ -1374,8 +1434,8 @@ static val_t prim_bytes_copy(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-copy: not a bytevector");
     Bytevector *b = as_bytes(av[0]);
-    uint32_t s = ac > 1 ? (uint32_t)vunfix(av[1]) : 0;
-    uint32_t e = ac > 2 ? (uint32_t)vunfix(av[2]) : b->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 1, b->len, "bytevector-copy", &s, &e);
     uint32_t n = e - s;
     Bytevector *r = CURRY_NEW_FLEX_ATOM(Bytevector, n);
     r->hdr.type = T_BYTEVECTOR; r->hdr.flags = 0; r->len = n;
@@ -1388,12 +1448,14 @@ static val_t prim_bytes_copy_bang(int ac, val_t *av, void *ud) {
     if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-copy!: at not exact integer");
     if (!vis_bytes(av[2])) scm_raise(V_FALSE, "bytevector-copy!: from not a bytevector");
     Bytevector *to   = as_bytes(av[0]);
-    uint32_t    at   = (uint32_t)vunfix(av[1]);
     Bytevector *from = as_bytes(av[2]);
-    uint32_t    s    = ac > 3 ? (uint32_t)vunfix(av[3]) : 0;
-    uint32_t    e    = ac > 4 ? (uint32_t)vunfix(av[4]) : from->len;
-    uint32_t    n    = e - s;
-    if (at + n > to->len) scm_raise(V_FALSE, "bytevector-copy!: would exceed destination");
+    uint32_t    s, e;
+    validate_index_range(ac, av, 3, from->len, "bytevector-copy!", &s, &e);
+    uint32_t n = e - s;
+    intptr_t iat = vunfix(av[1]);
+    if (iat < 0 || iat > (intptr_t)to->len || iat + (intptr_t)n > (intptr_t)to->len)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "bytevector-copy!: at/length out of range");
+    uint32_t at = (uint32_t)iat;
     memmove(to->data + at, from->data + s, n);
     return V_VOID;
 }
@@ -1470,7 +1532,14 @@ static val_t prim_read_string(int ac, val_t *av, void *ud) {
 static val_t prim_read_bytevector(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "read-bytevector: k must be exact integer");
-    int k = (int)vunfix(av[0]);
+    intptr_t ik = vunfix(av[0]);
+    /* Same guard as make-bytevector: a negative or oversized k cast
+     * straight to (uint32_t) would otherwise attempt a multi-GB
+     * allocation or wrap to a small in-range size, both silently. Capped
+     * at INT_MAX (not UINT32_MAX) since k is used as a plain `int` below. */
+    if (ik < 0 || ik > (intptr_t)INT_MAX)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "read-bytevector: invalid size");
+    int k = (int)ik;
     val_t port = ac > 1 ? av[1] : PORT_STDIN;
     Bytevector *bv = CURRY_NEW_FLEX_ATOM(Bytevector, (uint32_t)k);
     bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = 0;
@@ -1483,8 +1552,8 @@ static val_t prim_read_bytevector_bang(int ac, val_t *av, void *ud) {
     if (!vis_bytes(av[0])) scm_raise(V_FALSE, "read-bytevector!: not a bytevector");
     Bytevector *bv = as_bytes(av[0]);
     val_t port = ac > 1 ? av[1] : PORT_STDIN;
-    uint32_t s = ac > 2 ? (uint32_t)vunfix(av[2]) : 0;
-    uint32_t e = ac > 3 ? (uint32_t)vunfix(av[3]) : bv->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 2, bv->len, "read-bytevector!", &s, &e);
     int count = 0, b;
     for (uint32_t i = s; i < e && (b = port_read_byte(port)) >= 0; i++) { bv->data[i] = (uint8_t)b; count++; }
     return count == 0 ? V_EOF : vfix((intptr_t)count);
@@ -1494,8 +1563,8 @@ static val_t prim_write_bytevector(int ac, val_t *av, void *ud) {
     if (!vis_bytes(av[0])) scm_raise(V_FALSE, "write-bytevector: not a bytevector");
     Bytevector *bv = as_bytes(av[0]);
     val_t port = ac > 1 ? av[1] : PORT_STDOUT;
-    uint32_t s = ac > 2 ? (uint32_t)vunfix(av[2]) : 0;
-    uint32_t e = ac > 3 ? (uint32_t)vunfix(av[3]) : bv->len;
+    uint32_t s, e;
+    validate_index_range(ac, av, 2, bv->len, "write-bytevector", &s, &e);
     for (uint32_t i = s; i < e; i++) port_write_byte(port, bv->data[i]);
     return V_VOID;
 }

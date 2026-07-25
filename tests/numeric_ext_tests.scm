@@ -90,6 +90,17 @@
 (define q-back (mv->quaternion (quaternion->mv q-orig)))
 (check "quat->mv->quat roundtrip" (quaternion? q-back) #t)
 
+;;; octonion-ref: basic access plus bounds/type checking (previously
+;;; unchecked, both a bad index and a non-octonion argument segfaulted).
+(define oc (make-octonion 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0))
+(check "octonion-ref basic" (octonion-ref oc 3) 4.0)
+(check "octonion-ref out-of-range raises instead of crashing"
+  (guard (exn (#t 'raised)) (octonion-ref oc 100000000)) 'raised)
+(check "octonion-ref negative index raises"
+  (guard (exn (#t 'raised)) (octonion-ref oc -1)) 'raised)
+(check "octonion-ref non-octonion argument raises"
+  (guard (exn (#t 'raised)) (octonion-ref 42 2)) 'raised)
+
 ;;; mv-from-list and mv-ref
 (define mv-list (mv-from-list 2 0 0 '(1.0 2.0 3.0 4.0)))
 (check "mv-from-list mv?" (mv? mv-list) #t)
