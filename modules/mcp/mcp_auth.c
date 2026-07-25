@@ -471,26 +471,41 @@ static EVP_PKEY *s_jwt_pubkey      = NULL;   /* RS256 */
 static char     s_jwt_issuer[256]  = "";
 static char     s_jwt_audience[256] = "";
 
-/* Base64url → raw bytes.  Returns decoded length, or 0 on error. */
+/* Base64url → raw bytes.  Returns decoded length, or 0 on error.
+ *
+ * `src` is attacker-controlled (a JWT header/payload/signature segment
+ * straight from an Authorization header), and EVP_DecodeBlock() writes
+ * exactly (slen+pad)/4*3 bytes into `dst` regardless of `cap` — that size
+ * grows without bound with the length of `src`, while every caller here
+ * passes a small fixed-size stack buffer. The size check against `cap`
+ * used to run only AFTER EVP_DecodeBlock() had already written into dst,
+ * i.e. after any overflow already happened — a check-after-write pattern
+ * that's a stack buffer overflow waiting for a long enough token. Fixed
+ * by computing the exact output size EVP_DecodeBlock() will use and
+ * rejecting up front, before it's ever called. */
 static size_t b64url_decode(const char *src, unsigned char *dst, size_t cap) {
-    /* Convert base64url to standard base64 */
     size_t slen = strlen(src);
-    char *b64 = malloc(slen + 4);
+    size_t pad  = (4 - slen % 4) % 4;
+    size_t decoded_cap = (slen + pad) / 4 * 3;
+    if (decoded_cap > cap) return 0;
+
+    /* Convert base64url to standard base64 */
+    char *b64 = malloc(slen + pad + 1);
+    if (!b64) return 0;
     for (size_t i = 0; i < slen; i++) {
         if      (src[i] == '-') b64[i] = '+';
         else if (src[i] == '_') b64[i] = '/';
         else                    b64[i] = src[i];
     }
     /* Add padding */
-    size_t pad = (4 - slen % 4) % 4;
     for (size_t i = 0; i < pad; i++) b64[slen + i] = '=';
     b64[slen + pad] = '\0';
 
     int n = EVP_DecodeBlock(dst, (unsigned char *)b64, (int)(slen + pad));
     free(b64);
-    if (n < 0) return 0;
+    if (n < 0 || (size_t)n < pad) return 0;
     /* EVP_DecodeBlock pads with 0 bytes for '=' — subtract them */
-    return (size_t)(n) - pad > cap ? 0 : (size_t)(n) - pad;
+    return (size_t)n - pad;
 }
 
 static bool jwt_verify_hs256(const char *hdr_b64, const char *pay_b64,
@@ -563,6 +578,7 @@ static bool jwt_validate(const char *token) {
     size_t plen = (size_t)(dot2 - dot1 - 1);
     char *hdr_b64 = malloc(hlen + 1);
     char *pay_b64 = malloc(plen + 1);
+    if (!hdr_b64 || !pay_b64) { free(hdr_b64); free(pay_b64); return false; }
     memcpy(hdr_b64, token,       hlen); hdr_b64[hlen] = '\0';
     memcpy(pay_b64, dot1 + 1,   plen); pay_b64[plen] = '\0';
     const char *sig_b64 = dot2 + 1;
