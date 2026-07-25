@@ -1,0 +1,61 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Only the push-to-main run needs to publish the new baseline to
+    # gh-pages; PR runs only read the existing baseline to compare against
+    # and, on a regression, comment on the PR — no write access needed.
+    permissions:
+      contents: ${{ github.event_name == 'push' && 'write' || 'read' }}
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgc-dev libgmp-dev cmake build-essential pkg-config
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+
+      - name: Run benchmark suite
+        run: ./build/curry tests/bench_ci.scm --out bench-results.json
+
+      - name: Store benchmark result, compare, and gate on regression
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: bench-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          # Only push a new baseline point when we're actually on main —
+          # PR runs compare against the existing baseline without mutating it.
+          auto-push: ${{ github.event_name == 'push' }}
+          comment-on-alert: true
+          alert-comment-cc-users: ''
+          # >130% of the stored baseline (i.e. >30% slower) fails the run.
+          alert-threshold: '130%'
+          fail-on-alert: true
+          summary-always: true
