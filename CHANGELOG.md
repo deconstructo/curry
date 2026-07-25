@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.10.1 — Transparent `.scc` cache: content-hash keyed, with HIT/MISS visibility
 
 **`.scc` cache — content-hash keyed, with HIT/MISS visibility**
 - The `.scc` bytecode cache (transparent — no `-c` needed, just
