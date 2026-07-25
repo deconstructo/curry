@@ -2,6 +2,10 @@
 
 ### Unreleased
 
+**Concurrency — work-stealing pool started worker threads before all deques were initialized**
+
+`pool_init()` (`src/workpool.c`, the persistent Chase-Lev work-stealing thread pool backing parallel `map`/`reduce`/`for-each/par`) initialized each deque and started its worker thread in the same loop iteration — but every worker's steal loop scans *all* deques looking for work, not just its own, so a thread already running could race a steal attempt against `deque_init()` for a not-yet-reached index. TSan-confirmed real per C11's non-atomic `atomic_init` semantics, though not currently exploitable: the deque array is zeroed on allocation before any `deque_init` runs, and `deque_steal` checks `top >= bottom` before ever dereferencing the (`NULL` until initialized) backing buffer, so a steal reaching an uninitialized deque sees "empty" rather than corrupting anything — fragile, since that safety net depends on an implementation detail of the allocator rather than a documented contract, but not presently reachable as a wild read. Fixed by splitting into two sequential loops: initialize every deque first, only then start any thread — `pthread_create`'s happens-before guarantee (a universal pthreads/C11 requirement, the same one every program relies on to safely pass a thread's argument struct) means every worker thread sees every deque fully initialized by transitivity. Reviewed independently; confirmed no other order-dependent assumption in `pool_init`/`worker_loop` needed the same fix. TSan-clean across repeated parallel-`map` runs on a 200k-element list; ctest 44/44, test_cli.sh 67/67.
+
 **Vectors/bytevectors/misc — the same missing-bounds-check bug class found in strings, chased down across three review rounds**
 
 The independent reviews of the string bounds-checking fix (above) kept turning up the identical unguarded-index-cast pattern in sibling primitives, each round finding the next one. Rather than stop at "strings are fixed," followed it to ground:

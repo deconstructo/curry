@@ -211,11 +211,20 @@ void pool_init(void) {
     pthread_mutex_init(&global_pool->park_mutex, NULL);
     pthread_cond_init(&global_pool->park_cond,   NULL);
 
-    for (int i = 0; i < n; i++) {
+    /* Every worker's steal loop scans ALL deques (see deque_steal calls in
+     * worker_loop), not just its own — so initializing deque i and then
+     * immediately starting thread i in the same iteration (as this used
+     * to do) let thread i (or any earlier-started thread) race a steal
+     * attempt against deque_init() for a not-yet-reached index j > i.
+     * TSan-confirmed; currently benign only because the backing memory
+     * happens to come back zeroed. Initialize every deque first, only
+     * then start any thread, so no worker can observe a partially
+     * constructed WSDeque. */
+    for (int i = 0; i < n; i++)
         deque_init(&global_pool->deques[i]);
+    for (int i = 0; i < n; i++)
         pthread_create(&global_pool->threads[i], NULL,
                        worker_loop, (void *)(intptr_t)i);
-    }
 }
 
 /* ── dispatch ────────────────────────────────────────────────────────────── */
