@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 extern void scm_write(val_t v, val_t port);
@@ -14,6 +15,16 @@ extern void scm_write(val_t v, val_t port);
 val_t SUR_ZERO, SUR_ONE, SUR_NEG_ONE, SUR_OMEGA, SUR_EPSILON;
 
 #define MAX_TERMS 64
+/* sort_terms is O(n^2) insertion sort; sur_mul's result-term cap keeps that
+ * (and the cross-term buffer itself) bounded. Matches the original
+ * MAX_TERMS*MAX_TERMS design bound — sur_mul used to silently truncate at
+ * this point instead of erroring, which is the bug being fixed. */
+#define SUR_MAX_PRODUCT_TERMS (MAX_TERMS * MAX_TERMS)
+
+/* ---- Arithmetic helpers (defined below; declared here for from_arrays) ---- */
+
+static void sort_terms(int n, val_t *exps, val_t *coeffs);
+static int  merge_equal(int n, val_t *exps, val_t *coeffs);
 
 /* ---- Allocation ---- */
 
@@ -25,20 +36,21 @@ static val_t alloc_sur(int n) {
     return vptr(s);
 }
 
-/* Build from arrays, skipping zero coefficients. Arrays need not be pre-filtered. */
+/* Build from arrays: the single choke point every constructor goes through,
+ * so it enforces the canonical form the rest of the arithmetic (sur_add's
+ * merge in particular) assumes every live Surreal already has: sorted
+ * descending by exponent, at most one term per exponent, no zero
+ * coefficients. Arrays need not be pre-sorted, pre-merged, or
+ * pre-filtered — mutated in place, which is safe since every call site
+ * passes a scratch buffer it doesn't reuse afterward. */
 static val_t from_arrays(int n, val_t *exps, val_t *coeffs) {
-    int nnz = 0;
-    for (int i = 0; i < n; i++)
-        if (!num_is_zero(coeffs[i])) nnz++;
-    val_t r = alloc_sur(nnz);
+    sort_terms(n, exps, coeffs);
+    n = merge_equal(n, exps, coeffs);
+    val_t r = alloc_sur(n);
     Surreal *s = as_surreal(r);
-    int j = 0;
     for (int i = 0; i < n; i++) {
-        if (!num_is_zero(coeffs[i])) {
-            s->data[2*j]   = exps[i];
-            s->data[2*j+1] = coeffs[i];
-            j++;
-        }
+        s->data[2*i]   = exps[i];
+        s->data[2*i+1] = coeffs[i];
     }
     return r;
 }
@@ -181,21 +193,37 @@ val_t sur_mul(val_t a, val_t b) {
     int na = sa->nterms, nb = sb->nterms;
     if (na == 0 || nb == 0) return SUR_ZERO;
 
-    int nc = na * nb;
-    if (nc > MAX_TERMS * MAX_TERMS) nc = MAX_TERMS * MAX_TERMS;
+    /* Every (i, j) cross-term contributes: a finite product of two finite
+     * Hahn sums is itself exactly finite (unlike sur_div's quotient, which
+     * approximates an infinite series and is deliberately capped at
+     * MAX_TERMS). The old fixed MAX_TERMS*MAX_TERMS-sized buffer silently
+     * dropped cross-terms past that cap and returned a mathematically
+     * wrong product with no error. Nothing bounds Surreal.nterms elsewhere
+     * (sur_add/from_arrays grow it freely), so na*nb is neither bounded
+     * nor overflow-safe as a plain `int` multiply — compute it widened and
+     * raise a clear error instead of either truncating silently or
+     * overflowing into an undersized allocation. SUR_MAX_PRODUCT_TERMS
+     * additionally caps sort_terms's O(n^2) insertion sort on the result,
+     * which would otherwise make an ordinary (* big-surreal big-surreal)
+     * call from Scheme an easy O(n^4) hang. */
+    int64_t nc64 = (int64_t)na * (int64_t)nb;
+    if (nc64 > SUR_MAX_PRODUCT_TERMS)
+        scm_raise(V_FALSE,
+                  "surreal multiplication: result would have too many terms "
+                  "(%d x %d = %lld cross-terms, limit %d)",
+                  na, nb, (long long)nc64, SUR_MAX_PRODUCT_TERMS);
+    int nc = (int)nc64;
     val_t *exps   = (val_t *)gc_alloc_raw_pinned((size_t)nc * sizeof(val_t));
     val_t *coeffs = (val_t *)gc_alloc_raw_pinned((size_t)nc * sizeof(val_t));
 
     int n = 0;
-    for (int i = 0; i < na && n < nc; i++) {
-        for (int j = 0; j < nb && n < nc; j++) {
+    for (int i = 0; i < na; i++) {
+        for (int j = 0; j < nb; j++) {
             exps[n]   = num_add(sa->data[2*i], sb->data[2*j]);
             coeffs[n] = num_mul(sa->data[2*i+1], sb->data[2*j+1]);
             n++;
         }
     }
-    sort_terms(n, exps, coeffs);
-    n = merge_equal(n, exps, coeffs);
     return from_arrays(n, exps, coeffs);
 }
 

@@ -419,6 +419,33 @@
   (surreal->number (+ sur3 (make-surreal (list (cons 0 5))))) 8)
 (check "surreal-birthday ≥ 0" (>= (surreal-birthday sur3) 0) #t)
 
+;;; make-surreal must canonicalize: sort descending by exponent and merge
+;;; duplicate exponents, regardless of input order — arithmetic elsewhere
+;;; (sur_add's merge in particular) assumes every live surreal already has
+;;; this form.
+(check "make-surreal sorts + merges duplicates"
+  (surreal-terms (make-surreal (list (cons 0 1) (cons 2 3) (cons 0 4) (cons 1 5))))
+  '((2 . 3) (1 . 5) (0 . 5)))
+(check "make-surreal drops zero coefficients after merge"
+  (surreal-terms (make-surreal (list (cons 0 1) (cons 0 -1) (cons 1 2))))
+  '((1 . 2)))
+
+;;; surreal multiplication must not silently drop cross-terms when the
+;;; product of term counts is within the 64x64=4096 cap: previously this
+;;; region (na, nb both > 64 but na*nb <= 4096) was fine, but a case that
+;;; used to silently truncate above the cap must now raise instead.
+(define (surreal-monomial-sum n)
+  (make-surreal (let loop ((i 0) (acc '()))
+                  (if (= i n) acc (loop (+ i 1) (cons (cons i 1) acc))))))
+(check "surreal-mul: correct (no truncation) within the term cap"
+  (length (surreal-terms (* (surreal-monomial-sum 60) (surreal-monomial-sum 60))))
+  119)  ; exponents 0..118 after merging 60*60=3600 cross-terms (<= 4096 cap)
+(check "surreal-mul: raises rather than silently truncating past the term cap"
+  (guard (exn (#t 'raised))
+    (* (surreal-monomial-sum 65) (surreal-monomial-sum 65))  ; 65*65=4225 > 4096
+    'no-error-raised)
+  'raised)
+
 
 ;;; =========================================================================
 ;;; Auto-differentiation  (dual-number / surreal forward mode)
