@@ -218,7 +218,7 @@
 
 ;;; Mouse callback — capture canvas in closure
 (canvas-on-mouse! canvas
-  (lambda (event btn mx my)
+  (lambda (event btn mx my mods)
     (on-mouse! event btn mx my canvas)))
 
 ;;; ---- Sidebar -----------------------------------------------------------
