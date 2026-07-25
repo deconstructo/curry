@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.10.0 — Eval-elimination phase 3 complete, `--timings`, benchmark CI
 
 **CLI — `--timings` pipeline report**
 - New `--timings` flag prints a read/expand/compile/execute breakdown (ms)
