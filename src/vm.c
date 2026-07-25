@@ -324,6 +324,48 @@ void vm_close_upvalues(val_t *last) {
     }
 }
 
+/* See vm.h for why this exists (actor_spawn's cross-thread upvalue race).
+ *
+ * This does NOT close `bc`'s upvalues in place — an earlier version of
+ * this fix did, and review caught a real regression: an open Upvalue is
+ * shared (by pointer) by every closure that captured the same variable
+ * from the same still-live scope, e.g. two sibling closures over one
+ * named-let loop variable, or the enclosing frame's own OP_LOAD_LOCAL/
+ * OP_STORE_LOCAL access to that exact stack slot. Force-closing the
+ * shared object in place freezes the value for ALL of them the instant
+ * one of them escapes to spawn — not just the one being spawned — which
+ * is observably wrong for anything still running in the spawning thread:
+ * confirmed with a repro where a sibling closure sharing the spawned
+ * closure's loop variable, mutated and re-read after the spawn call,
+ * silently saw the pre-spawn value instead of the mutation. vm_close_upvalues
+ * itself never has this problem because it only ever runs at genuine scope
+ * exit, when the local slot will provably never be read again by anyone.
+ *
+ * Instead, this builds an independent COPY of `bc` — same chunk, but with
+ * every upvalue slot replaced by a fresh, already-closed snapshot of its
+ * current value. The original closure object (and everything else that
+ * may still reference its shared, still-open upvalues) is left completely
+ * untouched, so same-thread sharers keep observing the live, mutable
+ * variable exactly as they always have, right up to its normal scope-exit
+ * close. Only the actor's private copy is frozen — snapshotting even an
+ * already-closed upvalue too, rather than sharing it, since a "closed"
+ * Upvalue can still be mutated later via OP_STORE_UP through any other
+ * closure that shares it, which would otherwise still be an unsynchronized
+ * cross-thread write/read race on that shared object. */
+BcClosure *vm_snapshot_closure_for_escape(BcClosure *bc) {
+    BcClosure *copy = vm_make_closure(bc->chunk, bc->upval_count);
+    for (int i = 0; i < bc->upval_count; i++) {
+        Upvalue *up  = bc->upvals[i];
+        Upvalue *snap = CURRY_NEW_PINNED(Upvalue);
+        snap->hdr.type = T_UPVALUE; snap->hdr.flags = 0; snap->hdr.fwd = 0;
+        snap->closed = *up->location;
+        snap->location = &snap->closed;
+        snap->next = NULL;
+        copy->upvals[i] = snap;
+    }
+    return copy;
+}
+
 /* ── Foreign call helper ─────────────────────────────────────────────── */
 
 static val_t call_foreign(val_t callee, int argc, val_t *args) {

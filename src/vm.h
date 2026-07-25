@@ -133,4 +133,20 @@ BcClosure *vm_make_closure(Chunk *chunk, int nupvals);
 /* Close all open upvalues up to and including `last` stack slot */
 void vm_close_upvalues(val_t *last);
 
+/* Build a private copy of `bc` — same chunk, but every upvalue replaced
+ * with an independent, already-closed snapshot of its current value —
+ * safe to hand to a brand-new thread (actor_spawn). The original closure
+ * is left completely untouched: this does NOT close `bc`'s own upvalues
+ * in place, since an open Upvalue can be shared by other same-thread
+ * closures (or the enclosing frame's own local-variable access) that must
+ * keep observing the live, mutable variable normally. Without a snapshot
+ * of some kind, an actor spawned from inside a tail-recursive loop can
+ * race the spawning thread's next iteration reusing the same stack slot
+ * and read a stale/wrong value with no error (see actors.c: actor_spawn,
+ * and vm.c for the full reasoning and the in-place-close approach this
+ * replaced after review found it corrupts same-thread sharers). Must be
+ * called from the thread that owns the current `vm` (the one that opened
+ * `bc`'s upvalues, if any are still open). */
+BcClosure *vm_snapshot_closure_for_escape(BcClosure *bc);
+
 #endif /* CURRY_VM_H */

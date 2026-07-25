@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Concurrency — `spawn` could silently hand an actor a wrong/stale captured value**
+
+A correctness bug from the same full-codebase audit as the security fixes below, now fixed: a closure passed to `spawn` could still have an upvalue open into the *spawning* thread's live stack at the moment the new actor thread started running it. If the spawning thread was a tail-recursive loop reusing that exact stack slot for its next iteration (which TCO does by design), the actor could read the wrong value — no crash, no error, just silently wrong data. Confirmed on a plain release build with no sanitizer: 2000 actors spawned from a loop capturing the loop variable produced several actors reading a duplicated/skipped value across repeated runs.
+
+Fixed in two iterations, the first of which review caught as itself wrong: closing the shared `Upvalue` object in place (the first attempt) froze the value for *every* closure sharing that same variable from the same still-live scope, not just the one being spawned — breaking ordinary same-thread code (e.g. a sibling closure over the same loop variable) that should still observe a later `set!`. The landed fix instead builds the actor a private, independent snapshot closure (`vm_snapshot_closure_for_escape`), leaving the original closure and anything else sharing its upvalues completely untouched. TSan-confirmed clean on both the original race and the sibling-closure regression; regression tests added to `tests/actors_tests.scm`.
+
+One related, pre-existing, deliberately out-of-scope gap noted during review: a closure with open upvalues sent to another actor via a mailbox message *before* being spawned would have its upvalues force-read by the *receiving* thread, not the thread that opened them — this fix's synchronous-snapshot-in-the-spawning-thread approach assumes `spawn`'s caller is that owning thread, which mailbox-relayed closures violate. Not currently known to be reachable in practice; would need broader design work on what value kinds a mailbox should accept.
+
 **Security — six memory-safety bugs from a full-codebase audit**
 
 A systematic bug-hunting audit (9 parallel independent reviews, each required to build and reproduce findings rather than just pattern-match) turned up 23 findings ranging from confirmed crashes to minor UB. This release fixes the six most severe: memory-unsafe bugs reachable from ordinary Scheme code with no special build flags, several confirmed with ASan/a live crafted-input reproduction. The rest of the audit's findings (a real correctness bug in `spawn`+closures, GC/STM/workpool issues in experimental backends, `surreal.c`/sexagesimal/`string-ref` correctness bugs, and more) remain open — see the audit for the full list.

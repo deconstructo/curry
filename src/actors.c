@@ -154,6 +154,29 @@ void actors_init(void) {
 }
 
 val_t actor_spawn(val_t closure, val_t args) {
+    /* If closure has upvalues, give the ACTOR its own private, frozen
+     * snapshot of them before handing it to a brand-new thread below —
+     * never mutate the original closure/its upvalues in place. Without
+     * some fix here, the new actor thread's OP_LOAD_UP (a plain,
+     * unsynchronized `*upval->location` read) can race this thread's own
+     * continuing execution — e.g. a tail-recursive loop's very next
+     * iteration reusing that exact stack slot for its next parameter —
+     * with no lock, no atomic, no fence anywhere in the path. Confirmed:
+     * 2000 actors spawned from inside a loop capturing the loop variable
+     * produced several actors reading a duplicated/skipped value with no
+     * error, even on a plain non-TSan build.
+     *
+     * An open Upvalue is shared by pointer with anything else that
+     * captured the same variable from the same still-live scope (a
+     * sibling closure, or the enclosing frame's own local-variable
+     * access), so closing it IN PLACE — an earlier version of this fix —
+     * is wrong: it freezes the value for all of them the instant one
+     * escapes to spawn, not just the one being spawned. Building a
+     * fresh, independent closure (vm_snapshot_closure_for_escape) instead
+     * leaves the original completely untouched. */
+    if (vis_bcclosure(closure))
+        closure = vptr(vm_snapshot_closure_for_escape(as_bcclosure(closure)));
+
     Actor *a = CURRY_NEW_PINNED(Actor);
     a->hdr.type  = T_ACTOR;
     a->hdr.flags = 0;

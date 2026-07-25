@@ -133,6 +133,66 @@
 (sem-wait! sem5)
 (check "condvar signal/wait" cv-result 'signaled)
 
+;;; spawn + closure upvalue race — regression test.
+;;;
+;;; A closure handed to spawn can still have an upvalue open into the
+;;; SPAWNING thread's live stack at the moment the new actor thread starts
+;;; running it. If the spawning thread is a loop reusing that exact stack
+;;; slot for its next iteration (which TCO does by design), the actor can
+;;; read the wrong value with no error, no lock, nothing — a silent
+;;; correctness bug, not a crash. Fixed by force-closing a spawned
+;;; closure's open upvalues synchronously in the spawning thread, before
+;;; the new thread starts (see vm_force_close_upvalue, actor_spawn).
+;;;
+;;; This spawns N actors from inside a tight tail-recursive loop, each
+;;; capturing the loop variable and writing it into a distinct vector
+;;; slot; every actor must see its own iteration's value, never a
+;;; neighbor's. Before the fix, this reliably produced either a wrong
+;;; value (silently) or a type-confused crash within a handful of runs.
+(define N-race 2000)
+(define race-results (make-vector N-race #f))
+(define sem-race (make-semaphore 0))
+(let loop ((i 0))
+  (when (< i N-race)
+    (spawn (lambda ()
+             (vector-set! race-results i i)
+             (sem-post! sem-race)))
+    (loop (+ i 1))))
+(let loop ((i 0))
+  (when (< i N-race)
+    (sem-wait! sem-race)
+    (loop (+ i 1))))
+(define race-wrong 0)
+(let loop ((i 0))
+  (when (< i N-race)
+    (unless (equal? (vector-ref race-results i) i)
+      (set! race-wrong (+ race-wrong 1)))
+    (loop (+ i 1))))
+(check "spawn from a loop: every actor captures its own iteration's value" race-wrong 0)
+
+;;; spawn must not freeze a shared upvalue for same-thread sharers —
+;;; regression test for a review finding against an earlier version of the
+;;; fix above. An open upvalue is shared (by pointer) by every closure
+;;; that captured the same variable from the same still-live scope; an
+;;; in-place close (to make it safe to hand to a new actor thread) wrongly
+;;; froze the value for ALL of them, not just the escaping one, breaking
+;;; an ordinary same-thread sibling closure that should still observe a
+;;; later set! to the shared variable. The fix instead gives the actor its
+;;; own private snapshot, leaving the original (and anything else sharing
+;;; it) untouched.
+(define sem-sib (make-semaphore 0))
+(define sib-result #f)
+(define (make-sibling-test)
+  (let ((counter 0))
+    (define get-counter (lambda () counter))
+    (spawn (lambda () (sem-post! sem-sib)))
+    (sem-wait! sem-sib)
+    (set! counter 999)
+    (get-counter)))
+(set! sib-result (make-sibling-test))
+(check "spawn does not freeze a shared upvalue for same-thread sibling closures"
+       sib-result 999)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
