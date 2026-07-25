@@ -39,6 +39,13 @@ static curry_val json_parse_string(const char **p) {
     while (**p && **p != '"') {
         if (**p == '\\') {
             (*p)++;
+            /* A trailing backslash at the very end of the input (no
+             * character follows) previously fell through to read/advance
+             * past the NUL terminator unconditionally below — an
+             * out-of-bounds read past the string's allocated buffer.
+             * Stop cleanly instead; the unterminated string is malformed
+             * input either way. */
+            if (!**p) break;
             char esc = **p; (*p)++;
             switch (esc) {
             case '"':  buf[len++] = '"'; break;
@@ -50,8 +57,16 @@ static curry_val json_parse_string(const char **p) {
             case 'b':  buf[len++] = '\b'; break;
             case 'f':  buf[len++] = '\f'; break;
             case 'u': {
-                char hex[5] = {(*p)[0],(*p)[1],(*p)[2],(*p)[3],0};
-                (*p) += 4;
+                /* Read up to 4 hex digits, stopping at the NUL terminator
+                 * if the escape is truncated (previously read/advanced 4
+                 * bytes unconditionally, which could run past the
+                 * string's end). A short escape yields fewer significant
+                 * digits, same as strtoul would produce from a
+                 * NUL-padded buffer. */
+                char hex[5] = {0,0,0,0,0};
+                int hn = 0;
+                while (hn < 4 && (*p)[hn]) { hex[hn] = (*p)[hn]; hn++; }
+                (*p) += hn;
                 uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
                 /* Encode as UTF-8 */
                 if (cp < 0x80) { buf[len++]=(char)cp; }
