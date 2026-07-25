@@ -57,7 +57,16 @@ typedef uintptr_t val_t;
 /* ---- Fixnum ---- */
 #define vfix(n)         (((val_t)((uintptr_t)(intptr_t)(n) << 2)) | VTAG_FIX)
 #define vunfix(v)       ((intptr_t)(v) >> 2)
-#define FIXNUM_MAX      ((intptr_t)((UINTPTR_MAX >> 3) >> 1))
+/* vfix/vunfix shift by 2 (the 2-bit tag), leaving 62 value bits — a signed
+ * 62-bit range is [-2^61, 2^61-1]. UINTPTR_MAX >> 3 gives exactly 2^61-1
+ * (removing 3 bits from a 64-bit unsigned max yields a 61-bit unsigned
+ * max). The previous `(UINTPTR_MAX >> 3) >> 1` shifted one bit too many,
+ * halving the documented/usable fixnum range to 2^60-1 — every value in
+ * [2^60, 2^61-1] was promoted to a bignum one range earlier than it
+ * needed to be. No call site depended on the narrower range (the sole
+ * user, numeric.c's overflow check, just compares against whatever this
+ * expands to), so widening it back to the correct value is a pure fix. */
+#define FIXNUM_MAX      ((intptr_t)(UINTPTR_MAX >> 3))
 #define FIXNUM_MIN      (-FIXNUM_MAX - 1)
 #define in_fixnum_range(n) ((intptr_t)(n) >= FIXNUM_MIN && (intptr_t)(n) <= FIXNUM_MAX)
 
