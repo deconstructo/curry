@@ -220,12 +220,54 @@ val_t expand_qq(val_t form, val_t env, int depth) {
 
 /* ---- Apply ---- */
 
+/* Copy a Scheme list's `n` elements (n = list_length(args), computed by
+ * the caller) into a C array sized to match — `inline_buf` (caller's
+ * on-stack array) for the common case, a fresh GC allocation for anything
+ * larger. This replaces three call sites that used to copy into a fixed
+ * 64-slot buffer via list_to_arr(args, arr, 64) while a SEPARATE, uncapped
+ * list_length() supplied the count used afterward: for the BcClosure and
+ * symbolic-apply paths, that meant reading arr[64..n-1] — past the end of
+ * the 64-slot buffer, straight off the C stack, and pushing that garbage
+ * as real Scheme values (a real, exploitable-from-Scheme information leak:
+ * `(apply f big-list)` called indirectly, e.g. `(define ap apply) (ap f
+ * big-list)`, since the compiler only special-cases a *literal*
+ * `(apply f args)` call site into a safe, correctly-sized OP_APPLY). For
+ * the primitive-call path it didn't read out of bounds (that one already
+ * capped its own `n` at 64 via list_to_arr's return value) but silently
+ * dropped every argument past #64 with no error — a separate, purely-
+ * logic bug.
+ *
+ * Allocated via gc_alloc (GC-managed, holds val_t which may be heap
+ * pointers — never GC_MALLOC_ATOMIC) rather than malloc/free or a
+ * persistent scratch buffer, for two reasons found by review of an
+ * earlier version of this fix that DID use malloc/free:
+ *   1. Reentrancy: `apply` is reentrant (a primitive called through this
+ *      path can itself call back into `apply`, e.g. map/for-each
+ *      internals) — a single shared/thread-local buffer would let a
+ *      nested large-argc call overwrite an outer call's still-in-use argv
+ *      out from under it. Each call getting its own allocation avoids
+ *      this regardless of how it's allocated.
+ *   2. free()-based cleanup requires a free() call on every exit path,
+ *      and this function's callers (below) call into things — prim->fn,
+ *      vm_run, sx_make_apply — that can raise a Scheme condition (a
+ *      longjmp) for entirely mundane reasons (a wrong-type argument, an
+ *      arity mismatch two frames down), not just rare fatal errors.
+ *      Every such raise skips a textually-later free(), leaking the
+ *      buffer — confirmed empirically (~190MB over 200k iterations of a
+ *      >64-arg call that raises inside a guard). GC allocation has no
+ *      such window: nothing needs to free it, so nothing can forget to. */
+static val_t *args_to_arr(val_t args, int n, val_t *inline_buf, int inline_cap) {
+    val_t *arr = (n <= inline_cap) ? inline_buf : (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    list_to_arr(args, arr, n);
+    return arr;
+}
+
 val_t apply(val_t proc, val_t args) {
     if (vis_bcclosure(proc)) {
         BcClosure *cl = as_bcclosure(proc);
         int n = list_length(args);
-        val_t arr[64];
-        list_to_arr(args, arr, 64);
+        val_t stack_arr[64];
+        val_t *arr = args_to_arr(args, n, stack_arr, 64);
         val_t *saved_sp = vm->sp;
         vm_push(proc);
         for (int i = 0; i < n; i++) vm_push(arr[i]);
@@ -246,8 +288,9 @@ val_t apply(val_t proc, val_t args) {
     }
     if (vis_prim(proc)) {
         Primitive *prim = as_prim(proc);
-        val_t arr[64];
-        int n = list_to_arr(args, arr, 64);
+        int n = list_length(args);
+        val_t stack_arr[64];
+        val_t *arr = args_to_arr(args, n, stack_arr, 64);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
         gc_inhibit_minor();
@@ -304,8 +347,8 @@ val_t apply(val_t proc, val_t args) {
     }
     if (vis_symfn(proc)) {
         int n = list_length(args);
-        val_t arr[64];
-        list_to_arr(args, arr, 64);
+        val_t stack_arr[64];
+        val_t *arr = args_to_arr(args, n, stack_arr, 64);
         return sx_make_apply(proc, n, arr);
     }
     scm_raise_code(EC_NOT_A_PROCEDURE, "apply: not a procedure");

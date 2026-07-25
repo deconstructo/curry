@@ -119,6 +119,38 @@
         (receive (n1) (values (- n 1))
           (loop n1 (+ acc n))))) 6)
 
+;;; apply/call with more than 64 arguments — regression coverage for a bug
+;;; found in a full-codebase audit: apply()'s BcClosure/primitive/symbolic-
+;;; function branches (runtime.c) and the tree-walker's own function-
+;;; application dispatch (eval.c) all used a fixed 64-slot array. For
+;;; runtime.c's apply(), called INDIRECTLY (as a value, not the literal
+;;; `(apply f args)` the compiler special-cases into a safe OP_APPLY),
+;;; the BcClosure/symbolic-function paths read past the end of that
+;;; buffer — straight off the C stack — and used the garbage as real
+;;; argument values; the primitive path silently truncated to 64 args
+;;; with no error. The tree-walker's own dispatch was worse: it STOPPED
+;;; EVALUATING argument expressions past the 64th, silently dropping
+;;; their side effects too, with no error, reachable via -l/load or a
+;;; library body (the only places the tree-walker still runs).
+;;; `ap` (a variable, not the literal symbol `apply`) forces every call
+;;; below through the INDIRECT path — the compiler only special-cases a
+;;; literal `(apply f args)` call site into a safe, correctly-sized
+;;; OP_APPLY; going through a variable reference is exactly the case that
+;;; was vulnerable.
+(define ap apply)
+(define (variadic-length . xs) (length xs))
+(define (range-from-1 n)
+  (let loop ((i n) (acc '())) (if (= i 0) acc (loop (- i 1) (cons i acc)))))
+(check ">64 args via indirect apply: correct count"
+  (ap variadic-length (range-from-1 100))
+  100)
+(check ">64 args via indirect apply: every value preserved in order"
+  (ap (lambda args args) (range-from-1 100))
+  (range-from-1 100))
+(check ">64 args to a variadic primitive via indirect apply"
+  (ap + (range-from-1 100))
+  5050)
+
 ;;; Let forms
 (check "let" (let ((x 1) (y 2)) (+ x y)) 3)
 (check "let*" (let* ((x 1) (y (+ x 1))) y) 2)

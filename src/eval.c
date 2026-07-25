@@ -36,6 +36,7 @@
 #include "surreal.h"
 #include "profiling.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- parameterize WindFrame helpers ---- */
@@ -1006,10 +1007,39 @@ tail:
     {
         val_t proc = vis_symbol(op) ? op_val : eval(op, env);
 
-        /* Evaluate arguments directly into a stack array — no cons allocation */
-        val_t arr[64];
+        /* Evaluate arguments directly into an array — no cons allocation.
+         * Sized to the actual argument-expression count (list_length on
+         * the still-unevaluated `rest`, which costs nothing extra to
+         * compute), not a bare fixed 64-slot cap: the previous
+         * `argc < 64` loop bound silently STOPPED EVALUATING expressions
+         * past the 64th, so a >64-argument call not only truncated the
+         * argument values but dropped the side effects of every later
+         * argument expression entirely, with no error — worse than the
+         * equivalent bug fixed in runtime.c's apply(), which just
+         * mis-sized an already-evaluated array. Only reachable via the
+         * tree-walker (`-l`/`load`, or library/define-library bodies,
+         * which stay permanently tree-walked by design), not compiled
+         * code.
+         *
+         * gc_alloc (GC-managed; never GC_MALLOC_ATOMIC — a val_t may be a
+         * heap pointer) rather than malloc for the rare >64 case, and no
+         * matching free() anywhere below: an earlier version of this fix
+         * used malloc + a free() before every one of this block's many
+         * exit points (several returns, a goto tail, a longjmp) — review
+         * found several of those exits are reached by an ordinary raised
+         * condition (a wrong-type/wrong-arity argument, arity mismatch in
+         * env_bind_arr, etc.), which longjmps past the textually-later
+         * free(), leaking the buffer on what is a completely mundane,
+         * everyday error path, not a rare one (confirmed empirically:
+         * ~190MB over 200k guard-wrapped iterations). GC allocation has
+         * no such window — nothing needs to free it, so nothing can
+         * forget to, on any exit path, present or future. */
+        int argc_total = list_length(rest);
+        val_t stack_arr[64];
+        val_t *arr = (argc_total <= 64) ? stack_arr
+                                         : (val_t *)gc_alloc((size_t)argc_total * sizeof(val_t));
         int argc = 0;
-        for (val_t r = rest; vis_pair(r) && argc < 64; r = vcdr(r))
+        for (val_t r = rest; vis_pair(r); r = vcdr(r))
             arr[argc++] = eval(vcar(r), env);
 
         if (vis_prim(proc)) {

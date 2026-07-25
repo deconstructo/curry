@@ -225,6 +225,28 @@ SCHEME
 out=$("$CURRY" -l "$DEFN_SCM" -e '(display (greet "world")) (newline)')
 check "-l loads file before -e expression" "$out" "hi world"
 
+# -l runs via the tree-walker (eval.c), not the compiler — regression test
+# for a bug found in a full-codebase audit: the tree-walker's function-
+# application dispatch used a fixed 64-slot array for evaluated arguments,
+# and its loop bound (`argc < 64`) stopped EVALUATING argument expressions
+# past the 64th, silently dropping their side effects too, with no error.
+MANYARGS_SCM="$TMPDIR_CLI/manyargs.scm"
+python3 - "$MANYARGS_SCM" << 'PYEOF'
+import sys
+path = sys.argv[1]
+n = 70
+marks = " ".join(f"(mark! {i})" for i in range(n))
+with open(path, "w") as f:
+    f.write("(define side-effects (make-vector %d #f))\n" % n)
+    f.write("(define (mark! i) (vector-set! side-effects i #t) i)\n")
+    f.write("(define (f . xs) (length xs))\n")
+    f.write("(define result (f %s))\n" % marks)
+    f.write("(define missed 0)\n")
+    f.write("(let loop ((i 0)) (when (< i %d) (unless (vector-ref side-effects i) (set! missed (+ missed 1))) (loop (+ i 1))))\n" % n)
+PYEOF
+out=$("$CURRY" -l "$MANYARGS_SCM" -e '(display result) (display " ") (display missed) (newline)')
+check "-l (tree-walker): >64-arg call preserves count and all side effects" "$out" "70 0"
+
 # ─── Script receives arguments ────────────────────────────────────────────────
 
 ARGS_SCM="$TMPDIR_CLI/args.scm"
