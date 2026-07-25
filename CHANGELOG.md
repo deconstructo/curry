@@ -1,6 +1,8 @@
 # Changelog
 
-### Unreleased
+### 1.10.4 — Full-codebase security/correctness audit: memory safety, concurrency, numeric-tower bugs
+
+A systematic bug-hunting audit (9 parallel independent reviews, each required to build and reproduce findings rather than just pattern-match) turned up 23 findings. This release fixes all of them, working through the list in priority order across many iterations, with every non-trivial fix reviewed independently at least once (several caught a flawed first attempt and required a second iteration — noted inline below where that happened) per this project's own review policy.
 
 **`(curry mcp)` JWT auth — check-after-write stack buffer overflow in base64url decoding**
 
@@ -88,6 +90,11 @@ A systematic bug-hunting audit (9 parallel independent reviews, each required to
 - **`(curry image)`**'s GIF LZW decoder used a fixed 256-byte-per-row dictionary buffer, but a chained dictionary entry's length is unbounded up to the table size (4096) — an ordinary large flat-color GIF (not just a crafted one) could overflow it. ASan-confirmed on a 4000×4000 solid-color GIF. Rows widened to the safe bound, plus an explicit clamp as defense in depth.
 - **`(curry neo4j)`**'s PackStream decoder allocated (and immediately `memset`-committed) a bytevector/list sized from an attacker-controlled length header *before* validating it against the actual remaining message buffer — unlike the adjacent string-decode path, which already validated first. Crashed against a fake malicious Bolt server during the **unauthenticated** HELLO handshake; fixed to validate first, matching the existing string path.
 - **`(curry mcp)`**'s JSON parser had no recursion-depth limit — unbounded stack recursion on deeply nested input, crashable via `mcp-serve`'s stdio transport (and pre-authentication over HTTP on some SSE-enabled deployments). The sibling `(curry lsp)` module was specifically hardened against exactly this; `mcp.c` now has the same `JSON_MAX_DEPTH` guard.
+
+**Two audit items deliberately left open**
+
+- **The interactive debugger's `next`/`finish` behavior around tail calls** (`src/debug.c`/`src/vm.c`) was investigated and a fix was built (tagging each `CallFrame` with a monotonic call-sequence number, bumped on every `OP_TAIL_CALL` frame reuse as well as every `OP_CALL` push, so `next` could distinguish "still the same activation" from "a tail call just replaced it"). Testing it against the existing named-let-loop debugger test, though, showed it broke correct, already-tested behavior: `next` stepping through a self-recursive loop (`count` → `lp` → `lp` → …) relies on exactly the same tail-call-frame-reuse mechanism as an ordinary cross-function tail call, and no rule was found that cleanly separates "should stop" (loop iteration) from "should skip" (a plain tail call elsewhere) without more clarity on the intended semantics than the audit finding provided. Reverted rather than ship a regression in working, tested behavior. Left as an open, documented question rather than a fix.
+- **The generational GC backend's (`--gc generational`, experimental, non-default) write barrier not tracking actor-thread nurseries** was not attempted this release — lower priority since it's an opt-in backend, not the one any user gets without explicitly asking for it.
 
 ### 1.10.3 — Fix `.scc` cache never being written for GUI/`(exit)`-ending scripts
 
