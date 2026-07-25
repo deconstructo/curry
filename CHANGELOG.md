@@ -1,5 +1,23 @@
 # Changelog
 
+### 1.10.2 — Fix `--timings` never reporting for `(curry qt6)` apps
+
+**CLI**
+- `run-event-loop` (`modules/qt6/qt6.cpp`) calls C's `exit(3)` directly
+  once the Qt event loop returns, deep inside `vm_run()` while a script is
+  still executing — bypassing `main()`'s normal return path entirely.
+  `--timings` on a GUI script (e.g. `examples/mandelbrot/mandelbrot.scm`)
+  silently never printed its report, regardless of how the window was
+  closed, since the report was only ever triggered explicitly at the end
+  of `main()` and in the REPL's `,quit` handler.
+- Fixed by registering `curry_timings_report` via `atexit()` once, early
+  in `main()`, instead of calling it explicitly at each known exit point.
+  `exit(3)` (unlike `_exit(2)`) always runs `atexit` handlers, so this
+  catches every exit path uniformly — including ones inside C extension
+  modules `main.c` has no visibility into — without needing to track down
+  each one individually. Verified against `mandelbrot.scm`: closing the
+  window now correctly prints the read/expand/compile/execute report.
+
 ### 1.10.1 — Transparent `.scc` cache: content-hash keyed, with HIT/MISS visibility
 
 **`.scc` cache — content-hash keyed, with HIT/MISS visibility**
