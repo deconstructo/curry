@@ -20,6 +20,9 @@ uint64_t curry_timing_expand_ns  = 0;
 uint64_t curry_timing_compile_ns = 0;
 uint64_t curry_timing_execute_ns = 0;
 
+bool curry_timings_cache_checked = false;
+bool curry_timings_cache_hit     = false;
+
 static double ns_to_ms(uint64_t ns) { return (double)ns / 1000000.0; }
 
 void curry_timings_report(void) {
@@ -31,6 +34,8 @@ void curry_timings_report(void) {
     uint64_t total_ns = curry_timing_read_ns + curry_timing_expand_ns +
                         compile_only_ns + curry_timing_execute_ns;
     fprintf(stderr, "\n--timings (ms):\n");
+    if (curry_timings_cache_checked)
+        fprintf(stderr, "  cache    %12s\n", curry_timings_cache_hit ? "HIT" : "MISS");
     fprintf(stderr, "  read     %12.3f\n", ns_to_ms(curry_timing_read_ns));
     fprintf(stderr, "  expand   %12.3f\n", ns_to_ms(curry_timing_expand_ns));
     fprintf(stderr, "  compile  %12.3f\n", ns_to_ms(compile_only_ns));

@@ -42,7 +42,7 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x03'   /* v3: + per-chunk local_debug table */
+#define SCC_FMT_VER     '\x04'   /* v4: content-hash cache key (was mtime+size) */
 #define SCC_SENTINEL    0xCAFEBEEFu
 #define SCC_SHEBANG     "#!/usr/bin/env curry\n"
 
@@ -82,8 +82,6 @@ static bool wu64(FILE *f, uint64_t v) {
     };
     return fwrite(b, 1, 8, f) == 8;
 }
-
-static bool wi64(FILE *f, int64_t v)  { return wu64(f, (uint64_t)v); }
 
 static bool wbytes(FILE *f, const void *p, uint32_t n) {
     return n == 0 || fwrite(p, 1, n, f) == n;
@@ -134,13 +132,6 @@ static bool ru64(FILE *f, uint64_t *v) {
        | ((uint64_t)b[2]<<16)  | ((uint64_t)b[3]<<24)
        | ((uint64_t)b[4]<<32)  | ((uint64_t)b[5]<<40)
        | ((uint64_t)b[6]<<48)  | ((uint64_t)b[7]<<56);
-    return true;
-}
-
-static bool ri64(FILE *f, int64_t *v) {
-    uint64_t u;
-    if (!ru64(f, &u)) return false;
-    *v = (int64_t)u;
     return true;
 }
 
@@ -583,14 +574,51 @@ static bool read_chunk(FILE *f, Chunk *c) {
     return true;
 }
 
-/* ── Source file metadata ───────────────────────────────────────────────── */
+/* ── Source file content hash (cache key) ────────────────────────────────── */
 
-static bool src_stat(const char *src_path, int64_t *mtime, int64_t *size) {
+/* FNV-1a 64-bit hash of the source file's full contents — keys .scc cache
+ * validity. Content-hash keyed rather than mtime/size (the pre-v4 scheme):
+ * mtime survives things that don't change content but do touch the
+ * filesystem timestamp (git checkout, cp -p, some editors' save-in-place),
+ * which either falsely invalidates a still-good cache or, worse, can look
+ * "unchanged" after a real edit if a tool preserves the old mtime — a
+ * content hash can't be fooled either way. Not a cryptographic hash: this
+ * only needs to detect accidental changes to a build cache key, not resist
+ * a deliberate collision attack.
+ *
+ * Refuses non-regular files (stat()'d up front, before any read — a stat
+ * doesn't consume pipe data) rather than hashing them: a process
+ * substitution or named-pipe "source path" (e.g. bash's `curry <(...)`,
+ * used by tests/test_mcp.sh) is a one-shot, non-seekable stream — reading
+ * it here to compute a hash would drain it, leaving nothing for the real
+ * read-and-compile pass that follows a cache-miss verdict. mtime/size
+ * (the pre-v4 scheme) didn't have this failure mode: stat() alone never
+ * touches file content. Both write_scc and load_chunks_from_file already
+ * treat a false return here as "cache unusable" (write fails harmlessly;
+ * load falls through to a normal miss), so refusing up front is exactly
+ * the right degradation — these inputs simply never get cached, matching
+ * what already happened in practice (an ephemeral pipe's content differs
+ * across invocations, so a stat-based cache never usefully hit on one
+ * anyway; the difference is doing so no longer has a content side effect). */
+static bool src_hash(const char *src_path, uint64_t *hash_out) {
     struct stat st;
-    if (stat(src_path, &st) != 0) return false;
-    *mtime = (int64_t)st.st_mtime;
-    *size  = (int64_t)st.st_size;
-    return true;
+    if (stat(src_path, &st) != 0 || !S_ISREG(st.st_mode)) return false;
+
+    FILE *f = fopen(src_path, "rb");
+    if (!f) return false;
+    uint64_t h = 14695981039346656037ULL; /* FNV-1a 64 offset basis */
+    unsigned char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) {
+        for (size_t i = 0; i < n; i++) {
+            h ^= buf[i];
+            h *= 1099511628211ULL; /* FNV-1a 64 prime */
+        }
+    }
+    bool ok = !ferror(f);
+    fclose(f);
+    if (ok) *hash_out = h;
+    return ok;
 }
 
 /* ── Cache path helpers ─────────────────────────────────────────────────── */
@@ -665,8 +693,8 @@ static char *fallback_path(const char *src_path) {
 
 static int write_scc(const char *scc_path, const char *src_path,
                      Chunk **chunks, int n_chunks, bool executable) {
-    int64_t mtime, size;
-    if (!src_stat(src_path, &mtime, &size)) return -1;
+    uint64_t hash;
+    if (!src_hash(src_path, &hash)) return -1;
 
     FILE *f = fopen(scc_path, "wb");
     if (!f) return -1;
@@ -681,8 +709,7 @@ static int write_scc(const char *scc_path, const char *src_path,
     ok = ok && wb(f, vlen);
     ok = ok && wbytes(f, CURRY_VERSION, vlen);
 
-    ok = ok && wi64(f, mtime);
-    ok = ok && wi64(f, size);
+    ok = ok && wu64(f, hash);
 
     ok = ok && wu32(f, (uint32_t)n_chunks);
     for (int i = 0; i < n_chunks && ok; i++)
@@ -699,8 +726,8 @@ static int write_scc(const char *scc_path, const char *src_path,
 }
 
 /* Load chunks from an already-open SCC file.  If src_path is non-NULL,
-   validates the cached mtime/size against the source file; otherwise skips
-   those 16 bytes (used when loading a .scc directly without a source). */
+   validates the cached content hash against the source file; otherwise
+   skips those 8 bytes (used when loading a .scc directly without a source). */
 static bool load_chunks_from_file(FILE *f, const char *src_path,
                                    Chunk ***chunks_out, int *n_out) {
     skip_shebang(f);
@@ -722,13 +749,13 @@ static bool load_chunks_from_file(FILE *f, const char *src_path,
     if (strcmp(vbuf, CURRY_VERSION) != 0) goto done;
 
     if (src_path) {
-        int64_t src_mtime, src_size;
-        if (!src_stat(src_path, &src_mtime, &src_size)) goto done;
-        int64_t cached_mtime, cached_size;
-        if (!ri64(f, &cached_mtime) || !ri64(f, &cached_size)) goto done;
-        if (cached_mtime != src_mtime || cached_size != src_size) goto done;
+        uint64_t src_h;
+        if (!src_hash(src_path, &src_h)) goto done;
+        uint64_t cached_h;
+        if (!ru64(f, &cached_h)) goto done;
+        if (cached_h != src_h) goto done;
     } else {
-        if (fseek(f, 16, SEEK_CUR) != 0) goto done;
+        if (fseek(f, 8, SEEK_CUR) != 0) goto done;
     }
 
     uint32_t n_chunks;

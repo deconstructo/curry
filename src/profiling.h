@@ -82,6 +82,18 @@ extern uint64_t curry_timing_expand_ns;
 extern uint64_t curry_timing_compile_ns;
 extern uint64_t curry_timing_execute_ns;
 
+/* .scc cache HIT/MISS visibility (Kaappi §4.7: "an invisible bytecode
+ * cache cost them real debugging hours"). Set by main.c's positional
+ * script-file driver right after a cache lookup completes; printed as an
+ * extra report line only when --timings is on (an on-by-default line
+ * would be noise for every normal script run — the point is to make the
+ * decision visible when you're actually looking, not to nag). Not set for
+ * -e/REPL/a direct .scc invocation, none of which involve a cache
+ * decision — curry_timings_cache_checked stays false for those, and the
+ * report simply omits the cache line. */
+extern bool curry_timings_cache_checked;
+extern bool curry_timings_cache_hit;
+
 /* Print the accumulated report to stderr. No-op if disabled. Safe to call
  * at any point (e.g. process exit, or ,quit in the REPL) — does not reset
  * the accumulators, so a REPL session's report grows across calls. */

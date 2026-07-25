@@ -732,6 +732,8 @@ int main(int argc, char **argv) {
                     curry_timing_execute_ns += profiling_now_ns() - _exec_t0;
             } else if (scc_load(argv[i], &chunks, &n_chunks)) {
                 /* Cache hit: run each chunk in order */
+                curry_timings_cache_checked = true;
+                curry_timings_cache_hit     = true;
                 for (int k = 0; k < n_chunks; k++)
                     chunk_set_source_name_recursive(chunks[k], argv[i]);
                 uint64_t _exec_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
@@ -742,6 +744,8 @@ int main(int argc, char **argv) {
             } else {
                 /* Cache miss: compile one form at a time (preserves macro semantics),
                    collect chunks, write cache; each form is run as compiled */
+                curry_timings_cache_checked = true;
+                curry_timings_cache_hit     = false;
                 compiler_set_source_name(argv[i]);
                 val_t port = port_open_file(argv[i], PORT_INPUT);
                 if (vis_false(port)) {

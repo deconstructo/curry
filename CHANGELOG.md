@@ -1,5 +1,33 @@
 # Changelog
 
+### Unreleased
+
+**`.scc` cache — content-hash keyed, with HIT/MISS visibility**
+- The `.scc` bytecode cache (transparent — no `-c` needed, just
+  `curry script.scm`) now validates against a content hash (FNV-1a 64 over
+  the full source) instead of mtime + size. mtime survives things that
+  don't change content (`git checkout`, `cp -p`, some editors'
+  save-in-place), which could either falsely invalidate a good cache or,
+  worse, look "unchanged" after a real edit — a content hash can't be
+  fooled either way. On-disk format bumped to v4; an old-format `.scc` is
+  cleanly treated as a miss and recompiled, not misread.
+- HIT/MISS is now visible: `--timings` prints an extra `cache: HIT`/`MISS`
+  line whenever a script run actually made a cache decision (not shown for
+  `-e`/REPL, which don't use this cache at all) — addresses the exact
+  failure mode Kaappi's postmortem flagged ("an invisible bytecode cache
+  cost them real debugging hours").
+- A real regression was found and fixed before landing: hashing requires
+  reading the whole file, which drains a non-seekable, one-shot source
+  like bash process substitution (`curry <(...)`, used by
+  `tests/test_mcp.sh`) before the real compile pass gets to read it. Fixed
+  by refusing to hash (and therefore never caching) anything that isn't a
+  regular file, checked via `stat()` up front — which doesn't touch
+  content — rather than via a doomed `fopen`+`fread`.
+- Regression coverage added to `tests/test_cli.sh`: content-hash-not-mtime,
+  changed-content invalidation, HIT/MISS line presence/absence, the
+  process-substitution non-regression, and a hand-crafted stale/wrong-
+  version `.scc` rejection case.
+
 ### 1.10.0 — Eval-elimination phase 3 complete, `--timings`, benchmark CI
 
 **CLI — `--timings` pipeline report**

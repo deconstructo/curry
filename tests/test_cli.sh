@@ -350,6 +350,68 @@ check "--timings: stdout unaffected by report (report goes to stderr)" "$out" "4
 out=$("$CURRY" --timings "$TIMINGS_SCM" 2>&1 >/dev/null | grep 'compile')
 check_contains "--timings: compile stage near-zero on .scc cache hit" "$out" "0.000"
 
+# ─── .scc cache: content-hash keyed, with HIT/MISS visibility ─────────────────
+CACHEHASH_SCM="$TMPDIR_CLI/cachehash_test.scm"
+echo '(display (+ 1 2)) (newline)' > "$CACHEHASH_SCM"
+rm -f "$TMPDIR_CLI/cachehash_test.scc"
+
+out=$("$CURRY" --timings "$CACHEHASH_SCM" 2>&1 >/dev/null)
+check_contains "cache: MISS reported on first (cache-miss) run" "$out" "MISS"
+out=$("$CURRY" --timings "$CACHEHASH_SCM" 2>&1 >/dev/null)
+check_contains "cache: HIT reported on second (cache-hit) run" "$out" "HIT"
+
+# Content-hash keyed, not mtime: touching mtime with unchanged content must
+# stay a HIT (mtime alone doesn't invalidate — the whole point of moving off
+# the pre-v4 mtime+size scheme, which git checkout / cp -p / some editors
+# can flip without changing content).
+touch "$CACHEHASH_SCM"
+out=$("$CURRY" --timings "$CACHEHASH_SCM" 2>&1 >/dev/null)
+check_contains "cache: HIT survives an mtime touch with unchanged content" "$out" "HIT"
+
+# Changed content must still invalidate the cache. One run does double duty:
+# stdout must reflect the new content AND stderr must report MISS — check
+# both from the same invocation (a prior plain run would itself consume the
+# one available "miss" by recompiling and rewriting the cache).
+echo '(display 99) (newline)' >> "$CACHEHASH_SCM"
+out=$("$CURRY" --timings "$CACHEHASH_SCM" 2>/tmp/cachehash_stderr.$$)
+err=$(cat /tmp/cachehash_stderr.$$); rm -f /tmp/cachehash_stderr.$$
+check "cache: changed content is reflected (not served from stale cache)" "$out" "$(printf '3\n99')"
+check_contains "cache: MISS reported after content actually changed" "$err" "MISS"
+
+# -e/REPL don't go through the script-file cache at all — no cache line.
+out=$("$CURRY" --timings -e '(display 1)' 2>&1 >/dev/null)
+if printf '%s' "$out" | grep -q 'cache'; then
+    echo "FAIL: --timings -e: no cache line (none expected, no cache decision made)"
+    (( fail++ )) || true
+else
+    echo "PASS: --timings -e: no cache line (none expected, no cache decision made)"
+    (( pass++ )) || true
+fi
+
+# Regression test: a process-substitution / pipe "source path" (bash's
+# curry <(...), used by test_mcp.sh) must not be drained by cache-key
+# hashing before the real compile pass gets to read it. Reading a whole
+# file to hash it (the v4 content-hash scheme) consumes a one-shot,
+# non-seekable stream — src_hash() now refuses non-regular files (checked
+# via stat(), which doesn't touch content) rather than hashing them, so
+# such inputs are simply never cached instead of silently losing their data.
+out=$(printf '' | "$CURRY" <(echo '(display (+ 40 2)) (newline)'))
+check "cache: process-substitution source is not drained by hashing" "$out" "42"
+
+# A stale/wrong-format .scc (e.g. left over from an older curry build using
+# the pre-v4 mtime+size scheme) must be rejected cleanly — recompiled from
+# source, not misread/corrupted/crashed on. Hand-craft one: correct magic,
+# wrong format-version byte (garbage after that is never reached, since the
+# version check is the very next byte compared).
+CACHEVER_SCM="$TMPDIR_CLI/cachever_test.scm"
+echo '(display (* 6 7)) (newline)' > "$CACHEVER_SCM"
+CACHEVER_SCC="$TMPDIR_CLI/cachever_test.scc"
+printf 'CURRYBC\x03garbage-not-a-real-v3-body' > "$CACHEVER_SCC"
+out=$("$CURRY" "$CACHEVER_SCM")
+check "cache: stale/wrong-version .scc rejected cleanly, recompiles" "$out" "42"
+ver_byte=$(od -An -tx1 -j 7 -N 1 "$CACHEVER_SCC" | tr -d ' \n')
+check "cache: stale .scc rewritten in the current format version" "$ver_byte" "04"
+
 # -e also reports.
 out=$("$CURRY" --timings -e '(display (+ 1 2))' 2>&1 >/dev/null)
 check_contains "--timings: works with -e" "$out" "--timings (ms):"
