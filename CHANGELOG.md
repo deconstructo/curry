@@ -1,5 +1,29 @@
 # Changelog
 
+### Unreleased
+
+**`.scc` cache — GUI/`(exit)`-ending scripts now actually get cached**
+- Same root cause as the `--timings` fix below, for the transparent
+  `.scc` cache itself: the positional-script-file cache-miss loop only
+  called `scc_write()` once, AFTER its read/compile/run loop returned —
+  but a form whose `vm_run()` never returns to that loop (a `(curry qt6)`
+  GUI script's `run-event-loop`, or any script ending in a plain `(exit)`)
+  meant that line was never reached. Every GUI script, and every script
+  ending in `(exit)`, was a full cache MISS on **every single run**,
+  forever — exactly the class of program (slow GUI/script startup) the
+  transparent cache exists to speed up.
+- Fixed with the same `atexit()` pattern as the `--timings` fix: the loop
+  now arms a pending-write fallback with everything compiled so far
+  (including the in-flight chunk) right before that chunk's `vm_run()`
+  call, so it's correct even if that call never returns. Explicitly
+  disarmed after the loop's own normal-completion write (no double-write)
+  and in the error handler for this block (so a genuine compile/runtime
+  error never leaves behind a partial cache that a later
+  unchanged-content run would wrongly treat as a complete, valid HIT).
+- Regression coverage added to `tests/test_cli.sh`: a script ending in
+  `(exit)` gets a working `.scc` written and hits on the next run, and a
+  script that errors mid-execution leaves no `.scc` behind at all.
+
 ### 1.10.2 — Fix `--timings` never reporting for `(curry qt6)` apps
 
 **CLI**

@@ -319,6 +319,46 @@ check_file_exists "record cache-miss run wrote .scc" "$TMPDIR_CLI/record_cache.s
 out=$("$CURRY" "$RECORD_SCM")
 check "define-record-type predicate survives cache-hit run" "$out" "#t 3"
 
+# ─── .scc cache: script that exits via (exit) never returns control to the
+# read/compile loop's own end-of-loop scc_write() call — same root cause as
+# (curry qt6)'s run-event-loop, which calls exit(3) itself once the Qt
+# event loop returns and never hands control back to main.c. Without the
+# atexit-based fallback, a script ending in (exit) would never get its
+# .scc cache written, defeating transparent caching for every such script
+# on every single run. ─────────────────────────────────────────────────────
+EXIT_SCM="$TMPDIR_CLI/exit_cache.scm"
+cat > "$EXIT_SCM" << 'SCHEME'
+(display "before-exit")
+(newline)
+(exit 0)
+SCHEME
+rm -f "$TMPDIR_CLI/exit_cache.scc"
+out=$("$CURRY" "$EXIT_SCM")
+check "(exit)-ending script still runs correctly" "$out" "before-exit"
+check_file_exists "(exit)-ending script's .scc gets written despite never reaching the loop's own scc_write" "$TMPDIR_CLI/exit_cache.scc"
+out=$("$CURRY" --timings "$EXIT_SCM" 2>&1 >/dev/null)
+check_contains "(exit)-ending script: second run is a cache HIT" "$out" "HIT"
+
+# A genuine compile/runtime error must NOT leave behind a partial .scc: a
+# later unchanged-content run would treat it as a complete, valid HIT and
+# silently truncate execution to whatever compiled before the error.
+ERR_SCM="$TMPDIR_CLI/err_cache.scm"
+cat > "$ERR_SCM" << 'SCHEME'
+(display "reached")
+(newline)
+(car '())
+(display "never-reached")
+SCHEME
+rm -f "$TMPDIR_CLI/err_cache.scc"
+"$CURRY" "$ERR_SCM" > /dev/null 2>&1 || true
+if [ -f "$TMPDIR_CLI/err_cache.scc" ]; then
+    echo "FAIL: a script that errors mid-compile does not write a partial .scc"
+    (( fail++ )) || true
+else
+    echo "PASS: a script that errors mid-compile does not write a partial .scc"
+    (( pass++ )) || true
+fi
+
 # ─── --timings: read/expand/compile/execute pipeline report ───────────────────
 TIMINGS_SCM="$TMPDIR_CLI/timings_test.scm"
 cat > "$TIMINGS_SCM" << 'SCHEME'

@@ -437,6 +437,40 @@ static val_t timed_scm_read(val_t port) {
     return v;
 }
 
+/* Pending .scc write, flushed via atexit — see write_pending_scc_atexit.
+ * g_pending_scc_src armed (non-NULL) means "everything compiled into
+ * g_pending_scc_chunks[0..g_pending_scc_n) so far is safe to cache". */
+static const char *g_pending_scc_src     = NULL;
+static Chunk      **g_pending_scc_chunks = NULL;
+static int          g_pending_scc_n      = 0;
+
+/* Same root cause as the --timings/atexit fix above, for the same class of
+ * program: the positional-script-file cache-miss loop (below) only calls
+ * scc_write() once, AFTER its while loop returns — but vm_run() on a form
+ * that never returns to its caller (e.g. (curry qt6)'s run-event-loop,
+ * which calls exit(3) itself once the Qt event loop returns, deep inside
+ * vm_run()) means that line is never reached, so a GUI script's .scc cache
+ * was never written on ANY run — always a full MISS, defeating the entire
+ * point of the transparent cache for exactly the class of program (slow
+ * GUI startup) that benefits from it most.
+ *
+ * Fixed the same way: register this via atexit() once, and have the loop
+ * arm it incrementally as each chunk is appended (which happens BEFORE
+ * that chunk's vm_run() — see the loop below — so by the time a
+ * never-returning vm_run() runs, the chunks compiled so far, including the
+ * current one, are already recorded here and safe to cache exactly as they
+ * are). The loop clears g_pending_scc_src after its own explicit
+ * end-of-loop scc_write() to avoid writing the file twice on a normal
+ * exit; the error handler for this whole block also clears it, so a
+ * genuine compile/runtime error never leaves behind a partial cache that a
+ * later unchanged-content run would wrongly treat as a complete, valid
+ * HIT (silently truncating execution to whatever compiled before the
+ * error). */
+static void write_pending_scc_atexit(void) {
+    if (g_pending_scc_src)
+        scc_write(g_pending_scc_src, g_pending_scc_chunks, g_pending_scc_n);
+}
+
 static void usage(const char *argv0) {
     fprintf(stderr,
         "Usage: %s [options] [script.scm] [args...]\n"
@@ -488,6 +522,7 @@ int main(int argc, char **argv) {
      * (unlike _exit(2)) always runs atexit handlers, so this is the one
      * place a hook can catch every exit path uniformly. */
     atexit(curry_timings_report);
+    atexit(write_pending_scc_atexit);   /* see write_pending_scc_atexit above */
 
     /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
     size_t nursery_size = 0;   /* 0 = use gc_gen default */
@@ -782,6 +817,12 @@ int main(int argc, char **argv) {
                         chunks = GC_REALLOC(chunks, (size_t)cap * sizeof(Chunk *));
                     }
                     chunks[n_chunks++] = bc->chunk;
+                    /* Arm the atexit fallback with everything compiled so
+                     * far, INCLUDING this chunk, before running it — see
+                     * write_pending_scc_atexit: vm_run may never return. */
+                    g_pending_scc_src    = argv[i];
+                    g_pending_scc_chunks = chunks;
+                    g_pending_scc_n      = n_chunks;
                     vm_run(bc, 0);
                     if (curry_timings_enabled)
                         curry_timing_execute_ns += profiling_now_ns() - _t0;
@@ -790,6 +831,7 @@ int main(int argc, char **argv) {
                 gc_resume_minor();   /* EOF exit: leave inhibit balanced */
                 port_close(port);
                 scc_write(argv[i], chunks, n_chunks);
+                g_pending_scc_src = NULL;   /* already written — don't also write at exit */
             }
             current_handler = h.prev;
         } else {
@@ -797,6 +839,11 @@ int main(int argc, char **argv) {
             jit_depth_restore(h.saved_jit_depth);
             vm_reset();
             print_scheme_error(h.exn);
+            /* A genuine compile/runtime error must not leave behind a
+             * partial cache: a later unchanged-content run would treat it
+             * as a complete, valid HIT and silently truncate execution to
+             * whatever compiled before the error. */
+            g_pending_scc_src = NULL;
             return 1;
         }
         ran_something = true;
