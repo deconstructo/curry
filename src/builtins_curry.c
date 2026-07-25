@@ -186,6 +186,49 @@ static val_t prim_assumption_restore(int ac, val_t *av, void *ud) {
     as_symvar(av[0])->hdr.flags = (uint32_t)vunfix(av[1]);
     return V_VOID;
 }
+
+/* ---- define-rule / define-ruleset support (native compiler codegen,
+ * compiler.c: build_define_rule_call) ----
+ * (pattern pvars guard-fn action-fn ruleset) — argument order matches
+ * sx_rule_add's parameter order exactly. pattern/pvars are quoted source
+ * data (never evaluated, matching the tree-walker's S_DEFINE_RULE /
+ * S_DEFINE_RULESET); guard-fn/action-fn are real closures compiled and
+ * evaluated the ordinary way, so — unlike the tree-eval path this
+ * replaces — they correctly close over the enclosing lexical scope
+ * instead of always GLOBAL_ENV. */
+static val_t prim_define_rule_bang(int ac, val_t *av, void *ud) {
+    (void)ud; (void)ac;
+    sx_rule_add(av[0], av[1], av[2], av[3], av[4]);
+    return V_VOID;
+}
+
+/* ---- define-algebra support (native compiler codegen, compiler.c:
+ * compile_define_algebra) ----
+ * (op kw1 val1 kw2 val2 ...) — op is the already-evaluated operator
+ * symbol; keyword tokens are self-evaluating (#:foo), values are ordinary
+ * evaluated expressions, matching eval.c's S_DEFINE_ALGEBRA parsing
+ * exactly (a keyword with no trailing value is silently ignored, same as
+ * the tree-walker's `while (... && vis_pair(vcdr(kws)))` loop). Only
+ * registers the algebra info — the auto-bound operator procedure is built
+ * and bound by the caller's generated (define ...) so it gets a real
+ * lexical binding when possible; see compile_define_algebra. */
+static val_t prim_define_algebra_bang(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_symbol(av[0]))
+        scm_raise(V_FALSE, "%define-algebra!: operator must be a symbol");
+    bool commutative = false, associative = false;
+    val_t identity = V_VOID, absorbing = V_VOID, relations_fn = V_FALSE;
+    for (int i = 1; i + 1 < ac; i += 2) {
+        val_t kw = av[i], val = av[i + 1];
+        if (kw == S_KW_COMMUTATIVE)      commutative  = !vis_false(val);
+        else if (kw == S_KW_ASSOCIATIVE) associative  = !vis_false(val);
+        else if (kw == S_KW_IDENTITY)    identity     = val;
+        else if (kw == S_KW_ABSORBING)   absorbing    = val;
+        else if (kw == S_KW_RELATIONS)   relations_fn = val;
+    }
+    sx_algebra_define(av[0], commutative, associative, identity, absorbing, relations_fn);
+    return V_VOID;
+}
 static val_t prim_sx_trigsimp(int ac, val_t *av, void *ud)
     { (void)ac;(void)ud; return sx_trigsimp(av[0]); }
 static val_t prim_sx_substitute(int ac, val_t *av, void *ud)
@@ -1562,6 +1605,11 @@ void builtins_curry_register(val_t env) {
     DEF("%assumption-flags",   prim_assumption_flags,   1, 1);
     DEF("%assumption-set!",    prim_assumption_set,     2, 2);
     DEF("%assumption-restore!",prim_assumption_restore, 2, 2);
+
+    /* define-rule / define-ruleset / define-algebra support — see
+     * build_define_rule_call / compile_define_algebra (compiler.c) */
+    DEF("%define-rule!",      prim_define_rule_bang,     5,  5);
+    DEF("%define-algebra!",   prim_define_algebra_bang,  1, -1);
 
     /* Low-level SymExpr constructor and accessors */
     DEF("sym-expr",       prim_sym_expr,       1, -1);

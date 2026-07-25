@@ -66,6 +66,7 @@
 #include "record_type.h"
 #include "syntax_rules.h"
 #include "sx_algebra.h"
+#include "sx_pattern.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -118,6 +119,7 @@ typedef struct Compiler {
 /* ── Forward declarations ────────────────────────────────────────────── */
 static void compile(Compiler *c, val_t expr, bool tail, int line);
 static void compile_seq(Compiler *c, val_t list, bool tail, int line);
+static bool is_quoted_symbol(val_t expr, val_t *out_sym);
 
 /* ── Compiler lifecycle ──────────────────────────────────────────────── */
 
@@ -415,6 +417,38 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                  * to reserve.  compile_define_syntax registers it into
                  * c.syntax_locals sequentially as compile_seq reaches this
                  * form for real, so later forms in this same body see it. */
+            } else if (akk_translate(vcar(form)) == S_DEFINE_RULE ||
+                       akk_translate(vcar(form)) == S_DEFINE_RULESET) {
+                /* Neither binds a name into the enclosing scope: define-rule
+                 * registers a global rewrite rule and binds nothing;
+                 * define-ruleset's "name" argument is a rule-grouping label
+                 * (sx_rule_add's ruleset field), not a variable. Nothing to
+                 * reserve. Falling into the generic branch below (as these
+                 * did before compile_define_rule/compile_define_ruleset
+                 * existed) misread the pattern/ruleset-name as a bound
+                 * variable name and reserved a bogus, permanently-
+                 * uninitialised local slot — confirmed: it could shadow an
+                 * unrelated global (e.g. define-algebra's quoted operator
+                 * form made the second element `quote`, silently turning a
+                 * later bare reference to the special form name `quote`
+                 * into a read of an uninitialised local instead of the
+                 * expected unbound-variable error). */
+            } else if (akk_translate(vcar(form)) == S_DEFINE_ALGEBRA) {
+                /* Only the compile-time-literal-quoted-operator case
+                 * ((define-algebra 'sym ...), by far the common usage — see
+                 * compile_define_algebra) gets a real lexical binding for
+                 * its auto-bound operator procedure. A runtime-computed
+                 * operator name has no local binding to reserve: the same
+                 * fundamental limit as any (define <computed-name> ...) in
+                 * a slot-based compiled VM, where every local's slot index
+                 * is fixed at compile time. */
+                val_t op_expr = vis_pair(vcdr(form)) ? vcar(vcdr(form)) : V_FALSE;
+                val_t sym;
+                if (is_quoted_symbol(op_expr, &sym)) {
+                    add_local(&c, sym);
+                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                }
             } else {
                 val_t defname = vcar(vcdr(form));
                 if (vis_symbol(defname)) {
@@ -1494,6 +1528,198 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
     compile(c, outer_let, tail, line);
 }
 
+/* True iff expr is literally (quote SYM) for some symbol SYM — the shape a
+ * source-level 'sym reader-expands to. Used by compile_define_algebra (and
+ * its matching internal-define prescan case in compile_lambda above) to
+ * detect the overwhelmingly common case where an operator name is a
+ * compile-time-known literal rather than a runtime-computed expression.
+ * Compares via akk_translate rather than a raw S_QUOTE check, so an
+ * Akkadian/cuneiform spelling of quote (e.g. kīma) is recognized too —
+ * found by review: without this, (define-algebra (kīma myop) ...) missed
+ * the compile-time-literal fast path and fell back to the tree-eval path,
+ * reproducing the global-leak bug this function exists to fix for that
+ * one spelling. */
+static bool is_quoted_symbol(val_t expr, val_t *out_sym) {
+    if (vis_pair(expr) && akk_translate(vcar(expr)) == S_QUOTE &&
+        vis_pair(vcdr(expr)) && vis_symbol(vcar(vcdr(expr))) &&
+        vcdr(vcdr(expr)) == V_NIL) {
+        *out_sym = vcar(vcdr(expr));
+        return true;
+    }
+    return false;
+}
+
+/* Shared by compile_define_rule and compile_define_ruleset: parse one
+ * (pattern -> template [#:when guard]) clause. Mirrors eval.c's
+ * S_DEFINE_RULE/S_DEFINE_RULESET parsing exactly — the arrow token's own
+ * value is never checked, only its position (element 1), matching the
+ * pre-existing tree-walker's leniency there. */
+static void parse_rule_clause(val_t clause, val_t *pattern, val_t *tmpl, val_t *guard_expr) {
+    *pattern = vcar(clause);
+    *tmpl    = vcar(vcdr(vcdr(clause)));
+    val_t trailing = vcdr(vcdr(vcdr(clause)));
+    *guard_expr = V_FALSE;
+    if (vis_pair(trailing) && vcar(trailing) == S_KW_WHEN && vis_pair(vcdr(trailing)))
+        *guard_expr = vcar(vcdr(trailing));
+}
+
+/* Build one (%define-rule! 'pattern 'pvars guard-lambda action-lambda
+ * ruleset-name-ast) call — the runtime registration this clause desugars
+ * to. pvars is computed HERE, at compile time, via sx_pattern_vars: the
+ * pattern is always static source syntax (never evaluated, matching the
+ * tree-walker), so there is no need to re-derive it at runtime on every
+ * call the way eval.c's tree-walker case does on every invocation.
+ * ruleset_name_ast is (quote NAME) for define-ruleset or V_FALSE (itself,
+ * self-evaluating) for a standalone define-rule. */
+static val_t build_define_rule_call(val_t pattern, val_t tmpl, val_t guard_expr,
+                                     val_t ruleset_name_ast) {
+    val_t pvars = sx_pattern_vars(pattern);
+
+    val_t pattern_quoted = scm_cons(S_QUOTE, scm_cons(pattern, V_NIL));
+    val_t pvars_quoted   = scm_cons(S_QUOTE, scm_cons(pvars, V_NIL));
+
+    val_t action_lam = scm_cons(S_LAMBDA, scm_cons(pvars, scm_cons(tmpl, V_NIL)));
+    val_t guard_lam  = (guard_expr != V_FALSE)
+        ? scm_cons(S_LAMBDA, scm_cons(pvars, scm_cons(guard_expr, V_NIL)))
+        : V_FALSE;
+
+    val_t reg_sym = sym_intern_cstr("%define-rule!");
+    return scm_cons(reg_sym,
+            scm_cons(pattern_quoted,
+             scm_cons(pvars_quoted,
+              scm_cons(guard_lam,
+               scm_cons(action_lam,
+                scm_cons(ruleset_name_ast, V_NIL))))));
+}
+
+/* (define-rule pattern -> template [#:when guard]) — one rewrite rule.
+ * Desugars to a single build_define_rule_call, compiled as an ordinary
+ * call. Unlike define-record-type/symbolic/with-assumptions, this needs no
+ * internal-define prescan slot reservation: it binds no name into the
+ * enclosing scope at all (see compile_lambda's prescan, S_DEFINE_RULE
+ * case) — it only registers a rule into sx_rules.c's process-wide rule
+ * table, so there is no lexical-scoping bug to fix here, only the
+ * tree-walker's guard/template closures being built against GLOBAL_ENV
+ * unconditionally (via tree-eval) instead of the actual enclosing lexical
+ * environment, which broke any guard/template referencing a local
+ * variable. Native codegen fixes that the same way compile_lambda always
+ * has: ordinary closures over the real enclosing scope. */
+static void compile_define_rule(Compiler *c, val_t rest, bool tail, int line) {
+    if (!vis_pair(rest) || !vis_pair(vcdr(rest)) || !vis_pair(vcdr(vcdr(rest)))) {
+        fprintf(stderr, "compiler: define-rule: expected (define-rule pattern -> template)\n");
+        emit(c, OP_VOID, line);
+        return;
+    }
+    val_t pattern, tmpl, guard_expr;
+    parse_rule_clause(rest, &pattern, &tmpl, &guard_expr);
+    val_t call = build_define_rule_call(pattern, tmpl, guard_expr, V_FALSE);
+    compile(c, call, tail, line);
+}
+
+/* (define-ruleset name (pattern -> template [#:when guard]) ...) — same
+ * per-clause desugaring as compile_define_rule, looped over every clause
+ * and tagged with the ruleset name (a bare, never-evaluated symbol,
+ * matching the tree-walker — quoted here since it's compile-time-known).
+ * Malformed clauses are skipped, matching eval.c's per-clause `continue`. */
+static void compile_define_ruleset(Compiler *c, val_t rest, bool tail, int line) {
+    if (!vis_pair(rest)) {
+        fprintf(stderr, "compiler: define-ruleset: expected (define-ruleset name clause ...)\n");
+        emit(c, OP_VOID, line);
+        return;
+    }
+    val_t name         = vcar(rest);
+    val_t name_quoted  = scm_cons(S_QUOTE, scm_cons(name, V_NIL));
+
+    /* Collect in reverse (cheap prepend), then reverse back so rules
+     * register — and therefore fire, per sx_rules.c's append-to-chain-end
+     * ordering — in source order, matching the tree-walker. */
+    val_t calls_rev = V_NIL;
+    int n = 0;
+    for (val_t cl = vcdr(rest); vis_pair(cl); cl = vcdr(cl)) {
+        val_t clause = vcar(cl);
+        if (!vis_pair(clause) || !vis_pair(vcdr(clause)) || !vis_pair(vcdr(vcdr(clause))))
+            continue; /* skip malformed clause, matching eval.c */
+        val_t pattern, tmpl, guard_expr;
+        parse_rule_clause(clause, &pattern, &tmpl, &guard_expr);
+        calls_rev = scm_cons(build_define_rule_call(pattern, tmpl, guard_expr, name_quoted),
+                              calls_rev);
+        n++;
+    }
+    if (n == 0) { emit(c, OP_VOID, line); return; }
+
+    val_t calls = V_NIL;
+    for (val_t p = calls_rev; vis_pair(p); p = vcdr(p)) calls = scm_cons(vcar(p), calls);
+
+    compile_seq(c, calls, tail, line);
+}
+
+/* (define-algebra op-expr [#:commutative? b] [#:associative? b]
+ *                 [#:identity v] [#:absorbing v] [#:relations fn])
+ * Registers algebra info for op-expr's value and auto-binds it to
+ * (lambda args (apply sym-expr 'op args)) — see eval.c's S_DEFINE_ALGEBRA.
+ *
+ * The registration call is always the same shape: (%define-algebra!
+ * op-expr kw1 val1-expr kw2 val2-expr ...), with keyword values compiled
+ * as ordinary runtime expressions (matching the tree-walker, which
+ * evaluates them too — only the keyword tokens themselves are literal).
+ *
+ * The auto-bind's scoping is where this diverges from a pure mechanical
+ * translation, and is worth spelling out: when op-expr is a literal
+ * (quote sym) — by far the common usage, see tests/sx_algebra_tests.scm —
+ * the bound name is known at COMPILE time, so it gets a real lexical
+ * binding via an ordinary (define sym ...), exactly like
+ * compile_define_record_type's bindings: correct at top level AND
+ * correctly local when used inside a lambda body, unlike the tree-walker's
+ * env_define(env, op_name, proc), which — reached only via tree-eval's
+ * hardcoded GLOBAL_ENV — always leaked the binding to global scope even
+ * when define-algebra appeared inside a function (confirmed: `(define (f)
+ * (define-algebra 'myop ...) ...)` left `myop` callable at top level after
+ * calling f once).
+ *
+ * When op-expr is NOT a literal quoted symbol (its value is only known at
+ * runtime), there is no way to give it a real lexical binding in a
+ * slot-based compiled VM — every local's stack slot is fixed at compile
+ * time, the same fundamental limit R7RS's own (define <computed-name> ...)
+ * runs into. This rare case is left on the pre-existing tree-eval path
+ * (dynamic env_define against GLOBAL_ENV), which is the correct place for
+ * a genuinely dynamic top-level-only binding to live, not a bug to fix. */
+static void compile_define_algebra(Compiler *c, val_t rest, bool tail, int line) {
+    if (!vis_pair(rest)) {
+        fprintf(stderr, "compiler: define-algebra: expected operator as first argument\n");
+        emit(c, OP_VOID, line);
+        return;
+    }
+    val_t op_expr = vcar(rest);
+    val_t kws     = vcdr(rest);
+
+    val_t sym;
+    if (!is_quoted_symbol(op_expr, &sym)) {
+        /* Dynamic operator name: keep the existing tree-eval behavior. */
+        val_t tree_eval_sym = sym_intern_cstr("tree-eval");
+        emit_ab(c, OP_LOAD_GLOBAL,
+                (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
+        emit_const(c, scm_cons(S_DEFINE_ALGEBRA, rest), line);
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
+        return;
+    }
+
+    val_t reg_sym  = sym_intern_cstr("%define-algebra!");
+    val_t reg_call = scm_cons(reg_sym, scm_cons(op_expr, kws));
+
+    val_t sym_expr_sym = sym_intern_cstr("sym-expr");
+    val_t apply_sym    = sym_intern_cstr("apply");
+    val_t args_sym     = sym_intern_cstr("args");
+    val_t op_quoted    = scm_cons(S_QUOTE, scm_cons(sym, V_NIL));
+    val_t body = scm_cons(apply_sym,
+                  scm_cons(sym_expr_sym,
+                   scm_cons(op_quoted,
+                    scm_cons(args_sym, V_NIL))));
+    val_t lam      = scm_cons(S_LAMBDA, scm_cons(args_sym, scm_cons(body, V_NIL)));
+    val_t def_form = scm_cons(S_DEFINE, scm_cons(sym, scm_cons(lam, V_NIL)));
+
+    compile_seq(c, scm_cons(reg_call, scm_cons(def_form, V_NIL)), tail, line);
+}
+
 /* (with-assumptions ((var assumption...) ...) body...) — mirrors
  * compile_parameterize immediately above almost exactly: same
  * capture-old/set-new/dynamic-wind-restore shape, just swapping the
@@ -1830,6 +2056,21 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
+    if (head == S_DEFINE_RULE) {
+        compile_define_rule(c, args, tail, line);
+        return;
+    }
+
+    if (head == S_DEFINE_RULESET) {
+        compile_define_ruleset(c, args, tail, line);
+        return;
+    }
+
+    if (head == S_DEFINE_ALGEBRA) {
+        compile_define_algebra(c, args, tail, line);
+        return;
+    }
+
     /* Note: syntax-rules itself is deliberately NOT special-cased here.
      * syntax_rules_register() binds the symbol `syntax-rules` to a T_SYNTAX
      * in GLOBAL_ENV whose transformer (sr_compile_fn) takes the raw
@@ -1843,9 +2084,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
        import, define-library, library.
        Emitted as: (tree-eval '<form>) */
     if (head == S_IMPORT        ||
-        head == S_DEFINE_LIBRARY || head == S_LIBRARY       ||
-        head == S_DEFINE_RULE   || head == S_DEFINE_RULESET  ||
-        head == S_DEFINE_ALGEBRA) {
+        head == S_DEFINE_LIBRARY || head == S_LIBRARY) {
         val_t tree_eval_sym = sym_intern_cstr("tree-eval");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);

@@ -156,6 +156,144 @@
   (sym-expr? (simplify (meet x y))) #t)
 
 ;;; ============================================================
+;;; 3d. define-rule / define-ruleset — native compiler codegen
+;;; ============================================================
+;;; Regression coverage for compile_define_rule/compile_define_ruleset
+;;; (compiler.c), which replaced the tree-eval punt that always built
+;;; guard/template closures against GLOBAL_ENV regardless of where the
+;;; form actually appeared in source.
+
+;;; Plain top-level define-rule still fires.
+(symbolic dr1)
+(define-rule (dbl ?a) -> (* 2 ?a))
+(assert-equal "define-rule: top-level rule fires"
+  (simplify (sym-expr 'dbl dr1)) (simplify (* 2 dr1)))
+
+;;; define-ruleset: multiple clauses, including one with a guard, both fire.
+(symbolic rs1)
+(define-ruleset arith-demo
+  ((rsadd ?a ?b) -> (+ ?a ?b))
+  ((rsdbl ?a) -> (* 2 ?a) #:when (> 1 0)))
+(assert-equal "define-ruleset: first clause fires"
+  (simplify (sym-expr 'rsadd 3 4)) 7)
+(assert-equal "define-ruleset: second clause fires (with guard)"
+  (simplify (sym-expr 'rsdbl rs1)) (simplify (* 2 rs1)))
+
+;;; define-rule inside a lambda body, guard referencing an enclosing local
+;;; variable. Before native codegen this raised "unbound variable: thresh"
+;;; even though thresh is plainly in scope, because the tree-eval punt
+;;; always built the guard closure against GLOBAL_ENV instead of the
+;;; actual lexical environment of make-threshold-rule!'s call frame.
+(symbolic dr2)
+(define (make-threshold-rule! thresh)
+  (define-rule (thresh-check ?a) -> ?a #:when (> thresh 3)))
+(make-threshold-rule! 10)
+(assert-equal "define-rule: guard closes over enclosing lexical scope"
+  (simplify (sym-expr 'thresh-check dr2)) dr2)
+
+;;; ============================================================
+;;; 3e. define-algebra inside a lambda body — native compiler codegen
+;;; ============================================================
+;;; Regression coverage for compile_define_algebra (compiler.c). The
+;;; auto-bound operator procedure must get a real LOCAL binding when the
+;;; operator name is a compile-time literal (the (define-algebra 'sym ...)
+;;; shape used everywhere above) — previously it always leaked into the
+;;; global environment via tree-eval's hardcoded env_define(GLOBAL_ENV, ...),
+;;; even when define-algebra appeared inside a function.
+
+(define (use-local-algebra!)
+  (define-algebra 'local-op9182 #:associative? #t)
+  (local-op9182 1 2))
+(assert-equal "define-algebra: usable inside its own defining scope"
+  (sym-expr? (use-local-algebra!)) #t)
+(assert-equal "define-algebra: operator does not leak to global scope"
+  (guard (e (#t 'unbound)) (local-op9182 1 2) 'leaked)
+  'unbound)
+
+;;; A local define-algebra must not corrupt the enclosing lambda's local
+;;; slot layout for unrelated names. Before this fix, compile_lambda's
+;;; internal-define prescan misread the quoted operator form's `quote`
+;;; token as define-algebra's bound variable name and reserved a bogus,
+;;; permanently-uninitialised local slot for it — so a later bare
+;;; reference to the special-form name `quote` inside the same body
+;;; silently read back void instead of raising unbound-variable.
+(define (g-quote-slot-test)
+  (define-algebra 'another-op772 #:associative? #t)
+  quote)
+(assert-equal "define-algebra: does not reserve a bogus local slot"
+  (guard (e (#t 'unbound)) (g-quote-slot-test) 'leaked)
+  'unbound)
+
+;;; Akkadian spelling of quote (kīma) must take the same compile-time-
+;;; literal fast path as 'sym / (quote sym) — is_quoted_symbol compares via
+;;; akk_translate, not a raw S_QUOTE check, specifically so this doesn't
+;;; silently fall back to the (still-correct, but always-global) tree-eval
+;;; path. Found by review.
+(define (use-akkadian-quote-algebra!)
+  (define-algebra (kīma local-op-akk) #:commutative? #t)
+  (local-op-akk 1 2))
+(assert-equal "define-algebra: (kīma sym) takes the literal fast path too"
+  (sym-expr? (use-akkadian-quote-algebra!)) #t)
+(assert-equal "define-algebra: (kīma sym) operator stays local, not global"
+  (guard (e (#t 'unbound)) (local-op-akk 1 2) 'leaked)
+  'unbound)
+
+;;; define-ruleset used internally in a lambda body: both clauses must
+;;; fire, including the guard-bearing one closing over the local `mult`.
+(symbolic rs-in1)
+(define (make-ruleset-internally! mult)
+  (define-ruleset internal-demo
+    ((rsi-add ?a ?b) -> (+ ?a ?b))
+    ((rsi-scale ?a) -> (* mult ?a) #:when (> mult 0))))
+(make-ruleset-internally! 5)
+(assert-equal "define-ruleset: internal usage, first clause fires"
+  (simplify (sym-expr 'rsi-add 3 4)) 7)
+(assert-equal "define-ruleset: internal usage, guard closes over local"
+  (simplify (sym-expr 'rsi-scale rs-in1)) (simplify (* 5 rs-in1)))
+
+;;; define-ruleset: a malformed clause among valid ones is skipped, not a
+;;; compile error, matching eval.c's per-clause `continue`.
+(symbolic rs-mal1)
+(define-ruleset mixed-validity
+  ((rsm-ok ?a) -> ?a)
+  (this-is-not-a-valid-clause)
+  ((rsm-also-ok ?a) -> (* 3 ?a)))
+(assert-equal "define-ruleset: malformed clause skipped, valid ones still fire (1)"
+  (simplify (sym-expr 'rsm-ok rs-mal1)) rs-mal1)
+(assert-equal "define-ruleset: malformed clause skipped, valid ones still fire (2)"
+  (simplify (sym-expr 'rsm-also-ok rs-mal1)) (simplify (* 3 rs-mal1)))
+
+;;; define-algebra with a RUNTIME-computed (non-literal-quote) operator
+;;; name. There's no way to give a runtime-only name a real lexical
+;;; binding in a slot-based compiled VM (compile_define_algebra's
+;;; documented limit), so this stays on the pre-existing tree-eval path —
+;;; which, unchanged by this migration, only ever evaluates against
+;;; GLOBAL_ENV. The auto-bound operator always ends up a GLOBAL binding
+;;; under whatever name op-expr evaluated to, so it must be invoked by
+;;; that known literal name (there is no other way to reach a
+;;; runtime-computed binding) — confirmed identical on pre-migration main.
+(define global-name-thunk (lambda () 'dyn-op-global))
+(define (use-dynamic-algebra-global!)
+  (define-algebra (global-name-thunk) #:commutative? #t)
+  (dyn-op-global 1 2))
+(assert-equal "define-algebra: dynamic operator name referencing only globals works"
+  (sym-expr? (use-dynamic-algebra-global!)) #t)
+
+;;; ...but confirmed UNCHANGED (not a regression introduced by native
+;;; codegen) when op-expr references an enclosing LOCAL variable: this
+;;; already raised unbound-variable before this migration too, since
+;;; tree-eval's env is always GLOBAL_ENV regardless of where the form
+;;; appears. compile_define_algebra's fallback branch preserves that
+;;; exact pre-existing limitation rather than silently changing it.
+(define (use-dynamic-algebra-local! name-thunk)
+  (define-algebra (name-thunk) #:commutative? #t)
+  (dyn-op-local 1 2))
+(assert-equal "define-algebra: dynamic operator name referencing a LOCAL still fails (unchanged limitation, not a new regression)"
+  (guard (e (#t 'unbound-as-before))
+    (use-dynamic-algebra-local! (lambda () 'dyn-op-local)))
+  'unbound-as-before)
+
+;;; ============================================================
 ;;; 4. sym-var? / built-in assumption predicates still work
 ;;; ============================================================
 

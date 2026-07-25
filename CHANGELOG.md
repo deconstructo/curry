@@ -2,29 +2,62 @@
 
 ### Unreleased
 
-**Compiler — eval-elimination phase 3, continued**
+**Compiler — eval-elimination phase 3 complete**
 - `with-assumptions` now compiles to native bytecode instead of punting to
-  `(tree-eval '<form>)`, the last of the phase-3 special forms (`import`,
-  `define-library`, and `library` remain permanently tree-walked by design —
-  those bodies are load-time-only and never compiled).
-  `(with-assumptions ((var assumption...) ...) body...)` desugars to a
-  `let`/`dynamic-wind` nest mirroring the pre-existing `parameterize`
-  codegen (same capture-old/set-new/restore shape), backed by three new
-  primitives — `%assumption-flags`, `%assumption-set!`,
-  `%assumption-restore!` — that read/OR-in/overwrite a `SymVar`'s
-  assumption bits directly. Each clause's assumption keywords are resolved
-  to a flag bitmask at compile time, so there's no runtime keyword-lookup
-  cost.
-- One deliberate, documented behavioral improvement over the tree-walker
-  found during review: if the same `SymVar` appears in two clauses of one
-  `with-assumptions` form, the tree-walker's interleaved snapshot-then-set
-  left a residual flag set after the form exited; the native codegen
-  snapshots all clauses' original flags upfront, so a repeated variable is
-  restored to its true original state. Locked in by a regression test.
-- Regression coverage added to `tests/sx_algebra_tests.scm`: lambda-body/
-  tail-position usage (the class of internal-define leak bug the earlier
-  phase-3 migrations fixed), independent multi-clause restore, and the
-  duplicate-clause case above.
+  `(tree-eval '<form>)`. `(with-assumptions ((var assumption...) ...)
+  body...)` desugars to a `let`/`dynamic-wind` nest mirroring the
+  pre-existing `parameterize` codegen (same capture-old/set-new/restore
+  shape), backed by three new primitives — `%assumption-flags`,
+  `%assumption-set!`, `%assumption-restore!` — that read/OR-in/overwrite a
+  `SymVar`'s assumption bits directly. Each clause's assumption keywords
+  are resolved to a flag bitmask at compile time, so there's no runtime
+  keyword-lookup cost.
+  - One deliberate, documented behavioral improvement over the tree-walker
+    found during review: if the same `SymVar` appears in two clauses of one
+    `with-assumptions` form, the tree-walker's interleaved snapshot-then-set
+    left a residual flag set after the form exited; the native codegen
+    snapshots all clauses' original flags upfront, so a repeated variable
+    is restored to its true original state. Locked in by a regression test.
+- `define-rule`, `define-ruleset`, and `define-algebra` also now compile
+  natively, completing eval-elimination phase 3 (`import`, `define-library`,
+  and `library` remain permanently tree-walked by design — those bodies are
+  load-time-only and never compiled). This closes two real, demonstrated
+  bugs, not just a performance gap:
+  - `define-algebra`'s auto-bound operator procedure always leaked into the
+    global environment even when used inside a function body (e.g.
+    `(define (f) (define-algebra 'myop ...) ...)` left `myop` callable at
+    top level after calling `f` once), because `tree-eval` always evaluates
+    against `GLOBAL_ENV`. When the operator name is a compile-time literal
+    — `(define-algebra 'sym ...)`, the form used everywhere in practice —
+    it now gets a real lexical binding, correctly local when used inside a
+    function. A genuinely runtime-computed operator name has no way to get
+    a real lexical binding in a slot-based compiled VM (the same
+    fundamental limit as any `(define <computed-name> ...)`), so that rare
+    case intentionally stays on the pre-existing `tree-eval` path.
+  - `define-rule`/`define-ruleset` guard and template expressions
+    referencing an enclosing lexical variable raised spurious
+    `unbound-variable` errors, for the same `GLOBAL_ENV`-always reason.
+  - A third, independent latent bug was found and fixed along the way in
+    `compile_lambda`'s internal-define prescan: all three forms previously
+    fell through to a generic fallback that blindly treated the form's
+    second element as a bound variable name — the *pattern* for
+    `define-rule`, the ruleset *name* for `define-ruleset`, the *operator
+    expression* for `define-algebra` — reserving a bogus, permanently-
+    uninitialised local slot (confirmed: for a quoted operator like `'sym`,
+    this reserved a slot literally named `quote`, so a later bare
+    reference to the special form `quote` inside the same body silently
+    read back void instead of raising `unbound-variable`).
+  - Review also caught that the compile-time-literal detection must compare
+    via `akk_translate`, not a raw symbol check, so the Akkadian spelling
+    of `quote` (`kīma`) takes the same fast path as `'`/`(quote ...)`
+    instead of silently falling back to the always-global `tree-eval` path.
+- Regression coverage added to `tests/sx_algebra_tests.scm` (49 assertions,
+  up from 26): lambda-body/tail-position usage for all four forms
+  (`with-assumptions`, `define-rule`, `define-ruleset`, `define-algebra`),
+  independent and duplicate-clause restore, malformed-clause skipping in
+  `define-ruleset`, the `quote`-slot corruption case, the Akkadian-`quote`
+  case, and confirmation that the dynamic-operator-name fallback path is
+  unchanged (not regressed) for both global- and local-referencing cases.
 
 ### 1.9.1 — Fix a 1.9.0 regression: segfault calling the actor-mailbox `receive` primitive
 
