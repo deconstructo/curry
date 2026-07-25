@@ -335,8 +335,27 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
 static curry_val fn_close(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     RedisConn *c = val_to_conn(av[0]);
-    resp_start(c, 1); resp_arg_cstr(c, "QUIT");
-    resp_read(c);
+    /* Best-effort QUIT, via raw send()/SSL_write() rather than
+     * resp_start/resp_arg_cstr/resp_read (write_all() calls curry_error —
+     * a longjmp — on any write/read failure). If the connection is
+     * already broken when redis-close! is called, that longjmp would skip
+     * every line below it, leaking the fd and the ~128KB of buffers
+     * embedded in this RedisConn. Closing an already-dead connection is
+     * an ordinary, expected outcome here, not an error worth raising —
+     * so a failed goodbye is silently ignored and cleanup always runs. */
+    static const char quit_cmd[] = "*1\r\n$4\r\nQUIT\r\n";
+    size_t sent = 0;
+    while (sent < sizeof(quit_cmd) - 1) {
+        ssize_t n;
+#ifdef HAVE_REDIS_TLS
+        if (c->ssl)
+            n = (ssize_t)SSL_write(c->ssl, quit_cmd + sent, (int)(sizeof(quit_cmd) - 1 - sent));
+        else
+#endif
+            n = (ssize_t)sock_write(c->fd, quit_cmd + sent, sizeof(quit_cmd) - 1 - sent);
+        if (n <= 0) break;
+        sent += (size_t)n;
+    }
 #ifdef HAVE_REDIS_TLS
     if (c->ssl) {
         SSL_shutdown(c->ssl);

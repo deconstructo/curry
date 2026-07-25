@@ -70,7 +70,17 @@ static curry_val fn_open(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sqlite3 *db = NULL;
     int rc = sqlite3_open(curry_string(av[0]), &db);
-    if (rc != SQLITE_OK) curry_error("sqlite-open: %s", sqlite3_errmsg(db));
+    if (rc != SQLITE_OK) {
+        /* sqlite3_open() always returns a valid handle to sqlite3_close(),
+         * even on failure — per its own documented contract. curry_error()
+         * is a longjmp, so it must run AFTER the close, not instead of it,
+         * or the handle leaks. */
+        const char *msg = sqlite3_errmsg(db);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s", msg ? msg : "unknown error");
+        sqlite3_close(db);
+        curry_error("sqlite-open: %s", buf);
+    }
     ScmDB *w = malloc(sizeof(ScmDB)); w->db = db;
     return make_opaque(w, "sqlite-db");
 }
