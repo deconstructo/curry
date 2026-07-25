@@ -133,6 +133,11 @@ The test suites registered in `ctest`:
   -b SPEC    Set a debugger breakpoint before running (function name
              or file:line; repeatable)
   -v         Print version
+  --timings  Print a read/expand/compile/execute pipeline timing report
+             to stderr on exit (plus a cache HIT/MISS line for script runs)
+  --gc BACKEND          GC backend: boehm (default) or generational (experimental)
+  --gc-max-heap N       Limit GC heap (suffixes K/M/G; 0 = unlimited)
+  --gc-nursery-size N   Per-thread nursery size (requires --gc generational)
 ```
 
 Passing a `.scc` file as the positional argument runs it directly from bytecode without needing the original `.scm` source.
@@ -140,6 +145,10 @@ Passing a `.scc` file as the positional argument runs it directly from bytecode 
 Scripts support shebang lines — `#!` is treated as a line comment, so `#!/usr/bin/env curry` works correctly. Make the file executable with `chmod +x script.scm` and invoke it directly.
 
 Compiled `.scc` files also support direct execution: `curry -c script.scm` produces `script.scc` with a shebang prepended and the executable bit set, so `./script.scc` works immediately.
+
+### Transparent `.scc` cache
+
+Running `curry script.scm` directly (no `-c` needed) auto-compiles and writes a `.scc` cache next to the source (or under `~/.cache/curry/` if that directory isn't writable), then reuses it on the next run. Cache validity is keyed on a content hash (FNV-1a 64 over the full source, `src_hash()` in `src/scc.c`) rather than mtime/size, so it can't be fooled by `git checkout`/`cp -p`/editors that touch mtime without changing content. Non-regular-file sources (e.g. bash process substitution, `curry <(...)`) are never cached — hashing would consume a one-shot stream before the real compile pass could read it, so `src_hash()` refuses anything that isn't `S_ISREG` via a `stat()` check up front. Run with `--timings` to see `cache: HIT`/`MISS` for a given script run.
 
 Script arguments are available as `(command-line)` (R7RS thunk returning a list of strings) and as `command-line-args` (legacy variable, same list).
 
