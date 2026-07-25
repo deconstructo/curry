@@ -222,7 +222,19 @@ val_t stm_tvar_read(val_t v) {
     val_t pending = wset_lookup(tx, tv);
     if (pending != V_UNDEF) return pending;
 
-    /* Read version first (acquire), THEN value — see comment in stm.h. */
+    /* Standard TL2 read protocol: version, then value, then re-read version
+     * and compare — not just version-then-value. Without the post-read
+     * recheck, a commit (tx_commit writes tv->value, THEN tv->version —
+     * see there) landing in the window between our version read and our
+     * value read is invisible to us: we'd read the pre-commit version but
+     * the post-commit value, a torn (version, value) pair. Read-set
+     * validation at our own commit time would eventually catch that this
+     * tvar changed and abort us — but not before the transaction body
+     * has already run on the inconsistent snapshot, which is exactly what
+     * TL2's immediate per-read validation exists to prevent (a torn read
+     * can drive control flow into states rset validation never gets a
+     * chance to catch, e.g. an infinite loop or an out-of-bounds access
+     * derived from combining an old and a new value). */
     uint64_t ver = atomic_load_explicit(
         (_Atomic uint64_t *)&tv->version, memory_order_acquire);
 
@@ -230,6 +242,12 @@ val_t stm_tvar_read(val_t v) {
         stm_retry();
 
     val_t val = tv->value;
+
+    uint64_t ver2 = atomic_load_explicit(
+        (_Atomic uint64_t *)&tv->version, memory_order_acquire);
+    if (ver2 != ver)
+        stm_retry();
+
     rset_add(tx, tv, ver);
     return val;
 }

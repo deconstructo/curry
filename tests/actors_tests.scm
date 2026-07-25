@@ -193,6 +193,46 @@
 (check "spawn does not freeze a shared upvalue for same-thread sibling closures"
        sib-result 999)
 
+;;; STM: concurrent tvar increments from several actors must all land.
+;;; Companion smoke test for a torn-read fix in stm_tvar_read (src/stm.c):
+;;; the read protocol used to check tv->version before reading tv->value
+;;; but never re-check it afterward, so a commit landing in the window
+;;; between those two reads was invisible to the reader. Fixed by
+;;; re-reading the version after the value and retrying immediately on
+;;; any mismatch. Independent review noted, honestly, that this
+;;; particular test does NOT actually distinguish pre-fix from post-fix
+;;; behavior: each transaction here is a single read-modify-write, so any
+;;; torn read that occurs still only ever discards its own transaction
+;;; via read-set validation at that transaction's own commit — it can
+;;; never corrupt the final total, whether or not the version-recheck
+;;; fix is present. A test that truly isolates the single-tvar torn-read
+;;; window would need either a transaction body whose control flow
+;;; diverges when handed torn data (raising before ever reaching
+;;; commit-time validation — but constructing that without ALSO
+;;; depending on this STM's separate, unaddressed opacity/extend-
+;;; validation gap across multiple tvars turns out to be its own
+;;; can of worms) or direct test-only instrumentation of stm_tvar_read.
+;;; Kept anyway as a concurrent-load correctness smoke test (and because
+;;; the fix itself was verified correct by close reading, independently,
+;;; twice) rather than as true regression coverage for this specific
+;;; defect. Kept modest (4 actors x 200 increments) since heavy
+;;; contention on a single tvar is slow independent of correctness.
+(define stm-counter (make-tvar 0))
+(define stm-n-actors 4)
+(define stm-n-incr 200)
+(define stm-done-sem (make-semaphore 0))
+(define (stm-worker)
+  (let loop ((i 0))
+    (if (< i stm-n-incr)
+        (begin
+          (atomically (lambda () (tvar-write! stm-counter (+ (tvar-read stm-counter) 1))))
+          (loop (+ i 1)))
+        (sem-post! stm-done-sem))))
+(let loop ((i 0)) (when (< i stm-n-actors) (spawn stm-worker) (loop (+ i 1))))
+(let loop ((i 0)) (when (< i stm-n-actors) (sem-wait! stm-done-sem) (loop (+ i 1))))
+(check "STM: concurrent tvar increments across actors all land"
+       (tvar-read stm-counter) (* stm-n-actors stm-n-incr))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
