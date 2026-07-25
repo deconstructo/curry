@@ -260,8 +260,7 @@ static void eval_port_exprs(val_t port, bool print) {
 #ifdef HAVE_READLINE
                     rl_save_history();
 #endif
-                    curry_timings_report();
-                    exit(0);
+                    exit(0);   /* runs the atexit(curry_timings_report) hook */
                 }
                 if (!strcmp(name, "help")) {
                     puts("Commands: ,quit  ,help  ,gc  ,env  ,profile  ,vm");
@@ -478,6 +477,18 @@ static size_t parse_size(const char *s) {
 /* ---- Entry point ---- */
 
 int main(int argc, char **argv) {
+    /* Register once, unconditionally: curry_timings_report() itself checks
+     * curry_timings_enabled at the time it actually runs, so it's harmless
+     * to register before that flag is even parsed below. atexit — rather
+     * than explicit calls at the end of main() and the REPL's ,quit — is
+     * what makes this correct for paths that skip main()'s normal return
+     * entirely: e.g. (curry qt6)'s run-event-loop calls C's exit(3) itself
+     * once the Qt event loop returns (qt6.cpp), deep inside vm_run(), long
+     * before control would ever get back to the end of main(). exit(3)
+     * (unlike _exit(2)) always runs atexit handlers, so this is the one
+     * place a hook can catch every exit path uniformly. */
+    atexit(curry_timings_report);
+
     /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
     size_t nursery_size = 0;   /* 0 = use gc_gen default */
     bool use_gen_gc = false;
@@ -794,6 +805,5 @@ int main(int argc, char **argv) {
     if (!ran_something || interactive) {
         repl();
     }
-    curry_timings_report();
-    return 0;
+    return 0;   /* runs the atexit(curry_timings_report) hook */
 }
