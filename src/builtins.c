@@ -1065,8 +1065,28 @@ static val_t prim_make_bytes(int ac, val_t *av, void *ud) {
     return vptr(b);
 }
 static val_t prim_bytes_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(as_bytes(av[0])->len);}
-static val_t prim_bytes_u8_ref(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-u8-ref: not a bytevector"); if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-u8-ref: not an exact integer"); return vfix(as_bytes(av[0])->data[vunfix(av[1])]);}
-static val_t prim_bytes_u8_set(int ac, val_t *av, void *ud) {(void)ac;(void)ud; if (!vis_bytes(av[0])) scm_raise(V_FALSE, "bytevector-u8-set!: not a bytevector"); if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "bytevector-u8-set!: not an exact integer"); if (!vis_fixnum(av[2])) scm_raise(V_FALSE, "bytevector-u8-set!: value must be exact integer"); as_bytes(av[0])->data[vunfix(av[1])]=(uint8_t)vunfix(av[2]); return V_VOID;}
+static val_t prim_bytes_u8_ref(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_bytes(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-ref: not a bytevector");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-ref: not an exact integer");
+    Bytevector *b = as_bytes(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || (uint32_t)i >= b->len)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "bytevector-u8-ref: index %ld out of bounds (length %u)", (long)i, b->len);
+    return vfix(b->data[i]);
+}
+static val_t prim_bytes_u8_set(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_bytes(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-set!: not a bytevector");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-set!: not an exact integer");
+    if (!vis_fixnum(av[2])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-set!: value must be exact integer");
+    Bytevector *b = as_bytes(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || (uint32_t)i >= b->len)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "bytevector-u8-set!: index %ld out of bounds (length %u)", (long)i, b->len);
+    b->data[i] = (uint8_t)vunfix(av[2]);
+    return V_VOID;
+}
 
 /* ---- I/O ---- */
 static val_t prim_display(int ac, val_t *av, void *ud) {(void)ud; scm_display(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
@@ -1995,9 +2015,28 @@ static val_t prim_make_parameter(int ac, val_t *av, void *ud) {
     /* We return the Parameter object; the evaluator handles parameterize */
     return vptr(p);
 }
-/* ---- Record types (internal primitives) ---- */
+/* ---- Record types (internal primitives) ----
+ * These are ordinary discoverable globals — nothing stops user code from
+ * calling them directly, bypassing the generated constructor/predicate/
+ * accessor/mutator closures define-record-type normally hands out (same
+ * class of hazard already found and fixed for %make-record-type and
+ * %rebuild-syntax-rules). Validate types and field-index bounds so direct
+ * misuse raises an ordinary Scheme error instead of type-confusing a
+ * non-RTD/non-Record value or indexing past the field array.
+ *
+ * Field mutability (immutable vs. mutable, per R7RS record-type syntax) is
+ * NOT tracked here: RecordType (object.h) has no per-field mutability
+ * bitmask, only the field count/names, so %record-set! cannot itself tell
+ * an immutable field from a mutable one — that contract is enforced one
+ * layer up, by define-record-type simply never generating/exposing a
+ * mutator closure for an immutable field (record_type.c). Calling
+ * %record-set! directly on such a field bypasses that (a real gap, not
+ * addressed by this fix, since encoding mutability into RecordType would
+ * touch its .scc serialization format — out of scope for a bounds/type
+ * safety fix). */
 static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ctor: not a record type");
     RecordType *rtd = vunptr(RecordType, av[0]);
     uint32_t n = rtd->nfields;
     Record *r = (Record *)gc_alloc(sizeof(Record) + n * sizeof(val_t));
@@ -2007,18 +2046,30 @@ static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     return vptr(r);
 }
 static val_t prim_record_pred(int ac, val_t *av, void *ud) {
-    (void)ac;(void)ud; RecordType *rtd=vunptr(RecordType,av[0]);
+    (void)ac;(void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-pred?: not a record type");
+    RecordType *rtd=vunptr(RecordType,av[0]);
     return vbool(vis_record(av[1]) && as_rec(av[1])->rtd == rtd);
 }
 static val_t prim_record_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "record-ref: not an exact integer");
-    return as_rec(av[0])->fields[vunfix(av[1])];
+    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ref: not a record");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ref: not an exact integer");
+    Record *r = as_rec(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || (uint32_t)i >= r->rtd->nfields)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%record-ref: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
+    return r->fields[i];
 }
 static val_t prim_record_set(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "record-set!: not an exact integer");
-    as_rec(av[0])->fields[vunfix(av[1])] = av[2];
+    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-set!: not a record");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-set!: not an exact integer");
+    Record *r = as_rec(av[0]);
+    intptr_t i = vunfix(av[1]);
+    if (i < 0 || (uint32_t)i >= r->rtd->nfields)
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%record-set!: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
+    r->fields[i] = av[2];
     return V_VOID;
 }
 /* Build a fresh RecordType (RTD) from a name and a list of field-name

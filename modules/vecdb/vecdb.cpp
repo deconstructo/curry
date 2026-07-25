@@ -88,6 +88,8 @@ static curry_val fn_add(int ac, curry_val *av, void *ud) {
     VecDB *db = val_to_db(av[0]);
     long id   = (long)curry_fixnum(av[1]);
     uint32_t n = curry_vector_length(av[2]);
+    if ((int)n != db->dims)
+        curry_error("vecdb-add: vector has %u dimensions, expected %d", n, db->dims);
     std::vector<float> vec(n);
     for (uint32_t i = 0; i < n; i++) vec[i] = (float)curry_float(curry_vector_ref(av[2], i));
     db->entries[id] = vec;
@@ -98,6 +100,8 @@ static curry_val fn_search(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     VecDB *db  = val_to_db(av[0]);
     uint32_t n = curry_vector_length(av[1]);
+    if ((int)n != db->dims)
+        curry_error("vecdb-search: query vector has %u dimensions, expected %d", n, db->dims);
     std::vector<float> query(n);
     for (uint32_t i = 0; i < n; i++) query[i] = (float)curry_float(curry_vector_ref(av[1], i));
     int k = (int)curry_fixnum(av[2]);

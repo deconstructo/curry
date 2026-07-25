@@ -436,9 +436,20 @@ static curry_val load_gif(const char *path) {
     int eoi = cc + 1;
     int bits_used = lzw_min + 1;
 
-    /* Code table */
+    /* Code table.
+     * Row width was previously 256, but a dictionary entry's length
+     * (code_len[next_code] = code_len[prev_code] + 1, chained every time a
+     * new code is added) has no upper bound other than the total number of
+     * table entries, GIF_MAX_CODES itself — a long flat-color run (an
+     * entirely ordinary, non-adversarial GIF, not just a crafted one)
+     * legitimately produces chained entries longer than 256 bytes. Rows
+     * must be sized to GIF_MAX_CODES to make the memcpy/index write below
+     * safe for every representable chain length; the explicit clamp is
+     * kept too as defense in depth (matching the existing
+     * `code &gt;= GIF_MAX_CODES` guard's style) in case that invariant is
+     * ever wrong. */
     #define GIF_MAX_CODES 4096
-    static uint8_t  code_buf[GIF_MAX_CODES][256];
+    static uint8_t  code_buf[GIF_MAX_CODES][GIF_MAX_CODES];
     static uint16_t code_len[GIF_MAX_CODES];
     int next_code = eoi + 1;
     int prev_code = -1;
@@ -472,7 +483,8 @@ static curry_val load_gif(const char *path) {
             /* append first byte of prev code */
         }
 
-        if (next_code < GIF_MAX_CODES && prev_code >= 0) {
+        if (next_code < GIF_MAX_CODES && prev_code >= 0 &&
+            code_len[prev_code] < GIF_MAX_CODES - 1) {
             memcpy(code_buf[next_code], code_buf[prev_code], code_len[prev_code]);
             code_buf[next_code][code_len[prev_code]] = seq[0];
             code_len[next_code] = code_len[prev_code] + 1;

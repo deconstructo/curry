@@ -1,5 +1,18 @@
 # Changelog
 
+### Unreleased
+
+**Security — six memory-safety bugs from a full-codebase audit**
+
+A systematic bug-hunting audit (9 parallel independent reviews, each required to build and reproduce findings rather than just pattern-match) turned up 23 findings ranging from confirmed crashes to minor UB. This release fixes the six most severe: memory-unsafe bugs reachable from ordinary Scheme code with no special build flags, several confirmed with ASan/a live crafted-input reproduction. The rest of the audit's findings (a real correctness bug in `spawn`+closures, GC/STM/workpool issues in experimental backends, `surreal.c`/sexagesimal/`string-ref` correctness bugs, and more) remain open — see the audit for the full list.
+
+- **`bytevector-u8-ref`/`bytevector-u8-set!`** (`src/builtins.c`) had no index bounds check at all — `(bytevector-u8-ref (make-bytevector 4 0) 1000000)` segfaulted instantly. Now bounds-checked like `vector-ref`/`vector-set!`, raising `index-out-of-range`.
+- **`%record-ref`/`%record-set!`/`%record-ctor`** (`src/builtins.c`) — the primitives `define-record-type`'s generated accessors compile down to — had no type check on the record/RTD argument and no field-index bounds check; both `(%record-ref 5 0)` and `(%record-ctor 5 1 2 3)` segfaulted. Now type- and bounds-checked. (Field immutability is still not enforced at this layer — see the code comment for why that's a separate, deliberately out-of-scope gap.)
+- **`(curry vecdb)`** `vecdb-add`/`vecdb-search` never validated that a vector's length matched the database's declared dimensionality before reading exactly that many floats from it — an ASan-confirmed heap-buffer-overflow read. Both now raise a clear error on a dimension mismatch.
+- **`(curry image)`**'s GIF LZW decoder used a fixed 256-byte-per-row dictionary buffer, but a chained dictionary entry's length is unbounded up to the table size (4096) — an ordinary large flat-color GIF (not just a crafted one) could overflow it. ASan-confirmed on a 4000×4000 solid-color GIF. Rows widened to the safe bound, plus an explicit clamp as defense in depth.
+- **`(curry neo4j)`**'s PackStream decoder allocated (and immediately `memset`-committed) a bytevector/list sized from an attacker-controlled length header *before* validating it against the actual remaining message buffer — unlike the adjacent string-decode path, which already validated first. Crashed against a fake malicious Bolt server during the **unauthenticated** HELLO handshake; fixed to validate first, matching the existing string path.
+- **`(curry mcp)`**'s JSON parser had no recursion-depth limit — unbounded stack recursion on deeply nested input, crashable via `mcp-serve`'s stdio transport (and pre-authentication over HTTP on some SSE-enabled deployments). The sibling `(curry lsp)` module was specifically hardened against exactly this; `mcp.c` now has the same `JSON_MAX_DEPTH` guard.
+
 ### 1.10.3 — Fix `.scc` cache never being written for GUI/`(exit)`-ending scripts
 
 **`.scc` cache — GUI/`(exit)`-ending scripts now actually get cached**

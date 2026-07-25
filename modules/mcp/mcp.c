@@ -310,14 +310,25 @@ static curry_val parse_str(const char **p) {
     curry_val r=curry_make_string(buf); free(buf); return r;
 }
 
+/* Caps nesting depth so a message of thousands of consecutive '{' or '['
+ * can't exhaust the native stack via unbounded recursion — the same fix
+ * the sibling (curry lsp) module's JSON parser already has (lsp.c,
+ * JSON_MAX_DEPTH). mcp.c never received the equivalent guard; reachable
+ * over stdio (mcp-serve) from any local process, and pre-authentication
+ * over HTTP on SSE-enabled builds via the request body. */
+#define JSON_MAX_DEPTH 500
+static int s_json_depth = 0;
+
 static curry_val parse_val(const char **p) {
     skip_ws(p);
     if (!**p) return curry_nil();
     if (**p=='"') return parse_str(p);
+    if ((**p=='{' || **p=='[') && s_json_depth>=JSON_MAX_DEPTH) { (*p)++; return curry_nil(); }
     if (**p=='{') {
         (*p)++;
+        s_json_depth++;
         curry_val al=curry_nil(); skip_ws(p);
-        if (**p=='}') { (*p)++; return al; }
+        if (**p=='}') { (*p)++; s_json_depth--; return al; }
         while (**p) {
             skip_ws(p); if (**p!='"') break;
             curry_val k=parse_str(p); skip_ws(p);
@@ -328,12 +339,14 @@ static curry_val parse_val(const char **p) {
             if (**p==',') { (*p)++; continue; }
             if (**p=='}') { (*p)++; break; }
         }
+        s_json_depth--;
         return al;
     }
     if (**p=='[') {
         (*p)++;
+        s_json_depth++;
         curry_val elems[1024]; int n=0; skip_ws(p);
-        if (**p==']') { (*p)++; return curry_nil(); }
+        if (**p==']') { (*p)++; s_json_depth--; return curry_nil(); }
         while (**p && n<1024) {
             elems[n++]=parse_val(p); skip_ws(p);
             if (**p==',') { (*p)++; continue; }
@@ -341,6 +354,7 @@ static curry_val parse_val(const char **p) {
         }
         curry_val lst=curry_nil();
         for (int i=n-1;i>=0;i--) lst=curry_make_pair(elems[i],lst);
+        s_json_depth--;
         return lst;
     }
     if (strncmp(*p,"true",4)==0)  { *p+=4; return curry_make_bool(true); }

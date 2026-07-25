@@ -301,6 +301,12 @@ static curry_val ps_read_string(PSCur *c, size_t n) {
 
 static curry_val ps_read_list(PSCur *c, size_t n) {
     /* build forward list */
+    /* Every PackStream value is at least 1 byte, so a claimed element
+     * count greater than the remaining buffer is never valid — reject it
+     * before the allocation below, rather than letting an attacker-
+     * controlled n (up to ~4 billion for the 4-byte-length list marker)
+     * force a huge premature malloc. */
+    if (n > c->len - c->pos) curry_error("neo4j: list overrun in message");
     curry_val *elems = malloc(n * sizeof(curry_val));
     if (!elems && n > 0) curry_error("neo4j: out of memory");
     for (size_t i = 0; i < n; i++) elems[i] = ps_decode(c);
@@ -406,16 +412,26 @@ static curry_val ps_decode(PSCur *c) {
     case 0xCA: { int32_t v = (int32_t)cur_u32(c);  return curry_make_fixnum(v); }
     case 0xCB: { int64_t v = (int64_t)cur_u64(c);  return curry_make_fixnum((intptr_t)v); }
 
-    /* Bytes — decode as bytevector */
+    /* Bytes — decode as bytevector. A claimed length is validated against
+     * the actual remaining buffer BEFORE allocating, same as
+     * ps_read_string below — curry_make_bytevector commits real memory
+     * immediately (it memsets the whole thing), so an unvalidated,
+     * attacker-controlled length here (e.g. from a malicious/compromised
+     * server during the unauthenticated HELLO handshake) could force a
+     * huge allocation/memset, or read past cur_byte's own per-byte check
+     * arbitrarily many times before it happens to hit the length. */
     case 0xCC: { size_t n = cur_byte(c);
+                 if (c->pos + n > c->len) curry_error("neo4j: bytes overrun in message");
                  curry_val bv = curry_make_bytevector((uint32_t)n, 0);
                  for (size_t i=0;i<n;i++) curry_bytevector_set(bv,(uint32_t)i,cur_byte(c));
                  return bv; }
     case 0xCD: { size_t n = cur_u16(c);
+                 if (c->pos + n > c->len) curry_error("neo4j: bytes overrun in message");
                  curry_val bv = curry_make_bytevector((uint32_t)n, 0);
                  for (size_t i=0;i<n;i++) curry_bytevector_set(bv,(uint32_t)i,cur_byte(c));
                  return bv; }
     case 0xCE: { size_t n = cur_u32(c);
+                 if (c->pos + n > c->len) curry_error("neo4j: bytes overrun in message");
                  curry_val bv = curry_make_bytevector((uint32_t)n, 0);
                  for (size_t i=0;i<n;i++) curry_bytevector_set(bv,(uint32_t)i,cur_byte(c));
                  return bv; }
