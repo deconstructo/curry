@@ -255,6 +255,50 @@
        (jit-compiled? pic-hot)
        #f)
 
+;; Torn-read regression: independent review flagged that %%pic-store!
+;; originally wrote a cache entry's three fields (tuple, generation, chain)
+;; as three separate writes directly into the shared cache vector — since
+;; curry's actors are real OS threads sharing GLOBAL_ENV, a concurrent
+;; reader on another actor could observe a torn entry (e.g. a new tuple
+;; already visible paired with the OLD chain still sitting from whatever
+;; previously occupied that slot) and silently dispatch to the wrong
+;; method. Fixed by building each entry as a separate, fully-initialized
+;; vector and publishing it with a single write, so a reader only ever
+;; sees a slot's old entry or its new one, never a mix. Several actors
+;; hammer the SAME generic function with only as many distinct argument
+;; types as there are cache slots (guaranteeing constant eviction
+;; pressure, not just occasional cache churn) and every result must match
+;; its class's expected answer with zero exceptions.
+(import (curry sync))
+(define-class <tr0> ()) (define-class <tr1> ())
+(define-class <tr2> ()) (define-class <tr3> ())
+(define-generic torn-read-check (x))
+(define-method torn-read-check ((x <tr0>)) 0)
+(define-method torn-read-check ((x <tr1>)) 1)
+(define-method torn-read-check ((x <tr2>)) 2)
+(define-method torn-read-check ((x <tr3>)) 3)
+(define tr-insts (vector (make <tr0>) (make <tr1>) (make <tr2>) (make <tr3>)))
+(define tr-n-actors 8)
+(define tr-n-calls 5000)
+(define tr-done (make-semaphore 0))
+(define tr-mtx (make-mutex))
+(define tr-mismatches 0)
+(define (tr-worker id)
+  (let loop ((i 0))
+    (if (< i tr-n-calls)
+        (let* ((idx (modulo (+ i id) 4))
+               (result (torn-read-check (vector-ref tr-insts idx))))
+          (if (not (= result idx))
+              (begin (mutex-lock! tr-mtx)
+                     (set! tr-mismatches (+ tr-mismatches 1))
+                     (mutex-unlock! tr-mtx)))
+          (loop (+ i 1)))
+        (sem-post! tr-done))))
+(let loop ((i 0)) (when (< i tr-n-actors) (spawn (lambda () (tr-worker i))) (loop (+ i 1))))
+(let loop ((i 0)) (when (< i tr-n-actors) (sem-wait! tr-done) (loop (+ i 1))))
+(check "PIC: no torn cache reads across actors sharing a generic function"
+       tr-mismatches 0)
+
 ;;; ---- Summary ----
 
 (newline)

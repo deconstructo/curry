@@ -1419,15 +1419,26 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
  * whether LLVM is built in, so this is meaningful (if inert) either way.
  * Uses the exact same store maybe_jit_bcc (src/runtime.c) already uses to
  * permanently pin a self-referencing named-let closure — this is that
- * mechanism made callable directly, not a new one. jit_val is set with a
- * release store BEFORE any call can observe it, so no call ever races
- * ahead and promotes proc between this store and its first invocation.
+ * mechanism made callable directly, not a new one.
  * Per-BcClosure-instance, not per-Chunk: pinning one closure has no effect
  * on any other closure compiled from the same lambda source (each fresh
  * closure gets its own independent jit_val/call_count — see vm_make_closure
  * in src/vm.c). Returns proc unchanged (including when it isn't a
  * BcClosure at all, e.g. an already-native or C-primitive procedure,
- * for which "never JIT" is trivially and harmlessly already true). */
+ * for which "never JIT" is trivially and harmlessly already true).
+ *
+ * Narrow race, call before ever exposing/calling proc to be safe against
+ * it: maybe_jit_bcc's OWN promotion path also uses V_FALSE, as a transient
+ * "compiling in progress" sentinel (see the CAS there), and its final
+ * store after compiling is unconditional — not itself a CAS gated on
+ * "still V_FALSE". If jit-never! lands in the brief window between another
+ * thread's CAS-into-V_FALSE and that thread's final store (i.e. proc is
+ * already warm, already being compiled by a concurrent actor, when
+ * jit-never! is called), that final store can still overwrite the pin
+ * with a real T_JITCLOSURE. Calling jit-never! on a closure before it has
+ * ever been invoked (as oop.scm's %make-generic does, immediately after
+ * creating each dispatcher) makes this unreachable — call_count is still
+ * 0, so there is no in-flight compile to race against. */
 static val_t prim_jit_never(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t proc = av[0];

@@ -27,16 +27,31 @@
  * permanently interpreted via jit-never!, so this cache is never itself
  * silently bypassed either.
  *
- * Cache layout (a plain GC-managed Scheme vector — deliberately not a new
- * object.h type, keeping this additive and low-risk to the GC): length
- * 1 + 3*PIC_N. Slot 0 is a fixnum round-robin write cursor. Each of the
- * PIC_N cache entries occupies 3 consecutive slots starting at
- * 1 + 3*i: [class-tuple-vector, generation, cached-dispatch-chain].
- * An empty entry has #f in the class-tuple-vector position.
+ * Cache layout (plain GC-managed Scheme vectors — deliberately not a new
+ * object.h type, keeping this additive and low-risk to the GC): the outer
+ * "pic" vector has length 1 + PIC_N. Slot 0 is a fixnum round-robin write
+ * cursor. Each of slots 1..PIC_N holds either #f (empty) or an "entry"
+ * vector — a separate, fixed 3-element [class-tuple-vector, generation,
+ * cached-dispatch-chain] vector.
+ *
+ * Every entry is built as a fresh, private, never-mutated-again vector and
+ * published into its outer slot with a single write (see %%pic-store!) —
+ * deliberately NOT three separate field writes into the outer vector, even
+ * though that's a simpler-looking layout. Curry's actors are real OS
+ * threads sharing GLOBAL_ENV, so a top-level generic function's cache is
+ * the same shared object across every actor calling it; three independent
+ * field writes would let a concurrent reader observe a torn entry (e.g. a
+ * new tuple already visible paired with the OLD chain from whatever
+ * previously occupied that slot) and silently dispatch to the wrong
+ * method. Publishing one already-fully-built entry object per slot with a
+ * single pointer-sized write means a reader only ever sees a slot's
+ * previous entry (fully consistent, already built before anything else
+ * could see it) or its new one (ditto) — never a mix.
  */
 
 #define PIC_N 4
-#define PIC_VECTOR_LEN (1 + 3 * PIC_N)
+#define PIC_VECTOR_LEN (1 + PIC_N)
+#define PIC_ENTRY_LEN 3   /* [tuple, generation, chain] */
 
 void pic_register_builtins(val_t env);
 
