@@ -842,6 +842,24 @@
               (abs (- (log (exp qsmall)) qsmall))
               0.0  1e-10)
 
+;;; abs on complex/octonion: num_abs used to have no error fallthrough at
+;;; all — an unrecognized type (e.g. a plain string) silently returned
+;;; unchanged instead of raising, and separately never computed a real
+;;; answer for complex/octonion operands specifically (silently returning
+;;; them unchanged too, despite abs already being defined — correctly — as
+;;; the norm for quaternions just above). Fixing the missing fallthrough
+;;; surfaced both gaps; closed by extending abs to the norm for complex and
+;;; octonion too, matching the quaternion precedent already established.
+(check-approx "abs of a complex number is its magnitude (3-4-5 triangle)"
+              (abs (make-rectangular 3 4)) 5.0 1e-10)
+(check-approx "abs of an octonion is its norm"
+              (abs (make-octonion 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0))
+              (sqrt (+ 1 4 9 16 25 36 49 64))
+              1e-10)
+(check "abs on an unrecognized type raises instead of returning it unchanged"
+       (guard (e (#t #t)) (abs "not a number") #f)
+       #t)
+
 ;;; =========================================================================
 ;;; Quaternion builtins: accessors, operations, eqv?/equal?, conj
 ;;; =========================================================================

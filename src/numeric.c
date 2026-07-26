@@ -675,6 +675,25 @@ val_t num_abs(val_t a) {
         Quaternion *q = as_quat(a);
         return num_make_float(sqrt(q->a*q->a + q->b*q->b + q->c*q->c + q->d*q->d));
     }
+    if (vis_oct(a)) return num_oct_norm(a);
+    if (vis_complex(a)) {
+        /* Same computation num_magnitude already does for its complex
+         * case — kept in sync here (rather than having num_abs simply
+         * defer to num_magnitude) since num_magnitude's OWN non-complex
+         * path is defined as "defer to num_abs", and having each call the
+         * other would be circular. Consistent with the quaternion/octonion
+         * cases just above: this file already treats num_abs as this
+         * numeric tower's general absolute-value/norm operation across
+         * every type it represents geometrically, not just R7RS reals —
+         * found necessary when fixing this function's missing error
+         * fallthrough (see below) surfaced that src/symbolic.c's sx_abs
+         * calls num_abs directly for any vis_number operand, including
+         * complex/octonion ones, and had been silently getting back the
+         * operand unchanged (itself already a latent correctness bug, not
+         * something this newly introduces) instead of a real answer. */
+        double r = num_to_double(as_cpx(a)->real), i = num_to_double(as_cpx(a)->imag);
+        return num_make_float(sqrt(r*r + i*i));
+    }
     /* Unlike every sibling num_* op (num_to_double, to_mpz, ...), this used
      * to fall through silently, returning a's unrecognized value unchanged
      * instead of raising — found while auditing this file for OOP Layer 3.
