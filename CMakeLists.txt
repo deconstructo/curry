@@ -135,6 +135,7 @@ set(CORE_SOURCES
   src/quantum.c
   src/surreal.c
   src/multivec.c
+  src/pic.c
   src/matrix.c
   src/spinor.c
   src/syntax_rules.c
