@@ -10,6 +10,14 @@
  * living at the call site).
  */
 
+/* Process-wide diagnostic counters (not per-generic-function — a single
+ * global total is enough to let a test assert "the cache path was
+ * genuinely exercised" rather than trusting silently-always-missing code).
+ * Not thread-safe (plain increments); fine for their sole purpose, a
+ * single-threaded test/diagnostic signal, not a correctness-load-bearing
+ * value. */
+static uint64_t g_pic_hits = 0, g_pic_misses = 0;
+
 /* (%%pic-lookup pic class-tuple generation) -> cached chain, or #f on a
  * miss (no matching slot, or a matching slot whose stamped generation is
  * stale — the method table changed since that entry was cached).
@@ -23,11 +31,11 @@
 static val_t prim_pic_lookup(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t pic_v = av[0], tuple_v = av[1], gen_v = av[2];
-    if (!vis_vector(pic_v) || !vis_vector(tuple_v)) return V_FALSE;
+    if (!vis_vector(pic_v) || !vis_vector(tuple_v)) { g_pic_misses++; return V_FALSE; }
 
     Vector *pic = as_vec(pic_v);
     Vector *tuple = as_vec(tuple_v);
-    if (pic->len != PIC_VECTOR_LEN) return V_FALSE;   /* malformed/foreign vector */
+    if (pic->len != PIC_VECTOR_LEN) { g_pic_misses++; return V_FALSE; } /* malformed/foreign vector */
 
     for (int i = 0; i < PIC_N; i++) {
         int base = 1 + 3 * i;
@@ -41,8 +49,9 @@ static val_t prim_pic_lookup(int ac, val_t *av, void *ud) {
         for (uint32_t j = 0; j < tuple->len; j++) {
             if (st->data[j] != tuple->data[j]) { match = false; break; }
         }
-        if (match) return pic->data[base + 2];
+        if (match) { g_pic_hits++; return pic->data[base + 2]; }
     }
+    g_pic_misses++;
     return V_FALSE;
 }
 
@@ -70,7 +79,35 @@ static val_t prim_pic_store(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 
+/* (%%pic-make) -> a fresh, empty PIC cache vector. Centralizes
+ * PIC_VECTOR_LEN in one place (here) instead of duplicating the size as a
+ * magic number wherever a generic function is constructed. */
+static val_t prim_pic_make(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    Vector *v = CURRY_NEW_FLEX(Vector, PIC_VECTOR_LEN);
+    v->hdr.type = T_VECTOR; v->hdr.flags = 0; v->len = PIC_VECTOR_LEN;
+    for (int i = 0; i < PIC_VECTOR_LEN; i++) v->data[i] = V_FALSE;
+    return vptr(v);
+}
+
+/* (%%pic-stats) -> (hits . misses) since the last %%pic-reset-stats! (or
+ * process start). Diagnostic only. */
+static val_t prim_pic_stats(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return scm_cons(vfix((intptr_t)g_pic_hits), vfix((intptr_t)g_pic_misses));
+}
+
+/* (%%pic-reset-stats!) -> unspecified. */
+static val_t prim_pic_reset_stats(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    g_pic_hits = 0; g_pic_misses = 0;
+    return V_VOID;
+}
+
 void pic_register_builtins(val_t env) {
     defprim(env, "%%pic-lookup", prim_pic_lookup, 3, 3);
     defprim(env, "%%pic-store!", prim_pic_store,  4, 4);
+    defprim(env, "%%pic-make",   prim_pic_make,   0, 0);
+    defprim(env, "%%pic-stats",       prim_pic_stats,       0, 0);
+    defprim(env, "%%pic-reset-stats!", prim_pic_reset_stats, 0, 0);
 }

@@ -185,6 +185,76 @@
               (%ensure-generic! 'already-a-number already-a-number)
               #f))
 
+;;; ---- Layer 2: PIC dispatch cache ----
+;;; docs/thoughts/oop.md's Layer 2 — a cache owned by each generic
+;;; function's own dispatch closure (not a call-site cache, which would go
+;;; cold the moment a caller gets JIT-compiled; see src/pic.c and the
+;;; commit history on this branch for why). Correctness must be identical
+;;; whether the cache is cold, warm, or stale — every check above this
+;;; section already re-validates that implicitly (it all runs with Layer 2
+;;; wired in); this section additionally proves the cache is doing
+;;; something, not silently always missing, and that it can't return a
+;;; stale answer.
+
+(define-class <pica> ())
+(define-class <picb> ())
+
+(define-generic pic-dispatch (x))
+(define-method pic-dispatch ((x <pica>)) 'a-branch)
+(define-method pic-dispatch ((x <picb>)) 'b-branch)
+
+(define pica (make <pica>))
+(define picb (make <picb>))
+
+;; The cache must actually be hit on repeated same-type calls — proves the
+;; fast path isn't silently always missing (which would still pass every
+;; correctness check above while providing zero speedup).
+(%%pic-reset-stats!)
+(pic-dispatch pica) (pic-dispatch pica) (pic-dispatch pica)
+(pic-dispatch picb) (pic-dispatch picb)
+(let ((stats (%%pic-stats)))
+  (check-true "PIC: repeated same-type calls produce cache hits"
+              (> (car stats) 0)))
+
+;; Adding a method after the cache is warm must invalidate it — a stale
+;; cached decision would keep returning the pre-redefinition answer.
+(define-generic pic-invalidate (x))
+(define-method pic-invalidate ((x <object>)) 'generic-answer)
+(pic-invalidate pica)  ; warm the cache for <pica> against the <object> method
+(pic-invalidate pica)  ; now a cache hit
+(define-method pic-invalidate ((x <pica>)) 'specific-answer)
+(check "PIC: adding a method invalidates stale cached entries"
+       (pic-invalidate pica) 'specific-answer)
+
+;; call-next-method must still work correctly when the winning method came
+;; from a cache hit, not just on the first (necessarily cache-miss) call.
+(define-generic pic-cnm (x))
+(define-method pic-cnm ((x <object>)) "object")
+(define-method pic-cnm ((x <pica>)) (string-append "a:" (call-next-method)))
+(pic-cnm pica)  ; first call: cache miss, populates the cache
+(check "PIC: call-next-method correct on a cache hit"
+       (pic-cnm pica)  ; second call: cache hit
+       "a:object")
+
+;; A generic function's own dispatcher must never be promoted to native
+;; code, however many times it's called — otherwise its cache (embedded in
+;; its own bytecode) would go cold exactly when the call site is hottest.
+;; Loop past JIT_THRESHOLD (50) from a caller that's itself a JIT
+;; candidate, and confirm both correctness and that the dispatcher stays
+;; interpreted throughout.
+(define-generic pic-hot (x))
+(define-method pic-hot ((x <pica>)) 1)
+(define-method pic-hot ((x <number>)) 2)
+(define (pic-hot-loop n)
+  (let loop ((i 0) (acc 0))
+    (if (= i n) acc (loop (+ i 1) (+ acc (pic-hot pica) (pic-hot i))))))
+(check "PIC: correct results calling a generic 500x from a hot caller"
+       (pic-hot-loop 500)
+       (+ (* 500 1) (* 2 500)))  ; 500 * (pic-hot pica)=1, plus 500 * (pic-hot i)=2
+(check "PIC: generic function dispatcher is never JIT-promoted"
+       (jit-compiled? pic-hot)
+       #f)
+
 ;;; ---- Summary ----
 
 (newline)

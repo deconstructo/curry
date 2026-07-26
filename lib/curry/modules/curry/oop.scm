@@ -350,10 +350,14 @@
 ;;; =========================================================================
 
 ;; A generic function's dispatcher closure closes over a #(name methods
-;; fallback) vector. External code (define-method, %ensure-generic!) reaches
-;; that vector by calling the closure with a reserved sentinel first
-;; argument — avoids needing an eq?-keyed identity registry.
+;; fallback generation pic) vector. External code (define-method,
+;; %ensure-generic!) reaches that vector by calling the closure with a
+;; reserved sentinel first argument — avoids needing an eq?-keyed identity
+;; registry. `generation` (a fixnum, bumped by %add-method! on every method
+;; table change) and `pic` (a %%pic-make-allocated cache vector, see
+;; src/pic.c) back Layer 2's dispatch cache — see %invoke-generic.
 (define %%gf-introspect-tag (list '%%gf-introspect))
+(define %%gf-box-len 5)
 
 (define %next-methods (make-parameter '()))
 (define %current-args  (make-parameter '()))
@@ -374,31 +378,57 @@
 (define (%sort-methods methods args)
   (%merge-sort methods (lambda (a b) (%method-more-specific? a b args))))
 
+;; Layer 2: try the PIC cache before paying for filter+sort+is-a?/CPL-walk
+;; dispatch. A cache hit skips straight to the cached, already-specificity-
+;; sorted chain; parameterize is still paid on every call (call-next-method
+;; needs %next-methods/%current-args regardless of how the chain was
+;; obtained) — the cache removes the dispatch *search* cost, not that.
+;; `cached` is only ever #f on a genuine miss: %%pic-store! only runs below
+;; when `chain` is non-empty, so a stored value is never itself #f.
 (define (%invoke-generic box args)
-  (let* ((methods    (vector-ref box 1))
-         (fallback   (vector-ref box 2))
-         (applicable (filter (lambda (m) (%applicable? (car m) args)) methods))
-         (sorted     (%sort-methods applicable args))
-         (chain      (if fallback
-                         (append sorted (list (cons '() fallback)))
-                         sorted)))
-    (if (null? chain)
-        (error (string-append "no applicable method for generic function "
-                              (symbol->string (vector-ref box 0))))
-        (parameterize ((%next-methods (cdr chain)) (%current-args args))
-          (apply (cdar chain) args)))))
+  (let* ((fallback   (vector-ref box 2))
+         (generation (vector-ref box 3))
+         (pic        (vector-ref box 4))
+         (tuple      (list->vector (map class-of args)))
+         (cached     (%%pic-lookup pic tuple generation)))
+    (if cached
+        (parameterize ((%next-methods (cdr cached)) (%current-args args))
+          (apply (cdar cached) args))
+        (let* ((methods    (vector-ref box 1))
+               (applicable (filter (lambda (m) (%applicable? (car m) args)) methods))
+               (sorted     (%sort-methods applicable args))
+               (chain      (if fallback
+                               (append sorted (list (cons '() fallback)))
+                               sorted)))
+          (if (null? chain)
+              (error (string-append "no applicable method for generic function "
+                                    (symbol->string (vector-ref box 0))))
+              (begin
+                (%%pic-store! pic tuple generation chain)
+                (parameterize ((%next-methods (cdr chain)) (%current-args args))
+                  (apply (cdar chain) args))))))))
 
 (define (%make-generic name)
-  (let ((box (vector name '() #f)))
-    (lambda args
-      (if (and (pair? args) (eq? (car args) %%gf-introspect-tag))
-          box
-          (%invoke-generic box args)))))
+  (let* ((box (vector name '() #f 0 (%%pic-make)))
+         (gf  (lambda args
+                (if (and (pair? args) (eq? (car args) %%gf-introspect-tag))
+                    box
+                    (%invoke-generic box args)))))
+    ;; Pinned permanently interpreted: a PIC embedded in a *caller's*
+    ;; bytecode goes cold the moment that caller gets JIT-compiled (JIT'd
+    ;; code calls native/apply_arr directly, never re-executing the
+    ;; bytecode instruction the cache would live in). Owning the cache here
+    ;; instead — and guaranteeing this dispatcher itself never migrates to
+    ;; native code — means it's exercised on every call regardless of the
+    ;; caller's tier: apply_arr falls through to vm_run's bytecode loop for
+    ;; any non-JIT'd closure, JIT'd caller or not.
+    (jit-never! gf)
+    gf))
 
 (define (%generic-box gf)
   (guard (e (#t #f))
     (let ((r (gf %%gf-introspect-tag)))
-      (if (and (vector? r) (= (vector-length r) 3)) r #f))))
+      (if (and (vector? r) (= (vector-length r) %%gf-box-len)) r #f))))
 
 ;; Only ever called with `name` already bound to *some* value — the guard
 ;; in define-generic/define-method's expansion catches a genuinely unbound
@@ -442,7 +472,13 @@
     (vector-set! box 1
       (cons (cons specializers proc)
             (filter (lambda (m) (not (%specializers-eq? (car m) specializers)))
-                    (vector-ref box 1))))))
+                    (vector-ref box 1))))
+    ;; Invalidate the entire PIC cache — simplest correct approach; the
+    ;; method table is small and changes rarely, so there's no point
+    ;; chasing per-entry invalidation. A stale generation makes
+    ;; %%pic-lookup miss every existing entry without needing to touch the
+    ;; cache vector itself.
+    (vector-set! box 3 (+ 1 (vector-ref box 3)))))
 
 (define (call-next-method . new-args)
   (let ((remaining (%next-methods)))
