@@ -675,7 +675,15 @@ val_t num_abs(val_t a) {
         Quaternion *q = as_quat(a);
         return num_make_float(sqrt(q->a*q->a + q->b*q->b + q->c*q->c + q->d*q->d));
     }
-    return a;
+    /* Unlike every sibling num_* op (num_to_double, to_mpz, ...), this used
+     * to fall through silently, returning a's unrecognized value unchanged
+     * instead of raising — found while auditing this file for OOP Layer 3.
+     * Matches num_to_double's error shape (src/numeric.c) for consistency. */
+    scm_raise(V_FALSE, "not a number: %s",
+              vis_pair(a) ? "#<pair>" :
+              vis_nil(a)  ? "()"      :
+              (a == V_TRUE) ? "#t"    :
+              (a == V_FALSE) ? "#f"   : "#<non-numeric>");
 }
 
 /* ---- Comparison ---- */

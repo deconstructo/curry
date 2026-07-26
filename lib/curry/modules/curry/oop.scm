@@ -1,10 +1,10 @@
 ;;; (curry oop) — Slim CLOS: classes, generic functions, multiple dispatch.
 ;;;
 ;;; Layer 1 of docs/thoughts/oop.md: a pure-Scheme macro layer, no C changes.
-;;; Dispatch goes through a hash of method tables keyed by argument class —
-;;; acceptable overhead for application-level code; Layers 2 (VM-level
-;;; polymorphic inline cache) and 3 (numeric-tower integration) are future
-;;; work, not attempted here.
+;;; Layer 2 (a small polymorphic inline cache per generic function, see
+;;; src/pic.c) and Layer 3 (a fast path that skips dispatch entirely when no
+;;; user-defined method could possibly apply — see %invoke-generic below)
+;;; are both built on top of this and described where they're wired in.
 ;;;
 ;;; What this deliberately does NOT build (per oop.md's own recommendation):
 ;;; no metaobject protocol, no method-combination qualifiers (:before/:after/
@@ -32,6 +32,12 @@
 (define (%every2 pred l1 l2)
   (or (null? l1)
       (and (pred (car l1) (car l2)) (%every2 pred (cdr l1) (cdr l2)))))
+
+(define (%every pred lst)
+  (or (null? lst) (and (pred (car lst)) (%every pred (cdr lst)))))
+
+(define (%any pred lst)
+  (and (pair? lst) (or (pred (car lst)) (%any pred (cdr lst)))))
 
 (define (%position x lst)
   (let loop ((l lst) (i 0))
@@ -350,14 +356,15 @@
 ;;; =========================================================================
 
 ;; A generic function's dispatcher closure closes over a #(name methods
-;; fallback generation pic) vector. External code (define-method,
-;; %ensure-generic!) reaches that vector by calling the closure with a
-;; reserved sentinel first argument — avoids needing an eq?-keyed identity
-;; registry. `generation` (a fixnum, bumped by %add-method! on every method
-;; table change) and `pic` (a %%pic-make-allocated cache vector, see
-;; src/pic.c) back Layer 2's dispatch cache — see %invoke-generic.
+;; fallback generation pic specializer-set) vector. External code
+;; (define-method, %ensure-generic!) reaches that vector by calling the
+;; closure with a reserved sentinel first argument — avoids needing an
+;; eq?-keyed identity registry. `generation` (a fixnum, bumped by
+;; %add-method! on every method table change) and `pic` (a
+;; %%pic-make-allocated cache vector, see src/pic.c) back Layer 2's dispatch
+;; cache. `specializer-set` backs Layer 3's fast path — see %invoke-generic.
 (define %%gf-introspect-tag (list '%%gf-introspect))
-(define %%gf-box-len 5)
+(define %%gf-box-len 6)
 
 (define %next-methods (make-parameter '()))
 (define %current-args  (make-parameter '()))
@@ -378,6 +385,26 @@
 (define (%sort-methods methods args)
   (%merge-sort methods (lambda (a b) (%method-more-specific? a b args))))
 
+;; Layer 3: precomputed per-generic "which classes could a non-fallback
+;; method possibly care about" set, recomputed by %add-method! whenever the
+;; method table changes (see there). Two shapes:
+;;   #t   — fast path permanently disabled for this generic: some method
+;;          specializes on nothing but <object> in every position, so it
+;;          always applies and could rank above the fallback. <object> is
+;;          otherwise excluded from the set entirely — including it would
+;;          make %definitely-fallback-only? always fail (every argument's
+;;          CPL contains <object>), silently defeating the fast path for
+;;          any generic with even one ordinary unspecialized-parameter
+;;          method, which is a completely normal pattern (e.g.
+;;          (define-method describe ((x <object>)) ...)), not an edge case.
+;;   list — every other class actually used as a specializer anywhere in
+;;          the method table, deduplicated.
+(define (%definitely-fallback-only? args spec-set)
+  (and (not (eq? spec-set #t))
+       (%every (lambda (a)
+                 (not (%any (lambda (s) (memq s spec-set)) (%class-cpl (class-of a)))))
+               args)))
+
 ;; Layer 2: try the PIC cache before paying for filter+sort+is-a?/CPL-walk
 ;; dispatch. A cache hit skips straight to the cached, already-specificity-
 ;; sorted chain; parameterize is still paid on every call (call-next-method
@@ -386,30 +413,43 @@
 ;; `cached` is only ever #f on a genuine miss: %%pic-store! only runs below
 ;; when `chain` is non-empty, so a stored value is never itself #f.
 (define (%invoke-generic box args)
-  (let* ((fallback   (vector-ref box 2))
-         (generation (vector-ref box 3))
-         (pic        (vector-ref box 4))
-         (tuple      (list->vector (map class-of args)))
-         (cached     (%%pic-lookup pic tuple generation)))
-    (if cached
-        (parameterize ((%next-methods (cdr cached)) (%current-args args))
-          (apply (cdar cached) args))
-        (let* ((methods    (vector-ref box 1))
-               (applicable (filter (lambda (m) (%applicable? (car m) args)) methods))
-               (sorted     (%sort-methods applicable args))
-               (chain      (if fallback
-                               (append sorted (list (cons '() fallback)))
-                               sorted)))
-          (if (null? chain)
-              (error (string-append "no applicable method for generic function "
-                                    (symbol->string (vector-ref box 0))))
-              (begin
-                (%%pic-store! pic tuple generation chain)
-                (parameterize ((%next-methods (cdr chain)) (%current-args args))
-                  (apply (cdar chain) args))))))))
+  (let ((fallback (vector-ref box 2)))
+    (if (and fallback (%definitely-fallback-only? args (vector-ref box 5)))
+        ;; Layer 3 fast path: no method other than the fallback could ever
+        ;; apply to these arguments, in any order, regardless of multi-
+        ;; argument specificity — skip tuple construction, the PIC lookup,
+        ;; and (what would have been, on a miss) the full filter+sort
+        ;; entirely. Still parameterizes an EMPTY %next-methods rather than
+        ;; skipping parameterize too: leaving the dynamic parameter
+        ;; untouched here would let a call-next-method inside the fallback
+        ;; (a user error, since a plain C/Scheme primitive fallback has no
+        ;; "next" method) read whatever chain happens to be live in an
+        ;; unrelated ENCLOSING dispatch instead of failing cleanly.
+        (parameterize ((%next-methods '()) (%current-args args))
+          (apply fallback args))
+        (let* ((generation (vector-ref box 3))
+               (pic        (vector-ref box 4))
+               (tuple      (list->vector (map class-of args)))
+               (cached     (%%pic-lookup pic tuple generation)))
+          (if cached
+              (parameterize ((%next-methods (cdr cached)) (%current-args args))
+                (apply (cdar cached) args))
+              (let* ((methods    (vector-ref box 1))
+                     (applicable (filter (lambda (m) (%applicable? (car m) args)) methods))
+                     (sorted     (%sort-methods applicable args))
+                     (chain      (if fallback
+                                     (append sorted (list (cons '() fallback)))
+                                     sorted)))
+                (if (null? chain)
+                    (error (string-append "no applicable method for generic function "
+                                          (symbol->string (vector-ref box 0))))
+                    (begin
+                      (%%pic-store! pic tuple generation chain)
+                      (parameterize ((%next-methods (cdr chain)) (%current-args args))
+                        (apply (cdar chain) args))))))))))
 
 (define (%make-generic name)
-  (let* ((box (vector name '() #f 0 (%%pic-make)))
+  (let* ((box (vector name '() #f 0 (%%pic-make) '()))
          (gf  (lambda args
                 (if (and (pair? args) (eq? (car args) %%gf-introspect-tag))
                     box
@@ -460,6 +500,24 @@
         ((eq? (car s1) (car s2)) (%specializers-eq? (cdr s1) (cdr s2)))
         (else #f)))
 
+;; Returns #t ("disable the Layer 3 fast path — some method always applies")
+;; if any method's specializer list is nothing but <object>; otherwise a
+;; flat, deduplicated list of every other specializer class used anywhere
+;; in `methods`. See %definitely-fallback-only? for how this is consumed.
+(define (%collect-specializer-classes methods)
+  (let loop ((ms methods) (acc '()))
+    (cond
+      ((null? ms) acc)
+      ((%every (lambda (s) (eq? s <object>)) (caar ms)) #t)
+      (else
+       (loop (cdr ms)
+             (let inner ((specs (caar ms)) (acc acc))
+               (cond
+                 ((null? specs) acc)
+                 ((or (eq? (car specs) <object>) (memq (car specs) acc))
+                  (inner (cdr specs) acc))
+                 (else (inner (cdr specs) (cons (car specs) acc))))))))))
+
 (define (%add-method! gf specializers proc)
   (let ((box (%generic-box gf)))
     (if (not box) (error "define-method: not a generic function"))
@@ -478,7 +536,10 @@
     ;; chasing per-entry invalidation. A stale generation makes
     ;; %%pic-lookup miss every existing entry without needing to touch the
     ;; cache vector itself.
-    (vector-set! box 3 (+ 1 (vector-ref box 3)))))
+    (vector-set! box 3 (+ 1 (vector-ref box 3)))
+    ;; Layer 3: recompute which classes a non-fallback method could
+    ;; possibly care about, now that the method table has changed.
+    (vector-set! box 5 (%collect-specializer-classes (vector-ref box 1)))))
 
 (define (call-next-method . new-args)
   (let ((remaining (%next-methods)))
