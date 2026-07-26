@@ -1413,6 +1413,47 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
 }
 #endif /* BUILD_LLVM */
 
+/* (jit-never! proc) — permanently exempt proc from tiered-JIT promotion.
+ * Unconditional (not guarded by BUILD_LLVM): the jit_val field and the
+ * V_FALSE "never compile this instance" sentinel both exist regardless of
+ * whether LLVM is built in, so this is meaningful (if inert) either way.
+ * Uses the exact same store maybe_jit_bcc (src/runtime.c) already uses to
+ * permanently pin a self-referencing named-let closure — this is that
+ * mechanism made callable directly, not a new one. jit_val is set with a
+ * release store BEFORE any call can observe it, so no call ever races
+ * ahead and promotes proc between this store and its first invocation.
+ * Per-BcClosure-instance, not per-Chunk: pinning one closure has no effect
+ * on any other closure compiled from the same lambda source (each fresh
+ * closure gets its own independent jit_val/call_count — see vm_make_closure
+ * in src/vm.c). Returns proc unchanged (including when it isn't a
+ * BcClosure at all, e.g. an already-native or C-primitive procedure,
+ * for which "never JIT" is trivially and harmlessly already true). */
+static val_t prim_jit_never(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (vis_bcclosure(proc)) {
+        BcClosure *cl = as_bcclosure(proc);
+        __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
+    }
+    return proc;
+}
+
+/* (jit-compiled? proc) — has proc actually been promoted to native code
+ * right now? #f for an unpromoted BcClosure (whether merely not-yet-hot or
+ * permanently jit-never!'d — both leave jit_val as something other than a
+ * real T_JITCLOSURE) and for any non-BcClosure procedure. Introspection
+ * only; exists so callers (tests, this feature's own verification) can
+ * directly observe the pinning `jit-never!` performs rather than inferring
+ * it indirectly from timing. */
+static val_t prim_jit_compiled_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (!vis_bcclosure(proc)) return V_FALSE;
+    BcClosure *cl = as_bcclosure(proc);
+    val_t jv = __atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE);
+    return vbool(vis_jitclosure(jv));
+}
+
 /* ── GC builtins ─────────────────────────────────────────────────────────── */
 
 static val_t prim_gc_collect(int ac, val_t *av, void *ud) {
@@ -1648,6 +1689,8 @@ void builtins_curry_register(val_t env) {
     DEF("jit-call-depth",        prim_jit_call_depth,    0, 0);
     DEF("jit-compile!",          prim_jit_compile,       1, 1);
 #endif
+    DEF("jit-never!",            prim_jit_never,         1, 1);
+    DEF("jit-compiled?",         prim_jit_compiled_p,    1, 1);
 
     /* ── GC builtins ───────────────────────────────────────────────────────── */
     DEF("gc-collect!",      prim_gc_collect,    0, 0);
