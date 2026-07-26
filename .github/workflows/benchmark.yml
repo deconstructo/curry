@@ -18,11 +18,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Only the push-to-main run needs to publish the new baseline to
-    # gh-pages; PR runs only read the existing baseline to compare against
-    # and, on a regression, comment on the PR — no write access needed.
+    # `permissions:` values must be static literals — GitHub's own context-
+    # availability table doesn't list `permissions` among the keys that
+    # accept `${{ }}` expressions, and a workflow that uses one there is
+    # silently rejected wholesale (every run shows "This run likely failed
+    # because of a workflow file issue" / "No jobs were run", with zero
+    # diagnostic pointing at this line — confirmed via `gh api .../jobs`
+    # returning zero jobs on every push since this workflow was added).
+    # `contents: write` is granted unconditionally; the actual write only
+    # happens on a push-to-main run, gated below via `auto-push:` (an
+    # ordinary `with:` input, which — unlike `permissions:` — does support
+    # expressions). For a pull_request run from a fork, GitHub restricts
+    # GITHUB_TOKEN to read-only regardless of what's granted here; the
+    # residual exposure is limited to a same-repo (non-fork) PR run, which
+    # still never exercises the write path.
     permissions:
-      contents: ${{ github.event_name == 'push' && 'write' || 'read' }}
+      contents: write
       pull-requests: write
 
     steps:
