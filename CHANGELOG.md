@@ -1,5 +1,24 @@
 # Changelog
 
+### 1.11.0 — Add `(curry oop)`: Slim CLOS Layer 1 — classes, generics, multiple dispatch
+
+New pure-Scheme library, `lib/curry/modules/curry/oop.scm`, no C changes: Layer 1 of the object-system design in `docs/thoughts/oop.md`.
+
+- **`define-class`** with single or multiple inheritance and per-slot `#:init`/`#:accessor`/`#:mutable`/`#:type` options. Slots are **immutable by default** — the one deliberate departure from standard CLOS, chosen because an object whose state can be accidentally mutated is a worse fit for curry's physics/CAS domain than one that can't be, and immutable objects share freely across actors with no synchronization.
+- **`define-generic`/`define-method`** with real multiple dispatch: method applicability and specificity ordering both go through a proper C3 linearization of the class hierarchy (the same algorithm Python, Dylan, and Raku use for multiple inheritance), not just a first-argument check. `call-next-method` walks the linearized method chain.
+- **`make`/`slot-ref`/`slot-set!`**, plus introspection: `is-a?`, `class-of`, `subclass?`, `class-name`, `class-slots`, `class-precedence-list`.
+- A **built-in type hierarchy** so generic functions dispatch on plain numbers, strings, symbols, etc. without any wrapper — adapted pragmatically to what's actually distinguishable via predicates that exist in this codebase today (there's no Scheme-visible `fixnum?`/`bignum?`/`flonum?` split, only at the C `val_t` tag level, so those collapse into `<integer>`/`<inexact-real>` here rather than literally reproducing the design doc's more granular aspirational tree).
+- **Extending an existing procedure** (e.g. the primitive `+`) with methods for a user-defined type, while its original behavior is preserved as the fallback for every case no user method matches — verified specifically that plain `(+ 1 2 3)` keeps working after `+` has been extended for a user-defined `<poly>` type.
+
+Verified against all six of the design doc's own suggested acceptance tests, plus a 31-assertion test file (`tests/oop_tests.scm`). Independent review (per this project's mandate for non-trivial Scheme code) found four real correctness bugs before this was called done, all fixed and covered by regression tests:
+
+- Redefining a method appended a duplicate instead of replacing it, so re-evaluating a `define-method` — the ordinary REPL/script-reload workflow — left the *old* definition as the one dispatch actually picked, with the new one reachable (if at all) only via `call-next-method`. Fixed by comparing specializer lists via `eq?` identity (not `equal?` — classes are singletons, and structural comparison of two *different* class records could spuriously call them "equal") and replacing on a match.
+- `#:init` expressions were evaluated once at class-definition time and shared `eq?` across every instance of the class — a mutable default like `#:init (make-hash-table)` would be the *same* table for every instance. Fixed by wrapping `#:init` in a thunk, re-evaluated fresh on every `make` call, matching how CLOS re-evaluates `:initform` per instance.
+- The internal unbound-slot sentinel was directly importable (the module has no export list) and `slot-set!`-able, which would make `slot-ref` wrongly report an explicitly-set slot as still unbound. Fixed with an explicit rejection in `slot-set!`.
+- `define-method`/`define-generic` on a name already bound to a non-procedure value (e.g. a plain number) silently clobbered it with a fresh generic function instead of raising a clear error.
+
+Layers 2 (a VM-level polymorphic inline cache for hot dispatch paths) and 3 (wiring the numeric tower's existing C-level type dispatch through this same generic-function machinery) remain future work, not attempted here. `ctest` 45/45 (new `oop` test), `test_cli.sh` 67/67.
+
 ### 1.10.4 — Full-codebase security/correctness audit: memory safety, concurrency, numeric-tower bugs
 
 A systematic bug-hunting audit (9 parallel independent reviews, each required to build and reproduce findings rather than just pattern-match) turned up 23 findings. This release fixes all of them, working through the list in priority order across many iterations, with every non-trivial fix reviewed independently at least once (several caught a flawed first attempt and required a second iteration — noted inline below where that happened) per this project's own review policy.
