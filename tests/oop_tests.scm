@@ -299,6 +299,48 @@
 (check "PIC: no torn cache reads across actors sharing a generic function"
        tr-mismatches 0)
 
+;;; ---- Layer 3: fast path for calls no user method could match ----
+;;; docs/thoughts/oop.md's Layer 3 — once a builtin like `+` has been
+;;; extended for a user-defined type, plain-number calls must not pay any
+;;; class-tuple-vector allocation or PIC-lookup cost, since no user method
+;;; could ever apply to them. This section proves both halves: the fast
+;;; path is genuinely taken (not just "correct by luck"), and it's
+;;; correctly disabled whenever a method could actually outrank the
+;;; fallback.
+
+(define-class <l3poly> ()
+  (coeffs #:init '() #:accessor l3poly-coeffs))
+(define-method + ((a <l3poly>) (b <l3poly>))
+  (make <l3poly> #:coeffs (map + (l3poly-coeffs a) (l3poly-coeffs b))))
+
+(%%pic-reset-stats!)
+(check "Layer 3: extended + still correct on plain numbers" (+ 1 2) 3)
+(check "Layer 3: extended + still correct, several plain-number calls"
+       (list (+ 10 20) (+ 100 200) (+ 1 2 3))
+       '(30 300 6))
+(check "Layer 3: plain-number + calls never touch the PIC at all"
+       (%%pic-stats)
+       (cons 0 0))
+
+(define l3p1 (make <l3poly> #:coeffs '(1 2 3)))
+(define l3p2 (make <l3poly> #:coeffs '(10 20 30)))
+(check "Layer 3: poly+poly still dispatches to the user method"
+       (l3poly-coeffs (+ l3p1 l3p2))
+       '(11 22 33))
+(check-true "Layer 3: poly+poly call does touch the PIC (fast path correctly excludes it)"
+            (> (+ (car (%%pic-stats)) (cdr (%%pic-stats))) 0))
+
+(check-true "Layer 3: mixed poly+number still raises exactly as before this change"
+            (guard (e (#t #t)) (+ l3p1 5) #f))
+
+;; The critical correctness case: an <object>-specialized method must still
+;; be able to outrank the fallback — the fast path's exclusion of <object>
+;; from specializer-set exists specifically to guarantee this.
+(define-method sqrt ((x <object>)) 'l3-object-override)
+(check "Layer 3: an <object>-specialized method disables the fast path and still wins"
+       (sqrt 4)
+       'l3-object-override)
+
 ;;; ---- Summary ----
 
 (newline)
