@@ -31,6 +31,7 @@ add_test(NAME logic        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/logic_tests
 add_test(NAME random       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/random_tests.scm)
 add_test(NAME sets         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/set_tests.scm)
 add_test(NAME sets_module  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sets_module_tests.scm)
+add_test(NAME oop          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/oop_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
@@ -45,7 +46,7 @@ add_test(NAME debugger
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
 set_tests_properties(akkadian PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
-set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic sets_module random PROPERTIES
+set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic sets_module random oop PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 
 if(BUILD_MODULE_GIT AND TARGET curry_git)
