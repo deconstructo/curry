@@ -3,6 +3,8 @@
 *Design document for Curry's object system.*
 *Status: pre-implementation design; not yet built.*
 
+**Not the design chosen (2026-07-26).** `docs/thoughts/oop.md`'s minimal Slim-CLOS recommendation shipped instead as `(curry oop)` — see [its reference doc](../reference/module-oop.md). Nothing in this document (the full MOP, method combination, logic-valued dispatch, or "every instance is its own actor") is implemented. The object-and-actor pairing this document treats as fundamental is instead available as an ordinary pattern you write by hand — one actor wrapping one instance, dispatching on message shape — shown in [the usage guide's §3](../guides/oop-guide.md#3-objects-owned-by-actors). This document remains as a record of the more radical alternative that was considered and not pursued.
+
 ---
 
 ## The Core Decision

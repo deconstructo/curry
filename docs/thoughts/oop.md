@@ -2,7 +2,9 @@
 
 *Draft — 2026-05-23*
 
-A design sketch for adding a first-class OOP layer to Curry. Nothing here is implemented yet. The intent is to nail down the model before writing any code.
+**Status (2026-07-26): implemented.** The recommended design below — Slim CLOS, immutable-by-default slots, no MOP, no method-combination qualifiers — shipped as `(curry oop)` (`lib/curry/modules/curry/oop.scm`), including all three implementation layers described here (Layer 1's pure-Scheme dispatch, Layer 2's per-generic-function PIC, and Layer 3's fast path for calls no user method can match). See [`(curry oop)` reference](../reference/module-oop.md) for the API as built and [the usage guide](../guides/oop-guide.md) for worked examples. This document remains as the design rationale and record of alternatives considered; it is not kept in sync with the implementation going forward.
+
+A design sketch for adding a first-class OOP layer to Curry. The intent was to nail down the model before writing any code — see the status note above for what actually shipped.
 
 ---
 
