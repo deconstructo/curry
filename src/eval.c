@@ -706,7 +706,10 @@ tail:
         val_t result = V_VOID;
         ExnHandler h;
         h.prev = current_handler;
+        h.saved_shadow   = gc_shadow_save();
+        h.saved_inhibit  = gc_inhibit_save();
         h.saved_jit_depth = jit_depth_save();
+        vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -715,7 +718,10 @@ tail:
             return result;
         }
         current_handler = h.prev;
+        gc_shadow_restore(h.saved_shadow);
+        gc_inhibit_restore(h.saved_inhibit);
         jit_depth_restore(h.saved_jit_depth);
+        vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
         val_t exn = h.exn;
 
         /* Try each clause */

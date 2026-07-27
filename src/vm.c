@@ -257,6 +257,25 @@ void vm_free(void) {
     vm = NULL;
 }
 
+/* See the SCM_PROTECT / ExnHandler comment in eval.h: this is the partial,
+ * dynamic-extent-scoped counterpart to vm_reset()'s full reset-to-base — it
+ * rewinds only what the protected region itself pushed, so it's safe to call
+ * from a nested guard/with-exception-handler without discarding legitimate
+ * outer VM frames. */
+void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues) {
+    if (!vm) { *frame_count = 0; *sp = NULL; *open_upvalues = NULL; return; }
+    *frame_count = vm->frame_count;
+    *sp = (void *)vm->sp;
+    *open_upvalues = (void *)vm->open_upvalues;
+}
+
+void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues) {
+    if (!vm) return;
+    vm->frame_count = frame_count;
+    vm->sp = (val_t *)sp;
+    vm->open_upvalues = (Upvalue *)open_upvalues;
+}
+
 void vm_reset(void) {
     vm->sp = vm->stack;
     vm->frame_count = 0;

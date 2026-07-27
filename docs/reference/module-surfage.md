@@ -10,6 +10,7 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfag
 |---------|------|-------------|
 | `(surfage s1 lists)` | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
 | `(surfage s27 random-bits)` | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
+| `(surfage s215 log)` | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
 
 ---
 
@@ -181,6 +182,48 @@ Return a uniform random flonum in `(0.0, 1.0)` using `default-random-source`.
 
 ---
 
+## `(surfage s215 log)` — SRFI-215 central log exchange
+
+```scheme
+(import (surfage s215 log))
+```
+
+Decouples log producers (library code) from log consumers (the application). Library code calls `send-log` without knowing which logging backend, if any, is active; the application installs a callback to route messages wherever it likes.
+
+#### `(send-log severity message key value ...)` → *unspecified*
+
+Construct a log message and pass it to the current log callback as an association list. `severity` is stored under the key `SEVERITY`; `message` (a string) under `MESSAGE`. Any additional `key value ...` pairs are added to the message, followed by the fields from `current-log-fields`. Signals an error if an odd number of trailing arguments is given, or if a `key` is not a symbol.
+
+Each `value` is stored as-is if it satisfies `string?`, `bytevector?`, `exact-integer?`, `error-object?`, or `condition?`; otherwise it is converted to a string as if by `write`.
+
+```scheme
+(send-log INFO "server started" 'PORT 8080)
+; => callback receives ((SEVERITY . 6) (MESSAGE . "server started") (PORT . 8080))
+```
+
+#### Severity constants
+
+`EMERGENCY` (0), `ALERT` (1), `CRITICAL` (2), `ERROR` (3), `WARNING` (4), `NOTICE` (5), `INFO` (6), `DEBUG` (7) — matching syslog severity levels.
+
+#### `current-log-fields` — *parameter*, default `()`
+
+A list of `(key . value)` pairs automatically appended to every message built by `send-log`. Use `parameterize` to scope contextual fields (e.g. a request ID) to a dynamic extent.
+
+#### `current-log-callback` — *parameter*, default buffers messages
+
+A procedure of one argument (the association-list message), called by `send-log` after building each message. Set it with `(current-log-callback proc)` to install a global handler, or scope one with `parameterize`.
+
+```scheme
+(current-log-callback
+ (lambda (msg)
+   (display (cdr (assq 'MESSAGE msg)) (current-error-port))
+   (newline (current-error-port))))
+```
+
+Before the application installs its own callback, messages are held in a bounded buffer (most-recent 100 kept). The first time `current-log-callback` is set to a non-default procedure, the buffer replays into it in order and is cleared — so log calls made during startup, before logging is configured, aren't lost.
+
+---
+
 ## Portability note
 
-Code written against `(surfage s1 lists)` and `(surfage s27 random-bits)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.
+Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, and `(surfage s215 log)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.

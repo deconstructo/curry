@@ -69,6 +69,24 @@ typedef struct ExnHandler {
                                          permanently inflating the counter until it pins at
                                          JIT_CALL_DEPTH_LIMIT and silently disables the JIT
                                          fast path for the rest of the thread's lifetime. */
+    int             saved_vm_frame_count; /* vm->frame_count at setjmp time — restored on longjmp */
+    void           *saved_vm_sp;          /* vm->sp at setjmp time — restored on longjmp */
+    void           *saved_vm_open_upvalues; /* vm->open_upvalues at setjmp time — restored on longjmp;
+                                         together with the two fields above, mirrors what
+                                         OP_PUSH_HANDLER already saves/restores for purely
+                                         in-VM catches (VmHandlerInfo in vm.h). Without this, a
+                                         protected body that calls into VM-compiled bytecode
+                                         (e.g. a guard around a call to a bytecode closure) which
+                                         then raises leaves vm->sp/frame_count pointing wherever
+                                         the raise happened deep inside vm_run(), because the
+                                         longjmp back to this handler unwinds straight past
+                                         apply()/apply_arr()'s own "restore saved_sp after
+                                         vm_run() returns" cleanup — that cleanup only runs on a
+                                         normal return, never on a longjmp past it. The corrupted
+                                         vm->sp then makes the *next* VM opcode read garbage
+                                         stack slots as if they were arguments, surfacing as
+                                         nonsensical "too few arguments" or type errors on
+                                         whatever unrelated code runs after the handler catches. */
 } ExnHandler;
 
 /* Thread-local current exception handler chain.
@@ -163,12 +181,27 @@ void  gc_inhibit_restore(int saved);
 }
 #endif
 
+/* VM operand-stack/frame/upvalue state — saved/restored across an ExnHandler
+ * unwind the same way OP_PUSH_HANDLER already does for purely in-VM catches
+ * (VmHandlerInfo in vm.h). Defined in vm.c; opaque void* types here so
+ * SCM_PROTECT can be used from translation units that don't include vm.h.
+ * Without this, a protected body that calls into VM-compiled bytecode which
+ * then raises leaves vm->sp/frame_count pointing wherever the raise happened
+ * deep inside vm_run() — the longjmp back to the handler unwinds straight
+ * past apply()/apply_arr()'s own "restore saved sp after vm_run() returns"
+ * cleanup, which only runs on a normal return, never on a longjmp past it. */
+void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues);
+void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
+
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
 #define SCM_PROTECT(h, body, on_exn) do {              \
     (h).prev           = current_handler;               \
     (h).saved_shadow   = gc_shadow_save();              \
     (h).saved_inhibit  = gc_inhibit_save();             \
     (h).saved_jit_depth = jit_depth_save();             \
+    vm_exn_state_save(&(h).saved_vm_frame_count,        \
+                       &(h).saved_vm_sp,                \
+                       &(h).saved_vm_open_upvalues);    \
     current_handler    = &(h);                          \
     if (setjmp((h).jmp) == 0) {                        \
         body;                                           \
@@ -178,6 +211,9 @@ void  gc_inhibit_restore(int saved);
         gc_shadow_restore((h).saved_shadow);            \
         gc_inhibit_restore((h).saved_inhibit);          \
         jit_depth_restore((h).saved_jit_depth);         \
+        vm_exn_state_restore((h).saved_vm_frame_count,  \
+                              (h).saved_vm_sp,           \
+                              (h).saved_vm_open_upvalues); \
         on_exn;                                         \
     }                                                   \
 } while (0)

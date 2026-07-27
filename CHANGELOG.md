@@ -1,5 +1,23 @@
 # Changelog
 
+### 1.11.1 — Fix VM stack corruption across guard/longjmp; add SRFI-64 and SRFI-215 surfage libraries
+
+**Exception handling — `guard`/`with-exception-handler`/`handler-bind` could corrupt the VM's operand stack**
+
+`ExnHandler` (the setjmp/longjmp-based frame installed by the `SCM_PROTECT` macro and by `guard`'s hand-rolled equivalent in `eval.c`) saved and restored `g_jit_call_depth`, the GC shadow stack, and the GC inhibit counter across a catch, but not the VM's operand stack pointer, frame count, or open-upvalues list. `apply()`/`apply_arr()`'s bytecode-closure call path (`src/runtime.c`) only restores `vm->sp` on a *normal* return from `vm_run()`; a longjmp past that point — which is exactly what happens when a tree-walker-evaluated closure (anything defined via `load`, or inside a `define-library` body, both of which are always tree-walked, never compiled) uses `guard` to catch an exception raised from a nested call into VM-compiled bytecode — skips that restore entirely. The corrupted `vm->sp` then made the *next* VM opcode read garbage stack slots as if they were arguments, surfacing as nonsensical "too few arguments" or type errors in unrelated code running after the catch.
+
+Found while implementing `(surfage s64 testing)` below: `test-error`/`test-assert` need exactly this pattern (catching an exception from an arbitrary, usually VM-compiled, test expression from inside a tree-walked library function), so the bug made the module unusable for its core purpose until fixed. Fixed by adding `saved_vm_frame_count`/`saved_vm_sp`/`saved_vm_open_upvalues` to `ExnHandler` and two new functions, `vm_exn_state_save`/`vm_exn_state_restore` (declared with opaque `void *` parameters in `eval.h` so translation units without `vm.h` can still use `SCM_PROTECT`; defined in `vm.c`), that mirror the VM's own already-correct `VmHandlerInfo` save/restore used by the native `OP_PUSH_HANDLER`/`OP_POP_HANDLER` opcodes. `SCM_PROTECT` and `guard`'s hand-rolled setjmp block (which was *also* separately missing the GC shadow-stack/inhibit-counter save/restore that `SCM_PROTECT` already had) both call these now. All 43 ctest suites pass; independent review per this project's mandate is in progress as of this writing.
+
+**`(surfage s64 testing)` — SRFI-64 test-suite API**
+
+New pure-Scheme library following the existing `(surfage sN name)` convention (see `s1 lists`, `s27 random-bits`): `test-begin`/`test-end`/`test-group`/`test-group-with-cleanup`, `test-assert`/`test-equal`/`test-eqv`/`test-eq`/`test-approximate`/`test-error`, `test-skip`/`test-expect-fail` with `test-match-name`/`-nth`/`-any`/`-all` specifiers, full test-runner objects (`test-runner-null`/`-simple`/`-create`/`-current`/`-factory`, all `test-runner-on-*` callbacks, `test-result-ref`/`-set!`/`-remove`/`-clear`/`-alist`), `test-apply`, `test-with-runner`, `test-read-eval-string`. The default ("simple") runner's final summary prints `N passed, M failed[, ...]` and exits nonzero on failure, matching the `(if (> fail 0) (exit 1) (exit 0))` convention every file in `tests/*.scm` already hand-rolls — so migrating an existing test file to it is a drop-in replacement for ctest purposes, not a new convention. Motivated by 37 of the 53 files in `tests/*.scm` each independently defining their own copy-pasted pass/fail-counting `check` helper.
+
+While implementing this, discovered that curry's `syntax-rules` macros are not hygienic for free identifiers when a macro defined inside a `define-library` body is used from outside that library: a macro template resolves helper-procedure names in the *use-site* environment, not the definition-site environment. Worked around by exporting the handful of otherwise-private helpers (`%run-assert`, `%run-compare`, `%run-approx`, `%run-error`, `%run-error-2`, `%run-group`) that public macro templates expand to directly — documented inline as internal, not part of the SRFI-64 API. This is a real limitation of curry's macro system worth fixing properly at some point; not attempted here.
+
+**`(surfage s215 log)` — SRFI-215 central log exchange**
+
+New pure-Scheme library: `send-log`, severity constants (`EMERGENCY` through `DEBUG`), `current-log-fields` and `current-log-callback` parameters. The default callback buffers up to 100 messages and replays them once the application installs its own callback, so log calls made before logging is configured aren't lost. Fills a real gap — curry had no logging facility at all before this.
+
 ### 1.11.0 — Add `(curry oop)`: Slim CLOS Layer 1 — classes, generics, multiple dispatch
 
 New pure-Scheme library, `lib/curry/modules/curry/oop.scm`, no C changes: Layer 1 of the object-system design in `docs/thoughts/oop.md`.
