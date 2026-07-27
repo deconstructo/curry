@@ -1398,12 +1398,23 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     while (vis_pair(cl) && ci < 64) {
         val_t clause = vcar(cl);
         val_t test   = vcar(clause);
-        val_t expr   = vis_pair(vcdr(clause)) ? vcar(vcdr(clause)) : V_VOID;
-        val_t wrapped = scm_cons(gk, scm_cons(expr, V_NIL));
-        if (test == S_ELSE2)
-            clause_arr[ci++] = scm_cons(S_ELSE2, scm_cons(wrapped, V_NIL));
-        else
-            clause_arr[ci++] = scm_cons(test, scm_cons(wrapped, V_NIL));
+        val_t cbody  = vcdr(clause);
+        val_t rest;
+        if (!vis_pair(cbody)) {
+            /* Bodyless clause (test) — return test's own value without
+             * re-evaluating it, via cond's => arrow form (proc receives
+             * the test's value as its one argument). */
+            rest = scm_cons(S_ARROW, scm_cons(gk, V_NIL));
+        } else {
+            /* A clause body is (expr ...), i.e. an implicit begin — wrap
+             * multi-expression bodies in an explicit (begin ...) so every
+             * expression actually runs, not just the first. */
+            val_t body_expr = vis_pair(vcdr(cbody))
+                ? scm_cons(S_BEGIN, cbody)
+                : vcar(cbody);
+            rest = scm_cons(scm_cons(gk, scm_cons(body_expr, V_NIL)), V_NIL);
+        }
+        clause_arr[ci++] = scm_cons(test == S_ELSE2 ? S_ELSE2 : test, rest);
         cl = vcdr(cl);
     }
     /* Append default (else (raise var)) if no else clause present */
