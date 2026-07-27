@@ -113,6 +113,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | Module | Import | Description | Extra deps |
 |--------|--------|-------------|------------|
 | [json](docs/reference/module-json.md) | `(curry json)` | JSON parse / stringify | — |
+| [yaml](docs/reference/module-yaml.md) | `(curry yaml)` | YAML parse / stringify: anchors/aliases, merge keys, multi-doc streams *(pure Scheme, no build step)* | — |
 | [sqlite](docs/reference/module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
 | [network](docs/reference/module-network.md) | `(curry network)` | TCP / UDP sockets | — |
 | [crypto](docs/reference/module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
@@ -155,6 +156,7 @@ Portable SRFI libraries under the `(surfage sN name)` naming convention — comp
 | [s27 random-bits](docs/reference/module-surfage.md) | `(surfage s27 random-bits)` | SRFI-27: random sources, `random-integer`, `random-real` |
 | [s215 log](docs/reference/module-surfage.md) | `(surfage s215 log)` | SRFI-215: central log exchange, `send-log`, `current-log-callback` |
 | [s170 posix](docs/reference/module-surfage.md) | `(surfage s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
+| [s112 environment-inquiry](docs/reference/module-surfage.md) | `(surfage s112 environment-inquiry)` | SRFI-112: `implementation-name`/`-version`, `os-name`/`-version`, `cpu-architecture`, `machine-name` *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
 
 ---
 

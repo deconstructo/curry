@@ -1,11 +1,13 @@
 /* posix.c — POSIX filesystem/process bindings for Curry Scheme (SRFI-170
- * subset). Pure libc, no extra library dependency, macOS/Linux portable.
+ * subset), plus SRFI-112 environment inquiry. Pure libc, no extra library
+ * dependency, macOS/Linux portable.
  *
  * Provides file-info (stat/lstat) + type predicates, directory creation/
  * listing/removal, symlinks/hardlinks/rename, file mode/owner/times,
  * process state (cwd, umask, pid, uid/gid, niceness), user/group database
- * lookups, monotonic/wall-clock time, environment-variable mutation, and
- * a terminal? predicate.
+ * lookups, monotonic/wall-clock time, environment-variable mutation, a
+ * terminal? predicate, and (SRFI-112) implementation/OS/machine identity
+ * queries via uname(2)/gethostname(2).
  *
  * Deliberately out of scope for this first pass (see docs/reference/
  * module-posix.md): posix-error? type introspection (would need every
@@ -19,6 +21,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #include <curry.h>
+#include "version.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +32,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/resource.h>
+#include <sys/utsname.h>
 #include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
@@ -549,6 +553,51 @@ static curry_val fn_terminal_p(int ac, curry_val *av, void *ud) {
     return curry_make_bool(isatty(fd) != 0);
 }
 
+/* ---- SRFI-112: environment inquiry ---------------------------------------- */
+
+static curry_val fn_implementation_name(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return curry_make_string("curry");
+}
+
+static curry_val fn_implementation_version(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return curry_make_string(CURRY_VERSION);
+}
+
+/* uname(2) is called once per query rather than cached: cheap syscall, and
+ * caching would go stale across a container/VM migration or a kernel that
+ * reports a changed hostname mid-process — not worth the complexity for
+ * something this infrequently called. */
+static curry_val fn_cpu_architecture(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    struct utsname u;
+    if (uname(&u) < 0) return curry_make_bool(false);
+    return curry_make_string(u.machine);
+}
+
+static curry_val fn_os_name(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    struct utsname u;
+    if (uname(&u) < 0) return curry_make_bool(false);
+    return curry_make_string(u.sysname);
+}
+
+static curry_val fn_os_version(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    struct utsname u;
+    if (uname(&u) < 0) return curry_make_bool(false);
+    return curry_make_string(u.release);
+}
+
+static curry_val fn_machine_name(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    char buf[256];
+    if (gethostname(buf, sizeof(buf)) < 0) return curry_make_bool(false);
+    buf[sizeof(buf) - 1] = '\0';
+    return curry_make_string(buf);
+}
+
 /* ---- registration ----------------------------------------------------------- */
 
 void curry_module_init(CurryVM *vm) {
@@ -627,4 +676,11 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "delete-environment-variable!", fn_delete_environment_variable, 1, 1, NULL);
 
     curry_define_fn(vm, "terminal?",             fn_terminal_p,          0, 1, NULL);
+
+    curry_define_fn(vm, "implementation-name",    fn_implementation_name,    0, 0, NULL);
+    curry_define_fn(vm, "implementation-version", fn_implementation_version, 0, 0, NULL);
+    curry_define_fn(vm, "cpu-architecture",       fn_cpu_architecture,       0, 0, NULL);
+    curry_define_fn(vm, "machine-name",           fn_machine_name,           0, 0, NULL);
+    curry_define_fn(vm, "os-name",                fn_os_name,                0, 0, NULL);
+    curry_define_fn(vm, "os-version",              fn_os_version,             0, 0, NULL);
 }

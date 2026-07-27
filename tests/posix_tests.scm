@@ -162,6 +162,19 @@
 
 (check "terminal? returns a boolean for fd 0" (boolean? (terminal? 0)) #t)
 
+;;; Environment inquiry (SRFI-112)
+
+(check "implementation-name" (implementation-name) "curry")
+(check "implementation-version is a string" (string? (implementation-version)) #t)
+(check "cpu-architecture is a string or #f"
+       (or (string? (cpu-architecture)) (eq? (cpu-architecture) #f)) #t)
+(check "os-name is a string or #f"
+       (or (string? (os-name)) (eq? (os-name) #f)) #t)
+(check "os-version is a string or #f"
+       (or (string? (os-version)) (eq? (os-version) #f)) #t)
+(check "machine-name is a string or #f"
+       (or (string? (machine-name)) (eq? (machine-name) #f)) #t)
+
 ;;; Summary
 
 (newline)

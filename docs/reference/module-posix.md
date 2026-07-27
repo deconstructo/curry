@@ -2,9 +2,9 @@
 
 *unreleased*
 
-POSIX filesystem and process bindings — a pragmatic subset of [SRFI-170](https://srfi.schemers.org/srfi-170/). Pure system libc (`sys/stat.h`, `dirent.h`, `unistd.h`, `pwd.h`, `grp.h`, `time.h`); no external library dependency, macOS/Linux portable. Built by default (`-DBUILD_MODULE_POSIX=ON`).
+POSIX filesystem and process bindings — a pragmatic subset of [SRFI-170](https://srfi.schemers.org/srfi-170/) — plus [SRFI-112](https://srfi.schemers.org/srfi-112/) environment inquiry. Pure system libc (`sys/stat.h`, `dirent.h`, `unistd.h`, `pwd.h`, `grp.h`, `time.h`, `sys/utsname.h`); no external library dependency, macOS/Linux portable. Built by default (`-DBUILD_MODULE_POSIX=ON`).
 
-A portable re-export under the SRFI's own naming convention is available as `(surfage s170 posix)` — see [`module-surfage.md`](module-surfage.md).
+Portable re-exports under each SRFI's own naming convention are available as `(surfage s170 posix)` and `(surfage s112 environment-inquiry)` — see [`module-surfage.md`](module-surfage.md).
 
 ## Import
 
@@ -14,7 +14,7 @@ A portable re-export under the SRFI's own naming convention is available as `(su
 
 ## Scope
 
-Implemented: file info (`stat`/`lstat`) and type predicates, directory create/list/remove, symlinks/hardlinks/rename, file mode/owner/times/truncation, process state (cwd, umask, pid, niceness, uid/gid), user/group database lookups, wall-clock and monotonic time, environment-variable mutation, and a `terminal?` predicate.
+Implemented: file info (`stat`/`lstat`) and type predicates, directory create/list/remove, symlinks/hardlinks/rename, file mode/owner/times/truncation, process state (cwd, umask, pid, niceness, uid/gid), user/group database lookups, wall-clock and monotonic time, environment-variable mutation, a `terminal?` predicate, and (SRFI-112) implementation/OS/machine identity queries.
 
 Deliberately **not** implemented in this first pass:
 
@@ -153,4 +153,21 @@ Uses the reentrant `getpwuid_r`/`getpwnam_r` with a 4096-byte buffer; a patholog
 ```scheme
 (terminal? 1)                    ; is stdout a tty?
 (terminal? (current-output-port))
+```
+
+## Environment inquiry (SRFI-112)
+
+Six zero-argument procedures, each returning a string or `#f` if the implementation can't provide it. A portable re-export under the SRFI's own naming convention is available as `(surfage s112 environment-inquiry)`.
+
+- `(implementation-name)` → `"curry"`.
+- `(implementation-version)` → curry's own version string (e.g. `"1.11.1"`).
+- `(cpu-architecture)` → `uname(2)`'s `machine` field (e.g. `"arm64"`, `"x86_64"`).
+- `(os-name)` → `uname(2)`'s `sysname` field (e.g. `"Darwin"`, `"Linux"`).
+- `(os-version)` → `uname(2)`'s `release` field.
+- `(machine-name)` → `gethostname(2)`.
+
+```scheme
+(import (curry posix))
+(list (implementation-name) (implementation-version) (os-name))
+; => ("curry" "1.11.1" "Darwin")
 ```
