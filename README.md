@@ -143,6 +143,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [fits](docs/reference/module-fits.md) | `(curry fits)` | FITS scientific image read/write *(pure Scheme, no build step)* | — |
 | [netcdf](docs/reference/module-netcdf.md) | `(curry netcdf)` | NetCDF classic format reader *(pure Scheme, no build step)* | — |
 | [hdf5](docs/reference/module-hdf5.md) | `(curry hdf5)` | HDF5 dataset/attribute read/write via FFI *(pure Scheme + FFI, no build step)* | `libhdf5` installed at runtime (`-DBUILD_FFI=ON`) |
+| [posix](docs/reference/module-posix.md) | `(curry posix)` | Filesystem/process POSIX bindings (SRFI-170 subset): `file-info`, directories, symlinks, uid/gid, `umask`, users/groups | — |
 
 ### SRFI compatibility (`surfage`)
 
@@ -153,6 +154,7 @@ Portable SRFI libraries under the `(surfage sN name)` naming convention — comp
 | [s1 lists](docs/reference/module-surfage.md) | `(surfage s1 lists)` | SRFI-1: `iota`, `any`, `every`, `fold`, `take/drop`, `partition`, … |
 | [s27 random-bits](docs/reference/module-surfage.md) | `(surfage s27 random-bits)` | SRFI-27: random sources, `random-integer`, `random-real` |
 | [s215 log](docs/reference/module-surfage.md) | `(surfage s215 log)` | SRFI-215: central log exchange, `send-log`, `current-log-callback` |
+| [s170 posix](docs/reference/module-surfage.md) | `(surfage s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
 
 ---
 

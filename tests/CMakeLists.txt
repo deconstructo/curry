@@ -114,6 +114,12 @@ if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+if(BUILD_MODULE_POSIX AND TARGET curry_posix)
+    add_test(NAME posix COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/posix_tests.scm)
+    set_tests_properties(posix PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(BUILD_MODULE_RPI AND TARGET curry_rpi)
     # rpi_tests.scm: hardware-free simulation tests + API surface check (Linux)
     add_test(NAME rpi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rpi_tests.scm)

@@ -300,6 +300,7 @@ option(BUILD_MODULE_SYNC      "Build mutex/condvar/semaphore module" ON)
 option(BUILD_MODULE_MCP       "Build MCP server module"              ON)
 option(BUILD_MODULE_LSP       "Build Language Server Protocol module" ON)
 option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
+option(BUILD_MODULE_POSIX     "Build POSIX filesystem/process module (SRFI-170 subset)" ON)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -577,6 +578,11 @@ endif()
 if(BUILD_MODULE_REGEX)
   curry_c_module(regex)
   message(STATUS "Building regex module (system POSIX regex.h)")
+endif()
+
+if(BUILD_MODULE_POSIX)
+  curry_c_module(posix)
+  message(STATUS "Building posix module (SRFI-170 subset, system libc)")
 endif()
 
 if(BUILD_MODULE_SYNC)

@@ -11,6 +11,7 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfag
 | `(surfage s1 lists)` | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
 | `(surfage s27 random-bits)` | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
 | `(surfage s215 log)` | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
+| `(surfage s170 posix)` | [SRFI-170](https://srfi.schemers.org/srfi-170/) | POSIX API (subset) — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 
 ---
 
@@ -223,6 +224,14 @@ A procedure of one argument (the association-list message), called by `send-log`
 Before the application installs its own callback, messages are held in a bounded buffer (most-recent 100 kept). The first time `current-log-callback` is set to a non-default procedure, the buffer replays into it in order and is cleared — so log calls made during startup, before logging is configured, aren't lost.
 
 ---
+
+## `(surfage s170 posix)` — SRFI-170 POSIX API (subset)
+
+```scheme
+(import (surfage s170 posix))
+```
+
+Thin re-export of `(curry posix)` under the portable SRFI-170 name — see [`docs/reference/module-posix.md`](module-posix.md) for the full procedure list and the C module's scope (what's implemented vs. deliberately left out for a first pass: `posix-error?` introspection, `open-file`/`fd->port`, `create-fifo`, temp-file helpers, `file-space`, and the directory-generator API). Requires curry built with `-DBUILD_MODULE_POSIX=ON` (the default) — unlike the other `surfage` libraries, this one can't be pure Scheme, since `stat`, `opendir`/`readdir`, `getuid`, `chmod`, `symlink`, `umask`, and `getpid` have no Scheme-level equivalent to build on.
 
 ## Portability note
 
