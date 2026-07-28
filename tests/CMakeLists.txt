@@ -121,6 +121,12 @@ if(BUILD_MODULE_POSIX AND TARGET curry_posix)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+if(BUILD_MODULE_CODESETS AND TARGET curry_codesets)
+    add_test(NAME codesets COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/codesets_tests.scm)
+    set_tests_properties(codesets PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(BUILD_MODULE_RPI AND TARGET curry_rpi)
     # rpi_tests.scm: hardware-free simulation tests + API surface check (Linux)
     add_test(NAME rpi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rpi_tests.scm)

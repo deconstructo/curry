@@ -13,6 +13,7 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfag
 | `(surfage s215 log)` | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
 | `(surfage s170 posix)` | [SRFI-170](https://srfi.schemers.org/srfi-170/) | POSIX API (subset) — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | `(surfage s112 environment-inquiry)` | [SRFI-112](https://srfi.schemers.org/srfi-112/) | Implementation/OS/machine identity queries — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
+| `(surfage s238 codesets)` | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |
 
 ---
 
@@ -244,6 +245,16 @@ Thin re-export of `(curry posix)` under the portable SRFI-170 name — see [`doc
 
 Thin re-export of `(curry posix)`'s six SRFI-112 procedures (`implementation-name`, `implementation-version`, `cpu-architecture`, `machine-name`, `os-name`, `os-version`) — see [`docs/reference/module-posix.md`](module-posix.md#environment-inquiry-srfi-112). Also requires `-DBUILD_MODULE_POSIX=ON` (the default), since `uname(2)`/`gethostname(2)` are syscalls with no Scheme-level equivalent to build on.
 
+---
+
+## `(surfage s238 codesets)` — SRFI-238 codesets
+
+```scheme
+(import (surfage s238 codesets))
+```
+
+Thin re-export of `(curry codesets)`'s five procedures (`codeset?`, `codeset-symbols`, `codeset-symbol`, `codeset-number`, `codeset-message`) covering the `errno`, `signal`, and `http-status` codesets — see [`docs/reference/module-codesets.md`](module-codesets.md). Requires `-DBUILD_MODULE_CODESETS=ON` (the default) — `errno`/`signal` symbol names and values come from this platform's own `<errno.h>`/`<signal.h>` macros, with no Scheme-level equivalent to build on.
+
 ## Portability note
 
-Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, and `(surfage s112 environment-inquiry)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.
+Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, `(surfage s112 environment-inquiry)`, and `(surfage s238 codesets)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.

@@ -145,6 +145,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [netcdf](docs/reference/module-netcdf.md) | `(curry netcdf)` | NetCDF classic format reader *(pure Scheme, no build step)* | — |
 | [hdf5](docs/reference/module-hdf5.md) | `(curry hdf5)` | HDF5 dataset/attribute read/write via FFI *(pure Scheme + FFI, no build step)* | `libhdf5` installed at runtime (`-DBUILD_FFI=ON`) |
 | [posix](docs/reference/module-posix.md) | `(curry posix)` | Filesystem/process POSIX bindings (SRFI-170 subset): `file-info`, directories, symlinks, uid/gid, `umask`, users/groups | — |
+| [codesets](docs/reference/module-codesets.md) | `(curry codesets)` | SRFI-238 codesets: `errno`/`signal`/`http-status` symbol ⟷ number ⟷ message lookup | — |
 
 ### SRFI compatibility (`surfage`)
 
@@ -157,6 +158,7 @@ Portable SRFI libraries under the `(surfage sN name)` naming convention — comp
 | [s215 log](docs/reference/module-surfage.md) | `(surfage s215 log)` | SRFI-215: central log exchange, `send-log`, `current-log-callback` |
 | [s170 posix](docs/reference/module-surfage.md) | `(surfage s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
 | [s112 environment-inquiry](docs/reference/module-surfage.md) | `(surfage s112 environment-inquiry)` | SRFI-112: `implementation-name`/`-version`, `os-name`/`-version`, `cpu-architecture`, `machine-name` *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
+| [s238 codesets](docs/reference/module-surfage.md) | `(surfage s238 codesets)` | SRFI-238: `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup *(requires `-DBUILD_MODULE_CODESETS=ON`, the default)* |
 
 ---
 
