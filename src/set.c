@@ -4,6 +4,7 @@
 #include "numeric.h"
 #include "symbolic.h"
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 
 /* ---- Equality predicates ---- */
@@ -75,6 +76,38 @@ static uint32_t hash_u64(uint64_t x) {
     return (uint32_t)(x ^ (x >> 31));
 }
 
+static uint32_t hash_combine(uint32_t a, uint32_t b) {
+    return hash_u64(((uint64_t)a << 32) | (uint64_t)b);
+}
+
+static uint32_t hash_bytes(const void *data, size_t len) {
+    /* FNV-1a, same algorithm as the string case below. */
+    uint32_t h = 2166136261u;
+    const uint8_t *p = (const uint8_t *)data;
+    for (size_t i = 0; i < len; i++) { h ^= p[i]; h *= 16777619u; }
+    return h;
+}
+
+static uint32_t hash_mpz(mpz_srcptr z) {
+    /* Hash the digit string rather than the internal limb array directly —
+     * slower, but reuses an already-correct, already-used-elsewhere GMP
+     * entry point (see e.g. port.c's number printing) instead of relying
+     * on GMP's internal limb layout, and mpz values are not a hot-path
+     * hash target. */
+    char *s = mpz_get_str(NULL, 16, z);
+    uint32_t h = hash_bytes(s, strlen(s));
+    free(s);
+    return h;
+}
+
+/* Structural hash for any value, used under SET_CMP_EQUAL (and, for the
+ * numeric-tower cases, SET_CMP_EQV — see the dispatch below) so that
+ * scm_equal(a, b) implies val_hash(a) == val_hash(b), matching what
+ * scm_equal/scm_eqv actually compare structurally rather than by
+ * identity. Recurses through pairs/vectors, so a deeply nested or very
+ * large structure costs proportionally more to hash than to compare for
+ * inequality at the first differing element — an accepted tradeoff, same
+ * as every other Scheme's equal-hash implementation. */
 uint32_t val_hash(val_t v, int cmp_type) {
     if (cmp_type == SET_CMP_EQ || vis_imm(v) || vis_fixnum(v) || vis_char(v))
         return hash_u64((uint64_t)v);
@@ -83,15 +116,59 @@ uint32_t val_hash(val_t v, int cmp_type) {
         return hash_u64(bits);
     }
     if (vis_string(v)) {
-        /* FNV-1a over bytes */
         String *s = as_str(v);
-        uint32_t h = 2166136261u;
-        const char *sd = str_data(s);
-        for (uint32_t i = 0; i < s->len; i++) { h ^= (uint8_t)sd[i]; h *= 16777619u; }
-        return h;
+        return hash_bytes(str_data(s), s->len);
     }
     if (vis_symbol(v)) return as_sym(v)->hash;
-    if (vis_pair(v))   return hash_u64((uint64_t)v); /* structural hash too expensive */
+    /* scm_eqv/scm_equal both compare bignums/rationals/complex/quaternions
+     * by value regardless of cmp_type (scm_equal delegates to scm_eqv for
+     * these), so they must hash by value under SET_CMP_EQV too, not just
+     * SET_CMP_EQUAL. */
+    if (vis_bignum(v))   return hash_mpz(as_big(v)->z);
+    if (vis_rational(v)) return hash_combine(hash_mpz(mpq_numref(as_rat(v)->q)),
+                                              hash_mpz(mpq_denref(as_rat(v)->q)));
+    if (vis_complex(v))  return hash_combine(val_hash(as_cpx(v)->real, cmp_type),
+                                              val_hash(as_cpx(v)->imag, cmp_type));
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        uint64_t bits[4];
+        memcpy(&bits[0], &q->a, 8); memcpy(&bits[1], &q->b, 8);
+        memcpy(&bits[2], &q->c, 8); memcpy(&bits[3], &q->d, 8);
+        uint32_t h = hash_u64(bits[0]);
+        for (int i = 1; i < 4; i++) h = hash_combine(h, hash_u64(bits[i]));
+        return h;
+    }
+    if (cmp_type != SET_CMP_EQUAL) return hash_u64((uint64_t)v);
+    if (vis_pair(v))
+        return hash_combine(val_hash(vcar(v), cmp_type), val_hash(vcdr(v), cmp_type));
+    if (vis_vector(v)) {
+        Vector *vec = as_vec(v);
+        uint32_t h = 2166136261u;
+        for (uint32_t i = 0; i < vec->len; i++) h = hash_combine(h, val_hash(vec->data[i], cmp_type));
+        return h;
+    }
+    if (vis_bytes(v)) {
+        Bytevector *bv = as_bytes(v);
+        return hash_bytes(bv->data, bv->len);
+    }
+    if (vis_tuple(v)) {
+        Tuple *t = as_tuple(v);
+        uint32_t h = hash_u64(t->hdr.type);
+        for (uint32_t i = 0; i < t->len; i++) h = hash_combine(h, val_hash(t->data[i], cmp_type));
+        return h;
+    }
+    if (vis_f64vec(v)) {
+        F64Vec *fv = as_f64v(v);
+        return hash_bytes(fv->data, fv->len * sizeof(double));
+    }
+    /* Symbolic (CAS) expression trees: scm_equal delegates to sx_equal, a
+     * much larger subsystem with its own node-equality rules (canonical
+     * ordering, etc.) — not given a matching structural hash here. Falls
+     * back to identity hashing, a known, narrow gap: two sx_equal-but-
+     * distinct-allocation symbolic expressions used as SET_CMP_EQUAL keys
+     * may not find each other. Not hit by any use of val_hash elsewhere in
+     * the codebase today (sets/hash-tables of raw symbolic expressions
+     * aren't a normal usage pattern), flagged rather than silently left. */
     return hash_u64((uint64_t)v);
 }
 
