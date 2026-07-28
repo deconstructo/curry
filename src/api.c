@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <alloca.h>
+#include <math.h>
 
 /* ---- Value constructors ---- */
 
@@ -69,6 +70,31 @@ bool curry_is_vector(curry_val v)     { return vis_vector(v); }
 bool curry_is_bytevector(curry_val v) { return vis_bytes(v); }
 bool curry_is_true(curry_val v)      { return vis_true(v); }
 bool curry_is_error(curry_val v)     { return vis_error(v); }
+/* True for any numeric-tower value — fixnum/flonum/bignum/rational/
+ * complex/etc, not just the fixnum/flonum cases curry_is_fixnum/
+ * curry_is_float already cover — so a module can detect "this is some
+ * kind of number I should convert with curry_number_to_double" without
+ * needing its own type predicates for every numeric-tower type. */
+bool curry_is_number(curry_val v)    { return vis_number(v); }
+/* Convert any numeric-tower value to its closest double, e.g. a bignum
+ * or exact rational a module has no way to introspect through the rest
+ * of this API. Lossy where the exact value doesn't fit a double exactly
+ * (same tradeoff as Scheme's own exact->inexact). Returns NAN if v isn't
+ * a number, rather than raising: every other accessor in this header
+ * (curry_fixnum, curry_float, curry_car/curry_cdr, etc.) assumes the
+ * caller already checked the type and is unsafe on a mismatch, except
+ * curry_error itself, which is self-documenting (its name says so, and
+ * it's declared noreturn). A second raising function that looks like an
+ * ordinary accessor would be a surprise here — worse, raising means a
+ * longjmp through Curry's exception machinery, which is fine from
+ * Scheme-evaluation context but takes down the whole process if called
+ * from embedder C with no handler installed (scm_raise_val falls through
+ * to abort()). Check curry_is_number(v) first if you need to distinguish
+ * "wasn't a number" from a legitimate NaN input. */
+double curry_number_to_double(curry_val v) {
+    if (!vis_number(v)) return NAN;
+    return num_to_double(v);
+}
 const char *curry_error_message(curry_val v) {
     if (!vis_error(v)) return NULL;
     val_t msg = as_err(v)->message;

@@ -80,6 +80,19 @@ bool       curry_is_bytevector(curry_val v);
 bool       curry_is_true(curry_val v);
 bool       curry_is_error(curry_val v);
 const char *curry_error_message(curry_val v); /* NULL if message is not a string */
+/* True for any numeric-tower value (fixnum/flonum/bignum/rational/
+ * complex/etc), not just the fixnum/float cases curry_is_fixnum/
+ * curry_is_float cover. */
+bool       curry_is_number(curry_val v);
+/* Convert any numeric-tower value to its closest double — for bignums/
+ * rationals/etc a module has no other way to introspect through this
+ * API. Lossy where the exact value doesn't fit a double exactly (same
+ * tradeoff as Scheme's own exact->inexact). Returns NAN (not a raised
+ * error) if v isn't a number — matching every other accessor in this
+ * header, which assume the caller already checked the type. Check
+ * curry_is_number(v) first if you need to distinguish "wasn't a number"
+ * from a legitimate NaN input. */
+double     curry_number_to_double(curry_val v);
 
 intptr_t   curry_fixnum(curry_val v);
 double     curry_float(curry_val v);

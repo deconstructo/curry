@@ -203,6 +203,14 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_bool(v)) { sb_str(out,len,cap,curry_bool(v)?"true":"false"); return; }
     if (curry_is_fixnum(v)) { snprintf(buf,sizeof(buf),"%ld",(long)curry_fixnum(v)); sb_str(out,len,cap,buf); return; }
     if (curry_is_float(v)) { snprintf(buf,sizeof(buf),"%g",curry_float(v)); sb_str(out,len,cap,buf); return; }
+    /* Any other numeric-tower value (bignum, exact rational, complex —
+     * JSON's own number type is just IEEE double, so there's nowhere
+     * more precise to put these): convert rather than silently falling
+     * through to the generic "unrecognized value" null case below, which
+     * would make a real number indistinguishable from a genuinely absent
+     * field. Must come after the fixnum/float checks above, which handle
+     * those two cases exactly rather than through this lossy path. */
+    if (curry_is_number(v)) { snprintf(buf,sizeof(buf),"%g",curry_number_to_double(v)); sb_str(out,len,cap,buf); return; }
     if (curry_is_string(v)) { write_json_string(curry_string(v), out, len, cap); return; }
     /* A symbol used as an alist key (looks_like_alist now permits this,
      * matching how such an alist would actually be built) must still

@@ -146,6 +146,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [hdf5](docs/reference/module-hdf5.md) | `(curry hdf5)` | HDF5 dataset/attribute read/write via FFI *(pure Scheme + FFI, no build step)* | `libhdf5` installed at runtime (`-DBUILD_FFI=ON`) |
 | [posix](docs/reference/module-posix.md) | `(curry posix)` | Filesystem/process POSIX bindings (SRFI-170 subset): `file-info`, directories, symlinks, uid/gid, `umask`, users/groups | — |
 | [codesets](docs/reference/module-codesets.md) | `(curry codesets)` | SRFI-238 codesets: `errno`/`signal`/`http-status` symbol ⟷ number ⟷ message lookup | — |
+| [aviation-weather](docs/reference/module-aviation-weather.md) | `(curry aviation-weather)` | METAR / TAF / ATIS aviation weather report parsing *(pure Scheme, no build step)* | — |
 
 ### SRFI compatibility (`surfage`)
 

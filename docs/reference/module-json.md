@@ -41,6 +41,7 @@ Serialise a Scheme value to a JSON string.
 | `#f` | `null` |
 | `#t` | `true` |
 | fixnum / flonum | number |
+| bignum / exact rational / other numeric-tower value | number (converted to its nearest double — JSON's own number type is IEEE double, so this is the same lossy tradeoff as `exact->inexact`; a bignum too large to fit becomes `+inf.0`/`-inf.0`-range double behavior; for a complex value, only the real part is used — the imaginary part is silently dropped, matching how the rest of curry's numeric tower already treats a complex-to-real conversion elsewhere) |
 | string | string (with escaping) |
 | list of pairs `((k . v) ...)` | object |
 | list | array |
