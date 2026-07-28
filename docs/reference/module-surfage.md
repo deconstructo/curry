@@ -14,6 +14,9 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfag
 | `(surfage s170 posix)` | [SRFI-170](https://srfi.schemers.org/srfi-170/) | POSIX API (subset) — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | `(surfage s112 environment-inquiry)` | [SRFI-112](https://srfi.schemers.org/srfi-112/) | Implementation/OS/machine identity queries — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | `(surfage s238 codesets)` | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |
+| `(surfage s69 hash-tables)` | [SRFI-69](https://srfi.schemers.org/srfi-69/) | Basic hash tables — full API, wrapping curry's built-in hash table with corrected `hash-table-ref` semantics |
+| `(surfage s90 hash-tables)` | [SRFI-90](https://srfi.schemers.org/srfi-90/srfi-90.html) | `make-table`, a keyword-argument hash-table constructor layered on `(surfage s69 hash-tables)` |
+| `(surfage s174 posix-timespecs)` | [SRFI-174](https://srfi.schemers.org/srfi-174/) | Immutable `(seconds nanoseconds)` time-instant type |
 
 ---
 
@@ -255,6 +258,27 @@ Thin re-export of `(curry posix)`'s six SRFI-112 procedures (`implementation-nam
 
 Thin re-export of `(curry codesets)`'s five procedures (`codeset?`, `codeset-symbols`, `codeset-symbol`, `codeset-number`, `codeset-message`) covering the `errno`, `signal`, and `http-status` codesets — see [`docs/reference/module-codesets.md`](module-codesets.md). Requires `-DBUILD_MODULE_CODESETS=ON` (the default) — `errno`/`signal` symbol names and values come from this platform's own `<errno.h>`/`<signal.h>` macros, with no Scheme-level equivalent to build on.
 
+---
+
+## `(surfage s69 hash-tables)` and `(surfage s90 hash-tables)` — SRFI-69 / SRFI-90
+
+```scheme
+(import (surfage s69 hash-tables))
+(import (surfage s90 hash-tables))   ; layered on s69; import both together
+```
+
+Pure Scheme, no C — see [`docs/reference/module-hash-tables-srfi.md`](module-hash-tables-srfi.md) for the full API. Unlike the other `surfage` libraries above, this one isn't a thin re-export of an existing curry primitive: curry's own built-in `hash-table-ref` has different (non-SRFI-69) semantics for its optional third argument, so this library reimplements the single-element accessors correctly in terms of the lower-level builtins, and restricts `make-hash-table`'s equivalence predicate to `eq?`/`eqv?`/`equal?` (curry's underlying table only supports those three comparator modes, not arbitrary predicates).
+
+---
+
+## `(surfage s174 posix-timespecs)` — SRFI-174 POSIX timespecs
+
+```scheme
+(import (surfage s174 posix-timespecs))
+```
+
+Pure Scheme, no C — see [`docs/reference/module-timespec-srfi.md`](module-timespec-srfi.md) for the full API. A small immutable `(seconds nanoseconds)` time-instant record type, implemented directly with `define-record-type`; no dependency on `(curry posix)` or any other module.
+
 ## Portability note
 
-Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, `(surfage s112 environment-inquiry)`, and `(surfage s238 codesets)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.
+Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, `(surfage s112 environment-inquiry)`, `(surfage s238 codesets)`, `(surfage s69 hash-tables)`, `(surfage s90 hash-tables)`, and `(surfage s174 posix-timespecs)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.

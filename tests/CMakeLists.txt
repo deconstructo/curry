@@ -33,6 +33,8 @@ add_test(NAME sets         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/set_tests.s
 add_test(NAME sets_module  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sets_module_tests.scm)
 add_test(NAME oop          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/oop_tests.scm)
 add_test(NAME yaml         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/yaml_tests.scm)
+add_test(NAME hash_tables_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hash_tables_srfi_tests.scm)
+add_test(NAME timespec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/timespec_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()

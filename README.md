@@ -159,6 +159,8 @@ Portable SRFI libraries under the `(surfage sN name)` naming convention — comp
 | [s170 posix](docs/reference/module-surfage.md) | `(surfage s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
 | [s112 environment-inquiry](docs/reference/module-surfage.md) | `(surfage s112 environment-inquiry)` | SRFI-112: `implementation-name`/`-version`, `os-name`/`-version`, `cpu-architecture`, `machine-name` *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
 | [s238 codesets](docs/reference/module-surfage.md) | `(surfage s238 codesets)` | SRFI-238: `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup *(requires `-DBUILD_MODULE_CODESETS=ON`, the default)* |
+| [s69/s90 hash-tables](docs/reference/module-hash-tables-srfi.md) | `(surfage s69 hash-tables)`, `(surfage s90 hash-tables)` | SRFI-69 basic hash tables + SRFI-90 `make-table` *(pure Scheme, no build step)* |
+| [s174 posix-timespecs](docs/reference/module-timespec-srfi.md) | `(surfage s174 posix-timespecs)` | SRFI-174: immutable `(seconds nanoseconds)` time-instant type *(pure Scheme, no build step)* |
 
 ---
 
