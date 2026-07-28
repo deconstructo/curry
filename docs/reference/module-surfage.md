@@ -17,6 +17,7 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(surfag
 | `(surfage s69 hash-tables)` | [SRFI-69](https://srfi.schemers.org/srfi-69/) | Basic hash tables — full API, wrapping curry's built-in hash table with corrected `hash-table-ref` semantics |
 | `(surfage s90 hash-tables)` | [SRFI-90](https://srfi.schemers.org/srfi-90/srfi-90.html) | `make-table`, a keyword-argument hash-table constructor layered on `(surfage s69 hash-tables)` |
 | `(surfage s174 posix-timespecs)` | [SRFI-174](https://srfi.schemers.org/srfi-174/) | Immutable `(seconds nanoseconds)` time-instant type |
+| `(surfage s19 time)` | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
 
 ---
 
@@ -279,6 +280,16 @@ Pure Scheme, no C — see [`docs/reference/module-hash-tables-srfi.md`](module-h
 
 Pure Scheme, no C — see [`docs/reference/module-timespec-srfi.md`](module-timespec-srfi.md) for the full API. A small immutable `(seconds nanoseconds)` time-instant record type, implemented directly with `define-record-type`; no dependency on `(curry posix)` or any other module.
 
+---
+
+## `(surfage s19 time)` — SRFI-19 time/date
+
+```scheme
+(import (surfage s19 time))
+```
+
+See [`docs/reference/module-time-srfi.md`](module-time-srfi.md) for the full API and its scope (notably: `time-tai` is unsupported — raises rather than giving a plausible-but-wrong answer without a maintained leap-second table; `time-monotonic` is numerically identical to `time-utc`; `current-date` has no local-timezone auto-detection). Requires `-DBUILD_MODULE_POSIX=ON` (the default) for `current-time`/`current-date`; everything else (date arithmetic, Julian Day conversion, formatting/parsing) is pure Scheme.
+
 ## Portability note
 
-Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, `(surfage s112 environment-inquiry)`, `(surfage s238 codesets)`, `(surfage s69 hash-tables)`, `(surfage s90 hash-tables)`, and `(surfage s174 posix-timespecs)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.
+Code written against `(surfage s1 lists)`, `(surfage s27 random-bits)`, `(surfage s215 log)`, `(surfage s170 posix)`, `(surfage s112 environment-inquiry)`, `(surfage s238 codesets)`, `(surfage s69 hash-tables)`, `(surfage s90 hash-tables)`, `(surfage s174 posix-timespecs)`, and `(surfage s19 time)` is compatible with Guile, Chicken (via the `surfage-egg`), Chibi-Scheme, and other implementations that follow the same naming convention. The only difference is that Curry's `(surfage s27 random-bits)` uses xoshiro256+ internally rather than the Mersenne Twister typically found in other implementations; the statistical properties are equivalent or better.

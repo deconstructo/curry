@@ -121,6 +121,10 @@ if(BUILD_MODULE_POSIX AND TARGET curry_posix)
     add_test(NAME posix COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/posix_tests.scm)
     set_tests_properties(posix PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    # (surfage s19 time) imports (curry posix) for current-time.
+    add_test(NAME time_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/time_srfi_tests.scm)
+    set_tests_properties(time_srfi PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 if(BUILD_MODULE_CODESETS AND TARGET curry_codesets)
