@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.12.0 — 2026-07-28
 
 **`(curry aviation-weather)` — METAR / TAF / ATIS aviation weather report parsing**
 
