@@ -227,7 +227,7 @@ Linked list of `EnvFrame` structs (flat symbol/value arrays). `env_lookup()` rai
 
 ### Module system (`src/modules.h`, `src/modules.c`)
 
-Two kinds: C extension `.so` (exports `curry_module_init`) and Scheme `.sld`/`.scm`. Always-on: `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`. Optional (`-DBUILD_MODULE_X=ON`): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui`, `plplot`, `qt6`. Search order: `CURRY_MODULE_PATH`, then `lib/curry/modules/`.
+Two kinds: C extension `.so` (exports `curry_module_init`) and Scheme `.sld`/`.scm`. Always-on: `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`. Optional (`-DBUILD_MODULE_X=ON`, most default ON): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui`, `plplot`, `qt6`, `posix` (SRFI-170 filesystem/process bindings + SRFI-112 environment inquiry), `codesets` (SRFI-238 errno/signal/http-status lookup). Search order: `CURRY_MODULE_PATH`, then `lib/curry/modules/`.
 
 ### Actor system (`src/actors.h`, `src/actors.c`)
 

@@ -12,7 +12,7 @@ YAML reader and writer, pure Scheme — no C, no external dependency. Unlike [`(
 
 ## Scope
 
-Supported: block and flow mappings/sequences, all scalar styles (plain, single-/double-quoted, literal `|`, folded `>`), comments, `---`/`...` document markers and multi-document streams, implicit scalar typing (null/bool/int/float/string, including hex `0x`/octal `0o`/underscore-separated `1_000` integers and `.inf`/`-.inf`/`.nan`), the core explicit tags (`!!str`/`!!int`/`!!float`/`!!bool`/`!!null`) to override implicit typing, anchors (`&name`) and aliases (`*name`), and merge keys (`<<: *anchor`) in both block and flow mappings.
+Supported: block and flow mappings/sequences, all scalar styles (plain, single-/double-quoted, literal `|`, folded `>`), comments, `---`/`...` document markers and multi-document streams, implicit scalar typing (null/bool/int/float/string, including hex `0x`/octal `0o`/underscore-separated `1_000` integers and `.inf`/`-.inf`/`.nan`), the core explicit tags (`!!str`/`!!int`/`!!float`/`!!bool`/`!!null`) to override implicit typing, anchors (`&name`) and aliases (`*name`), and merge keys in both block and flow mappings — both single-source (`<<: *anchor`) and multi-source (`<<: [*a, *b, ...]`, flattening each source's keys in order with first-source-wins on any key present in more than one source).
 
 Deliberately **not** supported:
 

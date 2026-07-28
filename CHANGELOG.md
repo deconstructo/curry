@@ -1,5 +1,47 @@
 # Changelog
 
+### Unreleased
+
+**Compiler — `compile_guard` silently truncated multi-expression `guard` clause bodies to their first expression**
+
+`(guard (e (#t (display "a") (display "b") (display "c"))) ...)` in *compiled* code (the common case — anything not forced through the tree-walker) ran only `(display "a")`; `(display "b")`/`(display "c")` were never even compiled in, not merely skipped at runtime. Found via independent review while auditing an unrelated fix. Also fixed a body-less `(test)` clause returning `V_VOID` instead of the test's own value (now uses `cond`'s `=>` arrow form internally). Independent review stress-tested 20k iterations, nested guards, and non-matching fallthrough/re-raise with no issues found.
+
+**`(curry posix)` — SRFI-170 filesystem/process bindings, plus SRFI-112 environment inquiry**
+
+New C module (pure libc, no extra dependency, `-DBUILD_MODULE_POSIX=ON` by default): `file-info`/`stat`/`lstat` with type predicates, directory create/list/remove/open/read/close, symlinks/hardlinks/rename/realpath, file mode/owner/times/truncate, process state (cwd/umask/pid/nice/uid/gid), user/group database lookups, wall-clock/monotonic time, environment-variable mutation, `terminal?`, and (SRFI-112) `implementation-name`/`-version`/`os-name`/`-version`/`cpu-architecture`/`machine-name` via `uname(2)`/`gethostname(2)`. Portable re-exports as `(surfage s170 posix)` and `(surfage s112 environment-inquiry)`.
+
+Independent review caught two real bugs before release: a directory-stream double-close handed a stale `DIR*` back to libc (confirmed reproducible segfault from pure Scheme, no C needed) — fixed by zeroing the packed pointer on close and checking for it; and nearly every numeric argument (mode, uid, gid, length, time values) went through `curry_fixnum()` unchecked, which silently returns garbage for a non-fixnum (e.g. a bignum) instead of erroring — confirmed a bignum mode argument silently created a directory with garbage permission bits. Fixed with a `req_fixnum()` helper that raises a clean Scheme error instead. Also hardened `read-symlink` to grow-and-retry rather than trust a fixed buffer size.
+
+**`(curry yaml)` — YAML reader and writer, pure Scheme**
+
+Hand-written recursive-descent parser and writer: block/flow mappings and sequences, all scalar styles (plain, quoted, literal `|`/folded `>` block scalars), comments, `---` document markers and multi-document streams, implicit scalar typing, the core explicit tags (`!!str` etc.), anchors/aliases, and merge keys (including multi-source `<<: [*a, *b]` with first-source-wins dedup). Unlike `(curry json)`, `null` is a distinguished sentinel (`yaml-null`/`yaml-null?`) rather than collapsed into `#f` — matching SRFI-180's approach for JSON, and the right call here since config files often rely on null-vs-false being distinguishable.
+
+Independent review found five real bugs, all fixed: the writer misidentified any plain list of mappings as one giant mapping (crash or silent corruption on a sequence-of-mappings — exactly what `yaml-parse` itself produces for `"- name: a\n- name: b"`); a block scalar (`|`/`>`) as a sequence item used the wrong indent baseline, confirmed against a realistic Kubernetes manifest to fragment 2 documents into 7 (several garbage) when a `command: - |` shell-script block was present; multi-source merge keys didn't flatten; a sequence item with a nested mapping/sequence value got jammed onto the same output line, dropping content on reparse; and root-level multi-line plain scalars were truncated and fabricated bogus extra documents.
+
+**Core — `val_hash()` didn't structurally hash pairs, vectors, bignums, and other compound types**
+
+`equal?`/`eqv?`-mode hash tables and sets (`(curry sets)`, any hash table using the default `equal?` comparator) fell back to pointer-address hashing for every type except fixnums/flonums/strings/symbols, while `scm_equal()` correctly implements structural equality for all of them — breaking the fundamental invariant that equal objects must hash equal. A list or vector key almost never landed in the same bucket as an `equal?` key inserted via a different allocation, so lookups silently missed (confirmed: 2/200 hits for list keys, 0/200 for vector keys, before the fix). Found via independent review of `(surfage s69 hash-tables)`, which defaults to `equal?`-mode tables. Fixed with proper recursive structural hashing for pairs/vectors/bytevectors/tuples/f64vectors (`SET_CMP_EQUAL`) and bignums/rationals/complex/quaternions (`SET_CMP_EQUAL` and `SET_CMP_EQV`, since `scm_equal` delegates to `scm_eqv` for these regardless of comparator mode). Symbolic (CAS) expression trees remain a known, documented gap (not currently exercised by any use of `val_hash` in the codebase).
+
+**`(surfage s69 hash-tables)` / `(surfage s90 hash-tables)` — SRFI-69 basic hash tables + SRFI-90 `make-table`**
+
+Full SRFI-69 API, pure Scheme, wrapping curry's built-in hash table. Reimplements `hash-table-ref` with correct SRFI-69 thunk/error-on-miss semantics (curry's own builtin treats the 3rd argument as a plain default value instead — available here as `hash-table-ref/default`), and restricts `make-hash-table`'s equivalence predicate to `eq?`/`eqv?`/`equal?` (curry's underlying table only supports those three comparator modes), raising a clear error for anything else. `(surfage s90 hash-tables)` adds `make-table`, a Gambit-style keyword-argument constructor (markers need quoting — curry has no self-evaluating colon-keyword reader syntax).
+
+Independent review found `(surfage s90 hash-tables)` imported both `(surfage s69 hash-tables)` and `(scheme base)`, both exporting `make-hash-table` — curry's import merge doesn't error on the collision, and which one won depended on unrelated import-order details, silently bypassing s69's comparator validation under the wrong order. Fixed by excluding `make-hash-table` from the `(scheme base)` import. (The `val_hash` core bug above was also found during this review.)
+
+**`(surfage s174 posix-timespecs)` — SRFI-174 POSIX timespecs**
+
+Small immutable `(seconds nanoseconds)` time-instant record type, pure Scheme, no dependency on `(curry posix)` or anything else.
+
+**`(surfage s19 time)` — SRFI-19 time/date objects and calendar conversions**
+
+Time objects, date objects, Julian Day / Modified Julian Day conversion via the standard Fliegel & Van Flandern algorithm, arithmetic with nanosecond carry/borrow, and `date->string`/`string->date` with `strftime`-style format directives. `time-tai` raises rather than faking leap-second math (no maintained leap-second table); `time-monotonic` is numerically identical to `time-utc`; `current-date` has no local-timezone auto-detection (no `localtime()` binding exists yet).
+
+Independent review — warranted here more than most, since calendar math is a notorious bug magnet — found three real bugs, all fixed and verified against Python's `datetime`/`calendar` as ground truth: `~U`/`~W` week-number directives were silently off by one for ~98% of the year (missing the standard partial-first-week adjustment); `~V` claimed to be the ISO 8601 week number but was just an alias for `~W`'s plain count, missing the actual "week containing the first Thursday" rule and its year-boundary spillover; and `string->date`'s `~z` directive couldn't parse the `+` sign that `date->string`'s `~z` always emits for a zero/positive offset, so the module's own default (UTC, which prints as `"+0000"`) crashed on round-trip.
+
+**`(curry codesets)` — SRFI-238 codeset lookup (errno/signal/http-status)**
+
+Unified numeric-code ⟷ symbol ⟷ human-message lookup: `codeset?`, `codeset-symbols`, `codeset-symbol`, `codeset-number`, `codeset-message`. `errno`/`signal` symbol names and numeric values come straight from this platform's own `<errno.h>`/`<signal.h>` macros; `http-status` is a static RFC-sourced table. Plus `(surfage s238 codesets)`. Independent review found no bugs — verified the platform-aliasing guards (`EOPNOTSUPP`/`ENOTSUP`, `EWOULDBLOCK`/`EAGAIN`) against the actual macOS headers rather than by inspection, and spot-checked the full HTTP status table against the relevant RFCs.
+
 ### 1.11.1 — Fix VM stack corruption across guard/longjmp; add SRFI-64 and SRFI-215 surfage libraries
 
 **Exception handling — `guard`/`with-exception-handler`/`handler-bind` could corrupt the VM's operand stack**
