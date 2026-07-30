@@ -25,6 +25,8 @@
  * been closed.
  */
 
+#define _GNU_SOURCE /* fopencookie/cookie_io_functions_t (glibc) */
+
 #include <curry.h>
 #include <string.h>
 #include <stdio.h>
