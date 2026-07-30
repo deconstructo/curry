@@ -3,11 +3,20 @@
  *
  * No external C dependencies; talks directly to Neo4j over TCP sockets using
  * the Bolt binary protocol and PackStream encoding.  Modelled on the Redis
- * module (modules/redis/redis.c).
+ * module (modules/redis/redis.c), including its TLS pattern: when built with
+ * OpenSSL present, HAVE_NEO4J_TLS is defined and neo4j-connect-tls wraps the
+ * socket in a TLS session (SSL_connect) before the Bolt handshake bytes are
+ * ever sent, so credentials (and everything else) never cross the wire in
+ * cleartext for connections that opt into it. Plain neo4j-connect is
+ * unchanged and still sends HELLO/LOGON in cleartext — Neo4j servers with
+ * TLS disabled (a common local-dev default) don't support the alternative.
  *
  * Scheme API:
  *   (neo4j-connect host port)               -> conn
  *   (neo4j-connect host port user password) -> conn
+ *   (neo4j-connect-tls host port)                     -> conn  (requires OpenSSL at build time)
+ *   (neo4j-connect-tls host port user password)       -> conn  (AUTH over TLS)
+ *   (neo4j-connect-tls host port user password ca)    -> conn  (custom CA cert file)
  *   (neo4j-disconnect conn)                 -> void
  *   (neo4j-run conn cypher)                 -> list of row-alists
  *   (neo4j-run conn cypher params-alist)    -> list of row-alists
@@ -38,6 +47,11 @@
 #include <errno.h>
 #include <math.h>
 
+#ifdef HAVE_NEO4J_TLS
+#  include <openssl/ssl.h>
+#  include <openssl/err.h>
+#endif
+
 #ifdef _WIN32
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
@@ -65,6 +79,10 @@ typedef int sock_t;
 
 typedef struct {
     sock_t  fd;
+#ifdef HAVE_NEO4J_TLS
+    SSL_CTX *ssl_ctx;  /* NULL for plain TCP connections */
+    SSL     *ssl;
+#endif
     uint8_t net[NET_BUF];
     size_t  nlen, npos;
     int     bolt_major, bolt_minor;
@@ -95,7 +113,13 @@ static NeoConn *conn_unbox(curry_val v, const char *ctx) {
 
 static void net_write(NeoConn *c, const uint8_t *buf, size_t len) {
     while (len > 0) {
-        ssize_t n = (ssize_t)sock_write(c->fd, (const char *)buf, len);
+        ssize_t n;
+#ifdef HAVE_NEO4J_TLS
+        if (c->ssl)
+            n = (ssize_t)SSL_write(c->ssl, buf, (int)len);
+        else
+#endif
+            n = (ssize_t)sock_write(c->fd, (const char *)buf, len);
         if (n <= 0) curry_error("neo4j: write failed: %s", strerror(errno));
         buf += n; len -= (size_t)n;
     }
@@ -103,7 +127,13 @@ static void net_write(NeoConn *c, const uint8_t *buf, size_t len) {
 
 static uint8_t net_byte(NeoConn *c) {
     if (c->npos >= c->nlen) {
-        ssize_t n = (ssize_t)sock_read(c->fd, (char *)c->net, NET_BUF);
+        ssize_t n;
+#ifdef HAVE_NEO4J_TLS
+        if (c->ssl)
+            n = (ssize_t)SSL_read(c->ssl, c->net, NET_BUF);
+        else
+#endif
+            n = (ssize_t)sock_read(c->fd, (char *)c->net, NET_BUF);
         if (n <= 0) curry_error("neo4j: connection closed");
         c->nlen = (size_t)n; c->npos = 0;
     }
@@ -579,7 +609,8 @@ static curry_val alist_get(curry_val alist, const char *key) {
 /* ---- Bolt handshake + connect -------------------------------------------*/
 
 static NeoConn *bolt_connect(const char *host, int port,
-                              const char *user, const char *password) {
+                              const char *user, const char *password,
+                              bool use_tls, const char *ca_cert) {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
@@ -601,6 +632,41 @@ static NeoConn *bolt_connect(const char *host, int port,
     if (!c) { sock_close(fd); curry_error("neo4j-connect: out of memory"); }
     c->fd = fd;
 
+    if (use_tls) {
+#ifdef HAVE_NEO4J_TLS
+        /* Wrap the raw socket in a TLS session before a single Bolt byte
+         * (magic preamble, HELLO/LOGON credentials, query text/results, ...)
+         * goes over the wire — everything downstream of this point routes
+         * through net_write/net_byte, which check c->ssl. */
+        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx) { sock_close(fd); free(c); curry_error("neo4j-connect-tls: SSL_CTX_new failed"); }
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        if (ca_cert) {
+            if (SSL_CTX_load_verify_locations(ctx, ca_cert, NULL) != 1) {
+                SSL_CTX_free(ctx); sock_close(fd); free(c);
+                curry_error("neo4j-connect-tls: cannot load CA cert: %s", ca_cert);
+            }
+        } else {
+            SSL_CTX_set_default_verify_paths(ctx);
+        }
+        SSL *ssl = SSL_new(ctx);
+        if (!ssl) { SSL_CTX_free(ctx); sock_close(fd); free(c); curry_error("neo4j-connect-tls: SSL_new failed"); }
+        SSL_set_fd(ssl, (int)fd);
+        SSL_set_tlsext_host_name(ssl, host);  /* SNI */
+        if (SSL_connect(ssl) != 1) {
+            char errbuf[256];
+            ERR_error_string_n(ERR_get_error(), errbuf, sizeof errbuf);
+            SSL_free(ssl); SSL_CTX_free(ctx); sock_close(fd); free(c);
+            curry_error("neo4j-connect-tls: TLS handshake failed: %s", errbuf);
+        }
+        c->ssl_ctx = ctx;
+        c->ssl = ssl;
+#else
+        free(c); sock_close(fd);
+        curry_error("neo4j-connect-tls: this build of curry was compiled without OpenSSL support");
+#endif
+    }
+
     /* Bolt handshake: magic + 4 version proposals */
     static const uint8_t handshake[20] = {
         0x60, 0x60, 0xB0, 0x17,   /* magic preamble */
@@ -615,7 +681,13 @@ static NeoConn *bolt_connect(const char *host, int port,
     uint8_t ver[4];
     for (int i = 0; i < 4; i++) ver[i] = net_byte(c);
     int major = ver[3], minor = ver[2];
-    if (major == 0) { sock_close(fd); free(c); curry_error("neo4j-connect: no compatible Bolt version"); }
+    if (major == 0) {
+#ifdef HAVE_NEO4J_TLS
+        if (c->ssl) { SSL_free(c->ssl); SSL_CTX_free(c->ssl_ctx); }
+#endif
+        sock_close(fd); free(c);
+        curry_error("neo4j-connect: no compatible Bolt version");
+    }
     c->bolt_major = major;
     c->bolt_minor = minor;
 
@@ -624,9 +696,17 @@ static NeoConn *bolt_connect(const char *host, int port,
     build_hello(&msg, user, password, major, minor);
     bolt_send(c, &msg);
     free(msg.data);
+    /* bolt_expect_success raises directly (curry_error/longjmp) on a
+     * FAILURE reply (e.g. bad credentials) without returning to this
+     * frame, so a failure here leaks c (and, for a TLS connection, the
+     * SSL session and context) rather than reaching fn_disconnect's
+     * cleanup — a real but low-severity gap (bounded per failed connect
+     * attempt, not attacker-amplifiable) that would need this file's
+     * error handling restructured around a C-level unwind-safe cleanup
+     * to close fully; not attempted here. */
     bolt_expect_success(c);
 
-    /* LOGON for Bolt 5.1+ */
+    /* LOGON for Bolt 5.1+ (same leak-on-failure caveat as HELLO above) */
     bool needs_logon = (major > 5) || (major == 5 && minor >= 1);
     if (needs_logon) {
         PSBuf lmsg = {0};
@@ -741,9 +821,22 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     int         port     = (int)curry_fixnum(av[1]);
     const char *user     = (ac >= 4 && curry_is_string(av[2])) ? curry_string(av[2]) : "neo4j";
     const char *password = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : "";
-    NeoConn *c = bolt_connect(host, port, user, password);
+    NeoConn *c = bolt_connect(host, port, user, password, false, NULL);
     return conn_box(c, conn_tag());
 }
+
+#ifdef HAVE_NEO4J_TLS
+static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    const char *host     = curry_string(av[0]);
+    int         port     = (int)curry_fixnum(av[1]);
+    const char *user     = (ac >= 4 && curry_is_string(av[2])) ? curry_string(av[2]) : "neo4j";
+    const char *password = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : "";
+    const char *ca_cert  = (ac >= 5 && curry_is_string(av[4])) ? curry_string(av[4]) : NULL;
+    NeoConn *c = bolt_connect(host, port, user, password, true, ca_cert);
+    return conn_box(c, conn_tag());
+}
+#endif
 
 static curry_val fn_disconnect(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
@@ -751,6 +844,13 @@ static curry_val fn_disconnect(int ac, curry_val *av, void *ud) {
     PSBuf bye = {0}; ps_struct_hdr(&bye, 0x02, 0);
     bolt_send(c, &bye); free(bye.data);
     /* Read (but ignore) the GOODBYE response if any */
+#ifdef HAVE_NEO4J_TLS
+    if (c->ssl) {
+        SSL_shutdown(c->ssl);
+        SSL_free(c->ssl);
+        SSL_CTX_free(c->ssl_ctx);
+    }
+#endif
     sock_close(c->fd);
     free(c);
     return curry_void();
@@ -797,6 +897,9 @@ static curry_val fn_rollback(int ac, curry_val *av, void *ud) {
 
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "neo4j-connect",    fn_connect,    2, 4, NULL);
+#ifdef HAVE_NEO4J_TLS
+    curry_define_fn(vm, "neo4j-connect-tls", fn_connect_tls, 2, 5, NULL);
+#endif
     curry_define_fn(vm, "neo4j-disconnect", fn_disconnect, 1, 1, NULL);
     curry_define_fn(vm, "neo4j-run",        fn_run,        2, 3, NULL);
     curry_define_fn(vm, "neo4j-begin-tx",   fn_begin_tx,   1, 1, NULL);

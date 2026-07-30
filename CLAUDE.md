@@ -272,7 +272,7 @@ Curry scripts serve as [Model Context Protocol](https://modelcontextprotocol.io/
 
 ## Neo4j module (`modules/neo4j/neo4j.c`)
 
-Raw Bolt 4.x/5.x protocol with PackStream encoding — no `libneo4j-client` dependency. Bolt version negotiated at connect time; Bolt 5.1+ uses split HELLO/LOGON. Enable with `-DBUILD_MODULE_NEO4J=ON`. See `docs/reference/module-neo4j.md`.
+Raw Bolt 4.x/5.x protocol with PackStream encoding — no `libneo4j-client` dependency. Bolt version negotiated at connect time; Bolt 5.1+ uses split HELLO/LOGON. Enable with `-DBUILD_MODULE_NEO4J=ON`. `neo4j-connect-tls` wraps the socket in TLS (OpenSSL, auto-detected at configure time) before the handshake, for encrypted connections; plain `neo4j-connect` sends credentials in cleartext. See `docs/reference/module-neo4j.md`.
 
 ## R6RS compatibility
 

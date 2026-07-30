@@ -3,8 +3,9 @@
 *v1.2.2 — 2026-06-07*
 
 Neo4j graph database client using the Bolt 4.x/5.x wire protocol directly.
-No external C dependencies — pure POSIX sockets with PackStream binary encoding,
-modelled on the Redis module.
+Pure POSIX sockets with PackStream binary encoding, modelled on the Redis
+module — including its optional-OpenSSL TLS pattern (`neo4j-connect-tls`,
+below).
 
 Bolt version is negotiated automatically: the module proposes 5.4, 5.0, and the
 full 4.0–4.4 range; Neo4j picks the highest mutually-supported version. Bolt 5.1+
@@ -57,6 +58,23 @@ The default Neo4j Bolt port is **7687**.
 
 (neo4j-disconnect db)
 ```
+
+`neo4j-connect` sends credentials in cleartext — fine on `localhost` or a
+network you already trust, but not across an untrusted network. When built
+with OpenSSL present (the default; check the CMake configure log for
+"Neo4j TLS support enabled"), `neo4j-connect-tls` wraps the socket in a TLS
+session (`bolt+s`/`neo4j+s`-style, verifying the server certificate by
+default) before a single Bolt byte — including the HELLO/LOGON credentials —
+goes over the wire:
+
+```scheme
+(neo4j-connect-tls host port)                  ; → conn  (anonymous)
+(neo4j-connect-tls host port user password)    ; → conn  (basic auth over TLS)
+(neo4j-connect-tls host port user password ca) ; → conn  (custom CA cert file)
+```
+
+`neo4j-disconnect` works the same for both — it detects and cleans up the
+TLS session automatically.
 
 ## Queries
 
