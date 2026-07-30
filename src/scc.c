@@ -38,6 +38,7 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 /* ── Format constants ───────────────────────────────────────────────────── */
 
@@ -608,11 +609,24 @@ static bool read_chunk(FILE *f, Chunk *c) {
  * across invocations, so a stat-based cache never usefully hit on one
  * anyway; the difference is doing so no longer has a content side effect). */
 static bool src_hash(const char *src_path, uint64_t *hash_out) {
+    /* Open first, then fstat() the resulting descriptor rather than
+     * stat()-then-fopen() on the path: the latter has a TOCTOU window in
+     * which src_path could be replaced (e.g. a symlink swap) between the
+     * check and the open, so the fread loop below could end up hashing a
+     * different file than the one just verified regular. O_NONBLOCK keeps
+     * the open from blocking if src_path names a FIFO with no writer yet
+     * (POSIX says O_NONBLOCK has no effect on a regular file's own I/O, so
+     * it's dropped again below once S_ISREG is confirmed, purely so a
+     * blocking fread loop behaves exactly as it did before this fix). */
+    int fd = open(src_path, O_RDONLY | O_NONBLOCK);
+    if (fd < 0) return false;
     struct stat st;
-    if (stat(src_path, &st) != 0 || !S_ISREG(st.st_mode)) return false;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) { close(fd); return false; }
+    int flags = fcntl(fd, F_GETFL);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 
-    FILE *f = fopen(src_path, "rb");
-    if (!f) return false;
+    FILE *f = fdopen(fd, "rb");
+    if (!f) { close(fd); return false; }
     uint64_t h = 14695981039346656037ULL; /* FNV-1a 64 offset basis */
     unsigned char buf[8192];
     size_t n;

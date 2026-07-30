@@ -215,7 +215,7 @@ static val_t prim_define_rule_bang(int ac, val_t *av, void *ud) {
 static val_t prim_define_algebra_bang(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_symbol(av[0]))
-        scm_raise(V_FALSE, "%define-algebra!: operator must be a symbol");
+        scm_raise(V_FALSE, "%%define-algebra!: operator must be a symbol");
     bool commutative = false, associative = false;
     val_t identity = V_VOID, absorbing = V_VOID, relations_fn = V_FALSE;
     for (int i = 1; i + 1 < ac; i += 2) {

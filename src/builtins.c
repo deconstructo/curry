@@ -2158,7 +2158,7 @@ static val_t prim_make_parameter(int ac, val_t *av, void *ud) {
  * safety fix). */
 static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     (void)ud;
-    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ctor: not a record type");
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-ctor: not a record type");
     RecordType *rtd = vunptr(RecordType, av[0]);
     uint32_t n = rtd->nfields;
     Record *r = (Record *)gc_alloc(sizeof(Record) + n * sizeof(val_t));
@@ -2169,28 +2169,28 @@ static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
 }
 static val_t prim_record_pred(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-pred?: not a record type");
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-pred?: not a record type");
     RecordType *rtd=vunptr(RecordType,av[0]);
     return vbool(vis_record(av[1]) && as_rec(av[1])->rtd == rtd);
 }
 static val_t prim_record_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ref: not a record");
-    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-ref: not an exact integer");
+    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-ref: not a record");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-ref: not an exact integer");
     Record *r = as_rec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= r->rtd->nfields)
-        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%record-ref: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%%record-ref: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
     return r->fields[i];
 }
 static val_t prim_record_set(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-set!: not a record");
-    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%record-set!: not an exact integer");
+    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-set!: not a record");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-set!: not an exact integer");
     Record *r = as_rec(av[0]);
     intptr_t i = vunfix(av[1]);
     if (i < 0 || (uint32_t)i >= r->rtd->nfields)
-        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%record-set!: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
+        scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%%record-set!: field index %ld out of bounds (nfields %u)", (long)i, r->rtd->nfields);
     r->fields[i] = av[2];
     return V_VOID;
 }

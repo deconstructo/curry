@@ -157,12 +157,12 @@ extern _Thread_local RestartFrame *current_restart_frame;
 void walk_cond_handlers(val_t exn, CondHandler *h);
 
 /* Raise an exception (never returns) */
-void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
+void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
 void scm_raise_val(val_t exn) __attribute__((noreturn));
 
 /* Like scm_raise, but stamps a stable machine-legible symbol code (e.g.
  * 'wrong-type-argument) on the error object; see docs/reference/error-codes.md. */
-void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn));
+void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
 
 /*
  * longjmp-safe shadow-stack and inhibit-counter helpers.

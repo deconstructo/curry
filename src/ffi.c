@@ -273,16 +273,16 @@ static void ffi_def(val_t env, const char *name,
 
 static val_t prim_ffi_load(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_string(av[0])) scm_raise(V_FALSE, "%ffi-load: path must be a string");
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "%%ffi-load: path must be a string");
     val_t lib = ffi_load_library(str_data(as_str(av[0])));
     as_foreignlib(lib)->path = av[0];
     return lib;
 }
 static val_t prim_ffi_make_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_foreignlib(av[0])) scm_raise(V_FALSE, "%ffi-make-fn: not a foreign-lib");
-    if (!vis_string(av[1]))     scm_raise(V_FALSE, "%ffi-make-fn: c-name must be a string");
-    if (!vis_symbol(av[2]))     scm_raise(V_FALSE, "%ffi-make-fn: ret-type must be a symbol");
+    if (!vis_foreignlib(av[0])) scm_raise(V_FALSE, "%%ffi-make-fn: not a foreign-lib");
+    if (!vis_string(av[1]))     scm_raise(V_FALSE, "%%ffi-make-fn: c-name must be a string");
+    if (!vis_symbol(av[2]))     scm_raise(V_FALSE, "%%ffi-make-fn: ret-type must be a symbol");
     return ffi_make_fn(av[0], str_data(as_str(av[1])), av[2], av[3]);
 }
 static val_t prim_ffi_call(int ac, val_t *av, void *ud)
@@ -294,12 +294,12 @@ static val_t prim_make_cptr(int ac, val_t *av, void *ud) {
 }
 static val_t prim_cptr_address(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_cptr(av[0])) scm_raise(V_FALSE, "%ffi-cptr-address: not a c-ptr");
+    if (!vis_cptr(av[0])) scm_raise(V_FALSE, "%%ffi-cptr-address: not a c-ptr");
     return vfix((intptr_t)(uintptr_t)as_cptr(av[0])->ptr);
 }
 static val_t prim_ffi_matrix_ptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_matrix(av[0])) scm_raise(V_FALSE, "%ffi-matrix-ptr: not a matrix");
+    if (!vis_matrix(av[0])) scm_raise(V_FALSE, "%%ffi-matrix-ptr: not a matrix");
     gc_pin(as_matrix(av[0]));   /* no-op under Boehm; protocol for moving GC */
     return ffi_make_cptr(as_matrix(av[0])->data);
 }
@@ -310,7 +310,7 @@ static val_t prim_ffi_matrix_unpin(int ac, val_t *av, void *ud) {
 }
 static val_t prim_ffi_tensor_ptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_tensor(av[0])) scm_raise(V_FALSE, "%ffi-tensor-ptr: not a tensor");
+    if (!vis_tensor(av[0])) scm_raise(V_FALSE, "%%ffi-tensor-ptr: not a tensor");
     gc_pin(as_tensor(av[0]));
     /* tensor_data() is static inline in matrix.c; use the layout directly:
      * dims[ndim] uint32_t elements followed immediately by the double array. */
@@ -331,7 +331,7 @@ static val_t prim_ffi_tensor_unpin(int ac, val_t *av, void *ud) {
  * for FITS/NetCDF) rather than this exposing typed accessors itself. */
 static val_t prim_ffi_bytevector_ptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "%ffi-bytevector-ptr: not a bytevector");
+    if (!vis_bytes(av[0])) scm_raise(V_FALSE, "%%ffi-bytevector-ptr: not a bytevector");
     gc_pin(as_bytes(av[0]));
     return ffi_make_cptr(as_bytes(av[0])->data);
 }
@@ -351,10 +351,10 @@ static val_t prim_ffi_peek_bytes(int ac, val_t *av, void *ud) {
     void *src = vis_cptr(av[0])   ? as_cptr(av[0])->ptr
               : vis_fixnum(av[0]) ? (void *)(uintptr_t)vunfix(av[0])
               : NULL;
-    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "%ffi-peek-bytes: n must be exact integer");
+    if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "%%ffi-peek-bytes: n must be exact integer");
     intptr_t n = vunfix(av[1]);
-    if (n < 0) scm_raise(V_FALSE, "%ffi-peek-bytes: n must be non-negative");
-    if (!src && n > 0) scm_raise(V_FALSE, "%ffi-peek-bytes: NULL pointer");
+    if (n < 0) scm_raise(V_FALSE, "%%ffi-peek-bytes: n must be non-negative");
+    if (!src && n > 0) scm_raise(V_FALSE, "%%ffi-peek-bytes: NULL pointer");
     Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + (size_t)n);
     bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = (uint32_t)n;
     if (n > 0) memcpy(bv->data, src, (size_t)n);
