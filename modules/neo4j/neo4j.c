@@ -653,6 +653,14 @@ static NeoConn *bolt_connect(const char *host, int port,
         if (!ssl) { SSL_CTX_free(ctx); sock_close(fd); free(c); curry_error("neo4j-connect-tls: SSL_new failed"); }
         SSL_set_fd(ssl, (int)fd);
         SSL_set_tlsext_host_name(ssl, host);  /* SNI */
+        /* SSL_VERIFY_PEER above only checks the certificate chain is
+         * trusted, not that it was issued for this host — without this,
+         * any cert the attacker holds for any domain (or a compromised CA)
+         * would pass, defeating the point of verifying at all. */
+        if (SSL_set1_host(ssl, host) != 1) {
+            SSL_free(ssl); SSL_CTX_free(ctx); sock_close(fd); free(c);
+            curry_error("neo4j-connect-tls: SSL_set1_host failed");
+        }
         if (SSL_connect(ssl) != 1) {
             char errbuf[256];
             ERR_error_string_n(ERR_get_error(), errbuf, sizeof errbuf);
