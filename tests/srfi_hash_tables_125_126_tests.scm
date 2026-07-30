@@ -54,6 +54,14 @@
 (hashtable-update! ht 'a (lambda (v) (+ v 100)) 0)
 (check "hashtable-update! applies the updater" (hashtable-ref ht 'a 0) 101)
 
+; R6RS: an eq?/eqv? hashtable has no user-level hash function
+(check "hashtable-hash-function is #f for an eq? hashtable"
+       (hashtable-hash-function (make-eq-hashtable))
+       #f)
+(check "hashtable-hash-function is a procedure for an equal?-mode hashtable"
+       (procedure? (hashtable-hash-function (make-hashtable equal-hash equal?)))
+       #t)
+
 ;;; Summary
 
 (newline)

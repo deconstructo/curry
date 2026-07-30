@@ -21,6 +21,11 @@
 (define s2 (set string-comparator "b" "c" "d"))
 
 (check "set-size" (set-size s1) 3)
+; SRFI-113/SRFI-1 fold convention is (proc elem acc), not curry's native
+; set-fold's (proc acc elem) — (fold cons '() '(1 2 3)) => (3 2 1)
+(check "set-fold calls proc as (elem acc), matching SRFI-1 fold order"
+       (set-fold cons '() (set number-comparator 1 2 3))
+       '(3 2 1))
 (check "set-contains? for a present element" (set-contains? s1 "a") #t)
 (check "set-contains? for an absent element" (set-contains? s1 "z") #f)
 (check "set-union size" (set-size (set-union s1 s2)) 4)

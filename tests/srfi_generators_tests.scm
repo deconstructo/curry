@@ -51,6 +51,14 @@
 (check "coroutine generator: exhausted after producer returns" (eof-object? (cg)) #t)
 (check "coroutine generator: stays exhausted" (eof-object? (cg)) #t)
 
+;; a producer that raises must still mark the generator exhausted, not
+;; deadlock every later call waiting on a turn that will never flip back
+(define cg2 (make-coroutine-generator
+             (lambda (yield) (yield 42) (error "producer failed"))))
+(check "coroutine generator: value before the error" (cg2) 42)
+(check "coroutine generator: exhausted after producer raises" (eof-object? (cg2)) #t)
+(check "coroutine generator: stays exhausted after producer raised" (eof-object? (cg2)) #t)
+
 ;;; accumulators
 
 (define acc (list-accumulator))

@@ -80,7 +80,11 @@
     (define set-size %native-set-size)
     (define set->list %native-set->list)
     (define set-for-each %native-set-for-each)
-    (define set-fold %native-set-fold)
+    ; curry's native set-fold calls (proc acc elem); SRFI-113 (and SRFI-1
+    ; fold's own convention) calls (proc elem acc) — swap here rather than
+    ; re-exporting the native procedure under a name that means something
+    ; different in each convention.
+    (define (set-fold proc knil s) (%native-set-fold (lambda (acc elem) (proc elem acc)) knil s))
     (define set-any? %native-set-any?)
     (define set-every? %native-set-every?)
     (define set-count %native-set-count)

@@ -42,6 +42,10 @@
        (let-optionals* (list 1 2) ((x 0) (y 0) (z 99)) (list x y z))
        (list 1 2 99))
 
+(check "let-optionals* accepts a dotted tail-var after the option specs"
+       (let-optionals* (list 1 2 3 4) ((x 0) (y 0) . rest) (list x y rest))
+       (list 1 2 '(3 4)))
+
 ;;; Summary
 
 (newline)

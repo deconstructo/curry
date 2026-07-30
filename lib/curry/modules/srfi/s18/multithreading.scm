@@ -44,8 +44,12 @@
             (if (not (vector-ref state 0))
                 (begin
                   (vector-set! state 0 #t)
+                  ; guard, not just a plain call: if the thunk raises, the
+                  ; "mark done and wake joiners" block must still run, or
+                  ; thread-join! would block forever waiting on a thread
+                  ; that already exited.
                   (spawn (lambda ()
-                           (let ((result ((%thread-thunk t))))
+                           (let ((result (guard (e (#t #f)) ((%thread-thunk t)))))
                              (with-mutex (vector-ref state 3)
                                (lambda ()
                                  (vector-set! state 2 result)

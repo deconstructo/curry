@@ -44,7 +44,12 @@
     (define (hashtable-equivalence-function t)
       (comparator-equality-predicate (hash-table-comparator t)))
 
-    (define (hashtable-hash-function t) equal-hash)
+    ; R6RS: eq?/eqv? hashtables have no user-level hash function (#f);
+    ; only a table with a genuine hash/equiv function (in practice here,
+    ; anything bucketed under equal? mode) reports one.
+    (define (hashtable-hash-function t)
+      (let ((cmp (hash-table-comparator t)))
+        (if (or (eq? cmp eq-comparator) (eq? cmp eqv-comparator)) #f equal-hash)))
 
     (define (equal-hash obj) (comparator-hash equal-comparator obj))
     (define (string-hash s) (comparator-hash string-comparator s))

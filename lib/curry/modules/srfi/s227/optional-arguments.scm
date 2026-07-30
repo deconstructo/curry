@@ -36,7 +36,9 @@
         ((_ args (name . more) body ...)
          (let ((name (if (pair? args) (car args) (default-object)))
                (%rest (if (pair? args) (cdr args) '())))
-           (%opt-bind-optional %rest more body ...)))))
+           (%opt-bind-optional %rest more body ...)))
+        ((_ args tail-var body ...)
+         (let ((tail-var args)) body ...))))
 
     (define-syntax %opt-bind
       (syntax-rules (#:optional #:rest)

@@ -20,6 +20,13 @@
 (thread-start! t)
 (check "thread-join! returns the thunk's result" (thread-join! t) 6)
 
+; a thunk that raises must still mark the thread done, not deadlock
+; thread-join! forever waiting on a thread that already exited
+(define bad-t (thread-start! (make-thread (lambda () (error "thread failed")))))
+(check "thread-join! returns rather than hanging when the thunk raised"
+       (thread-join! bad-t)
+       #f)
+
 (define cv (make-condition-variable))
 (check "make-condition-variable produces a condvar" (condition-variable? cv) #t)
 

@@ -87,9 +87,13 @@
           (wait-until (lambda () (eq? (vector-ref state 2) 'producer)))))
         #f)
 
+      ; guard, not just a plain call: if `proc` raises, the "mark done and
+      ; wake the consumer" block below must still run — otherwise a caller
+      ; blocked in the generator thunk (or any later call) would wait on a
+      ; turn that will never change, deadlocking forever.
       (spawn (lambda ()
                (with-mutex mx (lambda () (wait-until (lambda () (eq? (vector-ref state 2) 'producer)))))
-               (proc yield)
+               (guard (e (#t #f)) (proc yield))
                (with-mutex mx (lambda ()
                  (vector-set! state 1 'done)
                  (vector-set! state 2 'consumer)
