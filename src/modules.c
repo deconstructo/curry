@@ -80,8 +80,15 @@ static void name_to_path(val_t name, char *buf, size_t cap) {
         if (vis_fixnum(component)) {
             snprintf(numbuf, sizeof(numbuf), "%ld", (long)vunfix(component));
             seg = numbuf;
-        } else {
+        } else if (vis_symbol(component)) {
             seg = sym_cstr(component);
+        } else {
+            /* Anything else (bignum, string, boolean, ...) is not a valid
+             * R7RS library-name component (identifier or exact
+             * non-negative integer) — sym_cstr()/as_sym() assume a symbol
+             * object and would misinterpret this value's header, so raise
+             * a clear error instead of reading garbage or crashing. */
+            scm_raise(V_FALSE, "invalid library name component (expected an identifier or exact integer)");
         }
         size_t slen = strlen(seg);
         if (pos + slen + 2 < cap) {
