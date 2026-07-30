@@ -4,7 +4,18 @@
 
 Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(srfi sN name)` namespace — a naming convention used by several Scheme implementations so that the same `(import …)` line works across them. The libraries delegate to Curry's built-ins wherever the procedure is already present; only missing names are defined in Scheme.
 
-## Available libraries
+## Bare-number `(srfi N)` shims
+
+The naming convention SRFI 97 itself specifies — and the one Chibi-Scheme and Gauche actually implement — is a bare-number library name with no descriptive component: `(import (srfi 1))`, not `(import (srfi s1 lists))`. For every library below, curry also ships a one-line shim `lib/curry/modules/srfi/N.scm` that just imports the `(srfi sN name)` library and re-exports everything it exports, so both spellings work:
+
+```scheme
+(import (srfi 1))          ; same bindings as...
+(import (srfi s1 lists))   ; ...this
+```
+
+`(srfi N)` library names use an *exact non-negative integer* as the second component, which R7RS's library-name grammar explicitly permits alongside identifiers. Note for combining multiple `(srfi N)` imports in one program: several of these libraries deliberately share generic names on purpose (`(srfi 69)`/`(srfi 90)` and `(srfi 125)`/`(srfi 126)` both touch hash tables, `(srfi 113)` touches sets) — if two imported libraries export the *same* name with different behavior (e.g. `(srfi 69)`'s and `(srfi 125)`'s both-named `make-hash-table`), only one wins in that flat top-level scope, same as any Scheme's colliding-import behavior. `(srfi 125)`/`(srfi 126)` avoid this with each other (`hash-table-*` vs `hashtable-*`), so they're safe to combine with each other, just not with `(srfi 69)`/`(srfi 90)`.
+
+## Available `(srfi sN name)` libraries
 
 | Library | SRFI | Description |
 |---------|------|-------------|

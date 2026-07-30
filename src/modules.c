@@ -70,7 +70,19 @@ static void add_search_dir(const char *dir) {
 static void name_to_path(val_t name, char *buf, size_t cap) {
     size_t pos = 0;
     while (vis_pair(name)) {
-        const char *seg = sym_cstr(vcar(name));
+        /* R7RS library names may contain exact non-negative integers as
+         * well as identifiers (e.g. (srfi 1)) — sym_cstr() assumes a
+         * symbol object, so a bare fixnum component is rendered as its
+         * decimal digits instead. */
+        char numbuf[24];
+        const char *seg;
+        val_t component = vcar(name);
+        if (vis_fixnum(component)) {
+            snprintf(numbuf, sizeof(numbuf), "%ld", (long)vunfix(component));
+            seg = numbuf;
+        } else {
+            seg = sym_cstr(component);
+        }
         size_t slen = strlen(seg);
         if (pos + slen + 2 < cap) {
             if (pos > 0) buf[pos++] = '/';
