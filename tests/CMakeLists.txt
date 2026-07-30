@@ -36,6 +36,14 @@ add_test(NAME oop          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/oop_tests.s
 add_test(NAME yaml         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/yaml_tests.scm)
 add_test(NAME hash_tables_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hash_tables_srfi_tests.scm)
 add_test(NAME timespec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/timespec_tests.scm)
+add_test(NAME srfi_receive_assume_optional COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_receive_assume_optional_tests.scm)
+add_test(NAME srfi_comparators COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_comparators_tests.scm)
+add_test(NAME srfi_hash_tables_125_126 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_hash_tables_125_126_tests.scm)
+add_test(NAME srfi_sorting_vectors COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_sorting_vectors_tests.scm)
+add_test(NAME srfi_sets_bags COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_sets_bags_tests.scm)
+add_test(NAME srfi_generators COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_generators_tests.scm)
+add_test(NAME srfi_threads COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_threads_tests.scm)
+add_test(NAME srfi_misc COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_misc_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
@@ -122,7 +130,7 @@ if(BUILD_MODULE_POSIX AND TARGET curry_posix)
     add_test(NAME posix COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/posix_tests.scm)
     set_tests_properties(posix PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
-    # (surfage s19 time) imports (curry posix) for current-time.
+    # (srfi s19 time) imports (curry posix) for current-time.
     add_test(NAME time_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/time_srfi_tests.scm)
     set_tests_properties(time_srfi PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")

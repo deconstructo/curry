@@ -1,4 +1,4 @@
-# `(surfage s174 posix-timespecs)`
+# `(srfi s174 posix-timespecs)`
 
 *unreleased*
 
@@ -7,7 +7,7 @@
 ## Import
 
 ```scheme
-(import (surfage s174 posix-timespecs))
+(import (srfi s174 posix-timespecs))
 ```
 
 ## Procedures
@@ -38,7 +38,7 @@ Compares seconds first, then nanoseconds.
 Equal timespecs always hash equally; the specific values aren't meant to match any other implementation's.
 
 ```scheme
-(import (surfage s174 posix-timespecs))
+(import (srfi s174 posix-timespecs))
 
 (define t (timespec 1721000000 500000000))
 (timespec-seconds t)        ; => 1721000000

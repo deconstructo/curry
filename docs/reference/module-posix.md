@@ -4,7 +4,7 @@
 
 POSIX filesystem and process bindings — a pragmatic subset of [SRFI-170](https://srfi.schemers.org/srfi-170/) — plus [SRFI-112](https://srfi.schemers.org/srfi-112/) environment inquiry. Pure system libc (`sys/stat.h`, `dirent.h`, `unistd.h`, `pwd.h`, `grp.h`, `time.h`, `sys/utsname.h`); no external library dependency, macOS/Linux portable. Built by default (`-DBUILD_MODULE_POSIX=ON`).
 
-Portable re-exports under each SRFI's own naming convention are available as `(surfage s170 posix)` and `(surfage s112 environment-inquiry)` — see [`module-surfage.md`](module-surfage.md).
+Portable re-exports under each SRFI's own naming convention are available as `(srfi s170 posix)` and `(srfi s112 environment-inquiry)` — see [`module-srfi.md`](module-srfi.md).
 
 ## Import
 
@@ -157,7 +157,7 @@ Uses the reentrant `getpwuid_r`/`getpwnam_r` with a 4096-byte buffer; a patholog
 
 ## Environment inquiry (SRFI-112)
 
-Six zero-argument procedures, each returning a string or `#f` if the implementation can't provide it. A portable re-export under the SRFI's own naming convention is available as `(surfage s112 environment-inquiry)`.
+Six zero-argument procedures, each returning a string or `#f` if the implementation can't provide it. A portable re-export under the SRFI's own naming convention is available as `(srfi s112 environment-inquiry)`.
 
 - `(implementation-name)` → `"curry"`.
 - `(implementation-version)` → curry's own version string (e.g. `"1.11.1"`).

@@ -4,7 +4,7 @@
 
 [SRFI-238](https://srfi.schemers.org/srfi-238/) codesets: a unified interface for translating between numeric codes and symbolic mnemonics, plus human-readable messages, across `errno`, POSIX signals, and HTTP status codes. Pure system libc (`<errno.h>`, `<signal.h>`, `strerror`/`strsignal`); no external dependency, macOS/Linux portable. Built by default (`-DBUILD_MODULE_CODESETS=ON`).
 
-A portable re-export under the SRFI's own naming convention is available as `(surfage s238 codesets)` — see [`module-surfage.md`](module-surfage.md).
+A portable re-export under the SRFI's own naming convention is available as `(srfi s238 codesets)` — see [`module-srfi.md`](module-srfi.md).
 
 ## Import
 

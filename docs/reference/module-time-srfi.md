@@ -1,4 +1,4 @@
-# `(surfage s19 time)`
+# `(srfi s19 time)`
 
 *unreleased*
 
@@ -7,7 +7,7 @@
 ## Import
 
 ```scheme
-(import (surfage s19 time))
+(import (srfi s19 time))
 ```
 
 ## Scope — what's different from the full SRFI
@@ -61,7 +61,7 @@ Immutable records — Gregorian calendar, with a zone offset in seconds east of 
 - Every `time-tai`-involving converter (`date->time-tai`, `time-tai->date`, `time-utc->time-tai`, `time-monotonic->time-tai`, `julian-day->time-tai`, `modified-julian-day->time-tai`, and their `!` variants) raises.
 
 ```scheme
-(import (surfage s19 time))
+(import (srfi s19 time))
 
 (define d (make-date 0 0 30 14 15 6 2023 0))
 (date->string d "~Y-~m-~dT~H:~M:~S~z")   ; => "2023-06-15T14:30:00+0000"

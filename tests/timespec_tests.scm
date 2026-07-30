@@ -1,6 +1,6 @@
-;;; (surfage s174 posix-timespecs) tests
+;;; (srfi s174 posix-timespecs) tests
 
-(import (surfage s174 posix-timespecs))
+(import (srfi s174 posix-timespecs))
 
 (define pass 0)
 (define fail 0)

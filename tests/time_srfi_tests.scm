@@ -1,6 +1,6 @@
-;;; (surfage s19 time) tests — requires (curry posix)
+;;; (srfi s19 time) tests — requires (curry posix)
 
-(import (surfage s19 time))
+(import (srfi s19 time))
 
 (define pass 0)
 (define fail 0)

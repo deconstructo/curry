@@ -32,7 +32,7 @@
 (define (yaml-null? x) (eq? x yaml-null))
 
 ;;; =========================================================================
-;;; Small local helpers (kept independent of (surfage s1 lists))
+;;; Small local helpers (kept independent of (srfi s1 lists))
 ;;; =========================================================================
 
 (define (%string-suffix? suf s)

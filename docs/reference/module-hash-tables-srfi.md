@@ -1,4 +1,4 @@
-# `(surfage s69 hash-tables)` and `(surfage s90 hash-tables)`
+# `(srfi s69 hash-tables)` and `(srfi s90 hash-tables)`
 
 *unreleased*
 
@@ -7,8 +7,8 @@ Pure Scheme, no C — wrappers around curry's built-in hash table primitives pro
 ## Import
 
 ```scheme
-(import (surfage s69 hash-tables))
-(import (surfage s90 hash-tables))   ; layered on s69; import both together
+(import (srfi s69 hash-tables))
+(import (srfi s90 hash-tables))   ; layered on s69; import both together
 ```
 
 ## Why a wrapper, not just the builtins?
@@ -58,7 +58,7 @@ Comparator tracking works by recording each table created through this library's
 All four return a non-negative exact integer less than `bound` (default 2³⁰). Implemented as a pure-Scheme polynomial rolling hash — `hash`/`hash-by-identity` hash the object's printed (`write`) representation, so two `equal?` values always hash equally, but the specific numbers won't match any other Scheme implementation's hash values (the SRFI doesn't require that). `hash-by-identity` doesn't hash by true pointer identity (no such primitive is exposed at the Scheme level in curry) — it falls back to the same content hash as `hash`, which is a valid (if not maximally efficient) implementation per the SRFI.
 
 ```scheme
-(import (surfage s69 hash-tables))
+(import (srfi s69 hash-tables))
 
 (define t (make-hash-table))
 (hash-table-set! t 'name "Alice")
@@ -76,7 +76,7 @@ All four return a non-negative exact integer less than `bound` (default 2³⁰).
 ## `make-table` (SRFI-90)
 
 ```scheme
-(import (surfage s90 hash-tables) (surfage s69 hash-tables))
+(import (srfi s90 hash-tables) (srfi s69 hash-tables))
 ```
 
 A single constructor, `make-table`, using Gambit-style colon-suffixed keyword markers (`test:`, `hash:`, `size:`, `min-load:`, `max-load:`, `weak-keys:`, `weak-values:`). Gambit's reader treats a colon-suffixed identifier as a self-evaluating keyword object; curry has no such reader feature, so **the markers must be quoted** at the call site — `(make-table 'test: eq?)`, not the bare `(make-table test: eq?)` shown in the SRFI text.

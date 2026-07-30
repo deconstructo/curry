@@ -1,6 +1,6 @@
-;;; (surfage s69 hash-tables) and (surfage s90 hash-tables) tests
+;;; (srfi s69 hash-tables) and (srfi s90 hash-tables) tests
 
-(import (surfage s69 hash-tables) (surfage s90 hash-tables))
+(import (srfi s69 hash-tables) (srfi s90 hash-tables))
 
 (define pass 0)
 (define fail 0)

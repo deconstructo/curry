@@ -34,7 +34,7 @@ ambition; each phase unblocks the phases above it.
 | Polynomial ops (expand, collect, degree) | ✓ partial |
 | **CL-style condition system with restarts** | ✓ **v1.1.0** |
 | **General C FFI (libffi, zero-copy matrix/tensor)** | ✓ **v1.1.0** (`BUILD_FFI=ON`) |
-| **SRFI compatibility layer (`surfage s1`, `surfage s27`)** | ✓ **v1.1.1** |
+| **SRFI compatibility layer (`srfi s1`, `srfi s27`)** | ✓ **v1.1.1** |
 | **MPFR arbitrary-precision floats + interval arithmetic** | ✓ **v1.2.0** (`BUILD_MPFR=ON`) |
 | **Number theory** (primality, factoring, modular arithmetic, combinatorics, CF) | ✓ **v1.2.0** |
 | **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
@@ -69,8 +69,8 @@ ambition; each phase unblocks the phases above it.
 
 ## Phase 1 — v1.1: Condition System + FFI ✓ done
 
-*Shipped in v1.1.0 (2026-06-06). v1.1.1 added SRFI compatibility (`surfage s1
-lists`, `surfage s27 random-bits`). The two features that unblock everything
+*Shipped in v1.1.0 (2026-06-06). v1.1.1 added SRFI compatibility (`srfi s1
+lists`, `srfi s27 random-bits`). The two features that unblock everything
 else. No new dependencies for the condition system; LIBFFI for FFI.*
 
 **1a. Common Lisp condition system with restarts**
@@ -890,7 +890,7 @@ GR/QM library the original mapping promised for that slot):
 | Version | Highlights | Status |
 |---------|-----------|--------|
 | ~~**v1.1.0**~~ | Condition system + restarts; FFI + zero-copy matrix/tensor | ✓ shipped |
-| ~~**v1.1.1**~~ | SRFI compat: `(surfage s1 lists)`, `(surfage s27 random-bits)` | ✓ shipped |
+| ~~**v1.1.1**~~ | SRFI compat: `(srfi s1 lists)`, `(srfi s27 random-bits)` | ✓ shipped |
 | ~~**v1.2.0**~~ | MPFR + interval arithmetic; number theory | ✓ shipped |
 | ~~**v1.2.1**~~ | Pollard rho fix; expanded test coverage | ✓ shipped |
 | ~~**v1.2.5**~~ | Sexagesimal/Babylonian numbers: cuneiform reader/writer, Neugebauer notation | ✓ shipped |
