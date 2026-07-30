@@ -871,6 +871,14 @@ static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     if (!ssl) { SSL_CTX_free(ctx); sock_close(fd); curry_error("redis-connect-tls: SSL_new failed"); }
     SSL_set_fd(ssl, (int)fd);
     SSL_set_tlsext_host_name(ssl, host);  /* SNI */
+    /* SSL_VERIFY_PEER above only checks the certificate chain is trusted,
+     * not that it was issued for this host — without this, any cert the
+     * attacker holds for any domain (or a compromised CA) would pass,
+     * defeating the point of verifying at all. */
+    if (SSL_set1_host(ssl, host) != 1) {
+        SSL_free(ssl); SSL_CTX_free(ctx); sock_close(fd);
+        curry_error("redis-connect-tls: SSL_set1_host failed");
+    }
 
     if (SSL_connect(ssl) != 1) {
         char errbuf[256];
