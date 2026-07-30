@@ -795,7 +795,10 @@
   (check-true "PR translit: pūtum binding (interval)" (procedure? pūtum))
   (check-true "PR translit: epēš-pūtim binding (make-interval)" (procedure? epēš-pūtim))
   (check "PR translit: šapil-pūtim / elû-pūtim (interval-lo/hi)"
-    (list (šapil-pūtim (epēš-pūtim 1 5)) (elû-pūtim (epēš-pūtim 1 5)))
+    ;; endpoints come back as MPFR (arbitrary-precision, directed-rounded per
+    ;; docs/reference/numeric-precision.md), so round-trip through exact
+    ;; before comparing against plain fixnums.
+    (list (exact (šapil-pūtim (epēš-pūtim 1 5))) (exact (elû-pūtim (epēš-pūtim 1 5))))
     '(1 5)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────

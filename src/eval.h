@@ -190,8 +190,14 @@ void  gc_inhibit_restore(int saved);
  * deep inside vm_run() — the longjmp back to the handler unwinds straight
  * past apply()/apply_arr()'s own "restore saved sp after vm_run() returns"
  * cleanup, which only runs on a normal return, never on a longjmp past it. */
+#ifdef __cplusplus
+extern "C" {
+#endif
 void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues);
 void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
+#ifdef __cplusplus
+}
+#endif
 
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
 #define SCM_PROTECT(h, body, on_exn) do {              \
