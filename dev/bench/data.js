@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785429260999,
+  "lastUpdate": 1785494727936,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -344,6 +344,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 98.633,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Chris Ó Luanaigh",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Chris Ó Luanaigh",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "400bafc85d80a2d57d99e2badcc9477440a7e6c7",
+          "message": "fix: intermittent actor/STM crash from unrestored VM state on retry\n\nstm_atomically's retry loop longjmps to its own retry_jmp whenever\nstm_retry() fires (frequent under real contention), bypassing the\nVM-state save/restore SCM_PROTECT provides for exceptions. Every retry\nleaked vm->sp/vm->frame_count, and the next retry's apply_arr call\nbuilt on the already-drifted state — corrupting the VM stack within a\nfew hundred retries and surfacing as a bogus arity error or a straight\nsegfault. Fixed by saving/restoring the same state around the retry\nlongjmp points in both stm_atomically and stm_or_else.\n\nAlso fixes a related but independent latent race: GLOBAL_ENV's frame\nhad no synchronization between frame_grow/frame_hash_rehash and\nconcurrent readers on other actor threads. EnvFrame.version now works\nas a seqlock, with a mutex serializing writers; local (non-shared)\nframes are unaffected.\n\nConfirmed via gdb and an LD_PRELOAD SIGSEGV trap: 0 failures across\n500+ stress runs of tests/actors_tests.scm after the fix, versus a\nconsistent ~25-40% failure rate before.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-07-31T20:44:28+10:00",
+          "tree_id": "f4575a56dafef5bc0761e7d2bd4d153e57986617",
+          "url": "https://github.com/deconstructo/curry/commit/400bafc85d80a2d57d99e2badcc9477440a7e6c7"
+        },
+        "date": 1785494726965,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.497,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 27.496,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.34,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 32.408,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.642,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 419.706,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 86.13,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 131.99,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 106.626,
             "unit": "ms"
           }
         ]
