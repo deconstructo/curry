@@ -114,7 +114,7 @@ The test suites registered in `ctest`:
 | `actors` | `actors_tests.scm` | Concurrency primitives (spawn/send!/receive) |
 | `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |
 | `syntax_rules` | `syntax_rules_tests.scm` | `define-syntax`/`syntax-rules` hygiene |
-| `akkadian` | `akkadian_tests.scm` | Every Akkadian/cuneiform synonym (both transliterated and cuneiform forms) for all AKK_SF and AKK_PR entries in `akkadian_names.h` — 205 assertions |
+| `akkadian` | `akkadian_tests.scm` | Every Akkadian/cuneiform synonym (both transliterated and cuneiform forms) for all AKK_SF/AKK_PR entries in `akkadian_names.h` plus every per-library synonym declared via `lib/curry/modules/curry/private/lang-aliases.scm` across the SRFI libraries — 1736 assertions |
 | `sexagesimal` | `sexagesimal_tests.scm` | Babylonian base-60 I/O: `#s` reader, cuneiform Unicode reader, `number->string`/`string->number` with `'neugebauer`/`'cuneiform`, `current-number-notation`, `(curry sexagesimal)` module — 76 assertions |
 | `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
 | `lsp` | `test_lsp.sh` | `(curry lsp)` over real Content-Length-framed stdio: `initialize` capabilities, reader-driven diagnostics (raise + clear on `didChange`), hover (special forms/builtins/Akkadian synonyms), completion (static table + structurally-collected local bindings), the nesting-depth crash guard (including the `#\"`/`#\;` character-literal bypass), `didClose`, unknown-method errors — 27 assertions |
@@ -219,7 +219,7 @@ CL-style condition system (`src/condition.h`): `handler-bind` installs non-unwin
 
 C FFI (`src/ffi.c`, `BUILD_FFI=ON`): libffi-backed. Types `T_CPTR`, `T_FOREIGN_LIB`, `T_FOREIGN_FN`. `curry_ffi.h` (renamed from `ffi.h` to avoid collision with libffi's `<ffi.h>`).
 
-Before dispatching special forms, `eval()` calls `akk_translate(op)` to remap Akkadian/cuneiform synonyms to their canonical English symbols.
+Before dispatching special forms, `eval()` calls `lang_translate(op)` to remap Akkadian/cuneiform synonyms to their canonical English symbols. `lang_translate`/`lang_pr_lookup` (`src/lang_registry.h`) are the language-agnostic entry points into a pluggable registry of "language packs" (`src/akkadian_lang.c` is Akkadian's own pack, built from `src/akkadian_names.h`); adding another language means writing a new names header + pack file and registering it in `lang_registry_init()`, not touching `eval.c`/`compiler.c`/`builtins.c`/`modules.c`.
 
 ### Environments (`src/env.h`, `src/env.c`)
 
@@ -286,3 +286,9 @@ Not yet implemented:
 ## Akkadian error messages
 
 All runtime errors carry a Standard Babylonian Akkadian preamble (𒀭 ḫiṭītu — *great fault*) from `src/akkadian.h`. Special-form names have Akkadian/cuneiform synonyms in `src/akkadian_names.h`; `eval()` translates them transparently — Akkadian code is valid Curry Scheme.
+
+Two mechanisms distribute foreign-language procedure aliases, chosen by where the name is defined:
+- **Names bound in `GLOBAL_ENV` at `builtins_register()` time** (R7RS/R6RS core, and C `.so` modules like `crypto`/`json`/`mcp`/`posix`/`codesets`) get their aliases from `src/akkadian_names.h`'s `AKK_PR`/`AKK_SF` entries, compiled into the `src/lang_registry.c` pack and applied by `builtins.c`'s startup loop (core) or `modules.c`'s `import_binding()` at import time (C modules — those aliases only come to exist once the module is imported, since the module's own env doesn't exist before then).
+- **Names defined inside a pure-Scheme library** (every SRFI, every `(curry oop)`/`(curry sets)`/etc.) get their aliases declared in that same `.scm` file via `lib/curry/modules/curry/private/lang-aliases.scm`'s `define-name-aliases`/`define-syntax-aliases` macros — see that file's header comment for the pattern, including a reader gotcha (never list two cuneiform forms back-to-back in an `export` clause; they merge into one symbol on read).
+
+A C header entry never covers a pure-Scheme library's own procedures, and a Scheme alias declaration never applies to a C-module or core binding — pick the one matching where the name is actually defined.

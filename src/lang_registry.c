@@ -15,7 +15,17 @@ static int _pack_count = 0;
  * them directly. Add one line per new language. */
 void akkadian_lang_setup(void);
 
+/* eval_init() calls this unconditionally at startup; compiler_compile()
+ * also calls it lazily on first use (its own static-bool guard doesn't
+ * know eval_init() already ran it, since the two live in different
+ * translation units). Idempotent here, not just at each call site: packs
+ * accumulate in a list rather than overwriting flat arrays the way the
+ * pre-registry code did, so a second call would otherwise double-register
+ * every pack. */
 void lang_registry_init(void) {
+    static bool initialized = false;
+    if (initialized) return;
+    initialized = true;
     akkadian_lang_setup();
     /* future languages register themselves here, e.g.:
      *   sumerian_lang_setup();

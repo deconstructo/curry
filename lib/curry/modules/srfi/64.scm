@@ -31,7 +31,7 @@
     ;; from the Catalan-number sense) for a test-result; kašādum:
     ;; "to reach/attain" for a name/pattern match; puzrum: "hidden
     ;; thing" marks the %-prefixed internal helpers.
-    alias eng bāqir-kīnim 𒇽𒆜 bāqir-mitḫārim-eqv 𒅆𒆜𒈧 bāqir-mitḫārim-eq 𒋻𒊻
+    bāqir-kīnim 𒇽𒆜 bāqir-mitḫārim-eqv 𒅆𒆜𒈧 bāqir-mitḫārim-eq 𒋻𒊻
     bāqir-mitḫārim-šalmim 𒈷𒆠 bāqir-qerbûm 𒀭𒆜𒇲 bāqir-ḫiṭītim 𒅆𒀀𒋻 bāqir-kiṣrim
     𒄀𒌑 bāqir-kiṣri-ullulim 𒅆𒆠𒇽 itti-pāqidim 𒁹𒄀𒈷 bāqir-šemî-epšētim 𒌋𒀸
     šurrû-bāqirim 𒌋𒆜𒀀 gamār-bāqirim 𒂗𒉡𒇽 ēṭer-bāqirim 𒇽𒅆𒇽 qû-lemnêm 𒄀𒌑𒀭

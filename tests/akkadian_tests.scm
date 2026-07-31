@@ -1939,7 +1939,7 @@
 (check-true "PR translit: maḫār-kunuk-ṭuppim binding (hashtable-ref)" (eq? maḫār-kunuk-ṭuppim hashtable-ref))
 (check-true "PR cunei: 𒆜𒈷𒈧 binding (hashtable-ref)" (eq? 𒆜𒈷𒈧 hashtable-ref))
 (check-true "PR translit: šakān-kunuk-ṭuppim binding (hashtable-set!)" (eq? šakān-kunuk-ṭuppim hashtable-set!))
-(check-true "PR cunei: 𒀀𒀀 binding (hashtable-set!)" (eq? 𒀀𒀀 hashtable-set!))
+(check-true "PR cunei: 𒂍𒂍𒌑 binding (hashtable-set!)" (eq? 𒂍𒂍𒌑 hashtable-set!))
 (check-true "PR translit: mīnu-kunuk-ṭuppim binding (hashtable-size)" (eq? mīnu-kunuk-ṭuppim hashtable-size))
 (check-true "PR cunei: 𒉡𒀀𒅁 binding (hashtable-size)" (eq? 𒉡𒀀𒅁 hashtable-size))
 (check-true "PR translit: šanî-kunuk-ṭuppim binding (hashtable-update!)" (eq? šanî-kunuk-ṭuppim hashtable-update!))
