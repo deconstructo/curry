@@ -8,8 +8,8 @@
     ;; sense already used for u8-ready?), for the low-level seconds+
     ;; nanoseconds pair as opposed to a full calendar adannum.
     adan-riqqim 𒄀𒌝 adan-riqqim? 𒀭𒄿𒆠 adan-riqqi-kabtim 𒇽𒀭𒅆 adan-riqqi-ṣiḫrim
-    𒌑𒄀 lā-kinattu-ana-adan-riqqim 𒈷𒂗 adan-riqqum-ana-lā-kinattim 𒅁𒈷𒂍 mitḫār-
-    adan-riqqim? 𒀸𒄀 ṣeḫēr-adan-riqqim? 𒆜𒀸𒋻 kunukku-adan-riqqim 𒅁𒅆)
+    𒌑𒄀 lā-kinattu-ana-adan-riqqim 𒈷𒂗 adan-riqqum-ana-lā-kinattim 𒅁𒈷𒂍
+    mitḫār-adan-riqqim? 𒀸𒄀 ṣeḫēr-adan-riqqim? 𒆜𒀸𒋻 kunukku-adan-riqqim 𒅁𒅆)
   (begin
     (define-name-aliases
       (timespec                 adan-riqqim                  𒄀𒌝)

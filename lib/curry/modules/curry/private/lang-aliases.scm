@@ -40,6 +40,18 @@
 ;;; define-syntax-aliases is the same idea for macros (define-syntax
 ;;; exports): the row's english name must already be a macro, and each
 ;;; alias becomes a macro that forwards its arguments unchanged.
+;;;
+;;; Reader gotcha when listing cuneiform forms in an (export ...) clause:
+;;; two cuneiform tokens separated only by a space get read as ONE
+;;; symbol, not two -- the reader greedily merges adjacent
+;;; space-separated cuneiform groups (that's what lets a sexagesimal
+;;; numeral like "𒁹 𒌋𒁹" read as a single number). Never list cuneiform
+;;; forms back-to-back in an export clause; always interleave them with
+;;; their (non-cuneiform) transliterated form, e.g. "tr1 cu1 tr2 cu2 ..."
+;;; rather than "tr1 tr2 ... cu1 cu2 ...". The alias rows passed to
+;;; define-name-aliases/define-syntax-aliases themselves are unaffected
+;;; -- a cuneiform form there is always followed by a closing paren, not
+;;; another cuneiform token, so it can never merge.
 
 (define-syntax %lang-alias-row
   (syntax-rules ()

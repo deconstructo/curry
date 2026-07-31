@@ -13,10 +13,10 @@
     ;; Extends the vector root (ṣindum) already established for the
     ;; R7RS core vector procedures.
     turru-ina 𒇲𒈧𒇽 mimma-ṣindim 𒈠𒈧𒈧 bêr-ṣindim 𒈠𒈷 puḫur-ṣindī 𒊻𒄿 mīnu-ṣindim
-    𒊻𒀀 ṣindum-rīqum? 𒂗𒆜𒀸 gabbu-ṣindim 𒅁𒅁𒉡 lapāt-ṣindim 𒈧𒀭𒅁 lapāt-ṣindim-
-    imittam 𒇽𒁹 ašar-ṣindim 𒌑𒇲𒌋 ašar-ṣindim-imittam 𒂍𒊻 turru-ṣindim-ina 𒇲𒀀
-    turru-ṣindim-ina-šanîtum 𒄿𒆠𒈷 šutbû-ṣindim-ina 𒅆𒍪𒂍 paṭār-ṣindim 𒄀𒅆𒂗
-    paṭār-ṣindim-imittam 𒄿𒈷𒊻 mitḫār-ṣindim 𒇲𒀭𒂍)
+    𒊻𒀀 ṣindum-rīqum? 𒂗𒆜𒀸 gabbu-ṣindim 𒅁𒅁𒉡 lapāt-ṣindim 𒈧𒀭𒅁
+    lapāt-ṣindim-imittam 𒇽𒁹 ašar-ṣindim 𒌑𒇲𒌋 ašar-ṣindim-imittam 𒂍𒊻
+    turru-ṣindim-ina 𒇲𒀀 turru-ṣindim-ina-šanîtum 𒄿𒆠𒈷 šutbû-ṣindim-ina 𒅆𒍪𒂍
+    paṭār-ṣindim 𒄀𒅆𒂗 paṭār-ṣindim-imittam 𒄿𒈷𒊻 mitḫār-ṣindim 𒇲𒀭𒂍)
   (begin
     (define-name-aliases
       (reverse!                         turru-ina                    𒇲𒈧𒇽)

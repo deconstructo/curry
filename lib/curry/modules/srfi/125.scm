@@ -16,14 +16,14 @@
     ;; kunukkum: "seal" (same root as SRFI 69, above) -- the words are
     ;; shared for shared english names, distinct where the APIs diverge.
     ;; dayyānum: "judge" -- reused as the comparator root (see SRFI 128).
-    ṭuppu-ana-kunukkim 𒅆𒇲 banû-kunukkim-mala 𒊻𒀭𒇲 ullul-kunukkim 𒈠𒊕𒀸 dayyān-
-    kunukkim 𒈠𒊕 kunukkum-īšû? 𒇽𒇲𒅆 šutur-kunukkim 𒍪𒊻 mīnu-kunukkim 𒄀𒈧𒅆 mīnu-
-    kašād-kunukkim 𒌑𒄿𒇲 ḫarāṣ-kunukkim 𒇽𒌋 šutur-rīqi-kunukkim 𒅁𒀭𒍪 kunukkum-
-    rīqum? 𒀀𒅁𒆜 libbū-kunukkim 𒌋𒈠 lapāt-kunukkim 𒀭𒍪𒆠 ana-kālāma-kunukkim 𒄿𒂗
-    kanāk-kunukkim 𒊕𒇽 ištēniš-kunukkim 𒈧𒅆𒆠 šutakūl-kunukkim-ana-nindabîm 𒌑𒈠𒌝
-    šutakūl-kunukkim 𒂗𒈠𒂍 nakās-kunukkim 𒌑𒂍𒌑 maḫār-kunukkim-kayyamānim 𒇲𒂗𒍪
-    paṭār-kunukkim 𒌋𒌝 puḫur-kunukkim 𒁀𒅆 šanî-kunukkim 𒀀𒈷 šanî-kunukkim-
-    kayyamānim 𒁹𒅆 alāk-kunukkim 𒆠𒌋)
+    ṭuppu-ana-kunukkim 𒅆𒇲 banû-kunukkim-mala 𒊻𒀭𒇲 ullul-kunukkim 𒈠𒊕𒀸
+    dayyān-kunukkim 𒈠𒊕 kunukkum-īšû? 𒇽𒇲𒅆 šutur-kunukkim 𒍪𒊻 mīnu-kunukkim 𒄀𒈧𒅆
+    mīnu-kašād-kunukkim 𒌑𒄿𒇲 ḫarāṣ-kunukkim 𒇽𒌋 šutur-rīqi-kunukkim 𒅁𒀭𒍪
+    kunukkum-rīqum? 𒀀𒅁𒆜 libbū-kunukkim 𒌋𒈠 lapāt-kunukkim 𒀭𒍪𒆠
+    ana-kālāma-kunukkim 𒄿𒂗 kanāk-kunukkim 𒊕𒇽 ištēniš-kunukkim 𒈧𒅆𒆠
+    šutakūl-kunukkim-ana-nindabîm 𒌑𒈠𒌝 šutakūl-kunukkim 𒂗𒈠𒂍 nakās-kunukkim
+    𒌑𒂍𒌑 maḫār-kunukkim-kayyamānim 𒇲𒂗𒍪 paṭār-kunukkim 𒌋𒌝 puḫur-kunukkim 𒁀𒅆
+    šanî-kunukkim 𒀀𒈷 šanî-kunukkim-kayyamānim 𒁹𒅆 alāk-kunukkim 𒆠𒌋)
   (begin
     (define-name-aliases
       (alist->hash-table            ṭuppu-ana-kunukkim           𒅆𒇲)

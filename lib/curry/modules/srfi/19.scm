@@ -32,30 +32,31 @@
     ;; for TAI (evoking "atomic"); šutēšurum: "well-ordered, regular"
     ;; for monotonic time; ridûtum: "a stretch, an extent" (from redûm,
     ;; "to follow/extend") for a duration.
-    ridûtum 𒄿𒁹𒁀 šutēšurum 𒇲𒋻 šipru 𒈷𒊻𒄿 dannum 𒀭𒌝𒉡 ilku 𒌑𒊻𒌑 kīnum 𒉡𒁀𒅁 epēš-
-    adannim 𒌝𒃲𒄀 adannum? 𒊻𒂗𒆜 zikru-adannim 𒈧𒆜 adan-ṣiḫrim 𒂍𒀀𒀀 adan-kabtim 𒈠𒀭
-    šakān-zikri-adannim 𒆜𒀸 šakān-adan-ṣiḫrim 𒄿𒂍 šakān-adan-kabtim 𒌑𒈧𒀭 šutur-
-    adannim 𒂗𒀀𒀭 adannu-inanna 𒆜𒅆 parās-adannim 𒈧𒇲 ṣeḫēr-adannim? 𒍪𒉡𒇲 ṣeḫēr-
-    mitḫār-adannim? 𒄿𒁀𒁹 mitḫār-adannim? 𒄿𒂗𒀸 rabû-mitḫār-adannim? 𒀭𒈠𒅆 rabû-
-    adannim? 𒀭𒁀 nasāḫ-adannim 𒅁𒇲𒁀 nasāḫ-adannim-ina 𒀭𒊻 waṣāb-ridûtim 𒊻𒇲
-    waṣāb-ridûtim-ina 𒌑𒉡 ḫarāṣ-ridûtim 𒅁𒂗 ḫarāṣ-ridûtim-ina 𒀀𒅆𒈠 epēš-ūmim
-    𒈠𒀭𒊕 ūmum? 𒈠𒍪 ūm-ṣiḫrim 𒁹𒆠𒈠 ūm-kabtim 𒁀𒅆𒊻 ūm-mislim 𒌋𒀭 ūm-berîm 𒄿𒁹𒉡 ūm-
-    warḫim 𒂗𒋻𒂍 warḫum 𒆜𒆠𒈷 šattum 𒁹𒂍𒀭 nasāḫ-ašrim 𒃲𒇲𒈠 ūm-šattim 𒌑𒇲𒅁 ūm-
-    ḫamuštim 𒃲𒉡 mīnu-ḫamuštim 𒅆𒄀𒈠 ūmu-inanna 𒌝𒅆𒇽 minât-ūmī-inanna 𒃲𒅁𒈧 minât-
-    ūmī-eššim-inanna 𒄿𒌑𒍪 ūmum-ana-minât-ūmī 𒈠𒍪𒌝 ūmum-ana-minât-ūmī-eššim 𒊕𒉡
-    ūmum-ana-šutēšurim 𒀸𒃲 ūmum-ana-dannim 𒀀𒁹𒀭 ūmum-ana-kīnim 𒆠𒃲 minât-ūmī-
-    ana-ūmim 𒄀𒉡𒋻 minât-ūmī-ana-šutēšurim 𒅆𒁹𒌋 minât-ūmī-ana-dannim 𒊕𒃲𒌋 minât-
-    ūmī-ana-kīnim 𒂗𒊕𒍪 minât-ūmī-eššim-ana-ūmim 𒀀𒂍 minât-ūmī-eššim-ana-
-    šutēšurim 𒂗𒀀𒂍 minât-ūmī-eššim-ana-dannim 𒄿𒈧 minât-ūmī-eššim-ana-kīnim
-    𒃲𒈠𒆠 šutēšurum-ana-ūmim 𒊻𒀭 šutēšurum-ana-minât-ūmī 𒀭𒇲𒌋 šutēšurum-ana-
-    minât-ūmī-eššim 𒈠𒆜𒆠 šutēšurum-ana-dannim 𒆜𒊻𒆜 šutēšurum-ana-dannim-ina 𒈠𒄿
-    šutēšurum-ana-kīnim 𒊻𒌋 šutēšurum-ana-kīnim-ina 𒊻𒋻 dannum-ana-ūmim 𒊻𒍪𒃲
-    dannum-ana-minât-ūmī 𒈷𒇽𒈧 dannum-ana-minât-ūmī-eššim 𒀸𒃲𒊻 dannum-ana-
-    šutēšurim 𒆜𒌋𒈧 dannum-ana-šutēšurim-ina 𒈷𒌋 dannum-ana-kīnim 𒌑𒈠𒌑 dannum-
-    ana-kīnim-ina 𒈷𒅆𒈠 kīnum-ana-ūmim 𒄿𒁹𒅆 kīnum-ana-minât-ūmī 𒌋𒂍 kīnum-ana-
-    minât-ūmī-eššim 𒀸𒅆𒆠 kīnum-ana-šutēšurim 𒀀𒋻 kīnum-ana-šutēšurim-ina 𒅆𒌑
-    kīnum-ana-dannim 𒀀𒈧 kīnum-ana-dannim-ina 𒀸𒌋𒍪 ūmum-ana-ṭuppim 𒋻𒄀𒋻 ṭuppum-
-    ana-ūmim 𒈧𒋻𒌋)
+    ridûtum 𒄿𒁹𒁀 šutēšurum 𒇲𒋻 šipru 𒈷𒊻𒄿 dannum 𒀭𒌝𒉡 ilku 𒌑𒊻𒌑 kīnum 𒉡𒁀𒅁
+    epēš-adannim 𒌝𒃲𒄀 adannum? 𒊻𒂗𒆜 zikru-adannim 𒈧𒆜 adan-ṣiḫrim 𒂍𒀀𒀀
+    adan-kabtim 𒈠𒀭 šakān-zikri-adannim 𒆜𒀸 šakān-adan-ṣiḫrim 𒄿𒂍
+    šakān-adan-kabtim 𒌑𒈧𒀭 šutur-adannim 𒂗𒀀𒀭 adannu-inanna 𒆜𒅆 parās-adannim
+    𒈧𒇲 ṣeḫēr-adannim? 𒍪𒉡𒇲 ṣeḫēr-mitḫār-adannim? 𒄿𒁀𒁹 mitḫār-adannim? 𒄿𒂗𒀸
+    rabû-mitḫār-adannim? 𒀭𒈠𒅆 rabû-adannim? 𒀭𒁀 nasāḫ-adannim 𒅁𒇲𒁀
+    nasāḫ-adannim-ina 𒀭𒊻 waṣāb-ridûtim 𒊻𒇲 waṣāb-ridûtim-ina 𒌑𒉡 ḫarāṣ-ridûtim
+    𒅁𒂗 ḫarāṣ-ridûtim-ina 𒀀𒅆𒈠 epēš-ūmim 𒈠𒀭𒊕 ūmum? 𒈠𒍪 ūm-ṣiḫrim 𒁹𒆠𒈠 ūm-kabtim
+    𒁀𒅆𒊻 ūm-mislim 𒌋𒀭 ūm-berîm 𒄿𒁹𒉡 ūm-warḫim 𒂗𒋻𒂍 warḫum 𒆜𒆠𒈷 šattum 𒁹𒂍𒀭
+    nasāḫ-ašrim 𒃲𒇲𒈠 ūm-šattim 𒌑𒇲𒅁 ūm-ḫamuštim 𒃲𒉡 mīnu-ḫamuštim 𒅆𒄀𒈠
+    ūmu-inanna 𒌝𒅆𒇽 minât-ūmī-inanna 𒃲𒅁𒈧 minât-ūmī-eššim-inanna 𒄿𒌑𒍪
+    ūmum-ana-minât-ūmī 𒈠𒍪𒌝 ūmum-ana-minât-ūmī-eššim 𒊕𒉡 ūmum-ana-šutēšurim 𒀸𒃲
+    ūmum-ana-dannim 𒀀𒁹𒀭 ūmum-ana-kīnim 𒆠𒃲 minât-ūmī-ana-ūmim 𒄀𒉡𒋻
+    minât-ūmī-ana-šutēšurim 𒅆𒁹𒌋 minât-ūmī-ana-dannim 𒊕𒃲𒌋 minât-ūmī-ana-kīnim
+    𒂗𒊕𒍪 minât-ūmī-eššim-ana-ūmim 𒀀𒂍 minât-ūmī-eššim-ana-šutēšurim 𒂗𒀀𒂍
+    minât-ūmī-eššim-ana-dannim 𒄿𒈧 minât-ūmī-eššim-ana-kīnim 𒃲𒈠𒆠
+    šutēšurum-ana-ūmim 𒊻𒀭 šutēšurum-ana-minât-ūmī 𒀭𒇲𒌋
+    šutēšurum-ana-minât-ūmī-eššim 𒈠𒆜𒆠 šutēšurum-ana-dannim 𒆜𒊻𒆜
+    šutēšurum-ana-dannim-ina 𒈠𒄿 šutēšurum-ana-kīnim 𒊻𒌋
+    šutēšurum-ana-kīnim-ina 𒊻𒋻 dannum-ana-ūmim 𒊻𒍪𒃲 dannum-ana-minât-ūmī 𒈷𒇽𒈧
+    dannum-ana-minât-ūmī-eššim 𒀸𒃲𒊻 dannum-ana-šutēšurim 𒆜𒌋𒈧
+    dannum-ana-šutēšurim-ina 𒈷𒌋 dannum-ana-kīnim 𒌑𒈠𒌑 dannum-ana-kīnim-ina
+    𒈷𒅆𒈠 kīnum-ana-ūmim 𒄿𒁹𒅆 kīnum-ana-minât-ūmī 𒌋𒂍 kīnum-ana-minât-ūmī-eššim
+    𒀸𒅆𒆠 kīnum-ana-šutēšurim 𒀀𒋻 kīnum-ana-šutēšurim-ina 𒅆𒌑 kīnum-ana-dannim
+    𒀀𒈧 kīnum-ana-dannim-ina 𒀸𒌋𒍪 ūmum-ana-ṭuppim 𒋻𒄀𒋻 ṭuppum-ana-ūmim 𒈧𒋻𒌋)
   (begin
     (define-name-aliases
       (time-duration                ridûtum                  𒄿𒁹𒁀)

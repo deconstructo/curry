@@ -15,15 +15,15 @@
     ;; dayyānum: "judge" -- a comparator decides order/equality, exactly
     ;; what a judge does.
     ṣeḫēr-dayyānim? 𒊕𒌋𒁹 ṣeḫēr-mitḫār-dayyānim? 𒄿𒈷𒅆 mitḫār-dayyānim? 𒀀𒋻𒁹
-    rabû-dayyānim? 𒄀𒄿 rabû-mitḫār-dayyānim? 𒅆𒂍 dayyānum? 𒁀𒈠𒀸 dayyānum-
-    šutēšurum? 𒂍𒅁 dayyānum-kunukkum? 𒁀𒈧𒉡 banû-dayyānim 𒄿𒊕 dayyān-gattim 𒈧𒌝
-    dayyān-mitḫārim 𒆜𒆠 dayyān-šutēšurim 𒁀𒊻𒃲 epšet-dayyānim 𒀸𒁹𒀸 parās-gattim
-    𒍪𒈷𒈧 naṣār-gattim 𒋻𒆜 kunuk-dayyānim 𒈠𒉡𒇲 šakān-dayyān-kayyamānim 𒈷𒄿𒈷
-    dayyān-kayyamānum 𒊕𒅁𒈧 banû-dayyān-kayyamānim 𒆠𒉡 dayyān-kēnim 𒁀𒀸𒀀 dayyān-
-    ṣīrim 𒂍𒄿𒌑 dayyān-nikkassim 𒌋𒄿𒂗 dayyān-ṣibtim 𒌋𒌝𒅁 dayyān-ṣibti-mithāriš
-    𒄀𒀭𒁀 dayyān-ṭuppim 𒊕𒅆𒌝 dayyān-ṭuppi-mithāriš 𒆜𒇽𒄿 dayyān-šumim 𒆜𒇽 dayyān-
-    qitnim 𒈠𒌋𒁀 dayyān-nindabîm 𒁹𒍪𒇲 dayyān-ṣindim 𒌝𒄀𒂍 dayyān-eq 𒇲𒈧𒂗 dayyān-
-    eqv 𒈧𒊕𒀭 dayyān-šalmim 𒁀𒄀𒂍)
+    rabû-dayyānim? 𒄀𒄿 rabû-mitḫār-dayyānim? 𒅆𒂍 dayyānum? 𒁀𒈠𒀸
+    dayyānum-šutēšurum? 𒂍𒅁 dayyānum-kunukkum? 𒁀𒈧𒉡 banû-dayyānim 𒄿𒊕
+    dayyān-gattim 𒈧𒌝 dayyān-mitḫārim 𒆜𒆠 dayyān-šutēšurim 𒁀𒊻𒃲 epšet-dayyānim
+    𒀸𒁹𒀸 parās-gattim 𒍪𒈷𒈧 naṣār-gattim 𒋻𒆜 kunuk-dayyānim 𒈠𒉡𒇲
+    šakān-dayyān-kayyamānim 𒈷𒄿𒈷 dayyān-kayyamānum 𒊕𒅁𒈧 banû-dayyān-kayyamānim
+    𒆠𒉡 dayyān-kēnim 𒁀𒀸𒀀 dayyān-ṣīrim 𒂍𒄿𒌑 dayyān-nikkassim 𒌋𒄿𒂗 dayyān-ṣibtim
+    𒌋𒌝𒅁 dayyān-ṣibti-mithāriš 𒄀𒀭𒁀 dayyān-ṭuppim 𒊕𒅆𒌝 dayyān-ṭuppi-mithāriš
+    𒆜𒇽𒄿 dayyān-šumim 𒆜𒇽 dayyān-qitnim 𒈠𒌋𒁀 dayyān-nindabîm 𒁹𒍪𒇲 dayyān-ṣindim
+    𒌝𒄀𒂍 dayyān-eq 𒇲𒈧𒂗 dayyān-eqv 𒈧𒊕𒀭 dayyān-šalmim 𒁀𒄀𒂍)
   (begin
     (define-name-aliases
       (<?                               ṣeḫēr-dayyānim?              𒊕𒌋𒁹)

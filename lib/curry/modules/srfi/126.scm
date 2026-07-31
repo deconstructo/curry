@@ -16,10 +16,10 @@
     kunuk-ṭuppum-īšû? 𒊕𒌝𒈧 šutur-kunuk-ṭuppim 𒆜𒉡 nasāḫ-kunuk-ṭuppim 𒃲𒊻𒄿
     libbū-kunuk-ṭuppim 𒀀𒂍𒈠 parās-mitḫāri-kunuk-ṭuppim 𒇲𒍪 epšet-kunuk-ṭuppim
     𒁹𒀸 rēšū-kunuk-ṭuppim 𒅁𒆜𒉡 kunuk-ṭuppum-šunnâm? 𒍪𒁀𒂗 maḫār-kunuk-ṭuppim 𒆜𒈷𒈧
-    šakān-kunuk-ṭuppim 𒀀𒀀 mīnu-kunuk-ṭuppim 𒉡𒀀𒅁 šanî-kunuk-ṭuppim 𒁹𒈧𒊻 šīmū-
-    kunuk-ṭuppim 𒈷𒇲 alāk-kunuk-ṭuppim 𒄀𒅁 kunuk-ṭuppum? 𒃲𒌑𒇽 banû-kunuk-ṭuppi-
-    eq 𒀀𒆠𒁹 banû-kunuk-ṭuppi-eqv 𒈠𒁀 banû-kunuk-ṭuppim 𒊕𒄀𒀀 kunuk-ṭuppi-šaṭārim
-    𒂗𒋻 kunuk-šumim 𒆠𒆜𒇽)
+    šakān-kunuk-ṭuppim 𒀀𒀀 mīnu-kunuk-ṭuppim 𒉡𒀀𒅁 šanî-kunuk-ṭuppim 𒁹𒈧𒊻
+    šīmū-kunuk-ṭuppim 𒈷𒇲 alāk-kunuk-ṭuppim 𒄀𒅁 kunuk-ṭuppum? 𒃲𒌑𒇽
+    banû-kunuk-ṭuppi-eq 𒀀𒆠𒁹 banû-kunuk-ṭuppi-eqv 𒈠𒁀 banû-kunuk-ṭuppim 𒊕𒄀𒀀
+    kunuk-ṭuppi-šaṭārim 𒂗𒋻 kunuk-šumim 𒆠𒆜𒇽)
   (begin
     (define-name-aliases
       (equal-hash                   kunuk-mitḫārim               𒈧𒇽)

@@ -19,19 +19,20 @@
     ;; (holds many of a kind, with counts). aḫītum: "something foreign/
     ;; strange" for XOR (either but not both).
     banû-kiṣrim 𒂍𒊕𒊻 dayyān-kiṣrim 𒄀𒈧𒇽 kiṣrum-īšû? 𒌑𒄀𒋻 maḫār-kiṣrim 𒀭𒅆𒌋
-    kiṣrū-parsū? 𒇲𒇲𒈷 nasāḫ-gabbi-kiṣrim 𒌑𒂍 nasāḫ-gabbi-kiṣrim-ina 𒁹𒃲 zâzu-
-    kiṣrim 𒆠𒅆𒃲 nasāḫ-kiṣrim 𒅆𒁹𒌑 nasāḫ-kiṣrim-ina 𒈧𒅁 puḫur-kiṣrim-ina 𒍪𒀀
-    ištēniš-kiṣrim-ina 𒌑𒋻 ḫarāṣ-kiṣrim-ina 𒅁𒂗𒅆 aḫītu-kiṣrim 𒈠𒈠 aḫītu-kiṣrim-
-    ina 𒍪𒀭𒆜 ṣeḫēr-kiṣrim? 𒆠𒂍 ṣeḫēr-mitḫār-kiṣrim? 𒅁𒍪𒉡 rabû-kiṣrim? 𒈷𒈷𒌝 rabû-
-    mitḫār-kiṣrim? 𒇲𒀭 banû-kīsim 𒆜𒇽𒀸 kīsum? 𒃲𒊻 mitḫār-kīsim? 𒊕𒂍𒇽 kīsum-īšû?
-    𒀀𒄀 kīsum-rīqum? 𒅁𒆠 mīnu-kīsim 𒊕𒈠 mīnu-ēdûti-kīsim 𒈷𒅁 mīnu-zittim-kīsim
-    𒈷𒅁𒈧 waṣāb-kīsim 𒍪𒌝 waṣāb-kīsim-ina 𒀸𒈠𒅁 nasāḫ-kīsim 𒈧𒃲𒈧 nasāḫ-kīsim-ina
-    𒊕𒄿 ana-kālāma-kīsim 𒊻𒂗𒀭 lapāt-kīsim 𒊻𒊻𒃲 epšet-kīsim 𒃲𒅆𒉡 ṣêr-kīsim 𒂍𒂍
-    mimma-kīsim? 𒅁𒌝 gabbu-kīsim? 𒌑𒁀𒁹 mīnu-kašād-kīsim 𒆜𒀀𒆜 šutur-kīsim 𒀀𒂗
-    kīsum-ana-nindabîm 𒈧𒆠𒈷 nindabûm-ana-kīsim 𒇽𒂍𒋻 kīsum-ana-libbim 𒊕𒈧𒌝
-    libbum-ana-kīsim 𒋻𒈷𒌝 puḫur-kīsim 𒆜𒋻𒈷 puḫur-kīsim-ina 𒃲𒀸𒅆 ištēniš-kīsim
-    𒃲𒌝 kamār-kīsim 𒊕𒀀 kamār-kīsim-ina 𒈷𒊻𒈠 šutakūl-kīsim 𒅁𒊕 šutakūl-kīsim-ina
-    𒂍𒁹𒃲 dayyān-kīsim 𒈧𒌑𒂗)
+    kiṣrū-parsū? 𒇲𒇲𒈷 nasāḫ-gabbi-kiṣrim 𒌑𒂍 nasāḫ-gabbi-kiṣrim-ina 𒁹𒃲
+    zâzu-kiṣrim 𒆠𒅆𒃲 nasāḫ-kiṣrim 𒅆𒁹𒌑 nasāḫ-kiṣrim-ina 𒈧𒅁 puḫur-kiṣrim-ina 𒍪𒀀
+    ištēniš-kiṣrim-ina 𒌑𒋻 ḫarāṣ-kiṣrim-ina 𒅁𒂗𒅆 aḫītu-kiṣrim 𒈠𒈠
+    aḫītu-kiṣrim-ina 𒍪𒀭𒆜 ṣeḫēr-kiṣrim? 𒆠𒂍 ṣeḫēr-mitḫār-kiṣrim? 𒅁𒍪𒉡
+    rabû-kiṣrim? 𒈷𒈷𒌝 rabû-mitḫār-kiṣrim? 𒇲𒀭 banû-kīsim 𒆜𒇽𒀸 kīsum? 𒃲𒊻
+    mitḫār-kīsim? 𒊕𒂍𒇽 kīsum-īšû? 𒀀𒄀 kīsum-rīqum? 𒅁𒆠 mīnu-kīsim 𒊕𒈠
+    mīnu-ēdûti-kīsim 𒈷𒅁 mīnu-zittim-kīsim 𒈷𒅁𒈧 waṣāb-kīsim 𒍪𒌝 waṣāb-kīsim-ina
+    𒀸𒈠𒅁 nasāḫ-kīsim 𒈧𒃲𒈧 nasāḫ-kīsim-ina 𒊕𒄿 ana-kālāma-kīsim 𒊻𒂗𒀭 lapāt-kīsim
+    𒊻𒊻𒃲 epšet-kīsim 𒃲𒅆𒉡 ṣêr-kīsim 𒂍𒂍 mimma-kīsim? 𒅁𒌝 gabbu-kīsim? 𒌑𒁀𒁹
+    mīnu-kašād-kīsim 𒆜𒀀𒆜 šutur-kīsim 𒀀𒂗 kīsum-ana-nindabîm 𒈧𒆠𒈷
+    nindabûm-ana-kīsim 𒇽𒂍𒋻 kīsum-ana-libbim 𒊕𒈧𒌝 libbum-ana-kīsim 𒋻𒈷𒌝
+    puḫur-kīsim 𒆜𒋻𒈷 puḫur-kīsim-ina 𒃲𒀸𒅆 ištēniš-kīsim 𒃲𒌝 kamār-kīsim 𒊕𒀀
+    kamār-kīsim-ina 𒈷𒊻𒈠 šutakūl-kīsim 𒅁𒊕 šutakūl-kīsim-ina 𒂍𒁹𒃲 dayyān-kīsim
+    𒈧𒌑𒂗)
   (begin
     (define-name-aliases
       (set                  banû-kiṣrim              𒂍𒊕𒊻)

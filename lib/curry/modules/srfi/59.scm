@@ -7,10 +7,7 @@
     ->vicinity vicinity:suffix? ->namestring
     ;; Akkadian synonyms -- ašrum: "place, location" (reused from the
     ;; condition system's condition-backtrace), urḫum: "road, path".
-    ašru-ana-ṭuppim ṭuppu-ana-ašrim ašru-bītim ašru-epēšim ina-ašrim
-    ašru-ṭuppi epēš-ašrim urḫu-ana-ašrim ašru-šipirtim ašru-qerbûm
-    ašru-amēlim zibbat-ašrim?
-    𒀀𒃲𒊕 𒄿𒈧𒂗 𒁹𒆜𒁀 𒀀𒁀 𒁹𒈠 𒍪𒂗 𒉡𒈧 𒂗𒃲𒀀 𒊻𒀀𒌑 𒊻𒆜𒆠 𒌋𒊻 𒄀𒁹𒇲)
+    ašru-ana-ṭuppim 𒀀𒃲𒊕 ṭuppu-ana-ašrim 𒄿𒈧𒂗 ašru-bītim 𒁹𒆜𒁀 ašru-epēšim 𒀀𒁀 ina-ašrim 𒁹𒈠 ašru-ṭuppi 𒍪𒂗 epēš-ašrim 𒉡𒈧 urḫu-ana-ašrim 𒂗𒃲𒀀 ašru-šipirtim 𒊻𒀀𒌑 ašru-qerbûm 𒊻𒆜𒆠 ašru-amēlim 𒌋𒊻 zibbat-ašrim? 𒄀𒁹𒇲)
   (begin
     (define-name-aliases
       (->namestring          ašru-ana-ṭuppim      𒀀𒃲𒊕)

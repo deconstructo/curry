@@ -31,26 +31,27 @@
     ;; from the Catalan-number sense) for a test-result; kašādum:
     ;; "to reach/attain" for a name/pattern match; puzrum: "hidden
     ;; thing" marks the %-prefixed internal helpers.
-    bāqir-kīnim 𒇽𒆜 bāqir-mitḫārim-eqv 𒅆𒆜𒈧 bāqir-mitḫārim-eq 𒋻𒊻 bāqir-
-    mitḫārim-šalmim 𒈷𒆠 bāqir-qerbûm 𒀭𒆜𒇲 bāqir-ḫiṭītim 𒅆𒀀𒋻 bāqir-šemî-epšētim
-    𒌋𒀸 šurrû-bāqirim 𒌋𒆜𒀀 gamār-bāqirim 𒂗𒉡𒇽 bāqir-kiṣrim 𒄀𒌑 bāqir-kiṣri-
-    ullulim 𒅆𒆠𒇽 ēṭer-bāqirim 𒇽𒅆𒇽 qû-lemnêm 𒄀𒌑𒀭 kašād-šumim 𒁹𒆜𒆜 kašād-minîm
-    𒌋𒃲𒀭 kašād-mimma 𒈷𒄀𒄀 kašād-gabbi 𒄿𒇽𒃲 pāqidum? 𒇽𒍪𒁀 pāqid-inanna 𒇲𒀸𒄿 maḫār-
-    pāqidim 𒈠𒌑𒄿 epēš-pāqidim 𒄿𒆜 pāqid-lā-bašîm 𒌋𒌋𒈧 pāqid-ēdiš 𒇲𒄿𒀀 pāqid-
-    bāniš 𒈧𒅆𒇽 nadān-bāqirim 𒉡𒄀 itti-pāqidim 𒁹𒄀𒈷 zikru-purussîm 𒌋𒄀 damqum-
-    bāqirim? 𒈠𒄀 maḫār-purussîm 𒄿𒊻𒌝 šakān-purussîm 𒀭𒇲𒅆 nasāḫ-purussîm 𒇲𒇽𒈷
-    ullul-purussîm 𒄿𒀀 purussû-ṭuppim 𒀸𒇲 mīnu-damqim 𒄀𒇽 mīnu-lemnim 𒅁𒈷𒃲 mīnu-
-    damqi-lā-qaātim 𒃲𒂍 mīnu-lemni-lā-qaātim 𒊕𒌋 mīnu-eṭrim 𒄿𒁹 šum-bāqirim 𒃲𒇲
-    urḫu-kiṣrim 𒆜𒋻 kiṣru-kīlum 𒈧𒁀 aḫu-qīštim 𒂗𒈧 šakān-aḫi-qīštim 𒆠𒊻𒊻 turru-
-    pāqidim 𒌋𒌑 ina-šurrî-bāqirim 𒀸𒃲𒉡 šakān-ina-šurrî-bāqirim 𒂗𒀸𒉡 ina-gamār-
-    bāqirim 𒂗𒅆𒅆 šakān-ina-gamār-bāqirim 𒂍𒋻 ina-šurrî-kiṣrim 𒂗𒂗 šakān-ina-
-    šurrî-kiṣrim 𒄿𒀸𒂗 ina-gamār-kiṣrim 𒀸𒋻𒀭 šakān-ina-gamār-kiṣrim 𒄿𒌝𒋻 ina-
-    lemni-mīnim 𒄀𒅁𒆠 šakān-ina-lemni-mīnim 𒆠𒀸𒈷 ina-lemni-šumim 𒇲𒃲𒂗 šakān-ina-
-    lemni-šumim 𒈧𒌝𒉡 ina-gamrim 𒂍𒃲 šakān-ina-gamrim 𒇽𒈷𒁀 šurrû-bāqirim-ēdiš
-    𒊻𒅆𒍪 gamār-bāqirim-ēdiš 𒀭𒅁 šurrû-kiṣrim-ēdiš 𒀀𒅆 gamār-kiṣrim-ēdiš 𒇽𒅁
-    lemni-mīnim-ēdiš 𒅁𒌋𒄀 lemni-šumim-ēdiš 𒈷𒊕𒂍 gamrum-ēdiš 𒌝𒌑 bāqir-kīnim-
-    puzrum 𒀀𒊕 kašād-puzrum 𒇽𒍪 qerbûm-puzrum 𒈠𒀸𒌑 ḫiṭītum-puzrum 𒊕𒂍 ḫiṭītum-
-    puzrum-šanûm 𒇲𒇽 kiṣrum-puzrum 𒌋𒉡𒅁)
+    alias eng bāqir-kīnim 𒇽𒆜 bāqir-mitḫārim-eqv 𒅆𒆜𒈧 bāqir-mitḫārim-eq 𒋻𒊻
+    bāqir-mitḫārim-šalmim 𒈷𒆠 bāqir-qerbûm 𒀭𒆜𒇲 bāqir-ḫiṭītim 𒅆𒀀𒋻 bāqir-kiṣrim
+    𒄀𒌑 bāqir-kiṣri-ullulim 𒅆𒆠𒇽 itti-pāqidim 𒁹𒄀𒈷 bāqir-šemî-epšētim 𒌋𒀸
+    šurrû-bāqirim 𒌋𒆜𒀀 gamār-bāqirim 𒂗𒉡𒇽 ēṭer-bāqirim 𒇽𒅆𒇽 qû-lemnêm 𒄀𒌑𒀭
+    kašād-šumim 𒁹𒆜𒆜 kašād-minîm 𒌋𒃲𒀭 kašād-mimma 𒈷𒄀𒄀 kašād-gabbi 𒄿𒇽𒃲 pāqidum?
+    𒇽𒍪𒁀 pāqid-inanna 𒇲𒀸𒄿 maḫār-pāqidim 𒈠𒌑𒄿 epēš-pāqidim 𒄿𒆜 pāqid-lā-bašîm
+    𒌋𒌋𒈧 pāqid-ēdiš 𒇲𒄿𒀀 pāqid-bāniš 𒈧𒅆𒇽 nadān-bāqirim 𒉡𒄀 zikru-purussîm 𒌋𒄀
+    damqum-bāqirim? 𒈠𒄀 maḫār-purussîm 𒄿𒊻𒌝 šakān-purussîm 𒀭𒇲𒅆 nasāḫ-purussîm
+    𒇲𒇽𒈷 ullul-purussîm 𒄿𒀀 purussû-ṭuppim 𒀸𒇲 mīnu-damqim 𒄀𒇽 mīnu-lemnim 𒅁𒈷𒃲
+    mīnu-damqi-lā-qaātim 𒃲𒂍 mīnu-lemni-lā-qaātim 𒊕𒌋 mīnu-eṭrim 𒄿𒁹
+    šum-bāqirim 𒃲𒇲 urḫu-kiṣrim 𒆜𒋻 kiṣru-kīlum 𒈧𒁀 aḫu-qīštim 𒂗𒈧
+    šakān-aḫi-qīštim 𒆠𒊻𒊻 turru-pāqidim 𒌋𒌑 ina-šurrî-bāqirim 𒀸𒃲𒉡
+    šakān-ina-šurrî-bāqirim 𒂗𒀸𒉡 ina-gamār-bāqirim 𒂗𒅆𒅆
+    šakān-ina-gamār-bāqirim 𒂍𒋻 ina-šurrî-kiṣrim 𒂗𒂗 šakān-ina-šurrî-kiṣrim
+    𒄿𒀸𒂗 ina-gamār-kiṣrim 𒀸𒋻𒀭 šakān-ina-gamār-kiṣrim 𒄿𒌝𒋻 ina-lemni-mīnim 𒄀𒅁𒆠
+    šakān-ina-lemni-mīnim 𒆠𒀸𒈷 ina-lemni-šumim 𒇲𒃲𒂗 šakān-ina-lemni-šumim 𒈧𒌝𒉡
+    ina-gamrim 𒂍𒃲 šakān-ina-gamrim 𒇽𒈷𒁀 šurrû-bāqirim-ēdiš 𒊻𒅆𒍪
+    gamār-bāqirim-ēdiš 𒀭𒅁 šurrû-kiṣrim-ēdiš 𒀀𒅆 gamār-kiṣrim-ēdiš 𒇽𒅁
+    lemni-mīnim-ēdiš 𒅁𒌋𒄀 lemni-šumim-ēdiš 𒈷𒊕𒂍 gamrum-ēdiš 𒌝𒌑
+    bāqir-kīnim-puzrum 𒀀𒊕 kašād-puzrum 𒇽𒍪 qerbûm-puzrum 𒈠𒀸𒌑 ḫiṭītum-puzrum
+    𒊕𒂍 ḫiṭītum-puzrum-šanûm 𒇲𒇽 kiṣrum-puzrum 𒌋𒉡𒅁)
   (begin
     ;; test-assert/test-equal/.../test-group(-with-cleanup)/test-with-runner
     ;; are define-syntax in s64/testing.scm (they need to capture the

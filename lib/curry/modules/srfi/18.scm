@@ -13,11 +13,7 @@
     ;; compulsory assigned labor, an apt fit for a scheduled unit of
     ;; independent work. dagiltum (from dagālum, "to watch/wait for") --
     ;; a condition variable is exactly a thing waited upon.
-    ilku? epēš-ilkim ilku-annûm šumu-ilkim šurrû-ilkim wuššur-ilkim
-    ṣalāl-ilkim kaṣār-ilkim qatê-ilkim puzri-ilkim šakān-puzri-ilkim
-    dagiltum? epēš-dagiltim šasû-dagiltim šasû-gabbi-dagiltim
-    adan-kaṣārim? qatê-ilkim-šanûm?
-    𒉡𒄿𒀭 𒌑𒈷 𒊻𒌋𒀭 𒆠𒀀 𒍪𒁹𒂍 𒈷𒂗𒅆 𒂗𒃲𒀸 𒄀𒁀 𒇲𒁀𒈠 𒋻𒄿𒌋 𒆠𒁀 𒀀𒍪 𒆜𒃲𒆠 𒀭𒅆 𒇲𒂗𒆠 𒆜𒄀 𒂍𒉡𒍪)
+    ilku? 𒉡𒄿𒀭 epēš-ilkim 𒌑𒈷 ilku-annûm 𒊻𒌋𒀭 šumu-ilkim 𒆠𒀀 šurrû-ilkim 𒍪𒁹𒂍 wuššur-ilkim 𒈷𒂗𒅆 ṣalāl-ilkim 𒂗𒃲𒀸 kaṣār-ilkim 𒄀𒁀 qatê-ilkim 𒇲𒁀𒈠 puzri-ilkim 𒋻𒄿𒌋 šakān-puzri-ilkim 𒆠𒁀 dagiltum? 𒀀𒍪 epēš-dagiltim 𒆜𒃲𒆠 šasû-dagiltim 𒀭𒅆 šasû-gabbi-dagiltim 𒇲𒂗𒆠 adan-kaṣārim? 𒆜𒄀 qatê-ilkim-šanûm? 𒂍𒉡𒍪)
   (begin
     (define-name-aliases
       (thread?                        ilku?                    𒉡𒄿𒀭)

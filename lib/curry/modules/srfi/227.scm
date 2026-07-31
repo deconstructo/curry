@@ -8,8 +8,8 @@
     ;; watrum: "surplus, extra" (already used for extended-gcd/
     ;; abundant?) fits an optional/extra argument. puzrum marks the
     ;; %-prefixed internal helpers, as elsewhere.
-    epēšu-watrum 𒈷𒉡𒇲 leqû-mala 𒂍𒀭 leqû-mala-šanîš 𒊻𒌝 watru-kayyamānum 𒆜𒄿
-    watru-kayyamānum? 𒄿𒆠𒇽 watrum-puzrum 𒀭𒅆𒈠 watrum-puzrum-šanîš 𒁀𒅁)
+    epēšu-watrum 𒈷𒉡𒇲 leqû-mala 𒂍𒀭 leqû-mala-šanîš 𒊻𒌝 watrum-puzrum 𒀭𒅆𒈠
+    watrum-puzrum-šanîš 𒁀𒅁 watru-kayyamānum 𒆜𒄿 watru-kayyamānum? 𒄿𒆠𒇽)
   (begin
     (define-syntax-aliases
       (opt-lambda               epēšu-watrum             𒈷𒉡𒇲)

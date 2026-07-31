@@ -13,10 +13,10 @@
     ;; kunukkum: "seal" -- reused from the crypto hash-digest sense
     ;; (md5/sha1/sha256 already use kunukku) for a hash table.
     ṭuppu-ana-kunukkim 𒅆𒇲 kunukku 𒉡𒉡𒊻 kunuk-gattim 𒁀𒋻𒋻 šutur-kunukkim 𒍪𒊻
-    parās-mitḫāri-kunukkim 𒌋𒌋𒄿 lapāt-kunukkim 𒀭𒍪𒆠 epšet-kunukkim 𒁹𒀀 kaṣār-
-    kunukkim 𒃲𒆜𒄿 maḫār-kunukkim-kayyamānim 𒇲𒂗𒍪 šanî-kunukkim 𒀀𒈷 šanî-
-    kunukkim-kayyamānim 𒁹𒅆 alāk-kunukkim 𒆠𒌋 kunuk-ṭuppi-mithāriš 𒅆𒇽𒁹 kunuk-
-    šaṭārim 𒍪𒀭)
+    parās-mitḫāri-kunukkim 𒌋𒌋𒄿 lapāt-kunukkim 𒀭𒍪𒆠 epšet-kunukkim 𒁹𒀀
+    kaṣār-kunukkim 𒃲𒆜𒄿 maḫār-kunukkim-kayyamānim 𒇲𒂗𒍪 šanî-kunukkim 𒀀𒈷
+    šanî-kunukkim-kayyamānim 𒁹𒅆 alāk-kunukkim 𒆠𒌋 kunuk-ṭuppi-mithāriš 𒅆𒇽𒁹
+    kunuk-šaṭārim 𒍪𒀭)
   (begin
     (define-name-aliases
       (alist->hash-table            ṭuppu-ana-kunukkim           𒅆𒇲)

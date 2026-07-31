@@ -10,10 +10,10 @@
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; pūrum: "lot" (as in casting lots, already used for
     ;; default-random-source) is the chance/randomness root.
-    banû-pūr-mithāriš 𒂍𒆜 banû-pūr-kīnim 𒄿𒋻𒂗 banû-pūr-napḫarim 𒌋𒅆𒈧 banû-pūr-
-    kilallān 𒈧𒋻𒇲 banû-pūr-ḫisbim 𒅁𒆜𒌋 banû-pūr-mitḫartim 𒅁𒃲𒋻 banû-pūr-eššim
-    𒈷𒇽 banû-pūr-zikrim 𒀭𒉡 banû-pūr-kēnim 𒌋𒇽𒇽 banû-pūr-ṣibtim 𒋻𒆠𒈧 banû-pūr-
-    nikkassim 𒀸𒀭 banû-pūr-ṣīrim 𒊕𒇲𒄿)
+    banû-pūr-mithāriš 𒂍𒆜 banû-pūr-kīnim 𒄿𒋻𒂗 banû-pūr-napḫarim 𒌋𒅆𒈧
+    banû-pūr-kilallān 𒈧𒋻𒇲 banû-pūr-ḫisbim 𒅁𒆜𒌋 banû-pūr-mitḫartim 𒅁𒃲𒋻
+    banû-pūr-eššim 𒈷𒇽 banû-pūr-zikrim 𒀭𒉡 banû-pūr-kēnim 𒌋𒇽𒇽 banû-pūr-ṣibtim
+    𒋻𒆠𒈧 banû-pūr-nikkassim 𒀸𒀭 banû-pūr-ṣīrim 𒊕𒇲𒄿)
   (begin
     (define-name-aliases
       (make-uniform-generator           banû-pūr-mithāriš            𒂍𒆜)
