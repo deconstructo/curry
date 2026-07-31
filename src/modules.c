@@ -7,7 +7,7 @@
 #include "gc.h"
 #include "reader.h"
 #include "port.h"
-#include "akkadian_eval.h"
+#include "lang_registry.h"
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
@@ -389,21 +389,20 @@ static void import_binding(val_t orig_sym, val_t val, val_t spec, val_t filter, 
     }
     env_define(env, sym, val);
 
-    /* Akkadian/cuneiform aliases: builtins.c's own startup loop only
-     * ever sees names already bound in the global env at that point
-     * (see the comment on that loop) — it never sees names that live
-     * only inside a module's own environment until something
+    /* Foreign-language aliases (Akkadian and any other registered
+     * language pack — see lang_registry.h): builtins.c's own startup
+     * loop only ever sees names already bound in the global env at that
+     * point (see the comment on that loop) — it never sees names that
+     * live only inside a module's own environment until something
      * imports them, which is now. Alias under the module's ORIGINAL
      * export name (orig_sym), not whatever a rename/prefix filter
      * turned the local binding into — the synonym is a property of
      * what the module exports, not of the importer's local nickname
      * for it. only/except still apply, since we've already
      * returned past excluded names above. */
-    val_t translit, cuneiform;
-    if (akk_pr_lookup(orig_sym, &translit, &cuneiform)) {
-        env_define(env, translit, val);
-        env_define(env, cuneiform, val);
-    }
+    val_t forms[LANG_PR_MAX_FORMS];
+    int nforms = lang_pr_lookup(orig_sym, forms, LANG_PR_MAX_FORMS);
+    for (int f = 0; f < nforms; f++) env_define(env, forms[f], val);
 }
 
 /* Import a single spec into env.

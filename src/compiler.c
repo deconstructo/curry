@@ -30,7 +30,7 @@
  *   quote, if, begin, define, set!, lambda, let (including named let),
  *   let*, letrec, letrec*, and, or, cond (with => support), when, unless,
  *   do, values, apply.  Akkadian/cuneiform synonyms are translated by
- *   akk_translate() before dispatch, so Akkadian source compiles identically.
+ *   lang_translate() before dispatch, so Akkadian source compiles identically.
  *
  * TAIL CALLS
  *   The `tail` flag propagates through the compile tree.  Calls in tail
@@ -61,7 +61,7 @@
 #include "eval.h"
 #include "vm.h"
 #include "builtins.h"
-#include "akkadian_eval.h"
+#include "lang_registry.h"
 #include "profiling.h"
 #include "reader.h"
 #include "record_type.h"
@@ -366,13 +366,13 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
     while (vis_pair(bscan)) {
         val_t form = vcar(bscan);
         bool is_def = vis_pair(form) && vis_symbol(vcar(form)) &&
-                      (akk_translate(vcar(form)) == S_DEFINE ||
-                       akk_translate(vcar(form)) == S_DEFINE_SYNTAX ||
-                       akk_translate(vcar(form)) == S_DEFINE_VALUES ||
-                       akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE ||
-                       akk_translate(vcar(form)) == S_DEFINE_RULE ||
-                       akk_translate(vcar(form)) == S_DEFINE_RULESET ||
-                       akk_translate(vcar(form)) == S_DEFINE_ALGEBRA);
+                      (lang_translate(vcar(form)) == S_DEFINE ||
+                       lang_translate(vcar(form)) == S_DEFINE_SYNTAX ||
+                       lang_translate(vcar(form)) == S_DEFINE_VALUES ||
+                       lang_translate(vcar(form)) == S_DEFINE_RECORD_TYPE ||
+                       lang_translate(vcar(form)) == S_DEFINE_RULE ||
+                       lang_translate(vcar(form)) == S_DEFINE_RULESET ||
+                       lang_translate(vcar(form)) == S_DEFINE_ALGEBRA);
         /* (symbolic x y z ...) binds each name as a fresh runtime value
          * (see compile_symbolic) — not an R7RS-style internal definition
          * (no ordering restriction relative to expressions, matching its
@@ -386,7 +386,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
          * layout (confirmed: a local `symbolic` variable read back an
          * unrelated value). */
         if (vis_pair(form) && vis_symbol(vcar(form)) &&
-            akk_translate(vcar(form)) == S_SYMBOLIC) {
+            lang_translate(vcar(form)) == S_SYMBOLIC) {
             for (val_t p = vcdr(form); vis_pair(p); p = vcdr(p)) {
                 if (!vis_symbol(vcar(p))) continue;
                 add_local(&c, vcar(p));
@@ -398,7 +398,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
         if (is_def) {
             if (body_has_expr)
                 scm_raise(V_FALSE, "internal definition after expression in body (R7RS violation)");
-            if (akk_translate(vcar(form)) == S_DEFINE_RECORD_TYPE) {
+            if (lang_translate(vcar(form)) == S_DEFINE_RECORD_TYPE) {
                 /* define-record-type doesn't bind its own type-name symbol
                  * (matching record_type_build_spec/eval.c) — it binds a
                  * constructor, a predicate, and one accessor/mutator pair
@@ -412,14 +412,14 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                     c.locals[c.local_count - 1].depth = -1; /* uninitialised */
                     emit(&c, OP_VOID, line); /* reserve stack slot */
                 }
-            } else if (akk_translate(vcar(form)) == S_DEFINE_SYNTAX) {
+            } else if (lang_translate(vcar(form)) == S_DEFINE_SYNTAX) {
                 /* Macro registration is pure compile-time bookkeeping (see
                  * add_syntax_local/resolve_syntax_local) — no VM stack slot
                  * to reserve.  compile_define_syntax registers it into
                  * c.syntax_locals sequentially as compile_seq reaches this
                  * form for real, so later forms in this same body see it. */
-            } else if (akk_translate(vcar(form)) == S_DEFINE_RULE ||
-                       akk_translate(vcar(form)) == S_DEFINE_RULESET) {
+            } else if (lang_translate(vcar(form)) == S_DEFINE_RULE ||
+                       lang_translate(vcar(form)) == S_DEFINE_RULESET) {
                 /* Neither binds a name into the enclosing scope: define-rule
                  * registers a global rewrite rule and binds nothing;
                  * define-ruleset's "name" argument is a rule-grouping label
@@ -434,7 +434,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                  * later bare reference to the special form name `quote`
                  * into a read of an uninitialised local instead of the
                  * expected unbound-variable error). */
-            } else if (akk_translate(vcar(form)) == S_DEFINE_ALGEBRA) {
+            } else if (lang_translate(vcar(form)) == S_DEFINE_ALGEBRA) {
                 /* Only the compile-time-literal-quoted-operator case
                  * ((define-algebra 'sym ...), by far the common usage — see
                  * compile_define_algebra) gets a real lexical binding for
@@ -1545,14 +1545,14 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
  * its matching internal-define prescan case in compile_lambda above) to
  * detect the overwhelmingly common case where an operator name is a
  * compile-time-known literal rather than a runtime-computed expression.
- * Compares via akk_translate rather than a raw S_QUOTE check, so an
+ * Compares via lang_translate rather than a raw S_QUOTE check, so an
  * Akkadian/cuneiform spelling of quote (e.g. kīma) is recognized too —
  * found by review: without this, (define-algebra (kīma myop) ...) missed
  * the compile-time-literal fast path and fell back to the tree-eval path,
  * reproducing the global-leak bug this function exists to fix for that
  * one spelling. */
 static bool is_quoted_symbol(val_t expr, val_t *out_sym) {
-    if (vis_pair(expr) && akk_translate(vcar(expr)) == S_QUOTE &&
+    if (vis_pair(expr) && lang_translate(vcar(expr)) == S_QUOTE &&
         vis_pair(vcdr(expr)) && vis_symbol(vcar(vcdr(expr))) &&
         vcdr(vcdr(expr)) == V_NIL) {
         *out_sym = vcar(vcdr(expr));
@@ -1932,7 +1932,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     }
 
     /* ── Compound form (head . args) ── */
-    val_t head = akk_translate(vcar(expr));
+    val_t head = lang_translate(vcar(expr));
     val_t args = vcdr(expr);
 
     /* quote */
@@ -2168,8 +2168,8 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 val_t compiler_compile(val_t expr) {
-    static bool akk_ready = false;
-    if (!akk_ready) { akk_eval_setup(); akk_ready = true; }
+    static bool lang_ready = false;
+    if (!lang_ready) { lang_registry_init(); lang_ready = true; }
 
     gc_inhibit_minor();
     Compiler c;

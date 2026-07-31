@@ -114,7 +114,8 @@ set(CORE_SOURCES
   src/eval.c
   src/runtime.c
   src/record_type.c
-  src/akkadian_eval.c
+  src/akkadian_lang.c
+  src/lang_registry.c
   src/builtins.c
   src/builtins_curry.c
   src/workpool.c

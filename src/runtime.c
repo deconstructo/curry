@@ -26,7 +26,7 @@
 #include "reader.h"
 #include "gc.h"
 #include "akkadian.h"
-#include "akkadian_eval.h"
+#include "lang_registry.h"
 #include "symbolic.h"
 #include "surreal.h"
 #include "profiling.h"
@@ -557,4 +557,4 @@ val_t scm_load(const char *path, val_t env) {
     return result;
 }
 
-void eval_init(void) { akk_eval_setup(); symbolic_init(); surreal_init(); }
+void eval_init(void) { lang_registry_init(); symbolic_init(); surreal_init(); }

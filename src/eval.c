@@ -30,7 +30,7 @@
 #include "env.h"
 #include "gc.h"
 #include "akkadian.h"
-#include "akkadian_eval.h"
+#include "lang_registry.h"
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
@@ -146,7 +146,7 @@ tail:
         if (t != T_PAIR)   return expr;   /* string, number, vector, etc. — self-eval */
     }
 
-    op   = akk_translate(vcar(expr));   /* Akkadian/cuneiform → English */
+    op   = lang_translate(vcar(expr));   /* Akkadian/cuneiform → English */
     rest = vcdr(expr);
 
     /* ---- Special forms ---- */
