@@ -295,11 +295,51 @@ val_t stm_atomically(val_t thunk) {
 
     val_t result = V_VOID;
 
+    /* State to restore if stm_retry()'s longjmp lands here. retry_jmp is a
+     * SEPARATE longjmp target from SCM_PROTECT's own h.jmp below, reached
+     * directly from stm_tvar_read (or stm_or_else) deep inside whatever VM
+     * call depth apply_arr(thunk, ...) is nested at when a conflicting
+     * commit is detected — exactly like an uncaught exception unwinding
+     * through vm_run(), but it bypasses SCM_PROTECT's own restore entirely
+     * since it never touches h.jmp. Without saving/restoring the same
+     * vm->sp/frame_count/open_upvalues (plus the shadow stack, GC-inhibit
+     * count and JIT call depth) around it ourselves, each retry leaves
+     * vm->sp/frame_count wherever the retrying read happened; the next
+     * retry's apply_arr call then captures that already-drifted vm->sp as
+     * its new baseline, leaking VM stack/frame slots on every single
+     * retry. Under real contention (multiple actors transacting on one
+     * tvar, as in tests/actors_tests.scm's STM section) retries are
+     * frequent, and the leak corrupts vm->stack/vm->frames within a few
+     * hundred retries: a later OP_CALL's PEEK() reads a stale/leftover
+     * stack slot as the callee, invoking an unrelated live closure with
+     * whatever argc happened to be encoded at that call site — surfacing
+     * as a bogus "too many arguments" on some unrelated closure, or a
+     * straight segfault in vm_run(), depending on what garbage lands
+     * there. Confirmed via gdb/LD_PRELOAD SIGSEGV-trap reproduction: the
+     * crash is always inside vm_run(), reached through apply_arr() called
+     * from here, and disappears once retries restore this state exactly
+     * as SCM_PROTECT already does for the exception path below. */
+    void   *saved_shadow;
+    int     saved_inhibit;
+    int     saved_jit_depth;
+    int     saved_vm_frame_count;
+    void   *saved_vm_sp;
+    void   *saved_vm_open_upvalues;
+
     for (;;) {
         tx_reset(tx);
         current_handler = saved_handler;
 
+        saved_shadow    = gc_shadow_save();
+        saved_inhibit   = gc_inhibit_save();
+        saved_jit_depth = jit_depth_save();
+        vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
+
         if (setjmp(retry_jmp) == RETRY_SIG) {
+            gc_shadow_restore(saved_shadow);
+            gc_inhibit_restore(saved_inhibit);
+            jit_depth_restore(saved_jit_depth);
+            vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
             tx_wait_for_change(tx);
             continue;
         }
@@ -340,22 +380,49 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
     jmp_buf local_jmp;
     tx->retry_jmp = &local_jmp;
 
+    /* Same vm-state leak as stm_atomically's retry_jmp (see the comment
+     * there): a stm_retry() inside thunk1/thunk2 longjmps straight to
+     * local_jmp, skipping SCM_PROTECT's restore entirely, so it has to be
+     * saved/restored here by hand around each attempt. */
+    void *saved_shadow;
+    int   saved_inhibit, saved_jit_depth;
+    int   saved_vm_frame_count;
+    void *saved_vm_sp, *saved_vm_open_upvalues;
+
+    saved_shadow    = gc_shadow_save();
+    saved_inhibit   = gc_inhibit_save();
+    saved_jit_depth = jit_depth_save();
+    vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
+
     if (setjmp(local_jmp) == 0) {
         val_t r1      = apply_arr(thunk1, 0, NULL);
         tx->retry_jmp = saved_retry;
         return r1;
     }
+    gc_shadow_restore(saved_shadow);
+    gc_inhibit_restore(saved_inhibit);
+    jit_depth_restore(saved_jit_depth);
+    vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
 
     tx->rlen     = saved_rlen;
     tx->wlen     = saved_wlen;
     tx->read_ver = saved_read_ver;
     tx->retry_jmp = &local_jmp;
 
+    saved_shadow    = gc_shadow_save();
+    saved_inhibit   = gc_inhibit_save();
+    saved_jit_depth = jit_depth_save();
+    vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
+
     if (setjmp(local_jmp) == 0) {
         val_t r2      = apply_arr(thunk2, 0, NULL);
         tx->retry_jmp = saved_retry;
         return r2;
     }
+    gc_shadow_restore(saved_shadow);
+    gc_inhibit_restore(saved_inhibit);
+    jit_depth_restore(saved_jit_depth);
+    vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
 
     tx->rlen     = saved_rlen;
     tx->wlen     = saved_wlen;

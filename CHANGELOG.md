@@ -1,5 +1,58 @@
 # Changelog
 
+### Unreleased
+
+**Core — intermittent crash/hang in actor + STM code (`tests/actors_tests.scm`)**
+
+`make test` was failing ~25-40% of the time in the STM section (4 actors
+hammering one shared `tvar` via `atomically`), either segfaulting or
+hanging on a semaphore that never got posted because the actor died first.
+Root cause: `stm_atomically`'s retry loop (`src/stm.c`) longjmps to its own
+`retry_jmp` whenever `stm_retry()` fires (very frequent under real
+contention — every conflicting read triggers one), completely bypassing
+the VM-state save/restore that `SCM_PROTECT` provides for the exception
+path. Every retry left `vm->sp`/`vm->frame_count` wherever the retrying
+`tvar-read` happened deep inside `vm_run()`, and the next retry's
+`apply_arr` call captured that already-drifted `vm->sp` as its new
+baseline — silently leaking VM stack/frame slots on every single retry
+until the VM's stack was corrupted enough that a later `OP_CALL` read a
+stale slot as the callee, invoking an unrelated live closure with a bogus
+argc (surfacing as "too many arguments" on some unrelated procedure) or
+segfaulting outright. Fixed by saving/restoring the same state
+(shadow stack, GC-inhibit count, JIT call depth, VM frame/stack pointers)
+around `stm_atomically`'s and `stm_or_else`'s retry longjmp points that
+`SCM_PROTECT` already does for exceptions. Confirmed via gdb and an
+LD_PRELOAD `SIGSEGV` trap; 0 failures across 500+ stress runs after the
+fix, versus a consistent ~25-40% failure rate before.
+
+While chasing the above, also found and fixed a real (if narrower) latent
+race in `GLOBAL_ENV`: `frame_grow`/`frame_hash_rehash` (`src/env.c`)
+reallocate the frame's `syms`/`vals`/`hidx` arrays with zero
+synchronization against concurrent readers — actors are the only thing
+that ever shares one `EnvFrame` across threads (every other frame is
+owned by exactly the C call stack that created it), so a `(define ...)`
+racing another actor's global lookup could read a hash bucket computed
+against one generation of the table applied to a different one, indexing
+out of bounds. Wasn't the trigger for the crash above (that repro never
+grows `GLOBAL_ENV` while the actors run), but is real and independently
+fixed: `EnvFrame.version` now doubles as a seqlock (odd = writer in
+progress) with a mutex serializing writers; lock-free readers retry on a
+version mismatch. Local (non-global, single-thread-owned) frames take an
+unchanged, zero-overhead path.
+
+**Core — `qt6.so` failed to load; MPFR/interval values displayed as `#<object N>`**
+
+`vm_exn_state_save`/`vm_exn_state_restore` (`src/eval.h`) lacked `extern
+"C"` linkage, so `qt6.cpp` (compiled as C++) name-mangled the
+declarations while `vm.c` (compiled as C) exported them unmangled —
+`qt6.so` failed to `dlopen` with an undefined symbol error at runtime.
+Fixed by wrapping the whole header in one outer `extern "C"` block rather
+than patching declarations one at a time, so a future C++ module can't
+reintroduce the same bug by including `eval.h` unwrapped. Separately,
+`scm_write`/`scm_display` (`src/port.c`) had no case for MPFR or Interval
+values, so displaying one fell through to the generic `#<object N>`
+placeholder instead of its numeric value.
+
 ### 1.13.0 — 2026-07-30
 
 **Breaking: `(surfage sN name)` renamed to `(srfi sN name)`**

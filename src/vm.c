@@ -176,6 +176,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 
 #include "vm.h"
 #include "debug.h"
@@ -603,15 +604,25 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci = READ_U8();
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(GLOBAL_ENV);
+            /* Acquire load: pairs with the release store in env.c's
+             * seq_end_write, so a match against cache[ci].version here
+             * guarantees cache[ci].slot (stamped from the same
+             * frame_lookup_versioned call that validated that version) is
+             * still a slot in the CURRENT root->vals, not a stale one from
+             * before a since-completed frame_grow. See env.c for why an
+             * unsynchronized global-environment frame is unsafe when actor
+             * threads share it. */
+            uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
             val_t loaded_gval;
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
-                                 cache[ci].version == root->version, 1)) {
+                                 cache[ci].version == root_ver, 1)) {
                 loaded_gval = *cache[ci].slot;
             } else {
                 val_t sym = CONSTS[ci];
-                val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
+                uint32_t ver;
+                val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
-                if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
+                if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
                 loaded_gval = *slot;
             }
             PUSH(loaded_gval);
@@ -622,16 +633,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t val = POP();
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(GLOBAL_ENV);
+            uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
-                                 cache[ci].version == root->version, 1)) {
+                                 cache[ci].version == root_ver, 1)) {
                 gc_wb_slot(cache[ci].slot, val);
             } else {
                 val_t sym = CONSTS[ci];
-                val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
+                uint32_t ver;
+                val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
                 else {
                     gc_wb_slot(slot, val);
-                    if (cache) { cache[ci].slot = slot; cache[ci].version = root->version; }
+                    if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
                 }
             }
             NEXT;
@@ -641,12 +654,21 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t sym = CONSTS[ci];
             val_t val = POP();
             env_define(GLOBAL_ENV, sym, val);
-            /* Fill cache after define (frame may have grown, bumping version) */
+            /* Fill cache after define, using the (slot, version) pair from
+             * one atomic frame_lookup_versioned call rather than fetching
+             * the slot and then separately re-reading root->version — the
+             * latter leaves a window where a second, concurrent define (on
+             * another actor thread) could grow the frame again in between,
+             * stamping this slot (valid for the generation env_define just
+             * produced) with a newer version than the one it's actually
+             * from, which would make every future cache hit trust it
+             * regardless of whether it's since gone stale. */
             GlobCacheEntry *cache = GCACHE;
             if (cache) {
                 EnvFrame *root = as_env(GLOBAL_ENV);
-                val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
-                if (slot) { cache[ci].slot = slot; cache[ci].version = root->version; }
+                uint32_t ver;
+                val_t *slot = frame_lookup_versioned(root, sym, &ver);
+                if (slot) { cache[ci].slot = slot; cache[ci].version = ver; }
             }
             NEXT;
         }

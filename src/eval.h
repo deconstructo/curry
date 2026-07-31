@@ -20,6 +20,20 @@
 #include <setjmp.h>
 #include <stdarg.h>
 
+/* Everything below has C linkage. Wrapping the whole header (rather than
+ * guarding each declaration individually) means a C++ translation unit that
+ * includes eval.h unwrapped (e.g. a module's .cpp) can never again hit the
+ * qt6.so bug: vm_exn_state_save/vm_exn_state_restore were declared without
+ * extern "C" here, so qt6.cpp's C++ compilation mangled the names while
+ * vm.c (compiled as C) exported them unmangled, and qt6.so failed to dlopen
+ * with an undefined symbol at runtime. The per-declaration extern "C" blocks
+ * below (for WindFrame/current_handler/jit_depth/etc.) still special-case
+ * their own C-vs-C++ ABI differences (thread_local wrapper avoidance) and
+ * are left as-is; this outer wrap is a backstop for everything else. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Initialize the evaluator (call after sym_init, env_init, num_init) */
 void eval_init(void);
 
@@ -229,5 +243,9 @@ val_t scm_load(const char *path, val_t env);
 
 /* ---- Quasiquote expansion (used by compiler) ---- */
 val_t expand_qq(val_t form, val_t env, int depth);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CURRY_EVAL_H */

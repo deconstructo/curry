@@ -23,6 +23,17 @@ bool             frame_define(struct EnvFrame *f, val_t sym, val_t val);
 bool             frame_set(struct EnvFrame *f, val_t sym, val_t val);  /* local only */
 val_t           *frame_lookup(struct EnvFrame *f, val_t sym);          /* NULL if not found */
 
+/* Like frame_lookup, but for the (possibly shared) GLOBAL_ENV frame also
+ * hands back the frame->version the lookup was validated against, in the
+ * same lock-free read as the slot fetch itself — see vm.c's OP_LOAD_GLOBAL/
+ * OP_STORE_GLOBAL/OP_DEF_GLOBAL, which stamp their monomorphic inline cache
+ * with *out_ver rather than re-reading frame->version afterward (a
+ * time-of-check-to-time-of-use gap: a frame_grow landing in between would
+ * silently stamp a slot from the OLD vals array with the NEW version,
+ * telling every future cache hit to trust a stale pointer forever). NULL
+ * out_ver is fine when the caller doesn't need it. */
+val_t           *frame_lookup_versioned(struct EnvFrame *f, val_t sym, uint32_t *out_ver);
+
 /* ---- Environment operations ---- */
 
 /* Create a new root (global) environment */
