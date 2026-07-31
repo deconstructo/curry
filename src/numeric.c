@@ -1717,6 +1717,19 @@ val_t sex_parse_cuneiform(const char *s) {
         got_any = true;
     }
 
+    /* A group can break out of the loop above by hitting a glyph that
+     * isn't a valid sexagesimal digit (p left pointing at it, *p != '\0')
+     * rather than by exhausting the string. That's not "1 followed by
+     * some other token" -- callers pass one already-tokenized symbol
+     * string, so leftover, unconsumed content means this token as a
+     * WHOLE isn't a sexagesimal literal, even though a leading prefix of
+     * it happened to parse as one (e.g. "𒁹𒈠", ASH followed by a
+     * non-digit glyph, would otherwise silently parse as 1 and discard
+     * "𒈠" -- see reader.c's cuneiform token dispatch, which relies on
+     * this function failing so it can fall back to interning the whole
+     * token as a symbol). */
+    if (*p != '\0') { mpz_clear(total); return V_FALSE; }
+
     val_t r = make_big_from_mpz(total);
     mpz_clear(total);
     return got_any ? r : V_FALSE;
