@@ -366,6 +366,34 @@ Differentiating a polynomial, integrating, simplifying — in the language of th
 
 ---
 
+## Error messages
+
+All runtime errors carry a Standard Babylonian preamble identifying the fault category. Selected phrases:
+
+| Situation | Akkadian | Gloss |
+|-----------|----------|-------|
+| Unbound variable | *šumu lā šakin* | the name is not established |
+| Wrong type (pair expected) | *lā qitnum* | not a small thing |
+| Wrong type (number) | *lā nikkassum* | not a count |
+| Wrong type (string) | *lā ṭupšarrum* | not a scribal tablet |
+| Wrong type (procedure) | *lā pārisum* | not a resolver/judge |
+| Division by zero | *ina ṣifri pašāṭum lā leqû* | cannot erase with the void |
+| Module not found | *bīt ṭuppi lā ibašši* | the tablet house does not exist |
+| File cannot be opened | *ṭuppu lā petûm* | the tablet cannot be opened |
+| Actor dead | *ana erṣetim ittalak* | it has gone to the underworld |
+| Unknown error | *ḫiṭītu rabîtum* | great fault |
+
+Example:
+
+```
+𒀭 ḫiṭītu — lā nikkassum:
+  +: not a number: "hello"
+```
+
+See [`error-codes.md`](error-codes.md) for the stable machine-legible `error-object-code`/`condition-code` registry underlying these messages.
+
+---
+
 ## Test coverage
 
 Every entry in `akkadian_names.h` is exercised by `tests/akkadian_tests.scm`,
