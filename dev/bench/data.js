@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785574349688,
+  "lastUpdate": 1785575598611,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -965,6 +965,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 107.127,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b4a5d941a8d7d219dcf26da9ffc64292b4dd006c",
+          "message": "docs: split SRFI docs into individual pages under docs/reference/srfi/\n\nmodule-srfi.md had grown to 449 lines covering 24 SRFI libraries in one\nfile; three others (SRFI-69/90, SRFI-19, SRFI-174) already had separate\ntop-level doc files of their own. Restructures all of it into one page\nper SRFI (paired SRFIs that are documented together and layer on each\nother -- 69+90, 125+126, 132+133 -- share one page) under\ndocs/reference/srfi/, with docs/reference/srfi/index.md as the full\navailability table + bare-number-shim explanation + portability note.\n\nmodule-srfi.md is now a short pointer to srfi/index.md rather than\nduplicating its content. README.md's SRFI table, module-posix.md, and\nmodule-codesets.md updated to link directly to the relevant per-SRFI\npage instead of the old monolithic doc. One stray doc-path reference in\na Scheme source comment (lib/curry/modules/srfi/s19/time.scm) updated\ntoo. No code changes -- docs only.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T19:12:23+10:00",
+          "tree_id": "600c73bcf5b59046348b7ffffe3dc10a3b23d605",
+          "url": "https://github.com/deconstructo/curry/commit/b4a5d941a8d7d219dcf26da9ffc64292b4dd006c"
+        },
+        "date": 1785575597808,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 23.142,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.168,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.179,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.843,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.619,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.644,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.921,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.738,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.526,
             "unit": "ms"
           }
         ]
