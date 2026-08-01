@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785575598611,
+  "lastUpdate": 1785576317558,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1034,6 +1034,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.526,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "574c6d1d7bb859282855db25e2b7576e770ca987",
+          "message": "docs: move README.md's reference tables into docs/reference/\n\nREADME had grown to 349 lines, most of it reference-table material\n(numeric tower, CAS procedures, parallel map/reduce, SRFI-27 random,\nmodules, SRFI compatibility, LLVM JIT benchmarks, FFI types, GC flags,\nAkkadian error phrases) rather than the introductory content a README\nshould lead with.\n\n- Numeric tower table: deleted, already covered by language.md's Values\n  and types table.\n- CAS table: moved into a new \"Quick reference\" section at the top of\n  symbolic.md (which had no consolidated procedure table before).\n- Parallel map/reduce table: moved to new docs/reference/parallel.md.\n- SRFI-27 random table: deleted, already covered by\n  docs/reference/srfi/s27.md.\n- Modules table (36 rows): moved to new docs/reference/modules.md.\n- SRFI compatibility table (21 rows): deleted, already covered by\n  docs/reference/srfi/index.md.\n- LLVM JIT procedure/benchmark tables + build command: moved to new\n  docs/reference/llvm-jit.md.\n- FFI \"Supported types\" line: dropped, already covered in more detail\n  by module-ffi.md's existing Type mapping table.\n- GC backend table + gc-stats field breakdown: deleted, already covered\n  by the existing docs/reference/gc.md.\n- Akkadian error-message table: moved into a new \"Error messages\"\n  section in akkadian-reference.md (genuinely new content there, not a\n  duplicate).\n\nREADME's own Documents index updated with links to all the\nnew/newly-referenced pages. Checked every new/changed relative link\nresolves to a real file (one pre-existing dangling link to a since-removed\ndocs/PHILOSOPHY.md was found but is unrelated to this change, left as-is).\n\nREADME.md: 349 -> 171 lines.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T19:24:14+10:00",
+          "tree_id": "4981a9944219940cbce9d77078d77c3ca940ec1b",
+          "url": "https://github.com/deconstructo/curry/commit/574c6d1d7bb859282855db25e2b7576e770ca987"
+        },
+        "date": 1785576316577,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 23.384,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.097,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.171,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.125,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 198.292,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 367.888,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.96,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 124.366,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 104.021,
             "unit": "ms"
           }
         ]
