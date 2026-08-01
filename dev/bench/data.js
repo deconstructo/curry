@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785552126650,
+  "lastUpdate": 1785552200839,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -620,6 +620,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.478,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0981cad9c5f9a13f6f88fbddd8fa4cbd13155962",
+          "message": "Modify CHANGELOG for uncommitted updates\n\nUpdated changelog to reflect uncommitted changes.",
+          "timestamp": "2026-08-01T12:42:26+10:00",
+          "tree_id": "2ed90bfad6a0ae8d849f5bea1774bd3f69562ff9",
+          "url": "https://github.com/deconstructo/curry/commit/0981cad9c5f9a13f6f88fbddd8fa4cbd13155962"
+        },
+        "date": 1785552199886,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.324,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.284,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.968,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.416,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.057,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 421.005,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 84.471,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 129.255,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.7,
             "unit": "ms"
           }
         ]
