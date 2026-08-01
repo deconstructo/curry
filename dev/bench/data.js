@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785577651978,
+  "lastUpdate": 1785580082041,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1241,6 +1241,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 106.245,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "32b6c8d6856b8858f46c1a6a653f40c3c1b2d30d",
+          "message": "feat: (srfi s263 prototype-objects) — SRFI-263 Prototype Object System\n\nA \"Self\"-inspired prototype/message-passing object system: objects are\nplain procedures invoked as (obj 'message . args), holding value/method/\nparent slots in a private table, derived from other objects (cloning-\nwith-a-parent-pointer) rather than instantiated from classes. Complements\n(curry oop), the existing CLOS-style class/generic-function system --\ndifferent paradigms, not competing implementations of the same thing.\n\nImplements *the-root-object*, derive/copy/mirror, set-value-slot!/\nset-method-slot!/set-parent-slot!/delete-slot!, message-not-understood/\nambiguous-message-send (both overridable), slot?/slot-getter/slot-setter/\nslot-type, and the define-method/define-object/derive-object/copy-object\nsyntactic sugar. (srfi 263) and (srfi srfi-263) shims included.\n\nTwo real bugs found and fixed during implementation/review, both in the\nparent-chain search algorithm (%find-slot/%search-parents/%deliver):\n\n1. Diamond-inheritance ambiguity detection didn't dedupe hits by slot\n   identity, so an object with 2+ parents sending any message that\n   resolves via ambiguous-message-send (itself searched across those same\n   parents, converging on the same root handler through every branch)\n   recursed forever instead of raising once. Fixed by deduping search\n   results by slot eq? identity before counting them as distinct.\n\n2. (found by an independent code-review subagent) set-parent-slot! is\n   ordinary public API with no cycle check, so a buggy or adversarial\n   call (most simply an object re-parenting itself) could create a cycle\n   in the parent graph -- every parent-walking search (dispatch, resend,\n   and the mirror's has-ancestor/full-ancestor-list/full-slot-list) had\n   no guard against revisiting an object already on the search path,\n   causing a native stack-overflow segfault. Fixed with a visited-set\n   threaded through all of them; a cycle that additionally severs every\n   path back to *the-root-object* (so even the message-not-understood/\n   ambiguous-message-send fallback handlers become unreachable) now\n   raises a plain Scheme error instead of attempting a fallback that\n   would itself loop.\n\n29-assertion test suite covering both regressions plus the normal API\nsurface. Docs at docs/reference/srfi/s263.md, including the specific\ninterpretive choices made where the SRFI's own prose is thin/example-\ndriven (ambiguity dedup, copy's exact semantics, multi-parent auto-naming,\nthe cycle-safety notes above).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T20:27:00+10:00",
+          "tree_id": "f04f05cc4852d42ab17b302dffa8e58ccce3002e",
+          "url": "https://github.com/deconstructo/curry/commit/32b6c8d6856b8858f46c1a6a653f40c3c1b2d30d"
+        },
+        "date": 1785580081658,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.373,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.418,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.132,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.673,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.137,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 415.349,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 85.853,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 131.924,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 103.067,
             "unit": "ms"
           }
         ]
