@@ -52,6 +52,18 @@
 ;; 𒁹 𒑊 = 1*60+0 = 60
 (check "cuneiform 60"   𒁹 𒑊   60)
 
+;; Regression: the reader's trailing-token loop (for glyphs like '?'/'!'
+;; immediately after a cuneiform run) used to push a decoded codepoint back
+;; as a single raw (char)-truncated byte instead of re-encoding it as UTF-8.
+;; That's invisible for single-byte ASCII trailing chars, but a multi-byte
+;; trailing glyph -- e.g. the "·" (U+00B7, 2 bytes) radix separator this
+;; diff introduces, written with no space as a user might copy from
+;; number->string's output -- produced invalid UTF-8 that crashed later
+;; (confirmed: segfault). Loading this very test file would have crashed
+;; before the fix; reaching this assertion at all is the regression test.
+(check "cuneiform reader trailing multi-byte glyph doesn't corrupt"
+       (symbol? '𒌋𒁹·) #t)
+
 ;;; ---- number->string with 'neugebauer ----
 
 (check "n->s integer 71"    (number->string 71 'neugebauer)    "1,11")
@@ -239,6 +251,27 @@
 (check "s->n cun bad index"   (string->number "𒁹+𒁹𒂊𒌋" 'cuneiform)  #f)
 (check "s->n cun garbage"     (string->number "𒁹𒄿𒈠" 'cuneiform)    #f)
 
+;; Regression: a later term repeating an earlier term's blade used to
+;; silently overwrite it instead of being rejected as malformed.
+(check "s->n cun duplicate blade across terms"
+       (string->number "𒁹+𒁹𒁹𒂊𒁹+𒁹𒁹𒁹𒂊𒁹" 'cuneiform) #f)
+
+;; Regression: a magnitude following an explicit sign was allowed to carry
+;; its own sign too ("1--2i" silently parsed as 1+2i via double negation).
+(check "s->n cun double sign rejected"
+       (string->number "𒁹--𒁹𒁹𒄿" 'cuneiform) #f)
+
+;; Regression: the extended-term cap (8) was sized for the octonion special
+;; case but the general-multivector fallback needs up to 255 (2^8-1
+;; non-scalar blades for an 8-basis-vector Cl(8,0,0)) -- a valid multivector
+;; with more than 8 nonzero non-scalar blades used to fail to round-trip.
+(let ((v (make-mv 4 0 0)))
+  (mv-set! v 0 1)
+  (let loop ((i 1)) (when (< i 16) (mv-set! v i i) (loop (+ i 1))))
+  (check "rt cun mv >8 non-scalar terms"
+         (number->string (string->number (number->string v 'cuneiform) 'cuneiform))
+         (number->string v)))
+
 ;;; ---- Cuneiform notation for surreal/symbolic (writer only) ----
 ;;; Best-effort, not required to round-trip through string->number.
 
@@ -264,6 +297,19 @@
 (check "n->s rational 3/2 (radix)"  (number->string 3/2)                      "3/2")
 (check "n->s complex"                (number->string (make-rectangular 3 4))   "3+4i")
 (check "n->s quaternion"             (number->string (make-quaternion 1 2 3 4)) "1+2i+3j+4k")
+
+;; Regression: this used to infinite-recurse (stack-overflow crash) when
+;; current-number-notation was 'cuneiform/'neugebauer and the rational's
+;; integer part overflowed the 64-base-60-digit cap: num_to_string's
+;; fallback delegated to scm_write, which for a rational calls
+;; write_number_notation, which calls back into sex_to_cuneiform, which
+;; falls back to num_to_string on invalid digits -- looping forever. Giving
+;; num_to_string its own direct (non-scm_write) rational branch fixed it.
+(current-number-notation 'cuneiform)
+(check "n->s huge rational doesn't infinite-recurse"
+       (string? (number->string (/ (expt 60 65) 7)))
+       #t)
+(current-number-notation #f)
 
 ;;; ---- Summary ----
 

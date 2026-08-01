@@ -1392,12 +1392,30 @@ val_t num_to_string(val_t v, int radix) {
     } else if (vis_mpfr(v)) {
         return mpfr_to_string(v, 0, radix);
 #endif
+    } else if (vis_rational(v)) {
+        /* A dedicated branch, not the scm_write() fallback below: scm_write()
+         * routes a rational through write_number_notation() (src/port.c),
+         * which -- when current-number-notation is 'cuneiform/'neugebauer --
+         * calls back into sex_to_cuneiform()/sex_to_neugebauer(). Either of
+         * those falls back to num_to_string(v, 10) for a rational whose
+         * integer part overflows the 64-base-60-digit cap
+         * (mpz_to_base60_digits() returns -1), which would re-enter this
+         * exact function and recurse forever (confirmed: segfault). Formatting
+         * directly with GMP here, like the bignum branch above, sidesteps
+         * write_number_notation() entirely. */
+        char *s = mpq_get_str(NULL, radix, as_rat(v)->q);
+        uint32_t len = (uint32_t)strlen(s);
+        String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
+        memcpy(str->data, s, len+1); free(s); return vptr(str);
     } else {
-        /* Rational/complex/quaternion/octonion/multivector/surreal/symbolic:
-         * radix is meaningless for these, same as the flonum case above which
-         * already ignores it. Delegate to the writer scm_write() already uses
-         * for `display`/`write` rather than maintaining a second, partial
-         * printer here. */
+        /* Complex/quaternion/octonion/multivector/surreal/symbolic: radix is
+         * meaningless for these, same as the flonum case above which already
+         * ignores it. Delegate to the writer scm_write() already uses for
+         * `display`/`write` rather than maintaining a second, partial printer
+         * here -- safe from the rational's recursion risk above because none
+         * of these route through write_number_notation() (see port.c's
+         * scm_write: only flonum/bignum/rational do). */
         val_t p = port_open_output_string();
         scm_write(v, p);
         return port_get_output_string(p);
@@ -1436,12 +1454,31 @@ val_t num_normalize(val_t v) {
 #define CP_MIDDLE_DOT 0x00B7u /* · U+00B7 — the radix-point separator sex_to_cuneiform()
                                * renders between integer and fractional digit groups */
 
-/* Extended-tower markers, chosen from real (but otherwise unused-by-Curry)
- * cuneiform syllabic signs, reused here purely for their phonetic value --
- * the same way Babylonian scribes reused a sign's sound rather than its
- * logographic meaning. Neither collides with CP_ASH/CP_U/CP_SHAR2 (the
- * digit glyphs) nor with any reserved Akkadian keyword glyph in
- * akkadian_names.h (checked at the time these were picked). */
+/* Extended-tower markers, chosen from real cuneiform syllabic/determinative
+ * signs, reused here purely for their phonetic/symbolic value -- the same
+ * way Babylonian scribes reused a sign's sound rather than its logographic
+ * meaning. None collides with CP_ASH/CP_U/CP_SHAR2 (the digit glyphs).
+ *
+ * CP_SIGN_I and CP_DINGIR, however, are NOT unused elsewhere in Curry: 𒄿 is
+ * also the sole cuneiform form of the `do` special form
+ * (`AKK_SF("do", "alākum", "𒄿")` in akkadian_names.h) and appears within
+ * several multi-glyph Akkadian words besides; 𒀭 (DINGIR) appears even more
+ * often, being the divine determinative several coined procedure names are
+ * built from (e.g. `surreal-real-part`'s cuneiform form is "𒀭𒄿" --
+ * literally DINGIR + this same I sign). This is safe in practice today for
+ * two independent reasons, not because the glyphs are reserved-word-free:
+ * (1) `sex_parse_cuneiform`/`sex_parse_cuneiform_extended` never consult
+ * `_akk_cuneiform_table` at all -- that whole-token reserved-keyword check
+ * lives only in reader.c, upstream of `sex_parse_cuneiform` being called;
+ * and (2) as of this writing reader.c's own tokenizer doesn't yet assemble
+ * this extended notation into one token in the first place (only
+ * `string->number` reaches this parser -- see module-sexagesimal.md), so no
+ * currently-reachable bare source literal collides with `do` or with any
+ * DINGIR-prefixed procedure alias. If reader.c is ever taught to tokenize
+ * extended cuneiform literals directly, this reuse would need re-auditing
+ * against the full akkadian_names.h table at that point -- it is not
+ * checked or enforced anywhere today. Only CP_SIGN_E (𒂊) is actually unused
+ * in akkadian_names.h. */
 #define CP_SIGN_I 0x1213Fu  /* 𒄿 U+1213F CUNEIFORM SIGN I — marks the complex imaginary unit */
 #define CP_SIGN_E 0x1208Au  /* 𒂊 U+1208A CUNEIFORM SIGN E — marks a basis blade e_n, followed
                              * by a cuneiform digit for n (1..8): quaternion/octonion/multivector */
@@ -1452,8 +1489,11 @@ val_t num_normalize(val_t v) {
 
 /* ---- UTF-8 helpers ---- */
 
-/* Decode one codepoint from *s; advance *s past the bytes. Returns -1 at end. */
-static int sex_decode_cp(const char **s) {
+/* Decode one codepoint from *s; advance *s past the bytes. Returns -1 at end.
+ * Not static: symbolic_print.c's sx_write_cuneiform() reuses this (rather
+ * than a second, laxer hand-rolled decoder) to find a symbol's first
+ * codepoint when picking out a cuneiform-alias operator glyph. */
+int sex_decode_cp(const char **s) {
     const unsigned char *p = (const unsigned char *)*s;
     if (!*p) return -1;
     uint32_t cp; int n;
@@ -1850,14 +1890,24 @@ static int sex_parse_one_cuneiform_digit(const char **pp) {
  * which is handled separately by the caller). */
 typedef struct { bool neg; val_t mag; int idxs[8]; int nidx; } CunTerm;
 
+/* A multivector caps at 8 basis vectors (Cl(p,q,r), n=p+q+r<=8), i.e. up to
+ * 2^8=256 blades, 255 of them non-scalar -- the true worst case for how many
+ * extended-notation terms a single literal can carry (quaternion/octonion
+ * only ever need 3/7, but the general-multivector fallback below needs
+ * headroom for all of them or a legitimately-written literal with more than
+ * 8 nonzero non-scalar blades would be rejected instead of round-tripping). */
+#define CUN_MAX_TERMS 255
+
 /* Parse the "('+'|'-') <magnitude> <marker>..." tail that follows a leading
  * scalar number in extended cuneiform notation. `first` is that already-
  * parsed leading number; `p` points just past it. Returns V_FALSE (fail
  * closed, same contract as sex_parse_cuneiform itself) on any malformed
- * term, an out-of-range basis index (only 1..8 are valid: Multivector caps
- * at 8 basis vectors), or trailing unconsumed input. */
+ * term, a double-signed magnitude (e.g. "1--2i"), an out-of-range or
+ * cross-term-repeated basis index (only 1..8 are valid: Multivector caps at
+ * 8 basis vectors), or trailing unconsumed input. */
 static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
-    CunTerm terms[8];
+    CunTerm terms[CUN_MAX_TERMS];   /* ~12KB on the stack -- actors run this
+                                     * concurrently, so this must not be static */
     int nterms = 0;
 
     while (*p == '+' || *p == '-') {
@@ -1865,6 +1915,10 @@ static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
         p++;
         val_t mag;
         if (!sex_parse_cuneiform_number(&p, &mag)) return V_FALSE;
+        /* A magnitude following an explicit sign token must not itself carry
+         * one -- otherwise "1--2i" would parse as 1+2i instead of being
+         * rejected (the two negatives silently cancelling). */
+        if (num_is_negative(mag)) return V_FALSE;
 
         const char *mp = p;
         int mcp = sex_decode_cp(&mp);
@@ -1885,7 +1939,7 @@ static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
             mp = p;
             mcp = sex_decode_cp(&mp);
         }
-        if (nidx == 0 || nterms >= 8) return V_FALSE;
+        if (nidx == 0 || nterms >= CUN_MAX_TERMS) return V_FALSE;
         terms[nterms].neg = tneg; terms[nterms].mag = mag;
         memcpy(terms[nterms].idxs, idxs, sizeof(idxs));
         terms[nterms].nidx = nidx;
@@ -1895,7 +1949,15 @@ static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
     if (*p != '\0' || nterms == 0) return V_FALSE;
 
     /* Quaternion: a+b·E1+c·E2+d·E3, in that exact order, one index each --
-     * the canonical form sex_to_cuneiform() writes for a T_QUATERNION. */
+     * the canonical form sex_to_cuneiform() writes for a T_QUATERNION.
+     *
+     * Note this treats i,j,k as grade-1 basis vectors e1,e2,e3 directly --
+     * a different (and simpler, for notation purposes) convention from
+     * `quaternion->mv`/`mv->quaternion` (multivec.c), which embed a
+     * quaternion into Cl(3,0,0)'s *even* subalgebra via bivectors
+     * (i=e12, j=e23, k=e13). The two conventions are unrelated: a
+     * T_QUATERNION parsed here is never converted through a Multivector,
+     * so this doesn't need to (and doesn't) agree with that embedding. */
     if (nterms == 3
         && terms[0].nidx == 1 && terms[0].idxs[0] == 1
         && terms[1].nidx == 1 && terms[1].idxs[0] == 2
@@ -1936,6 +1998,11 @@ static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
     val_t mvv = mv_make(n, 0, 0);
     Multivector *mv = as_mv(mvv);
     mv->c[0] = num_to_double(first);
+    bool blade_seen[256] = { false };   /* every blade but scalar starts unset;
+                                         * catches a term repeating a blade
+                                         * across DIFFERENT terms (not just
+                                         * within one), which used to silently
+                                         * overwrite instead of failing closed */
     for (int i = 0; i < nterms; i++) {
         uint32_t bitmap = 0;
         for (int k = 0; k < terms[i].nidx; k++) {
@@ -1943,6 +2010,8 @@ static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
             if (bitmap & bit) return V_FALSE; /* repeated index within one blade */
             bitmap |= bit;
         }
+        if (blade_seen[bitmap]) return V_FALSE; /* same blade written by an earlier term */
+        blade_seen[bitmap] = true;
         double val = num_to_double(terms[i].mag);
         if (terms[i].neg) val = -val;
         mv->c[bitmap] = val;

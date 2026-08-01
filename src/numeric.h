@@ -154,6 +154,7 @@ val_t num_normalize(val_t v);  /* reduce e.g. bignum that fits in fixnum */
 /* Check whether a codepoint is in the Cuneiform Unicode block */
 #define SEX_IS_CUNEIFORM(cp) ((uint32_t)(cp) >= 0x12000u && (uint32_t)(cp) <= 0x1247Fu)
 
+int   sex_decode_cp(const char **s);          /* decode one UTF-8 codepoint, advance *s; -1 at end */
 val_t sex_parse_neugebauer(const char *s);   /* "1;30" → 3/2, "1,0,0" → 3600 */
 val_t sex_parse_cuneiform(const char *s);    /* "𒁹 𒌋𒁹" → 71 */
 val_t sex_to_neugebauer(val_t v, int max_frac); /* < 0 = auto */

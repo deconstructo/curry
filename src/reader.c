@@ -566,13 +566,24 @@ static val_t read_datum(val_t port) {
                     break;
                 }
             }
-            /* Append trailing non-delimiter ASCII chars (e.g. '?', '!') only when
-             * the last thing read was cuneiform (not a space before another token). */
+            /* Append trailing non-delimiter chars (e.g. '?', '!', or a
+             * multi-byte codepoint like the cuneiform-notation "·" radix
+             * separator or "𒄿"/"𒂊" markers) only when the last thing read
+             * was cuneiform (not a space before another token). next_char()
+             * returns a decoded Unicode codepoint, not a raw byte -- must
+             * re-encode with sb_push_utf8 (as the cuneiform-glyph loop above
+             * already does), not truncate to (char). A codepoint like U+00B7
+             * (183) fits an unsigned char numerically but is not valid UTF-8
+             * on its own; writing it as a single raw byte produced malformed
+             * UTF-8 that crashed later processing (confirmed: segfault) --
+             * this doesn't make such trailing text parse as a NUMBER (that
+             * still requires going through string->number; see docs), it
+             * just stops it from corrupting the token. */
             if (!space_consumed) {
                 int nxt;
                 while (nxt = peek_char_port(port),
                        !is_delimiter(nxt) && !SEX_IS_CUNEIFORM((uint32_t)nxt)) {
-                    sb_push(&sb, (char)next_char(port));
+                    sb_push_utf8(&sb, (uint32_t)next_char(port));
                 }
             }
             sb.buf[sb.len] = '\0';

@@ -578,19 +578,6 @@ void sx_write(val_t expr, val_t port) {
 
 /* ---- Cuneiform (best-effort) ---- */
 
-/* First Unicode codepoint of a symbol's UTF-8 text, or -1 if s is empty or
- * malformed (truncated multi-byte sequence). */
-static int sxc_first_cp(Symbol *s) {
-    if (s->len == 0) return -1;
-    unsigned char c0 = (unsigned char)s->data[0];
-    if (c0 < 0x80) return c0;
-    if (c0 < 0xE0) return s->len >= 2 ? ((c0 & 0x1F) << 6) | ((unsigned char)s->data[1] & 0x3F) : -1;
-    if (c0 < 0xF0) return s->len >= 3 ? ((c0 & 0x0F) << 12) | (((unsigned char)s->data[1] & 0x3F) << 6)
-                                          | ((unsigned char)s->data[2] & 0x3F) : -1;
-    return s->len >= 4 ? ((c0 & 0x07) << 18) | (((unsigned char)s->data[1] & 0x3F) << 12)
-                           | (((unsigned char)s->data[2] & 0x3F) << 6) | ((unsigned char)s->data[3] & 0x3F) : -1;
-}
-
 /* op's registered Akkadian cuneiform alias, if any -- every core arithmetic
  * operator (+,-,*,/,...) already has one via akkadian_names.h/lang_pr_lookup
  * (the same mechanism modules.c uses to attach Akkadian aliases at import
@@ -603,7 +590,12 @@ static Symbol *sxc_op_glyph(val_t op) {
     for (int i = 0; i < n; i++) {
         if (!vis_symbol(forms[i])) continue;
         Symbol *s = as_sym(forms[i]);
-        if (SEX_IS_CUNEIFORM((uint32_t)sxc_first_cp(s))) return s;
+        /* Symbol.data is NUL-terminated (object.h), so sex_decode_cp's
+         * end-of-string check works directly on it; reuse it (validated
+         * continuation-byte checking) rather than a second hand-rolled
+         * UTF-8 decoder. */
+        const char *p = s->data;
+        if (SEX_IS_CUNEIFORM((uint32_t)sex_decode_cp(&p))) return s;
     }
     return NULL;
 }

@@ -305,10 +305,27 @@ Returns the exact rational encoded on Yale Babylonian Collection tablet YBC 7289
 - The extended-notation markers are **U+1213F** CUNEIFORM SIGN I (complex
   imaginary unit) and **U+1208A** CUNEIFORM SIGN E (quaternion/octonion/
   multivector basis blade e_n) — real cuneiform signs, reused here for their
-  phonetic value rather than their logographic meaning, chosen to not collide
-  with the digit glyphs or any reserved Akkadian keyword glyph.
+  phonetic value rather than their logographic meaning. Only U+1208A is
+  actually unused elsewhere in `akkadian_names.h`; U+1213F is also the
+  cuneiform form of the `do` special form. This isn't a live collision today
+  — `string->number`'s cuneiform parser never consults the Akkadian
+  reserved-keyword table, and bare source literals using this notation
+  aren't tokenized by the reader yet either (see `src/numeric.c`'s
+  `CP_SIGN_I` comment for the full reasoning) — but it would need
+  re-auditing if the reader is ever extended to tokenize these literals
+  directly.
 - The surreal-number term marker is **U+1202D** CUNEIFORM SIGN AN (𒀭 DINGIR,
   the divine determinative real scribes prefixed to god-names), reused here
-  for a Hahn-series term's "order of ω".
-- Implementation: `src/numeric.c` (parsing and formatting), `src/reader.c`
-  (token dispatch), `lib/curry/modules/curry/sexagesimal.scm` (module).
+  for a Hahn-series term's "order of ω" — also not unique to this feature;
+  DINGIR prefixes several existing Akkadian procedure-name coinages (e.g.
+  `surreal-real-part`'s cuneiform form starts with it), with the same
+  not-currently-reachable caveat as CP_SIGN_I above.
+- Bare source-code literals using the extended (complex/quaternion/
+  octonion/multivector) or fractional ("·") notation are **not yet**
+  tokenized directly by the reader — only `string->number`/`number->string`
+  support them today. Typing `(number->string _ 'cuneiform)`'s own output
+  back as a literal will not round-trip through the reader; go through
+  `string->number` instead.
+- Implementation: `src/numeric.c` (parsing and formatting); `src/reader.c`
+  (bare-integer cuneiform token dispatch only, per the note above);
+  `lib/curry/modules/curry/sexagesimal.scm` (module).
