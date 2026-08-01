@@ -2,6 +2,26 @@
 
 ### Unreleased
 
+**New — `(srfi s111 boxes)` and `(srfi s195 multiple-value-boxes)`: box types**
+
+SRFI-111's single-value mutable box (`box`/`box?`/`unbox`/`set-box!`) and
+SRFI-195's extension to zero-or-more-value boxes (`box-arity`/`unbox-value`/
+`set-box-value!`). Implemented as one shared representation: `(srfi s111
+boxes)` stores a vector of 0+ values from the start, so `(srfi s195
+multiple-value-boxes)` re-exports its box/box?/unbox/set-box! unchanged
+rather than reimplementing them, trivially satisfying SRFI-195's requirement
+that "the bindings that are exported by both SRFIs have to be the same" when
+a program imports both. `(srfi 111)`/`(srfi srfi-111)` and `(srfi
+195)`/`(srfi srfi-195)` shims included. See `docs/reference/srfi/s111.md`
+and `docs/reference/srfi/s195.md`.
+
+(found by an independent code-review subagent) `unbox-value`/
+`set-box-value!` passed a caller-supplied index straight into curry's core
+`list-ref`, which has no bounds check of its own and segfaults on an
+out-of-range index rather than raising -- and silently returned the wrong
+element for a negative index instead of erroring. Fixed by validating the
+index against `box-arity` before it reaches `list-ref`.
+
 **New — `(srfi s263 prototype-objects)`: SRFI-263 Prototype Object System**
 
 A "Self"-inspired prototype/message-passing object system (`*the-root-object*`,
