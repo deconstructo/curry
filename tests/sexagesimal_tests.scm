@@ -203,6 +203,42 @@
 (check "ybc7289 approx sqrt" (let ((r (exact->inexact (sex:ybc7289))))
                                (and (> r 1.4142) (< r 1.4143)))  #t)
 
+;;; ---- Cuneiform notation for complex/quaternion/octonion/multivector ----
+;;; Extended notation: "<scalar> ('+'|'-') <mag> <unit>" repeated, where
+;;; <unit> is the imaginary-unit marker 𒄿 for complex, or one-or-more
+;;; basis-blade "𒂊<digit>" units for the others. All four round-trip through
+;;; string->number (a general multivector's metric signature is not
+;;; recoverable from the notation and is reconstructed as Euclidean -- see
+;;; sex_parse_cuneiform_extended in src/numeric.c).
+
+(check "n->s cun complex"    (number->string (make-rectangular 3 4) 'cuneiform)
+                              "𒁹𒁹𒁹+𒁹𒁹𒁹𒁹𒄿")
+(check "s->n cun complex"    (string->number "𒁹𒁹𒁹+𒁹𒁹𒁹𒁹𒄿" 'cuneiform)
+                              (make-rectangular 3 4))
+(check "rt cun complex neg"  (string->number (number->string (make-rectangular 3/2 -4) 'cuneiform) 'cuneiform)
+                              (make-rectangular 3/2 -4))
+
+(check "rt cun quaternion"   (string->number (number->string (make-quaternion 1 2 3 4) 'cuneiform) 'cuneiform)
+                              (make-quaternion 1 2 3 4))
+(check "rt cun quaternion neg" (string->number (number->string (make-quaternion -1 2 -3 4) 'cuneiform) 'cuneiform)
+                              (make-quaternion -1 2 -3 4))
+
+;; equal? doesn't compare octonions structurally, so compare via number->string
+(check "rt cun octonion"     (number->string (string->number (number->string (make-octonion 1 2 3 4 5 6 7 8) 'cuneiform) 'cuneiform))
+                              (number->string (make-octonion 1 2 3 4 5 6 7 8)))
+
+;; Multivector round-trip, including a multi-index blade (e12)
+(let* ((v (make-mv 3 0 0)))
+  (mv-set! v 0 5) (mv-set! v 1 2) (mv-set! v 4 -7) (mv-set! v 3 9)
+  (check "n->s cun mv"  (number->string v 'cuneiform)
+                        "𒁹𒁹𒁹𒁹𒁹+𒁹𒁹𒂊𒁹+𒁹𒁹𒁹𒁹𒁹𒁹𒁹𒁹𒁹𒂊𒁹𒂊𒁹𒁹-𒁹𒁹𒁹𒁹𒁹𒁹𒁹𒂊𒁹𒁹𒁹")
+  (check "rt cun mv"    (number->string (string->number (number->string v 'cuneiform) 'cuneiform))
+                        (number->string v)))
+
+;; Fail-closed: out-of-range basis index, garbage after a marker
+(check "s->n cun bad index"   (string->number "𒁹+𒁹𒂊𒌋" 'cuneiform)  #f)
+(check "s->n cun garbage"     (string->number "𒁹𒄿𒈠" 'cuneiform)    #f)
+
 ;;; ---- number->string fallback for non-fixnum/bignum/flonum types ----
 ;;; Regression: num_to_string() used to fall back to the literal string
 ;;; "#<number>" for any type it didn't special-case, which included plain

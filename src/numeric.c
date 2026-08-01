@@ -7,6 +7,7 @@
 #include "quantum.h"
 #include "surreal.h"
 #include "port.h"
+#include "multivec.h"
 #ifdef BUILD_MPFR
 #include "mpfr_num.h"
 #endif
@@ -1435,6 +1436,16 @@ val_t num_normalize(val_t v) {
 #define CP_MIDDLE_DOT 0x00B7u /* · U+00B7 — the radix-point separator sex_to_cuneiform()
                                * renders between integer and fractional digit groups */
 
+/* Extended-tower markers, chosen from real (but otherwise unused-by-Curry)
+ * cuneiform syllabic signs, reused here purely for their phonetic value --
+ * the same way Babylonian scribes reused a sign's sound rather than its
+ * logographic meaning. Neither collides with CP_ASH/CP_U/CP_SHAR2 (the
+ * digit glyphs) nor with any reserved Akkadian keyword glyph in
+ * akkadian_names.h (checked at the time these were picked). */
+#define CP_SIGN_I 0x1213Fu  /* 𒄿 U+1213F CUNEIFORM SIGN I — marks the complex imaginary unit */
+#define CP_SIGN_E 0x1208Au  /* 𒂊 U+1208A CUNEIFORM SIGN E — marks a basis blade e_n, followed
+                             * by a cuneiform digit for n (1..8): quaternion/octonion/multivector */
+
 /* ---- UTF-8 helpers ---- */
 
 /* Decode one codepoint from *s; advance *s past the bytes. Returns -1 at end. */
@@ -1612,11 +1623,14 @@ static void sex_get_digits(val_t v, int max_frac, SexDigs *out) {
         mpz_clear(tmp);
         if (out->nint < 0) { out->valid = false; return; }
 
-        for (int i = 0; i < max_frac && i < 32; i++) {
+        /* frac_d == 0.0 here means d was exactly integral (e.g. 1.0) --
+         * skip the loop entirely rather than running one iteration that
+         * multiplies 0.0 by 60 and emits a spurious trailing "0" digit
+         * (e.g. rendering 1.0 as "1;0" / "𒁹 · 𒑊" instead of plain "1"). */
+        while (frac_d != 0.0 && out->nfrac < max_frac && out->nfrac < 32) {
             frac_d *= 60.0;
             double fi; frac_d = modf(frac_d, &fi);
             out->frac_digs[out->nfrac++] = (int)fi;
-            if (frac_d == 0.0) break;
         }
     } else {
         out->valid = false;
@@ -1735,14 +1749,21 @@ static int sex_parse_cuneiform_digit_run(const char **pp, int *digits, int max) 
  * see reader.c's cuneiform token dispatch, which relies on that to fall back
  * to interning an unrecognized token as a symbol, e.g. "𒁹𒈠" must fail
  * entirely rather than silently parsing as 1 and discarding "𒈠"). */
-val_t sex_parse_cuneiform(const char *s) {
-    const char *p = s;
+/* Parse one signed sexagesimal number (optional leading '-', an integer
+ * digit-group run, optionally followed by " · " and a fractional digit-group
+ * run) at *pp. Returns true and sets *out, advancing *pp past the number, on
+ * success; false (leaving *pp unspecified) if there's no valid number there
+ * at all. This is the core sex_parse_cuneiform() itself uses for a top-level
+ * literal, and that the extended (complex/quaternion/octonion/multivector)
+ * notation below reuses for the magnitude of each term. */
+static bool sex_parse_cuneiform_number(const char **pp, val_t *out) {
+    const char *p = *pp;
     bool neg = false;
     if (*p == '-') { neg = true; p++; }
 
     int int_digs[64];
     int nint = sex_parse_cuneiform_digit_run(&p, int_digs, 64);
-    if (nint <= 0) return V_FALSE;
+    if (nint <= 0) return false;
 
     int frac_digs[64];
     int nfrac = 0;
@@ -1754,12 +1775,11 @@ val_t sex_parse_cuneiform(const char *s) {
         const char *q = dot_end;
         while (*q == ' ') q++;
         int n = sex_parse_cuneiform_digit_run(&q, frac_digs, 64);
-        if (n <= 0) return V_FALSE; /* '·' with no fractional digits after it */
-        nfrac = n;
-        p = q;
+        /* If '·' isn't followed by digits, leave it unconsumed rather than
+         * guessing -- the caller's own "whole string consumed" check will
+         * reject it. */
+        if (n > 0) { nfrac = n; p = q; }
     }
-
-    if (*p != '\0') return V_FALSE;
 
     if (nfrac == 0) {
         mpz_t total; mpz_init_set_ui(total, 0);
@@ -1768,31 +1788,170 @@ val_t sex_parse_cuneiform(const char *s) {
             mpz_add_ui(total, total, (unsigned long)int_digs[i]);
         }
         if (neg) mpz_neg(total, total);
-        val_t r = make_big_from_mpz(total);
+        *out = make_big_from_mpz(total);
         mpz_clear(total);
-        return r;
+    } else {
+        mpq_t result; mpq_init(result); mpq_set_ui(result, 0, 1);
+        mpq_t sixty; mpq_init(sixty); mpq_set_ui(sixty, 60, 1);
+        for (int i = 0; i < nint; i++) {
+            mpq_t tmp; mpq_init(tmp);
+            mpq_mul(result, result, sixty);
+            mpq_set_si(tmp, int_digs[i], 1); mpq_add(result, result, tmp);
+            mpq_clear(tmp);
+        }
+        mpq_t denom; mpq_init(denom); mpq_set(denom, sixty);
+        for (int i = 0; i < nfrac; i++) {
+            mpq_t frac; mpq_init(frac);
+            mpq_set_si(frac, frac_digs[i], 1); mpq_div(frac, frac, denom);
+            mpq_add(result, result, frac); mpq_clear(frac);
+            mpq_mul(denom, denom, sixty);
+        }
+        mpq_clear(denom); mpq_clear(sixty);
+        if (neg) mpq_neg(result, result);
+        *out = make_rat_from_mpq(result);
+        mpq_clear(result);
+    }
+    *pp = p;
+    return true;
+}
+
+/* Parse exactly one cuneiform digit-group (ASH/U/SHAR2 run, no leading
+ * space) at *pp -- the single sexagesimal digit immediately following a
+ * CP_SIGN_E basis marker (e.g. the "1" in "E1"). Returns the digit (0-59),
+ * or -1 if there's none/it's invalid. Advances *pp past it on success. */
+static int sex_parse_one_cuneiform_digit(const char **pp) {
+    const char *p = *pp;
+    int tens = 0, ones = 0;
+    bool is_zero_ph = false, got = false;
+    while (*p) {
+        const char *gp = p;
+        int gcp = sex_decode_cp(&p);
+        if (gcp < 0) { p = gp; break; }
+        uint32_t ugcp = (uint32_t)gcp;
+        if      (ugcp == CP_U)     { tens++; got = true; }
+        else if (ugcp == CP_ASH)   { ones++; got = true; }
+        else if (ugcp == CP_SHAR2) { is_zero_ph = true; got = true; }
+        else { p = gp; break; }
+    }
+    if (!got) return -1;
+    int digit = is_zero_ph ? 0 : tens * 10 + ones;
+    if (digit > 59) return -1;
+    *pp = p;
+    return digit;
+}
+
+/* One signed term of extended (complex/quaternion/octonion/multivector)
+ * cuneiform notation: a sign, a magnitude, and the basis blade it multiplies
+ * (a run of one-or-more CP_SIGN_E + digit units; empty for the scalar term,
+ * which is handled separately by the caller). */
+typedef struct { bool neg; val_t mag; int idxs[8]; int nidx; } CunTerm;
+
+/* Parse the "('+'|'-') <magnitude> <marker>..." tail that follows a leading
+ * scalar number in extended cuneiform notation. `first` is that already-
+ * parsed leading number; `p` points just past it. Returns V_FALSE (fail
+ * closed, same contract as sex_parse_cuneiform itself) on any malformed
+ * term, an out-of-range basis index (only 1..8 are valid: Multivector caps
+ * at 8 basis vectors), or trailing unconsumed input. */
+static val_t sex_parse_cuneiform_extended(val_t first, const char *p) {
+    CunTerm terms[8];
+    int nterms = 0;
+
+    while (*p == '+' || *p == '-') {
+        bool tneg = (*p == '-');
+        p++;
+        val_t mag;
+        if (!sex_parse_cuneiform_number(&p, &mag)) return V_FALSE;
+
+        const char *mp = p;
+        int mcp = sex_decode_cp(&mp);
+        if (mcp == (int)CP_SIGN_I) {
+            /* Complex: this must be the one and only term, and the marker
+             * must end the string -- "a+bi" has exactly one imaginary part. */
+            if (nterms != 0 || *mp != '\0') return V_FALSE;
+            return num_make_complex(first, tneg ? num_neg(mag) : mag);
+        }
+        if (mcp != (int)CP_SIGN_E) return V_FALSE;
+
+        int idxs[8], nidx = 0;
+        while (mcp == (int)CP_SIGN_E) {
+            p = mp; /* consume the E marker */
+            int digit = sex_parse_one_cuneiform_digit(&p);
+            if (digit < 1 || digit > 8 || nidx >= 8) return V_FALSE;
+            idxs[nidx++] = digit;
+            mp = p;
+            mcp = sex_decode_cp(&mp);
+        }
+        if (nidx == 0 || nterms >= 8) return V_FALSE;
+        terms[nterms].neg = tneg; terms[nterms].mag = mag;
+        memcpy(terms[nterms].idxs, idxs, sizeof(idxs));
+        terms[nterms].nidx = nidx;
+        nterms++;
     }
 
-    mpq_t result; mpq_init(result); mpq_set_ui(result, 0, 1);
-    mpq_t sixty; mpq_init(sixty); mpq_set_ui(sixty, 60, 1);
-    for (int i = 0; i < nint; i++) {
-        mpq_t tmp; mpq_init(tmp);
-        mpq_mul(result, result, sixty);
-        mpq_set_si(tmp, int_digs[i], 1); mpq_add(result, result, tmp);
-        mpq_clear(tmp);
+    if (*p != '\0' || nterms == 0) return V_FALSE;
+
+    /* Quaternion: a+b·E1+c·E2+d·E3, in that exact order, one index each --
+     * the canonical form sex_to_cuneiform() writes for a T_QUATERNION. */
+    if (nterms == 3
+        && terms[0].nidx == 1 && terms[0].idxs[0] == 1
+        && terms[1].nidx == 1 && terms[1].idxs[0] == 2
+        && terms[2].nidx == 1 && terms[2].idxs[0] == 3) {
+        double a = num_to_double(first);
+        double b = num_to_double(terms[0].mag) * (terms[0].neg ? -1.0 : 1.0);
+        double c = num_to_double(terms[1].mag) * (terms[1].neg ? -1.0 : 1.0);
+        double d = num_to_double(terms[2].mag) * (terms[2].neg ? -1.0 : 1.0);
+        return num_make_quat(a, b, c, d);
     }
-    mpq_t denom; mpq_init(denom); mpq_set(denom, sixty);
-    for (int i = 0; i < nfrac; i++) {
-        mpq_t frac; mpq_init(frac);
-        mpq_set_si(frac, frac_digs[i], 1); mpq_div(frac, frac, denom);
-        mpq_add(result, result, frac); mpq_clear(frac);
-        mpq_mul(denom, denom, sixty);
+
+    /* Octonion: a+b·E1+...+h·E7, in that exact order, one index each. */
+    if (nterms == 7) {
+        bool ok = true;
+        for (int i = 0; i < 7 && ok; i++)
+            ok = (terms[i].nidx == 1 && terms[i].idxs[0] == i + 1);
+        if (ok) {
+            double e[8];
+            e[0] = num_to_double(first);
+            for (int i = 0; i < 7; i++)
+                e[i + 1] = num_to_double(terms[i].mag) * (terms[i].neg ? -1.0 : 1.0);
+            return num_make_oct(e);
+        }
     }
-    mpq_clear(denom); mpq_clear(sixty);
-    if (neg) mpq_neg(result, result);
-    val_t r = make_rat_from_mpq(result);
-    mpq_clear(result);
-    return r;
+
+    /* Otherwise: a general multivector. Cuneiform notation only records
+     * coefficients per blade, never the metric signature (p,q,r aren't
+     * observable from "E1"/"E2" alone) -- reconstruct as a Euclidean
+     * Cl(n,0,0) sized to the highest basis index referenced. This loses
+     * signature fidelity for non-Euclidean algebras (Cl(3,1,0), etc.);
+     * acceptable for what this notation is for, but not a lossless
+     * round-trip in general. */
+    int n = 1;
+    for (int i = 0; i < nterms; i++)
+        for (int k = 0; k < terms[i].nidx; k++)
+            if (terms[i].idxs[k] > n) n = terms[i].idxs[k];
+
+    val_t mvv = mv_make(n, 0, 0);
+    Multivector *mv = as_mv(mvv);
+    mv->c[0] = num_to_double(first);
+    for (int i = 0; i < nterms; i++) {
+        uint32_t bitmap = 0;
+        for (int k = 0; k < terms[i].nidx; k++) {
+            uint32_t bit = 1u << (terms[i].idxs[k] - 1);
+            if (bitmap & bit) return V_FALSE; /* repeated index within one blade */
+            bitmap |= bit;
+        }
+        double val = num_to_double(terms[i].mag);
+        if (terms[i].neg) val = -val;
+        mv->c[bitmap] = val;
+    }
+    return mvv;
+}
+
+val_t sex_parse_cuneiform(const char *s) {
+    const char *p = s;
+    val_t first;
+    if (!sex_parse_cuneiform_number(&p, &first)) return V_FALSE;
+    if (*p == '\0') return first;
+    return sex_parse_cuneiform_extended(first, p);
 }
 
 /* Format a number in Neugebauer notation.
@@ -1822,28 +1981,126 @@ val_t sex_to_neugebauer(val_t v, int max_frac) {
     return sexbuf_to_val(&b);
 }
 
-/* Format a number as cuneiform glyph string.
- * Returns a Scheme string. */
-val_t sex_to_cuneiform(val_t v) {
-    int max_frac = 6;
+/* Append one real (fixnum/bignum/rational/flonum) number's cuneiform digits
+ * to b (with the "·" radix-point separator for a fractional part). Returns
+ * false, leaving b unmodified in effect (caller discards it), if v is a
+ * NaN/infinite flonum or otherwise not cuneiform-representable. */
+static bool sex_append_cuneiform_number(SexBuf *b, val_t v, int max_frac) {
     if (vis_flonum(v)) {
         double d = vfloat(v);
-        if (d != d || d == 1.0/0.0 || d == -1.0/0.0) return num_to_string(v, 10);
+        if (d != d || d == 1.0/0.0 || d == -1.0/0.0) return false;
     }
-
     SexDigs digs;
     sex_get_digits(v, max_frac, &digs);
-    if (!digs.valid) return num_to_string(v, 10);
+    if (!digs.valid) return false;
+    if (digs.neg) sexbuf_push(b, '-');
+    sex_render_cuneiform_digits(b, digs.int_digs, digs.nint);
+    if (digs.nfrac > 0) {
+        sexbuf_push(b, ' ');
+        sexbuf_push_cp(b, CP_MIDDLE_DOT);
+        sexbuf_push(b, ' ');
+        sex_render_cuneiform_digits(b, digs.frac_digs, digs.nfrac);
+    }
+    return true;
+}
+
+/* Append a signed extended-notation term's magnitude: "('+'|'-') <|mag|>". */
+static bool sex_append_signed_term(SexBuf *b, double mag, int max_frac) {
+    sexbuf_push(b, mag < 0.0 ? '-' : '+');
+    return sex_append_cuneiform_number(b, num_make_float(fabs(mag)), max_frac);
+}
+
+/* Append the basis-blade suffix for a term: one CP_SIGN_E + digit per index. */
+static void sex_append_basis_units(SexBuf *b, const int *idxs, int nidx) {
+    for (int i = 0; i < nidx; i++) {
+        sexbuf_push_cp(b, CP_SIGN_E);
+        sex_render_cuneiform_digit(b, idxs[i]);
+    }
+}
+
+/* Format a number as cuneiform glyph string.
+ *
+ * Real (fixnum/bignum/rational/flonum): plain sexagesimal digits, "·" radix
+ * point for a fractional part (see sex_append_cuneiform_number).
+ *
+ * Complex/quaternion/octonion/multivector: "<scalar> ('+'|'-') <mag> <unit>"
+ * repeated per component, where <unit> is CP_SIGN_I (the traditional single
+ * imaginary axis) for complex, or one-or-more "CP_SIGN_E <digit>" basis-blade
+ * units for the others (quaternion e1,e2,e3; octonion e1..e7; multivector
+ * whatever blades are nonzero, digit = 1-based basis index, matching the
+ * bitmap convention mv_write() already uses for its ASCII "e13" labels).
+ * These four all round-trip through sex_parse_cuneiform() (see
+ * sex_parse_cuneiform_extended) except that a general multivector's metric
+ * signature (p,q,r) isn't recoverable from the notation and is reconstructed
+ * as Euclidean on read-back.
+ *
+ * Anything else (surreal, symbolic, ...) falls back to num_to_string(),
+ * same as an unrepresentable real number.
+ */
+val_t sex_to_cuneiform(val_t v) {
+    int max_frac = 6;
+
+    if (vis_complex(v)) {
+        val_t re = as_cpx(v)->real, im = as_cpx(v)->imag;
+        bool im_neg = num_is_negative(im);
+        val_t im_mag = im_neg ? num_neg(im) : im;
+        SexBuf b; sexbuf_init(&b);
+        bool ok = sex_append_cuneiform_number(&b, re, max_frac);
+        if (ok) { sexbuf_push(&b, im_neg ? '-' : '+'); ok = sex_append_cuneiform_number(&b, im_mag, max_frac); }
+        if (ok) { sexbuf_push_cp(&b, CP_SIGN_I); return sexbuf_to_val(&b); }
+        free(b.buf);
+        return num_to_string(v, 10);
+    }
+
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        SexBuf b; sexbuf_init(&b);
+        bool ok = sex_append_cuneiform_number(&b, num_make_float(q->a), max_frac);
+        if (ok) ok = sex_append_signed_term(&b, q->b, max_frac);
+        if (ok) { int idx[] = {1}; sex_append_basis_units(&b, idx, 1); }
+        if (ok) ok = sex_append_signed_term(&b, q->c, max_frac);
+        if (ok) { int idx[] = {2}; sex_append_basis_units(&b, idx, 1); }
+        if (ok) ok = sex_append_signed_term(&b, q->d, max_frac);
+        if (ok) { int idx[] = {3}; sex_append_basis_units(&b, idx, 1); }
+        if (ok) return sexbuf_to_val(&b);
+        free(b.buf);
+        return num_to_string(v, 10);
+    }
+
+    if (vis_oct(v)) {
+        Octonion *o = as_oct(v);
+        SexBuf b; sexbuf_init(&b);
+        bool ok = sex_append_cuneiform_number(&b, num_make_float(o->e[0]), max_frac);
+        for (int i = 1; ok && i <= 7; i++) {
+            ok = sex_append_signed_term(&b, o->e[i], max_frac);
+            if (ok) { int idx[] = {i}; sex_append_basis_units(&b, idx, 1); }
+        }
+        if (ok) return sexbuf_to_val(&b);
+        free(b.buf);
+        return num_to_string(v, 10);
+    }
+
+    if (vis_mv(v)) {
+        Multivector *mv = as_mv(v);
+        SexBuf b; sexbuf_init(&b);
+        bool ok = sex_append_cuneiform_number(&b, num_make_float(mv->c[0]), max_frac);
+        for (uint32_t i = 1; ok && i < mv->dim; i++) {
+            double c = mv->c[i];
+            if (c == 0.0) continue;
+            ok = sex_append_signed_term(&b, c, max_frac);
+            if (ok) {
+                int idxs[8], nidx = 0;
+                for (int k = 0; k < mv->n; k++) if (i & (1u << k)) idxs[nidx++] = k + 1;
+                sex_append_basis_units(&b, idxs, nidx);
+            }
+        }
+        if (ok) return sexbuf_to_val(&b);
+        free(b.buf);
+        return num_to_string(v, 10);
+    }
 
     SexBuf b; sexbuf_init(&b);
-    if (digs.neg) sexbuf_push(&b, '-');
-    sex_render_cuneiform_digits(&b, digs.int_digs, digs.nint);
-    if (digs.nfrac > 0) {
-        /* Radix point indicated by '·' separator between integer and fractional groups */
-        sexbuf_push(&b, ' ');
-        sexbuf_push_cp(&b, 0xB7u); /* U+00B7 MIDDLE DOT as radix separator */
-        sexbuf_push(&b, ' ');
-        sex_render_cuneiform_digits(&b, digs.frac_digs, digs.nfrac);
-    }
-    return sexbuf_to_val(&b);
+    if (sex_append_cuneiform_number(&b, v, max_frac)) return sexbuf_to_val(&b);
+    free(b.buf);
+    return num_to_string(v, 10);
 }

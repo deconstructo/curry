@@ -75,13 +75,38 @@ Format any exact or inexact number in Neugebauer notation.
 
 ### `(number->string n 'cuneiform)`
 
-Format as cuneiform glyph string.
+Format as cuneiform glyph string. Supports the entire numeric tower.
 
 ```scheme
 (number->string 71 'cuneiform)   ; → "𒁹 𒌋𒁹"
 (number->string 23 'cuneiform)   ; → "𒌋𒌋𒁹𒁹𒁹"
 (number->string 0 'cuneiform)    ; → "𒑊"
 ```
+
+A rational or flonum gets a fractional part after "·" (U+00B7 MIDDLE DOT, the
+cuneiform radix point):
+
+```scheme
+(number->string 3/2 'cuneiform)  ; → "𒁹 · 𒌋𒌋𒌋"     (1;30)
+```
+
+Complex/quaternion/octonion/multivector render as repeated
+`('+'|'-') <magnitude> <unit>` terms after a leading scalar, where `<unit>` is
+𒄿 (U+1213F CUNEIFORM SIGN I — reused for its sound value, the traditional
+single complex imaginary axis) for complex numbers, or one-or-more
+`𒂊<digit>` (U+1208A CUNEIFORM SIGN E + a cuneiform digit 1-8, the basis vector
+e_n) units for quaternion/octonion/multivector:
+
+```scheme
+(number->string (make-rectangular 3 4) 'cuneiform)
+  ; → "𒁹𒁹𒁹+𒁹𒁹𒁹𒁹𒄿"          (3+4i)
+(number->string (make-quaternion 1 2 3 4) 'cuneiform)
+  ; → "𒁹+𒁹𒁹𒂊𒁹+𒁹𒁹𒁹𒂊𒁹𒁹+𒁹𒁹𒁹𒁹𒂊𒁹𒁹𒁹"   (1+2i+3j+4k)
+```
+
+A multivector's blade label concatenates one `𒂊<digit>` unit per set bit, in
+ascending index order — the cuneiform analogue of `mv-write`'s ASCII `e13`
+labels (`𒂊𒁹𒂊𒁹𒁹𒁹` for blade `e13`).
 
 ### `(string->number s 'neugebauer)`
 
@@ -97,14 +122,27 @@ Returns `#f` if the string is not valid Neugebauer notation.
 
 ### `(string->number s 'cuneiform)`
 
-Parse a cuneiform glyph string to an exact integer.
-Returns `#f` if the string contains unrecognised glyphs.
+Parse a cuneiform glyph string produced by `(number->string _ 'cuneiform)`
+back to an exact number — this is the inverse of everything documented above
+(integers, rationals/flonums with a "·" fractional part, and
+complex/quaternion/octonion/multivector extended notation). Returns `#f` if
+the string doesn't parse as a WHOLE cuneiform literal (no partial-prefix
+successes), including any out-of-range basis index (only 1-8 are valid) or
+trailing unrecognized content.
 
 ```scheme
 (string->number "𒁹 𒌋𒁹" 'cuneiform)      ; → 71
 (string->number "𒌋𒌋𒁹𒁹𒁹" 'cuneiform)   ; → 23
 (string->number "𒑊" 'cuneiform)           ; → 0
+(string->number "𒁹 · 𒌋𒌋𒌋" 'cuneiform)  ; → 3/2
+(string->number "𒁹𒁹𒁹+𒁹𒁹𒁹𒁹𒄿" 'cuneiform)  ; → 3+4i
 ```
+
+A general multivector's metric signature (p,q,r) isn't observable from the
+notation itself (it only records which blades are nonzero) — reading one back
+reconstructs a Euclidean `Cl(n,0,0)` sized to the highest basis index
+referenced, which is not a lossless round-trip for a non-Euclidean algebra
+(e.g. `Cl(3,1,0)` Minkowski spacetime).
 
 ### `(current-number-notation)`
 ### `(current-number-notation sym)`
@@ -241,5 +279,12 @@ Returns the exact rational encoded on Yale Babylonian Collection tablet YBC 7289
 - The cuneiform block covered by the reader is U+12000–U+1247F (`SEX_IS_CUNEIFORM`).
 - The zero placeholder is **U+1244A** (CUNEIFORM NUMERIC SIGN TWO ASH TENU). Earlier
   design documents incorrectly listed U+12469.
+- The radix-point separator is **U+00B7** MIDDLE DOT (not a cuneiform
+  codepoint — chosen precisely so it can't be confused with a digit glyph).
+- The extended-notation markers are **U+1213F** CUNEIFORM SIGN I (complex
+  imaginary unit) and **U+1208A** CUNEIFORM SIGN E (quaternion/octonion/
+  multivector basis blade e_n) — real cuneiform signs, reused here for their
+  phonetic value rather than their logographic meaning, chosen to not collide
+  with the digit glyphs or any reserved Akkadian keyword glyph.
 - Implementation: `src/numeric.c` (parsing and formatting), `src/reader.c`
   (token dispatch), `lib/curry/modules/curry/sexagesimal.scm` (module).
