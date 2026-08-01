@@ -1,5 +1,17 @@
 # Changelog
 
+### Unreleased
+
+**New — `(srfi srfi-N)` shims (SRFI-261)**
+
+[SRFI-261](https://srfi.schemers.org/srfi-261/) (finalized 2025-12-07)
+specifies `(srfi srfi-N)` as the primary portable library-name form for
+referring to SRFI N, distinct from both the bare `(srfi N)` form curry
+already shipped and curry's own descriptive `(srfi sN name)` naming.
+Added a `(srfi srfi-N)` shim for all 24 existing numbered SRFIs
+(`lib/curry/modules/srfi/srfi-N.scm`), identical in shape to the existing
+`(srfi N)` shims. See `docs/reference/srfi/index.md`.
+
 ### 1.14.1 - 2026-08-01
 
 **Core — `number->string` printed `#<number>` for rationals/complex/quaternion/etc.**

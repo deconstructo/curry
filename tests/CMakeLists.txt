@@ -48,6 +48,7 @@ add_test(NAME srfi_misc COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_misc_test
 add_test(NAME srfi_numbered_shims COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_numbered_shims_tests.scm)
 add_test(NAME srfi_numbered_shim_hash_family COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_numbered_shim_hash_family_tests.scm)
 add_test(NAME srfi_numbered_shim_comparator_hash COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_numbered_shim_comparator_hash_tests.scm)
+add_test(NAME srfi_srfi_prefixed_shims COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_srfi_prefixed_shims_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
