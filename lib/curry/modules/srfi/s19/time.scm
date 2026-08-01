@@ -1,6 +1,6 @@
 ;;; (srfi s19 time) — SRFI-19: Time Data Types and Procedures.
 ;;;
-;;; Scope notes (see docs/reference/module-time-srfi.md for the full story):
+;;; Scope notes (see docs/reference/srfi/s19.md for the full story):
 ;;;
 ;;; - TAI (International Atomic Time) requires a leap-second table that
 ;;;   needs periodic maintenance to stay correct — rather than silently

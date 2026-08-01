@@ -151,32 +151,32 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 
 ### SRFI compatibility (`srfi`)
 
-Portable SRFI libraries under the `(srfi sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme:
+Portable SRFI libraries under the `(srfi sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme. Full index: [`docs/reference/srfi/index.md`](docs/reference/srfi/index.md).
 
 | Library | Import | Description |
 |---------|--------|-------------|
-| [s1 lists](docs/reference/module-srfi.md) | `(srfi s1 lists)` | SRFI-1: `iota`, `any`, `every`, `fold`, `take/drop`, `partition`, … |
-| [s27 random-bits](docs/reference/module-srfi.md) | `(srfi s27 random-bits)` | SRFI-27: random sources, `random-integer`, `random-real` |
-| [s215 log](docs/reference/module-srfi.md) | `(srfi s215 log)` | SRFI-215: central log exchange, `send-log`, `current-log-callback` |
-| [s170 posix](docs/reference/module-srfi.md) | `(srfi s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
-| [s112 environment-inquiry](docs/reference/module-srfi.md) | `(srfi s112 environment-inquiry)` | SRFI-112: `implementation-name`/`-version`, `os-name`/`-version`, `cpu-architecture`, `machine-name` *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
-| [s238 codesets](docs/reference/module-srfi.md) | `(srfi s238 codesets)` | SRFI-238: `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup *(requires `-DBUILD_MODULE_CODESETS=ON`, the default)* |
-| [s69/s90 hash-tables](docs/reference/module-hash-tables-srfi.md) | `(srfi s69 hash-tables)`, `(srfi s90 hash-tables)` | SRFI-69 basic hash tables + SRFI-90 `make-table` *(pure Scheme, no build step)* |
-| [s174 posix-timespecs](docs/reference/module-timespec-srfi.md) | `(srfi s174 posix-timespecs)` | SRFI-174: immutable `(seconds nanoseconds)` time-instant type *(pure Scheme, no build step)* |
-| [s19 time](docs/reference/module-time-srfi.md) | `(srfi s19 time)` | SRFI-19: time/date objects, Julian Day conversions, `strftime`-style formatting *(requires `-DBUILD_MODULE_POSIX=ON`, the default, for `current-time`)* |
-| [s8 receive](docs/reference/module-srfi.md) | `(srfi s8 receive)` | SRFI-8: `receive` multiple-values binding macro |
-| [s145 assume](docs/reference/module-srfi.md) | `(srfi s145 assume)` | SRFI-145: `assume` runtime invariant declaration |
-| [s227 optional-arguments](docs/reference/module-srfi.md) | `(srfi s227 optional-arguments)` | SRFI-227: `opt-lambda`, `let-optionals*`, `default-object` |
-| [s128 comparators](docs/reference/module-srfi.md) | `(srfi s128 comparators)` | SRFI-128: comparator type, basic-type and compound comparators, `default-comparator` |
-| [s125/s126 hash-tables](docs/reference/module-srfi.md) | `(srfi s125 hash-tables)`, `(srfi s126 hashtables)` | SRFI-125 comparator-keyed hash tables + SRFI-126 R6RS-style `hashtable-*` naming |
-| [s132 sorting](docs/reference/module-srfi.md) | `(srfi s132 sorting)` | SRFI-132: stable merge sort for lists and vectors |
-| [s133 vectors](docs/reference/module-srfi.md) | `(srfi s133 vectors)` | SRFI-133: vector fold/index/count/any/every, binary search, concatenate, unfold |
-| [s113 sets-and-bags](docs/reference/module-srfi.md) | `(srfi s113 sets-and-bags)` | SRFI-113: sets over curry's native set, plus pure-Scheme multiset bags |
-| [s158 generators-and-accumulators](docs/reference/module-srfi.md) | `(srfi s158 generators-and-accumulators)` | SRFI-158: generator/accumulator combinators, `make-coroutine-generator` via a real thread |
-| [s18 multithreading](docs/reference/module-srfi.md) | `(srfi s18 multithreading)` | SRFI-18: thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
-| [s98 os-environment-variables](docs/reference/module-srfi.md) | `(srfi s98 os-environment-variables)` | SRFI-98: `get-environment-variable(s)` |
-| [s59 vicinity](docs/reference/module-srfi.md) | `(srfi s59 vicinity)` | SRFI-59: vicinity path utilities |
-| [s194 random-data-samples](docs/reference/module-srfi.md) | `(srfi s194 random-data-samples)` | SRFI-194: random integer/real/boolean/char/distribution generators |
+| [s1 lists](docs/reference/srfi/s1.md) | `(srfi s1 lists)` | SRFI-1: `iota`, `any`, `every`, `fold`, `take/drop`, `partition`, … |
+| [s27 random-bits](docs/reference/srfi/s27.md) | `(srfi s27 random-bits)` | SRFI-27: random sources, `random-integer`, `random-real` |
+| [s215 log](docs/reference/srfi/s215.md) | `(srfi s215 log)` | SRFI-215: central log exchange, `send-log`, `current-log-callback` |
+| [s170 posix](docs/reference/srfi/s170.md) | `(srfi s170 posix)` | SRFI-170 subset: `file-info`, directories, symlinks, users/groups *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
+| [s112 environment-inquiry](docs/reference/srfi/s112.md) | `(srfi s112 environment-inquiry)` | SRFI-112: `implementation-name`/`-version`, `os-name`/`-version`, `cpu-architecture`, `machine-name` *(requires `-DBUILD_MODULE_POSIX=ON`, the default)* |
+| [s238 codesets](docs/reference/srfi/s238.md) | `(srfi s238 codesets)` | SRFI-238: `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup *(requires `-DBUILD_MODULE_CODESETS=ON`, the default)* |
+| [s69/s90 hash-tables](docs/reference/srfi/s69-s90.md) | `(srfi s69 hash-tables)`, `(srfi s90 hash-tables)` | SRFI-69 basic hash tables + SRFI-90 `make-table` *(pure Scheme, no build step)* |
+| [s174 posix-timespecs](docs/reference/srfi/s174.md) | `(srfi s174 posix-timespecs)` | SRFI-174: immutable `(seconds nanoseconds)` time-instant type *(pure Scheme, no build step)* |
+| [s19 time](docs/reference/srfi/s19.md) | `(srfi s19 time)` | SRFI-19: time/date objects, Julian Day conversions, `strftime`-style formatting *(requires `-DBUILD_MODULE_POSIX=ON`, the default, for `current-time`)* |
+| [s8 receive](docs/reference/srfi/s8.md) | `(srfi s8 receive)` | SRFI-8: `receive` multiple-values binding macro |
+| [s145 assume](docs/reference/srfi/s145.md) | `(srfi s145 assume)` | SRFI-145: `assume` runtime invariant declaration |
+| [s227 optional-arguments](docs/reference/srfi/s227.md) | `(srfi s227 optional-arguments)` | SRFI-227: `opt-lambda`, `let-optionals*`, `default-object` |
+| [s128 comparators](docs/reference/srfi/s128.md) | `(srfi s128 comparators)` | SRFI-128: comparator type, basic-type and compound comparators, `default-comparator` |
+| [s125/s126 hash-tables](docs/reference/srfi/s125-s126.md) | `(srfi s125 hash-tables)`, `(srfi s126 hashtables)` | SRFI-125 comparator-keyed hash tables + SRFI-126 R6RS-style `hashtable-*` naming |
+| [s132 sorting](docs/reference/srfi/s132-s133.md) | `(srfi s132 sorting)` | SRFI-132: stable merge sort for lists and vectors |
+| [s133 vectors](docs/reference/srfi/s132-s133.md) | `(srfi s133 vectors)` | SRFI-133: vector fold/index/count/any/every, binary search, concatenate, unfold |
+| [s113 sets-and-bags](docs/reference/srfi/s113.md) | `(srfi s113 sets-and-bags)` | SRFI-113: sets over curry's native set, plus pure-Scheme multiset bags |
+| [s158 generators-and-accumulators](docs/reference/srfi/s158.md) | `(srfi s158 generators-and-accumulators)` | SRFI-158: generator/accumulator combinators, `make-coroutine-generator` via a real thread |
+| [s18 multithreading](docs/reference/srfi/s18.md) | `(srfi s18 multithreading)` | SRFI-18: thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
+| [s98 os-environment-variables](docs/reference/srfi/s98.md) | `(srfi s98 os-environment-variables)` | SRFI-98: `get-environment-variable(s)` |
+| [s59 vicinity](docs/reference/srfi/s59.md) | `(srfi s59 vicinity)` | SRFI-59: vicinity path utilities |
+| [s194 random-data-samples](docs/reference/srfi/s194.md) | `(srfi s194 random-data-samples)` | SRFI-194: random integer/real/boolean/char/distribution generators |
 
 ---
 
