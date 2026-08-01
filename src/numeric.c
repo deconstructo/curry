@@ -1432,6 +1432,8 @@ val_t num_normalize(val_t v) {
                              * (Seleucid zero placeholder; the glyph commonly
                              * labelled "𒑊" in Assyriology tools maps to U+1244A,
                              * not U+12469 SHAR2 which denotes 3600 in astronomy) */
+#define CP_MIDDLE_DOT 0x00B7u /* · U+00B7 — the radix-point separator sex_to_cuneiform()
+                               * renders between integer and fractional digit groups */
 
 /* ---- UTF-8 helpers ---- */
 
@@ -1680,32 +1682,32 @@ val_t sex_parse_neugebauer(const char *s) {
     return r;
 }
 
-/* Parse a cuneiform glyph string to an exact integer.
- * Groups (space-separated) are sexagesimal digits; within each group
- * count ASH (=1) and U (=10), or SHAR2 (=0). */
-val_t sex_parse_cuneiform(const char *s) {
-    mpz_t total; mpz_init_set_ui(total, 0);
-    bool got_any = false;
-    const char *p = s;
-
+/* Parse one maximal run of space-separated sexagesimal digit-groups starting
+ * at *pp (a group is ASH/U/SHAR2 glyphs, additive within the group). Fills
+ * digits[] (MSB-first, up to max entries) and returns the count parsed.
+ * Returns -1 on a malformed group (invalid glyph mid-group, digit > 59, or
+ * more than max digits). Leaves *pp just past the last consumed group --
+ * on a clean stop (end of string, or the next thing isn't a digit-group)
+ * it does NOT consume the trailing spaces that led to that discovery, so
+ * callers can inspect what follows (e.g. the '·' radix separator). */
+static int sex_parse_cuneiform_digit_run(const char **pp, int *digits, int max) {
+    const char *p = *pp;
+    int n = 0;
     while (*p) {
-        /* Skip inter-group spaces */
+        const char *before_spaces = p;
         while (*p == ' ') p++;
-        if (!*p) break;
+        if (!*p) { p = before_spaces; break; }
 
-        /* Decode first glyph of group */
-        const char *before = p;
+        const char *gstart = p;
         int cp = sex_decode_cp(&p);
-        if (cp < 0) break;
+        if (cp < 0) { p = before_spaces; break; }
         uint32_t ucp = (uint32_t)cp;
-        if (ucp != CP_ASH && ucp != CP_U && ucp != CP_SHAR2) {
-            p = before; break; /* not a cuneiform glyph — stop */
-        }
+        if (ucp != CP_ASH && ucp != CP_U && ucp != CP_SHAR2) { p = before_spaces; break; }
 
-        /* Read the full group (until space or end) */
+        /* Re-read the full group (until space or end) */
         int tens = 0, ones = 0;
         bool is_zero_ph = false;
-        p = before; /* re-read from start of group */
+        p = gstart;
         while (*p && *p != ' ') {
             const char *gp = p;
             int gcp = sex_decode_cp(&p);
@@ -1718,29 +1720,79 @@ val_t sex_parse_cuneiform(const char *s) {
         }
 
         int digit = is_zero_ph ? 0 : tens * 10 + ones;
-        if (digit > 59) { mpz_clear(total); return V_FALSE; }
+        if (digit > 59 || n >= max) return -1;
+        digits[n++] = digit;
+    }
+    *pp = p;
+    return n;
+}
 
-        if (got_any) mpz_mul_ui(total, total, 60);
-        mpz_add_ui(total, total, (unsigned long)digit);
-        got_any = true;
+/* Parse a cuneiform glyph string to an exact number: a run of sexagesimal
+ * digit-groups (space-separated) for the integer part, optionally followed
+ * by " · " (the radix separator sex_to_cuneiform() emits) and another digit
+ * run for the fractional part, optionally preceded by '-'. Returns V_FALSE
+ * for anything that doesn't parse as a WHOLE (no partial-prefix successes --
+ * see reader.c's cuneiform token dispatch, which relies on that to fall back
+ * to interning an unrecognized token as a symbol, e.g. "𒁹𒈠" must fail
+ * entirely rather than silently parsing as 1 and discarding "𒈠"). */
+val_t sex_parse_cuneiform(const char *s) {
+    const char *p = s;
+    bool neg = false;
+    if (*p == '-') { neg = true; p++; }
+
+    int int_digs[64];
+    int nint = sex_parse_cuneiform_digit_run(&p, int_digs, 64);
+    if (nint <= 0) return V_FALSE;
+
+    int frac_digs[64];
+    int nfrac = 0;
+    const char *after_int = p;
+    while (*after_int == ' ') after_int++;
+    const char *dot_end = after_int;
+    int dcp = sex_decode_cp(&dot_end);
+    if (dcp == (int)CP_MIDDLE_DOT) {
+        const char *q = dot_end;
+        while (*q == ' ') q++;
+        int n = sex_parse_cuneiform_digit_run(&q, frac_digs, 64);
+        if (n <= 0) return V_FALSE; /* '·' with no fractional digits after it */
+        nfrac = n;
+        p = q;
     }
 
-    /* A group can break out of the loop above by hitting a glyph that
-     * isn't a valid sexagesimal digit (p left pointing at it, *p != '\0')
-     * rather than by exhausting the string. That's not "1 followed by
-     * some other token" -- callers pass one already-tokenized symbol
-     * string, so leftover, unconsumed content means this token as a
-     * WHOLE isn't a sexagesimal literal, even though a leading prefix of
-     * it happened to parse as one (e.g. "𒁹𒈠", ASH followed by a
-     * non-digit glyph, would otherwise silently parse as 1 and discard
-     * "𒈠" -- see reader.c's cuneiform token dispatch, which relies on
-     * this function failing so it can fall back to interning the whole
-     * token as a symbol). */
-    if (*p != '\0') { mpz_clear(total); return V_FALSE; }
+    if (*p != '\0') return V_FALSE;
 
-    val_t r = make_big_from_mpz(total);
-    mpz_clear(total);
-    return got_any ? r : V_FALSE;
+    if (nfrac == 0) {
+        mpz_t total; mpz_init_set_ui(total, 0);
+        for (int i = 0; i < nint; i++) {
+            mpz_mul_ui(total, total, 60);
+            mpz_add_ui(total, total, (unsigned long)int_digs[i]);
+        }
+        if (neg) mpz_neg(total, total);
+        val_t r = make_big_from_mpz(total);
+        mpz_clear(total);
+        return r;
+    }
+
+    mpq_t result; mpq_init(result); mpq_set_ui(result, 0, 1);
+    mpq_t sixty; mpq_init(sixty); mpq_set_ui(sixty, 60, 1);
+    for (int i = 0; i < nint; i++) {
+        mpq_t tmp; mpq_init(tmp);
+        mpq_mul(result, result, sixty);
+        mpq_set_si(tmp, int_digs[i], 1); mpq_add(result, result, tmp);
+        mpq_clear(tmp);
+    }
+    mpq_t denom; mpq_init(denom); mpq_set(denom, sixty);
+    for (int i = 0; i < nfrac; i++) {
+        mpq_t frac; mpq_init(frac);
+        mpq_set_si(frac, frac_digs[i], 1); mpq_div(frac, frac, denom);
+        mpq_add(result, result, frac); mpq_clear(frac);
+        mpq_mul(denom, denom, sixty);
+    }
+    mpq_clear(denom); mpq_clear(sixty);
+    if (neg) mpq_neg(result, result);
+    val_t r = make_rat_from_mpq(result);
+    mpq_clear(result);
+    return r;
 }
 
 /* Format a number in Neugebauer notation.

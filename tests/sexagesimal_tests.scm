@@ -101,6 +101,10 @@
 (check "n->s cun 60"  (number->string 60 'cuneiform) "𒁹 𒑊")
 (check "n->s cun 0"   (number->string 0 'cuneiform)  "𒑊")
 
+;; Rational/flonum → cuneiform, with fractional "·" separator
+(check "n->s cun rational 3/2"  (number->string 3/2 'cuneiform)  "𒁹 · 𒌋𒌋𒌋")
+(check "n->s cun negative"      (number->string -3/2 'cuneiform) "-𒁹 · 𒌋𒌋𒌋")
+
 ;;; ---- string->number with 'neugebauer ----
 
 (check "s->n neu integer 71"    (string->number "1,11" 'neugebauer)      71)
@@ -119,6 +123,16 @@
 (check "s->n cun 23"  (string->number "𒌋𒌋𒁹𒁹𒁹" 'cuneiform) 23)
 (check "s->n cun 71"  (string->number "𒁹 𒌋𒁹" 'cuneiform)  71)
 (check "s->n cun 0"   (string->number "𒑊" 'cuneiform)     0)
+
+;; Fractional cuneiform ("·" radix separator) -- regression: this used to
+;; return #f because sex_parse_cuneiform() didn't understand the "·"
+;; sex_to_cuneiform() emits, so number->string/string->number for 'cuneiform
+;; didn't round-trip on anything but pure integers.
+(check "s->n cun rational 3/2"    (string->number "𒁹 · 𒌋𒌋𒌋" 'cuneiform)   3/2)
+(check "s->n cun negative"        (string->number "-𒁹 · 𒌋𒌋𒌋" 'cuneiform)  -3/2)
+(check "s->n cun dot no frac"     (string->number "𒁹 · " 'cuneiform)        #f)
+(check "s->n cun round-trip ybc"  (string->number (number->string 30547/21600 'cuneiform) 'cuneiform)
+                                  30547/21600)
 
 ;;; ---- Round-trip: reader → number->string ----
 
