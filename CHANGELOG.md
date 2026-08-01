@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.14.1 - 2026-08-01
 
 **Core — `number->string` printed `#<number>` for rationals/complex/quaternion/etc.**
 
