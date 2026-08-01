@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785576681033,
+  "lastUpdate": 1785577651978,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1172,6 +1172,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 81.488,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "2dfc1ecee1958415e922785a8138386cd1410c89",
+          "message": "feat: (srfi srfi-N) shims for SRFI-261 portable library naming\n\nSRFI-261 (finalized 2025-12-07) specifies (srfi srfi-N) as the primary\nportable library-name form for referring to SRFI N -- distinct from both\nthe bare (srfi N) shorthand curry already ships and curry's own\ndescriptive (srfi sN name) naming, and silent on the latter.\n\nAdded a (srfi srfi-N) shim for all 24 existing numbered SRFIs, identical\nin shape to the existing (srfi N) shims (same underlying (srfi sN name)\nlibrary, one more library-name segment) -- mechanically generated from\nthe existing N.scm shims since the two are byte-identical apart from the\ndefine-library name.\n\nNew tests/srfi_srfi_prefixed_shims_tests.scm mirrors\nsrfi_numbered_shims_tests.scm's checks via the srfi-N form.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T19:44:25+10:00",
+          "tree_id": "681c9c3794297e1809a6036785516735c52ffc5c",
+          "url": "https://github.com/deconstructo/curry/commit/2dfc1ecee1958415e922785a8138386cd1410c89"
+        },
+        "date": 1785577651140,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.372,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.379,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.122,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.088,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.583,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 345.979,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.668,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.189,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 106.245,
             "unit": "ms"
           }
         ]
