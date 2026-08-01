@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785580082041,
+  "lastUpdate": 1785617737374,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1310,6 +1310,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.067,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "486bd30d413926c7308a44b7e2cd7c102ebe120f",
+          "message": "docs: fix stale SRFI count and incomplete changelog entry\n\nmodule-srfi.md still said '24 supported SRFIs' after SRFI-263 brought\nthe count to 25. The SRFI-263 CHANGELOG entry only described the first\nof the two bugs found/fixed during that work (the diamond-inheritance\ndedup fix); added the second (cyclic-parent-graph segfault, found by\nthe code-review subagent) to match what actually happened and what the\ncommit message for 32b6c8d already says.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-02T06:52:38+10:00",
+          "tree_id": "f8b4371055af3471aac7a8813e32d089534f262d",
+          "url": "https://github.com/deconstructo/curry/commit/486bd30d413926c7308a44b7e2cd7c102ebe120f"
+        },
+        "date": 1785617736372,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.557,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.983,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.169,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 43.473,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 195.176,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 439.914,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 90.499,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 135.566,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.612,
             "unit": "ms"
           }
         ]
