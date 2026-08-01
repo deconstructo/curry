@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785552258917,
+  "lastUpdate": 1785573571165,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -758,6 +758,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 102.278,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b416f654f055b10e3cd367cc1de78a3cf5197b5a",
+          "message": "docs: changelog, README module table, CLAUDE.md test-suite table\n\nRecord the number->string/cuneiform-tower fixes and the new\n(curry babylonian-astronomy) module in CHANGELOG.md's Unreleased section;\nadd babylonian-astronomy to README.md's module table; update CLAUDE.md's\ntest-suite table (sexagesimal's assertion count grew from 76 to 110, new\nbabylonian_astronomy row) and the sexagesimal architecture blurb to\nmention the extended cuneiform tower notation and the new module.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T18:37:37+10:00",
+          "tree_id": "14c7f6bd6f0a18490912d98b6ab64fd4dceed4a6",
+          "url": "https://github.com/deconstructo/curry/commit/b416f654f055b10e3cd367cc1de78a3cf5197b5a"
+        },
+        "date": 1785573570216,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.98,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.738,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.015,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.556,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.842,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 378.292,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 74.427,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 123.192,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.564,
             "unit": "ms"
           }
         ]
