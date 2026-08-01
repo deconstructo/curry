@@ -23,6 +23,7 @@ add_test(NAME akkadian      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_t
 add_test(NAME conditions    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/conditions_tests.scm)
 add_test(NAME numtheory     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numtheory_tests.scm)
 add_test(NAME sexagesimal   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sexagesimal_tests.scm)
+add_test(NAME babylonian_astronomy COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/babylonian_astronomy_tests.scm)
 add_test(NAME sx_rules      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_rules_tests.scm)
 add_test(NAME sx_algebra    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_algebra_tests.scm)
 add_test(NAME sx_poly       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_poly_tests.scm)
