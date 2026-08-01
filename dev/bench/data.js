@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785617737374,
+  "lastUpdate": 1785618820473,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1379,6 +1379,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.612,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b4ca93e0221fcd6ab5507be0cc4d6343c5ed091c",
+          "message": "docs: expand 12 thin SRFI pages to full per-procedure reference\n\ns8, s18, s59, s98, s113, s125-s126, s128, s132-s133, s145, s158, s194,\ns227 had been extracted near-verbatim from the old monolithic\nmodule-srfi.md, which was itself already terse for these libraries --\na single run-on paragraph naming procedures with no individual\nsignatures, parameter/return-type documentation, or worked examples.\nRewrote each against its actual lib/curry/modules/srfi/sN/*.scm source\n(not just the SRFI text, since several deviate from it in curry-specific\nways worth documenting explicitly -- thread-join!'s silently-swallowed\nexceptions, hash-table-ref's thunk-vs-default-value distinction between\nlibraries, set-xor!'s not-actually-in-place implementation, etc.) and\nverified every code example against the actual built interpreter rather\nthan transcribing from memory.\n\ns1, s27, s215, s170, s112, s238 were already adequate (either written\ncarefully from the start, or -- for s170/s112/s238 -- correctly thin\nsince they're one-line re-exports of C modules documented in full\nelsewhere) and are unchanged.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-02T07:12:32+10:00",
+          "tree_id": "2690971ee9811f7beec8389fa968d0ef6c04b2a6",
+          "url": "https://github.com/deconstructo/curry/commit/b4ca93e0221fcd6ab5507be0cc4d6343c5ed091c"
+        },
+        "date": 1785618820127,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.727,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.805,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.081,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 42.252,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.272,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 431.452,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 89.658,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 136.398,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.519,
             "unit": "ms"
           }
         ]
