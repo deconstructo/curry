@@ -1,5 +1,55 @@
 # Changelog
 
+### Unreleased
+
+**Core — `number->string` printed `#<number>` for rationals/complex/quaternion/etc.**
+
+`num_to_string()` (`src/numeric.c`) only special-cased fixnum/bignum/flonum/
+mpfr and fell back to the literal string `"#<number>"` for everything
+else, including plain rationals — `display`/`write` were unaffected since
+they go through the separate, already-correct `scm_write()` path. Fixed
+by delegating the fallback to that same writer via a string port, with a
+dedicated `vis_rational` branch kept separate to avoid a real
+infinite-recursion crash this initially introduced (see below).
+
+**Core — cuneiform notation now covers the whole numeric tower**
+
+`(number->string _ 'cuneiform)`/`(string->number _ 'cuneiform)` previously
+only handled integers, and even there the writer's fractional `·`
+separator wasn't understood by the reader (`(string->number (number->string
+3/2 'cuneiform) 'cuneiform)` returned `#f`). Both are fixed, and the
+notation is extended to complex numbers (new 𒄿 imaginary-unit marker),
+quaternion/octonion/Clifford-multivector (new 𒂊 basis-blade marker,
+`𒂊<digit>` per index, matching `mv-write`'s ASCII `e13` convention), and
+surreal/symbolic expressions (writer-only, reusing existing Akkadian
+operator aliases for `+`/`-`/`*`/`/`/`sin`/etc. via `lang_pr_lookup`). A
+general multivector's metric signature isn't recoverable from the
+notation and is reconstructed as Euclidean on read-back (documented
+limitation).
+
+An 8-angle code review plus a dedicated security-review pass on this work
+found and fixed two real crashes — a stack-overflow via infinite
+recursion between `num_to_string`/`scm_write`/`write_number_notation`/
+`sex_to_cuneiform` for a rational overflowing the base-60 digit cap under
+`current-number-notation`, and a UTF-8-corruption segfault in
+`src/reader.c`'s cuneiform-token trailing-glyph loop (it truncated a
+multi-byte codepoint to a single raw byte) — plus three fail-open
+validation gaps in the new extended-notation parser (a term-count cap too
+small for large multivectors, a duplicate-blade term silently overwriting
+instead of being rejected, and an unrejected double-signed magnitude).
+
+**New module — `(curry babylonian-astronomy)`**
+
+Pure-Scheme Babylonian mathematical-astronomy toolkit: the System-A
+"zigzag" ramp-and-reflect function, the System B mean synodic-month
+constant (`29;31,50,8,20` days, entered as an actual Neugebauer literal)
+with a Saros-period (223 synodic months) eclipse-window predictor, and
+the twelve Babylonian civil calendar month names — not a full MUL.APIN
+star-almanac implementation. Three procedures get Akkadian aliases
+(transliterated + cuneiform) via `(curry private lang-aliases)`. See
+`docs/reference/module-babylonian-astronomy.md` and
+`examples/mul-apin-akkadian.scm`.
+
 ### 1.14.0 - 2026-07-31
 
 **Core — intermittent crash/hang in actor + STM code (`tests/actors_tests.scm`)**

@@ -147,6 +147,7 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+).
 | [posix](docs/reference/module-posix.md) | `(curry posix)` | Filesystem/process POSIX bindings (SRFI-170 subset): `file-info`, directories, symlinks, uid/gid, `umask`, users/groups | — |
 | [codesets](docs/reference/module-codesets.md) | `(curry codesets)` | SRFI-238 codesets: `errno`/`signal`/`http-status` symbol ⟷ number ⟷ message lookup | — |
 | [aviation-weather](docs/reference/module-aviation-weather.md) | `(curry aviation-weather)` | METAR / TAF / ATIS aviation weather report parsing *(pure Scheme, no build step)* | — |
+| [babylonian-astronomy](docs/reference/module-babylonian-astronomy.md) | `(curry babylonian-astronomy)` | Babylonian mathematical astronomy: System-A zigzag function, synodic month/Saros eclipse cycle, civil calendar month names *(pure Scheme, no build step)* | — |
 
 ### SRFI compatibility (`srfi`)
 
