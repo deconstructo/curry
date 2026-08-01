@@ -2,6 +2,24 @@
 
 ### Unreleased
 
+**New — `(srfi s263 prototype-objects)`: SRFI-263 Prototype Object System**
+
+A "Self"-inspired prototype/message-passing object system (`*the-root-object*`,
+`derive`/`copy`/`mirror` messages, value/method/parent slots,
+`define-method`/`define-object`/`derive-object`/`copy-object` sugar) --
+complements, and is unrelated to, `(curry oop)` (the existing CLOS-style
+class/generic-function system): different paradigms, not competing
+implementations of the same thing. `(srfi 263)` and `(srfi srfi-263)`
+shims included. See `docs/reference/srfi/s263.md`.
+
+Found and fixed one real bug while implementing: diamond-inheritance
+ambiguity detection didn't dedupe hits by slot identity, so an object
+with more than one parent sending any unhandled/genuinely-ambiguous
+message (which itself resolves via `ambiguous-message-send`, converging
+on the same handler through every parent branch) recursed forever
+instead of raising once. Fixed by deduping search results by slot eq?
+identity before counting them as distinct.
+
 **New — `(srfi srfi-N)` shims (SRFI-261)**
 
 [SRFI-261](https://srfi.schemers.org/srfi-261/) (finalized 2025-12-07)

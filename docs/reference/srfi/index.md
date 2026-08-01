@@ -53,6 +53,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s215 log)`](s215.md) | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
 | [`(srfi s227 optional-arguments)`](s227.md) | [SRFI-227](https://srfi.schemers.org/srfi-227/) | `opt-lambda`, `let-optionals`/`let-optionals*`, `default-object`/`default-object?` — spelled with `#:optional`/`#:rest`, not `#!optional`/`#!rest` |
 | [`(srfi s238 codesets)`](s238.md) | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |
+| [`(srfi s263 prototype-objects)`](s263.md) | [SRFI-263](https://srfi.schemers.org/srfi-263/) | Self-inspired prototype/message-passing object system — complements, doesn't replace, `(curry oop)` |
 
 ## Portability note
 
