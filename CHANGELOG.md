@@ -1,6 +1,6 @@
 # Changelog
 
-### Uncommitted
+### 1.14.0 - 2026-07-31
 
 **Core — intermittent crash/hang in actor + STM code (`tests/actors_tests.scm`)**
 
