@@ -12,13 +12,27 @@ class/generic-function system): different paradigms, not competing
 implementations of the same thing. `(srfi 263)` and `(srfi srfi-263)`
 shims included. See `docs/reference/srfi/s263.md`.
 
-Found and fixed one real bug while implementing: diamond-inheritance
-ambiguity detection didn't dedupe hits by slot identity, so an object
-with more than one parent sending any unhandled/genuinely-ambiguous
-message (which itself resolves via `ambiguous-message-send`, converging
-on the same handler through every parent branch) recursed forever
-instead of raising once. Fixed by deduping search results by slot eq?
-identity before counting them as distinct.
+Found and fixed two real bugs, both in the parent-chain search algorithm:
+
+1. Diamond-inheritance ambiguity detection didn't dedupe hits by slot
+   identity, so an object with more than one parent sending any
+   unhandled/genuinely-ambiguous message (which itself resolves via
+   `ambiguous-message-send`, converging on the same handler through
+   every parent branch) recursed forever instead of raising once. Fixed
+   by deduping search results by slot eq? identity before counting them
+   as distinct.
+2. (found by an independent code-review subagent) `set-parent-slot!` is
+   ordinary public API with no cycle check, so a buggy or adversarial
+   call (most simply an object re-parenting itself) could create a
+   cycle in the parent graph, and every parent-walking search (dispatch,
+   `resend`, and the mirror's `has-ancestor`/`full-ancestor-list`/
+   `full-slot-list`) had no guard against revisiting an object already
+   on the search path -- a native stack-overflow segfault. Fixed with a
+   visited-set threaded through all of them; a cycle that additionally
+   severs every path back to `*the-root-object*` (so even the
+   `message-not-understood`/`ambiguous-message-send` fallback handlers
+   become unreachable) now raises a plain Scheme error instead of
+   attempting a fallback that would itself loop.
 
 **New — `(srfi srfi-N)` shims (SRFI-261)**
 
