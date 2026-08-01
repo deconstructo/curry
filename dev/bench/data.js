@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785618820473,
+  "lastUpdate": 1785621976461,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1448,6 +1448,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.519,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "7ee4d9f4ef521b1e886342b40af477194c4b1a47",
+          "message": "feat: SRFI-111 (Boxes) and SRFI-195 (Multiple-value boxes)\n\nSingle-value mutable box (box/box?/unbox/set-box!) and its extension to\nzero-or-more values (box-arity/unbox-value/set-box-value!). (srfi s111\nboxes) stores a vector of 0+ values from the start, so (srfi s195\nmultiple-value-boxes) re-exports its box/box?/unbox/set-box! unchanged\nrather than reimplementing them -- trivially satisfying SRFI-195's\nrequirement that bindings shared between the two SRFIs be identical when\nboth are imported. (srfi 111)/(srfi srfi-111) and (srfi 195)/(srfi\nsrfi-195) shims included.\n\nCode review (independent subagent) found that unbox-value/set-box-value!\npassed a caller-supplied index straight into curry's core list-ref, which\nsegfaults on out-of-range input rather than raising, and silently returned\nthe wrong element for a negative index. Fixed by validating the index\nagainst box-arity before it reaches list-ref.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-02T08:05:17+10:00",
+          "tree_id": "6ab877856145e1b1da99e698351fde93ee1dff43",
+          "url": "https://github.com/deconstructo/curry/commit/7ee4d9f4ef521b1e886342b40af477194c4b1a47"
+        },
+        "date": 1785621975636,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.967,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 36.133,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.035,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 42.688,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 193.336,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 435.081,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 87.458,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 133.283,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.102,
             "unit": "ms"
           }
         ]
