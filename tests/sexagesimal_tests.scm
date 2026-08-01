@@ -239,6 +239,22 @@
 (check "s->n cun bad index"   (string->number "𒁹+𒁹𒂊𒌋" 'cuneiform)  #f)
 (check "s->n cun garbage"     (string->number "𒁹𒄿𒈠" 'cuneiform)    #f)
 
+;;; ---- Cuneiform notation for surreal/symbolic (writer only) ----
+;;; Best-effort, not required to round-trip through string->number.
+
+;; 3 + 2ε: real term plain, ε-term marked with 𒀭 (DINGIR) + exponent -1
+(check "n->s cun surreal"  (number->string (+ 3 (* 2 epsilon)) 'cuneiform)
+                            "𒁹𒁹𒁹+𒁹𒁹𒀭-𒁹")
+(check "s->n cun surreal is writer-only" (string->number "𒁹𒁹𒁹+𒁹𒁹𒀭-𒁹" 'cuneiform) #f)
+
+;; Symbolic: "+"/"*" get their registered Akkadian cuneiform alias (infix);
+;; "sin" (unary, no infix sense) gets its alias as a prefix function name.
+(symbolic cuntestvar)
+(check "n->s cun symbolic +*" (number->string (+ (* 2 cuntestvar) 3) 'cuneiform)
+                               "(𒁹𒁹𒁹𒋻𒁹(𒁹𒁹𒈧𒁹cuntestvar))")
+(check "n->s cun symbolic sin" (number->string (sin cuntestvar) 'cuneiform)
+                                "𒁹𒀸𒁹(cuntestvar)")
+
 ;;; ---- number->string fallback for non-fixnum/bignum/flonum types ----
 ;;; Regression: num_to_string() used to fall back to the literal string
 ;;; "#<number>" for any type it didn't special-case, which included plain

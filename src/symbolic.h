@@ -278,6 +278,13 @@ val_t sx_leading_coeff(val_t expr, val_t var);               /* coefficient of h
 void  sx_write(val_t expr, val_t port);
 void  sx_write_infix(val_t expr, val_t port);   /* infix:  x^2 + 2*x + 1  */
 void  sx_write_latex(val_t expr, val_t port);   /* LaTeX:  x^{2} + 2 x + 1 */
+void  sx_write_cuneiform(val_t expr, val_t port); /* best-effort: numeric leaves and
+                                                    * operators with a registered Akkadian
+                                                    * cuneiform alias (+,-,*,/,...) in
+                                                    * cuneiform infix; anything else (trig
+                                                    * functions, etc.) falls back to plain
+                                                    * English prefix notation. Writer only --
+                                                    * no cuneiform-symbolic reader. */
 
 /* Interned operator symbols (available after symbolic_init) */
 extern val_t SX_ADD, SX_SUB, SX_MUL, SX_DIV, SX_NEG;

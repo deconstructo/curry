@@ -3,6 +3,7 @@
 #include "symbol.h"
 #include "numeric.h"
 #include "port.h"
+#include "lang_registry.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -574,3 +575,88 @@ void sx_write(val_t expr, val_t port) {
     /* Numeric fallback */
     scm_write(expr, port);
 }
+
+/* ---- Cuneiform (best-effort) ---- */
+
+/* First Unicode codepoint of a symbol's UTF-8 text, or -1 if s is empty or
+ * malformed (truncated multi-byte sequence). */
+static int sxc_first_cp(Symbol *s) {
+    if (s->len == 0) return -1;
+    unsigned char c0 = (unsigned char)s->data[0];
+    if (c0 < 0x80) return c0;
+    if (c0 < 0xE0) return s->len >= 2 ? ((c0 & 0x1F) << 6) | ((unsigned char)s->data[1] & 0x3F) : -1;
+    if (c0 < 0xF0) return s->len >= 3 ? ((c0 & 0x0F) << 12) | (((unsigned char)s->data[1] & 0x3F) << 6)
+                                          | ((unsigned char)s->data[2] & 0x3F) : -1;
+    return s->len >= 4 ? ((c0 & 0x07) << 18) | (((unsigned char)s->data[1] & 0x3F) << 12)
+                           | (((unsigned char)s->data[2] & 0x3F) << 6) | ((unsigned char)s->data[3] & 0x3F) : -1;
+}
+
+/* op's registered Akkadian cuneiform alias, if any -- every core arithmetic
+ * operator (+,-,*,/,...) already has one via akkadian_names.h/lang_pr_lookup
+ * (the same mechanism modules.c uses to attach Akkadian aliases at import
+ * time). Returns NULL for operators with no registered alias at all (most
+ * CAS-specific ops: sin, expt, ...), or none of whose registered forms
+ * happen to be the cuneiform one. */
+static Symbol *sxc_op_glyph(val_t op) {
+    val_t forms[LANG_PR_MAX_FORMS];
+    int n = lang_pr_lookup(op, forms, LANG_PR_MAX_FORMS);
+    for (int i = 0; i < n; i++) {
+        if (!vis_symbol(forms[i])) continue;
+        Symbol *s = as_sym(forms[i]);
+        if (SEX_IS_CUNEIFORM((uint32_t)sxc_first_cp(s))) return s;
+    }
+    return NULL;
+}
+
+static void sxc_write(val_t expr, val_t port) {
+    if (!vis_symbolic(expr) && !vis_symfn(expr)) {
+        /* Numeric leaf: render in cuneiform when the value supports it
+         * (sex_to_cuneiform already falls back to plain decimal itself). */
+        val_t s = sex_to_cuneiform(expr);
+        port_write_string(port, str_data(as_str(s)), as_str(s)->len);
+        return;
+    }
+    if (vis_symvar(expr)) {
+        Symbol *s = as_sym(as_symvar(expr)->name);
+        port_write_string(port, s->data, s->len);
+        return;
+    }
+    if (vis_symfn(expr)) {
+        Symbol *s = as_sym(as_symfn(expr)->name);
+        port_write_string(port, s->data, s->len);
+        return;
+    }
+
+    SymExpr *se = as_symexpr(expr);
+    val_t    op = se->op;
+    int      n  = (int)se->nargs;
+    Symbol  *glyph = sxc_op_glyph(op);
+
+    if (glyph && n >= 2) {
+        /* n-ary operator (+, -, *, /, ...): infix. */
+        port_write_char(port, '(');
+        sxc_write(se->args[0], port);
+        for (int i = 1; i < n; i++) {
+            port_write_string(port, glyph->data, glyph->len);
+            sxc_write(se->args[i], port);
+        }
+        port_write_char(port, ')');
+        return;
+    }
+
+    /* Unary function (sin, neg, ...) with a registered glyph: prefix,
+     * using the glyph as the function name -- infix makes no sense for a
+     * single argument, and would otherwise silently drop the operator
+     * entirely (n==1 has no "remaining terms" to loop over). Also covers
+     * n==0 defensively (falls through to the same shape with no args). */
+    Symbol *name = glyph ? glyph : as_sym(op);
+    port_write_string(port, name->data, name->len);
+    port_write_char(port, '(');
+    for (int i = 0; i < n; i++) {
+        if (i > 0) port_write_char(port, ',');
+        sxc_write(se->args[i], port);
+    }
+    port_write_char(port, ')');
+}
+
+void sx_write_cuneiform(val_t expr, val_t port) { sxc_write(expr, port); }

@@ -1445,6 +1445,10 @@ val_t num_normalize(val_t v) {
 #define CP_SIGN_I 0x1213Fu  /* 𒄿 U+1213F CUNEIFORM SIGN I — marks the complex imaginary unit */
 #define CP_SIGN_E 0x1208Au  /* 𒂊 U+1208A CUNEIFORM SIGN E — marks a basis blade e_n, followed
                              * by a cuneiform digit for n (1..8): quaternion/octonion/multivector */
+#define CP_DINGIR 0x1202Du  /* 𒀭 U+1202D CUNEIFORM SIGN AN — the divine determinative real
+                             * scribes prefixed to god-names, reused here to mark a surreal
+                             * Hahn-series term's exponent (an "order of ω", i.e. an
+                             * infinite/infinitesimal quantity) */
 
 /* ---- UTF-8 helpers ---- */
 
@@ -2039,6 +2043,39 @@ static void sex_append_basis_units(SexBuf *b, const int *idxs, int nidx) {
  */
 val_t sex_to_cuneiform(val_t v) {
     int max_frac = 6;
+
+    if (vis_surreal(v)) {
+        Surreal *s = as_surreal(v);
+        SexBuf b; sexbuf_init(&b);
+        bool ok = (s->nterms > 0);
+        for (int i = 0; i < s->nterms && ok; i++) {
+            val_t exp = s->data[2*i], coeff = s->data[2*i + 1];
+            if (i == 0) {
+                ok = sex_append_cuneiform_number(&b, coeff, max_frac);
+            } else {
+                bool cneg = num_is_negative(coeff);
+                sexbuf_push(&b, cneg ? '-' : '+');
+                ok = sex_append_cuneiform_number(&b, cneg ? num_neg(coeff) : coeff, max_frac);
+            }
+            /* Real (exponent 0) terms are plain numbers; anything else is an
+             * "order of ω" quantity, marked with the DINGIR determinative. */
+            if (ok && !num_is_zero(exp)) {
+                sexbuf_push_cp(&b, CP_DINGIR);
+                ok = sex_append_cuneiform_number(&b, exp, max_frac);
+            }
+        }
+        if (ok) return sexbuf_to_val(&b);
+        free(b.buf);
+        return num_to_string(v, 10);
+    }
+
+    if (vis_symbolic(v) || vis_symfn(v)) {
+        /* Best-effort: writer only (see sx_write_cuneiform in
+         * symbolic_print.c), no cuneiform-symbolic reader. */
+        val_t p = port_open_output_string();
+        sx_write_cuneiform(v, p);
+        return port_get_output_string(p);
+    }
 
     if (vis_complex(v)) {
         val_t re = as_cpx(v)->real, im = as_cpx(v)->imag;

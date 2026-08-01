@@ -108,6 +108,27 @@ A multivector's blade label concatenates one `𒂊<digit>` unit per set bit, in
 ascending index order — the cuneiform analogue of `mv-write`'s ASCII `e13`
 labels (`𒂊𒁹𒂊𒁹𒁹𒁹` for blade `e13`).
 
+Surreal numbers and symbolic (CAS) expressions also render in `'cuneiform`,
+**writer only** — `string->number` can't parse them back:
+
+```scheme
+(number->string (+ 3 (* 2 epsilon)) 'cuneiform)
+  ; → "𒁹𒁹𒁹+𒁹𒁹𒀭-𒁹"     (3 + 2ε: the real term plain, the ε-term
+  ;                            marked with 𒀭 DINGIR + its exponent -1)
+
+(symbolic x)
+(number->string (+ (* 2 x) 3) 'cuneiform)
+  ; → "(𒁹𒁹𒁹𒋻𒁹(𒁹𒁹𒈧𒁹x))"   (+ and * use their existing Akkadian
+  ;                                cuneiform aliases, infix)
+(number->string (sin x) 'cuneiform)
+  ; → "𒁹𒀸𒁹(x)"              (sin's alias used as a prefix function name --
+  ;                              a unary function has no infix reading)
+```
+
+A symbolic operator with no registered Akkadian alias (most CAS-specific
+operators beyond the core arithmetic + trig set) falls back to its plain
+English name rather than coining new vocabulary.
+
 ### `(string->number s 'neugebauer)`
 
 Parse a Neugebauer notation string to an exact rational or integer.
@@ -286,5 +307,8 @@ Returns the exact rational encoded on Yale Babylonian Collection tablet YBC 7289
   multivector basis blade e_n) — real cuneiform signs, reused here for their
   phonetic value rather than their logographic meaning, chosen to not collide
   with the digit glyphs or any reserved Akkadian keyword glyph.
+- The surreal-number term marker is **U+1202D** CUNEIFORM SIGN AN (𒀭 DINGIR,
+  the divine determinative real scribes prefixed to god-names), reused here
+  for a Hahn-series term's "order of ω".
 - Implementation: `src/numeric.c` (parsing and formatting), `src/reader.c`
   (token dispatch), `lib/curry/modules/curry/sexagesimal.scm` (module).
