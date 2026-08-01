@@ -6,6 +6,7 @@
 #include "symbolic.h"
 #include "quantum.h"
 #include "surreal.h"
+#include "port.h"
 #ifdef BUILD_MPFR
 #include "mpfr_num.h"
 #endif
@@ -1391,7 +1392,14 @@ val_t num_to_string(val_t v, int radix) {
         return mpfr_to_string(v, 0, radix);
 #endif
     } else {
-        snprintf(buf, sizeof(buf), "#<number>");
+        /* Rational/complex/quaternion/octonion/multivector/surreal/symbolic:
+         * radix is meaningless for these, same as the flonum case above which
+         * already ignores it. Delegate to the writer scm_write() already uses
+         * for `display`/`write` rather than maintaining a second, partial
+         * printer here. */
+        val_t p = port_open_output_string();
+        scm_write(v, p);
+        return port_get_output_string(p);
     }
     uint32_t len = (uint32_t)strlen(buf);
     String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);

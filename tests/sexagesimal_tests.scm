@@ -189,6 +189,16 @@
 (check "ybc7289 approx sqrt" (let ((r (exact->inexact (sex:ybc7289))))
                                (and (> r 1.4142) (< r 1.4143)))  #t)
 
+;;; ---- number->string fallback for non-fixnum/bignum/flonum types ----
+;;; Regression: num_to_string() used to fall back to the literal string
+;;; "#<number>" for any type it didn't special-case, which included plain
+;;; rationals as well as complex/quaternion/octonion. It now delegates to the
+;;; same writer `display`/`write` already use.
+
+(check "n->s rational 3/2 (radix)"  (number->string 3/2)                      "3/2")
+(check "n->s complex"                (number->string (make-rectangular 3 4))   "3+4i")
+(check "n->s quaternion"             (number->string (make-quaternion 1 2 3 4)) "1+2i+3j+4k")
+
 ;;; ---- Summary ----
 
 (newline)
