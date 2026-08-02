@@ -34,6 +34,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s18 multithreading)`](s18.md) | [SRFI-18](https://srfi.schemers.org/srfi-18/) | Thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
 | [`(srfi s19 time)`](s19.md) | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
 | [`(srfi s27 random-bits)`](s27.md) | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
+| [`(srfi s54 cat)`](s54.md) | [SRFI-54](https://srfi.schemers.org/srfi-54/) | `cat` — order-independent object-to-string formatting (width, padding, precision, radix, separators, pipes, converters) |
 | [`(srfi s59 vicinity)`](s59.md) | [SRFI-59](https://srfi.schemers.org/srfi-59/) | Vicinity (directory-of-a-path) string utilities |
 | [`(srfi s64 testing)`](s64.md) | [SRFI-64](https://srfi.schemers.org/srfi-64/) | Unit-testing framework — test cases/groups, skip/expect-fail specifiers, pluggable test runners; curry's own test suites use this |
 | [`(srfi s69 hash-tables)`](s69-s90.md) | [SRFI-69](https://srfi.schemers.org/srfi-69/) | Basic hash tables — full API, wrapping curry's built-in hash table with corrected `hash-table-ref` semantics |

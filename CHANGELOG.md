@@ -2,6 +2,41 @@
 
 ### Unreleased
 
+**New — `(srfi s54 cat)`: SRFI-54 Formatting**
+
+`cat`, an order-independent object-to-string formatter: every optional
+argument is recognized by its own shape (a symbol, a list starting with
+a procedure, a pair of two procedures, and so on), not by position.
+Covers every non-number argument fully (writer/pipe/take/width/char/
+port/string/converter) and every number argument for real numbers in
+decimal radix fully (exactness/radix/sign/precision/separator); a
+non-decimal radix is supported for exact integers only. Precision
+rounds using a flonum's own printed decimal digits rather than its raw
+binary value, matching the spec's own worked example (`129.985` rounds
+to `129.98`, not `129.99`, since the true double value sits a hair
+above the halfway point but the digits as written don't). `(srfi
+54)`/`(srfi srfi-54)` shims included. See `docs/reference/srfi/s54.md`
+for the handful of exotic combinations (non-decimal radix with an
+inexact number, precision applied to a complex number) intentionally
+left out of scope, and the documented dependency on curry's own
+`number->string` round-tripping (a separate, pre-existing gap: see
+below).
+
+Found in the process (pre-existing, out of scope, tracked separately):
+curry's flonum `number->string` doesn't currently round-trip every
+double faithfully -- `(number->string 129.985001)` prints `"129.985"`,
+which reads back as a different value.
+
+Code review (independent subagent) found two bugs, both fixed:
+`precision` of exactly `0` dropped the decimal point entirely
+(`(cat 129 0.)` gave `"#e129"` instead of `"#e129."`), which broke one
+of the spec's own worked examples that relies on the point being there
+to `take` off; and a malformed take-spec with a non-integer second
+element (e.g. `(cat "x" '(3 "y"))`) was accepted by the argument
+classifier and only failed later with a confusing low-level type error,
+rather than the clean "unrecognized optional argument" every other
+malformed shape gets.
+
 **New — `(srfi s210 multiple-values)`: SRFI-210 Multiple Values**
 
 Convenience syntax/procedures for multiple-value programming, layered

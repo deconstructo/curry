@@ -54,6 +54,7 @@ add_test(NAME srfi_s111_s195_boxes COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srf
 add_test(NAME srfi_s252_property_testing COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s252_property_testing_tests.scm)
 add_test(NAME srfi_s209_enums COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s209_enums_tests.scm)
 add_test(NAME srfi_s210_multiple_values COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s210_multiple_values_tests.scm)
+add_test(NAME srfi_s54_cat COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s54_cat_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
