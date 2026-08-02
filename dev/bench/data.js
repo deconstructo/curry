@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785684150536,
+  "lastUpdate": 1785685046495,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1724,6 +1724,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 102.086,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "acea8b8cf6124a6a44bdc1e960ce2915d0b10e66",
+          "message": "feat: SRFI-210 (Multiple Values)\n\nConvenience syntax/procedures for multiple-value programming, layered\nentirely on call-with-values: apply/mv, call/mv, list/mv, vector/mv,\nbox/mv, value/mv, coarity, set!-values, with-values, case-receive,\nbind/mv, plus the chaining/composition helpers compose-left/\ncompose-right/map-values/bind-list/bind-box/bind and small utilities\nlist-values/vector-values/box-values/value/identity. (srfi 210)/(srfi\nsrfi-210) shims included.\n\ncall/mv's first implementation attempt was a recursive macro building\nnested consumer lambdas, one per producer, each rebinding the same\nparameter name (vals) -- wrong, caught by a test with three producers:\ncurry's macro expansion doesn't hygienically rename a\ntemplate-introduced binding per recursive expansion (the same gap\nSRFI-209's registry design found), so reusing that literal name at\nevery nesting level meant each deeper lambda silently shadowed the\nouter one, and every reference ultimately resolved to the last\nproducer's values only. Fixed by not introducing any named binding per\nproducer at all -- each producer becomes a zero-argument thunk, and the\nactual value collection happens in ordinary runtime code over a plain\nlist of thunks.\n\nIndependent code review audited every other macro in the file for the\nsame shadowing risk (bind/mv, case-receive, set!-values) and found none\nrecur; added a handful of suggested coverage-gap tests (3+ item cases,\nnegative-index bounds checks, multi-transducer chains).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T01:36:25+10:00",
+          "tree_id": "e9a75cc492351559f2366f876dc5b8c3b49c54be",
+          "url": "https://github.com/deconstructo/curry/commit/acea8b8cf6124a6a44bdc1e960ce2915d0b10e66"
+        },
+        "date": 1785685045686,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.896,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.943,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.973,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.318,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 190.522,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 372.648,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.522,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.863,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.25,
             "unit": "ms"
           }
         ]
