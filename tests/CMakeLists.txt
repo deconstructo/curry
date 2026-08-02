@@ -52,6 +52,7 @@ add_test(NAME srfi_srfi_prefixed_shims COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME srfi_s263_prototype_objects COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s263_prototype_objects_tests.scm)
 add_test(NAME srfi_s111_s195_boxes COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s111_s195_boxes_tests.scm)
 add_test(NAME srfi_s252_property_testing COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s252_property_testing_tests.scm)
+add_test(NAME srfi_s209_enums COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s209_enums_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()

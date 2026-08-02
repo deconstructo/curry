@@ -2,6 +2,43 @@
 
 ### Unreleased
 
+**New — `(srfi s209 enums)`: SRFI-209 Enums and Enum Sets**
+
+Typed, ordered symbolic constants (name/ordinal/value) grouped into disjoint
+enum types, plus enum sets with the usual set algebra (union/intersection/
+difference/xor, each with a functional and a linear-update `!` form),
+`make-enum-comparator` (an SRFI-128 comparator ordering by ordinal), the
+full R6RS-compatibility layer (`make-enumeration`, `enum-set-universe`,
+etc.), and the `define-enum`/`define-enumeration` macro sugar. `(srfi
+209)`/`(srfi srfi-209)` shims included. See `docs/reference/srfi/s209.md`.
+
+`define-enum`/`define-enumeration` bind `type-name` and `constructor-name`
+as macros that both need to agree on the exact same underlying enum-type
+object -- but curry's `define-syntax` doesn't hygienically rename
+identifiers a macro template introduces (confirmed: two separate
+expansions of a helper macro that each write their own top-level `(define
+%tmp ...)` collide on the same `%tmp` rather than getting distinct
+bindings), so a shared hidden temporary written directly in the macro
+body isn't safe across more than one `define-enum` use in the same scope.
+Solved with a small private registry keyed by `(type-name . ctor-name)`
+instead of a synthesized identifier -- sidesteps the hygiene gap for the
+common case, since distinct user-chosen type/constructor name pairs are
+already guaranteed distinct within one program.
+
+(found by an independent code-review subagent) The registry was
+initially keyed on `'type-name` alone, which turned out to collide
+across two *separately authored libraries* that each independently chose
+the same type-name for an unrelated `define-enum` -- and unlike an
+ordinary top-level name collision, an R7RS renaming import
+(`(rename (liba) (size liba-size))`) doesn't rescue it, since the
+registry lookup embeds the original unrenamed name at macro-definition
+time. Narrowed (not fully closed -- curry has no gensym/datum->syntax
+available to a plain `syntax-rules` template) by folding `ctor-name`
+into the key too; verified against the exact renamed-import scenario
+that exposed it. Documented as a residual limitation in
+`docs/reference/srfi/s209.md` for programs combining `define-enum` types
+from multiple independently-authored libraries.
+
 **New — `(srfi s252 property-testing)`: SRFI-252 Property Testing**
 
 Property-based testing layered on `(srfi s64 testing)`: `test-property`,
