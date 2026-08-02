@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785685046495,
+  "lastUpdate": 1785686160864,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1793,6 +1793,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.25,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "7fb42d85d403bccb0e7831a97f170c9f15ec0a0e",
+          "message": "feat: SRFI-54 (Formatting)\n\ncat, an order-independent object-to-string formatter: every optional\nargument is recognized by its own shape (a symbol, a list starting with\na procedure, a pair of two procedures, and so on), not by position.\nCovers every non-number argument fully (writer/pipe/take/width/char/\nport/string/converter) and every number argument for real numbers in\ndecimal radix fully (exactness/radix/sign/precision/separator); a\nnon-decimal radix is supported for exact integers only. Precision\nrounds using a flonum's own printed decimal digits rather than its raw\nbinary value, matching the spec's own worked example (129.985 rounds\nto 129.98, not 129.99, since the true double value sits a hair above\nthe halfway point but the digits as written don't). (srfi 54)/(srfi\nsrfi-54) shims included.\n\nDocumented scope limitations rather than guessed at: non-decimal radix\ncombined with an inexact number, precision applied to a complex number,\nand a separate pre-existing gap in curry's own number->string (doesn't\nalways round-trip a flonum losslessly).\n\nIndependent code review found and fixed two bugs: precision of exactly\n0 dropped the decimal point entirely, breaking one of the spec's own\nworked examples that relies on the point being there to take off; and a\nmalformed take-spec with a non-integer second element was accepted by\nthe argument classifier and only failed later with a confusing\nlow-level type error instead of a clean classification error.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T01:55:02+10:00",
+          "tree_id": "94cd9a65d72012274f9bc200cff7998ffbd67e2d",
+          "url": "https://github.com/deconstructo/curry/commit/7fb42d85d403bccb0e7831a97f170c9f15ec0a0e"
+        },
+        "date": 1785686160098,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.486,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.656,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.136,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.095,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 206.476,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 362.035,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.098,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 127.121,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 107.864,
             "unit": "ms"
           }
         ]
