@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785670588053,
+  "lastUpdate": 1785671775297,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1586,6 +1586,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 105.242,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "dfe7f28cdbcd9c1ba2bee0793953d38b125bc7d9",
+          "message": "feat: SRFI-209 (Enums and Enum Sets)\n\nTyped, ordered symbolic constants (name/ordinal/value) grouped into\ndisjoint enum types, plus enum sets with the usual set algebra\n(union/intersection/difference/xor, each with a functional and a\nlinear-update ! form), make-enum-comparator (an SRFI-128 comparator\nordering by ordinal), the full R6RS-compatibility layer\n(make-enumeration, enum-set-universe, etc.), and the\ndefine-enum/define-enumeration macro sugar. Enum sets are a boolean\nmembership vector indexed by ordinal, and enum types use a two-phase\nbuild (type record created first with a placeholder enums-vec, patched\nin once the enum records that reference it back exist). (srfi\n209)/(srfi srfi-209) shims included.\n\ndefine-enum/define-enumeration's type-name and constructor-name macros\nboth need to resolve to the same underlying enum-type object, but\ncurry's define-syntax doesn't hygienically rename identifiers a macro\ntemplate introduces -- solved with a private registry rather than a\nshared hidden temporary.\n\nCode review (independent subagent) found the registry was initially\nkeyed on the type name alone, which collides across two independently\nauthored libraries that happen to choose the same type-name for\nunrelated define-enum types -- and unlike an ordinary name collision, an\nR7RS renaming import doesn't rescue it. Narrowed (not fully closable\nwithout gensym/datum->syntax, which curry's syntax-rules doesn't have)\nby folding the constructor-name into the key too, verified against the\nexact renamed-import scenario that exposed it, and documented as a\nresidual limitation.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-02T21:55:10+10:00",
+          "tree_id": "f1a115d6a81056a731c67f1f3196dbdbb81166e7",
+          "url": "https://github.com/deconstructo/curry/commit/dfe7f28cdbcd9c1ba2bee0793953d38b125bc7d9"
+        },
+        "date": 1785671774818,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.458,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.16,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.034,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.194,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.071,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 371.302,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.992,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.707,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.022,
             "unit": "ms"
           }
         ]
