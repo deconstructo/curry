@@ -113,6 +113,10 @@ typedef enum {
     OP_APPLY,       /* (apply f args-list) — f and list on stack         */
     OP_VALUES,      /* A: bundle A values into a multiple-values object  */
     OP_CALL_WITH_VALUES, /* consumer, thunk on stack                     */
+    OP_TAIL_CALL_WITH_VALUES, /* consumer, thunk on stack; tail-calls the
+                                  consumer, reusing the current frame if
+                                  it's a BcClosure (same idea as
+                                  OP_TAIL_CALL vs OP_CALL)                */
 
     /* ── Exception handling ─────────────────────────────────────────── */
     OP_PUSH_HANDLER,/* B: push exception handler, jump offset B on exn   */

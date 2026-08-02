@@ -43,7 +43,16 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x04'   /* v4: content-hash cache key (was mtime+size) */
+#define SCC_FMT_VER     '\x05'   /* v5: OP_TAIL_CALL_WITH_VALUES inserted into the
+                                    opcode enum, shifting every subsequent opcode's
+                                    numeric value -- any .scc compiled by an older
+                                    binary encodes bytecode using the OLD numbering,
+                                    which the new binary would silently misinterpret
+                                    as different opcodes rather than refuse to load.
+                                    Bump this on any opcode.h reordering/insertion,
+                                    not just cache-*structure* changes (v4 above was
+                                    that kind); this one is a bytecode *encoding*
+                                    change and needs the same treatment. */
 #define SCC_SENTINEL    0xCAFEBEEFu
 #define SCC_SHEBANG     "#!/usr/bin/env curry\n"
 

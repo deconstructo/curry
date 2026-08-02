@@ -472,7 +472,7 @@ printf 'CURRYBC\x03garbage-not-a-real-v3-body' > "$CACHEVER_SCC"
 out=$("$CURRY" "$CACHEVER_SCM")
 check "cache: stale/wrong-version .scc rejected cleanly, recompiles" "$out" "42"
 ver_byte=$(od -An -tx1 -j 7 -N 1 "$CACHEVER_SCC" | tr -d ' \n')
-check "cache: stale .scc rewritten in the current format version" "$ver_byte" "04"
+check "cache: stale .scc rewritten in the current format version" "$ver_byte" "05"
 
 # -e also reports.
 out=$("$CURRY" --timings -e '(display (+ 1 2))' 2>&1 >/dev/null)

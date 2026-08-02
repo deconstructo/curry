@@ -99,6 +99,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_APPLY]          = "APPLY",
     [OP_VALUES]         = "VALUES",
     [OP_CALL_WITH_VALUES] = "CALL_WITH_VALUES",
+    [OP_TAIL_CALL_WITH_VALUES] = "TAIL_CALL_WITH_VALUES",
     [OP_PUSH_HANDLER]   = "PUSH_HANDLER",
     [OP_POP_HANDLER]    = "POP_HANDLER",
     [OP_RAISE]          = "RAISE",

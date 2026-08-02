@@ -199,18 +199,6 @@
 ;;; the tree-walker (eval.c), not compiled/`-e` execution or .scc scripts.
 ;;; Fixed by desugaring both to nested call-with-values/lambda forms at
 ;;; compile time (compile_let_values/compile_let_star_values).
-;;;
-;;; NOTE: call-with-values' own primitive (prim_call_with_values,
-;;; src/builtins.c) invokes its consumer via a real (nested) C call rather
-;;; than a bytecode-level tail call, so a let-values/let*-values binding in
-;;; tail position of a self-recursive loop does NOT get proper TCO -- deep
-;;; recursion through one will eventually hit curry's call-stack-depth
-;;; limit. This is a pre-existing gap shared with `receive` (found to have
-;;; the identical issue while investigating this), not something newly
-;;; introduced here; fixing it for real needs VM-level work (making
-;;; OP_CALL_WITH_VALUES a genuine tail call) tracked separately. The test
-;;; below stays well under the frame limit rather than asserting TCO that
-;;; doesn't actually hold.
 (check "let-values proper formals"
   (let-values (((a b) (values 1 2))) (+ a b)) 3)
 (check "let-values multiple bindings"
@@ -221,11 +209,48 @@
   (let-values ((all (values 1 2 3))) all) '(1 2 3))
 (check "let-values is parallel: a producer cannot see an earlier binding"
   (let ((a 100)) (let-values (((a) (values 1)) ((b) (values a))) (list a b))) '(1 100))
-(check "let-values in a recursive loop, within the call-stack limit"
-  (let loop ((n 100) (acc 0))
+
+;;; call-with-values / receive / let-values / let*-values in tail
+;;; position now get genuine TCO — regression coverage for a bug found
+;;; while fixing the above: prim_call_with_values (builtins.c) invokes
+;;; its consumer via a real nested C call, which is fine for a one-shot
+;;; call but meant a self-recursive loop tail-calling through any of
+;;; these forms accumulated one such nested call PER ITERATION, hitting
+;;; curry's call-stack limit instead of looping forever. Fixed with a new
+;;; OP_TAIL_CALL_WITH_VALUES bytecode op (emitted only when the compiler
+;;; sees a literal 2-argument (call-with-values producer consumer) — the
+;;; same unconditional syntactic special-casing convention already used
+;;; for apply/values — in tail position) that reuses the current call
+;;; frame for a BcClosure consumer exactly the way plain OP_TAIL_CALL
+;;; does, instead of going through prim_call_with_values at all.
+(check "call-with-values in tail position: deep recursion doesn't overflow"
+  (let loop ((n 200000) (acc 0))
+    (if (= n 0) acc
+        (call-with-values (lambda () (values (- n 1)))
+          (lambda (n1) (loop n1 (+ acc 1)))))) 200000)
+(check "receive in tail position: deep recursion doesn't overflow"
+  (let loop ((n 200000) (acc 0))
+    (if (= n 0) acc
+        (receive (n1) (values (- n 1))
+          (loop n1 (+ acc 1))))) 200000)
+(check "let-values in tail position: deep recursion doesn't overflow"
+  (let loop ((n 200000) (acc 0))
     (if (= n 0) acc
         (let-values (((n1) (values (- n 1))))
-          (loop n1 (+ acc 1))))) 100)
+          (loop n1 (+ acc 1))))) 200000)
+(check "let*-values in tail position: deep recursion doesn't overflow"
+  (let loop ((n 200000) (acc 0))
+    (if (= n 0) acc
+        (let*-values (((n1) (values (- n 1))))
+          (loop n1 (+ acc 1))))) 200000)
+(check "call-with-values still correct as a non-tail subexpression"
+  (+ 1 (call-with-values (lambda () (values 10 20)) +)) 31)
+; Genuinely in tail position this time (the sole/last expression of an
+; immediately-invoked lambda's body, not an argument expression to
+; `check` itself, which compile_call always compiles tail=false) --
+; exercises OP_TAIL_CALL_WITH_VALUES's non-BcClosure branch specifically.
+(check "call-with-values in tail position with a non-BcClosure consumer (a primitive)"
+  ((lambda () (call-with-values (lambda () (values 1 2 3)) +))) 6)
 (check "let*-values proper formals"
   (let*-values (((a b) (values 1 2)) ((c) (values (+ a b)))) (list a b c)) '(1 2 3))
 (check "let*-values is sequential: a later producer sees an earlier binding"

@@ -558,6 +558,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_CLOSURE]     = &&L_OP_CLOSURE,     [OP_CLOSE_UP]     = &&L_OP_CLOSE_UP,
         [OP_APPLY]       = &&L_OP_APPLY,       [OP_VALUES]       = &&L_OP_VALUES,
         [OP_CALL_WITH_VALUES] = &&L_OP_CALL_WITH_VALUES,
+        [OP_TAIL_CALL_WITH_VALUES] = &&L_OP_TAIL_CALL_WITH_VALUES,
         [OP_PUSH_HANDLER]= &&L_OP_PUSH_HANDLER,[OP_POP_HANDLER]  = &&L_OP_POP_HANDLER,
         [OP_RAISE]       = &&L_OP_RAISE,
         [OP_DISPLAY]     = &&L_OP_DISPLAY,     [OP_WRITE]        = &&L_OP_WRITE,
@@ -1124,6 +1125,58 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 result = call_foreign(consumer, 1, cargs);
             }
             PUSH(result);
+            NEXT;
+        }
+
+        /* Same idea as OP_TAIL_CALL vs OP_CALL: reuses the current frame
+         * when the consumer is a BcClosure, instead of always going
+         * through call_foreign (which, for a BcClosure argument, starts a
+         * whole NEW nested vm_run() that only unwinds once the consumer's
+         * entire continuation finishes -- exactly the bug this opcode
+         * exists to avoid, since a call-with-values/receive/let-values in
+         * tail position of a self-recursive loop previously accumulated
+         * one such nested frame PER ITERATION, hitting the call-stack
+         * limit instead of looping forever. */
+        CASE(OP_TAIL_CALL_WITH_VALUES) {
+            val_t consumer = POP();
+            val_t thunk    = POP();
+            val_t produced = call_foreign(thunk, 0, NULL);
+            int argc2;
+            if (vis_values(produced)) {
+                Values *mv = as_vals(produced);
+                argc2 = (int)mv->count;
+                for (int i = 0; i < argc2; i++) PUSH(mv->vals[i]);
+            } else {
+                argc2 = 1;
+                PUSH(produced);
+            }
+            if (vis_bcclosure(consumer)) {
+                BcClosure *cl = as_bcclosure(consumer);
+                vm_maybe_jit(cl);
+                if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                        frame->closure->chunk->name) {
+                    val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                    profiling_record_timed(sym, frame->prof_start_ns);
+                }
+                if (curry_profiling_level >= 1 && cl != frame->closure && cl->chunk->name)
+                    profiling_record_call_tco(sym_intern_cstr(cl->chunk->name));
+                val_t *new_args = vm->sp - argc2;
+                vm_close_upvalues(frame->slots);
+                memmove(frame->slots, new_args, (size_t)argc2 * sizeof(val_t));
+                vm->sp            = frame->slots + argc2;
+                frame->closure    = cl;
+                frame->ip         = cl->chunk->code;
+                frame->slot_count = vm_bind_args(cl, frame->slots, argc2);
+                frame->prof_start_ns = 0;
+                if (curry_profiling_level >= 2 && cl->chunk->name)
+                    frame->prof_start_ns = profiling_now_ns();
+            } else {
+                val_t *call_args = vm->sp - argc2;
+                val_t result     = call_foreign(consumer, argc2, call_args);
+                vm->sp -= argc2;
+                if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
+            }
             NEXT;
         }
 

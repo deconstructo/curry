@@ -1134,11 +1134,14 @@ static val_t let_values_temp_formals(val_t formals, int bi, int *pi, val_t *pair
  *         (lambda (%%lv1_0)
  *           (let ((a %%lv0_0) (b %%lv0_1) (c %%lv1_0)) body ...)))))
  *
- * NOTE: prim_call_with_values (builtins.c) invokes its consumer via a real
- * (nested) C call rather than a bytecode-level tail call, so this doesn't
- * get proper TCO when it sits in tail position of a self-recursive loop --
- * a pre-existing gap shared with `receive`'s own call-with-values desugar
- * above, not something specific to this desugaring. */
+ * Each nested call-with-values is the sole/last expression of its
+ * enclosing consumer lambda's body, so it's always compiled tail=true
+ * (compile_lambda already treats a lambda's own body as tail position
+ * regardless of the lambda's own calling context) -- meaning the whole
+ * chain, and this desugaring's use above it, gets genuine TCO via
+ * OP_TAIL_CALL_WITH_VALUES (see the dispatch for S_CALL_WITH_VALUES in
+ * the main compile() switch) when the overall let-values form itself
+ * sits in tail position. */
 static val_t let_values_expand(val_t bindings, val_t body, int bi, val_t pairs) {
     if (vis_nil(bindings)) {
         val_t let_bindings = V_NIL;
@@ -2112,6 +2115,24 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
             n++; a = vcdr(a);
         }
         emit_ab(c, OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
+        return;
+    }
+
+    /* call-with-values — (call-with-values producer consumer), literal
+     * 2-argument syntactic position only (same unconditional special-
+     * casing convention as `apply`/`values` above, not checking for local
+     * shadowing of the name; still callable indirectly as an ordinary
+     * value through a rebound identifier, just without this fast path).
+     * OP_TAIL_CALL_WITH_VALUES vs OP_CALL_WITH_VALUES exists for exactly
+     * the same reason OP_TAIL_CALL vs OP_CALL does: prim_call_with_values
+     * (builtins.c) invokes its consumer via a real nested C call, so a
+     * receive/let-values/let*-values/with-values in tail position of a
+     * self-recursive loop would otherwise accumulate one nested call
+     * frame per iteration instead of looping forever. */
+    if (head == S_CALL_WITH_VALUES && vis_pair(args) && vis_pair(vcdr(args)) && vis_nil(vcdr(vcdr(args)))) {
+        compile(c, vcar(args), false, line);
+        compile(c, vcar(vcdr(args)), false, line);
+        emit(c, tail ? OP_TAIL_CALL_WITH_VALUES : OP_CALL_WITH_VALUES, line);
         return;
     }
 

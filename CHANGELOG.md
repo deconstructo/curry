@@ -2,6 +2,31 @@
 
 ### Unreleased
 
+**Fix — `call-with-values`/`receive`/`let-values`/`let*-values` in tail position now get genuine TCO**
+
+`prim_call_with_values` (builtins.c) invokes its consumer via a real
+nested C call, which is fine for a one-shot call but meant any of these
+forms sitting in the tail position of a self-recursive loop
+accumulated one such nested call PER ITERATION, hitting curry's
+call-stack limit instead of looping forever. Fixed with a new
+`OP_TAIL_CALL_WITH_VALUES` bytecode op -- emitted only when the
+compiler sees a literal 2-argument `(call-with-values producer
+consumer)` (the same unconditional syntactic special-casing convention
+already used for `apply`/`values`) in tail position -- that reuses the
+current call frame for a `BcClosure` consumer exactly the way plain
+`OP_TAIL_CALL` does, instead of going through `prim_call_with_values`
+at all. Non-tail usage (as an ordinary subexpression) is unaffected,
+still going through the existing primitive.
+
+Since `OP_TAIL_CALL_WITH_VALUES` was inserted into the middle of the
+opcode enum, every opcode after it shifted its numeric value -- bumped
+`.scc` cache format version (v4 -> v5) so any cache compiled by an
+older binary is rejected and recompiled rather than silently
+misinterpreted under the new numbering. (Building this fix initially
+surfaced as a wave of unrelated-looking test failures across the suite
+-- all traced to exactly this: stale `.scc` caches from before the
+opcode reordering.)
+
 **Fix — `call-with-values` with a zero-value producer**
 
 `(call-with-values (lambda () (values)) (lambda () ...))` failed with
