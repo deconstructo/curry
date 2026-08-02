@@ -153,7 +153,7 @@ void mat_write(val_t v, val_t port) {
         if (i > 0) port_write_string(port, " | ", 3);
         for (uint32_t j = 0; j < m->cols; j++) {
             if (j > 0) port_write_char(port, ' ');
-            len = snprintf(buf, sizeof(buf), "%g", m->data[i * m->cols + j]);
+            len = num_flonum_to_shortest_cstr(m->data[i * m->cols + j], buf, sizeof(buf));
             port_write_string(port, buf, (uint32_t)len);
         }
     }
@@ -298,7 +298,7 @@ val_t tensor_reshape(val_t t, uint32_t ndim, const uint32_t *new_dims) {
 static void tensor_write_dim(val_t port, Tensor *t, uint32_t dim,
                               uint32_t *idx, char *buf, size_t bufsz) {
     if (dim == t->ndim) {
-        int len = snprintf(buf, bufsz, "%g", tensor_data(t)[tensor_flat_index(t, idx)]);
+        int len = num_flonum_to_shortest_cstr(tensor_data(t)[tensor_flat_index(t, idx)], buf, bufsz);
         port_write_string(port, buf, (uint32_t)len);
         return;
     }

@@ -147,6 +147,16 @@ val_t num_oct_inverse(val_t v);
 val_t num_to_string(val_t v, int radix);  /* radix 2/8/10/16 */
 val_t num_from_string(val_t s, int radix);
 
+/* Writes the shortest decimal string for `d` that round-trips back to the
+ * exact same double via strtod (R7RS's "read the same number back" writer
+ * convention), into buf (bufsize should be at least 32). Returns the
+ * string length. Shared by num_to_string's flonum branch (numeric.c) and
+ * scm_write's direct flonum case (port.c) -- both previously used a bare
+ * "%g" (6 significant digits, nowhere near enough for a double) and lost
+ * precision on anything with more than 6 significant digits, e.g.
+ * (display 3.14159265358979) printed "3.14159". */
+int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize);
+
 /* ---- Promotion helpers (internal use) ---- */
 val_t num_normalize(val_t v);  /* reduce e.g. bignum that fits in fixnum */
 

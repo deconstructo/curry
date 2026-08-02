@@ -1363,6 +1363,69 @@ val_t num_oct_inverse(val_t v) {
 }
 
 /* ---- Number <-> string ---- */
+
+/* True iff every digit character in `s` after the first `keep` significant
+ * digits is '0' -- i.e. reformatting at a higher precision than `keep`
+ * added nothing but trailing zeros, not genuine extra digits. Skips the
+ * sign, decimal point, and anything from an exponent marker onward. */
+static bool num_only_trailing_zeros_after(const char *s, int keep) {
+    int seen = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p == 'e' || *p == 'E') break;
+        if (*p < '0' || *p > '9') continue;
+        if (++seen > keep && *p != '0') return false;
+    }
+    return true;
+}
+
+int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
+    /* NaN never round-trips via == (NaN != NaN in IEEE), so the loop below
+     * would spin all the way to precision 17 for no benefit -- %g's own
+     * spelling ("nan"/"inf"/"-inf", matching this codebase's existing
+     * display convention) doesn't depend on precision at all, so short-
+     * circuit both non-finite cases directly. */
+    if (d != d || d == 1.0/0.0 || d == -1.0/0.0)
+        return snprintf(buf, bufsize, "%g", d);
+    int p_min = 17;
+    for (int prec = 1; prec <= 17; prec++) {
+        snprintf(buf, bufsize, "%.*g", prec, d);
+        if (strtod(buf, NULL) == d) { p_min = prec; break; }
+    }
+    /* %g switches to scientific notation whenever the value's decimal
+     * exponent E satisfies E >= precision. For a "round" value that needs
+     * few significant digits to round-trip (e.g. 100.0, p_min == 1), that
+     * rule triggers scientific notation ("1e+02") purely because the
+     * REQUIRED digit count is small -- not because the value's own
+     * magnitude warrants it. Try bumping the precision used for the FINAL
+     * formatting (not the round-trip search above, which must start low
+     * to find the true minimal digit count) to also cover the integer
+     * part's own digit count, so %g's notation choice reflects the
+     * number's actual magnitude rather than the incidental digit count
+     * needed to represent it exactly.
+     *
+     * This is only safe when the extra digits %g reveals at that higher
+     * precision are genuine trailing zeros (true for a value that IS
+     * decimal-clean in binary, like 100.0) rather than real bits of the
+     * value's binary representation bleeding through (true for most
+     * large-magnitude values that aren't exactly representable, e.g.
+     * 1e300 -- (%.17g 1e300) is "1.0000000000000001e+300", not clean
+     * zeros, because the double closest to 1e300 isn't exactly 10^300).
+     * Bumping precision can never break the round-trip already
+     * established above (more digits is always at least as accurate),
+     * but it CAN accidentally turn a clean "1e+300" into 300 digits of
+     * binary-conversion noise if applied blindly -- verify before using
+     * it, and fall back to p_min's own natural formatting otherwise. */
+    int exponent = (d == 0.0) ? 0 : (int)floor(log10(fabs(d)));
+    int fmt_prec = p_min;
+    if (exponent + 1 > fmt_prec) fmt_prec = exponent + 1;
+    if (fmt_prec > 17) fmt_prec = 17;
+    if (fmt_prec > p_min) {
+        int n = snprintf(buf, bufsize, "%.*g", fmt_prec, d);
+        if (num_only_trailing_zeros_after(buf, p_min)) return n;
+    }
+    return snprintf(buf, bufsize, "%.*g", p_min, d);
+}
+
 val_t num_to_string(val_t v, int radix) {
     char buf[128];
     if (vis_fixnum(v)) {
@@ -1387,7 +1450,7 @@ val_t num_to_string(val_t v, int radix) {
         str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
         memcpy(str->data, s, len+1); free(s); return vptr(str);
     } else if (vis_flonum(v)) {
-        snprintf(buf, sizeof(buf), "%g", vfloat(v));
+        num_flonum_to_shortest_cstr(vfloat(v), buf, sizeof(buf));
 #ifdef BUILD_MPFR
     } else if (vis_mpfr(v)) {
         return mpfr_to_string(v, 0, radix);

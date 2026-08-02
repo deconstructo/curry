@@ -11,6 +11,7 @@
 #include "object.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 
 static int pass = 0, fail = 0;
@@ -68,6 +69,61 @@ static void test_rationals(void) {
 static void test_floats(void) {
     CHECK(vis_true(run("(inexact? 1.5)")),      "1.5 is inexact");
     CHECK(vis_true(run("(< (abs (- (sin 0.0) 0.0)) 1e-15)")), "sin(0)=0");
+}
+
+/* num_flonum_to_shortest_cstr — regression coverage for a bug found in a
+ * full-codebase audit: num_to_string's flonum branch (and scm_write's own
+ * direct flonum case in port.c, and the matrix/tensor/multivector/f64vector
+ * element printers) all used a bare "%g" (6 significant digits), losing
+ * precision on anything needing more -- (display 3.14159265358979) printed
+ * "3.14159". Fixed with a shared helper that finds the shortest decimal
+ * string that round-trips back to the exact same double via strtod, with a
+ * safety check before trying to avoid needless scientific notation for
+ * "round" values (100.0 -> "100", not "1e+02") that verifies the extra
+ * digits revealed are genuine trailing zeros and not real precision noise
+ * from a value that isn't exactly decimal-clean in binary (1e300 -> the
+ * clean "1e+300", not 17 digits of binary-conversion noise). */
+static void test_flonum_shortest_string(void) {
+    char buf[64];
+    int n;
+
+    n = num_flonum_to_shortest_cstr(129.985001, buf, sizeof(buf));
+    CHECK(n == (int)strlen("129.985001") && strcmp(buf, "129.985001") == 0,
+          "flonum shortest-string: 129.985001 round-trips losslessly");
+    CHECK(strtod(buf, NULL) == 129.985001, "flonum shortest-string: round-trips via strtod");
+
+    n = num_flonum_to_shortest_cstr(3.14159265358979, buf, sizeof(buf));
+    CHECK(strcmp(buf, "3.14159265358979") == 0, "flonum shortest-string: pi-like value keeps all digits");
+
+    n = num_flonum_to_shortest_cstr(100.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "100") == 0, "flonum shortest-string: round value avoids needless scientific notation");
+    (void)n;
+
+    n = num_flonum_to_shortest_cstr(1e300, buf, sizeof(buf));
+    CHECK(strcmp(buf, "1e+300") == 0,
+          "flonum shortest-string: large non-decimal-clean value stays scientific, no noise digits");
+    (void)n;
+
+    n = num_flonum_to_shortest_cstr(0.0/0.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "nan") == 0, "flonum shortest-string: NaN");
+    (void)n;
+
+    n = num_flonum_to_shortest_cstr(1.0/0.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "inf") == 0, "flonum shortest-string: +inf");
+    (void)n;
+
+    n = num_flonum_to_shortest_cstr(-129.985001, buf, sizeof(buf));
+    CHECK(strcmp(buf, "-129.985001") == 0, "flonum shortest-string: negative value keeps sign and all digits");
+    (void)n;
+
+    n = num_flonum_to_shortest_cstr(-100.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "-100") == 0, "flonum shortest-string: negative round value, no scientific notation");
+    (void)n;
+
+    CHECK(vis_true(run("(= (string->number (number->string 129.985001)) 129.985001)")),
+          "number->string round-trips 129.985001 (Scheme level)");
+    CHECK(vis_true(run("(string=? (number->string 100.0) \"100\")")),
+          "number->string of a round value has no scientific notation");
 }
 
 static void test_complex(void) {
@@ -156,6 +212,7 @@ int main(void) {
     RUN_TEST(test_bignums);
     RUN_TEST(test_rationals);
     RUN_TEST(test_floats);
+    RUN_TEST(test_flonum_shortest_string);
     RUN_TEST(test_complex);
     RUN_TEST(test_quaternion);
     RUN_TEST(test_octonion);

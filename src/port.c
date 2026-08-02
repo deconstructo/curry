@@ -378,7 +378,7 @@ static void write_number_notation(val_t v, val_t port) {
     if (vis_fixnum(v))   { int n=snprintf(buf,sizeof(buf),"%ld",(long)vunfix(v)); port_write_string(port,buf,(uint32_t)n); }
     else if (vis_bignum(v))   { char *s=mpz_get_str(NULL,10,as_big(v)->z); port_write_string(port,s,(uint32_t)strlen(s)); free(s); }
     else if (vis_rational(v)) { char *s=mpq_get_str(NULL,10,as_rat(v)->q); port_write_string(port,s,(uint32_t)strlen(s)); free(s); }
-    else if (vis_flonum(v))   { int n=snprintf(buf,sizeof(buf),"%g",vfloat(v)); port_write_string(port,buf,(uint32_t)n); }
+    else if (vis_flonum(v))   { int n=num_flonum_to_shortest_cstr(vfloat(v),buf,sizeof(buf)); port_write_string(port,buf,(uint32_t)n); }
 }
 
 void scm_write(val_t v, val_t port) {
@@ -495,7 +495,7 @@ void scm_write(val_t v, val_t port) {
         port_write_string(port, "#f64(", 5);
         for (uint32_t i = 0; i < fv->len; i++) {
             if (i) port_write_char(port, ' ');
-            int n = snprintf(buf, sizeof(buf), "%g", fv->data[i]);
+            int n = num_flonum_to_shortest_cstr(fv->data[i], buf, sizeof(buf));
             port_write_string(port, buf, (uint32_t)n);
         }
         port_write_char(port, ')');

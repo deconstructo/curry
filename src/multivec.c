@@ -278,7 +278,7 @@ void mv_write(val_t v, val_t port) {
         if (c == 0.0) continue;
         if (first) { port_write_string(port, ": ", 2); first = false; }
         else if (c > 0.0) port_write_char(port, '+');
-        len = snprintf(buf, sizeof(buf), "%g", c);
+        len = num_flonum_to_shortest_cstr(c, buf, sizeof(buf));
         port_write_string(port, buf, (uint32_t)len);
         if (i == 0) continue;   /* scalar part: just the number */
         /* Print blade label: e followed by 1-based subscripts */

@@ -2,6 +2,24 @@
 
 ### Unreleased
 
+**Fix — flonum `number->string`/`display`/`write` no longer lose precision**
+
+`num_to_string`'s flonum branch (numeric.c), `scm_write`'s own direct
+flonum case (port.c), and the matrix/tensor/multivector/f64vector
+element printers all used a bare `"%g"` -- 6 significant digits by
+default, nowhere near enough for a double, which can need up to 17.
+`(display 3.14159265358979)` printed `"3.14159"`; `(number->string
+129.985001)` printed `"129.985"`, which read back as a different
+number entirely. Fixed with a shared helper
+(`num_flonum_to_shortest_cstr`) that finds the shortest decimal string
+that round-trips back to the exact same double via `strtod`, with a
+safety check before trying to avoid needless scientific notation for
+"round" values (`100.0` -> `"100"`, not `"1e+02"`) that verifies the
+extra digits revealed really are trailing zeros and not genuine
+precision noise from a value that isn't exactly decimal-clean in
+binary (`1e300` stays the clean `"1e+300"`, not 17 digits of
+binary-conversion noise).
+
 **Fix — `call-with-values`/`receive`/`let-values`/`let*-values` in tail position now get genuine TCO**
 
 `prim_call_with_values` (builtins.c) invokes its consumer via a real
