@@ -178,6 +178,48 @@
         (receive (n1) (values (- n 1))
           (loop n1 (+ acc n))))) 6)
 
+;;; let-values / let*-values — regression coverage for a bug found in a
+;;; full-codebase audit: src/compiler.c had zero handling for
+;;; S_LET_VALUES/S_LET_STAR_VALUES, so both special forms only worked in
+;;; the tree-walker (eval.c), not compiled/`-e` execution or .scc scripts.
+;;; Fixed by desugaring both to nested call-with-values/lambda forms at
+;;; compile time (compile_let_values/compile_let_star_values).
+;;;
+;;; NOTE: call-with-values' own primitive (prim_call_with_values,
+;;; src/builtins.c) invokes its consumer via a real (nested) C call rather
+;;; than a bytecode-level tail call, so a let-values/let*-values binding in
+;;; tail position of a self-recursive loop does NOT get proper TCO -- deep
+;;; recursion through one will eventually hit curry's call-stack-depth
+;;; limit. This is a pre-existing gap shared with `receive` (found to have
+;;; the identical issue while investigating this), not something newly
+;;; introduced here; fixing it for real needs VM-level work (making
+;;; OP_CALL_WITH_VALUES a genuine tail call) tracked separately. The test
+;;; below stays well under the frame limit rather than asserting TCO that
+;;; doesn't actually hold.
+(check "let-values proper formals"
+  (let-values (((a b) (values 1 2))) (+ a b)) 3)
+(check "let-values multiple bindings"
+  (let-values (((a b) (values 1 2)) ((c) (values 3))) (list a b c)) '(1 2 3))
+(check "let-values dotted formals"
+  (let-values (((a . rest) (values 1 2 3))) (list a rest)) '(1 (2 3)))
+(check "let-values rest-only formals"
+  (let-values ((all (values 1 2 3))) all) '(1 2 3))
+(check "let-values is parallel: a producer cannot see an earlier binding"
+  (let ((a 100)) (let-values (((a) (values 1)) ((b) (values a))) (list a b))) '(1 100))
+(check "let-values in a recursive loop, within the call-stack limit"
+  (let loop ((n 100) (acc 0))
+    (if (= n 0) acc
+        (let-values (((n1) (values (- n 1))))
+          (loop n1 (+ acc 1))))) 100)
+(check "let*-values proper formals"
+  (let*-values (((a b) (values 1 2)) ((c) (values (+ a b)))) (list a b c)) '(1 2 3))
+(check "let*-values is sequential: a later producer sees an earlier binding"
+  (let*-values (((a) (values 1)) ((b) (values (+ a 1)))) (list a b)) '(1 2))
+(check "let*-values no bindings"
+  (let*-values () 42) 42)
+(check "let-values no bindings"
+  (let-values () 42) 42)
+
 ;;; apply/call with more than 64 arguments — regression coverage for a bug
 ;;; found in a full-codebase audit: apply()'s BcClosure/primitive/symbolic-
 ;;; function branches (runtime.c) and the tree-walker's own function-

@@ -2,6 +2,30 @@
 
 ### Unreleased
 
+**Fix — `let-values`/`let*-values` unbound in compiled/`-e` execution and `.scc` scripts**
+
+`src/compiler.c` had zero handling for these two R7RS special forms — only
+the tree-walker (`src/eval.c`) supported them, so any real script run
+through the normal compiled path (`curry script.scm`, `curry -e`, or a
+cached `.scc`) hit an unbound-special-form failure using either. Fixed by
+desugaring both to nested `call-with-values`/`lambda` forms at compile
+time. `let-values` uses fresh temp names in each producer's consumer
+lambda so a later producer can never observe an earlier binding (correct
+*parallel* semantics); `let*-values` nests directly with the real formal
+names (correct *sequential* semantics), mirroring the existing
+`compile_let_star`'s recursive self-embedding style.
+
+Found in the process (not introduced by this fix, and out of scope for
+it — tracked separately): `call-with-values`'s own runtime primitive
+invokes its consumer via a real nested C call rather than a genuine
+bytecode-level tail call, so `let-values`/`let*-values` (and the
+pre-existing `receive`, confirmed to have the identical issue) sitting in
+tail position of a self-recursive loop doesn't get proper TCO — deep
+recursion through one eventually hits curry's call-stack limit instead of
+looping forever. Also found (and equally out of scope, equally
+pre-existing): `(call-with-values (lambda () (values)) (lambda () ...))`
+with zero values fails outright.
+
 **New — `(srfi s209 enums)`: SRFI-209 Enums and Enum Sets**
 
 Typed, ordered symbolic constants (name/ordinal/value) grouped into disjoint

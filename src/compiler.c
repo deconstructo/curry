@@ -1098,6 +1098,106 @@ static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
 
+/* Walks a lambda-formals shape (proper list, dotted list, or a bare
+ * rest-symbol) and returns a same-shaped structure with every identifier
+ * replaced by a fresh "%%lvB_P" temp symbol (B = binding index within the
+ * enclosing let-values form, P = position within this binding's formals).
+ * Prepends each (original . temp) pair onto *pairs (order doesn't matter --
+ * it only ever becomes an unordered `let` binding list). */
+static val_t let_values_temp_formals(val_t formals, int bi, int *pi, val_t *pairs) {
+    if (vis_nil(formals)) return V_NIL;
+    char namebuf[40];
+    if (vis_symbol(formals)) {
+        snprintf(namebuf, sizeof(namebuf), "%%lv%d_%d", bi, (*pi)++);
+        val_t tmp = sym_intern_cstr(namebuf);
+        *pairs = scm_cons(scm_cons(formals, scm_cons(tmp, V_NIL)), *pairs);
+        return tmp;
+    }
+    val_t orig_name = vcar(formals);
+    snprintf(namebuf, sizeof(namebuf), "%%lv%d_%d", bi, (*pi)++);
+    val_t tmp = sym_intern_cstr(namebuf);
+    *pairs = scm_cons(scm_cons(orig_name, scm_cons(tmp, V_NIL)), *pairs);
+    return scm_cons(tmp, let_values_temp_formals(vcdr(formals), bi, pi, pairs));
+}
+
+/* (let-values (((a b) e1) ((c) e2) ...) body ...)
+ * Desugars to nested call-with-values, one per binding, each consumer
+ * lambda using FRESH temp names rather than the source-level formal
+ * names -- so a later producer expression (e.g. e2) can never observe an
+ * earlier binding (e.g. a/b), matching let-values' parallel-binding
+ * semantics (as opposed to let*-values' sequential visibility). The
+ * outermost consumer, once every producer has run, closes with a single
+ * `let` that binds the real names to their temps:
+ *   (call-with-values (lambda () e1)
+ *     (lambda (%%lv0_0 %%lv0_1)
+ *       (call-with-values (lambda () e2)
+ *         (lambda (%%lv1_0)
+ *           (let ((a %%lv0_0) (b %%lv0_1) (c %%lv1_0)) body ...)))))
+ *
+ * NOTE: prim_call_with_values (builtins.c) invokes its consumer via a real
+ * (nested) C call rather than a bytecode-level tail call, so this doesn't
+ * get proper TCO when it sits in tail position of a self-recursive loop --
+ * a pre-existing gap shared with `receive`'s own call-with-values desugar
+ * above, not something specific to this desugaring. */
+static val_t let_values_expand(val_t bindings, val_t body, int bi, val_t pairs) {
+    if (vis_nil(bindings)) {
+        val_t let_bindings = V_NIL;
+        val_t p = pairs;
+        while (vis_pair(p)) { let_bindings = scm_cons(vcar(p), let_bindings); p = vcdr(p); }
+        return scm_cons(S_LET, scm_cons(let_bindings, body));
+    }
+    val_t binding  = vcar(bindings);
+    val_t formals  = vcar(binding);
+    val_t producer = vcar(vcdr(binding));
+    int pi = 0;
+    val_t temp_formals = let_values_temp_formals(formals, bi, &pi, &pairs);
+    val_t inner = let_values_expand(vcdr(bindings), body, bi + 1, pairs);
+    val_t producer_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, scm_cons(producer, V_NIL)));
+    val_t consumer_lam = scm_cons(S_LAMBDA, scm_cons(temp_formals, scm_cons(inner, V_NIL)));
+    val_t cwv = sym_intern_cstr("call-with-values");
+    return scm_cons(cwv, scm_cons(producer_lam, scm_cons(consumer_lam, V_NIL)));
+}
+
+static void compile_let_values(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+    if (vis_nil(bindings)) { compile_seq(c, body, tail, line); return; }
+    compile(c, let_values_expand(bindings, body, 0, V_NIL), tail, line);
+}
+
+/* (let*-values (((a b) e1) rest...) body ...)
+ * Desugars to nested call-with-values using the REAL formal names directly
+ * (no temp-name indirection needed): each subsequent producer expression
+ * is compiled as part of the previous binding's consumer-lambda body, so
+ * it correctly sees earlier bindings -- exactly let*-values' sequential
+ * semantics. Mirrors compile_let_star's existing self-embedding recursion
+ * (reusing S_LET_STAR_VALUES for the inner form) rather than the
+ * expand-then-compile-once style of compile_let_values above. */
+static void compile_let_star_values(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+    if (vis_nil(bindings)) { compile_seq(c, body, tail, line); return; }
+
+    val_t binding  = vcar(bindings);
+    val_t formals  = vcar(binding);
+    val_t producer = vcar(vcdr(binding));
+    val_t rest     = vcdr(bindings);
+
+    val_t inner_body;
+    if (vis_nil(rest)) {
+        inner_body = body;
+    } else {
+        val_t inner_form = scm_cons(S_LET_STAR_VALUES, scm_cons(rest, body));
+        inner_body = scm_cons(inner_form, V_NIL);
+    }
+
+    val_t producer_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, scm_cons(producer, V_NIL)));
+    val_t consumer_lam = scm_cons(S_LAMBDA, scm_cons(formals, inner_body));
+    val_t cwv = sym_intern_cstr("call-with-values");
+    val_t expanded = scm_cons(cwv, scm_cons(producer_lam, scm_cons(consumer_lam, V_NIL)));
+    compile(c, expanded, tail, line);
+}
+
 static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
     /* (cond (test expr...) ... (else expr...)) */
     int end_patches[64]; int np = 0;
@@ -1973,6 +2073,8 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_LET_STAR) { compile_let_star(c, args, tail, line); return; }
     if (head == S_LETREC || head == S_LETREC_STAR)
                             { compile_letrec(c, args, tail, line);   return; }
+    if (head == S_LET_VALUES)      { compile_let_values(c, args, tail, line);      return; }
+    if (head == S_LET_STAR_VALUES) { compile_let_star_values(c, args, tail, line); return; }
 
     /* and / or */
     if (head == S_AND) { compile_and(c, args, tail, line); return; }
