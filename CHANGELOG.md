@@ -2,6 +2,8 @@
 
 ### Unreleased
 
+### 1.14.2 - 2026-08-03
+
 **Fix — flonum `number->string`/`display`/`write` no longer lose precision**
 
 `num_to_string`'s flonum branch (numeric.c), `scm_write`'s own direct
