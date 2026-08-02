@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785688008012,
+  "lastUpdate": 1785689655094,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -2000,6 +2000,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.395,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "ed791eeb43e2cf2300b271f8c7d642fe9268ec7b",
+          "message": "fix: flonum number->string/display/write no longer lose precision\n\nnum_to_string's flonum branch (numeric.c), scm_write's own direct\nflonum case (port.c), and the matrix/tensor/multivector/f64vector\nelement printers all used a bare \"%g\" -- 6 significant digits by\ndefault, nowhere near enough for a double, which can need up to 17.\n(display 3.14159265358979) printed \"3.14159\"; (number->string\n129.985001) printed \"129.985\", which read back as a different number\nentirely.\n\nFixed with a shared helper (num_flonum_to_shortest_cstr) that finds\nthe shortest decimal string that round-trips back to the exact same\ndouble via strtod, with a safety check before trying to avoid\nneedless scientific notation for \"round\" values (100.0 -> \"100\", not\n\"1e+02\") that verifies the extra digits revealed really are trailing\nzeros and not genuine precision noise from a value that isn't exactly\ndecimal-clean in binary (1e300 stays the clean \"1e+300\", not 17\ndigits of binary-conversion noise).\n\nIndependent code review stress-tested round-trip correctness across\nsubnormals, DBL_MIN/MAX, power-of-10 boundaries, and everyday\ndecimals, verified buffer sizes at all five call sites, and confirmed\nno bugs; added a couple of suggested negative-number regression tests.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T02:53:21+10:00",
+          "tree_id": "f69ea30be3ffe08de07fe36c7841bf768b8c840a",
+          "url": "https://github.com/deconstructo/curry/commit/ed791eeb43e2cf2300b271f8c7d642fe9268ec7b"
+        },
+        "date": 1785689654821,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.489,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 27.887,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.173,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 32.567,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 206.513,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 375.604,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.564,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 125.739,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 104.783,
             "unit": "ms"
           }
         ]
