@@ -35,6 +35,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s19 time)`](s19.md) | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
 | [`(srfi s27 random-bits)`](s27.md) | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
 | [`(srfi s59 vicinity)`](s59.md) | [SRFI-59](https://srfi.schemers.org/srfi-59/) | Vicinity (directory-of-a-path) string utilities |
+| [`(srfi s64 testing)`](s64.md) | [SRFI-64](https://srfi.schemers.org/srfi-64/) | Unit-testing framework — test cases/groups, skip/expect-fail specifiers, pluggable test runners; curry's own test suites use this |
 | [`(srfi s69 hash-tables)`](s69-s90.md) | [SRFI-69](https://srfi.schemers.org/srfi-69/) | Basic hash tables — full API, wrapping curry's built-in hash table with corrected `hash-table-ref` semantics |
 | [`(srfi s90 hash-tables)`](s69-s90.md) | [SRFI-90](https://srfi.schemers.org/srfi-90/srfi-90.html) | `make-table`, a keyword-argument hash-table constructor layered on `(srfi s69 hash-tables)` |
 | [`(srfi s98 os-environment-variables)`](s98.md) | [SRFI-98](https://srfi.schemers.org/srfi-98/) | `get-environment-variable(s)` — thin re-export of native builtins |
@@ -55,6 +56,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s215 log)`](s215.md) | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
 | [`(srfi s227 optional-arguments)`](s227.md) | [SRFI-227](https://srfi.schemers.org/srfi-227/) | `opt-lambda`, `let-optionals`/`let-optionals*`, `default-object`/`default-object?` — spelled with `#:optional`/`#:rest`, not `#!optional`/`#!rest` |
 | [`(srfi s238 codesets)`](s238.md) | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |
+| [`(srfi s252 property-testing)`](s252.md) | [SRFI-252](https://srfi.schemers.org/srfi-252/) | Property-based testing layered on `(srfi s64 testing)`: `test-property` and friends, plus a fixed suite of type/number generators |
 | [`(srfi s263 prototype-objects)`](s263.md) | [SRFI-263](https://srfi.schemers.org/srfi-263/) | Self-inspired prototype/message-passing object system — complements, doesn't replace, `(curry oop)` |
 
 ## Portability note

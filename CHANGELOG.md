@@ -2,6 +2,46 @@
 
 ### Unreleased
 
+**New — `(srfi s252 property-testing)`: SRFI-252 Property Testing**
+
+Property-based testing layered on `(srfi s64 testing)`: `test-property`,
+`test-property-expect-fail`, `test-property-skip`, `test-property-error`,
+`test-property-error-type`, a `property-test-runner` with failure-input
+reporting, and the SRFI's full fixed generator suite (booleans, chars,
+strings, symbols, bytevectors, the numeric tower, and `list-generator-of`/
+`vector-generator-of`/`pair-generator-of`/`procedure-generator-of`). Built
+entirely on s64's *exported* public API (`%run-assert`, `test-skip`,
+`test-expect-fail`) rather than its private pass/fail-count internals, so
+bookkeeping is exactly s64's own already-tested logic, not a second copy of
+it. `exact-complex-generator`/`exact-integer-complex-generator` raise (curry
+has no exact complex representation — `(exact? (make-rectangular 1/2 1/3))`
+is `#f`), and `complex-generator` aliases the inexact form accordingly, both
+per the SRFI's own allowance for that situation. `(srfi 252)`/`(srfi
+srfi-252)` shims included. See `docs/reference/srfi/s252.md`.
+
+Also closes a documentation gap noticed while writing this: `(srfi s64
+testing)` (already fully implemented, and in use by curry's own test suites)
+had no doc page, no index.md entry, and no `(srfi srfi-64)` shim — only the
+bare-number `(srfi 64)` form existed. Added all three; see
+`docs/reference/srfi/s64.md`.
+
+Code review (independent subagent) found two real bugs, both fixed:
+
+1. The richer failure detail attached via `test-result-set!` (which inputs
+   triggered a failure, the underlying error) was being set *after*
+   `%run-assert` returned — but `%run-assert`'s own `%do-case` already fires
+   the runner's `on-test-end` callback (where `property-test-runner`'s
+   reporting hook reads those properties) before returning, so the extra
+   detail was silently dropped every time. Fixed by temporarily wrapping
+   the runner's `on-test-end` callback to attach the extra properties
+   first, then chain to the original callback, restoring it immediately
+   after.
+2. `%run-property-trials`/`%run-error-trials` recursed to the next trial
+   from *inside* their own `guard` form rather than after it returned —
+   `guard` isn't tail-call transparent, so each trial cost an unreclaimed
+   stack frame, and `(test-property ... 200000)` segfaulted. Fixed by
+   moving the recursive call outside `guard`'s dynamic extent.
+
 **New — `(srfi s111 boxes)` and `(srfi s195 multiple-value-boxes)`: box types**
 
 SRFI-111's single-value mutable box (`box`/`box?`/`unbox`/`set-box!`) and
