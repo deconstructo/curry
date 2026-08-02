@@ -54,6 +54,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s194 random-data-samples)`](s194.md) | [SRFI-194](https://srfi.schemers.org/srfi-194/) | Random integer/real/boolean/char generators plus distribution samplers |
 | [`(srfi s195 multiple-value-boxes)`](s195.md) | [SRFI-195](https://srfi.schemers.org/srfi-195/) | Multiple-value boxes — extends `(srfi s111 boxes)` with `box-arity`/`unbox-value`/`set-box-value!` |
 | [`(srfi s209 enums)`](s209.md) | [SRFI-209](https://srfi.schemers.org/srfi-209/) | Enums and enum sets — typed, ordered symbolic constants with a name/ordinal/value, grouped into disjoint enum types; `define-enum`/`define-enumeration` sugar |
+| [`(srfi s210 multiple-values)`](s210.md) | [SRFI-210](https://srfi.schemers.org/srfi-210/) | Multiple-values convenience syntax/procedures layered on `call-with-values`: `apply/mv`, `call/mv`, `bind/mv`, `case-receive`, `set!-values`, and more |
 | [`(srfi s215 log)`](s215.md) | [SRFI-215](https://srfi.schemers.org/srfi-215/) | Central log exchange |
 | [`(srfi s227 optional-arguments)`](s227.md) | [SRFI-227](https://srfi.schemers.org/srfi-227/) | `opt-lambda`, `let-optionals`/`let-optionals*`, `default-object`/`default-object?` — spelled with `#:optional`/`#:rest`, not `#!optional`/`#!rest` |
 | [`(srfi s238 codesets)`](s238.md) | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |

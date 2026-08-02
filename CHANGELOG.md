@@ -2,6 +2,36 @@
 
 ### Unreleased
 
+**New — `(srfi s210 multiple-values)`: SRFI-210 Multiple Values**
+
+Convenience syntax/procedures for multiple-value programming, layered
+entirely on `call-with-values`: `apply/mv`, `call/mv`, `list/mv`,
+`vector/mv`, `box/mv`, `value/mv`, `coarity`, `set!-values`,
+`with-values`, `case-receive`, `bind/mv`, plus the chaining/composition
+helpers `compose-left`/`compose-right`/`map-values`/`bind/list`/
+`bind/box`/`bind` and small utilities `list-values`/`vector-values`/
+`box-values`/`value`/`identity`. `(srfi 210)`/`(srfi srfi-210)` shims
+included. See `docs/reference/srfi/s210.md`.
+
+`call/mv`'s first implementation attempt was a recursive macro building
+nested `(lambda vals ...)` consumer lambdas, one per producer -- wrong,
+and caught by a test with three producers: curry's macro expansion
+doesn't hygienically rename a template-introduced binding per recursive
+expansion (the same gap `(srfi s209 enums)`'s registry design found), so
+reusing the literal name `vals` at every nesting level meant each deeper
+`(lambda vals ...)` silently shadowed the outer one, and every reference
+ultimately resolved to the last producer's values only
+(`(call/mv list (values 1) (values 2 3) (values 4))` returned `(4 4 4)`
+instead of `(1 2 3 4)`). Fixed by not introducing any named binding per
+producer at all -- each producer becomes a zero-argument thunk, and the
+actual value collection happens in ordinary runtime code over a plain
+list of thunks.
+
+Also surfaces, but doesn't fix (both pre-existing, both tracked
+separately): the same call-with-values TCO gap noted in the
+`let-values`/`let*-values` fix above, and a producer yielding exactly
+zero values fails outright.
+
 **Fix — `let-values`/`let*-values` unbound in compiled/`-e` execution and `.scc` scripts**
 
 `src/compiler.c` had zero handling for these two R7RS special forms — only
