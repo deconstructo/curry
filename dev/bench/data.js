@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785686983505,
+  "lastUpdate": 1785688008012,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1931,6 +1931,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 104.08,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b3f5f0c0b3c3a3a156fa1c5a0afb2f3c6e2e6444",
+          "message": "fix: call-with-values/receive/let-values/let*-values now get proper TCO\n\nprim_call_with_values (builtins.c) invokes its consumer via a real\nnested C call, which is fine for a one-shot call but meant any of\nthese forms sitting in the tail position of a self-recursive loop\naccumulated one such nested call PER ITERATION, hitting curry's\ncall-stack limit instead of looping forever.\n\nFixed with a new OP_TAIL_CALL_WITH_VALUES bytecode op, emitted only\nwhen the compiler sees a literal 2-argument (call-with-values producer\nconsumer) -- the same unconditional syntactic special-casing\nconvention already used for apply/values -- in tail position. It\nreuses the current call frame for a BcClosure consumer exactly the way\nplain OP_TAIL_CALL does, instead of going through\nprim_call_with_values at all. Non-tail usage (as an ordinary\nsubexpression) is unaffected, still going through the existing\nprimitive.\n\nSince OP_TAIL_CALL_WITH_VALUES was inserted into the middle of the\nopcode enum, every opcode after it shifted its numeric value -- bumped\n.scc cache format version (v4 -> v5) so any cache compiled by an older\nbinary is rejected and recompiled rather than silently misinterpreted\nunder the new numbering. Building this fix initially surfaced as a\nwave of unrelated-looking test failures across the suite, all traced\nto exactly this: stale .scc caches from before the opcode reordering.\nUpdated one test_cli.sh assertion that hardcoded the format-version\nbyte to match.\n\nIndependent code review confirmed stack arithmetic, GC safety, and the\ncompiler dispatch's fast-path gating are all correct; found one test\nthat didn't actually exercise what its name claimed (a non-tail\nargument expression, not genuine tail position) and it's fixed here.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T02:25:56+10:00",
+          "tree_id": "abbab58089c6a6dddd685ccd6af06dbc9e2af8ee",
+          "url": "https://github.com/deconstructo/curry/commit/b3f5f0c0b3c3a3a156fa1c5a0afb2f3c6e2e6444"
+        },
+        "date": 1785688007169,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 26.421,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.459,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 8.623,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.6,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 207.27,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.241,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.666,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.209,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 103.395,
             "unit": "ms"
           }
         ]
