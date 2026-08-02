@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785621976461,
+  "lastUpdate": 1785670588053,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1517,6 +1517,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 102.102,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "5286f81e74696bf3ce789f6c5fc8fef75d013d1d",
+          "message": "feat: SRFI-252 (Property Testing), plus SRFI-64 doc/naming gap\n\nProperty-based testing layered on (srfi s64 testing): test-property,\ntest-property-expect-fail, test-property-skip, test-property-error,\ntest-property-error-type, a property-test-runner with failure-input\nreporting, and the SRFI's full fixed generator suite (booleans, chars,\nstrings, symbols, bytevectors, the numeric tower, and list/vector/pair/\nprocedure-generator-of). Built entirely on s64's exported public API\n(%run-assert, test-skip, test-expect-fail) rather than its private\npass/fail-count internals, so bookkeeping is exactly s64's own\nalready-tested logic. exact-complex-generator/exact-integer-complex-\ngenerator raise (curry has no exact complex representation), and\ncomplex-generator aliases the inexact form accordingly, both per the\nSRFI's own allowance for that situation. (srfi 252)/(srfi srfi-252)\nshims included.\n\nAlso closes a documentation gap noticed while writing this: (srfi s64\ntesting) had no doc page, no index.md entry, and no (srfi srfi-64) shim.\nAdded all three.\n\nCode review (independent subagent) found two real bugs, both fixed:\nricher failure detail (failing inputs, underlying error) was attached to\nthe result-alist after on-test-end had already fired and read it, so it\nwas silently dropped -- fixed via a temporary on-test-end wrapper; and\nthe trial loops recursed from inside their own `guard` form rather than\nafter it returned, which isn't tail-call-transparent and segfaulted\naround 200k runs -- fixed by moving recursion outside guard's extent.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-02T21:35:42+10:00",
+          "tree_id": "2416dbd29dc46f94e0b7469a52b79dff33048cf2",
+          "url": "https://github.com/deconstructo/curry/commit/5286f81e74696bf3ce789f6c5fc8fef75d013d1d"
+        },
+        "date": 1785670587560,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.351,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.46,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.142,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.492,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.048,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 407.076,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 85.097,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 131.283,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 105.242,
             "unit": "ms"
           }
         ]
