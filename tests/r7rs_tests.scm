@@ -163,6 +163,21 @@
 ;;; Control
 (check "values" (call-with-values (lambda () (values 1 2)) +) 3)
 
+;;; call-with-values with a zero-value producer — regression coverage for
+;;; a bug found in a full-codebase audit: vm.c's OP_VALUES special-cased
+;;; n == 0 by pushing V_VOID instead of a genuine zero-count Values
+;;; object (unlike eval.c's tree-walker equivalent, which already built a
+;;; real empty Values object). call-with-values's consumer decides how
+;;; many arguments to apply by checking vis_values(produced); V_VOID
+;;; isn't distinguishable from an ordinary single void-returning value,
+;;; so it was applied as ONE argument, and a zero-argument consumer
+;;; failed with "too many arguments (got 1, need 0)". Fixed by letting
+;;; n == 0 fall through to the same code path n >= 2 already used.
+(check "call-with-values: zero-value producer, zero-arg consumer"
+  (call-with-values (lambda () (values)) (lambda () 'ok)) 'ok)
+(check "call-with-values: zero-value producer, rest-arg consumer sees an empty list"
+  (call-with-values (lambda () (values)) list) '())
+
 ;;; receive (R7RS sugar over call-with-values, compiled natively)
 (check "receive proper formals"
   (receive (a b) (values 1 2) (+ a b)) 3)

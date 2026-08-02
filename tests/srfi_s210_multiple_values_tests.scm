@@ -55,10 +55,7 @@
 
 (check "coarity: spec example" (coarity (values 'a 'b 'c)) 3)
 (check "coarity: single value" (coarity 42) 1)
-; Not tested: (coarity (values)) -- a zero-value producer currently
-; crashes call-with-values itself (a pre-existing bug, tracked
-; separately, unrelated to this library: see task "Fix zero-values
-; call-with-values bug"), so this can't be asserted here yet.
+(check "coarity: zero values" (coarity (values)) 0)
 
 ;;; ---- set!-values ----
 

@@ -2,6 +2,23 @@
 
 ### Unreleased
 
+**Fix — `call-with-values` with a zero-value producer**
+
+`(call-with-values (lambda () (values)) (lambda () ...))` failed with
+"too many arguments (got 1, need 0)". `vm.c`'s `OP_VALUES` bytecode
+(what the compiler emits for a literal `(values ...)` call) special-cased
+zero arguments by pushing `V_VOID` instead of building a genuine
+zero-count `Values` object — unlike `eval.c`'s tree-walker equivalent,
+which already built a real empty `Values` object for this case. Since
+`call-with-values`'s consumer decides how many arguments to apply by
+checking whether the producer's result is a `Values` object, `V_VOID`
+(indistinguishable from any other void-returning single value) was
+applied as one argument instead of zero. Fixed by letting the `n == 0`
+case fall through to the same path `n >= 2` already used. This also
+unblocks `coarity`/`bind/mv`/etc. from [`(srfi s210)`](docs/reference/srfi/s210.md)
+being used with a zero-value producer, previously documented there as a
+known limitation.
+
 **New — `(srfi s54 cat)`: SRFI-54 Formatting**
 
 `cat`, an order-independent object-to-string formatter: every optional

@@ -1092,8 +1092,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_VALUES) {
             uint8_t n = READ_U8();
             if (n == 1) { NEXT; }
-            /* n == 0: push void (rarely needed but keep consistent) */
-            if (n == 0) { PUSH(V_VOID); NEXT; }
+            /* n == 0 falls through to the general path below and builds a
+             * genuine zero-count Values object, matching eval.c's S_VALUES
+             * tree-walker case -- NOT V_VOID. A prior version special-cased
+             * n == 0 as V_VOID, which broke call-with-values: its consumer
+             * checks vis_values(produced) to decide how many arguments to
+             * apply, and V_VOID (indistinguishable from any OTHER
+             * void-returning single value) doesn't say "zero values" --
+             * it was applied as ONE argument, so
+             * (call-with-values (lambda () (values)) (lambda () ...))
+             * failed with "too many arguments (got 1, need 0)". */
             Values *mv = (Values *)gc_alloc(sizeof(Values) + (size_t)n * sizeof(val_t));
             mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = n;
             val_t *base = vm->sp - n;
