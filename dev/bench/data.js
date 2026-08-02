@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785671775297,
+  "lastUpdate": 1785684150536,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1655,6 +1655,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.022,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "4dc3e4d7e5b201c8b9fdf223a2aa3e18fe0fd1d5",
+          "message": "fix: let-values/let*-values missing from bytecode compiler\n\nsrc/compiler.c had zero handling for S_LET_VALUES/S_LET_STAR_VALUES, so\nboth R7RS special forms only worked in the tree-walker (eval.c) -- any\nscript run through the normal compiled path (curry script.scm, curry -e,\nor a cached .scc) hit an unbound-special-form failure using either.\n\nFixed by desugaring both to nested call-with-values/lambda forms at\ncompile time. let-values uses fresh temp names in each producer's\nconsumer lambda so a later producer can never observe an earlier\nbinding (correct parallel semantics); let*-values nests directly with\nthe real formal names (correct sequential semantics), mirroring\ncompile_let_star's existing recursive self-embedding style.\n\nIndependent code review found no correctness bugs in the desugaring\nitself, but surfaced two pre-existing, out-of-scope issues while\ntesting: call-with-values' own primitive doesn't preserve proper tail\ncalls for its consumer (shared with receive, which has the identical\ngap), and call-with-values with a zero-value producer fails outright.\nBoth documented in code comments and filed as separate backlog items\nrather than fixed here.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T01:21:45+10:00",
+          "tree_id": "6687f7fa9171c7a31266f8c725e7086d078460f2",
+          "url": "https://github.com/deconstructo/curry/commit/4dc3e4d7e5b201c8b9fdf223a2aa3e18fe0fd1d5"
+        },
+        "date": 1785684149574,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.542,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.162,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.138,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.142,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 206.295,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 428.229,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 86.209,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 136.574,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.086,
             "unit": "ms"
           }
         ]
