@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785686160864,
+  "lastUpdate": 1785686983505,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -1862,6 +1862,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 107.864,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "1192ddc634d35b039c5ba08207a95579f9e929a6",
+          "message": "fix: call-with-values with a zero-value producer\n\n(call-with-values (lambda () (values)) (lambda () ...)) failed with\n\"too many arguments (got 1, need 0)\". vm.c's OP_VALUES bytecode (what\nthe compiler emits for a literal (values ...) call) special-cased zero\narguments by pushing V_VOID instead of building a genuine zero-count\nValues object -- unlike eval.c's tree-walker equivalent, which already\nbuilt a real empty Values object for this case. Since\ncall-with-values's consumer decides how many arguments to apply by\nchecking whether the producer's result is a Values object, V_VOID\n(indistinguishable from any other void-returning single value) was\napplied as one argument instead of zero.\n\nFixed by letting the n == 0 case fall through to the same path n >= 2\nalready used. Also unblocks coarity/bind/mv/etc. from SRFI-210 being\nused with a zero-value producer, previously a documented known\nlimitation there.\n\nIndependent code review confirmed the fix's allocation path is sound\nfor n=0, cross-checked every other Values/vis_values consumer in the\ncodebase (tree-walker, GC tracers, prim_values/prim_call_with_values)\nfor the same class of bug, and found none.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-03T02:08:46+10:00",
+          "tree_id": "9bf58ec9fd8725e8f2e13ae5c5eeed7ef11355a5",
+          "url": "https://github.com/deconstructo/curry/commit/1192ddc634d35b039c5ba08207a95579f9e929a6"
+        },
+        "date": 1785686982910,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.715,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.935,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.516,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.302,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.19,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 374.197,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.789,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 124.385,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 104.08,
             "unit": "ms"
           }
         ]
