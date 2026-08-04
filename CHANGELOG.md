@@ -2,6 +2,27 @@
 
 ### Unreleased
 
+**New — `(curry toml)`: TOML 1.0 reader/writer, pure Scheme**
+
+Mirrors `(curry yaml)`'s shape deliberately: tables become association
+lists (string keys), arrays become lists, and -- since TOML datetimes
+are unquoted literals distinct from strings -- datetimes get the same
+"distinguished sentinel" treatment `yaml-null` uses for YAML's null: a
+`toml-datetime` record (tested with `toml-datetime?`, unwrapped with
+`toml-datetime->string`), rather than collapsing them into plain
+strings and losing the distinction on write.
+
+Covers key/value pairs (bare/quoted/dotted keys), standard tables and
+dotted-path tables, arrays of tables (`[[table]]`, including reopening
+a dotted sub-path on the array's last element), inline tables, arrays
+(multi-line, heterogeneous, trailing commas), all four TOML string
+forms (basic, literal, and their multi-line variants, with basic
+multi-line's line-continuation backslash), integers (decimal/hex/
+octal/binary, underscores), floats (exponents, signed inf/nan,
+underscores), booleans, and all four datetime forms. `toml-parse`/
+`toml-load-file` for reading, `toml-stringify`/`toml-dump-file` for
+writing. See `docs/reference/module-toml.md`.
+
 ### 1.14.2 - 2026-08-03
 
 **Fix — flonum `number->string`/`display`/`write` no longer lose precision**
