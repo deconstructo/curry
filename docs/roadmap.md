@@ -2,23 +2,41 @@
 
 *Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Corrected 2026-07-17
 against actual shipped state through v1.8.0 — see "Where we are now" and
-"Decided against" below. Source: cill_spec.pdf + design sessions.*
+"Decided against" below. Updated 2026-08-04 for v1.15.0. Source:
+cill_spec.pdf + design sessions.*
 
-Curry is at v1.8.0 (released). Since this roadmap was last updated: Phase 4
-(Extensible CAS) finished completely, generational GC shipped as an
+Curry is at v1.15.0 (released). Since this roadmap was last updated: Phase
+4 (Extensible CAS) finished completely, generational GC shipped as an
 experimental opt-in backend, a `(curry sets)`/`(curry logic)` pair of
 modules realized part of Phase 7's pluggable-foundations idea in pure
 Scheme, real error backtraces + machine-legible error codes landed, and an
-interactive debugger shipped standalone ahead of Phase 8. Some things were
-also explicitly decided *against* rather than simply not gotten to yet —
-see the "Decided against" section before the summary timeline. This
-document maps the path from here to a compiled Scheme for scientific
-computing — the full cill specification. It is ordered by dependency, not
-ambition; each phase unblocks the phases above it.
+interactive debugger shipped standalone ahead of Phase 8 — all as of the
+last correction. Since then: **Slim CLOS Layer 1 shipped** (`(curry oop)`,
+v1.11.0) — classes, generics, multiple dispatch, C3 linearisation — closing
+most of Phase 7's first third; **property-based testing and scientific
+I/O both landed**, differently-shaped than Phase 9 sketched (SRFI-252
+generator-driven `test-property` on top of SRFI-158/SRFI-64, rather than a
+bespoke `define-property`/`check-property` DSL; `(curry hdf5)`/`(curry
+netcdf)`/`(curry fits)` directly rather than under a `(curry io ...)`
+namespace, with no native `.curry-tensor` serialisation format); a
+full-codebase security/correctness audit (v1.10.4) fixed six memory-safety
+bugs; the compiler's eval-elimination effort reached native codegen for
+the last tree-walker-only special forms (v1.9.0–v1.10.0); and a large
+tranche of portable SRFI compatibility libraries, an LSP module, and
+argv-based subprocess execution (`process-run`/`process-start`, no shell)
+landed alongside several new pure-Scheme domain modules (aviation weather,
+Babylonian astronomy, YAML, TOML). None of this was tracked against a
+roadmap phase at the time it shipped — see `CHANGELOG.md` v1.8.3 through
+v1.15.0 for the full list. Some things were also explicitly decided
+*against* rather than simply not gotten to yet — see the "Decided
+against" section before the summary timeline. This document maps the
+path from here to a compiled Scheme for scientific computing — the full
+cill specification. It is ordered by dependency, not ambition; each phase
+unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.8.0)
+## Where we are now (v1.15.0)
 
 | Capability | Status |
 |---|---|
@@ -47,18 +65,18 @@ ambition; each phase unblocks the phases above it.
 | **Real error backtraces + machine-legible error codes** | ✓ **v1.7.0** |
 | **`(curry sets)` + `(curry logic)` modules** (multisets, 6 pluggable logics) | ✓ **v1.7.0** — partial, differently-shaped realization of "pluggable set theory foundations" below |
 | **Interactive debugger** (breakpoints, step/next/finish/continue, locals, backtrace) | ✓ **v1.8.0** — a slice of Phase 8 below, arrived standalone/early |
+| **Slim CLOS Layer 1** (`define-class`, `define-generic`, `define-method`, C3 linearisation) | ✓ **v1.11.0** (`(curry oop)`) — Layer 1 only; PIC dispatch (Layer 2) and numeric-tower-generic operators (Layer 3) not started |
+| **Property-based testing** (generator-driven, many trials per property) | ✓ **v1.14.2** — differently-shaped realization of Phase 9 below: SRFI-252 `test-property` over SRFI-158 generators, on top of SRFI-64, not the bespoke `define-property`/`check-property` DSL sketched there |
+| **Scientific I/O** (HDF5, NetCDF, FITS) | ✓ shipped, undated in `CHANGELOG.md` — `(curry hdf5)`, `(curry netcdf)`, `(curry fits)` directly rather than under a `(curry io ...)` namespace; no native `.curry-tensor` serialisation format |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
 | Pluggable scheduler | ✗ |
-| Slim CLOS | ✗ |
 | Pluggable set theory foundations (C-level `curry_foundations_ops_t`) | ✗ (see `(curry sets)`/`(curry logic)` above for the Scheme-level equivalent) |
 | Topology | ✗ |
 | GR / QM libraries | ✗ |
 | Full introspection (heap-walk, compiler IR, actor debug) | ✗ (debugger above covers breakpoints/locals only) |
 | Sampling profiler, Tracy/Perfetto tracing, SIMD tower | ✗ |
-| Property-based testing | ✗ |
-| Scientific I/O (HDF5, NetCDF, FITS) | ✗ |
-| Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/pkg-design.md` and "Decided against" below |
+| Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/guides/pkg-design.md` and "Decided against" below |
 | Notebook interface | ✗ |
 | Units and dimensions system | ✗ |
 | Step-by-step CAS (`explain-simplify`) | ✗ |
@@ -469,7 +487,18 @@ Three conceptually related features: user-defined types that participate in
 dispatch, formal set semantics as a foundation, and the topological structure
 that connects sets to geometry.
 
-**Slim CLOS** (no MOP, no method qualifiers):
+**Status: Slim CLOS Layer 1 shipped (v1.11.0); set theory shipped
+differently-shaped (v1.7.0, see below); topology not started.**
+
+### ✓ Slim CLOS Layer 1 — shipped v1.11.0 (no MOP, no method qualifiers)
+
+`(curry oop)` implements the sketch below essentially as written —
+`define-class`, `define-generic`, `define-method`, `is-a?`, `class-of`,
+`class-precedence-list` (C3 linearisation), `call-next-method` in primary
+methods only, immutable-by-default slots. Layer 2 (polymorphic inline
+cache for hot dispatch paths) and Layer 3 (numeric-tower operators
+becoming generic) below are not started.
+
 ```scheme
 (define-class <point> ()
   (x #:init 0 #:accessor point-x)   ; immutable by default
@@ -495,7 +524,7 @@ Layer 1: pure Scheme macro layer (no C changes).
 Layer 2: polymorphic inline cache in VM for hot dispatch paths.
 Layer 3: numeric tower operators (`+`, `*`, `simplify`, `∂`) become generic.
 
-**Pluggable set theory foundations:**
+### ~ Pluggable set theory foundations — shipped differently-shaped, v1.7.0
 
 *Status: the underlying idea — set semantics parameterized by a pluggable
 foundation — shipped in v1.7.0, but as a pure-Scheme realization rather
@@ -545,7 +574,7 @@ extern curry_foundations_ops_t *FOUNDATIONS;
 (fuzzy-set (lambda (x) (/ 1 (+ 1 (exp (- x))))))
 ```
 
-**Topology:**
+### ✗ Topology — not started
 ```scheme
 (topological-space S (list empty-set S U1 U2 ...))
 (metric-topology S metric-fn)
@@ -659,9 +688,22 @@ above) exists beyond the debugger.
 
 ---
 
-## Phase 9 — v2.3: Property-Based Testing + Scientific I/O
+## Phase 9 — v2.3: Property-Based Testing + Scientific I/O ✓ done, differently-shaped
 
-**Property-based testing:**
+**Status: both halves shipped, neither via the API sketched below.**
+Property-based testing landed as [SRFI-252](reference/srfi/s252.md)
+(`(srfi s252 property-testing)`, v1.14.2) — `test-property`/
+`test-property-expect-fail`/`test-property-skip`/`test-property-error`
+draw inputs from [SRFI-158](reference/srfi/s158.md) generators and
+integrate with [SRFI-64](reference/srfi/s64.md)'s test-runner bookkeeping,
+rather than a bespoke `define-property`/`check-property` DSL with its own
+generator vocabulary. Scientific I/O landed as three direct modules —
+[`(curry hdf5)`](reference/module-hdf5.md), [`(curry netcdf)`](reference/module-netcdf.md),
+[`(curry fits)`](reference/module-fits.md) — rather than under a
+`(curry io ...)` namespace; only the native `.curry-tensor` fast-serialisation
+format sketched below was not built.
+
+**Property-based testing** *(original sketch — not what shipped, see SRFI-252 above)*:
 ```scheme
 (define-property mat-multiply-associative
   #:forall [(A (gen-matrix 3 3)) (B (gen-matrix 3 3)) (C (gen-matrix 3 3))]
@@ -683,7 +725,7 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 `gen-matrix`, `gen-tensor`, `gen-symbolic`, `gen-finite-set`,
 `gen-hamiltonian-ic`. Automatic shrinking on failure.
 
-**Scientific I/O:**
+**Scientific I/O** *(original sketch — see `(curry hdf5)`/`(curry netcdf)`/`(curry fits)` docs for the real API)*:
 ```scheme
 (import (curry io hdf5))
 (hdf5-read f "/measurements/temperature")  ; → tensor
@@ -696,7 +738,7 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 (import (curry io fits))
 (fits-read-image "image.fits")             ; → matrix + header alist
 
-; Native fast tensor serialisation
+; Native fast tensor serialisation — not built; no equivalent shipped
 (tensor-save T "result.curry-tensor")
 (tensor-load "result.curry-tensor")
 ```
@@ -709,7 +751,7 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 
 **Package manager** (`curry pkg`) — **explicitly deferred by decision, not
 just unstarted.** A design evaluation already exists —
-`docs/pkg-design.md` — comparing registry models, lock files, environments,
+`docs/guides/pkg-design.md` — comparing registry models, lock files, environments,
 C extension handling, versioning, package identity, and security across
 CHICKEN/Akku/cargo/pip/npm/Julia/Quicklisp. The decision was to finish
 that survey before writing any implementation; the sketch below is a
@@ -875,7 +917,7 @@ Scheme and the Kaappi implementation for lessons applicable to curry):
   the frame-copying continuation strategy without checking first.
 
 **Package manager** (Phase 10) is deferred by decision pending the
-comparative survey in `docs/pkg-design.md`, not because nobody's gotten to
+comparative survey in `docs/guides/pkg-design.md`, not because nobody's gotten to
 it — see that phase's section above.
 
 ---
@@ -900,6 +942,14 @@ GR/QM library the original mapping promised for that slot):
 | ~~**v1.6.0–1.6.3**~~ | GC instrumentation, benchmarking stack, JIT/GC correctness fixes | ✓ shipped |
 | ~~**v1.7.0**~~ | Real error backtraces + machine-legible error codes; `(curry logic)` + `(curry sets)` (partial Phase 7) | ✓ shipped |
 | ~~**v1.8.0**~~ | Interactive debugger (partial Phase 8); per-statement source lines | ✓ shipped |
+| ~~**v1.8.3–1.8.4**~~ | Full Akkadian/cuneiform coverage; `(curry lsp)` Language Server Protocol module; SRFI 149 macro template extensions; module export enforcement | ✓ shipped |
+| ~~**v1.9.0–1.10.0**~~ | Compiler eval-elimination phase 3 complete: native codegen for `receive`, `define-record-type`, `define-syntax`, symbolic special forms — retires the last tree-walker-only special forms; `--timings` pipeline report; benchmark CI | ✓ shipped |
+| ~~**v1.10.1–1.10.4**~~ | Transparent content-hash-keyed `.scc` cache; full-codebase security/correctness audit (six memory-safety bugs fixed: STM torn reads, work-stealing pool init race, string/vector/bytevector bounds checks, surreal-number canonicalization, sexagesimal UB, actor capture bug) | ✓ shipped |
+| ~~**v1.11.0–1.11.1**~~ | `(curry oop)` Slim CLOS Layer 1 (partial Phase 7, see above); VM operand-stack corruption fix across `guard`/`longjmp`; SRFI-64 testing, SRFI-215 log | ✓ shipped |
+| ~~**v1.12.0**~~ | `(curry aviation-weather)`, `(curry posix)` (SRFI-170 + SRFI-112), `(curry yaml)`, `(curry codesets)` (SRFI-238); SRFI-69/90 hash tables, SRFI-174 POSIX timespecs, SRFI-19 time | ✓ shipped |
+| ~~**v1.13.0**~~ | `(surfage sN name)` renamed to `(srfi sN name)`; 14 new SRFI compatibility libraries; CodeQL security fixes; `redis-connect-tls` hostname-verification fix | ✓ shipped |
+| ~~**v1.14.0–1.14.2**~~ | `(curry babylonian-astronomy)`; cuneiform notation covers the whole numeric tower; flonum print-precision fix; genuine TCO for `call-with-values`/`receive`/`let-values`; SRFI-54/111/195/209/210/252/261/263 | ✓ shipped |
+| ~~**v1.15.0**~~ | `(curry posix)` argv-based process execution (`process-run`/`process-start`, no shell — not tracked against any phase above); `system`'s exit-code decoding fixed; `(curry toml)`; every pure-Scheme `(curry X)` module converted to `define-library` (real export enforcement, not just SRFI libraries) | ✓ shipped |
 
 Remaining phases, in the dependency order from the top of this document —
 not pinned to specific version numbers, since the original numbering
@@ -909,10 +959,13 @@ broke after v1.4.0 and re-pinning invites the same drift:
 |---|---|---|---|
 | 5 | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
 | 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload — GC portion already shipped, see above; heavier rewrite in progress on `gc-rewrite` branch | 5–7 mo |
-| 7 (remainder) | Types + Sets | Slim CLOS, topology — pluggable-foundations portion already shipped differently, see above | 4–5 mo |
+| 7 (remainder) | Types + Sets | Topology — Slim CLOS Layer 1 and pluggable-foundations portions already shipped, see above | 4–5 mo |
 | 8 (remainder) | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower — debugger portion already shipped, see above | 3–4 mo |
-| 9 | Testing + I/O | Property-based testing, HDF5/NetCDF/FITS | 2–3 mo |
 | 10 | Ecosystem | Package manager (deferred by decision); notebook (Qt6, mathematical rendering); units system; `explain-simplify`; LLM-integrated notebook; exploration sharing | 7–9 mo |
+
+Phase 9 (testing + scientific I/O) is done — see above — save for the
+native `.curry-tensor` fast-serialisation format, which was never built
+and isn't currently planned.
 
 **Breaking-change note:** the *next* moving/precise GC milestone (on the
 `gc-rewrite` branch, not the v1.5.0 generational GC already shipped) is
