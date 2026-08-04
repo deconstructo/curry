@@ -53,6 +53,19 @@ curry_val curry_make_pair(curry_val car, curry_val cdr) {
     return scm_cons(car, cdr);
 }
 
+/* Mirrors src/builtins.c's prim_values: argc==1 returns the value itself
+ * (a single value isn't wrapped), so callers into e.g. call-with-values
+ * see the plain value, matching R7RS's own `values` semantics. */
+curry_val curry_make_values(int argc, curry_val *argv) {
+    if (argc == 1) return argv[0];
+    Values *mv = (Values *)gc_alloc(sizeof(Values) + (size_t)argc * sizeof(val_t));
+    mv->hdr.type = T_VALUES;
+    mv->hdr.flags = 0;
+    mv->count = (uint32_t)argc;
+    for (int i = 0; i < argc; i++) mv->vals[i] = argv[i];
+    return vptr(mv);
+}
+
 /* ---- Value predicates ---- */
 
 bool curry_is_fixnum(curry_val v)    { return vis_fixnum(v); }

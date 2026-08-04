@@ -20,6 +20,10 @@
 
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
+/* macOS hides posix_spawn_file_actions_addchdir_np (used below for
+ * process-start's #:cwd) behind _DARWIN_C_SOURCE once _POSIX_C_SOURCE is
+ * defined; harmless no-op on other platforms. */
+#define _DARWIN_C_SOURCE
 #include <curry.h>
 #include "version.h"
 #include <stdio.h>
@@ -36,6 +40,27 @@
 #include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <sys/select.h>
+
+/* posix_spawn_file_actions_addchdir_np: a GNU/BSD extension (glibc >= 2.29,
+ * macOS >= 10.15) that POSIX.1-2024 has since standardized without the _np
+ * suffix on very new platforms (macOS deprecates the _np name starting with
+ * macOS 26). The _np name is used unconditionally below since it covers the
+ * overwhelming majority of real-world deployments; platforms lacking it
+ * entirely (e.g. musl) fail #:cwd at runtime with a clear error rather than
+ * at compile time, so process-start/process-run without #:cwd still work
+ * everywhere. */
+#if defined(__APPLE__)
+#define HAVE_POSIX_SPAWN_CHDIR 1
+#elif defined(__GLIBC__)
+#include <features.h>
+#if defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 29)
+#define HAVE_POSIX_SPAWN_CHDIR 1
+#endif
+#endif
 
 /* ---- pointer packing for opaque handles (DIR*), same idiom as rpi.c/sync.c --- */
 
@@ -390,6 +415,468 @@ static curry_val fn_nice(int ac, curry_val *av, void *ud) {
     return curry_make_fixnum(want);
 }
 
+/* ---- process execution: argv-based spawn, no shell ------------------------
+ *
+ * (system cmd-string) in src/builtins.c is the only other way to run a
+ * subprocess -- always through /bin/sh -c, so any call site that builds a
+ * command from a variable is a shell-injection site by construction. The
+ * procedures below never touch a shell: program and each argument are
+ * passed straight through to posix_spawnp/execvp-style argv, so shell
+ * metacharacters in an argument are just literal bytes in that argument.
+ *
+ * posix_spawn (not fork()+exec()) is used deliberately: curry runs actor
+ * threads (src/actors.c), and fork() in a multithreaded process is fragile
+ * -- only the calling thread survives into the child, and any lock held by
+ * another thread at fork time (Boehm GC's allocator lock, malloc's arena
+ * lock, ...) can be left permanently held in the child, deadlocking it the
+ * moment it touches the allocator before exec. posix_spawn is specifically
+ * designed to avoid that hazard: the child-side setup (dup2, chdir, close)
+ * is described declaratively via posix_spawn_file_actions_t and applied by
+ * the implementation, not by arbitrary C code running in a forked child.
+ */
+
+/* Scan av[from..ac-1] for a "#:name" keyword symbol followed by its value,
+ * in any order relative to other keywords (same #:kw val ... convention
+ * used throughout the Scheme-level modules -- ffi.scm's #:from/#:c-name,
+ * oop.scm's #:init/#:accessor, fits.scm's #:header). Returns #f if the
+ * keyword isn't present; #:cwd/#:env/#:timeout values are never
+ * legitimately #f themselves, so #f is an unambiguous "absent" sentinel. */
+static curry_val find_kwarg(int ac, curry_val *av, int from, const char *kw) {
+    for (int i = from; i + 1 < ac; i++) {
+        if (curry_is_symbol(av[i]) && strcmp(curry_symbol(av[i]), kw) == 0)
+            return av[i + 1];
+    }
+    return curry_make_bool(false);
+}
+
+static double mono_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Decode a wait-status the same way src/builtins.c's (system ...) does:
+ * a normal exit yields its exit code (0-255); a signal-killed child yields
+ * the negative signal number, so callers only need to learn one rule. */
+static int decode_wait_status(int status) {
+    if (WIFEXITED(status))   return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return -WTERMSIG(status);
+    return status;
+}
+
+typedef struct {
+    pid_t pid;
+    int stdin_fd;   /* parent's write end; child reads its stdin from this */
+    int stdout_fd;  /* parent's read end */
+    int stderr_fd;  /* parent's read end */
+} spawned_process_t;
+
+/* Spawns program with arg_list as argv[1..]; argv[0] is program itself
+ * (conventional -- matches what a shell or execvp caller would set).
+ * cwd: a string to posix_spawn_file_actions_addchdir_np into, or #f.
+ * env: an alist of (string . string) pairs to spawn with as envp, or #f
+ *      to inherit curry's own environment. PATH search (posix_spawnp) always
+ *      uses curry's own PATH regardless of a custom env, per POSIX: the
+ *      *p variants search using the calling process's environment, not the
+ *      new child's envp -- so a custom #:env never disables PATH search. */
+static void do_spawn(const char *fn, const char *program, curry_val arg_list,
+                      curry_val cwd, curry_val env, spawned_process_t *out) {
+    if (!curry_is_pair(arg_list) && !curry_is_nil(arg_list))
+        curry_error("posix: %s: argument list must be a list of strings", fn);
+    if (curry_is_true(cwd) && !curry_is_string(cwd))
+        curry_error("posix: %s: #:cwd must be a string", fn);
+#ifndef HAVE_POSIX_SPAWN_CHDIR
+    if (curry_is_true(cwd))
+        curry_error("posix: %s: #:cwd is not supported on this platform "
+                    "(needs glibc >= 2.29 or macOS >= 10.15)", fn);
+#endif
+
+    int in_pipe[2] = {-1, -1}, out_pipe[2] = {-1, -1}, err_pipe[2] = {-1, -1};
+    char **argv = NULL;
+    char **envp = NULL;
+    int envp_owned = 0, envp_count = 0;
+    posix_spawn_file_actions_t facts;
+    int facts_inited = 0;
+
+    if (pipe(in_pipe) < 0) { posix_error(fn); }
+    if (pipe(out_pipe) < 0) goto fail_errno;
+    if (pipe(err_pipe) < 0) goto fail_errno;
+
+    int argc = 1;
+    for (curry_val p = arg_list; curry_is_pair(p); p = curry_cdr(p)) argc++;
+    argv = (char **)malloc((size_t)(argc + 1) * sizeof(char *));
+    if (!argv) goto fail_oom;
+    argv[0] = (char *)program;
+    {
+        int i = 1;
+        for (curry_val p = arg_list; curry_is_pair(p); p = curry_cdr(p), i++) {
+            curry_val elt = curry_car(p);
+            if (!curry_is_string(elt)) {
+                free(argv); argv = NULL;
+                close(in_pipe[0]); close(in_pipe[1]);
+                close(out_pipe[0]); close(out_pipe[1]);
+                close(err_pipe[0]); close(err_pipe[1]);
+                curry_error("posix: %s: argument list must contain only strings", fn);
+            }
+            argv[i] = (char *)curry_string(elt);
+        }
+        argv[argc] = NULL;
+    }
+
+    extern char **environ;
+    if (curry_is_true(env)) {
+        if (!curry_is_pair(env) && !curry_is_nil(env))
+            curry_error("posix: %s: #:env must be an alist of (string . string) pairs", fn);
+        int n = 0;
+        for (curry_val p = env; curry_is_pair(p); p = curry_cdr(p)) n++;
+        envp = (char **)malloc((size_t)(n + 1) * sizeof(char *));
+        if (!envp) goto fail_oom;
+        int idx = 0;
+        for (curry_val p = env; curry_is_pair(p); p = curry_cdr(p), idx++) {
+            curry_val kv = curry_car(p);
+            if (!curry_is_pair(kv) || !curry_is_string(curry_car(kv)) ||
+                !curry_is_string(curry_cdr(kv))) {
+                for (int j = 0; j < idx; j++) free(envp[j]);
+                free(envp); envp = NULL;
+                free(argv); argv = NULL;
+                close(in_pipe[0]); close(in_pipe[1]);
+                close(out_pipe[0]); close(out_pipe[1]);
+                close(err_pipe[0]); close(err_pipe[1]);
+                curry_error("posix: %s: #:env must be an alist of (string . string) pairs", fn);
+            }
+            const char *k = curry_string(curry_car(kv));
+            const char *v = curry_string(curry_cdr(kv));
+            size_t len = strlen(k) + strlen(v) + 2;
+            char *entry = (char *)malloc(len);
+            if (!entry) {
+                for (int j = 0; j < idx; j++) free(envp[j]);
+                free(envp); envp = NULL;
+                goto fail_oom;
+            }
+            snprintf(entry, len, "%s=%s", k, v);
+            envp[idx] = entry;
+        }
+        envp[idx] = NULL;
+        envp_owned = 1;
+        envp_count = idx;
+    } else {
+        envp = environ;
+    }
+
+    posix_spawn_file_actions_init(&facts);
+    facts_inited = 1;
+    posix_spawn_file_actions_adddup2(&facts, in_pipe[0], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&facts, out_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&facts, err_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&facts, in_pipe[0]);
+    posix_spawn_file_actions_addclose(&facts, in_pipe[1]);
+    posix_spawn_file_actions_addclose(&facts, out_pipe[0]);
+    posix_spawn_file_actions_addclose(&facts, out_pipe[1]);
+    posix_spawn_file_actions_addclose(&facts, err_pipe[0]);
+    posix_spawn_file_actions_addclose(&facts, err_pipe[1]);
+#ifdef HAVE_POSIX_SPAWN_CHDIR
+    if (curry_is_true(cwd))
+        posix_spawn_file_actions_addchdir_np(&facts, curry_string(cwd));
+#endif
+
+    pid_t pid;
+    int rc = posix_spawnp(&pid, program, &facts, NULL, argv, envp);
+
+    posix_spawn_file_actions_destroy(&facts);
+    free(argv);
+    if (envp_owned) {
+        for (int j = 0; j < envp_count; j++) free(envp[j]);
+        free(envp);
+    }
+    /* Child-side fd ends are no longer needed in the parent regardless of
+     * spawn success/failure -- posix_spawn dup2'd them into the child (or
+     * failed before doing so, in which case they're simply unused here). */
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+
+    if (rc != 0) {
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(err_pipe[0]);
+        /* posix_spawn returns its error code directly rather than setting
+         * errno (unlike every other syscall this file wraps with
+         * posix_error()), so errno must be set explicitly first. */
+        errno = rc;
+        posix_error(fn);
+    }
+
+    out->pid = pid;
+    out->stdin_fd = in_pipe[1];
+    out->stdout_fd = out_pipe[0];
+    out->stderr_fd = err_pipe[0];
+    return;
+
+fail_oom:
+    if (argv) free(argv);
+    if (facts_inited) posix_spawn_file_actions_destroy(&facts);
+    close(in_pipe[0]); close(in_pipe[1]);
+    close(out_pipe[0]); close(out_pipe[1]);
+    close(err_pipe[0]); close(err_pipe[1]);
+    curry_error("posix: %s: out of memory", fn);
+fail_errno:
+    if (in_pipe[0] >= 0) close(in_pipe[0]);
+    if (in_pipe[1] >= 0) close(in_pipe[1]);
+    if (out_pipe[0] >= 0) close(out_pipe[0]);
+    if (out_pipe[1] >= 0) close(out_pipe[1]);
+    if (err_pipe[0] >= 0) close(err_pipe[0]);
+    if (err_pipe[1] >= 0) close(err_pipe[1]);
+    posix_error(fn);
+}
+
+/* ---- process handle: (process . #(pid stdin stdout stderr reaped? code)) - */
+
+enum { PH_PID = 0, PH_STDIN, PH_STDOUT, PH_STDERR, PH_REAPED, PH_EXITCODE, PH_LEN };
+
+static int is_process_handle(curry_val v) {
+    return has_tag(v, "process") && curry_is_vector(curry_cdr(v)) &&
+           curry_vector_length(curry_cdr(v)) == PH_LEN;
+}
+
+static curry_val checked_process(curry_val v, const char *fn) {
+    if (!is_process_handle(v)) curry_error("posix: %s: not a process handle", fn);
+    return curry_cdr(v);
+}
+
+/* Non-blocking reap attempt; caches the decoded exit code in the handle so
+ * a later call never re-invokes waitpid on an already-reaped pid (which
+ * would fail ECHILD -- the one real footgun in this design). Returns true
+ * once the child has been reaped, whether just now or on a prior call. */
+static bool reap_nonblocking(curry_val vec) {
+    if (curry_is_true(curry_vector_ref(vec, PH_REAPED))) return true;
+    pid_t pid = (pid_t)curry_fixnum(curry_vector_ref(vec, PH_PID));
+    int status;
+    pid_t r = waitpid(pid, &status, WNOHANG);
+    if (r == 0) return false;   /* still running */
+    if (r < 0) return false;    /* reaped out-of-band; nothing useful to report */
+    curry_vector_set(vec, PH_REAPED, curry_make_bool(true));
+    curry_vector_set(vec, PH_EXITCODE, curry_make_fixnum(decode_wait_status(status)));
+    return true;
+}
+
+static curry_val fn_process_start(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    const char *program = req_string(av[0], "process-start");
+    curry_val cwd = find_kwarg(ac, av, 2, "#:cwd");
+    curry_val env = find_kwarg(ac, av, 2, "#:env");
+    spawned_process_t sp;
+    do_spawn("process-start", program, av[1], cwd, env, &sp);
+
+    curry_val v = curry_make_vector(PH_LEN, curry_void());
+    curry_vector_set(v, PH_PID,      curry_make_fixnum((intptr_t)sp.pid));
+    curry_vector_set(v, PH_STDIN,    curry_make_port_from_fd(sp.stdin_fd,  true,  false));
+    curry_vector_set(v, PH_STDOUT,   curry_make_port_from_fd(sp.stdout_fd, false, false));
+    curry_vector_set(v, PH_STDERR,   curry_make_port_from_fd(sp.stderr_fd, false, false));
+    curry_vector_set(v, PH_REAPED,   curry_make_bool(false));
+    curry_vector_set(v, PH_EXITCODE, curry_make_bool(false));
+    return curry_make_pair(curry_make_symbol("process"), v);
+}
+
+static curry_val fn_process_handle_p(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_make_bool(is_process_handle(av[0]));
+}
+
+static curry_val fn_process_pid(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_vector_ref(checked_process(av[0], "process-pid"), PH_PID);
+}
+static curry_val fn_process_stdin(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_vector_ref(checked_process(av[0], "process-stdin"), PH_STDIN);
+}
+static curry_val fn_process_stdout(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_vector_ref(checked_process(av[0], "process-stdout"), PH_STDOUT);
+}
+static curry_val fn_process_stderr(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    return curry_vector_ref(checked_process(av[0], "process-stderr"), PH_STDERR);
+}
+
+static curry_val fn_process_wait(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    curry_val vec = checked_process(av[0], "process-wait");
+    if (ac < 2 || !curry_is_true(av[1])) {
+        if (!curry_is_true(curry_vector_ref(vec, PH_REAPED))) {
+            pid_t pid = (pid_t)curry_fixnum(curry_vector_ref(vec, PH_PID));
+            int status;
+            pid_t r = waitpid(pid, &status, 0);
+            if (r < 0) posix_error("process-wait");
+            curry_vector_set(vec, PH_REAPED, curry_make_bool(true));
+            curry_vector_set(vec, PH_EXITCODE, curry_make_fixnum(decode_wait_status(status)));
+        }
+        return curry_vector_ref(vec, PH_EXITCODE);
+    }
+    double timeout = req_time_seconds(av[1], "process-wait");
+    double deadline = mono_now() + timeout;
+    for (;;) {
+        if (reap_nonblocking(vec)) return curry_vector_ref(vec, PH_EXITCODE);
+        if (mono_now() >= deadline) return curry_make_bool(false);
+        struct timespec ts = {0, 10L * 1000L * 1000L};  /* 10ms */
+        nanosleep(&ts, NULL);
+    }
+}
+
+static curry_val fn_process_alive_p(int ac, curry_val *av, void *ud) {
+    (void)ac; (void)ud;
+    curry_val vec = checked_process(av[0], "process-alive?");
+    if (curry_is_true(curry_vector_ref(vec, PH_REAPED))) return curry_make_bool(false);
+    return curry_make_bool(!reap_nonblocking(vec));
+}
+
+static int signal_from_val(curry_val v, const char *fn) {
+    if (curry_is_fixnum(v)) return (int)curry_fixnum(v);
+    if (curry_is_symbol(v)) {
+        const char *s = curry_symbol(v);
+        if (strcmp(s, "sigterm") == 0) return SIGTERM;
+        if (strcmp(s, "sigkill") == 0) return SIGKILL;
+        if (strcmp(s, "sigint")  == 0) return SIGINT;
+        if (strcmp(s, "sighup")  == 0) return SIGHUP;
+        curry_error("posix: %s: unknown signal name %s (known: sigterm, sigkill, sigint, sighup)", fn, s);
+    }
+    curry_error("posix: %s: signal must be an integer or a symbol", fn);
+    return 0; /* unreachable */
+}
+
+static curry_val fn_process_kill(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    pid_t pid;
+    if (is_process_handle(av[0]))
+        pid = (pid_t)curry_fixnum(curry_vector_ref(curry_cdr(av[0]), PH_PID));
+    else if (curry_is_fixnum(av[0]))
+        pid = (pid_t)curry_fixnum(av[0]);
+    else
+        curry_error("posix: process-kill: expected a process handle or a pid");
+    int sig = ac >= 2 ? signal_from_val(av[1], "process-kill") : SIGTERM;
+    if (kill(pid, sig) < 0) posix_error("process-kill");
+    return curry_void();
+}
+
+/* ---- process-run: spawn + capture, the common case ------------------------ */
+
+typedef struct { char *data; size_t len, cap; } growbuf_t;
+
+static void growbuf_append(growbuf_t *b, const char *chunk, size_t n) {
+    if (b->len + n > b->cap) {
+        size_t newcap = b->cap ? b->cap * 2 : 4096;
+        while (newcap < b->len + n) newcap *= 2;
+        char *p = (char *)realloc(b->data, newcap);
+        if (!p) curry_error("posix: process-run: out of memory");
+        b->data = p;
+        b->cap = newcap;
+    }
+    memcpy(b->data + b->len, chunk, n);
+    b->len += n;
+}
+
+static curry_val fn_process_run(int ac, curry_val *av, void *ud) {
+    (void)ud;
+    const char *program = req_string(av[0], "process-run");
+    curry_val cwd = find_kwarg(ac, av, 2, "#:cwd");
+    curry_val env = find_kwarg(ac, av, 2, "#:env");
+    curry_val timeout_v = find_kwarg(ac, av, 2, "#:timeout");
+    bool has_timeout = curry_is_true(timeout_v);
+    double timeout = has_timeout ? req_time_seconds(timeout_v, "process-run") : 0.0;
+
+    spawned_process_t sp;
+    do_spawn("process-run", program, av[1], cwd, env, &sp);
+
+    /* process-run never writes to the child's stdin -- close it immediately
+     * so a child that reads its stdin to EOF (e.g. `cat` with no args)
+     * doesn't block forever waiting for input that will never come. */
+    close(sp.stdin_fd);
+
+    growbuf_t out_buf = {0}, err_buf = {0};
+    bool out_eof = false, err_eof = false, timed_out = false;
+    double deadline = has_timeout ? mono_now() + timeout : 0.0;
+
+    /* Drain stdout and stderr concurrently via select() -- reading one
+     * stream to EOF before touching the other risks the classic pipe-full
+     * deadlock: the child blocks writing to whichever stream we haven't
+     * drained yet once its pipe buffer fills. */
+    while (!out_eof || !err_eof) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        int maxfd = -1;
+        if (!out_eof) { FD_SET(sp.stdout_fd, &rfds); if (sp.stdout_fd > maxfd) maxfd = sp.stdout_fd; }
+        if (!err_eof) { FD_SET(sp.stderr_fd, &rfds); if (sp.stderr_fd > maxfd) maxfd = sp.stderr_fd; }
+
+        struct timeval tv, *tvp = NULL;
+        if (has_timeout) {
+            double remaining = deadline - mono_now();
+            if (remaining <= 0.0) { timed_out = true; break; }
+            tv.tv_sec = (time_t)remaining;
+            tv.tv_usec = (suseconds_t)((remaining - (double)tv.tv_sec) * 1e6);
+            tvp = &tv;
+        }
+
+        int r = select(maxfd + 1, &rfds, NULL, NULL, tvp);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            close(sp.stdout_fd); close(sp.stderr_fd);
+            free(out_buf.data); free(err_buf.data);
+            posix_error("process-run");
+        }
+        if (r == 0) { timed_out = true; break; }  /* only reachable with a timeout */
+
+        char chunk[65536];
+        if (!out_eof && FD_ISSET(sp.stdout_fd, &rfds)) {
+            ssize_t n = read(sp.stdout_fd, chunk, sizeof(chunk));
+            if (n < 0) {
+                if (errno != EINTR) {
+                    close(sp.stdout_fd); close(sp.stderr_fd);
+                    free(out_buf.data); free(err_buf.data);
+                    posix_error("process-run");
+                }
+            } else if (n == 0) out_eof = true;
+            else growbuf_append(&out_buf, chunk, (size_t)n);
+        }
+        if (!err_eof && FD_ISSET(sp.stderr_fd, &rfds)) {
+            ssize_t n = read(sp.stderr_fd, chunk, sizeof(chunk));
+            if (n < 0) {
+                if (errno != EINTR) {
+                    close(sp.stdout_fd); close(sp.stderr_fd);
+                    free(out_buf.data); free(err_buf.data);
+                    posix_error("process-run");
+                }
+            } else if (n == 0) err_eof = true;
+            else growbuf_append(&err_buf, chunk, (size_t)n);
+        }
+    }
+    close(sp.stdout_fd);
+    close(sp.stderr_fd);
+
+    if (timed_out) {
+        kill(sp.pid, SIGKILL);
+        int status;
+        waitpid(sp.pid, &status, 0);  /* reap now -- no zombie left behind */
+        free(out_buf.data);
+        free(err_buf.data);
+        curry_error("posix: process-run: timed out after %g seconds", timeout);
+    }
+
+    int status;
+    if (waitpid(sp.pid, &status, 0) < 0) {
+        free(out_buf.data); free(err_buf.data);
+        posix_error("process-run");
+    }
+    int code = decode_wait_status(status);
+
+    curry_val out_str = curry_make_string_n(out_buf.data ? out_buf.data : "", (uint32_t)out_buf.len);
+    curry_val err_str = curry_make_string_n(err_buf.data ? err_buf.data : "", (uint32_t)err_buf.len);
+    free(out_buf.data);
+    free(err_buf.data);
+
+    curry_val results[3] = { curry_make_fixnum(code), out_str, err_str };
+    return curry_make_values(3, results);
+}
+
 static curry_val fn_user_uid(int ac, curry_val *av, void *ud) {
     (void)ac; (void)av; (void)ud;
     return curry_make_fixnum((intptr_t)getuid());
@@ -648,6 +1135,17 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "set-current-directory!",fn_set_current_directory,1,1, NULL);
     curry_define_fn(vm, "pid",                   fn_pid,                 0, 0, NULL);
     curry_define_fn(vm, "nice",                  fn_nice,                0, 1, NULL);
+
+    curry_define_fn(vm, "process-start",         fn_process_start,       2, 6, NULL);
+    curry_define_fn(vm, "process-handle?",       fn_process_handle_p,    1, 1, NULL);
+    curry_define_fn(vm, "process-pid",           fn_process_pid,         1, 1, NULL);
+    curry_define_fn(vm, "process-stdin",         fn_process_stdin,       1, 1, NULL);
+    curry_define_fn(vm, "process-stdout",        fn_process_stdout,      1, 1, NULL);
+    curry_define_fn(vm, "process-stderr",        fn_process_stderr,      1, 1, NULL);
+    curry_define_fn(vm, "process-wait",          fn_process_wait,        1, 2, NULL);
+    curry_define_fn(vm, "process-alive?",        fn_process_alive_p,     1, 1, NULL);
+    curry_define_fn(vm, "process-kill",          fn_process_kill,        1, 2, NULL);
+    curry_define_fn(vm, "process-run",           fn_process_run,         2, 8, NULL);
 
     curry_define_fn(vm, "user-uid",              fn_user_uid,            0, 0, NULL);
     curry_define_fn(vm, "user-gid",              fn_user_gid,            0, 0, NULL);

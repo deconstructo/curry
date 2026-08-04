@@ -14,7 +14,7 @@ Portable re-exports under each SRFI's own naming convention are available as `(s
 
 ## Scope
 
-Implemented: file info (`stat`/`lstat`) and type predicates, directory create/list/remove, symlinks/hardlinks/rename, file mode/owner/times/truncation, process state (cwd, umask, pid, niceness, uid/gid), user/group database lookups, wall-clock and monotonic time, environment-variable mutation, a `terminal?` predicate, and (SRFI-112) implementation/OS/machine identity queries.
+Implemented: file info (`stat`/`lstat`) and type predicates, directory create/list/remove, symlinks/hardlinks/rename, file mode/owner/times/truncation, process state (cwd, umask, pid, niceness, uid/gid), process execution (argv-based spawn via `posix_spawn` — no shell, streaming or captured I/O, per-call cwd/env, kill/timeout), user/group database lookups, wall-clock and monotonic time, environment-variable mutation, a `terminal?` predicate, and (SRFI-112) implementation/OS/machine identity queries.
 
 Deliberately **not** implemented in this first pass:
 
@@ -111,6 +111,63 @@ Lower-level streaming alternative to `directory-files` for large directories —
 - `(nice increment)` → adjust niceness by `increment` and return the new value (via `getpriority`+`setpriority`, avoiding the `errno`-ambiguity in POSIX `nice(2)`'s return value).
 - `(user-uid)`, `(user-gid)`, `(user-effective-uid)`, `(user-effective-gid)` → exact integers.
 - `(user-supplementary-gids)` → *list of exact integers* — `getgroups(2)`.
+
+## Process execution
+
+`(system cmd-string)` is curry's other subprocess primitive — a core builtin, always available without `(import (curry posix))`. It runs `cmd-string` through `/bin/sh -c` and returns the decoded exit code: 0–255 on a normal exit, or the *negative* signal number if the shell (or the command it ran) was killed by a signal, e.g. `-15` for `SIGTERM`. Because it goes through a shell, any part of `cmd-string` built from outside the program — a filename, a URL, anything not a fixed literal — is a shell-injection risk. Prefer `process-run`/`process-start` below whenever that's the case; they never invoke a shell.
+
+```scheme
+(system "echo hi")        ; => 0, prints "hi"
+(system "exit 3")         ; => 3
+(system "kill -TERM $$")  ; => -15
+```
+
+`process-run` and `process-start` take the program and its arguments as separate strings — never concatenated into a shell command line — so shell metacharacters in an argument (`;`, `` ` ``, `$(...)`, etc.) are just literal bytes in that argument, not something the shell ever sees.
+
+### `(process-run program arg-list [#:cwd path] [#:env alist] [#:timeout seconds])`
+
+The common case: run `program` with `arg-list` (a list of strings), wait for it to finish, and get everything back at once.
+
+```scheme
+(import (curry posix))
+(call-with-values
+  (lambda () (process-run "curl" (list "-s" "https://example.com")))
+  (lambda (exit-code stdout stderr)
+    (display exit-code) (newline)
+    (display (string-length stdout)) (newline)))
+```
+
+- Returns three values: the decoded exit code (same convention as `system`), the child's stdout, and its stderr — both captured as strings.
+- `#:cwd` — run the child in this directory instead of curry's own current directory. Requires `posix_spawn_file_actions_addchdir_np` (glibc ≥ 2.29 or macOS ≥ 10.15); raises on platforms without it (e.g. musl) if given.
+- `#:env` — an alist of `(string . string)` pairs; the child's *entire* environment becomes exactly this, replacing (not merging with) curry's own. Omit to inherit curry's environment unchanged. Either way, the executable itself is still found by searching curry's own `PATH` — a custom `#:env` never disables that search, even if it doesn't include its own `PATH` entry.
+- `#:timeout` — seconds (exact or inexact). If the child hasn't exited by the deadline, it's sent `SIGKILL`, reaped, and `process-run` raises `posix: process-run: timed out after Ns`.
+- The child's stdin is closed immediately (before anything else runs) — `process-run` never writes to it, so a program that reads its own stdin to EOF (`cat` with no arguments, for instance) doesn't hang forever waiting for input that will never arrive.
+- A nonexistent executable, a bad `#:cwd`, or any other spawn failure raises an ordinary catchable condition: `posix: process-run: No such file or directory`.
+
+### `(process-start program arg-list [#:cwd path] [#:env alist])` → *process handle*
+
+The streaming form, for when you want to talk to the child incrementally instead of waiting for it to finish — same `#:cwd`/`#:env` semantics as `process-run`.
+
+```scheme
+(define h (process-start "cat" '()))
+(write-string "hello\n" (process-stdin h))
+(close-port (process-stdin h))      ; signal EOF to the child
+(display (read-line (process-stdout h)))  ; => "hello"
+(process-wait h)                    ; => 0
+```
+
+- `(process-handle? x)` → boolean.
+- `(process-pid h)` → exact integer.
+- `(process-stdin h)` → output port, the child's stdin.
+- `(process-stdout h)`, `(process-stderr h)` → input ports, the child's stdout/stderr. All three are ordinary curry ports — `read-line`, `read-char`, `write-string`, `close-port`, etc. all work on them directly.
+- `(process-wait h)` → blocks until the child exits; returns the decoded exit code (same convention as `system`).
+- `(process-wait h timeout-seconds)` → waits up to `timeout-seconds`; returns the decoded exit code if the child exited in time, or `#f` if it's still running (without reaping it — call `process-kill` then `process-wait` again to force it down and reap).
+- `(process-alive? h)` → `#t`/`#f`, a non-blocking check.
+- `(process-kill h-or-pid [signal])` → send `signal` (default `SIGTERM`) to the child. Accepts either a process handle or a raw pid, and either an integer signal number or one of the symbols `'sigterm`/`'sigkill`/`'sigint`/`'sighup`.
+
+**Zombie processes.** Curry's GC doesn't run a finalizer on a process handle, so a spawned child that's never passed to `process-wait`/`process-alive?` (which reap it) stays a zombie in the process table until curry itself exits — the same limitation `open-directory` has with `close-directory`. Always `process-wait` (or `process-kill` + `process-wait`) a handle you're done with.
+
+**Security note.** `process-run`/`process-start` never invoke a shell — the program and its arguments are passed straight through to the OS's own argv-based process creation, so there's no shell-metacharacter injection surface at all, unlike `(system ...)`. Prefer them over `system` for anything built from external input.
 
 ## User/group database
 

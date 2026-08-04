@@ -158,6 +158,77 @@
        (guard (e (#t 'caught)) (create-directory "/no/such/parent/curry-posix-test"))
        'caught)
 
+;;; Process execution
+
+(check "system decodes a normal exit code, not a raw wait-status"
+       (system "exit 3") 3)
+(check "system exit 0" (system "exit 0") 0)
+(check "system decodes a signal-killed command as a negative signal number"
+       (system "kill -TERM $$") -15)
+
+(call-with-values
+  (lambda () (process-run "/bin/echo" (list "hello" "world")))
+  (lambda (code out err)
+    (check "process-run: echo exit code" code 0)
+    (check "process-run: echo stdout" out "hello world\n")
+    (check "process-run: echo stderr" err "")))
+
+(call-with-values
+  (lambda () (process-run "/bin/sh" (list "-c" "echo to-stderr 1>&2; exit 7")))
+  (lambda (code out err)
+    (check "process-run: nonzero exit code" code 7)
+    (check "process-run: stdout empty" out "")
+    (check "process-run: stderr captured" err "to-stderr\n")))
+
+(call-with-values
+  (lambda () (process-run "/bin/pwd" '() #:cwd "/tmp"))
+  (lambda (code out err)
+    (check "process-run: #:cwd exit code" code 0)
+    ;; /tmp is a symlink to /private/tmp on macOS; just check the leaf.
+    (check "process-run: #:cwd took effect" (exact? (string-contains out "tmp")) #t)))
+
+(call-with-values
+  (lambda () (process-run "/usr/bin/env" '() #:env (list (cons "CURRY_TEST_VAR" "hello"))))
+  (lambda (code out err)
+    (check "process-run: #:env exit code" code 0)
+    (check "process-run: #:env replaces environment" out "CURRY_TEST_VAR=hello\n")))
+
+(check "process-run: nonexistent executable raises a catchable error"
+       (guard (e (#t 'caught)) (process-run "/no/such/curry-test-binary" '()))
+       'caught)
+
+(check "process-run: #:timeout raises when the child overruns"
+       (guard (e (#t 'caught)) (process-run "/bin/sleep" (list "5") #:timeout 0.2))
+       'caught)
+
+(let ((h (process-start "/bin/cat" '())))
+  (check "process-start: returns a process handle" (process-handle? h) #t)
+  (check "process-start: pid is a positive fixnum" (> (process-pid h) 0) #t)
+  (write-string "roundtrip\n" (process-stdin h))
+  (close-port (process-stdin h))
+  (check "process-start: stdout streams back what was written"
+         (read-line (process-stdout h)) "roundtrip")
+  (check "process-start: wait reaps a normal exit" (process-wait h) 0))
+
+(let ((h (process-start "/bin/sleep" (list "5"))))
+  (check "process-start: alive? true for a running child" (process-alive? h) #t)
+  (process-kill h 'sigterm)
+  (check "process-start: wait decodes a signal kill as -signal"
+         (process-wait h) -15)
+  (check "process-start: alive? false after reaping" (process-alive? h) #f))
+
+(let ((h (process-start "/bin/sleep" (list "5"))))
+  (check "process-wait: timeout returns #f without reaping"
+         (process-wait h 0.2) #f)
+  (process-kill h 'sigkill)
+  (check "process-wait: blocking wait after kill decodes -9"
+         (process-wait h) -9))
+
+(let ((h (process-start "/bin/sleep" (list "5"))))
+  ;; process-kill accepts a raw pid, not just a handle.
+  (process-kill (process-pid h))
+  (check "process-kill: accepts a raw pid" (process-wait h) -15))
+
 ;;; terminal?
 
 (check "terminal? returns a boolean for fd 0" (boolean? (terminal? 0)) #t)

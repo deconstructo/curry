@@ -158,6 +158,13 @@ curry_val  curry_make_octonion(const double e[8]);
 /* ---- List building helpers ---- */
 curry_val  curry_list(int n, ...);  /* curry_list(3, a, b, c) -> (a b c) */
 
+/* Package argc values as an R7RS multiple-values object, the same
+ * representation (values a b c) produces -- a caller using
+ * call-with-values or a define-values/let-values binding form sees
+ * exactly argc separate values. argc==1 returns argv[0] itself, unwrapped
+ * (a single value is never boxed), matching (values x). */
+curry_val  curry_make_values(int argc, curry_val *argv);
+
 /* ---- Ports ----
  * Wrap an existing file descriptor (e.g. a socket) as a Curry port, usable
  * directly with read-line/write-string/read-char/etc. Takes ownership of

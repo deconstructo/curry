@@ -109,7 +109,7 @@ The index must be populated with `git-add!` before committing.
 
 ## Raw command
 
-Use `git-command` (not yet exposed) for operations not covered above. As an alternative, use `(system "git ...")` for quick scripting.
+Use `git-command` (not yet exposed) for operations not covered above. As an alternative, `(import (curry posix))` and use `(process-run "git" (list "..."))` — no shell involved, so any part of the argument list that comes from outside the program (a branch name, a file path) can't be interpreted as shell syntax. `(system "git ...")` also works for quick scripting with a fully-literal command string, but goes through `/bin/sh -c`; see [`module-posix.md`](module-posix.md#process-execution).
 
 ## Examples
 
