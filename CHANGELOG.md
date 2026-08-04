@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.15.0 - 2026-08-04
 
 **New — `(curry posix)`: argv-based process execution, no shell**
 
