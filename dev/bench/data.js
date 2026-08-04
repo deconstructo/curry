@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785836224263,
+  "lastUpdate": 1785836828087,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -2276,6 +2276,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.653,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "277cc49d627e5f987175abc0dc4409ebf5e2e662",
+          "message": "docs: sync roadmap.md from v1.8.0 to v1.15.0\n\nThe roadmap was last corrected against actual shipped state at\nv1.8.0 (2026-07-17); seven point releases and one minor version\nshipped since without it being updated.\n\nFlips three \"Where we are now\" table rows from unstarted to shipped:\nSlim CLOS Layer 1 (v1.11.0, `(curry oop)`), property-based testing\n(v1.14.2, SRFI-252 -- differently-shaped than the bespoke\ndefine-property/check-property DSL Phase 9 sketched), and scientific\nI/O (HDF5/NetCDF/FITS, shipped undated -- differently-shaped than the\n(curry io ...) namespace Phase 9 sketched, missing only the native\n.curry-tensor serialisation format). Phase 7 and Phase 9's own\nsections get the same done/shipped-differently/not-started split\nPhase 6 already used for its own partial completion. Adds the missing\nv1.8.3 through v1.15.0 rows to the summary timeline table and drops\nPhase 9 from the remaining-phases table since it's done. Fixes a\nstale docs/pkg-design.md path (actually docs/guides/pkg-design.md) in\nthree places.",
+          "timestamp": "2026-08-04T19:44:42+10:00",
+          "tree_id": "0ccac30e3b5d8c394762f8304dc74e1a6a7d01be",
+          "url": "https://github.com/deconstructo/curry/commit/277cc49d627e5f987175abc0dc4409ebf5e2e662"
+        },
+        "date": 1785836827331,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.427,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.689,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.93,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.944,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 189.865,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 359.656,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.459,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.022,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.15,
             "unit": "ms"
           }
         ]
