@@ -25,6 +25,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <math.h>
 #include <gmp.h>
@@ -1716,7 +1717,16 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
 
 static val_t prim_system(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "system: not a string");
-    return vfix(system(str_data(as_str(av[0]))));
+    int status = system(str_data(as_str(av[0])));
+    if (status == -1)
+        scm_raise(V_FALSE, "system: failed to run shell");
+    /* system(3) returns a wait-status, not a plain exit code — decode it
+     * rather than handing the raw packed value back. Negative return means
+     * the command was killed by signal N (mirrors Python's subprocess
+     * convention), so callers only need to learn one rule. */
+    if (WIFEXITED(status))   return vfix(WEXITSTATUS(status));
+    if (WIFSIGNALED(status)) return vfix(-WTERMSIG(status));
+    return vfix(status);
 }
 
 /* ---- Control ---- */
