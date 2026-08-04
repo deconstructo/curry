@@ -20,7 +20,12 @@
 ;;;   (hdf5-write f dataset-path tensor)
 ;;;   (hdf5-attributes f object-path)          -> alist (string or number values)
 
-(import (curry ffi))
+(define-library (curry hdf5)
+  (import (curry ffi))
+  (import (scheme base))
+  (export
+    hdf5-open hdf5-close hdf5-read hdf5-write hdf5-attributes)
+  (begin
 
 ;; ── Library discovery ────────────────────────────────────────────────────────
 ;;
@@ -370,3 +375,5 @@
         ((= expo #x7FF) (if (= mant 0) (if (= sign 1) (/ 1.0 0.0) (/ -1.0 0.0)) (/ 0.0 0.0)))
         ((= expo 0) (* sign (/ mant (expt 2 52)) (expt 2 -1022)))
         (else (* sign (+ 1 (/ mant (expt 2 52))) (expt 2 (- expo 1023))))))))
+
+  )) ;; end begin, define-library

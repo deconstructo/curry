@@ -23,7 +23,31 @@
 ;;; tag checks for why), so <fixnum>/<bignum>/<flonum> from the design doc
 ;;; collapse into <integer> (exact-integer?) and <inexact-real> here.
 
-(import (scheme base))
+(define-library (curry oop)
+  (import (scheme base))
+  (export
+    ;; Public API
+    make slot-ref slot-set!
+    class-of is-a? subclass? class-name class-slots class-precedence-list
+    define-class define-generic define-method call-next-method
+    ;; Helper procedures/macros referenced by the expansion of the macros
+    ;; above — curry's syntax-rules is not hygienic across define-library
+    ;; boundaries, so anything a macro's *expansion* (as opposed to a
+    ;; procedure's own body) refers to must be visible at the use site,
+    ;; which means exported here even though it's not meant to be called
+    ;; directly.
+    %build-class %parse-slot %parse-slot-opts %make-slot
+    %gen-accessors %gen-accessors-for-spec
+    %make-generic %ensure-generic! %add-method!
+    ;; Built-in type hierarchy — named directly in user code as
+    ;; define-method/is-a? specializers, so these need exporting too.
+    <object>
+    <number> <integer> <inexact-real>
+    <quaternion> <octonion> <multivector> <surreal> <symbolic> <quantum>
+    <tuple> <up-tuple> <down-tuple>
+    <boolean> <pair> <null> <vector> <bytevector> <string> <symbol> <char>
+    <procedure> <port> <actor> <promise> <hash-table> <set>)
+  (begin
 
 ;;; =========================================================================
 ;;; Small self-contained helpers (avoid depending on SRFI-1 availability)
@@ -253,9 +277,9 @@
 
 (define (slot-set! obj name val)
   (if (not (%instance? obj)) (error "slot-set!: not a class instance" obj))
-  ;; The module has no export list (all top-level bindings, including
-  ;; %unbound-slot, are visible to importers), so this guards the one
-  ;; direct misuse of that internal sentinel: storing it back into a slot
+  ;; %unbound-slot itself is not exported, but slot-set! is — so this
+  ;; guards the one direct misuse of that internal sentinel a caller could
+  ;; still trigger via some other eq? route: storing it back into a slot
   ;; would make slot-ref wrongly report the slot as still unbound.
   (if (eq? val %unbound-slot)
       (error "slot-set!: cannot store the internal unbound-slot marker"))
@@ -469,3 +493,5 @@
          (guard (e (#t (%make-generic 'name)))
            (%ensure-generic! 'name name)))
        (%add-method! name (list spec ...) (lambda (arg ...) body ...))))))
+
+  )) ;; end begin, define-library

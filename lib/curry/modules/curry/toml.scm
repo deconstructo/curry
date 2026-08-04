@@ -33,7 +33,13 @@
 ;;; - Full Unicode-escape validation in basic strings beyond `\uXXXX`/
 ;;;   `\UXXXXXXXX` decoding into the corresponding character.
 
-(import (scheme base))
+(define-library (curry toml)
+  (import (scheme base))
+  (export
+    toml-datetime toml-datetime? toml-datetime->string
+    toml-parse toml-load-file
+    toml-stringify toml-dump-file)
+  (begin
 
 ;;; =========================================================================
 ;;; The datetime sentinel
@@ -637,3 +643,5 @@
 
 (define (toml-dump-file value path)
   (call-with-output-file path (lambda (p) (write-string (toml-stringify value) p))))
+
+  )) ;; end begin, define-library

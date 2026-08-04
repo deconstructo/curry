@@ -32,7 +32,31 @@
 ;;;   (let ((words (list->multiset '(the cat sat on the mat the cat))))
 ;;;     (multiset-count words 'the))         => 3
 
-(import (curry logic))
+(define-library (curry sets)
+  (import (curry logic))
+  (import (scheme base))
+  (export
+    multiset? make-multiset multiset list->multiset alist->multiset multiset-copy
+    multiset-count multiset-member? multiset-size multiset-total multiset-empty?
+    multiset-elements multiset->alist multiset->list
+    multiset-set-count! multiset-add! multiset-add-n! multiset-remove! multiset-remove-all!
+    multiset-add multiset-remove
+    multiset=? multiset-subset?
+    multiset-union multiset-intersection multiset-sum multiset-difference multiset-scale
+    multiset-for-each multiset-map multiset-filter multiset-fold multiset-any? multiset-every?
+    logical-set? make-logical-set logical-set list->logical-set alist->logical-set
+    logical-set-copy logical-set-logic
+    logical-set-member logical-set-contains? logical-set-empty? logical-set-size
+    logical-set->alist logical-set-elements
+    logical-set-assert! logical-set-retract!
+    logical-set-union logical-set-intersection logical-set-complement
+    logical-set-difference logical-set-symmetric-difference
+    logical-set-for-each logical-set-map logical-set-filter logical-set-fold
+    logical-set-any? logical-set-every?
+    fuzzy-set belnap-set fuzzy-alpha-cut
+    belnap-set-contradictions belnap-set-unknowns
+    logical-set->set set->logical-set)
+  (begin
 
 ;;; ══════════════════════════════════════════════════════════════════════════
 ;;; Internal helpers
@@ -519,3 +543,5 @@
     (for-each (lambda (e) (logical-set-assert! ls e (logic-top logic)))
               (set->list s))
     ls))
+
+  )) ;; end begin, define-library

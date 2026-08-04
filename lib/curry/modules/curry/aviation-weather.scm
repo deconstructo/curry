@@ -24,7 +24,31 @@
 ;;; not parsed into structured fields — European-format temperature
 ;;; notation (e.g. "TM03") is not recognized.
 
-(import (curry regex) (scheme base) (scheme write))
+(define-library (curry aviation-weather)
+  (import (curry regex) (scheme base) (scheme write))
+  (export
+    wind? make-wind wind-direction wind-speed wind-gust wind-unit
+    wind-variable-from wind-variable-to wind->alist
+    cloud-layer? make-cloud-layer cloud-layer-type cloud-layer-height
+    cloud-layer-modifier cloud-layer->alist
+    weather-phenomenon? make-weather-phenomenon weather-phenomenon-intensity
+    weather-phenomenon-codes weather-phenomenon-raw weather-phenomenon->alist
+    rvr? make-rvr rvr-runway rvr-min-distance rvr-max-distance rvr-unit rvr-trend
+    rvr->alist
+    metar-report? metar-report-type metar-station metar-time metar-auto?
+    metar-wind metar-visibility metar-rvr metar-weather metar-cloud
+    metar-temperature metar-dewpoint metar-altimeter metar-cavok? metar-nsw?
+    metar-remarks metar-parse metar-report->alist
+    taf-group? make-taf-group taf-group-type taf-group-valid-from
+    taf-group-valid-to taf-group-wind taf-group-visibility taf-group-weather
+    taf-group-cloud taf-group-cavok? taf-group-nsw? taf-group->alist
+    taf-report? taf-station taf-amended? taf-corrected? taf-issue-time
+    taf-valid-from taf-valid-to taf-groups taf-remarks taf-parse taf-report->alist
+    atis-report? atis-station atis-type atis-information-letter atis-time
+    atis-wind atis-visibility atis-weather atis-cloud atis-temperature
+    atis-dewpoint atis-altimeter atis-cavok? atis-nsw? atis-remarks
+    atis-parse atis-report->alist)
+  (begin
 
 ;;; =========================================================================
 ;;; Small helpers
@@ -617,3 +641,5 @@
         (cons "cavok" (atis-cavok? r))
         (cons "nsw" (atis-nsw? r))
         (cons "remarks" (atis-remarks r))))
+
+  )) ;; end begin, define-library

@@ -27,12 +27,21 @@
 ;;;   (start-recording! "file.csv")     (stop-recording!)
 ;;;   (screenshot! "frame.png")
 
-(import (curry qt6))
-(import (curry qt6 stereo))
-(import (curry gravity scenarios))
-(import (scheme base))
-(import (scheme inexact))
-(import (scheme write))
+(define-library (curry gravity)
+  (import (curry qt6))
+  (import (curry qt6 stereo))
+  (import (curry gravity scenarios))
+  (import (scheme base))
+  (import (scheme inexact))
+  (import (scheme write))
+  (export
+    gravity-dimension gravity-bodies
+    body-position body-energy
+    set-dimension! add-body! remove-body! set-g!
+    total-energy angular-momentum orbit-period lyapunov-exponent
+    start-recording! stop-recording! screenshot!
+    gravity-run!)
+  (begin
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 1  SIMULATION PARAMETERS
@@ -1076,3 +1085,5 @@
     (build-window!)
     (window-show! *window*)
     (run-event-loop)))
+
+  )) ;; end begin, define-library

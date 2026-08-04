@@ -16,6 +16,26 @@
 ;;;
 ;;; Symbolic awareness: pass a (sym-var 'x) to pdf/cdf to get a CAS expression.
 
+(define-library (curry random)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    iota
+    uniform-distribution uniform-distribution? uniform-lo uniform-hi
+    normal-distribution normal-distribution? normal-mean normal-std
+    exponential-distribution exponential-distribution? exponential-rate
+    gamma-distribution gamma-distribution? gamma-shape gamma-scale
+    beta-distribution beta-distribution? beta-alpha beta-beta-param
+    cauchy-distribution cauchy-distribution? cauchy-location cauchy-scale
+    log-normal-distribution log-normal-distribution? log-normal-mu log-normal-sigma
+    chi-squared-distribution chi-squared-distribution? chi-squared-df
+    student-t-distribution student-t-distribution? student-t-df
+    sample
+    distribution-pdf distribution-cdf
+    distribution-mean distribution-variance distribution-std
+    shuffle! shuffle random-choice random-sample)
+  (begin
+
 ;;; ── helpers ─────────────────────────────────────────────────────────────────
 
 (define (iota count . args)
@@ -311,3 +331,5 @@
             (vector-set! reservoir j (car rest)))
           (loop (+ i 1) (cdr rest)))))
     (vector->list reservoir)))
+
+  )) ;; end begin, define-library

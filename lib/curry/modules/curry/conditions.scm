@@ -10,6 +10,19 @@
 ;;;
 ;;; This module provides the high-level sugar on top of those primitives.
 
+(define-library (curry conditions)
+  (import (scheme base))
+  (export
+    define-condition
+    make-condition make-condition*
+    signal warn condition-error
+    handler-bind %handler-bind-nest
+    with-restarts
+    invoke-restart find-restart
+    handler-case
+    ignore-errors)
+  (begin
+
 ;;; ---- Root condition type hierarchy ----
 
 (%condition-type-register! 'condition         '())
@@ -168,3 +181,5 @@
     ((_ body ...)
      (guard (exn (#t (values #f exn)))
        (values (begin body ...) #f)))))
+
+  )) ;; end begin, define-library

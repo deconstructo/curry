@@ -17,8 +17,18 @@
 ;;; Grid: (pde-linspace a b n) → vector of n equispaced flonum x values.
 ;;; All solution vectors are vectors of flonums.
 
-(import (scheme base))
-(import (scheme inexact))
+(define-library (curry pde)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    bc-dirichlet bc-neumann bc-periodic
+    pde-linspace
+    pde-mol pde-mol/steps
+    pde-heat pde-heat/steps
+    pde-wave pde-wave/steps
+    pde-poisson-1d
+    fd-laplacian-1d fd-gradient-1d)
+  (begin
 
 ;;;; ═══════════════════════════════════════════════════════════
 ;;;; § 1  BOUNDARY CONDITIONS
@@ -332,3 +342,5 @@
             (vector-set! sol (+ j 1) (vector-ref interior j)))
           (vector-set! sol (- n 1) right))))
     sol))
+
+  )) ;; end begin, define-library

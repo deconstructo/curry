@@ -20,6 +20,15 @@
 ;;;   (opt-ok?    result)          ; => #t if no errors
 ;;;   (opt-usage  "prog" specs)    ; => formatted usage string
 
+(define-library (curry getopt)
+  (import (scheme base))
+  (export
+    option opt-name opt-short opt-long opt-has-arg? opt-default opt-description
+    getopt
+    opt-get opt-rest opt-errors opt-ok?
+    opt-usage)
+  (begin
+
 ;; ---- Option spec -------------------------------------------------------------
 
 (define (option name short long has-arg? default description)
@@ -225,3 +234,5 @@
                (default-note spec)
                "\n"))
            specs))))
+
+  )) ;; end begin, define-library

@@ -30,8 +30,15 @@
 ;;;               (gfx-set-color! p r g b 1.0)
 ;;;               (gfx-fill-circle! p sx (/ h 2.0) 10.0)))))))
 
-(import (curry qt6))
-(import (scheme base))
+(define-library (curry qt6 stereo)
+  (import (curry qt6))
+  (import (scheme base))
+  (export
+    make-stereo-renderer
+    stereo-mode stereo-ipd stereo-mode-set! stereo-ipd-set!
+    stereo-luma stereo-color-id
+    stereo-render!)
+  (begin
 
 ;;; ---- Stereo renderer record: #(mode ipd) ----
 
@@ -102,3 +109,5 @@
       ;; --- None / passthrough --------------------------------------------
       (else
        (draw-proc painter 0.0 stereo-color-id)))))
+
+  )) ;; end begin, define-library

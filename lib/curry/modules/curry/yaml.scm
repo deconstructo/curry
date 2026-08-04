@@ -22,7 +22,14 @@
 ;;; via anchors — each occurrence is serialized independently, so a script
 ;;; that builds a genuinely circular structure will loop forever.
 
-(import (scheme base))
+(define-library (curry yaml)
+  (import (scheme base))
+  (export
+    yaml-null yaml-null?
+    yaml-parse yaml-parse-all
+    yaml-load-file yaml-load-file-all
+    yaml-stringify yaml-dump-file)
+  (begin
 
 ;;; =========================================================================
 ;;; The null sentinel
@@ -988,3 +995,5 @@
 
 (define (yaml-dump-file value path)
   (call-with-output-file path (lambda (p) (write-string (yaml-stringify value) p))))
+
+  )) ;; end begin, define-library

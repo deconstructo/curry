@@ -32,6 +32,26 @@
 ;;; Reference: "The Anarchist's Curry Cookbook", Chapter: The Laws Are Not
 ;;;            What They Seem.
 
+(define-library (curry logic)
+  (import (scheme base))
+  (export
+    logic? logic-name logic-bottom logic-top logic-meet logic-join
+    logic-complement logic-implies logic-entails? logic-combine logic-display-tv
+    make-logic
+    current-logic with-logic
+    l-and l-or l-not l-implies l-holds? l-top l-bot
+    ⊓ ⊔ ∼ ⊃ ⊨ ⊤ ⊥
+    kb? kb-logic kb-facts kb-rules
+    make-kb kb-assert! kb-retract! kb-query kb-true? kb-false?
+    kb-contradictions kb-consistent? kb-propositions kb-add-rule! kb-close!
+    classical-logic
+    belnap-four
+    make-fuzzy-logic fuzzy-logic fuzzy-logic/product
+    intuitionistic-logic
+    probabilistic-logic
+    defeasible-logic)
+  (begin
+
 ;;; ══════════════════════════════════════════════════════════════════════════
 ;;; Logic system record
 ;;; ══════════════════════════════════════════════════════════════════════════
@@ -496,3 +516,5 @@
     %defeat-meet %defeat-join %defeat-not
     'entails?:  %defeat-entails?
     'combine:   %defeat-combine))
+
+  )) ;; end begin, define-library

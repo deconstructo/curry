@@ -18,7 +18,12 @@
 ;;;   (netcdf-dimensions nc)            -> alist of (name . length); #f length = unlimited
 ;;;   (netcdf-close nc)
 
-(import (curry private binary-io))
+(define-library (curry netcdf)
+  (import (curry private binary-io))
+  (import (scheme base))
+  (export
+    netcdf-open netcdf-variable netcdf-attributes netcdf-dimensions netcdf-close)
+  (begin
 
 ;; nc_type tags
 (define %NC_BYTE 1) (define %NC_CHAR 2) (define %NC_SHORT 3)
@@ -250,3 +255,5 @@
                (d (if (null? (cdr shape)) rem (quotient rem sub)))
                (r (if (null? (cdr shape)) 0 (remainder rem sub))))
           (loop (cdr shape) r (cons d idx))))))
+
+  )) ;; end begin, define-library

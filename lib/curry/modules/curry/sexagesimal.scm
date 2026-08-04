@@ -13,6 +13,16 @@
 ;;; for reading cuneiform mathematical tablets.  The sexagesimal system
 ;;; survives today in hours/minutes/seconds and degrees/arcminutes/arcseconds.
 
+(define-library (curry sexagesimal)
+  (import (scheme base))
+  (export
+    rational->sexagesimal sexagesimal->rational
+    hms->seconds seconds->hms
+    dms->degrees degrees->dms
+    cuneiform->neugebauer neugebauer->cuneiform
+    sex:ybc7289)
+  (begin
+
 ;;; ---- Rational ↔ sexagesimal digit list ----
 
 ;;; Convert an exact rational (or integer) to a list of sexagesimal digit
@@ -131,3 +141,5 @@
 ;;; (sex:ybc7289)  → 30547/21600  (the exact rational from the tablet)
 (define (sex:ybc7289)
   (string->number "1;24,51,10" 'neugebauer))
+
+  )) ;; end begin, define-library

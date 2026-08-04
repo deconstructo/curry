@@ -2,6 +2,45 @@
 
 ### Unreleased
 
+**New — `(curry posix)`: argv-based process execution, no shell**
+
+`process-run`/`process-start`, built on `posix_spawn` rather than
+`fork()`+`exec()` (fork() in a process that runs curry's own POSIX-thread
+actors is fragile) or a shell (unlike `system`, so there's no
+shell-metacharacter injection surface at all). `process-run program
+arg-list` runs to completion and returns `(values exit-code stdout
+stderr)`, draining both streams concurrently to avoid the classic
+pipe-full deadlock; `process-start` returns a process handle with
+`process-stdin`/`process-stdout`/`process-stderr` as ordinary ports for
+incremental I/O. Both take optional `#:cwd`/`#:env` overrides scoped to
+that one call (rather than curry's existing process-wide
+`set-current-directory!`/`set-environment-variable!`, unsafe to mutate
+from one actor thread while others run); `process-run` also takes an
+optional `#:timeout`. `process-wait` (blocking or timeout-bounded),
+`process-alive?`, and `process-kill` (accepts a handle or a raw pid, and
+a signal number or a `'sigterm`/`'sigkill`/`'sigint`/`'sighup` symbol)
+round out the handle API. See `docs/reference/module-posix.md`.
+
+**Fix — `system` returned a raw wait-status instead of a decoded exit code**
+
+`(system "exit 1")` was returning `256`, not `1` — `system(3)`'s return
+value is a packed wait-status, not a plain exit code. Now decoded via
+`WIFEXITED`/`WEXITSTATUS`; a signal-killed command returns the *negative*
+signal number (e.g. `-15` for `SIGTERM`), the same convention the new
+`process-run`/`process-wait` use.
+
+**Core — every pure-Scheme `(curry X)` module now uses `define-library`**
+
+Brings the remaining `(curry X)` modules (previously bare top-level
+scripts) in line with the SRFI compatibility libraries' existing
+`define-library` convention, so each one now has a real, enforced export
+list instead of exposing every top-level binding — including internal
+`%`-prefixed helpers — to anything that imported it. No documented public
+procedure lost its export; see `docs/reference/writing-a-module.md` for
+the conversion pattern and its main gotcha (curry's `syntax-rules` isn't
+hygienic across `define-library` boundaries, so an exported macro's
+expansion can depend on other exports it doesn't look like it needs).
+
 **New — `(curry toml)`: TOML 1.0 reader/writer, pure Scheme**
 
 Mirrors `(curry yaml)`'s shape deliberately: tables become association

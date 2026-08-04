@@ -16,7 +16,12 @@
 ;;;   (fits-write-image path tensor #:header header-alist)
 ;;;   (fits-header-ref header key [default])  -- case-insensitive lookup
 
-(import (curry private binary-io))
+(define-library (curry fits)
+  (import (curry private binary-io))
+  (import (scheme base))
+  (export
+    fits-read-image fits-write-image fits-header-ref)
+  (begin
 
 (define %fits-block-size 2880)
 (define %fits-card-size 80)
@@ -269,3 +274,5 @@
        (+ (arithmetic-shift sign 63)
           (arithmetic-shift (+ e 1023) 52)
           mant)))))
+
+  )) ;; end begin, define-library

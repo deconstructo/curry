@@ -11,6 +11,16 @@
 ;;;   %ffi-peek-bytes
 ;;;   c-ptr?  foreign-lib?  foreign-fn?  foreign-lib-path
 
+(define-library (curry ffi)
+  (import (scheme base))
+  (export
+    define-foreign-library foreign-load-library
+    define-foreign
+    with-pinned-matrix with-pinned-tensor with-pinned-bytevector
+    peek-bytes
+    make-cptr cptr-address cptr-null? cptr-null)
+  (begin
+
 ;;; ── Loading libraries ────────────────────────────────────────────────────────
 
 ;;; (define-foreign-library name "path/to/lib.so")
@@ -117,3 +127,5 @@
 
 ;;; (cptr-null)           — the NULL pointer
 (define (cptr-null)       (make-cptr 0))
+
+  )) ;; end begin, define-library

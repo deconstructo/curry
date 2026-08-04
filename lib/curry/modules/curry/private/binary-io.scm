@@ -12,6 +12,15 @@
 ;;;   (%read-exact-bytes port n) -> bytevector, raises on short read (EOF)
 ;;;   (%pad-to-multiple n mult)  -> smallest k >= n with (zero? (remainder k mult))
 
+(define-library (curry private binary-io)
+  (import (scheme base))
+  (export
+    %bv-u16be %bv-u32be %bv-u64be
+    %bv-s16be %bv-s32be %bv-s64be
+    %bv-f32be %bv-f64be
+    %read-exact-bytes %pad-to-multiple)
+  (begin
+
 ;; ── Big-endian unsigned integer decode ──────────────────────────────────────
 
 (define (%bv-u16be bv i)
@@ -99,3 +108,5 @@
 
 (define (%pad-to-multiple n mult)
   (* mult (ceiling (/ n mult))))
+
+  )) ;; end begin, define-library

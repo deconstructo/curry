@@ -27,8 +27,15 @@
 ;;;   (ode-rk45/steps    f y0 t0 t1 tol)   → list
 ;;;   (ode-verlet/steps  accel q0 p0 t0 t1 h) → ((t q . p) ...)
 
-(import (scheme base))
-(import (scheme inexact))
+(define-library (curry ode)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    ode-euler ode-euler/steps
+    ode-rk4 ode-rk4/steps
+    ode-rk45 ode-rk45/steps
+    ode-verlet ode-verlet/steps)
+  (begin
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 1  GENERALISED VECTOR ARITHMETIC
@@ -257,3 +264,5 @@
                  (t1*  (+ t step)))
             (loop t1* (car qp) (cdr qp)
                   (cons (cons t1* qp) acc)))))))
+
+  )) ;; end begin, define-library

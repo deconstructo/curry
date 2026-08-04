@@ -8,6 +8,13 @@
 ;;;
 ;;; This module exports higher-level forms built on top of those primitives.
 
+(define-library (curry stm)
+  (import (scheme base))
+  (export
+    or-else
+    select %select-try-clause %select-fallback)
+  (begin
+
 ;;; (or-else e1 e2 ...)
 ;;; Tries e1 inside an implicit thunk; if it retries, tries e2, etc.
 ;;; If all alternatives retry, the combined read-set is used to wait.
@@ -72,3 +79,5 @@
     ((_ loop _ rest ...)                (%select-fallback loop rest ...))
     ((_ loop)
      (retry))))
+
+  )) ;; end begin, define-library

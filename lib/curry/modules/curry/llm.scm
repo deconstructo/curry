@@ -20,8 +20,19 @@
 ;;;   (conv-history   conv)              -> messages list
 ;;;   (llm-ask client message [model])   -> reply-string
 
-(import (curry http))
-(import (curry json))
+(define-library (curry llm)
+  (import (curry http))
+  (import (curry json))
+  (import (scheme base))
+  (export
+    make-llm-client
+    make-llm-client/claude make-llm-client/openai
+    make-llm-client/ollama make-llm-client/openai-compat
+    make-conversation
+    conv-system! conv-tool!
+    conv-send! conv-last-reply conv-clear! conv-history
+    llm-ask)
+  (begin
 
 ;;; ─── JSON encoder ───────────────────────────────────────────────────────────
 ;;; We encode our own JSON to build request bodies.
@@ -463,3 +474,5 @@
   (define model (if (null? args) (client-model client) (car args)))
   (define conv  (make-conversation client model))
   (conv-send! conv message))
+
+  )) ;; end begin, define-library

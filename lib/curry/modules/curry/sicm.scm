@@ -38,8 +38,51 @@
 ;;;   pb  Lie-derivative  Lie-transform
 ;;;   secular-average  secular-perturbation
 
-(import (scheme base))
-(import (scheme inexact))
+(define-library (curry sicm)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    ;; § 0 scmutils compatibility shim
+    pe print-expression show-expression define-symbolic literal-number
+    ;; § 1 utilities
+    compose square
+    ;; § 2 literal functions
+    literal-function literal-function*
+    ;; § 3 local tuple selectors
+    time coordinate velocity acceleration
+    ;; § 4 path functor
+    Gamma Gamma-bar
+    ;; § 5 Euler-Lagrange equations
+    Lagrange-equations Euler-Lagrange-operator
+    ;; § 6 energy and Hamiltonian
+    Lagrangian->energy Lagrangian->V Lagrangian->T
+    ;; § 7 standard Lagrangians
+    L-free-particle L-harmonic L-uniform-acceleration make-Lagrangian
+    ;; § 8 multi-DOF Lagrangians
+    L-free-particle-nd L-harmonic-nd L-central-rectangular L-Kepler-polar
+    ;; § 9 Hamiltonian mechanics
+    momentum Lagrangian->Hamiltonian make-Hamiltonian Hamilton-equations
+    ;; § 10 Poisson bracket and commutator
+    Poisson-bracket commutator
+    ;; § 11 matrix helpers
+    mat-ref mat-transpose mat-vec-mul mat-mat-mul
+    ;; § 12 rigid body mechanics
+    rotation-matrix-from-Euler Euler->omega-body Euler->omega-space
+    T-rigid-body L-rigid-body principal-value
+    ;; § 13 numerical trajectory evolution
+    stoermer-verlet-step evolve-Hamiltonian
+    lagrangian->hamiltonian-state evolve-Lagrangian poincare-section
+    ;; § 14 canonical transformations
+    ct-jacobian ct-symplectic-J symplectic-transform? canonical?
+    F->C F2->CT ct-f2-mixed-jac rectangular->polar action-angle
+    ;; § 15 Lie transforms and perturbation theory
+    pb Lie-derivative Lie-transform secular-average secular-perturbation
+    ;; § 16 controller synthesis
+    lqr-mat-zero lqr-mat-eye lqr-mat-ref
+    lqr-mat-add lqr-mat-sub lqr-mat-scale lqr-mat-mul lqr-mat-transpose
+    lqr-mat-norm lqr-mat-inv lqr-gauss-solve lqr-mat-kron lqr-vec lqr-unvec
+    lyapunov-solve lqr-continuous lqr linearise make-controller)
+  (begin
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 0  scmutils compatibility shim
@@ -1473,4 +1516,6 @@
           (cons 'reset!        reset!)
           (cons 'current-state current-state)
           (cons 'compute-u     compute-u))))
+
+  )) ;; end begin, define-library
 

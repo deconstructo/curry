@@ -14,8 +14,21 @@
 ;;; or directly:
 ;;;   (define-values (d G bodies) (scenario-two-body-circular))
 
-(import (scheme base))
-(import (scheme inexact))
+(define-library (curry gravity scenarios)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    scenario-two-body-circular
+    scenario-three-body-figure-8
+    scenario-binary-test-particle
+    scenario-radial-infall
+    scenario-random-cluster
+    scenario-orbit-zoo
+    scenario-dimension-sweep
+    dimension-sweep-step! dimension-sweep-active?
+    dimension-sweep-stop! dimension-sweep-start!
+    scenario-names scenario-run)
+  (begin
 
 ;;; ---- Constants ----
 
@@ -262,3 +275,5 @@
     (if entry
         ((cdr entry))
         (error "gravity: unknown scenario" name))))
+
+  )) ;; end begin, define-library

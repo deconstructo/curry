@@ -20,6 +20,25 @@
 ;;; any specific tablet -- exact parameters vary across the different
 ;;; System A/B schemes and periods attested in the tablets.
 
+(define-library (curry babylonian-astronomy)
+  (import (scheme base))
+  (import (curry private lang-aliases))
+  (export
+    babylonian-zigzag
+    system-a-daylight-length
+    babylonian-synodic-month
+    synodic-month-length
+    babylonian-saros-months
+    saros-length-days
+    babylonian-next-eclipse-window
+    babylonian-month-names
+    babylonian-month-name
+    ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
+    warḫu 𒌑𒀭
+    attalû 𒀭
+    šumu-ša-warḫi 𒁹𒌑)
+  (begin
+
 ;;; ---- The zigzag function ----
 
 ;;; (babylonian-zigzag max min half-period n)
@@ -102,8 +121,6 @@
 ;;; attested ancient name, so babylonian-zigzag is left English-only rather
 ;;; than forcing a coined ancient-sounding word onto a modern concept.
 
-(import (curry private lang-aliases))
-
 (define-name-aliases
   ;; warḫu — "month" (the synodic month's length)
   (synodic-month-length       warḫu           𒌑𒀭)
@@ -111,3 +128,5 @@
   (babylonian-next-eclipse-window  attalû     𒀭)
   ;; šumu-ša-warḫi — "name of the month"
   (babylonian-month-name       šumu-ša-warḫi  𒁹𒌑))
+
+  )) ;; end begin, define-library

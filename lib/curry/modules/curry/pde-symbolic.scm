@@ -20,8 +20,18 @@
 ;;;   L         — domain length (number or positive sym-var)
 ;;;   alpha, c  — PDE parameters (numbers or sym-vars)
 
-(import (scheme base))
-(import (scheme inexact))
+(define-library (curry pde-symbolic)
+  (import (scheme base))
+  (import (scheme inexact))
+  (export
+    pde-eigenvalue pde-eigenfunction
+    pde-heat-mode pde-wave-cos-mode pde-wave-sin-mode pde-laplace-2d-mode
+    pde-fourier-sin-coeff pde-fourier-cos-coeff
+    pde-transport-general pde-characteristics-homogeneous pde-characteristics-decay
+    pde-heat-laplace-ode pde-heat-laplace-residual
+    pde-heat-residual pde-wave-residual pde-transport-residual
+    pde-laplace-residual pde-first-order-residual pde-residual-at)
+  (begin
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 1  STURM-LIOUVILLE EIGENVALUE PROBLEM (Dirichlet, [0,L])
@@ -190,3 +200,5 @@
         (loop (substitute e (car vs) (car ws))
               (cdr vs)
               (cdr ws)))))
+
+  )) ;; end begin, define-library

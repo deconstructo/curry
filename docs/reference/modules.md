@@ -45,3 +45,4 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 ## See also
 
 - [`srfi/index.md`](srfi/index.md) — portable `(srfi sN name)` compatibility libraries
+- [`writing-a-module.md`](writing-a-module.md) — how to wrap a pure-Scheme `(curry X)` module in `define-library`, including the macro-export gotcha
