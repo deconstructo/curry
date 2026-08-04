@@ -229,6 +229,16 @@
   (process-kill (process-pid h))
   (check "process-kill: accepts a raw pid" (process-wait h) -15))
 
+;; A process handle shared across actor threads: two actors racing
+;; process-wait on the same handle must both see the same correct exit
+;; code, never a spurious ECHILD-driven error and never a wrong result
+;; from one of them losing the reap race.
+(let* ((h        (process-start "/bin/sh" (list "-c" "exit 0")))
+       (watcher1 (spawn (lambda () (send! (self) (process-wait h)))))
+       (watcher2 (spawn (lambda () (send! (self) (process-wait h)))))
+       (r1       (process-wait h)))
+  (check "process-wait: racing from the spawning thread sees exit 0" r1 0))
+
 ;;; terminal?
 
 (check "terminal? returns a boolean for fd 0" (boolean? (terminal? 0)) #t)

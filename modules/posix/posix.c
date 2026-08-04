@@ -44,6 +44,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/select.h>
+#include <pthread.h>
 
 /* posix_spawn_file_actions_addchdir_np: a GNU/BSD extension (glibc >= 2.29,
  * macOS >= 10.15) that POSIX.1-2024 has since standardized without the _np
@@ -565,18 +566,24 @@ static void do_spawn(const char *fn, const char *program, curry_val arg_list,
 
     posix_spawn_file_actions_init(&facts);
     facts_inited = 1;
-    posix_spawn_file_actions_adddup2(&facts, in_pipe[0], STDIN_FILENO);
-    posix_spawn_file_actions_adddup2(&facts, out_pipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_adddup2(&facts, err_pipe[1], STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&facts, in_pipe[0]);
-    posix_spawn_file_actions_addclose(&facts, in_pipe[1]);
-    posix_spawn_file_actions_addclose(&facts, out_pipe[0]);
-    posix_spawn_file_actions_addclose(&facts, out_pipe[1]);
-    posix_spawn_file_actions_addclose(&facts, err_pipe[0]);
-    posix_spawn_file_actions_addclose(&facts, err_pipe[1]);
+    /* Each of these can fail with ENOMEM; a silently-dropped action here
+     * would mean posix_spawn proceeds with an incomplete file-actions list
+     * (e.g. #:cwd quietly not applied, or a pipe fd leaking into the
+     * child), so check every one and abort via fail_oom rather than
+     * pressing on. */
+    if (posix_spawn_file_actions_adddup2(&facts, in_pipe[0], STDIN_FILENO)   != 0) goto fail_oom;
+    if (posix_spawn_file_actions_adddup2(&facts, out_pipe[1], STDOUT_FILENO) != 0) goto fail_oom;
+    if (posix_spawn_file_actions_adddup2(&facts, err_pipe[1], STDERR_FILENO) != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, in_pipe[0])  != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, in_pipe[1])  != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, out_pipe[0]) != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, out_pipe[1]) != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, err_pipe[0]) != 0) goto fail_oom;
+    if (posix_spawn_file_actions_addclose(&facts, err_pipe[1]) != 0) goto fail_oom;
 #ifdef HAVE_POSIX_SPAWN_CHDIR
-    if (curry_is_true(cwd))
-        posix_spawn_file_actions_addchdir_np(&facts, curry_string(cwd));
+    if (curry_is_true(cwd) &&
+        posix_spawn_file_actions_addchdir_np(&facts, curry_string(cwd)) != 0)
+        goto fail_oom;
 #endif
 
     pid_t pid;
@@ -614,6 +621,10 @@ static void do_spawn(const char *fn, const char *program, curry_val arg_list,
 
 fail_oom:
     if (argv) free(argv);
+    if (envp_owned) {
+        for (int j = 0; j < envp_count; j++) free(envp[j]);
+        free(envp);
+    }
     if (facts_inited) posix_spawn_file_actions_destroy(&facts);
     close(in_pipe[0]); close(in_pipe[1]);
     close(out_pipe[0]); close(out_pipe[1]);
@@ -643,19 +654,39 @@ static curry_val checked_process(curry_val v, const char *fn) {
     return curry_cdr(v);
 }
 
+/* Curry actors are OS threads sharing one GC heap, and a process handle
+ * (like any other value) can be passed between them -- e.g. one actor
+ * spawns via process-start and hands the handle to another via send!.
+ * Without a lock, two threads racing a check-then-act on PH_REAPED could
+ * both call waitpid on the same pid: the loser gets ECHILD, which
+ * reap_nonblocking previously swallowed silently (leaving process-alive?
+ * able to report a dead child as alive forever) and which the blocking
+ * wait in fn_process_wait would have surfaced as a spurious "No such
+ * process" error despite the child having exited normally. A single
+ * global lock around the reap-and-cache sequence is enough: waitpid plus
+ * two vector writes is fast, and it's shared across all process handles
+ * only to keep this simple, not because reaping different children
+ * actually contends with each other. */
+static pthread_mutex_t g_reap_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /* Non-blocking reap attempt; caches the decoded exit code in the handle so
  * a later call never re-invokes waitpid on an already-reaped pid (which
  * would fail ECHILD -- the one real footgun in this design). Returns true
  * once the child has been reaped, whether just now or on a prior call. */
 static bool reap_nonblocking(curry_val vec) {
-    if (curry_is_true(curry_vector_ref(vec, PH_REAPED))) return true;
+    pthread_mutex_lock(&g_reap_lock);
+    if (curry_is_true(curry_vector_ref(vec, PH_REAPED))) {
+        pthread_mutex_unlock(&g_reap_lock);
+        return true;
+    }
     pid_t pid = (pid_t)curry_fixnum(curry_vector_ref(vec, PH_PID));
     int status;
     pid_t r = waitpid(pid, &status, WNOHANG);
-    if (r == 0) return false;   /* still running */
-    if (r < 0) return false;    /* reaped out-of-band; nothing useful to report */
+    if (r == 0) { pthread_mutex_unlock(&g_reap_lock); return false; }   /* still running */
+    if (r < 0)  { pthread_mutex_unlock(&g_reap_lock); return false; }  /* reaped out-of-band */
     curry_vector_set(vec, PH_REAPED, curry_make_bool(true));
     curry_vector_set(vec, PH_EXITCODE, curry_make_fixnum(decode_wait_status(status)));
+    pthread_mutex_unlock(&g_reap_lock);
     return true;
 }
 
@@ -667,11 +698,29 @@ static curry_val fn_process_start(int ac, curry_val *av, void *ud) {
     spawned_process_t sp;
     do_spawn("process-start", program, av[1], cwd, env, &sp);
 
+    /* curry_make_port_from_fd only takes ownership of the fd on success
+     * (see include/curry.h) -- on fdopen() failure (fd-table exhaustion,
+     * essentially) the raw fd is left untouched and must be closed here,
+     * and the already-spawned child must not be silently orphaned. */
+    curry_val stdin_port  = curry_make_port_from_fd(sp.stdin_fd,  true,  false);
+    curry_val stdout_port = curry_make_port_from_fd(sp.stdout_fd, false, false);
+    curry_val stderr_port = curry_make_port_from_fd(sp.stderr_fd, false, false);
+    if (!curry_is_true(stdin_port) || !curry_is_true(stdout_port) || !curry_is_true(stderr_port)) {
+        if (!curry_is_true(stdin_port))  close(sp.stdin_fd);
+        if (!curry_is_true(stdout_port)) close(sp.stdout_fd);
+        if (!curry_is_true(stderr_port)) close(sp.stderr_fd);
+        kill(sp.pid, SIGKILL);
+        int status;
+        waitpid(sp.pid, &status, 0);
+        curry_error("posix: process-start: failed to wrap a pipe fd as a port "
+                    "(fd-table exhaustion?)");
+    }
+
     curry_val v = curry_make_vector(PH_LEN, curry_void());
     curry_vector_set(v, PH_PID,      curry_make_fixnum((intptr_t)sp.pid));
-    curry_vector_set(v, PH_STDIN,    curry_make_port_from_fd(sp.stdin_fd,  true,  false));
-    curry_vector_set(v, PH_STDOUT,   curry_make_port_from_fd(sp.stdout_fd, false, false));
-    curry_vector_set(v, PH_STDERR,   curry_make_port_from_fd(sp.stderr_fd, false, false));
+    curry_vector_set(v, PH_STDIN,    stdin_port);
+    curry_vector_set(v, PH_STDOUT,   stdout_port);
+    curry_vector_set(v, PH_STDERR,   stderr_port);
     curry_vector_set(v, PH_REAPED,   curry_make_bool(false));
     curry_vector_set(v, PH_EXITCODE, curry_make_bool(false));
     return curry_make_pair(curry_make_symbol("process"), v);
@@ -702,22 +751,18 @@ static curry_val fn_process_stderr(int ac, curry_val *av, void *ud) {
 static curry_val fn_process_wait(int ac, curry_val *av, void *ud) {
     (void)ud;
     curry_val vec = checked_process(av[0], "process-wait");
-    if (ac < 2 || !curry_is_true(av[1])) {
-        if (!curry_is_true(curry_vector_ref(vec, PH_REAPED))) {
-            pid_t pid = (pid_t)curry_fixnum(curry_vector_ref(vec, PH_PID));
-            int status;
-            pid_t r = waitpid(pid, &status, 0);
-            if (r < 0) posix_error("process-wait");
-            curry_vector_set(vec, PH_REAPED, curry_make_bool(true));
-            curry_vector_set(vec, PH_EXITCODE, curry_make_fixnum(decode_wait_status(status)));
-        }
-        return curry_vector_ref(vec, PH_EXITCODE);
-    }
-    double timeout = req_time_seconds(av[1], "process-wait");
-    double deadline = mono_now() + timeout;
+    bool has_timeout = ac >= 2 && curry_is_true(av[1]);
+    double deadline = has_timeout ? mono_now() + req_time_seconds(av[1], "process-wait") : 0.0;
+    /* Both the blocking and timed-wait cases poll via reap_nonblocking
+     * (WNOHANG under g_reap_lock) rather than one thread parking in a
+     * blocking waitpid(pid, &status, 0) -- holding a lock across a
+     * blocking waitpid would serialize every other process handle's
+     * process-wait/process-alive? on unrelated children while this one
+     * sleeps, and not holding the lock across it reopens the same
+     * check-then-act race reap_nonblocking exists to close. */
     for (;;) {
         if (reap_nonblocking(vec)) return curry_vector_ref(vec, PH_EXITCODE);
-        if (mono_now() >= deadline) return curry_make_bool(false);
+        if (has_timeout && mono_now() >= deadline) return curry_make_bool(false);
         struct timespec ts = {0, 10L * 1000L * 1000L};  /* 10ms */
         nanosleep(&ts, NULL);
     }
