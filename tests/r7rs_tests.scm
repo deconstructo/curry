@@ -76,6 +76,28 @@
        (guard (exn (#t 'raised)) (string-ref "hello" 5)) 'raised)
 (check "string-ref empty string raises"
        (guard (exn (#t 'raised)) (string-ref "" 0)) 'raised)
+;; Regression: string-ref used a separate, buggy byte-counting loop that
+;; stopped the instant it saw enough lead bytes, without skipping the rest
+;; of a multi-byte character's continuation bytes first — correct only
+;; when every character before the target index happens to be 1 byte
+;; (ASCII), or the target index is 0 or 1. Indexing *past* a 3-byte CJK
+;; character (not just past a single 2-byte accented Latin one, which
+;; happened to still work) exposed it: it landed mid-sequence and decoded
+;; garbage instead of the intended character. Fixed by reusing the
+;; already-correct utf8_char_offset() helper substring/string-copy rely on.
+(check "string-ref past one multibyte char (3-byte CJK)" (string-ref "日本語" 1) #\本)
+(check "string-ref past two multibyte chars (3-byte CJK)" (string-ref "日本語" 2) #\語)
+(check "string-ref past a 2-byte char then more text" (string-ref "café latte" 5) #\l)
+;; Regression: decoding a string's UTF-8 byte data assumed every lead byte
+;; encountered had all of its continuation bytes actually present in the
+;; buffer. utf8->string does a raw byte copy with no validation, so a
+;; bytevector ending mid-multi-byte-sequence produces a string whose last
+;; "character" is a truncated lead byte with no continuation bytes after
+;; it — string-ref must raise on that, not read past the string's
+;; allocation decoding continuation bytes that were never there.
+(check "string-ref on a string ending in a truncated UTF-8 sequence raises"
+       (guard (exn (#t 'raised)) (string-ref (utf8->string (bytevector 32 32 32 240)) 3))
+       'raised)
 (check "string-set! basic"
        (let ((s (string-copy "hello"))) (string-set! s 0 #\H) s) "Hello")
 (check "string-set! multibyte"

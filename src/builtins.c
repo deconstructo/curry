@@ -651,6 +651,16 @@ static val_t prim_string_length(int ac, val_t *av, void *ud) {
     while (p < end) { if ((*p & 0xC0) != 0x80) n++; p++; }
     return vfix(n);
 }
+/* Forward-declared: defined below, alongside the substring/string-copy
+ * range-validation code that already relies on it. prim_string_ref used to
+ * maintain its own separate byte-counting loop instead of calling this —
+ * that duplicate was missing the "skip any trailing continuation bytes"
+ * step this one already has (see its body), so it could land mid-sequence
+ * on a multi-byte character immediately before the target index and then
+ * decode garbage from that misaligned position. Reusing this one
+ * implementation removes the divergence instead of patching the copy. */
+static uint32_t utf8_char_offset(const char *data, uint32_t byte_len, uint32_t n);
+
 static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-ref: not a string");
@@ -660,23 +670,30 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
      * index raises cleanly instead of wrapping to a huge offset. */
     if (idx < 0) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: index out of range");
     const char *sd = str_data(s);
-    const char *p = sd, *end = p + s->len;
-    intptr_t n = 0;
-    while (p < end && n < idx) {
-        if ((*p & 0xC0) != 0x80) n++;
-        p++;
-    }
-    /* idx >= character count: either p ran off the end, or (for idx == n
-     * at loop exit) p landed exactly on end with no character left to
-     * decode there — both mean out of range, checked before any decode
-     * read past the buffer. */
-    if (p >= end || n < idx) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: index out of range");
+    const char *end = sd + s->len;
+    const char *p = sd + utf8_char_offset(sd, s->len, (uint32_t)idx);
+    /* idx >= character count: utf8_char_offset clamps to byte_len (the
+     * buffer end) rather than raising itself, so that's checked here,
+     * before any decode read past the buffer. */
+    if (p >= end) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: index out of range");
     unsigned char c = (unsigned char)*p;
     uint32_t cp;
-    if      (c < 0x80)            cp = c;
-    else if ((c & 0xE0) == 0xC0) { cp=(c&0x1F); cp=(cp<<6)|((unsigned char)p[1]&0x3F); }
-    else if ((c & 0xF0) == 0xE0) { cp=(c&0x0F); cp=(cp<<6)|((unsigned char)p[1]&0x3F); cp=(cp<<6)|((unsigned char)p[2]&0x3F); }
-    else { cp=(c&0x07); for(int i=1;i<4;i++) cp=(cp<<6)|((unsigned char)p[i]&0x3F); }
+    int seqlen;
+    if      (c < 0x80)           { cp = c;        seqlen = 1; }
+    else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; seqlen = 2; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; seqlen = 3; }
+    else                         { cp = c & 0x07; seqlen = 4; }
+    /* A lead byte's own presence within [sd,end) doesn't guarantee its
+     * continuation bytes are too — a String can hold malformed/truncated
+     * UTF-8 (e.g. utf8->string does a raw copy with no validation), and a
+     * multi-byte lead byte could be the buffer's very last byte. Reading
+     * p[1..seqlen-1] unconditionally in that case would run past the
+     * string's allocation; raise instead of decoding out of bounds,
+     * mirroring how (curry ports)' read_utf8_codepoint (src/port.c)
+     * already stops rather than reading past its own input on a
+     * truncated sequence. */
+    if (p + seqlen > end) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: truncated UTF-8 sequence");
+    for (int i = 1; i < seqlen; i++) cp = (cp << 6) | ((unsigned char)p[i] & 0x3F);
     return vchr(cp);
 }
 /* Helper: advance a UTF-8 pointer by n characters; returns byte offset of char n */
