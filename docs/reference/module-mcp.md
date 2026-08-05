@@ -382,4 +382,4 @@ Supported `type` values: `"string"`, `"number"`, `"integer"`, `"boolean"`,
 ## See also
 
 - [Authentication guide](../guides/mcp-authentication.md) — step-by-step OAuth 2.0 setup
-- [Example servers](../../examples/mcp_server.scm) — `mcp_server.scm`, `mcp_math.scm`, `mcp_nbody.scm`
+- [Example servers](../../examples/mcp_server.scm) — `mcp_server.scm`, `mcp_math.scm`, `mcp_nbody.scm`, `mcp_naips.scm`

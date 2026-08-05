@@ -19,10 +19,18 @@ cmake -B build && cmake --build build -j$(nproc)
 
 # N-body physics in D dimensions
 ./build/curry examples/mcp_nbody.scm
+
+# Australian NAIPS aviation weather/NOTAM briefings (needs a NAIPS account —
+# credentials are read from the environment, never a tool argument)
+NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/mcp_naips.scm
 ```
 
 Use **absolute paths** in every client config — clients typically launch with a minimal
-`PATH` that does not include your build directory.
+`PATH` that does not include your build directory. A server that needs credentials
+(like `mcp_naips.scm` above) reads them from environment variables set on the spawned
+process, not from a tool argument — every client config below has an `env` (or
+equivalent) field for exactly this; see [`module-naips.md`](../reference/module-naips.md)
+for that server's specific variables.
 
 ---
 

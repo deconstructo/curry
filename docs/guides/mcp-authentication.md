@@ -330,4 +330,4 @@ JWT needs to be revoked immediately, use introspect mode.
 ## See also
 
 - [MCP module reference](../reference/module-mcp.md) — full procedure signatures
-- [MCP server examples](../../examples/) — `mcp_server.scm`, `mcp_math.scm`, `mcp_nbody.scm`
+- [MCP server examples](../../examples/) — `mcp_server.scm`, `mcp_math.scm`, `mcp_nbody.scm`, `mcp_naips.scm`
