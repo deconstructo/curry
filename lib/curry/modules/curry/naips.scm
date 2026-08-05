@@ -42,13 +42,17 @@
   (import (scheme base) (curry regex) (curry http) (curry base64) (curry aviation-weather))
   (export
     naips-loc-briefing naips-area-briefing naips-met-briefing naips-notam-briefing
+    naips-general-met-dir naips-general-met-briefing
     naips-build-loc-brief-request naips-build-area-brief-request
     naips-build-met-brief-request naips-build-notam-brief-request
-    naips-parse-briefing-response
+    naips-build-general-met-dir-request naips-build-general-met-brief-request
+    naips-parse-briefing-response naips-parse-general-met-dir-response
     naips-briefing? naips-briefing-status naips-briefing-info
     naips-briefing-content naips-briefing-products naips-briefing->alist
     naips-product? naips-product-type naips-product-report-kind
-    naips-product-text naips-product-parsed naips-product->alist)
+    naips-product-text naips-product-parsed naips-product->alist
+    naips-general-met-message? naips-general-met-message-name
+    naips-general-met-message-type naips-general-met-message->alist)
   (begin
 
 ;;; =========================================================================
@@ -467,5 +471,85 @@
     (error "naips-notam-briefing: entity-id must be 2 to 5 alphanumeric characters" entity-id))
   (naips-parse-briefing-response
     (%soap-post (naips-build-notam-brief-request requestor password entity-id))))
+
+;;; =========================================================================
+;;; general-met-dir / get-general-met — directory of, and retrieval of,
+;;; "general" MET products: aviation MET messages not addressed by ICAO
+;;; location or 7/8/9-series area code (e.g. national/regional text
+;;; bulletins), discovered by name rather than looked up by a fixed code.
+;;; The WSDL gives no enumeration of valid (name, type) pairs — the
+;;; directory call is the only way to learn what's currently published, and
+;;; get-general-met's request just echoes back a (name, type) pair taken
+;;; from a directory entry.
+;;; =========================================================================
+
+(define-record-type <naips-general-met-message>
+  (%make-naips-general-met-message name type)
+  naips-general-met-message?
+  (name naips-general-met-message-name)
+  (type naips-general-met-message-type))
+
+(define (naips-general-met-message->alist m)
+  (list (cons "name" (naips-general-met-message-name m))
+        (cons "type" (naips-general-met-message-type m))))
+
+;; general-met-dir-rqs carries no body elements beyond the common
+;; source/requestor/password attributes every request opens with.
+;; (naips-build-general-met-dir-request requestor password) -> string
+(define (naips-build-general-met-dir-request requestor password)
+  (%soap-envelope
+    (string-append
+      (%request-open "general-met-dir-rqs" requestor password)
+      (%request-close "general-met-dir-rqs"))))
+
+(define %rx-msg (regex-compile "<msg>[ \t\r\n]*<name>([^<]*)</name>[ \t\r\n]*<type>([^<]*)</type>[ \t\r\n]*</msg>"))
+
+;; (naips-parse-general-met-dir-response raw-xml) -> list of <naips-general-met-message>
+;;
+;; Exported for the same reason naips-parse-briefing-response is: so a
+;; captured response can be parsed without a live network call.
+(define (naips-parse-general-met-dir-response raw-xml)
+  (let* ((xml (%strip-namespace-prefixes raw-xml))
+         (fault-m (regex-match-string %rx-fault xml)))
+    (if fault-m
+        (error "naips: SOAP fault" (cadr fault-m))
+        (let ((status-m (regex-match-string %rx-status xml)))
+          (unless (and status-m (string=? (cadr status-m) "SUCCESS"))
+            (let ((info-m (regex-match-string %rx-info xml)))
+              (error "naips-general-met-dir: request failed"
+                     (if status-m (cadr status-m) "ERROR")
+                     (if info-m (cadr info-m) #f))))
+          (map (lambda (groups) (%make-naips-general-met-message (car groups) (cadr groups)))
+               (%regex-find-all %rx-msg xml))))))
+
+;; (naips-general-met-dir requestor password) -> list of <naips-general-met-message>
+;;
+;; Lists every general MET message currently available. Each entry's
+;; (name, type) is exactly what naips-general-met-briefing needs to fetch
+;; that message's content.
+(define (naips-general-met-dir requestor password)
+  (naips-parse-general-met-dir-response
+    (%soap-post (naips-build-general-met-dir-request requestor password))))
+
+;; (naips-build-general-met-brief-request requestor password name type) -> string
+(define (naips-build-general-met-brief-request requestor password name type)
+  (%soap-envelope
+    (string-append
+      (%request-open "general-met-brief-rqs" requestor password)
+      (%el "name" name)
+      (%el "type" type)
+      (%request-close "general-met-brief-rqs"))))
+
+;; (naips-general-met-briefing requestor password name type) -> <naips-briefing>
+;;
+;; name/type: taken verbatim from a naips-general-met-dir entry (each is
+;;   1-32 characters; there's no fixed enumeration to validate against).
+;;   Response shares the same BriefingResponse shape as the four *-brief
+;;   operations, so it parses with naips-parse-briefing-response.
+(define (naips-general-met-briefing requestor password name type)
+  (%require-length-1-32 name "naips-general-met-briefing: name")
+  (%require-length-1-32 type "naips-general-met-briefing: type")
+  (naips-parse-briefing-response
+    (%soap-post (naips-build-general-met-brief-request requestor password name type))))
 
   )) ;; end begin, define-library

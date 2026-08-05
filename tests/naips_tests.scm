@@ -313,6 +313,106 @@
        'raised)
 
 ;;; =========================================================================
+;;; general-met-dir / get-general-met
+;;; =========================================================================
+
+(define dir-req (naips-build-general-met-dir-request "user1234" "pass1234"))
+(check "general-met-dir request wrapper present" (%found? dir-req "<loc:general-met-dir-rqs") 'found)
+(check "general-met-dir request has no body elements"
+       (%found? dir-req "<loc:general-met-dir-rqs source=\"curry\" requestor=\"user1234\" password=\"pass1234\"></loc:general-met-dir-rqs>")
+       'found)
+
+(define brief-req (naips-build-general-met-brief-request "user1234" "pass1234" "National GAF Summary" "GAF_TEXT"))
+(check "general-met-brief request wrapper present" (%found? brief-req "<loc:general-met-brief-rqs") 'found)
+(check "general-met-brief request name element present" (%found? brief-req "<loc:name>National GAF Summary</loc:name>") 'found)
+(check "general-met-brief request type element present" (%found? brief-req "<loc:type>GAF_TEXT</loc:type>") 'found)
+
+(define brief-esc-req (naips-build-general-met-brief-request "user1234" "pass1234" "A & B <name>" "T\"y<pe>"))
+(check "general-met-brief name ampersand/less-than escaped" (%found? brief-esc-req "A &amp; B &lt;name&gt;") 'found)
+(check "general-met-brief type quote/less-than escaped" (%found? brief-esc-req "T&quot;y&lt;pe&gt;") 'found)
+(check "no raw '<' from general-met-brief name/type leaks into markup"
+       (%found? brief-esc-req "B <name") 'not-found)
+
+;; general-met-dir-rsp: a flat list of <msg><name/><type/></msg>, no
+;; top-level <content> and no <product> elements (it's a directory listing,
+;; not a briefing) — a distinct response shape from the four *-brief
+;; operations, so it gets its own parser (naips-parse-general-met-dir-response)
+;; rather than reusing naips-parse-briefing-response.
+(define %dir-success-response
+  (string-append
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<S:Envelope xmlns:S=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+    "<S:Body>"
+    "<ns2:general-met-dir-rsp xmlns:ns2=\"http://www.airservicesaustralia.com/naips/xsd\" status=\"SUCCESS\">"
+    "<msg><name>National GAF Summary</name><type>GAF_TEXT</type></msg>"
+    "<msg><name>Volcanic Ash Advisory</name><type>VAA</type></msg>"
+    "</ns2:general-met-dir-rsp>"
+    "</S:Body>"
+    "</S:Envelope>"))
+
+(define dir-msgs (naips-parse-general-met-dir-response %dir-success-response))
+(check "general-met-dir message count" (length dir-msgs) 2)
+(check "general-met-dir first message name" (naips-general-met-message-name (list-ref dir-msgs 0)) "National GAF Summary")
+(check "general-met-dir first message type" (naips-general-met-message-type (list-ref dir-msgs 0)) "GAF_TEXT")
+(check "general-met-dir second message name" (naips-general-met-message-name (list-ref dir-msgs 1)) "Volcanic Ash Advisory")
+(check "general-met-dir->alist"
+       (naips-general-met-message->alist (list-ref dir-msgs 1))
+       (list (cons "name" "Volcanic Ash Advisory") (cons "type" "VAA")))
+
+(define %dir-error-response
+  (string-append
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<S:Envelope xmlns:S=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+    "<S:Body>"
+    "<ns2:general-met-dir-rsp xmlns:ns2=\"http://www.airservicesaustralia.com/naips/xsd\" status=\"INVALID_ACCOUNT\">"
+    "<info>Invalid account id or password.</info>"
+    "</ns2:general-met-dir-rsp>"
+    "</S:Body>"
+    "</S:Envelope>"))
+
+(check "general-met-dir non-success status raises"
+       (guard (e (#t 'raised))
+         (naips-parse-general-met-dir-response %dir-error-response)
+         'not-raised)
+       'raised)
+
+(check "general-met-dir soap fault raises"
+       (guard (e (#t 'raised))
+         (naips-parse-general-met-dir-response %fault-response)
+         'not-raised)
+       'raised)
+
+;; get-general-met-brief-rsp is a bare BriefingResponse, same shape as
+;; loc-brief-rsp/area-brief-rsp/met-brief-rsp/notam-brief-rsp, so it reuses
+;; naips-parse-briefing-response — no separate parser needed.
+(define %general-met-brief-response
+  (string-append
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<S:Envelope xmlns:S=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+    "<S:Body>"
+    "<ns2:general-met-brief-rsp xmlns:ns2=\"http://www.airservicesaustralia.com/naips/xsd\" status=\"SUCCESS\">"
+    "<content>GENERAL MET TEXT GOES HERE</content>"
+    "</ns2:general-met-brief-rsp>"
+    "</S:Body>"
+    "</S:Envelope>"))
+
+(define gmb (naips-parse-briefing-response %general-met-brief-response))
+(check "general-met-brief response status" (naips-briefing-status gmb) "SUCCESS")
+(check "general-met-brief response content" (naips-briefing-content gmb) "GENERAL MET TEXT GOES HERE")
+
+(check "general-met-briefing empty name rejected"
+       (guard (e (#t 'raised))
+         (naips-general-met-briefing "user1234" "pass1234" "" "GAF_TEXT")
+         'not-raised)
+       'raised)
+
+(check "general-met-briefing empty type rejected"
+       (guard (e (#t 'raised))
+         (naips-general-met-briefing "user1234" "pass1234" "National GAF Summary" "")
+         'not-raised)
+       'raised)
+
+;;; =========================================================================
 
 (newline)
 (display "Total: ") (display (+ pass fail)) (display " Pass: ") (display pass)

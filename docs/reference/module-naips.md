@@ -2,7 +2,7 @@
 
 *unreleased*
 
-Client for Airservices Australia's public NAIPS `briefing-service` SOAP endpoint. Covers the *briefing* operation family — `loc-brief`, `area-brief`, `met-brief`, `notam-brief` — and turns the response into the record types `(curry aviation-weather)` already defines. Pure Scheme, built on `(curry http)` and `(curry regex)` — no XML library was added to build this; see [Design](#design) for why.
+Client for Airservices Australia's public NAIPS `briefing-service` SOAP endpoint. Covers the *briefing* operation family — `loc-brief`, `area-brief`, `met-brief`, `notam-brief` — plus `general-met-dir`/`get-general-met` (the directory of, and retrieval of, general MET products not addressed by ICAO location or area code) — and turns the response into the record types `(curry aviation-weather)` already defines. Pure Scheme, built on `(curry http)` and `(curry regex)` — no XML library was added to build this; see [Design](#design) for why.
 
 Requires a NAIPS account (a requestor id and password). This module only speaks the wire protocol; it does not manage, store, or validate account credentials beyond basic shape checks.
 
@@ -51,11 +51,13 @@ Covers the four operations that share the WSDL's `BriefingRequest`/`BriefingResp
 | `met-brief` | `naips-met-briefing` | 1-4 locations | restricted to caller-chosen MET message types |
 | `notam-brief` | `naips-notam-briefing` | 1 location/area (2-5 alphanumeric) | NOTAM summary only, raw text (not structurally parsed) |
 
+`general-met-dir`/`get-general-met` sit outside that shared shape (`GeneralMETMessageDirectoryRqs` is a bare `AbstractRequest`, not a `BriefingRequest`) but `GetGeneralMETMessageRsp` is itself a bare `BriefingResponse` extension, so `get-general-met`'s response still parses with the same `naips-parse-briefing-response`. The WSDL gives no enumeration of valid `(name, type)` pairs for `get-general-met` — `general-met-dir` (no parameters beyond credentials) is the only way to discover what's currently published; each directory entry's `name`/`type` is exactly what `get-general-met` needs.
+
 **Not covered** — the WSDL has roughly 40 other operations with their own request/response shapes, deliberately out of scope here:
 
 - **`notam-brief`'s "history" mode.** The request schema offers two mutually exclusive branches: `summary` (a plain `EntityId` string — what this module supports) or `history` (a specific NOTAM's revision history), which needs a compound `NOTAMId` — itself `{ loc: EntityKey, series-id, number, year }`, where `EntityKey` is in turn `{ id, fir, type }`. A caller would need to already know the FIR and entity-type of the location, which normally comes from browsing a NOTAM directory (also not covered) — not a "briefing" in the same sense as the other three operations, so it's left out.
-- **Charts and other binary products.** A briefing can request chart images (`charts`/`reference`/`variant` flags); a non-`TEXT` product comes back as a `<naips-product>` with `type` set but `text`/`parsed` both `#f` — the base64 is simply not decoded to text. Decoding chart images to a bytevector would be straightforward to add but has no consumer in this module today.
-- **Everything else**: SPFIB flight-plan templates, NOTAM proposal submission, RAIM, wind/temp profiles, first/last light, general MET message directories, chart/resource retrieval. Several of these are write operations with real account-state consequences; the rest have entirely different response shapes this module's parser doesn't (and shouldn't be stretched to) handle.
+- **Charts and other binary products.** A briefing can request chart images (`charts`/`reference`/`variant` flags); a non-`TEXT` product comes back as a `<naips-product>` with `type` set but `text`/`parsed` both `#f` — the base64 is simply not decoded to text. Decoding chart images to a bytevector would be straightforward to add but has no consumer in this module today. `chart-dir`/`get-chart` (retrieving the charts themselves — GAF/SIGWX/GPWT images or PDFs) are separate operations with their own request/response shapes, also not covered.
+- **Everything else**: SPFIB flight-plan templates, NOTAM proposal submission, RAIM, wind/temp profiles, first/last light. Several of these are write operations with real account-state consequences; the rest have entirely different response shapes this module's parser doesn't (and shouldn't be stretched to) handle.
 
 ## API
 
@@ -92,6 +94,22 @@ Same shape, for a whole briefing area instead of named locations. `areas` is 1-5
 
 `entity-id`: a location or area code, 2-5 alphanumeric characters. Requests the NOTAM *summary* briefing (see Scope for why "history" mode isn't offered). Every product comes back classified `'other` (raw text) — there's no structured NOTAM record type to parse into.
 
+### `(naips-general-met-dir requestor password)` → list of *naips-general-met-message*
+
+Lists every general MET message currently available. There's no filter to pass — the request carries only the usual credentials.
+
+```scheme
+(for-each
+  (lambda (m) (display (naips-general-met-message-name m)) (newline))
+  (naips-general-met-dir "MYACCT01" "MyPassw0rd"))
+```
+
+Raises a Scheme error on a SOAP fault or a non-`SUCCESS` status (unlike the four briefing operations, there's no partial/`#f`-content result to return on failure — a directory listing is either fully there or it isn't).
+
+### `(naips-general-met-briefing requestor password name type)` → *naips-briefing*
+
+Fetches one general MET message by the exact `name`/`type` pair from a `naips-general-met-dir` entry (each 1-32 characters — free text, not a fixed code, so pass through what the directory gave you rather than constructing your own). Response shape and error handling match the four briefing operations above (parsed with the same `naips-parse-briefing-response`).
+
 ## Records
 
 ### `<naips-briefing>`
@@ -110,6 +128,12 @@ Same shape, for a whole briefing area instead of named locations. `areas` is 1-5
 - `naips-product-parsed` — the `(curry aviation-weather)` record (`taf-report`/`metar-report`/`atis-report`), or `#f` for `'other`/non-text products.
 - `naips-product->alist` — alist converter; `"parsed"` uses whichever of `taf-report->alist`/`metar-report->alist`/`atis-report->alist` applies.
 
+### `<naips-general-met-message>`
+
+- `naips-general-met-message-name` — the message's name, as it must be passed back to `naips-general-met-briefing`.
+- `naips-general-met-message-type` — the message's type, likewise.
+- `naips-general-met-message->alist` — alist converter (`"name"`/`"type"`).
+
 ## Lower-level: request/response functions
 
 Each operation's request builder and the shared response parser are exported directly — useful for logging/inspecting an outgoing request, sending it over a transport other than `(curry http)`, or parsing a response captured elsewhere (a proxy, a saved log) without a live account. This is also how the test suite exercises the module without network access.
@@ -118,7 +142,10 @@ Each operation's request builder and the shared response parser are exported dir
 - `(naips-build-area-brief-request requestor password areas flags)` → XML string
 - `(naips-build-met-brief-request requestor password locations message-types)` → XML string
 - `(naips-build-notam-brief-request requestor password entity-id)` → XML string
-- `(naips-parse-briefing-response raw-xml)` → *naips-briefing* — shared by all four operations, since they all extend the same `BriefingResponse` type.
+- `(naips-build-general-met-dir-request requestor password)` → XML string
+- `(naips-build-general-met-brief-request requestor password name type)` → XML string
+- `(naips-parse-briefing-response raw-xml)` → *naips-briefing* — shared by five operations (the four briefing operations plus `get-general-met`, since `GetGeneralMETMessageRsp` is also a bare `BriefingResponse` extension).
+- `(naips-parse-general-met-dir-response raw-xml)` → list of *naips-general-met-message* — `general-met-dir-rsp` has its own, distinct response shape (a flat `<msg>` list, no top-level `<content>`, no `<product>`), so it gets its own parser.
 
 ## Security notes
 
