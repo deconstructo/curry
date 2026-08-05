@@ -59,11 +59,20 @@
   (if (not (string=? (naips-briefing-status b) "SUCCESS"))
       (string-append "Status: " (naips-briefing-status b)
                       (let ((i (naips-briefing-info b))) (if i (string-append " — " i) "")))
-      (if (null? (naips-briefing-products b))
-          "Status: SUCCESS (no products returned)"
-          (apply string-append
-                 "Status: SUCCESS\n\n"
-                 (map fmt-product (naips-briefing-products b))))))
+      (cond
+        ((pair? (naips-briefing-products b))
+         (apply string-append
+                "Status: SUCCESS\n\n"
+                (map fmt-product (naips-briefing-products b))))
+        ;; Some operations (e.g. loc-brief with the "met" flag) return the
+        ;; whole briefing as one top-level <content> text blob with no
+        ;; per-report <product> elements at all, even though the WSDL
+        ;; schema allows for that shape — naips-briefing-content still has
+        ;; the real report text in that case, so fall back to it rather
+        ;; than reporting an empty briefing.
+        ((let ((c (naips-briefing-content b))) (and c (> (string-length c) 0) c))
+         => (lambda (c) (string-append "Status: SUCCESS\n\n" c)))
+        (else "Status: SUCCESS (no products returned)"))))
 
 ;;; ---- Tool handlers ----
 
