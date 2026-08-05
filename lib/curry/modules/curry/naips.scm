@@ -15,7 +15,8 @@
 ;;; patterns is enough to pull that apart; a real, general-purpose XML
 ;;; parser (DTDs, mixed content, arbitrary nesting, namespace-aware
 ;;; querying) would be solving a much bigger problem than this one response
-;;; shape actually has.
+;;; shape actually has. Base64 decoding is (curry base64)'s
+;;; base64-decode-string, not hand-rolled here.
 ;;;
 ;;; Scope: the four *briefing* operations (loc-brief/area-brief/met-brief/
 ;;; notam-brief), which all extend the WSDL's BriefingRequest/BriefingResponse
@@ -38,7 +39,7 @@
 ;;; speaks the wire protocol, it does not manage or store credentials.
 
 (define-library (curry naips)
-  (import (scheme base) (curry regex) (curry http) (curry aviation-weather))
+  (import (scheme base) (curry regex) (curry http) (curry base64) (curry aviation-weather))
   (export
     naips-loc-briefing naips-area-briefing naips-met-briefing naips-notam-briefing
     naips-build-loc-brief-request naips-build-area-brief-request
@@ -81,44 +82,6 @@
 (define %rx-ns-prefix (regex-compile "<(/?)[A-Za-z_][A-Za-z0-9_.-]*:"))
 (define (%strip-namespace-prefixes xml)
   (regex-replace %rx-ns-prefix xml "<\\1" #t))
-
-(define %b64-alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
-
-(define (%b64-char-value c)
-  (let loop ((i 0))
-    (cond ((>= i 64) #f)
-          ((char=? c (string-ref %b64-alphabet i)) i)
-          (else (loop (+ i 1))))))
-
-;; Decodes standard base64 (RFC 4648, '=' padding) directly to a string —
-;; the only base64 payloads this module ever handles are TEXT-type NAIPS
-;; products (METAR/TAF/ATIS/NOTAM: plain 7-bit ASCII), never image bytes, so
-;; a bytevector intermediate would add nothing. Whitespace in the input
-;; (line-wrapped base64) is skipped rather than rejected.
-(define (%base64-decode-string s)
-  (let* ((n (string-length s))
-         (out (open-output-string)))
-    (let loop ((i 0) (bits 0) (nbits 0))
-      (if (>= i n)
-          (get-output-string out)
-          (let ((c (string-ref s i)))
-            (cond
-              ((or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return))
-               (loop (+ i 1) bits nbits))
-              ((char=? c #\=)
-               (loop (+ i 1) bits nbits))
-              (else
-               (let ((v (%b64-char-value c)))
-                 (if (not v)
-                     (error "naips: invalid base64 character in product content" c)
-                     (let* ((bits2 (bitwise-or (arithmetic-shift bits 6) v))
-                            (nbits2 (+ nbits 6)))
-                       (if (>= nbits2 8)
-                           (let* ((shift (- nbits2 8))
-                                  (byte (bitwise-and 255 (arithmetic-shift bits2 (- shift)))))
-                             (write-char (integer->char byte) out)
-                             (loop (+ i 1) (bitwise-and bits2 (- (arithmetic-shift 1 shift) 1)) shift))
-                           (loop (+ i 1) bits2 nbits2))))))))))))
 
 (define (%require-length-1-32 s what)
   (when (or (< (string-length s) 1) (> (string-length s) 32))
@@ -352,7 +315,7 @@
          (type-m (regex-match-string %rx-product-type attrs))
          (type (if type-m (cadr type-m) "TEXT")))
     (if (string=? type "TEXT")
-        (let* ((text (%base64-decode-string b64))
+        (let* ((text (base64-decode-string b64))
                (kind (%classify-product-text text)))
           (%make-naips-product type kind text (%parse-product-text kind text)))
         (%make-naips-product type #f #f #f))))

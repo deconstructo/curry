@@ -49,9 +49,13 @@ The raw literal text is kept as-is (not decomposed into year/month/day/etc. fiel
 
 Parse a TOML document string and return its root table (an association list) — every TOML document's top level is a table, so this never returns a bare scalar or array.
 
+### `(toml-read port)` → value
+
+Parse a whole port's content as TOML — reads `port` to end-of-file, then `toml-parse`s the result. TOML's structure (nested tables, multi-line strings) means the full document has to be in hand before parsing can start, so this isn't incremental/streaming parsing — it's the port-native entry point `toml-load-file` itself is built on, useful directly for any other port source (stdin, a socket, an in-memory pipe via `open-input-string`).
+
 ### `(toml-load-file path)` → value
 
-Convenience wrapper reading the whole file first.
+Convenience wrapper: `(call-with-input-file path toml-read)`.
 
 ```scheme
 (import (curry toml))
@@ -87,9 +91,13 @@ Serialize a Scheme value — an association list of string keys, i.e. what `toml
 ; "title = \"Example\"\n\n[owner]\nname = \"Tom\"\n"
 ```
 
+### `(toml-write value port)`
+
+Write `value` as TOML directly to `port`. `toml-stringify`/`toml-dump-file` are both thin wrappers around this (not the other way around), so writing straight to a file never needs the whole document materialized as one intermediate string first.
+
 ### `(toml-dump-file value path)`
 
-Write `(toml-stringify value)` to a file.
+Convenience wrapper: `(call-with-output-file path (lambda (p) (toml-write value p)))`.
 
 ## Notes
 

@@ -37,8 +37,8 @@
   (import (scheme base))
   (export
     toml-datetime toml-datetime? toml-datetime->string
-    toml-parse toml-load-file
-    toml-stringify toml-dump-file)
+    toml-parse toml-read toml-load-file
+    toml-stringify toml-write toml-dump-file)
   (begin
 
 ;;; =========================================================================
@@ -496,8 +496,18 @@
         (unless (eof-object? ch) (write-char ch out) (loop))))
     (get-output-string out)))
 
+;; (toml-read port) -> value — parses a whole port's content as TOML. TOML's
+;; structure (nested tables/arrays, multi-line strings) means the full
+;; document has to be in hand before parsing can even start, so this is
+;; "slurp the port to a string, then toml-parse it" rather than genuine
+;; incremental/streaming parsing — still useful as the port-native entry
+;; point `toml-load-file` and any other port source (stdin, a socket, an
+;; in-memory pipe) build on, instead of each needing its own
+;; read-the-whole-thing-first boilerplate.
+(define (toml-read port) (toml-parse (%port->string port)))
+
 (define (toml-load-file path)
-  (call-with-input-file path (lambda (p) (toml-parse (%port->string p)))))
+  (call-with-input-file path toml-read))
 
 ;;; =========================================================================
 ;;; Writing
@@ -634,14 +644,23 @@
              v)))))
     alist))
 
-(define (toml-stringify value)
+;; (toml-write value port) — writes `value` as TOML directly to `port`,
+;; without ever materializing the whole document as one intermediate
+;; string first — `toml-stringify`/`toml-dump-file` below are both thin
+;; wrappers around this, not the other way around, so a large document
+;; written straight to a file only ever needs one line/value in flight at
+;; a time.
+(define (toml-write value port)
   (unless (or (null? value) (%value-table? value))
-    (%toml-error "toml-stringify: the top-level value must be a table (an association list of string keys)" value))
+    (%toml-error "toml-write: the top-level value must be a table (an association list of string keys)" value))
+  (%write-table-body value '() port))
+
+(define (toml-stringify value)
   (let ((out (open-output-string)))
-    (%write-table-body value '() out)
+    (toml-write value out)
     (get-output-string out)))
 
 (define (toml-dump-file value path)
-  (call-with-output-file path (lambda (p) (write-string (toml-stringify value) p))))
+  (call-with-output-file path (lambda (p) (toml-write value p))))
 
   )) ;; end begin, define-library

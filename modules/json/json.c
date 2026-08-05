@@ -4,7 +4,17 @@
  * Scheme API:
  *   (json-parse string)         -> Scheme value
  *   (json-stringify value)      -> string
- *   (json-parse-port port)      -> Scheme value
+ *   (json-read port)            -> Scheme value
+ *   (json-write value port)     -> unspecified
+ *   (json-load-file path)       -> Scheme value
+ *   (json-dump-file value path) -> unspecified
+ *
+ * json-read/json-write go through curry_port_read_byte/
+ * curry_port_write_string (include/curry.h) so they work on any port —
+ * string, bytevector, or file. json-load-file/json-dump-file use plain
+ * fopen/fread/fwrite/fclose directly rather than the port API, so the file
+ * is flushed and closed deterministically on return, not whenever the
+ * port's GC finalizer happens to run.
  *
  * Mapping:
  *   JSON null        -> #f  (or (json-null) sentinel — configurable)
@@ -275,7 +285,89 @@ static curry_val fn_json_stringify(int argc, curry_val *argv, void *ud) {
     return r;
 }
 
+/* Reads a whole port to a growable buffer via curry_port_read_byte. Used
+ * by both json-read and json-load-file's in-memory equivalent — JSON's
+ * structure (nested objects/arrays) means json_parse_value needs to look
+ * ahead arbitrarily anyway, so there's no genuine incremental-parsing win
+ * from feeding it one byte at a time instead of one contiguous buffer. */
+static char *slurp_port(curry_val port, size_t *out_len) {
+    size_t cap = 256, len = 0;
+    char *buf = malloc(cap);
+    int b;
+    while ((b = curry_port_read_byte(port)) >= 0) {
+        if (len + 2 >= cap) { cap *= 2; buf = realloc(buf, cap); }
+        buf[len++] = (char)b;
+    }
+    buf[len] = '\0';
+    if (out_len) *out_len = len;
+    return buf;
+}
+
+static curry_val fn_json_read(int argc, curry_val *argv, void *ud) {
+    (void)ud; (void)argc;
+    if (!curry_is_port(argv[0])) curry_error("json-read: not a port");
+    char *buf = slurp_port(argv[0], NULL);
+    const char *p = buf;
+    curry_val result = json_parse_value(&p);
+    free(buf);
+    return result;
+}
+
+static curry_val fn_json_write(int argc, curry_val *argv, void *ud) {
+    (void)ud; (void)argc;
+    if (!curry_is_port(argv[1])) curry_error("json-write: not a port");
+    size_t cap=256, len=0;
+    char *buf = malloc(cap);
+    json_write_value(argv[0], &buf, &len, &cap);
+    buf[len] = '\0';
+    curry_port_write_string(argv[1], buf);
+    free(buf);
+    return curry_void();
+}
+
+/* json-load-file/json-dump-file use plain C file I/O rather than the
+ * port API — deterministic fopen/fclose on every call, rather than
+ * leaving an intermediate port's flush/close timing to whenever its GC
+ * finalizer happens to run. */
+static curry_val fn_json_load_file(int argc, curry_val *argv, void *ud) {
+    (void)ud; (void)argc;
+    const char *path = curry_string(argv[0]);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) curry_error("json-load-file: cannot open '%s'", path);
+    size_t cap = 4096, len = 0;
+    char *buf = malloc(cap);
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len, fp)) > 0) {
+        len += n;
+        if (len + 4096 >= cap) { cap *= 2; buf = realloc(buf, cap); }
+    }
+    fclose(fp);
+    buf[len] = '\0';
+    const char *p = buf;
+    curry_val result = json_parse_value(&p);
+    free(buf);
+    return result;
+}
+
+static curry_val fn_json_dump_file(int argc, curry_val *argv, void *ud) {
+    (void)ud; (void)argc;
+    const char *path = curry_string(argv[1]);
+    FILE *fp = fopen(path, "wb");
+    if (!fp) curry_error("json-dump-file: cannot open '%s' for writing", path);
+    size_t cap=256, len=0;
+    char *buf = malloc(cap);
+    json_write_value(argv[0], &buf, &len, &cap);
+    fwrite(buf, 1, len, fp);
+    fclose(fp);
+    free(buf);
+    return curry_void();
+}
+
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "json-parse",     fn_json_parse,     1, 1, NULL);
     curry_define_fn(vm, "json-stringify", fn_json_stringify, 1, 1, NULL);
+    curry_define_fn(vm, "json-read",      fn_json_read,      1, 1, NULL);
+    curry_define_fn(vm, "json-write",     fn_json_write,     2, 2, NULL);
+    curry_define_fn(vm, "json-load-file", fn_json_load_file, 1, 1, NULL);
+    curry_define_fn(vm, "json-dump-file", fn_json_dump_file, 2, 2, NULL);
 }

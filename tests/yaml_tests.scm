@@ -217,6 +217,22 @@
        '(("hello" . "world") ("n" . 5)))
 (delete-file tmp-path)
 
+;;; Port-level API (yaml-read/yaml-read-all/yaml-write)
+
+(check "yaml-read matches yaml-parse, given a port"
+       (yaml-read (open-input-string "hello: world\nn: 5"))
+       (yaml-parse "hello: world\nn: 5"))
+
+(check "yaml-read-all matches yaml-parse-all, given a port"
+       (yaml-read-all (open-input-string "a: 1\n---\nb: 2"))
+       (yaml-parse-all "a: 1\n---\nb: 2"))
+
+(check "yaml-write matches yaml-stringify, given a port"
+       (let ((out (open-output-string)))
+         (yaml-write '(("hello" . "world") ("n" . 5)) out)
+         (get-output-string out))
+       (yaml-stringify '(("hello" . "world") ("n" . 5))))
+
 ;;; Summary
 
 (newline)

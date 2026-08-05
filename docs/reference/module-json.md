@@ -27,10 +27,18 @@ Parse a JSON string and return the corresponding Scheme value.
 | `false` | `#f` |
 | number | fixnum or flonum |
 | string | string |
-| array | list |
+| array | vector |
 | object | association list `((key . value) ...)` where keys are strings |
 
 Raises an error if the input is not valid JSON.
+
+### `(json-read port)` → value
+
+Like `json-parse`, but reads from `port` (string, bytevector, or file) instead of an already-in-hand string. Reads `port` to end-of-file first — JSON's structure (nested objects/arrays) means the parser needs to look ahead arbitrarily anyway, so this isn't incremental/streaming parsing, just a port-native entry point. Raises if `port` isn't actually a port.
+
+### `(json-load-file path)` → value
+
+Convenience wrapper: opens `path`, reads and parses its entire content, closes the file. Raises if `path` can't be opened.
 
 ### `(json-stringify value)` → string
 
@@ -47,13 +55,21 @@ Serialise a Scheme value to a JSON string.
 | list | array |
 | vector | array |
 
+### `(json-write value port)`
+
+Like `json-stringify`, but writes directly to `port` (string, bytevector, or file) instead of building and returning a string. Raises if `port` isn't actually a port.
+
+### `(json-dump-file value path)`
+
+Convenience wrapper: opens `path`, writes `value` as JSON, closes the file. Raises if `path` can't be opened for writing.
+
 ## Examples
 
 ```scheme
 (import (curry json))
 
 (define data (json-parse "{\"name\":\"Alice\",\"age\":30,\"tags\":[\"admin\",\"user\"]}"))
-; => (("name" . "Alice") ("age" . 30) ("tags" . ("admin" "user")))
+; => (("tags" . #("admin" "user")) ("age" . 30) ("name" . "Alice"))
 
 (cdr (assoc "name" data))   ; => "Alice"
 (cdr (assoc "age"  data))   ; => 30
@@ -63,6 +79,13 @@ Serialise a Scheme value to a JSON string.
 
 (json-stringify '(1 2 3 "hello" #t))
 ; => "[1,2,3,\"hello\",true]"
+
+;; Port and file forms
+(json-read (open-input-string "{\"n\":1}"))       ; => (("n" . 1))
+(json-write '(("n" . 1)) (current-output-port))   ; writes {"n":1} to stdout
+
+(json-dump-file '(("hello" . "world")) "config.json")
+(json-load-file "config.json")                    ; => (("hello" . "world"))
 ```
 
 ## Notes

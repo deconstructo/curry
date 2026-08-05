@@ -38,7 +38,7 @@ A real, general-purpose XML parser would need to handle DTDs, mixed content, arb
 
 ### Report classification
 
-Each `TEXT`-type product's base64 is decoded (a hand-rolled RFC 4648 decoder — the only base64 payloads this module ever handles are plain 7-bit ASCII reports, so a bytevector intermediate would add nothing) and classified by its leading token, the same way `(curry aviation-weather)` itself distinguishes report types: `TAF` → `taf-parse`, `METAR`/`SPECI` → `metar-parse`, a bare `HHMMZ` timestamp → `atis-parse`. Anything else (NOTAM text, SIGMET/AIRMET, ...) is classified `'other` and exposed as raw text only — `(curry aviation-weather)` has no NOTAM structural parser.
+Each `TEXT`-type product's base64 is decoded via `(curry base64)`'s `base64-decode-string` and classified by its leading token, the same way `(curry aviation-weather)` itself distinguishes report types: `TAF` → `taf-parse`, `METAR`/`SPECI` → `metar-parse`, a bare `HHMMZ` timestamp → `atis-parse`. Anything else (NOTAM text, SIGMET/AIRMET, ...) is classified `'other` and exposed as raw text only — `(curry aviation-weather)` has no NOTAM structural parser.
 
 ## Scope
 

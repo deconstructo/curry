@@ -27,8 +27,8 @@
   (export
     yaml-null yaml-null?
     yaml-parse yaml-parse-all
-    yaml-load-file yaml-load-file-all
-    yaml-stringify yaml-dump-file)
+    yaml-read yaml-read-all yaml-load-file yaml-load-file-all
+    yaml-stringify yaml-write yaml-dump-file)
   (begin
 
 ;;; =========================================================================
@@ -969,15 +969,22 @@
                 (begin (write-char #\newline out) (%emit-node v (+ indent 2) out))))
           (loop (cdr xs))))))
 
+;; (yaml-write value port) — writes `value` as YAML directly to `port`,
+;; without ever materializing the whole document as one intermediate string
+;; first. `yaml-stringify`/`yaml-dump-file` are both thin wrappers around
+;; this, not the other way around.
+(define (yaml-write value port)
+  (if (%scalar-value? value)
+      (begin (%emit-scalar value 0 port) (write-char #\newline port))
+      (%emit-node value 0 port)))
+
 (define (yaml-stringify value)
   (let ((out (open-output-string)))
-    (if (%scalar-value? value)
-        (begin (%emit-scalar value 0 out) (write-char #\newline out))
-        (%emit-node value 0 out))
+    (yaml-write value out)
     (get-output-string out)))
 
 ;;; =========================================================================
-;;; File convenience wrappers
+;;; Port / file convenience wrappers
 ;;; =========================================================================
 
 (define (%port->string p)
@@ -987,13 +994,25 @@
         (unless (eof-object? ch) (write-char ch out) (loop))))
     (get-output-string out)))
 
+;; (yaml-read port) / (yaml-read-all port) -> value(s) — parse a whole
+;; port's content as a single YAML document, or as a multi-document stream,
+;; respectively. YAML's structure (block indentation, anchors resolved
+;; across the whole document) means the full content has to be in hand
+;; before parsing can start, so this is "slurp the port to a string, then
+;; parse it" rather than incremental/streaming parsing — still the
+;; port-native entry point `yaml-load-file`/`yaml-load-file-all` are built
+;; on, useful directly for any other port source (stdin, a socket, an
+;; in-memory pipe via `open-input-string`).
+(define (yaml-read port) (yaml-parse (%port->string port)))
+(define (yaml-read-all port) (yaml-parse-all (%port->string port)))
+
 (define (yaml-load-file path)
-  (call-with-input-file path (lambda (p) (yaml-parse (%port->string p)))))
+  (call-with-input-file path yaml-read))
 
 (define (yaml-load-file-all path)
-  (call-with-input-file path (lambda (p) (yaml-parse-all (%port->string p)))))
+  (call-with-input-file path yaml-read-all))
 
 (define (yaml-dump-file value path)
-  (call-with-output-file path (lambda (p) (write-string (yaml-stringify value) p))))
+  (call-with-output-file path (lambda (p) (yaml-write value p))))
 
   )) ;; end begin, define-library

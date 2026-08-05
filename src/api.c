@@ -230,6 +230,23 @@ curry_val curry_make_port_from_file(FILE *fp, bool output, bool binary) {
     return port_wrap_file_owned(fp, flags);
 }
 
+bool curry_is_port(curry_val v) { return vis_port(v); }
+
+int curry_port_read_byte(curry_val port) {
+    if (!vis_port(port)) return -1;
+    return port_read_byte((val_t)port);
+}
+
+void curry_port_write_byte(curry_val port, uint8_t b) {
+    if (!vis_port(port)) return;
+    port_write_byte((val_t)port, b);
+}
+
+void curry_port_write_string(curry_val port, const char *s) {
+    if (!vis_port(port)) return;
+    port_write_string((val_t)port, s, (uint32_t)strlen(s));
+}
+
 /* ---- List helpers ---- */
 
 curry_val curry_list(int n, ...) {

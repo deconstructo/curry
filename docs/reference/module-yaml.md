@@ -52,10 +52,15 @@ Parse a YAML string and return the first (or only) document. Returns `yaml-null`
 
 Parse a `---`-separated multi-document stream and return every document as a list.
 
+### `(yaml-read port)` → value
+### `(yaml-read-all port)` → list of values
+
+Parse a whole port's content as a single document, or as a multi-document stream, respectively — reads `port` to end-of-file, then `yaml-parse`/`yaml-parse-all`s the result. YAML's structure (block indentation, anchors resolved across the whole document) means the full content has to be in hand before parsing can start, so this isn't incremental/streaming parsing — it's the port-native entry point `yaml-load-file`/`yaml-load-file-all` are built on, useful directly for any other port source (stdin, a socket, an in-memory pipe via `open-input-string`).
+
 ### `(yaml-load-file path)` → value
 ### `(yaml-load-file-all path)` → list of values
 
-Convenience wrappers reading the whole file first.
+Convenience wrappers: `(call-with-input-file path yaml-read)` / `yaml-read-all`.
 
 ```scheme
 (import (curry yaml))
@@ -91,9 +96,13 @@ Serialize a Scheme value to a YAML string, block style, 2-space indentation.
 | list or vector | block sequence |
 | `'()` / empty vector / empty hash table | inline `[]` / `{}` |
 
+### `(yaml-write value port)`
+
+Write `value` as YAML directly to `port`. `yaml-stringify`/`yaml-dump-file` are both thin wrappers around this (not the other way around), so writing straight to a file never needs the whole document materialized as one intermediate string first.
+
 ### `(yaml-dump-file value path)`
 
-Write `(yaml-stringify value)` to a file.
+Convenience wrapper: `(call-with-output-file path (lambda (p) (yaml-write value p)))`.
 
 ```scheme
 (import (curry yaml))

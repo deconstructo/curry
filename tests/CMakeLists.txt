@@ -31,6 +31,7 @@ add_test(NAME sx_risch      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sx_risch_t
 add_test(NAME logic        COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/logic_tests.scm)
 add_test(NAME aviation_weather COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/aviation_weather_tests.scm)
 add_test(NAME naips COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/naips_tests.scm)
+add_test(NAME base64 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/base64_tests.scm)
 add_test(NAME random       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/random_tests.scm)
 add_test(NAME sets         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/set_tests.scm)
 add_test(NAME sets_module  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sets_module_tests.scm)

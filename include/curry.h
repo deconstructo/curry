@@ -185,6 +185,32 @@ curry_val  curry_make_port_from_file(FILE *fp, bool output, bool binary);
  * string port or a closed port. */
 int        curry_port_fd(curry_val port);
 
+/* Generic byte-level port I/O for module authors whose C code already
+ * works on raw bytes/C strings (e.g. a parser like curry_json's, which
+ * needs its whole input as one contiguous buffer before it can even
+ * start, and produces its output the same way) and just needs to read
+ * from or write to whatever port a caller passes — a string port, a
+ * bytevector port, or a file port — without needing separate code paths
+ * for each. curry_port_read_byte/curry_port_write_byte/
+ * curry_port_write_string are safe to call on any curry_val; they check
+ * curry_is_port themselves rather than assuming the caller already did. */
+
+/* True iff v is a port (string-, bytevector-, or file-backed; input or
+ * output). */
+bool curry_is_port(curry_val v);
+
+/* Reads one raw byte from an input port. Returns 0-255, or -1 at
+ * end-of-file, on a closed port, or if port isn't actually a port. */
+int  curry_port_read_byte(curry_val port);
+
+/* Writes one raw byte to an output port. No-op on a closed port or a
+ * non-port value. */
+void curry_port_write_byte(curry_val port, uint8_t byte);
+
+/* Writes a NUL-terminated C string's bytes verbatim (no re-encoding) to
+ * an output port. No-op on a closed port or a non-port value. */
+void curry_port_write_string(curry_val port, const char *s);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

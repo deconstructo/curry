@@ -42,6 +42,57 @@
 (check "malformed: truncated unicode escape does not crash"
   (json-parse "\"\\u") "")
 
+;;; Port-level API (json-read/json-write) — generic curry_port_read_byte/
+;;; curry_port_write_string based, so these should agree exactly with the
+;;; string-based json-parse/json-stringify.
+
+(check "json-read matches json-parse, given a string input port"
+  (json-read (open-input-string "{\"a\":1,\"b\":2}"))
+  (json-parse "{\"a\":1,\"b\":2}"))
+
+(check "json-read matches json-parse for an array"
+  (json-read (open-input-string "[1,2,3]"))
+  (json-parse "[1,2,3]"))
+
+(check "json-write matches json-stringify, given a string output port"
+  (let ((out (open-output-string)))
+    (json-write (list (cons "x" 1) (cons "y" "z")) out)
+    (get-output-string out))
+  (json-stringify (list (cons "x" 1) (cons "y" "z"))))
+
+(check "json-write on a bytevector output port then json-read round-trips"
+  (let ((out (open-output-bytevector)))
+    (json-write (list (cons "n" 42)) out)
+    (json-read (open-input-bytevector (get-output-bytevector out))))
+  (json-parse "{\"n\":42}"))
+
+(check "json-read on a non-port raises"
+  (guard (e (#t 'raised)) (json-read "not a port") 'not-raised)
+  'raised)
+
+(check "json-write on a non-port raises"
+  (guard (e (#t 'raised)) (json-write 5 "not a port") 'not-raised)
+  'raised)
+
+;;; File convenience wrappers
+
+;; json-load-file re-parses through json-parse's own alist builder, which
+;; (like "parse object" above) prepends key/value pairs while parsing —
+;; the round-tripped alist's key order is reversed from the original, same
+;; as any other json-parse result. Written already in that expected order
+;; rather than re-asserting the reversal is a bug it isn't.
+(let* ((path (string-append "/tmp/curry-json-file-roundtrip-test-" (number->string (current-jiffy)) ".json"))
+       (doc (list (cons "title" "Example") (cons "nums" (vector 1 2 3)))))
+  (json-dump-file doc path)
+  (check "json-load-file . json-dump-file round trip"
+         (json-load-file path)
+         (list (cons "nums" (vector 1 2 3)) (cons "title" "Example")))
+  (delete-file path))
+
+(check "json-load-file on a missing path raises"
+  (guard (e (#t 'raised)) (json-load-file "/nonexistent/path/does-not-exist.json") 'not-raised)
+  'raised)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

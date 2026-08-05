@@ -160,6 +160,29 @@
          (norm (toml-parse (toml-stringify doc)))
          (norm doc)))
 
+;;; Port-level API (toml-read/toml-write) and the file convenience functions
+;;; built on them
+
+(check "toml-read matches toml-parse, given a port"
+       (toml-read (open-input-string "s = \"hello\"\nn = 42"))
+       (toml-parse "s = \"hello\"\nn = 42"))
+
+(check "toml-write matches toml-stringify, given a port"
+       (let ((out (open-output-string)))
+         (toml-write '(("title" . "Example") ("n" . 42)) out)
+         (get-output-string out))
+       (toml-stringify '(("title" . "Example") ("n" . 42))))
+
+(check "toml-write on a non-table raises"
+       (guard (e (#t 'raised)) (toml-write 5 (open-output-string)) 'not-raised)
+       'raised)
+
+(let* ((path "/tmp/curry-toml-file-roundtrip-test.toml")
+       (doc (list (cons "title" "Example") (cons "nums" (list 1 2 3)))))
+  (toml-dump-file doc path)
+  (check "toml-load-file . toml-dump-file round trip" (toml-load-file path) doc)
+  (delete-file path))
+
 ;;; Errors
 
 (check "missing = raises" (guard (e (#t 'raised)) (toml-parse "x 1")) 'raised)
