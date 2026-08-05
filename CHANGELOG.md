@@ -1,5 +1,30 @@
 # Changelog
 
+### 1.16.0 - 2026-08-05
+
+**New — `(curry naips)`: Airservices Australia NAIPS briefing-service client**
+
+Pure-Scheme SOAP client for NAIPS's public `briefing-service` endpoint,
+covering the `loc-brief`/`area-brief`/`met-brief`/`notam-brief` operation
+family (`naips-loc-briefing`, `naips-area-briefing`, `naips-met-briefing`,
+`naips-notam-briefing`). Rather than a general XML parser, the response
+schema (pulled from the service's own WSDL/XSD) is handled with a
+namespace-prefix-stripping pass plus a handful of small, anchored
+`(curry regex)` patterns — the same one-tiny-pattern-per-field approach
+`(curry aviation-weather)` already uses — since every product comes back
+as base64 inside a flat, one-level-deep `<product>` list. Decoded `TEXT`
+products are classified and handed straight to `(curry aviation-weather)`'s
+`metar-parse`/`taf-parse`/`atis-parse`. See `docs/reference/module-naips.md`.
+
+**New — `examples/mcp_naips.scm`: NAIPS briefings as MCP tools**
+
+Exposes the four briefing operations as MCP tools (`loc_briefing`,
+`area_briefing`, `met_briefing`, `notam_briefing`) for Claude Code or any
+other MCP client. Credentials are read once from `NAIPS_REQUESTOR`/
+`NAIPS_PASSWORD` at server startup rather than taken as a tool argument,
+so a password never flows through a tool call, an MCP client's call log,
+or an LLM's context window.
+
 ### 1.15.0 - 2026-08-04
 
 **New — `(curry posix)`: argv-based process execution, no shell**

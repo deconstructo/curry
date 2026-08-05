@@ -2,10 +2,10 @@
 
 *Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Corrected 2026-07-17
 against actual shipped state through v1.8.0 — see "Where we are now" and
-"Decided against" below. Updated 2026-08-04 for v1.15.0. Source:
-cill_spec.pdf + design sessions.*
+"Decided against" below. Updated 2026-08-04 for v1.15.0. Updated
+2026-08-05 for v1.16.0. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.15.0 (released). Since this roadmap was last updated: Phase
+Curry is at v1.16.0 (released). Since this roadmap was last updated: Phase
 4 (Extensible CAS) finished completely, generational GC shipped as an
 experimental opt-in backend, a `(curry sets)`/`(curry logic)` pair of
 modules realized part of Phase 7's pluggable-foundations idea in pure
@@ -27,7 +27,7 @@ argv-based subprocess execution (`process-run`/`process-start`, no shell)
 landed alongside several new pure-Scheme domain modules (aviation weather,
 Babylonian astronomy, YAML, TOML). None of this was tracked against a
 roadmap phase at the time it shipped — see `CHANGELOG.md` v1.8.3 through
-v1.15.0 for the full list. Some things were also explicitly decided
+v1.16.0 for the full list. Some things were also explicitly decided
 *against* rather than simply not gotten to yet — see the "Decided
 against" section before the summary timeline. This document maps the
 path from here to a compiled Scheme for scientific computing — the full
@@ -36,7 +36,7 @@ unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.15.0)
+## Where we are now (v1.16.0)
 
 | Capability | Status |
 |---|---|
@@ -950,6 +950,7 @@ GR/QM library the original mapping promised for that slot):
 | ~~**v1.13.0**~~ | `(surfage sN name)` renamed to `(srfi sN name)`; 14 new SRFI compatibility libraries; CodeQL security fixes; `redis-connect-tls` hostname-verification fix | ✓ shipped |
 | ~~**v1.14.0–1.14.2**~~ | `(curry babylonian-astronomy)`; cuneiform notation covers the whole numeric tower; flonum print-precision fix; genuine TCO for `call-with-values`/`receive`/`let-values`; SRFI-54/111/195/209/210/252/261/263 | ✓ shipped |
 | ~~**v1.15.0**~~ | `(curry posix)` argv-based process execution (`process-run`/`process-start`, no shell — not tracked against any phase above); `system`'s exit-code decoding fixed; `(curry toml)`; every pure-Scheme `(curry X)` module converted to `define-library` (real export enforcement, not just SRFI libraries) | ✓ shipped |
+| ~~**v1.16.0**~~ | `(curry naips)` Airservices Australia NAIPS briefing-service client (loc/area/met/notam briefing, built on `(curry aviation-weather)`'s METAR/TAF/ATIS parsing — not tracked against any phase above); `examples/mcp_naips.scm` exposes it as MCP tools | ✓ shipped |
 
 Remaining phases, in the dependency order from the top of this document —
 not pinned to specific version numbers, since the original numbering
