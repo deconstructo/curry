@@ -140,6 +140,16 @@
 (check "write-string out-of-range raises"
        (guard (exn (#t 'raised))
          (write-string "abc" (open-output-string) 0 100)) 'raised)
+(check "write-string preserves multi-byte UTF-8 to a string port"
+       (let ((out (open-output-string)))
+         (write-string "Acme \x2014; test" out)
+         (get-output-string out))
+       "Acme \x2014; test")
+(check "write preserves multi-byte UTF-8 in a quoted string to a string port"
+       (let ((out (open-output-string)))
+         (write "Acme \x2014; test" out)
+         (get-output-string out))
+       "\"Acme \x2014; test\"")
 (check "string->utf8 out-of-range raises"
        (guard (exn (#t 'raised)) (string->utf8 "abc" 0 100)) 'raised)
 (check "utf8->string out-of-range raises"

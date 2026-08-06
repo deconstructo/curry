@@ -346,6 +346,13 @@ val_t port_get_output_bytevector(val_t v) {
 /* ---- Display / Write ---- */
 
 static void write_string_escaped(val_t port, const char *s, uint32_t len) {
+    /* Scans byte-by-byte (safe: every UTF-8 continuation/lead byte is
+       >= 0x80, so it can never be mistaken for one of the ASCII escape
+       triggers below), but a pass-through byte must reach the port as a
+       raw byte via port_write_string, not via port_write_char — the
+       latter treats its argument as a full Unicode codepoint and
+       UTF-8-encodes it, which double-encodes any multi-byte character
+       one raw byte at a time. */
     port_write_char(port, '"');
     for (uint32_t i = 0; i < len; i++) {
         char c = s[i];
@@ -354,7 +361,7 @@ static void write_string_escaped(val_t port, const char *s, uint32_t len) {
         else if (c == '\n') { port_write_string(port, "\\n", 2);  }
         else if (c == '\r') { port_write_string(port, "\\r", 2);  }
         else if (c == '\t') { port_write_string(port, "\\t", 2);  }
-        else                { port_write_char(port, (unsigned char)c); }
+        else                { port_write_string(port, s + i, 1);  }
     }
     port_write_char(port, '"');
 }

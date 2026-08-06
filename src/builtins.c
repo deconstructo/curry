@@ -862,7 +862,7 @@ static val_t prim_write_string(int ac, val_t *av, void *ud) {
     val_t port = ac > 1 ? av[1] : PORT_STDOUT;
     uint32_t sb, eb;
     string_range_to_bytes(sd, s->len, ac, av, 2, "write-string", &sb, &eb);
-    for (uint32_t i = sb; i < eb; i++) port_write_byte(port, (uint8_t)sd[i]);
+    port_write_string(port, sd + sb, eb - sb);
     return V_VOID;
 }
 static val_t prim_string_to_utf8(int ac, val_t *av, void *ud) {
