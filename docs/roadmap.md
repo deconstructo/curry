@@ -3,9 +3,10 @@
 *Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Corrected 2026-07-17
 against actual shipped state through v1.8.0 — see "Where we are now" and
 "Decided against" below. Updated 2026-08-04 for v1.15.0. Updated
-2026-08-05 for v1.16.0. Source: cill_spec.pdf + design sessions.*
+2026-08-05 for v1.16.0. Updated 2026-08-06 for v1.17.0. Source:
+cill_spec.pdf + design sessions.*
 
-Curry is at v1.16.0 (released). Since this roadmap was last updated: Phase
+Curry is at v1.17.0 (released). Since this roadmap was last updated: Phase
 4 (Extensible CAS) finished completely, generational GC shipped as an
 experimental opt-in backend, a `(curry sets)`/`(curry logic)` pair of
 modules realized part of Phase 7's pluggable-foundations idea in pure
@@ -27,7 +28,7 @@ argv-based subprocess execution (`process-run`/`process-start`, no shell)
 landed alongside several new pure-Scheme domain modules (aviation weather,
 Babylonian astronomy, YAML, TOML). None of this was tracked against a
 roadmap phase at the time it shipped — see `CHANGELOG.md` v1.8.3 through
-v1.16.0 for the full list. Some things were also explicitly decided
+v1.17.0 for the full list. Some things were also explicitly decided
 *against* rather than simply not gotten to yet — see the "Decided
 against" section before the summary timeline. This document maps the
 path from here to a compiled Scheme for scientific computing — the full
@@ -36,7 +37,7 @@ unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.16.0)
+## Where we are now (v1.17.0)
 
 | Capability | Status |
 |---|---|

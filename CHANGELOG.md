@@ -1,5 +1,39 @@
 # Changelog
 
+### 1.17.0 - 2026-08-06
+
+**New — `(curry okf)`: Open Knowledge Format v0.2 bundle reader/query/writer**
+
+Loads, queries, links, and writes OKF bundles — directories of markdown
+files with YAML frontmatter carrying provenance, trust, and lifecycle
+metadata. Frontmatter parsing/serialization is delegated entirely to
+`(curry yaml)`; this module covers what's OKF-specific: trust-tier and
+staleness derivation, the concept link graph, Attested Computation
+helpers (both the fenced and 4-space-indented inline-computation forms),
+and atomic bundle-relative writing with path-traversal guards on the
+write/index/log entry points. Validated against a real bundle vendored
+from the OKF reference implementation
+(`tests/fixtures/okf-real/acme_retail`), not only synthetic fixtures.
+See `docs/reference/module-okf.md`.
+
+**New — three `(curry okf)` examples**
+
+`examples/okf_bundle_report.scm` (plain-text bundle health report),
+`examples/mcp_okf.scm` (the design doc's MCP knowledge server, made
+runnable), and `examples/okf_bootstrap_bundle.scm` (the producer side —
+mint, write, index, log, reload).
+
+**Fix — `write-string`/`write` corrupted multi-byte UTF-8 on string ports**
+
+Both wrote a string's raw bytes one at a time through `port_write_char`,
+which treats its argument as a full Unicode codepoint and re-encodes it
+— double-encoding any non-ASCII character into mojibake whenever written
+via `write-string`, or via `write`'s string-quoting path, to an
+`open-output-string` port. File/stdout ports and `display` were
+unaffected. Found via `(curry yaml)`'s plain-scalar folder, which uses
+`write-string` internally and so silently corrupted any unquoted
+YAML/OKF scalar containing non-ASCII text.
+
 ### 1.16.0 - 2026-08-05
 
 **New — `(curry naips)`: Airservices Australia NAIPS briefing-service client**
