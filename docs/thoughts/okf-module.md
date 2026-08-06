@@ -127,42 +127,46 @@ already carries the structure.
 (import (curry okf) (curry mcp))
 
 (define bundle (okf-load-bundle "./bundles/ga4"))
-(define graph  (okf-bundle->graph bundle))
-(define back   (okf-graph-backlinks graph))
 
-;; Expose individual concepts as MCP resources — the LLM fetches one at a time,
-;; following links as it needs them. OKF's progressive disclosure maps exactly
-;; to how an LLM agent actually wants to work.
-(mcp-resource "okf://concept/{id}"
-  (lambda (id)
-    (let ((c (okf-bundle-ref bundle id)))
-      (and c (okf-concept-body c)))))
+;; (curry mcp) resources are static URIs, not templates — so each concept
+;; gets its own registration up front, one per id, rather than a single
+;; "okf://concept/{id}" pattern. The LLM still fetches one at a time,
+;; following links as it needs them; OKF's progressive disclosure maps
+;; exactly to how an LLM agent actually wants to work.
+(for-each
+  (lambda (c)
+    (mcp-resource (string-append "okf://concept/" (okf-concept-id c))
+      (string-append "OKF concept: " (or (okf-concept-title c) (okf-concept-id c)))
+      (lambda (uri) (mcp-text (okf-concept-body c)))))
+  (okf-bundle-concepts bundle))
 
 ;; Tools for structured queries the LLM can call instead of reading every file
-(mcp-tool "find-concepts"
-  '((type . string) (tag . string))
+(mcp-tool "find-concepts" "List concept ids of a given type"
+  '((type . ((type . "string") (description . "OKF type, e.g. \"BigQuery Table\""))))
   (lambda (args)
-    (map okf-concept-id
-         (okf-concepts-by-type bundle (alist-ref 'type args)))))
+    (mcp-json (map okf-concept-id
+                   (okf-concepts-by-type bundle (arg args 'type))))))
 
-(mcp-tool "trust-summary" '()
+(mcp-tool "trust-summary" "Count concepts per trust tier" '()
   (lambda (_)
-    (map (lambda (tier)
-           (cons tier (length (okf-concepts-by-trust-tier bundle tier))))
-         '(unverified machine-confirmed human-reviewed))))
+    (mcp-json (map (lambda (tier)
+                      (cons tier (length (okf-concepts-by-trust-tier bundle tier))))
+                    '(unverified machine-confirmed human-reviewed)))))
 
-(mcp-tool "stale-concepts" '()
+(mcp-tool "stale-concepts" "List concepts past their stale_after date" '()
   (lambda (_)
-    (map (lambda (c)
-           `((id . ,(okf-concept-id c))
-             (stale_after . ,(okf-concept-stale-after c))
-             (trust . ,(symbol->string (okf-trust-tier c)))))
-         (okf-concepts-stale bundle))))
+    (mcp-json (map (lambda (c)
+                      `((id . ,(okf-concept-id c))
+                        (stale_after . ,(okf-concept-stale-after c))
+                        (trust . ,(symbol->string (okf-trust-tier c)))))
+                    (okf-concepts-stale bundle)))))
 
-(mcp-serve)
+(mcp-serve "okf" "1.0")
 ```
 
-That is an MCP knowledge server in roughly 30 lines. The host LLM can fetch concepts by
+That is an MCP knowledge server in roughly 30 lines (a fuller version, with
+backlink/broken-link tools and a resource per concept, lives at
+`examples/mcp_okf.scm`). The host LLM can fetch concepts by
 id (getting back the markdown OKF already formats for readability), ask what concepts
 exist by type or tag, check what is stale and how trusted each thing is, and navigate the
 graph by following the links embedded in concept bodies — all without loading the whole

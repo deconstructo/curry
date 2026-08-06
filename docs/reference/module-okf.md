@@ -195,6 +195,14 @@ Appends a `- YYYY-MM-DD **kind** — text` line to `dir/log.md`, creating it if 
 - **Path safety.** `okf-write-concept`/`okf-generate-index`/`okf-log-append` all validate their bundle-relative-path argument before touching the filesystem; this exists specifically because those arguments are the kind of value an agentic caller might pass unsanitized (see `docs/thoughts/okf-module.md`'s MCP-server example, which forwards an agent-supplied concept id straight into `okf-write-concept`).
 - **`okf-resolve-link` never touches the filesystem.** It's a pure string computation followed by a hash-table lookup — a link body can contain arbitrary `../../..` traversal attempts and the worst outcome is `okf-resolve-link` returning `#f` (or, in principle, a different bundle id if one happens to collide after clamping), never a filesystem read outside the bundle.
 
+## Examples
+
+- [`examples/okf_bundle_report.scm`](../../examples/okf_bundle_report.scm) — plain-text health report for a bundle: counts by type, trust tiers, stale concepts, broken links, most-linked-to concepts. No MCP, no setup — the fastest way to see the module do something real.
+- [`examples/mcp_okf.scm`](../../examples/mcp_okf.scm) — the design doc's MCP knowledge server, made runnable: every concept as a resource, plus `list-concepts`/`get-concept`/`trust-summary`/`stale-concepts`/`backlinks`/`broken-links` tools.
+- [`examples/okf_bootstrap_bundle.scm`](../../examples/okf_bootstrap_bundle.scm) — the producer side: mint concepts with `make-okf-concept`, write them, regenerate indexes, append a log entry, then reload and verify the round trip.
+
+All three default to running against `tests/fixtures/okf-real/acme_retail` (a real bundle vendored from the OKF reference implementation — see that directory's `NOTICE.md`) when no bundle path is given.
+
 ## See also
 
 - [`module-yaml.md`](module-yaml.md) — does all the actual frontmatter parsing/serialization this module builds on
