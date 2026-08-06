@@ -7,6 +7,7 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [json](module-json.md) | `(curry json)` | JSON parse / stringify | — |
 | [yaml](module-yaml.md) | `(curry yaml)` | YAML parse / stringify: anchors/aliases, merge keys, multi-doc streams *(pure Scheme, no build step)* | — |
 | [toml](module-toml.md) | `(curry toml)` | TOML 1.0 parse / stringify: tables, arrays of tables, inline tables, all string/datetime forms *(pure Scheme, no build step)* | — |
+| [okf](module-okf.md) | `(curry okf)` | Open Knowledge Format v0.2 bundle reader/query/writer: trust tiers, staleness, link graph, Attested Computations *(pure Scheme, no build step)* | — |
 | [sqlite](module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
 | [network](module-network.md) | `(curry network)` | TCP / UDP sockets | — |
 | [crypto](module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
