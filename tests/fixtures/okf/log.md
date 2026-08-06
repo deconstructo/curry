@@ -1,0 +1,1 @@
+- 2026-08-04 **Creation** — Initialized fixture bundle.
