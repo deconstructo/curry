@@ -7,10 +7,18 @@
 ;;; report text.
 ;;;
 ;;; Tools:
-;;;   loc_briefing   — METAR/TAF/ATIS(/NOTAM) for up to 12 locations
-;;;   area_briefing  — same, for a whole briefing area (7xxx/8xxx/9xxx code)
-;;;   met_briefing   — briefing restricted to specific MET message types
-;;;   notam_briefing — NOTAM summary for one location/area
+;;;   loc_briefing       — METAR/TAF/ATIS(/NOTAM) for up to 12 locations
+;;;   area_briefing      — same, for a whole briefing area (7xxx/8xxx/9xxx code)
+;;;   met_briefing       — briefing restricted to specific MET message types
+;;;   notam_briefing     — NOTAM summary for one location/area
+;;;   general_met_dir    — directory of "general" MET bulletins (not tied to
+;;;                        an ICAO location or area code) currently published
+;;;   general_met_briefing — fetch one bulletin's content by (name, type)
+;;;                        taken from a general_met_dir entry
+;;;   area_code_lookup    — look up cached Area Briefing codes (7xxx/8xxx/
+;;;                        9xxx) covering a given location or tag
+;;;   area_code_cache_add — record a confirmed area-code mapping into the
+;;;                        cache for future lookups
 ;;;
 ;;; Credentials: read once from the environment at startup (NAIPS_REQUESTOR /
 ;;; NAIPS_PASSWORD), never taken as a tool argument — so a password never
@@ -25,7 +33,8 @@
 ;;;       "args":    ["/path/to/examples/mcp_naips.scm"],
 ;;;       "env":     { "NAIPS_REQUESTOR": "...", "NAIPS_PASSWORD": "..." } } } }
 
-(import (curry mcp) (curry naips) (curry aviation-weather))
+(import (curry mcp) (curry naips) (curry aviation-weather)
+        (curry okf) (curry regex) (srfi 19))
 
 ;;; ---- Credentials ----
 
@@ -97,6 +106,158 @@
   (let ((entity-id (arg args 'entity_id)))
     (mcp-text (fmt-briefing (naips-notam-briefing *requestor* *password* entity-id)))))
 
+(define (fmt-general-met-dir messages)
+  (if (null? messages)
+      "(no general MET bulletins currently published)"
+      (apply string-append
+             (map (lambda (m)
+                    (string-append (naips-general-met-message-name m)
+                                    " [" (naips-general-met-message-type m) "]\n"))
+                  messages))))
+
+;; naips-general-met-dir raises a plain Scheme error on a non-SUCCESS NAIPS
+;; response (naips.scm's general-met-dir parser has no <naips-briefing>
+;; record to carry a status string, unlike the four *-briefing operations
+;; fmt-briefing already renders gracefully) — caught here so a bad-account
+;; or transient NAIPS failure still reaches the MCP client as the same kind
+;; of readable "Status: ERROR — ..." text the other tools produce, not a
+;; bare JSON-RPC internal-error string.
+(define (tool-general-met-dir args)
+  (mcp-text
+    (guard (e (#t (string-append "Status: ERROR — " (error-object-message e))))
+      (fmt-general-met-dir (naips-general-met-dir *requestor* *password*)))))
+
+(define (tool-general-met-briefing args)
+  (let ((name (arg args 'name))
+        (type (arg args 'type)))
+    (mcp-text (fmt-briefing (naips-general-met-briefing *requestor* *password* name type)))))
+
+;;; ---- Area-code cache ----
+;;;
+;;; NAIPS's Area Briefing codes (4 digits: series digit 7/8/9 + area number +
+;;; sub-division digit) aren't enumerable through any operation this server
+;;; calls — NAIPS only exposes the mapping via a clickable map / "Area & Sub
+;;; Area Directory" widget on the website. Rather than ship a hand-copied
+;;; table with this server (which would go stale silently the moment
+;;; Airservices renumbers an area, with no way for this code to notice),
+;;; mappings this server has actually confirmed — either from a live
+;;; area_briefing response or from Airservices' own published documentation
+;;; — are cached as an OKF bundle on disk, outside the repo, and grown
+;;; incrementally via area_code_cache_add. A cache miss means "not learned
+;;; yet", never "does not exist".
+;;;
+;;; One concept per area code, id "areas/<code>". Locations are stored as
+;;; "loc:<CODE>" tags (make-okf-concept has no arbitrary-frontmatter-key
+;;; escape hatch, but tags is exactly the free-form string list this needs)
+;;; so lookup is a plain tag/membership scan; the body repeats them as a
+;;; human-readable list for anyone browsing the bundle directly.
+
+(define (%naips-cache-root)
+  (or (get-environment-variable "NAIPS_OKF_CACHE_DIR")
+      (string-append
+        (or (get-environment-variable "XDG_CACHE_HOME")
+            (string-append (get-environment-variable "HOME") "/.cache"))
+        "/curry/naips-areas")))
+
+;; #f (rather than an empty bundle) when the cache root doesn't exist yet —
+;; okf-load-bundle walks a real directory, so "never written to" and "empty"
+;; need to be distinguishable without an error.
+(define (%naips-cache-bundle)
+  (let ((root (%naips-cache-root)))
+    (if (file-exists? root) (okf-load-bundle root) #f)))
+
+(define (%area-concept-id area-code) (string-append "areas/" area-code))
+
+(define %rx-naips-area-code (regex-compile "^[789][0-9]{3}$"))
+(define (%valid-naips-area-code? s) (and (regex-match %rx-naips-area-code s) #t))
+
+(define (%loc-tag? t) (and (>= (string-length t) 4) (string=? (substring t 0 4) "loc:")))
+(define (%tag->loc t) (substring t 4 (string-length t)))
+(define (%loc->tag l) (string-append "loc:" (string-upcase l)))
+(define (%concept-locations c) (map %tag->loc (filter %loc-tag? (okf-concept-tags c))))
+
+;; Existing locations read back off a concept are already uppercase (they
+;; came from %loc->tag on the way in), but a caller-supplied `locations`
+;; list isn't guaranteed to be — comparing "yssy" against "YSSY" in
+;; %string-list-union would fail to dedupe, so normalize on the way in
+;; rather than relying on every caller to have already done so.
+(define (%valid-locations-list? x)
+  (and (list? x)
+       (let loop ((xs x))
+         (or (null? xs)
+             (and (string? (car xs)) (> (string-length (car xs)) 0) (loop (cdr xs)))))))
+
+(define (%string-list-union a b)
+  (let loop ((xs b) (acc a))
+    (cond ((null? xs) acc)
+          ((member (car xs) acc) (loop (cdr xs) acc))
+          (else (loop (cdr xs) (append acc (list (car xs))))))))
+
+(define (%interpose sep lst)
+  (cond ((null? lst) '())
+        ((null? (cdr lst)) lst)
+        (else (cons (car lst) (cons sep (%interpose sep (cdr lst)))))))
+
+(define (%today) (date->string (current-date) "~Y-~m-~d"))
+
+(define (tool-area-code-lookup args)
+  (let* ((query (string-upcase (arg args 'query)))
+         (bundle (%naips-cache-bundle)))
+    (if (not bundle)
+        (mcp-text "(area-code cache is empty — nothing has been confirmed and cached yet; use area_briefing to find a code, then area_code_cache_add to remember it)")
+        (let* ((concepts (okf-concepts-by-type bundle "NAIPS Briefing Area"))
+               (matches (filter
+                          (lambda (c)
+                            (or (member query (map string-upcase (%concept-locations c)))
+                                (member query (map string-upcase (okf-concept-tags c)))))
+                          concepts)))
+          (mcp-text
+            (if (null? matches)
+                (string-append "No cached area code covers \"" query "\" yet — try area_briefing with a plausible code, then area_code_cache_add once confirmed.")
+                (apply string-append
+                  (map (lambda (c)
+                         (string-append
+                           (okf-concept-id c) "  " (or (okf-concept-title c) "") "\n"
+                           "  " (or (okf-concept-description c) "") "\n"
+                           "  locations: " (apply string-append (%interpose ", " (%concept-locations c))) "\n"
+                           "  trust: " (symbol->string (okf-trust-tier c)) "\n\n"))
+                       matches))))))))
+
+(define (tool-area-code-cache-add args)
+  (let* ((area-code (arg args 'area_code))
+         (region (arg args 'region))
+         (state (arg? args 'state #f))
+         (locations (arg? args 'locations '()))
+         (source-note (arg args 'source_note)))
+    (unless (%valid-naips-area-code? area-code)
+      (error "area_code_cache_add: area_code must be 4 digits starting with 7, 8, or 9" area-code))
+    (unless (%valid-locations-list? locations)
+      (error "area_code_cache_add: locations must be a list of non-empty strings" locations))
+    (let* ((root (%naips-cache-root))
+           (id (%area-concept-id area-code))
+           (bundle (%naips-cache-bundle))
+           (existing (and bundle (okf-bundle-ref bundle id)))
+           (merged-locations (%string-list-union (if existing (%concept-locations existing) '())
+                                                  (map string-upcase locations)))
+           (prior-sources (if existing (okf-concept-sources existing) '()))
+           (concept
+             (make-okf-concept
+               #:type "NAIPS Briefing Area"
+               #:title (string-append "Area " area-code (if state (string-append " (" state ")") ""))
+               #:description region
+               #:tags (append (list "naips-area-code")
+                               (if state (list state) '())
+                               (map %loc->tag merged-locations))
+               #:sources (append prior-sources
+                                  (list (list (cons "note" source-note) (cons "checked" (%today)))))
+               #:verified (list (list (cons "by" "curry-naips-mcp") (cons "at" (%today))))
+               #:body (string-append
+                        "# Locations\n\n"
+                        (apply string-append (map (lambda (l) (string-append "- " l "\n")) merged-locations))))))
+      (okf-write-concept concept root id)
+      (mcp-text (string-append "Cached " id " — " (number->string (length merged-locations))
+                                " location(s) at " root ".")))))
+
 ;;; ---- Tools ----
 
 (mcp-tool "loc_briefing"
@@ -130,6 +291,48 @@ characters, e.g. \"YSSY\"). Returned as raw text only — (curry
 aviation-weather) does not structurally parse NOTAM text."
   '((entity_id . ((type . "string") (description . "Location or area identifier, e.g. \"YSSY\""))))
   tool-notam-briefing)
+
+(mcp-tool "general_met_dir"
+  "Lists every 'general' aviation MET bulletin NAIPS currently publishes —
+national/regional text products not tied to a specific ICAO location or
+7xxx/8xxx/9xxx area code (e.g. area forecasts, national warnings summaries).
+Each entry's name and type are what general_met_briefing needs to fetch its
+content. Takes no arguments."
+  '()
+  tool-general-met-dir)
+
+(mcp-tool "general_met_briefing"
+  "Fetches one 'general' MET bulletin's content by name and type, as listed
+by general_met_dir (call that first to discover valid name/type pairs)."
+  '((name . ((type . "string") (description . "Bulletin name, from a general_met_dir entry")))
+    (type . ((type . "string") (description . "Bulletin type, from a general_met_dir entry"))))
+  tool-general-met-briefing)
+
+(mcp-tool "area_code_lookup"
+  "Looks up cached NAIPS Area Briefing codes (4-digit codes starting 7/8/9,
+the kind area_briefing takes) covering a given ICAO location code or tag
+(e.g. a state name like \"NSW\"). The cache is local to this server and
+grows only via area_code_cache_add — a miss means no code has been
+confirmed and cached yet, not that none exists. Fall back to a live
+area_briefing guess or the NAIPS website's area map on a miss."
+  '((query . ((type . "string") (description . "ICAO location code (e.g. \"YSCO\") or tag (e.g. \"NSW\")"))))
+  tool-area-code-lookup)
+
+(mcp-tool "area_code_cache_add"
+  "Records a confirmed NAIPS Area Briefing code -> location(s) mapping in
+the local cache (an OKF bundle on disk, outside the repo — see
+NAIPS_OKF_CACHE_DIR), so future area_code_lookup calls can resolve it
+without re-deriving it. Only call this once the mapping is actually
+confirmed — e.g. an area_briefing response for area_code included the
+expected location, or a specific line in NAIPS's own published
+documentation says so. Merges with any existing cached entry for the same
+area_code (locations are unioned) rather than overwriting it."
+  '((area_code   . ((type . "string") (description . "4-digit code starting 7/8/9, e.g. \"9200\"")))
+    (region      . ((type . "string") (description . "Short human description of the area, e.g. \"Hunter / North Coast / Sydney Basin, NSW\"")))
+    (state       . ((type . "string") (description . "State/territory tag, e.g. \"NSW\"") (default . #f)))
+    (locations   . ((type . "array") (description . "ICAO/location codes confirmed to be covered by this area") (default . ())))
+    (source_note . ((type . "string") (description . "How this was confirmed, e.g. \"live area_briefing query 2026-08-07\" or a citation into NAIPS's user guide"))))
+  tool-area-code-cache-add)
 
 ;;; ---- Serve ----
 
