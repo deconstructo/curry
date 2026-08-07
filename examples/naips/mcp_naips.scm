@@ -8,8 +8,12 @@
 ;;;
 ;;; Tools:
 ;;;   loc_briefing       — METAR/TAF/ATIS(/NOTAM) for up to 12 locations
+;;;                        (ICAO code or plain airport name — see
+;;;                        (curry airports); an ambiguous name is rejected
+;;;                        with the candidate ICAO codes rather than guessed)
 ;;;   area_briefing      — same, for a whole briefing area (7xxx/8xxx/9xxx code)
 ;;;   met_briefing       — briefing restricted to specific MET message types
+;;;                        (locations accept names the same way as loc_briefing)
 ;;;   notam_briefing     — NOTAM summary for one location/area
 ;;;   general_met_dir    — directory of "general" MET bulletins (not tied to
 ;;;                        an ICAO location or area code) currently published
@@ -34,7 +38,7 @@
 ;;;       "env":     { "NAIPS_REQUESTOR": "...", "NAIPS_PASSWORD": "..." } } } }
 
 (import (curry mcp) (curry naips) (curry aviation-weather)
-        (curry okf) (curry regex) (srfi 19))
+        (curry okf) (curry regex) (curry airports) (srfi 19) (srfi 1))
 
 ;;; ---- Credentials ----
 
@@ -53,6 +57,27 @@
 (define (arg? args name default)
   (let ((p (assq name args)))
     (if p (cdr p) default)))
+
+;; Lets loc_briefing/met_briefing take a human name ("the oaks") as well as
+;; an ICAO code ("YOAS") — an exact ICAO match always wins over a name
+;; search, so a location that happens to also be a substring of some other
+;; airport's name (unlikely, given ICAO codes are 4 letters) is never
+;; ambiguous. (curry airports) is the general ICAO/name directory used
+;; here; it knows nothing about NAIPS area codes, so this only applies to
+;; the *-briefing tools' individual-location arguments, not area_briefing's
+;; 4-digit area codes or notam_briefing's location-or-area entity_id.
+(define (%resolve-location loc)
+  (let ((exact (airport-lookup loc)))
+    (if exact
+        (airport-icao exact)
+        (let ((matches (airport-search loc)))
+          (cond
+            ((null? matches)
+             (error "no known ICAO code or airport name matches" loc))
+            ((null? (cdr matches)) (airport-icao (car matches)))
+            (else
+             (error "airport name is ambiguous — matched multiple airports; use the ICAO code instead"
+                    (map (lambda (a) (list (airport-icao a) (airport-name a))) matches))))))))
 
 ;;; ---- Formatting a <naips-briefing> as readable text ----
 
@@ -86,7 +111,7 @@
 ;;; ---- Tool handlers ----
 
 (define (tool-loc-briefing args)
-  (let* ((locations (arg args 'locations))
+  (let* ((locations (map %resolve-location (arg args 'locations)))
          (notams (eq? (arg? args 'notams #f) #t))
          (flags (list (cons "met" #t) (cons "ntm" notams))))
     (mcp-text (fmt-briefing (naips-loc-briefing *requestor* *password* locations flags)))))
@@ -98,7 +123,7 @@
     (mcp-text (fmt-briefing (naips-area-briefing *requestor* *password* areas flags)))))
 
 (define (tool-met-briefing args)
-  (let ((locations (arg args 'locations))
+  (let ((locations (map %resolve-location (arg args 'locations)))
         (message-types (arg args 'message_types)))
     (mcp-text (fmt-briefing (naips-met-briefing *requestor* *password* locations message-types)))))
 
@@ -200,6 +225,54 @@
 
 (define (%today) (date->string (current-date) "~Y-~m-~d"))
 
+;; ICAO -> common/city name, so a query like "Townsville" resolves to the
+;; area code(s) covering YBTL even though the cache otherwise only indexes
+;; by ICAO code and state/region tags. This is public aviation knowledge
+;; (ICAO's own location-indicator scheme), not something derived from a
+;; NAIPS response — a different epistemic category from the area codes
+;; themselves, which only ever get cached after a live confirmation. Kept
+;; in sync by hand with naips_seed_area_cache.scm's copy of the same table
+;; (same reason %valid-naips-area-code? is duplicated there: that script
+;; deliberately doesn't import this file, which starts an MCP stdio server
+;; and requires NAIPS credentials at load time).
+(define %aerodrome-common-names
+  '(("YBTL" . "Townsville") ("YBMK" . "Mackay") ("YBHM" . "Hamilton Island")
+    ("YBBN" . "Brisbane") ("YBCG" . "Gold Coast") ("YBSU" . "Sunshine Coast")
+    ("YBRK" . "Rockhampton") ("YTWB" . "Toowoomba")
+    ("YBCV" . "Charleville") ("YLRE" . "Longreach") ("YROM" . "Roma")
+    ("YBMA" . "Mount Isa") ("YCCY" . "Cloncurry") ("YWTN" . "Winton")
+    ("YBCS" . "Cairns") ("YBWP" . "Weipa") ("YCKN" . "Cooktown")
+    ("YPAD" . "Adelaide") ("YPPH" . "Perth") ("YSSY" . "Sydney")
+    ("YMML" . "Melbourne") ("YSCB" . "Canberra") ("YMHB" . "Hobart")
+    ("YPDN" . "Darwin") ("YBAS" . "Alice Springs")
+    ("YCDU" . "Ceduna") ("YTAR" . "Tarcoola") ("YWUD" . "Wudinna")
+    ("YPKG" . "Kalgoorlie") ("YLEO" . "Leonora") ("YFRT" . "Forrest")
+    ("YABA" . "Albany") ("YESP" . "Esperance") ("YBUN" . "Bunbury")
+    ("YCAR" . "Carnarvon") ("YMEK" . "Meekatharra")
+    ("YBRM" . "Broome") ("YPKU" . "Kununurra") ("YDBY" . "Derby")))
+
+;; #t if `needle` occurs anywhere in `haystack` (both already upcased) —
+;; string-search-forward-style substring test, hand-rolled since (scheme
+;; base) doesn't provide one.
+(define (%substring? needle haystack)
+  (let ((nl (string-length needle)) (hl (string-length haystack)))
+    (and (<= nl hl)
+         (let loop ((i 0))
+           (cond ((> (+ i nl) hl) #f)
+                 ((string=? (substring haystack i (+ i nl)) needle) #t)
+                 (else (loop (+ i 1))))))))
+
+;; Does `query` (already upcased) name any location covered by concept `c`?
+;; Matches on the well-known-name table by substring either direction, so
+;; both "TOWNSVILLE" and a query containing extra words matches "Townsville".
+(define (%name-matches-concept? query c)
+  (let ((locs (%concept-locations c)))
+    (any (lambda (p)
+           (and (member (car p) locs)
+                (let ((name (string-upcase (cdr p))))
+                  (or (%substring? query name) (%substring? name query)))))
+         %aerodrome-common-names)))
+
 (define (tool-area-code-lookup args)
   (let* ((query (string-upcase (arg args 'query)))
          (bundle (%naips-cache-bundle)))
@@ -209,7 +282,8 @@
                (matches (filter
                           (lambda (c)
                             (or (member query (map string-upcase (%concept-locations c)))
-                                (member query (map string-upcase (okf-concept-tags c)))))
+                                (member query (map string-upcase (okf-concept-tags c)))
+                                (%name-matches-concept? query c)))
                           concepts)))
           (mcp-text
             (if (null? matches)
@@ -262,10 +336,14 @@
 
 (mcp-tool "loc_briefing"
   "Location briefing: METAR/TAF/ATIS (and optionally NOTAMs) for up to 12
-locations or airspace entities, e.g. [\"YSSY\"]. Each report is returned
-both as raw text and, for METAR/TAF/ATIS, already parsed into structured
-fields (wind, visibility, cloud, temperature, altimeter, ...)."
-  '((locations . ((type . "array") (description . "1-12 location/airspace names, e.g. [\"YSSY\", \"YMML\"]")))
+locations or airspace entities. Each entry may be an ICAO code (e.g.
+\"YSSY\") or a plain airport name (e.g. \"the oaks\") — names are resolved
+against the global airport directory; an ambiguous name (matches more than
+one airport) is rejected with the list of candidates, so use the ICAO code
+in that case. Each report is returned both as raw text and, for
+METAR/TAF/ATIS, already parsed into structured fields (wind, visibility,
+cloud, temperature, altimeter, ...)."
+  '((locations . ((type . "array") (description . "1-12 ICAO codes and/or airport names, e.g. [\"YSSY\", \"the oaks\"]")))
     (notams    . ((type . "boolean") (description . "Also include NOTAMs (raw text only)") (default . #f))))
   tool-loc-briefing)
 
@@ -279,9 +357,10 @@ briefing area, identified by a 4-digit code starting with 7, 8, or 9
 
 (mcp-tool "met_briefing"
   "MET briefing restricted to specific message types, for up to 4 locations.
-message_types must be a subset of: TAF, ADWRNG, METAR, SPECI, WSWRNG, AQNH,
-SIGMET, AIRMET, ATIS."
-  '((locations     . ((type . "array") (description . "1-4 location/airspace names")))
+Each location may be an ICAO code or a plain airport name (resolved the same
+way as loc_briefing). message_types must be a subset of: TAF, ADWRNG, METAR,
+SPECI, WSWRNG, AQNH, SIGMET, AIRMET, ATIS."
+  '((locations     . ((type . "array") (description . "1-4 ICAO codes and/or airport names")))
     (message_types . ((type . "array") (description . "e.g. [\"METAR\", \"TAF\"]"))))
   tool-met-briefing)
 
