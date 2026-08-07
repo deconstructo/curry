@@ -153,6 +153,17 @@ if(BUILD_MODULE_POSIX AND TARGET curry_posix)
     add_test(NAME okf COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/okf_tests.scm)
     set_tests_properties(okf PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+
+    # (curry airports) imports (curry posix) for create-directory/
+    # rename-file/set-environment-variable! and (curry http) for the
+    # cache-refresh download. airports_tests.scm redirects HOME to an
+    # isolated fixture cache before importing the module, so it never
+    # touches the network or the real user cache.
+    if(BUILD_MODULE_HTTP AND TARGET curry_http)
+        add_test(NAME airports COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/airports_tests.scm)
+        set_tests_properties(airports PROPERTIES
+            ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    endif()
 endif()
 
 if(BUILD_MODULE_CODESETS AND TARGET curry_codesets)
