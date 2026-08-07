@@ -155,10 +155,10 @@ Each operation's request builder and the shared response parser are exported dir
 
 ## MCP server example
 
-`examples/mcp_naips.scm` exposes the same four operations as MCP tools (`loc_briefing`, `area_briefing`, `met_briefing`, `notam_briefing`) for use with Claude Code or another MCP client. Credentials are read once from `NAIPS_REQUESTOR`/`NAIPS_PASSWORD` at server startup rather than taken as tool arguments, so a password never flows through a tool call or an MCP client's call log.
+`examples/naips/mcp_naips.scm` exposes the same four operations as MCP tools (`loc_briefing`, `area_briefing`, `met_briefing`, `notam_briefing`) for use with Claude Code or another MCP client. Credentials are read once from `NAIPS_REQUESTOR`/`NAIPS_PASSWORD` at server startup rather than taken as tool arguments, so a password never flows through a tool call or an MCP client's call log.
 
 ```bash
-NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/mcp_naips.scm
+NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/naips/mcp_naips.scm
 ```
 
 See the file header for the Claude Code `mcpServers` config snippet.

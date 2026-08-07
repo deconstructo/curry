@@ -22,7 +22,7 @@ cmake -B build && cmake --build build -j$(nproc)
 
 # Australian NAIPS aviation weather/NOTAM briefings (needs a NAIPS account —
 # credentials are read from the environment, never a tool argument)
-NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/mcp_naips.scm
+NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/naips/mcp_naips.scm
 ```
 
 Use **absolute paths** in every client config — clients typically launch with a minimal

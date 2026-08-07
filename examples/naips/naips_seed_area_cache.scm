@@ -1,4 +1,4 @@
-;;; examples/naips_seed_area_cache.scm — seed the NAIPS area-code cache
+;;; examples/naips/naips_seed_area_cache.scm — seed the NAIPS area-code cache
 ;;; Version: 1.0
 ;;;
 ;;; A maintenance script, run by a human (not an MCP tool an agent calls
@@ -13,8 +13,8 @@
 ;;; against a real response.
 ;;;
 ;;; Usage:
-;;;   ./build/curry examples/naips_seed_area_cache.scm
-;;;   NAIPS_OKF_CACHE_DIR=/custom/path ./build/curry examples/naips_seed_area_cache.scm
+;;;   ./build/curry examples/naips/naips_seed_area_cache.scm
+;;;   NAIPS_OKF_CACHE_DIR=/custom/path ./build/curry examples/naips/naips_seed_area_cache.scm
 ;;;
 ;;; Safe to re-run: writes go through the same merge-by-area_code path
 ;;; area_code_cache_add uses, so re-seeding an already-seeded cache just
@@ -99,5 +99,5 @@
   "live area_briefing(\"9210\") response, curry-naips MCP session")
 
 (newline)
-(display "Done. area_code_lookup/area_code_cache_add (in examples/mcp_naips.scm) read this same cache.")
+(display "Done. area_code_lookup/area_code_cache_add (in examples/naips/mcp_naips.scm) read this same cache.")
 (newline)

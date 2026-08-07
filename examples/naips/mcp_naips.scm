@@ -1,4 +1,4 @@
-;;; examples/mcp_naips.scm — Airservices Australia NAIPS briefing MCP server
+;;; examples/naips/mcp_naips.scm — Airservices Australia NAIPS briefing MCP server
 ;;; Version: 1.0
 ;;;
 ;;; Exposes the (curry naips) briefing family as MCP tools, so an LLM client
@@ -25,12 +25,12 @@
 ;;; flows through a tool call, an MCP client's call log, or an LLM's context.
 ;;;
 ;;; Usage:
-;;;   NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/mcp_naips.scm
+;;;   NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/naips/mcp_naips.scm
 ;;;
 ;;; Claude Code config (~/.claude.json):
 ;;;   { "mcpServers": { "curry-naips": {
 ;;;       "command": "/path/to/build/curry",
-;;;       "args":    ["/path/to/examples/mcp_naips.scm"],
+;;;       "args":    ["/path/to/examples/naips/mcp_naips.scm"],
 ;;;       "env":     { "NAIPS_REQUESTOR": "...", "NAIPS_PASSWORD": "..." } } } }
 
 (import (curry mcp) (curry naips) (curry aviation-weather)

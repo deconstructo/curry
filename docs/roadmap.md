@@ -951,7 +951,7 @@ GR/QM library the original mapping promised for that slot):
 | ~~**v1.13.0**~~ | `(surfage sN name)` renamed to `(srfi sN name)`; 14 new SRFI compatibility libraries; CodeQL security fixes; `redis-connect-tls` hostname-verification fix | ✓ shipped |
 | ~~**v1.14.0–1.14.2**~~ | `(curry babylonian-astronomy)`; cuneiform notation covers the whole numeric tower; flonum print-precision fix; genuine TCO for `call-with-values`/`receive`/`let-values`; SRFI-54/111/195/209/210/252/261/263 | ✓ shipped |
 | ~~**v1.15.0**~~ | `(curry posix)` argv-based process execution (`process-run`/`process-start`, no shell — not tracked against any phase above); `system`'s exit-code decoding fixed; `(curry toml)`; every pure-Scheme `(curry X)` module converted to `define-library` (real export enforcement, not just SRFI libraries) | ✓ shipped |
-| ~~**v1.16.0**~~ | `(curry naips)` Airservices Australia NAIPS briefing-service client (loc/area/met/notam briefing, built on `(curry aviation-weather)`'s METAR/TAF/ATIS parsing — not tracked against any phase above); `examples/mcp_naips.scm` exposes it as MCP tools | ✓ shipped |
+| ~~**v1.16.0**~~ | `(curry naips)` Airservices Australia NAIPS briefing-service client (loc/area/met/notam briefing, built on `(curry aviation-weather)`'s METAR/TAF/ATIS parsing — not tracked against any phase above); `examples/naips/mcp_naips.scm` exposes it as MCP tools | ✓ shipped |
 
 Remaining phases, in the dependency order from the top of this document —
 not pinned to specific version numbers, since the original numbering
