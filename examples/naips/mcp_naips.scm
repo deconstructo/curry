@@ -225,53 +225,15 @@
 
 (define (%today) (date->string (current-date) "~Y-~m-~d"))
 
-;; ICAO -> common/city name, so a query like "Townsville" resolves to the
-;; area code(s) covering YBTL even though the cache otherwise only indexes
-;; by ICAO code and state/region tags. This is public aviation knowledge
-;; (ICAO's own location-indicator scheme), not something derived from a
-;; NAIPS response — a different epistemic category from the area codes
-;; themselves, which only ever get cached after a live confirmation. Kept
-;; in sync by hand with naips_seed_area_cache.scm's copy of the same table
-;; (same reason %valid-naips-area-code? is duplicated there: that script
-;; deliberately doesn't import this file, which starts an MCP stdio server
-;; and requires NAIPS credentials at load time).
-(define %aerodrome-common-names
-  '(("YBTL" . "Townsville") ("YBMK" . "Mackay") ("YBHM" . "Hamilton Island")
-    ("YBBN" . "Brisbane") ("YBCG" . "Gold Coast") ("YBSU" . "Sunshine Coast")
-    ("YBRK" . "Rockhampton") ("YTWB" . "Toowoomba")
-    ("YBCV" . "Charleville") ("YLRE" . "Longreach") ("YROM" . "Roma")
-    ("YBMA" . "Mount Isa") ("YCCY" . "Cloncurry") ("YWTN" . "Winton")
-    ("YBCS" . "Cairns") ("YBWP" . "Weipa") ("YCKN" . "Cooktown")
-    ("YPAD" . "Adelaide") ("YPPH" . "Perth") ("YSSY" . "Sydney")
-    ("YMML" . "Melbourne") ("YSCB" . "Canberra") ("YMHB" . "Hobart")
-    ("YPDN" . "Darwin") ("YBAS" . "Alice Springs")
-    ("YCDU" . "Ceduna") ("YTAR" . "Tarcoola") ("YWUD" . "Wudinna")
-    ("YPKG" . "Kalgoorlie") ("YLEO" . "Leonora") ("YFRT" . "Forrest")
-    ("YABA" . "Albany") ("YESP" . "Esperance") ("YBUN" . "Bunbury")
-    ("YCAR" . "Carnarvon") ("YMEK" . "Meekatharra")
-    ("YBRM" . "Broome") ("YPKU" . "Kununurra") ("YDBY" . "Derby")))
-
-;; #t if `needle` occurs anywhere in `haystack` (both already upcased) —
-;; string-search-forward-style substring test, hand-rolled since (scheme
-;; base) doesn't provide one.
-(define (%substring? needle haystack)
-  (let ((nl (string-length needle)) (hl (string-length haystack)))
-    (and (<= nl hl)
-         (let loop ((i 0))
-           (cond ((> (+ i nl) hl) #f)
-                 ((string=? (substring haystack i (+ i nl)) needle) #t)
-                 (else (loop (+ i 1))))))))
-
-;; Does `query` (already upcased) name any location covered by concept `c`?
-;; Matches on the well-known-name table by substring either direction, so
-;; both "TOWNSVILLE" and a query containing extra words matches "Townsville".
+;; Does `query` (a free-text airport-name fragment, e.g. "Townsville") name
+;; any location covered by concept `c`? Uses (curry airports)'s full
+;; ~28,000-airport directory rather than a hand-maintained table — any
+;; airport name curry knows about works here, not just a hand-picked
+;; subset, and there's nothing to keep in sync by hand across files.
 (define (%name-matches-concept? query c)
   (let ((locs (%concept-locations c)))
-    (any (lambda (p)
-           (and (member (car p) locs)
-                (let ((name (string-upcase (cdr p))))
-                  (or (%substring? query name) (%substring? name query)))))
-         %aerodrome-common-names)))
+    (any (lambda (a) (member (airport-icao a) locs))
+         (airport-search query))))
 
 (define (tool-area-code-lookup args)
   (let* ((query (string-upcase (arg args 'query)))
