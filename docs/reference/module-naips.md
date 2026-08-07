@@ -155,10 +155,26 @@ Each operation's request builder and the shared response parser are exported dir
 
 ## MCP server example
 
-`examples/naips/mcp_naips.scm` exposes the same four operations as MCP tools (`loc_briefing`, `area_briefing`, `met_briefing`, `notam_briefing`) for use with Claude Code or another MCP client. Credentials are read once from `NAIPS_REQUESTOR`/`NAIPS_PASSWORD` at server startup rather than taken as tool arguments, so a password never flows through a tool call or an MCP client's call log.
+`examples/naips/mcp_naips.scm` exposes this module as MCP tools for use with Claude Code or another MCP client. Credentials are read once from `NAIPS_REQUESTOR`/`NAIPS_PASSWORD` at server startup rather than taken as tool arguments, so a password never flows through a tool call or an MCP client's call log.
 
 ```bash
 NAIPS_REQUESTOR=... NAIPS_PASSWORD=... ./build/curry examples/naips/mcp_naips.scm
 ```
 
 See the file header for the Claude Code `mcpServers` config snippet.
+
+Tools:
+
+- `loc_briefing`, `met_briefing` — the four briefing operations above, for up to 12 (`loc_briefing`) or 4 (`met_briefing`) locations. Each location may be an ICAO code (`"YSSY"`) or a plain airport name (`"the oaks"`) — names are resolved via `(curry airports)`; an ambiguous name (matches more than one airport) is rejected with the candidate ICAO codes rather than guessed.
+- `area_briefing`, `notam_briefing` — same, for a 4-digit NAIPS area code or a location/area entity id; these take NAIPS-specific codes, not airport names.
+- `general_met_dir`, `general_met_briefing` — directory and fetch for "general" MET bulletins not tied to an ICAO location or area code.
+- `area_code_lookup`, `area_code_cache_add` — read and grow a local on-disk cache (an OKF bundle) mapping NAIPS Area Briefing codes to the locations they cover, since NAIPS doesn't expose that mapping through any callable operation. `area_code_lookup`'s query matches an ICAO code, a state/region tag, or an airport name (also resolved via `(curry airports)`). See the file's own "Area-code cache" comment section for the full design.
+
+`examples/naips/naips_area_cache_tool.scm` is an offline CLI for the same on-disk area-code cache — `lookup`/`add` from a plain shell, no NAIPS credentials or running MCP server required:
+
+```bash
+./build/curry examples/naips/naips_area_cache_tool.scm lookup Townsville
+./build/curry examples/naips/naips_area_cache_tool.scm add 9999 "Test area" QLD YBTL,YBMK "manual correction"
+```
+
+`examples/naips/naips_seed_area_cache.scm` seeds that same cache with area-code mappings already confirmed via live `area_briefing` calls — see its header for the full list and how each was confirmed.
