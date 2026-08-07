@@ -1,5 +1,21 @@
 # Changelog
 
+### 1.17.2 - 2026-08-07
+
+**New — `(curry http)`: `http-request/headers`**
+
+A variant of `http-request` that returns `(status headers-alist body)`
+instead of `(status . body)`, exposing response headers (names
+lowercased, since HTTP header names are case-insensitive) so callers can
+do conditional-GET caching — send `If-None-Match`/`If-Modified-Since` via
+the existing `headers` request parameter, then read back `ETag`/
+`Last-Modified` from the response. Only the final response's headers are
+kept; headers from intermediate redirect hops are discarded.
+`http-request` itself is unchanged. Captured header count is capped and
+all allocations are checked, so a malicious/misbehaving server can't
+exhaust memory or crash the process via an unbounded or malformed
+response header block. See `docs/reference/module-http.md`.
+
 ### 1.17.0 - 2026-08-06
 
 **New — `(curry okf)`: Open Knowledge Format v0.2 bundle reader/query/writer**
