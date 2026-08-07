@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786087236469,
+  "lastUpdate": 1786101985512,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -2621,6 +2621,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.083,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b1b4e80a34f7d34797e9630f808bf39efa9f7705",
+          "message": "chore(formula): update sha256 for v1.17.2 tarball",
+          "timestamp": "2026-08-07T21:25:36+10:00",
+          "tree_id": "58fe059c1e7f12186f144844c457f2c9dc340360",
+          "url": "https://github.com/deconstructo/curry/commit/b1b4e80a34f7d34797e9630f808bf39efa9f7705"
+        },
+        "date": 1786101984117,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.317,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 27.869,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.259,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.096,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 212.909,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 403.421,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 85.272,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 134.062,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 105.293,
             "unit": "ms"
           }
         ]
