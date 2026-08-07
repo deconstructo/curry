@@ -1035,6 +1035,8 @@
 (import (curry http))
 (check-true "PR translit: erištum binding (http-request)" (procedure? erištum))
 (check-true "PR cunei: 𒂍𒉡𒁹 binding (http-request)" (procedure? 𒂍𒉡𒁹))
+(check-true "PR translit: erištum-ša-qaqqadātim binding (http-request/headers)" (procedure? erištum-ša-qaqqadātim))
+(check-true "PR cunei: 𒂍𒉡𒁹𒊕 binding (http-request/headers)" (procedure? 𒂍𒉡𒁹𒊕))
 
 (import (curry graphql))
 (check-true "PR translit: šāʾilum binding (graphql-client)" (procedure? šāʾilum))

@@ -38,6 +38,23 @@ Raises a Scheme error on network failure (DNS, TLS, timeout, etc.).
 Header injection is rejected: headers whose name or value contain `CR` or `LF`
 raise an error immediately.
 
+### `(http-request/headers method url)` → `(status headers body)`
+### `(http-request/headers method url headers)` → `(status headers body)`
+### `(http-request/headers method url headers body)` → `(status headers body)`
+
+Same arguments as `http-request`, but returns a 3-element list `(status
+headers-alist body)` instead of a `(status . body)` pair. `headers-alist`
+holds the *response* headers as `("name" . "value")` pairs with names
+lowercased (HTTP header names are case-insensitive), so look one up with
+`(assoc "etag" headers)`. Only headers from the final response are kept —
+if the request follows a redirect, headers from the intermediate hops are
+discarded.
+
+Useful for conditional requests / cache validation: send `If-None-Match` or
+`If-Modified-Since` via the `headers` request parameter (as with
+`http-request`), then read the `ETag` / `Last-Modified` response headers
+back out to store alongside a local cache.
+
 ## Examples
 
 ```scheme
@@ -60,6 +77,16 @@ raise an error immediately.
     (list (cons "Authorization" (string-append "Bearer " my-token)))))
 (when (not (= (car res) 204))
   (error "delete failed" (car res)))
+
+; Conditional GET using cached validators
+(define res
+  (http-request/headers "GET" "https://example.com/data.csv"
+    (list (cons "If-None-Match" cached-etag))))
+(define status  (car res))
+(define headers (cadr res))
+(define body    (caddr res))
+(when (= status 200)
+  (set! cached-etag (cdr (assoc "etag" headers))))
 ```
 
 ## Notes

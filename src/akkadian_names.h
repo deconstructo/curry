@@ -1061,6 +1061,9 @@ AKK_PR("socket-ready?",           "bašû-bābim?",    "𒀸𒂍𒉌?")
 /* ---- (curry http) ---- */
 /* erištu: "request, petition" — genuine noun, an exact fit. */
 AKK_PR("http-request",   "erištum",        "𒂍𒉡𒁹")
+/* qaqqadu: "head" (also used for a document's heading) — erištum ša
+ * qaqqadātim, "a request of the heads", for the headers-returning variant. */
+AKK_PR("http-request/headers", "erištum-ša-qaqqadātim", "𒂍𒉡𒁹𒊕")
 
 /* ---- (curry graphql) ---- */
 /* šâlum: "to ask, to inquire"; šāʾilu: agent noun, "one who asks". */
