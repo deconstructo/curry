@@ -615,6 +615,28 @@
 (check "read-line"
   (read-line (open-input-string "hello\nworld"))
   "hello")
+;; Regression: read-line on a real (non-string) port used to bypass the
+;; one-codepoint peek-char lookahead entirely, silently dropping
+;; whatever character a preceding peek-char had already buffered, and
+;; leaving that lookahead stale forever afterward (peek-char would then
+;; keep reporting the same stale character indefinitely, never reaching
+;; eof-object? even long after the real stream was exhausted). Only
+;; reproduces on a real FILE*-backed port -- open-input-string's
+;; peek-char restores its position immediately rather than caching a
+;; persistent lookahead, so it never hit this path.
+(let ((path "/tmp/curry-portline-regression-test.txt"))
+  (call-with-output-file path (lambda (p) (display "line1\nline2\n" p)))
+  (check "peek-char then read-line on a file port doesn't drop the peeked character"
+    (call-with-input-file path
+      (lambda (p) (let ((c (peek-char p))) (list c (read-line p)))))
+    (list #\l "line1"))
+  (check "peek-char after read-line correctly reaches eof, doesn't stick to a stale lookahead"
+    (call-with-input-file path
+      (lambda (p)
+        (peek-char p) (read-line p)   ; line1
+        (peek-char p) (read-line p)   ; line2
+        (eof-object? (peek-char p))))
+    #t))
 (check "with-output-to-string"
   (with-output-to-string (lambda () (display 42) (display "!")))
   "42!")

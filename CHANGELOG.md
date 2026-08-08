@@ -1,5 +1,60 @@
 # Changelog
 
+### 1.17.7 - 2026-08-09
+
+**New — `(curry schematic)`: source reindenter, doc extractor, Markdown/svnwiki generators**
+
+Five sub-libraries — `(curry schematic read/extract/format/markdown/wiki)`
+— ported from Evan Hanson's BSD-licensed `schematic`
+(https://git.foldling.org/schematic/): `format-scheme` reindents Scheme
+source (not a pretty-printer — never changes line breaks or intraline
+spacing, only indentation); `extract-definitions` recognizes commented
+`define`/`define-syntax`/`define-record-type`/etc. forms and emits
+s-expressive specifications; `scheme->markdown`/`scheme->wiki` build on
+those to generate Markdown prose+code blocks and CHICKEN-wiki svnwiki
+tags respectively. Runnable CLI wrappers in `examples/schematic/`, using
+the existing `(curry getopt)` module rather than porting upstream's own
+separate `optimism` CLI-argument library. curry has no `case-lambda`, so
+every upstream `case-lambda` procedure is rewritten to take its optional
+arguments via a `. rest` list instead. See
+`docs/reference/module-schematic.md`; 21 new assertions in
+`tests/schematic_tests.scm`.
+
+**Fix — `read-line` on a real port could drop a character and loop forever**
+
+`port_read_line` (`src/port.c`) called `read_utf8_codepoint` directly,
+bypassing the one-codepoint lookahead `peek-char` uses. Any code using
+the ordinary "peek-char to check for eof?, then read-line" idiom (which
+is exactly what `(curry schematic format)`'s own line-by-line loop does,
+among others) would silently drop whatever character a preceding
+`peek-char` had already buffered, *and* leave that lookahead stale
+forever afterward — nothing else ever clears it for a file port — so a
+later `peek-char` kept reporting that same stale character indefinitely,
+never reaching `eof-object?` even long after the real stream was
+exhausted. This only reproduced on a real (file-descriptor-backed) port;
+string ports restore their position immediately on `peek-char` rather
+than caching a persistent lookahead, so they never hit it. Found while
+testing the new `schematic-format` CLI script against piped stdin (it
+hung, then crashed once the unbounded loop exhausted memory). Two new
+regression tests in `tests/r7rs_tests.scm`.
+
+**Perf — O(1) `string-ref` for ASCII strings, amortized O(1) cursor cache otherwise**
+
+curry stores strings as raw UTF-8 byte buffers with a byte length, not a
+codepoint count, so `string-ref` had to rescan from byte 0 on every call
+to find the Nth codepoint — O(n) per call, O(n²) for any loop of
+increasing `string-ref` calls (exactly what the cursor-based parsers in
+`(curry csv)`/`(curry toml)`/`(curry yaml)` do). A 100k-character
+sequential scan took 22.29s. Adds a small per-`String` cache (`src/
+object.h`): a pure-ASCII string now indexes directly (byte offset ==
+char index) for true O(1); a non-ASCII string remembers the last
+(char-index, byte-offset) pair looked up and resumes from there for a
+non-decreasing access pattern, amortized O(1) instead of O(n) per call.
+Both are computed lazily and invalidated by `string-set!`/`string-fill!`/
+`string-copy!`, the only three primitives that mutate a string's bytes
+in place. Same 100k-character scan: 22.29s → 0.04s. Independently
+reviewed for cache-invalidation completeness and off-by-one correctness.
+
 ### 1.17.6 - 2026-08-08
 
 **New — `(curry csv)`: RFC 4180 CSV reader and writer**

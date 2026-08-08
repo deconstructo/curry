@@ -226,10 +226,29 @@ val_t port_read_line(val_t v) {
     val_t out = port_open_output_string();
     int cp;
     bool any = false;
-    while ((cp = read_utf8_codepoint(p)) != -1) {
+    /* Drain a pending one-codepoint lookahead from a prior peek-char
+     * first, exactly like port_read_char does. read_utf8_codepoint
+     * always reads fresh from the underlying stream (it has no idea
+     * peeked_cp exists), so calling it directly here — as this used
+     * to — silently dropped whatever character a preceding peek-char
+     * had already buffered, AND left peeked_cp stale forever
+     * afterward (nothing else ever clears it for a file port), so a
+     * later peek-char kept reporting that same stale character
+     * indefinitely, never reaching eof-object? even long after the
+     * real stream was exhausted — an infinite loop for any code using
+     * the ordinary "peek-char to check eof?, then read-line" idiom
+     * (e.g. (curry schematic format)'s format-scheme). */
+    if (p->peeked_cp != -2) {
+        cp = p->peeked_cp;
+        p->peeked_cp = -2;
+    } else {
+        cp = read_utf8_codepoint(p);
+    }
+    while (cp != -1) {
         if (cp == '\n') break;
         port_write_char(out, cp);
         any = true;
+        cp = read_utf8_codepoint(p);
     }
     if (!any && cp == -1) return V_EOF;
     return port_get_output_string(out);
