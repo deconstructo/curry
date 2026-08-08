@@ -1,5 +1,20 @@
 # Changelog
 
+### 1.17.3 - 2026-08-08
+
+**New — `(curry okf)`: frontmatter validation**
+
+`okf-validate-concept`/`okf-validate-bundle` check a concept's raw
+frontmatter against the shapes OKF v0.2 actually promises (`type`
+required, `status` enum, `stale_after` ISO-8601-shaped, `tags`/`sources`
+list shapes, `generated`/`verified` map shapes with a non-empty `by`),
+returning human-readable issue strings rather than raising — advisory
+only, never enforced at load time, matching OKF's own "unknown keys are
+fully conformant" tolerance. Reads raw frontmatter directly rather than
+through the tolerant accessors, since surfacing exactly what those
+accessors paper over (e.g. a malformed `verified: true` silently
+normalizing to `'()`) is the point. See `docs/reference/module-okf.md`.
+
 ### 1.17.2 - 2026-08-07
 
 **New — `(curry http)`: `http-request/headers`**

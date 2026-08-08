@@ -187,6 +187,71 @@
 (check "malformed scalar verified: trust tier still derivable"
   (okf-trust-tier malformed-concept) 'unverified)
 
+;;; Frontmatter validation — advisory checks the tolerant accessors above
+;;; deliberately don't perform (that's the point: okf-concept-verified
+;;; normalizing the malformed-scalar case above into '() hides exactly what
+;;; okf-validate-concept exists to surface).
+
+(define (make-test-concept yaml-body)
+  (okf-read-concept (open-input-string yaml-body) "test/x" "test/x.md"))
+
+(check "validate: clean concept has no issues"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\nstatus: stable\n---\nbody"))
+  '())
+
+(check "validate: missing type flagged"
+  (okf-validate-concept (make-test-concept "---\nstatus: stable\n---\nbody"))
+  '("type is required and must be a non-empty string (spec REQUIRED)"))
+
+(check "validate: bad status enum flagged"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\nstatus: bogus\n---\nbody"))
+  '("status must be draft/stable/deprecated, got: bogus"))
+
+(check "validate: non-ISO stale_after flagged"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\nstale_after: not-a-date\n---\nbody"))
+  '("stale_after must be a YYYY-MM-DD date string"))
+
+(check "validate: ISO-shaped stale_after accepted"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\nstale_after: 2026-09-23\n---\nbody"))
+  '())
+
+(check "validate: non-list tags flagged"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\ntags: notalist\n---\nbody"))
+  '("tags must be a list of strings"))
+
+(check "validate: malformed scalar verified flagged (the case tolerance hides)"
+  (okf-validate-concept malformed-concept)
+  '("verified must be a map or a list of maps"))
+
+(check "validate: verified entry missing by flagged"
+  (okf-validate-concept
+    (make-test-concept "---\ntype: Foo\nverified:\n  at: 2026-01-01\n---\nbody"))
+  '("verified.by must be a non-empty string"))
+
+(check "validate: verified bare map with by accepted"
+  (okf-validate-concept
+    (make-test-concept "---\ntype: Foo\nverified:\n  by: human:alice\n  at: 2026-01-01\n---\nbody"))
+  '())
+
+(check "validate: explicit empty verified list is zero issues, not a malformed-map error"
+  (okf-validate-concept (make-test-concept "---\ntype: Foo\nverified: []\n---\nbody"))
+  '())
+
+;; A YAML anchor/alias can produce a list whose first element is a genuine
+;; (string . value) pair but whose later elements are bare scalars — e.g.
+;; via `generated: &a\n by: x` then `verified: [*a, 42]`, which parses to
+;; verified = (("by" . "x") 42). Checking only the first element (the
+;; original bug this regression test guards against) would call core
+;; assoc on the bare 42 and crash the process instead of reporting a
+;; clean validation issue.
+(check "validate: anchor-derived list with a valid pair followed by a bare scalar is rejected safely, not crashed"
+  (okf-validate-concept
+    (make-test-concept "---\ntype: X\ngenerated: &a\n  by: x\nverified: [*a, 42]\n---\nbody"))
+  '("verified must be a map or a list of maps"))
+
+(check "validate-bundle: clean synthetic bundle has no issues"
+  (okf-validate-bundle bundle) '())
+
 ;;; Writing: build, write, reload round-trip
 
 (define tmp-root (string-append fixture-root "-tmp-" (number->string (pid))))
@@ -228,6 +293,8 @@
   (length (okf-bundle-concepts real-bundle)) 9)
 (check-true "real bundle: no broken links"
   (null? (okf-bundle-broken-links real-bundle)))
+(check "real bundle: no frontmatter validation issues"
+  (okf-validate-bundle real-bundle) '())
 
 (define real-revenue (okf-bundle-ref real-bundle "computations/revenue-ytd"))
 (check-true "real bundle: revenue-ytd found" real-revenue)

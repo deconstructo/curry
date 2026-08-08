@@ -26,6 +26,7 @@
 ;;;   (okf-concept-links c) / (okf-bundle->graph bundle) / (okf-graph-backlinks graph)
 ;;;   (okf-resolve-link bundle c target) / (okf-bundle-broken-links bundle)
 ;;;   (okf-computation-runtime/parameters/inline-sql c)
+;;;   (okf-validate-concept c) / (okf-validate-bundle bundle)
 ;;;   (make-okf-concept #:type ... #:body ...)
 ;;;   (okf-write-concept-port c port) / (okf-write-concept c root id)
 ;;;   (okf-generate-index bundle prefix) / (okf-log-append bundle dir kind text)
@@ -51,6 +52,7 @@
     okf-concept-links okf-bundle->graph okf-graph-backlinks okf-resolve-link
     okf-bundle-broken-links
     okf-computation-runtime okf-computation-parameters okf-computation-inline-sql
+    okf-validate-concept okf-validate-bundle
     make-okf-concept okf-write-concept-port okf-write-concept
     okf-generate-index okf-log-append)
   (begin
@@ -144,6 +146,9 @@
         (reverse acc)
         (let ((v (f (car l))))
           (loop (cdr l) (if v (cons v acc) acc))))))
+
+(define (%every pred lst)
+  (or (null? lst) (and (pred (car lst)) (%every pred (cdr lst)))))
 
 (define (%today) (date->string (current-date) "~Y-~m-~d"))
 
@@ -461,6 +466,98 @@
       ((string=? (%string-trim-right (car lines)) "# Computation")
        (loop (cdr lines) #t #f acc))
       (else (loop (cdr lines) in-section mode acc)))))
+
+;;; =========================================================================
+;;; Frontmatter validation
+;;; =========================================================================
+;;
+;; Advisory, never enforced at load time: OKF's own conformance rule is that
+;; a consumer ignoring unknown keys is fully conformant, and okf-load-bundle
+;; plus the tolerant accessors above (okf-concept-verified's malformed-input
+;; handling, okf-concept-type's missing-type tolerance) deliberately keep
+;; loading working even when frontmatter doesn't match the spec's shapes.
+;; okf-validate-concept is for a caller who wants to know about those shape
+;; problems anyway — e.g. before trusting a concept's derived okf-trust-tier,
+;; or before publishing agent-produced output — without making every other
+;; caller pay for strict enforcement they didn't ask for. It reads the raw
+;; frontmatter directly rather than through the tolerant accessors, since
+;; those accessors' whole point is to paper over exactly what this is meant
+;; to surface.
+
+(define %okf-date-rx (regex-compile "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+(define (%iso-date-shaped? s) (and (string? s) (regex-match %okf-date-rx s) #t))
+
+;; A "map" here means: whatever (curry yaml) produces for a YAML mapping —
+;; a list of (string . value) pairs. '() counts as a (trivially empty) map.
+;; Every element is checked, not just the first: core assoc (used by
+;; %map-has-nonempty-string? below) has no type guard on later list
+;; elements, so a list that's a valid pair up front but degrades into a
+;; bare non-pair scalar further along (adversarial/malformed frontmatter
+;; is exactly the input this validator has to expect) would otherwise
+;; reach assoc and crash rather than being reported as a clean issue.
+(define (%pair-map-entry? e) (and (pair? e) (string? (car e))))
+(define (%map-shaped? v)
+  (and (list? v) (%every %pair-map-entry? v)))
+
+(define (%list-of-strings? v) (and (list? v) (%every string? v)))
+(define (%list-of-maps? v) (and (list? v) (%every %map-shaped? v)))
+
+(define (%map-has-nonempty-string? m key)
+  (let ((v (%fm-ref m key #f))) (and (string? v) (> (string-length v) 0))))
+
+;; Checks the shapes the spec actually promises: type (§required), status
+;; (§an enum), stale_after (§5.5, an ISO 8601 date), tags/sources (§list
+;; shapes), and generated/verified (§5.2, each a by/at-bearing map or, for
+;; verified, a list of them). Returns a list of human-readable issue
+;; strings, '() when clean.
+(define (okf-validate-concept c)
+  (let ((fm (okf-concept-frontmatter c)))
+    (append
+      (let ((type (%fm-ref fm "type" #f)))
+        (if (and (string? type) (> (string-length type) 0))
+            '()
+            (list "type is required and must be a non-empty string (spec REQUIRED)")))
+      (let ((status (%fm-ref fm "status" #f)))
+        (if (or (not status) (member status '("draft" "stable" "deprecated")))
+            '()
+            (list (string-append "status must be draft/stable/deprecated, got: "
+                                  (if (string? status) status "(non-string value)")))))
+      (let ((sa (%fm-ref fm "stale_after" #f)))
+        (if (or (not sa) (%iso-date-shaped? sa))
+            '()
+            (list "stale_after must be a YYYY-MM-DD date string")))
+      (let ((tags (%fm-ref fm "tags" #f)))
+        (if (or (not tags) (%list-of-strings? tags))
+            '()
+            (list "tags must be a list of strings")))
+      (let ((sources (%fm-ref fm "sources" #f)))
+        (if (or (not sources) (%list-of-maps? sources))
+            '()
+            (list "sources must be a list of maps")))
+      (let ((generated (%fm-ref fm "generated" #f)))
+        (cond
+          ((not generated) '())
+          ((not (%map-shaped? generated)) (list "generated must be a map"))
+          ((not (%map-has-nonempty-string? generated "by")) (list "generated.by must be a non-empty string"))
+          (else '())))
+      (let ((verified (%fm-ref fm "verified" #f)))
+        (cond
+          ((or (not verified) (null? verified)) '())
+          ((%map-shaped? verified)
+           (if (%map-has-nonempty-string? verified "by") '() (list "verified.by must be a non-empty string")))
+          ((%list-of-maps? verified)
+           (%filter-map (lambda (v) (if (%map-has-nonempty-string? v "by") #f "verified entry missing a non-empty by"))
+                        verified))
+          (else (list "verified must be a map or a list of maps")))))))
+
+;; Bundle-wide sweep, same (id . issues) shape convention as
+;; okf-bundle-broken-links: only concepts with at least one issue appear.
+(define (okf-validate-bundle bundle)
+  (%filter-map
+    (lambda (c)
+      (let ((issues (okf-validate-concept c)))
+        (and (pair? issues) (cons (okf-concept-id c) issues))))
+    (okf-bundle-concepts bundle)))
 
 ;;; =========================================================================
 ;;; Writing

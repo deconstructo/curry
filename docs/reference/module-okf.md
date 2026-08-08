@@ -135,6 +135,24 @@ Linting helper: every concept that has at least one link not resolving to a conc
 (hash-table-ref back "tables/events_" '())   ; => ids of concepts linking to events_
 ```
 
+## Frontmatter validation
+
+Advisory only — never enforced at load time. `okf-load-bundle` and the accessors above (e.g. `okf-concept-verified`'s malformed-input normalization, `okf-concept-type`'s missing-`type` tolerance) deliberately keep working even when frontmatter doesn't match the spec's shapes, matching OKF's own conformance rule that a consumer ignoring unknown keys is fully conformant. These two functions are for a caller who wants to know about shape problems anyway — before trusting a concept's derived `okf-trust-tier`, say, or before publishing agent-produced output — without forcing every other caller to pay for strict enforcement they didn't ask for. They read the raw frontmatter directly rather than through the tolerant accessors, since surfacing exactly what those accessors paper over is the point.
+
+### `(okf-validate-concept c)` → list of strings
+
+Checks the shapes the spec actually promises: `type` present and non-empty (spec-required); `status` one of `draft`/`stable`/`deprecated` if present; `stale_after` shaped like an ISO 8601 date if present; `tags` a list of strings if present; `sources` a list of maps if present; `generated` and each `verified` entry (bare-map or list form) a map with a non-empty `by`. Returns a list of human-readable issue strings, `'()` when clean. Note this catches shapes the tolerant accessors above deliberately hide — `verified: true` normalizes silently to `'()` via `okf-concept-verified`, but `okf-validate-concept` flags it as `"verified must be a map or a list of maps"`.
+
+### `(okf-validate-bundle bundle)` → list of `(id . issues)`
+
+Bundle-wide sweep, same shape convention as `okf-bundle-broken-links`: only concepts with at least one issue appear.
+
+```scheme
+(define bundle (okf-load-bundle "./bundles/ga4"))
+(okf-validate-bundle bundle)
+;; => '() if every concept's frontmatter matches the spec's shapes
+```
+
 ## Attested Computation helpers
 
 Per spec §10.2, these only make sense for `type: Attested Computation` concepts (`okf-attested-computation?`).
