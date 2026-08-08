@@ -1,5 +1,12 @@
 # `curry pkg` — Design Evaluation and Recommendation
 
+> **Superseded** by
+> [`docs/thoughts/package-management-design.md`](../thoughts/package-management-design.md),
+> which inherits every conclusion below except §4 (C Extension Handling) —
+> that one is deliberately reversed there in favor of an FFI-first native-
+> capability default. Kept here as historical background/prior art, not
+> deleted or moved.
+
 ## Context
 
 Curry is a Scheme interpreter with a C core, optional C extension modules (compiled as `.so`), and a growing standard library of pure-Scheme modules. Its immediate user base is small; its ambition (SICM mechanics, hardware control, symbolic CAS) attracts users who care about correctness and reproducibility more than ecosystem breadth. The package manager needs to be simple enough for one person to operate initially and correct enough to not need redesigning when the ecosystem grows.

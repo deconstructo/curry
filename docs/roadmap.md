@@ -77,7 +77,7 @@ unblocks the phases above it.
 | GR / QM libraries | ✗ |
 | Full introspection (heap-walk, compiler IR, actor debug) | ✗ (debugger above covers breakpoints/locals only) |
 | Sampling profiler, Tracy/Perfetto tracing, SIMD tower | ✗ |
-| Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/guides/pkg-design.md` and "Decided against" below |
+| Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/thoughts/package-management-design.md` (supersedes `docs/guides/pkg-design.md`) and "Decided against" below |
 | Notebook interface | ✗ |
 | Units and dimensions system | ✗ |
 | Step-by-step CAS (`explain-simplify`) | ✗ |
@@ -754,18 +754,27 @@ Generators: `gen-integer`, `gen-real`, `gen-boolean`, `gen-list`, `gen-vector`,
 just unstarted.** A design evaluation already exists —
 `docs/guides/pkg-design.md` — comparing registry models, lock files, environments,
 C extension handling, versioning, package identity, and security across
-CHICKEN/Akku/cargo/pip/npm/Julia/Quicklisp. The decision was to finish
-that survey before writing any implementation; the sketch below is a
-candidate design from that evaluation, not a committed spec:
+CHICKEN/Akku/cargo/pip/npm/Julia/Quicklisp. A second document,
+`docs/thoughts/package-management-design.md`, now supersedes it: it
+inherits every conclusion except C extension handling — that one is
+reversed in favor of an FFI-first native-capability default (following the
+`(curry hdf5)` pattern) with source-compilation kept as an explicit
+fallback tier — and adds bundled tests/docs in the manifest, a
+`develop`/patch workflow, targeted lock-file updates, version retraction, optional
+dependencies, and a porting path for CHICKEN eggs and SRFIs. The sketch
+below is the older candidate design; see the superseding document for the
+current one, still not a committed spec:
 - Registry: git-index model (Julia General style) — metadata only, source at
   author-hosted URLs, checksums in index
 - Manifest: `curry.pkg` (what you write) + `curry.lock` (what the resolver
   writes); both committed
 - Global install with per-project lock pinning
 - CLI: `curry pkg install`, `curry pkg update`, `curry pkg build`, `curry pkg
-  test`, `curry pkg publish`
-- C extension packages compile to `.so` as part of install; build recipe in
-  manifest
+  test`, `curry pkg publish` — plus `search`, `develop`, and `update -p` per
+  the superseding document
+- Native-capability packages default to `(curry ffi)` + runtime `dlopen`
+  (no build step); C/C++ source compilation via CMake remains a fallback
+  tier for what FFI can't reach
 - Environment name field in lock file (default `"global"`) for future isolation
 
 **Notebook interface:**
@@ -917,9 +926,10 @@ Scheme and the Kaappi implementation for lessons applicable to curry):
   don't assume coroutine-based green threads slot in cleanly on top of
   the frame-copying continuation strategy without checking first.
 
-**Package manager** (Phase 10) is deferred by decision pending the
-comparative survey in `docs/guides/pkg-design.md`, not because nobody's gotten to
-it — see that phase's section above.
+**Package manager** (Phase 10) is deferred by decision pending further
+work on `docs/thoughts/package-management-design.md` (which supersedes the
+original `docs/guides/pkg-design.md` survey), not because nobody's gotten
+to it — see that phase's section above.
 
 ---
 
