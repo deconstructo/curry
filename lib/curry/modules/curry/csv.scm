@@ -107,10 +107,21 @@
                 (char=? (%c-ch c) #\return))
       (write-char (%c-ch c) out) (%c-adv! c) (loop))))
 
+;; RFC 4180 permits nothing but a delimiter, a row terminator, or EOF
+;; immediately after a quoted field's closing quote. Without this check,
+;; malformed input like "a",x,b (stray "x" glued onto the closing quote)
+;; would silently start parsing "x" as if it were unquoted content
+;; rather than being rejected — a silent-corruption risk rather than a
+;; clean, caller-visible error.
+(define (%check-after-quoted-field! c delim)
+  (unless (or (%c-eof? c) (char=? (%c-ch c) delim)
+              (char=? (%c-ch c) #\newline) (char=? (%c-ch c) #\return))
+    (%csv-error "unexpected character after closing quote" (%c-ch c))))
+
 (define (%parse-field! c delim)
   (let ((out (open-output-string)))
     (if (and (not (%c-eof? c)) (char=? (%c-ch c) #\"))
-        (begin (%c-adv! c) (%parse-quoted-field! c out))
+        (begin (%c-adv! c) (%parse-quoted-field! c out) (%check-after-quoted-field! c delim))
         (%parse-unquoted-field! c delim out))
     (get-output-string out)))
 
@@ -121,9 +132,6 @@
   (cond
     ((and (char=? (%c-ch c) #\return) (eqv? (%c-ch-at c 1) #\newline)) (%c-adv-n! c 2))
     ((or (char=? (%c-ch c) #\newline) (char=? (%c-ch c) #\return)) (%c-adv! c))))
-
-(define (%at-row-terminator-or-eof? c)
-  (or (%c-eof? c) (char=? (%c-ch c) #\newline) (char=? (%c-ch c) #\return)))
 
 (define (%parse-row! c delim)
   (let loop ((fields (list (%parse-field! c delim))))

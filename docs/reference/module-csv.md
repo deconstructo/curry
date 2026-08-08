@@ -43,6 +43,8 @@ If `header?` is true, the first row is consumed as column names and every remain
 ; => (("a" "b" "c"))
 ```
 
+Raises if a quoted field is unterminated, or if anything other than the delimiter, a row terminator, or EOF immediately follows a quoted field's closing quote (`"a"x,b` is rejected, not silently misread as a new field starting with `x`).
+
 A quoted field may embed the delimiter, a literal `"` (doubled, `""`), or a newline:
 
 ```scheme

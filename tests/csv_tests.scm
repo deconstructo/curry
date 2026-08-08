@@ -49,6 +49,11 @@
   (csv-parse "\"a,b\"\nc,d")
   '(("a,b") ("c" "d")))
 (check "quoted empty field" (csv-parse "\"\",b") '(("" "b")))
+(check "lone CR row terminator" (csv-parse "a,b\rc,d") '(("a" "b") ("c" "d")))
+(check-error "unterminated quoted field raises"
+  (lambda () (csv-parse "\"a")))
+(check-error "garbage immediately after a closing quote raises"
+  (lambda () (csv-parse "\"a\"x,b")))
 
 ;;; Custom delimiter
 
