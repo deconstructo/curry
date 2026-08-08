@@ -212,12 +212,43 @@ typedef struct {
     val_t    data[];
 } Vector;
 
+/* hdr.flags bits for String — a small per-string cache over its own UTF-8
+ * content, letting index-by-character operations (string-ref, string-set!,
+ * substring, ...) avoid rescanning from byte 0 every single call. Every
+ * String constructor already explicitly zeroes hdr.flags (see the many
+ * "s->hdr.flags = 0" call sites across the codebase), so STR_META_VALID
+ * starts unset for every freshly allocated string with no further
+ * initialization needed — cache_idx/cache_off are only ever read once
+ * STR_CURSOR_VALID is set, and that only ever happens after they've been
+ * populated, so their own uninitialized value never matters.
+ *   STR_META_VALID   — nchars and STR_IS_ASCII (below) are up to date.
+ *   STR_IS_ASCII     — every byte is <0x80, so byte offset == char index
+ *                       directly and no scan/cache is ever needed at all.
+ *   STR_CURSOR_VALID — (cache_idx -> cache_off) is a valid resume point for
+ *                       a forward scan (only meaningful when META_VALID is
+ *                       set and STR_IS_ASCII is NOT — an ASCII string never
+ *                       needs this). Only ever set for non-ASCII strings,
+ *                       to make the common "increasing sequence of
+ *                       string-ref calls" access pattern (the cursor-based
+ *                       parsers in (curry csv)/(curry toml)/(curry yaml)
+ *                       all use exactly this pattern) amortized O(1)
+ *                       instead of O(n) per call.
+ * Any mutation of a string's bytes (string-set!, string-fill!,
+ * string-copy!) must clear STR_META_VALID — see str_invalidate_cache()
+ * in builtins.c — so a stale cache is never read as if it were current. */
+#define STR_META_VALID    0x1u
+#define STR_IS_ASCII      0x2u
+#define STR_CURSOR_VALID  0x4u
+
 typedef struct {
     Hdr      hdr;
     uint32_t len;      /* current byte length, excluding NUL */
     uint32_t hash;
     uint32_t orig_cap; /* inline data[] capacity set at allocation; never shrinks */
     char    *ext;      /* NULL → use inline data[]; set by string-set! on width change */
+    uint32_t nchars;      /* cached codepoint count; valid iff STR_META_VALID */
+    uint32_t cache_idx;   /* last codepoint index looked up; valid iff STR_CURSOR_VALID */
+    uint32_t cache_off;   /* byte offset of cache_idx; valid iff STR_CURSOR_VALID */
     char     data[];   /* original inline storage */
 } String;
 

@@ -643,23 +643,34 @@ static val_t prim_string(int ac, val_t *av, void *ud) {
     for(int i=0;i<ac;i++) port_write_char(port,(int)vunchr(av[i]));
     return port_get_output_string(port);
 }
+/* Forward-declared: defined below, alongside the substring/string-copy
+ * range-validation code that already relies on them. prim_string_ref used
+ * to maintain its own separate byte-counting loop that was missing the
+ * "skip any trailing continuation bytes" step str_char_offset already has
+ * (see its body), so it could land mid-sequence on a multi-byte character
+ * immediately before the target index and then decode garbage from that
+ * misaligned position. Reusing this one implementation removes the
+ * divergence instead of patching the copy.
+ *
+ * str_nchars/str_char_offset cache their result on the String itself (see
+ * STR_META_VALID and friends in object.h) rather than rescanning the whole
+ * byte buffer from scratch on every call — a loop of increasing
+ * string-ref/string-length calls over the same string (exactly what a
+ * cursor-based parser like (curry csv)/(curry toml)/(curry yaml) does) is
+ * amortized O(1) per call instead of O(n), which used to make a full scan
+ * O(n²) overall. str_invalidate_cache MUST be called after any mutation of
+ * a string's bytes (string-set!, string-fill!, string-copy!) so a stale
+ * cache is never read as if it were still current. */
+static uint32_t str_nchars(String *s);
+static uint32_t str_char_offset(String *s, uint32_t n);
+static void str_invalidate_cache(String *s);
+
 static val_t prim_string_length(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
-    /* UTF-8 character count (not byte length) */
+    /* UTF-8 character count (not byte length) — cached, see str_nchars. */
     String *s = as_str(av[0]);
-    uint32_t n=0; const char *p=str_data(s), *end=p+s->len;
-    while (p < end) { if ((*p & 0xC0) != 0x80) n++; p++; }
-    return vfix(n);
+    return vfix(str_nchars(s));
 }
-/* Forward-declared: defined below, alongside the substring/string-copy
- * range-validation code that already relies on it. prim_string_ref used to
- * maintain its own separate byte-counting loop instead of calling this —
- * that duplicate was missing the "skip any trailing continuation bytes"
- * step this one already has (see its body), so it could land mid-sequence
- * on a multi-byte character immediately before the target index and then
- * decode garbage from that misaligned position. Reusing this one
- * implementation removes the divergence instead of patching the copy. */
-static uint32_t utf8_char_offset(const char *data, uint32_t byte_len, uint32_t n);
 
 static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -671,8 +682,8 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     if (idx < 0) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: index out of range");
     const char *sd = str_data(s);
     const char *end = sd + s->len;
-    const char *p = sd + utf8_char_offset(sd, s->len, (uint32_t)idx);
-    /* idx >= character count: utf8_char_offset clamps to byte_len (the
+    const char *p = sd + str_char_offset(s, (uint32_t)idx);
+    /* idx >= character count: str_char_offset clamps to byte_len (the
      * buffer end) rather than raising itself, so that's checked here,
      * before any decode read past the buffer. */
     if (p >= end) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-ref: index out of range");
@@ -696,32 +707,92 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     for (int i = 1; i < seqlen; i++) cp = (cp << 6) | ((unsigned char)p[i] & 0x3F);
     return vchr(cp);
 }
-/* Helper: advance a UTF-8 pointer by n characters; returns byte offset of char n */
-static uint32_t utf8_char_offset(const char *data, uint32_t byte_len, uint32_t n) {
-    uint32_t i = 0, b = 0;
+/* Scans a String's byte content exactly once (until the next mutation
+ * invalidates the cache) to determine its character count and whether
+ * every byte is plain ASCII. Populates s->nchars and the STR_IS_ASCII /
+ * STR_META_VALID flags; a no-op if the cache is already valid. Every
+ * String constructor already explicitly zeroes hdr.flags, so a freshly
+ * allocated string always starts with STR_META_VALID unset — no separate
+ * initialization of this cache is needed at any allocation site. */
+static void str_ensure_meta(String *s) {
+    if (s->hdr.flags & STR_META_VALID) return;
+    const unsigned char *p = (const unsigned char *)str_data(s);
+    uint32_t byte_len = s->len;
+    uint32_t n = 0;
+    bool ascii = true;
+    for (uint32_t b = 0; b < byte_len; b++) {
+        if (p[b] >= 0x80) ascii = false;
+        if ((p[b] & 0xC0) != 0x80) n++;
+    }
+    s->nchars = n;
+    s->hdr.flags = (uint32_t)((s->hdr.flags | STR_META_VALID) & ~(STR_IS_ASCII | STR_CURSOR_VALID));
+    if (ascii) s->hdr.flags |= STR_IS_ASCII;
+}
+
+/* Character count, cached (see str_ensure_meta). Replaces what used to be
+ * an independent "count non-continuation bytes" loop duplicated across
+ * string-length, string-ref, string-set!, string_range_to_bytes, and
+ * string-copy!. */
+static uint32_t str_nchars(String *s) { str_ensure_meta(s); return s->nchars; }
+
+/* Must be called after any in-place mutation of a string's bytes
+ * (string-set!, string-fill!, string-copy!) — the mutation may have
+ * changed the character count, ASCII-ness, or made the cursor cache's
+ * remembered byte offset point at the wrong place, so the cache has to be
+ * recomputed from scratch (lazily, on next use) rather than trusted. */
+static void str_invalidate_cache(String *s) {
+    s->hdr.flags &= ~(STR_META_VALID | STR_IS_ASCII | STR_CURSOR_VALID);
+}
+
+/* Byte offset of character index n, clamped to s->len if n is at or past
+ * the string's own character count (the same "clamp rather than raise"
+ * contract the original single free-function version of this had —
+ * callers are responsible for checking the returned offset against the
+ * buffer end themselves, same as before).
+ *
+ * O(1) for an ASCII string (byte offset == char index, always). For a
+ * non-ASCII string, O(1) amortized as long as n is non-decreasing across
+ * successive calls on the same string (resumes the scan from the cached
+ * (cache_idx, cache_off) position instead of rescanning from byte 0) —
+ * exactly the access pattern a cursor-based parser produces — and O(n)
+ * worst case for a single random or backward access, same as the
+ * original implementation always was. */
+static uint32_t str_char_offset(String *s, uint32_t n) {
+    str_ensure_meta(s);
+    if (s->hdr.flags & STR_IS_ASCII) return n < s->nchars ? n : s->len;
+    const char *data = str_data(s);
+    uint32_t byte_len = s->len;
+    uint32_t i, b;
+    if ((s->hdr.flags & STR_CURSOR_VALID) && n >= s->cache_idx) {
+        i = s->cache_idx; b = s->cache_off;
+    } else {
+        i = 0; b = 0;
+    }
     while (b < byte_len && i < n) {
         if (((unsigned char)data[b] & 0xC0) != 0x80) i++;
         b++;
     }
     /* Advance past continuation bytes when i==n was hit mid-sequence */
     while (b < byte_len && ((unsigned char)data[b] & 0xC0) == 0x80) b++;
+    s->cache_idx = i;
+    s->cache_off = b;
+    s->hdr.flags |= STR_CURSOR_VALID;
     return b;
 }
+
 /* Validate a [start,end) *character* range against a UTF-8 buffer's real
  * character count and convert it to byte offsets — used by every
  * string primitive that takes an optional start/end pair. Unlike calling
- * utf8_char_offset() directly on an unchecked index, this raises on a
+ * str_char_offset() directly on an unchecked index, this raises on a
  * negative, inverted, or out-of-range index instead of silently clamping
  * to the buffer end (which corrupts rather than errors, since callers
  * then compute lengths as a difference of two independently-clamped
  * offsets that can end up in the wrong order). */
-static void string_range_to_bytes(const char *sd, uint32_t byte_len,
+static void string_range_to_bytes(String *s,
                                    int ac, val_t *av, int start_idx,
                                    const char *who,
                                    uint32_t *sb_out, uint32_t *eb_out) {
-    uint32_t nchars = 0;
-    for (const char *p = sd, *e = sd + byte_len; p < e; p++)
-        if (((unsigned char)*p & 0xC0) != 0x80) nchars++;
+    uint32_t nchars = str_nchars(s);
     if (ac > start_idx && !vis_fixnum(av[start_idx]))
         scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: start must be exact integer", who);
     if (ac > start_idx + 1 && !vis_fixnum(av[start_idx + 1]))
@@ -734,8 +805,8 @@ static void string_range_to_bytes(const char *sd, uint32_t byte_len,
      * small on a plain (uint32_t) cast and could slip past the check. */
     if (istart < 0 || iend < istart || iend > (intptr_t)nchars)
         scm_raise_code(EC_INDEX_OUT_OF_RANGE, "%s: index out of range", who);
-    *sb_out = utf8_char_offset(sd, byte_len, (uint32_t)istart);
-    *eb_out = utf8_char_offset(sd, byte_len, (uint32_t)iend);
+    *sb_out = str_char_offset(s, (uint32_t)istart);
+    *eb_out = str_char_offset(s, (uint32_t)iend);
 }
 static val_t prim_string_copy(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -743,7 +814,7 @@ static val_t prim_string_copy(int ac, val_t *av, void *ud) {
     String *s = as_str(av[0]);
     const char *sd = str_data(s);
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 1, "string-copy", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 1, "string-copy", &sb, &eb);
     uint32_t len = eb - sb;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
@@ -762,7 +833,7 @@ static val_t prim_string_to_list(int ac, val_t *av, void *ud) {
     String *s = as_str(av[0]);
     const char *sd = str_data(s);
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 1, "string->list", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 1, "string->list", &sb, &eb);
     val_t port = port_open_input_string(sd + sb, eb - sb);
     val_t chars = V_NIL; int cp;
     while((cp=port_read_char(port))!=-1) chars=scm_cons(vchr((uint32_t)cp),chars);
@@ -797,7 +868,7 @@ static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
     String *s = as_str(av[0]);
     char *sd = str_data(s);
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 2, "string-fill!", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 2, "string-fill!", &sb, &eb);
     /* Encode fill char */
     uint32_t u = vunchr(av[1]); char enc[4]; int elen;
     if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
@@ -807,6 +878,11 @@ static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
     /* Fill byte-by-byte within range (only safe for same-width chars) */
     for (uint32_t b = sb; b + (uint32_t)elen <= eb; b += (uint32_t)elen)
         memcpy(sd + b, enc, (size_t)elen);
+    /* The fill char's byte width may differ from what was there before,
+     * changing this string's ASCII-ness even though its length doesn't
+     * change — the cached nchars/ASCII/cursor state must not be trusted
+     * as still current after this. */
+    str_invalidate_cache(s);
     return V_VOID;
 }
 static val_t prim_string_foldcase(int ac, val_t *av, void *ud) {
@@ -841,7 +917,7 @@ static val_t prim_substring(int ac, val_t *av, void *ud) {
     String *s = as_str(av[0]);
     const char *sd = str_data(s);
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 1, "substring", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 1, "substring", &sb, &eb);
     uint32_t len = eb - sb;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
@@ -861,7 +937,7 @@ static val_t prim_write_string(int ac, val_t *av, void *ud) {
     const char *sd = str_data(s);
     val_t port = ac > 1 ? av[1] : PORT_STDOUT;
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 2, "write-string", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 2, "write-string", &sb, &eb);
     port_write_string(port, sd + sb, eb - sb);
     return V_VOID;
 }
@@ -871,7 +947,7 @@ static val_t prim_string_to_utf8(int ac, val_t *av, void *ud) {
     String *s = as_str(av[0]);
     const char *sd = str_data(s);
     uint32_t sb, eb;
-    string_range_to_bytes(sd, s->len, ac, av, 1, "string->utf8", &sb, &eb);
+    string_range_to_bytes(s, ac, av, 1, "string->utf8", &sb, &eb);
     uint32_t len = eb - sb;
     Bytevector *b = CURRY_NEW_FLEX_ATOM(Bytevector, len);
     b->hdr.type=T_BYTEVECTOR; b->hdr.flags=0; b->len=len;
@@ -1339,19 +1415,18 @@ static val_t prim_string_set_bang(int ac, val_t *av, void *ud) {
     char *sd = str_data(s);
     intptr_t idx = vunfix(av[1]);
     /* Checked against 0 and the real character count explicitly, not just
-     * cast to unsigned and handed to utf8_char_offset: a negative index
+     * cast to unsigned and handed to str_char_offset: a negative index
      * cast to uint32_t wraps to a huge offset, and an out-of-range index
      * (negative-wrapped or simply too large) both clamp through
-     * utf8_char_offset to the end of the buffer instead of raising,
+     * str_char_offset to the end of the buffer instead of raising,
      * silently corrupting the string (splicing the new character in at
      * the wrong place) rather than erroring. */
-    uint32_t nchars = 0;
-    { const char *p = sd, *end = p + s->len; while (p < end) { if ((*p & 0xC0) != 0x80) nchars++; p++; } }
+    uint32_t nchars = str_nchars(s);
     if (idx < 0 || (uint32_t)idx >= nchars)
         scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-set!: index out of range");
     uint32_t k = (uint32_t)idx;
-    uint32_t bstart = utf8_char_offset(sd, s->len, k);
-    uint32_t bend   = utf8_char_offset(sd, s->len, k + 1);
+    uint32_t bstart = str_char_offset(s, k);
+    uint32_t bend   = str_char_offset(s, k + 1);
     uint32_t old_blen = bend - bstart;
     uint32_t u = vunchr(av[2]); char enc[4]; int elen;
     if      (u < 0x80)    { enc[0]=(char)u; elen=1; }
@@ -1373,6 +1448,7 @@ static val_t prim_string_set_bang(int ac, val_t *av, void *ud) {
         s->len = new_len;
     }
     s->hash = 0;
+    str_invalidate_cache(s);
     return V_VOID;
 }
 
@@ -1387,7 +1463,7 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
     char       *tod   = str_data(to);
     const char *fromd = str_data(from);
     uint32_t sb, eb;
-    string_range_to_bytes(fromd, from->len, ac, av, 3, "string-copy!", &sb, &eb);
+    string_range_to_bytes(from, ac, av, 3, "string-copy!", &sb, &eb);
 
     /* Count characters in the source slice to find the matching dest range. */
     uint32_t char_count = 0;
@@ -1404,9 +1480,7 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
      * on a plain (uint32_t) cast. Comparing the signed, uncast intptr_t
      * against to_chars (an actual character count, always small) avoids
      * both. */
-    uint32_t to_chars = 0;
-    for (uint32_t b = 0; b < to->len; b++)
-        if (((unsigned char)tod[b] & 0xC0) != 0x80) to_chars++;
+    uint32_t to_chars = str_nchars(to);
     intptr_t iat = vunfix(av[1]);
     /* Compared as intptr_t throughout, never narrowed to uint32_t before
      * the check: to_chars/char_count are uint32_t and always fit in
@@ -1417,8 +1491,8 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
         scm_raise_code(EC_INDEX_OUT_OF_RANGE, "string-copy!: at/length out of range");
     uint32_t at_char = (uint32_t)iat;
 
-    uint32_t at_b     = utf8_char_offset(tod, to->len, at_char);
-    uint32_t at_end_b = utf8_char_offset(tod, to->len, at_char + char_count);
+    uint32_t at_b     = str_char_offset(to, at_char);
+    uint32_t at_end_b = str_char_offset(to, at_char + char_count);
 
     uint32_t src_bytes = eb - sb;
     uint32_t dst_bytes = at_end_b - at_b;
@@ -1435,6 +1509,7 @@ static val_t prim_string_copy_bang(int ac, val_t *av, void *ud) {
         to->len = new_len;
     }
     to->hash = 0;
+    str_invalidate_cache(to);
     return V_VOID;
 }
 
