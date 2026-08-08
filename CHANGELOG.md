@@ -1,5 +1,21 @@
 # Changelog
 
+### 1.17.6 - 2026-08-08
+
+**New — `(curry csv)`: RFC 4180 CSV reader and writer**
+
+`csv-parse`/`csv-read`/`csv-load-file`, `csv-stringify`/`csv-write`/
+`csv-dump-file`, following the same pure-Scheme, no-build-step,
+association-list/list-of-lists shape as `(curry toml)` and
+`(curry yaml)`. RFC 4180 quoting (doubled-`"` escaping, embedded
+commas/newlines/CRLF inside quoted fields), a configurable
+single-character delimiter (`#\tab` for TSV, etc.), both LF and CRLF
+row separators on read, and an optional `header?` mode that returns
+each data row as an association list keyed by the first row's column
+names. Every field stays a string — no type inference, since CSV has
+no type system of its own to infer from. 34 new assertions in
+`tests/csv_tests.scm`; see `docs/reference/module-csv.md`.
+
 ### 1.17.5 - 2026-08-08
 
 **New — `(curry matchable)`: pattern matching**
