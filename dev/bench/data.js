@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786101985512,
+  "lastUpdate": 1786151315910,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -2690,6 +2690,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 105.293,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "3e4c9e5b8bc6c1daef78a9bb72f67601a02d11a4",
+          "message": "docs(pkg-design): add public package-manager design doc, supersede prior survey\n\ndocs/thoughts/package-management-design.md inherits every settled\nconclusion from docs/guides/pkg-design.md except native-capability\nhandling, which it deliberately reverses: FFI-first (runtime dlopen,\nfollowing the working (curry hdf5) pattern) as the default, with\nCMake source-compilation kept as an explicit fallback tier for what\n(curry ffi) structurally can't reach (no struct-by-value, callbacks,\nor variadics).\n\nAlso adds: bundled tests/docs in the manifest, a develop/patch\nworkflow for local package development, targeted single-edge lockfile\nupdates, version retraction in the index schema, optional/weak\ndependencies, a registry-PR-submission helper, and a porting path for\nCHICKEN eggs and SRFIs. Consolidates what must change in curry itself,\nwith each item explicitly resolved (in v1 scope or deferred) rather\nthan left open.\n\nUses Akkadian terminology (bīt ṭuppi / iškāru / iškāru aḥûtu)\nconceptually throughout, kept deliberately out of all concrete syntax —\nmanifest extension, CLI verbs, and directories stay plain English.\n\npkg-design.md is marked superseded (kept as historical background, not\ndeleted); roadmap.md's three references updated to point at the new\ndocument.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T11:03:24+10:00",
+          "tree_id": "dacf57e3122bb648f12592bd119bd2eb3e5338b6",
+          "url": "https://github.com/deconstructo/curry/commit/3e4c9e5b8bc6c1daef78a9bb72f67601a02d11a4"
+        },
+        "date": 1786151314837,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.977,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.128,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.322,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.2,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 152.371,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 298.202,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.208,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 96.575,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 80.236,
             "unit": "ms"
           }
         ]
