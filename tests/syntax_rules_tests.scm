@@ -347,6 +347,59 @@
   (guard (e (#t 'caught)) (bare-transformer 5))
   'caught)
 
+;;; ---- ellipsis over a dotted-tail pattern capture ----
+;;; Regression test: a template variable captured through a *dotted-tail*
+;;; ellipsis position -- (pat . rest) ... -- must be substituted per
+;;; repetition in the template, same as one captured through a proper-list
+;;; position. sr_ell_refs used to only walk a template's proper-list
+;;; portion, so the dotted-tail variable was never recognized as needing
+;;; per-iteration substitution and came out as the literal, unexpanded
+;;; name instead of its captured value.
+(define-syntax dotted-ellipsis-probe
+  (syntax-rules ()
+    ((_ (pat . rest) ...) (quote ((pat . rest) ...)))))
+;; (pat . rest) matched against (1 2) binds pat=1, rest=(2) -- rest is the
+;; cdr of a 2-element list, i.e. a 1-element list, not the bare atom 2 --
+;; so reconstructing (pat . rest) correctly gives (1 . (2)) = (1 2), not
+;; (1 . 2).
+(check "ellipsis correctly substitutes a dotted-tail-captured variable"
+  (dotted-ellipsis-probe (1 2) (3 4))
+  '((1 2) (3 4)))
+
+;;; ---- "_" declared as a macro's own literal ----
+;;; Regression test: sr_match_one checked "is this the universal wildcard
+;;; _" before checking literal-list membership, so a macro that explicitly
+;;; declares "_" as one of its own literals (to match a literal use-site
+;;; underscore, distinct from the universal-wildcard case) had that
+;;; declaration silently ignored -- its "_"-clause matched every
+;;; invocation regardless of what was actually passed there, since the
+;;; wildcard check always won first.
+(define-syntax underscore-literal-probe
+  (syntax-rules (_)
+    ((_ _) 'literal-underscore-matched)
+    ((_ x) (list 'fallback x))))
+(check "a macro declaring _ as its own literal isn't shadowed by the universal wildcard"
+  (underscore-literal-probe 42)
+  '(fallback 42))
+(check "the literal _ itself still matches that macro's own _-literal clause"
+  (underscore-literal-probe _)
+  'literal-underscore-matched)
+
+;;; ---- reader: dotted-pair tail immediately after the ellipsis identifier ----
+;;; Regression test: "..." is itself read via the "symbol starting with a
+;;; literal '.'" fallback path in read_list (its own first character is
+;;; '.'), which used to unconditionally recurse into reading a fresh list
+;;; element next rather than re-checking for a genuine dotted-pair marker
+;;; first -- so "(a ... . tail)" misread as (a ... (. tail)) instead of
+;;; (a ... . tail): the real dot got read as a bare "." symbol followed by
+;;; "tail" as a separate element, rather than splicing tail in directly.
+(check "a dotted-pair tail right after the ellipsis identifier reads correctly"
+  (cdr (cdr '(a ... . tail)))
+  'tail)
+(check "the ellipsis identifier itself still reads correctly in that position"
+  (car (cdr '(a ... . tail)))
+  '...)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

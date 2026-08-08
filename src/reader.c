@@ -299,8 +299,64 @@ static val_t read_char_literal(val_t port) {
 
 /* ---- List reading ---- */
 
-/* Forward declaration */
+/* Forward declarations (mutually recursive: read_list_tail's non-dot case
+ * defers to read_list for the next element; read_list defers to
+ * read_list_tail for everything after its own head element). */
 static val_t read_datum(val_t port);
+static val_t read_list(val_t port, int close_ch);
+
+/* Given the reader is positioned right after one list element (post-
+ * skip_whitespace), determines and returns the *rest* of the list: a
+ * dotted-pair tail if "." is immediately followed by a delimiter (read one
+ * more datum, then require close_ch); an ordinary element if "." starts a
+ * longer token instead (e.g. the ellipsis identifier "..."), read as this
+ * list's next element via the same dot-vs-symbol check applied to
+ * whatever follows *it*; or, if the current character isn't "." at all,
+ * an ordinary recursive read_list continuation.
+ *
+ * This one function is used both right after read_list's own head element
+ * and, recursively, right after a "starts with '.'" element it reads
+ * itself — previously that second case unconditionally called read_list,
+ * which (having no way to know a real dotted-pair "." might immediately
+ * follow) would read that dot as a *fresh* bare "." symbol rather than
+ * recognizing the dotted tail, e.g. misreading "(a ... . tail)" as
+ * (a ... (. tail)) instead of (a ... . tail) — because "..." itself is
+ * only reachable via the "starts with '.'" branch (its own first
+ * character is a literal '.'), and nothing re-checked for a genuine
+ * dotted tail immediately following it. */
+static val_t read_list_tail(val_t port, int close_ch) {
+    skip_whitespace(port);
+    int elem_line = port_line(port);
+    int c = peek_char_port(port);
+    if (c == '.') {
+        next_char(port);
+        if (is_delimiter(peek_char_port(port))) {
+            /* Dotted pair: this IS the list's improper tail. */
+            skip_whitespace(port);
+            val_t cdr = read_datum(port);
+            skip_whitespace(port);
+            if (next_char(port) != close_ch) read_error("expected closing paren after dot");
+            return cdr;
+        }
+        /* A symbol starting with '.' (e.g. "..."); read it as this list's
+         * next element and continue — checking again for a dotted tail
+         * (or another such symbol) after it, not assuming a plain datum
+         * comes next. */
+        StrBuf sb; sb_init(&sb);
+        sb_push(&sb, '.');
+        while (!is_delimiter(peek_char_port(port))) {
+            sb_push(&sb, (char)next_char(port));
+        }
+        sb.buf[sb.len] = '\0';
+        val_t sym = sym_intern(sb.buf, (uint32_t)sb.len);
+        val_t rest = read_list_tail(port, close_ch);
+        Pair *p = CURRY_NEW(Pair);
+        p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
+        p->car = sym; p->cdr = rest;
+        return vptr(p);
+    }
+    return read_list(port, close_ch);
+}
 
 static val_t read_list(val_t port, int close_ch) {
     skip_whitespace(port);
@@ -313,42 +369,7 @@ static val_t read_list(val_t port, int close_ch) {
     int elem_line = port_line(port);
 
     val_t head = read_datum(port);
-    skip_whitespace(port);
-
-    c = peek_char_port(port);
-    if (c == '.') {
-        /* Could be dotted pair or a symbol starting with . */
-        next_char(port);
-        if (is_delimiter(peek_char_port(port))) {
-            /* Dotted pair */
-            skip_whitespace(port);
-            val_t cdr = read_datum(port);
-            skip_whitespace(port);
-            if (next_char(port) != close_ch) read_error("expected closing paren after dot");
-            /* Make a pair */
-            Pair *p = CURRY_NEW(Pair);
-            p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
-            p->car = head; p->cdr = cdr;
-            return vptr(p);
-        }
-        /* It's a symbol starting with '.'; push back the dot */
-        /* We can't unread, so handle it inline - read as symbol */
-        StrBuf sb; sb_init(&sb);
-        sb_push(&sb, '.');
-        while (!is_delimiter(peek_char_port(port))) {
-            sb_push(&sb, (char)next_char(port));
-        }
-        sb.buf[sb.len] = '\0';
-        val_t sym = sym_intern(sb.buf, (uint32_t)sb.len);
-        val_t rest2 = read_list(port, close_ch);
-        Pair *p2 = CURRY_NEW(Pair);
-        p2->hdr.type=T_PAIR; p2->hdr.flags=(uint32_t)elem_line; p2->car=sym; p2->cdr=rest2;
-        Pair *outer = CURRY_NEW(Pair);
-        outer->hdr.type=T_PAIR; outer->hdr.flags=(uint32_t)elem_line; outer->car=head; outer->cdr=vptr(p2);
-        return vptr(outer);
-    }
-
-    val_t rest = read_list(port, close_ch);
+    val_t rest = read_list_tail(port, close_ch);
     Pair *p = CURRY_NEW(Pair);
     p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
     p->car = head; p->cdr = rest;

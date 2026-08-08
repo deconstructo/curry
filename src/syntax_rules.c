@@ -93,9 +93,18 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
 static bool sr_match_one(val_t pat, val_t form, val_t literals, val_t ellipsis,
                          val_t *bindings, val_t *ell_bindings) {
     if (vis_symbol(pat)) {
-        if (pat == SR_UNDERSCORE) return true;
+        /* A macro may explicitly declare "_" as one of its own literals
+         * (Alex Shinn's match.scm does exactly this, matching "_" used
+         * literally as a match-pattern's own wildcard marker against the
+         * caller's actual use-site symbol "_") — that declaration must
+         * take priority over the universal wildcard special-case below,
+         * or "_" would swallow every macro call regardless of what the
+         * caller actually passed there, never reaching any later clause
+         * (including whatever clause was meant to bind an ordinary new
+         * pattern variable). Checked first, same as any other literal. */
         if (sr_is_literal(pat, literals))
             return vis_symbol(form) && form == pat;
+        if (pat == SR_UNDERSCORE) return true;
         /* Pattern variable — bind it */
         *bindings = scm_cons(scm_cons(pat, form), *bindings);
         return true;
@@ -211,6 +220,23 @@ static val_t sr_ell_refs(val_t tmpl, val_t ell_bindings) {
             if (!dup) result = scm_cons(vcar(s), result);
         }
         tmpl = vcdr(tmpl);
+    }
+    /* Dotted tail: the loop above only walks tmpl's proper-list portion,
+     * so a variable captured through a dotted-pair tail (e.g. "rest" in
+     * a (pat . rest) ... template) is otherwise never found here — and
+     * sr_expand_list only substitutes per-iteration for names sr_ell_refs
+     * reports, so a missed dotted-tail variable would fall through to
+     * sr_expand's "unbound identifier, emit as-is" case and appear
+     * unexpanded in the output. sr_match_list and sr_pvars both already
+     * handle this same dotted-tail case; this mirrors them. */
+    if (vis_symbol(tmpl)) {
+        val_t sub = sr_ell_refs(tmpl, ell_bindings);
+        for (val_t s = sub; vis_pair(s); s = vcdr(s)) {
+            bool dup = false;
+            for (val_t r = result; vis_pair(r); r = vcdr(r))
+                if (vcar(vcar(r)) == vcar(vcar(s))) { dup = true; break; }
+            if (!dup) result = scm_cons(vcar(s), result);
+        }
     }
     return result;
 }

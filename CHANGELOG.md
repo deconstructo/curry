@@ -1,5 +1,50 @@
 # Changelog
 
+### 1.17.5 - 2026-08-08
+
+**New — `(curry matchable)`: pattern matching**
+
+`match`/`match-lambda`/`match-lambda*`/`match-let`/`match-let*`, ported
+from Alex Shinn's public-domain `match.scm` (the same portable
+implementation behind CHICKEN's `matchable` egg, Chibi's
+`(chibi match)`, and Guile's `(ice-9 match)`). Literals, quoted
+literals, `_`, non-linear variables, list/dotted-pair/fixed-vector
+patterns, `(p ...)` ellipsis, `and`/`or`/`not`, `(? pred ...)`,
+`(= proc p)`, and an R7RS-native `(record pred? (accessor p) ...)`
+replacing upstream's CHICKEN-specific `$`/`@` (which lean on generic
+record introspection R7RS doesn't have). Trailing patterns after `...`
+and vector-level ellipsis are intentionally not supported — see the
+module's own header comment.
+
+Three real, general-purpose bugs in curry's core were found and fixed
+while porting this (none specific to this module):
+
+- `syntax-rules` template expansion never substituted a pattern
+  variable captured through a *dotted-tail* ellipsis position
+  (`(pat . rest) ...`) — the tail variable came out as the literal,
+  unexpanded name instead of its captured value.
+- `syntax-rules` treated `_` as a universal wildcard even when a macro
+  explicitly declared `_` as one of its own literals, so such a macro's
+  `_`-clause silently swallowed every invocation regardless of what was
+  actually passed there.
+- The reader misparsed a dotted-pair tail immediately following the
+  ellipsis identifier — `(a ... . tail)` read as `(a ... (. tail))`
+  instead of `(a ... . tail)` — because reading `...` itself goes
+  through the "symbol starting with `.`" fallback path, which
+  unconditionally recursed into reading a fresh list element next
+  rather than re-checking for a dotted-pair marker first.
+
+All three are covered by new regression tests in
+`tests/syntax_rules_tests.scm`; the module itself also required
+scoping every internal helper to avoid a fourth, subtler issue —
+curry's macro expansion doesn't rename template-introduced identifiers
+across nested/recursive uses of the *same* macro clause, so a named
+intermediate binding (e.g. `(let ((w (car v))) ...)`) could shadow an
+outer one of the same name whose continuation was still pending,
+silently binding a later pattern variable to the wrong value on
+patterns nested three or more levels deep. See
+`docs/reference/module-matchable.md` for the full writeup.
+
 ### 1.17.4 - 2026-08-08
 
 **New — `(curry ncurses)`: terminal UI via ncurses**
