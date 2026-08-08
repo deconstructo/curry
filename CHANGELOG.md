@@ -1,5 +1,27 @@
 # Changelog
 
+### 1.17.4 - 2026-08-08
+
+**New — `(curry ncurses)`: terminal UI via ncurses**
+
+Pure Scheme + `(curry ffi)`, no build step — dlopens the system ncurses at
+import time following `(curry hdf5)`'s pattern. One idiomatic layer rather
+than a raw 1:1 transliteration of the C API (unlike CHICKEN's `ncurses`
+egg): windows are records, attributes apply via `with-attributes` instead
+of manual `attron`/`attroff` pairing, and `ncurses-getch` translates known
+key codes to symbols (`'up`, `'enter`, ...) while still returning a raw
+integer for anything unrecognized. Every raw C symbol it binds was
+verified against a real system `libncurses.dylib` via a live `dlsym`
+probe (including confirming `getmaxx`/`getmaxy`, which are macros in
+`curses.h`, still export real backing symbols for FFI use); attribute bit
+values were computed from `NCURSES_ATTR_SHIFT=8` against a real system
+`curses.h` rather than guessed. `has_colors()` and the variadic `printw`
+family are deliberately not bound — the former returns ncurses' narrow
+`bool` C type, which `(curry ffi)` has no exact-width return marshaling
+for, and the latter needs variadic-call support `(curry ffi)` doesn't
+have. See `docs/reference/module-ncurses.md` and
+`examples/ncurses_demo.scm`.
+
 ### 1.17.3 - 2026-08-08
 
 **New — `(curry okf)`: frontmatter validation**

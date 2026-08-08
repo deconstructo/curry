@@ -132,6 +132,11 @@ add_test(NAME fits    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fits_tests.scm)
 add_test(NAME netcdf  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/netcdf_tests.scm)
 if(BUILD_FFI)
     add_test(NAME hdf5 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hdf5_tests.scm)
+    # (curry ncurses) is the same pure-Scheme-+-FFI shape as hdf5 above:
+    # requires BUILD_FFI=ON to compile, dlopens the system ncurses at
+    # runtime. ncurses_tests.scm only checks import/constants — no
+    # initscr()/newwin(), which need a real controlling terminal.
+    add_test(NAME ncurses COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/ncurses_tests.scm)
 endif()
 
 if(BUILD_MODULE_PROFILING AND TARGET curry_profiling)

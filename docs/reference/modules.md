@@ -45,6 +45,7 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [naips](module-naips.md) | `(curry naips)` | Airservices Australia NAIPS briefing-service client (loc/area/met/notam briefing) *(pure Scheme, no build step)* | `(curry http)` |
 | [babylonian-astronomy](module-babylonian-astronomy.md) | `(curry babylonian-astronomy)` | Babylonian mathematical astronomy: System-A zigzag function, synodic month/Saros eclipse cycle, civil calendar month names *(pure Scheme, no build step)* | — |
 | [airports](module-airports.md) | `(curry airports)` | ICAO/name airport directory lookup, cached and staleness-checked against the source *(pure Scheme, no build step)* | `(curry http)`, `(curry posix)` |
+| [ncurses](module-ncurses.md) | `(curry ncurses)` | Terminal UI via ncurses: windows, attributes, colors, key-symbol translation *(pure Scheme + FFI, no build step)* | `ncurses` installed at runtime (`-DBUILD_FFI=ON`) |
 
 ## See also
 
