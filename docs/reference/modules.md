@@ -50,6 +50,9 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [csv](module-csv.md) | `(curry csv)` | RFC 4180 CSV parse / stringify: quoting, custom delimiter, optional header row *(pure Scheme, no build step)* | — |
 | [schematic](module-schematic.md) | `(curry schematic read/extract/format/markdown/wiki)` | Scheme source reindenter, commented-definition extractor, and Markdown/svnwiki doc generators, ported from Evan Hanson's BSD-licensed schematic *(pure Scheme, no build step)* | — |
 | [graphviz](module-graphviz.md) | `(curry graphviz)` | DOT graph builder/writer *(pure Scheme, no build step)*; `graph-render!` renders via libgvc/libcgraph, dlopen'd at runtime | Graphviz installed at runtime (`-DBUILD_FFI=ON`) |
+| [xml](module-xml.md) | `(curry xml)` | Minimal XML reader/writer, scoped to feed-document needs *(pure Scheme, no build step)* | — |
+| [rss](module-rss.md) | `(curry rss)` | RSS 2.0 feed parse / stringify *(pure Scheme, no build step)* | `(curry xml)` |
+| [atom](module-atom.md) | `(curry atom)` | Atom 1.0 (RFC 4287) feed parse / stringify *(pure Scheme, no build step)* | `(curry xml)` |
 
 ## See also
 

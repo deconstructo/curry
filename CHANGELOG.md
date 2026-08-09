@@ -1,5 +1,49 @@
 # Changelog
 
+### 1.17.9 - 2026-08-09
+
+**New — `(curry xml)`, `(curry rss)`, `(curry atom)`: feed reading/writing**
+
+`(curry xml)`: a minimal pure-Scheme XML reader/writer scoped to what
+well-formed feed documents need (elements, attributes, CDATA, comments,
+the XML declaration and DOCTYPE, predefined + numeric character
+entities) — not a general XML 1.0 processor, and deliberately doesn't
+resolve namespaces (a tag like `content:encoded` is kept as one literal
+symbol). The shared foundation `(curry rss)`/`(curry atom)` are built
+on, the same way `(curry http)` underlies `(curry naips)`/`(curry
+airports)`/`(curry llm)`.
+
+`(curry rss)`: RSS 2.0 `rss-parse`/`rss-read`/`rss-load-file` and
+`rss-stringify`/`rss-write`/`rss-dump-file`. An `<rss-feed>` record
+(channel metadata + a list of `<rss-item>`) models the common elements
+by name; anything else present in the source is preserved in an
+`extras` alist and written back out, not silently dropped. Dates
+(`pubDate`, `lastBuildDate`) are kept as raw RFC 822 text, not parsed.
+
+`(curry atom)`: Atom 1.0 (RFC 4287) `atom-parse`/`atom-read`/
+`atom-load-file` and `atom-stringify`/`atom-write`/`atom-dump-file`,
+mirroring `(curry rss)`'s own API shape deliberately. An `<atom-feed>`
+record (feed metadata + a list of `<atom-entry>`), with `<atom-person>`
+(author name/email/uri) and `<atom-link>` (href/rel/type) sub-records
+for RFC 4287's own Person/Link constructs.
+
+Independent review of `(curry xml)`'s parser (the security-sensitive
+part, since it processes untrusted network feed data) before this
+shipped found two crash bugs, both fixed: `%parse-element!`/
+`%parse-content!` had no nesting-depth limit, so a deeply nested
+document — trivially constructible, ~15KB for 5000 levels — overflowed
+the C stack and segfaulted the whole process instead of raising a
+catchable error (now capped at 500 levels); and an Atom `<category>`
+missing its (RFC-4287-required, but real-world-omittable) `term`
+attribute produced `#f` in the parsed categories list, which then
+segfaulted on `atom-stringify` when written back out as an attribute
+value (now filtered out on read, matching the "tolerate malformed
+input rather than reject it" stance the rest of this module already
+takes).
+
+36/35/44 new assertions in tests/{xml,rss,atom}_tests.scm respectively
+(115 total); see docs/reference/module-{xml,rss,atom}.md.
+
 ### 1.17.8 - 2026-08-09
 
 **New — `(curry graphviz)`: DOT graph builder, writer, and renderer**
