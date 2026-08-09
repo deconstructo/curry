@@ -41,6 +41,7 @@ add_test(NAME toml         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/toml_tests.
 add_test(NAME matchable    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/matchable_tests.scm)
 add_test(NAME csv          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/csv_tests.scm)
 add_test(NAME schematic    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/schematic_tests.scm)
+add_test(NAME graphviz     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/graphviz_tests.scm)
 add_test(NAME hash_tables_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hash_tables_srfi_tests.scm)
 add_test(NAME timespec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/timespec_tests.scm)
 add_test(NAME srfi_receive_assume_optional COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_receive_assume_optional_tests.scm)

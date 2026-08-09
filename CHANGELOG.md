@@ -1,5 +1,18 @@
 # Changelog
 
+### 1.17.8 - 2026-08-09
+
+**New — `(curry graphviz)`: DOT graph builder, writer, and renderer**
+
+`make-graph`/`graph-add-node!`/`graph-add-edge!`/`graph-add-subgraph!`
+build a mutable graph object without hand-formatting DOT syntax;
+`graph->dot-string`/`graph-write-dot` need nothing beyond this module.
+`graph-render!` renders straight to PNG/SVG/PDF/etc. via Graphviz's own
+`libgvc`/`libcgraph`, dlopen'd lazily at runtime on first use (the same
+pattern `(curry hdf5)`/`(curry ncurses)` use) — not a shell-out to the
+`dot` CLI. 27 new assertions in `tests/graphviz_tests.scm`; see
+`docs/reference/module-graphviz.md`.
+
 ### 1.17.7 - 2026-08-09
 
 **New — `(curry schematic)`: source reindenter, doc extractor, Markdown/svnwiki generators**
