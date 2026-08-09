@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786210358170,
+  "lastUpdate": 1786270288794,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -2828,6 +2828,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 80.388,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "676bfcad888a9c5247a15963534706387f3795c4",
+          "message": "feat(zeromq): add (curry zeromq), ZeroMQ messaging sockets\n\nContext/socket lifecycle, zmq-bind!/zmq-connect!, zmq-send!/zmq-recv\n(blocking and non-blocking via 'dontwait), the common socket options\n(SUBSCRIBE/UNSUBSCRIBE/LINGER/RCVTIMEO/SNDTIMEO/IDENTITY), and\nmultipart messages ('sndmore/zmq-more?), via libzmq dlopen'd lazily at\nruntime -- the same pattern (curry hdf5)/(curry ncurses)/(curry\ngraphviz) already use. Messages are plain bytevectors at the primitive\nlevel; zmq-send-string!/zmq-recv-string are thin string->utf8/\nutf8->string convenience wrappers. zmq_poll (socket multiplexing,\nneeding struct-array FFI marshaling) and the CURVE/PLAIN security\nmechanisms are out of scope for this pass.\n\nIndependent review found two real bugs before this shipped, both in\nzmq-recv: a blocking call (no 'dontwait) on a socket with RCVTIMEO set\nraised once the deadline elapsed instead of returning #f -- EAGAIN is\nthe exact same errno for that case and for a 'dontwait call finding\nnothing queued, and the old check only special-cased the latter,\ndefeating the normal \"block with a give-up deadline\" idiom RCVTIMEO\nexists for. Separately, zmq_msg_close was skipped on any recv failure\nthat wasn't EAGAIN (e.g. calling recv on a push/pub socket, which\nlibzmq itself rejects) -- not an observed leak, but a violation of the\nzmq_msg_init/zmq_msg_close pairing contract. Both fixed: EAGAIN is now\ndetected by matching zmq_strerror's text (no portable numeric errno\nacross platforms) regardless of which flag the caller passed, and\nzmq_msg_close runs on every path out of zmq-recv, success or failure.\n\n17 new assertions in tests/zeromq_tests.scm, all exercised against\nreal inproc:// socket pairs (PUSH/PULL, REQ/REP, PUB/SUB with a\nsubscription filter, multipart); full 85/85 ctest suite passes; see\ndocs/reference/module-zeromq.md.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T19:59:24+10:00",
+          "tree_id": "aa2bc586dae28b84e056496db73770d04a86f2c8",
+          "url": "https://github.com/deconstructo/curry/commit/676bfcad888a9c5247a15963534706387f3795c4"
+        },
+        "date": 1786270288306,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.559,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.599,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.105,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.958,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 197.64,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 377.772,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.387,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.697,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.655,
             "unit": "ms"
           }
         ]
