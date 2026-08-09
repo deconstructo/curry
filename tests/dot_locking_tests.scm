@@ -96,12 +96,54 @@
     #f)
   (release-dot-lock f))
 
-;;; Concurrency: see dot_locking_concurrency_tests.scm (a separate test
-;;; file/ctest entry, deliberately not embedded here -- spawning many
-;;; actors reliably reproduces its regression in a fresh process, but
-;;; hung when run as this file's own 15th test in sequence, in a
-;;; process that had already done substantial prior work; kept isolated
-;;; rather than risk destabilizing this suite before that's understood).
+;;; Concurrency: curry actors are real OS threads sharing one address
+;;; space, so obtain-dot-lock can genuinely be called concurrently from
+;;; multiple actors within a single process. %unique-tmp-name's counter
+;;; used to be an unsynchronized (set! ...), a real data race -- two
+;;; actors could compute the identical temp filename and then race each
+;;; other's call-with-output-file/delete-file/create-hard-link against
+;;; that one shared path, producing a spurious ENOENT-style error
+;;; (correctly re-raised as "not an EEXIST failure", but the underlying
+;;; collision was itself the bug) instead of the intended #f/retry
+;;; behavior.
+;;;
+;;; The shared result-collecting state below (%race-mx/%race-results)
+;;; is deliberately at the TOP LEVEL, not let-bound inside this test:
+;;; curry's spawn gives every escaping closure its own frozen,
+;;; independent snapshot of whatever local variables it captures as
+;;; upvalues (see actor_spawn's own comment in src/actors.c), so a
+;;; let-bound "shared" mutable variable closed over by several spawned
+;;; actors is NOT actually shared at all -- each actor's set! only
+;;; mutates its own private copy, invisible to the others and to
+;;; whatever spawned them. A plain top-level define lives in the
+;;; genuinely-shared global environment instead, so a mutex around it
+;;; behaves like an ordinary shared-global-plus-lock pattern would in
+;;; any other threaded language. (An earlier version of this test used
+;;; a let-bound results list and appeared to hang intermittently --
+;;; it wasn't a hang, and it wasn't curry-core at all: it was this
+;;; exact mistake, so the wait loop below polled a `results` variable
+;;; the racing actors could structurally never update.)
+(define %race-mx (make-mutex))
+(define %race-results '())
+(let ((f (fresh-path 12)) (n 40))
+  (let loop ((i 0))
+    (when (< i n)
+      (spawn (lambda ()
+               (let ((r (guard (e (#t (list 'spurious-error (error-object-message e))))
+                          (obtain-dot-lock f 0.01 5))))
+                 (with-mutex %race-mx (lambda () (set! %race-results (cons r %race-results)))))))
+      (loop (+ i 1))))
+  (let wait ()
+    (unless (with-mutex %race-mx (lambda () (= (length %race-results) n)))
+      (thread-sleep! 0.01)
+      (wait)))
+  (check "no spurious errors when many actors race the same lock concurrently"
+    (filter (lambda (r) (and (pair? r) (eq? (car r) 'spurious-error))) %race-results)
+    '())
+  (check "exactly one of many racing actors actually obtains the lock"
+    (length (filter (lambda (r) (eq? r #t)) %race-results))
+    1)
+  (release-dot-lock f))
 
 ;;; with-dot-lock* / with-dot-lock
 

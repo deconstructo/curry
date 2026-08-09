@@ -25,11 +25,7 @@ the identical temp name and race each other's file operations against
 it, producing spurious errors unrelated to the lock actually being
 held. Fixed with a mutex around the counter; verified by racing 40
 actors against the same lock repeatedly (exactly one ever succeeds,
-zero spurious errors). That stress scenario also surfaced what looks
-like a separate, pre-existing, intermittent hang somewhere in curry's
-own actor/GC interaction under rapid concurrent thread creation —
-noted for future investigation, not fixed here, and deliberately not
-included as an automated test to avoid an occasionally-hanging CI run.
+zero spurious errors, every time).
 
 20 new assertions in tests/dot_locking_tests.scm; see
 docs/reference/module-dot-locking.md.
