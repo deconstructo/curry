@@ -1,5 +1,39 @@
 # Changelog
 
+### 1.17.10 - 2026-08-09
+
+**New — `(curry dot-locking)`: NFS-safe advisory file locking**
+
+`obtain-dot-lock`/`release-dot-lock`/`break-dot-lock`/`with-dot-lock*`/
+`with-dot-lock`, reimplemented against curry's own `(curry posix)`
+primitives from the API documented by CHICKEN Scheme's `dot-locking`
+egg (algorithm originally by Olin Shivers, CHICKEN port by felix
+winkelmann). Obtaining a lock for `file` uses the classic unique-temp-
+file-then-`link(2)` technique — atomic even over NFS, unlike a plain
+`O_EXCL` create historically was — leaving only `file.lock` behind
+while held. Supports bounded or infinite retry with a configurable
+sleep interval (via SRFI 18's `thread-sleep!`, already implemented in
+curry — no new core primitive needed), and optional stale-lock
+breaking by the lock file's own mtime.
+
+Independent review found one real bug before this shipped: curry
+actors are real OS threads sharing one address space, so
+`obtain-dot-lock` can genuinely be called concurrently from multiple
+actors within a single process — but the internal unique-temp-filename
+counter was an unsynchronized `(set! ...)`, letting two actors compute
+the identical temp name and race each other's file operations against
+it, producing spurious errors unrelated to the lock actually being
+held. Fixed with a mutex around the counter; verified by racing 40
+actors against the same lock repeatedly (exactly one ever succeeds,
+zero spurious errors). That stress scenario also surfaced what looks
+like a separate, pre-existing, intermittent hang somewhere in curry's
+own actor/GC interaction under rapid concurrent thread creation —
+noted for future investigation, not fixed here, and deliberately not
+included as an automated test to avoid an occasionally-hanging CI run.
+
+20 new assertions in tests/dot_locking_tests.scm; see
+docs/reference/module-dot-locking.md.
+
 ### 1.17.9 - 2026-08-09
 
 **New — `(curry xml)`, `(curry rss)`, `(curry atom)`: feed reading/writing**
