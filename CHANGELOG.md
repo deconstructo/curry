@@ -1,5 +1,39 @@
 # Changelog
 
+### 1.17.11 - 2026-08-09
+
+**New — `(curry zeromq)`: ZeroMQ messaging sockets**
+
+Context/socket lifecycle, `zmq-bind!`/`zmq-connect!`, `zmq-send!`/
+`zmq-recv` (blocking and non-blocking via `'dontwait`), the common
+socket options (`SUBSCRIBE`/`UNSUBSCRIBE`/`LINGER`/`RCVTIMEO`/
+`SNDTIMEO`/`IDENTITY`), and multipart messages (`'sndmore`/
+`zmq-more?`), via `libzmq` dlopen'd lazily at runtime — the same
+pattern `(curry hdf5)`/`(curry ncurses)`/`(curry graphviz)` already use.
+Messages are plain bytevectors at the primitive level;
+`zmq-send-string!`/`zmq-recv-string` are thin `string->utf8`/
+`utf8->string` convenience wrappers. `zmq_poll` (socket multiplexing,
+needing struct-array FFI marshaling) and the CURVE/PLAIN security
+mechanisms are out of scope for this pass.
+
+Independent review found two real bugs before this shipped, both in
+`zmq-recv`: a blocking call (no `'dontwait`) on a socket with
+`RCVTIMEO` set raised once the deadline elapsed instead of returning
+`#f` — `EAGAIN` is the exact same errno for that case and for a
+`'dontwait` call finding nothing queued, and the old check only
+special-cased the latter, defeating the normal "block with a give-up
+deadline" idiom `RCVTIMEO` exists for. Separately, `zmq_msg_close` was
+skipped on any recv failure that wasn't `EAGAIN` (e.g. calling `recv`
+on a `push`/`pub` socket, which libzmq itself rejects) — not an
+observed leak, but a violation of the `zmq_msg_init`/`zmq_msg_close`
+pairing contract. Both fixed: `EAGAIN` is now detected by matching
+`zmq_strerror`'s text (there's no portable numeric errno across
+platforms) regardless of which flag the caller passed, and
+`zmq_msg_close` runs on every path out of `zmq-recv`, success or
+failure. 17 new assertions in tests/zeromq_tests.scm, all exercised
+against real `inproc://` socket pairs (PUSH/PULL, REQ/REP, PUB/SUB with
+a subscription filter, multipart); see docs/reference/module-zeromq.md.
+
 ### 1.17.10 - 2026-08-09
 
 **New — `(curry dot-locking)`: NFS-safe advisory file locking**
