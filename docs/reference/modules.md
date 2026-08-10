@@ -55,6 +55,7 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [atom](module-atom.md) | `(curry atom)` | Atom 1.0 (RFC 4287) feed parse / stringify *(pure Scheme, no build step)* | `(curry xml)` |
 | [dot-locking](module-dot-locking.md) | `(curry dot-locking)` | NFS-safe advisory file locking (obtain/release/break/with-dot-lock) *(pure Scheme, no build step)* | `(curry posix)` |
 | [zeromq](module-zeromq.md) | `(curry zeromq)` | ZeroMQ messaging sockets: bind/connect, send/recv, pub/sub, multipart *(pure Scheme + FFI, no build step)* | `libzmq` installed at runtime (`-DBUILD_FFI=ON`) |
+| [sql](module-sql.md) | `(curry sql)` | Cross-database layer (sqlite today; mariadb/postgres reserved) — one `?`-placeholder style, alist rows, `sql-with-transaction` *(pure Scheme, no build step)* | `(curry sqlite)`, `(curry conditions)` |
 
 ## See also
 

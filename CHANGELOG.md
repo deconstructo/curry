@@ -1,5 +1,61 @@
 # Changelog
 
+### 1.17.12 - 2026-08-10
+
+**New — `(curry sql)`: a Scheme-native cross-database layer**
+
+`sql-connect`/`sql-exec`/`sql-query`/`sql-query-one`,
+`sql-begin!`/`sql-commit!`/`sql-rollback!`/`sql-with-transaction`,
+`sql-last-insert-id`, over `(curry sqlite)` (the first backend;
+mariadb/postgres are reserved names, not yet implemented). One `?`
+placeholder style regardless of backend, rows always as alists keyed
+by column-name symbol (matching `(curry sqlite)`'s own existing
+convention — this module makes no changes to `(curry sqlite)` itself),
+and `sql-with-transaction` follows `(curry dot-locking)`'s own
+`with-dot-lock*` pattern (`dynamic-wind`-based, commits on a normal
+return, rolls back and re-raises on any escape). A `'sql-row-error`
+condition type is reserved for recoverable per-row problems, openly
+extensible by any future driver or any caller via `(curry
+conditions)`'s own global type registry.
+
+Designed as an explicit critique of and alternative to PHP's PDO —
+see `docs/thoughts/sql-abstraction-design.md` for the full rationale:
+what PDO gets right (one interface, several drivers), what's
+PHP-idiomatic rather than actually necessary (the DSN string, the
+`ATTR_*`/`FETCH_*` integer-flag bags, one overloaded `lastInsertId`
+argument meaning different things per driver), and where curry's own
+condition/restart system does something PDO's language has no way to
+offer at all. 26 new assertions in tests/sql_tests.scm; see
+docs/reference/module-sql.md.
+
+**Fix — `(curry sqlite)`: two silent-corruption bugs found while building the layer above it**
+
+Independent review of `(curry sql)` traced its money-adjacent
+`sql-with-transaction` guarantee down to two pre-existing bugs in
+`(curry sqlite)` itself, both fixed here (no change to that module's
+own public API):
+
+- `sqlite-exec`'s step loop distinguished only `SQLITE_ROW` from
+  "anything else," silently treating a genuine step-time error (e.g.
+  running `ROLLBACK` with no active transaction) exactly like a normal
+  end-of-results — returning an empty row list instead of raising.
+  Concretely, this meant a nested `sql-with-transaction` call could
+  silently corrupt data rather than fail loudly: the inner call's
+  `COMMIT` would commit the one shared sqlite transaction early, and
+  the outer call's later `ROLLBACK` (issued once its own thunk raised)
+  would then fail against a connection with no active transaction —
+  and that failure went unreported. Fixed by checking the final step's
+  return code and raising if it isn't `SQLITE_DONE`, matching
+  `sqlite-step`'s own existing (correct) convention.
+- `sqlite-bind` had no catch-all case: a boolean `#t`, a symbol, a
+  pair, a vector, or a bytevector all fell through every type check
+  silently, leaving that parameter position bound to `NULL` rather
+  than raising — a caller's type mistake (a symbol where a string was
+  meant, say) would silently corrupt the bound row with no error at
+  all. Now raises clearly instead.
+
+3 new assertions in tests/sqlite_tests.scm.
+
 ### 1.17.11 - 2026-08-09
 
 **New — `(curry zeromq)`: ZeroMQ messaging sockets**

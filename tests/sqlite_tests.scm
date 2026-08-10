@@ -39,6 +39,32 @@
     (check "nul-byte-length" (string-length got) (string-length nul-str))
     (check "nul-byte-roundtrip" got nul-str)))
 
+(define (check-error name thunk)
+  (if (guard (e (#t #t)) (thunk) #f)
+      (set! pass (+ pass 1))
+      (begin (set! fail (+ fail 1))
+             (display "FAIL: ") (display name) (display " did not raise") (newline))))
+
+;;; Regression: sqlite-exec's step loop used to distinguish only
+;;; SQLITE_ROW from "anything else", silently treating a genuine
+;;; step-time error (e.g. ROLLBACK with no active transaction) exactly
+;;; like a normal end-of-results -- returning an empty row list rather
+;;; than raising. This mattered in practice for (curry sql)'s own
+;;; sql-with-transaction, whose dynamic-wind-based rollback guarantee
+;;; depended on sqlite-exec actually raising when a rollback fails.
+(check-error "exec-rollback-with-no-active-transaction-raises"
+  (lambda () (sqlite-exec db "ROLLBACK")))
+
+;;; Regression: sqlite-bind had no catch-all case -- a boolean #t, a
+;;; symbol, a pair, a vector, or a bytevector all fell through every
+;;; branch silently, leaving that parameter position bound to NULL
+;;; rather than raising. A caller's type mistake (a symbol where a
+;;; string was meant, say) would then silently corrupt the bound row.
+(let ((stmt (sqlite-prepare db "SELECT 1 WHERE 1 = ?")))
+  (check-error "bind-symbol-raises" (lambda () (sqlite-bind stmt 1 'not-a-valid-type)))
+  (check-error "bind-boolean-true-raises" (lambda () (sqlite-bind stmt 1 #t)))
+  (sqlite-finalize stmt))
+
 (sqlite-close db)
 
 (newline)

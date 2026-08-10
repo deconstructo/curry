@@ -118,8 +118,27 @@ static curry_val fn_exec(int ac, curry_val *av, void *ud) {
     if (rc != SQLITE_OK) curry_error("sqlite-exec: %s", sqlite3_errmsg(db->db));
 
     curry_val rows = curry_nil();
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    int step_rc;
+    while ((step_rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         rows = curry_make_pair(row_to_alist(stmt), rows);
+    }
+    /* The loop above only distinguished SQLITE_ROW from "anything else" --
+     * silently treating a genuine step-time error (SQLITE_ERROR,
+     * SQLITE_MISUSE, ...) the exact same way as a normal SQLITE_DONE end
+     * of results, i.e. returning whatever rows were collected so far with
+     * no indication anything went wrong. This is the same distinction
+     * fn_step (below) already makes correctly; fn_exec needs it too --
+     * a caller running "ROLLBACK" with no active transaction, or any
+     * other statement that fails mid-execution rather than at prepare
+     * time, must raise, not silently succeed with an empty (or partial)
+     * row list. Captured before sqlite3_finalize, since finalize's own
+     * return code could otherwise be mistaken for -- or overwrite the
+     * state behind -- the error this step actually hit. */
+    if (step_rc != SQLITE_DONE) {
+        char errbuf[256];
+        snprintf(errbuf, sizeof(errbuf), "%s", sqlite3_errmsg(db->db));
+        sqlite3_finalize(stmt);
+        curry_error("sqlite-exec: %s", errbuf);
     }
     sqlite3_finalize(stmt);
 
@@ -153,6 +172,14 @@ static curry_val fn_bind(int ac, curry_val *av, void *ud) {
         sqlite3_bind_text(w->stmt, idx, curry_string(val),
                            (int)curry_string_length(val), SQLITE_TRANSIENT);
     }
+    /* No catch-all case existed here before: #t, a symbol, a pair, a
+     * vector, a bytevector -- anything not matched by one of the
+     * branches above -- fell through with no binding made at all,
+     * silently leaving that parameter position NULL rather than
+     * raising. A caller's mistake (passing a symbol where a string was
+     * meant, say) would then silently corrupt the bound row instead of
+     * failing loudly. */
+    else curry_error("sqlite-bind: unsupported value type (expected #f, an exact integer, a flonum, or a string)");
     return curry_void();
 }
 

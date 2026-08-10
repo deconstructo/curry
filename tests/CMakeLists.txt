@@ -47,6 +47,7 @@ add_test(NAME rss          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rss_tests.s
 add_test(NAME atom         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/atom_tests.scm)
 add_test(NAME dot_locking  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dot_locking_tests.scm)
 add_test(NAME zeromq       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/zeromq_tests.scm)
+add_test(NAME sql          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sql_tests.scm)
 add_test(NAME hash_tables_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hash_tables_srfi_tests.scm)
 add_test(NAME timespec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/timespec_tests.scm)
 add_test(NAME srfi_receive_assume_optional COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_receive_assume_optional_tests.scm)
