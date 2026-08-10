@@ -52,13 +52,14 @@ Uses the modern Linux GPIO character device (`/dev/gpiochipN`).
 
 ```scheme
 (import (curry rpi))
+(import (srfi 18))
 
 ; Blink LED on BCM4 five times
 (define led (gpio-open 0 4 'output))
 (let loop ((i 0))
   (when (< i 5)
-    (gpio-write led 1) (sleep 0.5)
-    (gpio-write led 0) (sleep 0.5)
+    (gpio-write led 1) (thread-sleep! 0.5)
+    (gpio-write led 0) (thread-sleep! 0.5)
     (loop (+ i 1))))
 (gpio-close led)
 
@@ -67,7 +68,7 @@ Uses the modern Linux GPIO character device (`/dev/gpiochipN`).
 (define w   (gpio-watch btn
                (lambda (edge)
                  (display (symbol->string edge)) (newline))))
-(sleep 30)
+(thread-sleep! 30)
 (gpio-unwatch w)
 (gpio-close btn)
 ```
@@ -155,11 +156,12 @@ Direct `ioctl` on `/dev/spidevN.M`.
 
 ```scheme
 (import (curry rpi))
+(import (srfi 18))
 
 (define servo (pwm-open 0 0))
 (pwm-set! servo 20000000 1500000)   ; 20 ms period, 1.5 ms = neutral
 (pwm-enable! servo)
-(sleep 2)
+(thread-sleep! 2)
 (pwm-disable! servo)
 (pwm-close servo)
 ```
@@ -336,16 +338,17 @@ Uses the Linux `w1-therm` kernel driver via sysfs.
 
 ```scheme
 (import (curry rpi))
-(import (curry actors))
+(import (srfi 18))
 
 (define wdt (watchdog-open 30))
 (display (string-append "WDT timeout: "
                         (number->string (watchdog-timeout wdt)) " s")) (newline)
 
-; Background heartbeat — kick every 15 s
+; Background heartbeat — kick every 15 s. spawn/send!/receive/self are
+; core builtins (curry's actor system), no import needed.
 (spawn (lambda ()
          (let loop ()
-           (sleep 15)
+           (thread-sleep! 15)
            (watchdog-kick wdt)
            (loop))))
 
@@ -401,9 +404,9 @@ Uses the Linux `w1-therm` kernel driver via sysfs.
 
 ```bash
 # GPIO: blink LED on BCM4
-./build/curry -e '(import (curry rpi))
+./build/curry -e '(import (curry rpi)) (import (srfi 18))
   (define led (gpio-open 0 4 '"'"'output))
-  (gpio-write led 1) (sleep 0.5) (gpio-write led 0)
+  (gpio-write led 1) (thread-sleep! 0.5) (gpio-write led 0)
   (gpio-close led) (display "GPIO OK\n")'
 
 # I2C: open bus 1
