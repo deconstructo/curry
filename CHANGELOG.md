@@ -2,21 +2,29 @@
 
 ### 1.17.12 - 2026-08-10
 
-**New — `(curry sql)`: a Scheme-native cross-database layer**
+**New — `(curry sql)`: a Scheme-native cross-database layer, with sqlite/mariadb/postgres backends**
 
 `sql-connect`/`sql-exec`/`sql-query`/`sql-query-one`,
 `sql-begin!`/`sql-commit!`/`sql-rollback!`/`sql-with-transaction`,
-`sql-last-insert-id`, over `(curry sqlite)` (the first backend;
-mariadb/postgres are reserved names, not yet implemented). One `?`
-placeholder style regardless of backend, rows always as alists keyed
-by column-name symbol (matching `(curry sqlite)`'s own existing
-convention — this module makes no changes to `(curry sqlite)` itself),
-and `sql-with-transaction` follows `(curry dot-locking)`'s own
-`with-dot-lock*` pattern (`dynamic-wind`-based, commits on a normal
-return, rolls back and re-raises on any escape). A `'sql-row-error`
-condition type is reserved for recoverable per-row problems, openly
-extensible by any future driver or any caller via `(curry
-conditions)`'s own global type registry.
+`sql-last-insert-id`, over three backends: `(curry sqlite)` (true
+prepared statements), and the two new `(curry mariadb)`/`(curry
+postgres)` FFI client modules (escape-and-splice, via each database's
+own connection-aware escaping function — neither builds a native
+parameter-array struct). One `?` placeholder style regardless of
+backend, rows always as alists keyed by column-name symbol (matching
+`(curry sqlite)`'s own existing convention — this module makes no
+changes to `(curry sqlite)`/`(curry mariadb)`/`(curry postgres)`
+themselves), and `sql-with-transaction` follows `(curry dot-locking)`'s
+own `with-dot-lock*` pattern (`dynamic-wind`-based, commits on a normal
+return, rolls back and re-raises on any escape). `sql-last-insert-id`
+takes an optional sequence-name argument — accepted-but-ignored on
+sqlite/mariadb (both have a genuine connection-scoped answer without
+one), genuinely used on postgres (`currval(sequence-name)` vs.
+`lastval()`), since PostgreSQL has no connection-independent concept of
+"the row I just inserted." A `'sql-row-error` condition type is
+reserved for recoverable per-row problems, openly extensible by any
+future driver or any caller via `(curry conditions)`'s own global type
+registry.
 
 Designed as an explicit critique of and alternative to PHP's PDO —
 see `docs/thoughts/sql-abstraction-design.md` for the full rationale:
@@ -25,8 +33,30 @@ PHP-idiomatic rather than actually necessary (the DSN string, the
 `ATTR_*`/`FETCH_*` integer-flag bags, one overloaded `lastInsertId`
 argument meaning different things per driver), and where curry's own
 condition/restart system does something PDO's language has no way to
-offer at all. 26 new assertions in tests/sql_tests.scm; see
-docs/reference/module-sql.md.
+offer at all.
+
+`(curry mariadb)`'s `my-exec` reads `MYSQL_FIELD`/`MYSQL_ROW` column
+data via raw C-struct pointer arithmetic rather than a struct FFI
+binding (MariaDB's own C API has no safer accessor for this); `(curry
+postgres)`'s `pg-exec`/`pg-escape-literal`/`pg-escape-bytea` need no
+such thing — `PQfname`/`PQgetvalue`/`PQescapeLiteral` are ordinary
+string-returning functions. Both were exercised live against real
+local servers (a SELECT round-trip on each; both escape functions on
+postgres) during an independent review, which caught and fixed two
+real bugs: a wrong FFI argument-type declaration on
+`PQescapeLiteral`'s call site (a Scheme string tag where a raw pinned
+pointer is actually passed, silently marshaling to `NULL` rather than
+raising) that made every `pg-escape-literal` call crash the process
+outright, and a missing `make-cptr` wrap on `my-exec`'s column-name
+read that made every mariadb query with at least one column raise
+`"not a c-ptr"`. Both are fixed and reverified live.
+
+27 assertions in tests/sql_tests.scm, plus new
+tests/mariadb_tests.scm/tests/postgres_tests.scm (both limited, by
+design, to what's reachable without a live server present at
+test-run time — see their own headers); full 88/88 ctest suite passes.
+See docs/reference/module-sql.md, docs/reference/module-mariadb.md,
+docs/reference/module-postgres.md.
 
 **Fix — `(curry sqlite)`: two silent-corruption bugs found while building the layer above it**
 

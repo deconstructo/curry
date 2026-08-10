@@ -2,7 +2,7 @@
 
 *unreleased*
 
-A Scheme-native cross-database layer over `(curry sqlite)` — and, in future, MariaDB/PostgreSQL FFI backends. See [`docs/thoughts/sql-abstraction-design.md`](../thoughts/sql-abstraction-design.md) for the full design rationale (a critique of PHP's PDO and what a Lisp-native version of the same idea looks like); this module is that design, with SQLite as the first backend.
+A Scheme-native cross-database layer over `(curry sqlite)`, `(curry mariadb)`, and `(curry postgres)`. See [`docs/thoughts/sql-abstraction-design.md`](../thoughts/sql-abstraction-design.md) for the full design rationale (a critique of PHP's PDO and what a Lisp-native version of the same idea looks like); this module is that design.
 
 ## Import
 
@@ -18,12 +18,14 @@ A caller always writes `?` placeholders and always gets rows back as alists keye
 
 ### `(sql-connect kind config)` → connection
 
-`kind` is `'sqlite` today (`'mariadb`/`'postgres` are recognized but raise "not yet implemented" — they're reserved names, not silently-wrong behaviour). `config` is a path string, or the literal symbol `':memory:` for an in-memory database.
+`kind` is `'sqlite`, `'mariadb`, or `'postgres`. For `'sqlite`, `config` is a path string, or the literal symbol `':memory:` for an in-memory database. For `'mariadb`/`'postgres`, `config` is an alist of connection parameters passed straight through to `(curry mariadb)`'s `my-connect`/`(curry postgres)`'s `pg-connect` — see those modules' own docs for their accepted keys (`host`, `port`, `user`, `password`, and `database`/`dbname` respectively).
 
 ```scheme
 (import (curry sql))
 (define conn (sql-connect 'sqlite "/path/to.db"))
 (define mem  (sql-connect 'sqlite ':memory:))
+(define pg   (sql-connect 'postgres '((host . "localhost") (dbname . "app") (user . "app"))))
+(define my   (sql-connect 'mariadb '((host . "localhost") (database . "app") (user . "app"))))
 ```
 
 ### `(sql-connection? x)` → boolean
@@ -81,7 +83,7 @@ The one nearly everyone should use instead: begins a transaction, calls `(thunk)
 
 ### `(sql-last-insert-id conn . sequence-name)` → integer
 
-Works as expected on SQLite (and, in future, MariaDB) — their own native "just tell me" primitive. The optional `sequence-name` argument exists for a future PostgreSQL backend, which has no universal equivalent (only "the last value a named sequence produced in this session," via `lastval()`) — accepted-but-ignored here since SQLite doesn't need it, so call sites stay portable across backends. See the design doc's §9 for why PostgreSQL's version of this procedure will raise rather than guess if no sequence name is given, once that backend exists — an `INSERT ... RETURNING id` is the genuinely idiomatic PostgreSQL alternative worth reaching for directly.
+Works as expected on SQLite and MariaDB — their own native "just tell me" primitive (`sqlite-last-insert-rowid`, `mysql_insert_id`) — where `sequence-name`, if given, is accepted but ignored, keeping call sites portable. PostgreSQL has no connection-independent equivalent: with no `sequence-name`, it's "the last value produced by any sequence in this session" (`lastval()`), raising if none has been used yet; with a `sequence-name`, it's that specific sequence's own last value (`currval(sequence-name)`), still raising if that sequence hasn't been used yet. See the design doc's §9 for the full rationale; an `INSERT ... RETURNING id` is the genuinely idiomatic PostgreSQL alternative worth reaching for directly.
 
 ## Recoverable row errors
 
@@ -90,7 +92,7 @@ A `'sql-row-error` condition type is registered (via `(curry conditions)`) as th
 ## Notes
 
 - `%find-placeholder`'s `?`-scanning does not skip a literal `?` character that happens to appear inside a quoted string in the SQL text itself — a query containing both parameter placeholders and a literal `?` in a string constant is a real, narrow gap; write that particular `?` as a bound parameter instead (`... WHERE note = ?` with the literal `"?"` passed as a parameter) if it comes up.
-- Backends without true prepared-statement support (a future MariaDB/PostgreSQL FFI driver) use an escape-and-splice strategy instead — each parameter is rendered as a SQL literal via that database's own connection-aware escaping function and spliced into the query text — see the design doc's §5 for why this is a deliberate, named strategy rather than a compromise.
+- Backends without true prepared-statement support (MariaDB, PostgreSQL) use an escape-and-splice strategy instead — each parameter is rendered as a SQL literal via that database's own connection-aware escaping function and spliced into the query text — see the design doc's §5 for why this is a deliberate, named strategy rather than a compromise.
 
 ## See also
 

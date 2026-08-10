@@ -47,7 +47,16 @@ add_test(NAME rss          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rss_tests.s
 add_test(NAME atom         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/atom_tests.scm)
 add_test(NAME dot_locking  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dot_locking_tests.scm)
 add_test(NAME zeromq       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/zeromq_tests.scm)
-add_test(NAME sql          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sql_tests.scm)
+if(BUILD_FFI)
+  # (curry sql) unconditionally imports (curry mariadb)/(curry postgres),
+  # both of which import (curry ffi) -- all three tests need BUILD_FFI=ON
+  # to even import, regardless of whether a live MariaDB/PostgreSQL
+  # server is reachable (mariadb_tests.scm/postgres_tests.scm test what's
+  # possible without one -- see their own headers).
+  add_test(NAME sql          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sql_tests.scm)
+  add_test(NAME mariadb      COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/mariadb_tests.scm)
+  add_test(NAME postgres     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/postgres_tests.scm)
+endif()
 add_test(NAME hash_tables_srfi COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/hash_tables_srfi_tests.scm)
 add_test(NAME timespec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/timespec_tests.scm)
 add_test(NAME srfi_receive_assume_optional COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_receive_assume_optional_tests.scm)

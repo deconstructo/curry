@@ -1,9 +1,11 @@
 ;;; SQL abstraction layer tests — (curry sql), sqlite backend
 ;;;
 ;;; See docs/thoughts/sql-abstraction-design.md for the design this
-;;; module implements. This suite only exercises the sqlite backend —
-;;; mariadb/postgres don't exist yet (sql-connect raises a clear
-;;; "not yet implemented" for those, checked below).
+;;; module implements. This suite exercises the sqlite backend end to
+;;; end; mariadb/postgres are exercised in their own
+;;; tests/mariadb_tests.scm/tests/postgres_tests.scm (no live server is
+;;; available here, so those two suites are limited to import,
+;;; connection-failure, and escaping-logic checks — see their headers).
 
 (import (curry sql))
 
@@ -37,8 +39,10 @@
 (check "sql-connect returns a connection" (sql-connection? (fresh-conn)) #t)
 (check "sql-connection-kind reports the backend" (sql-connection-kind (fresh-conn)) 'sqlite)
 (check-error "sql-connect raises on an unknown backend" (lambda () (sql-connect 'not-a-real-db "x")))
-(check-error "sql-connect raises clearly for a not-yet-implemented backend"
-  (lambda () (sql-connect 'mariadb '((host . "localhost")))))
+(check-error "sql-connect raises on an unreachable mariadb host"
+  (lambda () (sql-connect 'mariadb '((host . "127.0.0.1") (port . 1)))))
+(check-error "sql-connect raises on an unreachable postgres host"
+  (lambda () (sql-connect 'postgres '((host . "127.0.0.1") (port . 1)))))
 
 ;;; Basic exec / query
 
