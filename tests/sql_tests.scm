@@ -2,7 +2,9 @@
 ;;;
 ;;; See docs/thoughts/sql-abstraction-design.md for the design this
 ;;; module implements. This suite exercises the sqlite backend end to
-;;; end; mariadb/postgres are exercised in their own
+;;; end, including sql-query-stream/sql-with-stream (sqlite streams by
+;;; nature via true prepared statements, so this needs no server);
+;;; mariadb/postgres are exercised in their own
 ;;; tests/mariadb_tests.scm/tests/postgres_tests.scm (no live server is
 ;;; available here, so those two suites are limited to import,
 ;;; connection-failure, and escaping-logic checks — see their headers).
@@ -101,6 +103,24 @@
   (check "sql-last-insert-id accepts (and ignores) a sequence-name argument"
     (sql-last-insert-id conn "irrelevant-on-sqlite")
     2)
+  (sql-close conn))
+
+;;; Streaming
+
+(let ((conn (fresh-conn)))
+  (sql-exec conn "INSERT INTO people (name, age) VALUES (?, ?)" "Alice" 30)
+  (sql-exec conn "INSERT INTO people (name, age) VALUES (?, ?)" "Bob" 25)
+  (sql-exec conn "INSERT INTO people (name, age) VALUES (?, ?)" "Carol" 40)
+  (let ((s (sql-query-stream conn "SELECT * FROM people WHERE age > ? ORDER BY age" 26)))
+    (check "sql-stream-next! returns rows in order" (sql-stream-next! s) '((id . 1) (name . "Alice") (age . 30)))
+    (check "sql-stream-next! returns the next row" (sql-stream-next! s) '((id . 3) (name . "Carol") (age . 40)))
+    (check "sql-stream-next! returns #f at end" (sql-stream-next! s) #f)
+    (sql-stream-close! s))
+  (sql-with-stream conn "SELECT * FROM people ORDER BY id" '()
+    (lambda (s)
+      (let loop ((row (sql-stream-next! s)) (n 0))
+        (if row (loop (sql-stream-next! s) (+ n 1))
+            (check "sql-with-stream drains every row" n 3)))))
   (sql-close conn))
 
 ;;; Transactions — manual

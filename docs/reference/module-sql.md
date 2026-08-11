@@ -85,6 +85,29 @@ The one nearly everyone should use instead: begins a transaction, calls `(thunk)
 
 Works as expected on SQLite and MariaDB — their own native "just tell me" primitive (`sqlite-last-insert-rowid`, `mysql_insert_id`) — where `sequence-name`, if given, is accepted but ignored, keeping call sites portable. PostgreSQL has no connection-independent equivalent: with no `sequence-name`, it's "the last value produced by any sequence in this session" (`lastval()`), raising if none has been used yet; with a `sequence-name`, it's that specific sequence's own last value (`currval(sequence-name)`), still raising if that sequence hasn't been used yet. See the design doc's §9 for the full rationale; an `INSERT ... RETURNING id` is the genuinely idiomatic PostgreSQL alternative worth reaching for directly.
 
+## Streaming
+
+For a result set too large to comfortably hold as one in-memory list — the alternative to `sql-query`/`sql-exec`, which always materialize the full result set.
+
+### `(sql-query-stream conn sql . params)` → stream handle
+### `(sql-stream-next! stream)` → row alist or `#f` at end
+### `(sql-stream-close! stream)`
+### `(sql-with-stream conn sql params thunk)`
+
+`sql-with-stream` is the one nearly everyone should use instead of the raw open/next/close triplet — opens a stream, calls `(thunk stream)`, and always closes on the way out (a normal return, an error, or an escaping continuation) via `dynamic-wind`, the same shape `sql-with-transaction` already uses. Note `params` here is a plain list, not a rest argument (`thunk` occupies the last position):
+
+```scheme
+(import (curry sql))
+(sql-with-stream conn "SELECT * FROM people WHERE age > ?" (list 21)
+  (lambda (stream)
+    (let loop ((row (sql-stream-next! stream)))
+      (when row
+        (display row) (newline)
+        (loop (sql-stream-next! stream))))))
+```
+
+Every backend streams underneath, but by a different mechanism: SQLite already streams by nature (`sqlite-prepare`/`sqlite-step` fetch one row at a time via true prepared statements — `sql-query-stream` reuses that path directly rather than adding a second one); MariaDB uses `mysql_use_result` (unbuffered fetch off the wire); PostgreSQL uses a `WITH HOLD` SQL cursor (`DECLARE`/`FETCH`/`CLOSE`, so it works without wrapping the caller in an explicit transaction). See each backend's own module docs — [`module-mariadb.md`](module-mariadb.md#streaming), [`module-postgres.md`](module-postgres.md#streaming) — for backend-specific detail, including PostgreSQL's own additional native-async streaming extra (`pg-stream-open`/etc.), which is deliberately *not* wired in here since it isn't portable across backends.
+
 ## Recoverable row errors
 
 A `'sql-row-error` condition type is registered (via `(curry conditions)`) as the root of anything a driver or a caller wants to signal about a specific row without aborting the whole query — see the design doc's §10 for the full rationale and worked examples of a driver registering its own subtype (e.g. a future PostgreSQL encoding error) and a caller registering an application-specific one (e.g. a negative-balance check), both via `(curry conditions)`'s own open, global condition-type registry, with no coordination needed from this module. Nothing in the current SQLite-only backend signals this type itself — SQLite's own value types (integer/float/text/blob/`NULL`) have no "can't decode this column" case the way a future encoding-sensitive backend might — but it's reserved now so later code can build on it without this module changing.

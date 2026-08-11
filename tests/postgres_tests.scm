@@ -8,17 +8,27 @@
 ;;;
 ;;; No live PostgreSQL server was available in the environment this
 ;;; suite was written in, so it cannot exercise pg-exec/pg-last-insert-
-;;; id against a real connection. It CAN, and does, exercise
-;;; pg-escape-literal/pg-escape-bytea for real: unlike MariaDB's escape
-;;; functions (which need an already-connected MYSQL* for its charset
-;;; info), libpq's PQescapeLiteral/PQescapeByteaConn only need a live
-;;; PGconn* to read its client encoding from — which a refused TCP
-;;; connection never produces, so those two functions are still
-;;; untestable here for the same underlying reason. What this suite
-;;; DOES exercise is pg-connect's real FFI path (PQconnectdb, PQstatus,
-;;; PQerrorMessage, PQfinish): a connection attempt to 127.0.0.1 on a
-;;; port nothing listens on is guaranteed to be refused quickly and
-;;; deterministically, without needing any server at all.
+;;; id/pg-cursor-*/pg-stream-*/pg-listen/pg-notify/pg-copy-* against a
+;;; real connection. (They HAVE all been exercised live against a real
+;;; local Postgres 18 server during development -- see postgres.scm's
+;;; own commit history for exactly what was checked: bool/int/float/
+;;; numeric/bytea/NULL type coercion, cursor and native-async
+;;; streaming including early-close-then-reuse and two concurrent
+;;; cursors on one connection, a real LISTEN/NOTIFY round trip across
+;;; two connections with special characters in both channel name and
+;;; payload, and a COPY FROM/COPY TO round trip.) It CAN, and does,
+;;; exercise pg-escape-literal/pg-escape-bytea for real: unlike
+;;; MariaDB's escape functions (which need an already-connected
+;;; MYSQL* for its charset info), libpq's PQescapeLiteral/
+;;; PQescapeByteaConn only need a live PGconn* to read its client
+;;; encoding from — which a refused TCP connection never produces, so
+;;; those two functions are still untestable here for the same
+;;; underlying reason. What this suite DOES exercise is pg-connect's
+;;; real FFI path (PQconnectdb, PQstatus, PQerrorMessage, PQfinish)
+;;; and the structured 'postgres-error condition it now raises: a
+;;; connection attempt to 127.0.0.1 on a port nothing listens on is
+;;; guaranteed to be refused quickly and deterministically, without
+;;; needing any server at all.
 ;;;
 ;;; If libpq itself isn't installed on the machine running this suite,
 ;;; pg-connect's own dlopen failure raises a clear "not found" error
@@ -26,7 +36,7 @@
 ;;; below — skip cleanly in that case rather than failing the whole
 ;;; run, matching (curry hdf5)'s own test convention.
 
-(import (curry postgres))
+(import (curry postgres) (curry conditions))
 
 (define pass 0)
 (define fail 0)
@@ -56,6 +66,19 @@
 
 (check-error "pg-connect raises with a numeric port passed as a string too"
   (lambda () (pg-connect '((host . "127.0.0.1") (port . "1")))))
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 1b  Structured error condition -- still exercisable without a
+;;; live server: a connect failure never has a PGresult to read a
+;;; SQLSTATE off of, so the field should genuinely be #f, not just
+;;; unread.
+;;; ════════════════════════════════════════════════════════════
+
+(guard (e (#t
+           (check "connect failure raises 'postgres-error" (condition-is-a? e 'postgres-error) #t)
+           (check "connect failure sqlstate is #f (no PGresult exists yet)" (condition-field e 'sqlstate) #f)))
+  (pg-connect '((host . "127.0.0.1") (port . 1)))
+  (check "unreachable" #t #f))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 2  Accessors that don't need a live connection
