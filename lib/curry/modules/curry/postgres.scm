@@ -43,7 +43,8 @@
     pg-exec pg-escape-literal pg-escape-bytea
     pg-last-insert-id pg-error
     pg-cursor-open pg-cursor-fetch pg-cursor-close pg-cursor?
-    pg-stream-open pg-stream-next pg-stream-close pg-async-stream?)
+    pg-stream-open pg-stream-next pg-stream-close pg-async-stream?
+    pg-listen pg-unlisten pg-notify pg-notifications)
   (begin
 
 ;;; ── Library discovery ────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@
 (define %pq-exec #f) (define %pq-result-status #f) (define %pq-result-error-message #f) (define %pq-clear #f)
 (define %pq-result-error-field #f)
 (define %pq-send-query #f) (define %pq-set-single-row-mode #f) (define %pq-get-result #f)
+(define %pq-escape-identifier #f) (define %pq-consume-input #f) (define %pq-notifies #f)
 (define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f) (define %pq-ftype #f)
 (define %pq-getvalue #f) (define %pq-getisnull #f) (define %pq-getlength #f) (define %pq-cmd-tuples #f)
 (define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-unescape-bytea #f) (define %pq-freemem #f)
@@ -139,6 +141,12 @@
                                    (lambda (conn) (%ffi-call fn (list conn)))))
   (set! %pq-get-result (let ((fn (%ffi-make-fn %pq-lib "PQgetResult" 'c-ptr '(c-ptr))))
                           (lambda (conn) (%ffi-call fn (list conn)))))
+  (set! %pq-escape-identifier (let ((fn (%ffi-make-fn %pq-lib "PQescapeIdentifier" 'c-ptr '(c-ptr c-ptr uint64))))
+                                 (lambda (conn str len) (%ffi-call fn (list conn str len)))))
+  (set! %pq-consume-input (let ((fn (%ffi-make-fn %pq-lib "PQconsumeInput" 'int '(c-ptr))))
+                             (lambda (conn) (%ffi-call fn (list conn)))))
+  (set! %pq-notifies (let ((fn (%ffi-make-fn %pq-lib "PQnotifies" 'c-ptr '(c-ptr))))
+                        (lambda (conn) (%ffi-call fn (list conn)))))
   (set! %pq-clear (let ((fn (%ffi-make-fn %pq-lib "PQclear" 'void '(c-ptr))))
                      (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-ntuples (let ((fn (%ffi-make-fn %pq-lib "PQntuples" 'int '(c-ptr))))
@@ -536,5 +544,92 @@
           (%pq-clear res)
           (loop))))
     (set-car! (pg-async-stream-done?-box stream) #t)))
+
+;;; ── LISTEN/NOTIFY (a Postgres-only extra -- no equivalent concept in
+;;; MariaDB or SQLite, so nothing here fits (curry sql)'s own shared
+;;; driver record). Unlike pg-cursor-*'s internally-generated names,
+;;; a channel name IS caller-supplied text, so it goes through
+;;; PQescapeIdentifier (double-quote identifier escaping) rather than
+;;; being spliced raw -- LISTEN/NOTIFY take an unquoted-or-double-
+;;; quoted identifier, not a string literal, so pg-escape-literal's
+;;; own single-quote-string escaping would be the wrong tool here. ───────────
+
+;; (%pg-escape-identifier conn name) -> a double-quoted, escaped SQL
+;; identifier, e.g. "foo\"bar" -> "\"foo\"\"bar\"". Frees libpq's own
+;; malloc'd buffer before returning, same pattern as pg-escape-literal.
+(define (%pg-escape-identifier conn name)
+  (let ((bv (string->utf8 name)))
+    (with-pinned-bytevector bv ptr
+      (let ((escaped (%pq-escape-identifier conn ptr (bytevector-length bv))))
+        (when (cptr-null? escaped) (error (string-append "postgres: PQescapeIdentifier failed: " (%pq-error-message conn))))
+        (let ((s (%c-string-at escaped)))
+          (%pq-freemem escaped)
+          s)))))
+
+;; PGnotify's own struct layout (libpq-fe.h): relname (char*, offset
+;; 0), be_pid (int, offset 8), extra (char*, offset 16 -- 4 bytes of
+;; padding after the int to realign the next pointer to an 8-byte
+;; boundary on both x86_64 and arm64), next (private to libpq, offset
+;; 24, never read here). Verified against the actual header shipped
+;; with the local libpq 18 install, not just the historical struct
+;; comment (libpq-fe.h itself says "so simple it's unlikely to
+;; change," and it hasn't since Postgres 6.4).
+(define %PGNOTIFY-RELNAME-OFFSET 0) (define %PGNOTIFY-BE-PID-OFFSET 8) (define %PGNOTIFY-EXTRA-OFFSET 16)
+
+(define (%pg-notify->triple notify)
+  (let ((addr (cptr-address notify)))
+    (list (%c-string-at (make-cptr (%peek-u64-le (+ addr %PGNOTIFY-RELNAME-OFFSET))))
+          (%peek-u32-le (+ addr %PGNOTIFY-BE-PID-OFFSET))
+          (%c-string-at (make-cptr (%peek-u64-le (+ addr %PGNOTIFY-EXTRA-OFFSET)))))))
+
+;; Reads an 8-byte little-endian value at `addr` as a fixnum -- same
+;; rationale (curry mariadb)'s own %peek-u64-le comment gives.
+(define (%peek-u64-le addr)
+  (let ((bv (peek-bytes addr 8)))
+    (let loop ((i 7) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref bv i)))))))
+
+;; Reads a 4-byte little-endian value at `addr` as a fixnum -- for
+;; be_pid, an `int`, half the width of the char* members.
+(define (%peek-u32-le addr)
+  (let ((bv (peek-bytes addr 4)))
+    (let loop ((i 3) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref bv i)))))))
+
+;; (pg-listen conn channel) -- subscribes this connection to `channel`.
+;; Notifications become visible via pg-notifications, never pushed;
+;; see that procedure's own comment for the poll-based caveat.
+(define (pg-listen conn channel)
+  (pg-exec conn (string-append "LISTEN " (%pg-escape-identifier conn channel)))
+  (values))
+
+(define (pg-unlisten conn channel)
+  (pg-exec conn (string-append "UNLISTEN " (%pg-escape-identifier conn channel)))
+  (values))
+
+;; (pg-notify conn channel payload) -- payload goes through
+;; pg-escape-literal (a string literal, not an identifier).
+(define (pg-notify conn channel payload)
+  (pg-exec conn (string-append "NOTIFY " (%pg-escape-identifier conn channel) ", " (pg-escape-literal conn payload)))
+  (values))
+
+;; (pg-notifications conn) -> a list of (channel pid . payload)
+;; triples, possibly empty. Poll-based, not a blocking wait: this
+;; calls PQconsumeInput (reads any pending server data into libpq's
+;; own client-side buffer without blocking on the network) and then
+;; drains PQnotifies until it returns NULL. A caller wanting to block
+;; until a notification arrives needs its own wait on PQsocket(conn)'s
+;; underlying file descriptor -- genuinely out of scope here, not
+;; silently missing: this module has no socket-level primitives at all
+;; (see this module's own header on why libpq isn't linked at build
+;; time in the first place).
+(define (pg-notifications conn)
+  (when (zero? (%pq-consume-input conn))
+    (%pg-raise #f (string-append "postgres: PQconsumeInput failed: " (%pq-error-message conn))))
+  (let loop ((acc '()))
+    (let ((notify (%pq-notifies conn)))
+      (if (cptr-null? notify)
+          (reverse acc)
+          (let ((triple (%pg-notify->triple notify)))
+            (%pq-freemem notify)
+            (loop (cons (cons (car triple) (cons (cadr triple) (caddr triple))) acc)))))))
 
   )) ;; end begin, define-library
