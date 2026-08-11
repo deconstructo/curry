@@ -438,10 +438,11 @@
 ;;; channel names genuinely are caller-supplied and do need it. ───────────────
 
 (define-record-type <pg-cursor>
-  (%make-pg-cursor name conn)
+  (%make-pg-cursor name conn closed?-box)
   pg-cursor?
-  (name pg-cursor-name)
-  (conn pg-cursor-conn))
+  (name       pg-cursor-name)
+  (conn       pg-cursor-conn)
+  (closed?-box pg-cursor-closed?-box))
 
 (define %pg-cursor-counter 0)
 
@@ -452,18 +453,25 @@
   (set! %pg-cursor-counter (+ %pg-cursor-counter 1))
   (let ((name (string-append "curry_cur_" (number->string %pg-cursor-counter))))
     (pg-exec conn (string-append "DECLARE " name " CURSOR WITH HOLD FOR " sql))
-    (%make-pg-cursor name conn)))
+    (%make-pg-cursor name conn (list #f))))
 
 ;; (pg-cursor-fetch cursor) -> row alist or #f at end.
 (define (pg-cursor-fetch cursor)
   (let-values (((rows affected) (pg-exec (pg-cursor-conn cursor) (string-append "FETCH 1 FROM " (pg-cursor-name cursor)))))
     (if (pair? rows) (car rows) #f)))
 
-;; (pg-cursor-close cursor) -- safe to call whether or not the cursor
-;; was already fully drained; CLOSE on a cursor with no remaining rows
-;; is still a valid, ordinary command.
+;; (pg-cursor-close cursor) -- safe to call more than once (a second
+;; call is a no-op): CLOSE on an already-closed cursor name is a
+;; server-side error ("cursor ... does not exist", surfaced as a
+;; postgres-error condition), not the harmless no-op it is for
+;; my-stream-close/pg-stream-close's own already-freed/already-drained
+;; guards -- this closed?-box gives pg-cursor-close the same guarantee
+;; sql-stream-close!'s own doc comment already promises for every
+;; backend.
 (define (pg-cursor-close cursor)
-  (pg-exec (pg-cursor-conn cursor) (string-append "CLOSE " (pg-cursor-name cursor)))
+  (unless (car (pg-cursor-closed?-box cursor))
+    (pg-exec (pg-cursor-conn cursor) (string-append "CLOSE " (pg-cursor-name cursor)))
+    (set-car! (pg-cursor-closed?-box cursor) #t))
   (values))
 
 ;;; ── Streaming via native async single-row mode (a Postgres-only
