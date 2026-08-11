@@ -58,7 +58,13 @@
 
 (define (tts-backends) (map car %backend-table))
 
-(define (tts-backend-available? sym) ((tts-backend-available-proc (%lookup-backend sym))))
+;; Deliberately returns #f rather than raising for an unrecognized `sym`
+;; -- unlike every other backend-taking procedure here, this is a pure
+;; query ("is this a thing I could use right now"), and an unknown
+;; symbol naturally answers "no" rather than being a usage error.
+(define (tts-backend-available? sym)
+  (let ((p (assq sym %backend-table)))
+    (and p ((tts-backend-available-proc (cdr p))))))
 
 ;;; =========================================================================
 ;;; Default backend -- auto-detected from (os-name) at import time,

@@ -29,7 +29,7 @@ The full set of registered backends, e.g. `(macos-say espeak-ng)` — the same t
 
 ### `(tts-backend-available? sym)` → boolean
 
-A `PATH` lookup only — never spawns a process. `'macos-say` is available only on macOS; `'espeak-ng` is available wherever `espeak-ng` or `espeak` is on `PATH`.
+A `PATH` lookup only — never spawns a process. `'macos-say` is available only on macOS; `'espeak-ng` is available wherever `espeak-ng` or `espeak` is on `PATH`. Unlike every other procedure below, an unrecognized `sym` here returns `#f` rather than raising — a pure query naturally answers "no" for something that doesn't exist, rather than treating it as a usage error.
 
 ## Speaking
 

@@ -47,6 +47,7 @@ add_test(NAME rss          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/rss_tests.s
 add_test(NAME atom         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/atom_tests.scm)
 add_test(NAME dot_locking  COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dot_locking_tests.scm)
 add_test(NAME zeromq       COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/zeromq_tests.scm)
+add_test(NAME tts          COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/tts_tests.scm)
 if(BUILD_FFI)
   # (curry sql) unconditionally imports (curry mariadb)/(curry postgres),
   # both of which import (curry ffi) -- all three tests need BUILD_FFI=ON
