@@ -118,6 +118,7 @@
 (define %my-query #f) (define %my-store-result #f) (define %my-use-result #f) (define %my-field-count #f) (define %my-free-result #f)
 (define %my-fetch-row #f) (define %my-fetch-lengths #f) (define %my-num-fields #f) (define %my-fetch-field-direct #f)
 (define %my-insert-id #f) (define %my-affected-rows #f) (define %my-real-escape-string #f) (define %my-ssl-set #f)
+(define %my-options #f)
 
 (define (%my-bind-fns!)
   (set! %my-init (let ((fn (%ffi-make-fn %my-lib "mysql_init" 'c-ptr '(c-ptr))))
@@ -164,7 +165,10 @@
       (lambda (mysql to from len) (%ffi-call fn (list mysql to from len)))))
   (set! %my-ssl-set
     (let ((fn (%ffi-make-fn %my-lib "mysql_ssl_set" 'bool '(c-ptr c-string c-string c-string c-string c-string))))
-      (lambda (mysql key cert ca capath cipher) (%ffi-call fn (list mysql key cert ca capath cipher))))))
+      (lambda (mysql key cert ca capath cipher) (%ffi-call fn (list mysql key cert ca capath cipher)))))
+  (set! %my-options
+    (let ((fn (%ffi-make-fn %my-lib "mysql_options" 'int '(c-ptr int c-ptr))))
+      (lambda (mysql option arg-ptr) (%ffi-call fn (list mysql option arg-ptr))))))
 
 ;;; ── Raw pointer readers (see this module's own header comment) ─────────────
 
@@ -294,17 +298,41 @@
 ;; unlike (curry postgres), which already gets TLS for free via
 ;; sslmode/sslcert/etc. passed straight through its own conninfo alist,
 ;; MySQL's C API needs this explicit, separate call.
+;;
+;; Server certificate verification (MYSQL_OPT_SSL_VERIFY_SERVER_CERT)
+;; defaults to ON whenever TLS is requested at all -- mysql_ssl_set
+;; alone only encrypts the connection; it does not by itself confirm
+;; the server presenting the certificate is the one actually intended
+;; (a MITM could otherwise present any cert and still be accepted, the
+;; same "encrypted but unauthenticated" gap TLS without verification
+;; always has). A caller that genuinely wants to skip verification
+;; (e.g. a self-signed dev server with no ssl-ca configured) can pass
+;; (ssl-verify-cert . #f) explicitly -- an opt-out, not a silent
+;; default, matching the design doc's own preference for named
+;; strategies over implicit ones.
 (define %CLIENT-SSL #x0800)
+;; MYSQL_OPT_SSL_VERIFY_SERVER_CERT's own enum value -- verified
+;; against mariadb-connector-c 12.3.2's own mysql.h: the 22nd member
+;; (index 21) of enum mysql_option, counting from
+;; MYSQL_OPT_CONNECT_TIMEOUT=0. This enum has only ever been appended
+;; to across MySQL/MariaDB client library history, never reordered,
+;; so this value is stable across the versions curry actually builds
+;; against.
+(define %MYSQL-OPT-SSL-VERIFY-SERVER-CERT 21)
 
 (define (my-connect config)
   (%my-ensure!)
   (let* ((get (lambda (k default) (let ((p (assq k config))) (if p (cdr p) default))))
          (mysql (%my-init))
          (ssl? (or (assq 'ssl-key config) (assq 'ssl-cert config) (assq 'ssl-ca config)
-                   (assq 'ssl-capath config) (assq 'ssl-cipher config))))
+                   (assq 'ssl-capath config) (assq 'ssl-cipher config)))
+         (verify-cert? (get 'ssl-verify-cert ssl?)))
     (when (cptr-null? mysql) (error "mariadb: mysql_init failed (out of memory)"))
     (when ssl?
-      (%my-ssl-set mysql (get 'ssl-key #f) (get 'ssl-cert #f) (get 'ssl-ca #f) (get 'ssl-capath #f) (get 'ssl-cipher #f)))
+      (%my-ssl-set mysql (get 'ssl-key #f) (get 'ssl-cert #f) (get 'ssl-ca #f) (get 'ssl-capath #f) (get 'ssl-cipher #f))
+      (let ((flag (make-bytevector 1 (if verify-cert? 1 0))))
+        (with-pinned-bytevector flag flag-ptr
+          (%my-options mysql %MYSQL-OPT-SSL-VERIFY-SERVER-CERT flag-ptr))))
     (let ((result (%my-real-connect mysql
                                      (get 'host "localhost")
                                      (get 'user #f)

@@ -20,6 +20,8 @@ Install: `brew install mariadb` (macOS), `apt install libmariadb-dev` (Debian/Ub
 
 TLS: add any of `ssl-key`/`ssl-cert`/`ssl-ca`/`ssl-capath`/`ssl-cipher` (any combination — all independently optional, matching `mysql_ssl_set`'s own signature) to turn on TLS via `mysql_ssl_set` and `CLIENT_SSL`; with none present, the connection stays plaintext. `(curry postgres)` already gets TLS for free via `sslmode`/`sslcert`/etc. in its own conninfo alist — MySQL's C API needs this explicit, separate option instead.
 
+Server certificate verification (`MYSQL_OPT_SSL_VERIFY_SERVER_CERT`) defaults to **on** whenever any of the above TLS keys is present — `mysql_ssl_set` alone only encrypts the connection, it does not by itself confirm the server presenting the certificate is the intended one. Pass `(ssl-verify-cert . #f)` explicitly to opt out (e.g. a self-signed dev server with no `ssl-ca` configured); this is a deliberate, named opt-out, not a silent default.
+
 ### `(my-connect? x)` → boolean
 ### `(my-close conn)`
 ### `(my-error conn)` → string
