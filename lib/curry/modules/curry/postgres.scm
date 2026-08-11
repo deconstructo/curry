@@ -41,7 +41,8 @@
   (export
     pg-connect pg-connect? pg-close
     pg-exec pg-escape-literal pg-escape-bytea
-    pg-last-insert-id pg-error)
+    pg-last-insert-id pg-error
+    pg-cursor-open pg-cursor-fetch pg-cursor-close pg-cursor?)
   (begin
 
 ;;; ── Library discovery ────────────────────────────────────────────────────────
@@ -397,5 +398,46 @@
       ;; string->number, back when pg-exec returned bare strings for
       ;; every column regardless of type).
       (cdr (car (car rows))))))
+
+;;; ── Streaming via SQL cursors (see (curry sql)'s own sql-query-
+;;; stream/sql-stream-next!/sql-stream-close!) -- portable, no new
+;;; libpq bindings needed at all: DECLARE/FETCH/CLOSE are plain SQL
+;;; text, the same escape-and-splice-free path pg-exec already runs
+;;; everything else through. WITH HOLD specifically so the cursor
+;;; survives outside an explicit transaction -- keeps a stream self-
+;;; contained rather than forcing every caller through a transaction
+;;; of their own. Cursor names are internally generated (never
+;;; caller-supplied text), so no identifier escaping is needed here --
+;;; contrast (curry postgres)'s own pg-listen/pg-notify (Part 5), whose
+;;; channel names genuinely are caller-supplied and do need it. ───────────────
+
+(define-record-type <pg-cursor>
+  (%make-pg-cursor name conn)
+  pg-cursor?
+  (name pg-cursor-name)
+  (conn pg-cursor-conn))
+
+(define %pg-cursor-counter 0)
+
+;; (pg-cursor-open conn sql) -- sql should already have any (curry
+;; sql)-level `?` params spliced in; this module itself never sees a
+;; placeholder.
+(define (pg-cursor-open conn sql)
+  (set! %pg-cursor-counter (+ %pg-cursor-counter 1))
+  (let ((name (string-append "curry_cur_" (number->string %pg-cursor-counter))))
+    (pg-exec conn (string-append "DECLARE " name " CURSOR WITH HOLD FOR " sql))
+    (%make-pg-cursor name conn)))
+
+;; (pg-cursor-fetch cursor) -> row alist or #f at end.
+(define (pg-cursor-fetch cursor)
+  (let-values (((rows affected) (pg-exec (pg-cursor-conn cursor) (string-append "FETCH 1 FROM " (pg-cursor-name cursor)))))
+    (if (pair? rows) (car rows) #f)))
+
+;; (pg-cursor-close cursor) -- safe to call whether or not the cursor
+;; was already fully drained; CLOSE on a cursor with no remaining rows
+;; is still a valid, ordinary command.
+(define (pg-cursor-close cursor)
+  (pg-exec (pg-cursor-conn cursor) (string-append "CLOSE " (pg-cursor-name cursor)))
+  (values))
 
   )) ;; end begin, define-library

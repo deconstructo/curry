@@ -35,7 +35,8 @@
     sql-connect sql-connection? sql-connection-kind sql-close
     sql-exec sql-query sql-query-one
     sql-begin! sql-commit! sql-rollback! sql-in-transaction? sql-with-transaction
-    sql-last-insert-id)
+    sql-last-insert-id
+    sql-query-stream sql-stream-next! sql-stream-close! sql-with-stream sql-stream?)
   (begin
 
 ;;; =========================================================================
@@ -62,10 +63,18 @@
 ;; (sqlite-changes) is plain connection-level state, safe to read any
 ;; time after stmt-finalize! runs -- there's no result object it needs
 ;; to come bundled with the way PostgreSQL's PQcmdTuples does.
+;; stream-open/stream-next/stream-close are only used by escape-and-
+;; splice drivers (mariadb, postgres) -- sqlite already streams by
+;; nature via stmt-prepare/stmt-bind!/stmt-step (true prepared
+;; statements fetch one row at a time under the hood already), so
+;; sql-query-stream reuses those directly for sqlite rather than
+;; needing a second, redundant streaming API -- see sql-query-stream's
+;; own comment below. All three are #f in %sqlite-driver.
 (define-record-type <sql-driver>
   (make-sql-driver exec-raw prepare?
                     stmt-prepare stmt-bind! stmt-step stmt-finalize! stmt-affected-rows
-                    escape-literal last-insert-id close)
+                    escape-literal last-insert-id close
+                    stream-open stream-next stream-close)
   sql-driver?
   (exec-raw          driver-exec-raw)          ; (proc raw sql) -> (values row-alist-list affected-row-count)
   (prepare?           driver-prepare?)          ; #t: use stmt-*; #f: use escape-literal
@@ -76,7 +85,10 @@
   (stmt-affected-rows driver-stmt-affected-rows) ; (proc raw) -> integer, valid right after stmt-finalize!
   (escape-literal     driver-escape-literal)    ; (proc raw value) -> SQL literal text, incl. quoting
   (last-insert-id     driver-last-insert-id)    ; (proc raw . sequence-name) -> integer
-  (close              driver-close))            ; (proc raw)
+  (close              driver-close)             ; (proc raw)
+  (stream-open        driver-stream-open)       ; (proc raw sql) -> stream handle (sql already has params spliced in)
+  (stream-next        driver-stream-next)       ; (proc stream) -> row alist or #f
+  (stream-close       driver-stream-close))     ; (proc stream)
 
 (define-record-type <sql-connection>
   (%make-sql-connection kind raw driver in-transaction?-box)
@@ -115,7 +127,8 @@
     sqlite-changes                       ; stmt-affected-rows
     #f                                    ; escape-literal: unused, prepare? is #t
     %sqlite-last-insert-id
-    sqlite-close))
+    sqlite-close
+    #f #f #f))                           ; stream-*: unused, sql-query-stream reuses stmt-* for sqlite directly
 
 ;;; =========================================================================
 ;;; The mariadb and postgres drivers -- both use the escape-and-splice
@@ -143,7 +156,8 @@
     #f #f #f #f #f                        ; stmt-*: unused, prepare? is #f
     %mariadb-escape-value
     %mariadb-last-insert-id
-    my-close))
+    my-close
+    my-query-stream my-stream-next my-stream-close))
 
 (define (%postgres-escape-value raw value)
   (if (bytevector? value) (pg-escape-bytea raw value) (pg-escape-literal raw value)))
@@ -155,7 +169,8 @@
     #f #f #f #f #f                        ; stmt-*: unused, prepare? is #f
     %postgres-escape-value
     pg-last-insert-id
-    pg-close))
+    pg-close
+    pg-cursor-open pg-cursor-fetch pg-cursor-close))
 
 ;;; =========================================================================
 ;;; Condition type for recoverable row-level problems -- see the design
@@ -279,6 +294,69 @@
 (define (sql-query-one conn sql . params)
   (let ((rows (apply sql-query conn sql params)))
     (if (pair? rows) (car rows) #f)))
+
+;;; =========================================================================
+;;; Streaming -- an alternative to sql-query for a result set too large
+;;; to comfortably hold as one in-memory list. sqlite already streams
+;;; by nature (sqlite-prepare/sqlite-bind/sqlite-step fetch one row at
+;;; a time under the hood, true prepared statements): sql-query-stream
+;;; reuses those stmt-* driver slots directly for sqlite rather than
+;;; introducing a second, redundant streaming path for it. mariadb and
+;;; postgres have no stmt-* slots at all (prepare? is #f -- they use
+;;; escape-and-splice), so they go through the driver's own stream-*
+;;; slots instead (mysql_use_result for mariadb; a WITH HOLD SQL cursor
+;;; for postgres -- see each module's own header for why). A <sql-
+;;; stream>'s own `kind` field remembers which path it took so
+;;; sql-stream-next!/sql-stream-close! know which driver slots to call.
+;;; =========================================================================
+
+(define-record-type <sql-stream>
+  (%make-sql-stream kind handle driver)
+  sql-stream?
+  (kind   sql-stream-kind)      ; 'stmt (sqlite) or 'raw (mariadb/postgres)
+  (handle sql-stream-handle)
+  (driver sql-stream-driver))
+
+;; (sql-query-stream conn sql . params) -> stream handle for
+;; sql-stream-next!/sql-stream-close!.
+(define (sql-query-stream conn sql . params)
+  (let ((driver (sql-connection-driver conn)) (raw (sql-connection-raw conn)))
+    (if (driver-prepare? driver)
+        (let ((stmt ((driver-stmt-prepare driver) raw sql)))
+          (let loop ((i 1) (ps params))
+            (unless (null? ps)
+              ((driver-stmt-bind! driver) stmt i (car ps))
+              (loop (+ i 1) (cdr ps))))
+          (%make-sql-stream 'stmt stmt driver))
+        (let ((final-sql (if (null? params) sql (%splice-sql sql params driver raw))))
+          (%make-sql-stream 'raw ((driver-stream-open driver) raw final-sql) driver)))))
+
+;; (sql-stream-next! stream) -> row alist or #f at end.
+(define (sql-stream-next! stream)
+  (case (sql-stream-kind stream)
+    ((stmt) ((driver-stmt-step (sql-stream-driver stream)) (sql-stream-handle stream)))
+    ((raw)  ((driver-stream-next (sql-stream-driver stream)) (sql-stream-handle stream)))))
+
+;; (sql-stream-close! stream) -- safe to call whether or not the
+;; stream was already fully drained (each driver's own stream-close/
+;; stmt-finalize! implementation already tolerates that).
+(define (sql-stream-close! stream)
+  (case (sql-stream-kind stream)
+    ((stmt) ((driver-stmt-finalize! (sql-stream-driver stream)) (sql-stream-handle stream)))
+    ((raw)  ((driver-stream-close (sql-stream-driver stream)) (sql-stream-handle stream)))))
+
+;; (sql-with-stream conn sql params thunk) -- opens a stream, calls
+;; (thunk stream), always closes on the way out (normal return, an
+;; error, or an escaping continuation) via dynamic-wind -- the same
+;; "acquire, run, always release" shape sql-with-transaction already
+;; uses. `params` is a list here (not a rest argument), since thunk
+;; already occupies the last position.
+(define (sql-with-stream conn sql params thunk)
+  (let ((stream (apply sql-query-stream conn sql params)))
+    (dynamic-wind
+      (lambda () #t)
+      (lambda () (thunk stream))
+      (lambda () (sql-stream-close! stream)))))
 
 ;;; =========================================================================
 ;;; Transactions -- BEGIN/COMMIT/ROLLBACK as plain SQL text through

@@ -58,7 +58,8 @@
   (export
     my-connect my-connect? my-close
     my-exec my-escape-literal my-escape-bytea
-    my-last-insert-id my-error)
+    my-last-insert-id my-error
+    my-query-stream my-stream-next my-stream-close my-stream?)
   (begin
 
 ;;; ── Library discovery ────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@
 
 (define %my-init #f) (define %my-real-connect #f) (define %my-close-raw #f) (define %my-error #f)
 (define %my-errno #f) (define %my-sqlstate #f)
-(define %my-query #f) (define %my-store-result #f) (define %my-field-count #f) (define %my-free-result #f)
+(define %my-query #f) (define %my-store-result #f) (define %my-use-result #f) (define %my-field-count #f) (define %my-free-result #f)
 (define %my-fetch-row #f) (define %my-fetch-lengths #f) (define %my-num-fields #f) (define %my-fetch-field-direct #f)
 (define %my-insert-id #f) (define %my-affected-rows #f) (define %my-real-escape-string #f)
 
@@ -137,6 +138,11 @@
                      (lambda (mysql sql) (%ffi-call fn (list mysql sql)))))
   (set! %my-store-result (let ((fn (%ffi-make-fn %my-lib "mysql_store_result" 'c-ptr '(c-ptr))))
                             (lambda (mysql) (%ffi-call fn (list mysql)))))
+  ;; mysql_use_result -- same signature as mysql_store_result, but
+  ;; leaves the result set unbuffered on the wire instead of reading it
+  ;; all into memory up front. Used by my-query-stream (see below).
+  (set! %my-use-result (let ((fn (%ffi-make-fn %my-lib "mysql_use_result" 'c-ptr '(c-ptr))))
+                          (lambda (mysql) (%ffi-call fn (list mysql)))))
   (set! %my-field-count (let ((fn (%ffi-make-fn %my-lib "mysql_field_count" 'uint '(c-ptr))))
                            (lambda (mysql) (%ffi-call fn (list mysql)))))
   (set! %my-free-result (let ((fn (%ffi-make-fn %my-lib "mysql_free_result" 'void '(c-ptr))))
@@ -309,6 +315,45 @@
 
 ;;; ── Running statements ───────────────────────────────────────────────────────
 
+;; (%my-read-column-meta res) -> (values names types flags), one entry
+;; per column, each read once per result rather than once per cell
+;; (same reasoning as (curry postgres)'s own pg-exec). Shared by
+;; my-exec's buffered path and my-query-stream's unbuffered one below.
+(define (%my-read-column-meta res)
+  (let ((ncols (%my-num-fields res)))
+    (values
+      (let loop ((i 0) (acc '()))
+        (if (= i ncols)
+            (reverse acc)
+            (loop (+ i 1)
+                  (cons (string->symbol (%c-string-at (make-cptr (%peek-u64-le (cptr-address (%my-fetch-field-direct res i))))))
+                        acc))))
+      (let loop ((i 0) (acc '())) (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-type res i) acc))))
+      (let loop ((i 0) (acc '())) (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-flags res i) acc)))))))
+
+;; (%my-read-one-row res ncols names types flags) -> row alist or #f at
+;; end. Does NOT free `res` -- callers decide when (my-exec frees it as
+;; soon as this returns #f; my-query-stream's caller frees it either at
+;; end-of-stream or via an explicit my-stream-close, whichever comes
+;; first).
+(define (%my-read-one-row res ncols names types flags)
+  (let ((row (%my-fetch-row res)))
+    (if (cptr-null? row)
+        #f
+        (let ((lengths (%my-fetch-lengths res)))
+          (let col-loop ((c 0) (cacc '()))
+            (if (= c ncols)
+                (reverse cacc)
+                (let ((val-ptr (%peek-u64-le (+ (cptr-address row) (* c 8)))))
+                  (col-loop (+ c 1)
+                    (cons (cons (list-ref names c)
+                                (if (zero? val-ptr)
+                                    #f
+                                    (%my-coerce (list-ref types c) (list-ref flags c)
+                                                (make-cptr val-ptr)
+                                                (%peek-u64-le (+ (cptr-address lengths) (* c 8))))))
+                          cacc)))))))))
+
 ;; (my-exec conn sql) -> (values rows affected-rows) -- rows is a list
 ;; of alists (column-name symbol -> string or #f for SQL NULL);
 ;; affected-rows is an integer, meaningful for INSERT/UPDATE/DELETE
@@ -324,44 +369,69 @@
         (if (zero? (%my-field-count conn))
             (values '() (%my-affected-rows conn))
             (%my-raise conn (string-append "mariadb: " (%my-error conn))))
-        (let* ((ncols (%my-num-fields res))
-               (names (let loop ((i 0) (acc '()))
-                        (if (= i ncols)
-                            (reverse acc)
-                            (loop (+ i 1)
-                                  (cons (string->symbol (%c-string-at (make-cptr (%peek-u64-le (cptr-address (%my-fetch-field-direct res i))))))
-                                        acc)))))
-               ;; Read every column's type/flags once per result, not
-               ;; once per cell (same reasoning as (curry postgres)'s
-               ;; own pg-exec: these are plain accessors, no reason to
-               ;; call them nrows times over).
-               (types (let loop ((i 0) (acc '()))
-                        (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-type res i) acc)))))
-               (flags (let loop ((i 0) (acc '()))
-                        (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-flags res i) acc)))))
-               (rows
-                 (let row-loop ((racc '()))
-                   (let ((row (%my-fetch-row res)))
-                     (if (cptr-null? row)
-                         (begin (%my-free-result res) (reverse racc))
-                         (let ((lengths (%my-fetch-lengths res)))
-                           (row-loop
-                             (cons
-                               (let col-loop ((c 0) (cacc '()))
-                                 (if (= c ncols)
-                                     (reverse cacc)
-                                     (let ((val-ptr (%peek-u64-le (+ (cptr-address row) (* c 8)))))
-                                       (col-loop (+ c 1)
-                                         (cons (cons (list-ref names c)
-                                                     (if (zero? val-ptr)
-                                                         #f
-                                                         (%my-coerce (list-ref types c) (list-ref flags c)
-                                                                     (make-cptr val-ptr)
-                                                                     (%peek-u64-le (+ (cptr-address lengths) (* c 8))))))
-                                               cacc)))))
-                               racc)))))))
-               )
-          (values rows (%my-affected-rows conn))))))
+        (let-values (((names types flags) (%my-read-column-meta res)))
+          (let ((ncols (%my-num-fields res)))
+            (let row-loop ((racc '()))
+              (let ((row (%my-read-one-row res ncols names types flags)))
+                (if (not row)
+                    (begin (%my-free-result res) (values (reverse racc) (%my-affected-rows conn)))
+                    (row-loop (cons row racc))))))))))
+
+;;; ── Streaming (see (curry sql)'s own sql-query-stream/sql-stream-
+;;; next!/sql-stream-close! -- mysql_use_result leaves the result set
+;;; unbuffered on the wire, fetching one row at a time on demand,
+;;; instead of mysql_store_result's own "read the whole thing into
+;;; memory first" behaviour my-exec uses. One real constraint, not
+;;; enforced here but worth knowing: per mysql_use_result's own
+;;; documented contract, a stream must be fully drained (my-stream-next
+;;; returning #f) or explicitly closed (my-stream-close) before another
+;;; query runs on the same connection. ─────────────────────────────────────────
+
+(define-record-type <my-stream>
+  (%make-my-stream res conn ncols names types flags freed?-box)
+  my-stream?
+  (res    %my-stream-res)
+  (conn   %my-stream-conn)
+  (ncols  %my-stream-ncols)
+  (names  %my-stream-names)
+  (types  %my-stream-types)
+  (flags  %my-stream-flags)
+  (freed?-box %my-stream-freed?-box))
+
+;; (my-query-stream conn sql) -> a stream handle for my-stream-next/
+;; my-stream-close. DDL/DML (no result set at all) still returns a
+;; valid, immediately-exhausted stream rather than erroring, so a
+;; caller doesn't need to special-case statement kind up front.
+(define (my-query-stream conn sql)
+  (when (not (zero? (%my-query conn sql))) (%my-raise conn (string-append "mariadb: " (%my-error conn))))
+  (let ((res (%my-use-result conn)))
+    (if (cptr-null? res)
+        (if (zero? (%my-field-count conn))
+            (%make-my-stream (cptr-null) conn 0 '() '() '() (list #t))
+            (%my-raise conn (string-append "mariadb: " (%my-error conn))))
+        (let-values (((names types flags) (%my-read-column-meta res)))
+          (%make-my-stream res conn (%my-num-fields res) names types flags (list #f))))))
+
+;; (my-stream-next stream) -> row alist or #f at end. Frees the
+;; underlying MYSQL_RES the instant it's exhausted, same as my-exec.
+(define (my-stream-next stream)
+  (if (car (%my-stream-freed?-box stream))
+      #f
+      (let ((row (%my-read-one-row (%my-stream-res stream) (%my-stream-ncols stream)
+                                    (%my-stream-names stream) (%my-stream-types stream) (%my-stream-flags stream))))
+        (unless row
+          (%my-free-result (%my-stream-res stream))
+          (set-car! (%my-stream-freed?-box stream) #t))
+        row)))
+
+;; (my-stream-close stream) -- safe to call whether or not the stream
+;; was already fully drained (my-stream-next already frees on
+;; exhaustion; this guards against a double mysql_free_result, which
+;; is undefined behaviour).
+(define (my-stream-close stream)
+  (unless (car (%my-stream-freed?-box stream))
+    (%my-free-result (%my-stream-res stream))
+    (set-car! (%my-stream-freed?-box stream) #t)))
 
 ;;; ── Escaping (used by (curry sql)'s escape-and-splice strategy for
 ;;; parameters, since this module never builds a MYSQL_BIND struct
