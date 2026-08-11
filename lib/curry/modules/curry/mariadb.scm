@@ -54,7 +54,7 @@
 ;;; does and doesn't reach.
 
 (define-library (curry mariadb)
-  (import (scheme base) (curry ffi))
+  (import (scheme base) (curry ffi) (curry conditions))
   (export
     my-connect my-connect? my-close
     my-exec my-escape-literal my-escape-bytea
@@ -113,6 +113,7 @@
 ;;; postgres)'s own header comments for why). ─────────────────────────────────
 
 (define %my-init #f) (define %my-real-connect #f) (define %my-close-raw #f) (define %my-error #f)
+(define %my-errno #f) (define %my-sqlstate #f)
 (define %my-query #f) (define %my-store-result #f) (define %my-field-count #f) (define %my-free-result #f)
 (define %my-fetch-row #f) (define %my-fetch-lengths #f) (define %my-num-fields #f) (define %my-fetch-field-direct #f)
 (define %my-insert-id #f) (define %my-affected-rows #f) (define %my-real-escape-string #f)
@@ -128,6 +129,10 @@
                          (lambda (mysql) (%ffi-call fn (list mysql)))))
   (set! %my-error (let ((fn (%ffi-make-fn %my-lib "mysql_error" 'c-string '(c-ptr))))
                      (lambda (mysql) (%ffi-call fn (list mysql)))))
+  (set! %my-errno (let ((fn (%ffi-make-fn %my-lib "mysql_errno" 'uint '(c-ptr))))
+                     (lambda (mysql) (%ffi-call fn (list mysql)))))
+  (set! %my-sqlstate (let ((fn (%ffi-make-fn %my-lib "mysql_sqlstate" 'c-string '(c-ptr))))
+                        (lambda (mysql) (%ffi-call fn (list mysql)))))
   (set! %my-query (let ((fn (%ffi-make-fn %my-lib "mysql_query" 'int '(c-ptr c-string))))
                      (lambda (mysql sql) (%ffi-call fn (list mysql sql)))))
   (set! %my-store-result (let ((fn (%ffi-make-fn %my-lib "mysql_store_result" 'c-ptr '(c-ptr))))
@@ -194,6 +199,19 @@
 ;;; ── Constants ────────────────────────────────────────────────────────────────
 
 (define %default-port 3306)
+
+;;; ── Structured errors (see (curry postgres)'s own equivalent section
+;;; for the rationale; the design doc's §10 is what both are chasing).
+;;; mysql_errno/mysql_sqlstate both read directly off the MYSQL*
+;;; handle, no result object needed -- unlike Postgres's PGresult-
+;;; scoped PQresultErrorField, every failure path here (including
+;;; connect) has one available. ─────────────────────────────────────────────
+(define-condition mariadb-error (error) #:fields (errno sqlstate))
+
+(define (%my-raise mysql message)
+  (condition-error 'mariadb-error
+    (list (cons 'errno (%my-errno mysql)) (cons 'sqlstate (%my-sqlstate mysql)))
+    message))
 
 ;;; ── Column type coercion (see (curry postgres)'s own equivalent
 ;;; section for why this exists at all: (curry sqlite)'s row_to_alist
@@ -272,9 +290,17 @@
                                      #f    ; unix_socket
                                      0)))  ; clientflag
       (when (cptr-null? result)
-        (let ((msg (%my-error mysql)))
+        ;; Read errno/sqlstate/message before mysql_close, which frees
+        ;; the handle -- %my-raise itself never returns to run any
+        ;; cleanup written after it (same reasoning as (curry
+        ;; postgres)'s %pg-raise).
+        (let ((msg (%my-error mysql))
+              (errno (%my-errno mysql))
+              (sqlstate (%my-sqlstate mysql)))
           (%my-close-raw mysql)
-          (error (string-append "mariadb: connection failed: " msg))))
+          (condition-error 'mariadb-error
+            (list (cons 'errno errno) (cons 'sqlstate sqlstate))
+            (string-append "mariadb: connection failed: " msg))))
       mysql)))
 
 (define (my-connect? x) (c-ptr? x))
@@ -288,7 +314,7 @@
 ;; affected-rows is an integer, meaningful for INSERT/UPDATE/DELETE
 ;; (0 for a SELECT, matching (curry postgres)'s own pg-exec convention).
 (define (my-exec conn sql)
-  (when (not (zero? (%my-query conn sql))) (error (string-append "mariadb: " (%my-error conn))))
+  (when (not (zero? (%my-query conn sql))) (%my-raise conn (string-append "mariadb: " (%my-error conn))))
   (let ((res (%my-store-result conn)))
     (if (cptr-null? res)
         ;; mysql_store_result returning NULL is ambiguous by itself:
@@ -297,7 +323,7 @@
         ;; disambiguates: 0 means "no result set was ever expected."
         (if (zero? (%my-field-count conn))
             (values '() (%my-affected-rows conn))
-            (error (string-append "mariadb: " (%my-error conn))))
+            (%my-raise conn (string-append "mariadb: " (%my-error conn))))
         (let* ((ncols (%my-num-fields res))
                (names (let loop ((i 0) (acc '()))
                         (if (= i ncols)

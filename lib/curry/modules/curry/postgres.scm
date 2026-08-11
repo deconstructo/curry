@@ -37,7 +37,7 @@
 ;;; the reasoning.
 
 (define-library (curry postgres)
-  (import (scheme base) (curry ffi))
+  (import (scheme base) (curry ffi) (curry conditions))
   (export
     pg-connect pg-connect? pg-close
     pg-exec pg-escape-literal pg-escape-bytea
@@ -108,6 +108,7 @@
 
 (define %pq-connectdb #f) (define %pq-status #f) (define %pq-error-message #f) (define %pq-finish #f)
 (define %pq-exec #f) (define %pq-result-status #f) (define %pq-result-error-message #f) (define %pq-clear #f)
+(define %pq-result-error-field #f)
 (define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f) (define %pq-ftype #f)
 (define %pq-getvalue #f) (define %pq-getisnull #f) (define %pq-getlength #f) (define %pq-cmd-tuples #f)
 (define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-unescape-bytea #f) (define %pq-freemem #f)
@@ -127,6 +128,8 @@
                              (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-result-error-message (let ((fn (%ffi-make-fn %pq-lib "PQresultErrorMessage" 'c-string '(c-ptr))))
                                     (lambda (res) (%ffi-call fn (list res)))))
+  (set! %pq-result-error-field (let ((fn (%ffi-make-fn %pq-lib "PQresultErrorField" 'c-string '(c-ptr int))))
+                                  (lambda (res field-code) (%ffi-call fn (list res field-code)))))
   (set! %pq-clear (let ((fn (%ffi-make-fn %pq-lib "PQclear" 'void '(c-ptr))))
                      (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-ntuples (let ((fn (%ffi-make-fn %pq-lib "PQntuples" 'int '(c-ptr))))
@@ -162,6 +165,25 @@
 (define %PGRES-COMMAND-OK 1) (define %PGRES-TUPLES-OK 2)
 
 (define (%pg-ok-status? s) (or (= s %PGRES-COMMAND-OK) (= s %PGRES-TUPLES-OK)))
+
+;;; ── Structured errors (see the design doc's §10: curry's condition
+;;; system beats a plain error string here -- a caller can dispatch on
+;;; sqlstate via handler-bind/condition-field instead of pattern-
+;;; matching the message text). PG_DIAG_SQLSTATE is the ASCII char 'C'
+;;; per libpq-fe.h's own PQresultErrorField field-code enum. ─────────────
+(define-condition postgres-error (error) #:fields (sqlstate))
+(define %PG-DIAG-SQLSTATE 67) ;; #\C
+
+;; (%pg-raise sqlstate-or-#f message) -- condition-error's own signal/
+;; raise never returns to its caller (either a handler-bind invokes a
+;; restart that jumps elsewhere, or it unwinds via raise), so the
+;; sqlstate has to be read out of the PGresult *before* calling this --
+;; a caller that also needs to PQclear the result must do that itself,
+;; after this call, which it will never reach; do it before instead.
+;; sqlstate is #f for a connection-level failure (e.g. PQconnectdb
+;; itself failing) that never had a PGresult to read one from at all.
+(define (%pg-raise sqlstate message)
+  (condition-error 'postgres-error (list (cons 'sqlstate sqlstate)) message))
 
 ;;; ── Column type coercion (see this module's design-doc header for why
 ;;; this exists at all: (curry sqlite)'s own row_to_alist already
@@ -244,7 +266,9 @@
       (unless (= (%pq-status conn) %CONNECTION-OK)
         (let ((msg (%pq-error-message conn)))
           (%pq-finish conn)
-          (error (string-append "postgres: connection failed: " msg))))
+          ;; No PGresult exists yet at this point -- a connection-level
+          ;; failure genuinely has no SQLSTATE, not just an unread one.
+          (%pg-raise #f (string-append "postgres: connection failed: " msg))))
       conn)))
 
 (define (pg-connect? x) (c-ptr? x))
@@ -263,12 +287,18 @@
 ;; answer for (curry sql)'s own driver-affected-rows contract).
 (define (pg-exec conn sql)
   (let ((res (%pq-exec conn sql)))
-    (when (cptr-null? res) (error (string-append "postgres: PQexec failed: " (%pq-error-message conn))))
+    ;; PQexec itself returning NULL is a client-side failure (out of
+    ;; memory) with no PGresult to read a sqlstate off of either.
+    (when (cptr-null? res) (%pg-raise #f (string-append "postgres: PQexec failed: " (%pq-error-message conn))))
     (let ((status (%pq-result-status res)))
       (unless (%pg-ok-status? status)
-        (let ((msg (%pq-result-error-message res)))
+        ;; Read both the message and the sqlstate before clearing res --
+        ;; PQclear frees it, and %pg-raise never returns to run any
+        ;; cleanup written after it (see %pg-raise's own comment).
+        (let ((msg (%pq-result-error-message res))
+              (sqlstate (%pq-result-error-field res %PG-DIAG-SQLSTATE)))
           (%pq-clear res)
-          (error (string-append "postgres: " msg))))
+          (%pg-raise sqlstate (string-append "postgres: " msg))))
       (let* ((ncols (%pq-nfields res))
              (names (let loop ((i 0) (acc '()))
                       (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (string->symbol (%pq-fname res i)) acc)))))
