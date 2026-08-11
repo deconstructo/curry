@@ -117,7 +117,7 @@
 (define %my-errno #f) (define %my-sqlstate #f)
 (define %my-query #f) (define %my-store-result #f) (define %my-use-result #f) (define %my-field-count #f) (define %my-free-result #f)
 (define %my-fetch-row #f) (define %my-fetch-lengths #f) (define %my-num-fields #f) (define %my-fetch-field-direct #f)
-(define %my-insert-id #f) (define %my-affected-rows #f) (define %my-real-escape-string #f)
+(define %my-insert-id #f) (define %my-affected-rows #f) (define %my-real-escape-string #f) (define %my-ssl-set #f)
 
 (define (%my-bind-fns!)
   (set! %my-init (let ((fn (%ffi-make-fn %my-lib "mysql_init" 'c-ptr '(c-ptr))))
@@ -161,7 +161,10 @@
                              (lambda (mysql) (%ffi-call fn (list mysql)))))
   (set! %my-real-escape-string
     (let ((fn (%ffi-make-fn %my-lib "mysql_real_escape_string" 'uint64 '(c-ptr c-ptr c-ptr uint64))))
-      (lambda (mysql to from len) (%ffi-call fn (list mysql to from len))))))
+      (lambda (mysql to from len) (%ffi-call fn (list mysql to from len)))))
+  (set! %my-ssl-set
+    (let ((fn (%ffi-make-fn %my-lib "mysql_ssl_set" 'bool '(c-ptr c-string c-string c-string c-string c-string))))
+      (lambda (mysql key cert ca capath cipher) (%ffi-call fn (list mysql key cert ca capath cipher))))))
 
 ;;; ── Raw pointer readers (see this module's own header comment) ─────────────
 
@@ -282,11 +285,26 @@
 ;;   '((host . "localhost") (port . 3306) (database . "app") (user . "app") (password . "secret"))
 ;; `database` (not `dbname`, matching MySQL's own terminology) selects
 ;; the initial schema; omit it to connect without one.
+;;
+;; TLS: any of ssl-key/ssl-cert/ssl-ca/ssl-capath/ssl-cipher present
+;; (any combination -- all five are independently nullable in
+;; mysql_ssl_set itself) turns on mysql_ssl_set before connecting and
+;; ORs CLIENT_SSL into the connect flags. With none present, the
+;; connection is plaintext, same as before this option existed --
+;; unlike (curry postgres), which already gets TLS for free via
+;; sslmode/sslcert/etc. passed straight through its own conninfo alist,
+;; MySQL's C API needs this explicit, separate call.
+(define %CLIENT-SSL #x0800)
+
 (define (my-connect config)
   (%my-ensure!)
   (let* ((get (lambda (k default) (let ((p (assq k config))) (if p (cdr p) default))))
-         (mysql (%my-init)))
+         (mysql (%my-init))
+         (ssl? (or (assq 'ssl-key config) (assq 'ssl-cert config) (assq 'ssl-ca config)
+                   (assq 'ssl-capath config) (assq 'ssl-cipher config))))
     (when (cptr-null? mysql) (error "mariadb: mysql_init failed (out of memory)"))
+    (when ssl?
+      (%my-ssl-set mysql (get 'ssl-key #f) (get 'ssl-cert #f) (get 'ssl-ca #f) (get 'ssl-capath #f) (get 'ssl-cipher #f)))
     (let ((result (%my-real-connect mysql
                                      (get 'host "localhost")
                                      (get 'user #f)
@@ -294,7 +312,7 @@
                                      (get 'database #f)
                                      (get 'port %default-port)
                                      #f    ; unix_socket
-                                     0)))  ; clientflag
+                                     (if ssl? %CLIENT-SSL 0))))  ; clientflag
       (when (cptr-null? result)
         ;; Read errno/sqlstate/message before mysql_close, which frees
         ;; the handle -- %my-raise itself never returns to run any
