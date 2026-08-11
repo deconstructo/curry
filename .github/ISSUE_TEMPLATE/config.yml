@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / not sure if it's a bug
+    url: https://github.com/deconstructo/curry/discussions
+    about: Ask here first if you're unsure whether something is a bug, a missing feature, or intentional behavior.
