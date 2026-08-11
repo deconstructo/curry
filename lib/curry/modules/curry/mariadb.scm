@@ -184,9 +184,73 @@
   (let ((bv (peek-bytes addr 8)))
     (let loop ((i 7) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref bv i)))))))
 
+;; Reads a 4-byte little-endian value at `ptr` as a fixnum -- for
+;; MYSQL_FIELD's `unsigned int` members (flags, type), which are half
+;; the width of the `char*`/`unsigned long` members %peek-u64-le reads.
+(define (%peek-u32-le addr)
+  (let ((bv (peek-bytes addr 4)))
+    (let loop ((i 3) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref bv i)))))))
+
 ;;; ── Constants ────────────────────────────────────────────────────────────────
 
 (define %default-port 3306)
+
+;;; ── Column type coercion (see (curry postgres)'s own equivalent
+;;; section for why this exists at all: (curry sqlite)'s row_to_alist
+;;; already returns fixnum/flonum/string/bytevector/#f per SQLite's own
+;;; column type -- bare strings for everything here was the odd one out
+;;; in (curry sql)'s cross-backend contract). MYSQL_FIELD.flags and
+;;; .type are read by the same raw-offset trick this module's header
+;;; already uses for .name, just two members further into the struct --
+;;; verified against mariadb-connector-c 12.3.2's own mysql.h layout:
+;;; 7 char* (name..def, 56 bytes) + 2 unsigned long (length, max_length,
+;;; 16 bytes) + 7 unsigned int (name_length..def_length, 28 bytes) =
+;;; offset 100 for flags, +4 for decimals (104), +4 for charsetnr (108),
+;;; so type sits at offset 112. Both flags and type are `unsigned int`
+;;; (4 bytes), read with %peek-u32-le, not %peek-u64-le. ─────────────────────
+(define %MYSQL-FIELD-FLAGS-OFFSET 100)
+(define %MYSQL-FIELD-TYPE-OFFSET 112)
+(define %BINARY-FLAG #x80)
+
+;; enum_field_types values (mariadb_com.h) this module coerces --
+;; everything else (VARCHAR/STRING/DATE/DATETIME/JSON/ENUM/... ) stays
+;; a plain string.
+(define %MYSQL-TYPE-DECIMAL 0) (define %MYSQL-TYPE-TINY 1) (define %MYSQL-TYPE-SHORT 2)
+(define %MYSQL-TYPE-LONG 3) (define %MYSQL-TYPE-FLOAT 4) (define %MYSQL-TYPE-DOUBLE 5)
+(define %MYSQL-TYPE-LONGLONG 8) (define %MYSQL-TYPE-INT24 9) (define %MYSQL-TYPE-NEWDECIMAL 246)
+(define %MYSQL-TYPE-TINY-BLOB 249) (define %MYSQL-TYPE-MEDIUM-BLOB 250)
+(define %MYSQL-TYPE-LONG-BLOB 251) (define %MYSQL-TYPE-BLOB 252)
+
+(define (%my-field-flags res i) (%peek-u32-le (+ (cptr-address (%my-fetch-field-direct res i)) %MYSQL-FIELD-FLAGS-OFFSET)))
+(define (%my-field-type res i) (%peek-u32-le (+ (cptr-address (%my-fetch-field-direct res i)) %MYSQL-FIELD-TYPE-OFFSET)))
+
+(define (%my-blob-type? ty)
+  (or (= ty %MYSQL-TYPE-TINY-BLOB) (= ty %MYSQL-TYPE-MEDIUM-BLOB)
+      (= ty %MYSQL-TYPE-LONG-BLOB) (= ty %MYSQL-TYPE-BLOB)))
+
+;; (%my-coerce type flags ptr len) -- ptr/len are the raw value's own
+;; address and byte length (from mysql_fetch_row/mysql_fetch_lengths);
+;; never called for a NULL cell (the caller checks that first). A true
+;; binary BLOB (BINARY_FLAG set -- MySQL's C API reuses the BLOB type
+;; code for both TEXT and binary BLOB columns, BINARY_FLAG is the
+;; documented way to tell them apart) is read as a raw bytevector,
+;; skipping utf8->string entirely -- fixing a latent bug where binary
+;; data that isn't valid UTF-8 would previously raise or corrupt
+;; through %string-at's own utf8->string call.
+(define (%my-coerce type flags ptr len)
+  (cond
+    ((and (%my-blob-type? type) (= (bitwise-and flags %BINARY-FLAG) %BINARY-FLAG))
+     (peek-bytes ptr len))
+    (else
+      (let ((text (%string-at ptr len)))
+        (cond
+          ((or (= type %MYSQL-TYPE-TINY) (= type %MYSQL-TYPE-SHORT) (= type %MYSQL-TYPE-LONG)
+               (= type %MYSQL-TYPE-LONGLONG) (= type %MYSQL-TYPE-INT24))
+           (string->number text))
+          ((or (= type %MYSQL-TYPE-DECIMAL) (= type %MYSQL-TYPE-FLOAT) (= type %MYSQL-TYPE-DOUBLE)
+               (= type %MYSQL-TYPE-NEWDECIMAL))
+           (exact->inexact (string->number text)))
+          (else text))))))
 
 ;;; ── Connecting ───────────────────────────────────────────────────────────────
 
@@ -241,6 +305,14 @@
                             (loop (+ i 1)
                                   (cons (string->symbol (%c-string-at (make-cptr (%peek-u64-le (cptr-address (%my-fetch-field-direct res i))))))
                                         acc)))))
+               ;; Read every column's type/flags once per result, not
+               ;; once per cell (same reasoning as (curry postgres)'s
+               ;; own pg-exec: these are plain accessors, no reason to
+               ;; call them nrows times over).
+               (types (let loop ((i 0) (acc '()))
+                        (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-type res i) acc)))))
+               (flags (let loop ((i 0) (acc '()))
+                        (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%my-field-flags res i) acc)))))
                (rows
                  (let row-loop ((racc '()))
                    (let ((row (%my-fetch-row res)))
@@ -257,7 +329,9 @@
                                          (cons (cons (list-ref names c)
                                                      (if (zero? val-ptr)
                                                          #f
-                                                         (%string-at (make-cptr val-ptr) (%peek-u64-le (+ (cptr-address lengths) (* c 8))))))
+                                                         (%my-coerce (list-ref types c) (list-ref flags c)
+                                                                     (make-cptr val-ptr)
+                                                                     (%peek-u64-le (+ (cptr-address lengths) (* c 8))))))
                                                cacc)))))
                                racc)))))))
                )
