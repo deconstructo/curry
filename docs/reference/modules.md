@@ -58,6 +58,7 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [sql](module-sql.md) | `(curry sql)` | Cross-database layer over sqlite/mariadb/postgres — one `?`-placeholder style, alist rows, `sql-with-transaction` *(pure Scheme, no build step)* | `(curry sqlite)`, `(curry mariadb)`, `(curry postgres)`, `(curry conditions)` |
 | [mariadb](module-mariadb.md) | `(curry mariadb)` | MariaDB/MySQL client *(pure Scheme + FFI, no build step)* | `libmariadb`/`libmysqlclient` installed at runtime (`-DBUILD_FFI=ON`) |
 | [postgres](module-postgres.md) | `(curry postgres)` | PostgreSQL client *(pure Scheme + FFI, no build step)* | `libpq` installed at runtime (`-DBUILD_FFI=ON`) |
+| [tts](module-tts.md) | `(curry tts)` | Cross-backend text-to-speech — macOS (`say`) and Linux (`espeak-ng`/`espeak`) *(pure Scheme, no build step)* | `(curry posix)`, `(curry conditions)`; `say` or `espeak-ng`/`espeak` installed at runtime |
 
 ## See also
 
