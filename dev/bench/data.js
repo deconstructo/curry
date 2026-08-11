@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786436208054,
+  "lastUpdate": 1786439300977,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3173,6 +3173,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 79.993,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "9d50df584d07210c28879959ec7ec573188994d0",
+          "message": "fix(tts): address independent code review findings\n\nTwo real, if minor, robustness gaps found by a fresh code-review pass:\n\n- macos.scm's %trim only stripped ASCII space, not general whitespace,\n  unlike the sibling espeak.scm tokenizer which already uses\n  char-whitespace?. `say -v ?`'s column padding has only ever been\n  observed as plain spaces, but nothing guarantees that holds across\n  every locale/macOS build -- a stray tab would otherwise silently end\n  up inside an extracted voice name, breaking #:voice lookups.\n\n- #:rate had no validation at all, unlike #:voice (which is checked\n  against the backend's own live voice list). A rational, negative, or\n  non-numeric #:rate either produced a value neither `say -r` nor\n  `espeak-ng -s` could parse, or an unhelpful raw type error, instead\n  of a clean 'tts-error. Added %validate-rate (positive exact integer\n  only), matching #:voice's own discipline.\n\nAlso documented two things the review flagged as correct-but-easy-to-\nmiss: tts-stop doesn't itself reap the process (pair it with tts-wait,\nsame as (curry posix)'s own process-kill/process-wait contract, or a\nzombie persists for the life of the curry process), and #:voice usage\nmeans two subprocess spawns per tts-speak/tts-save call, not one (one\nto validate against a live tts-voices listing, one to actually\nspeak/render).\n\nEverything else the review checked came back clean: argv construction\n(no shell, no injection surface, flags/values always kept as separate\nlist elements), voice-list parsing bounds-checking, process reaping\nvia process-run's own C-level waitpid, and the #:foo keyword scanner's\nbehavior against (curry posix)'s own find_kwarg.\n\nFull ctest suite (89 tests) passes.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-11T19:05:50+10:00",
+          "tree_id": "78c22d9c9a5829d0780278ea1016b8c35a0496d7",
+          "url": "https://github.com/deconstructo/curry/commit/9d50df584d07210c28879959ec7ec573188994d0"
+        },
+        "date": 1786439300385,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.133,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.539,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.278,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.655,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 204.811,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 343.234,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.15,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.58,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.28,
             "unit": "ms"
           }
         ]
