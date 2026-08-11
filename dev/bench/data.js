@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786413741919,
+  "lastUpdate": 1786436208054,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3104,6 +3104,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 83.054,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "a7768913b2d3d7edeb30f5f549cea752936ddb48",
+          "message": "docs: add CONTRIBUTING.md, issue templates; fix unresolved merge in LICENSE\n\nLICENSE had unresolved git conflict markers committed straight into the\nfile since its original addition -- both sides were GPL-3.0 text (one a\nshort stub pointing at the full text, one the actual full text), so the\nfix keeps the full official GPL-3.0 body verbatim with the project's\ncopyright notice in the standard \"how to apply\" slot at the top, not a\nrewritten or paraphrased license.\n\nCONTRIBUTING.md covers build/test/style/review-focus/commit-message\nconventions drawn from CLAUDE.md and observed git history, for anyone\nwho wants to contribute without reading the whole AI-workflow doc first.\nIssue templates (bug report, feature request, a discussions link for\nopen questions) give a starting structure instead of a blank textarea.",
+          "timestamp": "2026-08-11T18:15:46+10:00",
+          "tree_id": "de61ab19241e19911d82ddd1f3ad020efbdd6f12",
+          "url": "https://github.com/deconstructo/curry/commit/a7768913b2d3d7edeb30f5f549cea752936ddb48"
+        },
+        "date": 1786436206590,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.585,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.455,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.761,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 28.778,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 159.162,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 264.707,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 54.291,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 95.385,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.993,
             "unit": "ms"
           }
         ]
