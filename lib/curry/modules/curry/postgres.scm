@@ -42,7 +42,8 @@
     pg-connect pg-connect? pg-close
     pg-exec pg-escape-literal pg-escape-bytea
     pg-last-insert-id pg-error
-    pg-cursor-open pg-cursor-fetch pg-cursor-close pg-cursor?)
+    pg-cursor-open pg-cursor-fetch pg-cursor-close pg-cursor?
+    pg-stream-open pg-stream-next pg-stream-close pg-async-stream?)
   (begin
 
 ;;; ── Library discovery ────────────────────────────────────────────────────────
@@ -110,6 +111,7 @@
 (define %pq-connectdb #f) (define %pq-status #f) (define %pq-error-message #f) (define %pq-finish #f)
 (define %pq-exec #f) (define %pq-result-status #f) (define %pq-result-error-message #f) (define %pq-clear #f)
 (define %pq-result-error-field #f)
+(define %pq-send-query #f) (define %pq-set-single-row-mode #f) (define %pq-get-result #f)
 (define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f) (define %pq-ftype #f)
 (define %pq-getvalue #f) (define %pq-getisnull #f) (define %pq-getlength #f) (define %pq-cmd-tuples #f)
 (define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-unescape-bytea #f) (define %pq-freemem #f)
@@ -131,6 +133,12 @@
                                     (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-result-error-field (let ((fn (%ffi-make-fn %pq-lib "PQresultErrorField" 'c-string '(c-ptr int))))
                                   (lambda (res field-code) (%ffi-call fn (list res field-code)))))
+  (set! %pq-send-query (let ((fn (%ffi-make-fn %pq-lib "PQsendQuery" 'int '(c-ptr c-string))))
+                          (lambda (conn sql) (%ffi-call fn (list conn sql)))))
+  (set! %pq-set-single-row-mode (let ((fn (%ffi-make-fn %pq-lib "PQsetSingleRowMode" 'int '(c-ptr))))
+                                   (lambda (conn) (%ffi-call fn (list conn)))))
+  (set! %pq-get-result (let ((fn (%ffi-make-fn %pq-lib "PQgetResult" 'c-ptr '(c-ptr))))
+                          (lambda (conn) (%ffi-call fn (list conn)))))
   (set! %pq-clear (let ((fn (%ffi-make-fn %pq-lib "PQclear" 'void '(c-ptr))))
                      (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-ntuples (let ((fn (%ffi-make-fn %pq-lib "PQntuples" 'int '(c-ptr))))
@@ -164,6 +172,8 @@
 
 (define %CONNECTION-OK 0)
 (define %PGRES-COMMAND-OK 1) (define %PGRES-TUPLES-OK 2)
+(define %PGRES-COPY-OUT 3) (define %PGRES-COPY-IN 4)
+(define %PGRES-SINGLE-TUPLE 9)
 
 (define (%pg-ok-status? s) (or (= s %PGRES-COMMAND-OK) (= s %PGRES-TUPLES-OK)))
 
@@ -439,5 +449,92 @@
 (define (pg-cursor-close cursor)
   (pg-exec (pg-cursor-conn cursor) (string-append "CLOSE " (pg-cursor-name cursor)))
   (values))
+
+;;; ── Streaming via native async single-row mode (a Postgres-only
+;;; extra, not wired into (curry sql)'s own driver record -- that uses
+;;; pg-cursor-* above, the portable path. This one skips the cursor
+;;; round-trip entirely: PQsendQuery + PQsetSingleRowMode make the
+;;; server hand back one PGresult per row directly, as they're
+;;; produced, instead of buffering server-side between FETCHes. Real
+;;; tradeoff for a caller to weigh: this ties up the connection for
+;;; other use until the stream is fully drained or closed, where a
+;;; cursor's own FETCHes don't. ─────────────────────────────────────────────
+
+(define-record-type <pg-async-stream>
+  (%make-pg-async-stream conn done?-box)
+  pg-async-stream?
+  (conn      pg-async-stream-conn)
+  (done?-box pg-async-stream-done?-box))
+
+;; (%pg-result-row-alist res) -- res is a single-row PGresult
+;; (PGRES_SINGLE_TUPLE always carries exactly one row, at index 0).
+;; Column types are read fresh per result rather than cached across
+;; calls, unlike pg-exec's own per-result-set caching -- simpler and
+;; correctness-first for what's meant to stay a narrow, opt-in extra.
+(define (%pg-result-row-alist res)
+  (let* ((ncols (%pq-nfields res)))
+    (let loop ((c 0) (acc '()))
+      (if (= c ncols)
+          (reverse acc)
+          (loop (+ c 1)
+                (cons (cons (string->symbol (%pq-fname res c))
+                            (if (= (%pq-getisnull res 0 c) 1)
+                                #f
+                                (%pg-coerce (%pq-ftype res c) (%pq-getvalue res 0 c))))
+                      acc))))))
+
+;; (pg-stream-open conn sql) -> stream handle for pg-stream-next/
+;; pg-stream-close. sql should already have any (curry sql)-level `?`
+;; params spliced in, same as pg-cursor-open.
+(define (pg-stream-open conn sql)
+  (when (zero? (%pq-send-query conn sql))
+    (%pg-raise #f (string-append "postgres: PQsendQuery failed: " (%pq-error-message conn))))
+  ;; Must be called after PQsendQuery, before the first PQgetResult --
+  ;; libpq's own documented ordering requirement.
+  (when (zero? (%pq-set-single-row-mode conn))
+    (%pg-raise #f "postgres: PQsetSingleRowMode failed (called too late, or no query in progress)"))
+  (%make-pg-async-stream conn (list #f)))
+
+;; (pg-stream-next stream) -> row alist or #f at end.
+(define (pg-stream-next stream)
+  (if (car (pg-async-stream-done?-box stream))
+      #f
+      (let ((res (%pq-get-result (pg-async-stream-conn stream))))
+        (cond
+          ((cptr-null? res)
+           (set-car! (pg-async-stream-done?-box stream) #t)
+           #f)
+          ((= (%pq-result-status res) %PGRES-SINGLE-TUPLE)
+           (let ((row (%pg-result-row-alist res)))
+             (%pq-clear res)
+             row))
+          ((%pg-ok-status? (%pq-result-status res))
+           ;; The final, row-less terminator result (PGRES_TUPLES_OK/
+           ;; COMMAND_OK) -- keep draining until PQgetResult itself
+           ;; finally returns NULL, which is what actually marks the
+           ;; command complete.
+           (%pq-clear res)
+           (pg-stream-next stream))
+          (else
+           (let ((msg (%pq-result-error-message res))
+                 (sqlstate (%pq-result-error-field res %PG-DIAG-SQLSTATE)))
+             (%pq-clear res)
+             (set-car! (pg-async-stream-done?-box stream) #t)
+             (%pg-raise sqlstate (string-append "postgres: " msg))))))))
+
+;; (pg-stream-close stream) -- safe to call whether or not the stream
+;; was already fully drained. If not, drains every remaining PGresult
+;; first: PQgetResult must be called until it returns NULL before
+;; another command can run on this connection at all -- an async
+;; query left half-read would otherwise corrupt every later query on
+;; the same connection, not just this one.
+(define (pg-stream-close stream)
+  (unless (car (pg-async-stream-done?-box stream))
+    (let loop ()
+      (let ((res (%pq-get-result (pg-async-stream-conn stream))))
+        (unless (cptr-null? res)
+          (%pq-clear res)
+          (loop))))
+    (set-car! (pg-async-stream-done?-box stream) #t)))
 
   )) ;; end begin, define-library
