@@ -108,9 +108,9 @@
 
 (define %pq-connectdb #f) (define %pq-status #f) (define %pq-error-message #f) (define %pq-finish #f)
 (define %pq-exec #f) (define %pq-result-status #f) (define %pq-result-error-message #f) (define %pq-clear #f)
-(define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f)
+(define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f) (define %pq-ftype #f)
 (define %pq-getvalue #f) (define %pq-getisnull #f) (define %pq-getlength #f) (define %pq-cmd-tuples #f)
-(define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-freemem #f)
+(define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-unescape-bytea #f) (define %pq-freemem #f)
 
 (define (%pq-bind-fns!)
   (set! %pq-connectdb (let ((fn (%ffi-make-fn %pq-lib "PQconnectdb" 'c-ptr '(c-string))))
@@ -135,6 +135,8 @@
                        (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-fname (let ((fn (%ffi-make-fn %pq-lib "PQfname" 'c-string '(c-ptr int))))
                      (lambda (res col) (%ffi-call fn (list res col)))))
+  (set! %pq-ftype (let ((fn (%ffi-make-fn %pq-lib "PQftype" 'uint32 '(c-ptr int))))
+                     (lambda (res col) (%ffi-call fn (list res col)))))
   (set! %pq-getvalue (let ((fn (%ffi-make-fn %pq-lib "PQgetvalue" 'c-string '(c-ptr int int))))
                         (lambda (res row col) (%ffi-call fn (list res row col)))))
   (set! %pq-getisnull (let ((fn (%ffi-make-fn %pq-lib "PQgetisnull" 'int '(c-ptr int int))))
@@ -147,6 +149,8 @@
                               (lambda (conn str len) (%ffi-call fn (list conn str len)))))
   (set! %pq-escape-bytea-conn (let ((fn (%ffi-make-fn %pq-lib "PQescapeByteaConn" 'c-ptr '(c-ptr c-ptr uint64 c-ptr))))
                                  (lambda (conn from from-len to-len-ptr) (%ffi-call fn (list conn from from-len to-len-ptr)))))
+  (set! %pq-unescape-bytea (let ((fn (%ffi-make-fn %pq-lib "PQunescapeBytea" 'c-ptr '(c-string c-ptr))))
+                              (lambda (str to-len-ptr) (%ffi-call fn (list str to-len-ptr)))))
   (set! %pq-freemem (let ((fn (%ffi-make-fn %pq-lib "PQfreemem" 'void '(c-ptr))))
                        (lambda (ptr) (%ffi-call fn (list ptr))))))
 
@@ -158,6 +162,49 @@
 (define %PGRES-COMMAND-OK 1) (define %PGRES-TUPLES-OK 2)
 
 (define (%pg-ok-status? s) (or (= s %PGRES-COMMAND-OK) (= s %PGRES-TUPLES-OK)))
+
+;;; ── Column type coercion (see this module's design-doc header for why
+;;; this exists at all: (curry sqlite)'s own row_to_alist already
+;;; returns fixnum/flonum/string/bytevector/#f per SQLite's own column
+;;; type -- returning bare strings for everything here was the odd one
+;;; out in (curry sql)'s cross-backend contract, not a considered
+;;; design). OIDs are from PostgreSQL's own built-in pg_type catalog
+;;; (stable, well-known values -- see src/include/catalog/pg_type.dat
+;;; upstream); anything not listed here stays a plain string (text,
+;;; varchar, date, timestamp, json, uuid, ...). ─────────────────────────────
+(define %PG-OID-BOOL 16) (define %PG-OID-BYTEA 17)
+(define %PG-OID-INT8 20) (define %PG-OID-INT2 21) (define %PG-OID-INT4 23) (define %PG-OID-OID 26)
+(define %PG-OID-FLOAT4 700) (define %PG-OID-FLOAT8 701) (define %PG-OID-NUMERIC 1700)
+
+;; (%pg-coerce oid text) -- text is never #f here (NULL is checked by
+;; the caller before this is ever reached); returns the Scheme value
+;; `text` should become for a column of type `oid`.
+(define (%pg-coerce oid text)
+  (cond
+    ((= oid %PG-OID-BOOL) (string=? text "t"))
+    ((or (= oid %PG-OID-INT8) (= oid %PG-OID-INT2) (= oid %PG-OID-INT4) (= oid %PG-OID-OID))
+     (string->number text))
+    ;; NUMERIC can carry more precision than a double -- this is a
+    ;; known, accepted lossy conversion, the same tradeoff every
+    ;; non-decimal-aware SQL binding makes (see this module's header).
+    ((or (= oid %PG-OID-FLOAT4) (= oid %PG-OID-FLOAT8) (= oid %PG-OID-NUMERIC))
+     (exact->inexact (string->number text)))
+    ((= oid %PG-OID-BYTEA) (%pg-unescape-bytea text))
+    (else text)))
+
+;; (%pg-unescape-bytea text) -> bytevector. PQunescapeBytea handles both
+;; of libpq's own bytea text formats (hex, the modern default, and the
+;; legacy octal-escape format) transparently -- this module never needs
+;; to know which one a given server is configured to emit.
+(define (%pg-unescape-bytea text)
+  (let ((len-out (make-bytevector 8 0)))
+    (with-pinned-bytevector len-out len-ptr
+      (let ((buf (%pq-unescape-bytea text len-ptr)))
+        (when (cptr-null? buf) (error "postgres: PQunescapeBytea failed (out of memory)"))
+        (let* ((len (let loop ((i 7) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref len-out i))))))
+               (bv (peek-bytes buf len)))
+          (%pq-freemem buf)
+          bv)))))
 
 ;;; ── Connecting ───────────────────────────────────────────────────────────────
 
@@ -225,6 +272,11 @@
       (let* ((ncols (%pq-nfields res))
              (names (let loop ((i 0) (acc '()))
                       (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (string->symbol (%pq-fname res i)) acc)))))
+             ;; Read every column's type once per result, not once per
+             ;; cell -- PQftype is a plain O(1) accessor, but there's no
+             ;; reason to call it nrows times over.
+             (types (let loop ((i 0) (acc '()))
+                      (if (= i ncols) (reverse acc) (loop (+ i 1) (cons (%pq-ftype res i) acc)))))
              (nrows (%pq-ntuples res))
              (rows (let row-loop ((r 0) (racc '()))
                      (if (= r nrows)
@@ -235,7 +287,9 @@
                                        (reverse cacc)
                                        (col-loop (+ c 1)
                                          (cons (cons (list-ref names c)
-                                                     (if (= (%pq-getisnull res r c) 1) #f (%pq-getvalue res r c)))
+                                                     (if (= (%pq-getisnull res r c) 1)
+                                                         #f
+                                                         (%pg-coerce (list-ref types c) (%pq-getvalue res r c))))
                                                cacc))))
                                  racc)))))
              (affected (let ((s (%pq-cmd-tuples res))) (if (string=? s "") 0 (or (string->number s) 0)))))
@@ -307,6 +361,11 @@
                  "SELECT lastval()"
                  (string-append "SELECT currval(" (pg-escape-literal conn (car sequence-name)) ")"))))
     (let-values (((rows affected) (pg-exec conn sql)))
-      (string->number (cdr (car (car rows)))))))
+      ;; lastval()/currval() are int8 columns -- pg-exec's own column
+      ;; type coercion already turns those into a Scheme fixnum, not a
+      ;; string, so this is a direct pass-through now (used to be
+      ;; string->number, back when pg-exec returned bare strings for
+      ;; every column regardless of type).
+      (cdr (car (car rows))))))
 
   )) ;; end begin, define-library
