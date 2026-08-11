@@ -107,6 +107,21 @@
       (string-append "tts: unknown voice for backend " (symbol->string backend-sym) ": " voice)))
   voice)
 
+;; #:rate gets the same discipline as #:voice: fail cleanly here rather
+;; than handing a value neither `say -r`/`espeak-ng -s` (both expect a
+;; plain positive integer, words per minute) nor number->string itself
+;; can make sense of through to the subprocess.
+(define (%validate-rate backend-sym rate)
+  (when (and rate (not (and (integer? rate) (exact? rate) (positive? rate))))
+    (condition-error 'tts-error (list (cons 'backend backend-sym))
+      (string-append "tts: #:rate must be a positive exact integer, got: " (%rate->string rate))))
+  rate)
+
+(define (%rate->string rate)
+  (let ((out (open-output-string)))
+    (write rate out)
+    (get-output-string out)))
+
 ;;; =========================================================================
 ;;; Public API
 ;;; =========================================================================
@@ -117,7 +132,7 @@
   (let* ((backend-sym (%kwarg kwargs '#:backend (current-tts-backend)))
          (backend (%lookup-backend backend-sym))
          (voice (%validate-voice backend-sym backend (%kwarg kwargs '#:voice #f)))
-         (rate (%kwarg kwargs '#:rate #f)))
+         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate #f))))
     ((tts-backend-speak-async backend) text voice rate)))
 
 ;; (tts-speak text . kwargs) -- blocks until the utterance finishes.
@@ -130,7 +145,7 @@
   (let* ((backend-sym (%kwarg kwargs '#:backend (current-tts-backend)))
          (backend (%lookup-backend backend-sym))
          (voice (%validate-voice backend-sym backend (%kwarg kwargs '#:voice #f)))
-         (rate (%kwarg kwargs '#:rate #f)))
+         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate #f))))
     ((tts-backend-save backend) text path voice rate)))
 
 ;; (tts-voices . kwargs) -> list of (name . locale) pairs for the active

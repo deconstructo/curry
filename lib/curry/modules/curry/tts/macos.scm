@@ -76,10 +76,16 @@
 ;; trimmed" is not.
 (define %locale-rx (regex-compile "[a-z][a-z]_[A-Z][A-Z]"))
 
+;; char-whitespace?, not just #\space -- matching (curry tts espeak)'s
+;; own tokenizer, which already uses char-whitespace? for the same
+;; reason: `say -v ?`'s column padding is space-padded in every sample
+;; observed so far, but there's no guarantee that holds across every
+;; locale/macOS build, and a stray tab would otherwise silently end up
+;; inside the extracted voice name, breaking #:voice lookups.
 (define (%trim s)
   (let* ((len (string-length s))
-         (start (let loop ((i 0)) (if (and (< i len) (char=? (string-ref s i) #\space)) (loop (+ i 1)) i)))
-         (end (let loop ((i len)) (if (and (> i start) (char=? (string-ref s (- i 1)) #\space)) (loop (- i 1)) i))))
+         (start (let loop ((i 0)) (if (and (< i len) (char-whitespace? (string-ref s i))) (loop (+ i 1)) i)))
+         (end (let loop ((i len)) (if (and (> i start) (char-whitespace? (string-ref s (- i 1)))) (loop (- i 1)) i))))
     (substring s start end)))
 
 (define (%parse-voice-line line)

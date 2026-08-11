@@ -45,7 +45,7 @@ Blocks until the utterance finishes playing through the system's default audio o
 ```
 
 - `#:voice name` — validated against the active backend's own `tts-voices` output before being passed through; an unrecognized name raises `'tts-error` rather than being trusted blindly (see [Errors](#errors)).
-- `#:rate n` — words per minute (`say -r`/`espeak-ng -s`).
+- `#:rate n` — words per minute (`say -r`/`espeak-ng -s`); must be a positive exact integer, or `'tts-error` is raised rather than passing something the underlying CLI can't parse straight through.
 - `#:backend sym` — one-off override of `current-tts-backend` for this call only.
 
 ### `(tts-speak-async text . kwargs)` → process handle
@@ -58,7 +58,7 @@ Blocks until the utterance started by `tts-speak-async` finishes.
 
 ### `(tts-stop h)`
 
-Cancels a still-playing utterance immediately (sends `SIGTERM` to the underlying process).
+Cancels a still-playing utterance immediately (sends `SIGTERM` to the underlying process). `tts-stop` alone doesn't reap the process — pair it with `tts-wait` (as in the example below), same as `(curry posix)`'s own `process-kill`/`process-wait` pairing; a `tts-stop` with no follow-up `tts-wait` leaves a zombie process for the life of the curry process.
 
 ### `(tts-speaking? h)` → boolean
 
@@ -114,7 +114,7 @@ Raised (via `(curry conditions)`) for: an unknown `#:backend` symbol, an unrecog
 ## Notes
 
 - Neither backend supports capturing spoken audio as an in-memory bytevector — only playback through the default audio device or rendering to a file on disk.
-- `tts-voices`/`tts-save`/`tts-speak` all spawn a real subprocess per call (`say -v ?`/`espeak-ng --voices` to list voices); there's no persistent "connection" or daemon the way `(curry sql)`'s backends have, since neither `say` nor `espeak-ng` needs one.
+- `tts-voices`/`tts-save`/`tts-speak` all spawn a real subprocess per call (`say -v ?`/`espeak-ng --voices` to list voices); there's no persistent "connection" or daemon the way `(curry sql)`'s backends have, since neither `say` nor `espeak-ng` needs one. Note `tts-speak`/`tts-save`/`tts-speak-async` spawn **two** subprocesses, not one, whenever `#:voice` is given — one to validate the name against a live `tts-voices` listing, one to actually speak/render. Omit `#:voice` (use the backend's own default) if that per-call cost matters for a tight loop.
 - On macOS, a voice's own display name can contain spaces and nested parentheses (e.g. `"Moira (English (Ireland))"`) — `tts-voices`' own parser locates each line's locale tag (always `xx_XX`) via regex rather than splitting on whitespace, specifically to handle this correctly.
 
 ## See also
