@@ -44,7 +44,8 @@
     pg-last-insert-id pg-error
     pg-cursor-open pg-cursor-fetch pg-cursor-close pg-cursor?
     pg-stream-open pg-stream-next pg-stream-close pg-async-stream?
-    pg-listen pg-unlisten pg-notify pg-notifications)
+    pg-listen pg-unlisten pg-notify pg-notifications
+    pg-copy-from-start pg-copy-data pg-copy-end pg-copy-to-start pg-copy-fetch)
   (begin
 
 ;;; ── Library discovery ────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@
 (define %pq-result-error-field #f)
 (define %pq-send-query #f) (define %pq-set-single-row-mode #f) (define %pq-get-result #f)
 (define %pq-escape-identifier #f) (define %pq-consume-input #f) (define %pq-notifies #f)
+(define %pq-put-copy-data #f) (define %pq-put-copy-end #f) (define %pq-get-copy-data #f)
 (define %pq-ntuples #f) (define %pq-nfields #f) (define %pq-fname #f) (define %pq-ftype #f)
 (define %pq-getvalue #f) (define %pq-getisnull #f) (define %pq-getlength #f) (define %pq-cmd-tuples #f)
 (define %pq-escape-literal #f) (define %pq-escape-bytea-conn #f) (define %pq-unescape-bytea #f) (define %pq-freemem #f)
@@ -147,6 +149,12 @@
                              (lambda (conn) (%ffi-call fn (list conn)))))
   (set! %pq-notifies (let ((fn (%ffi-make-fn %pq-lib "PQnotifies" 'c-ptr '(c-ptr))))
                         (lambda (conn) (%ffi-call fn (list conn)))))
+  (set! %pq-put-copy-data (let ((fn (%ffi-make-fn %pq-lib "PQputCopyData" 'int '(c-ptr c-ptr int))))
+                             (lambda (conn buf nbytes) (%ffi-call fn (list conn buf nbytes)))))
+  (set! %pq-put-copy-end (let ((fn (%ffi-make-fn %pq-lib "PQputCopyEnd" 'int '(c-ptr c-string))))
+                            (lambda (conn errmsg) (%ffi-call fn (list conn errmsg)))))
+  (set! %pq-get-copy-data (let ((fn (%ffi-make-fn %pq-lib "PQgetCopyData" 'int '(c-ptr c-ptr int))))
+                             (lambda (conn buf-out-ptr async) (%ffi-call fn (list conn buf-out-ptr async)))))
   (set! %pq-clear (let ((fn (%ffi-make-fn %pq-lib "PQclear" 'void '(c-ptr))))
                      (lambda (res) (%ffi-call fn (list res)))))
   (set! %pq-ntuples (let ((fn (%ffi-make-fn %pq-lib "PQntuples" 'int '(c-ptr))))
@@ -631,5 +639,92 @@
           (let ((triple (%pg-notify->triple notify)))
             (%pq-freemem notify)
             (loop (cons (cons (car triple) (cons (cadr triple) (caddr triple))) acc)))))))
+
+;;; ── COPY (a Postgres-only extra, bulk load/unload -- no equivalent
+;;; in MariaDB's or SQLite's own C API, so this doesn't fit (curry
+;;; sql)'s shared driver record either). PQputCopyData/PQgetCopyData
+;;; both move raw bytes, not text -- passed/read as bytevectors, never
+;;; through a c-string marshal, since COPY data can contain arbitrary
+;;; binary content (e.g. BINARY-format COPY) that a NUL-terminated
+;;; c-string would truncate. ──────────────────────────────────────────────────
+
+;; (pg-copy-from-start conn sql) -- sql is a full "COPY ... FROM STDIN
+;; [...]" statement; asserts the server actually entered COPY-IN mode.
+(define (pg-copy-from-start conn sql)
+  (let ((res (%pq-exec conn sql)))
+    (when (cptr-null? res) (%pg-raise #f (string-append "postgres: PQexec failed: " (%pq-error-message conn))))
+    (let ((status (%pq-result-status res)))
+      (if (= status %PGRES-COPY-IN)
+          (begin (%pq-clear res) (values))
+          (let ((msg (%pq-result-error-message res))
+                (sqlstate (%pq-result-error-field res %PG-DIAG-SQLSTATE)))
+            (%pq-clear res)
+            (%pg-raise sqlstate (string-append "postgres: expected COPY IN: " msg)))))))
+
+;; (pg-copy-data conn bytes) -- bytes is a bytevector, or a string
+;; (encoded to UTF-8 first; COPY TEXT/CSV format expects text, COPY
+;; BINARY expects a caller-built bytevector already in that format).
+(define (pg-copy-data conn bytes)
+  (let ((bv (if (bytevector? bytes) bytes (string->utf8 bytes))))
+    (with-pinned-bytevector bv ptr
+      (when (< (%pq-put-copy-data conn ptr (bytevector-length bv)) 0)
+        (%pg-raise #f (string-append "postgres: PQputCopyData failed: " (%pq-error-message conn)))))
+    (values)))
+
+;; (pg-copy-end conn) -- signals normal completion (PQputCopyEnd with
+;; no error message) and drains the resulting command-complete result,
+;; same "must fully drain PQgetResult" requirement pg-stream-close
+;; documents for the async single-row-mode path.
+(define (pg-copy-end conn)
+  (when (< (%pq-put-copy-end conn #f) 0)
+    (%pg-raise #f (string-append "postgres: PQputCopyEnd failed: " (%pq-error-message conn))))
+  (let loop ()
+    (let ((res (%pq-get-result conn)))
+      (unless (cptr-null? res)
+        (let ((status (%pq-result-status res)))
+          (if (%pg-ok-status? status)
+              (begin (%pq-clear res) (loop))
+              (let ((msg (%pq-result-error-message res))
+                    (sqlstate (%pq-result-error-field res %PG-DIAG-SQLSTATE)))
+                (%pq-clear res)
+                (%pg-raise sqlstate (string-append "postgres: " msg))))))))
+  (values))
+
+;; (pg-copy-to-start conn sql) -- sql is a full "COPY ... TO STDOUT
+;; [...]" statement; asserts the server actually entered COPY-OUT mode.
+(define (pg-copy-to-start conn sql)
+  (let ((res (%pq-exec conn sql)))
+    (when (cptr-null? res) (%pg-raise #f (string-append "postgres: PQexec failed: " (%pq-error-message conn))))
+    (let ((status (%pq-result-status res)))
+      (if (= status %PGRES-COPY-OUT)
+          (%pq-clear res)
+          (let ((msg (%pq-result-error-message res))
+                (sqlstate (%pq-result-error-field res %PG-DIAG-SQLSTATE)))
+            (%pq-clear res)
+            (%pg-raise sqlstate (string-append "postgres: expected COPY OUT: " msg))))))
+  (values))
+
+;; (pg-copy-fetch conn) -> one chunk as a bytevector, or #f at end
+;; (having already drained the final result, same as pg-copy-end).
+;; PQgetCopyData writes the address of its own malloc'd buffer into
+;; the 8-byte out-param this pins -- read straight back out of that
+;; same bytevector's own bytes rather than a second peek through a
+;; wrapped pointer.
+(define (pg-copy-fetch conn)
+  (let ((buf-out (make-bytevector 8 0)))
+    (with-pinned-bytevector buf-out buf-out-ptr
+      (let ((n (%pq-get-copy-data conn buf-out-ptr 0)))
+        (cond
+          ((> n 0)
+           (let* ((data-addr (let loop ((i 7) (acc 0)) (if (< i 0) acc (loop (- i 1) (+ (* acc 256) (bytevector-u8-ref buf-out i))))))
+                  (bv (peek-bytes (make-cptr data-addr) n)))
+             (%pq-freemem (make-cptr data-addr))
+             bv))
+          ((= n -1)
+           (let loop ()
+             (let ((res (%pq-get-result conn)))
+               (unless (cptr-null? res) (%pq-clear res) (loop))))
+           #f)
+          (else (%pg-raise #f (string-append "postgres: PQgetCopyData failed: " (%pq-error-message conn)))))))))
 
   )) ;; end begin, define-library
