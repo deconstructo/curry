@@ -1186,18 +1186,24 @@
 (check-true "PR translit: šakān-ṣalmim raises cleanly on wrong type (image-save)"
   (guard (e (#t #t)) (šakān-ṣalmim 42 akk-img) #f))
 
-(import (curry mqtt))
-(check-true "PR translit: erēb-bīt-šipri binding (mqtt-connect)" (procedure? erēb-bīt-šipri))
-(check-true "PR cunei: 𒂗𒂍𒉌𒌋 binding (mqtt-connect)" (procedure? 𒂗𒂍𒉌𒌋))
-(check-true "PR translit: erēb-bīt-šipri-šanûm binding (mqtt-connect*)" (procedure? erēb-bīt-šipri-šanûm))
-(check-true "PR translit: waṣê-bīt-šipri binding (mqtt-disconnect)" (procedure? waṣê-bīt-šipri))
-(check-true "PR translit: erēb-bīt-šipri? binding (mqtt-connected?)" (procedure? erēb-bīt-šipri?))
-(check-true "PR translit: maqtū-šipri binding (mqtt-dropped)" (procedure? maqtū-šipri))
-(check-true "PR translit: šūdû-šipri binding (mqtt-publish)" (procedure? šūdû-šipri))
-(check-true "PR translit: šeʾû-šipri binding (mqtt-subscribe)" (procedure? šeʾû-šipri))
-(check-true "PR translit: pašār-šipri binding (mqtt-unsubscribe)" (procedure? pašār-šipri))
-(check-true "PR translit: maḫār-šipri binding (mqtt-receive)" (procedure? maḫār-šipri))
-(check-true "PR translit: erēb-bīt-šipri-puzri binding (mqtt-connect-tls)" (procedure? erēb-bīt-šipri-puzri))
+;; (curry mqtt) requires -DBUILD_MODULE_MQTT=ON plus libpaho-mqtt
+;; installed (per CLAUDE.md's cmake flags), neither guaranteed present —
+;; e.g. CI runners without libpaho-mqtt-dev/libpaho-mqtt installed don't
+;; build this module at all; guarded like ldap above rather than assumed
+;; always built in.
+(guard (e (#t (display "SKIP: (curry mqtt) not built in") (newline)))
+  (import (curry mqtt))
+  (check-true "PR translit: erēb-bīt-šipri binding (mqtt-connect)" (procedure? erēb-bīt-šipri))
+  (check-true "PR cunei: 𒂗𒂍𒉌𒌋 binding (mqtt-connect)" (procedure? 𒂗𒂍𒉌𒌋))
+  (check-true "PR translit: erēb-bīt-šipri-šanûm binding (mqtt-connect*)" (procedure? erēb-bīt-šipri-šanûm))
+  (check-true "PR translit: waṣê-bīt-šipri binding (mqtt-disconnect)" (procedure? waṣê-bīt-šipri))
+  (check-true "PR translit: erēb-bīt-šipri? binding (mqtt-connected?)" (procedure? erēb-bīt-šipri?))
+  (check-true "PR translit: maqtū-šipri binding (mqtt-dropped)" (procedure? maqtū-šipri))
+  (check-true "PR translit: šūdû-šipri binding (mqtt-publish)" (procedure? šūdû-šipri))
+  (check-true "PR translit: šeʾû-šipri binding (mqtt-subscribe)" (procedure? šeʾû-šipri))
+  (check-true "PR translit: pašār-šipri binding (mqtt-unsubscribe)" (procedure? pašār-šipri))
+  (check-true "PR translit: maḫār-šipri binding (mqtt-receive)" (procedure? maḫār-šipri))
+  (check-true "PR translit: erēb-bīt-šipri-puzri binding (mqtt-connect-tls)" (procedure? erēb-bīt-šipri-puzri)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; f64vector — safe to run fully functionally in-process.
