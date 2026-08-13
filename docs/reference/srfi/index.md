@@ -61,6 +61,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s238 codesets)`](s238.md) | [SRFI-238](https://srfi.schemers.org/srfi-238/) | `errno`/`signal`/`http-status` code ⟷ symbol ⟷ message lookup — thin re-export of `(curry codesets)`, requires `-DBUILD_MODULE_CODESETS=ON` (default) |
 | [`(srfi s252 property-testing)`](s252.md) | [SRFI-252](https://srfi.schemers.org/srfi-252/) | Property-based testing layered on `(srfi s64 testing)`: `test-property` and friends, plus a fixed suite of type/number generators |
 | [`(srfi s263 prototype-objects)`](s263.md) | [SRFI-263](https://srfi.schemers.org/srfi-263/) | Self-inspired prototype/message-passing object system — complements, doesn't replace, `(curry oop)` |
+| [`(srfi s279 inspect)`](s279.md) | [SRFI-279](https://srfi.schemers.org/srfi-279/) (draft) | `inspect-properties`/`inspect-describe` generic introspection protocol — curry-native implementation, not a port of the SRFI's own reference code (which depends on four other SRFIs curry doesn't have) |
 
 ## Portability note
 

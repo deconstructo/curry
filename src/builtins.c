@@ -2298,6 +2298,43 @@ static val_t prim_record_set(int ac, val_t *av, void *ud) {
     r->fields[i] = av[2];
     return V_VOID;
 }
+
+/* ---- Generic record introspection ((rnrs records inspection) naming) ----
+ * define-record-type only ever hands out a type-specific predicate/
+ * accessor set (e.g. %record-pred? closed over one particular RTD); there
+ * was previously no way for Scheme code to ask "is this any record at
+ * all" or "what type/fields does this record have" without already
+ * knowing the RTD ahead of time. These four are read-only, type-checked
+ * the same way %record-ref/%record-set! are above, and back SRFI-279's
+ * record-properties/rtd-* inspection. */
+static val_t prim_record_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return vbool(vis_record(av[0]));
+}
+static val_t prim_record_type_p(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return vbool(vis_rtd(av[0]));
+}
+static val_t prim_record_rtd(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_record(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-rtd: not a record");
+    return vptr(as_rec(av[0])->rtd);
+}
+static val_t prim_record_type_name(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-name: not a record type");
+    return vunptr(RecordType, av[0])->name;
+}
+static val_t prim_record_type_field_names(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-field-names: not a record type");
+    RecordType *rtd = vunptr(RecordType, av[0]);
+    val_t list = V_NIL;
+    for (uint32_t i = rtd->nfields; i > 0; i--)
+        list = scm_cons(rtd->field_names[i - 1], list);
+    return list;
+}
+
 /* Build a fresh RecordType (RTD) from a name and a list of field-name
  * symbols. Used by the compiler's define-record-type codegen to
  * reconstruct the RTD at runtime — see compile_define_record_type in
@@ -2884,6 +2921,11 @@ void builtins_register(val_t env) {
     DEF("%record-ref",    prim_record_ref,  2,2);
     DEF("%record-set!",   prim_record_set,  3,3);
     DEF("%make-record-type", prim_make_record_type, 2,2);
+    DEF("record?",              prim_record_p,               1,1);
+    DEF("record-type?",         prim_record_type_p,          1,1);
+    DEF("record-rtd",           prim_record_rtd,             1,1);
+    DEF("record-type-name",     prim_record_type_name,       1,1);
+    DEF("record-type-field-names", prim_record_type_field_names, 1,1);
 
     /* Misc */
     DEF("gensym",     prim_gensym,  0,1);
