@@ -184,11 +184,27 @@ static Module *load_scheme_module(val_t name, const char *path) {
     val_t port = port_open_file(path, PORT_INPUT);
     if (vis_false(port)) return NULL;
 
+    /* A second, independent file-reading loop from scm_load's own (see
+     * that function's header comment in runtime.c) -- (include ...)
+     * declarations inside this file's own define-library body are
+     * reached from here, so this needs the same mark/release around its
+     * read/eval loop for those to resolve relative to *this* file's
+     * directory rather than the process's cwd, and the same
+     * exception-safe release-then-reraise on error (SCM_PROTECT) so a
+     * module that fails to load partway through doesn't leave stale
+     * directory-context entries behind to corrupt a later, unrelated
+     * load if the error is caught and execution continues. */
+    int mark = load_dir_mark();
+    load_push_dir(path);
     val_t result = V_VOID;
-    val_t v;
-    while (!vis_eof((v = scm_read(port)))) {
-        result = eval(v, mod_env);
-    }
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        val_t v;
+        while (!vis_eof((v = scm_read(port)))) {
+            result = eval(v, mod_env);
+        }
+    }, { load_dir_release(mark); port_close(port); scm_raise_val(h.exn); });
+    load_dir_release(mark);
     port_close(port);
     (void)result;
 
