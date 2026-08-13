@@ -1380,11 +1380,27 @@ static bool num_only_trailing_zeros_after(const char *s, int keep) {
 
 int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
     /* NaN never round-trips via == (NaN != NaN in IEEE), so the loop below
-     * would spin all the way to precision 17 for no benefit -- %g's own
-     * spelling ("nan"/"inf"/"-inf", matching this codebase's existing
-     * display convention) doesn't depend on precision at all, so short-
-     * circuit both non-finite cases directly. */
-    if (d != d || d == 1.0/0.0 || d == -1.0/0.0)
+     * would spin all the way to precision 17 for no benefit -- short-
+     * circuit both non-finite cases directly.
+     *
+     * NaN is spelled as a literal "nan" here, NOT delegated to %g: a
+     * NaN's sign bit is implementation-defined (IEEE 754 doesn't specify
+     * what payload/sign a computation like 0.0/0.0 produces), and glibc's
+     * printf faithfully reflects that bit in its output ("-nan" vs
+     * "nan"), while other libcs (macOS's, for the exact same computed
+     * value) don't set it -- confirmed via CI: this codebase's own
+     * NaN round-trip test passed on macOS and failed on Linux for
+     * exactly this reason, for a value neither platform's C code
+     * chooses the sign of. curry's own display convention (unlike inf,
+     * where the sign IS meaningful and well-defined) doesn't distinguish
+     * signed NaNs at all, so normalize to the same "nan" spelling
+     * everywhere regardless of the underlying bit. +inf/-inf's sign is
+     * unambiguous IEEE 754, not implementation-defined, so %g is fine
+     * there. */
+    if (d != d) {
+        return snprintf(buf, bufsize, "nan");
+    }
+    if (d == 1.0/0.0 || d == -1.0/0.0)
         return snprintf(buf, bufsize, "%g", d);
     int p_min = 17;
     for (int prec = 1; prec <= 17; prec++) {
