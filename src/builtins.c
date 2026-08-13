@@ -16,6 +16,7 @@
 #include "profiling.h"
 #include "numtheory.h"
 #include "unicode.h"
+#include "unicode_tables.h"
 #include "lang_registry.h"
 #include "curry_features.h"
 #ifdef BUILD_MPFR
@@ -657,6 +658,32 @@ static val_t prim_char_foldcase(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
 #define CHAR_PRED(nm,test) static val_t prim_char_##nm(int ac, val_t *av, void *ud){(void)ac;(void)ud; return vbool(test(vunchr(av[0])));}
 CHAR_PRED(alpha_p, unicode_is_alphabetic) CHAR_PRED(numeric_p, unicode_is_numeric) CHAR_PRED(whitespace_p, unicode_is_whitespace)
 CHAR_PRED(upper_p, unicode_is_upper) CHAR_PRED(lower_p, unicode_is_lower)
+/* Exposes the generated cp>=128 classification range tables (see
+ * unicode.c/unicode_tables.h) as a Scheme list of (lo . hi) fixnum
+ * pairs -- for (curry unicode-ranges), the data source behind
+ * (srfi 14)'s full-Unicode predefined char-sets (char-set:letter,
+ * char-set:upper-case, etc). Building those sets by scanning all
+ * ~1.1M codepoints at the Scheme level through char-alphabetic? and
+ * friends would be both slow and redundant: the C tables already ARE
+ * the merged range form for cp>=128, so this hands them over directly
+ * instead. The ASCII (cp<128) portion is cheap enough to scan at the
+ * Scheme level via the ordinary char predicates and isn't covered here. */
+static val_t prim_unicode_property_ranges(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise(V_FALSE, "unicode-property-ranges: not a string");
+    const char *name = str_data(as_str(av[0]));
+    const uint32_t (*ranges)[2]; size_t count;
+    if      (strcmp(name, "alphabetic") == 0) { ranges = unicode_alpha_ranges; count = unicode_alpha_ranges_count; }
+    else if (strcmp(name, "numeric")    == 0) { ranges = unicode_numeric_ranges; count = unicode_numeric_ranges_count; }
+    else if (strcmp(name, "whitespace") == 0) { ranges = unicode_space_ranges; count = unicode_space_ranges_count; }
+    else if (strcmp(name, "uppercase")  == 0) { ranges = unicode_upper_ranges; count = unicode_upper_ranges_count; }
+    else if (strcmp(name, "lowercase")  == 0) { ranges = unicode_lower_ranges; count = unicode_lower_ranges_count; }
+    else { scm_raise(V_FALSE, "unicode-property-ranges: unknown property"); return V_VOID; }
+    val_t result = V_NIL;
+    for (size_t i = count; i-- > 0; )
+        result = scm_cons(scm_cons(vfix((intptr_t)ranges[i][0]), vfix((intptr_t)ranges[i][1])), result);
+    return result;
+}
 static val_t prim_char_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])!=vunchr(av[i])) return V_FALSE; return V_TRUE;}
 static val_t prim_char_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])>=vunchr(av[i])) return V_FALSE; return V_TRUE;}
 
@@ -2812,6 +2839,7 @@ void builtins_register(val_t env) {
     DEF("char-ci=?",prim_char_ci_eq,2,-1); DEF("char-ci<?",prim_char_ci_lt,2,-1);
     DEF("char-ci<=?",prim_char_ci_le,2,-1); DEF("char-ci>?",prim_char_ci_gt,2,-1); DEF("char-ci>=?",prim_char_ci_ge,2,-1);
     DEF("digit-value",prim_digit_value,1,1);
+    DEF("unicode-property-ranges",prim_unicode_property_ranges,1,1);
 
     /* Strings */
     DEF("make-string",prim_make_string,1,2); DEF("string",prim_string,0,-1);

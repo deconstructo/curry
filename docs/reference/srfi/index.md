@@ -31,6 +31,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 |---------|------|-------------|
 | [`(srfi s1 lists)`](s1.md) | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
 | [`(srfi s8 receive)`](s8.md) | [SRFI-8](https://srfi.schemers.org/srfi-8/) | `receive` multiple-values binding macro — shadows curry's own actor `receive` special form when imported |
+| [`(srfi s14 char-sets)`](s14.md) | [SRFI-14](https://srfi.schemers.org/srfi-14/) | Character sets — construction, iteration, set algebra, and the standard predefined sets (`char-set:letter`, `char-set:whitespace`, etc), backed by a sorted-range representation over curry's full Unicode codepoint space |
 | [`(srfi s18 multithreading)`](s18.md) | [SRFI-18](https://srfi.schemers.org/srfi-18/) | Thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
 | [`(srfi s19 time)`](s19.md) | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
 | [`(srfi s26 cut)`](s26.md) | [SRFI-26](https://srfi.schemers.org/srfi-26/) | `cut`/`cute` — partial application without writing `lambda` by hand; the reference implementation verbatim (its recursive-macro shape found and drove a real curry `syntax-rules` hygiene fix — see the doc page) |
