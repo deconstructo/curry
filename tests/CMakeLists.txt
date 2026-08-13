@@ -26,6 +26,13 @@ add_test(NAME load_dir_context_thread_safety
 add_test(NAME srfi_s26_cut COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
 add_test(NAME actors         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
+# Rare, non-deterministic hang observed once in CI (Ubuntu Debug, under
+# ctest -j full-suite contention): the 2000-actor spawn/race regression
+# test never returned, but did not reproduce in 9 follow-up attempts
+# (isolated runs and full-suite loops alike). A hard timeout turns any
+# future recurrence into a fast, diagnosable CTest TIMEOUT instead of a
+# silent 15+ minute CI hang.
+set_tests_properties(actors PROPERTIES TIMEOUT 120)
 add_test(NAME dynamic_wind   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_wind_tests.scm)
 add_test(NAME syntax_rules   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/syntax_rules_tests.scm)
 add_test(NAME ode            COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/ode_tests.scm)
