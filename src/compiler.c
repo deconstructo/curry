@@ -799,7 +799,22 @@ static val_t compile_time_eval(val_t expr) {
 static void compile_define_syntax(Compiler *c, val_t args, int line) {
     val_t name        = vcar(args);
     val_t xfm_expr    = vcar(vcdr(args));
-    val_t transformer = compile_time_eval(xfm_expr);
+    /* Make `name` itself visible to sr_is_protected (syntax_rules.c)
+     * while its OWN (syntax-rules ...) is being compiled, so a self-
+     * recursive locally-scoped macro's own name in its template doesn't
+     * get incorrectly renamed (it lives only in this Compiler's
+     * syntax_locals, never in any runtime env sr_current_env's def_env
+     * could see) -- harmless to also do this for a top-level
+     * (scope_depth == 0) define-syntax, where GLOBAL_ENV already covers
+     * it via add_syntax_local below being unreachable for that branch. */
+    val_t saved_locals = sr_get_current_local_macros();
+    sr_set_current_local_macros(scm_cons(name, saved_locals));
+    val_t transformer = V_VOID;
+    ExnHandler ds_h;
+    SCM_PROTECT(ds_h,
+        transformer = compile_time_eval(xfm_expr),
+        { sr_set_current_local_macros(saved_locals); scm_raise_val(ds_h.exn); });
+    sr_set_current_local_macros(saved_locals);
 
     if (c->scope_depth == 0) {
         Syntax *syn = CURRY_NEW(Syntax);
@@ -843,22 +858,46 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
  * practice that distinction is moot here, since compile_time_eval compiles
  * each transformer expression as an independent parent-less unit that
  * cannot observe this Compiler's syntax_locals either way — a transformer
- * that itself needs to invoke a sibling local macro during its own
- * construction is an exotic case this implementation doesn't support, no
- * differently for let-syntax vs. letrec-syntax. */
+ * that itself needs to PROCEDURALLY INVOKE a sibling local macro during
+ * its own construction is an exotic case this implementation doesn't
+ * support, no differently for let-syntax vs. letrec-syntax.
+ *
+ * A narrower, much more common case IS supported, though: a sibling
+ * macro's own NAME appearing in another sibling's (or its own) template,
+ * for sr_is_protected's (syntax_rules.c) hygiene decision at LATER
+ * macro-use time -- e.g. two mutually-recursive local macros, or one
+ * self-recursive local macro. All these binding names are pushed onto
+ * sr_current_local_macros (syntax_rules.c) up front, before any of
+ * their transformer expressions are compiled, treating let-syntax and
+ * letrec-syntax identically (matching this function's own existing
+ * behavior elsewhere) — this is a static namelist for a rename
+ * decision, not construction-time visibility, so it doesn't need the
+ * unsupported procedural-invocation case above. */
 static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
     begin_scope(c);
+
+    val_t saved_locals = sr_get_current_local_macros();
+    val_t names = saved_locals;
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        names = scm_cons(vcar(vcar(b)), names);
+    sr_set_current_local_macros(names);
+
     val_t b = bindings;
-    while (vis_pair(b)) {
-        val_t bind = vcar(b);
-        val_t name = vcar(bind);
-        val_t xfm  = compile_time_eval(vcar(vcdr(bind)));
-        add_syntax_local(c, name, xfm);
-        b = vcdr(b);
-    }
+    ExnHandler ls_h;
+    SCM_PROTECT(ls_h, {
+        while (vis_pair(b)) {
+            val_t bind = vcar(b);
+            val_t name = vcar(bind);
+            val_t xfm  = compile_time_eval(vcar(vcdr(bind)));
+            add_syntax_local(c, name, xfm);
+            b = vcdr(b);
+        }
+    }, { sr_set_current_local_macros(saved_locals); scm_raise_val(ls_h.exn); });
+    sr_set_current_local_macros(saved_locals);
+
     compile_seq(c, body, tail, line);
     end_scope(c, line);
 }

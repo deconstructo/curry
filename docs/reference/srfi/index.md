@@ -33,6 +33,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s8 receive)`](s8.md) | [SRFI-8](https://srfi.schemers.org/srfi-8/) | `receive` multiple-values binding macro — shadows curry's own actor `receive` special form when imported |
 | [`(srfi s18 multithreading)`](s18.md) | [SRFI-18](https://srfi.schemers.org/srfi-18/) | Thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
 | [`(srfi s19 time)`](s19.md) | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
+| [`(srfi s26 cut)`](s26.md) | [SRFI-26](https://srfi.schemers.org/srfi-26/) | `cut`/`cute` — partial application without writing `lambda` by hand; the reference implementation verbatim (its recursive-macro shape found and drove a real curry `syntax-rules` hygiene fix — see the doc page) |
 | [`(srfi s27 random-bits)`](s27.md) | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
 | [`(srfi s54 cat)`](s54.md) | [SRFI-54](https://srfi.schemers.org/srfi-54/) | `cat` — order-independent object-to-string formatting (width, padding, precision, radix, separators, pipes, converters) |
 | [`(srfi s59 vicinity)`](s59.md) | [SRFI-59](https://srfi.schemers.org/srfi-59/) | Vicinity (directory-of-a-path) string utilities |

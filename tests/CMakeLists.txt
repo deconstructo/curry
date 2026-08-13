@@ -23,6 +23,7 @@ add_test(NAME load_dir_context_exception_safety
     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/exception_safety/main.scm)
 add_test(NAME load_dir_context_thread_safety
     COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/thread_safety/main.scm)
+add_test(NAME srfi_s26_cut COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
 add_test(NAME actors         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
 add_test(NAME dynamic_wind   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_wind_tests.scm)

@@ -35,6 +35,7 @@
 #include "quantum.h"
 #include "surreal.h"
 #include "profiling.h"
+#include "syntax_rules.h"
 #include "features.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1015,8 +1016,31 @@ tail:
 
     val_t op_val = vis_symbol(op) ? env_lookup(env, op) : eval(op, env);
     if (vis_syntax(op_val)) {
-        /* Apply transformer */
-        val_t transformed = apply(as_syntax(op_val)->transformer, make_pair(expr, V_NIL));
+        /* Apply transformer. Save/set/restore syntax_rules.c's "current
+         * env" thread-local around this call -- it's how sr_compile_fn
+         * (itself invoked exactly like this, since "syntax-rules" is
+         * this same kind of T_SYNTAX value) learns the environment a
+         * (syntax-rules ...) expression is being evaluated in, to
+         * capture as the resulting transformer's def_env. Save/restore
+         * (not a bare one-way set) so nested macro expansion -- this
+         * transformer's own output itself containing another macro use,
+         * or a (syntax-rules ...) evaluated while already inside some
+         * outer transformer's apply() -- doesn't leak the wrong env
+         * into an unrelated later expansion once this call returns.
+         * SCM_PROTECT, not a bare set/call/set, so a transformer that
+         * raises (a malformed macro use, a procedural transformer's own
+         * error) still restores the saved value before the exception
+         * continues propagating -- otherwise a later, unrelated
+         * (syntax-rules ...) evaluation in the same thread could pick up
+         * this stale env instead of its own correct one. */
+        val_t saved_sr_env = sr_get_current_env();
+        sr_set_current_env(env);
+        val_t transformed = V_VOID;
+        ExnHandler sr_h;
+        SCM_PROTECT(sr_h,
+            transformed = apply(as_syntax(op_val)->transformer, make_pair(expr, V_NIL)),
+            { sr_set_current_env(saved_sr_env); scm_raise_val(sr_h.exn); });
+        sr_set_current_env(saved_sr_env);
         expr = transformed; goto tail;
     }
 

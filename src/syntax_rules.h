@@ -4,14 +4,34 @@
 /*
  * syntax_rules.h — R7RS syntax-rules macro transformer.
  *
- * Implements unhygienic pattern-matching macro expansion. syntax-rules is
- * registered in the global environment as a T_SYNTAX, so eval passes the
- * entire unevaluated form to the compile function, which returns a T_PRIMITIVE
- * transformer. Introduced identifiers resolve at use-site (not definition-site).
+ * Implements pattern-matching macro expansion. syntax-rules is registered
+ * in the global environment as a T_SYNTAX, so eval passes the entire
+ * unevaluated form to the compile function, which returns a T_PRIMITIVE
+ * transformer.
  *
- * Hygiene note: this implementation is intentionally unhygienic. Template
- * symbols that are not pattern variables are emitted as-is and resolved in
- * the expansion environment, not the definition environment.
+ * Hygiene note: this is partial, not full, hygiene. Full hygiene would
+ * mean identifiers carry lexical context ("color") resolved against the
+ * right environment at every reference — a rewrite of how identifiers are
+ * represented throughout the interpreter, not a macro-expander-local fix.
+ * What this implementation actually does (syntax_rules.c's "Partial
+ * hygiene" header comment above sr_is_pattern_var has the full
+ * rationale, including two earlier heuristics that were tried and
+ * replaced after each broke a real case): after a pattern match, every
+ * template-introduced symbol (not a pattern variable, not the ellipsis
+ * identifier or "_", not inside a quoted literal) that ISN'T already a
+ * real reference — a core special-form keyword, or something bound in
+ * the macro's own DEFINING environment (an ordinary global procedure
+ * like `apply`, or the macro's own name for a recursive self-call) —
+ * gets one fresh gensym for that one expansion, substituted consistently
+ * throughout its output. This is what makes recursive macros that
+ * accumulate bindings (the standard SRFI-26 cut/cute reference
+ * implementation, for one) work correctly instead of colliding separate
+ * intended bindings into one literal name, while a genuine free
+ * reference to something real — lambda, apply, a helper procedure name,
+ * the macro's own name — still resolves normally. A macro intentionally
+ * capturing/exposing an identifier to its caller (classic anaphoric
+ * macros) is still possible for names that don't happen to also be
+ * globally bound.
  */
 
 #include "value.h"
@@ -47,5 +67,27 @@ bool sr_transformer_data(val_t transformer, val_t *literals, val_t *rules,
  * (never silently misbehaves) if literals/rules/ellipsis aren't
  * well-formed. */
 val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis);
+
+/* The environment sr_compile_fn ("syntax-rules" itself) is currently
+ * being evaluated in, for it to capture as a new transformer's def_env —
+ * see syntax_rules.c's own header comment on this pair of functions for
+ * why it's a thread-local rather than a parameter, and who's
+ * responsible for saving/setting/restoring it (eval.c's T_SYNTAX
+ * dispatch). V_FALSE means "not currently tracked" (the compiled path,
+ * which can only ever see GLOBAL_ENV here regardless). */
+val_t sr_get_current_env(void);
+void  sr_set_current_env(val_t env);
+
+/* Companion to sr_get_current_env/sr_set_current_env for compiler.c's
+ * let-syntax/letrec-syntax and locally-scoped define-syntax: a list of
+ * compile-time-local macro names in scope, since those live only in
+ * compiler.c's own SyntaxLocal table, never in any runtime environment
+ * sr_get_current_env's def_env could see. Set by compile_let_syntax/
+ * compile_define_syntax around each compile_time_eval call (save/set/
+ * restore, same discipline as sr_current_env). See syntax_rules.c's own
+ * header comment on this pair for the full rationale, including the
+ * self-recursive local-macro bug this exists to fix. */
+val_t sr_get_current_local_macros(void);
+void  sr_set_current_local_macros(val_t names);
 
 #endif /* CURRY_SYNTAX_RULES_H */
