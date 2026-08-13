@@ -6,8 +6,33 @@ add_test(NAME json           COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/json_test
 add_test(NAME sqlite         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sqlite_tests.scm)
 add_test(NAME scheme_r7rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r7rs_tests.scm)
 add_test(NAME scheme_r6rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r6rs_tests.scm)
+add_test(NAME cond_expand    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/cond_expand_tests.scm)
+add_test(NAME srfi_s279_inspect COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s279_inspect_tests.scm)
+add_test(NAME include_relative COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/include_relative_tests.scm)
+set_tests_properties(include_relative PROPERTIES
+    ENVIRONMENT "CURRY_MODULE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include_relative")
+
+# Both of these run the fixture's own main.scm directly as curry's
+# positional script argument (not imported as a module) -- deliberately
+# no WORKING_DIRECTORY override, so ctest's default cwd (the build
+# directory) differs from the fixture's own directory, exercising the
+# same cwd-independence these fixtures exist to check.
+add_test(NAME load_dir_context_script_relative
+    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/script_relative_load/main.scm)
+add_test(NAME load_dir_context_exception_safety
+    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/exception_safety/main.scm)
+add_test(NAME load_dir_context_thread_safety
+    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/thread_safety/main.scm)
+add_test(NAME srfi_s26_cut COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
 add_test(NAME actors         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
+# Rare, non-deterministic hang observed once in CI (Ubuntu Debug, under
+# ctest -j full-suite contention): the 2000-actor spawn/race regression
+# test never returned, but did not reproduce in 9 follow-up attempts
+# (isolated runs and full-suite loops alike). A hard timeout turns any
+# future recurrence into a fast, diagnosable CTest TIMEOUT instead of a
+# silent 15+ minute CI hang.
+set_tests_properties(actors PROPERTIES TIMEOUT 120)
 add_test(NAME dynamic_wind   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_wind_tests.scm)
 add_test(NAME syntax_rules   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/syntax_rules_tests.scm)
 add_test(NAME ode            COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/ode_tests.scm)

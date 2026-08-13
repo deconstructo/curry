@@ -736,6 +736,18 @@ int main(int argc, char **argv) {
         h.saved_jit_depth = jit_depth_save();
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
+            /* So a top-level script's own (load "relative/path.scm")
+             * resolves against the script's own directory, not the
+             * process's cwd -- see scm_load's header comment in
+             * runtime.c. A failure anywhere in this branch falls through
+             * to the setjmp else-branch below, which prints the error
+             * and exits the process (return 1) rather than continuing,
+             * so this doesn't need SCM_PROTECT-style release-then-
+             * reraise on the exceptional path the way scm_load/
+             * load_scheme_module do -- there's no "later, unrelated
+             * load" left in this process for a leaked mark to corrupt. */
+            int load_dir_script_mark = load_dir_mark();
+            load_push_dir(argv[i]);
             Chunk **chunks = NULL;
             int n_chunks = 0;
             size_t arglen = strlen(argv[i]);
@@ -833,6 +845,7 @@ int main(int argc, char **argv) {
                 scc_write(argv[i], chunks, n_chunks);
                 g_pending_scc_src = NULL;   /* already written — don't also write at exit */
             }
+            load_dir_release(load_dir_script_mark);
             current_handler = h.prev;
         } else {
             current_handler = h.prev;

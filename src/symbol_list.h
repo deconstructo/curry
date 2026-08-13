@@ -31,6 +31,7 @@ SYM(S_SYNTAX_RULES,       "syntax-rules")
 /* Conditionals */
 SYM(S_AND,                "and")
 SYM(S_OR,                 "or")
+SYM(S_NOT,                "not")
 SYM(S_COND,               "cond")
 SYM(S_CASE,               "case")
 SYM(S_WHEN,               "when")

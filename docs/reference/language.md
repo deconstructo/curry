@@ -258,13 +258,25 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 ```
 
 `syntax-rules` is pattern-matching, not procedural — no `syntax-case`,
-no arbitrary transformer procedures. **Unhygienic by design**:
-identifiers introduced by a template are emitted as-is and resolved at
-the macro's use-site, not its definition-site, so a template variable
-can be captured by (or capture) a use-site binding of the same name —
-the classic footgun a hygienic expander would prevent. Write macros
+no arbitrary transformer procedures. **Partially, not fully, hygienic**:
+full hygiene (identifiers carrying lexical "color" resolved against the
+right environment at every reference) would be a rewrite of how
+identifiers are represented throughout the interpreter, not a
+macro-expander-local fix. What curry actually does (see
+`src/syntax_rules.c`'s own "Partial hygiene" header comment for the
+full rationale): a template-introduced identifier that ISN'T already a
+real reference — a special-form keyword, or something bound in the
+macro's own defining environment (an ordinary global procedure, or the
+macro's own name for a recursive self-call) — gets a fresh, per-
+expansion name, so it can't collide with a sibling or later expansion's
+use of the same literal name (this is what makes recursive
+bindings-accumulating macros, like SRFI-26's `cut`/`cute`, work
+correctly). This does *not* cover the other direction: a template's
+free reference to something real still resolves at the macro's
+use-site, not its definition-site, so a use-site binding of the same
+name as a helper the macro relies on can still shadow it — write macros
 defensively (e.g. avoid common names like `tmp` for template-internal
-bindings) until curry has a hygienic expander.
+bindings) for that remaining case.
 
 ```scheme
 (define-syntax my-or

@@ -122,5 +122,73 @@
       (list-head (magic-bytes path 4) 4)
       (list #\R #\I #\F #\F))))
 
+;;; ════════════════════════════════════════════════════════════
+;;; § 5  current-tts-voice / current-tts-rate / current-tts-language
+;;; ════════════════════════════════════════════════════════════
+
+(let ((original (current-tts-voice)))
+  (check "current-tts-voice starts unset" (current-tts-voice) #f)
+  (current-tts-voice "some-voice")
+  (check "current-tts-voice set permanently" (current-tts-voice) "some-voice")
+  (parameterize ((current-tts-voice "other-voice"))
+    (check "parameterize scopes an override (voice)" (current-tts-voice) "other-voice"))
+  (check "current-tts-voice reverts after parameterize" (current-tts-voice) "some-voice")
+  (current-tts-voice original))
+
+(let ((original (current-tts-rate)))
+  (check "current-tts-rate starts unset" (current-tts-rate) #f)
+  (current-tts-rate 200)
+  (check "current-tts-rate set permanently" (current-tts-rate) 200)
+  (current-tts-rate original))
+
+(let ((original (current-tts-language)))
+  (check "current-tts-language starts unset" (current-tts-language) #f)
+  (current-tts-language "en")
+  (check "current-tts-language set permanently" (current-tts-language) "en")
+  (current-tts-language original))
+
+(check-error "current-tts-language raises when no voice matches"
+  (lambda ()
+    (parameterize ((current-tts-language "zz-definitely-not-a-real-language"))
+      (tts-speak "hi" #:backend (car (tts-backends))))))
+
+;; An explicit #:voice must win over current-tts-language even when the
+;; language would resolve to a different, valid voice -- the whole point
+;; of %resolve-voice's (if voice ...) check coming before the language
+;; branch. Exercised against a real backend since it needs a real voice
+;; name to assert against.
+(define (exercise-voice-beats-language sym)
+  (when (tts-backend-available? sym)
+    (let* ((voices (tts-voices #:backend sym))
+           (explicit (car (car voices))))
+      (parameterize ((current-tts-language "zz-definitely-not-a-real-language"))
+        ;; explicit #:voice bypasses language resolution entirely, so an
+        ;; unmatched current-tts-language must NOT raise here.
+        (let ((h (tts-speak-async "hi" #:backend sym #:voice explicit)))
+          (check (string-append "explicit #:voice overrides an unmatched current-tts-language (" (symbol->string sym) ")")
+            (tts-speaking? h) #t)
+          (tts-stop h)
+          (tts-wait h))))))
+
+(exercise-voice-beats-language 'macos-say)
+(exercise-voice-beats-language 'espeak-ng)
+
+;; current-tts-language lets tts-speak-async run with only the text
+;; argument, once backend/voice/language defaults are all set up front —
+;; the exact scenario this feature exists for.
+(define (exercise-language-default sym)
+  (when (tts-backend-available? sym)
+    (parameterize ((current-tts-backend sym)
+                   (current-tts-voice #f)
+                   (current-tts-language "en"))
+      (let ((h (tts-speak-async "hello")))
+        (check (string-append "tts-speak-async needs only text once backend/language are set (" (symbol->string sym) ")")
+          (tts-speaking? h) #t)
+        (tts-stop h)
+        (tts-wait h)))))
+
+(exercise-language-default 'macos-say)
+(exercise-language-default 'espeak-ng)
+
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))

@@ -241,6 +241,29 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
 /* ---- Load / include ---- */
 val_t scm_load(const char *path, val_t env);
 
+/* Directory-context stack scm_load() resolves relative paths against
+ * (runtime.c) -- mark/release, not push/pop, so releasing back to a
+ * saved mark is correct even across an exception unwind or a silently-
+ * skipped push past MAX_LOAD_DEPTH (see the header comment on this
+ * block in runtime.c for why a fixed push/pop pairing isn't safe here).
+ * Exposed so load_scheme_module (modules.c) and main.c's positional-
+ * script-argument path, both independent file-reading loops not
+ * implemented in terms of scm_load, can mark/release the same way
+ * around their own read/eval loops. */
+void load_push_dir(const char *path);
+int  load_dir_mark(void);
+void load_dir_release(int mark);
+
+/* Cross-thread inheritance for actor_spawn (actors.c): call
+ * load_dir_snapshot() on the spawning thread to capture its current
+ * directory-context stack, then load_dir_adopt_snapshot() on the new
+ * actor thread (before it runs any Scheme code) to seed its own
+ * thread-local stack from that snapshot -- otherwise a freshly-spawned
+ * thread's _Thread_local stack starts empty and its own relative loads
+ * silently fall back to cwd instead of inheriting context. */
+char **load_dir_snapshot(int *out_count);
+void   load_dir_adopt_snapshot(char **snap, int count);
+
 /* ---- Quasiquote expansion (used by compiler) ---- */
 val_t expand_qq(val_t form, val_t env, int depth);
 

@@ -18,7 +18,7 @@
     tts-speak tts-speak-async tts-save
     tts-voices tts-backends tts-backend-available?
     tts-wait tts-stop tts-speaking?
-    current-tts-backend)
+    current-tts-backend current-tts-voice current-tts-rate current-tts-language)
   (begin
 
 (define-condition tts-error (error) #:fields (backend))
@@ -81,6 +81,25 @@
 (define current-tts-backend (make-parameter (%default-backend)))
 
 ;;; =========================================================================
+;;; Voice/rate/language defaults -- same parameterize-or-permanent-set
+;;; shape as current-tts-backend above. current-tts-voice and
+;;; current-tts-rate are plain per-call defaults, consulted only when a
+;;; call doesn't pass #:voice/#:rate itself. current-tts-language is a
+;;; step removed: it never reaches the backend directly (say/espeak-ng
+;;; both take a voice name, not a locale) -- instead %resolve-voice below
+;;; uses it to pick the first backend voice whose locale (from
+;;; tts-voices' own (name . locale) pairs) starts with the requested
+;;; language, so a caller can set e.g. "fr" once instead of knowing the
+;;; exact voice name a given backend/machine happens to expose. An
+;;; explicit #:voice on the call, or a current-tts-voice default, always
+;;; wins over current-tts-language.
+;;; =========================================================================
+
+(define current-tts-voice (make-parameter #f))
+(define current-tts-rate (make-parameter #f))
+(define current-tts-language (make-parameter #f))
+
+;;; =========================================================================
 ;;; Keyword-argument scanning -- #:foo is a genuine self-evaluating
 ;;; reader token (Guile/Racket-style keyword symbol), the same convention
 ;;; (curry posix)'s own process-run/process-start use (find_kwarg in
@@ -107,6 +126,44 @@
       (string-append "tts: unknown voice for backend " (symbol->string backend-sym) ": " voice)))
   voice)
 
+;; (%string-prefix? prefix s) -- manual loop, same reasoning as
+;; macos.scm's own %split-colon/%trim: no SRFI-13 string-prefix? in
+;; scope here without pulling in a whole extra import for one call site.
+(define (%string-prefix? prefix s)
+  (let ((plen (string-length prefix)))
+    (and (<= plen (string-length s))
+         (string=? prefix (substring s 0 plen)))))
+
+;; assoc (src/builtins.c) is fixed at 2 args, no R7RS-optional
+;; comparator -- so this is a plain manual loop rather than
+;; (assoc lang voices %string-prefix?).
+(define (%find-voice-for-language lang voices)
+  (cond
+    ((null? voices) #f)
+    ((%string-prefix? lang (cdar voices)) (caar voices))
+    (else (%find-voice-for-language lang (cdr voices)))))
+
+;; (%resolve-voice backend-sym backend voice) -- an explicit #:voice (or
+;; current-tts-voice default) always wins and is validated the normal
+;; way via %validate-voice; otherwise, if current-tts-language is set,
+;; pick the first backend voice whose locale starts with it. Unmatched
+;; language fails loudly, the same way an unknown #:voice does, rather
+;; than silently falling back to the backend's own default voice. Only
+;; one of the two branches ever calls tts-backend-voices-proc, so this
+;; costs the same single extra voice-list subprocess as an explicit
+;; #:voice does -- a name found via current-tts-language came straight
+;; off that same list, so re-checking it through %validate-voice
+;; (a second, redundant voice-list fetch) would be pure waste.
+(define (%resolve-voice backend-sym backend voice)
+  (if voice
+      (%validate-voice backend-sym backend voice)
+      (let ((lang (current-tts-language)))
+        (and lang
+             (or (%find-voice-for-language lang ((tts-backend-voices-proc backend)))
+                 (condition-error 'tts-error (list (cons 'backend backend-sym))
+                   (string-append "tts: no voice for backend " (symbol->string backend-sym)
+                                  " matching language: " lang)))))))
+
 ;; #:rate gets the same discipline as #:voice: fail cleanly here rather
 ;; than handing a value neither `say -r`/`espeak-ng -s` (both expect a
 ;; plain positive integer, words per minute) nor number->string itself
@@ -127,12 +184,16 @@
 ;;; =========================================================================
 
 ;; (tts-speak-async text . kwargs) -> process handle, non-blocking.
-;; kwargs: #:voice name, #:rate words-per-minute, #:backend symbol.
+;; kwargs: #:voice name, #:rate words-per-minute, #:backend symbol --
+;; each falls back to current-tts-voice/current-tts-rate/
+;; current-tts-backend (and, absent an explicit or defaulted voice, to
+;; current-tts-language) when omitted, so a caller who has set those up
+;; front can call (tts-speak "...") with just the text.
 (define (tts-speak-async text . kwargs)
   (let* ((backend-sym (%kwarg kwargs '#:backend (current-tts-backend)))
          (backend (%lookup-backend backend-sym))
-         (voice (%validate-voice backend-sym backend (%kwarg kwargs '#:voice #f)))
-         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate #f))))
+         (voice (%resolve-voice backend-sym backend (%kwarg kwargs '#:voice (current-tts-voice))))
+         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate (current-tts-rate)))))
     ((tts-backend-speak-async backend) text voice rate)))
 
 ;; (tts-speak text . kwargs) -- blocks until the utterance finishes.
@@ -144,8 +205,8 @@
 (define (tts-save text path . kwargs)
   (let* ((backend-sym (%kwarg kwargs '#:backend (current-tts-backend)))
          (backend (%lookup-backend backend-sym))
-         (voice (%validate-voice backend-sym backend (%kwarg kwargs '#:voice #f)))
-         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate #f))))
+         (voice (%resolve-voice backend-sym backend (%kwarg kwargs '#:voice (current-tts-voice))))
+         (rate (%validate-rate backend-sym (%kwarg kwargs '#:rate (current-tts-rate)))))
     ((tts-backend-save backend) text path voice rate)))
 
 ;; (tts-voices . kwargs) -> list of (name . locale) pairs for the active

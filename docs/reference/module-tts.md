@@ -23,6 +23,28 @@ A real parameter object (`make-parameter`, the same "call with no args to get, o
 
 Every procedure below also accepts a `#:backend sym` keyword argument for a one-off override, without touching `current-tts-backend` at all.
 
+### `(current-tts-voice)` → string or `#f`
+### `(current-tts-voice name)`
+
+Same parameter idiom, for `#:voice`: unset (`#f`) by default, meaning "let the backend pick its own default voice." Set it once and every subsequent `tts-speak`/`tts-save`/`tts-speak-async` call that doesn't pass its own `#:voice` uses it.
+
+### `(current-tts-rate)` → exact positive integer or `#f`
+### `(current-tts-rate n)`
+
+Same idiom, for `#:rate` (words per minute).
+
+### `(current-tts-language)` → string or `#f`
+### `(current-tts-language lang)`
+
+A step removed from `current-tts-voice`: `say`/`espeak-ng` both take a *voice name*, not a locale, so this is never passed to the backend directly. Instead, when a call resolves no `#:voice` (neither the call's own nor `current-tts-voice`), the active backend's `tts-voices` list is searched for the first entry whose locale starts with `lang`, and that voice's name is used. Lets you say `(current-tts-language "fr")` once instead of knowing the exact voice name (`"Thomas"` on macOS, `"French_(France)"` on espeak-ng) a given backend/machine happens to expose. Raises `'tts-error` if no voice matches. An explicit `#:voice` (call-level or `current-tts-voice`) always takes priority over `current-tts-language`.
+
+```scheme
+(current-tts-voice #f)
+(current-tts-language "en")
+(tts-speak "hello world")     ; picks a matching voice automatically
+(tts-speak "bonjour" #:voice "Thomas")   ; explicit #:voice still wins
+```
+
 ### `(tts-backends)` → list of symbols
 
 The full set of registered backends, e.g. `(macos-say espeak-ng)` — the same two on every platform; only their *availability* differs.
@@ -114,7 +136,7 @@ Raised (via `(curry conditions)`) for: an unknown `#:backend` symbol, an unrecog
 ## Notes
 
 - Neither backend supports capturing spoken audio as an in-memory bytevector — only playback through the default audio device or rendering to a file on disk.
-- `tts-voices`/`tts-save`/`tts-speak` all spawn a real subprocess per call (`say -v ?`/`espeak-ng --voices` to list voices); there's no persistent "connection" or daemon the way `(curry sql)`'s backends have, since neither `say` nor `espeak-ng` needs one. Note `tts-speak`/`tts-save`/`tts-speak-async` spawn **two** subprocesses, not one, whenever `#:voice` is given — one to validate the name against a live `tts-voices` listing, one to actually speak/render. Omit `#:voice` (use the backend's own default) if that per-call cost matters for a tight loop.
+- `tts-voices`/`tts-save`/`tts-speak` all spawn a real subprocess per call (`say -v ?`/`espeak-ng --voices` to list voices); there's no persistent "connection" or daemon the way `(curry sql)`'s backends have, since neither `say` nor `espeak-ng` needs one. Note `tts-speak`/`tts-save`/`tts-speak-async` spawn **two** subprocesses, not one, whenever a voice ends up in play — either `#:voice`/`current-tts-voice` given directly (validated against a live `tts-voices` listing before speaking/rendering), or `current-tts-language` set (which itself calls `tts-voices` once to resolve a matching name — that name is already known-good off that same list, so it isn't re-validated against a second fetch). Leave voice/language unset (use the backend's own default) if that per-call cost matters for a tight loop.
 - On macOS, a voice's own display name can contain spaces and nested parentheses (e.g. `"Moira (English (Ireland))"`) — `tts-voices`' own parser locates each line's locale tag (always `xx_XX`) via regex rather than splitting on whitespace, specifically to handle this correctly.
 
 ## See also

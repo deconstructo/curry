@@ -101,6 +101,11 @@ typedef struct {
     Actor *actor;
     val_t  closure;
     val_t  args;
+    /* Directory-context inheritance -- see load_dir_snapshot's header
+     * comment in runtime.c. Captured on the spawning thread in
+     * actor_spawn, adopted on the new thread in actor_thread. */
+    char **load_dir_snap;
+    int    load_dir_snap_count;
 } ActorStart;
 
 static void actor_thread_cleanup(void *arg) {
@@ -110,6 +115,7 @@ static void actor_thread_cleanup(void *arg) {
 static void *actor_thread(void *arg) {
     ActorStart *start = (ActorStart *)arg;
     gc_register_thread();
+    load_dir_adopt_snapshot(start->load_dir_snap, start->load_dir_snap_count);
     pthread_cleanup_push(actor_thread_cleanup, NULL);
     vm_init();
 
@@ -141,6 +147,17 @@ static void *actor_thread(void *arg) {
     pthread_mutex_lock(&self->lock);
     self->alive = false;
     pthread_mutex_unlock(&self->lock);
+
+    /* Release the directory-context entries load_dir_adopt_snapshot
+     * seeded this thread's stack with above -- this thread is about to
+     * exit, so releasing back to depth 0 (rather than whatever depth it
+     * started at) frees everything it holds. Every other caller of this
+     * stack (scm_load, load_scheme_module, main.c's script-run path)
+     * already marks/releases what it pushes; this was the one path that
+     * adopted entries without ever releasing them, confirmed via `leaks`
+     * to leak one allocation per actor spawned from an active load
+     * context (i.e. nearly every actor in practice). */
+    load_dir_release(0);
 
     vm_free();
     pthread_cleanup_pop(1);
@@ -197,12 +214,22 @@ val_t actor_spawn(val_t closure, val_t args) {
     start->actor   = a;
     start->closure = closure;
     start->args    = args;
+    start->load_dir_snap = load_dir_snapshot(&start->load_dir_snap_count);
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
-    pthread_create(&a->thread, &attr, actor_thread, start);
+    if (pthread_create(&a->thread, &attr, actor_thread, start) != 0) {
+        /* actor_thread — the only code that would otherwise adopt and
+         * later release start->load_dir_snap — never runs, so free it
+         * here or it leaks (along with every strdup'd string in it).
+         * a->alive stays accurate: no thread is actually running. */
+        for (int i = 0; i < start->load_dir_snap_count; i++)
+            free(start->load_dir_snap[i]);
+        free(start->load_dir_snap);
+        a->alive = false;
+    }
     pthread_attr_destroy(&attr);
 
     return vptr(a);

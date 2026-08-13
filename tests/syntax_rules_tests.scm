@@ -1,5 +1,7 @@
 ;;; Tests for syntax-rules macro system
 
+(import (curry sync))
+
 (define pass 0)
 (define fail 0)
 
@@ -277,6 +279,67 @@
     (sq 6))
   36)
 
+;;; Regression tests for a real bug found by review of the "Partial
+;;; hygiene" fix above: a let-syntax/letrec-syntax-bound macro's name
+;;; lives only in the COMPILER's own compile-time SyntaxLocal table
+;;; (compiler.c), never in any runtime environment sr_is_protected's
+;;; def_env-based check could see -- so a self-recursive or mutually-
+;;; recursive LOCAL macro's own self-reference got incorrectly renamed
+;;; and broke with "unbound variable" in compiled code (this test file
+;;; runs compiled, not tree-walked). Fixed via a second thread-local,
+;;; sr_current_local_macros, that compile_let_syntax/compile_define_syntax
+;;; set to the relevant local macro name(s) around each compile_time_eval
+;;; call.
+(check "self-recursive letrec-syntax macro (compiled path)"
+  (letrec-syntax
+      ((my-rec (syntax-rules ()
+         ((_ 0) 0)
+         ((_ n) (+ n (my-rec 0))))))
+    (my-rec 5))
+  5)
+
+(check "mutually-recursive letrec-syntax macros (compiled path)"
+  (letrec-syntax
+      ((my-even? (syntax-rules ()
+         ((_ 0) #t)
+         ((_ n) (my-odd? n))))
+       (my-odd? (syntax-rules ()
+         ((_ n) (not (my-even? n))))))
+    (my-even? 0))
+  #t)
+
+(check "self-recursive internal define-syntax (compiled path)"
+  (let ()
+    (define-syntax loop-tag
+      (syntax-rules ()
+        ((_ x) (list 'loop-tag x))))
+    (loop-tag 42))
+  '(loop-tag 42))
+
+;;; Regression: an Akkadian/cuneiform special-form synonym (šumma for
+;;; if, epēšum for lambda, ...) used inside a macro's own template is a
+;;; genuine free reference to a real special form, not a template-
+;;; introduced binder -- but it's never itself a member of
+;;; sr_protected_keywords (built from symbol_list.h's canonical ENGLISH
+;;; names only) and never bound anywhere either (unlike a procedure
+;;; alias like rēšum for car, which IS a real GLOBAL_ENV binding
+;;; builtins.c's startup loop creates): lang_translate() (lang_registry.h)
+;;; resolves it to "if" only at eval/compile dispatch time. Without
+;;; special-casing this, šumma got renamed to a gensym and broke -- a
+;;; real regression this fix caused in akkadian_tests.scm's own
+;;; define-syntax/syntax-rules translit coverage (šakānum-ṭupšarrim /
+;;; ṭupšarrūtum defining my-and via šumma), caught by CI, not local
+;;; testing (curry's own scripts are almost always written in English).
+(check "an Akkadian special-form synonym inside a macro template still resolves"
+  (let ()
+    (define-syntax my-and2
+      (syntax-rules ()
+        ((_) #t)
+        ((_ e) e)
+        ((_ e1 e2 ...) (šumma e1 (my-and2 e2 ...) #f))))
+    (my-and2 1 2 3))
+  3)
+
 (check "let-syntax macro invisible outside its body"
   (guard (e (#t 'unbound))
     (begin (let-syntax ((only-here (syntax-rules () ((_ x) x)))) (only-here 1))
@@ -399,6 +462,166 @@
 (check "the ellipsis identifier itself still reads correctly in that position"
   (car (cdr '(a ... . tail)))
   '...)
+
+;;; ---- Partial hygiene: per-expansion renaming of template-introduced,
+;;; not-already-bound symbols (syntax_rules.c's own "Partial hygiene"
+;;; header comment has the full design rationale, including two earlier
+;;; heuristics tried and rejected). Found while porting SRFI-26: the
+;;; standard reference cut/cute implementation is a recursive macro that
+;;; accumulates a fresh `x` binding at each expansion step, which
+;;; previously collapsed into ONE literal `x` used as multiple lambda
+;;; formals, since template-introduced symbols were emitted completely
+;;; unchanged. ----
+
+;;; A minimal version of the exact pattern cut/cute needs: a macro that
+;;; recursively accumulates a fresh identifier into a growing formals
+;;; list across several separate expansions of itself.
+;;;
+;;; Deliberately named %accumulated-slot, not the more obvious `x` --
+;;; this heuristic's one documented false-negative case is a template-
+;;; introduced name that happens to collide with something ALREADY
+;;; globally bound for an unrelated reason (checked, not just assumed:
+;;; this file's own line 102 defines a genuine top-level `x`, which
+;;; would make sr_is_protected correctly-by-its-own-logic decide NOT to
+;;; rename a same-named introduced symbol here, reproducing the exact
+;;; bug this test exists to catch, for an unrelated reason). A real
+;;; macro author picking `x` as their own fresh-variable name and
+;;; happening to collide with a caller's unrelated global `x` is exactly
+;;; this same scenario -- rare, and safe when it happens (same behavior
+;;; as before this fix, not corrupted), but real; documented in
+;;; sr_is_protected's own header comment in syntax_rules.c.
+(define-syntax accumulate-formals
+  (syntax-rules ()
+    ((_ (n ...))
+     (lambda (n ...) (list n ...)))
+    ((_ (n ...) tok . rest)
+     (accumulate-formals (n ... %accumulated-slot) . rest))))
+(check "recursive macro gives each accumulated formal its own fresh name"
+  ((accumulate-formals () a b c) 10 20 30)
+  '(10 20 30))
+
+;;; Quoted symbolic data in a template must never be renamed -- it's
+;;; literal output the macro author wrote, not a variable reference.
+(define-syntax tag-it
+  (syntax-rules ()
+    ((_ x) (list 'a-quoted-tag x))))
+(check "a quoted symbol in a template is emitted verbatim, not renamed"
+  (tag-it 99)
+  '(a-quoted-tag 99))
+
+;;; A macro's own recursive self-reference, and references to ordinary
+;;; global procedures (lambda, apply, list, ...), must resolve normally
+;;; -- not get renamed into an unbound gensym just because they aren't
+;;; pattern variables. accumulate-formals above already exercises this
+;;; (its own name, plus lambda/list, all resolve correctly across
+;;; several recursive expansions); the library-local case below covers
+;;; the same thing for a macro whose self-reference has to resolve
+;;; inside its own defining environment rather than GLOBAL_ENV.
+
+;;; A helper macro/procedure DEFINED INSIDE THE SAME define-library body
+;;; as the macro that uses it -- library bodies run in their own
+;;; isolated environment (env_new_root(), not GLOBAL_ENV, per
+;;; modules.c), so this is exactly the shape that broke when the
+;;; "already bound" check only ever consulted GLOBAL_ENV (confirmed via
+;;; a real regression in this codebase's own (curry private
+;;; lang-aliases) helper macro, %lang-alias-row, recursing into itself).
+;;; %helper is exported alongside build-list even though it's "private"
+;;; plumbing, per this codebase's own documented macro-expansion gotcha
+;;; (docs/reference/writing-a-module.md): curry's macro expansion is
+;;; unhygienic in the OTHER direction too -- a free identifier in an
+;;; exported macro's expansion resolves in the IMPORTER's environment at
+;;; use time, not the defining library's environment, so build-list's
+;;; expansion referencing %helper only works from outside this library
+;;; if %helper is exported too. Unrelated to this fix (that gotcha
+;;; predates it and would apply with or without partial hygiene); this
+;;; test is specifically about %helper's OWN recursive self-reference
+;;; resolving correctly *while its own template is being expanded*,
+;;; which does depend on def_env being the library's environment.
+(define-library (test hygiene-library-local-macro)
+  (export build-list %helper)
+  (import (scheme base))
+  (begin
+    (define-syntax %helper
+      (syntax-rules ()
+        ((_ acc) acc)
+        ((_ acc x . rest) (%helper (cons x acc) . rest))))
+    (define-syntax build-list
+      (syntax-rules ()
+        ((_ x ...) (%helper '() x ...))))))
+(import (test hygiene-library-local-macro))
+(check "a library-local macro's self-reference resolves inside its own defining environment"
+  (build-list 1 2 3)
+  '(3 2 1))
+
+;;; ════════════════════════════════════════════════════════════
+;;; Regression: sr_gensym's counter must be thread-safe.
+;;; ════════════════════════════════════════════════════════════
+;;;
+;;; Found by review of the "Partial hygiene" fix: sr_gensym's fresh-name
+;;; counter (syntax_rules.c) was a plain `static long`, not atomic --
+;;; two threads reading the same pre-increment value under concurrent
+;;; macro expansion produced two macro-introduced bindings with the
+;;; SAME "fresh" name, corrupting one thread's binding into aliasing
+;;; another's. Fixed with `_Atomic long` + `atomic_fetch_add`, matching
+;;; actors.c's own next_actor_id pattern.
+;;;
+;;; Many actors concurrently `eval` a shared macro whose expansion
+;;; introduces a fresh binding into (interaction-environment) -- a
+;;; genuinely shared, concurrently-mutated GLOBAL_ENV, the exact
+;;; scenario the race needed. Each actor's own expansion must bind and
+;;; read back its OWN value; a name collision would show up as one
+;;; actor reading a value it never wrote.
+
+(define gensym-race-n-actors 20)
+(define gensym-race-iterations 50)
+(define gensym-race-results (make-vector gensym-race-n-actors #f))
+(define gensym-race-done (make-semaphore 0))
+
+;; A recursive macro (same accumulating-formals shape as accumulate-formals
+;; above) is a convenient way to force multiple fresh-name allocations
+;; per expansion, increasing the odds of catching a counter race within
+;; a bounded number of iterations.
+(define-syntax gensym-race-macro
+  (syntax-rules ()
+    ((_ (n ...) v)
+     (let ((n v) ...) (+ n ...)))
+    ((_ (n ...) v tok . rest)
+     (gensym-race-macro (n ... %gensym-race-slot) v . rest))))
+
+;; idx is captured by ordinary closure/lexical scoping (a parameter of
+;; gensym-race-worker, distinct per actor) -- NOT a shared global
+;; variable: mutating one shared global from 20 racing actors would be
+;; its own unrelated bug in this test, not the one it's trying to catch.
+;; idx's VALUE is spliced directly into the quoted form as a literal via
+;; `list`, so each actor's own eval'd expansion embeds its own number.
+(define (gensym-race-worker idx)
+  (spawn (lambda ()
+    (let loop ((i 0) (ok #t))
+      (if (< i gensym-race-iterations)
+          (let ((result (eval (list 'gensym-race-macro '() idx 'a 'b 'c 'd 'e)
+                               (interaction-environment))))
+            (loop (+ i 1) (and ok (equal? result (* idx 5)))))
+          (begin
+            (vector-set! gensym-race-results idx ok)
+            (sem-post! gensym-race-done)))))))
+
+(let loop ((i 0))
+  (when (< i gensym-race-n-actors)
+    (gensym-race-worker i)
+    (loop (+ i 1))))
+
+(let loop ((i 0))
+  (when (< i gensym-race-n-actors)
+    (sem-wait! gensym-race-done)
+    (loop (+ i 1))))
+
+(check "concurrent macro expansion doesn't collide fresh gensym names"
+  (let loop ((i 0))
+    (cond
+      ((= i gensym-race-n-actors) #t)
+      ((not (vector-ref gensym-race-results i)) #f)
+      (else (loop (+ i 1)))))
+  #t)
 
 ;;; Summary
 (newline)

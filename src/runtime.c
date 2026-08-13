@@ -541,18 +541,160 @@ val_t eval_body(val_t exprs, val_t env) {
     return eval(vcar(exprs), env);
 }
 
-/* ---- Load file ---- */
+/* ---- Load file ----
+ *
+ * A relative `path` (no leading '/') resolves against the directory of
+ * whichever file is currently being loaded -- not the process's current
+ * working directory -- via a small stack of directories, so a chain of
+ * nested (include ...)/(load ...) calls (e.g. a define-library's own
+ * (include "helper.scm") declaration, itself reached while loading some
+ * other .sld from a directory that isn't the process's cwd) resolves
+ * relative to the file that named it, the same way #include/require/
+ * import typically works in other languages. Previously every load
+ * resolved relative to cwd unconditionally, which meant a library whose
+ * own directory wasn't the cwd could never portably (include ...) a
+ * sibling file -- found while testing a multi-file SRFI-279 port that
+ * follows exactly that layout.
+ *
+ * Mark/release, not push/pop: load_dir_mark() snapshots the current
+ * depth; load_dir_release(mark) pops everything back down to it. This
+ * (rather than a single paired push+pop per call) is what makes the API
+ * safe under both of the ways a single push/pop pairing broke:
+ *   - Exception unwind: if eval() below raises, a plain "push then pop
+ *     after the loop" leaves the pushed entry (and any it nested)
+ *     permanently on the stack -- not just a leak, but stale state that
+ *     then corrupts a *later, unrelated* load's path resolution if the
+ *     exception is caught (guard/with-exception-handler) and execution
+ *     continues in the same process. scm_load and load_scheme_module
+ *     both now release back to their entry mark from inside SCM_PROTECT's
+ *     exception path before re-raising, the same pattern
+ *     call-with-precision (builtins.c) uses to restore tl_mpfr_prec.
+ *   - Stack overflow desync: load_push_dir silently no-ops past
+ *     MAX_LOAD_DEPTH (pathological nesting) without incrementing
+ *     load_dir_depth -- a fixed push/pop pairing would then have its
+ *     matching "pop" fire anyway, freeing/popping the *outer*, still-
+ *     active frame one level early. Releasing to a saved mark is
+ *     self-correcting: a skipped push never advanced load_dir_depth
+ *     past the mark, so releasing to that mark is a correct no-op for
+ *     it regardless.
+ *
+ * load_scheme_module (modules.c) uses the same mark/release around its
+ * own read/eval loop for .sld/.scm module files, since that's a second,
+ * independent file-reading loop (not implemented in terms of scm_load)
+ * that (include ...) declarations inside a define-library can be
+ * reached from. main.c's positional-script-argument path marks/releases
+ * around running the script itself, so a top-level script's own
+ * (load "relative/path.scm") resolves against the script's directory
+ * too, not just files reached via -l/(include ...)/module loading.
+ */
+
+/* _Thread_local, matching current_handler/current_wind/g_jit_call_depth
+ * above -- curry's actor system runs each actor in its own detached
+ * POSIX thread (src/actors.c), any of which can call scm_load/
+ * load_scheme_module concurrently. A plain (non-thread-local) static
+ * stack here is a real cross-thread data race and worse -- verified via
+ * ThreadSanitizer: load_dir_release()'s free() on a stack slot races
+ * against a concurrent read of that same slot in another thread's
+ * scm_load(), a genuine use-after-free of the dir_of()-allocated
+ * buffer, not just a lost-update. "What directory am I currently
+ * loading relative to" is inherently per-thread call-stack context
+ * anyway, the same way current_handler's exception-handler chain is. */
+#define MAX_LOAD_DEPTH 64
+static _Thread_local char *load_dir_stack[MAX_LOAD_DEPTH];
+static _Thread_local int   load_dir_depth = 0;
+
+static char *dir_of(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash) return NULL; /* no directory component -- caller's cwd-relative open already matches */
+    size_t len = (size_t)(slash - path);
+    char *dir = malloc(len + 1);
+    memcpy(dir, path, len);
+    dir[len] = '\0';
+    return dir;
+}
+
+void load_push_dir(const char *path) {
+    /* Pathological nesting (64+ deep): stop tracking rather than
+     * overflow the array. load_dir_depth stops advancing, so relative-
+     * path resolution beyond this point keeps resolving against the
+     * last successfully-tracked directory (not truly cwd-relative)
+     * until the stack unwinds back under the cap -- verified this
+     * degrades to a clean "file not found" for a load whose real
+     * parent is beyond the cap, not a crash or wrong-file open. */
+    if (load_dir_depth >= MAX_LOAD_DEPTH) return;
+    load_dir_stack[load_dir_depth++] = dir_of(path);
+}
+
+/* A freshly-spawned actor thread otherwise starts with an *empty*
+ * load_dir_stack (that's the whole point of it being _Thread_local --
+ * no cross-thread sharing) -- so an actor's own (load "relative.scm")
+ * would silently fall back to cwd instead of inheriting whatever
+ * directory context the thread that spawned it was in. Confirmed by
+ * testing: 20 actors each doing (load "dirA-or-dirB/inner.scm") pass
+ * reliably when the process's cwd happens to equal the spawning
+ * script's own directory (an easy coincidence to test under without
+ * noticing), and fail every single time once cwd differs -- e.g. when
+ * ctest runs a script from the build directory rather than the
+ * script's own directory, exactly the scenario this whole feature
+ * exists to make work correctly.
+ *
+ * actor_spawn (actors.c) calls load_dir_snapshot() on the *spawning*
+ * thread (where the correct context still lives) and stashes the result
+ * in ActorStart; actor_thread (running on the new thread) calls
+ * load_dir_adopt_snapshot() once at startup, before running the actor's
+ * body, to seed its own thread-local stack from it. */
+char **load_dir_snapshot(int *out_count) {
+    if (load_dir_depth == 0) { *out_count = 0; return NULL; }
+    char **snap = malloc((size_t)load_dir_depth * sizeof(char *));
+    for (int i = 0; i < load_dir_depth; i++)
+        snap[i] = load_dir_stack[i] ? strdup(load_dir_stack[i]) : NULL;
+    *out_count = load_dir_depth;
+    return snap;
+}
+
+void load_dir_adopt_snapshot(char **snap, int count) {
+    int n = count < MAX_LOAD_DEPTH ? count : MAX_LOAD_DEPTH;
+    for (int i = 0; i < n; i++) load_dir_stack[i] = snap[i];
+    load_dir_depth = n;
+    /* Only reachable if the source thread's own stack was somehow deeper
+     * than MAX_LOAD_DEPTH, which load_push_dir never lets happen -- kept
+     * as a defensive leak-avoider, not an expected path. */
+    for (int i = n; i < count; i++) free(snap[i]);
+    free(snap);
+}
+
+int load_dir_mark(void) { return load_dir_depth; }
+
+void load_dir_release(int mark) {
+    while (load_dir_depth > mark) {
+        load_dir_depth--;
+        free(load_dir_stack[load_dir_depth]);
+        load_dir_stack[load_dir_depth] = NULL;
+    }
+}
 
 val_t scm_load(const char *path, val_t env) {
+    char resolved[4096];
+    if (path[0] != '/' && load_dir_depth > 0 && load_dir_stack[load_dir_depth - 1]) {
+        snprintf(resolved, sizeof(resolved), "%s/%s", load_dir_stack[load_dir_depth - 1], path);
+        path = resolved;
+    }
+
     val_t port = port_open_file(path, PORT_INPUT);
     if (vis_false(port))
         scm_raise(V_FALSE, "load: cannot open file: %s", path);
 
+    int mark = load_dir_mark();
+    load_push_dir(path);
     val_t result = V_VOID;
-    val_t v;
-    while (!vis_eof((v = scm_read(port)))) {
-        result = eval(v, env);
-    }
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        val_t v;
+        while (!vis_eof((v = scm_read(port)))) {
+            result = eval(v, env);
+        }
+    }, { load_dir_release(mark); port_close(port); scm_raise_val(h.exn); });
+    load_dir_release(mark);
     port_close(port);
     return result;
 }

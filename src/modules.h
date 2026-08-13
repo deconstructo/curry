@@ -32,6 +32,10 @@ void modules_init(void);
 /* Load and return a module by name list (e.g. (curry json)) */
 val_t modules_load(val_t name_list);
 
+/* True iff modules_load(name_list) would succeed right now, without
+ * raising on failure -- backs cond-expand's `(library <name>)` requirement. */
+bool modules_available(val_t name_list);
+
 /* Import a module spec into env */
 val_t modules_import(val_t spec, val_t env);
 

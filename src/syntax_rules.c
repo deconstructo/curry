@@ -6,8 +6,11 @@
 #include "env.h"
 #include "builtins.h"
 #include "set.h"
+#include "lang_registry.h"
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdatomic.h>
 
 /* ---- Interned symbols ---- */
 
@@ -23,7 +26,63 @@ typedef struct {
                         SR_DEFAULT_ELLIPSIS, but overridable per R7RS
                         4.3.2's (syntax-rules ellipsis (literal ...) rule ...)
                         form) */
+    val_t def_env;  /* the environment (syntax-rules ...) was evaluated in
+                        -- see sr_current_env's header comment below for why
+                        this is captured once here rather than looked up
+                        per-expansion. Used by sr_is_protected to decide
+                        whether a template-introduced symbol already refers
+                        to something real in the macro's OWN defining scope
+                        (not the use site) before renaming it. */
+    val_t local_macros; /* list of compile-time-local macro names (compiler.c
+                        let-syntax/letrec-syntax/internal define-syntax) in
+                        scope alongside def_env -- see sr_current_local_macros'
+                        header comment for why def_env alone isn't enough for
+                        these. Always V_NIL for a top-level or tree-walked
+                        macro, where def_env already covers it. */
 } SyntaxRulesData;
+
+/* ---- Current environment for (syntax-rules ...) evaluation ----
+ *
+ * sr_compile_fn (the "syntax-rules" T_SYNTAX transformer itself) needs to
+ * know what environment IT is being evaluated in, to capture as the new
+ * transformer's def_env -- but like every Primitive.fn, it receives no
+ * environment parameter at all (Primitive's calling convention is
+ * (argc, argv, userdata), env isn't part of it). Rather than changing
+ * that convention everywhere, eval.c's T_SYNTAX dispatch (the one place
+ * that already has `env` in scope right where it calls apply() on any
+ * transformer, syntax-rules included) saves/sets/restores this thread-
+ * local around that one call, the same save-a-previous-value/restore-it
+ * pattern current_handler's own chain uses elsewhere in this codebase.
+ * compiler.c's compiled path never touches this at all: compile_time_eval
+ * (compiler.c) already documents that a compiled define-syntax's
+ * transformer-expr can only ever see GLOBAL_ENV (no enclosing lambda's
+ * locals/upvalues) -- V_FALSE here means exactly that "not currently
+ * tracked, must be the compiled path" case, and sr_compile_fn maps it to
+ * GLOBAL_ENV directly, so no separate handling is needed on that path. */
+static _Thread_local val_t sr_current_env = V_FALSE;
+
+val_t sr_get_current_env(void) { return sr_current_env; }
+void  sr_set_current_env(val_t env) { sr_current_env = env; }
+
+/* Companion to sr_current_env, for compiler.c's let-syntax/letrec-syntax
+ * and locally-scoped (scope_depth != 0) define-syntax. Those macros'
+ * names live ONLY in the compiler's own compile-time SyntaxLocal table
+ * (add_syntax_local/resolve_syntax_local, compiler.c) -- never in any
+ * runtime EnvFrame env_lookup_slot can see, unlike a top-level
+ * define-syntax (env_define(GLOBAL_ENV, ...)) or a tree-walked library
+ * body's define-syntax (a real, if isolated, runtime env). Without this,
+ * sr_is_protected's def_env-based check has no way to know a locally-
+ * scoped macro's own name (or a letrec-syntax sibling's), so a locally-
+ * scoped macro's self-recursion got incorrectly renamed and broke --
+ * found by review, verified via a minimal letrec-syntax self-recursion
+ * repro. compile_let_syntax/compile_define_syntax set this to the
+ * relevant local macro name(s) (unioned with whatever was already set,
+ * so nested let-syntax blocks see outer local macros too) around each
+ * compile_time_eval call, save/restore-style. */
+static _Thread_local val_t sr_current_local_macros = V_NIL;
+
+val_t sr_get_current_local_macros(void) { return sr_current_local_macros; }
+void  sr_set_current_local_macros(val_t names) { sr_current_local_macros = names; }
 
 /* ---- Vector <-> list helpers, so patterns/templates need only be taught
  * about pairs; a vector pattern/template is handled by converting to/from
@@ -241,14 +300,227 @@ static val_t sr_ell_refs(val_t tmpl, val_t ell_bindings) {
     return result;
 }
 
+/* ---- Partial hygiene: per-expansion renaming of template-introduced,
+ * never-applied identifiers ----
+ *
+ * True hygiene (identifiers carrying lexical "color"/marks, resolved
+ * against the right environment at every reference) would mean giving
+ * every symbol a lexical-context tag and threading that through
+ * evaluation/compilation everywhere identifiers are compared or looked
+ * up -- compiler.c's variable resolution, env_lookup, every `==`
+ * special-form-keyword dispatch in eval.c/compiler.c. That's a rewrite
+ * of how identifiers are represented throughout the interpreter, not a
+ * macro-expander-local fix.
+ *
+ * What actually breaks in practice -- confirmed via a minimal repro
+ * during SRFI-26 porting: a recursive macro (the standard reference
+ * `cut`/`cute` implementation) that builds up a growing lambda formals
+ * list by accumulating a literal `x` at each recursive expansion step
+ * ends up with the SAME literal symbol `x` used as multiple formals
+ * (`(lambda (x x) ...)`), since template-introduced symbols were
+ * previously always emitted completely unchanged (see this file's
+ * former "emit as-is (unhygienic)" comment) -- each expansion step
+ * needs its OWN fresh name for the identifier IT introduces, distinct
+ * from a sibling or a later recursively-generated expansion's use of
+ * the same name.
+ *
+ * An earlier version of this fix tried to detect this by syntactically
+ * recognizing lambda/let/letrec/do binding-form shapes directly in the
+ * template -- but that misses exactly the recursive case above: `x` in
+ * `(step (n ... x) . rest)` isn't textually inside a `lambda` at the
+ * point it's introduced; it only becomes lambda-bound several
+ * *recursive* expansions later, once the macro's own base-case rule
+ * finally fires.
+ *
+ * The heuristic that actually covers this: for the ONE template being
+ * expanded right now, rename every symbol that (a) isn't a pattern
+ * variable for this match, and (b) never appears in *operator* (call-
+ * head) position anywhere in this same template. Genuine free
+ * references a macro template relies on -- `lambda`, `apply`, `list`,
+ * a helper procedure name, even the macro's own name for a recursive
+ * self-call -- are always applied somewhere (`(lambda ...)`, `(apply
+ * ...)`, `(step ...)`), so they're never renamed and keep resolving
+ * normally. A symbol that's only ever passed around as a plain value
+ * (never called) is, in practice, essentially always a variable name
+ * the macro is threading through as a fresh binding-to-be -- give it
+ * one fresh gensym for this expansion, substituted consistently
+ * wherever it appears in this expansion's output. A DIFFERENT expansion
+ * (a separate use of the macro, including a recursively-generated one)
+ * gets its own distinct gensym, so accumulating recursive macros like
+ * cut/cute now produce genuinely distinct formals instead of colliding
+ * into one -- verified against exactly the SRFI-26 cut/cute reference
+ * implementation this was found through.
+ *
+ * This does not attempt full hygiene in the other direction (a
+ * macro-introduced free reference capturing a same-named user binding
+ * at the use site) -- that's the harder half of the problem and is
+ * unchanged. It's also a heuristic, not a proof: a template that uses
+ * the same symbol both as an operator somewhere AND as a fresh-variable
+ * placeholder elsewhere (unusual in practice) won't get that symbol
+ * renamed -- no worse than the old fully-unhygienic behavior for that
+ * rare shape, just not improved by this fix either. */
+
+static bool sr_is_pattern_var(val_t sym, val_t bindings, val_t ell_bindings) {
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        if (vcar(vcar(b)) == sym) return true;
+    for (val_t b = ell_bindings; vis_pair(b); b = vcdr(b))
+        if (vcar(vcar(b)) == sym) return true;
+    return false;
+}
+
+static bool sr_sym_in_list(val_t sym, val_t lst) {
+    for (val_t l = lst; vis_pair(l); l = vcdr(l))
+        if (vcar(l) == sym) return true;
+    return false;
+}
+
+/* "Protected" symbols that must never be renamed: every core special-
+ * form keyword (reusing symbol_list.h's own X-macro list, the same
+ * source of truth symbol.c builds S_QUOTE/S_LAMBDA/etc. from, rather
+ * than hand-duplicating that enumeration here) plus, per-call, anything
+ * ALREADY bound in GLOBAL_ENV at expansion time -- ordinary procedure
+ * names like `list`/`apply`, and a macro's own recursive self-reference
+ * (macros are stored as ordinary environment bindings too, so this one
+ * check covers both without needing them special-cased separately). A
+ * symbol that resolves to neither is, in practice, essentially always a
+ * fresh local variable name the template is threading through as a
+ * binding-to-be, not a reference to something that already exists.
+ *
+ * def_env is the macro's OWN defining environment (SyntaxRulesData.
+ * def_env, captured once by sr_compile_fn — see sr_current_env's header
+ * comment above for how it gets there), not the use site: an earlier
+ * version of this checked GLOBAL_ENV unconditionally, which broke any
+ * syntax-rules macro defined inside a define-library body (every
+ * (curry X)/(srfi X) module in this codebase) — library bodies run in
+ * their own isolated environment (env_new_root(), see modules.c), so a
+ * macro's own recursive self-reference or a sibling helper macro/
+ * procedure it calls was never found in GLOBAL_ENV and got incorrectly
+ * renamed, breaking it. Confirmed via the akkadian/SRFI-shim test
+ * regressions that heuristic caused. */
+static val_t sr_protected_keywords = V_NIL;
+static bool  sr_protected_ready = false;
+
+static void sr_init_protected_keywords(void) {
+#define SYM(var, str) sr_protected_keywords = scm_cons(var, sr_protected_keywords);
+#include "symbol_list.h"
+#undef SYM
+    sr_protected_ready = true;
+}
+
+static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
+    if (!sr_protected_ready) sr_init_protected_keywords();
+    if (sr_sym_in_list(sym, sr_protected_keywords)) return true;
+    /* An Akkadian/cuneiform special-form synonym (šumma for if, epēšum
+     * for lambda, ...) is never itself in sr_protected_keywords or
+     * bound anywhere -- lang_translate() (lang_registry.h) resolves it
+     * to its canonical English special-form symbol at eval/compile
+     * dispatch time, not via any environment binding, unlike a
+     * procedure alias (rēšum for car), which IS a real GLOBAL_ENV
+     * binding builtins.c's startup loop creates and so is already
+     * covered by the env_lookup_slot check below. Confirmed via a real
+     * regression: akkadian_tests.scm defines a macro whose template
+     * uses šumma as (curry's own) if -- without this, šumma got
+     * renamed to a gensym and broke, since it's a genuine free
+     * reference to a real special form, not an introduced binder. */
+    if (sr_sym_in_list(lang_translate(sym), sr_protected_keywords)) return true;
+    if (sr_sym_in_list(sym, local_macros)) return true;
+    return env_lookup_slot(def_env, sym) != NULL;
+}
+
+/* Every symbol appearing anywhere in tmpl (any position) that isn't a
+ * pattern variable, the ellipsis identifier, or "_" -- candidates for
+ * renaming, before sr_is_protected/the macro's own literals are
+ * subtracted out in sr_transformer_fn.
+ *
+ * Does NOT descend into a literal (quote X) subform: a non-pattern-
+ * variable symbol inside a template's own quote -- '(list 'outer x)
+ * emitting the symbol `outer` as a literal tag, not a variable
+ * reference -- is data the macro author wrote to be produced verbatim,
+ * never a fresh binding to introduce. (A pattern variable inside quote
+ * is unaffected either way: sr_is_pattern_var's check above already
+ * excludes it from this collection regardless of quote context, and
+ * sr_expand's own pattern-variable substitution -- separate from this
+ * renaming pass -- still applies inside quote exactly as it always has.)
+ * quasiquote/unquote is NOT specially handled the way plain quote is,
+ * unlike the parenthetical above: a template using `(quasiquote (tag
+ * ,x))` to emit a literal symbol tag DOES still get that tag symbol
+ * renamed (verified) -- e.g. two separate expansions of such a template
+ * would produce tags that are no longer eq? to each other, when the
+ * macro author's intent was clearly one fixed, shared tag. Known gap,
+ * not exercised by anything in this codebase; would need the same
+ * "don't descend" treatment quote gets, done separately since
+ * quasiquote's own unquote/unquote-splicing regions DO need normal
+ * pattern-variable substitution to still apply within them. */
+static void sr_collect_free_symbols(val_t tmpl, val_t bindings, val_t ell_bindings,
+                                     val_t ellipsis, val_t *out_set) {
+    if (vis_vector(tmpl)) {
+        Vector *v = as_vec(tmpl);
+        for (uint32_t i = 0; i < v->len; i++)
+            sr_collect_free_symbols(v->data[i], bindings, ell_bindings, ellipsis, out_set);
+        return;
+    }
+    if (vis_symbol(tmpl)) {
+        if (tmpl == ellipsis || tmpl == SR_UNDERSCORE) return;
+        if (sr_is_pattern_var(tmpl, bindings, ell_bindings)) return;
+        if (sr_sym_in_list(tmpl, *out_set)) return;
+        *out_set = scm_cons(tmpl, *out_set);
+        return;
+    }
+    if (!vis_pair(tmpl)) return;
+    if (vcar(tmpl) == S_QUOTE && vis_pair(vcdr(tmpl)) && vis_nil(vcddr(tmpl)))
+        return;
+    val_t t = tmpl;
+    while (vis_pair(t)) {
+        sr_collect_free_symbols(vcar(t), bindings, ell_bindings, ellipsis, out_set);
+        t = vcdr(t);
+    }
+    /* dotted tail (t is whatever terminates the list -- a symbol for a
+     * dotted pattern/template, V_NIL for a proper one) */
+    if (!vis_nil(t))
+        sr_collect_free_symbols(t, bindings, ell_bindings, ellipsis, out_set);
+}
+
+/* Fresh name for one template-introduced binder, unique across the
+ * whole process -- including across threads: macro expansion can run
+ * concurrently (multiple actor threads compiling/expanding a shared
+ * top-level macro for the first time, or any of them calling `eval` on
+ * code that defines/uses one), and _Atomic here is load-bearing, not
+ * just tidy -- a plain `static long counter` race was confirmed by
+ * review to produce real gensym collisions under concurrent load (two
+ * threads reading the same pre-increment value), corrupting unrelated
+ * macro-introduced bindings into referring to each other. Matches
+ * actors.c's own next_actor_id pattern.
+ *
+ * "\x01" can't appear in anything the reader can produce, so this can't
+ * collide with a name the macro's own template, or an ordinary use-site
+ * call, could ever actually spell. It CAN appear in a symbol built via
+ * `(string->symbol "...")` with a literal 0x01 byte, and the counter is
+ * a predictable, deterministic sequence -- so a
+ * script that both controls a template (or rules data via
+ * %rebuild-syntax-rules) AND deliberately embeds "\x01<N>" suffixes
+ * matching future counter values could, in principle, engineer a
+ * self-inflicted rename collision. Not a cross-boundary/privilege
+ * concern (the "attacker" already has to be the one authoring the
+ * colliding template in the same scope as its own target), and not
+ * addressed further here -- documented as a known, narrow gap rather
+ * than adding string-scanning defenses against it. */
+static _Atomic long sr_gensym_counter = 0;
+
+static val_t sr_gensym(val_t base) {
+    long n = atomic_fetch_add(&sr_gensym_counter, 1);
+    char buf[160];
+    snprintf(buf, sizeof buf, "%s\x01%ld", sym_cstr(base), n);
+    return sym_intern_cstr(buf);
+}
+
 /* Forward declaration */
 static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings,
-                       val_t ellipsis, bool literal_mode);
+                       val_t rename_map, val_t ellipsis, bool literal_mode);
 
 /* Expand a template list (car/cdr chain, not yet unwrapped from any vector)
  * element by element, honoring ellipsis repetition unless literal_mode. */
 static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
-                            val_t ellipsis, bool literal_mode) {
+                            val_t rename_map, val_t ellipsis, bool literal_mode) {
     val_t result = V_NIL;
     val_t t = tmpl;
     while (vis_pair(t)) {
@@ -266,7 +538,7 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
             vis_pair(vcdr(elem)) && vis_nil(vcddr(elem))) {
             result = scm_append(result,
                          scm_cons(sr_expand(vcadr(elem), bindings, ell_bindings,
-                                             ellipsis, true),
+                                             rename_map, ellipsis, true),
                                   V_NIL));
             t = rest;
             continue;
@@ -288,7 +560,7 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
                     }
                     result = scm_append(result,
                                  scm_cons(sr_expand(elem, iter_bindings, ell_bindings,
-                                                     ellipsis, literal_mode),
+                                                     rename_map, ellipsis, literal_mode),
                                           V_NIL));
                 }
             }
@@ -298,14 +570,14 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
         }
 
         result = scm_append(result,
-                     scm_cons(sr_expand(elem, bindings, ell_bindings, ellipsis, literal_mode),
+                     scm_cons(sr_expand(elem, bindings, ell_bindings, rename_map, ellipsis, literal_mode),
                               V_NIL));
         t = rest;
     }
 
     /* Dotted template tail */
     if (!vis_nil(t))
-        result = scm_append(result, sr_expand(t, bindings, ell_bindings, ellipsis, literal_mode));
+        result = scm_append(result, sr_expand(t, bindings, ell_bindings, rename_map, ellipsis, literal_mode));
 
     return result;
 }
@@ -314,25 +586,35 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
  * literal_mode, once entered via an (ellipsis template) escape, suppresses
  * ellipsis-triggered repetition for the whole subtree — "..." tokens and
  * elem-followed-by-"..." pairs are then just ordinary data — while pattern
- * variable substitution still happens normally throughout. */
+ * variable substitution still happens normally throughout.
+ *
+ * rename_map is the per-expansion (name . fresh-gensym) table built by
+ * sr_transformer_fn from sr_collect_operators/sr_collect_free_symbols —
+ * see the "Partial hygiene" header comment above them for what it does
+ * and doesn't fix. */
 static val_t sr_expand(val_t tmpl, val_t bindings, val_t ell_bindings,
-                       val_t ellipsis, bool literal_mode) {
+                       val_t rename_map, val_t ellipsis, bool literal_mode) {
     if (vis_symbol(tmpl)) {
         /* Look up in simple bindings first */
         for (val_t b = bindings; vis_pair(b); b = vcdr(b))
             if (vcar(vcar(b)) == tmpl) return vcdr(vcar(b));
-        /* Introduced identifier — emit as-is (unhygienic) */
+        /* Template-introduced binder this expansion has a fresh name for */
+        for (val_t r = rename_map; vis_pair(r); r = vcdr(r))
+            if (vcar(vcar(r)) == tmpl) return vcdr(vcar(r));
+        /* Free identifier (e.g. lambda, apply, a helper procedure name) —
+         * emit as-is, resolved at the use site (still unhygienic in this
+         * direction, see the header comment above sr_is_pattern_var). */
         return tmpl;
     }
 
     if (vis_vector(tmpl))
         return sr_list_to_vector(
             sr_expand_list(sr_vector_to_list(tmpl), bindings, ell_bindings,
-                           ellipsis, literal_mode));
+                           rename_map, ellipsis, literal_mode));
 
     if (!vis_pair(tmpl)) return tmpl; /* self-evaluating datum */
 
-    return sr_expand_list(tmpl, bindings, ell_bindings, ellipsis, literal_mode);
+    return sr_expand_list(tmpl, bindings, ell_bindings, rename_map, ellipsis, literal_mode);
 }
 
 /* ---- Transformer function (called when the macro is used) ---- */
@@ -366,8 +648,24 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
 
         val_t bindings = V_NIL, ell_bindings = V_NIL;
         if (sr_match_list(pat_rest, form_rest, sr->literals, sr->ellipsis,
-                           &bindings, &ell_bindings))
-            return sr_expand(tmpl, bindings, ell_bindings, sr->ellipsis, false);
+                           &bindings, &ell_bindings)) {
+            /* One fresh gensym per distinct template-introduced symbol
+             * that isn't already a meaningful reference (a special-form
+             * keyword, an existing global procedure/macro, or one of
+             * this macro's own declared literals), for this one
+             * expansion only -- see the "Partial hygiene" header
+             * comment above sr_is_protected. */
+            val_t free_syms = V_NIL;
+            sr_collect_free_symbols(tmpl, bindings, ell_bindings, sr->ellipsis, &free_syms);
+            val_t rename_map = V_NIL;
+            for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
+                val_t sym = vcar(s);
+                if (sr_is_literal(sym, sr->literals)) continue;
+                if (sr_is_protected(sym, sr->def_env, sr->local_macros)) continue;
+                rename_map = scm_cons(scm_cons(sym, sr_gensym(sym)), rename_map);
+            }
+            return sr_expand(tmpl, bindings, ell_bindings, rename_map, sr->ellipsis, false);
+        }
     }
 
     val_t kw = vis_pair(form) ? vcar(form) : V_FALSE;
@@ -415,6 +713,13 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     sr->literals = literals;
     sr->rules    = compiled;
     sr->ellipsis = ellipsis;
+    /* V_FALSE (the compiled path, which never sets this thread-local —
+     * see its own header comment) maps to GLOBAL_ENV, matching
+     * compile_time_eval's existing "GLOBAL_ENV only" constraint for a
+     * compiled define-syntax's transformer-expr. */
+    val_t cur_env = sr_get_current_env();
+    sr->def_env = (cur_env == V_FALSE) ? GLOBAL_ENV : cur_env;
+    sr->local_macros = sr_get_current_local_macros();
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
@@ -468,6 +773,13 @@ val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis) {
     sr->literals = literals;
     sr->rules    = rules;
     sr->ellipsis = ellipsis;
+    /* Always the compiled/.scc-cache-hit path for a TOP-LEVEL macro
+     * (compiler.c's compile_define_syntax only calls %rebuild-syntax-rules
+     * from its scope_depth == 0 branch -- a local/let-syntax macro never
+     * reaches this) -- GLOBAL_ENV/no local macros, same as sr_compile_fn's
+     * own V_FALSE fallback for that path. */
+    sr->def_env      = GLOBAL_ENV;
+    sr->local_macros = V_NIL;
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
