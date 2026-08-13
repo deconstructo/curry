@@ -16,7 +16,7 @@
 #include "numtheory.h"
 #include "unicode.h"
 #include "lang_registry.h"
-#include "features.h"
+#include "curry_features.h"
 #ifdef BUILD_MPFR
 #include "mpfr_num.h"
 #endif

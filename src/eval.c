@@ -36,7 +36,7 @@
 #include "surreal.h"
 #include "profiling.h"
 #include "syntax_rules.h"
-#include "features.h"
+#include "curry_features.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

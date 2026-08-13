@@ -68,7 +68,7 @@
 #include "syntax_rules.h"
 #include "sx_algebra.h"
 #include "sx_pattern.h"
-#include "features.h"
+#include "curry_features.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 

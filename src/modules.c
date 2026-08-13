@@ -8,7 +8,7 @@
 #include "reader.h"
 #include "port.h"
 #include "lang_registry.h"
-#include "features.h"
+#include "curry_features.h"
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
