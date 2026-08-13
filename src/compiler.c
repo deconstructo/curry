@@ -68,6 +68,7 @@
 #include "syntax_rules.h"
 #include "sx_algebra.h"
 #include "sx_pattern.h"
+#include "features.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -2056,6 +2057,17 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* begin */
     if (head == S_BEGIN) { compile_begin(c, args, tail, line); return; }
+
+    /* cond-expand — resolved entirely at compile time: pick the first
+     * satisfied clause's body (see features.c) and compile it in place,
+     * exactly as if it had been written as (begin body...) here. */
+    if (head == S_COND_EXPAND) {
+        bool matched;
+        val_t body = cond_expand_choose(args, &matched);
+        if (!matched) scm_raise(V_FALSE, "cond-expand: no matching clause");
+        compile_begin(c, body, tail, line);
+        return;
+    }
 
     /* define */
     if (head == S_DEFINE) { compile_define(c, args, line); return; }

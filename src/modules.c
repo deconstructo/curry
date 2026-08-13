@@ -8,6 +8,7 @@
 #include "reader.h"
 #include "port.h"
 #include "lang_registry.h"
+#include "features.h"
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
@@ -305,9 +306,16 @@ void modules_init(void) {
     }
 }
 
-val_t modules_load(val_t name_list) {
+/* Shared by modules_load (raises on failure) and modules_available (used by
+ * cond-expand's `(library <name>)` feature requirement, which needs a
+ * side-effect-free-on-failure probe rather than a longjmp) -- same registry
+ * lookup + on-disk search, just returns NULL instead of raising when nothing
+ * is found. A successful probe does register the module, same as a real
+ * import would; that's fine (idempotent, and "available" conventionally
+ * means "importable right now" in other R7RS implementations too). */
+static Module *modules_try_load(val_t name_list) {
     Module *mod = registry_lookup(name_list);
-    if (mod) return vptr(mod);
+    if (mod) return mod;
 
     char path_base[256];
     name_to_path(name_list, path_base, sizeof(path_base));
@@ -319,12 +327,12 @@ val_t modules_load(val_t name_list) {
         /* Try .so first */
         snprintf(full, sizeof(full), "%s/%s.so", search_dirs[i], path_base);
         mod = load_c_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return vptr(mod); }
+        if (mod) { registry_insert(name_list, mod); return mod; }
 
         /* Try .dylib (macOS) */
         snprintf(full, sizeof(full), "%s/%s.dylib", search_dirs[i], path_base);
         mod = load_c_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return vptr(mod); }
+        if (mod) { registry_insert(name_list, mod); return mod; }
 
         /* Try .sld (Scheme library definition) */
         snprintf(full, sizeof(full), "%s/%s.sld", search_dirs[i], path_base);
@@ -334,9 +342,9 @@ val_t modules_load(val_t name_list) {
              * (define-library ...), those forms already registered the module
              * under the correct env.  Don't overwrite with the file-level wrapper. */
             Module *self_reg = registry_lookup(name_list);
-            if (self_reg) return vptr(self_reg);
+            if (self_reg) return self_reg;
             registry_insert(name_list, mod);
-            return vptr(mod);
+            return mod;
         }
 
         /* Try .scm */
@@ -344,13 +352,28 @@ val_t modules_load(val_t name_list) {
         mod = load_scheme_module(name_list, full);
         if (mod) {
             Module *self_reg = registry_lookup(name_list);
-            if (self_reg) return vptr(self_reg);
+            if (self_reg) return self_reg;
             registry_insert(name_list, mod);
-            return vptr(mod);
+            return mod;
         }
     }
 
+    return NULL;
+}
+
+val_t modules_load(val_t name_list) {
+    Module *mod = modules_try_load(name_list);
+    if (mod) return vptr(mod);
+
+    char path_base[256];
+    name_to_path(name_list, path_base, sizeof(path_base));
     scm_raise(V_FALSE, "module not found: %s", path_base);
+}
+
+/* (library <name>) feature requirement inside cond-expand -- true iff
+ * name_list would successfully modules_load() right now. */
+bool modules_available(val_t name_list) {
+    return modules_try_load(name_list) != NULL;
 }
 
 /* Apply an importer's filter (only/except/rename/prefix) to one binding and,
@@ -465,6 +488,50 @@ static void register_library(val_t name_list, val_t mod_env, val_t exports,
     registry_insert(name_list, make_module(name_list, mod_env, exports, has_exports, NULL));
 }
 
+/* One define-library declaration: (export ...) | (import ...) | (begin ...)
+ * | (include ...) | (cond-expand <ce-clause>...). Factored out of
+ * modules_define_library so cond-expand can recurse into it -- a matched
+ * cond-expand clause's body is itself a list of further declarations (this
+ * is exactly how SRFI 279's own 279.sld picks its per-implementation
+ * (import ...)/(include ...) pair), not expressions, so it can't just be
+ * handed to eval() the way S_BEGIN's body is. */
+static void define_library_clause(val_t clause, val_t *exports, bool *has_exports,
+                                   val_t lib_env) {
+    if (!vis_pair(clause))
+        scm_raise(V_FALSE, "define-library: malformed declaration (not a list)");
+    val_t clause_type = vcar(clause);
+
+    if (clause_type == S_EXPORT) {
+        *has_exports = true;
+        val_t es = vcdr(clause);
+        while (vis_pair(es)) { *exports = scm_cons(vcar(es), *exports); es = vcdr(es); }
+    } else if (clause_type == S_IMPORT) {
+        /* (import spec ...) — one or more import specs */
+        val_t specs = vcdr(clause);
+        while (vis_pair(specs)) {
+            modules_import(vcar(specs), lib_env);
+            specs = vcdr(specs);
+        }
+    } else if (clause_type == S_BEGIN) {
+        val_t body = vcdr(clause);
+        while (vis_pair(body)) { eval(vcar(body), lib_env); body = vcdr(body); }
+    } else if (clause_type == S_INCLUDE) {
+        val_t files = vcdr(clause);
+        while (vis_pair(files)) {
+            scm_load(str_data(as_str(vcar(files))), lib_env);
+            files = vcdr(files);
+        }
+    } else if (clause_type == S_COND_EXPAND) {
+        bool matched;
+        val_t body = cond_expand_choose(vcdr(clause), &matched);
+        if (!matched) scm_raise(V_FALSE, "cond-expand: no matching clause");
+        while (vis_pair(body)) {
+            define_library_clause(vcar(body), exports, has_exports, lib_env);
+            body = vcdr(body);
+        }
+    }
+}
+
 /* (define-library (name) clause...) — R7RS */
 val_t modules_define_library(val_t form, val_t env) {
     val_t rest    = vcdr(form);
@@ -475,29 +542,7 @@ val_t modules_define_library(val_t form, val_t env) {
 
     while (vis_pair(rest)) {
         val_t clause = vcar(rest); rest = vcdr(rest);
-        val_t clause_type = vcar(clause);
-
-        if (clause_type == S_EXPORT) {
-            has_exports = true;
-            val_t es = vcdr(clause);
-            while (vis_pair(es)) { exports = scm_cons(vcar(es), exports); es = vcdr(es); }
-        } else if (clause_type == S_IMPORT) {
-            /* (import spec ...) — one or more import specs */
-            val_t specs = vcdr(clause);
-            while (vis_pair(specs)) {
-                modules_import(vcar(specs), lib_env);
-                specs = vcdr(specs);
-            }
-        } else if (clause_type == S_BEGIN) {
-            val_t body = vcdr(clause);
-            while (vis_pair(body)) { eval(vcar(body), lib_env); body = vcdr(body); }
-        } else if (clause_type == S_INCLUDE) {
-            val_t files = vcdr(clause);
-            while (vis_pair(files)) {
-                scm_load(str_data(as_str(vcar(files))), lib_env);
-                files = vcdr(files);
-            }
-        }
+        define_library_clause(clause, &exports, &has_exports, lib_env);
     }
     (void)env;
     register_library(name, lib_env, exports, has_exports);

@@ -16,6 +16,7 @@
 #include "numtheory.h"
 #include "unicode.h"
 #include "lang_registry.h"
+#include "features.h"
 #ifdef BUILD_MPFR
 #include "mpfr_num.h"
 #endif
@@ -2364,6 +2365,13 @@ static val_t prim_breakpoint(int ac, val_t *av, void *ud) {
     vm_debug_request_step();
     return V_VOID;
 }
+/* (features) — R7RS 6.13.3: list of feature identifiers this build
+ * supports, the same list cond-expand (features.c) tests requirements
+ * against. */
+static val_t prim_features(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return features_list();
+}
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
@@ -2891,6 +2899,7 @@ void builtins_register(val_t env) {
     DEF("current-second",      prim_current_second,      0,0);
     DEF("current-jiffy",       prim_current_jiffy,       0,0);
     DEF("jiffies-per-second",  prim_jiffies_per_second,  0,0);
+    DEF("features",                    prim_features,               0,0);
     DEF("gc",                          prim_gc,                    0,0);
     DEF("gc-mode",                     prim_gc_mode,               0,0);
     DEF("gc-heap-size",                prim_gc_heap_size,          0,0);

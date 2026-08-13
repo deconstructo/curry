@@ -35,6 +35,7 @@
 #include "quantum.h"
 #include "surreal.h"
 #include "profiling.h"
+#include "features.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -608,6 +609,16 @@ tail:
             rest = vcdr(rest);
         }
         return r;
+    }
+
+    if (op == S_COND_EXPAND) {
+        bool matched;
+        val_t body = cond_expand_choose(rest, &matched);
+        if (!matched)
+            scm_raise(V_FALSE, "cond-expand: no matching clause");
+        if (!vis_pair(body)) return V_VOID;
+        while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+        expr = vcar(body); goto tail;
     }
 
     if (op == S_VALUES) {

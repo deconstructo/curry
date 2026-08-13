@@ -110,6 +110,7 @@ The test suites registered in `ctest`:
 | `core` | `curry_test` (C binary) | C-level value/numeric/GC primitives |
 | `scheme_r7rs` | `r7rs_tests.scm` | R7RS conformance |
 | `scheme_r6rs` | `r6rs_tests.scm` | R6RS compatibility: `library` form, `(rnrs)` imports, R6RS `define-record-type`, SRFI-27 random |
+| `cond_expand` | `cond_expand_tests.scm` | `(features)` and `cond-expand`: feature identifiers, `and`/`or`/`not`/`library` requirements, `else`, no-match error, `define-library`-declaration position (incl. nested `cond-expand`) |
 | `numeric_ext` | `numeric_ext_tests.scm` | Clifford algebra, symbolic CAS, surreal numbers, auto-diff, numeric tower |
 | `actors` | `actors_tests.scm` | Concurrency primitives (spawn/send!/receive) |
 | `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |

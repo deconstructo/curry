@@ -6,6 +6,7 @@ add_test(NAME json           COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/json_test
 add_test(NAME sqlite         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/sqlite_tests.scm)
 add_test(NAME scheme_r7rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r7rs_tests.scm)
 add_test(NAME scheme_r6rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r6rs_tests.scm)
+add_test(NAME cond_expand    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/cond_expand_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
 add_test(NAME actors         COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
 add_test(NAME dynamic_wind   COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_wind_tests.scm)

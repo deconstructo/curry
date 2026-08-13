@@ -104,6 +104,7 @@ set(CORE_SOURCES
   src/gc_gen.c
   src/chunk.c
   src/symbol.c
+  src/features.c
   src/numeric.c
   src/numtheory.c
   src/unicode.c
