@@ -6,6 +6,7 @@
 #include "env.h"
 #include "builtins.h"
 #include "set.h"
+#include "lang_registry.h"
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
@@ -409,6 +410,19 @@ static void sr_init_protected_keywords(void) {
 static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
     if (!sr_protected_ready) sr_init_protected_keywords();
     if (sr_sym_in_list(sym, sr_protected_keywords)) return true;
+    /* An Akkadian/cuneiform special-form synonym (šumma for if, epēšum
+     * for lambda, ...) is never itself in sr_protected_keywords or
+     * bound anywhere -- lang_translate() (lang_registry.h) resolves it
+     * to its canonical English special-form symbol at eval/compile
+     * dispatch time, not via any environment binding, unlike a
+     * procedure alias (rēšum for car), which IS a real GLOBAL_ENV
+     * binding builtins.c's startup loop creates and so is already
+     * covered by the env_lookup_slot check below. Confirmed via a real
+     * regression: akkadian_tests.scm defines a macro whose template
+     * uses šumma as (curry's own) if -- without this, šumma got
+     * renamed to a gensym and broke, since it's a genuine free
+     * reference to a real special form, not an introduced binder. */
+    if (sr_sym_in_list(lang_translate(sym), sr_protected_keywords)) return true;
     if (sr_sym_in_list(sym, local_macros)) return true;
     return env_lookup_slot(def_env, sym) != NULL;
 }

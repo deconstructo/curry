@@ -316,6 +316,30 @@
     (loop-tag 42))
   '(loop-tag 42))
 
+;;; Regression: an Akkadian/cuneiform special-form synonym (šumma for
+;;; if, epēšum for lambda, ...) used inside a macro's own template is a
+;;; genuine free reference to a real special form, not a template-
+;;; introduced binder -- but it's never itself a member of
+;;; sr_protected_keywords (built from symbol_list.h's canonical ENGLISH
+;;; names only) and never bound anywhere either (unlike a procedure
+;;; alias like rēšum for car, which IS a real GLOBAL_ENV binding
+;;; builtins.c's startup loop creates): lang_translate() (lang_registry.h)
+;;; resolves it to "if" only at eval/compile dispatch time. Without
+;;; special-casing this, šumma got renamed to a gensym and broke -- a
+;;; real regression this fix caused in akkadian_tests.scm's own
+;;; define-syntax/syntax-rules translit coverage (šakānum-ṭupšarrim /
+;;; ṭupšarrūtum defining my-and via šumma), caught by CI, not local
+;;; testing (curry's own scripts are almost always written in English).
+(check "an Akkadian special-form synonym inside a macro template still resolves"
+  (let ()
+    (define-syntax my-and2
+      (syntax-rules ()
+        ((_) #t)
+        ((_ e) e)
+        ((_ e1 e2 ...) (šumma e1 (my-and2 e2 ...) #f))))
+    (my-and2 1 2 3))
+  3)
+
 (check "let-syntax macro invisible outside its body"
   (guard (e (#t 'unbound))
     (begin (let-syntax ((only-here (syntax-rules () ((_ x) x)))) (only-here 1))
