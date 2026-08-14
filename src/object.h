@@ -546,12 +546,31 @@ typedef struct {
     int      cmp;
 } Hashtable;
 
-/* Record type descriptor (RTD) */
+/* Record type descriptor (RTD)
+ *
+ * constructor/predicate/accessors/mutators are populated AFTER the RTD
+ * itself is built (record_type_build_spec only constructs the RTD and
+ * describes what bindings need creating -- the actual closures don't
+ * exist until compiler.c/eval.c finish compiling/evaluating each one),
+ * via %rtd-set-constructor!/%rtd-set-predicate!/%rtd-set-accessor!/
+ * %rtd-set-mutator! (src/builtins.c) called once per binding right
+ * after it's defined. All four are V_FALSE (constructor/predicate) or
+ * per-slot V_FALSE (accessors/mutators -- accessors are always real
+ * procedures once populated since every field has one; mutators are
+ * V_FALSE for fields declared immutable) until then, and accessors/
+ * mutators stay V_FALSE forever for an R6RS/R7RS record type built
+ * with rtd_ref = V_FALSE (the tree-walker's eval.c path builds these
+ * directly in C and populates all four eagerly instead -- see its own
+ * S_DEFINE_RECORD_TYPE case). */
 typedef struct {
     Hdr      hdr;
     val_t    name;        /* symbol */
     uint32_t nfields;
-    val_t    field_names[]; /* flexible array of symbols */
+    val_t    constructor; /* procedure, or V_FALSE if not yet/never set */
+    val_t    predicate;   /* procedure, or V_FALSE if not yet/never set */
+    val_t   *accessors;   /* val_t[nfields], GC-visible heap array; NULL until allocated */
+    val_t   *mutators;    /* val_t[nfields], V_FALSE per immutable field; NULL until allocated */
+    val_t    field_names[]; /* flexible array of symbols -- must stay last */
 } RecordType;
 
 /* Record instance */

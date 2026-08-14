@@ -297,6 +297,22 @@
 (check "record-type-name" (record-type-name (record-rtd pt)) '<point>)
 (check "record-type-field-names" (record-type-field-names (record-rtd pt)) '(x y))
 
+;; record-type-constructor/-predicate/-accessors/-mutators: the four
+;; "record-related procedures" (SRFI-279's own phrase) as real,
+;; callable procedure objects, stashed onto the RTD by define-record-
+;; type's own codegen (record_type.c/compiler.c/eval.c).
+(check "record-type-constructor is callable and produces a real instance"
+  (point-x ((record-type-constructor (record-rtd pt)) 10 20)) 10)
+(check "record-type-predicate accepts an instance"
+  ((record-type-predicate (record-rtd pt)) pt) #t)
+(check "record-type-predicate rejects a non-instance"
+  ((record-type-predicate (record-rtd pt)) 'not-a-point) #f)
+(check "record-type-accessors: field order matches field-names, both work"
+  (map (lambda (acc) (acc pt)) (record-type-accessors (record-rtd pt)))
+  '(3 4))
+(check "record-type-mutators: both <point> fields are immutable"
+  (record-type-mutators (record-rtd pt)) '(#f #f))
+
 (let ((p (inspect-properties pt)))
   (has "record: field x" p 'x 3)
   (has "record: field y" p 'y 4)
@@ -305,7 +321,24 @@
 
 (let ((p (inspect-properties (record-rtd pt))))
   (has "record-type: rtd-name" p 'rtd-name '<point>)
-  (has "record-type: rtd-field-names" p 'rtd-field-names '(x y)))
+  (has "record-type: rtd-field-names" p 'rtd-field-names '(x y))
+  (check "record-type: rtd-constructor is present and callable"
+    (procedure? (cadr (assoc 'rtd-constructor p))) #t)
+  (check "record-type: rtd-predicate is present and callable"
+    (procedure? (cadr (assoc 'rtd-predicate p))) #t)
+  (check "record-type: rtd-accessors is a list of 2 real procedures"
+    (map procedure? (cadr (assoc 'rtd-accessors p))) '(#t #t))
+  (check "record-type: rtd-mutators is (#f #f) for an all-immutable record"
+    (cadr (assoc 'rtd-mutators p)) '(#f #f)))
+
+;; A record type with a mutable field: rtd-mutators must mix real
+;; procedures and #f in the right positions, not omit or reorder.
+(define-record-type <mut-point> (make-mut-point x y) mut-point?
+  (x mut-point-x) (y mut-point-y set-mut-point-y!))
+(let ((p (inspect-properties (record-rtd (make-mut-point 1 2)))))
+  (check "record-type: rtd-mutators mixes #f (immutable) and a real procedure (mutable)"
+    (map (lambda (m) (if m 'mutator #f)) (cadr (assoc 'rtd-mutators p)))
+    '(#f mutator)))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 14.5  procedure-properties, and the underlying procedure-name /

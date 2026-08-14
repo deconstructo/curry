@@ -631,6 +631,40 @@ static void compile_define_record_type(Compiler *c, val_t rest, int line) {
                      scm_cons(spec.bindings[i].params, spec.bindings[i].body));
         val_t def_args = scm_cons(spec.bindings[i].name, scm_cons(lam, V_NIL));
         compile_define(c, def_args, line);
+
+        /* Stash this binding's freshly-defined closure back onto the
+         * RUNTIME RTD (referenced via rtd_ref, not the compile-time-only
+         * `rtd` above -- that one only exists to extract name/nfields/
+         * field_names for the %make-record-type call emitted earlier and
+         * is never itself the object %make-record-type builds at
+         * runtime) so record-type-constructor/-predicate/-accessors/
+         * -mutators can retrieve it later (SRFI-279's rtd-properties). */
+        val_t stash_call;
+        switch (spec.bindings[i].role) {
+            case RTD_ROLE_CONSTRUCTOR:
+                stash_call = scm_cons(sym_intern_cstr("%rtd-set-constructor!"),
+                    scm_cons(rtd_ref, scm_cons(spec.bindings[i].name, V_NIL)));
+                break;
+            case RTD_ROLE_PREDICATE:
+                stash_call = scm_cons(sym_intern_cstr("%rtd-set-predicate!"),
+                    scm_cons(rtd_ref, scm_cons(spec.bindings[i].name, V_NIL)));
+                break;
+            case RTD_ROLE_ACCESSOR:
+                stash_call = scm_cons(sym_intern_cstr("%rtd-set-accessor!"),
+                    scm_cons(rtd_ref, scm_cons(vfix((intptr_t)spec.bindings[i].field_index),
+                        scm_cons(spec.bindings[i].name, V_NIL))));
+                break;
+            case RTD_ROLE_MUTATOR:
+                stash_call = scm_cons(sym_intern_cstr("%rtd-set-mutator!"),
+                    scm_cons(rtd_ref, scm_cons(vfix((intptr_t)spec.bindings[i].field_index),
+                        scm_cons(spec.bindings[i].name, V_NIL))));
+                break;
+            default:
+                stash_call = V_VOID;
+                break;
+        }
+        emit(c, OP_POP, line); /* discard this binding's own OP_VOID */
+        compile(c, stash_call, false, line);
     }
 }
 
