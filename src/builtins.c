@@ -413,12 +413,20 @@ NUM_CMP(eq,eq)
 #define NUM_CMP_ORD(fn, op, name) \
 static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; \
-    if (ac == 2 && (vis_symbolic(av[0]) || vis_symbolic(av[1]))) return sx_##op(av[0], av[1]); \
-    /* Scan for a symbolic operand up front, across the whole call --
-     * not interleaved with the comparison loop below. Checking only the
-     * pair currently being examined let an earlier numeric pair's #f
-     * short-circuit the loop before it ever reached the symbolic pair,
-     * so e.g. (< 5 1 x) silently returned #f instead of raising. */ \
+    /* ac==2 is the hot path (every plain numeric (< a b) call goes
+     * through here) -- handled standalone so it costs exactly the two
+     * vis_symbolic checks below and nothing more, rather than also
+     * paying for the 3+-arg scan on every call. */ \
+    if (ac == 2) { \
+        if (vis_symbolic(av[0]) || vis_symbolic(av[1])) return sx_##op(av[0], av[1]); \
+        return vbool(num_##op(av[0], av[1])); \
+    } \
+    /* 3+ args: scan for a symbolic operand across the WHOLE call up
+     * front, not interleaved with the comparison loop below. Checking
+     * only the pair currently being examined let an earlier numeric
+     * pair's #f short-circuit the loop before it ever reached the
+     * symbolic pair, so e.g. (< 5 1 x) silently returned #f instead of
+     * raising. */ \
     for (int i=0;i<ac;i++) \
         if (vis_symbolic(av[i])) \
             scm_raise(V_FALSE, name ": symbolic comparison only supports exactly 2 arguments"); \
