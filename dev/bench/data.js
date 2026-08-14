@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786695815692,
+  "lastUpdate": 1786697145111,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3863,6 +3863,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.801,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "252be18be057043b7813e50f655347edc81a659f",
+          "message": "feat(srfi279): wire in numeric-vector properties; fix stale docs (#30)\n\n* feat(srfi279): wire in numeric-vector properties; fix stale docs\n\nAdds typedvec-properties to (srfi s279 inspect), covering all 9 SRFI-4\nkinds (u8/s8/u16/s16/u32/s32/u64/s64/f64vector) -- unblocked now that\n(curry typedvec) and (curry f64vector) both exist. No single generic\n\"is this any typed vector\" predicate exists across the 9 kinds (8\nshare one heap type with a kind flag but only expose per-kind\npredicates; f64vector is a wholly separate heap type), so a small\ndispatch table looks up each kind's own predicate/length/->list\nprocedures. Property keys are the real per-kind procedure names (e.g.\n'u8vector-length), matching this module's existing convention of\nnaming a property after the standard procedure that produced it.\n\nAlso fixes documentation that had gone stale as other work landed:\n- The .scm header and docs/reference/srfi/s279.md's \"Deliberately out\n  of scope\" list still claimed no procedure introspection existed and\n  no ports support existed -- both shipped in earlier PRs (#25, #27)\n  and are already wired into inspect-properties, just never reflected\n  in either doc.\n- The \"Supported types\" table was missing rows for port and procedure\n  properties entirely, despite both being implemented.\n- Added an explicit, prominent note that SRFI-279 is still a draft\n  (not finalized) and that this page/module's surface is therefore\n  provisional and may need to change to track the spec -- the\n  existing mention was just a parenthetical in the intro line.\n\ntests/srfi_s279_inspect_tests.scm: 13 new checks covering all 9 kinds\n(including s64/u64 bignum-boundary round-tripping and cross-kind\npredicate isolation), up to 204 from 191. Full ctest suite: 94/94 pass.\n\n* docs(srfi279): note inspect-properties' cost on large sequences\n\nIndependent security review of the typedvec-properties addition\nmeasured (inspect-properties v) on a 50M-element u8vector at ~127s/\n13.4GB peak RSS vs ~2.8s/2.7GB for (u8vector->list v) alone -- about\n45x slower and 5x more memory than the accessor it calls, from\nmaterializing the object as a list and then a second list of (index\nelement) pairs on top of that. Pre-existing behavior shared with\nordinary vector/bytevector properties, not introduced by typed-vector\nsupport, but typed vectors are the type real code uses for large\nbinary/numeric buffers, so more likely to actually be large in\npractice. Not a bug, just worth documenting explicitly.",
+          "timestamp": "2026-08-14T18:44:50+10:00",
+          "tree_id": "e197f8a11a3b4ec09459e11938b49ed93767390f",
+          "url": "https://github.com/deconstructo/curry/commit/252be18be057043b7813e50f655347edc81a659f"
+        },
+        "date": 1786697144291,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.427,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.637,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.406,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.217,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 204.327,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 378.452,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.957,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.715,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 103.857,
             "unit": "ms"
           }
         ]
