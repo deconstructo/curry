@@ -234,24 +234,34 @@
 
     (define (u8vector-concatenate vs) (apply u8vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (u8vector-unfold f length . seeds)
-      (let ((out (make-u8vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-u8vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u8vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u8vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (u8vector-unfold-right f length . seeds)
-      (let ((out (make-u8vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-u8vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u8vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u8vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define u8vector-comparator
@@ -416,24 +426,34 @@
 
     (define (s8vector-concatenate vs) (apply s8vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (s8vector-unfold f length . seeds)
-      (let ((out (make-s8vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-s8vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s8vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s8vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (s8vector-unfold-right f length . seeds)
-      (let ((out (make-s8vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-s8vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s8vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s8vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define s8vector-comparator
@@ -598,24 +618,34 @@
 
     (define (u16vector-concatenate vs) (apply u16vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (u16vector-unfold f length . seeds)
-      (let ((out (make-u16vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-u16vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u16vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u16vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (u16vector-unfold-right f length . seeds)
-      (let ((out (make-u16vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-u16vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u16vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u16vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define u16vector-comparator
@@ -780,24 +810,34 @@
 
     (define (s16vector-concatenate vs) (apply s16vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (s16vector-unfold f length . seeds)
-      (let ((out (make-s16vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-s16vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s16vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s16vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (s16vector-unfold-right f length . seeds)
-      (let ((out (make-s16vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-s16vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s16vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s16vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define s16vector-comparator
@@ -962,24 +1002,34 @@
 
     (define (u32vector-concatenate vs) (apply u32vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (u32vector-unfold f length . seeds)
-      (let ((out (make-u32vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-u32vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u32vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u32vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (u32vector-unfold-right f length . seeds)
-      (let ((out (make-u32vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-u32vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u32vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u32vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define u32vector-comparator
@@ -1144,24 +1194,34 @@
 
     (define (s32vector-concatenate vs) (apply s32vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (s32vector-unfold f length . seeds)
-      (let ((out (make-s32vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-s32vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s32vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s32vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (s32vector-unfold-right f length . seeds)
-      (let ((out (make-s32vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-s32vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s32vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s32vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define s32vector-comparator
@@ -1326,24 +1386,34 @@
 
     (define (u64vector-concatenate vs) (apply u64vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (u64vector-unfold f length . seeds)
-      (let ((out (make-u64vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-u64vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u64vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (u64vector-unfold-right f length . seeds)
-      (let ((out (make-u64vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-u64vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (u64vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (u64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define u64vector-comparator
@@ -1508,24 +1578,34 @@
 
     (define (s64vector-concatenate vs) (apply s64vector-append vs))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (s64vector-unfold f length . seeds)
-      (let ((out (make-s64vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-s64vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s64vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (s64vector-unfold-right f length . seeds)
-      (let ((out (make-s64vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-s64vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (s64vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (s64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define s64vector-comparator
@@ -1691,28 +1771,43 @@
     (define (f64vector-concatenate vs)
       ;; (curry f64vector)'s f64vector-append is a fixed 2-arg procedure
       ;; (unlike the other 8 kinds' N-ary append), so concatenating N
-      ;; vectors folds pairwise instead of apply-ing.
-      (if (null? vs) (f64vector)
-          (fold-left f64vector-append (car vs) (cdr vs))))
+      ;; vectors folds pairwise instead of apply-ing. The single-element
+      ;; case is special-cased to copy rather than fold-left-ing over an
+      ;; empty rest list, which would just return (car vs) unchanged --
+      ;; aliasing the input instead of producing a fresh vector, unlike
+      ;; every other kind's -concatenate (found by independent review).
+      (cond ((null? vs) (f64vector))
+            ((null? (cdr vs)) (f64vector-copy (car vs)))
+            (else (fold-left f64vector-append (car vs) (cdr vs)))))
 
+    ;; call-with-values's receiver used to be called with (loop ...) as
+    ;; its own tail call -- curry's core VM doesn't fully TCO that shape
+    ;; inside a define-library body (a separate, pre-existing core bug,
+    ;; found here by independent security review: SIGSEGV via C stack
+    ;; overflow past a few thousand elements). Worked around by routing
+    ;; the multiple return values through `list` as call-with-values's
+    ;; receiver (an ordinary, non-tail call) and doing the actual loop
+    ;; recursion as a separate, genuinely tail call afterward.
     (define (f64vector-unfold f length . seeds)
-      (let ((out (make-f64vector length)))
-        (let loop ((i 0) (ss seeds))
+      (let ((out (make-f64vector length))
+            (ss seeds))
+        (let loop ((i 0))
           (when (< i length)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (f64vector-set! out i val)
-                (loop (+ i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (f64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (+ i 1)))))
         out))
 
     (define (f64vector-unfold-right f length . seeds)
-      (let ((out (make-f64vector length)))
-        (let loop ((i (- length 1)) (ss seeds))
+      (let ((out (make-f64vector length))
+            (ss seeds))
+        (let loop ((i (- length 1)))
           (when (>= i 0)
-            (call-with-values (lambda () (apply f i ss))
-              (lambda (val . next-ss)
-                (f64vector-set! out i val)
-                (loop (- i 1) next-ss)))))
+            (let ((results (call-with-values (lambda () (apply f i ss)) list)))
+              (f64vector-set! out i (car results))
+              (set! ss (cdr results))
+              (loop (- i 1)))))
         out))
 
     (define f64vector-comparator

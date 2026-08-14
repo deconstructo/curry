@@ -115,6 +115,22 @@
        (u8vector->list (u8vector-unfold-right (lambda (i seed) (values seed (+ seed 1))) 5 0))
        '(4 3 2 1 0))
 
+;; regression: the original call-with-values-in-tail-position shape
+;; SIGSEGV'd (C stack overflow) at a few thousand elements -- a
+;; pre-existing core-VM TCO defect for that pattern inside a
+;; define-library body, found by independent security review. Fixed
+;; here at the library level by routing call-with-values's receiver
+;; through `list` (an ordinary, non-tail call) and doing the actual
+;; loop recursion as a separate tail call. This checks a length well
+;; past the crash threshold that used to be reproducible.
+(check "u8vector-unfold at 200000 elements doesn't crash and is correct"
+       (let ((v (u8vector-unfold (lambda (i s) (values (modulo i 256) (+ s 1))) 200000 0)))
+         (list (u8vector-length v) (u8vector-ref v 0) (u8vector-ref v 300)))
+       '(200000 0 44))
+(check "u8vector-unfold-right at 200000 elements doesn't crash"
+       (u8vector-length (u8vector-unfold-right (lambda (i s) (values (modulo i 256) (+ s 1))) 200000 0))
+       200000)
+
 ;;; ---- comparators ----
 
 (check "u8vector-comparator is a comparator" (comparator? u8vector-comparator) #t)
@@ -155,6 +171,15 @@
        (f64vector->list (f64vector-concatenate (list (f64vector 1.0 2.0) (f64vector 3.0) (f64vector 4.0 5.0))))
        '(1.0 2.0 3.0 4.0 5.0))
 (check "f64vector-concatenate empty list" (f64vector->list (f64vector-concatenate '())) '())
+;; regression: a single-element list originally fold-left'd over an
+;; empty rest list, returning (car vs) unchanged -- aliasing the input
+;; instead of producing a fresh vector, unlike every other kind's
+;; -concatenate (found by independent code review).
+(check "f64vector-concatenate on a single-element list copies, doesn't alias"
+       (let* ((v (f64vector 1.0 2.0 3.0))
+              (c (f64vector-concatenate (list v))))
+         (list (eq? v c) (begin (f64vector-set! c 0 999.0) (f64vector->list v))))
+       '(#f (1.0 2.0 3.0)))
 (check "f64vector-comparator" (=? f64vector-comparator (f64vector 1.0 2.0) (f64vector 1.0 2.0)) #t)
 
 ;;; ---- Summary ----
