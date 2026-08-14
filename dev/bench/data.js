@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786701493606,
+  "lastUpdate": 1786740735038,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4070,6 +4070,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.864,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eacf48fc3c179c010fdde2654ed689474f99f13a",
+          "message": "feat(srfi279): add record-type-constructor/-predicate/-accessors/-mutators (#33)\n\n* feat(srfi279): add record-type-constructor/-predicate/-accessors/-mutators\n\nCloses the last SRFI-279 gap deliberately deferred from the original\nimplementation (see docs/reference/srfi/s279.md's own prior note):\nSRFI-279's rtd-properties wants the actual constructor/predicate/\naccessor/mutator procedure objects, not just their names, but curry's\nRecordType struct only stored name+field_names -- nothing referenced\nthe closures define-record-type's own codegen creates.\n\nExtends RecordType (src/object.h) with four new slots: constructor,\npredicate, and GC-visible accessors[]/mutators[] arrays (one entry per\nfield; mutators holds #f for a field declared immutable). The RTD is\nbuilt before any of its bindings' closures exist -- record_type_build_\nspec only describes what needs creating, see its own header comment --\nso these can't be populated eagerly at RTD-construction time the way\nname/field_names are. RecordBinding gained a role tag (constructor/\npredicate/accessor/mutator) and field_index so both define-record-type\ncodegen paths can stash each binding's closure back onto the RTD right\nafter it's created:\n\n- eval.c's tree-walker S_DEFINE_RECORD_TYPE case: builds closures\n  directly in C, so it just assigns the RTD's new fields inline.\n- compiler.c's native compile_define_record_type: closures don't exist\n  until the compiled bytecode actually runs, so it emits an extra\n  %rtd-set-constructor!/-predicate!/-accessor!/-mutator! call (new\n  internal primitives, src/builtins.c) right after each binding's own\n  compile_define, referencing the runtime RTD via the same rtd_ref\n  gensym'd shared variable the rest of this codegen already uses for\n  .scc-cache-safe identity (not the compile-time-only RecordType* that\n  record_type_build_spec itself builds -- that one only exists to\n  extract name/nfields/field_names for the emitted %make-record-type\n  call, never the object actually constructed at runtime).\n- %make-record-type (src/builtins.c) -- the runtime RTD constructor\n  compiler.c's codegen emits a call to -- needed the identical\n  constructor/predicate/accessors/mutators initialization added too.\n\nNew public primitives (record-type-* naming, matching this codebase's\nexisting record-type-name/-field-names convention):\nrecord-type-constructor, record-type-predicate, record-type-accessors\n(list, field order, always real procedures), record-type-mutators\n(list, field order, #f per immutable field). Wired into (srfi s279\ninspect)'s rtd-properties as rtd-constructor/-predicate/-accessors/\n-mutators.\n\nVerified across R6RS and R7RS record syntax, top-level and local\n(scope_depth > 0) define-record-type, and a .scc cache round-trip\n(fresh compile and cache-hit replay both reconstruct working\nprocedures correctly).\n\ntests/r7rs_tests.scm, tests/r6rs_tests.scm, tests/srfi_s279_inspect_\ntests.scm all extended. Full ctest suite: 95/95 pass.\n\n* fix(srfi279): address independent code+security review findings\n\nBoth a fresh code-review subagent and a fresh security-review\nsubagent (no shared context with the writing session) reviewed the\nRTD-accessors commit and each independently found and reproduced the\nsame critical bug:\n\n- CRITICAL: %rtd-set-constructor!/-predicate!/-accessor!/-mutator!\n  had no vis_rtd check on their first argument. These are ordinary\n  DEF'd globals like every other primitive in this file -- the %\n  prefix is a naming convention, not an access restriction curry's\n  flat global namespace can enforce -- so any Scheme script could call\n  them directly. vunptr blindly reinterpreted an arbitrary value's raw\n  bits as a RecordType* and wrote through it: (%rtd-set-accessor! 5 0\n  some-closure) and (%rtd-set-predicate! #f 'x) both segfaulted the\n  process (confirmed live by both reviewers independently). Fixed by\n  adding the same vis_rtd guard %record-ref/%record-set!/%record-pred?\n  already use for exactly this reason.\n- %rtd-set-accessor!/-mutator!'s field-index argument had no\n  vis_fixnum check either: a non-fixnum value's raw bits, reinterpreted\n  via vunfix's arithmetic right-shift, could silently alias into a\n  valid array slot -- (%rtd-set-accessor! rtd (integer->char 0)\n  hijack-closure) overwrote field 0's accessor instead of raising.\n  Fixed with the same vis_fixnum check tv_idx-style helpers elsewhere\n  in this codebase already use.\n- Negative-index handling was changed from uint32_t wraparound\n  (already safe by luck: a negative fixnum's raw bits truncate to a\n  LARGE unsigned value that correctly fails the nfields bounds check)\n  to an explicit signed comparison, for clarity rather than\n  correctness -- no behavior change, but no longer relying on\n  wraparound-happens-to-still-be-safe reasoning.\n\n- src/gc_gen.c's T_RECORD_TYPE scan_pinned_object case (the\n  experimental, non-default generational GC backend) was not updated\n  for the four new RecordType fields -- only rt->name and\n  field_names[] were evacuated. A minor GC promoting an object\n  referenced only via constructor/predicate/accessors[]/mutators[]\n  would leave a stale nursery pointer. Fixed to evacuate all four,\n  matching how T_ENV/T_CLOSURE/etc in the same function stay\n  exhaustive for their own pointer fields.\n\nRegression tests added for the type-confusion and index-aliasing\nfixes; full ctest suite: 95/95 pass.",
+          "timestamp": "2026-08-15T06:51:30+10:00",
+          "tree_id": "17cca2cb77809d472b61fce2175a37fefaa8eb93",
+          "url": "https://github.com/deconstructo/curry/commit/eacf48fc3c179c010fdde2654ed689474f99f13a"
+        },
+        "date": 1786740734261,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 24.173,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.698,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.307,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.33,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 210.456,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 374.582,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.806,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 124.949,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 106.708,
             "unit": "ms"
           }
         ]
