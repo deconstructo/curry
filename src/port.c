@@ -527,6 +527,59 @@ void scm_write(val_t v, val_t port) {
         port_write_char(port, ')');
         return;
     }
+    if (vis_typedvec(v)) {
+        /* SRFI-4 typed vectors (modules/typedvec/typedvec.c) -- printed
+         * directly from the raw bytes here in core rather than calling
+         * back into the module (a loadable .so, not linked against by
+         * port.c). Values are formatted straight as long/unsigned long
+         * (both exactly 64 bits on every platform curry supports), not
+         * routed through the numeric tower/bignum promotion the module's
+         * own tv_get does for Scheme-visible access -- printing never
+         * needs a val_t, just correct signed/unsigned text.
+         *
+         * Deliberately NOT "#u8(...)"/"#s8(...)"/etc (i.e. NOT the bare
+         * TAG_INFO prefix used everywhere else, e.g. procedure names):
+         * the reader already treats "#u8(" as R7RS bytevector syntax
+         * (read_bytevector in reader.c) and "#s" followed by digits as
+         * a sexagesimal number literal (sex_parse_neugebauer) -- reusing
+         * either prefix bare would make write/read silently round-trip
+         * to the WRONG TYPE (a u8vector reading back as a bytevector) or
+         * corrupt the read stream (an s8vector's "(1 2 3)" silently
+         * swallowed as unconsumed sexagesimal-literal trailing text).
+         * The "vec" suffix guarantees neither reader path's literal
+         * character match succeeds, so an attempt to read one of these
+         * back raises a clean read-error instead -- not yet a true
+         * reader literal (matching the pre-existing #f64(...) above,
+         * which has the same limitation), but no longer type-confusing
+         * or silently corrupting on read. */
+        TypedVec *tv = as_typedvec(v);
+        static const char *tv_prefix[8] = {
+            "u8vec","s8vec","u16vec","s16vec","u32vec","s32vec","u64vec","s64vec"
+        };
+        TVKind k = (TVKind)tv->hdr.flags;
+        port_write_char(port, '#');
+        port_write_string(port, tv_prefix[k], (uint32_t)strlen(tv_prefix[k]));
+        port_write_char(port, '(');
+        for (uint32_t i = 0; i < tv->len; i++) {
+            if (i) port_write_char(port, ' ');
+            const uint8_t *p = tv->data + (size_t)i * tv_elem_size(k);
+            int n;
+            switch (k) {
+                case TV_U8:  n = snprintf(buf, sizeof(buf), "%u",  *(const uint8_t  *)p); break;
+                case TV_S8:  n = snprintf(buf, sizeof(buf), "%d",  *(const int8_t   *)p); break;
+                case TV_U16: { uint16_t x; memcpy(&x,p,2); n = snprintf(buf, sizeof(buf), "%u",  x); break; }
+                case TV_S16: { int16_t  x; memcpy(&x,p,2); n = snprintf(buf, sizeof(buf), "%d",  x); break; }
+                case TV_U32: { uint32_t x; memcpy(&x,p,4); n = snprintf(buf, sizeof(buf), "%u",  x); break; }
+                case TV_S32: { int32_t  x; memcpy(&x,p,4); n = snprintf(buf, sizeof(buf), "%d",  x); break; }
+                case TV_U64: { uint64_t x; memcpy(&x,p,8); n = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)x); break; }
+                case TV_S64: { int64_t  x; memcpy(&x,p,8); n = snprintf(buf, sizeof(buf), "%lld", (long long)x); break; }
+                default: n = 0; break;
+            }
+            port_write_string(port, buf, (uint32_t)n);
+        }
+        port_write_char(port, ')');
+        return;
+    }
     if (vis_traced(v)) {
         Traced *t = as_traced(v);
         if (vis_symbol(t->name)) {

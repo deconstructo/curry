@@ -59,6 +59,7 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [mariadb](module-mariadb.md) | `(curry mariadb)` | MariaDB/MySQL client *(pure Scheme + FFI, no build step)* | `libmariadb`/`libmysqlclient` installed at runtime (`-DBUILD_FFI=ON`) |
 | [postgres](module-postgres.md) | `(curry postgres)` | PostgreSQL client *(pure Scheme + FFI, no build step)* | `libpq` installed at runtime (`-DBUILD_FFI=ON`) |
 | [tts](module-tts.md) | `(curry tts)` | Cross-backend text-to-speech — macOS (`say`) and Linux (`espeak-ng`/`espeak`) *(pure Scheme, no build step)* | `(curry posix)`, `(curry conditions)`; `say` or `espeak-ng`/`espeak` installed at runtime |
+| [typedvec](module-typedvec.md) | `(curry typedvec)` | SRFI-4 core typed numeric vectors: u8/s8/u16/s16/u32/s32/u64/s64vector | — |
 
 ## See also
 

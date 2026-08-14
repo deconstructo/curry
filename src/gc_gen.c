@@ -247,6 +247,10 @@ static size_t obj_size(const Hdr *h) {
         const F64Vec *f = (const F64Vec *)h;
         return ((sizeof(F64Vec) + f->len * sizeof(double)) + 7u) & ~7u;
     }
+    case T_TYPEDVEC: {
+        const TypedVec *t = (const TypedVec *)h;
+        return ((sizeof(TypedVec) + (size_t)t->len * tv_elem_size((TVKind)h->flags)) + 7u) & ~7u;
+    }
     case T_VALUES: {
         const Values *v = (const Values *)h;
         return ((sizeof(Values) + v->count * sizeof(val_t)) + 7u) & ~7u;
@@ -311,7 +315,7 @@ static bool type_has_ptrs(uint32_t t) {
     case T_FLONUM: case T_QUATERNION: case T_OCTONION:
     case T_F64VEC: case T_BYTEVECTOR: case T_SPINOR:
     case T_MULTIVECTOR: case T_MATRIX: case T_TENSOR:
-    case T_STRING: case T_CPTR:
+    case T_STRING: case T_CPTR: case T_TYPEDVEC:
         return false;
     default:
         return true;
@@ -356,7 +360,7 @@ static void scan_object(void *obj) {
     case T_FLONUM: case T_QUATERNION: case T_OCTONION:
     case T_F64VEC: case T_BYTEVECTOR: case T_SPINOR:
     case T_MULTIVECTOR: case T_MATRIX: case T_TENSOR:
-    case T_STRING: case T_CPTR:
+    case T_STRING: case T_CPTR: case T_TYPEDVEC:
         break;
 
     case T_PAIR: {
