@@ -22,22 +22,38 @@
 ;;; their own header comment in src/builtins.c for exactly what each of
 ;;; curry's three procedure representations, tree-walker closures,
 ;;; bytecode-VM closures, and C primitives, can and can't report).
+;;; As of this version: also char-sets (srfi 14), the universal id/size/
+;;; type properties (location deliberately omitted -- see %object-id's
+;;; own comment in src/builtins.c), symbol-value (a live global-env
+;;; lookup, not a module registry), char-name (curry's own 9 R7RS
+;;; named-character reader vocabulary), and hash-table-equivalence-
+;;; function/-hash-function/-weak?/-mutable?.
+;;;
 ;;; Deliberately deferred, not forgotten:
-;;;   - char-set properties: curry now HAS SRFI-14 (as of a later commit
-;;;     than this module's original version), but char-sets aren't wired
-;;;     into inspect-properties yet -- an easy, self-contained follow-up.
+;;;   - rtd-accessors/-mutators/-predicate/-constructor: these are
+;;;     supposed to be actual procedure objects per the SRFI ("record-
+;;;     related procedures"), but curry's RecordType struct only stores
+;;;     name+field_names -- nothing references the constructor/
+;;;     predicate/accessor/mutator closures define-record-type's codegen
+;;;     generates. Adding this means extending RecordType and
+;;;     compile_define_record_type's codegen to stash those closures
+;;;     back onto the RTD at creation time -- real compiler/runtime
+;;;     work, scoped as its own follow-up rather than bundled here.
 ;;;   - numeric-vector (s8vector etc.) properties: curry has no SRFI 4/160.
 ;;;   - library/environment properties: modules.c's registry has no
 ;;;     Scheme-level enumeration API (module names/exports aren't queryable
 ;;;     from Scheme once loaded).
 ;;;   - ports: no port-open?/-direction/-type/etc case at all yet.
+;;;   - symbol-library/symbol-exported?: same module-registry gap as
+;;;     library/environment properties above -- symbol-value alone
+;;;     doesn't need it (a plain global lookup), these do.
 ;;; A `#f`-valued object-properties entry is never emitted for these —
 ;;; per the SRFI's own rule, an unsupported property is omitted, not
 ;;; filled with a dummy value.
 
 (define-library (srfi s279 inspect)
   (import (scheme base) (scheme write) (scheme char)
-          (srfi 1) (srfi 69) (srfi 111) (srfi 113))
+          (srfi 1) (srfi 14) (srfi 69) (srfi 111) (srfi 113))
   (export inspect-properties inspect-describe)
   (begin
 
@@ -61,9 +77,42 @@
     ;; scope to fix. Everything else in inspect-properties (car/cdr, the
     ;; rest of pair-properties) stays cycle-safe via `list?`'s own R7RS-
     ;; mandated cycle detection -- only this write/display step is at risk.
+    ;; Mirrors inspect-properties' own dispatch cond order exactly (see
+    ;; the bottom of this file) -- kept as a separate function rather
+    ;; than restructured to share one pass, since %object-properties
+    ;; runs before that dispatch and duplicating a stable, rarely-
+    ;; changing predicate order is simpler than threading the matched
+    ;; branch backward through the call.
+    (define (%type-name object)
+      (cond
+        ((number? object)      'number)
+        ((boolean? object)     'boolean)
+        ((box? object)         'box)
+        ((bag? object)         'bag)
+        ((hash-table? object)  'hash-table)
+        ((set? object)         'set)
+        ((char-set? object)    'char-set)
+        ((pair? object)        'pair)
+        ((symbol? object)      'symbol)
+        ((char? object)        'char)
+        ((string? object)      'string)
+        ((vector? object)      'vector)
+        ((bytevector? object)  'bytevector)
+        ((error-object? object) 'error)
+        ((record-type? object) 'record-type)
+        ((record? object)      'record)
+        ((procedure? object)   'procedure)
+        ((null? object)        'null)
+        ((eof-object? object)  'eof)
+        (else #f))) ; "whenever inferrable" -- omitted, not guessed, otherwise
+
     (define (%object-properties object)
-      (list (list 'write   (%to-string-with object write))
-            (list 'display (%to-string-with object display))))
+      (append
+        (list (list 'id      (%object-id object))
+              (list 'write   (%to-string-with object write))
+              (list 'display (%to-string-with object display)))
+        (let ((sz (%object-size object))) (if sz (list (list 'size sz)) '()))
+        (let ((ty (%type-name object)))   (if ty (list (list 'type ty)) '()))))
 
     ;;; ---- Number ----
 
@@ -120,12 +169,40 @@
     ;;; symbol-library/symbol-exported?/symbol-properties from the SRFI's
     ;;; own list need a library/property registry curry's module system
     ;;; doesn't expose to Scheme (see the header comment) -- symbol->string
-    ;;; is the one property here with no such dependency.
+    ;;; and symbol-value (a plain global-environment lookup, needing no
+    ;;; registry at all) are the two properties here with no such
+    ;;; dependency.
+
+    ;; A private, freshly-allocated sentinel (never eq? to any real Scheme
+    ;; value, including #f) so "genuinely unbound" is distinguishable from
+    ;; "bound, and its value happens to be #f" -- a guard that just caught
+    ;; and returned #f on error couldn't tell those apart.
+    (define %unbound-sentinel (list 'unbound))
+
+    (define (%symbol-value object)
+      (guard (e (#t %unbound-sentinel)) (eval object (interaction-environment))))
 
     (define (%symbol-properties object)
-      (list (list 'symbol->string (symbol->string object))))
+      (append
+        (list (list 'symbol->string (symbol->string object)))
+        (let ((v (%symbol-value object)))
+          (if (eq? v %unbound-sentinel) '() (list (list 'symbol-value v))))))
 
     ;;; ---- Character ----
+
+    ;; Reverse lookup against curry's own reader vocabulary (src/reader.c)
+    ;; -- exactly the 9 R7RS named characters curry's #\name syntax
+    ;; already recognizes, not a full Unicode character-name database
+    ;; (SRFI-279's own char-name example, "MALE WITH STROKE...", implies
+    ;; Unicode's full NamesList.txt, which curry has no data for at all).
+    (define %named-chars
+      (list (cons #\space "space") (cons #\newline "newline")
+            (cons #\tab "tab") (cons #\return "return")
+            (cons (integer->char 0) "null") (cons (integer->char 27) "escape")
+            (cons (integer->char 127) "delete") (cons (integer->char 7) "alarm")
+            (cons (integer->char 8) "backspace")))
+
+    (define (%char-name object) (cond ((assv object %named-chars) => cdr) (else #f)))
 
     (define (%character-properties object)
       (append
@@ -134,6 +211,7 @@
             (let ((d (digit-value object)))
               (if d (list (list 'digit-value d)) '()))
             '())
+        (let ((n (%char-name object))) (if n (list (list 'char-name n)) '()))
         (list (list 'char-alphabetic? (char-alphabetic? object))
               (list 'char-numeric?    (char-numeric? object))
               (list 'char-whitespace? (char-whitespace? object))
@@ -221,10 +299,29 @@
             (list 'error-object-irritants (error-object-irritants object))))
 
     ;;; ---- Hash table (srfi 69) ----
+    ;;;
+    ;;; SRFI-279 describes hash-table-equivalence-function/-hash-function
+    ;;; as "Names of procedures defining hash table behaviors" -- symbols,
+    ;;; not the procedure objects themselves. (srfi 69)'s own
+    ;;; hash-table-equivalence-function/-hash-function already return the
+    ;;; real procedure (equal?/eqv?/eq? and hash/hash-by-identity
+    ;;; respectively, tracked per-table via its own side registry -- see
+    ;;; its own header comment); procedure-name (added alongside this
+    ;;; module's procedure-properties support) turns that into the name
+    ;;; this property actually wants. curry's hash tables have no weak-
+    ;;; reference variant and are always mutable (no immutable-hash-table
+    ;;; concept at all), so those two are fixed constants, not per-object
+    ;;; queries.
 
     (define (%hash-table-properties object)
       (append
         (list (list 'hash-table-size (hash-table-size object)))
+        (let ((n (procedure-name (hash-table-equivalence-function object))))
+          (if n (list (list 'hash-table-equivalence-function n)) '()))
+        (let ((n (procedure-name (hash-table-hash-function object))))
+          (if n (list (list 'hash-table-hash-function n)) '()))
+        (list (list 'hash-table-weak? #f)
+              (list 'hash-table-mutable? #t))
         (map (lambda (kv) (list (car kv) (cdr kv))) (hash-table->alist object))))
 
     ;;; ---- Box (srfi 111) ----
@@ -251,6 +348,52 @@
         (list (list 'bag-size (bag-size object))
               (list 'bag-unique-size (bag-unique-size object)))
         (map (lambda (kv) (list (car kv) (cdr kv))) (bag->alist object))))
+
+    ;;; ---- Character set (srfi 14) ----
+
+    ;; char-set-name is only meaningful for one of the STANDARD predefined
+    ;; sets (char-set:letter and friends) -- SRFI-14 char-sets built by
+    ;; the user (via char-set/list->char-set/union/etc) are structurally
+    ;; anonymous, so this is a reverse lookup against that fixed list via
+    ;; char-set=, not a stored name. char-set:title-case is deliberately
+    ;; NOT its own entry here: curry's own (srfi s14 char-sets) has no
+    ;; titlecase table at all, so it's permanently empty and structurally
+    ;; identical to char-set:empty -- char-set= can't tell them apart, so
+    ;; char-set:title-case (and any other genuinely empty char-set a user
+    ;; happens to build) honestly reports char-set-name 'char-set:empty,
+    ;; the best answer actually available, rather than being given its
+    ;; own separate (and unverifiable) name.
+    (define %named-char-sets
+      (list (cons 'char-set:lower-case char-set:lower-case)
+            (cons 'char-set:upper-case char-set:upper-case)
+            (cons 'char-set:letter char-set:letter)
+            (cons 'char-set:digit char-set:digit)
+            (cons 'char-set:letter+digit char-set:letter+digit)
+            (cons 'char-set:graphic char-set:graphic)
+            (cons 'char-set:printing char-set:printing)
+            (cons 'char-set:whitespace char-set:whitespace)
+            (cons 'char-set:iso-control char-set:iso-control)
+            (cons 'char-set:punctuation char-set:punctuation)
+            (cons 'char-set:symbol char-set:symbol)
+            (cons 'char-set:hex-digit char-set:hex-digit)
+            (cons 'char-set:blank char-set:blank)
+            (cons 'char-set:ascii char-set:ascii)
+            (cons 'char-set:full char-set:full)
+            (cons 'char-set:empty char-set:empty)))
+
+    (define (%char-set-name object)
+      (let loop ((known %named-char-sets))
+        (cond ((null? known) #f)
+              ((char-set= object (cdar known)) (caar known))
+              (else (loop (cdr known))))))
+
+    (define (%char-set-properties object)
+      (append
+        (list (list 'char-set-size (char-set-size object))
+              (list 'char-set->list (char-set->list object))
+              (list 'char-set->string (char-set->string object)))
+        (let ((n (%char-set-name object)))
+          (if n (list (list 'char-set-name n)) '()))))
 
     ;;; ---- Procedure ----
     ;;;
@@ -316,6 +459,7 @@
           ((bag? object)     (%bag-properties object))
           ((hash-table? object) (%hash-table-properties object))
           ((set? object)     (%set-properties object))
+          ((char-set? object) (%char-set-properties object))
           ((pair? object)    (%pair-properties object))
           ((symbol? object)  (%symbol-properties object))
           ((char? object)    (%character-properties object))
