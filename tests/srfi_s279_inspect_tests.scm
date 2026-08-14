@@ -11,7 +11,7 @@
 ;;; set/bag iteration order isn't guaranteed, and pinning the exact key
 ;;; list would make the suite brittle against future scope additions.
 
-(import (srfi 279) (srfi 69) (srfi 111) (srfi 113) (srfi 128)
+(import (srfi 279) (srfi 14) (srfi 69) (srfi 111) (srfi 113) (srfi 128)
         (scheme write) (scheme char))
 
 (define pass 0)
@@ -43,6 +43,49 @@
 
 (has "object-properties: write" (inspect-properties 42) 'write "42")
 (has "object-properties: display" (inspect-properties "abc") 'display "abc")
+
+;;; id: present for everything, and distinguishes different objects
+(check "object-properties: id is present"
+  (integer? (cadr (assoc 'id (inspect-properties 42)))) #t)
+(check "object-properties: id distinguishes two different (non-eq?) strings"
+  (= (cadr (assoc 'id (inspect-properties (string-copy "abc"))))
+     (cadr (assoc 'id (inspect-properties (string-copy "abc")))))
+  #f)
+
+;;; type: matches the object's actual kind
+(has "object-properties: type of a number" (inspect-properties 42) 'type 'number)
+(has "object-properties: type of a pair" (inspect-properties (cons 1 2)) 'type 'pair)
+(has "object-properties: type of a string" (inspect-properties "x") 'type 'string)
+(has "object-properties: type of a symbol" (inspect-properties 'x) 'type 'symbol)
+(has "object-properties: type of a boolean" (inspect-properties #t) 'type 'boolean)
+
+;;; size: present (and correct) for the handful of types it's implemented
+;;; for, absent everywhere else (never a dummy 0)
+(has "object-properties: size of a pair" (inspect-properties (cons 1 2)) 'size 32)
+(check "object-properties: size of a string reflects its length"
+  (< (cadr (assoc 'size (inspect-properties "a")))
+     (cadr (assoc 'size (inspect-properties "abcdefghij"))))
+  #t)
+(lacks "object-properties: no size for a number" (inspect-properties 42) 'size)
+(lacks "object-properties: no size for a symbol" (inspect-properties 'x) 'size)
+
+;; Regression: a string's real footprint after a width-changing
+;; string-set! (ASCII -> multi-byte, forcing a reallocation onto a
+;; separate `ext` buffer) is roughly DOUBLE the original -- the
+;; original inline block stays allocated (dead weight, never freed or
+;; reused under Boehm GC) alongside the new ext buffer. size must grow
+;; to reflect that, not stay roughly flat (found by independent code
+;; review: the original implementation used live content length
+;; instead of allocated capacity, silently under-reporting both this
+;; case and any string whose allocated capacity simply exceeds its
+;; current content length).
+(let* ((s (make-string 10000 #\a))
+       (size-before (cadr (assoc 'size (inspect-properties s)))))
+  (string-set! s 0 (integer->char 955)) ; U+03BB, a 2-byte UTF-8 char
+  (let ((size-after (cadr (assoc 'size (inspect-properties s)))))
+    (check "object-properties: string size reflects a real ext-buffer reallocation, not just live content length"
+      (> size-after (* 1.5 size-before))
+      #t)))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 2  number-properties
@@ -105,15 +148,27 @@
 
 (has "char-list: list->string" (inspect-properties (list #\a #\b #\c)) 'list->string "abc")
 
-;;; Empty list: not a pair (nil), so only object-properties apply.
-(check "nil: no type-specific properties beyond write/display"
-  (length (inspect-properties '())) 2)
+;;; Empty list: not a pair (nil), so only object-properties apply --
+;;; id/write/display/type (size omitted: '() isn't one of the heap
+;;; types %object-size covers).
+(check "nil: no type-specific properties beyond the universal ones"
+  (length (inspect-properties '())) 4)
+(has "nil: type" (inspect-properties '()) 'type 'null)
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 5  symbol-properties
 ;;; ════════════════════════════════════════════════════════════
 
 (has "symbol: symbol->string" (inspect-properties 'hello) 'symbol->string "hello")
+
+;; symbol-value: a plain global-environment lookup, not a module registry
+(define s279-bound-global 99)
+(has "symbol: symbol-value for a bound global" (inspect-properties 's279-bound-global) 'symbol-value 99)
+(lacks "symbol: no symbol-value for an unbound symbol"
+  (inspect-properties 's279-definitely-unbound-xyz) 'symbol-value)
+(define s279-false-global #f)
+(has "symbol: symbol-value is present even when the value is #f itself"
+  (inspect-properties 's279-false-global) 'symbol-value #f)
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 6  character-properties
@@ -122,10 +177,16 @@
 (let ((p (inspect-properties #\a)))
   (has "char: char->integer" p 'char->integer 97)
   (has "char: char-alphabetic?" p 'char-alphabetic? #t)
-  (has "char: char-lower-case?" p 'char-lower-case? #t))
+  (has "char: char-lower-case?" p 'char-lower-case? #t)
+  (lacks "char: no char-name for an ordinary letter" p 'char-name))
 
 (has "char: digit-value present for a digit" (inspect-properties #\7) 'digit-value 7)
 (lacks "char: no digit-value for a letter" (inspect-properties #\a) 'digit-value)
+
+;; char-name: curry's own 9 R7RS named-character reader vocabulary
+(has "char: char-name for space" (inspect-properties #\space) 'char-name "space")
+(has "char: char-name for newline" (inspect-properties #\newline) 'char-name "newline")
+(has "char: char-name for tab" (inspect-properties #\tab) 'char-name "tab")
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 7  string-properties
@@ -180,7 +241,21 @@
        (dummy (hash-table-set! ht 'a 1))
        (p (inspect-properties ht)))
   (has "hash-table: hash-table-size" p 'hash-table-size 1)
-  (has "hash-table: key inlined" p 'a 1))
+  (has "hash-table: key inlined" p 'a 1)
+  (has "hash-table: hash-table-equivalence-function name (default equal?)"
+    p 'hash-table-equivalence-function 'equal?)
+  (has "hash-table: hash-table-hash-function name" p 'hash-table-hash-function 'hash)
+  (has "hash-table: hash-table-weak? is always #f" p 'hash-table-weak? #f)
+  (has "hash-table: hash-table-mutable? is always #t" p 'hash-table-mutable? #t))
+
+;; Not tested here with a non-default comparator (e.g. (make-hash-table
+;; eq?)): this test file imports both (srfi 69) and (srfi 128), which
+;; both provide a make-hash-table, and the one that wins the resulting
+;; name collision isn't (srfi 69)'s own comparator-tracking wrapper --
+;; unrelated to this property's own correctness (already covered above
+;; via the default equal? case, which every make-hash-table variant
+;; agrees on), just an ambiguity in which library's same-named export
+;; this file's own import list resolves to.
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 12  box-properties (srfi 111)
@@ -355,6 +430,27 @@
   (has "unicode string: indexed codepoint" p 0 (string-ref "𒀭" 0)))
 
 (has "unicode char: char->integer" (inspect-properties #\𒀭) 'char->integer 73773)
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 17  char-set-properties (srfi 14)
+;;; ════════════════════════════════════════════════════════════
+
+(let ((p (inspect-properties (char-set #\a #\b))))
+  (has   "char-set: char-set-size" p 'char-set-size 2)
+  (has   "char-set: char-set->list" p 'char-set->list (list #\a #\b))
+  (has   "char-set: char-set->string" p 'char-set->string "ab")
+  (lacks "char-set: no char-set-name for a non-predefined set" p 'char-set-name))
+
+(has "char-set: char-set-name recognizes a predefined set"
+  (inspect-properties char-set:hex-digit) 'char-set-name 'char-set:hex-digit)
+(has "char-set: char-set-name recognizes char-set:empty"
+  (inspect-properties char-set:empty) 'char-set-name 'char-set:empty)
+;; char-set:title-case has no titlecase table in curry at all (see
+;; (srfi 14)'s own docs) so it's permanently empty -- structurally
+;; identical to, and therefore honestly reported as, char-set:empty.
+(has "char-set: char-set-name for char-set:title-case honestly reports char-set:empty"
+  (inspect-properties char-set:title-case) 'char-set-name 'char-set:empty)
+(has "char-set: type" (inspect-properties char-set:empty) 'type 'char-set)
 
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))

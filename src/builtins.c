@@ -2616,6 +2616,85 @@ static val_t prim_procedure_closure(int ac, val_t *av, void *ud) {
     return V_NIL;
 }
 
+/* ---- Universal object introspection ----
+ * Backs (srfi 279) inspect-properties' 'id and 'size universal
+ * properties (see lib/curry/modules/srfi/s279/inspect.scm's
+ * %object-properties). 'type and 'location are handled entirely in
+ * Scheme -- 'type from the same predicates inspect-properties'
+ * dispatch already uses, and 'location deliberately omitted (curry has
+ * no separate notion of "location" beyond identity, and exposing a raw
+ * heap address here -- rather than a hash of it, as below -- would leak
+ * real memory layout for no compensating value). */
+
+/* %object-id: a per-object integer identity, NOT the raw pointer --
+ * SRFI-279 explicitly allows "memory location... or hash, whenever
+ * suitable" for 'id, and val_hash's SET_CMP_EQ mode already exists
+ * exactly for identity-hashing a val_t (immediates hash their own bits
+ * directly; heap pointers get mixed through hash_u64, never exposed
+ * raw) -- reused as-is rather than duplicating pointer-hashing logic.
+ * hash_u64's mixing is a real avalanche (splitmix64-style finalizer);
+ * the actual barrier against recovering the source pointer is the
+ * 32-bit output truncation, not the mix's own one-wayness -- a
+ * probabilistic speed bump against a determined offline search, not a
+ * hard guarantee, though adequate for curry's own scripting-language
+ * threat model (independent security review, confirmed by inspecting
+ * hash_u64 directly).
+ *
+ * NOT stable under the (experimental, opt-in) `--gc generational`
+ * backend: that backend promotes/copies live nursery objects into
+ * Boehm's heap, changing the pointer -- and therefore this hash --
+ * mid-process for any object that survives a minor collection.
+ * Confirmed live: the same object's %object-id changed after enough
+ * allocation to trigger a promotion under --gc generational, while
+ * staying constant for the entire process under the default (non-
+ * moving) Boehm backend. Not fixed here: giving every heap object a
+ * real, GC-move-independent identity slot would mean adding a field to
+ * every heap type this project has, for the sake of one experimental,
+ * non-default backend -- a redesign disproportionate to this feature,
+ * not attempted. */
+static val_t prim_object_id(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    return vfix((intptr_t)val_hash(av[0], SET_CMP_EQ));
+}
+
+/* %object-size: "amount of memory occupied, in bytes" -- implemented
+ * for the handful of heap types where that's a cheap, well-defined
+ * struct-plus-payload computation (String/Vector/Bytevector/Pair);
+ * #f (omit, not a dummy 0) for everything else, matching the SRFI's
+ * own "whenever inferrable" allowance rather than guessing at sizes
+ * for numeric-tower/record/closure internals this isn't worth
+ * chasing precisely.
+ *
+ * Strings specifically: `len` is live *content* length, not allocated
+ * size -- using it alone (found by independent code review) silently
+ * under-reports two real cases. `orig_cap` (fixed at construction,
+ * "never shrinks" per its own comment on the String struct) is the
+ * true size of the inline data[] block, which is what must be used for
+ * the inline case instead of len. And once a width-changing edit
+ * (string-set!/string-copy! swapping to a wider/narrower UTF-8
+ * encoding) sets `ext`, the ORIGINAL inline block is still allocated
+ * and simply dead weight -- not reused, not freed (Boehm GC, no
+ * realloc-in-place) -- while content actually lives in a separate
+ * ext buffer. That ext buffer's own malloc'd size isn't tracked in the
+ * struct anywhere, but every call site that sets `ext` (both in this
+ * file) allocates it as exactly `len + 1` bytes, matching the `len`
+ * already assigned alongside it -- confirmed by reading both sites,
+ * not assumed. */
+static val_t prim_object_size(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t v = av[0];
+    if (vis_string(v)) {
+        String *s = as_str(v);
+        size_t sz = sizeof(String) + (size_t)s->orig_cap + 1; /* inline block: always allocated */
+        if (s->ext) sz += (size_t)s->len + 1;                 /* ext buffer, if content moved out */
+        return vfix((intptr_t)sz);
+    }
+    if (vis_vector(v))     return vfix((intptr_t)(sizeof(Vector) + (size_t)as_vec(v)->len * sizeof(val_t)));
+    if (vis_bytes(v))      return vfix((intptr_t)(sizeof(Bytevector) + as_bytes(v)->len));
+    if (vis_pair(v))       return vfix((intptr_t)sizeof(Pair));
+    return V_FALSE;
+}
+
 /* ---- Misc ---- */
 static val_t prim_gensym(int ac, val_t *av, void *ud) {
     (void)ud; static int counter = 0;
@@ -3187,6 +3266,10 @@ void builtins_register(val_t env) {
     DEF("procedure-line",     prim_procedure_line,     1,1);
     DEF("procedure-lambda",   prim_procedure_lambda,   1,1);
     DEF("procedure-closure",  prim_procedure_closure,  1,1);
+
+    /* Universal object introspection (backs (srfi 279)) */
+    DEF("%object-id",         prim_object_id,          1,1);
+    DEF("%object-size",       prim_object_size,        1,1);
 
     /* Misc */
     DEF("gensym",     prim_gensym,  0,1);
