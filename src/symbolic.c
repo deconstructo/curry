@@ -28,6 +28,7 @@ val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 val_t SX_COT, SX_SEC, SX_CSC;
 val_t SX_LIMIT;
 val_t SX_SIGN;
+val_t SX_LT, SX_LE, SX_GT, SX_GE;
 val_t SX_APPLY;
 val_t SX_LAPLACE;
 val_t SX_FOURIER;
@@ -67,6 +68,10 @@ void symbolic_init(void) {
     SX_CSC       = sym_intern_cstr("csc");
     SX_LIMIT     = sym_intern_cstr("limit");
     SX_SIGN      = sym_intern_cstr("sign");
+    SX_LT        = sym_intern_cstr("<");
+    SX_LE        = sym_intern_cstr("<=");
+    SX_GT        = sym_intern_cstr(">");
+    SX_GE        = sym_intern_cstr(">=");
     SX_APPLY     = sym_intern_cstr("apply");
     SX_LAPLACE   = sym_intern_cstr("laplace");
     SX_FOURIER   = sym_intern_cstr("fourier");
@@ -843,6 +848,34 @@ val_t sx_simplify(val_t expr) {
         if (sym_is_negative(a)) return vfix(-1);
     }
 
+    /* ---- Comparisons (<, <=, >, >=) — decide where possible, else stay
+     * symbolic. See docs/reference/symbolic.md "Symbolic inequalities"
+     * for the exact scope: no general expression-level sign inference,
+     * no bound assumptions beyond sign. Motivated by
+     * https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/
+     * ("Analysis-oriented CASes are generally good at manipulating
+     * equalities and limits, but strangely poor at manipulating
+     * inequalities."). ---- */
+    if ((op == SX_LT || op == SX_LE || op == SX_GT || op == SX_GE) && n == 2) {
+        val_t a = sa[0], b = sa[1];
+        if (num_count == 2) {
+            bool r = (op == SX_LT) ? num_lt(a, b) : (op == SX_LE) ? num_le(a, b)
+                    : (op == SX_GT) ? num_gt(a, b) : num_ge(a, b);
+            return vbool(r);
+        }
+        /* Reflexive: identical expressions on both sides. */
+        if (sx_equal(a, b)) return vbool(op == SX_LE || op == SX_GE);
+        /* One side a sign-flagged sym-var, other side a plain number. */
+        if (sym_is_positive(a) && vis_number(b) && !num_is_positive(b))
+            return vbool(op == SX_GT || op == SX_GE);
+        if (sym_is_negative(a) && vis_number(b) && !num_is_negative(b))
+            return vbool(op == SX_LT || op == SX_LE);
+        if (sym_is_positive(b) && vis_number(a) && !num_is_positive(a))
+            return vbool(op == SX_LT || op == SX_LE);
+        if (sym_is_negative(b) && vis_number(a) && !num_is_negative(a))
+            return vbool(op == SX_GT || op == SX_GE);
+    }
+
     /* ---- CONJ ---- */
     if (op == SX_CONJ && n == 1) {
         val_t a = sa[0];
@@ -1160,6 +1193,16 @@ val_t sx_sign(val_t a) {
     }
     return sx_simplify(sx_expr1(SX_SIGN, a));
 }
+
+/* Decision logic (assumption-based, structural-equality reflexive case)
+ * lives inside sx_simplify's dispatch, mirroring SX_SIGN/SX_ABS above --
+ * these constructors just build the node and simplify it, so a later
+ * re-simplify (e.g. after substitute swaps a number in for a variable)
+ * decides it too, not just at construction time. */
+val_t sx_lt(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_LT, a, b)); }
+val_t sx_le(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_LE, a, b)); }
+val_t sx_gt(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_GT, a, b)); }
+val_t sx_ge(val_t a, val_t b) { return sx_simplify(sx_expr2(SX_GE, a, b)); }
 
 val_t sx_conj(val_t a) {
     if (vis_number(a)) return num_conjugate(a);

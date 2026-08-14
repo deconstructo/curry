@@ -240,6 +240,19 @@ val_t sx_sec(val_t a);
 val_t sx_csc(val_t a);
 val_t sx_sign(val_t a);
 
+/* ---- Comparisons (returns V_TRUE/V_FALSE when decidable, else a
+ * symbolic comparison expression, e.g. (< x 5)). Decidable cases: both
+ * operands numeric; the operands are structurally identical (sx_equal);
+ * or one operand is a sign-flagged sym-var ('positive/'negative)
+ * compared against a plain number. No general expression-level sign
+ * inference and no bound assumptions beyond sign -- see the "Symbolic
+ * inequalities" section of docs/reference/symbolic.md for the exact
+ * scope and why. ---- */
+val_t sx_lt(val_t a, val_t b);
+val_t sx_le(val_t a, val_t b);
+val_t sx_gt(val_t a, val_t b);
+val_t sx_ge(val_t a, val_t b);
+
 /* ---- Arithmetic (continued) ---- */
 val_t sx_conj(val_t a);
 val_t sx_real(val_t a);
@@ -298,6 +311,7 @@ extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 extern val_t SX_COT, SX_SEC, SX_CSC;
 extern val_t SX_LIMIT;
 extern val_t SX_SIGN;
+extern val_t SX_LT, SX_LE, SX_GT, SX_GE;
 extern val_t SX_APPLY;   /* symbolic function application: (apply fn arg0 arg1 ...) */
 extern val_t SX_LAPLACE; /* unevaluated Laplace transform node */
 extern val_t SX_FOURIER; /* unevaluated Fourier transform node */

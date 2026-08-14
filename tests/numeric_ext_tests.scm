@@ -642,6 +642,128 @@
 (check "sign latex"   (string? (sym->latex (sign x)))  #t)
 
 ;;; =========================================================================
+;;; Symbolic inequalities -- <, <=, >, >=
+;;; Motivated by https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/
+;;; point #12: "Analysis-oriented CASes are generally good at
+;;; manipulating equalities and limits, but strangely poor at
+;;; manipulating inequalities." Scope: 2-argument comparisons only,
+;;; decided via (a) both operands numeric, (b) structurally identical
+;;; operands, or (c) a sign-flagged sym-var against a plain number --
+;;; otherwise a genuine symbolic comparison expression.
+;;; =========================================================================
+
+;;; both numeric -- unchanged, ordinary boolean behavior
+(check "< both numeric true"  (< 3 5) #t)
+(check "< both numeric false" (< 5 3) #f)
+(check "<= both numeric"      (<= 5 5) #t)
+(check ">= both numeric"      (>= 3 5) #f)
+(check "> both numeric"       (> 5 3) #t)
+
+;;; symbolic, undecidable -- stays a symbolic comparison node
+(check "< with plain sym-var stays symbolic" (symbolic? (< x 5)) #t)
+(check "< with plain sym-var round-trips through simplify"
+  (equal? (simplify (< x 5)) (< x 5)) #t)
+
+;;; reflexive: identical expressions on both sides
+(check "< x x = #f"  (< x x) #f)
+(check "<= x x = #t" (<= x x) #t)
+(check "> x x = #f"  (> x x) #f)
+(check ">= x x = #t" (>= x x) #t)
+
+;;; sign-flagged sym-var against a plain number
+(check "xp > 0"  (> xp 0) #t)
+(check "xp < 0"  (< xp 0) #f)
+(check "xp >= 0" (>= xp 0) #t)
+(check "xp <= 0" (<= xp 0) #f)
+(check "xn < 0"  (< xn 0) #t)
+(check "xn > 0"  (> xn 0) #f)
+(check "0 < xp"  (< 0 xp) #t)
+(check "0 > xn"  (> 0 xn) #t)
+;;; a positive var against a negative number, and vice versa
+(check "xp > -5" (> xp -5) #t)
+(check "xn < 5"  (< xn 5) #t)
+
+;;; a variable with no sign assumption compared to a number: still undecidable
+(check "x > 0 with no assumption stays symbolic" (symbolic? (> x 0)) #t)
+
+;;; identical inequality expressions built twice are equal? (consistent
+;;; node structure, not e.g. fresh unhashable objects each time)
+(check "two identically-built inequalities are equal?"
+  (equal? (< x 5) (< x 5)) #t)
+
+;;; 3+-argument symbolic chains are explicitly unsupported -- clear
+;;; error, not num_cmp's confusing "exact integer required". The error
+;;; message must name the operator the user actually typed (a Scheme
+;;; symbol like "<"), not builtins.c's internal C macro token ("lt") --
+;;; regression coverage for exactly that bug, found by code review.
+(check "< with 3 args and a symbolic operand raises"
+  (guard (e (#t 'raised)) (< 1 x 5) 'not-raised)
+  'raised)
+;;; Regression: the symbolic-operand check must scan the whole call
+;;; up front, not interleave with the pairwise comparison loop -- an
+;;; earlier false numeric pair used to short-circuit the loop before
+;;; it ever reached the symbolic pair, so this used to silently return
+;;; #f instead of raising (found by independent security review).
+(check "< with 3 args, symbolic operand LAST, and an earlier false pair still raises"
+  (guard (e (#t 'raised)) (< 5 1 x) 'not-raised)
+  'raised)
+;;; condition-message includes curry's standard Akkadian error preamble
+;;; (see CLAUDE.md "Akkadian error messages") ahead of the raw text
+;;; passed to scm_raise, so check the operator-naming fix via substring
+;;; rather than exact equality.
+(check "< error message names the actual operator, not the internal C token"
+  (number? (string-contains (guard (e (#t (condition-message e))) (< 1 x 5))
+                             "<: symbolic comparison only supports exactly 2 arguments"))
+  #t)
+(check "> error message names the actual operator, not the internal C token"
+  (number? (string-contains (guard (e (#t (condition-message e))) (> x 1 5))
+                             ">: symbolic comparison only supports exactly 2 arguments"))
+  #t)
+
+;;; two DIFFERENTLY-NAMED sign-flagged vars compared against each other:
+;;; neither side is a plain number, so the sign-vs-number decision rule
+;;; doesn't apply -- stays symbolic even though a human could reason
+;;; xp > xw in general (that would require bound reasoning this feature
+;;; deliberately doesn't attempt -- see "What's explicitly out of scope"
+;;; in docs/reference/symbolic.md). Note: xp and xn above are both named
+;;; 'x (only their assumption flags differ), so sx_equal's name-only
+;;; equality check (existing behavior, not new) treats them as the SAME
+;;; variable -- (< xp xn) hits the *reflexive* case, not this one. A
+;;; genuinely different name is needed to test the undecidable case.
+(define xw (sym-var 'w 'negative))
+(check "sign-flagged var vs. differently-named sign-flagged var stays symbolic"
+  (symbolic? (< xp xw)) #t)
+
+;;; comparison display
+(check "< infix"  (equal? (sym->infix (< x 5)) "x < 5") #t)
+(check "<= infix" (equal? (sym->infix (<= x 5)) "x <= 5") #t)
+(check "> infix"  (equal? (sym->infix (> x 5)) "x > 5") #t)
+(check ">= infix" (equal? (sym->infix (>= x 5)) "x >= 5") #t)
+(check "< latex"  (equal? (sym->latex (< x 5)) "x < 5") #t)
+(check "<= latex" (equal? (sym->latex (<= x 5)) "x \\leq 5") #t)
+(check "> latex"  (equal? (sym->latex (> x 5)) "x > 5") #t)
+(check ">= latex" (equal? (sym->latex (>= x 5)) "x \\geq 5") #t)
+
+;;; printer parenthesization when a comparison is nested inside
+;;; arithmetic (comparisons bind loosest) -- verified correct by
+;;; independent code review, added here so it can't silently regress.
+(check "comparison nested inside + gets parens (infix)"
+  (equal? (sym->infix (+ 1 (< x y))) "1 + (x < y)") #t)
+(check "comparison nested inside * gets parens (infix)"
+  (equal? (sym->infix (* 2 (< x y))) "2 * (x < y)") #t)
+(check "comparison nested inside unary - gets parens (infix)"
+  (equal? (sym->infix (- (< x y))) "-(x < y)") #t)
+(check "comparison's own operands don't get spurious parens when they're sums (infix)"
+  (equal? (sym->infix (< (+ x 1) y)) "1 + x < y") #t)
+
+;;; sym->markdown -- wraps sym->latex in $...$ / $$...$$
+(check "sym->markdown inline"  (equal? (sym->markdown (< x 5)) "$x < 5$") #t)
+(check "sym->markdown display" (equal? (sym->markdown (< x 5) 'display) "$$x < 5$$") #t)
+(check "sym->markdown rejects a bad second arg"
+  (guard (e (#t 'raised)) (sym->markdown (< x 5) 'block) 'not-raised)
+  'raised)
+
+;;; =========================================================================
 ;;; Exotic limits: 0·∞, 1^∞, 0^0, ∞^0
 ;;; =========================================================================
 

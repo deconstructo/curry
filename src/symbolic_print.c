@@ -16,12 +16,17 @@ extern void scm_write(val_t v, val_t port);
  * =================================================================== */
 
 /* Operator precedence levels for parenthesisation decisions */
-#define SP_LOW   0   /* outermost / always safe */
+#define SP_LOW   0   /* outermost / always safe -- also comparisons (<,<=,>,>=): the
+                        loosest binding, same as being unparenthesized at top level */
 #define SP_ADD   1   /* +  - */
 #define SP_MUL   2   /* *  / */
 #define SP_NEG   3   /* unary - */
 #define SP_POW   4   /* ^ */
 #define SP_ATOM  5   /* numbers, variables, function calls */
+
+static bool sp_is_cmp_op(val_t op) {
+    return op == SX_LT || op == SX_LE || op == SX_GT || op == SX_GE;
+}
 
 static int sp_prec(val_t v) {
     if (!vis_symexpr(v)) return SP_ATOM;
@@ -30,6 +35,7 @@ static int sp_prec(val_t v) {
     if (op == SX_MUL || op == SX_DIV || op == SX_NCMUL) return SP_MUL;
     if (op == SX_NEG)                  return SP_NEG;
     if (op == SX_EXPT)                 return SP_POW;
+    if (sp_is_cmp_op(op))              return SP_LOW;
     return SP_ATOM;
 }
 
@@ -202,6 +208,13 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
         pws(port, "csc("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_SIGN && n == 1) {
         pws(port, "sign("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (sp_is_cmp_op(op) && n == 2) {
+        sp_infix(a[0], SP_ADD, port);
+        if (op == SX_LT) pws(port, " < ");
+        else if (op == SX_LE) pws(port, " <= ");
+        else if (op == SX_GT) pws(port, " > ");
+        else pws(port, " >= ");
+        sp_infix(a[1], SP_ADD, port);
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^");
         bool ep = (sp_prec(a[1]) < SP_ATOM);
@@ -453,6 +466,13 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
         pws(port, "\\csc\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
     } else if (op == SX_SIGN && n == 1) {
         pws(port, "\\operatorname{sign}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (sp_is_cmp_op(op) && n == 2) {
+        sl_latex(a[0], SP_ADD, port);
+        if (op == SX_LT) pws(port, " < ");
+        else if (op == SX_LE) pws(port, " \\leq ");
+        else if (op == SX_GT) pws(port, " > ");
+        else pws(port, " \\geq ");
+        sl_latex(a[1], SP_ADD, port);
     } else if (op == SX_FRACDIFF && n == 3) {
         pws(port, "D^{"); sl_latex(a[1], SP_LOW, port);
         pws(port, "}_{"); sl_latex(a[2], SP_LOW, port);

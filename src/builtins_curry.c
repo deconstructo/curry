@@ -275,6 +275,28 @@ static val_t prim_sym_to_latex(int ac, val_t *av, void *ud) {
     sx_write_latex(av[0], p);
     return port_get_output_string(p);
 }
+/* Wraps sym->latex's output in the $...$ / $$...$$ math-delimiter
+ * convention nearly every Markdown renderer that supports math at all
+ * agrees on (GitHub-flavored Markdown, Jupyter, Pandoc, Obsidian) --
+ * an inline expression by default, or a display/block equation with
+ * an optional second argument 'display. Motivated by
+ * https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/
+ * point #17: "A CAS should be able to produce publication-quality
+ * formulas ... without special effort by the user." */
+static val_t prim_sym_to_markdown(int ac, val_t *av, void *ud) {
+    (void)ud;
+    bool display = false;
+    if (ac == 2) {
+        if (!vis_symbol(av[1]) || av[1] != sym_intern_cstr("display"))
+            scm_raise(V_FALSE, "sym->markdown: second argument must be the symbol 'display");
+        display = true;
+    }
+    val_t p = port_open_output_string();
+    port_write_string(p, display ? "$$" : "$", display ? 2 : 1);
+    sx_write_latex(av[0], p);
+    port_write_string(p, display ? "$$" : "$", display ? 2 : 1);
+    return port_get_output_string(p);
+}
 static val_t prim_sym_var(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_symbol(av[0])) scm_raise(V_FALSE, "sym-var: first argument must be a symbol");
@@ -1464,6 +1486,7 @@ void builtins_curry_register(val_t env) {
     DEF("sym->string",    prim_sym_to_string,   1, 1);
     DEF("sym->infix",     prim_sym_to_string,   1, 1);
     DEF("sym->latex",     prim_sym_to_latex,    1, 1);
+    DEF("sym->markdown",  prim_sym_to_markdown, 1, 2);
     DEF("sym-var",        prim_sym_var,         1, 2);
     DEF("unspecified?",   prim_unspecified_p,   1, 1);
     DEF("sym-var?",       prim_sym_var_p,       1, 1);
