@@ -239,6 +239,10 @@ if(BUILD_MODULE_TYPEDVEC AND TARGET curry_typedvec AND BUILD_MODULE_F64VECTOR AN
     add_test(NAME typedvec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/typedvec_tests.scm)
     set_tests_properties(typedvec PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    # (srfi 160) builds on (srfi 4) in pure Scheme -- same module dependency.
+    add_test(NAME srfi_160 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_160_tests.scm)
+    set_tests_properties(srfi_160 PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 if(BUILD_MODULE_QT6 AND TARGET curry_qt6)

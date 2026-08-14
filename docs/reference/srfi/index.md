@@ -53,6 +53,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s133 vectors)`](s132-s133.md) | [SRFI-133](https://srfi.schemers.org/srfi-133/) | Vector extras layered on curry's native vector ops: fold, index/count/any/every, binary-search, concatenate, unfold |
 | [`(srfi s145 assume)`](s145.md) | [SRFI-145](https://srfi.schemers.org/srfi-145/) | `assume` runtime invariant declaration (always checked, never elided) |
 | [`(srfi s158 generators-and-accumulators)`](s158.md) | [SRFI-158](https://srfi.schemers.org/srfi-158/) | Generator/accumulator combinators; `make-coroutine-generator` via a real thread |
+| [`(srfi s160 uniform-vectors)`](s160.md) | [SRFI-160](https://srfi.schemers.org/srfi-160/) | Extended homogeneous numeric vector ops (map/fold/filter/comparator/generator) for all 9 kinds, layered on `(srfi s4 uniform-vectors)` |
 | [`(srfi s170 posix)`](s170.md) | [SRFI-170](https://srfi.schemers.org/srfi-170/) | POSIX API (subset) — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | [`(srfi s174 posix-timespecs)`](s174.md) | [SRFI-174](https://srfi.schemers.org/srfi-174/) | Immutable `(seconds nanoseconds)` time-instant type |
 | [`(srfi s194 random-data-samples)`](s194.md) | [SRFI-194](https://srfi.schemers.org/srfi-194/) | Random integer/real/boolean/char generators plus distribution samplers |

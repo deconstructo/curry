@@ -67,4 +67,5 @@ Typed vectors are allocated atomically (`gc_alloc_atomic`) — the element bytes
 ## See also
 
 - [`srfi/s4.md`](srfi/s4.md) — the combined SRFI-4 library (this module + `(curry f64vector)`)
+- [`srfi/s160.md`](srfi/s160.md) — extended map/fold/filter/comparator/generator ops layered on top of SRFI-4
 - [`srfi/index.md`](srfi/index.md) — full SRFI availability table
