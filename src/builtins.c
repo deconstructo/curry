@@ -507,6 +507,8 @@ static val_t prim_make_quat(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     return num_make_quat(a,b,c,d);
 }
 static val_t prim_quat_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_quat(av[0]));}
+static val_t prim_bignum_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_bignum(av[0]));}
+static val_t prim_mv_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_mv(av[0]));}
 
 /* Quaternion accessors and operations */
 static val_t prim_quat_w(int ac, val_t *av, void *ud) {
@@ -3187,6 +3189,7 @@ void builtins_register(val_t env) {
     DEF("infinite?",    prim_infinite_p,  1,1); DEF("finite?",     prim_finite_p,    1,1);
     DEF("odd?",         prim_odd_p,       1,1); DEF("even?",       prim_even_p,      1,1);
     DEF("quaternion?",  prim_quat_p,      1,1); DEF("octonion?",   prim_oct_p,       1,1);
+    DEF("bignum?",      prim_bignum_p,    1,1); DEF("multivector?", prim_mv_p,       1,1);
 
     /* Equivalence */
     DEF("eq?",    prim_eq,    2,-1); DEF("eqv?",   prim_eqv,   2,-1); DEF("equal?", prim_equal, 2,-1);
