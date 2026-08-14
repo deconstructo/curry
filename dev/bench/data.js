@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786697145111,
+  "lastUpdate": 1786700040979,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3932,6 +3932,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.857,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9f511e742b8e39cb0a5c62c0894b2f6a1fe32439",
+          "message": "feat(srfi1): close SRFI-1 list-library gap; fix real fold argument-order bug (#31)\n\n* feat(srfi279): wire in numeric-vector properties; fix stale docs\n\nAdds typedvec-properties to (srfi s279 inspect), covering all 9 SRFI-4\nkinds (u8/s8/u16/s16/u32/s32/u64/s64/f64vector) -- unblocked now that\n(curry typedvec) and (curry f64vector) both exist. No single generic\n\"is this any typed vector\" predicate exists across the 9 kinds (8\nshare one heap type with a kind flag but only expose per-kind\npredicates; f64vector is a wholly separate heap type), so a small\ndispatch table looks up each kind's own predicate/length/->list\nprocedures. Property keys are the real per-kind procedure names (e.g.\n'u8vector-length), matching this module's existing convention of\nnaming a property after the standard procedure that produced it.\n\nAlso fixes documentation that had gone stale as other work landed:\n- The .scm header and docs/reference/srfi/s279.md's \"Deliberately out\n  of scope\" list still claimed no procedure introspection existed and\n  no ports support existed -- both shipped in earlier PRs (#25, #27)\n  and are already wired into inspect-properties, just never reflected\n  in either doc.\n- The \"Supported types\" table was missing rows for port and procedure\n  properties entirely, despite both being implemented.\n- Added an explicit, prominent note that SRFI-279 is still a draft\n  (not finalized) and that this page/module's surface is therefore\n  provisional and may need to change to track the spec -- the\n  existing mention was just a parenthetical in the intro line.\n\ntests/srfi_s279_inspect_tests.scm: 13 new checks covering all 9 kinds\n(including s64/u64 bignum-boundary round-tripping and cross-kind\npredicate isolation), up to 204 from 191. Full ctest suite: 94/94 pass.\n\n* docs(srfi279): note inspect-properties' cost on large sequences\n\nIndependent security review of the typedvec-properties addition\nmeasured (inspect-properties v) on a 50M-element u8vector at ~127s/\n13.4GB peak RSS vs ~2.8s/2.7GB for (u8vector->list v) alone -- about\n45x slower and 5x more memory than the accessor it calls, from\nmaterializing the object as a list and then a second list of (index\nelement) pairs on top of that. Pre-existing behavior shared with\nordinary vector/bytevector properties, not introduced by typed-vector\nsupport, but typed vectors are the type real code uses for large\nbinary/numeric buffers, so more likely to actually be large in\npractice. Not a bug, just worth documenting explicitly.\n\n* feat(srfi1): close SRFI-1 list-library gap; fix real fold bug\n\ncurry's (srfi 1) only implemented a ~30-name subset of the real\n100+-procedure SRFI-1 spec. Adds the missing surface: constructors\n(xcons, cons*, list-tabulate, circular-list), predicates (proper-list?,\ncircular-list?, dotted-list?, null-list?, not-pair?, list=), selectors\n(sixth..tenth, take-right, drop-right, split-at, last), fold/unfold\n(reduce, reduce-right, unfold, unfold-right, pair-for-each, multi-list\nfold/any/every/count/list-index), searching (find, find-tail, span,\nbreak, list-index, member/assoc with the optional equality predicate\nboth R7RS and SRFI-1 specify -- curry's own global member/assoc don't\naccept one), delete-duplicates, append/concatenate/reverse helpers,\nzip/unzip1..5, association-list helpers, and the lset-* set-on-lists\nfamily. Every !-suffixed procedure is a plain alias for its\nnon-destructive counterpart -- SRFI-1 explicitly permits (does not\nrequire) in-place mutation, and this avoids shared-structure hazards\nunder curry's GC'd, immutable-by-convention list style for no real\nbenefit.\n\nReal bug found and fixed while doing this: (srfi 1)'s own `fold` was\nimplemented via fold-left's argument convention (accumulator first),\nnot SRFI-1's actual convention (elements first, accumulator last) --\nsilently wrong for any non-commutative kons. (fold cons '() '(1 2 3))\nwas (((() . 1) . 2) . 3); must be (3 2 1).\n\nThat fix has a real blast radius: lib/curry/modules/srfi/s14/\nchar-sets.scm was deliberately written AROUND the old bug (its own\ncomment said so explicitly), using (lambda (acc x) ...) callbacks\nagainst 10 different fold call sites. All 10 updated to the correct\n(lambda (x acc) ...) order; full codebase grep confirms char-sets.scm\nwas the only consumer relying on the old (wrong) order.\n\nAlso found and fixed a separate, subtler bug while getting `reduce`/\n`member`/`assoc` to actually work through the (srfi 1)/(srfi srfi-1)\nbare-number shims: both shims imported (curry private lang-aliases) --\na plain, non-define-library file whose environment chains up to\nGLOBAL_ENV -- AFTER importing (srfi s1 lists), so any newly-overridden\nname that was ALREADY a core global primitive (member/assoc/reduce all\npredate this library) got silently re-clobbered back to the stale core\nversion by the second import. Fixed by importing lang-aliases first,\nso (srfi s1 lists)'s own bindings win last -- direct (import (srfi s1\nlists)) without the shim was never affected, only the two bare-number\nwrapper libraries.\n\ntests/srfi_1_tests.scm: 70 new checks (new module, previously\nuntested at the (srfi 1) level at all). Full ctest suite: 95/95 pass.\n\n* fix(srfi1): dotted-list? hangs forever on a circular list\n\nIndependent security review (cut short by an account spend limit\nmid-run, but this finding was already confirmed live before it\nstopped) found dotted-list?'s original implementation did its own\nnaive (cdr p) walk with no cycle detection -- (dotted-list? (circular-\nlist 1 2 3)) never returned.\n\nproper-list?/circular-list?/dotted-list?/null-list?/not-pair? are\nexactly the small set of SRFI-1 procedures whose entire purpose is\ncorrectly classifying ANY list shape, including circular ones, without\nhanging -- unlike ordinary list procedures (find, pair-for-each, zip,\netc), which SRFI-1 does not require to handle circular input safely,\nmatching R7RS's own map/for-each. proper-list? and circular-list? were\nalready correctly cycle-safe (delegating to R7RS's cycle-safe list?,\nand a tortoise/hare walk, respectively); dotted-list? is now derived\nfrom those two instead of a third independent manual walk, since a\nlist is exactly one of {proper, circular, dotted}.\n\nRegression test added; full ctest suite: 95/95 pass (two unrelated\nfailures on the first parallel run -- debugger, lsp -- confirmed as\nthis session's established ctest-contention noise pattern, both pass\nstandalone).",
+          "timestamp": "2026-08-14T19:33:10+10:00",
+          "tree_id": "999777840f421f835955238cb2894a79e3b326bd",
+          "url": "https://github.com/deconstructo/curry/commit/9f511e742b8e39cb0a5c62c0894b2f6a1fe32439"
+        },
+        "date": 1786700039853,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.757,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.73,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.945,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.161,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.047,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.3,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.022,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.89,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.58,
             "unit": "ms"
           }
         ]
