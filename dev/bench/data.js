@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786693819516,
+  "lastUpdate": 1786695815692,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3794,6 +3794,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 75.487,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "36b1c08a9197e0ae8310a4258f22f6113fb184b3",
+          "message": "feat(srfi160): extended uniform-vector ops (map/fold/filter/comparator/generator) for all 9 kinds (#29)\n\n* feat(srfi160): add extended SRFI-160 uniform-vector ops for all 9 kinds\n\nLayers the extended SRFI-160 operation set -- higher-order iteration,\nsearching, folding, comparators, and generators -- on top of the\nSRFI-4 core shipped in #28, for all 9 kinds (u8/s8/u16/s16/u32/s32/\nu64/s64/f64). Entirely pure Scheme: no new C module, built on the\nexisting (curry typedvec)/(curry f64vector) primitives plus the\nalready-shipped (srfi 128) comparators and (srfi 158) generators.\n\n- lib/curry/modules/srfi/s160/uniform-vectors.scm: -empty?, -=,\n  -swap!, -reverse!, -reverse-copy, -map(!), -for-each, -count,\n  -index(-right), -skip(-right), -any, -every, -filter, -remove,\n  -partition, -fold, -fold-right, -concatenate, -unfold(-right),\n  a comparator instance, and a generator, per kind; re-exports the\n  SRFI-4 base ops too so this one library is self-sufficient\n- (srfi 160) / (srfi srfi-160) bare-number shims, matching this\n  codebase's existing SRFI naming convention\n- also fixes a real gap in already-merged #28: (srfi 4)'s doc and\n  export list incorrectly claimed (curry f64vector) has no\n  f64vector-append; it does (fixed 2-arg arity, unlike the other 8\n  kinds' N-ary append) and just wasn't re-exported -- now is\n\nCaught during manual testing (all fixed before commit, since this\nwas generated code -- one generator script produces the same shape\nof definition for all 9 kinds, so a bug in the template is a bug in\nall 9):\n- TAGvector= had a real infinite loop: the N-ary equality chain's\n  recursive step called (loop rest) instead of (loop (cdr rest)),\n  so any 3+-argument call that reached its second comparison never\n  terminated\n- TAGvector-fold-right passed kons the accumulator in the same\n  position as TAGvector-fold ((kons acc e1 e2 ...)); SRFI-133/\n  SRFI-160's actual convention has fold-right's kons take the\n  elements first and the accumulator last, which matters for a\n  non-commutative kons like cons\n- TAGvector-comparator values were unusable without a separate\n  (srfi 128) import, since comparator?/=?/<?/etc weren't re-exported\n\ntests/srfi_160_tests.scm: 54 checks -- full coverage on u8, plus\ns64 (bignum-boundary values) and f64 (float) spot checks, since the\nsame generated code is shared across all 9 kinds. Regression tests\nadded for both bugs found above. Full ctest suite: 94/94 pass.\n\n* docs: catch up CHANGELOG.md through v1.20.0\n\nThe changelog was stuck at a stale \"1.17.12\" heading (dated the same\nday as the actual v1.18.0 tag -- fixed to match) with three full\nreleases worth of work undocumented since: v1.19.0 (mariadb/postgres\ntype coercion, structured errors, streaming, TLS, LISTEN/NOTIFY, COPY)\nand v1.20.0 (TTS module, cond-expand and (features), SRFI-279, the\nload/include directory-context fix, syntax-rules partial hygiene plus\nSRFI-26, SRFI-14, symbolic inequalities, NaN formatting, and the\nfeatures.h glibc header collision fix).\n\n* fix(srfi160): address independent code+security review findings\n\nBoth a fresh code-review subagent and a fresh security-review\nsubagent (no shared context with the writing session) reviewed the\nSRFI-160 commit and each found a real bug:\n\n- f64vector-concatenate aliased its input instead of copying it for a\n  single-element list: (fold-left f64vector-append (car vs) '())\n  short-circuits to (car vs) unchanged with no f64vector-append call\n  at all, so (f64vector-concatenate (list v)) returned v itself --\n  later mutating the \"new\" vector silently corrupted the original.\n  Every other kind's -concatenate is (apply TAGvector-append vs),\n  which always allocates fresh even for one argument, so this was an\n  f64-specific regression from its special-cased pairwise-fold\n  implementation (needed because (curry f64vector)'s f64vector-append\n  is a fixed 2-arg procedure, unlike the other 8 kinds' N-ary form).\n  Fixed by special-casing the single-element case to f64vector-copy.\n\n- TAGvector-unfold/-unfold-right (all 9 kinds) SIGSEGV'd via C stack\n  overflow at a few thousand elements: (u8vector-unfold ... 5000 0)\n  reliably crashed the process. Root cause is a pre-existing curry\n  core-VM defect -- call-with-values/apply tail calls don't get fully\n  TCO'd inside a define-library body (confirmed: the identical pattern\n  survives millions of iterations at the top level, but crashes at\n  ~2000 inside a library) -- not a logic bug in this new code per se,\n  but every (curry X)/SRFI library is required to be a define-library,\n  so this public API was directly and trivially crashable. Worked\n  around at the library level: call-with-values's receiver is now\n  `list` (an ordinary, non-tail call) instead of a lambda that itself\n  makes the loop's recursive tail call, so the actual recursion\n  happens as a separate, genuinely-tail call afterward. Verified\n  correct and crash-free at 200,000 elements. The underlying core-VM\n  TCO defect remains open and should be tracked/fixed separately.\n\nRegression tests added for both: aliasing (mutate-after-concatenate\non a singleton list) and the crash threshold (200k-element unfold).\ntests/srfi_160_tests.scm: 57 checks, up from 54. Full ctest suite:\n94/94 pass.",
+          "timestamp": "2026-08-14T18:22:49+10:00",
+          "tree_id": "e5bb1cbfab214fd936b382bc50bfba0639fb11bd",
+          "url": "https://github.com/deconstructo/curry/commit/36b1c08a9197e0ae8310a4258f22f6113fb184b3"
+        },
+        "date": 1786695815095,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.236,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.27,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.064,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.689,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 190.958,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 376.805,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 76.536,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.07,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.801,
             "unit": "ms"
           }
         ]
