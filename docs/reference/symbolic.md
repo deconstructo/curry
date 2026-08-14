@@ -26,8 +26,10 @@ Curry's numeric tower includes a built-in computer algebra system (CAS). Any ope
 | `(quad-frac-diff f α x)` | Grünwald-Letnikov numerical D^α (for non-symbolic f) |
 | `(quad-frac-int f α x)` | Numerical RL fractional integral |
 | `(quad f a b)` | Gauss-Kronrod G7K15 adaptive numerical quadrature |
+| `(< a b)` / `(<= a b)` / `(> a b)` / `(>= a b)` | Symbolic-aware ordering comparisons (2-argument only — see "Symbolic inequalities" below) |
 | `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 + 2*x + 1` |
 | `(sym->latex expr)` | LaTeX string: `x^{2} + 2 x + 1` |
+| `(sym->markdown expr)` / `(sym->markdown expr 'display)` | Markdown math: `$x^2$` inline, `` $$x^2$$ `` display |
 
 `∂` and `∫` are Unicode (U+2202, U+222B); ASCII aliases `sym-diff` and `integrate` are equivalent. All standard numeric operators lift automatically over symbolic values.
 
@@ -453,6 +455,51 @@ Pattern variables bound in the pattern are available in the template and in `#:w
 ```
 
 `trigsimp` calls `simplify` internally, so it subsumes algebraic simplification. Use it when an expression involves trigonometric terms that `simplify` leaves unevaluated.
+
+## Symbolic inequalities
+
+`<`, `<=`, `>`, `>=` lift over symbolic values the same way `+`/`*`/`sin`/etc. already do: applying them to a symbolic operand no longer raises "wrong type" — it either decides the comparison (returning `#t`/`#f`) or builds a symbolic comparison expression.
+
+This is motivated by a specific, common complaint about computer algebra systems: Fredrik Johansson's ["Things I would like to see in a computer algebra system"](https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/) (2022), point #12 — *"Analysis-oriented CASes are generally good at manipulating equalities and limits, but strangely poor at manipulating inequalities."*
+
+```scheme
+(symbolic x)
+(< x 5)              ; => (< x 5)   -- undecidable in general, stays symbolic
+(< 3 5)               ; => #t       -- ordinary numbers, unchanged
+(< x x)               ; => #f       -- reflexive: identical operands
+(<= x x)               ; => #t
+
+(define xp (sym-var 'x 'positive))
+(> xp 0)               ; => #t   -- decided from the 'positive assumption
+(< xp 0)               ; => #f
+(> xp -5)              ; => #t   -- positive var vs. any non-positive number
+```
+
+### What gets decided
+
+A comparison is decided (returns `#t`/`#f`) in exactly three cases:
+
+1. **Both operands are plain numbers** — ordinary numeric comparison, no change from before this feature existed.
+2. **The two operands are structurally identical expressions** (checked the same way `simplify`'s own cancellation rules check it, e.g. `(+ x (- x)) => 0`) — the reflexive case: `<`/`>` are `#f`, `<=`/`>=` are `#t`.
+3. **One operand is a sign-flagged `sym-var`** (`'positive` or `'negative`, see "Assumption flags" above) **and the other is a plain number** — decided from the sign, e.g. a `'positive` variable is always greater than any non-positive number.
+
+Anything else — comparing two different plain variables, a variable with no sign assumption against a number, a compound expression like `(+ x 1)` against a number — stays a genuine symbolic expression, printable and substitutable like any other:
+
+```scheme
+(symbolic y)
+(< x y)                        ; => (< x y)               -- two different variables
+(substitute (< x y) x 3)      ; => (< 3 y)                -- still undecidable
+(substitute (< x y) y 2)      ; => (< x 2)
+(simplify (< (+ x 1) 5))      ; => (< (+ 1 x) 5)
+```
+
+### What's explicitly out of scope
+
+- **No general expression-level sign inference.** `(> (+ (expt x 2) 1) 0)` stays symbolic even though it's always true — deciding that requires interval arithmetic / sign analysis over arbitrary expressions, a substantially larger feature than this one.
+- **No bound assumptions beyond sign.** There's no way to assume `x > 5`; the assumption system (`'positive`/`'negative`/`'real`/`'integer`/`'nonzero`/`'quaternion`) only ever carries a sign, not an arbitrary bound.
+- **3-or-more-argument symbolic comparisons are not supported.** `(< 1 x 5)` with `x` symbolic raises a clear error rather than silently misbehaving; `(< 1 3 5)` (no symbolic operand) works exactly as before. Modeling a symbolic chain like `1 < x < 5` would mean deciding what it even prints as (an `and` of two comparisons? a new ternary node?) — a real design question left for if it's ever actually needed.
+- **`=`/`≠` are not covered.** They hit the exact same underlying gap (`(= x x)` also used to raise), but symbolic equality's "when can I safely say `#f`" question is a different judgment call from ordering (two different symbols *might* be equal at runtime; only exact structural identity should ever fold to `#t`) — left for a future pass rather than bundled in here.
+- `∂`/`∫`/`differentiate` on a comparison expression is not meaningful and stays unevaluated (returned as-is, e.g. `(∂ (< x 5) x)` => `(∂ (< x 5) x)`), the same as any other operator the differentiator/integrator doesn't have a rule for.
 
 ## Symbolic differentiation
 
@@ -1313,6 +1360,19 @@ Complex operators use standard mathematical notation:
 (sym->latex (real-part z))               ; => "\\operatorname{Re}\\!\\left(z\\right)"
 (sym->latex (imag-part z))               ; => "\\operatorname{Im}\\!\\left(z\\right)"
 ```
+
+### Markdown notation — `sym->markdown`
+
+Wraps `sym->latex`'s output in the `$...$` / `$$...$$` math-delimiter convention nearly every Markdown renderer that supports math agrees on — GitHub-flavored Markdown, Jupyter, Pandoc, Obsidian. Inline by default; pass `'display` as a second argument for a block/display equation:
+
+```scheme
+(symbolic x)
+
+(sym->markdown (+ (expt x 2) 1))              ; => "$x^{2} + 1$"
+(sym->markdown (+ (expt x 2) 1) 'display)     ; => "$$x^{2} + 1$$"
+```
+
+This exists so a derivation can be dropped straight into a `.md` file or a chat/notebook cell that renders math, without the user hand-wrapping `sym->latex`'s output themselves — see point #17 ("publication-quality output... should not even be particularly hard") of the [Johansson post](https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/) referenced above.
 
 ### Workflow: symbolic derivation to LaTeX
 

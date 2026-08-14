@@ -7,6 +7,7 @@
 #include "env.h"
 #include "symbol.h"
 #include "numeric.h"
+#include "symbolic.h"
 #include "port.h"
 #include "reader.h"
 #include "set.h"
@@ -396,7 +397,42 @@ static val_t prim_div(int ac, val_t *av, void *ud) {
 #define NUM_CMP(fn, op) \
 static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; return V_TRUE; }
-NUM_CMP(eq,eq) NUM_CMP(lt,lt) NUM_CMP(le,le) NUM_CMP(gt,gt) NUM_CMP(ge,ge)
+NUM_CMP(eq,eq)
+
+/* Ordering comparisons (<, <=, >, >=) additionally lift over symbolic
+ * values -- the exact 2-argument case dispatches to sx_lt/sx_le/sx_gt/
+ * sx_ge, which decide it (both numeric, structurally identical, or a
+ * sign-flagged sym-var against a plain number) or return a genuine
+ * symbolic comparison node like (< x 5). A 3+-argument chain with any
+ * symbolic operand isn't supported (deliberately -- see "Symbolic
+ * inequalities" in docs/reference/symbolic.md) and raises a clear error
+ * instead of num_##op's confusing "exact integer required". */
+/* `name` is the Scheme-visible operator spelling (e.g. "<"), not the C
+ * macro token `op` (e.g. lt) -- the error message must name what the
+ * user actually typed, not builtins.c's own internal identifier. */
+#define NUM_CMP_ORD(fn, op, name) \
+static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
+    (void)ud; \
+    /* ac==2 is the hot path (every plain numeric (< a b) call goes
+     * through here) -- handled standalone so it costs exactly the two
+     * vis_symbolic checks below and nothing more, rather than also
+     * paying for the 3+-arg scan on every call. */ \
+    if (ac == 2) { \
+        if (vis_symbolic(av[0]) || vis_symbolic(av[1])) return sx_##op(av[0], av[1]); \
+        return vbool(num_##op(av[0], av[1])); \
+    } \
+    /* 3+ args: scan for a symbolic operand across the WHOLE call up
+     * front, not interleaved with the comparison loop below. Checking
+     * only the pair currently being examined let an earlier numeric
+     * pair's #f short-circuit the loop before it ever reached the
+     * symbolic pair, so e.g. (< 5 1 x) silently returned #f instead of
+     * raising. */ \
+    for (int i=0;i<ac;i++) \
+        if (vis_symbolic(av[i])) \
+            scm_raise(V_FALSE, name ": symbolic comparison only supports exactly 2 arguments"); \
+    for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; \
+    return V_TRUE; }
+NUM_CMP_ORD(lt,lt,"<") NUM_CMP_ORD(le,le,"<=") NUM_CMP_ORD(gt,gt,">") NUM_CMP_ORD(ge,ge,">=")
 
 static val_t prim_max(int ac, val_t *av, void *ud) {(void)ud; val_t r=av[0]; for(int i=1;i<ac;i++) r=num_max(r,av[i]); return r;}
 static val_t prim_min(int ac, val_t *av, void *ud) {(void)ud; val_t r=av[0]; for(int i=1;i<ac;i++) r=num_min(r,av[i]); return r;}
