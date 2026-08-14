@@ -1,12 +1,56 @@
 (define-library (srfi 1)
-  (import (srfi s1 lists))
   (import (curry private lang-aliases))
+  (import (srfi s1 lists))
   (export
-    cons car cdr caaar cadar caar cdar list list* make-list length append
-    reverse list-tail list-ref last-pair map for-each filter fold-left
-    fold-right fold fold-right iota any every remove delete append-map
-    filter-map flat-map take drop take-while drop-while count partition first
-    second third fourth fifth
+    ; SRFI-1 procedures already in curry's global env
+    cons car cdr caaar cadar caar cdar
+    list make-list length append reverse
+    list-tail list-ref last-pair list-copy
+    map for-each filter fold-left
+
+    ; Constructors
+    xcons cons* list-tabulate circular-list
+
+    ; Predicates
+    proper-list? circular-list? dotted-list? null-list? not-pair? list=
+
+    ; Selectors
+    first second third fourth fifth sixth seventh eighth ninth tenth
+    take drop take-right drop-right take! drop-right!
+    split-at split-at! last
+
+    ; Fold, unfold, map
+    fold fold-right reduce reduce-right
+    unfold unfold-right
+    map! pair-for-each append-map append-map! filter-map flat-map
+
+    ; Filtering / partitioning
+    any every remove delete delete! partition count
+
+    ; Searching
+    find find-tail take-while drop-while span break list-index
+    member assoc
+
+    ; Deleting duplicates
+    delete-duplicates delete-duplicates!
+
+    ; Append / concatenate / reverse
+    concatenate concatenate! append! append-reverse append-reverse! reverse!
+
+    ; iota (existing)
+    iota
+
+    ; Zip / unzip
+    zip unzip1 unzip2 unzip3 unzip4 unzip5
+
+    ; Association lists
+    alist-cons alist-copy del-assq del-assv del-assoc del-assq! del-assv! del-assoc!
+
+    ; Lists as sets
+    lset<= lset= lset-adjoin
+    lset-union lset-intersection lset-difference lset-xor
+    lset-union! lset-intersection! lset-difference! lset-xor!
+
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     rakāsum-mala 𒈠𒀀
     qitin-zibbatim 𒋻𒈧𒂗

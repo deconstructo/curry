@@ -210,10 +210,13 @@
 
 ;;; ── set algebra ──────────────────────────────────────────────────────
 
-;; NOTE: this codebase's `fold` is aliased to `fold-left` (src/builtins.c),
-;; so the callback is called as (proc acc element) -- SRFI-1's canonical
-;; `fold` calls it (proc element acc) instead. Every fold below uses the
-;; local (acc x) order accordingly.
+;; `(srfi s1 lists)`'s `fold` calls its callback as (proc element acc) --
+;; element first, accumulator last -- per SRFI-1's own convention. Every
+;; fold below uses that (x acc) parameter order accordingly. (An earlier
+;; version of this file was written against a bug in this codebase's own
+;; `fold`, which called the callback with the arguments swapped -- fixed
+;; alongside this SRFI-1 session, which is why every call site below
+;; needed updating to match the corrected argument order.)
 
 ;; Collect every operand's ranges and normalize ONCE at the end, rather
 ;; than folding through %ranges-union (itself a full re-sort) once per
@@ -223,26 +226,26 @@
 ;; a growing accumulator. (Unlike union, xor below is NOT safe to
 ;; flatten this way -- see its own comment.)
 (define (char-set-union . css)
-  (%make-cs (fold (lambda (acc cs) (append (%cs-ranges-list cs) acc)) '() css)))
+  (%make-cs (fold (lambda (cs acc) (append (%cs-ranges-list cs) acc)) '() css)))
 
 (define (char-set-union! cs1 . css)
-  (%cs-replace! cs1 (fold (lambda (acc cs) (append (%cs-ranges-list cs) acc))
+  (%cs-replace! cs1 (fold (lambda (cs acc) (append (%cs-ranges-list cs) acc))
                            (%cs-ranges-list cs1) css)))
 
 (define (char-set-intersection cs1 . css)
-  (%make-cs (fold (lambda (acc cs) (%ranges-intersection acc (%cs-ranges-list cs)))
+  (%make-cs (fold (lambda (cs acc) (%ranges-intersection acc (%cs-ranges-list cs)))
                    (%cs-ranges-list cs1) css)))
 
 (define (char-set-intersection! cs1 . css)
-  (%cs-replace! cs1 (fold (lambda (acc cs) (%ranges-intersection acc (%cs-ranges-list cs)))
+  (%cs-replace! cs1 (fold (lambda (cs acc) (%ranges-intersection acc (%cs-ranges-list cs)))
                            (%cs-ranges-list cs1) css)))
 
 (define (char-set-difference cs1 . css)
-  (%make-cs (fold (lambda (acc cs) (%ranges-difference acc (%cs-ranges-list cs)))
+  (%make-cs (fold (lambda (cs acc) (%ranges-difference acc (%cs-ranges-list cs)))
                    (%cs-ranges-list cs1) css)))
 
 (define (char-set-difference! cs1 . css)
-  (%cs-replace! cs1 (fold (lambda (acc cs) (%ranges-difference acc (%cs-ranges-list cs)))
+  (%cs-replace! cs1 (fold (lambda (cs acc) (%ranges-difference acc (%cs-ranges-list cs)))
                            (%cs-ranges-list cs1) css)))
 
 ;; xor genuinely needs sequential pairwise combination (unlike union
@@ -251,10 +254,10 @@
 ;; and-merge over all operands' ranges -- parity matters, not just
 ;; coverage.
 (define (char-set-xor . css)
-  (%make-cs (fold (lambda (acc cs) (%ranges-xor acc (%cs-ranges-list cs))) '() css)))
+  (%make-cs (fold (lambda (cs acc) (%ranges-xor acc (%cs-ranges-list cs))) '() css)))
 
 (define (char-set-xor! cs1 . css)
-  (%cs-replace! cs1 (fold (lambda (acc cs) (%ranges-xor acc (%cs-ranges-list cs)))
+  (%cs-replace! cs1 (fold (lambda (cs acc) (%ranges-xor acc (%cs-ranges-list cs)))
                            (%cs-ranges-list cs1) css)))
 
 (define (char-set-complement cs) (%make-cs (%ranges-complement (%cs-ranges-list cs))))
@@ -294,7 +297,7 @@
   ;; grows as a base-31 bignum across hundreds of ranges (e.g.
   ;; char-set:letter) instead of staying bounded.
   (let ((bound (max (if (pair? opt) (car opt) 4194304) 1)))
-    (fold (lambda (acc r) (modulo (+ (* acc 31) (car r) (* 31 (cdr r))) bound))
+    (fold (lambda (r acc) (modulo (+ (* acc 31) (car r) (* 31 (cdr r))) bound))
           0 (%cs-ranges-list cs))))
 
 ;;; ── iteration ────────────────────────────────────────────────────────
@@ -354,7 +357,7 @@
 (define (char-set->string cs) (list->string (char-set->list cs)))
 
 (define (char-set-size cs)
-  (fold (lambda (acc r) (+ acc 1 (- (cdr r) (car r)))) 0 (%cs-ranges-list cs)))
+  (fold (lambda (r acc) (+ acc 1 (- (cdr r) (car r)))) 0 (%cs-ranges-list cs)))
 
 (define (char-set-count pred cs) (count pred (char-set->list cs)))
 (define (char-set-every pred cs) (every pred (char-set->list cs)))
