@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786746056720,
+  "lastUpdate": 1786746367603,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4346,6 +4346,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 93.095,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5b24bfda0b7cdb6164e0675bc92bda076a2e0e69",
+          "message": "docs(thoughts): FLINT integration design doc (#37)\n\nNot implemented -- a scoping/design pass before any code, per explicit\nrequest. Grounds the proposal in what curry actually already has\n(MPFR arbitrary-precision floats and a substantial always-on number\ntheory library are both already implemented and documented, contrary\nto what \"MPFR you say?\" might suggest was still just a roadmap item;\nthe CAS already has polynomial GCD/factorization too, just via naive/\nsubresultant algorithms rather than FLINT's FFT/modular-accelerated\nones), then covers what FLINT 3.x actually is (post-Arb/Antic/Calcium\nmerger: certified ball arithmetic, algebraic number fields, exact\nalgebraic+transcendental computation, on top of its long-standing\nfast bignum/polynomial/matrix/finite-field core), three named\ncandidate integration architectures with explicit tradeoffs (isolated\nmodule vs deep numeric-tower integration vs a staged approach --\nrecommending the staged one), a proposed phase-1 scope, and five open\nquestions flagged for explicit decision rather than silently picked\n(module scope, BUILD_FLINT/BUILD_MPFR CMake option relationship,\nnaming, license compatibility -- checked clean, GPL-3.0-or-later\ncurry linking LGPL-3.0-or-later FLINT is standard -- and whether a\nfirst pass should go through (curry ffi) directly rather than a\nhand-written C module).",
+          "timestamp": "2026-08-15T08:25:12+10:00",
+          "tree_id": "f59085db8eb730f8f623aab9f931b03c9c54bf62",
+          "url": "https://github.com/deconstructo/curry/commit/5b24bfda0b7cdb6164e0675bc92bda076a2e0e69"
+        },
+        "date": 1786746366402,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.211,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.235,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.972,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.539,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 190.104,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 368.04,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.33,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.609,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 99.469,
             "unit": "ms"
           }
         ]
