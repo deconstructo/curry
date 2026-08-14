@@ -51,14 +51,14 @@ Every kind `TAG` in `{u8, s8, u16, s16, u32, s32, u64, s64}` gets the same 12 pr
 
 ## External representation
 
-`write`/`display` produce a `#TAG(...)` form, one per kind, mirroring `(curry f64vector)`'s existing `#f64(...)`:
+`write`/`display` produce a `#TAGvec(...)` form, one per kind:
 
 ```scheme
-(display (u8vector 1 2 3))                          ; #u8(1 2 3)
-(display (s64vector -9223372036854775808 5))         ; #s64(-9223372036854775808 5)
+(display (u8vector 1 2 3))                          ; #u8vec(1 2 3)
+(display (s64vector -9223372036854775808 5))         ; #s64vec(-9223372036854775808 5)
 ```
 
-This is a printed *representation*, not a reader syntax — there is no `#u8(...)` literal in the reader (R7RS's `#u8(...)` bytevector literal is unrelated and produces a `bytevector`, a different type, not a `u8vector`).
+This is a printed *representation*, not reader syntax — reading `#u8vec(...)`/`#s8vec(...)`/etc back raises a clean read-error rather than reconstructing a typed vector (matching `(curry f64vector)`'s own `#f64(...)`, which has the same limitation). The suffix is deliberate, not cosmetic: the bare prefix `#u8(...)` is already R7RS bytevector reader syntax (a *different* type), and bare `#s...` is already curry's sexagesimal-number reader syntax — reusing either would make `write` followed by `read` either silently produce the wrong type or silently corrupt the rest of the read stream, instead of failing loudly.
 
 ## GC
 

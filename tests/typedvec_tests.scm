@@ -92,23 +92,57 @@
   (u8vector-fill! v 5)
   (check "u8vector-fill!" (u8vector->list v) '(5 5 5)))
 
-;;; ---- external representation (#u8(...), #s64(...), etc.) ----
+;;; ---- external representation (#u8vec(...), #s64vec(...), etc.) ----
+;;; Deliberately NOT "#u8(...)"/"#s8(...)": those exact prefixes are
+;;; already claimed by the reader (R7RS bytevector syntax and the
+;;; sexagesimal-literal reader, respectively) -- reusing them would make
+;;; write/read round-trip to the wrong type or silently corrupt. The
+;;; "vec" suffix avoids both collisions; see src/port.c's comment.
 
 (check "u8vector write representation"
        (let ((p (open-output-string)))
          (write (u8vector 1 2 3) p)
          (get-output-string p))
-       "#u8(1 2 3)")
+       "#u8vec(1 2 3)")
 (check "s64vector write representation round-trips boundary values"
        (let ((p (open-output-string)))
          (write (s64vector -9223372036854775808 9223372036854775807) p)
          (get-output-string p))
-       "#s64(-9223372036854775808 9223372036854775807)")
+       "#s64vec(-9223372036854775808 9223372036854775807)")
 (check "u64vector write representation for UINT64_MAX"
        (let ((p (open-output-string)))
          (write (u64vector 18446744073709551615) p)
          (get-output-string p))
-       "#u64(18446744073709551615)")
+       "#u64vec(18446744073709551615)")
+
+;;; ---- printed representation no longer collides with reader syntax ----
+;;; (regression: found by code review -- the original "#u8(...)"/
+;;; "#s8(...)" forms collided with R7RS bytevector syntax and the
+;;; sexagesimal-literal reader, so writing a u8vector and reading it
+;;; back silently produced a *bytevector*, and writing an s8vector..
+;;; s64vector and reading it back silently corrupted the read stream
+;;; instead of raising.)
+
+(check "#u8(...) still reads as a bytevector, not confused with u8vector"
+       (bytevector? (read (open-input-string "#u8(1 2 3)")))
+       #t)
+(check "#u8vec(...) is not (yet) reader syntax -- raises cleanly instead of misparsing"
+       (guard (e (#t 'raised)) (read (open-input-string "#u8vec(1 2 3)")))
+       'raised)
+(check "#s8vec(...) is not (yet) reader syntax -- raises cleanly instead of silently corrupting"
+       (guard (e (#t 'raised)) (read (open-input-string "#s8vec(1 2 3)")))
+       'raised)
+
+;;; ---- input validation regressions found by independent review ----
+
+(check "TAGvector-copy! end argument must be a fixnum, not silently reinterpreted"
+       (guard (e (#t 'raised))
+         (let ((to (make-u8vector 5 0)) (from (u8vector 9 9 9)))
+           (u8vector-copy! to 0 from 0 #t)))
+       'raised)
+(check "make-TAGvector rejects a length exceeding uint32_t range instead of silently truncating"
+       (guard (e (#t 'raised)) (make-u8vector 4294967297 7))
+       'raised)
 
 ;;; ---- (srfi 4) re-exports both the 8 integer kinds and f64vector ----
 

@@ -80,8 +80,11 @@ static void tv_range(int ac, val_t *av, int start_idx, uint32_t len,
      * (one past the last element, the valid "whole rest" case) pass;
      * a true out-of-range end is caught by the *end > len check below. */
     if (*start > len) curry_error("%s: start out of range", ctx);
-    *end = ac > start_idx + 1 ? (uint32_t)vunfix(av[start_idx + 1]) : len;
-    if (!(ac > start_idx + 1) ) *end = len;
+    if (ac > start_idx + 1) {
+        *end = tv_idx(av[start_idx + 1], len + 1, ctx);
+    } else {
+        *end = len;
+    }
     if (*end > len || *end < *start)
         curry_error("%s: end out of range", ctx);
 }
@@ -198,7 +201,8 @@ static val_t fn_make_typedvector(int ac, val_t *av, void *ud) {
     TVKind kind = ud_kind(ud);
     if (!vis_fixnum(av[0])) curry_error("make-%svector: length must be fixnum", TV_INFO[kind].prefix);
     intptr_t n = vunfix(av[0]);
-    if (n < 0) curry_error("make-%svector: negative length", TV_INFO[kind].prefix);
+    if (n < 0 || n > (intptr_t)UINT32_MAX)
+        curry_error("make-%svector: length out of range", TV_INFO[kind].prefix);
     val_t r = alloc_typedvec(kind, (uint32_t)n);
     if (ac > 1) {
         TypedVec *tv = as_typedvec(r);
@@ -296,11 +300,11 @@ static val_t fn_typedvector_copy_bang(int ac, val_t *av, void *ud) {
     /* tv_range's start_idx counts from av[0]; here the optional
      * start/end refer to `from` and begin at av[3]/av[4]. */
     uint32_t fstart = ac > 3 ? tv_idx(av[3], from->len + 1, ctx) : 0;
-    uint32_t fend   = ac > 4 ? (uint32_t)vunfix(av[4]) : from->len;
+    uint32_t fend   = ac > 4 ? tv_idx(av[4], from->len + 1, ctx) : from->len;
     if (fend > from->len || fend < fstart) curry_error("%s: end out of range", ctx);
     start = fstart; end = fend;
     uint32_t n = end - start;
-    if (at + n > to->len) curry_error("%s: destination too short", ctx);
+    if ((size_t)at + (size_t)n > (size_t)to->len) curry_error("%s: destination too short", ctx);
     memmove(to->data + (size_t)at * tv_elem_size(kind),
             from->data + (size_t)start * tv_elem_size(kind),
             (size_t)n * tv_elem_size(kind));
@@ -310,9 +314,10 @@ static val_t fn_typedvector_copy_bang(int ac, val_t *av, void *ud) {
 static val_t fn_typedvector_append(int ac, val_t *av, void *ud) {
     TVKind kind = ud_kind(ud);
     char ctx[24]; snprintf(ctx, sizeof(ctx), "%svector-append", TV_INFO[kind].prefix);
-    uint32_t total = 0;
-    for (int i = 0; i < ac; i++) total += get_tv(av[i], kind, ctx)->len;
-    val_t r = alloc_typedvec(kind, total);
+    uint64_t total = 0;
+    for (int i = 0; i < ac; i++) total += (uint64_t)get_tv(av[i], kind, ctx)->len;
+    if (total > UINT32_MAX) curry_error("%s: combined length too large", ctx);
+    val_t r = alloc_typedvec(kind, (uint32_t)total);
     uint8_t *out = as_typedvec(r)->data;
     for (int i = 0; i < ac; i++) {
         TypedVec *tv = as_typedvec(av[i]);
