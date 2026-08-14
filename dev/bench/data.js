@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786687017977,
+  "lastUpdate": 1786689088899,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3518,6 +3518,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 73.677,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4520cb2b5327995fae7838c417ca250a6d905f24",
+          "message": "feat: add procedure introspection (procedure-name/-arity/-arglist/-file/-line/-lambda/-closure) (#25)\n\nCloses a real, previously-documented gap: (srfi s279 inspect)'s own\nheader comment said \"curry exposes no procedure-name/arity/arglist\nintrospection to Scheme at all yet\". Curry has three procedure\nrepresentations with different available metadata -- tree-walker\nclosures (T_CLOSURE: params/body/name directly, no source-location\ntracking at all), bytecode-VM closures (T_BCCLOSURE, wraps a Chunk\nthat already carries name/arity/source_name/lines/src_lambda for the\ndebugger's sake), and C primitives (name/min_args/max_args only, no\nsource form or captured closure to report). Each new primitive\ndispatches on which representation it got and reports #f (or '() for\nprocedure-closure) when a property genuinely doesn't exist for that\nrepresentation, rather than guessing -- matching SRFI-279's own\n\"omit unsupported properties\" rule, which (srfi 279)'s new\n%procedure-properties wires these into directly.\n\nFound and fixed one real pre-existing bug along the way: Chunk.src_lambda\n(procedure-lambda/procedure-arglist's data source, also used for\ntiered-JIT hot-swap) was never persisted to the .scc bytecode cache, so\na script's FIRST run (a cache MISS, compiled fresh in memory) reported\nit correctly but every subsequent run (a cache HIT, loaded from disk)\nsilently lost it and returned #f -- discovered because the new SRFI-279\ntests failed only on their second run. Fixed by serializing src_lambda\nthrough the existing generic write_const/read_const machinery (already\nhandles arbitrary S-expressions) and bumping SCC_FMT_VER 5->6 so every\npre-existing cache is cleanly invalidated and recompiled rather than\npartially misread.\n\nIndependently code-reviewed and security-reviewed (fresh subagents, no\nshared context) before landing. Two real findings fixed:\n- closure_params_arity walked a closure's params list with no cycle\n  guard. Confirmed live and reachable from pure Scheme (no sandbox\n  needed): (eval (list 'lambda circular-params body) env) builds a\n  real T_CLOSURE with circular params (nothing validates it eagerly at\n  construction time), and calling procedure-arity on it hung forever --\n  a genuine DoS reachable anywhere untrusted-influenced Scheme can reach\n  a REPL helper, notebook, MCP tool, or LSP hover that calls\n  procedure-arity/inspect-properties. Fixed with Floyd's cycle\n  detection (tortoise/hare) rather than a hard iteration cap, so\n  legitimately long finite parameter lists still work correctly.\n- procedure-closure's \"don't dump a huge shared scope\" guard checked\n  pointer-identity against GLOBAL_ENV specifically, missing every\n  OTHER root frame -- namely every (curry X)/SRFI module's own\n  env_new_root() frame (every define-library body runs in one, per\n  this project's own module-system convention). A closure returned\n  from ANY exported procedure of ANY shipped module leaked its entire\n  module scope through procedure-closure: verified live at ~1933\n  bindings (every imported builtin, Akkadian/cuneiform aliases, and\n  the real process command-line-args) from one ordinary two-line test\n  module. Made worse by being reachable transitively through (srfi\n  279)'s inspect-properties/inspect-describe, which calls\n  procedure-closure unconditionally -- an innocuous-looking \"describe\n  this object\" debugging call was the actual leak vector. Fixed by\n  generalizing the guard to env->parent == NULL (any root frame, not\n  just the one specific GLOBAL_ENV instance), which correctly covers\n  both cases while still reporting real captures for nested lambdas.\n\nTwo lower-severity findings documented rather than fixed (both\npre-existing risk shapes in code this change doesn't otherwise touch,\nnot new problems introduced by it): write_const's unbounded recursion\non long cdr chains is now reachable via arbitrarily-long lambda bodies,\nnot just short quoted literals (a bigger, separate iterative-rewrite\ntask); procedure-closure's '() return conflates \"genuinely no captures\"\nwith \"this representation can't report captures\" (matches SRFI-279's\nown established omission-collapsing convention elsewhere).\n\n31 new checks in tests/srfi_s279_inspect_tests.scm (123 total, 0\nfailed) including a regression test for the module-scope leak (a\ndefine-library-scoped closure's procedure-closure must come back\nempty, not the whole module frame). 2 new checks in tests/test_cli.sh\n(69 total, 0 failed) for the .scc cache MISS/HIT src_lambda\nregression. Full suite: 92/92 ctest passing.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-14T16:30:39+10:00",
+          "tree_id": "082c54aa887d47bc2475fc132a085528e1941d7d",
+          "url": "https://github.com/deconstructo/curry/commit/4520cb2b5327995fae7838c417ca250a6d905f24"
+        },
+        "date": 1786689088326,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.341,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.501,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.307,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.095,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 190.669,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 369.724,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.399,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.384,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 99.96,
             "unit": "ms"
           }
         ]
