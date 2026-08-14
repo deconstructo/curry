@@ -1,6 +1,135 @@
 # Changelog
 
-### 1.17.12 - 2026-08-10
+### 1.20.0 - 2026-08-14
+
+**New — `(curry tts)`: cross-backend text-to-speech**
+
+`tts-speak`/`tts-save`/`tts-speak-async` over two backends: `'macos-say`
+(the system `say` command) and `'espeak-ng` (Linux, `espeak-ng` or
+`espeak`) — both plain command-line tools run through `(curry
+posix)`'s `posix_spawn`-backed `process-run`/`process-start`, so text,
+voice names, and paths pass through as literal argv data with no
+shell-injection surface. `current-tts-backend`/`-voice`/`-rate`/
+`-language` are real parameter objects (the same idiom as
+`current-number-notation`); `current-tts-language` resolves to a
+concrete voice by locale prefix against the active backend's own
+`tts-voices` listing, since neither backend takes a locale directly.
+`tts-backend-available?` fixed to return `#f` for an unrecognized
+backend symbol instead of raising. See docs/reference/module-tts.md.
+
+**New — R7RS `cond-expand` and `(features)`**
+
+`cond-expand` was a pre-interned symbol that was never actually
+dispatched — a real R7RS 4.2.9 gap. Now a genuine special form
+(feature identifiers, `and`/`or`/`not`, `(library <name>)`, `else`),
+resolved at three call sites: the tree-walker, the VM compiler
+(resolved once at compile time), and `define-library` declaration
+position — the motivating case, since SRFI-279's own reference
+implementation dispatches chibi/kawa/guile/else exactly this way.
+`(features)` is the new matching R7RS 6.13.3 builtin.
+
+**New — SRFI-279 (In(tro)spection Protocol)**
+
+`inspect-properties`/`inspect-describe`, written directly against
+curry's own primitives rather than porting the SRFI's reference
+implementation (which depends on SRFI 14/26/160/253, none of which
+curry had at the time). Covers objects, numbers, booleans, pairs,
+symbols, characters, strings, vectors, bytevectors, error-objects,
+hash-tables, boxes, sets/bags, and records — plus four new primitives
+(`record?`/`record-type?`/`record-rtd`/`record-type-name`/
+`record-type-field-names`) giving curry generic record introspection
+for the first time, not just the type-specific accessors
+`define-record-type` hands out. Two independent review rounds found
+and fixed a real type-dispatch ordering bug (SRFI-113 bags are hash
+tables under the hood, so `bag?` must be checked before the generic
+`hash-table?` branch) and a doc/code mismatch (`utf8->string` was
+documented as validating its input; it doesn't). See
+docs/reference/srfi/s279.md.
+
+**New — `(load ...)`/`(include ...)` resolve relative paths against the loading file's own directory, not the process's cwd**
+
+Found while porting SRFI-279 upstream: a library whose own directory
+wasn't the process's cwd could never portably `(include "sibling.scm")`.
+A new directory-context stack is pushed/released around every path
+that reads Scheme source from a file. Three rounds of review found and
+fixed real bugs along the way: an exception mid-load left stale stack
+state that corrupted a later, unrelated load (fixed via a mark/release
+scheme instead of push/pop pairing); the stack being a plain static
+was a genuine cross-thread data race confirmed via ThreadSanitizer (a
+real use-after-free, not just a lost update) — fixed by making it
+`_Thread_local`, which then meant a freshly-spawned actor started with
+an empty stack instead of inheriting its spawning thread's directory
+context (fixed with an explicit snapshot/adopt handoff in `actor_spawn`/
+`actor_thread`).
+
+**New — Partial hygiene for `syntax-rules`; `(srfi 26)` (`cut`/`cute`)**
+
+curry's `syntax-rules` was fully unhygienic — a template-introduced
+identifier was always emitted unchanged, resolved at the macro's use
+site. This broke porting SRFI-26's reference `cut`/`cute` (a recursive
+macro that accumulates a fresh identifier across expansions): every
+recursive step's introduced identifier collapsed into the same literal
+symbol. Now, after a pattern match, every template-introduced symbol
+that isn't already a real reference gets one fresh gensym for that
+expansion. Two independent review rounds found real concurrency bugs
+along the way: `let`/`letrec-syntax` self-recursion broke in compiled
+code (those macro names live only in the compiler's own per-call
+table, a second thread-local was needed), and the gensym counter
+itself was an unsynchronized plain `static long`, a genuine cross-thread
+race under curry's real-OS-thread actors (fixed with `_Atomic long`).
+`lib/curry/modules/srfi/s26/cut.scm` is the reference implementation
+verbatim.
+
+**New — SRFI-14 (Character-Set Library)** — construction, iteration, set
+algebra, comparisons, and the standard predefined sets, backed by a
+sorted-range representation over curry's full Unicode codepoint space.
+
+**New — Symbolic inequalities** (`<`, `<=`, `>`, `>=`) in the CAS.
+
+**Fix — NaN formatting normalized to a literal `"nan"` everywhere.**
+`%g`-based formatting faithfully printed a NaN's own sign bit, but
+IEEE 754 doesn't specify what sign a computation like `0.0/0.0`
+produces, so the same source expression could print `"nan"` on one
+platform and `"-nan"` on another — confirmed via a CI-only failure on
+Linux for a value neither platform's C code actually chooses the sign
+of. curry's display convention doesn't distinguish signed NaNs (unlike
+`+inf`/`-inf`, where the sign is IEEE-754-unambiguous and meaningful).
+
+**Fix — `src/features.h` renamed to `src/curry_features.h`.** It
+shadowed glibc's own `<features.h>` (transitively included by nearly
+everything, including Boehm GC's headers), breaking the Ubuntu build
+via a header-search-order collision never surfaced on macOS/BSD libc,
+which has no header by this name.
+
+**Docs** — CONTRIBUTING.md and issue templates added; an unresolved
+git-merge conflict marker left in LICENSE fixed.
+
+### 1.19.0 - 2026-08-11
+
+**New — `(curry mariadb)`/`(curry postgres)`: type coercion, structured errors, streaming, TLS, LISTEN/NOTIFY, COPY**
+
+Column values now coerce to native Scheme types automatically (mariadb:
+fixed a real BLOB-corruption bug found while doing this; postgres:
+coerced by OID) instead of every column coming back as a string. Both
+backends now raise structured `mariadb-error`/`postgres-error`
+conditions carrying SQLSTATE/errno instead of a bare error string.
+`sql-query-stream`/`sql-with-stream` (plus each backend's own native
+streaming mechanism — postgres also gets a native async
+single-row-mode variant) let a caller process large result sets
+without materializing them all in memory first. `(curry mariadb)`
+gains TLS config keys, now defaulting to verifying the server
+certificate (fixed after initially defaulting to skip verification);
+`(curry postgres)` gains LISTEN/NOTIFY pub-sub and COPY bulk
+load/unload, and `pg-cursor-close` is now guarded against being called
+twice.
+
+Docs (module-mariadb.md/module-postgres.md/module-sql.md) and tests
+extended to match; `sql_tests.scm` adds sqlite-backed
+`sql-query-stream`/`sql-with-stream` coverage (sqlite streams natively
+via true prepared statements, needing no live server). Full ctest
+suite passes.
+
+### 1.18.0 - 2026-08-10
 
 **New — `(curry sql)`: a Scheme-native cross-database layer, with sqlite/mariadb/postgres backends**
 
