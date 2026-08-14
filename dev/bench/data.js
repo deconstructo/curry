@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786686014074,
+  "lastUpdate": 1786686648508,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3380,6 +3380,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 98.78,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aeaf8060eee70bb07575eeea115599b0c5b84419",
+          "message": "feat: implement SRFI-14 (Character-Set Library) (#23)\n\nFollow-up to SRFI-26 (cut/cute) from the same session's SRFI-1/26/279\nsurvey -- SRFI-14 was recommended but deprioritized in favor of the\nsyntax-rules hygiene fix and a subsequent CI investigation. This\nimplements the full public API.\n\nA char-set is a curry-native (not a port of SRFI-14's own bitstring-\nbased reference implementation) record wrapping a sorted, non-\noverlapping vector of inclusive codepoint ranges -- chosen because\ncurry chars span the full Unicode codepoint space (0..#x10FFFF minus\nthe surrogate gap), where a bitmap or per-char hash-table would be\nenormous for sets like char-set:letter (~1M members). Range vectors\ngive char-set-contains? an O(log n) binary search and let the\nset-algebra ops run as simple sweeps over sorted ranges.\n\nAdds one new C builtin, unicode-property-ranges, exposing the existing\ngenerated Unicode classification tables (src/unicode_tables.c -- the\nsame ones char-alphabetic?/char-numeric?/etc already use) as Scheme\nrange data, so the full-Unicode predefined sets (char-set:letter,\nchar-set:digit, char-set:whitespace, char-set:upper-case,\nchar-set:lower-case) are built from the real tables in O(1) instead of\nscanning ~1.1M codepoints at the Scheme level. Everything else\n(punctuation/symbol/iso-control/blank/hex-digit/ascii/graphic/\nprinting/title-case) is ASCII-only (or empty for title-case), since\ncurry has no generated Unicode General-Category tables for those\nclasses -- documented in the module's header comment rather than\nsilently mis-classifying non-ASCII input.\n\nIndependently code-reviewed and security-reviewed (fresh subagents,\nno shared context) before landing. Two real findings applied:\n- char-set-map inherited char->integer's codebase-wide lack of a\n  type check, so a buggy mapper proc returning a non-char silently\n  produced a garbage-but-in-range codepoint instead of a clean error.\n  Added a char? check in %char->cp, the one chokepoint every codepoint\n  entering a char-set passes through.\n- char-set-union/-union! folded through %ranges-union (a full re-sort)\n  once per operand, O(k^2 log k) for k operands instead of O(k log k).\n  Fixed by collecting all operands' ranges and normalizing once.\n  char-set-xor is NOT safe to flatten the same way (parity-sensitive,\n  not just coverage), so it keeps its sequential pairwise fold --\n  documented why in a comment so it isn't \"fixed\" the same way later.\n\nNo memory-safety issues found: the new C builtin validates its string\nargument and raises cleanly (via scm_raise, a real longjmp, not a\nfallthrough) on an unknown property name before touching the\notherwise-uninitialized table pointer/count; ucs-range->char-set\nclamps arbitrarily large or reversed integer bounds to O(1) cost via\nmin/max rather than materializing the requested range.\n\n69 tests (tests/srfi_s14_char_sets_tests.scm), including full-Unicode\ncoverage above the BMP (a real >0xFFFF classification-table entry, not\njust the surrogate-exclusion logic char-set:full already covered).\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-14T15:50:07+10:00",
+          "tree_id": "c300c23eb093f259841f6b2d410dab0219882a51",
+          "url": "https://github.com/deconstructo/curry/commit/aeaf8060eee70bb07575eeea115599b0c5b84419"
+        },
+        "date": 1786686647903,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 25.357,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.464,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.645,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.152,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 223.78,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 415.641,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 76.33,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 136.705,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 111.301,
             "unit": "ms"
           }
         ]
