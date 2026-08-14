@@ -102,6 +102,7 @@
         ((record-type? object) 'record-type)
         ((record? object)      'record)
         ((procedure? object)   'procedure)
+        ((port? object)        'port)
         ((null? object)        'null)
         ((eof-object? object)  'eof)
         (else #f))) ; "whenever inferrable" -- omitted, not guessed, otherwise
@@ -426,6 +427,69 @@
         (%omit 'procedure-lambda   (procedure-lambda object))
         (%omit 'procedure-closure  (procedure-closure object))))
 
+    ;;; ---- Port ----
+    ;;;
+    ;;; port-open?/-direction/-type/-line/-position/-file-descriptor are
+    ;;; backed by new textual-port?/binary-port?/port-line/-position/
+    ;;; -file-descriptor primitives added alongside this module (see
+    ;;; their own comments in src/builtins.c for exactly what each of
+    ;;; curry's two port representations, FILE*-backed and string/
+    ;;; bytevector-backed, can and can't report). port-file is omitted
+    ;;; entirely: curry's Port struct never stores the path a file port
+    ;;; was opened from (see src/object.h), so there's genuinely nothing
+    ;;; to report, not something merely unwired. port-column is
+    ;;; similarly omitted: curry tracks line but never column at all.
+    ;;; port-encoding is a fixed 'UTF-8 for textual ports (curry really
+    ;;; is UTF-8-only throughout, per port.h's own header comment --
+    ;;; not a guess), omitted for binary ports (encoding doesn't apply).
+
+    (define (%port-open? object)
+      (or (and (input-port? object) (input-port-open? object))
+          (and (output-port? object) (output-port-open? object))))
+
+    (define (%port-direction object)
+      (cond ((and (input-port? object) (output-port? object)) 'both)
+            ((input-port? object) 'input)
+            ((output-port? object) 'output)
+            (else #f))) ; unreachable in practice -- every real port is at least one
+
+    ;; get-output-string/get-output-bytevector are meant for STRING/
+    ;; BYTEVECTOR OUTPUT ports specifically (SRFI-279's own wording:
+    ;; "for string and bytevector output ports") -- but curry's own
+    ;; get-output-string/-bytevector only check the PORT_STRING flag,
+    ;; not direction, so calling either on an INPUT string port doesn't
+    ;; raise at all, it just returns the input content (confirmed live:
+    ;; (get-output-string (open-input-string "hello")) => "hello", no
+    ;; error). Relying on a guard here would silently expose these
+    ;; properties on input ports too, contradicting the SRFI's own
+    ;; wording -- output-port? is checked explicitly instead of trusting
+    ;; curry's own exception behavior to enforce the boundary.
+    ;; textual-port?/binary-port? distinguish which of the two accessors
+    ;; actually applies -- both flags share PORT_STRING internally, so
+    ;; trying the wrong one isn't otherwise self-evident.
+    (define (%port-buffer object)
+      (and (output-port? object)
+           (if (textual-port? object)
+               (guard (e (#t #f)) (get-output-string object))
+               (guard (e (#t #f)) (get-output-bytevector object)))))
+
+    (define (%port-properties object)
+      (append
+        (list (list 'port-open? (%port-open? object))
+              (list 'port-direction (%port-direction object))
+              (list 'port-type (if (binary-port? object) 'binary 'textual))
+              (list 'port-line (port-line object)))
+        (let ((pos (port-position object))) (if pos (list (list 'port-position pos)) '()))
+        (let ((fd (port-file-descriptor object))) (if fd (list (list 'port-file-descriptor fd)) '()))
+        (if (textual-port? object) (list (list 'port-encoding 'UTF-8)) '())
+        (let ((buf (%port-buffer object))) (if buf (list (list 'port-buffer buf)) '()))
+        (if (and (output-port? object) (textual-port? object))
+            (guard (e (#t '())) (list (list 'get-output-string (get-output-string object))))
+            '())
+        (if (and (output-port? object) (binary-port? object))
+            (guard (e (#t '())) (list (list 'get-output-bytevector (get-output-bytevector object))))
+            '())))
+
     ;;; ---- 0..N → type indexed-element inlining, shared by pair/string/
     ;;; vector properties above. ----
 
@@ -470,6 +534,7 @@
           ((record-type? object) (%rtd-properties object))
           ((record? object)  (%record-properties object))
           ((procedure? object) (%procedure-properties object))
+          ((port? object)      (%port-properties object))
           (else '()))))
 
     (define (inspect-describe object . port-arg)

@@ -452,5 +452,113 @@
   (inspect-properties char-set:title-case) 'char-set-name 'char-set:empty)
 (has "char-set: type" (inspect-properties char-set:empty) 'type 'char-set)
 
+;;; ════════════════════════════════════════════════════════════
+;;; § 18  port-properties
+;;; ════════════════════════════════════════════════════════════
+
+;; textual-port?/binary-port?/port-line/port-position/port-file-descriptor
+;; as standalone R7RS-style primitives, not just through inspect-properties.
+(check "textual-port? on a textual port" (textual-port? (open-output-string)) #t)
+(check "binary-port? on a textual port" (binary-port? (open-output-string)) #f)
+(check "binary-port? on a binary port" (binary-port? (open-output-bytevector)) #t)
+(check "textual-port? on a binary port" (textual-port? (open-output-bytevector)) #f)
+(check "port-line is a positive integer" (integer? (port-line (open-input-string "x"))) #t)
+(check "port-file-descriptor is #f for a string port"
+  (port-file-descriptor (open-output-string)) #f)
+
+;; Regression: a FILE*-backed port (open-input-file/open-output-file),
+;; open and healthy -- port-position/port-file-descriptor's ftell(3)/
+;; fileno(3) path, entirely untested until now (only string/bytevector
+;; ports were exercised above; found missing by independent code
+;; review alongside the closed-port crash below).
+(let* ((path "/tmp/curry-s279-port-test.txt")
+       (dummy1 (call-with-output-file path (lambda (p) (write-string "hello" p))))
+       (ip (open-input-file path)))
+  (check "port-file-descriptor is a real fd for an open file port"
+    (and (integer? (port-file-descriptor ip)) (>= (port-file-descriptor ip) 0)) #t)
+  (check "port-position is a real offset for an open file port (ftell path)"
+    (integer? (port-position ip)) #t)
+  (close-port ip)
+  (delete-file path))
+
+;; Regression (CRITICAL, found by independent code review AND
+;; independent security review, both flagging the exact same bug):
+;; port_close (src/port.c) fclose()s a non-std-stream FILE*-backed
+;; port and sets its u.fp to NULL -- but the port object itself is
+;; still port?-true (closing doesn't change the type tag), so nothing
+;; upstream filters it out. The FIRST version of port-position/
+;; port-file-descriptor called ftell(3)/fileno(3) directly on that now-
+;; NULL FILE* with no PORT_CLOSED check at all -- an unconditional
+;; NULL-pointer dereference, verified live to segfault the whole
+;; process (exit 139), reachable from ordinary Scheme code with no
+;; unsafe/FFI involved, including transitively through plain
+;; inspect-properties/inspect-describe on a closed port (an entirely
+;; ordinary thing to introspect, e.g. debugging why/when a port
+;; closed). Must return #f, not crash.
+(let* ((path "/tmp/curry-s279-port-closed-test.txt")
+       (dummy1 (call-with-output-file path (lambda (p) (write-string "x" p))))
+       (ip (open-input-file path))
+       (dummy2 (close-port ip)))
+  (check "port-position on a closed file port returns #f, does not crash"
+    (port-position ip) #f)
+  (check "port-file-descriptor on a closed file port returns #f, does not crash"
+    (port-file-descriptor ip) #f)
+  (check "inspect-properties on a closed file port does not crash"
+    (integer? (length (inspect-properties ip))) #t)
+  (has "port(closed): port-open? is #f" (inspect-properties ip) 'port-open? #f)
+  (lacks "port(closed): no port-position" (inspect-properties ip) 'port-position)
+  (lacks "port(closed): no port-file-descriptor" (inspect-properties ip) 'port-file-descriptor)
+  (delete-file path))
+
+;; Regression: output string ports track position via u.str.len (bytes
+;; written so far), NOT u.str.pos (which is exclusively the INPUT read
+;; cursor and stays 0 for an output port no matter how much is
+;; written) -- an earlier version of port-position used pos
+;; unconditionally and silently reported 0 after every write.
+(let ((op (open-output-string)))
+  (check "port-position starts at 0 for a fresh output string port" (port-position op) 0)
+  (write-string "hello" op)
+  (check "port-position reflects bytes actually written" (port-position op) 5))
+
+;; port-position for an input string port: the read cursor, distinct
+;; from output's write-length tracking above.
+(let ((ip (open-input-string "hello world")))
+  (check "port-position starts at 0 for a fresh input string port" (port-position ip) 0)
+  (read-char ip) (read-char ip)
+  (check "port-position advances as chars are read" (port-position ip) 2))
+
+;; Input string port properties
+(let ((p (inspect-properties (open-input-string "x"))))
+  (has   "port(input): port-open?" p 'port-open? #t)
+  (has   "port(input): port-direction" p 'port-direction 'input)
+  (has   "port(input): port-type" p 'port-type 'textual)
+  (has   "port(input): port-encoding" p 'port-encoding 'UTF-8)
+  (lacks "port(input): no get-output-string (SRFI-279 specifies this for OUTPUT ports only, even though curry's own get-output-string primitive doesn't itself enforce that direction)"
+    p 'get-output-string)
+  (lacks "port(input): no port-buffer either, same reasoning" p 'port-buffer)
+  (lacks "port(input): no port-file (curry never stores the opening path)" p 'port-file)
+  (lacks "port(input): no port-column (curry never tracks it)" p 'port-column))
+
+;; Output string port properties
+(let* ((op (open-output-string))
+       (dummy (write-string "abc" op))
+       (p (inspect-properties op)))
+  (has "port(output-string): port-direction" p 'port-direction 'output)
+  (has "port(output-string): port-position after writing" p 'port-position 3)
+  (has "port(output-string): port-buffer mirrors get-output-string" p 'port-buffer "abc")
+  (has "port(output-string): get-output-string" p 'get-output-string "abc")
+  (lacks "port(output-string): no get-output-bytevector for a textual port" p 'get-output-bytevector))
+
+;; Output bytevector port properties
+(let* ((bop (open-output-bytevector))
+       (dummy (write-u8 65 bop))
+       (p (inspect-properties bop)))
+  (has   "port(output-bytevector): port-type" p 'port-type 'binary)
+  (has   "port(output-bytevector): get-output-bytevector" p 'get-output-bytevector (bytevector 65))
+  (lacks "port(output-bytevector): no port-encoding for a binary port" p 'port-encoding)
+  (lacks "port(output-bytevector): no get-output-string for a binary port" p 'get-output-string))
+
+(has "port(input): type" (inspect-properties (open-input-string "x")) 'type 'port)
+
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))
