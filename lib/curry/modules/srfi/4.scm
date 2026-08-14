@@ -35,4 +35,4 @@
 
     make-f64vector f64vector f64vector? f64vector-length f64vector-ref
     f64vector-set! f64vector->list list->f64vector f64vector-copy
-    f64vector-fill!))
+    f64vector-append f64vector-fill!))

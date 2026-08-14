@@ -35,17 +35,20 @@
 
     make-f64vector f64vector f64vector? f64vector-length f64vector-ref
     f64vector-set! f64vector->list list->f64vector f64vector-copy
-    f64vector-fill!)
+    f64vector-append f64vector-fill!)
   (begin
     ; u8/s8/.../s64 come from (curry typedvec) (modules/typedvec/typedvec.c,
     ; one generic C implementation parameterized over 8 element kinds);
     ; f64vector comes from the separate, pre-existing (curry f64vector)
     ; module (which also has a much larger numeric-computation surface --
     ; f64vector-dot, -map, -sum, etc -- not part of SRFI-4 and deliberately
-    ; not re-exported here). f64vector has no -copy!/-append counterpart
-    ; in that module, so SRFI-4's f64vector-copy!/f64vector-append are not
-    ; available through this library -- only what's actually implemented
-    ; is re-exported, per the s170/posix.scm precedent in this codebase.
+    ; not re-exported here). f64vector-append exists there too, but only
+    ; as a fixed 2-argument procedure, not the N-ary form the other 8
+    ; kinds have; still re-exported as-is (SRFI-4's own append is silent
+    ; on arity). f64vector-copy! has no counterpart in that module at
+    ; all, so it's the one SRFI-4 operation not available through this
+    ; library -- only what's actually implemented is re-exported, per
+    ; the s170/posix.scm precedent in this codebase.
     ; f32vector is not part of this library: curry's numeric tower has no
     ; native single-precision float representation to back it with.
     ))
