@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786745147698,
+  "lastUpdate": 1786746056720,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4277,6 +4277,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 94.744,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e86753efc527686252675fae933637bd07f5007d",
+          "message": "fix(srfi253): fix exponential case-lambda-checked expansion blowup (#36)\n\nIndependent security review found and measured a real macro-\nexpansion-time resource-exhaustion bug: %clc-dispatch spliced the\nnext clause's full unexpanded dispatch form in directly at every\narity-mismatch branch inside %clc-try's own recursion, making\nexpansion cost genuinely EXPONENTIAL in clause count (base ~= 2p+1\nfor p parameters per clause). Measured: 4x4 clauses/params -> 0.11s,\n5x5 -> 2.48s, 6x5 -> 27.7s, 8x4 -> didn't finish compiling in over 2\nminutes -- entirely reasonable-looking user code, reachable from any\ncode path compiling less-than-fully-trusted Curry source (an MCP\ntool, a REPL-as-a-service).\n\nFixed by wrapping the \"try the next clause\" continuation in a thunk,\ncreated once per clause via let, so only the resulting tiny 2-token\ncall gets duplicated across %clc-try's several branches -- not the\nwhole recursive dispatch tree. Expansion cost is now linear in\n(clauses x parameters) again; verified the same 8x4 stress case now\ncompiles and runs in ~12ms, not 2+ minutes. Regression test added\nexercising the exact shape that used to blow up.\n\nAlso documents (in both the code comment and docs/reference/srfi/\ns253.md) a second, narrower finding from the same review round:\ndefine-record-type-checked has a real, if short-lived, window between\nbinding the raw unchecked constructor/modifiers under their public\nnames and shadowing them with checked wrappers, during which another\nalready-running actor calling the constructor/a modifier by name gets\nthe unchecked version. Not fixed with a redesign -- doing so would\nneed generating a distinct fresh identifier per mutable field within\none define-record-type call, which portable syntax-rules genuinely\ncannot do (no gensym, no identifier concatenation) -- documented as a\nknown limitation instead, with the concrete usage guidance (define\ntypes before spawning actors that use them) that avoids it.\n\ntests/srfi_253_tests.scm: 43 checks (up from 42). Full ctest suite:\n96/96 pass.",
+          "timestamp": "2026-08-15T08:20:19+10:00",
+          "tree_id": "a5ac4ffb076b8959da10cec36ca02b2aa134ae2c",
+          "url": "https://github.com/deconstructo/curry/commit/e86753efc527686252675fae933637bd07f5007d"
+        },
+        "date": 1786746055867,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.909,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.983,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.599,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.935,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 183.88,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 327.585,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.629,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 105.414,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 93.095,
             "unit": "ms"
           }
         ]
