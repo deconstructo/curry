@@ -472,7 +472,28 @@ printf 'CURRYBC\x03garbage-not-a-real-v3-body' > "$CACHEVER_SCC"
 out=$("$CURRY" "$CACHEVER_SCM")
 check "cache: stale/wrong-version .scc rejected cleanly, recompiles" "$out" "42"
 ver_byte=$(od -An -tx1 -j 7 -N 1 "$CACHEVER_SCC" | tr -d ' \n')
-check "cache: stale .scc rewritten in the current format version" "$ver_byte" "05"
+check "cache: stale .scc rewritten in the current format version" "$ver_byte" "06"
+
+# Regression: Chunk.src_lambda (procedure-lambda/procedure-arglist's data
+# source) used to never be written to .scc at all, so a script's SECOND run
+# (a cache HIT, loaded from disk) silently lost it and returned #f, even
+# though the exact same script's FIRST run (a cache MISS, compiled fresh in
+# memory) had it correctly. Run the identical script twice and confirm both
+# runs -- not just the first -- report the real lambda form.
+SRCLAMBDA_SCM="$TMPDIR_CLI/srclambda_test.scm"
+cat > "$SRCLAMBDA_SCM" <<'EOF'
+(define (add x y) (+ x y))
+(display (procedure-lambda add))
+(newline)
+(display (procedure-arglist add))
+(newline)
+EOF
+rm -f "$TMPDIR_CLI/srclambda_test.scc"
+out1=$("$CURRY" "$SRCLAMBDA_SCM")
+out2=$("$CURRY" "$SRCLAMBDA_SCM")
+expected=$'(lambda (x y) (+ x y))\n(x y)'
+check "cache: procedure-lambda survives the first (cache MISS) run" "$out1" "$expected"
+check "cache: procedure-lambda survives a second (cache HIT) run" "$out2" "$expected"
 
 # -e also reports.
 out=$("$CURRY" --timings -e '(display (+ 1 2))' 2>&1 >/dev/null)

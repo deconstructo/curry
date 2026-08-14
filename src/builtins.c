@@ -2428,6 +2428,194 @@ static val_t prim_make_record_type(int ac, val_t *av, void *ud) {
     return vptr(rtd);
 }
 
+/* ---- Procedure introspection ----
+ *
+ * Curry previously exposed no way for Scheme code to ask a procedure
+ * its own name, arity, or source form -- a real, previously-documented
+ * gap (see (srfi s279 inspect)'s own header comment, "curry exposes no
+ * procedure-name/arity/arglist introspection to Scheme at all yet").
+ * Three procedure representations exist and each carries different
+ * metadata:
+ *   - T_CLOSURE (tree-walker): params/body/name/env directly on the
+ *     struct -- no separate source-location tracking exists for this
+ *     path at all (confirmed by the debugger's own doc comment: "tree-
+ *     walker code (load, tree-eval) is invisible to it").
+ *   - T_BCCLOSURE (bytecode VM): wraps a Chunk, which already carries
+ *     name/arity/source_name/lines/src_lambda for the debugger's sake
+ *     -- this path has the richest metadata.
+ *   - T_PRIMITIVE (built-in C procedure): name/min_args/max_args only;
+ *     no source form, no named parameters, no captured closure to
+ *     report -- those properties are correctly absent, not defaulted.
+ * Continuations and JIT-compiled closures report nothing (V_FALSE)
+ * rather than raising, matching the SRFI's own "omit unknown
+ * properties" rule one layer up in the inspect module. */
+
+static val_t bi_cstr_to_string(const char *s) {
+    if (!s) return V_FALSE;
+    uint32_t len = (uint32_t)strlen(s);
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, s, len + 1);
+    return vptr(str);
+}
+
+static val_t prim_procedure_name(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-name: not a procedure");
+    if (vis_closure(p)) return as_clos(p)->name;
+    if (vis_bcclosure(p)) { const char *n = as_bcclosure(p)->chunk->name; return n ? sym_intern_cstr(n) : V_FALSE; }
+    if (vis_prim(p)) return sym_intern_cstr(as_prim(p)->name);
+    return V_FALSE;
+}
+
+/* Closure params: a symbol (all-rest), a proper list, or an improper
+ * list ending in a rest symbol -- no separate "optional" arity concept
+ * exists in curry, so min/max fall out of this shape alone.
+ *
+ * Floyd's cycle detection (tortoise/hare), not just a plain walk: a
+ * closure's params is ordinary user-reachable data (nothing validates
+ * it eagerly at closure-construction time), so `(eval (list 'lambda
+ * circular-list body) env)` builds a real T_CLOSURE with circular
+ * params -- confirmed by independent security review to hang this
+ * function forever with a plain `while (vis_pair(p))` walk, a genuine
+ * DoS reachable from pure Scheme (a REPL helper, notebook, MCP tool,
+ * or LSP hover calling procedure-arity/inspect-properties on
+ * attacker-influenced input). No hard iteration cap is used instead,
+ * since that would reject legitimately long (if unusual) finite
+ * parameter lists that happen to exceed the cap. */
+static void closure_params_arity(val_t params, int *min_out, bool *variadic_out) {
+    int n = 0;
+    val_t slow = params, fast = params;
+    while (vis_pair(fast)) {
+        n++; fast = vcdr(fast);
+        if (!vis_pair(fast)) break;
+        n++; fast = vcdr(fast);
+        slow = vcdr(slow);
+        if (fast == slow) { /* cycle: treat as an unbounded rest-arg list */
+            *min_out = n; *variadic_out = true;
+            return;
+        }
+    }
+    *min_out = n;
+    *variadic_out = !vis_nil(fast); /* symbol tail (rest) or the whole thing was a bare symbol */
+}
+
+static val_t prim_procedure_arity(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-arity: not a procedure");
+    if (vis_closure(p)) {
+        int min; bool variadic;
+        closure_params_arity(as_clos(p)->params, &min, &variadic);
+        return scm_cons(vfix(min), variadic ? V_FALSE : vfix(min));
+    }
+    if (vis_bcclosure(p)) {
+        int arity = as_bcclosure(p)->chunk->arity;
+        if (arity >= 0) return scm_cons(vfix(arity), vfix(arity));
+        int min = -arity - 1;
+        return scm_cons(vfix(min), V_FALSE);
+    }
+    if (vis_prim(p)) {
+        Primitive *pr = as_prim(p);
+        return scm_cons(vfix(pr->min_args), pr->max_args < 0 ? V_FALSE : vfix(pr->max_args));
+    }
+    return V_FALSE;
+}
+
+static val_t prim_procedure_arglist(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-arglist: not a procedure");
+    if (vis_closure(p)) return as_clos(p)->params;
+    if (vis_bcclosure(p)) {
+        val_t lam = as_bcclosure(p)->chunk->src_lambda;
+        return vis_pair(lam) && vis_pair(vcdr(lam)) ? vcar(vcdr(lam)) : V_FALSE;
+    }
+    return V_FALSE; /* primitives have no named formals to report */
+}
+
+static val_t prim_procedure_file(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-file: not a procedure");
+    if (vis_bcclosure(p)) {
+        const char *sn = as_bcclosure(p)->chunk->source_name;
+        return sn ? bi_cstr_to_string(sn) : V_FALSE;
+    }
+    return V_FALSE;
+}
+
+static val_t prim_procedure_line(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-line: not a procedure");
+    if (vis_bcclosure(p)) {
+        Chunk *ch = as_bcclosure(p)->chunk;
+        if (ch->lines && ch->code_len > 0) return vfix(ch->lines[0]);
+    }
+    return V_FALSE;
+}
+
+static val_t prim_procedure_lambda(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-lambda: not a procedure");
+    if (vis_closure(p)) {
+        Closure *c = as_clos(p);
+        return scm_cons(S_LAMBDA, scm_cons(c->params, c->body));
+    }
+    if (vis_bcclosure(p)) {
+        val_t lam = as_bcclosure(p)->chunk->src_lambda;
+        return vis_pair(lam) ? lam : V_FALSE;
+    }
+    return V_FALSE;
+}
+
+/* Captured free variables as a ((name . value) ...) alist -- best
+ * effort, not exhaustive: a top-level closure's "env" is a ROOT frame
+ * (no parent) -- either GLOBAL_ENV itself, or (just as importantly,
+ * and originally missed here -- found by independent security review)
+ * any (curry X)/SRFI module's own env_new_root() frame, which holds
+ * every binding the module imported plus every private top-level
+ * define in that module, not a meaningful per-lambda "capture" either.
+ * A pointer-identity check against GLOBAL_ENV specifically let any
+ * exported procedure from ANY module leak its entire module scope
+ * (imports, siblings, even command-line-args) through this primitive
+ * and, transitively, through (srfi 279)'s inspect-properties/-describe,
+ * which calls this unconditionally. Guarding on env->parent == NULL
+ * (any root frame, not just the specific GLOBAL_ENV one) catches both.
+ * Tree-walker closures report their immediate defining frame only (not
+ * the full enclosing chain); BcClosures report their actual captured
+ * upvalues by name where the compiler recorded one. */
+static val_t prim_procedure_closure(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t p = av[0];
+    if (!vis_proc(p)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "procedure-closure: not a procedure");
+    if (vis_closure(p)) {
+        EnvFrame *env = as_clos(p)->env;
+        if (env == NULL || env->parent == NULL) return V_NIL;
+        val_t out = V_NIL;
+        for (uint32_t i = env->size; i > 0; i--)
+            out = scm_cons(scm_cons(env->syms[i-1], env->vals[i-1]), out);
+        return out;
+    }
+    if (vis_bcclosure(p)) {
+        BcClosure *bc = as_bcclosure(p);
+        val_t *names = bc->chunk->upval_names;
+        if (!names) return V_NIL;
+        val_t out = V_NIL;
+        for (int i = bc->upval_count; i > 0; i--) {
+            val_t name = names[i-1];
+            if (vis_false(name)) continue; /* unrecorded upvalue name */
+            out = scm_cons(scm_cons(name, *bc->upvals[i-1]->location), out);
+        }
+        return out;
+    }
+    return V_NIL;
+}
+
 /* ---- Misc ---- */
 static val_t prim_gensym(int ac, val_t *av, void *ud) {
     (void)ud; static int counter = 0;
@@ -2990,6 +3178,15 @@ void builtins_register(val_t env) {
     DEF("record-rtd",           prim_record_rtd,             1,1);
     DEF("record-type-name",     prim_record_type_name,       1,1);
     DEF("record-type-field-names", prim_record_type_field_names, 1,1);
+
+    /* Procedure introspection */
+    DEF("procedure-name",     prim_procedure_name,     1,1);
+    DEF("procedure-arity",    prim_procedure_arity,    1,1);
+    DEF("procedure-arglist",  prim_procedure_arglist,  1,1);
+    DEF("procedure-file",     prim_procedure_file,     1,1);
+    DEF("procedure-line",     prim_procedure_line,     1,1);
+    DEF("procedure-lambda",   prim_procedure_lambda,   1,1);
+    DEF("procedure-closure",  prim_procedure_closure,  1,1);
 
     /* Misc */
     DEF("gensym",     prim_gensym,  0,1);

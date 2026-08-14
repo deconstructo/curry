@@ -16,16 +16,21 @@
 ;;; by the new record?/record-rtd/record-type-name/record-type-field-names
 ;;; primitives added alongside this module -- curry previously had no way
 ;;; to ask "is this any record" without already knowing its RTD), error
-;;; objects, hash tables (srfi 69), boxes (srfi 111), and sets/bags
-;;; (srfi 113). Deliberately deferred, not forgotten:
-;;;   - procedure properties: curry exposes no procedure-name/arity/
-;;;     arglist introspection to Scheme at all yet (a real gap, tracked
-;;;     separately from this SRFI).
+;;; objects, hash tables (srfi 69), boxes (srfi 111), sets/bags (srfi 113),
+;;; and procedures (backed by the procedure-name/-arity/-arglist/-file/
+;;; -line/-lambda/-closure primitives added alongside this module -- see
+;;; their own header comment in src/builtins.c for exactly what each of
+;;; curry's three procedure representations, tree-walker closures,
+;;; bytecode-VM closures, and C primitives, can and can't report).
+;;; Deliberately deferred, not forgotten:
+;;;   - char-set properties: curry now HAS SRFI-14 (as of a later commit
+;;;     than this module's original version), but char-sets aren't wired
+;;;     into inspect-properties yet -- an easy, self-contained follow-up.
 ;;;   - numeric-vector (s8vector etc.) properties: curry has no SRFI 4/160.
-;;;   - char-set properties: curry has no SRFI 14.
 ;;;   - library/environment properties: modules.c's registry has no
 ;;;     Scheme-level enumeration API (module names/exports aren't queryable
 ;;;     from Scheme once loaded).
+;;;   - ports: no port-open?/-direction/-type/etc case at all yet.
 ;;; A `#f`-valued object-properties entry is never emitted for these —
 ;;; per the SRFI's own rule, an unsupported property is omitted, not
 ;;; filled with a dummy value.
@@ -247,6 +252,37 @@
               (list 'bag-unique-size (bag-unique-size object)))
         (map (lambda (kv) (list (car kv) (cdr kv))) (bag->alist object))))
 
+    ;;; ---- Procedure ----
+    ;;;
+    ;;; Each accessor already returns #f (or, for procedure-closure, '())
+    ;;; when curry has nothing to report for that procedure representation
+    ;;; (e.g. primitives have no source file/line/arglist/closure; the
+    ;;; tree-walker has no source location at all) -- %omit below turns
+    ;;; that into "key absent" rather than "key present with a dummy #f",
+    ;;; matching the SRFI's own rule for this exact situation.
+    ;;;
+    ;;; Known ambiguity (flagged by independent code review, accepted
+    ;;; rather than fixed): procedure-closure's '() means both "this
+    ;;; procedure genuinely captured nothing" (e.g. a top-level define)
+    ;;; and "this representation can't report captures at all" (every
+    ;;; primitive). Both collapse to an absent procedure-closure key
+    ;;; here, so a caller can't tell "verified empty" from "unknown" --
+    ;;; the same shape of collapse the SRFI's own omission rule already
+    ;;; accepts elsewhere (e.g. a #f digit-value is indistinguishable
+    ;;; from "not a digit" in %character-properties above).
+
+    (define (%omit key value) (if (or (eq? value #f) (null? value)) '() (list (list key value))))
+
+    (define (%procedure-properties object)
+      (append
+        (%omit 'procedure-name     (procedure-name object))
+        (list  (list 'procedure-arity (procedure-arity object)))
+        (%omit 'procedure-arglists (let ((a (procedure-arglist object))) (if a (list a) #f)))
+        (%omit 'procedure-file     (procedure-file object))
+        (%omit 'procedure-line     (procedure-line object))
+        (%omit 'procedure-lambda   (procedure-lambda object))
+        (%omit 'procedure-closure  (procedure-closure object))))
+
     ;;; ---- 0..N → type indexed-element inlining, shared by pair/string/
     ;;; vector properties above. ----
 
@@ -289,6 +325,7 @@
           ((error-object? object) (%error-properties object))
           ((record-type? object) (%rtd-properties object))
           ((record? object)  (%record-properties object))
+          ((procedure? object) (%procedure-properties object))
           (else '()))))
 
     (define (inspect-describe object . port-arg)
