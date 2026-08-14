@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786740735038,
+  "lastUpdate": 1786741914434,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4139,6 +4139,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 106.708,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f79e2adb56b7a96d7fa05a845273e8eee97fbefe",
+          "message": "docs: fix dead PHILOSOPHY.md link, update stale SRFI/module counts (#34)\n\ndocs/PHILOSOPHY.md was deliberately deleted in a834cc5b (\"removed\")\nbut README's link to it was never cleaned up -- a real 404. Removed\nthe link, keeping the surrounding sentence as plain prose.\n\nThe SRFI and module counts had also drifted: README claimed 32 SRFI\nlibraries (docs/reference/srfi/index.md now lists 37) and ~35 modules\n(docs/reference/modules.md now lists 56) -- both stale from before\nthis session's SRFI-4/160/279 and other additions.",
+          "timestamp": "2026-08-15T07:11:12+10:00",
+          "tree_id": "644c807bed2a83dc7d1d6f8a5ad8c5e42bf009ff",
+          "url": "https://github.com/deconstructo/curry/commit/f79e2adb56b7a96d7fa05a845273e8eee97fbefe"
+        },
+        "date": 1786741913022,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 27.081,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.019,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 7.414,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.657,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 268.656,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 409.714,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 75.44,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 147.618,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 129.469,
             "unit": "ms"
           }
         ]
