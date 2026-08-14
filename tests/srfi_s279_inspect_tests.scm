@@ -233,6 +233,106 @@
   (has "record-type: rtd-field-names" p 'rtd-field-names '(x y)))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; § 14.5  procedure-properties, and the underlying procedure-name /
+;;; -arity / -arglist / -file / -line / -lambda / -closure primitives.
+;;; Covers all three of curry's procedure representations: bytecode-VM
+;;; closures (ordinary top-level defines), tree-walker closures (an
+;;; internal define, which curry evaluates via tree-eval rather than
+;;; compiling), and C primitives.
+;;; ════════════════════════════════════════════════════════════
+
+(define (add-two x y) (+ x y))
+(define (make-adder n) (lambda (x) (+ x n)))
+(define add5 (make-adder 5))
+(define (varargs a . rest) (cons a rest))
+(define (all-rest . xs) xs)
+
+(check "procedure-name: named top-level define"    (procedure-name add-two) 'add-two)
+(check "procedure-name: anonymous closure is #f"    (procedure-name add5) #f)
+(check "procedure-name: primitive"                  (procedure-name car) 'car)
+(check "procedure-name: non-procedure raises"
+  (guard (e (#t 'raised)) (procedure-name 42)) 'raised)
+
+(check "procedure-arity: fixed 2-arg"      (procedure-arity add-two) '(2 . 2))
+(check "procedure-arity: fixed 1-arg (closure over n)" (procedure-arity add5) '(1 . 1))
+(check "procedure-arity: one required + rest" (procedure-arity varargs) '(1 . #f))
+(check "procedure-arity: all-rest (zero required)" (procedure-arity all-rest) '(0 . #f))
+(check "procedure-arity: primitive, fixed"  (procedure-arity car) '(1 . 1))
+(check "procedure-arity: primitive, variadic" (procedure-arity +) '(0 . #f))
+
+(check "procedure-arglist: proper list"     (procedure-arglist add-two) '(x y))
+(check "procedure-arglist: dotted (rest)"   (procedure-arglist varargs) '(a . rest))
+(check "procedure-arglist: primitive is #f" (procedure-arglist car) #f)
+
+(check "procedure-lambda: reconstructs the source form"
+  (procedure-lambda add-two) '(lambda (x y) (+ x y)))
+(check "procedure-lambda: primitive is #f" (procedure-lambda car) #f)
+
+(check "procedure-closure: captures the free variable"
+  (procedure-closure add5) '((n . 5)))
+(check "procedure-closure: no captures for a top-level define"
+  (procedure-closure add-two) '())
+(check "procedure-closure: primitive is '()" (procedure-closure car) '())
+
+(check "procedure-file: primitive is #f" (procedure-file car) #f)
+(check "procedure-line: primitive is #f" (procedure-line car) #f)
+
+;; A genuine tree-walker closure (T_CLOSURE, not T_BCCLOSURE) via
+;; tree-eval, curry's own primitive for forcing evaluation through the
+;; tree-walking interpreter rather than the bytecode VM -- an ordinary
+;; internal (define ...) is NOT this path (it still compiles to a
+;; BcClosure, confirmed via procedure-file returning a real filename
+;; for one rather than #f).
+(tree-eval '(define (tw-fn p q) (* p q)))
+(check "procedure-arity works for a tree-walker closure too"
+  (procedure-arity tw-fn) '(2 . 2))
+(check "procedure-arglist works for a tree-walker closure too"
+  (procedure-arglist tw-fn) '(p q))
+(check "tree-walker closures have no source-location tracking (procedure-file)"
+  (procedure-file tw-fn) #f)
+
+(let ((p (inspect-properties add-two)))
+  (has   "procedure: procedure-name"     p 'procedure-name 'add-two)
+  (has   "procedure: procedure-arity"    p 'procedure-arity '(2 . 2))
+  (has   "procedure: procedure-arglists" p 'procedure-arglists '((x y)))
+  (has   "procedure: procedure-lambda"   p 'procedure-lambda '(lambda (x y) (+ x y)))
+  (lacks "procedure: no procedure-closure for a top-level define" p 'procedure-closure))
+
+(let ((p (inspect-properties add5)))
+  (has   "procedure(closure): procedure-closure has the capture" p 'procedure-closure '((n . 5)))
+  (lacks "procedure(closure): procedure-name is absent, not #f"  p 'procedure-name))
+
+(let ((p (inspect-properties car)))
+  (has   "procedure(primitive): procedure-name" p 'procedure-name 'car)
+  (has   "procedure(primitive): procedure-arity" p 'procedure-arity '(1 . 1))
+  (lacks "procedure(primitive): no procedure-arglists" p 'procedure-arglists)
+  (lacks "procedure(primitive): no procedure-lambda"   p 'procedure-lambda)
+  (lacks "procedure(primitive): no procedure-file"     p 'procedure-file)
+  (lacks "procedure(primitive): no procedure-line"     p 'procedure-line)
+  (lacks "procedure(primitive): no procedure-closure"  p 'procedure-closure))
+
+;; Regression: procedure-closure on a closure whose env is a MODULE's own
+;; root frame (define-library's env_new_root(), not GLOBAL_ENV itself)
+;; used to leak that entire frame -- every import, every sibling private
+;; define, even command-line-args -- because the "don't dump a shared
+;; root scope" guard checked pointer-identity against GLOBAL_ENV
+;; specifically instead of "is this a root frame at all" (found by
+;; independent security review; verified to leak ~1933 bindings before
+;; the fix -- every builtin, its Akkadian/cuneiform aliases, and the
+;; real process argv, all reachable from an ordinary exported procedure
+;; of ANY shipped module). Any root frame (parent == #f at the C level)
+;; is now treated the same as GLOBAL_ENV: '(), not a real capture.
+(define-library (test s279-modscope)
+  (import (scheme base) (scheme write))
+  (export get-inner)
+  (begin
+    (define (inner) (+ 1 2))
+    (define (get-inner) inner)))
+(import (test s279-modscope))
+(check "procedure-closure on a module-scope closure does not leak the module frame"
+  (procedure-closure (get-inner)) '())
+
+;;; ════════════════════════════════════════════════════════════
 ;;; § 15  inspect-describe — human-readable output, doesn't raise
 ;;; ════════════════════════════════════════════════════════════
 

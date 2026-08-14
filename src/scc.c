@@ -43,7 +43,17 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x05'   /* v5: OP_TAIL_CALL_WITH_VALUES inserted into the
+#define SCC_FMT_VER     '\x06'   /* v6: persist Chunk.src_lambda (the original
+                                    (lambda params . body) source form, used for
+                                    tiered-JIT hot-swap and now also for the
+                                    procedure-lambda/procedure-arglist introspection
+                                    primitives) -- previously never written, so a
+                                    cache HIT silently lost it (returned #f) even
+                                    though the same script's first-ever run (a cache
+                                    MISS, compiled fresh in memory) had it. Found via
+                                    the (srfi 279) inspect test suite failing only
+                                    on its second run, never its first.
+                                  v5: OP_TAIL_CALL_WITH_VALUES inserted into the
                                     opcode enum, shifting every subsequent opcode's
                                     numeric value -- any .scc compiled by an older
                                     binary encodes bytecode using the OLD numbering,
@@ -335,6 +345,22 @@ static bool write_chunk(FILE *f, const Chunk *c) {
         }
     }
 
+    /* Source lambda form (v6+): tiered-JIT hot-swap + procedure-lambda/
+     * procedure-arglist introspection. write_const already handles an
+     * arbitrary S-expression (including V_VOID when unavailable), so
+     * this is just one more constant, not a new serialization format.
+     * Independent security review noted write_const's CTAG_PAIR case
+     * recurses non-tail on cdr with no depth limit, and this is the
+     * first caller to hand it something that can be an entire lambda
+     * BODY (previously only ever short quoted literals from the
+     * constant pool) -- a pre-existing exposure in shared code, not new
+     * here, but this call makes it reachable more often. Not fixed as
+     * part of this change (would mean converting write_const/read_const's
+     * whole pair-recursion to iterative, a larger refactor of code this
+     * change doesn't otherwise touch); flagged here for whoever picks
+     * that up. */
+    if (!write_const(f, c->src_lambda)) return false;
+
     return true;
 }
 
@@ -587,6 +613,9 @@ static bool read_chunk(FILE *f, Chunk *c) {
             free(buf);
         }
     }
+
+    /* Source lambda form (v6+) */
+    if (!read_const(f, &c->src_lambda)) return false;
 
     return true;
 }
