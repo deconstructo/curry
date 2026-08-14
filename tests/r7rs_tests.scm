@@ -451,6 +451,17 @@
     (person-age bob))
   21)
 
+;;; bignum?/multivector?: two type predicates genuinely missing from
+;;; curry's core before (srfi 253) -- every other extended-tower/object
+;;; predicate (quaternion?, octonion?, complex?, rational?, surreal?,
+;;; symbolic?, quantum?, matrix?, tensor?, spinor?, actor?) already
+;;; existed; added alongside (srfi 253) so it can be used meaningfully
+;;; across curry's whole type system, not just R7RS's base types.
+(check "bignum?: #f for a fixnum" (bignum? 5) #f)
+(check "bignum?: #t past fixnum range" (bignum? (expt 2 100)) #t)
+(check "multivector?: #f for a plain number" (multivector? 5) #f)
+(check "multivector?: #t for a real multivector" (multivector? (make-mv 3 0 0)) #t)
+
 ;;; %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: intended for
 ;;; internal use only by define-record-type's own codegen, but ordinary
 ;;; DEF'd globals like every other primitive, so directly callable by
