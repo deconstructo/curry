@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786700040979,
+  "lastUpdate": 1786701493606,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4001,6 +4001,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.58,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9e7f5dd51c8134132997a96ec7149c7ee923d136",
+          "message": "fix(srfi1): restore list* export + fix SIGSEGV-prone recursion (follow-up to #31) (#32)\n\n* fix(srfi1): restore list* to the export list (regression)\n\nIndependent code review found list* silently dropped from (srfi 1)/\n(srfi srfi-1)'s export list during the SRFI-1 gap-closing rewrite --\nit was previously reachable only via the Akkadian-alias chain\n(lang-aliases assumed it was already exported), and the new,\ncarefully-scoped export clause never re-added the plain name itself.\nConfirmed live: importing (srfi 1) into a fresh define-library body\nand calling list* raised \"unbound variable\" (a top-level REPL/script\nnever noticed, since core list* is already in scope there regardless\nof any SRFI-1 import).\n\nRe-added to (srfi s1 lists)'s own export list (it's a core global\nre-export, matching cons/car/cdr/list/etc's existing treatment) and\nto both shim files' export lists.\n\n* fix(srfi1): avoid non-tail cons-recursion in cons*/take/take-while/unfold\n\nIndependent security review found curry's per-function stack-overflow\nguard (the catchable \"call stack overflow\" condition) doesn't fire for\nnon-tail-recursive procedures defined inside a define-library body --\nthe process SIGSEGVs once the real C stack is exhausted instead. This\nis a pre-existing core interpreter gap (recorded separately for future\nwork), but this library made it trivially reachable at surprisingly\nlow thresholds for ordinary-sized input: (apply cons* (iota 800))\ncrashed at ~760 elements, (take (iota 1000000) 5000) crashed at ~5000,\nand unfold building a ~5000-element list crashed too -- far below what\nany real caller would consider \"very long\" (a several-thousand-row\nCSV/JSON array is enough to crash the whole VM with no diagnostic).\n\nRewrote all four as accumulator-based tail loops (reverse/\nappend-reverse at the end instead of building via cons in a non-tail\nposition). Verified live at sizes well past the old crash thresholds;\nregression tests added exercising 2000-20000 elements without needing\nto reproduce an actual crash in the test suite.\n\nNote: while auditing for the same import-order fix used elsewhere in\nthis branch, a fix to (srfi 69)/(srfi 125)'s own import order (to make\ntheir own hash-table-ref failure-thunk argument actually get invoked,\nmatching what this branch fixed for member/assoc/reduce) was found to\nhave a real collateral regression: (srfi s113 sets-and-bags) calls the\nCORE make-hash-table (integer cmp-mode) directly via its own bare\n(scheme base) import, relying on that name staying the original core\nprimitive in the shared flat GLOBAL_ENV -- the 69/125 fix makes their\nown override stick globally and permanently once imported anywhere in\nthe process, breaking srfi 113's internal usage (confirmed live:\nimporting (srfi 90) then (srfi 113) in sequence, as\ntests/akkadian_tests.scm does, then raises \"make-hash-table: only eq?,\neqv?, and equal? are supported\"). That fix is NOT included in this\nbranch -- reverted after finding the regression. This is a genuinely\ndeeper architectural issue (curry's SRFI shims share one flat\nGLOBAL_ENV with no isolation between \"this SRFI's override of a core\nname\" and unrelated code elsewhere that assumes core names stay put)\nthat needs a more careful fix than a blanket import-order swap.\n\nFull ctest suite: 95/95 pass, including akkadian_tests.scm (1738/1738,\nconfirmed unaffected by anything actually shipped in this commit).",
+          "timestamp": "2026-08-14T19:57:20+10:00",
+          "tree_id": "0bfbc90d9d27998709c12cd02bf6c69fd73d425e",
+          "url": "https://github.com/deconstructo/curry/commit/9e7f5dd51c8134132997a96ec7149c7ee923d136"
+        },
+        "date": 1786701492100,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.413,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.047,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.129,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.933,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.648,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 385.085,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.476,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.42,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.864,
             "unit": "ms"
           }
         ]
