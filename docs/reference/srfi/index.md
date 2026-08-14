@@ -30,6 +30,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | Library | SRFI | Description |
 |---------|------|-------------|
 | [`(srfi s1 lists)`](s1.md) | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
+| [`(srfi s4 uniform-vectors)`](s4.md) | [SRFI-4](https://srfi.schemers.org/srfi-4/) | Homogeneous numeric vectors — u8/s8/u16/s16/u32/s32/u64/s64vector from `(curry typedvec)` plus f64vector from `(curry f64vector)`; no f32vector (curry's numeric tower has no native single-precision type) |
 | [`(srfi s8 receive)`](s8.md) | [SRFI-8](https://srfi.schemers.org/srfi-8/) | `receive` multiple-values binding macro — shadows curry's own actor `receive` special form when imported |
 | [`(srfi s14 char-sets)`](s14.md) | [SRFI-14](https://srfi.schemers.org/srfi-14/) | Character sets — construction, iteration, set algebra, and the standard predefined sets (`char-set:letter`, `char-set:whitespace`, etc), backed by a sorted-range representation over curry's full Unicode codepoint space |
 | [`(srfi s18 multithreading)`](s18.md) | [SRFI-18](https://srfi.schemers.org/srfi-18/) | Thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |

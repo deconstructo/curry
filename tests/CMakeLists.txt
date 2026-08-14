@@ -234,6 +234,13 @@ if(BUILD_MODULE_RPI AND TARGET curry_rpi)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+if(BUILD_MODULE_TYPEDVEC AND TARGET curry_typedvec AND BUILD_MODULE_F64VECTOR AND TARGET curry_f64vector)
+    # (srfi 4) imports both (curry typedvec) and (curry f64vector).
+    add_test(NAME typedvec COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/typedvec_tests.scm)
+    set_tests_properties(typedvec PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(BUILD_MODULE_QT6 AND TARGET curry_qt6)
     # Phase 1 (widget creation) runs immediately; Phase 2 (painter / text
     # metrics) triggers an offscreen render via canvas-save-png!.
