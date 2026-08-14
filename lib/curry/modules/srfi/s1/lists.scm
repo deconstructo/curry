@@ -3,7 +3,7 @@
   (export
     ; SRFI-1 procedures already in curry's global env
     cons car cdr caaar cadar caar cdar
-    list make-list length append reverse
+    list list* make-list length append reverse
     list-tail list-ref last-pair list-copy
     map for-each filter fold-left
 
