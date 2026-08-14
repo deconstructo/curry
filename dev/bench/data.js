@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786741914434,
+  "lastUpdate": 1786745147698,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4208,6 +4208,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 129.469,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b8f0e786135ae70620bda3a32413852a9c678c80",
+          "message": "feat(srfi253): add Data (Type-)Checking; add bignum?/multivector? (#35)\n\nImplements SRFI-253: check-arg, values-checked, check-case,\nlambda-checked, case-lambda-checked, define-checked, define-record-\ntype-checked -- available as (srfi 253), (srfi srfi-253), and\n(srfi s253 data-checking), matching this codebase's existing SRFI\nnaming convention.\n\nAny ordinary unary predicate works as a checker, so curry's extended\ntype system (bignum?, rational?, complex?, quaternion?, octonion?,\nmultivector?, surreal?, symbolic?, quantum?, matrix?, tensor?,\nspinor?, actor?) already works with lambda-checked/define-checked/etc\nfor free -- except bignum? and multivector? didn't exist as core\npredicates at all before this commit (every other extended-tower/\nobject predicate did). Added both (src/builtins.c) so this SRFI can\nactually be used meaningfully across curry's whole type system, not\njust R7RS's base types.\n\ncurry has no native case-lambda at all (not even as a core special\nform, and no SRFI-16 shim exists either) -- case-lambda-checked is\nself-contained: a single variadic (lambda args ...) that dispatches\non the call's actual argument count by hand, rather than expanding\ninto calls to a case-lambda primitive that doesn't exist.\n\nTwo real macro-expansion bugs found and fixed during implementation\n(both caught by direct testing before committing, not by a formal\nreview round):\n- Every internal helper macro an exported macro's expansion reaches\n  (%values-checked, %lambda-checked, %clc-dispatch/-try, the\n  define-record-type-checked helpers) had to be exported too, even\n  though none is meant for direct external use -- curry's syntax-rules\n  is not hygienic across define-library boundaries (see\n  docs/reference/writing-a-module.md's own documented gotcha); omitting\n  them raised \"unbound variable\" the first time a user actually called\n  the exported macro, not at import time.\n- define-record-type-checked originally spliced an unexpanded\n  (%drtc-raw-field field-spec) macro call directly into\n  define-record-type's own field-spec position. define-record-type is\n  compiled directly (src/compiler.c's dedicated\n  compile_define_record_type), not itself a macro that expands its\n  own arguments first, so it read that call completely literally --\n  silently producing a garbled record type whose real accessors were\n  never actually defined. Fixed by pre-expanding the whole field-spec\n  list into plain (fname acc [mod]) forms via a CPS-style helper\n  BEFORE splicing anything into define-record-type, rather than\n  relying on define-record-type to macro-expand a nested call itself.\n\nCurry-specific scoping decision for define-record-type-checked:\nconstructor argument names must appear in the same order as the\nfield-specs they're checked against (matched positionally, not by\nname) -- simpler to implement correctly in portable syntax-rules (no\ncompile-time identifier-equality machinery, which syntax-rules can't\ndo portably at all) and matches how every existing define-record-type\ncall in this codebase is already written.\n\ntests/srfi_253_tests.scm: 42 checks covering all seven forms plus\ncurry's extended-type predicates as checkers. tests/r7rs_tests.scm:\n4 new checks for bignum?/multivector? directly. Full ctest suite:\n96/96 pass.",
+          "timestamp": "2026-08-15T08:05:10+10:00",
+          "tree_id": "9072738d660cdf39065b00623d51cb0875d0379f",
+          "url": "https://github.com/deconstructo/curry/commit/b8f0e786135ae70620bda3a32413852a9c678c80"
+        },
+        "date": 1786745145066,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.555,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.896,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.578,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.649,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 180.831,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 321.774,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.934,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 102.739,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 94.744,
             "unit": "ms"
           }
         ]
