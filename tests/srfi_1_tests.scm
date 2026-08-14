@@ -63,6 +63,14 @@
 (check "list-tabulate" (list-tabulate 4 (lambda (i) (* i i))) '(0 1 4 9))
 (check "circular-list?" (circular-list? (circular-list 1 2 3)) #t)
 (check "circular-list? on a proper list" (circular-list? (list 1 2 3)) #f)
+;; regression: dotted-list?'s original implementation did its own naive
+;; (cdr p) walk with no cycle detection, hanging forever on a circular
+;; list -- found live by independent security review. Fixed by deriving
+;; it from proper-list?/circular-list? (both already cycle-safe) instead
+;; of a third manual walk. These three predicates are exactly the ones
+;; SRFI-1 requires to correctly classify ANY list shape without hanging.
+(check "dotted-list? on a circular list terminates and is false"
+       (dotted-list? (circular-list 1 2 3)) #f)
 
 ;;; ---- Predicates ----
 

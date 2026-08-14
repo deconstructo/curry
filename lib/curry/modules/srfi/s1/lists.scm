@@ -97,13 +97,18 @@
                    ((not (pair? (cdr fast))) #f)
                    (else (loop (cdr slow) (cddr fast)))))))
 
+    ;; A list is exactly one of {proper, circular, dotted} (or the atom
+    ;; '() itself, which is proper but not a pair). Reusing proper-list?
+    ;; (delegates to R7RS's cycle-safe list?) and circular-list? (its
+    ;; own tortoise/hare walk) instead of a third independent manual
+    ;; walk here is deliberate: an earlier version of this predicate did
+    ;; its own naive (cdr p) walk with no cycle detection at all, hanging
+    ;; forever on a circular list -- found live by independent security
+    ;; review (dotted-list? on (circular-list 1 2 3) never returned).
     (define (dotted-list? x)
-      (cond ((null? x) #f)
-            ((pair? x) (let loop ((p x))
-                         (cond ((null? p) #f)
-                               ((pair? p) (loop (cdr p)))
-                               (else #t))))
-            (else #t)))
+      (and (not (null? x))
+           (not (proper-list? x))
+           (not (circular-list? x))))
 
     (define (null-list? x) (null? x))
     (define (not-pair? x) (not (pair? x)))
