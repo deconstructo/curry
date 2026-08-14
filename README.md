@@ -6,7 +6,7 @@ Source is compiled to bytecode and executed on a stack-based VM. When built with
 
 Error messages are rendered in Standard Babylonian Akkadian with cuneiform script (𒀭 ḫiṭītu — *great fault*), as scribal tradition demands.
 
-See [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) for why the project is built this way — pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
+Built around pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
 
 ## Documents
 
@@ -25,7 +25,7 @@ Documentation is split into two directories:
 - [Akkadian / Cuneiform reference](docs/reference/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages, plus the runtime error-message phrase table
 - [Error codes](docs/reference/error-codes.md) — stable machine-legible `error-object-code`/`condition-code` registry for tooling
 - [Module index](docs/reference/modules.md) — the full list of `(curry ...)` modules, import names, and extra build dependencies
-- [SRFI compatibility](docs/reference/srfi/index.md) — the 32 portable `(srfi sN name)` libraries, one page each
+- [SRFI compatibility](docs/reference/srfi/index.md) — the 37 portable `(srfi sN name)` libraries, one page each
 - [Parallel map/reduce](docs/reference/parallel.md) — the work-stealing thread pool behind `map`/`reduce`
 - [LLVM JIT backend](docs/reference/llvm-jit.md) — auto-JIT, benchmark numbers, build flags
 - [Garbage collector reference](docs/reference/gc.md) — the two GC backends and `(gc-stats)` fields
@@ -59,11 +59,11 @@ The global source is seeded from `/dev/urandom` on first use (xoshiro256+). See 
 
 ### Modules
 
-Curry ships ~35 optional and always-on modules — databases, HTTP/GraphQL/MQTT clients, an LLM client, image/scientific-data I/O, FFI, concurrency primitives, and more. Full list with import names, descriptions, and extra build dependencies: [`docs/reference/modules.md`](docs/reference/modules.md).
+Curry ships ~55 optional and always-on modules — databases, HTTP/GraphQL/MQTT clients, an LLM client, image/scientific-data I/O, FFI, concurrency primitives, and more. Full list with import names, descriptions, and extra build dependencies: [`docs/reference/modules.md`](docs/reference/modules.md).
 
 ### SRFI compatibility (`srfi`)
 
-32 portable SRFI libraries under the `(srfi sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme. Full index: [`docs/reference/srfi/index.md`](docs/reference/srfi/index.md).
+37 portable SRFI libraries under the `(srfi sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme. Full index: [`docs/reference/srfi/index.md`](docs/reference/srfi/index.md).
 
 ---
 
