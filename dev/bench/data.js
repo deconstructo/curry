@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786689088899,
+  "lastUpdate": 1786691070724,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3587,6 +3587,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 99.96,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5633820760d00ee30122f6c26f730b6a3acf6ef1",
+          "message": "feat: close (srfi 279) gaps -- char-sets, universal id/size/type, symbol-value, char-name, hash-table introspection (#26)\n\nCloses items 1, 2, and 4 of the SRFI-279 gap list from this session's\nearlier codebase review (item 3, rtd-accessors/-mutators/-predicate/\n-constructor, needs real RecordType struct + compiler codegen changes\nand is scoped as its own separate follow-up, alongside ports and\nSRFI-4/160).\n\n- Char-sets (srfi 14, newly available in this codebase): char-set-size,\n  char-set->list, char-set->string, and char-set-name (a reverse lookup\n  against the predefined sets via char-set= structural equality, since\n  SRFI-14 char-sets are otherwise anonymous). char-set:title-case is\n  deliberately not its own lookup entry -- curry has no titlecase table\n  at all, so it's permanently empty and structurally indistinguishable\n  from char-set:empty by char-set=, and honestly reports that name\n  rather than being given an unverifiable one of its own.\n\n- Universal object properties (id/size/type -- location deliberately\n  omitted, see its own comment): two new C primitives, %object-id\n  (a hash of the pointer via the existing val_hash SET_CMP_EQ path,\n  not the raw address, to avoid leaking memory layout) and\n  %object-size (byte footprint for String/Vector/Bytevector/Pair only,\n  #f -- omitted, not guessed -- for everything else). type is computed\n  in Scheme from the same predicate order inspect-properties' own\n  dispatch already uses.\n\n- symbol-value: a plain global-environment lookup (guarded eval),\n  distinguishing \"unbound\" from \"bound to a real #f\" via a private,\n  unexported sentinel value nothing outside the library can obtain a\n  reference to.\n\n- char-name: curry's own 9 R7RS named-character reader vocabulary\n  (space/newline/tab/return/null/escape/delete/alarm/backspace),\n  reverse-looked-up.\n\n- hash-table-equivalence-function/-hash-function: (srfi 69)'s own\n  accessors (which already return real procedure objects) piped\n  through procedure-name (added in a prior PR) to get the symbol name\n  SRFI-279 actually specifies. hash-table-weak?/-mutable?: fixed\n  #f/#t constants matching curry's actual hash-table semantics (no\n  weak-reference variant, always mutable).\n\nIndependently code-reviewed and security-reviewed (fresh subagents, no\nshared context) before landing. Two real bugs found and fixed:\n- %object-size for strings used live content length (`len`) instead\n  of allocated capacity (`orig_cap`), silently under-reporting any\n  string whose capacity exceeds its content -- and, worse, any string\n  that had a width-changing string-set!/string-copy! (ASCII -> multi-\n  byte or back), which reallocates onto a separate `ext` buffer while\n  the ORIGINAL inline block stays allocated as dead weight (Boehm GC,\n  no realloc-in-place). Verified live: a 10000-byte string's real\n  footprint roughly doubles after one such edit; the old formula\n  reported it as nearly unchanged. Fixed using orig_cap for the inline\n  block plus the ext buffer's own size (every ext-setting call site in\n  this file allocates it as exactly len+1 bytes, confirmed by reading\n  both sites, not assumed).\n- %object-id is not actually stable under the experimental, opt-in\n  `--gc generational` backend, which promotes/copies live objects\n  during minor collections -- changing the pointer the id hashes from\n  mid-process. Verified live (same object, same process, id changes\n  after enough allocation to trigger a promotion) against the default\n  Boehm backend (stable for the whole process, as claimed). Not\n  redesigned to fix -- giving every heap type a real GC-move-\n  independent identity slot is disproportionate to this feature for\n  the sake of one experimental, non-default backend -- documented as\n  an explicit, honest limitation in the primitive's own doc comment\n  instead of the previous unconditional \"stable\" claim.\n\nOne informational finding from security review incorporated into the\ndoc comment rather than requiring a code change: %object-id's actual\nprotection against address recovery is the 32-bit output truncation,\nnot one-wayness of the underlying hash mix (which is a real, invertible-\nin-principle avalanche finalizer) -- a probabilistic speed bump, not a\nhard guarantee, adequate for curry's scripting-language threat model\nbut worth writing down rather than leaving implicit.\n\n31 new/updated checks in tests/srfi_s279_inspect_tests.scm (155 total,\n0 failed), including regression coverage for both fixed bugs (the\nstring ext-buffer size fix) and one pre-existing test's hardcoded\nproperty count updated (2 -> 4) to account for the new universal id/\ntype properties always being present. Full suite: 92/92 ctest passing.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-14T17:03:49+10:00",
+          "tree_id": "6e74a8ca479820a4685d3659879323f31b3f1de3",
+          "url": "https://github.com/deconstructo/curry/commit/5633820760d00ee30122f6c26f730b6a3acf6ef1"
+        },
+        "date": 1786691069753,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.899,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.342,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.001,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.135,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 189.61,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 367.588,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.157,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.312,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 98.708,
             "unit": "ms"
           }
         ]
