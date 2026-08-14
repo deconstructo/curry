@@ -90,6 +90,10 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
             sizeof(RecordType) + nfields * sizeof(val_t));
         rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
         rtd->name = name_sym; rtd->nfields = nfields;
+        rtd->constructor = V_FALSE; rtd->predicate = V_FALSE;
+        rtd->accessors = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+        rtd->mutators  = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+        for (uint32_t k = 0; k < nfields; k++) { rtd->accessors[k] = V_FALSE; rtd->mutators[k] = V_FALSE; }
 
         val_t fs = field_list; uint32_t fi = 0;
         while (vis_pair(fs)) {
@@ -125,6 +129,7 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
         spec->bindings[n].name   = sym_intern_cstr(buf);
         spec->bindings[n].params = ctor_fields;
         spec->bindings[n].body   = rp_ctor_body(rtd_ref_expr, ctor_fields);
+        spec->bindings[n].role   = RTD_ROLE_CONSTRUCTOR;
         n++;
 
         /* Predicate: <name>? */
@@ -132,6 +137,7 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
         spec->bindings[n].name   = sym_intern_cstr(buf);
         spec->bindings[n].params = rp_cons(x_sym, V_NIL);
         spec->bindings[n].body   = rp_pred_body(rtd_ref_expr, x_sym);
+        spec->bindings[n].role   = RTD_ROLE_PREDICATE;
         n++;
 
         /* Accessors and mutators */
@@ -143,16 +149,20 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
             val_t fi_val     = vfix((intptr_t)fi);
 
             snprintf(buf, sizeof(buf), "%s-%s", ns, sym_cstr(fname));
-            spec->bindings[n].name   = sym_intern_cstr(buf);
-            spec->bindings[n].params = rp_cons(x_sym, V_NIL);
-            spec->bindings[n].body   = rp_getter_body(x_sym, fi_val);
+            spec->bindings[n].name        = sym_intern_cstr(buf);
+            spec->bindings[n].params      = rp_cons(x_sym, V_NIL);
+            spec->bindings[n].body        = rp_getter_body(x_sym, fi_val);
+            spec->bindings[n].role        = RTD_ROLE_ACCESSOR;
+            spec->bindings[n].field_index = (int)fi;
             n++;
 
             if (is_mutable) {
                 snprintf(buf, sizeof(buf), "%s-%s-set!", ns, sym_cstr(fname));
-                spec->bindings[n].name   = sym_intern_cstr(buf);
-                spec->bindings[n].params = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
-                spec->bindings[n].body   = rp_setter_body(x_sym, fi_val, v_sym);
+                spec->bindings[n].name        = sym_intern_cstr(buf);
+                spec->bindings[n].params      = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
+                spec->bindings[n].body        = rp_setter_body(x_sym, fi_val, v_sym);
+                spec->bindings[n].role        = RTD_ROLE_MUTATOR;
+                spec->bindings[n].field_index = (int)fi;
                 n++;
             }
             fi++; fs = vcdr(fs);
@@ -171,6 +181,10 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
     RecordType *rtd = (RecordType *)gc_alloc_pinned(sizeof(RecordType) + nfields * sizeof(val_t));
     rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
     rtd->name = name_sym; rtd->nfields = nfields;
+    rtd->constructor = V_FALSE; rtd->predicate = V_FALSE;
+    rtd->accessors = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+    rtd->mutators  = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+    for (uint32_t k = 0; k < nfields; k++) { rtd->accessors[k] = V_FALSE; rtd->mutators[k] = V_FALSE; }
     val_t fs = field_specs; uint32_t fi = 0;
     while (vis_pair(fs)) { rtd->field_names[fi++] = vcar(vcar(fs)); fs = vcdr(fs); }
 
@@ -190,12 +204,14 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
     spec->bindings[n].name   = ctor_name;
     spec->bindings[n].params = ctor_fields;
     spec->bindings[n].body   = rp_ctor_body(rtd_ref_expr, ctor_fields);
+    spec->bindings[n].role   = RTD_ROLE_CONSTRUCTOR;
     n++;
 
     /* Predicate */
     spec->bindings[n].name   = pred_sym;
     spec->bindings[n].params = rp_cons(x_sym, V_NIL);
     spec->bindings[n].body   = rp_pred_body(rtd_ref_expr, x_sym);
+    spec->bindings[n].role   = RTD_ROLE_PREDICATE;
     n++;
 
     /* Field accessors and mutators */
@@ -206,16 +222,20 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
         val_t getter_name = vcadr(fspec);
         val_t fi_val      = vfix((intptr_t)fi);
 
-        spec->bindings[n].name   = getter_name;
-        spec->bindings[n].params = rp_cons(x_sym, V_NIL);
-        spec->bindings[n].body   = rp_getter_body(x_sym, fi_val);
+        spec->bindings[n].name        = getter_name;
+        spec->bindings[n].params      = rp_cons(x_sym, V_NIL);
+        spec->bindings[n].body        = rp_getter_body(x_sym, fi_val);
+        spec->bindings[n].role        = RTD_ROLE_ACCESSOR;
+        spec->bindings[n].field_index = (int)fi;
         n++;
 
         if (vis_pair(vcddr(fspec))) {
             val_t setter_name = vcaddr(fspec);
-            spec->bindings[n].name   = setter_name;
-            spec->bindings[n].params = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
-            spec->bindings[n].body   = rp_setter_body(x_sym, fi_val, v_sym);
+            spec->bindings[n].name        = setter_name;
+            spec->bindings[n].params      = rp_cons(x_sym, rp_cons(v_sym, V_NIL));
+            spec->bindings[n].body        = rp_setter_body(x_sym, fi_val, v_sym);
+            spec->bindings[n].role        = RTD_ROLE_MUTATOR;
+            spec->bindings[n].field_index = (int)fi;
             n++;
         }
         fi++; fs = vcdr(fs);

@@ -2475,6 +2475,91 @@ static val_t prim_record_type_field_names(int ac, val_t *av, void *ud) {
     return list;
 }
 
+/* record-type-constructor/-predicate/-accessors/-mutators: the four
+ * "record-related procedures" SRFI-279's rtd-properties wants (see its
+ * own header comment in lib/curry/modules/srfi/s279/inspect.scm).
+ * constructor/predicate return the closure or #f if never populated
+ * (only possible for an RTD built by hand via %make-record-type with
+ * no define-record-type binding ever pointed back at it -- doesn't
+ * happen through normal Scheme code, but these stay defensive rather
+ * than assuming). accessors is always a full list of real procedures
+ * (every field has one, by both R6RS and R7RS's own grammar); mutators
+ * has a #f entry for each field declared immutable. */
+static val_t prim_record_type_constructor(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-constructor: not a record type");
+    return vunptr(RecordType, av[0])->constructor;
+}
+static val_t prim_record_type_predicate(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-predicate: not a record type");
+    return vunptr(RecordType, av[0])->predicate;
+}
+static val_t prim_record_type_accessors(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-accessors: not a record type");
+    RecordType *rtd = vunptr(RecordType, av[0]);
+    val_t list = V_NIL;
+    for (uint32_t i = rtd->nfields; i > 0; i--)
+        list = scm_cons(rtd->accessors ? rtd->accessors[i - 1] : V_FALSE, list);
+    return list;
+}
+static val_t prim_record_type_mutators(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "record-type-mutators: not a record type");
+    RecordType *rtd = vunptr(RecordType, av[0]);
+    val_t list = V_NIL;
+    for (uint32_t i = rtd->nfields; i > 0; i--)
+        list = scm_cons(rtd->mutators ? rtd->mutators[i - 1] : V_FALSE, list);
+    return list;
+}
+
+/* %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: intended for
+ * internal use only, by compiler.c's/eval.c's define-record-type
+ * codegen, to stash each binding's freshly-created closure back onto
+ * the RTD right after it's defined (the RTD itself is built before any
+ * of the bindings' closures exist -- record_type_build_spec only
+ * describes what needs creating, see its own header comment). "Not
+ * exported to user code" is documentation, not enforcement, though --
+ * these are ordinary DEF'd globals like every other primitive in this
+ * file, directly callable by any Scheme script (found by independent
+ * code review: (%rtd-set-accessor! 5 0 some-closure) reinterpreted the
+ * fixnum 5's raw bits as a RecordType* and wrote through it,
+ * segfaulting the process). Type-checked here the same way
+ * %record-ref/%record-set!/%record-pred? already are, for the same
+ * reason: a %-prefixed name signals "internal convention," not an
+ * actual access restriction curry's flat global namespace can enforce. */
+static val_t prim_rtd_set_constructor(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-constructor!: not a record type");
+    vunptr(RecordType, av[0])->constructor = av[1];
+    return V_VOID;
+}
+static val_t prim_rtd_set_predicate(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-predicate!: not a record type");
+    vunptr(RecordType, av[0])->predicate = av[1];
+    return V_VOID;
+}
+static val_t prim_rtd_set_accessor(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-accessor!: not a record type");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-accessor!: field index must be a fixnum");
+    RecordType *rtd = vunptr(RecordType, av[0]);
+    intptr_t idx = vunfix(av[1]);
+    if (idx >= 0 && (uint32_t)idx < rtd->nfields) rtd->accessors[idx] = av[2];
+    return V_VOID;
+}
+static val_t prim_rtd_set_mutator(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-mutator!: not a record type");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-mutator!: field index must be a fixnum");
+    RecordType *rtd = vunptr(RecordType, av[0]);
+    intptr_t idx = vunfix(av[1]);
+    if (idx >= 0 && (uint32_t)idx < rtd->nfields) rtd->mutators[idx] = av[2];
+    return V_VOID;
+}
+
 /* Build a fresh RecordType (RTD) from a name and a list of field-name
  * symbols. Used by the compiler's define-record-type codegen to
  * reconstruct the RTD at runtime — see compile_define_record_type in
@@ -2500,6 +2585,10 @@ static val_t prim_make_record_type(int ac, val_t *av, void *ud) {
         sizeof(RecordType) + nfields * sizeof(val_t));
     rtd->hdr.type = T_RECORD_TYPE; rtd->hdr.flags = 0;
     rtd->name = name; rtd->nfields = nfields;
+    rtd->constructor = V_FALSE; rtd->predicate = V_FALSE;
+    rtd->accessors = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+    rtd->mutators  = (val_t *)gc_alloc_raw_pinned(nfields * sizeof(val_t));
+    for (uint32_t i = 0; i < nfields; i++) { rtd->accessors[i] = V_FALSE; rtd->mutators[i] = V_FALSE; }
     val_t f = av[1];
     for (uint32_t i = 0; i < nfields; i++) { rtd->field_names[i] = vcar(f); f = vcdr(f); }
     return vptr(rtd);
@@ -3337,6 +3426,14 @@ void builtins_register(val_t env) {
     DEF("record-rtd",           prim_record_rtd,             1,1);
     DEF("record-type-name",     prim_record_type_name,       1,1);
     DEF("record-type-field-names", prim_record_type_field_names, 1,1);
+    DEF("record-type-constructor", prim_record_type_constructor, 1,1);
+    DEF("record-type-predicate",   prim_record_type_predicate,   1,1);
+    DEF("record-type-accessors",   prim_record_type_accessors,   1,1);
+    DEF("record-type-mutators",    prim_record_type_mutators,    1,1);
+    DEF("%rtd-set-constructor!",   prim_rtd_set_constructor,     2,2);
+    DEF("%rtd-set-predicate!",     prim_rtd_set_predicate,       2,2);
+    DEF("%rtd-set-accessor!",      prim_rtd_set_accessor,        3,3);
+    DEF("%rtd-set-mutator!",       prim_rtd_set_mutator,         3,3);
 
     /* Procedure introspection */
     DEF("procedure-name",     prim_procedure_name,     1,1);

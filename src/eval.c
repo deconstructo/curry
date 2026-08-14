@@ -589,6 +589,7 @@ tail:
          * always tree-walked, never compiled. */
         RecordTypeSpec spec;
         record_type_build_spec(rest, V_FALSE, &spec);
+        RecordType *rtd = as_rtd(spec.rtd_val);
         for (int i = 0; i < spec.count; i++) {
             Closure *c = CURRY_NEW_PINNED(Closure);
             c->hdr.type = T_CLOSURE; c->hdr.flags = 0;
@@ -596,7 +597,17 @@ tail:
             c->body   = spec.bindings[i].body;
             c->env    = as_env(env);
             c->name   = spec.bindings[i].name;
-            env_define(env, spec.bindings[i].name, vptr(c));
+            val_t cv = vptr(c);
+            env_define(env, spec.bindings[i].name, cv);
+            /* Stash each binding's closure back onto the RTD so
+             * record-type-constructor/-predicate/-accessors/-mutators
+             * can retrieve it later (SRFI-279's rtd-properties). */
+            switch (spec.bindings[i].role) {
+                case RTD_ROLE_CONSTRUCTOR: rtd->constructor = cv; break;
+                case RTD_ROLE_PREDICATE:   rtd->predicate   = cv; break;
+                case RTD_ROLE_ACCESSOR:    rtd->accessors[spec.bindings[i].field_index] = cv; break;
+                case RTD_ROLE_MUTATOR:     rtd->mutators[spec.bindings[i].field_index]  = cv; break;
+            }
         }
         return V_VOID;
     }

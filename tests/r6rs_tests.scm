@@ -99,6 +99,26 @@
 (check "r6rs record immutable: g" (color-g c) 128)
 (check "r6rs record immutable: b" (color-b c) 0)
 
+;;; record-type-constructor/-predicate/-accessors/-mutators via the
+;;; R6RS (fields ...) codegen path (record_type.c's is_r6rs branch),
+;;; a different name-derivation shape from R7RS's explicit
+;;; (ctor-name field...)/pred/(field acc [mut])... forms above.
+(define point-rtd (record-rtd p))
+(check "r6rs rtd: constructor field values"
+  (let ((q ((record-type-constructor point-rtd) 7 8))) (list (point-x q) (point-y q)))
+  '(7 8))
+(check "r6rs rtd: predicate" ((record-type-predicate point-rtd) p) #t)
+(check "r6rs rtd: both point fields are mutable"
+  (map (lambda (m) (procedure? m)) (record-type-mutators point-rtd))
+  '(#t #t))
+
+(define color-rtd (record-rtd c))
+(check "r6rs rtd: all-immutable record has no mutators"
+  (record-type-mutators color-rtd) '(#f #f #f))
+(check "r6rs rtd: accessors still work for an all-immutable record"
+  (map (lambda (acc) (acc c)) (record-type-accessors color-rtd))
+  '(255 128 0))
+
 ;;; ---- (rnrs) sub-library aliases ----
 
 (import (rnrs lists))

@@ -12,6 +12,19 @@
  * silently-divergable copies of the same field/name derivation logic.
  */
 
+/* Which of an RTD's four "record-related procedures" (SRFI-279's own
+ * phrase) a given binding is -- lets both compiler.c and eval.c stash
+ * each binding's resulting closure back onto the RTD (via
+ * %rtd-set-constructor!/-predicate!/-accessor!/-mutator!, see
+ * src/builtins.c) without re-deriving R6RS/R7RS's differing field-spec
+ * shapes themselves. field_index is only meaningful for ACCESSOR/MUTATOR. */
+typedef enum {
+    RTD_ROLE_CONSTRUCTOR,
+    RTD_ROLE_PREDICATE,
+    RTD_ROLE_ACCESSOR,
+    RTD_ROLE_MUTATOR,
+} RtdRole;
+
 /* One binding a define-record-type form introduces: the constructor, the
  * predicate, or one field's accessor/mutator. `body` is a ready-to-splice
  * one-form lambda body (a list of exactly one expression) referencing the
@@ -19,9 +32,11 @@
  * RTD referenced via whatever `rtd_ref` record_type_build_spec was called
  * with (see below). */
 typedef struct {
-    val_t name;
-    val_t params;
-    val_t body;
+    val_t   name;
+    val_t   params;
+    val_t   body;
+    RtdRole role;
+    int     field_index; /* only meaningful when role is ACCESSOR/MUTATOR */
 } RecordBinding;
 
 typedef struct {

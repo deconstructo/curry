@@ -335,9 +335,25 @@
     ;; the same way.
     (define (%record-field-ref object i) (%record-ref object i))
 
+    ;; rtd-constructor/-predicate/-accessors/-mutators: the four
+    ;; "record-related procedures" the SRFI wants (record-type-* are new
+    ;; primitives added alongside this update -- see their own comment
+    ;; in src/builtins.c). constructor/predicate are omitted in the
+    ;; (should-be-unreachable-in-practice) case they're #f -- every
+    ;; define-record-type binding populates both; accessors is always a
+    ;; full list of real procedures (every field has one by both R6RS
+    ;; and R7RS's own grammar); mutators keeps a #f entry INLINE for
+    ;; each field declared immutable rather than omitting the whole
+    ;; property or dropping that one element, so a caller can still
+    ;; line mutators up against field-names/accessors by position.
     (define (%rtd-properties rtd)
-      (list (list 'rtd-name (record-type-name rtd))
-            (list 'rtd-field-names (record-type-field-names rtd))))
+      (append
+        (list (list 'rtd-name (record-type-name rtd))
+              (list 'rtd-field-names (record-type-field-names rtd)))
+        (%omit 'rtd-constructor (record-type-constructor rtd))
+        (%omit 'rtd-predicate   (record-type-predicate rtd))
+        (list (list 'rtd-accessors (record-type-accessors rtd))
+              (list 'rtd-mutators  (record-type-mutators rtd)))))
 
     ;; field… → object: indexed by field name, in field-definition order.
     (define (%rtd-field-properties names ref)

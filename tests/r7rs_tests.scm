@@ -428,6 +428,52 @@
 (set-person-age! alice 31)
 (check "record-mutator" (person-age alice) 31)
 
+;;; record-type-constructor/-predicate/-accessors/-mutators: the actual
+;;; procedure objects define-record-type's own codegen creates, stashed
+;;; back onto the RTD (SRFI-279's rtd-properties wants these -- see
+;;; record_type.c/builtins.c's own comments on why the RTD doesn't have
+;;; them populated until after each binding is compiled/evaluated).
+(define person-rtd (record-rtd alice))
+(check "record-type-constructor is the actual constructor"
+  (person-name ((record-type-constructor person-rtd) "Bob" 40)) "Bob")
+(check "record-type-predicate is the actual predicate"
+  ((record-type-predicate person-rtd) alice) #t)
+(check "record-type-predicate rejects a non-instance"
+  ((record-type-predicate person-rtd) 42) #f)
+(check "record-type-accessors: field order matches record-type-field-names"
+  (map (lambda (acc) (acc alice)) (record-type-accessors person-rtd))
+  (list "Alice" 31))
+(check "record-type-mutators: immutable field's mutator slot is #f"
+  (car (record-type-mutators person-rtd)) #f)
+(check "record-type-mutators: mutable field's mutator slot actually mutates"
+  (let ((bob (make-person "Bob" 20)))
+    ((cadr (record-type-mutators person-rtd)) bob 21)
+    (person-age bob))
+  21)
+
+;;; %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: intended for
+;;; internal use only by define-record-type's own codegen, but ordinary
+;;; DEF'd globals like every other primitive, so directly callable by
+;;; any script. Independent security review found and reproduced a real
+;;; segfault: no vis_rtd check on the first argument, so vunptr blindly
+;;; reinterpreted an arbitrary value's raw bits as a RecordType*. Also
+;;; found a non-fixnum field-index argument silently aliasing into a
+;;; valid slot via vunfix's raw bit-shift (no vis_fixnum check).
+(check "%rtd-set-accessor! on a non-rtd raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! 5 0 (lambda (x) x)))
+  'caught)
+(check "%rtd-set-predicate! on #f raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-predicate! #f 'x))
+  'caught)
+(check "%rtd-set-accessor! on a string raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! "hello" 0 (lambda (x) x)))
+  'caught)
+(check "%rtd-set-accessor! with a non-fixnum index raises, doesn't alias into a valid slot"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! person-rtd (integer->char 0) (lambda (r) 'hijacked)))
+  'caught)
+(check "record-type-accessors unaffected by the rejected hijack attempt above"
+  (person-name alice) "Alice")
+
 ;;; define-record-type as an internal (local) definition — compiled natively,
 ;;; must stay local to the enclosing lambda rather than leaking to the
 ;;; global environment.
@@ -443,6 +489,25 @@
 (define counter1 (make-local-record-counter))
 (check "local define-record-type: first call"  (counter1) 1)
 (check "local define-record-type: second call" (counter1) 2)
+
+;;; record-type-* through a LOCALLY-defined record type: exercises the
+;;; add_local/scope_depth > 0 branch of compile_define_record_type
+;;; (the rtd_ref gensym gets its own reserved local slot instead of a
+;;; global binding), a different codegen path from the top-level
+;;; <person> record above -- must stash the same way.
+(define (make-local-rtd-probe)
+  (define-record-type <box2>
+    (mk-box2 v)
+    box2?
+    (v box2-v set-box2-v!))
+  (record-rtd (mk-box2 0)))
+(define box2-rtd (make-local-rtd-probe))
+(check "local define-record-type: record-type-constructor works"
+  ((car (record-type-accessors box2-rtd)) ((record-type-constructor box2-rtd) 99)) 99)
+(check "local define-record-type: record-type-predicate works"
+  ((record-type-predicate box2-rtd) ((record-type-constructor box2-rtd) 0)) #t)
+(check "local define-record-type: record-type-predicate rejects other types"
+  ((record-type-predicate box2-rtd) 42) #f)
 (check "local define-record-type: ctor not leaked to global"
   (guard (e (#t 'unbound)) (mk-ctr 0) 'leaked)
   'unbound)
