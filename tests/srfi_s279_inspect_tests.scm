@@ -11,7 +11,7 @@
 ;;; set/bag iteration order isn't guaranteed, and pinning the exact key
 ;;; list would make the suite brittle against future scope additions.
 
-(import (srfi 279) (srfi 14) (srfi 69) (srfi 111) (srfi 113) (srfi 128)
+(import (srfi 279) (srfi 14) (srfi 69) (srfi 111) (srfi 113) (srfi 128) (srfi 4)
         (scheme write) (scheme char))
 
 (define pass 0)
@@ -559,6 +559,39 @@
   (lacks "port(output-bytevector): no get-output-string for a binary port" p 'get-output-string))
 
 (has "port(input): type" (inspect-properties (open-input-string "x")) 'type 'port)
+
+;;; ════════════════════════════════════════════════════════════
+;;; § 19  typedvec-properties (srfi 4: u8/s8/u16/s16/u32/s32/u64/s64/f64vector)
+;;; ════════════════════════════════════════════════════════════
+
+(let ((p (inspect-properties (u8vector 1 2 3))))
+  (has "typedvec(u8): type" p 'type 'typedvec)
+  (has "typedvec(u8): u8vector-length" p 'u8vector-length 3)
+  (has "typedvec(u8): u8vector->list" p 'u8vector->list (list 1 2 3))
+  (has "typedvec(u8): indexed element 0" p 0 1)
+  (has "typedvec(u8): indexed element 2" p 2 3)
+  (lacks "typedvec(u8): no s8vector-length (wrong kind)" p 's8vector-length))
+
+;; s64vector: exact-bignum boundary values (past C long range) round-trip
+;; through the numeric tower correctly.
+(let ((p (inspect-properties (s64vector -9223372036854775808 9223372036854775807))))
+  (has "typedvec(s64): s64vector-length" p 's64vector-length 2)
+  (has "typedvec(s64): s64vector->list preserves bignum boundary values"
+    p 's64vector->list (list -9223372036854775808 9223372036854775807)))
+
+;; u64vector: UINT64_MAX, exceeding even signed int64 range.
+(has "typedvec(u64): u64vector->list preserves UINT64_MAX"
+  (inspect-properties (u64vector 18446744073709551615)) 'u64vector->list
+  (list 18446744073709551615))
+
+;; f64vector: a wholly separate heap type from the other 8 kinds
+;; ((curry f64vector), not (curry typedvec)) -- verifies %typedvec-entry's
+;; table dispatch reaches it too, not just the T_TYPEDVEC-backed kinds.
+(let ((p (inspect-properties (f64vector 1.5 2.5))))
+  (has "typedvec(f64): type" p 'type 'typedvec)
+  (has "typedvec(f64): f64vector-length" p 'f64vector-length 2)
+  (has "typedvec(f64): f64vector->list" p 'f64vector->list (list 1.5 2.5))
+  (lacks "typedvec(f64): no u8vector-length (wrong kind)" p 'u8vector-length))
 
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))
