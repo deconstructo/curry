@@ -1846,6 +1846,83 @@ static val_t prim_input_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; 
 static val_t prim_input_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
 static val_t prim_output_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_output(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
 static val_t prim_output_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_output(av[0]));}
+
+/* textual-port?/binary-port? -- real R7RS §6.13.1 procedures curry
+ * previously had no way to ask at all (port_is_binary already existed
+ * as a C-only helper; these are the first Scheme-visible wrappers).
+ * Backs (srfi 279)'s port-type property, but genuinely useful on their
+ * own regardless of that SRFI. */
+static val_t prim_textual_port_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud; return vbool(vis_port(av[0]) && !port_is_binary(av[0]));
+}
+static val_t prim_binary_port_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud; return vbool(vis_port(av[0]) && port_is_binary(av[0]));
+}
+
+/* port-line: 1-based line of the next unread character -- already
+ * tracked internally (port_line, src/port.c) for the reader's own
+ * backtraces, just never exposed to Scheme before. Meaningful mainly
+ * for input ports; reported for any port rather than gated, since it's
+ * an honest "whatever the port's own counter currently says" rather
+ * than a guess. */
+static val_t prim_port_line(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "port-line: not a port");
+    return vfix(port_line(av[0]));
+}
+
+/* port-position: exact byte offset into the port's own backing store.
+ * String/bytevector ports (PORT_STRING) track this via TWO different
+ * fields depending on direction, not one shared "position" -- u.str.pos
+ * is exclusively the input read cursor (port_read_char/-byte advance
+ * it; never touched by a write); an output port instead grows
+ * u.str.len as content is appended and leaves pos permanently at 0
+ * (confirmed by reading port_write_char/port_write_string directly,
+ * not assumed -- an earlier version of this function used pos
+ * unconditionally and silently reported 0 for every output-port
+ * write). File-backed ports use ftell(3) -- #f (not -1, an ordinary
+ * Scheme integer that could be silently mistaken for a real position)
+ * on any stream ftell can't answer for (pipes, ttys, sockets), rather
+ * than raising -- "position isn't meaningful for this port" is a
+ * legitimate, expected answer here, not an error.
+ *
+ * A closed FILE*-backed port must be checked before touching u.fp at
+ * all: port_close (src/port.c) fclose()s the stream and sets u.fp to
+ * NULL for any non-std-stream port, but leaves PORT_STRING-flagged
+ * ports' union member untouched and never changes the object's own
+ * type tag -- port? still says true, so nothing upstream filters a
+ * closed port out before it reaches here. Calling ftell/fileno on a
+ * NULL FILE* segfaults (found by independent code review, confirmed
+ * live: closing a file port then calling port-position on it crashed
+ * the process -- directly reachable through ordinary
+ * (srfi 279) inspect-properties, no unsafe/FFI needed). #f for a
+ * closed port is the same "not meaningful here" answer already used
+ * for the ftell-fails and no-fd-at-all cases, not a new convention. */
+static val_t prim_port_position(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "port-position: not a port");
+    Port *p = as_port(av[0]);
+    if (p->flags & PORT_STRING)
+        return vfix((intptr_t)(p->flags & PORT_OUTPUT ? p->u.str.len : p->u.str.pos));
+    if ((p->flags & PORT_CLOSED) || !p->u.fp) return V_FALSE;
+    long pos = ftell(p->u.fp);
+    return pos >= 0 ? vfix((intptr_t)pos) : V_FALSE;
+}
+
+/* port-file-descriptor: the underlying OS fd for a FILE*-backed port
+ * (fileno(3)); #f for string/bytevector ports, which have no fd at
+ * all -- not an error, there's genuinely nothing to report. Same
+ * closed-port hazard as port-position above -- guarded the same way,
+ * before fileno() ever sees a NULL/dangling u.fp. */
+static val_t prim_port_file_descriptor(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "port-file-descriptor: not a port");
+    Port *p = as_port(av[0]);
+    if (p->flags & PORT_STRING) return V_FALSE;
+    if ((p->flags & PORT_CLOSED) || !p->u.fp) return V_FALSE;
+    int fd = fileno(p->u.fp);
+    return fd >= 0 ? vfix(fd) : V_FALSE;
+}
 static val_t prim_current_input_port(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return PORT_STDIN;}
 static val_t prim_current_output_port(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return PORT_STDOUT;}
 static val_t prim_current_error_port(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return PORT_STDERR;}
@@ -3178,6 +3255,9 @@ void builtins_register(val_t env) {
     DEF("close-output-port",prim_close_port,1,1);
     DEF("input-port?",prim_input_port_p,1,1); DEF("output-port?",prim_output_port_p,1,1);
     DEF("input-port-open?",prim_input_port_open_p,1,1); DEF("output-port-open?",prim_output_port_open_p,1,1);
+    DEF("textual-port?",prim_textual_port_p,1,1); DEF("binary-port?",prim_binary_port_p,1,1);
+    DEF("port-line",prim_port_line,1,1); DEF("port-position",prim_port_position,1,1);
+    DEF("port-file-descriptor",prim_port_file_descriptor,1,1);
     DEF("current-input-port",prim_current_input_port,0,0);
     DEF("current-output-port",prim_current_output_port,0,0);
     DEF("current-error-port",prim_current_error_port,0,0);
