@@ -98,6 +98,12 @@ typedef enum {
     T_INTERVAL      = 52,  /* GC:MOVE — lo/hi are val_t (the MPFR values they point to are pinned) */
     T_CHUNK         = 53,  /* GC:PIN val_t: constants[], src_lambda — BcClosure.chunk is raw ptr */
     T_UPVALUE       = 54,  /* GC:PIN  — vm->open_upvalues raw linked list; location is interior ptr */
+    T_TYPEDVEC      = 55,  /* GC:MOVE — SRFI-4 typed vector (u8/s8/u16/s16/u32/s32/u64/s64/f32/f64);
+                               one shared struct for all 9 kinds, not 9 separate types -- see
+                               TV_KIND_* in object.h and modules/typedvec/typedvec.c. Distinct
+                               from the existing T_F64VEC (a separate, math/BLAS-flavored
+                               module with its own different operation set) -- deliberately not
+                               unified with it, to avoid destabilizing that already-shipped API. */
 } ObjType;
 
 /*
@@ -171,6 +177,7 @@ static inline uint32_t vtype(val_t v) {
 #define vis_matrix(v)   vis_type(v, T_MATRIX)
 #define vis_tensor(v)   vis_type(v, T_TENSOR)
 #define vis_f64vec(v)   vis_type(v, T_F64VEC)
+#define vis_typedvec(v) vis_type(v, T_TYPEDVEC)
 #define vis_up(v)       vis_type(v, T_UP)
 #define vis_down(v)     vis_type(v, T_DOWN)
 #define vis_tuple(v)    (vis_up(v) || vis_down(v))
@@ -319,6 +326,41 @@ typedef struct {
     uint32_t len;
     double   data[];
 } F64Vec;
+
+/* SRFI-4 element kind, stored in hdr.flags -- one shared struct for all
+ * 8 integer typed-vector kinds rather than 8 separate ObjTypes/structs
+ * (f64 is deliberately NOT included here: curry already has a full,
+ * separately-shipped (curry f64vector) module with its own F64Vec type
+ * and a much larger BLAS-flavored operation set; (srfi 4) re-exports
+ * that module's f64vector rather than introducing a second, competing
+ * f64 vector type that would collide on every name if both modules
+ * were ever imported together). See modules/typedvec/typedvec.c. */
+typedef enum {
+    TV_U8, TV_S8, TV_U16, TV_S16, TV_U32, TV_S32, TV_U64, TV_S64
+} TVKind;
+
+/* Element byte width per kind -- shared by the typedvec module and the
+ * GC (gc_gen.c needs it to size/copy a TypedVec without linking against
+ * the module). Inline rather than a lookup table: TVKind is a small,
+ * fixed, ordered enum, so a switch compiles to a jump table anyway. */
+static inline uint32_t tv_elem_size(TVKind k) {
+    switch (k) {
+        case TV_U8: case TV_S8:   return 1;
+        case TV_U16: case TV_S16: return 2;
+        case TV_U32: case TV_S32: return 4;
+        case TV_U64: case TV_S64: return 8;
+    }
+    return 1; /* unreachable */
+}
+
+/* TypedVec: flat array of raw bytes, element width determined by the
+ * TVKind in hdr.flags -- no GC pointers, use CURRY_NEW_FLEX_ATOM
+ * (data[] sized in BYTES, not elements: allocate len * tv_elem_size(kind)). */
+typedef struct {
+    Hdr      hdr;      /* hdr.flags = TVKind */
+    uint32_t len;      /* element count, not byte count */
+    uint8_t  data[];
+} TypedVec;
 
 typedef struct {
     Hdr      hdr;
@@ -739,6 +781,7 @@ typedef struct {
 #define as_quat(v)    vunptr(Quaternion, v)
 #define as_oct(v)     vunptr(Octonion,   v)
 #define as_f64v(v)    vunptr(F64Vec,     v)
+#define as_typedvec(v) vunptr(TypedVec,  v)
 #define as_bytes(v)   vunptr(Bytevector, v)
 #define as_port(v)    vunptr(Port,       v)
 #define as_clos(v)    vunptr(Closure,    v)

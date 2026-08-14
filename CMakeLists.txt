@@ -281,6 +281,7 @@ endif()
 # ---- Optional modules (shared libraries loaded at runtime) ----
 
 option(BUILD_MODULE_F64VECTOR "Build f64vector typed numeric array module" ON)
+option(BUILD_MODULE_TYPEDVEC  "Build typedvec module (SRFI-4 u8/s8/u16/s16/u32/s32/u64/s64 vectors)" ON)
 option(BUILD_MODULE_JSON      "Build JSON module"                  ON)
 option(BUILD_MODULE_SQLITE    "Build SQLite module"                ON)
 option(BUILD_MODULE_NETWORK   "Build network module"               ON)
@@ -389,6 +390,12 @@ if(BUILD_MODULE_F64VECTOR)
   curry_c_module(f64vector)
   target_link_libraries(curry_f64vector PRIVATE m)
   message(STATUS "Building f64vector module (typed double[] arrays)")
+endif()
+
+if(BUILD_MODULE_TYPEDVEC)
+  curry_c_module(typedvec)
+  target_link_libraries(curry_typedvec PRIVATE ${GMP_LIB})
+  message(STATUS "Building typedvec module (SRFI-4 u8/s8/u16/s16/u32/s32/u64/s64 vectors)")
 endif()
 
 if(BUILD_MODULE_JSON)

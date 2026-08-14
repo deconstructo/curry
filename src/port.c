@@ -527,6 +527,45 @@ void scm_write(val_t v, val_t port) {
         port_write_char(port, ')');
         return;
     }
+    if (vis_typedvec(v)) {
+        /* SRFI-4 typed vectors (modules/typedvec/typedvec.c) -- printed
+         * directly from the raw bytes here in core rather than calling
+         * back into the module (a loadable .so, not linked against by
+         * port.c), matching #f64(...) above's own established pattern
+         * for a typed numeric vector's external representation. Values
+         * are formatted straight as long/unsigned long (both exactly
+         * 64 bits on every platform curry supports), not routed through
+         * the numeric tower/bignum promotion the module's own
+         * tv_get does for Scheme-visible access -- printing never
+         * needs a val_t, just correct signed/unsigned text. */
+        TypedVec *tv = as_typedvec(v);
+        static const char *tv_prefix[8] = {
+            "u8","s8","u16","s16","u32","s32","u64","s64"
+        };
+        TVKind k = (TVKind)tv->hdr.flags;
+        port_write_char(port, '#');
+        port_write_string(port, tv_prefix[k], (uint32_t)strlen(tv_prefix[k]));
+        port_write_char(port, '(');
+        for (uint32_t i = 0; i < tv->len; i++) {
+            if (i) port_write_char(port, ' ');
+            const uint8_t *p = tv->data + (size_t)i * tv_elem_size(k);
+            int n;
+            switch (k) {
+                case TV_U8:  n = snprintf(buf, sizeof(buf), "%u",  *(const uint8_t  *)p); break;
+                case TV_S8:  n = snprintf(buf, sizeof(buf), "%d",  *(const int8_t   *)p); break;
+                case TV_U16: { uint16_t x; memcpy(&x,p,2); n = snprintf(buf, sizeof(buf), "%u",  x); break; }
+                case TV_S16: { int16_t  x; memcpy(&x,p,2); n = snprintf(buf, sizeof(buf), "%d",  x); break; }
+                case TV_U32: { uint32_t x; memcpy(&x,p,4); n = snprintf(buf, sizeof(buf), "%u",  x); break; }
+                case TV_S32: { int32_t  x; memcpy(&x,p,4); n = snprintf(buf, sizeof(buf), "%d",  x); break; }
+                case TV_U64: { uint64_t x; memcpy(&x,p,8); n = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)x); break; }
+                case TV_S64: { int64_t  x; memcpy(&x,p,8); n = snprintf(buf, sizeof(buf), "%lld", (long long)x); break; }
+                default: n = 0; break;
+            }
+            port_write_string(port, buf, (uint32_t)n);
+        }
+        port_write_char(port, ')');
+        return;
+    }
     if (vis_traced(v)) {
         Traced *t = as_traced(v);
         if (vis_symbol(t->name)) {
