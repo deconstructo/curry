@@ -26,8 +26,12 @@
 ;;; type properties (location deliberately omitted -- see %object-id's
 ;;; own comment in src/builtins.c), symbol-value (a live global-env
 ;;; lookup, not a module registry), char-name (curry's own 9 R7RS
-;;; named-character reader vocabulary), and hash-table-equivalence-
-;;; function/-hash-function/-weak?/-mutable?.
+;;; named-character reader vocabulary), hash-table-equivalence-
+;;; function/-hash-function/-weak?/-mutable?, ports (port-open?/
+;;; -direction/-type/-line/-position/-file-descriptor, backed by the
+;;; primitives added alongside the ports feature), and numeric vectors
+;;; (u8/s8/u16/s16/u32/s32/u64/s64/f64vector, now that (curry typedvec)
+;;; and (curry f64vector) both exist -- see %typedvec-properties below).
 ;;;
 ;;; Deliberately deferred, not forgotten:
 ;;;   - rtd-accessors/-mutators/-predicate/-constructor: these are
@@ -39,21 +43,25 @@
 ;;;     compile_define_record_type's codegen to stash those closures
 ;;;     back onto the RTD at creation time -- real compiler/runtime
 ;;;     work, scoped as its own follow-up rather than bundled here.
-;;;   - numeric-vector (s8vector etc.) properties: curry has no SRFI 4/160.
 ;;;   - library/environment properties: modules.c's registry has no
 ;;;     Scheme-level enumeration API (module names/exports aren't queryable
 ;;;     from Scheme once loaded).
-;;;   - ports: no port-open?/-direction/-type/etc case at all yet.
 ;;;   - symbol-library/symbol-exported?: same module-registry gap as
 ;;;     library/environment properties above -- symbol-value alone
 ;;;     doesn't need it (a plain global lookup), these do.
 ;;; A `#f`-valued object-properties entry is never emitted for these —
 ;;; per the SRFI's own rule, an unsupported property is omitted, not
 ;;; filled with a dummy value.
+;;;
+;;; SRFI-279 itself is still a DRAFT (not finalized) as of this writing
+;;; -- see docs/reference/srfi/s279.md's own opening note. The property
+;;; names/shapes below track the draft as it stood when each piece was
+;;; written; if the SRFI changes before finalization, this module's
+;;; surface may need to change to match.
 
 (define-library (srfi s279 inspect)
   (import (scheme base) (scheme write) (scheme char)
-          (srfi 1) (srfi 14) (srfi 69) (srfi 111) (srfi 113))
+          (srfi 1) (srfi 14) (srfi 69) (srfi 111) (srfi 113) (srfi 4))
   (export inspect-properties inspect-describe)
   (begin
 
@@ -92,6 +100,7 @@
         ((hash-table? object)  'hash-table)
         ((set? object)         'set)
         ((char-set? object)    'char-set)
+        ((%typedvec? object)   'typedvec)
         ((pair? object)        'pair)
         ((symbol? object)      'symbol)
         ((char? object)        'char)
@@ -249,6 +258,50 @@
             (list (list 'vector->string (%vector->string object)))
             '())
         (%indexed-properties (vector->list object))))
+
+    ;;; ---- Typed numeric vector (srfi 4: u8/s8/u16/s16/u32/s32/u64/
+    ;;; s64/f64vector) ----
+    ;;;
+    ;;; No single generic "is this any typed vector" predicate exists
+    ;;; across the 9 kinds -- 8 of them share one C heap type internally
+    ;;; ((curry typedvec)'s T_TYPEDVEC, distinguished only by a kind flag)
+    ;;; but expose only a kind-specific predicate at the Scheme level
+    ;;; (u8vector?, s8vector?, ...), and f64vector is a wholly separate
+    ;;; heap type from the pre-existing (curry f64vector) module. Each
+    ;;; kind's own predicate/length/->list procedures are looked up via
+    ;;; this table instead. Property keys are the real per-kind procedure
+    ;;; names (e.g. 'u8vector-length, not a generic 'typedvec-length),
+    ;;; matching this module's existing convention of naming a property
+    ;;; after the actual standard procedure that produced it.
+    (define %typedvec-table
+      (list
+        (list u8vector?  'u8vector-length  u8vector-length  'u8vector->list  u8vector->list)
+        (list s8vector?  's8vector-length  s8vector-length  's8vector->list  s8vector->list)
+        (list u16vector? 'u16vector-length u16vector-length 'u16vector->list u16vector->list)
+        (list s16vector? 's16vector-length s16vector-length 's16vector->list s16vector->list)
+        (list u32vector? 'u32vector-length u32vector-length 'u32vector->list u32vector->list)
+        (list s32vector? 's32vector-length s32vector-length 's32vector->list s32vector->list)
+        (list u64vector? 'u64vector-length u64vector-length 'u64vector->list u64vector->list)
+        (list s64vector? 's64vector-length s64vector-length 's64vector->list s64vector->list)
+        (list f64vector? 'f64vector-length f64vector-length 'f64vector->list f64vector->list)))
+
+    (define (%typedvec-entry object)
+      (let loop ((table %typedvec-table))
+        (cond ((null? table) #f)
+              (((caar table) object) (car table))
+              (else (loop (cdr table))))))
+
+    (define (%typedvec? object) (if (%typedvec-entry object) #t #f))
+
+    (define (%typedvec-properties object)
+      (let* ((e (%typedvec-entry object))
+             (len-key (list-ref e 1)) (len-fn (list-ref e 2))
+             (list-key (list-ref e 3)) (list-fn (list-ref e 4))
+             (elements (list-fn object)))
+        (append
+          (list (list len-key (len-fn object))
+                (list list-key elements))
+          (%indexed-properties elements))))
 
     ;;; ---- Bytevector ----
 
@@ -524,6 +577,7 @@
           ((hash-table? object) (%hash-table-properties object))
           ((set? object)     (%set-properties object))
           ((char-set? object) (%char-set-properties object))
+          ((%typedvec? object) (%typedvec-properties object))
           ((pair? object)    (%pair-properties object))
           ((symbol? object)  (%symbol-properties object))
           ((char? object)    (%character-properties object))
