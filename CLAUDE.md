@@ -118,6 +118,7 @@ The test suites registered in `ctest`:
 | `load_dir_context_thread_safety` | `fixtures/load_dir_context/thread_safety/main.scm` | The directory-context stack is `_Thread_local` and a spawned actor inherits its spawning thread's stack (`load_dir_snapshot`/`load_dir_adopt_snapshot`) — 20 concurrent actors, each verified correct on every one of 30 iterations |
 | `syntax_rules` | `syntax_rules_tests.scm` | `syntax-rules`/`define-syntax`/`let-syntax`/`letrec-syntax`, plus the "Partial hygiene" per-expansion renaming of template-introduced symbols in `src/syntax_rules.c` (recursive macros that accumulate fresh bindings, quoted symbolic data staying literal, a library-local macro's self-reference resolving in its own defining environment, not `GLOBAL_ENV`) |
 | `srfi_s26_cut` | `srfi_s26_cut_tests.scm` | `(srfi 26)` `cut`/`cute` — the reference implementation verbatim; doubles as the motivating regression suite for the `syntax-rules` hygiene fix above |
+| `srfi_s14_char_sets` | `srfi_s14_char_sets_tests.scm` | `(srfi 14)` char-sets — construction, iteration, set algebra, comparisons, and the standard predefined sets (full-Unicode letter/digit/whitespace/upper/lower-case backed by curry's own classification tables; ASCII-only punctuation/symbol/control/etc) |
 | `numeric_ext` | `numeric_ext_tests.scm` | Clifford algebra, symbolic CAS, surreal numbers, auto-diff, numeric tower |
 | `actors` | `actors_tests.scm` | Concurrency primitives (spawn/send!/receive) |
 | `dynamic_wind` | `dynamic_wind_tests.scm` | `dynamic-wind`, `call/cc` interactions |
