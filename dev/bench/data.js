@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786652883646,
+  "lastUpdate": 1786686014074,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3311,6 +3311,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 58.164,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7717b4ae355e6cca87423588e370f6f7cda1c516",
+          "message": "feat(symbolic): implement symbolic inequalities (<, <=, >, >=) (#24)\n\n* feat(symbolic): implement symbolic inequalities (<, <=, >, >=)\n\nMotivated by Fredrik Johansson's \"Things I would like to see in a\ncomputer algebra system\" (https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/),\npoint #12: \"Analysis-oriented CASes are generally good at manipulating\nequalities and limits, but strangely poor at manipulating\ninequalities.\" Before this, `(symbolic x) (< x 5)` raised a confusing\n\"exact integer required, got non-numeric value\" instead of building a\nsymbolic expression the way `+`/`*`/`sin`/etc already do.\n\n<, <=, >, >= now lift over symbolic values in the 2-argument case:\ndecided (returns #t/#f) when both operands are numeric, when they're\nstructurally identical (reflexive case, reusing the existing sx_equal\nhelper), or when one side is a sign-flagged sym-var ('positive/\n'negative) compared against a plain number -- otherwise a genuine\nsymbolic comparison expression like (< x 5), printable via\nsym->infix/sym->latex and substitutable like any other symbolic node.\n\nNew: SX_LT/SX_LE/SX_GT/SX_GE op symbols and sx_lt/sx_le/sx_gt/sx_ge\nconstructors in symbolic.{h,c}, mirroring the existing sx_sign pattern\n(decision logic lives inside sx_simplify's dispatch, not the\nconstructors, so re-simplifying after substitute decides it too, not\njust at construction time). A new NUM_CMP_ORD macro in builtins.c\nhandles the symbolic dispatch and, for 3+-argument calls with any\nsymbolic operand, raises a clear error instead of unsupported chain\nsemantics (no design for what e.g. `1 < x < 5` even prints as).\nPrinter support (infix + LaTeX) in symbolic_print.c.\n\nBonus: sym->markdown wraps sym->latex's output in $...$/$$...$$, the\nmath-delimiter convention GitHub-flavored Markdown/Jupyter/Pandoc/\nObsidian all agree on -- point #17 of the same post (\"publication-\nquality output... should not even be particularly hard\").\n\nExplicitly out of scope (documented in docs/reference/symbolic.md):\nno general expression-level sign inference, no bound assumptions\nbeyond sign, no 3+-arg symbolic chains, = and != not covered (same\nunderlying gap, different judgment call on when #f is safe to return).\n\nIndependently code-reviewed and security-reviewed (fresh subagents, no\nshared context) before landing. Two real findings fixed:\n- The 3+-arg error path only checked the CURRENT pair for a symbolic\n  operand, interleaved with the pairwise comparison loop -- an earlier\n  numeric pair's #f could short-circuit the loop before it ever\n  reached the symbolic pair, so e.g. (< 5 1 x) silently returned #f\n  instead of raising, contradicting the documented guarantee. Fixed by\n  scanning the whole call for a symbolic operand up front.\n- The error message stringified the macro's internal C token (#op,\n  e.g. \"lt\") instead of the Scheme-visible operator name, so a user\n  who wrote `>` saw \"gt: symbolic comparison...\". Fixed by threading\n  the actual operator spelling through the macro explicitly.\n\nAlso fixed one pre-existing doc inaccuracy noticed in review (not\nintroduced by this change): docs claimed differentiating a comparison\nraises an error; it actually stays unevaluated, same as any other\noperator the differentiator has no rule for.\n\n32 new checks in tests/numeric_ext_tests.scm (406 total in that file,\n0 failed), including a regression test for both review findings above.\nFull suite: 91/91 ctest passing.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* perf(symbolic): avoid redundant vis_symbolic re-scan on the 2-arg comparison hot path\n\nThe 3+-arg symbolic-operand fix (previous commit) added a whole-call\nscan for a symbolic operand ahead of the comparison loop, but that\nscan ran unconditionally -- even for the ac==2 case, which had already\njust checked both operands for symbolic-ness one line above. Every\nordinary (< a b) call (the hottest path here by far -- e.g. fib's\n`(< n 2)`) was paying for 4 vis_symbolic checks instead of 2.\n\nInvestigated after CI's benchmark gate flagged a 1.3-1.8x regression\nacross ALL benchmarks simultaneously, including ones (list-build-walk,\nflonum-loop, cont-capture) that only use `=`, which this feature never\ntouched -- a same-machine main-vs-branch comparison (Release build,\naveraged over 3 runs) showed that alert was dominated by CI-runner\nnoise: `=`-only benchmarks were statistically identical, and the real,\nreproducible cost was ~6-8% on fib specifically, nowhere near 1.3x.\nRestructuring so the ac==2 case returns before the 3+-arg scan runs\nbrings alloc-churn/tak/count-down back to noise-level parity with\nmain; fib retains a small ~6-8% cost inherent to adding any check to\na hot comparison dispatch, which is an acceptable, disclosed tradeoff\nfor the feature working at all.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-14T15:39:18+10:00",
+          "tree_id": "5b2648541c8c9593615521f69aa7dd835d0a29f9",
+          "url": "https://github.com/deconstructo/curry/commit/7717b4ae355e6cca87423588e370f6f7cda1c516"
+        },
+        "date": 1786686013327,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.957,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.068,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.045,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.286,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.093,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.116,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.294,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.709,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 98.78,
             "unit": "ms"
           }
         ]
