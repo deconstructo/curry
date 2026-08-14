@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786692811687,
+  "lastUpdate": 1786693819516,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3725,6 +3725,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 102.793,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "91134113524b9c984796f1b6a873b9742c0a150c",
+          "message": "feat(typedvec): SRFI-4 core typed vectors (u8..s64) + (srfi 4) wrapper (#28)\n\n* feat(typedvec): add SRFI-4 core typed vector module (u8..s64)\n\nNew T_TYPEDVEC heap type + modules/typedvec/typedvec.c covering the 8\ninteger SRFI-4 kinds (u8/s8/u16/s16/u32/s32/u64/s64); f64vector is\ndeliberately excluded since (curry f64vector) already ships it.\nRegisters 12 generic operations x 8 kinds via a single parameterized\nC implementation rather than duplicating per-kind code.\n\n- src/object.h: T_TYPEDVEC tag, TVKind enum, TypedVec struct, tv_elem_size\n- src/gc_gen.c: size/type_has_ptrs/scan_object cases for the generational\n  (experimental, non-default) GC backend\n- src/port.c: #u8(...)/#s64(...)/etc external representation in scm_write,\n  mirroring the existing #f64(...) case\n- CMakeLists.txt: BUILD_MODULE_TYPEDVEC option (default ON)\n\nu64/s64 values round-trip exactly as bignums past signed-long range;\nrange checking verified (out-of-range u8vector-set! raises).\n\n* feat(srfi4): add (srfi 4) uniform-vectors wrapper, tests, docs\n\nCombines (curry typedvec) (u8..s64, this session's new module) with\nthe pre-existing (curry f64vector) module into one SRFI-4 surface,\navailable as (srfi 4), (srfi srfi-4), and (srfi s4 uniform-vectors)\nper the codebase's existing SRFI-shim convention. f64vector-copy and\nf64vector-append are not re-exported since (curry f64vector) does not\nimplement copy-into or append; f32vector is out of scope (curry has\nno native single-precision float type).\n\n- tests/typedvec_tests.scm: 34 checks covering all 8 integer kinds,\n  range checking, u64/s64 exact-bignum round-tripping, copy/append/\n  fill, and the new #u8(...)/#s64(...) external representation\n- docs/reference/module-typedvec.md, docs/reference/srfi/s4.md\n- registered in docs/reference/modules.md and srfi/index.md\n\n* fix(typedvec): address independent code+security review findings\n\nBoth a fresh code-review subagent and a fresh security-review subagent\nindependently examined the SRFI-4 typedvec commits with no shared\ncontext, and each found real bugs:\n\n- CRITICAL: the printer's #u8(...)/#s8(...)/etc external representation\n  collided with existing reader syntax -- #u8( is already R7RS\n  bytevector literal syntax (reading a written u8vector silently\n  produced a bytevector instead, a type-confusion bug), and bare #s...\n  is already the sexagesimal-number reader (reading a written s8vector\n  through s64vector silently corrupted the rest of the read stream\n  instead of raising). Fixed by suffixing every prefix with \"vec\"\n  (#u8vec(...), #s64vec(...), etc), which neither reader path's literal\n  character match can succeed on -- both now raise a clean read error\n  on read-back instead of misparsing, matching the pre-existing\n  #f64(...) representation's own same non-reader-syntax limitation.\n- tv_range()'s end argument and fn_typedvector_copy_bang's fend both\n  called vunfix() directly without the vis_fixnum check tv_idx() uses\n  everywhere else, so a non-fixnum argument (e.g. #t) was silently\n  reinterpreted as a small integer instead of raising a type error.\n  Fixed by routing both through tv_idx().\n- make-TAGvector validated only n < 0, then silently truncated to\n  uint32_t -- (make-u8vector 4294967297 7) produced a 1-element vector\n  instead of raising. Fixed with an explicit upper-bound check.\n- %svector-append accumulated per-argument lengths into a uint32_t\n  with no overflow check; for a combined length exceeding UINT32_MAX\n  (requires several GB of typed vectors) this wraps to a small value,\n  under-allocates the result, and the copy loop then writes past the\n  allocation -- a real heap buffer overflow, just not reproducible in\n  a normal sandbox. Fixed by accumulating in uint64_t and rejecting\n  before truncation.\n- fn_typedvector_copy_bang's own at + n > to->len bounds check had the\n  same uint32_t-overflow shape; now computed in size_t.\n\nAdded regression tests for all of the above plus read-back checks\nconfirming #u8(...) still resolves to a real bytevector and the new\n#u8vec(...)/#s8vec(...) forms raise cleanly rather than misparsing.",
+          "timestamp": "2026-08-14T17:49:08+10:00",
+          "tree_id": "8ecebaa0795d81ea42b176f0d7e07810878ddfcc",
+          "url": "https://github.com/deconstructo/curry/commit/91134113524b9c984796f1b6a873b9742c0a150c"
+        },
+        "date": 1786693818342,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.399,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.587,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.839,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.043,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 144.811,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 281.613,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 63.359,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.434,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 75.487,
             "unit": "ms"
           }
         ]
