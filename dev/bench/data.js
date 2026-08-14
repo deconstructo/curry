@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786691070724,
+  "lastUpdate": 1786692811687,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -3656,6 +3656,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 98.708,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "11b58544a29a81d5a89c0c961f8ed95205d9f2f3",
+          "message": "feat: add port introspection (textual-port?/binary-port?/port-line/-position/-file-descriptor) and wire into (srfi 279) (#27)\n\nCloses the \"ports\" gap from the SRFI-279 gap list.\n\nNew standalone primitives, genuinely useful beyond just this SRFI:\n- textual-port?/binary-port?: real R7RS section 6.13.1 procedures\n  curry previously had no way to call at all (the underlying C helper,\n  port_is_binary, already existed in src/port.c -- just never wrapped\n  for Scheme).\n- port-line: exposes the line-tracking curry's reader already\n  maintains internally for its own backtraces.\n- port-position: for string/bytevector-backed ports, reads the exact\n  byte offset directly out of curry's Port struct; for FILE*-backed\n  ports, ftell(3).\n- port-file-descriptor: fileno(3) on the underlying FILE* for\n  FILE*-backed ports; #f for string/bytevector ports (no fd at all).\n\nWired into (srfi 279)'s inspect-properties as %port-properties:\nport-open?, port-direction ('input/'output/'both), port-type\n('textual/'binary), port-line, port-position, port-file-descriptor,\nport-encoding (fixed 'UTF-8 for textual ports -- curry really is\nUTF-8-only throughout), port-buffer, get-output-string/\nget-output-bytevector. port-file and port-column are omitted\nentirely, not merely unwired: curry's Port struct never stores an\nopening file path, and never tracks column at all.\n\nOne notable design point: curry's own pre-existing get-output-string/\nget-output-bytevector only check the PORT_STRING flag internally, not\ndirection -- calling get-output-string on an INPUT string port doesn't\nraise at all, it just returns the input content. SRFI-279 specifies\nthese properties for output ports specifically (\"for string and\nbytevector output ports\"), so %port-properties gates get-output-string/\n-bytevector and the new port-buffer property on (output-port? object)\nexplicitly in Scheme, rather than trusting curry's own primitives to\nenforce that boundary.\n\nIndependently code-reviewed and security-reviewed (fresh subagents, no\nshared context) before landing. Both independently found the same\ncritical bug:\n- port-position and port-file-descriptor called ftell(3)/fileno(3)\n  directly on a FILE*-backed port's raw C FILE* with no PORT_CLOSED\n  check. port_close (src/port.c, pre-existing, unchanged here)\n  fclose()s a non-std-stream port and sets its u.fp to NULL on close,\n  but closing a port doesn't change its own type tag -- port? still\n  says true, so nothing upstream filtered a closed port out before it\n  reached these primitives. Calling ftell/fileno on a NULL FILE* is\n  undefined behavior; verified live to reliably segfault the process\n  (exit 139) on this platform. Reachable from completely ordinary\n  Scheme code with no unsafe/FFI involved -- including transitively\n  through plain inspect-properties/inspect-describe on a closed port,\n  an entirely unremarkable thing to introspect (e.g. debugging why/\n  when a port closed). Fixed by checking PORT_CLOSED (and u.fp != NULL\n  as a second guard) before either libc call, returning #f -- the same\n  \"not meaningful here\" convention already used for the ftell-fails\n  and no-fd-at-all cases, not a new one invented for this.\n- A related fix along the way: port-position originally used the\n  string port's read-cursor field (u.str.pos) unconditionally, which\n  is exclusively an INPUT cursor -- port_write_char/port_write_string\n  (src/port.c) only ever touch u.str.len, never pos, so an output\n  port's position silently stayed 0 after every write. Fixed by\n  selecting the field based on PORT_OUTPUT.\n\nAlso closed a real test-coverage gap the reviews flagged: the original\ntest suite only exercised string/bytevector ports, never a real\nFILE*-backed port (open or closed) -- exactly where the crash lived,\nso it wasn't caught before review. New tests cover both.\n\n41 new checks in tests/srfi_s279_inspect_tests.scm (191 total, 0\nfailed), including regression coverage for both the closed-port crash\nand the output-position field bug. Full suite: 92/92 ctest passing.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-14T17:32:43+10:00",
+          "tree_id": "cc9c048ee40577ecc54a313d70a0bcc725133a4f",
+          "url": "https://github.com/deconstructo/curry/commit/11b58544a29a81d5a89c0c961f8ed95205d9f2f3"
+        },
+        "date": 1786692811088,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.492,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.409,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.187,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.85,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 198.361,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 366.272,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.923,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.906,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.793,
             "unit": "ms"
           }
         ]
