@@ -60,6 +60,24 @@
 (check "xcons" (xcons 2 1) '(1 . 2))
 (check "cons*" (cons* 1 2 (list 3 4)) '(1 2 3 4))
 (check "cons* single arg" (cons* (list 1 2)) '(1 2))
+;; regression: cons*/take/take-while/unfold originally built their
+;; result via naive non-tail cons-recursion. curry's per-function
+;; stack-overflow guard doesn't catch that shape of recursion inside a
+;; define-library body (a separate, pre-existing core VM gap) -- it
+;; SIGSEGVs the whole process instead of raising a catchable error, at
+;; a few hundred to a few thousand elements. Found live by independent
+;; security review. Fixed by rewriting all four as accumulator-based
+;; tail loops; these checks exercise sizes well past the old crash
+;; thresholds (750 for cons*, ~5000 for take/unfold) without needing
+;; to actually reproduce the crash in the test suite itself.
+(check "cons* at a size past the old crash threshold"
+       (length (apply cons* (append (iota 2000) (list (list))))) 2000)
+(check "take at a size past the old crash threshold"
+       (length (take (iota 200000) 20000)) 20000)
+(check "take-while at a size past the old crash threshold"
+       (length (take-while (lambda (x) (< x 20000)) (iota 200000))) 20000)
+(check "unfold at a size past the old crash threshold"
+       (length (unfold (lambda (i) (= i 20000)) (lambda (i) i) (lambda (i) (+ i 1)) 0)) 20000)
 (check "list-tabulate" (list-tabulate 4 (lambda (i) (* i i))) '(0 1 4 9))
 (check "circular-list?" (circular-list? (circular-list 1 2 3)) #t)
 (check "circular-list? on a proper list" (circular-list? (list 1 2 3)) #f)

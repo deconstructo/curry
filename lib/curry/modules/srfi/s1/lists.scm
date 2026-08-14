@@ -3,7 +3,7 @@
   (export
     ; SRFI-1 procedures already in curry's global env
     cons car cdr caaar cadar caar cdar
-    list make-list length append reverse
+    list list* make-list length append reverse
     list-tail list-ref last-pair list-copy
     map for-each filter fold-left
 
@@ -64,10 +64,20 @@
     ;;; ---- Constructors ----
 
     (define (xcons d a) (cons a d))
+    ;; Accumulator-based, not the naive (cons (car args) (apply cons*
+    ;; (cdr args))) recursion -- that builds one C stack frame per
+    ;; argument with the cons happening AFTER the recursive call returns
+    ;; (non-tail), and curry's per-function stack-overflow guard doesn't
+    ;; catch overflow inside a define-library body (a separate, pre-
+    ;; existing core VM gap found by independent security review): it
+    ;; SIGSEGVs the whole process instead of raising a catchable error,
+    ;; at a few hundred arguments. This version is a single tail-
+    ;; recursive loop with no such risk.
     (define (cons* . args)
-      (if (null? (cdr args))
-          (car args)
-          (cons (car args) (apply cons* (cdr args)))))
+      (let loop ((args args) (acc '()))
+        (if (null? (cdr args))
+            (append-reverse acc (car args))
+            (loop (cdr args) (cons (car args) acc)))))
     (define (list-tabulate n f)
       (let loop ((i (- n 1)) (acc '()))
         (if (< i 0) acc (loop (- i 1) (cons (f i) acc)))))
@@ -138,10 +148,17 @@
     (define (ninth   lst) (car (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr lst))))))))))
     (define (tenth   lst) (car (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr lst)))))))))))
 
+    ;; Accumulator-based tail loop, not naive non-tail cons-recursion --
+    ;; see cons*'s own comment above on why: curry's stack-overflow guard
+    ;; doesn't catch this shape of recursion inside a define-library
+    ;; body, so a large-enough n would otherwise SIGSEGV the process
+    ;; rather than raise (found by independent security review; a mere
+    ;; few thousand elements was enough to crash the old version).
     (define (take lst n)
-      (if (or (= n 0) (null? lst))
-          '()
-          (cons (car lst) (take (cdr lst) (- n 1)))))
+      (let loop ((lst lst) (n n) (acc '()))
+        (if (or (= n 0) (null? lst))
+            (reverse acc)
+            (loop (cdr lst) (- n 1) (cons (car lst) acc)))))
 
     (define (drop lst n)
       (if (or (= n 0) (null? lst))
@@ -210,12 +227,15 @@
     ;; when (p seed) is true, otherwise conses (f seed) and recurses on
     ;; (g seed). tail-gen (default: seed is dropped, proper list) computes
     ;; the final cdr from the seed that satisfied p.
+    ;; Builds via an accumulator + final reverse, not naive non-tail
+    ;; cons-recursion -- see take's own comment above on why (same
+    ;; stack-overflow risk this avoids).
     (define (unfold p f g seed . tail-gen)
       (let ((tg (if (null? tail-gen) (lambda (x) '()) (car tail-gen))))
-        (let loop ((seed seed))
+        (let loop ((seed seed) (acc '()))
           (if (p seed)
-              (tg seed)
-              (cons (f seed) (loop (g seed)))))))
+              (append-reverse acc (tg seed))
+              (loop (g seed) (cons (f seed) acc))))))
 
     (define (unfold-right p f g seed . tail)
       (let loop ((seed seed) (acc (if (null? tail) '() (car tail))))
@@ -278,10 +298,13 @@
 
     (define (delete! x lst . rest) (apply delete x lst rest))
 
+    ;; Accumulator-based tail loop -- see take's own comment above on why
+    ;; (same non-tail-cons-recursion stack-overflow risk this avoids).
     (define (take-while pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (take-while pred (cdr lst))))
-            (else '())))
+      (let loop ((lst lst) (acc '()))
+        (if (and (pair? lst) (pred (car lst)))
+            (loop (cdr lst) (cons (car lst) acc))
+            (reverse acc))))
 
     (define (drop-while pred lst)
       (cond ((null? lst) '())
