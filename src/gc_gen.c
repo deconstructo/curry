@@ -536,8 +536,13 @@ static void scan_pinned_object(void *obj) {
     case T_RECORD_TYPE: {
         RecordType *rt = (RecordType *)obj;
         rt->name = evacuate(rt->name);
-        for (uint32_t i = 0; i < rt->nfields; i++)
+        rt->constructor = evacuate(rt->constructor);
+        rt->predicate   = evacuate(rt->predicate);
+        for (uint32_t i = 0; i < rt->nfields; i++) {
             rt->field_names[i] = evacuate(rt->field_names[i]);
+            if (rt->accessors) rt->accessors[i] = evacuate(rt->accessors[i]);
+            if (rt->mutators)  rt->mutators[i]  = evacuate(rt->mutators[i]);
+        }
         break;
     }
     case T_UPVALUE: {

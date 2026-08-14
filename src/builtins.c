@@ -2514,37 +2514,49 @@ static val_t prim_record_type_mutators(int ac, val_t *av, void *ud) {
     return list;
 }
 
-/* %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: internal,
- * used only by compiler.c's/eval.c's define-record-type codegen to
- * stash each binding's freshly-created closure back onto the RTD right
- * after it's defined (the RTD itself is built before any of the
- * bindings' closures exist -- record_type_build_spec only describes
- * what needs creating, see its own header comment). Not exported to
- * user code: these mutate an otherwise Scheme-immutable RTD field and
- * exist purely to populate what record-type-constructor/-predicate/
- * -accessors/-mutators above read back. */
+/* %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: intended for
+ * internal use only, by compiler.c's/eval.c's define-record-type
+ * codegen, to stash each binding's freshly-created closure back onto
+ * the RTD right after it's defined (the RTD itself is built before any
+ * of the bindings' closures exist -- record_type_build_spec only
+ * describes what needs creating, see its own header comment). "Not
+ * exported to user code" is documentation, not enforcement, though --
+ * these are ordinary DEF'd globals like every other primitive in this
+ * file, directly callable by any Scheme script (found by independent
+ * code review: (%rtd-set-accessor! 5 0 some-closure) reinterpreted the
+ * fixnum 5's raw bits as a RecordType* and wrote through it,
+ * segfaulting the process). Type-checked here the same way
+ * %record-ref/%record-set!/%record-pred? already are, for the same
+ * reason: a %-prefixed name signals "internal convention," not an
+ * actual access restriction curry's flat global namespace can enforce. */
 static val_t prim_rtd_set_constructor(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-constructor!: not a record type");
     vunptr(RecordType, av[0])->constructor = av[1];
     return V_VOID;
 }
 static val_t prim_rtd_set_predicate(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-predicate!: not a record type");
     vunptr(RecordType, av[0])->predicate = av[1];
     return V_VOID;
 }
 static val_t prim_rtd_set_accessor(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-accessor!: not a record type");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-accessor!: field index must be a fixnum");
     RecordType *rtd = vunptr(RecordType, av[0]);
-    uint32_t i = (uint32_t)vunfix(av[1]);
-    if (i < rtd->nfields) rtd->accessors[i] = av[2];
+    intptr_t idx = vunfix(av[1]);
+    if (idx >= 0 && (uint32_t)idx < rtd->nfields) rtd->accessors[idx] = av[2];
     return V_VOID;
 }
 static val_t prim_rtd_set_mutator(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-mutator!: not a record type");
+    if (!vis_fixnum(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%rtd-set-mutator!: field index must be a fixnum");
     RecordType *rtd = vunptr(RecordType, av[0]);
-    uint32_t i = (uint32_t)vunfix(av[1]);
-    if (i < rtd->nfields) rtd->mutators[i] = av[2];
+    intptr_t idx = vunfix(av[1]);
+    if (idx >= 0 && (uint32_t)idx < rtd->nfields) rtd->mutators[idx] = av[2];
     return V_VOID;
 }
 

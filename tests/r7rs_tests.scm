@@ -451,6 +451,29 @@
     (person-age bob))
   21)
 
+;;; %rtd-set-constructor!/-predicate!/-accessor!/-mutator!: intended for
+;;; internal use only by define-record-type's own codegen, but ordinary
+;;; DEF'd globals like every other primitive, so directly callable by
+;;; any script. Independent security review found and reproduced a real
+;;; segfault: no vis_rtd check on the first argument, so vunptr blindly
+;;; reinterpreted an arbitrary value's raw bits as a RecordType*. Also
+;;; found a non-fixnum field-index argument silently aliasing into a
+;;; valid slot via vunfix's raw bit-shift (no vis_fixnum check).
+(check "%rtd-set-accessor! on a non-rtd raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! 5 0 (lambda (x) x)))
+  'caught)
+(check "%rtd-set-predicate! on #f raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-predicate! #f 'x))
+  'caught)
+(check "%rtd-set-accessor! on a string raises cleanly, no crash"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! "hello" 0 (lambda (x) x)))
+  'caught)
+(check "%rtd-set-accessor! with a non-fixnum index raises, doesn't alias into a valid slot"
+  (guard (e (#t 'caught)) (%rtd-set-accessor! person-rtd (integer->char 0) (lambda (r) 'hijacked)))
+  'caught)
+(check "record-type-accessors unaffected by the rejected hijack attempt above"
+  (person-name alice) "Alice")
+
 ;;; define-record-type as an internal (local) definition — compiled natively,
 ;;; must stay local to the enclosing lambda rather than leaking to the
 ;;; global environment.
