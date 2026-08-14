@@ -130,14 +130,22 @@
     ;; destructuring+checking+evaluating its body if so.
     ;;
     ;; %clc-dispatch's `fail` continuation (the next clause to try, or
-    ;; a final "no match" error) is spliced in UNEXPANDED at every
-    ;; arity-mismatch branch inside %clc-try's own recursion -- correct
-    ;; (no double-evaluation risk, since it's a pure expression with no
-    ;; side effects until actually reached) but means macro-expansion
-    ;; work scales with (parameters per clause) x (sibling clauses).
-    ;; Entirely fine at the realistic clause/parameter counts real code
-    ;; uses; not something a many-dozens-of-clauses case-lambda-checked
-    ;; should be built with.
+    ;; a final "no match" error) is wrapped in a zero-argument thunk,
+    ;; created ONCE per clause, and only the tiny 2-token call
+    ;; (fail-thunk) -- not the unexpanded recursive dispatch tree
+    ;; itself -- gets spliced into %clc-try's several arity-mismatch
+    ;; branches. This is deliberate, not incidental: an earlier version
+    ;; spliced the full unexpanded (%clc-dispatch args rest ...) form
+    ;; in directly at every branch, which independent security review
+    ;; found and measured to be genuinely EXPONENTIAL in clause count
+    ;; (base ~= 2p+1 for p parameters per clause -- an 8-clause x
+    ;; 4-parameter case-lambda-checked form, entirely reasonable-looking
+    ;; user code, took over 2 minutes to even finish compiling). The
+    ;; thunk indirection makes expansion cost linear in (clauses x
+    ;; parameters) again, at the cost of one small closure allocation
+    ;; per clause per call -- a normal, bounded runtime cost, not a
+    ;; macro-expansion-time compile bomb reachable from ordinary-looking
+    ;; source.
     (define-syntax case-lambda-checked
       (syntax-rules ()
         ((_ clause ...)
@@ -148,7 +156,8 @@
         ((_ args)
          (error "case-lambda-checked: no matching clause" args))
         ((_ args (formals body ...) rest ...)
-         (%clc-try formals args (begin body ...) (%clc-dispatch args rest ...)))))
+         (let ((fail-thunk (lambda () (%clc-dispatch args rest ...))))
+           (%clc-try formals args (begin body ...) (fail-thunk))))))
 
     (define-syntax %clc-try
       (syntax-rules ()
@@ -212,6 +221,27 @@
     ;; each field's/the constructor's own let-capture is a separate,
     ;; non-nested sibling form, so reusing the same literal template
     ;; identifier (e.g. %%drtc-orig) across several of them is safe.
+    ;;
+    ;; KNOWN LIMITATION (found by independent security review): between
+    ;; define-record-type binding the raw constructor/modifiers under
+    ;; their public names and the set! calls below replacing them with
+    ;; checked wrappers, there is a real window during which the raw,
+    ;; UNCHECKED constructor/modifiers are live under the public name in
+    ;; GLOBAL_ENV. curry's actors are real OS threads sharing that same
+    ;; global environment, so another already-running actor that calls
+    ;; the constructor/a modifier by name during that exact window gets
+    ;; the unchecked version -- a genuine, if narrow and short-lived,
+    ;; validation bypass. Avoiding it entirely would need each field's
+    ;; raw constructor/modifier bound under its OWN distinct temporary
+    ;; name from the start (never touching the public name until fully
+    ;; checked-and-ready), which needs generating N distinct fresh
+    ;; identifiers for N mutable fields all within one define-record-
+    ;; type call -- something portable syntax-rules genuinely cannot do
+    ;; (no identifier concatenation, no gensym). Given that constraint,
+    ;; this is documented rather than "fixed" with a redesign that would
+    ;; trade a narrow race for a real risk of a new correctness bug:
+    ;; evaluate every define-record-type-checked form before spawning
+    ;; any actor that uses the type it defines.
     ;;
     ;; %drtc-build-raw pre-expands the whole (fname fpred acc [mod])
     ;; field-spec list into plain (fname acc [mod]) forms -- the shape

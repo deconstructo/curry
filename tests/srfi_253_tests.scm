@@ -112,6 +112,30 @@
        (guard (e (#t 'caught)) (clc))
        'caught)
 
+;; regression: the original %clc-dispatch/%clc-try spliced the next
+;; clause's full unexpanded dispatch form in directly at every
+;; arity-mismatch branch, making macro-expansion time genuinely
+;; EXPONENTIAL in clause count (measured by independent security
+;; review: an 8-clause x 4-parameter form didn't finish compiling in
+;; over 2 minutes). Fixed by wrapping the "try the next clause"
+;; continuation in a thunk, created once per clause, so only a tiny
+;; 2-token call gets duplicated across branches instead of the whole
+;; recursive dispatch tree. This exercises the exact shape that used
+;; to blow up -- if this test suite itself takes more than a couple
+;; seconds to even finish loading this file, the fix has regressed.
+(define clc-stress (case-lambda-checked
+  (((a1 number?) (a2 number?) (a3 number?) (a4 number?)) 1)
+  (((b1 number?) (b2 number?) (b3 number?) (b4 number?) (b5 number?)) 2)
+  (((c1 number?) (c2 number?) (c3 number?) (c4 number?)) 3)
+  (((d1 number?) (d2 number?) (d3 number?) (d4 number?)) 4)
+  (((e1 number?) (e2 number?) (e3 number?) (e4 number?)) 5)
+  (((g1 number?) (g2 number?) (g3 number?) (g4 number?)) 6)
+  (((h1 number?) (h2 number?) (h3 number?) (h4 number?)) 7)
+  ((i1 i2 i3 i4 . rest) 8)))
+(check "case-lambda-checked: 8-clause x 4-parameter form compiles and dispatches correctly"
+       (clc-stress 1 2 3 4)
+       1)
+
 ;;; ---- define-checked ----
 
 (define-checked (mul (a number?) (b number?)) (* a b))
