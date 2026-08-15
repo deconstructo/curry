@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786760181849,
+  "lastUpdate": 1786760603331,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4484,6 +4484,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 105.11,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0ccdd8b09778eb5baabe6df1cc8f6ef614c5c51",
+          "message": "docs(srfi279): fix stale rtd-accessors header comment (#38)\n\nlib/curry/modules/srfi/s279/inspect.scm's own header comment still\nlisted rtd-accessors/-mutators/-predicate/-constructor under\n\"Deliberately deferred, not forgotten\" -- PR #33 implemented and shipped\nthese, and updated docs/reference/srfi/s279.md's own \"Deliberately out\nof scope\" list accordingly, but missed this file's own header comment\n(caught by direct user review of the source). Removed the stale\ndeferred-item bullet and added it to the \"As of this version\" summary\nparagraph alongside the other already-shipped additions.",
+          "timestamp": "2026-08-15T12:22:37+10:00",
+          "tree_id": "97f53d2a228fdd97e5387e03b1c48ab35b188b51",
+          "url": "https://github.com/deconstructo/curry/commit/e0ccdd8b09778eb5baabe6df1cc8f6ef614c5c51"
+        },
+        "date": 1786760602483,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.981,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.615,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 7.223,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.881,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 203.491,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 342.233,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.06,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 131.705,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 103.41,
             "unit": "ms"
           }
         ]
