@@ -81,10 +81,9 @@
     (define (list-tabulate n f)
       (let loop ((i (- n 1)) (acc '()))
         (if (< i 0) acc (loop (- i 1) (cons (f i) acc)))))
-    ;; Genuinely circular -- callers must not (write)/(display)/traverse
-    ;; this with anything that doesn't detect cycles (curry's write/display
-    ;; have no cycle detection at all -- see (srfi 279)'s own documented
-    ;; limitation on this exact point).
+    ;; Genuinely circular. curry's write/display are cycle-safe (they
+    ;; emit #n=/#n# datum labels rather than looping), so this is fine
+    ;; to (write)/(display) directly.
     (define (circular-list . args)
       (if (null? args)
           (error "circular-list: at least one element required")

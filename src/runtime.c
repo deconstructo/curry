@@ -132,7 +132,7 @@ void scm_raise_val(val_t exn) {
     }
     /* Unhandled: print and abort */
     fprintf(stderr, "Unhandled exception: ");
-    scm_write(exn, PORT_STDERR);
+    scm_write_shared(exn, PORT_STDERR);
     fprintf(stderr, "\n");
     abort();
 }
@@ -334,14 +334,14 @@ val_t apply(val_t proc, val_t args) {
         port_write_string(PORT_STDERR, nm, (uint32_t)strlen(nm));
         for (val_t a = args; vis_pair(a); a = vcdr(a)) {
             port_write_char(PORT_STDERR, ' ');
-            scm_write(vcar(a), PORT_STDERR);
+            scm_write_shared(vcar(a), PORT_STDERR);
         }
         port_write_string(PORT_STDERR, ")\n", 2);
         val_t result = apply(t->proc, args);
         port_write_string(PORT_STDERR, "[trace] <-- ", 12);
         port_write_string(PORT_STDERR, nm, (uint32_t)strlen(nm));
         port_write_string(PORT_STDERR, " = ", 3);
-        scm_write(result, PORT_STDERR);
+        scm_write_shared(result, PORT_STDERR);
         port_write_char(PORT_STDERR, '\n');
         return result;
     }

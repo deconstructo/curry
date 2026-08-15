@@ -75,16 +75,6 @@
       (call-with-port (open-output-string)
         (lambda (p) (proc object p) (get-output-string p))))
 
-    ;; KNOWN LIMITATION (curry core, not this module): curry's write/
-    ;; display have no cycle detection (no #n=/#n# datum-labeling) --
-    ;; confirmed independently, `(write x)` on a circular pair alone
-    ;; hangs forever. Since this SRFI's spec calls for the 'write/'display
-    ;; entries to be exactly the standard procedures' own output,
-    ;; inspect-properties on a circular object will hang here rather than
-    ;; silently working around a core gap that's out of this module's
-    ;; scope to fix. Everything else in inspect-properties (car/cdr, the
-    ;; rest of pair-properties) stays cycle-safe via `list?`'s own R7RS-
-    ;; mandated cycle detection -- only this write/display step is at risk.
     ;; Mirrors inspect-properties' own dispatch cond order exactly (see
     ;; the bottom of this file) -- kept as a separate function rather
     ;; than restructured to share one pass, since %object-properties

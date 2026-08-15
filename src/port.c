@@ -691,46 +691,56 @@ static bool ws_is_compound(val_t v) {
     return vis_pair(v) || vis_vector(v) || vis_string(v) || vis_bytes(v);
 }
 
+/* Iterative over the cdr chain (recursing only into car and vector
+ * elements) so a long flat list doesn't consume one C stack frame per
+ * element -- mirrors ws_write_list's own cdr loop below. A recursive
+ * ws_count_refs(vcdr(v), m) call here previously made an ordinary long
+ * list (no cycle, no sharing) overflow the C stack on write()/display(),
+ * since those now route through this pass unconditionally. */
 static void ws_count_refs(val_t v, WSharedMap *m) {
-    if (!ws_is_compound(v)) return;
-    WSharedEntry *e = ws_find(m, v);
-    if (e) { e->count++; return; }
-    e = ws_insert(m, v);
-    e->count = 1;
-    if (vis_pair(v)) {
-        ws_count_refs(vcar(v), m);
-        ws_count_refs(vcdr(v), m);
-    } else if (vis_vector(v)) {
-        Vector *vec = as_vec(v);
-        for (uint32_t i = 0; i < vec->len; i++) ws_count_refs(vec->data[i], m);
+    while (ws_is_compound(v)) {
+        WSharedEntry *e = ws_find(m, v);
+        if (e) { e->count++; return; }
+        e = ws_insert(m, v);
+        e->count = 1;
+        if (vis_pair(v)) {
+            ws_count_refs(vcar(v), m);
+            v = vcdr(v);
+            continue;
+        }
+        if (vis_vector(v)) {
+            Vector *vec = as_vec(v);
+            for (uint32_t i = 0; i < vec->len; i++) ws_count_refs(vec->data[i], m);
+        }
+        /* strings and bytevectors have no sub-values */
+        return;
     }
-    /* strings and bytevectors have no sub-values */
 }
 
-static void ws_write(val_t v, val_t port, WSharedMap *m);
+static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display);
 
-static void ws_write_list(val_t v, val_t port, WSharedMap *m) {
+static void ws_write_list(val_t v, val_t port, WSharedMap *m, bool as_display) {
     port_write_char(port, '(');
-    ws_write(vcar(v), port, m);
+    ws_write(vcar(v), port, m, as_display);
     val_t rest = vcdr(v);
     while (vis_pair(rest)) {
         WSharedEntry *e2 = ws_find(m, rest);
         if (e2 && e2->count > 1) {
             port_write_string(port, " . ", 3);
-            ws_write(rest, port, m);
+            ws_write(rest, port, m, as_display);
             port_write_char(port, ')');
             return;
         }
         port_write_char(port, ' ');
-        ws_write(vcar(rest), port, m);
+        ws_write(vcar(rest), port, m, as_display);
         rest = vcdr(rest);
     }
-    if (!vis_nil(rest)) { port_write_string(port, " . ", 3); ws_write(rest, port, m); }
+    if (!vis_nil(rest)) { port_write_string(port, " . ", 3); ws_write(rest, port, m, as_display); }
     port_write_char(port, ')');
 }
 
-static void ws_write(val_t v, val_t port, WSharedMap *m) {
-    if (!ws_is_compound(v)) { scm_write(v, port); return; }
+static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display) {
+    if (!ws_is_compound(v)) { if (as_display) scm_display(v, port); else scm_write(v, port); return; }
     WSharedEntry *e = ws_find(m, v);
     if (e && e->count > 1) {
         if (e->label >= 0) {
@@ -742,24 +752,41 @@ static void ws_write(val_t v, val_t port, WSharedMap *m) {
         char buf[32]; int n = snprintf(buf, sizeof(buf), "#%d=", e->label);
         port_write_string(port, buf, (uint32_t)n);
     }
-    if (vis_pair(v))   { ws_write_list(v, port, m); return; }
+    if (vis_pair(v))   { ws_write_list(v, port, m, as_display); return; }
     if (vis_vector(v)) {
         Vector *vec = as_vec(v);
         port_write_string(port, "#(", 2);
         for (uint32_t i = 0; i < vec->len; i++) {
             if (i) port_write_char(port, ' ');
-            ws_write(vec->data[i], port, m);
+            ws_write(vec->data[i], port, m, as_display);
         }
         port_write_char(port, ')');
         return;
     }
-    scm_write(v, port);
+    if (as_display) scm_display(v, port); else scm_write(v, port);
 }
 
 void scm_write_shared(val_t v, val_t port) {
+    if (!ws_is_compound(v)) { scm_write(v, port); return; }
     WSharedMap *m = ws_new();
     ws_count_refs(v, m);
-    ws_write(v, port, m);
+    ws_write(v, port, m, false);
+}
+
+/*
+ * Cycle-safe display: same two-pass shared/cyclic-structure tracking as
+ * write-shared, but atoms are printed via scm_display (strings/chars
+ * unquoted) rather than scm_write. This is what plain display() uses --
+ * R7RS requires write/display (unlike write-simple) to not loop forever
+ * on circular structure; write-shared's existing machinery already does
+ * that correctly; only display's own naive fallback for the atom case
+ * differs from write's.
+ */
+void scm_display_shared(val_t v, val_t port) {
+    if (!ws_is_compound(v)) { scm_display(v, port); return; }
+    WSharedMap *m = ws_new();
+    ws_count_refs(v, m);
+    ws_write(v, port, m, true);
 }
 
 void scm_display(val_t v, val_t port) {

@@ -92,8 +92,8 @@ static void print_scheme_error(val_t exn) {
     val_t code = vis_error(exn) ? as_err(exn)->code : V_FALSE;
     if (vis_symbol(code)) fprintf(stderr, "Error [%s]: ", sym_cstr(code));
     else fprintf(stderr, "Error: ");
-    if (vis_error(exn)) scm_display(as_err(exn)->message, PORT_STDERR);
-    else scm_write(exn, PORT_STDERR);
+    if (vis_error(exn)) scm_display_shared(as_err(exn)->message, PORT_STDERR);
+    else scm_write_shared(exn, PORT_STDERR);
     fputs("\n", stderr);
 
     val_t bt = vis_error(exn) ? as_err(exn)->backtrace : V_NIL;
@@ -124,13 +124,13 @@ static void print_result(val_t v) {
     if (vis_values(v)) {
         Values *mv = as_vals(v);
         for (uint32_t i = 0; i < mv->count; i++) {
-            scm_write(mv->vals[i], PORT_STDOUT);
+            scm_write_shared(mv->vals[i], PORT_STDOUT);
             if (i + 1 < mv->count) scm_newline(PORT_STDOUT);
         }
         scm_newline(PORT_STDOUT);
         return;
     }
-    scm_write(v, PORT_STDOUT);
+    scm_write_shared(v, PORT_STDOUT);
     scm_newline(PORT_STDOUT);
 }
 
@@ -239,7 +239,7 @@ static void eval_port_exprs(val_t port, bool print) {
         else {
             current_handler = h.prev;
             fprintf(stderr, "Read error: ");
-            scm_write(h.exn, PORT_STDERR);
+            scm_write_shared(h.exn, PORT_STDERR);
             fprintf(stderr, "\n");
             continue;
         }
@@ -650,7 +650,7 @@ int main(int argc, char **argv) {
                 current_handler = h.prev;
                 jit_depth_restore(h.saved_jit_depth);
                 fprintf(stderr, "Error loading %s: ", optarg);
-                scm_write(h.exn, PORT_STDERR); fputs("\n", stderr); return 1;
+                scm_write_shared(h.exn, PORT_STDERR); fputs("\n", stderr); return 1;
             }
             ran_something = true;
             break;
