@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786765290175,
+  "lastUpdate": 1786766019508,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4760,6 +4760,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 99.856,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5770b175806ad7d15d3cf2634a0060849b35ddec",
+          "message": "fix(core): string->number(\"\") returns #f, not 0; utf8->string validates input (#45)\n\n* fix(core): string->number(\"\") returns #f, not 0; utf8->string validates input\n\nTwo core bugs previously documented as known limitations in (srfi 279)'s docs (which explicitly worked around both rather than fixing them, since they're outside that module's own scope).\n\nstring->number: parse_number's fixnum-range fast path used 'errno == 0 && *end == 0' as its success check. strtol(\"\", &end, radix) consumes nothing (end == s), returns 0, and leaves errno untouched -- indistinguishable from a genuine \"0\" by that check alone, so (string->number \"\") silently returned 0 instead of #f (R7RS: the empty string is never a valid number literal). Fixed with an explicit empty-string guard at the top of parse_number, which also correctly covers empty numerator/denominator/real/imaginary substrings reached via the function's own recursive calls (e.g. \"3/\").\n\nutf8->string: did a raw memcpy from the bytevector into a new String with zero UTF-8 validation -- any bytevector, however malformed (truncated sequences, stray continuation bytes, overlong encodings, encoded UTF-16 surrogate halves, lead bytes past the 4-byte range), silently became a String with garbled content. Added a validator mirroring string-ref's existing lead/continuation decode shape, raising wrong-type-argument on malformed input instead.\n\nUpdated (srfi 279)'s inspect.scm to match: the string->number empty-string guard is now redundant (string->number itself returns #f) and removed; the bytevector utf8->string entry is now wrapped in guard since it can raise, omitting the entry on invalid UTF-8 rather than propagating the exception through the whole inspect-properties call -- matching the module's own \"omit unsupported property\" convention. Updated docs/reference/srfi/s279.md accordingly.\n\nAdded regression tests for both fixes plus edge cases (overlong encoding, stray continuation byte, surrogate half, lead byte past 4-byte range) to tests/r7rs_tests.scm.\n\n* fix(core): close integer-overflow OOB read in utf8_is_well_formed\n\nIndependent security review (fresh context, per CLAUDE.md) on the previous commit found: utf8_is_well_formed's truncation check 'i + seqlen > len' used uint32_t arithmetic that can wrap around for a bytevector near UINT32_MAX in length (make-bytevector's own documented upper bound) -- a crafted trailing lead byte near the end of such a bytevector would make i + seqlen wrap past UINT32_MAX back down to a small value, spuriously pass the truncation check, and read up to 3 bytes past the bytevector's allocation.\n\nFixed by comparing 'seqlen > len - i' instead: i < len is the loop's own invariant, so len - i can never underflow, making this comparison overflow-safe for any i/len/seqlen rather than needing a wider integer type.\n\nAlso fixed a now-stale comment in prim_string_ref (found by the same review pass) that still described utf8->string as never validating its input.",
+          "timestamp": "2026-08-15T13:52:49+10:00",
+          "tree_id": "17793f503a13c21272628b1bdf983ef6d8de0938",
+          "url": "https://github.com/deconstructo/curry/commit/5770b175806ad7d15d3cf2634a0060849b35ddec"
+        },
+        "date": 1786766018920,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.545,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.51,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.175,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.918,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.133,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 368.927,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.88,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.847,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 101.968,
             "unit": "ms"
           }
         ]
