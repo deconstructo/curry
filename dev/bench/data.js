@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786768585729,
+  "lastUpdate": 1786769922743,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4967,6 +4967,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 99.11,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a56679fd6fcadfcbf2fde07f52be31e1b7f4b6fd",
+          "message": "feat(core): add R7RS string->vector/vector->string (#49)\n\nCloses #46. Neither was implemented at all -- (srfi 279)'s inspect.scm had its own local list->vector/list->string-composed workaround with a header comment noting the gap, but nothing else in the codebase provided them.\n\nstring->vector does the same single-pass UTF-8 codepoint decode string->list already does (byte range -> variable-width codepoints, final element count not knowable upfront), but builds straight into a Vector instead of going through an intermediate list, filling backward once the count is known (same shape %indexed-pairs already uses elsewhere in this file).\n\nvector->string explicitly validates every element in range is a character and raises otherwise, rather than the lax vunchr-whatever's-there pattern list->string already uses -- new code, no existing lax behavior to preserve compatibility with.\n\ninspect.scm's own %string-properties/%vector-properties are left as-is: they already reuse an already-materialized list via plain list->vector/list->string rather than calling these new primitives, which would be strictly less efficient (re-deriving the list from the original string/vector a second time).",
+          "timestamp": "2026-08-15T14:57:54+10:00",
+          "tree_id": "5924f2c408254f457479b5b8816873ee2093e497",
+          "url": "https://github.com/deconstructo/curry/commit/a56679fd6fcadfcbf2fde07f52be31e1b7f4b6fd"
+        },
+        "date": 1786769920868,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.016,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 15.474,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.315,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 18.206,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 97.31,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 181.156,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 44.168,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 62.417,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 50.569,
             "unit": "ms"
           }
         ]
