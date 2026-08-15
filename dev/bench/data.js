@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786746367603,
+  "lastUpdate": 1786760181849,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4415,6 +4415,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 99.469,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1831adec23af69b436366568527d9caf8a733d5a",
+          "message": "fix(core): make write/display cycle-safe on circular structure (#39)\n\n* fix(core): make write/display cycle-safe on circular structure\n\nR7RS 6.13.3 requires write/display to not loop forever on circular data (only write-simple is exempt). write-shared already implemented correct #n=/#n# datum-labeling via a two-pass ref-counting walk (ws_count_refs/ws_write); write/display used a separate, naive recursive path with no cycle tracking and hung forever on a circular pair or vector.\n\nRoute write/display through that same cycle-safe machinery (adding scm_display_shared, an as_display-parameterized variant of ws_write) instead of writing new detection logic. write-simple keeps calling the original naive scm_write directly, matching its documented R7RS license to loop on cycles.\n\nCloses the KNOWN LIMITATION gap called out in srfi/s279's inspect-properties and referenced from srfi/s1's circular-list.\n\n* fix(core): close remaining hang/crash paths found by independent review\n\nCode review found that only the write/display Scheme primitives were routed through the cycle-safe writer -- several internal C call sites (REPL result echo, uncaught-exception printers, (error ...) with a non-string message, actor-crash reporting, the trace facility) still called the raw, cycle-unsafe scm_write/scm_display directly, so a circular value could still hang the process without ever calling write/display explicitly. Switched those call sites to scm_write_shared/scm_display_shared.\n\nSecurity review then found that this exposed a much easier-to-trigger regression: ws_count_refs (the first pass of the cycle-safe writer) recursed on both car and cdr for every cons cell, so an ordinary long flat list -- no cycle, no sharing -- now overflowed the C stack via plain write()/display(), at as few as ~150-200k elements, since those primitives route through this pass unconditionally. Fixed by making the cdr walk iterative (only car recursion remains, bounded by nesting depth rather than list length), matching the shape ws_write_list already used for its own second-pass cdr walk. Verified with a 2M-element flat list.\n\nAlso skip the WSharedMap allocation entirely for non-compound (atomic) values in scm_write_shared/scm_display_shared, avoiding an unconditional map alloc on every write/display call now that they're the hot path rather than the rarely-used write-shared.",
+          "timestamp": "2026-08-15T12:15:28+10:00",
+          "tree_id": "53aa3e9f7c53dbcef8b4de9233cef86f5cb45cf0",
+          "url": "https://github.com/deconstructo/curry/commit/1831adec23af69b436366568527d9caf8a733d5a"
+        },
+        "date": 1786760180948,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.255,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.454,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.132,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.841,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 205.119,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 333.403,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.76,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.074,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 105.11,
             "unit": "ms"
           }
         ]
