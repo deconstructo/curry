@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786786284139,
+  "lastUpdate": 1786790432908,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5312,6 +5312,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 111.478,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "3f2e12a643925f45b33bd3bcc62345805068267d",
+          "message": "docs(srfi279): document universal id/size/type properties\n\ninspect-properties has always prefixed every object alist with id\nand appended size/type when inferrable, but the doc only mentioned\nwrite/display, leaving the real output shape undocumented.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-15T20:39:33+10:00",
+          "tree_id": "79e3509e77d843d1b57fd70fd125379cd98c8081",
+          "url": "https://github.com/deconstructo/curry/commit/3f2e12a643925f45b33bd3bcc62345805068267d"
+        },
+        "date": 1786790431006,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.256,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.654,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.791,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.61,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 159.183,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 288.349,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 53.759,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.869,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 81.129,
             "unit": "ms"
           }
         ]
