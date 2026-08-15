@@ -209,6 +209,20 @@
          (write circ-vec out)
          (get-output-string out))
        "#0=#(1 2 #0#)")
+;; Regression: the cycle-safe write/display machinery's first pass
+;; (ws_count_refs) originally recursed on both car AND cdr for every
+;; cons cell, so an ordinary long flat (non-circular, non-shared) list
+;; overflowed the C stack once write()/display() started routing through
+;; it unconditionally -- found by independent security review, reproduced
+;; at ~150-200k elements. Fixed by making the cdr walk iterative (only
+;; car recursion remains, bounded by nesting depth, not list length).
+(let loop ((i 0) (acc '()))
+  (if (= i 300000)
+      (let ((out (open-output-string)))
+        (write acc out)
+        (check "write on a long flat list doesn't stack-overflow"
+               (string? (get-output-string out)) #t))
+      (loop (+ i 1) (cons i acc))))
 
 ;;; Vectors
 (define v (make-vector 3 0))

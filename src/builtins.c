@@ -2058,7 +2058,7 @@ static val_t prim_error(int ac, val_t *av, void *ud) {
     val_t msg = av[0];
     if (!vis_string(msg)) {
         val_t out = port_open_output_string();
-        scm_write(av[0], out);
+        scm_write_shared(av[0], out);
         msg = port_get_output_string(out);
     }
     val_t irritants = V_NIL;
@@ -2086,7 +2086,7 @@ static val_t prim_raise_continuable(int ac, val_t *av, void *ud) {(void)ac;(void
 static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if(vis_error(av[0])) return as_err(av[0])->message;
-    val_t p=port_open_output_string(); scm_write(av[0],p); return port_get_output_string(p);
+    val_t p=port_open_output_string(); scm_write_shared(av[0],p); return port_get_output_string(p);
 }
 /* noinline: the setjmp jmp_buf must stay on this function's stack frame.
  * Avoid a volatile-ret pattern: clang (ARM64 -O2) replaces `ret = cont->result`

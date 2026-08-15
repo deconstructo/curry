@@ -138,7 +138,7 @@ static void *actor_thread(void *arg) {
         jit_depth_restore(h.saved_jit_depth);
         reason = h.exn;
         fprintf(stderr, "Actor %lu died: ", (unsigned long)self->id);
-        scm_write(reason, PORT_STDERR);
+        scm_write_shared(reason, PORT_STDERR);
         fprintf(stderr, "\n");
     }
     atomic_fetch_add_explicit(&self->ns_in_body, mono_ns() - t0, memory_order_relaxed);
