@@ -135,6 +135,26 @@
 (check "string->list" (string->list "abc") '(#\a #\b #\c))
 (check "string->list out-of-range end raises"
        (guard (exn (#t 'raised)) (string->list "abc" 0 100)) 'raised)
+;; string->vector / vector->string (R7RS 6.7) -- were entirely missing
+;; from curry (issue #46); (srfi 279)'s inspect.scm had its own local
+;; list->vector/list->string-composed workaround noting the gap.
+(check "string->vector" (string->vector "abc") (vector #\a #\b #\c))
+(check "string->vector multibyte" (string->vector "héllo")
+       (vector #\h #\é #\l #\l #\o))
+(check "string->vector with start/end" (string->vector "hello" 1 3)
+       (vector #\e #\l))
+(check "string->vector empty string" (string->vector "") (vector))
+(check "string->vector out-of-range end raises"
+       (guard (exn (#t 'raised)) (string->vector "abc" 0 100)) 'raised)
+(check "vector->string" (vector->string (vector #\a #\b #\c)) "abc")
+(check "vector->string with start/end" (vector->string (vector #\a #\b #\c) 1) "bc")
+(check "vector->string empty vector" (vector->string (vector)) "")
+(check "vector->string raises on a non-character element"
+       (guard (exn (#t 'raised)) (vector->string (vector 1 2 3))) 'raised)
+(check "vector->string out-of-range end raises"
+       (guard (exn (#t 'raised)) (vector->string (vector #\a #\b) 0 100)) 'raised)
+(check "string->vector / vector->string round-trip"
+       (vector->string (string->vector "curry")) "curry")
 (check "string-copy out-of-range raises instead of crashing"
        (guard (exn (#t 'raised)) (string-copy "abc" 1000 2)) 'raised)
 (check "string-copy! negative at raises instead of corrupting"

@@ -906,6 +906,29 @@ static val_t prim_string_to_list(int ac, val_t *av, void *ud) {
     while((cp=port_read_char(port))!=-1) chars=scm_cons(vchr((uint32_t)cp),chars);
     return scm_reverse(chars);
 }
+/* string->vector (R7RS 6.7): same single decode pass as string->list
+ * above (byte range -> variable-width UTF-8 codepoints, so the final
+ * element count isn't known upfront), but built straight into a Vector
+ * instead of going through a list at all -- string->list followed by
+ * list->vector would work too, but walks the codepoints twice for no
+ * reason. Collected in reverse via cons (cheap, no realloc), then
+ * filled into the Vector from the end backward once the final count is
+ * known, same shape as %indexed-pairs' own backward-build in this file. */
+static val_t prim_string_to_vector(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string->vector: not a string");
+    String *s = as_str(av[0]);
+    const char *sd = str_data(s);
+    uint32_t sb, eb;
+    string_range_to_bytes(s, ac, av, 1, "string->vector", &sb, &eb);
+    val_t port = port_open_input_string(sd + sb, eb - sb);
+    val_t chars = V_NIL; int cp; uint32_t n = 0;
+    while ((cp = port_read_char(port)) != -1) { chars = scm_cons(vchr((uint32_t)cp), chars); n++; }
+    Vector *v = CURRY_NEW_FLEX(Vector, n);
+    v->hdr.type = T_VECTOR; v->hdr.flags = 0; v->len = n;
+    for (uint32_t i = n; i > 0; i--) { v->data[i-1] = vcar(chars); chars = vcdr(chars); }
+    return vptr(v);
+}
 static val_t prim_string_for_each(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t proc = av[0];
@@ -1159,6 +1182,25 @@ static val_t prim_vector_to_list(int ac, val_t *av, void *ud) {
     val_t r = V_NIL;
     for (int i = (int)e - 1; i >= (int)s; i--) r = scm_cons(v->data[i], r);
     return r;
+}
+/* vector->string (R7RS 6.7): every element in [start,end) must be a
+ * character -- checked explicitly and raised on, rather than the lax
+ * "just call vunchr on whatever's there" pattern list->string (above)
+ * uses, since this is new code with no existing lax behavior to stay
+ * compatible with. */
+static val_t prim_vector_to_string(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_vector(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector->string: not a vector");
+    Vector *v = as_vec(av[0]);
+    uint32_t s, e;
+    validate_index_range(ac, av, 1, v->len, "vector->string", &s, &e);
+    val_t port = port_open_output_string();
+    for (uint32_t i = s; i < e; i++) {
+        if (!vis_char(v->data[i]))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "vector->string: element is not a character");
+        port_write_char(port, (int)vunchr(v->data[i]));
+    }
+    return port_get_output_string(port);
 }
 static val_t prim_list_to_vector(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -3386,6 +3428,7 @@ void builtins_register(val_t env) {
     DEF("string-length",prim_string_length,1,1); DEF("string-ref",prim_string_ref,2,2);
     DEF("string-copy",prim_string_copy,1,3); DEF("string-append",prim_string_append,0,-1);
     DEF("string->list",prim_string_to_list,1,3); DEF("list->string",prim_list_to_string,1,1);
+    DEF("string->vector",prim_string_to_vector,1,3); DEF("vector->string",prim_vector_to_string,1,3);
     DEF("string->symbol",prim_string_to_symbol,1,1); DEF("symbol->string",prim_symbol_to_string,1,1);
     DEF("string=?",prim_string_eq,2,-1); DEF("string<?",prim_string_lt,2,-1);
     DEF("string<=?",prim_string_le,2,-1); DEF("string>?",prim_string_gt,2,-1); DEF("string>=?",prim_string_ge,2,-1);
