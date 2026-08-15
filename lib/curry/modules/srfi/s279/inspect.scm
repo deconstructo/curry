@@ -29,20 +29,20 @@
 ;;; named-character reader vocabulary), hash-table-equivalence-
 ;;; function/-hash-function/-weak?/-mutable?, ports (port-open?/
 ;;; -direction/-type/-line/-position/-file-descriptor, backed by the
-;;; primitives added alongside the ports feature), and numeric vectors
+;;; primitives added alongside the ports feature), numeric vectors
 ;;; (u8/s8/u16/s16/u32/s32/u64/s64/f64vector, now that (curry typedvec)
-;;; and (curry f64vector) both exist -- see %typedvec-properties below).
+;;; and (curry f64vector) both exist -- see %typedvec-properties below),
+;;; and rtd-constructor/-predicate/-accessors/-mutators (the actual
+;;; constructor/predicate/accessor/mutator closures define-record-type's
+;;; own codegen creates, not just their names -- backed by the new
+;;; record-type-constructor/-predicate/-accessors/-mutators primitives,
+;;; which needed extending RecordType itself and both define-record-type
+;;; codegen paths, eval.c's tree-walker case and compiler.c's native
+;;; compile_define_record_type, to stash each binding's closure back
+;;; onto the RTD right after it's created; see their own comments in
+;;; src/object.h/src/record_type.c/src/builtins.c for the full story).
 ;;;
 ;;; Deliberately deferred, not forgotten:
-;;;   - rtd-accessors/-mutators/-predicate/-constructor: these are
-;;;     supposed to be actual procedure objects per the SRFI ("record-
-;;;     related procedures"), but curry's RecordType struct only stores
-;;;     name+field_names -- nothing references the constructor/
-;;;     predicate/accessor/mutator closures define-record-type's codegen
-;;;     generates. Adding this means extending RecordType and
-;;;     compile_define_record_type's codegen to stash those closures
-;;;     back onto the RTD at creation time -- real compiler/runtime
-;;;     work, scoped as its own follow-up rather than bundled here.
 ;;;   - library/environment properties: modules.c's registry has no
 ;;;     Scheme-level enumeration API (module names/exports aren't queryable
 ;;;     from Scheme once loaded).
