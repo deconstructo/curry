@@ -173,6 +173,16 @@ if(BUILD_MODULE_NETWORK AND TARGET curry_network)
     set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# (curry s3) imports (curry crypto) for HMAC-SHA256/SHA-256 and
+# (curry http) for the actual requests -- both needed to even import,
+# regardless of whether a live S3-compatible endpoint is reachable
+# (s3_tests.scm's own live round-trip section skips cleanly unless
+# CURRY_S3_TEST_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY are all set).
+if(BUILD_MODULE_CRYPTO AND TARGET curry_crypto AND BUILD_MODULE_HTTP AND TARGET curry_http)
+    add_test(NAME s3 COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/s3_tests.scm)
+    set_tests_properties(s3 PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 # Pure-Scheme scientific I/O modules (fits/netcdf) plus the FFI-based hdf5
 # wrapper (requires BUILD_FFI=ON to compile; libhdf5 itself is a
 # runtime-only dlopen dependency, so hdf5_tests.scm skips cleanly if it's

@@ -149,6 +149,14 @@ curry_val  curry_make_bytevector(uint32_t len, uint8_t fill);
 uint32_t   curry_bytevector_length(curry_val v);
 uint8_t    curry_bytevector_ref(curry_val v, uint32_t i);
 void       curry_bytevector_set(curry_val v, uint32_t i, uint8_t b);
+/* Direct pointer into the GC heap, curry_bytevector_length(v) bytes —
+ * same "pointer into GC heap" contract as curry_string(). Lets a module
+ * bulk-copy (memcpy) a bytevector's contents instead of looping over
+ * curry_bytevector_ref one byte at a time, which is prohibitively slow
+ * for anything megabyte-sized (e.g. an HTTP request body). Read-only:
+ * mutate through curry_bytevector_set, not this pointer, so GC write
+ * barriers (if any are ever added) aren't bypassed. */
+const uint8_t *curry_bytevector_data(curry_val v);
 
 /* ---- Numeric tower ---- */
 curry_val  curry_make_complex(curry_val real, curry_val imag);

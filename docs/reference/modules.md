@@ -14,7 +14,8 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [ldap](module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
 | [http](module-http.md) | `(curry http)` | General-purpose HTTP client — any method, headers, body | `libcurl4-openssl-dev` |
 | [llm](module-llm.md) | `(curry llm)` | LLM client: Claude, OpenAI, Ollama, any OpenAI-compat endpoint; tool use, agentic loop *(pure Scheme, no build step)* | `(curry http)` |
-| [storage](module-storage.md) | `(curry storage)` | S3, Swift, Azure Blob, GCS | `libcurl4-openssl-dev` |
+| [storage](module-storage.md) | `(curry storage)` | Swift, Azure Blob | `libcurl4-openssl-dev` |
+| [s3](module-s3.md) | `(curry s3)` | Amazon S3 client — also R2/MinIO/Ceph/GCS-via-S3-interop; listing, HEAD, copy, presigned URLs, multipart upload *(pure Scheme, no build step)* | `(curry crypto)`, `(curry http)`, `(curry xml)` |
 | [graphql](module-graphql.md) | `(curry graphql)` | GraphQL HTTP client | `libcurl4-openssl-dev` |
 | [redis](module-redis.md) | `(curry redis)` | Redis client (RESP2, no hiredis) | — |
 | [neo4j](module-neo4j.md) | `(curry neo4j)` | Neo4j graph database client (Bolt 4.x/5.x, no libneo4j) | — |

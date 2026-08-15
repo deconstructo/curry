@@ -191,6 +191,7 @@ uint8_t  curry_bytevector_ref(curry_val v, uint32_t i)         { return as_bytes
 void     curry_bytevector_set(curry_val v, uint32_t i, uint8_t b) {
     as_bytes(v)->data[i] = b;
 }
+const uint8_t *curry_bytevector_data(curry_val v)              { return as_bytes(v)->data; }
 
 /* ---- Numeric tower ---- */
 

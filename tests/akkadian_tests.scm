@@ -1109,13 +1109,14 @@
 (check-true "PR translit: šūdû-dāgilim binding (cond-signal!)" (procedure? šūdû-dāgilim))
 (check-true "PR translit: šūdû-dāgilim-kalāma binding (cond-broadcast!)" (procedure? šūdû-dāgilim-kalāma))
 
+;; S3 itself (erēb-maškanim/šakān-maškanim/leqû-maškanim/nasāḫ-maškanim)
+;; moved out of (curry storage) into the pure-Scheme (curry s3) module,
+;; which -- consistent with comparable custom API-client modules like
+;; airports/naips -- carries no Akkadian aliases at all. See
+;; src/akkadian_names.h's own note at the old AKK_PR entries' former
+;; location.
 (guard (e (#t (display "SKIP: (curry storage) checks need cloud credentials, binding-only") (newline)))
   (import (curry storage))
-  (check-true "PR translit: erēb-maškanim binding (s3-client)" (procedure? erēb-maškanim))
-  (check-true "PR cunei: 𒂗𒂍 binding (s3-client)" (procedure? 𒂗𒂍))
-  (check-true "PR translit: šakān-maškanim binding (s3-put!)" (procedure? šakān-maškanim))
-  (check-true "PR translit: leqû-maškanim binding (s3-get)" (procedure? leqû-maškanim))
-  (check-true "PR translit: nasāḫ-maškanim binding (s3-delete!)" (procedure? nasāḫ-maškanim))
   (check-true "PR translit: erēb-maškanim-šanûm binding (swift-client)" (procedure? erēb-maškanim-šanûm))
   (check-true "PR translit: šakān-maškanim-šanûm binding (swift-put!)" (procedure? šakān-maškanim-šanûm))
   (check-true "PR translit: leqû-maškanim-šanûm binding (swift-get)" (procedure? leqû-maškanim-šanûm))

@@ -13,7 +13,10 @@
  *   method:  string — "GET", "POST", "PUT", "PATCH", "DELETE", etc.
  *   url:     string
  *   headers: alist of ("Name" . "value") string pairs, or '()
- *   body:    optional string (request body)
+ *   body:    optional string or bytevector (request body) — a bytevector
+ *            is sent byte-for-byte; a string goes through
+ *            curry_string_length (not strlen), so embedded NUL bytes
+ *            don't truncate it either
  *
  *   http-request returns: pair (fixnum-status . body-string)
  *   http-request/headers returns: list (fixnum-status headers-alist body-string),
@@ -139,6 +142,36 @@ static size_t hdr_cb(char *buf, size_t sz, size_t n, void *ud) {
     return total;
 }
 
+/* Resolves an optional string-or-bytevector body argument into a byte
+ * pointer + length. A string body points directly into the GC heap (via
+ * curry_string_length, not strlen, so embedded NULs don't truncate it) —
+ * *owned_out stays NULL and the caller must not free it. A bytevector
+ * body is copied byte-by-byte into a malloc'd buffer (curry.h has no
+ * bulk bytevector-pointer accessor) and *owned_out is set to that
+ * buffer, which the caller must free(). Returns NULL/sets *len_out to 0
+ * if av[idx] is absent or neither type. */
+static const char *resolve_body(int ac, curry_val *av, int idx,
+                                 size_t *len_out, char **owned_out) {
+    *owned_out = NULL;
+    *len_out = 0;
+    if (ac <= idx) return NULL;
+    curry_val v = av[idx];
+    if (curry_is_string(v)) {
+        *len_out = curry_string_length(v);
+        return curry_string(v);
+    }
+    if (curry_is_bytevector(v)) {
+        uint32_t n = curry_bytevector_length(v);
+        char *buf = malloc(n ? n : 1);
+        if (!buf) curry_error("http: out of memory building request body (%u bytes)", n);
+        memcpy(buf, curry_bytevector_data(v), n);
+        *len_out = n;
+        *owned_out = buf;
+        return buf;
+    }
+    return NULL;
+}
+
 /* Shared request/perform core. hdrs may be NULL to skip header capture
  * entirely (the original http-request path — no CURLOPT_HEADERFUNCTION
  * is installed, so its behavior is unchanged). */
@@ -177,6 +210,16 @@ static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "curry-http/1.0");
 
+    /* CURLOPT_CUSTOMREQUEST alone doesn't tell curl to suppress the
+     * response body the way a real HEAD request should -- without
+     * CURLOPT_NOBODY, curl still performs a GET-shaped transfer and
+     * simply trusts the server not to send one. A server that gets
+     * HEAD semantics wrong (some non-AWS S3-compatible endpoints do)
+     * sends a body anyway, which curl then happily reads as the
+     * response. Set NOBODY explicitly rather than relying on every
+     * server behaving. */
+    curl_easy_setopt(curl, CURLOPT_NOBODY, strcmp(method, "HEAD") == 0 ? 1L : 0L);
+
     if (body) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
@@ -199,12 +242,14 @@ static curry_val fn_http_request(int ac, curry_val *av, void *ud) {
     const char *method   = curry_string(av[0]);
     const char *url      = curry_string(av[1]);
     curry_val   hdrs_v   = (ac > 2) ? av[2] : curry_nil();
-    const char *body     = (ac > 3 && curry_is_string(av[3])) ? curry_string(av[3]) : NULL;
-    size_t      body_len = body ? strlen(body) : 0;
+    size_t      body_len = 0;
+    char       *body_owned = NULL;
+    const char *body     = resolve_body(ac, av, 3, &body_len, &body_owned);
 
     Buf resp = buf_new();
     long code = 0;
     CURLcode rc = do_request(method, url, hdrs_v, body, body_len, &resp, NULL, &code);
+    free(body_owned);
 
     if (rc != CURLE_OK)
         curry_error("http: %s — %s", method, curl_easy_strerror(rc));
@@ -223,13 +268,15 @@ static curry_val fn_http_request_headers(int ac, curry_val *av, void *ud) {
     const char *method   = curry_string(av[0]);
     const char *url      = curry_string(av[1]);
     curry_val   hdrs_v   = (ac > 2) ? av[2] : curry_nil();
-    const char *body     = (ac > 3 && curry_is_string(av[3])) ? curry_string(av[3]) : NULL;
-    size_t      body_len = body ? strlen(body) : 0;
+    size_t      body_len = 0;
+    char       *body_owned = NULL;
+    const char *body     = resolve_body(ac, av, 3, &body_len, &body_owned);
 
     Buf resp = buf_new();
     HdrList hdrs; hdrlist_init(&hdrs);
     long code = 0;
     CURLcode rc = do_request(method, url, hdrs_v, body, body_len, &resp, &hdrs, &code);
+    free(body_owned);
 
     if (rc != CURLE_OK) {
         free(resp.data);

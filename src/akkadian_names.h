@@ -1087,15 +1087,23 @@ AKK_PR("sqlite-finalize",          "gamār-nikkassim",      "𒃲𒈷𒃲")   /*
 AKK_PR("sqlite-last-insert-rowid", "warki-nikkassim",      "𒉡𒈷")
 AKK_PR("sqlite-changes",           "nakru-nikkassim",      "𒉡𒄿𒈷")   /* nakārum root, reused */
 
-/* ---- (curry storage) — S3 / Swift / Azure object storage ---- */
+/* ---- (curry storage) — Swift / Azure object storage ---- */
 /* maškanu: "storage place, threshing floor" — genuine, reused from
  * mcp-introspection-cache-ttl!. Distinguished per cloud by genuine OB
  * ordinals (šanûm "second"/"other" already reused elsewhere; šalšu
- * "third" introduced here). */
-AKK_PR("s3-client",     "erēb-maškanim",         "𒂗𒂍")
-AKK_PR("s3-put!",       "šakān-maškanim",        "𒁹𒂍")
-AKK_PR("s3-get",        "leqû-maškanim",         "𒅁𒂍")     /* leqûm = to take, reused (let) */
-AKK_PR("s3-delete!",    "nasāḫ-maškanim",        "𒋻𒂍𒉡")     /* nasāḫum = to tear out, genuine */
+ * "third" introduced here).
+ *
+ * S3 itself (erēb-maškanim/šakān-maškanim/leqû-maškanim/nasāḫ-maškanim
+ * for the old s3-client/s3-put!/s3-get/s3-delete!) moved out of this
+ * table when S3 support moved from this C module to the pure-Scheme
+ * (curry s3) module (lib/curry/modules/curry/s3.scm) — this AKK_PR
+ * table only ever applies to GLOBAL_ENV/C-module bindings (see
+ * CLAUDE.md's "Akkadian error messages" section), not pure-Scheme
+ * libraries, and s3-client etc. are no longer either. Custom API-
+ * client modules in this class (airports, naips) don't carry Akkadian
+ * aliases at all, so none were added to (curry s3) either — keeping
+ * this consistent with that existing pattern rather than inventing a
+ * one-off exception. */
 AKK_PR("swift-client",  "erēb-maškanim-šanûm",   "𒂗𒂍𒁀")
 AKK_PR("swift-put!",    "šakān-maškanim-šanûm",  "𒁹𒂍𒁀")
 AKK_PR("swift-get",     "leqû-maškanim-šanûm",   "𒅁𒂍𒁀")
