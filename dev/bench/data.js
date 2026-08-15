@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786790432908,
+  "lastUpdate": 1786836716569,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5381,6 +5381,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 81.129,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "86d59164d1d0089f223c6b2bf420f21c612e53e0",
+          "message": "feat(s3): pure-Scheme (curry s3) module, replacing the C-level S3 client\n\nNew (curry s3) (lib/curry/modules/curry/s3.scm): AWS SigV4-signed S3\nclient built entirely on existing curry building blocks (crypto, http,\nxml, srfi 19/132) -- no new C module. Covers put/get/delete/head/copy,\nbucket listing (ListObjectsV2), bucket create (with the region-specific\nLocationConstraint body AWS requires)/delete, presigned URLs, and\nmultipart upload with automatic part splitting. Also works against any\nS3-compatible endpoint: R2, MinIO, Ceph, GCS-via-S3-interop, Wasabi.\n\nBoth signing flavors (Authorization-header and query-string/presign)\nwere cross-checked byte-for-byte against an independent Python\nreference implementation during development.\n\nRemoved S3 support from the C (curry storage) module entirely (Swift\nand Azure unchanged), along with its now-dead Akkadian aliases.\n\nAlong the way, fixed two real bugs in (curry http):\n- http-request/-headers sized string request bodies via strlen instead\n  of the length-aware curry_string_length, silently truncating at the\n  first embedded NUL byte.\n- HEAD requests never set CURLOPT_NOBODY, relying on the server to\n  volunteer no body instead of actually requesting one.\nAlso extended it to accept a bytevector body directly (not just a\nstring), added curry_bytevector_data to the public embedding API so\nthat copy can be a real memcpy instead of a byte-at-a-time loop, and\ngave the internal malloc a NULL check.\n\nNew tests/s3_tests.scm (34 checks: client/URI-encoding/presign-format/\nXML-fixture coverage, plus an opt-in live round-trip gated on env vars,\nskipped by default) registered as ctest s3. New docs/reference/\nmodule-s3.md; module-storage.md and modules.md updated accordingly.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-16T09:31:08+10:00",
+          "tree_id": "576f06fd0a24c20be3148f13232bea975d74868b",
+          "url": "https://github.com/deconstructo/curry/commit/86d59164d1d0089f223c6b2bf420f21c612e53e0"
+        },
+        "date": 1786836715443,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.183,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.451,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.188,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.922,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 130.721,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 260.429,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 58.821,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 83.742,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.053,
             "unit": "ms"
           }
         ]
