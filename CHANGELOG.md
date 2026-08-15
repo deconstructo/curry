@@ -1,5 +1,145 @@
 # Changelog
 
+### 1.21.0 - 2026-08-15
+
+**Fix — `write`/`display` no longer hang forever on circular structure**
+
+`write`/`display` used a naive recursive writer with zero cycle
+tracking; a self-referential pair or vector hung the process forever.
+curry already had a correct two-pass cycle-safe algorithm backing
+`write-shared` (`ws_count_refs`/`ws_write` in `src/port.c`) — `write`/
+`display` now route through the same machinery instead of a new
+implementation. `write-simple` keeps the original naive path, matching
+its R7RS license to loop on cycles. Also fixed: the internal call
+sites that still called the raw writer directly (REPL result echo,
+uncaught-exception printers, `(error ...)` with a non-string message,
+actor-crash reporting, the trace facility) could hang even without an
+explicit `write`/`display` call.
+
+**Fix — `(string->number "")` returned `0`, not `#f`; `utf8->string` never validated its input**
+
+`parse_number`'s fixnum fast path couldn't distinguish "parsed the
+digit 0" from "parsed nothing at all" (`strtol("")` returns 0 without
+touching `errno`) — an empty string, or an empty numerator/denominator/
+real/imaginary component reached via the parser's own recursive calls,
+silently became `0` instead of `#f`. `utf8->string` did a raw byte
+copy with zero validation; it now rejects truncated sequences, stray
+continuation bytes, overlong encodings, encoded UTF-16 surrogate
+halves, and out-of-range lead bytes, raising instead of producing a
+String with garbled content.
+
+**New — R7RS `string->vector`/`vector->string`**
+
+Neither existed at all; `(srfi 279)`'s own `inspect.scm` had a local
+`list->vector`/`list->string`-composed workaround noting the gap.
+
+**New — R7RS `delay`/`delay-force` now work in compiled code, not just the tree-walker**
+
+Found while auditing compiler/tree-walker parity: `eval.c` has always
+special-cased `delay`/`delay-force`, but `compiler.c` never learned to
+— `(define x (delay ...))` at the top level (which compiles, unlike
+`define-library` bodies) has apparently always raised
+`unbound-variable`. New compiler codegen builds the same `Promise`
+shape the tree-walker already does.
+
+**Fix — non-tail recursion inside a `define-library` body could crash the whole process**
+
+`define-library` bodies are tree-walked (`modules.c` calls `eval()`
+directly, not the compiled VM path top-level script/REPL code uses),
+and the tree-walker had no stack-depth guard at all — unlike the
+bytecode VM's own catchable, explicit frame-count guard. Deep non-tail
+recursion just exhausted the real OS stack and segfaulted. `eval()`
+now carries its own guard, raising a catchable `stack-overflow`
+condition instead. The first version used a fixed byte budget assuming
+an ~8MB thread stack everywhere; independent security review found
+curry's own parallel `map`/`reduce`/`for-each/par` worker pool spawned
+threads with the platform default stack size (512KB on macOS) — the
+fixed threshold never fired there and the process still crashed. Fixed
+by querying each thread's real stack size instead of assuming one, and
+by giving worker-pool threads an explicit 8MB stack matching the
+existing actor-thread convention.
+
+**Perf — `(srfi 279)` `inspect-properties` up to ~10x faster on large sequences**
+
+The dominant cost turned out to be an interpreted Scheme loop building
+the `(index element)` alist for every pair/string/vector/bytevector/
+typed-vector property set — measured at over 90% of total time on a
+2M-element vector, consistent with this codebase's own documented
+"`define-library` hot loops run slower than top-level code"
+characteristic. Moved to a small C primitive (`%indexed-pairs`) doing
+the same walk natively. A 2M-element vector's `inspect-properties`
+call dropped from ~4.8s to ~0.44s; the doc's original 50M-element,
+45x-slower measurement is now roughly 5x. (Also found and fixed by the
+same review pass: the new primitive's own length-counting loop had no
+cycle detection and could hang forever on a circular list, reachable
+directly from ordinary Scheme via `set-cdr!` — fixed with the same
+tortoise-and-hare pattern `length` already uses.)
+
+**New — SRFI-253 (Data Type-Checking)**
+
+`check-arg`, `values-checked`, `check-case`, `lambda-checked`,
+`case-lambda-checked`, `define-checked`, `define-record-type-checked`
+— any of curry's extended numeric-tower/object predicates work as
+checkers with no special support needed. `bignum?`/`multivector?` were
+genuinely missing from curry's core before this and were added
+alongside it. A follow-up review found the original
+`case-lambda-checked` macro expansion was exponential in clause count
+(an 8-clause form took over 2 minutes to compile) — fixed by
+thunk-wrapping the "try next clause" continuation instead of splicing
+the whole recursive dispatch tree at every branch.
+
+**New — SRFI-1 (List Library) completed; a real `fold` argument-order bug fixed**
+
+Closed the remaining gap in curry's list-library coverage, plus a
+genuine pre-existing bug in `fold`'s argument order to the combining
+procedure. A follow-up found `cons*`/`take`/`take-while`/`unfold`'s
+naive non-tail recursion could SIGSEGV inside a `define-library` body
+(the same tree-walker stack-guard gap fixed above, worked around
+locally at the time) and that `list*` had been dropped from the
+export list.
+
+**New — SRFI-4 (Homogeneous Numeric Vectors) and extended SRFI-160 uniform-vector operations**
+
+Core typed vectors (`u8vector` through `s64vector`) plus a `(srfi 4)`
+wrapper, and `map`/`fold`/`filter`/comparator/generator support across
+all 9 typed-vector kinds.
+
+**Extended — `(srfi 279)` In(tro)spection Protocol**
+
+Closed several gaps since 1.20.0: char-sets, universal `id`/`size`/
+`type` properties, `symbol-value`, `char-name`, hash-table
+equivalence-/hash-function/weak?/mutable? properties; port
+introspection (`port-open?`/`-direction`/`-type`/`-line`/`-position`/
+`-file-descriptor`, backed by new primitives); procedure introspection
+(`procedure-name`/`-arity`/`-arglist`/`-file`/`-line`/`-lambda`/
+`-closure`); numeric-vector properties; and the four "record-related
+procedures" the SRFI itself wants (`rtd-accessors`/`-mutators`/
+`-predicate`/`-constructor` — the actual closures `define-record-type`
+generates, not just their names), which needed extending `RecordType`
+and both `define-record-type` codegen paths. Two independent review
+rounds along the way found and fixed a real type-dispatch ordering bug
+(SRFI-113 bags are hash tables under the hood, so `bag?` must be
+checked before the generic `hash-table?` branch) and a doc/code
+mismatch.
+
+**Fix — intermittent `lsp` test failures on CI**
+
+Root cause was `test_lsp.sh`'s own assertion helper forking a
+`printf | grep` pipeline for every check; under process/fork pressure
+(a loaded CI runner) that pipeline could fail to spawn or return a
+misleading exit status unrelated to the actual content being checked
+— confirmed by reproducing it locally under artificial load and
+finding the "missing" content was actually present when the same log
+was grepped directly afterward. Replaced with bash's builtin substring
+test, which needs no process creation at all.
+
+**Fix — Akkadian reference documented the wrong glyph for `map`**
+
+The cuneiform glyph documented for `map` was actually bound to
+`number->string`; following the docs for `map` silently ran the wrong
+procedure. Corrected, and the missing `number->string` row added so
+the collision would have been visible in the doc's own tables.
+
 ### 1.20.0 - 2026-08-14
 
 **New — `(curry tts)`: cross-backend text-to-speech**
