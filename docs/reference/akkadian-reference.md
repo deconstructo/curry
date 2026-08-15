@@ -1,6 +1,6 @@
 # Akkadian Language Reference
 
-*v1.2.2 — 2026-06-07*
+*v1.20.0 — 2026-08-15*
 
 Curry Scheme accepts three equivalent notations for every name. You can mix them freely within a single program.
 
@@ -69,7 +69,7 @@ The cuneiform signs render in any font that includes the Unicode Cuneiform block
 | `length` | `mīnum` | `𒈠𒈾` | MA.NA — weight/measure |
 | `append` | `redûm` | `𒈠𒂗` | to follow/continue |
 | `reverse` | `turrum` | `𒋻𒀀` | TAR.A — to turn back |
-| `map` | `šutakūlum-nindabî` | `𒈷𒌝` | ME.UM |
+| `map` | `šutakūlum-nindabî` | `𒈷𒅆` | ME.IGI |
 | `for-each` | `ana-kālāma` | `𒀀𒈾𒆠` | A.NA.KI — for all |
 | `filter` | `ṣêrum` | `𒋻` | TAR — to cut/select |
 | `null?` | `šūnum?` | `𒉡𒁹` | NU.DIŠ — not-one = empty |
@@ -106,6 +106,7 @@ These terms are attested in Old Babylonian mathematical tablets.
 | `lcm` | `qallum` | `𒉡𒃲𒁹` | |
 | `exact` | `kinattu` | `𒆠𒋻` | |
 | `inexact` | `lā-kinattu` | `𒉡𒆠𒋻` | |
+| `number->string` | `nikkassum-ana-ṭuppi` | `𒈷𒌝` | ME.UM — "account to tablet"; *nikkassu* "account" is reused (cf. `values`'s `nikkassū` above) |
 
 ### I/O
 
