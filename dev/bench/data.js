@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786769922743,
+  "lastUpdate": 1786783385335,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5036,6 +5036,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 50.569,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "926579b7dee8dad9345ada9acf2a4300c0d8f22c",
+          "message": "fix(core): eval() stack-depth guard; compiler support for delay/delay-force (#50)\n\n* fix(core): eval() stack-depth guard; compiler support for delay/delay-force\n\nInvestigating #2 (define-library non-tail recursion SIGSEGVs) and #3 (define-library hot loops ~3.6x slower than top level) found both share one root cause: define-library bodies are tree-walked (modules.c's define_library_clause calls eval() directly), not compiled+VM-run the way top-level script/REPL code already is (main.c: compiler_compile()+vm_run()). The VM has an explicit, catchable call-stack-overflow guard (vm.c, max 256 frames); eval() had none at all, so deep non-tail recursion just exhausted the real OS stack and crashed.\n\n#3's actual fix -- switching modules.c to compile+vm_run -- turned out to be architecturally blocked: the VM's global-variable ops are hardwired to one GLOBAL_ENV (vm.c's own header comment says so directly), while define-library bodies execute against an isolated root environment specifically so library-internal defines don't leak into the global namespace. A naive swap would silently break module isolation for every existing module. This exact problem, and a proposed fix (repair modules.c's currently-broken export-list filtering and make that the real isolation mechanism instead of environment-frame topology), turns out to already be scoped in docs/thoughts/eval-elimination-migration-plan-2026-07-23.md -- an existing 8-phase plan whose phase 1 (splitting eval.c into runtime.c + a shrinking tree-walker) is already merged. Phases 2-8, including the modules.c rewrite that would actually close #3, are a separate, larger, already-planned undertaking -- not attempted here.\n\n#2 is fixed on its own: eval() now carries a stack-depth guard (a per-thread cached stack base, from Boehm's GC_get_stack_base, compared against the current stack pointer on every real C-level entry -- goto-tail iterations don't grow the C stack and never reach the check), raising the same catchable EC_STACK_OVERFLOW condition the VM's own guard uses instead of segfaulting. Verified: a define-library-defined function doing non-tail recursion to depth 1,000,000 previously crashed the process immediately; now raises cleanly and is catchable via guard. The new threshold (~1400-1600 non-tail frames with the current 7MB budget) is well above the VM's own established 256-frame limit for compiled code, so no new false-positive risk relative to already-accepted behavior.\n\nWhile checking compiler/tree-walker parity before touching modules.c (a prerequisite investigation, not itself part of the swap), found delay/delay-force are unbound in compiled code today -- eval.c has always specially handled them, but compiler.c never learned to, so top-level (define x (delay ...)) has apparently always raised unbound-variable. Fixed with actual new compiler codegen (compile_delay in compiler.c, reusing compile_lambda for the thunk, calling two new primitives %delay-promise/%delay-force-promise in builtins.c that build the same Promise shape eval.c's own S_DELAY/S_DELAY_FORCE construct) rather than eval.c's tree-walker-specific Closure construction -- verified force/delay/delay-force all now work identically whether compiled or tree-walked, and prim_force's existing apply(p->val, V_NIL) is already closure-representation-agnostic so no changes were needed there. No existing module in the codebase used delay/delay-force/defined? inside a define-library body (grep confirmed), so this closes a real, independently-shippable bug rather than working around a live regression.\n\nNew ctest entry define_library_stack_guard (own file, not folded into r7rs_tests.scm, matching this suite's convention for scenarios that would previously crash the whole test binary rather than just fail one assertion).\n\n* fix(core): eval() stack guard must query real per-thread stack size\n\nIndependent security review of the previous commit found the guard's fixed 7MB threshold assumed every thread has an ~8MB stack, matching the main thread and actors.c's own actor threads -- but curry's parallel map/reduce/for-each/par worker pool (workpool.c) spawned its threads with a NULL pthread_attr_t (platform default stack size, 512KB on macOS), so the fixed 7MB threshold never fired there: the real, much smaller stack still exhausted and crashed the process (confirmed: Bus error at non-tail recursion depth ~150 through a define-library-defined function inside a parallel map, reproduced with no special configuration -- an ordinary default build/run). The same root cause also reproduced on the main thread under a lowered ulimit -s (confirmed below ~7.2MB).\n\nFixed two ways:\n1. eval()'s guard now queries each thread's real stack size (pthread_get_stacksize_np on macOS, pthread_getattr_np+pthread_attr_getstack on Linux) instead of assuming a fixed 8MB, reserving 1/8 of the real size (minimum 64KB) as unwind headroom -- scales correctly for both a normal ~8MB thread and workpool's previous 512KB default.\n2. workpool.c now explicitly requests an 8MB stack via pthread_attr_setstacksize, matching actors.c's existing convention, so worker threads get the same headroom as every other thread in the process rather than being uniquely constrained.\n\nVerified: the exact crash repro from the security review (parallel map over a define-library-defined non-tail-recursive function) now completes/raises cleanly instead of crashing; the ulimit -s 7168 repro now raises and is caught instead of segfaulting. Added two new regression tests exercising workpool worker threads specifically (map auto-parallelizes above the default 8-element threshold, so a 12-element list genuinely exercises worker threads, not just the calling thread) -- the existing tests only covered the main thread and wouldn't have caught this.",
+          "timestamp": "2026-08-15T18:42:16+10:00",
+          "tree_id": "edf4293535b3d90647cfa9ffd116a56a2fa480e7",
+          "url": "https://github.com/deconstructo/curry/commit/926579b7dee8dad9345ada9acf2a4300c0d8f22c"
+        },
+        "date": 1786783383435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.899,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.322,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.012,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.998,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 190.505,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 367.697,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.016,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.313,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.682,
             "unit": "ms"
           }
         ]
