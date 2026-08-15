@@ -17,9 +17,18 @@ export CURRY_MODULE_PATH="$MOD_PATH"
 pass=0
 fail=0
 
+# Bash builtin substring test (no grep/printf subprocess) -- under CI-runner
+# or system load, forking a grep+printf pipeline for every single assertion
+# (dozens per run) is itself failure-prone: fork()/exec() can transiently
+# fail or a pipeline stage can be reaped with a misleading exit status for
+# reasons that have nothing to do with the actual haystack content. That
+# produced real, reproducible false-FAILs under load (confirmed by re-
+# grepping a failed run's own saved log afterward and finding the "missing"
+# substring right there, byte for byte). [[ == *needle* ]] does the same
+# literal substring match with zero process creation.
 check_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if [[ "$haystack" == *"$needle"* ]]; then
         echo "PASS: $label"
         (( pass++ )) || true
     else
@@ -32,7 +41,7 @@ check_contains() {
 
 check_not_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if [[ "$haystack" == *"$needle"* ]]; then
         echo "FAIL: $label (string unexpectedly found)"
         echo "  not looking for: $needle"
         echo "  in: $haystack"
