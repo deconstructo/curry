@@ -761,9 +761,10 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; seqlen = 3; }
     else                         { cp = c & 0x07; seqlen = 4; }
     /* A lead byte's own presence within [sd,end) doesn't guarantee its
-     * continuation bytes are too — a String can hold malformed/truncated
-     * UTF-8 (e.g. utf8->string does a raw copy with no validation), and a
-     * multi-byte lead byte could be the buffer's very last byte. Reading
+     * continuation bytes are too — a String can still end up holding
+     * malformed/truncated UTF-8 (utf8->string validates now, but other
+     * routes to a String's raw bytes may not), and a multi-byte lead byte
+     * could be the buffer's very last byte. Reading
      * p[1..seqlen-1] unconditionally in that case would run past the
      * string's allocation; raise instead of decoding out of bounds,
      * mirroring how (curry ports)' read_utf8_codepoint (src/port.c)
@@ -1039,7 +1040,13 @@ static bool utf8_is_well_formed(const unsigned char *p, uint32_t len) {
         else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; seqlen = 3; min_cp = 0x800; }
         else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; seqlen = 4; min_cp = 0x10000; }
         else return false; /* stray continuation byte, or 0xF5-0xFF */
-        if (i + (uint32_t)seqlen > len) return false; /* truncated */
+        /* len - i, not i + seqlen > len: bytevectors are permitted up to
+         * UINT32_MAX bytes (see make-bytevector), and i + seqlen can wrap
+         * uint32_t back down to a small value near the buffer's end,
+         * silently passing the truncation check and reading up to 3 bytes
+         * past the allocation. i < len is the loop invariant here, so
+         * len - i can never underflow. */
+        if ((uint32_t)seqlen > len - i) return false; /* truncated */
         for (int k = 1; k < seqlen; k++) {
             unsigned char cc = p[i + (uint32_t)k];
             if ((cc & 0xC0) != 0x80) return false; /* not a continuation byte */
