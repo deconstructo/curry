@@ -98,6 +98,14 @@ static bool is_delimiter(int c) {
 }
 
 val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_force) {
+    /* The empty string is never a valid number literal (R7RS). Without this,
+     * strtol("", &end, radix) sets end == s (consumes nothing) and returns 0
+     * with errno untouched, which the fixnum-range check below can't tell
+     * apart from a genuine "0" -- (string->number "") silently returned 0
+     * instead of #f. This also correctly rejects an empty numerator/
+     * denominator/real/imaginary substring reached via this function's own
+     * recursive calls below (e.g. "3/" or "+i" splitting to an empty part). */
+    if (*s == '\0') return V_FALSE;
     /* Try integer */
     char *end;
     errno = 0;

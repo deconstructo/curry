@@ -227,15 +227,8 @@
               (list 'string->vector (%string->vector object))
               (list 'string->utf8   (string->utf8 object))
               (list 'string-length  (string-length object)))
-        ;; (string->number "") incorrectly returns 0 rather than #f in
-        ;; this build (a core numeric-parser bug, out of scope to fix
-        ;; here) -- guard the empty string explicitly so that bug doesn't
-        ;; leak a bogus string->number entry into every empty string's
-        ;; properties.
-        (if (> (string-length object) 0)
-            (let ((n (string->number object)))
-              (if n (list (list 'string->number n)) '()))
-            '())
+        (let ((n (string->number object)))
+          (if n (list (list 'string->number n)) '()))
         (%indexed-properties (string->list object))))
 
     ;;; ---- Vector ----
@@ -295,14 +288,15 @@
 
     ;;; ---- Bytevector ----
 
-    ;; No `guard` here: curry's utf8->string does a raw copy with no
-    ;; validation (never raises on invalid UTF-8, per its own comment in
-    ;; builtins.c), so it always succeeds -- for a bytevector that isn't
-    ;; valid UTF-8, this entry is present but its content is garbled
-    ;; rather than a real decode, which callers should be aware of.
+    ;; curry's utf8->string now validates its input and raises on
+    ;; malformed UTF-8 -- guard it so a bytevector that isn't valid UTF-8
+    ;; just omits this entry (matching every other unsupported-property
+    ;; case in this module) instead of making the whole inspect-properties
+    ;; call raise for an unrelated bytevector.
     (define (%bytevector-properties object)
       (append
-        (list (list 'utf8->string (utf8->string object)))
+        (guard (e (#t '()))
+          (list (list 'utf8->string (utf8->string object))))
         (%indexed-properties (bytevector->list object))))
 
     (define (bytevector->list bv)
