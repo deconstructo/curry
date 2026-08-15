@@ -222,9 +222,24 @@ void pool_init(void) {
      * constructed WSDeque. */
     for (int i = 0; i < n; i++)
         deque_init(&global_pool->deques[i]);
+    /* Explicit 8MB stack, matching actors.c's own convention -- a worker
+     * runs arbitrary user map/reduce/for-each/par callbacks, which can
+     * include ordinary non-tail recursion through the tree-walker
+     * (eval()'s own stack-depth guard sizes its safe threshold from each
+     * thread's real stack, but a worker spawned with the platform
+     * default (NULL attr; 512KB on macOS) still only has room for a very
+     * shallow call depth before that guard has to fire -- independent
+     * security review found this crashed the process outright before
+     * eval()'s guard existed, and even now leaves worker threads far
+     * more constrained than every other thread in the process for no
+     * reason other than never having requested more). */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
     for (int i = 0; i < n; i++)
-        pthread_create(&global_pool->threads[i], NULL,
+        pthread_create(&global_pool->threads[i], &attr,
                        worker_loop, (void *)(intptr_t)i);
+    pthread_attr_destroy(&attr);
 }
 
 /* ── dispatch ────────────────────────────────────────────────────────────── */
