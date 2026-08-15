@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786767198770,
+  "lastUpdate": 1786768585729,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4898,6 +4898,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.468,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bc11de06a43d85c6a281e2a834e90853ef77c8cd",
+          "message": "fix(core): close circular-list hang in %indexed-pairs (independent security review) (#48)\n\nUrgent follow-up to #47, which merged before this fix (found by an independent security review that was still running when #47's merge happened) landed. main currently has the live bug: %indexed-pairs' counting pass was a bare vis_pair walk with no cycle detection -- reachable from ordinary unprivileged Scheme (set-cdr! alone builds a circular list) since it's an ordinary globally-registered primitive in curry's flat GLOBAL_ENV, not gated behind inspect.scm's own list?-before-call convention the way its only current caller happens to use it. A circular list hangs the process forever in a tight, uninterruptible C loop.\n\nFixed with the same Floyd tortoise-and-hare pattern prim_length already uses elsewhere in this file. As a side effect this also makes a dotted/improper-list argument raise instead of silently truncating at the first non-pair cdr and returning a partial result -- a second, lower-severity issue the same review found, evidenced by a test that was asserting the silent-truncation behavior while its own label claimed the opposite ('raises on a dotted list' checking a non-raising equality assertion). Both tests corrected to actually guard/expect a raise.\n\nAlso added a defense-in-depth i < n bound on the fill loop: pass 1 fixes the trip count, but nothing enforces that lst can't be mutated by another thread between the two passes for some future caller that doesn't share inspect.scm's own guarantee of a fresh, unshared list.\n\nVerified: the circular-list repro now raises immediately instead of hanging; full ctest suite (96/96) passes; the 2M-element-vector inspect-properties benchmark from #47 is unaffected (~0.46s -- Floyd's algorithm's overhead is negligible against the already-necessary single list walk).",
+          "timestamp": "2026-08-15T14:35:38+10:00",
+          "tree_id": "12abaee2d748917d4619279915edb11d3d5a9d46",
+          "url": "https://github.com/deconstructo/curry/commit/bc11de06a43d85c6a281e2a834e90853ef77c8cd"
+        },
+        "date": 1786768584848,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.593,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.53,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.964,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.872,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.96,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 372.074,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.524,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 119.466,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 99.11,
             "unit": "ms"
           }
         ]
