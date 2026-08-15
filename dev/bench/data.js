@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786783385335,
+  "lastUpdate": 1786785234155,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5105,6 +5105,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.682,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7eac86cedea22a58b2fafda1a744353eef571959",
+          "message": "Release v1.21.0 (#53)\n\nCHANGELOG.md documents everything merged since v1.20.0: the write/display cycle-detection fix, string->number/utf8->string validation fixes, string->vector/vector->string, delay/delay-force compiler support, the eval() stack-depth guard (plus the worker-pool thread-stack-size follow-up), the SRFI-279 inspect-properties perf fix (and the circular-list DoS found alongside it), SRFI-253, SRFI-1 completion, SRFI-4/160, further SRFI-279 gap closures, the lsp test flake fix, and the Akkadian map-glyph doc fix.\n\nsrc/version.h is CMakeLists.txt's single source of truth for the project version. Formula/curry.rb's url/version point at the not-yet-created v1.21.0 tag; sha256 stays at the v1.20.0 tarball's checksum until the tag exists and can be hashed for real, in a follow-up commit after tagging (matching this repo's own established two-step pattern).\n\nVerified: curry -v reports 1.21.0, full ctest suite (97/97) passes.",
+          "timestamp": "2026-08-15T19:13:16+10:00",
+          "tree_id": "b2d5319131b110a73db9bcbdcc5f35ab4b4ddeaf",
+          "url": "https://github.com/deconstructo/curry/commit/7eac86cedea22a58b2fafda1a744353eef571959"
+        },
+        "date": 1786785233580,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.005,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.936,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.025,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.748,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 193.685,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.746,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.672,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.649,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.593,
             "unit": "ms"
           }
         ]
