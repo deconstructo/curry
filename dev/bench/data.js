@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786760603331,
+  "lastUpdate": 1786761449155,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4553,6 +4553,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 103.41,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aec3b8a0b4d763fa318af801622ca8acb1c6f97a",
+          "message": "fix(tests): remove grep/printf subprocess forking from lsp test assertions (#42)\n\nReproduced the intermittent 'lsp' ctest failure (issue #40) locally by running 20-30 parallel test_lsp.sh instances under artificial CPU load. The failures were not data corruption: re-grepping a failed run's own saved log afterward found the exact substring check_contains claimed was missing, present byte-for-byte. Root cause is check_contains/check_not_contains forking a printf+grep pipeline for every single assertion (dozens per run) -- under process/fork pressure that pipeline can fail to spawn or return a misleading exit status unrelated to the actual haystack content.\n\nReplaced with bash's builtin [[ == *needle* ]] substring test, which does the same literal match with zero process creation. Confirmed: 8/20 failures under load before the fix, 0/20 and then 0/30 after, across two separate load runs. Full ctest suite (96/96) still passes.",
+          "timestamp": "2026-08-15T12:36:48+10:00",
+          "tree_id": "f9afc7afd56f334bd2318bf4f12c853390bac448",
+          "url": "https://github.com/deconstructo/curry/commit/aec3b8a0b4d763fa318af801622ca8acb1c6f97a"
+        },
+        "date": 1786761446974,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.726,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 19.279,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.752,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 23.483,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 159.043,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 260.711,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 54.024,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.585,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 82.549,
             "unit": "ms"
           }
         ]
