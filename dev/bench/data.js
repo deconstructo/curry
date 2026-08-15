@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786786081163,
+  "lastUpdate": 1786786284139,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5243,6 +5243,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.733,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7aecf3ff64bab2740468e62fa47e594e06909a44",
+          "message": "docs(thoughts): draft SRFI-279 upstream contribution (curry.scm port) (#52)\n\nNot yet submitted -- see the README for why (SRFI-279 is still draft status, upstream's own README funnels participation through its mailing list rather than GitHub PRs/issues, and the existing per-implementation files in that repo all carry the SRFI author's own copyright with no established third-party-PR precedent to point to).\n\ncurry.scm is a working port of lib/curry/modules/srfi/s279/inspect.scm into the flat include-able shape the upstream repo's chibi.scm/guile.scm/kawa.scm already use -- verified end-to-end against a live curry build (built a temporary define-library, included curry.scm with the imports 279.sld.diff proposes, confirmed correct inspect-properties/inspect-describe output across numbers, pairs, strings, vectors, typed numeric vectors including the separate f64vector module, bytevectors, hash tables, boxes, char-sets, records, record-types, and procedures). Two required imports (srfi 1 for last-pair/every, curry f64vector) weren't obvious from curry's own module and were only found by actually running it against this exact include shape.\n\n279.sld.diff is the corresponding cond-expand clause addition wiring curry's own 'curry feature identifier to these imports and the new file.",
+          "timestamp": "2026-08-15T19:30:23+10:00",
+          "tree_id": "9f0fc22392097f4ad06841a6df3cacd6a6e7a443",
+          "url": "https://github.com/deconstructo/curry/commit/7aecf3ff64bab2740468e62fa47e594e06909a44"
+        },
+        "date": 1786786283289,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 25.222,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.168,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 7.573,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.27,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 218.71,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 383.241,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.91,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 134.857,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 111.478,
             "unit": "ms"
           }
         ]
