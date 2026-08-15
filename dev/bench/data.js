@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786761449155,
+  "lastUpdate": 1786762126076,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4622,6 +4622,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 82.549,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "34b75df191ea28111bbee64d05fe32656abc8998",
+          "message": "docs(akkadian): fix wrong map glyph, add missing number->string row (#43)\n\nIssue #6: the reference documented map as 𒈷𒌝 (ME.UM), but src/akkadian_names.h actually binds that glyph to number->string; map's real glyph is 𒈷𒅆 (ME.IGI). Following the doc for (𒈷𒌝 ...) silently ran number->string instead of map, with no error to reveal the mistake since both glyphs resolve to real (but different) procedures. Verified against src/akkadian_names.h and by evaluating both glyphs directly.\n\nFixed map's row to the correct glyph, and added the previously-missing number->string row so the collision would have been visible in the doc's own table. Also bumped the stale v1.2.2 stamp to the current 1.20.0.",
+          "timestamp": "2026-08-15T12:47:47+10:00",
+          "tree_id": "436c68705c3d77e062f81114f5e98c4226967d0f",
+          "url": "https://github.com/deconstructo/curry/commit/34b75df191ea28111bbee64d05fe32656abc8998"
+        },
+        "date": 1786762124318,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.86,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.062,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.945,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.015,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 188.803,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 369.68,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.848,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.281,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 99.61,
             "unit": "ms"
           }
         ]
