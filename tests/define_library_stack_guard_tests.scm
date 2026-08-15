@@ -10,10 +10,12 @@
 ;;; raw C until the real OS stack was exhausted and the process crashed.
 ;;;
 ;;; Fixed by giving eval() its own stack-depth guard (a per-thread cached
-;;; stack base compared against the current stack pointer on every real
-;;; C-level entry into eval() -- goto-tail iterations don't grow the
-;;; stack and never reach the check), raising the same EC_STACK_OVERFLOW
-;;; condition the VM's own guard uses. This is its own ctest entry
+;;; stack base and REAL queried stack size -- not a fixed assumed byte
+;;; budget, see the workpool-thread checks below for why that mattered --
+;;; compared against the current stack pointer on every real C-level
+;;; entry into eval(); goto-tail iterations don't grow the stack and
+;;; never reach the check), raising the same EC_STACK_OVERFLOW condition
+;;; the VM's own guard uses. This is its own ctest entry
 ;;; (rather than folded into r7rs_tests.scm) matching this suite's
 ;;; existing convention for a scenario that would previously crash the
 ;;; whole test binary rather than just fail one assertion, so a future
@@ -52,14 +54,36 @@
 
 ;; A depth well past the VM's own compiled-path guard (256 frames,
 ;; vm.c's VM_FRAMES_MAX) but comfortably under the tree-walker's own
-;; guard threshold (empirically ~1400-1600 with the current 7MB budget --
-;; each eval() non-tail frame costs noticeably more C stack than a
-;; compiled VM frame does) must still complete normally -- the fix must
-;; not be so aggressive it breaks ordinary, previously-working recursion
-;; depths.
+;; guard threshold (empirically ~1400-1600 with the current dynamic
+;; per-thread budget on an ~8MB stack -- each eval() non-tail frame
+;; costs noticeably more C stack than a compiled VM frame does) must
+;; still complete normally -- the fix must not be so aggressive it
+;; breaks ordinary, previously-working recursion depths.
 (check "moderate non-tail recursion depth still completes normally"
        (deep-sum 1000)
        1000)
+
+;; Regression: independent security review found the guard's original
+;; fixed 7MB threshold assumed every thread has an ~8MB stack like the
+;; main thread and actors.c's own actor threads do -- but curry's
+;; parallel map/reduce/for-each/par worker pool (workpool.c) spawned its
+;; threads with a NULL pthread_attr_t (platform default stack size,
+;; 512KB on macOS), so the fixed threshold never fired there and the
+;; real, much smaller stack still exhausted and crashed the process
+;; exactly as before this guard existed at all. Fixed two ways: the
+;; guard now queries each thread's REAL stack size instead of assuming
+;; one, and workpool.c now explicitly requests an 8MB stack (matching
+;; actors.c's existing convention) so worker threads get the same
+;; headroom as every other thread in the process. map auto-parallelizes
+;; above map_par_threshold (default 8 elements, src/builtins_curry.c),
+;; so a 12-element list here genuinely exercises worker threads, not
+;; just the calling thread.
+(check "non-tail recursion inside a define-library body, run on parallel map worker threads, doesn't crash"
+       (map (lambda (x) (go-catch 1000000)) '(1 2 3 4 5 6 7 8 9 10 11 12))
+       '(caught caught caught caught caught caught caught caught caught caught caught caught))
+(check "moderate non-tail recursion depth on parallel map worker threads still completes normally"
+       (map (lambda (x) (deep-sum 100)) '(1 2 3 4 5 6 7 8 9 10 11 12))
+       '(100 100 100 100 100 100 100 100 100 100 100 100))
 
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))
