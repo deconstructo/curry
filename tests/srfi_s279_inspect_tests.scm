@@ -646,16 +646,24 @@
 (check "%indexed-pairs: raises on a non-list argument"
   (guard (e (#t 'raised)) (%indexed-pairs 5))
   'raised)
+;; Regression: independent security review found the counting pass used
+;; a bare vis_pair walk with no cycle detection, so a circular list
+;; hung the process forever -- reachable from ordinary unprivileged
+;; Scheme (set-cdr! alone builds one), not gated behind inspect.scm's
+;; own list?-before-call convention, since %indexed-pairs is an
+;; ordinary globally-registered primitive like everything else in
+;; curry's flat GLOBAL_ENV. Fixed with the same Floyd tortoise-and-hare
+;; pattern prim_length already uses (also above) -- which as a side
+;; effect makes a dotted/improper-list argument raise too, rather than
+;; the previous silent (and separately flagged) "stop at the first
+;; non-pair cdr and pretend that's the whole list" behavior.
+(check "%indexed-pairs: raises on a circular list"
+  (guard (e (#t 'raised))
+    (%indexed-pairs (let ((x (list 1 2))) (set-cdr! (cdr x) x) x)))
+  'raised)
 (check "%indexed-pairs: raises on a dotted (improper) list"
-  ;; A dotted pair isn't nil-terminated -- the walk stops at the first
-  ;; non-pair cdr, same as it would for any proper-list-only C loop;
-  ;; every real call site (inspect.scm) only ever calls this after its
-  ;; own list?/vector->list/string->list check already guarantees a
-  ;; proper list, so this exercises the primitive's own defensive
-  ;; behavior directly rather than anything reachable through inspect-
-  ;; properties itself.
-  (%indexed-pairs (cons 1 2))
-  '((0 1)))
+  (guard (e (#t 'raised)) (%indexed-pairs (cons 1 2)))
+  'raised)
 ;; Large-scale round-trip: confirms the C fast path produces byte-for-
 ;; byte the same shape the old interpreted Scheme loop did, at a size
 ;; where a correctness regression (e.g. an off-by-one in the length
