@@ -2618,25 +2618,48 @@ static val_t prim_rtd_set_mutator(int ac, val_t *av, void *ud) {
  * (project history: "define-library hot loops ~3x slower than
  * top-level"). Doing the same O(n) walk in C sidesteps that entirely.
  *
- * Two passes: count the list's length first (cheap pointer-only walk),
- * then fill a scratch array of the (i car) sub-pairs and build the
- * outer list from the end backward -- avoids both an O(n) Scheme-style
- * reverse pass and any C recursion whose depth would track list length
- * (unbounded recursion here risks a real C stack overflow for a large
- * enough list, unlike the bounded loops below). The scratch array holds
- * heap references (val_t sub-pair pointers), so it's gc_alloc'd (GC-
- * scanned), not gc_alloc_atomic'd. */
+ * Two passes: count the list's length first (Floyd tortoise-and-hare,
+ * same pattern as prim_length above -- a plain vis_pair walk here would
+ * hang forever on a circular list, and this primitive is an ordinary
+ * globally-registered global like everything else in curry's flat
+ * GLOBAL_ENV, directly callable on arbitrary input regardless of
+ * inspect.scm's own callers always passing an already-list?-validated
+ * list; found by independent security review, reproduced via
+ * (%indexed-pairs (let ((x (list 1 2))) (set-cdr! (cdr x) x) x))
+ * hanging uninterruptibly), then fill a scratch array of the (i car)
+ * sub-pairs and build the outer list from the end backward -- avoids
+ * both an O(n) Scheme-style reverse pass and any C recursion whose
+ * depth would track list length (unbounded recursion here risks a real
+ * C stack overflow for a large enough list, unlike the bounded loops
+ * below). The scratch array holds heap references (val_t sub-pair
+ * pointers), so it's gc_alloc'd (GC-scanned), not gc_alloc_atomic'd. */
 static val_t prim_indexed_pairs(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t lst = av[0];
     if (!vis_pair(lst) && !vis_nil(lst))
         scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%indexed-pairs: not a list");
     uint32_t n = 0;
-    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    val_t slow = lst, fast = lst;
+    while (vis_pair(fast)) {
+        fast = vcdr(fast); n++;
+        if (!vis_pair(fast)) break;
+        fast = vcdr(fast); n++;
+        slow = vcdr(slow);
+        if (fast == slow) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%indexed-pairs: circular list");
+    }
+    if (!vis_nil(fast)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%indexed-pairs: not a proper list");
     if (n == 0) return V_NIL;
     val_t *entries = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
     uint32_t i = 0;
-    for (val_t p = lst; vis_pair(p); p = vcdr(p), i++)
+    /* i < n as well as vis_pair(p): pass 1 fixes the trip count at n, but
+     * nothing prevents lst from being a still-mutable, shared pair chain
+     * -- if another thread extended it via set-cdr! between the two
+     * passes, an unbounded fill loop could walk past n and write outside
+     * entries[]. No call site actually shares a mutable list across
+     * threads today, but this primitive is an ordinary global like any
+     * other, reachable directly with no such guarantee enforced upstream
+     * (independent code review). */
+    for (val_t p = lst; vis_pair(p) && i < n; p = vcdr(p), i++)
         entries[i] = scm_cons(vfix((intptr_t)i), scm_cons(vcar(p), V_NIL));
     val_t result = V_NIL;
     for (uint32_t k = n; k > 0; k--) result = scm_cons(entries[k-1], result);
