@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786762126076,
+  "lastUpdate": 1786765290175,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4691,6 +4691,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 99.61,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bdbd5cf11bf3fadae12fa74610e5aadf1cffba59",
+          "message": "docs(thoughts): solve/variable-isolation/elimination design doc (#44)\n\nMotivated by issue #10 (dharmatech): interactive equation-solving/variable-isolation demo, plus a follow-on question about a Jupyter-lite-style UI on curry. This doc scopes just the CAS primitives (solve/isolate/eliminate) that such a UI would eventually call -- the UI itself is explicitly deferred by the repo owner pending objects/packages/module support and is out of scope here.\n\nChecked against src/symbolic.h/symbolic.c/sx_poly.c and docs/reference/symbolic.md: curry's CAS has extensive diff/integrate/simplify/collect/degree machinery and an existing sx_lt/le/gt/ge comparison-node pattern to mirror, but no equation representation and no solve/isolate/eliminate at all -- this is new surface, not an extension of something partial.\n\nProposes three tiers (isolate: single-occurrence inverse-operation peeling, directly matching the demoed UI's click-to-isolate interaction; solve: closed-form linear/quadratic via existing sx_collect/degree; eliminate: pairwise substitution across a small system, built entirely from isolate/solve plus the already-existing sx_substitute), an equation-representation recommendation (a new SX_EQ operator mirroring the existing SX_LT/LE/GT/GE pattern, not a separate record type), and flags the one real user-facing design choice left open: how multi-valued inverses (x^2=4 has two roots) should be returned. Design doc only, not yet implemented.",
+          "timestamp": "2026-08-15T13:40:45+10:00",
+          "tree_id": "6fcc0f49749d68b9729b9e6f9ff6dee407fceed2",
+          "url": "https://github.com/deconstructo/curry/commit/bdbd5cf11bf3fadae12fa74610e5aadf1cffba59"
+        },
+        "date": 1786765289041,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.384,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.193,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.012,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.264,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 188.881,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 369.746,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.341,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 120.277,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 99.856,
             "unit": "ms"
           }
         ]
