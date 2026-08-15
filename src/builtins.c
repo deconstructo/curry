@@ -2606,6 +2606,43 @@ static val_t prim_rtd_set_mutator(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 
+/* %indexed-pairs: given a proper list (e0 e1 ... en-1), returns
+ * ((0 e0) (1 e1) ... (n-1 en-1)). Backs (srfi 279)'s %indexed-properties
+ * helper (inspect.scm), which builds this same shape for every pair/
+ * string/vector/bytevector/typedvec inspect-properties call -- on large
+ * sequences this loop, run as ordinary interpreted Scheme inside a
+ * define-library body, was measured as the dominant cost of
+ * inspect-properties (over 90% of a 2M-element vector's ~4.8s total,
+ * against ~0.06s for vector->list alone), consistent with this
+ * codebase's own documented define-library-body hot-loop slowdown
+ * (project history: "define-library hot loops ~3x slower than
+ * top-level"). Doing the same O(n) walk in C sidesteps that entirely.
+ *
+ * Two passes: count the list's length first (cheap pointer-only walk),
+ * then fill a scratch array of the (i car) sub-pairs and build the
+ * outer list from the end backward -- avoids both an O(n) Scheme-style
+ * reverse pass and any C recursion whose depth would track list length
+ * (unbounded recursion here risks a real C stack overflow for a large
+ * enough list, unlike the bounded loops below). The scratch array holds
+ * heap references (val_t sub-pair pointers), so it's gc_alloc'd (GC-
+ * scanned), not gc_alloc_atomic'd. */
+static val_t prim_indexed_pairs(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t lst = av[0];
+    if (!vis_pair(lst) && !vis_nil(lst))
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%indexed-pairs: not a list");
+    uint32_t n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    if (n == 0) return V_NIL;
+    val_t *entries = (val_t *)gc_alloc((size_t)n * sizeof(val_t));
+    uint32_t i = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p), i++)
+        entries[i] = scm_cons(vfix((intptr_t)i), scm_cons(vcar(p), V_NIL));
+    val_t result = V_NIL;
+    for (uint32_t k = n; k > 0; k--) result = scm_cons(entries[k-1], result);
+    return result;
+}
+
 /* Build a fresh RecordType (RTD) from a name and a list of field-name
  * symbols. Used by the compiler's define-record-type codegen to
  * reconstruct the RTD at runtime — see compile_define_record_type in
@@ -3481,6 +3518,7 @@ void builtins_register(val_t env) {
     DEF("%rtd-set-predicate!",     prim_rtd_set_predicate,       2,2);
     DEF("%rtd-set-accessor!",      prim_rtd_set_accessor,        3,3);
     DEF("%rtd-set-mutator!",       prim_rtd_set_mutator,         3,3);
+    DEF("%indexed-pairs",          prim_indexed_pairs,           1,1);
 
     /* Procedure introspection */
     DEF("procedure-name",     prim_procedure_name,     1,1);
