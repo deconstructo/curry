@@ -73,6 +73,7 @@ val_t port_get_output_bytevector(val_t p);
 void  scm_display(val_t v, val_t port);       /* (display obj port) */
 void  scm_write(val_t v, val_t port);         /* (write obj port) - readable output */
 void  scm_write_shared(val_t v, val_t port);  /* (write-shared obj port) */
+void  scm_display_shared(val_t v, val_t port); /* cycle-safe display, used by plain (display) */
 void  scm_newline(val_t port);
 
 #endif /* CURRY_PORT_H */

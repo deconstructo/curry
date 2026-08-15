@@ -1336,8 +1336,11 @@ static val_t prim_bytes_u8_set(int ac, val_t *av, void *ud) {
 }
 
 /* ---- I/O ---- */
-static val_t prim_display(int ac, val_t *av, void *ud) {(void)ud; scm_display(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
-static val_t prim_write(int ac, val_t *av, void *ud) {(void)ud; scm_write(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
+/* write/display must not loop forever on circular structure (R7RS 6.13.3);
+ * write-simple may. Route through the cycle-safe write-shared machinery,
+ * which curry already implements correctly. */
+static val_t prim_display(int ac, val_t *av, void *ud) {(void)ud; scm_display_shared(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
+static val_t prim_write(int ac, val_t *av, void *ud) {(void)ud; scm_write_shared(av[0],ac>1?av[1]:PORT_STDOUT); return V_VOID;}
 static val_t prim_newline(int ac, val_t *av, void *ud) {(void)ud; scm_newline(ac>0?av[0]:PORT_STDOUT); return V_VOID;}
 static val_t prim_write_char(int ac, val_t *av, void *ud) {(void)ud; port_write_char(ac>1?av[1]:PORT_STDOUT,(int)vunchr(av[0])); return V_VOID;}
 static val_t prim_read(int ac, val_t *av, void *ud) {(void)ud; return scm_read(ac>0?av[0]:PORT_STDIN);}
