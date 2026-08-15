@@ -1,0 +1,39 @@
+Proposed addition to srfi-279's own 279.sld (adds a `curry` cond-expand
+clause alongside the existing chibi/kawa/guile/else clauses). curry
+advertises itself as the `curry` feature identifier via `(features)`,
+so this clause is selected automatically under curry's own cond-expand.
+
+--- a/srfi/279.sld
++++ b/srfi/279.sld
+@@ -46,6 +46,15 @@
+        (import (kawa lib reflection))
+        (import (kawa lib ports))
+        (include "kawa.scm"))
++    (curry
++     (import (srfi 1))   ;; last-pair, every
++     (import (srfi 4))   ;; Typed numeric vectors (u8..s64)
++     (import (srfi 14))  ;; Char sets
++     (import (srfi 69))  ;; Hash tables
++     (import (srfi 111)) ;; Boxes
++     (import (srfi 113)) ;; Sets and bags
++     (import (curry f64vector)) ;; f64vector -- a separate module from srfi 4 in curry
++     (include "curry.scm"))
+     (guile
+      (import (srfi 1)) ;; List library
+      (import (srfi 2)) ;; and-let*
+
+Notes:
+- Placed alongside the other named-implementation clauses, before `guile`
+  (order among clauses doesn't matter functionally; cond-expand tries
+  the current implementation's own feature identifier first regardless
+  of position).
+- curry.scm needs no `(scheme eval)`/`(scheme complex)`/etc beyond what
+  279.sld's own top-level `(import ...)` block already provides — those
+  cover `eval`/`interaction-environment` (used for symbol-value) and
+  `real-part`/`imag-part` (used for number-properties).
+- Verified end-to-end against a live curry build (curry.scm `include`d
+  into a define-library with exactly these imports): numbers, pairs,
+  strings, vectors, typed numeric vectors (u8vector and the separate
+  f64vector module), bytevectors, hash tables, boxes, char-sets,
+  records, record-types, and procedures all produce correct
+  inspect-properties/inspect-describe output.
