@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786766019508,
+  "lastUpdate": 1786767198770,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -4829,6 +4829,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 101.968,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c2c39d3b821684d4cb87c057d2eeba6de0674cf7",
+          "message": "perf(srfi279): move indexed-pairs construction to C, ~10x faster on large sequences (#47)\n\ninspect-properties' documented Known Limitation (roughly 45x slower / 5x more memory than the underlying accessor on large vectors/bytevectors) was profiled to find the actual dominant cost: %indexed-properties, the loop building the (index element) alist for every pair/string/vector/bytevector/typedvec property set. Measured on a 2M-element vector, inspect-properties took ~4.8s against ~0.06s for vector->list alone; instrumenting %vector-properties directly attributed ~4.5s of that (over 90%) to %indexed-properties specifically, not the redundant list re-materialization fixed in an earlier commit (that accounted for only a few percent).\n\nRoot cause: the same loop logic run at curry's top level (outside any define-library body) took ~1.25s for the identical input, a ~3.6x difference matching this codebase's own previously-documented 'define-library hot loops ~3x slower than top-level' interpreter characteristic -- not something specific to this module.\n\nAdded %indexed-pairs, a small C primitive (src/builtins.c) doing the same O(n) walk natively: two passes over the input list (count, then fill a GC-scanned scratch array of the (i car) sub-pairs), building the result list from the end backward to avoid both an O(n) Scheme-style reverse and unbounded C recursion depth. inspect.scm's %indexed-properties now delegates to it directly.\n\nMeasured improvement: the same 2M-element vector's inspect-properties call dropped from ~4.8s to ~0.44s (~11x). At the doc's original 50M-element-scale measurement (u8vector), the ratio to the underlying accessor drops from ~45x to ~5x (measured freshly at 10M-element scale: ~0.4s accessor vs ~2.1s inspect-properties).\n\nAdded direct regression tests for %indexed-pairs (empty list, single element, order preservation, non-list/dotted-pair inputs, and a 10k-element scale round-trip), and updated docs/reference/srfi/s279.md's Known Limitations entry with the new measurements.",
+          "timestamp": "2026-08-15T14:12:31+10:00",
+          "tree_id": "8c97fb94563fada4dccbc4ee22b278895234ffe8",
+          "url": "https://github.com/deconstructo/curry/commit/c2c39d3b821684d4cb87c057d2eeba6de0674cf7"
+        },
+        "date": 1786767197747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.498,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.45,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.346,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.589,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 193.62,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 375.32,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.454,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 122.593,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 103.468,
             "unit": "ms"
           }
         ]
