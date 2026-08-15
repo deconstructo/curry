@@ -9,6 +9,7 @@ add_test(NAME scheme_r6rs    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/r6rs_test
 add_test(NAME cond_expand    COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/cond_expand_tests.scm)
 add_test(NAME srfi_s279_inspect COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s279_inspect_tests.scm)
 add_test(NAME include_relative COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/include_relative_tests.scm)
+add_test(NAME define_library_stack_guard COMMAND curry ${CMAKE_CURRENT_SOURCE_DIR}/define_library_stack_guard_tests.scm)
 set_tests_properties(include_relative PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include_relative")
 

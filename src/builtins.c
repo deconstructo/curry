@@ -2135,6 +2135,34 @@ static val_t prim_make_promise(int ac, val_t *av, void *ud) {
     Promise *p = CURRY_NEW(Promise); p->hdr.type=T_PROMISE; p->hdr.flags=0;
     p->state=PROMISE_FORCED; p->val=av[0]; return vptr(p);
 }
+/* %delay-promise/%delay-force-promise: what compile_delay (compiler.c)
+ * calls to build a lazy promise around an already-compiled zero-arg
+ * thunk, mirroring eval.c's S_DELAY/S_DELAY_FORCE tree-walker special
+ * forms exactly (same Promise fields, same lazy-force flag convention)
+ * but taking the thunk as an ordinary already-evaluated argument
+ * instead of building a tree-walker Closure by hand -- av[0] can be
+ * any callable (bytecode closure, tree-walker closure, or C
+ * primitive), since prim_force's own apply(p->val, V_NIL) is already
+ * agnostic to which. This is what makes delay/delay-force work in
+ * compiled code (previously: unbound-variable, since only eval.c knew
+ * about them -- found while checking compiler/tree-walker parity
+ * before switching define-library bodies to compiled execution). */
+static val_t prim_delay_promise(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    Promise *p = CURRY_NEW(Promise);
+    p->hdr.type = T_PROMISE; p->hdr.flags = 0;
+    p->state = PROMISE_LAZY;
+    p->val = av[0];
+    return vptr(p);
+}
+static val_t prim_delay_force_promise(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    Promise *p = CURRY_NEW(Promise);
+    p->hdr.type = T_PROMISE; p->hdr.flags = 1; /* lazy-force flag, matches eval.c's S_DELAY_FORCE */
+    p->state = PROMISE_LAZY;
+    p->val = av[0];
+    return vptr(p);
+}
 static val_t prim_error(int ac, val_t *av, void *ud) {
     (void)ud;
     /* av[0] is the message string; remaining args are irritants */
@@ -3509,6 +3537,7 @@ void builtins_register(val_t env) {
     DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right,3,3);
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
+    DEF("%delay-promise",prim_delay_promise,1,1); DEF("%delay-force-promise",prim_delay_force_promise,1,1);
     DEF("error",prim_error,1,-1); DEF("raise",prim_raise,1,1);
     DEF("raise-continuable",prim_raise_continuable,1,1);
     DEF("error-message",prim_error_message,1,1);

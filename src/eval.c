@@ -116,7 +116,40 @@ static val_t eval_call_cc(val_t proc) {
 
 /* ---- Evaluator ---- */
 
+/* Per-thread cached stack base (Boehm's "bottom of stack" == the highest
+ * address, for a downward-growing stack), lazily captured on first use.
+ * Used to detect an approaching real C-stack overflow from unbounded
+ * non-tail recursion through eval() -- goto-tail iterations below don't
+ * grow the C stack and never reach this check at all; only genuine
+ * recursive C-level re-entry into eval() (a non-tail sub-expression,
+ * e.g. deep (+ 1 (deep-sum (- n 1)))) does. Without this, that recursion
+ * SIGSEGVs the whole process once the OS stack is exhausted -- unlike
+ * the bytecode VM's own compiled path, which has an explicit, catchable
+ * frame-count guard (vm.c, "call stack overflow (max N frames)"). This
+ * gives the tree-walker the same kind of catchable guard instead of a
+ * hard crash. Reproduced: a define-library-defined function doing
+ * non-tail recursion to depth ~1,000,000 previously segfaulted
+ * immediately (define-library bodies are tree-walked, not compiled --
+ * see modules.c's define_library_clause). */
+static _Thread_local void *eval_stack_base = NULL;
+/* 8MB is curry's own actor-thread stack size (src/actors.c) and the
+ * common default main-thread stack size on macOS/Linux; stop 1MB short
+ * of that to leave headroom for whatever C stack the raise/longjmp
+ * unwind path itself still needs to run once triggered. */
+#define EVAL_STACK_LIMIT_BYTES (7u * 1024u * 1024u)
+
 val_t eval(val_t expr, val_t env) {
+    if (__builtin_expect(!eval_stack_base, 0)) {
+        struct GC_stack_base sb;
+        GC_get_stack_base(&sb);
+        eval_stack_base = sb.mem_base;
+    }
+    {
+        char stack_probe;
+        size_t used = (size_t)((uintptr_t)eval_stack_base - (uintptr_t)&stack_probe);
+        if (__builtin_expect(used > EVAL_STACK_LIMIT_BYTES, 0))
+            scm_raise_code(EC_STACK_OVERFLOW, "eval: call stack overflow");
+    }
     /* Shadow stack: register the two persistent locals so a moving GC can
      * update them after nursery evacuation.  op/rest are declared here so
      * they are in scope for GC_AUTOFRAME; goto tail re-assigns them each

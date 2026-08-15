@@ -1395,6 +1395,24 @@ static void compile_when(Compiler *c, val_t args, bool tail, int line) {
     patch_jump(c, end);
 }
 
+/* (delay expr...) / (delay-force expr...): compile the body as an
+ * ordinary zero-arg thunk (reusing compile_lambda -- no new closure-
+ * construction codegen needed), then call %delay-promise/
+ * %delay-force-promise (builtins.c) to wrap it into a lazy Promise.
+ * Was previously handled only by eval.c's tree-walker (S_DELAY/
+ * S_DELAY_FORCE) with no compiler equivalent at all -- (delay ...) at
+ * top level or anywhere else compiled raised unbound-variable, since
+ * the compiler had never heard of it. Found while checking compiler/
+ * tree-walker parity before switching define-library bodies to
+ * compiled execution (they'd previously only worked because that one
+ * path happened to still be tree-walked). */
+static void compile_delay(Compiler *c, val_t body, bool is_force, bool tail, int line) {
+    val_t prim_sym = sym_intern_cstr(is_force ? "%delay-force-promise" : "%delay-promise");
+    emit_ab(c, OP_LOAD_GLOBAL, (uint8_t)chunk_add_const(c->chunk, prim_sym), line);
+    compile_lambda(c, V_NIL, body, NULL, line);
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
+}
+
 static void compile_unless(Compiler *c, val_t args, bool tail, int line) {
     val_t test = vcar(args);
     val_t body = vcdr(args);
@@ -2175,6 +2193,10 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     /* when / unless */
     if (head == S_WHEN)   { compile_when(c, args, tail, line);   return; }
     if (head == S_UNLESS) { compile_unless(c, args, tail, line); return; }
+
+    /* delay / delay-force */
+    if (head == S_DELAY)       { compile_delay(c, args, false, tail, line); return; }
+    if (head == S_DELAY_FORCE) { compile_delay(c, args, true,  tail, line); return; }
 
     /* do */
     if (head == S_DO) { compile_do(c, args, tail, line); return; }
