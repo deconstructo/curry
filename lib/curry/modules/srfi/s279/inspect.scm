@@ -65,11 +65,11 @@
   (export inspect-properties inspect-describe)
   (begin
 
-    ;; curry has no string->vector/vector->string (an R7RS gap in its
-    ;; own right, out of scope here) -- small local fallbacks via the
-    ;; list conversions curry does have, good enough for property display.
-    (define (%string->vector s) (list->vector (string->list s)))
-    (define (%vector->string v) (list->string (vector->list v)))
+    ;; curry has no string->vector/vector->string (an R7RS gap in its own
+    ;; right, out of scope here) -- %string-properties/%vector-properties
+    ;; below build the equivalent via list->vector/list->string directly on
+    ;; a list they've already materialized once, rather than a separate
+    ;; helper that would re-derive that list itself.
 
     (define (%to-string-with object proc)
       (call-with-port (open-output-string)
@@ -220,27 +220,42 @@
 
     ;;; ---- String ----
 
+    ;; string->list is called exactly once here (`lst`) and reused for the
+    ;; 'string->list entry, the 'string->vector conversion, and the indexed
+    ;; 0..N expansion below -- previously each of those three re-derived it
+    ;; independently (three full string->list passes over the same string,
+    ;; one of them nested inside %string->vector), which is most of why
+    ;; inspect-properties costs far more than the accessor it calls (see
+    ;; "Known limitations" in docs/reference/srfi/s279.md). Same output,
+    ;; just without redoing the same O(n) work three times.
     (define (%string-properties object)
-      (append
-        (list (list 'string->symbol (string->symbol object))
-              (list 'string->list   (string->list object))
-              (list 'string->vector (%string->vector object))
-              (list 'string->utf8   (string->utf8 object))
-              (list 'string-length  (string-length object)))
-        (let ((n (string->number object)))
-          (if n (list (list 'string->number n)) '()))
-        (%indexed-properties (string->list object))))
+      (let ((lst (string->list object)))
+        (append
+          (list (list 'string->symbol (string->symbol object))
+                (list 'string->list   lst)
+                (list 'string->vector (list->vector lst))
+                (list 'string->utf8   (string->utf8 object))
+                (list 'string-length  (string-length object)))
+          (let ((n (string->number object)))
+            (if n (list (list 'string->number n)) '()))
+          (%indexed-properties lst))))
 
     ;;; ---- Vector ----
 
+    ;; vector->list is called exactly once here (`lst`) instead of three
+    ;; separate times (the 'vector->list entry, the every-char? check, and
+    ;; the indexed 0..N expansion), plus a fourth nested call inside
+    ;; %vector->string whenever the char check passed -- same reasoning
+    ;; and rationale as %string-properties above.
     (define (%vector-properties object)
-      (append
-        (list (list 'vector-length (vector-length object))
-              (list 'vector->list (vector->list object)))
-        (if (every char? (vector->list object))
-            (list (list 'vector->string (%vector->string object)))
-            '())
-        (%indexed-properties (vector->list object))))
+      (let ((lst (vector->list object)))
+        (append
+          (list (list 'vector-length (vector-length object))
+                (list 'vector->list lst))
+          (if (every char? lst)
+              (list (list 'vector->string (list->string lst)))
+              '())
+          (%indexed-properties lst))))
 
     ;;; ---- Typed numeric vector (srfi 4: u8/s8/u16/s16/u32/s32/u64/
     ;;; s64/f64vector) ----
@@ -546,11 +561,13 @@
     ;;; ---- 0..N → type indexed-element inlining, shared by pair/string/
     ;;; vector properties above. ----
 
-    (define (%indexed-properties lst)
-      (let loop ((lst lst) (i 0) (acc '()))
-        (if (null? lst)
-            (reverse acc)
-            (loop (cdr lst) (+ i 1) (cons (list i (car lst)) acc)))))
+    ;; %indexed-pairs (src/builtins.c) does the same O(n) walk in C --
+    ;; this loop, run as interpreted Scheme inside a define-library body,
+    ;; was measured as the dominant cost of inspect-properties on large
+    ;; sequences (over 90% of the total time on a 2M-element vector), well
+    ;; past the fixed cost of the underlying accessor itself. See
+    ;; %indexed-pairs' own comment in builtins.c for the measurement.
+    (define (%indexed-properties lst) (%indexed-pairs lst))
 
     ;;; ---- Dispatch ----
     ;;;
