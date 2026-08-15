@@ -761,9 +761,10 @@ static val_t prim_string_ref(int ac, val_t *av, void *ud) {
     else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; seqlen = 3; }
     else                         { cp = c & 0x07; seqlen = 4; }
     /* A lead byte's own presence within [sd,end) doesn't guarantee its
-     * continuation bytes are too — a String can hold malformed/truncated
-     * UTF-8 (e.g. utf8->string does a raw copy with no validation), and a
-     * multi-byte lead byte could be the buffer's very last byte. Reading
+     * continuation bytes are too — a String can still end up holding
+     * malformed/truncated UTF-8 (utf8->string validates now, but other
+     * routes to a String's raw bytes may not), and a multi-byte lead byte
+     * could be the buffer's very last byte. Reading
      * p[1..seqlen-1] unconditionally in that case would run past the
      * string's allocation; raise instead of decoding out of bounds,
      * mirroring how (curry ports)' read_utf8_codepoint (src/port.c)
@@ -1020,6 +1021,44 @@ static val_t prim_string_to_utf8(int ac, val_t *av, void *ud) {
     memcpy(b->data, sd + sb, len);
     return vptr(b);
 }
+/* Rejects anything strtod/raw-copy would silently accept as bytes but
+ * isn't actually well-formed UTF-8: truncated multi-byte sequences,
+ * continuation bytes not preceded by a lead byte, overlong encodings
+ * (e.g. a 2-byte sequence for a codepoint that fits in 1 byte), lead
+ * bytes above the 4-byte range (0xF5-0xFF, would need a 5th/6th byte or
+ * exceed U+10FFFF), and encoded UTF-16 surrogate halves (U+D800-U+DFFF,
+ * never valid as a scalar value in UTF-8). Mirrors the lead/continuation
+ * decode shape prim_string_ref already uses, but validating rather than
+ * decoding to a char, and over a whole byte range instead of one char. */
+static bool utf8_is_well_formed(const unsigned char *p, uint32_t len) {
+    uint32_t i = 0;
+    while (i < len) {
+        unsigned char c = p[i];
+        uint32_t cp; int seqlen; uint32_t min_cp;
+        if (c < 0x80) { i++; continue; }
+        else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; seqlen = 2; min_cp = 0x80; }
+        else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; seqlen = 3; min_cp = 0x800; }
+        else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; seqlen = 4; min_cp = 0x10000; }
+        else return false; /* stray continuation byte, or 0xF5-0xFF */
+        /* len - i, not i + seqlen > len: bytevectors are permitted up to
+         * UINT32_MAX bytes (see make-bytevector), and i + seqlen can wrap
+         * uint32_t back down to a small value near the buffer's end,
+         * silently passing the truncation check and reading up to 3 bytes
+         * past the allocation. i < len is the loop invariant here, so
+         * len - i can never underflow. */
+        if ((uint32_t)seqlen > len - i) return false; /* truncated */
+        for (int k = 1; k < seqlen; k++) {
+            unsigned char cc = p[i + (uint32_t)k];
+            if ((cc & 0xC0) != 0x80) return false; /* not a continuation byte */
+            cp = (cp << 6) | (cc & 0x3F);
+        }
+        if (cp < min_cp) return false;              /* overlong encoding */
+        if (cp > 0x10FFFF) return false;             /* beyond Unicode range */
+        if (cp >= 0xD800 && cp <= 0xDFFF) return false; /* surrogate half */
+        i += (uint32_t)seqlen;
+    }
+    return true;
+}
 static val_t prim_utf8_to_string(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_bytes(av[0])) scm_raise(V_FALSE, "utf8->string: not a bytevector");
@@ -1032,6 +1071,8 @@ static val_t prim_utf8_to_string(int ac, val_t *av, void *ud) {
         scm_raise_code(EC_INDEX_OUT_OF_RANGE, "utf8->string: index out of range");
     uint32_t sb = (uint32_t)istart, eb = (uint32_t)iend;
     uint32_t len = eb - sb;
+    if (!utf8_is_well_formed(bv->data + sb, len))
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "utf8->string: invalid UTF-8 sequence");
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
     r->hdr.type=T_STRING; r->hdr.flags=0; r->len=len; r->hash=0; r->orig_cap=len; r->ext=NULL;
     memcpy(r->data, bv->data + sb, len); r->data[len] = '\0';

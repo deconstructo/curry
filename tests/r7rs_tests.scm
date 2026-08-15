@@ -33,6 +33,12 @@
 (check "sqrt exact" (sqrt 4) 2)
 (check "number->string" (number->string 255 16) "ff")
 (check "string->number" (string->number "ff" 16) 255)
+;; Regression: strtol("", &end, radix) consumes nothing (end == s) and
+;; returns 0 with errno untouched, indistinguishable from a genuine "0" by
+;; the errno/end-of-string check alone -- (string->number "") returned 0
+;; instead of #f (R7RS: the empty string is never a valid number literal).
+(check "string->number empty string returns #f, not 0" (string->number "") #f)
+(check "string->number empty numerator/denominator returns #f" (string->number "3/") #f)
 
 ;;; Arithmetic
 (check "+" (+ 1 2 3) 6)
@@ -90,11 +96,17 @@
 (check "string-ref past a 2-byte char then more text" (string-ref "café latte" 5) #\l)
 ;; Regression: decoding a string's UTF-8 byte data assumed every lead byte
 ;; encountered had all of its continuation bytes actually present in the
-;; buffer. utf8->string does a raw byte copy with no validation, so a
-;; bytevector ending mid-multi-byte-sequence produces a string whose last
-;; "character" is a truncated lead byte with no continuation bytes after
-;; it — string-ref must raise on that, not read past the string's
-;; allocation decoding continuation bytes that were never there.
+;; buffer. utf8->string used to do a raw byte copy with no validation, so a
+;; bytevector ending mid-multi-byte-sequence produced a string whose last
+;; "character" was a truncated lead byte with no continuation bytes after
+;; it — string-ref had to raise on that rather than read past the string's
+;; allocation decoding continuation bytes that were never there. utf8->string
+;; itself now validates (see below) and rejects this input before a
+;; malformed String can even be constructed this way, but string-ref's own
+;; defensive bounds check is kept as-is (belt and suspenders against any
+;; other route to a malformed string), and this still exercises it
+;; transitively -- the guard here catches utf8->string's own raise now,
+;; one layer earlier than before, and the assertion still holds.
 (check "string-ref on a string ending in a truncated UTF-8 sequence raises"
        (guard (exn (#t 'raised)) (string-ref (utf8->string (bytevector 32 32 32 240)) 3))
        'raised)
@@ -154,6 +166,20 @@
        (guard (exn (#t 'raised)) (string->utf8 "abc" 0 100)) 'raised)
 (check "utf8->string out-of-range raises"
        (guard (exn (#t 'raised)) (utf8->string (string->utf8 "abc") 0 100)) 'raised)
+;; Regression: utf8->string did a raw byte copy with no UTF-8 validation at
+;; all -- any bytevector, however malformed, silently became a String.
+(check "utf8->string raises on a truncated multi-byte sequence"
+       (guard (exn (#t 'raised)) (utf8->string (bytevector 32 32 32 240))) 'raised)
+(check "utf8->string raises on a stray continuation byte"
+       (guard (exn (#t 'raised)) (utf8->string (bytevector 128))) 'raised)
+(check "utf8->string raises on an overlong 2-byte encoding of NUL"
+       (guard (exn (#t 'raised)) (utf8->string (bytevector 192 128))) 'raised)
+(check "utf8->string raises on an encoded UTF-16 surrogate half"
+       (guard (exn (#t 'raised)) (utf8->string (bytevector 237 160 128))) 'raised)
+(check "utf8->string raises on a lead byte past the 4-byte range"
+       (guard (exn (#t 'raised)) (utf8->string (bytevector 255))) 'raised)
+(check "utf8->string still accepts well-formed multi-byte UTF-8"
+       (utf8->string (string->utf8 "héllo 日本語")) "héllo 日本語")
 (check "utf8->string basic still works"
        (utf8->string (string->utf8 "abc")) "abc")
 (check "list->string" (list->string '(#\h #\i)) "hi")
