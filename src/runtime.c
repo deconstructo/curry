@@ -400,6 +400,25 @@ void maybe_jit_bcc(BcClosure *cl) {
 #ifdef BUILD_LLVM
     if (__atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE) != V_VOID) return;
     if (cl->chunk->src_lambda == V_VOID) return;
+    /* JIT-compiled native code's global-variable resolution (src/llvm/
+     * jit.cpp's env_lookup_slot/env_define helpers) hard-codes GLOBAL_ENV,
+     * with no knowledge of a chunk's own Chunk::target_env (chunk.h) --
+     * unlike the bytecode VM's OP_LOAD_GLOBAL/etc, which read TARGET_ENV.
+     * A chunk compiled against a define-library body's own env_new_root()
+     * frame would, once JIT-promoted, silently start resolving its own
+     * top-level references against GLOBAL_ENV instead -- appearing as
+     * "unbound variable" for any reference to a same-library sibling that
+     * doesn't happen to also exist in GLOBAL_ENV. Conservative fix,
+     * matching this project's own established pattern for a closely
+     * related problem (docs/thoughts/performance-chez-kaappi.md ss4.4's
+     * call/cc side-exit design): such chunks stay on the bytecode VM tier
+     * permanently, never promoted to native code, rather than teaching
+     * the JIT's own codegen and runtime helpers about target_env too --
+     * real follow-up work, not attempted here. Bytecode-VM execution
+     * alone is still the actual goal of this migration (define-library
+     * bodies no longer tree-walked); JIT promotion on top of that is a
+     * further tier this specific case simply doesn't get yet. */
+    if (cl->chunk->target_env != V_VOID) return;
     if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
     /* Skip JIT for self-referencing closures (named-let loops that capture
      * themselves as an upvalue).  The bytecode tail-call reuse gives O(1)

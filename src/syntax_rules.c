@@ -424,7 +424,23 @@ static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
      * reference to a real special form, not an introduced binder. */
     if (sr_sym_in_list(lang_translate(sym), sr_protected_keywords)) return true;
     if (sr_sym_in_list(sym, local_macros)) return true;
-    return env_lookup_slot(def_env, sym) != NULL;
+    if (env_lookup_slot(def_env, sym) != NULL) return true;
+    /* A macro's own top-level (scope_depth == 0) self-reference is
+     * eagerly registered into GLOBAL_ENV regardless of def_env
+     * (compile_define_syntax, compiler.c, and its eval.c tree-walker
+     * counterpart both always do this -- the compiled path's target_env-
+     * scoped def_env fix doesn't touch where the macro NAME itself is
+     * bound, only where sr_is_protected looks for its free references).
+     * Without this fallback, a target_env-scoped recursive macro (bound
+     * only in GLOBAL_ENV, never its own library's target_env) failed to
+     * recognize its OWN name as protected once def_env stopped being
+     * GLOBAL_ENV, incorrectly renaming its self-recursive call and
+     * breaking it (found via (curry schematic extract)'s %match-case
+     * calling itself). Checked after def_env, not instead of it, so a
+     * library-scoped helper that happens to share a name with something
+     * unrelated in GLOBAL_ENV still resolves to the closer, correct
+     * binding first. */
+    return def_env != GLOBAL_ENV && env_lookup_slot(GLOBAL_ENV, sym) != NULL;
 }
 
 /* Every symbol appearing anywhere in tmpl (any position) that isn't a
@@ -758,7 +774,7 @@ bool sr_transformer_data(val_t transformer, val_t *literals, val_t *rules,
  * makes direct misuse behave exactly like using (syntax-rules ...) with
  * malformed literals/rules/ellipsis — validated below, then a normal
  * Scheme error, never a crash. */
-val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis) {
+val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t def_env) {
     if (scm_list_length(literals) < 0)
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: literals must be a proper list");
     if (scm_list_length(rules) < 0)
@@ -773,12 +789,23 @@ val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis) {
     sr->literals = literals;
     sr->rules    = rules;
     sr->ellipsis = ellipsis;
-    /* Always the compiled/.scc-cache-hit path for a TOP-LEVEL macro
-     * (compiler.c's compile_define_syntax only calls %rebuild-syntax-rules
-     * from its scope_depth == 0 branch -- a local/let-syntax macro never
-     * reaches this) -- GLOBAL_ENV/no local macros, same as sr_compile_fn's
-     * own V_FALSE fallback for that path. */
-    sr->def_env      = GLOBAL_ENV;
+    /* def_env defaults to GLOBAL_ENV (the historical behavior, for a
+     * plain top-level macro or a user calling %rebuild-syntax-rules
+     * directly per this function's own doc comment) unless the caller
+     * -- compile_define_syntax's runtime re-registration form, for a
+     * macro compiled against a library's own target_env (chunk.h) --
+     * passes the real defining environment explicitly. Without this, a
+     * target_env-scoped macro's runtime-rebuilt transformer always got
+     * GLOBAL_ENV as its def_env, which made sr_is_protected miss any
+     * library-local helper a template referenced (bound only in
+     * target_env), incorrectly renaming it and breaking self-recursive
+     * macros that call a sibling from their own library body (found via
+     * (curry schematic extract)'s %match-case calling %match). See
+     * Chunk::target_env's own doc comment for the parallel, still-open
+     * gap this shares: a live env value embedded this way does not
+     * survive a .scc cache reload across process runs -- deferred, same
+     * as target_env itself. */
+    sr->def_env      = (def_env == V_VOID) ? GLOBAL_ENV : def_env;
     sr->local_macros = V_NIL;
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
@@ -800,8 +827,8 @@ val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis) {
  * plain define, so it goes through the same single Syntax-wrapping step as
  * every other transformer-expr. */
 static val_t prim_rebuild_syntax_rules(int ac, val_t *av, void *ud) {
-    (void)ac; (void)ud;
-    return sr_rebuild_syntax(av[0], av[1], av[2]);
+    (void)ud;
+    return sr_rebuild_syntax_env(av[0], av[1], av[2], ac > 3 ? av[3] : V_VOID);
 }
 
 /* ---- Registration ---- */
@@ -830,7 +857,7 @@ void syntax_rules_register(val_t env) {
     Primitive *rebuild_prim = CURRY_NEW_PINNED(Primitive);
     rebuild_prim->hdr.type = T_PRIMITIVE; rebuild_prim->hdr.flags = 0;
     rebuild_prim->name     = "%rebuild-syntax-rules";
-    rebuild_prim->min_args = 3; rebuild_prim->max_args = 3;
+    rebuild_prim->min_args = 3; rebuild_prim->max_args = 4;
     rebuild_prim->fn  = prim_rebuild_syntax_rules;
     rebuild_prim->ud  = NULL;
     env_define(env, sym_intern_cstr("%rebuild-syntax-rules"), vptr(rebuild_prim));

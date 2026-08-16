@@ -1,21 +1,31 @@
 ;;; Regression: non-tail recursion inside a define-library body used to
 ;;; SIGSEGV the whole process instead of raising a catchable condition.
 ;;;
-;;; define-library bodies are tree-walked (modules.c's define_library_
-;;; clause calls eval() directly, not the compiler+VM path top-level
-;;; script/REPL code uses), and the tree-walker's own eval() had no
-;;; depth guard at all -- unlike the bytecode VM, which has an explicit,
-;;; catchable "call stack overflow (max N frames)" check. Deep non-tail
-;;; recursion through a define-library-defined function just recursed in
-;;; raw C until the real OS stack was exhausted and the process crashed.
+;;; Originally, define-library bodies were tree-walked (modules.c's
+;;; define_library_clause called eval() directly, not the compiler+VM
+;;; path top-level script/REPL code used), and the tree-walker's own
+;;; eval() had no depth guard at all -- unlike the bytecode VM, which
+;;; has an explicit, catchable "call stack overflow (max N frames)"
+;;; check. Deep non-tail recursion through a define-library-defined
+;;; function just recursed in raw C until the real OS stack was
+;;; exhausted and the process crashed.
 ;;;
-;;; Fixed by giving eval() its own stack-depth guard (a per-thread cached
-;;; stack base and REAL queried stack size -- not a fixed assumed byte
-;;; budget, see the workpool-thread checks below for why that mattered --
-;;; compared against the current stack pointer on every real C-level
-;;; entry into eval(); goto-tail iterations don't grow the stack and
-;;; never reach the check), raising the same EC_STACK_OVERFLOW condition
-;;; the VM's own guard uses. This is its own ctest entry
+;;; First fixed by giving eval() its own stack-depth guard (a per-thread
+;;; cached stack base and REAL queried stack size -- not a fixed assumed
+;;; byte budget, see the workpool-thread checks below for why that
+;;; mattered -- compared against the current stack pointer on every real
+;;; C-level entry into eval(); goto-tail iterations don't grow the stack
+;;; and never reach the check), raising the same EC_STACK_OVERFLOW
+;;; condition the VM's own guard uses.
+;;;
+;;; The eval-elimination migration later moved define-library bodies off
+;;; the tree-walker entirely -- they now compile and run through the VM
+;;; (modules.c calls vm_eval, not eval()) -- so it's the VM's own
+;;; stricter 256-frame guard (vm.c's VM_FRAMES_MAX) that actually applies
+;;; here now, not eval()'s ~1400-1600-frame budget. The catchable-
+;;; condition behavior this test exists to verify is unaffected either
+;;; way; only the specific depth that "moderate, still completes
+;;; normally" can mean changed (see below). This is its own ctest entry
 ;;; (rather than folded into r7rs_tests.scm) matching this suite's
 ;;; existing convention for a scenario that would previously crash the
 ;;; whole test binary rather than just fail one assertion, so a future
@@ -52,16 +62,19 @@
        (go-catch 1000000)
        'caught)
 
-;; A depth well past the VM's own compiled-path guard (256 frames,
-;; vm.c's VM_FRAMES_MAX) but comfortably under the tree-walker's own
-;; guard threshold (empirically ~1400-1600 with the current dynamic
-;; per-thread budget on an ~8MB stack -- each eval() non-tail frame
-;; costs noticeably more C stack than a compiled VM frame does) must
-;; still complete normally -- the fix must not be so aggressive it
-;; breaks ordinary, previously-working recursion depths.
+;; A depth comfortably under the VM's own compiled-path guard (256
+;; frames, vm.c's VM_FRAMES_MAX) must still complete normally -- the
+;; guard must not be so aggressive it breaks ordinary, previously-
+;; working recursion depths. define-library bodies are now compiled and
+;; run through the VM (the eval-elimination migration), not tree-walked,
+;; so it's the VM's own stricter 256-frame guard that applies here, not
+;; the tree-walker's much higher ~1400-1600 threshold this test used to
+;; target -- 1000 legitimately overflows now (it did not before this
+;; migration), so 100 is the depth actually being exercised, matching
+;; the parallel-worker-thread variant of this same check below.
 (check "moderate non-tail recursion depth still completes normally"
-       (deep-sum 1000)
-       1000)
+       (deep-sum 100)
+       100)
 
 ;; Regression: independent security review found the guard's original
 ;; fixed 7MB threshold assumed every thread has an ~8MB stack like the
