@@ -575,7 +575,8 @@ static void scan_pinned_object(void *obj) {
         Chunk *ch = (Chunk *)obj;
         for (int i = 0; i < ch->const_len; i++)
             ch->constants[i] = evacuate(ch->constants[i]);
-        ch->src_lambda = evacuate(ch->src_lambda);
+        ch->src_lambda  = evacuate(ch->src_lambda);
+        ch->target_env  = evacuate(ch->target_env);
         break;
     }
     case T_MODULE: {

@@ -40,10 +40,15 @@
  *   freely during the transition to full-VM execution.
  *
  * GLOBALS
- *   All global variable operations (OP_LOAD_GLOBAL, OP_STORE_GLOBAL,
- *   OP_DEF_GLOBAL) operate on GLOBAL_ENV, the same environment the
- *   tree-walker uses, keeping one shared namespace throughout the
- *   migration.
+ *   Global variable operations (OP_LOAD_GLOBAL, OP_STORE_GLOBAL,
+ *   OP_DEF_GLOBAL) operate on each chunk's own target environment (the
+ *   TARGET_ENV macro below, reading Chunk::target_env), which defaults to
+ *   GLOBAL_ENV -- every chunk compiled without an explicit
+ *   compiler_set_target_env() call gets GLOBAL_ENV, the same environment
+ *   the tree-walker uses for ordinary top-level code, keeping one shared
+ *   namespace there. A define-library body compiled against its own
+ *   isolated env_new_root() frame instead is the one exception: see
+ *   chunk.h's own comment on Chunk::target_env.
  *
  * OPCODE REFERENCE  (see also opcode.h for the full enum and comments)
  *
@@ -64,10 +69,11 @@
  *     OP_LOAD_LOCAL  A   push slots[A]
  *     OP_STORE_LOCAL A   slots[A] = pop()      (no push; define/set! follow with OP_VOID)
  *
- *   Global variables (constant pool holds the symbol)
- *     OP_LOAD_GLOBAL  A   push GLOBAL_ENV[constants[A]]
- *     OP_STORE_GLOBAL A   GLOBAL_ENV[constants[A]] = pop()   (set! — symbol must exist)
- *     OP_DEF_GLOBAL   A   GLOBAL_ENV[constants[A]] = pop()   (define — creates binding)
+ *   Global variables (constant pool holds the symbol; TARGET_ENV is
+ *   GLOBAL_ENV unless the chunk was compiled with an explicit target env)
+ *     OP_LOAD_GLOBAL  A   push TARGET_ENV[constants[A]]
+ *     OP_STORE_GLOBAL A   TARGET_ENV[constants[A]] = pop()   (set! — symbol must exist)
+ *     OP_DEF_GLOBAL   A   TARGET_ENV[constants[A]] = pop()   (define — creates binding)
  *
  *   Upvalues (closure's upvals[] array)
  *     OP_LOAD_UP  A   push *upvals[A]->location
@@ -509,6 +515,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #define JUMP_ABS(t)  (frame->ip = frame->closure->chunk->code + (t))
 #define CONSTS       (frame->closure->chunk->constants)
 #define GCACHE       (frame->closure->chunk->glob_cache)
+/* V_VOID means "this chunk was compiled without an explicit target env"
+ * (every chunk before this field existed, and every ordinary top-level/
+ * REPL/script compile today) -- falls back to GLOBAL_ENV. See chunk.h's
+ * own comment on Chunk::target_env. */
+#define TARGET_ENV   (frame->closure->chunk->target_env == V_VOID \
+                        ? GLOBAL_ENV : frame->closure->chunk->target_env)
 #define PUSH(v)      do { \
     if (vm->sp >= vm->stack + VM_STACK_MAX) \
         scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX); \
@@ -604,7 +616,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_LOAD_GLOBAL) {
             uint8_t ci = READ_U8();
             GlobCacheEntry *cache = GCACHE;
-            EnvFrame *root = as_env(GLOBAL_ENV);
+            EnvFrame *root = as_env(TARGET_ENV);
             /* Acquire load: pairs with the release store in env.c's
              * seq_end_write, so a match against cache[ci].version here
              * guarantees cache[ci].slot (stamped from the same
@@ -633,7 +645,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci = READ_U8();
             val_t val = POP();
             GlobCacheEntry *cache = GCACHE;
-            EnvFrame *root = as_env(GLOBAL_ENV);
+            EnvFrame *root = as_env(TARGET_ENV);
             uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
                                  cache[ci].version == root_ver, 1)) {
@@ -654,7 +666,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             uint8_t ci = READ_U8();
             val_t sym = CONSTS[ci];
             val_t val = POP();
-            env_define(GLOBAL_ENV, sym, val);
+            env_define(TARGET_ENV, sym, val);
             /* Fill cache after define, using the (slot, version) pair from
              * one atomic frame_lookup_versioned call rather than fetching
              * the slot and then separately re-reading root->version — the
@@ -666,7 +678,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * regardless of whether it's since gone stale. */
             GlobCacheEntry *cache = GCACHE;
             if (cache) {
-                EnvFrame *root = as_env(GLOBAL_ENV);
+                EnvFrame *root = as_env(TARGET_ENV);
                 uint32_t ver;
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (slot) { cache[ci].slot = slot; cache[ci].version = ver; }
@@ -1304,9 +1316,22 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
 /* ── vm_eval ─────────────────────────────────────────────────────────── */
 
-/* Compile a single Scheme expression and immediately run it in the VM.
-   The `env` argument is accepted for API compatibility with the tree-walker
-   but is ignored; all global operations use GLOBAL_ENV.
+/* Compile a single Scheme expression and immediately run it in the VM,
+   with global operations in the compiled code targeting `env` (GLOBAL_ENV
+   for every caller today; a define-library body's own isolated
+   env_new_root() frame once Track 2 of the eval-elimination migration
+   switches modules.c to call this instead of eval() — see chunk.h's
+   Chunk::target_env comment).
+
+   Not exception-safe against compiler_compile() raising mid-compile: if it
+   does, g_compile_target_env is left set to `env` rather than restored,
+   same as the pre-existing g_compile_source_name (compiler_set_source_name)
+   has always been — in practice every meaningfully different subsequent
+   compile call site re-sets both before use, so a stale value only matters
+   if something compiles without first calling compiler_set_target_env
+   itself. Track 2 should verify this holds for modules.c's actual
+   exception-handling paths (a library body that fails to compile) before
+   relying on it, rather than assuming it from this comment alone.
 
    The closure is pushed as the callee before vm_run: pop_frame's normal
    return path does sp = slots - 1 to drop callee + args, so a frame
@@ -1315,8 +1340,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
    to the stack base), but nested evaluation — the debugger's p command
    runs inside a paused vm_run — corrupts the suspended frame without it. */
 val_t vm_eval(val_t expr, val_t env) {
-    (void)env;
+    compiler_set_target_env(env);
     val_t cl_val  = compiler_compile(expr);
+    compiler_clear_target_env();
     BcClosure *cl = as_bcclosure(cl_val);
     vm_push(cl_val);
     return vm_run(cl, 0);

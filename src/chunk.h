@@ -66,6 +66,36 @@ typedef struct {
      * upval_names[i] = interned symbol for upvalue i; NULL if unavailable. */
     val_t  src_lambda;
     val_t *upval_names;
+
+    /* Which environment OP_LOAD_GLOBAL/OP_STORE_GLOBAL/OP_DEF_GLOBAL
+     * target for this chunk. V_VOID (the default) means "use GLOBAL_ENV",
+     * matching every chunk compiled before this field existed. Set via
+     * compiler_set_target_env() before compiling a define-library body,
+     * so a library's own top-level defines/references resolve against
+     * its isolated root environment instead of the shared global one --
+     * see compiler.c's init_compiler() and vm.c's TARGET_ENV macro. A
+     * compile-time-fixed property of the code (like source_name above),
+     * not a per-call-site or per-closure one: a nested lambda compiled
+     * as part of a library body must keep resolving its global refs
+     * against that same library's env regardless of which unrelated
+     * code later calls it.
+     *
+     * NOT YET SAFE for a target_env other than V_VOID/GLOBAL_ENV to be
+     * reachable from more than one thread until Track 2 of the
+     * eval-elimination migration lands (see docs/thoughts/ and project
+     * memory) -- env.c's frame_is_global() was widened to cover any root
+     * frame, not just literal GLOBAL_ENV, specifically so a
+     * define-library body's env_new_root() frame gets the same seqlock
+     * protection GLOBAL_ENV always has once it becomes possible to call
+     * into it from two actor threads at once, but this has not yet been
+     * verified end-to-end with an actual concurrent test (nothing
+     * currently compiles a chunk with target_env != V_VOID). Also not
+     * yet handled: src/scc.c's .scc cache serializer does not persist
+     * this field, so a chunk compiled against a non-default target_env
+     * would silently revert to GLOBAL_ENV after a cache round-trip --
+     * must be resolved before Track 2 relies on .scc caching for
+     * define-library bodies. */
+    val_t  target_env;
 } Chunk;
 
 /* Allocate a fresh empty chunk */
