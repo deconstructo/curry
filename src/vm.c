@@ -1323,15 +1323,18 @@ val_t vm_run(BcClosure *top_closure, int argc) {
    switches modules.c to call this instead of eval() — see chunk.h's
    Chunk::target_env comment).
 
-   Not exception-safe against compiler_compile() raising mid-compile: if it
-   does, g_compile_target_env is left set to `env` rather than restored,
-   same as the pre-existing g_compile_source_name (compiler_set_source_name)
-   has always been — in practice every meaningfully different subsequent
-   compile call site re-sets both before use, so a stale value only matters
-   if something compiles without first calling compiler_set_target_env
-   itself. Track 2 should verify this holds for modules.c's actual
-   exception-handling paths (a library body that fails to compile) before
-   relying on it, rather than assuming it from this comment alone.
+   SCM_PROTECT'd around compiler_compile(): a library body that fails to
+   compile (e.g. a malformed internal-define form) raises mid-compile, and
+   without this the thread-local g_compile_target_env was left pointing at
+   this call's `env` instead of being cleared — confirmed via a real repro
+   (independent code review): after such a failure, a later, unrelated
+   top-level `(define ...)` compiled with no g_compile_target_env caller of
+   its own silently inherited the stale value and got written into that
+   orphaned library env instead of GLOBAL_ENV, invisible to `,env` and any
+   other code for the rest of the process. Re-raises the same exception
+   after restoring, so callers still see the original failure. Doesn't
+   protect vm_run() itself (a runtime error, as opposed to a compile
+   error, occurs after compiler_clear_target_env() already ran normally).
 
    The closure is pushed as the callee before vm_run: pop_frame's normal
    return path does sp = slots - 1 to drop callee + args, so a frame
@@ -1341,7 +1344,11 @@ val_t vm_run(BcClosure *top_closure, int argc) {
    runs inside a paused vm_run — corrupts the suspended frame without it. */
 val_t vm_eval(val_t expr, val_t env) {
     compiler_set_target_env(env);
-    val_t cl_val  = compiler_compile(expr);
+    val_t cl_val = V_VOID;
+    ExnHandler h;
+    SCM_PROTECT(h,
+        cl_val = compiler_compile(expr),
+        { compiler_clear_target_env(); scm_raise_val(h.exn); });
     compiler_clear_target_env();
     BcClosure *cl = as_bcclosure(cl_val);
     vm_push(cl_val);

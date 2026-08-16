@@ -864,10 +864,24 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
         val_t literals, rules, ellipsis;
         val_t runtime_xfm_expr;
         if (sr_transformer_data(transformer, &literals, &rules, &ellipsis)) {
-            runtime_xfm_expr = scm_cons(sym_intern_cstr("%rebuild-syntax-rules"),
-                scm_cons(scm_cons(S_QUOTE, scm_cons(literals, V_NIL)),
+            /* Pass this chunk's own target_env (chunk.h) through as a 4th,
+             * quoted argument so the runtime-rebuilt transformer's def_env
+             * matches the compile-time one (sr_rebuild_syntax_env,
+             * syntax_rules.c) instead of always defaulting to GLOBAL_ENV --
+             * without this, a target_env-scoped macro's runtime transformer
+             * couldn't see its own library's local helpers as "protected"
+             * from hygienic renaming (see sr_is_protected). Embedding a
+             * live env value here is fine for this same-process run (quote
+             * just returns it verbatim, same as literals/rules/ellipsis
+             * above); it shares the same not-yet-.scc-safe gap as
+             * Chunk::target_env itself (both deferred together). */
+            val_t rebuild_args = scm_cons(scm_cons(S_QUOTE, scm_cons(literals, V_NIL)),
                  scm_cons(scm_cons(S_QUOTE, scm_cons(rules, V_NIL)),
-                  scm_cons(scm_cons(S_QUOTE, scm_cons(ellipsis, V_NIL)), V_NIL))));
+                  scm_cons(scm_cons(S_QUOTE, scm_cons(ellipsis, V_NIL)), V_NIL)));
+            if (c->chunk->target_env != V_VOID)
+                rebuild_args = scm_append(rebuild_args,
+                    scm_cons(scm_cons(S_QUOTE, scm_cons(c->chunk->target_env, V_NIL)), V_NIL));
+            runtime_xfm_expr = scm_cons(sym_intern_cstr("%rebuild-syntax-rules"), rebuild_args);
         } else {
             runtime_xfm_expr = xfm_expr;
         }
@@ -1282,14 +1296,34 @@ static void compile_let_star_values(Compiler *c, val_t args, bool tail, int line
 
 static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
     /* (cond (test expr...) ... (else expr...)) */
-    int end_patches[64]; int np = 0;
+    /* Every non-else clause now pushes exactly one end_patches entry
+     * (the "jump past the trailing OP_VOID fallback" fix applies
+     * uniformly to every clause, not just non-last ones anymore -- see
+     * this function's own clause-by-clause comments), so a cond with N
+     * non-else clauses needs N slots here, not N-1 as before. 512 is a
+     * generous ceiling (previously 64, unchecked, so a >64-clause plain
+     * cond already silently overran this array before this diff --
+     * confirmed by review); the explicit check below turns any case
+     * that still exceeds it into a clean compile-time error instead of
+     * stack corruption. */
+    int end_patches[512]; int np = 0;
+#define COND_PUSH_PATCH(off) do { \
+        if (np >= (int)(sizeof(end_patches) / sizeof(end_patches[0]))) \
+            scm_raise(V_FALSE, "cond: too many clauses (compiler limit)"); \
+        end_patches[np++] = (off); \
+    } while (0)
 
     while (vis_pair(clauses)) {
         val_t clause = vcar(clauses);
         val_t test   = vcar(clause);
         val_t exprs  = vcdr(clause);
         clauses      = vcdr(clauses);
-        bool last    = vis_nil(clauses);
+        /* No `last`-gating left anywhere below: every non-else clause
+         * (value-only, => arrow, and plain-body alike) now always jumps
+         * past the trailing "no clause matched" OP_VOID fallback and
+         * always compiles its body with the cond's own `tail` flag,
+         * regardless of clause position -- see this loop's own
+         * per-clause comments for why. */
 
         val_t S_ELSE = sym_intern_cstr("else");
         if (test == S_ELSE) {
@@ -1299,15 +1333,21 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
 
         compile(c, test, false, line);
 
-        /* (cond (test) ...) — test is the value */
+        /* (cond (test) ...) — test is the value. Always DUP/jump, even
+         * as the last clause -- gating this on `!last` (as this code
+         * used to) left a matched last clause's single test value on
+         * the stack with nothing to jump past the trailing "no clause
+         * matched" OP_VOID fallback below, which then unconditionally
+         * pushed a second value on top of it, corrupting the stack for
+         * the caller (confirmed: `(cond (5))` raised a spurious "not a
+         * procedure" error). Same bug class, and same fix, as the
+         * plain-body clause below and the => arrow clause just below
+         * that. */
         if (vis_nil(exprs)) {
-            if (!last) {
-                emit(c, OP_DUP, line);
-                int skip = emit_jump(c, OP_JUMP_TRUE, line);
-                emit(c, OP_POP, line);
-                end_patches[np++] = skip;
-            }
-            /* else: test value remains on stack as result */
+            emit(c, OP_DUP, line);
+            int skip = emit_jump(c, OP_JUMP_TRUE, line);
+            emit(c, OP_POP, line);
+            COND_PUSH_PATCH(skip);
             continue;
         }
 
@@ -1322,7 +1362,13 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
             compile(c, proc, false, line);
             emit(c, OP_SWAP, line);   /* (proc test) */
             emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
-            if (!last) end_patches[np++] = emit_jump(c, OP_JUMP, line);
+            /* Always jump past the trailing OP_VOID fallback, even as
+             * the last clause -- same bug class as the plain-body and
+             * test-only clauses above/below (confirmed: a matched,
+             * textually-last `=> ` clause silently discarded its
+             * result, falling through into the OP_POP meant only for
+             * the #f path and then the fallback OP_VOID). */
+            COND_PUSH_PATCH(emit_jump(c, OP_JUMP, line));
             patch_jump(c, skip);
             /* #f path: JUMP_FALSE already popped dup; original #f is on stack */
             emit(c, OP_POP, line);
@@ -1330,9 +1376,37 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
         }
 
         int skip = emit_jump(c, OP_JUMP_FALSE, line);
-        /* JUMP_FALSE already popped the test — no OP_POP needed */
-        compile_seq(c, exprs, tail && last, line);
-        if (!last) end_patches[np++] = emit_jump(c, OP_JUMP, line);
+        /* JUMP_FALSE already popped the test — no OP_POP needed.
+         * Compile with the cond's own `tail` flag, not `tail && last`:
+         * exactly one clause's body ever executes per evaluation of the
+         * whole cond, so EVERY clause's body is in the same tail
+         * position the whole cond expression is, not just the textually
+         * last one. Gating on `last` here meant a call in any non-last
+         * clause's body never got OP_TAIL_CALL, silently growing the
+         * stack on every iteration of a tail-recursive loop written as
+         * `(let loop (...) (cond (test1 (loop ...)) (test2 (loop ...))
+         * (else result)))` -- exactly the shape of a state-machine-style
+         * loop with an early-exit clause, and exactly what (srfi s252
+         * property-testing)'s %run-property-trials does (its recursive
+         * call sits in a cond's *middle* clause), which is how this was
+         * found: `(test-property ... 150000)` overflowed the VM's
+         * 256-frame guard despite the recursive call already being
+         * outside `guard`, single-call-site, and documented as tail-
+         * position. The matching `=> ` clause branch just above already
+         * gets this right (uses plain `tail`, not `tail && last`) --
+         * this brings the plain-body clause in line with it. */
+        compile_seq(c, exprs, tail, line);
+        /* Always jump past the "no clause matched" OP_VOID fallback
+         * below, even for the last clause — omitting it here (as this
+         * code previously did for `last`) let a matched last clause's
+         * value fall straight through into that OP_VOID, silently
+         * discarding it and corrupting the stack for the caller (e.g.
+         * `(cond (#f 1) (#t 2))` returned void instead of 2, and in a
+         * call-argument position desynced the stack enough to raise a
+         * spurious "not a procedure" error). Dead code when the clause
+         * body ends in a tail call (control never reaches it), harmless
+         * either way. */
+        COND_PUSH_PATCH(emit_jump(c, OP_JUMP, line));
         patch_jump(c, skip);
     }
     emit(c, OP_VOID, line);   /* no clause matched */
@@ -1340,6 +1414,7 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
 cond_done:
     for (int i = 0; i < np; i++) patch_jump(c, end_patches[i]);
 }
+#undef COND_PUSH_PATCH
 
 static void compile_case(Compiler *c, val_t args, bool tail, int line) {
     /* Desugar: (case key clause...) →
@@ -2349,6 +2424,19 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     if (vis_symbol(head)) {
         val_t transformer;
         bool is_macro = resolve_syntax_local(c, head, &transformer);
+        if (!is_macro && c->chunk->target_env != V_VOID) {
+            /* A library body compiled against its own target_env (see
+             * chunk.h's Chunk::target_env comment) needs its OWN
+             * imported macros checked here too, not just GLOBAL_ENV --
+             * e.g. define-name-aliases (lib/curry/modules/curry/
+             * private/lang-aliases.scm), imported and used by nearly
+             * every (curry X)/SRFI library's own body. Checked before
+             * GLOBAL_ENV below, matching how a library-local import can
+             * shadow a same-named global one. */
+            val_t macro = env_lookup_or_false(c->chunk->target_env, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
         if (!is_macro) {
             val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
             is_macro = vis_syntax(macro);
@@ -2359,9 +2447,31 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
             val_t expanded = V_FALSE;
             val_t exn_val  = V_FALSE;
             uint64_t _expand_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
+            /* sr_current_env (syntax_rules.c) is how sr_compile_fn learns
+             * a (syntax-rules ...) expression's defining environment, to
+             * capture as the resulting transformer's def_env -- eval.c's
+             * tree-walker save/set/restores this around every macro
+             * apply() (see its own comment at the analogous site), but
+             * this compiler.c macro-expansion call had no equivalent,
+             * leaving sr_current_env at its V_FALSE default (mapped to
+             * GLOBAL_ENV by sr_compile_fn) for every macro compiled here
+             * -- including a library's own (define-syntax ... (syntax-
+             * rules ...)) compiled against its target_env (chunk.h). That
+             * made sr_is_protected's def_env check miss any library-local
+             * helper procedure/macro a template referenced (only visible
+             * via target_env, never GLOBAL_ENV), incorrectly renaming it
+             * to a fresh gensym and breaking self-recursive macros that
+             * call a sibling from their own library body (found via
+             * (curry schematic extract)'s %match-case calling %match).
+             * Save/restore, not a bare set, so a nested macro expansion
+             * triggered from within this apply() doesn't leak this env
+             * into an unrelated later expansion. */
+            val_t saved_sr_env = sr_get_current_env();
+            sr_set_current_env(c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV);
             SCM_PROTECT(h,
                 expanded = apply(transformer, scm_cons(expr, V_NIL)),
                 exn_val  = h.exn);
+            sr_set_current_env(saved_sr_env);
             if (curry_timings_enabled)
                 curry_timing_expand_ns += profiling_now_ns() - _expand_t0;
             if (exn_val != V_FALSE) {

@@ -130,22 +130,32 @@
 ;;; ── range-list set algebra (inputs assumed normalized) ──────────────
 
 ;; a minus b, both sorted/merged range lists -> sorted/merged result.
+;;
+;; Deliberately ONE textual call to `loop` (see (srfi s132 sorting)'s
+;; list-merge for the full explanation): curry's compiler/VM does not
+;; correctly tail-call-optimize a named let with two or more DIFFERENT
+;; self-recursive call sites -- each call genuinely pushes a fresh VM
+;; frame instead of reusing one, overflowing the 256-frame guard once a
+;; real (non-degenerate) range list is long enough. The four-call-site
+;; version this replaced is the natural way to write this sweep;
+;; computing next-a/next-b/next-acc as plain values first and making a
+;; single parameterized tail call sidesteps the bug.
 (define (%ranges-difference a b)
   (let loop ((a a) (b b) (acc '()))
     (cond
       ((null? a) (reverse acc))
       ((null? b) (append (reverse acc) a))
       (else
-       (let ((ra (car a)) (rb (car b)))
-         (cond
-           ((< (cdr rb) (car ra)) (loop a (cdr b) acc))
-           ((> (car rb) (cdr ra)) (loop (cdr a) b (cons ra acc)))
-           (else
-            (let ((left  (and (< (car ra) (car rb)) (cons (car ra) (- (car rb) 1))))
-                  (right (and (> (cdr ra) (cdr rb)) (cons (+ (cdr rb) 1) (cdr ra)))))
-              (if right
-                  (loop (cons right (cdr a)) (cdr b) (if left (cons left acc) acc))
-                  (loop (cdr a) b (if left (cons left acc) acc)))))))))))
+       (let* ((ra (car a)) (rb (car b))
+              (b-before-a? (< (cdr rb) (car ra)))
+              (b-after-a? (and (not b-before-a?) (> (car rb) (cdr ra))))
+              (overlap? (and (not b-before-a?) (not b-after-a?)))
+              (left  (and overlap? (< (car ra) (car rb)) (cons (car ra) (- (car rb) 1))))
+              (right (and overlap? (> (cdr ra) (cdr rb)) (cons (+ (cdr rb) 1) (cdr ra))))
+              (next-a (cond (b-before-a? a) (b-after-a? (cdr a)) (right (cons right (cdr a))) (else (cdr a))))
+              (next-b (cond (b-before-a? (cdr b)) (b-after-a? b) (right (cdr b)) (else b)))
+              (next-acc (cond (b-before-a? acc) (b-after-a? (cons ra acc)) (left (cons left acc)) (else acc))))
+         (loop next-a next-b next-acc))))))
 
 (define (%ranges-union a b) (%normalize-ranges (append a b)))
 ;; A ∩ B = A - (A - B) — avoids a third sweep algorithm.

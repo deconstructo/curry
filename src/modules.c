@@ -9,6 +9,7 @@
 #include "port.h"
 #include "lang_registry.h"
 #include "curry_features.h"
+#include "vm.h"
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
@@ -530,7 +531,13 @@ static void define_library_clause(val_t clause, val_t *exports, bool *has_export
         }
     } else if (clause_type == S_BEGIN) {
         val_t body = vcdr(clause);
-        while (vis_pair(body)) { eval(vcar(body), lib_env); body = vcdr(body); }
+        /* Compile+run against lib_env (an env_new_root() frame) instead of
+         * tree-walking via eval() -- see chunk.h's Chunk::target_env
+         * comment and the eval-elimination migration project memory. Each
+         * form is compiled and run individually, same sequencing as the
+         * eval() loop it replaces, so a later form still sees an earlier
+         * form's own top-level defines. */
+        while (vis_pair(body)) { vm_eval(vcar(body), lib_env); body = vcdr(body); }
     } else if (clause_type == S_INCLUDE) {
         val_t files = vcdr(clause);
         while (vis_pair(files)) {
@@ -584,7 +591,7 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
     while (vis_pair(rest)) {
         val_t clause = vcar(rest); rest = vcdr(rest);
         if (!vis_pair(clause)) {
-            eval(clause, lib_env);
+            vm_eval(clause, lib_env);
             continue;
         }
         val_t clause_type = vcar(clause);
@@ -602,7 +609,7 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
             }
         } else {
             /* Inline body form */
-            eval(clause, lib_env);
+            vm_eval(clause, lib_env);
         }
     }
     (void)env;

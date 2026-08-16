@@ -66,7 +66,12 @@ bool sr_transformer_data(val_t transformer, val_t *literals, val_t *rules,
  * only place a Syntax struct gets built; raises a normal Scheme error
  * (never silently misbehaves) if literals/rules/ellipsis aren't
  * well-formed. */
-val_t sr_rebuild_syntax(val_t literals, val_t rules, val_t ellipsis);
+/* def_env is the transformer's defining environment (V_VOID means
+ * "unknown, default to GLOBAL_ENV") -- see sr_rebuild_syntax_env's own
+ * comment in syntax_rules.c for why this exists (target_env-scoped
+ * macros need their runtime-rebuilt transformer's def_env to match, not
+ * always GLOBAL_ENV). */
+val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t def_env);
 
 /* The environment sr_compile_fn ("syntax-rules" itself) is currently
  * being evaluated in, for it to capture as a new transformer's def_env —
