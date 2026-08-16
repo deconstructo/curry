@@ -12,6 +12,7 @@
 extern "C" {
 #include "../value.h"
 #include "../eval.h"
+#include "../vm.h"
 }
 
 #include <llvm/IR/LLVMContext.h>
@@ -84,8 +85,17 @@ val_t curry_jit_call(val_t thunk) {
 }
 
 val_t curry_jit_eval_expr(val_t expr) {
+    /* Compile-to-bytecode-and-interpret (vm_eval) rather than tree-walk
+     * (eval()) for both the "JIT unavailable" and "JIT compile failed"
+     * paths -- part of the eval-elimination migration (see
+     * docs/thoughts/eval-elimination-migration-plan-2026-07-23.md's
+     * "Other eval() callers" section and the project memory). A JIT
+     * compile failure by definition already has `expr` in hand as a
+     * plain, uncompiled Scheme form (this function's own argument, not
+     * bytecode) -- vm_eval compiles it fresh against GLOBAL_ENV, exactly
+     * as eval() would have tree-walked it, just through the VM instead. */
     if (!g_initialised.load())
-        return eval(expr, GLOBAL_ENV);
+        return vm_eval(expr, GLOBAL_ENV);
 
     static std::atomic<uint64_t> seq{0};
     std::string fn_name = "curry_expr_" + std::to_string(seq.fetch_add(1));
@@ -110,7 +120,7 @@ val_t curry_jit_eval_expr(val_t expr) {
     } catch (const std::exception &e) {
         fprintf(stderr, "[curry-llvm] JIT failed (%s), falling back: %s\n",
                 fn_name.c_str(), e.what());
-        return eval(expr, GLOBAL_ENV);
+        return vm_eval(expr, GLOBAL_ENV);
     }
 }
 
