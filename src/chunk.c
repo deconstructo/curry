@@ -128,6 +128,7 @@ Chunk *chunk_new(void) {
     c->local_debug_cap = 0;
     c->src_lambda  = V_VOID;
     c->upval_names = NULL;
+    c->target_env  = V_VOID;
     return c;
 }
 

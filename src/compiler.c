@@ -126,8 +126,12 @@ static bool is_quoted_symbol(val_t expr, val_t *out_sym);
 /* ── Compiler lifecycle ──────────────────────────────────────────────── */
 
 static _Thread_local const char *g_compile_source_name = NULL;
+static _Thread_local val_t       g_compile_target_env   = V_VOID;
 
 void compiler_set_source_name(const char *name) { g_compile_source_name = name; }
+
+void compiler_set_target_env(val_t env) { g_compile_target_env = env; }
+void compiler_clear_target_env(void)    { g_compile_target_env = V_VOID; }
 
 static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->enclosing   = enc;
@@ -139,6 +143,7 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->syntax_local_count = 0;
     c->chunk->name = name;
     c->chunk->source_name = g_compile_source_name;
+    c->chunk->target_env  = g_compile_target_env;
 }
 
 static Chunk *end_compiler(Compiler *c) {

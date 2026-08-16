@@ -62,11 +62,40 @@ void *gc_env_frame_pin = NULL;
  * syms/vals/hidx/size/cap sandwiched inside it. Local, single-thread-owned
  * frames skip all of this (frame_is_global short-circuits to the original
  * unprotected fast path) since they were never the problem.
+ *
+ * frame_is_global is keyed on "is this a ROOT frame" (parent == NULL), not
+ * literal identity with GLOBAL_ENV — GLOBAL_ENV's own frame happens to be a
+ * root frame too (env_new_root_permanent(), same shape as env_new_root()),
+ * so this check already covered it correctly without special-casing it.
+ * Widened deliberately (not merely "happens to also work") once Chunk::
+ * target_env (chunk.h) made it possible for compiled code's OP_LOAD_GLOBAL/
+ * OP_STORE_GLOBAL/OP_DEF_GLOBAL to target a define-library body's own
+ * env_new_root() frame instead of GLOBAL_ENV: once such a frame's exported
+ * closures can be called from more than one actor thread (two actors both
+ * importing and calling the same library concurrently), it is exactly as
+ * exposed to the frame_hash_rehash race above as GLOBAL_ENV always was —
+ * the race was never about GLOBAL_ENV specifically, only about "a root
+ * frame reachable from more than one thread," which used to be exactly one
+ * frame and now, in principle, is not. Every non-root frame (function-call
+ * locals, let bodies, C-extension module envs loaded via env_extend) stays
+ * on the original unprotected fast path, unaffected.
+ *
+ * Coarse-grained by design, not yet optimized: every root frame currently
+ * shares g_global_frame_lock, so a rare structural write to one
+ * define-library's frame briefly serializes against a concurrent write to
+ * an unrelated one (or to GLOBAL_ENV itself) even though they touch
+ * disjoint memory. Root-frame writes are load-time-rare (each top-level
+ * define, once, while a library loads) as opposed to per-call, so this is
+ * expected to be negligible in practice; a per-frame lock would remove even
+ * that if it ever shows up as real contention, not attempted here since
+ * nothing yet exercises a non-GLOBAL_ENV root frame from more than one
+ * thread (Track 2 of the eval-elimination migration, not yet started, is
+ * what would first make that happen).
  */
 static pthread_mutex_t g_global_frame_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static inline bool frame_is_global(const EnvFrame *f) {
-    return GLOBAL_ENV != 0 && f == as_env(GLOBAL_ENV);
+    return f->parent == NULL;
 }
 
 static inline uint32_t seq_begin_write(EnvFrame *f) {
