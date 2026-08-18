@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787042498682,
+  "lastUpdate": 1787043485267,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5864,6 +5864,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 102.49,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "0f4007da5de0a938f2ab0008fe5576fd1d57fa50",
+          "message": "docs: update performance-chez-kaappi.md against current main\n\nRe-verified the July 16 state table against source. Tier 0 (both\nitems: benchmark CI, --timings) and Tier 1.4 (transparent .scc\ncaching) have shipped since July. The eval-elimination migration made\nreal, if not originally itemized, progress on Tier 4's stated\nprerequisite (\"shrink tree-eval passthrough first\"): define-library\nand R6RS-library bodies now compile and run through the VM instead of\nbeing tree-walked, and the LLVM JIT-compile-failure fallback now\nroutes to the VM too. Flagged the benchmark CI regression gate as a\nsingle-sample comparison confirmed noise-prone on at least one PR this\nsession, rather than presenting it as fully trustworthy. Tier 2 (IR\nlayer) and Tier 3 (GC) remain unchanged.\n\nAdded the same version/date header convention as the companion\nmaturity-roadmap.md update (v2, 2026-08-18).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-18T18:57:21+10:00",
+          "tree_id": "f6fe2ce1e76ca4b3826cefca83e4a15e203d0f72",
+          "url": "https://github.com/deconstructo/curry/commit/0f4007da5de0a938f2ab0008fe5576fd1d57fa50"
+        },
+        "date": 1787043484619,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 23.442,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.48,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.458,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.187,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 196.769,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 368.891,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.144,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.008,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 100.278,
             "unit": "ms"
           }
         ]
