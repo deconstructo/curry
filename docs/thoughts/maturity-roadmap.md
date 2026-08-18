@@ -1,7 +1,11 @@
 # Maturity Gaps: What Chez and Kaappi Have That Curry Doesn't
 
-*2026-07-16 — companion to [performance-chez-kaappi.md](performance-chez-kaappi.md), which
-covers execution speed. This document covers everything else that makes an
+**Document version 2 — 2026-08-18** (v1 was 2026-07-16). Verified against
+curry v1.21.0 / `main`.
+
+*2026-07-16, updated 2026-08-18 — companion to
+[performance-chez-kaappi.md](performance-chez-kaappi.md), which covers
+execution speed. This document covers everything else that makes an
 implementation feel production-grade: debuggability, conformance confidence,
 CI, tooling, and API stability.*
 
@@ -11,13 +15,19 @@ in. The gap is not features, it's the scaffolding around them that lets
 people trust and debug a large system. Findings below are verified against
 `main`, not assumed.
 
+**2026-08-18 update**: the July 16 version of this document is significantly
+stale — five of its nine gaps (CI, error location/backtrace, LSP, syntax
+highlighting, interactive debugger, CONTRIBUTING.md) have since shipped. This
+revision re-verifies every item against current `main` and re-ranks what's
+actually left.
+
 ---
 
 ## 1. What's already solid (don't relitigate)
 
 - `CHANGELOG.md`, `VERSIONING.md`, semver git tags back to v1.4.2 — real
   release discipline.
-- `docs/reference/` (44 files) and `docs/guides/` are genuinely thorough for
+- `docs/reference/` (44+ files) and `docs/guides/` are genuinely thorough for
   the exotic subsystems (CAS, multivectors, surreals, quantum).
 - An explicit, documented "R7RS deviations" section in `language.md` —
   Kaappi's `CONFORMANCE.md` does the same thing and it's the right pattern;
@@ -25,173 +35,167 @@ people trust and debug a large system. Findings below are verified against
 - Deep domain-specific test suites: `numeric_ext_tests.scm` (354 assertions),
   `sicm_tests.scm` (172), `symbolic_tests.scm` (111) — this is coverage Chez
   and Kaappi don't have because they don't have the subsystems.
+- **CI that builds and tests on every push/PR** (`.github/workflows/ci.yml`):
+  a real `ubuntu-latest`/`macos-latest` × `Debug`/`Release` matrix running
+  `cmake --build && ctest`, plus a separate `benchmark.yml` and `codeql.yml`.
+  This was gap #1 in the July version — now done and was the prerequisite
+  everything else below builds trust on.
+- **Errors carry file:line and a call chain by default**:
+  ```
+  $ curry /tmp/errtest.scm
+  Error [wrong-type-argument]: 𒀭 ḫiṭītu — lā qitnum:
+    car: not a pair
+    at f (/tmp/errtest.scm:1)
+    at <toplevel> (/tmp/errtest.scm:1)
+  ```
+  `condition-backtrace` is no longer a stub — it returns the real captured
+  frame stack off the error object. This was the July version's
+  "single highest-leverage fix"; it shipped. One residual gap: the comment
+  at the implementation site notes user-signalled `Condition` objects
+  (`make-condition`, not a raised error) "don't capture frames yet" — worth
+  closing for parity, but the common case (an actual error) is fully fixed.
+- **A real interactive debugger**: gdb-style, breakpoints by function name
+  or `file:line` (`,break` in the REPL, `-b` on the CLI, `(breakpoint)` in
+  source), step/next/finish/continue, `bt`, `locals` (including captured
+  upvalues), `p <expr>` — see `docs/reference/debugger.md`. This directly
+  matches what the July version flagged Kaappi as having and curry lacking.
+- **An LSP server and editor tooling**: `(curry lsp)` (`modules/lsp/lsp.c`)
+  implements `textDocument/hover` and `textDocument/completion` over
+  Content-Length-framed stdio, with reader-driven diagnostics and a
+  nesting-depth crash guard (27 assertions in `tests/test_lsp.sh`). Syntax
+  highlighting exists for both Vim (`editors/vim/`: syntax, ftdetect,
+  ftplugin) and VS Code (`editors/vscode/`: a real extension —
+  `package.json`, `language-configuration.json`, a `.tmLanguage.json`
+  grammar), not just a bare grammar file. Not yet done: go-to-definition
+  (LSP has hover+completion only) and publishing the VS Code extension
+  somewhere findable (Marketplace/Open VSX) — see §2.3 below.
+- **`CONTRIBUTING.md` and GitHub issue templates** (`.github/ISSUE_TEMPLATE/
+  bug_report.md`, `feature_request.md`, `config.yml`) both exist.
 
 ## 2. The gaps, ranked by how often they'll bite someone
 
-### 2.1 Error messages carry no location, ever (highest priority)
+### 2.1 Structured/coded diagnostics are ~17% done (highest priority now)
 
-```
-$ curry /tmp/errtest.scm      # a 3-line file, error on line 1, inside (g (f x))
-Error: 𒀭 ḫiṭītu — lā qitnum:
-  car: not a pair
-```
+`docs/reference/error-codes.md` documents a real mechanism (`scm_raise_code`
+stamps a stable symbol like `wrong-type-argument` onto an error object,
+readable via `(error-object-code e)`/`(condition-code e)`, shown by the
+REPL/script printer as `Error [wrong-type-argument]: ...`) — this is not
+vaporware, it works today exactly as documented. But coverage is thin:
+**107 of 633 total raise sites use a code (~17%)** — the doc's own words,
+"most of them" (raised without a code) is accurate. `(error-object-code e)`
+returns `#f` for the ~83% majority.
 
-No file, no line, no call stack. `condition-backtrace` — the one API that
-could answer "where" — is a literal stub in `src/condition.c`:
+This is now the highest-leverage remaining item for the same reason error
+location was in July: it's something every programmatic consumer of curry's
+errors (a future LSP diagnostic, the MCP module, the LLM client, any linter)
+hits immediately, and the mechanism to fix it already exists — this is
+"add codes to more call sites," not new infrastructure.
 
-```c
-static val_t prim_condition_backtrace(int ac, val_t *av, void *ud)
-    { (void)ac; (void)ud; (void)av; return V_NIL; /* full traces in v2.2 */ }
-```
+**What's needed:** work through `src/*.c`'s remaining ~526 uncoded
+`scm_raise(...)` sites, starting with the highest-traffic ones (type errors
+in `builtins.c`, arity errors, unbound-variable) — same incremental
+approach `error-codes.md` itself already recommends.
 
-This is the single highest-leverage fix in this document. Every other item
-here is something you hit occasionally; this is something you hit on every
-debugging session, immediately, as the very first experience of a bug. Chez
-and Kaappi both report source location and a call chain by default.
+### 2.2 R7RS conformance still isn't quantified
 
-**What's needed:**
-- Thread `source_line`/`source_file` through chunks (compiler already has
-  line info for the reader — confirm it survives to `Chunk`) and stamp it on
-  the active frame at raise time.
-- Walk `VM_FRAMES` (the existing frame stack) at raise time and materialize
-  it into the condition object — the frame stack already exists, this is
-  "read it before unwinding," not new infrastructure.
-- Print `file:line: in <proc>` chain by default on uncaught errors, matching
-  the format most Scheme users expect from Racket/Guile/Chez.
+Unchanged from July: `docs/reference/language.md` documents deviations
+qualitatively but there's still no `CONFORMANCE.md` and no published number
+anywhere ("curry passes N/M of R7RS Appendix A", per-SRFI percentages).
+`tests/r7rs_tests.scm` has grown from 168 to **314 assertions** since July,
+real progress, but still an order of magnitude below what a dedicated
+conformance suite would cover, and growing the test file isn't the same as
+publishing a number anyone can cite.
 
-### 2.2 No CI that builds or runs the test suite
+**What's needed:** unchanged — expand toward Appendix A coverage (or adopt
+a public R7RS test suite) and publish a `CONFORMANCE.md` with per-SRFI
+percentages, mirroring the "R7RS deviations" pattern that already works
+well in `language.md`.
 
-`.github/workflows/` has exactly one file: CodeQL security scanning. Nothing
-runs `cmake --build && ctest` on push or PR. This means:
-- A broken build on `main` is only caught by whoever happens to build locally.
-- `ctest`'s 36 suites (the ones this session ran manually) aren't gating
-  merges.
-- No cross-platform coverage (Linux vs macOS) beyond whatever the developer's
-  own machine is.
+### 2.3 LSP go-to-definition + published editor extension
 
-**What's needed:** a `ci.yml` matrix (Ubuntu + macOS, Debug + Release) that
-configures, builds, and runs `ctest --test-dir build`. This is the
-prerequisite for the benchmark-regression CI already recommended in
-performance-chez-kaappi.md §5 Tier 0 — that doc assumed a CI harness exists
-to hang the benchmark job off of; it doesn't yet.
+Partially addressed since July (see §1) — hover and completion work, syntax
+highlighting exists for Vim and VS Code. What's left: `textDocument/
+definition` isn't implemented (only hover/completion are wired into the LSP
+dispatch), and the VS Code extension isn't confirmed published anywhere
+(Marketplace/Open VSX) — it exists as source in `editors/vscode/` but a user
+would need to build/side-load it today, not install it.
 
-### 2.3 No editor/LSP tooling
+**What's needed:** add a `textDocument/definition` handler (same
+reader-driven approach hover already uses, resolving a symbol to its
+`define`'s source location instead of its docstring) and publish the VS
+Code extension.
 
-Kaappi ships a bundled LSP server and a VS Code extension
-(`vscode-kaappi`) with syntax highlighting. Curry has neither — no LSP, no
-editor extension, no syntax-highlighting grammar published anywhere findable.
-For a language with this much surface area (44 reference docs, Akkadian
-syntax variants, a CAS), discoverability while typing matters more than
-usual: users can't reasonably memorize 600+ procedure names across three
-naming languages (English/Akkadian/cuneiform).
+### 2.4 No fuzzing
 
-**What's needed, roughly in order of payoff:** a TextMate/Tree-sitter grammar
-for syntax highlighting (cheap, immediate value, no server needed) → a
-minimal LSP exposing hover-for-docstring and go-to-definition, sourced from
-the same procedure registry `builtins_register()` already populates → the
-existing `,help` / `(disassemble ...)` REPL introspection is a good backend
-to reuse rather than duplicate.
+Unchanged from July, still zero: no `libFuzzer`/AFL harness anywhere in the
+tree. Neither the reader, the expander, nor the numeric tower (GMP-backed,
+lots of promotion-boundary edge cases per CLAUDE.md's own review checklist —
+"off-by-one errors in sexagesimal/numeric code") is fuzz-tested. Given
+curry's numeric tower has more promotion boundaries than almost any other
+Scheme (fixnum → bignum → rational → flonum → complex → quaternion →
+octonion → multivector → surreal → symbolic), this remains a strong
+candidate for harnesses targeting `reader.c`, `numeric.c` promotion logic,
+and the sexagesimal reader — exactly the code CLAUDE.md already flags for
+extra review scrutiny.
 
-### 2.4 No interactive debugger
+**What's needed:** unchanged — `libFuzzer`/AFL harnesses for the three areas
+above, plus a `docs/dev/fuzzing.md` documenting how to run them, matching
+Kaappi's own pattern.
 
-Kaappi's `vm_debug.zig` gives breakpoints, step/next/continue, locals
-inspection, and backtrace, driven from their bytecode VM. Curry's REPL has no
-`,break`, `,step`, or `,locals` — `,gc` and `,env` are the extent of REPL
-introspection commands found in `src/main.c`. Once §2.1's frame-walking
-exists, a minimal stepper is a small addition on top: the VM already has an
-explicit frame/register structure, which is the hard prerequisite Kaappi's
-design also depends on (§4.4 of the performance doc notes this same
-frame-stack-as-data-structure property is what makes their `call/cc` and
-their debugger both possible).
+### 2.5 condition-backtrace gap for user-signalled Condition objects
 
-### 2.5 Machine-legible diagnostics
+New, narrower item split out of what used to be §2.1: a raised *error*
+captures a full backtrace (see §1), but a user-signalled `Condition` object
+(via `make-condition`, the CL-style condition system, not an R7RS `error`)
+does not yet. Small, well-scoped fix now that the frame-capture
+infrastructure for the error case already exists and works.
 
-Kaappi assigns every error a stable code (`error[KP####]`) and offers
-`--diagnostics=json` for tooling. Curry's errors are prose strings — fine
-for a human reading them once, unusable for a linter, an LSP, or an agent
-parsing output programmatically (curry has an MCP module and an LLM client;
-both would benefit from structured errors more than a typical Scheme would).
-This is a smaller lift than it sounds: assign codes at the `scm_raise` call
-sites incrementally, starting with the ~20 most common (`not a pair`, `not
-bound`, `wrong number of arguments`, `not a procedure`, `division by zero`).
+**What's needed:** capture the same frame stack at `(signal ...)`/condition
+construction time that error-raising already does, and wire it into
+`condition-backtrace` for that path too.
 
-### 2.6 R7RS conformance isn't quantified
+### 2.6 No package manager, still deferred
 
-`docs/reference/language.md` documents deviations qualitatively but there's
-no number anywhere — no "curry passes N/M of R7RS Appendix A identifiers"
-the way Kaappi's `CONFORMANCE.md` states "1,391 pass, 0 fail" and gives
-per-SRFI percentages (e.g. "SRFI 1: 95%, missing `unzip3`–`unzip5`"). Curry's
-own `r7rs_tests.scm` is only 168 assertions — an order of magnitude below
-Kaappi's suite, though curry's suite is hand-picked and Kaappi's may include
-finer-grained per-procedure cases. Either way, nobody evaluating curry today
-can answer "how R7RS-complete is this?" with a number, which matters for
-credibility with anyone comparing implementations.
-
-**What's needed:** expand `r7rs_tests.scm` toward Appendix A coverage (or
-adopt a public R7RS test suite wholesale) and publish a `CONFORMANCE.md` with
-per-SRFI percentages, mirroring the pattern that already exists for
-"R7RS deviations."
-
-### 2.7 No fuzzing
-
-Neither the reader, the expander, nor the numeric tower (GMP-backed, lots of
-promotion-boundary edge cases per CLAUDE.md's own review checklist —
-"off-by-one errors in sexagesimal/numeric code") is fuzz-tested. Kaappi has a
-`docs/dev/fuzzing.md` and a `fuzzing-feasibility.md`. Given curry's numeric
-tower has more promotion boundaries than almost any other Scheme (fixnum →
-bignum → rational → flonum → complex → quaternion → octonion → multivector →
-surreal → symbolic), this is a strong candidate for `libFuzzer`/AFL harnesses
-targeting `reader.c`, `numeric.c` promotion logic, and the sexagesimal
-reader — exactly the code CLAUDE.md already flags for extra review scrutiny.
-
-### 2.8 No package manager, still deferred
-
-Recorded in memory as an open item (`project_pkg_design_deferred`) — you
-already want a comparative survey before implementing. Restating it here
-because it's a maturity axis both reference points score on: Kaappi ships
-`thottam` with ~20 first-party libraries; Chez has an ecosystem via Racket/
-Chicken-adjacent tooling and R6RS libraries. Curry's C module system
-(`modules.c`) is solid for *built-in* modules but there's no story for
-*user-published* Scheme libraries yet. Not re-litigating the design here —
-flagging it as a maturity axis worth keeping on the roadmap, and noting that
-Kaappi's answer (curated first-party monorepo-of-repos, §5 of the performance
-doc) is worth weighting more now that there's a concrete example to compare
-against CHICKEN/Akku/npm.
-
-### 2.9 No CONTRIBUTING.md or issue templates
-
-Minor, but zero-cost to fix: there's a `CODE_OF_CONDUCT.md`-shaped gap (no
-`CONTRIBUTING.md`, no `.github/ISSUE_TEMPLATE/`). If curry ever wants outside
-contributors, the entry cost right now is "read all of CLAUDE.md and infer
-the workflow" — fine for one maintainer with an AI pair, a wall for anyone
-else.
+Unchanged from July: recorded in memory as an open item
+(`project_pkg_design_deferred`) — a comparative survey was wanted before
+implementing, and the survey (`docs/thoughts/package-management-design.md`,
+which supersedes the older `docs/guides/pkg-design.md`) is done, but no
+implementation exists yet. Restating it here because it's a maturity axis
+both reference points score on: Kaappi ships `thottam` with ~20 first-party
+libraries; Chez has an ecosystem via Racket/Chicken-adjacent tooling and
+R6RS libraries. Curry's C module system (`modules.c`) is solid for
+*built-in* modules but there's still no story for *user-published* Scheme
+libraries. Not re-litigating the design here — flagging it as a maturity
+axis worth keeping on the roadmap.
 
 ---
 
 ## 3. Recommended sequencing
 
-Unlike the performance doc, most of these are independent and cheap — this
-isn't a dependency chain, it's a priority-ordered backlog:
+Most of what was sequenced in July is now done. What remains is a shorter,
+mostly-independent backlog:
 
 | Priority | Item | Effort | Why first/last |
 |---|---|---|---|
-| 1 | CI: build + ctest on push/PR | hours | Nothing else is trustworthy without this; blocks benchmark CI from the performance doc too |
-| 2 | Error location + real `condition-backtrace` | days | Highest daily-impact fix; frame stack already exists, this is surfacing it |
-| 3 | `CONFORMANCE.md` with real numbers | days | Cheap, high credibility payoff, no code changes required beyond running/counting |
-| 4 | Syntax highlighting grammar | days | Cheap, immediate discoverability win, no server needed |
-| 5 | Structured/coded diagnostics | 1–2 weeks, incremental | Pairs naturally with #2; do the top 20 error sites first |
-| 6 | Minimal LSP (hover + go-to-def) | weeks | Wants #5's error codes and can reuse `,help`'s registry |
-| 7 | REPL debugger (`,break`/`,step`/`,locals`) | weeks | Wants #2's frame-walking as foundation |
-| 8 | Fuzzing harnesses (reader, numeric tower) | weeks, ongoing | High value given numeric-tower complexity; not blocking |
-| 9 | CONTRIBUTING.md + issue templates | hour | Do whenever outside contribution becomes a goal |
-| — | Package manager | deferred by design | Already tracked; survey first per existing decision |
+| 1 | Structured diagnostics: widen code coverage past ~17% | 1–2 weeks, incremental | Mechanism already exists and is documented; highest-leverage remaining item, same reasoning error-location had in July |
+| 2 | `CONFORMANCE.md` with real numbers | days | Cheap, high credibility payoff, no code changes required beyond running/counting |
+| 3 | LSP go-to-definition + publish the VS Code extension | days–1 week | Small addition on an already-working LSP; publishing is zero-code, pure distribution |
+| 4 | `condition-backtrace` for user-signalled Conditions | days | Small, well-scoped, closes the one residual gap in an otherwise-shipped fix |
+| 5 | Fuzzing harnesses (reader, numeric tower) | weeks, ongoing | High value given numeric-tower complexity; not blocking |
+| — | Package manager | deferred by design | Survey done (`docs/thoughts/package-management-design.md`); implementation not started |
+
+**Done since July** (no longer on this list): CI matrix, error location +
+real `condition-backtrace` for errors, interactive debugger, LSP
+(hover/completion), syntax highlighting (Vim + VS Code), CONTRIBUTING.md +
+issue templates.
 
 ---
 
 ## 4. One-line summary
 
-Curry's *language* is more ambitious than Chez or Kaappi's; its *tooling
-around the language* — CI, error locations, a debugger, conformance
-numbers — is younger than either. The fastest path to "feels mature" is
-items 1–4 above, all cheap, all independent, and all things a user notices
-in their first ten minutes with curry.
+The July gap list front-loaded the items that mattered most for a user's
+first ten minutes with curry — CI, error location, a debugger, editor
+support — and all of those shipped. What's left skews toward *credibility
+with someone comparing implementations* (a published conformance number,
+codes on most errors, fuzzing) rather than day-one friction, which is a
+meaningfully more mature place to be than five weeks ago.
