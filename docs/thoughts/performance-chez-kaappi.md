@@ -1,6 +1,9 @@
 # Performance Lessons from Chez Scheme and Kaappi
 
-*Design recommendations for curry, 2026-07-16*
+**Document version 2 — 2026-08-18** (v1 was 2026-07-16). Verified against
+curry v1.21.0 / `main`.
+
+*Design recommendations for curry, 2026-07-16, updated 2026-08-18*
 
 This document surveys the two most instructive reference points for curry's
 performance work — Chez Scheme (the gold standard for native-compiled Scheme,
@@ -10,24 +13,36 @@ generational-GC ambitions) — and turns them into a prioritized development
 plan. Each recommendation is grounded in what curry actually has on `main`
 today, verified against the source.
 
+**2026-08-18 update**: Tier 0 (both items) and Tier 1's item 1.4 have
+shipped since July. Separately, the eval-elimination migration (tracked in
+project memory, not this doc originally) made direct, if not originally
+itemized, progress on Tier 4's stated prerequisite — "shrink `tree-eval`
+passthrough first" — `define-library`/R6RS-library bodies now compile and
+run through the VM (`vm_eval`) instead of being tree-walked, and the LLVM
+JIT-compile-failure fallback (§4.3) now falls back to the VM instead of the
+tree-walker too. See the callouts inline below for specifics; Tier 2 (the
+IR layer) and Tier 3 (GC) are unchanged — no IR exists yet, and
+`gc-rewrite` is still an unmerged side branch.
+
 ---
 
 ## 1. Where curry stands today
 
-Facts checked against `main` (July 2026), since they frame everything below:
+Facts checked against `main`, since they frame everything below (July 2026
+column preserved for reference; August column re-verified against source):
 
-| Subsystem | Current state |
-|-----------|---------------|
-| Execution | Stack-based bytecode VM (`src/vm.c`, computed-goto dispatch) with a tree-walking `eval` (`src/eval.c`) reached via `(tree-eval '<form>)` passthrough for forms the compiler doesn't handle (`src/compiler.c:1233`) |
-| Arithmetic | Inline fixnum fast path with `__builtin_add_overflow` in `OP_ADD` (`src/vm.c:507`); everything else calls the `num_*` tower (GMP-backed) |
-| Flonums | Heap-allocated `T_FLONUM` objects — every flonum-producing op allocates |
-| Globals | Versioned inline cache per chunk (`GlobCacheEntry`, `src/vm.c:435`); any global `set!` bumps `root->version`, invalidating all entries (full invalidation — the safe design; see §4.6) |
-| Calls | `OP_CALL` / `OP_TAIL_CALL`; tiered JIT hot-swap to native code in `OP_CALL` (`src/vm.c:707`); no fused or self-recursive call opcodes |
-| LLVM | ORC JIT (`src/llvm/`), statepoint-based GC strategy registered, stack-map emission on, `gc_args` empty until precise GC lands; minor GC inhibited across statepoints |
-| GC | Boehm (conservative) baseline; generational/semispace attempts reverted; `gc-rewrite` branch at M1 (safepoint at `L_DISPATCH`) |
-| Continuations | `setjmp`/`longjmp` escape-only `call/cc` |
-| Caching | `.scc` bytecode files exist but only via explicit `-c`; no transparent cache |
-| Benchmarks | `tests/bench*.scm` exist; not in CI, no trend tracking |
+| Subsystem | July 2026 | August 2026 |
+|-----------|-----------|-------------|
+| Execution | Stack-based bytecode VM (`src/vm.c`, computed-goto dispatch) with a tree-walking `eval` (`src/eval.c`) reached via `(tree-eval '<form>)` passthrough for forms the compiler doesn't handle (`src/compiler.c:1233`) | Same VM/dispatch. The `tree-eval` punt list is down to exactly 3 forms (`import`/`define-library`/`library`, `src/compiler.c:2408`) — `define-syntax`, `receive`, `define-record-type`, `syntax-rules`, and the CAS-adjacent forms all now have native `compile_*` codegen. `define-library`/R6RS-library *bodies* also no longer tree-walk: `modules.c` compiles and runs each body form through the VM (`vm_eval`), not `eval()` — real progress on §4.4's stated prerequisite, "shrink `tree-eval` passthrough first," though `import`/`define-library`/`library` themselves are still punted (they're not compiler-native forms yet) |
+| Arithmetic | Inline fixnum fast path with `__builtin_add_overflow` in `OP_ADD` (`src/vm.c:507`); everything else calls the `num_*` tower (GMP-backed) | Unchanged |
+| Flonums | Heap-allocated `T_FLONUM` objects — every flonum-producing op allocates | Unchanged |
+| Globals | Versioned inline cache per chunk (`GlobCacheEntry`, `src/vm.c:435`); any global `set!` bumps `root->version`, invalidating all entries (full invalidation — the safe design; see §4.6) | Unchanged, but generalized: the cache now validates against an arbitrary per-chunk `target_env` root frame (not hardcoded `GLOBAL_ENV`), so a `define-library` body's own isolated environment gets the same caching — same invalidation semantics, wider applicability |
+| Calls | `OP_CALL` / `OP_TAIL_CALL`; tiered JIT hot-swap to native code in `OP_CALL` (`src/vm.c:707`); no fused or self-recursive call opcodes | Unchanged — Tier 1.1/1.2 (self-tail-call, fused global-call opcodes) not started. One correctness fix landed that affects tail-call behavior generally: `compile_cond` previously only tail-call-optimized a `cond` clause's body when it was the textually *last* clause — any self-recursive call sitting in a non-last clause silently grew the stack every iteration instead of reusing the frame. Fixed; not a superinstruction, but closes a real gap in existing TCO correctness |
+| LLVM | ORC JIT (`src/llvm/`), statepoint-based GC strategy registered, stack-map emission on, `gc_args` empty until precise GC lands; minor GC inhibited across statepoints | Unchanged, plus: chunks compiled against a non-`GLOBAL_ENV` `target_env` are now explicitly excluded from JIT promotion (`maybe_jit_bcc`, `src/runtime.c`) — the JIT's native codegen (`src/llvm/jit.cpp`) still hardcodes `GLOBAL_ENV` for global lookups, so this is a correctness guard, not a new capability. Separately, `curry_jit_eval_expr`'s JIT-compile-failure fallback (§4.3) now calls `vm_eval()` instead of tree-walking — exactly the swap this document's own §4.3/Tier-4 discussion anticipated |
+| GC | Boehm (conservative) baseline; generational/semispace attempts reverted; `gc-rewrite` branch at M1 (safepoint at `L_DISPATCH`) | Unchanged — `gc-rewrite` still an unmerged side branch, no new milestones confirmed landed since July per project memory |
+| Continuations | `setjmp`/`longjmp` escape-only `call/cc` | Unchanged — full multi-shot `call/cc` still blocked on the same prerequisite (§4.4), which is now measurably closer but not complete: `eval()` still has real callers (`prim_eval`'s R7RS `eval`, `tree-eval` itself, `scm_load`, `modules.c`'s `load_scheme_module`, `eval_body` for any remaining tree-walker closures) |
+| Caching | `.scc` bytecode files exist but only via explicit `-c`; no transparent cache | **Done** — running `curry script.scm` directly now auto-compiles and transparently caches to `.scc` (content-hash keyed via `src_hash()`, not mtime/size), reused on the next run; `--timings` reports cache `HIT`/`MISS`. Matches Tier 1.4 and Kaappi's own pattern (§4.7) exactly |
+| Benchmarks | `tests/bench*.scm` exist; not in CI, no trend tracking | **Done** — `.github/workflows/benchmark.yml` runs on every push/PR with a stored baseline and a regression gate (currently a flat 130%-of-baseline alert threshold, single-sample comparison — noted during this session as noise-prone on at least one PR; per-commit trend *storage* exists, but the gate itself would benefit from averaging/repetition before being fully trusted) |
 
 ---
 
@@ -247,21 +262,21 @@ counters — never a shared stamp with per-entry writes.
 
 Ordered by leverage-per-effort, mapped to existing roadmap items.
 
-### Tier 0 — instrumentation first (days)
+### Tier 0 — instrumentation first (days) — **both items done**
 
 | # | Item | Source | Notes |
 |---|------|--------|-------|
-| 0.1 | Benchmark suite in CI with per-commit trends + PR regression gate | Kaappi §4.7 | = gc-rewrite P0; adopt `github-action-pull-request-benchmark`; seed with `tests/bench*.scm`, tak, fib, flonum loop, cont-capture |
-| 0.2 | `--timings` per-stage pipeline report (read/expand/compile/execute) | Kaappi §4.7 | Cheap; makes every later change measurable |
+| 0.1 | ~~Benchmark suite in CI with per-commit trends + PR regression gate~~ **Done** | Kaappi §4.7 | `.github/workflows/benchmark.yml`, stored baseline + gate. Caveat: the gate is a single-sample comparison against one baseline (flat 130% threshold), confirmed noise-prone on at least one real PR this session (zero production-code changes still tripped it uniformly ~1.3-1.6x) — worth revisiting with repetition/averaging before treating a gate failure as automatically meaningful |
+| 0.2 | ~~`--timings` per-stage pipeline report~~ **Done** | Kaappi §4.7 | Reports read/expand/compile/execute stage times plus cache HIT/MISS; see `--timings` in the CLI reference |
 
 ### Tier 1 — VM quick wins (days–weeks each, all independently benchmarkable)
 
-| # | Item | Source | Expected effect |
-|---|------|--------|-----------------|
-| 1.1 | `OP_SELF_TAIL_CALL` for direct self-recursion and named-`let` loops | Kaappi §4.1 | ~20%+ on call-heavy code (their measured 23% on tak) |
-| 1.2 | Fused `OP_CALL_GLOBAL` (lookup+call, one dispatch) — handling **all** callee types | Kaappi §4.1 | One dispatch instead of two on the most common call shape |
-| 1.3 | Per-call-site cache for `tree-eval` passthrough (compile once, memoize thunk) | Kaappi §4.3 | Removes re-walking cost from every non-compiled form |
-| 1.4 | Transparent content-hash `.scc` cache with HIT/MISS visibility | Kaappi §4.7 | Script startup; visibility line is non-negotiable |
+| # | Item | Source | Expected effect | Status |
+|---|------|--------|-----------------|--------|
+| 1.1 | `OP_SELF_TAIL_CALL` for direct self-recursion and named-`let` loops | Kaappi §4.1 | ~20%+ on call-heavy code (their measured 23% on tak) | Not started |
+| 1.2 | Fused `OP_CALL_GLOBAL` (lookup+call, one dispatch) — handling **all** callee types | Kaappi §4.1 | One dispatch instead of two on the most common call shape | Not started |
+| 1.3 | Per-call-site cache for `tree-eval` passthrough (compile once, memoize thunk) | Kaappi §4.3 | Removes re-walking cost from every non-compiled form | Not started as a cache, but the passthrough itself shrank: only `import`/`define-library`/`library` still punt to `tree-eval` (was a dozen forms in July); a per-site memoized-thunk cache for those 3 remaining forms is still the open item |
+| 1.4 | Transparent content-hash `.scc` cache with HIT/MISS visibility | Kaappi §4.7 | Script startup; visibility line is non-negotiable | **Done** — see §1 table above |
 
 ### Tier 2 — the IR layer (the enabling investment, ~weeks)
 
@@ -289,7 +304,22 @@ tiers once the IR feeds both.
 ### Tier 4 — continuations and the native tier (aligns with existing plans)
 
 - Full multi-shot `call/cc` via VM frame-stack copying, once passthrough is
-  small enough that all execution flows through the VM (§4.4).
+  small enough that all execution flows through the VM (§4.4). **Progress
+  since July**: `define-library`/R6RS-library bodies (a major real-world
+  source of tree-walked code — every `(curry X)`/SRFI library in the tree)
+  now compile and run through the VM instead of `eval()`, and the JIT's own
+  compile-failure fallback (§4.3) now routes to the VM too. What's left
+  before "all execution through the VM" is actually true: `eval()`'s
+  remaining real callers — the R7RS `(eval expr env)` primitive itself
+  (which will always need *some* general evaluator for an arbitrary
+  environment, VM or not), `scm_load` (`-l`/`(load ...)`/`(include ...)`,
+  deliberately left on `eval()` — see project memory on why an unconditional
+  switch there broke a real case), `modules.c`'s `load_scheme_module`, and
+  `eval_body` for any tree-walker closures still in play. Two forms
+  (`define-values`, `defined?`) were also found to have **zero** compiler/VM
+  codegen at all — tree-walker-only even at plain top level, unrelated to
+  any of the above — and block cleanly closing several of these call sites
+  until they get real `compile_*` codegen.
 - `call/ec` and `guard` stay on the `setjmp` fast path.
 - LLVM tier compiles continuation-free functions natively; conservative
   reachability analysis; VM fallback for the rest (§4.4). This slots into the
