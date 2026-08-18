@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787042399788,
+  "lastUpdate": 1787042498682,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5795,6 +5795,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 105.343,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "83d15bb6b221dd416f839734bad1d55ee6824e4f",
+          "message": "docs: update maturity-roadmap.md against current main\n\nThe July 16 version was significantly stale: five of its nine gaps (CI,\nerror location/backtrace, LSP, syntax highlighting, interactive\ndebugger, CONTRIBUTING.md) have since shipped. Re-verified every item\nagainst current main and re-ranked what is actually left: widening\nstructured error-code coverage past its current ~17%, publishing a\nquantified R7RS conformance number, LSP go-to-definition plus\npublishing the VS Code extension, backtrace support for user-signalled\nCondition objects, fuzzing, and the still-deferred package manager.\n\nAdded an explicit version/date header (v2, 2026-08-18) tied to the\ncurry release the audit was run against.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-18T18:40:46+10:00",
+          "tree_id": "c78dac4f074a1fe7e3344d368fa983502fdbd230",
+          "url": "https://github.com/deconstructo/curry/commit/83d15bb6b221dd416f839734bad1d55ee6824e4f"
+        },
+        "date": 1787042498025,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 23.943,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.182,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.388,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 196.031,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 375.697,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 71.926,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 121.459,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 102.49,
             "unit": "ms"
           }
         ]
