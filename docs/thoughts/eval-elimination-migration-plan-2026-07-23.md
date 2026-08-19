@@ -1,8 +1,50 @@
 # Migration plan: eliminate the tree-walker, VM+JIT as sole execution engine
 
-Private working notes. Not committed. Companion to
+Working notes, tracked in git since `fdc107d` (phase 1 landed). Companion to
 `architecture-review-2026-07-23.md`. Based on a full-codebase fact-finding pass
 (file:line cited throughout) rather than assumption.
+
+## Status as of 2026-08-19
+
+Re-audited against current `main` (evidence-based, not from memory). Six of
+eight phases done or mostly done; two real blockers remain, one of them not
+on the original phase-3 list at all.
+
+| Phase | Status |
+|---|---|
+| 1. File split (`eval.c` → `runtime.c` + shrinking tree-walker) | **Done.** `src/runtime.c` holds `apply`/`apply_arr`, `expand_qq`, `scm_load`, JIT-depth guard, `scm_raise*`, `eval_init`. `src/eval.c` is down to `eval()`'s dispatch + `eval_call_cc` only. |
+| 2. `modules.c` export-list bug | **Done.** `modules_import()` now filters on `mod->has_exports`/`mod->exports` instead of discarding them (`modules.c:467-479`). |
+| 3. Tree-eval-punted forms → compiler-native codegen | **Mostly done.** Only `import`/`define-library`/`library` still punt (now via the cached `OP_TREE_EVAL_CACHED`, PR #60 — a further optimization beyond what this plan called for, not just the plain passthrough). `receive`, `define-record-type`, `define-syntax`/`let-syntax`/`letrec-syntax`, `symbolic`, `with-assumptions`, `define-rule`/`define-ruleset`/`define-algebra` all have real `compile_*` codegen now (`compiler.c:2526-2596`). `syntax-rules` needed no special-casing — it self-expands as an ordinary macro transformer. |
+| — | **New blocker found, not on the original phase-3 list**: `define-values` and `defined?` have **zero** compiler codegen — not even the tree-eval punt. Compiled code can't use them at all (`(defined? a)` in compiled code raises `unbound-variable: defined?`); they only work via the tree-walker, reached through `-l`/`(load)`/`load_scheme_module`. Tests route around this today (`tests/akkadian_tests.scm:132`, `tests/conditions_tests.scm:154` both comment that `define-values` isn't supported, use `call-with-values` instead). This blocks phase 7 outright and needs its own `compile_*` codegen before `eval()`'s dispatch can be deleted — add it to phase 3's scope. |
+| 4. `scm_load()` rewrite (compile+`vm_run()` instead of `eval()` per form) | **Not done.** `runtime.c:713` still calls `eval(v, env)` in the read loop. `main.c`'s `-l` and `builtins.c`'s `(load)` primitive both still route through this. |
+| 5. `modules.c`'s four `eval()` call sites | **3 of 4 done.** `modules_define_library`'s `(begin ...)` body and `modules_define_r6rs_library`'s inline body forms now use `vm_eval()` (`modules.c:540,594,612`, with a comment citing this plan). `load_scheme_module()` (`modules.c:205`) is the one holdout — still calls `eval()` per form, still uses `env_extend(GLOBAL_ENV)` rather than the isolation model this plan's design question (§ "The open design question") was about. |
+| 6. `curry_llvm.cpp` JIT-fallback swap | **Done.** Both fallback sites call `vm_eval()` now (`curry_llvm.cpp:98,123`), comment cites this plan. |
+| 7. Delete `eval()`'s dispatch + `eval_call_cc` | **Not started** — correctly blocked on 3 (new define-values/defined? gap), 4, and 5. `eval()` still has 40 special-form cases. `eval_call_cc` still has its one expected caller (`eval()`'s own `S_CALLCC`), confirmed no other callers exist — cheap to delete once everything else clears. |
+| 8. `apply_arr`/VM inline-JIT reconciliation (optional) | **Not started**, as intended — explicitly deferred by this plan, not a blocker. |
+
+**Two things this plan didn't originally account for, found in the re-audit:**
+
+- `builtins.c:3787`'s MPFR `with-precision` bootstrap macro still calls
+  `eval()` directly at C-startup. The plan gated this on `define-syntax`
+  going VM-native — that's now done (`compile_define_syntax`,
+  `compiler.c:2536`), so this call site is actually unblocked and could be
+  replaced now; it just hasn't been revisited since.
+- `prim_eval` (`builtins.c:2185-2188`, the R7RS `eval` primitive) calls
+  `eval()` directly and isn't addressed anywhere in this plan. Since R7RS
+  `eval` is a real language feature (arbitrary env, not statically known at
+  compile time), it will always need *some* general evaluator — the open
+  question this plan never posed is whether that's still allowed to be the
+  tree-walker after phase 7, or whether `prim_eval` needs to become
+  compile-on-the-fly-and-`vm_run()` too. Worth an explicit decision before
+  phase 7's "delete `eval()`'s dispatch" is taken literally — `prim_eval`
+  is a real, permanent caller, not migration debt to clear.
+
+Also: `CLAUDE.md`'s `define_library_stack_guard` test-suite doc entry still
+says a define-library body is "tree-walked via `eval()`, not the compiled VM
+path" — stale relative to phase 5's `vm_eval()` swap for that exact code
+path. Worth a follow-up check on whether that specific test still exercises
+a genuinely tree-walked path (possibly via the still-unported
+`load_scheme_module`) or needs its doc line corrected.
 
 ## The headline correction to my earlier framing
 
