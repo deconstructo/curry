@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787043485267,
+  "lastUpdate": 1787134627596,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -5933,6 +5933,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 100.278,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f069de0d71cca325fad02a5895adc8ac7e7c88f7",
+          "message": "Merge pull request #60 from deconstructo/tier1-vm-quick-wins\n\nperf(vm): Tier 1 quick wins — self-tail-call, fused global calls, cached tree-eval\n\nThis has been through so many rounds of review. Improvement in performance",
+          "timestamp": "2026-08-19T20:16:13+10:00",
+          "tree_id": "6e6606128d7efadae7257e8325f8a2ebde7f7eb1",
+          "url": "https://github.com/deconstructo/curry/commit/f069de0d71cca325fad02a5895adc8ac7e7c88f7"
+        },
+        "date": 1787134626360,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.122,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.133,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.738,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.621,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 150.564,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 305.29,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.11,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 102.775,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 83.504,
             "unit": "ms"
           }
         ]
