@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787134825005,
+  "lastUpdate": 1787135674622,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6071,6 +6071,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.624,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "17baa6d68408d4c3b6763695bd4fa970894597cb",
+          "message": "docs: re-audit eval-elimination migration plan against current main\n\nEvidence-based status pass (file:line citations, not memory) on all 8\nphases of the tree-walker-elimination plan. 6 of 8 done or mostly done.\nTwo real blockers remain: scm_load() and load_scheme_module() still call\neval() per form (phases 4-5), and a new gap found during the audit that\nwas not on the original phase-3 list - define-values/defined? have zero\ncompiler codegen at all, not even a tree-eval punt, which blocks phase 7\noutright. Also flags two callers the plan never addressed (the MPFR\nwith-precision bootstrap eval() call, now actually unblocked since\ndefine-syntax went VM-native; and prim_eval, the permanent R7RS eval\nprimitive) and a stale CLAUDE.md test-doc line.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T20:33:32+10:00",
+          "tree_id": "dc9e50fcbd2b51cd3d652ecfa0cba030ce292ebf",
+          "url": "https://github.com/deconstructo/curry/commit/17baa6d68408d4c3b6763695bd4fa970894597cb"
+        },
+        "date": 1787135672787,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.612,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.11,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.354,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.685,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 148.875,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 314.351,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.079,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 100.601,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.331,
             "unit": "ms"
           }
         ]
