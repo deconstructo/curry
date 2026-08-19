@@ -273,9 +273,9 @@ Ordered by leverage-per-effort, mapped to existing roadmap items.
 
 | # | Item | Source | Expected effect | Status |
 |---|------|--------|-----------------|--------|
-| 1.1 | `OP_SELF_TAIL_CALL` for direct self-recursion and named-`let` loops | Kaappi §4.1 | ~20%+ on call-heavy code (their measured 23% on tak) | Not started |
-| 1.2 | Fused `OP_CALL_GLOBAL` (lookup+call, one dispatch) — handling **all** callee types | Kaappi §4.1 | One dispatch instead of two on the most common call shape | Not started |
-| 1.3 | Per-call-site cache for `tree-eval` passthrough (compile once, memoize thunk) | Kaappi §4.3 | Removes re-walking cost from every non-compiled form | Not started as a cache, but the passthrough itself shrank: only `import`/`define-library`/`library` still punt to `tree-eval` (was a dozen forms in July); a per-site memoized-thunk cache for those 3 remaining forms is still the open item |
+| 1.1 | `OP_SELF_TAIL_CALL` for direct self-recursion and named-`let` loops | Kaappi §4.1 | ~20%+ on call-heavy code (their measured 23% on tak) | **Done** (PR #60) — scoped to named-`let` only (a global self-reference could be reassigned by unrelated code, unlike a loop's private upvalue); ~15% measured on a named-let benchmark |
+| 1.2 | Fused `OP_CALL_GLOBAL` (lookup+call, one dispatch) — handling **all** callee types | Kaappi §4.1 | One dispatch instead of two on the most common call shape | **Done** (PR #60) — `OP_CALL_GLOBAL`/`OP_TAIL_CALL_GLOBAL`, reuses the same `call_foreign` trampoline `OP_CALL` uses for every non-closure callee type; ~5-8% measured on `fib(30)` |
+| 1.3 | Per-call-site cache for `tree-eval` passthrough (compile once, memoize thunk) | Kaappi §4.3 | Removes re-walking cost from every non-compiled form | **Done** (PR #60) — `OP_TREE_EVAL_CACHED`, a per-chunk side array (`Chunk::tree_eval_cache`) parallel to the constant pool, C11 atomics for cross-actor-thread safety, never touched by the `.scc` serializer (mirrors `glob_cache`'s always-cold-on-load convention) |
 | 1.4 | Transparent content-hash `.scc` cache with HIT/MISS visibility | Kaappi §4.7 | Script startup; visibility line is non-negotiable | **Done** — see §1 table above |
 
 ### Tier 2 — the IR layer (the enabling investment, ~weeks)
@@ -300,6 +300,23 @@ tiers once the IR feeds both.
   milestones (caches, module tables, handler chains, startup ordering).
 - Revisit per-object `Hdr` overhead once segments carry type (pairs at 16
   bytes is a heap-size and cache-locality win).
+- **Known bug, found while landing Tier 1 (2026-08-19), not yet fixed**: under
+  `--gc generational` with an artificially small `--gc-nursery-size`, a script
+  using `import` can hit `scc: internal error: constant of type -1 has no
+  .scc serialization support` on write. The `-1` is `GC_FORWARDED`
+  (`0xFFFFFFFF` misread as a signed type tag) — a stale, unfollowed pointer
+  into nursery memory that's since been reused for a fresh allocation.
+  Reproduces on plain `main` (predates Tier 1 entirely), only with a tiny
+  nursery (not the default), and only via the tree-eval constant path
+  (`import`/`define-library`/`library`) — a plain quoted-list constant under
+  identical tiny-nursery settings serializes fine. Root cause is presumably a
+  GC-root-registration-timing gap: the constant is added to a chunk's pool
+  mid-compilation, before that chunk is reachable as a scanned root, so a
+  minor GC in that window can move the underlying object without the
+  constant-pool slot ever being updated to follow it. `--gc generational`
+  isn't exercised by `ctest` at all currently, which is why this stayed
+  invisible. Worth an explicit audit item under the §4.5 checklist above
+  before `--gc generational` is anything but experimental.
 
 ### Tier 4 — continuations and the native tier (aligns with existing plans)
 
