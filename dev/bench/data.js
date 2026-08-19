@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787134627596,
+  "lastUpdate": 1787134825005,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6002,6 +6002,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 83.504,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "4e37e7c11208bcb0b18fa822cdb26b824043abb2",
+          "message": "docs: update performance-chez-kaappi.md - Tier 1 done, generational-GC bug noted\n\nMarks all three Tier 1 items (self-tail-call, fused global calls, cached\ntree-eval) done per PR #60, with measured results. Also records the\npre-existing generational-GC stale-pointer bug found while landing that PR\n(tiny-nursery + import + .scc write), so it is not lost before --gc\ngenerational gets its own audit pass.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T20:19:41+10:00",
+          "tree_id": "812e799c199b682705ff996fae679b12b5c55b71",
+          "url": "https://github.com/deconstructo/curry/commit/4e37e7c11208bcb0b18fa822cdb26b824043abb2"
+        },
+        "date": 1787134824347,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.931,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.354,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.285,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.291,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 149.447,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 316.421,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.567,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.411,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 78.624,
             "unit": "ms"
           }
         ]
