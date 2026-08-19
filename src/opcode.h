@@ -103,6 +103,28 @@ typedef enum {
     OP_CALL,        /* A: call top-of-stack with A args below it         */
     OP_TAIL_CALL,   /* A: tail call (reuses current frame)               */
     OP_RETURN,      /* return top of stack to caller                     */
+    OP_SELF_TAIL_CALL, /* A: tail-call the CURRENTLY EXECUTING closure with
+                         A args already on the stack (no callee pushed) --
+                         compiler-proven self-recursion only (named-let
+                         loops whose own name is never set!'d); see
+                         compile_call's own comment in compiler.c for the
+                         safety argument                                  */
+    OP_CALL_GLOBAL,      /* A: constants[A] const-pool index of the global
+                            symbol to look up (via the same cache
+                            OP_LOAD_GLOBAL uses) and call; B: argc, args
+                            already on the stack, no callee pushed        */
+    OP_TAIL_CALL_GLOBAL, /* same as OP_CALL_GLOBAL but tail (reuses frame) */
+    OP_TREE_EVAL_CACHED, /* A: constants[A] holds a raw form still punted to
+                            the tree-walker (import/define-library/library
+                            -- see compiler.c's tree-eval punt block);
+                            chunk->tree_eval_cache[A] memoizes the result
+                            of already having run it through eval() once,
+                            so repeated executions of this exact bytecode
+                            site (e.g. an import nested inside a function
+                            called from a loop) only actually evaluate it
+                            the first time. See chunk.h's Chunk::
+                            tree_eval_cache comment for why this cache is
+                            deliberately not .scc-persisted             */
 
     /* ── Closures ───────────────────────────────────────────────────── */
     OP_CLOSURE,     /* A: push new closure wrapping constants[A] (Chunk*)

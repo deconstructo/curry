@@ -50,6 +50,24 @@ typedef struct {
     val_t    *slots;      /* base of this frame's window into vm->stack  */
     int       slot_count; /* number of slots (locals + args)             */
     uint64_t  prof_start_ns; /* profiling: call entry time (level 2+)   */
+    /* Was a callee value pushed onto the stack directly below `slots`
+     * when this frame was created (true: OP_CALL's convention -- callee,
+     * then args) or not (false: OP_CALL_GLOBAL's convention -- the
+     * callee is resolved by the opcode handler itself via a fused
+     * lookup, never pushed at all)? pop_frame() (vm.c) needs this to
+     * know how many slots to remove on return: `frame->slots - 1` only
+     * when a callee slot genuinely exists. Set once, at frame creation
+     * (OP_CALL/OP_CALL_GLOBAL); UNCHANGED by a tail call that reuses
+     * this same frame in place (OP_TAIL_CALL/OP_SELF_TAIL_CALL/
+     * OP_TAIL_CALL_GLOBAL/OP_TAIL_CALL_WITH_VALUES) -- a tail call
+     * doesn't add or remove the callee slot this frame was originally
+     * entered with, it just changes which closure/code is running in it.
+     * Found the hard way: an earlier version of OP_CALL_GLOBAL skipped
+     * the callee slot without telling pop_frame, which unconditionally
+     * assumed one always existed and silently clobbered the CALLER's own
+     * next-lower stack slot on every return -- see git history / PR
+     * discussion for the (+ 1 (g 5)) repro that caught it. */
+    bool      has_callee_slot;
 } CallFrame;
 
 /*

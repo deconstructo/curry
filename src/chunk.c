@@ -31,6 +31,7 @@
 #include "symbol.h"
 #include "object.h"
 #include "set.h"
+#include "eval.h"
 
 const char *opcode_name[OP_COUNT] = {
     [OP_CONST]          = "CONST",
@@ -94,6 +95,10 @@ const char *opcode_name[OP_COUNT] = {
     [OP_CALL]           = "CALL",
     [OP_TAIL_CALL]      = "TAIL_CALL",
     [OP_RETURN]         = "RETURN",
+    [OP_SELF_TAIL_CALL]   = "SELF_TAIL_CALL",
+    [OP_CALL_GLOBAL]      = "CALL_GLOBAL",
+    [OP_TAIL_CALL_GLOBAL] = "TAIL_CALL_GLOBAL",
+    [OP_TREE_EVAL_CACHED] = "TREE_EVAL_CACHED",
     [OP_CLOSURE]        = "CLOSURE",
     [OP_CLOSE_UP]       = "CLOSE_UP",
     [OP_APPLY]          = "APPLY",
@@ -123,6 +128,7 @@ Chunk *chunk_new(void) {
     c->name       = NULL;
     c->source_name = NULL;
     c->glob_cache = NULL;
+    c->tree_eval_cache = NULL;
     c->local_debug = NULL;
     c->local_debug_len = 0;
     c->local_debug_cap = 0;
@@ -217,6 +223,20 @@ int chunk_add_const(Chunk *c, val_t v) {
         if (vis_string(e) && vis_string(v) &&
             strcmp(str_data(as_str(e)), str_data(as_str(v))) == 0) return i;
     }
+    /* Every bytecode operand indexing into constants[] is a single uint8_t
+     * (OP_LOAD_GLOBAL/OP_STORE_GLOBAL/OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL/
+     * OP_TREE_EVAL_CACHED/emit_const, ...) -- a chunk that accumulates a
+     * 257th DISTINCT constant would silently wrap the returned index back
+     * into uint8_t range and every later use of that index would load or
+     * call the WRONG constant instead of failing loudly. This has always
+     * been possible (emit_load/emit_store hit this same path for every
+     * distinct global reference, pre-dating this check), but is worth a
+     * hard, clear compile-time stop rather than silent misbehavior --
+     * mirrors the existing "cond: too many clauses (compiler limit)"
+     * precedent below for the same category of fixed-width-operand
+     * limit. */
+    if (c->const_len >= 256)
+        scm_raise(V_FALSE, "compiler limit: too many distinct constants in one chunk (max 256)");
     if (c->const_len == c->const_cap) {
         int cap = c->const_cap < 8 ? 8 : c->const_cap * 2;
         c->constants = GC_REALLOC(c->constants, (size_t)cap * sizeof(val_t));
@@ -229,6 +249,18 @@ int chunk_add_const(Chunk *c, val_t v) {
         memset(new_gc + c->const_len, 0,
                (size_t)(cap - c->const_len) * sizeof(GlobCacheEntry));
         c->glob_cache = new_gc;
+        /* Grow tree_eval_cache the same way, parallel to constants --
+         * see chunk.h's Chunk::tree_eval_cache comment. Unlike
+         * glob_cache this holds real val_t values (not raw pointers), so
+         * it needs gc_alloc_raw_pinned for the same "Boehm traces this"
+         * reason but ALSO needs a gc_gen.c evacuation case (added
+         * alongside T_CHUNK's existing one) for correctness under
+         * --gc generational. */
+        val_t *new_tc = (val_t *)gc_alloc_raw_pinned((size_t)cap * sizeof(val_t));
+        if (c->tree_eval_cache)
+            memcpy(new_tc, c->tree_eval_cache, (size_t)c->const_len * sizeof(val_t));
+        memset(new_tc + c->const_len, 0, (size_t)(cap - c->const_len) * sizeof(val_t));
+        c->tree_eval_cache = new_tc;
     }
     int idx = c->const_len++;
     c->constants[idx] = v;
@@ -252,10 +284,10 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_LOAD_LOCAL: case OP_STORE_LOCAL:
     case OP_LOAD_GLOBAL: case OP_STORE_GLOBAL: case OP_DEF_GLOBAL:
     case OP_LOAD_UP: case OP_STORE_UP:
-    case OP_CALL: case OP_TAIL_CALL:
+    case OP_CALL: case OP_TAIL_CALL: case OP_SELF_TAIL_CALL:
     case OP_CLOSURE: case OP_CLOSE_UP:
     case OP_VALUES: case OP_MAKEVEC: case OP_APPLY:
-    case OP_SLIDE: {
+    case OP_SLIDE: case OP_TREE_EVAL_CACHED: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||
@@ -276,6 +308,17 @@ static int disasm_one(const Chunk *c, int off) {
         uint16_t b = (uint16_t)(c->code[off] | (c->code[off+1] << 8));
         off += 2;
         fprintf(stderr, "%-16s %4d\n", name, (int)b);
+        break;
+    }
+    case OP_CALL_GLOBAL: case OP_TAIL_CALL_GLOBAL: {
+        uint8_t a = c->code[off++];
+        uint8_t b = c->code[off++];
+        fprintf(stderr, "%-16s %4d %4d", name, a, b);
+        if (a < c->const_len) {
+            val_t v = c->constants[a];
+            if (vis_symbol(v)) fprintf(stderr, "  ; %s", as_sym(v)->data);
+        }
+        fprintf(stderr, "\n");
         break;
     }
     default:

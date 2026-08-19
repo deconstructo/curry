@@ -57,6 +57,37 @@ typedef struct {
 
     GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
 
+    /* Per-call-site cache for OP_TREE_EVAL_CACHED (the tree-eval
+     * passthrough for import/define-library/library -- see
+     * compiler.c's tree-eval punt block). Parallel to constants[] like
+     * glob_cache, grown alongside it in chunk_add_const. NULL/unset
+     * slots hold 0 (not a valid heap pointer, matching glob_cache's own
+     * NULL-slot convention); a non-zero slot holds the memoized result
+     * of already having run constants[i] through eval() once.
+     *
+     * Deliberately NEVER touched by src/scc.c's serializer, the same way
+     * glob_cache never is: every chunk, whether freshly compiled or
+     * loaded from .scc, starts with this NULL and rebuilds lazily during
+     * execution. This is what makes the cache safe to have at all --
+     * .scc writes happen AFTER the compiling process has already run the
+     * chunk once (see main.c's write_pending_scc_atexit), so if this
+     * array's post-execution state were serialized, a "already imported"
+     * cached slot would leak into the file; a FRESH process loading that
+     * .scc would then wrongly skip re-running import/define-library
+     * against its own empty GLOBAL_ENV. Not serializing it at all sidesteps
+     * that entirely, at the cost (same as glob_cache) of the cache
+     * starting cold again on every new process -- fine, since it only
+     * ever helps within one process's repeated execution of the same
+     * chunk (e.g. an import nested inside a function called from a loop),
+     * never across process boundaries anyway.
+     *
+     * Unlike glob_cache, THIS array needs a gc_gen.c evacuation case:
+     * glob_cache stores raw val_t* slot pointers validated by a separate
+     * version check (safe to go stale under --gc generational), but this
+     * array stores real cached val_t RESULT values that must move with
+     * everything else. */
+    val_t *tree_eval_cache;
+
     LocalDebugEntry *local_debug; /* debugger's slot→name map; may be NULL */
     int       local_debug_len;
     int       local_debug_cap;

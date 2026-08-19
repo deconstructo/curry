@@ -489,7 +489,10 @@ static void usage(const char *argv0) {
         "                    Note: generational backend is experimental. Actor-heavy workloads\n"
         "                    may accumulate nursery garbage between main-thread GC cycles.\n"
         "  --timings         Print a read/expand/compile/execute pipeline timing\n"
-        "                    report to stderr on exit\n",
+        "                    report to stderr on exit\n"
+        "  --clear-cache     Delete any existing .scc cache for the script being\n"
+        "                    run (both cache-location tiers) before compiling,\n"
+        "                    forcing a fresh compile instead of a stale cache hit\n",
         argv0);
 }
 
@@ -552,6 +555,7 @@ int main(int argc, char **argv) {
     const char *compile_file = NULL;
     const char *compile_out  = NULL;
     bool compile_executable  = false;
+    bool clear_cache_flag    = false;
 
     static const struct option long_opts[] = {
         { "version",      no_argument,       NULL, 'v' },
@@ -560,6 +564,7 @@ int main(int argc, char **argv) {
         { "gc",              required_argument, NULL, 0   },  /* handled pre-scan */
         { "gc-nursery-size", required_argument, NULL, 0   },  /* handled pre-scan */
         { "timings",         no_argument,       NULL, 0   },
+        { "clear-cache",     no_argument,       NULL, 0   },
         { NULL, 0, NULL, 0 }
     };
 
@@ -572,6 +577,8 @@ int main(int argc, char **argv) {
             /* long option with no short form */
             if (!strcmp(long_opts[long_idx].name, "timings"))
                 curry_timings_enabled = true;
+            else if (!strcmp(long_opts[long_idx].name, "clear-cache"))
+                clear_cache_flag = true;
             break;   /* --gc / --gc-nursery-size already handled in the pre-scan */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
@@ -772,6 +779,16 @@ int main(int argc, char **argv) {
                     }
                 }
             }
+            /* --clear-cache: discard any existing cache for this script
+             * before deciding HIT or MISS, so a stale .scc (e.g. left
+             * behind by a curry build with a different bytecode format
+             * mid-development -- see scc_clear's own comment) is never
+             * consulted, and the run below always recompiles fresh and
+             * rewrites it. No-op when the positional argument is itself a
+             * .scc file (is_scc): there is no separate cache to clear in
+             * that case, the file *is* the thing being run. */
+            if (clear_cache_flag && !is_scc)
+                scc_clear(argv[i]);
             if (is_scc) {
                 /* Direct .scc run — no source file, skip mtime check.
                    .scc caching doesn't persist source_name (see scc.c), so

@@ -116,6 +116,17 @@ typedef struct Compiler {
 
     SyntaxLocal syntax_locals[MAX_SYNTAX_LOCALS];
     int         syntax_local_count;
+
+    /* Named-let self-tail-call (OP_SELF_TAIL_CALL, see compile_call and
+     * compile_let's named-let branch): self_tail_name is the loop's own
+     * symbol when this Compiler is compiling exactly that loop's body
+     * (V_FALSE otherwise); self_tail_mutated is set once, before body
+     * compilation begins, if the raw body ever textually targets that
+     * name with set! anywhere (conservative, shadowing-unaware --see
+     * body_mentions_set_target) -- when true, every self-tail-call site
+     * in this body falls back to the ordinary call path instead. */
+    val_t self_tail_name;
+    bool  self_tail_mutated;
 } Compiler;
 
 /* ── Forward declarations ────────────────────────────────────────────── */
@@ -127,6 +138,14 @@ static bool is_quoted_symbol(val_t expr, val_t *out_sym);
 
 static _Thread_local const char *g_compile_source_name = NULL;
 static _Thread_local val_t       g_compile_target_env   = V_VOID;
+/* Set by compile_let's named-let branch right before compiling the loop
+ * lambda's own body, consumed-and-cleared by init_compiler below the same
+ * way g_compile_target_env is -- see Compiler::self_tail_name's own
+ * comment. Mirrors the established thread-local hand-off pattern used
+ * throughout this file rather than adding a parameter to compile_lambda
+ * (which has many other callers that don't care about this at all). */
+static _Thread_local val_t       g_compile_self_tail_name    = V_FALSE;
+static _Thread_local bool        g_compile_self_tail_mutated = false;
 
 void compiler_set_source_name(const char *name) { g_compile_source_name = name; }
 
@@ -144,6 +163,10 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->chunk->name = name;
     c->chunk->source_name = g_compile_source_name;
     c->chunk->target_env  = g_compile_target_env;
+    c->self_tail_name     = g_compile_self_tail_name;
+    c->self_tail_mutated  = g_compile_self_tail_mutated;
+    g_compile_self_tail_name    = V_FALSE;
+    g_compile_self_tail_mutated = false;
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -176,6 +199,14 @@ static void emit_const(Compiler *c, val_t v, int line) {
 static void emit_ab(Compiler *c, uint8_t op, uint8_t a, int line) {
     chunk_emit(c->chunk, op, line);
     chunk_emit(c->chunk, a,  line);
+}
+
+/* Opcode + two single-byte operands (e.g. OP_CALL_GLOBAL's const-pool
+ * index and argc) */
+static void emit_abc(Compiler *c, uint8_t op, uint8_t a, uint8_t b, int line) {
+    chunk_emit(c->chunk, op, line);
+    chunk_emit(c->chunk, a,  line);
+    chunk_emit(c->chunk, b,  line);
 }
 
 /* Emit a jump; returns offset of the 16-bit placeholder to patch later */
@@ -1015,6 +1046,65 @@ static void compile_or(Compiler *c, val_t args, bool tail, int line) {
         patch_jump(c, patches[i]);
 }
 
+/* Conservative textual scan: does `expr` (or anything nested inside it,
+ * except inside a (quote ...) subform) contain (set! name ...) anywhere,
+ * OR any macro use at all (local syntax-local, or a global/target_env
+ * T_SYNTAX binding)? Deliberately ignores lexical shadowing for the
+ * set!-target check -- a false positive there (an inner binding that
+ * happens to share `name` but isn't really the same variable) only costs
+ * a missed optimization. The macro-use check is a SEPARATE, unconditional
+ * bail-out (found by code review, confirmed via repro): a plain textual
+ * scan of the RAW body can only ever see set! forms written literally in
+ * source -- it is blind to a macro that itself EXPANDS to (set! name
+ * ...), since expansion happens later, during compile(). A named-let
+ * loop whose body used a macro that expanded to `(set! loop other-fn)`
+ * previously still got OP_SELF_TAIL_CALL (the scan found no literal
+ * set!), so the compiler kept trusting "this call always means myself"
+ * even after the loop variable was reassigned to something else --
+ * confirmed: the loop silently kept calling the stale closure instead of
+ * the reassigned one. Rather than expanding every macro here just to
+ * scan the result (duplicating compile()'s own expansion machinery), any
+ * macro use anywhere in the body unconditionally disables the
+ * optimization -- correct by construction (no expansion result can ever
+ * need scanning if the whole body already bails out), at the cost of
+ * also declining the optimization for named-let loops that happen to use
+ * some unrelated macro that doesn't touch the loop variable at all. That
+ * tradeoff is deliberate: only a hard NO is guaranteed to never regress
+ * to a wrong answer as new macros get written.
+ *
+ * Mirrors sr_collect_free_symbols's own "don't descend into quote"
+ * pattern (syntax_rules.c), and compile()'s own is-macro check (checked
+ * local-syntax first, then target_env, then GLOBAL_ENV) for the macro
+ * detection. lang_translate on the head catches an Akkadian-spelled
+ * set! too, matching how compile()'s own dispatch translates every head
+ * before comparing against S_SET. */
+static bool expr_mentions_set_target(Compiler *c, val_t expr, val_t name) {
+    if (!vis_pair(expr)) return false;
+    val_t raw_head = vcar(expr);
+    val_t head = lang_translate(raw_head);
+    if (head == S_QUOTE) return false;
+    if (head == S_SET && vis_pair(vcdr(expr)) && vcar(vcdr(expr)) == name)
+        return true;
+    if (vis_symbol(raw_head)) {
+        val_t transformer;
+        bool is_macro = resolve_syntax_local(c, raw_head, &transformer);
+        if (!is_macro && c->chunk->target_env != V_VOID)
+            is_macro = vis_syntax(env_lookup_or_false(c->chunk->target_env, raw_head));
+        if (!is_macro)
+            is_macro = vis_syntax(env_lookup_or_false(GLOBAL_ENV, raw_head));
+        if (is_macro) return true;  /* unconditional bail-out, see comment above */
+    }
+    for (val_t p = expr; vis_pair(p); p = vcdr(p))
+        if (expr_mentions_set_target(c, vcar(p), name)) return true;
+    return false;
+}
+
+static bool body_mentions_set_target(Compiler *c, val_t body, val_t name) {
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (expr_mentions_set_target(c, vcar(p), name)) return true;
+    return false;
+}
+
 static void compile_let(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
@@ -1058,7 +1148,18 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         mark_initialised(&outer);
         emit(&outer, OP_VOID, line);
 
-        /* Inner loop lambda; loop_name resolves as upvalue from outer's slot 0 */
+        /* Inner loop lambda; loop_name resolves as upvalue from outer's slot 0.
+         * Arm the self-tail-call thread-local so a tail-position call to
+         * loop_name within this exact body compiles to OP_SELF_TAIL_CALL
+         * instead of the ordinary upvalue-load-then-call sequence -- see
+         * Compiler::self_tail_name's comment and compile_call. The
+         * set!-scan runs over the RAW (uncompiled) body once, up front,
+         * so every self-tail-call site compiled anywhere in this body
+         * consistently sees the same answer regardless of where in the
+         * body a set! to loop_name might textually appear relative to
+         * a given tail call. */
+        g_compile_self_tail_name    = loop_name;
+        g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
         compile_lambda(&outer, fwd, body, as_sym(loop_name)->data, line);
         emit_ab(&outer, OP_STORE_LOCAL, 0, line);  /* store closure → slot 0 */
         emit_ab(&outer, OP_LOAD_LOCAL,  0, line);  /* callee */
@@ -2147,11 +2248,85 @@ static void compile_receive(Compiler *c, val_t args, bool tail, int line) {
 
 /* ── Application compilation ─────────────────────────────────────────── */
 
+/* Matches compile()'s own "#:keyword symbols are self-evaluating" check
+ * (below) so compile_call's fused-global-call fast path can defer to it:
+ * a #:keyword head must still compile to "push the symbol itself as a
+ * constant, then try to call it" (raising not-a-procedure at runtime),
+ * not "look it up as a global variable" (raising unbound-variable) --
+ * the fast path bypasses compile()'s general symbol handling entirely,
+ * so without this guard it silently changed the error a caller sees for
+ * `(#:foo 1 2)` from one condition type to another (found by code
+ * review). */
+static bool is_keyword_symbol(val_t v) {
+    Symbol *s = as_sym(v);
+    return s->len >= 2 && s->data[0] == '#' && s->data[1] == ':';
+}
+
 static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int line) {
     /* Count args */
     int argc = 0;
     val_t a = args;
     while (vis_pair(a)) { argc++; a = vcdr(a); }
+
+    /* Self-tail-call: a tail-position call whose head is exactly the
+     * enclosing named-let loop's own self-reference (Compiler::
+     * self_tail_name, set up by compile_let's named-let branch). Trusted
+     * at compile time ONLY because that reference is a private upvalue
+     * slot no code outside this one lambda body can ever reach, and the
+     * set!-scan (body_mentions_set_target, run once up front over the
+     * whole raw body) already ruled out this body ever mutating it.
+     * resolve_local guards against an inner local of the same name
+     * shadowing the loop variable at THIS call site specifically (e.g. a
+     * nested (let ((loop 5)) (loop)) inside the loop body must resolve to
+     * the LOCAL 5, not the outer loop closure). */
+    if (tail && vis_symbol(head) && c->self_tail_name != V_FALSE &&
+        head == c->self_tail_name && !c->self_tail_mutated &&
+        resolve_local(c, head) < 0) {
+        /* Still register the self-reference as a captured upvalue (for
+         * its SIDE EFFECT, discarding the returned index -- the bytecode
+         * itself never loads it via OP_LOAD_UP, since OP_SELF_TAIL_CALL
+         * needs no callee on the stack at all) rather than skipping this
+         * call entirely. Without this, the closure's own upval_count/
+         * upvals[] never gets the self-capture entry that maybe_jit_bcc
+         * (src/runtime.c) depends on to detect "this is a self-
+         * referencing named-let loop, never promote it to native code" --
+         * omitting it let a hot loop cross the JIT threshold and hit a
+         * real, previously-dormant JIT codegen bug for self-referencing
+         * closures the very guard this restores exists to prevent
+         * (confirmed by reproducing: an identical loop failed with
+         * "unbound variable: loop" past ~50 iterations before this fix,
+         * worked correctly after). */
+        resolve_upvalue(c, head);
+        a = args;
+        while (vis_pair(a)) { compile(c, vcar(a), false, line); a = vcdr(a); }
+        emit_ab(c, OP_SELF_TAIL_CALL, (uint8_t)argc, line);
+        return;
+    }
+
+    /* Fused global call: a call whose head is a symbol resolving to
+     * neither a local nor an upvalue (the same condition emit_load uses
+     * to fall through to OP_LOAD_GLOBAL) -- look the global up and call
+     * it in one dispatch instead of two. Every non-BcClosure callee type
+     * still goes through call_foreign inside the opcode handler itself,
+     * exactly as OP_CALL/OP_TAIL_CALL already do -- see the vm.c handler's
+     * own comment for why this is safe for every callee type curry has
+     * (primitives, continuations, parameter objects, FFI functions), not
+     * just closures -- the specific failure Kaappi's own postmortem
+     * documented for a naively-fused call opcode that only dispatched two
+     * of the possible callee types directly. resolve_upvalue has the
+     * side effect of marking an enclosing local captured/registering the
+     * upvalue slot if `head` turns out to resolve as one -- unavoidable
+     * and harmless here: that bookkeeping is required regardless of
+     * which call opcode ultimately gets emitted. */
+    if (vis_symbol(head) && !is_keyword_symbol(head) &&
+        resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
+        int ci = chunk_add_const(c->chunk, head);
+        a = args;
+        while (vis_pair(a)) { compile(c, vcar(a), false, line); a = vcdr(a); }
+        emit_abc(c, tail ? OP_TAIL_CALL_GLOBAL : OP_CALL_GLOBAL,
+                 (uint8_t)ci, (uint8_t)argc, line);
+        return;
+    }
 
     /* Compile callee */
     compile(c, head, false, line);
@@ -2404,14 +2579,18 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* Forms the compiler delegates to the tree-walker at runtime:
        import, define-library, library.
-       Emitted as: (tree-eval '<form>) */
+       Emitted as OP_TREE_EVAL_CACHED, not a (tree-eval '<form>) call --
+       see chunk.h's Chunk::tree_eval_cache and opcode.h's own comment.
+       Memoizes per call SITE (this exact bytecode instruction, keyed by
+       constant-pool index), not globally: re-executing the SAME chunk
+       (e.g. an import nested inside a function called from a loop) only
+       actually runs the form through eval() once. No tail/non-tail
+       distinction needed -- these forms are side-effecting declarations
+       that always return normally, never altering control flow. */
     if (head == S_IMPORT        ||
         head == S_DEFINE_LIBRARY || head == S_LIBRARY) {
-        val_t tree_eval_sym = sym_intern_cstr("tree-eval");
-        emit_ab(c, OP_LOAD_GLOBAL,
-                (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
-        emit_const(c, expr, line);
-        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line);
+        int ci = chunk_add_const(c->chunk, expr);
+        emit_ab(c, OP_TREE_EVAL_CACHED, (uint8_t)ci, line);
         return;
     }
 
