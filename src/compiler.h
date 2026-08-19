@@ -41,4 +41,16 @@ void compiler_clear_target_env(void);
    left-to-right and returns the value of the last one. */
 val_t compiler_compile_script(val_t expr_list);
 
+/* Tier 2.1 IR differential self-check (docs/thoughts/
+ * performance-chez-kaappi.md §5, src/ir.h): compiles `expr` twice, once
+ * via the existing direct S-expr-to-bytecode compile() path and once via
+ * the new ir_lower()+ir_emit() path, and returns true iff the resulting
+ * bytecode is byte-for-byte identical. Prints a disassembly of both sides
+ * to stderr on mismatch. Neither compile run has any side effect outside
+ * its own scratch Compiler/Chunk (does not touch GLOBAL_ENV, does not
+ * produce a runnable closure) -- this is a verification tool, not part
+ * of any live compile path; ir_lower/ir_emit are not otherwise called
+ * from compiler_compile/compiler_compile_script in this landing. */
+bool compiler_ir_self_check(val_t expr);
+
 #endif /* CURRY_COMPILER_H */

@@ -103,6 +103,7 @@ set(CORE_SOURCES
   src/gc.c
   src/gc_gen.c
   src/chunk.c
+  src/ir.c
   src/symbol.c
   src/curry_features.c
   src/numeric.c

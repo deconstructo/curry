@@ -51,6 +51,7 @@
 
 #include "compiler.h"
 #include "chunk.h"
+#include "ir.h"
 #include "opcode.h"
 #include "value.h"
 #include "object.h"
@@ -127,6 +128,15 @@ typedef struct Compiler {
      * in this body falls back to the ordinary call path instead. */
     val_t self_tail_name;
     bool  self_tail_mutated;
+
+    /* Tier 2.1 IR arena (src/ir.h) -- one per top-level compiled form,
+     * shared by every nested Compiler in that form's compile tree (a
+     * child Compiler inherits its enclosing's pointer rather than
+     * allocating its own, see init_compiler). Created by the root
+     * Compiler, freed once by whichever of compiler_compile/
+     * compiler_compile_script created that root -- never freed by a
+     * child. */
+    IRArena *ir_arena;
 } Compiler;
 
 /* ── Forward declarations ────────────────────────────────────────────── */
@@ -167,6 +177,16 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->self_tail_mutated  = g_compile_self_tail_mutated;
     g_compile_self_tail_name    = V_FALSE;
     g_compile_self_tail_mutated = false;
+    /* Lazily NULL, not eagerly allocated, on the ordinary (enc == NULL,
+     * i.e. compiler_compile/compiler_compile_script) path -- independent
+     * security review noted that eagerly allocating here for every single
+     * top-level compile leaked the arena on any ordinary compile-time
+     * error (compile() longjmps out via scm_raise with nothing to free
+     * it), since ir_lower/ir_emit are never actually invoked from that
+     * path in this landing. compiler_ir_self_check (the only real
+     * consumer right now) sets its own two scratch Compilers' ir_arena
+     * fields explicitly after calling this. */
+    c->ir_arena = enc ? enc->ir_arena : NULL;
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -2687,6 +2707,278 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
         if (!last) emit(c, OP_POP, line);
         list = rest;
     }
+}
+
+/* ── Tier 2.1 IR: lowering + codegen (src/ir.h) ──────────────────────────
+ *
+ * ir_lower walks the same raw S-expressions compile() does, but only ever
+ * recognizes a small, deliberately bounded subset natively: self-
+ * evaluating literals, #:keyword symbols, ordinary variable references
+ * (local/upvalue/global -- resolution decided here, once, exactly as
+ * emit_load does today), quote, if, and begin. Every other form --
+ * anything compile() would otherwise handle further down its dispatch
+ * chain (let, cond, case, named-let, lambda, set!, define, and, or,
+ * calls, define-record-type, define-syntax, the CAS forms, import/
+ * define-library/library, ...) -- is wrapped whole as an IR_FALLBACK
+ * leaf, whose ir_emit case is simply `compile(c, expr, tail, line)`:
+ * byte-for-byte whatever would have happened had ir_lower never run.
+ * This is what lets IR_IF/IR_SEQ cover real programs (whose branches and
+ * begin-bodies routinely contain calls and lets) without needing to
+ * natively lower those forms first -- see the Tier 2.1 plan's
+ * "explicitly deferred" list for what widens this in a follow-up.
+ *
+ * ir_lower is guaranteed to never return NULL: every input either matches
+ * one of the native cases above or becomes an IR_FALLBACK leaf. Neither
+ * function is wired into compile()'s own dispatch in this landing --
+ * they exist, are exercised via compiler_ir_self_check (below and in
+ * compiler.h) and tests/test_core.c, but the live compile path is
+ * completely unchanged. Wiring them in behind the differential check is
+ * the natural next increment once this skeleton is proven stable. */
+
+static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line);
+static void    ir_emit(Compiler *c, IRNode *n);
+
+static IRNode *ir_lower_if(Compiler *c, val_t args, bool tail, int line) {
+    val_t test = vcar(args);  args = vcdr(args);
+    val_t then = vcar(args);  args = vcdr(args);
+    val_t els  = vis_pair(args) ? vcar(args) : V_VOID;
+
+    IRNode *n = ir_node_new(c->ir_arena, IR_IF, tail, line);
+    n->as.iff.test = ir_lower(c, test, false, line);
+    n->as.iff.then = ir_lower(c, then, tail, line);
+    n->as.iff.els  = ir_lower(c, els,  tail, line);
+    return n;
+}
+
+/* Mirrors compile_seq's exact line-tracking (a mutable `line` threaded
+ * through the loop, updated from each cons cell's own hdr.flags when
+ * present) so IR_SEQ's pop_lines[] carries the same per-item line
+ * compile_seq would have used for that item's OP_POP -- see IR_SEQ's own
+ * field comment in ir.h for why this must be tracked SEPARATELY from
+ * items[i]->line (a real, differential-self-check-invisible bug, found
+ * by independent code review, when the two were conflated). */
+static IRNode *ir_lower_seq(Compiler *c, val_t list, bool tail, int line) {
+    if (vis_nil(list)) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+        n->as.konst.value = V_VOID;
+        return n;
+    }
+    /* size_t, not int: an int `count` could wrap on a pathologically long
+     * list (independent security review) -- overflow of the counting
+     * loop itself, and of the byte-size multiplications below, both
+     * become well-defined-but-wrong at `int` width. size_t avoids the
+     * multiplication overflow in practice (a list long enough to
+     * overflow size_t's range cannot exist -- each cons cell alone
+     * exceeds available memory first); the arena's own OOM abort
+     * (ir_arena_block_new, ir.c) is the actual backstop. */
+    size_t count = 0;
+    for (val_t p = list; vis_pair(p); p = vcdr(p)) count++;
+
+    IRNode *n = ir_node_new(c->ir_arena, IR_SEQ, tail, line);
+    n->as.seq.items     = (IRNode **)ir_arena_alloc(c->ir_arena,
+                                                     sizeof(IRNode *) * count);
+    n->as.seq.pop_lines = (int *)ir_arena_alloc(c->ir_arena,
+                                                 sizeof(int) * count);
+    n->as.seq.count = (int)count;
+
+    size_t i = 0;
+    while (vis_pair(list)) {
+        val_t expr = vcar(list);
+        val_t rest = vcdr(list);
+        bool  last = vis_nil(rest);
+        if (as_pair(list)->hdr.flags) line = (int)as_pair(list)->hdr.flags;
+        n->as.seq.pop_lines[i] = line;
+        n->as.seq.items[i]     = ir_lower(c, expr, tail && last, line);
+        i++;
+        list = rest;
+    }
+    return n;
+}
+
+static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
+    if (vis_pair(expr) && as_pair(expr)->hdr.flags)
+        line = (int)as_pair(expr)->hdr.flags;
+
+    /* ── Self-evaluating atoms (mirrors compile()'s own checks exactly) ── */
+    if (vis_fixnum(expr) || vis_flonum(expr) || vis_bignum(expr) ||
+        vis_rational(expr) || vis_complex(expr) || vis_string(expr) ||
+        vis_char(expr)) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+        n->as.konst.value = expr;
+        return n;
+    }
+    if (expr == V_TRUE || expr == V_FALSE || expr == V_NIL || expr == V_VOID) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+        n->as.konst.value = expr;
+        return n;
+    }
+
+    /* ── Symbol → variable reference ── */
+    if (vis_symbol(expr)) {
+        Symbol *ksym = as_sym(expr);
+        if (ksym->len >= 2 && ksym->data[0] == '#' && ksym->data[1] == ':') {
+            IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+            n->as.konst.value = expr;
+            return n;
+        }
+        /* Resolution (local vs upvalue vs global) is deliberately NOT
+         * decided here -- see IRNode::as.var_ref's comment in ir.h for
+         * why: resolve_upvalue/chunk_add_const have ordering-sensitive
+         * side effects that must happen in the same left-to-right order
+         * ir_emit walks the tree, not the order ir_lower happens to
+         * build it in. */
+        IRNode *n = ir_node_new(c->ir_arena, IR_VAR_REF, tail, line);
+        n->as.var_ref.name = expr;
+        return n;
+    }
+
+    /* ── Non-pair non-symbol: quote it ── */
+    if (!vis_pair(expr)) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+        n->as.konst.value = expr;
+        return n;
+    }
+
+    /* ── Compound form ── */
+    val_t head = lang_translate(vcar(expr));
+    val_t args = vcdr(expr);
+
+    if (head == S_QUOTE) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_CONST, tail, line);
+        n->as.konst.value  = vis_pair(args) ? vcar(args) : V_NIL;
+        n->as.konst.quoted = true;
+        return n;
+    }
+    if (head == S_IF)    return ir_lower_if(c, args, tail, line);
+    if (head == S_BEGIN) return ir_lower_seq(c, args, tail, line);
+
+    /* Not (yet) natively lowered -- delegate the whole subform. */
+    IRNode *n = ir_node_new(c->ir_arena, IR_FALLBACK, tail, line);
+    n->as.fallback.expr = expr;
+    return n;
+}
+
+static void ir_emit(Compiler *c, IRNode *n) {
+    switch (n->kind) {
+    case IR_CONST: {
+        val_t v = n->as.konst.value;
+        /* quote's own codegen (compile()'s S_QUOTE case) always uses
+         * emit_const, never the special-cased immediate opcodes below --
+         * see this struct field's comment in ir.h. */
+        if (!n->as.konst.quoted) {
+            if (v == V_TRUE)  { emit(c, OP_TRUE,  n->line); return; }
+            if (v == V_FALSE) { emit(c, OP_FALSE, n->line); return; }
+            if (v == V_NIL)   { emit(c, OP_NIL,   n->line); return; }
+            if (v == V_VOID)  { emit(c, OP_VOID,  n->line); return; }
+        }
+        emit_const(c, v, n->line);
+        return;
+    }
+    case IR_VAR_REF:
+        /* Resolution happens here, at emit time -- see ir.h's comment on
+         * IRNode::as.var_ref for why. emit_load is the exact function
+         * compile()'s own symbol-handling calls. */
+        emit_load(c, n->as.var_ref.name, n->line);
+        return;
+    case IR_FALLBACK:
+        compile(c, n->as.fallback.expr, n->tail, n->line);
+        return;
+    case IR_IF: {
+        ir_emit(c, n->as.iff.test);
+        int else_jmp = emit_jump(c, OP_JUMP_FALSE, n->line);
+        ir_emit(c, n->as.iff.then);
+        int end_jmp  = emit_jump(c, OP_JUMP, n->line);
+        patch_jump(c, else_jmp);
+        ir_emit(c, n->as.iff.els);
+        patch_jump(c, end_jmp);
+        return;
+    }
+    case IR_SEQ: {
+        int count = n->as.seq.count;
+        if (count == 0) { emit(c, OP_VOID, n->line); return; }
+        for (int i = 0; i < count; i++) {
+            ir_emit(c, n->as.seq.items[i]);
+            /* pop_lines[i], NOT items[i]->line -- see IR_SEQ's field
+             * comment in ir.h. */
+            if (i != count - 1) emit(c, OP_POP, n->as.seq.pop_lines[i]);
+        }
+        return;
+    }
+    case IR_LAMBDA:
+    case IR_CALL:
+    case IR_SELF_TAIL_CALL:
+    case IR_SET:
+    case IR_DEFINE:
+        /* Reserved for a future widening pass; ir_lower never constructs
+         * these yet (see this section's header comment). */
+        fprintf(stderr, "ir_emit: node kind %d not yet lowered\n", (int)n->kind);
+        abort();
+    }
+}
+
+bool compiler_ir_self_check(val_t expr) {
+    gc_inhibit_minor();
+
+    /* init_compiler leaves ir_arena NULL for a root Compiler (see its own
+     * comment) since ordinary compiler_compile/compiler_compile_script
+     * never touch ir_lower/ir_emit; this is the one real consumer, so it
+     * sets up its own two scratch arenas explicitly. */
+    Compiler old_c;
+    init_compiler(&old_c, NULL, "<ir-check-old>");
+    old_c.ir_arena = ir_arena_new();
+
+    Compiler new_c;
+    init_compiler(&new_c, NULL, "<ir-check-new>");
+    new_c.ir_arena = ir_arena_new();
+
+    int  line   = g_reader_last_line;
+    bool same   = false;
+    bool raised = false;
+
+    /* compile()/ir_lower/ir_emit can scm_raise on malformed input
+     * (unbound variable, bad special-form syntax, ...); without this,
+     * such a longjmp would skip both arena frees below and leave
+     * gc_inhibit_count unbalanced for the rest of the process -- exactly
+     * the hazard compile_time_eval's own SCM_PROTECT usage documents and
+     * guards against (independent security review). */
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        compile(&old_c, expr, false, line);
+        chunk_emit(old_c.chunk, OP_RETURN, line);
+
+        IRNode *ir = ir_lower(&new_c, expr, false, line);
+        ir_emit(&new_c, ir);
+        chunk_emit(new_c.chunk, OP_RETURN, line);
+
+        same = old_c.chunk->code_len == new_c.chunk->code_len &&
+               memcmp(old_c.chunk->code, new_c.chunk->code,
+                      (size_t)old_c.chunk->code_len) == 0;
+        /* Also compare per-byte source lines: code-identical but
+         * lines[]-divergent output is a real, silent bug class a
+         * code-only comparison would miss entirely (this is exactly how
+         * the IR_SEQ pop_lines bug -- see ir.h's field comment --
+         * initially got past this same self-check; found by independent
+         * code review). */
+        if (same)
+            same = memcmp(old_c.chunk->lines, new_c.chunk->lines,
+                           (size_t)old_c.chunk->code_len * sizeof(int)) == 0;
+
+        if (!same) {
+            fprintf(stderr, "ir self-check: MISMATCH\n--- old (direct compile) ---\n");
+            chunk_disasm(old_c.chunk, "old");
+            fprintf(stderr, "--- new (ir_lower + ir_emit) ---\n");
+            chunk_disasm(new_c.chunk, "new");
+        }
+    }, {
+        raised = true;
+    });
+
+    ir_arena_free(old_c.ir_arena);
+    ir_arena_free(new_c.ir_arena);
+    gc_resume_minor();
+
+    if (raised) scm_raise_val(h.exn);
+    return same;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
