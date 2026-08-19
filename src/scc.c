@@ -873,6 +873,13 @@ void scc_write_to(const char *out_path, const char *src_path,
     write_scc(out_path, src_path, chunks, n_chunks, executable);
 }
 
+void scc_clear(const char *src_path) {
+    char *p = primary_path(src_path);
+    if (p) { remove(p); free(p); }
+    char *fb = fallback_path(src_path);
+    if (fb) { remove(fb); free(fb); }
+}
+
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
     char *p = primary_path(src_path);
     if (p && read_scc(p, src_path, chunks_out, n_out)) {

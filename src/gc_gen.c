@@ -577,6 +577,37 @@ static void scan_pinned_object(void *obj) {
             ch->constants[i] = evacuate(ch->constants[i]);
         ch->src_lambda  = evacuate(ch->src_lambda);
         ch->target_env  = evacuate(ch->target_env);
+        /* tree_eval_cache (chunk.h) holds real cached val_t RESULT
+         * values (not raw pointers validated some other way, unlike
+         * glob_cache, which is deliberately NOT evacuated here since its
+         * slot pointers are re-validated via a version check instead) --
+         * these must move with everything else. 0 is the "not yet
+         * cached" sentinel (never a valid tagged val_t), skip it rather
+         * than handing evacuate() a non-value bit pattern.
+         *
+         * This runs on the main thread mid-collection while OTHER actor
+         * threads may be concurrently executing OP_TREE_EVAL_CACHED on
+         * this exact chunk (chunks are shared verbatim across actors, see
+         * vm_snapshot_closure_for_escape) -- gc_minor_pending is a
+         * per-thread flag, so a minor collection here is NOT a
+         * stop-the-world pause for other threads. Use the same
+         * acquire/release atomics OP_TREE_EVAL_CACHED itself uses so a
+         * concurrent reader either sees the pre- or post-evacuation
+         * value, never a torn one. Skip the store entirely when
+         * evacuation didn't move anything (the common case today: every
+         * current caller of OP_TREE_EVAL_CACHED -- import/define-library/
+         * library -- always evaluates to the immediate V_VOID, which
+         * evacuate() passes through unchanged) to avoid a redundant
+         * atomic write racing a concurrent reader for no reason. */
+        if (ch->tree_eval_cache)
+            for (int i = 0; i < ch->const_len; i++) {
+                _Atomic val_t *slot = (_Atomic val_t *)&ch->tree_eval_cache[i];
+                val_t old = atomic_load_explicit(slot, memory_order_acquire);
+                if (old == 0) continue;
+                val_t moved = evacuate(old);
+                if (moved != old)
+                    atomic_store_explicit(slot, moved, memory_order_release);
+            }
         break;
     }
     case T_MODULE: {

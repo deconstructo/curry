@@ -47,4 +47,16 @@ void scc_write_to(const char *out_path, const char *src_path,
    Used when running a .scc file explicitly (no corresponding .scm present). */
 bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out);
 
+/* Delete any cached .scc for src_path, checking both cache-location tiers
+   (source-adjacent, then ~/.cache/curry/) -- silently no-ops for a location
+   that doesn't exist. Used by the --clear-cache CLI flag (main.c) to
+   force a stale cache to be discarded and freshly recompiled, rather than
+   relying on scc_write()'s own overwrite-on-recompile to eventually
+   replace it. Distinct from that overwrite path because a flag named
+   "clear" should visibly remove the file even if, for whatever reason,
+   the run that follows never reaches a successful scc_write() of its own
+   (e.g. a script that raises before finishing) -- leaving no stale file
+   behind is the whole point, not just "usually gets replaced." */
+void scc_clear(const char *src_path);
+
 #endif /* CURRY_SCC_H */

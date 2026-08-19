@@ -412,7 +412,9 @@ static bool pop_frame(CallFrame **frame_ptr, val_t result) {
         *vm->sp++ = result;
         return true;
     }
-    vm->sp = frame->slots - 1;   /* remove callee + args */
+    /* Remove callee (if this frame's calling convention reserved one --
+     * see CallFrame::has_callee_slot's own comment, vm.h) + args. */
+    vm->sp = frame->slots - (frame->has_callee_slot ? 1 : 0);
     *vm->sp++ = result;
     *frame_ptr = &vm->frames[vm->frame_count - 1];
     return false;
@@ -487,6 +489,33 @@ static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
     return fixed + 1;
 }
 
+/* Shared cached global-variable lookup for OP_CALL_GLOBAL/
+ * OP_TAIL_CALL_GLOBAL, which need this exact lookup fused with a call
+ * rather than as a separate dispatch. Mirrors (does not replace)
+ * OP_LOAD_GLOBAL's own inline copy below -- deliberately NOT refactored
+ * to share one implementation, since OP_LOAD_GLOBAL's copy carries a
+ * detailed comment about the acquire/release memory-ordering contract
+ * with env.c's seqlock and is exactly the kind of already-reviewed,
+ * concurrency-sensitive code not worth touching for a de-dup that isn't
+ * otherwise necessary. Takes `chunk` explicitly (rather than the frame-
+ * local CONSTS/GCACHE/TARGET_ENV macros below) so it reads as a plain,
+ * self-contained function. Raises unbound-variable the same way. */
+static inline val_t load_global_cached(Chunk *chunk, uint8_t ci) {
+    GlobCacheEntry *cache = chunk->glob_cache;
+    EnvFrame *root = as_env(chunk->target_env == V_VOID ? GLOBAL_ENV : chunk->target_env);
+    uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
+    if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
+                         cache[ci].version == root_ver, 1)) {
+        return *cache[ci].slot;
+    }
+    val_t sym = chunk->constants[ci];
+    uint32_t ver;
+    val_t *slot = frame_lookup_versioned(root, sym, &ver);
+    if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
+    if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
+    return *slot;
+}
+
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
@@ -505,6 +534,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
     CallFrame *frame  = &vm->frames[vm->frame_count++];
     frame->closure    = top_closure;
+    frame->has_callee_slot = true;  /* irrelevant in practice: pop_frame's
+                                        frame_count==0 path never reads it
+                                        for the outermost frame, set for
+                                        consistency anyway */
     frame->ip         = top_closure->chunk->code;
     frame->slots      = vm->sp - argc;
     frame->slot_count = vm_bind_args(top_closure, frame->slots, argc);
@@ -567,6 +600,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_JUMP_TRUE]   = &&L_OP_JUMP_TRUE,
         [OP_CALL]        = &&L_OP_CALL,        [OP_TAIL_CALL]    = &&L_OP_TAIL_CALL,
         [OP_RETURN]      = &&L_OP_RETURN,
+        [OP_SELF_TAIL_CALL]   = &&L_OP_SELF_TAIL_CALL,
+        [OP_CALL_GLOBAL]      = &&L_OP_CALL_GLOBAL,
+        [OP_TAIL_CALL_GLOBAL] = &&L_OP_TAIL_CALL_GLOBAL,
+        [OP_TREE_EVAL_CACHED] = &&L_OP_TREE_EVAL_CACHED,
         [OP_CLOSURE]     = &&L_OP_CLOSURE,     [OP_CLOSE_UP]     = &&L_OP_CLOSE_UP,
         [OP_APPLY]       = &&L_OP_APPLY,       [OP_VALUES]       = &&L_OP_VALUES,
         [OP_CALL_WITH_VALUES] = &&L_OP_CALL_WITH_VALUES,
@@ -940,6 +977,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
+                nf->has_callee_slot = true;  /* PEEK(argc2) above found the
+                                                 callee already on the
+                                                 stack below the args */
                 nf->ip         = cl->chunk->code;
                 nf->slots      = vm->sp - argc2;
                 nf->slot_count = vm_bind_args(cl, nf->slots, argc2);
@@ -1014,6 +1054,252 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 vm->sp -= argc2 + 1;
                 if (pop_frame(&frame, result)) return *--vm->sp;
                 if (vm->frame_count == entry_depth) return *--vm->sp;
+            }
+            NEXT;
+        }
+
+        CASE(OP_SELF_TAIL_CALL) {
+            /* Tail-call the CURRENTLY EXECUTING closure -- the compiler
+             * only ever emits this when it has proven (compile_call,
+             * compiler.c) the callee is always this exact closure (a
+             * named-let loop's own private, never-set!'d upvalue self-
+             * reference), so no PEEK/vis_bcclosure branch is needed at
+             * all: cl is definitionally frame->closure, and there is no
+             * callee slot on the stack to skip past when reading args or
+             * adjusting sp -- unlike OP_TAIL_CALL, argc2 args are the
+             * ENTIRE stack contribution of this call. */
+            uint8_t argc2 = READ_U8();
+            BcClosure *cl = frame->closure;
+            /* Tiered JIT: hot-swap to native code once compiled. jit_val
+             * is dynamic per-closure state a hot self-recursive loop's
+             * own iterations can cross the promotion threshold during --
+             * unlike callee identity (statically proven), jit_val is NOT
+             * statically known and must still be checked every
+             * iteration. */
+            if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                && curry_profiling_level == 0 && !vm_debug_active) {
+                vm_check_arity(cl, argc2);
+                JitClosure *jc = as_jitclos(cl->jit_val);
+                val_t *call_args = vm->sp - argc2;
+                typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                g_jit_call_depth++;
+                gc_inhibit_minor();
+                val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
+                                                                     (uint64_t *)call_args,
+                                                                     (uint64_t *)jc->caps);
+                gc_resume_minor();
+                g_jit_call_depth--;
+                vm->sp -= argc2;
+                if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
+                NEXT;
+            }
+            vm_maybe_jit(cl);
+            if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                    frame->closure->chunk->name) {
+                val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                profiling_record_timed(sym, frame->prof_start_ns);
+            }
+            /* Not counted as a cross-function tail call -- matches
+             * OP_TAIL_CALL's own "not self-tail-call loops" comment. */
+            val_t *new_args = vm->sp - argc2;
+            vm_close_upvalues(frame->slots);
+            memmove(frame->slots, new_args, argc2 * sizeof(val_t));
+            vm->sp            = frame->slots + argc2;
+            frame->ip         = cl->chunk->code;
+            frame->slot_count = vm_bind_args(cl, frame->slots, argc2);
+            frame->prof_start_ns = 0;
+            if (curry_profiling_level >= 2 && cl->chunk->name)
+                frame->prof_start_ns = profiling_now_ns();
+            NEXT;
+        }
+
+        CASE(OP_CALL_GLOBAL) {
+            /* Fused OP_LOAD_GLOBAL + OP_CALL: one dispatch instead of two
+             * for the most common call shape (calling a plain top-level
+             * function), with NO callee slot pushed at all -- unlike an
+             * earlier version of this opcode, which inserted the looked-
+             * up callee back onto the stack via memmove to match OP_CALL's
+             * layout. That worked but measured no real performance win
+             * (the memmove roughly cancelled out the dispatch savings);
+             * CallFrame::has_callee_slot (vm.h) now lets pop_frame handle
+             * a frame with no callee slot correctly, so the callee is
+             * simply never pushed, matching Kaappi's own design (see
+             * docs/thoughts/performance-chez-kaappi.md §4.1) and actually
+             * delivering the dispatch-iteration saving. Every non-
+             * BcClosure callee still goes through call_foreign here
+             * exactly as OP_CALL itself does, which is what makes this
+             * safe for every callee type curry has (primitives,
+             * continuations, parameter objects, FFI functions), not just
+             * closures -- the specific failure Kaappi's own postmortem
+             * documented for a naively-fused call opcode that only
+             * dispatched two callee types directly instead of reusing the
+             * universal trampoline. */
+            uint8_t ci     = READ_U8();
+            uint8_t argc2  = READ_U8();
+            val_t callee   = load_global_cached(frame->closure->chunk, ci);
+
+            if (vis_bcclosure(callee)) {
+                BcClosure *cl = as_bcclosure(callee);
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0 && !vm_debug_active) {
+                    vm_check_arity(cl, argc2);
+                    JitClosure *jc = as_jitclos(cl->jit_val);
+                    val_t *call_args = vm->sp - argc2;
+                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
+                    gc_inhibit_minor();
+                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
+                                                                         (uint64_t *)call_args,
+                                                                         (uint64_t *)jc->caps);
+                    gc_resume_minor();
+                    g_jit_call_depth--;
+                    vm->sp -= argc2;
+                    PUSH(result);
+                    NEXT;
+                }
+                vm_maybe_jit(cl);
+                if (vm->frame_count >= VM_FRAMES_MAX)
+                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                CallFrame *nf  = &vm->frames[vm->frame_count++];
+                nf->closure    = cl;
+                nf->has_callee_slot = false;  /* no callee pushed above */
+                nf->ip         = cl->chunk->code;
+                nf->slots      = vm->sp - argc2;
+                nf->slot_count = vm_bind_args(cl, nf->slots, argc2);
+                nf->prof_start_ns = 0;
+                if (curry_profiling_level >= 1 && cl->chunk->name) {
+                    val_t sym = sym_intern_cstr(cl->chunk->name);
+                    if (curry_profiling_level >= 2)
+                        nf->prof_start_ns = profiling_now_ns();
+                    else
+                        profiling_record_call(sym);
+                }
+                frame = nf;
+            } else {
+                val_t *call_args = vm->sp - argc2;
+                val_t result     = call_foreign(callee, (int)argc2, call_args);
+                vm->sp -= argc2;
+                PUSH(result);
+            }
+            NEXT;
+        }
+
+        CASE(OP_TAIL_CALL_GLOBAL) {
+            /* Fused OP_LOAD_GLOBAL + OP_TAIL_CALL -- see OP_CALL_GLOBAL's
+             * comment just above for the full rationale (no callee slot
+             * pushed at all, CallFrame::has_callee_slot lets pop_frame
+             * handle it). This branch never creates a new CallFrame (a
+             * tail call reuses the current one in place), so it never
+             * touches has_callee_slot -- that flag describes how the
+             * CURRENT frame was originally entered, unaffected by which
+             * opcode later tail-calls within it. */
+            uint8_t ci     = READ_U8();
+            uint8_t argc2  = READ_U8();
+            val_t callee   = load_global_cached(frame->closure->chunk, ci);
+
+            if (vis_bcclosure(callee)) {
+                BcClosure *cl = as_bcclosure(callee);
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                    && curry_profiling_level == 0 && !vm_debug_active) {
+                    vm_check_arity(cl, argc2);
+                    JitClosure *jc = as_jitclos(cl->jit_val);
+                    val_t *call_args = vm->sp - argc2;
+                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
+                    g_jit_call_depth++;
+                    gc_inhibit_minor();
+                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
+                                                                         (uint64_t *)call_args,
+                                                                         (uint64_t *)jc->caps);
+                    gc_resume_minor();
+                    g_jit_call_depth--;
+                    vm->sp -= argc2;
+                    if (pop_frame(&frame, result)) return *--vm->sp;
+                    if (vm->frame_count == entry_depth) return *--vm->sp;
+                    NEXT;
+                }
+                vm_maybe_jit(cl);
+                if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                        frame->closure->chunk->name) {
+                    val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                    profiling_record_timed(sym, frame->prof_start_ns);
+                }
+                if (curry_profiling_level >= 1 && cl != frame->closure &&
+                        cl->chunk->name) {
+                    profiling_record_call_tco(sym_intern_cstr(cl->chunk->name));
+                }
+                val_t *new_args = vm->sp - argc2;
+                vm_close_upvalues(frame->slots);
+                memmove(frame->slots, new_args, argc2 * sizeof(val_t));
+                vm->sp            = frame->slots + argc2;
+                frame->closure    = cl;
+                frame->ip         = cl->chunk->code;
+                frame->slot_count = vm_bind_args(cl, frame->slots, argc2);
+                frame->prof_start_ns = 0;
+                if (curry_profiling_level >= 2 && cl->chunk->name)
+                    frame->prof_start_ns = profiling_now_ns();
+            } else {
+                val_t *call_args = vm->sp - argc2;
+                val_t result     = call_foreign(callee, (int)argc2, call_args);
+                vm->sp -= argc2;
+                if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
+            }
+            NEXT;
+        }
+
+        CASE(OP_TREE_EVAL_CACHED) {
+            /* See chunk.h's Chunk::tree_eval_cache and opcode.h's own
+             * comment. Not tail/non-tail-distinguished -- eval()'s
+             * dispatch for import/define-library/library always returns
+             * normally (side-effecting declarations, never altering
+             * control flow), so this is a plain value-producing
+             * instruction regardless of the surrounding call's tail
+             * position, unlike an ordinary call.
+             *
+             * The chunk this cache lives in is shared VERBATIM (not
+             * copied) across actor threads (vm_snapshot_closure_for_escape
+             * only snapshots upvalues), so two actors can race on the same
+             * cache slot for the same chunk. A plain load/store of a
+             * val_t across threads with no ordering is a data race under
+             * the C11 memory model even though every write here happens
+             * to store the exact same value (V_VOID -- import/
+             * define-library/library's result is always immediate, never
+             * a heap pointer, so there is nothing to lose from two
+             * threads both losing the race and both calling eval() once
+             * each; the redundant eval() is no worse than what happened
+             * every time before this cache existed). Use acquire/release
+             * atomics on the slot itself so the race is well-defined
+             * instead of relying on that coincidence.
+             *
+             * Deliberately do NOT also call gc_wb_slot() on this slot
+             * (independent security review caught this: an earlier
+             * version called both gc_wb_slot() -- a plain, non-atomic
+             * `*slot = newval` -- and the atomic store below on the same
+             * slot, which is undefined behavior under C11 regardless of
+             * whether the two writes agree, and gc_wb_slot's own dirty-
+             * slot bookkeeping (gc_dirty_slots/gc_dirty_count, gc.h) is
+             * itself unsynchronized, so a future value that actually took
+             * its vis_ptr(newval) branch concurrently from two racing
+             * actor threads would corrupt that fixed-size array via an
+             * unlocked, non-atomic gc_dirty_count++). No write barrier is
+             * needed here in the first place: unlike a general heap
+             * mutation, this array is fully re-scanned every minor GC via
+             * gc_gen.c's T_CHUNK evacuation case (every chunk is a pinned
+             * Boehm object, walked in full each pass), so there is no
+             * "remembered set" for the barrier to populate. */
+            uint8_t ci = READ_U8();
+            Chunk *chunk = frame->closure->chunk;
+            _Atomic val_t *slot = chunk->tree_eval_cache
+                ? (_Atomic val_t *)&chunk->tree_eval_cache[ci] : NULL;
+            val_t cached = slot ? atomic_load_explicit(slot, memory_order_acquire) : 0;
+            if (cached != 0) {
+                PUSH(cached);
+            } else {
+                val_t result = eval(chunk->constants[ci], GLOBAL_ENV);
+                if (slot)
+                    atomic_store_explicit(slot, result, memory_order_release);
+                PUSH(result);
             }
             NEXT;
         }
