@@ -276,10 +276,25 @@ static void test_ir_self_check(void) {
      * nothing state afterward. */
     {
         char src[8192];
-        int off = snprintf(src, sizeof(src), "(begin");
-        for (int i = 0; i < 300; i++)
-            off += snprintf(src + off, sizeof(src) - (size_t)off, " sym%d", i);
-        snprintf(src + off, sizeof(src) - (size_t)off, ")");
+        /* snprintf's return value is how many bytes WOULD have been
+         * written, not how many actually were -- accumulating it
+         * unchecked into `off` and using `sizeof(src) - off` for the
+         * next call's size argument underflows (size_t is unsigned) the
+         * moment off exceeds sizeof(src), turning "buffer full" into
+         * "here, take this huge size and write past the end" (flagged by
+         * CodeQL). 300 short symbol names comfortably fit in 8192 bytes
+         * in practice, but the pattern itself is the bug, independent of
+         * whether today's fixed inputs happen to avoid it -- clamp `off`
+         * to the buffer size so a future change to the loop bound or
+         * symbol-name length can't silently reintroduce an overflow. */
+        size_t off = (size_t)snprintf(src, sizeof(src), "(begin");
+        if (off > sizeof(src)) off = sizeof(src);
+        for (int i = 0; i < 300 && off < sizeof(src); i++) {
+            int n = snprintf(src + off, sizeof(src) - off, " sym%d", i);
+            off += (size_t)n;
+            if (off > sizeof(src)) off = sizeof(src);
+        }
+        if (off < sizeof(src)) snprintf(src + off, sizeof(src) - off, ")");
         val_t port = port_open_input_string(src, (uint32_t)strlen(src));
         val_t expr = scm_read(port);
 
