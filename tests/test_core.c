@@ -9,6 +9,7 @@
 #include "modules.h"
 #include "set.h"
 #include "object.h"
+#include "compiler.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -203,6 +204,114 @@ static void test_guard(void) {
     CHECK(r == sym_intern_cstr("caught"), "guard catches error");
 }
 
+/* Tier 2.1 IR (src/ir.h, docs/thoughts/performance-chez-kaappi.md §5):
+ * compiler_ir_self_check(expr) compiles expr both via the existing direct
+ * compile() path and via the new ir_lower+ir_emit path and asserts the
+ * resulting bytecode is byte-for-byte identical. Covers the bounded
+ * subset ir_lower recognizes natively (literals, quote, symbol refs at
+ * every scope depth, if, begin) plus IR_FALLBACK's delegation for
+ * everything else (calls, lambda, let, and/or, ...) nested inside those
+ * forms -- exercising both the native cases and the fallback composition
+ * they need to work with real code. */
+static void test_ir_self_check(void) {
+    static const char *cases[] = {
+        "42",
+        "3.14",
+        "\"hello\"",
+        "#\\a",
+        "#t",
+        "#f",
+        "'()",
+        "#:foo",
+        "(quote (1 2 3))",
+        "(quote ())",
+        "(quote #t)",
+        "(quote #f)",
+        "(if #t (quote ()) (quote ()))",
+        "(if #t 1 2)",
+        "(if #f 1)",
+        "(begin)",
+        "(begin 1)",
+        "(begin 1 2 3)",
+        "(if (> 3 2) (begin (+ 1 2) 'yes) 'no)",
+        "((lambda (x) (if x (+ x 1) 0)) 5)",
+        "(begin (define x 10) (if (> x 5) (* x 2) x))",
+        "(let ((a 1) (b 2)) (if (< a b) (begin a (+ a b)) b))",
+        "(if (if #t #f #t) 'a (begin 'b 'c))",
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
+        val_t expr = scm_read(port);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "ir self-check: %s", cases[i]);
+        CHECK(compiler_ir_self_check(expr), msg);
+    }
+
+    /* Regression case for a real bug independent code review found: a
+     * macro-rebuilt `begin` spine (scm_cons always stamps hdr.flags = 0
+     * on the cells IT conses, unlike the reader) whose spliced-in items
+     * retain their own original, non-zero reader-stamped lines. This is
+     * exactly the shape that let items[i]->line silently diverge from
+     * the seq-spine line compile_seq itself would use for OP_POP -- a
+     * divergence invisible to a code-only bytecode comparison (only
+     * chunk->lines[] differs), which is also why compiler_ir_self_check
+     * itself now compares lines[] too, not just code. */
+    run("(define-syntax my-begin2 (syntax-rules () ((_ a b) (begin a b))))");
+    {
+        const char *src = "(my-begin2 1 2)";
+        val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_self_check(expr), "ir self-check: macro-expanded begin spine");
+    }
+
+    /* Exception-safety regression: compiler_ir_self_check must not crash
+     * or corrupt gc_inhibit_count when compile() raises mid-way
+     * (independent security review -- see this function's own
+     * SCM_PROTECT comment in compiler.c). A begin with >256 distinct
+     * symbols overflows chunk_add_const's compiler-limit check, a
+     * reliable, clean compile-time scm_raise. Wrap the call in our own
+     * SCM_PROTECT since compiler_ir_self_check correctly RE-raises (it
+     * is a verification tool, not an error-swallowing one) -- catching
+     * it here just confirms the process is still in a sane, unbalanced-
+     * nothing state afterward. */
+    {
+        char src[8192];
+        /* snprintf's return value is how many bytes WOULD have been
+         * written, not how many actually were -- accumulating it
+         * unchecked into `off` and using `sizeof(src) - off` for the
+         * next call's size argument underflows (size_t is unsigned) the
+         * moment off exceeds sizeof(src), turning "buffer full" into
+         * "here, take this huge size and write past the end" (flagged by
+         * CodeQL). 300 short symbol names comfortably fit in 8192 bytes
+         * in practice, but the pattern itself is the bug, independent of
+         * whether today's fixed inputs happen to avoid it -- clamp `off`
+         * to the buffer size so a future change to the loop bound or
+         * symbol-name length can't silently reintroduce an overflow. */
+        size_t off = (size_t)snprintf(src, sizeof(src), "(begin");
+        if (off > sizeof(src)) off = sizeof(src);
+        for (int i = 0; i < 300 && off < sizeof(src); i++) {
+            int n = snprintf(src + off, sizeof(src) - off, " sym%d", i);
+            off += (size_t)n;
+            if (off > sizeof(src)) off = sizeof(src);
+        }
+        if (off < sizeof(src)) snprintf(src + off, sizeof(src) - off, ")");
+        val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+        val_t expr = scm_read(port);
+
+        int before = gc_inhibit_save();
+        ExnHandler h;
+        bool raised = false;
+        SCM_PROTECT(h, {
+            compiler_ir_self_check(expr);
+        }, {
+            raised = true;
+        });
+        int after = gc_inhibit_save();
+        CHECK(raised, "ir self-check: >256-constant overflow raises");
+        CHECK(before == after, "ir self-check: gc_inhibit_count balanced after raise");
+    }
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -225,6 +334,7 @@ int main(void) {
     RUN_TEST(test_hash_tables);
     RUN_TEST(test_records);
     RUN_TEST(test_guard);
+    RUN_TEST(test_ir_self_check);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
