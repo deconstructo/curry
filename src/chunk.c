@@ -45,6 +45,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_LOAD_GLOBAL]    = "LOAD_GLOBAL",
     [OP_STORE_GLOBAL]   = "STORE_GLOBAL",
     [OP_DEF_GLOBAL]     = "DEF_GLOBAL",
+    [OP_DEFINED_GLOBAL] = "DEFINED_GLOBAL",
     [OP_LOAD_UP]        = "LOAD_UP",
     [OP_STORE_UP]       = "STORE_UP",
     [OP_POP]            = "POP",
@@ -103,6 +104,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_CLOSE_UP]       = "CLOSE_UP",
     [OP_APPLY]          = "APPLY",
     [OP_VALUES]         = "VALUES",
+    [OP_VALUES_REF]     = "VALUES_REF",
     [OP_CALL_WITH_VALUES] = "CALL_WITH_VALUES",
     [OP_TAIL_CALL_WITH_VALUES] = "TAIL_CALL_WITH_VALUES",
     [OP_PUSH_HANDLER]   = "PUSH_HANDLER",
@@ -283,15 +285,17 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_CONST:
     case OP_LOAD_LOCAL: case OP_STORE_LOCAL:
     case OP_LOAD_GLOBAL: case OP_STORE_GLOBAL: case OP_DEF_GLOBAL:
+    case OP_DEFINED_GLOBAL:
     case OP_LOAD_UP: case OP_STORE_UP:
     case OP_CALL: case OP_TAIL_CALL: case OP_SELF_TAIL_CALL:
     case OP_CLOSURE: case OP_CLOSE_UP:
-    case OP_VALUES: case OP_MAKEVEC: case OP_APPLY:
+    case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY:
     case OP_SLIDE: case OP_TREE_EVAL_CACHED: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||
-            (OpCode)op == OP_STORE_GLOBAL || (OpCode)op == OP_DEF_GLOBAL) {
+            (OpCode)op == OP_STORE_GLOBAL || (OpCode)op == OP_DEF_GLOBAL ||
+            (OpCode)op == OP_DEFINED_GLOBAL) {
             /* print constant value */
             if (a < c->const_len) {
                 val_t v = c->constants[a];

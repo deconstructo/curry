@@ -571,7 +571,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_NIL]         = &&L_OP_NIL,         [OP_VOID]         = &&L_OP_VOID,
         [OP_LOAD_LOCAL]  = &&L_OP_LOAD_LOCAL,  [OP_STORE_LOCAL]  = &&L_OP_STORE_LOCAL,
         [OP_LOAD_GLOBAL] = &&L_OP_LOAD_GLOBAL, [OP_STORE_GLOBAL] = &&L_OP_STORE_GLOBAL,
-        [OP_DEF_GLOBAL]  = &&L_OP_DEF_GLOBAL,
+        [OP_DEF_GLOBAL]  = &&L_OP_DEF_GLOBAL, [OP_DEFINED_GLOBAL] = &&L_OP_DEFINED_GLOBAL,
         [OP_LOAD_UP]     = &&L_OP_LOAD_UP,     [OP_STORE_UP]     = &&L_OP_STORE_UP,
         [OP_POP]         = &&L_OP_POP,         [OP_DUP]          = &&L_OP_DUP,
         [OP_SWAP]        = &&L_OP_SWAP,        [OP_SLIDE]        = &&L_OP_SLIDE,
@@ -606,6 +606,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_TREE_EVAL_CACHED] = &&L_OP_TREE_EVAL_CACHED,
         [OP_CLOSURE]     = &&L_OP_CLOSURE,     [OP_CLOSE_UP]     = &&L_OP_CLOSE_UP,
         [OP_APPLY]       = &&L_OP_APPLY,       [OP_VALUES]       = &&L_OP_VALUES,
+        [OP_VALUES_REF]  = &&L_OP_VALUES_REF,
         [OP_CALL_WITH_VALUES] = &&L_OP_CALL_WITH_VALUES,
         [OP_TAIL_CALL_WITH_VALUES] = &&L_OP_TAIL_CALL_WITH_VALUES,
         [OP_PUSH_HANDLER]= &&L_OP_PUSH_HANDLER,[OP_POP_HANDLER]  = &&L_OP_POP_HANDLER,
@@ -720,6 +721,19 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (slot) { cache[ci].slot = slot; cache[ci].version = ver; }
             }
+            NEXT;
+        }
+        CASE(OP_DEFINED_GLOBAL) {
+            /* Non-raising counterpart to OP_LOAD_GLOBAL (see opcode.h's
+             * own comment) -- same TARGET_ENV-aware lookup, no inline
+             * cache (not a hot path), pushes #t/#f instead of raising or
+             * pushing the value itself. */
+            uint8_t ci = READ_U8();
+            val_t sym = CONSTS[ci];
+            EnvFrame *root = as_env(TARGET_ENV);
+            uint32_t ver;
+            val_t *slot = frame_lookup_versioned(root, sym, &ver);
+            PUSH(slot ? V_TRUE : V_FALSE);
             NEXT;
         }
 
@@ -1407,6 +1421,32 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             for (int i = 0; i < (int)n; i++) mv->vals[i] = base[i];
             vm->sp -= n;
             PUSH(vptr(mv));
+            NEXT;
+        }
+
+        CASE(OP_VALUES_REF) {
+            uint8_t a = READ_U8();
+            val_t top = POP();
+            /* Generic message, not "define-values:" -- this opcode is a
+             * general read-side counterpart to OP_VALUES (see opcode.h),
+             * not exclusive to define-values' own codegen even though
+             * that's its only caller today; a future second caller
+             * shouldn't inherit a misleading error prefix (independent
+             * code review). */
+            if (vis_values(top)) {
+                Values *mv = as_vals(top);
+                if (a >= mv->count)
+                    scm_raise(V_FALSE,
+                        "too few values (need index %d, got %u)",
+                        (int)a, mv->count);
+                PUSH(mv->vals[a]);
+            } else {
+                if (a != 0)
+                    scm_raise(V_FALSE,
+                        "too few values (need index %d, got 1)",
+                        (int)a);
+                PUSH(top);
+            }
             NEXT;
         }
 

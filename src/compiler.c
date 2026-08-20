@@ -358,6 +358,22 @@ static int resolve_upvalue(Compiler *c, val_t name) {
     return -1;
 }
 
+/* Read-only version of resolve_upvalue's reachability check: does `name`
+ * resolve as a local anywhere up the ->enclosing chain, without any of
+ * resolve_upvalue's own side effects (marking the enclosing local
+ * captured, registering a real upvalue-capture descriptor in
+ * c->upvals[]/chunk->upval_count). For a caller that only needs to know
+ * WHETHER a name is reachable, not to actually load it -- compile_defined_p
+ * is the motivating case (see its own comment): calling the mutating
+ * resolve_upvalue there to answer a boolean query gave every closure
+ * containing a (defined? outer-var) check a real, otherwise-unused
+ * upvalue capture, needlessly enlarging it (independent code review). */
+static bool is_upvalue_reachable(Compiler *c, val_t name) {
+    for (Compiler *cc = c->enclosing; cc; cc = cc->enclosing)
+        if (resolve_local(cc, name) >= 0) return true;
+    return false;
+}
+
 /* ── Variable load / store ───────────────────────────────────────────── */
 
 static void emit_load(Compiler *c, val_t name, int line) {
@@ -507,6 +523,26 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                     c.locals[c.local_count - 1].depth = -1; /* uninitialised */
                     emit(&c, OP_VOID, line); /* reserve stack slot */
                 }
+            } else if (lang_translate(vcar(form)) == S_DEFINE_VALUES) {
+                /* (define-values (var...) expr) binds N names, not one --
+                 * falling into the generic (define name ...) case below
+                 * would misread (var...) itself as a single defname (via
+                 * vis_pair(defname) → add_local(vcar(defname))), reserving
+                 * exactly one bogus, wrongly-named slot instead of one per
+                 * formal. Reserve one uninitialised local per name, same
+                 * pattern as every other multi-binding case above
+                 * (define-record-type). Only reserves for a well-formed
+                 * proper list of symbols -- a bare-symbol or dotted/rest
+                 * `vars` reserves nothing here and will raise a clear
+                 * compile-time error when compile_define_values itself
+                 * runs for real (see that function's own comment); no
+                 * need to duplicate that validation in the prescan. */
+                val_t vars = vis_pair(vcdr(form)) ? vcar(vcdr(form)) : V_NIL;
+                for (val_t p = vars; vis_pair(p) && vis_symbol(vcar(p)); p = vcdr(p)) {
+                    add_local(&c, vcar(p));
+                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
+                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                }
             } else {
                 val_t defname = vcar(vcdr(form));
                 if (vis_symbol(defname)) {
@@ -565,11 +601,13 @@ static void compile_if(Compiler *c, val_t args, bool tail, int line) {
     patch_jump(c, end_jmp);
 }
 
-/* Emit the store half of a define: the computed value must already be on
- * top of the stack. Shared by compile_define (after compiling an ordinary
- * value expression) and compile_symbolic (after emitting hand-rolled,
- * lookup-hygienic call bytecode instead of a compilable AST value). */
-static void emit_define_store(Compiler *c, val_t name, int line) {
+/* Store half of a define, minus the trailing "define returns void": the
+ * computed value must already be on top of the stack. Factored out of
+ * emit_define_store (below) so compile_define_values can call it once
+ * per bound name without accumulating one OP_VOID per name -- only ONE
+ * OP_VOID should represent the whole define-values form's return, not
+ * one per variable. */
+static void emit_define_store_novoid(Compiler *c, val_t name, int line) {
     if (c->scope_depth == 0) {
         /* Top-level: DEF_GLOBAL */
         emit_ab(c, OP_DEF_GLOBAL, (uint8_t)chunk_add_const(c->chunk, name), line);
@@ -589,6 +627,14 @@ static void emit_define_store(Compiler *c, val_t name, int line) {
                     (uint8_t)(c->local_count - 1), line);
         }
     }
+}
+
+/* Emit the store half of a define: the computed value must already be on
+ * top of the stack. Shared by compile_define (after compiling an ordinary
+ * value expression) and compile_symbolic (after emitting hand-rolled,
+ * lookup-hygienic call bytecode instead of a compilable AST value). */
+static void emit_define_store(Compiler *c, val_t name, int line) {
+    emit_define_store_novoid(c, name, line);
     emit(c, OP_VOID, line);   /* define returns void */
 }
 
@@ -616,6 +662,124 @@ static void compile_define(Compiler *c, val_t args, int line) {
     }
 
     emit_define_store(c, name, line);
+}
+
+/* (define-values (var...) expr) — R7RS. Unlike `receive` (compile_receive,
+ * below), this can't desugar to a call-with-values + consumer lambda: its
+ * targets are bindings in the ENCLOSING scope, and a consumer lambda's
+ * formals are a different, inner scope with no way to reach back out and
+ * populate the outer scope's locals/globals via ordinary recompiled
+ * Scheme source. Direct codegen instead: compile expr once, then peel
+ * off one component at a time with OP_VALUES_REF (the read-side
+ * counterpart to OP_VALUES; see its own comment in opcode.h) and store
+ * each with the same global/local dispatch an ordinary define uses.
+ *
+ * Scope for this landing: `vars` must be a proper list of symbols.
+ * Neither a bare symbol (`(define-values all expr)`, meant to collect
+ * every value into a list) nor a dotted/rest tail
+ * (`(define-values (a . rest) expr)`) is supported -- raises a clear
+ * compile-time error rather than silently defining nothing. This is not
+ * a regression: eval.c's own S_DEFINE_VALUES case guards its binding
+ * loop with vis_pair(vars), so a bare-symbol `vars` already silently
+ * defines nothing today in the tree-walker either -- this just replaces
+ * silent no-op with an honest diagnostic. Full rest-arg support, if ever
+ * needed, would reuse compile_params' existing formals parsing (already
+ * shared by compile_receive) as its template. */
+static void compile_define_values(Compiler *c, val_t args, int line) {
+    /* vcar/vcdr are unchecked casts (object.h) -- (define-values) with no
+     * formals/expr at all makes `args` V_NIL, and vcar(V_NIL) dereferences
+     * near-address 0xB, segfaulting the whole process rather than raising
+     * a catchable compile error (independent code review, confirmed via
+     * repro: `curry -e '(define-values)'` crashed before this guard). */
+    if (!vis_pair(args))
+        scm_raise(V_FALSE, "define-values: missing formals and expression");
+    val_t vars = vcar(args);
+    val_t expr = vis_pair(vcdr(args)) ? vcar(vcdr(args)) : V_VOID;
+
+    int count = 0;
+    for (val_t p = vars; vis_pair(p); p = vcdr(p)) {
+        if (!vis_symbol(vcar(p)))
+            scm_raise(V_FALSE, "define-values: expected a symbol in formals");
+        /* OP_VALUES_REF's operand is a uint8_t component index (0-255,
+         * matching every other single-byte opcode operand in this VM).
+         * Past 256 formals, (uint8_t)i below would silently wrap --
+         * v256 would overwrite v0's value, v257 v1's, etc., with no
+         * error, just wrong bindings (independent security review).
+         * Raise a clear compiler-limit error instead, mirroring
+         * chunk_add_const's identical 256-constant bound. */
+        if (count >= 256)
+            scm_raise(V_FALSE,
+                "define-values: too many formals (compiler limit: max 256)");
+        count++;
+    }
+    if (!vis_nil(vars) && count == 0)
+        scm_raise(V_FALSE,
+            "define-values: rest/bare-symbol formals not yet supported");
+    {
+        val_t p = vars;
+        for (int i = 0; i < count; i++) p = vcdr(p);
+        if (!vis_nil(p))
+            scm_raise(V_FALSE,
+                "define-values: rest/bare-symbol formals not yet supported");
+    }
+
+    compile(c, expr, false, line);
+
+    if (count == 0) {
+        emit(c, OP_POP, line);   /* evaluated for effect only, R7RS */
+    } else {
+        val_t p = vars;
+        for (int i = 0; i < count; i++) {
+            val_t name = vcar(p);
+            bool  last = (i == count - 1);
+            if (!last) emit(c, OP_DUP, line);
+            emit_ab(c, OP_VALUES_REF, (uint8_t)i, line);
+            emit_define_store_novoid(c, name, line);
+            p = vcdr(p);
+        }
+    }
+    emit(c, OP_VOID, line);   /* define-values returns void, like define */
+}
+
+/* (defined? sym) — R7RS-adjacent extension (see eval.c's own S_DEFINED_P
+ * case). Special form so `sym` is never evaluated. Resolution is split
+ * between compile time and runtime:
+ *
+ *   - A local or upvalue reference (resolve_local/resolve_upvalue) is
+ *     lexically ALWAYS bound once compiled -- emit #t directly, no
+ *     runtime check.
+ *   - Otherwise, a genuine runtime check against TARGET_ENV/GLOBAL_ENV
+ *     (OP_DEFINED_GLOBAL, opcode.h/vm.c), since a global can be defined
+ *     or not across separately-compiled top-level forms.
+ *
+ * Documented divergence from eval.c's dynamic env_lookup_or_false check:
+ * the tree-walker's defined? on a forward-referenced internal define
+ * (letrec* semantics) reads #f before that define's own form has
+ * executed, since env_define only happens at that point in sequential
+ * execution. Compiled locals don't have an equivalent "not yet run"
+ * runtime state to check -- once compile_lambda's prescan reserves a
+ * local's slot, it's lexically real for the rest of that scope, same as
+ * every other forward-declared internal define this compiler already
+ * treats this way (e.g. mutual recursion). defined? on such a name
+ * therefore reads #t as soon as it's in lexical scope, not only after
+ * its own definition has run. This matches the ordinary/expected use of
+ * defined? (checking whether some top-level/global binding exists) and
+ * diverges only on the edge case of asking whether a not-yet-reached
+ * internal define has run yet -- not tracked, since the VM has no
+ * per-slot "assigned yet" bit today. */
+static void compile_defined_p(Compiler *c, val_t args, int line) {
+    if (!vis_pair(args) || !vis_symbol(vcar(args)))
+        scm_raise(V_FALSE, "defined?: expected a symbol");
+    val_t sym = vcar(args);
+    /* is_upvalue_reachable, not resolve_upvalue: a boolean query has no
+     * business registering a real (otherwise unused) upvalue capture as
+     * a side effect -- see that function's own comment. */
+    if (resolve_local(c, sym) >= 0 || is_upvalue_reachable(c, sym)) {
+        emit(c, OP_TRUE, line);
+        return;
+    }
+    int ci = chunk_add_const(c->chunk, sym);
+    emit_ab(c, OP_DEFINED_GLOBAL, (uint8_t)ci, line);
 }
 
 /* (define-record-type name ctor-form pred field-spec...) — R7RS, or
@@ -2437,6 +2601,12 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* define */
     if (head == S_DEFINE) { compile_define(c, args, line); return; }
+
+    /* define-values */
+    if (head == S_DEFINE_VALUES) { compile_define_values(c, args, line); return; }
+
+    /* defined? */
+    if (head == S_DEFINED_P) { compile_defined_p(c, args, line); return; }
 
     /* set! */
     if (head == S_SET) { compile_set(c, args, line); return; }
