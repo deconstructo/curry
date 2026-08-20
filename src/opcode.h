@@ -31,6 +31,18 @@ typedef enum {
     OP_LOAD_GLOBAL, /* A: push global binding for constants[A] (symbol) */
     OP_STORE_GLOBAL,/* A: set global binding for constants[A] = pop()   */
     OP_DEF_GLOBAL,  /* A: define global constants[A] = pop()            */
+    OP_DEFINED_GLOBAL, /* A: push #t if constants[A] (symbol) is bound in
+                            TARGET_ENV, #f otherwise -- the non-raising
+                            counterpart to OP_LOAD_GLOBAL, backing
+                            (defined? sym) for a symbol that isn't a
+                            compile-time-resolvable local/upvalue (see
+                            compile_defined_p, compiler.c). No inline
+                            cache: unlike OP_LOAD_GLOBAL this isn't a
+                            hot-path lookup, and caching a *miss* would
+                            need its own invalidation story (a global
+                            that's *since become* bound), not worth it
+                            for what's normally an occasional feature-
+                            detection check.                          */
 
     /* ── Upvalue / closure captures ─────────────────────────────────── */
     OP_LOAD_UP,     /* A: push current closure's upvalue[A]             */
@@ -134,6 +146,25 @@ typedef enum {
     /* ── apply / values ─────────────────────────────────────────────── */
     OP_APPLY,       /* (apply f args-list) — f and list on stack         */
     OP_VALUES,      /* A: bundle A values into a multiple-values object  */
+    OP_VALUES_REF,  /* A: pop TOS (a multiple-values object or a plain
+                         single value); push component A. If TOS is a
+                         T_VALUES object, requires A < its count; if it's
+                         a plain value, requires A == 0 (a single value
+                         behaves as if it were a one-element values
+                         object). Raises on an out-of-range A either way
+                         -- the read-side counterpart OP_VALUES never
+                         needed: OP_VALUES only ever BUILDS a values
+                         object (used by (values ...) itself), nothing
+                         previously needed to pull one back apart other
+                         than OP_CALL_WITH_VALUES's own inline unpack
+                         (vm.c), which hands the pieces straight to a
+                         call rather than leaving them addressable on the
+                         stack. compile_define_values (compiler.c) is the
+                         first caller: define-values needs each bound
+                         name's value individually, stored one at a time
+                         via the same global/local dispatch an ordinary
+                         define uses, which OP_CALL_WITH_VALUES's
+                         call-shaped unpack can't provide.            */
     OP_CALL_WITH_VALUES, /* consumer, thunk on stack                     */
     OP_TAIL_CALL_WITH_VALUES, /* consumer, thunk on stack; tail-calls the
                                   consumer, reusing the current frame if

@@ -310,6 +310,37 @@
         (receive (n1) (values (- n 1))
           (loop n1 (+ acc n))))) 6)
 
+;;; define-values / defined? — compiled natively as of this session (both
+;;; previously had ZERO compiler codegen, tree-walker-only; ordinary
+;;; compiled code couldn't use either at all).
+(define-values (dv-a dv-b) (values 1 2))
+(check "define-values: top-level, two vars" (list dv-a dv-b) '(1 2))
+(define-values (dv-single) 42)
+(check "define-values: single var, single (non-Values) value" dv-single 42)
+(define-values (dv-extra1 dv-extra2) (values 10 20 30))
+(check "define-values: extra produced values are discarded"
+  (list dv-extra1 dv-extra2) '(10 20))
+(check "define-values: internal define inside a lambda body"
+  (let ()
+    (define-values (p q) (values 3 4))
+    (+ p q))
+  7)
+(check "define-values: zero formals, expr evaluated for effect only"
+  (begin (define-values () (values)) 'ok) 'ok)
+(check "define-values: too few produced values raises"
+  (guard (e (#t 'caught))
+    (define-values (x y z) (values 1 2))
+    'not-reached)
+  'caught)
+
+(define dv-global-defined 1)
+(check "defined?: bound global" (defined? dv-global-defined) #t)
+(check "defined?: unbound global" (defined? dv-totally-unbound-name-xyz) #f)
+(check "defined?: local parameter"
+  ((lambda (x) (defined? x)) 5) #t)
+(check "defined?: upvalue captured from an enclosing lambda"
+  ((lambda (x) ((lambda () (defined? x)))) 5) #t)
+
 ;;; let-values / let*-values — regression coverage for a bug found in a
 ;;; full-codebase audit: src/compiler.c had zero handling for
 ;;; S_LET_VALUES/S_LET_STAR_VALUES, so both special forms only worked in
