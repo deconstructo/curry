@@ -86,20 +86,24 @@ cmake -B build -DBUILD_LLVM=ON -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
 
 ## Tests
 
+**When working on the compiler, VM, or anything else that changes codegen, always run `curry` against `.scm` test files with `--clear-cache`** (or delete stale `.scc` files first — `find tests -name '*.scc' -delete`). The transparent `.scc` cache (see below) is keyed on source *content* hash, not compiler version: a `.scc` file compiled by yesterday's binary is still a cache HIT today if the `.scm` source hasn't changed, silently serving old bytecode instead of re-running your changes through the compiler. `ctest`'s Scheme-based suites (`scheme_r7rs`, `scheme_r6rs`, `syntax_rules`, every `srfi_*`/module test, etc. — everything except the pure-C `core` target) invoke `curry` on checked-in `.scm` files this same way and are just as exposed: a stale `.scc` left over from before your change can make `ctest` report a pass that never actually exercised the new code. Confirmed concretely during Tier 2.1/2.2 IR development: `ctest` reported 99/99 passing against `.scc` files compiled the day before a live-dispatch refactor landed (`curry --timings tests/r7rs_tests.scm` showed `cache HIT`) — the suite wasn't lying, but it also wasn't testing the refactor. Clearing all `.scc` files and rerunning was the only way to get a genuine result.
+
 ```bash
 cmake --build build && ctest --test-dir build -V
 
 # Run only the C unit tests
 ./build/tests/curry_test
 
-# Run only the Scheme R7RS tests
-./build/curry tests/r7rs_tests.scm
+# Run only the Scheme R7RS tests -- --clear-cache forces a fresh
+# compile instead of a possible stale cache hit (see above)
+./build/curry --clear-cache tests/r7rs_tests.scm
 
 # Run a specific test file
-./build/curry tests/actors_tests.scm
-./build/curry tests/numeric_ext_tests.scm
+./build/curry --clear-cache tests/actors_tests.scm
+./build/curry --clear-cache tests/numeric_ext_tests.scm
 
-# Run a specific expression
+# Run a specific expression (not cached -- -e is never subject to the
+# .scc cache, which only applies to a positional script-file argument)
 ./build/curry -e '(display (+ 1 2)) (newline)'
 ```
 
