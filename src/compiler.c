@@ -3188,6 +3188,151 @@ static IRNode *ir_lower_call(Compiler *c, val_t head, val_t args, bool tail, int
     return n;
 }
 
+/* Builds an IR_CALL{callee=IR_LAMBDA{...}} node directly (not via
+ * ir_lower_call, which expects a raw val_t callee to lower itself --
+ * here the callee is ALREADY the IR_LAMBDA ir_lower_lambda just built,
+ * no S-expression synthesis needed for it). `head` is V_FALSE: never a
+ * symbol, so IR_CALL's own ir_emit classification always falls through
+ * to its generic (non-self-tail, non-fused-global) branch -- exactly
+ * matching compile_let/compile_let_star/compile_letrec, which always
+ * emit a plain OP_CALL/OP_TAIL_CALL for these desugared forms, never
+ * OP_CALL_GLOBAL. Shared by ir_lower_let/ir_lower_let_star/
+ * ir_lower_letrec below. */
+static IRNode *ir_lower_lambda_call(Compiler *c, IRNode *callee,
+                                     IRNode **args, int argc,
+                                     bool tail, int line) {
+    IRNode *n = ir_node_new(c->ir_arena, IR_CALL, tail, line);
+    n->as.call.head   = V_FALSE;
+    n->as.call.callee = callee;
+    n->as.call.argc   = argc;
+    n->as.call.args   = args;
+    return n;
+}
+
+/* Mirrors compile_let's own PLAIN (non-named) branch exactly: `(let
+ * ((x v) ...) body...)` desugars to `((lambda (x ...) body...) v ...)`.
+ * No new IR node kind needed -- IR_LAMBDA already handles everything a
+ * let's body needs (its own child scope, internal defines, internal
+ * macros -- see IR_LAMBDA's own comment in ir.h), so this is pure
+ * ir_lower-time construction reusing it unchanged. The named-let branch
+ * is NOT handled here -- see ir_lower_named_let, called separately from
+ * ir_lower's own dispatch (it needs ir_emit-time work this can't do). */
+static IRNode *ir_lower_let(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+
+    /* Forward-order params list -- same double-reverse compile_let itself
+     * uses (bindings is walked once to reverse, then reversed back). */
+    val_t params = V_NIL;
+    int argc = 0;
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+        params = scm_cons(vcar(vcar(b)), params);
+        argc++;
+    }
+    val_t fwd = V_NIL;
+    while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
+
+    IRNode *callee = ir_lower_lambda(c, fwd, body, c->name, line);
+    IRNode **argv = argc > 0
+        ? (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *) * (size_t)argc)
+        : NULL;
+    int i = 0;
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        argv[i++] = ir_lower(c, vcar(vcdr(vcar(b))), false, line);
+    return ir_lower_lambda_call(c, callee, argv, argc, tail, line);
+}
+
+/* Mirrors compile_let_star exactly, including its base case (empty
+ * bindings compiles the body directly via ir_lower_seq, no lambda
+ * wrapper) and its single-binding-at-a-time nesting: `(let* ((x v)
+ * rest...) body)` -> `((lambda (x) (let* rest... body)) v)`. The
+ * synthesized inner `(let* rest body)` form is embedded as the lambda's
+ * OWN body (via ir_lower_lambda, same as ir_lower_let above) -- it gets
+ * lowered lazily, later, when ir_emit's IR_LAMBDA case walks that body,
+ * re-entering this same function via ir_lower's own S_LET_STAR dispatch
+ * hook. No manual recursion needed here -- IR_LAMBDA's deferred-body
+ * design already gives this the same per-level laziness compile_let_star
+ * itself relies on (each inner let* is only compiled when ITS enclosing
+ * lambda's body is). */
+static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+
+    if (vis_nil(bindings))
+        return ir_lower_seq(c, body, tail, line);
+
+    val_t binding = vcar(bindings);
+    val_t name    = vcar(binding);
+    val_t init    = vcar(vcdr(binding));
+    val_t rest    = vcdr(bindings);
+
+    val_t inner_body;
+    if (vis_nil(rest)) {
+        inner_body = body;
+    } else {
+        val_t let_star_sym = sym_intern_cstr("let*");
+        val_t inner_form   = scm_cons(let_star_sym, scm_cons(rest, body));
+        inner_body = scm_cons(inner_form, V_NIL);
+    }
+    val_t params = scm_cons(name, V_NIL);
+
+    IRNode *callee = ir_lower_lambda(c, params, inner_body, c->name, line);
+    IRNode **argv  = (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *));
+    argv[0] = ir_lower(c, init, false, line);
+    return ir_lower_lambda_call(c, callee, argv, 1, tail, line);
+}
+
+/* Mirrors compile_letrec exactly (shared by S_LETREC and S_LETREC_STAR,
+ * same as compile_letrec itself -- curry draws no stricter distinction
+ * between them at the compiler level). Rather than replicate
+ * compile_letrec's own bespoke "pre-declare all locals with void
+ * placeholders, then compile+store each init in order" bytecode
+ * sequence, this desugars to `((lambda () (define n1 v1) (define n2 v2)
+ * ... body...)))`  -- lambda_prescan (compiler.c) ALREADY gives ordinary
+ * internal defines this exact same "every name visible from the first
+ * define onward, initialized in sequence" treatment for letrec*
+ * semantics, which is what compile_letrec itself provides for both
+ * letrec and letrec* today, so this produces identical observable
+ * behavior through already-verified machinery instead of a parallel
+ * bespoke implementation. */
+static IRNode *ir_lower_letrec(Compiler *c, val_t args, bool tail, int line) {
+    val_t bindings = vcar(args);
+    val_t body     = vcdr(args);
+
+    /* Build (define name init) forms in reverse, then prepend each (in
+     * that reverse order) onto body -- restores original binding order
+     * at the front, ahead of the original body forms. */
+    val_t rev = V_NIL;
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+        val_t name = vcar(vcar(b));
+        val_t init = vcar(vcdr(vcar(b)));
+        val_t def_form = scm_cons(S_DEFINE, scm_cons(name, scm_cons(init, V_NIL)));
+        rev = scm_cons(def_form, rev);
+    }
+    val_t new_body = body;
+    for (val_t p = rev; vis_pair(p); p = vcdr(p))
+        new_body = scm_cons(vcar(p), new_body);
+
+    IRNode *callee = ir_lower_lambda(c, V_NIL, new_body, "<letrec>", line);
+    return ir_lower_lambda_call(c, callee, NULL, 0, tail, line);
+}
+
+/* Named let: `(let loop ((x v) ...) body)` -- see compile_let's own
+ * comment for the full "zero-arg outer wrapper" shape this mirrors.
+ * Unlike every other let / let-star / letrec form above, this ISN'T
+ * pure ir_lower-time desugaring -- see ir.h's comment on IRNode::as.named_let
+ * for why the self-tail-call thread-local arming forces the whole
+ * construction into ir_emit instead. This function only stores the raw
+ * pieces ir_emit's IR_NAMED_LET case needs. */
+static IRNode *ir_lower_named_let(Compiler *c, val_t loop_name, val_t bindings,
+                                   val_t body, bool tail, int line) {
+    IRNode *n = ir_node_new(c->ir_arena, IR_NAMED_LET, tail, line);
+    n->as.named_let.loop_name = loop_name;
+    n->as.named_let.bindings  = bindings;
+    n->as.named_let.body      = body;
+    return n;
+}
+
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (vis_pair(expr) && as_pair(expr)->hdr.flags)
         line = (int)as_pair(expr)->hdr.flags;
@@ -3249,6 +3394,21 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_OR)    return ir_lower_or(c, args, tail, line);
     if (head == S_LAMBDA && vis_pair(args))
         return ir_lower_lambda(c, vcar(args), vcdr(args), NULL, line);
+    /* let -- named vs plain distinguished the same way compile_let
+     * itself does (a leading symbol instead of a bindings list). Named
+     * let routes to ir_lower_named_let (IR_NAMED_LET); everything else
+     * routes to ir_lower_let (pure desugaring, see its own comment). */
+    if (head == S_LET && vis_pair(args)) {
+        val_t bindings = vcar(args);
+        if (vis_symbol(bindings)) {
+            val_t let_body = vcdr(args);
+            return ir_lower_named_let(c, bindings, vcar(let_body), vcdr(let_body), tail, line);
+        }
+        return ir_lower_let(c, args, tail, line);
+    }
+    if (head == S_LET_STAR) return ir_lower_let_star(c, args, tail, line);
+    if (head == S_LETREC || head == S_LETREC_STAR)
+        return ir_lower_letrec(c, args, tail, line);
     /* Both `(define sym expr)` and `(define (f params...) body...)`
      * lambda-sugar are natively lowered (the latter via IR_LAMBDA, now
      * that it exists -- see ir_lower_define_lambda_sugar's comment);
@@ -3384,19 +3544,18 @@ static void ir_emit(Compiler *c, IRNode *n) {
          * why this decision (not just the resolution it depends on)
          * happens here, at emit time, rather than during ir_lower.
          *
-         * The self-tail-call sub-branch just below is currently
-         * unreachable via compiler_ir_self_check: c->self_tail_name is
-         * only ever armed by compile_let (for a named-let loop body),
-         * and compile_let only runs on the classic compile() path --
-         * S_LET itself is not natively IR-lowered (classify_head returns
-         * SF_LET, not SF_NONE), so a named-let's loop body is always
-         * inside an IR_FALLBACK leaf that ir_lower never recurses into,
-         * meaning ir_lower_call/this IR_CALL case never even sees it.
-         * Correct by direct mirroring of compile_call, but genuinely
-         * untested until named-let itself gets IR-lowered in a future
-         * landing -- see tests/test_core.c's own comment at the same
-         * spot (an earlier version of that test wrongly claimed this
-         * branch was covered; caught by independent code review). */
+         * The self-tail-call sub-branch just below now has real coverage
+         * (as of the sixth landing, named-let/IR_NAMED_LET below): a
+         * named-let loop's inner lambda body is walked through
+         * ir_lower_lambda+ir_emit (see IR_NAMED_LET's own case), with
+         * c->self_tail_name armed there exactly as compile_let arms it
+         * for the classic path -- so a tail-position self-call inside
+         * that body reaches this branch for real, exercised by
+         * tests/test_core.c's named-let self-tail-call cases. (Earlier
+         * landings, before named-let was IR-lowered, had this branch
+         * correct by inspection only; an earlier version of the test
+         * file wrongly claimed coverage that didn't exist yet -- caught
+         * by independent code review at the time.) */
         val_t head  = n->as.call.head;
         int   argc  = n->as.call.argc;
         bool  ctail = n->tail;
@@ -3483,6 +3642,70 @@ static void ir_emit(Compiler *c, IRNode *n) {
             chunk_emit(c->chunk, child.upvals[i].is_local ? 1 : 0, n->line);
             chunk_emit(c->chunk, (uint8_t)child.upvals[i].index,   n->line);
         }
+        return;
+    }
+    case IR_NAMED_LET: {
+        /* Direct translation of compile_let's own named-let branch -- see
+         * ir.h's comment on IRNode::as.named_let for why this whole
+         * construction (not just the resolution inside it) has to happen
+         * here, at emit time: g_compile_self_tail_name/mutated must be
+         * armed immediately before the inner loop lambda's own child
+         * Compiler is created (init_compiler consumes them), and that
+         * creation now happens via ir_lower_lambda+ir_emit rather than
+         * compile_lambda -- giving IR_CALL's self-tail-call branch (see
+         * its own ir_emit case) its first REAL coverage: a named-let
+         * loop's body is now actually walked through ir_lower/ir_emit,
+         * not left as IR_FALLBACK. */
+        val_t loop_name = n->as.named_let.loop_name;
+        val_t bindings  = n->as.named_let.bindings;
+        val_t body      = n->as.named_let.body;
+
+        int argc = 0;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) argc++;
+
+        /* Forward-order params list -- matches compile_let exactly. */
+        val_t params = V_NIL;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+            params = scm_cons(vcar(vcar(b)), params);
+        val_t fwd = V_NIL;
+        while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
+
+        Compiler outer;
+        init_compiler(&outer, c, as_sym(loop_name)->data);
+        outer.chunk->arity = 0;
+
+        /* Slot 0 = loop name (void placeholder) -- matches compile_let. */
+        add_local(&outer, loop_name);
+        mark_initialised(&outer);
+        emit(&outer, OP_VOID, n->line);
+
+        /* Arm the self-tail-call thread-local, consumed by init_compiler
+         * inside ir_lower_lambda+ir_emit's own IR_LAMBDA case below --
+         * body_mentions_set_target scans against `c` (the ENCLOSING
+         * compiler, i.e. this ir_emit call's own parameter), matching
+         * compile_let's identical call exactly (not `outer`: at this
+         * point no inner scope exists yet to check macros against). */
+        g_compile_self_tail_name    = loop_name;
+        g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
+        IRNode *loop_lambda = ir_lower_lambda(&outer, fwd, body,
+                                               as_sym(loop_name)->data, n->line);
+        ir_emit(&outer, loop_lambda);
+        emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);  /* store closure -> slot 0 */
+        emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);  /* callee */
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
+            ir_emit(&outer, arg);
+        }
+        emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, n->line);
+        Chunk *och = end_compiler(&outer);
+
+        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
+        emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
+        for (int i = 0; i < outer.upval_count; i++) {
+            chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
+            chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+        }
+        emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
         return;
     }
     }
