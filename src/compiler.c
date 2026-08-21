@@ -3556,13 +3556,23 @@ bool compiler_ir_self_check(val_t expr) {
 /* ── Tier 2.2: cheap IR optimizations (docs/thoughts/
  * performance-chez-kaappi.md §5, item 2.2) ─────────────────────────────
  *
- * ir_optimize runs on an already-lowered tree, between ir_lower and
+ * ir_optimize_andor (below) recurses via ir_optimize before ir_optimize
+ * itself is defined -- forward-declared here. */
+static IRNode *ir_optimize(IRNode *n);
+
+/* ir_optimize runs on an already-lowered tree, between ir_lower and
  * ir_emit, and rewrites it in place (no arena allocation -- it only ever
  * splices existing subtrees into a parent's slot or leaves a node
- * untouched, never builds a new one). Landing one transform for now:
- * dead-branch elimination on IR_IF, `(if <const> then else)` folding to
- * whichever branch the constant's truthiness picks, entirely discarding
- * the OTHER branch's bytecode and the test's own load+jump instructions.
+ * untouched, never builds a new one). Two transforms land here:
+ *   - dead-branch elimination on IR_IF: `(if <const> then else)` folds
+ *     to whichever branch the constant's truthiness picks, discarding
+ *     the OTHER branch's bytecode and the test's own load+jump
+ *     instructions entirely.
+ *   - boolean simplification on IR_AND/IR_OR (ir_optimize_andor, below):
+ *     a non-last constant item that already decides the short-circuit
+ *     outcome truncates the list there (everything after is dead); a
+ *     non-last constant item that doesn't is spliced out (side-effect-
+ *     free, contributes nothing).
  *
  * This is the first Tier 2.1/2.2 transform in this codebase that
  * deliberately produces DIFFERENT bytecode than compile()'s own
@@ -3587,6 +3597,50 @@ bool compiler_ir_self_check(val_t expr) {
  * the same reason (raw val_t, not a tree) and IR_VAR_REF/IR_CONST are
  * leaves -- none of these four kinds get a case below; they fall through
  * to the default `return n` unchanged. */
+
+/* Shared by IR_AND/IR_OR: compacts the items list in place, applying two
+ * safe transforms to each NON-LAST item (after recursively optimizing
+ * it, so an item that itself folds down to a constant -- e.g. a nested
+ * `(if #t 1 2)` -- is caught by the same pass):
+ *
+ *   - a constant whose truthiness already decides the whole expression's
+ *     short-circuit outcome (falsy for AND, truthy for OR) truncates the
+ *     list right there: it becomes the new last item, and every item
+ *     after it is unreachable dead code, discarded.
+ *   - a constant whose truthiness does NOT decide the outcome (truthy
+ *     for AND, falsy for OR) contributes nothing but its own position in
+ *     the sequence, and -- being a literal -- has no side effect either:
+ *     spliced out entirely.
+ *
+ * The last item is never touched by either rule (guarded by `!is_last`):
+ * its VALUE is what the whole expression evaluates to when reached, not
+ * just a truth test, so it's kept (and still recursively optimized)
+ * regardless of its own truthiness. A dropped or truncation-point item
+ * is, by construction, always an IR_CONST -- literals ignore `tail`
+ * entirely in their own codegen, so this never disturbs the one item
+ * (the ORIGINAL last item, when no truncation happens) whose `->tail`
+ * ir_lower_and/or actually set meaningfully for tail-call purposes.
+ * `short_circuits_on_falsy` selects AND's vs OR's roles. */
+static void ir_optimize_andor(IRNode *n, bool short_circuits_on_falsy) {
+    int in_count  = n->as.andor.count;
+    int out_count = 0;
+    for (int i = 0; i < in_count; i++) {
+        bool     is_last = (i == in_count - 1);
+        IRNode  *item    = ir_optimize(n->as.andor.items[i]);
+        if (!is_last && item->kind == IR_CONST) {
+            bool truthy  = item->as.konst.value != V_FALSE;
+            bool ends_it = short_circuits_on_falsy ? !truthy : truthy;
+            if (ends_it) {
+                n->as.andor.items[out_count++] = item;
+                break;  /* truncate: this becomes the new last item */
+            }
+            continue;   /* provably doesn't end it, no side effect: drop */
+        }
+        n->as.andor.items[out_count++] = item;
+    }
+    n->as.andor.count = out_count;
+}
+
 static IRNode *ir_optimize(IRNode *n) {
     switch (n->kind) {
     case IR_IF: {
@@ -3607,11 +3661,8 @@ static IRNode *ir_optimize(IRNode *n) {
     case IR_SET:
         n->as.set.value = ir_optimize(n->as.set.value);
         return n;
-    case IR_AND:
-    case IR_OR:
-        for (int i = 0; i < n->as.andor.count; i++)
-            n->as.andor.items[i] = ir_optimize(n->as.andor.items[i]);
-        return n;
+    case IR_AND: ir_optimize_andor(n, true);  return n;
+    case IR_OR:  ir_optimize_andor(n, false); return n;
     case IR_DEFINE:
         n->as.def.value = ir_optimize(n->as.def.value);
         return n;

@@ -476,6 +476,32 @@ static void test_ir_optimize_check(void) {
         "(and #t (if #f 1 2))",
         "(or #f (if #t 1 2))",
         "(define x (if #t 10 20))",
+        /* and/or boolean simplification (ir_optimize_andor). */
+        "(and 1 2 3)",
+        "(and #f 1 2)",
+        "(and 1 #f 2)",
+        "(and 1 2 #f)",
+        "(and 1 2 3 'last)",
+        "(or 1 2 3)",
+        "(or #f 1 2)",
+        "(or #f #f 1)",
+        "(or 1 2 3 'last)",
+        "(and #t #t #t)",
+        "(or #f #f #f)",
+        /* a non-last item that only becomes constant AFTER its own
+         * nested fold -- ir_optimize_andor must re-check post-recursion,
+         * not just the item's shape before optimizing it. */
+        "(and (if #t 1 2) 3)",
+        "(or (if #f 1 2) 3)",
+        /* mixed with calls -- the dropped/truncated items are always
+         * literals, but a surviving non-constant item (a call) must
+         * still be reachable and correctly emitted. */
+        "(and 1 (+ 2 3))",
+        "(or #f (+ 2 3))",
+        /* nested and/or -- the outer pass must recurse into an inner
+         * and/or that itself simplifies. */
+        "(and (and 1 2) 3)",
+        "(or (or #f #f) 3)",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
