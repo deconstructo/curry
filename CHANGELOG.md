@@ -1,5 +1,37 @@
 # Changelog
 
+### 1.22.0 - 2026-08-21
+
+**New — compiler now has a real IR pipeline, live in production for the first time**
+
+`compile()` previously translated Scheme source straight to bytecode in
+one pass, form by form, with no intermediate representation to optimize
+over. It now lowers `if`/`begin`/`set!`/`and`/`or`/`define`/`lambda`/
+`let`/`let*`/`letrec`/`letrec*`/named-`let`/ordinary calls to a small
+tree IR first (`ir_lower`), runs a cheap optimization pass over it
+(`ir_optimize`), then emits bytecode from the (possibly rewritten) tree
+(`ir_emit`) — for every Scheme program curry compiles, not just as an
+internal experiment. Two optimizations ship with this: dead-branch
+elimination (`(if <literal> then else)` compiles to just the taken
+branch, discarding the other branch's bytecode entirely) and boolean
+short-circuit simplification (`and`/`or` drop provably-dead or
+provably-inert literal operands). Everything else still compiles
+byte-for-byte identically to before — verified by a differential
+self-check comparing the IR path against the original direct-compile
+path on every routed form, run continuously through this and the six
+preceding preparatory landings.
+
+**Fix — `force` didn't fully flatten `delay-force` chains 3+ levels deep**
+
+A chain of `delay-force` indirections (`p1` resolving to `p2` resolving
+to `p3` resolving to a value) only had its first link unwrapped; `force`
+returned `p3` itself — an unforced promise object — instead of chasing
+through to the final value. This is the pattern R7RS's own recursive
+stream-filter idiom depends on chaining arbitrarily deep. `force` now
+loops until it reaches a real value or an already-forced promise,
+correctly handling chains that mix `delay` and `delay-force`, and
+self-referential promises that memoize themselves mid-force.
+
 ### 1.21.0 - 2026-08-15
 
 **Fix — `write`/`display` no longer hang forever on circular structure**
