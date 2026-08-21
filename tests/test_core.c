@@ -287,26 +287,32 @@ static void test_ir_self_check(void) {
         "(f 1 2 3)",
         "(+ 1 (* 2 3))",
         "((lambda (x) x) 5)",
-        /* No self-tail-call case here: `let`/named-let (S_LET) is itself
-         * not natively IR-lowered -- classify_head returns SF_LET, not
-         * SF_NONE, so ir_lower wraps the WHOLE named-let form (loop body
-         * included) as one IR_FALLBACK leaf and never recurses into it.
-         * self_tail_name is only ever armed by compile_let, which only
-         * runs on the classic compile() path that IR_FALLBACK's own
-         * ir_emit case delegates to -- ir_lower/ir_lower_call never see
-         * that body at all. IR_CALL's self-tail-call branch in ir_emit
-         * (mirrors compile_call's own guard exactly) is therefore
-         * correct-by-inspection but genuinely UNREACHABLE via this
-         * differential self-check today, and any attempt to write a
-         * named-let test case here would silently test nothing (an
-         * earlier version of this test did exactly that -- caught by
-         * independent code review). Real coverage arrives once named-let
-         * itself gets IR-lowered in a future landing. Manually verified
-         * against the live compile() path instead: `curry -e '(display
-         * (let loop ((i 0) (acc 0)) (if (= i 100000) acc (loop (+ i 1)
-         * (+ acc i)))))'` runs the classic self-tail-call path
-         * correctly (unaffected by this landing, since ir_lower/ir_emit
-         * are still never called from compile()). */
+        /* let / let-star / letrec / letrec-star / named-let -- widened
+         * in the sixth landing. Plain let/let-star/letrec are pure
+         * ir_lower-time desugaring into IR_CALL{callee=IR_LAMBDA{...}}
+         * (see ir_lower_let/ir_lower_let_star/ir_lower_letrec's own
+         * comments); named-let is the one genuinely new IR_NAMED_LET
+         * node kind, and the first thing to give IR_CALL's self-tail-
+         * call branch REAL coverage (previously correct-by-inspection
+         * but unreachable -- an earlier version of this test wrongly
+         * claimed a named-let case tested it, when named-let itself
+         * wasn't IR-lowered yet; caught by independent code review). */
+        "(let ((a 1) (b 2)) (+ a b))",
+        "(let () 42)",
+        "(let* ((a 1) (b (+ a 1)) (c (+ b 1))) c)",
+        "(let* () 'empty)",
+        "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 10))",
+        "(letrec* ((a 1) (b (+ a 1))) b)",
+        /* named-let: self-tail-call in tail position -- exercises
+         * IR_CALL's OP_SELF_TAIL_CALL branch for real. */
+        "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
+        /* a non-tail self-reference must NOT take the self-tail-call
+         * path (matches compile_call's own `tail &&` guard). */
+        "(let loop ((i 0)) (+ 1 (if (< i 3) (loop (+ i 1)) i)))",
+        /* named-let nested inside a call/if -- mixed with other already-
+         * lowered forms, the exact shape that caught real ordering bugs
+         * in earlier landings. */
+        "(+ 1 (let loop ((i 0)) (if (= i 3) i (loop (+ i 1)))))",
         /* receive/call-with-values with the "wrong" shape for the special
          * form fall through to an ordinary call (classify_head's shaped
          * checks) -- see compile()'s own SF_RECEIVE/SF_CALL_WITH_VALUES
@@ -476,6 +482,32 @@ static void test_ir_optimize_check(void) {
         "(and #t (if #f 1 2))",
         "(or #f (if #t 1 2))",
         "(define x (if #t 10 20))",
+        /* and/or boolean simplification (ir_optimize_andor). */
+        "(and 1 2 3)",
+        "(and #f 1 2)",
+        "(and 1 #f 2)",
+        "(and 1 2 #f)",
+        "(and 1 2 3 'last)",
+        "(or 1 2 3)",
+        "(or #f 1 2)",
+        "(or #f #f 1)",
+        "(or 1 2 3 'last)",
+        "(and #t #t #t)",
+        "(or #f #f #f)",
+        /* a non-last item that only becomes constant AFTER its own
+         * nested fold -- ir_optimize_andor must re-check post-recursion,
+         * not just the item's shape before optimizing it. */
+        "(and (if #t 1 2) 3)",
+        "(or (if #f 1 2) 3)",
+        /* mixed with calls -- the dropped/truncated items are always
+         * literals, but a surviving non-constant item (a call) must
+         * still be reachable and correctly emitted. */
+        "(and 1 (+ 2 3))",
+        "(or #f (+ 2 3))",
+        /* nested and/or -- the outer pass must recurse into an inner
+         * and/or that itself simplifies. */
+        "(and (and 1 2) 3)",
+        "(or (or #f #f) 3)",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));

@@ -70,5 +70,5 @@ fi
 
 # ---- Run tests ----
 CURRY_MODULE_PATH="$MOD_PATH" \
-    "$CURRY" "$SCRIPT_DIR/redis_tests.scm" \
+    "$CURRY" --clear-cache "$SCRIPT_DIR/redis_tests.scm" \
     "$PLAIN_PORT" "$TLS_PORT" "$TLS_CA"

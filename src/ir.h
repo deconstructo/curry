@@ -71,6 +71,21 @@ typedef enum {
     IR_LAMBDA,      /* widened in the fifth landing -- see this kind's own
                      * `lambda` field comment below for why its body is
                      * stored RAW, not pre-lowered into an IR tree. */
+    IR_NAMED_LET,   /* widened in the sixth landing, ALONGSIDE plain
+                     * let / let-star / letrec / letrec-star -- but those
+                     * four need no new node kind at all: they're pure
+                     * ir_lower-time desugaring into
+                     * IR_CALL{callee=IR_LAMBDA{...}}
+                     * (see ir_lower_let/ir_lower_let_star/
+                     * ir_lower_letrec, compiler.c), reusing IR_LAMBDA's
+                     * already-verified machinery unchanged. Named let is
+                     * the one exception: it needs the self-tail-call
+                     * thread-local side-channel (g_compile_self_tail_
+                     * name/mutated, compiler.c) armed at exactly the
+                     * right moment, an ordering-sensitive side effect
+                     * that -- like every other one in this IR -- can
+                     * only happen at ir_emit time. See this kind's own
+                     * `named_let` field comment below. */
 } IRKind;
 
 typedef struct IRNode IRNode;
@@ -210,6 +225,17 @@ struct IRNode {
          * anonymous (lambda ...), the bound symbol's C string for
          * `(define (f ...) ...)` sugar. */
         struct { val_t params; val_t body; const char *name; } lambda; /* IR_LAMBDA */
+        /* All three fields raw/unprocessed, same reasoning as
+         * IR_LAMBDA's own `lambda` field above -- ir_emit's IR_NAMED_LET
+         * case builds the whole "zero-arg outer wrapper" structure
+         * (compile_let's own comment on its named-let branch,
+         * compiler.c, has the full shape) itself, arming
+         * g_compile_self_tail_name/g_compile_self_tail_mutated
+         * immediately before lowering+emitting the inner loop lambda --
+         * nothing here can be pre-built during ir_lower. `bindings` is
+         * the raw `((x v) ...)` list (not yet split into params/inits);
+         * `body` is the loop's own raw body forms. */
+        struct { val_t loop_name; val_t bindings; val_t body; } named_let; /* IR_NAMED_LET */
     } as;
 };
 

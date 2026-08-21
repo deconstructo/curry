@@ -87,7 +87,7 @@ fi
 # observe the disconnect event.  Everything else goes through as normal output.
 
 CURRY_MODULE_PATH="$MOD_PATH" \
-    "$CURRY" "$SCRIPT_DIR/mqtt_tests.scm" \
+    "$CURRY" --clear-cache "$SCRIPT_DIR/mqtt_tests.scm" \
     "$PLAIN_PORT" "$TLS_PORT" "$TLS_CA" "$DISCO_ACTUAL" \
 | while IFS= read -r line; do
     if [ "$line" = "READY" ]; then
