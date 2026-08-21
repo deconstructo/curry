@@ -2527,6 +2527,99 @@ static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int lin
 
 /* ── Main dispatch ───────────────────────────────────────────────────── */
 
+/* Every compound-form classification compile()'s own dispatch below can
+ * reach, in the same order compile() tests for them. Shared with
+ * ir_lower (via classify_head, below) so the Tier 2.1 IR's own "is this
+ * actually a plain call?" decision for IR_CALL can never drift out of
+ * sync with what compile() itself would do -- a hand-duplicated second
+ * copy of this same ~35-symbol chain was rejected as exactly the
+ * two-lists-that-must-stay-in-sync hazard this project's own IR_SEQ/
+ * IR_VAR_REF postmortems (see ir.h) warn about. */
+typedef enum {
+    SF_NONE = 0,    /* none of the below matched -- an ordinary call */
+    SF_QUOTE, SF_QUASIQUOTE, SF_IF, SF_BEGIN, SF_COND_EXPAND, SF_DEFINE,
+    SF_DEFINE_VALUES, SF_DEFINED_P, SF_SET, SF_LAMBDA, SF_LET, SF_LET_STAR,
+    SF_LETREC, SF_LET_VALUES, SF_LET_STAR_VALUES, SF_AND, SF_OR, SF_COND,
+    SF_CASE, SF_WHEN, SF_UNLESS, SF_DELAY, SF_DELAY_FORCE, SF_DO,
+    SF_VALUES, SF_APPLY, SF_CALL_WITH_VALUES, SF_PARAMETERIZE, SF_GUARD,
+    SF_WITH_EXCEPTION_HANDLER, SF_RECEIVE, SF_DEFINE_RECORD_TYPE,
+    SF_DEFINE_SYNTAX, SF_LET_SYNTAX, SF_SYMBOLIC, SF_WITH_ASSUMPTIONS,
+    SF_DEFINE_RULE, SF_DEFINE_RULESET, SF_DEFINE_ALGEBRA, SF_TREE_EVAL,
+    SF_MACRO,
+} SpecialForm;
+
+/* Classification only -- never executes a handler, never mutates `c`
+ * except via the macro-lookup path's own resolve_syntax_local/env_lookup
+ * calls, which are read-only queries (unlike resolve_local/
+ * resolve_upvalue, they register nothing). Sets *transformer_out only
+ * when returning SF_MACRO. Conditions and their order are copied
+ * verbatim from compile()'s own dispatch chain below -- keep the two in
+ * sync by construction: compile() switches on this function's result
+ * rather than re-testing `head` itself. */
+static SpecialForm classify_head(Compiler *c, val_t head, val_t args,
+                                  val_t *transformer_out) {
+    if (head == S_QUOTE) return SF_QUOTE;
+    if (head == S_QUASIQUOTE) return SF_QUASIQUOTE;
+    if (head == S_IF) return SF_IF;
+    if (head == S_BEGIN) return SF_BEGIN;
+    if (head == S_COND_EXPAND) return SF_COND_EXPAND;
+    if (head == S_DEFINE) return SF_DEFINE;
+    if (head == S_DEFINE_VALUES) return SF_DEFINE_VALUES;
+    if (head == S_DEFINED_P) return SF_DEFINED_P;
+    if (head == S_SET) return SF_SET;
+    if (head == S_LAMBDA) return SF_LAMBDA;
+    if (head == S_LET) return SF_LET;
+    if (head == S_LET_STAR) return SF_LET_STAR;
+    if (head == S_LETREC || head == S_LETREC_STAR) return SF_LETREC;
+    if (head == S_LET_VALUES) return SF_LET_VALUES;
+    if (head == S_LET_STAR_VALUES) return SF_LET_STAR_VALUES;
+    if (head == S_AND) return SF_AND;
+    if (head == S_OR) return SF_OR;
+    if (head == S_COND) return SF_COND;
+    if (head == S_CASE) return SF_CASE;
+    if (head == S_WHEN) return SF_WHEN;
+    if (head == S_UNLESS) return SF_UNLESS;
+    if (head == S_DELAY) return SF_DELAY;
+    if (head == S_DELAY_FORCE) return SF_DELAY_FORCE;
+    if (head == S_DO) return SF_DO;
+    if (head == S_VALUES) return SF_VALUES;
+    if (head == S_APPLY) return SF_APPLY;
+    if (head == S_CALL_WITH_VALUES && vis_pair(args) &&
+        vis_pair(vcdr(args)) && vis_nil(vcdr(vcdr(args))))
+        return SF_CALL_WITH_VALUES;
+    if (head == S_PARAMETERIZE) return SF_PARAMETERIZE;
+    if (head == S_GUARD) return SF_GUARD;
+    if (head == S_WITH_EXCEPTION_HANDLER) return SF_WITH_EXCEPTION_HANDLER;
+    if (head == S_RECEIVE && vis_pair(args) && vis_pair(vcdr(args)))
+        return SF_RECEIVE;
+    if (head == S_DEFINE_RECORD_TYPE) return SF_DEFINE_RECORD_TYPE;
+    if (head == S_DEFINE_SYNTAX) return SF_DEFINE_SYNTAX;
+    if (head == S_LET_SYNTAX || head == S_LETREC_SYNTAX) return SF_LET_SYNTAX;
+    if (head == S_SYMBOLIC) return SF_SYMBOLIC;
+    if (head == S_WITH_ASSUMPTIONS) return SF_WITH_ASSUMPTIONS;
+    if (head == S_DEFINE_RULE) return SF_DEFINE_RULE;
+    if (head == S_DEFINE_RULESET) return SF_DEFINE_RULESET;
+    if (head == S_DEFINE_ALGEBRA) return SF_DEFINE_ALGEBRA;
+    if (head == S_IMPORT || head == S_DEFINE_LIBRARY || head == S_LIBRARY)
+        return SF_TREE_EVAL;
+    if (vis_symbol(head)) {
+        val_t transformer;
+        bool is_macro = resolve_syntax_local(c, head, &transformer);
+        if (!is_macro && c->chunk->target_env != V_VOID) {
+            val_t macro = env_lookup_or_false(c->chunk->target_env, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
+        if (!is_macro) {
+            val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
+        if (is_macro) { *transformer_out = transformer; return SF_MACRO; }
+    }
+    return SF_NONE;
+}
+
 static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* Reader-annotated source line: the reader stamps each cons cell's
@@ -2569,29 +2662,31 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     val_t head = lang_translate(vcar(expr));
     val_t args = vcdr(expr);
 
+    val_t transformer = V_FALSE;
+    switch (classify_head(c, head, args, &transformer)) {
+
     /* quote */
-    if (head == S_QUOTE) {
+    case SF_QUOTE:
         emit_const(c, vis_pair(args) ? vcar(args) : V_NIL, line);
         return;
-    }
 
     /* quasiquote — expand to list-construction code, then compile that */
-    if (head == S_QUASIQUOTE) {
+    case SF_QUASIQUOTE: {
         val_t expanded = expand_qq(vis_pair(args) ? vcar(args) : V_NIL, GLOBAL_ENV, 0);
         compile(c, expanded, tail, line);
         return;
     }
 
     /* if */
-    if (head == S_IF) { compile_if(c, args, tail, line); return; }
+    case SF_IF: compile_if(c, args, tail, line); return;
 
     /* begin */
-    if (head == S_BEGIN) { compile_begin(c, args, tail, line); return; }
+    case SF_BEGIN: compile_begin(c, args, tail, line); return;
 
     /* cond-expand — resolved entirely at compile time: pick the first
      * satisfied clause's body (see features.c) and compile it in place,
      * exactly as if it had been written as (begin body...) here. */
-    if (head == S_COND_EXPAND) {
+    case SF_COND_EXPAND: {
         bool matched;
         val_t body = cond_expand_choose(args, &matched);
         if (!matched) scm_raise(V_FALSE, "cond-expand: no matching clause");
@@ -2600,19 +2695,19 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     }
 
     /* define */
-    if (head == S_DEFINE) { compile_define(c, args, line); return; }
+    case SF_DEFINE: compile_define(c, args, line); return;
 
     /* define-values */
-    if (head == S_DEFINE_VALUES) { compile_define_values(c, args, line); return; }
+    case SF_DEFINE_VALUES: compile_define_values(c, args, line); return;
 
     /* defined? */
-    if (head == S_DEFINED_P) { compile_defined_p(c, args, line); return; }
+    case SF_DEFINED_P: compile_defined_p(c, args, line); return;
 
     /* set! */
-    if (head == S_SET) { compile_set(c, args, line); return; }
+    case SF_SET: compile_set(c, args, line); return;
 
     /* lambda */
-    if (head == S_LAMBDA) {
+    case SF_LAMBDA: {
         val_t params = vcar(args);
         val_t body   = vcdr(args);
         compile_lambda(c, params, body, NULL, line);
@@ -2620,34 +2715,33 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     }
 
     /* let */
-    if (head == S_LET)      { compile_let(c, args, tail, line);      return; }
-    if (head == S_LET_STAR) { compile_let_star(c, args, tail, line); return; }
-    if (head == S_LETREC || head == S_LETREC_STAR)
-                            { compile_letrec(c, args, tail, line);   return; }
-    if (head == S_LET_VALUES)      { compile_let_values(c, args, tail, line);      return; }
-    if (head == S_LET_STAR_VALUES) { compile_let_star_values(c, args, tail, line); return; }
+    case SF_LET:      compile_let(c, args, tail, line);      return;
+    case SF_LET_STAR: compile_let_star(c, args, tail, line); return;
+    case SF_LETREC:   compile_letrec(c, args, tail, line);   return;
+    case SF_LET_VALUES:      compile_let_values(c, args, tail, line);      return;
+    case SF_LET_STAR_VALUES: compile_let_star_values(c, args, tail, line); return;
 
     /* and / or */
-    if (head == S_AND) { compile_and(c, args, tail, line); return; }
-    if (head == S_OR)  { compile_or(c, args, tail, line);  return; }
+    case SF_AND: compile_and(c, args, tail, line); return;
+    case SF_OR:  compile_or(c, args, tail, line);  return;
 
     /* cond / case */
-    if (head == S_COND) { compile_cond(c, args, tail, line); return; }
-    if (head == S_CASE) { compile_case(c, args, tail, line); return; }
+    case SF_COND: compile_cond(c, args, tail, line); return;
+    case SF_CASE: compile_case(c, args, tail, line); return;
 
     /* when / unless */
-    if (head == S_WHEN)   { compile_when(c, args, tail, line);   return; }
-    if (head == S_UNLESS) { compile_unless(c, args, tail, line); return; }
+    case SF_WHEN:   compile_when(c, args, tail, line);   return;
+    case SF_UNLESS: compile_unless(c, args, tail, line); return;
 
     /* delay / delay-force */
-    if (head == S_DELAY)       { compile_delay(c, args, false, tail, line); return; }
-    if (head == S_DELAY_FORCE) { compile_delay(c, args, true,  tail, line); return; }
+    case SF_DELAY:       compile_delay(c, args, false, tail, line); return;
+    case SF_DELAY_FORCE: compile_delay(c, args, true,  tail, line); return;
 
     /* do */
-    if (head == S_DO) { compile_do(c, args, tail, line); return; }
+    case SF_DO: compile_do(c, args, tail, line); return;
 
     /* values */
-    if (head == S_VALUES) {
+    case SF_VALUES: {
         int n = 0;
         val_t a = args;
         while (vis_pair(a)) {
@@ -2659,7 +2753,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     }
 
     /* apply — (apply f arg1 ... rest-list) */
-    if (head == S_APPLY) {
+    case SF_APPLY: {
         int n = 0;
         val_t a = args;
         while (vis_pair(a)) {
@@ -2680,83 +2774,72 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
      * (builtins.c) invokes its consumer via a real nested C call, so a
      * receive/let-values/let*-values/with-values in tail position of a
      * self-recursive loop would otherwise accumulate one nested call
-     * frame per iteration instead of looping forever. */
-    if (head == S_CALL_WITH_VALUES && vis_pair(args) && vis_pair(vcdr(args)) && vis_nil(vcdr(vcdr(args)))) {
+     * frame per iteration instead of looping forever. Shape already
+     * verified by classify_head. */
+    case SF_CALL_WITH_VALUES:
         compile(c, vcar(args), false, line);
         compile(c, vcar(vcdr(args)), false, line);
         emit(c, tail ? OP_TAIL_CALL_WITH_VALUES : OP_CALL_WITH_VALUES, line);
         return;
-    }
 
     /* parameterize — desugar to let + dynamic-wind in the compiler so that
        local variables in the body are captured as upvalues, not looked up
        in GLOBAL_ENV (which would fail for BcClosure-local bindings). */
-    if (head == S_PARAMETERIZE) {
+    case SF_PARAMETERIZE:
         compile_parameterize(c, args, tail, line);
         return;
-    }
 
-    if (head == S_GUARD) {
+    case SF_GUARD:
         compile_guard(c, args, tail, line);
         return;
-    }
 
-    if (head == S_WITH_EXCEPTION_HANDLER) {
+    case SF_WITH_EXCEPTION_HANDLER:
         compile_with_exception_handler(c, args, tail, line);
         return;
-    }
 
     /* `receive` is ambiguous: it's both the R7RS special form (requires at
      * least 2 forms after it: formals and a producer expression, body...
      * optional) and — pre-existing in this codebase — the actor-mailbox
      * primitive (arity 0-1: optional timeout). The two are unambiguous by
      * argument count alone, so only treat it as the special form when the
-     * shape can't be the primitive; otherwise fall through to an ordinary
+     * shape can't be the primitive (already verified by classify_head);
+     * otherwise it classifies as SF_NONE, falling through to an ordinary
      * call so (receive) and (receive timeout) keep working. */
-    if (head == S_RECEIVE && vis_pair(args) && vis_pair(vcdr(args))) {
+    case SF_RECEIVE:
         compile_receive(c, args, tail, line);
         return;
-    }
 
-    if (head == S_DEFINE_RECORD_TYPE) {
+    case SF_DEFINE_RECORD_TYPE:
         compile_define_record_type(c, args, line);
         return;
-    }
 
-    if (head == S_DEFINE_SYNTAX) {
+    case SF_DEFINE_SYNTAX:
         compile_define_syntax(c, args, line);
         return;
-    }
 
-    if (head == S_LET_SYNTAX || head == S_LETREC_SYNTAX) {
+    case SF_LET_SYNTAX:
         compile_let_syntax(c, args, tail, line);
         return;
-    }
 
-    if (head == S_SYMBOLIC) {
+    case SF_SYMBOLIC:
         compile_symbolic(c, args, line);
         return;
-    }
 
-    if (head == S_WITH_ASSUMPTIONS) {
+    case SF_WITH_ASSUMPTIONS:
         compile_with_assumptions(c, args, tail, line);
         return;
-    }
 
-    if (head == S_DEFINE_RULE) {
+    case SF_DEFINE_RULE:
         compile_define_rule(c, args, tail, line);
         return;
-    }
 
-    if (head == S_DEFINE_RULESET) {
+    case SF_DEFINE_RULESET:
         compile_define_ruleset(c, args, tail, line);
         return;
-    }
 
-    if (head == S_DEFINE_ALGEBRA) {
+    case SF_DEFINE_ALGEBRA:
         compile_define_algebra(c, args, tail, line);
         return;
-    }
 
     /* Note: syntax-rules itself is deliberately NOT special-cased here.
      * syntax_rules_register() binds the symbol `syntax-rules` to a T_SYNTAX
@@ -2764,7 +2847,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
      * (syntax-rules literals rule...) form and returns a self-evaluating
      * T_PRIMITIVE transformer — so a (syntax-rules ...) expression, e.g. as
      * define-syntax's transformer-expr, already gets handled by the
-     * ordinary "macro expansion" check below like any other macro use,
+     * ordinary "macro expansion" case below like any other macro use,
      * with no eval()/tree-eval dependency at all. */
 
     /* Forms the compiler delegates to the tree-walker at runtime:
@@ -2777,85 +2860,66 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
        actually runs the form through eval() once. No tail/non-tail
        distinction needed -- these forms are side-effecting declarations
        that always return normally, never altering control flow. */
-    if (head == S_IMPORT        ||
-        head == S_DEFINE_LIBRARY || head == S_LIBRARY) {
+    case SF_TREE_EVAL: {
         int ci = chunk_add_const(c->chunk, expr);
         emit_ab(c, OP_TREE_EVAL_CACHED, (uint8_t)ci, line);
         return;
     }
 
-    /* Macro expansion: if head is a symbol bound to a macro, expand and
-       recompile. A local macro (let-syntax/letrec-syntax/internal
-       define-syntax, tracked in c->syntax_locals — see resolve_syntax_local)
-       shadows a same-named global one, matching ordinary lexical scoping.
+    /* Macro expansion: head is a symbol bound to a macro (classify_head
+       already resolved which one -- local macro via c->syntax_locals,
+       this chunk's own target_env, or GLOBAL_ENV, in that shadowing
+       order, with `transformer` set accordingly); expand and recompile.
        Expansion errors are deferred to runtime via (raise ...) so that
        guard forms inside lambdas can catch zero-clause or no-match errors. */
-    if (vis_symbol(head)) {
-        val_t transformer;
-        bool is_macro = resolve_syntax_local(c, head, &transformer);
-        if (!is_macro && c->chunk->target_env != V_VOID) {
-            /* A library body compiled against its own target_env (see
-             * chunk.h's Chunk::target_env comment) needs its OWN
-             * imported macros checked here too, not just GLOBAL_ENV --
-             * e.g. define-name-aliases (lib/curry/modules/curry/
-             * private/lang-aliases.scm), imported and used by nearly
-             * every (curry X)/SRFI library's own body. Checked before
-             * GLOBAL_ENV below, matching how a library-local import can
-             * shadow a same-named global one. */
-            val_t macro = env_lookup_or_false(c->chunk->target_env, head);
-            is_macro = vis_syntax(macro);
-            if (is_macro) transformer = as_syntax(macro)->transformer;
+    case SF_MACRO: {
+        ExnHandler h;
+        val_t expanded = V_FALSE;
+        val_t exn_val  = V_FALSE;
+        uint64_t _expand_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
+        /* sr_current_env (syntax_rules.c) is how sr_compile_fn learns
+         * a (syntax-rules ...) expression's defining environment, to
+         * capture as the resulting transformer's def_env -- eval.c's
+         * tree-walker save/set/restores this around every macro
+         * apply() (see its own comment at the analogous site), but
+         * this compiler.c macro-expansion call had no equivalent,
+         * leaving sr_current_env at its V_FALSE default (mapped to
+         * GLOBAL_ENV by sr_compile_fn) for every macro compiled here
+         * -- including a library's own (define-syntax ... (syntax-
+         * rules ...)) compiled against its target_env (chunk.h). That
+         * made sr_is_protected's def_env check miss any library-local
+         * helper procedure/macro a template referenced (only visible
+         * via target_env, never GLOBAL_ENV), incorrectly renaming it
+         * to a fresh gensym and breaking self-recursive macros that
+         * call a sibling from their own library body (found via
+         * (curry schematic extract)'s %match-case calling %match).
+         * Save/restore, not a bare set, so a nested macro expansion
+         * triggered from within this apply() doesn't leak this env
+         * into an unrelated later expansion. */
+        val_t saved_sr_env = sr_get_current_env();
+        sr_set_current_env(c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV);
+        SCM_PROTECT(h,
+            expanded = apply(transformer, scm_cons(expr, V_NIL)),
+            exn_val  = h.exn);
+        sr_set_current_env(saved_sr_env);
+        if (curry_timings_enabled)
+            curry_timing_expand_ns += profiling_now_ns() - _expand_t0;
+        if (exn_val != V_FALSE) {
+            /* Expansion failed — emit (raise <error>) to defer to runtime */
+            val_t raise_sym = sym_intern_cstr("raise");
+            val_t raise_form = scm_cons(raise_sym,
+                                   scm_cons(scm_cons(S_QUOTE,
+                                                scm_cons(exn_val, V_NIL)),
+                                            V_NIL));
+            compile(c, raise_form, tail, line);
+        } else {
+            compile(c, expanded, tail, line);
         }
-        if (!is_macro) {
-            val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
-            is_macro = vis_syntax(macro);
-            if (is_macro) transformer = as_syntax(macro)->transformer;
-        }
-        if (is_macro) {
-            ExnHandler h;
-            val_t expanded = V_FALSE;
-            val_t exn_val  = V_FALSE;
-            uint64_t _expand_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
-            /* sr_current_env (syntax_rules.c) is how sr_compile_fn learns
-             * a (syntax-rules ...) expression's defining environment, to
-             * capture as the resulting transformer's def_env -- eval.c's
-             * tree-walker save/set/restores this around every macro
-             * apply() (see its own comment at the analogous site), but
-             * this compiler.c macro-expansion call had no equivalent,
-             * leaving sr_current_env at its V_FALSE default (mapped to
-             * GLOBAL_ENV by sr_compile_fn) for every macro compiled here
-             * -- including a library's own (define-syntax ... (syntax-
-             * rules ...)) compiled against its target_env (chunk.h). That
-             * made sr_is_protected's def_env check miss any library-local
-             * helper procedure/macro a template referenced (only visible
-             * via target_env, never GLOBAL_ENV), incorrectly renaming it
-             * to a fresh gensym and breaking self-recursive macros that
-             * call a sibling from their own library body (found via
-             * (curry schematic extract)'s %match-case calling %match).
-             * Save/restore, not a bare set, so a nested macro expansion
-             * triggered from within this apply() doesn't leak this env
-             * into an unrelated later expansion. */
-            val_t saved_sr_env = sr_get_current_env();
-            sr_set_current_env(c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV);
-            SCM_PROTECT(h,
-                expanded = apply(transformer, scm_cons(expr, V_NIL)),
-                exn_val  = h.exn);
-            sr_set_current_env(saved_sr_env);
-            if (curry_timings_enabled)
-                curry_timing_expand_ns += profiling_now_ns() - _expand_t0;
-            if (exn_val != V_FALSE) {
-                /* Expansion failed — emit (raise <error>) to defer to runtime */
-                val_t raise_sym = sym_intern_cstr("raise");
-                val_t raise_form = scm_cons(raise_sym,
-                                       scm_cons(scm_cons(S_QUOTE,
-                                                    scm_cons(exn_val, V_NIL)),
-                                                V_NIL));
-                compile(c, raise_form, tail, line);
-            } else {
-                compile(c, expanded, tail, line);
-            }
-            return;
-        }
+        return;
+    }
+
+    case SF_NONE:
+        break;
     }
 
     /* Fallthrough: function call */
@@ -2886,28 +2950,39 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
  * evaluating literals, #:keyword symbols, ordinary variable references
  * (local/upvalue/global -- resolution decided here, once, exactly as
  * emit_load does today), quote, if, begin, set!, and, or (widened in the
- * second landing -- see IR_SET/IR_AND/IR_OR in ir.h), and `(define sym
+ * second landing -- see IR_SET/IR_AND/IR_OR in ir.h), `(define sym
  * expr)` (widened in the third landing -- see IR_DEFINE in ir.h; the
  * `(define (f params...) body...)` lambda-sugar shape is NOT covered,
- * see ir_lower_define's own comment). Every other form -- anything
- * compile() would otherwise handle further down its dispatch chain (let,
- * cond, case, named-let, lambda, calls, define-record-type,
- * define-syntax, the CAS forms, import/define-library/library, ...) --
- * is wrapped whole as an IR_FALLBACK leaf, whose ir_emit case is simply
- * `compile(c, expr, tail, line)`: byte-for-byte whatever would have
- * happened had ir_lower never run. This is what lets IR_IF/IR_SEQ cover
- * real programs (whose branches and begin-bodies routinely contain calls
- * and lets) without needing to
- * natively lower those forms first -- see the Tier 2.1 plan's
+ * see ir_lower_define's own comment), and ordinary/fused-global/self-
+ * tail calls (widened in the fourth landing -- see IR_CALL in ir.h).
+ * Every other form -- anything compile() would otherwise handle further
+ * down its dispatch chain (let, cond, case, named-let, lambda,
+ * define-record-type, define-syntax, the CAS forms, import/
+ * define-library/library, macro uses, ...) -- is wrapped whole as an
+ * IR_FALLBACK leaf, whose ir_emit case is simply `compile(c, expr, tail,
+ * line)`: byte-for-byte whatever would have happened had ir_lower never
+ * run. This is what lets IR_IF/IR_SEQ cover real programs (whose
+ * branches and begin-bodies routinely contain calls and lets) without
+ * needing to natively lower those forms first -- see the Tier 2.1 plan's
  * "explicitly deferred" list for what widens this in a follow-up.
  *
  * ir_lower is guaranteed to never return NULL: every input either matches
- * one of the native cases above or becomes an IR_FALLBACK leaf. Neither
- * function is wired into compile()'s own dispatch in this landing --
- * they exist, are exercised via compiler_ir_self_check (below and in
- * compiler.h) and tests/test_core.c, but the live compile path is
- * completely unchanged. Wiring them in behind the differential check is
- * the natural next increment once this skeleton is proven stable. */
+ * one of the native cases above or becomes an IR_FALLBACK leaf. ir_lower/
+ * ir_emit themselves are still never called from compile()'s own
+ * dispatch -- they exist, are exercised via compiler_ir_self_check
+ * (below and in compiler.h) and tests/test_core.c, but the LIVE compile
+ * path never runs them. What DID change in the fourth landing:
+ * compile()'s own dispatch now routes through classify_head (just above
+ * compile() itself) rather than re-testing `head` inline, specifically
+ * so ir_lower's own "is this actually a plain call?" question (needed
+ * for IR_CALL) can reuse that exact same classification instead of
+ * maintaining a second, driftable copy of the same ~35-symbol special-
+ * form list -- see classify_head's own comment. That refactor changes
+ * compile()'s dispatch MECHANISM but is verified behavior-preserving via
+ * the full test suite (ctest), not just the differential self-check.
+ * Wiring ir_lower/ir_emit themselves into compile() behind the
+ * differential check is the natural next increment once the skeleton
+ * covers enough of the language to be worth it. */
 
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line);
 static void    ir_emit(Compiler *c, IRNode *n);
@@ -3056,6 +3131,29 @@ static IRNode *ir_lower_define(Compiler *c, val_t args, int line) {
     return n;
 }
 
+/* Mirrors compile_call, but builds a single IR_CALL node rather than
+ * deciding self-tail/fused-global/generic here -- see ir.h's comment on
+ * IRNode::as.call for why that classification has to wait for ir_emit.
+ * `callee` is lowered eagerly (cheap, side-effect-free, like any other
+ * subtree); only used by ir_emit's generic-call fallback branch. */
+static IRNode *ir_lower_call(Compiler *c, val_t head, val_t args, bool tail, int line) {
+    int argc = 0;
+    for (val_t a = args; vis_pair(a); a = vcdr(a)) argc++;
+
+    IRNode *n = ir_node_new(c->ir_arena, IR_CALL, tail, line);
+    n->as.call.head   = head;
+    n->as.call.callee = ir_lower(c, head, false, line);
+    n->as.call.argc   = argc;
+    n->as.call.args   = argc > 0
+        ? (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *) * (size_t)argc)
+        : NULL;
+
+    int i = 0;
+    for (val_t a = args; vis_pair(a); a = vcdr(a))
+        n->as.call.args[i++] = ir_lower(c, vcar(a), false, line);
+    return n;
+}
+
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (vis_pair(expr) && as_pair(expr)->hdr.flags)
         line = (int)as_pair(expr)->hdr.flags;
@@ -3120,6 +3218,16 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
      * generic IR_FALLBACK wrap below -- see ir_lower_define's comment. */
     if (head == S_DEFINE && vis_pair(args) && vis_symbol(vcar(args)))
         return ir_lower_define(c, args, line);
+
+    /* Anything else compile() would treat as a special form or macro use
+     * (classify_head -- the same function compile() itself switches on,
+     * see its own comment) still falls back whole; only a genuine
+     * ordinary call (SF_NONE) gets natively lowered here. */
+    {
+        val_t transformer = V_FALSE;
+        if (classify_head(c, head, args, &transformer) == SF_NONE)
+            return ir_lower_call(c, head, args, tail, line);
+    }
 
     /* Not (yet) natively lowered -- delegate the whole subform. */
     IRNode *n = ir_node_new(c->ir_arena, IR_FALLBACK, tail, line);
@@ -3229,11 +3337,55 @@ static void ir_emit(Compiler *c, IRNode *n) {
         emit_define_store(c, n->as.def.name, n->line);
         return;
     }
+    case IR_CALL: {
+        /* Direct translation of compile_call's own three-branch
+         * classification -- see ir.h's comment on IRNode::as.call for
+         * why this decision (not just the resolution it depends on)
+         * happens here, at emit time, rather than during ir_lower.
+         *
+         * The self-tail-call sub-branch just below is currently
+         * unreachable via compiler_ir_self_check: c->self_tail_name is
+         * only ever armed by compile_let (for a named-let loop body),
+         * and compile_let only runs on the classic compile() path --
+         * S_LET itself is not natively IR-lowered (classify_head returns
+         * SF_LET, not SF_NONE), so a named-let's loop body is always
+         * inside an IR_FALLBACK leaf that ir_lower never recurses into,
+         * meaning ir_lower_call/this IR_CALL case never even sees it.
+         * Correct by direct mirroring of compile_call, but genuinely
+         * untested until named-let itself gets IR-lowered in a future
+         * landing -- see tests/test_core.c's own comment at the same
+         * spot (an earlier version of that test wrongly claimed this
+         * branch was covered; caught by independent code review). */
+        val_t head  = n->as.call.head;
+        int   argc  = n->as.call.argc;
+        bool  ctail = n->tail;
+
+        if (ctail && vis_symbol(head) && c->self_tail_name != V_FALSE &&
+            head == c->self_tail_name && !c->self_tail_mutated &&
+            resolve_local(c, head) < 0) {
+            resolve_upvalue(c, head);
+            for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+            emit_ab(c, OP_SELF_TAIL_CALL, (uint8_t)argc, n->line);
+            return;
+        }
+
+        if (vis_symbol(head) && !is_keyword_symbol(head) &&
+            resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
+            int ci = chunk_add_const(c->chunk, head);
+            for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+            emit_abc(c, ctail ? OP_TAIL_CALL_GLOBAL : OP_CALL_GLOBAL,
+                     (uint8_t)ci, (uint8_t)argc, n->line);
+            return;
+        }
+
+        ir_emit(c, n->as.call.callee);
+        for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+        emit_ab(c, ctail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, n->line);
+        return;
+    }
     case IR_LAMBDA:
-    case IR_CALL:
-    case IR_SELF_TAIL_CALL:
         /* Reserved for a future widening pass; ir_lower never constructs
-         * these yet (see this section's header comment). */
+         * this yet (see this section's header comment). */
         fprintf(stderr, "ir_emit: node kind %d not yet lowered\n", (int)n->kind);
         abort();
     }

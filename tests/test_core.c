@@ -269,6 +269,49 @@ static void test_ir_self_check(void) {
         "(define another-new-global)",
         "(begin (define p 1) (define q 2) (+ p q))",
         "(if #t (define ifdef-a 1) (define ifdef-b 2))",
+        /* calls -- ordinary/fused-global/self-tail, widened in the fourth
+         * landing. classify_head is what decides "not a special form or
+         * macro, so a call" here -- see IR_CALL in ir.h and
+         * classify_head's own comment. */
+        "(f)",
+        "(f 1)",
+        "(f 1 2 3)",
+        "(+ 1 (* 2 3))",
+        "((lambda (x) x) 5)",
+        /* No self-tail-call case here: `let`/named-let (S_LET) is itself
+         * not natively IR-lowered -- classify_head returns SF_LET, not
+         * SF_NONE, so ir_lower wraps the WHOLE named-let form (loop body
+         * included) as one IR_FALLBACK leaf and never recurses into it.
+         * self_tail_name is only ever armed by compile_let, which only
+         * runs on the classic compile() path that IR_FALLBACK's own
+         * ir_emit case delegates to -- ir_lower/ir_lower_call never see
+         * that body at all. IR_CALL's self-tail-call branch in ir_emit
+         * (mirrors compile_call's own guard exactly) is therefore
+         * correct-by-inspection but genuinely UNREACHABLE via this
+         * differential self-check today, and any attempt to write a
+         * named-let test case here would silently test nothing (an
+         * earlier version of this test did exactly that -- caught by
+         * independent code review). Real coverage arrives once named-let
+         * itself gets IR-lowered in a future landing. Manually verified
+         * against the live compile() path instead: `curry -e '(display
+         * (let loop ((i 0) (acc 0)) (if (= i 100000) acc (loop (+ i 1)
+         * (+ acc i)))))'` runs the classic self-tail-call path
+         * correctly (unaffected by this landing, since ir_lower/ir_emit
+         * are still never called from compile()). */
+        /* receive/call-with-values with the "wrong" shape for the special
+         * form fall through to an ordinary call (classify_head's shaped
+         * checks) -- see compile()'s own SF_RECEIVE/SF_CALL_WITH_VALUES
+         * comments. */
+        "(receive 5)",
+        "(call-with-values f)",
+        /* calls nested inside already-lowered forms, mixing IR_CALL with
+         * IR_IF/IR_SEQ/IR_AND/IR_OR/IR_DEFINE siblings -- the exact shape
+         * that caught real ordering bugs in earlier landings. */
+        "(if (f 1) (g 2) (h 3))",
+        "(begin (f 1) (g 2) (h 3))",
+        "(and (f 1) (g 2))",
+        "(or (f 1) (g 2))",
+        "(define computed (f (g 1) (h 2)))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));

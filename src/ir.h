@@ -54,14 +54,24 @@ typedef enum {
                      * landing; the (define (f params...) body...) lambda-
                      * sugar case still falls back whole, see
                      * ir_lower_define's comment */
+    IR_CALL,        /* ordinary call, fused-global call, AND self-tail-
+                     * call -- widened in the fourth landing. All three
+                     * are ONE node kind, not three: which of them a given
+                     * call site actually is depends on resolve_local/
+                     * resolve_upvalue(head), which (like every other
+                     * ordering-sensitive resolution in this IR) can only
+                     * be decided at ir_emit time -- see this kind's own
+                     * `call` field comment below. There is deliberately
+                     * no separate IR_SELF_TAIL_CALL kind: it is a
+                     * classification IR_CALL's own ir_emit case makes
+                     * internally, exactly mirroring how compile_call
+                     * itself decides between OP_SELF_TAIL_CALL/
+                     * OP_CALL_GLOBAL/OP_CALL at one call site, not a
+                     * decision ir_lower could make ahead of time. */
 
     /* Reserved for a future widening pass (see Tier 2.1 plan's deferred
-     * list) -- not constructed by ir_lower in this landing. Listed here
-     * so the schema doesn't need another revision when calls/lambda get
-     * lowered natively. */
+     * list) -- not constructed by ir_lower in this landing. */
     IR_LAMBDA,
-    IR_CALL,
-    IR_SELF_TAIL_CALL,
 } IRKind;
 
 typedef struct IRNode IRNode;
@@ -153,6 +163,24 @@ struct IRNode {
          * that requires compile_lambda -- not yet IR-lowered (see
          * IR_LAMBDA above). */
         struct { val_t name; IRNode *value; } def;             /* IR_DEFINE */
+        /* `head` is deliberately the raw, unresolved val_t (a symbol, or
+         * any other expression when the callee position isn't a bare
+         * name) -- classify_head/compile_call's own self-tail/fused-
+         * global/generic classification runs entirely on resolve_local/
+         * resolve_upvalue(head), which must happen at ir_emit time, in
+         * ir_emit's own left-to-right walk order, for the same reason
+         * IR_VAR_REF/IR_SET/IR_DEFINE defer their own resolution there
+         * (see IR_VAR_REF's comment above) -- so ir_lower_call must NOT
+         * pre-decide the classification, only hand ir_emit everything it
+         * needs to decide it itself. `callee` is `head` already run
+         * through ir_lower (cheap and side-effect-free at lower time,
+         * same as any other subtree) -- used only by the generic-call
+         * branch, when classification falls through past both the
+         * self-tail and fused-global fast paths; built eagerly anyway so
+         * ir_emit never needs to call ir_lower mid-emit. `args` are
+         * always lowered non-tail, matching every one of compile_call's
+         * three branches. */
+        struct { val_t head; IRNode *callee; IRNode **args; int argc; } call; /* IR_CALL */
     } as;
 };
 
