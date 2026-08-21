@@ -70,6 +70,7 @@
 #include "sx_algebra.h"
 #include "sx_pattern.h"
 #include "curry_features.h"
+#include "set.h"
 
 /* ── Compiler scope structures ───────────────────────────────────────── */
 
@@ -3550,6 +3551,125 @@ bool compiler_ir_self_check(val_t expr) {
 
     if (raised) scm_raise_val(h.exn);
     return same;
+}
+
+/* ── Tier 2.2: cheap IR optimizations (docs/thoughts/
+ * performance-chez-kaappi.md §5, item 2.2) ─────────────────────────────
+ *
+ * ir_optimize runs on an already-lowered tree, between ir_lower and
+ * ir_emit, and rewrites it in place (no arena allocation -- it only ever
+ * splices existing subtrees into a parent's slot or leaves a node
+ * untouched, never builds a new one). Landing one transform for now:
+ * dead-branch elimination on IR_IF, `(if <const> then else)` folding to
+ * whichever branch the constant's truthiness picks, entirely discarding
+ * the OTHER branch's bytecode and the test's own load+jump instructions.
+ *
+ * This is the first Tier 2.1/2.2 transform in this codebase that
+ * deliberately produces DIFFERENT bytecode than compile()'s own
+ * unoptimized output for affected inputs -- every prior landing
+ * (IR_SET/AND/OR/DEFINE/CALL/LAMBDA) was required to be byte-identical,
+ * verified by compiler_ir_self_check's memcmp. That comparison does NOT
+ * apply here (an optimizer whose output always byte-matches unoptimized
+ * code isn't optimizing anything); compiler_ir_optimize_check (below)
+ * verifies this pass by actually RUNNING both compiled forms and
+ * comparing their RESULTS instead.
+ *
+ * A folded branch's own `->tail` field is already correct without
+ * adjustment: ir_lower_if lowers `then`/`els` with the SAME `tail` value
+ * the IR_IF node itself received, so splicing the taken branch directly
+ * into the parent's slot preserves tail-position correctness for free.
+ *
+ * IR_LAMBDA is deliberately NOT recursed into: its body is raw val_t at
+ * this point in the pipeline (see IRNode::as.lambda's own comment in
+ * ir.h), not yet an IR tree -- there is nothing for this pass to walk
+ * until IR_LAMBDA's own ir_emit does its interleaved lower+emit walk,
+ * which is a separate concern from this pass. IR_FALLBACK is opaque for
+ * the same reason (raw val_t, not a tree) and IR_VAR_REF/IR_CONST are
+ * leaves -- none of these four kinds get a case below; they fall through
+ * to the default `return n` unchanged. */
+static IRNode *ir_optimize(IRNode *n) {
+    switch (n->kind) {
+    case IR_IF: {
+        IRNode *test = ir_optimize(n->as.iff.test);
+        if (test->kind == IR_CONST) {
+            bool truthy = test->as.konst.value != V_FALSE;
+            return ir_optimize(truthy ? n->as.iff.then : n->as.iff.els);
+        }
+        n->as.iff.test = test;
+        n->as.iff.then = ir_optimize(n->as.iff.then);
+        n->as.iff.els  = ir_optimize(n->as.iff.els);
+        return n;
+    }
+    case IR_SEQ:
+        for (int i = 0; i < n->as.seq.count; i++)
+            n->as.seq.items[i] = ir_optimize(n->as.seq.items[i]);
+        return n;
+    case IR_SET:
+        n->as.set.value = ir_optimize(n->as.set.value);
+        return n;
+    case IR_AND:
+    case IR_OR:
+        for (int i = 0; i < n->as.andor.count; i++)
+            n->as.andor.items[i] = ir_optimize(n->as.andor.items[i]);
+        return n;
+    case IR_DEFINE:
+        n->as.def.value = ir_optimize(n->as.def.value);
+        return n;
+    case IR_CALL:
+        n->as.call.callee = ir_optimize(n->as.call.callee);
+        for (int i = 0; i < n->as.call.argc; i++)
+            n->as.call.args[i] = ir_optimize(n->as.call.args[i]);
+        return n;
+    default:
+        return n;
+    }
+}
+
+bool compiler_ir_optimize_check(val_t expr) {
+    gc_inhibit_minor();
+
+    Compiler old_c;
+    init_compiler(&old_c, NULL, "<ir-opt-check-old>");
+
+    Compiler new_c;
+    init_compiler(&new_c, NULL, "<ir-opt-check-new>");
+    new_c.ir_arena = ir_arena_new();
+
+    int  line   = g_reader_last_line;
+    bool equal  = false;
+    bool raised = false;
+    val_t exn   = V_FALSE;
+
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        compile(&old_c, expr, false, line);
+        chunk_emit(old_c.chunk, OP_RETURN, line);
+        old_c.chunk->upval_count = 0;
+        BcClosure *old_cl = vm_make_closure(old_c.chunk, 0);
+
+        IRNode *ir = ir_lower(&new_c, expr, false, line);
+        ir = ir_optimize(ir);
+        ir_emit(&new_c, ir);
+        chunk_emit(new_c.chunk, OP_RETURN, line);
+        new_c.chunk->upval_count = 0;
+        BcClosure *new_cl = vm_make_closure(new_c.chunk, 0);
+
+        vm_push(vptr(old_cl));
+        val_t old_result = vm_run(old_cl, 0);
+        vm_push(vptr(new_cl));
+        val_t new_result = vm_run(new_cl, 0);
+
+        equal = scm_equal(old_result, new_result);
+    }, {
+        raised = true;
+        exn    = h.exn;
+    });
+
+    ir_arena_free(new_c.ir_arena);
+    gc_resume_minor();
+
+    if (raised) scm_raise_val(exn);
+    return equal;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

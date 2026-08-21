@@ -440,6 +440,52 @@ static void test_ir_self_check(void) {
     }
 }
 
+/* Tier 2.2 (docs/thoughts/performance-chez-kaappi.md §5, item 2.2):
+ * compiler_ir_optimize_check(expr) actually RUNS both the classic and the
+ * ir_lower+ir_optimize+ir_emit compiled forms and compares RESULTS, not
+ * bytecode -- dead-branch elimination is only worth having if it produces
+ * DIFFERENT (shorter) bytecode for these inputs, so byte-identical
+ * comparison (compiler_ir_self_check's contract) doesn't apply. Every
+ * case here must be self-contained (no free/unbound variables, no
+ * observable side effects) since both sides are genuinely executed. */
+static void test_ir_optimize_check(void) {
+    static const char *cases[] = {
+        "(if #t 1 2)",
+        "(if #f 1 2)",
+        /* only #f is falsy in Scheme -- 0 and '() are both truthy,
+         * unlike some other Lisps. */
+        "(if 0 1 2)",
+        "(if '() 1 2)",
+        "(if #t (+ 1 2) (* 3 4))",
+        "(if #f (+ 1 2) (* 3 4))",
+        /* nested: the outer fold must recurse into the taken branch,
+         * which is itself a foldable IR_IF. */
+        "(if #t (if #f 10 20) 30)",
+        "(if #f (if #t 10 20) 30)",
+        /* the dead branch is never compiled at all once eliminated --
+         * (car '()) would raise at runtime if it ever executed, proving
+         * this isn't just a runtime-skipped jump. */
+        "(if #t 42 (car '()))",
+        "(if #f (car '()) 42)",
+        /* test itself is a nested foldable expression, not a bare
+         * literal -- ir_optimize must recurse into iff.test too. */
+        "(if (if #t #t #f) 1 2)",
+        /* IR_IF nested inside other already-lowered forms -- the fold
+         * must still fire when it's not the top-level node. */
+        "(begin 0 (if #t 'a 'b))",
+        "(and #t (if #f 1 2))",
+        "(or #f (if #t 1 2))",
+        "(define x (if #t 10 20))",
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
+        val_t expr = scm_read(port);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "ir optimize-check: %s", cases[i]);
+        CHECK(compiler_ir_optimize_check(expr), msg);
+    }
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -463,6 +509,7 @@ int main(void) {
     RUN_TEST(test_records);
     RUN_TEST(test_guard);
     RUN_TEST(test_ir_self_check);
+    RUN_TEST(test_ir_optimize_check);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
