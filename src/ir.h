@@ -68,10 +68,9 @@ typedef enum {
                      * itself decides between OP_SELF_TAIL_CALL/
                      * OP_CALL_GLOBAL/OP_CALL at one call site, not a
                      * decision ir_lower could make ahead of time. */
-
-    /* Reserved for a future widening pass (see Tier 2.1 plan's deferred
-     * list) -- not constructed by ir_lower in this landing. */
-    IR_LAMBDA,
+    IR_LAMBDA,      /* widened in the fifth landing -- see this kind's own
+                     * `lambda` field comment below for why its body is
+                     * stored RAW, not pre-lowered into an IR tree. */
 } IRKind;
 
 typedef struct IRNode IRNode;
@@ -181,6 +180,36 @@ struct IRNode {
          * always lowered non-tail, matching every one of compile_call's
          * three branches. */
         struct { val_t head; IRNode *callee; IRNode **args; int argc; } call; /* IR_CALL */
+        /* `params`/`body` are deliberately the RAW, unprocessed val_t
+         * forms compile_lambda itself takes -- NOT pre-lowered into an IR
+         * tree during ir_lower, unlike every other node's subexpressions.
+         * Reason: a lambda body is compiled against a brand-new child
+         * Compiler (fresh locals[]/upvals[]/syntax_locals[], its own
+         * Chunk) that doesn't exist yet at ir_lower time, and doesn't
+         * meaningfully exist as a *concept* until ir_emit is ready to
+         * create it -- resolve_upvalue's own capture-chain walk
+         * (compiler.c) needs `child.enclosing` to be the REAL, live
+         * parent Compiler stack frame, not something reconstructible
+         * from an arena snapshot. Worse, an internal (define-syntax ...)
+         * inside the body registers into that child's OWN syntax_locals
+         * table (compile_define_syntax, mid-walk) for LATER forms in the
+         * same body to see via classify_head's macro lookup -- if the
+         * whole body were pre-lowered in one pass against some
+         * proxy/placeholder Compiler, a later form using an earlier
+         * form's local macro would classify wrong (misread as an
+         * ordinary call instead of expanding it), since the proxy would
+         * never see that registration in the right order. ir_emit's
+         * IR_LAMBDA case creates the real child Compiler, runs the same
+         * prescan compile_lambda uses (lambda_prescan, compiler.c), then
+         * walks body forms one at a time -- ir_lower(&child, form, ...)
+         * immediately followed by ir_emit(&child, that_node) -- exactly
+         * interleaved the way compile_seq's own per-form compile() call
+         * is, so a macro registered by form i is visible by the time
+         * form i+1 is classified. `name` is the JIT/debug label
+         * (compile_lambda's own `name` parameter) -- NULL for an
+         * anonymous (lambda ...), the bound symbol's C string for
+         * `(define (f ...) ...)` sugar. */
+        struct { val_t params; val_t body; const char *name; } lambda; /* IR_LAMBDA */
     } as;
 };
 

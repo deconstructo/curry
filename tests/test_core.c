@@ -10,6 +10,7 @@
 #include "set.h"
 #include "object.h"
 #include "compiler.h"
+#include "vm.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -32,6 +33,14 @@ static void init(void) {
     fprintf(stderr, "eval_init\n"); eval_init();
     fprintf(stderr, "actors_init\n"); actors_init();
     fprintf(stderr, "modules_init\n"); modules_init();
+    /* Needed by anything that runs compiled bytecode on the VM rather
+     * than tree-walking via eval() -- e.g. compile_time_eval (compiler.c),
+     * which define-syntax uses to construct a macro's transformer. Every
+     * test in this binary happened to go through eval()/run() until the
+     * Tier 2.1 IR's lambda-widening tests added an internal define-syntax
+     * case, which segfaulted on a NULL _Thread_local `vm` (vm.c) -- this
+     * gap was always latent, just never previously exercised. */
+    fprintf(stderr, "vm_init\n"); vm_init();
     fprintf(stderr, "init done\n");
 }
 
@@ -312,6 +321,51 @@ static void test_ir_self_check(void) {
         "(and (f 1) (g 2))",
         "(or (f 1) (g 2))",
         "(define computed (f (g 1) (h 2)))",
+        /* lambda -- widened in the fifth landing. The body is walked
+         * (lowered AND emitted) against a real child Compiler created at
+         * ir_emit time -- see IR_LAMBDA in ir.h. */
+        "(lambda (x) x)",
+        "((lambda (x) x) 5)",
+        "((lambda (x y) (+ x y)) 3 4)",
+        "((lambda () 42))",
+        "((lambda () ))",
+        /* dotted (rest) params -- compile_params' negative-arity path. */
+        "((lambda (a . rest) rest) 1 2 3)",
+        /* multi-form body: non-last forms need the OP_POP glue compile_seq
+         * emits, at the SPINE cell's own line, not the item's -- the same
+         * class of bug an earlier landing's IR_SEQ caught (see ir.h's
+         * pop_lines comment). */
+        "((lambda (x) (+ x 1) (+ x 2) (+ x 3)) 5)",
+        /* nested lambda closing over the outer's parameter -- upvalue
+         * capture across the child/parent Compiler boundary. */
+        "((lambda (n) (lambda (x) (+ x n))) 3)",
+        "(((lambda (n) (lambda (x) (+ x n))) 3) 4)",
+        /* internal define -- letrec* self-recursion: `fact` (itself a
+         * nested lambda, sugar-defined) calling itself from within its
+         * OWN body, which is a DIFFERENT child Compiler one level deeper
+         * than the internal define's own scope. */
+        "((lambda (n) (define (fact k acc) (if (= k 0) acc (fact (- k 1) (* k acc)))) (fact n 1)) 5)",
+        /* internal define-syntax registered mid-body, used by a LATER
+         * form in the SAME body -- the exact scoping hazard IR_LAMBDA's
+         * own design comment (ir.h) exists to avoid: a naively bulk-
+         * lowered body would classify the later use as an ordinary call
+         * instead of expanding it, since a proxy Compiler would never see
+         * the registration in the right order. */
+        "((lambda () (define-syntax my-const (syntax-rules () ((_) 42))) (my-const)))",
+        /* internal define-record-type -- one of lambda_prescan's
+         * multi-binding cases (constructor + predicate + accessor). */
+        "((lambda () (define-record-type point (make-point x y) point? (x point-x) (y point-y)) (point-x (make-point 1 2))))",
+        /* internal (symbolic ...) -- reserves a local slot without R7RS's
+         * definitions-must-precede-expressions restriction. */
+        "((lambda () (symbolic x) x))",
+        /* define lambda-sugar -- now natively lowered as IR_DEFINE{value
+         * = IR_LAMBDA} instead of falling back whole (see
+         * ir_lower_define_lambda_sugar's comment). */
+        "(define (add1 x) (+ x 1))",
+        "(begin (define (add1 x) (+ x 1)) (add1 5))",
+        /* self-recursive top-level define lambda-sugar -- `fact` resolves
+         * as a fused-global call from within its own IR_LAMBDA body. */
+        "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));

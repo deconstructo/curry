@@ -423,17 +423,16 @@ static int compile_params(Compiler *c, val_t params) {
 
 /* ── Lambda compilation ───────────────────────────────────────────────── */
 
-static void compile_lambda(Compiler *parent, val_t params, val_t body,
-                            const char *name, int line) {
-    Compiler c;
-    init_compiler(&c, parent, name);
-
-    int arity = compile_params(&c, params);
-    c.chunk->arity = arity;
-    begin_scope(&c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
-
-    /* Scan for internal defines and pre-declare as locals (letrec* semantics).
-     * Also enforce R7RS: definitions must precede all expressions in the body. */
+/* Scan a lambda body for internal defines and pre-declare them as locals
+ * (letrec* semantics), enforcing R7RS's "definitions must precede all
+ * expressions in the body". Factored out of compile_lambda so ir_emit's
+ * IR_LAMBDA case (compiler.c, Tier 2.1 IR section) can run the identical
+ * prescan against its own freshly-created child Compiler -- this step is
+ * inherently imperative (add_local + immediate OP_VOID emission in
+ * lockstep, so a later real store lands on the exact stack slot the
+ * reservation carved out) and has no natural IR-tree representation, so
+ * both callers just run it directly rather than duplicating it. */
+static void lambda_prescan(Compiler *c, val_t body, int line) {
     val_t bscan = body;
     bool body_has_expr = false;
     while (vis_pair(bscan)) {
@@ -462,9 +461,9 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
             lang_translate(vcar(form)) == S_SYMBOLIC) {
             for (val_t p = vcdr(form); vis_pair(p); p = vcdr(p)) {
                 if (!vis_symbol(vcar(p))) continue;
-                add_local(&c, vcar(p));
-                c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                emit(&c, OP_VOID, line); /* reserve stack slot */
+                add_local(c, vcar(p));
+                c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+                emit(c, OP_VOID, line); /* reserve stack slot */
             }
         }
 
@@ -481,9 +480,9 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                 RecordTypeSpec spec;
                 record_type_build_spec(vcdr(form), V_FALSE, &spec);
                 for (int i = 0; i < spec.count; i++) {
-                    add_local(&c, spec.bindings[i].name);
-                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                    add_local(c, spec.bindings[i].name);
+                    c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+                    emit(c, OP_VOID, line); /* reserve stack slot */
                 }
             } else if (lang_translate(vcar(form)) == S_DEFINE_SYNTAX) {
                 /* Macro registration is pure compile-time bookkeeping (see
@@ -519,9 +518,9 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                 val_t op_expr = vis_pair(vcdr(form)) ? vcar(vcdr(form)) : V_FALSE;
                 val_t sym;
                 if (is_quoted_symbol(op_expr, &sym)) {
-                    add_local(&c, sym);
-                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                    add_local(c, sym);
+                    c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+                    emit(c, OP_VOID, line); /* reserve stack slot */
                 }
             } else if (lang_translate(vcar(form)) == S_DEFINE_VALUES) {
                 /* (define-values (var...) expr) binds N names, not one --
@@ -539,22 +538,22 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
                  * need to duplicate that validation in the prescan. */
                 val_t vars = vis_pair(vcdr(form)) ? vcar(vcdr(form)) : V_NIL;
                 for (val_t p = vars; vis_pair(p) && vis_symbol(vcar(p)); p = vcdr(p)) {
-                    add_local(&c, vcar(p));
-                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                    add_local(c, vcar(p));
+                    c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+                    emit(c, OP_VOID, line); /* reserve stack slot */
                 }
             } else {
                 val_t defname = vcar(vcdr(form));
                 if (vis_symbol(defname)) {
                     /* simple (define x ...) */
-                    add_local(&c, defname);
-                    c.locals[c.local_count - 1].depth = -1; /* uninitialised */
-                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                    add_local(c, defname);
+                    c->locals[c->local_count - 1].depth = -1; /* uninitialised */
+                    emit(c, OP_VOID, line); /* reserve stack slot */
                 } else if (vis_pair(defname)) {
                     /* (define (f ...) ...) sugar */
-                    add_local(&c, vcar(defname));
-                    c.locals[c.local_count - 1].depth = -1;
-                    emit(&c, OP_VOID, line); /* reserve stack slot */
+                    add_local(c, vcar(defname));
+                    c->locals[c->local_count - 1].depth = -1;
+                    emit(c, OP_VOID, line); /* reserve stack slot */
                 }
             }
         } else {
@@ -562,6 +561,18 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
         }
         bscan = vcdr(bscan);
     }
+}
+
+static void compile_lambda(Compiler *parent, val_t params, val_t body,
+                            const char *name, int line) {
+    Compiler c;
+    init_compiler(&c, parent, name);
+
+    int arity = compile_params(&c, params);
+    c.chunk->arity = arity;
+    begin_scope(&c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
+
+    lambda_prescan(&c, body, line);
 
     compile_seq(&c, body, true, line);
     Chunk *ch = end_compiler(&c);
@@ -3113,14 +3124,7 @@ static IRNode *ir_lower_or(Compiler *c, val_t args, bool tail, int line) {
     return n;
 }
 
-/* Mirrors compile_define's `(define sym expr)` case exactly. The
- * `(define (f params...) body...)` lambda-sugar case is deliberately NOT
- * handled here -- ir_lower's own S_DEFINE dispatch only calls this
- * function when the target is already a bare symbol; a pair target (or
- * anything else compile_define's own error path would reject) falls
- * through to the generic IR_FALLBACK wrap, since expanding lambda sugar
- * needs compile_lambda, which isn't IR-lowered yet (see IR_LAMBDA in
- * ir.h). */
+/* Mirrors compile_define's `(define sym expr)` case exactly. */
 static IRNode *ir_lower_define(Compiler *c, val_t args, int line) {
     val_t name  = vcar(args);
     val_t rest  = vcdr(args);
@@ -3128,6 +3132,35 @@ static IRNode *ir_lower_define(Compiler *c, val_t args, int line) {
     IRNode *n = ir_node_new(c->ir_arena, IR_DEFINE, false, line);
     n->as.def.name  = name;
     n->as.def.value = ir_lower(c, value, false, line);
+    return n;
+}
+
+/* Mirrors compile_lambda's own signature. Deliberately does NOT lower the
+ * body here -- see ir.h's comment on IRNode::as.lambda for why the body
+ * has to wait for ir_emit to create the real child Compiler it belongs
+ * to (a scope that doesn't exist, and can't be faked, until then). */
+static IRNode *ir_lower_lambda(Compiler *c, val_t params, val_t body,
+                                const char *name, int line) {
+    IRNode *n = ir_node_new(c->ir_arena, IR_LAMBDA, false, line);
+    n->as.lambda.params = params;
+    n->as.lambda.body   = body;
+    n->as.lambda.name   = name;
+    return n;
+}
+
+/* Mirrors compile_define's `(define (f params...) body...)` lambda-sugar
+ * case exactly (name = vcar(target), params = vcdr(target), rest = the
+ * lambda body) -- builds IR_DEFINE{value = IR_LAMBDA} now that IR_LAMBDA
+ * exists, instead of falling the whole form back to IR_FALLBACK the way
+ * the third landing had to. */
+static IRNode *ir_lower_define_lambda_sugar(Compiler *c, val_t args, int line) {
+    val_t target = vcar(args);
+    val_t rest   = vcdr(args);
+    val_t name   = vcar(target);
+    val_t params = vcdr(target);
+    IRNode *n = ir_node_new(c->ir_arena, IR_DEFINE, false, line);
+    n->as.def.name  = name;
+    n->as.def.value = ir_lower_lambda(c, params, rest, as_sym(name)->data, line);
     return n;
 }
 
@@ -3213,11 +3246,18 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_SET)   return ir_lower_set(c, args, line);
     if (head == S_AND)   return ir_lower_and(c, args, tail, line);
     if (head == S_OR)    return ir_lower_or(c, args, tail, line);
-    /* Only the `(define sym expr)` shape is natively lowered; a pair
-     * target (lambda sugar) or malformed args falls through to the
-     * generic IR_FALLBACK wrap below -- see ir_lower_define's comment. */
-    if (head == S_DEFINE && vis_pair(args) && vis_symbol(vcar(args)))
-        return ir_lower_define(c, args, line);
+    if (head == S_LAMBDA && vis_pair(args))
+        return ir_lower_lambda(c, vcar(args), vcdr(args), NULL, line);
+    /* Both `(define sym expr)` and `(define (f params...) body...)`
+     * lambda-sugar are natively lowered (the latter via IR_LAMBDA, now
+     * that it exists -- see ir_lower_define_lambda_sugar's comment);
+     * anything else (malformed args) falls through to the generic
+     * IR_FALLBACK wrap below, matching compile_define's own error path. */
+    if (head == S_DEFINE && vis_pair(args)) {
+        val_t target = vcar(args);
+        if (vis_symbol(target)) return ir_lower_define(c, args, line);
+        if (vis_pair(target))   return ir_lower_define_lambda_sugar(c, args, line);
+    }
 
     /* Anything else compile() would treat as a special form or macro use
      * (classify_head -- the same function compile() itself switches on,
@@ -3383,11 +3423,67 @@ static void ir_emit(Compiler *c, IRNode *n) {
         emit_ab(c, ctail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, n->line);
         return;
     }
-    case IR_LAMBDA:
-        /* Reserved for a future widening pass; ir_lower never constructs
-         * this yet (see this section's header comment). */
-        fprintf(stderr, "ir_emit: node kind %d not yet lowered\n", (int)n->kind);
-        abort();
+    case IR_LAMBDA: {
+        /* Direct translation of compile_lambda -- see ir.h's comment on
+         * IRNode::as.lambda for why the body is walked (lowered AND
+         * emitted, one form at a time) here rather than during ir_lower:
+         * this is the point where the real child Compiler this body
+         * belongs to finally exists. */
+        Compiler child;
+        init_compiler(&child, c, n->as.lambda.name);
+
+        int arity = compile_params(&child, n->as.lambda.params);
+        child.chunk->arity = arity;
+        begin_scope(&child);  /* body scope: depth 1+, matches compile_lambda */
+
+        lambda_prescan(&child, n->as.lambda.body, n->line);
+
+        /* Interleaved lower-then-emit walk, one body form at a time,
+         * against the now-real child compiler -- mirrors compile_seq(
+         * &child, body, true, line) exactly (including its own per-spine
+         * -cell line tracking), just with ir_lower+ir_emit standing in
+         * for compile()'s direct call per form. */
+        val_t list = n->as.lambda.body;
+        if (vis_nil(list)) {
+            emit(&child, OP_VOID, n->line);
+        } else {
+            int seq_line = n->line;
+            while (vis_pair(list)) {
+                val_t expr = vcar(list);
+                val_t rest = vcdr(list);
+                bool  last = vis_nil(rest);
+                if (as_pair(list)->hdr.flags)
+                    seq_line = (int)as_pair(list)->hdr.flags;
+                IRNode *form_ir = ir_lower(&child, expr, last, seq_line);
+                ir_emit(&child, form_ir);
+                if (!last) emit(&child, OP_POP, seq_line);
+                list = rest;
+            }
+        }
+
+        Chunk *ch = end_compiler(&child);
+
+        /* Preserve source AST and upvalue names for tiered JIT hot-swap --
+         * matches compile_lambda exactly. */
+        ch->src_lambda = scm_cons(S_LAMBDA,
+                              scm_cons(n->as.lambda.params, n->as.lambda.body));
+        if (child.upval_count > 0) {
+            ch->upval_names = (val_t *)gc_alloc_raw_pinned(
+                                  (size_t)child.upval_count * sizeof(val_t));
+            for (int i = 0; i < child.upval_count; i++)
+                ch->upval_names[i] = child.upvals[i].name;
+        }
+
+        /* In parent: emit OP_CLOSURE followed by upvalue descriptors --
+         * matches compile_lambda exactly. */
+        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)ch);
+        emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
+        for (int i = 0; i < child.upval_count; i++) {
+            chunk_emit(c->chunk, child.upvals[i].is_local ? 1 : 0, n->line);
+            chunk_emit(c->chunk, (uint8_t)child.upvals[i].index,   n->line);
+        }
+        return;
+    }
     }
 }
 
