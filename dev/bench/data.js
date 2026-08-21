@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787215872356,
+  "lastUpdate": 1787304932030,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6347,6 +6347,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 57.082,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "be153aeb4abc2335876ec93cc789cf1551a50186",
+          "message": "Merge pull request #63 from deconstructo/tier2-ir-widen-1\n\nfeat(compiler): widen Tier 2.1 IR + land first Tier 2.2 optimization\n\napparent performance drop - but this will be accepted",
+          "timestamp": "2026-08-21T19:34:43+10:00",
+          "tree_id": "d2de00c7e0da0c7efe19fa6a4241d84e63a9a2b8",
+          "url": "https://github.com/deconstructo/curry/commit/be153aeb4abc2335876ec93cc789cf1551a50186"
+        },
+        "date": 1787304928944,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.106,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.509,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 23.479,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.244,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 243.66,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 52.805,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 80.896,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 64.311,
             "unit": "ms"
           }
         ]
