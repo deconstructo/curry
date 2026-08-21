@@ -47,15 +47,17 @@ typedef enum {
     /* Combinators */
     IR_IF,
     IR_SEQ,         /* begin; only the last element inherits `tail` */
+    IR_SET,         /* set! -- widened in the second landing */
+    IR_AND,         /* widened in the second landing */
+    IR_OR,          /* widened in the second landing */
 
     /* Reserved for a future widening pass (see Tier 2.1 plan's deferred
      * list) -- not constructed by ir_lower in this landing. Listed here
-     * so the schema doesn't need another revision when calls/lambda/set!/
+     * so the schema doesn't need another revision when calls/lambda/
      * define get lowered natively. */
     IR_LAMBDA,
     IR_CALL,
     IR_SELF_TAIL_CALL,
-    IR_SET,
     IR_DEFINE,
 } IRKind;
 
@@ -119,6 +121,24 @@ struct IRNode {
          * lines[]-divergent) for macro-synthesized begin spines, found
          * by independent code review during Tier 2.1 development. */
         struct { IRNode **items; int *pop_lines; int count; } seq;  /* IR_SEQ */
+        /* Deliberately just the raw symbol, same reasoning as
+         * IR_VAR_REF's own `name` field above: emit_store (the store-
+         * side counterpart of emit_load) has the identical ordering-
+         * sensitive resolve_local/resolve_upvalue side effects, so
+         * resolution happens at ir_emit time via emit_store itself, not
+         * here. */
+        struct { val_t name; IRNode *value; } set;             /* IR_SET */
+        /* Shared by IR_AND and IR_OR -- both are "a list of tested
+         * expressions with early-exit," structurally identical to
+         * IR_SEQ's items array, but codegen is jump-based (short-circuit)
+         * rather than OP_POP-separated sequencing, so pop_lines has no
+         * meaning here; a separate struct avoids a meaningless field on
+         * every AND/OR node. Each items[i]'s own ->tail was set during
+         * lowering to match compile_and/compile_or's own per-item tail
+         * argument exactly -- see ir_lower_and/ir_lower_or's comments for
+         * the (deliberately preserved, not "fixed") asymmetry between the
+         * two: `and` propagates tail to its last item, `or` never does. */
+        struct { IRNode **items; int count; } andor;      /* IR_AND, IR_OR */
     } as;
 };
 

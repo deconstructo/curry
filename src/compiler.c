@@ -2885,15 +2885,16 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
  * recognizes a small, deliberately bounded subset natively: self-
  * evaluating literals, #:keyword symbols, ordinary variable references
  * (local/upvalue/global -- resolution decided here, once, exactly as
- * emit_load does today), quote, if, and begin. Every other form --
- * anything compile() would otherwise handle further down its dispatch
- * chain (let, cond, case, named-let, lambda, set!, define, and, or,
- * calls, define-record-type, define-syntax, the CAS forms, import/
- * define-library/library, ...) -- is wrapped whole as an IR_FALLBACK
- * leaf, whose ir_emit case is simply `compile(c, expr, tail, line)`:
- * byte-for-byte whatever would have happened had ir_lower never run.
- * This is what lets IR_IF/IR_SEQ cover real programs (whose branches and
- * begin-bodies routinely contain calls and lets) without needing to
+ * emit_load does today), quote, if, begin, set!, and, and or (the last
+ * three widened in the second landing -- see IR_SET/IR_AND/IR_OR in
+ * ir.h). Every other form -- anything compile() would otherwise handle
+ * further down its dispatch chain (let, cond, case, named-let, lambda,
+ * define, calls, define-record-type, define-syntax, the CAS forms,
+ * import/define-library/library, ...) -- is wrapped whole as an
+ * IR_FALLBACK leaf, whose ir_emit case is simply `compile(c, expr, tail,
+ * line)`: byte-for-byte whatever would have happened had ir_lower never
+ * run. This is what lets IR_IF/IR_SEQ cover real programs (whose branches
+ * and begin-bodies routinely contain calls and lets) without needing to
  * natively lower those forms first -- see the Tier 2.1 plan's
  * "explicitly deferred" list for what widens this in a follow-up.
  *
@@ -2965,6 +2966,75 @@ static IRNode *ir_lower_seq(Compiler *c, val_t list, bool tail, int line) {
     return n;
 }
 
+/* Mirrors compile_set (compiler.c) exactly: value compiled non-tail,
+ * name resolution deferred to ir_emit via emit_store (see IRNode::
+ * as.set's comment in ir.h). */
+static IRNode *ir_lower_set(Compiler *c, val_t args, int line) {
+    val_t name = vcar(args);
+    val_t expr = vcar(vcdr(args));
+    IRNode *n = ir_node_new(c->ir_arena, IR_SET, false, line);
+    n->as.set.name  = name;
+    n->as.set.value = ir_lower(c, expr, false, line);
+    return n;
+}
+
+/* Mirrors compile_and exactly, including which per-item tail value each
+ * item gets: only the last item inherits `tail`, matching `compile(c,
+ * vcar(args), last && tail, line)`. */
+static IRNode *ir_lower_and(Compiler *c, val_t args, bool tail, int line) {
+    if (vis_nil(args)) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_AND, tail, line);
+        n->as.andor.items = NULL;
+        n->as.andor.count = 0;
+        return n;
+    }
+    size_t count = 0;
+    for (val_t p = args; vis_pair(p); p = vcdr(p)) count++;
+
+    IRNode *n = ir_node_new(c->ir_arena, IR_AND, tail, line);
+    n->as.andor.items = (IRNode **)ir_arena_alloc(c->ir_arena,
+                                                   sizeof(IRNode *) * count);
+    n->as.andor.count = (int)count;
+
+    size_t i = 0;
+    while (vis_pair(args)) {
+        val_t next = vcdr(args);
+        bool  last = vis_nil(next);
+        n->as.andor.items[i++] = ir_lower(c, vcar(args), last && tail, line);
+        args = next;
+    }
+    return n;
+}
+
+/* Mirrors compile_or exactly -- deliberately, NOT symmetric with
+ * ir_lower_and: compile_or hardcodes `false` for every item's tail
+ * argument, including the last, unlike compile_and. Preserved as-is,
+ * see this landing's plan for why "fixing" this asymmetry is explicitly
+ * out of scope here. */
+static IRNode *ir_lower_or(Compiler *c, val_t args, bool tail, int line) {
+    if (vis_nil(args)) {
+        IRNode *n = ir_node_new(c->ir_arena, IR_OR, tail, line);
+        n->as.andor.items = NULL;
+        n->as.andor.count = 0;
+        return n;
+    }
+    size_t count = 0;
+    for (val_t p = args; vis_pair(p); p = vcdr(p)) count++;
+
+    IRNode *n = ir_node_new(c->ir_arena, IR_OR, tail, line);
+    n->as.andor.items = (IRNode **)ir_arena_alloc(c->ir_arena,
+                                                   sizeof(IRNode *) * count);
+    n->as.andor.count = (int)count;
+
+    size_t i = 0;
+    while (vis_pair(args)) {
+        val_t next = vcdr(args);
+        n->as.andor.items[i++] = ir_lower(c, vcar(args), false, line);
+        args = next;
+    }
+    return n;
+}
+
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (vis_pair(expr) && as_pair(expr)->hdr.flags)
         line = (int)as_pair(expr)->hdr.flags;
@@ -3021,6 +3091,9 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     }
     if (head == S_IF)    return ir_lower_if(c, args, tail, line);
     if (head == S_BEGIN) return ir_lower_seq(c, args, tail, line);
+    if (head == S_SET)   return ir_lower_set(c, args, line);
+    if (head == S_AND)   return ir_lower_and(c, args, tail, line);
+    if (head == S_OR)    return ir_lower_or(c, args, tail, line);
 
     /* Not (yet) natively lowered -- delegate the whole subform. */
     IRNode *n = ir_node_new(c->ir_arena, IR_FALLBACK, tail, line);
@@ -3074,10 +3147,58 @@ static void ir_emit(Compiler *c, IRNode *n) {
         }
         return;
     }
+    case IR_SET: {
+        ir_emit(c, n->as.set.value);
+        /* Resolution happens here, at emit time -- see ir.h's comment on
+         * IRNode::as.set for why. */
+        emit_store(c, n->as.set.name, n->line);
+        emit(c, OP_VOID, n->line);
+        return;
+    }
+    case IR_AND: {
+        /* Direct translation of compile_and's patch-list loop -- see
+         * ir_lower_and's comment for the exact tail-propagation this
+         * mirrors. Arena-allocated patch array sized to `count`, not
+         * compile_and's fixed MAX_LOCALS C-stack array -- no reason to
+         * inherit that specific bound here. */
+        int count = n->as.andor.count;
+        if (count == 0) { emit(c, OP_TRUE, n->line); return; }
+        int *patches = (int *)ir_arena_alloc(c->ir_arena, sizeof(int) * (size_t)count);
+        int np = 0;
+        for (int i = 0; i < count; i++) {
+            ir_emit(c, n->as.andor.items[i]);
+            if (i != count - 1)
+                patches[np++] = emit_jump(c, OP_JUMP_FALSE, n->line);
+        }
+        int end = emit_jump(c, OP_JUMP, n->line);
+        int false_pos = chunk_pos(c->chunk);
+        emit(c, OP_FALSE, n->line);
+        patch_jump(c, end);
+        for (int i = 0; i < np; i++)
+            chunk_patch16(c->chunk, patches[i], (uint16_t)false_pos);
+        return;
+    }
+    case IR_OR: {
+        /* Direct translation of compile_or's patch-list loop. */
+        int count = n->as.andor.count;
+        if (count == 0) { emit(c, OP_FALSE, n->line); return; }
+        int *patches = (int *)ir_arena_alloc(c->ir_arena, sizeof(int) * (size_t)count);
+        int np = 0;
+        for (int i = 0; i < count; i++) {
+            ir_emit(c, n->as.andor.items[i]);
+            if (i != count - 1) {
+                emit(c, OP_DUP, n->line);
+                patches[np++] = emit_jump(c, OP_JUMP_TRUE, n->line);
+                emit(c, OP_POP, n->line);
+            }
+        }
+        for (int i = 0; i < np; i++)
+            patch_jump(c, patches[i]);
+        return;
+    }
     case IR_LAMBDA:
     case IR_CALL:
     case IR_SELF_TAIL_CALL:
-    case IR_SET:
     case IR_DEFINE:
         /* Reserved for a future widening pass; ir_lower never constructs
          * these yet (see this section's header comment). */

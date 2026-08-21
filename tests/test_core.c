@@ -238,6 +238,28 @@ static void test_ir_self_check(void) {
         "(begin (define x 10) (if (> x 5) (* x 2) x))",
         "(let ((a 1) (b 2)) (if (< a b) (begin a (+ a b)) b))",
         "(if (if #t #f #t) 'a (begin 'b 'c))",
+        /* set! -- widened in the second landing */
+        "(set! some-global 5)",
+        "(begin (set! another-global (+ 1 2)) 'done)",
+        "(if #t (set! g1 1) (set! g2 2))",
+        /* and/or -- widened in the second landing */
+        "(and)",
+        "(and 1)",
+        "(and 1 2 3)",
+        "(and 1 #f 3)",
+        "(or)",
+        "(or #f)",
+        "(or #f 1 2)",
+        "(or 1 2)",
+        "(and (> 3 2) (< 1 2))",
+        "(or (> 1 2) (< 1 2))",
+        /* and/or nested inside if/begin, mixed with IR_FALLBACK-only
+         * subexpressions (calls) -- the exact shape that caught the two
+         * ordering bugs during the first landing. */
+        "(if (and (f 1) (g 2)) 'yes 'no)",
+        "(begin (or (h 1) (k 2)) 'tail)",
+        "(and (begin 1 2) (if #t 3 4))",
+        "(or (and 1 2) (and 3 #f))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
