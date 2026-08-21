@@ -30,6 +30,8 @@ cmake -B build-release -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-release -j$(sysctl -n hw.logicalcpu)
 ```
 
+(`qt@6`'s prefix lacks `Qt6Config.cmake`; CMake falls back to `qtbase` automatically — see [`module-qt6.md`](module-qt6.md).)
+
 ## See also
 
 - [`benchmarking.md`](benchmarking.md) — full benchmark suites and real-time Grafana monitoring

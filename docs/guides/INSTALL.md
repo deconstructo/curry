@@ -137,6 +137,8 @@ cmake --build build -j$(sysctl -n hw.logicalcpu)
 
 > Qt6 on macOS uses Metal for rendering. `QOpenGLWidget` is bridged through Apple's OpenGL compatibility layer; expect deprecation warnings at runtime but the module works correctly.
 
+> `brew --prefix qt@6` resolves to the umbrella `qt` formula, which doesn't actually ship `Qt6Config.cmake` (only its `qtbase` dependency does) — `CMakeLists.txt` falls back to `brew --prefix qtbase` automatically on macOS if the first `find_package(Qt6 …)` misses, so the command above still works. The module also bakes in Homebrew's Qt plugin directory at build time, so no `QT_QPA_PLATFORM_PLUGIN_PATH` env var is needed to run it.
+
 ### Notes
 
 - Modules build as `.so` bundles on both Linux and macOS; `(import (curry qt6))` works identically on both platforms.

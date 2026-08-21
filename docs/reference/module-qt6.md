@@ -18,6 +18,8 @@ cmake -B build -DBUILD_MODULE_QT6=ON \
 
 Build flag: `-DBUILD_MODULE_QT6=ON` (off by default).
 
+> `brew --prefix qt@6` resolves to the umbrella `qt` formula, which doesn't ship `Qt6Config.cmake` itself (only its `qtbase` dependency does). `CMakeLists.txt` falls back to `brew --prefix qtbase` automatically if the first `find_package(Qt6 …)` misses, so the command above works either way — pass `-DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"` directly to skip the fallback. The build also bakes in Homebrew's Qt plugin directory, so `(import (curry qt6))` doesn't need `QT_QPA_PLATFORM_PLUGIN_PATH` set to find the `cocoa` platform plugin at runtime.
+
 ## Import
 
 ```scheme

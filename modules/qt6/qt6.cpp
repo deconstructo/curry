@@ -190,6 +190,16 @@ static QApplication *s_app = nullptr;
 
 static void ensure_app() {
     if (s_app) return;
+#ifdef CURRY_QT6_PLUGIN_DIR
+    /* Homebrew's Qt6 keg isn't on the default plugin search path, so a
+     * freshly built curry_qt6.so aborts on QApplication construction with
+     * "Could not find the Qt platform plugin cocoa" unless something points
+     * it at the plugins directory. Respect an explicit user override
+     * (QT_QPA_PLATFORM_PLUGIN_PATH) if one is already set. */
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM_PLUGIN_PATH")) {
+        QCoreApplication::addLibraryPath(QStringLiteral(CURRY_QT6_PLUGIN_DIR));
+    }
+#endif
     QSurfaceFormat fmt;
     fmt.setVersion(3, 3);
     fmt.setProfile(QSurfaceFormat::CoreProfile);

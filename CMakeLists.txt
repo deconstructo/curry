@@ -569,12 +569,49 @@ endif()
 
 if(BUILD_MODULE_QT6)
   find_package(Qt6 QUIET COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
+  if(NOT Qt6_FOUND AND APPLE)
+    # Homebrew's umbrella "qt" formula (what `brew --prefix qt@6` resolves
+    # to) does not symlink Qt6Config.cmake into its own lib/cmake/Qt6 —
+    # only the "qtbase" keg it depends on actually ships it. Fall back to
+    # asking brew for qtbase directly before giving up.
+    find_program(CURRY_BREW_EXE brew)
+    if(CURRY_BREW_EXE)
+      execute_process(
+        COMMAND ${CURRY_BREW_EXE} --prefix qtbase
+        OUTPUT_VARIABLE CURRY_QTBASE_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+      if(CURRY_QTBASE_PREFIX AND EXISTS "${CURRY_QTBASE_PREFIX}/lib/cmake/Qt6")
+        # Prepend (not append): a broken umbrella "qt" prefix earlier in the
+        # list can shadow qtbase's working Qt6*Targets.cmake files with its
+        # own dangling ones and produce confusing "referenced file not
+        # found" errors even after qtbase is added. qtbase must win.
+        list(PREPEND CMAKE_PREFIX_PATH "${CURRY_QTBASE_PREFIX}")
+        find_package(Qt6 QUIET COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
+      endif()
+    endif()
+  endif()
   if(Qt6_FOUND)
     curry_cxx_module(qt6)
     set_target_properties(curry_qt6 PROPERTIES AUTOMOC ON)
     target_link_libraries(curry_qt6 PRIVATE
       Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets)
     message(STATUS "Qt6 ${Qt6_VERSION} found — building qt6 module")
+    if(APPLE)
+      # Bake in Homebrew's platform-plugins directory (libqcocoa.dylib etc.)
+      # so the module works without the user having to set
+      # QT_QPA_PLATFORM_PLUGIN_PATH themselves — see ensure_app() in
+      # modules/qt6/qt6.cpp. Qt6_DIR is <prefix>/lib/cmake/Qt6; Homebrew
+      # installs plugins under <prefix>/share/qt/plugins. This layout is
+      # Homebrew-specific, so it's scoped to APPLE rather than applied to
+      # every platform's Qt6_DIR guess.
+      get_filename_component(CURRY_QT6_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
+      set(CURRY_QT6_PLUGIN_DIR "${CURRY_QT6_PREFIX}/share/qt/plugins")
+      if(EXISTS "${CURRY_QT6_PLUGIN_DIR}/platforms")
+        target_compile_definitions(curry_qt6 PRIVATE
+          "CURRY_QT6_PLUGIN_DIR=\"${CURRY_QT6_PLUGIN_DIR}\"")
+      endif()
+    endif()
   else()
     message(WARNING "Qt6 not found, skipping qt6 module")
   endif()

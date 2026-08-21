@@ -32,7 +32,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_QT6=ON \
   -DBUILD_FFI=ON \
   -DBUILD_LLVM=ON \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6 (see note below)
 
 
 
@@ -46,6 +46,19 @@ cmake --build build -j$(sysctl -n hw.logicalcpu) # macOS
 # Run a script
 ./build/curry script.scm
 ```
+
+**Qt6 on macOS, note:** `brew --prefix qt@6` resolves to Homebrew's umbrella `qt`
+formula, whose `lib/cmake/Qt6/` does *not* actually contain `Qt6Config.cmake`
+(only `qtbase`, a dependency of `qt`, ships it) — passing that prefix alone used
+to make `find_package(Qt6 …)` silently fail and skip the module with just a
+`WARNING`, not an error, so it's easy to not notice. `CMakeLists.txt` now
+falls back to `brew --prefix qtbase` automatically on macOS when the initial
+`find_package` misses, so the command above works either way; pass
+`-DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"` directly if you want to skip
+the fallback. Once found, the qt6 module also bakes in Homebrew's Qt plugin
+directory at build time (see `CURRY_QT6_PLUGIN_DIR` in `modules/qt6/qt6.cpp`),
+so `(import (curry qt6))` no longer aborts with *"Could not find the Qt
+platform plugin cocoa"* — no `QT_QPA_PLATFORM_PLUGIN_PATH` env var needed.
 
 ## Dependencies
 

@@ -48,6 +48,12 @@ class Curry < Formula
   depends_on "libffi"   if build.with? "ffi"
   depends_on "mpfr"     if build.with? "mpfr"
   depends_on "qt@6"     if build.with? "qt6"
+  # qt@6 is an alias for the umbrella "qt" formula, which pulls in qtbase as
+  # a dependency but does not itself symlink Qt6Config.cmake into its own
+  # lib/cmake/Qt6 — only qtbase does. CMake's find_package(Qt6) needs
+  # qtbase's opt_prefix on CMAKE_PREFIX_PATH, so depend on it explicitly
+  # rather than relying on it being present transitively.
+  depends_on "qtbase"   if build.with? "qt6"
   depends_on "plplot"   if build.with? "plplot"
 
   def install
@@ -60,6 +66,12 @@ class Curry < Formula
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
     prefix_paths << Formula["libffi"].opt_prefix    if build.with? "ffi"
     prefix_paths << Formula["mpfr"].opt_prefix      if build.with? "mpfr"
+    # qtbase must precede qt@6 here: CMake's find_package(Qt6) picks the
+    # first matching prefix on CMAKE_PREFIX_PATH, and the umbrella qt@6
+    # tree has a Qt6CoreToolsConfig.cmake that references target files it
+    # doesn't actually ship (only qtbase's copy is complete) — putting
+    # qt@6 first makes the configure step fail outright.
+    prefix_paths << Formula["qtbase"].opt_prefix    if build.with? "qt6"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
 
