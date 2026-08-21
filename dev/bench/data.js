@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787310854478,
+  "lastUpdate": 1787313924565,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6485,6 +6485,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 57.388,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a06f5288769eafe436aa503d9c90ab11486ef3ed",
+          "message": "Merge pull request #65 from deconstructo/fix-delay-force-issue-51\n\nfix(builtins): force fully flattens delay-force chains of any depth",
+          "timestamp": "2026-08-21T22:04:27+10:00",
+          "tree_id": "d42f77c8f85d655559f8ce5c2cae795e1bb944f1",
+          "url": "https://github.com/deconstructo/curry/commit/a06f5288769eafe436aa503d9c90ab11486ef3ed"
+        },
+        "date": 1787313923913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.556,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.648,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.248,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.379,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 151.086,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 308.277,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.355,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.237,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.862,
             "unit": "ms"
           }
         ]
