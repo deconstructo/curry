@@ -47,16 +47,30 @@ typedef enum {
     /* Combinators */
     IR_IF,
     IR_SEQ,         /* begin; only the last element inherits `tail` */
-
-    /* Reserved for a future widening pass (see Tier 2.1 plan's deferred
-     * list) -- not constructed by ir_lower in this landing. Listed here
-     * so the schema doesn't need another revision when calls/lambda/set!/
-     * define get lowered natively. */
-    IR_LAMBDA,
-    IR_CALL,
-    IR_SELF_TAIL_CALL,
-    IR_SET,
-    IR_DEFINE,
+    IR_SET,         /* set! -- widened in the second landing */
+    IR_AND,         /* widened in the second landing */
+    IR_OR,          /* widened in the second landing */
+    IR_DEFINE,      /* (define sym expr) only -- widened in the third
+                     * landing; the (define (f params...) body...) lambda-
+                     * sugar case still falls back whole, see
+                     * ir_lower_define's comment */
+    IR_CALL,        /* ordinary call, fused-global call, AND self-tail-
+                     * call -- widened in the fourth landing. All three
+                     * are ONE node kind, not three: which of them a given
+                     * call site actually is depends on resolve_local/
+                     * resolve_upvalue(head), which (like every other
+                     * ordering-sensitive resolution in this IR) can only
+                     * be decided at ir_emit time -- see this kind's own
+                     * `call` field comment below. There is deliberately
+                     * no separate IR_SELF_TAIL_CALL kind: it is a
+                     * classification IR_CALL's own ir_emit case makes
+                     * internally, exactly mirroring how compile_call
+                     * itself decides between OP_SELF_TAIL_CALL/
+                     * OP_CALL_GLOBAL/OP_CALL at one call site, not a
+                     * decision ir_lower could make ahead of time. */
+    IR_LAMBDA,      /* widened in the fifth landing -- see this kind's own
+                     * `lambda` field comment below for why its body is
+                     * stored RAW, not pre-lowered into an IR tree. */
 } IRKind;
 
 typedef struct IRNode IRNode;
@@ -119,6 +133,83 @@ struct IRNode {
          * lines[]-divergent) for macro-synthesized begin spines, found
          * by independent code review during Tier 2.1 development. */
         struct { IRNode **items; int *pop_lines; int count; } seq;  /* IR_SEQ */
+        /* Deliberately just the raw symbol, same reasoning as
+         * IR_VAR_REF's own `name` field above: emit_store (the store-
+         * side counterpart of emit_load) has the identical ordering-
+         * sensitive resolve_local/resolve_upvalue side effects, so
+         * resolution happens at ir_emit time via emit_store itself, not
+         * here. */
+        struct { val_t name; IRNode *value; } set;             /* IR_SET */
+        /* Shared by IR_AND and IR_OR -- both are "a list of tested
+         * expressions with early-exit," structurally identical to
+         * IR_SEQ's items array, but codegen is jump-based (short-circuit)
+         * rather than OP_POP-separated sequencing, so pop_lines has no
+         * meaning here; a separate struct avoids a meaningless field on
+         * every AND/OR node. Each items[i]'s own ->tail was set during
+         * lowering to match compile_and/compile_or's own per-item tail
+         * argument exactly -- see ir_lower_and/ir_lower_or's comments for
+         * the (deliberately preserved, not "fixed") asymmetry between the
+         * two: `and` propagates tail to its last item, `or` never does. */
+        struct { IRNode **items; int count; } andor;      /* IR_AND, IR_OR */
+        /* Deliberately just the raw symbol, same reasoning as IR_SET's own
+         * `name` field above: emit_define_store has the same ordering-
+         * sensitive add_local/resolve_local side effects (it also mutates
+         * c->locals/c->local_count for a brand-new internal define), so
+         * resolution/declaration happens at ir_emit time via
+         * emit_define_store itself, not here. Only covers `(define sym
+         * expr)`; ir_lower_define falls the whole form back to
+         * IR_FALLBACK when the target is a pair (lambda sugar), since
+         * that requires compile_lambda -- not yet IR-lowered (see
+         * IR_LAMBDA above). */
+        struct { val_t name; IRNode *value; } def;             /* IR_DEFINE */
+        /* `head` is deliberately the raw, unresolved val_t (a symbol, or
+         * any other expression when the callee position isn't a bare
+         * name) -- classify_head/compile_call's own self-tail/fused-
+         * global/generic classification runs entirely on resolve_local/
+         * resolve_upvalue(head), which must happen at ir_emit time, in
+         * ir_emit's own left-to-right walk order, for the same reason
+         * IR_VAR_REF/IR_SET/IR_DEFINE defer their own resolution there
+         * (see IR_VAR_REF's comment above) -- so ir_lower_call must NOT
+         * pre-decide the classification, only hand ir_emit everything it
+         * needs to decide it itself. `callee` is `head` already run
+         * through ir_lower (cheap and side-effect-free at lower time,
+         * same as any other subtree) -- used only by the generic-call
+         * branch, when classification falls through past both the
+         * self-tail and fused-global fast paths; built eagerly anyway so
+         * ir_emit never needs to call ir_lower mid-emit. `args` are
+         * always lowered non-tail, matching every one of compile_call's
+         * three branches. */
+        struct { val_t head; IRNode *callee; IRNode **args; int argc; } call; /* IR_CALL */
+        /* `params`/`body` are deliberately the RAW, unprocessed val_t
+         * forms compile_lambda itself takes -- NOT pre-lowered into an IR
+         * tree during ir_lower, unlike every other node's subexpressions.
+         * Reason: a lambda body is compiled against a brand-new child
+         * Compiler (fresh locals[]/upvals[]/syntax_locals[], its own
+         * Chunk) that doesn't exist yet at ir_lower time, and doesn't
+         * meaningfully exist as a *concept* until ir_emit is ready to
+         * create it -- resolve_upvalue's own capture-chain walk
+         * (compiler.c) needs `child.enclosing` to be the REAL, live
+         * parent Compiler stack frame, not something reconstructible
+         * from an arena snapshot. Worse, an internal (define-syntax ...)
+         * inside the body registers into that child's OWN syntax_locals
+         * table (compile_define_syntax, mid-walk) for LATER forms in the
+         * same body to see via classify_head's macro lookup -- if the
+         * whole body were pre-lowered in one pass against some
+         * proxy/placeholder Compiler, a later form using an earlier
+         * form's local macro would classify wrong (misread as an
+         * ordinary call instead of expanding it), since the proxy would
+         * never see that registration in the right order. ir_emit's
+         * IR_LAMBDA case creates the real child Compiler, runs the same
+         * prescan compile_lambda uses (lambda_prescan, compiler.c), then
+         * walks body forms one at a time -- ir_lower(&child, form, ...)
+         * immediately followed by ir_emit(&child, that_node) -- exactly
+         * interleaved the way compile_seq's own per-form compile() call
+         * is, so a macro registered by form i is visible by the time
+         * form i+1 is classified. `name` is the JIT/debug label
+         * (compile_lambda's own `name` parameter) -- NULL for an
+         * anonymous (lambda ...), the bound symbol's C string for
+         * `(define (f ...) ...)` sugar. */
+        struct { val_t params; val_t body; const char *name; } lambda; /* IR_LAMBDA */
     } as;
 };
 

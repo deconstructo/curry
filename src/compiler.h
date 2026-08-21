@@ -53,4 +53,17 @@ val_t compiler_compile_script(val_t expr_list);
  * from compiler_compile/compiler_compile_script in this landing. */
 bool compiler_ir_self_check(val_t expr);
 
+/* Tier 2.2 optimizer check: compiles `expr` twice -- once via the classic
+ * compile() path (unoptimized), once via ir_lower()+ir_optimize()+
+ * ir_emit() (dead-branch elimination on IR_IF) -- actually RUNS both
+ * resulting closures and compares their RESULTS with scm_equal, not their
+ * bytecode. Unlike compiler_ir_self_check, byte-identical comparison
+ * doesn't apply here: the whole point of ir_optimize is to produce
+ * DIFFERENT (shorter) bytecode for inputs where it can prove a branch is
+ * dead, so `expr` must be a self-contained expression safe to actually
+ * evaluate (no free/unbound variables, no observable side effects a
+ * second run would double up) -- this is a stricter contract than
+ * compiler_ir_self_check's, which never executes anything. */
+bool compiler_ir_optimize_check(val_t expr);
+
 #endif /* CURRY_COMPILER_H */
