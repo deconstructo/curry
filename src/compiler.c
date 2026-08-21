@@ -2885,16 +2885,19 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
  * recognizes a small, deliberately bounded subset natively: self-
  * evaluating literals, #:keyword symbols, ordinary variable references
  * (local/upvalue/global -- resolution decided here, once, exactly as
- * emit_load does today), quote, if, begin, set!, and, and or (the last
- * three widened in the second landing -- see IR_SET/IR_AND/IR_OR in
- * ir.h). Every other form -- anything compile() would otherwise handle
- * further down its dispatch chain (let, cond, case, named-let, lambda,
- * define, calls, define-record-type, define-syntax, the CAS forms,
- * import/define-library/library, ...) -- is wrapped whole as an
- * IR_FALLBACK leaf, whose ir_emit case is simply `compile(c, expr, tail,
- * line)`: byte-for-byte whatever would have happened had ir_lower never
- * run. This is what lets IR_IF/IR_SEQ cover real programs (whose branches
- * and begin-bodies routinely contain calls and lets) without needing to
+ * emit_load does today), quote, if, begin, set!, and, or (widened in the
+ * second landing -- see IR_SET/IR_AND/IR_OR in ir.h), and `(define sym
+ * expr)` (widened in the third landing -- see IR_DEFINE in ir.h; the
+ * `(define (f params...) body...)` lambda-sugar shape is NOT covered,
+ * see ir_lower_define's own comment). Every other form -- anything
+ * compile() would otherwise handle further down its dispatch chain (let,
+ * cond, case, named-let, lambda, calls, define-record-type,
+ * define-syntax, the CAS forms, import/define-library/library, ...) --
+ * is wrapped whole as an IR_FALLBACK leaf, whose ir_emit case is simply
+ * `compile(c, expr, tail, line)`: byte-for-byte whatever would have
+ * happened had ir_lower never run. This is what lets IR_IF/IR_SEQ cover
+ * real programs (whose branches and begin-bodies routinely contain calls
+ * and lets) without needing to
  * natively lower those forms first -- see the Tier 2.1 plan's
  * "explicitly deferred" list for what widens this in a follow-up.
  *
@@ -3035,6 +3038,24 @@ static IRNode *ir_lower_or(Compiler *c, val_t args, bool tail, int line) {
     return n;
 }
 
+/* Mirrors compile_define's `(define sym expr)` case exactly. The
+ * `(define (f params...) body...)` lambda-sugar case is deliberately NOT
+ * handled here -- ir_lower's own S_DEFINE dispatch only calls this
+ * function when the target is already a bare symbol; a pair target (or
+ * anything else compile_define's own error path would reject) falls
+ * through to the generic IR_FALLBACK wrap, since expanding lambda sugar
+ * needs compile_lambda, which isn't IR-lowered yet (see IR_LAMBDA in
+ * ir.h). */
+static IRNode *ir_lower_define(Compiler *c, val_t args, int line) {
+    val_t name  = vcar(args);
+    val_t rest  = vcdr(args);
+    val_t value = vis_pair(rest) ? vcar(rest) : V_VOID;
+    IRNode *n = ir_node_new(c->ir_arena, IR_DEFINE, false, line);
+    n->as.def.name  = name;
+    n->as.def.value = ir_lower(c, value, false, line);
+    return n;
+}
+
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (vis_pair(expr) && as_pair(expr)->hdr.flags)
         line = (int)as_pair(expr)->hdr.flags;
@@ -3094,6 +3115,11 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_SET)   return ir_lower_set(c, args, line);
     if (head == S_AND)   return ir_lower_and(c, args, tail, line);
     if (head == S_OR)    return ir_lower_or(c, args, tail, line);
+    /* Only the `(define sym expr)` shape is natively lowered; a pair
+     * target (lambda sugar) or malformed args falls through to the
+     * generic IR_FALLBACK wrap below -- see ir_lower_define's comment. */
+    if (head == S_DEFINE && vis_pair(args) && vis_symbol(vcar(args)))
+        return ir_lower_define(c, args, line);
 
     /* Not (yet) natively lowered -- delegate the whole subform. */
     IRNode *n = ir_node_new(c->ir_arena, IR_FALLBACK, tail, line);
@@ -3196,10 +3222,16 @@ static void ir_emit(Compiler *c, IRNode *n) {
             patch_jump(c, patches[i]);
         return;
     }
+    case IR_DEFINE: {
+        ir_emit(c, n->as.def.value);
+        /* Declaration/resolution happens here, at emit time -- see ir.h's
+         * comment on IRNode::as.def for why. */
+        emit_define_store(c, n->as.def.name, n->line);
+        return;
+    }
     case IR_LAMBDA:
     case IR_CALL:
     case IR_SELF_TAIL_CALL:
-    case IR_DEFINE:
         /* Reserved for a future widening pass; ir_lower never constructs
          * these yet (see this section's header comment). */
         fprintf(stderr, "ir_emit: node kind %d not yet lowered\n", (int)n->kind);

@@ -260,6 +260,15 @@ static void test_ir_self_check(void) {
         "(begin (or (h 1) (k 2)) 'tail)",
         "(and (begin 1 2) (if #t 3 4))",
         "(or (and 1 2) (and 3 #f))",
+        /* define -- (define sym expr) only, widened in the third landing.
+         * Lambda-sugar `(define (f ...) ...)` deliberately stays
+         * IR_FALLBACK (see ir_lower_define's comment) and is exercised by
+         * the existing "(begin (define x 10) ...)" case above and by
+         * ordinary compiler tests elsewhere -- not re-tested here. */
+        "(define some-new-global 42)",
+        "(define another-new-global)",
+        "(begin (define p 1) (define q 2) (+ p q))",
+        "(if #t (define ifdef-a 1) (define ifdef-b 2))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));

@@ -50,15 +50,18 @@ typedef enum {
     IR_SET,         /* set! -- widened in the second landing */
     IR_AND,         /* widened in the second landing */
     IR_OR,          /* widened in the second landing */
+    IR_DEFINE,      /* (define sym expr) only -- widened in the third
+                     * landing; the (define (f params...) body...) lambda-
+                     * sugar case still falls back whole, see
+                     * ir_lower_define's comment */
 
     /* Reserved for a future widening pass (see Tier 2.1 plan's deferred
      * list) -- not constructed by ir_lower in this landing. Listed here
-     * so the schema doesn't need another revision when calls/lambda/
-     * define get lowered natively. */
+     * so the schema doesn't need another revision when calls/lambda get
+     * lowered natively. */
     IR_LAMBDA,
     IR_CALL,
     IR_SELF_TAIL_CALL,
-    IR_DEFINE,
 } IRKind;
 
 typedef struct IRNode IRNode;
@@ -139,6 +142,17 @@ struct IRNode {
          * the (deliberately preserved, not "fixed") asymmetry between the
          * two: `and` propagates tail to its last item, `or` never does. */
         struct { IRNode **items; int count; } andor;      /* IR_AND, IR_OR */
+        /* Deliberately just the raw symbol, same reasoning as IR_SET's own
+         * `name` field above: emit_define_store has the same ordering-
+         * sensitive add_local/resolve_local side effects (it also mutates
+         * c->locals/c->local_count for a brand-new internal define), so
+         * resolution/declaration happens at ir_emit time via
+         * emit_define_store itself, not here. Only covers `(define sym
+         * expr)`; ir_lower_define falls the whole form back to
+         * IR_FALLBACK when the target is a pair (lambda sugar), since
+         * that requires compile_lambda -- not yet IR-lowered (see
+         * IR_LAMBDA above). */
+        struct { val_t name; IRNode *value; } def;             /* IR_DEFINE */
     } as;
 };
 
