@@ -358,6 +358,21 @@ static void test_ir_self_check(void) {
          * instead of expanding it, since a proxy Compiler would never see
          * the registration in the right order. */
         "((lambda () (define-syntax my-const (syntax-rules () ((_) 42))) (my-const)))",
+        /* the SAME hazard, but for a plain `begin` (IR_SEQ) rather than a
+         * lambda body -- IR_SEQ's own body is ALSO raw val_t, walked via
+         * the same interleaved lower-then-emit design as IR_LAMBDA's, for
+         * exactly this reason. This exact case was a real regression:
+         * IR_SEQ originally pre-lowered every item in one eager pass
+         * (before any of them were emitted), which compiler_ir_self_check
+         * never caught (it doesn't execute anything, and `my-const2`
+         * misclassified as an ordinary call still LOWERED to *something*,
+         * a byte-comparable-but-wrong IR_CALL) -- only surfaced once
+         * compile() started routing through the IR live and ctest's
+         * syntax_rules suite actually ran the miscompiled form
+         * (`not-a-procedure` on `my-const2`). Fixed by giving IR_SEQ the
+         * same deferred-body treatment as IR_LAMBDA; this case is here so
+         * it can't silently regress again. */
+        "(begin (define-syntax my-const2 (syntax-rules () ((_) 43))) (my-const2))",
         /* internal define-record-type -- one of lambda_prescan's
          * multi-binding cases (constructor + predicate + accessor). */
         "((lambda () (define-record-type point (make-point x y) point? (x point-x) (y point-y)) (point-x (make-point 1 2))))",

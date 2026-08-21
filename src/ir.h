@@ -131,23 +131,30 @@ struct IRNode {
         struct { val_t name; } var_ref;                       /* IR_VAR_REF */
         struct { val_t expr; } fallback;                      /* IR_FALLBACK */
         struct { IRNode *test, *then, *els; } iff;             /* IR_IF */
-        /* pop_lines[i] is the line compile_seq would stamp on the
-         * OP_POP emitted after items[i] (i.e. the SEQ SPINE cons cell's
-         * own hdr.flags at that position) -- deliberately NOT the same
-         * as items[i]->line, which is whatever line ir_lower recursively
-         * refined the ITEM's own subtree to internally (e.g. from the
-         * item pair's own hdr.flags, which can differ from the spine
-         * cell's when the item came from a macro-rebuilt cons whose
-         * spine cell has hdr.flags == 0 but whose captured/spliced
-         * subexpression retains its original non-zero flags).
-         * compile_seq's own `line` variable is never affected by
-         * whatever compile() does internally to ITS copy of `line`
-         * (plain C pass-by-value) -- collapsing this into a single
-         * per-item line and using it for OP_POP produced a real,
-         * differential-self-check-invisible divergence (code-identical,
-         * lines[]-divergent) for macro-synthesized begin spines, found
-         * by independent code review during Tier 2.1 development. */
-        struct { IRNode **items; int *pop_lines; int count; } seq;  /* IR_SEQ */
+        /* `body` is deliberately the RAW, unprocessed val_t list -- NOT
+         * pre-lowered into an array of IRNodes the way this field
+         * originally worked. Reason (found via a real, ctest-only
+         * regression -- invisible to compiler_ir_self_check's hand-
+         * picked cases -- once compile() actually started routing
+         * through the IR live): an internal `(define-syntax ...)` inside
+         * a `(begin ...)` registers into the enclosing Compiler's
+         * syntax_locals table only when it's EMITTED (IR_FALLBACK's own
+         * ir_emit calls compile(), which calls compile_define_syntax) --
+         * never when it's merely LOWERED. Eagerly lowering every item in
+         * one pass, before any of them are emitted, meant a LATER item
+         * using that macro was classified (via classify_head) before the
+         * registration existed, misreading the macro use as an ordinary
+         * call. ir_emit's own IR_SEQ case now does the same interleaved
+         * lower-then-emit walk per item that IR_LAMBDA's body walk
+         * already used for exactly this reason (see IR_LAMBDA's own
+         * `lambda` field comment) -- including the same per-spine-cell
+         * `hdr.flags` line tracking a differential-self-check-invisible
+         * bug (macro-synthesized begin spines) previously required here.
+         * Consequence: ir_optimize can no longer reach INSIDE a `begin`
+         * the way it once could (there's no pre-lowered IRNode tree to
+         * walk until ir_emit builds one, item by item) -- the same
+         * accepted tradeoff IR_LAMBDA's own body already has. */
+        struct { val_t body; } seq;  /* IR_SEQ */
         /* Deliberately just the raw symbol, same reasoning as
          * IR_VAR_REF's own `name` field above: emit_store (the store-
          * side counterpart of emit_load) has the identical ordering-

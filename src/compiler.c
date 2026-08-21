@@ -143,6 +143,12 @@ typedef struct Compiler {
 /* ── Forward declarations ────────────────────────────────────────────── */
 static void compile(Compiler *c, val_t expr, bool tail, int line);
 static void compile_seq(Compiler *c, val_t list, bool tail, int line);
+/* Tier 2.1/2.2 IR pipeline (src/ir.h; defined much later in this file,
+ * forward-declared here so compile() -- defined well before them -- can
+ * route through them; see compile()'s own IR_OR_CLASSIC macro). */
+static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line);
+static IRNode *ir_optimize(IRNode *n);
+static void    ir_emit(Compiler *c, IRNode *n);
 static bool is_quoted_symbol(val_t expr, val_t *out_sym);
 
 /* ── Compiler lifecycle ──────────────────────────────────────────────── */
@@ -157,6 +163,21 @@ static _Thread_local val_t       g_compile_target_env   = V_VOID;
  * (which has many other callers that don't care about this at all). */
 static _Thread_local val_t       g_compile_self_tail_name    = V_FALSE;
 static _Thread_local bool        g_compile_self_tail_mutated = false;
+
+/* Forces compile()'s own dispatch (specifically IR_OR_CLASSIC, below) to
+ * always take the classic compile_X path, never ir_lower/ir_emit --
+ * checked once per compile() call, so it applies to the WHOLE recursive
+ * compile tree for as long as it's set, not just the top-level call.
+ * That matters because compile_if/compile_let/etc. call compile()
+ * itself (not some pluggable alternative) for their own subexpressions
+ * -- a thread-local flag compile() checks at its own entry is what makes
+ * "classic all the way down" achievable without duplicating compile()'s
+ * entire dispatch switch a second time just to keep it classic-only
+ * (which would also need to stay in sync with the real one forever).
+ * Set/cleared by compile_classic (below), never anywhere else -- see its
+ * own comment for why compiler_ir_self_check/compiler_ir_optimize_check
+ * need this now that compile() itself routes through the IR. */
+static _Thread_local bool        g_force_classic_compile = false;
 
 void compiler_set_source_name(const char *name) { g_compile_source_name = name; }
 
@@ -178,16 +199,22 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->self_tail_mutated  = g_compile_self_tail_mutated;
     g_compile_self_tail_name    = V_FALSE;
     g_compile_self_tail_mutated = false;
-    /* Lazily NULL, not eagerly allocated, on the ordinary (enc == NULL,
-     * i.e. compiler_compile/compiler_compile_script) path -- independent
-     * security review noted that eagerly allocating here for every single
-     * top-level compile leaked the arena on any ordinary compile-time
-     * error (compile() longjmps out via scm_raise with nothing to free
-     * it), since ir_lower/ir_emit are never actually invoked from that
-     * path in this landing. compiler_ir_self_check (the only real
-     * consumer right now) sets its own two scratch Compilers' ir_arena
-     * fields explicitly after calling this. */
-    c->ir_arena = enc ? enc->ir_arena : NULL;
+    /* Eagerly allocated for every root Compiler (enc == NULL): compile()
+     * now genuinely routes through ir_lower/ir_emit for most forms (see
+     * IR_OR_CLASSIC), so by the time any caller's compile() call returns
+     * this is essentially always needed anyway -- unlike the landing
+     * that introduced this field, where compile() never touched
+     * ir_lower/ir_emit at all and eager allocation here was pure waste
+     * (and, per an independent security review at the time, a leak on
+     * every ordinary compile-time error, since nothing freed it on the
+     * exception path). That leak risk is now handled at the two real
+     * root-Compiler call sites instead of being avoided by not
+     * allocating: compiler_compile/compiler_compile_script wrap their
+     * whole compile() call in SCM_PROTECT and free c.ir_arena
+     * unconditionally afterward (success or raise) -- see their own
+     * comments. A child Compiler (enc != NULL) still just inherits its
+     * parent's arena, same as always. */
+    c->ir_arena = enc ? enc->ir_arena : ir_arena_new();
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -2632,6 +2659,40 @@ static SpecialForm classify_head(Compiler *c, val_t head, val_t args,
     return SF_NONE;
 }
 
+/* Tries the Tier 2.1/2.2 IR pipeline (ir_lower -> ir_optimize -> ir_emit)
+ * for the current `expr`/`tail`/`line` (all in scope wherever this is
+ * used, inside compile()'s own switch below); if ir_lower can't actually
+ * lower this specific case (falls back to IR_FALLBACK -- only possible
+ * for SF_DEFINE today, whose malformed-target shape compile_define
+ * itself handles gracefully rather than crashing, so ir_lower can't
+ * safely claim unconditional coverage the way SF_IF/SF_LAMBDA/etc. do;
+ * see ir_lower's own S_LAMBDA/S_LET comments), falls back to
+ * `classic_stmt` instead of calling ir_emit -- calling ir_emit on an
+ * IR_FALLBACK node would call compile() again on this SAME expr, which
+ * re-classifies to this SAME case and re-enters this SAME macro: an
+ * infinite loop on malformed input (found during design review, before
+ * compile() ever called ir_lower live -- no existing test exercised
+ * malformed input through the live dispatch to catch it). Applied
+ * uniformly to every case below, including ones where ir_lower is
+ * already known to have unconditional coverage (SF_IF, SF_SET, SF_AND,
+ * SF_OR, SF_LAMBDA, SF_LET, SF_LET_STAR, SF_LETREC, and the SF_NONE/
+ * ordinary-call fallthrough) -- redundant but cheap for those, and
+ * removes any need to keep a second, driftable list of "which cases are
+ * actually safe" in sync with ir_lower's own guards.
+ *
+ * Also checks g_force_classic_compile first -- see its own comment --
+ * so compile_classic can force a genuinely IR-free compile of the WHOLE
+ * recursive tree for compiler_ir_self_check/compiler_ir_optimize_check's
+ * "old" side, which needs one now that this macro means compile() no
+ * longer IS classic-only by default. */
+#define IR_OR_CLASSIC(classic_stmt) do {                              \
+        if (g_force_classic_compile) { classic_stmt; return; }        \
+        IRNode *_ir = ir_lower(c, expr, tail, line);                  \
+        if (_ir->kind == IR_FALLBACK) { classic_stmt; return; }       \
+        ir_emit(c, ir_optimize(_ir));                                 \
+        return;                                                       \
+    } while (0)
+
 static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* Reader-annotated source line: the reader stamps each cons cell's
@@ -2689,11 +2750,11 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
-    /* if */
-    case SF_IF: compile_if(c, args, tail, line); return;
+    /* if -- routed through the Tier 2.1 IR (see IR_OR_CLASSIC's comment) */
+    case SF_IF: IR_OR_CLASSIC(compile_if(c, args, tail, line));
 
     /* begin */
-    case SF_BEGIN: compile_begin(c, args, tail, line); return;
+    case SF_BEGIN: IR_OR_CLASSIC(compile_begin(c, args, tail, line));
 
     /* cond-expand — resolved entirely at compile time: pick the first
      * satisfied clause's body (see features.c) and compile it in place,
@@ -2706,8 +2767,9 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         return;
     }
 
-    /* define */
-    case SF_DEFINE: compile_define(c, args, line); return;
+    /* define -- the one case where IR_OR_CLASSIC's fallback path is
+     * actually reachable (a malformed target); see its own comment. */
+    case SF_DEFINE: IR_OR_CLASSIC(compile_define(c, args, line));
 
     /* define-values */
     case SF_DEFINE_VALUES: compile_define_values(c, args, line); return;
@@ -2716,26 +2778,25 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
     case SF_DEFINED_P: compile_defined_p(c, args, line); return;
 
     /* set! */
-    case SF_SET: compile_set(c, args, line); return;
+    case SF_SET: IR_OR_CLASSIC(compile_set(c, args, line));
 
     /* lambda */
-    case SF_LAMBDA: {
+    case SF_LAMBDA: IR_OR_CLASSIC({
         val_t params = vcar(args);
         val_t body   = vcdr(args);
         compile_lambda(c, params, body, NULL, line);
-        return;
-    }
+    });
 
     /* let */
-    case SF_LET:      compile_let(c, args, tail, line);      return;
-    case SF_LET_STAR: compile_let_star(c, args, tail, line); return;
-    case SF_LETREC:   compile_letrec(c, args, tail, line);   return;
+    case SF_LET:      IR_OR_CLASSIC(compile_let(c, args, tail, line));
+    case SF_LET_STAR: IR_OR_CLASSIC(compile_let_star(c, args, tail, line));
+    case SF_LETREC:   IR_OR_CLASSIC(compile_letrec(c, args, tail, line));
     case SF_LET_VALUES:      compile_let_values(c, args, tail, line);      return;
     case SF_LET_STAR_VALUES: compile_let_star_values(c, args, tail, line); return;
 
     /* and / or */
-    case SF_AND: compile_and(c, args, tail, line); return;
-    case SF_OR:  compile_or(c, args, tail, line);  return;
+    case SF_AND: IR_OR_CLASSIC(compile_and(c, args, tail, line));
+    case SF_OR:  IR_OR_CLASSIC(compile_or(c, args, tail, line));
 
     /* cond / case */
     case SF_COND: compile_cond(c, args, tail, line); return;
@@ -2934,8 +2995,52 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
         break;
     }
 
-    /* Fallthrough: function call */
-    compile_call(c, head, args, tail, line);
+    /* Fallthrough: function call -- routed through the IR too. */
+    IR_OR_CLASSIC(compile_call(c, head, args, tail, line));
+}
+
+/* Compiles `expr` via compile()'s ORIGINAL, pre-IR dispatch -- guaranteed
+ * to never touch ir_lower/ir_emit anywhere in the resulting tree, however
+ * deep. Needed because compile_if/compile_let/etc. call compile() itself
+ * (not a pluggable alternative) for their own subexpressions -- once
+ * compile()'s own dispatch routes through the IR (IR_OR_CLASSIC, above),
+ * merely calling a classic per-form function once at the top no longer
+ * guarantees the WHOLE recursive tree stays IR-free, since that
+ * function's own nested compile() calls would immediately route back
+ * through the IR again. Setting g_force_classic_compile before calling
+ * compile() sidesteps that: it's a thread-local IR_OR_CLASSIC itself
+ * checks, so it stays in effect for every nested compile() call in the
+ * same dynamic extent, not just this one.
+ *
+ * This exists for exactly one reason: compiler_ir_self_check and
+ * compiler_ir_optimize_check need a genuine, independent classic
+ * implementation to compare the IR pipeline against. Before compile()
+ * routed through the IR, compile() itself WAS that independent
+ * implementation; now it isn't, so this recovers it. Without this,
+ * "old_c" and "new_c" in both those functions would silently collapse
+ * into the exact same code path, and their comparison would trivially
+ * pass regardless of any future bug in ir_lower/ir_emit -- a tautology,
+ * not a test (found during design review, before compile() ever called
+ * ir_lower live).
+ *
+ * SCM_PROTECT'd so a raise mid-compile still restores the flag -- a
+ * naive save/set/compile/restore would leave it stuck at `true` for the
+ * rest of the process on any compile-time error, silently disabling the
+ * IR pipeline for every later compile on this thread. */
+static void compile_classic(Compiler *c, val_t expr, bool tail, int line) {
+    bool saved = g_force_classic_compile;
+    g_force_classic_compile = true;
+
+    ExnHandler h;
+    bool raised = false;
+    SCM_PROTECT(h, {
+        compile(c, expr, tail, line);
+    }, {
+        raised = true;
+    });
+
+    g_force_classic_compile = saved;
+    if (raised) scm_raise_val(h.exn);
 }
 
 /* Compile a list of expressions; only the last is in tail position */
@@ -3024,35 +3129,11 @@ static IRNode *ir_lower_seq(Compiler *c, val_t list, bool tail, int line) {
         n->as.konst.value = V_VOID;
         return n;
     }
-    /* size_t, not int: an int `count` could wrap on a pathologically long
-     * list (independent security review) -- overflow of the counting
-     * loop itself, and of the byte-size multiplications below, both
-     * become well-defined-but-wrong at `int` width. size_t avoids the
-     * multiplication overflow in practice (a list long enough to
-     * overflow size_t's range cannot exist -- each cons cell alone
-     * exceeds available memory first); the arena's own OOM abort
-     * (ir_arena_block_new, ir.c) is the actual backstop. */
-    size_t count = 0;
-    for (val_t p = list; vis_pair(p); p = vcdr(p)) count++;
-
+    /* `body` is the raw list, stored unprocessed -- see ir.h's comment on
+     * IRNode::as.seq for why per-item lowering has to wait for ir_emit's
+     * own interleaved walk now, same reasoning as IR_LAMBDA's body. */
     IRNode *n = ir_node_new(c->ir_arena, IR_SEQ, tail, line);
-    n->as.seq.items     = (IRNode **)ir_arena_alloc(c->ir_arena,
-                                                     sizeof(IRNode *) * count);
-    n->as.seq.pop_lines = (int *)ir_arena_alloc(c->ir_arena,
-                                                 sizeof(int) * count);
-    n->as.seq.count = (int)count;
-
-    size_t i = 0;
-    while (vis_pair(list)) {
-        val_t expr = vcar(list);
-        val_t rest = vcdr(list);
-        bool  last = vis_nil(rest);
-        if (as_pair(list)->hdr.flags) line = (int)as_pair(list)->hdr.flags;
-        n->as.seq.pop_lines[i] = line;
-        n->as.seq.items[i]     = ir_lower(c, expr, tail && last, line);
-        i++;
-        list = rest;
-    }
+    n->as.seq.body = list;
     return n;
 }
 
@@ -3392,13 +3473,31 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_SET)   return ir_lower_set(c, args, line);
     if (head == S_AND)   return ir_lower_and(c, args, tail, line);
     if (head == S_OR)    return ir_lower_or(c, args, tail, line);
-    if (head == S_LAMBDA && vis_pair(args))
+    /* No vis_pair(args) guard here (or on S_LET just below) -- matching
+     * compile()'s own classic SF_LAMBDA case, which does the identical
+     * unchecked `vcar(args)`/`vcdr(args)` with no shape check either.
+     * Deliberate: this makes ir_lower NEVER produce IR_FALLBACK for
+     * head==S_LAMBDA, only crash-parity with classic on malformed input
+     * (e.g. a bare `(lambda)`) -- if it COULD fall back to IR_FALLBACK
+     * here, ir_emit's IR_FALLBACK case would call compile() again on the
+     * same expr, which re-classifies to this same SF_LAMBDA case and
+     * (once wired into compile()'s live dispatch) recurses into this
+     * exact code path again -- an infinite loop on malformed input,
+     * found during design review before compile() ever called ir_lower
+     * live. S_DEFINE can't use this same trick (compile_define's
+     * malformed-target case degrades gracefully with an error message,
+     * not a crash -- silently mis-lowering it instead of replicating
+     * that behavior would be a correctness bug, not crash-parity), so
+     * compile()'s own SF_DEFINE case instead checks for IR_FALLBACK and
+     * falls back to compile_define directly -- see compile()'s dispatch
+     * for the full reasoning. */
+    if (head == S_LAMBDA)
         return ir_lower_lambda(c, vcar(args), vcdr(args), NULL, line);
     /* let -- named vs plain distinguished the same way compile_let
      * itself does (a leading symbol instead of a bindings list). Named
      * let routes to ir_lower_named_let (IR_NAMED_LET); everything else
      * routes to ir_lower_let (pure desugaring, see its own comment). */
-    if (head == S_LET && vis_pair(args)) {
+    if (head == S_LET) {
         val_t bindings = vcar(args);
         if (vis_symbol(bindings)) {
             val_t let_body = vcdr(args);
@@ -3472,13 +3571,24 @@ static void ir_emit(Compiler *c, IRNode *n) {
         return;
     }
     case IR_SEQ: {
-        int count = n->as.seq.count;
-        if (count == 0) { emit(c, OP_VOID, n->line); return; }
-        for (int i = 0; i < count; i++) {
-            ir_emit(c, n->as.seq.items[i]);
-            /* pop_lines[i], NOT items[i]->line -- see IR_SEQ's field
-             * comment in ir.h. */
-            if (i != count - 1) emit(c, OP_POP, n->as.seq.pop_lines[i]);
+        /* Interleaved lower-then-emit walk, one item at a time -- see
+         * ir.h's comment on IRNode::as.seq for why (an internal
+         * define-syntax's registration only exists once IT has been
+         * emitted, and a LATER item's own classify_head-based
+         * classification needs to see it). Mirrors compile_seq exactly,
+         * including its own per-spine-cell `hdr.flags` line tracking. */
+        val_t list = n->as.seq.body;
+        int seq_line = n->line;
+        while (vis_pair(list)) {
+            val_t expr = vcar(list);
+            val_t rest = vcdr(list);
+            bool  last = vis_nil(rest);
+            if (as_pair(list)->hdr.flags)
+                seq_line = (int)as_pair(list)->hdr.flags;
+            IRNode *item_ir = ir_lower(c, expr, n->tail && last, seq_line);
+            ir_emit(c, item_ir);
+            if (!last) emit(c, OP_POP, seq_line);
+            list = rest;
         }
         return;
     }
@@ -3714,17 +3824,14 @@ static void ir_emit(Compiler *c, IRNode *n) {
 bool compiler_ir_self_check(val_t expr) {
     gc_inhibit_minor();
 
-    /* init_compiler leaves ir_arena NULL for a root Compiler (see its own
-     * comment) since ordinary compiler_compile/compiler_compile_script
-     * never touch ir_lower/ir_emit; this is the one real consumer, so it
-     * sets up its own two scratch arenas explicitly. */
+    /* init_compiler allocates a fresh ir_arena for every root Compiler
+     * now (see its own comment) -- no need to set one up explicitly here
+     * anymore; doing so would leak the one init_compiler already made. */
     Compiler old_c;
     init_compiler(&old_c, NULL, "<ir-check-old>");
-    old_c.ir_arena = ir_arena_new();
 
     Compiler new_c;
     init_compiler(&new_c, NULL, "<ir-check-new>");
-    new_c.ir_arena = ir_arena_new();
 
     int  line   = g_reader_last_line;
     bool same   = false;
@@ -3738,7 +3845,7 @@ bool compiler_ir_self_check(val_t expr) {
      * guards against (independent security review). */
     ExnHandler h;
     SCM_PROTECT(h, {
-        compile(&old_c, expr, false, line);
+        compile_classic(&old_c, expr, false, line);
         chunk_emit(old_c.chunk, OP_RETURN, line);
 
         IRNode *ir = ir_lower(&new_c, expr, false, line);
@@ -3812,14 +3919,18 @@ static IRNode *ir_optimize(IRNode *n);
  * the IR_IF node itself received, so splicing the taken branch directly
  * into the parent's slot preserves tail-position correctness for free.
  *
- * IR_LAMBDA is deliberately NOT recursed into: its body is raw val_t at
- * this point in the pipeline (see IRNode::as.lambda's own comment in
- * ir.h), not yet an IR tree -- there is nothing for this pass to walk
- * until IR_LAMBDA's own ir_emit does its interleaved lower+emit walk,
- * which is a separate concern from this pass. IR_FALLBACK is opaque for
- * the same reason (raw val_t, not a tree) and IR_VAR_REF/IR_CONST are
- * leaves -- none of these four kinds get a case below; they fall through
- * to the default `return n` unchanged. */
+ * IR_LAMBDA and IR_SEQ are deliberately NOT recursed into: their bodies
+ * are raw val_t at this point in the pipeline (see IRNode::as.lambda/
+ * as.seq's own comments in ir.h), not yet an IR tree -- there is nothing
+ * for this pass to walk until their own ir_emit cases do their
+ * interleaved lower+emit walks, a separate concern from this pass
+ * (IR_SEQ's own deferred design exists for the same internal-define-
+ * syntax-scoping reason IR_LAMBDA's already did -- found as a real
+ * ctest-only regression, invisible to compiler_ir_self_check, once
+ * compile() started routing through the IR live). IR_FALLBACK is opaque
+ * for the same reason (raw val_t, not a tree) and IR_VAR_REF/IR_CONST
+ * are leaves -- none of these five kinds get a case below; they fall
+ * through to the default `return n` unchanged. */
 
 /* Shared by IR_AND/IR_OR: compacts the items list in place, applying two
  * safe transforms to each NON-LAST item (after recursively optimizing
@@ -3877,10 +3988,11 @@ static IRNode *ir_optimize(IRNode *n) {
         n->as.iff.els  = ir_optimize(n->as.iff.els);
         return n;
     }
-    case IR_SEQ:
-        for (int i = 0; i < n->as.seq.count; i++)
-            n->as.seq.items[i] = ir_optimize(n->as.seq.items[i]);
-        return n;
+    /* IR_SEQ is NOT recursed into, same reasoning as IR_LAMBDA just
+     * below: its body is raw val_t at this point in the pipeline (see
+     * IRNode::as.seq's own comment in ir.h) -- there's no pre-lowered
+     * tree here to optimize until ir_emit's own interleaved walk builds
+     * one, item by item. Falls to the default `return n` unchanged. */
     case IR_SET:
         n->as.set.value = ir_optimize(n->as.set.value);
         return n;
@@ -3902,12 +4014,13 @@ static IRNode *ir_optimize(IRNode *n) {
 bool compiler_ir_optimize_check(val_t expr) {
     gc_inhibit_minor();
 
+    /* init_compiler allocates a fresh ir_arena for every root Compiler
+     * now (see its own comment) -- no need to set one up explicitly. */
     Compiler old_c;
     init_compiler(&old_c, NULL, "<ir-opt-check-old>");
 
     Compiler new_c;
     init_compiler(&new_c, NULL, "<ir-opt-check-new>");
-    new_c.ir_arena = ir_arena_new();
 
     int  line   = g_reader_last_line;
     bool equal  = false;
@@ -3916,7 +4029,7 @@ bool compiler_ir_optimize_check(val_t expr) {
 
     ExnHandler h;
     SCM_PROTECT(h, {
-        compile(&old_c, expr, false, line);
+        compile_classic(&old_c, expr, false, line);
         chunk_emit(old_c.chunk, OP_RETURN, line);
         old_c.chunk->upval_count = 0;
         BcClosure *old_cl = vm_make_closure(old_c.chunk, 0);
@@ -3939,6 +4052,7 @@ bool compiler_ir_optimize_check(val_t expr) {
         exn    = h.exn;
     });
 
+    ir_arena_free(old_c.ir_arena);
     ir_arena_free(new_c.ir_arena);
     gc_resume_minor();
 
@@ -3956,14 +4070,33 @@ val_t compiler_compile(val_t expr) {
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
-    int line = g_reader_last_line;
-    compile(&c, expr, false, line);
-    chunk_emit(c.chunk, OP_RETURN, line);
-    c.chunk->upval_count = 0;
+    int   line   = g_reader_last_line;
+    val_t result = V_VOID;
+    bool  raised = false;
+    val_t exn    = V_FALSE;
 
-    BcClosure *cl = vm_make_closure(c.chunk, 0);
+    /* SCM_PROTECT'd since compile() genuinely raises on malformed input
+     * and, now that init_compiler allocates c.ir_arena eagerly for every
+     * root Compiler (see its own comment), that's real malloc'd memory
+     * that would otherwise leak on every ordinary compile-time error --
+     * matches compiler_ir_self_check's own reasoning for the identical
+     * pattern. */
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        compile(&c, expr, false, line);
+        chunk_emit(c.chunk, OP_RETURN, line);
+        c.chunk->upval_count = 0;
+        result = vptr(vm_make_closure(c.chunk, 0));
+    }, {
+        raised = true;
+        exn    = h.exn;
+    });
+
+    ir_arena_free(c.ir_arena);
     gc_resume_minor();
-    return vptr(cl);
+
+    if (raised) scm_raise_val(exn);
+    return result;
 }
 
 val_t compiler_compile_script(val_t expr_list) {
@@ -3972,11 +4105,26 @@ val_t compiler_compile_script(val_t expr_list) {
     init_compiler(&c, NULL, "<script>");
     c.chunk->arity = 0;
 
-    compile_seq(&c, expr_list, false, 0);
-    chunk_emit(c.chunk, OP_RETURN, 0);
-    c.chunk->upval_count = 0;
+    val_t result = V_VOID;
+    bool  raised = false;
+    val_t exn    = V_FALSE;
 
-    BcClosure *cl = vm_make_closure(c.chunk, 0);
+    /* SCM_PROTECT'd for the same reason compiler_compile is -- see its
+     * own comment. */
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        compile_seq(&c, expr_list, false, 0);
+        chunk_emit(c.chunk, OP_RETURN, 0);
+        c.chunk->upval_count = 0;
+        result = vptr(vm_make_closure(c.chunk, 0));
+    }, {
+        raised = true;
+        exn    = h.exn;
+    });
+
+    ir_arena_free(c.ir_arena);
     gc_resume_minor();
-    return vptr(cl);
+
+    if (raised) scm_raise_val(exn);
+    return result;
 }

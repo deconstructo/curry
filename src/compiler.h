@@ -43,27 +43,34 @@ val_t compiler_compile_script(val_t expr_list);
 
 /* Tier 2.1 IR differential self-check (docs/thoughts/
  * performance-chez-kaappi.md §5, src/ir.h): compiles `expr` twice, once
- * via the existing direct S-expr-to-bytecode compile() path and once via
- * the new ir_lower()+ir_emit() path, and returns true iff the resulting
- * bytecode is byte-for-byte identical. Prints a disassembly of both sides
- * to stderr on mismatch. Neither compile run has any side effect outside
- * its own scratch Compiler/Chunk (does not touch GLOBAL_ENV, does not
- * produce a runnable closure) -- this is a verification tool, not part
- * of any live compile path; ir_lower/ir_emit are not otherwise called
- * from compiler_compile/compiler_compile_script in this landing. */
+ * via compile_classic() (compile()'s own original, pre-IR dispatch,
+ * forced classic-all-the-way-down via a thread-local flag -- see its own
+ * comment in compiler.c for why a plain call to compile() no longer
+ * suffices now that compile() itself routes through ir_lower/ir_emit)
+ * and once via the standalone ir_lower()+ir_emit() path, and returns
+ * true iff the resulting bytecode is byte-for-byte identical. Prints a
+ * disassembly of both sides to stderr on mismatch. Neither compile run
+ * has any side effect outside its own scratch Compiler/Chunk (does not
+ * touch GLOBAL_ENV, does not produce a runnable closure) -- this is a
+ * verification tool, not part of any live compile path itself, though
+ * compile() (the actual live path) now shares the same ir_lower/
+ * ir_optimize/ir_emit machinery this function verifies. */
 bool compiler_ir_self_check(val_t expr);
 
-/* Tier 2.2 optimizer check: compiles `expr` twice -- once via the classic
- * compile() path (unoptimized), once via ir_lower()+ir_optimize()+
- * ir_emit() (dead-branch elimination on IR_IF) -- actually RUNS both
- * resulting closures and compares their RESULTS with scm_equal, not their
- * bytecode. Unlike compiler_ir_self_check, byte-identical comparison
- * doesn't apply here: the whole point of ir_optimize is to produce
- * DIFFERENT (shorter) bytecode for inputs where it can prove a branch is
- * dead, so `expr` must be a self-contained expression safe to actually
- * evaluate (no free/unbound variables, no observable side effects a
- * second run would double up) -- this is a stricter contract than
- * compiler_ir_self_check's, which never executes anything. */
+/* Tier 2.2 optimizer check: compiles `expr` twice -- once via
+ * compile_classic() (unoptimized, genuinely IR-free -- see
+ * compiler_ir_self_check's own comment for why compile() itself no
+ * longer serves this role), once via ir_lower()+ir_optimize()+
+ * ir_emit() (dead-branch elimination on IR_IF, boolean simplification on
+ * IR_AND/IR_OR) -- actually RUNS both resulting closures and compares
+ * their RESULTS with scm_equal, not their bytecode. Unlike
+ * compiler_ir_self_check, byte-identical comparison doesn't apply here:
+ * the whole point of ir_optimize is to produce DIFFERENT (shorter)
+ * bytecode for inputs where it can prove something, so `expr` must be a
+ * self-contained expression safe to actually evaluate (no free/unbound
+ * variables, no observable side effects a second run would double up)
+ * -- this is a stricter contract than compiler_ir_self_check's, which
+ * never executes anything. */
 bool compiler_ir_optimize_check(val_t expr);
 
 #endif /* CURRY_COMPILER_H */
