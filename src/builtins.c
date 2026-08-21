@@ -2112,21 +2112,56 @@ static val_t prim_fold_right(int ac, val_t *av, void *ud) {
     return apply(proc, scm_cons(vcar(lst), scm_cons(rest, V_NIL)));
 }
 static val_t prim_not(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_false(av[0]));}
+/* Iterative (not recursive) delay-force trampoline -- R7RS 4.2.5 requires
+ * `force` to fully flatten a delay-force chain of ANY depth, not just one
+ * level. The previous version unwrapped exactly one indirection (apply
+ * p's thunk, and if THAT returned a still-lazy delay-force promise q,
+ * collapse p onto q's own thunk and apply ONCE more, returning whatever
+ * that produced -- without checking whether THAT result was itself
+ * another still-lazy delay-force promise). For a chain 3+ levels deep
+ * (p1 -> p2 -> p3 -> value) this returned p3 itself (an unforced
+ * promise) instead of p3's eventual value (confirmed via repro; GitHub
+ * issue #51). Fixed by looping instead of returning after one collapse:
+ * each iteration re-applies p's (possibly just-collapsed) thunk and
+ * re-checks the result, continuing for as many delay-force indirections
+ * as the chain actually has.
+ *
+ * `p->hdr.flags` is copied from `q` on each collapse (not just `p->val`):
+ * once p is standing in for q, whether the NEXT apply's result should
+ * itself be chased as a delay-force indirection depends on whether q was
+ * a delay-force promise, not on p's original flags -- a chain that mixes
+ * delay-force with plain delay would otherwise wrongly keep chasing (or
+ * wrongly stop chasing) past a plain-delay link.
+ *
+ * Checks `p->state == PROMISE_FORCED` after every apply, not just once
+ * up front: a self-referential promise's own thunk can force `p` itself
+ * during evaluation (the classic memoized-lazy-stream pattern) -- if
+ * that happened, respect the memoized value instead of overwriting it
+ * with whatever this call's own apply produced. */
 static val_t prim_force(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_promise(av[0])) return av[0];
     Promise *p = as_promise(av[0]);
-    if (p->state == PROMISE_FORCED) return p->val;
-    val_t r = apply(p->val, V_NIL);
-    if (p->hdr.flags & 1) { /* delay-force: r should be a promise */
-        if (vis_promise(r)) {
+    while (p->state != PROMISE_FORCED) {
+        val_t r = apply(p->val, V_NIL);
+        if (p->state == PROMISE_FORCED) break;  /* forced during apply */
+        if ((p->hdr.flags & 1) && vis_promise(r)) {
             Promise *q = as_promise(r);
-            if (q->state == PROMISE_FORCED) r = q->val;
-            else { gc_wb_slot(&p->val, q->val); return apply(p->val, V_NIL); }
+            if (q->state == PROMISE_FORCED) {
+                gc_wb_slot(&p->val, q->val);
+                p->state = PROMISE_FORCED;
+                break;
+            }
+            /* q is itself a lazy promise -- collapse p onto q's own
+             * thunk/flags and loop again instead of returning early. */
+            gc_wb_slot(&p->val, q->val);
+            p->hdr.flags = q->hdr.flags;
+            continue;
         }
+        /* r is a final, non-promise (or non-delay-force) value. */
+        gc_wb_slot(&p->val, r);
+        p->state = PROMISE_FORCED;
     }
-    gc_wb_slot(&p->val, r);
-    p->state = PROMISE_FORCED;
     return p->val;
 }
 static val_t prim_make_promise(int ac, val_t *av, void *ud) {

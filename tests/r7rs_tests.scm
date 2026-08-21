@@ -888,6 +888,46 @@
 (define p-lazy (make-promise (+ 1 2)))
 (check "force promise" (force p-lazy) 3)
 
+;;; delay-force chains -- GitHub issue #51: force only flattened one
+;;; level of delay-force indirection, leaving a chain 3+ levels deep as
+;;; an unforced inner promise instead of its final value.
+(define dfp3 (delay 42))
+(define dfp2 (delay-force dfp3))
+(define dfp1 (delay-force dfp2))
+(check "delay-force chain, 3 levels" (force dfp1) 42)
+
+(define dfp6 (delay 100))
+(define dfp5 (delay-force dfp6))
+(define dfp4 (delay-force dfp5))
+(define dfp3b (delay-force dfp4))
+(define dfp2b (delay-force dfp3b))
+(define dfp1b (delay-force dfp2b))
+(check "delay-force chain, 6 levels" (force dfp1b) 100)
+(check "delay-force chain memoized on second force" (force dfp1b) 100)
+
+;;; mixed plain delay / delay-force chain
+(define dfq2 (delay 7))
+(define dfq1 (delay-force dfq2))
+(check "mixed delay/delay-force chain" (force dfq1) 7)
+
+;;; the classic delay-force use case: a recursive stream filter, which
+;;; chains delay-force arbitrarily deep as it skips non-matching elements
+(define (df-stream-filter pred s)
+  (delay-force
+    (if (null? (force s))
+        (delay '())
+        (let ((h (car (force s))) (t (cdr (force s))))
+          (if (pred h)
+              (delay (cons h (df-stream-filter pred t)))
+              (df-stream-filter pred t))))))
+(define (df-stream-from n) (delay (cons n (df-stream-from (+ n 1)))))
+(define (df-stream-take s n)
+  (if (= n 0) '()
+      (cons (car (force s)) (df-stream-take (cdr (force s)) (- n 1)))))
+(check "delay-force recursive stream filter"
+  (df-stream-take (df-stream-filter even? (df-stream-from 1)) 5)
+  '(2 4 6 8 10))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
