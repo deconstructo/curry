@@ -3062,44 +3062,34 @@ static void compile_seq(Compiler *c, val_t list, bool tail, int line) {
 
 /* ── Tier 2.1 IR: lowering + codegen (src/ir.h) ──────────────────────────
  *
- * ir_lower walks the same raw S-expressions compile() does, but only ever
- * recognizes a small, deliberately bounded subset natively: self-
- * evaluating literals, #:keyword symbols, ordinary variable references
- * (local/upvalue/global -- resolution decided here, once, exactly as
- * emit_load does today), quote, if, begin, set!, and, or (widened in the
- * second landing -- see IR_SET/IR_AND/IR_OR in ir.h), `(define sym
- * expr)` (widened in the third landing -- see IR_DEFINE in ir.h; the
- * `(define (f params...) body...)` lambda-sugar shape is NOT covered,
- * see ir_lower_define's own comment), and ordinary/fused-global/self-
- * tail calls (widened in the fourth landing -- see IR_CALL in ir.h).
- * Every other form -- anything compile() would otherwise handle further
- * down its dispatch chain (let, cond, case, named-let, lambda,
+ * ir_lower walks the same raw S-expressions compile() does, natively
+ * recognizing: self-evaluating literals, #:keyword symbols, ordinary
+ * variable references (local/upvalue/global -- resolution decided at
+ * ir_emit time, exactly as emit_load does), quote, if, begin, set!, and,
+ * or, `(define sym expr)` and `(define (f params...) body...)`
+ * lambda-sugar, ordinary/fused-global/self-tail calls, lambda/closures,
+ * and let / let-star / letrec / letrec-star / named-let. Everything else
+ * compile()
+ * would otherwise handle further down its dispatch chain (cond, case,
  * define-record-type, define-syntax, the CAS forms, import/
- * define-library/library, macro uses, ...) -- is wrapped whole as an
+ * define-library/library, macro uses, ...) is wrapped whole as an
  * IR_FALLBACK leaf, whose ir_emit case is simply `compile(c, expr, tail,
  * line)`: byte-for-byte whatever would have happened had ir_lower never
- * run. This is what lets IR_IF/IR_SEQ cover real programs (whose
- * branches and begin-bodies routinely contain calls and lets) without
- * needing to natively lower those forms first -- see the Tier 2.1 plan's
- * "explicitly deferred" list for what widens this in a follow-up.
+ * run for that subform.
  *
  * ir_lower is guaranteed to never return NULL: every input either matches
- * one of the native cases above or becomes an IR_FALLBACK leaf. ir_lower/
- * ir_emit themselves are still never called from compile()'s own
- * dispatch -- they exist, are exercised via compiler_ir_self_check
- * (below and in compiler.h) and tests/test_core.c, but the LIVE compile
- * path never runs them. What DID change in the fourth landing:
- * compile()'s own dispatch now routes through classify_head (just above
- * compile() itself) rather than re-testing `head` inline, specifically
- * so ir_lower's own "is this actually a plain call?" question (needed
- * for IR_CALL) can reuse that exact same classification instead of
- * maintaining a second, driftable copy of the same ~35-symbol special-
- * form list -- see classify_head's own comment. That refactor changes
- * compile()'s dispatch MECHANISM but is verified behavior-preserving via
- * the full test suite (ctest), not just the differential self-check.
- * Wiring ir_lower/ir_emit themselves into compile() behind the
- * differential check is the natural next increment once the skeleton
- * covers enough of the language to be worth it. */
+ * one of the native cases above or becomes an IR_FALLBACK leaf.
+ *
+ * As of the seventh landing, ir_lower/ir_emit/ir_optimize are ACTUALLY
+ * LIVE: compile()'s own dispatch (via the IR_OR_CLASSIC macro, defined
+ * just above compile() itself) routes every case this section covers
+ * through them, for every Scheme program curry compiles -- the REPL,
+ * -e, script files, everything. They are no longer test-only; see
+ * IR_OR_CLASSIC's own comment for the malformed-input infinite-
+ * recursion hazard that had to be closed before this was safe, and
+ * compile_classic's comment for why compiler_ir_self_check/
+ * compiler_ir_optimize_check needed a new, genuinely IR-free reference
+ * implementation once compile() itself stopped being one. */
 
 static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line);
 static void    ir_emit(Compiler *c, IRNode *n);
