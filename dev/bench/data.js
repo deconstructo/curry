@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787327483125,
+  "lastUpdate": 1787348561736,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6692,6 +6692,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 79.449,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "ea2815dfdba150ff8c38d5d2e2a96d0de614e830",
+          "message": "fix(build): resolve Qt6 on Homebrew via qtbase, not the broken qt@6 alias\n\n`brew --prefix qt@6` resolves to Homebrew's umbrella \"qt\" formula, whose\nlib/cmake/Qt6/ doesn't actually contain Qt6Config.cmake (only its qtbase\ndependency ships it), so find_package(Qt6 ...) silently missed and the\nmodule was skipped with just a WARNING. CMakeLists.txt now falls back to\n`brew --prefix qtbase` on macOS when the initial lookup misses, prepending\nit so it isn't shadowed by a qt@6 prefix already on CMAKE_PREFIX_PATH.\n\nFormula/curry.rb had the same bug in Ruby form (--with-qt6 failed to\nconfigure at all): it never added qtbase's opt_prefix, and once added,\nqtbase has to precede qt@6 in CMAKE_PREFIX_PATH or CMake resolves the\nQt6CoreTools sub-config from the broken umbrella tree instead.\n\nOnce found, qt6 also bakes in Homebrew's Qt plugin directory (macOS only)\nso (import (curry qt6)) doesn't abort with \"Could not find the Qt platform\nplugin cocoa\" — no QT_QPA_PLATFORM_PLUGIN_PATH env var needed anymore.\n\nVerified with a from-scratch reconfigure/build of qt6+llvm+ffi+ldap, the\nfull ctest suite (106/106), and a real `brew install --build-from-source`\nagainst the fixed formula.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-22T07:41:36+10:00",
+          "tree_id": "b2c9f70807a19a97083366d618ae448290437a25",
+          "url": "https://github.com/deconstructo/curry/commit/ea2815dfdba150ff8c38d5d2e2a96d0de614e830"
+        },
+        "date": 1787348560535,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.82,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.163,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.277,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.385,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 152.035,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 313.123,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.072,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.875,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 80.171,
             "unit": "ms"
           }
         ]
