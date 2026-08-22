@@ -20,8 +20,18 @@ typedef struct IRArenaBlock {
     char   data[];
 } IRArenaBlock;
 
+/* Tier 2.3 (cp0-style local inliner): a per-top-level-compile inline-effort
+ * budget lives here rather than on Compiler, because every child Compiler
+ * in a top-level form's compile tree shares this one arena pointer (see
+ * ir.h's lifetime comment) -- so a single counter here naturally caps
+ * total inlining work across the WHOLE form (every nested lambda/let/
+ * letrec), not just one Compiler's own locals, without any extra plumbing
+ * to thread a shared counter through init_compiler. */
+#define IR_ARENA_DEFAULT_INLINE_BUDGET 32
+
 struct IRArena {
     IRArenaBlock *head;
+    int           inline_budget;
 };
 
 static IRArenaBlock *ir_arena_block_new(size_t min_cap) {
@@ -39,7 +49,14 @@ IRArena *ir_arena_new(void) {
     IRArena *a = (IRArena *)malloc(sizeof(IRArena));
     if (!a) { fprintf(stderr, "ir: out of memory\n"); abort(); }
     a->head = ir_arena_block_new(IR_ARENA_INITIAL_BLOCK);
+    a->inline_budget = IR_ARENA_DEFAULT_INLINE_BUDGET;
     return a;
+}
+
+bool ir_arena_take_inline_budget(IRArena *a) {
+    if (a->inline_budget <= 0) return false;
+    a->inline_budget--;
+    return true;
 }
 
 void ir_arena_free(IRArena *a) {

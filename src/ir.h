@@ -254,6 +254,13 @@ IRArena *ir_arena_new(void);
 void     ir_arena_free(IRArena *a);
 void    *ir_arena_alloc(IRArena *a, size_t size);
 
+/* Tier 2.3 local inliner: claims one unit of this compile tree's shared
+ * inline-effort budget. Returns false (no claim made) once exhausted, so
+ * callers fall back to a normal, correct, just-not-inlined call -- see
+ * struct IRArena's own comment in ir.c for why this lives on the arena
+ * rather than on Compiler. */
+bool ir_arena_take_inline_budget(IRArena *a);
+
 /* Convenience: allocate and zero-init one IRNode from the arena. */
 IRNode  *ir_node_new(IRArena *a, IRKind kind, bool tail, int line);
 
