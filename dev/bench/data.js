@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787349405213,
+  "lastUpdate": 1787359223742,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6830,6 +6830,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.128,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "0db2e68af189b49907141e6d6d49d9bc10feceb9",
+          "message": "fix(bench): stop actor-ring benchmarks from deadlocking on completion signal\n\nAll three actor-ring benchmarks (tests/bench.scm, bench_heavy.scm,\nbench_torture.scm) used a plain set!'d \"finished\" variable, captured by\nthe spawned actor closures, to signal ring completion back to the main\nthread waiting on a condvar.\n\nspawn() deliberately deep-copies every upvalue into the new actor's own\nclosure (vm_snapshot_closure_for_escape in src/vm.c) so that a same-thread\nsibling closure sharing a live loop variable never observes a spawned\nactor's later mutations -- this fixed a real race previously. But it means\na spawned actor's (set! finished #t) only ever mutates its own private\ncopy of that binding, never the main thread's. The main thread's wait loop\nre-checks its own (always-false) finished after the one-and-only signal\nand blocks on the condvar forever.\n\nConfirmed while benchmarking v1.22.1: tests/bench.scm hung indefinitely\non actor-ring/8x100 on both Debug and Release builds, reproduced twice.\nA stack sample showed all ring actors idle in actor_receive and the main\nthread parked in cond_wait with near-zero total CPU time, consistent with\nthe ring completing and only the signal never becoming visible -- not an\nactors.c/vm.c bug, which is working exactly as documented.\n\ncurry has no box primitive, so the fix backs \"finished\" with a\nsingle-element vector instead of a plain variable: vectors are heap\nobjects referenced by pointer, so spawn's upvalue copy shares the same\nunderlying vector across actor and main thread, and vector-set!/vector-ref\nthrough it stay genuinely synchronized (already guarded by the existing\ndone-mtx).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-22T10:39:31+10:00",
+          "tree_id": "75ca6644d88319e4dc81dba4bbd23e4223574bdb",
+          "url": "https://github.com/deconstructo/curry/commit/0db2e68af189b49907141e6d6d49d9bc10feceb9"
+        },
+        "date": 1787359221736,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.152,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.675,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.592,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.26,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 149.811,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 310.112,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.421,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.56,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.546,
             "unit": "ms"
           }
         ]
