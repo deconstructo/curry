@@ -523,6 +523,62 @@ static void test_ir_optimize_check(void) {
          * and/or that itself simplifies. */
         "(and (and 1 2) 3)",
         "(or (or #f #f) 3)",
+
+        /* Tier 2.3 local inliner. Its decision logic lives entirely
+         * inside ir_emit's IR_CALL case (see compiler.c), not in
+         * ir_optimize -- so this same classic-vs-live-IR result-equality
+         * check already exercises it for free whenever a case below
+         * happens to trigger it; no separate differential-check function
+         * needed. Every candidate is wrapped in `(let () ...)` so its
+         * internal define runs at scope_depth > 0 (a top-level define
+         * doesn't register as a known-lambda candidate at all). */
+
+        /* Basic closed helper, called twice with a fused-global (+)
+         * consuming both results -- the exact shape that first exposed
+         * a real miscompilation during development: `add_local`'s
+         * physical-slot numbering silently aliased the first call's
+         * still-pending result with the second call's own parameter
+         * (25 came out as 90) until IR_CALL's argument-evaluation loops
+         * were fixed to reserve a placeholder for every pending sibling
+         * value before a nested inline call can claim any locals. */
+        "(let () (define (sq x) (* x x)) (+ (sq 3) (sq 4)))",
+        /* Three+ pending arguments to the same fused-global call. */
+        "(let () (define (sq x) (* x x)) (+ (sq 1) (sq 2) (sq 3) (sq 4)))",
+        /* Nested inlining: an inlined call's own argument is itself
+         * another inlined call. */
+        "(let () (define (sq x) (* x x)) (define (dbl x) (+ x x)) (sq (dbl 3)))",
+        /* A nested closure inside the inlined body captures one of the
+         * spliced-in params -- exercises end_scope's OP_CLOSE_UP firing
+         * correctly for a same-frame splice, not just a real closure's
+         * own frame teardown. */
+        "(let () (define (adder x) (lambda (y) (+ x y))) (define add5 (adder 5)) (add5 10))",
+        /* Self-recursive candidate: must be correctly rejected (not
+         * inlined -- named-let/self-tail-call already owns recursive
+         * loops), and still compile correctly either way. */
+        "(let () (define (fact k) (if (= k 0) 1 (* k (fact (- k 1))))) (fact 5))",
+        /* set! before the only call site -- must poison the registration
+         * so the call sees the REASSIGNED procedure, not the original
+         * inlined body. */
+        "(let () (define (sq x) (* x x)) (set! sq (lambda (x) 999)) (sq 3))",
+        /* Cross-Compiler poisoning: a NESTED closure mutates the outer
+         * known-local via an upvalue-resolved set!, not a same-Compiler
+         * one -- exercises poison_known's ->enclosing chain walk
+         * specifically (a same-Compiler-only check would miss this). */
+        "(let () (define (sq x) (* x x)) (define mut (lambda () (set! sq (lambda (x) 777)))) (mut) (sq 3))",
+        /* Rest-param candidate: must be rejected (proper-param-list gate)
+         * and still compile/run correctly via a real call. */
+        "(let () (define (sumall . xs) (apply + xs)) (sumall 1 2 3))",
+        /* A call to a known local via the GENERIC (non-fused-global,
+         * non-self-tail) branch -- (car ops) as the callee is never a
+         * bare symbol, so this exercises the ordinary call path, not the
+         * inliner (confirms the two coexist correctly). */
+        "(let () (define (sq x) (* x x)) (define ops (list sq sq)) ((car ops) 7))",
+        /* An inlined call inside a named-let loop body, composing with
+         * self-tail-call classification each iteration. */
+        "(let () (define (sq x) (* x x)) (let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc (sq i))))))",
+        /* Oversized body (over INLINE_MAX_BODY_NODES): must fall back to
+         * a real call, not attempt to inline, and still be correct. */
+        "(let () (define (sum10 x) (+ x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)) (sum10 1))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -530,6 +586,47 @@ static void test_ir_optimize_check(void) {
         char msg[256];
         snprintf(msg, sizeof(msg), "ir optimize-check: %s", cases[i]);
         CHECK(compiler_ir_optimize_check(expr), msg);
+    }
+}
+
+/* Tier 2.3: positive proof the local inliner actually fires, not just
+ * that it's harmless when disabled -- see compiler_ir_inline_fired_check's
+ * own comment (compiler.c/compiler.h) for why compiler_ir_optimize_check's
+ * result-equality check alone can't tell "inlined correctly" apart from
+ * "silently never inlined, fell back to an ordinary call correctly" (both
+ * produce the same RESULT). Split into two groups: cases that SHOULD grow
+ * the live-IR bytecode (an eligible candidate genuinely gets duplicated at
+ * its call site) and cases that must NOT (self-recursive, rest-param,
+ * oversized-body, or non-symbol-callee candidates correctly falling back
+ * to a real call) -- both directions matter equally: a false positive
+ * here would mean the eligibility gates aren't actually excluding what
+ * they claim to. */
+static void test_ir_inline_fires(void) {
+    static const char *should_fire[] = {
+        "(let () (define (sq x) (* x x)) (+ (sq 3) (sq 4)))",
+        "(let () (define (sq x) (* x x)) (+ (sq 1) (sq 2) (sq 3) (sq 4)))",
+        "(let () (define (sq x) (* x x)) (define (dbl x) (+ x x)) (sq (dbl 3)))",
+        "(let () (define (adder x) (lambda (y) (+ x y))) (define add5 (adder 5)) (add5 10))",
+    };
+    static const char *should_not_fire[] = {
+        "(let () (define (fact k) (if (= k 0) 1 (* k (fact (- k 1))))) (fact 5))",
+        "(let () (define (sumall . xs) (apply + xs)) (sumall 1 2 3))",
+        "(let () (define (sq x) (* x x)) (define ops (list sq sq)) ((car ops) 7))",
+        "(let () (define (sum10 x) (+ x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)) (sum10 1))",
+    };
+    for (size_t i = 0; i < sizeof(should_fire) / sizeof(should_fire[0]); i++) {
+        val_t port = port_open_input_string(should_fire[i], (uint32_t)strlen(should_fire[i]));
+        val_t expr = scm_read(port);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "ir inline fires: %s", should_fire[i]);
+        CHECK(compiler_ir_inline_fired_check(expr), msg);
+    }
+    for (size_t i = 0; i < sizeof(should_not_fire) / sizeof(should_not_fire[0]); i++) {
+        val_t port = port_open_input_string(should_not_fire[i], (uint32_t)strlen(should_not_fire[i]));
+        val_t expr = scm_read(port);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "ir inline correctly withheld: %s", should_not_fire[i]);
+        CHECK(!compiler_ir_inline_fired_check(expr), msg);
     }
 }
 
@@ -557,6 +654,7 @@ int main(void) {
     RUN_TEST(test_guard);
     RUN_TEST(test_ir_self_check);
     RUN_TEST(test_ir_optimize_check);
+    RUN_TEST(test_ir_inline_fires);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
