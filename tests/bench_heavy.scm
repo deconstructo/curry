@@ -321,7 +321,14 @@
              (rounds   500)
              (done-mtx (make-mutex))
              (done-cv  (make-condvar))
-             (finished #f))
+             ;; See the identical note in tests/bench.scm's actor-ring
+             ;; benchmark: `spawn` deep-copies upvalues into the actor's own
+             ;; closure, so a plain `(set! finished #t)` inside actor-body
+             ;; would only ever mutate the actor's private copy and this
+             ;; wait loop would hang forever. A single-element vector is a
+             ;; heap object referenced by pointer, so the shared reference
+             ;; survives the copy.
+             (finished (vector #f)))
         (define (actor-body)
           (let lp ((next #f) (count rounds))
             (let ((msg (receive)))
@@ -331,7 +338,7 @@
                 ((and (pair? msg) (eq? (car msg) 'msg))
                  (if (= count 0)
                      (begin (mutex-lock! done-mtx)
-                            (set! finished #t)
+                            (vector-set! finished 0 #t)
                             (cond-signal! done-cv)
                             (mutex-unlock! done-mtx))
                      (begin (send! next (list 'msg (cadr msg)))
@@ -346,7 +353,7 @@
           (send! (vector-ref vec 0) (list 'msg (ring-of 500)))
           (mutex-lock! done-mtx)
           (let wait ()
-            (unless finished
+            (unless (vector-ref finished 0)
               (cond-wait! done-cv done-mtx)
               (wait)))
           (mutex-unlock! done-mtx))))

@@ -296,7 +296,19 @@
              (rounds   100)
              (done-mtx (make-mutex))
              (done-cv  (make-condvar))
-             (finished #f))
+             ;; `spawn` deep-copies every upvalue into the new actor's own
+             ;; closure (see vm_snapshot_closure_for_escape in src/vm.c) so
+             ;; that a same-thread sibling closure sharing a live loop
+             ;; variable never observes a spawned actor's later mutations.
+             ;; A plain `(set! finished #t)` inside actor-body would
+             ;; therefore only ever touch the actor's own private copy,
+             ;; never this let*'s binding -- the wait loop below would spin
+             ;; on cond-wait! forever after the one-and-only signal. A
+             ;; single-element vector is a heap object referenced by
+             ;; pointer, so the pointer (not its contents) is what gets
+             ;; copied into each actor's snapshot -- vector-set!/vector-ref
+             ;; through it stays genuinely shared across the boundary.
+             (finished (vector #f)))
         (define (actor-body)
           (let lp ((next #f) (count rounds))
             (let ((msg (receive)))
@@ -306,7 +318,7 @@
                 ((and (pair? msg) (eq? (car msg) 'msg))
                  (if (= count 0)
                      (begin (mutex-lock! done-mtx)
-                            (set! finished #t)
+                            (vector-set! finished 0 #t)
                             (cond-signal! done-cv)
                             (mutex-unlock! done-mtx))
                      (begin (send! next (list 'msg (cadr msg)))
@@ -321,7 +333,7 @@
           (send! (vector-ref vec 0) (list 'msg (ring-of 20)))
           (mutex-lock! done-mtx)
           (let wait ()
-            (unless finished
+            (unless (vector-ref finished 0)
               (cond-wait! done-cv done-mtx)
               (wait)))
           (mutex-unlock! done-mtx))))
