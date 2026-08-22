@@ -78,6 +78,13 @@
 #define MAX_UPVALS  256
 #define MAX_SYNTAX_LOCALS 64
 
+/* Tier 2.3 local inliner: size budget on a candidate lambda's raw body
+ * (see ir_count_ast_nodes). Deliberately generous for a first landing --
+ * this bounds worst-case code growth per inlined call site, not overall
+ * compile-tree effort (see IR_ARENA_DEFAULT_INLINE_BUDGET, ir.c, for
+ * that). */
+#define INLINE_MAX_BODY_NODES 64
+
 typedef struct {
     val_t  name;       /* interned symbol                                */
     int    depth;      /* scope depth at declaration                     */
@@ -427,6 +434,19 @@ static int resolve_local(Compiler *c, val_t name) {
     for (int i = c->local_count - 1; i >= 0; i--)
         if (c->locals[i].name == name) return i;
     return -1;
+}
+
+/* Tier 2.3 local inliner: unconditionally invalidates any known-lambda
+ * registration for `name`, walking the ->enclosing chain -- a set!
+ * reaching a local via an upvalue (mutated from a NESTED closure, not the
+ * frame that originally bound it) must still poison the registration, or
+ * a stale, now-wrong known[] entry stays live after a real mutation. No
+ * re-marking after poisoning: deliberately simple and conservative. */
+static void poison_known(Compiler *c, val_t name) {
+    for (Compiler *cc = c; cc; cc = cc->enclosing) {
+        int slot = resolve_local(cc, name);
+        if (slot >= 0) { cc->known[slot].valid = false; return; }
+    }
 }
 
 static int resolve_upvalue(Compiler *c, val_t name) {
@@ -1381,6 +1401,48 @@ static bool body_mentions_set_target(Compiler *c, val_t body, val_t name) {
     for (val_t p = body; vis_pair(p); p = vcdr(p))
         if (expr_mentions_set_target(c, vcar(p), name)) return true;
     return false;
+}
+
+/* Tier 2.3 local inliner: conservative self-recursion check for an
+ * inlining candidate -- does `expr` contain `name` as a symbol ANYWHERE
+ * (car or cdr position, including inside a quoted datum -- unlike
+ * expr_mentions_set_target above, this deliberately does NOT special-case
+ * quote or macro use, since any occurrence at all, even inert data, is
+ * grounds to reject: over-conservative on purpose. A stray unrelated
+ * occurrence just means a safe, correct candidate gets left un-inlined,
+ * never the other way around. Does not descend into vector literals --
+ * missing a symbol occurrence there is still safe, since a vector isn't
+ * something that gets called. */
+static bool expr_contains_symbol(val_t expr, val_t name) {
+    if (expr == name) return true;
+    if (!vis_pair(expr)) return false;
+    return expr_contains_symbol(vcar(expr), name) ||
+           expr_contains_symbol(vcdr(expr), name);
+}
+
+static bool body_contains_symbol(val_t body, val_t name) {
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (expr_contains_symbol(vcar(p), name)) return true;
+    return false;
+}
+
+/* Tier 2.3: total raw AST node count (every pair cell plus every atom
+ * leaf counts as one) -- the inliner's size budget. */
+static int ir_count_ast_nodes(val_t expr) {
+    if (!vis_pair(expr)) return 1;
+    return 1 + ir_count_ast_nodes(vcar(expr)) + ir_count_ast_nodes(vcdr(expr));
+}
+
+/* Tier 2.3: true (with *argc_out set) iff `params` is a proper list --
+ * rest/dotted param lists are rejected as inlining candidates to keep
+ * call-site argument substitution simple (exact argc match only). */
+static bool params_proper_arity(val_t params, int *argc_out) {
+    int n = 0;
+    val_t p = params;
+    while (vis_pair(p)) { n++; p = vcdr(p); }
+    if (!vis_nil(p)) return false;
+    *argc_out = n;
+    return true;
 }
 
 static void compile_let(Compiler *c, val_t args, bool tail, int line) {
@@ -3642,6 +3704,10 @@ static void ir_emit(Compiler *c, IRNode *n) {
         /* Resolution happens here, at emit time -- see ir.h's comment on
          * IRNode::as.set for why. */
         emit_store(c, n->as.set.name, n->line);
+        /* Tier 2.3: a set! anywhere reachable permanently invalidates any
+         * known-lambda registration for this name -- see poison_known's
+         * own comment for why this must walk ->enclosing, not just c. */
+        poison_known(c, n->as.set.name);
         emit(c, OP_VOID, n->line);
         return;
     }
@@ -3691,6 +3757,37 @@ static void ir_emit(Compiler *c, IRNode *n) {
         /* Declaration/resolution happens here, at emit time -- see ir.h's
          * comment on IRNode::as.def for why. */
         emit_define_store(c, n->as.def.name, n->line);
+
+        /* Tier 2.3 local inliner: register `name` as a known,
+         * safely-re-lowerable lambda iff ALL of: internal (not
+         * top-level) binding, the value just emitted above was
+         * syntactically (lambda ...) (covers both `(define name (lambda
+         * ...))` and `(define (f params...) body...)` sugar -- both
+         * reach here as IR_DEFINE{value=IR_LAMBDA}, see
+         * ir_lower_define/ir_lower_define_lambda_sugar), that lambda
+         * compiled fully closed (g_last_lambda_upval_count == 0 -- the
+         * soundness condition, see its own comment), a proper
+         * (non-rest) param list, non-self-recursive, and within the
+         * size budget. A candidate failing any gate simply isn't
+         * registered -- calls to it still compile correctly, just
+         * without inlining. */
+        if (c->scope_depth > 0 && n->as.def.value->kind == IR_LAMBDA &&
+            g_last_lambda_upval_count == 0) {
+            val_t params = n->as.def.value->as.lambda.params;
+            val_t body   = n->as.def.value->as.lambda.body;
+            int argc;
+            if (params_proper_arity(params, &argc) &&
+                !body_contains_symbol(body, n->as.def.name) &&
+                ir_count_ast_nodes(body) <= INLINE_MAX_BODY_NODES) {
+                int slot = resolve_local(c, n->as.def.name);
+                if (slot >= 0) {
+                    c->known[slot].valid  = true;
+                    c->known[slot].params = params;
+                    c->known[slot].body   = body;
+                    c->known[slot].argc   = argc;
+                }
+            }
+        }
         return;
     }
     case IR_CALL: {
