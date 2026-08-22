@@ -295,6 +295,26 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
      * comments. A child Compiler (enc != NULL) still just inherits its
      * parent's arena, same as always. */
     c->ir_arena = enc ? enc->ir_arena : ir_arena_new();
+
+    /* Tier 2.3: g_inlining_depth (currently_inlining's own guard stack)
+     * has no SCM_PROTECT around ir_emit_inline_call's push/pop, so a
+     * Scheme condition raised (longjmp) while compiling INSIDE an
+     * inlined body's splice -- e.g. a malformed internal define --
+     * skips the matching pop, leaking depth for the rest of the
+     * thread's lifetime (after MAX_INLINE_DEPTH such leaks, silently
+     * disabling cycle detection for every later compile on this thread,
+     * caught by independent code review). Rather than wrap every
+     * ir_emit_inline_call invocation in its own SCM_PROTECT (real cost,
+     * for a guard that's only ever meaningful within ONE top-level
+     * compile's own recursive descent anyway), reset it here for every
+     * ROOT Compiler only (enc == NULL, never a child -- resetting
+     * unconditionally would wrongly wipe an in-progress inline's own
+     * tracking the moment any ordinary nested lambda inside that inlined
+     * body gets its own child Compiler). A raise abandons its entire
+     * enclosing top-level compile (see compiler_compile's own
+     * SCM_PROTECT), so it's always safe -- and, after a leak, necessary
+     * -- for the NEXT one to start clean. */
+    if (!enc) g_inlining_depth = 0;
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -471,6 +491,26 @@ static int add_local(Compiler *c, val_t name) {
  * whole time a nested inline call might run, without emitting any extra
  * bytecode -- the real call instruction consumes the runtime values
  * regardless of how compile-time bookkeeping numbered them. */
+/* Capacity note (flagged by independent code review): this is now called
+ * for every argument of every call, self-tail-call, and tail/ordinary
+ * call -- not just at an inlined call site -- so it widens exposure to
+ * MAX_LOCALS(256) overflow beyond what add_local alone already risked
+ * (which has the IDENTICAL "silently return an aliased, already-in-use
+ * slot on overflow" behavior, unchanged by this file, and whose callers
+ * likewise don't check for it). None of this function's own call sites
+ * check its -1 return either. Reaching this in practice requires an
+ * extreme, deliberately-pathological program (on the order of 256
+ * simultaneously pending call arguments to a single call site) -- not
+ * something realistic hand-written or generated Scheme code produces --
+ * and the actual array accesses here and in add_local are always
+ * guarded before the write (see both functions' own bounds checks), so
+ * this cannot produce an out-of-bounds access; the failure mode, if ever
+ * reached, is a wrong compile of that one pathological call site, with
+ * add_local's existing "too many locals" diagnostic on stderr. Accepted
+ * as a pre-existing class of limitation this landing makes marginally
+ * easier to reach, not a new one -- a proper fix (making Compiler-level
+ * local-slot exhaustion a clean, callable-checked failure everywhere,
+ * not just here) is a broader change than this landing's own scope. */
 static int reserve_pending_slot(Compiler *c) {
     if (c->local_count == MAX_LOCALS) return -1;
     int slot = c->local_count++;
@@ -1517,10 +1557,26 @@ static bool body_contains_symbol(val_t body, val_t name) {
 }
 
 /* Tier 2.3: total raw AST node count (every pair cell plus every atom
- * leaf counts as one) -- the inliner's size budget. */
-static int ir_count_ast_nodes(val_t expr) {
-    if (!vis_pair(expr)) return 1;
-    return 1 + ir_count_ast_nodes(vcar(expr)) + ir_count_ast_nodes(vcdr(expr));
+ * leaf counts as one) -- the inliner's size budget. Iterative over the
+ * cdr-spine, not recursive -- a wide, flat body (many top-level forms,
+ * plausible from macro-generated code) costs O(1) C-stack depth this
+ * way, not one C frame per element; only car sub-structure still
+ * recurses, bounded by genuine Scheme nesting depth rather than the
+ * body's overall size. Also stops early, without finishing the walk,
+ * once already over `budget` -- a plain unconditional recursive count
+ * (the original shape of this function) doesn't actually avoid deep
+ * C-stack recursion for a pathologically large candidate just by being
+ * CALLED before body_contains_symbol's own (unbounded) walk, the way an
+ * earlier version's ordering comment claimed -- caught by independent
+ * code review. */
+static int ir_count_ast_nodes(val_t expr, int budget) {
+    int count = 0;
+    while (vis_pair(expr)) {
+        count += 1 + ir_count_ast_nodes(vcar(expr), budget);
+        if (count > budget) return count;
+        expr = vcdr(expr);
+    }
+    return count + 1;   /* the terminal atom -- nil, or a dotted tail */
 }
 
 /* Tier 2.3: true (with *argc_out set) iff `params` is a proper list --
@@ -3811,10 +3867,23 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
      * bytecode, the values are already correctly positioned; depth is
      * already correct too (reserve_pending_slot set it to the current
      * scope_depth, exactly what add_local+mark_initialised would have
-     * set here). */
+     * set here). dbg_idx is NOT already correct, though: reserve_pending_
+     * slot never calls chunk_local_debug_add (it's an anonymous
+     * placeholder, not a real named local, at the point it's reserved),
+     * so it retains whatever stale index the physical array slot last
+     * held. end_scope unconditionally calls chunk_local_debug_end on
+     * every popped local's dbg_idx when this splice's own scope closes
+     * -- left stale, that would silently close some UNRELATED, already-
+     * finalized local's live-range entry instead of this param's own
+     * (caught by independent code review), corrupting the interactive
+     * debugger's reported variable lifetimes. Give each renamed param a
+     * genuine, fresh entry, exactly as add_local does. */
     val_t p = params;
     for (int i = 0; i < argc; i++) {
-        c->locals[base + i].name = vcar(p);
+        val_t name = vcar(p);
+        c->locals[base + i].name    = name;
+        c->locals[base + i].dbg_idx = chunk_local_debug_add(
+            c->chunk, name, base + i, chunk_pos(c->chunk));
         p = vcdr(p);
     }
 
@@ -3999,7 +4068,7 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * deep C-stack recursion compiling adversarially large
              * source in the first place). */
             if (params_proper_arity(params, &argc) &&
-                ir_count_ast_nodes(body) <= INLINE_MAX_BODY_NODES &&
+                ir_count_ast_nodes(body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
                 !body_contains_symbol(body, n->as.def.name)) {
                 int slot = resolve_local(c, n->as.def.name);
                 if (slot >= 0) {
