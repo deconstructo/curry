@@ -78,6 +78,13 @@
 #define MAX_UPVALS  256
 #define MAX_SYNTAX_LOCALS 64
 
+/* Tier 2.3 local inliner: size budget on a candidate lambda's raw body
+ * (see ir_count_ast_nodes). Deliberately generous for a first landing --
+ * this bounds worst-case code growth per inlined call site, not overall
+ * compile-tree effort (see IR_ARENA_DEFAULT_INLINE_BUDGET, ir.c, for
+ * that). */
+#define INLINE_MAX_BODY_NODES 64
+
 typedef struct {
     val_t  name;       /* interned symbol                                */
     int    depth;      /* scope depth at declaration                     */
@@ -91,6 +98,26 @@ typedef struct {
     int   index;
     val_t name;        /* interned symbol — for JIT upval_names table   */
 } UpvalDesc;
+
+/* Tier 2.3 local inliner: recorded for a local slot bound by an internal
+ * `(define name (lambda ...))` whose value compiled as a fully CLOSED
+ * lambda (zero captured upvalues -- see g_last_lambda_upval_count's own
+ * comment for why that's the soundness condition that makes it safe to
+ * re-lower `params`/`body` unchanged at a different call site later).
+ * `params`/`body` are raw, unprocessed val_t forms, same representation
+ * IRNode::as.lambda already uses (ir.h) -- ir_emit_inline_call re-lowers
+ * them fresh against the calling Compiler at each inlined call site, the
+ * same way ir_lower_let already re-lowers a let's own lambda body lazily.
+ * `valid` is cleared (never re-set once cleared) the moment this local is
+ * `set!` anywhere reachable (see poison_known) or when its physical slot
+ * index is reused by an unrelated later local (see add_local) -- kept
+ * deliberately simple/conservative: no re-marking after either event. */
+typedef struct {
+    bool  valid;
+    val_t params;
+    val_t body;
+    int   argc;
+} KnownLambda;
 
 /* A macro visible only within this compilation and its nested lambdas —
  * established by let-syntax/letrec-syntax or an internal (non-top-level)
@@ -112,6 +139,11 @@ typedef struct Compiler {
     Local      locals[MAX_LOCALS];
     int        local_count;
     int        scope_depth;
+
+    /* Tier 2.3 local inliner -- parallel to locals[] by physical slot
+     * index (known[i] describes locals[i]). See KnownLambda's own comment
+     * above. */
+    KnownLambda known[MAX_LOCALS];
 
     UpvalDesc  upvals[MAX_UPVALS];
     int        upval_count;
@@ -164,6 +196,54 @@ static _Thread_local val_t       g_compile_target_env   = V_VOID;
 static _Thread_local val_t       g_compile_self_tail_name    = V_FALSE;
 static _Thread_local bool        g_compile_self_tail_mutated = false;
 
+/* Tier 2.3 local inliner. IR_LAMBDA's ir_emit case (below) creates a real
+ * child Compiler, compiles the lambda, and tears the child down
+ * (end_compiler) before returning -- so child.upval_count is gone by the
+ * time a caller like IR_DEFINE's case, which just called ir_emit(c,
+ * n->as.def.value), would want to inspect it. Set as literally the last
+ * statement in IR_LAMBDA's case before it returns, mirroring
+ * g_compile_self_tail_name/g_compile_self_tail_mutated immediately above
+ * -- the same "child Compiler learned something only the parent's next
+ * statement needs" hand-off shape, at the same granularity (read
+ * immediately after the one ir_emit call that produced it, before any
+ * other ir_emit call could overwrite it). child.upval_count == 0 means
+ * the lambda captured no free variables from its defining scope -- the
+ * soundness condition that makes it safe to re-lower its raw params/body
+ * unchanged at a different call site later (see KnownLambda's comment):
+ * with no free variables, there is nothing for re-lowering elsewhere to
+ * mis-resolve, since every non-param name it references either fails to
+ * resolve locally at every level (falls through to global lookup, which
+ * is scope-independent) or is a global to begin with. Deliberately NOT
+ * reset to some sentinel after IR_LAMBDA's case -- every caller that
+ * cares reads it immediately after its own single ir_emit(..., IR_LAMBDA)
+ * call, never after any other node kind, so a stale value from an
+ * unrelated earlier IR_LAMBDA can never be misread as this one's. */
+static _Thread_local int         g_last_lambda_upval_count   = -1;
+
+/* Tier 2.3: guards against mutual/indirect recursion inlining itself
+ * arbitrarily deep. body_contains_symbol (below) only rejects DIRECT
+ * self-reference (f's own body mentioning f) -- two or more candidates
+ * calling each other in a cycle (A's body calls B, B's body calls A)
+ * would otherwise pass every per-candidate eligibility gate and only be
+ * stopped once the shared inline-effort budget (ir_arena_take_inline_
+ * budget) runs out. That bounds total compile cost, but isn't a clean
+ * "don't do this" signal -- it wastes budget on doomed splice attempts
+ * that could otherwise go to legitimately-inlinable call sites elsewhere
+ * in the same top-level form. Tracks the raw body val_t IDENTITY (eq?
+ * comparison -- the exact same cons cells are reused every time a given
+ * candidate is spliced, since KnownLambda.body is never copied) of every
+ * inline currently in progress on the C call stack; ir_emit_inline_call
+ * pushes/pops around its own body-processing. */
+#define MAX_INLINE_DEPTH 64
+static _Thread_local val_t g_inlining_bodies[MAX_INLINE_DEPTH];
+static _Thread_local int   g_inlining_depth = 0;
+
+static bool currently_inlining(val_t body) {
+    for (int i = 0; i < g_inlining_depth; i++)
+        if (g_inlining_bodies[i] == body) return true;
+    return false;
+}
+
 /* Forces compile()'s own dispatch (specifically IR_OR_CLASSIC, below) to
  * always take the classic compile_X path, never ir_lower/ir_emit --
  * checked once per compile() call, so it applies to the WHOLE recursive
@@ -215,6 +295,26 @@ static void init_compiler(Compiler *c, Compiler *enc, const char *name) {
      * comments. A child Compiler (enc != NULL) still just inherits its
      * parent's arena, same as always. */
     c->ir_arena = enc ? enc->ir_arena : ir_arena_new();
+
+    /* Tier 2.3: g_inlining_depth (currently_inlining's own guard stack)
+     * has no SCM_PROTECT around ir_emit_inline_call's push/pop, so a
+     * Scheme condition raised (longjmp) while compiling INSIDE an
+     * inlined body's splice -- e.g. a malformed internal define --
+     * skips the matching pop, leaking depth for the rest of the
+     * thread's lifetime (after MAX_INLINE_DEPTH such leaks, silently
+     * disabling cycle detection for every later compile on this thread,
+     * caught by independent code review). Rather than wrap every
+     * ir_emit_inline_call invocation in its own SCM_PROTECT (real cost,
+     * for a guard that's only ever meaningful within ONE top-level
+     * compile's own recursive descent anyway), reset it here for every
+     * ROOT Compiler only (enc == NULL, never a child -- resetting
+     * unconditionally would wrongly wipe an in-progress inline's own
+     * tracking the moment any ordinary nested lambda inside that inlined
+     * body gets its own child Compiler). A raise abandons its entire
+     * enclosing top-level compile (see compiler_compile's own
+     * SCM_PROTECT), so it's always safe -- and, after a leak, necessary
+     * -- for the NEXT one to start clean. */
+    if (!enc) g_inlining_depth = 0;
 }
 
 static Chunk *end_compiler(Compiler *c) {
@@ -342,7 +442,99 @@ static int add_local(Compiler *c, val_t name) {
     l->captured = false;
     l->dbg_idx  = chunk_local_debug_add(c->chunk, name, c->local_count,
                                         chunk_pos(c->chunk));
+    /* Tier 2.3: this physical slot may have most recently held some other,
+     * unrelated local from an already-exited scope with a live
+     * known-lambda registration (known[] is keyed by physical slot index,
+     * not by variable identity) -- clear it so `name` doesn't inherit
+     * that stale entry. */
+    c->known[c->local_count].valid = false;
     return c->local_count++;
+}
+
+/* Tier 2.3 local inliner: reserves a compile-time-only placeholder local
+ * slot -- no bytecode emitted, no name, never resolvable by
+ * resolve_local -- for a value that is CURRENTLY sitting on the real VM
+ * stack but isn't itself a named local: specifically, an already-emitted
+ * sibling argument of a call/self-tail-call/tail-call whose OWN
+ * evaluation isn't finished yet (more arguments remain to be compiled
+ * before the single call/self-tail-call instruction consumes all of
+ * them at once).
+ *
+ * Why this is needed: add_local (and therefore ir_emit_inline_call,
+ * which uses it to bind an inlined call's params) assumes `c->local_count`
+ * always equals the TRUE current depth of the real VM stack relative to
+ * this frame's base -- i.e. that nothing is sitting on the stack above
+ * `c->locals[c->local_count-1]` except what add_local itself put there.
+ * That invariant holds for every call site that existed before Tier 2.3:
+ * a lambda body's own params/internal-defines are the ONLY things ever
+ * on the stack when add_local runs, because any nested lambda/let/letrec
+ * gets its OWN brand-new child Compiler with local_count starting fresh
+ * at 0, and CALLING CONVENTION guarantees that child's frame->slots base
+ * is computed fresh (vm->sp - argc) at the exact moment of the real
+ * OP_CALL that creates it -- so nothing else can possibly be pending.
+ *
+ * The local inliner breaks that guarantee: it's the first thing that can
+ * call add_local against the SAME, already-in-progress Compiler `c`
+ * while evaluating one of several sibling arguments to an OUTER call
+ * still being accumulated on the stack (e.g. `(+ (square 3) (square
+ * 4))`: while inlining the second `(square 4))`, the first `(square 3))`'s
+ * already-computed result is sitting on the stack, untracked by
+ * `c->local_count`, and inlining's own add_local would otherwise
+ * silently claim that SAME physical stack slot for the second call's own
+ * `x` -- confirmed as a real, reproduced miscompilation (`(+ (square 3)
+ * (square 4))` returned 90 instead of 25) before this fix.
+ *
+ * Bracketing every call-argument-evaluation loop with
+ * reserve_pending_slot (after each argument is pushed) and
+ * release_pending_slots (once, right before the real call instruction
+ * that actually consumes them) keeps `c->local_count` accurate for the
+ * whole time a nested inline call might run, without emitting any extra
+ * bytecode -- the real call instruction consumes the runtime values
+ * regardless of how compile-time bookkeeping numbered them. */
+/* Capacity note (flagged by independent code review): this is now called
+ * for every argument of every call, self-tail-call, and tail/ordinary
+ * call -- not just at an inlined call site -- so it widens exposure to
+ * MAX_LOCALS(256) overflow beyond what add_local alone already risked
+ * (which has the IDENTICAL "silently return an aliased, already-in-use
+ * slot on overflow" behavior, unchanged by this file, and whose callers
+ * likewise don't check for it). None of this function's own call sites
+ * check its -1 return either. Reaching this in practice requires an
+ * extreme, deliberately-pathological program (on the order of 256
+ * simultaneously pending call arguments to a single call site) -- not
+ * something realistic hand-written or generated Scheme code produces --
+ * and the actual array accesses here and in add_local are always
+ * guarded before the write (see both functions' own bounds checks), so
+ * this cannot produce an out-of-bounds access; the failure mode, if ever
+ * reached, is a wrong compile of that one pathological call site, with
+ * add_local's existing "too many locals" diagnostic on stderr. Accepted
+ * as a pre-existing class of limitation this landing makes marginally
+ * easier to reach, not a new one -- a proper fix (making Compiler-level
+ * local-slot exhaustion a clean, callable-checked failure everywhere,
+ * not just here) is a broader change than this landing's own scope. */
+static int reserve_pending_slot(Compiler *c) {
+    if (c->local_count == MAX_LOCALS) return -1;
+    int slot = c->local_count++;
+    c->locals[slot].name     = V_FALSE;   /* never matches a real name */
+    c->locals[slot].captured = false;
+    /* Must match c->scope_depth (the CURRENT depth, not deeper): this
+     * physical array slot may retain a stale, deeper .depth value from
+     * whatever local last occupied it (e.g. an earlier sibling argument's
+     * own inlined call's param, already popped). end_scope only pops
+     * locals whose depth is STRICTLY GREATER than the scope it's
+     * exiting -- setting depth to the current level makes this
+     * placeholder look like it belongs to an OUTER scope, so a nested
+     * inline call's own end_scope correctly leaves it alone instead of
+     * wrongly popping/OP_SLIDE-ing it away along with its own real
+     * locals (confirmed as a second real bug, caught immediately after
+     * fixing the first: manifested as a runtime type error instead of a
+     * silently wrong numeric result). */
+    c->locals[slot].depth    = c->scope_depth;
+    c->known[slot].valid     = false;
+    return slot;
+}
+
+static void release_pending_slots(Compiler *c, int saved_local_count) {
+    c->local_count = saved_local_count;
 }
 
 /* Mark the most-recently added local as initialised at current depth */
@@ -372,6 +564,19 @@ static int resolve_local(Compiler *c, val_t name) {
     for (int i = c->local_count - 1; i >= 0; i--)
         if (c->locals[i].name == name) return i;
     return -1;
+}
+
+/* Tier 2.3 local inliner: unconditionally invalidates any known-lambda
+ * registration for `name`, walking the ->enclosing chain -- a set!
+ * reaching a local via an upvalue (mutated from a NESTED closure, not the
+ * frame that originally bound it) must still poison the registration, or
+ * a stale, now-wrong known[] entry stays live after a real mutation. No
+ * re-marking after poisoning: deliberately simple and conservative. */
+static void poison_known(Compiler *c, val_t name) {
+    for (Compiler *cc = c; cc; cc = cc->enclosing) {
+        int slot = resolve_local(cc, name);
+        if (slot >= 0) { cc->known[slot].valid = false; return; }
+    }
 }
 
 static int resolve_upvalue(Compiler *c, val_t name) {
@@ -1326,6 +1531,64 @@ static bool body_mentions_set_target(Compiler *c, val_t body, val_t name) {
     for (val_t p = body; vis_pair(p); p = vcdr(p))
         if (expr_mentions_set_target(c, vcar(p), name)) return true;
     return false;
+}
+
+/* Tier 2.3 local inliner: conservative self-recursion check for an
+ * inlining candidate -- does `expr` contain `name` as a symbol ANYWHERE
+ * (car or cdr position, including inside a quoted datum -- unlike
+ * expr_mentions_set_target above, this deliberately does NOT special-case
+ * quote or macro use, since any occurrence at all, even inert data, is
+ * grounds to reject: over-conservative on purpose. A stray unrelated
+ * occurrence just means a safe, correct candidate gets left un-inlined,
+ * never the other way around. Does not descend into vector literals --
+ * missing a symbol occurrence there is still safe, since a vector isn't
+ * something that gets called. */
+static bool expr_contains_symbol(val_t expr, val_t name) {
+    if (expr == name) return true;
+    if (!vis_pair(expr)) return false;
+    return expr_contains_symbol(vcar(expr), name) ||
+           expr_contains_symbol(vcdr(expr), name);
+}
+
+static bool body_contains_symbol(val_t body, val_t name) {
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (expr_contains_symbol(vcar(p), name)) return true;
+    return false;
+}
+
+/* Tier 2.3: total raw AST node count (every pair cell plus every atom
+ * leaf counts as one) -- the inliner's size budget. Iterative over the
+ * cdr-spine, not recursive -- a wide, flat body (many top-level forms,
+ * plausible from macro-generated code) costs O(1) C-stack depth this
+ * way, not one C frame per element; only car sub-structure still
+ * recurses, bounded by genuine Scheme nesting depth rather than the
+ * body's overall size. Also stops early, without finishing the walk,
+ * once already over `budget` -- a plain unconditional recursive count
+ * (the original shape of this function) doesn't actually avoid deep
+ * C-stack recursion for a pathologically large candidate just by being
+ * CALLED before body_contains_symbol's own (unbounded) walk, the way an
+ * earlier version's ordering comment claimed -- caught by independent
+ * code review. */
+static int ir_count_ast_nodes(val_t expr, int budget) {
+    int count = 0;
+    while (vis_pair(expr)) {
+        count += 1 + ir_count_ast_nodes(vcar(expr), budget);
+        if (count > budget) return count;
+        expr = vcdr(expr);
+    }
+    return count + 1;   /* the terminal atom -- nil, or a dotted tail */
+}
+
+/* Tier 2.3: true (with *argc_out set) iff `params` is a proper list --
+ * rest/dotted param lists are rejected as inlining candidates to keep
+ * call-site argument substitution simple (exact argc match only).
+ * scm_list_length (src/builtins.c) already performs exactly this walk
+ * and returns -1 for an improper list. */
+static bool params_proper_arity(val_t params, int *argc_out) {
+    int n = scm_list_length(params);
+    if (n < 0) return false;
+    *argc_out = n;
+    return true;
 }
 
 static void compile_let(Compiler *c, val_t args, bool tail, int line) {
@@ -2520,8 +2783,22 @@ static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int lin
          * "unbound variable: loop" past ~50 iterations before this fix,
          * worked correctly after). */
         resolve_upvalue(c, head);
-        a = args;
-        while (vis_pair(a)) { compile(c, vcar(a), false, line); a = vcdr(a); }
+        /* Tier 2.3: reserve/release brackets this loop -- see
+         * reserve_pending_slot's own comment (compiler.c) for why: an
+         * argument compiled here can recurse back into ir_emit's IR_CALL
+         * inline branch (via compile()'s own IR_OR_CLASSIC), which must
+         * not alias an earlier, still-pending sibling argument's stack
+         * slot. */
+        {
+            int saved = c->local_count;
+            a = args;
+            while (vis_pair(a)) {
+                compile(c, vcar(a), false, line);
+                reserve_pending_slot(c);
+                a = vcdr(a);
+            }
+            release_pending_slots(c, saved);
+        }
         emit_ab(c, OP_SELF_TAIL_CALL, (uint8_t)argc, line);
         return;
     }
@@ -2544,21 +2821,35 @@ static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int lin
     if (vis_symbol(head) && !is_keyword_symbol(head) &&
         resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
         int ci = chunk_add_const(c->chunk, head);
-        a = args;
-        while (vis_pair(a)) { compile(c, vcar(a), false, line); a = vcdr(a); }
+        /* Tier 2.3: see the self-tail-call branch's own comment above. */
+        {
+            int saved = c->local_count;
+            a = args;
+            while (vis_pair(a)) {
+                compile(c, vcar(a), false, line);
+                reserve_pending_slot(c);
+                a = vcdr(a);
+            }
+            release_pending_slots(c, saved);
+        }
         emit_abc(c, tail ? OP_TAIL_CALL_GLOBAL : OP_CALL_GLOBAL,
                  (uint8_t)ci, (uint8_t)argc, line);
         return;
     }
 
-    /* Compile callee */
-    compile(c, head, false, line);
-
-    /* Compile arguments */
-    a = args;
-    while (vis_pair(a)) {
-        compile(c, vcar(a), false, line);
-        a = vcdr(a);
+    /* Tier 2.3: the callee itself is ALSO a pending value while args are
+     * compiled below -- reserve it too, not just the args. */
+    {
+        int saved = c->local_count;
+        compile(c, head, false, line);
+        reserve_pending_slot(c);
+        a = args;
+        while (vis_pair(a)) {
+            compile(c, vcar(a), false, line);
+            reserve_pending_slot(c);
+            a = vcdr(a);
+        }
+        release_pending_slots(c, saved);
     }
 
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, line);
@@ -3525,6 +3816,116 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     return n;
 }
 
+/* Tier 2.3 local inliner: splices a known-closed candidate's raw
+ * `params`/`body` directly into the CALLING Compiler `c`'s own
+ * instruction stream -- no new child Compiler, no OP_CLOSURE, no
+ * OP_CALL/OP_RETURN at all. `args` are `call_node`'s own already-lowered
+ * (via ir_lower, at ir_lower_call time) argument IRNodes; `call_node` is
+ * the original IR_CALL node being replaced, whose ->tail this inlined
+ * body's own last form inherits (so an inlined tail call composes for
+ * free with whatever self-tail-call/fused-global classification that
+ * last form's own ir_emit ends up choosing).
+ *
+ * This is deliberately IR_LAMBDA's own case (above) with init_compiler/
+ * end_compiler/OP_CLOSURE removed and begin_scope/end_scope substituted
+ * for "new Compiler": begin_scope/end_scope (see end_scope's own comment)
+ * already correctly (a) gives resolve_local's innermost-first walk
+ * correct shadowing for the newly-spliced params/internal-defines against
+ * c's own pre-existing locals, (b) emits OP_CLOSE_UP for a nested closure
+ * inside the inlined body capturing one of the spliced-in locals, before
+ * (c) OP_SLIDE compacts every spliced local away, leaving only the
+ * inlined body's final value on the stack -- exactly where a real call's
+ * return value would have ended up. No new opcode needed. */
+static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
+                                 IRNode **args, int argc, IRNode *call_node) {
+    begin_scope(c);
+
+    /* Every argument must be evaluated -- and, in particular, every
+     * IR_VAR_REF inside it resolved -- against the CALLER's own scope,
+     * completely untouched by this call's own params, before any of
+     * those params are bound. Binding param i as a real, resolvable
+     * local BEFORE emitting argument i+1 was a real, confirmed
+     * miscompilation: (let ((x 100)) (define (add x y) (+ x y)) (add 1
+     * x)) returned 2 instead of 101, because by the time the second
+     * argument's reference to the OUTER x was resolved (IR_VAR_REF
+     * resolution is deliberately deferred to ir_emit time -- see ir.h),
+     * the first param (also named x, from `add`'s own param list) had
+     * already been bound and shadowed it. This is exactly the ordering
+     * hazard reserve_pending_slot/release_pending_slots already exists
+     * to prevent for an OUTER call's own sibling arguments (see that
+     * function's own comment) -- the same fix applies here: reserve
+     * every argument's value as an anonymous (name = V_FALSE, never
+     * resolvable) placeholder first, and only claim them as the real,
+     * shadowing-capable param names in a second pass once every argument
+     * has already been evaluated. */
+    int base = c->local_count;
+    for (int i = 0; i < argc; i++) {
+        ir_emit(c, args[i]);
+        reserve_pending_slot(c);
+    }
+    /* Claim each reserved placeholder as its real param name -- no
+     * bytecode, the values are already correctly positioned; depth is
+     * already correct too (reserve_pending_slot set it to the current
+     * scope_depth, exactly what add_local+mark_initialised would have
+     * set here). dbg_idx is NOT already correct, though: reserve_pending_
+     * slot never calls chunk_local_debug_add (it's an anonymous
+     * placeholder, not a real named local, at the point it's reserved),
+     * so it retains whatever stale index the physical array slot last
+     * held. end_scope unconditionally calls chunk_local_debug_end on
+     * every popped local's dbg_idx when this splice's own scope closes
+     * -- left stale, that would silently close some UNRELATED, already-
+     * finalized local's live-range entry instead of this param's own
+     * (caught by independent code review), corrupting the interactive
+     * debugger's reported variable lifetimes. Give each renamed param a
+     * genuine, fresh entry, exactly as add_local does. */
+    val_t p = params;
+    for (int i = 0; i < argc; i++) {
+        val_t name = vcar(p);
+        c->locals[base + i].name    = name;
+        c->locals[base + i].dbg_idx = chunk_local_debug_add(
+            c->chunk, name, base + i, chunk_pos(c->chunk));
+        p = vcdr(p);
+    }
+
+    lambda_prescan(c, body, call_node->line);
+
+    /* Mark this candidate's body as "currently being inlined" for the
+     * duration of walking it -- see currently_inlining's own comment.
+     * Bounded by MAX_INLINE_DEPTH, itself well above the inline-effort
+     * budget (32), so this can't overflow in practice; fails safe
+     * (silently stops tracking, at worst re-allowing a budget-bounded
+     * expansion) rather than crashing if it somehow did. */
+    if (g_inlining_depth < MAX_INLINE_DEPTH)
+        g_inlining_bodies[g_inlining_depth++] = body;
+
+    /* Interleaved lower-then-emit walk, one body form at a time, against
+     * `c` directly -- identical in shape to IR_LAMBDA's own body walk
+     * above, just targeting the caller's own Compiler instead of a
+     * freshly created child. */
+    val_t list = body;
+    if (vis_nil(list)) {
+        emit(c, OP_VOID, call_node->line);
+    } else {
+        int seq_line = call_node->line;
+        while (vis_pair(list)) {
+            val_t expr = vcar(list);
+            val_t rest = vcdr(list);
+            bool  last = vis_nil(rest);
+            if (as_pair(list)->hdr.flags)
+                seq_line = (int)as_pair(list)->hdr.flags;
+            IRNode *form_ir = ir_lower(c, expr, call_node->tail && last, seq_line);
+            ir_emit(c, form_ir);
+            if (!last) emit(c, OP_POP, seq_line);
+            list = rest;
+        }
+    }
+
+    if (g_inlining_depth > 0 && g_inlining_bodies[g_inlining_depth - 1] == body)
+        g_inlining_depth--;
+
+    end_scope(c, call_node->line);
+}
+
 static void ir_emit(Compiler *c, IRNode *n) {
     switch (n->kind) {
     case IR_CONST: {
@@ -3587,6 +3988,10 @@ static void ir_emit(Compiler *c, IRNode *n) {
         /* Resolution happens here, at emit time -- see ir.h's comment on
          * IRNode::as.set for why. */
         emit_store(c, n->as.set.name, n->line);
+        /* Tier 2.3: a set! anywhere reachable permanently invalidates any
+         * known-lambda registration for this name -- see poison_known's
+         * own comment for why this must walk ->enclosing, not just c. */
+        poison_known(c, n->as.set.name);
         emit(c, OP_VOID, n->line);
         return;
     }
@@ -3636,6 +4041,44 @@ static void ir_emit(Compiler *c, IRNode *n) {
         /* Declaration/resolution happens here, at emit time -- see ir.h's
          * comment on IRNode::as.def for why. */
         emit_define_store(c, n->as.def.name, n->line);
+
+        /* Tier 2.3 local inliner: register `name` as a known,
+         * safely-re-lowerable lambda iff ALL of: internal (not
+         * top-level) binding, the value just emitted above was
+         * syntactically (lambda ...) (covers both `(define name (lambda
+         * ...))` and `(define (f params...) body...)` sugar -- both
+         * reach here as IR_DEFINE{value=IR_LAMBDA}, see
+         * ir_lower_define/ir_lower_define_lambda_sugar), that lambda
+         * compiled fully closed (g_last_lambda_upval_count == 0 -- the
+         * soundness condition, see its own comment), a proper
+         * (non-rest) param list, non-self-recursive, and within the
+         * size budget. A candidate failing any gate simply isn't
+         * registered -- calls to it still compile correctly, just
+         * without inlining. */
+        if (c->scope_depth > 0 && n->as.def.value->kind == IR_LAMBDA &&
+            g_last_lambda_upval_count == 0) {
+            val_t params = n->as.def.value->as.lambda.params;
+            val_t body   = n->as.def.value->as.lambda.body;
+            int argc;
+            /* Ordered cheapest-first: params_proper_arity and
+             * ir_count_ast_nodes are simple bounded walks; both run
+             * before body_contains_symbol's unbounded recursive scan, so
+             * a large candidate gets rejected by the size budget without
+             * ever paying for the full self-reference walk (or risking
+             * deep C-stack recursion compiling adversarially large
+             * source in the first place). */
+            if (params_proper_arity(params, &argc) &&
+                ir_count_ast_nodes(body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+                !body_contains_symbol(body, n->as.def.name)) {
+                int slot = resolve_local(c, n->as.def.name);
+                if (slot >= 0) {
+                    c->known[slot].valid  = true;
+                    c->known[slot].params = params;
+                    c->known[slot].body   = body;
+                    c->known[slot].argc   = argc;
+                }
+            }
+        }
         return;
     }
     case IR_CALL: {
@@ -3664,22 +4107,78 @@ static void ir_emit(Compiler *c, IRNode *n) {
             head == c->self_tail_name && !c->self_tail_mutated &&
             resolve_local(c, head) < 0) {
             resolve_upvalue(c, head);
-            for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+            /* Tier 2.3: reserve/release brackets this loop so a nested
+             * inline call in a later argument (see reserve_pending_slot's
+             * own comment) numbers its own locals correctly relative to
+             * earlier, still-pending sibling arguments. */
+            int saved = c->local_count;
+            for (int i = 0; i < argc; i++) {
+                ir_emit(c, n->as.call.args[i]);
+                reserve_pending_slot(c);
+            }
+            release_pending_slots(c, saved);
             emit_ab(c, OP_SELF_TAIL_CALL, (uint8_t)argc, n->line);
             return;
+        }
+
+        /* Tier 2.3 local inliner. Mutually exclusive with both the
+         * self-tail-call branch above and the fused-global branch below
+         * by construction: both require resolve_local(c, head) < 0, which
+         * a registered known-lambda local can never satisfy (it IS a
+         * resolvable local). MAX_LOCALS overflow from the params alone is
+         * checked here; overflow from the inlined body's own internal
+         * defines relies on add_local's existing guard, same as any other
+         * deeply-nested closure in this file today -- not a new risk
+         * category, just a modest quantitative increase in worst-case
+         * slot pressure, and bounded in practice by the effort/size
+         * budgets already limiting how much inlining can compound. */
+        if (vis_symbol(head)) {
+            int slot = resolve_local(c, head);
+            if (slot >= 0 && c->known[slot].valid &&
+                c->known[slot].argc == argc &&
+                c->local_count + argc < MAX_LOCALS &&
+                /* Mutual/indirect recursion guard -- checked BEFORE
+                 * claiming inline budget below, so a candidate rejected
+                 * for this reason doesn't burn a unit of the shared
+                 * budget on a splice that was never going to happen; see
+                 * currently_inlining's own comment. */
+                !currently_inlining(c->known[slot].body) &&
+                ir_arena_take_inline_budget(c->ir_arena)) {
+                ir_emit_inline_call(c, c->known[slot].params,
+                                     c->known[slot].body,
+                                     n->as.call.args, argc, n);
+                return;
+            }
         }
 
         if (vis_symbol(head) && !is_keyword_symbol(head) &&
             resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
             int ci = chunk_add_const(c->chunk, head);
-            for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+            /* Tier 2.3: see the self-tail-call branch's own comment above. */
+            int saved = c->local_count;
+            for (int i = 0; i < argc; i++) {
+                ir_emit(c, n->as.call.args[i]);
+                reserve_pending_slot(c);
+            }
+            release_pending_slots(c, saved);
             emit_abc(c, ctail ? OP_TAIL_CALL_GLOBAL : OP_CALL_GLOBAL,
                      (uint8_t)ci, (uint8_t)argc, n->line);
             return;
         }
 
-        ir_emit(c, n->as.call.callee);
-        for (int i = 0; i < argc; i++) ir_emit(c, n->as.call.args[i]);
+        /* Tier 2.3: the callee itself (evaluated first here) is ALSO a
+         * pending value while the args below are compiled -- reserve it
+         * too, not just the args. */
+        {
+            int saved = c->local_count;
+            ir_emit(c, n->as.call.callee);
+            reserve_pending_slot(c);
+            for (int i = 0; i < argc; i++) {
+                ir_emit(c, n->as.call.args[i]);
+                reserve_pending_slot(c);
+            }
+            release_pending_slots(c, saved);
+        }
         emit_ab(c, ctail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, n->line);
         return;
     }
@@ -3742,6 +4241,9 @@ static void ir_emit(Compiler *c, IRNode *n) {
             chunk_emit(c->chunk, child.upvals[i].is_local ? 1 : 0, n->line);
             chunk_emit(c->chunk, (uint8_t)child.upvals[i].index,   n->line);
         }
+        /* Tier 2.3: see g_last_lambda_upval_count's own comment -- last
+         * statement in this case, after `child` is otherwise done with. */
+        g_last_lambda_upval_count = child.upval_count;
         return;
     }
     case IR_NAMED_LET: {
@@ -4048,6 +4550,77 @@ bool compiler_ir_optimize_check(val_t expr) {
 
     if (raised) scm_raise_val(exn);
     return equal;
+}
+
+/* Tier 2.3 local-inliner positive-firing check: compiler_ir_optimize_check
+ * above already differentially verifies inlining's CORRECTNESS for free
+ * (inlining's decision logic lives entirely inside ir_emit's IR_CALL case,
+ * not in ir_optimize, so the live IR path it already runs exercises it
+ * whenever an input expression happens to trigger it) -- but a pure
+ * result-comparison check can pass even with inlining silently disabled
+ * entirely (a no-op fallback to an ordinary call is still "correct"). This
+ * is the proof the feature actually exists: for an expr whose eligible
+ * candidate is called `call_count` times, a genuinely-firing inliner
+ * duplicates the candidate's body at each call site instead of a compact
+ * OP_LOAD_LOCAL+OP_CALL sequence, so the live-IR chunk's compiled bytecode
+ * length must come out LARGER than classic compilation's -- a simple,
+ * robust, opcode-format-agnostic signal that doesn't require decoding
+ * individual instructions. Same compile-both-sides shape as
+ * compiler_ir_optimize_check, minus the result-equality assertion (this
+ * function's caller is expected to also call compiler_ir_optimize_check
+ * on the same expr for that). */
+/* Tier 2.3 test helper: finds the first nested Chunk (a lambda's own
+ * compiled body) in `c`'s constant pool -- used to look past an outer
+ * `(let () ...)` wrapper's own trivial "create closure; call it" bytecode
+ * (a handful of bytes regardless of what's inside) down to where the
+ * interesting body bytecode, including any inlined duplication, actually
+ * lives. Returns NULL if `c` has no nested chunk (e.g. expr wasn't
+ * let-wrapped). */
+static Chunk *chunk_first_nested(Chunk *c) {
+    for (int i = 0; i < c->const_len; i++)
+        if (vis_type(c->constants[i], T_CHUNK))
+            return vunptr(Chunk, c->constants[i]);
+    return NULL;
+}
+
+bool compiler_ir_inline_fired_check(val_t expr) {
+    gc_inhibit_minor();
+
+    Compiler old_c;
+    init_compiler(&old_c, NULL, "<inline-fired-check-old>");
+    Compiler new_c;
+    init_compiler(&new_c, NULL, "<inline-fired-check-new>");
+
+    int  line = g_reader_last_line;
+    bool grew = false;
+
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        compile_classic(&old_c, expr, false, line);
+        IRNode *ir = ir_lower(&new_c, expr, false, line);
+        ir_emit(&new_c, ir_optimize(ir));
+        /* `(let () ...)` desugars to an IIFE: the OUTER chunk being built
+         * here is just "create closure; call it" (a handful of bytes),
+         * regardless of what's inside -- the interesting body bytecode
+         * (including any inlined duplication) lives in the LET's own
+         * nested child Chunk, stored as a Chunk* in the outer chunk's own
+         * constant pool. Find and compare that instead. */
+        Chunk *old_body = chunk_first_nested(old_c.chunk);
+        Chunk *new_body = chunk_first_nested(new_c.chunk);
+        int old_len = old_body ? old_body->code_len : old_c.chunk->code_len;
+        int new_len = new_body ? new_body->code_len : new_c.chunk->code_len;
+        grew = new_len > old_len;
+    }, {
+        ir_arena_free(old_c.ir_arena);
+        ir_arena_free(new_c.ir_arena);
+        gc_resume_minor();
+        scm_raise_val(h.exn);
+    });
+
+    ir_arena_free(old_c.ir_arena);
+    ir_arena_free(new_c.ir_arena);
+    gc_resume_minor();
+    return grew;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

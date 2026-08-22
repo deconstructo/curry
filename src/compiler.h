@@ -73,4 +73,15 @@ bool compiler_ir_self_check(val_t expr);
  * never executes anything. */
 bool compiler_ir_optimize_check(val_t expr);
 
+/* Tier 2.3 local-inliner positive-firing check: compiler_ir_optimize_check
+ * above already differentially verifies inlining's correctness for free
+ * (its decision logic lives inside ir_emit, not ir_optimize), but a pure
+ * result-comparison check can pass even with inlining silently disabled.
+ * This proves the feature actually fired for `expr`: true iff the live-IR
+ * compile produced strictly MORE bytecode than classic compilation, the
+ * signature of a candidate's body being duplicated at its call site(s)
+ * instead of compactly loaded-and-called. See its own comment in
+ * compiler.c for the full contract. */
+bool compiler_ir_inline_fired_check(val_t expr);
+
 #endif /* CURRY_COMPILER_H */
