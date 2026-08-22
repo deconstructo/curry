@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787359223742,
+  "lastUpdate": 1787373988196,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -6899,6 +6899,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.546,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "41620341b7b0f31fce076986757fd15293900f37",
+          "message": "docs(llm): fix broken actor-based summarise-all example in guide-llm.md\n\nThe \"streaming pipelines with actors\" example spawned one actor per text,\nthen collected results with (map (lambda (a) (receive)) actors). That's\nbroken: (receive) reads the CALLING actor's own mailbox, and the\ntop-level/script thread isn't an actor, so actor_self() returns #f and\nactor_receive short-circuits to #f immediately instead of blocking (see\nprim_receive/actor_receive in src/builtins.c and src/actors.c). Verified\ndirectly: swapping llm-ask for a dummy string function and running the old\nexample prints three #f's instantly — every summary was silently\ndiscarded, not just slow.\n\nWorkers can't send! the result back to the caller either, for the same\nreason: the caller has no mailbox to send to.\n\nRewrote the example using the same shared-state idiom the actor-ring\nbenchmarks use (just fixed in 0db2e68): a shared results vector and a\nmutex/condvar pair from (curry sync), with a \"remaining\" counter (also a\nvector, since spawn deep-copies captured variables into the actor's own\nclosure — only a heap object captured by reference stays genuinely shared\nacross that boundary). Verified the corrected pattern against the same\ndummy substitution: all 5 summaries come back in order, no hang.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-22T14:45:48+10:00",
+          "tree_id": "937cd649be4bad7938e04724934b6c6005c2870d",
+          "url": "https://github.com/deconstructo/curry/commit/41620341b7b0f31fce076986757fd15293900f37"
+        },
+        "date": 1787373987492,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.377,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.615,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.714,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.35,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 159.689,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 306.022,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.752,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 103.419,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 81.275,
             "unit": "ms"
           }
         ]
