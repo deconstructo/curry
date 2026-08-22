@@ -92,6 +92,26 @@ typedef struct {
     val_t name;        /* interned symbol — for JIT upval_names table   */
 } UpvalDesc;
 
+/* Tier 2.3 local inliner: recorded for a local slot bound by an internal
+ * `(define name (lambda ...))` whose value compiled as a fully CLOSED
+ * lambda (zero captured upvalues -- see g_last_lambda_upval_count's own
+ * comment for why that's the soundness condition that makes it safe to
+ * re-lower `params`/`body` unchanged at a different call site later).
+ * `params`/`body` are raw, unprocessed val_t forms, same representation
+ * IRNode::as.lambda already uses (ir.h) -- ir_emit_inline_call re-lowers
+ * them fresh against the calling Compiler at each inlined call site, the
+ * same way ir_lower_let already re-lowers a let's own lambda body lazily.
+ * `valid` is cleared (never re-set once cleared) the moment this local is
+ * `set!` anywhere reachable (see poison_known) or when its physical slot
+ * index is reused by an unrelated later local (see add_local) -- kept
+ * deliberately simple/conservative: no re-marking after either event. */
+typedef struct {
+    bool  valid;
+    val_t params;
+    val_t body;
+    int   argc;
+} KnownLambda;
+
 /* A macro visible only within this compilation and its nested lambdas —
  * established by let-syntax/letrec-syntax or an internal (non-top-level)
  * define-syntax.  Pure compile-time bookkeeping: `transformer` is the
@@ -112,6 +132,11 @@ typedef struct Compiler {
     Local      locals[MAX_LOCALS];
     int        local_count;
     int        scope_depth;
+
+    /* Tier 2.3 local inliner -- parallel to locals[] by physical slot
+     * index (known[i] describes locals[i]). See KnownLambda's own comment
+     * above. */
+    KnownLambda known[MAX_LOCALS];
 
     UpvalDesc  upvals[MAX_UPVALS];
     int        upval_count;
@@ -163,6 +188,30 @@ static _Thread_local val_t       g_compile_target_env   = V_VOID;
  * (which has many other callers that don't care about this at all). */
 static _Thread_local val_t       g_compile_self_tail_name    = V_FALSE;
 static _Thread_local bool        g_compile_self_tail_mutated = false;
+
+/* Tier 2.3 local inliner. IR_LAMBDA's ir_emit case (below) creates a real
+ * child Compiler, compiles the lambda, and tears the child down
+ * (end_compiler) before returning -- so child.upval_count is gone by the
+ * time a caller like IR_DEFINE's case, which just called ir_emit(c,
+ * n->as.def.value), would want to inspect it. Set as literally the last
+ * statement in IR_LAMBDA's case before it returns, mirroring
+ * g_compile_self_tail_name/g_compile_self_tail_mutated immediately above
+ * -- the same "child Compiler learned something only the parent's next
+ * statement needs" hand-off shape, at the same granularity (read
+ * immediately after the one ir_emit call that produced it, before any
+ * other ir_emit call could overwrite it). child.upval_count == 0 means
+ * the lambda captured no free variables from its defining scope -- the
+ * soundness condition that makes it safe to re-lower its raw params/body
+ * unchanged at a different call site later (see KnownLambda's comment):
+ * with no free variables, there is nothing for re-lowering elsewhere to
+ * mis-resolve, since every non-param name it references either fails to
+ * resolve locally at every level (falls through to global lookup, which
+ * is scope-independent) or is a global to begin with. Deliberately NOT
+ * reset to some sentinel after IR_LAMBDA's case -- every caller that
+ * cares reads it immediately after its own single ir_emit(..., IR_LAMBDA)
+ * call, never after any other node kind, so a stale value from an
+ * unrelated earlier IR_LAMBDA can never be misread as this one's. */
+static _Thread_local int         g_last_lambda_upval_count   = -1;
 
 /* Forces compile()'s own dispatch (specifically IR_OR_CLASSIC, below) to
  * always take the classic compile_X path, never ir_lower/ir_emit --
@@ -342,6 +391,12 @@ static int add_local(Compiler *c, val_t name) {
     l->captured = false;
     l->dbg_idx  = chunk_local_debug_add(c->chunk, name, c->local_count,
                                         chunk_pos(c->chunk));
+    /* Tier 2.3: this physical slot may have most recently held some other,
+     * unrelated local from an already-exited scope with a live
+     * known-lambda registration (known[] is keyed by physical slot index,
+     * not by variable identity) -- clear it so `name` doesn't inherit
+     * that stale entry. */
+    c->known[c->local_count].valid = false;
     return c->local_count++;
 }
 
@@ -3742,6 +3797,9 @@ static void ir_emit(Compiler *c, IRNode *n) {
             chunk_emit(c->chunk, child.upvals[i].is_local ? 1 : 0, n->line);
             chunk_emit(c->chunk, (uint8_t)child.upvals[i].index,   n->line);
         }
+        /* Tier 2.3: see g_last_lambda_upval_count's own comment -- last
+         * statement in this case, after `child` is otherwise done with. */
+        g_last_lambda_upval_count = child.upval_count;
         return;
     }
     case IR_NAMED_LET: {
