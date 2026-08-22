@@ -236,24 +236,64 @@ structured data instead of generating prose.
 
 ## 5. Streaming pipelines with actors
 
-Combine the actor system with LLM calls to process data concurrently:
+Combine the actor system with LLM calls to process data concurrently.
+
+`(receive)` reads from the *calling actor's own* mailbox — called from the
+top-level/script thread (which isn't itself an actor), it returns `#f`
+immediately instead of blocking, since there's no actor mailbox to read
+from. So the top-level thread can't collect results by calling `(receive)`
+once per worker the way the old version of this example did; that pattern
+silently discarded every summary and returned a list of `#f`s. Workers also
+can't `send!` a result back to "the caller," because the caller isn't an
+actor either and so has no mailbox to send to.
+
+The fix is the same shared-state idiom curry's own actor-ring benchmarks
+use: a shared vector of results plus a mutex/condvar pair from `(curry
+sync)`, so the top-level thread can block until every worker has reported
+in. A vector works here — and a plain variable wouldn't — because `spawn`
+deep-copies each captured variable into the new actor's own closure, so a
+worker's mutation of a captured *variable* would only ever be visible to
+that worker; a vector is a heap object captured *by reference*, so
+`vector-set!`/`vector-ref` through it is genuinely shared across the
+actor/caller boundary.
 
 ```scheme
 (import (curry llm))
+(import (curry sync))
 
 (define client (make-llm-client 'ollama "llama3.1"))
 
-; Summarise a list of texts in parallel — one actor per item
+; Summarise a list of texts in parallel — one actor per item, results
+; collected into a shared vector and a "workers remaining" counter (also a
+; vector, for the same by-reference-sharing reason) guarded by a mutex.
 (define (summarise-all texts)
-  (define actors
-    (map (lambda (text)
-           (spawn
-             (lambda ()
-               (llm-ask client
-                 (string-append
-                   "Summarise in one sentence: " text)))))
-         texts))
-  (map (lambda (a) (receive)) actors))
+  (let* ((n         (length texts))
+         (results   (make-vector n #f))
+         (remaining (vector n))
+         (done-mtx  (make-mutex))
+         (done-cv   (make-condvar)))
+    (let loop ((i 0) (ts texts))
+      (when (pair? ts)
+        (let ((idx i) (text (car ts)))
+          (spawn
+            (lambda ()
+              (let ((summary (llm-ask client
+                               (string-append
+                                 "Summarise in one sentence: " text))))
+                (mutex-lock! done-mtx)
+                (vector-set! results idx summary)
+                (vector-set! remaining 0 (- (vector-ref remaining 0) 1))
+                (when (= (vector-ref remaining 0) 0)
+                  (cond-signal! done-cv))
+                (mutex-unlock! done-mtx)))))
+        (loop (+ i 1) (cdr ts))))
+    (mutex-lock! done-mtx)
+    (let wait ()
+      (unless (= (vector-ref remaining 0) 0)
+        (cond-wait! done-cv done-mtx)
+        (wait)))
+    (mutex-unlock! done-mtx)
+    (vector->list results)))
 
 (define summaries
   (summarise-all
