@@ -176,6 +176,36 @@
     (+ (sq 2) (cube 2) (sq 3) (cube 3)))
   (+ 4 8 9 27))
 
+;;; A later argument's free variable shares a name with an EARLIER
+;;; parameter of the candidate being inlined -- must resolve against the
+;;; caller's own outer binding, not the not-yet-fully-bound param. Found
+;;; as a real, confirmed miscompilation during development: binding each
+;;; param immediately after emitting its own argument let the first
+;;; param (also named x) shadow the second argument's reference to the
+;;; OUTER x before it was ever evaluated (returned 2 instead of 101).
+(check "argument references outer var shadowed by an earlier param"
+  (let ((x 100))
+    (define (add x y) (+ x y))
+    (add 1 x))
+  101)
+
+;;; Same shape, reversed argument order (was already correct before the
+;;; fix above -- kept as a control case).
+(check "argument references outer var shadowed by an earlier param, reversed"
+  (let ((x 100))
+    (define (add x y) (+ x y))
+    (add x 1))
+  101)
+
+;;; Three parameters, each argument referencing a caller-scope variable
+;;; that collides with a DIFFERENT one of the candidate's own params --
+;;; every argument must still resolve against the caller's own scope.
+(check "multiple shadowing collisions across all params"
+  (let ((a 1) (b 2) (c 3))
+    (define (f a b c) (+ a b c))
+    (f b c a))
+  6)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

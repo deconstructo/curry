@@ -220,6 +220,30 @@ static _Thread_local bool        g_compile_self_tail_mutated = false;
  * unrelated earlier IR_LAMBDA can never be misread as this one's. */
 static _Thread_local int         g_last_lambda_upval_count   = -1;
 
+/* Tier 2.3: guards against mutual/indirect recursion inlining itself
+ * arbitrarily deep. body_contains_symbol (below) only rejects DIRECT
+ * self-reference (f's own body mentioning f) -- two or more candidates
+ * calling each other in a cycle (A's body calls B, B's body calls A)
+ * would otherwise pass every per-candidate eligibility gate and only be
+ * stopped once the shared inline-effort budget (ir_arena_take_inline_
+ * budget) runs out. That bounds total compile cost, but isn't a clean
+ * "don't do this" signal -- it wastes budget on doomed splice attempts
+ * that could otherwise go to legitimately-inlinable call sites elsewhere
+ * in the same top-level form. Tracks the raw body val_t IDENTITY (eq?
+ * comparison -- the exact same cons cells are reused every time a given
+ * candidate is spliced, since KnownLambda.body is never copied) of every
+ * inline currently in progress on the C call stack; ir_emit_inline_call
+ * pushes/pops around its own body-processing. */
+#define MAX_INLINE_DEPTH 64
+static _Thread_local val_t g_inlining_bodies[MAX_INLINE_DEPTH];
+static _Thread_local int   g_inlining_depth = 0;
+
+static bool currently_inlining(val_t body) {
+    for (int i = 0; i < g_inlining_depth; i++)
+        if (g_inlining_bodies[i] == body) return true;
+    return false;
+}
+
 /* Forces compile()'s own dispatch (specifically IR_OR_CLASSIC, below) to
  * always take the classic compile_X path, never ir_lower/ir_emit --
  * checked once per compile() call, so it applies to the WHOLE recursive
@@ -1501,12 +1525,12 @@ static int ir_count_ast_nodes(val_t expr) {
 
 /* Tier 2.3: true (with *argc_out set) iff `params` is a proper list --
  * rest/dotted param lists are rejected as inlining candidates to keep
- * call-site argument substitution simple (exact argc match only). */
+ * call-site argument substitution simple (exact argc match only).
+ * scm_list_length (src/builtins.c) already performs exactly this walk
+ * and returns -1 for an improper list. */
 static bool params_proper_arity(val_t params, int *argc_out) {
-    int n = 0;
-    val_t p = params;
-    while (vis_pair(p)) { n++; p = vcdr(p); }
-    if (!vis_nil(p)) return false;
+    int n = scm_list_length(params);
+    if (n < 0) return false;
     *argc_out = n;
     return true;
 }
@@ -3760,15 +3784,50 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
                                  IRNode **args, int argc, IRNode *call_node) {
     begin_scope(c);
 
-    val_t p = params;
+    /* Every argument must be evaluated -- and, in particular, every
+     * IR_VAR_REF inside it resolved -- against the CALLER's own scope,
+     * completely untouched by this call's own params, before any of
+     * those params are bound. Binding param i as a real, resolvable
+     * local BEFORE emitting argument i+1 was a real, confirmed
+     * miscompilation: (let ((x 100)) (define (add x y) (+ x y)) (add 1
+     * x)) returned 2 instead of 101, because by the time the second
+     * argument's reference to the OUTER x was resolved (IR_VAR_REF
+     * resolution is deliberately deferred to ir_emit time -- see ir.h),
+     * the first param (also named x, from `add`'s own param list) had
+     * already been bound and shadowed it. This is exactly the ordering
+     * hazard reserve_pending_slot/release_pending_slots already exists
+     * to prevent for an OUTER call's own sibling arguments (see that
+     * function's own comment) -- the same fix applies here: reserve
+     * every argument's value as an anonymous (name = V_FALSE, never
+     * resolvable) placeholder first, and only claim them as the real,
+     * shadowing-capable param names in a second pass once every argument
+     * has already been evaluated. */
+    int base = c->local_count;
     for (int i = 0; i < argc; i++) {
         ir_emit(c, args[i]);
-        add_local(c, vcar(p));
-        mark_initialised(c);
+        reserve_pending_slot(c);
+    }
+    /* Claim each reserved placeholder as its real param name -- no
+     * bytecode, the values are already correctly positioned; depth is
+     * already correct too (reserve_pending_slot set it to the current
+     * scope_depth, exactly what add_local+mark_initialised would have
+     * set here). */
+    val_t p = params;
+    for (int i = 0; i < argc; i++) {
+        c->locals[base + i].name = vcar(p);
         p = vcdr(p);
     }
 
     lambda_prescan(c, body, call_node->line);
+
+    /* Mark this candidate's body as "currently being inlined" for the
+     * duration of walking it -- see currently_inlining's own comment.
+     * Bounded by MAX_INLINE_DEPTH, itself well above the inline-effort
+     * budget (32), so this can't overflow in practice; fails safe
+     * (silently stops tracking, at worst re-allowing a budget-bounded
+     * expansion) rather than crashing if it somehow did. */
+    if (g_inlining_depth < MAX_INLINE_DEPTH)
+        g_inlining_bodies[g_inlining_depth++] = body;
 
     /* Interleaved lower-then-emit walk, one body form at a time, against
      * `c` directly -- identical in shape to IR_LAMBDA's own body walk
@@ -3791,6 +3850,9 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
             list = rest;
         }
     }
+
+    if (g_inlining_depth > 0 && g_inlining_bodies[g_inlining_depth - 1] == body)
+        g_inlining_depth--;
 
     end_scope(c, call_node->line);
 }
@@ -3929,9 +3991,16 @@ static void ir_emit(Compiler *c, IRNode *n) {
             val_t params = n->as.def.value->as.lambda.params;
             val_t body   = n->as.def.value->as.lambda.body;
             int argc;
+            /* Ordered cheapest-first: params_proper_arity and
+             * ir_count_ast_nodes are simple bounded walks; both run
+             * before body_contains_symbol's unbounded recursive scan, so
+             * a large candidate gets rejected by the size budget without
+             * ever paying for the full self-reference walk (or risking
+             * deep C-stack recursion compiling adversarially large
+             * source in the first place). */
             if (params_proper_arity(params, &argc) &&
-                !body_contains_symbol(body, n->as.def.name) &&
-                ir_count_ast_nodes(body) <= INLINE_MAX_BODY_NODES) {
+                ir_count_ast_nodes(body) <= INLINE_MAX_BODY_NODES &&
+                !body_contains_symbol(body, n->as.def.name)) {
                 int slot = resolve_local(c, n->as.def.name);
                 if (slot >= 0) {
                     c->known[slot].valid  = true;
@@ -3999,6 +4068,12 @@ static void ir_emit(Compiler *c, IRNode *n) {
             if (slot >= 0 && c->known[slot].valid &&
                 c->known[slot].argc == argc &&
                 c->local_count + argc < MAX_LOCALS &&
+                /* Mutual/indirect recursion guard -- checked BEFORE
+                 * claiming inline budget below, so a candidate rejected
+                 * for this reason doesn't burn a unit of the shared
+                 * budget on a splice that was never going to happen; see
+                 * currently_inlining's own comment. */
+                !currently_inlining(c->known[slot].body) &&
                 ir_arena_take_inline_budget(c->ir_arena)) {
                 ir_emit_inline_call(c, c->known[slot].params,
                                      c->known[slot].body,

@@ -579,6 +579,15 @@ static void test_ir_optimize_check(void) {
         /* Oversized body (over INLINE_MAX_BODY_NODES): must fall back to
          * a real call, not attempt to inline, and still be correct. */
         "(let () (define (sum10 x) (+ x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)) (sum10 1))",
+        /* A later argument's free variable shares a name with an EARLIER
+         * parameter of the candidate being inlined -- a real, confirmed
+         * miscompilation caught by independent code review: binding each
+         * param immediately after emitting its own argument let the first
+         * param (also named x) shadow the second argument's reference to
+         * the OUTER x before it was ever evaluated. */
+        "(let ((x 100)) (define (add x y) (+ x y)) (add 1 x))",
+        "(let ((x 100)) (define (add x y) (+ x y)) (add x 1))",
+        "(let ((a 1) (b 2) (c 3)) (define (f a b c) (+ a b c)) (f b c a))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
