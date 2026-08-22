@@ -66,8 +66,12 @@ void pool_init(void);
 /* True on worker threads; false on the main thread and any non-pool thread.
  * Used by prim_map / prim_reduce to avoid nested parallel dispatch, which
  * would deadlock: all workers blocked waiting on nested work items that
- * can never run because every worker is already occupied. */
+ * can never run because every worker is already occupied.
+ * Hidden from C++ TUs: _Thread_local is not a C++ keyword (see the same
+ * guard on vm.h's `vm` global for the full rationale). */
+#ifndef __cplusplus
 extern _Thread_local bool pool_is_worker;
+#endif
 
 /* Number of logical CPUs (same value the pool uses for its thread count). */
 int pool_hw_concurrency(void);

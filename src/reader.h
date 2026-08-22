@@ -30,8 +30,12 @@ val_t scm_read(val_t port);
 
 /* Line the most recent scm_read() call's datum started on (1-based).
    Valid immediately after scm_read() returns; used by the compiler to
-   stamp backtrace line numbers on freshly-read top-level forms. */
+   stamp backtrace line numbers on freshly-read top-level forms.
+   Hidden from C++ TUs: _Thread_local is not a C++ keyword (see the same
+   guard on vm.h's `vm` global for the full rationale). */
+#ifndef __cplusplus
 extern _Thread_local int g_reader_last_line;
+#endif
 
 /* Read from a C string (convenience) */
 val_t scm_read_cstr(const char *src);

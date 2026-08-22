@@ -49,7 +49,11 @@ bool     actor_alive(val_t actor);
 uint64_t actor_id(val_t actor);
 val_t    actor_stats(val_t actor);   /* alist of profiling counters */
 
-/* Thread-local current actor (NULL in main thread) */
+/* Thread-local current actor (NULL in main thread).
+ * Hidden from C++ TUs: _Thread_local is not a C++ keyword (see the same
+ * guard on vm.h's `vm` global for the full rationale). */
+#ifndef __cplusplus
 extern _Thread_local Actor *current_actor;
+#endif
 
 #endif /* CURRY_ACTORS_H */

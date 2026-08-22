@@ -7,16 +7,20 @@
 #include "object.h"
 #include <stdbool.h>
 
-/* Thread-local precision context.  0 = not active (use double). */
+/* Thread-local precision context.  0 = not active (use double).
+ * Hidden from C++ TUs: _Thread_local is not a C++ keyword (see the same
+ * guard on vm.h's `vm` global for the full rationale). */
+#define MPFR_DEFAULT_PREC 128
+
+#ifndef __cplusplus
 extern _Thread_local mpfr_prec_t tl_mpfr_prec;
 extern _Thread_local mpfr_rnd_t  tl_mpfr_rnd;
-
-#define MPFR_DEFAULT_PREC 128
 
 static inline mpfr_prec_t mpfr_ctx_prec(void) {
     return tl_mpfr_prec > 0 ? tl_mpfr_prec : MPFR_DEFAULT_PREC;
 }
 static inline mpfr_rnd_t mpfr_ctx_rnd(void) { return tl_mpfr_rnd; }
+#endif
 
 /* Return the precision of an MPFR val_t */
 static inline mpfr_prec_t mpfr_val_prec(val_t v) {

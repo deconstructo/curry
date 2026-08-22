@@ -102,8 +102,15 @@ typedef struct VM {
     int           handler_count;                  /* active handler depth */
 } VM;
 
-/* Per-thread VM instance — each thread must call vm_init() before use */
+/* Per-thread VM instance — each thread must call vm_init() before use.
+ * Hidden from C++ TUs: _Thread_local is not a C++ keyword (C++ uses
+ * thread_local, which mangles to a different, non-interoperable TLS
+ * wrapper symbol -- see the current_handler precedent in eval.h). The
+ * LLVM backend's .cpp files only need the vm_* functions declared below,
+ * not this variable or the vm->-dereferencing inline helpers that follow. */
+#ifndef __cplusplus
 extern _Thread_local VM *vm;
+#endif
 
 /* Lifecycle */
 void vm_init(void);
@@ -138,12 +145,14 @@ void vm_check_arity(BcClosure *cl, int argc);
 val_t vm_capture_backtrace(void);
 
 /* Stack helpers (inline for speed) */
+#ifndef __cplusplus
 static inline void   vm_push(val_t v)  {
     if (vm->sp >= vm->stack + VM_STACK_MAX) vm_stack_overflow();
     *vm->sp++ = v;
 }
 static inline val_t  vm_pop(void)      { return *--vm->sp; }
 static inline val_t  vm_peek(int dist) { return vm->sp[-1 - dist]; }
+#endif
 
 /* Make a closure from a chunk (upvalues filled in by OP_CLOSURE) */
 BcClosure *vm_make_closure(Chunk *chunk, int nupvals);
