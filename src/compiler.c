@@ -3935,9 +3935,38 @@ static IRNode *ir_lower_let(Compiler *c, val_t args, bool tail, int line) {
     IRNode **argv = argc > 0
         ? (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *) * (size_t)argc)
         : NULL;
+    /* Tier 2.4: one KnownParam slot per binding, populated for whichever
+     * ones are eligible known-lambda candidates -- see IRKnownParam's own
+     * comment (ir.h) for why this has to be decided HERE, at ir_lower
+     * time, rather than post-hoc the way IR_DEFINE's registration works. */
+    IRKnownParam *kp = argc > 0
+        ? (IRKnownParam *)ir_arena_alloc(c->ir_arena, sizeof(IRKnownParam) * (size_t)argc)
+        : NULL;
     int i = 0;
-    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
-        argv[i++] = ir_lower(c, vcar(vcdr(vcar(b))), false, line);
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+        argv[i] = ir_lower(c, vcar(vcdr(vcar(b))), false, line);
+        kp[i].closed = false;
+        /* Only a bare (lambda ...) literal is ever eligible -- matches
+         * IR_DEFINE's own `value->kind == IR_LAMBDA` gate exactly: an
+         * expression that merely EVALUATES to a lambda isn't statically
+         * inspectable. */
+        if (argv[i]->kind == IR_LAMBDA) {
+            val_t cand_params = argv[i]->as.lambda.params;
+            val_t cand_body   = argv[i]->as.lambda.body;
+            int cand_argc;
+            int budget = INLINE_MAX_BODY_NODES;
+            if (params_proper_arity(cand_params, &cand_argc) &&
+                ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+                lambda_is_closed(c, cand_params, cand_body, &budget)) {
+                kp[i].closed = true;
+                kp[i].params = cand_params;
+                kp[i].body   = cand_body;
+                kp[i].argc   = cand_argc;
+            }
+        }
+        i++;
+    }
+    callee->as.lambda.known_params = kp;
     return ir_lower_lambda_call(c, callee, argv, argc, tail, line);
 }
 
@@ -3978,6 +4007,36 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
     IRNode *callee = ir_lower_lambda(c, params, inner_body, c->name, line);
     IRNode **argv  = (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *));
     argv[0] = ir_lower(c, init, false, line);
+
+    /* Tier 2.4: same single-slot registration as ir_lower_let above,
+     * just for this one binding. `c` here is exactly the right enclosing
+     * scope for THIS binding's own closedness check -- the "rest" of a
+     * let* (any FURTHER bindings) doesn't exist as a real scope yet at
+     * all; it's still raw, embedded body, only re-lowered later against
+     * the real child Compiler this binding's own IR_LAMBDA eventually
+     * gets (see this function's own header comment on why that's fine:
+     * the same laziness that makes let*'s per-level nesting free also
+     * gives each later binding's OWN lambda_is_closed check the correct,
+     * progressively narrower `c` for free, the next time ir_lower_let_star
+     * is re-entered). */
+    IRKnownParam *kp = (IRKnownParam *)ir_arena_alloc(c->ir_arena, sizeof(IRKnownParam));
+    kp[0].closed = false;
+    if (argv[0]->kind == IR_LAMBDA) {
+        val_t cand_params = argv[0]->as.lambda.params;
+        val_t cand_body   = argv[0]->as.lambda.body;
+        int cand_argc;
+        int budget = INLINE_MAX_BODY_NODES;
+        if (params_proper_arity(cand_params, &cand_argc) &&
+            ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+            lambda_is_closed(c, cand_params, cand_body, &budget)) {
+            kp[0].closed = true;
+            kp[0].params = cand_params;
+            kp[0].body   = cand_body;
+            kp[0].argc   = cand_argc;
+        }
+    }
+    callee->as.lambda.known_params = kp;
+
     return ir_lower_lambda_call(c, callee, argv, 1, tail, line);
 }
 
