@@ -206,6 +206,83 @@
     (f b c a))
   6)
 
+;;; ── Tier 2.4: let/let*-bound candidates ─────────────────────────────────
+;;; letrec/letrec* already covered above (via internal define, above) --
+;;; they desugar into internal defines and reuse that registration
+;;; unchanged. These cases exercise the genuinely new path: a let/let*
+;;; binding itself is the candidate, registered via a static
+;;; (lambda_is_closed) check at ir_lower time rather than IR_DEFINE's
+;;; "compile it, then read what it proved" approach.
+
+(check "let-bound candidate composed with call/cc"
+  (call/cc
+    (lambda (k)
+      (let ((sq (lambda (x) (* x x))))
+        (+ (sq 3) (k 'escaped) (sq 4)))))
+  'escaped)
+
+(define let-dw-log '())
+(let ((sq (lambda (x) (* x x))))
+  (dynamic-wind
+    (lambda () (set! let-dw-log (cons 'in let-dw-log)))
+    (lambda () (set! let-dw-log (cons (sq 5) let-dw-log)))
+    (lambda () (set! let-dw-log (cons 'out let-dw-log)))))
+(check "dynamic-wind around a let-bound inlined call"
+  (reverse let-dw-log) '(in 25 out))
+
+;;; let*'s progressive narrowing, both directions: a later binding that
+;;; captures an earlier one (must not inline, still correct) and one
+;;; that doesn't (must inline).
+(check "let* progressive narrowing -- captures an earlier binding"
+  (let* ((n 10) (f (lambda (x) (+ x n))))
+    (f 5))
+  15)
+(check "let* progressive narrowing -- does not capture"
+  (let* ((f (lambda (x) (* x 3))))
+    (+ (f 2) (f 3)))
+  15)
+
+(check "let-bound candidate inside a named-let loop"
+  (let ((sq (lambda (x) (* x x))))
+    (let loop ((i 0) (acc 0))
+      (if (= i 6) acc (loop (+ i 1) (+ acc (sq i))))))
+  55)
+
+;;; Sibling-shadow-by-name via let, as a real-VM check: f must capture
+;;; the genuinely OUTER x (100), never the sibling x (5) bound in the
+;;; SAME let -- getting the actual number right matters more here than
+;;; the C-level differential-equality proof alone.
+(check "let sibling-shadow-by-name"
+  (let ((x 100))
+    (let ((x 5) (f (lambda (a) (+ a x))))
+      (f 1)))
+  101)
+
+;;; A let-bound candidate referencing its OWN binding name (or a
+;;; sibling's) must correctly raise unbound-variable, not silently
+;;; resolve -- a real, confirmed miscompilation caught by independent
+;;; code review: plain let bindings are NOT visible to each other's
+;;; inits (unlike letrec), but that sibling name isn't yet resolvable
+;;; against the enclosing scope either at the point closedness gets
+;;; checked, so it was wrongly treated as "global, fine" and inlined --
+;;; after splicing, the name became a real, resolvable local at the
+;;; call site, silently succeeding instead of erroring. Wrapped in guard
+;;; since the whole point is confirming this DOES raise.
+(check "let candidate referencing its own binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (procedure? (let ((f (lambda (x) f))) (f 1))))
+  'correctly-unbound)
+
+(check "let candidate referencing a sibling's binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (let ((y 10) (f (lambda (x) (+ x y)))) (f 1)))
+  'correctly-unbound)
+
+(check "let* candidate referencing its own binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (let* ((f (lambda (x) (+ x f)))) (f 1)))
+  'correctly-unbound)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

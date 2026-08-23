@@ -1556,6 +1556,55 @@ static bool body_contains_symbol(val_t body, val_t name) {
     return false;
 }
 
+/* Tier 2.4: multi-name sibling-reference guard for let-bound candidates
+ * (let* only ever has one binding to check per registration -- see
+ * ir_lower_let_star's own use of body_contains_symbol above -- but plain
+ * let can have several siblings at once). Independent code review
+ * caught a real, confirmed miscompilation this closes: lambda_is_closed
+ * (below) only checks a candidate's free variables against the
+ * ENCLOSING Compiler `c` -- correctly, since that's the only real scope
+ * that exists yet at ir_lower_let time -- but a let's OWN sibling
+ * binding names (including the candidate's own name) are NEITHER
+ * locally bound within the candidate's own params NOR yet resolvable in
+ * `c` at this point, so lambda_is_closed's existing check silently
+ * treats a reference to one of them as "global, fine". Once
+ * ir_emit_inline_call later splices the body into the wrapper's own
+ * frame, that name IS a real local there if the call site happens to be
+ * inside the same let's body -- so the reference silently resolves
+ * instead of correctly raising unbound-variable, exactly the way a
+ * genuine letrec-style self/mutual-reference would (but plain `let`
+ * bindings are NOT visible to each other's inits or to any sibling's
+ * own captured-closure environment -- only letrec makes that true).
+ * Confirmed via direct repro before this fix: `(let ((f (lambda (x) f)))
+ * (procedure? (f 1)))` printed #t (should raise unbound-variable);
+ * `(let ((y 10) (f (lambda (x) (+ x y)))) (f 1))` returned 11 (should
+ * also raise unbound-variable, since y is a SIBLING binding, not
+ * visible to f's own closure under real let semantics). Any reference
+ * to ANY of the let's own binding names -- checked as a flat list,
+ * ignoring which specific sibling it is, including the candidate's own
+ * name -- is grounds to reject: same over-conservative-but-safe
+ * tradeoff body_contains_symbol's own single-name self-recursion check
+ * already uses (a candidate that merely shares a name with an unrelated
+ * OUTER variable also gets conservatively rejected here; that just
+ * means a safe candidate falls back to a real, correct, non-inlined
+ * call, never a miscompile). */
+static bool expr_contains_any_symbol(val_t expr, val_t names) {
+    if (vis_symbol(expr)) {
+        for (val_t p = names; vis_pair(p); p = vcdr(p))
+            if (vcar(p) == expr) return true;
+        return false;
+    }
+    if (!vis_pair(expr)) return false;
+    return expr_contains_any_symbol(vcar(expr), names) ||
+           expr_contains_any_symbol(vcdr(expr), names);
+}
+
+static bool body_contains_any_symbol(val_t body, val_t names) {
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (expr_contains_any_symbol(vcar(p), names)) return true;
+    return false;
+}
+
 /* Tier 2.3: total raw AST node count (every pair cell plus every atom
  * leaf counts as one) -- the inliner's size budget. Iterative over the
  * cdr-spine, not recursive -- a wide, flat body (many top-level forms,
@@ -1589,6 +1638,350 @@ static bool params_proper_arity(val_t params, int *argc_out) {
     if (n < 0) return false;
     *argc_out = n;
     return true;
+}
+
+/* Tier 2.4 (let/let*-bound local inlining): lambda_is_closed and its
+ * helpers below. A new, side-effect-free, purely syntactic walker,
+ * modeled directly on expr_mentions_set_target's own established shape
+ * (conservative pre-expansion syntactic scanning, unconditional bail-out
+ * on anything it can't cleanly reason about) -- see IRKnownParam's own
+ * comment in ir.h for why this has to run at ir_lower time, before
+ * either the candidate or its would-be enclosing wrapper exist as real
+ * Compilers, unlike IR_DEFINE's "compile it, then read what it proved"
+ * registration.
+ *
+ * A linked list of symbol sets, one per lexical scope nesting level
+ * introduced while walking a candidate body -- NOT Compiler::locals[]:
+ * no physical stack slots exist for any of this yet, this is pure
+ * syntactic bookkeeping over raw val_t forms. */
+typedef struct BoundScope {
+    struct BoundScope *parent;
+    val_t               names;   /* flat list of symbols bound at this level */
+} BoundScope;
+
+static bool bound_scope_has(BoundScope *scope, val_t name) {
+    for (BoundScope *s = scope; s; s = s->parent)
+        for (val_t p = s->names; vis_pair(p); p = vcdr(p))
+            if (vcar(p) == name) return true;
+    return false;
+}
+
+/* Flattens a param spec (proper list, dotted rest-arg, or a bare "all
+ * rest" symbol) into a plain list of every name it binds -- order
+ * doesn't matter, only membership. */
+static val_t collect_param_names(val_t params) {
+    if (vis_symbol(params)) return scm_cons(params, V_NIL);
+    val_t result = V_NIL;
+    val_t p = params;
+    while (vis_pair(p)) { result = scm_cons(vcar(p), result); p = vcdr(p); }
+    if (vis_symbol(p)) result = scm_cons(p, result);
+    return result;
+}
+
+/* Same three-tier lookup expr_mentions_set_target already uses (local
+ * syntax -> target_env -> GLOBAL_ENV) to decide "is this head a macro
+ * use" -- kept as its own helper here since lambda_is_closed needs the
+ * same check from more than one call site below. */
+static bool head_is_macro(Compiler *c, val_t raw_head) {
+    if (!vis_symbol(raw_head)) return false;
+    val_t transformer;
+    if (resolve_syntax_local(c, raw_head, &transformer)) return true;
+    if (c->chunk->target_env != V_VOID &&
+        vis_syntax(env_lookup_or_false(c->chunk->target_env, raw_head)))
+        return true;
+    if (vis_syntax(env_lookup_or_false(GLOBAL_ENV, raw_head))) return true;
+    return false;
+}
+
+/* Collects every name a body's own front-of-body internal-definition-like
+ * forms bind, mirroring lambda_prescan's dispatch table (compiler.c) --
+ * reusing only the recognized-form list, never lambda_prescan's own
+ * side-effecting add_local/emit calls. Returns false (give up on the
+ * WHOLE candidate, treated as not-closed by every caller) the moment it
+ * sees define-record-type/define-rule/define-ruleset/define-algebra/
+ * define-syntax: these either need real, non-trivial parsing to know
+ * what they bind (define-record-type goes through
+ * record_type_build_spec) or don't bind a plain variable name at all in
+ * a way worth specially modeling here -- reproducing that logic purely
+ * to let a FEW more candidates qualify isn't worth the risk of getting
+ * it subtly wrong; bailing out is always safe, just conservative. Scans
+ * the whole body (not just a strict R7RS-ordered prefix): this function
+ * only needs to avoid UNDER-binding a name that's genuinely visible
+ * later (which would cause a false "captures!" verdict, safe but overly
+ * conservative) -- it doesn't need to replicate R7RS's own
+ * internal-definition-ordering validation, since a genuinely malformed
+ * body still gets a real compile-time error at real compile time
+ * regardless of whether this candidate gets inlined. */
+static bool collect_body_def_names(val_t body, val_t *names_out) {
+    val_t names = V_NIL;
+    for (val_t p = body; vis_pair(p); p = vcdr(p)) {
+        val_t form = vcar(p);
+        if (!vis_pair(form) || !vis_symbol(vcar(form))) continue;
+        val_t head = lang_translate(vcar(form));
+        if (head == S_DEFINE_RECORD_TYPE || head == S_DEFINE_RULE ||
+            head == S_DEFINE_RULESET || head == S_DEFINE_ALGEBRA ||
+            head == S_DEFINE_SYNTAX) {
+            return false;
+        }
+        if (head == S_SYMBOLIC) {
+            for (val_t q = vcdr(form); vis_pair(q); q = vcdr(q))
+                if (vis_symbol(vcar(q))) names = scm_cons(vcar(q), names);
+        } else if (head == S_DEFINE_VALUES) {
+            val_t vars = vis_pair(vcdr(form)) ? vcar(vcdr(form)) : V_NIL;
+            for (val_t q = vars; vis_pair(q) && vis_symbol(vcar(q)); q = vcdr(q))
+                names = scm_cons(vcar(q), names);
+        } else if (head == S_DEFINE) {
+            val_t defname = vcar(vcdr(form));
+            if (vis_symbol(defname)) names = scm_cons(defname, names);
+            else if (vis_pair(defname)) names = scm_cons(vcar(defname), names);
+        }
+    }
+    *names_out = names;
+    return true;
+}
+
+static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budget);
+
+/* Walks a body (a list of forms, e.g. a lambda/let/do body): collects
+ * its own front-of-body internal-definition names FIRST (matching
+ * lambda_prescan's letrec*-style "every internal define visible from
+ * the first one onward" semantics -- not incremental, or a later
+ * internal define referencing an earlier one would be wrongly flagged
+ * as capturing something), extends `scope` with them, then checks every
+ * form against the extended scope. */
+static bool body_is_closed(Compiler *c, val_t body, BoundScope *scope, int *budget) {
+    val_t def_names;
+    if (!collect_body_def_names(body, &def_names)) return false;
+    BoundScope inner = { scope, def_names };
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (!expr_is_closed(c, vcar(p), &inner, budget)) return false;
+    return true;
+}
+
+/* Checks a `let`-shaped bindings list `((name init) ...)` where every
+ * init is checked against `outer_scope` (siblings NOT visible to each
+ * other -- correct, not just conservative, for plain let: see
+ * lambda_is_closed's own top-level comment) and returns the collected
+ * names as a fresh scope layer for the caller to check body against. */
+static bool let_bindings_closed(Compiler *c, val_t bindings, BoundScope *outer_scope,
+                                 int *budget, BoundScope *out_scope) {
+    val_t names = V_NIL;
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+        val_t binding = vcar(b);
+        val_t name = vcar(binding);
+        val_t init = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
+        if (!expr_is_closed(c, init, outer_scope, budget)) return false;
+        names = scm_cons(name, names);
+    }
+    out_scope->parent = outer_scope;
+    out_scope->names  = names;
+    return true;
+}
+
+static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budget) {
+    if (*budget <= 0) return false;   /* exhausted -- fail safe: not closed */
+    (*budget)--;
+
+    if (vis_symbol(expr)) {
+        if (bound_scope_has(scope, expr)) return true;
+        if (resolve_local(c, expr) >= 0 || is_upvalue_reachable(c, expr))
+            return false;   /* a genuine free-variable capture */
+        return true;        /* global, or genuinely unbound -- either way, fine */
+    }
+    if (!vis_pair(expr)) return true;   /* self-evaluating atom -- fine */
+
+    val_t raw_head = vcar(expr);
+    val_t head = vis_symbol(raw_head) ? lang_translate(raw_head) : raw_head;
+
+    if (head == S_QUOTE) return true;   /* quoted data, not a reference */
+
+    /* Macro bail-out -- see this function's own header comment. Checked
+     * before any of the special-form dispatch below, since a locally
+     * shadowed macro name could otherwise be misread as one of these
+     * keywords (the same risk classify_head's own dispatch is built to
+     * avoid, mirrored here). */
+    if (vis_symbol(raw_head) && head_is_macro(c, raw_head)) return false;
+    if (head == S_DEFINE_SYNTAX || head == S_LET_SYNTAX || head == S_LETREC_SYNTAX)
+        return false;
+
+    if (head == S_LAMBDA) {
+        val_t params2 = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t body2   = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        BoundScope inner = { scope, collect_param_names(params2) };
+        return body_is_closed(c, body2, &inner, budget);
+    }
+
+    if (head == S_LET) {
+        val_t rest = vcdr(expr);
+        if (vis_pair(rest) && vis_symbol(vcar(rest))) {
+            /* Named let: (let loop ((x v) ...) body...) -- loop's own
+             * name IS visible within its own body (it's how the loop
+             * recurses), unlike a plain let's sibling bindings. */
+            val_t loop_name = vcar(rest);
+            val_t bindings  = vis_pair(vcdr(rest)) ? vcar(vcdr(rest)) : V_NIL;
+            val_t body2     = vis_pair(vcdr(rest)) ? vcdr(vcdr(rest)) : V_NIL;
+            BoundScope inner;
+            if (!let_bindings_closed(c, bindings, scope, budget, &inner)) return false;
+            inner.names = scm_cons(loop_name, inner.names);
+            return body_is_closed(c, body2, &inner, budget);
+        }
+        val_t bindings = vis_pair(rest) ? vcar(rest) : V_NIL;
+        val_t body2    = vis_pair(rest) ? vcdr(rest) : V_NIL;
+        BoundScope inner;
+        if (!let_bindings_closed(c, bindings, scope, budget, &inner)) return false;
+        return body_is_closed(c, body2, &inner, budget);
+    }
+
+    if (head == S_LET_STAR) {
+        val_t bindings = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t body2    = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        BoundScope *cur = scope;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            val_t binding = vcar(b);
+            val_t name    = vcar(binding);
+            val_t init    = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
+            /* Sequential: each init is checked against everything bound
+             * by EARLIER bindings in this same let*, not later ones. */
+            if (!expr_is_closed(c, init, cur, budget)) return false;
+            BoundScope *level = (BoundScope *)ir_arena_alloc(
+                c->ir_arena, sizeof(BoundScope));
+            level->parent = cur;
+            level->names  = scm_cons(name, V_NIL);
+            cur = level;
+        }
+        return body_is_closed(c, body2, cur, budget);
+    }
+
+    if (head == S_LETREC || head == S_LETREC_STAR) {
+        val_t bindings = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t body2    = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        /* letrec(*): every binding name is visible to every init AND to
+         * the body -- build the whole scope layer first. */
+        val_t names = V_NIL;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+            names = scm_cons(vcar(vcar(b)), names);
+        BoundScope inner = { scope, names };
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            val_t binding = vcar(b);
+            val_t init = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
+            if (!expr_is_closed(c, init, &inner, budget)) return false;
+        }
+        return body_is_closed(c, body2, &inner, budget);
+    }
+
+    if (head == S_DO) {
+        /* (do ((var init step) ...) (test result...) body...) */
+        val_t var_specs = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t rest2     = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        val_t term      = vis_pair(rest2) ? vcar(rest2) : V_NIL;
+        val_t body2     = vis_pair(rest2) ? vcdr(rest2) : V_NIL;
+        val_t names = V_NIL;
+        for (val_t vs = var_specs; vis_pair(vs); vs = vcdr(vs)) {
+            val_t spec = vcar(vs);
+            val_t init = vis_pair(vcdr(spec)) ? vcar(vcdr(spec)) : V_FALSE;
+            /* init exprs see the OUTER scope only, matching do's own
+             * semantics (vars aren't bound yet for their own inits). */
+            if (!expr_is_closed(c, init, scope, budget)) return false;
+            names = scm_cons(vcar(spec), names);
+        }
+        BoundScope inner = { scope, names };
+        for (val_t vs = var_specs; vis_pair(vs); vs = vcdr(vs)) {
+            val_t spec = vcar(vs);
+            val_t step = vis_pair(vcdr(spec)) && vis_pair(vcdr(vcdr(spec)))
+                             ? vcar(vcdr(vcdr(spec))) : vcar(spec);
+            if (!expr_is_closed(c, step, &inner, budget)) return false;
+        }
+        for (val_t t = term; vis_pair(t); t = vcdr(t))
+            if (!expr_is_closed(c, vcar(t), &inner, budget)) return false;
+        return body_is_closed(c, body2, &inner, budget);
+    }
+
+    if (head == S_RECEIVE) {
+        val_t formals  = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t rest2    = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        val_t producer = vis_pair(rest2) ? vcar(rest2) : V_FALSE;
+        val_t body2    = vis_pair(rest2) ? vcdr(rest2) : V_NIL;
+        if (!expr_is_closed(c, producer, scope, budget)) return false;
+        BoundScope inner = { scope, collect_param_names(formals) };
+        return body_is_closed(c, body2, &inner, budget);
+    }
+
+    if (head == S_LET_VALUES || head == S_LET_STAR_VALUES) {
+        val_t bindings = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t body2    = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        bool star = (head == S_LET_STAR_VALUES);
+        BoundScope *cur = scope;
+        val_t all_names = V_NIL;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            val_t binding  = vcar(b);
+            val_t formals  = vcar(binding);
+            val_t producer = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
+            /* let-values: every producer sees only the OUTER scope.
+             * let*-values: sequential, like let*. */
+            if (!expr_is_closed(c, producer, star ? cur : scope, budget)) return false;
+            if (star) {
+                BoundScope *level = (BoundScope *)ir_arena_alloc(
+                    c->ir_arena, sizeof(BoundScope));
+                level->parent = cur;
+                level->names  = collect_param_names(formals);
+                cur = level;
+            } else {
+                val_t names = collect_param_names(formals);
+                for (val_t q = names; vis_pair(q); q = vcdr(q))
+                    all_names = scm_cons(vcar(q), all_names);
+            }
+        }
+        BoundScope inner_flat = { scope, all_names };
+        return body_is_closed(c, body2, star ? cur : &inner_flat, budget);
+    }
+
+    if (head == S_GUARD) {
+        /* (guard (var clause...) body...) -- var is bound ONLY within
+         * clause, never within body (compile_guard, compiler.c: body
+         * gets its own separate zero-arg thunk that never sees var). */
+        val_t var_and_clauses = vis_pair(vcdr(expr)) ? vcar(vcdr(expr)) : V_NIL;
+        val_t body2   = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
+        val_t var     = vis_pair(var_and_clauses) ? vcar(var_and_clauses) : V_FALSE;
+        val_t clauses = vis_pair(var_and_clauses) ? vcdr(var_and_clauses) : V_NIL;
+        BoundScope inner = { scope, vis_symbol(var) ? scm_cons(var, V_NIL) : V_NIL };
+        for (val_t cl = clauses; vis_pair(cl); cl = vcdr(cl))
+            if (!expr_is_closed(c, vcar(cl), &inner, budget)) return false;
+        return body_is_closed(c, body2, scope, budget);
+    }
+
+    /* Ordinary form (call, or any special form with no extra binding
+     * semantics of its own -- if/and/or/begin/when/unless/cond/case/
+     * set!/quasiquote/unquote/parameterize/etc.): recurse into every
+     * element, head included -- a head symbol shadowed by an outer local
+     * (a rare edge case) is correctly caught by the same vis_symbol
+     * branch above when THIS same function is re-entered for it. */
+    val_t p = expr;
+    for (; vis_pair(p); p = vcdr(p))
+        if (!expr_is_closed(c, vcar(p), scope, budget)) return false;
+    /* The final, non-pair cdr -- almost always V_NIL for a well-formed
+     * form, but a genuinely dotted tail (nonstandard for a call/special
+     * form, though not something this walker should simply assume can't
+     * occur) could itself be a reference. Checking it too costs nothing
+     * for the overwhelmingly common nil case and closes what would
+     * otherwise be a silent under-shadowing gap for the uncommon one. */
+    return expr_is_closed(c, p, scope, budget);
+}
+
+/* Tier 2.4 public entry point: true iff `body` (compiled with `params`
+ * as its own parameters) captures NO free variable reachable from `c` --
+ * see this whole block's header comment for why this has to be a static,
+ * pre-compile, pre-expansion check rather than IR_DEFINE's "compile it,
+ * then read what it proved" approach. `*budget` is decremented by every
+ * AST node visited and must already be positive on entry; exhaustion
+ * fails safe (returns false, i.e. "not closed") rather than continuing
+ * to recurse -- this must be independent of call-order relative to any
+ * other budget check (see ir_count_ast_nodes's own comment for why an
+ * earlier version of THAT function got exactly this wrong: relying on
+ * being called first doesn't bound this function's OWN recursion if it
+ * doesn't carry its own budget). */
+static bool lambda_is_closed(Compiler *c, val_t params, val_t body, int *budget) {
+    BoundScope top = { NULL, collect_param_names(params) };
+    return body_is_closed(c, body, &top, budget);
 }
 
 static void compile_let(Compiler *c, val_t args, bool tail, int line) {
@@ -3598,9 +3991,47 @@ static IRNode *ir_lower_let(Compiler *c, val_t args, bool tail, int line) {
     IRNode **argv = argc > 0
         ? (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *) * (size_t)argc)
         : NULL;
+    /* Tier 2.4: one KnownParam slot per binding, populated for whichever
+     * ones are eligible known-lambda candidates -- see IRKnownParam's own
+     * comment (ir.h) for why this has to be decided HERE, at ir_lower
+     * time, rather than post-hoc the way IR_DEFINE's registration works. */
+    IRKnownParam *kp = argc > 0
+        ? (IRKnownParam *)ir_arena_alloc(c->ir_arena, sizeof(IRKnownParam) * (size_t)argc)
+        : NULL;
     int i = 0;
-    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
-        argv[i++] = ir_lower(c, vcar(vcdr(vcar(b))), false, line);
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+        argv[i] = ir_lower(c, vcar(vcdr(vcar(b))), false, line);
+        kp[i].closed = false;
+        /* Only a bare (lambda ...) literal is ever eligible -- matches
+         * IR_DEFINE's own `value->kind == IR_LAMBDA` gate exactly: an
+         * expression that merely EVALUATES to a lambda isn't statically
+         * inspectable. */
+        if (argv[i]->kind == IR_LAMBDA) {
+            val_t cand_params = argv[i]->as.lambda.params;
+            val_t cand_body   = argv[i]->as.lambda.body;
+            int cand_argc;
+            int budget = INLINE_MAX_BODY_NODES;
+            /* Tier 2.4: reject if the candidate's body references ANY of
+             * THIS let's own binding names (including its own) -- see
+             * body_contains_any_symbol's own comment for why: those
+             * names aren't yet resolvable in `c` (so lambda_is_closed's
+             * existing enclosing-scope check can't see them), but ARE
+             * real locals once the wrapper is entered -- exactly the
+             * gap a confirmed miscompilation was found through before
+             * this check existed. */
+            if (params_proper_arity(cand_params, &cand_argc) &&
+                ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+                !body_contains_any_symbol(cand_body, fwd) &&
+                lambda_is_closed(c, cand_params, cand_body, &budget)) {
+                kp[i].closed = true;
+                kp[i].params = cand_params;
+                kp[i].body   = cand_body;
+                kp[i].argc   = cand_argc;
+            }
+        }
+        i++;
+    }
+    callee->as.lambda.known_params = kp;
     return ir_lower_lambda_call(c, callee, argv, argc, tail, line);
 }
 
@@ -3641,6 +4072,44 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
     IRNode *callee = ir_lower_lambda(c, params, inner_body, c->name, line);
     IRNode **argv  = (IRNode **)ir_arena_alloc(c->ir_arena, sizeof(IRNode *));
     argv[0] = ir_lower(c, init, false, line);
+
+    /* Tier 2.4: same single-slot registration as ir_lower_let above,
+     * just for this one binding. `c` here is exactly the right enclosing
+     * scope for THIS binding's own closedness check -- the "rest" of a
+     * let* (any FURTHER bindings) doesn't exist as a real scope yet at
+     * all; it's still raw, embedded body, only re-lowered later against
+     * the real child Compiler this binding's own IR_LAMBDA eventually
+     * gets (see this function's own header comment on why that's fine:
+     * the same laziness that makes let*'s per-level nesting free also
+     * gives each later binding's OWN lambda_is_closed check the correct,
+     * progressively narrower `c` for free, the next time ir_lower_let_star
+     * is re-entered). */
+    IRKnownParam *kp = (IRKnownParam *)ir_arena_alloc(c->ir_arena, sizeof(IRKnownParam));
+    kp[0].closed = false;
+    if (argv[0]->kind == IR_LAMBDA) {
+        val_t cand_params = argv[0]->as.lambda.params;
+        val_t cand_body   = argv[0]->as.lambda.body;
+        int cand_argc;
+        int budget = INLINE_MAX_BODY_NODES;
+        /* Tier 2.4: reject if the candidate body references its OWN
+         * binding name -- see body_contains_any_symbol's comment
+         * (compiler.c) for the full rationale; only one name to check
+         * here (unlike plain let's possibly-several siblings), since
+         * let*'s later bindings aren't visible to earlier ones at all
+         * (sequential scoping), so there's no sibling-name hazard beyond
+         * self-reference for this one binding. */
+        if (params_proper_arity(cand_params, &cand_argc) &&
+            ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+            !body_contains_symbol(cand_body, name) &&
+            lambda_is_closed(c, cand_params, cand_body, &budget)) {
+            kp[0].closed = true;
+            kp[0].params = cand_params;
+            kp[0].body   = cand_body;
+            kp[0].argc   = cand_argc;
+        }
+    }
+    callee->as.lambda.known_params = kp;
+
     return ir_lower_lambda_call(c, callee, argv, 1, tail, line);
 }
 
@@ -4193,6 +4662,31 @@ static void ir_emit(Compiler *c, IRNode *n) {
 
         int arity = compile_params(&child, n->as.lambda.params);
         child.chunk->arity = arity;
+
+        /* Tier 2.4: populate known[] for any let/let*-desugared param
+         * ir_lower_let/ir_lower_let_star already proved closed (see
+         * IRKnownParam's own comment, ir.h, for why this can't be done
+         * the IR_DEFINE way, post-hoc from g_last_lambda_upval_count).
+         * resolve_local(&child, ...) right after compile_params is
+         * guaranteed to find each param at its correct physical slot --
+         * params were just add_local'd, in the same forward order
+         * known_params was built in, by compile_params itself. */
+        if (n->as.lambda.known_params) {
+            int pi = 0;
+            for (val_t p = n->as.lambda.params; vis_pair(p); p = vcdr(p), pi++) {
+                IRKnownParam *kp = &n->as.lambda.known_params[pi];
+                if (kp->closed) {
+                    int slot = resolve_local(&child, vcar(p));
+                    if (slot >= 0) {
+                        child.known[slot].valid  = true;
+                        child.known[slot].params = kp->params;
+                        child.known[slot].body   = kp->body;
+                        child.known[slot].argc   = kp->argc;
+                    }
+                }
+            }
+        }
+
         begin_scope(&child);  /* body scope: depth 1+, matches compile_lambda */
 
         lambda_prescan(&child, n->as.lambda.body, n->line);
