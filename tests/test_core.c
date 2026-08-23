@@ -588,6 +588,43 @@ static void test_ir_optimize_check(void) {
         "(let ((x 100)) (define (add x y) (+ x y)) (add 1 x))",
         "(let ((x 100)) (define (add x y) (+ x y)) (add x 1))",
         "(let ((a 1) (b 2) (c 3)) (define (f a b c) (+ a b c)) (f b c a))",
+
+        /* Tier 2.4: let/let*-bound candidates (letrec/letrec* already
+         * covered above -- they desugar to internal defines, reusing
+         * the IR_DEFINE registration unchanged). */
+        "(let ((f (lambda (x) (* x x)))) (+ (f 3) (f 4)))",
+        /* let*: capturing (must NOT fire) vs. not (must fire) -- proves
+         * the distinction is load-bearing, not accidental. */
+        "(let* ((n 5) (f (lambda (x) (+ x n)))) (f 1))",
+        "(let* ((f (lambda (x) (+ x 1)))) (f 1))",
+        /* Sibling-shadow-by-name: f must capture the OUTER x (100),
+         * never the sibling x (5) bound in the SAME let -- the sharpest
+         * test that a plain let's bindings are genuinely not visible to
+         * each other's inits. */
+        "(let ((x 100)) (let ((x 5) (f (lambda (a) (+ a x)))) (f 1)))",
+        /* Self-reference via plain let (NOT letrec) -- f is unbound
+         * inside its own body under real let semantics; classic and IR
+         * paths must still agree on whatever that produces. */
+        /* Wrapped in guard, not left to raise past this expression:
+         * compiler_ir_optimize_check runs BOTH the classic and IR
+         * closures inside one shared SCM_PROTECT, so an uncaught raise
+         * from the FIRST run would skip the second entirely and
+         * re-propagate out of the check itself, crashing this test
+         * binary rather than reporting a clean pass/fail. */
+        "(let ((f (lambda (x) (if (= x 0) 1 (* x (f (- x 1))))))) (guard (e (#t 'correctly-unbound)) (f 5)))",
+        /* Rest-param and oversized-body analogues, bound via let instead
+         * of internal define. */
+        "(let ((f (lambda args (apply + args)))) (f 1 2 3))",
+        "(let ((f (lambda (x) (+ x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)))) (f 1))",
+        /* guard's asymmetric scoping inside a candidate body: e resolves
+         * within the clause, x throughout. */
+        "(let ((f (lambda (x) (guard (e (#t (+ e x))) (raise x))))) (f 5))",
+        /* Adversarial macro-in-body: an outer-defined macro (three-tier
+         * lookup) must bail out correctly. */
+        "(let () (define-syntax dbl (syntax-rules () ((_ x) (* 2 x)))) (let ((f (lambda (x) (dbl x)))) (+ (f 3) (f 4))))",
+        /* Adversarial internal-macro-in-body: the candidate defines its
+         * own local macro via define-syntax -- must also bail out. */
+        "(let ((f (lambda () (define-syntax m (syntax-rules () ((_) 42))) (m)))) (f))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -616,12 +653,20 @@ static void test_ir_inline_fires(void) {
         "(let () (define (sq x) (* x x)) (+ (sq 1) (sq 2) (sq 3) (sq 4)))",
         "(let () (define (sq x) (* x x)) (define (dbl x) (+ x x)) (sq (dbl 3)))",
         "(let () (define (adder x) (lambda (y) (+ x y))) (define add5 (adder 5)) (add5 10))",
+        /* Tier 2.4: let/let*-bound candidates. */
+        "(let ((f (lambda (x) (* x x)))) (+ (f 3) (f 4)))",
+        "(let* ((f (lambda (x) (+ x 1)))) (f 1))",
     };
     static const char *should_not_fire[] = {
         "(let () (define (fact k) (if (= k 0) 1 (* k (fact (- k 1))))) (fact 5))",
         "(let () (define (sumall . xs) (apply + xs)) (sumall 1 2 3))",
         "(let () (define (sq x) (* x x)) (define ops (list sq sq)) ((car ops) 7))",
         "(let () (define (sum10 x) (+ x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x)) (sum10 1))",
+        /* Tier 2.4: let/let*-bound candidates that must correctly NOT
+         * fire -- a real capture, a rest-param, and macro use in body. */
+        "(let* ((n 5) (f (lambda (x) (+ x n)))) (f 1))",
+        "(let ((f (lambda args (apply + args)))) (f 1 2 3))",
+        "(let () (define-syntax dbl (syntax-rules () ((_ x) (* 2 x)))) (let ((f (lambda (x) (dbl x)))) (+ (f 3) (f 4))))",
     };
     for (size_t i = 0; i < sizeof(should_fire) / sizeof(should_fire[0]); i++) {
         val_t port = port_open_input_string(should_fire[i], (uint32_t)strlen(should_fire[i]));
