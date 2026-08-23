@@ -88,6 +88,27 @@ typedef enum {
                      * `named_let` field comment below. */
 } IRKind;
 
+/* Tier 2.4 (let/let*-bound local inlining, docs/thoughts/performance-chez-
+ * kaappi.md sec5 item 2.3's own deferred note): one entry per parameter of
+ * a let/let*-desugared wrapper IR_LAMBDA (see IRNode::as.lambda's own
+ * `known_params` field below), populated by ir_lower_let/ir_lower_let_star
+ * (compiler.c) via a new, side-effect-free lambda_is_closed check run at
+ * ir_lower time -- BEFORE either the wrapper or the candidate exist as
+ * real Compilers. This can't be determined the way IR_DEFINE's own known-
+ * lambda registration is (compile the candidate, then read what its
+ * upval_count proved): IR_CALL's generic-call ir_emit branch fully
+ * compiles and tears down the CALLEE (this wrapper, body and all) before
+ * ever touching an argument (where a let/let*-bound candidate lambda
+ * literal actually lives), so there's no live Compiler frame left, at any
+ * point, to read a post-hoc "did this candidate capture anything" result
+ * from. `params`/`body`/`argc` are only meaningful when `closed` is true. */
+typedef struct {
+    bool  closed;
+    val_t params;
+    val_t body;
+    int   argc;
+} IRKnownParam;
+
 typedef struct IRNode IRNode;
 
 struct IRNode {
@@ -231,7 +252,20 @@ struct IRNode {
          * (compile_lambda's own `name` parameter) -- NULL for an
          * anonymous (lambda ...), the bound symbol's C string for
          * `(define (f ...) ...)` sugar. */
-        struct { val_t params; val_t body; const char *name; } lambda; /* IR_LAMBDA */
+        /* `known_params` (Tier 2.4): NULL for every IR_LAMBDA except a
+         * let/let*-desugared wrapper (ir_lower_let/ir_lower_let_star,
+         * compiler.c) -- a real (lambda ...) literal, letrec's own
+         * `<letrec>` zero-arg wrapper, and named-let's loop lambda never
+         * set it (ir_node_new's zero-init already makes this the default,
+         * so every other producer of an IR_LAMBDA needs no change at
+         * all). When non-NULL, one entry per parameter in `params`'s own
+         * order, consulted by ir_emit's IR_LAMBDA case (right after
+         * compile_params assigns each param's physical slot) to populate
+         * that child Compiler's own known[] the same way IR_DEFINE's
+         * registration does -- see IRKnownParam's own comment above for
+         * why this can't be computed post-hoc the IR_DEFINE way. */
+        struct { val_t params; val_t body; const char *name;
+                 IRKnownParam *known_params; } lambda; /* IR_LAMBDA */
         /* All three fields raw/unprocessed, same reasoning as
          * IR_LAMBDA's own `lambda` field above -- ir_emit's IR_NAMED_LET
          * case builds the whole "zero-arg outer wrapper" structure
