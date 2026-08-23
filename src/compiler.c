@@ -4589,6 +4589,31 @@ static void ir_emit(Compiler *c, IRNode *n) {
 
         int arity = compile_params(&child, n->as.lambda.params);
         child.chunk->arity = arity;
+
+        /* Tier 2.4: populate known[] for any let/let*-desugared param
+         * ir_lower_let/ir_lower_let_star already proved closed (see
+         * IRKnownParam's own comment, ir.h, for why this can't be done
+         * the IR_DEFINE way, post-hoc from g_last_lambda_upval_count).
+         * resolve_local(&child, ...) right after compile_params is
+         * guaranteed to find each param at its correct physical slot --
+         * params were just add_local'd, in the same forward order
+         * known_params was built in, by compile_params itself. */
+        if (n->as.lambda.known_params) {
+            int pi = 0;
+            for (val_t p = n->as.lambda.params; vis_pair(p); p = vcdr(p), pi++) {
+                IRKnownParam *kp = &n->as.lambda.known_params[pi];
+                if (kp->closed) {
+                    int slot = resolve_local(&child, vcar(p));
+                    if (slot >= 0) {
+                        child.known[slot].valid  = true;
+                        child.known[slot].params = kp->params;
+                        child.known[slot].body   = kp->body;
+                        child.known[slot].argc   = kp->argc;
+                    }
+                }
+            }
+        }
+
         begin_scope(&child);  /* body scope: depth 1+, matches compile_lambda */
 
         lambda_prescan(&child, n->as.lambda.body, n->line);
