@@ -1955,9 +1955,16 @@ static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budg
      * element, head included -- a head symbol shadowed by an outer local
      * (a rare edge case) is correctly caught by the same vis_symbol
      * branch above when THIS same function is re-entered for it. */
-    for (val_t p = expr; vis_pair(p); p = vcdr(p))
+    val_t p = expr;
+    for (; vis_pair(p); p = vcdr(p))
         if (!expr_is_closed(c, vcar(p), scope, budget)) return false;
-    return true;
+    /* The final, non-pair cdr -- almost always V_NIL for a well-formed
+     * form, but a genuinely dotted tail (nonstandard for a call/special
+     * form, though not something this walker should simply assume can't
+     * occur) could itself be a reference. Checking it too costs nothing
+     * for the overwhelmingly common nil case and closes what would
+     * otherwise be a silent under-shadowing gap for the uncommon one. */
+    return expr_is_closed(c, p, scope, budget);
 }
 
 /* Tier 2.4 public entry point: true iff `body` (compiled with `params`
