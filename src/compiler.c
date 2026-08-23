@@ -4305,8 +4305,35 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
  * (c) OP_SLIDE compacts every spliced local away, leaving only the
  * inlined body's final value on the stack -- exactly where a real call's
  * return value would have ended up. No new opcode needed. */
+/* `known_params` (Tier 2.4, wrapper elision): NULL for the existing
+ * Tier 2.3 named-candidate call site, or the let/let*-desugared wrapper's
+ * own per-param closedness analysis (ir_lower_let/ir_lower_let_star) when
+ * this splice IS that wrapper's callee -- see IRKnownParam's own comment
+ * (ir.h) for what it records. Transferred into c->known[] here, the same
+ * way IR_LAMBDA's own ir_emit case already does for a REAL (non-spliced)
+ * closure, so splicing a let's own wrapper away doesn't silently regress
+ * the already-shipped optimization for a let-bound lambda literal called
+ * inside that same let's own body (caught by independent design review
+ * before this landing: routing straight to this function bypasses
+ * IR_LAMBDA's case entirely, which is the only other place that transfer
+ * happens).
+ *
+ * `track_cycle`: true for the Tier 2.3 named-candidate path (this body
+ * IS looked up by name at other call sites, so currently_inlining's
+ * g_inlining_bodies stack must track it to catch mutual recursion via
+ * splicing); false for wrapper elision, where a body is never looked up
+ * by name a second time (nothing registers it in any known[] table) --
+ * cycle detection is structurally meaningless for that path. Passing
+ * false there is required, not just an optimization: g_inlining_bodies
+ * is a small, FIXED-size, SHARED array (MAX_INLINE_DEPTH) that unconditional
+ * per-let-level tracking would exhaust for an entirely ordinary, non-
+ * adversarial long let* chain (each binding is its own nested wrapper),
+ * silently degrading cycle detection for genuine named-candidate mutual
+ * recursion nested elsewhere in the same compile -- caught by independent
+ * design review before this landing. */
 static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
-                                 IRNode **args, int argc, IRNode *call_node) {
+                                 IRNode **args, int argc, IRNode *call_node,
+                                 IRKnownParam *known_params, bool track_cycle) {
     begin_scope(c);
 
     /* Every argument must be evaluated -- and, in particular, every
@@ -4356,15 +4383,36 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
         p = vcdr(p);
     }
 
+    /* Tier 2.4: transfer any per-param known-lambda registration the
+     * caller already computed (let/let*'s own closedness analysis --
+     * see this function's own header comment). Same shape as IR_LAMBDA's
+     * own ir_emit case, just against `c` directly (base + i) instead of
+     * a child Compiler's own resolve_local. */
+    if (known_params) {
+        for (int i = 0; i < argc; i++) {
+            if (known_params[i].closed) {
+                c->known[base + i].valid  = true;
+                c->known[base + i].params = known_params[i].params;
+                c->known[base + i].body   = known_params[i].body;
+                c->known[base + i].argc   = known_params[i].argc;
+            }
+        }
+    }
+
     lambda_prescan(c, body, call_node->line);
 
     /* Mark this candidate's body as "currently being inlined" for the
      * duration of walking it -- see currently_inlining's own comment.
      * Bounded by MAX_INLINE_DEPTH, itself well above the inline-effort
-     * budget (32), so this can't overflow in practice; fails safe
-     * (silently stops tracking, at worst re-allowing a budget-bounded
-     * expansion) rather than crashing if it somehow did. */
-    if (g_inlining_depth < MAX_INLINE_DEPTH)
+     * budget (32), so this can't overflow in practice for the Tier 2.3
+     * named-candidate path; fails safe (silently stops tracking, at
+     * worst re-allowing a budget-bounded expansion) rather than crashing
+     * if it somehow did. Skipped entirely when !track_cycle (Tier 2.4
+     * wrapper elision -- see this function's own header comment for why
+     * that's required, not just an optimization: unconditional per-let-
+     * level tracking would let an entirely ordinary long let* chain
+     * exhaust this small, shared, fixed-size array on its own). */
+    if (track_cycle && g_inlining_depth < MAX_INLINE_DEPTH)
         g_inlining_bodies[g_inlining_depth++] = body;
 
     /* Interleaved lower-then-emit walk, one body form at a time, against
@@ -4389,7 +4437,8 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
         }
     }
 
-    if (g_inlining_depth > 0 && g_inlining_bodies[g_inlining_depth - 1] == body)
+    if (track_cycle && g_inlining_depth > 0 &&
+        g_inlining_bodies[g_inlining_depth - 1] == body)
         g_inlining_depth--;
 
     end_scope(c, call_node->line);
@@ -4615,7 +4664,8 @@ static void ir_emit(Compiler *c, IRNode *n) {
                 ir_arena_take_inline_budget(c->ir_arena)) {
                 ir_emit_inline_call(c, c->known[slot].params,
                                      c->known[slot].body,
-                                     n->as.call.args, argc, n);
+                                     n->as.call.args, argc, n,
+                                     NULL, true);
                 return;
             }
         }
