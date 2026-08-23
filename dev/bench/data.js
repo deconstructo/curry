@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787412331604,
+  "lastUpdate": 1787477505832,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7037,6 +7037,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 82.845,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "985604c5b515e13e73f9db810fe2e23d5ea65e89",
+          "message": "Merge pull request #68 from deconstructo/tier2-let-inline-1\n\nTier 2.4: extend local inliner to let/let*-bound candidates",
+          "timestamp": "2026-08-23T19:30:58+10:00",
+          "tree_id": "e016292891c1560991eb11860a1e03af52106b49",
+          "url": "https://github.com/deconstructo/curry/commit/985604c5b515e13e73f9db810fe2e23d5ea65e89"
+        },
+        "date": 1787477504458,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.594,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.337,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.273,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.945,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 150.168,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 312.383,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.622,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 100.754,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 81.663,
             "unit": "ms"
           }
         ]
