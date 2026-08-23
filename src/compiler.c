@@ -1556,6 +1556,55 @@ static bool body_contains_symbol(val_t body, val_t name) {
     return false;
 }
 
+/* Tier 2.4: multi-name sibling-reference guard for let-bound candidates
+ * (let* only ever has one binding to check per registration -- see
+ * ir_lower_let_star's own use of body_contains_symbol above -- but plain
+ * let can have several siblings at once). Independent code review
+ * caught a real, confirmed miscompilation this closes: lambda_is_closed
+ * (below) only checks a candidate's free variables against the
+ * ENCLOSING Compiler `c` -- correctly, since that's the only real scope
+ * that exists yet at ir_lower_let time -- but a let's OWN sibling
+ * binding names (including the candidate's own name) are NEITHER
+ * locally bound within the candidate's own params NOR yet resolvable in
+ * `c` at this point, so lambda_is_closed's existing check silently
+ * treats a reference to one of them as "global, fine". Once
+ * ir_emit_inline_call later splices the body into the wrapper's own
+ * frame, that name IS a real local there if the call site happens to be
+ * inside the same let's body -- so the reference silently resolves
+ * instead of correctly raising unbound-variable, exactly the way a
+ * genuine letrec-style self/mutual-reference would (but plain `let`
+ * bindings are NOT visible to each other's inits or to any sibling's
+ * own captured-closure environment -- only letrec makes that true).
+ * Confirmed via direct repro before this fix: `(let ((f (lambda (x) f)))
+ * (procedure? (f 1)))` printed #t (should raise unbound-variable);
+ * `(let ((y 10) (f (lambda (x) (+ x y)))) (f 1))` returned 11 (should
+ * also raise unbound-variable, since y is a SIBLING binding, not
+ * visible to f's own closure under real let semantics). Any reference
+ * to ANY of the let's own binding names -- checked as a flat list,
+ * ignoring which specific sibling it is, including the candidate's own
+ * name -- is grounds to reject: same over-conservative-but-safe
+ * tradeoff body_contains_symbol's own single-name self-recursion check
+ * already uses (a candidate that merely shares a name with an unrelated
+ * OUTER variable also gets conservatively rejected here; that just
+ * means a safe candidate falls back to a real, correct, non-inlined
+ * call, never a miscompile). */
+static bool expr_contains_any_symbol(val_t expr, val_t names) {
+    if (vis_symbol(expr)) {
+        for (val_t p = names; vis_pair(p); p = vcdr(p))
+            if (vcar(p) == expr) return true;
+        return false;
+    }
+    if (!vis_pair(expr)) return false;
+    return expr_contains_any_symbol(vcar(expr), names) ||
+           expr_contains_any_symbol(vcdr(expr), names);
+}
+
+static bool body_contains_any_symbol(val_t body, val_t names) {
+    for (val_t p = body; vis_pair(p); p = vcdr(p))
+        if (expr_contains_any_symbol(vcar(p), names)) return true;
+    return false;
+}
+
 /* Tier 2.3: total raw AST node count (every pair cell plus every atom
  * leaf counts as one) -- the inliner's size budget. Iterative over the
  * cdr-spine, not recursive -- a wide, flat body (many top-level forms,
@@ -3955,8 +4004,17 @@ static IRNode *ir_lower_let(Compiler *c, val_t args, bool tail, int line) {
             val_t cand_body   = argv[i]->as.lambda.body;
             int cand_argc;
             int budget = INLINE_MAX_BODY_NODES;
+            /* Tier 2.4: reject if the candidate's body references ANY of
+             * THIS let's own binding names (including its own) -- see
+             * body_contains_any_symbol's own comment for why: those
+             * names aren't yet resolvable in `c` (so lambda_is_closed's
+             * existing enclosing-scope check can't see them), but ARE
+             * real locals once the wrapper is entered -- exactly the
+             * gap a confirmed miscompilation was found through before
+             * this check existed. */
             if (params_proper_arity(cand_params, &cand_argc) &&
                 ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+                !body_contains_any_symbol(cand_body, fwd) &&
                 lambda_is_closed(c, cand_params, cand_body, &budget)) {
                 kp[i].closed = true;
                 kp[i].params = cand_params;
@@ -4026,8 +4084,16 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
         val_t cand_body   = argv[0]->as.lambda.body;
         int cand_argc;
         int budget = INLINE_MAX_BODY_NODES;
+        /* Tier 2.4: reject if the candidate body references its OWN
+         * binding name -- see body_contains_any_symbol's comment
+         * (compiler.c) for the full rationale; only one name to check
+         * here (unlike plain let's possibly-several siblings), since
+         * let*'s later bindings aren't visible to earlier ones at all
+         * (sequential scoping), so there's no sibling-name hazard beyond
+         * self-reference for this one binding. */
         if (params_proper_arity(cand_params, &cand_argc) &&
             ir_count_ast_nodes(cand_body, INLINE_MAX_BODY_NODES) <= INLINE_MAX_BODY_NODES &&
+            !body_contains_symbol(cand_body, name) &&
             lambda_is_closed(c, cand_params, cand_body, &budget)) {
             kp[0].closed = true;
             kp[0].params = cand_params;

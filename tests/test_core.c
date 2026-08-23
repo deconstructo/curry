@@ -625,6 +625,19 @@ static void test_ir_optimize_check(void) {
         /* Adversarial internal-macro-in-body: the candidate defines its
          * own local macro via define-syntax -- must also bail out. */
         "(let ((f (lambda () (define-syntax m (syntax-rules () ((_) 42))) (m)))) (f))",
+        /* A real, confirmed miscompilation caught by independent code
+         * review: a let-bound candidate referencing its own binding
+         * name (or a sibling's) was wrongly treated as "closed" --
+         * that name isn't yet resolvable against the enclosing scope at
+         * the point closedness gets checked (correctly not a capture),
+         * but also isn't visible to the candidate's own init under real
+         * let semantics (unlike letrec) -- so a reference to it should
+         * raise unbound-variable, not silently resolve once splicing
+         * makes the name a real local at the call site. Wrapped in
+         * guard, not left to raise, for the same reason noted above. */
+        "(let ((f (lambda (x) f))) (guard (e (#t 'correctly-unbound)) (procedure? (f 1))))",
+        "(let ((y 10) (f (lambda (x) (+ x y)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
+        "(let* ((f (lambda (x) (+ x f)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -667,6 +680,12 @@ static void test_ir_inline_fires(void) {
         "(let* ((n 5) (f (lambda (x) (+ x n)))) (f 1))",
         "(let ((f (lambda args (apply + args)))) (f 1 2 3))",
         "(let () (define-syntax dbl (syntax-rules () ((_ x) (* 2 x)))) (let ((f (lambda (x) (dbl x)))) (+ (f 3) (f 4))))",
+        /* Self/sibling-reference regression -- see the matching
+         * test_ir_optimize_check cases' own comment for the full
+         * rationale. */
+        "(let ((f (lambda (x) f))) (guard (e (#t 'correctly-unbound)) (procedure? (f 1))))",
+        "(let ((y 10) (f (lambda (x) (+ x y)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
+        "(let* ((f (lambda (x) (+ x f)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
     };
     for (size_t i = 0; i < sizeof(should_fire) / sizeof(should_fire[0]); i++) {
         val_t port = port_open_input_string(should_fire[i], (uint32_t)strlen(should_fire[i]));

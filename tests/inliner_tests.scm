@@ -258,6 +258,31 @@
       (f 1)))
   101)
 
+;;; A let-bound candidate referencing its OWN binding name (or a
+;;; sibling's) must correctly raise unbound-variable, not silently
+;;; resolve -- a real, confirmed miscompilation caught by independent
+;;; code review: plain let bindings are NOT visible to each other's
+;;; inits (unlike letrec), but that sibling name isn't yet resolvable
+;;; against the enclosing scope either at the point closedness gets
+;;; checked, so it was wrongly treated as "global, fine" and inlined --
+;;; after splicing, the name became a real, resolvable local at the
+;;; call site, silently succeeding instead of erroring. Wrapped in guard
+;;; since the whole point is confirming this DOES raise.
+(check "let candidate referencing its own binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (procedure? (let ((f (lambda (x) f))) (f 1))))
+  'correctly-unbound)
+
+(check "let candidate referencing a sibling's binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (let ((y 10) (f (lambda (x) (+ x y)))) (f 1)))
+  'correctly-unbound)
+
+(check "let* candidate referencing its own binding name raises, not silently resolves"
+  (guard (e (#t 'correctly-unbound))
+    (let* ((f (lambda (x) (+ x f)))) (f 1)))
+  'correctly-unbound)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
