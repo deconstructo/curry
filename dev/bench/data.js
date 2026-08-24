@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787477505832,
+  "lastUpdate": 1787564415203,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7106,6 +7106,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 81.663,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "845e0cc975aee20a5cf33a9818a412cfb73892f1",
+          "message": "Merge pull request #69 from deconstructo/tier2-let-wrapper-elide-1\n\nTier 2.4: closure elision for compiler-synthesized wrappers\n\nTonnes of extra tests - including an ubuntu and a fedora build!",
+          "timestamp": "2026-08-24T19:39:33+10:00",
+          "tree_id": "2a997c71f0e5c5a3ca932721c292bb4982e02600",
+          "url": "https://github.com/deconstructo/curry/commit/845e0cc975aee20a5cf33a9818a412cfb73892f1"
+        },
+        "date": 1787564412930,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.164,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.571,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.36,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.646,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 147.415,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 308.987,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.884,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 100.654,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.257,
             "unit": "ms"
           }
         ]
