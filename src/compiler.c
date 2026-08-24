@@ -2535,14 +2535,39 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     vs = var_specs;
     while (vis_pair(vs)) { nv++; vs = vcdr(vs); }
 
+    /* Tier 2.4 fix (found by independent code review; same bug class,
+     * same fix, as SF_VALUES/SF_APPLY/SF_CALL_WITH_VALUES's own "Tier 2.4
+     * fix" comments above): this loop predates reserve_pending_slot and
+     * was never updated for it. A step expression that is itself a
+     * let / let* / letrec / letrec* / named-let now splices real locals
+     * directly into `d` -- without this bracketing, a LATER step's own
+     * splice computes its new locals' slot indices against a
+     * d->local_count that doesn't account for the EARLIER steps' own
+     * already-pushed, still-pending values, aliasing physical stack
+     * positions those earlier steps are still using.
+     *
+     * `base` itself is unrelated to this bracketing: it identifies the nv
+     * PERSISTENT loop-variable slots (added via add_local during the init
+     * phase above, at the very top of this function), which is exactly
+     * `saved - nv` -- `saved` (== d->local_count right before this loop)
+     * only equals `d->local_count - nv` measured AFTER the loop when
+     * nothing in between changes local_count, which no longer holds once
+     * a step can splice new locals of its own; capturing `saved` before
+     * this loop and subtracting nv from IT is what stays correct in both
+     * cases. Confirmed as a real, silent wrong-value bug: `(do ((i 0 (+ i
+     * 1)) (acc 0 (+ acc (let ((x 1)) x)))) ((= i 3) acc))` returned 0
+     * instead of 3 before this fix. */
+    int saved = d->local_count;
     vs = var_specs;
     while (vis_pair(vs)) {
         val_t spec = vcar(vs);
         val_t step = vis_pair(vcdr(vcdr(spec))) ? vcar(vcdr(vcdr(spec))) : vcar(spec);
         compile(d, step, false, line);
+        reserve_pending_slot(d);
         vs = vcdr(vs);
     }
-    int base = d->local_count - nv;
+    int base = saved - nv;
+    release_pending_slots(d, saved);
     for (int i = nv - 1; i >= 0; i--)
         emit_ab(d, OP_STORE_LOCAL, (uint8_t)(base + i), line);
 
@@ -4894,14 +4919,72 @@ static void ir_emit(Compiler *c, IRNode *n) {
          * (see this switch's head==V_FALSE branch above) applies here:
          * `outer` was created, closed over, and consumed by the very next
          * instruction, every time, with no other reference ever taken to
-         * it. Splicing it away needed no closedness check, no size/effort
-         * budget, and (unlike that branch) no MAX_LOCALS guard either --
-         * every local this case adds goes through add_local/
-         * reserve_pending_slot, which already fail safe on overflow (see
-         * their own comments), never through a raw unguarded array write
-         * the way the let/let*-wrapper case's now-fixed bug did.
-         *
-         * The one real semantic difference from `outer`'s own bytecode:
+         * it. Splicing it away needed no closedness check and no size/
+         * effort budget -- but DOES need the same MAX_LOCALS guard the
+         * let / let* / letrec / letrec* branch above needed (flagged missing
+         * here by independent code review, same bug class as that
+         * branch's own now-fixed one): add_local/reserve_pending_slot
+         * fail safe on overflow in the sense of never writing out of
+         * bounds, but "safe" there means silently returning slot 0 and
+         * printing a diagnostic, not silently doing the RIGHT thing --
+         * loop_name would alias whatever real local already lives in
+         * slot 0, and the OP_STORE_LOCAL below would then overwrite that
+         * unrelated local's actual runtime value. Splicing needs room for
+         * loop_name (1), the reloaded callee copy (1), and each binding
+         * (argc) simultaneously live at once; below that, fall back to
+         * building a real, separate closure for the wrapper exactly the
+         * way this case always did before this landing -- correctness
+         * over the optimization when the frame is already nearly full,
+         * matching the let-branch's own fallback philosophy exactly. */
+        val_t loop_name0 = n->as.named_let.loop_name;
+        val_t bindings0  = n->as.named_let.bindings;
+        int   argc0 = 0;
+        for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) argc0++;
+        if (c->local_count + 2 + argc0 >= MAX_LOCALS) {
+            val_t body0 = n->as.named_let.body;
+            val_t params0 = V_NIL;
+            for (val_t b = bindings0; vis_pair(b); b = vcdr(b))
+                params0 = scm_cons(vcar(vcar(b)), params0);
+            val_t fwd0 = V_NIL;
+            while (vis_pair(params0)) { fwd0 = scm_cons(vcar(params0), fwd0); params0 = vcdr(params0); }
+
+            Compiler outer;
+            init_compiler(&outer, c, as_sym(loop_name0)->data);
+            outer.chunk->arity = 0;
+            add_local(&outer, loop_name0);
+            mark_initialised(&outer);
+            emit(&outer, OP_VOID, n->line);
+            g_compile_self_tail_name    = loop_name0;
+            g_compile_self_tail_mutated = body_mentions_set_target(c, body0, loop_name0);
+            IRNode *loop_lambda0 = ir_lower_lambda(&outer, fwd0, body0,
+                                                    as_sym(loop_name0)->data, n->line);
+            ir_emit(&outer, loop_lambda0);
+            emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);
+            emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);
+            {
+                int osaved = outer.local_count;
+                reserve_pending_slot(&outer);
+                for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) {
+                    IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
+                    ir_emit(&outer, arg);
+                    reserve_pending_slot(&outer);
+                }
+                release_pending_slots(&outer, osaved);
+            }
+            emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc0, n->line);
+            Chunk *och = end_compiler(&outer);
+
+            int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
+            emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
+            for (int i = 0; i < outer.upval_count; i++) {
+                chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
+                chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+            }
+            emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
+            return;
+        }
+
+        /* The one real semantic difference from `outer`'s own bytecode:
          * `outer` was ALWAYS entered via a tail call from here (any
          * function's own body computing its return value via a fresh,
          * dedicated closure can always tail-call out of it) -- but once

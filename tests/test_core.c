@@ -996,6 +996,70 @@ static void test_apply_values_pending_slot_fix(void) {
         "apply nested inside let*'s own wrapper-elided body still sees correct pending-slot bookkeeping");
 }
 
+/* Regression test for a real, confirmed miscompilation found by
+ * independent code review: compile_do's step-expression loop (compiler.c,
+ * `(do ((var init step) ...) (test result) body...)`) has the exact same
+ * bug class, and needed the exact same fix, as SF_VALUES/SF_APPLY/
+ * SF_CALL_WITH_VALUES above -- its own step-compilation loop also
+ * predates reserve_pending_slot and was never bracketed with it. Before
+ * the fix, a step expression that spliced real locals (any Tier 2.4
+ * wrapper-elided form) corrupted `base`'s own computation (`d->local_count
+ * - nv`, evaluated AFTER the splice-disturbed loop instead of captured
+ * before it), which is doubly dangerous for a `do` loop specifically:
+ * `base` here doesn't just mislocate a transient result the way apply/
+ * values did, it selects which PERSISTENT loop-variable slots the
+ * OP_STORE_LOCAL loop overwrites -- get it wrong and the loop variables
+ * never actually update, so the termination test never becomes true and
+ * the loop runs forever. Confirmed directly: `(do ((i 0 (+ i 1)) (acc 0
+ * (+ acc (let ((x 1)) x)))) ((= i 3) acc))` hung indefinitely before the
+ * fix (not merely a wrong value) -- caught interactively, not by this
+ * suite, since nothing here previously exercised a splicing step
+ * expression at all. */
+static void test_do_step_pending_slot_fix(void) {
+    CHECK(vunfix(run_vm(
+        "(do ((i 0 (+ i 1)) (acc 0 (+ acc (let ((x 1)) x)))) ((= i 3) acc))")) == 3,
+        "do: let step expression doesn't alias an earlier pending sibling step value");
+    CHECK(vunfix(run_vm(
+        "(do ((i 0 (+ i 1)) (acc 0 (+ acc (let loop ((j 0)) (if (= j 1) 1 (loop (+ j 1))))))) ((= i 3) acc))")) == 3,
+        "do: named-let step expression doesn't alias an earlier pending sibling step value");
+}
+
+/* Regression test for a real, confirmed memory-corruption bug found by
+ * independent code review: IR_NAMED_LET's own wrapper-elision splice
+ * (ir_emit's IR_NAMED_LET case, compiler.c) called add_local(c,
+ * loop_name) directly against the enclosing Compiler with NO MAX_LOCALS
+ * guard, unlike the sibling let / let* / letrec / letrec* elision branch, which
+ * already added `c->local_count + argc < MAX_LOCALS` after an earlier
+ * round of this same review found the identical risk there. On overflow,
+ * add_local silently returns slot 0 (a stale, already-live, unrelated
+ * local's own slot) instead of a fresh one, and the OP_STORE_LOCAL that
+ * follows then overwrites THAT local's real runtime value out from under
+ * it -- not a crash, a silent corruption of unrelated program state.
+ * Confirmed directly: a 256-param function (filling MAX_LOCALS exactly)
+ * with a named-let anywhere in its body, called and returning its first
+ * parameter afterward, returned a corrupted internal object instead of
+ * that parameter's real value before the fix. The fix falls back to
+ * building a real, separate closure for the wrapper (the pre-Tier-2.4
+ * behavior) whenever there isn't room to splice safely -- this is the
+ * direct regression test for that fallback actually firing and producing
+ * the CORRECT value, not just avoiding a crash. Its own function, not
+ * folded into another test, for the same on-stack-buffer-size reason
+ * test_ir_wrapper_elision_max_locals_guard already documents. */
+static void test_named_let_max_locals_guard(void) {
+    char buf[8192];
+    int  off = snprintf(buf, sizeof(buf), "(let ()");
+    off += snprintf(buf + off, sizeof(buf) - (size_t)off, " (define (f");
+    for (int i = 0; i < 256 && (size_t)off < sizeof(buf); i++)
+        off += snprintf(buf + off, sizeof(buf) - (size_t)off, " p%d", i);
+    off += snprintf(buf + off, sizeof(buf) - (size_t)off,
+        ") (let loop ((i 0)) (if (= i 1) i (loop (+ i 1)))) p0)");
+    off += snprintf(buf + off, sizeof(buf) - (size_t)off,
+        " (apply f (make-list 256 42)))");
+    CHECK((size_t)off < sizeof(buf), "named-let MAX_LOCALS guard source fits in buffer");
+    CHECK(vunfix(run_vm(buf)) == 42,
+          "named-let: MAX_LOCALS overflow falls back to a real closure instead of corrupting a local");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1024,6 +1088,8 @@ int main(void) {
     RUN_TEST(test_ir_wrapper_elision_stress);
     RUN_TEST(test_ir_wrapper_elision_max_locals_guard);
     RUN_TEST(test_apply_values_pending_slot_fix);
+    RUN_TEST(test_do_step_pending_slot_fix);
+    RUN_TEST(test_named_let_max_locals_guard);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
