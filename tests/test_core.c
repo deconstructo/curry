@@ -819,10 +819,18 @@ static void test_ir_wrapper_elision_stress(void) {
     /* (let* ((a0 0) (a1 (+ a0 1)) ... (a149 (+ a148 1))) a149) == 149 */
     {
         char buf[16384];
-        int  off = snprintf(buf, sizeof(buf), "(let* ((a0 0)");
-        for (int i = 1; i < 150; i++)
-            off += snprintf(buf + off, sizeof(buf) - off,
+        /* size_t + clamp-after-every-call, matching test_ir_self_check's
+         * own "snprintf's return value is how many bytes WOULD have been
+         * written" fix above -- see that block's own comment for the full
+         * rationale (flagged again here by CodeQL on this file's own
+         * newer, unfixed copies of the identical pattern). */
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 150; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
                              " (a%d (+ a%d 1))", i, i - 1);
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
         snprintf(buf + off, sizeof(buf) - off, ") a149)");
         val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
         val_t expr = scm_read(port);
@@ -837,14 +845,18 @@ static void test_ir_wrapper_elision_stress(void) {
      * must still correctly decline to inline either candidate. */
     {
         char buf[16384];
-        int  off = snprintf(buf, sizeof(buf), "(let* ((a0 0)");
-        for (int i = 1; i < 100; i++)
-            off += snprintf(buf + off, sizeof(buf) - off,
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 100; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
                              " (a%d (+ a%d 1))", i, i - 1);
-        off += snprintf(buf + off, sizeof(buf) - off,
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off,
             ") (letrec ((e? (lambda (n) (if (= n 0) #t (o? (- n 1)))))"
             "           (o? (lambda (n) (if (= n 0) #f (e? (- n 1))))))"
             "  (list a99 (e? 20) (o? 20))))");
+        if (off > sizeof(buf)) off = sizeof(buf);
         val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
         val_t expr = scm_read(port);
         CHECK(compiler_ir_optimize_check(expr),
@@ -869,13 +881,19 @@ static void test_ir_wrapper_elision_stress(void) {
      * headroom against future, similarly innocuous frame-size growth. */
     {
         char buf[16384];
-        int  off = snprintf(buf, sizeof(buf), "(let ((x0 1))");
-        for (int i = 1; i < 120; i++)
-            off += snprintf(buf + off, sizeof(buf) - off,
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let ((x0 1))");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 120; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
                              " (let ((x%d (+ x%d 1)))", i, i - 1);
-        off += snprintf(buf + off, sizeof(buf) - off, " x119");
-        for (int i = 0; i < 120; i++)
-            off += snprintf(buf + off, sizeof(buf) - off, ")");
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, " x119");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 0; i < 120; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off, ")");
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
         val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
         val_t expr = scm_read(port);
         CHECK(compiler_ir_optimize_check(expr),
@@ -928,10 +946,19 @@ static void test_ir_wrapper_elision_stress(void) {
  * function, before splitting it out. */
 static void test_ir_wrapper_elision_max_locals_guard(void) {
     char buf[8192];
-    int  off = snprintf(buf, sizeof(buf), "(define x 1) (let (");
-    for (int i = 0; i < 300 && (size_t)off < sizeof(buf); i++)
-        off += snprintf(buf + off, sizeof(buf) - (size_t)off, "(a%d x) ", i);
-    snprintf(buf + off, sizeof(buf) - (size_t)off, ") a299)");
+    /* size_t + clamp-after-every-call -- see test_ir_self_check's own
+     * "snprintf's return value is how many bytes WOULD have been written"
+     * comment for the full rationale. The loop's own `off < sizeof(buf)`
+     * guard alone isn't enough: a single iteration can still push `off`
+     * past sizeof(buf) before the guard is rechecked, and the trailing
+     * snprintf call below runs unconditionally either way. */
+    size_t off = (size_t)snprintf(buf, sizeof(buf), "(define x 1) (let (");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    for (int i = 0; i < 300 && off < sizeof(buf); i++) {
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, "(a%d x) ", i);
+        if (off > sizeof(buf)) off = sizeof(buf);
+    }
+    snprintf(buf + off, sizeof(buf) - off, ") a299)");
     val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
     val_t def_expr = scm_read(port);
     val_t let_expr = scm_read(port);
@@ -1047,15 +1074,24 @@ static void test_do_step_pending_slot_fix(void) {
  * test_ir_wrapper_elision_max_locals_guard already documents. */
 static void test_named_let_max_locals_guard(void) {
     char buf[8192];
-    int  off = snprintf(buf, sizeof(buf), "(let ()");
-    off += snprintf(buf + off, sizeof(buf) - (size_t)off, " (define (f");
-    for (int i = 0; i < 256 && (size_t)off < sizeof(buf); i++)
-        off += snprintf(buf + off, sizeof(buf) - (size_t)off, " p%d", i);
-    off += snprintf(buf + off, sizeof(buf) - (size_t)off,
+    /* size_t + clamp-after-every-call -- see test_ir_self_check's own
+     * "snprintf's return value is how many bytes WOULD have been written"
+     * comment for the full rationale. */
+    size_t off = (size_t)snprintf(buf, sizeof(buf), "(let ()");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off, " (define (f");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    for (int i = 0; i < 256 && off < sizeof(buf); i++) {
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, " p%d", i);
+        if (off > sizeof(buf)) off = sizeof(buf);
+    }
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off,
         ") (let loop ((i 0)) (if (= i 1) i (loop (+ i 1)))) p0)");
-    off += snprintf(buf + off, sizeof(buf) - (size_t)off,
+    if (off > sizeof(buf)) off = sizeof(buf);
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off,
         " (apply f (make-list 256 42)))");
-    CHECK((size_t)off < sizeof(buf), "named-let MAX_LOCALS guard source fits in buffer");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    CHECK(off < sizeof(buf), "named-let MAX_LOCALS guard source fits in buffer");
     CHECK(vunfix(run_vm(buf)) == 42,
           "named-let: MAX_LOCALS overflow falls back to a real closure instead of corrupting a local");
 }
