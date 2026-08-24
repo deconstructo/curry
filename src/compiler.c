@@ -4645,8 +4645,32 @@ static void ir_emit(Compiler *c, IRNode *n) {
          * (NB: named-let's own entry wrapper does NOT go through this
          * path -- IR_NAMED_LET hand-builds its own separate Compiler
          * rather than routing through ir_lower_lambda_call/IR_CALL at
-         * all; eliding it is deliberately deferred, real separate work). */
-        if (head == V_FALSE && n->as.call.callee->kind == IR_LAMBDA) {
+         * all; eliding it is deliberately deferred, real separate work).
+         *
+         * `c->local_count + argc < MAX_LOCALS` (flagged missing by
+         * independent code review): the Tier 2.3 named-candidate site
+         * below guards its own ir_emit_inline_call call with this exact
+         * check; this site originally didn't, and unlike Tier 2.3 that
+         * omission is NOT merely quantitative here. Before wrapper
+         * elision, every let / let* / letrec / letrec* got its own fresh child
+         * Compiler with local_count reset to 0 -- MAX_LOCALS(256) was a
+         * per-form limit. Splicing removes that reset, so a long chain of
+         * lets/letrec sharing one enclosing frame (sequential lets in one
+         * function body, or a single let* with 256+ bindings) now
+         * accumulates locals against ONE Compiler's fixed-size
+         * `locals[MAX_LOCALS]`/`known[MAX_LOCALS]` arrays. Without this
+         * guard, ir_emit_inline_call's param-claiming loop writes
+         * `c->locals[base + i]` / `c->known[base + i]` for i in
+         * [0, argc) unconditionally -- reserve_pending_slot's own -1-on-
+         * overflow return is never consulted there, so base + i walks
+         * straight past index 255 and out of bounds of both arrays,
+         * corrupting adjacent Compiler fields on the stack. Falling
+         * through on failure (rather than returning) reaches the
+         * ordinary, always-safe call path further below, which emits the
+         * callee as a real closure and calls it -- exactly what happened
+         * before this landing existed. */
+        if (head == V_FALSE && n->as.call.callee->kind == IR_LAMBDA &&
+            c->local_count + argc < MAX_LOCALS) {
             ir_emit_inline_call(c, n->as.call.callee->as.lambda.params,
                                  n->as.call.callee->as.lambda.body,
                                  n->as.call.args, argc, n,

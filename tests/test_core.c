@@ -828,6 +828,76 @@ static void test_ir_wrapper_elision_stress(void) {
     }
 }
 
+/* Regression test for a real, confirmed memory-corruption bug found by
+ * independent code review of this same landing: a single FLAT `let` with
+ * more bindings than MAX_LOCALS (256) -- unlike the let*-chain/deep-
+ * nesting cases in test_ir_wrapper_elision_stress above, this hits the
+ * guard in ONE ir_emit_inline_call call (argc=300 by itself), not via
+ * cross-splice accumulation, and needs no deep C-stack recursion to reach
+ * (deep nesting/let* accumulation toward 256 actually hits a PRE-
+ * EXISTING, already-present-on-main C-stack-depth segfault around ~200
+ * levels first -- confirmed by testing this same expression shape against
+ * `main`, unrelated to this landing). ir_emit's new Tier 2.4 wrapper-
+ * elision branch originally called ir_emit_inline_call unconditionally
+ * whenever head==V_FALSE and the callee was a literal IR_LAMBDA, with no
+ * MAX_LOCALS bound check -- unlike the Tier 2.3 named-candidate call site,
+ * which already guards with `c->local_count + argc < MAX_LOCALS`.
+ * ir_emit_inline_call's own param-claiming loop writes `c->locals[base +
+ * i]` / `c->known[base + i]` for i in [0, argc) with no bounds check of
+ * its own -- for argc=300, base+i walks straight past index 255 and out
+ * of bounds of both fixed-size 256-entry arrays, corrupting adjacent
+ * Compiler struct fields on the C stack. Confirmed as a real, not just
+ * theoretical, crash: reverting just the added guard and running this
+ * same expression through the CLI reliably produced a Bus error (SIGBUS),
+ * not a clean Scheme-level error.
+ *
+ * With the guard in place, this now falls back to the ordinary "emit
+ * callee as a real closure, call it" path -- which hits the SAME
+ * MAX_LOCALS(256) limit compile_params/add_local already enforce for any
+ * ordinary closure, on BOTH the classic and IR sides, so
+ * compiler_ir_optimize_check itself would re-raise rather than return a
+ * bool; this uses its own SCM_PROTECT instead, following the exact same
+ * pattern as the `>256-constant overflow raises` case in
+ * test_ir_self_check above -- the assertion is that this raises a
+ * catchable, well-formed error (and leaves gc_inhibit_count balanced)
+ * rather than corrupting memory or crashing the process.
+ *
+ * Deliberately its OWN function, not folded into
+ * test_ir_wrapper_elision_stress above: that function's 200-level nested-
+ * let case is already close to this process's C-stack limit (a pre-
+ * existing, on-`main` fragility, unrelated to this landing), and a sibling
+ * lexical block's own large on-stack `char buf[]` still contributes to
+ * that SAME function's total stack-frame size in an unoptimized build even
+ * though it's used later -- confirmed by reproducing a spurious crash in
+ * the unrelated 200-level case purely from adding this buffer to that
+ * function, before splitting it out. */
+static void test_ir_wrapper_elision_max_locals_guard(void) {
+    char buf[8192];
+    int  off = snprintf(buf, sizeof(buf), "(define x 1) (let (");
+    for (int i = 0; i < 300 && (size_t)off < sizeof(buf); i++)
+        off += snprintf(buf + off, sizeof(buf) - (size_t)off, "(a%d x) ", i);
+    snprintf(buf + off, sizeof(buf) - (size_t)off, ") a299)");
+    val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+    val_t def_expr = scm_read(port);
+    val_t let_expr = scm_read(port);
+
+    eval(def_expr, GLOBAL_ENV);  /* curry's own tree-walking Scheme evaluator (src/eval.c), not JS eval */
+
+    int before = gc_inhibit_save();
+    ExnHandler h;
+    bool raised = false;
+    SCM_PROTECT(h, {
+        compiler_ir_optimize_check(let_expr);
+    }, {
+        raised = true;
+    });
+    int after = gc_inhibit_save();
+    CHECK(raised,
+          "ir optimize-check: 300-binding flat let raises cleanly (no MAX_LOCALS overflow)");
+    CHECK(before == after,
+          "ir optimize-check: gc_inhibit_count balanced after 300-binding let raise");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -854,6 +924,7 @@ int main(void) {
     RUN_TEST(test_ir_optimize_check);
     RUN_TEST(test_ir_inline_fires);
     RUN_TEST(test_ir_wrapper_elision_stress);
+    RUN_TEST(test_ir_wrapper_elision_max_locals_guard);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
