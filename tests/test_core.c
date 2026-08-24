@@ -1238,6 +1238,95 @@ static void test_cons_pairp_nullp_open_coding(void) {
           "open-coded cons: local shadow is never open-coded");
 }
 
+/* Regression test for a real, confirmed TCO (proper tail call) violation
+ * found by independent code review: the open-coding landing above
+ * originally never checked whether a car/cdr/cons/pair?/null? call was
+ * in TAIL position before open-coding it. Every one of these opcodes'
+ * fallback path (taken when the name has been redefined) goes through
+ * call_foreign, which recurses via apply_arr -> a NESTED vm_run() --
+ * unlike OP_TAIL_CALL/OP_TAIL_CALL_GLOBAL's own fallback, which reuses
+ * the current CallFrame for a BcClosure callee. A self-tail-recursive
+ * redefinition compiled to the open-coded opcode therefore grew the C
+ * stack by one frame per call instead of looping in O(1) C-stack space --
+ * `(define (cdr n) (if (= n 0) 'done (cdr (- n 1)))) (cdr 2000000)`
+ * overflowed the VM's own 256-frame call-stack limit almost immediately
+ * on the buggy version, where an identically-shaped loop using an
+ * ordinary (non-open-coded) name completed normally. Fixed by never
+ * open-coding a call already known to be in tail position at all (see
+ * ir_emit's own "Tier 2.5" comment, compiler.c) -- this is the direct
+ * regression test for that fix actually holding: a redefinition of each
+ * of the five open-coded names, self-tail-recursing enough times that
+ * anything short of genuine O(1)-C-stack tail-call reuse would exhaust
+ * the 256-frame limit and raise a catchable stack-overflow condition
+ * instead of completing. */
+static void test_open_coding_preserves_tco(void) {
+    CHECK(run_vm_script(
+        "(define (cdr n) (if (= n 0) 'done (cdr (- n 1)))) (cdr 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded cdr: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (car n) (if (= n 0) 'done (car (- n 1)))) (car 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded car: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (cons a b) (if (= a 0) 'done (cons (- a 1) b))) (cons 5000 1)")
+        == sym_intern_cstr("done"),
+        "open-coded cons: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (pair? n) (if (= n 0) 'done (pair? (- n 1)))) (pair? 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded pair?: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (null? n) (if (= n 0) 'done (null? (- n 1)))) (null? 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded null?: redefinition called in tail position still gets proper TCO");
+}
+
+/* Tier 2.6 step 1: smoke test for compiler_ir_lower_for_jit -- see its
+ * own comment (compiler.c/compiler.h) for the full contract. Just checks
+ * this new entry point produces a real tree (and a matching arena) for
+ * ordinary input, since nothing calls it live yet (the codegen.cpp
+ * rewrite that would actually consume this tree is deliberately out of
+ * scope for this landing). */
+static void test_compiler_ir_lower_for_jit(void) {
+    {
+        val_t port = port_open_input_string("(+ 1 2)", 7);
+        val_t expr = scm_read(port);
+        IRArena *arena = NULL;
+        IRNode *ir = compiler_ir_lower_for_jit(expr, &arena);
+        CHECK(ir != NULL, "compiler_ir_lower_for_jit: returns a tree for ordinary input");
+        CHECK(arena != NULL, "compiler_ir_lower_for_jit: returns an arena for ordinary input");
+        if (arena) ir_arena_free(arena);
+    }
+    /* No "malformed input raises cleanly" case here, deliberately: tried
+     * one (an unbound-variable reference) while landing this and found it
+     * does NOT exercise compiler_ir_lower_for_jit's SCM_PROTECT at all --
+     * ir_lower/ir_optimize never actually raise for any currently-
+     * reachable top-level input. This matches their own documented lazy
+     * design exactly (compiler.h's own comment on this function): a bare
+     * variable reference just becomes an unresolved IR_VAR_REF node
+     * (resolution, and any unbound-variable error, is deferred all the
+     * way to ir_emit time), and every special form ir_lower doesn't
+     * natively handle falls back whole to IR_FALLBACK (deferred to
+     * ir_emit's own compile() call) rather than raising immediately.
+     * Confirmed by direct inspection: neither function contains a
+     * scm_raise/scm_raise_code call anywhere in this codebase today. The
+     * SCM_PROTECT wrapping stays anyway, as defensive parity with every
+     * other root-Compiler entry point in this file (compiler_ir_self_check,
+     * compiler_compile, ...) that could reach one if a future change to
+     * ir_lower/ir_optimize ever adds one -- just not something a test can
+     * honestly exercise against today's actual implementation.
+     *
+     * Also found while trying to construct a "malformed input" case: a
+     * real, PRE-EXISTING bug, unrelated to this landing and NOT fixed
+     * here (out of scope for Tier 2.5/2.6) -- `(if)`, `(if 1)`, `(let)`,
+     * and apparently other special forms with too few operands SIGSEGV
+     * the whole process instead of raising a catchable condition,
+     * confirmed via the CLI and confirmed identical in both ir_lower_if
+     * and compile_if (plain unchecked vcar/vcdr, no arity check at all) --
+     * confirmed present on `main` too. Worth a dedicated follow-up. */
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1271,6 +1360,8 @@ int main(void) {
     RUN_TEST(test_with_exception_handler_pending_slot_fix);
     RUN_TEST(test_car_cdr_open_coding);
     RUN_TEST(test_cons_pairp_nullp_open_coding);
+    RUN_TEST(test_open_coding_preserves_tco);
+    RUN_TEST(test_compiler_ir_lower_for_jit);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

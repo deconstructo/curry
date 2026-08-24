@@ -4851,8 +4851,34 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * new locals' slot indices without accounting for the first
              * argument's still-pending value). car/cdr/pair?/null? only
              * ever have ONE argument, so they need no such bracketing. */
+            /* `!ctail` (found by independent code review, confirmed by
+             * direct reproduction -- a real TCO regression, not just a
+             * documented trade-off): none of these opcodes' own VM
+             * handlers reuse the current CallFrame the way OP_TAIL_CALL/
+             * OP_TAIL_CALL_GLOBAL do on their fallback (redefined-to-a-
+             * BcClosure) path -- they always go through call_foreign,
+             * which recurses via apply_arr -> a nested vm_run(). A
+             * self-tail-recursive redefinition -- `(define (cdr n) (if (=
+             * n 0) 'done (cdr (- n 1)))) (cdr 2000000)` -- overflowed the
+             * call stack on this branch (256-frame limit hit almost
+             * immediately) where it ran to completion on main, silently
+             * breaking R7RS's proper-tail-call guarantee for any program
+             * that redefines one of these five names and calls it
+             * recursively in tail position. Simplest correct fix: never
+             * open-code a call already known to be in tail position at
+             * all -- fall through to the ordinary OP_TAIL_CALL_GLOBAL path
+             * below instead, which already handles both the common
+             * (unredefined primitive) case efficiently via the existing
+             * fused-global-call opcode AND the redefined-BcClosure case
+             * with correct, O(1)-C-stack tail-call reuse. Giving up the
+             * open-coding win specifically in tail position is an
+             * acceptable trade: car/cdr/cons/pair?/null? are rarely the
+             * tail expression of a recursive loop themselves (far more
+             * commonly an ARGUMENT to the actual recursive call, e.g. `(loop
+             * (cdr x) ...)`, a shape this restriction doesn't touch at
+             * all, since `cdr` there is not itself in tail position). */
             bool opencoded = false;
-            if (argc == 1) {
+            if (!ctail && argc == 1) {
                 val_t car_sym   = sym_intern_cstr("car");
                 val_t cdr_sym   = sym_intern_cstr("cdr");
                 val_t pairp_sym = sym_intern_cstr("pair?");
@@ -4870,7 +4896,7 @@ static void ir_emit(Compiler *c, IRNode *n) {
                     emit_ab(c, op1, (uint8_t)sym_ci, n->line);
                     opencoded = true;
                 }
-            } else if (argc == 2 && head == sym_intern_cstr("cons")) {
+            } else if (!ctail && argc == 2 && head == sym_intern_cstr("cons")) {
                 int sym_ci = chunk_add_const(c->chunk, head);
                 int saved = c->local_count;
                 ir_emit(c, n->as.call.args[0]);
@@ -5167,6 +5193,52 @@ static void ir_emit(Compiler *c, IRNode *n) {
         return;
     }
     }
+}
+
+/* Tier 2.6 step 1 -- see compiler.h's own comment on this function for
+ * the full contract (what "the IR" does and does NOT mean here: lazily
+ * lowered, nested lambda bodies stay raw S-expression, variable
+ * references stay unresolved symbols -- this is not a standalone tree a
+ * from-scratch consumer can just walk). This function's own job is
+ * narrow: produce that tree safely, from a context (an eventual JIT
+ * trigger, called from C++) that must never let a raised Scheme
+ * condition longjmp past it -- ir_lower/ir_optimize can scm_raise on
+ * malformed input (unbound variable, bad special-form syntax, ...) the
+ * exact same way compiler_ir_self_check's own SCM_PROTECT usage already
+ * guards against, but crossing into C++ frames via a raw longjmp (no
+ * destructor unwinding) is a strictly worse hazard than the pure-C
+ * gc_inhibit_count leak that comment describes -- so a raise here is
+ * caught and converted to a plain NULL return, mirroring
+ * curry_llvm_jit_compile's own existing "silent failure, fall back to
+ * bytecode" philosophy (curry_llvm.cpp) rather than ever propagating an
+ * exception across the C/C++ boundary. */
+IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
+    gc_inhibit_minor();
+
+    Compiler c;
+    init_compiler(&c, NULL, "<jit>");
+
+    int   line   = g_reader_last_line;
+    IRNode *result = NULL;
+    bool  raised = false;
+
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        IRNode *ir = ir_lower(&c, expr, false, line);
+        result = ir_optimize(ir);
+    }, {
+        raised = true;
+    });
+
+    gc_resume_minor();
+
+    if (raised) {
+        ir_arena_free(c.ir_arena);
+        *out_arena = NULL;
+        return NULL;
+    }
+    *out_arena = c.ir_arena;
+    return result;
 }
 
 bool compiler_ir_self_check(val_t expr) {

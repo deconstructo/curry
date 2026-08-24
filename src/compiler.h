@@ -4,6 +4,7 @@
 #include "value.h"
 #include "chunk.h"
 #include "vm.h"
+#include "ir.h"
 
 /*
  * Compiler — AST (val_t) → bytecode (Chunk / Closure)
@@ -83,5 +84,47 @@ bool compiler_ir_optimize_check(val_t expr);
  * instead of compactly loaded-and-called. See its own comment in
  * compiler.c for the full contract. */
 bool compiler_ir_inline_fired_check(val_t expr);
+
+/* Tier 2.6 step 1 (docs/thoughts/performance-chez-kaappi.md §5, item 2.6):
+ * exposes ir_lower()+ir_optimize() as a public entry point, real
+ * groundwork toward eventually pointing src/llvm/codegen.cpp at the IR
+ * instead of raw S-expressions -- but NOT, on its own, a tree codegen.cpp
+ * (or anything else) can walk standalone yet. Read this contract
+ * carefully before building on it:
+ *
+ * The IR is LAZILY lowered by design (see ir.h's own comments on
+ * IR_VAR_REF and IR_LAMBDA's `body` field) -- ir_lower() alone does NOT
+ * recursively lower an entire program in one pass the way a "the IR" of
+ * a from-scratch compiler normally would:
+ *   - IR_VAR_REF nodes carry only a raw symbol; resolving it to a local
+ *     slot / upvalue index / global happens at ir_emit() time, against
+ *     whichever Compiler is actively walking that node then -- there is
+ *     no standalone, Compiler-independent "resolved" form.
+ *   - IR_LAMBDA's body is deliberately left as a raw, un-lowered val_t
+ *     list; ir_emit() lowers each body form immediately before emitting
+ *     it (interleaved, one statement at a time), not upfront.
+ * So the tree returned here is real IR, but every nested lambda body
+ * inside it is still raw S-expression, and every variable reference is
+ * still an unresolved symbol -- exactly the same lazy contract ir_emit()
+ * itself has always worked under. A future codegen.cpp rewrite needs its
+ * OWN resolution/nested-lowering machinery (mirroring resolve_local/
+ * resolve_upvalue's role), not just a call to this function, to get a
+ * tree it can walk standalone. That machinery is the real remaining
+ * scope of Tier 2.6's IR-retargeting -- deliberately not attempted here.
+ *
+ * `expr` is lowered (and optimized) against a fresh, throwaway root
+ * Compiler with no enclosing scope -- appropriate for a JIT-eligible
+ * chunk's own top-level src_lambda (already isolated: JIT promotion is
+ * refused for closures with unresolved free-variable upvalues that
+ * aren't first baked in as constants -- see maybe_jit_bcc's own comment,
+ * runtime.c), not for an arbitrary nested subexpression that depends on
+ * an enclosing scope's locals.
+ *
+ * Returns the optimized tree; `*out_arena` receives the IRArena it was
+ * allocated from (transferring ownership -- the caller must
+ * ir_arena_free() it once done reading the tree, exactly the same
+ * lifetime contract every other IRArena in this codebase already has,
+ * see ir.h's own header comment). */
+IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena);
 
 #endif /* CURRY_COMPILER_H */

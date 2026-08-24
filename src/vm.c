@@ -107,7 +107,13 @@
  *     OP_EQUAL –   (equal? a b)
  *     OP_NOT   –   push #f iff TOS is #f, else #t
  *
- *   Pairs & lists
+ *   Pairs & lists (OP_CONS/OP_CAR/OP_CDR/OP_NULLP/OP_PAIRP: Tier 2.5
+ *   open-coding, not the unconditional 0-operand ops this summary once
+ *   described -- each takes a const-pool operand and only takes the fast
+ *   path shown below if that global hasn't been redefined since compile
+ *   time; see opcode.h's own comment on this opcode group for the full
+ *   redefinition-safety design, and never open-coded at all in tail
+ *   position -- see compiler.c's own emission-site comment for why)
  *     OP_CONS   –   push (cons a b)
  *     OP_CAR    –   push car(TOS)
  *     OP_CDR    –   push cdr(TOS)
@@ -516,6 +522,23 @@ static inline val_t load_global_cached(Chunk *chunk, uint8_t ci) {
     return *slot;
 }
 
+/* Tier 2.5 step 1: shared fast path for every open-coded 1-argument
+ * primitive opcode (OP_CAR/OP_CDR/OP_NULLP/OP_PAIRP) -- see opcode.h's
+ * own comment on this whole opcode group for the full redefinition-
+ * safety design this implements. `expected` is the specific prim_* this
+ * call site was compiled for (compiler.c only ever emits one of these
+ * opcodes when it already knows which primitive it's checking against);
+ * calling THROUGH that same function pointer on a match, rather than a
+ * per-opcode hardcoded call, is what lets one helper serve all four
+ * opcodes instead of four near-identical copies (flagged by independent
+ * code review). */
+static inline val_t open_coded_unary1(Chunk *chunk, uint8_t ci, val_t x, PrimFn expected) {
+    val_t current = load_global_cached(chunk, ci);
+    if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == expected, 1))
+        return expected(1, &x, NULL);
+    return call_foreign(current, 1, &x);
+}
+
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
@@ -877,50 +900,37 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             }
             NEXT;
         }
-        /* Tier 2.5 step 1: open-coded car/cdr -- see opcode.h's own
-         * comment on OP_CAR/OP_CDR for the full redefinition-safety
-         * design. load_global_cached reuses the exact same glob_cache
-         * infrastructure OP_LOAD_GLOBAL/OP_CALL_GLOBAL already use, so
-         * this costs one cache-hit lookup (usually just a version
-         * compare) plus one type+function-pointer comparison beyond a
-         * truly sealed primitive's cost -- still far cheaper than
-         * OP_CALL_GLOBAL's own full call-frame setup for the
-         * overwhelmingly common case where car/cdr haven't been
-         * redefined. The guard compares against prim_car/prim_cdr's
-         * actual C function pointer (builtins.h), not a compile-time-
-         * captured val_t snapshot: a snapshot captured AFTER car/cdr had
-         * already been redefined (a real bug caught while landing this --
-         * compiler.c's own emission-site comment has the repro) would
-         * silently treat the redefinition as if it WERE the primitive
-         * forever after; comparing against the actual, immutable function
-         * pointer is correct regardless of compile-time timing, and needs
-         * no second constant-pool slot at all. On a mismatch (redefined),
-         * falls back to call_foreign -- correct for every callee type
-         * (matches OP_CALL_GLOBAL's own non-BcClosure branch exactly),
-         * though a BcClosure callee here loses OP_CALL_GLOBAL's dedicated
-         * tail-call-reusable frame path; accepted as out of scope for
-         * this landing given how pathological "redefine car as a hot
-         * self-recursive closure, call it in tail position" already is. */
+        /* Tier 2.5 step 1: open-coded car/cdr/null?/pair? -- see opcode.h's
+         * own comment on this whole opcode group for the full
+         * redefinition-safety design. Each CASE below is a thin wrapper
+         * around open_coded_unary1 (this file, just above the dispatch
+         * loop) -- collapsed into one shared helper (flagged by
+         * independent code review: four near-identical 9-line blocks
+         * differing only in which prim_* to compare/call) parameterized
+         * on the specific primitive's own function pointer, so a future
+         * fix to the guard logic only needs to change one place. Never
+         * emitted at all for a call already known to be in tail position
+         * -- see compiler.c's own emission-site comment for why: this
+         * opcode's fallback (redefined-to-a-BcClosure) path always goes
+         * through call_foreign, which recurses via apply_arr -> a nested
+         * vm_run() rather than reusing the current CallFrame the way
+         * OP_TAIL_CALL/OP_TAIL_CALL_GLOBAL do, so open-coding a genuine
+         * tail call here would silently break proper tail-call
+         * optimization for a redefined name called recursively -- a real,
+         * confirmed regression caught by independent code review before
+         * this comment existed, fixed by restricting open-coding to
+         * non-tail call sites entirely rather than teaching this opcode
+         * its own frame-reuse path. */
         CASE(OP_CAR) {
             uint8_t ci = READ_U8();
-            val_t current = load_global_cached(frame->closure->chunk, ci);
             val_t x = POP();
-            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_car, 1)) {
-                PUSH(prim_car(1, &x, NULL));
-            } else {
-                PUSH(call_foreign(current, 1, &x));
-            }
+            PUSH(open_coded_unary1(frame->closure->chunk, ci, x, prim_car));
             NEXT;
         }
         CASE(OP_CDR) {
             uint8_t ci = READ_U8();
-            val_t current = load_global_cached(frame->closure->chunk, ci);
             val_t x = POP();
-            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_cdr, 1)) {
-                PUSH(prim_cdr(1, &x, NULL));
-            } else {
-                PUSH(call_foreign(current, 1, &x));
-            }
+            PUSH(open_coded_unary1(frame->closure->chunk, ci, x, prim_cdr));
             NEXT;
         }
         CASE(OP_SETCAR) {
@@ -935,29 +945,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             PUSH(V_VOID);
             NEXT;
         }
-        /* Tier 2.5 step 1: open-coded null?/pair? -- see opcode.h's own
-         * comment on this group of opcodes for the full redefinition-
-         * safety design. */
         CASE(OP_NULLP) {
             uint8_t ci = READ_U8();
-            val_t current = load_global_cached(frame->closure->chunk, ci);
             val_t x = POP();
-            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_null_p, 1)) {
-                PUSH(prim_null_p(1, &x, NULL));
-            } else {
-                PUSH(call_foreign(current, 1, &x));
-            }
+            PUSH(open_coded_unary1(frame->closure->chunk, ci, x, prim_null_p));
             NEXT;
         }
         CASE(OP_PAIRP) {
             uint8_t ci = READ_U8();
-            val_t current = load_global_cached(frame->closure->chunk, ci);
             val_t x = POP();
-            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_pair_p, 1)) {
-                PUSH(prim_pair_p(1, &x, NULL));
-            } else {
-                PUSH(call_foreign(current, 1, &x));
-            }
+            PUSH(open_coded_unary1(frame->closure->chunk, ci, x, prim_pair_p));
             NEXT;
         }
 
