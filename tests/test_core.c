@@ -54,6 +54,29 @@ static val_t run(const char *src) {
     return result;
 }
 
+/* Like run(), but through the REAL compiled path (compiler_compile +
+ * vm_run) instead of eval()'s tree-walker -- needed for anything that
+ * only exists in classic compile()'s own special-form handling with no
+ * tree-walker equivalent to fall back to (apply/values/call-with-values
+ * are compiled directly by compile(), never interpreted by eval() at
+ * all). compiler_ir_optimize_check can't stand in for this either: it
+ * only catches divergence BETWEEN classic and IR compilation, and apply/
+ * values/call-with-values have no IR-native form, so both its "old" and
+ * "new" sides run the exact SAME classic code -- a bug shared by both
+ * sides compares equal to itself and is invisible to that check (exactly
+ * how the regression below escaped it, only caught by tests/sicm_tests.scm
+ * actually running the compiled bytecode). Only evaluates ONE expression
+ * (unlike run()) since compiler_compile takes a single expr, not a
+ * sequence. */
+static val_t run_vm(const char *src) {
+    val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+    val_t expr = scm_read(port);
+    val_t cl_val = compiler_compile(expr);
+    BcClosure *cl = as_bcclosure(cl_val);
+    vm_push(cl_val);
+    return vm_run(cl, 0);
+}
+
 static void test_fixnums(void) {
     CHECK(vis_fixnum(vfix(0)),   "vfix(0) is fixnum");
     CHECK(vunfix(vfix(42)) == 42,"vfix/vunfix round-trip");
@@ -898,6 +921,49 @@ static void test_ir_wrapper_elision_max_locals_guard(void) {
           "ir optimize-check: gc_inhibit_count balanced after 300-binding let raise");
 }
 
+/* Regression test for a real, confirmed miscompilation found while
+ * testing named-let wrapper elision above, but NOT specific to named-let
+ * or even to this landing at all: apply/values/call-with-values are
+ * classic special forms (compile()'s SF_APPLY/SF_VALUES/
+ * SF_CALL_WITH_VALUES, compiler.c) with no IR-native form of their own --
+ * each compiles its own multiple sub-expressions with a plain sequential
+ * loop that PREDATES Tier 2.3's reserve_pending_slot convention and was
+ * never updated for it (compile_call's own, otherwise-identical argument
+ * loop already has this bracketing, added by Tier 2.3 -- these three just
+ * never got the same pass, since nothing about landing the LOCAL inliner
+ * itself touched them).
+ *
+ * The bug: with only Tier 2.4's let / let* / letrec / letrec* / named-let wrapper
+ * elision in place (this whole branch, not just the named-let work), a
+ * LATER argument to apply/values/call-with-values that happens to be one
+ * of those forms now splices real locals directly into the SAME Compiler
+ * compiling the earlier arguments -- but since the earlier arguments'
+ * own already-pushed values were never reserve_pending_slot'd, the
+ * splice computes its new locals' slot indices against a local_count
+ * that doesn't account for them, aliasing physical stack positions the
+ * earlier arguments are still using. Confirmed as a real, silent wrong-
+ * VALUE bug (not a crash): `(apply + (list 1 (let ((x 5)) x) 2))`
+ * returned 4 instead of 8 before the fix -- originally surfaced by
+ * tests/sicm_tests.scm's `Hamilton-equations`/`Lagrangian->Hamiltonian`
+ * failing deep in real physics code, not by anything in this file, since
+ * compiler_ir_optimize_check's differential classic-vs-IR comparison
+ * cannot catch it: apply/values/call-with-values have no IR-native form,
+ * so its "old" and "new" sides run the EXACT SAME classic code and the
+ * shared bug compares equal to itself. Needs run_vm (real compiled
+ * execution), not compiler_ir_optimize_check, to catch at all. */
+static void test_apply_values_pending_slot_fix(void) {
+    CHECK(vunfix(run_vm("(apply + (list 1 (let ((x 5)) x) 2))")) == 8,
+          "apply: let argument doesn't alias an earlier pending sibling argument");
+    CHECK(vunfix(run_vm("(apply + (list 1 (let loop ((i 0)) (if (= i 1) 5 (loop (+ i 1)))) 2))")) == 8,
+          "apply: named-let argument doesn't alias an earlier pending sibling argument");
+    CHECK(vunfix(run_vm(
+        "(call-with-values (lambda () (values 1 (let ((x 5)) x) 2)) (lambda (a b c) (+ a b c)))")) == 8,
+        "call-with-values: let-producing value doesn't alias an earlier pending sibling value");
+    CHECK(vunfix(run_vm(
+        "(let* ((a 1) (b (apply + (list a (let ((x 5)) x) 2)))) b)")) == 8,
+        "apply nested inside let*'s own wrapper-elided body still sees correct pending-slot bookkeeping");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -925,6 +991,7 @@ int main(void) {
     RUN_TEST(test_ir_inline_fires);
     RUN_TEST(test_ir_wrapper_elision_stress);
     RUN_TEST(test_ir_wrapper_elision_max_locals_guard);
+    RUN_TEST(test_apply_values_pending_slot_fix);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

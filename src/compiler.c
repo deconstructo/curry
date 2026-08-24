@@ -3499,24 +3499,51 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* values */
     case SF_VALUES: {
+        /* Tier 2.4 fix (found via a real, confirmed miscompilation:
+         * `(values 1 (let ((x 5)) x) 2)` returned (1 1 2) instead of
+         * (1 5 2)): this loop predates Tier 2.3's reserve_pending_slot
+         * convention and was never updated for it -- compile_call's own
+         * identical argument loop already has this bracketing (see its
+         * own "Tier 2.3" comment), but SF_VALUES/SF_APPLY/
+         * SF_CALL_WITH_VALUES below are classic special forms with no IR-
+         * native form of their own, so they never got the same pass. Any
+         * one of these several already-pushed-but-untracked pending
+         * values (e.g. `1` above) is exactly the "still-pending sibling
+         * argument" reserve_pending_slot's own comment warns about: a
+         * LATER item that happens to be a let / let* / letrec / letrec* /
+         * named-let now splices real locals directly into `c` (Tier 2.4), and
+         * without this bracketing it computes its own new slot indices
+         * against a `c->local_count` that doesn't yet account for the
+         * earlier items' own already-pushed values -- aliasing physical
+         * stack positions that are still very much in use. */
         int n = 0;
         val_t a = args;
+        int saved = c->local_count;
         while (vis_pair(a)) {
             compile(c, vcar(a), false, line);
+            reserve_pending_slot(c);
             n++; a = vcdr(a);
         }
+        release_pending_slots(c, saved);
         emit_ab(c, OP_VALUES, (uint8_t)n, line);
         return;
     }
 
     /* apply — (apply f arg1 ... rest-list) */
     case SF_APPLY: {
+        /* Tier 2.4 fix -- see SF_VALUES's own comment just above for the
+         * full rationale; same bug, same fix, this is the actual site
+         * where it was originally found: `(apply + (list 1 (let ((x 5))
+         * x) 2))` returned 4 instead of 8. */
         int n = 0;
         val_t a = args;
+        int saved = c->local_count;
         while (vis_pair(a)) {
             compile(c, vcar(a), false, line);
+            reserve_pending_slot(c);
             n++; a = vcdr(a);
         }
+        release_pending_slots(c, saved);
         emit_ab(c, OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
         return;
     }
@@ -3533,11 +3560,19 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
      * self-recursive loop would otherwise accumulate one nested call
      * frame per iteration instead of looping forever. Shape already
      * verified by classify_head. */
-    case SF_CALL_WITH_VALUES:
+    case SF_CALL_WITH_VALUES: {
+        /* Tier 2.4 fix -- see SF_VALUES's own comment above for the full
+         * rationale; same bug (the producer thunk is a still-pending
+         * value while the consumer is compiled). */
+        int saved = c->local_count;
         compile(c, vcar(args), false, line);
+        reserve_pending_slot(c);
         compile(c, vcar(vcdr(args)), false, line);
+        reserve_pending_slot(c);
+        release_pending_slots(c, saved);
         emit(c, tail ? OP_TAIL_CALL_WITH_VALUES : OP_CALL_WITH_VALUES, line);
         return;
+    }
 
     /* parameterize — desugar to let + dynamic-wind in the compiler so that
        local variables in the body are captured as upvalues, not looked up
