@@ -150,8 +150,12 @@ val_t scm_symbol_to_string(val_t sym) {
 /* ---- Type predicates ---- */
 #define PRED1(name, test) static val_t prim_##name(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(test(av[0])); }
 
-PRED1(pair_p,     vis_pair)
-PRED1(null_p,     vis_nil)
+/* Not static (unlike every other PRED1 use) -- see builtins.h's own
+ * comment on why the compiler/VM need this exact function pointer for
+ * Tier 2.5 open-coding. Hand-written instead of via PRED1 since that
+ * macro always emits `static`. */
+val_t prim_pair_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(vis_pair(av[0])); }
+val_t prim_null_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(vis_nil(av[0])); }
 static val_t prim_list_p(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     /* Floyd tortoise-and-hare: circular lists must yield #f, not hang */
@@ -246,7 +250,9 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Pairs and lists ---- */
-static val_t prim_cons(int ac, val_t *av, void *ud) {
+/* Not static -- see builtins.h's own comment on why the compiler/VM need
+ * this exact function pointer for Tier 2.5 open-coding. */
+val_t prim_cons(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
      * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */

@@ -1187,6 +1187,57 @@ static void test_car_cdr_open_coding(void) {
           "open-coded car: local shadow is never open-coded");
 }
 
+/* Tier 2.5 step 1, extended to cons/pair?/null? -- same design as
+ * test_car_cdr_open_coding above, same class of redefinition/shadow/
+ * arity coverage, plus the reserve_pending_slot bracketing cons's own
+ * two-argument emission needed (the same bug class as compile_do/
+ * SF_APPLY/etc.'s own "Tier 2.4 fix"es elsewhere in this file: a second
+ * argument that splices real locals must not treat the first argument's
+ * still-pending value as absent). */
+static void test_cons_pairp_nullp_open_coding(void) {
+    {
+        val_t p = run_vm("(cons 1 2)");
+        CHECK(vis_pair(p) && vunfix(vcar(p)) == 1 && vunfix(vcdr(p)) == 2,
+              "open-coded cons: basic correctness");
+    }
+    CHECK(run_vm("(pair? (cons 1 2))") == V_TRUE,
+          "open-coded pair?: #t on a real pair");
+    CHECK(run_vm("(pair? 5)") == V_FALSE,
+          "open-coded pair?: #f on a non-pair");
+    CHECK(run_vm("(null? '())") == V_TRUE,
+          "open-coded null?: #t on the empty list");
+    CHECK(run_vm("(null? 5)") == V_FALSE,
+          "open-coded null?: #f on a non-nil value");
+
+    /* cons's own pending-slot regression: a let that splices real locals
+     * as cons's SECOND argument, while the first argument's own value is
+     * still pending. */
+    {
+        val_t p = run_vm("(cons 1 (let ((x 2)) x))");
+        CHECK(vis_pair(p) && vunfix(vcar(p)) == 1 && vunfix(vcdr(p)) == 2,
+              "open-coded cons: let as second argument doesn't alias the first, still-pending argument");
+    }
+
+    /* Redefinition in the same compiled chunk, same shape as car's own
+     * regression test above. */
+    {
+        val_t redefined = run_vm_script(
+            "(define (cons a b) (list 'redefined a b)) (cons 1 2)");
+        CHECK(vis_pair(redefined) && vcar(redefined) == sym_intern_cstr("redefined"),
+              "open-coded cons: redefinition in the same script is honored, not silently skipped");
+    }
+    {
+        val_t redefined = run_vm_script(
+            "(define (pair? x) 'redefined) (pair? 5)");
+        CHECK(redefined == sym_intern_cstr("redefined"),
+              "open-coded pair?: redefinition in the same script is honored, not silently skipped");
+    }
+
+    /* Local shadow must never open-code. */
+    CHECK(vunfix(run_vm("(let ((cons (lambda (a b) (+ a b)))) (cons 3 4))")) == 7,
+          "open-coded cons: local shadow is never open-coded");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1219,6 +1270,7 @@ int main(void) {
     RUN_TEST(test_named_let_max_locals_guard);
     RUN_TEST(test_with_exception_handler_pending_slot_fix);
     RUN_TEST(test_car_cdr_open_coding);
+    RUN_TEST(test_cons_pairp_nullp_open_coding);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

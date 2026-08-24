@@ -77,31 +77,32 @@ typedef enum {
     OP_NOT,         /* push (not pop())                                  */
 
     /* ── Pairs / lists ──────────────────────────────────────────────── */
-    OP_CONS,        /* push cons(a, b)                                   */
     /* Tier 2.5 step 1 (open-coding, docs/thoughts/performance-chez-kaappi.md
-     * §5): A = const-pool index of the symbol ('car/'cdr, same convention
-     * OP_CALL_GLOBAL's own `ci` operand uses -- looked up via the same
-     * glob_cache infrastructure, load_global_cached, vm.c). car/cdr are
-     * ordinary, user-redefinable global bindings (`(define car ...)` is
-     * legal R7RS) -- unlike a truly sealed VM primitive, this opcode must
-     * re-verify at every execution that the symbol's CURRENT binding is
-     * still the real primitive before taking the fast path, comparing
-     * against prim_car/prim_cdr's actual C function pointer (builtins.h),
-     * not any value captured at compile time (compiler.c's own emission-
-     * site comment explains why a compile-time-captured snapshot is
-     * actually unsafe here, not just unnecessary). On a mismatch (car/cdr
-     * redefined since compile time) it falls back to an ordinary call
-     * against whatever's bound now. Never emitted for any OTHER opcode
-     * shape -- these were previously defined but completely unemitted
-     * dead code (verified: zero compiler call sites), safely repurposed
-     * here since nothing depended on the old 0-operand "always unchecked,
-     * never verified" contract their comments used to describe. */
+     * §5): A = const-pool index of the symbol ('car/'cdr/'cons/'pair?/
+     * 'null?, same convention OP_CALL_GLOBAL's own `ci` operand uses --
+     * looked up via the same glob_cache infrastructure, load_global_cached,
+     * vm.c). Each of these is an ordinary, user-redefinable global binding
+     * (`(define car ...)` is legal R7RS) -- unlike a truly sealed VM
+     * primitive, every one of these opcodes must re-verify at every
+     * execution that the symbol's CURRENT binding is still the real
+     * primitive before taking the fast path, comparing against the
+     * matching prim_*'s actual C function pointer (builtins.h), not any
+     * value captured at compile time (compiler.c's own emission-site
+     * comment explains why a compile-time-captured snapshot is actually
+     * unsafe here, not just unnecessary). On a mismatch (redefined since
+     * compile time) each falls back to an ordinary call against whatever's
+     * bound now. Never emitted for any OTHER opcode shape -- these were
+     * previously defined but completely unemitted dead code (verified:
+     * zero compiler call sites), safely repurposed here since nothing
+     * depended on the old 0-operand "always unchecked, never verified"
+     * contract their comments used to describe. */
+    OP_CONS,        /* A: see above -- push cons(a,b) if global(A) is really the cons primitive, else a real call */
     OP_CAR,         /* A: see above -- push car of TOS if global(A) is really the car primitive, else a real call */
     OP_CDR,         /* A: see above -- push cdr of TOS if global(A) is really the cdr primitive, else a real call */
     OP_SETCAR,      /* set-car!(pair, val) — both popped                 */
     OP_SETCDR,      /* set-cdr!(pair, val)                               */
-    OP_NULLP,       /* push (null? pop())                                */
-    OP_PAIRP,       /* push (pair? pop())                                */
+    OP_NULLP,       /* A: see above -- push (null? TOS) if global(A) is really the null? primitive, else a real call */
+    OP_PAIRP,       /* A: see above -- push (pair? TOS) if global(A) is really the pair? primitive, else a real call */
 
     /* ── Strings / chars ────────────────────────────────────────────── */
     OP_STRINGLEN,   /* push (string-length pop())                        */

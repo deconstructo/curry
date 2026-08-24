@@ -849,13 +849,32 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
         /* ── Pairs ──────────────────────────────────────────────────── */
+        /* Tier 2.5 step 1: open-coded cons -- see opcode.h's own comment
+         * on this group of opcodes for the full redefinition-safety
+         * design. On the fast path this keeps the args on the REAL VM
+         * stack and allocates directly from it, unchanged from before
+         * this landing (gc_alloc may trigger a collection; args still on
+         * vm->sp are found by it same as always). Only the rare mismatch
+         * (redefined) path pops into C locals to call_foreign -- the same
+         * "pass the address of a C-stack val_t" pattern OP_CAR/OP_CDR's
+         * own fallback already uses, safe for the same reason (Boehm's
+         * conservative stack scan covers it same as any other C local). */
         CASE(OP_CONS) {
-            /* Allocate first: args still on VM stack so GC (if triggered)
-             * can update them.  Re-read from stack after allocation. */
-            Pair *p = (Pair *)gc_alloc(sizeof(Pair));
-            p->hdr.type = T_PAIR; p->hdr.flags = 0;
-            p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
-            vm->sp -= 2; *vm->sp++ = vptr(p);
+            uint8_t ci = READ_U8();
+            val_t current = load_global_cached(frame->closure->chunk, ci);
+            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_cons, 1)) {
+                /* Allocate first: args still on VM stack so GC (if
+                 * triggered) can update them. Re-read from stack after
+                 * allocation. */
+                Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+                p->hdr.type = T_PAIR; p->hdr.flags = 0;
+                p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
+                vm->sp -= 2; *vm->sp++ = vptr(p);
+            } else {
+                val_t args2[2];
+                args2[1] = POP(); args2[0] = POP();
+                PUSH(call_foreign(current, 2, args2));
+            }
             NEXT;
         }
         /* Tier 2.5 step 1: open-coded car/cdr -- see opcode.h's own
@@ -916,8 +935,31 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             PUSH(V_VOID);
             NEXT;
         }
-        CASE(OP_NULLP) { PUSH(vis_nil(POP())  ? V_TRUE : V_FALSE); NEXT; }
-        CASE(OP_PAIRP) { PUSH(vis_pair(POP()) ? V_TRUE : V_FALSE); NEXT; }
+        /* Tier 2.5 step 1: open-coded null?/pair? -- see opcode.h's own
+         * comment on this group of opcodes for the full redefinition-
+         * safety design. */
+        CASE(OP_NULLP) {
+            uint8_t ci = READ_U8();
+            val_t current = load_global_cached(frame->closure->chunk, ci);
+            val_t x = POP();
+            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_null_p, 1)) {
+                PUSH(prim_null_p(1, &x, NULL));
+            } else {
+                PUSH(call_foreign(current, 1, &x));
+            }
+            NEXT;
+        }
+        CASE(OP_PAIRP) {
+            uint8_t ci = READ_U8();
+            val_t current = load_global_cached(frame->closure->chunk, ci);
+            val_t x = POP();
+            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_pair_p, 1)) {
+                PUSH(prim_pair_p(1, &x, NULL));
+            } else {
+                PUSH(call_foreign(current, 1, &x));
+            }
+            NEXT;
+        }
 
         /* ── Strings / chars ─────────────────────────────────────────── */
         CASE(OP_STRINGLEN) {

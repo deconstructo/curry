@@ -4839,17 +4839,47 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * (argc != 1) falls through on purpose: that's headed for a
              * genuine wrong-number-of-arguments error either way, and the
              * ordinary call path below already raises it correctly. */
+            /* Extended to cons/pair?/null? (same design, same
+             * redefinition-safety guard -- see opcode.h's own comment on
+             * this whole group of opcodes) once car/cdr proved out.
+             * cons's two args are, briefly, BOTH pending values on the
+             * real stack while the second one compiles -- bracketed with
+             * reserve_pending_slot/release_pending_slots exactly like any
+             * other multi-argument call site in this file (see e.g.
+             * compile_do's own "Tier 2.4 fix" comment for the bug class
+             * this prevents: a splicing second argument computing its own
+             * new locals' slot indices without accounting for the first
+             * argument's still-pending value). car/cdr/pair?/null? only
+             * ever have ONE argument, so they need no such bracketing. */
             bool opencoded = false;
             if (argc == 1) {
-                val_t car_sym = sym_intern_cstr("car");
-                val_t cdr_sym = sym_intern_cstr("cdr");
-                if (head == car_sym || head == cdr_sym) {
+                val_t car_sym   = sym_intern_cstr("car");
+                val_t cdr_sym   = sym_intern_cstr("cdr");
+                val_t pairp_sym = sym_intern_cstr("pair?");
+                val_t nullp_sym = sym_intern_cstr("null?");
+                bool matched = true;
+                uint8_t op1 = 0;
+                if (head == car_sym) op1 = OP_CAR;
+                else if (head == cdr_sym) op1 = OP_CDR;
+                else if (head == pairp_sym) op1 = OP_PAIRP;
+                else if (head == nullp_sym) op1 = OP_NULLP;
+                else matched = false;
+                if (matched) {
                     int sym_ci = chunk_add_const(c->chunk, head);
                     ir_emit(c, n->as.call.args[0]);
-                    emit_ab(c, head == car_sym ? OP_CAR : OP_CDR,
-                            (uint8_t)sym_ci, n->line);
+                    emit_ab(c, op1, (uint8_t)sym_ci, n->line);
                     opencoded = true;
                 }
+            } else if (argc == 2 && head == sym_intern_cstr("cons")) {
+                int sym_ci = chunk_add_const(c->chunk, head);
+                int saved = c->local_count;
+                ir_emit(c, n->as.call.args[0]);
+                reserve_pending_slot(c);
+                ir_emit(c, n->as.call.args[1]);
+                reserve_pending_slot(c);
+                release_pending_slots(c, saved);
+                emit_ab(c, OP_CONS, (uint8_t)sym_ci, n->line);
+                opencoded = true;
             }
             if (opencoded) return;
 
