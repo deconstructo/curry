@@ -550,11 +550,9 @@ static inline val_t open_coded_unary1(Chunk *chunk, uint8_t ci, val_t x, PrimFn 
  * num_lt fast path would not replicate). */
 static inline val_t open_coded_binary2(Chunk *chunk, uint8_t ci, val_t a, val_t b, PrimFn expected) {
     val_t current = load_global_cached(chunk, ci);
-    if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == expected, 1)) {
-        val_t args2[2]; args2[0] = a; args2[1] = b;
-        return expected(2, args2, NULL);
-    }
     val_t args2[2]; args2[0] = a; args2[1] = b;
+    if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == expected, 1))
+        return expected(2, args2, NULL);
     return call_foreign(current, 2, args2);
 }
 

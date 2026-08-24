@@ -4960,6 +4960,24 @@ static void ir_emit(Compiler *c, IRNode *n) {
                 { ">",     OP_GT,    2 },
                 { ">=",    OP_GE,    2 },
             };
+            enum { OPEN_CODE_N = sizeof(open_code_table) / sizeof(open_code_table[0]) };
+            /* Interned once, lazily, rather than re-interning every table
+             * entry's name on every 2-arg call node ir_emit ever visits
+             * (flagged on review: an ordinary, non-open-coded 2-arg call
+             * like `(f 1 2)` used to pay for 9 wasted sym_intern_cstr
+             * calls -- cons plus all eight arithmetic/comparison entries
+             * -- before falling through). A benign race on first use
+             * across concurrent compiles (if that ever happens) just
+             * re-interns the same idempotent symbols into the same slots
+             * twice; sym_intern_cstr itself is the actual synchronization
+             * point, so no lock is needed here. */
+            static val_t open_code_syms[OPEN_CODE_N];
+            static bool open_code_syms_ready = false;
+            if (!open_code_syms_ready) {
+                for (size_t i = 0; i < OPEN_CODE_N; i++)
+                    open_code_syms[i] = sym_intern_cstr(open_code_table[i].name);
+                open_code_syms_ready = true;
+            }
             /* `!ctail` (found by independent code review, confirmed by
              * direct reproduction -- a real TCO regression, not just a
              * documented trade-off): none of these opcodes' own VM
@@ -4988,9 +5006,9 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * itself in tail position). */
             bool opencoded = false;
             if (!ctail && (argc == 1 || argc == 2)) {
-                for (size_t oci = 0; oci < sizeof(open_code_table) / sizeof(open_code_table[0]); oci++) {
+                for (size_t oci = 0; oci < OPEN_CODE_N; oci++) {
                     if ((uint8_t)argc != open_code_table[oci].arity) continue;
-                    if (head != sym_intern_cstr(open_code_table[oci].name)) continue;
+                    if (head != open_code_syms[oci]) continue;
                     int sym_ci = chunk_add_const(c->chunk, head);
                     if (argc == 1) {
                         ir_emit(c, n->as.call.args[0]);

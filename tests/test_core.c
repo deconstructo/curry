@@ -1309,7 +1309,7 @@ static void test_open_coding_preserves_tco(void) {
  * pre-existing inline fixnum fast-path bodies). Covers basic correctness
  * for all eight, the same redefinition-in-the-same-script and local-shadow
  * regressions already established for car/cdr/cons/pair?/null?, a non-2-
- * arg call falling through correctly (R7RS variadic +/-/*'s own reduction,
+ * arg call falling through correctly (R7RS variadic +, -, * and friends' own reduction,
  * not replicated by the open-coded 2-arg-only opcode), and -- the actual
  * reason this step's design changed mid-implementation -- a symbolic (CAS
  * sym-var) operand to < still returning a genuine symbolic comparison node
