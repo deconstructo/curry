@@ -4918,16 +4918,48 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * ordinary call path below already raises it correctly. */
             /* Extended to cons/pair?/null? (same design, same
              * redefinition-safety guard -- see opcode.h's own comment on
-             * this whole group of opcodes) once car/cdr proved out.
-             * cons's two args are, briefly, BOTH pending values on the
-             * real stack while the second one compiles -- bracketed with
-             * reserve_pending_slot/release_pending_slots exactly like any
-             * other multi-argument call site in this file (see e.g.
-             * compile_do's own "Tier 2.4 fix" comment for the bug class
-             * this prevents: a splicing second argument computing its own
-             * new locals' slot indices without accounting for the first
-             * argument's still-pending value). car/cdr/pair?/null? only
-             * ever have ONE argument, so they need no such bracketing. */
+             * this whole group of opcodes) once car/cdr proved out, then
+             * to +, -, *, =, <, <=, >, >= (Tier 2.5 step 2) once THAT
+             * proved out -- OP_ADD/OP_SUB/OP_MUL/OP_NUMEQ/OP_LT/OP_LE/
+             * OP_GT/OP_GE are all strictly binary opcodes (pop exactly
+             * two, push one), so a 1-arg or 3+-arg call to any of these
+             * names still correctly falls through to the ordinary
+             * OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL path below (which is what
+             * R7RS's own variadic +, -, * and comparison chains' own
+             * reduction over ac != 2 needs anyway -- not replicated here).
+             * On a match, every entry below calls the REAL primitive
+             * function directly (see builtins.h's own comment on
+             * prim_add/prim_num_lt/etc.) rather than any separate inline
+             * fast-path body -- required for correctness, not just style:
+             * prim_num_lt/le/gt/ge's own 2-arg case dispatches to
+             * sx_lt/sx_le/sx_gt/sx_ge for a symbolic (CAS) operand, which
+             * a hand-rolled fixnum-or-num_lt fast path would not
+             * replicate, silently doing the wrong thing for e.g. an
+             * open-coded `(< x 5)` where `x` is a sym-var.
+             *
+             * Table-driven rather than three separate growing if/else
+             * chains (one per arity group) as of this landing: the third
+             * such chain (the eight arithmetic/comparison ops just above)
+             * was near-identical copy-paste of the first two's own
+             * "compute sym_ci, emit args, bracket pending slots if arity
+             * 2, emit_ab" shape, an accumulating-duplication smell flagged
+             * on review. Adding a future open-coded primitive is now one
+             * table row, not another ~15-line branch. */
+            static const struct { const char *name; uint8_t op; uint8_t arity; } open_code_table[] = {
+                { "car",   OP_CAR,   1 },
+                { "cdr",   OP_CDR,   1 },
+                { "pair?", OP_PAIRP, 1 },
+                { "null?", OP_NULLP, 1 },
+                { "cons",  OP_CONS,  2 },
+                { "+",     OP_ADD,   2 },
+                { "-",     OP_SUB,   2 },
+                { "*",     OP_MUL,   2 },
+                { "=",     OP_NUMEQ, 2 },
+                { "<",     OP_LT,    2 },
+                { "<=",    OP_LE,    2 },
+                { ">",     OP_GT,    2 },
+                { ">=",    OP_GE,    2 },
+            };
             /* `!ctail` (found by independent code review, confirmed by
              * direct reproduction -- a real TCO regression, not just a
              * documented trade-off): none of these opcodes' own VM
@@ -4940,98 +4972,48 @@ static void ir_emit(Compiler *c, IRNode *n) {
              * call stack on this branch (256-frame limit hit almost
              * immediately) where it ran to completion on main, silently
              * breaking R7RS's proper-tail-call guarantee for any program
-             * that redefines one of these five names and calls it
-             * recursively in tail position. Simplest correct fix: never
-             * open-code a call already known to be in tail position at
-             * all -- fall through to the ordinary OP_TAIL_CALL_GLOBAL path
-             * below instead, which already handles both the common
-             * (unredefined primitive) case efficiently via the existing
-             * fused-global-call opcode AND the redefined-BcClosure case
-             * with correct, O(1)-C-stack tail-call reuse. Giving up the
-             * open-coding win specifically in tail position is an
-             * acceptable trade: car/cdr/cons/pair?/null? are rarely the
-             * tail expression of a recursive loop themselves (far more
-             * commonly an ARGUMENT to the actual recursive call, e.g. `(loop
-             * (cdr x) ...)`, a shape this restriction doesn't touch at
-             * all, since `cdr` there is not itself in tail position). */
+             * that redefines one of these names and calls it recursively
+             * in tail position. Simplest correct fix: never open-code a
+             * call already known to be in tail position at all -- fall
+             * through to the ordinary OP_TAIL_CALL_GLOBAL path below
+             * instead, which already handles both the common (unredefined
+             * primitive) case efficiently via the existing fused-global-
+             * call opcode AND the redefined-BcClosure case with correct,
+             * O(1)-C-stack tail-call reuse. Giving up the open-coding win
+             * specifically in tail position is an acceptable trade: these
+             * names are rarely the tail expression of a recursive loop
+             * themselves (far more commonly an ARGUMENT to the actual
+             * recursive call, e.g. `(loop (cdr x) ...)`, a shape this
+             * restriction doesn't touch at all, since `cdr` there is not
+             * itself in tail position). */
             bool opencoded = false;
-            if (!ctail && argc == 1) {
-                val_t car_sym   = sym_intern_cstr("car");
-                val_t cdr_sym   = sym_intern_cstr("cdr");
-                val_t pairp_sym = sym_intern_cstr("pair?");
-                val_t nullp_sym = sym_intern_cstr("null?");
-                bool matched = true;
-                uint8_t op1 = 0;
-                if (head == car_sym) op1 = OP_CAR;
-                else if (head == cdr_sym) op1 = OP_CDR;
-                else if (head == pairp_sym) op1 = OP_PAIRP;
-                else if (head == nullp_sym) op1 = OP_NULLP;
-                else matched = false;
-                if (matched) {
+            if (!ctail && (argc == 1 || argc == 2)) {
+                for (size_t oci = 0; oci < sizeof(open_code_table) / sizeof(open_code_table[0]); oci++) {
+                    if ((uint8_t)argc != open_code_table[oci].arity) continue;
+                    if (head != sym_intern_cstr(open_code_table[oci].name)) continue;
                     int sym_ci = chunk_add_const(c->chunk, head);
-                    ir_emit(c, n->as.call.args[0]);
-                    emit_ab(c, op1, (uint8_t)sym_ci, n->line);
+                    if (argc == 1) {
+                        ir_emit(c, n->as.call.args[0]);
+                    } else {
+                        /* Both args are, briefly, pending values on the
+                         * real stack while the second one compiles --
+                         * bracketed exactly like any other multi-argument
+                         * call site in this file (see e.g. compile_do's
+                         * own "Tier 2.4 fix" comment for the bug class
+                         * this prevents: a splicing second argument
+                         * computing its own new locals' slot indices
+                         * without accounting for the first argument's
+                         * still-pending value). */
+                        int saved = c->local_count;
+                        ir_emit(c, n->as.call.args[0]);
+                        reserve_pending_slot(c);
+                        ir_emit(c, n->as.call.args[1]);
+                        reserve_pending_slot(c);
+                        release_pending_slots(c, saved);
+                    }
+                    emit_ab(c, open_code_table[oci].op, (uint8_t)sym_ci, n->line);
                     opencoded = true;
-                }
-            } else if (!ctail && argc == 2 && head == sym_intern_cstr("cons")) {
-                int sym_ci = chunk_add_const(c->chunk, head);
-                int saved = c->local_count;
-                ir_emit(c, n->as.call.args[0]);
-                reserve_pending_slot(c);
-                ir_emit(c, n->as.call.args[1]);
-                reserve_pending_slot(c);
-                release_pending_slots(c, saved);
-                emit_ab(c, OP_CONS, (uint8_t)sym_ci, n->line);
-                opencoded = true;
-            } else if (!ctail && argc == 2) {
-                /* Tier 2.5 step 2: +, -, *, =, <, <=, >, >= -- same design
-                 * as cons just above (2-arg shape, same pending-slot
-                 * bracketing), extended once car/cdr/cons/pair?/null?
-                 * proved out. Strictly 2-arg only, even though R7RS's own
-                 * +, -, *, =, <, <=, >, >= are variadic: OP_ADD/OP_SUB/OP_MUL/
-                 * OP_NUMEQ/OP_LT/OP_LE/OP_GT/OP_GE are all strictly binary
-                 * opcodes (pop exactly two, push one) -- a 1-arg or 3+-arg
-                 * call to any of these names falls through to the ordinary
-                 * OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL path below, which
-                 * already handles R7RS's variadic reduction correctly
-                 * (that's what the real prim_add/prim_num_lt/etc. do for
-                 * ac != 2 -- not replicated here, since matching only the
-                 * common 2-arg call shape is exactly the same trade-off
-                 * already made for car/cdr/cons/pair?/null?). On a match,
-                 * the opcode calls the REAL primitive directly (see
-                 * builtins.h's own comment on prim_add/prim_num_lt/etc. for
-                 * why this is required for correctness with symbolic (CAS)
-                 * operands, not just a stylistic choice) rather than any
-                 * separate inline fast-path body. */
-                val_t add_sym = sym_intern_cstr("+");
-                val_t sub_sym = sym_intern_cstr("-");
-                val_t mul_sym = sym_intern_cstr("*");
-                val_t numeq_sym = sym_intern_cstr("=");
-                val_t lt_sym = sym_intern_cstr("<");
-                val_t le_sym = sym_intern_cstr("<=");
-                val_t gt_sym = sym_intern_cstr(">");
-                val_t ge_sym = sym_intern_cstr(">=");
-                bool matched2 = true;
-                uint8_t op2 = 0;
-                if (head == add_sym) op2 = OP_ADD;
-                else if (head == sub_sym) op2 = OP_SUB;
-                else if (head == mul_sym) op2 = OP_MUL;
-                else if (head == numeq_sym) op2 = OP_NUMEQ;
-                else if (head == lt_sym) op2 = OP_LT;
-                else if (head == le_sym) op2 = OP_LE;
-                else if (head == gt_sym) op2 = OP_GT;
-                else if (head == ge_sym) op2 = OP_GE;
-                else matched2 = false;
-                if (matched2) {
-                    int sym_ci = chunk_add_const(c->chunk, head);
-                    int saved = c->local_count;
-                    ir_emit(c, n->as.call.args[0]);
-                    reserve_pending_slot(c);
-                    ir_emit(c, n->as.call.args[1]);
-                    reserve_pending_slot(c);
-                    release_pending_slots(c, saved);
-                    emit_ab(c, op2, (uint8_t)sym_ci, n->line);
-                    opencoded = true;
+                    break;
                 }
             }
             if (opencoded) return;
