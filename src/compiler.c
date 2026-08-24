@@ -2617,14 +2617,30 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
     val_t handler_expr = vcar(args);
     val_t thunk_expr   = vcar(vcdr(args));
 
+    /* Tier 2.4 fix (same bug class, same fix, as SF_VALUES/SF_APPLY/
+     * SF_CALL_WITH_VALUES/compile_do's own "Tier 2.4 fix" comments
+     * elsewhere in this file): handler_expr's own fresh result is a
+     * still-pending value on the physical stack while thunk_expr
+     * compiles below -- if thunk_expr is itself (or evaluates via) a
+     * let / let* / letrec / letrec* / named-let, its own splice must not treat
+     * `c->local_count` as if it already accounted for handler's value,
+     * or its own new locals alias handler's physical stack slot.
+     * Confirmed as a real bug: `(with-exception-handler (lambda (e)
+     * 'handled) (let ((f (lambda () 42))) f))` returned 'handled instead
+     * of calling the thunk and returning 42. */
+    int saved = c->local_count;
+
     /* Compile handler (stays below the protected call on the stack) */
     compile(c, handler_expr, false, line);
+    reserve_pending_slot(c);
 
     /* OP_PUSH_HANDLER: saves sp at this point (past handler, before thunk) */
     int catch_placeholder = emit_jump(c, OP_PUSH_HANDLER, line);
 
     /* Compile thunk and call it with no arguments */
     compile(c, thunk_expr, false, line);
+    reserve_pending_slot(c);
+    release_pending_slots(c, saved);
     emit_ab(c, OP_CALL, 0, line);          /* (thunk) → result */
 
     /* Normal path: remove handler, discard it, keep result */

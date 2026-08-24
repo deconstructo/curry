@@ -1060,6 +1060,25 @@ static void test_named_let_max_locals_guard(void) {
           "named-let: MAX_LOCALS overflow falls back to a real closure instead of corrupting a local");
 }
 
+/* Regression test for a real, confirmed miscompilation found by
+ * independent code review: compile_with_exception_handler's own
+ * `(with-exception-handler handler thunk)` codegen (compiler.c) has the
+ * same pending-slot bug class as SF_VALUES/SF_APPLY/SF_CALL_WITH_VALUES/
+ * compile_do/compile_do's own fixes elsewhere in this file -- handler's
+ * own fresh result is a still-pending value on the physical stack while
+ * thunk compiles below it, and thunk splicing real locals (any Tier 2.4
+ * wrapper-elided form) without accounting for handler's pending slot
+ * aliases it. Confirmed as a real bug: `(with-exception-handler (lambda
+ * (e) 'handled) (let ((f (lambda () 42))) f))` returned 'handled (as if
+ * an exception were raised and caught) instead of calling the thunk and
+ * returning 42 -- silently wrong control flow, not merely a wrong value. */
+static void test_with_exception_handler_pending_slot_fix(void) {
+    CHECK(run_vm(
+        "(with-exception-handler (lambda (e) 'handled) (let ((f (lambda () 'ok))) f))")
+        == sym_intern_cstr("ok"),
+        "with-exception-handler: let-producing thunk doesn't alias handler's pending slot");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1090,6 +1109,7 @@ int main(void) {
     RUN_TEST(test_apply_values_pending_slot_fix);
     RUN_TEST(test_do_step_pending_slot_fix);
     RUN_TEST(test_named_let_max_locals_guard);
+    RUN_TEST(test_with_exception_handler_pending_slot_fix);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
