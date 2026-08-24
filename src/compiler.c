@@ -4621,6 +4621,40 @@ static void ir_emit(Compiler *c, IRNode *n) {
         int   argc  = n->as.call.argc;
         bool  ctail = n->tail;
 
+        /* Tier 2.4: closure elision for let / let-star / letrec / letrec-star's own
+         * compiler-synthesized entry wrapper. ir_lower_lambda_call is the
+         * ONLY producer, anywhere in this file, of an IR_CALL with
+         * head==V_FALSE and a literal IR_LAMBDA callee (grep confirms
+         * exactly 3 call sites: ir_lower_let/ir_lower_let_star/
+         * ir_lower_letrec, each returning the node as the WHOLE lowered
+         * form for that let/letrec expression) -- so this callee's
+         * closure is provably always non-escaping and always single-
+         * call-site BY CONSTRUCTION, not by analysis: nothing else ever
+         * holds a reference to this specific node's callee field except
+         * this same emission, which immediately consumes it with a call.
+         * Unlike the named-candidate inliner below, this needs no
+         * closedness check, no self-recursion guard, and no size/effort
+         * budget -- there being exactly one call site means splicing
+         * costs exactly the same total code size as not splicing; the
+         * body is compiled exactly once either way. Checked first since
+         * head==V_FALSE trivially fails every vis_symbol(head) guard
+         * every other branch below requires, making this unconditionally
+         * mutually exclusive with all of them -- placement is purely for
+         * readability, not correctness. See ir_emit_inline_call's own
+         * header comment for known_params/track_cycle's meaning here
+         * (NB: named-let's own entry wrapper does NOT go through this
+         * path -- IR_NAMED_LET hand-builds its own separate Compiler
+         * rather than routing through ir_lower_lambda_call/IR_CALL at
+         * all; eliding it is deliberately deferred, real separate work). */
+        if (head == V_FALSE && n->as.call.callee->kind == IR_LAMBDA) {
+            ir_emit_inline_call(c, n->as.call.callee->as.lambda.params,
+                                 n->as.call.callee->as.lambda.body,
+                                 n->as.call.args, argc, n,
+                                 n->as.call.callee->as.lambda.known_params,
+                                 false);
+            return;
+        }
+
         if (ctail && vis_symbol(head) && c->self_tail_name != V_FALSE &&
             head == c->self_tail_name && !c->self_tail_mutated &&
             resolve_local(c, head) < 0) {
@@ -4838,9 +4872,25 @@ static void ir_emit(Compiler *c, IRNode *n) {
         ir_emit(&outer, loop_lambda);
         emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);  /* store closure -> slot 0 */
         emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);  /* callee */
-        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
-            IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
-            ir_emit(&outer, arg);
+        /* Tier 2.4: the callee (just pushed) and each binding init are ALL
+         * pending stack values while later inits are compiled -- an init
+         * expression that is itself a let/letrec (or a Tier 2.3 known-
+         * candidate call) can now splice new locals directly into `outer`
+         * via ir_emit_inline_call, whose add_local calls must not alias a
+         * still-pending sibling's own stack slot. Same hazard, and same
+         * fix, as IR_CALL's own argument-evaluation loops just above --
+         * this call site just never needed it before wrapper elision made
+         * a plain nested let capable of splicing into an enclosing
+         * compiler it doesn't itself define. */
+        {
+            int saved = outer.local_count;
+            reserve_pending_slot(&outer);
+            for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+                IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
+                ir_emit(&outer, arg);
+                reserve_pending_slot(&outer);
+            }
+            release_pending_slots(&outer, saved);
         }
         emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, n->line);
         Chunk *och = end_compiler(&outer);
@@ -5113,18 +5163,29 @@ bool compiler_ir_optimize_check(val_t expr) {
  * compiler_ir_optimize_check, minus the result-equality assertion (this
  * function's caller is expected to also call compiler_ir_optimize_check
  * on the same expr for that). */
-/* Tier 2.3 test helper: finds the first nested Chunk (a lambda's own
- * compiled body) in `c`'s constant pool -- used to look past an outer
- * `(let () ...)` wrapper's own trivial "create closure; call it" bytecode
- * (a handful of bytes regardless of what's inside) down to where the
- * interesting body bytecode, including any inlined duplication, actually
- * lives. Returns NULL if `c` has no nested chunk (e.g. expr wasn't
- * let-wrapped). */
-static Chunk *chunk_first_nested(Chunk *c) {
+/* Tier 2.4: sums code_len recursively across `c` and every chunk nested
+ * (transitively) in its constant pool -- the TOTAL compiled bytecode size
+ * of the whole unit, regardless of which particular chunk boundary any of
+ * it happens to live behind. Wrapper elision (this same landing) merely
+ * RELOCATES a let / let-star / letrec wrapper's own body bytecode from a nested
+ * child chunk into its parent chunk directly -- it does not duplicate
+ * anything, so it leaves this total essentially unchanged (a few bytes
+ * either way from the closure-creation opcodes it removes). Genuine
+ * named-candidate duplication (the thing this check actually exists to
+ * prove) does grow this total, because the candidate's body bytecode then
+ * appears more than once somewhere in the whole tree. This replaces an
+ * earlier single-chunk-comparison approach (see git history) that assumed
+ * a let-shaped expr's interesting body always lived at a fixed, predictable
+ * nesting depth -- an assumption wrapper elision broke, since the IR side
+ * of that comparison could end up anchored on an unrelated inner closure's
+ * own chunk instead once the previously-reliable outer wrapper chunk
+ * stopped being created at all. */
+static int chunk_total_code_len(Chunk *c) {
+    int total = c->code_len;
     for (int i = 0; i < c->const_len; i++)
         if (vis_type(c->constants[i], T_CHUNK))
-            return vunptr(Chunk, c->constants[i]);
-    return NULL;
+            total += chunk_total_code_len(vunptr(Chunk, c->constants[i]));
+    return total;
 }
 
 bool compiler_ir_inline_fired_check(val_t expr) {
@@ -5143,16 +5204,13 @@ bool compiler_ir_inline_fired_check(val_t expr) {
         compile_classic(&old_c, expr, false, line);
         IRNode *ir = ir_lower(&new_c, expr, false, line);
         ir_emit(&new_c, ir_optimize(ir));
-        /* `(let () ...)` desugars to an IIFE: the OUTER chunk being built
-         * here is just "create closure; call it" (a handful of bytes),
-         * regardless of what's inside -- the interesting body bytecode
-         * (including any inlined duplication) lives in the LET's own
-         * nested child Chunk, stored as a Chunk* in the outer chunk's own
-         * constant pool. Find and compare that instead. */
-        Chunk *old_body = chunk_first_nested(old_c.chunk);
-        Chunk *new_body = chunk_first_nested(new_c.chunk);
-        int old_len = old_body ? old_body->code_len : old_c.chunk->code_len;
-        int new_len = new_body ? new_body->code_len : new_c.chunk->code_len;
+        /* Tier 2.4: compare TOTAL compiled bytecode size across the whole
+         * unit on each side (see chunk_total_code_len's own comment) --
+         * robust to wrapper elision relocating a let/letrec wrapper's own
+         * body bytecode up into its parent chunk, which a single fixed-
+         * nesting-depth chunk comparison is not. */
+        int old_len = chunk_total_code_len(old_c.chunk);
+        int new_len = chunk_total_code_len(new_c.chunk);
         grew = new_len > old_len;
     }, {
         ir_arena_free(old_c.ir_arena);
