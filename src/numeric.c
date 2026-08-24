@@ -1442,6 +1442,27 @@ int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
     return snprintf(buf, bufsize, "%.*g", p_min, d);
 }
 
+/* Copy len+1 bytes (including the NUL) of a C string into a freshly
+ * allocated Curry String -- the "alloc a String, fill its fixed header
+ * fields, memcpy the bytes in" sequence num_to_string's branches below
+ * all repeated verbatim. Does not take ownership of `s`. */
+static val_t string_from_cstr_len(const char *s, uint32_t len) {
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, s, len + 1);
+    return vptr(str);
+}
+
+/* Same, for a malloc'd C string this function takes ownership of and
+ * frees -- covers the mpz_get_str/mpq_get_str result in each of
+ * num_to_string's GMP-backed branches. */
+static val_t string_from_owned_cstr(char *s) {
+    val_t result = string_from_cstr_len(s, (uint32_t)strlen(s));
+    free(s);
+    return result;
+}
+
 val_t num_to_string(val_t v, int radix) {
     char buf[128];
     if (vis_fixnum(v)) {
@@ -1452,19 +1473,12 @@ val_t num_to_string(val_t v, int radix) {
         } else {
             mpz_t z; mpz_init_set_si(z, (long)vunfix(v));
             char *s = mpz_get_str(NULL, radix, z);
-            uint32_t len = (uint32_t)strlen(s);
-            String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-            str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
-            memcpy(str->data, s, len+1); free(s); mpz_clear(z);
-            return vptr(str);
+            val_t result = string_from_owned_cstr(s);
+            mpz_clear(z);
+            return result;
         }
     } else if (vis_bignum(v)) {
-        char *s = mpz_get_str(NULL, radix, as_big(v)->z);
-        /* wrap in String */
-        uint32_t len = (uint32_t)strlen(s);
-        String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
-        memcpy(str->data, s, len+1); free(s); return vptr(str);
+        return string_from_owned_cstr(mpz_get_str(NULL, radix, as_big(v)->z));
     } else if (vis_flonum(v)) {
         num_flonum_to_shortest_cstr(vfloat(v), buf, sizeof(buf));
 #ifdef BUILD_MPFR
@@ -1482,11 +1496,7 @@ val_t num_to_string(val_t v, int radix) {
          * exact function and recurse forever (confirmed: segfault). Formatting
          * directly with GMP here, like the bignum branch above, sidesteps
          * write_number_notation() entirely. */
-        char *s = mpq_get_str(NULL, radix, as_rat(v)->q);
-        uint32_t len = (uint32_t)strlen(s);
-        String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-        str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
-        memcpy(str->data, s, len+1); free(s); return vptr(str);
+        return string_from_owned_cstr(mpq_get_str(NULL, radix, as_rat(v)->q));
     } else {
         /* Complex/quaternion/octonion/multivector/surreal/symbolic: radix is
          * meaningless for these, same as the flonum case above which already
@@ -1499,11 +1509,7 @@ val_t num_to_string(val_t v, int radix) {
         scm_write(v, p);
         return port_get_output_string(p);
     }
-    uint32_t len = (uint32_t)strlen(buf);
-    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    str->hdr.type=T_STRING; str->hdr.flags=0; str->len=len; str->orig_cap=len; str->ext=NULL;
-    memcpy(str->data, buf, len+1);
-    return vptr(str);
+    return string_from_cstr_len(buf, (uint32_t)strlen(buf));
 }
 
 val_t num_normalize(val_t v) {
