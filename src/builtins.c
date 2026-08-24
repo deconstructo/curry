@@ -377,17 +377,20 @@ static val_t prim_assv(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Arithmetic ---- */
-static val_t prim_add(int ac, val_t *av, void *ud) {
+/* Not static (prim_add/prim_mul here, prim_sub just below) -- see
+ * builtins.h's own comment on why the compiler/VM need these exact
+ * function pointers for Tier 2.5 open-coding. */
+val_t prim_add(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = vfix(0);
     for (int i=0; i<ac; i++) r = num_add(r, av[i]);
     return r;
 }
-static val_t prim_mul(int ac, val_t *av, void *ud) {
+val_t prim_mul(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = vfix(1);
     for (int i=0; i<ac; i++) r = num_mul(r, av[i]);
     return r;
 }
-static val_t prim_sub(int ac, val_t *av, void *ud) {
+val_t prim_sub(int ac, val_t *av, void *ud) {
     (void)ud;
     if (ac == 1) return num_neg(av[0]);
     val_t r = av[0];
@@ -402,9 +405,13 @@ static val_t prim_div(int ac, val_t *av, void *ud) {
     return r;
 }
 
-/* Comparison: (= a b c...) etc. */
+/* Comparison: (= a b c...) etc. Not static (unlike every other use of
+ * these two macros would normally be) -- see builtins.h's own comment on
+ * why the compiler/VM need these exact function pointers for Tier 2.5
+ * open-coding. Only NUM_CMP(eq,eq) and the four NUM_CMP_ORD invocations
+ * just below are affected; nothing else uses either macro. */
 #define NUM_CMP(fn, op) \
-static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
+val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; return V_TRUE; }
 NUM_CMP(eq,eq)
 
@@ -420,7 +427,7 @@ NUM_CMP(eq,eq)
  * macro token `op` (e.g. lt) -- the error message must name what the
  * user actually typed, not builtins.c's own internal identifier. */
 #define NUM_CMP_ORD(fn, op, name) \
-static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
+val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; \
     /* ac==2 is the hot path (every plain numeric (< a b) call goes
      * through here) -- handled standalone so it costs exactly the two

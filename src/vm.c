@@ -539,6 +539,25 @@ static inline val_t open_coded_unary1(Chunk *chunk, uint8_t ci, val_t x, PrimFn 
     return call_foreign(current, 1, &x);
 }
 
+/* Tier 2.5 step 2: same shape as open_coded_unary1 above, for the
+ * 2-argument open-coded arithmetic/comparison opcodes (OP_ADD/OP_SUB/
+ * OP_MUL/OP_NUMEQ/OP_LT/OP_LE/OP_GT/OP_GE). Calls THROUGH `expected`
+ * (the real prim_add/prim_num_lt/etc.) on a match rather than any
+ * separate inline fast-path logic -- see builtins.h's own comment on
+ * these opcodes' declarations for why that's required for correctness
+ * (prim_num_lt/le/gt/ge's own 2-arg case dispatches to sx_lt/sx_le/
+ * sx_gt/sx_ge for a symbolic operand, which a hand-rolled fixnum-or-
+ * num_lt fast path would not replicate). */
+static inline val_t open_coded_binary2(Chunk *chunk, uint8_t ci, val_t a, val_t b, PrimFn expected) {
+    val_t current = load_global_cached(chunk, ci);
+    if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == expected, 1)) {
+        val_t args2[2]; args2[0] = a; args2[1] = b;
+        return expected(2, args2, NULL);
+    }
+    val_t args2[2]; args2[0] = a; args2[1] = b;
+    return call_foreign(current, 2, args2);
+}
+
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
@@ -780,31 +799,29 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_NOP)  NEXT;
 
         /* ── Arithmetic ─────────────────────────────────────────────── */
+        /* Tier 2.5 step 2: open-coded +, -, * -- see opcode.h's own comment
+         * on this opcode group, and builtins.h's comment on prim_add/
+         * prim_sub/prim_mul, for the full design (same redefinition-
+         * safety guard as OP_CAR/OP_CDR/OP_CONS above, via
+         * open_coded_binary2). Never emitted for a tail call -- same
+         * reason as OP_CAR/OP_CDR/OP_CONS, see compiler.c's emission-site
+         * comment. */
         CASE(OP_ADD) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1)) {
-                intptr_t ia = vunfix(a), ib = vunfix(b), ir;
-                if (!__builtin_add_overflow(ia, ib, &ir)) { PUSH(vfix(ir)); }
-                else PUSH(num_add(a, b));
-            } else PUSH(num_add(a, b));
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_add));
             NEXT;
         }
         CASE(OP_SUB) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1)) {
-                intptr_t ia = vunfix(a), ib = vunfix(b), ir;
-                if (!__builtin_sub_overflow(ia, ib, &ir)) { PUSH(vfix(ir)); }
-                else PUSH(num_sub(a, b));
-            } else PUSH(num_sub(a, b));
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_sub));
             NEXT;
         }
         CASE(OP_MUL) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1)) {
-                intptr_t ia = vunfix(a), ib = vunfix(b), ir;
-                if (!__builtin_mul_overflow(ia, ib, &ir)) { PUSH(vfix(ir)); }
-                else PUSH(num_mul(a, b));
-            } else PUSH(num_mul(a, b));
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_mul));
             NEXT;
         }
         CASE(OP_DIV) { val_t b = POP(), a = POP(); PUSH(num_div(a, b)); NEXT; }
@@ -813,8 +830,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_EXPT) { val_t b = POP(), a = POP(); PUSH(num_expt(a, b)); NEXT; }
 
         /* ── Comparison ─────────────────────────────────────────────── */
-        CASE(OP_EQ)
-        CASE(OP_NUMEQ) {
+        /* OP_EQ: genuinely unemitted dead code (see opcode.h), left with
+         * its old 0-operand behavior -- deliberately NOT merged with
+         * OP_NUMEQ below anymore (they used to share this body via
+         * fallthrough; separated so OP_NUMEQ could take the new operand
+         * without changing OP_EQ's contract). */
+        CASE(OP_EQ) {
             val_t b = POP(), a = POP();
             if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1))
                 PUSH(a == b ? V_TRUE : V_FALSE);
@@ -822,36 +843,37 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 PUSH(num_eq(a, b) ? V_TRUE : V_FALSE);
             NEXT;
         }
-        CASE(OP_LT) {
+        /* Tier 2.5 step 2: open-coded =/</<=/>/>= -- see the arithmetic
+         * group's own comment just above for the design; open_coded_binary2
+         * is what makes this safe for symbolic operands (see builtins.h). */
+        CASE(OP_NUMEQ) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1))
-                PUSH((intptr_t)a < (intptr_t)b ? V_TRUE : V_FALSE);
-            else
-                PUSH(num_lt(a, b) ? V_TRUE : V_FALSE);
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_num_eq));
+            NEXT;
+        }
+        CASE(OP_LT) {
+            uint8_t ci = READ_U8();
+            val_t b = POP(), a = POP();
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_num_lt));
             NEXT;
         }
         CASE(OP_LE) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1))
-                PUSH((intptr_t)a <= (intptr_t)b ? V_TRUE : V_FALSE);
-            else
-                PUSH(num_le(a, b) ? V_TRUE : V_FALSE);
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_num_le));
             NEXT;
         }
         CASE(OP_GT) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1))
-                PUSH((intptr_t)a > (intptr_t)b ? V_TRUE : V_FALSE);
-            else
-                PUSH(num_gt(a, b) ? V_TRUE : V_FALSE);
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_num_gt));
             NEXT;
         }
         CASE(OP_GE) {
+            uint8_t ci = READ_U8();
             val_t b = POP(), a = POP();
-            if (__builtin_expect(vis_fixnum(a) & vis_fixnum(b), 1))
-                PUSH((intptr_t)a >= (intptr_t)b ? V_TRUE : V_FALSE);
-            else
-                PUSH(num_ge(a, b) ? V_TRUE : V_FALSE);
+            PUSH(open_coded_binary2(frame->closure->chunk, ci, a, b, prim_num_ge));
             NEXT;
         }
 

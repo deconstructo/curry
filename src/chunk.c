@@ -291,7 +291,9 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_CLOSURE: case OP_CLOSE_UP:
     case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY:
     case OP_SLIDE: case OP_TREE_EVAL_CACHED:
-    case OP_CAR: case OP_CDR: case OP_CONS: case OP_NULLP: case OP_PAIRP: {
+    case OP_CAR: case OP_CDR: case OP_CONS: case OP_NULLP: case OP_PAIRP:
+    case OP_ADD: case OP_SUB: case OP_MUL: case OP_NUMEQ:
+    case OP_LT: case OP_LE: case OP_GT: case OP_GE: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||
@@ -299,7 +301,11 @@ static int disasm_one(const Chunk *c, int off) {
             (OpCode)op == OP_DEFINED_GLOBAL ||
             (OpCode)op == OP_CAR || (OpCode)op == OP_CDR ||
             (OpCode)op == OP_CONS || (OpCode)op == OP_NULLP ||
-            (OpCode)op == OP_PAIRP) {
+            (OpCode)op == OP_PAIRP ||
+            (OpCode)op == OP_ADD || (OpCode)op == OP_SUB ||
+            (OpCode)op == OP_MUL || (OpCode)op == OP_NUMEQ ||
+            (OpCode)op == OP_LT || (OpCode)op == OP_LE ||
+            (OpCode)op == OP_GT || (OpCode)op == OP_GE) {
             /* print constant value */
             if (a < c->const_len) {
                 val_t v = c->constants[a];

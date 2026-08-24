@@ -4982,6 +4982,56 @@ static void ir_emit(Compiler *c, IRNode *n) {
                 release_pending_slots(c, saved);
                 emit_ab(c, OP_CONS, (uint8_t)sym_ci, n->line);
                 opencoded = true;
+            } else if (!ctail && argc == 2) {
+                /* Tier 2.5 step 2: +, -, *, =, <, <=, >, >= -- same design
+                 * as cons just above (2-arg shape, same pending-slot
+                 * bracketing), extended once car/cdr/cons/pair?/null?
+                 * proved out. Strictly 2-arg only, even though R7RS's own
+                 * +, -, *, =, <, <=, >, >= are variadic: OP_ADD/OP_SUB/OP_MUL/
+                 * OP_NUMEQ/OP_LT/OP_LE/OP_GT/OP_GE are all strictly binary
+                 * opcodes (pop exactly two, push one) -- a 1-arg or 3+-arg
+                 * call to any of these names falls through to the ordinary
+                 * OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL path below, which
+                 * already handles R7RS's variadic reduction correctly
+                 * (that's what the real prim_add/prim_num_lt/etc. do for
+                 * ac != 2 -- not replicated here, since matching only the
+                 * common 2-arg call shape is exactly the same trade-off
+                 * already made for car/cdr/cons/pair?/null?). On a match,
+                 * the opcode calls the REAL primitive directly (see
+                 * builtins.h's own comment on prim_add/prim_num_lt/etc. for
+                 * why this is required for correctness with symbolic (CAS)
+                 * operands, not just a stylistic choice) rather than any
+                 * separate inline fast-path body. */
+                val_t add_sym = sym_intern_cstr("+");
+                val_t sub_sym = sym_intern_cstr("-");
+                val_t mul_sym = sym_intern_cstr("*");
+                val_t numeq_sym = sym_intern_cstr("=");
+                val_t lt_sym = sym_intern_cstr("<");
+                val_t le_sym = sym_intern_cstr("<=");
+                val_t gt_sym = sym_intern_cstr(">");
+                val_t ge_sym = sym_intern_cstr(">=");
+                bool matched2 = true;
+                uint8_t op2 = 0;
+                if (head == add_sym) op2 = OP_ADD;
+                else if (head == sub_sym) op2 = OP_SUB;
+                else if (head == mul_sym) op2 = OP_MUL;
+                else if (head == numeq_sym) op2 = OP_NUMEQ;
+                else if (head == lt_sym) op2 = OP_LT;
+                else if (head == le_sym) op2 = OP_LE;
+                else if (head == gt_sym) op2 = OP_GT;
+                else if (head == ge_sym) op2 = OP_GE;
+                else matched2 = false;
+                if (matched2) {
+                    int sym_ci = chunk_add_const(c->chunk, head);
+                    int saved = c->local_count;
+                    ir_emit(c, n->as.call.args[0]);
+                    reserve_pending_slot(c);
+                    ir_emit(c, n->as.call.args[1]);
+                    reserve_pending_slot(c);
+                    release_pending_slots(c, saved);
+                    emit_ab(c, op2, (uint8_t)sym_ci, n->line);
+                    opencoded = true;
+                }
             }
             if (opencoded) return;
 

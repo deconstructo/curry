@@ -54,10 +54,28 @@ typedef enum {
     OP_SWAP,        /* swap top two stack values                         */
     OP_SLIDE,       /* A: move TOS past A items below it (scope cleanup) */
 
-    /* ── Arithmetic (numeric tower, same semantics as num_add etc.) ─── */
-    OP_ADD,         /* push num_add(pop(), pop())   (order: b=pop a=pop) */
-    OP_SUB,         /* push num_sub(a, b)                                */
-    OP_MUL,         /* push num_mul(pop(), pop())                        */
+    /* ── Arithmetic (numeric tower, same semantics as num_add etc.) ───
+     * Tier 2.5 step 2 (open-coding, extended from car/cdr/cons/pair?/
+     * null? -- see THAT group's own comment further down for the shared
+     * redefinition-safety design this reuses exactly). OP_ADD/OP_SUB/
+     * OP_MUL/OP_NUMEQ/OP_LT/OP_LE/OP_GT/OP_GE each take one operand (A =
+     * const-pool index of the callee symbol, same convention) and are
+     * only ever emitted for the exact 2-argument call shape (`(+ a b)`,
+     * never `(+ a b c)` or `(+)` or `(+ a)` -- see compiler.c's own
+     * emission-site comment for why). On a match, calls the REAL
+     * primitive (prim_add/prim_num_lt/etc., builtins.h) directly, NOT
+     * this opcode's own separate fixnum-fast-path body below (kept
+     * unchanged, still genuinely dead code, deliberately NOT reused here
+     * -- found while landing this: prim_num_lt/le/gt/ge's own 2-arg case
+     * dispatches to sx_lt/sx_le/sx_gt/sx_ge for a symbolic (CAS) operand,
+     * which the fixnum-or-else-num_lt logic below does not replicate at
+     * all -- reusing it would have silently done the wrong thing for an
+     * open-coded `(< x 5)` where `x` is a sym-var). OP_DIV/OP_NEG/
+     * OP_ABS/OP_EXPT and OP_EQ are all still genuinely unemitted dead
+     * code, untouched by this landing. */
+    OP_ADD,         /* A: see above -- push (+ a b) if global(A) is really the + primitive, else a real call */
+    OP_SUB,         /* A: see above -- push (- a b) if global(A) is really the - primitive, else a real call */
+    OP_MUL,         /* A: see above -- push (* a b) if global(A) is really the * primitive, else a real call */
     OP_DIV,         /* push num_div(a, b)                                */
     OP_NEG,         /* push num_neg(pop())                               */
     OP_ABS,         /* push num_abs(pop())                               */
@@ -65,11 +83,11 @@ typedef enum {
 
     /* ── Comparison ─────────────────────────────────────────────────── */
     OP_EQ,          /* push num_eq(a,b)  → #t/#f                        */
-    OP_LT,          /* push num_lt(a,b)                                  */
-    OP_LE,          /* push num_le(a,b)                                  */
-    OP_GT,          /* push num_gt(a,b)                                  */
-    OP_GE,          /* push num_ge(a,b)                                  */
-    OP_NUMEQ,       /* push (= a b) — numeric equality                  */
+    OP_LT,          /* A: see arithmetic group's own comment -- push (< a b) if global(A) is really the < primitive, else a real call */
+    OP_LE,          /* A: see arithmetic group's own comment -- push (<= a b) if global(A) is really the <= primitive, else a real call */
+    OP_GT,          /* A: see arithmetic group's own comment -- push (> a b) if global(A) is really the > primitive, else a real call */
+    OP_GE,          /* A: see arithmetic group's own comment -- push (>= a b) if global(A) is really the >= primitive, else a real call */
+    OP_NUMEQ,       /* A: see arithmetic group's own comment -- push (= a b) if global(A) is really the = primitive, else a real call */
 
     /* ── Identity / equivalence ─────────────────────────────────────── */
     OP_EQV,         /* push scm_eqv(a,b)                                */
