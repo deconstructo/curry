@@ -701,6 +701,12 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
 static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t form = av[0];
+    /* A malformed `(syntax-rules)` (no ellipsis/literals/rules at all)
+     * used to SIGSEGV here on vcadr(form) -- same widespread bug class as
+     * compiler.c's require_min_args, confirmed present on main too. */
+    if (!vis_pair(vcdr(form)))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                        "syntax-rules: ill-formed special form");
     val_t second = vcadr(form);
 
     val_t ellipsis, literals, rules_kv;

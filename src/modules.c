@@ -557,8 +557,13 @@ static void define_library_clause(val_t clause, val_t *exports, bool *has_export
 
 /* (define-library (name) clause...) — R7RS */
 val_t modules_define_library(val_t form, val_t env) {
-    val_t rest    = vcdr(form);
-    val_t name    = vcar(rest);   rest = vcdr(rest);
+    val_t rest = vcdr(form);
+    /* A malformed `(define-library)` (no name at all) used to SIGSEGV
+     * here on vcar(rest) -- same widespread bug class as compiler.c's
+     * require_min_args, confirmed present on main too. */
+    if (!vis_pair(rest))
+        scm_raise(V_FALSE, "define-library: missing library name");
+    val_t name = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
     bool  has_exports = false;
@@ -582,8 +587,10 @@ val_t modules_define_library(val_t form, val_t env) {
  *      in an interpreter — compile-time vs run-time is not meaningful here).
  */
 val_t modules_define_r6rs_library(val_t form, val_t env) {
-    val_t rest    = vcdr(form);
-    val_t name    = vcar(rest);   rest = vcdr(rest);
+    val_t rest = vcdr(form);
+    if (!vis_pair(rest))
+        scm_raise(V_FALSE, "library: missing library name");
+    val_t name = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
     bool  has_exports = false;

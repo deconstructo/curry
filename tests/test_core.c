@@ -1298,33 +1298,66 @@ static void test_compiler_ir_lower_for_jit(void) {
         CHECK(arena != NULL, "compiler_ir_lower_for_jit: returns an arena for ordinary input");
         if (arena) ir_arena_free(arena);
     }
-    /* No "malformed input raises cleanly" case here, deliberately: tried
-     * one (an unbound-variable reference) while landing this and found it
-     * does NOT exercise compiler_ir_lower_for_jit's SCM_PROTECT at all --
-     * ir_lower/ir_optimize never actually raise for any currently-
-     * reachable top-level input. This matches their own documented lazy
-     * design exactly (compiler.h's own comment on this function): a bare
-     * variable reference just becomes an unresolved IR_VAR_REF node
-     * (resolution, and any unbound-variable error, is deferred all the
-     * way to ir_emit time), and every special form ir_lower doesn't
-     * natively handle falls back whole to IR_FALLBACK (deferred to
-     * ir_emit's own compile() call) rather than raising immediately.
-     * Confirmed by direct inspection: neither function contains a
-     * scm_raise/scm_raise_code call anywhere in this codebase today. The
-     * SCM_PROTECT wrapping stays anyway, as defensive parity with every
-     * other root-Compiler entry point in this file (compiler_ir_self_check,
-     * compiler_compile, ...) that could reach one if a future change to
-     * ir_lower/ir_optimize ever adds one -- just not something a test can
-     * honestly exercise against today's actual implementation.
-     *
-     * Also found while trying to construct a "malformed input" case: a
-     * real, PRE-EXISTING bug, unrelated to this landing and NOT fixed
-     * here (out of scope for Tier 2.5/2.6) -- `(if)`, `(if 1)`, `(let)`,
-     * and apparently other special forms with too few operands SIGSEGV
-     * the whole process instead of raising a catchable condition,
-     * confirmed via the CLI and confirmed identical in both ir_lower_if
-     * and compile_if (plain unchecked vcar/vcdr, no arity check at all) --
-     * confirmed present on `main` too. Worth a dedicated follow-up. */
+    /* Malformed input: `(if)` -- exercises require_min_args, added to
+     * ir_lower_if (and every other special-form compile_* / ir_lower_*
+     * function in this file, a separate, wider fix -- see
+     * test_special_form_arity_crashes below for the full story). Before
+     * that fix, ir_lower/ir_optimize never actually raised for ANY
+     * currently-reachable top-level input at all (everything either
+     * became an unresolved IR_VAR_REF, deferred to ir_emit time, or fell
+     * back whole to IR_FALLBACK) -- `(if)` specifically used to SIGSEGV
+     * the whole process instead, so this is also this new entry point's
+     * own regression test for that fix actually reaching ir_lower's own
+     * dispatch, not just compile()'s classic one. */
+    {
+        val_t port = port_open_input_string("(if)", 4);
+        val_t expr = scm_read(port);
+        int before = gc_inhibit_save();
+        IRArena *arena = (IRArena *)(void *)1;  /* poison: must be overwritten */
+        IRNode *ir = compiler_ir_lower_for_jit(expr, &arena);
+        int after = gc_inhibit_save();
+        CHECK(ir == NULL, "compiler_ir_lower_for_jit: malformed input returns NULL, not a longjmp");
+        CHECK(arena == NULL, "compiler_ir_lower_for_jit: malformed input clears *out_arena");
+        CHECK(before == after, "compiler_ir_lower_for_jit: gc_inhibit_count balanced after raise");
+    }
+}
+
+/* Regression test for a real, confirmed, WIDESPREAD bug found by
+ * independent code review while landing Tier 2.6 step 1 (not something
+ * that landing introduced -- confirmed present on `main` too): every
+ * special-form compile_* / ir_lower_* function in this file originally read
+ * its own operands with bare vcar/vcdr and no arity/shape check at all,
+ * so a malformed-but-syntactically-readable source form -- too few parts
+ * for the special form it names -- SIGSEGV'd the whole process instead of
+ * raising a catchable condition. Found via `(if)`; confirmed to affect at
+ * least 19 special forms by direct testing before the fix (require_min_args,
+ * compiler.c). This is the regression test for all of them at once: each
+ * must now raise a catchable EC_WRONG_NUMBER_OF_ARGUMENTS condition
+ * (with gc_inhibit_count left balanced) instead of crashing. Uses run_vm
+ * (the real compiled path) rather than compiler_ir_lower_for_jit, since
+ * several of these forms (case/when/unless/do/guard/let-values/
+ * parameterize/define-record-type) have no IR-native lowering at all and
+ * are only reachable through compile()'s own classic dispatch. */
+static void test_special_form_arity_crashes(void) {
+    static const char *const forms[] = {
+        "(if)", "(if 1)", "(let)", "(let loop)", "(let*)", "(letrec)",
+        "(letrec*)", "(lambda)", "(define)", "(set!)", "(case)", "(when)",
+        "(unless)", "(do)", "(guard)", "(let-values)", "(let*-values)",
+        "(parameterize)", "(define-record-type)",
+        "(define-syntax)", "(let-syntax)", "(letrec-syntax)", "(syntax-rules)",
+    };
+    for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
+        int before = gc_inhibit_save();
+        ExnHandler h;
+        bool raised = false;
+        SCM_PROTECT(h, { run_vm(forms[i]); }, { raised = true; });
+        int after = gc_inhibit_save();
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s: raises cleanly instead of crashing", forms[i]);
+        CHECK(raised, msg);
+        snprintf(msg, sizeof(msg), "%s: gc_inhibit_count balanced after raise", forms[i]);
+        CHECK(before == after, msg);
+    }
 }
 
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
@@ -1362,6 +1395,7 @@ int main(void) {
     RUN_TEST(test_cons_pairp_nullp_open_coding);
     RUN_TEST(test_open_coding_preserves_tco);
     RUN_TEST(test_compiler_ir_lower_for_jit);
+    RUN_TEST(test_special_form_arity_crashes);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
