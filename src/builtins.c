@@ -255,8 +255,10 @@ static val_t prim_cons(int ac, val_t *av, void *ud) {
     p->car = av[0]; p->cdr = av[1];
     return vptr(p);
 }
-static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"car: not a pair"); return vcar(av[0]); }
-static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"cdr: not a pair"); return vcdr(av[0]); }
+/* Not static -- see builtins.h's own comment on why the compiler/VM need
+ * this exact function pointer for Tier 2.5 open-coding. */
+val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"car: not a pair"); return vcar(av[0]); }
+val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"cdr: not a pair"); return vcdr(av[0]); }
 static val_t prim_set_car(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-car!: not a pair");

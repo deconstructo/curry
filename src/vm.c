@@ -858,8 +858,52 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             vm->sp -= 2; *vm->sp++ = vptr(p);
             NEXT;
         }
-        CASE(OP_CAR)  { PUSH(vcar(POP())); NEXT; }
-        CASE(OP_CDR)  { PUSH(vcdr(POP())); NEXT; }
+        /* Tier 2.5 step 1: open-coded car/cdr -- see opcode.h's own
+         * comment on OP_CAR/OP_CDR for the full redefinition-safety
+         * design. load_global_cached reuses the exact same glob_cache
+         * infrastructure OP_LOAD_GLOBAL/OP_CALL_GLOBAL already use, so
+         * this costs one cache-hit lookup (usually just a version
+         * compare) plus one type+function-pointer comparison beyond a
+         * truly sealed primitive's cost -- still far cheaper than
+         * OP_CALL_GLOBAL's own full call-frame setup for the
+         * overwhelmingly common case where car/cdr haven't been
+         * redefined. The guard compares against prim_car/prim_cdr's
+         * actual C function pointer (builtins.h), not a compile-time-
+         * captured val_t snapshot: a snapshot captured AFTER car/cdr had
+         * already been redefined (a real bug caught while landing this --
+         * compiler.c's own emission-site comment has the repro) would
+         * silently treat the redefinition as if it WERE the primitive
+         * forever after; comparing against the actual, immutable function
+         * pointer is correct regardless of compile-time timing, and needs
+         * no second constant-pool slot at all. On a mismatch (redefined),
+         * falls back to call_foreign -- correct for every callee type
+         * (matches OP_CALL_GLOBAL's own non-BcClosure branch exactly),
+         * though a BcClosure callee here loses OP_CALL_GLOBAL's dedicated
+         * tail-call-reusable frame path; accepted as out of scope for
+         * this landing given how pathological "redefine car as a hot
+         * self-recursive closure, call it in tail position" already is. */
+        CASE(OP_CAR) {
+            uint8_t ci = READ_U8();
+            val_t current = load_global_cached(frame->closure->chunk, ci);
+            val_t x = POP();
+            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_car, 1)) {
+                PUSH(prim_car(1, &x, NULL));
+            } else {
+                PUSH(call_foreign(current, 1, &x));
+            }
+            NEXT;
+        }
+        CASE(OP_CDR) {
+            uint8_t ci = READ_U8();
+            val_t current = load_global_cached(frame->closure->chunk, ci);
+            val_t x = POP();
+            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_cdr, 1)) {
+                PUSH(prim_cdr(1, &x, NULL));
+            } else {
+                PUSH(call_foreign(current, 1, &x));
+            }
+            NEXT;
+        }
         CASE(OP_SETCAR) {
             val_t v = POP(), p = POP();
             GC_WB(as_pair(p), car, v);

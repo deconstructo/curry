@@ -290,12 +290,14 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_CALL: case OP_TAIL_CALL: case OP_SELF_TAIL_CALL:
     case OP_CLOSURE: case OP_CLOSE_UP:
     case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY:
-    case OP_SLIDE: case OP_TREE_EVAL_CACHED: {
+    case OP_SLIDE: case OP_TREE_EVAL_CACHED:
+    case OP_CAR: case OP_CDR: {
         uint8_t a = c->code[off++];
         fprintf(stderr, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||
             (OpCode)op == OP_STORE_GLOBAL || (OpCode)op == OP_DEF_GLOBAL ||
-            (OpCode)op == OP_DEFINED_GLOBAL) {
+            (OpCode)op == OP_DEFINED_GLOBAL ||
+            (OpCode)op == OP_CAR || (OpCode)op == OP_CDR) {
             /* print constant value */
             if (a < c->const_len) {
                 val_t v = c->constants[a];

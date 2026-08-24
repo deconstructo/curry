@@ -4806,6 +4806,53 @@ static void ir_emit(Compiler *c, IRNode *n) {
 
         if (vis_symbol(head) && !is_keyword_symbol(head) &&
             resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
+            /* Tier 2.5 step 1 (docs/thoughts/performance-chez-kaappi.md §5,
+             * item 2.5): open-code car/cdr instead of the ordinary fused-
+             * global-call path below, when the call shape matches their
+             * own fixed 1-arg arity exactly -- see OP_CAR/OP_CDR's own
+             * comment (opcode.h) for the full redefinition-safety design.
+             * car/cdr are ordinary, user-redefinable globals, not sealed
+             * VM primitives, so the opcode re-verifies at EVERY execution
+             * (comparing against prim_car/prim_cdr's actual function
+             * pointer, builtins.h) rather than trusting anything captured
+             * here at compile time -- this emission site only needs to
+             * decide WHETHER to try the fast opcode at all, never what to
+             * compare against. An earlier version of this landing tried
+             * to also bake in "the value car currently resolves to" as a
+             * second, compile-time-captured constant to compare against
+             * at runtime -- a real, confirmed bug: if `car` had ALREADY
+             * been redefined before this call site was compiled (a
+             * perfectly ordinary sequence: `(define (car x) ...)` followed
+             * by a later `(car ...)` call in the same or a later top-level
+             * form), that captured "expected" value WAS the redefinition,
+             * so the runtime guard matched it forever and the opcode kept
+             * open-coding raw pair access instead of ever calling the
+             * redefined procedure. Comparing against the actual, immutable
+             * C function pointer instead is correct regardless of
+             * compile-time timing, and needs no such capture at all --
+             * `head` only needs to be unshadowed (already confirmed above)
+             * and its symbol name checked. No compile-time env lookup
+             * either: if car/cdr are actually unbound in this chunk's
+             * target env, the opcode's own load_global_cached raises the
+             * correct unbound-variable error at runtime, same as the
+             * ordinary OP_CALL_GLOBAL path below would. Wrong arity
+             * (argc != 1) falls through on purpose: that's headed for a
+             * genuine wrong-number-of-arguments error either way, and the
+             * ordinary call path below already raises it correctly. */
+            bool opencoded = false;
+            if (argc == 1) {
+                val_t car_sym = sym_intern_cstr("car");
+                val_t cdr_sym = sym_intern_cstr("cdr");
+                if (head == car_sym || head == cdr_sym) {
+                    int sym_ci = chunk_add_const(c->chunk, head);
+                    ir_emit(c, n->as.call.args[0]);
+                    emit_ab(c, head == car_sym ? OP_CAR : OP_CDR,
+                            (uint8_t)sym_ci, n->line);
+                    opencoded = true;
+                }
+            }
+            if (opencoded) return;
+
             int ci = chunk_add_const(c->chunk, head);
             /* Tier 2.3: see the self-tail-call branch's own comment above. */
             int saved = c->local_count;

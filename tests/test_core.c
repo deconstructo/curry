@@ -11,6 +11,7 @@
 #include "object.h"
 #include "compiler.h"
 #include "vm.h"
+#include "builtins.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -72,6 +73,27 @@ static val_t run_vm(const char *src) {
     val_t port = port_open_input_string(src, (uint32_t)strlen(src));
     val_t expr = scm_read(port);
     val_t cl_val = compiler_compile(expr);
+    BcClosure *cl = as_bcclosure(cl_val);
+    vm_push(cl_val);
+    return vm_run(cl, 0);
+}
+
+/* Like run_vm(), but for a whole sequence of top-level forms compiled as
+ * ONE chunk (compiler_compile_script), matching how a real .scm script
+ * file is compiled -- needed for anything that depends on top-level
+ * forms sharing compile-time state across the sequence (e.g. a `car`
+ * redefinition in an earlier form affecting a later form's own
+ * compile-time decisions). run_vm can't stand in for this: it only ever
+ * reads and compiles a single expression. */
+static val_t run_vm_script(const char *src) {
+    val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+    val_t head = V_NIL, *tail = &head;
+    val_t datum;
+    while (!vis_eof(datum = scm_read(port))) {
+        *tail = scm_cons(datum, V_NIL);
+        tail = &as_pair(*tail)->cdr;
+    }
+    val_t cl_val = compiler_compile_script(head);
     BcClosure *cl = as_bcclosure(cl_val);
     vm_push(cl_val);
     return vm_run(cl, 0);
@@ -1115,6 +1137,56 @@ static void test_with_exception_handler_pending_slot_fix(void) {
         "with-exception-handler: let-producing thunk doesn't alias handler's pending slot");
 }
 
+/* Tier 2.5 step 1 (open-coding car/cdr, compiler.c's ir_emit IR_CALL
+ * case + OP_CAR/OP_CDR, vm.c). Basic correctness, plus a real regression
+ * caught while landing this: the first version captured "whatever car
+ * currently resolves to" as a compile-time constant to compare against
+ * at runtime, instead of the actual, immutable prim_car function
+ * pointer -- if car had ALREADY been redefined before a later call site
+ * in the SAME script was compiled (an entirely ordinary sequence:
+ * `(define (car x) ...)` followed by a later `(car ...)` call, both
+ * compiled together as one chunk by compiler_compile_script, exactly
+ * how a real .scm file compiles), that captured "expected" value WAS
+ * the redefinition, so the runtime guard matched it forever and kept
+ * open-coding raw pair access instead of ever calling the redefined
+ * procedure. `(define (car x) (list 'redefined x)) (car (list 1 2 3))`
+ * returned `1` (silently ignoring the redefinition) before this fix. */
+static void test_car_cdr_open_coding(void) {
+    CHECK(vunfix(run_vm("(car (list 1 2 3))")) == 1,
+          "open-coded car: basic correctness");
+    {
+        val_t cdr_result = run_vm("(cdr (list 1 2 3))");
+        CHECK(vis_pair(cdr_result) && vunfix(vcar(cdr_result)) == 2,
+              "open-coded cdr: basic correctness");
+    }
+
+    int before = gc_inhibit_save();
+    ExnHandler h;
+    bool raised = false;
+    SCM_PROTECT(h, { run_vm("(car 5)"); }, { raised = true; });
+    int after = gc_inhibit_save();
+    CHECK(raised, "open-coded car: wrong-type argument still raises");
+    CHECK(before == after, "open-coded car: gc_inhibit_count balanced after raise");
+
+    raised = false;
+    SCM_PROTECT(h, { run_vm("(car 1 2)"); }, { raised = true; });
+    CHECK(raised, "open-coded car: wrong arity still raises");
+
+    /* The actual regression: car redefined, then called, in the SAME
+     * compiled chunk (run_vm_script, not run_vm -- see its own comment). */
+    val_t redefined = run_vm_script(
+        "(define (car x) (list 'redefined x)) (car (list 1 2 3))");
+    CHECK(vis_pair(redefined) && vcar(redefined) == sym_intern_cstr("redefined"),
+          "open-coded car: redefinition in the same script is honored, not silently skipped");
+
+    /* Shadowing by a local named car/cdr must never open-code at all --
+     * resolve_local(c, head) >= 0 makes this branch unreachable for a
+     * shadowed reference, same guard the ordinary fused-global-call path
+     * already relies on. */
+    CHECK(vunfix(run_vm("(let ((car (lambda (x) (+ x 100)))) (car 5))")) == 105,
+          "open-coded car: local shadow is never open-coded");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1146,6 +1218,7 @@ int main(void) {
     RUN_TEST(test_do_step_pending_slot_fix);
     RUN_TEST(test_named_let_max_locals_guard);
     RUN_TEST(test_with_exception_handler_pending_slot_fix);
+    RUN_TEST(test_car_cdr_open_coding);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

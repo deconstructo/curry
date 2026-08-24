@@ -78,8 +78,26 @@ typedef enum {
 
     /* ── Pairs / lists ──────────────────────────────────────────────── */
     OP_CONS,        /* push cons(a, b)                                   */
-    OP_CAR,         /* push car(pop())                                   */
-    OP_CDR,         /* push cdr(pop())                                   */
+    /* Tier 2.5 step 1 (open-coding, docs/thoughts/performance-chez-kaappi.md
+     * §5): A = const-pool index of the symbol ('car/'cdr, same convention
+     * OP_CALL_GLOBAL's own `ci` operand uses -- looked up via the same
+     * glob_cache infrastructure, load_global_cached, vm.c). car/cdr are
+     * ordinary, user-redefinable global bindings (`(define car ...)` is
+     * legal R7RS) -- unlike a truly sealed VM primitive, this opcode must
+     * re-verify at every execution that the symbol's CURRENT binding is
+     * still the real primitive before taking the fast path, comparing
+     * against prim_car/prim_cdr's actual C function pointer (builtins.h),
+     * not any value captured at compile time (compiler.c's own emission-
+     * site comment explains why a compile-time-captured snapshot is
+     * actually unsafe here, not just unnecessary). On a mismatch (car/cdr
+     * redefined since compile time) it falls back to an ordinary call
+     * against whatever's bound now. Never emitted for any OTHER opcode
+     * shape -- these were previously defined but completely unemitted
+     * dead code (verified: zero compiler call sites), safely repurposed
+     * here since nothing depended on the old 0-operand "always unchecked,
+     * never verified" contract their comments used to describe. */
+    OP_CAR,         /* A: see above -- push car of TOS if global(A) is really the car primitive, else a real call */
+    OP_CDR,         /* A: see above -- push cdr of TOS if global(A) is really the cdr primitive, else a real call */
     OP_SETCAR,      /* set-car!(pair, val) — both popped                 */
     OP_SETCDR,      /* set-cdr!(pair, val)                               */
     OP_NULLP,       /* push (null? pop())                                */
