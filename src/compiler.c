@@ -5026,12 +5026,10 @@ static void ir_emit(Compiler *c, IRNode *n) {
          * for any other call in this file; `release_pending_slots` only
          * needs to fix up `c`'s own COMPILE-TIME local_count bookkeeping
          * to match, not emit any bytecode of its own. */
-        val_t loop_name = n->as.named_let.loop_name;
-        val_t bindings  = n->as.named_let.bindings;
+        val_t loop_name = loop_name0;
+        val_t bindings  = bindings0;
         val_t body      = n->as.named_let.body;
-
-        int argc = 0;
-        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) argc++;
+        int   argc      = argc0;  /* already counted for the guard above */
 
         /* Forward-order params list -- matches compile_let exactly. */
         val_t params = V_NIL;
