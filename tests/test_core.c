@@ -1458,6 +1458,16 @@ static void test_special_form_arity_crashes(void) {
         "(unless)", "(do)", "(guard)", "(let-values)", "(let*-values)",
         "(parameterize)", "(define-record-type)",
         "(define-syntax)", "(let-syntax)", "(letrec-syntax)", "(syntax-rules)",
+        /* with-exception-handler: missed by the original sweep (found by
+         * independent security review of the Tier 2.5 step 2 commit) --
+         * compile_with_exception_handler read vcar(args)/vcar(vcdr(args))
+         * unconditionally, with no require_min_args guard and no shape
+         * check in classify_head (unlike compile_receive's own guard at
+         * that same call site) to keep a too-short arg list from ever
+         * reaching it. `(with-exception-handler)` and
+         * `(with-exception-handler (lambda (e) e))` both SIGSEGV'd the
+         * whole process before this was added to require_min_args. */
+        "(with-exception-handler)", "(with-exception-handler (lambda (e) e))",
     };
     for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
         int before = gc_inhibit_save();

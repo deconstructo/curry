@@ -2664,6 +2664,7 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
      *   OP_CALL 1               ← (handler exn) → result
      *  end:
      */
+    require_min_args(args, 2, "with-exception-handler");
     val_t handler_expr = vcar(args);
     val_t thunk_expr   = vcar(vcdr(args));
 
