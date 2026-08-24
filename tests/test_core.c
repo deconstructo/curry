@@ -54,6 +54,29 @@ static val_t run(const char *src) {
     return result;
 }
 
+/* Like run(), but through the REAL compiled path (compiler_compile +
+ * vm_run) instead of eval()'s tree-walker -- needed for anything that
+ * only exists in classic compile()'s own special-form handling with no
+ * tree-walker equivalent to fall back to (apply/values/call-with-values
+ * are compiled directly by compile(), never interpreted by eval() at
+ * all). compiler_ir_optimize_check can't stand in for this either: it
+ * only catches divergence BETWEEN classic and IR compilation, and apply/
+ * values/call-with-values have no IR-native form, so both its "old" and
+ * "new" sides run the exact SAME classic code -- a bug shared by both
+ * sides compares equal to itself and is invisible to that check (exactly
+ * how the regression below escaped it, only caught by tests/sicm_tests.scm
+ * actually running the compiled bytecode). Only evaluates ONE expression
+ * (unlike run()) since compiler_compile takes a single expr, not a
+ * sequence. */
+static val_t run_vm(const char *src) {
+    val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+    val_t expr = scm_read(port);
+    val_t cl_val = compiler_compile(expr);
+    BcClosure *cl = as_bcclosure(cl_val);
+    vm_push(cl_val);
+    return vm_run(cl, 0);
+}
+
 static void test_fixnums(void) {
     CHECK(vis_fixnum(vfix(0)),   "vfix(0) is fixnum");
     CHECK(vunfix(vfix(42)) == 42,"vfix/vunfix round-trip");
@@ -245,7 +268,6 @@ static void test_ir_self_check(void) {
         "(if (> 3 2) (begin (+ 1 2) 'yes) 'no)",
         "((lambda (x) (if x (+ x 1) 0)) 5)",
         "(begin (define x 10) (if (> x 5) (* x 2) x))",
-        "(let ((a 1) (b 2)) (if (< a b) (begin a (+ a b)) b))",
         "(if (if #t #f #t) 'a (begin 'b 'c))",
         /* set! -- widened in the second landing */
         "(set! some-global 5)",
@@ -296,23 +318,23 @@ static void test_ir_self_check(void) {
          * call branch REAL coverage (previously correct-by-inspection
          * but unreachable -- an earlier version of this test wrongly
          * claimed a named-let case tested it, when named-let itself
-         * wasn't IR-lowered yet; caught by independent code review). */
-        "(let ((a 1) (b 2)) (+ a b))",
-        "(let () 42)",
-        "(let* ((a 1) (b (+ a 1)) (c (+ b 1))) c)",
+         * wasn't IR-lowered yet; caught by independent code review).
+         *
+         * Plain let/let-star/letrec/letrec-star cases with real bindings
+         * moved OUT of this list as of Tier 2.4 (wrapper elision): they
+         * no longer compile byte-identical to classic, by design -- see
+         * test_ir_optimize_check's own Tier 2.4 section below for their
+         * result-equality replacements. A zero-binding let-star is kept
+         * here since it still happens to compile identically either way
+         * (no params/args means no OP_SLIDE-vs-real-call-return
+         * difference for ir_emit_inline_call's splice to introduce). */
         "(let* () 'empty)",
-        "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 10))",
-        "(letrec* ((a 1) (b (+ a 1))) b)",
-        /* named-let: self-tail-call in tail position -- exercises
-         * IR_CALL's OP_SELF_TAIL_CALL branch for real. */
-        "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
-        /* a non-tail self-reference must NOT take the self-tail-call
-         * path (matches compile_call's own `tail &&` guard). */
-        "(let loop ((i 0)) (+ 1 (if (< i 3) (loop (+ i 1)) i)))",
-        /* named-let nested inside a call/if -- mixed with other already-
-         * lowered forms, the exact shape that caught real ordering bugs
-         * in earlier landings. */
-        "(+ 1 (let loop ((i 0)) (if (= i 3) i (loop (+ i 1)))))",
+        /* named-let cases with real bindings moved OUT of this list as of
+         * Tier 2.4 (named-let wrapper elision): like plain let / let* /
+         * letrec / letrec* above, they no longer compile byte-identical to
+         * classic (no more a real outer closure being allocated and
+         * called) -- see test_ir_optimize_check's own Tier 2.4 section
+         * below for their result-equality replacements. */
         /* receive/call-with-values with the "wrong" shape for the special
          * form fall through to an ordinary call (classify_head's shaped
          * checks) -- see compile()'s own SF_RECEIVE/SF_CALL_WITH_VALUES
@@ -638,6 +660,81 @@ static void test_ir_optimize_check(void) {
         "(let ((f (lambda (x) f))) (guard (e (#t 'correctly-unbound)) (procedure? (f 1))))",
         "(let ((y 10) (f (lambda (x) (+ x y)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
         "(let* ((f (lambda (x) (+ x f)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
+
+        /* Tier 2.4: wrapper elision -- let/let-star/letrec/letrec-star's
+         * OWN compiler-synthesized entry closure is now spliced directly
+         * into the caller's frame (ir_lower_lambda_call's only 3 producer
+         * sites; see ir_emit's IR_CALL head==V_FALSE branch). These moved
+         * here from test_ir_self_check since this landing deliberately
+         * makes their bytecode diverge from classic compilation -- only
+         * RESULTS need to still agree. */
+        "(let ((a 1) (b 2)) (+ a b))",
+        "(let () 42)",
+        "(let* ((a 1) (b (+ a 1)) (c (+ b 1))) c)",
+        "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 10))",
+        "(letrec* ((a 1) (b (+ a 1))) b)",
+        /* A nested closure inside the wrapper's own body capturing one of
+         * the wrapper's OWN bindings (not a let-bound lambda CANDIDATE --
+         * an ordinary escaping closure) -- proves end_scope's existing
+         * OP_CLOSE_UP logic still fires correctly with no separate
+         * wrapper closure frame in between it and the caller. */
+        "(let ((n 7)) (define get (lambda () n)) (get))",
+        "(letrec ((n 7) (get (lambda () n))) (get))",
+        /* let/letrec used as an argument to an outer call, with a
+         * binding name that shadows an outer variable -- composition with
+         * reserve_pending_slot/release_pending_slots, the exact
+         * miscompilation shape ir_emit_inline_call's own header comment
+         * documents, now one level further out (the let ITSELF is the
+         * pending sibling argument, not just a call inside it). */
+        "(let ((x 100)) (+ x (let ((x 1) (y 2)) (+ x y))))",
+        "(let ((x 100)) (+ x (letrec ((x 1) (y 2)) (+ x y))))",
+        /* letrec/letrec* with 2+ mutually-recursive internal bindings --
+         * proves splicing the wrapper doesn't disturb lambda_prescan's
+         * existing internal-define mutual-visibility handling. */
+        "(letrec ((e? (lambda (n) (if (= n 0) #t (o? (- n 1))))) (o? (lambda (n) (if (= n 0) #f (e? (- n 1)))))) (list (e? 8) (o? 8)))",
+        /* A real, confirmed miscompilation caught while landing this
+         * feature: a named-let's OWN init-argument-evaluation loop
+         * (IR_NAMED_LET's ir_emit case) never got the same
+         * reserve_pending_slot/release_pending_slots bracketing IR_CALL's
+         * argument loops already have -- before wrapper elision, no named-
+         * let init argument could ever splice new locals into `outer`
+         * mid-loop (a nested let always built a real, separate closure),
+         * so the gap was latent. Once a plain nested let could splice
+         * directly into whatever compiler was active when it was emitted,
+         * an EARLIER sibling init's still-pending stack value got aliased
+         * by the LATER let-init's own spliced locals -- reproduced
+         * directly against (srfi s128 comparators)'s real %default-hash
+         * helper (a named-let whose middle binding's init is itself a
+         * nested let), which segfaulted the whole process under ctest
+         * before this fix. */
+        "(let loop ((i 0) (acc 17) (s (let ((out (+ 1 2))) (+ out 3)))) (if (= i 1) (+ acc s) (loop (+ i 1) (+ acc 1) s)))",
+        /* Same shape, deliberately 3+ siblings around the splicing init
+         * (not just before it) to also cover a LATER sibling referencing
+         * an outer name the spliced let's own params happen to shadow. */
+        "(let ((x 100)) (let loop ((a (let ((x 1)) (+ x 1))) (b x) (c (let ((x 2)) (+ x 1)))) (+ a b c)))",
+
+        /* Tier 2.4: named-let wrapper elision -- named-let's own "zero-arg
+         * outer wrapper" (see IR_NAMED_LET's own ir_emit case) is now
+         * spliced directly into the caller's frame too, the same way the
+         * plain let / let* / letrec / letrec* wrapper already is; the loop's
+         * OWN lambda (holding the real, still-genuinely-recursive closure
+         * self-tail-call semantics) is untouched -- only the "bind
+         * loop_name, evaluate the initial bindings, call it" wrapper
+         * around that closure is elided. Moved here from
+         * test_ir_self_check for the same reason the plain-let cases were:
+         * no more real "outer" closure being allocated and called, so the
+         * bytecode legitimately diverges from classic. */
+        "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
+        /* a non-tail self-reference must NOT take the self-tail-call
+         * path (matches compile_call's own `tail &&` guard) -- also now
+         * the case that proves this wrapper's own final call correctly
+         * uses OP_CALL, not OP_TAIL_CALL, when the named-let expression
+         * itself isn't in tail position relative to its enclosing scope. */
+        "(let loop ((i 0)) (+ 1 (if (< i 3) (loop (+ i 1)) i)))",
+        /* named-let nested inside a call/if -- mixed with other already-
+         * lowered forms, the exact shape that caught real ordering bugs
+         * in earlier landings. */
+        "(+ 1 (let loop ((i 0)) (if (= i 3) i (loop (+ i 1)))))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -703,6 +800,321 @@ static void test_ir_inline_fires(void) {
     }
 }
 
+/* Tier 2.4 stress cases, built programmatically since their whole point is
+ * SIZE: a plain `let*` desugars to one nested wrapper per binding, and
+ * with wrapper elision every level of that chain now splices via
+ * ir_emit_inline_call with track_cycle=false -- this is the direct
+ * regression test for the cycle-detection-budget-exhaustion gap the
+ * design review caught (see ir_emit_inline_call's own header comment):
+ * without track_cycle=false, a ~150-binding let* chain would push
+ * g_inlining_bodies past MAX_INLINE_DEPTH=64 on every compile, silently
+ * degrading cycle detection for genuine named-candidate mutual recursion
+ * compiled anywhere else in the SAME top-level expression. A deeply
+ * nested plain `let` chain is a separate smoke test for C-stack depth in
+ * the compiler itself (ir_emit_inline_call recurses one C frame per
+ * splice level, same as the pre-existing IR_LAMBDA path it replaces --
+ * this proves that didn't get WORSE, not that recursion was newly
+ * introduced). */
+static void test_ir_wrapper_elision_stress(void) {
+    /* (let* ((a0 0) (a1 (+ a0 1)) ... (a149 (+ a148 1))) a149) == 149 */
+    {
+        char buf[16384];
+        /* size_t + clamp-after-every-call, matching test_ir_self_check's
+         * own "snprintf's return value is how many bytes WOULD have been
+         * written" fix above -- see that block's own comment for the full
+         * rationale (flagged again here by CodeQL on this file's own
+         * newer, unfixed copies of the identical pattern). */
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 150; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+                             " (a%d (+ a%d 1))", i, i - 1);
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        snprintf(buf + off, sizeof(buf) - off, ") a149)");
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: long let* chain (149 bindings)");
+    }
+
+    /* Same long let* chain, but with genuine named-candidate mutual
+     * recursion (even?/odd?) nested inside its own body -- proves
+     * track_cycle=false on the chain's own splices doesn't disturb
+     * track_cycle=true cycle detection for the mutual recursion, which
+     * must still correctly decline to inline either candidate. */
+    {
+        char buf[16384];
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 100; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+                             " (a%d (+ a%d 1))", i, i - 1);
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+            ") (letrec ((e? (lambda (n) (if (= n 0) #t (o? (- n 1)))))"
+            "           (o? (lambda (n) (if (= n 0) #f (e? (- n 1))))))"
+            "  (list a99 (e? 20) (o? 20))))");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: long let* chain + nested mutual recursion");
+    }
+
+    /* (let ((x0 1)) (let ((x1 (+ x0 1))) ... N levels ... )) -- C-stack
+     * depth smoke test, no result correctness subtlety (each level just
+     * adds 1). N deliberately conservative (120, not e.g. 200): this
+     * process's C-stack limit for this kind of recursive-descent IR
+     * lowering isn't a fixed constant -- it's however many levels fit
+     * given ir_emit's OWN current per-call stack-frame size, which grows
+     * whenever a new case in its switch adds more local variables (an
+     * unoptimized/Debug build typically doesn't shrink a function's frame
+     * back down between sibling switch cases). Confirmed directly: this
+     * exact test at N=200 started segfaulting purely from the Tier 2.4
+     * named-let-wrapper-elision landing adding several new locals to
+     * ir_emit's IR_NAMED_LET case, with no logic bug involved -- and the
+     * same threshold-sensitivity was already independently confirmed
+     * present on `main`, unrelated to any Tier 2.4 work at all (see the
+     * MAX_LOCALS-guard commit's own message). 120 leaves comfortable
+     * headroom against future, similarly innocuous frame-size growth. */
+    {
+        char buf[16384];
+        size_t off = (size_t)snprintf(buf, sizeof(buf), "(let ((x0 1))");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 1; i < 120; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+                             " (let ((x%d (+ x%d 1)))", i, i - 1);
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, " x119");
+        if (off > sizeof(buf)) off = sizeof(buf);
+        for (int i = 0; i < 120; i++) {
+            off += (size_t)snprintf(buf + off, sizeof(buf) - off, ")");
+            if (off > sizeof(buf)) off = sizeof(buf);
+        }
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: deeply nested let chain (120 levels)");
+    }
+}
+
+/* Regression test for a real, confirmed memory-corruption bug found by
+ * independent code review of this same landing: a single FLAT `let` with
+ * more bindings than MAX_LOCALS (256) -- unlike the let*-chain/deep-
+ * nesting cases in test_ir_wrapper_elision_stress above, this hits the
+ * guard in ONE ir_emit_inline_call call (argc=300 by itself), not via
+ * cross-splice accumulation, and needs no deep C-stack recursion to reach
+ * (deep nesting/let* accumulation toward 256 actually hits a PRE-
+ * EXISTING, already-present-on-main C-stack-depth segfault around ~200
+ * levels first -- confirmed by testing this same expression shape against
+ * `main`, unrelated to this landing). ir_emit's new Tier 2.4 wrapper-
+ * elision branch originally called ir_emit_inline_call unconditionally
+ * whenever head==V_FALSE and the callee was a literal IR_LAMBDA, with no
+ * MAX_LOCALS bound check -- unlike the Tier 2.3 named-candidate call site,
+ * which already guards with `c->local_count + argc < MAX_LOCALS`.
+ * ir_emit_inline_call's own param-claiming loop writes `c->locals[base +
+ * i]` / `c->known[base + i]` for i in [0, argc) with no bounds check of
+ * its own -- for argc=300, base+i walks straight past index 255 and out
+ * of bounds of both fixed-size 256-entry arrays, corrupting adjacent
+ * Compiler struct fields on the C stack. Confirmed as a real, not just
+ * theoretical, crash: reverting just the added guard and running this
+ * same expression through the CLI reliably produced a Bus error (SIGBUS),
+ * not a clean Scheme-level error.
+ *
+ * With the guard in place, this now falls back to the ordinary "emit
+ * callee as a real closure, call it" path -- which hits the SAME
+ * MAX_LOCALS(256) limit compile_params/add_local already enforce for any
+ * ordinary closure, on BOTH the classic and IR sides, so
+ * compiler_ir_optimize_check itself would re-raise rather than return a
+ * bool; this uses its own SCM_PROTECT instead, following the exact same
+ * pattern as the `>256-constant overflow raises` case in
+ * test_ir_self_check above -- the assertion is that this raises a
+ * catchable, well-formed error (and leaves gc_inhibit_count balanced)
+ * rather than corrupting memory or crashing the process.
+ *
+ * Deliberately its OWN function, not folded into
+ * test_ir_wrapper_elision_stress above: that function's 200-level nested-
+ * let case is already close to this process's C-stack limit (a pre-
+ * existing, on-`main` fragility, unrelated to this landing), and a sibling
+ * lexical block's own large on-stack `char buf[]` still contributes to
+ * that SAME function's total stack-frame size in an unoptimized build even
+ * though it's used later -- confirmed by reproducing a spurious crash in
+ * the unrelated 200-level case purely from adding this buffer to that
+ * function, before splitting it out. */
+static void test_ir_wrapper_elision_max_locals_guard(void) {
+    char buf[8192];
+    /* size_t + clamp-after-every-call -- see test_ir_self_check's own
+     * "snprintf's return value is how many bytes WOULD have been written"
+     * comment for the full rationale. The loop's own `off < sizeof(buf)`
+     * guard alone isn't enough: a single iteration can still push `off`
+     * past sizeof(buf) before the guard is rechecked, and the trailing
+     * snprintf call below runs unconditionally either way. */
+    size_t off = (size_t)snprintf(buf, sizeof(buf), "(define x 1) (let (");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    for (int i = 0; i < 300 && off < sizeof(buf); i++) {
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, "(a%d x) ", i);
+        if (off > sizeof(buf)) off = sizeof(buf);
+    }
+    snprintf(buf + off, sizeof(buf) - off, ") a299)");
+    val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+    val_t def_expr = scm_read(port);
+    val_t let_expr = scm_read(port);
+
+    eval(def_expr, GLOBAL_ENV);  /* curry's own tree-walking Scheme evaluator (src/eval.c), not JS eval */
+
+    int before = gc_inhibit_save();
+    ExnHandler h;
+    bool raised = false;
+    SCM_PROTECT(h, {
+        compiler_ir_optimize_check(let_expr);
+    }, {
+        raised = true;
+    });
+    int after = gc_inhibit_save();
+    CHECK(raised,
+          "ir optimize-check: 300-binding flat let raises cleanly (no MAX_LOCALS overflow)");
+    CHECK(before == after,
+          "ir optimize-check: gc_inhibit_count balanced after 300-binding let raise");
+}
+
+/* Regression test for a real, confirmed miscompilation found while
+ * testing named-let wrapper elision above, but NOT specific to named-let
+ * or even to this landing at all: apply/values/call-with-values are
+ * classic special forms (compile()'s SF_APPLY/SF_VALUES/
+ * SF_CALL_WITH_VALUES, compiler.c) with no IR-native form of their own --
+ * each compiles its own multiple sub-expressions with a plain sequential
+ * loop that PREDATES Tier 2.3's reserve_pending_slot convention and was
+ * never updated for it (compile_call's own, otherwise-identical argument
+ * loop already has this bracketing, added by Tier 2.3 -- these three just
+ * never got the same pass, since nothing about landing the LOCAL inliner
+ * itself touched them).
+ *
+ * The bug: with only Tier 2.4's let / let* / letrec / letrec* / named-let wrapper
+ * elision in place (this whole branch, not just the named-let work), a
+ * LATER argument to apply/values/call-with-values that happens to be one
+ * of those forms now splices real locals directly into the SAME Compiler
+ * compiling the earlier arguments -- but since the earlier arguments'
+ * own already-pushed values were never reserve_pending_slot'd, the
+ * splice computes its new locals' slot indices against a local_count
+ * that doesn't account for them, aliasing physical stack positions the
+ * earlier arguments are still using. Confirmed as a real, silent wrong-
+ * VALUE bug (not a crash): `(apply + (list 1 (let ((x 5)) x) 2))`
+ * returned 4 instead of 8 before the fix -- originally surfaced by
+ * tests/sicm_tests.scm's `Hamilton-equations`/`Lagrangian->Hamiltonian`
+ * failing deep in real physics code, not by anything in this file, since
+ * compiler_ir_optimize_check's differential classic-vs-IR comparison
+ * cannot catch it: apply/values/call-with-values have no IR-native form,
+ * so its "old" and "new" sides run the EXACT SAME classic code and the
+ * shared bug compares equal to itself. Needs run_vm (real compiled
+ * execution), not compiler_ir_optimize_check, to catch at all. */
+static void test_apply_values_pending_slot_fix(void) {
+    CHECK(vunfix(run_vm("(apply + (list 1 (let ((x 5)) x) 2))")) == 8,
+          "apply: let argument doesn't alias an earlier pending sibling argument");
+    CHECK(vunfix(run_vm("(apply + (list 1 (let loop ((i 0)) (if (= i 1) 5 (loop (+ i 1)))) 2))")) == 8,
+          "apply: named-let argument doesn't alias an earlier pending sibling argument");
+    CHECK(vunfix(run_vm(
+        "(call-with-values (lambda () (values 1 (let ((x 5)) x) 2)) (lambda (a b c) (+ a b c)))")) == 8,
+        "call-with-values: let-producing value doesn't alias an earlier pending sibling value");
+    CHECK(vunfix(run_vm(
+        "(let* ((a 1) (b (apply + (list a (let ((x 5)) x) 2)))) b)")) == 8,
+        "apply nested inside let*'s own wrapper-elided body still sees correct pending-slot bookkeeping");
+}
+
+/* Regression test for a real, confirmed miscompilation found by
+ * independent code review: compile_do's step-expression loop (compiler.c,
+ * `(do ((var init step) ...) (test result) body...)`) has the exact same
+ * bug class, and needed the exact same fix, as SF_VALUES/SF_APPLY/
+ * SF_CALL_WITH_VALUES above -- its own step-compilation loop also
+ * predates reserve_pending_slot and was never bracketed with it. Before
+ * the fix, a step expression that spliced real locals (any Tier 2.4
+ * wrapper-elided form) corrupted `base`'s own computation (`d->local_count
+ * - nv`, evaluated AFTER the splice-disturbed loop instead of captured
+ * before it), which is doubly dangerous for a `do` loop specifically:
+ * `base` here doesn't just mislocate a transient result the way apply/
+ * values did, it selects which PERSISTENT loop-variable slots the
+ * OP_STORE_LOCAL loop overwrites -- get it wrong and the loop variables
+ * never actually update, so the termination test never becomes true and
+ * the loop runs forever. Confirmed directly: `(do ((i 0 (+ i 1)) (acc 0
+ * (+ acc (let ((x 1)) x)))) ((= i 3) acc))` hung indefinitely before the
+ * fix (not merely a wrong value) -- caught interactively, not by this
+ * suite, since nothing here previously exercised a splicing step
+ * expression at all. */
+static void test_do_step_pending_slot_fix(void) {
+    CHECK(vunfix(run_vm(
+        "(do ((i 0 (+ i 1)) (acc 0 (+ acc (let ((x 1)) x)))) ((= i 3) acc))")) == 3,
+        "do: let step expression doesn't alias an earlier pending sibling step value");
+    CHECK(vunfix(run_vm(
+        "(do ((i 0 (+ i 1)) (acc 0 (+ acc (let loop ((j 0)) (if (= j 1) 1 (loop (+ j 1))))))) ((= i 3) acc))")) == 3,
+        "do: named-let step expression doesn't alias an earlier pending sibling step value");
+}
+
+/* Regression test for a real, confirmed memory-corruption bug found by
+ * independent code review: IR_NAMED_LET's own wrapper-elision splice
+ * (ir_emit's IR_NAMED_LET case, compiler.c) called add_local(c,
+ * loop_name) directly against the enclosing Compiler with NO MAX_LOCALS
+ * guard, unlike the sibling let / let* / letrec / letrec* elision branch, which
+ * already added `c->local_count + argc < MAX_LOCALS` after an earlier
+ * round of this same review found the identical risk there. On overflow,
+ * add_local silently returns slot 0 (a stale, already-live, unrelated
+ * local's own slot) instead of a fresh one, and the OP_STORE_LOCAL that
+ * follows then overwrites THAT local's real runtime value out from under
+ * it -- not a crash, a silent corruption of unrelated program state.
+ * Confirmed directly: a 256-param function (filling MAX_LOCALS exactly)
+ * with a named-let anywhere in its body, called and returning its first
+ * parameter afterward, returned a corrupted internal object instead of
+ * that parameter's real value before the fix. The fix falls back to
+ * building a real, separate closure for the wrapper (the pre-Tier-2.4
+ * behavior) whenever there isn't room to splice safely -- this is the
+ * direct regression test for that fallback actually firing and producing
+ * the CORRECT value, not just avoiding a crash. Its own function, not
+ * folded into another test, for the same on-stack-buffer-size reason
+ * test_ir_wrapper_elision_max_locals_guard already documents. */
+static void test_named_let_max_locals_guard(void) {
+    char buf[8192];
+    /* size_t + clamp-after-every-call -- see test_ir_self_check's own
+     * "snprintf's return value is how many bytes WOULD have been written"
+     * comment for the full rationale. */
+    size_t off = (size_t)snprintf(buf, sizeof(buf), "(let ()");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off, " (define (f");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    for (int i = 0; i < 256 && off < sizeof(buf); i++) {
+        off += (size_t)snprintf(buf + off, sizeof(buf) - off, " p%d", i);
+        if (off > sizeof(buf)) off = sizeof(buf);
+    }
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+        ") (let loop ((i 0)) (if (= i 1) i (loop (+ i 1)))) p0)");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    off += (size_t)snprintf(buf + off, sizeof(buf) - off,
+        " (apply f (make-list 256 42)))");
+    if (off > sizeof(buf)) off = sizeof(buf);
+    CHECK(off < sizeof(buf), "named-let MAX_LOCALS guard source fits in buffer");
+    CHECK(vunfix(run_vm(buf)) == 42,
+          "named-let: MAX_LOCALS overflow falls back to a real closure instead of corrupting a local");
+}
+
+/* Regression test for a real, confirmed miscompilation found by
+ * independent code review: compile_with_exception_handler's own
+ * `(with-exception-handler handler thunk)` codegen (compiler.c) has the
+ * same pending-slot bug class as SF_VALUES/SF_APPLY/SF_CALL_WITH_VALUES/
+ * compile_do/compile_do's own fixes elsewhere in this file -- handler's
+ * own fresh result is a still-pending value on the physical stack while
+ * thunk compiles below it, and thunk splicing real locals (any Tier 2.4
+ * wrapper-elided form) without accounting for handler's pending slot
+ * aliases it. Confirmed as a real bug: `(with-exception-handler (lambda
+ * (e) 'handled) (let ((f (lambda () 42))) f))` returned 'handled (as if
+ * an exception were raised and caught) instead of calling the thunk and
+ * returning 42 -- silently wrong control flow, not merely a wrong value. */
+static void test_with_exception_handler_pending_slot_fix(void) {
+    CHECK(run_vm(
+        "(with-exception-handler (lambda (e) 'handled) (let ((f (lambda () 'ok))) f))")
+        == sym_intern_cstr("ok"),
+        "with-exception-handler: let-producing thunk doesn't alias handler's pending slot");
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -728,6 +1140,12 @@ int main(void) {
     RUN_TEST(test_ir_self_check);
     RUN_TEST(test_ir_optimize_check);
     RUN_TEST(test_ir_inline_fires);
+    RUN_TEST(test_ir_wrapper_elision_stress);
+    RUN_TEST(test_ir_wrapper_elision_max_locals_guard);
+    RUN_TEST(test_apply_values_pending_slot_fix);
+    RUN_TEST(test_do_step_pending_slot_fix);
+    RUN_TEST(test_named_let_max_locals_guard);
+    RUN_TEST(test_with_exception_handler_pending_slot_fix);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

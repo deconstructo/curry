@@ -97,6 +97,49 @@ brew install llvm
 cmake -B build -DBUILD_LLVM=ON -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
 ```
 
+## Cross-distro build verification (Docker)
+
+CI (`.github/workflows/ci.yml`) only covers `ubuntu-latest` and `macos-latest`.
+On an Apple Silicon Mac, Docker Desktop (or `podman`/the `container` CLI) can
+pull and run **native arm64** Ubuntu and Fedora images — not cross-compilation,
+a real compile on each distro's own libc/toolchain — to sanity-check a branch
+before it hits CI, e.g. against distros CI doesn't run at all (Fedora) or to
+double-check package-name/toolchain drift on Ubuntu ahead of time. Mount the
+repo read-only and copy it inside the container before building, so the
+container's build tree never touches the host's own `build/` directory:
+
+```bash
+# Ubuntu 24.04, arm64 — matches ci.yml's Linux dependency list (apt)
+docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro ubuntu:24.04 bash -c '
+  set -ex
+  apt-get update
+  apt-get install -y libgc-dev libgmp-dev cmake build-essential pkg-config \
+    libssl-dev libsqlite3-dev libcurl4-openssl-dev \
+    libpng-dev libjpeg-dev libgit2-dev libplplot-dev redis-server mosquitto git
+  cp -r /src /work && cd /work
+  cmake -B build -DCMAKE_BUILD_TYPE=Debug
+  cmake --build build -j$(nproc)
+  ctest --test-dir build --output-on-failure -j$(nproc)
+'
+
+# Fedora, arm64 — dnf package names differ from apt (gc-devel vs libgc-dev, etc.)
+docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro fedora:latest bash -c '
+  set -ex
+  dnf install -y gc-devel gmp-devel cmake gcc gcc-c++ make pkgconfig \
+    openssl-devel sqlite-devel libcurl-devel \
+    libpng-devel libjpeg-turbo-devel libgit2-devel plplot-devel redis mosquitto git
+  cp -r /src /work && cd /work
+  cmake -B build -DCMAKE_BUILD_TYPE=Debug
+  cmake --build build -j$(nproc)
+  ctest --test-dir build --output-on-failure -j$(nproc)
+'
+```
+
+This is a manual, on-demand check (not wired into CI) — useful whenever a
+change touches anything platform-sensitive: package availability, glibc vs.
+musl assumptions, compiler-version-dependent C code, endianness/alignment,
+or anything else CI's two-OS matrix wouldn't catch.
+
 ## Tests
 
 **When working on the compiler, VM, or anything else that changes codegen, always run `curry` against `.scm` test files with `--clear-cache`** (or delete stale `.scc` files first — `find tests -name '*.scc' -delete`). The transparent `.scc` cache (see below) is keyed on source *content* hash, not compiler version: a `.scc` file compiled by yesterday's binary is still a cache HIT today if the `.scm` source hasn't changed, silently serving old bytecode instead of re-running your changes through the compiler. `ctest`'s Scheme-based suites (`scheme_r7rs`, `scheme_r6rs`, `syntax_rules`, every `srfi_*`/module test, etc. — everything except the pure-C `core` target) invoke `curry` on checked-in `.scm` files this same way and are just as exposed: a stale `.scc` left over from before your change can make `ctest` report a pass that never actually exercised the new code. Confirmed concretely during Tier 2.1/2.2 IR development: `ctest` reported 99/99 passing against `.scc` files compiled the day before a live-dispatch refactor landed (`curry --timings tests/r7rs_tests.scm` showed `cache HIT`) — the suite wasn't lying, but it also wasn't testing the refactor. Clearing all `.scc` files and rerunning was the only way to get a genuine result.

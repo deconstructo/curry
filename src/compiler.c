@@ -2535,14 +2535,39 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     vs = var_specs;
     while (vis_pair(vs)) { nv++; vs = vcdr(vs); }
 
+    /* Tier 2.4 fix (found by independent code review; same bug class,
+     * same fix, as SF_VALUES/SF_APPLY/SF_CALL_WITH_VALUES's own "Tier 2.4
+     * fix" comments above): this loop predates reserve_pending_slot and
+     * was never updated for it. A step expression that is itself a
+     * let / let* / letrec / letrec* / named-let now splices real locals
+     * directly into `d` -- without this bracketing, a LATER step's own
+     * splice computes its new locals' slot indices against a
+     * d->local_count that doesn't account for the EARLIER steps' own
+     * already-pushed, still-pending values, aliasing physical stack
+     * positions those earlier steps are still using.
+     *
+     * `base` itself is unrelated to this bracketing: it identifies the nv
+     * PERSISTENT loop-variable slots (added via add_local during the init
+     * phase above, at the very top of this function), which is exactly
+     * `saved - nv` -- `saved` (== d->local_count right before this loop)
+     * only equals `d->local_count - nv` measured AFTER the loop when
+     * nothing in between changes local_count, which no longer holds once
+     * a step can splice new locals of its own; capturing `saved` before
+     * this loop and subtracting nv from IT is what stays correct in both
+     * cases. Confirmed as a real, silent wrong-value bug: `(do ((i 0 (+ i
+     * 1)) (acc 0 (+ acc (let ((x 1)) x)))) ((= i 3) acc))` returned 0
+     * instead of 3 before this fix. */
+    int saved = d->local_count;
     vs = var_specs;
     while (vis_pair(vs)) {
         val_t spec = vcar(vs);
         val_t step = vis_pair(vcdr(vcdr(spec))) ? vcar(vcdr(vcdr(spec))) : vcar(spec);
         compile(d, step, false, line);
+        reserve_pending_slot(d);
         vs = vcdr(vs);
     }
-    int base = d->local_count - nv;
+    int base = saved - nv;
+    release_pending_slots(d, saved);
     for (int i = nv - 1; i >= 0; i--)
         emit_ab(d, OP_STORE_LOCAL, (uint8_t)(base + i), line);
 
@@ -2592,14 +2617,30 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
     val_t handler_expr = vcar(args);
     val_t thunk_expr   = vcar(vcdr(args));
 
+    /* Tier 2.4 fix (same bug class, same fix, as SF_VALUES/SF_APPLY/
+     * SF_CALL_WITH_VALUES/compile_do's own "Tier 2.4 fix" comments
+     * elsewhere in this file): handler_expr's own fresh result is a
+     * still-pending value on the physical stack while thunk_expr
+     * compiles below -- if thunk_expr is itself (or evaluates via) a
+     * let / let* / letrec / letrec* / named-let, its own splice must not treat
+     * `c->local_count` as if it already accounted for handler's value,
+     * or its own new locals alias handler's physical stack slot.
+     * Confirmed as a real bug: `(with-exception-handler (lambda (e)
+     * 'handled) (let ((f (lambda () 42))) f))` returned 'handled instead
+     * of calling the thunk and returning 42. */
+    int saved = c->local_count;
+
     /* Compile handler (stays below the protected call on the stack) */
     compile(c, handler_expr, false, line);
+    reserve_pending_slot(c);
 
     /* OP_PUSH_HANDLER: saves sp at this point (past handler, before thunk) */
     int catch_placeholder = emit_jump(c, OP_PUSH_HANDLER, line);
 
     /* Compile thunk and call it with no arguments */
     compile(c, thunk_expr, false, line);
+    reserve_pending_slot(c);
+    release_pending_slots(c, saved);
     emit_ab(c, OP_CALL, 0, line);          /* (thunk) → result */
 
     /* Normal path: remove handler, discard it, keep result */
@@ -3499,24 +3540,51 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* values */
     case SF_VALUES: {
+        /* Tier 2.4 fix (found via a real, confirmed miscompilation:
+         * `(values 1 (let ((x 5)) x) 2)` returned (1 1 2) instead of
+         * (1 5 2)): this loop predates Tier 2.3's reserve_pending_slot
+         * convention and was never updated for it -- compile_call's own
+         * identical argument loop already has this bracketing (see its
+         * own "Tier 2.3" comment), but SF_VALUES/SF_APPLY/
+         * SF_CALL_WITH_VALUES below are classic special forms with no IR-
+         * native form of their own, so they never got the same pass. Any
+         * one of these several already-pushed-but-untracked pending
+         * values (e.g. `1` above) is exactly the "still-pending sibling
+         * argument" reserve_pending_slot's own comment warns about: a
+         * LATER item that happens to be a let / let* / letrec / letrec* /
+         * named-let now splices real locals directly into `c` (Tier 2.4), and
+         * without this bracketing it computes its own new slot indices
+         * against a `c->local_count` that doesn't yet account for the
+         * earlier items' own already-pushed values -- aliasing physical
+         * stack positions that are still very much in use. */
         int n = 0;
         val_t a = args;
+        int saved = c->local_count;
         while (vis_pair(a)) {
             compile(c, vcar(a), false, line);
+            reserve_pending_slot(c);
             n++; a = vcdr(a);
         }
+        release_pending_slots(c, saved);
         emit_ab(c, OP_VALUES, (uint8_t)n, line);
         return;
     }
 
     /* apply — (apply f arg1 ... rest-list) */
     case SF_APPLY: {
+        /* Tier 2.4 fix -- see SF_VALUES's own comment just above for the
+         * full rationale; same bug, same fix, this is the actual site
+         * where it was originally found: `(apply + (list 1 (let ((x 5))
+         * x) 2))` returned 4 instead of 8. */
         int n = 0;
         val_t a = args;
+        int saved = c->local_count;
         while (vis_pair(a)) {
             compile(c, vcar(a), false, line);
+            reserve_pending_slot(c);
             n++; a = vcdr(a);
         }
+        release_pending_slots(c, saved);
         emit_ab(c, OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
         return;
     }
@@ -3533,11 +3601,19 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
      * self-recursive loop would otherwise accumulate one nested call
      * frame per iteration instead of looping forever. Shape already
      * verified by classify_head. */
-    case SF_CALL_WITH_VALUES:
+    case SF_CALL_WITH_VALUES: {
+        /* Tier 2.4 fix -- see SF_VALUES's own comment above for the full
+         * rationale; same bug (the producer thunk is a still-pending
+         * value while the consumer is compiled). */
+        int saved = c->local_count;
         compile(c, vcar(args), false, line);
+        reserve_pending_slot(c);
         compile(c, vcar(vcdr(args)), false, line);
+        reserve_pending_slot(c);
+        release_pending_slots(c, saved);
         emit(c, tail ? OP_TAIL_CALL_WITH_VALUES : OP_CALL_WITH_VALUES, line);
         return;
+    }
 
     /* parameterize — desugar to let + dynamic-wind in the compiler so that
        local variables in the body are captured as upvalues, not looked up
@@ -4305,8 +4381,35 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
  * (c) OP_SLIDE compacts every spliced local away, leaving only the
  * inlined body's final value on the stack -- exactly where a real call's
  * return value would have ended up. No new opcode needed. */
+/* `known_params` (Tier 2.4, wrapper elision): NULL for the existing
+ * Tier 2.3 named-candidate call site, or the let/let*-desugared wrapper's
+ * own per-param closedness analysis (ir_lower_let/ir_lower_let_star) when
+ * this splice IS that wrapper's callee -- see IRKnownParam's own comment
+ * (ir.h) for what it records. Transferred into c->known[] here, the same
+ * way IR_LAMBDA's own ir_emit case already does for a REAL (non-spliced)
+ * closure, so splicing a let's own wrapper away doesn't silently regress
+ * the already-shipped optimization for a let-bound lambda literal called
+ * inside that same let's own body (caught by independent design review
+ * before this landing: routing straight to this function bypasses
+ * IR_LAMBDA's case entirely, which is the only other place that transfer
+ * happens).
+ *
+ * `track_cycle`: true for the Tier 2.3 named-candidate path (this body
+ * IS looked up by name at other call sites, so currently_inlining's
+ * g_inlining_bodies stack must track it to catch mutual recursion via
+ * splicing); false for wrapper elision, where a body is never looked up
+ * by name a second time (nothing registers it in any known[] table) --
+ * cycle detection is structurally meaningless for that path. Passing
+ * false there is required, not just an optimization: g_inlining_bodies
+ * is a small, FIXED-size, SHARED array (MAX_INLINE_DEPTH) that unconditional
+ * per-let-level tracking would exhaust for an entirely ordinary, non-
+ * adversarial long let* chain (each binding is its own nested wrapper),
+ * silently degrading cycle detection for genuine named-candidate mutual
+ * recursion nested elsewhere in the same compile -- caught by independent
+ * design review before this landing. */
 static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
-                                 IRNode **args, int argc, IRNode *call_node) {
+                                 IRNode **args, int argc, IRNode *call_node,
+                                 IRKnownParam *known_params, bool track_cycle) {
     begin_scope(c);
 
     /* Every argument must be evaluated -- and, in particular, every
@@ -4356,15 +4459,36 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
         p = vcdr(p);
     }
 
+    /* Tier 2.4: transfer any per-param known-lambda registration the
+     * caller already computed (let/let*'s own closedness analysis --
+     * see this function's own header comment). Same shape as IR_LAMBDA's
+     * own ir_emit case, just against `c` directly (base + i) instead of
+     * a child Compiler's own resolve_local. */
+    if (known_params) {
+        for (int i = 0; i < argc; i++) {
+            if (known_params[i].closed) {
+                c->known[base + i].valid  = true;
+                c->known[base + i].params = known_params[i].params;
+                c->known[base + i].body   = known_params[i].body;
+                c->known[base + i].argc   = known_params[i].argc;
+            }
+        }
+    }
+
     lambda_prescan(c, body, call_node->line);
 
     /* Mark this candidate's body as "currently being inlined" for the
      * duration of walking it -- see currently_inlining's own comment.
      * Bounded by MAX_INLINE_DEPTH, itself well above the inline-effort
-     * budget (32), so this can't overflow in practice; fails safe
-     * (silently stops tracking, at worst re-allowing a budget-bounded
-     * expansion) rather than crashing if it somehow did. */
-    if (g_inlining_depth < MAX_INLINE_DEPTH)
+     * budget (32), so this can't overflow in practice for the Tier 2.3
+     * named-candidate path; fails safe (silently stops tracking, at
+     * worst re-allowing a budget-bounded expansion) rather than crashing
+     * if it somehow did. Skipped entirely when !track_cycle (Tier 2.4
+     * wrapper elision -- see this function's own header comment for why
+     * that's required, not just an optimization: unconditional per-let-
+     * level tracking would let an entirely ordinary long let* chain
+     * exhaust this small, shared, fixed-size array on its own). */
+    if (track_cycle && g_inlining_depth < MAX_INLINE_DEPTH)
         g_inlining_bodies[g_inlining_depth++] = body;
 
     /* Interleaved lower-then-emit walk, one body form at a time, against
@@ -4389,7 +4513,8 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
         }
     }
 
-    if (g_inlining_depth > 0 && g_inlining_bodies[g_inlining_depth - 1] == body)
+    if (track_cycle && g_inlining_depth > 0 &&
+        g_inlining_bodies[g_inlining_depth - 1] == body)
         g_inlining_depth--;
 
     end_scope(c, call_node->line);
@@ -4572,6 +4697,64 @@ static void ir_emit(Compiler *c, IRNode *n) {
         int   argc  = n->as.call.argc;
         bool  ctail = n->tail;
 
+        /* Tier 2.4: closure elision for let / let-star / letrec / letrec-star's own
+         * compiler-synthesized entry wrapper. ir_lower_lambda_call is the
+         * ONLY producer, anywhere in this file, of an IR_CALL with
+         * head==V_FALSE and a literal IR_LAMBDA callee (grep confirms
+         * exactly 3 call sites: ir_lower_let/ir_lower_let_star/
+         * ir_lower_letrec, each returning the node as the WHOLE lowered
+         * form for that let/letrec expression) -- so this callee's
+         * closure is provably always non-escaping and always single-
+         * call-site BY CONSTRUCTION, not by analysis: nothing else ever
+         * holds a reference to this specific node's callee field except
+         * this same emission, which immediately consumes it with a call.
+         * Unlike the named-candidate inliner below, this needs no
+         * closedness check, no self-recursion guard, and no size/effort
+         * budget -- there being exactly one call site means splicing
+         * costs exactly the same total code size as not splicing; the
+         * body is compiled exactly once either way. Checked first since
+         * head==V_FALSE trivially fails every vis_symbol(head) guard
+         * every other branch below requires, making this unconditionally
+         * mutually exclusive with all of them -- placement is purely for
+         * readability, not correctness. See ir_emit_inline_call's own
+         * header comment for known_params/track_cycle's meaning here
+         * (NB: named-let's own entry wrapper does NOT go through this
+         * path -- IR_NAMED_LET hand-builds its own separate Compiler
+         * rather than routing through ir_lower_lambda_call/IR_CALL at
+         * all; eliding it is deliberately deferred, real separate work).
+         *
+         * `c->local_count + argc < MAX_LOCALS` (flagged missing by
+         * independent code review): the Tier 2.3 named-candidate site
+         * below guards its own ir_emit_inline_call call with this exact
+         * check; this site originally didn't, and unlike Tier 2.3 that
+         * omission is NOT merely quantitative here. Before wrapper
+         * elision, every let / let* / letrec / letrec* got its own fresh child
+         * Compiler with local_count reset to 0 -- MAX_LOCALS(256) was a
+         * per-form limit. Splicing removes that reset, so a long chain of
+         * lets/letrec sharing one enclosing frame (sequential lets in one
+         * function body, or a single let* with 256+ bindings) now
+         * accumulates locals against ONE Compiler's fixed-size
+         * `locals[MAX_LOCALS]`/`known[MAX_LOCALS]` arrays. Without this
+         * guard, ir_emit_inline_call's param-claiming loop writes
+         * `c->locals[base + i]` / `c->known[base + i]` for i in
+         * [0, argc) unconditionally -- reserve_pending_slot's own -1-on-
+         * overflow return is never consulted there, so base + i walks
+         * straight past index 255 and out of bounds of both arrays,
+         * corrupting adjacent Compiler fields on the stack. Falling
+         * through on failure (rather than returning) reaches the
+         * ordinary, always-safe call path further below, which emits the
+         * callee as a real closure and calls it -- exactly what happened
+         * before this landing existed. */
+        if (head == V_FALSE && n->as.call.callee->kind == IR_LAMBDA &&
+            c->local_count + argc < MAX_LOCALS) {
+            ir_emit_inline_call(c, n->as.call.callee->as.lambda.params,
+                                 n->as.call.callee->as.lambda.body,
+                                 n->as.call.args, argc, n,
+                                 n->as.call.callee->as.lambda.known_params,
+                                 false);
+            return;
+        }
+
         if (ctail && vis_symbol(head) && c->self_tail_name != V_FALSE &&
             head == c->self_tail_name && !c->self_tail_mutated &&
             resolve_local(c, head) < 0) {
@@ -4615,7 +4798,8 @@ static void ir_emit(Compiler *c, IRNode *n) {
                 ir_arena_take_inline_budget(c->ir_arena)) {
                 ir_emit_inline_call(c, c->known[slot].params,
                                      c->known[slot].body,
-                                     n->as.call.args, argc, n);
+                                     n->as.call.args, argc, n,
+                                     NULL, true);
                 return;
             }
         }
@@ -4741,23 +4925,111 @@ static void ir_emit(Compiler *c, IRNode *n) {
         return;
     }
     case IR_NAMED_LET: {
-        /* Direct translation of compile_let's own named-let branch -- see
-         * ir.h's comment on IRNode::as.named_let for why this whole
-         * construction (not just the resolution inside it) has to happen
-         * here, at emit time: g_compile_self_tail_name/mutated must be
-         * armed immediately before the inner loop lambda's own child
-         * Compiler is created (init_compiler consumes them), and that
-         * creation now happens via ir_lower_lambda+ir_emit rather than
-         * compile_lambda -- giving IR_CALL's self-tail-call branch (see
-         * its own ir_emit case) its first REAL coverage: a named-let
-         * loop's body is now actually walked through ir_lower/ir_emit,
-         * not left as IR_FALLBACK. */
-        val_t loop_name = n->as.named_let.loop_name;
-        val_t bindings  = n->as.named_let.bindings;
-        val_t body      = n->as.named_let.body;
+        /* Tier 2.4: wrapper elision for named-let's own "zero-arg outer
+         * wrapper" -- see ir.h's comment on IRNode::as.named_let for the
+         * shape this used to build as a REAL, separate closure (`outer`,
+         * a Compiler of its own, OP_CLOSURE'd and immediately OP_CALL'd/
+         * OP_TAIL_CALL'd from here). Exactly the same "provably non-
+         * escaping, single call site BY CONSTRUCTION" argument already
+         * used to justify eliding let / let* / letrec / letrec*'s own wrapper
+         * (see this switch's head==V_FALSE branch above) applies here:
+         * `outer` was created, closed over, and consumed by the very next
+         * instruction, every time, with no other reference ever taken to
+         * it. Splicing it away needed no closedness check and no size/
+         * effort budget -- but DOES need the same MAX_LOCALS guard the
+         * let / let* / letrec / letrec* branch above needed (flagged missing
+         * here by independent code review, same bug class as that
+         * branch's own now-fixed one): add_local/reserve_pending_slot
+         * fail safe on overflow in the sense of never writing out of
+         * bounds, but "safe" there means silently returning slot 0 and
+         * printing a diagnostic, not silently doing the RIGHT thing --
+         * loop_name would alias whatever real local already lives in
+         * slot 0, and the OP_STORE_LOCAL below would then overwrite that
+         * unrelated local's actual runtime value. Splicing needs room for
+         * loop_name (1), the reloaded callee copy (1), and each binding
+         * (argc) simultaneously live at once; below that, fall back to
+         * building a real, separate closure for the wrapper exactly the
+         * way this case always did before this landing -- correctness
+         * over the optimization when the frame is already nearly full,
+         * matching the let-branch's own fallback philosophy exactly. */
+        val_t loop_name0 = n->as.named_let.loop_name;
+        val_t bindings0  = n->as.named_let.bindings;
+        int   argc0 = 0;
+        for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) argc0++;
+        if (c->local_count + 2 + argc0 >= MAX_LOCALS) {
+            val_t body0 = n->as.named_let.body;
+            val_t params0 = V_NIL;
+            for (val_t b = bindings0; vis_pair(b); b = vcdr(b))
+                params0 = scm_cons(vcar(vcar(b)), params0);
+            val_t fwd0 = V_NIL;
+            while (vis_pair(params0)) { fwd0 = scm_cons(vcar(params0), fwd0); params0 = vcdr(params0); }
 
-        int argc = 0;
-        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) argc++;
+            Compiler outer;
+            init_compiler(&outer, c, as_sym(loop_name0)->data);
+            outer.chunk->arity = 0;
+            add_local(&outer, loop_name0);
+            mark_initialised(&outer);
+            emit(&outer, OP_VOID, n->line);
+            g_compile_self_tail_name    = loop_name0;
+            g_compile_self_tail_mutated = body_mentions_set_target(c, body0, loop_name0);
+            IRNode *loop_lambda0 = ir_lower_lambda(&outer, fwd0, body0,
+                                                    as_sym(loop_name0)->data, n->line);
+            ir_emit(&outer, loop_lambda0);
+            emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);
+            emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);
+            {
+                int osaved = outer.local_count;
+                reserve_pending_slot(&outer);
+                for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) {
+                    IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
+                    ir_emit(&outer, arg);
+                    reserve_pending_slot(&outer);
+                }
+                release_pending_slots(&outer, osaved);
+            }
+            emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc0, n->line);
+            Chunk *och = end_compiler(&outer);
+
+            int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
+            emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
+            for (int i = 0; i < outer.upval_count; i++) {
+                chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
+                chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+            }
+            emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
+            return;
+        }
+
+        /* The one real semantic difference from `outer`'s own bytecode:
+         * `outer` was ALWAYS entered via a tail call from here (any
+         * function's own body computing its return value via a fresh,
+         * dedicated closure can always tail-call out of it) -- but once
+         * spliced directly into `c`, this expression's own value is only
+         * in a tail position relative to `c` when n->tail actually says
+         * so. Emitting OP_TAIL_CALL unconditionally here, as `outer`
+         * always safely could, would incorrectly let the loop's call
+         * reuse/discard `c`'s own frame even when this named-let is just
+         * a subexpression (e.g. a let-binding init) that `c` still needs
+         * to keep computing after the loop returns -- so this uses
+         * `n->tail ? OP_TAIL_CALL : OP_CALL`, exactly like every other
+         * call site in this switch already does.
+         *
+         * No begin_scope/end_scope (and so no OP_SLIDE) needed either,
+         * unlike the let / let* / letrec wrapper-elision case: THAT case's
+         * body ends with an ordinary value left on the stack above its
+         * own now-dead param locals, which nothing but an explicit
+         * OP_SLIDE would otherwise reclaim. Here, the loop_name local
+         * and every binding-init value are the callee and arguments of a
+         * REAL call (OP_CALL/OP_TAIL_CALL) at the end -- the call
+         * instruction itself already consumes all of them off the
+         * runtime stack and leaves only the result, the same way it does
+         * for any other call in this file; `release_pending_slots` only
+         * needs to fix up `c`'s own COMPILE-TIME local_count bookkeeping
+         * to match, not emit any bytecode of its own. */
+        val_t loop_name = loop_name0;
+        val_t bindings  = bindings0;
+        val_t body      = n->as.named_let.body;
+        int   argc      = argc0;  /* already counted for the guard above */
 
         /* Forward-order params list -- matches compile_let exactly. */
         val_t params = V_NIL;
@@ -4766,42 +5038,55 @@ static void ir_emit(Compiler *c, IRNode *n) {
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
-        Compiler outer;
-        init_compiler(&outer, c, as_sym(loop_name)->data);
-        outer.chunk->arity = 0;
-
-        /* Slot 0 = loop name (void placeholder) -- matches compile_let. */
-        add_local(&outer, loop_name);
-        mark_initialised(&outer);
-        emit(&outer, OP_VOID, n->line);
+        int saved     = c->local_count;
+        int loop_slot = add_local(c, loop_name);
+        mark_initialised(c);
+        emit(c, OP_VOID, n->line);
 
         /* Arm the self-tail-call thread-local, consumed by init_compiler
          * inside ir_lower_lambda+ir_emit's own IR_LAMBDA case below --
          * body_mentions_set_target scans against `c` (the ENCLOSING
-         * compiler, i.e. this ir_emit call's own parameter), matching
-         * compile_let's identical call exactly (not `outer`: at this
-         * point no inner scope exists yet to check macros against). */
+         * compiler), matching compile_let's identical call exactly. */
         g_compile_self_tail_name    = loop_name;
         g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
-        IRNode *loop_lambda = ir_lower_lambda(&outer, fwd, body,
+        IRNode *loop_lambda = ir_lower_lambda(c, fwd, body,
                                                as_sym(loop_name)->data, n->line);
-        ir_emit(&outer, loop_lambda);
-        emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);  /* store closure -> slot 0 */
-        emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);  /* callee */
+        ir_emit(c, loop_lambda);
+        emit_ab(c, OP_STORE_LOCAL, (uint8_t)loop_slot, n->line);  /* store closure */
+        emit_ab(c, OP_LOAD_LOCAL,  (uint8_t)loop_slot, n->line);  /* callee */
+        reserve_pending_slot(c);  /* the callee just loaded, a pending value too */
         for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
-            IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
-            ir_emit(&outer, arg);
+            IRNode *arg = ir_lower(c, vcar(vcdr(vcar(b))), false, n->line);
+            ir_emit(c, arg);
+            reserve_pending_slot(c);
         }
-        emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, n->line);
-        Chunk *och = end_compiler(&outer);
-
-        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
-        emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
-        for (int i = 0; i < outer.upval_count; i++) {
-            chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
-            chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+        release_pending_slots(c, saved);
+        /* The call above consumes exactly its own callee+args (the
+         * reloaded copy at OP_LOAD_LOCAL and the argc binding values) --
+         * NOT loop_slot's own underlying stack position, which is a
+         * SEPARATE physical slot the reload merely copied from (found by
+         * independent testing: a named-let nested as a non-first,
+         * non-tail argument of an enclosing call -- e.g.
+         * `(+ 1 (let loop ((i 0)) i))` -- corrupted the outer call's own
+         * slot numbering, since the enclosing call's own reserve_pending_
+         * slot bookkeeping assumed this expression's fresh, uncommitted
+         * result would land at physical index `saved` the way every other
+         * expression's result does, but the call above actually leaves it
+         * one slot higher, at `saved + 1`, with the stale, now-redundant
+         * closure copy still sitting at index `saved` since nothing ever
+         * consumes THAT slot). In the OP_TAIL_CALL case this doesn't
+         * matter -- by definition nothing else compiles into `c` after a
+         * true tail position, so the stale slot is never observed -- but
+         * the OP_CALL case needs an explicit OP_SLIDE(1) to reclaim it,
+         * exactly the same operation (and reason) end_scope already uses
+         * to remove a scope's own dead locals out from under its result:
+         * move the fresh result down over the one stale slot below it. */
+        if (n->tail) {
+            emit_ab(c, OP_TAIL_CALL, (uint8_t)argc, n->line);
+        } else {
+            emit_ab(c, OP_CALL, (uint8_t)argc, n->line);
+            emit_ab(c, OP_SLIDE, 1, n->line);
         }
-        emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
         return;
     }
     }
@@ -5063,18 +5348,29 @@ bool compiler_ir_optimize_check(val_t expr) {
  * compiler_ir_optimize_check, minus the result-equality assertion (this
  * function's caller is expected to also call compiler_ir_optimize_check
  * on the same expr for that). */
-/* Tier 2.3 test helper: finds the first nested Chunk (a lambda's own
- * compiled body) in `c`'s constant pool -- used to look past an outer
- * `(let () ...)` wrapper's own trivial "create closure; call it" bytecode
- * (a handful of bytes regardless of what's inside) down to where the
- * interesting body bytecode, including any inlined duplication, actually
- * lives. Returns NULL if `c` has no nested chunk (e.g. expr wasn't
- * let-wrapped). */
-static Chunk *chunk_first_nested(Chunk *c) {
+/* Tier 2.4: sums code_len recursively across `c` and every chunk nested
+ * (transitively) in its constant pool -- the TOTAL compiled bytecode size
+ * of the whole unit, regardless of which particular chunk boundary any of
+ * it happens to live behind. Wrapper elision (this same landing) merely
+ * RELOCATES a let / let-star / letrec wrapper's own body bytecode from a nested
+ * child chunk into its parent chunk directly -- it does not duplicate
+ * anything, so it leaves this total essentially unchanged (a few bytes
+ * either way from the closure-creation opcodes it removes). Genuine
+ * named-candidate duplication (the thing this check actually exists to
+ * prove) does grow this total, because the candidate's body bytecode then
+ * appears more than once somewhere in the whole tree. This replaces an
+ * earlier single-chunk-comparison approach (see git history) that assumed
+ * a let-shaped expr's interesting body always lived at a fixed, predictable
+ * nesting depth -- an assumption wrapper elision broke, since the IR side
+ * of that comparison could end up anchored on an unrelated inner closure's
+ * own chunk instead once the previously-reliable outer wrapper chunk
+ * stopped being created at all. */
+static int chunk_total_code_len(Chunk *c) {
+    int total = c->code_len;
     for (int i = 0; i < c->const_len; i++)
         if (vis_type(c->constants[i], T_CHUNK))
-            return vunptr(Chunk, c->constants[i]);
-    return NULL;
+            total += chunk_total_code_len(vunptr(Chunk, c->constants[i]));
+    return total;
 }
 
 bool compiler_ir_inline_fired_check(val_t expr) {
@@ -5093,16 +5389,13 @@ bool compiler_ir_inline_fired_check(val_t expr) {
         compile_classic(&old_c, expr, false, line);
         IRNode *ir = ir_lower(&new_c, expr, false, line);
         ir_emit(&new_c, ir_optimize(ir));
-        /* `(let () ...)` desugars to an IIFE: the OUTER chunk being built
-         * here is just "create closure; call it" (a handful of bytes),
-         * regardless of what's inside -- the interesting body bytecode
-         * (including any inlined duplication) lives in the LET's own
-         * nested child Chunk, stored as a Chunk* in the outer chunk's own
-         * constant pool. Find and compare that instead. */
-        Chunk *old_body = chunk_first_nested(old_c.chunk);
-        Chunk *new_body = chunk_first_nested(new_c.chunk);
-        int old_len = old_body ? old_body->code_len : old_c.chunk->code_len;
-        int new_len = new_body ? new_body->code_len : new_c.chunk->code_len;
+        /* Tier 2.4: compare TOTAL compiled bytecode size across the whole
+         * unit on each side (see chunk_total_code_len's own comment) --
+         * robust to wrapper elision relocating a let/letrec wrapper's own
+         * body bytecode up into its parent chunk, which a single fixed-
+         * nesting-depth chunk comparison is not. */
+        int old_len = chunk_total_code_len(old_c.chunk);
+        int new_len = chunk_total_code_len(new_c.chunk);
         grew = new_len > old_len;
     }, {
         ir_arena_free(old_c.ir_arena);
