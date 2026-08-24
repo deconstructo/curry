@@ -4884,17 +4884,49 @@ static void ir_emit(Compiler *c, IRNode *n) {
         return;
     }
     case IR_NAMED_LET: {
-        /* Direct translation of compile_let's own named-let branch -- see
-         * ir.h's comment on IRNode::as.named_let for why this whole
-         * construction (not just the resolution inside it) has to happen
-         * here, at emit time: g_compile_self_tail_name/mutated must be
-         * armed immediately before the inner loop lambda's own child
-         * Compiler is created (init_compiler consumes them), and that
-         * creation now happens via ir_lower_lambda+ir_emit rather than
-         * compile_lambda -- giving IR_CALL's self-tail-call branch (see
-         * its own ir_emit case) its first REAL coverage: a named-let
-         * loop's body is now actually walked through ir_lower/ir_emit,
-         * not left as IR_FALLBACK. */
+        /* Tier 2.4: wrapper elision for named-let's own "zero-arg outer
+         * wrapper" -- see ir.h's comment on IRNode::as.named_let for the
+         * shape this used to build as a REAL, separate closure (`outer`,
+         * a Compiler of its own, OP_CLOSURE'd and immediately OP_CALL'd/
+         * OP_TAIL_CALL'd from here). Exactly the same "provably non-
+         * escaping, single call site BY CONSTRUCTION" argument already
+         * used to justify eliding let / let* / letrec / letrec*'s own wrapper
+         * (see this switch's head==V_FALSE branch above) applies here:
+         * `outer` was created, closed over, and consumed by the very next
+         * instruction, every time, with no other reference ever taken to
+         * it. Splicing it away needed no closedness check, no size/effort
+         * budget, and (unlike that branch) no MAX_LOCALS guard either --
+         * every local this case adds goes through add_local/
+         * reserve_pending_slot, which already fail safe on overflow (see
+         * their own comments), never through a raw unguarded array write
+         * the way the let/let*-wrapper case's now-fixed bug did.
+         *
+         * The one real semantic difference from `outer`'s own bytecode:
+         * `outer` was ALWAYS entered via a tail call from here (any
+         * function's own body computing its return value via a fresh,
+         * dedicated closure can always tail-call out of it) -- but once
+         * spliced directly into `c`, this expression's own value is only
+         * in a tail position relative to `c` when n->tail actually says
+         * so. Emitting OP_TAIL_CALL unconditionally here, as `outer`
+         * always safely could, would incorrectly let the loop's call
+         * reuse/discard `c`'s own frame even when this named-let is just
+         * a subexpression (e.g. a let-binding init) that `c` still needs
+         * to keep computing after the loop returns -- so this uses
+         * `n->tail ? OP_TAIL_CALL : OP_CALL`, exactly like every other
+         * call site in this switch already does.
+         *
+         * No begin_scope/end_scope (and so no OP_SLIDE) needed either,
+         * unlike the let / let* / letrec wrapper-elision case: THAT case's
+         * body ends with an ordinary value left on the stack above its
+         * own now-dead param locals, which nothing but an explicit
+         * OP_SLIDE would otherwise reclaim. Here, the loop_name local
+         * and every binding-init value are the callee and arguments of a
+         * REAL call (OP_CALL/OP_TAIL_CALL) at the end -- the call
+         * instruction itself already consumes all of them off the
+         * runtime stack and leaves only the result, the same way it does
+         * for any other call in this file; `release_pending_slots` only
+         * needs to fix up `c`'s own COMPILE-TIME local_count bookkeeping
+         * to match, not emit any bytecode of its own. */
         val_t loop_name = n->as.named_let.loop_name;
         val_t bindings  = n->as.named_let.bindings;
         val_t body      = n->as.named_let.body;
@@ -4909,58 +4941,55 @@ static void ir_emit(Compiler *c, IRNode *n) {
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
-        Compiler outer;
-        init_compiler(&outer, c, as_sym(loop_name)->data);
-        outer.chunk->arity = 0;
-
-        /* Slot 0 = loop name (void placeholder) -- matches compile_let. */
-        add_local(&outer, loop_name);
-        mark_initialised(&outer);
-        emit(&outer, OP_VOID, n->line);
+        int saved     = c->local_count;
+        int loop_slot = add_local(c, loop_name);
+        mark_initialised(c);
+        emit(c, OP_VOID, n->line);
 
         /* Arm the self-tail-call thread-local, consumed by init_compiler
          * inside ir_lower_lambda+ir_emit's own IR_LAMBDA case below --
          * body_mentions_set_target scans against `c` (the ENCLOSING
-         * compiler, i.e. this ir_emit call's own parameter), matching
-         * compile_let's identical call exactly (not `outer`: at this
-         * point no inner scope exists yet to check macros against). */
+         * compiler), matching compile_let's identical call exactly. */
         g_compile_self_tail_name    = loop_name;
         g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
-        IRNode *loop_lambda = ir_lower_lambda(&outer, fwd, body,
+        IRNode *loop_lambda = ir_lower_lambda(c, fwd, body,
                                                as_sym(loop_name)->data, n->line);
-        ir_emit(&outer, loop_lambda);
-        emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);  /* store closure -> slot 0 */
-        emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);  /* callee */
-        /* Tier 2.4: the callee (just pushed) and each binding init are ALL
-         * pending stack values while later inits are compiled -- an init
-         * expression that is itself a let/letrec (or a Tier 2.3 known-
-         * candidate call) can now splice new locals directly into `outer`
-         * via ir_emit_inline_call, whose add_local calls must not alias a
-         * still-pending sibling's own stack slot. Same hazard, and same
-         * fix, as IR_CALL's own argument-evaluation loops just above --
-         * this call site just never needed it before wrapper elision made
-         * a plain nested let capable of splicing into an enclosing
-         * compiler it doesn't itself define. */
-        {
-            int saved = outer.local_count;
-            reserve_pending_slot(&outer);
-            for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
-                IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
-                ir_emit(&outer, arg);
-                reserve_pending_slot(&outer);
-            }
-            release_pending_slots(&outer, saved);
+        ir_emit(c, loop_lambda);
+        emit_ab(c, OP_STORE_LOCAL, (uint8_t)loop_slot, n->line);  /* store closure */
+        emit_ab(c, OP_LOAD_LOCAL,  (uint8_t)loop_slot, n->line);  /* callee */
+        reserve_pending_slot(c);  /* the callee just loaded, a pending value too */
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            IRNode *arg = ir_lower(c, vcar(vcdr(vcar(b))), false, n->line);
+            ir_emit(c, arg);
+            reserve_pending_slot(c);
         }
-        emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, n->line);
-        Chunk *och = end_compiler(&outer);
-
-        int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
-        emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
-        for (int i = 0; i < outer.upval_count; i++) {
-            chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
-            chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+        release_pending_slots(c, saved);
+        /* The call above consumes exactly its own callee+args (the
+         * reloaded copy at OP_LOAD_LOCAL and the argc binding values) --
+         * NOT loop_slot's own underlying stack position, which is a
+         * SEPARATE physical slot the reload merely copied from (found by
+         * independent testing: a named-let nested as a non-first,
+         * non-tail argument of an enclosing call -- e.g.
+         * `(+ 1 (let loop ((i 0)) i))` -- corrupted the outer call's own
+         * slot numbering, since the enclosing call's own reserve_pending_
+         * slot bookkeeping assumed this expression's fresh, uncommitted
+         * result would land at physical index `saved` the way every other
+         * expression's result does, but the call above actually leaves it
+         * one slot higher, at `saved + 1`, with the stale, now-redundant
+         * closure copy still sitting at index `saved` since nothing ever
+         * consumes THAT slot). In the OP_TAIL_CALL case this doesn't
+         * matter -- by definition nothing else compiles into `c` after a
+         * true tail position, so the stale slot is never observed -- but
+         * the OP_CALL case needs an explicit OP_SLIDE(1) to reclaim it,
+         * exactly the same operation (and reason) end_scope already uses
+         * to remove a scope's own dead locals out from under its result:
+         * move the fresh result down over the one stale slot below it. */
+        if (n->tail) {
+            emit_ab(c, OP_TAIL_CALL, (uint8_t)argc, n->line);
+        } else {
+            emit_ab(c, OP_CALL, (uint8_t)argc, n->line);
+            emit_ab(c, OP_SLIDE, 1, n->line);
         }
-        emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
         return;
     }
     }

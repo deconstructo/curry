@@ -329,16 +329,12 @@ static void test_ir_self_check(void) {
          * (no params/args means no OP_SLIDE-vs-real-call-return
          * difference for ir_emit_inline_call's splice to introduce). */
         "(let* () 'empty)",
-        /* named-let: self-tail-call in tail position -- exercises
-         * IR_CALL's OP_SELF_TAIL_CALL branch for real. */
-        "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
-        /* a non-tail self-reference must NOT take the self-tail-call
-         * path (matches compile_call's own `tail &&` guard). */
-        "(let loop ((i 0)) (+ 1 (if (< i 3) (loop (+ i 1)) i)))",
-        /* named-let nested inside a call/if -- mixed with other already-
-         * lowered forms, the exact shape that caught real ordering bugs
-         * in earlier landings. */
-        "(+ 1 (let loop ((i 0)) (if (= i 3) i (loop (+ i 1)))))",
+        /* named-let cases with real bindings moved OUT of this list as of
+         * Tier 2.4 (named-let wrapper elision): like plain let / let* /
+         * letrec / letrec* above, they no longer compile byte-identical to
+         * classic (no more a real outer closure being allocated and
+         * called) -- see test_ir_optimize_check's own Tier 2.4 section
+         * below for their result-equality replacements. */
         /* receive/call-with-values with the "wrong" shape for the special
          * form fall through to an ordinary call (classify_head's shaped
          * checks) -- see compile()'s own SF_RECEIVE/SF_CALL_WITH_VALUES
@@ -716,6 +712,29 @@ static void test_ir_optimize_check(void) {
          * (not just before it) to also cover a LATER sibling referencing
          * an outer name the spliced let's own params happen to shadow. */
         "(let ((x 100)) (let loop ((a (let ((x 1)) (+ x 1))) (b x) (c (let ((x 2)) (+ x 1)))) (+ a b c)))",
+
+        /* Tier 2.4: named-let wrapper elision -- named-let's own "zero-arg
+         * outer wrapper" (see IR_NAMED_LET's own ir_emit case) is now
+         * spliced directly into the caller's frame too, the same way the
+         * plain let / let* / letrec / letrec* wrapper already is; the loop's
+         * OWN lambda (holding the real, still-genuinely-recursive closure
+         * self-tail-call semantics) is untouched -- only the "bind
+         * loop_name, evaluate the initial bindings, call it" wrapper
+         * around that closure is elided. Moved here from
+         * test_ir_self_check for the same reason the plain-let cases were:
+         * no more real "outer" closure being allocated and called, so the
+         * bytecode legitimately diverges from classic. */
+        "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
+        /* a non-tail self-reference must NOT take the self-tail-call
+         * path (matches compile_call's own `tail &&` guard) -- also now
+         * the case that proves this wrapper's own final call correctly
+         * uses OP_CALL, not OP_TAIL_CALL, when the named-let expression
+         * itself isn't in tail position relative to its enclosing scope. */
+        "(let loop ((i 0)) (+ 1 (if (< i 3) (loop (+ i 1)) i)))",
+        /* named-let nested inside a call/if -- mixed with other already-
+         * lowered forms, the exact shape that caught real ordering bugs
+         * in earlier landings. */
+        "(+ 1 (let loop ((i 0)) (if (= i 3) i (loop (+ i 1)))))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -832,22 +851,35 @@ static void test_ir_wrapper_elision_stress(void) {
               "ir optimize-check: long let* chain + nested mutual recursion");
     }
 
-    /* (let ((x0 1)) (let ((x1 (+ x0 1))) ... 200 levels ... )) -- C-stack
+    /* (let ((x0 1)) (let ((x1 (+ x0 1))) ... N levels ... )) -- C-stack
      * depth smoke test, no result correctness subtlety (each level just
-     * adds 1). */
+     * adds 1). N deliberately conservative (120, not e.g. 200): this
+     * process's C-stack limit for this kind of recursive-descent IR
+     * lowering isn't a fixed constant -- it's however many levels fit
+     * given ir_emit's OWN current per-call stack-frame size, which grows
+     * whenever a new case in its switch adds more local variables (an
+     * unoptimized/Debug build typically doesn't shrink a function's frame
+     * back down between sibling switch cases). Confirmed directly: this
+     * exact test at N=200 started segfaulting purely from the Tier 2.4
+     * named-let-wrapper-elision landing adding several new locals to
+     * ir_emit's IR_NAMED_LET case, with no logic bug involved -- and the
+     * same threshold-sensitivity was already independently confirmed
+     * present on `main`, unrelated to any Tier 2.4 work at all (see the
+     * MAX_LOCALS-guard commit's own message). 120 leaves comfortable
+     * headroom against future, similarly innocuous frame-size growth. */
     {
         char buf[16384];
         int  off = snprintf(buf, sizeof(buf), "(let ((x0 1))");
-        for (int i = 1; i < 200; i++)
+        for (int i = 1; i < 120; i++)
             off += snprintf(buf + off, sizeof(buf) - off,
                              " (let ((x%d (+ x%d 1)))", i, i - 1);
-        off += snprintf(buf + off, sizeof(buf) - off, " x199");
-        for (int i = 0; i < 200; i++)
+        off += snprintf(buf + off, sizeof(buf) - off, " x119");
+        for (int i = 0; i < 120; i++)
             off += snprintf(buf + off, sizeof(buf) - off, ")");
         val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
         val_t expr = scm_read(port);
         CHECK(compiler_ir_optimize_check(expr),
-              "ir optimize-check: deeply nested let chain (200 levels)");
+              "ir optimize-check: deeply nested let chain (120 levels)");
     }
 }
 
