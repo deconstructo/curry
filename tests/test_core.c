@@ -245,7 +245,6 @@ static void test_ir_self_check(void) {
         "(if (> 3 2) (begin (+ 1 2) 'yes) 'no)",
         "((lambda (x) (if x (+ x 1) 0)) 5)",
         "(begin (define x 10) (if (> x 5) (* x 2) x))",
-        "(let ((a 1) (b 2)) (if (< a b) (begin a (+ a b)) b))",
         "(if (if #t #f #t) 'a (begin 'b 'c))",
         /* set! -- widened in the second landing */
         "(set! some-global 5)",
@@ -296,13 +295,17 @@ static void test_ir_self_check(void) {
          * call branch REAL coverage (previously correct-by-inspection
          * but unreachable -- an earlier version of this test wrongly
          * claimed a named-let case tested it, when named-let itself
-         * wasn't IR-lowered yet; caught by independent code review). */
-        "(let ((a 1) (b 2)) (+ a b))",
-        "(let () 42)",
-        "(let* ((a 1) (b (+ a 1)) (c (+ b 1))) c)",
+         * wasn't IR-lowered yet; caught by independent code review).
+         *
+         * Plain let/let-star/letrec/letrec-star cases with real bindings
+         * moved OUT of this list as of Tier 2.4 (wrapper elision): they
+         * no longer compile byte-identical to classic, by design -- see
+         * test_ir_optimize_check's own Tier 2.4 section below for their
+         * result-equality replacements. A zero-binding let-star is kept
+         * here since it still happens to compile identically either way
+         * (no params/args means no OP_SLIDE-vs-real-call-return
+         * difference for ir_emit_inline_call's splice to introduce). */
         "(let* () 'empty)",
-        "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 10))",
-        "(letrec* ((a 1) (b (+ a 1))) b)",
         /* named-let: self-tail-call in tail position -- exercises
          * IR_CALL's OP_SELF_TAIL_CALL branch for real. */
         "(let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i))))",
@@ -638,6 +641,58 @@ static void test_ir_optimize_check(void) {
         "(let ((f (lambda (x) f))) (guard (e (#t 'correctly-unbound)) (procedure? (f 1))))",
         "(let ((y 10) (f (lambda (x) (+ x y)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
         "(let* ((f (lambda (x) (+ x f)))) (guard (e (#t 'correctly-unbound)) (f 1)))",
+
+        /* Tier 2.4: wrapper elision -- let/let-star/letrec/letrec-star's
+         * OWN compiler-synthesized entry closure is now spliced directly
+         * into the caller's frame (ir_lower_lambda_call's only 3 producer
+         * sites; see ir_emit's IR_CALL head==V_FALSE branch). These moved
+         * here from test_ir_self_check since this landing deliberately
+         * makes their bytecode diverge from classic compilation -- only
+         * RESULTS need to still agree. */
+        "(let ((a 1) (b 2)) (+ a b))",
+        "(let () 42)",
+        "(let* ((a 1) (b (+ a 1)) (c (+ b 1))) c)",
+        "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 10))",
+        "(letrec* ((a 1) (b (+ a 1))) b)",
+        /* A nested closure inside the wrapper's own body capturing one of
+         * the wrapper's OWN bindings (not a let-bound lambda CANDIDATE --
+         * an ordinary escaping closure) -- proves end_scope's existing
+         * OP_CLOSE_UP logic still fires correctly with no separate
+         * wrapper closure frame in between it and the caller. */
+        "(let ((n 7)) (define get (lambda () n)) (get))",
+        "(letrec ((n 7) (get (lambda () n))) (get))",
+        /* let/letrec used as an argument to an outer call, with a
+         * binding name that shadows an outer variable -- composition with
+         * reserve_pending_slot/release_pending_slots, the exact
+         * miscompilation shape ir_emit_inline_call's own header comment
+         * documents, now one level further out (the let ITSELF is the
+         * pending sibling argument, not just a call inside it). */
+        "(let ((x 100)) (+ x (let ((x 1) (y 2)) (+ x y))))",
+        "(let ((x 100)) (+ x (letrec ((x 1) (y 2)) (+ x y))))",
+        /* letrec/letrec* with 2+ mutually-recursive internal bindings --
+         * proves splicing the wrapper doesn't disturb lambda_prescan's
+         * existing internal-define mutual-visibility handling. */
+        "(letrec ((e? (lambda (n) (if (= n 0) #t (o? (- n 1))))) (o? (lambda (n) (if (= n 0) #f (e? (- n 1)))))) (list (e? 8) (o? 8)))",
+        /* A real, confirmed miscompilation caught while landing this
+         * feature: a named-let's OWN init-argument-evaluation loop
+         * (IR_NAMED_LET's ir_emit case) never got the same
+         * reserve_pending_slot/release_pending_slots bracketing IR_CALL's
+         * argument loops already have -- before wrapper elision, no named-
+         * let init argument could ever splice new locals into `outer`
+         * mid-loop (a nested let always built a real, separate closure),
+         * so the gap was latent. Once a plain nested let could splice
+         * directly into whatever compiler was active when it was emitted,
+         * an EARLIER sibling init's still-pending stack value got aliased
+         * by the LATER let-init's own spliced locals -- reproduced
+         * directly against (srfi s128 comparators)'s real %default-hash
+         * helper (a named-let whose middle binding's init is itself a
+         * nested let), which segfaulted the whole process under ctest
+         * before this fix. */
+        "(let loop ((i 0) (acc 17) (s (let ((out (+ 1 2))) (+ out 3)))) (if (= i 1) (+ acc s) (loop (+ i 1) (+ acc 1) s)))",
+        /* Same shape, deliberately 3+ siblings around the splicing init
+         * (not just before it) to also cover a LATER sibling referencing
+         * an outer name the spliced let's own params happen to shadow. */
+        "(let ((x 100)) (let loop ((a (let ((x 1)) (+ x 1))) (b x) (c (let ((x 2)) (+ x 1)))) (+ a b c)))",
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         val_t port = port_open_input_string(cases[i], (uint32_t)strlen(cases[i]));
@@ -703,6 +758,76 @@ static void test_ir_inline_fires(void) {
     }
 }
 
+/* Tier 2.4 stress cases, built programmatically since their whole point is
+ * SIZE: a plain `let*` desugars to one nested wrapper per binding, and
+ * with wrapper elision every level of that chain now splices via
+ * ir_emit_inline_call with track_cycle=false -- this is the direct
+ * regression test for the cycle-detection-budget-exhaustion gap the
+ * design review caught (see ir_emit_inline_call's own header comment):
+ * without track_cycle=false, a ~150-binding let* chain would push
+ * g_inlining_bodies past MAX_INLINE_DEPTH=64 on every compile, silently
+ * degrading cycle detection for genuine named-candidate mutual recursion
+ * compiled anywhere else in the SAME top-level expression. A deeply
+ * nested plain `let` chain is a separate smoke test for C-stack depth in
+ * the compiler itself (ir_emit_inline_call recurses one C frame per
+ * splice level, same as the pre-existing IR_LAMBDA path it replaces --
+ * this proves that didn't get WORSE, not that recursion was newly
+ * introduced). */
+static void test_ir_wrapper_elision_stress(void) {
+    /* (let* ((a0 0) (a1 (+ a0 1)) ... (a149 (+ a148 1))) a149) == 149 */
+    {
+        char buf[16384];
+        int  off = snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        for (int i = 1; i < 150; i++)
+            off += snprintf(buf + off, sizeof(buf) - off,
+                             " (a%d (+ a%d 1))", i, i - 1);
+        snprintf(buf + off, sizeof(buf) - off, ") a149)");
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: long let* chain (149 bindings)");
+    }
+
+    /* Same long let* chain, but with genuine named-candidate mutual
+     * recursion (even?/odd?) nested inside its own body -- proves
+     * track_cycle=false on the chain's own splices doesn't disturb
+     * track_cycle=true cycle detection for the mutual recursion, which
+     * must still correctly decline to inline either candidate. */
+    {
+        char buf[16384];
+        int  off = snprintf(buf, sizeof(buf), "(let* ((a0 0)");
+        for (int i = 1; i < 100; i++)
+            off += snprintf(buf + off, sizeof(buf) - off,
+                             " (a%d (+ a%d 1))", i, i - 1);
+        off += snprintf(buf + off, sizeof(buf) - off,
+            ") (letrec ((e? (lambda (n) (if (= n 0) #t (o? (- n 1)))))"
+            "           (o? (lambda (n) (if (= n 0) #f (e? (- n 1))))))"
+            "  (list a99 (e? 20) (o? 20))))");
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: long let* chain + nested mutual recursion");
+    }
+
+    /* (let ((x0 1)) (let ((x1 (+ x0 1))) ... 200 levels ... )) -- C-stack
+     * depth smoke test, no result correctness subtlety (each level just
+     * adds 1). */
+    {
+        char buf[16384];
+        int  off = snprintf(buf, sizeof(buf), "(let ((x0 1))");
+        for (int i = 1; i < 200; i++)
+            off += snprintf(buf + off, sizeof(buf) - off,
+                             " (let ((x%d (+ x%d 1)))", i, i - 1);
+        off += snprintf(buf + off, sizeof(buf) - off, " x199");
+        for (int i = 0; i < 200; i++)
+            off += snprintf(buf + off, sizeof(buf) - off, ")");
+        val_t port = port_open_input_string(buf, (uint32_t)strlen(buf));
+        val_t expr = scm_read(port);
+        CHECK(compiler_ir_optimize_check(expr),
+              "ir optimize-check: deeply nested let chain (200 levels)");
+    }
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -728,6 +853,7 @@ int main(void) {
     RUN_TEST(test_ir_self_check);
     RUN_TEST(test_ir_optimize_check);
     RUN_TEST(test_ir_inline_fires);
+    RUN_TEST(test_ir_wrapper_elision_stress);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
