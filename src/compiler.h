@@ -6,6 +6,14 @@
 #include "vm.h"
 #include "ir.h"
 
+/* Opaque -- struct body is private to compiler.c. Exposed only so an
+ * external (e.g. C++ LLVM codegen) caller can hold a session handle
+ * across multiple compiler_ir_session_lower_next calls; see that
+ * function's own comment for the full contract. Never dereferenced
+ * outside compiler.c -- the incomplete type here makes that a compile
+ * error anywhere else, same as any other opaque-pointer C API. */
+typedef struct Compiler Compiler;
+
 /*
  * Compiler — AST (val_t) → bytecode (Chunk / Closure)
  *
@@ -126,5 +134,46 @@ bool compiler_ir_inline_fired_check(val_t expr);
  * lifetime contract every other IRArena in this codebase already has,
  * see ir.h's own header comment). */
 IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena);
+
+/* Tier 2.6 Phase A (docs/thoughts/tier2-6-llvm-ir-retargeting-plan-
+ * 2026-08-25.md): an interleaved-lowering session for a caller (an LLVM
+ * codegen dispatcher) that needs to lower a WHOLE function body one form
+ * at a time, immediately consuming each form's IR before lowering the
+ * next -- unlike compiler_ir_lower_for_jit above, which only ever lowers
+ * one single top-level expression per call. See
+ * compiler_ir_session_lower_next's own comment (compiler.c) for the full
+ * contract, including why lowering never needs this session's
+ * locals/upvals to be real, and why each lowering call brackets its own
+ * GC-inhibit pair rather than leaving that open across the session.
+ *
+ *   IRArena *arena;
+ *   Compiler *root = compiler_ir_session_new_root("<jit-fn>", &arena);
+ *   for each top-level form in the function body, in order:
+ *     IRNode *n = compiler_ir_session_lower_next(root, form, is_last, line);
+ *     if (!n) { ir_arena_free(arena); abort this JIT attempt; }
+ *     ... consume `n` immediately (LLVM-emit it) before lowering the next
+ *         form -- required for internal define-syntax registration
+ *         ordering, see compiler_ir_session_lower_next's own comment ...
+ *   // for a nested (lambda ...) form encountered while consuming:
+ *   Compiler *child = compiler_ir_session_new_child(root, "<nested>");
+ *   // ... lower/consume the nested body against `child`, same loop shape ...
+ *   ir_arena_free(arena);  // once the WHOLE top-level function is done,
+ *                          // success or abort -- single owner, same as
+ *                          // every other IRArena in this codebase.
+ *
+ * `name` lifetime (found missing from an earlier version of this comment
+ * by independent code review): stored UNOWNED on the session's Compiler,
+ * exactly the same contract compiler_set_source_name's own comment above
+ * already documents for that similar case -- the string must outlive the
+ * session, since a named-let form lowered through it embeds this same
+ * pointer into a persisted IR_LAMBDA node kept alive in the session's
+ * arena (ir_lower_let/ir_lower_let_star -> ir_lower_lambda). Pass a
+ * literal or a buffer with process lifetime, never a transient stack
+ * buffer or a temporary std::string's c_str() that won't outlive the
+ * call that created it.
+ */
+Compiler *compiler_ir_session_new_root(const char *name, IRArena **out_arena);
+Compiler *compiler_ir_session_new_child(Compiler *parent, const char *name);
+IRNode   *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int line);
 
 #endif /* CURRY_COMPILER_H */

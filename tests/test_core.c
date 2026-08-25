@@ -1474,6 +1474,97 @@ static void test_compiler_ir_lower_for_jit(void) {
     }
 }
 
+/* Tier 2.6 Phase A groundwork (docs/thoughts/tier2-6-llvm-ir-retargeting-
+ * plan-2026-08-25.md): compiler_ir_session_new_root/new_child/lower_next,
+ * the interleaved-lowering API a future LLVM codegen dispatcher will
+ * drive to lower a whole function body one form at a time. Covers what's
+ * observable from outside compiler.c -- Compiler is now an opaque type
+ * (compiler.h), so this can't reach in and inspect syntax_locals/locals
+ * directly; the one invariant that actually needs ir_emit's own
+ * (private, VM-bytecode-specific) side effects to observe -- an internal
+ * define-syntax registered by form i being visible when form i+1 is
+ * lowered -- is deliberately NOT tested here. It becomes testable once
+ * Phase A's real consumer (codegen.cpp) exists and can be driven
+ * end-to-end through actual JIT compilation of a script with an internal
+ * macro used before... er, after its own definition in the same body. */
+static void test_compiler_ir_session(void) {
+    IRArena *arena = NULL;
+    Compiler *root = compiler_ir_session_new_root("<test-session>", &arena);
+    CHECK(root != NULL, "session: new_root returns a session handle");
+    CHECK(arena != NULL, "session: new_root returns a shared arena");
+
+    /* Sequential lowering of several distinct forms in ONE session --
+     * proves the API supports repeated calls without corrupting shared
+     * state, and that each call's result is independently sane. */
+    {
+        val_t port = port_open_input_string("(+ 1 2)", 7);
+        val_t expr = scm_read(port);
+        int before = gc_inhibit_save();
+        IRNode *ir = compiler_ir_session_lower_next(root, expr, false, 1);
+        int after = gc_inhibit_save();
+        CHECK(ir != NULL, "session: lower_next returns a tree for ordinary input");
+        CHECK(ir && ir->kind == IR_CALL, "session: (+ 1 2) lowers to IR_CALL");
+        CHECK(before == after, "session: gc_inhibit_count balanced after an ordinary lower_next call");
+    }
+    {
+        /* Not (if #t 1 2): ir_optimize's own dead-branch elimination on a
+         * constant test (see ir_optimize's IR_IF case) would fold that
+         * down to a bare IR_CONST before this function returns -- correct
+         * behavior (this session API runs the same lower-then-optimize
+         * pipeline compiler_ir_lower_for_jit does), just not what this
+         * check wants to observe. A non-constant test keeps IR_IF intact. */
+        val_t port = port_open_input_string("(if x 1 2)", 10);
+        val_t expr = scm_read(port);
+        IRNode *ir = compiler_ir_session_lower_next(root, expr, false, 2);
+        CHECK(ir != NULL, "session: second lower_next call in the same session still works");
+        CHECK(ir && ir->kind == IR_IF, "session: (if x 1 2) lowers to IR_IF");
+    }
+    {
+        val_t port = port_open_input_string("(lambda (x) x)", 14);
+        val_t expr = scm_read(port);
+        IRNode *ir = compiler_ir_session_lower_next(root, expr, true, 3);
+        CHECK(ir != NULL, "session: third lower_next call (tail position) still works");
+        CHECK(ir && ir->kind == IR_LAMBDA, "session: (lambda (x) x) lowers to IR_LAMBDA");
+    }
+
+    /* Child session -- mirrors ir_emit's own IR_LAMBDA case creating a
+     * child Compiler for a nested body. Just needs to not crash and
+     * produce sane IR; cross-scope macro visibility isn't observable
+     * from here (see this test's own header comment). */
+    {
+        Compiler *child = compiler_ir_session_new_child(root, "<test-child>");
+        CHECK(child != NULL, "session: new_child returns a session handle");
+        val_t port = port_open_input_string("(* x x)", 7);
+        val_t expr = scm_read(port);
+        IRNode *ir = compiler_ir_session_lower_next(child, expr, false, 4);
+        CHECK(ir != NULL, "session: lower_next works against a child session");
+        CHECK(ir && ir->kind == IR_CALL, "session: (* x x) in a child session lowers to IR_CALL");
+    }
+
+    /* Malformed input mid-session: NULL, gc_inhibit_count still balanced,
+     * and (unlike compiler_ir_lower_for_jit's own one-shot contract) the
+     * arena is NOT freed here -- earlier forms already lowered through
+     * this session may still be referenced by the caller. Verified by
+     * successfully lowering one more well-formed form through the SAME
+     * session afterward. */
+    {
+        val_t port = port_open_input_string("(if)", 4);
+        val_t expr = scm_read(port);
+        int before = gc_inhibit_save();
+        IRNode *ir = compiler_ir_session_lower_next(root, expr, false, 5);
+        int after = gc_inhibit_save();
+        CHECK(ir == NULL, "session: malformed input returns NULL, not a longjmp");
+        CHECK(before == after, "session: gc_inhibit_count balanced after a raise mid-session");
+
+        val_t port2 = port_open_input_string("(- 5 1)", 7);
+        val_t expr2 = scm_read(port2);
+        IRNode *ir2 = compiler_ir_session_lower_next(root, expr2, false, 6);
+        CHECK(ir2 != NULL, "session: the session and its arena survive a raise, still usable afterward");
+    }
+
+    ir_arena_free(arena);
+}
+
 /* Regression test for a real, confirmed, WIDESPREAD bug found by
  * independent code review while landing Tier 2.6 step 1 (not something
  * that landing introduced -- confirmed present on `main` too): every
@@ -1559,6 +1650,7 @@ int main(void) {
     RUN_TEST(test_open_coding_preserves_tco);
     RUN_TEST(test_arithmetic_open_coding);
     RUN_TEST(test_compiler_ir_lower_for_jit);
+    RUN_TEST(test_compiler_ir_session);
     RUN_TEST(test_special_form_arity_crashes);
 
     printf("\n%d passed, %d failed\n", pass, fail);

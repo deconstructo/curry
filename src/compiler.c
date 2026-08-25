@@ -5368,6 +5368,124 @@ IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
     return result;
 }
 
+/* Tier 2.6 (docs/thoughts/tier2-6-llvm-ir-retargeting-plan-2026-08-25.md,
+ * "Phase A"): compiler_ir_lower_for_jit above lowers exactly one top-level
+ * expression per call, against a throwaway Compiler that never survives
+ * past that single call -- fine for a JIT-eligible chunk's own top-level
+ * src_lambda, but not enough for a consumer (an LLVM codegen dispatcher)
+ * that needs to lower a WHOLE function body, one form at a time,
+ * interleaved with its own per-form consumption -- the same "lower this
+ * form, consume it immediately, THEN lower the next one" contract
+ * ir_emit's own IR_SEQ/IR_LAMBDA cases already rely on (see ir.h's own
+ * comments on IRNode::as.seq and IRNode::as.lambda for why: an internal
+ * define-syntax registered by form i must be visible when form i+1 is
+ * classified, which only holds if lowering happens interleaved with
+ * consumption, never as one eager batch upfront).
+ *
+ * This is genuinely new territory: every other Compiler in this file
+ * lives on one C function's own stack frame for the duration of a single,
+ * synchronous compile call. A session Compiler instead needs to survive
+ * across multiple, separate calls INTO this file from external (C++)
+ * code, so it must be heap-allocated -- gc_alloc_pinned, not GC_MALLOC or
+ * a plain malloc, since Compiler holds live val_t references (chunk,
+ * syntax_locals[].name/transformer, self_tail_name) that need to stay
+ * reachable to Boehm's collector for as long as this session lives, the
+ * same way every other long-lived, GC-participating struct in this
+ * codebase is allocated (see e.g. chunk_new's own gc_alloc_pinned call).
+ * A plain stack Compiler would only be traced by Boehm's conservative
+ * stack scan for the lifetime of ONE C stack frame -- wrong here, since
+ * the session outlives the call that created it. */
+Compiler *compiler_ir_session_new_root(const char *name, IRArena **out_arena) {
+    Compiler *c = CURRY_NEW_PINNED(Compiler);
+    init_compiler(c, NULL, name);
+    *out_arena = c->ir_arena;
+    return c;
+}
+
+/* Child session for a nested lambda body -- mirrors ir_emit's own
+ * IR_LAMBDA case creating a child Compiler for the body it's about to
+ * walk. Shares the parent's arena (init_compiler's own enc != NULL
+ * branch); needs no separate `out_arena` parameter since it's always the
+ * same arena the root session already returned. `enclosing` linkage is
+ * the one thing that actually matters for correctness here even though
+ * this session never populates real locals[]/upvals[] (nothing during
+ * LOWERING reads those -- see this function's own header note below) --
+ * resolve_syntax_local walks ->enclosing to find a macro registered in
+ * an outer scope, so a nested lambda's own body must chain to its
+ * parent's session Compiler to see macros defined above it. */
+Compiler *compiler_ir_session_new_child(Compiler *parent, const char *name) {
+    Compiler *c = CURRY_NEW_PINNED(Compiler);
+    init_compiler(c, parent, name);
+    return c;
+}
+
+/* Lowers ONE form against this session's Compiler, immediately -- the
+ * interleaved half of the "lower this form, consume it immediately" loop
+ * a caller (e.g. an LLVM codegen dispatcher walking IR_SEQ/IR_LAMBDA
+ * bodies) needs to drive itself. `tail` marks whether this form is in
+ * tail position (the last form of a body); `line` is the caller's own
+ * source-line tracking for this form (this function does not read
+ * g_reader_last_line the way compiler_ir_lower_for_jit does, since a
+ * session's forms don't necessarily come from an active read -- an
+ * LLVM-JIT-triggered recompile walks an ALREADY-read val_t body list, see
+ * Chunk's own per-statement line tracking for the shape a caller should
+ * mirror).
+ *
+ * Verified during this landing that lowering itself never actually reads
+ * this Compiler's locals[]/known[]/upvals[]/local_count/chunk fields --
+ * only ->enclosing (macro visibility, resolve_syntax_local) and
+ * ->syntax_locals[] (macro registration/lookup) are ever touched by
+ * ir_lower's own dispatch (classify_head checks resolve_syntax_local,
+ * never resolve_local/resolve_upvalue -- variable/call-site resolution
+ * is entirely an ir_emit-time concern, deferred by design, see ir.h's own
+ * comments on IR_VAR_REF/IR_CALL). This session API deliberately does
+ * NOT populate real locals/upvals for that reason: an LLVM consumer's own
+ * resolution (its own scope-tracking, entirely separate from this
+ * Compiler) is what actually resolves an IR_VAR_REF/IR_CALL once it
+ * consumes the node this function returns, exactly mirroring how
+ * ir_emit's own resolve_local/resolve_upvalue calls are what resolve
+ * those nodes for the VM bytecode backend -- two independent consumers,
+ * two independent resolutions, one shared lowering pass.
+ *
+ * Returns NULL if lowering raises a catchable Scheme condition (malformed
+ * special-form syntax, etc.) -- caught here via SCM_PROTECT so it can
+ * never cross into a C++ caller as a raw longjmp (the same hazard
+ * compiler_ir_lower_for_jit's own header comment describes), converted to
+ * a plain NULL instead, mirroring curry_llvm_jit_compile's existing
+ * "silent failure, fall back to bytecode" philosophy. On NULL, the caller
+ * must abort the whole in-progress session (this function does NOT free
+ * the arena itself on a raise -- earlier forms already lowered through
+ * this same session may still be referenced by the caller, and a session
+ * may have live children sharing the one arena, so freeing here could
+ * invalidate state the caller hasn't finished inspecting yet; the caller
+ * owns exactly when to call ir_arena_free on the arena
+ * compiler_ir_session_new_root returned, same single-owner contract every
+ * other IRArena in this codebase already has). Each call brackets its own
+ * gc_inhibit_minor/gc_resume_minor pair independently, rather than
+ * leaving that bracketing to the caller to hold open across the whole
+ * session -- deliberately, after PR #71's call/cc fix found exactly this
+ * class of bug (a paired inhibit/resume left unbalanced across multiple
+ * external calls into this codebase permanently blocks minor GC on the
+ * thread); a self-contained bracket per call cannot leak that way. */
+IRNode *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int line) {
+    gc_inhibit_minor();
+
+    IRNode *result = NULL;
+    bool    raised = false;
+
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        IRNode *ir = ir_lower(c, form, tail, line);
+        result = ir_optimize(ir);
+    }, {
+        raised = true;
+    });
+
+    gc_resume_minor();
+
+    return raised ? NULL : result;
+}
+
 bool compiler_ir_self_check(val_t expr) {
     gc_inhibit_minor();
 
