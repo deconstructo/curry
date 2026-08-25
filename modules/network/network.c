@@ -31,9 +31,6 @@
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #  pragma comment(lib, "ws2_32.lib")
-typedef SOCKET sock_t;
-#  define SOCK_INVALID INVALID_SOCKET
-#  define sock_close closesocket
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -42,26 +39,18 @@ typedef SOCKET sock_t;
 #  include <arpa/inet.h>
 #  include <fcntl.h>
 #  include <sys/select.h>
-typedef int sock_t;
-#  define SOCK_INVALID (-1)
-#  define sock_close close
 #endif
 
-static curry_val sock_to_val(sock_t fd) {
-    /* Pack fd into a bytevector */
-    curry_val bv = curry_make_bytevector(sizeof(sock_t), 0);
-    for (size_t i = 0; i < sizeof(sock_t); i++)
-        curry_bytevector_set(bv, (uint32_t)i, ((uint8_t *)&fd)[i]);
-    return curry_make_pair(curry_make_symbol("socket"), bv);
-}
-
-static sock_t val_to_sock(curry_val v) {
-    curry_val bv = curry_cdr(v);
-    sock_t fd;
-    for (size_t i = 0; i < sizeof(sock_t); i++)
-        ((uint8_t *)&fd)[i] = curry_bytevector_ref(bv, (uint32_t)i);
-    return fd;
-}
+/* sock_t/SOCK_INVALID/sock_close and the raw-socket-handle pack/unpack
+ * helpers (net_sock_to_val/net_val_to_sock/net_is_raw_socket_handle/
+ * net_extract_fd) now live in network_internal.h, shared with srfi106.c
+ * (the SRFI-106 socket interface, added alongside it) -- see that
+ * header's own comment. Local aliases kept here (rather than rewriting
+ * every call site below) purely to minimize this diff; srfi106.c uses
+ * the net_-prefixed names directly. */
+#include "network_internal.h"
+#define sock_to_val net_sock_to_val
+#define val_to_sock net_val_to_sock
 
 static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
@@ -89,10 +78,26 @@ static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
      * `-> port-pair (in-port . out-port)` contract. */
     int wfd = dup((int)fd);
     if (wfd < 0) { sock_close(fd); curry_error("tcp-connect: dup failed"); }
-    curry_val in_port  = curry_make_port_from_fd((int)fd, false, false);
+    /* curry_make_port_from_fd takes ownership of its fd ONLY on success;
+     * on fdopen failure it returns a falsy value without taking
+     * ownership at all (curry.h's own documented contract), so each of
+     * these must close its own fd explicitly on failure rather than
+     * leaking it -- found missing here by independent code review of
+     * the identical pattern in srfi106.c's socket-input-port/-output-
+     * port. Once in_port has been successfully created it owns `fd`
+     * (its own finalizer/close-port will close it), so a later out_port
+     * failure must only close `wfd`, never `fd` again. */
+    curry_val in_port = curry_make_port_from_fd((int)fd, false, false);
+    if (!curry_is_true(in_port)) {
+        sock_close(fd);
+        sock_close(wfd);
+        curry_error("tcp-connect: fdopen failed (in-port)");
+    }
     curry_val out_port = curry_make_port_from_fd(wfd, true, false);
-    if (!curry_is_true(in_port) || !curry_is_true(out_port))
-        curry_error("tcp-connect: fdopen failed");
+    if (!curry_is_true(out_port)) {
+        sock_close(wfd);
+        curry_error("tcp-connect: fdopen failed (out-port)");
+    }
     return curry_make_pair(in_port, out_port);
 }
 
@@ -131,13 +136,21 @@ static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
     sock_t client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
     if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
 
-    /* Port pair, same rationale as fn_tcp_connect. */
+    /* Port pair, same rationale (and same fd-leak-on-fdopen-failure fix)
+     * as fn_tcp_connect above. */
     int wfd = dup((int)client);
     if (wfd < 0) { sock_close(client); curry_error("tcp-accept: dup failed"); }
-    curry_val in_port  = curry_make_port_from_fd((int)client, false, false);
+    curry_val in_port = curry_make_port_from_fd((int)client, false, false);
+    if (!curry_is_true(in_port)) {
+        sock_close(client);
+        sock_close(wfd);
+        curry_error("tcp-accept: fdopen failed (in-port)");
+    }
     curry_val out_port = curry_make_port_from_fd(wfd, true, false);
-    if (!curry_is_true(in_port) || !curry_is_true(out_port))
-        curry_error("tcp-accept: fdopen failed");
+    if (!curry_is_true(out_port)) {
+        sock_close(wfd);
+        curry_error("tcp-accept: fdopen failed (out-port)");
+    }
     return curry_make_pair(in_port, out_port);
 }
 
@@ -227,19 +240,10 @@ static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
 }
 
 /* socket-ready?/socket-set-nonblocking! accept either a raw socket handle
- * (tcp-listen's/udp-socket's return) or a port (tcp-connect's/tcp-accept's
- * in-port or out-port) -- extract_fd dispatches on which it got. */
-static bool is_raw_socket_handle(curry_val v) {
-    return curry_is_pair(v) && curry_is_symbol(curry_car(v)) &&
-           strcmp(curry_symbol(curry_car(v)), "socket") == 0;
-}
-
-static int extract_fd(curry_val v, const char *who) {
-    if (is_raw_socket_handle(v)) return (int)val_to_sock(v);
-    int fd = curry_port_fd(v);
-    if (fd < 0) curry_error("%s: not a socket handle or file-backed port", who);
-    return fd;
-}
+ * (tcp-listen's/udp-socket's/SRFI-106 socket's return) or a port
+ * (tcp-connect's/tcp-accept's in-port or out-port) -- net_extract_fd
+ * (network_internal.h) dispatches on which it got. */
+#define extract_fd net_extract_fd
 
 static curry_val fn_socket_set_nonblocking(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
@@ -274,6 +278,14 @@ static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
  * TLS code's OpenSSL includes/link stay isolated in their own file. */
 void curry_tls_module_init(CurryVM *vm);
 
+/* Defined in srfi106.c, compiled into this same module target -- SRFI 106
+ * (Basic Socket Interface) native primitives, built on the exact same
+ * raw-socket-handle representation this file uses (network_internal.h).
+ * Same "separate file, own init function" pattern as curry_tls_module_init
+ * above, for the same reason: keeps the larger, more self-contained
+ * SRFI-106 surface out of this file. */
+void curry_srfi106_module_init(CurryVM *vm);
+
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "tcp-connect", fn_tcp_connect, 2, 2, NULL);
     curry_define_fn(vm, "tcp-listen",  fn_tcp_listen,  1, 2, NULL);
@@ -286,4 +298,5 @@ void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "socket-set-nonblocking!", fn_socket_set_nonblocking, 1, 1, NULL);
     curry_define_fn(vm, "socket-ready?", fn_socket_ready_p, 1, 2, NULL);
     curry_tls_module_init(vm);
+    curry_srfi106_module_init(vm);
 }
