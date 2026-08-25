@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787658167732,
+  "lastUpdate": 1787664962882,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7520,6 +7520,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 53.514,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bea13af425714629743e96d9de4ab308d5209083",
+          "message": "feat(network): implement SRFI 106 (Basic Socket Interface) (#74)\n\nCurry already has a richer, curry-specific networking API (tcp-connect/\ntcp-listen/tcp-accept, udp-socket/-bind/-send/-recv, non-blocking mode,\nTLS) that's a strict superset of SRFI 106's scope (SRFI 106 is\nblocking-only, TCP/UDP only, no TLS). Adds SRFI 106 as a thin\ncompatibility layer on top of the same underlying socket handling, for\nportable code written against the standard interface.\n\nNative primitives (make-client-socket, make-server-socket, socket?,\nsocket-accept, socket-send, socket-recv, socket-shutdown, socket-close,\nsocket-input-port, socket-output-port, plus the plain-fixnum named\nconstants) live in modules/network/srfi106.c, registered directly under\nthe SRFI's own names -- same convention (curry posix)/SRFI-170 already\nuses. Shares its raw-socket-handle representation with the existing\ntcp-listen/udp-socket via a new network_internal.h (extracted from\nnetwork.c, which previously had these helpers as file-private statics).\n\nThe shutdown-method flag category needed real design attention, not\njust a mechanical port: real POSIX SHUT_RD/SHUT_WR/SHUT_RDWR are 0/1/2\non every platform checked, NOT independent bits, so combining them the\nsame way address-info/message-type combine their own genuinely-\nindependent AI_*/MSG_* bits would silently produce the wrong value\n((shutdown-method read write) via SHUT_RD|SHUT_WR = 0|1 = 1, colliding\nwith plain SHUT_WR instead of SHUT_RDWR). Fixed by using a clean,\nalways-combinable 1/2/3 encoding for *shut-rd*/*shut-wr*/*shut-rdwr*\ninstead, translated to the real platform constant inside\nsocket-shutdown's own C implementation. Has a dedicated regression test\nverifying (shutdown-method read write) actually differs from\n(shutdown-method write) alone.\n\nThe six name->constant macros (address-family, address-info,\nsocket-domain, ip-protocol, message-type, shutdown-method) and the two\nflag combinators (socket-merge-flags, socket-purge-flags) live in the\nScheme shim (srfi/s106/sockets.scm) as syntax-rules macros -- pure\ncompile-time lookups with no runtime behavior, and curry's C module API\nhas no macro-registration story.\n\nIndependent code review found and fixed three real bugs before this\nlanded:\n- socket-input-port/socket-output-port leaked the dup()'d fd when\n  fdopen failed (curry_make_port_from_fd only takes ownership on\n  success, per its own documented contract) -- same pre-existing gap\n  found in network.c's own tcp-connect/tcp-accept while fixing this,\n  patched there too for consistency.\n- service_to_cstr's 16-byte buffer wasn't sized for curry's actual\n  fixnum range (~61-bit signed, not 32-bit) -- extreme port values were\n  silently truncated by snprintf rather than overflowing (never a\n  memory-safety bug, but a real correctness one: getaddrinfo would\n  reject the truncated string with no hint why).\n- srfi106.c was missing the ws2tcpip.h include network.c already has\n  for its own Windows build (struct addrinfo/getaddrinfo/AI_* are\n  declared there, not in winsock2.h) -- would have failed to compile on\n  Windows.\n\n347/347 C unit tests, 108/108 ctest suites (new srfi_106 suite: 33\nassertions covering real TCP/UDP round trips via both raw socket-send/\nrecv and port-based I/O, all six name macros, flag combinators,\ncall-with-socket's close-on-error guarantee via dynamic-wind, and the\nshutdown-method correctness case above), fresh --clear-cache run.\nIndependent code-review and security-review passes on the final diff.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T23:35:10+10:00",
+          "tree_id": "985c2acd875e405a2c9dd5bdc426e9bc473e0e41",
+          "url": "https://github.com/deconstructo/curry/commit/bea13af425714629743e96d9de4ab308d5209083"
+        },
+        "date": 1787664961276,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.92,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.733,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.116,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.513,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 138.456,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 287.989,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.635,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.771,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 72.736,
             "unit": "ms"
           }
         ]
