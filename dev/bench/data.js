@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787646510496,
+  "lastUpdate": 1787648065357,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7244,6 +7244,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.258,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dadd563a7fb3ccd2193601b5bda93ef33fb6129d",
+          "message": "Merge pull request #71 from deconstructo/fix-callcc-shadow-stack\n\nfix(eval,builtins): call/cc leaks GC shadow stack, gc_inhibit_count, JIT depth",
+          "timestamp": "2026-08-25T18:53:48+10:00",
+          "tree_id": "235525e66be4620941783f98e000ae048669c786",
+          "url": "https://github.com/deconstructo/curry/commit/dadd563a7fb3ccd2193601b5bda93ef33fb6129d"
+        },
+        "date": 1787648064466,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.719,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.263,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.901,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.3,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 107.539,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 261.897,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 61.333,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 72.011,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 53.178,
             "unit": "ms"
           }
         ]
