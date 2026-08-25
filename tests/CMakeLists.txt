@@ -175,6 +175,16 @@ if(BUILD_MODULE_NETWORK AND TARGET curry_network)
     set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# libpiper has no system package yet (see docs/reference/module-piper.md)
+# and is OFF by default -- gated the same way BUILD_FFI-dependent suites
+# below are, so this suite simply doesn't exist in ctest's list at all on
+# an ordinary build, rather than being present and unconditionally
+# failing to import.
+if(BUILD_MODULE_PIPER AND TARGET curry_piper)
+    add_test(NAME piper COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/piper_tests.scm)
+    set_tests_properties(piper PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 # (curry s3) imports (curry crypto) for HMAC-SHA256/SHA-256 and
 # (curry http) for the actual requests -- both needed to even import,
 # regardless of whether a live S3-compatible endpoint is reachable

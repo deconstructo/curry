@@ -18,7 +18,13 @@
     tts-speak tts-speak-async tts-save
     tts-voices tts-backends tts-backend-available?
     tts-wait tts-stop tts-speaking?
-    current-tts-backend current-tts-voice current-tts-rate current-tts-language)
+    current-tts-backend current-tts-voice current-tts-rate current-tts-language
+    ;; Extensibility for an optionally-compiled backend (e.g. (curry tts
+    ;; piper), which only exists at all when curry was built with
+    ;; -DBUILD_MODULE_PIPER=ON) -- see the "Backend registration" section
+    ;; below for why this widens what used to be a deliberately closed,
+    ;; fixed table.
+    make-tts-backend tts-register-backend!)
   (begin
 
 (define-condition tts-error (error) #:fields (backend))
@@ -29,13 +35,50 @@
 ;;; backends, no inheritance or dispatch machinery actually needed.
 ;;; =========================================================================
 
+;; wait/stop/speaking? default to #f, meaning "this handle is an ordinary
+;; (curry posix) process handle -- use process-wait/process-kill/
+;; process-alive? directly", exactly the contract macos-say/espeak-ng's
+;; own handles already documented before this widening (see
+;; docs/reference/module-tts.md's own "async-handle lifecycle" section)
+;; -- neither backend's own definition below needed to change at all.
+;; Only a backend whose speak-async return value ISN'T a real OS process
+;; (e.g. (curry tts piper): a background pthread doing native audio
+;; output, not a subprocess -- see modules/piper/piper.c's own header
+;; comment) needs to supply its own three procs, and %dispatch-handle-op
+;; below picks between the two by asking process-handle? about the
+;; handle itself, not by remembering which backend produced it -- so
+;; tts-wait/tts-stop/tts-speaking? (which take just a handle, no backend
+;; context -- see their own definitions further down) keep working
+;; exactly as before with no change to THEIR signatures either.
 (define-record-type <tts-backend>
-  (make-tts-backend available? speak-async save voices)
+  (%make-tts-backend available? speak-async save voices wait stop speaking? handle?)
   tts-backend?
   (available? tts-backend-available-proc)  ; (proc) -> boolean, PATH check only
-  (speak-async tts-backend-speak-async)    ; (proc text voice rate) -> process handle
+  (speak-async tts-backend-speak-async)    ; (proc text voice rate) -> handle
   (save        tts-backend-save)           ; (proc text path voice rate) -> unspecified, blocks
-  (voices      tts-backend-voices-proc))   ; (proc) -> list of (name . locale) pairs
+  (voices      tts-backend-voices-proc)    ; (proc) -> list of (name . locale) pairs
+  (wait        tts-backend-wait-proc)      ; (handle) -> unspecified, blocks -- or #f, see above
+  (stop        tts-backend-stop-proc)      ; (handle) -> unspecified -- or #f
+  (speaking?   tts-backend-speaking-proc)  ; (handle) -> boolean -- or #f
+  (handle?     tts-backend-handle-proc))   ; (v) -> boolean, "is v one of MY handles" -- or #f;
+                                            ; only consulted when v isn't a (curry posix)
+                                            ; process-handle?, see %dispatch-handle-op below
+
+;; Public constructor: wait/stop/speaking? are genuinely optional (a
+;; trailing . rest, not the #!optional some other Schemes' define-record-
+;; type constructors support -- unused anywhere else in this codebase),
+;; defaulting to #f each -- see <tts-backend>'s own comment above for
+;; what #f means here. A backend that supplies wait/stop/speaking? MUST
+;; also supply handle? (its own speak-async's return value is by
+;; definition not a process-handle?, so tts-wait/tts-stop/tts-speaking?
+;; need a way to recognize it -- see %dispatch-handle-op).
+(define (make-tts-backend available? speak-async save voices . rest)
+  (%make-tts-backend available? speak-async save voices
+                      (if (pair? rest) (car rest) #f)
+                      (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) #f)
+                      (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest))) (caddr rest) #f)
+                      (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest)) (pair? (cdddr rest)))
+                          (cadddr rest) #f)))
 
 (define %macos-backend
   (make-tts-backend macos-tts-available? macos-tts-speak-async macos-tts-save macos-tts-voices))
@@ -43,11 +86,27 @@
 (define %espeak-backend
   (make-tts-backend espeak-tts-available? espeak-tts-speak-async espeak-tts-save espeak-tts-voices))
 
-;; Fixed, small, known set -- doesn't need a registration mechanism the
-;; way (curry conditions)'s open condition-type registry does.
+;; Was a fixed, small, known set with no registration mechanism -- widened
+;; to an open registry (matching (curry conditions)'s own open condition-
+;; type registry, which this file's original comment explicitly said
+;; wasn't needed here) specifically because a backend like (curry tts
+;; piper) may not even exist as an importable library at all, depending
+;; on how curry was built (-DBUILD_MODULE_PIPER=OFF by default) -- unlike
+;; macos-say/espeak-ng, which are plain Scheme + subprocess spawning and
+;; always compile in regardless of platform, only ever varying in
+;; runtime *availability*. (curry tts) itself can't unconditionally
+;; (import (curry tts piper)) the way it does the other two, since that
+;; import would fail outright (unbound library) on an ordinary build.
+;; Instead, (curry tts piper) is its own separate library a caller who
+;; wants piper support imports explicitly, and its own top-level (begin
+;; ...) body registers itself here as a side effect of that import --
+;; see that file's own header comment for the full rationale.
 (define %backend-table
   (list (cons 'macos-say %macos-backend)
         (cons 'espeak-ng %espeak-backend)))
+
+(define (tts-register-backend! sym backend)
+  (set! %backend-table (cons (cons sym backend) %backend-table)))
 
 (define (%lookup-backend sym)
   (let ((p (assq sym %backend-table)))
@@ -218,8 +277,28 @@
 ;; ordinary (curry posix) process handle, so these are direct
 ;; pass-throughs; kept as tts-* names so callers never need to know
 ;; that's what it is (a future backend need not be subprocess-based).
-(define (tts-wait h) (process-wait h))
-(define (tts-stop h) (process-kill h))
-(define (tts-speaking? h) (process-alive? h))
+;; Fast path first: an ordinary (curry posix) process handle (macos-say/
+;; espeak-ng's own speak-async return value) is the overwhelmingly common
+;; case, checked with zero registry lookup -- process-handle? is a plain
+;; type predicate, not a search. Only when that's NOT what `h` is do we
+;; walk %backend-table looking for the (exactly one, in practice) backend
+;; whose own handle? proc recognizes it, and use THAT backend's wait/
+;; stop/speaking? instead. An unrecognized handle falls through to
+;; process-wait/process-kill/process-alive? anyway, which will raise its
+;; own clear type error -- no silent no-op.
+(define (%dispatch-handle-op h process-op backend-op-proc)
+  (if (process-handle? h)
+      (process-op h)
+      (let loop ((table %backend-table))
+        (cond
+          ((null? table) (process-op h)) ; unrecognized -- let process-op's own error fire
+          ((let ((handle-p (tts-backend-handle-proc (cdar table))))
+             (and handle-p (handle-p h)))
+           ((backend-op-proc (cdar table)) h))
+          (else (loop (cdr table)))))))
+
+(define (tts-wait h) (%dispatch-handle-op h process-wait tts-backend-wait-proc))
+(define (tts-stop h) (%dispatch-handle-op h process-kill tts-backend-stop-proc))
+(define (tts-speaking? h) (%dispatch-handle-op h process-alive? tts-backend-speaking-proc))
 
   )) ;; end begin, define-library

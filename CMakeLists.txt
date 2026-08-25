@@ -296,6 +296,7 @@ option(BUILD_MODULE_STORAGE   "Build object storage module (S3/GCS/Azure/Swift)"
 option(BUILD_MODULE_HTTP      "Build HTTP client module (libcurl)"  ON)
 option(BUILD_MODULE_GRAPHQL   "Build GraphQL client module"         ON)
 option(BUILD_MODULE_NEO4J     "Build Neo4j module"                  ON)
+option(BUILD_MODULE_PIPER     "Build Piper neural TTS module (requires libpiper -- see docs/reference/module-piper.md)" OFF)
 option(BUILD_MODULE_REDIS     "Build Redis client module"           ON)
 option(BUILD_MODULE_MQTT      "Build MQTT client module (Paho C)"   ON)
 option(BUILD_MODULE_IMAGE     "Build PNG/JPEG/GIF image module"     ON)
@@ -488,6 +489,56 @@ if(BUILD_MODULE_NEO4J)
     message(STATUS "Neo4j TLS support enabled (OpenSSL ${OPENSSL_VERSION})")
   else()
     message(STATUS "Neo4j TLS support disabled (OpenSSL not found)")
+  endif()
+endif()
+
+# Piper (https://github.com/OHF-Voice/piper1-gpl) has no system package yet --
+# build libpiper/ from that repo yourself first (see docs/reference/
+# module-piper.md), then either install it to a default search path or pass
+# -DPIPER_ROOT=<install prefix> (the libpiper build's own -DCMAKE_INSTALL_PREFIX).
+if(BUILD_MODULE_PIPER)
+  find_path(PIPER_INCLUDE_DIR NAMES piper.h HINTS "${PIPER_ROOT}/include")
+  find_library(PIPER_LIB NAMES piper HINTS "${PIPER_ROOT}/lib")
+  find_library(ONNXRUNTIME_LIB NAMES onnxruntime HINTS "${PIPER_ROOT}/lib")
+  if(NOT PIPER_INCLUDE_DIR OR NOT PIPER_LIB OR NOT ONNXRUNTIME_LIB)
+    message(FATAL_ERROR
+      "BUILD_MODULE_PIPER=ON but libpiper/onnxruntime were not found.\n"
+      "  1. git clone https://github.com/OHF-Voice/piper1-gpl\n"
+      "  2. cd piper1-gpl/libpiper && cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install\n"
+      "     cmake --build build --config Release && cmake --install build --config Release\n"
+      "  3. Re-run curry's own cmake configure with -DPIPER_ROOT=<that install prefix>")
+  endif()
+  curry_c_module(piper)
+  target_include_directories(curry_piper PRIVATE ${PIPER_INCLUDE_DIR})
+  target_link_libraries(curry_piper PRIVATE ${PIPER_LIB} ${ONNXRUNTIME_LIB})
+  if(APPLE)
+    # Native direct-to-speaker playback (piper-speak-async) via CoreAudio's
+    # AudioQueue API -- always present on macOS, nothing extra to install.
+    target_link_libraries(curry_piper PRIVATE "-framework AudioToolbox")
+  elseif(UNIX)
+    # ALSA is optional, not required: piper-save (WAV file output) never
+    # touches an audio device at all, and piper.c's own runtime fallback
+    # (no PIPER_HAVE_COREAUDIO/PIPER_HAVE_ALSA) raises a clear error from
+    # piper-speak-async specifically rather than failing to build or
+    # crashing, so it's safe to build without it.
+    find_library(ALSA_LIB NAMES asound)
+    find_path(ALSA_INCLUDE_DIR NAMES alsa/asoundlib.h)
+    if(ALSA_LIB AND ALSA_INCLUDE_DIR)
+      target_link_libraries(curry_piper PRIVATE ${ALSA_LIB})
+      target_include_directories(curry_piper PRIVATE ${ALSA_INCLUDE_DIR})
+      # Without this, piper.c's own #if defined(PIPER_BUILD_HAVE_ALSA)
+      # guard (modules/piper/piper.c) stays false even though ALSA was
+      # just linked above -- the module would silently compile with NO
+      # native audio backend on Linux at all, always falling into the
+      # "no native audio output" runtime-error fallback regardless of
+      # whether ALSA is actually present. Found missing here on a
+      # self-review pass before this was ever wired up correctly.
+      target_compile_definitions(curry_piper PRIVATE PIPER_BUILD_HAVE_ALSA)
+      message(STATUS "Piper: ALSA found -- piper-speak-async (direct-to-speaker) enabled")
+    else()
+      message(WARNING "Piper: ALSA (libasound-dev/alsa-lib-devel) not found -- "
+                       "piper-speak-async will raise at runtime; piper-save (WAV file output) still works")
+    endif()
   endif()
 endif()
 
