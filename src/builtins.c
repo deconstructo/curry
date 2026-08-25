@@ -2269,11 +2269,21 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     int saved_fc   = vm->frame_count;
     val_t *saved_sp = vm->sp;
     Upvalue *saved_uv = vm->open_upvalues;
+    /* Mirrors SCM_PROTECT's own save/restore triple (eval.h) and
+     * eval_call_cc's identical fix (eval.c) -- see that comment for the
+     * full explanation of why all three (shadow stack, gc_inhibit_count,
+     * g_jit_call_depth) need saving here, not just the shadow stack. */
+    void *saved_shadow = gc_shadow_save();
+    int   saved_inhibit = gc_inhibit_save();
+    int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         /* Continuation was invoked — restore VM state and return captured value.
          * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
          * comment for the full explanation. */
+        gc_shadow_restore(saved_shadow);
+        gc_inhibit_restore(saved_inhibit);
+        jit_depth_restore(saved_jit_depth);
         vm->frame_count   = saved_fc;
         vm->sp            = saved_sp;
         vm->open_upvalues = saved_uv;

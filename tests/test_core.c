@@ -229,6 +229,45 @@ static void test_continuations(void) {
     CHECK(vis_fixnum(r) && vunfix(r) == 42, "call/cc escape");
 }
 
+/* Regression test for a real gap found by independent code review of the
+ * gc_shadow_save/restore fix (eval_call_cc/prim_call_cc, eval.c/builtins.c):
+ * SCM_PROTECT saves/restores THREE things around its own setjmp/longjmp --
+ * the GC shadow stack, gc_inhibit_count, and g_jit_call_depth -- but the
+ * call/cc capture sites only originally gained the first one. Invoking a
+ * captured continuation from inside a primitive's own gc_inhibit_minor()/
+ * gc_resume_minor() bracket (for-each's C-side dispatch is exactly this
+ * shape) longjmps straight past the pending gc_resume_minor(), permanently
+ * leaking gc_inhibit_count -- under --gc generational this blocks minor GC
+ * on the thread forever (see src/compiler.c's own comment on this exact
+ * failure class for a different call site). Covers both execution paths
+ * that have their own independent call/cc implementation: eval_call_cc
+ * (tree-walker, exercised via run()) and prim_call_cc (compiled VM,
+ * exercised via run_vm()). */
+static void test_call_cc_inhibit_count_balanced(void) {
+    {
+        int before = gc_inhibit_save();
+        val_t r = run(
+            "(call/cc (lambda (k) "
+            " (for-each (lambda (x) (if (= x 3) (k 'done))) (list 1 2 3 4 5))))");
+        int after = gc_inhibit_save();
+        CHECK(r == sym_intern_cstr("done"),
+              "call/cc (tree-walker): escape from inside for-each returns correctly");
+        CHECK(before == after,
+              "call/cc (tree-walker): gc_inhibit_count balanced after escaping from inside for-each");
+    }
+    {
+        int before = gc_inhibit_save();
+        val_t r = run_vm(
+            "(call/cc (lambda (k) "
+            " (for-each (lambda (x) (if (= x 3) (k 'done))) (list 1 2 3 4 5))))");
+        int after = gc_inhibit_save();
+        CHECK(r == sym_intern_cstr("done"),
+              "call/cc (compiled VM): escape from inside for-each returns correctly");
+        CHECK(before == after,
+              "call/cc (compiled VM): gc_inhibit_count balanced after escaping from inside for-each");
+    }
+}
+
 static void test_sets(void) {
     run("(define s (make-set))");
     run("(set-add! s 1) (set-add! s 2) (set-add! s 3)");
@@ -1501,6 +1540,7 @@ int main(void) {
     RUN_TEST(test_tail_calls);
     RUN_TEST(test_closures);
     RUN_TEST(test_continuations);
+    RUN_TEST(test_call_cc_inhibit_count_balanced);
     RUN_TEST(test_sets);
     RUN_TEST(test_hash_tables);
     RUN_TEST(test_records);
