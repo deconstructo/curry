@@ -47,6 +47,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "piper.h"
 
@@ -94,6 +95,92 @@ static void *val_to_ptr(curry_val v) {
     return p;
 }
 
+/* ── Live-synth tracking: a process-exit safety net ────────────────────
+ * onnxruntime keeps a process-global OrtEnv singleton whose static
+ * destructor runs during exit()'s __cxa_finalize_ranges sweep. If ANY
+ * piper_synthesizer is still alive at that point (i.e. piper_free() was
+ * never called on it), that destructor throws inside noexcept context
+ * and the whole process SIGABRTs -- confirmed with lldb (the crash is
+ * entirely inside libonnxruntime's own
+ * unique_ptr<OrtEnv>::~unique_ptr, not in this module's code) and by
+ * direct comparison against libpiper's own reference CLI
+ * (src/main/main.cpp), which always calls piper_free() before
+ * returning and exits cleanly. This is NOT the same as the already-
+ * documented "no GC finalizer, caller must free" contract's ordinary
+ * consequence (a harmless leak) -- skipping piper-free! here crashes
+ * the whole process, not just this synth's own memory. (curry tts
+ * piper)'s own %synth-cache in particular never frees a cached synth
+ * at all, so without this safety net every process that ever used the
+ * piper TTS backend would abort on exit. Tracking + freeing any
+ * leftovers via atexit() converts that guaranteed crash back into the
+ * ordinary, already-accepted "ONNX session memory held until process
+ * exit" leak. */
+static pthread_mutex_t live_synths_lock = PTHREAD_MUTEX_INITIALIZER;
+typedef struct SynthNode { piper_synthesizer *synth; struct SynthNode *next; } SynthNode;
+static SynthNode *live_synths = NULL;
+
+static void free_leaked_synths_at_exit(void);    /* forward decl, defined below */
+static void free_leaked_playbacks_at_exit(void); /* forward decl, defined below */
+
+/* atexit() runs handlers LIFO. onnxruntime lazily constructs its
+ * process-global OrtEnv (and registers ITS OWN destructor) inside the
+ * FIRST piper_create() call, not at library-load time -- registering
+ * our cleanup unconditionally in curry_module_init (i.e. before any
+ * synth, hence before ORT's own lazy registration, has ever happened)
+ * put us BEFORE ORT in the atexit list, so ORT's crash-inducing
+ * teardown ran first at exit regardless of what we did (confirmed:
+ * that ordering crashed every run). Registering here instead, on the
+ * first successful track_synth() call -- guaranteed to run after
+ * piper_create() has already returned, and therefore after ORT's own
+ * lazy registration already happened -- puts us LAST in the list, so
+ * LIFO order runs our cleanup FIRST, before ORT's teardown. */
+static pthread_once_t atexit_once = PTHREAD_ONCE_INIT;
+static void register_exit_cleanup_once(void) {
+    /* Registered in this order so LIFO makes playback cleanup run
+     * BEFORE synth cleanup at exit -- a leftover PiperPlayback holds a
+     * borrowed (non-owning) pointer to its synth, so tearing down
+     * playbacks first, synths second, keeps that borrow valid for the
+     * whole of playback cleanup. */
+    atexit(free_leaked_synths_at_exit);
+    atexit(free_leaked_playbacks_at_exit);
+}
+
+static void track_synth(piper_synthesizer *synth) {
+    SynthNode *node = malloc(sizeof(SynthNode));
+    pthread_mutex_lock(&live_synths_lock);
+    node->synth = synth;
+    node->next = live_synths;
+    live_synths = node;
+    pthread_mutex_unlock(&live_synths_lock);
+    pthread_once(&atexit_once, register_exit_cleanup_once);
+}
+
+static void untrack_synth(piper_synthesizer *synth) {
+    pthread_mutex_lock(&live_synths_lock);
+    for (SynthNode **cur = &live_synths; *cur; cur = &(*cur)->next) {
+        if ((*cur)->synth == synth) {
+            SynthNode *dead = *cur;
+            *cur = dead->next;
+            free(dead);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&live_synths_lock);
+}
+
+static void free_leaked_synths_at_exit(void) {
+    pthread_mutex_lock(&live_synths_lock);
+    SynthNode *node = live_synths;
+    live_synths = NULL;
+    pthread_mutex_unlock(&live_synths_lock);
+    while (node) {
+        SynthNode *next = node->next;
+        piper_free(node->synth);
+        free(node);
+        node = next;
+    }
+}
+
 /* ── piper-create / piper-free! / piper-synth? / piper-version ────────── */
 
 static curry_val fn_piper_create(int ac, curry_val *av, void *ud) {
@@ -102,9 +189,31 @@ static curry_val fn_piper_create(int ac, curry_val *av, void *ud) {
     const char *config_path = (ac > 1 && curry_is_true(av[1])) ? curry_string(av[1]) : NULL;
     const char *espeak_data_path = (ac > 2 && curry_is_true(av[2])) ? curry_string(av[2]) : NULL;
 
+    /* piper_create is a C++ implementation behind an extern "C" API that
+     * does NOT catch its own internal exceptions (confirmed: a
+     * nonexistent model_path makes it try to nlohmann::json::parse an
+     * empty/missing config file, throw a json::parse_error, and that
+     * exception unwinds straight across the C boundary with nothing to
+     * catch it -- std::terminate, SIGABRT, the whole process dies, not
+     * just this call). We can't add a try/catch from this side (this
+     * file is plain C, and rewriting it to C++ just to add exception
+     * handling around six functions is disproportionate to the actual
+     * gap). Pre-checking the two file paths WE control covers the
+     * single most likely real-world trigger -- a typo'd or missing
+     * path -- with a normal catchable curry_error instead of a crash;
+     * it does not, and cannot, cover every possible internal exception
+     * (e.g. a syntactically present but corrupt .onnx/.json file could
+     * still crash the process -- that's an upstream libpiper
+     * robustness gap, not something fixable from a C wrapper). */
+    if (access(model_path, F_OK) != 0)
+        curry_error("piper-create: no such model file: %s", model_path);
+    if (config_path && access(config_path, F_OK) != 0)
+        curry_error("piper-create: no such config file: %s", config_path);
+
     piper_synthesizer *synth = piper_create(model_path, config_path, espeak_data_path);
     if (!synth)
         curry_error("piper-create: failed to load voice model: %s", model_path);
+    track_synth(synth);
     return ptr_to_val("piper-synth", synth);
 }
 
@@ -117,7 +226,9 @@ static curry_val fn_piper_free(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!val_is_tagged(av[0], "piper-synth"))
         curry_error("piper-free!: not a piper synth handle");
-    piper_free((piper_synthesizer *)val_to_ptr(av[0]));
+    piper_synthesizer *synth = (piper_synthesizer *)val_to_ptr(av[0]);
+    untrack_synth(synth);
+    piper_free(synth);
     return curry_void();
 }
 
@@ -322,6 +433,52 @@ typedef struct {
     char error_msg[256];
 } PiperPlayback;
 
+/* ── Live-playback tracking: same atexit safety net as live-synth
+ * tracking above, but simpler -- there is no "piper-handle-free!"
+ * primitive (a playback handle behaves like a (curry posix) process
+ * handle: it stays valid indefinitely after piper-wait, with no
+ * explicit release call, reclaimed automatically at process exit).
+ * So every handle just stays tracked from creation until exit, no
+ * untrack step needed anywhere. At exit, only free handles whose
+ * playback thread has actually finished (pb->done) -- one still
+ * running (process exiting while a fire-and-forget speak-async is
+ * still mid-flight, never waited/stopped) is left as a known, bounded
+ * leak rather than risk destroying a mutex/cond a detached thread
+ * might still be using concurrently. */
+static pthread_mutex_t live_playbacks_lock = PTHREAD_MUTEX_INITIALIZER;
+typedef struct PlaybackNode { PiperPlayback *pb; struct PlaybackNode *next; } PlaybackNode;
+static PlaybackNode *live_playbacks = NULL;
+
+static void track_playback(PiperPlayback *pb) {
+    PlaybackNode *node = malloc(sizeof(PlaybackNode));
+    pthread_mutex_lock(&live_playbacks_lock);
+    node->pb = pb;
+    node->next = live_playbacks;
+    live_playbacks = node;
+    pthread_mutex_unlock(&live_playbacks_lock);
+    pthread_once(&atexit_once, register_exit_cleanup_once);
+}
+
+static void free_leaked_playbacks_at_exit(void) {
+    pthread_mutex_lock(&live_playbacks_lock);
+    PlaybackNode *node = live_playbacks;
+    live_playbacks = NULL;
+    pthread_mutex_unlock(&live_playbacks_lock);
+    while (node) {
+        PlaybackNode *next = node->next;
+        pthread_mutex_lock(&node->pb->lock);
+        bool done = node->pb->done;
+        pthread_mutex_unlock(&node->pb->lock);
+        if (done) {
+            pthread_mutex_destroy(&node->pb->lock);
+            pthread_cond_destroy(&node->pb->cond);
+            free(node->pb);
+        }
+        free(node);
+        node = next;
+    }
+}
+
 static void *playback_thread_fn(void *arg) {
     PiperPlayback *pb = arg;
     AudioOutput *out = NULL;
@@ -345,8 +502,17 @@ static void *playback_thread_fn(void *arg) {
 
         piper_audio_chunk chunk;
         int r = piper_synthesize_next(pb->synth, &chunk);
-        if (r == PIPER_DONE) break;
-        if (r != PIPER_OK) {
+        /* PIPER_DONE is returned on the SAME call that delivers the final
+         * chunk's samples (confirmed against libpiper's own reference
+         * caller, src/main/utils/wavfile.cpp: it ignores the return code
+         * entirely and drives its loop off chunk.is_last, processing
+         * chunk.samples on every call including the one returning
+         * PIPER_DONE). Treating PIPER_DONE as "nothing to process, stop
+         * now" -- the original bug here -- silently discarded that last
+         * chunk's audio on every call, losing all audio outright for any
+         * text short enough to finish in a single chunk. Only a genuine
+         * negative error code (PIPER_ERR_GENERIC) is a real error. */
+        if (r != PIPER_OK && r != PIPER_DONE) {
             pthread_mutex_lock(&pb->lock);
             pb->had_error = true;
             snprintf(pb->error_msg, sizeof(pb->error_msg),
@@ -410,6 +576,7 @@ static curry_val fn_piper_speak_async(int ac, curry_val *av, void *ud) {
         curry_error("piper-speak-async: failed to start playback thread");
     }
     pthread_detach(pb->thread); /* piper-wait joins via the cond var, not pthread_join */
+    track_playback(pb);
 
     return ptr_to_val("piper-handle", pb);
 }
@@ -419,29 +586,25 @@ static curry_val fn_piper_handle_p(int ac, curry_val *av, void *ud) {
     return curry_make_bool(val_is_tagged(av[0], "piper-handle"));
 }
 
-/* piper-wait is where a PiperPlayback (`pb`) gets freed -- including its
- * pthread_mutex_t/pthread_cond_t, which are OS resources, not just heap
- * memory, and so worth being more careful about leaking than an ordinary
- * malloc (found missing entirely in an earlier version of this
- * function, on a self-review pass: pb was calloc'd in
- * fn_piper_speak_async and never freed on any path at all). Safe to
- * free here because pb->done is already known true (the wait loop below
- * doesn't return until it is), so the playback thread is provably done
- * touching pb by the time this function reaches the free -- pthread_
- * detach (fn_piper_speak_async) already released the thread's own
- * resources back to the OS once it returned, this is just the
- * separate heap struct + mutex/cond it was using.
- *
- * Known, accepted limitation, not fixed here: a caller that never calls
- * piper-wait at all (fire-and-forget speak-async, calling only piper-
- * stop!/piper-alive? or nothing further) leaks this same small,
- * fixed-size struct -- there is no other point in this API where "no
- * one will ever touch this handle again" can be determined safely.
- * Matches this module's own already-explicit resource-management
- * stance elsewhere (piper-synth needs an explicit piper-free! too, no
- * GC finalizer) rather than attempting reference-counting for a case
- * the documented API doesn't really encourage (tts-speak, the common
- * path, is tts-speak-async + a wait). */
+/* piper-wait used to free `pb` (including its pthread_mutex_t/
+ * pthread_cond_t) once pb->done was confirmed true, on the theory that
+ * "the playback thread is provably done touching pb, so it's safe."
+ * That was true for the playback thread, but wrong for the CALLER:
+ * (curry tts)'s own handle-usage pattern (mirrored from real (curry
+ * posix) process handles, which stay valid indefinitely after
+ * process-wait -- you can call process-alive? on an already-waited
+ * process at any time) calls piper-stop!/piper-wait/piper-alive? in
+ * sequence on the SAME handle, same as it always has for the process-
+ * handle backends. Freeing inside piper-wait made that sequence a
+ * live use-after-free -- caught by piper_tests.scm's own "tts-
+ * speaking? is #f after tts-stop+tts-wait" check silently returning
+ * the wrong (stale/undefined) answer instead of crashing outright.
+ * Fixed by NOT freeing here -- pb now stays valid after wait, exactly
+ * like a process handle -- and reclaiming it instead via the same
+ * live-tracking + atexit() safety net already used for piper-synth
+ * handles (see track_synth/free_leaked_synths_at_exit above), so
+ * repeated piper-speak-async use over a long-lived process doesn't
+ * accumulate unbounded live handles either. */
 static curry_val fn_piper_wait(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!val_is_tagged(av[0], "piper-handle"))
@@ -455,10 +618,6 @@ static curry_val fn_piper_wait(int ac, curry_val *av, void *ud) {
     char msg[256];
     if (had_error) memcpy(msg, pb->error_msg, sizeof(msg));
     pthread_mutex_unlock(&pb->lock);
-
-    pthread_mutex_destroy(&pb->lock);
-    pthread_cond_destroy(&pb->cond);
-    free(pb);
 
     if (had_error) curry_error("piper-wait: %s", msg);
     return curry_void();
@@ -557,8 +716,10 @@ static curry_val fn_piper_save(int ac, curry_val *av, void *ud) {
     for (;;) {
         piper_audio_chunk chunk;
         int r = piper_synthesize_next(synth, &chunk);
-        if (r == PIPER_DONE) break;
-        if (r != PIPER_OK) {
+        /* See playback_thread_fn's matching comment: PIPER_DONE carries
+         * valid samples in the same call, not a separate empty final
+         * call -- only a genuine negative error code is an error. */
+        if (r != PIPER_OK && r != PIPER_DONE) {
             free(pcm_buf);
             fclose(f);
             curry_error("piper-save: piper_synthesize_next failed (code %d)", r);

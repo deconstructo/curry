@@ -78,7 +78,7 @@
                       (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) #f)
                       (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest))) (caddr rest) #f)
                       (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest)) (pair? (cdddr rest)))
-                          (cadddr rest) #f)))
+                          (car (cdddr rest)) #f)))
 
 (define %macos-backend
   (make-tts-backend macos-tts-available? macos-tts-speak-async macos-tts-save macos-tts-voices))
@@ -256,8 +256,18 @@
     ((tts-backend-speak-async backend) text voice rate)))
 
 ;; (tts-speak text . kwargs) -- blocks until the utterance finishes.
+;; Was calling process-wait directly here -- a leftover from before the
+;; backend registry widened past a fixed process-handle-only world (see
+;; %dispatch-handle-op above); that made every non-process backend's
+;; handle (e.g. piper's, a background-thread handle, not a (curry
+;; posix) process) fail tts-speak specifically with "not a process
+;; handle", even though tts-wait itself was already correctly widened
+;; to dispatch on the handle's actual type. Found via a live run
+;; against the piper backend, not caught by tts_tests.scm since it
+;; only exercises macos-say/espeak-ng (real process handles, so the
+;; bug was invisible there).
 (define (tts-speak text . kwargs)
-  (process-wait (apply tts-speak-async text kwargs))
+  (tts-wait (apply tts-speak-async text kwargs))
   (values))
 
 ;; (tts-save text path . kwargs) -- render to `path`, no sound played.
