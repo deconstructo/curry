@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787648617722,
+  "lastUpdate": 1787650961390,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7382,6 +7382,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 57.36,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "241cf19660c33994b83eeb7bbed5028d8b17bc60",
+          "message": "feat(compiler): Tier 2.6 Phase A -- interleaved-lowering session API (#72)\n\n* feat(compiler): Tier 2.6 Phase A -- interleaved-lowering session API\n\nGroundwork for retargeting src/llvm/codegen.cpp at the IR instead of\nraw S-expressions (docs/thoughts/tier2-6-llvm-ir-retargeting-plan-\n2026-08-25.md). compiler_ir_lower_for_jit (already landed) only lowers\none top-level expression per call, against a throwaway Compiler that\nnever survives past that call -- not enough for a consumer that needs\nto lower a whole function body one form at a time, interleaved with\nits own per-form consumption (the same \"lower this form, consume it\nimmediately, then lower the next one\" contract ir_emit's own IR_SEQ/\nIR_LAMBDA cases already rely on, required for internal define-syntax\nregistration ordering).\n\nAdds compiler_ir_session_new_root/new_child/lower_next. Genuinely new\nterritory: every other Compiler in this file lives on one C stack\nframe for one synchronous call; a session Compiler must survive across\nmultiple, separate calls from external (eventually C++) code, so it's\nheap-allocated via gc_alloc_pinned -- the same allocator every other\nlong-lived, GC-participating struct in this codebase uses, needed\nsince Compiler holds live val_t references that must stay traceable\nby Boehm for the session's whole lifetime, unlike a stack Compiler\nonly covered by the conservative stack scan for one call's duration.\n\nVerified during this landing that lowering itself never reads a\nCompiler's locals[]/upvals[]/known[]/local_count/chunk fields -- only\n->enclosing (macro visibility) and ->syntax_locals[] (macro\nregistration) are touched by ir_lower's dispatch, since variable/\ncall-site resolution is entirely an ir_emit-time concern deferred by\ndesign (see ir.h's own comments on IR_VAR_REF/IR_CALL). This session\nAPI deliberately does not populate real locals/upvals for that\nreason -- an LLVM consumer's own separate resolution is what actually\nresolves those nodes once it consumes them, exactly mirroring how\nir_emit's own resolve_local/resolve_upvalue do for the VM backend.\n\nEach lower_next call brackets its own gc_inhibit_minor/gc_resume_minor\npair independently rather than leaving that open across the session --\ndeliberately, after PR #71's call/cc fix found exactly this class of\nbug (a paired inhibit/resume left unbalanced across multiple external\ncalls permanently blocks minor GC on the thread). A raise inside\nlower_next returns NULL without freeing the arena (earlier forms\nalready lowered through the session may still be referenced by the\ncaller) -- the caller owns exactly when to free it, same single-owner\ncontract every other IRArena in this codebase has.\n\nIndependent code review found one real gap: new_root/new_child's\n`name` parameter was stored unowned with no documented lifetime\nrequirement, unlike compiler_set_source_name's own existing \"must\noutlive\" contract for the same class of raw string pointer. A named-\nlet form lowered through a session embeds that same pointer into a\npersisted IR_LAMBDA node kept alive in the session's arena, so a\ntransient name from a future (not-yet-written) caller would leave a\ndangling pointer. Fixed by documenting the same \"literal or\nprocess-lifetime buffer\" requirement explicitly in compiler.h.\n\n347/347 C unit tests, 107/107 ctest suites, fresh --clear-cache run.\nIndependent code-review and security-review passes on the final diff.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* docs(performance): update Tier 2.6 plan session log for PR #72\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T19:42:01+10:00",
+          "tree_id": "b7ea2f77e21bd4e130d11a354ed4789f2f6f65e6",
+          "url": "https://github.com/deconstructo/curry/commit/241cf19660c33994b83eeb7bbed5028d8b17bc60"
+        },
+        "date": 1787650959195,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.195,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.062,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.336,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 27.333,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 121.971,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 271.59,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 62.566,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 76.835,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 64.858,
             "unit": "ms"
           }
         ]
