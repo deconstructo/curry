@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787650961390,
+  "lastUpdate": 1787658167732,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7451,6 +7451,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 64.858,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e397a532161770e71fa0ddcdc5dd34c42a3f4c42",
+          "message": "refactor(compiler): split compiler.c into five files along IR pipeline boundaries (#73)\n\n* refactor(compiler): split compiler.c into five files along IR pipeline boundaries\n\nPure code motion, no behavior change (verified: 332/332 core tests, 100/100\nctest suites, identical to pre-split baseline). compiler.c (5756 lines) mixed\nfour genuinely distinct concerns: the classic pre-IR special-form dispatcher,\nIR lowering, IR bytecode emission, and public API + differential self-check\ntest infrastructure.\n\n- src/compiler.h: added the opaque `typedef struct Compiler Compiler;`\n  forward declaration this split's internal-header pattern depends on\n  (mirrors src/runtime_internal.h's eval.c/runtime.c split.\n- src/compiler_internal.h (new): the real Compiler struct body, SpecialForm\n  enum, shared macros, and declarations for every symbol that crosses the\n  new file boundaries.\n- src/compiler.c (shrunk to ~810 lines): Compiler lifecycle, emit/scope/\n  local/upvalue helpers, and the public API entry points.\n- src/compiler_classic.c (new): the classic compile_* dispatcher, compile(),\n  compile_classic(), compile_seq(), classify_head().\n- src/ir_lower.c (new): ir_lower/ir_lower_*, ir_optimize, and the Tier 2.3\n  local-inliner eligibility/closedness helpers (moved here, not to\n  compiler_classic.c, since call-graph tracing showed they're consulted\n  exclusively by ir_lower_let/ir_lower_let_star, never by classic\n  compile_let).\n- src/ir_emit.c (new): ir_emit + ir_emit_inline_call.\n- src/compiler_ir_checks.c (new): compiler_ir_self_check/\n  compiler_ir_optimize_check/compiler_ir_inline_fired_check.\n\nCMakeLists.txt: added the four new source files to CORE_SOURCES.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nEOF\n)\n\n* fix(compiler): correct opaque Compiler typedef comment\n\nCode review of the compiler.c split flagged that the comment referenced compiler_ir_session_lower_next, a function declared in compiler.h but not yet implemented anywhere in this tree. Reworded to describe the forward declaration without pointing at a nonexistent API.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T21:41:38+10:00",
+          "tree_id": "6ba6140258c3d40555f7d7c346a7ff2d117cbd82",
+          "url": "https://github.com/deconstructo/curry/commit/e397a532161770e71fa0ddcdc5dd34c42a3f4c42"
+        },
+        "date": 1787658166523,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.201,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 22.557,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.704,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 28.2,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 101.245,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 243.915,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 59.851,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 66.822,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 53.514,
             "unit": "ms"
           }
         ]
