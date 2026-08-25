@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787564415203,
+  "lastUpdate": 1787646510496,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7175,6 +7175,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.257,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f4900a23a2ed13c22f809cdfbc7c8b777ee9f6fd",
+          "message": "Merge pull request #70 from deconstructo/tier2-unchecked-primitives-1\n\nTier 2.5: open-code car/cdr/cons/pair?/null?/arithmetic-comparison ops\n\nSurvived many reviews!",
+          "timestamp": "2026-08-25T18:27:47+10:00",
+          "tree_id": "7963bfda410a01a118e7fb192a35c36c3240f06d",
+          "url": "https://github.com/deconstructo/curry/commit/f4900a23a2ed13c22f809cdfbc7c8b777ee9f6fd"
+        },
+        "date": 1787646508430,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.421,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 22.832,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.402,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 26.928,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 120.781,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 273.656,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 62.006,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 76.868,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.258,
             "unit": "ms"
           }
         ]
