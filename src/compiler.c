@@ -796,6 +796,36 @@ static void lambda_prescan(Compiler *c, val_t body, int line) {
     }
 }
 
+/* Raises a catchable EC_WRONG_NUMBER_OF_ARGUMENTS condition if `args` (a
+ * special form's own operand list, e.g. the `(test then else)` after
+ * `if`) has fewer than `min` elements, instead of letting the caller's
+ * own unchecked vcar/vcdr walk off the end of a too-short (or non-pair,
+ * e.g. `(if . 5)`) list. Found and fixed as a real, confirmed, WIDESPREAD
+ * bug: every special-form compile_* / ir_lower_* function in this file
+ * originally read its own operands with bare vcar/vcdr and no arity
+ * check at all, so a malformed source form -- `(if)`, `(if 1)`, `(let)`,
+ * `(let*)`, `(letrec)`, `(lambda)`, `(define)`, `(set!)`, `(case)`,
+ * `(when)`, `(unless)`, `(do)`, `(guard)`, `(let-values)`,
+ * `(parameterize)`, `(define-record-type)` -- SIGSEGV'd the whole
+ * process instead of raising a catchable condition (confirmed present on
+ * `main` too, not introduced by any of tonight's other work; confirmed
+ * via direct testing of all of the above). Reuses
+ * EC_WRONG_NUMBER_OF_ARGUMENTS rather than minting a new stable error
+ * code (docs/reference/error-codes.md): this genuinely is an arity
+ * problem, just for a special form's own operand list rather than a
+ * procedure call's argument list. Every call site below passes a literal
+ * string naming the exact form for the error message, matching every
+ * other hand-written error message already in this file. */
+static void require_min_args(val_t args, int min, const char *form_name) {
+    val_t p = args;
+    for (int i = 0; i < min; i++) {
+        if (!vis_pair(p))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "%s: ill-formed special form", form_name);
+        p = vcdr(p);
+    }
+}
+
 static void compile_lambda(Compiler *parent, val_t params, val_t body,
                             const char *name, int line) {
     Compiler c;
@@ -830,6 +860,7 @@ static void compile_lambda(Compiler *parent, val_t params, val_t body,
 /* ── Special forms ───────────────────────────────────────────────────── */
 
 static void compile_if(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 2, "if");
     val_t test  = vcar(args);  args = vcdr(args);
     val_t then  = vcar(args);  args = vcdr(args);
     val_t els   = vis_pair(args) ? vcar(args) : V_VOID;
@@ -883,6 +914,7 @@ static void emit_define_store(Compiler *c, val_t name, int line) {
 }
 
 static void compile_define(Compiler *c, val_t args, int line) {
+    require_min_args(args, 1, "define");
     val_t target = vcar(args);
     val_t rest   = vcdr(args);
 
@@ -1295,6 +1327,7 @@ static val_t compile_time_eval(val_t expr) {
  * ends — nothing outside that (lexically-scoped, one-shot) compilation
  * could ever need it to exist again later. */
 static void compile_define_syntax(Compiler *c, val_t args, int line) {
+    require_min_args(args, 2, "define-syntax");
     val_t name        = vcar(args);
     val_t xfm_expr    = vcar(vcdr(args));
     /* Make `name` itself visible to sr_is_protected (syntax_rules.c)
@@ -1386,6 +1419,7 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
  * decision, not construction-time visibility, so it doesn't need the
  * unsupported procedural-invocation case above. */
 static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "let-syntax");  /* shared with letrec-syntax */
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
@@ -1415,6 +1449,7 @@ static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
 }
 
 static void compile_set(Compiler *c, val_t args, int line) {
+    require_min_args(args, 2, "set!");
     val_t name = vcar(args);
     val_t expr = vcar(vcdr(args));
     compile(c, expr, false, line);
@@ -1985,6 +2020,7 @@ static bool lambda_is_closed(Compiler *c, val_t params, val_t body, int *budget)
 }
 
 static void compile_let(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "let");
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
@@ -2003,6 +2039,7 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
          parent: OP_CLOSURE outer-wrapper; OP_CALL/OP_TAIL_CALL 0 */
     if (vis_symbol(bindings)) {
         val_t loop_name = bindings;
+        require_min_args(body, 1, "let");  /* named-let's own bindings list */
         bindings = vcar(body);
         body     = vcdr(body);
 
@@ -2086,6 +2123,7 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
 }
 
 static void compile_let_star(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "let*");
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
@@ -2119,6 +2157,7 @@ static void compile_let_star(Compiler *c, val_t args, bool tail, int line) {
 }
 
 static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "letrec");
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
@@ -2222,7 +2261,9 @@ static val_t let_values_expand(val_t bindings, val_t body, int bi, val_t pairs) 
         while (vis_pair(p)) { let_bindings = scm_cons(vcar(p), let_bindings); p = vcdr(p); }
         return scm_cons(S_LET, scm_cons(let_bindings, body));
     }
+    require_min_args(bindings, 1, "let-values");
     val_t binding  = vcar(bindings);
+    require_min_args(binding, 2, "let-values");  /* one (formals producer) pair */
     val_t formals  = vcar(binding);
     val_t producer = vcar(vcdr(binding));
     int pi = 0;
@@ -2235,6 +2276,7 @@ static val_t let_values_expand(val_t bindings, val_t body, int bi, val_t pairs) 
 }
 
 static void compile_let_values(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "let-values");
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
     if (vis_nil(bindings)) { compile_seq(c, body, tail, line); return; }
@@ -2250,11 +2292,14 @@ static void compile_let_values(Compiler *c, val_t args, bool tail, int line) {
  * (reusing S_LET_STAR_VALUES for the inner form) rather than the
  * expand-then-compile-once style of compile_let_values above. */
 static void compile_let_star_values(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "let*-values");
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
     if (vis_nil(bindings)) { compile_seq(c, body, tail, line); return; }
 
+    require_min_args(bindings, 1, "let*-values");
     val_t binding  = vcar(bindings);
+    require_min_args(binding, 2, "let*-values");  /* one (formals producer) pair */
     val_t formals  = vcar(binding);
     val_t producer = vcar(vcdr(binding));
     val_t rest     = vcdr(bindings);
@@ -2401,6 +2446,7 @@ static void compile_case(Compiler *c, val_t args, bool tail, int line) {
      *   (let ((%%k key)) (cond (clause') ...))
      * where non-else clause ((d...) body...) → ((memv %%k '(d...)) body...)
      * and   arrow clause ((d...) => proc)    → ((memv %%k '(d...)) (proc %%k)) */
+    require_min_args(args, 1, "case");
     val_t key     = vcar(args);
     val_t clauses = vcdr(args);
     val_t ksym    = sym_intern_cstr("%%case-key%%");
@@ -2442,6 +2488,7 @@ static void compile_case(Compiler *c, val_t args, bool tail, int line) {
 }
 
 static void compile_when(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "when");
     val_t test = vcar(args);
     val_t body = vcdr(args);
     compile(c, test, false, line);
@@ -2474,6 +2521,7 @@ static void compile_delay(Compiler *c, val_t body, bool is_force, bool tail, int
 }
 
 static void compile_unless(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 1, "unless");
     val_t test = vcar(args);
     val_t body = vcdr(args);
     compile(c, test, false, line);
@@ -2491,9 +2539,11 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     /* (do ((var init step) ...) (test expr...) body...)
        Wrap in a zero-arg lambda so do vars start at slot 0, avoiding
        slot-index conflicts when do appears as a call argument. */
+    require_min_args(args, 2, "do");
     val_t var_specs = vcar(args);
     val_t term      = vcar(vcdr(args));
     val_t body      = vcdr(vcdr(args));
+    require_min_args(term, 1, "do");  /* do's own (test expr...) clause */
     val_t test_expr = vcar(term);
     val_t result    = vcdr(term);
 
@@ -2614,6 +2664,7 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
      *   OP_CALL 1               ← (handler exn) → result
      *  end:
      */
+    require_min_args(args, 2, "with-exception-handler");
     val_t handler_expr = vcar(args);
     val_t thunk_expr   = vcar(vcdr(args));
 
@@ -2667,8 +2718,10 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
      *         (cond (test (%guard-k expr)) ... (else (raise var))))
      *       (lambda () body...))))
      * Each (else expr) clause wraps expr in (%guard-k ...) rather than raise. */
+    require_min_args(args, 1, "guard");
     val_t var_and_clauses = vcar(args);
     val_t body            = vcdr(args);
+    require_min_args(var_and_clauses, 1, "guard");  /* guard's own (var clause...) */
     val_t var             = vcar(var_and_clauses);
     val_t clauses         = vcdr(var_and_clauses);
 
@@ -2753,6 +2806,7 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
      *         (lambda () (%%p0 %%old0) (%%p1 %%old1) ...))))
      * so local variables in body are captured as upvalues, not looked up
      * in GLOBAL_ENV. */
+    require_min_args(args, 1, "parameterize");
     val_t param_list = vcar(args);
     val_t body       = vcdr(args);
 
@@ -2775,6 +2829,7 @@ static void compile_parameterize(Compiler *c, val_t args, bool tail, int line) {
     val_t b = param_list;
     for (int i = 0; i < n; i++, b = vcdr(b)) {
         val_t binding = vcar(b);
+        require_min_args(binding, 2, "parameterize");  /* one (param val) pair */
         param_expr[i] = vcar(binding);
         val_expr[i]   = vcar(vcdr(binding));
         snprintf(namebuf, sizeof(namebuf), "%%prm%d", i);
@@ -3507,6 +3562,7 @@ static void compile(Compiler *c, val_t expr, bool tail, int line) {
 
     /* lambda */
     case SF_LAMBDA: IR_OR_CLASSIC({
+        require_min_args(args, 1, "lambda");
         val_t params = vcar(args);
         val_t body   = vcdr(args);
         compile_lambda(c, params, body, NULL, line);
@@ -3855,6 +3911,7 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line);
 static void    ir_emit(Compiler *c, IRNode *n);
 
 static IRNode *ir_lower_if(Compiler *c, val_t args, bool tail, int line) {
+    require_min_args(args, 2, "if");
     val_t test = vcar(args);  args = vcdr(args);
     val_t then = vcar(args);  args = vcdr(args);
     val_t els  = vis_pair(args) ? vcar(args) : V_VOID;
@@ -3891,6 +3948,7 @@ static IRNode *ir_lower_seq(Compiler *c, val_t list, bool tail, int line) {
  * name resolution deferred to ir_emit via emit_store (see IRNode::
  * as.set's comment in ir.h). */
 static IRNode *ir_lower_set(Compiler *c, val_t args, int line) {
+    require_min_args(args, 2, "set!");
     val_t name = vcar(args);
     val_t expr = vcar(vcdr(args));
     IRNode *n = ir_node_new(c->ir_arena, IR_SET, false, line);
@@ -4299,41 +4357,60 @@ static IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     if (head == S_SET)   return ir_lower_set(c, args, line);
     if (head == S_AND)   return ir_lower_and(c, args, tail, line);
     if (head == S_OR)    return ir_lower_or(c, args, tail, line);
-    /* No vis_pair(args) guard here (or on S_LET just below) -- matching
-     * compile()'s own classic SF_LAMBDA case, which does the identical
-     * unchecked `vcar(args)`/`vcdr(args)` with no shape check either.
-     * Deliberate: this makes ir_lower NEVER produce IR_FALLBACK for
-     * head==S_LAMBDA, only crash-parity with classic on malformed input
-     * (e.g. a bare `(lambda)`) -- if it COULD fall back to IR_FALLBACK
-     * here, ir_emit's IR_FALLBACK case would call compile() again on the
-     * same expr, which re-classifies to this same SF_LAMBDA case and
-     * (once wired into compile()'s live dispatch) recurses into this
-     * exact code path again -- an infinite loop on malformed input,
-     * found during design review before compile() ever called ir_lower
-     * live. S_DEFINE can't use this same trick (compile_define's
-     * malformed-target case degrades gracefully with an error message,
-     * not a crash -- silently mis-lowering it instead of replicating
-     * that behavior would be a correctness bug, not crash-parity), so
-     * compile()'s own SF_DEFINE case instead checks for IR_FALLBACK and
-     * falls back to compile_define directly -- see compile()'s dispatch
-     * for the full reasoning. */
-    if (head == S_LAMBDA)
+    /* No IR_FALLBACK path here (or on S_LET just below) for malformed
+     * args -- this makes ir_lower NEVER produce IR_FALLBACK for
+     * head==S_LAMBDA at all. Originally deliberate for a specific reason:
+     * if it COULD fall back to IR_FALLBACK here, ir_emit's IR_FALLBACK
+     * case would call compile() again on the same expr, which
+     * re-classifies to this same SF_LAMBDA case and (once wired into
+     * compile()'s live dispatch) recurses into this exact code path
+     * again -- an infinite loop on malformed input, found during design
+     * review before compile() ever called ir_lower live. The ORIGINAL fix
+     * for that was accepting SIGSEGV-parity with classic's own equally
+     * unchecked `vcar(args)`/`vcdr(args)` (a bare `(lambda)` crashed the
+     * whole process, confirmed present on `main`) -- require_min_args
+     * below is a real improvement on that, not a reintroduction of the
+     * infinite-loop risk: raising via scm_raise_code is a longjmp, not a
+     * return, so it never produces an IR_FALLBACK node for ir_emit to
+     * reprocess at all -- it unwinds straight out of this whole compile
+     * attempt instead. S_DEFINE can't use the ORIGINAL crash-parity trick
+     * (compile_define's malformed-target case degrades gracefully with an
+     * error message, not a crash -- silently mis-lowering it instead of
+     * replicating that behavior would be a correctness bug, not crash-
+     * parity), so compile()'s own SF_DEFINE case instead checks for
+     * IR_FALLBACK and falls back to compile_define directly -- see
+     * compile()'s dispatch for the full reasoning; unaffected by this
+     * change either way, since S_DEFINE never reaches this file's own
+     * IR_FALLBACK-avoidance concern in the first place. */
+    if (head == S_LAMBDA) {
+        require_min_args(args, 1, "lambda");
         return ir_lower_lambda(c, vcar(args), vcdr(args), NULL, line);
+    }
     /* let -- named vs plain distinguished the same way compile_let
      * itself does (a leading symbol instead of a bindings list). Named
      * let routes to ir_lower_named_let (IR_NAMED_LET); everything else
      * routes to ir_lower_let (pure desugaring, see its own comment). */
     if (head == S_LET) {
+        /* Same require_min_args + no-IR_FALLBACK reasoning as S_LAMBDA
+         * just above -- a bare `(let)` used to SIGSEGV here identically
+         * to `vcar(V_NIL)` crashing classic's own compile_let. */
+        require_min_args(args, 1, "let");
         val_t bindings = vcar(args);
         if (vis_symbol(bindings)) {
             val_t let_body = vcdr(args);
+            require_min_args(let_body, 1, "let");  /* named-let's own bindings list */
             return ir_lower_named_let(c, bindings, vcar(let_body), vcdr(let_body), tail, line);
         }
         return ir_lower_let(c, args, tail, line);
     }
-    if (head == S_LET_STAR) return ir_lower_let_star(c, args, tail, line);
-    if (head == S_LETREC || head == S_LETREC_STAR)
+    if (head == S_LET_STAR) {
+        require_min_args(args, 1, "let*");
+        return ir_lower_let_star(c, args, tail, line);
+    }
+    if (head == S_LETREC || head == S_LETREC_STAR) {
+        require_min_args(args, 1, head == S_LETREC ? "letrec" : "letrec*");
         return ir_lower_letrec(c, args, tail, line);
+    }
     /* Both `(define sym expr)` and `(define (f params...) body...)`
      * lambda-sugar are natively lowered (the latter via IR_LAMBDA, now
      * that it exists -- see ir_lower_define_lambda_sugar's comment);
@@ -4806,6 +4883,159 @@ static void ir_emit(Compiler *c, IRNode *n) {
 
         if (vis_symbol(head) && !is_keyword_symbol(head) &&
             resolve_local(c, head) < 0 && resolve_upvalue(c, head) < 0) {
+            /* Tier 2.5 step 1 (docs/thoughts/performance-chez-kaappi.md §5,
+             * item 2.5): open-code car/cdr instead of the ordinary fused-
+             * global-call path below, when the call shape matches their
+             * own fixed 1-arg arity exactly -- see OP_CAR/OP_CDR's own
+             * comment (opcode.h) for the full redefinition-safety design.
+             * car/cdr are ordinary, user-redefinable globals, not sealed
+             * VM primitives, so the opcode re-verifies at EVERY execution
+             * (comparing against prim_car/prim_cdr's actual function
+             * pointer, builtins.h) rather than trusting anything captured
+             * here at compile time -- this emission site only needs to
+             * decide WHETHER to try the fast opcode at all, never what to
+             * compare against. An earlier version of this landing tried
+             * to also bake in "the value car currently resolves to" as a
+             * second, compile-time-captured constant to compare against
+             * at runtime -- a real, confirmed bug: if `car` had ALREADY
+             * been redefined before this call site was compiled (a
+             * perfectly ordinary sequence: `(define (car x) ...)` followed
+             * by a later `(car ...)` call in the same or a later top-level
+             * form), that captured "expected" value WAS the redefinition,
+             * so the runtime guard matched it forever and the opcode kept
+             * open-coding raw pair access instead of ever calling the
+             * redefined procedure. Comparing against the actual, immutable
+             * C function pointer instead is correct regardless of
+             * compile-time timing, and needs no such capture at all --
+             * `head` only needs to be unshadowed (already confirmed above)
+             * and its symbol name checked. No compile-time env lookup
+             * either: if car/cdr are actually unbound in this chunk's
+             * target env, the opcode's own load_global_cached raises the
+             * correct unbound-variable error at runtime, same as the
+             * ordinary OP_CALL_GLOBAL path below would. Wrong arity
+             * (argc != 1) falls through on purpose: that's headed for a
+             * genuine wrong-number-of-arguments error either way, and the
+             * ordinary call path below already raises it correctly. */
+            /* Extended to cons/pair?/null? (same design, same
+             * redefinition-safety guard -- see opcode.h's own comment on
+             * this whole group of opcodes) once car/cdr proved out, then
+             * to +, -, *, =, <, <=, >, >= (Tier 2.5 step 2) once THAT
+             * proved out -- OP_ADD/OP_SUB/OP_MUL/OP_NUMEQ/OP_LT/OP_LE/
+             * OP_GT/OP_GE are all strictly binary opcodes (pop exactly
+             * two, push one), so a 1-arg or 3+-arg call to any of these
+             * names still correctly falls through to the ordinary
+             * OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL path below (which is what
+             * R7RS's own variadic +, -, * and comparison chains' own
+             * reduction over ac != 2 needs anyway -- not replicated here).
+             * On a match, every entry below calls the REAL primitive
+             * function directly (see builtins.h's own comment on
+             * prim_add/prim_num_lt/etc.) rather than any separate inline
+             * fast-path body -- required for correctness, not just style:
+             * prim_num_lt/le/gt/ge's own 2-arg case dispatches to
+             * sx_lt/sx_le/sx_gt/sx_ge for a symbolic (CAS) operand, which
+             * a hand-rolled fixnum-or-num_lt fast path would not
+             * replicate, silently doing the wrong thing for e.g. an
+             * open-coded `(< x 5)` where `x` is a sym-var.
+             *
+             * Table-driven rather than three separate growing if/else
+             * chains (one per arity group) as of this landing: the third
+             * such chain (the eight arithmetic/comparison ops just above)
+             * was near-identical copy-paste of the first two's own
+             * "compute sym_ci, emit args, bracket pending slots if arity
+             * 2, emit_ab" shape, an accumulating-duplication smell flagged
+             * on review. Adding a future open-coded primitive is now one
+             * table row, not another ~15-line branch. */
+            static const struct { const char *name; uint8_t op; uint8_t arity; } open_code_table[] = {
+                { "car",   OP_CAR,   1 },
+                { "cdr",   OP_CDR,   1 },
+                { "pair?", OP_PAIRP, 1 },
+                { "null?", OP_NULLP, 1 },
+                { "cons",  OP_CONS,  2 },
+                { "+",     OP_ADD,   2 },
+                { "-",     OP_SUB,   2 },
+                { "*",     OP_MUL,   2 },
+                { "=",     OP_NUMEQ, 2 },
+                { "<",     OP_LT,    2 },
+                { "<=",    OP_LE,    2 },
+                { ">",     OP_GT,    2 },
+                { ">=",    OP_GE,    2 },
+            };
+            enum { OPEN_CODE_N = sizeof(open_code_table) / sizeof(open_code_table[0]) };
+            /* Interned once, lazily, rather than re-interning every table
+             * entry's name on every 2-arg call node ir_emit ever visits
+             * (flagged on review: an ordinary, non-open-coded 2-arg call
+             * like `(f 1 2)` used to pay for 9 wasted sym_intern_cstr
+             * calls -- cons plus all eight arithmetic/comparison entries
+             * -- before falling through). A benign race on first use
+             * across concurrent compiles (if that ever happens) just
+             * re-interns the same idempotent symbols into the same slots
+             * twice; sym_intern_cstr itself is the actual synchronization
+             * point, so no lock is needed here. */
+            static val_t open_code_syms[OPEN_CODE_N];
+            static bool open_code_syms_ready = false;
+            if (!open_code_syms_ready) {
+                for (size_t i = 0; i < OPEN_CODE_N; i++)
+                    open_code_syms[i] = sym_intern_cstr(open_code_table[i].name);
+                open_code_syms_ready = true;
+            }
+            /* `!ctail` (found by independent code review, confirmed by
+             * direct reproduction -- a real TCO regression, not just a
+             * documented trade-off): none of these opcodes' own VM
+             * handlers reuse the current CallFrame the way OP_TAIL_CALL/
+             * OP_TAIL_CALL_GLOBAL do on their fallback (redefined-to-a-
+             * BcClosure) path -- they always go through call_foreign,
+             * which recurses via apply_arr -> a nested vm_run(). A
+             * self-tail-recursive redefinition -- `(define (cdr n) (if (=
+             * n 0) 'done (cdr (- n 1)))) (cdr 2000000)` -- overflowed the
+             * call stack on this branch (256-frame limit hit almost
+             * immediately) where it ran to completion on main, silently
+             * breaking R7RS's proper-tail-call guarantee for any program
+             * that redefines one of these names and calls it recursively
+             * in tail position. Simplest correct fix: never open-code a
+             * call already known to be in tail position at all -- fall
+             * through to the ordinary OP_TAIL_CALL_GLOBAL path below
+             * instead, which already handles both the common (unredefined
+             * primitive) case efficiently via the existing fused-global-
+             * call opcode AND the redefined-BcClosure case with correct,
+             * O(1)-C-stack tail-call reuse. Giving up the open-coding win
+             * specifically in tail position is an acceptable trade: these
+             * names are rarely the tail expression of a recursive loop
+             * themselves (far more commonly an ARGUMENT to the actual
+             * recursive call, e.g. `(loop (cdr x) ...)`, a shape this
+             * restriction doesn't touch at all, since `cdr` there is not
+             * itself in tail position). */
+            bool opencoded = false;
+            if (!ctail && (argc == 1 || argc == 2)) {
+                for (size_t oci = 0; oci < OPEN_CODE_N; oci++) {
+                    if ((uint8_t)argc != open_code_table[oci].arity) continue;
+                    if (head != open_code_syms[oci]) continue;
+                    int sym_ci = chunk_add_const(c->chunk, head);
+                    if (argc == 1) {
+                        ir_emit(c, n->as.call.args[0]);
+                    } else {
+                        /* Both args are, briefly, pending values on the
+                         * real stack while the second one compiles --
+                         * bracketed exactly like any other multi-argument
+                         * call site in this file (see e.g. compile_do's
+                         * own "Tier 2.4 fix" comment for the bug class
+                         * this prevents: a splicing second argument
+                         * computing its own new locals' slot indices
+                         * without accounting for the first argument's
+                         * still-pending value). */
+                        int saved = c->local_count;
+                        ir_emit(c, n->as.call.args[0]);
+                        reserve_pending_slot(c);
+                        ir_emit(c, n->as.call.args[1]);
+                        reserve_pending_slot(c);
+                        release_pending_slots(c, saved);
+                    }
+                    emit_ab(c, open_code_table[oci].op, (uint8_t)sym_ci, n->line);
+                    opencoded = true;
+                    break;
+                }
+            }
+            if (opencoded) return;
+
             int ci = chunk_add_const(c->chunk, head);
             /* Tier 2.3: see the self-tail-call branch's own comment above. */
             int saved = c->local_count;
@@ -5090,6 +5320,52 @@ static void ir_emit(Compiler *c, IRNode *n) {
         return;
     }
     }
+}
+
+/* Tier 2.6 step 1 -- see compiler.h's own comment on this function for
+ * the full contract (what "the IR" does and does NOT mean here: lazily
+ * lowered, nested lambda bodies stay raw S-expression, variable
+ * references stay unresolved symbols -- this is not a standalone tree a
+ * from-scratch consumer can just walk). This function's own job is
+ * narrow: produce that tree safely, from a context (an eventual JIT
+ * trigger, called from C++) that must never let a raised Scheme
+ * condition longjmp past it -- ir_lower/ir_optimize can scm_raise on
+ * malformed input (unbound variable, bad special-form syntax, ...) the
+ * exact same way compiler_ir_self_check's own SCM_PROTECT usage already
+ * guards against, but crossing into C++ frames via a raw longjmp (no
+ * destructor unwinding) is a strictly worse hazard than the pure-C
+ * gc_inhibit_count leak that comment describes -- so a raise here is
+ * caught and converted to a plain NULL return, mirroring
+ * curry_llvm_jit_compile's own existing "silent failure, fall back to
+ * bytecode" philosophy (curry_llvm.cpp) rather than ever propagating an
+ * exception across the C/C++ boundary. */
+IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
+    gc_inhibit_minor();
+
+    Compiler c;
+    init_compiler(&c, NULL, "<jit>");
+
+    int   line   = g_reader_last_line;
+    IRNode *result = NULL;
+    bool  raised = false;
+
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        IRNode *ir = ir_lower(&c, expr, false, line);
+        result = ir_optimize(ir);
+    }, {
+        raised = true;
+    });
+
+    gc_resume_minor();
+
+    if (raised) {
+        ir_arena_free(c.ir_arena);
+        *out_arena = NULL;
+        return NULL;
+    }
+    *out_arena = c.ir_arena;
+    return result;
 }
 
 bool compiler_ir_self_check(val_t expr) {

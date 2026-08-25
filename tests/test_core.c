@@ -11,6 +11,7 @@
 #include "object.h"
 #include "compiler.h"
 #include "vm.h"
+#include "builtins.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -72,6 +73,27 @@ static val_t run_vm(const char *src) {
     val_t port = port_open_input_string(src, (uint32_t)strlen(src));
     val_t expr = scm_read(port);
     val_t cl_val = compiler_compile(expr);
+    BcClosure *cl = as_bcclosure(cl_val);
+    vm_push(cl_val);
+    return vm_run(cl, 0);
+}
+
+/* Like run_vm(), but for a whole sequence of top-level forms compiled as
+ * ONE chunk (compiler_compile_script), matching how a real .scm script
+ * file is compiled -- needed for anything that depends on top-level
+ * forms sharing compile-time state across the sequence (e.g. a `car`
+ * redefinition in an earlier form affecting a later form's own
+ * compile-time decisions). run_vm can't stand in for this: it only ever
+ * reads and compiles a single expression. */
+static val_t run_vm_script(const char *src) {
+    val_t port = port_open_input_string(src, (uint32_t)strlen(src));
+    val_t head = V_NIL, *tail = &head;
+    val_t datum;
+    while (!vis_eof(datum = scm_read(port))) {
+        *tail = scm_cons(datum, V_NIL);
+        tail = &as_pair(*tail)->cdr;
+    }
+    val_t cl_val = compiler_compile_script(head);
     BcClosure *cl = as_bcclosure(cl_val);
     vm_push(cl_val);
     return vm_run(cl, 0);
@@ -265,13 +287,10 @@ static void test_ir_self_check(void) {
         "(begin)",
         "(begin 1)",
         "(begin 1 2 3)",
-        "(if (> 3 2) (begin (+ 1 2) 'yes) 'no)",
         "((lambda (x) (if x (+ x 1) 0)) 5)",
-        "(begin (define x 10) (if (> x 5) (* x 2) x))",
         "(if (if #t #f #t) 'a (begin 'b 'c))",
         /* set! -- widened in the second landing */
         "(set! some-global 5)",
-        "(begin (set! another-global (+ 1 2)) 'done)",
         "(if #t (set! g1 1) (set! g2 2))",
         /* and/or -- widened in the second landing */
         "(and)",
@@ -282,8 +301,6 @@ static void test_ir_self_check(void) {
         "(or #f)",
         "(or #f 1 2)",
         "(or 1 2)",
-        "(and (> 3 2) (< 1 2))",
-        "(or (> 1 2) (< 1 2))",
         /* and/or nested inside if/begin, mixed with IR_FALLBACK-only
          * subexpressions (calls) -- the exact shape that caught the two
          * ordering bugs during the first landing. */
@@ -294,20 +311,24 @@ static void test_ir_self_check(void) {
         /* define -- (define sym expr) only, widened in the third landing.
          * Lambda-sugar `(define (f ...) ...)` deliberately stays
          * IR_FALLBACK (see ir_lower_define's comment) and is exercised by
-         * the existing "(begin (define x 10) ...)" case above and by
          * ordinary compiler tests elsewhere -- not re-tested here. */
         "(define some-new-global 42)",
         "(define another-new-global)",
-        "(begin (define p 1) (define q 2) (+ p q))",
         "(if #t (define ifdef-a 1) (define ifdef-b 2))",
         /* calls -- ordinary/fused-global/self-tail, widened in the fourth
          * landing. classify_head is what decides "not a special form or
          * macro, so a call" here -- see IR_CALL in ir.h and
-         * classify_head's own comment. */
+         * classify_head's own comment. Exact-2-arg calls to
+         * +, -, *, =, <, <=, >, >= deliberately excluded from this list as of
+         * Tier 2.5 step 2 (arithmetic/comparison open-coding): like the
+         * Tier 2.3/2.4 cases below, they no longer compile byte-identical
+         * to classic by design (ir_emit's IR_CALL case open-codes them,
+         * compile_classic's own SF_CALL path doesn't) -- see
+         * test_ir_optimize_check's own Tier 2.5 section for their
+         * result-equality replacements. */
         "(f)",
         "(f 1)",
         "(f 1 2 3)",
-        "(+ 1 (* 2 3))",
         "((lambda (x) x) 5)",
         /* let / let-star / letrec / letrec-star / named-let -- widened
          * in the sixth landing. Plain let/let-star/letrec are pure
@@ -545,6 +566,26 @@ static void test_ir_optimize_check(void) {
          * and/or that itself simplifies. */
         "(and (and 1 2) 3)",
         "(or (or #f #f) 3)",
+
+        /* Tier 2.5 step 2: exact-2-arg calls to +, -, *, =, <, <=, >, >= are
+         * open-coded by ir_emit's IR_CALL case (compiler.c) but not by
+         * compile_classic's own SF_CALL path -- like the Tier 2.3/2.4
+         * cases below, they compile to genuinely different bytecode by
+         * design, so this result-equality check (not
+         * compiler_ir_self_check's byte-identical one) is the right home
+         * for them. Every case is self-contained (no free variables), as
+         * this function's own header comment requires, since both sides
+         * are actually executed. */
+        "(if (> 3 2) (begin (+ 1 2) 'yes) 'no)",
+        "(let ((x 10)) (if (> x 5) (* x 2) x))",
+        "(and (> 3 2) (< 1 2))",
+        "(or (> 1 2) (< 1 2))",
+        "(let ((p 1) (q 2)) (+ p q))",
+        "(+ 1 (* 2 3))",
+        "(- 10 3)",
+        "(<= 3 3)",
+        "(>= 4 3)",
+        "(= 5 5)",
 
         /* Tier 2.3 local inliner. Its decision logic lives entirely
          * inside ir_emit's IR_CALL case (see compiler.c), not in
@@ -1115,6 +1156,333 @@ static void test_with_exception_handler_pending_slot_fix(void) {
         "with-exception-handler: let-producing thunk doesn't alias handler's pending slot");
 }
 
+/* Tier 2.5 step 1 (open-coding car/cdr, compiler.c's ir_emit IR_CALL
+ * case + OP_CAR/OP_CDR, vm.c). Basic correctness, plus a real regression
+ * caught while landing this: the first version captured "whatever car
+ * currently resolves to" as a compile-time constant to compare against
+ * at runtime, instead of the actual, immutable prim_car function
+ * pointer -- if car had ALREADY been redefined before a later call site
+ * in the SAME script was compiled (an entirely ordinary sequence:
+ * `(define (car x) ...)` followed by a later `(car ...)` call, both
+ * compiled together as one chunk by compiler_compile_script, exactly
+ * how a real .scm file compiles), that captured "expected" value WAS
+ * the redefinition, so the runtime guard matched it forever and kept
+ * open-coding raw pair access instead of ever calling the redefined
+ * procedure. `(define (car x) (list 'redefined x)) (car (list 1 2 3))`
+ * returned `1` (silently ignoring the redefinition) before this fix. */
+static void test_car_cdr_open_coding(void) {
+    CHECK(vunfix(run_vm("(car (list 1 2 3))")) == 1,
+          "open-coded car: basic correctness");
+    {
+        val_t cdr_result = run_vm("(cdr (list 1 2 3))");
+        CHECK(vis_pair(cdr_result) && vunfix(vcar(cdr_result)) == 2,
+              "open-coded cdr: basic correctness");
+    }
+
+    int before = gc_inhibit_save();
+    ExnHandler h;
+    bool raised = false;
+    SCM_PROTECT(h, { run_vm("(car 5)"); }, { raised = true; });
+    int after = gc_inhibit_save();
+    CHECK(raised, "open-coded car: wrong-type argument still raises");
+    CHECK(before == after, "open-coded car: gc_inhibit_count balanced after raise");
+
+    raised = false;
+    SCM_PROTECT(h, { run_vm("(car 1 2)"); }, { raised = true; });
+    CHECK(raised, "open-coded car: wrong arity still raises");
+
+    /* The actual regression: car redefined, then called, in the SAME
+     * compiled chunk (run_vm_script, not run_vm -- see its own comment). */
+    val_t redefined = run_vm_script(
+        "(define (car x) (list 'redefined x)) (car (list 1 2 3))");
+    CHECK(vis_pair(redefined) && vcar(redefined) == sym_intern_cstr("redefined"),
+          "open-coded car: redefinition in the same script is honored, not silently skipped");
+
+    /* Shadowing by a local named car/cdr must never open-code at all --
+     * resolve_local(c, head) >= 0 makes this branch unreachable for a
+     * shadowed reference, same guard the ordinary fused-global-call path
+     * already relies on. */
+    CHECK(vunfix(run_vm("(let ((car (lambda (x) (+ x 100)))) (car 5))")) == 105,
+          "open-coded car: local shadow is never open-coded");
+}
+
+/* Tier 2.5 step 1, extended to cons/pair?/null? -- same design as
+ * test_car_cdr_open_coding above, same class of redefinition/shadow/
+ * arity coverage, plus the reserve_pending_slot bracketing cons's own
+ * two-argument emission needed (the same bug class as compile_do/
+ * SF_APPLY/etc.'s own "Tier 2.4 fix"es elsewhere in this file: a second
+ * argument that splices real locals must not treat the first argument's
+ * still-pending value as absent). */
+static void test_cons_pairp_nullp_open_coding(void) {
+    {
+        val_t p = run_vm("(cons 1 2)");
+        CHECK(vis_pair(p) && vunfix(vcar(p)) == 1 && vunfix(vcdr(p)) == 2,
+              "open-coded cons: basic correctness");
+    }
+    CHECK(run_vm("(pair? (cons 1 2))") == V_TRUE,
+          "open-coded pair?: #t on a real pair");
+    CHECK(run_vm("(pair? 5)") == V_FALSE,
+          "open-coded pair?: #f on a non-pair");
+    CHECK(run_vm("(null? '())") == V_TRUE,
+          "open-coded null?: #t on the empty list");
+    CHECK(run_vm("(null? 5)") == V_FALSE,
+          "open-coded null?: #f on a non-nil value");
+
+    /* cons's own pending-slot regression: a let that splices real locals
+     * as cons's SECOND argument, while the first argument's own value is
+     * still pending. */
+    {
+        val_t p = run_vm("(cons 1 (let ((x 2)) x))");
+        CHECK(vis_pair(p) && vunfix(vcar(p)) == 1 && vunfix(vcdr(p)) == 2,
+              "open-coded cons: let as second argument doesn't alias the first, still-pending argument");
+    }
+
+    /* Redefinition in the same compiled chunk, same shape as car's own
+     * regression test above. */
+    {
+        val_t redefined = run_vm_script(
+            "(define (cons a b) (list 'redefined a b)) (cons 1 2)");
+        CHECK(vis_pair(redefined) && vcar(redefined) == sym_intern_cstr("redefined"),
+              "open-coded cons: redefinition in the same script is honored, not silently skipped");
+    }
+    {
+        val_t redefined = run_vm_script(
+            "(define (pair? x) 'redefined) (pair? 5)");
+        CHECK(redefined == sym_intern_cstr("redefined"),
+              "open-coded pair?: redefinition in the same script is honored, not silently skipped");
+    }
+
+    /* Local shadow must never open-code. */
+    CHECK(vunfix(run_vm("(let ((cons (lambda (a b) (+ a b)))) (cons 3 4))")) == 7,
+          "open-coded cons: local shadow is never open-coded");
+}
+
+/* Regression test for a real, confirmed TCO (proper tail call) violation
+ * found by independent code review: the open-coding landing above
+ * originally never checked whether a car/cdr/cons/pair?/null? call was
+ * in TAIL position before open-coding it. Every one of these opcodes'
+ * fallback path (taken when the name has been redefined) goes through
+ * call_foreign, which recurses via apply_arr -> a NESTED vm_run() --
+ * unlike OP_TAIL_CALL/OP_TAIL_CALL_GLOBAL's own fallback, which reuses
+ * the current CallFrame for a BcClosure callee. A self-tail-recursive
+ * redefinition compiled to the open-coded opcode therefore grew the C
+ * stack by one frame per call instead of looping in O(1) C-stack space --
+ * `(define (cdr n) (if (= n 0) 'done (cdr (- n 1)))) (cdr 2000000)`
+ * overflowed the VM's own 256-frame call-stack limit almost immediately
+ * on the buggy version, where an identically-shaped loop using an
+ * ordinary (non-open-coded) name completed normally. Fixed by never
+ * open-coding a call already known to be in tail position at all (see
+ * ir_emit's own "Tier 2.5" comment, compiler.c) -- this is the direct
+ * regression test for that fix actually holding: a redefinition of each
+ * of the five open-coded names, self-tail-recursing enough times that
+ * anything short of genuine O(1)-C-stack tail-call reuse would exhaust
+ * the 256-frame limit and raise a catchable stack-overflow condition
+ * instead of completing. */
+static void test_open_coding_preserves_tco(void) {
+    CHECK(run_vm_script(
+        "(define (cdr n) (if (= n 0) 'done (cdr (- n 1)))) (cdr 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded cdr: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (car n) (if (= n 0) 'done (car (- n 1)))) (car 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded car: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (cons a b) (if (= a 0) 'done (cons (- a 1) b))) (cons 5000 1)")
+        == sym_intern_cstr("done"),
+        "open-coded cons: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (pair? n) (if (= n 0) 'done (pair? (- n 1)))) (pair? 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded pair?: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (null? n) (if (= n 0) 'done (null? (- n 1)))) (null? 5000)")
+        == sym_intern_cstr("done"),
+        "open-coded null?: redefinition called in tail position still gets proper TCO");
+}
+
+/* Tier 2.5 step 2: open-coding extended from car/cdr/cons/pair?/null? to
+ * +, -, *, =, <, <=, >, >= -- same design throughout (see opcode.h's own
+ * comment on this whole opcode group, and builtins.h's comment on
+ * prim_add/prim_num_lt/etc. for why the fast path calls the real
+ * primitive directly instead of reusing OP_ADD/OP_LT/etc.'s own separate
+ * pre-existing inline fixnum fast-path bodies). Covers basic correctness
+ * for all eight, the same redefinition-in-the-same-script and local-shadow
+ * regressions already established for car/cdr/cons/pair?/null?, a non-2-
+ * arg call falling through correctly (R7RS variadic +, -, * and friends' own reduction,
+ * not replicated by the open-coded 2-arg-only opcode), and -- the actual
+ * reason this step's design changed mid-implementation -- a symbolic (CAS
+ * sym-var) operand to < still returning a genuine symbolic comparison node
+ * rather than silently doing the wrong thing, which a naive reuse of
+ * OP_LT's own fixnum-or-num_lt fast path would NOT have done correctly. */
+static void test_arithmetic_open_coding(void) {
+    CHECK(vunfix(run_vm("(+ 2 3)")) == 5, "open-coded +: basic correctness");
+    CHECK(vunfix(run_vm("(- 5 3)")) == 2, "open-coded -: basic correctness");
+    CHECK(vunfix(run_vm("(* 4 3)")) == 12, "open-coded *: basic correctness");
+    CHECK(run_vm("(= 3 3)") == V_TRUE, "open-coded =: #t on equal");
+    CHECK(run_vm("(= 3 4)") == V_FALSE, "open-coded =: #f on unequal");
+    CHECK(run_vm("(< 3 4)") == V_TRUE, "open-coded <: #t");
+    CHECK(run_vm("(< 4 3)") == V_FALSE, "open-coded <: #f");
+    CHECK(run_vm("(<= 3 3)") == V_TRUE, "open-coded <=: #t on equal");
+    CHECK(run_vm("(> 4 3)") == V_TRUE, "open-coded >: #t");
+    CHECK(run_vm("(>= 3 3)") == V_TRUE, "open-coded >=: #t on equal");
+
+    /* Non-2-arg calls must fall through to the ordinary variadic path,
+     * not be silently mishandled by the strictly-binary opcode. */
+    CHECK(vunfix(run_vm("(+ 1 2 3)")) == 6,
+          "open-coded +: 3-arg call falls through to variadic primitive");
+    CHECK(vunfix(run_vm("(+ 5)")) == 5,
+          "open-coded +: 1-arg call falls through to variadic primitive");
+    CHECK(vunfix(run_vm("(+)")) == 0,
+          "open-coded +: 0-arg call falls through to variadic primitive");
+
+    /* Local shadow must never open-code. */
+    CHECK(vunfix(run_vm("(let ((+ (lambda (a b) 999))) (+ 1 2))")) == 999,
+          "open-coded +: local shadow is never open-coded");
+
+    /* The symbolic-dispatch gap this step's design was corrected for: a
+     * sym-var operand to < must still produce a genuine symbolic
+     * comparison node (via prim_num_lt's own sx_lt dispatch), not a raw
+     * #t/#f or a raise -- confirming the open-coded opcode really does
+     * call the real primitive rather than any hand-rolled fixnum-only
+     * fast path. MUST run before the redefinition tests below: those
+     * redefine +/< via run_vm_script, which -- like every other top-level
+     * define in this codebase -- writes into the real, process-wide
+     * GLOBAL_ENV (not some scoped/reset test fixture), so a later call in
+     * this SAME process would otherwise see the poisoned binding instead
+     * of the real primitive (this exact ordering hazard is also documented
+     * project-wide, see feedback_scheme_base_global_env_aliasing_test_
+     * gotcha in this repo's memory notes). */
+    {
+        val_t r = run_vm("(< (sym-var 'x) 5)");
+        CHECK(vis_symbolic(r),
+              "open-coded <: symbolic operand still dispatches to a symbolic comparison node");
+    }
+    {
+        val_t r = run_vm("(+ (sym-var 'x) 5)");
+        CHECK(vis_symbolic(r),
+              "open-coded +: symbolic operand still dispatches to a symbolic result");
+    }
+
+    /* Redefinition in the same compiled chunk, same shape as car's own
+     * regression test above. From here on, +/< are permanently redefined
+     * for the rest of THIS TEST FUNCTION (see the comment just above) --
+     * nothing after this point may assume the real primitive. */
+    {
+        val_t redefined = run_vm_script(
+            "(define (+ a b) (list 'redefined a b)) (+ 1 2)");
+        CHECK(vis_pair(redefined) && vcar(redefined) == sym_intern_cstr("redefined"),
+              "open-coded +: redefinition in the same script is honored, not silently skipped");
+    }
+    {
+        val_t redefined = run_vm_script(
+            "(define (< a b) 'redefined) (< 1 2)");
+        CHECK(redefined == sym_intern_cstr("redefined"),
+              "open-coded <: redefinition in the same script is honored, not silently skipped");
+    }
+
+    /* TCO preserved in tail position, same regression class as the other
+     * five open-coded opcodes. Each of these ITSELF redefines +/< again
+     * (to the self-tail-recursive version) before calling it, so the
+     * already-poisoned binding from just above doesn't matter here. */
+    CHECK(run_vm_script(
+        "(define (+ a b) (if (= a 0) 'done (+ (- a 1) b))) (+ 5000 1)")
+        == sym_intern_cstr("done"),
+        "open-coded +: redefinition called in tail position still gets proper TCO");
+    CHECK(run_vm_script(
+        "(define (< a b) (if (= a 0) 'done (< (- a 1) b))) (< 5000 1)")
+        == sym_intern_cstr("done"),
+        "open-coded <: redefinition called in tail position still gets proper TCO");
+}
+
+/* Tier 2.6 step 1: smoke test for compiler_ir_lower_for_jit -- see its
+ * own comment (compiler.c/compiler.h) for the full contract. Just checks
+ * this new entry point produces a real tree (and a matching arena) for
+ * ordinary input, since nothing calls it live yet (the codegen.cpp
+ * rewrite that would actually consume this tree is deliberately out of
+ * scope for this landing). */
+static void test_compiler_ir_lower_for_jit(void) {
+    {
+        val_t port = port_open_input_string("(+ 1 2)", 7);
+        val_t expr = scm_read(port);
+        IRArena *arena = NULL;
+        IRNode *ir = compiler_ir_lower_for_jit(expr, &arena);
+        CHECK(ir != NULL, "compiler_ir_lower_for_jit: returns a tree for ordinary input");
+        CHECK(arena != NULL, "compiler_ir_lower_for_jit: returns an arena for ordinary input");
+        if (arena) ir_arena_free(arena);
+    }
+    /* Malformed input: `(if)` -- exercises require_min_args, added to
+     * ir_lower_if (and every other special-form compile_* / ir_lower_*
+     * function in this file, a separate, wider fix -- see
+     * test_special_form_arity_crashes below for the full story). Before
+     * that fix, ir_lower/ir_optimize never actually raised for ANY
+     * currently-reachable top-level input at all (everything either
+     * became an unresolved IR_VAR_REF, deferred to ir_emit time, or fell
+     * back whole to IR_FALLBACK) -- `(if)` specifically used to SIGSEGV
+     * the whole process instead, so this is also this new entry point's
+     * own regression test for that fix actually reaching ir_lower's own
+     * dispatch, not just compile()'s classic one. */
+    {
+        val_t port = port_open_input_string("(if)", 4);
+        val_t expr = scm_read(port);
+        int before = gc_inhibit_save();
+        IRArena *arena = (IRArena *)(void *)1;  /* poison: must be overwritten */
+        IRNode *ir = compiler_ir_lower_for_jit(expr, &arena);
+        int after = gc_inhibit_save();
+        CHECK(ir == NULL, "compiler_ir_lower_for_jit: malformed input returns NULL, not a longjmp");
+        CHECK(arena == NULL, "compiler_ir_lower_for_jit: malformed input clears *out_arena");
+        CHECK(before == after, "compiler_ir_lower_for_jit: gc_inhibit_count balanced after raise");
+    }
+}
+
+/* Regression test for a real, confirmed, WIDESPREAD bug found by
+ * independent code review while landing Tier 2.6 step 1 (not something
+ * that landing introduced -- confirmed present on `main` too): every
+ * special-form compile_* / ir_lower_* function in this file originally read
+ * its own operands with bare vcar/vcdr and no arity/shape check at all,
+ * so a malformed-but-syntactically-readable source form -- too few parts
+ * for the special form it names -- SIGSEGV'd the whole process instead of
+ * raising a catchable condition. Found via `(if)`; confirmed to affect at
+ * least 19 special forms by direct testing before the fix (require_min_args,
+ * compiler.c). This is the regression test for all of them at once: each
+ * must now raise a catchable EC_WRONG_NUMBER_OF_ARGUMENTS condition
+ * (with gc_inhibit_count left balanced) instead of crashing. Uses run_vm
+ * (the real compiled path) rather than compiler_ir_lower_for_jit, since
+ * several of these forms (case/when/unless/do/guard/let-values/
+ * parameterize/define-record-type) have no IR-native lowering at all and
+ * are only reachable through compile()'s own classic dispatch. */
+static void test_special_form_arity_crashes(void) {
+    static const char *const forms[] = {
+        "(if)", "(if 1)", "(let)", "(let loop)", "(let*)", "(letrec)",
+        "(letrec*)", "(lambda)", "(define)", "(set!)", "(case)", "(when)",
+        "(unless)", "(do)", "(guard)", "(let-values)", "(let*-values)",
+        "(parameterize)", "(define-record-type)",
+        "(define-syntax)", "(let-syntax)", "(letrec-syntax)", "(syntax-rules)",
+        /* with-exception-handler: missed by the original sweep (found by
+         * independent security review of the Tier 2.5 step 2 commit) --
+         * compile_with_exception_handler read vcar(args)/vcar(vcdr(args))
+         * unconditionally, with no require_min_args guard and no shape
+         * check in classify_head (unlike compile_receive's own guard at
+         * that same call site) to keep a too-short arg list from ever
+         * reaching it. `(with-exception-handler)` and
+         * `(with-exception-handler (lambda (e) e))` both SIGSEGV'd the
+         * whole process before this was added to require_min_args. */
+        "(with-exception-handler)", "(with-exception-handler (lambda (e) e))",
+    };
+    for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
+        int before = gc_inhibit_save();
+        ExnHandler h;
+        bool raised = false;
+        SCM_PROTECT(h, { run_vm(forms[i]); }, { raised = true; });
+        int after = gc_inhibit_save();
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s: raises cleanly instead of crashing", forms[i]);
+        CHECK(raised, msg);
+        snprintf(msg, sizeof(msg), "%s: gc_inhibit_count balanced after raise", forms[i]);
+        CHECK(before == after, msg);
+    }
+}
+
 #define RUN_TEST(fn) do { fprintf(stderr, ">> " #fn "\n"); fn(); fflush(stdout); } while(0)
 
 int main(void) {
@@ -1146,6 +1514,12 @@ int main(void) {
     RUN_TEST(test_do_step_pending_slot_fix);
     RUN_TEST(test_named_let_max_locals_guard);
     RUN_TEST(test_with_exception_handler_pending_slot_fix);
+    RUN_TEST(test_car_cdr_open_coding);
+    RUN_TEST(test_cons_pairp_nullp_open_coding);
+    RUN_TEST(test_open_coding_preserves_tco);
+    RUN_TEST(test_arithmetic_open_coding);
+    RUN_TEST(test_compiler_ir_lower_for_jit);
+    RUN_TEST(test_special_form_arity_crashes);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;

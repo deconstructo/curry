@@ -150,8 +150,12 @@ val_t scm_symbol_to_string(val_t sym) {
 /* ---- Type predicates ---- */
 #define PRED1(name, test) static val_t prim_##name(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(test(av[0])); }
 
-PRED1(pair_p,     vis_pair)
-PRED1(null_p,     vis_nil)
+/* Not static (unlike every other PRED1 use) -- see builtins.h's own
+ * comment on why the compiler/VM need this exact function pointer for
+ * Tier 2.5 open-coding. Hand-written instead of via PRED1 since that
+ * macro always emits `static`. */
+val_t prim_pair_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(vis_pair(av[0])); }
+val_t prim_null_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(vis_nil(av[0])); }
 static val_t prim_list_p(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     /* Floyd tortoise-and-hare: circular lists must yield #f, not hang */
@@ -246,7 +250,9 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Pairs and lists ---- */
-static val_t prim_cons(int ac, val_t *av, void *ud) {
+/* Not static -- see builtins.h's own comment on why the compiler/VM need
+ * this exact function pointer for Tier 2.5 open-coding. */
+val_t prim_cons(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
      * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
@@ -255,8 +261,10 @@ static val_t prim_cons(int ac, val_t *av, void *ud) {
     p->car = av[0]; p->cdr = av[1];
     return vptr(p);
 }
-static val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"car: not a pair"); return vcar(av[0]); }
-static val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"cdr: not a pair"); return vcdr(av[0]); }
+/* Not static -- see builtins.h's own comment on why the compiler/VM need
+ * this exact function pointer for Tier 2.5 open-coding. */
+val_t prim_car(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"car: not a pair"); return vcar(av[0]); }
+val_t prim_cdr(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if(!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT,"cdr: not a pair"); return vcdr(av[0]); }
 static val_t prim_set_car(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_pair(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-car!: not a pair");
@@ -369,17 +377,20 @@ static val_t prim_assv(int ac, val_t *av, void *ud) {
 }
 
 /* ---- Arithmetic ---- */
-static val_t prim_add(int ac, val_t *av, void *ud) {
+/* Not static (prim_add/prim_mul here, prim_sub just below) -- see
+ * builtins.h's own comment on why the compiler/VM need these exact
+ * function pointers for Tier 2.5 open-coding. */
+val_t prim_add(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = vfix(0);
     for (int i=0; i<ac; i++) r = num_add(r, av[i]);
     return r;
 }
-static val_t prim_mul(int ac, val_t *av, void *ud) {
+val_t prim_mul(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = vfix(1);
     for (int i=0; i<ac; i++) r = num_mul(r, av[i]);
     return r;
 }
-static val_t prim_sub(int ac, val_t *av, void *ud) {
+val_t prim_sub(int ac, val_t *av, void *ud) {
     (void)ud;
     if (ac == 1) return num_neg(av[0]);
     val_t r = av[0];
@@ -394,9 +405,13 @@ static val_t prim_div(int ac, val_t *av, void *ud) {
     return r;
 }
 
-/* Comparison: (= a b c...) etc. */
+/* Comparison: (= a b c...) etc. Not static (unlike every other use of
+ * these two macros would normally be) -- see builtins.h's own comment on
+ * why the compiler/VM need these exact function pointers for Tier 2.5
+ * open-coding. Only NUM_CMP(eq,eq) and the four NUM_CMP_ORD invocations
+ * just below are affected; nothing else uses either macro. */
 #define NUM_CMP(fn, op) \
-static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
+val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; return V_TRUE; }
 NUM_CMP(eq,eq)
 
@@ -412,7 +427,7 @@ NUM_CMP(eq,eq)
  * macro token `op` (e.g. lt) -- the error message must name what the
  * user actually typed, not builtins.c's own internal identifier. */
 #define NUM_CMP_ORD(fn, op, name) \
-static val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
+val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     (void)ud; \
     /* ac==2 is the hot path (every plain numeric (< a b) call goes
      * through here) -- handled standalone so it costs exactly the two

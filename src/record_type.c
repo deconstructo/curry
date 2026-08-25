@@ -2,6 +2,7 @@
 #include "object.h"
 #include "symbol.h"
 #include "gc.h"
+#include "eval.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -57,6 +58,14 @@ static val_t rp_setter_body(val_t x_sym, val_t fi_val, val_t v_sym) {
 }
 
 void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
+    /* A malformed `(define-record-type)` (rest==V_NIL) used to SIGSEGV
+     * here on `vcar(rest)` -- confirmed present on main too, unrelated to
+     * any of tonight's other work; part of a wider, project-wide sweep of
+     * this exact bug class across every special form's own compile-time
+     * operand-list handling (see compiler.c's require_min_args). */
+    if (!vis_pair(rest))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                        "define-record-type: ill-formed special form");
     val_t name_sym = vcar(rest);
     bool is_r6rs = vis_pair(vcdr(rest)) &&
                    vis_pair(vcadr(rest)) &&
