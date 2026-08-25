@@ -173,6 +173,8 @@ endif()
 if(BUILD_MODULE_NETWORK AND TARGET curry_network)
     add_test(NAME network COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/network_tests.scm)
     set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    add_test(NAME srfi_106 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_106_tests.scm)
+    set_tests_properties(srfi_106 PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 # (curry s3) imports (curry crypto) for HMAC-SHA256/SHA-256 and

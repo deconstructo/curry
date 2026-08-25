@@ -424,6 +424,10 @@ if(BUILD_MODULE_NETWORK)
   # compiles into the same curry_network.so target.
   target_sources(curry_network PRIVATE modules/network/tls.c)
   target_link_libraries(curry_network PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+  # SRFI 106 (Basic Socket Interface) native primitives -- same
+  # one-file-per-concern pattern as tls.c above, no extra link deps
+  # (plain POSIX sockets only).
+  target_sources(curry_network PRIVATE modules/network/srfi106.c)
 endif()
 
 if(BUILD_MODULE_CRYPTO)

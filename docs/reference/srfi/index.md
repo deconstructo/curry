@@ -43,6 +43,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s69 hash-tables)`](s69-s90.md) | [SRFI-69](https://srfi.schemers.org/srfi-69/) | Basic hash tables — full API, wrapping curry's built-in hash table with corrected `hash-table-ref` semantics |
 | [`(srfi s90 hash-tables)`](s69-s90.md) | [SRFI-90](https://srfi.schemers.org/srfi-90/srfi-90.html) | `make-table`, a keyword-argument hash-table constructor layered on `(srfi s69 hash-tables)` |
 | [`(srfi s98 os-environment-variables)`](s98.md) | [SRFI-98](https://srfi.schemers.org/srfi-98/) | `get-environment-variable(s)` — thin re-export of native builtins |
+| [`(srfi s106 sockets)`](s106.md) | [SRFI-106](https://srfi.schemers.org/srfi-106/) | Basic Socket Interface — native primitives in `(curry network)` (`modules/network/srfi106.c`), requires `-DBUILD_MODULE_NETWORK=ON` (default, always-on) |
 | [`(srfi s111 boxes)`](s111.md) | [SRFI-111](https://srfi.schemers.org/srfi-111/) | Single-slot mutable box — `box`/`box?`/`unbox`/`set-box!` |
 | [`(srfi s112 environment-inquiry)`](s112.md) | [SRFI-112](https://srfi.schemers.org/srfi-112/) | Implementation/OS/machine identity queries — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | [`(srfi s113 sets-and-bags)`](s113.md) | [SRFI-113](https://srfi.schemers.org/srfi-113/) | Sets — comparator-adapter wrapper over curry's native set; bags — pure-Scheme multiset on a comparator-adapted hash table |
