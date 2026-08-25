@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787648065357,
+  "lastUpdate": 1787648617722,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7313,6 +7313,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 53.178,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "313ceaad7cfc3281b7b3f0e10350d1485ad14f00",
+          "message": "docs(performance): plan Tier 2.6 LLVM IR retargeting, reframe the blocker\n\nRestarted planning for the item's own remaining scope (retarget\nsrc/llvm/codegen.cpp at the IR instead of raw S-expressions). The\noriginal framing assumed the blocker was that curry's IR is lazily\nlowered by design and would need to become eager before any consumer\nbesides ir_emit could walk it. Re-reading ir.h's own header comments\nplus checking codegen.cpp's actual structure finds that framing was\nwrong: codegen.cpp already has fully independent scope-tracking\n(CompileCtx::scopes) that was never going to reuse the VM Compiler's\nresolve_local/resolve_upvalue anyway, so IR_VAR_REF's raw-symbol,\nresolved-at-consume-time design is already the right shape for an\nLLVM consumer -- no pre-resolution needed. Likewise IR_LAMBDA/IR_SEQ's\nraw bodies don't need pre-lowering; an LLVM consumer can copy ir_emit's\nown interleaved lower-then-consume pattern verbatim, substituting LLVM\nemission for bytecode emission.\n\nNew plan doc (docs/thoughts/tier2-6-llvm-ir-retargeting-plan-2026-08-25.md)\nlays out a much smaller, lower-risk prerequisite than the original\nframing implied: give codegen.cpp an ir_emit-shaped dispatcher for the\nIR kinds ir.h already lowers natively (Phase A), with IR_FALLBACK\nrouting unchanged to codegen.cpp's own existing raw-S-expression\nhandling for forms with no native IR lowering yet (cond/case/do/etc.)\n-- extending IR coverage to those is real but non-blocking follow-up\nwork (Phase B). Includes a per-node-kind statepoint-safety checklist\n(the actual highest-risk part of this whole project) and three open\nquestions to resolve during implementation. No code changed yet --\nplanning only, tracked in the new doc across sessions.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T19:02:44+10:00",
+          "tree_id": "7f70de29a3a3c3234a40b4b1e140a1f06b0f37a9",
+          "url": "https://github.com/deconstructo/curry/commit/313ceaad7cfc3281b7b3f0e10350d1485ad14f00"
+        },
+        "date": 1787648616439,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.164,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 19.22,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.925,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 22.937,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 117.152,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 226.802,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 50.653,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 71.864,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 57.36,
             "unit": "ms"
           }
         ]
