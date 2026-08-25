@@ -211,4 +211,42 @@ project, not required for the item's own original ask (retarget
   scope-tracking that never needed VM-specific eager resolution, and (b)
   `compiler_ir_lower_for_jit`'s existing one-shot contract is the right
   template for a repeated-call version, not something needing replacement.
-  Not yet started: Phase A implementation.
+
+- **2026-08-25 (same day, later)**: first concrete Phase A step landed
+  (PR #72, branch `tier2-6-ir-session-api`): `compiler_ir_session_new_root`/
+  `new_child`/`lower_next` (`compiler.h`/`compiler.c`), the interleaved
+  lower-then-consume API "Open question 2" above asked for. `Compiler` is
+  now an opaque type in `compiler.h`. Verified concretely (not just by
+  reading comments) that lowering never touches a Compiler's
+  `locals[]`/`upvals[]`/`known[]` — confirmed by independent code review
+  grepping the whole `ir_lower_*` family for those field accesses (zero
+  hits) — so "Open question 1" above is resolved for real: the session
+  reuses the full `Compiler` struct without populating those fields at
+  all, and it's provably safe to do so, not just assumed safe. "Open
+  question 2" (exception-safety across a multi-call session) is also
+  resolved: each `lower_next` call brackets its own
+  `gc_inhibit_minor`/`gc_resume_minor` pair independently rather than
+  holding it open across the session, specifically to avoid the exact
+  leak class PR #71's `call/cc` fix found (an unbalanced inhibit/resume
+  across multiple external calls permanently blocking minor GC). One real
+  bug found by code review and fixed before merge: the session's `name`
+  parameter had no documented lifetime contract despite being embedded in
+  a persisted `IR_LAMBDA` node for named-let forms — now documented
+  matching `compiler_set_source_name`'s existing "must outlive" contract.
+
+  **Still not started**: the actual Phase A table (the `codegen.cpp` side
+  — an `ir_emit`-shaped LLVM dispatcher consuming what this session API
+  produces). "Open question 3" (skip curry's own cp0/wrapper-elision
+  inliner for the LLVM path, let LLVM's own inliner handle it) remains
+  open, unresolved by this landing. Also unstarted, separately: as a
+  side quest this same day, `compiler.c` (5874 lines before any of the
+  above) is being split into `compiler.c`/`compiler_classic.c`/
+  `ir_lower.c`/`ir_emit.c`/`compiler_ir_checks.c` + a new
+  `compiler_internal.h`, purely for readability (matching the existing
+  `eval.c`/`runtime.c`/`runtime_internal.h` precedent) — a separate,
+  parallel effort, not a Tier 2.6 prerequisite per se, but relevant to
+  anyone picking up the actual `codegen.cpp` dispatcher table next: check
+  whether that split landed first and adjust file paths in this plan
+  accordingly (`ir_lower.c`/`ir_emit.c` are where the `ir_lower_*`/
+  `ir_emit` functions this plan keeps referencing by `compiler.c` line
+  number will have moved to, if so).
