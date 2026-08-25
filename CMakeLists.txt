@@ -143,6 +143,10 @@ set(CORE_SOURCES
   src/syntax_rules.c
   src/profiling.c
   src/compiler.c
+  src/compiler_classic.c
+  src/ir_lower.c
+  src/ir_emit.c
+  src/compiler_ir_checks.c
   src/vm.c
   src/scc.c
 )

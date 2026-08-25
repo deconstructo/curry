@@ -6,12 +6,14 @@
 #include "vm.h"
 #include "ir.h"
 
-/* Opaque -- struct body is private to compiler.c. Exposed only so an
- * external (e.g. C++ LLVM codegen) caller can hold a session handle
- * across multiple compiler_ir_session_lower_next calls; see that
- * function's own comment for the full contract. Never dereferenced
- * outside compiler.c -- the incomplete type here makes that a compile
- * error anywhere else, same as any other opaque-pointer C API. */
+/* Opaque -- struct body is private to the compiler's own implementation
+ * files (compiler.c, compiler_classic.c, ir_lower.c, ir_emit.c,
+ * compiler_ir_checks.c; see compiler_internal.h). Forward-declared here so
+ * a future external (e.g. C++ LLVM codegen) caller could hold a handle to
+ * one without seeing its internals -- no such caller exists yet in this
+ * tree. Never dereferenced outside those five files -- the incomplete type
+ * here makes that a compile error anywhere else, same as any other
+ * opaque-pointer C API. */
 typedef struct Compiler Compiler;
 
 /*
