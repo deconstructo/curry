@@ -18,6 +18,8 @@ class Curry < Formula
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
   option "with-ldap",      "Build LDAP/LDAPS module"
+  option "with-piper",     "Build Piper neural TTS module (requires libpiper + onnxruntime " \
+                            "already installed under /usr/local -- see docs/guides/tts-piper.md)"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -57,6 +59,26 @@ class Curry < Formula
   depends_on "plplot"   if build.with? "plplot"
 
   def install
+    # libpiper/onnxruntime have no Homebrew formula of their own (see
+    # docs/guides/tts-piper.md) -- there's nothing to `depends_on` here, so
+    # this checks for a manual install under /usr/local before even running
+    # cmake, since a missing find_path/find_library would otherwise surface
+    # as an opaque CMake FATAL_ERROR partway through a --build-from-source
+    # run instead of a clear message up front.
+    if build.with?("piper") && !(File.exist?("/usr/local/include/piper.h") &&
+                                  Dir.glob("/usr/local/lib/libpiper.*").any? &&
+                                  Dir.glob("/usr/local/lib/libonnxruntime.*").any?)
+      odie <<~EOS
+        --with-piper needs libpiper + onnxruntime installed under /usr/local first:
+          git clone https://github.com/OHF-Voice/piper1-gpl
+          cd piper1-gpl/libpiper
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build --config Release
+          sudo cmake --install build --config Release
+        See docs/guides/tts-piper.md for the full walkthrough.
+      EOS
+    end
+
     prefix_paths = [
       Formula["openssl@3"].opt_prefix,
       Formula["readline"].opt_prefix,
@@ -95,7 +117,9 @@ class Curry < Formula
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot") ? "ON" : "OFF"}
       -DBUILD_MODULE_NEO4J=ON
       -DBUILD_MODULE_VECDB=OFF
+      -DBUILD_MODULE_PIPER=#{build.with?("piper") ? "ON" : "OFF"}
     ]
+    args << "-DPIPER_ROOT=/usr/local" if build.with? "piper"
 
     system "cmake", "-B", "build", *args
     system "cmake", "--build", "build", "-j", ENV.make_jobs.to_s
