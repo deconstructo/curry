@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787734925223,
+  "lastUpdate": 1787735464222,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7796,6 +7796,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.835,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "d8edbef9781c84ebe73bdad0c00947e0efa8dd71",
+          "message": "feat(formula): add --with-piper option, auto-detected under /usr/local\n\nlibpiper/onnxruntime have no Homebrew formula of their own, so there's\nnothing to depends_on -- this searches /usr/local/{include,lib} for\npiper.h/libpiper.*/libonnxruntime.* before running cmake, odie'ing with\nthe build-from-source steps (docs/guides/tts-piper.md) if not found,\notherwise passing -DBUILD_MODULE_PIPER=ON -DPIPER_ROOT=/usr/local.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-26T19:10:18+10:00",
+          "tree_id": "6e8d537cde061b5aa6a4137396b852d06d23b9a5",
+          "url": "https://github.com/deconstructo/curry/commit/d8edbef9781c84ebe73bdad0c00947e0efa8dd71"
+        },
+        "date": 1787735463070,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.448,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.374,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.553,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.205,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.963,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 287.867,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.223,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.416,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.748,
             "unit": "ms"
           }
         ]
