@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787664962882,
+  "lastUpdate": 1787734456611,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7589,6 +7589,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 72.736,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6a7960b018322c40cd0849ed8d2b9931c6ab5c4c",
+          "message": "test(srfi): add real behavioral coverage for (srfi s215 log) (#75)\n\nSRFI 215 (Central Log Exchange) has been implemented since before this\nsession, but was only ever smoke-tested (\"send-log is bound\") via\nsrfi_numbered_shims_tests.scm -- no test verified the actual message\nshape, severity constant values, current-log-fields merging, the\nvalue-conversion rules (string?/bytevector?/exact-integer?/error-object?/\ncondition? kept as-is, everything else written), the error paths (odd\ntrailing args, non-symbol key), or the one genuinely subtle piece of\nthis library: send-log calls made before any application callback is\ninstalled are buffered (up to 100 messages) and replayed in order into\nthe first non-default callback installed afterward.\n\nIndependent code review of an earlier version of this suite found one\nreal test-quality bug: the \"multiple extra pairs, in order\" check used\ntwo separate assq lookups, which find a key regardless of its position\nin the alist -- a swapped-order bug in send-log's own pair-building\nloop would have passed both lookups undetected. Fixed by comparing the\nexact remaining list structure instead; verified this actually catches\nan ordering regression by temporarily removing send-log's own\n(reverse acc) call, confirming the test fails, then restoring it.\n\n31 assertions, all passing. 347/347 C unit tests, 108/108 ctest suites\n(including this new srfi_215 suite), fresh --clear-cache run.\nIndependent code-review pass on the final diff.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-26T18:53:12+10:00",
+          "tree_id": "b998fb1e5a937092b256af0ef04b073ac7bd9991",
+          "url": "https://github.com/deconstructo/curry/commit/6a7960b018322c40cd0849ed8d2b9931c6ab5c4c"
+        },
+        "date": 1787734454742,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.031,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.959,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.807,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.483,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.146,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 293.23,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.858,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.36,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.458,
             "unit": "ms"
           }
         ]
