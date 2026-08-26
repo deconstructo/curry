@@ -2,9 +2,22 @@
 
 *unreleased*
 
-Cross-backend text-to-speech. Two backends today: `'macos-say` (macOS's built-in `say` command) and `'espeak-ng` (Linux, via `espeak-ng` or the older `espeak` binary name). Both are plain command-line tools run through `(curry posix)`'s `process-run`/`process-start` — no Objective-C, no framework linking, no new C module, and no shell-injection surface: `process-run`/`process-start` are backed by `posix_spawn` directly, never a shell, so the text to speak, voice names, and file paths all pass through as literal argv data, never interpreted by anything.
+Cross-backend text-to-speech. Three backends: `'macos-say` (macOS's built-in `say` command), `'espeak-ng` (Linux, via `espeak-ng` or the older `espeak` binary name), and `'piper` (neural TTS via `libpiper`, see [`module-piper.md`](module-piper.md)). The first two are plain command-line tools run through `(curry posix)`'s `process-run`/`process-start` — no Objective-C, no framework linking, no new C module, and no shell-injection surface: `process-run`/`process-start` are backed by `posix_spawn` directly, never a shell, so the text to speak, voice names, and file paths all pass through as literal argv data, never interpreted by anything. `'piper` is different — a real C module (`(curry piper)`) doing native audio output, and (unlike the other two) not compiled in by default; see [`module-piper.md`](module-piper.md) for why and how to enable it.
 
-Install: `say` ships with macOS — nothing to install. On Linux, `apt install espeak-ng` (Debian/Ubuntu) or the equivalent for your distro; the older `espeak` package also works if that's what's available.
+Install: `say` ships with macOS — nothing to install. On Linux, `apt install espeak-ng` (Debian/Ubuntu) or the equivalent for your distro; the older `espeak` package also works if that's what's available. `'piper` needs a separate build step — see [`module-piper.md`](module-piper.md).
+
+## Backend registration
+
+`(curry tts)`'s backend table was originally a small fixed set (`'macos-say`/`'espeak-ng`, both always compiled in) with no registration mechanism. `'piper` doesn't fit that shape — `(curry tts piper)` may not exist as an importable library at all, depending on whether curry was built with `-DBUILD_MODULE_PIPER=ON`, so `(curry tts)` can't unconditionally import it the way it does the other two (that import would fail outright — unbound library — on an ordinary build). The registry is now open: `(import (curry tts piper))` registers `'piper` into the table as a side effect of the import (via `tts-register-backend!`, exported alongside the widened `make-tts-backend` constructor for any future optionally-compiled backend to use the same way).
+
+### `(make-tts-backend available? speak-async save voices)`
+### `(make-tts-backend available? speak-async save voices wait stop speaking?)`
+
+The `<tts-backend>` record constructor. `wait`/`stop`/`speaking?` are optional, defaulting to `#f` — `#f` means "this backend's own `speak-async` returns an ordinary `(curry posix)` process handle, dispatch `tts-wait`/`tts-stop`/`tts-speaking?` to `process-wait`/`process-kill`/`process-alive?` directly" (`'macos-say`/`'espeak-ng`'s own case, unchanged by this). Supply real procs only if `speak-async`'s return value *isn't* a process handle — `'piper`'s own `speak-async` is a background pthread doing native audio output, not a subprocess, so it supplies `piper-wait`/`piper-stop!`/`piper-alive?` here. A backend that supplies these must also register a fourth "is this my handle" predicate (see `(curry piper)`'s own `piper-handle?`) — `tts-wait`/`tts-stop`/`tts-speaking?` check `process-handle?` first (the fast, common-case path, zero registry lookup) and only search the registry for a matching backend when that's `#f`.
+
+### `(tts-register-backend! sym backend)`
+
+Adds `backend` (a `<tts-backend>` from `make-tts-backend`) under `sym` into the table `tts-backends`/`tts-backend-available?`/`%lookup-backend` all read from. Not something ordinary code needs to call directly — it's what a library like `(curry tts piper)` calls on itself at import time.
 
 ## Import
 
@@ -47,7 +60,7 @@ A step removed from `current-tts-voice`: `say`/`espeak-ng` both take a *voice na
 
 ### `(tts-backends)` → list of symbols
 
-The full set of registered backends, e.g. `(macos-say espeak-ng)` — the same two on every platform; only their *availability* differs.
+The full set of registered backends, e.g. `(macos-say espeak-ng)` — `'macos-say`/`'espeak-ng` are always both registered regardless of platform (only their *availability* differs); `'piper` only appears here at all once `(curry tts piper)` has been imported (see "Backend registration" above).
 
 ### `(tts-backend-available? sym)` → boolean
 
@@ -141,5 +154,6 @@ Raised (via `(curry conditions)`) for: an unknown `#:backend` symbol, an unrecog
 
 ## See also
 
+- [`tts-piper.md`](../guides/tts-piper.md) — narrative walkthrough for the `'piper` backend: building on macOS/Linux, speaking, sourcing and adding voices
 - [`module-posix.md`](module-posix.md) — `process-run`/`process-start`, the subprocess primitives this module is built on
 - [`module-sql.md`](module-sql.md) — the other cross-backend layer in curry, similar shape (explicit backend selection, one shared API surface)
