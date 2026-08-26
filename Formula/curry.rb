@@ -65,18 +65,46 @@ class Curry < Formula
     # cmake, since a missing find_path/find_library would otherwise surface
     # as an opaque CMake FATAL_ERROR partway through a --build-from-source
     # run instead of a clear message up front.
-    if build.with?("piper") && !(File.exist?("/usr/local/include/piper.h") &&
-                                  Dir.glob("/usr/local/lib/libpiper.*").any? &&
-                                  Dir.glob("/usr/local/lib/libonnxruntime.*").any?)
-      odie <<~EOS
-        --with-piper needs libpiper + onnxruntime installed under /usr/local first:
-          git clone https://github.com/OHF-Voice/piper1-gpl
-          cd piper1-gpl/libpiper
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build build --config Release
-          sudo cmake --install build --config Release
-        See docs/guides/tts-piper.md for the full walkthrough.
-      EOS
+    if build.with? "piper"
+      unless File.exist?("/usr/local/include/piper.h") &&
+             Dir.glob("/usr/local/lib/libpiper.*").any? &&
+             Dir.glob("/usr/local/lib/libonnxruntime.*").any?
+        odie <<~EOS
+          --with-piper needs libpiper + onnxruntime installed under /usr/local first:
+            git clone https://github.com/OHF-Voice/piper1-gpl
+            cd piper1-gpl/libpiper
+            cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+            cmake --build build --config Release
+            sudo cmake --install build --config Release
+          See docs/guides/tts-piper.md for the full walkthrough.
+        EOS
+      end
+
+      # Homebrew's superenv build environment silently drops any -I/-L flag
+      # under /usr/local whenever Homebrew's own prefix is elsewhere (true
+      # here: this is an Apple Silicon /opt/homebrew install, and libpiper
+      # has no formula of its own so it lives at the classic /usr/local) --
+      # see shims/mac/super/bin/clang's own keep?, which treats /usr/local
+      # as stray Intel-Homebrew pollution and strips it even though the
+      # printed build log still shows the flag verbatim. CMake's own
+      # find_path/find_library succeed at configure time (they run outside
+      # that shim), so this doesn't show up until compilation, as a
+      # misleading "piper.h file not found" despite the file genuinely
+      # being there and the -I flag genuinely being on the command line.
+      # Copying the three files into a build-local directory (anywhere
+      # outside /usr/local satisfies the shim) and pointing PIPER_ROOT
+      # there instead sidesteps the filter entirely. Runtime resolution is
+      # unaffected either way: both libraries' own LC_ID_DYLIB is
+      # @rpath-relative (confirmed via otool -D), and macOS's default
+      # DYLD_FALLBACK_LIBRARY_PATH already includes /usr/local/lib, so the
+      # installed curry binary finds the real, original files at runtime
+      # regardless of which copy it linked against at build time.
+      piper_stage = buildpath/".piper-stage"
+      (piper_stage/"include").mkpath
+      (piper_stage/"lib").mkpath
+      cp "/usr/local/include/piper.h", piper_stage/"include"
+      system "cp", "-L", *Dir.glob("/usr/local/lib/libpiper*.dylib"), piper_stage/"lib"
+      system "cp", "-L", *Dir.glob("/usr/local/lib/libonnxruntime*.dylib"), piper_stage/"lib"
     end
 
     prefix_paths = [
@@ -119,7 +147,7 @@ class Curry < Formula
       -DBUILD_MODULE_VECDB=OFF
       -DBUILD_MODULE_PIPER=#{build.with?("piper") ? "ON" : "OFF"}
     ]
-    args << "-DPIPER_ROOT=/usr/local" if build.with? "piper"
+    args << "-DPIPER_ROOT=#{buildpath}/.piper-stage" if build.with? "piper"
 
     system "cmake", "-B", "build", *args
     system "cmake", "--build", "build", "-j", ENV.make_jobs.to_s
