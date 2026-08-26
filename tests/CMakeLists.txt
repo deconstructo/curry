@@ -26,6 +26,7 @@ add_test(NAME load_dir_context_exception_safety
 add_test(NAME load_dir_context_thread_safety
     COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/load_dir_context/thread_safety/main.scm)
 add_test(NAME srfi_1 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_1_tests.scm)
+add_test(NAME srfi_215 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_215_tests.scm)
 add_test(NAME srfi_253 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_253_tests.scm)
 add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
