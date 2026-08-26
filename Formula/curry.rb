@@ -18,8 +18,7 @@ class Curry < Formula
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
   option "with-ldap",      "Build LDAP/LDAPS module"
-  option "with-piper",     "Build Piper neural TTS module (requires libpiper + onnxruntime " \
-                            "already installed under /usr/local -- see docs/guides/tts-piper.md)"
+  option "with-piper",     "Build Piper neural TTS module"
 
   depends_on "cmake"      => :build
   depends_on "pkg-config" => :build
@@ -57,56 +56,14 @@ class Curry < Formula
   # rather than relying on it being present transitively.
   depends_on "qtbase"   if build.with? "qt6"
   depends_on "plplot"   if build.with? "plplot"
+  # libpiper is this tap's own formula (Formula/libpiper.rb), not homebrew-
+  # core -- see that formula's own header for why it can't live upstream
+  # (unversioned dependency chain, GPL, network access during build).
+  # Needed at runtime as well as build time: curry's own piper.so dlopen's
+  # libpiper.dylib/libonnxruntime.dylib, they aren't statically linked in.
+  depends_on "libpiper" if build.with? "piper"
 
   def install
-    # libpiper/onnxruntime have no Homebrew formula of their own (see
-    # docs/guides/tts-piper.md) -- there's nothing to `depends_on` here, so
-    # this checks for a manual install under /usr/local before even running
-    # cmake, since a missing find_path/find_library would otherwise surface
-    # as an opaque CMake FATAL_ERROR partway through a --build-from-source
-    # run instead of a clear message up front.
-    if build.with? "piper"
-      unless File.exist?("/usr/local/include/piper.h") &&
-             Dir.glob("/usr/local/lib/libpiper.*").any? &&
-             Dir.glob("/usr/local/lib/libonnxruntime.*").any?
-        odie <<~EOS
-          --with-piper needs libpiper + onnxruntime installed under /usr/local first:
-            git clone https://github.com/OHF-Voice/piper1-gpl
-            cd piper1-gpl/libpiper
-            cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-            cmake --build build --config Release
-            sudo cmake --install build --config Release
-          See docs/guides/tts-piper.md for the full walkthrough.
-        EOS
-      end
-
-      # Homebrew's superenv build environment silently drops any -I/-L flag
-      # under /usr/local whenever Homebrew's own prefix is elsewhere (true
-      # here: this is an Apple Silicon /opt/homebrew install, and libpiper
-      # has no formula of its own so it lives at the classic /usr/local) --
-      # see shims/mac/super/bin/clang's own keep?, which treats /usr/local
-      # as stray Intel-Homebrew pollution and strips it even though the
-      # printed build log still shows the flag verbatim. CMake's own
-      # find_path/find_library succeed at configure time (they run outside
-      # that shim), so this doesn't show up until compilation, as a
-      # misleading "piper.h file not found" despite the file genuinely
-      # being there and the -I flag genuinely being on the command line.
-      # Copying the three files into a build-local directory (anywhere
-      # outside /usr/local satisfies the shim) and pointing PIPER_ROOT
-      # there instead sidesteps the filter entirely. Runtime resolution is
-      # unaffected either way: both libraries' own LC_ID_DYLIB is
-      # @rpath-relative (confirmed via otool -D), and macOS's default
-      # DYLD_FALLBACK_LIBRARY_PATH already includes /usr/local/lib, so the
-      # installed curry binary finds the real, original files at runtime
-      # regardless of which copy it linked against at build time.
-      piper_stage = buildpath/".piper-stage"
-      (piper_stage/"include").mkpath
-      (piper_stage/"lib").mkpath
-      cp "/usr/local/include/piper.h", piper_stage/"include"
-      system "cp", "-L", *Dir.glob("/usr/local/lib/libpiper*.dylib"), piper_stage/"lib"
-      system "cp", "-L", *Dir.glob("/usr/local/lib/libonnxruntime*.dylib"), piper_stage/"lib"
-    end
-
     prefix_paths = [
       Formula["openssl@3"].opt_prefix,
       Formula["readline"].opt_prefix,
@@ -124,6 +81,7 @@ class Curry < Formula
     prefix_paths << Formula["qtbase"].opt_prefix    if build.with? "qt6"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
+    prefix_paths << Formula["libpiper"].opt_prefix  if build.with? "piper"
 
     args = std_cmake_args + %W[
       -DCMAKE_BUILD_TYPE=Release
@@ -147,7 +105,7 @@ class Curry < Formula
       -DBUILD_MODULE_VECDB=OFF
       -DBUILD_MODULE_PIPER=#{build.with?("piper") ? "ON" : "OFF"}
     ]
-    args << "-DPIPER_ROOT=#{buildpath}/.piper-stage" if build.with? "piper"
+    args << "-DPIPER_ROOT=#{Formula["libpiper"].opt_prefix}" if build.with? "piper"
 
     system "cmake", "-B", "build", *args
     system "cmake", "--build", "build", "-j", ENV.make_jobs.to_s
