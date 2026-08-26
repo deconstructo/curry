@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787741269820,
+  "lastUpdate": 1787742131574,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8141,6 +8141,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 54.244,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "b965a03f6a57ba6d6b052f9d2f2f78719433d42d",
+          "message": "fix(errors,port): print (curry conditions) objects properly at top level\n\nAny uncaught CL-style condition (condition-error, e.g. tts-error) hit\nthe top-level error reporters generic fallback -- it only special-\ncased R7RS ErrorObj (T_ERROR), not Condition (T_CONDITION) -- and the\ngeneric writer had no print case for T_CONDITION either, so the\nfallback rendered a bare #<object 46> (46 = T_CONDITION tag) with\nno indication of what actually failed or why.\n\nFound via manual end-to-end piper testing: setting the TTS backend to\npiper and calling tts-speak with no voice directory configured raises\nexactly this kind of condition, and it printed as that bare object tag\ninstead of the actual no piper voices found message already carried\nin the conditions own message field.\n\nprint_scheme_error (main.c) now checks vis_condition() first and\nprints the conditions type_sym plus message the same way it already\ndoes for ErrorObjs code plus message. ports generic writer also\ngains a condition-name case, so display and write on a condition\nnever fall through to the raw tag-number fallback either, independent\nof where the condition ends up.\n\n102/102 ctest suites pass (fresh clear-cache run); verified the\npiper-specific reproduction directly against the built curry binary\nbefore and after the fix. Independent low-effort code review found no\nissues.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-26T21:01:00+10:00",
+          "tree_id": "b992ad7016caa7e30d2400d2c0d532b620455190",
+          "url": "https://github.com/deconstructo/curry/commit/b965a03f6a57ba6d6b052f9d2f2f78719433d42d"
+        },
+        "date": 1787742129400,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.424,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.991,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.6,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.929,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.517,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 294.744,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.629,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.58,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.471,
             "unit": "ms"
           }
         ]
