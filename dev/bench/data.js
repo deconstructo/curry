@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787735891157,
+  "lastUpdate": 1787736322301,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7934,6 +7934,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.374,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "3067acc01b841727e0fdbe063e480b22e804408c",
+          "message": "fix(formula): stage piper.h/libpiper/libonnxruntime out of /usr/local for the build\n\nHomebrew's superenv build shim (shims/mac/super/bin/clang) silently\ndrops any -I/-L flag under /usr/local whenever Homebrew's own prefix\nis elsewhere (true here: /opt/homebrew), treating it as stray\nIntel-Homebrew pollution -- even though CMake's own find_path/\nfind_library (which run outside the shim) succeed at configure time\nand the flag shows up verbatim in the printed build log. The result\nwas a misleading \"piper.h file not found\" despite the file genuinely\nexisting and the flag genuinely being on the command line, confirmed\nby manually reproducing the exact compile invocation both with and\nwithout the shim.\n\nFix: copy the three files into a build-local .piper-stage directory\n(anywhere outside /usr/local satisfies the shim's filter and point\n-DPIPER_ROOT there instead. Runtime resolution is unaffected -- both\ndylibs' own LC_ID_DYLIB is @rpath-relative (confirmed via otool -D),\nand macOS's default DYLD_FALLBACK_LIBRARY_PATH already includes\n/usr/local/lib, so the installed curry binary finds the real files at\nruntime regardless of which copy it linked against at build time.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nEOF\n)",
+          "timestamp": "2026-08-26T19:24:38+10:00",
+          "tree_id": "f9849fee5f409df88f40ebd75256880e48d469c9",
+          "url": "https://github.com/deconstructo/curry/commit/3067acc01b841727e0fdbe063e480b22e804408c"
+        },
+        "date": 1787736320697,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.515,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.543,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.616,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.261,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 130.109,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 282.783,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.527,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 86.08,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.023,
             "unit": "ms"
           }
         ]
