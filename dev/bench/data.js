@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787742131574,
+  "lastUpdate": 1787768715355,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8210,6 +8210,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.471,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "2ba9d6d6e4116a9a97aa1458f757671e10c49d4d",
+          "message": "fix(tts): espeak-ng backend passed the wrong column to -v, breaking every #:voice value\n\nespeak-tts-voices built its (name . locale) pairs as (VoiceName .\nLanguage) -- e.g. (English_(America) . en-us) -- and name is what\n(curry tts)'s own contract requires as a valid #:voice value passed\nstraight through to espeak-ng -v. Real espeak-ng only accepts the\nLanguage column there; passing the VoiceName column fails with The\nspecified espeak-ng voice does not exist. This meant #:voice had never\nactually worked for any value taken from the backends own tts-voices\noutput, for any language, since this file was written -- only ever\nmanually verified with #:voice unset.\n\nFound while checking whether Irish (Gaeilge) TTS is possible through\ncurry: espeak-ng genuinely bundles an Irish voice (cel/ga in its own\ndata), but #:voice ga failed with that exact does not exist error\nuntil this fix. Now both fields of the pair are the Language column,\nsince thats the only value espeak-ng -v actually accepts -- confirmed\nend to end (a real Irish WAV file synthesized and played back), plus\nre-verified English still works and current-tts-language auto-\nselection is unaffected (it already matched against the Language\ncolumn via the cdr, so this fix only changes what car returns).\n\ndocs/reference/module-tts.md updated to match: the tts-voices example\noutput, the current-tts-language example voice name, and the Notes\nsection explaining the naming-convention difference between backends.\n\n102/102 ctest suites pass (fresh clear-cache run). Independent\nlow-effort code review found no issues.\n\nAlso mentioned separately: macOS say does have a genuine Irish\nEnglish voice, Moira (English (Ireland)) / en_IE, confirmed working\nthrough (curry tts) -- no code change needed there, just missed on\nthe first pass since only Pipers voice catalogue was checked.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-27T04:23:14+10:00",
+          "tree_id": "569f7855df820463eb36ba80eb176807abda3004",
+          "url": "https://github.com/deconstructo/curry/commit/2ba9d6d6e4116a9a97aa1458f757671e10c49d4d"
+        },
+        "date": 1787768714378,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.785,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.677,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.264,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.736,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 141.179,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 282.63,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.214,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.195,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 71.833,
             "unit": "ms"
           }
         ]
