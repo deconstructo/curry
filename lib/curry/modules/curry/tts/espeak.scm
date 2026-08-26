@@ -74,12 +74,22 @@
         (condition-error 'tts-error (list (cons 'backend 'espeak-ng))
           (string-append "tts: espeak exited " (number->string exit-code) ": " stderr))))))
 
-;; (espeak-tts-voices) -> list of (name . language) pairs. `--voices`
-;; prints a header line then whitespace-separated columns:
+;; (espeak-tts-voices) -> list of (name . language) pairs, where BOTH
+;; fields are the Language column (e.g. "en-us", "ga") -- confirmed via
+;; a real espeak-ng invocation that its own -v flag only accepts that
+;; column's value, never the VoiceName column (e.g. "English_(America)",
+;; "Gaelic_(Irish)"); passing VoiceName fails with "The specified
+;; espeak-ng voice does not exist." (curry tts)'s own %validate-voice/
+;; %resolve-voice contract requires `name` (the car) to be a value
+;; that's actually valid to pass back as #:voice, so VoiceName can't be
+;; `name` here despite being the more human-readable column -- an
+;; earlier version of this file used VoiceName for `name`, which meant
+;; #:voice on this backend had never actually worked for any value
+;; taken from its own tts-voices output. `--voices` prints a header
+;; line then whitespace-separated columns:
 ;;   Pty Language       Age/Gender VoiceName          File   Other Languages
 ;;    2  en-us           --/M      English_(America)  ...
-;; VoiceName never contains a space (multi-word names use underscores),
-;; so a plain whitespace split is safe here -- unlike macOS's `say -v ?`,
+;; A plain whitespace split is safe here -- unlike macOS's `say -v ?`,
 ;; which does need the regex-based locale-token approach.
 (define (%whitespace-fields line)
   (let ((len (string-length line)))
@@ -105,7 +115,7 @@
                 (reverse acc)
                 (let ((fields (%whitespace-fields line)))
                   (loop (if (>= (length fields) 4)
-                            (cons (cons (list-ref fields 3) (list-ref fields 1)) acc)
+                            (cons (cons (list-ref fields 1) (list-ref fields 1)) acc)
                             acc))))))))))
 
   )) ;; end begin, define-library

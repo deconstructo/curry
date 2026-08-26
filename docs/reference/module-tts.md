@@ -49,7 +49,7 @@ Same idiom, for `#:rate` (words per minute).
 ### `(current-tts-language)` → string or `#f`
 ### `(current-tts-language lang)`
 
-A step removed from `current-tts-voice`: `say`/`espeak-ng` both take a *voice name*, not a locale, so this is never passed to the backend directly. Instead, when a call resolves no `#:voice` (neither the call's own nor `current-tts-voice`), the active backend's `tts-voices` list is searched for the first entry whose locale starts with `lang`, and that voice's name is used. Lets you say `(current-tts-language "fr")` once instead of knowing the exact voice name (`"Thomas"` on macOS, `"French_(France)"` on espeak-ng) a given backend/machine happens to expose. Raises `'tts-error` if no voice matches. An explicit `#:voice` (call-level or `current-tts-voice`) always takes priority over `current-tts-language`.
+A step removed from `current-tts-voice`: `say`/`espeak-ng` both take a *voice name*, not a locale, so this is never passed to the backend directly. Instead, when a call resolves no `#:voice` (neither the call's own nor `current-tts-voice`), the active backend's `tts-voices` list is searched for the first entry whose locale starts with `lang`, and that voice's name is used. Lets you say `(current-tts-language "fr")` once instead of knowing the exact voice name (`"Thomas"` on macOS, `"fr-fr"` on espeak-ng) a given backend/machine happens to expose. Raises `'tts-error` if no voice matches. An explicit `#:voice` (call-level or `current-tts-voice`) always takes priority over `current-tts-language`.
 
 ```scheme
 (current-tts-voice #f)
@@ -115,7 +115,7 @@ Same `#:voice`/`#:rate`/`#:backend` options as `tts-speak`, but renders to `path
 
 ```scheme
 (tts-save "hello world" "greeting.aiff")
-(tts-save "hello" "greeting.wav" #:backend 'espeak-ng #:voice "en")
+(tts-save "hello" "greeting.wav" #:backend 'espeak-ng #:voice "en-us")
 ```
 
 ## Voices
@@ -128,10 +128,10 @@ For the active (or `#:backend`-forced) backend. `name` is exactly what that back
 (tts-voices)
 ; => (("Alice" . "it_IT") ("Moira (English (Ireland))" . "en_IE") ...)   ; macOS
 (tts-voices #:backend 'espeak-ng)
-; => (("English_(America)" . "en-us") ("French_(France)" . "fr-fr") ...)  ; espeak-ng
+; => (("en-us" . "en-us") ("fr-fr" . "fr-fr") ("ga" . "ga") ...)  ; espeak-ng
 ```
 
-Note the two backends use different `name` and `locale` conventions (macOS: display names, `xx_XX` locale tags; espeak-ng: underscore-separated names, `xx-xx`/`xx` language tags) — a `#:voice` value is never portable between backends, only within one.
+Note the two backends use different `name` conventions: macOS's `say` uses real display names distinct from locale (`"Moira (English (Ireland))"` for `en_IE`, `"Thomas"` for `fr_FR`), so both fields carry distinct information there — but espeak-ng's own `-v` flag only ever accepts its Language column, never its VoiceName column (confirmed directly: passing a VoiceName like `"English_(America)"` fails with "the specified espeak-ng voice does not exist"), so both `name` and `locale` are the same language-tag string for that backend (`"en-us"`, `"fr-fr"`, `"ga"`, ...). A `#:voice` value is never portable between backends either way, only within one.
 
 ## Errors
 
