@@ -601,6 +601,13 @@ void scm_write(val_t v, val_t port) {
         port_write_char(port, ')');
         return;
     }
+    if (vis_condition(v)) {
+        Condition *c = as_condition(v);
+        const char *name = vis_symbol(c->type_sym) ? as_sym(c->type_sym)->data : "condition";
+        int n = snprintf(buf, sizeof(buf), "#<condition %s>", name);
+        port_write_string(port, buf, (uint32_t)n);
+        return;
+    }
     /* fallback */
     int n = snprintf(buf, sizeof(buf), "#<object %u>", vtype(v));
     port_write_string(port, buf, (uint32_t)n);

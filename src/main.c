@@ -89,6 +89,22 @@ static void init_all(void) {
    (name file line) frames captured at raise time. Shared by every
    top-level catch site (script, REPL, -e, -c, .scc loading). */
 static void print_scheme_error(val_t exn) {
+    if (vis_condition(exn)) {
+        /* (curry conditions)'s CL-style condition, e.g. from condition-error
+           (tts-error, srfi-215's log conditions, etc.) -- distinct from the
+           R7RS ErrorObj case below (different struct, different fields).
+           Without this case, an uncaught condition fell through to the
+           generic scm_write_shared fallback, which has no print case for
+           T_CONDITION either, and printed as a bare "#<object 46>" (46 =
+           T_CONDITION's tag) with no indication of what actually failed. */
+        Condition *c = as_condition(exn);
+        if (vis_symbol(c->type_sym)) fprintf(stderr, "Error [%s]: ", sym_cstr(c->type_sym));
+        else fprintf(stderr, "Error: ");
+        if (vis_string(c->message)) scm_display_shared(c->message, PORT_STDERR);
+        else scm_write_shared(exn, PORT_STDERR);
+        fputs("\n", stderr);
+        return;
+    }
     val_t code = vis_error(exn) ? as_err(exn)->code : V_FALSE;
     if (vis_symbol(code)) fprintf(stderr, "Error [%s]: ", sym_cstr(code));
     else fprintf(stderr, "Error: ");
