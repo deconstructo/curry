@@ -79,7 +79,8 @@
 ;; override via (current-piper-espeak-data-path "...") same as any other
 ;; parameter here.
 (define (%find-espeak-data)
-  (let loop ((dirs (list "/opt/homebrew/share/espeak-ng-data"
+  (let loop ((dirs (list "/opt/homebrew/opt/libpiper/share/espeak-ng-data"
+                         "/opt/homebrew/share/espeak-ng-data"
                          "/usr/local/share/espeak-ng-data"
                          "/usr/share/espeak-ng-data")))
     (cond
