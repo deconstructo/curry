@@ -154,5 +154,6 @@ Raised (via `(curry conditions)`) for: an unknown `#:backend` symbol, an unrecog
 
 ## See also
 
+- [`tts-piper.md`](../guides/tts-piper.md) — narrative walkthrough for the `'piper` backend: building on macOS/Linux, speaking, sourcing and adding voices
 - [`module-posix.md`](module-posix.md) — `process-run`/`process-start`, the subprocess primitives this module is built on
 - [`module-sql.md`](module-sql.md) — the other cross-backend layer in curry, similar shape (explicit backend selection, one shared API surface)

@@ -105,5 +105,6 @@ Registers `'piper` into `(curry tts)`'s backend table as a side effect of being 
 
 ## See also
 
+- [`tts-piper.md`](../guides/tts-piper.md) — narrative walkthrough: building on macOS/Linux, speaking, sourcing and adding voices
 - [`module-tts.md`](module-tts.md) — the full `(curry tts)` API this backend plugs into
 - [`module-ffi.md`](module-ffi.md) — "When to use the FFI vs writing a C module," the design question this whole module answers
