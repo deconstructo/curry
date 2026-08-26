@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787740751775,
+  "lastUpdate": 1787741269820,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8072,6 +8072,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 70.236,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "883b3aa9af62cdd3af81ac9a20ba1eada27c6df5",
+          "message": "fix(tts): find espeak-ng-data under the new libpiper Homebrew formula\n\n%find-espeak-data's search list predated Formula/libpiper.rb -- on a\nmachine with only that formula installed (no separate espeak-ng), the\nlookup fell through to #f, and piper-create fell back to a stale\nbuild-tmp path baked into libpiper.dylib at its own build time\n(\"Error processing file '.../libpiper-<tmp>/.../espeak-ng-data/\nphontab': No such file or directory\"), found by testing piper support\nmanually end to end (piper-save, tts-save, tts-speak) rather than just\npiper-version. Added the formula's own opt-prefix data dir ahead of\nthe existing candidates.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-26T20:46:19+10:00",
+          "tree_id": "cf947544ed84d228790d17d5333e6ff57361d1df",
+          "url": "https://github.com/deconstructo/curry/commit/883b3aa9af62cdd3af81ac9a20ba1eada27c6df5"
+        },
+        "date": 1787741269215,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.165,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 19.369,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.964,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 23.005,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 107.673,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 226.012,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 51.213,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 70.106,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 54.244,
             "unit": "ms"
           }
         ]
