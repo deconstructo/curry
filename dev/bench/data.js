@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787734456611,
+  "lastUpdate": 1787734599928,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -7658,6 +7658,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.458,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7d105d98f9f70d048ac96e49021532e63f2feb93",
+          "message": "feat(tts): add Piper neural TTS backend with direct-to-speaker playback (#76)\n\n* feat(tts): add Piper neural TTS backend with direct-to-speaker playback\n\nAdds (curry piper), a real C module wrapping libpiper\n(https://github.com/OHF-Voice/piper1-gpl), wired into (curry tts) as\nthe 'piper backend. Unlike the existing 'macos-say/'espeak-ng backends\n(plain CLI tools spawned via (curry posix)), this is genuine native\ncode: libpiper streams synthesized audio via a 9-field struct\n(piper_audio_chunk) with raw float* sample arrays, exactly the \"deep\nstruct traversal\" case docs/reference/module-ffi.md itself says to\nwrite a C module for rather than force through the generic FFI layer.\n\nDirect-to-speaker playback (not just WAV-file output) via native\nplatform audio: CoreAudio's AudioQueue API on macOS, ALSA on Linux\n(optional at build time -- piper-save/WAV output works without it,\npiper-speak-async raises a clear runtime error instead of failing to\nbuild or crashing if ALSA wasn't found). Audio plays as soon as the\nfirst chunk is synthesized, not after the whole utterance completes.\n\nThe background thread piper-speak-async spawns never touches a\ncurry_val or GC-heap pointer at all -- text is strdup'd before the\nthread starts, specifically so it has zero dependency on curry's GC\nbeing aware of it (no gc_register_thread() needed, unlike e.g.\nmodules/mcp/mcp.c's per-connection threads, which do construct\ncurry_vals off-thread and therefore do need it). Verified this\ninvariant by reading the entire thread call graph.\n\n(curry tts)'s own <tts-backend> protocol needed widening: 'piper's\nspeak-async returns a background-thread handle, not a (curry posix)\nprocess handle the way the other two backends' does, so tts-wait/\ntts-stop/tts-speaking? needed to become backend-polymorphic (checking\nprocess-handle? first for the common case, falling back to a\nregistered backend's own wait/stop/speaking?/handle? procs otherwise).\nThe backend table itself also had to become an open registry\n(tts-register-backend!) rather than the fixed set it was, since (curry\ntts piper) may not exist as an importable library at all depending on\nwhether curry was built with -DBUILD_MODULE_PIPER=ON (OFF by default\n-- libpiper has no system package yet, see docs/reference/\nmodule-piper.md for the build steps), unlike macos-say/espeak-ng which\nalways compile in.\n\nVerification note: could not get a working local libpiper build on\nthis machine to link/run against -- its own build dependency,\nespeak-ng, crashes with a trace trap on this specific macOS/clang\nversion, confirmed unrelated to this module's own code by running the\nfreshly-built espeak-ng binary directly. Did verify modules/piper/\npiper.c compiles cleanly (clang -fsyntax-only and a real -c compile to\nan object file, zero warnings with -Wall -Wextra) against the REAL\npiper.h header (cloned from the upstream repo, not retyped from\nmemory) and real CoreAudio headers, and confirmed via nm -u that all\nsix libpiper symbols called are referenced correctly. Could not verify\nactual linking against a compiled libpiper.dylib or any runtime\nbehavior. A manual review pass (the code-review subagent hit the\naccount's monthly spend limit mid-session and couldn't run) found and\nfixed two real bugs before this landed:\n- PiperPlayback (the piper-speak-async handle's backing struct,\n  including its pthread_mutex_t/pthread_cond_t) was never freed on any\n  path -- fixed by freeing it in piper-wait, once playback is\n  confirmed done; documented that a handle never waited on (pure\n  fire-and-forget) still leaks this same small fixed-size struct,\n  matching piper-synth's own already-explicit \"no GC finalizer, call\n  piper-free! yourself\" contract.\n- tts/piper.scm's synth cache was keyed on voice name alone, not\n  (voice-dir . voice-name) -- changing current-piper-voice-dir between\n  two calls using the same voice name would have silently kept\n  returning the first directory's cached synth.\n\n347/347 C unit tests, 107/107 ctest suites (the new piper suite is\ngated behind BUILD_MODULE_PIPER AND TARGET curry_piper, so it doesn't\nexist in ctest's list at all on this or any ordinary build), fresh\n--clear-cache run -- all against the default BUILD_MODULE_PIPER=OFF\nconfiguration, confirming this change doesn't affect anyone who\ndoesn't opt in. Independent security review (the code-review subagent\nabove; security-review ran successfully) found no new external attack\nsurface.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(piper): fix data loss, exit crash, and use-after-free found via first real runtime test\n\nPR #76's previous commit shipped never having actually linked against a\nbuilt libpiper -- espeak-ng, one of its own build dependencies, crashed\non this machine's toolchain. That's now resolved (root cause: espeak-ng\nhardcodes its install path into a fixed 160-byte buffer via an\nunchecked strcpy, src/libespeak-ng/speech.c:338, and this sandbox's\ndefault scratchpad path is long enough to overflow it -- building from\na short path like ~/piper-build sidesteps it entirely; not a beta-\ntoolchain issue as originally guessed). With a real libpiper linked\nand a real voice model downloaded, this is the first time any of\nmodules/piper/piper.c has actually executed, and it surfaced four real\nbugs no amount of syntax-only compilation could have caught:\n\n- piper_synthesize_next's PIPER_DONE return code carries valid sample\n  data in the SAME call, not a separate empty final call (confirmed\n  against libpiper's own reference caller, src/main/utils/wavfile.cpp,\n  which ignores the return code entirely and drives its loop off\n  chunk.is_last). Both piper-save's and piper-speak-async's synthesis\n  loops treated PIPER_DONE as \"stop now, nothing to process,\" silently\n  discarding that last chunk's audio -- for any text short enough to\n  finish in one chunk, that's every sample: piper-save was producing a\n  44-byte WAV (header only, zero audio) on every call.\n\n- Any live synth still allocated when the process exits crashes it:\n  onnxruntime's global OrtEnv singleton throws from its own static\n  destructor during exit()'s teardown sweep if a piper_synthesizer is\n  still alive (confirmed with lldb -- the abort is entirely inside\n  libonnxruntime's unique_ptr<OrtEnv>::~unique_ptr, not this module's\n  code). (curry tts piper)'s synth cache never freed anything, so\n  every process that ever used the piper backend would have aborted on\n  exit. Fixed with a tracked-synth + atexit() sweep -- registered\n  lazily, on first use, specifically so it lands AFTER onnxruntime's\n  own lazy atexit registration (which happens inside the first\n  piper_create() call): atexit runs LIFO, so registering any earlier\n  put our cleanup before onnxruntime's in the list, meaning its crash\n  fired before we ever got a chance to free anything.\n\n- piper-wait was freeing the handle's backing struct (mutex/condvar\n  included) once done. That's wrong: (curry tts)'s tts-stop/tts-wait/\n  tts-speaking? dispatch calls all three on the same handle in\n  sequence for every backend (mirrored from real process handles,\n  which stay valid indefinitely after process-wait) -- freeing inside\n  piper-wait made that a live use-after-free, caught by\n  piper_tests.scm's own round-trip test silently returning the wrong\n  answer instead of crashing outright. Fixed by not freeing there at\n  all; playback handles now behave like process handles (valid\n  indefinitely, reclaimed at exit via the same tracking mechanism as\n  synths, no explicit free primitive).\n\n- piper_create doesn't catch its own internal C++ exceptions before\n  returning across its extern \"C\" boundary -- a nonexistent model path\n  makes it try to parse a missing/empty JSON config and throw\n  std::terminate straight through, crashing the process instead of\n  returning NULL. Can't fix this from a plain-C wrapper without a\n  disproportionate C++ rewrite; mitigated by validating the model/\n  config paths exist before ever calling into piper_create, covering\n  the single most likely real-world trigger (a typo'd path) with a\n  normal catchable curry_error. Documented as a known, not fully\n  closable, upstream gap.\n\nAlso fixed, found in the same pass: tts-speak (the blocking (curry\ntts) convenience wrapper) called process-wait directly instead of the\nalready-widened tts-wait, so it worked for macos-say/espeak-ng (real\nprocess handles) but raised \"not a process handle\" for any non-process\nbackend -- invisible to tts_tests.scm since it only exercises the two\nprocess-handle backends. And lib/curry/modules/curry/tts.scm's\nmake-tts-backend used cadddr, which isn't a core binding in curry\n(only 2-level cxr combinators are guaranteed outside a (scheme cxr)\nlibrary this codebase doesn't have) -- replaced with (car (cdddr ...)).\n\nVerified end-to-end this time, not just compiled: tts-speak/tts-save\nthrough the 'piper backend, direct piper-create/piper-speak-async/\npiper-save/piper-wait/piper-stop!/piper-alive? primitives, real WAV\noutput confirmed non-silent (afinfo/python wave module: 2+ seconds,\n94% non-zero samples), 3x repeated clean-exit runs with and without\nexplicit piper-free!/piper-wait, and the full piper_tests.scm suite\n(12/12) against a real linked libpiper build. Full existing suite\nre-verified for regressions: 107/107 ctest, tts_tests.scm 27/27,\nagainst the ordinary BUILD_MODULE_PIPER=OFF build.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* docs(piper): add build/usage/voice-sourcing guide for the piper TTS backend\n\nAdds docs/guides/tts-piper.md as the narrative walkthrough companion to\nthe existing module-piper.md/module-tts.md reference docs, and cross-links\nit from both plus the README guide index.\n\nLooking forward to hearing some Ancient Greek and Akkadian :-)",
+          "timestamp": "2026-08-26T18:55:48+10:00",
+          "tree_id": "d7b07e366403b38de141af398532db545198330b",
+          "url": "https://github.com/deconstructo/curry/commit/7d105d98f9f70d048ac96e49021532e63f2feb93"
+        },
+        "date": 1787734598015,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 13.968,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 19.268,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.957,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 23.475,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 108.184,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 222.848,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 50.321,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 70.829,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 55.379,
             "unit": "ms"
           }
         ]
