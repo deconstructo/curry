@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787736322301,
+  "lastUpdate": 1787740751775,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8003,6 +8003,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.023,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "e20cbb8f451443259c4b2936495e557b8f352f59",
+          "message": "feat(formula): package libpiper as a real Homebrew formula\n\nReplaces the /usr/local staging workaround with a proper dependency:\nFormula/libpiper.rb builds libpiper1-gpl's libpiper subdir (which\nneeds network access during install -- it clones espeak-ng and\ndownloads a prebuilt onnxruntime release itself, neither pre-fetched\nas a Homebrew resource) and fixes up both dylibs' install names\nafterward.\n\nBoth libpiper.dylib and onnxruntime's dylib ship with an @rpath-\nrelative LC_ID_DYLIB, unlike every other Homebrew-packaged dep curry\nlinks against (openssl, libgit2, ...), which all use absolute install\nnames and therefore never needed an rpath. Without fixing this,\ndlopen()'ing piper.so fails at runtime with \"no LC_RPATH's found\" --\nconfirmed by hitting exactly that failure twice: once for libpiper's\nown -id (fixed via install_name_tool -id), and again for libpiper.\ndylib's own internal LC_LOAD_DYLIB reference to onnxruntime, which\n-id does nothing for and needed a separate install_name_tool -change.\nVerified end to end: `curry -e '(import (curry piper))\n(display (piper-version))'` prints 1.7.0 with no rpath anywhere.\n\ncurry.rb now just depends_on \"libpiper\" if build.with? \"piper\",\ndropping the whole .piper-stage staging block from the previous\ncommit -- that workaround only existed to dodge Homebrew's superenv\nbuild shim filtering -I/-L flags under /usr/local (see that commit's\nown message; a real formula living under Homebrew's own prefix\nsidesteps the filter entirely, no staging needed.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nEOF\n)",
+          "timestamp": "2026-08-26T20:38:01+10:00",
+          "tree_id": "7d55f69494ccdcaeb70ca71a28da8d5f2046c97a",
+          "url": "https://github.com/deconstructo/curry/commit/e20cbb8f451443259c4b2936495e557b8f352f59"
+        },
+        "date": 1787740751150,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.65,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.274,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.674,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.306,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 130.558,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 305.888,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 83.285,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.42,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 70.236,
             "unit": "ms"
           }
         ]
