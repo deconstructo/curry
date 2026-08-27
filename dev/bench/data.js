@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787822176244,
+  "lastUpdate": 1787824691659,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8417,6 +8417,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.358,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "26ae094d6b607efeb9d9c5d2f896f927f0f3c56c",
+          "message": "feat(gillespie): add (curry gillespie) stochastic cell-biochemistry module (#78)\n\n* docs(thoughts): design sketch for a toy evolution model composing with Gillespie\n\nParks the population-genetics idea from conversation: genome as a\nvector of alleles, composable mutation operators (point/indel/\nduplication), three distinct modes of gene transfer (vertical asexual,\nvertical sexual/crossover, horizontal transfer), and standard roulette/\ntournament selection.\n\nThe part worth writing down carefully: a genome can literally be a\nGillespie cells vector of reaction rate constants, making fitness the\nresult of actually running that cells own biochemical simulation --\nmutation perturbs rate constants, sexual reproduction mixes two\nlineages rate vectors, and horizontal transfer splices one cells\nsuccessful rate constant into an unrelated cells network mid-\nsimulation (a reasonable toy model of plasmid-mediated resistance\nspread). The shared Gillespie environment (temperature/pH/nutrients)\nthen gives environmental selection pressure for free, since fitness is\ndefined by running the real simulation under that environment.\n\nPre-implementation only -- parked for later per explicit request, not\nwired into anything yet.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* docs(thoughts): Gillespie cell-model design, including an SBML import angle\n\nWrites up the design already discussed for (curry gillespie): composable\npropensity/rate-law combinators (mass-action, arrhenius, michaelis-\nmenten), the reaction/cell/environment record shapes, why environment\nsensitivity (temperature/pH/nutrients) falls out for free from\npropensities just being functions of state, multi-cell simulation via\ncurry's existing actor+STM concurrency rather than new machinery, and\na Qt visualization sketch.\n\nAdds an SBML interoperability section per request: curry already has\nthe two pieces a real importer would need -- (curry xml) for SBML's\nown nested-element structure, and (curry symbolic) to turn a kinetic\nlaw's embedded MathML into a real, inspectable symbolic expression\nrather than an opaque string. Scoped explicitly to species/reactions/\nstoichiometry plus mass-action/Michaelis-Menten kinetics as a bounded\nuseful first cut, not full MathML/SBML-package coverage.\n\nCross-links with docs/thoughts/toy-evolution-model.md (fixed that\nfiles own forward reference to this file, which did not exist yet\nwhen it was written).\n\nPre-implementation design doc; the base module itself is being\nimplemented in this same session.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(gillespie): add (curry gillespie) stochastic cell-biochemistry module\n\nBase capability from the design doc committed earlier this session:\nthe Gillespie stochastic simulation algorithm (SSA) for a set of\nchemical species undergoing reactions as a continuous-time Markov\nchain, with composable rate-law combinators (mass-action, arrhenius,\nmichaelis-menten, hill, rate*) as the whole environment-sensitivity\nmechanism -- temperature/pH/nutrient dependence is never a special\nfeature, just a propensity procedure reading environment fields,\ncomposed with ordinary function composition rather than a mini-DSL.\n\nTwo rounds of independent code review found five real bugs before\nthis landed, in order:\n\nRound 1 (also caught manually via direct runtime testing, same\npattern as the piper module earlier in this session -- toy/simulation\ncode needs to actually be run, not just read, to catch this class of\nbug):\n- %falling-factorial's n<=0 early-exit returned the unmultiplied\n  accumulator (1) instead of the correct 0 for a depleted reactant,\n  so mass-action kept a nonzero propensity after a reactant hit zero\n  -- a real simulation run consumed a finite resource down to -970\n  instead of stopping at 0.\n- michaelis-menten's km+S=0 case divided 0 by 0 unguarded -- a silent\n  NaN that poisons gillespie-step!'s (> a0 0) quiescence check\n  forever, permanently freezing an otherwise-live cell with no error.\n\nRound 2 (code review only, none of these were hit by manual testing):\n- cell-trajectory hung forever for dt <= 0 (next-sample never advanced\n  past t-max).\n- cell-trajectory accumulated sample times via repeated floating-point\n  addition of dt, which drifts for a dt that isn't an exact binary\n  fraction (e.g. 0.1) and can shift the final sample across the t-max\n  boundary -- switched to i*dt from an integer step count instead.\n- cell-trajectory kept rebuilding an identical species snapshot via\n  hash-table->alist at every remaining sample point even after the\n  cell had gone quiescent -- now caches and reuses one snapshot.\n- random-real() can return exactly 0.0 (probability 2^-53 per draw,\n  not zero), making (log 0.0) = -inf.0 and the drawn waiting time\n  +inf.0 -- silently jumping the cell's clock to infinity in one step\n  and ending the run early with no error. Fixed with a redraw-on-exact-\n  zero wrapper, effectively free amortized given the probability.\n- arrhenius/hill lacked the same zero-denominator guard michaelis-\n  menten already had (temperature=0, width=0 respectively) -- both now\n  return their correct mathematical limit (0, and a delta function)\n  instead of dividing by zero.\n\nAlso: docs/reference/module-gillespie.md (full API reference),\ndocs/guides/gillespie-cells.md (narrative walkthrough building up a\nbirth-death process, a genetic toggle switch, temperature sensitivity,\nand multi-cell simulation via curry's existing actors -- every code\nexample in it independently verified to actually run), a cookbook\nchapter in docs/thoughts/anarchists-cookbook.md, and an index entry in\ndocs/reference/modules.md and the README guide list.\n\n44/44 gillespie-specific tests pass (including regression tests for\nall five bugs above), 103/103 ctest suites pass overall (fresh\n--clear-cache run). Design doc (docs/thoughts/gillespie-cell-model.md,\ncommitted earlier) also covers an SBML-import idea and composing this\nwith a toy population-genetics model, neither implemented here.\n\nI thank Claude for the help with exploring ideas and, of course with the development\n\nIn case anyone is worried - I may use AI, but I remain responsible for its direction and its output.",
+          "timestamp": "2026-08-27T19:57:30+10:00",
+          "tree_id": "7734fd12f6f5376ebe561245d9c3eb77d9eaa5ad",
+          "url": "https://github.com/deconstructo/curry/commit/26ae094d6b607efeb9d9c5d2f896f927f0f3c56c"
+        },
+        "date": 1787824689647,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.395,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.5,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.629,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.221,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 139.322,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 288.07,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.427,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.114,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.135,
             "unit": "ms"
           }
         ]
