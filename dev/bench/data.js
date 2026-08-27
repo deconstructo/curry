@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787768824920,
+  "lastUpdate": 1787822176244,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8348,6 +8348,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.274,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c17898b6d7a52a5779ee3f4c6a9c68f90019bd5c",
+          "message": "fix(random): SRFI-27 pseudo-randomize!/random-source->random-integer, plus RNG thread-safety (#77)\n\nFound while adding deterministic-seed test coverage for the upcoming\n(curry gillespie) module: random-source-pseudo-randomize! (3 args, an\ninteger seed pair per SRFI 27) was bound to the exact same primitive\nas random-source-randomize! (1 arg, reseed unpredictably from the OS)\n-- it ignored its seed arguments entirely and reseeded from\n/dev/urandom every time. Every value it claimed to make reproducible\nwas actually still random. Fixed by giving it its own primitive that\nexpands the two integer seeds into xoshiro256+'s four-word state via\nsplitmix64, the same construction xoshiro's own reference\nimplementation recommends for seeding from a small value.\n\nAlso found and fixed: random-source->random-integer was bound to the\nsame primitive as random-source->random-real, so it returned a\nzero-argument real-number generator instead of a one-argument integer\ngenerator.\n\nSeparately: the RNG state (rng_s/rng_seeded) was a bare global with no\nsynchronization at all, despite curry having real OS-thread actors\nthat can call random-real/random-integer concurrently -- a genuine\ndata race, not hypothetical, given the multi-cell Gillespie design\nthis was found while preparing for is explicitly \"each cell is an\nactor drawing its own random waiting times\". Every access now goes\nthrough rng_mutex.\n\nAdded regression tests to tests/random_tests.scm for both binding\nfixes (same seed -> identical sequence, different seed -> different\nsequence, random-source->random-integer actually produces bounded\nintegers). 102/102 ctest suites pass (fresh --clear-cache run).\nIndependent medium-effort code review verified by actually building\nand running the suite rather than static reading alone; no findings.\n\nI was stupid enough to not really check for complete coverage of SRFI-27. Lesson: AI can do cool things, but one should remain in the loop.",
+          "timestamp": "2026-08-27T19:15:29+10:00",
+          "tree_id": "767a0b4128377006013a6ac6c2a8e81c9a809f11",
+          "url": "https://github.com/deconstructo/curry/commit/c17898b6d7a52a5779ee3f4c6a9c68f90019bd5c"
+        },
+        "date": 1787822175102,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.301,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.288,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.141,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.613,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 139.586,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 292.338,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.3,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.473,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.358,
             "unit": "ms"
           }
         ]
