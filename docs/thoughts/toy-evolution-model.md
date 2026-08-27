@@ -198,7 +198,7 @@ a second research-grant-sized undertaking.
 
 ## See also
 
-- The `(curry gillespie)` design/implementation this composes with
+- [`gillespie-cell-model.md`](gillespie-cell-model.md) — the `(curry gillespie)` design/implementation this composes with
 - `docs/thoughts/anarchists-cookbook.md` — this pairs naturally with a
   cookbook chapter once both modules exist: "grow a population of digital
   cells, watch a beneficial mutation sweep through it, then watch it jump
