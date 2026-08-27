@@ -65,6 +65,7 @@ add_test(NAME aviation_weather COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURC
 add_test(NAME naips COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/naips_tests.scm)
 add_test(NAME base64 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/base64_tests.scm)
 add_test(NAME random       COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/random_tests.scm)
+add_test(NAME gillespie    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/gillespie_tests.scm)
 add_test(NAME sets         COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/set_tests.scm)
 add_test(NAME sets_module  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sets_module_tests.scm)
 add_test(NAME oop          COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/oop_tests.scm)
@@ -124,7 +125,7 @@ add_test(NAME debugger
 set(MOD_PATH "${CMAKE_BINARY_DIR}/mods")
 set_tests_properties(akkadian PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
-set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic sets_module random oop yaml PROPERTIES
+set_tests_properties(numeric_ext actors ode pde_numerical d_operator tuples partial trig pde_symbolic sicm sexagesimal logic sets_module random gillespie oop yaml PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 
 if(BUILD_MODULE_GIT AND TARGET curry_git)

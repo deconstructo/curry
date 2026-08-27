@@ -144,6 +144,79 @@ Zipf distribution; recursive structure of natural language in six lines.
 
 ---
 
+---
+
+## Chapter: Watch a Cell Think — Stochastic Biochemistry with the Gillespie Algorithm
+
+*Full module in `(curry gillespie)`, design doc in
+`docs/thoughts/gillespie-cell-model.md`.*
+
+The pitch: real gene expression is noisy. A cell doesn't have "5.3 copies of a
+protein," it has 4, then 6, then 3 — a small integer jumping around at random,
+because chemistry at low molecule counts genuinely is a stochastic process,
+not a smooth curve with noise sprinkled on afterward. The Gillespie algorithm
+simulates that directly: draw a random waiting time, pick which reaction
+fires, repeat. Composable rate-law combinators (`mass-action`, `arrhenius`,
+`michaelis-menten`, `hill`, all glued together with `rate*`) mean temperature,
+pH, and nutrient sensitivity aren't special features — they're just more
+functions being multiplied into a propensity, so a reader who understands
+`rate*` can build essentially arbitrary biochemistry from four small pieces.
+
+This is exactly the kind of thing an eager nerdy reader can just... play
+with. Change one number, rerun, watch the population statistics shift. Cool
+the environment down and watch a whole reaction network visibly slow to a
+crawl. Starve a cell of glucose and watch it go quiescent mid-simulation with
+no crash, no special-cased error path — just an ordinary `#f` from
+`gillespie-step!` because every propensity in the network genuinely reached
+zero.
+
+### Recipe ideas
+
+**The birth-death "hello world"** — one production reaction, one
+degradation reaction, and a known analytical answer (`λ/μ`) to check your
+simulation against. The right first thing to run, and a good sanity check
+whenever you write a new reaction network: does the steady state land near
+where the math says it should?
+
+**A genetic toggle switch** — the classic synthetic-biology circuit: two
+genes that mutually repress each other, so the system settles into one of
+two stable states essentially at random depending on early noise. Build it
+with four reactions (transcribe-A, transcribe-B, degrade-A, degrade-B, each
+gated by the other's current level) and watch fifty independent cells split
+roughly in half between the two states — a beautiful, tiny demonstration of
+how stochastic noise can create genuine bistability from a symmetric system.
+
+**A population under thermal stress** — spawn N cell-actors (see
+`docs/reference/concurrency.md`), each running the same reaction network,
+sharing one `<environment>` whose temperature you ramp up over the course
+of the simulation via `set-environment-temperature!`. Watch the population's
+average protein output curve bend as an Arrhenius-scaled reaction crosses
+its effective activation threshold.
+
+**Starve it and watch it stop** — a network with one nutrient-uptake
+reaction (`michaelis-menten`) feeding everything else. Run to depletion and
+plot the trajectory: watch every downstream reaction's activity taper off
+in lockstep as the shared substrate runs out, then confirm the cell has
+gone genuinely quiescent (`gillespie-run!`'s return value `<` the requested
+`t-max`) rather than just "slow."
+
+**Live in Qt** — wire `cell-trajectory`'s output (or a live per-tick
+`gillespie-step!` loop) into a `(curry qt6)` canvas: cells as colored
+circles, color channels driven by species counts, so gene-expression noise
+is something you *watch flicker* rather than a number in a table.
+
+### Connecting thread for the chapter
+
+Every recipe above is the same four moving parts — a species table, a
+reaction list built from `mass-action`/`arrhenius`/`michaelis-menten`/`hill`
+composed with `rate*`, an environment, and either `gillespie-run!` for a
+single endpoint or `cell-trajectory` for the full time series. A reader who
+builds the birth-death toy and the toggle switch has already seen everything
+needed for the population and starvation recipes; scaling up to many cells
+is "wrap it in `spawn`," not a new concept.
+
+---
+
 ## Other chapter seeds (unrelated to v1.4)
 
 *(Drop ideas for other chapters here as they come up)*
