@@ -12,6 +12,9 @@
     string-ci-comparator symbol-comparator pair-comparator list-comparator
     vector-comparator eq-comparator eqv-comparator equal-comparator
     make-eq-comparator make-eqv-comparator make-equal-comparator
+    boolean-hash char-hash char-ci-hash string-hash string-ci-hash
+    symbol-hash number-hash default-hash hash-bound hash-salt
+    comparator-if<=>
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; dayyānum: "judge" -- a comparator decides order/equality, exactly
     ;; what a judge does.
