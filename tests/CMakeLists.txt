@@ -228,6 +228,13 @@ if(BUILD_MODULE_POSIX AND TARGET curry_posix)
     add_test(NAME time_srfi COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/time_srfi_tests.scm)
     set_tests_properties(time_srfi PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    add_test(NAME srfi_170 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_170_tests.scm)
+    set_tests_properties(srfi_170 PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    # Also needs (curry posix), transitively via (srfi srfi-170).
+    add_test(NAME srfi_legacy_dashed_names COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_legacy_dashed_names_tests.scm)
+    set_tests_properties(srfi_legacy_dashed_names PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
     # (curry okf) imports (curry posix) for directory walking and (srfi 19)
     # for staleness/log timestamps.
     add_test(NAME okf COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/okf_tests.scm)

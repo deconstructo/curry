@@ -335,6 +335,14 @@ static curry_val fn_set_file_mode(int ac, curry_val *av, void *ud) {
 static curry_val fn_set_file_owner(int ac, curry_val *av, void *ud) {
     (void)ud;
     const char *path = req_string(av[0], "set-file-owner");
+    /* uid/gid pass straight through to chown(2) with no validation --
+       SRFI-170's owner/unchanged and group/unchanged constants (both -1,
+       lib/curry/modules/srfi/s170/posix.scm) rely on this: -1 is the
+       POSIX sentinel chown(2) itself treats as "leave this id alone",
+       so those constants need no special-casing here at all. Keep it
+       that way -- rejecting negative uid/gid here would silently break
+       both Scheme-level constants with no compiler or test signal
+       pointing back to this function. */
     uid_t uid = (uid_t)req_fixnum(av[1], "set-file-owner");
     gid_t gid = ac >= 3 ? (gid_t)req_fixnum(av[2], "set-file-owner") : (gid_t)-1;
     if (chown(path, uid, gid) < 0) posix_error("set-file-owner");
