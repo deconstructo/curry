@@ -8,7 +8,10 @@
     vector-swap! reverse! vector-reverse! vector-reverse!* vector-index
     vector-index-right vector-count vector-any vector-every vector-fold
     vector-fold-right vector-binary-search vector-concatenate vector-unfold
-    vector-unfold-right
+    vector-unfold-right vector-unfold! vector-unfold-right!
+    vector-reverse-copy vector-append-subvectors vector-map! vector-cumulate
+    vector-skip vector-skip-right vector-partition
+    reverse-vector->list reverse-list->vector
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; Extends the vector root (ṣindum) already established for the
     ;; R7RS core vector procedures.

@@ -48,6 +48,42 @@
 (check "vector-concatenate joins vectors" (vector-concatenate (list #(1 2) #(3 4))) #(1 2 3 4))
 (check "vector-unfold builds via seed-free generator" (vector-unfold (lambda (i) i) 5) #(0 1 2 3 4))
 
+;;; SRFI-133 Tier 2 gap-closing additions
+
+(check "vector-reverse-copy" (vector-reverse-copy #(1 2 3 4)) #(4 3 2 1))
+(check "vector-reverse-copy with a range" (vector-reverse-copy #(1 2 3 4 5) 1 4) #(4 3 2))
+
+(check "vector-append-subvectors"
+       (vector-append-subvectors #(1 2 3) 0 2 #(10 20 30) 1 3)
+       #(1 2 20 30))
+
+(let ((v (vector 1 2 3 4)))
+  (vector-map! (lambda (x) (* x x)) v)
+  (check "vector-map! mutates in place" v #(1 4 9 16)))
+
+(check "vector-cumulate accumulates a running total"
+       (vector-cumulate + 0 #(1 2 3 4))
+       #(1 3 6 10))
+
+(check "vector-skip finds first non-matching index" (vector-skip even? #(2 4 6 7 8)) 3)
+(check "vector-skip-right finds last non-matching index" (vector-skip-right even? #(2 7 4 6 8)) 1)
+
+(call-with-values (lambda () (vector-partition even? #(1 2 3 4 5 6)))
+  (lambda (result count)
+    (check "vector-partition groups matches first, stably" result #(2 4 6 1 3 5))
+    (check "vector-partition returns the match count" count 3)))
+
+(check "reverse-vector->list" (reverse-vector->list #(1 2 3)) (list 3 2 1))
+(check "reverse-list->vector" (reverse-list->vector (list 1 2 3)) #(3 2 1))
+
+(let ((v (make-vector 5 0)))
+  (vector-unfold! (lambda (i) i) v 1 4)
+  (check "vector-unfold! fills a range in place" v #(0 1 2 3 0)))
+
+(let ((v (make-vector 5 0)))
+  (vector-unfold-right! (lambda (i) (* i 10)) v 1 4)
+  (check "vector-unfold-right! fills a range in place, right to left" v #(0 10 20 30 0)))
+
 ;;; Summary
 
 (newline)
