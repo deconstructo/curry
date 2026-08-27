@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787824691659,
+  "lastUpdate": 1787827809956,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8486,6 +8486,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.135,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "704a4abcb904d8a32f9b63e75e139cdc99b575da",
+          "message": "feat(srfi): close Tier 1 gaps in SRFI-125/128/170/227 (#79)\n\n* feat(srfi170): add owner/unchanged, group/unchanged, user-info:parsed-full-name\n\nCloses a silent gap found by a full 39-SRFI audit: SRFI-170 defines\nowner/unchanged and group/unchanged (pass either to set-file-owner to\nleave that half alone) and user-info:parsed-full-name (the GECOS\nfull-name portion up to the first comma), none of which curry\nexported.\n\nowner/unchanged and group/unchanged are both -1, the same sentinel\nchown(2) itself already treats as \"don't change this id\" -- set-file-\nowner's C implementation (fn_set_file_owner, modules/posix/posix.c)\nalready passes uid/gid straight through with no translation, so no\nC-side change was needed for the constants themselves. Added a\ncomment there anyway flagging the now-invisible dependency, so a\nfuture defensive-hardening change to that function (e.g. rejecting\nnegative uid/gid) doesn't silently break these two Scheme-level\nconstants with no signal pointing back to why.\n\nuser-info:parsed-full-name assumes the same office/work-phone/home-\nphone GECOS convention SRFI-170's own \"parsed\" variant is defined\nagainst; documented the (rare, undetectable-from-the-string-alone)\nalternate \"Lastname, Firstname\" convention some systems use instead,\nper independent code review.\n\nAdded to both the numeric shim (170.scm) and the legacy dashed-name\nshim (srfi-170.scm) -- the latter was initially missed entirely (code\nreview caught it): the two shims are separate define-library forms\neach with their own explicit export list, so adding a name to one\ndoes not make it visible through the other.\n\nNew test file tests/srfi_170_tests.scm (no prior dedicated SRFI-170\ntest file existed). 105/105 ctest suites pass overall (fresh\n--clear-cache run). Independent code review; findings addressed.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi125): add hash-table-mutable?\n\nCloses a silent gap found by a full 39-SRFI audit. curry has no\nimmutable hash tables, same reason SRFI-126's own hashtable-mutable?\n(s126/hashtables.scm) is already a hardcoded #t -- this is the\nmatching SRFI-125-named procedure for the same fact.\n\nAdded to both the numeric shim (125.scm) and the legacy dashed-name\nshim (srfi-125.scm); the latter was initially missed (see the SRFI-170\ncommit's own note on why -- each shim is a separate define-library\nwith its own explicit export list).\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\nIndependent code review; no findings against this file specifically.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi128): add make-eq-comparator, make-eqv-comparator, make-equal-comparator\n\nCloses a silent gap found by a full 39-SRFI audit. SRFI-128 defines\nboth ready-made comparator values (eq-comparator/eqv-comparator/\nequal-comparator, already present) and zero-argument typed\nconstructors that return the same objects -- curry only had the\nformer. Each new constructor just returns the existing matching\nvalue.\n\nAdded to both the numeric shim (128.scm) and the legacy dashed-name\nshim (srfi-128.scm); the latter was initially missed (see the SRFI-170\ncommit's own note on why).\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\nIndependent code review; no findings against this file specifically.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi227): add opt*-lambda, define-optionals, define-optionals*\n\nCloses a silent gap found by a full 39-SRFI audit -- half the spec's\nforms were missing.\n\nopt*-lambda is a pure forwarding macro to opt-lambda, not an\nindependent implementation: %opt-bind-optional (this file) is already\nsequential/let*-like (a later default-expr can see an earlier\noptional's bound value), the same simplification let-optionals/\nlet-optionals* below already make for the same reason -- curry's\nopt-lambda never had the spec's let-like (parallel) semantics to begin\nwith, pre-dating this addition. Since opt*-lambda contains no logic of\nits own, it can't drift out of sync with opt-lambda; if opt-lambda's\nbehavior is ever made genuinely parallel per spec, opt*-lambda needs\nno change, only a new implementation for opt-lambda to forward from\ninstead. Documented this reasoning inline per independent code review.\n\ndefine-optionals/define-optionals* are the definition-form sugar the\nspec builds on top of opt-lambda/opt*-lambda, the same relationship\nordinary (define (name . formals) body ...) has to (define name\n(lambda formals body ...)).\n\nAdded to both the numeric shim (227.scm) and the legacy dashed-name\nshim (srfi-227.scm); the latter was initially missed (see the SRFI-170\ncommit's own note on why).\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\nIndependent code review; findings addressed.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* test(srfi): regression coverage for legacy dashed-name shims (srfi-125/128/170/227)\n\nIndependent code review found the four preceding commits' new exports\nhad only been added to each SRFI's numeric-named shim (e.g. 170.scm),\nnot its legacy dashed-name counterpart (srfi-170.scm) -- each is a\nseparate define-library form with its own explicit export list, so\n(import (srfi srfi-170)) then calling user-info:parsed-full-name\nraised unbound-variable while (import (srfi 170)) worked fine for the\nexact same call. All four dashed-name shims were fixed in their\nrespective commits; this file exists so that class of gap (fixing one\nnaming convention's shim, missing its sibling) can't reappear silently\nfor any of the four again.\n\nRegistration (tests/CMakeLists.txt) landed already in the SRFI-170\ncommit alongside srfi_170's own registration -- this commit is just\nthe test file itself.\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\n\nCleaning up my poor code husbandry",
+          "timestamp": "2026-08-27T20:49:25+10:00",
+          "tree_id": "52622aaf6b8df02dfa8d03fa5a56cabe686daa2f",
+          "url": "https://github.com/deconstructo/curry/commit/704a4abcb904d8a32f9b63e75e139cdc99b575da"
+        },
+        "date": 1787827808872,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.067,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.555,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.768,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.314,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 133.833,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 300.257,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.552,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 91.995,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.424,
             "unit": "ms"
           }
         ]
