@@ -1,6 +1,7 @@
 (define-library (srfi s227 optional-arguments)
   (import (scheme base))
-  (export opt-lambda let-optionals let-optionals* default-object default-object?
+  (export opt-lambda opt*-lambda let-optionals let-optionals* default-object default-object?
+    define-optionals define-optionals*
     %opt-bind %opt-bind-optional)
   (begin
 
@@ -63,6 +64,29 @@
         ((_ formals body ...)
          (lambda %opt-args (%opt-bind %opt-args formals body ...)))))
 
+    ;; The spec distinguishes opt-lambda (default-exprs see only the
+    ;; required parameters, not each other -- let-like) from opt*-lambda
+    ;; (each default-expr also sees previously-bound optionals -- let*-
+    ;; like). %opt-bind-optional above is already sequential/let*-like
+    ;; (each optional's binding is a nested let around the rest, so a
+    ;; later default-expr can reference an earlier optional's value) --
+    ;; the same simplification let-optionals/let-optionals* below already
+    ;; make for the same reason (comment above): curry's opt-lambda
+    ;; itself never had the spec's let-like (parallel) semantics to begin
+    ;; with, pre-dating this file's opt*-lambda addition. opt*-lambda is
+    ;; therefore a pure forwarding macro with no logic of its own -- it
+    ;; contains nothing that could drift out of sync with opt-lambda,
+    ;; since it IS opt-lambda under a second name. If opt-lambda's own
+    ;; behavior is ever changed to be genuinely parallel per spec, this
+    ;; forwarding macro needs no change at all; a new, separate
+    ;; %opt-bind-optional-parallel would back opt-lambda instead, and
+    ;; opt*-lambda would keep forwarding to today's (correct, sequential)
+    ;; implementation, wherever that ends up living.
+    (define-syntax opt*-lambda
+      (syntax-rules ()
+        ((_ formals body ...)
+         (opt-lambda formals body ...))))
+
     ;; (let-optionals* rest-list ((var default) ... [. tail-var]) body ...)
     ;; rest-list is evaluated once; both forms bind sequentially (each
     ;; default-expr may refer to earlier vars) — curry does not distinguish
@@ -77,4 +101,18 @@
     (define-syntax let-optionals
       (syntax-rules ()
         ((_ rest-expr spec body ...)
-         (let-optionals* rest-expr spec body ...))))))
+         (let-optionals* rest-expr spec body ...))))
+
+    ;; (define-optionals (name . formals) body ...) -- definition-form
+    ;; sugar equivalent to (define name (opt-lambda formals body ...)),
+    ;; the same relationship ordinary (define (name . formals) body ...)
+    ;; has to (define name (lambda formals body ...)).
+    (define-syntax define-optionals
+      (syntax-rules ()
+        ((_ (name . formals) body ...)
+         (define name (opt-lambda formals body ...)))))
+
+    (define-syntax define-optionals*
+      (syntax-rules ()
+        ((_ (name . formals) body ...)
+         (define name (opt*-lambda formals body ...)))))))
