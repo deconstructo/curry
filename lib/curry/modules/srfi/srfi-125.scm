@@ -13,6 +13,7 @@
     hash-table-walk hash-table-for-each hash-table-map->list hash-table-fold
     hash-table-count-matching hash-table-map! hash-table-prune!
     hash-table-union! hash-table-intersection! hash-table-difference!
+    hash-table=? hash-table-find hash-table-pop! hash-table-xor!
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; kunukkum: "seal" (same root as SRFI 69, above) -- the words are
     ;; shared for shared english names, distinct where the APIs diverge.

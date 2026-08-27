@@ -15,7 +15,8 @@
     hash-table-walk hash-table-for-each hash-table-map->list
     hash-table-fold hash-table-count-matching
     hash-table-map! hash-table-prune!
-    hash-table-union! hash-table-intersection! hash-table-difference!)
+    hash-table-union! hash-table-intersection! hash-table-difference!
+    hash-table=? hash-table-find hash-table-pop! hash-table-xor!)
   (begin
 
     ; curry's native hash table (src/set.h) supports exactly three
@@ -157,4 +158,53 @@
       (for-each (lambda (kv) (if (hash-table-contains? t2 (car kv))
                                   (hash-table-delete! t1 (car kv))))
                 (hash-table->alist t1))
+      t1)
+
+    ; Same keys (both directions, so an extra key on either side fails
+    ; immediately via the size check) and every shared key's value equal
+    ; per value-comparator's own equality predicate -- not necessarily
+    ; equal? or either table's own key-equality, which is exactly why
+    ; the spec takes value-comparator as an explicit argument here rather
+    ; than reusing hash-table-comparator.
+    (define (hash-table=? value-comparator t1 t2)
+      (and (= (hash-table-size t1) (hash-table-size t2))
+           (let ((=? (comparator-equality-predicate value-comparator)))
+             (let loop ((kvs (hash-table->alist t1)))
+               (or (null? kvs)
+                   (and (hash-table-contains? t2 (caar kvs))
+                        (=? (cdar kvs) (hash-table-ref t2 (caar kvs)))
+                        (loop (cdr kvs))))))))
+
+    ; (proc key value) for each entry until it returns non-#f, in which
+    ; case that return value is hash-table-find's own result; (failure)
+    ; if no entry satisfies proc. Iteration order matches hash-table->
+    ; alist's own (native hash-table bucket order, not insertion order).
+    (define (hash-table-find proc t failure)
+      (let loop ((kvs (hash-table->alist t)))
+        (if (null? kvs)
+            (failure)
+            (let ((r (proc (caar kvs) (cdar kvs))))
+              (or r (loop (cdr kvs)))))))
+
+    ; Removes and returns one (arbitrary -- native hash-table bucket
+    ; order, not insertion order) entry as two values. Spec says the
+    ; behavior on an empty table is unspecified; raising here rather
+    ; than returning something meaningless.
+    (define (hash-table-pop! t)
+      (if (hash-table-empty? t)
+          (error "hash-table-pop!: table is empty")
+          (let* ((kv (car (hash-table->alist t))))
+            (hash-table-delete! t (car kv))
+            (values (car kv) (cdr kv)))))
+
+    ; Symmetric difference of KEYS, in place on t1: a key present in both
+    ; is removed from t1; a key present only in t2 is copied into t1
+    ; (with t2's value) -- t1 ends up holding exactly the keys that were
+    ; in exactly one of the two tables, mirroring set-xor!'s own shape.
+    (define (hash-table-xor! t1 t2)
+      (for-each (lambda (kv)
+                  (if (hash-table-contains? t1 (car kv))
+                      (hash-table-delete! t1 (car kv))
+                      (hash-table-set! t1 (car kv) (cdr kv))))
+                (hash-table->alist t2))
       t1)))
