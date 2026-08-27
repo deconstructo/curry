@@ -51,6 +51,17 @@
        (guard (e (#t 'caught)) (comparator-check-type real-comparator "x"))
        'caught)
 
+;;; make-eq-comparator / make-eqv-comparator / make-equal-comparator --
+;;; the spec's typed constructor form alongside the ready-made
+;;; eq-comparator/eqv-comparator/equal-comparator values.
+(check "make-eq-comparator produces a comparator" (comparator? (make-eq-comparator)) #t)
+(check "make-eq-comparator matches eq-comparator's equality"
+       (=? (make-eq-comparator) 'a 'a) #t)
+(check "make-eqv-comparator matches eqv-comparator's equality"
+       (=? (make-eqv-comparator) 1.0 1.0) #t)
+(check "make-equal-comparator matches equal-comparator's equality"
+       (=? (make-equal-comparator) (list 1 2) (list 1 2)) #t)
+
 ;;; Summary
 
 (newline)

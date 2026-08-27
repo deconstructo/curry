@@ -11,6 +11,7 @@
     number-comparator char-comparator char-ci-comparator string-comparator
     string-ci-comparator symbol-comparator pair-comparator list-comparator
     vector-comparator eq-comparator eqv-comparator equal-comparator
+    make-eq-comparator make-eqv-comparator make-equal-comparator
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; dayyānum: "judge" -- a comparator decides order/equality, exactly
     ;; what a judge does.
