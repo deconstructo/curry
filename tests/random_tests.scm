@@ -213,6 +213,18 @@
       (or (= i 50)
           (and (< (gen 100) 100) (loop (+ i 1)))))))
 
+;;; ── SRFI-27 random-source-state-ref / random-source-state-set! ─────────────
+;;; Tier 2 gap-closing addition: capture the RNG's current state, run some
+;;; draws, restore the captured state, and confirm the same draws repeat.
+
+(random-source-pseudo-randomize! (make-random-source) 99 3)
+(define %captured-state (random-source-state-ref (make-random-source)))
+(define %post-capture-run-1 (list (random-real) (random-real) (random-integer 1000)))
+(random-source-state-set! (make-random-source) %captured-state)
+(define %post-capture-run-2 (list (random-real) (random-real) (random-integer 1000)))
+(check "random-source-state-ref/set! round-trips the RNG state"
+  %post-capture-run-1 %post-capture-run-2)
+
 ;;; ── summary ──────────────────────────────────────────────────────────────────
 (newline)
 (display "Random tests: ") (display pass) (display " passed, ")

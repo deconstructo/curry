@@ -4,6 +4,7 @@
   (export
     default-random-source make-random-source random-source?
     random-source-randomize! random-source-pseudo-randomize!
+    random-source-state-ref random-source-state-set!
     random-source->random-real random-source->random-integer random-real
     random-integer
     ;; Akkadian synonym -- pūrum: "lot" (as in casting lots), the genuine
