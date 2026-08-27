@@ -184,6 +184,35 @@
   (check-true "random-sample no duplicates"
     (= (length s) (length (delete-duplicates s)))))
 
+;;; ── SRFI-27 deterministic pseudo-randomize! ────────────────────────────────
+;;; random-source-pseudo-randomize! previously ignored its seed arguments
+;;; entirely and reseeded from the OS, same as random-source-randomize! --
+;;; every value it claimed to make reproducible was actually still random.
+;;; These are the regression tests for that fix.
+
+(random-source-pseudo-randomize! (make-random-source) 42 7)
+(define %seeded-run-1 (list (random-real) (random-real) (random-integer 1000)))
+(random-source-pseudo-randomize! (make-random-source) 42 7)
+(define %seeded-run-2 (list (random-real) (random-real) (random-integer 1000)))
+(check "pseudo-randomize! same seed -> identical sequence"
+  %seeded-run-1 %seeded-run-2)
+
+(random-source-pseudo-randomize! (make-random-source) 1 1)
+(define %seeded-run-3 (list (random-real) (random-real) (random-integer 1000)))
+(check-true "pseudo-randomize! different seed -> different sequence"
+  (not (equal? %seeded-run-1 %seeded-run-3)))
+
+;;; random-source->random-integer previously returned the random-real
+;;; generator (a zero-argument procedure) instead of an integer generator,
+;;; since it was bound to the same primitive as random-source->random-real.
+(let ((gen (random-source->random-integer (make-random-source))))
+  (check-true "random-source->random-integer produces an exact integer"
+    (exact-integer? (gen 100)))
+  (check-true "random-source->random-integer respects its bound"
+    (let loop ((i 0))
+      (or (= i 50)
+          (and (< (gen 100) 100) (loop (+ i 1)))))))
+
 ;;; ── summary ──────────────────────────────────────────────────────────────────
 (newline)
 (display "Random tests: ") (display pass) (display " passed, ")
