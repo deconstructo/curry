@@ -1273,16 +1273,24 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
 
 /* ---- SRFI-27 random number primitives ---- */
 
-/* xoshiro256+ PRNG state — global, seeded lazily */
+/* xoshiro256+ PRNG state — global, seeded lazily. Curry has real OS-thread
+   actors that can all call random-real/random-integer concurrently, so
+   every access to rng_s/rng_seeded below goes through rng_mutex — found
+   as a genuine data race (no prior synchronization at all) while adding
+   deterministic seeding for (curry gillespie)'s test suite, whose whole
+   multi-cell design is "each cell is an actor drawing its own random
+   waiting times" -- exactly the scenario that would have hit this hardest. */
 static uint64_t rng_s[4] = { 0x123456789abcdef0ULL, 0xdeadbeefcafeULL,
                               0x0123456789ULL,        0xfedcba9876543210ULL };
 static bool rng_seeded = false;
+static pthread_mutex_t rng_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static uint64_t rng_rotl(const uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
 }
 
-static uint64_t rng_next(void) {
+/* Caller must hold rng_mutex. */
+static uint64_t rng_next_locked(void) {
     const uint64_t result = rng_s[0] + rng_s[3];
     const uint64_t t = rng_s[1] << 17;
     rng_s[2] ^= rng_s[0]; rng_s[3] ^= rng_s[1];
@@ -1292,7 +1300,8 @@ static uint64_t rng_next(void) {
     return result;
 }
 
-static void rng_seed_from_os(void) {
+/* Caller must hold rng_mutex. */
+static void rng_seed_from_os_locked(void) {
     FILE *f = fopen("/dev/urandom", "rb");
     if (f) {
         (void)fread(rng_s, sizeof(rng_s), 1, f);
@@ -1305,18 +1314,56 @@ static void rng_seed_from_os(void) {
     rng_seeded = true;
 }
 
+/* splitmix64 -- used only to expand a small integer seed into four
+   well-mixed 64-bit words for xoshiro256+'s state, same construction
+   xoshiro's own reference implementation recommends for seeding from a
+   single small value. Caller must hold rng_mutex. */
+static uint64_t rng_splitmix64_locked(uint64_t *state) {
+    uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+/* Caller must hold rng_mutex. */
+static void rng_seed_deterministic_locked(uint64_t i, uint64_t j) {
+    uint64_t sm_state = i ^ (j * 0x9E3779B97F4A7C15ULL);
+    for (int k = 0; k < 4; k++) rng_s[k] = rng_splitmix64_locked(&sm_state);
+    rng_seeded = true;
+}
+
 static val_t prim_random_real(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
-    if (!rng_seeded) rng_seed_from_os();
-    uint64_t bits = (rng_next() >> 11) | 0x3FF0000000000000ULL;
-    double   d;
+    pthread_mutex_lock(&rng_mutex);
+    if (!rng_seeded) rng_seed_from_os_locked();
+    uint64_t bits = (rng_next_locked() >> 11) | 0x3FF0000000000000ULL;
+    pthread_mutex_unlock(&rng_mutex);
+    double d;
     memcpy(&d, &bits, sizeof(d));
     return num_make_float(d - 1.0);
 }
 
+/* random-source-randomize! -- reseed unpredictably from the OS. */
 static val_t prim_random_seed(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
-    rng_seed_from_os();
+    pthread_mutex_lock(&rng_mutex);
+    rng_seed_from_os_locked();
+    pthread_mutex_unlock(&rng_mutex);
+    return V_VOID;
+}
+
+/* random-source-pseudo-randomize! source i j -- SRFI-27's deterministic
+   reseed: the same (i, j) always produces the same subsequent sequence.
+   Previously bound to the same prim_random_seed as the line above, so it
+   silently reseeded from the OS instead -- every value it claimed to make
+   reproducible was actually still random. */
+static val_t prim_random_pseudo_seed(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    uint64_t i = (uint64_t)(int64_t)vunfix(av[1]);
+    uint64_t j = (uint64_t)(int64_t)vunfix(av[2]);
+    pthread_mutex_lock(&rng_mutex);
+    rng_seed_deterministic_locked(i, j);
+    pthread_mutex_unlock(&rng_mutex);
     return V_VOID;
 }
 
@@ -1335,12 +1382,27 @@ static val_t prim_random_source_to_real(int ac, val_t *av, void *ud) {
     return env_lookup(GLOBAL_ENV, sym_intern_cstr("random-real"));
 }
 
+/* random-source->random-integer -- SRFI 27 says this returns a procedure
+   of one argument n producing an integer in [0, n). Previously bound to
+   the same prim_random_source_to_real above, so it returned the
+   random-real generator instead -- calling the result with an integer
+   bound would have applied random-real (which takes zero arguments) to
+   one argument and raised an arity error, rather than ever producing an
+   integer. */
+static val_t prim_random_source_to_integer(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return env_lookup(GLOBAL_ENV, sym_intern_cstr("random-integer"));
+}
+
 static val_t prim_random_integer(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    if (!rng_seeded) rng_seed_from_os();
     intptr_t n = vunfix(av[0]);
     if (n <= 0) return vfix(0);
-    return vfix((intptr_t)(rng_next() % (uint64_t)n));
+    pthread_mutex_lock(&rng_mutex);
+    if (!rng_seeded) rng_seed_from_os_locked();
+    uint64_t r = rng_next_locked();
+    pthread_mutex_unlock(&rng_mutex);
+    return vfix((intptr_t)(r % (uint64_t)n));
 }
 
 /* ---- STM primitives ---- */
@@ -1586,9 +1648,9 @@ void builtins_curry_register(val_t env) {
     DEF("make-random-source",             prim_make_random_source,    0,0);
     DEF("random-source?",                 prim_random_source_p,       1,1);
     DEF("random-source-randomize!",       prim_random_seed,           1,1);
-    DEF("random-source-pseudo-randomize!",prim_random_seed,           3,3);
+    DEF("random-source-pseudo-randomize!",prim_random_pseudo_seed,    3,3);
     DEF("random-source->random-real",     prim_random_source_to_real, 1,1);
-    DEF("random-source->random-integer",  prim_random_source_to_real, 1,1);
+    DEF("random-source->random-integer",  prim_random_source_to_integer, 1,1);
 
     /* Special functions (Phase 4f) */
     DEF("legendre",           prim_legendre,          2, 2);
