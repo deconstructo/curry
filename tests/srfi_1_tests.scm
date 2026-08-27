@@ -189,6 +189,44 @@
 (check "every: returns last predicate value on success"
        (every (lambda (x) (and (odd? x) x)) (list 1 3 5)) 5)
 
+;;; ---- Tier 2 gap-closing additions ----
+
+(call-with-values (lambda () (car+cdr (cons 1 2)))
+  (lambda (a b) (check "car+cdr" (list a b) (list 1 2))))
+
+(check "pair-fold walks pairs left-to-right"
+       (pair-fold (lambda (pair acc) (cons (car pair) acc)) '() (list 1 2 3))
+       (list 3 2 1))
+(check "pair-fold-right walks pairs right-to-left"
+       (pair-fold-right (lambda (pair acc) (cons (car pair) acc)) '() (list 1 2 3))
+       (list 1 2 3))
+
+(check "map-in-order single list" (map-in-order (lambda (x) (* x x)) (list 1 2 3 4))
+       (list 1 4 9 16))
+(check "map-in-order multi-list" (map-in-order + (list 1 2 3) (list 10 20 30))
+       (list 11 22 33))
+(let ((order '()))
+  (map-in-order (lambda (x) (set! order (cons x order))) (list 1 2 3 4 5))
+  (check "map-in-order applies strictly left-to-right" (reverse order) (list 1 2 3 4 5)))
+
+(check "filter! same as filter" (filter! odd? (list 1 2 3 4 5)) (list 1 3 5))
+(check "remove! same as remove" (remove! odd? (list 1 2 3 4 5)) (list 2 4))
+(call-with-values (lambda () (partition! odd? (list 1 2 3 4 5)))
+  (lambda (yes no) (check "partition!" (list yes no) (list (list 1 3 5) (list 2 4)))))
+
+(check "length+ on a proper list" (length+ (list 1 2 3)) 3)
+(check "length+ on a circular list is #f" (length+ (circular-list 1 2 3)) #f)
+
+(check "except-last-pair drops the last element" (except-last-pair (list 1 2 3 4))
+       (list 1 2 3))
+(check "except-last-pair! same as except-last-pair" (except-last-pair! (list 1 2 3 4))
+       (list 1 2 3))
+
+(call-with-values (lambda () (lset-diff+intersection eqv? (list 1 2 3 4) (list 2 4)))
+  (lambda (diff inter)
+    (check "lset-diff+intersection: difference" diff (list 1 3))
+    (check "lset-diff+intersection: intersection" inter (list 2 4))))
+
 ;;; ---- Summary ----
 
 (newline)

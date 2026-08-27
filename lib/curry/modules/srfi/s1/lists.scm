@@ -20,11 +20,15 @@
 
     ; Fold, unfold, map
     fold fold-right reduce reduce-right
+    pair-fold pair-fold-right
     unfold unfold-right
-    map! pair-for-each append-map append-map! filter-map flat-map
+    map! map-in-order pair-for-each append-map append-map! filter-map flat-map
 
     ; Filtering / partitioning
-    any every remove delete delete! partition count
+    any every remove remove! filter! delete delete! partition partition! count
+
+    ; car+cdr, length+, except-last-pair
+    car+cdr length+ except-last-pair except-last-pair!
 
     ; Searching
     find find-tail take-while drop-while span break list-index
@@ -48,7 +52,8 @@
     ; Lists as sets
     lset<= lset= lset-adjoin
     lset-union lset-intersection lset-difference lset-xor
-    lset-union! lset-intersection! lset-difference! lset-xor!)
+    lset-union! lset-intersection! lset-difference! lset-xor!
+    lset-diff+intersection lset-diff+intersection!)
   (begin
 
     ;;; ---- iota (pre-existing) ----
@@ -64,6 +69,10 @@
     ;;; ---- Constructors ----
 
     (define (xcons d a) (cons a d))
+
+    ;;; ---- car+cdr ----
+    (define (car+cdr p) (values (car p) (cdr p)))
+
     ;; Accumulator-based, not the naive (cons (car args) (apply cons*
     ;; (cdr args))) recursion -- that builds one C stack frame per
     ;; argument with the cons happening AFTER the recursive call returns
@@ -188,6 +197,21 @@
     (define (last-pair lst)
       (if (null? (cdr lst)) lst (last-pair (cdr lst))))
 
+    ;; #f for a circular list rather than hanging forever -- reuses the
+    ;; already cycle-safe circular-list? (its own tortoise/hare walk)
+    ;; instead of a third independent manual walk here, the same
+    ;; deliberate choice dotted-list?'s own comment above explains (an
+    ;; earlier version of that predicate did its own naive walk with no
+    ;; cycle detection and hung forever; not repeating that mistake here).
+    (define (length+ lst) (if (circular-list? lst) #f (length lst)))
+
+    ;; Accumulator-based tail loop -- see take's own comment above on why
+    ;; (same non-tail-cons-recursion stack-overflow risk this avoids).
+    (define (except-last-pair lst)
+      (let loop ((l lst) (acc '()))
+        (if (null? (cdr l)) (reverse acc) (loop (cdr l) (cons (car l) acc)))))
+    (define (except-last-pair! lst) (except-last-pair lst))
+
     ;;; ---- Fold / unfold / map ----
 
     ;; SRFI-1's fold calls kons with the CURRENT ELEMENT(S) FIRST and the
@@ -222,6 +246,32 @@
           (let ((rev (reverse lst)))
             (fold f (car rev) (cdr rev)))))
 
+    ;; Like fold, but f receives the current PAIR (cons cell), not its
+    ;; car -- lets f side-effect the list's structure (e.g. set-cdr!) as
+    ;; it walks, which is the entire point of this variant over plain
+    ;; fold. Already tail-recursive: grabs (cdr lis) before calling f, in
+    ;; case f mutates lis's own cdr.
+    (define (pair-fold f zero lis)
+      (let loop ((lis lis) (acc zero))
+        (if (null? lis)
+            acc
+            (let ((tail (cdr lis)))
+              (loop tail (f lis acc))))))
+
+    ;; Right-to-left version. The reference implementation is naturally
+    ;; recursive (f's result depends on recursing into the tail first) --
+    ;; avoided here per this file's established convention (see take's
+    ;; comment above): walk left-to-right collecting each pair by
+    ;; consing (which reverses the order, so the resulting list has the
+    ;; last pair first), then a single ordinary left-to-right fold over
+    ;; that already-reversed list computes the same right-to-left result,
+    ;; with no non-tail recursion anywhere.
+    (define (pair-fold-right f zero lis)
+      (let loop ((l lis) (tails '()))
+        (if (null? l)
+            (fold f zero tails)
+            (loop (cdr l) (cons l tails)))))
+
     ;; (unfold p f g seed [tail-gen]) builds a list left-to-right: stops
     ;; when (p seed) is true, otherwise conses (f seed) and recurses on
     ;; (g seed). tail-gen (default: seed is dropped, proper list) computes
@@ -241,6 +291,23 @@
         (if (p seed) acc (loop (g seed) (cons (f seed) acc)))))
 
     (define (map! f lst1 . rest) (apply map f lst1 rest))
+
+    ;; Guaranteed strictly left-to-right application order, unlike plain
+    ;; map/map! above -- curry's core global map (which map/map! both
+    ;; ultimately are, re-exported from the global env at the top of this
+    ;; file) goes parallel above a size threshold (src/builtins_curry.c,
+    ;; map_par_threshold), so it does NOT guarantee left-to-right side-
+    ;; effect ordering. map-in-order exists specifically for callers that
+    ;; need that guarantee (f has side effects whose order matters), so
+    ;; it's a real sequential loop here, not an alias.
+    (define (map-in-order f lst . rest)
+      (if (null? rest)
+          (let loop ((l lst) (acc '()))
+            (if (null? l) (reverse acc) (loop (cdr l) (cons (f (car l)) acc))))
+          (let loop ((ls (cons lst rest)) (acc '()))
+            (if (any null? ls)
+                (reverse acc)
+                (loop (map cdr ls) (cons (apply f (map car ls)) acc))))))
 
     (define (pair-for-each f lst)
       (let loop ((p lst)) (when (pair? p) (f p) (loop (cdr p)))))
@@ -291,6 +358,12 @@
 
     (define (remove pred lst) (filter (lambda (x) (not (pred x))) lst))
 
+    ;; SRFI-1 permits (doesn't require) the !-suffixed variants to
+    ;; imperatively splice -- plain aliases, same rationale as take!/
+    ;; drop-right! above.
+    (define (filter! pred lst) (filter pred lst))
+    (define (remove! pred lst) (remove pred lst))
+
     (define (delete x lst . rest)
       (let ((=? (if (null? rest) equal? (car rest))))
         (filter (lambda (y) (not (=? x y))) lst)))
@@ -323,6 +396,8 @@
         (cond ((null? l) (values (reverse yes) (reverse no)))
               ((pred (car l)) (loop (cdr l) (cons (car l) yes) no))
               (else           (loop (cdr l) yes (cons (car l) no))))))
+
+    (define (partition! pred lst) (partition pred lst))
 
     ;;; ---- Searching ----
 
@@ -453,4 +528,16 @@
     (define (lset-union! =? . lists) (apply lset-union =? lists))
     (define (lset-intersection! =? lst1 . lists) (apply lset-intersection =? lst1 lists))
     (define (lset-difference! =? lst1 . lists) (apply lset-difference =? lst1 lists))
-    (define (lset-xor! =? . lists) (apply lset-xor =? lists))))
+    (define (lset-xor! =? . lists) (apply lset-xor =? lists))
+
+    ;; Combined difference+intersection in one pass, rather than calling
+    ;; lset-difference and lset-intersection separately (each its own
+    ;; full walk over lst1). A single partition over the same "is x in
+    ;; any of lists?" test gives both: the "not in any" bucket IS the
+    ;; difference, and everything else (in at least one) IS the
+    ;; intersection -- and partition already returns (values yes no) in
+    ;; that same difference-then-intersection order the spec requires.
+    (define (lset-diff+intersection =? lst1 . lists)
+      (partition (lambda (x) (not (any (lambda (l) (any (lambda (y) (=? x y)) l)) lists)))
+                 lst1))
+    (define (lset-diff+intersection! =? lst1 . lists) (apply lset-diff+intersection =? lst1 lists))))
