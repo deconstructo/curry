@@ -2,7 +2,8 @@
   (import (srfi s227 optional-arguments))
   (import (curry private lang-aliases))
   (export
-    opt-lambda let-optionals let-optionals* default-object default-object?
+    opt-lambda opt*-lambda let-optionals let-optionals* default-object default-object?
+    define-optionals define-optionals*
     %opt-bind %opt-bind-optional
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     ;; watrum: "surplus, extra" (already used for extended-gcd/

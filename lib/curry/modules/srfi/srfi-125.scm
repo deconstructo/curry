@@ -7,6 +7,7 @@
     hash-table-empty? hash-table-size hash-table-count hash-table-ref
     hash-table-ref/default hash-table-set! hash-table-delete!
     hash-table-intern! hash-table-update! hash-table-update!/default
+    hash-table-mutable?
     hash-table-clear! hash-table-copy hash-table-empty-copy hash-table-keys
     hash-table-values hash-table-entries hash-table->alist alist->hash-table
     hash-table-walk hash-table-for-each hash-table-map->list hash-table-fold

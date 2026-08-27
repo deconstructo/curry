@@ -13,6 +13,8 @@
     current-directory set-current-directory! pid nice user-uid user-gid
     user-effective-uid user-effective-gid user-supplementary-gids user-info
     user-info? user-info:name user-info:uid user-info:gid user-info:home-dir
-    user-info:shell user-info:full-name group-info group-info?
+    user-info:shell user-info:full-name user-info:parsed-full-name
+    group-info group-info?
     group-info:name group-info:gid posix-time monotonic-time
-    set-environment-variable! delete-environment-variable! terminal?))
+    set-environment-variable! delete-environment-variable! terminal?
+    owner/unchanged group/unchanged))

@@ -46,6 +46,19 @@
        (let-optionals* (list 1 2 3 4) ((x 0) (y 0) . rest) (list x y rest))
        (list 1 2 '(3 4)))
 
+;;; opt*-lambda / define-optionals / define-optionals*
+
+(define h (opt*-lambda (a #:optional (b (* a 2)) (c (+ a b))) (list a b c)))
+(check "opt*-lambda: later default sees an earlier optional's value" (h 5) (list 5 10 15))
+(check "opt*-lambda: explicit args still override defaults" (h 5 1) (list 5 1 6))
+
+(define-optionals (i a #:optional (b (* a 3))) (+ a b))
+(check "define-optionals: default applied" (i 4) 16)
+(check "define-optionals: explicit arg overrides default" (i 4 100) 104)
+
+(define-optionals* (j a #:optional (b (* a 3)) (c (+ a b))) (list a b c))
+(check "define-optionals*: later default sees an earlier optional's value" (j 4) (list 4 12 16))
+
 ;;; Summary
 
 (newline)

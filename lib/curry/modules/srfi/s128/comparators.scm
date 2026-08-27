@@ -12,7 +12,8 @@
     char-comparator char-ci-comparator
     string-comparator string-ci-comparator symbol-comparator
     pair-comparator list-comparator vector-comparator
-    eq-comparator eqv-comparator equal-comparator)
+    eq-comparator eqv-comparator equal-comparator
+    make-eq-comparator make-eqv-comparator make-equal-comparator)
   (begin
 
     ;; ------------------------------------------------------------------
@@ -89,6 +90,13 @@
     (define eq-comparator (%make-comparator (lambda (x) #t) eq? #f #f))
     (define eqv-comparator (%make-comparator (lambda (x) #t) eqv? #f %default-hash))
     (define equal-comparator (%make-comparator (lambda (x) #t) equal? #f %default-hash))
+
+    ; The spec's typed constructors alongside the ready-made comparator
+    ; values above -- both forms are standard SRFI-128, just two ways to
+    ; get the same object (a zero-arg procedure call vs. a plain value).
+    (define (make-eq-comparator) eq-comparator)
+    (define (make-eqv-comparator) eqv-comparator)
+    (define (make-equal-comparator) equal-comparator)
 
     (define boolean-comparator
       (%make-comparator boolean? (lambda (a b) (eq? a b))
