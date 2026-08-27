@@ -39,6 +39,7 @@ Documentation is split into two directories:
 - [macOS app bundler](docs/guides/make-macos-app.md) — bundle any Curry script as a `.app` with Qt frameworks embedded
 - [Monitoring guide](docs/guides/guide-monitoring.md) — using `(gc-stats)`, running the Grafana stack (Docker and Apple Containers), customizing dashboards, publishing custom metrics
 - [Text-to-speech with Piper](docs/guides/tts-piper.md) — building `libpiper` and curry against it on macOS/Linux, speaking/saving audio via `(curry tts)`, sourcing and adding voice models
+- [Simulating cell biochemistry with Gillespie](docs/guides/gillespie-cells.md) — stochastic reaction networks, composable temperature/pH/nutrient-sensitive rate laws, multi-cell simulation via actors
 - [Benchmarking reference](docs/reference/benchmarking.md) — bench suites, MQTT event schema, all GC stat fields
 - [Profiling reference](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
 
