@@ -62,6 +62,12 @@
        (procedure? (hashtable-hash-function (make-hashtable equal-hash equal?)))
        #t)
 
+;;; hash-table-mutable? -- curry has no immutable hash tables, so this is
+;;; always #t (same as SRFI-126's own hashtable-mutable? above it).
+(check "hash-table-mutable? is #t"
+       (hash-table-mutable? (make-hash-table equal-comparator))
+       #t)
+
 ;;; Summary
 
 (newline)
