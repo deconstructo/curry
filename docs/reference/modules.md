@@ -10,6 +10,8 @@ The full list of `(curry ...)` modules. Optional modules that need an external l
 | [okf](module-okf.md) | `(curry okf)` | Open Knowledge Format v0.2 bundle reader/query/writer: trust tiers, staleness, link graph, Attested Computations *(pure Scheme, no build step)* | — |
 | [sqlite](module-sqlite.md) | `(curry sqlite)` | SQLite3 database | `libsqlite3-dev` |
 | [network](module-network.md) | `(curry network)` | TCP / UDP sockets | — |
+| [websocket](module-websocket.md) | `(curry websocket)` | RFC 6455 WebSocket client (`ws://` only) *(pure Scheme, no build step)* | — |
+| [ros](module-ros.md) | `(curry ros)` | rosbridge v2.0 JSON protocol client for ROS1/ROS2 — topics, services *(pure Scheme, no build step)* | `(curry websocket)`, running `rosbridge_server` |
 | [crypto](module-crypto.md) | `(curry crypto)` | base64, MD5, SHA-256, HMAC | `libssl-dev` |
 | [ldap](module-ldap.md) | `(curry ldap)` | LDAP / LDAPS directory access | `libldap-dev` |
 | [http](module-http.md) | `(curry http)` | General-purpose HTTP client — any method, headers, body | `libcurl4-openssl-dev` |
