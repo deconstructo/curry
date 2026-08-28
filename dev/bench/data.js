@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787902268071,
+  "lastUpdate": 1787904660837,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9107,6 +9107,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.573,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "84d9bc8655bb492619f906fdcfdb68c3fd0d674d",
+          "message": "feat(srfi): add SRFI-95 (Sorting and Merging), SRFI-78 (Lightweight Testing), SRFI-212 (Aliases) (#86)\n\nThree more SRFI gaps assessed as free/trivial in the last audit round.\n\n- SRFI-95 (Sorting and Merging): sort/sort!/merge/merge!/sorted? over\n  lists and vectors, with (sequence less? [key]) argument order and an\n  optional per-element key extractor. A thin argument-reordering/\n  key-wrapping shim over (srfi s132 sorting)'s existing real merge-sort\n  implementation, not a second sort algorithm.\n\n- SRFI-78 (Lightweight Testing): the check macro plus mode-controlled\n  counters/reporting. Implemented against the actual reference\n  implementation's semantics (fetched from\n  https://srfi.schemers.org/srfi-78/check.scm), not just the prose spec\n  -- they diverge in a way that matters: 'off mode means the checked\n  expression is genuinely never evaluated (wrapped in a thunk that's\n  simply never called) and never counted, not just evaluated silently;\n  'report mode (the default) prints every check result, pass or fail,\n  not only failures. check-ec (the SRFI-42 comprehension variant) isn't\n  implemented -- curry has no SRFI-42.\n\n- SRFI-212 (Aliases): define-alias, implemented as plain (define new\n  old). Documented limitation: can't alias a macro or one of curry's\n  ~40 hardcoded special forms (cond, lambda, define-record-type, ...),\n  the same wall SRFI-61 hit (issue #81) -- curry's macro system is\n  syntax-rules only, with no portable way to detect at expansion time\n  whether `old` names a macro rather than a value.\n\nEach ships the full three-file shape (srfi sN name, bare-numbered\nsrfi N, dashed srfi srfi-N). tests/srfi_95_78_212_tests.scm exercises\nall three library paths per SRFI (15 checks); srfi_legacy_dashed_names_tests.scm\ngained coverage for the three new dashed shims. 109/109 ctest suites\npass (fresh --clear-cache run, rebuilt standalone on this branch).\n\nTwo real bugs found and fixed during this work, independent of the\nfinal review:\n- SRFI-78's exported %check-one!/%check-proc helper (referenced by the\n  check macro's expansion) was initially only added to the s78 library's\n  own export list, not the two re-export shims -- exactly the class of\n  gap tests/srfi_legacy_dashed_names_tests.scm exists to catch, and it\n  did.\n- That same regression test's own local `check` helper procedure\n  collided with SRFI-78's newly-imported `check` macro in the same flat\n  script scope, silently turning `(check (+ 1 1) => 2)` into a\n  3-argument procedure call with `=>` evaluated as a bare unbound\n  variable. Renamed the test's helper to `assert-equal`.\n\nIndependent code review (fresh subagent, no shared context) found one\nfurther real bug, fixed before this commit: check-report printed the\nfirst-failure detail block in 'summary mode, which the reference\nimplementation suppresses there (summary mode prints only the pass/fail\ncounts). Fixed by gating that block on mode being 'report/'report-failed,\nwith new check-report-specific regression tests added (output captured\nvia with-output-to-string, not just visual inspection).\n\nREADME.md/FEATURES.md's SRFI count bumped 42 -> 45.\n\nThanks Claude :-)",
+          "timestamp": "2026-08-28T18:10:23+10:00",
+          "tree_id": "810b76775e7b2caef4aea01ac498a459b89f0012",
+          "url": "https://github.com/deconstructo/curry/commit/84d9bc8655bb492619f906fdcfdb68c3fd0d674d"
+        },
+        "date": 1787904659882,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.462,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.424,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.276,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.355,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 88.404,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 224.782,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 54.141,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 60.534,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 45.295,
             "unit": "ms"
           }
         ]
