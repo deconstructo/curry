@@ -3,46 +3,50 @@
 *Drafted 2026-06-06. Updated 2026-06-14 for v1.5.0. Corrected 2026-07-17
 against actual shipped state through v1.8.0 — see "Where we are now" and
 "Decided against" below. Updated 2026-08-04 for v1.15.0. Updated
-2026-08-05 for v1.16.0. Updated 2026-08-06 for v1.17.0. Source:
-cill_spec.pdf + design sessions.*
+2026-08-05 for v1.16.0. Updated 2026-08-06 for v1.17.0. Updated
+2026-08-29 against actual shipped state through v1.23.3 plus a further
+tranche merged to `main` but not yet version-bumped — see "Where we are
+now", the summary timeline, and the new "Active work outside the phase
+numbering" section below. Source: cill_spec.pdf + design sessions.*
 
-Curry is at v1.17.0 (released). Since this roadmap was last updated: Phase
-4 (Extensible CAS) finished completely, generational GC shipped as an
-experimental opt-in backend, a `(curry sets)`/`(curry logic)` pair of
-modules realized part of Phase 7's pluggable-foundations idea in pure
-Scheme, real error backtraces + machine-legible error codes landed, and an
-interactive debugger shipped standalone ahead of Phase 8 — all as of the
-last correction. Since then: **Slim CLOS Layer 1 shipped** (`(curry oop)`,
-v1.11.0) — classes, generics, multiple dispatch, C3 linearisation — closing
-most of Phase 7's first third; **property-based testing and scientific
-I/O both landed**, differently-shaped than Phase 9 sketched (SRFI-252
-generator-driven `test-property` on top of SRFI-158/SRFI-64, rather than a
-bespoke `define-property`/`check-property` DSL; `(curry hdf5)`/`(curry
-netcdf)`/`(curry fits)` directly rather than under a `(curry io ...)`
-namespace, with no native `.curry-tensor` serialisation format); a
-full-codebase security/correctness audit (v1.10.4) fixed six memory-safety
-bugs; the compiler's eval-elimination effort reached native codegen for
-the last tree-walker-only special forms (v1.9.0–v1.10.0); and a large
-tranche of portable SRFI compatibility libraries, an LSP module, and
-argv-based subprocess execution (`process-run`/`process-start`, no shell)
-landed alongside several new pure-Scheme domain modules (aviation weather,
-Babylonian astronomy, YAML, TOML). None of this was tracked against a
-roadmap phase at the time it shipped — see `CHANGELOG.md` v1.8.3 through
-v1.17.0 for the full list. Some things were also explicitly decided
-*against* rather than simply not gotten to yet — see the "Decided
-against" section before the summary timeline. This document maps the
-path from here to a compiled Scheme for scientific computing — the full
-cill specification. It is ordered by dependency, not ambition; each phase
-unblocks the phases above it.
+Curry is at v1.23.3 (released), plus unreleased work already merged to
+`main` (see below). Since this roadmap was last updated for v1.17.0:
+**a real compiler IR pipeline shipped** (Tiers 2.1 through 2.6 — open
+coding, a local inliner, wrapper elision, wider open-coding, an
+interleaved-lowering session API — the first IR curry has ever had, live
+in production compilation, not experimental; `compiler.c` split into five
+files along the pipeline's own boundaries); **neural text-to-speech
+landed** (`(curry tts)`, cross-backend — espeak-ng and a Piper neural
+backend, plus a real Homebrew formula for `libpiper`); **the Gillespie
+stochastic simulation algorithm landed** (`(curry gillespie)`, composable
+propensity/rate-law combinators, multi-cell simulation via actors); **a
+cross-database SQL layer landed** (`(curry sql)`, sqlite/mariadb/postgres
+backends); **`(curry okf)`** (Open Knowledge Format v0.2) and **R7RS
+`cond-expand`/`(features)`** landed; a real SRFI-27 RNG data race and two
+broken deterministic-reseed primitives were found and fixed; and a
+systematic audit of every implemented SRFI against its actual
+specification (not just curry's own docs) found and closed real gaps —
+20 in the first two audit tranches (v1.23.3), plus seven entirely new
+SRFI libraries added since (9, 31, 45, 95, 78, 212, 141 — see the summary
+timeline and the new SRFI section below). None of this was tracked
+against a roadmap phase at the time it shipped — see `CHANGELOG.md`
+v1.17.0 through v1.23.3 for the dated list, and the new section below for
+work merged since 1.23.3 that has no CHANGELOG entry yet. Some things
+were also explicitly decided *against* rather than simply not gotten to
+yet — see the "Decided against" section before the summary timeline.
+This document maps the path from here to a compiled Scheme for
+scientific computing — the full cill specification. It is ordered by
+dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.17.0)
+## Where we are now (v1.23.3, plus unreleased work merged to `main`)
 
 | Capability | Status |
 |---|---|
 | R7RS base + numeric tower (fixnum → octonion → symbolic CAS) | ✓ complete |
 | Bytecode compiler + VM | ✓ complete |
+| **Compiler IR pipeline** (Tiers 2.1–2.6: open coding, local inliner, wrapper elision, interleaved-lowering session API) | ✓ **v1.22.0–v1.23.0** — the first real IR curry has had, live in production compilation (not experimental); `compiler.c` split into five files along its boundaries |
 | LLVM ORC v2 JIT (tiered) | ✓ complete |
 | Actors, STM, CSP channels | ✓ complete |
 | Parallel map/reduce (Chase-Lev work-stealing) | ✓ complete |
@@ -69,13 +73,21 @@ unblocks the phases above it.
 | **Slim CLOS Layer 1** (`define-class`, `define-generic`, `define-method`, C3 linearisation) | ✓ **v1.11.0** (`(curry oop)`) — Layer 1 only; PIC dispatch (Layer 2) and numeric-tower-generic operators (Layer 3) not started |
 | **Property-based testing** (generator-driven, many trials per property) | ✓ **v1.14.2** — differently-shaped realization of Phase 9 below: SRFI-252 `test-property` over SRFI-158 generators, on top of SRFI-64, not the bespoke `define-property`/`check-property` DSL sketched there |
 | **Scientific I/O** (HDF5, NetCDF, FITS) | ✓ shipped, undated in `CHANGELOG.md` — `(curry hdf5)`, `(curry netcdf)`, `(curry fits)` directly rather than under a `(curry io ...)` namespace; no native `.curry-tensor` serialisation format |
+| **Text-to-speech** (`(curry tts)`) | ✓ **v1.20.0–v1.23.2** — cross-backend: `espeak-ng` (always available) and a Piper neural backend (`(curry piper)`, real Homebrew formula for `libpiper`), direct-to-speaker or file output |
+| **`(curry sql)`** — cross-database Scheme-native query layer | ✓ **v1.18.0** — sqlite/mariadb/postgres backends |
+| **`(curry okf)`** — Open Knowledge Format v0.2 bundle reader/query/writer | ✓ **v1.17.0** |
+| **R7RS `cond-expand`/`(features)`** | ✓ **v1.20.0** |
+| **`(curry gillespie)`** — Gillespie stochastic simulation algorithm | ✓ unreleased, merged to `main` — composable propensity/rate-law combinators (`mass-action`/`arrhenius`/`michaelis-menten`/`hill`), multi-cell simulation via actors, no separate concurrency model |
+| **`(curry websocket)`** + **`(curry ros)`** — RFC 6455 client + rosbridge v2.0 JSON protocol client | ✓ unreleased, merged to `main` — pure Scheme, no ROS install/DDS transport needed; see `docs/guides/ros-robot.md` for driving real GPIO/PWM motors via `(curry rpi)` from ROS teleop |
+| **SRFI compatibility** | ✓ **46 libraries** as of the unreleased work below (39 at the start of the audit work this update covers, v1.23.3) — see the new SRFI section below for audit status and known gaps |
+| **Full multi-shot `call/cc`** | ✗ — `setjmp`/`longjmp` escape-only continuations remain the whole story; the target strategy (VM frame-stack copying, decided against CPS — see "Decided against") is chosen but not implemented. See "Active work outside the phase numbering" below |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
 | Pluggable scheduler | ✗ |
 | Pluggable set theory foundations (C-level `curry_foundations_ops_t`) | ✗ (see `(curry sets)`/`(curry logic)` above for the Scheme-level equivalent) |
 | Topology | ✗ |
 | GR / QM libraries | ✗ |
-| Full introspection (heap-walk, compiler IR, actor debug) | ✗ (debugger above covers breakpoints/locals only) |
+| Full introspection (heap-walk, compiler IR dumps, actor debug) | ✗ — the compiler IR pipeline itself now exists (see above), but there's still no Scheme-level way to inspect it (`compile->ast/hir/mir/llvm/asm` from Phase 8's sketch below); debugger above covers breakpoints/locals only |
 | Sampling profiler, Tracy/Perfetto tracing, SIMD tower | ✗ |
 | Package manager | ✗ **deferred by decision**, not just unstarted — see `docs/thoughts/package-management-design.md` (supersedes `docs/guides/pkg-design.md`) and "Decided against" below |
 | Notebook interface | ✗ |
@@ -83,6 +95,122 @@ unblocks the phases above it.
 | Step-by-step CAS (`explain-simplify`) | ✗ |
 | LLM-integrated notebook | ✗ (LLM module exists; notebook does not yet) |
 | Exploration sharing (`.curry-nb` format) | ✗ |
+
+---
+
+## Active work outside the phase numbering
+
+Four threads that cut across the numbered phases below rather than
+belonging to one of them — performance, continuations, GC, and SRFI
+compatibility. Tracked here so they don't get lost between phase
+sections.
+
+### Performance
+
+Full status lives in `docs/thoughts/performance-chez-kaappi.md` (version
+2, 2026-08-18, verified against v1.21.0) — check that document directly
+before starting any performance work rather than trusting a summary here
+to stay current. As of this roadmap's own update (2026-08-29), one thing
+in that document is already stale: it says "no IR exists yet" for Tier 2,
+but the compiler IR pipeline (Tiers 2.1–2.6) shipped in v1.22.0–v1.23.0,
+after that document's last verification pass — the IR/inliner/open-coding
+work described there as future is now done. Everything else in it should
+still be checked as current:
+
+- **Tier 0/1** (superinstruction groundwork, transparent `.scc` caching,
+  benchmark CI) — done.
+- **Tier 2** (IR layer) — done, see above; the document itself needs a
+  fresh verification pass to reflect this.
+- **Tier 3** (GC) — unchanged, see below.
+- **Tier 4** (shrinking `tree-eval` passthrough, prerequisite for
+  multi-shot `call/cc`) — real, measurable progress (`define-library`/
+  R6RS-library bodies now compile through the VM instead of tree-walking;
+  the JIT's compile-failure fallback now hits the VM instead of the
+  tree-walker) but not complete — `eval()` still has real callers
+  (`prim_eval`'s R7RS `eval`, `tree-eval` itself, `scm_load`,
+  `modules.c`'s `load_scheme_module`, any remaining tree-walker
+  closures).
+- **Decided against**: NaN-boxing, a register-VM rewrite, CPS conversion
+  for `call/cc` — see "Decided against" below for the reasoning on each.
+
+### Complete (multi-shot) continuations
+
+Still not implemented — `setjmp`/`longjmp` escape-only `call/cc` remains
+the whole story (covers `call/ec`, `guard`, `dynamic-wind` exits; does
+not cover re-entering a continuation after its dynamic extent has
+returned). The target strategy was decided in
+`docs/thoughts/performance-chez-kaappi.md` §4.4 — VM frame-stack copying
+for genuine multi-shot capture, CPS conversion explicitly rejected (see
+"Decided against") — but blocked on Tier 4 above: the frame-copying
+approach needs `eval()`'s remaining callers gone first, since a
+continuation captured while any code path is still running through the
+tree-walker rather than the VM has no frame stack to copy. Phase 6's
+green-threads sketch (`(yield)` via LLVM coroutines) has an unresolved
+dependency on whatever continuation mechanism actually ships here — the
+two were never reconciled, see that phase's own note.
+
+### GC rewrite
+
+**Status uncertain as of this update — needs a fresh check before
+resuming.** `docs/thoughts/performance-chez-kaappi.md` (2026-08-18)
+describes a `gc-rewrite` branch at M1 (safepoint landed at the VM's
+`L_DISPATCH`) with P2 (safepoint protocol) through P6 (per-actor minor
+GC) still ahead of it. As of 2026-08-29, no `gc-rewrite` or `gc-perf`
+branch exists in this repository, locally or on `origin` — neither
+merged (no corresponding commits on `main` beyond what's already
+described as the v1.5.0–1.6.3 generational GC in Phase 6 below) nor
+present as an open branch. Whether this means the branch was abandoned,
+deleted after being superseded, or is simply missing from this
+particular checkout is not established — confirm directly (check for it
+under a different name, check whether its author has notes elsewhere)
+before assuming the P1–P6 plan is still active. The generational GC that
+*did* ship (v1.5.0–1.6.3, Phase 6 below) remains experimental and
+opt-in, with the known tree-walker/minor-GC interaction gap noted there
+unresolved regardless of `gc-rewrite`'s status.
+
+### SRFI compatibility
+
+46 `(srfi sN name)` libraries as of the work merged to `main` covered in
+the summary timeline below (39 at the start of the audit work covered
+here, v1.23.3). Two rounds of work distinct from ordinary new-library
+additions:
+
+- **Gap audit (v1.23.3 and the tranche before it):** every already-
+  implemented SRFI was checked against its actual specification text,
+  not just curry's own docs — 20 silent gaps closed across six libraries
+  (Tier 1: SRFI-170/125/128/227; Tier 2: SRFI-1/27/125/128/133), plus the
+  discovery that a fix touching only a SRFI's `(srfi sN name)`
+  implementation could silently miss its `(srfi N)`/`(srfi srfi-N)`
+  re-export shims — now guarded permanently by
+  `tests/srfi_legacy_dashed_names_tests.scm`.
+- **New libraries added post-audit** (all unreleased, merged to `main`):
+  SRFI-9 (records), SRFI-31 (`rec`), SRFI-45 (lazy/iterative algorithms),
+  SRFI-95 (sorting/merging), SRFI-78 (lightweight testing), SRFI-212
+  (aliases), SRFI-141 (integer division: `ceiling`/`round`/`euclidean`/
+  `balanced` families beyond R7RS's own `floor`/`truncate`).
+- **Blocked:** SRFI-61 (a more general `cond` clause) can't be
+  implemented as a library — `cond` is a hardcoded special form the
+  evaluator dispatches on directly, not resolved through macro lookup, so
+  a `define-syntax cond` shim is silently ignored. Filed as
+  [issue #81](https://github.com/deconstructo/curry/issues/81); would
+  need a real compiler-level change, not a library.
+- **Decided against:** SRFI-143 (Fixnums) — exists purely to let a
+  compiler skip type-dispatch overhead via a guaranteed-bounded machine
+  integer, which fights curry's own numeric-tower design goal of making
+  that distinction invisible; implementing it would deliver zero
+  performance benefit in curry specifically. SRFI-211 (Scheme Macro
+  Libraries) is a naming/discoverability convention, not new
+  functionality — doesn't map onto anything curry currently needs.
+- **Assessed, parked as real follow-up work (not free, not rejected):**
+  SRFI-144 (Flonums, ~80 procedures, mostly thin wrapping — moderate size
+  for modest value), SRFI-146 (Mappings, ~60+ procedures across ordered
+  and hash-based variants — the ordered variant genuinely needs a real
+  tree structure curry doesn't have anything to build on today), SRFI-275
+  (URIs/IRIs/paths, draft status — RFC 3986/3987-grade parsing from
+  scratch, real risk of rework before the draft finalizes), SRFI-13
+  (Strings, ~100+ procedures), SRFI-41 (Streams), SRFI-115 (SRE regex —
+  a genuine standalone regex-engine project, distinct from curry's
+  existing POSIX-based `(curry regex)`).
 
 ---
 
@@ -421,14 +549,18 @@ What actually got built, and how it differs from the sketch below:
   in-progress rewrite below, which picks these up properly instead of
   patching the v1.5.0 design further.
 
-**The actual current GC roadmap is a separate, more ambitious rewrite**
-in progress on the `gc-rewrite`/`gc-perf` branches, informed by
+**The actual current GC roadmap was a separate, more ambitious rewrite**
+planned on the `gc-rewrite`/`gc-perf` branches, informed by
 `docs/thoughts/performance-chez-kaappi.md` (Chez/Kaappi lessons,
 2026-07-16): P0 benchmarking+CI → P1 LLVM statepoints → P2 safepoint
 protocol → P3 three-zone/BiBOP heap (homogeneous type+generation segments,
 replacing the ad hoc two-generation `mmap` regions above) → P4 precise
 mark-sweep (closing the tree-walker gap noted above) → P5 concurrent
-marking → P6 per-actor minor GC. This supersedes the generational-GC
+marking → P6 per-actor minor GC. As of 2026-08-29 neither branch exists
+in this repository any more (see "Active work outside the phase
+numbering" near the top of this document) — status of this plan is
+unverified, not confirmed abandoned or confirmed still active. This
+still supersedes the generational-GC
 sketch in this section; treat the section above as historical record of
 what v1.5.0–1.6.3 actually shipped, not as the forward plan.
 
@@ -962,6 +1094,16 @@ GR/QM library the original mapping promised for that slot):
 | ~~**v1.14.0–1.14.2**~~ | `(curry babylonian-astronomy)`; cuneiform notation covers the whole numeric tower; flonum print-precision fix; genuine TCO for `call-with-values`/`receive`/`let-values`; SRFI-54/111/195/209/210/252/261/263 | ✓ shipped |
 | ~~**v1.15.0**~~ | `(curry posix)` argv-based process execution (`process-run`/`process-start`, no shell — not tracked against any phase above); `system`'s exit-code decoding fixed; `(curry toml)`; every pure-Scheme `(curry X)` module converted to `define-library` (real export enforcement, not just SRFI libraries) | ✓ shipped |
 | ~~**v1.16.0**~~ | `(curry naips)` Airservices Australia NAIPS briefing-service client (loc/area/met/notam briefing, built on `(curry aviation-weather)`'s METAR/TAF/ATIS parsing — not tracked against any phase above); `examples/naips/mcp_naips.scm` exposes it as MCP tools | ✓ shipped |
+| ~~**v1.17.0**~~ | `(curry okf)` Open Knowledge Format v0.2 bundle reader/query/writer + three examples; `write-string`/`write` multi-byte UTF-8 corruption fix on string ports | ✓ shipped |
+| ~~**v1.17.2–1.17.11**~~ | A burst of new domain modules, none tracked against any phase above: `(curry http)` `http-request/headers`, `(curry okf)` frontmatter validation, `(curry ncurses)` terminal UI, `(curry matchable)` pattern matching (`match`/`match-lambda`/...), `(curry csv)` (RFC 4180), `(curry schematic)` source reindenter/doc extractor, `(curry graphviz)` DOT builder, `(curry xml)`/`(curry rss)`/`(curry atom)` feeds, `(curry dot-locking)` NFS-safe file locking, `(curry zeromq)`; a `read-line` infinite-loop fix; O(1)/amortized-O(1) `string-ref` for ASCII | ✓ shipped |
+| ~~**v1.18.0**~~ | `(curry sql)`: a Scheme-native cross-database layer (sqlite/mariadb/postgres backends); two silent-corruption bugs found in `(curry sqlite)` while building it | ✓ shipped |
+| ~~**v1.19.0**~~ | `(curry mariadb)`/`(curry postgres)`: type coercion, structured errors, streaming, TLS, `LISTEN`/`NOTIFY`, `COPY` — the backends `(curry sql)` above sits on top of | ✓ shipped |
+| ~~**v1.20.0**~~ | `(curry tts)` cross-backend text-to-speech (espeak-ng); R7RS `cond-expand`/`(features)`; SRFI-279 In(tro)spection Protocol; `(load ...)`/`(include ...)` resolve relative to the loading file's own directory; partial `syntax-rules` hygiene + SRFI-26 (`cut`/`cute`); SRFI-14 (char-sets); symbolic inequalities in the CAS | ✓ shipped |
+| ~~**v1.21.0**~~ | `write`/`display` infinite-hang-on-circular-structure fix; `string->number`/`utf8->string` validation fixes; R7RS `string->vector`/`vector->string`; `delay`/`delay-force` in compiled code, not just the tree-walker; a non-tail-recursion-in-`define-library` crash fixed; SRFI-253 (data checking); SRFI-1 completed (real `fold` argument-order bug fixed); SRFI-4 + extended SRFI-160 | ✓ shipped |
+| ~~**v1.22.0–1.22.1**~~ | **Compiler IR pipeline, first landing** — the real IR/open-coding work this roadmap's performance section above describes as done; `--with-qt6` Apple Silicon Homebrew fix; a `delay-force` chain-flattening bug (3+ levels deep) fixed | ✓ shipped |
+| ~~**v1.23.0–1.23.2**~~ | Compiler Tiers 2.3–2.6 (local inliner, wrapper elision, wider open-coding, interleaved-lowering session API); `compiler.c` split into five files; a `call/cc` GC-shadow-stack/JIT-depth leak fixed; SRFI-106 (sockets); Piper neural TTS backend + real Homebrew formula for `libpiper`; `espeak-ng` `#:voice` fixed (never worked, for any voice) | ✓ shipped |
+| ~~**v1.23.3**~~ | `(curry gillespie)` stochastic simulation of cell biochemistry; SRFI-27 `random-source-pseudo-randomize!` fixed (never actually deterministic) + a real cross-thread RNG data race fixed + `random-source-state-ref`/`-set!` added; 20 silent gaps closed across six SRFI compatibility libraries; `README.md` split into `README.md` + `FEATURES.md` | ✓ shipped |
+| **unreleased, merged to `main`** | SRFI-9/31/45/95/78/212/141 (7 new libraries — see the SRFI section above for what's blocked/decided-against/parked alongside these); `(curry websocket)` (RFC 6455 client) + `(curry ros)` (rosbridge v2.0 JSON protocol client), with `docs/guides/ros-robot.md` driving real GPIO/PWM motors from ROS teleop; the 89 bare-numbered/dashed SRFI shim files renamed `.scm` → `.sld` (a pure re-export manifest, not an implementation, per R7RS-ecosystem convention) and documented as the pattern for splitting any module — SRFI or `(curry X)` — across multiple files; two real core bugs found and fixed along the way (`write`/`display` never rendered bytevector contents; `append` segfaulted instead of raising on a non-list argument) | merged, not yet version-bumped |
 
 Remaining phases, in the dependency order from the top of this document —
 not pinned to specific version numbers, since the original numbering
@@ -970,7 +1112,7 @@ broke after v1.4.0 and re-pinning invites the same drift:
 | Phase | Name | Highlights | Estimated effort |
 |---|---|---|---|
 | 5 | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
-| 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload — GC portion already shipped, see above; heavier rewrite in progress on `gc-rewrite` branch | 5–7 mo |
+| 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload — GC portion already shipped, see above; a heavier GC rewrite was planned on a `gc-rewrite` branch, status uncertain — see "Active work outside the phase numbering" above | 5–7 mo |
 | 7 (remainder) | Types + Sets | Topology — Slim CLOS Layer 1 and pluggable-foundations portions already shipped, see above | 4–5 mo |
 | 8 (remainder) | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower — debugger portion already shipped, see above | 3–4 mo |
 | 10 | Ecosystem | Package manager (deferred by decision); notebook (Qt6, mathematical rendering); units system; `explain-simplify`; LLM-integrated notebook; exploration sharing | 7–9 mo |
@@ -979,13 +1121,16 @@ Phase 9 (testing + scientific I/O) is done — see above — save for the
 native `.curry-tensor` fast-serialisation format, which was never built
 and isn't currently planned.
 
-**Breaking-change note:** the *next* moving/precise GC milestone (on the
-`gc-rewrite` branch, not the v1.5.0 generational GC already shipped) is
-still expected to require a C-extension audit — `gc_pin`/`gc_unpin` for
-off-stack Scheme pointers, same as originally described for "v2.0" above.
-The FFI `with-pinned-*` macros (v1.1) already handle this automatically
-for FFI callers; hand-written C modules will need a one-time look when
-that milestone lands.
+**Breaking-change note:** *if* the planned moving/precise GC rewrite
+(originally tracked on a `gc-rewrite` branch — see "Active work outside
+the phase numbering" above for why its current status is unverified)
+resumes and lands, it's still expected to require a C-extension audit —
+`gc_pin`/`gc_unpin` for off-stack Scheme pointers, same as originally
+described for "v2.0" above. This does not apply to the v1.5.0
+generational GC already shipped, which needed no such audit. The FFI
+`with-pinned-*` macros (v1.1) already handle this automatically for FFI
+callers; hand-written C modules will need a one-time look if/when that
+milestone lands.
 
 **Critical path:** v1.1 (condition system + FFI) was the original
 bottleneck and has long since shipped. Everything from the GR library
