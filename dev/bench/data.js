@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787827809956,
+  "lastUpdate": 1787890719753,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8555,6 +8555,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.424,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "10ad93399e7f68c46dd2bbff480e25b981859c48",
+          "message": "feat(srfi): close Tier 2 gaps in SRFI-1/27/125/128/133 (#80)\n\n* feat(srfi1): add Tier 2 gap-closing list procedures\n\nCloses Tier-2-effort gaps found by the earlier full 39-SRFI audit:\ncar+cdr, pair-fold, pair-fold-right, map-in-order, filter!, remove!,\npartition!, length+, except-last-pair, except-last-pair!,\nlset-diff+intersection, lset-diff+intersection!.\n\nTwo worth calling out specifically:\n\n- map-in-order is a real sequential loop, not an alias to map: this\n  file's own map/map! are re-exports of curry's core global map, which\n  goes parallel above map_par_threshold (src/builtins_curry.c) and\n  therefore does not guarantee left-to-right side-effect ordering.\n  map-in-order exists specifically for callers that need that\n  guarantee.\n\n- pair-fold-right avoids the reference implementation's natural non-\n  tail recursion (the same stack-overflow risk this file's own take/\n  unfold/take-while comments already document and avoid): walks left-\n  to-right collecting each pair via cons (which reverses the order),\n  then a single ordinary left-to-right fold over that already-reversed\n  list computes the same right-to-left result.\n\nIndependent review: the primary code-review agent hit its monthly\nspend limit mid-run (this has happened before this session); fell\nback to a careful manual read per established practice, focused on\nthe two trickiest additions (pair-fold-right's fold-based reversal\ntrick, lset-diff+intersection's single-partition derivation) plus\nlive verification of every new procedure's actual output against\nhand-computed expected values.\n\nAdded to both the numeric shim (1.scm) and the legacy dashed-name\nshim (srfi-1.scm), per the lesson from the Tier 1 PR (each is a\nseparate define-library with its own explicit export list).\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi27): add random-source-state-ref / random-source-state-set!\n\nCloses a Tier-2-effort gap found by the earlier full 39-SRFI audit.\nSRFI 27 leaves the state object's representation entirely up to the\nimplementation (opaque, only meant to round-trip through state-set!);\nrepresented here as a 4-element list of exact integers, one per\nxoshiro256+ state word.\n\nEach word is reinterpreted as a signed int64 for num_make_bignum_i\n(which itself falls back to a plain fixnum when the value fits) and\ndecoded back the same way via num_to_long, so the round-trip preserves\nthe exact original bit pattern regardless of whether a given word's\ntop bit happens to be set. Both new primitives take rng_mutex around\ntheir access to the shared RNG state, consistent with the mutex\ndiscipline added for this same state in the earlier RNG-detour PR.\n\nAdded to both the numeric shim (27.scm) and the legacy dashed-name\nshim (srfi-27.scm), per the lesson from the Tier 1 PR.\n\nIndependent review: the primary code-review agent hit its monthly\nspend limit mid-run; fell back to a careful manual read of this C\ndiff specifically (mutex discipline, bit-pattern round-trip\ncorrectness) plus live verification that a captured-then-restored\nstate produces an identical subsequent draw sequence.\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi125): add hash-table=?, hash-table-find, hash-table-pop!, hash-table-xor!\n\nCloses Tier-2-effort gaps found by the earlier full 39-SRFI audit.\n\nhash-table=? checks size equality plus every t1 entry having a\nmatching (per the given value-comparator's own equality predicate,\nnot necessarily equal? or either table's key-equality) entry in t2 --\nsize-equality plus that one-directional subset check together imply\nfull equality, since t2 can't hold any extra key once its size is\nalready accounted for by t1's own keys.\n\nhash-table-xor! (symmetric difference of keys, in place on t1) was\nchecked against the \"xor a table with itself\" edge case by hand:\nevery key starts present in t1 (since t1 and t2 are the same\nreference), so every key gets deleted during iteration and the table\nends up empty -- correct, matches the mathematical symmetric-\ndifference-of-a-set-with-itself result.\n\nAdded to both the numeric shim (125.scm) and the legacy dashed-name\nshim (srfi-125.scm), per the lesson from the Tier 1 PR.\n\nIndependent review: the primary code-review agent hit its monthly\nspend limit mid-run; fell back to a careful manual read of this file,\nplus live verification of all four procedures against hand-computed\nexpected values including the self-xor edge case above.\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi128): add standalone hash procedures, hash-bound, hash-salt, comparator-if<=>\n\nCloses Tier-2-effort gaps found by the earlier full 39-SRFI audit:\nboolean-hash, char-hash, char-ci-hash, string-hash, string-ci-hash,\nsymbol-hash, number-hash, default-hash, hash-bound, hash-salt,\ncomparator-if<=>.\n\nEvery hash procedure delegates to the existing %default-hash (the\nwrite-then-hash approach the built-in comparators already use\ninternally), except the two case-insensitive ones, which fold case\nfirst so char-ci=?/string-ci=?-equal values hash the same.\nhash-bound is %default-hash's own fixed modulus; hash-salt is a fixed,\nnon-secret constant since none of curry's built-in hash functions\nactually incorporate a salt (the spec requires hash-salt to exist and\nbe stable, not that every hash function read it).\n\ncomparator-if<=> supports both the 5-arg (default-comparator implied)\nand 6-arg (explicit comparator) forms via ordinary syntax-rules arity\nmatching. Caught and fixed one real bug while testing this by hand:\nthe 5-arg clause initially called (default-comparator) as if it were\na procedure, when it's actually a plain value (make-default-comparator\nis the procedure) -- found immediately via direct execution, not by\nthe (spend-limit-interrupted) review agent.\n\nAdded to both the numeric shim (128.scm) and the legacy dashed-name\nshim (srfi-128.scm), per the lesson from the Tier 1 PR.\n\nIndependent review: the primary code-review agent hit its monthly\nspend limit mid-run; fell back to a careful manual read of this file\nplus live verification of every new procedure and both\ncomparator-if<=> call forms.\n\n105/105 ctest suites pass overall (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(srfi133): add Tier 2 gap-closing vector procedures\n\nCloses Tier-2-effort gaps found by the earlier full 39-SRFI audit:\nvector-reverse-copy, vector-append-subvectors, vector-map!,\nvector-cumulate, vector-skip, vector-skip-right, vector-partition,\nreverse-vector->list, reverse-list->vector, vector-unfold!,\nvector-unfold-right!.\n\nvector-append-subvectors does two passes (sum the sub-range lengths,\nthen a single allocation plus vector-copy! per region) rather than\nbuilding an intermediate vector-copy per input and vector-appending\nthose. vector-partition returns two values (a new vector with\npred-matching elements first, in original relative order, then\nnon-matching, plus the match count, which also doubles as the\nboundary index between the two groups) via a single pass with two\nwrite cursors.\n\nvector-map!'s own comment initially claimed it matches curry's native\nvector-map's behavior on mismatched-length argument vectors -- checked\ndirectly by hand and found that claim false (native vector-map\nraises on a length mismatch; vector-map! here follows SRFI-133's own\ndocumented \"stop at the shortest vector\" convention instead, which is\na real, deliberate divergence, not a bug). Comment corrected to say so\nexplicitly rather than asserting a consistency that doesn't hold.\n\nAdded to both the numeric shim (133.scm) and the legacy dashed-name\nshim (srfi-133.scm), per the lesson from the Tier 1 PR.\n\nIndependent review: the primary code-review agent hit its monthly\nspend limit mid-run; fell back to a careful manual read of this file\n(including the vector-map! comment-accuracy check above) plus live\nverification of every new procedure against hand-computed expected\nvalues.\n\n105/105 ctest suites pass overall (fresh --clear-cache run). This is\nthe final commit of the Tier 2 SRFI gap-closing batch (SRFI-1, 27,\n125/126, 128, 133).\n\nTier 2 fixes to short cut implementations of SRFIs.\n\nAll hard work done by Claude. All errors, crap code, or missing functionality falls to me - as it should in this new age of development",
+          "timestamp": "2026-08-28T14:17:57+10:00",
+          "tree_id": "6b135857d5be35ee373550506ef5b3692a8ab429",
+          "url": "https://github.com/deconstructo/curry/commit/10ad93399e7f68c46dd2bbff480e25b981859c48"
+        },
+        "date": 1787890718613,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.341,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 32.415,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.635,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.458,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.983,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 285.299,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.314,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 86.648,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.424,
             "unit": "ms"
           }
         ]
