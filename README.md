@@ -8,6 +8,22 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 Built around pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
 
+## AI and development
+
+Yes, I do use Claude for development. My apology is this:
+
+* I can code, but I am slow - very slow. I make use of Claude to develop ideas quickly. For me, what is more interesting and important is exploring the ideas that I incorporate into Curry, than actually writing the code itself. 
+
+* I treat Claude more as a dialogue partner than as just a simple tool. I discuss ideas that I have. I discuss things that I find in papers or in other lisp or scheme implementations and work through what goes in, what remains on the table, and what is pulled out and/or replaced. 
+
+* One of the freedoms of this mode of development is that I see that if even a rather large change is required to get to a better place - in terms of stability, performance, flexibility or features - then I am _happy_ to make that change! Evidence are the changes from a tree-walking interpreter to VM to JIT compiler, or the work that I've done (and backed out) on improving garbage collection.
+
+* AI may do the coding and a lot of the documentation, but I assume all responsibility for bugs, errors, omissions, poor architecture, poor code and poor documentation.
+
+## Get involved!
+
+I'd love to work with others on this, dare I say rather unique language. I'd also like to be useful for others. So Feel free to drop issues in or PRs.
+
 ## Documents
 
 Documentation is split into two directories:
