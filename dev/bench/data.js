@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787896071926,
+  "lastUpdate": 1787902268071,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9038,6 +9038,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 55.417,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "10f8527100a1669cba2762f41fda01d774f3f2e3",
+          "message": "feat(websocket,ros): add (curry websocket) and (curry ros) modules (#85)\n\n* fix(port): render bytevector contents in write/display\n\nEvery bytevector (#u8(...) literals, (bytevector ...), sha1/base64-decode\noutput, etc.) printed as the generic #<object 11> fallback instead of its\nactual bytes -- the writer in src/port.c had a case for every other\ncompound heap type (pairs, vectors, closures, f64vectors, SRFI-4 typed\nvectors, tuples, conditions, ...) but never checked vis_bytes(v) before\nfalling through. Prints as #u8(...) now, matching R7RS's own external\nrepresentation and the existing #f64(.../typed-vector printers' shape.\n\nFound via direct interactive testing while implementing (curry websocket)\n(frame masking/handshake work needs bytevector arithmetic throughout, and\nprinting them while debugging just showed #<object 11>). Filed as #83.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(builtins): append raises a type error instead of segfaulting\n\nscm_append_inner only checked vis_nil(a) before unconditionally calling\nvcar(a)/vcdr(a) in its recursion. A non-pair, non-nil argument (e.g. a\nclosure) made vcar/vcdr read through it as if it were a Pair* regardless,\nwalking off into unrelated struct fields with no termination check --\neventually segfaulting the whole process instead of raising a catchable\nScheme error.\n\nTrivially triggered by an easy, unrelated mistake: curry's core\nhash-table-ref takes a plain default *value* as its third argument, not\na failure thunk like R7RS/SRFI-69 convention would suggest (the SRFI-69\ncompatibility shim already documents wrapping the core one specifically\nto \"correct\" this) -- passing a thunk there and later append-ing the\n(uncalled) result is a natural mistake that silently corrupts the\nprocess instead of erroring. Found exactly this way while implementing\n(curry ros)'s subscription bookkeeping. Filed as #84.\n\nFix adds a vis_pair(a) check before the recursive vcar/vcdr call,\nraising \"append: not a list\" -- matching the \"name: message\" style of\nsibling primitives (prim_list_tail/prim_list_ref) in the same file.\nZero-arg, one-arg, and multi-arg append with proper lists all still\nbehave identically (verified: the check can never fire on '() or a\npair, and the final argument is still permitted to be anything,\nincluding improper, matching R7RS and pre-fix behavior).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* docs(claude): record bug-report-as-issue convention\n\nPrompted by finding two real core bugs (bytevector print, append\nsegfault) while implementing an unrelated feature this session -- filing\nthem as GitHub issues in addition to fixing them keeps a durable,\nsearchable record independent of any one session's chat history.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* feat(websocket,ros): add (curry websocket) RFC 6455 client and (curry ros) rosbridge client\n\nLets curry talk to a running ROS1/ROS2 system through rosbridge_server's\nJSON protocol -- topics (publish/subscribe) and services (call/advertise)\n-- with no ROS client library, DDS transport, or ROS install linked into\ncurry itself. Both modules are pure Scheme, no new C code:\n\n- (curry websocket): a plain (ws://, no TLS) RFC 6455 client built on\n  curry's existing SRFI-106 sockets and (curry crypto)'s sha1/base64 for\n  the opening handshake. Handles frame masking, fragmentation\n  reassembly, transparent ping/pong, and the close handshake. A\n  per-connection mutex serializes the multi-part frame write since\n  multiple actors may call ws-send!/ws-close! on one connection\n  concurrently (the exact pattern (curry ros) uses: one reader actor,\n  arbitrarily many publisher/caller actors). Caps accepted frame length\n  at 64MB to avoid an unbounded-allocation attempt from a single crafted\n  frame header claiming an absurd 64-bit extended length.\n\n- (curry ros): the rosbridge v2.0 JSON protocol on top of the websocket\n  client + (curry json) + (curry sync) + curry's actor system.\n  ros-connect spawns a background reader actor that decodes every\n  incoming frame and dispatches by its \"op\" field to topic subscribers,\n  blocked ros-call-service callers (matched by a generated id, woken via\n  a per-call mutex+condvar), or locally-advertised service handlers.\n  Blocking service calls correctly survive spurious condvar wakeups\n  (loop re-checks the done flag rather than treating one non-done\n  wakeup as terminal) and are woken with a clean failure result rather\n  than hanging forever if the connection drops mid-call or closes\n  before the request could even be sent.\n\nBoth modules are tested against from-scratch, independently-implemented\nmock servers (raw sockets + hand-rolled WS server framing / rosbridge\nJSON, deliberately not reusing the client's own encode/decode logic) to\nprove real wire compatibility rather than self-consistency:\ntests/websocket_tests.scm (9 checks: handshake, echo, ping/pong,\nfragmentation, binary, oversized-frame rejection, close) and\ntests/ros_tests.scm (9 checks: subscribe/publish/call_service/\nadvertise_service round trips both directions, plus the\nconnection-drops-mid-call regression). 108/108 ctest suites pass.\n\ndocs/guides/ros-robot.md works through a concrete tracked-robot example:\ndifferential-drive teleop over /cmd_vel via rosbridge, driving real\nGPIO/PWM motor control through (curry rpi).\n\nIndependent code review (fresh subagent, no shared context) found three\nreal issues, all fixed before this commit: no bound on WebSocket frame\nlength (added the 64MB cap + regression test), a spurious-wakeup bug in\nros-call-service's wait loop that could falsely report failure and\nsilently drop the real response (fixed with a proper re-check loop), and\nno wakeup of blocked no-timeout callers on connection close/EOF (fixed\nby broadcasting a failure result to all pending calls on close/EOF).\nVerifying the third fix surfaced a fourth, related bug not caught by the\nreview -- an uncaught exception from ws-send! when the connection closes\nconcurrently with a call already killed the calling actor outright,\nindependent of the wakeup-on-close fix -- fixed by resolving the call as\nfailed directly instead of letting the exception escape.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T17:30:17+10:00",
+          "tree_id": "fa5dce1d73c7cb22ff142f3e3682765d0be04191",
+          "url": "https://github.com/deconstructo/curry/commit/10f8527100a1669cba2762f41fda01d774f3f2e3"
+        },
+        "date": 1787902266932,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.323,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.5,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.806,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.504,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 130.173,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 286.025,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.263,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.224,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.573,
             "unit": "ms"
           }
         ]
