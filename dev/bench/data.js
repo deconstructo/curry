@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787893808025,
+  "lastUpdate": 1787896071926,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8969,6 +8969,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 40.091,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5a75a434bedab0ce1dbed12507b844f242d1e85",
+          "message": "feat(srfi): add SRFI-9 (records), SRFI-31 (rec), SRFI-45 (lazy) (#82)\n\nThree of the four SRFI gaps assessed as free/trivial in the last audit\nround (the fourth, SRFI-61, turned out to require compiler changes --\nsee issue #81 and below).\n\n- SRFI-9 (Defining Record Types): thin re-export of curry's own core\n  define-record-type special form, which is already a strict superset\n  of SRFI-9's grammar (mutators, partial constructors). No new logic.\n\n- SRFI-31 (rec): a syntax-rules macro for self-referential expressions\n  (most commonly a recursive lambda) without a surrounding define or\n  letrec, transcribed from the SRFI's own reference implementation.\n\n- SRFI-45 (Primitives for Iterative Lazy Algorithms): curry's core\n  delay-force/make-promise already implement SRFI-45's constant-stack\n  lazy-forcing semantics -- verified by reading prim_force's iterative\n  trampoline in src/builtins.c, not just by a passing test. This shim\n  only needs to supply the two additional names, lazy (alias for\n  delay-force) and eager (alias for make-promise).\n\nEach ships the full three-file shape (srfi sN name, bare-numbered\nsrfi N, dashed srfi srfi-N), per the SRFI-8 template and the lesson\nfrom a prior review that fixes touching only the sN library silently\nmiss the two re-export shims. tests/srfi_9_31_45_tests.scm exercises\nall three library paths per SRFI; tests/srfi_legacy_dashed_names_tests.scm\ngained coverage for the three new dashed shims specifically as a\nregression guard against that same class of gap. 106/106 ctest suites\npass (fresh --clear-cache run on this branch, rebuilt standalone).\n\nIndependent code review (fresh subagent, no shared context) checked\nexport-list consistency across all three tiers, verified the rec macro\nagainst the SRFI-31 spec, and verified the lazy/eager semantic mapping\nby reading curry's actual C implementation rather than trusting the\ntest suite alone. No findings.\n\nSRFI-61 (a more general cond clause) was dropped from this batch: it\nrequires cond itself to accept a new clause shape, but curry's cond is\na hardcoded special form dispatched directly by the evaluator/compiler,\nnot resolved through macro/environment lookup, so a define-syntax cond\nshim is silently ignored (confirmed with a minimal repro). Filed as\nissue #81 for future compiler-level work.\n\nREADME.md/FEATURES.md's SRFI count bumped 39 -> 42.\n\nThere are some performance problems noted in the CI  - they are likely noise",
+          "timestamp": "2026-08-28T15:46:29+10:00",
+          "tree_id": "284c91ac55798e05a82eb60b8d80a851c766b39e",
+          "url": "https://github.com/deconstructo/curry/commit/a5a75a434bedab0ce1dbed12507b844f242d1e85"
+        },
+        "date": 1787896069910,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.493,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.161,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.849,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.441,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 104.991,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 260.083,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 61.613,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 71.541,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 55.417,
             "unit": "ms"
           }
         ]
