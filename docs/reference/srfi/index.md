@@ -32,11 +32,14 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s1 lists)`](s1.md) | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
 | [`(srfi s4 uniform-vectors)`](s4.md) | [SRFI-4](https://srfi.schemers.org/srfi-4/) | Homogeneous numeric vectors — u8/s8/u16/s16/u32/s32/u64/s64vector from `(curry typedvec)` plus f64vector from `(curry f64vector)`; no f32vector (curry's numeric tower has no native single-precision type) |
 | [`(srfi s8 receive)`](s8.md) | [SRFI-8](https://srfi.schemers.org/srfi-8/) | `receive` multiple-values binding macro — shadows curry's own actor `receive` special form when imported |
+| [`(srfi s9 records)`](s9.md) | [SRFI-9](https://srfi.schemers.org/srfi-9/) | `define-record-type` — thin re-export of curry's own core special form, a strict superset of SRFI-9's grammar |
 | [`(srfi s14 char-sets)`](s14.md) | [SRFI-14](https://srfi.schemers.org/srfi-14/) | Character sets — construction, iteration, set algebra, and the standard predefined sets (`char-set:letter`, `char-set:whitespace`, etc), backed by a sorted-range representation over curry's full Unicode codepoint space |
 | [`(srfi s18 multithreading)`](s18.md) | [SRFI-18](https://srfi.schemers.org/srfi-18/) | Thread/mutex/condition-variable naming over curry's actor `spawn` and `(curry sync)` |
 | [`(srfi s19 time)`](s19.md) | [SRFI-19](https://srfi.schemers.org/srfi-19/) | Time/date objects, Julian Day conversions, `strftime`-style formatting — requires `-DBUILD_MODULE_POSIX=ON` (default) for `current-time` |
 | [`(srfi s26 cut)`](s26.md) | [SRFI-26](https://srfi.schemers.org/srfi-26/) | `cut`/`cute` — partial application without writing `lambda` by hand; the reference implementation verbatim (its recursive-macro shape found and drove a real curry `syntax-rules` hygiene fix — see the doc page) |
 | [`(srfi s27 random-bits)`](s27.md) | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
+| [`(srfi s31 rec)`](s31.md) | [SRFI-31](https://srfi.schemers.org/srfi-31/) | `rec` — a special form for self-referential (typically recursive-lambda) expressions without a surrounding `define`/`letrec` |
+| [`(srfi s45 lazy)`](s45.md) | [SRFI-45](https://srfi.schemers.org/srfi-45/) | `lazy`/`eager` for iterative lazy algorithms — thin aliases over curry's own core `delay-force`/`make-promise`, which already implement SRFI-45's semantics |
 | [`(srfi s54 cat)`](s54.md) | [SRFI-54](https://srfi.schemers.org/srfi-54/) | `cat` — order-independent object-to-string formatting (width, padding, precision, radix, separators, pipes, converters) |
 | [`(srfi s59 vicinity)`](s59.md) | [SRFI-59](https://srfi.schemers.org/srfi-59/) | Vicinity (directory-of-a-path) string utilities |
 | [`(srfi s64 testing)`](s64.md) | [SRFI-64](https://srfi.schemers.org/srfi-64/) | Unit-testing framework — test cases/groups, skip/expect-fail specifiers, pluggable test runners; curry's own test suites use this |

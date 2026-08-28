@@ -8,7 +8,8 @@
 ;;; exact same call. This file exists specifically so that class of gap
 ;;; can't reappear silently.
 
-(import (srfi srfi-125) (srfi srfi-128) (srfi srfi-170) (srfi srfi-227))
+(import (srfi srfi-125) (srfi srfi-128) (srfi srfi-170) (srfi srfi-227)
+        (srfi srfi-9) (srfi srfi-31) (srfi srfi-45))
 
 (define pass 0)
 (define fail 0)
@@ -46,6 +47,18 @@
 
 (define-optionals* (g a #:optional (b (* a 3)) (c (+ a b))) (list a b c))
 (check "srfi-227 legacy shim exports define-optionals*" (g 4) (list 4 12 16))
+
+;;; (srfi srfi-9)
+(define-record-type <pt> (make-pt x) pt? (x pt-x))
+(check "srfi-9 legacy shim exports define-record-type" (pt-x (make-pt 7)) 7)
+
+;;; (srfi srfi-31)
+(check "srfi-31 legacy shim exports rec" (rec x (+ 1 1)) 2)
+
+;;; (srfi srfi-45)
+(check "srfi-45 legacy shim exports lazy/force/eager"
+       (force (eager (force (lazy 5))))
+       5)
 
 ;;; Summary
 

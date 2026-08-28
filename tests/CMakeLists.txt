@@ -111,6 +111,7 @@ add_test(NAME srfi_s252_property_testing COMMAND curry --clear-cache ${CMAKE_CUR
 add_test(NAME srfi_s209_enums COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s209_enums_tests.scm)
 add_test(NAME srfi_s210_multiple_values COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s210_multiple_values_tests.scm)
 add_test(NAME srfi_s54_cat COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s54_cat_tests.scm)
+add_test(NAME srfi_9_31_45 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_9_31_45_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
