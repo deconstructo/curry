@@ -82,22 +82,6 @@ mutex-protected, since curry's actors are real OS threads that can call
 `random-real`/`random-integer` concurrently. See
 [`docs/reference/srfi/s27.md`](docs/reference/srfi/s27.md).
 
-## `(curry gillespie)`: stochastic simulation of cell biochemistry
-
-The Gillespie stochastic simulation algorithm (SSA): a set of chemical
-species undergoing reactions modeled as a continuous-time Markov chain —
-individual random reaction events, not a smooth ODE approximation, which
-matters because real gene expression is genuinely noisy at low molecule
-counts. Environment sensitivity (temperature, pH, nutrients) isn't a special
-feature bolted onto the engine; a reaction's propensity is just an ordinary
-procedure of `(species environment)`, and composable rate-law combinators
-(`mass-action`, `arrhenius`, `michaelis-menten`, `hill`, glued together with
-`rate*`) are the entire mechanism for building richer kinetics. Multi-cell
-simulation reuses curry's existing actor system directly — one actor per
-cell — rather than introducing a separate concurrency model. See
-[`docs/reference/module-gillespie.md`](docs/reference/module-gillespie.md)
-and [`docs/guides/gillespie-cells.md`](docs/guides/gillespie-cells.md).
-
 ## Modules
 
 Curry ships around 55 optional and always-on modules: SQL/NoSQL databases,
