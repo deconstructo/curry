@@ -114,7 +114,7 @@ and extra runtime dependencies:
 
 ## SRFI compatibility
 
-45 portable `(srfi sN name)` libraries — the same naming convention Guile,
+46 portable `(srfi sN name)` libraries — the same naming convention Guile,
 Chicken, and Chibi-Scheme use, so the same `(import ...)` line works across
 implementations. Coverage runs from foundational list/vector/hash-table
 libraries (SRFI-1, 125/126, 128, 132/133) through concurrency (SRFI-18),

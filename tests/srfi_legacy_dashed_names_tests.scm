@@ -10,7 +10,8 @@
 
 (import (srfi srfi-125) (srfi srfi-128) (srfi srfi-170) (srfi srfi-227)
         (srfi srfi-9) (srfi srfi-31) (srfi srfi-45)
-        (srfi srfi-95) (srfi srfi-78) (srfi srfi-212))
+        (srfi srfi-95) (srfi srfi-78) (srfi srfi-212)
+        (srfi srfi-141))
 
 (define pass 0)
 (define fail 0)
@@ -80,6 +81,10 @@
 (define (%dashed-original x) (+ x 1))
 (define-alias %dashed-alias %dashed-original)
 (assert-equal "srfi-212 legacy shim exports define-alias" (%dashed-alias 9) 10)
+
+;;; (srfi srfi-141)
+(assert-equal "srfi-141 legacy shim exports euclidean-remainder"
+       (euclidean-remainder -7 2) 1)
 
 ;;; Summary
 

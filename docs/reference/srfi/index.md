@@ -57,6 +57,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s128 comparators)`](s128.md) | [SRFI-128](https://srfi.schemers.org/srfi-128/) | Comparator type, basic-type comparators, simplified compound pair/list/vector comparators, `default-comparator` |
 | [`(srfi s132 sorting)`](s132-s133.md) | [SRFI-132](https://srfi.schemers.org/srfi-132/) | `list-sort`/`vector-sort`(`!`) — every variant is the same stable merge sort |
 | [`(srfi s133 vectors)`](s132-s133.md) | [SRFI-133](https://srfi.schemers.org/srfi-133/) | Vector extras layered on curry's native vector ops: fold, index/count/any/every, binary-search, concatenate, unfold |
+| [`(srfi s141 division-operators)`](s141.md) | [SRFI-141](https://srfi.schemers.org/srfi-141/) | `ceiling`/`round`/`euclidean`/`balanced` division-operator families — the two R7RS doesn't already standardize (`floor`/`truncate` are core R7RS) |
 | [`(srfi s145 assume)`](s145.md) | [SRFI-145](https://srfi.schemers.org/srfi-145/) | `assume` runtime invariant declaration (always checked, never elided) |
 | [`(srfi s158 generators-and-accumulators)`](s158.md) | [SRFI-158](https://srfi.schemers.org/srfi-158/) | Generator/accumulator combinators; `make-coroutine-generator` via a real thread |
 | [`(srfi s160 uniform-vectors)`](s160.md) | [SRFI-160](https://srfi.schemers.org/srfi-160/) | Extended homogeneous numeric vector ops (map/fold/filter/comparator/generator) for all 9 kinds, layered on `(srfi s4 uniform-vectors)` |
