@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787931701616,
+  "lastUpdate": 1787957794067,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9452,6 +9452,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 69.295,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8d1090dc52f8e3d42a8e9aa9ce2ef3766f506183",
+          "message": "docs(roadmap): catch up through v1.23.3 plus unreleased work on main (#90)\n\nThe roadmap hadn't been touched since v1.16.0/v1.17.0, but CHANGELOG.md\nhad moved on through v1.23.3, and a further tranche (7 new SRFI\nlibraries, (curry websocket)/(curry ros), the .sld manifest convention,\ntwo core bugfixes) had already been merged to main without a version\nbump. Catches all of it up:\n\n- \"Where we are now\" table: compiler IR pipeline (the first real IR\n  curry has had, shipped v1.22.0-v1.23.0), TTS, (curry sql), (curry okf),\n  cond-expand/(features), Gillespie, websocket/ros, current SRFI count\n  (46), and an explicit ✗ row for full multi-shot call/cc (previously\n  not listed as a tracked gap at all).\n- Summary timeline: nine missing version rows (v1.17.0 through v1.23.3)\n  plus one row for the unreleased-but-merged tranche, each checked\n  against CHANGELOG.md's actual headlines rather than guessed -- caught\n  and fixed two misattributions while cross-checking (the SQL layer\n  landed in v1.18.0, not spread across v1.17.x; v1.19.0's own content\n  (mariadb/postgres backends) had been silently folded into a v1.20.0\n  entry and needed its own row).\n- New \"Active work outside the phase numbering\" section: the four\n  threads asked about directly -- performance (cross-referencing\n  performance-chez-kaappi.md's own Tier status, noting its \"no IR yet\"\n  claim is now stale since Tier 2 shipped after that doc's last\n  verification pass), complete multi-shot continuations (still blocked\n  on the same tree-walker-elimination prerequisite as the GC/performance\n  work), the GC rewrite (flagged as status-uncertain rather than\n  \"in progress\" -- the gc-rewrite/gc-perf branches this roadmap\n  previously asserted were active no longer exist anywhere in this\n  repository, confirmed by checking, not assumed), and SRFI compatibility\n  (audit history, the 7 libraries added since the audit, SRFI-61 blocked\n  on issue #81, SRFI-143/211 decided against with reasoning, SRFI-144/\n  146/275/13/41/115 parked as real follow-up work).\n- Corrected every other place in the document that still asserted the\n  gc-rewrite branch was actively in progress, now that its status is\n  established as uncertain rather than assumed continuing.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T08:55:55+10:00",
+          "tree_id": "95a4cd2143c9b1c1724b9947ab29fdaee6391d9e",
+          "url": "https://github.com/deconstructo/curry/commit/8d1090dc52f8e3d42a8e9aa9ce2ef3766f506183"
+        },
+        "date": 1787957793167,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.95,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.48,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.328,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.207,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 176.841,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 288.432,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.045,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 108.915,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 73.02,
             "unit": "ms"
           }
         ]
