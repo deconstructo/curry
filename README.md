@@ -8,7 +8,7 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 Built around pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
 
-## AI and development
+## AI and development: my philosophy
 
 Yes, I do use Claude for development. My apology is this:
 
@@ -18,7 +18,7 @@ Yes, I do use Claude for development. My apology is this:
 
 * One of the freedoms of this mode of development is that I see that if even a rather large change is required to get to a better place - in terms of stability, performance, flexibility or features - then I am _happy_ to make that change! Evidence are the changes from a tree-walking interpreter to VM to JIT compiler, or the work that I've done (and backed out) on improving garbage collection.
 
-* AI may do the coding and a lot of the documentation, but I assume all responsibility for bugs, errors, omissions, poor architecture, poor code and poor documentation.
+* AI may do the coding and a lot of the documentation, but **I am responsible** for bugs, errors, omissions in the code and in the documentation. If there's something wrong, I will do my best to fix it.
 
 ## Get involved!
 
