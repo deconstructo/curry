@@ -64,8 +64,7 @@ Documentation is split into two directories:
 The numeric tower, CAS, quantum values, parallel map/reduce, modules, SRFI
 compatibility, LLM/AI integration, the LLVM JIT backend, C FFI, the garbage
 collector, and Akkadian error messages all live in
-**[FEATURES.md](FEATURES.md)** now, so this file stays focused on getting
-curry installed and oriented. FEATURES.md is the more expansive tour.
+**[FEATURES.md](FEATURES.md)**.
 
 ---
 
