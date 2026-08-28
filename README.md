@@ -41,7 +41,7 @@ Documentation is split into two directories:
 - [Akkadian / Cuneiform reference](docs/reference/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages, plus the runtime error-message phrase table
 - [Error codes](docs/reference/error-codes.md) — stable machine-legible `error-object-code`/`condition-code` registry for tooling
 - [Module index](docs/reference/modules.md) — the full list of `(curry ...)` modules, import names, and extra build dependencies
-- [SRFI compatibility](docs/reference/srfi/index.md) — the 38 portable `(srfi sN name)` libraries, one page each
+- [SRFI compatibility](docs/reference/srfi/index.md) — the 39 portable `(srfi sN name)` libraries, one page each
 - [Parallel map/reduce](docs/reference/parallel.md) — the work-stealing thread pool behind `map`/`reduce`
 - [LLVM JIT backend](docs/reference/llvm-jit.md) — auto-JIT, benchmark numbers, build flags
 - [Garbage collector reference](docs/reference/gc.md) — the two GC backends and `(gc-stats)` fields
@@ -59,127 +59,19 @@ Documentation is split into two directories:
 - [Benchmarking reference](docs/reference/benchmarking.md) — bench suites, MQTT event schema, all GC stat fields
 - [Profiling reference](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
 
-### Extended numeric tower
+## Features
 
-Fixnum → bignum → rational → flonum → complex → quaternion → octonion → multivector → surreal → symbolic. Arithmetic automatically promotes through the tower: `(+ 1/3 0.5)` → flonum, `(∂ (* x x) x)` → symbolic `(+ x x)`. See [`docs/reference/language.md`](docs/reference/language.md#values-and-types) for the full type/predicate/constructor table.
-
-### CAS and auto-differentiation
-
-Symbolic differentiation/integration, simplification, Wirtinger calculus, fractional calculus, and infix/LaTeX output — see [`docs/reference/symbolic.md`](docs/reference/symbolic.md) for the full quick-reference table.
-
-### Parallel map and reduce
-
-`map` and `reduce` automatically parallelise over multiple CPU cores on a persistent work-stealing thread pool; sequential variants are always available. See [`docs/reference/parallel.md`](docs/reference/parallel.md).
-
-### Random numbers (SRFI-27)
-
-The global source is seeded from `/dev/urandom` on first use (xoshiro256+). See [`docs/reference/srfi/s27.md`](docs/reference/srfi/s27.md).
-
-### Modules
-
-Curry ships ~55 optional and always-on modules — databases, HTTP/GraphQL/MQTT clients, an LLM client, image/scientific-data I/O, FFI, concurrency primitives, and more. Full list with import names, descriptions, and extra build dependencies: [`docs/reference/modules.md`](docs/reference/modules.md).
-
-### SRFI compatibility (`srfi`)
-
-38 portable SRFI libraries under the `(srfi sN name)` naming convention — compatible with Guile, Chicken, and Chibi-Scheme. Full index: [`docs/reference/srfi/index.md`](docs/reference/srfi/index.md).
-
----
-
-## LLM / AI integration
-
-Curry can talk to any LLM out of the box. No API wrappers, no external packages — just import and go.
-
-```scheme
-(import (curry llm))
-
-; One-shot question (Ollama, local, no key needed)
-(display (llm-ask (make-llm-client 'ollama "llama3.1") "What is a monad?"))
-
-; Claude or OpenAI (reads key from env)
-(display (llm-ask (make-llm-client 'claude) "Explain tail-call optimisation."))
-```
-
-Give the model **tools** it can actually call:
-
-```scheme
-(define conv (make-conversation (make-llm-client 'claude)))
-
-(conv-system! conv "Use tools to answer accurately.")
-
-(conv-tool! conv "sqrt"
-  "Compute the square root of a number."
-  '((n "number" "The number"))
-  (lambda (args) (number->string (sqrt (cdr (assq 'n args))))))
-
-; The model calls sqrt(144), gets "12.0", incorporates it into its reply
-(display (conv-send! conv "What is the square root of 144? Use the sqrt tool."))
-```
-
-The library runs the full **agentic loop** automatically — send, detect tool calls, execute lambdas, feed results back, repeat. Supports Anthropic's native tool-use protocol and the OpenAI function-calling protocol; Ollama and any OpenAI-compatible endpoint use the OpenAI path.
-
-See [docs/guides/guide-llm.md](docs/guides/guide-llm.md) for ten progressively interesting examples: database queries, parallel actor pipelines, structured output, MCP servers backed by local models, CAS-assisted maths tutors, and more.
-
----
-
-### LLVM JIT backend
-
-When built with `-DBUILD_LLVM=ON`, Curry adds a tiered native-compilation layer on top of the bytecode VM: any closure called ≥ 50 times is automatically compiled to native ARM64/x86-64 on the next call, transparently — no source changes needed. Typical speedups on recursive/loop-heavy code range 1.1×-14×. See [`docs/reference/llvm-jit.md`](docs/reference/llvm-jit.md) for the procedure list, benchmark numbers, and build command.
-
----
-
-### C FFI
-
-When built with `-DBUILD_FFI=ON`, Curry can call any C library directly from Scheme with no glue code.
-
-```scheme
-(import (curry ffi))
-
-(define-foreign-library libm "libm.so")     ; Linux
-; (define-foreign-library libm "libm.dylib") ; macOS
-
-(define-foreign (c-sin  (x double)) → double #:from libm #:c-name "sin")
-(define-foreign (c-sqrt (x double)) → double #:from libm #:c-name "sqrt")
-
-(c-sin 1.5707963)   ; → 1.0
-(c-sqrt 2.0)        ; → 1.41421...
-```
-
-**Zero-copy matrix passthrough** — pass a matrix or tensor's raw `double*` directly to C (e.g. BLAS) with no copying:
-
-```scheme
-(with-pinned-matrix A pa
-  (with-pinned-matrix B pb
-    (with-pinned-matrix C pc
-      (cblas-dgemm CblasRowMajor CblasNoTrans CblasNoTrans
-                   rows cols inner 1.0 pa cols pb cols 0.0 pc cols))))
-```
-
-Requires `libffi-dev` on Linux; found automatically via Homebrew on macOS. See [`docs/reference/module-ffi.md`](docs/reference/module-ffi.md) for the full API and type-mapping table.
-
----
-
-### Garbage collector
-
-Curry ships two GC backends, selectable at runtime with `--gc boehm` (default, conservative, no configuration) or `--gc generational` (experimental per-thread nursery, lower pause times for allocation-heavy workloads). `(gc-stats)`/`(gc-stats-reset!)` expose live counters and pause times. See [`docs/reference/gc.md`](docs/reference/gc.md) for the full backend/flag/stats-field reference, [docs/reference/benchmarking.md](docs/reference/benchmarking.md) for the real-time Grafana monitoring stack, and [docs/reference/profiling.md](docs/reference/profiling.md) for the runtime profiler.
+The numeric tower, CAS, quantum values, parallel map/reduce, modules, SRFI
+compatibility, LLM/AI integration, the LLVM JIT backend, C FFI, the garbage
+collector, and Akkadian error messages all live in
+**[FEATURES.md](FEATURES.md)** now, so this file stays focused on getting
+curry installed and oriented. FEATURES.md is the more expansive tour.
 
 ---
 
 ## Installation & Building
 
 See [docs/guides/INSTALL.md](docs/guides/INSTALL.md) for Homebrew installation (macOS), building from source on Linux and macOS (including Qt6 and `.deb`/`.rpm` packaging), and running the test suite.
-
----
-
-## Akkadian error messages
-
-All runtime errors carry a Standard Babylonian preamble identifying the fault category:
-
-```
-𒀭 ḫiṭītu — lā nikkassum:
-  +: not a number: "hello"
-```
-
-See [`docs/reference/akkadian-reference.md`](docs/reference/akkadian-reference.md#error-messages) for the full phrase table.
 
 ---
 

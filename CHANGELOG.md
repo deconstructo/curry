@@ -1,5 +1,255 @@
 # Changelog
 
+### 1.23.3 - 2026-08-28
+
+**New — `(curry gillespie)`: stochastic simulation of cell biochemistry**
+
+The Gillespie stochastic simulation algorithm (SSA): a set of chemical
+species undergoing reactions modeled as a continuous-time Markov
+chain, rather than a system of smooth ODEs — the point being that real
+gene expression is noisy at low molecule counts (a handful of mRNA
+copies, not a continuous concentration), and this simulates the
+individual random reaction events directly instead of averaging them
+away. Environment sensitivity (temperature, pH, nutrients) is never a
+special feature of the engine itself — a reaction's propensity is
+just an ordinary procedure of `(species environment)`, so composable
+rate-law combinators (`mass-action`, `arrhenius`, `michaelis-menten`,
+`hill`, glued together with `rate*`) are the entire mechanism.
+Multi-cell simulation isn't a separate API either: spawn one curry
+actor per cell, each running its own `gillespie-step!` loop. Two
+rounds of independent review plus direct manual runtime testing found
+five real bugs before this landed, including one that drove a species
+count to -970 instead of stopping at zero and another that could
+silently freeze an otherwise-live cell with a NaN propensity. See
+docs/reference/module-gillespie.md and docs/guides/gillespie-cells.md.
+
+**Fix — SRFI-27's `random-source-pseudo-randomize!` never actually did anything deterministic; plus a real cross-thread data race in the shared RNG state**
+
+`random-source-pseudo-randomize!` (SRFI-27's deterministic reseed,
+taking two integer seed arguments) was bound to the exact same
+primitive as `random-source-randomize!` (reseed unpredictably from
+`/dev/urandom`) — it silently ignored its seed arguments, so every
+value it claimed to make reproducible was actually still random.
+Separately, `random-source->random-integer` was bound to the same
+primitive as `random-source->random-real`, returning a zero-argument
+real-number generator instead of a one-argument integer generator.
+Both found while adding deterministic-seed test coverage for the
+Gillespie module above. While in there: the RNG state (`rng_s`) was a
+bare global with zero synchronization despite curry having real
+OS-thread actors that can call `random-real`/`random-integer`
+concurrently — a genuine data race, not hypothetical, given Gillespie's
+own multi-cell design is exactly "each cell is an actor drawing its
+own random waiting times." Every access now goes through a mutex.
+
+**New — SRFI-27 `random-source-state-ref`/`random-source-state-set!`**
+
+Captures and restores the RNG's raw internal state as a 4-element list
+of exact integers (one per xoshiro256+ state word), letting a caller
+snapshot the generator and replay an identical draw sequence later.
+
+**New — closed 20 silent gaps across six SRFI compatibility libraries**
+
+A full audit comparing all 39 implemented SRFIs against their official
+specifications (rather than against curry's own documentation, which
+can go stale) found real, previously undocumented gaps. Closed:
+SRFI-170 (`owner/unchanged`, `group/unchanged`, `user-info:parsed-full-name`),
+SRFI-125/126 (`hash-table-mutable?`, `hash-table=?`, `hash-table-find`,
+`hash-table-pop!`, `hash-table-xor!`), SRFI-128 (`make-eq-comparator`/
+`make-eqv-comparator`/`make-equal-comparator`, the standalone hash
+procedures, `hash-bound`, `hash-salt`, `comparator-if<=>`), SRFI-227
+(`opt*-lambda`, `define-optionals`, `define-optionals*`), SRFI-1
+(`car+cdr`, `pair-fold`, `pair-fold-right`, `map-in-order`, `filter!`,
+`remove!`, `partition!`, `length+`, `except-last-pair`,
+`except-last-pair!`, `lset-diff+intersection`,
+`lset-diff+intersection!`), and SRFI-133 (`vector-reverse-copy`,
+`vector-append-subvectors`, `vector-map!`, `vector-cumulate`,
+`vector-skip`, `vector-skip-right`, `vector-partition`,
+`reverse-vector->list`, `reverse-list->vector`, `vector-unfold!`,
+`vector-unfold-right!`). Also found and fixed along the way: every one
+of these fixes had initially only been applied to each SRFI's
+numeric-named shim (e.g. `170.scm`), not its legacy dashed-name
+sibling (`srfi-170.scm`) — the two are separate `define-library` forms
+with independent export lists, so `(import (srfi srfi-170))` raised
+unbound-variable on a call that worked fine via `(import (srfi 170))`.
+All four affected dashed-name shims are fixed, with dedicated
+regression coverage. The remaining gaps found by the same audit
+(SRFI-113 sets/bags, SRFI-132/158/160/194, and SRFI-18's threading
+introspection surface) are tracked for a future release.
+
+**Docs — README.md split into README.md + FEATURES.md**
+
+The feature-tour material (extended numeric tower, CAS, parallel
+map/reduce, modules, SRFI compatibility, LLM/AI integration, the LLVM
+JIT backend, C FFI, the garbage collector, Akkadian error messages)
+moved to a new, more expansive FEATURES.md; README.md keeps the
+project overview, the AI-assisted-development disclosure, installation/
+building, and the changelog pointer.
+
+### 1.23.2 - 2026-08-27
+
+**Fix — the `espeak-ng` TTS backend's `#:voice` never actually worked, for any voice, on any language**
+
+`espeak-tts-voices` built its `(name . locale)` pairs as `(VoiceName .
+Language)` — e.g. `("English_(America)" . "en-us")` — and `name` is
+what `(curry tts)`'s own contract requires as a valid `#:voice` value,
+passed straight through to `espeak-ng -v`. Real `espeak-ng` only
+accepts the Language column there; passing the VoiceName column fails
+with "the specified espeak-ng voice does not exist." This meant
+`#:voice` had never actually worked for any value taken from the
+backend's own `tts-voices` output, for any language, since the file
+was written — only ever manually verified with `#:voice` left unset.
+Found while checking whether Irish (Gaeilge) TTS is possible through
+curry (it is: `espeak-ng` genuinely bundles an Irish voice); fixed by
+using the Language column for both fields of the pair.
+
+**Fix — an uncaught `(curry conditions)` object printed as a bare `#<object 46>` at the top level**
+
+`print_scheme_error`'s top-level error reporter only special-cased
+R7RS `ErrorObj` (`T_ERROR`), not the separate CL-style `Condition`
+record (`T_CONDITION`) `condition-error` raises — and the generic
+value writer had no print case for `T_CONDITION` either, so the
+fallback rendered the bare object-tag number with no indication of
+what actually failed. Found via real end-to-end TTS/Piper testing:
+`(current-tts-backend 'piper) (tts-speak "...")` with no voice
+directory configured raises exactly this kind of condition. Both the
+error reporter and the generic writer now handle `T_CONDITION`
+properly.
+
+**New — `libpiper` packaged as a real Homebrew formula**
+
+Replaces the previous `--with-piper` workaround (v1.23.1, staging
+files out of `/usr/local` at build time) with a proper dependency:
+`Formula/libpiper.rb` builds libpiper1-gpl's `libpiper` subdirectory
+(which needs network access during install — it clones `espeak-ng`
+and downloads a prebuilt `onnxruntime` release itself) and fixes up
+both dylibs' install names afterward. Both `libpiper.dylib` and
+onnxruntime's dylib ship with an `@rpath`-relative `LC_ID_DYLIB`,
+unlike every other Homebrew-packaged dependency curry links against —
+without fixing this, `dlopen()`-ing `piper.so` failed at runtime with
+"no LC_RPATH's found," confirmed by hitting exactly that failure twice
+during development (once for libpiper's own id, again for its internal
+reference to onnxruntime). `curry.rb` now just `depends_on "libpiper"
+if build.with? "piper"`.
+
+**Fix — the `libpiper` espeak-ng-data autodetection didn't check the new formula's own install location**
+
+`piper-create`'s espeak-data-path autodetection predates
+`Formula/libpiper.rb`; on a machine with only that formula installed
+(no separate `espeak-ng`), the lookup fell through to `#f` and
+`piper-create` fell back to a stale build-tmp path baked into
+`libpiper.dylib` at its own build time. Found by testing piper support
+manually end to end rather than just checking `piper-version`.
+
+### 1.23.1 - 2026-08-26
+
+**New — Homebrew `--with-piper` formula option**
+
+Since `libpiper` had no Homebrew formula of its own yet (see v1.23.2
+above, which replaced this), the option searched `/usr/local` for a
+manually-built `libpiper`/`onnxruntime` install and staged the files
+into a build-local directory to work around Homebrew's build sandbox
+stripping `-I`/`-L` flags under `/usr/local` on this machine's
+non-`/usr/local` Homebrew prefix.
+
+### 1.23.0 - 2026-08-26
+
+**New — compiler Tiers 2.3 through 2.6: a local inliner, wrapper elision, wider open-coding, and an interleaved-lowering session API**
+
+A local (cp0-style) inliner for known, non-escaping lambdas, extended
+to `let`/`let*`-bound call sites; compiler-synthesized wrapper closures
+elided at their call sites once no longer needed; open-coding (direct
+bytecode instead of a generic call) widened to `car`/`cdr`/`cons`/
+`pair?`/`null?` and the arithmetic/comparison operators; and a new
+interleaved-lowering session API for Tier 2.6's IR pipeline work.
+Landed as a sequence of small, independently reviewed steps rather
+than one large change; several rounds of independent review found and
+fixed real miscompilation bugs along the way, including a parameter-
+shadowing bug in the inliner, a let/let*-bound sibling-name
+miscompilation, a dotted-tail gap in the closedness check, and more
+than one pending-slot/`MAX_LOCALS` bookkeeping gap (`with-exception-
+handler`, `apply`/`values`/`call-with-values`, named-let splicing).
+
+**Refactor — `compiler.c` split into five files along IR pipeline boundaries**
+
+`compiler.c`, `ir_lower.c`, `ir_emit.c`, `compiler_ir_checks.c`, and
+`compiler_classic.c` — a pure reorganization along the compile →
+lower → emit pipeline stages the Tier 2.x work above established, no
+behavior change.
+
+**Fix — `call/cc` leaked the GC shadow stack, `gc_inhibit_count`, and JIT call depth**
+
+An escape continuation invoked more than once, or invoked after its
+dynamic extent had already unwound, could leave curry's GC shadow
+stack, its GC-inhibit reference count, and the JIT's own call-depth
+counter permanently offset from reality — each a slow, cumulative
+corruption rather than an immediate crash.
+
+**New — SRFI 106 (Basic Socket Interface)**
+
+A thin compatibility layer over curry's existing, richer networking
+API (`tcp-connect`/`tcp-listen`/`udp-socket`/TLS/non-blocking mode,
+already a strict superset of SRFI 106's blocking-only, TCP/UDP-only,
+no-TLS scope), for portable code written against the standard
+interface. The shutdown-method flag category needed real design
+attention: real POSIX `SHUT_RD`/`SHUT_WR`/`SHUT_RDWR` are `0`/`1`/`2`
+on every platform checked — not independent bits — so combining them
+the way the address-info/message-type flags combine their own
+genuinely-independent bits would have silently produced the wrong
+value; fixed with a clean, always-combinable `1`/`2`/`3` encoding
+translated to the real platform constant inside `socket-shutdown`'s
+own implementation. Independent review found and fixed three real
+bugs: a leaked `dup()`'d file descriptor when `fdopen` failed inside
+`socket-input-port`/`socket-output-port` (the same pre-existing gap
+also found and patched in `tcp-connect`/`tcp-accept` for consistency),
+a 16-byte port-number buffer sized for a 32-bit range instead of
+curry's actual ~61-bit fixnum range, and a missing Windows include.
+
+**Test — real behavioral coverage for `(srfi s215 log)`**
+
+SRFI 215 (Central Log Exchange) was implemented but only smoke-tested
+("`send-log` is bound"). New coverage: message shape, severity
+constants, `current-log-fields` merging, value-conversion rules, error
+paths, and the pre-install buffering/replay mechanism. Independent
+review found one test-quality bug (an order-claiming check using
+order-independent `assq` lookups) — fixed and verified it now actually
+catches an ordering regression by temporarily breaking the
+implementation, confirming the test fails, then restoring it.
+
+**New — Piper neural TTS backend**
+
+`(curry piper)`, a real C module wrapping `libpiper`'s streaming
+synthesis API directly (rather than forcing the "deep struct
+traversal" case through the generic FFI layer), registered into
+`(curry tts)` as the `'piper` backend. Unlike the other two backends
+(plain `say`/`espeak-ng` subprocess spawning), this does native
+direct-to-speaker audio output — CoreAudio's `AudioQueue` on macOS,
+ALSA on Linux — streaming synthesized chunks as they're produced, no
+temp file, no external player process. Found and fixed via the
+project's first real runtime test of the module (as opposed to just
+compiling it): a data-loss bug, an exit-time crash, and a
+use-after-free. Not compiled in by default (`-DBUILD_MODULE_PIPER=ON`,
+`libpiper` has no system package yet); see v1.23.1/v1.23.2 above for
+how the build story evolved, and docs/guides/tts-piper.md for the full
+walkthrough.
+
+### 1.22.1 - 2026-08-22
+
+**Fix — `--with-qt6` silently failed to find Qt6 on Apple Silicon Homebrew**
+
+`brew --prefix qt@6` resolves to Homebrew's umbrella `qt` formula,
+whose `lib/cmake/Qt6/` doesn't actually contain `Qt6Config.cmake` —
+only its `qtbase` dependency ships it — so `find_package(Qt6 ...)`
+silently missed and the module was skipped with just a `WARNING`, easy
+to not notice. `CMakeLists.txt` now falls back to `brew --prefix
+qtbase` on macOS when the initial lookup misses; `Formula/curry.rb`
+had the identical bug in Ruby form (`--with-qt6` failed to configure
+at all) and needed the same fix, plus getting the prefix ordering
+right (`qtbase` must precede `qt@6` on `CMAKE_PREFIX_PATH`, or CMake
+resolves the `Qt6CoreTools` sub-config from the broken umbrella tree
+instead). Once found, the qt6 module also now bakes in Homebrew's Qt
+plugin directory on macOS, so `(import (curry qt6))` no longer aborts
+with "Could not find the Qt platform plugin cocoa."
+
 ### 1.22.0 - 2026-08-21
 
 **New — compiler now has a real IR pipeline, live in production for the first time**
