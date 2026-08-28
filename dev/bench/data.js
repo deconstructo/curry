@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787890719753,
+  "lastUpdate": 1787891943352,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -8624,6 +8624,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.424,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1be8be220b3c2fbcaae168be4b0c7a4033193514",
+          "message": "Add AI and development section to README\n\nAdded a section explaining a little bit of the philosophy behind how AI is used. Also a call for people to get involved",
+          "timestamp": "2026-08-28T14:38:26+10:00",
+          "tree_id": "e04b1e315099e71e82a0a1cafc6f5e47cb5eccf3",
+          "url": "https://github.com/deconstructo/curry/commit/1be8be220b3c2fbcaae168be4b0c7a4033193514"
+        },
+        "date": 1787891941741,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.927,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.013,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.199,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.584,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 139.341,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 285.245,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.573,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 91.785,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 70.826,
             "unit": "ms"
           }
         ]
