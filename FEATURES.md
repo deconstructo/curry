@@ -2,10 +2,7 @@
 
 *v1.23.3 — 2026-08-28*
 
-A tour of what curry actually does, beyond the one-paragraph pitch in
-[README.md](README.md). For build/install instructions see
-[docs/guides/INSTALL.md](docs/guides/INSTALL.md); for the full API surface
-of any given piece, follow the links inline.
+A tour of what curry actually does
 
 ---
 
