@@ -601,6 +601,17 @@ void scm_write(val_t v, val_t port) {
         port_write_char(port, ')');
         return;
     }
+    if (vis_bytes(v)) {
+        Bytevector *bv = as_bytes(v);
+        port_write_string(port, "#u8(", 4);
+        for (uint32_t i = 0; i < bv->len; i++) {
+            if (i) port_write_char(port, ' ');
+            int n = snprintf(buf, sizeof(buf), "%u", bv->data[i]);
+            port_write_string(port, buf, (uint32_t)n);
+        }
+        port_write_char(port, ')');
+        return;
+    }
     if (vis_condition(v)) {
         Condition *c = as_condition(v);
         const char *name = vis_symbol(c->type_sym) ? as_sym(c->type_sym)->data : "condition";
