@@ -75,6 +75,13 @@ val_t scm_list_tail(val_t lst, int n) {
 
 static val_t scm_append_inner(val_t a, val_t b) {
     if (vis_nil(a)) return b;
+    /* A non-pair, non-nil `a` (e.g. a caller mistakenly passing a thunk
+     * where a list was expected) must not fall through to vcar/vcdr --
+     * those read through it as a raw Pair* regardless of actual type,
+     * which for most heap objects walks off into unrelated struct fields
+     * and can segfault the whole process rather than raise a catchable
+     * Scheme error. See GH issue #84. */
+    if (!vis_pair(a)) scm_raise(V_FALSE, "append: not a list");
     return scm_cons(vcar(a), scm_append_inner(vcdr(a), b));
 }
 val_t scm_append(val_t a, val_t b) {
