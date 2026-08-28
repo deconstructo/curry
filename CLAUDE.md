@@ -14,6 +14,10 @@ After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `
 
 After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `/security-review` skill) to review it before declaring the task done. The subagent should not share context with the writing session — the point is an independent read. Pay particular attention to: array bounds vs loop bounds, off-by-one errors in sexagesimal/numeric code, and cuneiform reader edge cases.
 
+## Bug reports
+
+When you find a real bug in existing code — whether stumbled on while working on something else, or surfaced by a review pass — file it as a GitHub issue (`gh issue create`) rather than only fixing it silently or only mentioning it in conversation. This keeps a durable, searchable record independent of any one session's chat history. Fixing it in the same session afterward, when small and in scope, is still fine and often the right call — the issue documents what was wrong and why, the fix closes it.
+
 ## Build
 
 ```bash
