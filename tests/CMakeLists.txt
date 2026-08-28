@@ -114,6 +114,7 @@ add_test(NAME srfi_s54_cat COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME srfi_9_31_45 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_9_31_45_tests.scm)
 add_test(NAME websocket COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/websocket_tests.scm)
 add_test(NAME ros COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ros_tests.scm)
+add_test(NAME srfi_95_78_212 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_95_78_212_tests.scm)
 if(BUILD_MPFR)
   add_test(NAME mpfr COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 endif()
