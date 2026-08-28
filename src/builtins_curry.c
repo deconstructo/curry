@@ -1377,6 +1377,43 @@ static val_t prim_random_source_p(int ac, val_t *av, void *ud) {
     return vis_symbol(av[0]) ? V_TRUE : V_FALSE;
 }
 
+/* random-source-state-ref source -- SRFI 27 leaves the state object's
+   representation entirely up to the implementation (it's opaque, only
+   meant to round-trip through random-source-state-set!); a 4-element
+   list of exact integers, one per xoshiro256+ state word, is as good a
+   choice as any. Each word is reinterpreted as a signed int64 for
+   num_make_bignum_i (which itself falls back to a plain fixnum when the
+   value fits, in_fixnum_range) -- decoding does the reverse
+   reinterpretation via num_to_long, so the round-trip preserves the
+   exact original bit pattern regardless of whether a given word's top
+   bit happens to be set. */
+static val_t prim_random_source_state_ref(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    val_t words[4];
+    pthread_mutex_lock(&rng_mutex);
+    for (int i = 0; i < 4; i++) words[i] = num_make_bignum_i((long)(int64_t)rng_s[i]);
+    pthread_mutex_unlock(&rng_mutex);
+    val_t lst = V_NIL;
+    for (int i = 3; i >= 0; i--) lst = scm_cons(words[i], lst);
+    return lst;
+}
+
+static val_t prim_random_source_state_set(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t lst = av[1];
+    uint64_t words[4];
+    for (int i = 0; i < 4; i++) {
+        if (!vis_pair(lst)) scm_raise(V_FALSE, "random-source-state-set!: state list too short");
+        words[i] = (uint64_t)(int64_t)num_to_long(vcar(lst));
+        lst = vcdr(lst);
+    }
+    pthread_mutex_lock(&rng_mutex);
+    for (int i = 0; i < 4; i++) rng_s[i] = words[i];
+    rng_seeded = true;
+    pthread_mutex_unlock(&rng_mutex);
+    return V_VOID;
+}
+
 static val_t prim_random_source_to_real(int ac, val_t *av, void *ud) {
     (void)ac; (void)av; (void)ud;
     return env_lookup(GLOBAL_ENV, sym_intern_cstr("random-real"));
@@ -1647,6 +1684,8 @@ void builtins_curry_register(val_t env) {
     DEF("random-integer",                 prim_random_integer,        1,1);
     DEF("make-random-source",             prim_make_random_source,    0,0);
     DEF("random-source?",                 prim_random_source_p,       1,1);
+    DEF("random-source-state-ref",        prim_random_source_state_ref, 1,1);
+    DEF("random-source-state-set!",       prim_random_source_state_set, 2,2);
     DEF("random-source-randomize!",       prim_random_seed,           1,1);
     DEF("random-source-pseudo-randomize!",prim_random_pseudo_seed,    3,3);
     DEF("random-source->random-real",     prim_random_source_to_real, 1,1);

@@ -21,11 +21,15 @@
 
     ; Fold, unfold, map
     fold fold-right reduce reduce-right
+    pair-fold pair-fold-right
     unfold unfold-right
-    map! pair-for-each append-map append-map! filter-map flat-map
+    map! map-in-order pair-for-each append-map append-map! filter-map flat-map
 
     ; Filtering / partitioning
-    any every remove delete delete! partition count
+    any every remove remove! filter! delete delete! partition partition! count
+
+    ; car+cdr, length+, except-last-pair
+    car+cdr length+ except-last-pair except-last-pair!
 
     ; Searching
     find find-tail take-while drop-while span break list-index
@@ -50,6 +54,7 @@
     lset<= lset= lset-adjoin
     lset-union lset-intersection lset-difference lset-xor
     lset-union! lset-intersection! lset-difference! lset-xor!
+    lset-diff+intersection lset-diff+intersection!
 
     ;; Akkadian synonyms -- lib/curry/modules/curry/private/lang-aliases.scm
     rakāsum-mala 𒈠𒀀

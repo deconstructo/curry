@@ -13,7 +13,10 @@
     string-comparator string-ci-comparator symbol-comparator
     pair-comparator list-comparator vector-comparator
     eq-comparator eqv-comparator equal-comparator
-    make-eq-comparator make-eqv-comparator make-equal-comparator)
+    make-eq-comparator make-eqv-comparator make-equal-comparator
+    boolean-hash char-hash char-ci-hash string-hash string-ci-hash
+    symbol-hash number-hash default-hash hash-bound hash-salt
+    comparator-if<=>)
   (begin
 
     ;; ------------------------------------------------------------------
@@ -73,6 +76,22 @@
     (define (<=? cmp . objs) (%chain (lambda (a b) (not ((comparator-ordering-predicate cmp) b a))) cmp objs))
     (define (>=? cmp . objs) (%chain (lambda (a b) (not ((comparator-ordering-predicate cmp) a b))) cmp objs))
 
+    ;; (comparator-if<=> [comparator] a b less-branch equal-branch greater-branch)
+    ;; -- computes the 3-way comparison once (equality first, then
+    ;; ordering) and evaluates exactly one branch. comparator is optional
+    ;; per spec, defaulting to (default-comparator); the two clauses
+    ;; below dispatch on that via ordinary syntax-rules arity matching
+    ;; (5 sub-forms vs. 6), which is unambiguous since the two shapes
+    ;; have different lengths.
+    (define-syntax comparator-if<=>
+      (syntax-rules ()
+        ((_ a b less eq gtr)
+         (comparator-if<=> default-comparator a b less eq gtr))
+        ((_ comparator a b less eq gtr)
+         (cond ((=? comparator a b) eq)
+               ((<? comparator a b) less)
+               (else gtr)))))
+
     ;; ------------------------------------------------------------------
     ;; Basic-type comparators
     ;; ------------------------------------------------------------------
@@ -97,6 +116,37 @@
     (define (make-eq-comparator) eq-comparator)
     (define (make-eqv-comparator) eqv-comparator)
     (define (make-equal-comparator) equal-comparator)
+
+    ; The spec's standalone hash procedures, alongside the comparators
+    ; above that already use %default-hash internally for the same
+    ; types -- %default-hash's write-then-hash approach already handles
+    ; every one of these types correctly (write produces distinguishing
+    ; text per type: #t/#f, #\a, "str", a-symbol, 42), so each of these
+    ; is a direct call except the two case-insensitive ones, which fold
+    ; case first so char-ci=?/string-ci=?-equal values hash the same.
+    (define (boolean-hash b) (%default-hash b))
+    (define (char-hash c) (%default-hash c))
+    (define (char-ci-hash c) (%default-hash (char-foldcase c)))
+    (define (string-hash s) (%default-hash s))
+    (define (string-ci-hash s) (%default-hash (string-foldcase s)))
+    (define (symbol-hash s) (%default-hash s))
+    (define (number-hash n) (%default-hash n))
+    (define (default-hash obj) (%default-hash obj))
+
+    ; %default-hash's own modulus (see its definition below) -- every
+    ; hash-bound-and-hash-salt pair curry ships is fixed and known ahead
+    ; of time, so hash-bound is a plain constant rather than something
+    ; computed from a comparator's own hash-function.
+    (define (hash-bound) 1073741824)
+
+    ; A fixed, non-secret salt value: %default-hash and every hash
+    ; procedure above are pure functions of their input with no salting
+    ; at all, so this exists only so a caller writing their OWN salted
+    ; hash function has a stable value to fold in for consistency with
+    ; the rest of a program -- curry's own built-in hash functions don't
+    ; read it, which the spec permits (it requires hash-salt to exist and
+    ; be stable, not that every hash function must incorporate it).
+    (define (hash-salt) 0)
 
     (define boolean-comparator
       (%make-comparator boolean? (lambda (a b) (eq? a b))

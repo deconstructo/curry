@@ -62,6 +62,32 @@
 (check "make-equal-comparator matches equal-comparator's equality"
        (=? (make-equal-comparator) (list 1 2) (list 1 2)) #t)
 
+;;; Standalone hash procedures + hash-bound/hash-salt + comparator-if<=> --
+;;; Tier 2 gap-closing additions.
+
+(check "boolean-hash is within hash-bound" (< (boolean-hash #t) (hash-bound)) #t)
+(check "char-hash is consistent for equal chars" (= (char-hash #\a) (char-hash #\a)) #t)
+(check "char-ci-hash ignores case" (= (char-ci-hash #\a) (char-ci-hash #\A)) #t)
+(check "string-hash is consistent for equal strings"
+       (= (string-hash "hello") (string-hash "hello")) #t)
+(check "string-ci-hash ignores case"
+       (= (string-ci-hash "Hello") (string-ci-hash "HELLO")) #t)
+(check "symbol-hash is consistent for eq symbols" (= (symbol-hash 'a) (symbol-hash 'a)) #t)
+(check "number-hash is consistent for equal numbers" (= (number-hash 42) (number-hash 42)) #t)
+(check "default-hash is within hash-bound" (< (default-hash "anything") (hash-bound)) #t)
+(check "hash-salt is a nonnegative exact integer within hash-bound"
+       (and (exact-integer? (hash-salt)) (>= (hash-salt) 0) (< (hash-salt) (hash-bound)))
+       #t)
+
+(check "comparator-if<=>: less branch, default comparator"
+       (comparator-if<=> 1 2 'less 'eq 'gtr) 'less)
+(check "comparator-if<=>: equal branch, default comparator"
+       (comparator-if<=> 5 5 'less 'eq 'gtr) 'eq)
+(check "comparator-if<=>: greater branch, default comparator"
+       (comparator-if<=> 9 5 'less 'eq 'gtr) 'gtr)
+(check "comparator-if<=>: explicit comparator"
+       (comparator-if<=> real-comparator 9 5 'less 'eq 'gtr) 'gtr)
+
 ;;; Summary
 
 (newline)
