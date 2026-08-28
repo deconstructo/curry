@@ -778,11 +778,16 @@ add_subdirectory(tests)
 install(TARGETS curry DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS curry_core DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/curry)
-# Scheme source modules (gravity.scm etc.) — placed so <exe>/../lib/curry/modules finds them
+# Scheme source modules (gravity.scm etc.) — placed so <exe>/../lib/curry/modules finds them.
+# Matches both extensions the module loader itself accepts at a given
+# library path (modules.c tries .sld before .scm): the top-level SRFI
+# shims (srfi/N.sld, srfi/srfi-N.sld) are pure re-export manifests with
+# no implementation of their own, distinct from the real .scm
+# implementation files they import.
 install(DIRECTORY lib/curry/modules/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/curry/modules
         OPTIONAL
-        FILES_MATCHING PATTERN "*.scm")
+        FILES_MATCHING PATTERN "*.scm" PATTERN "*.sld")
 
 # Documentation
 install(DIRECTORY docs/

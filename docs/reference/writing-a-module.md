@@ -28,6 +28,58 @@ Match the library name to the file's own `(curry ...)` import path: a file at
 at `lib/curry/modules/curry/foo/bar.scm` is `(define-library (curry foo bar)
 ...)`.
 
+## Splitting a module across multiple files
+
+A single `.scm` file with everything in one `(begin ...)` is the default and
+still the right choice for most modules — don't split a module just because
+you can. Split when a module has grown large enough that one file is
+genuinely hard to navigate, or when it naturally has independent pieces (e.g.
+per-platform implementations, or a large data table separate from the logic
+that uses it).
+
+The mechanism is a `.sld` (Scheme Library Definition) manifest plus one or
+more plain `.scm` implementation files, using R7RS's own `(include
+"filename")` library declaration — a real, already-working capability in
+curry (not something this pattern requires adding), proven by
+`tests/fixtures/include_relative/test-include-relative.sld` and its
+regression test:
+
+```scheme
+;; lib/curry/modules/curry/my-module.sld -- the manifest: name, imports,
+;; exports, and which implementation file(s) supply them. No (begin ...),
+;; no definitions of its own.
+(define-library (curry my-module)
+  (import (scheme base))
+  (import (curry some-dependency))
+  (export public-name-1 public-name-2)
+  (include "my-module/part1.scm")
+  (include "my-module/part2.scm"))
+```
+
+```scheme
+;; lib/curry/modules/curry/my-module/part1.scm -- plain top-level
+;; definitions, NOT wrapped in its own define-library. `include` splices
+;; this file's forms directly into the manifest's own library
+;; environment, the same as if they'd been written inline.
+(define (public-name-1 ...) ...)
+(define (%private-helper-1 ...) ...)
+```
+
+A filename given to `include` resolves relative to the **including file's
+own directory** (not the process's cwd) — confirmed by a real bug found
+porting SRFI-279 upstream, where a library whose directory wasn't the
+process's cwd couldn't portably `include` a sibling file. This is exactly
+what upstream SRFI reference implementations with per-platform files (e.g.
+SRFI-279's own `278.sld` including `chibi.scm`/`guile.scm`/`generic.scm`)
+rely on, so it's a proven, portable pattern, not a curry-specific trick.
+
+`.sld` vs `.scm` makes no difference to curry's module loader beyond search
+order (`src/modules.c` tries `.sld` before `.scm` at a given library path) —
+using `.sld` for a manifest-only file is a convention borrowed from the wider
+R7RS ecosystem to signal "this file declares a library's shape, it doesn't
+implement it," the same way the `(srfi N)`/`(srfi srfi-N)` bare re-export
+shims under `lib/curry/modules/srfi/` do (see `docs/reference/srfi/index.md`).
+
 ## Why explicit imports are mandatory, not decorative
 
 A `define-library` body runs in a **fresh environment with no parent** — see

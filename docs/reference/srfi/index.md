@@ -4,7 +4,7 @@ Curry ships a set of pure-Scheme SRFI compatibility libraries under the `(srfi s
 
 ## Bare-number `(srfi N)` shims
 
-The naming convention SRFI 97 itself specifies — and the one Chibi-Scheme and Gauche actually implement — is a bare-number library name with no descriptive component: `(import (srfi 1))`, not `(import (srfi s1 lists))`. For every library below, curry also ships a one-line shim `lib/curry/modules/srfi/N.scm` that just imports the `(srfi sN name)` library and re-exports everything it exports, so both spellings work:
+The naming convention SRFI 97 itself specifies — and the one Chibi-Scheme and Gauche actually implement — is a bare-number library name with no descriptive component: `(import (srfi 1))`, not `(import (srfi s1 lists))`. For every library below, curry also ships a one-line manifest `lib/curry/modules/srfi/N.sld` that just imports the `(srfi sN name)` library and re-exports everything it exports, so both spellings work. It's a `.sld` (Scheme Library Definition), not `.scm` — a pure re-export declaration with no implementation of its own, distinct from the real `.scm` implementation file it imports; curry's module loader accepts either extension at a given library path, trying `.sld` first:
 
 ```scheme
 (import (srfi 1))          ; same bindings as...
