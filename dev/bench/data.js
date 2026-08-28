@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787908706226,
+  "lastUpdate": 1787924679942,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9245,6 +9245,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.743,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7140ff04eb4a949201dc308707d0032d0944b81f",
+          "message": "feat(srfi): add SRFI-141 (Integer Division) (#89)\n\nAdds the four division-operator families SRFI-141 defines beyond what\nR7RS already standardizes (floor and truncate are core R7RS; this adds\nceiling, round, euclidean, and balanced). Curry's own hash-table-ref\nassessment aside, this one was flagged as a genuine, currently-missing,\nlow-cost gap worth closing -- unlike SRFI-143 (fixnums) and SRFI-144\n(flonums), assessed separately and intentionally skipped: 143 exists\npurely to let a compiler skip type-dispatch overhead by guaranteeing a\nbounded machine integer, which fights curry's own numeric-tower design\ngoal of making that distinction invisible, and 144 is mostly a thin\n~80-procedure naming wrapper around math curry already has generically.\n\nEvery family here is derived from R7RS's own floor-quotient/\nfloor-remainder rather than raw division, ships as the standard\nthree-file shape (srfi s141 division-operators / srfi 141 / srfi\nsrfi-141, using the new .sld manifest convention), and is tested with\n27 checks including bignum cases.\n\nIndependent code review (fresh subagent, no shared context) ran\nexhaustive brute-force checks (d in [-8,8], n in [-30,30], 976\ncombinations per family) plus targeted bignum cases against a live\nbuild, not just static reading. ceiling/round/euclidean all verified\ncorrect across every sign combination. Found one real bug: balanced/'s\ntie-breaking rule only accounted for positive divisors (the file's own\nderivation comments only worked through positive-d examples by hand) --\nfor a negative divisor, a tie must resolve toward the *smaller*\nquotient, not the larger one, since the valid remainder range\n[-|d|/2, |d|/2) is asymmetric and which candidate remainder actually\nfalls in range flips with the sign of d. Fixed, with the exact failing\ncases from review (and a bignum negative-divisor tie) added as\nregression tests.\n\nReview also caught an overstated claim in the file's own header\ncomment: floor-quotient/floor-remainder's zero-denominator check is\ngenuinely inherited for free, but their non-integer-argument check is\nnot -- curry's core primitives silently accept a flonum or rational and\nreturn a plausible-but-wrong result rather than raising, a pre-existing\ngap this file's comment incorrectly claimed didn't apply. Comment\ncorrected; the underlying core gap filed as issue #88 rather than fixed\nhere, since it's in shared primitives well outside this SRFI's own\nscope.",
+          "timestamp": "2026-08-28T23:43:49+10:00",
+          "tree_id": "986f79a3ab262c2146938fdb0360353086a2afaa",
+          "url": "https://github.com/deconstructo/curry/commit/7140ff04eb4a949201dc308707d0032d0944b81f"
+        },
+        "date": 1787924678668,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.625,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.945,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.693,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 27.964,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 96.036,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 245.698,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 59.443,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 66.775,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 49.289,
             "unit": "ms"
           }
         ]
