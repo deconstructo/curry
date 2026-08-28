@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787904660837,
+  "lastUpdate": 1787908706226,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9176,6 +9176,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 45.295,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4bbc0454e2df0c297f548b679fb164d43ca78813",
+          "message": "refactor(srfi): rename bare-numbered/dashed shims from .scm to .sld (#87)\n\n* refactor(srfi): rename bare-numbered/dashed shim files from .scm to .sld\n\nToward SRFI-97's own naming convention being properly reflected in the\nsource tree: the 89 loose files directly under lib/curry/modules/srfi/\n(srfi/N.scm, srfi/srfi-N.scm) are pure one-line re-export declarations\nwith zero implementation of their own -- they exist purely to import a\nreal (srfi sN name) library and re-export everything it exports. .sld\n(Scheme Library Definition) is the standard R7RS-ecosystem file type for\nexactly this: a manifest declaring a library's name/imports/exports,\ndistinct from the .scm files that hold actual implementation code.\ncurry's own module loader (src/modules.c) already tries .sld before .scm\nat a given library path, so this is a pure rename with zero resolver\nchanges and zero behavior change -- confirmed via full ctest run before\nand after (109/109 both times) and via a real `cmake --install` dry run.\n\nFixes a real packaging bug this rename would otherwise have introduced\nsilently: CMakeLists.txt's own module-install rule only matched\n`FILES_MATCHING PATTERN \"*.scm\"`, which would have dropped all 89\nrenamed .sld manifests from any packaged/installed build (Homebrew,\n.deb/.rpm, `cmake --install` in general) while leaving the dev tree\n(which runs directly from the source checkout) working fine and masking\nthe gap. Added `PATTERN \"*.sld\"` alongside the existing pattern; verified\nwith a real `cmake --install --prefix /tmp/...` that all 89 land in the\ninstalled tree.\n\ndocs/reference/srfi/index.md's own prose updated to say .sld, not .scm,\nfor these shims.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* docs(writing-a-module): document the multi-file .sld+.scm module pattern\n\nAnswers the natural follow-up to the SRFI shim .sld rename: (curry X)\nmodules can already be split across multiple files today, no new\ncapability needed -- R7RS's own (include \"filename\") library\ndeclaration already works in curry, resolves relative to the including\nfile's own directory (fixed for exactly this during the SRFI-279 port,\nsee tests/fixtures/include_relative/), and is exactly the mechanism\nupstream SRFI reference implementations with per-platform files (e.g.\nSRFI-279's own chibi.scm/guile.scm/generic.scm split) already rely on.\n\nVerified end to end with a fresh throwaway module (.sld manifest with\ntwo (include ...) clauses pulling in two plain .scm files, one defining\na private helper the other's public procedure uses) before writing this\nup, not just asserted from reading the code.\n\nNo code changes -- this documents an existing capability, doesn't add\none. Whether/which existing (curry X) modules are worth splitting this\nway is a separate, later decision -- most modules are fine as a single\nfile and shouldn't be split just because the option now exists.",
+          "timestamp": "2026-08-28T19:17:46+10:00",
+          "tree_id": "1388493f34e4b4091e552a9866f14a9d8dfab7da",
+          "url": "https://github.com/deconstructo/curry/commit/4bbc0454e2df0c297f548b679fb164d43ca78813"
+        },
+        "date": 1787908704140,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.474,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.921,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.957,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.866,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.074,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 289.715,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.527,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.482,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.743,
             "unit": "ms"
           }
         ]
