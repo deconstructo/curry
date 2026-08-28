@@ -11,7 +11,7 @@
 (import (srfi srfi-125) (srfi srfi-128) (srfi srfi-170) (srfi srfi-227)
         (srfi srfi-9) (srfi srfi-31) (srfi srfi-45)
         (srfi srfi-95) (srfi srfi-78) (srfi srfi-212)
-        (srfi srfi-141))
+        (srfi srfi-141) (srfi srfi-41))
 
 (define pass 0)
 (define fail 0)
@@ -85,6 +85,10 @@
 ;;; (srfi srfi-141)
 (assert-equal "srfi-141 legacy shim exports euclidean-remainder"
        (euclidean-remainder -7 2) 1)
+
+;;; (srfi srfi-41)
+(assert-equal "srfi-41 legacy shim exports stream/stream->list"
+       (stream->list (stream 1 2 3)) (list 1 2 3))
 
 ;;; Summary
 

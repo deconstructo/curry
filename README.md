@@ -25,7 +25,7 @@ Documentation is split into two directories:
 - [Akkadian / Cuneiform reference](docs/reference/akkadian-reference.md) — complete vocabulary of special forms and procedures in all three languages, plus the runtime error-message phrase table
 - [Error codes](docs/reference/error-codes.md) — stable machine-legible `error-object-code`/`condition-code` registry for tooling
 - [Module index](docs/reference/modules.md) — the full list of `(curry ...)` modules, import names, and extra build dependencies
-- [SRFI compatibility](docs/reference/srfi/index.md) — the 46 portable `(srfi sN name)` libraries, one page each
+- [SRFI compatibility](docs/reference/srfi/index.md) — the 47 portable `(srfi sN name)` libraries, one page each
 - [Parallel map/reduce](docs/reference/parallel.md) — the work-stealing thread pool behind `map`/`reduce`
 - [LLVM JIT backend](docs/reference/llvm-jit.md) — auto-JIT, benchmark numbers, build flags
 - [Garbage collector reference](docs/reference/gc.md) — the two GC backends and `(gc-stats)` fields

@@ -39,6 +39,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s26 cut)`](s26.md) | [SRFI-26](https://srfi.schemers.org/srfi-26/) | `cut`/`cute` — partial application without writing `lambda` by hand; the reference implementation verbatim (its recursive-macro shape found and drove a real curry `syntax-rules` hygiene fix — see the doc page) |
 | [`(srfi s27 random-bits)`](s27.md) | [SRFI-27](https://srfi.schemers.org/srfi-27/) | Random-number sources |
 | [`(srfi s31 rec)`](s31.md) | [SRFI-31](https://srfi.schemers.org/srfi-31/) | `rec` — a special form for self-referential (typically recursive-lambda) expressions without a surrounding `define`/`letrec` |
+| [`(srfi s41 streams)`](s41.md) | [SRFI-41](https://srfi.schemers.org/srfi-41/) | Lazy, memoizing streams — a stream is literally a curry promise, built directly on core `delay-force`; `stream?` is therefore looser than the spec (see `s41.md`) |
 | [`(srfi s45 lazy)`](s45.md) | [SRFI-45](https://srfi.schemers.org/srfi-45/) | `lazy`/`eager` for iterative lazy algorithms — thin aliases over curry's own core `delay-force`/`make-promise`, which already implement SRFI-45's semantics |
 | [`(srfi s54 cat)`](s54.md) | [SRFI-54](https://srfi.schemers.org/srfi-54/) | `cat` — order-independent object-to-string formatting (width, padding, precision, radix, separators, pipes, converters) |
 | [`(srfi s59 vicinity)`](s59.md) | [SRFI-59](https://srfi.schemers.org/srfi-59/) | Vicinity (directory-of-a-path) string utilities |
