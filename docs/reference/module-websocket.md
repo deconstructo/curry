@@ -2,9 +2,11 @@
 
 *unreleased*
 
-A plain (no TLS) RFC 6455 WebSocket client, pure Scheme — built entirely on curry's existing SRFI-106 sockets and `(curry crypto)`'s `sha1`/`base64-encode` for the handshake. No new C code, no external library.
+A plain (no TLS) RFC 6455 WebSocket client **and server**, pure Scheme — built entirely on curry's existing SRFI-106 sockets and `(curry crypto)`'s `sha1`/`base64-encode` for the handshake. No new C code, no external library.
 
-`ws://` only. `wss://` would need a TLS byte stream underneath the handshake and framing implemented here; SRFI-106 doesn't provide one. `(curry network)` has its own `tls-connect`, but it isn't wired into this module — a `wss://` client would mean layering this module's protocol logic over that instead of a plain socket.
+`ws://` only. `wss://` would need a TLS byte stream underneath the handshake and framing implemented here; SRFI-106 doesn't provide one. `(curry network)` has its own `tls-connect`, but it isn't wired into this module — a `wss://` client/server would mean layering this module's protocol logic over that instead of a plain socket.
+
+Client and server share every piece of frame-level machinery (masking, length encoding, fragmentation reassembly, ping/pong) — the only place the role actually matters is which direction masks: RFC 6455 §5.1 requires every client-to-server frame to be masked and forbids masking server-to-client frames, and requires a peer that receives a frame violating this to fail the connection (this is a real security requirement — defense against cache/protocol-confusion attacks via intermediaries that don't understand WebSocket framing — not just wire-format tidiness). `ws-recv!` enforces both directions: a server rejects an unmasked incoming frame, a client rejects a masked one, closing the connection and raising a clear error either way rather than silently tolerating the violation.
 
 ## Installation
 
@@ -16,7 +18,7 @@ No extra packages required. Always available — pure Scheme, no CMake flag.
 (import (curry websocket))
 ```
 
-## Procedures
+## Procedures — client
 
 ### `(ws-connect url)` → ws
 
@@ -48,6 +50,48 @@ Sends a close frame (if not already closed) and closes the underlying socket.
 ### `(ws-closed? ws)` → boolean
 
 ### `(ws? obj)` → boolean
+
+### `(ws-path ws)` → string | `#f`
+
+The request path a server-side connection was opened against (e.g. `"/live-data"`), for a server that wants to route by path. `#f` for a client-side connection — `ws-connect`'s own caller already knows the path it asked for, it doesn't need it echoed back.
+
+Returned verbatim from the request line — a query string, if the client sent one, stays attached (`GET /live-data?token=abc HTTP/1.1` gives `"/live-data?token=abc"`, not `"/live-data"`). Split it yourself if you're routing on the path alone.
+
+## Procedures — server
+
+### `(ws-listen port)` → listener
+
+Binds and listens on `port`. Doesn't block, doesn't accept anything yet — mirrors `(curry network)`'s own `tcp-listen`.
+
+### `(ws-accept listener)` → ws
+
+Blocks for the next incoming TCP connection and completes the RFC 6455 opening handshake on it (reads the client's `GET` request and headers, extracts `Sec-WebSocket-Key`, computes and sends `Sec-WebSocket-Accept`) before returning. By the time `ws-accept` returns, the connection is a fully negotiated WebSocket — `ws-send!`/`ws-recv!`/`ws-close!` all work on it exactly as they would on a `ws-connect` result. Raises if the request has no `Sec-WebSocket-Key` or a malformed request line, if the connection closes before the handshake completes, or if a single header line exceeds 8KB or the request has more than 100 header lines — a bounded-cost rejection of a connection that's misbehaving or attacking, rather than unbounded memory growth (an incoming connection is untrusted by construction, unlike `ws-connect`'s server, which the caller already chose to trust).
+
+### `(ws-listener? obj)` → boolean
+
+### `(ws-listener-close! listener)`
+
+Closes the listening socket. Doesn't affect any connections already accepted from it.
+
+## Example: a minimal echo server
+
+```scheme
+(import (curry websocket) (curry sync))
+
+(define listener (ws-listen 8080))
+
+(spawn (lambda ()
+         (let loop ()
+           (let ((conn (ws-accept listener)))
+             (spawn (lambda ()
+                      (let handle ()
+                        (let ((msg (ws-recv! conn)))
+                          (if (not (eof-object? msg))
+                              (begin (ws-send! conn msg) (handle)))))))
+             (loop)))))
+```
+
+One actor accepts connections in a loop; each accepted connection gets its own handler actor so slow or long-lived clients don't block new connections from being accepted. A client that disconnects abruptly mid-message raises inside `ws-recv!` (e.g. "connection closed mid-frame") — uncaught here, which only takes down that one handler actor (actors are isolated; the accept loop and every other connection are unaffected), but production code that wants to log or otherwise handle that gracefully should wrap the handler loop's body in `guard`.
 
 ## Thread safety
 
