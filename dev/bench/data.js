@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787964344750,
+  "lastUpdate": 1787975185752,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9590,6 +9590,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 63.529,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "68d4a304006df2064c387175c1e6895c1f5c3363",
+          "message": "feat(websocket): add server role (ws-listen/ws-accept) to (curry websocket) (#92)\n\nAdds the missing half of RFC 6455 to the existing client-only module:\nws-listen (bind+listen, mirrors (curry network)'s tcp-listen), ws-accept\n(blocks for a connection, performs the server-side opening handshake,\nreturns a fully negotiated connection), ws-listener?, ws-listener-close!,\nand a ws-path accessor (the request path a server connection was opened\nagainst, for path-based routing).\n\nClient and server share every piece of frame-level machinery -- masking,\nlength encoding, fragmentation reassembly, ping/pong -- via one <ws>\nrecord now carrying a role field ('client or 'server). The only place\nrole matters is which direction masks (RFC 6455 5.1: client-to-server\nframes MUST be masked, server-to-client frames MUST NOT be).\n\nTested against an independent hand-rolled RFC 6455 CLIENT (deliberately\nnot reusing ws-connect or any of this module's own framing code) driving\nthe real ws-listen/ws-accept server -- the same wire-compatibility\nphilosophy websocket_tests.scm already established for the client role,\nnow applied to the server: proving genuine protocol compliance, not\nself-consistency. Verified the handshake against RFC 6455 section 1.3's\nown worked Sec-WebSocket-Key/Accept example, not just a self-generated\nkey/accept pair.\n\nIndependent code review (fresh subagent, no shared context), specifically\nasked to focus on security since this is now server code accepting\narbitrary untrusted network input rather than client code talking to a\nserver the caller already chose to trust, found two real issues, both\nfixed here:\n\n- %read-header-lines (shared by both roles) delegated to curry's core\n  read-line, which has no line-length cap at all -- confirmed live with\n  a 2MB unterminated header line still buffering with no error 0.5s\n  later. A single connection to ws-accept could drive unbounded memory\n  growth. Fixed with an explicit char-at-a-time reader (8KB per line,\n  100 lines per request) -- checking length after read-line returns\n  wouldn't have helped, since the unbounded blocking already happens\n  before control comes back.\n\n- %read-frame silently unmasked/accepted a frame regardless of which\n  direction it arrived from, correct for round-tripping against a\n  well-behaved peer (why every prior test passed) but not enforcing RFC\n  6455 5.1's actual MUST-reject requirement -- masking direction is a\n  real security control (defense against cache/protocol-confusion\n  attacks via naive intermediaries), not wire-format decoration. Both\n  directions now raise a clean protocol error and close the connection\n  on a violation instead of tolerating it.\n\nBoth fixes verified against the built binary (not just reasoned about)\nand locked in as permanent regression tests in both test files.\n\n- lets be able to handle web clients :-)",
+          "timestamp": "2026-08-29T13:45:41+10:00",
+          "tree_id": "6a187e206175952facd63715debf434c608bb20d",
+          "url": "https://github.com/deconstructo/curry/commit/68d4a304006df2064c387175c1e6895c1f5c3363"
+        },
+        "date": 1787975184860,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.88,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.76,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.55,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.351,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.016,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 288.336,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.725,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.073,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 64.815,
             "unit": "ms"
           }
         ]
