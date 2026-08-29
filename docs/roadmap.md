@@ -79,7 +79,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 | **R7RS `cond-expand`/`(features)`** | ✓ **v1.20.0** |
 | **`(curry gillespie)`** — Gillespie stochastic simulation algorithm | ✓ unreleased, merged to `main` — composable propensity/rate-law combinators (`mass-action`/`arrhenius`/`michaelis-menten`/`hill`), multi-cell simulation via actors, no separate concurrency model |
 | **`(curry websocket)`** + **`(curry ros)`** — RFC 6455 client + rosbridge v2.0 JSON protocol client | ✓ unreleased, merged to `main` — pure Scheme, no ROS install/DDS transport needed; see `docs/guides/ros-robot.md` for driving real GPIO/PWM motors via `(curry rpi)` from ROS teleop |
-| **SRFI compatibility** | ✓ **46 libraries** as of the unreleased work below (39 at the start of the audit work this update covers, v1.23.3) — see the new SRFI section below for audit status and known gaps |
+| **SRFI compatibility** | ✓ **47 libraries** as of the unreleased work below (39 at the start of the audit work this update covers, v1.23.3) — see the new SRFI section below for audit status and known gaps |
 | **Full multi-shot `call/cc`** | ✗ — `setjmp`/`longjmp` escape-only continuations remain the whole story; the target strategy (VM frame-stack copying, decided against CPS — see "Decided against") is chosen but not implemented. See "Active work outside the phase numbering" below |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
@@ -170,7 +170,7 @@ unresolved regardless of `gc-rewrite`'s status.
 
 ### SRFI compatibility
 
-46 `(srfi sN name)` libraries as of the work merged to `main` covered in
+47 `(srfi sN name)` libraries as of the work merged to `main` covered in
 the summary timeline below (39 at the start of the audit work covered
 here, v1.23.3). Two rounds of work distinct from ordinary new-library
 additions:
@@ -187,7 +187,11 @@ additions:
   SRFI-9 (records), SRFI-31 (`rec`), SRFI-45 (lazy/iterative algorithms),
   SRFI-95 (sorting/merging), SRFI-78 (lightweight testing), SRFI-212
   (aliases), SRFI-141 (integer division: `ceiling`/`round`/`euclidean`/
-  `balanced` families beyond R7RS's own `floor`/`truncate`).
+  `balanced` families beyond R7RS's own `floor`/`truncate`), SRFI-41
+  (Streams — a stream is literally a curry promise, built directly on
+  the core `delay-force` SRFI-45 above wraps; verified stack-safe on a
+  100,000-element stream, not just correct; `stream?` is deliberately
+  looser than the spec as a result, see `s41.md`).
 - **Blocked:** SRFI-61 (a more general `cond` clause) can't be
   implemented as a library — `cond` is a hardcoded special form the
   evaluator dispatches on directly, not resolved through macro lookup, so
@@ -208,9 +212,9 @@ additions:
   tree structure curry doesn't have anything to build on today), SRFI-275
   (URIs/IRIs/paths, draft status — RFC 3986/3987-grade parsing from
   scratch, real risk of rework before the draft finalizes), SRFI-13
-  (Strings, ~100+ procedures), SRFI-41 (Streams), SRFI-115 (SRE regex —
-  a genuine standalone regex-engine project, distinct from curry's
-  existing POSIX-based `(curry regex)`).
+  (Strings, ~100+ procedures), SRFI-115 (SRE regex — a genuine
+  standalone regex-engine project, distinct from curry's existing
+  POSIX-based `(curry regex)`).
 
 ---
 
