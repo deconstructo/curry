@@ -187,6 +187,34 @@
 
 (tcp-close listener)
 
+;;; ---- regression from independent review: RFC 6455 5.1 masking
+;;; direction is a MUST-reject, not a tolerate-either-way convenience.
+;;; A server-to-client frame with the mask bit set is a protocol
+;;; violation the client must reject, not silently unmask and accept.
+
+(define mask-test-port 17995)
+(define mask-listener (tcp-listen mask-test-port))
+
+(define mask-server-thread
+  (spawn (lambda ()
+           (let* ((conn (tcp-accept mask-listener)) (in (car conn)) (out (cdr conn)))
+             (server-accept! in out)
+             ;; a text frame with the mask bit deliberately SET, plus a
+             ;; (bogus, but present) mask key -- only a client may ever
+             ;; legitimately send a masked frame; a server never should.
+             (write-u8 #x81 out)
+             (write-u8 (bitwise-or #x80 5) out)
+             (write-bytevector (bytevector 1 2 3 4) out) ; mask key
+             (write-bytevector (string->utf8 "hello") out)
+             (flush-output-port out)
+             (close-port in) (close-port out)))))
+
+(define mask-ws (ws-connect (string-append "ws://127.0.0.1:" (number->string mask-test-port) "/")))
+(check "ws-recv! rejects a masked frame from a server"
+       (guard (e (#t 'raised)) (ws-recv! mask-ws))
+       'raised)
+(tcp-close mask-listener)
+
 ;;; Summary
 
 (newline)

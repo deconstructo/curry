@@ -1,18 +1,29 @@
-;;; (curry websocket) — a plain (no TLS) RFC 6455 WebSocket client, built
-;;; entirely on curry's existing SRFI-106 sockets and (curry crypto)'s
-;;; sha1/base64 -- no new C code. `ws://` only; `wss://` would need a TLS
-;;; stream underneath the handshake/framing here, which SRFI-106 doesn't
-;;; provide (see (curry network)'s own tls-connect for that piece, not yet
-;;; wired into this module).
+;;; (curry websocket) — a plain (no TLS) RFC 6455 WebSocket client AND
+;;; server, built entirely on curry's existing SRFI-106 sockets and
+;;; (curry crypto)'s sha1/base64 -- no new C code. `ws://` only; `wss://`
+;;; would need a TLS stream underneath the handshake/framing here, which
+;;; SRFI-106 doesn't provide (see (curry network)'s own tls-connect for
+;;; that piece, not yet wired into this module).
 ;;;
-;;; This exists primarily as the transport (curry ros) speaks rosbridge
-;;; over, but is a standalone, generally useful client on its own.
-
+;;; Client and server share every piece of frame-level machinery below
+;;; (masking, length encoding, fragmentation reassembly, ping/pong) --
+;;; the only place role actually matters is which direction masks:
+;;; client-to-server frames MUST be masked, server-to-client frames MUST
+;;; NOT be, per RFC 6455 section 5.1. %ws-write-frame! checks a
+;;; connection's own role and masks accordingly; %read-frame already
+;;; unmasks whenever a frame's mask bit is set regardless of which side
+;;; is reading, so it needed no change at all to support the server role.
+;;;
+;;; The client role exists primarily as the transport (curry ros) speaks
+;;; rosbridge over; the server role exists to let a curry process push
+;;; live data to a browser-side frontend (e.g. React/whatever) without
+;;; needing curry to also speak HTTP.
 (define-library (curry websocket)
   (import (scheme base) (scheme write) (srfi s106 sockets) (curry crypto) (curry sync))
   (export
     ws-connect ws-send! ws-send-binary! ws-recv! ws-close! ws-closed?
-    ws?)
+    ws? ws-path
+    ws-listen ws-accept ws-listener? ws-listener-close!)
   (begin
 
     ;; A GUID fixed by RFC 6455 itself -- concatenated with the client's
@@ -21,15 +32,25 @@
     (define %ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
     (define-record-type <ws>
-      (%make-ws socket in out closed? send-mutex)
+      (%make-ws socket in out closed? send-mutex role path)
       ws?
       (socket %ws-socket)
       (in     %ws-in)
       (out    %ws-out)
       (closed? %ws-closed? %ws-set-closed?!)
-      (send-mutex %ws-send-mutex))
+      (send-mutex %ws-send-mutex)
+      (role %ws-role)
+      ;; The request path a server-side connection was opened against
+      ;; (e.g. "/live-data"), for callers that want to route by path;
+      ;; #f for a client-side connection (ws-connect already knows the
+      ;; path it asked for, it doesn't need it echoed back).
+      (path ws-path))
 
     (define (ws-closed? ws) (%ws-closed? ws))
+
+    (define-record-type <ws-listener>
+      (%make-ws-listener socket) ws-listener?
+      (socket %ws-listener-socket))
 
     ;; ---- URL parsing: "ws://host[:port][/path]" -> (values host port path)
 
@@ -63,17 +84,47 @@
               (begin (bytevector-u8-set! bv i (random-integer 256)) (loop (+ i 1)))))
         (base64-encode bv)))
 
+    ;; curry's core read-line has no line-length cap at all -- it grows an
+    ;; output-string buffer until it sees \n or EOF, unconditionally. That's
+    ;; fine for ws-connect (the peer is a server the caller already chose
+    ;; to trust), but ws-accept hands this the request line/headers of an
+    ;; arbitrary, untrusted incoming connection: a client that never sends
+    ;; \n (or sends unboundedly many header lines before the blank line
+    ;; that ends the request) can drive unbounded memory growth in a
+    ;; single connection -- confirmed directly during review with a 2MB
+    ;; unterminated line, still buffering with no error raised. Reading a
+    ;; char at a time with an explicit cap, rather than delegating to
+    ;; read-line, is the only way to actually bound this: checking a
+    ;; length after read-line returns doesn't help, since the unbounded
+    ;; blocking already happened before control comes back.
+    (define %ws-max-header-line-len 8192)
+    (define %ws-max-header-lines 100)
+
+    (define (%read-line-capped in)
+      (let loop ((chars '()) (n 0))
+        (let ((c (read-char in)))
+          (cond
+            ((eof-object? c) (if (null? chars) c (list->string (reverse chars))))
+            ((char=? c #\newline) (list->string (reverse chars)))
+            ((>= n %ws-max-header-line-len)
+             (error "ws: header line exceeds maximum length" %ws-max-header-line-len))
+            (else (loop (cons c chars) (+ n 1)))))))
+
     (define (%read-header-lines in)
       ;; Reads CRLF-terminated header lines up to (and consuming) the blank
-      ;; line that ends an HTTP response, returning the lines seen (status
-      ;; line first) with any trailing \r stripped. read-line's own notion
-      ;; of "line" already stops at \n, so only \r needs trimming here.
-      (let loop ((acc '()))
-        (let ((line (read-line in)))
-          (cond
-            ((eof-object? line) (error "ws-connect: connection closed during handshake"))
-            ((or (string=? line "") (string=? line "\r")) (reverse acc))
-            (else (loop (cons (%chomp-cr line) acc)))))))
+      ;; line that ends an HTTP request or response, returning the lines
+      ;; seen (request/status line first) with any trailing \r stripped.
+      ;; Shared by both ws-connect (reading the server's response) and
+      ;; ws-accept (reading the client's request) -- see %ws-max-header-*
+      ;; above for why this can't just delegate to plain read-line.
+      (let loop ((acc '()) (count 0))
+        (if (>= count %ws-max-header-lines)
+            (error "ws: too many header lines" %ws-max-header-lines)
+            (let ((line (%read-line-capped in)))
+              (cond
+                ((eof-object? line) (error "ws: connection closed during handshake"))
+                ((or (string=? line "") (string=? line "\r")) (reverse acc))
+                (else (loop (cons (%chomp-cr line) acc) (+ count 1))))))))
 
     (define (%chomp-cr s)
       (let ((n (string-length s)))
@@ -128,7 +179,7 @@
                  (error "ws-connect: server did not upgrade" status))
              (if (not (equal? accept expect))
                  (error "ws-connect: Sec-WebSocket-Accept mismatch" accept expect))
-             (%make-ws socket in out #f (make-mutex)))))))
+             (%make-ws socket in out #f (make-mutex) 'client path))))))
 
     (define (%string-contains s sub)
       (let ((sl (string-length s)) (bl (string-length sub)))
@@ -137,6 +188,51 @@
             ((> (+ i bl) sl) #f)
             ((string=? (substring s i (+ i bl)) sub) #t)
             (else (loop (+ i 1)))))))
+
+    ;; ---- Server: ws-listen / ws-accept
+
+    (define (ws-listen port) (%make-ws-listener (make-server-socket port)))
+
+    (define (ws-listener-close! listener) (socket-close (%ws-listener-socket listener)))
+
+    ;; Blocks for the next incoming TCP connection and completes the
+    ;; RFC 6455 opening handshake on it before returning -- by the time
+    ;; ws-accept returns, the connection is a fully negotiated WebSocket,
+    ;; usable with ws-send!/ws-recv!/ws-close! exactly like a ws-connect
+    ;; result (the role difference is internal, see the module header).
+    (define (ws-accept listener)
+      (let* ((socket (socket-accept (%ws-listener-socket listener)))
+             (in (socket-input-port socket))
+             (out (socket-output-port socket))
+             (path (%server-handshake! in out)))
+        (%make-ws socket in out #f (make-mutex) 'server path)))
+
+    (define (%server-handshake! in out)
+      (let* ((lines (%read-header-lines in))
+             (request-line (car lines))
+             (path (%request-path request-line))
+             (key (%header-value lines "Sec-WebSocket-Key")))
+        (if (not key) (error "ws-accept: request has no Sec-WebSocket-Key" request-line))
+        (let ((accept (base64-encode (sha1 (string->utf8 (string-append key %ws-guid))))))
+          (write-string
+           (string-append
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: " accept "\r\n"
+            "\r\n")
+           out)
+          (flush-output-port out)
+          path)))
+
+    ;; "GET /some/path HTTP/1.1" -> "/some/path"
+    (define (%request-path request-line)
+      (let ((sp1 (%string-index request-line #\space)))
+        (if (not sp1) (error "ws-accept: malformed request line" request-line))
+        (let* ((rest (substring request-line (+ sp1 1) (string-length request-line)))
+               (sp2 (%string-index rest #\space)))
+          (if (not sp2) (error "ws-accept: malformed request line" request-line))
+          (substring rest 0 sp2))))
 
     ;; ---- Framing (RFC 6455 section 5)
 
@@ -159,44 +255,51 @@
             (begin (bytevector-u8-set! bv (+ start i) (bitwise-and n 255))
                    (loop (- i 1) (arithmetic-shift n -8))))))
 
-    ;; Always masked -- every client-to-server frame MUST be masked per
-    ;; RFC 6455; curry's own WebSocket client has no server role.
+    ;; Masked iff this connection is playing the client role -- RFC 6455
+    ;; section 5.1 requires every client-to-server frame to be masked
+    ;; and forbids masking server-to-client frames. Both roles share
+    ;; this one procedure since everything else about frame writing is
+    ;; identical; only the mask bit and whether a mask key follows the
+    ;; header differ.
     ;;
-    ;; A frame is written as three separate port writes (header, mask key,
-    ;; payload); curry ports have no built-in per-write atomicity across
-    ;; threads, so two actors calling ws-send!/ws-send-binary!/ws-close!
-    ;; concurrently on the same connection (the normal (curry ros) usage
-    ;; pattern -- one reader actor plus arbitrarily many publisher actors)
-    ;; could otherwise interleave their frame bytes on the wire and
-    ;; corrupt the stream for both. with-mutex serializes the whole
-    ;; three-write sequence per connection.
+    ;; A frame is written as up to three separate port writes (header,
+    ;; mask key if present, payload); curry ports have no built-in
+    ;; per-write atomicity across threads, so two actors calling
+    ;; ws-send!/ws-send-binary!/ws-close! concurrently on the same
+    ;; connection (the normal (curry ros) usage pattern -- one reader
+    ;; actor plus arbitrarily many publisher actors) could otherwise
+    ;; interleave their frame bytes on the wire and corrupt the stream
+    ;; for both. with-mutex serializes the whole write sequence per
+    ;; connection, for both roles.
     (define (%ws-write-frame! ws opcode payload)
       (with-mutex (%ws-send-mutex ws)
         (lambda ()
           (let* ((out (%ws-out ws))
+                 (mask? (eq? (%ws-role ws) 'client))
                  (len (bytevector-length payload))
-                 (key (%mask-key))
+                 (key (if mask? (%mask-key) #f))
+                 (len-byte1 (lambda (v) (if mask? (bitwise-or #x80 v) v)))
                  (header
                   (cond
                     ((< len 126) (let ((h (make-bytevector 2 0)))
                                    (bytevector-u8-set! h 0 (bitwise-or #x80 opcode))
-                                   (bytevector-u8-set! h 1 (bitwise-or #x80 len))
+                                   (bytevector-u8-set! h 1 (len-byte1 len))
                                    h))
                     ((< len 65536) (let ((h (make-bytevector 4 0)))
                                      (bytevector-u8-set! h 0 (bitwise-or #x80 opcode))
-                                     (bytevector-u8-set! h 1 (bitwise-or #x80 126))
+                                     (bytevector-u8-set! h 1 (len-byte1 126))
                                      (%write-be h 2 2 len)
                                      h))
                     (else (let ((h (make-bytevector 10 0)))
                             (bytevector-u8-set! h 0 (bitwise-or #x80 opcode))
-                            (bytevector-u8-set! h 1 (bitwise-or #x80 127))
+                            (bytevector-u8-set! h 1 (len-byte1 127))
                             (%write-be h 2 8 len)
                             h))))
-                 (masked (bytevector-copy payload)))
-            (%mask! masked key)
+                 (out-payload (if mask? (bytevector-copy payload) payload)))
+            (if mask? (%mask! out-payload key))
             (write-bytevector header out)
-            (write-bytevector key out)
-            (write-bytevector masked out)
+            (if mask? (write-bytevector key out))
+            (write-bytevector out-payload out)
             (flush-output-port out)))))
 
     (define (ws-send! ws string)
@@ -225,6 +328,22 @@
     ;; process can survive raising a clean error over.
     (define %ws-max-frame-len 67108864)
 
+    ;; RFC 6455 section 5.1 is unambiguous: every client-to-server frame
+    ;; MUST be masked, every server-to-client frame MUST NOT be -- and a
+    ;; peer that receives a frame violating this MUST fail the
+    ;; connection. This exists for a real security reason (defense
+    ;; against cache/protocol-confusion attacks via naive intermediaries
+    ;; that don't understand WebSocket framing), not just wire-format
+    ;; tidiness, so it's enforced here rather than tolerated -- an
+    ;; earlier version of this code silently unmasked/accepted a
+    ;; wrongly-masked frame either direction, which round-trips fine
+    ;; against a well-behaved peer but doesn't actually reject the
+    ;; violation the spec requires rejecting.
+    (define (%ws-protocol-error! ws msg)
+      (%ws-set-closed?! ws #t)
+      (socket-close (%ws-socket ws))
+      (error (string-append "ws: protocol error: " msg)))
+
     ;; Returns (values opcode fin? payload-bytevector), or (values 'eof #t #f).
     (define (%read-frame ws)
       (let* ((in (%ws-in ws)) (b0 (read-u8 in)))
@@ -240,19 +359,21 @@
                          (len (cond ((= len7 126) (%read-be in 2))
                                     ((= len7 127) (%read-be in 8))
                                     (else len7))))
-                    (if (> len %ws-max-frame-len)
-                        (error "ws-recv!: frame length exceeds maximum" len %ws-max-frame-len)
-                        (let* ((key (if masked? (read-bytevector 4 in) #f))
-                               (payload (if (> len 0) (read-bytevector len in) (bytevector))))
-                          (if (or (eof-object? payload) (and key (eof-object? key)))
-                              (values 'eof #t #f)
-                              (begin
-                                ;; A conformant server never masks; unmask
-                                ;; anyway if it did, rather than silently
-                                ;; misreading the payload against a spec
-                                ;; violation.
-                                (if masked? (%mask! payload key))
-                                (values opcode fin? payload)))))))))))
+                    (cond
+                      ((> len %ws-max-frame-len)
+                       (error "ws-recv!: frame length exceeds maximum" len %ws-max-frame-len))
+                      ((and (eq? (%ws-role ws) 'server) (not masked?))
+                       (%ws-protocol-error! ws "received an unmasked frame from a client"))
+                      ((and (eq? (%ws-role ws) 'client) masked?)
+                       (%ws-protocol-error! ws "received a masked frame from a server"))
+                      (else
+                       (let* ((key (if masked? (read-bytevector 4 in) #f))
+                              (payload (if (> len 0) (read-bytevector len in) (bytevector))))
+                         (if (or (eof-object? payload) (and key (eof-object? key)))
+                             (values 'eof #t #f)
+                             (begin
+                               (if masked? (%mask! payload key))
+                               (values opcode fin? payload))))))))))))
 
     ;; Reassembles fragmented messages (continuation frames), answers
     ;; pings with pongs, and swallows pongs -- all transparently to the
