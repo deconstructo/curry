@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787957794067,
+  "lastUpdate": 1787964344750,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9521,6 +9521,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 73.02,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "95c537839887fbb249d754a4a432c1d161cd29d6",
+          "message": "feat(srfi): add SRFI-41 (Streams) (#91)\n\nSRFI-41's own reference implementation has to build its own\nmemoizing lazy-promise machinery from scratch (it predates R7RS's\ndelay-force); curry already has delay/delay-force/force natively with\nexactly the iterative, stack-safe chain-flattening the SRFI's own spec\ncalls \"vitally critical\", so this port represents a stream AS a curry\npromise directly rather than wrapping one in a distinct record.\n\nThe cost of that representation, disclosed in both the module header\nand the doc page: stream? really means \"is this a promise\", not \"is\nthis specifically a stream\" -- (stream? (delay 5)) is #t here, #f in\nthe reference. Unavoidable while keeping the stack-safety property: a\ndistinct wrapper record would stop delay-force's own chain-flattening\nfrom seeing through it, which is the entire reason to build this on\ndelay-force at all.\n\n~43 bindings: the 8 SRFI-41 primitives plus ~35 derived procedures,\nported from the SRFI's own reference implementation where one exists\n(stream-unfold, stream-unfolds, stream-range, stream-scan, stream-take,\nstream-drop-while, stream-concat, and more, checked line-by-line against\nthe actual spec text during review) or derived directly where it doesn't\n(stream-append isn't in the SRFI's reference appendix; derived by\nmirroring stream-concat's own structure, since a plain list of stream\narguments rather than a stream-of-streams is the only structural\ndifference between the two).\n\nFound and fixed one real thing along the way: curry has no case-lambda\nat all (confirmed by an existing comment elsewhere in the codebase,\nlib/curry/modules/curry/schematic/format.scm) -- an initial draft of\nstream->list using it failed with a confusing \"unbound variable: x\"\ninside the clause body rather than a clean \"case-lambda not supported\"\nerror. Rewritten using the reference implementation's own plain\nrest-arg dispatch instead (which doesn't use case-lambda either).\n\nShips as the standard three-file shape. tests/srfi_41_tests.scm (40\nchecks) covers every derived procedure plus a dedicated stack-safety\nsection (100,000-element stream traversal, verifying the whole point of\nbuilding this on delay-force, not just correctness).",
+          "timestamp": "2026-08-29T10:44:57+10:00",
+          "tree_id": "48a30a5a9077089157e8ae15c08dc55a815396e7",
+          "url": "https://github.com/deconstructo/curry/commit/95c537839887fbb249d754a4a432c1d161cd29d6"
+        },
+        "date": 1787964344117,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.227,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.061,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.729,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.67,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 127.192,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 294.371,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.818,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.752,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 63.529,
             "unit": "ms"
           }
         ]
