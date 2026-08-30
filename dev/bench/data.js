@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787975339395,
+  "lastUpdate": 1788085398497,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9728,6 +9728,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.2,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a04e7b0cee1113afb4833778e87cb50a59f5675e",
+          "message": "fix(builtins): floor-quotient/floor-remainder/floor/ reject non-integer arguments (#94)\n\nR7RS requires exact integer arguments for these three, and\nquotient/remainder/truncate-quotient/truncate-remainder already enforce\nthis correctly -- they route through numeric.c's to_mpz(), which raises\n\"exact integer required, got X\" on a rational, flonum, or complex\nargument. The floor family never went anywhere near that check: they're\nbuilt from num_floor(num_div(a,b)), plain real-number arithmetic that\n\"succeeds\" on any numeric type and silently returns a plausible-but-\nwrong result instead of rejecting it -- (floor-quotient 15/2 2) => 3,\n(floor-remainder 7.5 2) => 1.5.\n\nFixes #88, found during an earlier session's SRFI-141 (Integer\nDivision) implementation -- SRFI-141's own ceiling/round/euclidean/\nbalanced families are all built on floor-quotient/floor-remainder, so\nthe gap silently propagated (e.g. euclidean/ on a rational input\nreturned a wrong-but-plausible pair instead of raising).\n\nAdds check_exact_integer, matching to_mpz's exact classification order\n(fixnum/bignum accepted; else rational/inexact-real/complex/non-numeric),\ncalled at the top of all three primitives with each one's own correct\nprocedure name -- not just delegating to floor-quotient's internal call\nand letting the error misattribute to the wrong procedure, since\nfloor-remainder and floor/ both call floor-quotient as part of computing\ntheir own result.\n\nIndependent code review (fresh subagent, no shared context) verified\nlive: both exact repros from the issue, both bignums (confirmed correct\non 2^200-scale values), rejection on either argument position, and\ncomplex-number classification, plus confirmed no other unguarded call\nsite of the shared internal helper. 112/112 ctest suites pass; 4 new\nregression tests in tests/r7rs_tests.scm.",
+          "timestamp": "2026-08-30T20:22:32+10:00",
+          "tree_id": "e18c39ae8e8c30875d99ec4ba037f0cac8082008",
+          "url": "https://github.com/deconstructo/curry/commit/a04e7b0cee1113afb4833778e87cb50a59f5675e"
+        },
+        "date": 1788085396987,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.127,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 19.456,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.013,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 23.04,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 104.91,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 219.558,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 50.136,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 70.114,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 53.693,
             "unit": "ms"
           }
         ]
