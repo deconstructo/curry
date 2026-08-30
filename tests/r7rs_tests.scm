@@ -669,6 +669,24 @@
   (lambda (q r) (check "floor/ quotient" q 3)
                 (check "floor/ remainder" r 1)))
 
+;; Regression for GH issue #88: floor-quotient/floor-remainder/floor/
+;; used to silently accept a non-integer argument and return a
+;; plausible-but-wrong result instead of raising, unlike
+;; quotient/remainder/truncate-quotient/truncate-remainder, which
+;; already correctly rejected one via numeric.c's to_mpz().
+(check "floor-quotient rejects a rational argument"
+       (guard (exn (#t 'raised)) (floor-quotient 15/2 2)) 'raised)
+(check "floor-remainder rejects an inexact argument"
+       (guard (exn (#t 'raised)) (floor-remainder 7.5 2)) 'raised)
+(check "floor/ rejects a rational argument"
+       (guard (exn (#t 'raised))
+         (call-with-values (lambda () (floor/ 15/2 2)) (lambda (q r) 'no-error))) 'raised)
+;; floor and truncate agree when both operands are positive, so this
+;; checks the fix didn't disturb the bignum path at all, via a value
+;; already known correct (quotient) rather than a hand-derived one.
+(check "floor-quotient still works on bignums after the fix"
+       (floor-quotient (expt 2 100) 7) (quotient (expt 2 100) 7))
+
 ;;; Numeric: numerator / denominator
 (check "numerator"   (numerator 3/4) 3)
 (check "denominator" (denominator 3/4) 4)

@@ -500,8 +500,33 @@ static val_t prim_atanh(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return 
 static val_t prim_cot(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_cot(av[0]);}
 static val_t prim_sec(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_sec(av[0]);}
 static val_t prim_csc(int ac, val_t *av, void *ud)   {(void)ac;(void)ud; return num_csc(av[0]);}
-static val_t prim_floor_quotient(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_floor(num_div(av[0],av[1]));}
-static val_t prim_floor_remainder(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_sub(av[0],num_mul(prim_floor_quotient(ac,av,ud),av[1]));}
+/* quotient/remainder (and their truncate-* aliases) already reject a
+ * non-integer argument correctly -- they route through numeric.c's
+ * to_mpz(), which raises exactly this message. floor-quotient/
+ * floor-remainder/floor/ don't go anywhere near to_mpz() (they're built
+ * from num_floor(num_div(...)), generic real-number arithmetic that
+ * "succeeds" on a rational or flonum instead of rejecting it), so they
+ * need their own copy of the same check to match R7RS's actual
+ * precondition for these procedures. See GH issue #88. */
+static void check_exact_integer(val_t v, const char *who) {
+    if (vis_fixnum(v) || vis_bignum(v)) return;
+    scm_raise(V_FALSE, "%s: exact integer required, got %s", who,
+              vis_rational(v) ? "rational" :
+              vis_flonum(v)   ? "inexact real" :
+              vis_complex(v)  ? "complex" : "non-numeric value");
+}
+static val_t prim_floor_quotient(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    check_exact_integer(av[0], "floor-quotient");
+    check_exact_integer(av[1], "floor-quotient");
+    return num_floor(num_div(av[0],av[1]));
+}
+static val_t prim_floor_remainder(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    check_exact_integer(av[0], "floor-remainder");
+    check_exact_integer(av[1], "floor-remainder");
+    return num_sub(av[0],num_mul(prim_floor_quotient(ac,av,ud),av[1]));
+}
 static val_t prim_numerator(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (vis_rational(av[0])) { mpz_t z; mpz_init_set(z, mpq_numref(as_rat(av[0])->q)); val_t r=make_big_from_mpz(z); mpz_clear(z); return r; }
@@ -3221,6 +3246,8 @@ static val_t prim_profiling_report(int ac, val_t *av, void *ud) {(void)ac;(void)
 static val_t prim_profiling_reset(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; profiling_reset(); return V_VOID;}
 static val_t prim_floor_div(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    check_exact_integer(av[0], "floor/");
+    check_exact_integer(av[1], "floor/");
     val_t q=prim_floor_quotient(ac,av,ud), r2=num_sub(av[0],num_mul(q,av[1]));
     Values *mv=(Values *)gc_alloc(sizeof(Values)+2*sizeof(val_t));
     mv->hdr.type=T_VALUES; mv->hdr.flags=0; mv->count=2; mv->vals[0]=q; mv->vals[1]=r2;
