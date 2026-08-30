@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788085398497,
+  "lastUpdate": 1788086183624,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9797,6 +9797,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 53.693,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12a1bc55851e2b8445c758ffe96f8602e7e4c0e5",
+          "message": "docs(language): document core hash tables, including the ref-thunk gotcha (#95)\n\nCloses out the remaining thread on GH issue #84 -- the crash itself was\nalready fixed (append raises a clean error on a non-list argument\ninstead of segfaulting, PR #85), but the issue's \"Suggested fix\" section\nflagged a second, smaller question: whether there's a real naming-\nconsistency gap around hash-table-ref/default.",
+          "timestamp": "2026-08-30T20:35:30+10:00",
+          "tree_id": "e8899696482c3286770a855b3ffbf98a91d798ef",
+          "url": "https://github.com/deconstructo/curry/commit/12a1bc55851e2b8445c758ffe96f8602e7e4c0e5"
+        },
+        "date": 1788086181651,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.012,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.196,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.608,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.195,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 131.864,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 294.447,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.945,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.704,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.53,
             "unit": "ms"
           }
         ]
