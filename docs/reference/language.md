@@ -17,6 +17,7 @@ Curry is an R7RS Scheme interpreter with a numeric tower that extends through th
 - [Strings and characters](#strings-and-characters)
 - [Lists and pairs](#lists-and-pairs)
 - [Vectors and bytevectors](#vectors)
+- [Hash tables](#hash-tables)
 - [I/O](#input--output)
 - [Continuations](#tail-calls-and-continuations)
 - [Parallel map, reduce, and for-each](#parallel-map-reduce-and-for-each)
@@ -939,6 +940,44 @@ Bytevectors (`#u8(...)`) store raw bytes (0–255):
 (utf8->string bv)          ; decode UTF-8 bytes to string
 (string->utf8 str)         ; encode string to UTF-8 bytevector
 ```
+
+---
+
+## Hash tables
+
+```scheme
+(make-hash-table)               ; equal?-keyed by default
+(make-hash-table mode)           ; 0 = eq?, 1 = eqv?, 2 = equal? -- raw integers,
+                                 ; no named Scheme-level constant for these;
+                                 ; (srfi s125 hash-tables)'s own make-hash-table
+                                 ; takes a real SRFI-128 comparator object instead
+(hash-table? obj)
+(hash-table-set! t key val)
+(hash-table-ref t key default) ; see the callout below -- NOT a failure thunk
+(hash-table-exists? t key)
+(hash-table-delete! t key)
+(hash-table-keys t)
+(hash-table-values t)
+(hash-table->alist t)
+(hash-table-size t)
+```
+
+**`hash-table-ref`'s third argument is a plain default *value*, not a failure thunk.** This is the one place curry's core API doesn't follow the convention its own name suggests — R7RS-adjacent SRFIs (SRFI-69, SRFI-125) specify `hash-table-ref`'s third argument as a *thunk*, called only on a miss, precisely so a default requiring real work isn't computed on every call. curry's core primitive takes a plain value instead:
+
+```scheme
+(hash-table-ref t "missing-key" '())   ; correct: returns '() on a miss
+(hash-table-ref t "missing-key" (lambda () '()))
+; WRONG (a genuine, easy mistake): returns the closure itself, uncalled,
+; not '() -- (curry ros)'s subscription bookkeeping hit exactly this
+; while under active development, and passing that closure straight into
+; append crashed the whole process rather than raising a clean error
+; (see GH issue #84 -- the crash itself is fixed, `append` now raises
+; "append: not a list" on a non-pair, non-nil argument instead of
+; segfaulting, but the underlying value-vs-thunk mismatch this section
+; documents is exactly what makes that mistake so easy to hit).
+```
+
+If you want genuine SRFI-69/125 thunk semantics (and the `hash-table-ref/default` name for the plain-value case, matching the convention those specs actually define), `(import (srfi s69 hash-tables))` or `(import (srfi s125 hash-tables))` — both wrap this core primitive with the corrected semantics rather than replacing it, so `(hash-table-ref t key)` (no default) raises on a miss, `(hash-table-ref t key thunk)` calls `thunk` only on a miss, and `(hash-table-ref/default t key value)` is the plain-value form under its own, unambiguous name. See [`docs/reference/srfi/s69-s90.md`](srfi/s69-s90.md) or [`docs/reference/srfi/s125-s126.md`](srfi/s125-s126.md).
 
 ---
 
