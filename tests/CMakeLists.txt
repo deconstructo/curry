@@ -43,6 +43,7 @@ add_test(NAME dynamic_wind   COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_
 add_test(NAME disassemble    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/disassemble_tests.scm)
 add_test(NAME inliner        COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/inliner_tests.scm)
 add_test(NAME syntax_rules   COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/syntax_rules_tests.scm)
+add_test(NAME syntax_rules_nested_ellipsis COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/syntax_rules_nested_ellipsis_tests.scm)
 add_test(NAME ode            COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ode_tests.scm)
 add_test(NAME pde_numerical COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/pde_numerical_tests.scm)
 add_test(NAME d_operator    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/d_operator_tests.scm)

@@ -222,11 +222,38 @@ static bool sr_match_list(val_t pat_rest, val_t form_rest, val_t literals,
                 val_t sb = V_NIL, se = V_NIL;
                 if (!sr_match_one(pat_elem, vcar(form_rest), literals, ellipsis, &sb, &se))
                     return false;
-                /* Prepend each matched value to its accumulator */
+                /* Prepend each matched value to its accumulator.
+                 *
+                 * pnames[j] can land in EITHER sb or se, depending on
+                 * whether it has its own further ellipsis WITHIN pat_elem
+                 * (a nested-ellipsis pattern like "(a b ...) ..." -- here
+                 * `a` has no further ellipsis inside pat_elem, so its
+                 * match lands in sb; `b` has ITS OWN "..." inside
+                 * pat_elem, so its match lands in se instead, already
+                 * correctly shaped as one whole nested list per group by
+                 * this exact same logic applying recursively one level
+                 * down). Previously this only ever checked sb, so any
+                 * pattern variable with its own nested ellipsis silently
+                 * got V_NIL every time (issue #101) -- confirmed
+                 * minimal repro:
+                 *   (define-syntax my-test
+                 *     (syntax-rules () ((_ (a b ...) ...) '((a b ...) ...))))
+                 *   (my-test (1 10 20) (2 30))
+                 *   ; => ((1 () ())) instead of ((1 10 20) (2 30))
+                 * Falling back to se when not found in sb fixes this, and
+                 * composes correctly to arbitrary nesting depth by
+                 * induction: se's own entries are already properly
+                 * shaped by this same fallback having already applied
+                 * one level further in, via the recursive
+                 * sr_match_one -> sr_match_list call above. */
                 for (int j = 0; j < npv; j++) {
                     val_t val = V_NIL;
+                    bool found = false;
                     for (val_t s = sb; vis_pair(s); s = vcdr(s))
-                        if (vcar(vcar(s)) == pnames[j]) { val = vcdr(vcar(s)); break; }
+                        if (vcar(vcar(s)) == pnames[j]) { val = vcdr(vcar(s)); found = true; break; }
+                    if (!found)
+                        for (val_t s = se; vis_pair(s); s = vcdr(s))
+                            if (vcar(vcar(s)) == pnames[j]) { val = vcdr(vcar(s)); break; }
                     paccs[j] = scm_cons(val, paccs[j]);
                 }
                 form_rest = vcdr(form_rest);
@@ -567,15 +594,41 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
             if (vis_pair(refs)) {
                 int n = scm_list_length(vcdr(vcar(refs)));
                 for (int i = 0; i < n; i++) {
-                    /* Build per-iteration bindings: bind each ell var to its i-th value */
-                    val_t iter_bindings = bindings;
+                    /* Build per-iteration bindings: bind each ell var to
+                     * its i-th value. Pushed into BOTH tables:
+                     * iter_bindings (plain scalar substitution, for the
+                     * common case where elem references the var bare,
+                     * with no further ellipsis) AND iter_ell_bindings
+                     * (shadowing the OUTER ell_bindings entry for that
+                     * name, for the nested-ellipsis case where elem
+                     * itself contains "name ...", which needs to find
+                     * just THIS iteration's own slice, not the full
+                     * across-all-outer-iterations list).
+                     *
+                     * Without iter_ell_bindings (issue #101's expand-side
+                     * counterpart), a template like "((a b ...) ...)"
+                     * would recurse into elem = "(a b ...)" still holding
+                     * the ORIGINAL, un-scoped ell_bindings, so the inner
+                     * "b ..." would iterate over b's full nested
+                     * structure across every outer group instead of just
+                     * group i's own slice. A pattern variable with
+                     * further ellipsis in the template is never
+                     * referenced bare (R7RS requires matching ellipsis
+                     * depth at every reference), so iter_bindings' copy
+                     * of it is simply never consulted in that case --
+                     * harmless to set unconditionally on both tables
+                     * rather than trying to know ahead of time which one
+                     * a given name will actually need. */
+                    val_t iter_bindings     = bindings;
+                    val_t iter_ell_bindings = ell_bindings;
                     for (val_t r = refs; vis_pair(r); r = vcdr(r)) {
                         val_t name = vcar(vcar(r));
                         val_t val  = scm_list_ref(vcdr(vcar(r)), i);
-                        iter_bindings = scm_cons(scm_cons(name, val), iter_bindings);
+                        iter_bindings     = scm_cons(scm_cons(name, val), iter_bindings);
+                        iter_ell_bindings = scm_cons(scm_cons(name, val), iter_ell_bindings);
                     }
                     result = scm_append(result,
-                                 scm_cons(sr_expand(elem, iter_bindings, ell_bindings,
+                                 scm_cons(sr_expand(elem, iter_bindings, iter_ell_bindings,
                                                      rename_map, ellipsis, literal_mode),
                                           V_NIL));
                 }
