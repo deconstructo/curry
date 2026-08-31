@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788197644719,
+  "lastUpdate": 1788201516682,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10142,6 +10142,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.134,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e4891c551020a34502ae3f1174ad084ff8e0ac5",
+          "message": "feat(scheme): implement (scheme case-lambda), fix phantom alias in modules.c (#104)\n\n`(scheme case-lambda)` was listed in modules.c's \"alias GLOBAL_ENV\"\ntable alongside the real (scheme base)/(scheme write)/etc. libraries,\nwhich meant (import (scheme case-lambda)) silently succeeded while\nproviding nothing at all -- GLOBAL_ENV never actually had a\ncase-lambda binding, so any code using it failed later with a\nconfusing unbound-variable error at the use site instead of a clean\n\"library not found\" at import time. Removed from that table; added a\nreal implementation at lib/curry/modules/scheme/case-lambda.sld (the\nstandard portable syntax-rules reference implementation).\n\nImplementing it surfaced two independent, pre-existing bugs in curry's\nsyntax-rules engine, both worked around in this file, filed separately\nsince fixing the engine itself is well beyond this scope:\n\n- #101: a pattern where an outer ... wraps a sub-pattern that itself\n  contains a variable followed by its own ... (e.g. \"(_ (a b ...) ...)\")\n  fails to bind the inner variable -- exactly the shape the reference\n  implementation's outer case-lambda macro normally uses. Worked\n  around by capturing each clause as one opaque pattern variable in\n  the outer macro and destructuring one clause at a time via ordinary\n  recursion in a helper macro instead.\n- Found by independent review, same category but distinct: curry's\n  syntax-rules does not rename template-introduced binders on\n  collision with a user identifier -- the macro's own args/len\n  bindings would silently shadow a same-named variable in a clause\n  body. Fixed by renaming to %cl-args/%cl-len.\n\nAlso from independent review: %case-lambda-help was working only by\nan accidental macro-export leak (non-exported macros are visible to\nimporters even though non-exported values aren't) rather than the\ndocumented mechanism -- now actually exported; the no-matching-clause\nerror now names the actual argument count that failed to match.\n\nFiled #102 (apply is not tail-called, so the canonical self-recursive\ncase-lambda accumulator idiom overflows the stack) and #103 (reader\nmisparses the improper `(. r)` literal as a 2-element list) as\nseparate, unrelated pre-existing issues found during review.\n\nCorrected several now-false \"curry has no case-lambda\" comments across\ndocs and lib/ files that predate this work and haven't been migrated\nto build on the real form (their own hand-rolled dispatch already\nworks and in most cases needs to stay hand-rolled regardless, e.g.\nSRFI-253's checked-formal fallthrough semantics that plain\ncase-lambda has no mechanism for).\n\n12 new regression tests (case_lambda_tests.scm), including both bugs\nfound by review. 114/114 ctest suites pass (fresh --clear-cache run).\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T04:37:44+10:00",
+          "tree_id": "b84d02afeb5dd3f2e2fd8023263b2a762ac8d84f",
+          "url": "https://github.com/deconstructo/curry/commit/0e4891c551020a34502ae3f1174ad084ff8e0ac5"
+        },
+        "date": 1788201516008,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.77,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.618,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.182,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.556,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 138.471,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 281.859,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.402,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.926,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.781,
             "unit": "ms"
           }
         ]
