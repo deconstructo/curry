@@ -52,25 +52,17 @@
          (apply (lambda tail body0 ...) args))))
 
     ;; NOTE: deliberately does NOT decompose each clause in this macro's own
-    ;; pattern (i.e. NOT `((_ (params body0 ...) ...) ...)`)  --  curry's
-    ;; syntax-rules has a confirmed bug where a pattern variable that is
-    ;; itself followed by an ellipsis, nested inside ANOTHER pattern that is
-    ;; also wrapped in an outer ellipsis (an outer `...` wrapping a
-    ;; sub-pattern that contains its own `...`), fails to bind correctly:
-    ;; minimal repro is
-    ;;   (define-syntax my-test
-    ;;     (syntax-rules () ((_ (a b ...) ...) '((a b ...) ...))))
-    ;;   (my-test (1 10 20) (2 30))   ; => ((1 () ()) (2 () ())), should be
-    ;;                                ;    ((1 10 20) (2 30))
-    ;; Filed as its own issue -- not fixed here, since it's a core
-    ;; syntax-rules engine bug (src/syntax_rules.c), well beyond the scope
-    ;; of adding case-lambda. Worked around instead: this macro captures
-    ;; each clause as one OPAQUE `clause` pattern variable (ellipsis depth
-    ;; 1, no internal structure in this macro's own pattern), and
-    ;; %case-lambda-help above does the actual (params body0 ...)
-    ;; decomposition one clause at a time via ordinary recursion (`. rest`)
-    ;; rather than a second, nested `...` -- exactly the shape confirmed
-    ;; NOT to trigger the bug.
+    ;; pattern (i.e. NOT `((_ (params body0 ...) ...) ...)`) -- NOT because
+    ;; that shape is broken anymore (issue #101, the syntax-rules engine
+    ;; bug this comment used to describe, is fixed -- src/syntax_rules.c
+    ;; now correctly binds a pattern variable that has its own further
+    ;; ellipsis nested inside an outer ellipsis-repeated sub-pattern), but
+    ;; because this file was written and shipped before that fix landed,
+    ;; and the opaque-clause-plus-recursion shape below works fine and
+    ;; costs nothing to keep -- no need to churn already-correct, already-
+    ;; tested code just to use the more direct shape now that it works too.
+    ;; %case-lambda-help does the actual (params body0 ...) decomposition
+    ;; one clause at a time via ordinary recursion (`. rest`).
     ;;
     ;; %cl-args/%cl-len (not the more natural `args`/`len`) are deliberately
     ;; unusual names: curry's syntax-rules does NOT rename template-

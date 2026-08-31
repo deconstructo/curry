@@ -161,7 +161,20 @@ struct CompileCtx {
     }
 
     bool terminated() const {
-        return B.GetInsertBlock()->getTerminator() != nullptr;
+        /* NOT `getTerminator() != nullptr` -- that was the actual bug
+         * behind issue #99 (crash on LLVM 23.1.0, "cannot get terminator
+         * of non-well-formed block"). getTerminator() asserts the block
+         * is ALREADY terminated before returning anything; it was never
+         * meant to double as an is-it-terminated test, and older LLVM
+         * releases apparently didn't assert here (or asserts were
+         * compiled out), letting this call silently "work" by luck for
+         * years until a newer, stricter LLVM enforced its own documented
+         * precondition. hasTerminator() is the actual bool query this
+         * function needs -- confirmed against LLVM's own BasicBlock.h:
+         * hasTerminator() is a plain, assertion-free
+         * "!empty() && back().isTerminator()" check, exactly the
+         * unterminated-or-not question this function exists to answer. */
+        return B.GetInsertBlock()->hasTerminator();
     }
 
     void branch_if_open(BasicBlock *target) {
