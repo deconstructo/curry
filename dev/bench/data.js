@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788174464815,
+  "lastUpdate": 1788197644719,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10073,6 +10073,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 63.917,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a6c7044744ec6bb89b3d4f5f08aad49ae165ae90",
+          "message": "fix(build): _Thread_local is a C11 keyword, not C++ -- breaks LLVM backend build on GCC (#100)\n\nReported building on a Raspberry Pi with -DBUILD_LLVM=ON: g++ rejects\n\"extern _Thread_local VM *vm;\" in vm.h with \"'_Thread_local' does not\nname a type\" the moment src/llvm/*.cpp (C++) transitively includes it,\ncascading into \"'vm' was not declared in this scope\" everywhere it's\nused afterward.\n\n_Thread_local is C11-only; C++'s equivalent is the thread_local\nkeyword. Clang's C++ frontend tolerates _Thread_local as a\ncompatibility extension (why this never surfaced building on macOS),\nbut GCC's does not. Reproduced exactly against real GCC (Homebrew\ng++-16, not Apple's clang-in-disguise g++ symlink) before this fix,\nconfirmed resolved after.\n\nFix: new CURRY_THREAD_LOCAL macro in value.h (the one header every\naffected file already includes) expanding to thread_local under\n__cplusplus and _Thread_local otherwise. Replaced all 47 raw\n_Thread_local occurrences across headers and their corresponding .c\ndefinitions for consistency, even though the .c files themselves are\nnever compiled as C++ -- one spelling throughout, not two.\n\nAlso fixed a real header-ordering bug this surfaced: gc.h declared\nCURRY_THREAD_LOCAL-using externs (gc_nursery, etc.) at line 119 but\ndidn't include value.h (where the macro now lives) until line 242,\nfurther down the same file -- moved the include to the top, removing\nthe now-redundant later one. Every other affected header already\nincluded value.h before its own first thread-local use.\n\nVerified:\n- Real GCC (g++-16) repro of the Pi's exact error against unmodified\n  vm.h, then confirmed clean compilation of the same header after this\n  fix, using the actual reported error message as the test oracle.\n- Full LLVM backend build (-DBUILD_LLVM=ON, Clang) compiles and links\n  clean, including src/llvm/jit.cpp which was completely unreachable\n  as a build target on GCC before this fix.\n- 113/113 ctest suites pass (fresh --clear-cache run, LLVM off --\n  matches every other test run this session).\n\nFiled #99 for an unrelated, pre-existing issue found while verifying\nthis: this machine's current Homebrew llvm (23.1.0) crashes the JIT\ntier at runtime with an LLVM assertion (\"cannot get terminator of\nnon-well-formed block\") -- reproduces identically on unmodified main,\nunrelated to this fix, and out of scope here (needs someone bisecting\nthe actual JIT codegen against LLVM 15/18/23, not a build-portability\nfix).\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T03:33:22+10:00",
+          "tree_id": "11d5b425664f63c406e6b2fed3edcdff9278de6e",
+          "url": "https://github.com/deconstructo/curry/commit/a6c7044744ec6bb89b3d4f5f08aad49ae165ae90"
+        },
+        "date": 1788197643309,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.31,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.503,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.749,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.791,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.947,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.338,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.164,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.555,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.134,
             "unit": "ms"
           }
         ]
