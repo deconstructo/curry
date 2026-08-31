@@ -570,6 +570,15 @@ what v1.5.0–1.6.3 actually shipped, not as the forward plan.
 
 ### ✗ Green threads, hot reload, pluggable scheduler — not started
 
+**Planning doc:** [`docs/thoughts/concurrency-uplift-plan.md`](thoughts/concurrency-uplift-plan.md)
+compares curry's actual concurrency primitives against `cill_spec.pdf` §6
+and finds them already at near-parity (actors/STM/channels/thread-pool/
+mutex/condvar/semaphore all ✓ complete) — the real remaining gaps are two
+small primitives (rwlock, barrier, once) and a general future/task API,
+both low-risk. Green threads specifically remains out of that plan's scope
+and stays exactly where the paragraph below leaves it: blocked on the
+continuation-strategy reconciliation, not merely unstarted.
+
 Nothing below has a branch, a commit, or a design doc yet. Kept as the
 original design sketch since it's still the intended shape, but note one
 open dependency: the continuation strategy this depends on (`(yield)`,
@@ -677,6 +686,16 @@ useful only if a future need for non-Scheme-level pluggability (e.g. a
 foundation implemented in a C extension) actually arises — treat it as
 optional, not required follow-up work.
 
+**Planning doc:** [`docs/thoughts/set-theory-synthesis-plan.md`](thoughts/set-theory-synthesis-plan.md)
+works out a concrete path to close the ordinals/cardinals/foundations/
+relations gap, informed by comparing curry's actual (Scheme-level,
+logic-graded) design against `cill_spec.pdf` §18's from-scratch design —
+the conclusion is that the two are complementary (curry's graded-membership
+mechanism is stronger; Cill's axiomatic layer covers gaps curry has none of)
+rather than one being a strict improvement on the other. Also the direct
+prerequisite for the topology gap below (quotient topology needs quotient
+sets/equivalence classes).
+
 ```c
 typedef struct curry_foundations_ops {
     val_t (*member)(val_t x, val_t S);
@@ -746,6 +765,19 @@ compiler-IR dumps (`compile->ast/hir/mir/llvm/asm`), the sampling
 profiler, Tracy/Perfetto tracing, the SIMD tower — remains unstarted;
 only basic call-count/wall-clock profiling (already listed as "✓ basic"
 above) exists beyond the debugger.
+
+**Planning docs:** this phase's scope splits cleanly across two documents
+written after comparing against `cill_spec.pdf` (§12 Profiling, §13
+Introspection — both read "nice and clean" against curry's actual, thinner
+coverage here). [`docs/thoughts/profiling-uplift-plan.md`](thoughts/profiling-uplift-plan.md)
+covers the sampling profiler, event tracing, and allocation/concurrency
+profilers (this phase's third and fourth bullets below). [`docs/thoughts/introspection-uplift-plan.md`](thoughts/introspection-uplift-plan.md)
+covers everything else in this phase except the LLVM SIMD tower: object/
+heap introspection, compiler introspection, actor/thread/tvar enumeration,
+REPL integration, and macro/symbolic-algebra introspection — prioritized
+with macro introspection (`macroexpand`) first as the cheapest and most
+immediately useful, given how often this project's own SRFI/macro-hygiene
+bugs would have been faster to debug with it available.
 
 **Introspection** — the running system fully inspectable from Scheme:
 

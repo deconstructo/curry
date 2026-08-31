@@ -946,6 +946,53 @@
   (df-stream-take (df-stream-filter even? (df-stream-from 1)) 5)
   '(2 4 6 8 10))
 
+;;; Macro introspection: macro?, macroexpand-1, macroexpand
+;;; (introspection uplift work, docs/thoughts/introspection-uplift-plan.md)
+(define-syntax intro-my-when
+  (syntax-rules ()
+    ((_ c b ...) (if c (begin b ...) (if #f #f)))))
+(check "macro?: a real macro" (macro? 'intro-my-when) #t)
+(check "macro?: an ordinary procedure" (macro? 'car) #f)
+(check "macro?: not even bound" (macro? 'totally-unbound-name-xyz) #f)
+(check "macroexpand-1: expands exactly one step"
+       (macroexpand-1 '(intro-my-when #t (display 1) (display 2)))
+       '(if #t (begin (display 1) (display 2)) (if #f #f)))
+(check "macroexpand-1: non-macro-use form returned unchanged"
+       (macroexpand-1 '(+ 1 2)) '(+ 1 2))
+(check "macroexpand-1: non-pair returned unchanged" (macroexpand-1 42) 42)
+;; A macro whose expansion is itself another macro use -- macroexpand
+;; (unlike macroexpand-1) keeps going until the head is no longer a macro.
+(define-syntax intro-double-when
+  (syntax-rules ()
+    ((_ c b ...) (intro-my-when c b ...))))
+(check "macroexpand: fully expands the outermost form"
+       (macroexpand '(intro-double-when #t 'ok))
+       '(if #t (begin 'ok) (if #f #f)))
+
+;; Regression: a self-referential macro (its own expansion is another use
+;; of itself) used to hang macroexpand forever -- each expansion step
+;; conses a genuinely fresh list, so a bare `next == expr` fixpoint check
+;; never detects it. Found by independent review. Fixed with a hard
+;; expansion-step cap that raises a catchable error instead of looping.
+(define-syntax intro-loopy
+  (syntax-rules () ((_ x) (intro-loopy x))))
+(check "macroexpand: self-referential macro raises instead of hanging"
+       (guard (e (#t 'raised)) (macroexpand '(intro-loopy 1)))
+       'raised)
+
+;;; Object introspection: type-of (introspection uplift work)
+(check "type-of: fixnum" (type-of 42) 'fixnum)
+(check "type-of: pair" (type-of (cons 1 2)) 'pair)
+(check "type-of: string" (type-of "hi") 'string)
+(check "type-of: symbol" (type-of 'sym) 'symbol)
+(check "type-of: char" (type-of #\a) 'char)
+(check "type-of: boolean" (type-of #t) 'boolean)
+(check "type-of: null" (type-of '()) 'null)
+(check "type-of: vector" (type-of (vector 1 2)) 'vector)
+(check "type-of: a compiled closure" (type-of (lambda (x) x)) 'closure)
+(check "type-of: a primitive" (type-of car) 'primitive)
+(check "type-of: flonum" (type-of 1.5) 'flonum)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

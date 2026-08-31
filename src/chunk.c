@@ -271,31 +271,84 @@ int chunk_add_const(Chunk *c, val_t v) {
 
 /* ── Disassembler ────────────────────────────────────────────────────── */
 
-static int disasm_one(const Chunk *c, int off) {
-    fprintf(stderr, "%04d ", off);
+static int disasm_one(const Chunk *c, int off, FILE *out) {
+    fprintf(out, "%04d ", off);
     if (off > 0 && c->lines[off] == c->lines[off-1])
-        fprintf(stderr, "   | ");
+        fprintf(out, "   | ");
     else
-        fprintf(stderr, "%4d ", c->lines[off]);
+        fprintf(out, "%4d ", c->lines[off]);
 
     uint8_t op = c->code[off++];
     const char *name = (op < OP_COUNT) ? opcode_name[op] : "???";
 
     switch ((OpCode)op) {
+    /* OP_CLOSURE has its own case, separate from the plain single-byte-
+     * operand group below: its encoding is ci (1 byte) followed by
+     * upval_count*2 more bytes (an (is_local, idx) pair per captured
+     * upvalue -- see vm.c's OP_CLOSURE handler), a variable-length tail
+     * this disassembler must skip or every subsequent instruction in the
+     * chunk decodes from the wrong offset. Previously grouped with the
+     * fixed single-operand cases below, which only consumed ci and never
+     * skipped the upvalue table -- a real desync bug for any closure that
+     * captures at least one upvalue (the common case), found while wiring
+     * this up to a `disassemble` builtin/`,asm` REPL command. Also a
+     * latent OOB-read risk: the resulting misaligned `off` could walk the
+     * next fake "instruction" past code_len when this function's own
+     * multi-byte-operand cases read code[off+1] without their own bounds
+     * check, relying on this loop having decoded prior instructions
+     * correctly to stay in range. */
+    case OP_CLOSURE: {
+        uint8_t ci = c->code[off++];
+        fprintf(out, "%-16s %4d", name, ci);
+        /* If the constant at ci isn't actually a chunk (out of range, or
+         * present but the wrong type -- a corrupt/hostile .scc file could
+         * shape one this way; read_chunk in scc.c does not validate
+         * upval_count against anything), there is no reliable way to know
+         * how many trailing upvalue-table bytes this instruction actually
+         * has. Silently treating that as "0 upvalues" and continuing --
+         * an earlier version of this fix did exactly that -- resumes
+         * decoding at exactly the wrong offset, i.e. the desync bug this
+         * whole case exists to fix, just made silent instead of loud
+         * (found by independent review). Print a marker and stop
+         * disassembling the rest of the chunk instead: a truncated-but-
+         * honest listing beats a longer one that's silently wrong from
+         * this point on. */
+        if (ci >= c->const_len || !vis_type(c->constants[ci], T_CHUNK)) {
+            fprintf(out, "  <bad chunk constant %d -- disassembly aborted>\n", ci);
+            return c->code_len;
+        }
+        int n_upvals = vunptr(Chunk, c->constants[ci])->upval_count;
+        if (n_upvals > 0) fprintf(out, "  upvals:");
+        for (int i = 0; i < n_upvals; i++) {
+            /* Bounds-check every pair read, not just the loop count: a
+             * corrupt/hostile .scc's upval_count could claim more
+             * upvalues than actually fit in the remaining code[] bytes.
+             * Same "stop rather than silently misdecode" policy as above. */
+            if (off + 1 >= c->code_len) {
+                fprintf(out, "  <upvalue table runs past end of code -- disassembly aborted>\n");
+                return c->code_len;
+            }
+            uint8_t is_local = c->code[off++];
+            uint8_t idx      = c->code[off++];
+            fprintf(out, " (%s %d)", is_local ? "local" : "up", idx);
+        }
+        fprintf(out, "\n");
+        break;
+    }
     case OP_CONST:
     case OP_LOAD_LOCAL: case OP_STORE_LOCAL:
     case OP_LOAD_GLOBAL: case OP_STORE_GLOBAL: case OP_DEF_GLOBAL:
     case OP_DEFINED_GLOBAL:
     case OP_LOAD_UP: case OP_STORE_UP:
     case OP_CALL: case OP_TAIL_CALL: case OP_SELF_TAIL_CALL:
-    case OP_CLOSURE: case OP_CLOSE_UP:
+    case OP_CLOSE_UP:
     case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY:
     case OP_SLIDE: case OP_TREE_EVAL_CACHED:
     case OP_CAR: case OP_CDR: case OP_CONS: case OP_NULLP: case OP_PAIRP:
     case OP_ADD: case OP_SUB: case OP_MUL: case OP_NUMEQ:
     case OP_LT: case OP_LE: case OP_GT: case OP_GE: {
         uint8_t a = c->code[off++];
-        fprintf(stderr, "%-16s %4d", name, a);
+        fprintf(out, "%-16s %4d", name, a);
         if ((OpCode)op == OP_CONST || (OpCode)op == OP_LOAD_GLOBAL ||
             (OpCode)op == OP_STORE_GLOBAL || (OpCode)op == OP_DEF_GLOBAL ||
             (OpCode)op == OP_DEFINED_GLOBAL ||
@@ -309,11 +362,11 @@ static int disasm_one(const Chunk *c, int off) {
             /* print constant value */
             if (a < c->const_len) {
                 val_t v = c->constants[a];
-                if (vis_fixnum(v))  fprintf(stderr, "  ; %ld", (long)vunfix(v));
-                else if (vis_symbol(v)) fprintf(stderr, "  ; %s", as_sym(v)->data);
+                if (vis_fixnum(v))  fprintf(out, "  ; %ld", (long)vunfix(v));
+                else if (vis_symbol(v)) fprintf(out, "  ; %s", as_sym(v)->data);
             }
         }
-        fprintf(stderr, "\n");
+        fprintf(out, "\n");
         break;
     }
     case OP_CONST_W:
@@ -321,31 +374,31 @@ static int disasm_one(const Chunk *c, int off) {
     case OP_PUSH_HANDLER: {
         uint16_t b = (uint16_t)(c->code[off] | (c->code[off+1] << 8));
         off += 2;
-        fprintf(stderr, "%-16s %4d\n", name, (int)b);
+        fprintf(out, "%-16s %4d\n", name, (int)b);
         break;
     }
     case OP_CALL_GLOBAL: case OP_TAIL_CALL_GLOBAL: {
         uint8_t a = c->code[off++];
         uint8_t b = c->code[off++];
-        fprintf(stderr, "%-16s %4d %4d", name, a, b);
+        fprintf(out, "%-16s %4d %4d", name, a, b);
         if (a < c->const_len) {
             val_t v = c->constants[a];
-            if (vis_symbol(v)) fprintf(stderr, "  ; %s", as_sym(v)->data);
+            if (vis_symbol(v)) fprintf(out, "  ; %s", as_sym(v)->data);
         }
-        fprintf(stderr, "\n");
+        fprintf(out, "\n");
         break;
     }
     default:
-        fprintf(stderr, "%s\n", name);
+        fprintf(out, "%s\n", name);
         break;
     }
     return off;
 }
 
-void chunk_disasm(const Chunk *c, const char *label) {
-    fprintf(stderr, "=== %s (%d bytes, %d consts) ===\n",
+void chunk_disasm(const Chunk *c, const char *label, FILE *out) {
+    fprintf(out, "=== %s (%d bytes, %d consts) ===\n",
             label ? label : "<anon>", c->code_len, c->const_len);
     int off = 0;
     while (off < c->code_len)
-        off = disasm_one(c, off);
+        off = disasm_one(c, off, out);
 }

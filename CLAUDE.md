@@ -228,7 +228,9 @@ Script arguments are available as `(command-line)` (R7RS thunk returning a list 
 
 ## REPL commands
 
-Inside the REPL, comma-prefixed commands are available: `,quit`, `,help`, `,gc` (force GC), `,env` (list all global bindings), `,vm` (VM/heap stats), `,profile`, and the debugger commands `,break <fn|file:line>`, `,unbreak <n>`, `,breaks`, `,debug <expr>`. Readline history is saved to `~/.curry_history` (last 500 entries) when readline is present.
+Inside the REPL, comma-prefixed commands are available: `,quit`, `,help`, `,gc` (force GC), `,env` (list all global bindings), `,vm` (VM/heap stats), `,profile`, `,asm <name>` (disassemble a compiled procedure's bytecode), `,expand <expr>` (one macro-expansion step, unevaluated), `,actors` (list live/just-exited actors with mailbox depth and message counts), and the debugger commands `,break <fn|file:line>`, `,unbreak <n>`, `,breaks`, `,debug <expr>`. Readline history is saved to `~/.curry_history` (last 500 entries) when readline is present.
+
+Introspection builtins (no import required, always in `GLOBAL_ENV`): `(disassemble proc)` → bytecode listing as a string (compiled closures only — a primitive or tree-walked closure raises), `(macro? sym)`, `(macroexpand-1 form)`, `(macroexpand form)` (macro expansion sees `GLOBAL_ENV` only, not a `let-syntax`-local macro — a builtin has no access to a caller's lexical environment), `(type-of x)` → a symbol naming `x`'s runtime type, `(list-actors)` → actors currently live or just-exited (backed by a fixed 4096-slot registry — above that many simultaneously-registered actors, further spawns silently stop appearing in `list-actors` while still running normally).
 
 ## Interactive debugger
 
