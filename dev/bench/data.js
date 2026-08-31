@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788201516682,
+  "lastUpdate": 1788213278071,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10211,6 +10211,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.781,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cc190357f079986f4c27e04077983b40dfafd45b",
+          "message": "fix(llvm): use hasTerminator() instead of the asserting getTerminator() (#106)\n\nCloses #99.\n\nCompileCtx::terminated() tested for an unterminated basic block via\n'getTerminator() != nullptr'. LLVM's getTerminator() asserts the\nblock is ALREADY terminated before returning anything\n('assert(hasTerminator() && \"cannot get terminator of non-well-formed\nblock\")', BasicBlock.h) -- it was never designed to double as an\nis-it-terminated query. Apparently older LLVM releases didn't enforce\nthis (or shipped with assertions compiled out), letting this call\nsilently work by luck for years, until LLVM 23.1.0 (this machine's\ncurrent Homebrew version) hit the assertion at runtime the moment any\nJIT-compiled code exercised a control-flow path reaching an\nunterminated block -- which turned out to be nearly every\nsufficiently-looping test, cascading into 21 otherwise-unrelated\nctest targets (scheme_r7rs, actors, numeric_ext, sicm, syntax_rules,\nprofiling, posix, srfi_160, ...) all aborting the same way whenever\nthey ran long enough to cross the tiered JIT's promotion threshold.\n\nFixed with hasTerminator() -- LLVM's own plain, assertion-free bool\nquery for exactly this ('!empty() && back().isTerminator()') -- the\none-line change resolves the entire cascade, confirming it was all\nthe same root cause.\n\nVerified: standalone 'jit' ctest target now passes (previously failed\nimmediately); full ctest suite with -DBUILD_LLVM=ON is 115/115 (up\nfrom 94/115, with every previously-aborted target now passing);\nnon-LLVM build unaffected, 114/114.\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T07:53:41+10:00",
+          "tree_id": "a69c11fb0ec4775ba16468c80389a859da8181bc",
+          "url": "https://github.com/deconstructo/curry/commit/cc190357f079986f4c27e04077983b40dfafd45b"
+        },
+        "date": 1788213276796,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.454,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.957,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.698,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.953,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 126.115,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 287.77,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.599,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.205,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 64.178,
             "unit": "ms"
           }
         ]
