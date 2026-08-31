@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788213358019,
+  "lastUpdate": 1788219113813,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10349,6 +10349,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 46.501,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "54586312731e1e4009cc2c6126258dffc7af1319",
+          "message": "test(ci): bound websocket/websocket_server/ros to a 60s timeout\n\nCloses #110 (mitigation only, root cause still open).\n\nFound investigating a ~28-minute CI job cancellation on an unrelated\nPR: the 'websocket' ctest target hung completely silent (no output at\nall) until GitHub killed the job, reproduced identically on a manual\nre-run. In the same run, 'ros' failed fast with a port-bind conflict\n-- these three tests all bind fixed port numbers, making them\ninherently vulnerable to contention under ctest -j parallel CI load.\n\nSame treatment this file already gives the 'actors' test's own\ndocumented rare-hang: a TIMEOUT turns a future recurrence into a\nfast, diagnosable CTest TIMEOUT instead of silently consuming an\nentire CI job. Does not fix the underlying cause (why the blocking\ncall has no timeout of its own, or the fixed-port design) -- see the\nlinked issue.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T09:31:09+10:00",
+          "tree_id": "3fa6472cd301058318b07739666eb03a0a71b1a2",
+          "url": "https://github.com/deconstructo/curry/commit/54586312731e1e4009cc2c6126258dffc7af1319"
+        },
+        "date": 1788219112695,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.292,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.062,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.78,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.207,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 131.079,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 287.825,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.914,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.72,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.216,
             "unit": "ms"
           }
         ]
