@@ -110,10 +110,10 @@
         ((_) stream-null)
         ((_ x y ...) (stream-cons x (stream y ...)))))
 
-    ;; curry has no case-lambda (see e.g. lib/curry/modules/curry/schematic/
-    ;; format.scm's own note on the same gap) -- dispatch on argument count
-    ;; via a plain rest-arg, matching the reference implementation's own
-    ;; approach exactly (it doesn't use case-lambda either).
+    ;; Dispatch on argument count via a plain rest-arg, matching the
+    ;; reference implementation's own approach exactly (it doesn't use
+    ;; case-lambda either, even though (scheme case-lambda) exists in
+    ;; curry now -- see lib/curry/modules/scheme/case-lambda.sld).
     (define (stream->list . args)
       (let ((n (if (= 1 (length args)) #f (car args)))
             (strm (if (= 1 (length args)) (car args) (cadr args))))

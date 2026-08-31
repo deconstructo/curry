@@ -18,7 +18,7 @@ Runnable CLI wrappers for all five are in `examples/schematic/schematic-{format,
 
 ## A note on this port
 
-Curry has no `case-lambda`. Every one of upstream's `case-lambda` procedures is rewritten here to take its optional trailing arguments via a `. rest` list instead — the same convention `(curry csv)`/`(curry toml)` already use for their own optional arguments.
+This port predates `(scheme case-lambda)` (see `lib/curry/modules/scheme/case-lambda.sld`), which didn't exist yet when it was written. Every one of upstream's `case-lambda` procedures is rewritten here to take its optional trailing arguments via a `. rest` list instead — the same convention `(curry csv)`/`(curry toml)` already use for their own optional arguments — and hasn't been migrated back to real `case-lambda` since the existing dispatch already works.
 
 `(curry schematic extract)` writes its own small, local pattern matcher (a `#(...)`-wrapped pattern position captures; anything else must `equal?` the input) rather than reusing `(curry matchable)` — it's upstream's own tiny, purpose-built matcher for a small fixed pattern set, kept as its own thing so this port's behavior stays directly traceable against upstream rather than needing every clause re-derived against a different pattern language's literal-vs-capture rules.
 

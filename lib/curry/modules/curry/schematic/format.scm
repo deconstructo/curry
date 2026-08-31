@@ -11,11 +11,13 @@
 ;;; changes intraline spacing, only line indentation — the same
 ;;; distinction upstream draws in its own header comment.
 ;;;
-;;; curry has no case-lambda, so every one of upstream's case-lambda
-;;; procedures below (string-ref*, string-read, string-nth-read-index,
-;;; read-indent, display-indent, format-scheme itself) is rewritten to
-;;; take its optional trailing arguments via a `. rest` list instead,
-;;; the same convention (curry csv)/(curry toml) already use.
+;;; Written before (scheme case-lambda) existed (see
+;;; lib/curry/modules/scheme/case-lambda.sld), so every one of upstream's
+;;; case-lambda procedures below (string-ref*, string-read,
+;;; string-nth-read-index, read-indent, display-indent, format-scheme
+;;; itself) is rewritten to take its optional trailing arguments via a
+;;; `. rest` list instead, the same convention (curry csv)/(curry toml)
+;;; already use -- not migrated back since the existing dispatch works.
 ;;;
 ;;; Still TODO, matching upstream's own outstanding item: `=>` in `cond`
 ;;; forms should not open a new indentation level.

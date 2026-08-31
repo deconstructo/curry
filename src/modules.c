@@ -275,9 +275,20 @@ void modules_init(void) {
 
     /* Register all R7RS standard library names as aliases for the global env.
      * Everything lives in one flat namespace, so (scheme base), (scheme inexact),
-     * (scheme write), etc. all expose the same bindings. */
+     * (scheme write), etc. all expose the same bindings.
+     *
+     * NOT "case-lambda": per R7RS, (scheme case-lambda) is its own real
+     * library, not part of the flat-namespace core (scheme base) exposes --
+     * it was listed here for a while regardless, which meant
+     * (import (scheme case-lambda)) silently SUCCEEDED while providing
+     * nothing (GLOBAL_ENV has no case-lambda binding), failing only later
+     * with a confusing unbound-variable error at the first actual use
+     * site instead of a clean "library not found" at import time. Real
+     * implementation lives at lib/curry/modules/scheme/case-lambda.sld,
+     * resolved the normal on-disk way now that it's no longer intercepted
+     * by this alias table first. */
     static const char *scheme_libs[] = {
-        "base", "case-lambda", "char", "complex", "cxr",
+        "base", "char", "complex", "cxr",
         "eval", "file", "inexact", "lazy", "load",
         "process-context", "read", "repl", "time", "write",
         NULL
