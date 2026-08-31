@@ -527,12 +527,33 @@ static bool read_const(FILE *f, val_t *out) {
     }
 }
 
+/* Duplicated from compiler_internal.h's MAX_UPVALS rather than including
+ * that header here: it's explicitly documented as private to the five
+ * compiler.c-split files (compiler.c/compiler_classic.c/ir_lower.c/
+ * ir_emit.c/compiler_ir_checks.c), not to be included elsewhere. Keep
+ * this in sync if that value ever changes. */
+#define SCC_MAX_UPVALS 256
+
 /* ── Read a Chunk ───────────────────────────────────────────────────────── */
 
 static bool read_chunk(FILE *f, Chunk *c) {
     if (!ri32(f, &c->arity))       return false;
     if (!ri32(f, &c->local_count)) return false;
     if (!ri32(f, &c->upval_count)) return false;
+    /* Unlike code_len/const_len/local_debug_len just below, this field had
+     * NO validation at all before this check -- neither a negative-value
+     * rejection nor an upper bound -- despite two real consumers trusting
+     * it unconditionally: vm.c's OP_CLOSURE handler loops upval_count
+     * times doing unchecked byte reads, and chunk.c's disassembler (fixed
+     * separately for its own read to bound-check and abort cleanly) reads
+     * the same untrusted field. A corrupted or hand-crafted .scc could
+     * previously drive an allocation request that silently wraps via
+     * (size_t)(-1) * sizeof(...) below (confirmed: produced an "18
+     * exabyte" GC warning rather than a clean error). Bounding it against
+     * the same cap the compiler itself enforces when constructing a chunk
+     * (MAX_UPVALS) makes a corrupt/incompatible .scc fail cleanly here
+     * instead. */
+    if (c->upval_count < 0 || c->upval_count > SCC_MAX_UPVALS) return false;
 
     /* Name */
     uint32_t nlen;
