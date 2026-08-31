@@ -16,6 +16,64 @@ _Thread_local Actor *current_actor = NULL;
 
 static _Atomic uint64_t next_actor_id = 1;
 
+/* ---- Global actor registry (backs list-actors introspection) ----------
+ * A fixed-capacity slot table: plain static val_t array -- Boehm scans
+ * static/global data already (the same reason GLOBAL_ENV, a plain val_t
+ * global in env.c, needs no explicit GC_ADD_ROOT), so this needs none
+ * either -- guarded by one mutex. An actor is registered right before its thread
+ * actually starts running (actor_spawn) and unregistered right as it
+ * exits (actor_thread, in the same critical section that already flips
+ * self->alive to false) -- so list-actors only ever reports actors that
+ * are live or were live a moment ago, never an unbounded history of every
+ * actor a long-running process has ever spawned. A hard cap (rather than
+ * a growable array) matches this codebase's existing precedent for
+ * fixed-size debug/introspection tables (DBG_BREAKS_MAX, the profiler's
+ * 4096-slot hash map) -- if the cap is ever hit, spawning still succeeds,
+ * the actor just doesn't appear in list-actors (documented below), rather
+ * than either failing the spawn or growing unbounded for what is
+ * diagnostic-only bookkeeping. */
+#define ACTOR_REGISTRY_MAX 4096
+static val_t             actor_registry[ACTOR_REGISTRY_MAX];
+static int                actor_registry_count = 0; /* high-water mark of used slots */
+static pthread_mutex_t    actor_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Registers `a`; silently a no-op if the table is full (see comment
+ * above) -- introspection visibility, not correctness, so there is
+ * nothing to raise here. */
+static void actor_registry_add(Actor *a) {
+    pthread_mutex_lock(&actor_registry_lock);
+    for (int i = 0; i < ACTOR_REGISTRY_MAX; i++) {
+        if (actor_registry[i] == 0) {
+            actor_registry[i] = vptr(a);
+            if (i >= actor_registry_count) actor_registry_count = i + 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&actor_registry_lock);
+}
+
+static void actor_registry_remove(Actor *a) {
+    val_t target = vptr(a);
+    pthread_mutex_lock(&actor_registry_lock);
+    for (int i = 0; i < actor_registry_count; i++) {
+        if (actor_registry[i] == target) { actor_registry[i] = 0; break; }
+    }
+    pthread_mutex_unlock(&actor_registry_lock);
+}
+
+/* (list-actors) -> list of actor objects currently registered (live, or
+ * exiting right now -- see the registry comment above for the exact
+ * window). */
+val_t actors_list(void) {
+    val_t result = V_NIL;
+    pthread_mutex_lock(&actor_registry_lock);
+    for (int i = 0; i < actor_registry_count; i++) {
+        if (actor_registry[i] != 0) result = scm_cons(actor_registry[i], result);
+    }
+    pthread_mutex_unlock(&actor_registry_lock);
+    return result;
+}
+
 static uint64_t mono_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -147,6 +205,7 @@ static void *actor_thread(void *arg) {
     pthread_mutex_lock(&self->lock);
     self->alive = false;
     pthread_mutex_unlock(&self->lock);
+    actor_registry_remove(self);
 
     /* Release the directory-context entries load_dir_adopt_snapshot
      * seeded this thread's stack with above -- this thread is about to
@@ -210,6 +269,20 @@ val_t actor_spawn(val_t closure, val_t args) {
     atomic_init(&a->mailbox_depth, 0);
     a->spawn_ns  = mono_ns();
 
+    /* Register BEFORE pthread_create, not after: a fast-exiting actor can
+     * run actor_thread to completion (including actor_registry_remove)
+     * before the SPAWNING thread ever gets scheduled again to run the
+     * add call below it -- pthread_create returning success only means
+     * the thread now exists and may run concurrently, not that it hasn't
+     * already finished. Registering first means the worst case is a
+     * harmless double-write (add then immediately remove), never a
+     * remove-before-add that permanently strands a dead entry (confirmed
+     * by independent review: 368/500 short-lived actors leaked this way
+     * with the old post-create ordering, and once the fixed-size table
+     * fills from leaked entries, every later actor silently stops
+     * appearing in list-actors for the rest of the process). */
+    actor_registry_add(a);
+
     ActorStart *start = (ActorStart *)gc_alloc_raw_pinned(sizeof(ActorStart));
     start->actor   = a;
     start->closure = closure;
@@ -224,11 +297,14 @@ val_t actor_spawn(val_t closure, val_t args) {
         /* actor_thread — the only code that would otherwise adopt and
          * later release start->load_dir_snap — never runs, so free it
          * here or it leaks (along with every strdup'd string in it).
-         * a->alive stays accurate: no thread is actually running. */
+         * a->alive stays accurate: no thread is actually running. Also
+         * undo the optimistic registration above -- actor_thread's own
+         * exit path (which normally does this) never runs either. */
         for (int i = 0; i < start->load_dir_snap_count; i++)
             free(start->load_dir_snap[i]);
         free(start->load_dir_snap);
         a->alive = false;
+        actor_registry_remove(a);
     }
     pthread_attr_destroy(&attr);
 

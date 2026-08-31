@@ -224,6 +224,122 @@ static val_t prim_untrace(int ac, val_t *av, void *ud) {
     return sym;
 }
 
+/* Macro introspection -- (macroexpand-1 '(some-macro-call ...)), (macroexpand ...),
+ * (macro? 'name). Only sees GLOBAL_ENV, the same environment every (curry X)
+ * library's exported macros and every top-level define-syntax land in --
+ * a builtin has no access to a caller's local lexical environment (DEF
+ * functions take (argc, argv, ud), no env parameter), so a let-syntax/
+ * letrec-syntax-local macro is invisible here. Documented limitation, not
+ * a bug: the motivating use case (debugging why an exported library macro
+ * expands to something that references an unexported helper -- a recurring
+ * bug class in this codebase's own SRFI shims) is always a global macro. */
+static bool lookup_global_syntax(val_t sym, val_t *out_transformer) {
+    val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
+    if (!slot || !vis_syntax(*slot)) return false;
+    *out_transformer = as_syntax(*slot)->transformer;
+    return true;
+}
+static val_t prim_macro_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_symbol(av[0])) return V_FALSE;
+    val_t xfm;
+    return vbool(lookup_global_syntax(av[0], &xfm));
+}
+/* One expansion step: if expr is (name . args) and name is bound to a
+ * global macro transformer, apply the transformer once and return the
+ * result unchanged (do NOT recurse) -- matches macroexpand-1 in every
+ * other Scheme/Lisp that has one. Anything else (not a pair, head isn't a
+ * symbol, symbol isn't a macro) is returned as-is. Non-static: also called
+ * directly by main.c's `,expand` REPL command. */
+val_t macroexpand_1(val_t expr) {
+    if (!vis_pair(expr) || !vis_symbol(vcar(expr))) return expr;
+    val_t xfm;
+    if (!lookup_global_syntax(vcar(expr), &xfm)) return expr;
+    return apply(xfm, scm_cons(expr, V_NIL));
+}
+static val_t prim_macroexpand_1(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return macroexpand_1(av[0]);
+}
+/* Fully expand only the outermost form: repeat macroexpand-1 while it's
+ * still making progress (the (possibly new) head symbol still names a
+ * global macro). Does not descend into subexpressions, same convention as
+ * Common Lisp's MACROEXPAND. macroexpand_1 returns its input unchanged
+ * (same val_t, whether a heap pointer or an immediate) exactly when no
+ * expansion happened, so an `==` check against the previous result
+ * correctly detects "genuinely reached a fixpoint" -- no need to
+ * duplicate macroexpand_1's own pair/symbol/macro-lookup logic here.
+ *
+ * That check does NOT detect a self-referential macro, though (a macro
+ * whose expansion is another use of itself, e.g.
+ * (define-syntax loopy (syntax-rules () ((_ x) (loopy x))))) -- each
+ * expansion step conses a genuinely fresh list, so `next == expr` is
+ * never true even though the process is going nowhere. Confirmed hanging
+ * (unrecoverable, allocating the whole time) by independent review before
+ * this cap existed. A hard step cap, raising a catchable error past it,
+ * is the same defense Chez/Racket use for exactly this case. */
+#define MACROEXPAND_MAX_STEPS 1000
+static val_t prim_macroexpand(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t expr = av[0];
+    for (int steps = 0; steps < MACROEXPAND_MAX_STEPS; steps++) {
+        val_t next = macroexpand_1(expr);
+        if (next == expr) return expr;
+        expr = next;
+    }
+    scm_raise(V_FALSE, "macroexpand: exceeded %d expansion steps -- "
+              "likely a self-referential macro", MACROEXPAND_MAX_STEPS);
+}
+/* (type-of x) -> symbol naming x's runtime type. Immediates first (they
+ * carry no Hdr to switch on); heap objects via a table indexed by ObjType,
+ * matching Cill's `(type-of x)` (introspection uplift work). Runtime-type
+ * introspection only -- curry has no static type inference to report
+ * instead (no HIR/MIR type-annotation pass exists), so unlike Cill's
+ * spec this can only ever describe an already-evaluated value, not infer
+ * an expression's type ahead of evaluating it. */
+val_t type_of_val(val_t v) {
+    if (vis_fixnum(v))  return sym_intern_cstr("fixnum");
+    if (vis_char(v))    return sym_intern_cstr("char");
+    if (v == V_TRUE || v == V_FALSE) return sym_intern_cstr("boolean");
+    if (vis_nil(v))     return sym_intern_cstr("null");
+    if (vis_void(v))    return sym_intern_cstr("void");
+    if (vis_eof(v))     return sym_intern_cstr("eof");
+    if (!vis_ptr(v))    return sym_intern_cstr("unknown");
+    static const char *names[] = {
+        [T_PAIR] = "pair", [T_VECTOR] = "vector", [T_STRING] = "string",
+        [T_SYMBOL] = "symbol", [T_FLONUM] = "flonum", [T_BIGNUM] = "bignum",
+        [T_RATIONAL] = "rational", [T_COMPLEX] = "complex",
+        [T_QUATERNION] = "quaternion", [T_OCTONION] = "octonion",
+        [T_BYTEVECTOR] = "bytevector", [T_PORT] = "port",
+        [T_CLOSURE] = "closure", [T_PRIMITIVE] = "primitive",
+        [T_CONTINUATION] = "continuation", [T_ACTOR] = "actor",
+        [T_MAILBOX] = "mailbox", [T_SET] = "set", [T_HASHTABLE] = "hash-table",
+        [T_RECORD_TYPE] = "record-type", [T_RECORD] = "record",
+        [T_MODULE] = "module", [T_ENV] = "environment", [T_VALUES] = "values",
+        [T_SYNTAX] = "syntax", [T_ERROR] = "error", [T_PROMISE] = "promise",
+        [T_PARAMETER] = "parameter", [T_SYMVAR] = "symbolic-variable",
+        [T_SYMEXPR] = "symbolic-expression", [T_QUANTUM] = "quantum",
+        [T_SURREAL] = "surreal", [T_MULTIVECTOR] = "multivector",
+        [T_TRACED] = "traced-procedure", [T_MATRIX] = "matrix",
+        [T_TENSOR] = "tensor", [T_F64VEC] = "f64vector",
+        [T_SYMFN] = "symbolic-function", [T_UP] = "up-tuple",
+        [T_DOWN] = "down-tuple", [T_BCCLOSURE] = "closure",
+        [T_TVAR] = "tvar", [T_CHANNEL] = "channel",
+        [T_JITCLOSURE] = "jit-closure", [T_SPINOR] = "spinor",
+        [T_CONDITION] = "condition", [T_RESTART] = "restart",
+        [T_CPTR] = "c-pointer", [T_FOREIGN_LIB] = "foreign-library",
+        [T_FOREIGN_FN] = "foreign-function", [T_MPFR] = "mpfr",
+        [T_INTERVAL] = "interval", [T_CHUNK] = "chunk",
+        [T_UPVALUE] = "upvalue", [T_TYPEDVEC] = "typed-vector",
+    };
+    uint32_t t = vunptr(Hdr, v)->type;
+    const char *nm = (t < sizeof(names)/sizeof(names[0]) && names[t]) ? names[t] : "unknown";
+    return sym_intern_cstr(nm);
+}
+static val_t prim_type_of(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return type_of_val(av[0]);
+}
 static val_t prim_zero_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_zero(av[0])); }
 static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_positive(av[0])); }
 static val_t prim_negative_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_negative(av[0])); }
@@ -2577,6 +2693,10 @@ static val_t prim_actor_id(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     return vfix((intptr_t)actor_id(av[0]));
 }
+static val_t prim_list_actors(int ac, val_t *av, void *ud) {
+    (void)ac;(void)av;(void)ud;
+    return actors_list();
+}
 
 /* ---- Dynamic parameters ---- */
 static val_t prim_make_parameter(int ac, val_t *av, void *ud) {
@@ -3193,6 +3313,39 @@ static val_t prim_gc_set_fsd(int ac, val_t *av, void *ud) {
     gc_set_free_space_divisor((int)vunfix(av[0]));
     return V_VOID;
 }
+/* (disassemble proc) -> string listing of proc's bytecode, via chunk_disasm
+ * captured through open_memstream instead of chunk_disasm's normal stderr
+ * target. Only meaningful for a compiled closure (T_BCCLOSURE) -- a
+ * primitive has no chunk, and a tree-walked closure (never went through
+ * the bytecode compiler) has none either. */
+static val_t prim_disassemble(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    val_t proc = av[0];
+    if (!vis_bcclosure(proc)) {
+        if (vis_prim(proc))
+            scm_raise(V_FALSE, "disassemble: %s is a primitive procedure, no bytecode",
+                      as_prim(proc)->name ? as_prim(proc)->name : "?");
+        if (vis_closure(proc))
+            scm_raise(V_FALSE, "disassemble: procedure is tree-walked, not compiled to bytecode");
+        scm_raise(V_FALSE, "disassemble: not a procedure");
+    }
+    Chunk *chunk = as_bcclosure(proc)->chunk;
+
+    char *buf = NULL;
+    size_t buf_len = 0;
+    FILE *mem = open_memstream(&buf, &buf_len);
+    if (!mem) scm_raise(V_FALSE, "disassemble: open_memstream failed");
+    chunk_disasm(chunk, chunk->name, mem);
+    fclose(mem);
+
+    String *s = (String *)gc_alloc_atomic(sizeof(String) + buf_len + 1);
+    s->hdr.type = T_STRING; s->hdr.flags = 0;
+    s->len = (uint32_t)buf_len; s->hash = 0; s->orig_cap = (uint32_t)buf_len; s->ext = NULL;
+    memcpy(s->data, buf, buf_len);
+    s->data[buf_len] = '\0';
+    free(buf);
+    return vptr(s);
+}
 static val_t prim_gc_set_max_heap(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_fixnum(av[0]) || vunfix(av[0]) < 0)
@@ -3448,6 +3601,10 @@ void builtins_register(val_t env) {
     DEF("procedure?",   prim_procedure_p, 1,1); DEF("port?",       prim_port_p,      1,1);
     DEF("traced?",      prim_traced_p,    1,1);
     DEF("trace",        prim_trace,       1,1);
+    DEF("macro?",         prim_macro_p,         1,1);
+    DEF("macroexpand-1",  prim_macroexpand_1,   1,1);
+    DEF("macroexpand",    prim_macroexpand,     1,1);
+    DEF("type-of",        prim_type_of,         1,1);
     DEF("untrace",      prim_untrace,     1,1);
     DEF("eof-object?",  prim_eof_object_p,1,1); DEF("bytevector?", prim_bytevector_p,1,1);
     DEF("set?",         prim_set_p,       1,1); DEF("hash-table?", prim_hash_table_p,1,1);
@@ -3684,6 +3841,7 @@ void builtins_register(val_t env) {
     DEF("actor-stats",    prim_actor_stats,   1,1);
     DEF("actor-set-name!",prim_actor_set_name,2,2);
     DEF("actor-id",       prim_actor_id,      1,1);
+    DEF("list-actors",    prim_list_actors,   0,0);
 
     /* Parameters */
     DEF("make-parameter", prim_make_parameter, 1,2);
@@ -3744,6 +3902,7 @@ void builtins_register(val_t env) {
     DEF("gc-total-bytes",              prim_gc_total_bytes,        0,0);
     DEF("gc-enable-incremental!",      prim_gc_enable_incremental, 0,0);
     DEF("gc-set-free-space-divisor!",  prim_gc_set_fsd,            1,1);
+    DEF("disassemble",                 prim_disassemble,           1,1);
     DEF("gc-stats",                    prim_gc_stats,              0,0);
     DEF("gc-stats-reset!",             prim_gc_stats_reset,        0,0);
     DEF("gc-set-max-heap!",            prim_gc_set_max_heap,       1,1);

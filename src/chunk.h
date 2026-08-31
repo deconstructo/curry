@@ -2,6 +2,7 @@
 #define CURRY_CHUNK_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include "value.h"
 #include "opcode.h"
 #include "object.h"
@@ -161,6 +162,6 @@ void chunk_local_debug_finalize(Chunk *c);
 static inline int chunk_pos(const Chunk *c) { return c->code_len; }
 
 /* Disassemble to stderr (debug) */
-void chunk_disasm(const Chunk *c, const char *label);
+void chunk_disasm(const Chunk *c, const char *label, FILE *out);
 
 #endif /* CURRY_CHUNK_H */

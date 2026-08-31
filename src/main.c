@@ -279,7 +279,8 @@ static void eval_port_exprs(val_t port, bool print) {
                     exit(0);   /* runs the atexit(curry_timings_report) hook */
                 }
                 if (!strcmp(name, "help")) {
-                    puts("Commands: ,quit  ,help  ,gc  ,env  ,profile  ,vm");
+                    puts("Commands: ,quit  ,help  ,gc  ,env  ,profile  ,vm  ,asm <name>");
+                    puts("          ,expand <expr>  ,actors");
                     puts("Debugger: ,break <fn|file:line>  ,unbreak <n>  ,breaks  ,debug <expr>");
                     continue;
                 }
@@ -346,6 +347,79 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "breaks")) { vm_debug_break_list(); continue; }
+                if (!strcmp(name, "actors")) {
+                    val_t actors = actors_list();
+                    if (vis_nil(actors)) { puts("No live actors."); continue; }
+                    printf("%-8s %-16s %-6s %-10s %-10s\n",
+                           "id", "name", "alive", "mailbox", "msgs-rx");
+                    for (val_t p = actors; vis_pair(p); p = vcdr(p)) {
+                        val_t actor = vcar(p);
+                        /* actor_stats returns a fixed-shape alist (see
+                         * actors.c) -- walk it directly for the handful of
+                         * fields this summary line needs. */
+                        val_t alive_v = V_FALSE, depth_v = vfix(0), rx_v = vfix(0), nmv = V_FALSE;
+                        for (val_t q = actor_stats(actor); vis_pair(q); q = vcdr(q)) {
+                            val_t entry = vcar(q);
+                            const char *k = sym_cstr(vcar(entry));
+                            if (!strcmp(k, "alive")) alive_v = vcdr(entry);
+                            else if (!strcmp(k, "mailbox-depth")) depth_v = vcdr(entry);
+                            else if (!strcmp(k, "msgs-received")) rx_v = vcdr(entry);
+                            else if (!strcmp(k, "name")) nmv = vcdr(entry);
+                        }
+                        printf("%-8lu %-16s %-6s %-10ld %-10ld\n",
+                               (unsigned long)actor_id(actor),
+                               vis_symbol(nmv) ? sym_cstr(nmv) : (vis_string(nmv) ? str_data(as_str(nmv)) : "-"),
+                               alive_v == V_TRUE ? "yes" : "no",
+                               (long)vunfix(depth_v), (long)vunfix(rx_v));
+                    }
+                    continue;
+                }
+                if (!strcmp(name, "expand")) {
+                    /* macroexpand_1 can scm_raise -- an ordinary REPL typo
+                     * (a macro use matching no syntax-rules clause) is
+                     * enough to trigger it. Without a handler installed
+                     * here, that exception has nowhere to go and takes
+                     * down the whole REPL process (found by independent
+                     * review). Every other command that can raise either
+                     * reuses eval_expr's own handler (,debug) or installs
+                     * one itself; this matches that pattern. */
+                    val_t arg = scm_read(port);
+                    if (vis_eof(arg)) break;
+                    ExnHandler eh;
+                    eh.prev = current_handler;
+                    current_handler = &eh;
+                    if (setjmp(eh.jmp) == 0) {
+                        val_t expanded = macroexpand_1(arg);
+                        current_handler = eh.prev;
+                        scm_write_shared(expanded, PORT_STDOUT);
+                        fputc('\n', stdout);
+                    } else {
+                        current_handler = eh.prev;
+                        fprintf(stderr, "Error: ");
+                        scm_write_shared(eh.exn, PORT_STDERR);
+                        fputc('\n', stderr);
+                    }
+                    continue;
+                }
+                if (!strcmp(name, "asm")) {
+                    val_t arg = scm_read(port);
+                    const char *fn_name = vis_symbol(arg) ? sym_cstr(arg)
+                                        : vis_string(arg)  ? str_data(as_str(arg))
+                                        : NULL;
+                    if (!fn_name) {
+                        fprintf(stderr, "usage: ,asm <name>\n");
+                        continue;
+                    }
+                    val_t *slot = env_lookup_slot(GLOBAL_ENV, sym_intern_cstr(fn_name));
+                    if (!slot) {
+                        fprintf(stderr, "unbound variable: %s\n", fn_name);
+                    } else if (!vis_bcclosure(*slot)) {
+                        fprintf(stderr, "%s: not a compiled procedure (no bytecode)\n", fn_name);
+                    } else {
+                        chunk_disasm(as_bcclosure(*slot)->chunk, fn_name, stdout);
+                    }
+                    continue;
+                }
                 if (!strcmp(name, "debug")) {
                     expr = scm_read(port);
                     if (vis_eof(expr)) break;

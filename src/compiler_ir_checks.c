@@ -92,9 +92,9 @@ bool compiler_ir_self_check(val_t expr) {
 
         if (!same) {
             fprintf(stderr, "ir self-check: MISMATCH\n--- old (direct compile) ---\n");
-            chunk_disasm(old_c.chunk, "old");
+            chunk_disasm(old_c.chunk, "old", stderr);
             fprintf(stderr, "--- new (ir_lower + ir_emit) ---\n");
-            chunk_disasm(new_c.chunk, "new");
+            chunk_disasm(new_c.chunk, "new", stderr);
         }
     }, {
         raised = true;

@@ -72,6 +72,8 @@ val_t scm_reverse(val_t lst);
 
 /* String helpers */
 val_t scm_make_string(uint32_t len, int fill_char);
+val_t macroexpand_1(val_t expr);
+val_t type_of_val(val_t v);
 val_t scm_string_copy(val_t s);
 val_t scm_string_append(val_t a, val_t b);
 val_t scm_number_to_string(val_t n, int radix);

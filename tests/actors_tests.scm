@@ -233,6 +233,56 @@
 (check "STM: concurrent tvar increments across actors all land"
        (tvar-read stm-counter) (* stm-n-actors stm-n-incr))
 
+;;; list-actors: global registry (introspection uplift work,
+;;; docs/thoughts/introspection-uplift-plan.md) -- an actor is registered
+;;; right before its thread starts and unregistered right as it exits.
+(define la-done-sem (make-semaphore 0))
+(define la-actor
+  (spawn (lambda () (receive) (sem-post! la-done-sem))))
+;; Other tests earlier in this file spawn many actors of their own (some
+;; still winding down their own thread teardown at this point) -- check
+;; presence, not that la-actor is the only entry.
+(check "list-actors: a live actor appears"
+       (if (member la-actor (list-actors)) #t #f) #t)
+(send! la-actor 'go)
+(sem-wait! la-done-sem)
+;; Give the exiting thread a moment to reach actor_registry_remove --
+;; sem-post! happens just before the actor closure returns and the
+;; thread's own cleanup (which does the unregister) runs, so there's a
+;; small window. No sleep-ms primitive exists in curry, so poll with a
+;; real (non-trivial, not optimizable-away) amount of busy work between
+;; checks instead of a tight spin on list-actors alone.
+(define (la-busy-wait-a-bit)
+  (let loop ((i 0) (acc 0)) (if (< i 50000) (loop (+ i 1) (+ acc i)) acc)))
+(let loop ((tries 0))
+  (when (and (member la-actor (list-actors)) (< tries 100))
+    (la-busy-wait-a-bit)
+    (loop (+ tries 1))))
+(check "list-actors: no longer present after the actor exits"
+       (member la-actor (list-actors)) #f)
+
+;;; Regression: actor_registry_add used to run AFTER pthread_create
+;;; returned, so a fast-exiting actor's own actor_registry_remove (run on
+;;; its own thread, concurrently) could complete before the spawning
+;;; thread ever got scheduled to run the add -- remove found nothing, add
+;;; then inserted a permanently dead entry. Found by independent review:
+;;; 500 immediately-returning actors leaked 368 stranded registry slots
+;;; under the old post-create ordering. Fixed by registering before
+;;; pthread_create instead of after.
+;; Collect handles rather than asserting the whole registry is empty --
+;; other tests earlier in this file may still have their own actors
+;; mid-teardown at this point (benign, unrelated to this regression).
+(define la-race-actors
+  (let loop ((i 0) (acc '()))
+    (if (< i 300) (loop (+ i 1) (cons (spawn (lambda () 1)) acc)) acc)))
+;; Give every spawned thread a real chance to run to completion and
+;; unregister itself -- same busy-wait approach as above, no sleep-ms
+;; primitive available.
+(let loop ((tries 0)) (when (< tries 300) (la-busy-wait-a-bit) (loop (+ tries 1))))
+(check "list-actors: no permanently-stranded entries from fast-exiting actors"
+       (length (filter (lambda (a) (member a (list-actors))) la-race-actors))
+       0)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
