@@ -43,7 +43,12 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x06'   /* v6: persist Chunk.src_lambda (the original
+#define SCC_FMT_VER     '\x07'   /* v7: OP_TAIL_APPLY inserted into the opcode
+                                    enum (issue #102 -- apply is now tail-
+                                    callable), shifting every subsequent
+                                    opcode's numeric value. Same bytecode-
+                                    encoding-change treatment as v5 below.
+                                  v6: persist Chunk.src_lambda (the original
                                     (lambda params . body) source form, used for
                                     tiered-JIT hot-swap and now also for the
                                     procedure-lambda/procedure-arglist introspection

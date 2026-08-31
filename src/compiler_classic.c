@@ -2413,7 +2413,7 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
             n++; a = vcdr(a);
         }
         release_pending_slots(c, saved);
-        emit_ab(c, OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
+        emit_ab(c, tail ? OP_TAIL_APPLY : OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
         return;
     }
 

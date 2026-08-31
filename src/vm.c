@@ -645,7 +645,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_TAIL_CALL_GLOBAL] = &&L_OP_TAIL_CALL_GLOBAL,
         [OP_TREE_EVAL_CACHED] = &&L_OP_TREE_EVAL_CACHED,
         [OP_CLOSURE]     = &&L_OP_CLOSURE,     [OP_CLOSE_UP]     = &&L_OP_CLOSE_UP,
-        [OP_APPLY]       = &&L_OP_APPLY,       [OP_VALUES]       = &&L_OP_VALUES,
+        [OP_APPLY]       = &&L_OP_APPLY,       [OP_TAIL_APPLY]   = &&L_OP_TAIL_APPLY,
+        [OP_VALUES]       = &&L_OP_VALUES,
         [OP_VALUES_REF]  = &&L_OP_VALUES_REF,
         [OP_CALL_WITH_VALUES] = &&L_OP_CALL_WITH_VALUES,
         [OP_TAIL_CALL_WITH_VALUES] = &&L_OP_TAIL_CALL_WITH_VALUES,
@@ -1501,6 +1502,85 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             vm->sp -= total;
             val_t result = call_foreign(fn, total_args, call_args);
             PUSH(result);
+            NEXT;
+        }
+
+        CASE(OP_TAIL_APPLY) {
+            /* Same argument-flattening as OP_APPLY (see its own comment
+             * just above) -- the only difference is what happens once
+             * `fn` and the flattened `call_args` are known: a BcClosure
+             * reuses the current frame exactly like OP_TAIL_CALL, instead
+             * of always going through call_foreign (which recurses into
+             * a brand-new nested vm_run() for a BcClosure argument,
+             * accumulating one C stack frame per apply-based iteration --
+             * this opcode not existing was issue #102, confirmed via a
+             * self-recursive case-lambda accumulator stack-overflowing at
+             * a few hundred iterations instead of looping).
+             *
+             * Deliberately does NOT attempt the tiered-JIT native fast
+             * path OP_TAIL_CALL has (the jit_val/GC_REVEAL_POINTER
+             * branch): that path's calling convention expects call_args
+             * to already be live at `vm->sp - argc2`, i.e. positioned on
+             * the VM's own value stack, which the flattened array here is
+             * not (it's either a C-stack buf[64] or a separate
+             * gc_alloc_raw_pinned array -- see OP_APPLY above). Always
+             * going through the bytecode frame-reuse path below is
+             * simpler and still delivers the actual fix (genuine O(1)-
+             * stack tail calls); vm_maybe_jit(cl) still lets the closure
+             * warm up normally for whatever future calls DO reach it via
+             * an ordinary (non-apply) call site. */
+            uint8_t total = READ_U8();
+            val_t *base      = vm->sp - total;
+            val_t fn         = base[0];
+            val_t last_list  = base[total - 1];
+            int n_fixed      = (int)total - 2;
+
+            int n_tail = 0;
+            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+
+            int total_args = n_fixed + n_tail;
+            val_t buf[64];
+            val_t *call_args = (total_args <= 64)
+                ? buf
+                : (val_t *)gc_alloc_raw_pinned((size_t)total_args * sizeof(val_t));
+
+            for (int k = 0; k < n_fixed; k++) call_args[k] = base[1 + k];
+            val_t lp = last_list;
+            for (int k = 0; k < n_tail; k++) { call_args[n_fixed + k] = vcar(lp); lp = vcdr(lp); }
+
+            vm->sp -= total; /* discard this OP_TAIL_APPLY's own stack contribution */
+
+            if (vis_bcclosure(fn)) {
+                BcClosure *cl = as_bcclosure(fn);
+                vm_maybe_jit(cl);
+                if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                        frame->closure->chunk->name) {
+                    val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                    profiling_record_timed(sym, frame->prof_start_ns);
+                }
+                if (curry_profiling_level >= 1 && cl != frame->closure && cl->chunk->name)
+                    profiling_record_call_tco(sym_intern_cstr(cl->chunk->name));
+                /* frame->slots <= base < (old) vm->sp always holds -- this
+                 * frame's own slot region sits below wherever OP_APPLY's
+                 * operands were pushed, so overwriting it in place and
+                 * shrinking vm->sp back down to it is safe, same
+                 * invariant OP_TAIL_CALL relies on. call_args never
+                 * aliases frame->slots (it's a distinct C-stack or GC-heap
+                 * buffer), so a plain copy suffices. */
+                vm_close_upvalues(frame->slots);
+                memmove(frame->slots, call_args, (size_t)total_args * sizeof(val_t));
+                vm->sp            = frame->slots + total_args;
+                frame->closure    = cl;
+                frame->ip         = cl->chunk->code;
+                frame->slot_count = vm_bind_args(cl, frame->slots, total_args);
+                frame->prof_start_ns = 0;
+                if (curry_profiling_level >= 2 && cl->chunk->name)
+                    frame->prof_start_ns = profiling_now_ns();
+            } else {
+                val_t result = call_foreign(fn, total_args, call_args);
+                if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
+            }
             NEXT;
         }
 

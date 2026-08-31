@@ -182,6 +182,13 @@ typedef enum {
 
     /* ── apply / values ─────────────────────────────────────────────── */
     OP_APPLY,       /* (apply f args-list) — f and list on stack         */
+    OP_TAIL_APPLY,  /* A: tail-position (apply f args-list) — reuses the
+                        current frame exactly like OP_TAIL_CALL, when fn
+                        turns out to be a BcClosure. See issue #102: this
+                        opcode not existing was why apply could never be
+                        tail-called at all, so a self-recursive procedure
+                        built on apply (case-lambda's own dispatch, most
+                        visibly) stack-overflowed instead of looping. */
     OP_VALUES,      /* A: bundle A values into a multiple-values object  */
     OP_VALUES_REF,  /* A: pop TOS (a multiple-values object or a plain
                          single value); push component A. If TOS is a
