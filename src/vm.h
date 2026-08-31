@@ -103,7 +103,7 @@ typedef struct VM {
 } VM;
 
 /* Per-thread VM instance — each thread must call vm_init() before use */
-extern _Thread_local VM *vm;
+extern CURRY_THREAD_LOCAL VM *vm;
 
 /* Lifecycle */
 void vm_init(void);

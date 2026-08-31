@@ -31,7 +31,7 @@ val_t scm_read(val_t port);
 /* Line the most recent scm_read() call's datum started on (1-based).
    Valid immediately after scm_read() returns; used by the compiler to
    stamp backtrace line numbers on freshly-read top-level forms. */
-extern _Thread_local int g_reader_last_line;
+extern CURRY_THREAD_LOCAL int g_reader_last_line;
 
 /* Read from a C string (convenience) */
 val_t scm_read_cstr(const char *src);

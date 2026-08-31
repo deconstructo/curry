@@ -163,8 +163,8 @@ static val_t eval_call_cc(val_t proc) {
  * non-tail recursion to depth ~1,000,000 previously segfaulted
  * immediately (define-library bodies are tree-walked, not compiled --
  * see modules.c's define_library_clause). */
-static _Thread_local void   *eval_stack_base  = NULL;
-static _Thread_local size_t  eval_stack_limit = 0;
+static CURRY_THREAD_LOCAL void   *eval_stack_base  = NULL;
+static CURRY_THREAD_LOCAL size_t  eval_stack_limit = 0;
 
 /* Real per-thread stack size, queried once and cached alongside
  * eval_stack_base. A fixed byte budget here (e.g. "assume ~8MB, leave
@@ -1211,7 +1211,7 @@ tail:
                 /* Level 2+: sacrifice TCO for named closures to get wall-clock
                  * timing.  Skip when re-entering the same closure (self-tail-
                  * recursive loops) — otherwise the stack grows without bound. */
-                static _Thread_local val_t prof2_current = 0;
+                static CURRY_THREAD_LOCAL val_t prof2_current = 0;
                 if (proc != prof2_current) {
                     val_t saved = prof2_current;
                     prof2_current = proc;

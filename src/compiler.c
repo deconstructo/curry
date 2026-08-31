@@ -85,8 +85,8 @@
 
 /* ── Compiler lifecycle ──────────────────────────────────────────────── */
 
-static _Thread_local const char *g_compile_source_name = NULL;
-static _Thread_local val_t       g_compile_target_env   = V_VOID;
+static CURRY_THREAD_LOCAL const char *g_compile_source_name = NULL;
+static CURRY_THREAD_LOCAL val_t       g_compile_target_env   = V_VOID;
 /* Set by compile_let's named-let branch right before compiling the loop
  * lambda's own body, consumed-and-cleared by init_compiler below the same
  * way g_compile_target_env is -- see Compiler::self_tail_name's own
@@ -98,8 +98,8 @@ static _Thread_local val_t       g_compile_target_env   = V_VOID;
  * and read/cleared here by init_compiler; also read by ir_emit's own
  * IR_LET/IR_LETREC named-let handling (ir_emit.c), which sets it the same
  * way compile_let does for its own child Compiler. */
-_Thread_local val_t g_compile_self_tail_name    = V_FALSE;
-_Thread_local bool  g_compile_self_tail_mutated = false;
+CURRY_THREAD_LOCAL val_t g_compile_self_tail_name    = V_FALSE;
+CURRY_THREAD_LOCAL bool  g_compile_self_tail_mutated = false;
 
 /* Tier 2.3: guards against mutual/indirect recursion inlining itself
  * arbitrarily deep. body_contains_symbol (ir_lower.c) only rejects DIRECT
@@ -118,8 +118,8 @@ _Thread_local bool  g_compile_self_tail_mutated = false;
  * in compiler_internal.h (MAX_INLINE_DEPTH lives there too, since the
  * array's declared size must match between this definition and ir_emit.c's
  * own bounds check). */
-_Thread_local val_t g_inlining_bodies[MAX_INLINE_DEPTH];
-_Thread_local int   g_inlining_depth = 0;
+CURRY_THREAD_LOCAL val_t g_inlining_bodies[MAX_INLINE_DEPTH];
+CURRY_THREAD_LOCAL int   g_inlining_depth = 0;
 
 bool currently_inlining(val_t body) {
     for (int i = 0; i < g_inlining_depth; i++)

@@ -159,13 +159,13 @@ typedef enum {
 
 /* Set by compile_let's named-let branch right before compiling the loop
  * lambda's own body, consumed-and-cleared by init_compiler. */
-extern _Thread_local val_t g_compile_self_tail_name;
-extern _Thread_local bool  g_compile_self_tail_mutated;
+extern CURRY_THREAD_LOCAL val_t g_compile_self_tail_name;
+extern CURRY_THREAD_LOCAL bool  g_compile_self_tail_mutated;
 
 /* Tier 2.3: guards against mutual/indirect recursion inlining itself
  * arbitrarily deep -- see currently_inlining's own comment in compiler.c. */
-extern _Thread_local val_t g_inlining_bodies[MAX_INLINE_DEPTH];
-extern _Thread_local int   g_inlining_depth;
+extern CURRY_THREAD_LOCAL val_t g_inlining_bodies[MAX_INLINE_DEPTH];
+extern CURRY_THREAD_LOCAL int   g_inlining_depth;
 
 /* ── compiler.c: lifecycle / emit / scope / locals / upvalues ──────────── */
 

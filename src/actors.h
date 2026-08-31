@@ -51,6 +51,6 @@ val_t    actor_stats(val_t actor);   /* alist of profiling counters */
 val_t    actors_list(void);          /* list of all live-or-just-exited actors */
 
 /* Thread-local current actor (NULL in main thread) */
-extern _Thread_local Actor *current_actor;
+extern CURRY_THREAD_LOCAL Actor *current_actor;
 
 #endif /* CURRY_ACTORS_H */

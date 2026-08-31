@@ -12,8 +12,8 @@
 #include <stdlib.h>
 
 /* Thread-local precision/rounding context. */
-_Thread_local mpfr_prec_t tl_mpfr_prec = 0;
-_Thread_local mpfr_rnd_t  tl_mpfr_rnd  = MPFR_RNDN;
+CURRY_THREAD_LOCAL mpfr_prec_t tl_mpfr_prec = 0;
+CURRY_THREAD_LOCAL mpfr_rnd_t  tl_mpfr_rnd  = MPFR_RNDN;
 
 /* ---------------------------------------------------------------------- */
 /* GC finalizer — releases the mpfr_t limb storage.                       */

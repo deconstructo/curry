@@ -59,7 +59,7 @@ typedef struct {
  * locals/upvalues) -- V_FALSE here means exactly that "not currently
  * tracked, must be the compiled path" case, and sr_compile_fn maps it to
  * GLOBAL_ENV directly, so no separate handling is needed on that path. */
-static _Thread_local val_t sr_current_env = V_FALSE;
+static CURRY_THREAD_LOCAL val_t sr_current_env = V_FALSE;
 
 val_t sr_get_current_env(void) { return sr_current_env; }
 void  sr_set_current_env(val_t env) { sr_current_env = env; }
@@ -79,7 +79,7 @@ void  sr_set_current_env(val_t env) { sr_current_env = env; }
  * relevant local macro name(s) (unioned with whatever was already set,
  * so nested let-syntax blocks see outer local macros too) around each
  * compile_time_eval call, save/restore-style. */
-static _Thread_local val_t sr_current_local_macros = V_NIL;
+static CURRY_THREAD_LOCAL val_t sr_current_local_macros = V_NIL;
 
 val_t sr_get_current_local_macros(void) { return sr_current_local_macros; }
 void  sr_set_current_local_macros(val_t names) { sr_current_local_macros = names; }

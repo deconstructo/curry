@@ -12,7 +12,7 @@
 #include <time.h>
 #include <assert.h>
 
-_Thread_local Actor *current_actor = NULL;
+CURRY_THREAD_LOCAL Actor *current_actor = NULL;
 
 static _Atomic uint64_t next_actor_id = 1;
 

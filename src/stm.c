@@ -65,7 +65,7 @@ typedef struct TxState {
     jmp_buf *retry_jmp;    /* longjmp target for stm_retry() inside atomically */
 } TxState;
 
-static _Thread_local TxState *current_tx = NULL;
+static CURRY_THREAD_LOCAL TxState *current_tx = NULL;
 
 /* ---- TxState helpers ---- */
 

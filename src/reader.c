@@ -652,7 +652,7 @@ static val_t read_datum(val_t port) {
 /* Line the most recent top-level scm_read() call's datum started on
    (1-based; after skipping leading whitespace/comments). Read by the
    compiler to stamp backtrace line numbers on freshly-read forms. */
-_Thread_local int g_reader_last_line = 0;
+CURRY_THREAD_LOCAL int g_reader_last_line = 0;
 
 val_t scm_read(val_t port) {
     gc_inhibit_minor();
