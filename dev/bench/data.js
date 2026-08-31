@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788086183624,
+  "lastUpdate": 1788172275773,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -9866,6 +9866,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.53,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e648e0f6caa2ec414ce89f975cf7135dbc5199d0",
+          "message": "feat(introspection): disassemble/,asm, macroexpand/,expand, type-of, list-actors/,actors (#97)\n\n* feat(introspection): add disassemble/,asm, macroexpand/,expand, type-of, list-actors/,actors\n\nImplements the remaining REPL introspection tools from cill_spec.pdf\nSec 13.5 that curry did not already have (trace!/untrace! and break!/\nunbreak! were already covered by the existing trace/untrace builtins\nand ,break/,unbreak REPL commands).\n\n- (disassemble proc) / ,asm <name>: exposes chunk.c's pre-existing\n  internal disassembler (previously stderr-only, used by\n  compiler_ir_checks.c's codegen-comparison tool) as a Scheme builtin\n  and REPL command, via open_memstream.\n- (macro? sym), (macroexpand-1 form), (macroexpand form) / ,expand\n  <expr>: GLOBAL_ENV-only macro introspection built on the existing\n  T_SYNTAX/apply machinery.\n- (type-of x): maps ObjType/immediate tags to a symbol.\n- (list-actors) / ,actors: a new fixed-4096-slot global actor registry\n  in actors.c, populated on spawn and cleared on the actor's own exit.\n\nFound and fixed a real, independent bug in chunk.c's existing\ndisassembler while wiring it up: OP_CLOSURE's variable-length upvalue-\ntable encoding was never skipped, desyncing every later instruction in\nthe chunk for any closure with at least one upvalue. Filed as #96,\nfixed in this branch.\n\nIndependent review (two passes) found and this branch fixes two\nfurther real bugs before either shipped: actor_registry_add ran AFTER\npthread_create, letting a fast-exiting actor's own registry_remove run\nbefore the add and permanently stranding a dead entry (confirmed:\n368/500 short-lived actors leaked under the old ordering); and\nmacroexpand's next==expr fixpoint check never detects a self-\nreferential macro (each expansion step conses a fresh list), hanging\nforever -- fixed with a 1000-step cap that raises instead. Also fixed:\n,expand had no exception handler and could kill the whole REPL on a\nmalformed macro use; the OP_CLOSURE disassembler had no bounds check\non the upvalue-table read and silently misdecoded on a bad chunk\nconstant instead of aborting; a comment cited the wrong GC-rooting\nprecedent.\n\nAdds docs/thoughts/{profiling,concurrency,introspection}-uplift-plan.md\nand set-theory-synthesis-plan.md (written comparing curry's actual\nstate against cill_spec.pdf's design across several subsystems),\nlinked from docs/roadmap.md, plus documents the new builtins/REPL\ncommands in CLAUDE.md.\n\n113/113 ctest suites pass (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(repl): harden ,expand/,asm/,break/,unbreak/,debug against malformed arguments\n\nSecond independent review pass (verifying the first pass's fixes) found\nthat ,expand and ,asm's own scm_read call for their argument runs with\nno exception handler installed, so a malformed s-expression (e.g. an\nimproper \"(1 . . 2)\") had nowhere to go and killed the whole REPL\nprocess instead of printing a read error and continuing. The same gap\nalready existed in ,break/,unbreak/,debug (not introduced by this\nbranch), inherited rather than new -- fixed all five together with a\nnew shared safe_read() helper matching the main read loop's own\nexisting exception-safety pattern.\n\nAlso from the same review pass:\n- ,expand restored current_handler before writing the expansion result,\n  not after -- a raise during that write would have had nowhere to go.\n  Moved the restore after the write.\n- actor_spawn's pthread_create-failure branch wrote a->alive without\n  a->lock, unlike actor_thread's own exit path for the same field.\n  Provably race-free at that point (the actor hasn't escaped to any\n  caller yet), but locked anyway to match the exit path's pattern and\n  remove any doubt for a future reader.\n- Attempted to de-duplicate prim_disassemble's String construction by\n  calling api.c's curry_make_string_n instead -- reverted after it broke\n  curry_test's link (that target doesn't link api.c). Left in-file,\n  matching scm_make_string's own established convention in the same\n  file for exactly this reason.\n- Documented the actor registry's 4096-slot cap in CLAUDE.md.\n\nFiled #98 for a related but out-of-scope pre-existing gap the same\nreview found: scc.c's read_chunk doesn't validate upval_count before\nthe VM and disassembler both trust it, which can produce a confusing\nGC warning on a corrupted (not necessarily malicious) .scc file rather\nthan a clean error. Not fixed here since it's a separate area\n(.scc deserialization) from this branch's own scope.\n\nNew regression coverage: tests/test_cli.sh drives the REPL over stdin\nwith a malformed argument to each of the five affected commands and\nconfirms the REPL survives and keeps processing subsequent input.\n\n113/113 ctest suites pass (fresh --clear-cache run), plus test_cli.sh's\nnew cases (74/74 in that file).\n\nPulled a lot of interesting thoughts from another language - Cill - back into Curr.",
+          "timestamp": "2026-08-31T20:30:36+10:00",
+          "tree_id": "2b5e8691f1f1e4912ea993bfed4e7d62858a5fbb",
+          "url": "https://github.com/deconstructo/curry/commit/e648e0f6caa2ec414ce89f975cf7135dbc5199d0"
+        },
+        "date": 1788172274592,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.325,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.751,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.683,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 38.811,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 132.479,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 283.502,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.514,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.336,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.637,
             "unit": "ms"
           }
         ]
