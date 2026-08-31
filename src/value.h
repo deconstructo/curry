@@ -19,6 +19,21 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* _Thread_local is a C11 keyword, not a C++ one -- g++ (confirmed on
+ * Raspberry Pi / Linaro ARM GCC) rejects it outright with "does not name a
+ * type", unlike Clang, which accepts it in C++ mode too as a compatibility
+ * extension (why this never surfaced building on macOS). The LLVM JIT
+ * backend's .cpp files (under src/llvm) are C++ and transitively include every header
+ * below that declares thread-local externs (vm.h, gc.h, eval.h, actors.h,
+ * compiler_internal.h, reader.h, mpfr_num.h, workpool.h), so this macro
+ * belongs in value.h -- the one header all of them already include -- not
+ * duplicated ad hoc in each one. */
+#ifdef __cplusplus
+#define CURRY_THREAD_LOCAL thread_local
+#else
+#define CURRY_THREAD_LOCAL _Thread_local
+#endif
+
 typedef uintptr_t val_t;
 
 /* ---- Tag constants ---- */

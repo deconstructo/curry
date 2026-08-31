@@ -70,10 +70,10 @@ bool is_definition(val_t form) {
 
 /* ---- Exception handling and dynamic wind ---- */
 
-_Thread_local ExnHandler  *current_handler      = NULL;
-_Thread_local WindFrame   *current_wind         = NULL;
-_Thread_local CondHandler *current_cond_handler = NULL;
-_Thread_local RestartFrame *current_restart_frame = NULL;
+CURRY_THREAD_LOCAL ExnHandler  *current_handler      = NULL;
+CURRY_THREAD_LOCAL WindFrame   *current_wind         = NULL;
+CURRY_THREAD_LOCAL CondHandler *current_cond_handler = NULL;
+CURRY_THREAD_LOCAL RestartFrame *current_restart_frame = NULL;
 
 /* C accessors for TLS vars — used by C++ dylibs (eval.h) to avoid the
  * C++ TLS wrappers (__ZTW...) which are not exported from the main binary. */
@@ -366,7 +366,7 @@ extern val_t scm_cons(val_t, val_t);
  * This prevents stack overflow for deeply-recursive functions that hit the
  * JIT threshold before the recursion unwinds. */
 #define JIT_CALL_DEPTH_LIMIT 512
-_Thread_local int g_jit_call_depth = 0;
+CURRY_THREAD_LOCAL int g_jit_call_depth = 0;
 
 /* C-linkage wrappers for jit.cpp — avoids C++ TLS wrapper ABI mismatch. */
 void jit_depth_push(void) { g_jit_call_depth++; }
@@ -607,7 +607,7 @@ val_t eval_body(val_t exprs, val_t env) {
  * too, not just files reached via -l/(include ...)/module loading.
  */
 
-/* _Thread_local, matching current_handler/current_wind/g_jit_call_depth
+/* CURRY_THREAD_LOCAL, matching current_handler/current_wind/g_jit_call_depth
  * above -- curry's actor system runs each actor in its own detached
  * POSIX thread (src/actors.c), any of which can call scm_load/
  * load_scheme_module concurrently. A plain (non-thread-local) static
@@ -619,8 +619,8 @@ val_t eval_body(val_t exprs, val_t env) {
  * loading relative to" is inherently per-thread call-stack context
  * anyway, the same way current_handler's exception-handler chain is. */
 #define MAX_LOAD_DEPTH 64
-static _Thread_local char *load_dir_stack[MAX_LOAD_DEPTH];
-static _Thread_local int   load_dir_depth = 0;
+static CURRY_THREAD_LOCAL char *load_dir_stack[MAX_LOAD_DEPTH];
+static CURRY_THREAD_LOCAL int   load_dir_depth = 0;
 
 static char *dir_of(const char *path) {
     const char *slash = strrchr(path, '/');
@@ -645,7 +645,7 @@ void load_push_dir(const char *path) {
 }
 
 /* A freshly-spawned actor thread otherwise starts with an *empty*
- * load_dir_stack (that's the whole point of it being _Thread_local --
+ * load_dir_stack (that's the whole point of it being CURRY_THREAD_LOCAL --
  * no cross-thread sharing) -- so an actor's own (load "relative.scm")
  * would silently fall back to cwd instead of inheriting whatever
  * directory context the thread that spawned it was in. Confirmed by

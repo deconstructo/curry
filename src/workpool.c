@@ -89,7 +89,7 @@ static WorkItem *deque_steal(WSDeque *d) {
 
 static WorkPool *global_pool = NULL;
 
-_Thread_local bool pool_is_worker = false;
+CURRY_THREAD_LOCAL bool pool_is_worker = false;
 
 static void execute_item(WorkItem *item) {
     ExnHandler h;

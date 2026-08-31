@@ -57,7 +57,7 @@
  * Set/cleared by compile_classic (below), never anywhere else -- see its
  * own comment for why compiler_ir_self_check/compiler_ir_optimize_check
  * need this now that compile() itself routes through the IR. */
-static _Thread_local bool g_force_classic_compile = false;
+static CURRY_THREAD_LOCAL bool g_force_classic_compile = false;
 
 static void compile_lambda(Compiler *parent, val_t params, val_t body,
                             const char *name, int line) {

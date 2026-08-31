@@ -8,8 +8,8 @@
 #include <stdbool.h>
 
 /* Thread-local precision context.  0 = not active (use double). */
-extern _Thread_local mpfr_prec_t tl_mpfr_prec;
-extern _Thread_local mpfr_rnd_t  tl_mpfr_rnd;
+extern CURRY_THREAD_LOCAL mpfr_prec_t tl_mpfr_prec;
+extern CURRY_THREAD_LOCAL mpfr_rnd_t  tl_mpfr_rnd;
 
 #define MPFR_DEFAULT_PREC 128
 

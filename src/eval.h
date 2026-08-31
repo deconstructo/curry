@@ -65,7 +65,7 @@ typedef struct WindFrame {
 extern "C" WindFrame **curry_current_wind_ptr(void);
 #define current_wind (*curry_current_wind_ptr())
 #else
-extern _Thread_local WindFrame *current_wind;
+extern CURRY_THREAD_LOCAL WindFrame *current_wind;
 #endif
 
 /* ---- Exception system ---- */
@@ -111,13 +111,13 @@ typedef struct ExnHandler {
  * binary (which compiles eval.c as C), so the dynamic lookup resolves to null
  * and the first SCM_PROTECT in a .so crashes at 0x0. */
 #ifdef __cplusplus
-/* current_handler is a C _Thread_local defined in eval.c.  The C++ TLS
+/* current_handler is a C CURRY_THREAD_LOCAL defined in eval.c.  The C++ TLS
  * wrapper (__ZTW...) is NOT exported from the main binary, so C++ dylibs
  * must access it via this plain C function instead. */
 extern "C" ExnHandler **curry_current_handler_ptr(void);
 #define current_handler (*curry_current_handler_ptr())
 #else
-extern _Thread_local ExnHandler *current_handler;
+extern CURRY_THREAD_LOCAL ExnHandler *current_handler;
 #endif
 
 /* JIT call depth guard — defined in eval.c, C-linkage helpers used by jit.cpp
@@ -133,7 +133,7 @@ extern "C" {
     void jit_depth_restore(int saved);
 }
 #else
-extern _Thread_local int g_jit_call_depth;
+extern CURRY_THREAD_LOCAL int g_jit_call_depth;
 int  jit_depth_save(void);
 void jit_depth_restore(int saved);
 #define JIT_CALL_DEPTH_LIMIT 512
@@ -162,8 +162,8 @@ typedef struct RestartFrame {
 } RestartFrame;
 
 #ifndef __cplusplus
-extern _Thread_local CondHandler  *current_cond_handler;
-extern _Thread_local RestartFrame *current_restart_frame;
+extern CURRY_THREAD_LOCAL CondHandler  *current_cond_handler;
+extern CURRY_THREAD_LOCAL RestartFrame *current_restart_frame;
 #endif
 
 /* Walk the non-unwinding CondHandler chain; called by scm_raise_val and
@@ -259,7 +259,7 @@ void load_dir_release(int mark);
  * directory-context stack, then load_dir_adopt_snapshot() on the new
  * actor thread (before it runs any Scheme code) to seed its own
  * thread-local stack from that snapshot -- otherwise a freshly-spawned
- * thread's _Thread_local stack starts empty and its own relative loads
+ * thread's CURRY_THREAD_LOCAL stack starts empty and its own relative loads
  * silently fall back to cwd instead of inheriting context. */
 char **load_dir_snapshot(int *out_count);
 void   load_dir_adopt_snapshot(char **snap, int count);

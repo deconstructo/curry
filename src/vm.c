@@ -209,7 +209,7 @@
 
 /* ── Global VM state ─────────────────────────────────────────────────── */
 
-_Thread_local VM *vm = NULL;
+CURRY_THREAD_LOCAL VM *vm = NULL;
 
 __attribute__((noreturn)) void vm_stack_overflow(void) {
     fprintf(stderr, "[vm] vm_stack_overflow: sp=%p stack_end=%p\n",
@@ -256,7 +256,7 @@ val_t vm_capture_backtrace(void) {
 
 void vm_init(void) {
     /* Use GC_MALLOC_UNCOLLECTABLE so Boehm GC never frees the VM struct even
-     * though the only reference is a _Thread_local pointer (TLS is not scanned
+     * though the only reference is a CURRY_THREAD_LOCAL pointer (TLS is not scanned
      * as a GC root).  GC still scans the struct's interior for live val_t refs. */
     vm = (VM *)GC_MALLOC_UNCOLLECTABLE(sizeof(VM));
     vm->sp = vm->stack;

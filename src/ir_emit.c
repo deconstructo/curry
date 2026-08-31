@@ -70,7 +70,7 @@
  * misread as this one's. Entirely local to this file: both the one write
  * (IR_LAMBDA's case) and the two reads (IR_DEFINE's case, ir_emit_
  * inline_call's own eligibility check) live here. */
-static _Thread_local int g_last_lambda_upval_count = -1;
+static CURRY_THREAD_LOCAL int g_last_lambda_upval_count = -1;
 
 /* Tier 2.3 local inliner: splices a known-closed candidate's raw
  * `params`/`body` directly into the CALLING Compiler `c`'s own

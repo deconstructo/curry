@@ -67,7 +67,7 @@ void pool_init(void);
  * Used by prim_map / prim_reduce to avoid nested parallel dispatch, which
  * would deadlock: all workers blocked waiting on nested work items that
  * can never run because every worker is already occupied. */
-extern _Thread_local bool pool_is_worker;
+extern CURRY_THREAD_LOCAL bool pool_is_worker;
 
 /* Number of logical CPUs (same value the pool uses for its thread count). */
 int pool_hw_concurrency(void);

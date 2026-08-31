@@ -74,7 +74,7 @@ gc_ops_t *gc_ops = &gc_boehm_ops;
 
 /* ── Per-thread nursery ─────────────────────────────────────────────────── */
 
-_Thread_local GcNursery gc_nursery = { NULL, NULL, NULL };
+CURRY_THREAD_LOCAL GcNursery gc_nursery = { NULL, NULL, NULL };
 
 void   *gc_alloc_trace[GC_ALLOC_TRACE_N];
 size_t  gc_alloc_trace_idx;
@@ -84,17 +84,17 @@ size_t  gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
  * NULL when no eval() frame is active (e.g. at top level between expressions).
  * Under Boehm this is never read by the GC; it exists so that GC_AUTOFRAME
  * in eval.c compiles cleanly and a debug assertion can verify balance. */
-_Thread_local GcFrame *gc_shadow_stack = NULL;
+CURRY_THREAD_LOCAL GcFrame *gc_shadow_stack = NULL;
 
 /* Counter for gc_inhibit_minor() / gc_resume_minor().
  * > 0 means we're inside compiler/reader/other unsafe C code;
  * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
-_Thread_local int gc_inhibit_count = 0;
+CURRY_THREAD_LOCAL int gc_inhibit_count = 0;
 
 /* Deferred minor GC flag.  Set by gc_nursery_refill() when the nursery
  * overflowed but minor GC couldn't fire (shadow stack non-NULL or inhibited).
  * Cleared and acted on by eval() at the next tail-call safe point. */
-_Thread_local bool gc_minor_pending = false;
+CURRY_THREAD_LOCAL bool gc_minor_pending = false;
 
 /* Card table globals — retained for backwards compat; all stay NULL/0.
  * The write barrier no longer writes to the card table; it uses gc_dirty_slots. */

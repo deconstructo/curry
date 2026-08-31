@@ -40,6 +40,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "value.h" /* val_t, and CURRY_THREAD_LOCAL used by gc_nursery etc. below --
+                     * moved here from further down in this file (it used to be
+                     * included lazily right before its first use) because
+                     * CURRY_THREAD_LOCAL now needs to be visible far earlier */
 
 /* ── GC vtable ────────────────────────────────────────────────────────────── */
 
@@ -116,7 +120,7 @@ typedef struct {
 } GcNursery;
 
 #ifndef __cplusplus
-extern _Thread_local GcNursery gc_nursery;
+extern CURRY_THREAD_LOCAL GcNursery gc_nursery;
 #endif
 
 /*
@@ -238,8 +242,9 @@ void gc_roots_unlock(void);
 /* val_t-taking pin/unpin for FFI use: C extensions call these to protect
  * Scheme values they hold in heap-allocated structs across GC points.
  * Under Boehm these are no-ops (conservative scan finds them anyway).
- * Under a moving GC they prevent the referenced object from being relocated. */
-#include "value.h"
+ * Under a moving GC they prevent the referenced object from being relocated.
+ * (value.h itself is now included up top, not here -- see that include's
+ * own comment.) */
 /* gc_register_root_val(slot, v) stores v into *slot and registers it as a root
  * in one atomic step (under g_roots_lock).  Preferred over a bare store +
  * gc_register_root() when the caller may race with concurrent minor GC. */
@@ -330,7 +335,7 @@ static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
  * Thread-local so each thread manages its own nursery independently.
  */
 #ifndef __cplusplus
-extern _Thread_local bool gc_minor_pending;
+extern CURRY_THREAD_LOCAL bool gc_minor_pending;
 #endif
 
 typedef struct GcFrame {
@@ -340,7 +345,7 @@ typedef struct GcFrame {
 } GcFrame;
 
 #ifndef __cplusplus
-extern _Thread_local GcFrame *gc_shadow_stack;
+extern CURRY_THREAD_LOCAL GcFrame *gc_shadow_stack;
 #endif
 
 #ifndef __cplusplus
@@ -365,7 +370,7 @@ static inline void gc_pop_frame(GcFrame **fp) {
  * Calls are nestable and balanced.
  */
 #ifndef __cplusplus
-extern _Thread_local int gc_inhibit_count;
+extern CURRY_THREAD_LOCAL int gc_inhibit_count;
 #endif
 
 static inline void gc_inhibit_minor(void) {
