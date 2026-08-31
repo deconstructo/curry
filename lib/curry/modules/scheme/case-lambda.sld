@@ -13,17 +13,14 @@
 ;; attributed to Dybvig et al.) -- no VM/compiler changes needed, since
 ;; it's pure sugar over ordinary lambda + apply.
 ;;
-;; Known limitation: curry's `apply` is not tail-called (see the open
-;; issue on the VM/apply itself), so a self-recursive case-lambda using
-;; the canonical accumulator idiom -- e.g.
+;; `apply` is now genuinely tail-called (issue #102, OP_TAIL_APPLY), so
+;; the canonical self-recursive accumulator idiom loops forever instead of
+;; stack-overflowing -- e.g.
 ;;   (define count (case-lambda ((n) (count n 0))
 ;;                               ((n acc) (if (= n 0) acc (count (- n 1) (+ acc 1))))))
-;; -- will stack-overflow around a few hundred iterations instead of
-;; looping forever, exactly like calling any other procedure through
-;; `apply` in a loop would. Not fixable from within this file (portable
-;; syntax-rules has no way to avoid the underlying `apply` call each
-;; clause dispatch needs); flagged here since it's the single most
-;; natural case-lambda usage pattern to hit it.
+;;   (count 1000000) ; => 1000000, no stack growth
+;; was the single most natural case-lambda usage pattern to hit the old
+;; limitation, and is now covered directly in tests/apply_tco_tests.scm.
 (define-library (scheme case-lambda)
   (import (scheme base))
   (export case-lambda %case-lambda-help)

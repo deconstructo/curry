@@ -1,5 +1,73 @@
 # Changelog
 
+### 1.23.5 - 2026-09-01
+
+**New — `(scheme case-lambda)`**
+
+R7RS `case-lambda` is now a real library (`lib/curry/modules/scheme/case-lambda.sld`,
+the portable syntax-rules reference implementation), not the phantom
+`GLOBAL_ENV` alias it used to be — `(import (scheme case-lambda))` previously
+succeeded silently while providing nothing at all, since `case-lambda` was
+mistakenly listed in `modules.c`'s "alias `GLOBAL_ENV`" table alongside the
+real `(scheme base)`/`(scheme write)`/etc. libraries even though no such
+binding ever existed. Building it surfaced and fixed two independent,
+previously-undiscovered engine bugs rather than just working around them:
+
+- `syntax-rules` mis-bound pattern variables under nested ellipsis
+  (`(a b ...) ...`) — a lookup only checked the outer scope's bindings, never
+  falling back to the per-iteration scope a nested ellipsis actually needs.
+  Fixed in both the match and expand sides of `src/syntax_rules.c`; hardened
+  post-review against malformed macro uses that could otherwise SIGSEGV the
+  compiler instead of just producing wrong output.
+- `syntax-rules` never renamed template-introduced identifiers on collision
+  with a user identifier of the same name (a distinct hygiene gap from the
+  above, also found during this work) — worked around in `case-lambda.sld`
+  with deliberately-unusual internal names (`%cl-args`/`%cl-len`) rather than
+  fixed at the engine level, since a full hygienic-renaming pass is a much
+  larger undertaking than this module needed.
+
+**New — `apply` is genuinely tail-called (`OP_TAIL_APPLY`)**
+
+`(apply f args)` in tail position previously always grew the C/VM call stack
+regardless of source-level tail position, since `compiler_classic.c` only
+ever emitted the non-tail `OP_APPLY`. A new `OP_TAIL_APPLY` opcode gives
+`apply` the same frame-reuse tail-call treatment every other tail call
+already gets — the canonical self-recursive accumulator idiom (including
+`case-lambda`'s own dispatch, which is itself apply-based) now loops
+indefinitely instead of stack-overflowing. Independent review found two
+critical SIGSEGVs in the first cut — `(apply f)` with no trailing list
+argument produced a negative arg count fed straight into `memmove`, and an
+unbounded applied list had no stack-bounds check before being copied into
+the frame — both fixed with the same `vm_check_arity`/stack-bounds guards
+`OP_TAIL_CALL` already had, before any memory is touched.
+
+**Fixed**
+
+- `_Thread_local` (a C11 keyword, not C++) broke the LLVM backend build
+  under GCC's C++ frontend — reproduced building for Raspberry Pi with
+  `-DBUILD_LLVM=ON`. A new `CURRY_THREAD_LOCAL` macro (`src/value.h`)
+  resolves to `thread_local` under `__cplusplus`, `_Thread_local`
+  otherwise; applied across all 47 affected files.
+- LLVM codegen (`src/llvm/codegen.cpp`) called `getTerminator()` — which
+  *asserts* the block is already terminated rather than querying it — to
+  ask whether a basic block needed a terminator, crashing the JIT compiler
+  on newer LLVM. Uses the actual assertion-free `hasTerminator()` query now.
+- `scc.c`'s bytecode-chunk deserializer trusted a `.scc` file's own
+  `upval_count` field unbounded, an unvalidated size feeding directly into
+  later allocation/copy logic. Now rejected outside `[0, 256]` before use.
+- The reader's `read_list` accepted a bare `.` as a list's first element
+  (`(. x)`) instead of rejecting it as R7RS requires — dot-awareness had
+  previously only been implemented in the sibling `read_list_tail` function,
+  never in `read_list`'s own head-element read.
+
+**CI**
+
+`websocket`/`websocket_server`/`ros` bounded to a 60s ctest timeout after a
+genuine (twice-reproduced) ~28-minute silent hang under `macos-latest,
+Release` parallel load, most likely port contention among these tests'
+fixed listen ports. Root cause tracked as a separate open issue rather than
+further investigated here.
+
 ### 1.23.4 - 2026-08-31
 
 **New — introspection tools: `disassemble`/`,asm`, `macroexpand`/`,expand`, `type-of`, `list-actors`/`,actors`**
