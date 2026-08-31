@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788219527123,
+  "lastUpdate": 1788220056078,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10487,6 +10487,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.72,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "532d8d46b2c289ac0856c9f81f8ef87aa4dca315",
+          "message": "Release v1.23.5\n\nDocumentation sweep (CLAUDE.md's GLOBAL_ENV-aliasing note, case-lambda.sld's\nnow-stale apply-TCO limitation comment) plus a CHANGELOG.md entry covering\neverything landed since v1.23.4: case-lambda, OP_TAIL_APPLY, the\n_Thread_local C++ portability fix, the LLVM hasTerminator() fix, the\nsyntax-rules nested-ellipsis fix, the scc.c upval_count validation, the\nreader's bare-dot-at-list-start fix, and the websocket/ros CI timeout.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T09:46:54+10:00",
+          "tree_id": "69156fbbb804af0bd1f5c66af6bbf1d6c20570c8",
+          "url": "https://github.com/deconstructo/curry/commit/532d8d46b2c289ac0856c9f81f8ef87aa4dca315"
+        },
+        "date": 1788220055313,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.018,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.423,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.181,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.269,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 133.225,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 285.646,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.787,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.775,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.334,
             "unit": "ms"
           }
         ]
