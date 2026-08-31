@@ -592,7 +592,25 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
             /* Find ellipsis-bound vars referenced by elem */
             val_t refs = sr_ell_refs(elem, ell_bindings);
             if (vis_pair(refs)) {
+                /* scm_list_length returns -1 for a non-proper-list (see
+                 * its own definition) -- can happen here for a malformed
+                 * macro use where refs' first entry turns out to be a
+                 * scalar rather than the per-iteration list this code
+                 * expects (e.g. a template mixing a depth-1 and a
+                 * depth-2 variable in the same ellipsis-repeated
+                 * sub-template, which R7RS forbids but nothing in this
+                 * file actually rejects at match time). Clamping to 0
+                 * repetitions here, and guarding the per-ref scm_list_ref
+                 * call below the same way, turns what would otherwise be
+                 * an unchecked vcar/vcdr on a non-pair (a real, reviewer-
+                 * confirmed SIGSEGV, uncatchable since macro expansion
+                 * runs at compile time -- see issue #101's fix writeup)
+                 * into the same kind of "wrong but survivable" output a
+                 * malformed macro already produced before this nested-
+                 * ellipsis fix landed, rather than a worse failure mode
+                 * than before. */
                 int n = scm_list_length(vcdr(vcar(refs)));
+                if (n < 0) n = 0;
                 for (int i = 0; i < n; i++) {
                     /* Build per-iteration bindings: bind each ell var to
                      * its i-th value. Pushed into BOTH tables:
@@ -623,7 +641,22 @@ static val_t sr_expand_list(val_t tmpl, val_t bindings, val_t ell_bindings,
                     val_t iter_ell_bindings = ell_bindings;
                     for (val_t r = refs; vis_pair(r); r = vcdr(r)) {
                         val_t name = vcar(vcar(r));
-                        val_t val  = scm_list_ref(vcdr(vcar(r)), i);
+                        /* Guard this scm_list_ref too, not just the one
+                         * used to compute `n` above -- a malformed macro
+                         * mixing a depth-1 and a depth-2 variable in the
+                         * SAME ellipsis-repeated sub-template can pick a
+                         * well-formed list for `n` (from whichever ref
+                         * sr_ell_refs happened to return first) while a
+                         * DIFFERENT ref in this same loop holds a scalar
+                         * -- confirmed by independent review: this exact
+                         * shape still crashed even after the `n` guard
+                         * above, since this second, per-ref call is the
+                         * one that actually dereferences the scalar as a
+                         * pair. Same fallback: a not-a-proper-list value
+                         * degrades to V_NIL for this iteration instead of
+                         * crashing. */
+                        val_t vals = vcdr(vcar(r));
+                        val_t val  = (scm_list_length(vals) > i) ? scm_list_ref(vals, i) : V_NIL;
                         iter_bindings     = scm_cons(scm_cons(name, val), iter_bindings);
                         iter_ell_bindings = scm_cons(scm_cons(name, val), iter_ell_bindings);
                     }

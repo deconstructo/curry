@@ -113,6 +113,40 @@
 (check "nested ellipsis: direct (non-workaround) case-lambda reference shape, 2 args"
        (dcl-f 1 2) '(two 1 2))
 
+;;; Regression: malformed macro uses that mix ellipsis depths within the
+;;; same repeated sub-template (invalid per R7RS, but nothing in this file
+;;; rejects it at match time) used to SIGSEGV -- uncatchable by guard,
+;;; since macro expansion happens at compile time, not run time. Found by
+;;; independent review: the expand-side fix's per-iteration
+;;; iter_ell_bindings shadowing broke the invariant that every
+;;; ell_bindings value is a proper list, so an unguarded scm_list_ref
+;;; dereferenced a scalar as a pair. Fixed by treating a not-actually-a-
+;;; list value as "no more repetitions" instead of crashing. These tests
+;;; exist to prove the process survives at all -- the exact output for
+;;; genuinely invalid macro input is "wrong but survivable" by design, not
+;;; a meaningful contract, so only checking "didn't crash, execution
+;;; continued" here, not specific result shapes.
+(define-syntax mixed-depth-1
+  (syntax-rules () ((_ (a b ...) ...) '(((a b) ...) ...))))
+(mixed-depth-1 (1 10))
+(check "nested ellipsis: mixed-depth macro use does not crash the process"
+       'still-alive 'still-alive)
+
+(define-syntax mixed-depth-2
+  (syntax-rules () ((_ (a b ...) ...) '(((a . b) ...) ...))))
+(mixed-depth-2 (1 10 20))
+(check "nested ellipsis: mixed-depth dotted-tail use does not crash the process"
+       'still-alive 'still-alive)
+
+;; Pre-existing (not introduced by this fix, same call site, same guard):
+;; two same-depth ellipsis variables of UNEQUAL length used together also
+;; used to crash the same way.
+(define-syntax unequal-length
+  (syntax-rules () ((_ (a ...) (b ...)) '((b a) ...))))
+(unequal-length (1 2 3 4 5) (10 20))
+(check "nested ellipsis: unequal-length same-depth vars do not crash the process"
+       'still-alive 'still-alive)
+
 ;;; Summary
 
 (newline)

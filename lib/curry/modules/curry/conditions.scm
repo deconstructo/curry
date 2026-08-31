@@ -130,8 +130,11 @@
 ;;; Establishes named recovery points reachable via invoke-restart.
 ;;; Returns the result of form ... or of the chosen restart's body.
 
-;;; Uses recursion rather than nested ... to avoid a curry syntax-rules
-;;; limitation with nested ellipsis expansion.
+;;; Uses recursion rather than nested ... -- written before issue #101 (a
+;;; curry syntax-rules engine bug mishandling a pattern variable with its
+;;; own further ellipsis nested inside an outer ellipsis) was fixed. Left
+;;; as-is rather than churned to the more direct shape now that it works
+;;; too, same reasoning as (scheme case-lambda)'s own workaround.
 (define-syntax with-restarts
   (syntax-rules ()
     ((_ () body ...)
