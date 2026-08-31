@@ -376,7 +376,41 @@ static val_t read_list(val_t port, int close_ch) {
        (pairs never use flags otherwise) for compiler line tracking. */
     int elem_line = port_line(port);
 
-    val_t head = read_datum(port);
+    /* A dot cannot be the very first token of a list: R7RS's grammar is
+     * "(datum*)" or "(datum+ . datum)" -- at least one datum must precede
+     * the dot, so "(. r)" matches neither production and is invalid,
+     * unlike "(a . r)" or a bare "r". Only read_list_tail (consulted for
+     * every element AFTER the first) has ever checked for this -- this
+     * function previously read its own head element via a plain
+     * read_datum call with no dot-awareness at all, so "(. r)" read "."
+     * itself as an ordinary one-character symbol token for the head, then
+     * "r" as an unrelated second element, silently producing the
+     * 2-element list (|.| r) instead of rejecting the input (confirmed:
+     * (pair? '(. r)) => #t, (length '(. r)) => 2).
+     *
+     * Handled with the exact same technique read_list_tail already uses
+     * for its own "starts with '.'" case just below (build the token
+     * manually via sb_push, rather than trying to "un-read" the dot back
+     * onto the port -- port_unread_char is declared in port.h but was
+     * never actually implemented anywhere, confirmed by this fix
+     * initially trying to call it and failing to link), so "..."/".foo"
+     * (a symbol merely starting with '.') read correctly as the head
+     * element here too, not just after read_list_tail; only a BARE "."
+     * with nothing else in the token is ever treated as a dot marker. */
+    val_t head;
+    if (c == '.') {
+        next_char(port);
+        if (is_delimiter(peek_char_port(port)))
+            read_error("unexpected dot at start of list -- a datum must precede '.' in a dotted pair");
+        StrBuf sb; sb_init(&sb);
+        sb_push(&sb, '.');
+        while (!is_delimiter(peek_char_port(port)))
+            sb_push(&sb, (char)next_char(port));
+        sb.buf[sb.len] = '\0';
+        head = sym_intern(sb.buf, (uint32_t)sb.len);
+    } else {
+        head = read_datum(port);
+    }
     val_t rest = read_list_tail(port, close_ch);
     Pair *p = CURRY_NEW(Pair);
     p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
