@@ -113,6 +113,7 @@ add_test(NAME srfi_s209_enums COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE
 add_test(NAME srfi_s210_multiple_values COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s210_multiple_values_tests.scm)
 add_test(NAME srfi_s54_cat COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s54_cat_tests.scm)
 add_test(NAME srfi_9_31_45 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_9_31_45_tests.scm)
+add_test(NAME case_lambda COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/case_lambda_tests.scm)
 add_test(NAME websocket COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/websocket_tests.scm)
 add_test(NAME websocket_server COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/websocket_server_tests.scm)
 add_test(NAME ros COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ros_tests.scm)

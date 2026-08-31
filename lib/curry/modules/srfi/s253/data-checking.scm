@@ -14,14 +14,16 @@
 ;;; whole type system -- bignum? and multivector? -- added alongside
 ;;; this module (src/builtins.c) rather than left as a silent gap.
 ;;;
-;;; curry has no native case-lambda at all (not even as a core special
-;;; form -- confirmed absent, and no SRFI-16 shim exists either), so
-;;; case-lambda-checked below is self-contained: it dispatches on
+;;; Written before (scheme case-lambda) existed (see
+;;; lib/curry/modules/scheme/case-lambda.sld), so case-lambda-checked
+;;; below is self-contained rather than building on it: it dispatches on
 ;;; argument count itself via a single (lambda args ...) plus explicit
-;;; arity testing, rather than expanding into calls to a case-lambda
-;;; primitive that doesn't exist. Scoped to this module; implementing
-;;; general-purpose case-lambda as its own R7RS feature is a separate,
-;;; larger task not undertaken here.
+;;; arity testing. Not migrated to build on real case-lambda, since
+;;; checked-formal predicate testing needs to fall through to the next
+;;; clause when a predicate fails even after the arity already matched --
+;;; plain case-lambda has no such fallthrough (only exhausting every
+;;; clause raises there), so this would still need its own dispatch loop
+;;; either way.
 ;;;
 ;;; Errors use plain R7RS `error` (message + irritants), matching this
 ;;; codebase's own (srfi s145 assume) convention -- not R6RS's &assertion
@@ -122,11 +124,12 @@
 
     ;; (case-lambda-checked (formals body ...) ...) -- like case-lambda,
     ;; dispatching on the actual call's argument count, with the same
-    ;; (name predicate) checked-formal support as lambda-checked. Since
-    ;; curry has no native case-lambda, this dispatches by hand: one
-    ;; (lambda args ...) whose body tries each clause in turn, testing
-    ;; whether `args`'s length matches that clause's arity (exact for a
-    ;; proper formals list, "at least" for a dotted/rest one) and
+    ;; (name predicate) checked-formal support as lambda-checked. Doesn't
+    ;; build on real case-lambda (see this file's header comment for why),
+    ;; so this dispatches by hand: one (lambda args ...) whose body tries
+    ;; each clause in turn, testing whether `args`'s length matches that
+    ;; clause's arity (exact for a proper formals list, "at least" for a
+    ;; dotted/rest one) and
     ;; destructuring+checking+evaluating its body if so.
     ;;
     ;; %clc-dispatch's `fail` continuation (the next clause to try, or

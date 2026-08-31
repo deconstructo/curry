@@ -17,9 +17,10 @@
 ;;; lambda" idioms and anything not at the toplevel (outside a
 ;;; recognized library-wrapper form) are silently skipped.
 ;;;
-;;; curry has no case-lambda, so extract-definitions takes its optional
-;;; arguments the same way (curry csv)/(curry toml) do (a trailing
-;;; `. opts` list) rather than upstream's case-lambda dispatch.
+;;; Written before (scheme case-lambda) existed (see
+;;; lib/curry/modules/scheme/case-lambda.sld), so extract-definitions
+;;; takes its optional arguments the same way (curry csv)/(curry toml) do
+;;; (a trailing `. opts` list) rather than upstream's case-lambda dispatch.
 ;;;
 ;;; This module writes its own small, local `match`/`match-case` —
 ;;; upstream's own tiny vector-marker pattern matcher (a pattern
