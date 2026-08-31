@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788213278071,
+  "lastUpdate": 1788213358019,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10280,6 +10280,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 64.178,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12e37673b3918d19de25ce0d0986834cd9f9b1dc",
+          "message": "fix(syntax-rules): correctly bind pattern variables under nested ellipsis (#107)\n\n* fix(llvm): use hasTerminator() instead of the asserting getTerminator()\n\nCloses #99.\n\nCompileCtx::terminated() tested for an unterminated basic block via\n'getTerminator() != nullptr'. LLVM's getTerminator() asserts the\nblock is ALREADY terminated before returning anything\n('assert(hasTerminator() && \"cannot get terminator of non-well-formed\nblock\")', BasicBlock.h) -- it was never designed to double as an\nis-it-terminated query. Apparently older LLVM releases didn't enforce\nthis (or shipped with assertions compiled out), letting this call\nsilently work by luck for years, until LLVM 23.1.0 (this machine's\ncurrent Homebrew version) hit the assertion at runtime the moment any\nJIT-compiled code exercised a control-flow path reaching an\nunterminated block -- which turned out to be nearly every\nsufficiently-looping test, cascading into 21 otherwise-unrelated\nctest targets (scheme_r7rs, actors, numeric_ext, sicm, syntax_rules,\nprofiling, posix, srfi_160, ...) all aborting the same way whenever\nthey ran long enough to cross the tiered JIT's promotion threshold.\n\nFixed with hasTerminator() -- LLVM's own plain, assertion-free bool\nquery for exactly this ('!empty() && back().isTerminator()') -- the\none-line change resolves the entire cascade, confirming it was all\nthe same root cause.\n\nVerified: standalone 'jit' ctest target now passes (previously failed\nimmediately); full ctest suite with -DBUILD_LLVM=ON is 115/115 (up\nfrom 94/115, with every previously-aborted target now passing);\nnon-LLVM build unaffected, 114/114.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(syntax-rules): correctly bind pattern variables under nested ellipsis\n\nCloses #101.\n\nA pattern where an outer ... wraps a sub-pattern that itself contains\na variable followed by its own ... (e.g. \"(a b ...) ...\") silently\nbound the inner variable to () instead of its actual matched values.\nMinimal repro:\n  (define-syntax my-test\n    (syntax-rules () ((_ (a b ...) ...) '((a b ...) ...))))\n  (my-test (1 10 20) (2 30))\n  ; was: ((1 () ()) (2 () ())), should be ((1 10 20) (2 30))\n\nRoot cause, match side (sr_match_list): per-group accumulation only\never searched sb (the inner match's scalar bindings) for each pattern\nvariable name, silently defaulting to () when a name's match actually\nlanded in se (the inner match's own ellipsis bindings -- exactly where\na variable with further ellipsis inside the outer sub-pattern lands)\ninstead. Root cause, expand side (sr_expand_list): the symmetric gap\non the way back out -- it never re-scoped ell_bindings per outer\niteration, so a nested \"name ...\" inside a repeated sub-template\niterated over the wrong (whole, cross-iteration) list rather than just\nthat iteration's own slice.\n\nFixed with a minimal, surgical change on both sides rather than a\nstructural rewrite: match side falls back to se when a name isn't\nfound in sb; expand side builds a per-iteration, shadowed ell_bindings\ntable before recursing. Both compose correctly to arbitrary nesting\ndepth by induction, since each level applies the exact same fallback\n-- verified directly with 3-level-deep nesting, asymmetric group\nsizes, a dotted tail inside a nested clause, and the (scheme\ncase-lambda) reference implementation's own direct (non-workaround)\nshape, all in the new regression suite.\n\n10 new regression tests (syntax_rules_nested_ellipsis_tests.scm).\nUpdated case-lambda.sld's comment, which described this as an open,\nunfixed engine limitation -- it isn't anymore, though the file's own\nopaque-clause workaround is left in place rather than reverted to the\nmore direct shape, since it's already correct and already tested.\n\n115/115 ctest suites pass (fresh --clear-cache run) -- including every\nexisting syntax-rules-dependent macro across every SRFI shim and\n(curry X) module in the codebase, with zero regressions, giving real\nconfidence this fix is safe despite touching code every macro in the\ncodebase depends on.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(syntax-rules): guard scm_list_ref against a malformed macro's SIGSEGV\n\nIndependent review of the nested-ellipsis fix (previous commit)\nfound that a malformed macro use mixing ellipsis depths in the same\nrepeated sub-template -- invalid per R7RS, but nothing in this file\nrejects it at match time -- crashes with an uncatchable SIGSEGV\n(macro expansion runs at compile time, not run time, so guard cannot\nhelp). The new per-iteration iter_ell_bindings shadowing broke an\ninvariant every OTHER ell_bindings value in this file relies on\n(that it's always a proper list): a depth-1 variable's shadowed\nper-iteration value is a scalar, and the unguarded scm_list_ref\ndereferenced it as a pair.\n\nSame root cause covers a second, actually pre-existing (not\nintroduced by the nested-ellipsis fix) crash the same review pass\nfound: two same-depth ellipsis variables of unequal length used\ntogether in one template hit the identical unguarded call.\n\nFixed both with the same guard at the one call site: a not-actually-\na-proper-list value degrades to V_NIL / zero repetitions for that\nposition instead of dereferencing garbage -- matching this\nmalformed-input case's actual pre-nested-ellipsis-fix behavior\n(wrong output, not a crash) rather than introducing a worse failure\nmode than before.\n\nAlso: fixed a stale comment in conditions.scm the same review found,\ndescribing the now-fixed nested-ellipsis limitation as still open.\n\n3 new regression tests proving the process survives all three\ncrash repros (mixed-depth, mixed-depth-with-dotted-tail,\nunequal-length-same-depth) -- correctness of the resulting output for\ngenuinely invalid macro input isn't a meaningful contract, only that\nexecution continues. 115/115 ctest suites pass (fresh --clear-cache\nrun).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T07:54:58+10:00",
+          "tree_id": "4f26f1d709c8d8092341611d64b998e587a49981",
+          "url": "https://github.com/deconstructo/curry/commit/12e37673b3918d19de25ce0d0986834cd9f9b1dc"
+        },
+        "date": 1788213355889,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 13.011,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.058,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.269,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.413,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 88.143,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 220.181,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 53.936,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 61.867,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 46.501,
             "unit": "ms"
           }
         ]
