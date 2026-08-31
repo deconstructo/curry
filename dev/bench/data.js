@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788219113813,
+  "lastUpdate": 1788219527123,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10418,6 +10418,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.216,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3ed54eaa908d7e1992d059aa184436074a92c070",
+          "message": "fix(reader): reject a bare dot at the start of a list instead of misreading it (#109)\n\nCloses #103.\n\n\"(. r)\" (a dot with nothing preceding it) previously read as a valid\n2-element list containing the literal symbol \".\" followed by \"r\",\ninstead of being rejected. Per R7RS's own grammar (\"(datum*)\" or\n\"(datum+ . datum)\"), a dot needs at least one datum before it to be\na legal dotted-pair tail -- \"(. r)\" matches neither production.\n\nRoot cause: read_list's dot-awareness lived entirely in\nread_list_tail, consulted for every list element AFTER the first.\nread_list itself read its own head element via a plain read_datum\ncall with no dot-checking at all, so a list literally starting with\n\".\" fell through to being read as an ordinary one-character symbol\ntoken.\n\nFixed by giving read_list the same dot-followed-by-a-delimiter check\nread_list_tail already has for its head element, raising a clean\nread-error instead. A dot that turns out to start a LONGER token\n(\"...\", \".foo\") is still read correctly as that symbol, via the\nsame manual sb_push token-building technique read_list_tail already\nuses for its own identical case -- discovered along the way that\nport_unread_char (the more obvious fix -- consume the dot, peek\nahead, put it back if not a bare dot) is declared in port.h but was\nnever actually implemented anywhere in the codebase; not implementing\nit now, since the manual-token-building approach avoids needing it\nat all and mirrors existing code exactly.\n\n9 new regression tests (reader_dotted_list_tests.scm): the exact\nrejection case (bare and nested), every legitimate dotted-pair shape\nunaffected, '...' and other dot-prefixed symbols as a list's head\nelement specifically (the case the fix's own token-building branch\nhas to get right, not just the rejection case), and (scheme\ncase-lambda)'s legal bare-symbol variadic clause shape confirmed\nunaffected.\n\n115/115 ctest suites pass (fresh --clear-cache run).\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T09:38:07+10:00",
+          "tree_id": "80ec0dff3ac1d7fc972acdc9a224659c90940a21",
+          "url": "https://github.com/deconstructo/curry/commit/3ed54eaa908d7e1992d059aa184436074a92c070"
+        },
+        "date": 1788219525545,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.321,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.156,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.651,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.239,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 129.991,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 283.574,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.583,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.169,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.72,
             "unit": "ms"
           }
         ]
