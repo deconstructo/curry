@@ -645,7 +645,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_TAIL_CALL_GLOBAL] = &&L_OP_TAIL_CALL_GLOBAL,
         [OP_TREE_EVAL_CACHED] = &&L_OP_TREE_EVAL_CACHED,
         [OP_CLOSURE]     = &&L_OP_CLOSURE,     [OP_CLOSE_UP]     = &&L_OP_CLOSE_UP,
-        [OP_APPLY]       = &&L_OP_APPLY,       [OP_VALUES]       = &&L_OP_VALUES,
+        [OP_APPLY]       = &&L_OP_APPLY,       [OP_TAIL_APPLY]   = &&L_OP_TAIL_APPLY,
+        [OP_VALUES]       = &&L_OP_VALUES,
         [OP_VALUES_REF]  = &&L_OP_VALUES_REF,
         [OP_CALL_WITH_VALUES] = &&L_OP_CALL_WITH_VALUES,
         [OP_TAIL_CALL_WITH_VALUES] = &&L_OP_TAIL_CALL_WITH_VALUES,
@@ -1501,6 +1502,135 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             vm->sp -= total;
             val_t result = call_foreign(fn, total_args, call_args);
             PUSH(result);
+            NEXT;
+        }
+
+        CASE(OP_TAIL_APPLY) {
+            /* Same argument-flattening as OP_APPLY (see its own comment
+             * just above) -- the only difference is what happens once
+             * `fn` and the flattened `call_args` are known: a BcClosure
+             * reuses the current frame exactly like OP_TAIL_CALL, instead
+             * of always going through call_foreign (which recurses into
+             * a brand-new nested vm_run() for a BcClosure argument,
+             * accumulating one C stack frame per apply-based iteration --
+             * this opcode not existing was issue #102, confirmed via a
+             * self-recursive case-lambda accumulator stack-overflowing at
+             * a few hundred iterations instead of looping).
+             *
+             * Deliberately does NOT attempt the tiered-JIT native fast
+             * path OP_TAIL_CALL has (the jit_val/GC_REVEAL_POINTER
+             * branch). NOTE: an earlier version of this comment claimed
+             * that path's calling convention requires call_args to
+             * already be live at `vm->sp - argc2` -- independent review
+             * found that claim false (the native function is called as
+             * jit_fn(argc, call_args, caps), an ordinary read-only
+             * contiguous-array pointer; apply_arr already passes an
+             * arbitrary caller-supplied argv into this exact fast path
+             * today, including THIS opcode's own buf[64]/
+             * gc_alloc_raw_pinned array via the non-tail OP_APPLY case
+             * above). The real reason to skip it here is simpler: that
+             * branch is a non-tail C call bounded by
+             * JIT_CALL_DEPTH_LIMIT, which partly defeats the point of a
+             * dedicated tail opcode. vm_maybe_jit(cl) still lets the
+             * closure warm up normally for whatever future calls DO
+             * reach it via an ordinary (non-apply) call site -- though a
+             * hot apply-based loop itself never benefits at this call
+             * site specifically, since it never dispatches through the
+             * compiled code. */
+            uint8_t total = READ_U8();
+            val_t *base      = vm->sp - total;
+            val_t fn         = base[0];
+            val_t last_list  = base[total - 1];
+            int n_fixed      = (int)total - 2;
+
+            int n_tail = 0;
+            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+
+            int total_args = n_fixed + n_tail;
+            val_t buf[64];
+            val_t *call_args = (total_args <= 64)
+                ? buf
+                : (val_t *)gc_alloc_raw_pinned((size_t)total_args * sizeof(val_t));
+
+            for (int k = 0; k < n_fixed; k++) call_args[k] = base[1 + k];
+            val_t lp = last_list;
+            for (int k = 0; k < n_tail; k++) { call_args[n_fixed + k] = vcar(lp); lp = vcdr(lp); }
+
+            vm->sp -= total; /* discard this OP_TAIL_APPLY's own stack contribution */
+
+            if (vis_bcclosure(fn)) {
+                BcClosure *cl = as_bcclosure(fn);
+                /* Both checks found by independent review, both
+                 * confirmed-exploitable (real SIGSEGV) before this fix:
+                 *
+                 * 1. total_args can be NEGATIVE: "(apply f)" (a
+                 *    one-argument apply call, total==1) gives n_fixed =
+                 *    total-2 = -1, n_tail = 0, total_args = -1. OP_APPLY
+                 *    never hits this because it defers to call_foreign ->
+                 *    apply_arr, which validates arity via vm_check_arity
+                 *    BEFORE touching memory. This opcode used to copy
+                 *    total_args into frame->slots and derive vm->sp from
+                 *    it before ever validating anything, so a plain user
+                 *    typo like "(apply f)" in tail position produced
+                 *    memmove(..., (size_t)(-1) * sizeof(val_t)) -- a
+                 *    SIGSEGV instead of the clean, catchable
+                 *    "too few arguments" the equivalent non-tail call
+                 *    already raised.
+                 * 2. Even with a correctly non-negative total_args,
+                 *    nothing bounded it against the actual value stack
+                 *    size: OP_APPLY's own flattened call_args always
+                 *    eventually reaches call_foreign -> apply_arr, which
+                 *    pushes each argument via vm_push() -- and vm_push
+                 *    DOES check vm->sp against VM_STACK_MAX (vm.h). This
+                 *    opcode's direct memmove into frame->slots bypassed
+                 *    that check entirely: a long enough applied list
+                 *    (n_tail unbounded, entirely data-controlled) ran
+                 *    straight through frame->slots, the frame array, and
+                 *    the handler stack, out past the whole VM struct.
+                 *
+                 * vm_check_arity both validates the callee can actually
+                 * accept total_args (raising the same clean
+                 * wrong-number-of-arguments error a negative or
+                 * otherwise-invalid count hits through the normal call
+                 * path) and, running before any memory is touched,
+                 * naturally rejects the negative-total_args case too (no
+                 * valid arity accepts -1 arguments). The explicit
+                 * stack-bounds check right after it is the second,
+                 * independent guard for the unbounded-list case,
+                 * mirroring vm_push's own VM_STACK_MAX check since this
+                 * path bypasses vm_push entirely. */
+                vm_check_arity(cl, total_args);
+                if (total_args < 0 || frame->slots + total_args > vm->stack + VM_STACK_MAX)
+                    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
+                vm_maybe_jit(cl);
+                if (curry_profiling_level >= 2 && frame->prof_start_ns &&
+                        frame->closure->chunk->name) {
+                    val_t sym = sym_intern_cstr(frame->closure->chunk->name);
+                    profiling_record_timed(sym, frame->prof_start_ns);
+                }
+                if (curry_profiling_level >= 1 && cl != frame->closure && cl->chunk->name)
+                    profiling_record_call_tco(sym_intern_cstr(cl->chunk->name));
+                /* frame->slots <= base < (old) vm->sp always holds -- this
+                 * frame's own slot region sits below wherever OP_APPLY's
+                 * operands were pushed, so overwriting it in place and
+                 * shrinking vm->sp back down to it is safe, same
+                 * invariant OP_TAIL_CALL relies on. call_args never
+                 * aliases frame->slots (it's a distinct C-stack or GC-heap
+                 * buffer), so a plain copy suffices. */
+                vm_close_upvalues(frame->slots);
+                memmove(frame->slots, call_args, (size_t)total_args * sizeof(val_t));
+                vm->sp            = frame->slots + total_args;
+                frame->closure    = cl;
+                frame->ip         = cl->chunk->code;
+                frame->slot_count = vm_bind_args(cl, frame->slots, total_args);
+                frame->prof_start_ns = 0;
+                if (curry_profiling_level >= 2 && cl->chunk->name)
+                    frame->prof_start_ns = profiling_now_ns();
+            } else {
+                val_t result = call_foreign(fn, total_args, call_args);
+                if (pop_frame(&frame, result)) return *--vm->sp;
+                if (vm->frame_count == entry_depth) return *--vm->sp;
+            }
             NEXT;
         }
 

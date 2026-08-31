@@ -103,6 +103,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_CLOSURE]        = "CLOSURE",
     [OP_CLOSE_UP]       = "CLOSE_UP",
     [OP_APPLY]          = "APPLY",
+    [OP_TAIL_APPLY]     = "TAIL_APPLY",
     [OP_VALUES]         = "VALUES",
     [OP_VALUES_REF]     = "VALUES_REF",
     [OP_CALL_WITH_VALUES] = "CALL_WITH_VALUES",
@@ -342,7 +343,7 @@ static int disasm_one(const Chunk *c, int off, FILE *out) {
     case OP_LOAD_UP: case OP_STORE_UP:
     case OP_CALL: case OP_TAIL_CALL: case OP_SELF_TAIL_CALL:
     case OP_CLOSE_UP:
-    case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY:
+    case OP_VALUES: case OP_VALUES_REF: case OP_MAKEVEC: case OP_APPLY: case OP_TAIL_APPLY:
     case OP_SLIDE: case OP_TREE_EVAL_CACHED:
     case OP_CAR: case OP_CDR: case OP_CONS: case OP_NULLP: case OP_PAIRP:
     case OP_ADD: case OP_SUB: case OP_MUL: case OP_NUMEQ:
