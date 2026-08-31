@@ -55,6 +55,7 @@ add_test(NAME transcendental   COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURC
 add_test(NAME pde_symbolic     COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/pde_symbolic_tests.scm)
 add_test(NAME sicm              COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sicm_tests.scm)
 add_test(NAME akkadian      COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/akkadian_tests.scm)
+add_test(NAME reader_dotted_list COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/reader_dotted_list_tests.scm)
 add_test(NAME conditions    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/conditions_tests.scm)
 add_test(NAME numtheory     COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numtheory_tests.scm)
 add_test(NAME sexagesimal   COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sexagesimal_tests.scm)
