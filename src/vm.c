@@ -1519,16 +1519,24 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              *
              * Deliberately does NOT attempt the tiered-JIT native fast
              * path OP_TAIL_CALL has (the jit_val/GC_REVEAL_POINTER
-             * branch): that path's calling convention expects call_args
-             * to already be live at `vm->sp - argc2`, i.e. positioned on
-             * the VM's own value stack, which the flattened array here is
-             * not (it's either a C-stack buf[64] or a separate
-             * gc_alloc_raw_pinned array -- see OP_APPLY above). Always
-             * going through the bytecode frame-reuse path below is
-             * simpler and still delivers the actual fix (genuine O(1)-
-             * stack tail calls); vm_maybe_jit(cl) still lets the closure
-             * warm up normally for whatever future calls DO reach it via
-             * an ordinary (non-apply) call site. */
+             * branch). NOTE: an earlier version of this comment claimed
+             * that path's calling convention requires call_args to
+             * already be live at `vm->sp - argc2` -- independent review
+             * found that claim false (the native function is called as
+             * jit_fn(argc, call_args, caps), an ordinary read-only
+             * contiguous-array pointer; apply_arr already passes an
+             * arbitrary caller-supplied argv into this exact fast path
+             * today, including THIS opcode's own buf[64]/
+             * gc_alloc_raw_pinned array via the non-tail OP_APPLY case
+             * above). The real reason to skip it here is simpler: that
+             * branch is a non-tail C call bounded by
+             * JIT_CALL_DEPTH_LIMIT, which partly defeats the point of a
+             * dedicated tail opcode. vm_maybe_jit(cl) still lets the
+             * closure warm up normally for whatever future calls DO
+             * reach it via an ordinary (non-apply) call site -- though a
+             * hot apply-based loop itself never benefits at this call
+             * site specifically, since it never dispatches through the
+             * compiled code. */
             uint8_t total = READ_U8();
             val_t *base      = vm->sp - total;
             val_t fn         = base[0];
@@ -1552,6 +1560,48 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(fn)) {
                 BcClosure *cl = as_bcclosure(fn);
+                /* Both checks found by independent review, both
+                 * confirmed-exploitable (real SIGSEGV) before this fix:
+                 *
+                 * 1. total_args can be NEGATIVE: "(apply f)" (a
+                 *    one-argument apply call, total==1) gives n_fixed =
+                 *    total-2 = -1, n_tail = 0, total_args = -1. OP_APPLY
+                 *    never hits this because it defers to call_foreign ->
+                 *    apply_arr, which validates arity via vm_check_arity
+                 *    BEFORE touching memory. This opcode used to copy
+                 *    total_args into frame->slots and derive vm->sp from
+                 *    it before ever validating anything, so a plain user
+                 *    typo like "(apply f)" in tail position produced
+                 *    memmove(..., (size_t)(-1) * sizeof(val_t)) -- a
+                 *    SIGSEGV instead of the clean, catchable
+                 *    "too few arguments" the equivalent non-tail call
+                 *    already raised.
+                 * 2. Even with a correctly non-negative total_args,
+                 *    nothing bounded it against the actual value stack
+                 *    size: OP_APPLY's own flattened call_args always
+                 *    eventually reaches call_foreign -> apply_arr, which
+                 *    pushes each argument via vm_push() -- and vm_push
+                 *    DOES check vm->sp against VM_STACK_MAX (vm.h). This
+                 *    opcode's direct memmove into frame->slots bypassed
+                 *    that check entirely: a long enough applied list
+                 *    (n_tail unbounded, entirely data-controlled) ran
+                 *    straight through frame->slots, the frame array, and
+                 *    the handler stack, out past the whole VM struct.
+                 *
+                 * vm_check_arity both validates the callee can actually
+                 * accept total_args (raising the same clean
+                 * wrong-number-of-arguments error a negative or
+                 * otherwise-invalid count hits through the normal call
+                 * path) and, running before any memory is touched,
+                 * naturally rejects the negative-total_args case too (no
+                 * valid arity accepts -1 arguments). The explicit
+                 * stack-bounds check right after it is the second,
+                 * independent guard for the unbounded-list case,
+                 * mirroring vm_push's own VM_STACK_MAX check since this
+                 * path bypasses vm_push entirely. */
+                vm_check_arity(cl, total_args);
+                if (total_args < 0 || frame->slots + total_args > vm->stack + VM_STACK_MAX)
+                    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
                 vm_maybe_jit(cl);
                 if (curry_profiling_level >= 2 && frame->prof_start_ns &&
                         frame->closure->chunk->name) {

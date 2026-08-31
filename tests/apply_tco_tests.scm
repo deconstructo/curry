@@ -67,6 +67,29 @@
        (call-plus-in-tail-position 1 2 3 4)
        10)
 
+;; Regression: two real, independent-review-found SIGSEGVs in the first
+;; version of OP_TAIL_APPLY, both now-clean catchable errors instead.
+;;
+;; 1. total_args could go NEGATIVE: "(apply f)" (a one-argument apply
+;;    call) computed n_fixed = total-2 = -1 with no validation, reaching
+;;    memmove(..., (size_t)(-1) * sizeof(val_t)) before this fix.
+(define (target-no-args) 'ok)
+(define (bad-apply-in-tail-position) (apply target-no-args))
+(check "apply TCO: (apply f) with no trailing list in tail position raises cleanly, not a crash"
+       (guard (e (#t 'raised)) (bad-apply-in-tail-position))
+       'raised)
+
+;; 2. Nothing bounded total_args against the actual value stack size:
+;;    OP_APPLY's own path always goes through vm_push (which DOES check
+;;    against VM_STACK_MAX), but the direct frame-reuse memmove bypassed
+;;    that check entirely -- a long enough applied list overran
+;;    frame->slots, the frame array, and the handler stack.
+(define (sink . xs) (length xs))
+(define (unbounded-tail-apply n) (apply sink (make-list n 1)))
+(check "apply TCO: a very long applied list in tail position raises a clean stack-overflow, not a crash"
+       (guard (e (#t 'raised)) (unbounded-tail-apply 200000))
+       'raised)
+
 ;;; Summary
 
 (newline)
