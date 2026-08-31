@@ -1,5 +1,109 @@
 # Changelog
 
+### 1.23.4 - 2026-08-31
+
+**New — introspection tools: `disassemble`/`,asm`, `macroexpand`/`,expand`, `type-of`, `list-actors`/`,actors`**
+
+`(disassemble proc)`/`,asm <name>` exposes `chunk.c`'s pre-existing
+internal bytecode disassembler (previously stderr-only, used by an
+internal codegen-comparison tool) as a Scheme builtin and REPL
+command. `(macro? sym)`/`(macroexpand-1 form)`/`(macroexpand
+form)`/`,expand <expr>` give GLOBAL_ENV-scoped macro introspection —
+motivated directly by this project's own recurring debugging pain
+tracing `syntax-rules` expansions by hand across SRFI shim files.
+`(type-of x)` maps a value's runtime type to a symbol. `(list-actors)`/
+`,actors` lists live-or-just-exited actors via a new fixed-capacity
+global registry.
+
+Found and fixed four real bugs along the way, three of them by two
+rounds of independent review: `chunk.c`'s disassembler never skipped
+`OP_CLOSURE`'s variable-length upvalue-table bytes, desyncing every
+later instruction in the chunk for any closure with at least one
+upvalue; `actor_registry_add` ran *after* `pthread_create` returned,
+letting a fast-exiting actor's own deregistration race ahead of its
+own registration and permanently strand a dead entry (confirmed
+368/500 short-lived actors leaked under the old ordering, 0 after the
+fix); `macroexpand` hung forever on a self-referential macro, since
+each expansion step conses a fresh list and its fixpoint check could
+never detect the loop (fixed with a 1000-step cap that raises
+instead); and `,expand`/`,asm` (plus the pre-existing `,break`/
+`,unbreak`/`,debug`, which had the same inherited gap) had no
+exception handler around reading their own argument, so a malformed
+s-expression could kill the whole REPL process. A related, genuinely
+pre-existing gap — `scc.c`'s chunk deserializer doesn't validate
+`upval_count` before the VM and disassembler both trust it — was
+filed as its own issue rather than folded into this work, since it's a
+different area of the codebase (`.scc` deserialization) with its own
+scope.
+
+**New — `(curry websocket)` gains a server role; `(curry ros)` rosbridge client**
+
+`ws-listen`/`ws-accept` alongside the existing `ws-connect` client,
+tested against independent hand-rolled peer implementations in both
+directions rather than only against curry's own encoder/decoder.
+Independent review found and fixed two real security gaps: an
+unbounded header-line/count growth vector that could drive `ws-accept`
+into unbounded memory growth on a malicious or broken client (fixed
+with an 8KB-per-line, 100-line cap), and a missing enforcement of RFC
+6455 §5.1's masking-direction rule (a client frame MUST be masked, a
+server frame MUST NOT be — previously tolerated either way instead of
+rejected). `(curry ros)` is a rosbridge v2.0 JSON-protocol client for
+ROS integration; two bugs fixed post-review: a spurious-wakeup bug in
+`ros-call-service`'s wait loop that could silently drop a real response
+arriving moments after a single non-done wakeup, and no wakeup at all
+for blocked callers when the underlying connection drops.
+
+**New — SRFI 41 (Streams)**
+
+Full R7RS-style lazy streams (~43 bindings) built on curry's native
+`delay-force`/`make-promise`, including the genuine iterative (non-
+stack-growing) chain flattening `delay-force` already provided —
+verified with a dedicated 100,000-element stream-traversal stack-safety
+test.
+
+**New — SRFI 141 (Integer Division Operators)**
+
+`ceiling/`, `round/`, `euclidean/`, and `balanced/` division-operator
+families. Testing surfaced a real tie-direction bug in
+`balanced-quotient` for negative divisors, fixed and covered by an
+all-sign-combination regression test.
+
+**New — SRFI 9, 31, 45, 95, 78, 212**
+
+Six smaller SRFIs landed as thin shims over existing primitives:
+records (9), the `rec` recursive-binding macro (31), `lazy`/`eager`
+over core `delay-force` (45), sorting/merging (95, over SRFI 132),
+lightweight testing's `check` macro (78), and `define-alias` (212).
+
+**Refactor — SRFI shim files renamed `.scm` → `.sld`**
+
+All 89 loose bare-numbered/dashed SRFI shim files renamed to the `.sld`
+(Scheme Library Definition) extension — the standard R7RS-ecosystem
+convention for a pure re-export manifest, distinct from an
+implementation file. `modules.c`'s resolver already tried `.sld`
+before `.scm` with zero code changes needed; the Homebrew formula's
+install rule needed a matching `PATTERN "*.sld"` addition, a real
+packaging gap this rename surfaced.
+
+**Fix — `floor-quotient`/`floor-remainder`/`floor/` silently accepted non-integer arguments**
+
+Unlike `quotient`/`remainder`/`truncate-quotient`/`truncate-remainder`
+(which correctly validate their arguments), the floor family had no
+type check at all, silently returning wrong-but-plausible results for
+rationals or flonums instead of raising. Fixed with the same exact-
+integer validation the other families already use, with correct
+per-procedure error naming even where `floor-remainder`/`floor/`
+delegate internally to `floor-quotient`.
+
+**Docs — core hash tables documented, including a real ref-thunk gotcha**
+
+`docs/reference/language.md` gained a full "Hash tables" section: core
+`hash-table-ref`'s plain-value (not thunk) third-argument semantics —
+easy to get wrong coming from SRFI-69/125's own `hash-table-ref`, which
+does take a thunk — plus a corrected description of `make-hash-table`'s
+optional argument (a raw mode integer, not a comparator object, unlike
+SRFI-125's version of the same name).
+
 ### 1.23.3 - 2026-08-28
 
 **New — `(curry gillespie)`: stochastic simulation of cell biochemistry**
