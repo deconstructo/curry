@@ -527,6 +527,21 @@ compile_val=$(printf '%s\n' "$out" | grep 'compile' | awk '{print $2}')
 out=$("$CURRY" --help 2>&1 || true)
 check_contains "--help documents --timings" "$out" "--timings"
 
+# ─── REPL commands survive a malformed argument (regression) ──────────────────
+#
+# ,expand/,asm/,break/,unbreak/,debug all read a second form (their
+# argument) via scm_read after the top-level ,command read already
+# succeeded. That second read used to run with no exception handler
+# installed -- a malformed s-expression (e.g. an improper "(1 . . 2)")
+# raised past it with nowhere to go, killing the whole REPL process
+# instead of printing a read error and continuing. Found by independent
+# review while verifying PR #97. If the REPL is still alive afterward,
+# the trailing (display "still alive") runs and its output shows up.
+for cmd in expand asm break unbreak debug; do
+    out=$(printf ',%s (1 . . 2)\n(display "still alive")(newline)\n,quit\n' "$cmd" | "$CURRY" -i 2>&1 || true)
+    check_contains "REPL survives malformed argument to ,$cmd" "$out" "still alive"
+done
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

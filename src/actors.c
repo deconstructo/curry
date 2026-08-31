@@ -303,7 +303,15 @@ val_t actor_spawn(val_t closure, val_t args) {
         for (int i = 0; i < start->load_dir_snap_count; i++)
             free(start->load_dir_snap[i]);
         free(start->load_dir_snap);
+        /* No other thread can hold a reference to `a` yet at this point
+         * (actor_spawn hasn't returned it to its caller), so this write
+         * is provably race-free even unlocked -- but take the lock
+         * anyway to match actor_thread's own exit-path pattern for the
+         * same field, removing any doubt for a future reader (found by
+         * independent review). */
+        pthread_mutex_lock(&a->lock);
         a->alive = false;
+        pthread_mutex_unlock(&a->lock);
         actor_registry_remove(a);
     }
     pthread_attr_destroy(&attr);

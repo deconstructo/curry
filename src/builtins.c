@@ -3338,6 +3338,14 @@ static val_t prim_disassemble(int ac, val_t *av, void *ud) {
     chunk_disasm(chunk, chunk->name, mem);
     fclose(mem);
 
+    /* Same allocation api.c's curry_make_string_n does (flags=0/orig_cap/
+     * ext=NULL), but built in-file rather than calling across to api.c:
+     * that function lives in the `curry` executable's own sources, not
+     * in libcurry_core.a, so curry_test (which links the core library
+     * without api.c) fails to link against it -- confirmed by actually
+     * trying that reuse and rebuilding. scm_make_string just above this
+     * function already establishes the in-file-construction convention
+     * for exactly this reason. */
     String *s = (String *)gc_alloc_atomic(sizeof(String) + buf_len + 1);
     s->hdr.type = T_STRING; s->hdr.flags = 0;
     s->len = (uint32_t)buf_len; s->hash = 0; s->orig_cap = (uint32_t)buf_len; s->ext = NULL;

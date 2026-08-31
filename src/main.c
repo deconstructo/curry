@@ -239,6 +239,34 @@ static char *rl_read_expr(void) {
 
 #endif /* HAVE_READLINE */
 
+/* Read one form from port with the same exception-safety the main REPL
+ * loop's own scm_read call has (see eval_port_exprs below): a malformed
+ * s-expression (e.g. "(1 . . 2)") raises a read error, and without a
+ * handler installed here that exception has nowhere to go and kills the
+ * whole REPL process. Used by REPL commands that read a second form
+ * (their argument) after already having read the ,command-name form
+ * itself through the protected top-level read. Returns false (and prints
+ * "Read error: ..." itself, matching the top-level read's own message)
+ * on a raise; *out is only meaningful when this returns true. Found by
+ * independent review: ,expand/,asm (and the pre-existing ,break/,unbreak/
+ * ,debug, which have the same gap and are tracked separately) all read a
+ * second form this way. */
+static bool safe_read(val_t port, val_t *out) {
+    ExnHandler h;
+    h.prev = current_handler;
+    current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        *out = scm_read(port);
+        current_handler = h.prev;
+        return true;
+    }
+    current_handler = h.prev;
+    fprintf(stderr, "Read error: ");
+    scm_write_shared(h.exn, PORT_STDERR);
+    fprintf(stderr, "\n");
+    return false;
+}
+
 static void eval_port_exprs(val_t port, bool print) {
     compiler_set_source_name("<repl>");
     for (;;) {
@@ -328,7 +356,8 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "break")) {
-                    val_t arg = scm_read(port);
+                    val_t arg;
+                    if (!safe_read(port, &arg)) continue;
                     if (vis_symbol(arg)) {
                         int idx = vm_debug_break_add(sym_cstr(arg));
                         if (idx >= 0) printf("Breakpoint #%d set.\n", idx);
@@ -341,7 +370,8 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "unbreak")) {
-                    val_t arg = scm_read(port);
+                    val_t arg;
+                    if (!safe_read(port, &arg)) continue;
                     if (!vis_fixnum(arg) || !vm_debug_break_remove((int)vunfix(arg)))
                         fprintf(stderr, "usage: ,unbreak <index>  (see ,breaks)\n");
                     continue;
@@ -383,16 +413,22 @@ static void eval_port_exprs(val_t port, bool print) {
                      * review). Every other command that can raise either
                      * reuses eval_expr's own handler (,debug) or installs
                      * one itself; this matches that pattern. */
-                    val_t arg = scm_read(port);
+                    val_t arg;
+                    if (!safe_read(port, &arg)) continue;
                     if (vis_eof(arg)) break;
                     ExnHandler eh;
                     eh.prev = current_handler;
                     current_handler = &eh;
                     if (setjmp(eh.jmp) == 0) {
+                        /* Restore current_handler AFTER the write, not
+                         * before -- scm_write_shared can itself raise
+                         * (found by independent review), and restoring
+                         * first would leave that raise with nowhere to go
+                         * since no outer handler wraps this block. */
                         val_t expanded = macroexpand_1(arg);
-                        current_handler = eh.prev;
                         scm_write_shared(expanded, PORT_STDOUT);
                         fputc('\n', stdout);
+                        current_handler = eh.prev;
                     } else {
                         current_handler = eh.prev;
                         fprintf(stderr, "Error: ");
@@ -402,7 +438,8 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "asm")) {
-                    val_t arg = scm_read(port);
+                    val_t arg;
+                    if (!safe_read(port, &arg)) continue;
                     const char *fn_name = vis_symbol(arg) ? sym_cstr(arg)
                                         : vis_string(arg)  ? str_data(as_str(arg))
                                         : NULL;
@@ -421,7 +458,7 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "debug")) {
-                    expr = scm_read(port);
+                    if (!safe_read(port, &expr)) continue;
                     if (vis_eof(expr)) break;
                     vm_debug_request_step();
                     goto eval_expr;   /* run it under single-step */
