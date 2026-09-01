@@ -138,6 +138,7 @@ Chunk *chunk_new(void) {
     c->src_lambda  = V_VOID;
     c->upval_names = NULL;
     c->target_env  = V_VOID;
+    c->uses_local_macro = false;
     return c;
 }
 

@@ -43,7 +43,34 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-#define SCC_FMT_VER     '\x07'   /* v7: OP_TAIL_APPLY inserted into the opcode
+#define SCC_FMT_VER     '\x08'   /* v8: persist Chunk.uses_local_macro (issue
+                                    #114 -- a let-syntax/letrec-syntax-local
+                                    macro use has no GLOBAL_ENV binding and
+                                    isn't textually present in src_lambda, so
+                                    maybe_jit_bcc (runtime.c) needs this flag,
+                                    set by classify_head at compile time, to
+                                    know to decline JIT promotion for such a
+                                    chunk. Not persisting it would silently
+                                    lose the #114 fix's protection on the
+                                    very next run of the same script once its
+                                    .scc cache exists. Contrast the pre-
+                                    existing, still-unpersisted target_env
+                                    field a few lines below in Chunk
+                                    (chunk.h): that one IS reached by ordinary
+                                    define-library bodies today (modules.c
+                                    compiles them against a real non-GLOBAL_ENV
+                                    target_env), but harmlessly so for .scc
+                                    purposes specifically, since library-body
+                                    chunks are compiled at runtime via vm_eval
+                                    and never pass through this file's
+                                    read/write path at all (only main.c's
+                                    top-level-script and -c paths do) --
+                                    uses_local_macro has no equivalent escape:
+                                    an ordinary hot top-level function using
+                                    let-syntax goes straight through the
+                                    normal script-caching path this file
+                                    implements.
+                                  v7: OP_TAIL_APPLY inserted into the opcode
                                     enum (issue #102 -- apply is now tail-
                                     callable), shifting every subsequent
                                     opcode's numeric value. Same bytecode-
@@ -366,6 +393,9 @@ static bool write_chunk(FILE *f, const Chunk *c) {
      * that up. */
     if (!write_const(f, c->src_lambda)) return false;
 
+    /* uses_local_macro (v8+): see SCC_FMT_VER's comment. */
+    if (!wb(f, (uint8_t)c->uses_local_macro)) return false;
+
     return true;
 }
 
@@ -642,6 +672,11 @@ static bool read_chunk(FILE *f, Chunk *c) {
 
     /* Source lambda form (v6+) */
     if (!read_const(f, &c->src_lambda)) return false;
+
+    /* uses_local_macro (v8+): see SCC_FMT_VER's comment. */
+    uint8_t local_macro;
+    if (!rb(f, &local_macro)) return false;
+    c->uses_local_macro = (bool)local_macro;
 
     return true;
 }

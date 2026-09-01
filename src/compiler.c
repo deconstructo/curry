@@ -287,12 +287,38 @@ int add_syntax_local(Compiler *c, val_t name, val_t transformer) {
 /* Walk this compiler's local macro table, then each enclosing compiler in
  * turn (a nested lambda sees its parent's local macros, same as upvalues).
  * Inner bindings shadow outer ones. Returns false (not found) if no local
- * macro matches — the caller should then fall back to a GLOBAL_ENV lookup. */
+ * macro matches — the caller should then fall back to a GLOBAL_ENV lookup.
+ *
+ * On a match, also marks Chunk::uses_local_macro (chunk.h) on every
+ * compiler from `c` up to and including the one whose own syntax_locals
+ * table actually owns the match — not just `c->chunk` itself. This
+ * matters because the LLVM JIT tier (src/llvm/codegen.cpp's emit_lambda)
+ * compiles a nested lambda literal INLINE into its enclosing function's
+ * native code, rather than through that nested lambda's own chunk's
+ * independent maybe_jit_bcc gate — so if only c->chunk were marked, an
+ * outer closure embedding this exact nested lambda body would still get
+ * JIT-promoted and inline-compile straight through the unmarked outer
+ * chunk, miscompiling the very same local-macro call the inner chunk's
+ * own (correctly set, but never independently consulted in that case)
+ * flag was meant to guard against. Marking every level from `c` to the
+ * owning `cc` covers every chunk whose own JIT promotion could pull this
+ * macro use in, however many lambdas deep the reference is (issue #114's
+ * fix was originally only chunk-local and missed this). Every caller of
+ * resolve_syntax_local gets this for free rather than needing its own
+ * copy of this logic, including callers (expr_mentions_set_target,
+ * ir_lower.c's head_is_macro) that only use the boolean result for
+ * unrelated analysis -- harmless, since a true result there means the
+ * same head position will also be classify_head'd for real compilation
+ * of the very same body. */
 bool resolve_syntax_local(Compiler *c, val_t name, val_t *out_transformer) {
     for (Compiler *cc = c; cc; cc = cc->enclosing) {
         for (int i = cc->syntax_local_count - 1; i >= 0; i--)
             if (cc->syntax_locals[i].name == name) {
                 *out_transformer = cc->syntax_locals[i].transformer;
+                for (Compiler *m = c; m; m = m->enclosing) {
+                    m->chunk->uses_local_macro = true;
+                    if (m == cc) break;
+                }
                 return true;
             }
     }

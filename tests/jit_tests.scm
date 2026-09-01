@@ -252,6 +252,163 @@
            (jit-dp-user i) (+ i 1))
     (loop (+ i 1))))
 
+;;; 16. Locally shadowing an arithmetic operator must not be ignored ───────────
+;;; Regression coverage for issue #115: emit_call's ARITH2/ARITH1 fast paths
+;;; matched an operator's name directly against a builtin table with no
+;;; regard for local lexical scope, unlike every other name-dispatch in
+;;; codegen.cpp. A hot function shadowing +/-/*// etc. silently got the
+;;; builtin operator instead of its own local binding, with no error at
+;;; all -- a worse failure mode than #111's (that one at least raised a
+;;; catchable error).
+(define (jit-shadow-plus n) (let ((+ (lambda (a b) 99))) (+ n 1)))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: locally shadowed + is not silently ignored when hot"
+           (jit-shadow-plus i) 99)
+    (loop (+ i 1))))
+
+(define (jit-shadow-minus n) (let ((- (lambda (a b) 77))) (- n 1)))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: locally shadowed - is not silently ignored when hot"
+           (jit-shadow-minus i) 77)
+    (loop (+ i 1))))
+
+;;; Same bug class, found during review of the #115 fix above (issue #117):
+;;; the named-let self-call backedge matched the loop's name with no
+;;; cc.lookup check either -- a local binding shadowing the loop name
+;;; compiled to a backedge instead of an ordinary call, corrupting the loop
+;;; variable and hanging forever once JIT-promoted (worse than #115's
+;;; silently-wrong-answer outcome: an actual infinite loop). The named let
+;;; compiles inline into its enclosing function's own chunk (it isn't a
+;;; separate closure), so it's jit-shadow-loop itself -- not the inner
+;;; loop -- that needs to cross JIT_THRESHOLD for this to matter; each call
+;;; runs the loop to completion first regardless of tier, so this can't
+;;; hang indefinitely even pre-fix on a single call, only across repeated
+;;; calls once the enclosing closure gets promoted.
+(define (jit-shadow-loop n)
+  (let loop ((i 0))
+    (if (< i 5)
+        (loop (+ i 1))
+        (let ((loop (lambda (x) 7))) (loop 5)))))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: locally shadowed named-let loop name is not silently ignored"
+           (jit-shadow-loop i) 7)
+    (loop (+ i 1))))
+
+;;; A first attempt at the #117 fix (a blanket "any local binding of this
+;;; name suppresses the backedge" check) overcorrected: a named let's own
+;;; name must still shadow an ENCLOSING binding of the same name and
+;;; self-recurse normally -- only a binding introduced INSIDE the loop
+;;; body (the case above) should suppress it. Found by independent review
+;;; of that first attempt, before it was ever merged.
+(define (jit-enclosing-shadow-loop n)
+  (let ((loop (lambda (x) 'outer)))
+    (let loop ((i 0))
+      (if (< i n) (loop (+ i 1)) i))))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: named-let name correctly shadows an enclosing binding"
+           (jit-enclosing-shadow-loop 3) 3)
+    (loop (+ i 1))))
+
+;;; The sentinel fix itself (Binding::is_named_let) initially bound the
+;;; loop's own name into scope BEFORE its init expressions were compiled,
+;;; so an init expression legitimately referencing an ENCLOSING binding
+;;; sharing the loop's name resolved to the not-yet-real sentinel instead
+;;; -- a Binding with a null slot, corrupting the generated LLVM IR
+;;; (caught only by verifyModule on an assertions-disabled LLVM build,
+;;; would have asserted inside LoadInst's constructor on an assertions-
+;;; enabled one, rather than the clean "JIT failed, fell back to
+;;; bytecode" this now-fixed shape used to produce). Fixed by computing
+;;; every init value before the loop's own scope (and its sentinel)
+;;; exists, matching a named let's inits being evaluated in the ENCLOSING
+;;; scope, same as an ordinary `let`.
+;;;
+;;; This exact reordering also independently closes issue #119 (a
+;;; separate LLVM-JIT-only bug, filed then fixed within this same
+;;; commit): named-let init expressions were getting let*-style scoping
+;;; -- init i could see loop variables 0..i-1 bound by earlier iterations
+;;; of the same binding loop -- instead of R7RS's let-style "every init
+;;; sees only the enclosing scope". curry-jit-eval is used directly
+;;; (rather than driving a wrapper past JIT_THRESHOLD) so the asserted
+;;; value is unambiguously the JIT tier's own answer, not whichever tier
+;;; happened to run for a given call count.
+(check "JIT: named-let init expr resolves an enclosing shadow, not the sentinel"
+       (curry-jit-eval
+        '((lambda (n)
+            (let ((loop (lambda (x) (* x 10))))
+              (let loop ((i (loop n))) i)))
+          5))
+       50)
+
+;;; #119's own repro, confirming the fix generalizes beyond the specific
+;;; shadow-of-the-loop's-own-name case above: plain let* -> let scoping
+;;; for two ordinary loop variables (b's init `a` must see the outer
+;;; global, not the loop variable `a` bound moments earlier by the same
+;;; named let), no local-macro or shadowing involved at all.
+(define jit-119-a 100)
+(check "JIT: named-let init exprs use let (not let*) scoping"
+       (curry-jit-eval
+        '((lambda (n) (let loop ((jit-119-a 1) (b jit-119-a)) b)) 1))
+       100)
+
+;;; Referencing a named let's own name as a plain VALUE (not calling it)
+;;; has no real slot for the sentinel to provide -- this was already
+;;; unsupported before the sentinel existed (curry compiles named-let
+;;; purely as a backedge construct, never allocating a real closure for
+;;; the loop name), but used to at least compile to a global-variable
+;;; lookup that raised a clean "unbound variable" rather than reaching
+;;; LLVM's IR builder with a null operand. Must decline JIT promotion
+;;; cleanly (falls back to the bytecode interpreter, which is where this
+;;; correctly-consistent #t answer actually comes from at every call
+;;; count, not just below JIT_THRESHOLD) rather than crash.
+(define (jit-value-ref-loop n)
+  (let loop ((i 0)) (if (< i n) (loop (+ i 1)) (procedure? loop))))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: named-let name used as a value declines promotion cleanly"
+           (jit-value-ref-loop 3) #t)
+    (loop (+ i 1))))
+
+;;; 17. A let-syntax/letrec-syntax-local macro must not be miscompiled ─────────
+;;; Regression coverage for issue #114, a residual gap in #111's fix: the
+;;; JIT's macro guard only checks GLOBAL_ENV, and a let-syntax-local macro
+;;; has no GLOBAL_ENV binding -- worse, the enclosing let-syntax form is
+;;; evaluated once at define time to produce the closure and is never part
+;;; of the closure's own src_lambda, so it can't be caught by string-
+;;; matching the AST either. Fixed at the bytecode-compiler level instead:
+;;; classify_head now marks Chunk::uses_local_macro whenever compiling a
+;;; chunk resolves a name via resolve_syntax_local, and maybe_jit_bcc
+;;; refuses JIT promotion for such a chunk, the same way it already does
+;;; for target_env.
+(define jit-ls-user
+  (let-syntax ((m (syntax-rules () ((_ x) (+ x 1)))))
+    (lambda (n) (m n))))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: let-syntax-local macro stays correct when hot"
+           (jit-ls-user i) (+ i 1))
+    (loop (+ i 1))))
+
+;;; The first attempt at this fix only marked the innermost chunk actually
+;;; referencing the macro, but codegen.cpp's emit_lambda compiles a nested
+;;; lambda literal INLINE into its enclosing closure's own native code --
+;;; so an unmarked OUTER chunk still got JIT-promoted and inline-compiled
+;;; straight through, missing the correctly-set inner chunk's flag
+;;; entirely. Found by two independent reviews before this ever merged.
+;;; resolve_syntax_local now marks every chunk from the reference point up
+;;; to the one owning the macro, not just the innermost one.
+(define jit-ls-nested-user
+  (let-syntax ((m (syntax-rules () ((_ x) (+ x 1)))))
+    (lambda (n) ((lambda () (m n))))))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: let-syntax-local macro stays correct one lambda deeper"
+           (jit-ls-nested-user i) (+ i 1))
+    (loop (+ i 1))))
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
