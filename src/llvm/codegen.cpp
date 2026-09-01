@@ -165,16 +165,18 @@ struct CompileCtx {
          * behind issue #99 (crash on LLVM 23.1.0, "cannot get terminator
          * of non-well-formed block"). getTerminator() asserts the block
          * is ALREADY terminated before returning anything; it was never
-         * meant to double as an is-it-terminated test, and older LLVM
-         * releases apparently didn't assert here (or asserts were
-         * compiled out), letting this call silently "work" by luck for
-         * years until a newer, stricter LLVM enforced its own documented
-         * precondition. hasTerminator() is the actual bool query this
-         * function needs -- confirmed against LLVM's own BasicBlock.h:
-         * hasTerminator() is a plain, assertion-free
-         * "!empty() && back().isTerminator()" check, exactly the
-         * unterminated-or-not question this function exists to answer. */
-        return B.GetInsertBlock()->hasTerminator();
+         * meant to double as an is-it-terminated test.
+         *
+         * NOT `hasTerminator()` either (a prior version of this fix used
+         * it): that member is a newer addition to BasicBlock, present on
+         * the Homebrew LLVM used during that fix but absent from LLVM 15
+         * -- the project's own documented minimum -- causing a hard build
+         * break there. Inline the same check hasTerminator() itself
+         * performs (`!empty() && back().isTerminator()`), which only
+         * depends on BasicBlock::empty()/back() and Instruction::
+         * isTerminator(), all long-stable across LLVM releases. */
+        BasicBlock *bb = B.GetInsertBlock();
+        return !bb->empty() && bb->back().isTerminator();
     }
 
     void branch_if_open(BasicBlock *target) {
