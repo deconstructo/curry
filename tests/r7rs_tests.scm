@@ -1208,6 +1208,33 @@
 (check "case: missing key raises instead of crashing"
        (jit127-malformed-raises? (lambda () (eval '(case) (interaction-environment))))
        #t)
+;; A second round of independent review of the fix just above found
+;; more crashes it didn't cover -- an improper (non-nil, non-pair)
+;; clause body, and an `=>` arrow clause with no receiver expression --
+;; in both cond and case, including case's own `else` clause (which had
+;; its own separate copy of the same logic, missing the same checks its
+;; sibling matched-datum branch already had).
+(check "cond: improper clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (1 . 2)) (interaction-environment))))
+       #t)
+(check "cond: improper else-clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (else . 2)) (interaction-environment))))
+       #t)
+(check "cond: arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (1 =>)) (interaction-environment))))
+       #t)
+(check "case: improper clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 ((1) . 2)) (interaction-environment))))
+       #t)
+(check "case: else clause with no body doesn't crash (returns void)"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 (else)) (interaction-environment)) #f))
+       #f)
+(check "case: else-arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 (else =>)) (interaction-environment))))
+       #t)
+(check "case: matched-arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 ((1) =>)) (interaction-environment))))
+       #t)
 ;; The compiler-path halves of #127 (compile_cond/compile_case) can only
 ;; be tested via a real subprocess compile, same reasoning as #124's own
 ;; do/let-syntax/guard checks -- see tests/test_cli.sh.
@@ -1240,6 +1267,26 @@
 (check "parameterize: non-parameter value raises instead of crashing"
        (jit127-malformed-raises? (lambda () (eval '(parameterize ((car 5)) 1) (interaction-environment))))
        #t)
+;; A second round of independent review of the fix just above found
+;; `(let-values)` / `(let*-values)` / `(parameterize)` -- no operand
+;; list at all, not merely a malformed one -- still crashed: the
+;; per-binding checks above only fire once a bindings LIST is already
+;; being iterated. Also confirms `(parameterize ())` (a valid empty
+;; bindings list with no body) matches the compiled path's own
+;; leniency here (returns void) rather than introducing a stricter,
+;; tree-walker-only rejection for the same input.
+(check "let-values: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let-values) (interaction-environment))))
+       #t)
+(check "let*-values: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let*-values) (interaction-environment))))
+       #t)
+(check "parameterize: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize) (interaction-environment))))
+       #t)
+(check "parameterize: empty bindings and no body doesn't crash (returns void)"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize ()) (interaction-environment)) #f))
+       #f)
 (check "when: missing test raises instead of crashing"
        (jit127-malformed-raises? (lambda () (eval '(when) (interaction-environment))))
        #t)

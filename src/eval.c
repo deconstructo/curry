@@ -409,6 +409,14 @@ tail:
     if (op == S_LET_VALUES || op == S_LET_STAR_VALUES) {
         /* (let-values  (((a b) producer) ...) body...)
          * (let*-values (((a b) producer) ...) body...) */
+        /* Independent review of the #128 fix found `(let-values)` /
+         * `(let*-values)` -- no bindings list at all -- still reached
+         * vcar(rest) below unguarded; the per-binding check just below
+         * only covers a MALFORMED bindings list, not a MISSING one. */
+        if (!vis_pair(rest))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            op == S_LET_VALUES ? "let-values: ill-formed special form"
+                                                : "let*-values: ill-formed special form");
         val_t bindings = vcar(rest), body = vcdr(rest);
         val_t new_env = env_extend(env);
         val_t b = bindings;
@@ -478,6 +486,14 @@ tail:
                 scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "cond: ill-formed special form");
             val_t test   = vcar(clause);
             val_t body   = vcdr(clause);
+            /* Independent security review of the first #127 fix found
+             * more crashes this alone didn't cover: `(cond (1 . 2))`
+             * and `(cond (else . 2))` -- an improper (non-nil, non-
+             * pair) clause tail -- still reached vcar(body) below on a
+             * non-pair. A clause's own body, once past the test, must
+             * be either empty or a proper list starting point. */
+            if (!vis_nil(body) && !vis_pair(body))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "cond: ill-formed special form");
             rest = vcdr(rest);
 
             if (test == S_ELSE) {
@@ -489,7 +505,11 @@ tail:
             if (vis_true(result)) {
                 if (vis_nil(body)) return result;
                 if (vcar(body) == S_ARROW) {
-                    /* (test => proc) */
+                    /* (test => proc) -- also found by the same review:
+                     * `(cond (1 =>))` has no receiver expression at all,
+                     * so vcadr(body) below would read past the end. */
+                    if (!vis_pair(vcdr(body)))
+                        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "cond: ill-formed special form");
                     val_t proc = eval(vcadr(body), env);
                     return apply(proc, make_pair(result, V_NIL));
                 }
@@ -515,9 +535,24 @@ tail:
                 scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
             val_t datums = vcar(clause);
             val_t body   = vcdr(clause);
+            /* Independent review of the first #127 fix found more
+             * crashes: an improper (non-nil, non-pair) clause body --
+             * `(case 1 ((1) . 2))` -- still reached vcar(body) below.
+             * Same check as S_COND's identical fix just above. */
+            if (!vis_nil(body) && !vis_pair(body))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
             clauses = vcdr(clauses);
             if (datums == S_ELSE) {
-                if (vis_pair(body) && vcar(body) == S_ARROW) {
+                /* `(case 1 (else))` -- an else clause with no body at
+                 * all -- previously reached vcar(body)/vcdr(body) on a
+                 * nil body with no guard; the matched-datum branch below
+                 * already had this check, else's own copy did not. */
+                if (vis_nil(body)) return V_VOID;
+                if (vcar(body) == S_ARROW) {
+                    /* `(case 1 (else =>))` -- no receiver expression --
+                     * would read vcadr(body) past the end without this. */
+                    if (!vis_pair(vcdr(body)))
+                        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
                     return apply(eval(vcadr(body), env), make_pair(key, V_NIL));
                 }
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -534,6 +569,10 @@ tail:
                 if (match) {
                     if (vis_nil(body)) return V_VOID;
                     if (vcar(body) == S_ARROW) {
+                        /* `(case 1 ((1) =>))` -- same missing-receiver
+                         * gap as else's own arrow form just above. */
+                        if (!vis_pair(vcdr(body)))
+                            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
                         return apply(eval(vcadr(body), env), make_pair(key, V_NIL));
                     }
                     while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -775,6 +814,13 @@ tail:
         /* (parameterize ((param val)...) body...) */
         /* Register a WindFrame so escape continuations trigger parameter
          * restoration via wind_unwind_to, not just normal-exit cleanup. */
+        /* Independent review of the #128 fix found `(parameterize)` --
+         * no bindings list at all -- still reached vcar(rest) below
+         * unguarded; the per-binding check further down only covers a
+         * MALFORMED bindings list, not a MISSING one. Matches
+         * compile_parameterize's own require_min_args(args, 1, ...). */
+        if (!vis_pair(rest))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "parameterize: ill-formed special form");
         val_t bindings = vcar(rest), body = vcdr(rest);
         int n = list_length(bindings);
 
@@ -831,8 +877,19 @@ tail:
         h.saved_jit_depth = jit_depth_save();
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
-            while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
-            result = eval(vcar(body), env);
+            /* `(parameterize ((p v)))` / `(parameterize ())` -- no body
+             * forms at all -- previously reached vcar(body) on a nil
+             * body and crashed. The compiled path (compile_parameterize)
+             * is lenient here: it desugars to `(lambda () . body)`,
+             * and a zero-body lambda compiles to a no-op returning void
+             * (compile_seq's own vis_nil(list) case) rather than
+             * raising, so match that instead of introducing a stricter
+             * tree-walker-only rejection for the same input. Found via
+             * independent review of the #128 fix. */
+            if (!vis_nil(body)) {
+                while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+                result = eval(vcar(body), env);
+            }
             current_handler = h.prev;
         } else {
             current_handler = h.prev;
