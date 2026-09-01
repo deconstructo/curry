@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788242458996,
+  "lastUpdate": 1788267070804,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11039,6 +11039,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 53.972,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1c86d536404efc4db5878a5bce1f73580ad3b892",
+          "message": "fix(compiler): malformed let/letrec/do/guard bindings and unbounded let* recursion (#124, #125) (#130)\n\n* fix(compiler): catch malformed let/letrec/do/guard bindings and unbounded let* recursion\n\nIssue #124: `(let ((a)) ...)` and similar malformed bindings for\nlet/let*/letrec/letrec*/do/let-syntax/letrec-syntax/guard crashed the\nprocess (SIGSEGV) instead of raising a catchable compile-time error,\nacross all three of curry's independent compilation paths for these\nforms: the Tier 2.1 IR lowerer (ir_lower.c), the classic bytecode\ncompiler (compiler_classic.c -- the only live path for do/let-syntax/\nguard, which have no IR lowering at all), and the tree-walking\nevaluator (eval.c). Fixed by validating each binding's shape (a pair\nwhose cdr is also a pair, i.e. `(name init)`) before destructuring it,\nusing the existing require_min_args idiom in the two compilers and a\nsmall local equivalent in eval.c. Also fixed two related crashes not\nin the original report: let-syntax with a bodyless binding, and guard\nwith an empty clause.\n\nIssue #125: a long flat let*/letrec*/do chain (a few hundred sequential\nbindings) SIGSEGVed the process during compilation, because ir_emit()\nrecurses once per binding with no tail-call reuse of its own C frame,\neventually exhausting the real C stack with no bound. eval() already\nhad its own guard against exactly this kind of unbounded C recursion;\nextracted it into a shared check_c_stack_depth() (runtime.c) and now\ncall it from both eval() and ir_emit()'s single entry point, so the\nsame chain now raises a clean, catchable stack-overflow condition\ninstead of crashing.\n\nRegression tests added to tests/r7rs_tests.scm (tree-walker path, via\neval) and tests/test_cli.sh (real compiler path, via subprocess --\neval() can't exercise ir_lower.c/compiler_classic.c/ir_emit.c at all).\nThe test_cli.sh stack-overflow test needed 3001 bindings rather than\n~220: the guard fires at a fraction of the real per-thread stack limit,\nwhich is queried from the live ulimit rather than fixed, and CTest's\nown test-runner launches this script under a much larger default stack\n(64MB) than an interactive shell (8MB) -- confirmed empirically, fixed\nso the test is robust regardless of the caller's ulimit.\n\nVerified every fix both by confirming the crash becomes a clean exit-1\nerror and by confirming ordinary, legitimate usage of the same forms\nis unaffected. Verified the #125 test actually catches a regression by\ntemporarily reverting the check_c_stack_depth call and confirming the\ntest fails with a SIGSEGV (exit 139) as expected, then restoring it.\n\n117/117 ctest suites pass (default build), 118/118 pass (LLVM build),\nboth with .scc caches cleared. The one intermittent failure seen during\na parallel run (`ros`, port-bind contention) is a known pre-existing\nflake unrelated to this change, confirmed by rerunning in isolation.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(compiler): close eval.c gaps and stack-guard bypass found by review\n\nIndependent code review and security review of the prior commit\n(fix/#124-#125) surfaced real defects in scope of those same two\nissues, verified and fixed here:\n\n- eval.c had several more unchecked-destructure crashes in the exact\n  form family #124 targeted, not caught by require_binding_shape alone\n  since that only validates an individual binding's shape, not that\n  the enclosing form has enough top-level pieces to destructure:\n  `(let* ((a 1)))` / `(letrec ((a 1)))` with no body crashed on an\n  unconditional vcdr of a nil body; `(let loop)` with no bindings/body\n  crashed on vcar of a nil body; `(do ((i 0 (+ i 1))))` with no test\n  clause and `(do ((i 0)) ())` with a non-pair test clause both\n  crashed; and a dotted step-spec like `(i 0 . 5)` dereferenced the\n  non-pair tail via vcaddr. All now raise (or, for the dotted-step\n  case, silently skip the step -- matching compiler_classic.c's own\n  existing convention for the identical shape) instead of SIGSEGVing.\n- ir_lower_letrec (shared by S_LETREC/S_LETREC_STAR) hardcoded\n  \"letrec\" in its raised error message even for a letrec*-specific\n  malformed binding -- cosmetic, but a wrong form name in an error\n  points a future debugger at the wrong code. Now takes the actual\n  head symbol and names itself correctly.\n- The #125 stack-depth guard's per-thread stack-size query was\n  unclamped: under `ulimit -s unlimited` (a real, common setting, e.g.\n  on Linux service defaults), pthread_getattr_np/pthread_attr_getstack\n  reports a synthetic ~93TB stack size, pushing the guard's threshold\n  out past any depth actually reachable before a real SIGSEGV --\n  disabling the guard exactly where an unbounded stack makes a runaway\n  recursion most dangerous to run unguarded. Now clamped to a 512MB\n  ceiling, comfortably above every real stack size curry itself\n  requests.\n- GC_get_stack_base's return value was unchecked; on GC_UNIMPLEMENTED\n  the stack base is indeterminate, corrupting the guard's arithmetic\n  into either a persistent per-thread spurious stack-overflow (bad\n  base cached forever) or a silently disabled guard. Falls back to the\n  address of a local variable in this stack frame on failure -- an\n  underestimate of the true base, so the guard now errs toward firing\n  slightly early rather than not at all.\n\nAlso verified, not changed: the reviews confirmed guard's weaker\nsingle-element-clause check is correct R7RS behavior, the ir_lower.c\nclosedness predicates' fail-safe `return false` (rather than raising)\non a malformed binding is the right choice since the real lowering\nfunctions separately validate and raise, and check_c_stack_depth's\nplacement at ir_emit's single entry point does cover the whole\nrecursive tree (both ir_emit_inline_call call sites are internal to\nir_emit).\n\nFiled as separate issues, out of #124/#125's own scope (different\nspecial forms / different subsystem): unchecked cond/case clause\ndestructuring in compiler_classic.c and eval.c (same crash class, but\na different form family); the equivalent eval.c gaps for let-values/\nlet*-values/parameterize/when/define-syntax; and the reader having no\nrecursion-depth or list-length limit at all (a flat ~50000-element\nlist or ~15000-deep nesting SIGSEGVs at read time, before any of this\ncommit's guards ever run).\n\nRegression tests added to both tests/r7rs_tests.scm (the new eval.c-\nonly gaps, via eval) and tests/test_cli.sh (the letrec*/letrec naming\nfix, which is a compile-time error for the whole enclosing top-level\nform and so can't be tested via a runtime guard from inside a script).\n\n362/362 (r7rs_tests.scm), 87/87 (test_cli.sh), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build) -- all with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(tests): raise #125's stack-overflow test threshold for Release builds\n\nCI's macOS Release build failed test_cli.sh's #125 regression test\n(expected exit 1, got 0) at the 3001-binding threshold that was\nsufficient locally: a Release build's optimizer shrinks ir_emit's own\nper-recursion-level stack frame enough that 3001 levels of recursion\nno longer reaches check_c_stack_depth's threshold, on top of the\nalready-known ulimit-driven variance (CTest's 64MB default stack vs.\nan interactive shell's 8MB). Verified empirically that ~8000 bindings\nis enough to trigger reliably under a local Release build; raised to\n20001 for comfortable margin, confirmed under both Debug and Release\nbuilds combined with both an 8MB and a 64MB ulimit, and confirmed to\nstay well under the reader's own unrelated ~50000-element recursion\nlimit (issue #129) so the test keeps testing ir_emit's guard\nspecifically.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(tests): run #125's oversized let* form as a script file, not -e\n\nThe 20001-binding form from the previous commit's threshold fix is\n~300KB of source text -- comfortably past Linux's default whole-argv\nlength limit. CI's ubuntu runners (Debug, Release, and the LLVM build)\nall failed the same way: exit 126, bash's own report for an execve()\nE2BIG (\"argument list too long\") when handing that string to `curry -e`\nas a single argument. Fixed by writing the form to a real .scm file in\nthe suite's existing $TMPDIR_CLI and running it as a positional script\nargument instead, which has no such limit.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T22:50:18+10:00",
+          "tree_id": "2410ff5c2f66a374d1a03e1921b89c33a468a98b",
+          "url": "https://github.com/deconstructo/curry/commit/1c86d536404efc4db5878a5bce1f73580ad3b892"
+        },
+        "date": 1788267068690,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.682,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.87,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.897,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.557,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 133.71,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 289.281,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.495,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.792,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.683,
             "unit": "ms"
           }
         ]
