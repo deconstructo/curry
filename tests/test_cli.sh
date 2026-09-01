@@ -629,21 +629,31 @@ check "let/let*/letrec/do/let-syntax/guard still compile and run correctly" "$ou
 # actually compiles, and a plain bash loop avoids a python/perl
 # dependency in this shell-based suite.
 #
-# 3001 bindings, not ~220: the guard fires at a FRACTION of the real
-# per-thread C stack limit (check_c_stack_depth, runtime.c), and that
-# limit is queried at runtime from the actual ulimit -s in effect, not
-# a fixed constant -- confirmed to vary a lot across how this suite
-# gets invoked: an interactive shell here defaulted to an 8MB stack
-# (~220 bindings was enough to cross the guard's threshold), but
-# CTest's own test-runner process launches this script under a 64MB
-# stack, where 220 bindings finished cleanly (exit 0, guard never
-# fired) and the test read as a silent, non-obvious environment-
-# dependent flake rather than a real failure. 3001 is comfortably past
-# the threshold measured empirically under a 64MB stack too, so the
-# test is robust regardless of the caller's ulimit.
+# 20001 bindings, not ~220 or even 3001: the guard fires at a FRACTION
+# of the real per-thread C stack limit (check_c_stack_depth, runtime.c),
+# and both the actual stack limit AND how much of it each recursion
+# level of ir_emit consumes vary a lot across how this suite is built
+# and invoked -- confirmed empirically twice:
+#  - an interactive Debug-build shell here defaulted to an 8MB stack,
+#    where ~220 bindings was enough to cross the guard's threshold, but
+#    CTest's own test-runner process launches this script under a 64MB
+#    stack, where 220 (and even 3000) bindings finished cleanly (exit
+#    0, guard never fired) -- bumped to 3001, confirmed safe under a
+#    64MB stack too.
+#  - that 3001 figure then still failed the SAME way (exit 0, no
+#    SIGSEGV) under CI's macOS Release build specifically: a Release
+#    build's optimizer shrinks ir_emit's own per-call stack frame
+#    enough that 3001 recursion levels no longer reaches the guard's
+#    threshold at all, on top of the ulimit difference above. 20001 is
+#    comfortably past the threshold measured empirically under a
+#    Release build AND a 64MB stack simultaneously (triggers reliably
+#    above ~8000 in that combination), while staying well under the
+#    reader's own unrelated ~50000-element recursion limit (issue
+#    #129) so this test keeps testing ir_emit's guard specifically,
+#    not the reader's.
 bindings=""
 names=""
-for i in $(seq 0 3000); do
+for i in $(seq 0 20000); do
     bindings="$bindings(p$i 1)"
     names="$names p$i"
 done
@@ -652,7 +662,7 @@ set +e
 "$CURRY" -e "$big_letstar" >/dev/null 2>&1
 big_letstar_code=$?
 set -e
-check "let* with 3001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
+check "let* with 20001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
 # Confirms a much smaller, entirely ordinary let* chain (nowhere near
 # where the guard fires) still compiles and runs correctly.
 out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6 1) (p7 1) (p8 1) (p9 1)
