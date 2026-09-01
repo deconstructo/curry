@@ -39,6 +39,7 @@ extern "C" {
 #include "../env.h"
 #include "../builtins.h"
 #include "../gc.h"
+#include "../lang_registry.h"
 }
 
 #include <llvm/IR/IRBuilder.h>
@@ -956,7 +957,17 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
     if (!vis_pair(expr))
         return emit_literal(cc, expr);
 
-    val_t op  = as_pair(expr)->car;
+    /* Translate an Akkadian/cuneiform special-form synonym to its
+     * canonical English symbol before any dispatch below, exactly as
+     * eval() does (compiler_classic.c's classify_head does too). Without
+     * this, a supported form spelled in Akkadian (e.g. šumma for "if")
+     * matched none of the string comparisons below and fell all the way
+     * through to the macro/unsupported-form guard and then emit_call,
+     * getting silently miscompiled the same way an actual macro call
+     * did before that guard existed (issue #111) -- lang_translate() is a
+     * no-op for symbols with no registered synonym, including plain
+     * English ones, so this is safe to apply unconditionally. */
+    val_t op  = lang_translate(as_pair(expr)->car);
     val_t rst = as_pair(expr)->cdr;
 
     /* ---- (quote datum) ---- */
@@ -1293,6 +1304,60 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
     /* ---- (do var-specs (test result...) body...) ---- */
     if (vis_symbol(op) && op == S("do"))
         return emit_do(cc, rst);
+
+    /* ---- Bail out on macros / unimplemented special forms (issue #111) ----
+     * The forms above are everything this codegen understands. Anything
+     * else falling through to "procedure call" below either (a) is a user
+     * macro invocation -- the operator position holds a T_SYNTAX
+     * transformer, not a callable value -- or (b) is a special form
+     * curry's own bytecode compiler knows about (compiler_internal.h's
+     * SF_* enum) that this JIT tier has simply never implemented
+     * (quasiquote, let-values, case-lambda, ...). Compiling either as an
+     * ordinary call silently produces wrong results with misleading
+     * errors ("apply: not a procedure", "unbound variable") instead of
+     * declining JIT promotion, since maybe_jit_bcc compiles a chunk's raw,
+     * un-macro-expanded src_lambda with no eligibility check at all.
+     * Throwing here is caught by curry_llvm_jit_compile, which stores
+     * V_FALSE into jit_val -- permanently and safely pinning the closure
+     * to the bytecode interpreter, exactly the same fallback already used
+     * a few lines above maybe_jit_bcc's own call site for the unrelated
+     * target_env/define-library bailout (runtime.c). */
+    if (vis_symbol(op) && !cc.lookup(as_sym(op)->data)) {
+        static const std::unordered_set<std::string> UNSUPPORTED_FORMS = {
+            "quasiquote", "unquote", "unquote-splicing",
+            "let-values", "let*-values", "define-values",
+            "delay", "delay-force",
+            "parameterize", "guard", "with-exception-handler",
+            "receive", "define-record-type",
+            "define-syntax", "let-syntax", "letrec-syntax",
+            "syntax-rules", "cond-expand", "case-lambda",
+            "symbolic", "with-assumptions",
+            "defined?", "define-rule", "define-ruleset", "define-algebra",
+        };
+        const char *name = as_sym(op)->data;
+        if (UNSUPPORTED_FORMS.count(name))
+            throw std::runtime_error(
+                std::string("JIT: unsupported special form '") + name + "'");
+
+        /* GLOBAL_ENV-only lookup is a known, NOT fully closed gap (see
+         * issue #111's follow-up discussion): a macro introduced by a
+         * let-syntax/letrec-syntax that lexically encloses this closure
+         * -- e.g. (let-syntax ((m ...)) (lambda (n) (m n))) -- has no
+         * GLOBAL_ENV binding, and the closure's own src_lambda is just
+         * the inner (lambda (n) (m n)); the enclosing let-syntax form
+         * itself is never part of that captured AST, so it never trips
+         * the "let-syntax" entry in UNSUPPORTED_FORMS above either. A
+         * correct fix needs the bytecode compiler to record, per-chunk,
+         * whether compilation ever resolved a name via a lexical
+         * syntax_locals scope (compiler_internal.h), and maybe_jit_bcc
+         * (runtime.c) to refuse promotion for such chunks -- deeper than
+         * this fix's scope; tracked separately rather than attempted
+         * here. */
+        val_t *slot = env_lookup_slot(GLOBAL_ENV, S(name));
+        if (slot && vis_syntax(*slot))
+            throw std::runtime_error(
+                std::string("JIT: macro invocation '") + name + "' not supported");
+    }
 
     /* ---- procedure call ---- */
     return emit_call(cc, op, rst);
