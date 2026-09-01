@@ -414,6 +414,10 @@ tail:
         val_t b = bindings;
         while (vis_pair(b)) {
             val_t bind   = vcar(b);
+            /* Issue #128: `(let-values (1) 1)` / `(let-values ((a)) 1)`
+             * previously fell straight into vcar/vcadr below and
+             * SIGSEGVed instead of raising. */
+            require_binding_shape(bind, op == S_LET_VALUES ? "let-values" : "let*-values");
             val_t formals = vcar(bind);
             val_t init_e  = vcadr(bind);
             val_t produced = eval(init_e, op == S_LET_STAR_VALUES ? new_env : env);
@@ -438,6 +442,7 @@ tail:
             b = vcdr(b);
         }
         env = new_env;
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
@@ -466,6 +471,11 @@ tail:
     if (op == S_COND) {
         while (vis_pair(rest)) {
             val_t clause = vcar(rest);
+            /* Issue #127: a clause that isn't itself a pair (e.g.
+             * `(cond ())`, `(cond 1)`) previously fell straight into
+             * vcar/vcdr below and SIGSEGVed instead of raising. */
+            if (!vis_pair(clause))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "cond: ill-formed special form");
             val_t test   = vcar(clause);
             val_t body   = vcdr(clause);
             rest = vcdr(rest);
@@ -491,10 +501,18 @@ tail:
     }
 
     if (op == S_CASE) {
+        /* Issue #127: `(case)` with no key at all previously fell
+         * straight into vcar(rest) below and SIGSEGVed. */
+        if (!vis_pair(rest))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
         val_t key = eval(vcar(rest), env);
         val_t clauses = vcdr(rest);
         while (vis_pair(clauses)) {
             val_t clause = vcar(clauses);
+            /* Same shape check as S_COND above: a non-pair clause (e.g.
+             * `(case 1 1)`, `(case 1 ())`) previously SIGSEGVed here. */
+            if (!vis_pair(clause))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "case: ill-formed special form");
             val_t datums = vcar(clause);
             val_t body   = vcdr(clause);
             clauses = vcdr(clauses);
@@ -528,17 +546,28 @@ tail:
     }
 
     if (op == S_WHEN) {
+        /* Issue #128: `(when)` with no test at all previously fell
+         * straight into vcar(rest) below and SIGSEGVed. */
+        if (!vis_pair(rest))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "when: ill-formed special form");
         val_t cond = eval(vcar(rest), env);
         if (vis_false(cond)) return V_VOID;
         val_t body = vcdr(rest);
+        /* `(when #t)` -- a true test with no body forms at all -- hit
+         * the same missing-body gap #124/#125 fixed for let* / letrec:
+         * vcdr(body) on a nil body crashed instead of returning void. */
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
 
     if (op == S_UNLESS) {
+        if (!vis_pair(rest))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "unless: ill-formed special form");
         val_t cond = eval(vcar(rest), env);
         if (vis_true(cond)) return V_VOID;
         val_t body = vcdr(rest);
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
@@ -630,6 +659,11 @@ tail:
     }
 
     if (op == S_DEFINE_SYNTAX) {
+        /* Issue #128: `(define-syntax)` with no name/transformer at all
+         * previously fell straight into vcar(rest) below and SIGSEGVed.
+         * require_binding_shape checks rest is a pair whose cdr is also
+         * a pair -- exactly the (name transformer-expr) shape needed. */
+        require_binding_shape(rest, "define-syntax");
         val_t name        = vcar(rest);
         val_t transformer = eval(vcadr(rest), env);
         Syntax *syn = CURRY_NEW(Syntax);
@@ -753,7 +787,25 @@ tail:
         val_t b = bindings;
         for (int i = 0; i < n; i++, b = vcdr(b)) {
             val_t pair  = vcar(b);
+            /* Issue #128: `(parameterize (1) 1)` -- a non-pair binding --
+             * previously fell straight into vcar/vcadr below and
+             * SIGSEGVed. Matches compile_parameterize's own
+             * require_min_args(binding, 2, "parameterize") check. */
+            require_binding_shape(pair, "parameterize");
             val_t param = eval(vcar(pair), env);
+            /* `(parameterize ((car)) 1)` -- an expression that evaluates
+             * to something other than an actual parameter object --
+             * previously read ->converter off whatever T_* header
+             * happened to be there instead of raising. The compiled
+             * path (compile_parameterize) never needs this check: it
+             * desugars to an ordinary call through the value as if it
+             * WERE a parameter procedure, so a non-parameter fails
+             * naturally via normal application (e.g. arity or
+             * not-a-procedure) instead of an explicit check here; this
+             * function calls as_param directly rather than going
+             * through apply, so it needs its own check to match. */
+            if (!vis_param(param))
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "parameterize: not a parameter");
             val_t val   = eval(vcadr(pair), env);
             if (!vis_false(as_param(param)->converter))
                 val = apply(as_param(param)->converter, make_pair(val, V_NIL));

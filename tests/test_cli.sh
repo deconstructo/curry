@@ -598,6 +598,20 @@ letrec_star_err=$("$CURRY" -e '(let ((f (lambda () (letrec* ((a)) 1)))) (f))' 2>
 check "letrec*: malformed binding names letrec* (not letrec) in the error" \
       "$(echo "$letrec_star_err" | grep -c 'letrec\*: ill-formed special form')" "1"
 
+# Issue #127: compile_cond/compile_case (compiler_classic.c) had the
+# identical unchecked-clause-destructure crash as the let/letrec/do
+# family above, found by independent security review of the #124/#125
+# fix -- missed entirely since it's a different form family, not a
+# variant of let. r7rs_tests.scm covers the eval.c (tree-walker) half
+# via `eval`; these need a real subprocess compile for the same reason
+# every other compiler-path check in this section does.
+check_no_segv "cond: empty clause compiles to a clean error"  '(cond ())'
+check_no_segv "cond: non-pair clause compiles to a clean error" '(cond 1)'
+check_no_segv "case: empty clause compiles to a clean error"  '(case 1 ())'
+check_no_segv "case: non-pair clause compiles to a clean error" '(case 1 1)'
+out=$("$CURRY" -e '(display (list (cond (#f 1) (#t 2)) (case 2 ((1) (quote one)) ((2) (quote two)))))')
+check "cond/case still compile and run correctly" "$out" "(2 two)"
+
 # Confirms ordinary usage of all of these still compiles and runs correctly.
 out=$("$CURRY" -e '(display (list (let ((a 1) (b 2)) (+ a b))
                                    (let* ((a 1) (b (+ a 1))) b)
