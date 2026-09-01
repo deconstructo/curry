@@ -2195,6 +2195,13 @@ SpecialForm classify_head(Compiler *c, val_t head, val_t args,
         return SF_TREE_EVAL;
     if (vis_symbol(head)) {
         val_t transformer;
+        /* A match here means Chunk::uses_local_macro (chunk.h) is now set
+         * on every chunk from c up to the one whose syntax_locals table
+         * owns the macro -- resolve_syntax_local (compiler.c) does the
+         * marking itself, since the LLVM JIT tier inlines nested lambdas
+         * into their enclosing closure's native code and every one of
+         * those enclosing chunks needs the flag, not just c->chunk. See
+         * maybe_jit_bcc (runtime.c) for why -- closes issue #114. */
         bool is_macro = resolve_syntax_local(c, head, &transformer);
         if (!is_macro && c->chunk->target_env != V_VOID) {
             val_t macro = env_lookup_or_false(c->chunk->target_env, head);

@@ -93,6 +93,28 @@ struct Binding {
     AllocaInst *slot;
     bool        is_mutable;
     bool        is_cell;   /* slot holds a GC cell address (i64), not a direct value */
+    /* Sentinel entry (slot == nullptr) bound under the loop's own name at
+     * the same scope as its loop variables, purely so ordinary scope
+     * lookup -- already correct, battle-tested shadowing logic -- can
+     * answer "does a call to this name mean the loop itself, or does some
+     * OTHER binding of the same name shadow it here" without a parallel,
+     * error-prone scope-depth bookkeeping scheme. See emit_call's named-
+     * let self-call check (issue #117) for how this is used. Every OTHER
+     * site that can dereference a Binding's slot (emit_expr's symbol
+     * reference, set!, internal define, and emit_lambda's capture-array
+     * fill -- collect_free_vars recurses into a call's operator position
+     * too, so a nested lambda merely calling the loop's own name lists it
+     * as needing capture) checks is_named_let first and throws instead:
+     * referencing a named let's own name as a value (rather than calling
+     * it) has no real slot to load, and was already unsupported before
+     * this sentinel existed -- the bytecode VM has no notion of it as a
+     * first-class value either -- but used to at least compile to
+     * something (a global lookup that raised a clean "unbound variable")
+     * rather than a null AllocaInst reaching LLVM's IR builder. Found by
+     * independent review: a null slot passed silent-but-invalid IR past
+     * verifyModule on an assertions-disabled LLVM build; an assertions-
+     * enabled one would have asserted inside LoadInst's own constructor. */
+    bool        is_named_let = false;
 };
 
 /* Tracks an active named-let loop so self-calls emit backedges instead of
@@ -150,7 +172,13 @@ struct CompileCtx {
 
     void bind(const std::string &name, AllocaInst *slot, bool mut = true, bool cell = false) {
         if (scopes.empty()) scopes.emplace_back();
-        scopes.back()[name] = Binding{slot, mut, cell};
+        scopes.back()[name] = Binding{slot, mut, cell, false};
+    }
+
+    /* See Binding::is_named_let's comment. */
+    void bind_named_let(const std::string &name) {
+        if (scopes.empty()) scopes.emplace_back();
+        scopes.back()[name] = Binding{nullptr, false, false, true};
     }
 
     AllocaInst *alloc_root(const std::string &name = "") {
@@ -331,10 +359,31 @@ static const std::unordered_map<std::string, const char *> ARITH1 = {
 
 static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
 
-    /* ---- Named-let self-call → loop backedge ---- */
+    /* ---- Named-let self-call → loop backedge ----
+     * Gated on cc.lookup(nm) resolving to the loop's OWN sentinel binding
+     * (Binding::is_named_let, bound into the loop's own scope by emit_let's
+     * named-let branch) rather than some OTHER binding of the same name.
+     * A first attempt at this fix used a blanket `!cc.lookup(nm)` check,
+     * which broke the opposite direction: a named let's own name correctly
+     * shadows an ENCLOSING binding of the same name (e.g. `(let ((loop ...))
+     * (let loop ((i 0)) ... (loop ...)))` must still self-recurse), but
+     * `cc.lookup` alone can't distinguish "found the enclosing real
+     * binding" from "found nothing" -- both looked like "not shadowed" or
+     * "shadowed" incorrectly depending on scope ordering. Consulting the
+     * sentinel instead of a bare null-check reuses the scope stack's own
+     * already-correct inner-shadows-outer resolution: a REAL binding
+     * introduced inside the loop body (deeper scope) is found first and
+     * has is_named_let == false (ordinary call, issue #117's actual
+     * repro); an enclosing same-named binding sits in a shallower scope
+     * than the loop's own sentinel, so the sentinel is still found first
+     * (correct self-call, the regression the first attempt introduced);
+     * and with nothing bound at all, lookup returns nullptr (also
+     * correctly falls through, though this can't happen for the loop's
+     * own name specifically since bind_named_let always registers it). */
     if (vis_symbol(fn_expr) && !cc.named_lets.empty()) {
         std::string nm = as_sym(fn_expr)->data;
-        for (int i = (int)cc.named_lets.size() - 1; i >= 0; --i) {
+        Binding *b = cc.lookup(nm);
+        for (int i = (int)cc.named_lets.size() - 1; b && b->is_named_let && i >= 0; --i) {
             if (cc.named_lets[i].name == nm) {
                 NamedLetCtx &nlet = cc.named_lets[i];
                 /* Evaluate all new argument values BEFORE storing (avoid
@@ -350,8 +399,23 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
         }
     }
 
-    /* ---- Direct arithmetic (skip global lookup + apply dispatch) ---- */
-    if (vis_symbol(fn_expr)) {
+    /* ---- Direct arithmetic (skip global lookup + apply dispatch) ----
+     * Gated on !cc.lookup(op_nm): without this, a hot function that
+     * locally shadows +, -, *, / etc (e.g. `(let ((+ (lambda (a b) 99)))
+     * (+ 1 2))`) had the shadow silently ignored -- this fast path matched the
+     * name directly against the builtin table with no regard for local
+     * scope, unlike the macro/unsupported-form guard following this
+     * function (added for #111) and the named-let backedge check just
+     * above (added for #117), which both check cc.lookup first. Silently
+     * wrong numeric results with no error at all once the function got
+     * hot enough to JIT-promote (issue #115), a worse failure mode than
+     * #111's, since that one at least raised a catchable error. Note
+     * emit_expr's own special-form dispatch (if/let/cond/set!/etc, above
+     * this function) does NOT check cc.lookup either, but shadowing one
+     * of those keywords is R7RS-nonconformant on the plain interpreter
+     * tier too (no tier-specific divergence) -- a separate, pre-existing
+     * question, not a JIT-only bug like this one. */
+    if (vis_symbol(fn_expr) && !cc.lookup(as_sym(fn_expr)->data)) {
         std::string op_nm = as_sym(fn_expr)->data;
 
         /* Variadic fold: (+), (*) → identity; (- x) → negate; (op a b c…) → fold */
@@ -671,8 +735,18 @@ static Value *emit_lambda(CompileCtx &cc, val_t params_val, val_t body_val) {
                                       ConstantInt::get(cc.i32_t, (int)captured.size()),
                                       "caps");
         for (int i = 0; i < (int)captured.size(); ++i) {
-            auto *cv = cc.B.CreateLoad(cc.i64_t, cc.lookup(captured[i])->slot,
-                                        captured[i]);
+            Binding *cb = cc.lookup(captured[i]);
+            /* See emit_expr's symbol-reference case for why a named let's
+             * own sentinel binding (Binding::is_named_let) must never be
+             * treated as a real, storable slot -- collect_free_vars'
+             * default case recurses into a call's operator position too,
+             * so a nested lambda merely CALLING an enclosing named let's
+             * own name (rather than being the loop body itself) can list
+             * that name as something needing capture. */
+            if (cb->is_named_let)
+                throw std::runtime_error(
+                    "JIT: a named let's own name cannot be captured by a nested lambda");
+            auto *cv = cc.B.CreateLoad(cc.i64_t, cb->slot, captured[i]);
             cc.B.CreateStore(cv, cc.B.CreateGEP(cc.i64_t, caps_ptr,
                                                   ConstantInt::get(cc.i32_t, i)));
         }
@@ -942,6 +1016,24 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
     if (vis_symbol(expr)) {
         const char *name = as_sym(expr)->data;
         if (Binding *b = cc.lookup(name)) {
+            /* A named let's own name (Binding::is_named_let) has no real
+             * slot -- it exists purely so emit_call's self-call check can
+             * ask "does this call mean the loop itself" via ordinary
+             * scope-shadowing lookup. Referencing it as a plain VALUE
+             * (not calling it) was already unsupported before this
+             * sentinel existed -- the bytecode VM has no notion of the
+             * loop name as a first-class value either, since curry
+             * compiles named-let purely as a backedge construct, never
+             * allocating a real closure for the loop name -- but it used
+             * to at least compile to SOMETHING (a global-variable lookup
+             * that then raised a clean "unbound variable"). Bailing out
+             * of JIT compilation entirely here, rather than dereferencing
+             * a null slot into invalid IR, preserves that same clean
+             * failure mode instead of relying on verifyModule to catch a
+             * malformed load. */
+            if (b->is_named_let)
+                throw std::runtime_error(
+                    "JIT: a named let's own name cannot be used as a value");
             if (b->is_cell) {
                 Value *cell_addr = cc.B.CreateLoad(cc.i64_t, b->slot,
                                                    std::string(name) + "_cell");
@@ -1147,6 +1239,12 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             return emit_global_define(cc, S(nm.c_str()), val_v);
         } else {
             if (Binding *b = cc.lookup(nm)) {
+                /* See emit_expr's symbol-reference case for why a named
+                 * let's own sentinel binding (Binding::is_named_let) must
+                 * never be treated as a real, storable slot. */
+                if (b->is_named_let)
+                    throw std::runtime_error(
+                        "JIT: a named let's own name cannot be redefined");
                 if (b->is_cell) {
                     Value *cell_addr = cc.B.CreateLoad(cc.i64_t, b->slot);
                     Value *cell_ptr  = cc.B.CreateIntToPtr(cell_addr, cc.ptr_t);
@@ -1193,12 +1291,36 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             auto *exit_bb    = BasicBlock::Create(cc.llvm_ctx, "nlet_exit",   cc.fn);
             auto *result_slot = cc.alloc_root("nlet_result");
 
+            /* Compute every init expression BEFORE the loop's own scope
+             * (and its is_named_let sentinel, below) exists -- a named
+             * let's inits are evaluated in the ENCLOSING scope, same as
+             * an ordinary `let`, so one legitimately referencing an
+             * outer binding that happens to share the loop's own name
+             * (e.g. `(let ((loop f)) (let loop ((i (loop 5))) ...))`)
+             * must still resolve to that outer binding, not to a
+             * not-yet-real sentinel for the loop being defined. Emitting
+             * these after push_scope/bind_named_let (an earlier version
+             * of this fix did) let such an init resolve to the sentinel
+             * instead -- a Binding with slot == nullptr -- corrupting
+             * the generated IR (caught only by verifyModule/an
+             * assertions-disabled LLVM; would segfault inside
+             * LoadInst's constructor on an assertions-enabled build).
+             * Found by independent review. */
+            SmallVector<Value *, 8> init_vals;
+            for (int i = 0; i < (int)init_exprs.size(); ++i)
+                init_vals.push_back(emit_expr(cc, init_exprs[i]));
+
             cc.push_scope();
+            /* Bind the loop's own name into its own scope as a sentinel
+             * (see Binding::is_named_let) -- this makes ordinary,
+             * already-correct scope-lookup shadowing rules the single
+             * source of truth for emit_call's self-call check below,
+             * instead of a second, parallel bookkeeping scheme. */
+            cc.bind_named_let(loop_nm);
             std::vector<AllocaInst *> var_slots;
             for (int i = 0; i < (int)var_names.size(); ++i) {
-                Value *iv   = emit_expr(cc, init_exprs[i]);
-                auto  *slot = cc.alloc_root(var_names[i]);
-                cc.B.CreateStore(iv, slot);
+                auto *slot = cc.alloc_root(var_names[i]);
+                cc.B.CreateStore(init_vals[i], slot);
                 cc.bind(var_names[i], slot);
                 var_slots.push_back(slot);
             }
@@ -1289,6 +1411,12 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
         const char *vn   = as_sym(as_pair(rst)->car)->data;
         Value     *val_v = emit_expr(cc, as_pair(as_pair(rst)->cdr)->car);
         if (Binding *b = cc.lookup(vn)) {
+            /* See emit_expr's symbol-reference case for why a named let's
+             * own sentinel binding (Binding::is_named_let) must never be
+             * treated as a real, storable slot. */
+            if (b->is_named_let)
+                throw std::runtime_error(
+                    "JIT: a named let's own name cannot be set!");
             if (b->is_cell) {
                 Value *cell_addr = cc.B.CreateLoad(cc.i64_t, b->slot);
                 Value *cell_ptr  = cc.B.CreateIntToPtr(cell_addr, cc.ptr_t);
@@ -1339,20 +1467,20 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             throw std::runtime_error(
                 std::string("JIT: unsupported special form '") + name + "'");
 
-        /* GLOBAL_ENV-only lookup is a known, NOT fully closed gap (see
-         * issue #111's follow-up discussion): a macro introduced by a
+        /* GLOBAL_ENV-only lookup here is fine: a macro introduced by a
          * let-syntax/letrec-syntax that lexically encloses this closure
          * -- e.g. (let-syntax ((m ...)) (lambda (n) (m n))) -- has no
          * GLOBAL_ENV binding, and the closure's own src_lambda is just
          * the inner (lambda (n) (m n)); the enclosing let-syntax form
          * itself is never part of that captured AST, so it never trips
-         * the "let-syntax" entry in UNSUPPORTED_FORMS above either. A
-         * correct fix needs the bytecode compiler to record, per-chunk,
-         * whether compilation ever resolved a name via a lexical
-         * syntax_locals scope (compiler_internal.h), and maybe_jit_bcc
-         * (runtime.c) to refuse promotion for such chunks -- deeper than
-         * this fix's scope; tracked separately rather than attempted
-         * here. */
+         * the "let-syntax" entry in UNSUPPORTED_FORMS above either. That
+         * gap (issue #114) is closed at the bytecode-compiler level
+         * instead, upstream of codegen ever running: resolve_syntax_local
+         * (compiler.c) marks Chunk::uses_local_macro (chunk.h) on every
+         * chunk from a local-macro reference up to the one owning it, and
+         * maybe_jit_bcc (runtime.c) refuses JIT promotion for such a
+         * chunk before curry_llvm_jit_compile is ever called -- this
+         * function never sees a let-syntax-local macro call at all. */
         val_t *slot = env_lookup_slot(GLOBAL_ENV, S(name));
         if (slot && vis_syntax(*slot))
             throw std::runtime_error(

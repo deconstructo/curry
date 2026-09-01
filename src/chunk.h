@@ -128,6 +128,31 @@ typedef struct {
      * must be resolved before Track 2 relies on .scc caching for
      * define-library bodies. */
     val_t  target_env;
+
+    /* Set by resolve_syntax_local (compiler.c) whenever compiling this
+     * chunk's body -- or a lambda nested textually inside it, arbitrarily
+     * many levels deep -- resolves a macro use via a let-syntax/letrec-
+     * syntax-local binding, as opposed to one bound by top-level
+     * define-syntax (visible in GLOBAL_ENV, and already safely detected
+     * there by the LLVM JIT's own codegen.cpp guard). A let-syntax-local
+     * macro's binding is invisible outside the lexical form that
+     * introduced it, so it has no GLOBAL_ENV entry for that guard to
+     * find -- and the enclosing let-syntax form itself is never part of
+     * a nested lambda's own src_lambda (just above; the let-syntax
+     * wrapper is evaluated once at define time to produce the closure,
+     * then discarded), so codegen.cpp's unsupported-forms name list
+     * can't catch it by string-matching the AST either. Marked on every
+     * enclosing chunk up to the one owning the macro, not just the
+     * innermost one actually referencing it, because codegen.cpp's
+     * emit_lambda compiles a nested lambda literal INLINE into its
+     * enclosing closure's own native code rather than through that
+     * nested lambda's independent maybe_jit_bcc gate -- an unmarked
+     * outer chunk would still get JIT-promoted and inline-compile
+     * straight through, missing the correctly-set inner flag entirely.
+     * maybe_jit_bcc (runtime.c) checks this flag and permanently
+     * declines JIT promotion for such a chunk, the same way it already
+     * does for target_env above -- see issue #114. */
+    bool   uses_local_macro;
 } Chunk;
 
 /* Allocate a fresh empty chunk */

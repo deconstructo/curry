@@ -419,6 +419,18 @@ void maybe_jit_bcc(BcClosure *cl) {
      * bodies no longer tree-walked); JIT promotion on top of that is a
      * further tier this specific case simply doesn't get yet. */
     if (cl->chunk->target_env != V_VOID) return;
+    /* A let-syntax/letrec-syntax-local macro use has no GLOBAL_ENV binding
+     * for codegen.cpp's own macro guard to find, and the enclosing
+     * let-syntax form itself is never part of this chunk's own src_lambda
+     * (it's evaluated once at define time to produce the closure, then
+     * discarded) -- so codegen.cpp can silently compile a call to such a
+     * macro's name as an ordinary procedure call with no way to catch it
+     * from the AST alone. classify_head (compiler_classic.c) sets this
+     * flag whenever compiling this chunk resolved a name via
+     * resolve_syntax_local; bailing out here, same as target_env just
+     * above, is the only place with the compile-time information needed
+     * to catch it. See issue #114. */
+    if (cl->chunk->uses_local_macro) return;
     if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
     /* Skip JIT for self-referencing closures (named-let loops that capture
      * themselves as an upvalue).  The bytecode tail-call reuse gives O(1)
