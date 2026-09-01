@@ -658,8 +658,17 @@ for i in $(seq 0 20000); do
     names="$names p$i"
 done
 big_letstar="(display (let* ($bindings) (+$names)))"
+# Written to a real script file and run as a positional argument, NOT
+# passed via -e: this form is ~300KB of source text, comfortably past
+# Linux's default single-argument/whole-argv length limits (ARG_MAX) --
+# confirmed the hard way when CI's ubuntu runners reported exit 126
+# ("argument list too long", bash's own report for an execve() E2BIG)
+# on the very first version of this test that used -e. A script file
+# has no such limit.
+BIG_LETSTAR_SCM="$TMPDIR_CLI/big_letstar.scm"
+printf '%s\n' "$big_letstar" > "$BIG_LETSTAR_SCM"
 set +e
-"$CURRY" -e "$big_letstar" >/dev/null 2>&1
+"$CURRY" "$BIG_LETSTAR_SCM" >/dev/null 2>&1
 big_letstar_code=$?
 set -e
 check "let* with 20001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
