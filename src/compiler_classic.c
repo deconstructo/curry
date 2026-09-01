@@ -656,6 +656,14 @@ static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
+    /* Validates every (name transformer-expr) binding before either loop
+     * below destructures it -- see ir_lower_let's identical comment
+     * (issue #124, found incidentally while fixing the let/do family):
+     * (let-syntax ((m)) 1) previously SIGSEGV'd here on a binding with
+     * no transformer expression. */
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        require_min_args(vcar(b), 2, "let-syntax");
+
     begin_scope(c);
 
     val_t saved_locals = sr_get_current_local_macros();
@@ -851,6 +859,16 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         val_t b = bindings;
         while (vis_pair(b)) { argc++; b = vcdr(b); }
 
+        /* Validates every binding before either loop below destructures
+         * it -- see ir_lower_let's identical comment (issue #124). Not
+         * reachable from ordinary compilation today (classify_head's
+         * S_LET dispatch always routes through ir_lower's own IR path,
+         * which has the analogous fix; this function only runs via the
+         * test-only g_force_classic_compile switch), but fixed anyway
+         * since it's the same shape and the same one-line idiom. */
+        for (val_t b2 = bindings; vis_pair(b2); b2 = vcdr(b2))
+            require_min_args(vcar(b2), 2, "let");
+
         /* Build forward-order params list */
         val_t params = V_NIL;
         b = bindings;
@@ -917,6 +935,12 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
        The lambda creates a fresh frame, so slot 0 = first init arg
        regardless of what else is on the caller's stack. */
     {
+        /* Validates every binding before either loop below destructures
+         * it -- see this function's own named-let branch above (issue
+         * #124); same non-reachability caveat applies. */
+        for (val_t b2 = bindings; vis_pair(b2); b2 = vcdr(b2))
+            require_min_args(vcar(b2), 2, "let");
+
         /* Build params list in forward order */
         val_t params = V_NIL;
         int argc = 0;
@@ -951,6 +975,11 @@ static void compile_let_star(Compiler *c, val_t args, bool tail, int line) {
         return;
     }
     val_t binding  = vcar(bindings);
+    /* See compile_let's identical comment (issue #124); same
+     * non-reachability caveat. Only the first binding needs checking
+     * here -- each further one gets checked the next time this
+     * function recurses on the desugared inner let* form below. */
+    require_min_args(binding, 2, "let*");
     val_t name     = vcar(binding);
     val_t init     = vcar(vcdr(binding));
     val_t rest     = vcdr(bindings);
@@ -989,6 +1018,11 @@ static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
     int nb = 0;
     val_t bcount = bindings;
     while (vis_pair(bcount)) { nb++; bcount = vcdr(bcount); }
+
+    /* See compile_let's identical comment (issue #124); same
+     * non-reachability caveat. */
+    for (val_t b0 = bindings; vis_pair(b0); b0 = vcdr(b0))
+        require_min_args(vcar(b0), 2, "letrec");
 
     /* Pre-declare all locals with void placeholders */
     val_t b = bindings;
@@ -1363,6 +1397,16 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     val_t test_expr = vcar(term);
     val_t result    = vcdr(term);
 
+    /* Validates every (var init [step]) spec before either loop below
+     * destructures it -- see ir_lower_let's identical comment (issue
+     * #124): `do` has no IR lowering at all (SF_DO routes straight
+     * here), so this is the one live compilation path for it, unlike
+     * let / let* / letrec's own analogous fix in ir_lower.c. (let ((f
+     * (lambda () (do (1) (#t) 1)))) 1) previously SIGSEGV'd at the
+     * first loop below on a spec with no init. */
+    for (val_t vs2 = var_specs; vis_pair(vs2); vs2 = vcdr(vs2))
+        require_min_args(vcar(vs2), 2, "do");
+
     Compiler lc;
     init_compiler(&lc, c, "<do>");
     lc.chunk->arity = 0;
@@ -1546,6 +1590,16 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t S_COND2 = sym_intern_cstr("cond");
     val_t S_ELSE2 = sym_intern_cstr("else");
     val_t gk      = sym_intern_cstr("%guard-k");
+
+    /* Validates every clause is itself a non-empty pair before either
+     * loop below destructures it -- see ir_lower_let's identical comment
+     * (issue #124, found incidentally while fixing the let/do family):
+     * (guard (e ()) 1) previously SIGSEGV'd here on an empty `()`
+     * clause (guard's own clauses share cond's own clause shape, but
+     * unlike compile_cond -- which validates each clause -- this
+     * function never did). */
+    for (val_t cl0 = clauses; vis_pair(cl0); cl0 = vcdr(cl0))
+        require_min_args(vcar(cl0), 1, "guard");
 
     /* Count clauses and check for else */
     bool has_else = false;

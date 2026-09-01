@@ -17,15 +17,6 @@
  * Each eval() call site can install a handler with scm_with_exception_handler().
  */
 
-/* pthread_getattr_np (used below to query the real per-thread stack size
- * on Linux) is a glibc extension gated behind _GNU_SOURCE. Harmless on
- * macOS, where the __APPLE__ branch uses pthread_get_stacksize_np
- * instead and never calls it. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-#include <pthread.h>
-
 #include "eval.h"
 #include "runtime_internal.h"
 #include "sx_rules.h"
@@ -148,73 +139,37 @@ static val_t eval_call_cc(val_t proc) {
 
 /* ---- Evaluator ---- */
 
-/* Per-thread cached stack base (Boehm's "bottom of stack" == the highest
- * address, for a downward-growing stack), lazily captured on first use.
- * Used to detect an approaching real C-stack overflow from unbounded
- * non-tail recursion through eval() -- goto-tail iterations below don't
- * grow the C stack and never reach this check at all; only genuine
- * recursive C-level re-entry into eval() (a non-tail sub-expression,
- * e.g. deep (+ 1 (deep-sum (- n 1)))) does. Without this, that recursion
- * SIGSEGVs the whole process once the OS stack is exhausted -- unlike
- * the bytecode VM's own compiled path, which has an explicit, catchable
- * frame-count guard (vm.c, "call stack overflow (max N frames)"). This
- * gives the tree-walker the same kind of catchable guard instead of a
- * hard crash. Reproduced: a define-library-defined function doing
- * non-tail recursion to depth ~1,000,000 previously segfaulted
- * immediately (define-library bodies are tree-walked, not compiled --
- * see modules.c's define_library_clause). */
-static CURRY_THREAD_LOCAL void   *eval_stack_base  = NULL;
-static CURRY_THREAD_LOCAL size_t  eval_stack_limit = 0;
-
-/* Real per-thread stack size, queried once and cached alongside
- * eval_stack_base. A fixed byte budget here (e.g. "assume ~8MB, leave
- * 1MB headroom") was found by independent security review to be unsafe:
- * curry's own parallel map/reduce/for-each worker pool (src/workpool.c)
- * spawns threads with a NULL pthread_attr_t, i.e. the platform default
- * stack size -- 512KB on macOS -- so a hardcoded 7MB threshold never
- * fires there and the real stack still exhausts and crashes first,
- * exactly as before this guard existed. Querying the actual size makes
- * the guard correct on any thread, whatever its real stack turns out to
- * be, instead of assuming every thread matches curry's own actor
- * convention (actors.c does explicitly request 8MB; workpool.c and an
- * externally-lowered main-thread ulimit do not). */
-static size_t eval_query_thread_stack_size(void) {
-#if defined(__APPLE__)
-    return pthread_get_stacksize_np(pthread_self());
-#else
-    size_t size = 8u * 1024u * 1024u; /* conservative fallback if the query itself fails */
-    pthread_attr_t attr;
-    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
-        void *addr;
-        if (pthread_attr_getstack(&attr, &addr, &size) != 0)
-            size = 8u * 1024u * 1024u;
-        pthread_attr_destroy(&attr);
-    }
-    return size;
-#endif
+/* A `(var init)`-shaped let / let* / letrec / do binding, or one of do's own
+ * `(var init step)` specs, was destructured via unchecked vcar/vcdr
+ * chains throughout this file with no check that the binding itself is
+ * even a pair -- (eval '(let ((a)) 1) ...) SIGSEGV'd the whole process
+ * instead of raising a catchable error (issue #124, found via
+ * independent review of the analogous compiler-side bug; the compiler
+ * already has an equivalent helper, require_min_args, but that lives in
+ * compiler_internal.h, scoped to the bytecode compiler's own files --
+ * this is the tree-walker's separate copy of the same tiny check,
+ * matching its exact behavior and error message). */
+static void require_binding_shape(val_t binding, const char *form_name) {
+    if (!vis_pair(binding) || !vis_pair(vcdr(binding)))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: ill-formed special form", form_name);
 }
 
 val_t eval(val_t expr, val_t env) {
-    if (__builtin_expect(!eval_stack_base, 0)) {
-        struct GC_stack_base sb;
-        GC_get_stack_base(&sb);
-        eval_stack_base = sb.mem_base;
-        size_t stack_size = eval_query_thread_stack_size();
-        /* Reserve 1/8 of the real stack (min 64KB) for whatever C stack
-         * the raise/longjmp unwind path itself still needs once
-         * triggered -- scales down with small stacks (e.g. workpool's
-         * 512KB) instead of a fixed byte count that could exceed the
-         * whole stack on a small thread. */
-        size_t margin = stack_size / 8;
-        if (margin < 64u * 1024u) margin = 64u * 1024u;
-        eval_stack_limit = stack_size > margin ? stack_size - margin : stack_size / 2;
-    }
-    {
-        char stack_probe;
-        size_t used = (size_t)((uintptr_t)eval_stack_base - (uintptr_t)&stack_probe);
-        if (__builtin_expect(used > eval_stack_limit, 0))
-            scm_raise_code(EC_STACK_OVERFLOW, "eval: call stack overflow");
-    }
+    /* Detects an approaching real C-stack overflow from unbounded
+     * non-tail recursion through eval() -- goto-tail iterations below
+     * don't grow the C stack and never reach this check at all; only
+     * genuine recursive C-level re-entry into eval() (a non-tail
+     * sub-expression, e.g. deep (+ 1 (deep-sum (- n 1)))) does. Without
+     * this, that recursion SIGSEGVs the whole process once the OS stack
+     * is exhausted -- unlike the bytecode VM's own compiled path, which
+     * has an explicit, catchable frame-count guard (vm.c, "call stack
+     * overflow (max N frames)"). Reproduced: a define-library-defined
+     * function doing non-tail recursion to depth ~1,000,000 previously
+     * segfaulted immediately (define-library bodies are tree-walked,
+     * not compiled -- see modules.c's define_library_clause). Shared
+     * with ir_emit.c's own unbounded recursion (issue #125) -- see
+     * check_c_stack_depth's own comment in runtime.c. */
+    check_c_stack_depth("eval");
     /* Shadow stack: register the two persistent locals so a moving GC can
      * update them after nursery evacuation.  op/rest are declared here so
      * they are in scope for GC_AUTOFRAME; goto tail re-assigns them each
@@ -360,6 +315,7 @@ tail:
             val_t params = V_NIL, inits_list = V_NIL;
             val_t b = bindings;
             while (vis_pair(b)) {
+                require_binding_shape(vcar(b), "let");
                 params      = make_pair(vcar(vcar(b)), params);
                 inits_list  = make_pair(vcadr(vcar(b)), inits_list);
                 b = vcdr(b);
@@ -398,6 +354,7 @@ tail:
         val_t b = bindings;
         while (vis_pair(b)) {
             val_t bind = vcar(b);
+            require_binding_shape(bind, "let");
             val_t v    = eval(vcadr(bind), env);
             env_define(new_env, vcar(bind), v);
             b = vcdr(b);
@@ -413,6 +370,7 @@ tail:
         val_t cur_env = env_extend(env);
         while (vis_pair(bindings)) {
             val_t bind = vcar(bindings);
+            require_binding_shape(bind, "let*");
             env_define(cur_env, vcar(bind), eval(vcadr(bind), cur_env));
             bindings = vcdr(bindings);
         }
@@ -426,7 +384,11 @@ tail:
         val_t new_env = env_extend(env);
         /* Pre-define all vars as undefined */
         val_t b = bindings;
-        while (vis_pair(b)) { env_define(new_env, vcar(vcar(b)), V_UNDEF); b = vcdr(b); }
+        while (vis_pair(b)) {
+            require_binding_shape(vcar(b), op == S_LETREC ? "letrec" : "letrec*");
+            env_define(new_env, vcar(vcar(b)), V_UNDEF);
+            b = vcdr(b);
+        }
         /* Evaluate and set */
         b = bindings;
         while (vis_pair(b)) {
@@ -588,6 +550,7 @@ tail:
         val_t vs = var_specs;
         while (vis_pair(vs)) {
             val_t spec = vcar(vs);
+            require_binding_shape(spec, "do");
             env_define(do_env, vcar(spec), eval(vcadr(spec), env));
             vs = vcdr(vs);
         }
@@ -667,6 +630,7 @@ tail:
         val_t new_env = env_extend(env);
         while (vis_pair(bindings)) {
             val_t bind = vcar(bindings);
+            require_binding_shape(bind, "let-syntax");
             val_t name = vcar(bind);
             val_t xfm  = eval(vcadr(bind), op == S_LET_SYNTAX ? env : new_env);
             Syntax *syn = CURRY_NEW(Syntax);
@@ -851,6 +815,15 @@ tail:
         val_t cs = clauses;
         while (vis_pair(cs)) {
             val_t clause = vcar(cs);
+            /* A guard clause shares cond's own shape, including a valid
+             * bare-test `(test)` form with no body -- unlike every other
+             * binding this file validates, require_binding_shape's "cdr
+             * must also be a pair" is too strict here, so this only
+             * checks that the clause itself is a pair (issue #124: an
+             * empty clause, (), previously SIGSEGV'd on the vcar(clause)
+             * just below). */
+            if (!vis_pair(clause))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
             val_t test   = vcar(clause);
             val_t cbody  = vcdr(clause);
             cs = vcdr(cs);

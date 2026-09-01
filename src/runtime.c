@@ -11,6 +11,15 @@
  * exclusively-internal helpers, and eval_call_cc.
  */
 
+/* pthread_getattr_np (used by check_c_stack_depth below to query the real
+ * per-thread stack size on Linux) is a glibc extension gated behind
+ * _GNU_SOURCE. Harmless on macOS, where the __APPLE__ branch uses
+ * pthread_get_stacksize_np instead and never calls it. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <pthread.h>
+
 #include "eval.h"
 #include "runtime_internal.h"
 #include "vm.h"
@@ -377,6 +386,80 @@ void jit_depth_pop(void)  { g_jit_call_depth--; }
  * see ExnHandler.saved_jit_depth in eval.h. */
 int  jit_depth_save(void)        { return g_jit_call_depth; }
 void jit_depth_restore(int saved) { g_jit_call_depth = saved; }
+
+/* ---- Shared C-stack-depth guard (issue #125) ----
+ *
+ * Originally eval()'s own private mechanism (eval.c) to detect an
+ * approaching real C-stack overflow from unbounded non-tail recursion
+ * through the tree-walker -- goto-tail iterations don't grow the C
+ * stack and never reach this check at all; only genuine recursive
+ * C-level re-entry does. Without it, that recursion SIGSEGVs the whole
+ * process once the OS stack is exhausted, unlike the bytecode VM's own
+ * compiled path, which has an explicit, catchable frame-count guard
+ * (vm.c, "call stack overflow (max N frames)").
+ *
+ * Extracted here, and made a single shared instance rather than one
+ * private copy per subsystem, when ir_emit.c's own C-level recursion
+ * (ir_emit <-> ir_emit_inline_call, unbounded by a flat let* / letrec*
+ * chain of local bindings -- see issue #125) turned out to have the
+ * identical gap: eval() and ir_emit() run on the SAME thread and
+ * consume the SAME physical C stack, so there is exactly one real
+ * "how close to the top" answer regardless of which caller asks --
+ * duplicating the thread-local base/limit state per subsystem would
+ * just be two answers to the same question, computed twice. */
+static CURRY_THREAD_LOCAL void   *c_stack_base  = NULL;
+static CURRY_THREAD_LOCAL size_t  c_stack_limit = 0;
+
+/* Real per-thread stack size, queried once and cached alongside
+ * c_stack_base. A fixed byte budget here (e.g. "assume ~8MB, leave 1MB
+ * headroom") was found by independent security review to be unsafe:
+ * curry's own parallel map/reduce/for-each worker pool (src/workpool.c)
+ * spawns threads with a NULL pthread_attr_t, i.e. the platform default
+ * stack size -- 512KB on macOS -- so a hardcoded 7MB threshold never
+ * fires there and the real stack still exhausts and crashes first,
+ * exactly as before this guard existed. Querying the actual size makes
+ * the guard correct on any thread, whatever its real stack turns out to
+ * be, instead of assuming every thread matches curry's own actor
+ * convention (actors.c does explicitly request 8MB; workpool.c and an
+ * externally-lowered main-thread ulimit do not). */
+static size_t query_thread_stack_size(void) {
+#if defined(__APPLE__)
+    return pthread_get_stacksize_np(pthread_self());
+#else
+    size_t size = 8u * 1024u * 1024u; /* conservative fallback if the query itself fails */
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+        void *addr;
+        if (pthread_attr_getstack(&attr, &addr, &size) != 0)
+            size = 8u * 1024u * 1024u;
+        pthread_attr_destroy(&attr);
+    }
+    return size;
+#endif
+}
+
+/* `context` names the caller for the raised error message (e.g. "eval",
+ * "compile") -- purely diagnostic, no behavioral difference. */
+void check_c_stack_depth(const char *context) {
+    if (__builtin_expect(!c_stack_base, 0)) {
+        struct GC_stack_base sb;
+        GC_get_stack_base(&sb);
+        c_stack_base = sb.mem_base;
+        size_t stack_size = query_thread_stack_size();
+        /* Reserve 1/8 of the real stack (min 64KB) for whatever C stack
+         * the raise/longjmp unwind path itself still needs once
+         * triggered -- scales down with small stacks (e.g. workpool's
+         * 512KB) instead of a fixed byte count that could exceed the
+         * whole stack on a small thread. */
+        size_t margin = stack_size / 8;
+        if (margin < 64u * 1024u) margin = 64u * 1024u;
+        c_stack_limit = stack_size > margin ? stack_size - margin : stack_size / 2;
+    }
+    char stack_probe;
+    size_t used = (size_t)((uintptr_t)c_stack_base - (uintptr_t)&stack_probe);
+    if (__builtin_expect(used > c_stack_limit, 0))
+        scm_raise_code(EC_STACK_OVERFLOW, "%s: call stack overflow", context);
+}
 
 /* ---- Arithmetic-fast-path deopt (issue #118) ----
  *
