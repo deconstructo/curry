@@ -810,16 +810,37 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
     /* Named let: (let loop ((x v) ...) body)
        Semantics: letrec ((loop (lambda (x ...) body))) (loop v ...)
 
-       Compiled as a zero-arg outer wrapper to isolate the loop's frame:
+       Compiled as an outer wrapper (arity = argc, one param per loop
+       variable) to isolate the loop's frame:
+         parent (c): compile each init value; OP_CLOSURE outer-wrapper;
+                     OP_CALL/OP_TAIL_CALL argc
          outer-wrapper:
-           slot 0 = loop (void initially, then the closure)
+           params 0..argc-1 = the loop variables (ordinary arguments,
+             already-computed values received from the parent's call --
+             ISSUE #120: an earlier version of this instead had outer
+             itself both hold loop_name's slot AND compile the init
+             expressions, at zero arity, computing/receiving them
+             internally rather than as call arguments -- which meant
+             loop_name was already a valid local (add_local'd before
+             compiling the inits) *while compiling* each init
+             expression, and by the time the inits actually RAN (after
+             OP_STORE_LOCAL had already written the real closure into
+             that slot), any init referencing loop_name saw the fully-
+             constructed closure instead of R7RS's mandated "loop_name
+             is not yet bound while evaluating its own inits, which run
+             in the ENCLOSING scope". Moving init compilation to run
+             in `c` (this function's own parameter, the true enclosing
+             scope) instead of `outer` fixes this outright, mirroring
+             exactly how the plain (non-named) let branch a few lines
+             below already computes its own args in `c` before calling
+             into a freshly compiled lambda.
+           slot argc = loop_name (void initially, then the closure)
            push void placeholder
-           push OP_CLOSURE for loop (captures slot 0 as upvalue)
-           OP_STORE_LOCAL 0        ; slot 0 = closure
-           OP_LOAD_LOCAL 0         ; push closure as callee
-           compile each init value  ; push args
-           OP_TAIL_CALL N          ; jump into the loop
-         parent: OP_CLOSURE outer-wrapper; OP_CALL/OP_TAIL_CALL 0 */
+           push OP_CLOSURE for loop (captures slot argc as upvalue)
+           OP_STORE_LOCAL argc      ; slot argc = closure
+           OP_LOAD_LOCAL argc       ; push closure as callee
+           OP_LOAD_LOCAL 0..argc-1  ; forward outer's own params as args
+           OP_TAIL_CALL argc        ; jump into the loop */
     if (vis_symbol(bindings)) {
         val_t loop_name = bindings;
         require_min_args(body, 1, "let");  /* named-let's own bindings list */
@@ -837,36 +858,39 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
-        /* Zero-arg outer wrapper */
+        /* Outer wrapper, now with arity = argc instead of 0 */
         Compiler outer;
         init_compiler(&outer, c, as_sym(loop_name)->data);
-        outer.chunk->arity = 0;
+        /* Slots 0..argc-1 = the loop variables, matching an ordinary
+         * function's own param-binding convention exactly (same helper
+         * compile_lambda itself uses). */
+        outer.chunk->arity = compile_params(&outer, fwd);
 
-        /* Slot 0 = loop name (void placeholder) */
+        /* One more slot (argc) = loop_name's own self-reference
+         * placeholder, captured as an upvalue by the inner recursive
+         * lambda below -- unchanged from before, just moved from slot 0
+         * to slot argc now that the params occupy 0..argc-1. */
         add_local(&outer, loop_name);
         mark_initialised(&outer);
         emit(&outer, OP_VOID, line);
 
-        /* Inner loop lambda; loop_name resolves as upvalue from outer's slot 0.
-         * Arm the self-tail-call thread-local so a tail-position call to
-         * loop_name within this exact body compiles to OP_SELF_TAIL_CALL
-         * instead of the ordinary upvalue-load-then-call sequence -- see
-         * Compiler::self_tail_name's comment and compile_call. The
-         * set!-scan runs over the RAW (uncompiled) body once, up front,
-         * so every self-tail-call site compiled anywhere in this body
-         * consistently sees the same answer regardless of where in the
-         * body a set! to loop_name might textually appear relative to
-         * a given tail call. */
+        /* Inner loop lambda; loop_name resolves as upvalue from outer's
+         * slot argc. Arm the self-tail-call thread-local so a tail-
+         * position call to loop_name within this exact body compiles to
+         * OP_SELF_TAIL_CALL instead of the ordinary upvalue-load-then-
+         * call sequence -- see Compiler::self_tail_name's comment and
+         * compile_call. The set!-scan runs over the RAW (uncompiled)
+         * body once, up front, so every self-tail-call site compiled
+         * anywhere in this body consistently sees the same answer
+         * regardless of where in the body a set! to loop_name might
+         * textually appear relative to a given tail call. */
         g_compile_self_tail_name    = loop_name;
         g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
         compile_lambda(&outer, fwd, body, as_sym(loop_name)->data, line);
-        emit_ab(&outer, OP_STORE_LOCAL, 0, line);  /* store closure → slot 0 */
-        emit_ab(&outer, OP_LOAD_LOCAL,  0, line);  /* callee */
-        b = bindings;
-        while (vis_pair(b)) {
-            compile(&outer, vcar(vcdr(vcar(b))), false, line);
-            b = vcdr(b);
-        }
+        emit_ab(&outer, OP_STORE_LOCAL, (uint8_t)argc, line);  /* store closure → slot argc */
+        emit_ab(&outer, OP_LOAD_LOCAL,  (uint8_t)argc, line);  /* callee */
+        for (int i = 0; i < argc; i++)
+            emit_ab(&outer, OP_LOAD_LOCAL, (uint8_t)i, line);  /* forward outer's own params as args */
         emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, line);
         Chunk *och = end_compiler(&outer);
 
@@ -876,7 +900,16 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
             chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, line);
             chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   line);
         }
-        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
+        /* Compile each init value in c's OWN scope -- the true
+         * enclosing environment R7RS mandates -- rather than outer's,
+         * pushed after the callee exactly like the plain-let branch
+         * below does for its own lambda's call args. See issue #120. */
+        b = bindings;
+        while (vis_pair(b)) {
+            compile(c, vcar(vcdr(vcar(b))), false, line);
+            b = vcdr(b);
+        }
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc, line);
         return;
     }
 

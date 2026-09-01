@@ -810,17 +810,31 @@ void ir_emit(Compiler *c, IRNode *n) {
          * loop_name would alias whatever real local already lives in
          * slot 0, and the OP_STORE_LOCAL below would then overwrite that
          * unrelated local's actual runtime value. Splicing needs room for
-         * loop_name (1), the reloaded callee copy (1), and each binding
-         * (argc) simultaneously live at once; below that, fall back to
-         * building a real, separate closure for the wrapper exactly the
-         * way this case always did before this landing -- correctness
-         * over the optimization when the frame is already nearly full,
-         * matching the let-branch's own fallback philosophy exactly. */
+         * loop_name (1), the reloaded callee copy (1), each binding's
+         * ALREADY-computed init value (argc, held in a pending slot until
+         * the reload below re-pushes it -- see issue #120's own fix,
+         * which introduced this second `argc`-sized reservation to
+         * correctly compile each init in the caller's own enclosing
+         * scope), and each binding's RELOADED copy (argc again)
+         * simultaneously live at once: 2*argc + 2, not argc + 2. Below
+         * that, fall back to building a real, separate closure for the
+         * wrapper exactly the way this case always did before this
+         * landing -- correctness over the optimization when the frame is
+         * already nearly full, matching the let-branch's own fallback
+         * philosophy exactly. (Independent security review, #120's own
+         * follow-up: reserve_pending_slot's own bounds check keeps this
+         * currently inert -- nothing is compiled between the two
+         * reservation loops and release_pending_slots for anything to
+         * observe a wrong local_count through -- but the guard's
+         * arithmetic should still describe the peak it actually gates,
+         * not the pre-#120 shape's smaller one, since any future change
+         * compiling something in between would turn a latent
+         * miscounting into a live one.) */
         val_t loop_name0 = n->as.named_let.loop_name;
         val_t bindings0  = n->as.named_let.bindings;
         int   argc0 = 0;
         for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) argc0++;
-        if (c->local_count + 2 + argc0 >= MAX_LOCALS) {
+        if (c->local_count + 2 * argc0 + 2 >= MAX_LOCALS) {
             val_t body0 = n->as.named_let.body;
             val_t params0 = V_NIL;
             for (val_t b = bindings0; vis_pair(b); b = vcdr(b))
@@ -828,9 +842,16 @@ void ir_emit(Compiler *c, IRNode *n) {
             val_t fwd0 = V_NIL;
             while (vis_pair(params0)) { fwd0 = scm_cons(vcar(params0), fwd0); params0 = vcdr(params0); }
 
+            /* Outer wrapper, arity = argc0 instead of 0: issue #120,
+             * same fix and same reasoning as compile_let's own outer-
+             * wrapper (compiler_classic.c) -- inits must be compiled by
+             * `c` (the true enclosing scope), not by `outer` itself,
+             * so a reference to loop_name0 within an init expression
+             * can never resolve to this named-let's own about-to-be-
+             * created self-reference. */
             Compiler outer;
             init_compiler(&outer, c, as_sym(loop_name0)->data);
-            outer.chunk->arity = 0;
+            outer.chunk->arity = compile_params(&outer, fwd0);
             add_local(&outer, loop_name0);
             mark_initialised(&outer);
             emit(&outer, OP_VOID, n->line);
@@ -839,18 +860,10 @@ void ir_emit(Compiler *c, IRNode *n) {
             IRNode *loop_lambda0 = ir_lower_lambda(&outer, fwd0, body0,
                                                     as_sym(loop_name0)->data, n->line);
             ir_emit(&outer, loop_lambda0);
-            emit_ab(&outer, OP_STORE_LOCAL, 0, n->line);
-            emit_ab(&outer, OP_LOAD_LOCAL,  0, n->line);
-            {
-                int osaved = outer.local_count;
-                reserve_pending_slot(&outer);
-                for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) {
-                    IRNode *arg = ir_lower(&outer, vcar(vcdr(vcar(b))), false, n->line);
-                    ir_emit(&outer, arg);
-                    reserve_pending_slot(&outer);
-                }
-                release_pending_slots(&outer, osaved);
-            }
+            emit_ab(&outer, OP_STORE_LOCAL, (uint8_t)argc0, n->line);
+            emit_ab(&outer, OP_LOAD_LOCAL,  (uint8_t)argc0, n->line);
+            for (int i = 0; i < argc0; i++)
+                emit_ab(&outer, OP_LOAD_LOCAL, (uint8_t)i, n->line);
             emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc0, n->line);
             Chunk *och = end_compiler(&outer);
 
@@ -860,7 +873,20 @@ void ir_emit(Compiler *c, IRNode *n) {
                 chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
                 chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
             }
-            emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, 0, n->line);
+            /* Compile each init value in c's OWN scope, pushed after
+             * the callee -- the true enclosing environment R7RS
+             * mandates. See issue #120. */
+            {
+                int osaved = c->local_count;
+                reserve_pending_slot(c);  /* the callee just pushed via OP_CLOSURE above */
+                for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) {
+                    IRNode *arg = ir_lower(c, vcar(vcdr(vcar(b))), false, n->line);
+                    ir_emit(c, arg);
+                    reserve_pending_slot(c);
+                }
+                release_pending_slots(c, osaved);
+            }
+            emit_ab(c, n->tail ? OP_TAIL_CALL : OP_CALL, (uint8_t)argc0, n->line);
             return;
         }
 
@@ -902,7 +928,29 @@ void ir_emit(Compiler *c, IRNode *n) {
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
-        int saved     = c->local_count;
+        int saved = c->local_count;
+
+        /* Compile each init value FIRST, into temporary pending slots,
+         * BEFORE loop_name exists anywhere in c's own locals table --
+         * issue #120: the previous shape add_local'd loop_name (below)
+         * BEFORE compiling the inits, so a reference to loop_name within
+         * an init expression incorrectly resolved to this named-let's
+         * own about-to-be-created self-reference (and, worse, by the
+         * time the inits actually RAN at runtime -- after OP_STORE_LOCAL
+         * had already written the real closure into that slot -- such a
+         * reference saw the fully-constructed closure) instead of R7RS's
+         * mandated "loop_name is not yet bound while evaluating its own
+         * inits, which run in the ENCLOSING scope". Each value lands at
+         * a known physical position (arg_base + i) that nothing above
+         * this point could yet alias, exactly like any other pending
+         * call argument. */
+        int arg_base = c->local_count;
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
+            IRNode *arg = ir_lower(c, vcar(vcdr(vcar(b))), false, n->line);
+            ir_emit(c, arg);
+            reserve_pending_slot(c);
+        }
+
         int loop_slot = add_local(c, loop_name);
         mark_initialised(c);
         emit(c, OP_VOID, n->line);
@@ -919,37 +967,56 @@ void ir_emit(Compiler *c, IRNode *n) {
         emit_ab(c, OP_STORE_LOCAL, (uint8_t)loop_slot, n->line);  /* store closure */
         emit_ab(c, OP_LOAD_LOCAL,  (uint8_t)loop_slot, n->line);  /* callee */
         reserve_pending_slot(c);  /* the callee just loaded, a pending value too */
-        for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
-            IRNode *arg = ir_lower(c, vcar(vcdr(vcar(b))), false, n->line);
-            ir_emit(c, arg);
+        /* Re-push a fresh copy of each already-computed init value from
+         * its arg_base+i position -- these have no discoverable NAME
+         * (reserve_pending_slot's placeholders never match a real
+         * lookup), but OP_LOAD_LOCAL addresses a physical slot by plain
+         * numeric index, same trick compile_let's own outer-wrapper fix
+         * uses to forward its own params. This assembles the calling
+         * convention's required contiguous [callee, arg1, ..., argN]
+         * layout even though the args were computed earlier, at lower
+         * physical positions, than the callee. */
+        for (int i = 0; i < argc; i++) {
+            emit_ab(c, OP_LOAD_LOCAL, (uint8_t)(arg_base + i), n->line);
             reserve_pending_slot(c);
         }
         release_pending_slots(c, saved);
-        /* The call above consumes exactly its own callee+args (the
-         * reloaded copy at OP_LOAD_LOCAL and the argc binding values) --
-         * NOT loop_slot's own underlying stack position, which is a
-         * SEPARATE physical slot the reload merely copied from (found by
-         * independent testing: a named-let nested as a non-first,
-         * non-tail argument of an enclosing call -- e.g.
-         * `(+ 1 (let loop ((i 0)) i))` -- corrupted the outer call's own
-         * slot numbering, since the enclosing call's own reserve_pending_
-         * slot bookkeeping assumed this expression's fresh, uncommitted
-         * result would land at physical index `saved` the way every other
-         * expression's result does, but the call above actually leaves it
-         * one slot higher, at `saved + 1`, with the stale, now-redundant
-         * closure copy still sitting at index `saved` since nothing ever
-         * consumes THAT slot). In the OP_TAIL_CALL case this doesn't
-         * matter -- by definition nothing else compiles into `c` after a
-         * true tail position, so the stale slot is never observed -- but
-         * the OP_CALL case needs an explicit OP_SLIDE(1) to reclaim it,
-         * exactly the same operation (and reason) end_scope already uses
-         * to remove a scope's own dead locals out from under its result:
-         * move the fresh result down over the one stale slot below it. */
+        /* Exactly like the previous shape, the call above consumes only
+         * its own reloaded callee+args copies -- NOT the argc original
+         * arg-value slots or loop_slot's own underlying stack position,
+         * all of which are SEPARATE physical slots the reloads merely
+         * copied from. Where the previous shape left exactly ONE stale
+         * slot below the call's own footprint (the original closure
+         * copy), this leaves argc+1 (the original arg values AND the
+         * original closure) -- so the OP_CALL case's cleanup needs
+         * OP_SLIDE(argc+1) here, not the fixed OP_SLIDE(1) that was
+         * correct only when there was nothing computed ahead of the
+         * closure itself. In the OP_TAIL_CALL case this doesn't matter,
+         * as before: nothing else compiles into `c` after a true tail
+         * position, so stale slots below are never observed. */
         if (n->tail) {
             emit_ab(c, OP_TAIL_CALL, (uint8_t)argc, n->line);
         } else {
             emit_ab(c, OP_CALL, (uint8_t)argc, n->line);
-            emit_ab(c, OP_SLIDE, 1, n->line);
+            /* loop_slot (an open upvalue captured by the inner recursive
+             * lambda above) is one of the stale slots OP_SLIDE is about
+             * to discard from the runtime stack -- but discarding a
+             * stack slot is not the same as closing the upvalue that
+             * still points at it. Without this, an escaped closure
+             * holding the loop's own name as an upvalue keeps pointing
+             * at that now-stale, soon-to-be-reused stack address: a
+             * LATER local in this same enclosing frame ends up sharing
+             * storage with it, so reading/writing through the escaped
+             * closure's upvalue silently aliases an unrelated variable
+             * instead. Pre-existing gap (this fast path never closed
+             * loop_slot on this exit path), but widening OP_SLIDE's
+             * operand from a fixed 1 to argc+1 (above) turned it from
+             * "clobber the named-let's own about-to-be-discarded result"
+             * into "clobber whichever enclosing local happens to sit
+             * argc+1 slots up, chosen by how many loop variables the
+             * source declares" -- independent security review. */
+            emit_ab(c, OP_CLOSE_UP, (uint8_t)arg_base, n->line);
+            emit_ab(c, OP_SLIDE, (uint8_t)(argc + 1), n->line);
         }
         return;
     }
