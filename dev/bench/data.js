@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788239743939,
+  "lastUpdate": 1788242458996,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10970,6 +10970,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.079,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5def5a7e341bfe84586235630e0e9fcab1fc4ef6",
+          "message": "Merge pull request #126 from deconstructo/fix/named-let-init-scoping\n\nfix(compiler): named let's own name is not visible during its own init expressions",
+          "timestamp": "2026-09-01T16:00:13+10:00",
+          "tree_id": "76d0f5cade81d07bf8a88dad54c4b09d9a76e065",
+          "url": "https://github.com/deconstructo/curry/commit/5def5a7e341bfe84586235630e0e9fcab1fc4ef6"
+        },
+        "date": 1788242457792,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.374,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.641,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.823,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.076,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 114.701,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 260.722,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.017,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 74.689,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 53.972,
             "unit": "ms"
           }
         ]
