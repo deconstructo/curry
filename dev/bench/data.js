@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788220099640,
+  "lastUpdate": 1788221601064,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10625,6 +10625,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 35.039,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "275c01540fb64fc74e50c9f28f67d9d00548157f",
+          "message": "Merge pull request #112 from deconstructo/fix/llvm-hasterminator-portability\n\nfix(llvm): drop hasTerminator() dependency, breaks build on LLVM 15",
+          "timestamp": "2026-09-01T10:12:46+10:00",
+          "tree_id": "75f7f61afede39f268d03cf61574a2666d9fca90",
+          "url": "https://github.com/deconstructo/curry/commit/275c01540fb64fc74e50c9f28f67d9d00548157f"
+        },
+        "date": 1788221600198,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.372,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.523,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.798,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.173,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 101.787,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 243.17,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 61.963,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 69.782,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 53.89,
             "unit": "ms"
           }
         ]
