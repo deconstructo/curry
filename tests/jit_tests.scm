@@ -181,6 +181,77 @@
 (check "jit-call-depth does not leak across parameterize"
        (jit-call-depth) 0)
 
+;;; 15. Macro invocations inside a hot function must not be miscompiled ────────
+;;; Regression coverage for issue #111: maybe_jit_bcc JIT-compiles a chunk's
+;;; raw, un-macro-expanded src_lambda, and codegen.cpp's emit_expr only
+;;; understands ~18 core forms -- anything else (a macro call; a special
+;;; form the JIT tier doesn't implement) used to fall through to the
+;;; generic "procedure call" path and get compiled as an ordinary call to
+;;; whatever the head symbol happened to resolve to, silently producing
+;;; wrong results ("apply: not a procedure", "unbound variable") once the
+;;; function got hot enough to JIT-promote, instead of declining promotion
+;;; and staying on the bytecode interpreter.
+(define-syntax jit-macro-inc
+  (syntax-rules () ((_ x) (+ x 1))))
+(define (jit-macro-user n) (jit-macro-inc n))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: hot function using a user macro stays correct"
+           (jit-macro-user i) (+ i 1))
+    (loop (+ i 1))))
+
+;;; The exact case that surfaced #111: (scheme case-lambda)'s own expansion
+;;; leaves its internal %case-lambda-help helper call unexpanded in
+;;; src_lambda, and case-lambda itself is a special form this JIT tier has
+;;; never implemented.
+(import (scheme case-lambda))
+(define jit-cl-count
+  (case-lambda
+    ((n) (jit-cl-count n 0))
+    ((n acc) (if (= n 0) acc (jit-cl-count (- n 1) (+ acc 1))))))
+(check "JIT bailout: case-lambda self-recursive dispatch, 1000 iterations"
+       (jit-cl-count 1000) 1000)
+
+;;; A handful of the other unimplemented special forms named in issue #111,
+;;; each driven past JIT_THRESHOLD (50 calls) to force auto-JIT promotion.
+(define (jit-qq-user n) `(a ,n b))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: quasiquote stays correct when hot"
+           (jit-qq-user i) (list 'a i 'b))
+    (loop (+ i 1))))
+
+(define (jit-lv-user n)
+  (let-values (((q r) (floor/ n 3))) (+ q r)))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: let-values stays correct when hot"
+           (jit-lv-user i) (+ (quotient i 3) (remainder i 3)))
+    (loop (+ i 1))))
+
+;;; codegen.cpp didn't call lang_translate before matching an operator's
+;;; name against its own special-form dispatch, so a supported form spelled
+;;; in Akkadian never matched any branch and fell through to the same
+;;; miscompile path as an unrecognized form -- found by independent review
+;;; of the #111 fix. šumma is Akkadian for "if".
+(define (jit-akk-user n) (šumma (> n 0) (+ n 1) 0))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: Akkadian special-form synonym stays correct when hot"
+           (jit-akk-user i) (if (> i 0) (+ i 1) 0))
+    (loop (+ i 1))))
+
+;;; defined? (SF_DEFINED_P) was missing from the unsupported-forms list --
+;;; also found by independent review -- and has no GLOBAL_ENV binding of
+;;; its own, so it fell through the same way.
+(define jit-dp-target 1)
+(define (jit-dp-user n) (if (defined? jit-dp-target) (+ n 1) 0))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT bailout: defined? stays correct when hot"
+           (jit-dp-user i) (+ i 1))
+    (loop (+ i 1))))
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
