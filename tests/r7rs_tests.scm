@@ -449,6 +449,75 @@
 (check "named let" (let loop ((n 5) (acc 1))
                      (if (= n 0) acc (loop (- n 1) (* acc n)))) 120)
 
+;;; Regression coverage for issue #120: a named let's own init expressions
+;;; were compiled/evaluated in a scope where the loop's own name was
+;;; ALREADY a valid local (bound to a void placeholder, later the real
+;;; closure) instead of R7RS's mandated "inits run in the ENCLOSING
+;;; scope, before the loop's own binding exists at all". Two independent
+;;; bytecode-compilation paths had this bug (compiler_classic.c's
+;;; compile_let and the Tier 2.1 IR pipeline's own separate ir_emit.c
+;;; IR_NAMED_LET case, including ITS OWN separate MAX_LOCALS-overflow
+;;; fallback that builds a real, standalone closure the way compile_let
+;;; always did) -- all three fixed identically: compile each init value
+;;; via the true enclosing compiler, never the loop's own.
+(check "named let: own name is not visible during its own init exprs"
+       (guard (e (#t 'unbound)) (let loop ((i (procedure? loop))) i))
+       'unbound)
+(check "named let: init expr correctly sees an outer binding of the same name"
+       (let ((count (lambda (x) (* x 10))))
+         (let count ((i (count 5))) i))
+       50)
+;;; Same check again, but with enough loop variables (MAX_LOCALS is 256)
+;;; to force ir_emit.c's separate MAX_LOCALS-overflow "build a real,
+;;; standalone closure" fallback path, which has its own from-scratch
+;;; copy of the same logic (and, before the fix, the same bug) as the
+;;; common "splice the loop directly into the caller's frame" fast path
+;;; exercised by the checks above. Deliberately NOT built via `eval`/
+;;; `load` at runtime -- both route through eval.c's tree-walking
+;;; evaluator (prim_eval calls eval() directly; scm_load's own read-loop
+;;; does too), a third, wholly separate named-let implementation from
+;;; the two bytecode-compilation paths (compiler_classic.c, ir_emit.c)
+;;; this test exists to cover, so a form constructed and handed to
+;;; either at runtime would silently test nothing relevant. Must appear
+;;; as literal top-level source text in this script file, compiled the
+;;; same way every other top-level form in it is (main.c's own
+;;; compiler_compile + vm_run), machine-generated once rather than
+;;; hand-typed.
+(check "named let, enough loop vars to force the overflow fallback path: own name not visible"
+       (guard (e (#t 'unbound))
+         (let loop ((v0 0) (v1 0) (v2 0) (v3 0) (v4 0) (v5 0) (v6 0) (v7 0) (v8 0) (v9 0) (v10 0) (v11 0) (v12 0) (v13 0) (v14 0) (v15 0) (v16 0) (v17 0) (v18 0) (v19 0) (v20 0) (v21 0) (v22 0) (v23 0) (v24 0) (v25 0) (v26 0) (v27 0) (v28 0) (v29 0) (v30 0) (v31 0) (v32 0) (v33 0) (v34 0) (v35 0) (v36 0) (v37 0) (v38 0) (v39 0) (v40 0) (v41 0) (v42 0) (v43 0) (v44 0) (v45 0) (v46 0) (v47 0) (v48 0) (v49 0) (v50 0) (v51 0) (v52 0) (v53 0) (v54 0) (v55 0) (v56 0) (v57 0) (v58 0) (v59 0) (v60 0) (v61 0) (v62 0) (v63 0) (v64 0) (v65 0) (v66 0) (v67 0) (v68 0) (v69 0) (v70 0) (v71 0) (v72 0) (v73 0) (v74 0) (v75 0) (v76 0) (v77 0) (v78 0) (v79 0) (v80 0) (v81 0) (v82 0) (v83 0) (v84 0) (v85 0) (v86 0) (v87 0) (v88 0) (v89 0) (v90 0) (v91 0) (v92 0) (v93 0) (v94 0) (v95 0) (v96 0) (v97 0) (v98 0) (v99 0) (v100 0) (v101 0) (v102 0) (v103 0) (v104 0) (v105 0) (v106 0) (v107 0) (v108 0) (v109 0) (v110 0) (v111 0) (v112 0) (v113 0) (v114 0) (v115 0) (v116 0) (v117 0) (v118 0) (v119 0) (v120 0) (v121 0) (v122 0) (v123 0) (v124 0) (v125 0) (v126 0) (v127 0) (v128 0) (v129 0) (v130 0) (v131 0) (v132 0) (v133 0) (v134 0) (v135 0) (v136 0) (v137 0) (v138 0) (v139 0) (v140 0) (v141 0) (v142 0) (v143 0) (v144 0) (v145 0) (v146 0) (v147 0) (v148 0) (v149 0) (v150 0) (v151 0) (v152 0) (v153 0) (v154 0) (v155 0) (v156 0) (v157 0) (v158 0) (v159 0) (v160 0) (v161 0) (v162 0) (v163 0) (v164 0) (v165 0) (v166 0) (v167 0) (v168 0) (v169 0) (v170 0) (v171 0) (v172 0) (v173 0) (v174 0) (v175 0) (v176 0) (v177 0) (v178 0) (v179 0) (v180 0) (v181 0) (v182 0) (v183 0) (v184 0) (v185 0) (v186 0) (v187 0) (v188 0) (v189 0) (v190 0) (v191 0) (v192 0) (v193 0) (v194 0) (v195 0) (v196 0) (v197 0) (v198 0) (v199 0) (v200 0) (v201 0) (v202 0) (v203 0) (v204 0) (v205 0) (v206 0) (v207 0) (v208 0) (v209 0) (v210 0) (v211 0) (v212 0) (v213 0) (v214 0) (v215 0) (v216 0) (v217 0) (v218 0) (v219 0) (v220 0) (v221 0) (v222 0) (v223 0) (v224 0) (v225 0) (v226 0) (v227 0) (v228 0) (v229 0) (v230 0) (v231 0) (v232 0) (v233 0) (v234 0) (v235 0) (v236 0) (v237 0) (v238 0) (v239 0) (v240 0) (v241 0) (v242 0) (v243 0) (v244 0) (v245 0) (v246 0) (v247 0) (v248 0) (v249 0) (v250 0) (v251 0) (v252 0) (v253 (procedure? loop))) v253))
+       'unbound)
+
+;;; Regression coverage for issue #123, found during independent security
+;;; review of the #120 fix above: the IR pipeline's "splice the named let
+;;; directly into the caller's own frame" fast path captures the loop's
+;;; own name as an OPEN upvalue (for the inner recursive lambda's self-
+;;; calls), but its non-tail-call exit discarded that stack slot via
+;;; OP_SLIDE without ever closing the upvalue first. An escaped closure
+;;; holding that upvalue kept pointing at the now-stale, soon-to-be-
+;;; reused stack address, silently aliasing whatever LATER local ended up
+;;; there instead -- readable and (via set!) WRITABLE, from inside a
+;;; closure that already escaped the named let entirely. The #120 fix
+;;; widened OP_SLIDE's own operand from a fixed 1 to argc+1, which is
+;;; what turned this from "clobber the named let's own about-to-be-
+;;; discarded result" into "clobber whichever enclosing local happens to
+;;; sit argc+1 slots up, chosen by how many loop variables the source
+;;; declares" -- i.e. made the aliasing target attacker-influenceable
+;;; rather than a fixed, always-safe-to-discard value. Fixed by emitting
+;;; OP_CLOSE_UP before the OP_SLIDE.
+(check "named let: an escaped closure over the loop's own name does not alias a later local"
+       (let ()
+         (define esc #f)
+         (define (f)
+           (let* ((x (let loop ((i 0) (j 1))
+                       (set! esc (lambda (v) (set! loop v)))
+                       'done))
+                  (a 111) (b 222) (c 333) (d 444))
+             (esc 'clobbered)
+             (list x a b c d)))
+         (f))
+       (list 'done 111 222 333 444))
+
 ;;; Tail calls
 (define (count-down n)
   (if (= n 0) 'done (count-down (- n 1))))
