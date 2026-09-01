@@ -594,6 +594,52 @@
 ;;; subprocess compile regardless, for the same reason #124's do/
 ;;; let-syntax/guard checks are in test_cli.sh rather than here.
 
+;;; Additional eval.c-only gaps found by independent code review of the
+;;; #124 fix above: the compiler paths already rejected these malformed
+;;; forms cleanly, but eval.c's own tree-walker still SIGSEGVed on them
+;;; (require_binding_shape only validates an individual BINDING's shape,
+;;; not that the enclosing form has enough top-level pieces to destructure
+;;; in the first place -- e.g. `(let* ((a 1)))` has a well-formed binding
+;;; but no body, and the old code unconditionally called vcdr on that nil
+;;; body while checking for more forms to evaluate).
+(check "let*: missing body doesn't crash (returns void)"
+       (jit124-malformed-raises? (lambda () (eval '(let* ((a 1))) (interaction-environment)) #f))
+       #f)
+(check "letrec: missing body doesn't crash (returns void)"
+       (jit124-malformed-raises? (lambda () (eval '(letrec ((a 1))) (interaction-environment)) #f))
+       #f)
+(check "named let: missing bindings/body raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let loop) (interaction-environment))))
+       #t)
+(check "do: missing test clause raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(do ((i 0 (+ i 1)))) (interaction-environment))))
+       #t)
+(check "do: non-pair test clause raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(do ((i 0)) ()) (interaction-environment))))
+       #t)
+(check "do: dotted step-spec doesn't dereference the improper tail"
+       ;; (i 0 . 5) -- vcddr(spec) is 5, a non-pair. Matches
+       ;; compiler_classic.c's own do step-expr check (vis_pair(vcdr(vcdr
+       ;; (spec)))): treated as "no step expression" rather than crashing.
+       ;; This makes i never advance, hence the outer call/cc escape
+       ;; instead of actually looping.
+       (call-with-current-continuation
+        (lambda (k)
+          (guard (e (#t (k 'raised)))
+            (eval '(do ((i 0 . 5) (n 0 (+ n 1)))
+                       ((or (= i 1) (> n 2)) 'done))
+                  (interaction-environment)))))
+       'done)
+;; letrec* naming its own error correctly (ir_lower_letrec, shared by
+;; letrec/letrec*, was found by independent code review to hardcode
+;; "letrec" in the raised message even for a letrec* input) can't be
+;; tested from inside this file at all: `(letrec* ((a)) 1)` at the top
+;; level is a COMPILE-time error for the whole enclosing top-level form,
+;; including any guard meant to catch it -- the same eval-vs-compile
+;; distinction #124/#125's other compiler-path checks are subject to
+;; (see the comment above). Tested via a real subprocess in test_cli.sh
+;; instead, grepping stderr for the exact form name.
+
 ;;; Tail calls
 (define (count-down n)
   (if (= n 0) 'done (count-down (- n 1))))

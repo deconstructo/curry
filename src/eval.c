@@ -307,6 +307,8 @@ tail:
         /* Named let: (let name ((var init)...) body...) */
         if (vis_symbol(bindings)) {
             val_t loop_name = bindings;
+            if (!vis_pair(body))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "let: ill-formed special form");
             bindings = vcar(body);
             body     = vcdr(body);
 
@@ -375,6 +377,7 @@ tail:
             bindings = vcdr(bindings);
         }
         env = cur_env;
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
@@ -398,6 +401,7 @@ tail:
             b = vcdr(b);
         }
         env = new_env;
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
@@ -541,9 +545,13 @@ tail:
 
     if (op == S_DO) {
         /* (do ((var init step)...) (test expr...) body...) */
+        if (!vis_pair(rest) || !vis_pair(vcdr(rest)))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "do: ill-formed special form");
         val_t var_specs = vcar(rest);
         val_t term      = vcadr(rest);
         val_t body      = vcddr(rest);
+        if (!vis_pair(term))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "do: ill-formed special form");
 
         val_t do_env = env_extend(env);
         /* Initialize */
@@ -573,8 +581,14 @@ tail:
             vs = var_specs;
             while (vis_pair(vs)) {
                 val_t spec = vcar(vs);
-                val_t step = vis_nil(vcddr(spec)) ? env_lookup(do_env, vcar(spec))
-                                                   : eval(vcaddr(spec), do_env);
+                /* !vis_pair (not just vis_nil) so an improper dotted tail
+                 * like (i 0 . 5) -- found via independent security review
+                 * to crash vcaddr on the non-pair tail -- is also treated
+                 * as "no step expression" rather than dereferenced,
+                 * mirroring compiler_classic.c's own do step-expr check
+                 * (vis_pair(vcdr(vcdr(spec)))). */
+                val_t step = !vis_pair(vcddr(spec)) ? env_lookup(do_env, vcar(spec))
+                                                     : eval(vcaddr(spec), do_env);
                 new_vals = make_pair(make_pair(vcar(spec), step), new_vals);
                 vs = vcdr(vs);
             }

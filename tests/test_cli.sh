@@ -584,6 +584,20 @@ check_no_segv "do: malformed var-spec compiles to a clean error"          '(do (
 check_no_segv "let-syntax: malformed binding compiles to a clean error"   '(let-syntax ((m)) 1)'
 check_no_segv "letrec-syntax: malformed binding compiles to a clean error" '(letrec-syntax ((m)) 1)'
 check_no_segv "guard: empty clause compiles to a clean error"             '(guard (e ()) 1)'
+
+# ir_lower_letrec is shared by S_LETREC and S_LETREC_STAR; independent
+# code review found it hardcoded "letrec" (not "letrec*") in the raised
+# error message even for a letrec*-specific input -- cosmetic, but a
+# wrong form name in an error message sent a developer looking at the
+# wrong compiler code path. Checked here (not r7rs_tests.scm) because
+# the malformed binding is a COMPILE-time error for the whole enclosing
+# top-level form -- no runtime `guard` inside the same script could ever
+# see it, so this needs the real subprocess-stderr text, same as every
+# other compiler-path check in this section.
+letrec_star_err=$("$CURRY" -e '(let ((f (lambda () (letrec* ((a)) 1)))) (f))' 2>&1 || true)
+check "letrec*: malformed binding names letrec* (not letrec) in the error" \
+      "$(echo "$letrec_star_err" | grep -c 'letrec\*: ill-formed special form')" "1"
+
 # Confirms ordinary usage of all of these still compiles and runs correctly.
 out=$("$CURRY" -e '(display (list (let ((a 1) (b 2)) (+ a b))
                                    (let* ((a 1) (b (+ a 1))) b)

@@ -422,9 +422,23 @@ static CURRY_THREAD_LOCAL size_t  c_stack_limit = 0;
  * be, instead of assuming every thread matches curry's own actor
  * convention (actors.c does explicitly request 8MB; workpool.c and an
  * externally-lowered main-thread ulimit do not). */
+/* Clamp to a plausible ceiling: independent security review found that
+ * `ulimit -s unlimited` (a real, common setting -- e.g. the default for
+ * services on several Linux distros) makes pthread_getattr_np/
+ * pthread_attr_getstack report a synthetic ~93TB stack size on Linux
+ * (observed on Ubuntu 24.04 arm64), which would push c_stack_limit out
+ * past any depth of recursion actually reachable before a real SIGSEGV
+ * -- silently disabling this guard exactly on the systems where an
+ * unbounded stack makes a runaway recursion most dangerous to run
+ * unguarded. 512MB is comfortably above every real thread-stack size
+ * curry itself ever requests (actors: 8MB, workpool: platform default,
+ * typically 512KB-8MB) while still being a hard ceiling no legitimate
+ * query should exceed. */
+#define STACK_SIZE_CEILING (512u * 1024u * 1024u)
+
 static size_t query_thread_stack_size(void) {
 #if defined(__APPLE__)
-    return pthread_get_stacksize_np(pthread_self());
+    size_t size = pthread_get_stacksize_np(pthread_self());
 #else
     size_t size = 8u * 1024u * 1024u; /* conservative fallback if the query itself fails */
     pthread_attr_t attr;
@@ -434,8 +448,9 @@ static size_t query_thread_stack_size(void) {
             size = 8u * 1024u * 1024u;
         pthread_attr_destroy(&attr);
     }
-    return size;
 #endif
+    if (size > STACK_SIZE_CEILING) size = STACK_SIZE_CEILING;
+    return size;
 }
 
 /* `context` names the caller for the raised error message (e.g. "eval",
@@ -443,8 +458,18 @@ static size_t query_thread_stack_size(void) {
 void check_c_stack_depth(const char *context) {
     if (__builtin_expect(!c_stack_base, 0)) {
         struct GC_stack_base sb;
-        GC_get_stack_base(&sb);
-        c_stack_base = sb.mem_base;
+        /* GC_get_stack_base can fail (GC_UNIMPLEMENTED) on a platform
+         * Boehm GC doesn't support this query on -- independent security
+         * review found the unchecked case left sb.mem_base indeterminate,
+         * which corrupts the "used" computation below into either a huge
+         * bogus value (spurious stack-overflow raised on every single
+         * eval/compile on this thread from then on, since c_stack_base is
+         * cached) or silently disables the guard. Fall back to this
+         * frame's own address as the base on failure: an underestimate of
+         * the true base (stack grows down from something higher), so
+         * "used" is an overestimate -- the guard fires somewhat earlier
+         * than ideal instead of not at all, the safe direction to err. */
+        c_stack_base = (GC_get_stack_base(&sb) == GC_SUCCESS) ? sb.mem_base : (void *)&sb;
         size_t stack_size = query_thread_stack_size();
         /* Reserve 1/8 of the real stack (min 64KB) for whatever C stack
          * the raise/longjmp unwind path itself still needs once

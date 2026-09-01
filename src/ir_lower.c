@@ -921,13 +921,17 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
  * letrec and letrec* today, so this produces identical observable
  * behavior through already-verified machinery instead of a parallel
  * bespoke implementation. */
-static IRNode *ir_lower_letrec(Compiler *c, val_t args, bool tail, int line) {
+static IRNode *ir_lower_letrec(Compiler *c, val_t args, bool tail, int line, val_t head) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
+    const char *form_name = (head == S_LETREC_STAR) ? "letrec*" : "letrec";
 
-    /* See ir_lower_let's identical comment (issue #124). */
+    /* See ir_lower_let's identical comment (issue #124). form_name
+     * distinguishes letrec/letrec* in the raised error -- previously
+     * hardcoded to "letrec" even for a malformed letrec* binding, found
+     * by independent code review. */
     for (val_t b = bindings; vis_pair(b); b = vcdr(b))
-        require_min_args(vcar(b), 2, "letrec");
+        require_min_args(vcar(b), 2, form_name);
 
     /* Build (define name init) forms in reverse, then prepend each (in
      * that reverse order) onto body -- restores original binding order
@@ -1074,7 +1078,7 @@ IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     }
     if (head == S_LETREC || head == S_LETREC_STAR) {
         require_min_args(args, 1, head == S_LETREC ? "letrec" : "letrec*");
-        return ir_lower_letrec(c, args, tail, line);
+        return ir_lower_letrec(c, args, tail, line, head);
     }
     /* Both `(define sym expr)` and `(define (f params...) body...)`
      * lambda-sugar are natively lowered (the latter via IR_LAMBDA, now
