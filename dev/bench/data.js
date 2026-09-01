@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788225864313,
+  "lastUpdate": 1788226247643,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10763,6 +10763,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 56.087,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9119c0fe480022ecb3c2f6668a1027314f727008",
+          "message": "Merge pull request #113 from deconstructo/ci/add-llvm-job\n\nci: add a BUILD_LLVM=ON job so the JIT backend gets any CI coverage at all",
+          "timestamp": "2026-09-01T11:30:01+10:00",
+          "tree_id": "4928284db6f0efca2c1a1a58ba257494a5eeb713",
+          "url": "https://github.com/deconstructo/curry/commit/9119c0fe480022ecb3c2f6668a1027314f727008"
+        },
+        "date": 1788226246708,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.962,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.073,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.184,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.822,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 133.191,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 288.03,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.795,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.01,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 70.961,
             "unit": "ms"
           }
         ]
