@@ -54,3 +54,63 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)
+
+  build-and-test-llvm:
+    # Separate job (not folded into build-and-test's matrix) so the default
+    # BUILD_LLVM=OFF matrix isn't doubled in cost -- this exists specifically
+    # to give the LLVM JIT backend (src/llvm/*.cpp, dormant unless
+    # -DBUILD_LLVM=ON) any CI coverage at all. It previously had none: issue
+    # #111 (the JIT silently miscompiling macro calls/unimplemented special
+    # forms) and the hasTerminator()-vs-LLVM-15 build break it was found
+    # alongside (#106 fixed it for one LLVM version, PR #112 fixed the
+    # LLVM-15 regression that same fix introduced) both went undetected by
+    # CI for exactly this reason. Debug-only, one build_type, since the
+    # point is catching JIT-tier regressions, not duplicating the full
+    # os x build_type matrix above.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgc-dev libgmp-dev cmake build-essential pkg-config \
+            libssl-dev libsqlite3-dev libcurl4-openssl-dev \
+            libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
+            redis-server mosquitto llvm-18-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install bdw-gc gmp cmake pkg-config \
+            openssl sqlite libgit2 libpng jpeg-turbo plplot \
+            redis mosquitto llvm
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_LLVM=ON \
+            -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_LLVM=ON \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"
+
+      - name: Build
+        run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)
