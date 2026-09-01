@@ -40,6 +40,13 @@ extern "C" {
 #include "../builtins.h"
 #include "../gc.h"
 #include "../lang_registry.h"
+/* Declared directly rather than pulling in the much larger eval.h (its
+ * actual home, runtime.c) -- matches how vm.c forward-declares
+ * maybe_jit_bcc locally instead of a full-header include. See eval.h's
+ * own comment and runtime.c's definition for the full design (issue
+ * #118): once true, permanently, ARITH2/ARITH1 below must never be
+ * consulted again for any future compilation. */
+bool jit_arith_tainted(void);
 }
 
 #include <llvm/IR/IRBuilder.h>
@@ -414,8 +421,24 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
      * this function) does NOT check cc.lookup either, but shadowing one
      * of those keywords is R7RS-nonconformant on the plain interpreter
      * tier too (no tier-specific divergence) -- a separate, pre-existing
-     * question, not a JIT-only bug like this one. */
-    if (vis_symbol(fn_expr) && !cc.lookup(as_sym(fn_expr)->data)) {
+     * question, not a JIT-only bug like this one.
+     *
+     * Also gated on !jit_arith_tainted() (issue #118): a hot function's
+     * fast-pathed arithmetic still silently ignored a GLOBAL redefinition
+     * of +, -, *, / etc (e.g. (define (+ a b) 99) at top level, after some
+     * OTHER function using + was already JIT-compiled) -- cc.lookup only
+     * ever consults this codegen's own local scope stack, never
+     * GLOBAL_ENV. jit_arith_tainted() is a global, permanent, one-way
+     * flag set the instant any watched arithmetic name is ever globally
+     * redefined (env.c hooks env_define/env_set); once true, this
+     * function -- for every future compilation, not just ones touching
+     * the specific redefined name -- must fall through to the generic
+     * call path below instead of consulting ARITH2/ARITH1 at all.
+     * apply_arr/vm.c's OP_CALL-family fast dispatch (runtime.c) checks
+     * the same flag before ever invoking an ALREADY-compiled closure's
+     * native code, which is what actually deoptimizes a closure whose
+     * baked-in fast path predates the taint. */
+    if (vis_symbol(fn_expr) && !cc.lookup(as_sym(fn_expr)->data) && !jit_arith_tainted()) {
         std::string op_nm = as_sym(fn_expr)->data;
 
         /* Variadic fold: (+), (*) → identity; (- x) → negate; (op a b c…) → fold */

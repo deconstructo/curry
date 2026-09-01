@@ -726,6 +726,17 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(TARGET_ENV);
             uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
+            /* Compiled top-level set! on a bytecode-VM-compiled chunk goes
+             * straight through this opcode -- gc_wb_slot below, never
+             * env_set (env.c) -- so it must also hook the arithmetic-
+             * redefinition taint check (issue #118) directly here.
+             * env_define's OP_DEF_GLOBAL counterpart already routes
+             * through env_define itself and needs no separate hook.
+             * TARGET_ENV == GLOBAL_ENV mirrors env_set's own check: a
+             * set! against some other root frame (a define-library body)
+             * isn't a real global-arithmetic redefinition. */
+            if (TARGET_ENV == GLOBAL_ENV)
+                jit_maybe_taint_global_arith(CONSTS[ci], val);
             if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
                                  cache[ci].version == root_ver, 1)) {
                 gc_wb_slot(cache[ci].slot, val);
@@ -1068,7 +1079,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
-                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
@@ -1125,7 +1136,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
                 /* Tiered JIT: hot-swap to native code once compiled. */
-                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
@@ -1194,7 +1205,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * unlike callee identity (statically proven), jit_val is NOT
              * statically known and must still be checked every
              * iteration. */
-            if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+            if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                 && curry_profiling_level == 0 && !vm_debug_active) {
                 vm_check_arity(cl, argc2);
                 JitClosure *jc = as_jitclos(cl->jit_val);
@@ -1259,7 +1270,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
-                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);
@@ -1318,7 +1329,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
             if (vis_bcclosure(callee)) {
                 BcClosure *cl = as_bcclosure(callee);
-                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+                if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
                     JitClosure *jc = as_jitclos(cl->jit_val);

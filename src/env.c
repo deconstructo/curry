@@ -343,13 +343,17 @@ val_t env_extend(val_t parent) {
 }
 
 void env_define(val_t env, val_t sym, val_t val) {
+    if (env == GLOBAL_ENV) jit_maybe_taint_global_arith(sym, val);
     frame_define(as_env(env), sym, val);
 }
 
 bool env_set(val_t env, val_t sym, val_t val) {
     EnvFrame *f = as_env(env);
     while (f) {
-        if (frame_set(f, sym, val)) return true;
+        if (frame_set(f, sym, val)) {
+            if (vptr(f) == GLOBAL_ENV) jit_maybe_taint_global_arith(sym, val);
+            return true;
+        }
         f = f->parent;
     }
     return false;

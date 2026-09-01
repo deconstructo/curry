@@ -409,6 +409,63 @@
            (jit-ls-nested-user i) (+ i 1))
     (loop (+ i 1))))
 
+;;; 18. Global redefinition of an arithmetic operator must deopt already-
+;;; JIT-compiled closures and stop future fast-pathing (issue #118) ──────────
+;;; codegen.cpp's ARITH2/ARITH1 fast paths only ever checked LOCAL
+;;; shadowing (#115) -- a top-level (define (- a b) ...) or (set! - ...)
+;;; after some OTHER function using - was already JIT-compiled was still
+;;; silently ignored: the already-compiled native code keeps calling the
+;;; builtin num_sub forever, since a JIT-compiled function's machine code
+;;; can't be patched in place. Fixed with a global, permanent, one-way
+;;; taint flag (env.c hooks env_define/env_set on GLOBAL_ENV): once any
+;;; watched arithmetic name is ever redefined away from its original
+;;; value, apply_arr/vm.c's fast dispatch (runtime.c) stops invoking ANY
+;;; already-compiled closure's native code (falling back to the bytecode
+;;; interpreter, which always reads the CURRENT global binding correctly)
+;;; and codegen.cpp stops consulting ARITH2/ARITH1 for any future
+;;; compilation. Deliberately placed LAST in this file and using `-`
+;;; rather than `+`: the taint this test triggers is global and permanent
+;;; for the rest of this process, and `check`'s own pass/fail counting
+;;; above uses `+` internally -- redefining `+` here would corrupt every
+;;; later `check` call's own bookkeeping, not just the code under test.
+;;; set! specifically, run FIRST and using a different operator (*) than
+;;; the define-based test below (-): OP_STORE_GLOBAL (vm.c) bypasses
+;;; env_set entirely for a compiled top-level set!, so it needed its own
+;;; separate hook -- verified missing initially (independent security
+;;; review): (set! + myplus) after warmup still called the builtin, no
+;;; taint at all. Must run before the define-based test so this exercises
+;;; set!'s OWN path actually causing the (permanent, global) taint,
+;;; rather than piggybacking on an already-tainted flag from define.
+(define (jit-118-set-user n) (* n 2))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: * still correct before any global redefinition"
+           (jit-118-set-user i) (* i 2))
+    (loop (+ i 1))))
+;;; 999, not e.g. 2: an earlier version of this test used a redefinition
+;;; whose result happened to numerically coincide with what the STALE
+;;; builtin would also produce for the same arguments ((* 1 2) is 2, and
+;;; the broken redefinition also returned 2) -- a false pass that looked
+;;; like the fix worked whether or not the taint hook actually fired.
+;;; Confirmed live against a deliberately-reverted build: with the fix
+;;; removed this test as originally written still printed the "expected"
+;;; value by coincidence, while a redefinition returning a value distinct
+;;; from every plausible correct answer (999) correctly failed.
+(define (jit-118-myplus a b) 999)
+(set! * jit-118-myplus)
+(check "JIT: global set! of * takes effect for an already-compiled caller"
+       (jit-118-set-user 1) 999)
+
+(define (jit-118-user n) (- n 1))
+(let loop ((i 0))
+  (when (< i 60)
+    (check "JIT: - still correct before any global redefinition"
+           (jit-118-user i) (- i 1))
+    (loop (+ i 1))))
+(define (- a b) 99)
+(check "JIT: global redefinition of - takes effect for an already-compiled caller"
+       (jit-118-user 1) 99)
+
 ;;; Summary ─────────────────────────────────────────────────────────────────────
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")

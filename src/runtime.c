@@ -378,6 +378,107 @@ void jit_depth_pop(void)  { g_jit_call_depth--; }
 int  jit_depth_save(void)        { return g_jit_call_depth; }
 void jit_depth_restore(int saved) { g_jit_call_depth = saved; }
 
+/* ---- Arithmetic-fast-path deopt (issue #118) ----
+ *
+ * codegen.cpp's ARITH2/ARITH1 tables open-code +, -, *, /, <, sqrt, etc.
+ * as direct C-helper calls, assuming those names are never redefined --
+ * cheaper than a real global-variable lookup + generic call on every
+ * arithmetic operation, but wrong if a program later does
+ * (define (+ a b) ...) or (set! + ...). Rather than pay a per-call
+ * runtime guard to check this on every arithmetic operation (which
+ * would erase most of the fast path's benefit) or track precisely which
+ * already-JIT-compiled closures assumed which specific operator names
+ * (a much larger undertaking), this uses one global, permanent, one-way
+ * flag: the instant ANY watched arithmetic name is redefined away from
+ * its original builtin value, ALL arithmetic fast-pathing -- for every
+ * closure, whether or not it uses the redefined name specifically --
+ * stops forever. This is coarse (an unrelated closure loses a
+ * performance optimization it never needed to lose) but simple and
+ * definitely correct, matching the expectation that redefining core
+ * arithmetic operators at runtime is vanishingly rare in practice.
+ *
+ * Two consumers:
+ *   - Every already-JIT-compiled closure's native-fast-call dispatch
+ *     (apply_arr below, and the OP_CALL/OP_TAIL_CALL-family inline fast
+ *     paths in vm.c) checks jit_arith_tainted() before ever invoking a
+ *     closure's compiled native code -- this is the actual "deopt": a
+ *     closure whose native code still contains a now-stale direct call
+ *     to num_add (baked in at compile time, impossible to patch in
+ *     place) simply stops being reachable through the fast dispatch and
+ *     falls through to the bytecode interpreter instead, which always
+ *     reads GLOBAL_ENV's CURRENT binding correctly. No need to reset
+ *     the closure's jit_val to force recompilation: since the taint is
+ *     permanent, there would be nothing to gain from ever recompiling
+ *     it, so it's simply never called through the native path again.
+ *   - codegen.cpp checks jit_arith_tainted() before consulting ARITH2/
+ *     ARITH1 at all, so any closure compiled (or recompiled) after the
+ *     taint occurred never takes the fast path in the first place. */
+#ifdef BUILD_LLVM
+/* Plain int, NOT _Atomic-qualified: __atomic_load_n/__atomic_store_n are
+ * GCC/Clang's low-level intrinsics, which operate directly on an
+ * ordinary variable's address -- they reject a C11 _Atomic-qualified
+ * type outright (that qualifier is for the separate stdatomic.h
+ * atomic_load/atomic_store function-style API instead). Matches every
+ * other atomic variable already in this file (cl->jit_val, cl->call_count
+ * in BcClosure, vm.h), all plain-typed. */
+static int g_jit_arith_snapshot_ready = 0;
+static int g_jit_arith_tainted        = 0;
+
+/* Every name ARITH2/ARITH1 (src/llvm/codegen.cpp) open-codes. Kept in
+ * sync by hand -- small, stable list, not worth a shared header just
+ * for this. */
+static const char *const JIT_ARITH_WATCHED_NAMES[] = {
+    "+", "-", "*", "/", "<", ">", "<=", ">=", "=",
+    "inexact", "exact->inexact", "log", "exp", "sqrt",
+    "sin", "cos", "abs", "floor", "ceiling", "truncate", "round",
+};
+#define JIT_ARITH_WATCHED_COUNT \
+    (sizeof(JIT_ARITH_WATCHED_NAMES) / sizeof(JIT_ARITH_WATCHED_NAMES[0]))
+
+static val_t g_jit_arith_watched_syms[JIT_ARITH_WATCHED_COUNT];
+static val_t g_jit_arith_originals[JIT_ARITH_WATCHED_COUNT];
+#endif
+
+/* Called once, at the very end of builtins_register() (builtins.c) --
+ * every watched name is guaranteed bound to its real builtin by then.
+ * Snapshotting here, rather than treating "unset" as "never redefined",
+ * means the registration writes builtins_register() itself performs
+ * are never mistaken for a user redefinition. */
+void jit_arith_snapshot_init(void) {
+#ifdef BUILD_LLVM
+    for (size_t i = 0; i < JIT_ARITH_WATCHED_COUNT; i++) {
+        val_t sym = sym_intern_cstr(JIT_ARITH_WATCHED_NAMES[i]);
+        g_jit_arith_watched_syms[i] = sym;
+        g_jit_arith_originals[i]    = env_lookup_or_false(GLOBAL_ENV, sym);
+    }
+    __atomic_store_n(&g_jit_arith_snapshot_ready, true, __ATOMIC_RELEASE);
+#endif
+}
+
+void jit_maybe_taint_global_arith(val_t sym, val_t new_val) {
+#ifdef BUILD_LLVM
+    if (__atomic_load_n(&g_jit_arith_tainted, __ATOMIC_RELAXED)) return;
+    if (!__atomic_load_n(&g_jit_arith_snapshot_ready, __ATOMIC_ACQUIRE)) return;
+    for (size_t i = 0; i < JIT_ARITH_WATCHED_COUNT; i++) {
+        if (g_jit_arith_watched_syms[i] == sym) {
+            if (new_val != g_jit_arith_originals[i])
+                __atomic_store_n(&g_jit_arith_tainted, true, __ATOMIC_RELEASE);
+            return;
+        }
+    }
+#else
+    (void)sym; (void)new_val;
+#endif
+}
+
+bool jit_arith_tainted(void) {
+#ifdef BUILD_LLVM
+    return __atomic_load_n(&g_jit_arith_tainted, __ATOMIC_ACQUIRE);
+#else
+    return false;
+#endif
+}
+
 #ifdef BUILD_LLVM
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
  * values as constants so the JIT compiles them in without needing runtime
@@ -470,7 +571,7 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
          * Depth guard prevents C-stack overflow for deeply-recursive functions:
          * beyond JIT_CALL_DEPTH_LIMIT we fall through to the bytecode
          * interpreter which reuses its frame via OP_TAIL_CALL (O(1) C-stack). */
-        if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT
+        if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
             && curry_profiling_level == 0) {
             vm_check_arity(cl, argc);
             JitClosure *jc = as_jitclos(cl->jit_val);
