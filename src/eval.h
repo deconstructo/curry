@@ -136,6 +136,16 @@ extern "C" {
 extern CURRY_THREAD_LOCAL int g_jit_call_depth;
 int  jit_depth_save(void);
 void jit_depth_restore(int saved);
+
+/* Arithmetic-fast-path deopt (issue #118) -- see runtime.c's own comment
+ * above their definitions for the full design. jit_arith_snapshot_init()
+ * must be called exactly once, at the very end of builtins_register()
+ * (builtins.c), after every watched arithmetic name is guaranteed bound
+ * to its real builtin. jit_arith_tainted() is also declared to
+ * src/llvm/codegen.cpp's extern "C" block, so its signature here must
+ * stay C-compatible. */
+void jit_arith_snapshot_init(void);
+bool jit_arith_tainted(void);
 #define JIT_CALL_DEPTH_LIMIT 512
 #endif
 

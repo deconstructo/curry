@@ -66,6 +66,31 @@ val_t env_bind_arr(val_t parent_env, val_t params, int argc, val_t *argv);
 /* The global (top-level) environment */
 extern val_t GLOBAL_ENV;
 
+/* Implemented in runtime.c; a real body only when BUILD_LLVM is on
+ * (a cheap no-op otherwise), kept declared unconditionally so env.c's
+ * call sites need no #ifdef of their own. Called by env_define/env_set
+ * whenever GLOBAL_ENV specifically (not some other environment) is the
+ * one actually being mutated. Detects a global redefinition of one of
+ * the arithmetic operator names (+, -, *, /, <, ...) the LLVM JIT
+ * assumes are stable when open-coding them directly rather than doing a
+ * real global-variable lookup + call (see src/llvm/codegen.cpp's ARITH2/
+ * ARITH1 tables) -- see issue #118. Once any such redefinition is
+ * detected, permanently taints ALL future arithmetic fast-pathing
+ * (checked by codegen.cpp before ever taking the fast path, and by
+ * apply_arr's/vm.c's already-JIT-compiled-closure dispatch, which
+ * additionally deoptimizes any closure that was compiled and fast-
+ * pathed before the taint occurred: the taint check simply stops that
+ * dispatch from ever invoking the closure's now-permanently-wrong
+ * native code again -- jit_val itself is deliberately left as-is, not
+ * reset, since the taint is permanent and there's nothing to gain from
+ * ever recompiling that closure -- so it falls back to the bytecode
+ * interpreter every time instead, which always reads the
+ * CURRENT GLOBAL_ENV binding correctly). Global and one-way rather than
+ * per-symbol/per-closure: this kind of redefinition is expected to be
+ * extremely rare, so a coarse, simple, definitely-correct invalidation
+ * is preferred over a more precise but far more complex one. */
+void jit_maybe_taint_global_arith(val_t sym, val_t new_val);
+
 void env_init(void);
 
 #endif /* CURRY_ENV_H */

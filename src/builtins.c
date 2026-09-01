@@ -4077,4 +4077,9 @@ void builtins_register(val_t env) {
             for (int f = 0; f < nforms; f++) env_define(env, forms[f], v);
         }
     }
+
+    /* Snapshot the arithmetic operator names the LLVM JIT open-codes
+     * (issue #118) -- must run LAST, after every one of them is
+     * guaranteed bound to its real builtin value by everything above. */
+    jit_arith_snapshot_init();
 }
