@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788221601064,
+  "lastUpdate": 1788225864313,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -10694,6 +10694,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 53.89,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "42d0d67223d14c06c4ccc882088536c0541208eb",
+          "message": "Merge pull request #116 from deconstructo/fix/jit-macro-bailout\n\nfix(llvm): decline JIT promotion for macro calls and unimplemented special forms",
+          "timestamp": "2026-09-01T11:23:46+10:00",
+          "tree_id": "77e5ea309e34becfe372780cf6cdbbac11939129",
+          "url": "https://github.com/deconstructo/curry/commit/42d0d67223d14c06c4ccc882088536c0541208eb"
+        },
+        "date": 1788225863448,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.618,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.536,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.843,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.023,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 102.533,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 248.32,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 64.621,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 72.029,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 56.087,
             "unit": "ms"
           }
         ]
