@@ -1190,6 +1190,12 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
 
     while (vis_pair(clauses)) {
         val_t clause = vcar(clauses);
+        /* Issue #127: a clause that isn't itself a pair (e.g. `(cond ())`,
+         * `(cond 1)`) previously fell straight into vcar/vcdr below and
+         * SIGSEGVed instead of raising. require_min_args(clause, 1, ...)
+         * accepts the valid bare `(test)` shape (see the vis_nil(exprs)
+         * branch just below) while rejecting a non-pair clause. */
+        require_min_args(clause, 1, "cond");
         val_t test   = vcar(clause);
         val_t exprs  = vcdr(clause);
         clauses      = vcdr(clauses);
@@ -1306,6 +1312,10 @@ static void compile_case(Compiler *c, val_t args, bool tail, int line) {
     val_t cond_head = V_NIL, *cond_tail = &cond_head;
     while (vis_pair(clauses)) {
         val_t clause = vcar(clauses);  clauses = vcdr(clauses);
+        /* Issue #127: same unchecked-destructure shape as compile_cond
+         * above -- a non-pair clause (e.g. `(case 1 1)`, `(case 1 ())`)
+         * previously SIGSEGVed here instead of raising. */
+        require_min_args(clause, 1, "case");
         val_t datums = vcar(clause);
         val_t body   = vcdr(clause);
 
@@ -1595,9 +1605,11 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
      * loop below destructures it -- see ir_lower_let's identical comment
      * (issue #124, found incidentally while fixing the let/do family):
      * (guard (e ()) 1) previously SIGSEGV'd here on an empty `()`
-     * clause (guard's own clauses share cond's own clause shape, but
-     * unlike compile_cond -- which validates each clause -- this
-     * function never did). */
+     * clause. guard's own clauses share cond's own clause shape; at the
+     * time this comment was first written, compile_cond had NOT yet
+     * been fixed to validate its own clauses either (that was issue
+     * #127, filed as a direct result of independent review flagging
+     * this comment's original claim as false) -- both are now fixed. */
     for (val_t cl0 = clauses; vis_pair(cl0); cl0 = vcdr(cl0))
         require_min_args(vcar(cl0), 1, "guard");
 

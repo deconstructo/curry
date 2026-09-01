@@ -1184,6 +1184,180 @@
 (check "type-of: a primitive" (type-of car) 'primitive)
 (check "type-of: flonum" (type-of 1.5) 'flonum)
 
+;;; Issue #127: cond/case clause destructuring was unchecked in both
+;;; compile_cond/compile_case (compiler_classic.c) and eval.c's own
+;;; S_COND/S_CASE handlers -- a clause that wasn't itself a pair (e.g.
+;;; `(cond ())`, `(cond 1)`, `(case 1 1)`) SIGSEGVed instead of raising.
+;;; Found via independent security review of the #124/#125 fix, which
+;;; used the identical validate-before-destructure idiom for the
+;;; let/letrec/do family but missed this sibling form entirely.
+(define (jit127-malformed-raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+(check "cond: empty clause raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond ()) (interaction-environment))))
+       #t)
+(check "cond: non-pair clause raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond 1) (interaction-environment))))
+       #t)
+(check "case: empty clause raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 ()) (interaction-environment))))
+       #t)
+(check "case: non-pair clause raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 1) (interaction-environment))))
+       #t)
+(check "case: missing key raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case) (interaction-environment))))
+       #t)
+;; A second round of independent review of the fix just above found
+;; more crashes it didn't cover -- an improper (non-nil, non-pair)
+;; clause body, and an `=>` arrow clause with no receiver expression --
+;; in both cond and case, including case's own `else` clause (which had
+;; its own separate copy of the same logic, missing the same checks its
+;; sibling matched-datum branch already had).
+(check "cond: improper clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (1 . 2)) (interaction-environment))))
+       #t)
+(check "cond: improper else-clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (else . 2)) (interaction-environment))))
+       #t)
+(check "cond: arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(cond (1 =>)) (interaction-environment))))
+       #t)
+(check "case: improper clause tail raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 ((1) . 2)) (interaction-environment))))
+       #t)
+(check "case: else clause with no body doesn't crash (returns void)"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 (else)) (interaction-environment)) #f))
+       #f)
+(check "case: else-arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 (else =>)) (interaction-environment))))
+       #t)
+(check "case: matched-arrow clause with no receiver raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(case 1 ((1) =>)) (interaction-environment))))
+       #t)
+;; The compiler-path halves of #127 (compile_cond/compile_case) can only
+;; be tested via a real subprocess compile, same reasoning as #124's own
+;; do/let-syntax/guard checks -- see tests/test_cli.sh.
+(check "cond/case still work correctly"
+       (list (cond (#f 1) (#t 2))
+             (cond ((assv 1 (list (cons 1 'a))) => cdr) (else 'no))
+             (case 2 ((1) 'one) ((2) 'two) (else 'other))
+             (case 5 ((1 2) 'a) (else 'b)))
+       (list 2 'a 'two 'b))
+
+;;; Issue #128: several more eval.c-only unchecked-destructure gaps in
+;;; the same class as #124/#127, found by independent code review.
+;;; These are tree-walker-only bugs -- the corresponding compiler paths
+;;; already validate correctly for the same malformed input.
+(check "let-values: non-pair binding raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let-values (1) 1) (interaction-environment))))
+       #t)
+(check "let-values: malformed binding raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let-values ((a)) 1) (interaction-environment))))
+       #t)
+(check "let*-values: malformed binding raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let*-values ((a)) 1) (interaction-environment))))
+       #t)
+(check "parameterize: non-pair binding raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize (1) 1) (interaction-environment))))
+       #t)
+(check "parameterize: malformed binding raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize ((car)) 1) (interaction-environment))))
+       #t)
+(check "parameterize: non-parameter value raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize ((car 5)) 1) (interaction-environment))))
+       #t)
+;; A second round of independent review of the fix just above found
+;; `(let-values)` / `(let*-values)` / `(parameterize)` -- no operand
+;; list at all, not merely a malformed one -- still crashed: the
+;; per-binding checks above only fire once a bindings LIST is already
+;; being iterated. Also confirms `(parameterize ())` (a valid empty
+;; bindings list with no body) matches the compiled path's own
+;; leniency here (returns void) rather than introducing a stricter,
+;; tree-walker-only rejection for the same input.
+(check "let-values: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let-values) (interaction-environment))))
+       #t)
+(check "let*-values: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(let*-values) (interaction-environment))))
+       #t)
+(check "parameterize: missing bindings list raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize) (interaction-environment))))
+       #t)
+(check "parameterize: empty bindings and no body doesn't crash (returns void)"
+       (jit127-malformed-raises? (lambda () (eval '(parameterize ()) (interaction-environment)) #f))
+       #f)
+(check "when: missing test raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(when) (interaction-environment))))
+       #t)
+(check "when: missing body doesn't crash (returns void)"
+       (jit127-malformed-raises? (lambda () (eval '(when #t) (interaction-environment)) #f))
+       #f)
+(check "unless: missing test raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(unless) (interaction-environment))))
+       #t)
+(check "define-syntax: missing name/transformer raises instead of crashing"
+       (jit127-malformed-raises? (lambda () (eval '(define-syntax) (interaction-environment))))
+       #t)
+(check "let-values/let*-values/parameterize/when/unless still work correctly"
+       (list (let-values (((a b) (values 1 2))) (+ a b))
+             (let*-values (((a) (values 1)) ((b) (values (+ a 1)))) b)
+             (let* ((p (make-parameter 10)))
+               (parameterize ((p 20)) (p)))
+             (when #t 'yes)
+             (unless #f 'also-yes))
+       (list 3 2 20 'yes 'also-yes))
+
+;;; Issue #129: the reader itself (src/reader.c) had no recursion-depth
+;;; or list-length limit at all -- read_list/read_list_tail recurse
+;;; once per list element with no bound, and read_datum recurses once
+;;; per prefix reader macro (quote/quasiquote/unquote) with no bound
+;;; either. A sufficiently large flat list, deeply nested parens, or a
+;;; long quote-chain all SIGSEGVed at READ time, before any compiler or
+;;; eval() guard (#125) is ever reached. Fixed by sharing the same
+;;; check_c_stack_depth guard #125 added, called from read_datum,
+;;; read_list, and read_list_tail. Exercised here via `read` on a
+;;; string port -- the reader is a single shared implementation (unlike
+;;; eval() vs. the compilers), so this genuinely exercises the same
+;;; code a top-level script parse would.
+;; 1000000, not the ~15000-60000 that was enough to crash the pre-fix
+;; binary: same lesson as #125's own test_cli.sh threshold (see that
+;; file's comment), compounded by BOTH known sources of variance found
+;; there -- the guard fires at a FRACTION of the real per-thread stack
+;; limit, and (a) CTest's test-runner process launches this script
+;; under a much larger default stack (64MB) than an interactive shell
+;; (8MB), while (b) a Release build's optimizer shrinks read_list/
+;; read_list_tail/read_datum's own per-recursion-level stack frame
+;; enough that a given recursion depth needs even more levels to reach
+;; the same threshold. Confirmed empirically: Release-build + 64MB
+;; stack (the worst combination actually seen, on CI) needed >600000
+;; for the tightest of the three vectors (nested parens). 1000000 is
+;; comfortably past all three under that combination, confirmed fast
+;; (well under a second) even at this size.
+(define (jit129-flat-list-source n)
+  (let ((out (open-output-string)))
+    (write-char #\( out)
+    (do ((i 0 (+ i 1))) ((= i n))
+      (write-char #\1 out) (write-char #\space out))
+    (write-char #\) out)
+    (get-output-string out)))
+(check "reader: oversized flat list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (read (open-input-string (jit129-flat-list-source 1000000))))
+       'caught)
+(check "reader: deeply nested parens raise a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (read (open-input-string
+                (string-append (make-string 1000000 #\() "1" (make-string 1000000 #\))))))
+       'caught)
+(check "reader: long quote-chain raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (read (open-input-string (string-append (make-string 1000000 #\') "1"))))
+       'caught)
+(check "reader: ordinary lists/nesting/quoting still read correctly"
+       (read (open-input-string "(1 2 (3 (4 5)) 'x)"))
+       '(1 2 (3 (4 5)) (quote x)))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

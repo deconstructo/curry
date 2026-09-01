@@ -333,6 +333,19 @@ static val_t read_list(val_t port, int close_ch);
  * character is a literal '.'), and nothing re-checked for a genuine
  * dotted tail immediately following it. */
 static val_t read_list_tail(val_t port, int close_ch) {
+    /* Issue #129: read_list_tail and read_list (below) are mutually
+     * recursive once per list element -- a flat list of tens of
+     * thousands of elements, or a chain of dot-prefixed-symbol
+     * elements specifically (this function's own direct self-
+     * recursion just below, for "..."/".foo"-style tokens), previously
+     * exhausted the real C stack with no bound at all and SIGSEGVed,
+     * well before either of #125's own guards (eval()/ir_emit(), both
+     * compile-time) are ever reached -- read happens first. Shares
+     * check_c_stack_depth (src/runtime.c) with those two, the same way
+     * ir_emit() shares it with eval() rather than each guarding a
+     * private copy: it's the same real stack, the same "how close to
+     * the top" answer regardless of which caller asks. */
+    check_c_stack_depth("read");
     skip_whitespace(port);
     int elem_line = port_line(port);
     int c = peek_char_port(port);
@@ -367,6 +380,10 @@ static val_t read_list_tail(val_t port, int close_ch) {
 }
 
 static val_t read_list(val_t port, int close_ch) {
+    /* See read_list_tail's identical comment just above (issue #129) --
+     * this function is the other half of the same mutually-recursive
+     * pair, called once per list element in both directions. */
+    check_c_stack_depth("read");
     skip_whitespace(port);
     int c = peek_char_port(port);
     if (c == close_ch) { next_char(port); return V_NIL; }
@@ -463,6 +480,12 @@ static val_t wrap1(val_t sym, val_t v) {
 /* ---- Main reader ---- */
 
 static val_t read_datum(val_t port) {
+    /* Issue #129: a long chain of prefix reader macros (a few thousand
+     * nested `'`/`` ` ``/`,`/`,@`) recurses through this function's own
+     * quote/quasiquote/unquote cases below with no bound, the same
+     * unguarded-recursion class as read_list/read_list_tail's own
+     * per-element recursion (see their identical comment). */
+    check_c_stack_depth("read");
     skip_whitespace(port);
     int c = next_char(port);
     if (c == -1) return V_EOF;
