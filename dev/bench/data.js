@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788267070804,
+  "lastUpdate": 1788269580806,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11108,6 +11108,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.683,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eb099a1015bcdad5b34939eb397fcf3a05579bfd",
+          "message": "fix(compiler,reader): unchecked cond/case, eval.c gaps, unbounded reader recursion (#127, #128, #129) (#131)\n\n* fix(compiler,reader): unchecked cond/case, eval.c gaps, unbounded reader recursion\n\nThree follow-up bugs found by independent code/security review of the\n#124/#125 fix (PR #130), filed as #127/#128/#129 and fixed here:\n\nIssue #127: compile_cond/compile_case (compiler_classic.c) and eval.c's\nown S_COND/S_CASE handlers had the identical unchecked-clause-\ndestructure crash the #124 fix closed for the let/letrec/do family, but\nmissed entirely since cond/case is a different form family, not a\nvariant of let. `(cond ())`, `(cond 1)`, `(case 1 ())`, `(case 1 1)`,\nand `(case)` (no key) all SIGSEGVed instead of raising. Fixed with the\nsame require_min_args/pair-check idiom used throughout #124. Also\ncorrected a comment (compiler_classic.c, in compile_guard) that had\nclaimed compile_cond already validated its clauses -- true again now\nthat this fix lands, but was false when first written and is exactly\nwhat led review to file this issue in the first place.\n\nIssue #128: several more eval.c-only unchecked-destructure gaps in the\nsame class, found by independent code review -- let-values/let*-values\n(non-pair or malformed binding, and a missing-body gap matching #124's\nown let*/letrec pattern), parameterize (non-pair binding, and a value\nthat isn't actually a parameter object -- read directly via as_param\nrather than through apply, so unlike the compiled path it needs its\nown explicit type check), when/unless (missing test, and a\nmissing-body gap for a true/false test with no body forms), and\ndefine-syntax (missing name/transformer). All are tree-walker-only:\nthe corresponding compiler paths already validated correctly for the\nsame malformed input.\n\nIssue #129: the reader itself (src/reader.c) had no recursion-depth or\nlist-length limit at all. read_list and read_list_tail are mutually\nrecursive once per list element (both for a flat list's length and for\nnested-list depth); read_datum recurses once per prefix reader macro\n(quote/quasiquote/unquote). A large enough flat list, deep enough\nnesting, or a long enough quote-chain all SIGSEGVed at READ time,\nbefore any of #125's own guards (eval()/ir_emit(), both compile-time)\nare ever reached -- read happens first. Fixed by sharing the same\ncheck_c_stack_depth guard #125 added (src/runtime.c), called from all\nthree of read_datum/read_list/read_list_tail.\n\nRegression tests added to tests/r7rs_tests.scm (the reader is a single\nshared implementation, unlike eval() vs. the compilers, so `read` on a\nstring port genuinely exercises the same code a top-level script parse\nwould) and tests/test_cli.sh (cond/case's compiler-path halves, which\nneed a real subprocess compile for the same reason #124's own do/\nlet-syntax/guard checks do).\n\nThe reader test thresholds needed to go well past the sizes that\ncrashed the pre-fix binary (~15000-60000): the same ulimit-driven\nvariance #125's own test threshold hit (CTest's 64MB default stack vs.\nan interactive shell's 8MB), compounded by a Release build's optimizer\nshrinking the per-recursion-level stack frame -- confirmed empirically\nthat a Release+64MB-stack combination needed >600000 for the tightest\nof the three vectors. Settled on 1000000, confirmed fast (well under a\nsecond) and reliable across Debug/Release x 8MB/64MB stack locally.\n\n383/383 (r7rs_tests.scm), 92/92 (test_cli.sh), 117/117 ctest (default\nbuild, one pre-existing flaky websocket port-bind failure confirmed\nunrelated by rerunning in isolation), 118/118 ctest (LLVM build) --\nall with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(eval): close remaining cond/case/let-values/parameterize crash gaps\n\nSecond round of independent code/security review of the #127/#128 fix\n(commit 2daa066) found the fix was incomplete -- the same bug class\nsurvived in adjacent branches of the code it edited:\n\n- cond: `(cond (1 . 2))` and `(cond (else . 2))` -- an improper\n  (non-nil, non-pair) clause tail -- still reached vcar(body) on a\n  non-pair; `(cond (1 =>))` -- an arrow clause with no receiver\n  expression -- still reached vcadr(body) past the end. Both now\n  validated before use, matching compile_cond's own equivalent checks.\n- case: the same two gaps (`(case 1 ((1) . 2))`, `(case 1 ((1) =>))`),\n  plus case's own `else` clause had a SEPARATE, incomplete copy of the\n  matched-datum branch's logic -- `(case 1 (else))` (no body at all)\n  crashed because else's copy was missing the `if (vis_nil(body))\n  return V_VOID;` its sibling branch already had, and `(case 1 (else\n  =>))` had the same missing-receiver gap as the matched-datum branch.\n- let-values/let*-values: `(let-values)` / `(let*-values)` -- no\n  bindings list at all -- still reached vcar(rest) unguarded; the\n  per-binding check added in the first #128 fix only fires once a\n  bindings list is already being iterated, not when there's no list.\n- parameterize: same missing `rest`-level check for `(parameterize)`.\n  Also found (not previously flagged, same root cause): `(parameterize\n  ((p v)))` with no body at all crashed at vcar(body) on a nil body.\n  Fixed to match compile_parameterize's own leniency here rather than\n  introduce a stricter tree-walker-only rejection: a zero-body\n  parameterize desugars (compiled path) to a zero-body lambda, which\n  compile_seq already treats as a no-op returning void, not an error --\n  confirmed empirically that `(parameterize ())` and `(parameterize\n  ((p 1)))` both compile and run to void today, so eval.c now matches\n  that instead of raising.\n\n11 new regression tests added to tests/r7rs_tests.scm covering every\none of the above, plus confirming the two intentionally-lenient empty-\nbody cases (`(case 1 (else))`, `(parameterize ())`) return void rather\nthan raising, matching the compiled path exactly.\n\n394/394 (r7rs_tests.scm), 92/92 (test_cli.sh), 117/117 ctest (default\nbuild, no flakes this run), 118/118 ctest (LLVM build) -- all with\n.scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-01T23:32:18+10:00",
+          "tree_id": "ae6f4cea0e5616ad4d3db55c077753fd3bd2f5f3",
+          "url": "https://github.com/deconstructo/curry/commit/eb099a1015bcdad5b34939eb397fcf3a05579bfd"
+        },
+        "date": 1788269579491,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.781,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.975,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.633,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.642,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 136.51,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 280.589,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.13,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.685,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.614,
             "unit": "ms"
           }
         ]
