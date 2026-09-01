@@ -232,6 +232,17 @@ static void ir_emit_inline_call(Compiler *c, val_t params, val_t body,
 }
 
 void ir_emit(Compiler *c, IRNode *n) {
+    /* ir_emit and ir_emit_inline_call (both call sites of the latter are
+     * inside this function, so guarding ir_emit's own entry covers the
+     * whole recursive tree) recurse into each other once per binding of
+     * a flat let* / letrec* / do chain -- unlike eval()'s own goto-tail
+     * trampoline, nothing here reuses a C frame, so a few hundred
+     * sequential bindings SIGSEGVs the whole process once the real C
+     * stack is exhausted (issue #125). check_c_stack_depth (runtime.c)
+     * is the same guard eval() already has for its own unbounded
+     * recursion -- shared rather than duplicated, since both consume
+     * the same physical C stack on the same thread. */
+    check_c_stack_depth("compile");
     switch (n->kind) {
     case IR_CONST: {
         val_t v = n->as.konst.value;
@@ -834,6 +845,12 @@ void ir_emit(Compiler *c, IRNode *n) {
         val_t bindings0  = n->as.named_let.bindings;
         int   argc0 = 0;
         for (val_t b = bindings0; vis_pair(b); b = vcdr(b)) argc0++;
+        /* Validates every binding before either branch below destructures
+         * it -- see ir_lower_let's identical comment (issue #124):
+         * (let loop ((a)) 1) previously SIGSEGV'd here (and in the
+         * splice fast path below) on a binding with no init. */
+        for (val_t b = bindings0; vis_pair(b); b = vcdr(b))
+            require_min_args(vcar(b), 2, "let");
         if (c->local_count + 2 * argc0 + 2 >= MAX_LOCALS) {
             val_t body0 = n->as.named_let.body;
             val_t params0 = V_NIL;

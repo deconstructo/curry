@@ -542,6 +542,143 @@ for cmd in expand asm break unbreak debug; do
     check_contains "REPL survives malformed argument to ,$cmd" "$out" "still alive"
 done
 
+# ─── Malformed let/do/let-syntax/guard binding compiles to a clean error,
+#     not a SIGSEGV (regression, issue #124) ──────────────────────────────────
+#
+# A let/let*/letrec/do/let-syntax/guard binding or clause with the wrong
+# shape (not a pair, or a pair missing its init/body) was destructured via
+# unchecked vcar/vcdr chains with no check that the binding itself was even
+# a pair -- e.g. (let ((a)) 1) SIGSEGV'd the compiler instead of raising a
+# catchable error. Three independent implementations had this bug: the
+# Tier 2.1 IR pipeline (ir_lower.c/ir_emit.c), the classic bytecode
+# compiler (compiler_classic.c), and the tree-walking evaluator (eval.c,
+# reachable via the `eval` builtin -- covered separately in
+# r7rs_tests.scm, since testing that path doesn't require a subprocess).
+# do/let-syntax/guard specifically have NO IR lowering at all, so
+# compiler_classic.c's own copy of the fix is these three forms' ONLY live
+# compilation path outside eval.c's tree-walker -- this is the one place
+# that path can actually be exercised, since a malformed TOP-LEVEL form
+# must crash (or not) during the compile phase of a fresh `curry -e`
+# invocation, before any runtime `guard` in a long-running test script
+# could ever catch it.
+#
+# A bash pipeline's $? for a process killed by a signal is 128+signal
+# (139 for SIGSEGV specifically on every platform this project targets);
+# a clean Scheme-level error instead exits 1 via main.c's own error path.
+# Asserting the exact clean-error exit code (not just "not 139") also
+# catches a fix that silently swallows the error instead of reporting it.
+check_no_segv() {
+    local label="$1" form="$2"
+    set +e
+    "$CURRY" -e "$form" >/dev/null 2>&1
+    local code=$?
+    set -e
+    check "$label" "$code" "1"
+}
+check_no_segv "let: malformed binding compiles to a clean error"          '(let ((a)) 1)'
+check_no_segv "named let: malformed binding compiles to a clean error"    '(let loop ((a)) 1)'
+check_no_segv "let*: malformed binding compiles to a clean error"         '(let* ((a)) 1)'
+check_no_segv "letrec: malformed binding compiles to a clean error"       '(letrec ((a)) 1)'
+check_no_segv "letrec*: malformed binding compiles to a clean error"      '(letrec* ((a)) 1)'
+check_no_segv "do: malformed var-spec compiles to a clean error"          '(do ((a)) (#t) 1)'
+check_no_segv "let-syntax: malformed binding compiles to a clean error"   '(let-syntax ((m)) 1)'
+check_no_segv "letrec-syntax: malformed binding compiles to a clean error" '(letrec-syntax ((m)) 1)'
+check_no_segv "guard: empty clause compiles to a clean error"             '(guard (e ()) 1)'
+
+# ir_lower_letrec is shared by S_LETREC and S_LETREC_STAR; independent
+# code review found it hardcoded "letrec" (not "letrec*") in the raised
+# error message even for a letrec*-specific input -- cosmetic, but a
+# wrong form name in an error message sent a developer looking at the
+# wrong compiler code path. Checked here (not r7rs_tests.scm) because
+# the malformed binding is a COMPILE-time error for the whole enclosing
+# top-level form -- no runtime `guard` inside the same script could ever
+# see it, so this needs the real subprocess-stderr text, same as every
+# other compiler-path check in this section.
+letrec_star_err=$("$CURRY" -e '(let ((f (lambda () (letrec* ((a)) 1)))) (f))' 2>&1 || true)
+check "letrec*: malformed binding names letrec* (not letrec) in the error" \
+      "$(echo "$letrec_star_err" | grep -c 'letrec\*: ill-formed special form')" "1"
+
+# Confirms ordinary usage of all of these still compiles and runs correctly.
+out=$("$CURRY" -e '(display (list (let ((a 1) (b 2)) (+ a b))
+                                   (let* ((a 1) (b (+ a 1))) b)
+                                   (letrec ((f (lambda (n) (if (= n 0) 1 (* n (f (- n 1))))))) (f 5))
+                                   (do ((i 0 (+ i 1)) (s 0 (+ s i))) ((= i 5) s))
+                                   (let-syntax ((m (syntax-rules () ((_ x) (+ x 1))))) (m 5))
+                                   (guard (e (#t (quote caught))) (raise (quote oops)))))')
+check "let/let*/letrec/do/let-syntax/guard still compile and run correctly" "$out" "(3 2 120 10 6 caught)"
+
+# ─── Deeply nested let* compiles to a catchable stack-overflow, not a
+#     SIGSEGV (regression, issue #125) ────────────────────────────────────────
+#
+# ir_emit and ir_emit_inline_call (Tier 2.1 IR pipeline, ir_emit.c)
+# recurse into each other once per binding of a flat let*/letrec*/do
+# chain -- unlike eval()'s own goto-tail trampoline, nothing here reuses
+# a C frame, so a few hundred sequential bindings SIGSEGVs the whole
+# process once the real C stack is exhausted, instead of the catchable
+# stack-overflow condition eval() already raises for its own equivalent
+# unbounded recursion. Fixed by sharing eval()'s own guard
+# (check_c_stack_depth, runtime.c) at ir_emit's entry point. Must be
+# tested via a real subprocess compile: `eval` exercises eval.c's own
+# tree-walking let*, a plain while loop over bindings rather than
+# per-binding C recursion, so it can't reach ir_emit.c's bug at all
+# (see r7rs_tests.scm's own note at the same point).
+#
+# Built as literal source text, not generated Scheme, for the same
+# reason r7rs_tests.scm's own 254-loop-variable named-let test (issue
+# #120) is: this needs to appear as a real top-level form a subprocess
+# actually compiles, and a plain bash loop avoids a python/perl
+# dependency in this shell-based suite.
+#
+# 20001 bindings, not ~220 or even 3001: the guard fires at a FRACTION
+# of the real per-thread C stack limit (check_c_stack_depth, runtime.c),
+# and both the actual stack limit AND how much of it each recursion
+# level of ir_emit consumes vary a lot across how this suite is built
+# and invoked -- confirmed empirically twice:
+#  - an interactive Debug-build shell here defaulted to an 8MB stack,
+#    where ~220 bindings was enough to cross the guard's threshold, but
+#    CTest's own test-runner process launches this script under a 64MB
+#    stack, where 220 (and even 3000) bindings finished cleanly (exit
+#    0, guard never fired) -- bumped to 3001, confirmed safe under a
+#    64MB stack too.
+#  - that 3001 figure then still failed the SAME way (exit 0, no
+#    SIGSEGV) under CI's macOS Release build specifically: a Release
+#    build's optimizer shrinks ir_emit's own per-call stack frame
+#    enough that 3001 recursion levels no longer reaches the guard's
+#    threshold at all, on top of the ulimit difference above. 20001 is
+#    comfortably past the threshold measured empirically under a
+#    Release build AND a 64MB stack simultaneously (triggers reliably
+#    above ~8000 in that combination), while staying well under the
+#    reader's own unrelated ~50000-element recursion limit (issue
+#    #129) so this test keeps testing ir_emit's guard specifically,
+#    not the reader's.
+bindings=""
+names=""
+for i in $(seq 0 20000); do
+    bindings="$bindings(p$i 1)"
+    names="$names p$i"
+done
+big_letstar="(display (let* ($bindings) (+$names)))"
+# Written to a real script file and run as a positional argument, NOT
+# passed via -e: this form is ~300KB of source text, comfortably past
+# Linux's default single-argument/whole-argv length limits (ARG_MAX) --
+# confirmed the hard way when CI's ubuntu runners reported exit 126
+# ("argument list too long", bash's own report for an execve() E2BIG)
+# on the very first version of this test that used -e. A script file
+# has no such limit.
+BIG_LETSTAR_SCM="$TMPDIR_CLI/big_letstar.scm"
+printf '%s\n' "$big_letstar" > "$BIG_LETSTAR_SCM"
+set +e
+"$CURRY" "$BIG_LETSTAR_SCM" >/dev/null 2>&1
+big_letstar_code=$?
+set -e
+check "let* with 20001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
+# Confirms a much smaller, entirely ordinary let* chain (nowhere near
+# where the guard fires) still compiles and runs correctly.
+out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6 1) (p7 1) (p8 1) (p9 1)
+                                    (p10 1) (p11 1) (p12 1) (p13 1) (p14 1) (p15 1) (p16 1) (p17 1) (p18 1) (p19 1))
+                          (+ p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19)))')
+check "let* with 20 sequential bindings still compiles and runs correctly" "$out" "20"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

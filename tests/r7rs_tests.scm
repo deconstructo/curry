@@ -518,6 +518,128 @@
          (f))
        (list 'done 111 222 333 444))
 
+;;; Regression coverage for issue #124: a let/let*/letrec/do/let-syntax/
+;;; guard binding or clause with the wrong shape (not a pair, or a pair
+;;; with no init/body) was destructured via unchecked vcar/vcdr chains
+;;; across THREE independent implementations of this logic (the Tier 2.1
+;;; IR pipeline in ir_lower.c/ir_emit.c, the classic compiler in
+;;; compiler_classic.c, and the tree-walking evaluator in eval.c) --
+;;; SIGSEGVing the whole process instead of raising a catchable error.
+;;; A malformed binding with a missing init is a plausible typo, so this
+;;; was reachable from ordinary source. Fixed by validating every
+;;; binding/clause up front with the same idiom already used for the
+;;; enclosing form's own arity (require_min_args in the two compiler
+;;; paths; a small equivalent helper in eval.c, which has no access to
+;;; the compiler-internal header that idiom lives in).
+(define (jit124-malformed-raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+(check "let: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let ((a)) 1) (interaction-environment))))
+       #t)
+(check "named let: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let loop ((a)) 1) (interaction-environment))))
+       #t)
+(check "let*: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let* ((a)) 1) (interaction-environment))))
+       #t)
+(check "letrec: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(letrec ((a)) 1) (interaction-environment))))
+       #t)
+(check "letrec*: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(letrec* ((a)) 1) (interaction-environment))))
+       #t)
+(check "do: malformed var-spec raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(do ((a)) (#t) 1) (interaction-environment))))
+       #t)
+(check "let-syntax: malformed binding raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let-syntax ((m)) 1) (interaction-environment))))
+       #t)
+(check "guard: empty clause raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(guard (e ()) (raise 'oops)) (interaction-environment))))
+       #t)
+(check "guard: bare single-element clause (R7RS-valid, no body) still works"
+       (eval '(guard (e (#t)) (raise 5)) (interaction-environment))
+       #t)
+;; `eval` here exercises eval.c's OWN tree-walking implementation of each
+;; form, a THIRD independent copy of this logic distinct from both the
+;; classic bytecode compiler (compiler_classic.c) and the Tier 2.1 IR
+;; pipeline (ir_lower.c/ir_emit.c) -- each of those two has its own
+;; identical bug, independently confirmed fixed via `curry -e` (which
+;; compiles rather than tree-walks) during development, but not
+;; exercised by this .scm file: a malformed top-level form would crash
+;; during the COMPILE phase of loading this very test script, before any
+;; runtime `guard` could ever catch it. do/let-syntax/guard specifically
+;; have NO IR lowering at all (SF_DO/SF_LET_SYNTAX/SF_GUARD route
+;; straight to compiler_classic.c's own compile_do/compile_let_syntax/
+;; compile_guard), so for those three forms this compiler-side fix is
+;; the ONLY live path outside eval.c's own tree-walker -- but is
+;; likewise only checkable via a real subprocess compile, not from
+;; inside this file.
+;; Confirms the fix didn't regress ordinary usage of any of these forms.
+(check "let/let*/letrec/do/let-syntax/guard still work correctly"
+       (list (let ((a 1) (b 2)) (+ a b))
+             (let* ((a 1) (b (+ a 1))) b)
+             (letrec ((f (lambda (n) (if (= n 0) 1 (* n (f (- n 1))))))) (f 5))
+             (do ((i 0 (+ i 1)) (s 0 (+ s i))) ((= i 5) s))
+             (let-syntax ((m (syntax-rules () ((_ x) (+ x 1))))) (m 5))
+             (guard (e (#t 'caught)) (raise 'oops)))
+       (list 3 2 120 10 6 'caught))
+
+;;; Issue #125 (ir_emit/ir_emit_inline_call's unbounded per-binding C
+;;; recursion in a flat let* chain, Tier 2.1 IR pipeline) is regression-
+;;; tested in tests/test_cli.sh, not here: `eval` exercises eval.c's own
+;;; tree-walking let* -- a plain while loop over bindings, not per-
+;;; binding C recursion -- so it can't exercise ir_emit.c's bug at all;
+;;; and a malformed/huge top-level form must be tested via a real `curry`
+;;; subprocess compile regardless, for the same reason #124's do/
+;;; let-syntax/guard checks are in test_cli.sh rather than here.
+
+;;; Additional eval.c-only gaps found by independent code review of the
+;;; #124 fix above: the compiler paths already rejected these malformed
+;;; forms cleanly, but eval.c's own tree-walker still SIGSEGVed on them
+;;; (require_binding_shape only validates an individual BINDING's shape,
+;;; not that the enclosing form has enough top-level pieces to destructure
+;;; in the first place -- e.g. `(let* ((a 1)))` has a well-formed binding
+;;; but no body, and the old code unconditionally called vcdr on that nil
+;;; body while checking for more forms to evaluate).
+(check "let*: missing body doesn't crash (returns void)"
+       (jit124-malformed-raises? (lambda () (eval '(let* ((a 1))) (interaction-environment)) #f))
+       #f)
+(check "letrec: missing body doesn't crash (returns void)"
+       (jit124-malformed-raises? (lambda () (eval '(letrec ((a 1))) (interaction-environment)) #f))
+       #f)
+(check "named let: missing bindings/body raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(let loop) (interaction-environment))))
+       #t)
+(check "do: missing test clause raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(do ((i 0 (+ i 1)))) (interaction-environment))))
+       #t)
+(check "do: non-pair test clause raises instead of crashing"
+       (jit124-malformed-raises? (lambda () (eval '(do ((i 0)) ()) (interaction-environment))))
+       #t)
+(check "do: dotted step-spec doesn't dereference the improper tail"
+       ;; (i 0 . 5) -- vcddr(spec) is 5, a non-pair. Matches
+       ;; compiler_classic.c's own do step-expr check (vis_pair(vcdr(vcdr
+       ;; (spec)))): treated as "no step expression" rather than crashing.
+       ;; This makes i never advance, hence the outer call/cc escape
+       ;; instead of actually looping.
+       (call-with-current-continuation
+        (lambda (k)
+          (guard (e (#t (k 'raised)))
+            (eval '(do ((i 0 . 5) (n 0 (+ n 1)))
+                       ((or (= i 1) (> n 2)) 'done))
+                  (interaction-environment)))))
+       'done)
+;; letrec* naming its own error correctly (ir_lower_letrec, shared by
+;; letrec/letrec*, was found by independent code review to hardcode
+;; "letrec" in the raised message even for a letrec* input) can't be
+;; tested from inside this file at all: `(letrec* ((a)) 1)` at the top
+;; level is a COMPILE-time error for the whole enclosing top-level form,
+;; including any guard meant to catch it -- the same eval-vs-compile
+;; distinction #124/#125's other compiler-path checks are subject to
+;; (see the comment above). Tested via a real subprocess in test_cli.sh
+;; instead, grepping stderr for the exact form name.
+
 ;;; Tail calls
 (define (count-down n)
   (if (= n 0) 'done (count-down (- n 1))))

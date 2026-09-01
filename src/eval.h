@@ -137,6 +137,14 @@ extern CURRY_THREAD_LOCAL int g_jit_call_depth;
 int  jit_depth_save(void);
 void jit_depth_restore(int saved);
 
+/* Shared C-stack-depth guard (runtime.c) -- raises EC_STACK_OVERFLOW,
+ * naming `context` in the message, once this thread's real C stack
+ * usage crosses the cached per-thread limit. Originally eval()'s own
+ * private mechanism; shared with ir_emit.c's own unbounded recursion
+ * (issue #125) since both consume the same physical C stack on the
+ * same thread. */
+void check_c_stack_depth(const char *context);
+
 /* Arithmetic-fast-path deopt (issue #118) -- see runtime.c's own comment
  * above their definitions for the full design. jit_arith_snapshot_init()
  * must be called exactly once, at the very end of builtins_register()

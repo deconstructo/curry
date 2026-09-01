@@ -282,6 +282,16 @@ static bool let_bindings_closed(Compiler *c, val_t bindings, BoundScope *outer_s
     val_t names = V_NIL;
     for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
         val_t binding = vcar(b);
+        /* This is a closedness PREDICATE, not a compile step -- a
+         * malformed binding here just means "not eligible for this
+         * optimization," fail-safe, not a raised error (unlike the
+         * actual compile-time checks in ir_lower_let/ir_lower_let_star/
+         * etc for the exact same shape). Raising here would incorrectly
+         * change behavior for a program that never actually compiles
+         * the lambda body being analyzed. Issue #124, found via
+         * independent review: (let ((f (lambda () (let (1) 1)))) 1)
+         * previously dereferenced a non-pair binding here and SIGSEGV'd. */
+        if (!vis_pair(binding)) return false;
         val_t name = vcar(binding);
         val_t init = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
         if (!expr_is_closed(c, init, outer_scope, budget)) return false;
@@ -352,6 +362,7 @@ static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budg
         BoundScope *cur = scope;
         for (val_t b = bindings; vis_pair(b); b = vcdr(b)) {
             val_t binding = vcar(b);
+            if (!vis_pair(binding)) return false;   /* see let_bindings_closed's comment */
             val_t name    = vcar(binding);
             val_t init    = vis_pair(vcdr(binding)) ? vcar(vcdr(binding)) : V_FALSE;
             /* Sequential: each init is checked against everything bound
@@ -371,6 +382,8 @@ static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budg
         val_t body2    = vis_pair(vcdr(expr)) ? vcdr(vcdr(expr)) : V_NIL;
         /* letrec(*): every binding name is visible to every init AND to
          * the body -- build the whole scope layer first. */
+        for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+            if (!vis_pair(vcar(b))) return false;   /* see let_bindings_closed's comment */
         val_t names = V_NIL;
         for (val_t b = bindings; vis_pair(b); b = vcdr(b))
             names = scm_cons(vcar(vcar(b)), names);
@@ -392,6 +405,7 @@ static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budg
         val_t names = V_NIL;
         for (val_t vs = var_specs; vis_pair(vs); vs = vcdr(vs)) {
             val_t spec = vcar(vs);
+            if (!vis_pair(spec)) return false;   /* see let_bindings_closed's comment */
             val_t init = vis_pair(vcdr(spec)) ? vcar(vcdr(spec)) : V_FALSE;
             /* init exprs see the OUTER scope only, matching do's own
              * semantics (vars aren't bound yet for their own inits). */
@@ -401,6 +415,12 @@ static bool expr_is_closed(Compiler *c, val_t expr, BoundScope *scope, int *budg
         BoundScope inner = { scope, names };
         for (val_t vs = var_specs; vis_pair(vs); vs = vcdr(vs)) {
             val_t spec = vcar(vs);
+            /* Already validated as a pair by the first loop above (both
+             * walk the same var_specs list), but re-checked defensively
+             * since this loop re-derives `spec` independently -- cheap,
+             * and avoids relying on control flow across two separate
+             * loops to keep this safe if either is ever reordered. */
+            if (!vis_pair(spec)) return false;
             val_t step = vis_pair(vcdr(spec)) && vis_pair(vcdr(vcdr(spec)))
                              ? vcar(vcdr(vcdr(spec))) : vcar(spec);
             if (!expr_is_closed(c, step, &inner, budget)) return false;
@@ -731,6 +751,20 @@ static IRNode *ir_lower_let(Compiler *c, val_t args, bool tail, int line) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
 
+    /* require_min_args already guards the outer form's own spine
+     * (args itself, at this function's caller -- see classify_head's
+     * S_LET dispatch), but never validated each individual BINDING
+     * entry within it: (let ((a)) 1) has a well-formed two-element
+     * args list, so that check passes, then vcar(vcdr(vcar(b))) below
+     * dereferences (a)'s nonexistent cdr and SIGSEGVs the whole
+     * process (issue #124, found via independent review). Reusing
+     * require_min_args on each binding itself (rather than on `args`)
+     * catches both "not a pair at all" and "pair with no init"
+     * uniformly, matching the exact idiom this file already uses
+     * everywhere else. */
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        require_min_args(vcar(b), 2, "let");
+
     /* Forward-order params list -- same double-reverse compile_let itself
      * uses (bindings is walked once to reverse, then reversed back). */
     val_t params = V_NIL;
@@ -810,6 +844,12 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
         return ir_lower_seq(c, body, tail, line);
 
     val_t binding = vcar(bindings);
+    /* See ir_lower_let's identical comment (issue #124): validates this
+     * one binding before destructuring it. Only the first binding needs
+     * checking here -- each further one gets its own check the next
+     * time this function recurses on the desugared inner `let*` form
+     * below. */
+    require_min_args(binding, 2, "let*");
     val_t name    = vcar(binding);
     val_t init    = vcar(vcdr(binding));
     val_t rest    = vcdr(bindings);
@@ -881,9 +921,17 @@ static IRNode *ir_lower_let_star(Compiler *c, val_t args, bool tail, int line) {
  * letrec and letrec* today, so this produces identical observable
  * behavior through already-verified machinery instead of a parallel
  * bespoke implementation. */
-static IRNode *ir_lower_letrec(Compiler *c, val_t args, bool tail, int line) {
+static IRNode *ir_lower_letrec(Compiler *c, val_t args, bool tail, int line, val_t head) {
     val_t bindings = vcar(args);
     val_t body     = vcdr(args);
+    const char *form_name = (head == S_LETREC_STAR) ? "letrec*" : "letrec";
+
+    /* See ir_lower_let's identical comment (issue #124). form_name
+     * distinguishes letrec/letrec* in the raised error -- previously
+     * hardcoded to "letrec" even for a malformed letrec* binding, found
+     * by independent code review. */
+    for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+        require_min_args(vcar(b), 2, form_name);
 
     /* Build (define name init) forms in reverse, then prepend each (in
      * that reverse order) onto body -- restores original binding order
@@ -1030,7 +1078,7 @@ IRNode *ir_lower(Compiler *c, val_t expr, bool tail, int line) {
     }
     if (head == S_LETREC || head == S_LETREC_STAR) {
         require_min_args(args, 1, head == S_LETREC ? "letrec" : "letrec*");
-        return ir_lower_letrec(c, args, tail, line);
+        return ir_lower_letrec(c, args, tail, line, head);
     }
     /* Both `(define sym expr)` and `(define (f params...) body...)`
      * lambda-sugar are natively lowered (the latter via IR_LAMBDA, now
