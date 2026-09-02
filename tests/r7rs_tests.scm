@@ -1581,6 +1581,46 @@
          (string-length (get-output-string out)))
        101)
 
+;;; Issue #134 (found via independent security review of the fix itself):
+;;; scm_equal/val_hash (src/set.c) have the same unbounded-recursion
+;;; class, but reachable from ordinary Scheme data with no symbolic
+;;; module involved at all -- a deeply nested list compared with
+;;; `equal?` (or hashed) SIGSEGVed. Unlike the symbolic-CAS construction
+;;; functions, building a list this way costs O(depth), not O(depth^2)
+;;; (no re-simplification pass), so a large N here stays fast without
+;;; needing to constrain the process's own stack via ulimit the way
+;;; test_cli.sh's own #134 test does.
+(check "equal?: deeply nested list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (equal? (jit133-build-deep 3000000 1) (jit133-build-deep 3000000 1)))
+       'caught)
+(check "equal?: ordinary depth still works correctly"
+       (equal? (jit133-build-deep 50 1) (jit133-build-deep 50 1))
+       #t)
+
+;;; Issue #134 (found via independent security review of the fix
+;;; itself): num_mul's own separate inline tuple-distribution loop
+;;; (src/numeric.c) -- unlike num_add/num_sub/num_neg, which all route
+;;; through the already-guarded tuple_binop/tuple_unop -- recursed into
+;;; a nested (up-wrapped) tuple with no bound of its own. `up`/`down`
+;;; build nesting in O(1) per level with no simplification pass, so
+;;; this (like the equal? case above) stays fast at a large depth
+;;; without needing test_cli.sh's ulimit constraint. Also confirms
+;;; sx_depends_on (used by ∫/limit/series/laplace/fourier/etc as their
+;;; first structural check) is now guarded too -- it was the first
+;;; thing independent review found still crashing after the initial
+;;; #134 fix landed.
+(define (jit134-build-up n x)
+  (if (= n 0) x (jit134-build-up (- n 1) (up x))))
+(check "integrate: deeply nested up-tuple raises a catchable stack-overflow, not a SIGSEGV"
+       (let ((x (sym-var 'x)))
+         (guard (e (#t 'caught)) (∫ (jit134-build-up 3000000 x) x)))
+       'caught)
+(check "tuple arithmetic (+ - * on up/down) still works correctly"
+       (let ((v (up 1 2 3)))
+         (list (- v) (* 2 v) (+ v v) (* (down 1 1 1) v)))
+       (list (up -1 -2 -3) (up 2 4 6) (up 2 4 6) 6))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

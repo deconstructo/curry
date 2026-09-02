@@ -693,6 +693,48 @@ out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6
                           (+ p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19)))')
 check "let* with 20 sequential bindings still compiles and runs correctly" "$out" "20"
 
+# ─── Symbolic CAS (sx_simplify/sx_diff/etc, symbolic.c) shares the same
+#     stack-depth guard -- deep expression construction raises a
+#     catchable stack-overflow instead of a SIGSEGV (issue #134) ────────────
+#
+# sx_simplify re-walks its ENTIRE argument tree from scratch on every
+# call (no memoization of already-simplified subexpressions), so
+# building a chain of N nested `(sin ...)` applications one at a time
+# (each call re-simplifying the whole existing tree so far) costs
+# O(depth-at-guard^2), not O(N) -- confirmed empirically to take 30+
+# seconds under a Release build with a real 64MB stack, since the
+# guard's threshold (and therefore how deep the chain gets before
+# firing) scales with the real available stack. Rather than chase an
+# ever-larger N to outrun a bigger stack (as #125/#129/#133's own
+# thresholds needed), this test explicitly constrains the CHILD
+# process's own stack via `ulimit -s` first, making the guard's
+# threshold small, deterministic, and fast regardless of the host
+# environment's default stack or build type -- confirmed reliable and
+# fast (well under a second) across both Debug and Release builds.
+SYMDEEP_SCM="$TMPDIR_CLI/symdeep.scm"
+cat > "$SYMDEEP_SCM" << 'SYMDEEP_EOF'
+(define x (sym-var 'x))
+(define (wrap n e) (if (= n 0) e (wrap (- n 1) (sin e))))
+(guard (e (#t (display (error-message e)))) (wrap 3000 x) (display "no-crash"))
+SYMDEEP_EOF
+set +e
+symdeep_out=$(bash -c "ulimit -s 2048; \"$CURRY\" \"$SYMDEEP_SCM\"" 2>&1)
+set -e
+# Matches on the specific stack-overflow condition's own message
+# (via error-message), not just "guard caught something" -- an
+# unrelated error (a typo, an unbound name) would otherwise also
+# satisfy a bare "did guard's #t clause fire" check.
+check_contains "symbolic: deep expression construction raises a catchable stack-overflow, not a SIGSEGV" \
+               "$symdeep_out" "call stack overflow"
+# Confirms ordinary symbolic construction/simplification/differentiation/
+# printing (nowhere near where the guard fires) still works correctly.
+sym_out=$("$CURRY" -e '(define x (sym-var (quote x)))
+(display (list (sym->string (sym-expr (quote +) (sym-expr (quote sin) x) (sym-expr (quote *) x x)))
+               (simplify (sym-expr (quote +) x 0))
+               (∂ (sym-expr (quote sin) x) x)))')
+check "symbolic: ordinary construction/simplify/diff/printing still work correctly" \
+      "$sym_out" "(sin(x) + x^2 x (cos x))"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo
