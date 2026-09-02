@@ -171,6 +171,21 @@ static void require_binding_shape(val_t binding, const char *form_name) {
     require_min_args(binding, 2, form_name);
 }
 
+/* A second round of independent review of the #132 fix found more
+ * crashes in the exact same class, one level down: several of the
+ * "if (vis_nil(body)) return V_VOID; while (vis_pair(vcdr(body))) ..."
+ * body-loops the earlier fixes added only guarded the NIL case (no
+ * body forms at all) -- an IMPROPER (non-nil, non-pair) body, e.g.
+ * `(let* () . 5)` or `((lambda () . 5))`, still reaches vcdr(body) on
+ * a non-pair and crashes. This checks both invalid shapes in one call;
+ * callers still need their own `if (vis_nil(body)) return V_VOID;`
+ * (or equivalent) for the legitimate empty-body case -- this only
+ * rejects what's actually malformed. */
+static void require_body_shape(val_t body, const char *form_name) {
+    if (!vis_nil(body) && !vis_pair(body))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: ill-formed special form", form_name);
+}
+
 val_t eval(val_t expr, val_t env) {
     /* Detects an approaching real C-stack overflow from unbounded
      * non-tail recursion through eval() -- goto-tail iterations below
@@ -252,6 +267,12 @@ tail:
          * compiled path already accepts and compiles `(lambda ())` as
          * a no-op returning void when called. */
         require_min_args(rest, 1, "lambda");
+        /* `((lambda () . 5))` -- an improper (non-nil, non-pair) body --
+         * previously stored straight into c->body and crashed the FIRST
+         * time this closure was ever called (the shared closure-
+         * application trampoline, below, does vcdr(body) unconditionally).
+         * Checked once here at creation time rather than on every call. */
+        require_body_shape(vcdr(rest), "lambda");
         Closure *c = CURRY_NEW_PINNED(Closure);
         c->hdr.type  = T_CLOSURE;
         c->hdr.flags = 0;
@@ -263,6 +284,13 @@ tail:
     }
 
     if (op == S_BEGIN) {
+        /* `(begin . 5)` -- an improper (non-nil, non-pair) body --
+         * previously reached vcdr(rest) on a non-pair and crashed;
+         * found by a second round of independent review, and relevant
+         * beyond `begin` itself since named let's own tail call
+         * delegates to `(begin . body)` (see S_LET below), so this
+         * closes that path too. */
+        require_body_shape(rest, "begin");
         if (vis_nil(rest)) return V_VOID;
         while (vis_pair(vcdr(rest))) {
             eval(vcar(rest), env);
@@ -289,6 +317,8 @@ tail:
                 as_clos(val)->name = name_form;
         } else if (vis_pair(name_form)) {
             /* (define (name params...) body...) */
+            /* `(define (f) . 5)` -- see S_LAMBDA's identical comment. */
+            require_body_shape(vcdr(rest), "define");
             val_t name   = vcar(name_form);
             val_t params = vcdr(name_form);
             Closure *c   = CURRY_NEW_PINNED(Closure);
@@ -312,6 +342,17 @@ tail:
          * vcar(rest)/vcadr(rest) below and SIGSEGVed. */
         require_min_args(rest, 2, "set!");
         val_t sym = vcar(rest);
+        /* `(set! 1 2)` -- a non-symbol name -- found by independent
+         * security review to be a type-confusion bug, not just a
+         * missing-check crash: sym_cstr(sym) below unconditionally
+         * reads sym as if it were a Symbol object's own header/data
+         * layout, so a fixnum crashes outright and a String reads
+         * memory at the wrong struct-field offset and %s-formats
+         * whatever's there into the raised error message -- an
+         * out-of-bounds heap read reachable from untrusted source, not
+         * just a segfault. */
+        if (!vis_symbol(sym))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set!: not a symbol");
         val_t val = eval(vcadr(rest), env);
         if (!env_set(env, sym, val))
             scm_raise_code(EC_UNBOUND_VARIABLE, "set!: unbound variable: %s", sym_cstr(sym));
@@ -346,6 +387,10 @@ tail:
 
     /* (let ((x v) ...) body...) */
     if (op == S_LET) {
+        /* Issue #132 (missed in the first pass, found by a second round
+         * of independent review): `(let)` -- no bindings/body at all --
+         * previously fell straight into vcar(rest) below and SIGSEGVed. */
+        require_min_args(rest, 1, "let");
         val_t bindings = vcar(rest);
         val_t body     = vcdr(rest);
 
@@ -356,6 +401,10 @@ tail:
                 scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "let: ill-formed special form");
             bindings = vcar(body);
             body     = vcdr(body);
+            /* `(let loop () . 5)` -- see S_LAMBDA's identical comment;
+             * this closure's body is invoked via the same shared
+             * closure-application trampoline every ordinary call is. */
+            require_body_shape(body, "let");
 
             val_t new_env = env_extend(env);
             /* Collect params and inits */
@@ -407,12 +456,15 @@ tail:
             b = vcdr(b);
         }
         env = new_env;
+        require_body_shape(body, "let");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
 
     if (op == S_LET_STAR) {
+        /* `(let*)` -- see S_LET's identical comment just above. */
+        require_min_args(rest, 1, "let*");
         val_t bindings = vcar(rest), body = vcdr(rest);
         val_t cur_env = env_extend(env);
         while (vis_pair(bindings)) {
@@ -422,12 +474,15 @@ tail:
             bindings = vcdr(bindings);
         }
         env = cur_env;
+        require_body_shape(body, "let*");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
 
     if (op == S_LETREC || op == S_LETREC_STAR) {
+        /* `(letrec)` / `(letrec*)` -- see S_LET's identical comment above. */
+        require_min_args(rest, 1, op == S_LETREC ? "letrec" : "letrec*");
         val_t bindings = vcar(rest), body = vcdr(rest);
         val_t new_env = env_extend(env);
         /* Pre-define all vars as undefined */
@@ -446,6 +501,7 @@ tail:
             b = vcdr(b);
         }
         env = new_env;
+        require_body_shape(body, op == S_LETREC ? "letrec" : "letrec*");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
@@ -495,6 +551,7 @@ tail:
             b = vcdr(b);
         }
         env = new_env;
+        require_body_shape(body, op == S_LET_VALUES ? "let-values" : "let*-values");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
@@ -639,7 +696,10 @@ tail:
         val_t body = vcdr(rest);
         /* `(when #t)` -- a true test with no body forms at all -- hit
          * the same missing-body gap #124/#125 fixed for let* / letrec:
-         * vcdr(body) on a nil body crashed instead of returning void. */
+         * vcdr(body) on a nil body crashed instead of returning void.
+         * `(when #t . 5)` -- an improper body -- hit the sibling gap a
+         * later review round found (see require_body_shape's comment). */
+        require_body_shape(body, "when");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
@@ -651,6 +711,7 @@ tail:
         val_t cond = eval(vcar(rest), env);
         if (vis_true(cond)) return V_VOID;
         val_t body = vcdr(rest);
+        require_body_shape(body, "unless");
         if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
@@ -682,6 +743,9 @@ tail:
             if (vis_true(test_val)) {
                 /* Termination */
                 val_t result = vcdr(term);
+                /* `(do () (#t . 2))` -- an improper result-clause tail --
+                 * found by a later review round. */
+                require_body_shape(result, "do");
                 if (vis_nil(result)) return V_VOID;
                 while (vis_pair(vcdr(result))) { eval(vcar(result), do_env); result = vcdr(result); }
                 expr = vcar(result); env = do_env; goto tail;
@@ -714,6 +778,10 @@ tail:
     }
 
     if (op == S_DELAY) {
+        /* `(delay . 5)` -- see S_LAMBDA's identical comment; this
+         * closure's body is forced via the same shared closure-
+         * application trampoline every ordinary call is. */
+        require_body_shape(rest, "delay");
         Promise *p = CURRY_NEW(Promise);
         p->hdr.type=T_PROMISE; p->hdr.flags=0;
         p->state = PROMISE_LAZY;
@@ -726,6 +794,7 @@ tail:
     }
 
     if (op == S_DELAY_FORCE) {
+        require_body_shape(rest, "delay-force");
         Promise *p = CURRY_NEW(Promise);
         p->hdr.type=T_PROMISE; p->hdr.flags=0;
         p->state = PROMISE_LAZY;
@@ -761,6 +830,12 @@ tail:
     }
 
     if (op == S_LET_SYNTAX || op == S_LETREC_SYNTAX) {
+        /* `(let-syntax)` -- see S_LET's identical comment above -- and
+         * `(let-syntax ())` -- valid empty bindings but no body at all,
+         * confirmed the compiled path already accepts this leniently
+         * (returns void) -- previously crashed on vcar(rest) and on
+         * vcdr(body) respectively; neither was guarded before. */
+        require_min_args(rest, 1, op == S_LET_SYNTAX ? "let-syntax" : "letrec-syntax");
         val_t bindings = vcar(rest), body = vcdr(rest);
         val_t new_env = env_extend(env);
         while (vis_pair(bindings)) {
@@ -774,6 +849,8 @@ tail:
             bindings = vcdr(bindings);
         }
         env = new_env;
+        require_body_shape(body, op == S_LET_SYNTAX ? "let-syntax" : "letrec-syntax");
+        if (vis_nil(body)) return V_VOID;
         while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
         expr = vcar(body); goto tail;
     }
@@ -877,6 +954,10 @@ tail:
         if (!vis_pair(rest))
             scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "parameterize: ill-formed special form");
         val_t bindings = vcar(rest), body = vcdr(rest);
+        /* `(parameterize ((p 1)) . 5)` -- an improper body -- found by a
+         * later review round; checked up front rather than after the
+         * wind-frame machinery below is already set up. */
+        require_body_shape(body, "parameterize");
         int n = list_length(bindings);
 
         ParamBindings *pb = gc_alloc_raw_pinned(sizeof(ParamBindings));
@@ -975,6 +1056,11 @@ tail:
         val_t var         = vcar(var_clauses);
         val_t clauses     = vcdr(var_clauses);
         val_t body        = vcdr(rest);
+        /* `(guard (e) . 5)` -- an improper body -- found by a later
+         * review round; the nil case remains intentionally lenient
+         * (see comment above), only the genuinely malformed shape
+         * raises. */
+        require_body_shape(body, "guard");
 
         val_t result = V_VOID;
         ExnHandler h;
@@ -1018,12 +1104,26 @@ tail:
             val_t cbody  = vcdr(clause);
             cs = vcdr(cs);
             if (test == S_ELSE) {
+                /* `(guard (e (else)) ...)` / `(guard (e (else . 2)) ...)`
+                 * -- a missing or improper else-body -- found by a later
+                 * review round; unlike cond's else (which shares this
+                 * exact validate-then-nil-means-void shape, from #127),
+                 * this branch had never been guarded at all. */
+                if (!vis_nil(cbody) && !vis_pair(cbody))
+                    scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
+                if (vis_nil(cbody)) return V_VOID;
                 while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
                 return eval(vcar(cbody), guard_env);
             }
             val_t tv = eval(test, guard_env);
             if (vis_true(tv)) {
-                if (vis_nil(cbody)) return tv;
+                /* `!vis_pair(cbody)` (not just vis_nil) so an improper
+                 * body like `(guard (e (#t . 2)) ...)` -- found by the
+                 * same review round -- also falls back to returning the
+                 * test's own value rather than crashing on vcdr(cbody)
+                 * below; matches the compiled path's own confirmed
+                 * (if slightly odd) leniency for this exact shape. */
+                if (!vis_pair(cbody)) return tv;
                 while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
                 return eval(vcar(cbody), guard_env);
             }

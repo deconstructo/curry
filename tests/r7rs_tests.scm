@@ -1428,6 +1428,106 @@
              (call/cc (lambda (k) (k 42))))
        (list 1 2 5 10 2 1 '(1 2) 3 'caught 42))
 
+;;; A second round of independent code/security review of the #132 fix
+;;; found more crashes it didn't cover: `(let)`/`(let*)`/`(letrec)`/
+;;; `(letrec*)`/`(let-syntax)`/`(letrec-syntax)` -- no bindings/body at
+;;; all, missed since the first pass only checked forms with a fixed
+;;; small number of required arguments, not this "at least the
+;;; bindings position must exist" family -- plus a whole separate class
+;;; the first pass didn't consider: an IMPROPER (non-nil, non-pair)
+;;; body, e.g. `(let () . 5)`, reaches vcdr(body) on a non-pair in the
+;;; body-sequencing loop nearly every form in this file shares. Also
+;;; found: `(set! 1 2)` was a type-confusion bug, not just a crash --
+;;; sym_cstr(sym) read a non-Symbol object's memory at the wrong
+;;; struct-field offset.
+(check "let: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let) (interaction-environment))))
+       #t)
+(check "let*: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let*) (interaction-environment))))
+       #t)
+(check "letrec: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec) (interaction-environment))))
+       #t)
+(check "letrec*: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec*) (interaction-environment))))
+       #t)
+(check "let-syntax: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax) (interaction-environment))))
+       #t)
+(check "letrec-syntax: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec-syntax) (interaction-environment))))
+       #t)
+(check "let-syntax: empty bindings and no body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax ()) (interaction-environment)) #f))
+       #f)
+(check "when: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(when #t . 5) (interaction-environment))))
+       #t)
+(check "unless: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(unless #f . 5) (interaction-environment))))
+       #t)
+(check "let: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let () . 5) (interaction-environment))))
+       #t)
+(check "let*: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let* () . 5) (interaction-environment))))
+       #t)
+(check "letrec: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec () . 5) (interaction-environment))))
+       #t)
+(check "let-values: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-values () . 5) (interaction-environment))))
+       #t)
+(check "let-syntax: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax () . 5) (interaction-environment))))
+       #t)
+(check "lambda: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '((lambda () . 5)) (interaction-environment))))
+       #t)
+(check "named let: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let loop () . 5) (interaction-environment))))
+       #t)
+(check "delay: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(delay . 5) (interaction-environment))))
+       #t)
+(check "delay-force: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(delay-force . 5) (interaction-environment))))
+       #t)
+(check "guard: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e) . 5) (interaction-environment))))
+       #t)
+(check "guard: else clause with no body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e (else)) (raise 1)) (interaction-environment)) #f))
+       #f)
+(check "guard: else clause with improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e (else . 2)) (raise 1)) (interaction-environment))))
+       #t)
+(check "guard: matched-test clause with improper body doesn't crash (falls back to test value)"
+       (eval '(guard (e (#t . 2)) (raise 1)) (interaction-environment))
+       #t)
+(check "parameterize: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(parameterize () . 5) (interaction-environment))))
+       #t)
+(check "do: improper result-clause tail raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(do () (#t . 2)) (interaction-environment))))
+       #t)
+(check "begin: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(begin . 5) (interaction-environment))))
+       #t)
+(check "set!: non-symbol name raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set! 1 2) (interaction-environment))))
+       #t)
+(check "let/let*/letrec/let-syntax/when/unless/guard/do/begin still work correctly with ordinary bodies"
+       (list (let () 1 2 3) (let* () 4) (letrec () 5) (let-syntax () 6)
+             (when #t 'yes) (unless #f 'also-yes)
+             (do () (#t 'done))
+             (begin 1 2 3)
+             (let ((x 1)) (set! x 2) x)
+             (guard (e (else 'e)) (raise 1))
+             (guard (e (#t)) (raise 1)))
+       (list 3 4 5 6 'yes 'also-yes 'done 3 2 'e #t))
+
 ;;; Issue #133: the printer (write/display, src/port.c) has the same
 ;;; unbounded-recursion class #129 fixed for the reader, but for
 ;;; runtime-constructed data rather than source text: ws_count_refs/

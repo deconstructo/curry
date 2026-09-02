@@ -139,7 +139,29 @@ void scm_raise_val(val_t exn) {
         current_handler->exn = exn;
         longjmp(current_handler->jmp, 1);
     }
-    /* Unhandled: print and abort */
+    /* Unhandled: print and abort. */
+    /* Independent security review of #133 (the printer's own stack-
+     * depth guard) found this path could recurse without bound instead
+     * of aborting: raising an UNCAUGHT exception whose payload is
+     * itself deeply CAR-nested makes scm_write_shared below hit
+     * check_c_stack_depth's guard (we're already deep in the C stack --
+     * that's WHY it fired), which raises a stack-overflow condition by
+     * calling scm_raise_val again; with no current_handler that lands
+     * right back at this same "Unhandled: print" code, which tries to
+     * print AGAIN while still at (or past) the same stack depth,
+     * firing the guard again immediately -- an unbounded print-raise
+     * cycle observed to print thousands of "Unhandled exception:"
+     * lines before eventually SIGSEGVing anyway once even the
+     * guard's own emergency margin is exhausted. A thread-local re-
+     * entrancy flag breaks the cycle: the second (or later) entry
+     * skips the recursive-printer call entirely and goes straight to
+     * abort() with a plain, non-recursive fallback message. */
+    static CURRY_THREAD_LOCAL bool in_unhandled_exception = false;
+    if (in_unhandled_exception) {
+        fprintf(stderr, "\n(unhandled exception while printing a previous unhandled exception)\n");
+        abort();
+    }
+    in_unhandled_exception = true;
     fprintf(stderr, "Unhandled exception: ");
     scm_write_shared(exn, PORT_STDERR);
     fprintf(stderr, "\n");
