@@ -1358,6 +1358,229 @@
        (read (open-input-string "(1 2 (3 (4 5)) 'x)"))
        '(1 2 (3 (4 5)) (quote x)))
 
+;;; Issue #132: independent security review of the #127/#128 fix found
+;;; the identical unchecked-`rest`-destructure crash across a much
+;;; wider set of eval.c special forms than any single prior issue
+;;; tracked -- if/lambda/define/set!/define-values/quasiquote/
+;;; call-with-values/call-cc/guard/import(#:keyword) all SIGSEGVed on a
+;;; too-short argument list. Each of these already had a compiled-path
+;;; equivalent (compiler_classic.c/ir_lower.c) that validated correctly
+;;; for the same input -- only the tree-walker was missing the check.
+(define (jit132-malformed-raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+(check "if: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(if) (interaction-environment))))
+       #t)
+(check "if: missing consequent raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(if #t) (interaction-environment))))
+       #t)
+(check "lambda: missing params raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(lambda) (interaction-environment))))
+       #t)
+(check "define: missing name/expr raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define) (interaction-environment))))
+       #t)
+(check "set!: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set!) (interaction-environment))))
+       #t)
+(check "set!: missing value raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set! x) (interaction-environment))))
+       #t)
+(check "define-values: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-values) (interaction-environment))))
+       #t)
+(check "define-values: missing expr raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-values (a)) (interaction-environment))))
+       #t)
+(check "quasiquote: missing operand raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(quasiquote) (interaction-environment))))
+       #t)
+(check "call-with-values: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call-with-values) (interaction-environment))))
+       #t)
+(check "call-with-values: missing consumer raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call-with-values (lambda () 1)) (interaction-environment))))
+       #t)
+(check "call/cc: missing operand raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call/cc) (interaction-environment))))
+       #t)
+(check "guard: missing var-clauses list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard) (interaction-environment))))
+       #t)
+(check "guard: empty var-clauses list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard ()) (interaction-environment))))
+       #t)
+(check "guard: missing body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e)) (interaction-environment)) #f))
+       #f)
+(check "import: #:keyword with no argument raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(import (curry crypto) #:prefix) (interaction-environment))))
+       #t)
+(check "if/lambda/define/set!/define-values/quasiquote/call-with-values/call-cc/guard still work correctly"
+       (list (if #t 1) (if #f 1 2) ((lambda () 5))
+             (let () (define x 10) x)
+             (let ((y 1)) (set! y 2) y)
+             (let-values (((a) (values 1))) a)
+             `(1 ,(+ 1 1))
+             (call-with-values (lambda () (values 1 2)) +)
+             (guard (e (#t 'caught)) (raise 'oops))
+             (call/cc (lambda (k) (k 42))))
+       (list 1 2 5 10 2 1 '(1 2) 3 'caught 42))
+
+;;; A second round of independent code/security review of the #132 fix
+;;; found more crashes it didn't cover: `(let)`/`(let*)`/`(letrec)`/
+;;; `(letrec*)`/`(let-syntax)`/`(letrec-syntax)` -- no bindings/body at
+;;; all, missed since the first pass only checked forms with a fixed
+;;; small number of required arguments, not this "at least the
+;;; bindings position must exist" family -- plus a whole separate class
+;;; the first pass didn't consider: an IMPROPER (non-nil, non-pair)
+;;; body, e.g. `(let () . 5)`, reaches vcdr(body) on a non-pair in the
+;;; body-sequencing loop nearly every form in this file shares. Also
+;;; found: `(set! 1 2)` was a type-confusion bug, not just a crash --
+;;; sym_cstr(sym) read a non-Symbol object's memory at the wrong
+;;; struct-field offset.
+(check "let: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let) (interaction-environment))))
+       #t)
+(check "let*: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let*) (interaction-environment))))
+       #t)
+(check "letrec: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec) (interaction-environment))))
+       #t)
+(check "letrec*: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec*) (interaction-environment))))
+       #t)
+(check "let-syntax: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax) (interaction-environment))))
+       #t)
+(check "letrec-syntax: missing bindings/body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec-syntax) (interaction-environment))))
+       #t)
+(check "let-syntax: empty bindings and no body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax ()) (interaction-environment)) #f))
+       #f)
+(check "when: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(when #t . 5) (interaction-environment))))
+       #t)
+(check "unless: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(unless #f . 5) (interaction-environment))))
+       #t)
+(check "let: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let () . 5) (interaction-environment))))
+       #t)
+(check "let*: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let* () . 5) (interaction-environment))))
+       #t)
+(check "letrec: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(letrec () . 5) (interaction-environment))))
+       #t)
+(check "let-values: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-values () . 5) (interaction-environment))))
+       #t)
+(check "let-syntax: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let-syntax () . 5) (interaction-environment))))
+       #t)
+(check "lambda: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '((lambda () . 5)) (interaction-environment))))
+       #t)
+(check "named let: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(let loop () . 5) (interaction-environment))))
+       #t)
+(check "delay: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(delay . 5) (interaction-environment))))
+       #t)
+(check "delay-force: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(delay-force . 5) (interaction-environment))))
+       #t)
+(check "guard: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e) . 5) (interaction-environment))))
+       #t)
+(check "guard: else clause with no body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e (else)) (raise 1)) (interaction-environment)) #f))
+       #f)
+(check "guard: else clause with improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e (else . 2)) (raise 1)) (interaction-environment))))
+       #t)
+(check "guard: matched-test clause with improper body doesn't crash (falls back to test value)"
+       (eval '(guard (e (#t . 2)) (raise 1)) (interaction-environment))
+       #t)
+(check "parameterize: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(parameterize () . 5) (interaction-environment))))
+       #t)
+(check "do: improper result-clause tail raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(do () (#t . 2)) (interaction-environment))))
+       #t)
+(check "begin: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(begin . 5) (interaction-environment))))
+       #t)
+(check "set!: non-symbol name raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set! 1 2) (interaction-environment))))
+       #t)
+;; A third round of independent review found two more sites in the
+;; same class: define's symbol-name branch had its own separate
+;; ternary for the missing-value case that require_body_shape's sweep
+;; hadn't reached (only the lambda-sugar branch got it), and
+;; with-assumptions delegates to eval_body (runtime.c) -- the shared
+;; closure-application trampoline -- which had never been guarded
+;; against an improper body at all.
+(check "define: improper tail (symbol-name branch) raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define x . 5) (interaction-environment))))
+       #t)
+(check "with-assumptions: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(with-assumptions () . 5) (interaction-environment))))
+       #t)
+(check "let/let*/letrec/let-syntax/when/unless/guard/do/begin still work correctly with ordinary bodies"
+       (list (let () 1 2 3) (let* () 4) (letrec () 5) (let-syntax () 6)
+             (when #t 'yes) (unless #f 'also-yes)
+             (do () (#t 'done))
+             (begin 1 2 3)
+             (let ((x 1)) (set! x 2) x)
+             (guard (e (else 'e)) (raise 1))
+             (guard (e (#t)) (raise 1)))
+       (list 3 4 5 6 'yes 'also-yes 'done 3 2 'e #t))
+
+;;; Issue #133: the printer (write/display, src/port.c) has the same
+;;; unbounded-recursion class #129 fixed for the reader, but for
+;;; runtime-constructed data rather than source text: ws_count_refs/
+;;; ws_write (the write/display-shared machinery) and plain scm_write
+;;; (write-simple, and the debugger's own value printing) all recurse
+;;; once per level of CAR nesting with no bound. A deeply car-nested
+;;; list built at runtime (never going through the reader, so #129's
+;;; own fix doesn't cover it) previously SIGSEGVed on write/display/
+;;; write-simple. Fixed by sharing check_c_stack_depth (the same guard
+;;; #125/#129 already share) at all three functions' own entries.
+;; 1000000, not a smaller depth: same lesson as #125/#129's own test
+;; thresholds -- the guard fires at a fraction of the real per-thread
+;; stack limit, and a Release build's optimizer shrinks ws_write's own
+;; per-recursion-level stack frame enough that 500000 (already
+;; confirmed reliable under Debug builds and under write-simple's
+;; simpler, unshared scm_write path at any build type) stopped
+;; reaching the guard's threshold under Release+64MB-stack specifically
+;; -- confirmed empirically that 800000 was the minimum reliable depth
+;; there; 1000000 gives comfortable margin, confirmed fast (well under
+;; a second) even at this size.
+(define (jit133-build-deep n x)
+  (if (= n 0) x (jit133-build-deep (- n 1) (list x))))
+(check "write: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (write (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "write-simple: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (write-simple (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "display: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (display (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "write/write-simple/display: ordinary depth still works correctly"
+       (let ((out (open-output-string)))
+         (write (jit133-build-deep 50 1) out)
+         (string-length (get-output-string out)))
+       101)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
