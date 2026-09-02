@@ -744,8 +744,27 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
         val_t pat  = vcar(rule);
         val_t tmpl = vcdr(rule);
 
-        /* Skip the keyword position in the pattern */
-        val_t pat_rest  = vcdr(pat);
+        /* Skip the keyword position in the pattern. A top-level vector
+         * pattern (`#(keyword ...)`, valid per issue #135's own new
+         * vis_pair(pat)||vis_vector(pat) check) must be converted to a
+         * list first -- unlike every NESTED vector sub-pattern (handled
+         * by sr_match_one at line 122/173), this top-level keyword-skip
+         * previously called vcdr(pat) directly on a raw Vector object.
+         * Pair.cdr and Vector.data[0] sit at different struct offsets,
+         * so this was a real type-confusion / out-of-bounds read (found
+         * by a third review round), not just a missing-check crash:
+         * `vcdr` silently reinterpreted the vector's own length/first-
+         * element word as a val_t and handed it to sr_match_list. */
+        val_t pat_list  = vis_vector(pat) ? sr_vector_to_list(pat) : pat;
+        /* `#()` -- a zero-length vector pattern, with no keyword
+         * position at all -- converts to `()`, and vcdr(()) below
+         * would crash the same way vcdr on a raw empty Vector did.
+         * Treated as "this rule can never match" rather than raised,
+         * matching how a genuinely unmatchable rule is handled further
+         * down (sr_match_list returning false), since a macro can
+         * have other rules that DO match the same use. */
+        if (!vis_pair(pat_list)) continue;
+        val_t pat_rest  = vcdr(pat_list);
         val_t form_rest = vcdr(form);
 
         val_t bindings = V_NIL, ell_bindings = V_NIL;
@@ -798,6 +817,12 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     val_t ellipsis, literals, rules_kv;
     if (vis_symbol(second)) {
         /* (syntax-rules ellipsis (literal ...) rule ...) */
+        /* Issue #135: `(syntax-rules x)` -- an ellipsis identifier with
+         * no literals list (or anything) after it -- previously fell
+         * straight into vcaddr(form) below and SIGSEGVed. */
+        if (!vis_pair(vcddr(form)))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "syntax-rules: ill-formed special form");
         ellipsis = second;
         literals = vcaddr(form);
         rules_kv = vcdr(vcddr(form));
@@ -811,7 +836,26 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     val_t compiled = V_NIL;
     for (val_t r = rules_kv; vis_pair(r); r = vcdr(r)) {
         val_t rule = vcar(r);
+        /* `(syntax-rules () ())` -- an empty rule, not (pattern
+         * template) -- previously fell straight into vcar(rule)/
+         * vcadr(rule) below and SIGSEGVed. */
+        if (!vis_pair(rule) || !vis_pair(vcdr(rule)))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "syntax-rules: ill-formed rule");
         val_t pat  = vcar(rule);
+        /* Issue #135 (second round, found by independent review): a
+         * pattern that isn't itself a pair or vector -- `(syntax-rules
+         * () (x 1))`, `(syntax-rules () (5 1))` -- previously passed
+         * this rule-shape check (rule is a fine 2-element list) but
+         * later crashed sr_transformer_fn's own vcdr(pat) the first
+         * time the macro was actually USED, not when it was defined --
+         * so a malformed macro could be shipped/loaded successfully
+         * and only detonate for whoever calls it. Every R7RS pattern
+         * has a keyword/sub-pattern head position, so the top-level
+         * pattern is always list- or vector-shaped, never a bare atom. */
+        if (!vis_pair(pat) && !vis_vector(pat))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT,
+                            "syntax-rules: pattern must be a list or vector");
         val_t tmpl = vcadr(rule);
         compiled = scm_cons(scm_cons(pat, tmpl), compiled);
     }
@@ -871,9 +915,16 @@ val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t d
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: literals must be a proper list");
     if (scm_list_length(rules) < 0)
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: rules must be a proper list");
-    for (val_t r = rules; vis_pair(r); r = vcdr(r))
+    for (val_t r = rules; vis_pair(r); r = vcdr(r)) {
         if (!vis_pair(vcar(r)))
             scm_raise(V_FALSE, "%%rebuild-syntax-rules: each rule must be a (pattern . template) pair");
+        /* Same pattern-shape gap as sr_compile_fn's identical fix
+         * (issue #135, second round): a non-pair/non-vector pattern
+         * here crashes sr_transformer_fn's own vcdr(pat) at first use,
+         * not at definition time. */
+        if (!vis_pair(vcar(vcar(r))) && !vis_vector(vcar(vcar(r))))
+            scm_raise(V_FALSE, "%%rebuild-syntax-rules: pattern must be a list or vector");
+    }
     if (!vis_symbol(ellipsis))
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: ellipsis must be a symbol");
 

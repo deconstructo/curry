@@ -735,6 +735,53 @@ sym_out=$("$CURRY" -e '(define x (sym-var (quote x)))
 check "symbolic: ordinary construction/simplify/diff/printing still work correctly" \
       "$sym_out" "(sin(x) + x^2 x (cos x))"
 
+# ─── define-record-type / syntax-rules crash on malformed input on BOTH
+#     the compiled and tree-walked paths (issue #135) ───────────────────────
+#
+# Unlike every other issue in this series (#124-#132), record_type_build_spec
+# and sr_compile_fn are each a single function shared by compiler.c's native
+# codegen and eval.c's own tree-walker case -- tests/r7rs_tests.scm's own
+# `eval`-based checks already exercise this same shared code, but these
+# subprocess checks confirm the actual top-level compiled path too.
+check_no_segv "define-record-type: missing ctor/pred compiles to a clean error" \
+              '(define-record-type x)'
+check_no_segv "define-record-type: name itself a list compiles to a clean error" \
+              '(define-record-type (x))'
+check_no_segv "define-record-type: non-pair ctor-form compiles to a clean error" \
+              '(define-record-type point x point? (x px))'
+check_no_segv "define-record-type: non-pair field-spec compiles to a clean error" \
+              '(define-record-type point (mk-point x) point? y)'
+check_no_segv "syntax-rules: ellipsis identifier with nothing after it compiles to a clean error" \
+              '(define-syntax m (syntax-rules x))'
+check_no_segv "syntax-rules: empty rule compiles to a clean error" \
+              '(define-syntax m (syntax-rules () ()))'
+out=$("$CURRY" -e '(define-record-type point (mk-point x y) point? (x point-x) (y point-y set-point-y!))
+(define-syntax my-if (syntax-rules () ((_ c t e) (cond (c t) (else e)))))
+(display (list (point? (mk-point 1 2)) (point-x (mk-point 1 2)) (my-if #t (quote yes) (quote no))))')
+check "define-record-type/syntax-rules still compile and run correctly" "$out" "(#t 1 yes)"
+
+# A second round of independent review found the R6RS branch of
+# record_type_build_spec had no validation at all, and that a
+# malformed syntax-rules pattern (as opposed to a malformed rule)
+# passed definition-time validation but crashed on first USE of the
+# macro -- fixed to raise at definition time instead, so these need
+# only the bare (define-syntax ...) form, not a call to the macro.
+check_no_segv "define-record-type: R6RS field-spec too short compiles to a clean error" \
+              '(define-record-type x (fields (mutable)))'
+check_no_segv "define-record-type: R6RS non-symbol field name compiles to a clean error" \
+              '(define-record-type x (fields 5))'
+check_no_segv "define-record-type: non-symbol name compiles to a clean error" \
+              '(define-record-type 5 (fields a))'
+check_no_segv "define-record-type: name itself a pair compiles to a clean error" \
+              '(define-record-type (x) (fields a))'
+check_no_segv "syntax-rules: non-pair pattern compiles to a clean error" \
+              '(define-syntax m (syntax-rules () (x 1)))'
+check_no_segv "syntax-rules: fixnum pattern compiles to a clean error" \
+              '(define-syntax m (syntax-rules () (5 1)))'
+out2=$("$CURRY" -e '(define-record-type point2 (fields (mutable x) (immutable y) z))
+(display (list (point2? (make-point2 1 2 3)) (point2-x (make-point2 1 2 3))))')
+check "define-record-type R6RS with valid field specs still compiles and runs correctly" "$out2" "(#t 1)"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

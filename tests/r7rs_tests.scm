@@ -1621,6 +1621,124 @@
          (list (- v) (* 2 v) (+ v v) (* (down 1 1 1) v)))
        (list (up -1 -2 -3) (up 2 4 6) (up 2 4 6) 6))
 
+;;; Issue #135: define-record-type and syntax-rules crash on malformed
+;;; input on BOTH the compiled and tree-walked paths, unlike every
+;;; other issue in this series (#124-#132) -- record_type_build_spec
+;;; (src/record_type.c) and sr_compile_fn (src/syntax_rules.c) are each
+;;; a single function shared by compiler.c's native codegen and eval.c's
+;;; own S_DEFINE_RECORD_TYPE case, so a fix here closes both paths at
+;;; once and `eval` genuinely exercises the same code either path would
+;;; use, unlike #124-#132's own eval-only tests. Also exercised directly
+;;; (not just via eval) in tests/test_cli.sh, confirming the compiled
+;;; path specifically.
+(check "define-record-type: missing ctor/pred raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-record-type x) (interaction-environment))))
+       #t)
+(check "define-record-type: name itself a list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-record-type (x)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-pair ctor-form raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type point x point? (x px)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-pair field-spec raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type point (mk-point x) point? y) (interaction-environment))))
+       #t)
+(check "syntax-rules: ellipsis identifier with nothing after it raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-syntax m (syntax-rules x)) (interaction-environment))))
+       #t)
+(check "syntax-rules: empty rule raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-syntax m (syntax-rules () ())) (interaction-environment))))
+       #t)
+(check "define-record-type/syntax-rules still work correctly"
+       (eval '(begin
+                (define-record-type point (mk-point x y) point? (x point-x) (y point-y set-point-y!))
+                (define p (mk-point 1 2))
+                (define-syntax my-if (syntax-rules () ((_ c t e) (cond (c t) (else e)))))
+                (list (point? p) (point-x p) (point-y p) (my-if #t 'yes 'no)))
+             (interaction-environment))
+       (list #t 1 2 'yes))
+
+;;; A second round of independent code/security review of the #135 fix
+;;; found the R6RS branch of record_type_build_spec had NO validation
+;;; at all (the commit's own claim that it was "already defensive" was
+;;; wrong), and that a malformed syntax-rules PATTERN (as opposed to a
+;;; malformed RULE, already fixed) passed definition-time validation
+;;; but crashed sr_transformer_fn's own vcdr(pat) the first time the
+;;; macro was actually used -- so a malformed macro could be defined/
+;;; loaded successfully and only detonate for whoever later called it.
+(check "define-record-type: R6RS field-spec too short raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type x (fields (mutable))) (interaction-environment))))
+       #t)
+(check "define-record-type: R6RS non-symbol field name raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type x (fields 5)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-symbol name raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type 5 (fields a)) (interaction-environment))))
+       #t)
+(check "define-record-type: name itself a pair raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type (x) (fields a)) (interaction-environment))))
+       #t)
+(check "syntax-rules: non-pair pattern raises instead of crashing (at definition, not first use)"
+       (jit132-malformed-raises?
+        (lambda () (eval '(begin (define-syntax m (syntax-rules () (x 1))) (m)) (interaction-environment))))
+       #t)
+(check "syntax-rules: fixnum pattern raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(begin (define-syntax m (syntax-rules () (5 1))) (m)) (interaction-environment))))
+       #t)
+(check "%rebuild-syntax-rules: non-pair pattern raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda ()
+          (eval '(begin
+                   (define-syntax m (%rebuild-syntax-rules '() '((x . y)) '...))
+                   (m))
+                (interaction-environment))))
+       #t)
+(check "define-record-type R6RS/syntax-rules with valid patterns still work correctly"
+       (eval '(begin
+                (define-record-type point2 (fields (mutable x) (immutable y) z))
+                (define p2 (make-point2 1 2 3))
+                (define-syntax my-or (syntax-rules ()
+                                       ((_) #f) ((_ a) a)
+                                       ((_ a b ...) (let ((t a)) (if t t (my-or b ...))))))
+                (list (point2? p2) (point2-x p2) (point2-y p2) (point2-z p2) (my-or #f #f 5)))
+             (interaction-environment))
+       (list #t 1 2 3 5))
+
+;;; A third review round found the top-level vis_vector(pat) case the
+;;; #135 fix's own new pattern-shape check explicitly allows was itself
+;;; a type-confusion / out-of-bounds read: sr_transformer_fn called
+;;; vcdr(pat) directly on a raw Vector object (Pair.cdr and Vector's
+;;; own first-element slot sit at different struct offsets), silently
+;;; reinterpreting adjacent memory as a match-binding value instead of
+;;; raising or cleanly failing to match.
+(check "syntax-rules: top-level vector pattern doesn't type-confuse (rc=1, no wrong binding)"
+       (jit132-malformed-raises?
+        (lambda ()
+          (eval '(begin (define-syntax m (syntax-rules () (#(a) 'a))) (display (m 1 2 3)))
+                (interaction-environment))))
+       #t)
+(check "syntax-rules: empty vector pattern doesn't crash (never matches, tries other rules)"
+       (eval '(begin
+                (define-syntax m (syntax-rules () (#() 'empty) ((_ x) x)))
+                (m 42))
+             (interaction-environment))
+       42)
+(check "syntax-rules: nested vector sub-pattern still works correctly"
+       (eval '(begin
+                (define-syntax vec-len (syntax-rules () ((_ #(a b c)) (list a b c))))
+                (vec-len #(1 2 3)))
+             (interaction-environment))
+       (list 1 2 3))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
