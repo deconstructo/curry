@@ -1518,6 +1518,19 @@
 (check "set!: non-symbol name raises instead of crashing"
        (jit132-malformed-raises? (lambda () (eval '(set! 1 2) (interaction-environment))))
        #t)
+;; A third round of independent review found two more sites in the
+;; same class: define's symbol-name branch had its own separate
+;; ternary for the missing-value case that require_body_shape's sweep
+;; hadn't reached (only the lambda-sugar branch got it), and
+;; with-assumptions delegates to eval_body (runtime.c) -- the shared
+;; closure-application trampoline -- which had never been guarded
+;; against an improper body at all.
+(check "define: improper tail (symbol-name branch) raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define x . 5) (interaction-environment))))
+       #t)
+(check "with-assumptions: improper body raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(with-assumptions () . 5) (interaction-environment))))
+       #t)
 (check "let/let*/letrec/let-syntax/when/unless/guard/do/begin still work correctly with ordinary bodies"
        (list (let () 1 2 3) (let* () 4) (letrec () 5) (let-syntax () 6)
              (when #t 'yes) (unless #f 'also-yes)

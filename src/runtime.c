@@ -788,6 +788,17 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
 
 val_t eval_body(val_t exprs, val_t env) {
     if (vis_nil(exprs)) return V_VOID;
+    /* `(with-assumptions () . 5)` -- an improper (non-nil, non-pair)
+     * body -- found by a third round of independent review: this is
+     * the shared body-sequencing trampoline several eval.c special
+     * forms delegate to (with-assumptions among them), and unlike
+     * eval.c's own inlined body loops (see require_body_shape's
+     * comment there, same fix), this copy had never been guarded
+     * against a non-pair exprs that isn't nil either. Checked here
+     * once, in the shared function, rather than requiring every future
+     * caller to remember its own copy of the check. */
+    if (!vis_pair(exprs))
+        scm_raise(V_FALSE, "ill-formed special form: improper body");
     bool in_body = false;
     while (vis_pair(vcdr(exprs))) {
         val_t form = vcar(exprs);

@@ -312,6 +312,13 @@ tail:
         val_t val;
         if (vis_symbol(name_form)) {
             /* (define name expr) */
+            /* `(define x . 5)` -- an improper tail -- found by a third
+             * review round: the comment above claims a missing value
+             * expression is "already handled safely" by the ternary
+             * just below, which is true only for a NIL tail; vcdr(rest)
+             * being improper (non-nil, non-pair) still reached
+             * vcadr(rest) -> vcar(5) and crashed. */
+            require_body_shape(vcdr(rest), "define");
             val = vis_nil(vcdr(rest)) ? V_VOID : eval(vcadr(rest), env);
             if (vis_closure(val) && vis_false(as_clos(val)->name))
                 as_clos(val)->name = name_form;
