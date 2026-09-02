@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788269580806,
+  "lastUpdate": 1788338495353,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11177,6 +11177,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.614,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "03a30f9aba54b8fbfb5ae3e75ba39dcbdb5e1e78",
+          "message": "fix(eval,port): systemic eval.c argument-shape gaps and printer recursion (#132, #133) (#136)\n\n* fix(eval,port): systemic eval.c arg-shape gaps and printer recursion\n\nFixes #132 and #133, both filed from independent review of the #127/\n#128 fix (PR #131) but scoped separately since they're distinct\nsubsystems.\n\nIssue #132: eval.c's special-form handlers had the same unchecked-\n`rest`-destructure crash class as #124/#127/#128 across a much wider\nset of forms -- `(if)`, `(if test)`, `(lambda)`, `(define)`, `(set!)`,\n`(set! x)`, `(define-values)`, `(define-values (a))`, `(quasiquote)`,\n`(call-with-values)`, `(call-with-values p)`, `(call/cc)`, `(guard)`,\n`(guard ())`, and an import `#:keyword` modifier with no argument\nafter it, all SIGSEGVed. Added a general require_min_args helper to\neval.c (mirroring compiler.c's own, which eval.c has no access to --\nsame reasoning as the existing require_binding_shape, now reimplemented\nas a thin wrapper over the new helper) and applied it at each of these\nsites. guard's own missing-body case is intentionally left lenient\n(returns void, matching compile_guard's confirmed leniency for the\nsame input) rather than raising, mirroring the empty-body leniency\nalready established for let/let*/letrec/let-values/parameterize.\n\nIssue #133: the printer (write/display, src/port.c) had the identical\nunbounded-recursion class #129 fixed for the reader, but for runtime-\nconstructed data rather than source text -- ws_count_refs/ws_write\n(the write/display-shared machinery) and plain scm_write (write-simple,\nand the debugger's own value printing) all recurse once per level of\nCAR nesting with no bound, since only the reader's own guard (#129)\ncovers literal source text, not data built at runtime via repeated\n`cons`/`list`. Fixed by sharing check_c_stack_depth (the same guard\n#125/#129 already share) at all three functions' own single entry\npoints.\n\nBoth reader/printer thresholds needed to go well past a first-pass\nguess: same ulimit- and Release-build-optimizer-driven variance #125/\n#129's own test thresholds hit, confirmed empirically per vector.\n\nRegression tests added to tests/r7rs_tests.scm: 20 new checks for\n#132 (via eval, since these are compile-time-safe forms whose\ncompiled-path equivalents were already confirmed correct) and 4 new\nchecks for #133 (write/write-simple/display on a deeply car-nested\nruntime-built list, plus an ordinary-depth sanity check).\n\n415/415 (r7rs_tests.scm, confirmed across Debug/Release builds x 8MB/\n64MB stack ulimits), 92/92 (test_cli.sh), 117/117 ctest (default\nbuild, one pre-existing flaky websocket port-bind failure confirmed\nunrelated by rerunning in isolation), 118/118 ctest (LLVM build) --\nall with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(eval,runtime): close remaining #132/#133 gaps found by review\n\nA second round of independent code/security review of the #132/#133\nfix found the same bug classes still reachable in adjacent code:\n\neval.c (issue #132, continued):\n- `(let)`, `(let*)`, `(letrec)`, `(letrec*)`, `(let-syntax)`,\n  `(letrec-syntax)` -- missing bindings/body entirely -- still crashed\n  on their own top-level vcar(rest); the first pass only checked forms\n  with a small fixed argument count, not this \"at least the bindings\n  position must exist\" shape shared by the whole let family.\n- A new, wider class the first pass didn't consider at all: an\n  IMPROPER (non-nil, non-pair) body -- `(let () . 5)`, `(when #t . 5)`,\n  `((lambda () . 5))`, `(delay . 5)`, `(guard (e) . 5)`, `(parameterize\n  () . 5)`, `(do () (#t . 2))`, `(begin . 5)`, and named let's own\n  variant -- reaches vcdr(body) on a non-pair in the body-sequencing\n  loop nearly every one of these forms shares, including the shared\n  closure-application trampoline every ordinary function call goes\n  through (so a malformed lambda/define/named-let body crashed on\n  first CALL, not at creation time). Added a require_body_shape helper\n  (checks nil-or-pair, raising only for the genuinely malformed case --\n  callers keep their own existing nil-means-void leniency) and applied\n  it at every site above, plus at closure-creation time (lambda,\n  define's lambda-sugar, named let, delay/delay-force) rather than at\n  every call site, since all of those funnel through one shared\n  application path.\n- `guard`'s two clause-body branches (`else`, and the matched-test\n  branch) had their own separate, incomplete copies of this same\n  check -- `(guard (e (else)) ...)` and `(guard (e (else . 2)) ...)`\n  crashed since else's copy never got the nil/shape guard cond's own\n  else branch has had since #127; the matched-test branch's improper-\n  tail case now falls back to returning the test's own value, matching\n  the compiled path's own confirmed (if slightly unusual) leniency for\n  that exact shape.\n- `(set! 1 2)` was a type-confusion bug, not just a missing-check\n  crash: sym_cstr(sym) unconditionally read a non-Symbol value as if\n  it had a Symbol's own header/data layout -- a fixnum crashed\n  outright, and other heap types read memory at the wrong struct-field\n  offset and formatted whatever was there into the raised error\n  message (an out-of-bounds heap read reachable from untrusted\n  source). Fixed with an explicit vis_symbol check before use.\n\nruntime.c (issue #133, continued):\n- Raising an UNCAUGHT exception whose own payload is deeply CAR-nested\n  turned #133's stack-depth guard into an unbounded print-raise cycle\n  instead of a clean abort: the guard fires (correctly) while\n  scm_write_shared is trying to print the exception in scm_raise_val's\n  \"unhandled\" path, which raises a new stack-overflow condition, which\n  -- with no handler installed -- lands right back at that same\n  \"unhandled\" path, which tries to print AGAIN while still at the same\n  stack depth, firing the guard again immediately. Observed thousands\n  of repeated \"Unhandled exception:\" lines before eventually SIGSEGVing\n  once even the guard's own emergency margin was exhausted. Fixed with\n  a thread-local re-entrancy flag: a second entry into the unhandled-\n  exception path skips the recursive printer call entirely and aborts\n  with a plain, non-recursive fallback message instead.\n\nAlso filed #134 (out of scope here, separate subsystem): independent\nreview found the symbolic CAS module has a related but distinct\nunbounded-recursion problem, both during expression-tree construction\n(src/symbolic.c) and in its own dedicated printers (sx_write/sp_infix/\nsl_latex, src/symbolic_print.c), neither of which #133's printer guard\ncovers.\n\n27 new regression tests added to tests/r7rs_tests.scm.\n\n442/442 (r7rs_tests.scm, confirmed across Debug/Release builds x 8MB/\n64MB stack ulimits), 92/92 (test_cli.sh), 117/117 ctest (default\nbuild, one pre-existing flaky websocket port-bind failure confirmed\nunrelated by rerunning in isolation), 118/118 ctest (LLVM build) --\nall with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(eval,runtime): close define/with-assumptions gaps from third review\n\nA third independent review round found two more sites in the same\n\"improper body\" crash class the previous commit's require_body_shape\nsweep didn't reach:\n\n- `(define x . 5)` -- S_DEFINE's symbol-name branch had its own\n  separate ternary (`vis_nil(vcdr(rest)) ? V_VOID : eval(vcadr(rest),\n  env)`) for the missing-value case; the require_body_shape sweep only\n  reached the lambda-sugar branch just below it, not this one. An\n  improper (non-nil, non-pair) tail still reached vcadr(rest) -> a\n  non-pair vcar and crashed.\n- `(with-assumptions () . 5)` -- delegates to eval_body (runtime.c),\n  the shared closure-application trampoline several forms use, which\n  had never been guarded against an improper body at all (only a nil\n  one). Fixed once in the shared function rather than requiring every\n  future caller to remember its own copy of the check.\n\nAlso filed #135 (out of scope here): the same review round found\ndefine-record-type and syntax-rules crash on malformed input on BOTH\nthe compiled and tree-walked paths -- a different class from every\nprior issue in this series, since those were all tree-walker-only gaps\nwhere the compiler already validated correctly.\n\n2 new regression tests added to tests/r7rs_tests.scm.\n\n444/444 (r7rs_tests.scm), 92/92 (test_cli.sh), 117/117 ctest (default\nbuild, no flakes this run), 118/118 ctest (LLVM build) -- all with\n.scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-02T18:40:53+10:00",
+          "tree_id": "e25dd3967d7f907a45d83ee8b4c06caf3a0b0c76",
+          "url": "https://github.com/deconstructo/curry/commit/03a30f9aba54b8fbfb5ae3e75ba39dcbdb5e1e78"
+        },
+        "date": 1788338494668,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.983,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.083,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.611,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.8,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 133.766,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.255,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.24,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.926,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.283,
             "unit": "ms"
           }
         ]
