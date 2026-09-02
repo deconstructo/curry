@@ -4,6 +4,7 @@
 #include "numeric.h"
 #include "port.h"
 #include "lang_registry.h"
+#include "eval.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -107,6 +108,13 @@ static void sp_pos_mul_latex(val_t v, val_t port) {
  * expression is wrapped in parentheses so the caller's context is respected.
  */
 static void sp_infix(val_t expr, int ctx, val_t port) {
+    /* Issue #134: this expression-tree traversal self-recurses once per
+     * subexpression with no bound, distinct from #133's printer guard
+     * (which only covers scm_write's own plain-list/vector recursion,
+     * reached only for a numeric LEAF here, not this function's own
+     * tree-walk above that). Shares check_c_stack_depth with #133 and
+     * symbolic.c's own sx_simplify/sx_diff/etc (same fix, issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symbolic(expr) && !vis_symfn(expr)) { scm_display(expr, port); return; }
     if (vis_symvar(expr)) {
         Symbol *s = as_sym(as_symvar(expr)->name);
@@ -361,6 +369,8 @@ static void sl_num(val_t v, val_t port) {
  * is wrapped in \left(\right) for proper grouping.
  */
 static void sl_latex(val_t expr, int ctx, val_t port) {
+    /* Same unbounded-recursion class as sp_infix above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symbolic(expr) && !vis_symfn(expr)) { sl_num(expr, port); return; }
     if (vis_symvar(expr)) { sl_varname(expr, port); return; }
     if (vis_symfn(expr)) {
@@ -535,6 +545,9 @@ void sx_write_latex(val_t expr, val_t port) { sl_latex(expr, SP_LOW, port); }
 /* ---- Display (prefix notation) ---- */
 
 void sx_write(val_t expr, val_t port) {
+    /* Same unbounded-recursion class as sp_infix/sl_latex above (issue
+     * #134): this prefix-notation writer self-recurses too. */
+    check_c_stack_depth("symbolic");
     if (vis_symvar(expr)) {
         Symbol *s = as_sym(as_symvar(expr)->name);
         port_write_string(port, s->data, s->len);

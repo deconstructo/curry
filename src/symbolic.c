@@ -225,6 +225,16 @@ static bool decompose_trig_sq(val_t term,
 
 
 val_t sx_simplify(val_t expr) {
+    /* Issue #134: sx_simplify recurses into itself once per argument of
+     * every nested SymExpr node (just below, and again for the tuple
+     * case) with no bound at all -- a deeply nested expression tree
+     * built via repeated unary/binary applications (e.g. `(sin (sin
+     * (sin ... x)))` a few thousand levels deep, or any user script
+     * that recursively wraps a sym-var) SIGSEGVs during construction,
+     * before the value even exists for #133's printer guard to ever
+     * see. Shares check_c_stack_depth (runtime.c) with eval()/ir_emit()/
+     * the reader/the printer -- same real C stack, same guard. */
+    check_c_stack_depth("symbolic");
     if (!vis_symexpr(expr)) {
         /* Tuple: simplify each component */
         if (vis_tuple(expr)) {
@@ -1263,6 +1273,11 @@ static val_t sx_diff_symfn_idx(val_t fn, int idx) {
 /* ---- Symbolic differentiation ---- */
 
 val_t sx_diff(val_t expr, val_t var) {
+    /* Same unbounded-recursion class as sx_simplify/sx_substitute above
+     * (issue #134): its own separate self-recursive tree-walk (product/
+     * chain-rule cases below recurse into sx_diff on their own
+     * subexpressions), not merely a caller of either. */
+    check_c_stack_depth("symbolic");
     /* var must be a T_SYMVAR */
     if (!vis_symvar(var))
         scm_raise(V_FALSE, "∂: second argument must be a symbolic variable");
@@ -1485,6 +1500,8 @@ val_t sx_diff(val_t expr, val_t var) {
 /* ---- Wirtinger derivatives  ∂/∂z  and  ∂/∂z̄ ---- */
 
 val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(var))
         scm_raise(V_FALSE, "wirtinger: second argument must be a symbolic variable");
 
@@ -1657,6 +1674,11 @@ val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar) {
 /* ---- Substitution ---- */
 
 val_t sx_substitute(val_t expr, val_t var, val_t val) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134):
+     * this is its own separate self-recursive tree-walk, not merely a
+     * caller of sx_simplify (which only gets consulted at the very end
+     * of each level, on the way back up), so it needs its own guard. */
+    check_c_stack_depth("symbolic");
     if (vis_number(expr)) return expr;
     if (vis_symvar(expr)) {
         if (as_symvar(expr)->name == as_symvar(var)->name) return val;
@@ -1741,6 +1763,8 @@ static val_t expand_ncmul2(val_t a, val_t b) {
 }
 
 val_t sx_expand(val_t expr) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symbolic(expr)) return expr;
     if (vis_symvar(expr)) return expr;
 
@@ -2011,6 +2035,8 @@ val_t sx_leading_coeff(val_t expr, val_t var) {
 /* ---- Symbolic integration ---- */
 
 val_t sx_integrate(val_t expr, val_t var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(var))
         scm_raise(V_FALSE, "∫: second argument must be a symbolic variable");
 
@@ -2497,6 +2523,8 @@ val_t sx_integrate(val_t expr, val_t var) {
  *   D^α (D^β f) = D^(α+β) f                  (composition)
  */
 val_t sx_fracdiff(val_t expr, val_t alpha, val_t var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(var))
         scm_raise(V_FALSE, "frac-diff: third argument must be a symbolic variable");
 
@@ -2622,6 +2650,8 @@ unevaluated:;
  *   I^α (c·f)  = c · I^α f                   (constant factor)
  */
 val_t sx_fracint(val_t expr, val_t alpha, val_t var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(var))
         scm_raise(V_FALSE, "frac-int: third argument must be a symbolic variable");
 
@@ -2855,6 +2885,12 @@ static val_t sx_limit_unevaluated(val_t expr, val_t var, val_t point) {
 }
 
 static val_t sx_limit_inner(val_t expr, val_t var, val_t point, int dir, int depth) {
+    /* LHOPITAL_MAX below only bounds the L'Hopital-iteration count
+     * (depth+1 calls); the separate tree-structural recursion into each
+     * subexpression (la[i] = sx_limit_inner(args[i], ...), same depth)
+     * is bounded only by expression NESTING, which is unbounded --
+     * issue #134's same class as sx_diff/sx_simplify above. */
+    check_c_stack_depth("symbolic");
     if (depth > LHOPITAL_MAX)
         return sx_limit_unevaluated(expr, var, point);
 
@@ -3121,6 +3157,8 @@ static val_t sx_linear_coeff(val_t expr, val_t var) {
 }
 
 val_t sx_laplace(val_t expr, val_t t_var, val_t s_var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(t_var))
         scm_raise(V_FALSE, "laplace: t argument must be a symbolic variable");
     if (!vis_symvar(s_var))
@@ -3252,6 +3290,8 @@ val_t sx_laplace(val_t expr, val_t t_var, val_t s_var) {
 /* ---- Inverse Laplace (table-based) ---- */
 
 val_t sx_ilaplace(val_t expr, val_t s_var, val_t t_var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(s_var))
         scm_raise(V_FALSE, "ilaplace: s argument must be a symbolic variable");
     if (!vis_symvar(t_var))
@@ -3421,6 +3461,8 @@ static val_t sx_fourier_fn(val_t fn, val_t t_var, val_t w_var) {
 }
 
 val_t sx_fourier(val_t expr, val_t t_var, val_t w_var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symvar(t_var))
         scm_raise(V_FALSE, "fourier: t argument must be a symbolic variable");
     if (!vis_symvar(w_var))
@@ -3492,6 +3534,8 @@ val_t sx_fourier(val_t expr, val_t t_var, val_t w_var) {
 }
 
 val_t sx_ifourier(val_t expr, val_t w_var, val_t t_var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     /* Minimal inverse: linearity only, fallback unevaluated */
     if (!vis_symvar(w_var))
         scm_raise(V_FALSE, "ifourier: omega argument must be a symbolic variable");
