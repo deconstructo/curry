@@ -182,9 +182,37 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
 
     /* R7RS: (define-record-type name (ctor-name field...) pred
      *        (field acc [mut])...) */
+    /* Issue #135: unlike every other special form in curry (#124-#132),
+     * this shape is destructured identically by BOTH the compiler and
+     * the tree-walker via this one shared function, so a single fix
+     * here closes both paths at once. `(define-record-type x)` (no
+     * ctor-form/pred at all) and `(define-record-type (x))` (name_sym
+     * itself a list, so vcdr(rest) is nil) previously fell straight
+     * into vcadr(rest)/vcaddr(rest) below and SIGSEGVed. */
+    if (!vis_pair(vcdr(rest)) || !vis_pair(vcdr(vcdr(rest))))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                        "define-record-type: ill-formed special form");
     val_t ctor_form    = vcadr(rest);
     val_t pred_sym     = vcaddr(rest);
     val_t field_specs  = vcdr(vcddr(rest));
+
+    /* `(define-record-type point ctor-name point? ...)` -- ctor_form
+     * itself not a `(ctor-name field...)` list -- previously reached
+     * vcar(ctor_form)/vcdr(ctor_form) below on a non-pair. */
+    if (!vis_pair(ctor_form))
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                        "define-record-type: ill-formed special form");
+
+    /* `(define-record-type point (mk-point x) point? y)` -- a bare
+     * field-spec, not `(field-name getter [setter])` -- previously
+     * reached vcar(vcar(fs)) (the nfields-counting loop below) and
+     * vcadr(fspec) (the binding-building loop further down) on a
+     * non-pair. Both loops re-derive fspec from the same field_specs
+     * list, so validating once up front covers both. */
+    for (val_t fchk = field_specs; vis_pair(fchk); fchk = vcdr(fchk))
+        if (!vis_pair(vcar(fchk)) || !vis_pair(vcdr(vcar(fchk))))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "define-record-type: ill-formed field spec");
 
     uint32_t nfields = (uint32_t)rp_list_length(field_specs);
     RecordType *rtd = (RecordType *)gc_alloc_pinned(sizeof(RecordType) + nfields * sizeof(val_t));

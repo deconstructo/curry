@@ -798,6 +798,12 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     val_t ellipsis, literals, rules_kv;
     if (vis_symbol(second)) {
         /* (syntax-rules ellipsis (literal ...) rule ...) */
+        /* Issue #135: `(syntax-rules x)` -- an ellipsis identifier with
+         * no literals list (or anything) after it -- previously fell
+         * straight into vcaddr(form) below and SIGSEGVed. */
+        if (!vis_pair(vcddr(form)))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "syntax-rules: ill-formed special form");
         ellipsis = second;
         literals = vcaddr(form);
         rules_kv = vcdr(vcddr(form));
@@ -811,6 +817,12 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     val_t compiled = V_NIL;
     for (val_t r = rules_kv; vis_pair(r); r = vcdr(r)) {
         val_t rule = vcar(r);
+        /* `(syntax-rules () ())` -- an empty rule, not (pattern
+         * template) -- previously fell straight into vcar(rule)/
+         * vcadr(rule) below and SIGSEGVed. */
+        if (!vis_pair(rule) || !vis_pair(vcdr(rule)))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                            "syntax-rules: ill-formed rule");
         val_t pat  = vcar(rule);
         val_t tmpl = vcadr(rule);
         compiled = scm_cons(scm_cons(pat, tmpl), compiled);

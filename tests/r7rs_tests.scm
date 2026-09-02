@@ -1621,6 +1621,47 @@
          (list (- v) (* 2 v) (+ v v) (* (down 1 1 1) v)))
        (list (up -1 -2 -3) (up 2 4 6) (up 2 4 6) 6))
 
+;;; Issue #135: define-record-type and syntax-rules crash on malformed
+;;; input on BOTH the compiled and tree-walked paths, unlike every
+;;; other issue in this series (#124-#132) -- record_type_build_spec
+;;; (src/record_type.c) and sr_compile_fn (src/syntax_rules.c) are each
+;;; a single function shared by compiler.c's native codegen and eval.c's
+;;; own S_DEFINE_RECORD_TYPE case, so a fix here closes both paths at
+;;; once and `eval` genuinely exercises the same code either path would
+;;; use, unlike #124-#132's own eval-only tests. Also exercised directly
+;;; (not just via eval) in tests/test_cli.sh, confirming the compiled
+;;; path specifically.
+(check "define-record-type: missing ctor/pred raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-record-type x) (interaction-environment))))
+       #t)
+(check "define-record-type: name itself a list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-record-type (x)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-pair ctor-form raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type point x point? (x px)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-pair field-spec raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type point (mk-point x) point? y) (interaction-environment))))
+       #t)
+(check "syntax-rules: ellipsis identifier with nothing after it raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-syntax m (syntax-rules x)) (interaction-environment))))
+       #t)
+(check "syntax-rules: empty rule raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-syntax m (syntax-rules () ())) (interaction-environment))))
+       #t)
+(check "define-record-type/syntax-rules still work correctly"
+       (eval '(begin
+                (define-record-type point (mk-point x y) point? (x point-x) (y point-y set-point-y!))
+                (define p (mk-point 1 2))
+                (define-syntax my-if (syntax-rules () ((_ c t e) (cond (c t) (else e)))))
+                (list (point? p) (point-x p) (point-y p) (my-if #t 'yes 'no)))
+             (interaction-environment))
+       (list #t 1 2 'yes))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
