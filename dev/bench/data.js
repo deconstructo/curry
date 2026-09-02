@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788343752925,
+  "lastUpdate": 1788347880372,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11315,6 +11315,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 57.7,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "09337ea0ec83427bbd25ff98c13d7fbcd49bfe2d",
+          "message": "fix(record-type,syntax-rules): crashes on malformed input on both compiled and tree-walked paths (#135) (#139)\n\n* fix(record-type,syntax-rules): validate malformed input on both paths\n\nFixes #135: unlike every other issue in this series (#124-#132), where\nonly the tree-walker (eval.c) was missing a check the compiler already\nhad, define-record-type and syntax-rules crashed on malformed input on\nBOTH the compiled and tree-walked paths -- because record_type_build_spec\n(src/record_type.c) and sr_compile_fn (src/syntax_rules.c) are each a\nsingle function shared by compiler.c's native codegen and eval.c's own\ntree-walker case, and neither validated its own operand shape.\n\nrecord_type.c (record_type_build_spec, R7RS branch -- the R6RS branch\nwas already defensive):\n- `(define-record-type x)` -- no ctor-form/predicate at all -- and\n  `(define-record-type (x))` -- name itself a list, so vcdr(rest) is\n  nil -- both fell straight into vcadr(rest)/vcaddr(rest) and SIGSEGVed.\n- `(define-record-type point x point? (x px))` -- a non-pair ctor-form\n  -- reached vcar(ctor_form)/vcdr(ctor_form) on a non-pair.\n- `(define-record-type point (mk-point x) point? y)` -- a bare\n  field-spec, not `(field-name getter [setter])` -- reached\n  vcar(vcar(fs)) (the nfields-counting loop) and vcadr(fspec) (the\n  binding-building loop) on a non-pair; both loops re-derive fspec\n  from the same field_specs list, so one validation pass up front\n  covers both.\n\nsyntax_rules.c (sr_compile_fn, called for every `(syntax-rules ...)`\ntransformer-expr):\n- `(syntax-rules x)` -- an ellipsis identifier with nothing after it\n  -- reached vcaddr(form) past the end.\n- `(syntax-rules () ())` -- an empty rule, not `(pattern template)` --\n  reached vcar(rule)/vcadr(rule) on a non-pair. sr_transformer_fn's own\n  identical-looking vcar(rule)/vcdr(rule) needed no separate fix: it\n  only ever walks sr->rules, which sr_compile_fn always builds as\n  genuine (pattern . template) cons pairs via scm_cons, so a malformed\n  RAW rule can never reach it once sr_compile_fn's own input is\n  validated. sr_rebuild_syntax_env (the other constructor for this same\n  shape) was already defensive.\n\nRegression tests added to both tests/r7rs_tests.scm (via `eval` --\ngenuinely exercises the same shared function the compiler also calls,\nunlike #124-#132's own eval-only tests) and tests/test_cli.sh (a real\nsubprocess compile, confirming the top-level compiled path specifically).\n\n455/455 (r7rs_tests.scm), 101/101 (test_cli.sh), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build) -- all with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(record-type,syntax-rules): close remaining #135 gaps found by review\n\nTwo independent review rounds found the first #135 fix was incomplete\nin both files:\n\nrecord_type.c: the commit's own claim that the R6RS branch was\n\"already defensive\" was wrong -- it had no validation at all.\n- `(define-record-type x (fields (mutable)))` -- a field-spec pair too\n  short to contain a name -- reached vcadr(fspec) on a nil cdr (three\n  separate loops all re-derive fspec from the same field_list, so one\n  validation pass up front covers all three).\n- `(define-record-type x (fields (mutable 42)))` and `(define-record-\n  type x (fields 5))` -- a field-spec whose name isn't a symbol --\n  reached sym_cstr on a non-Symbol value. This is a real out-of-bounds\n  heap read, not just a missing-check crash: sym_cstr blindly reads a\n  Symbol's own header/data-pointer layout off whatever object is\n  actually there, and the resulting garbage bytes get snprintf'd into\n  a generated binding name that user code can then observe.\n- `(define-record-type 42 (fields a))` / `(define-record-type (x)\n  (fields a))` -- a non-symbol record name -- reached the same\n  sym_cstr(name_sym) call, shared by both the R6RS and R7RS branches,\n  so one check covers both.\n\nsyntax_rules.c: the first fix validated that a RULE has the right\nshape (pattern, template), but never that the pattern itself is a\npair/vector rather than a bare atom. `(syntax-rules () (x 1))` and\n`(syntax-rules () (5 1))` passed that check cleanly at DEFINITION time,\nthen crashed sr_transformer_fn's own vcdr(pat) the first time the\nmacro was actually USED -- meaning a malformed macro could be defined\nor loaded successfully and only detonate for whoever later called it.\nFixed by validating the pattern shape in both construction paths for\nthis data structure: sr_compile_fn (the ordinary `(syntax-rules ...)`\npath) and sr_rebuild_syntax_env (the internal %rebuild-syntax-rules\npath used for a compiled top-level macro's runtime re-registration).\n\n15 new regression tests added across tests/r7rs_tests.scm and\ntests/test_cli.sh.\n\n463/463 (r7rs_tests.scm), 108/108 (test_cli.sh), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build) -- all with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(syntax-rules): close top-level vector-pattern type confusion\n\nA third, final review round found the last hole in #135's own new\npattern-shape check: `vis_pair(pat) || vis_vector(pat)` correctly\nadmits a top-level vector pattern (`#(a b)`), but sr_transformer_fn\nthen called vcdr(pat) directly on the raw Vector object to skip the\nkeyword position -- Pair.cdr and Vector's own first-element slot sit\nat different struct offsets, so this silently reinterpreted adjacent\nmemory as a match-binding value instead of matching (or failing to\nmatch) correctly. Confirmed as real type confusion, not just a\ntheoretical gap: `(define-syntax m (syntax-rules () (#(a) 'a))) (m 1 2\n3)` bound `a` to the whole argument list `(1 2 3)` instead of raising\nor cleanly failing to match. For `#()` specifically (a zero-length\nvector pattern, converting to an empty list), the same code path would\nhave gone on to crash on vcdr(()).\n\nFixed by converting a vector pattern to a list first (matching how\nsr_match_one already handles a NESTED vector sub-pattern, just not\nthis top-level case), and treating a resulting empty list (`#()`, with\nno keyword position at all) as \"this rule can never match\" rather than\nraising -- a macro can have other rules that do match the same use, so\nthis mirrors how an ordinary non-matching rule is already handled.\n\n3 new regression tests added to tests/r7rs_tests.scm, including a\nsanity check that a nested vector sub-pattern (the actually meaningful\ncase) still works correctly.\n\n466/466 (r7rs_tests.scm), 108/108 (test_cli.sh), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build), 70/70 (syntax_rules_tests.scm) --\nall with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-02T21:17:12+10:00",
+          "tree_id": "7185f7b31766f56d80c84a373d67d68d6df06edb",
+          "url": "https://github.com/deconstructo/curry/commit/09337ea0ec83427bbd25ff98c13d7fbcd49bfe2d"
+        },
+        "date": 1788347878661,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.933,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.522,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.724,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.314,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 135.688,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.294,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.076,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.074,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.124,
             "unit": "ms"
           }
         ]
