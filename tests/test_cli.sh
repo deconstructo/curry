@@ -760,6 +760,28 @@ out=$("$CURRY" -e '(define-record-type point (mk-point x y) point? (x point-x) (
 (display (list (point? (mk-point 1 2)) (point-x (mk-point 1 2)) (my-if #t (quote yes) (quote no))))')
 check "define-record-type/syntax-rules still compile and run correctly" "$out" "(#t 1 yes)"
 
+# A second round of independent review found the R6RS branch of
+# record_type_build_spec had no validation at all, and that a
+# malformed syntax-rules pattern (as opposed to a malformed rule)
+# passed definition-time validation but crashed on first USE of the
+# macro -- fixed to raise at definition time instead, so these need
+# only the bare (define-syntax ...) form, not a call to the macro.
+check_no_segv "define-record-type: R6RS field-spec too short compiles to a clean error" \
+              '(define-record-type x (fields (mutable)))'
+check_no_segv "define-record-type: R6RS non-symbol field name compiles to a clean error" \
+              '(define-record-type x (fields 5))'
+check_no_segv "define-record-type: non-symbol name compiles to a clean error" \
+              '(define-record-type 5 (fields a))'
+check_no_segv "define-record-type: name itself a pair compiles to a clean error" \
+              '(define-record-type (x) (fields a))'
+check_no_segv "syntax-rules: non-pair pattern compiles to a clean error" \
+              '(define-syntax m (syntax-rules () (x 1)))'
+check_no_segv "syntax-rules: fixnum pattern compiles to a clean error" \
+              '(define-syntax m (syntax-rules () (5 1)))'
+out2=$("$CURRY" -e '(define-record-type point2 (fields (mutable x) (immutable y) z))
+(display (list (point2? (make-point2 1 2 3)) (point2-x (make-point2 1 2 3))))')
+check "define-record-type R6RS with valid field specs still compiles and runs correctly" "$out2" "(#t 1)"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo

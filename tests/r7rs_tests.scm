@@ -1662,6 +1662,57 @@
              (interaction-environment))
        (list #t 1 2 'yes))
 
+;;; A second round of independent code/security review of the #135 fix
+;;; found the R6RS branch of record_type_build_spec had NO validation
+;;; at all (the commit's own claim that it was "already defensive" was
+;;; wrong), and that a malformed syntax-rules PATTERN (as opposed to a
+;;; malformed RULE, already fixed) passed definition-time validation
+;;; but crashed sr_transformer_fn's own vcdr(pat) the first time the
+;;; macro was actually used -- so a malformed macro could be defined/
+;;; loaded successfully and only detonate for whoever later called it.
+(check "define-record-type: R6RS field-spec too short raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type x (fields (mutable))) (interaction-environment))))
+       #t)
+(check "define-record-type: R6RS non-symbol field name raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type x (fields 5)) (interaction-environment))))
+       #t)
+(check "define-record-type: non-symbol name raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type 5 (fields a)) (interaction-environment))))
+       #t)
+(check "define-record-type: name itself a pair raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(define-record-type (x) (fields a)) (interaction-environment))))
+       #t)
+(check "syntax-rules: non-pair pattern raises instead of crashing (at definition, not first use)"
+       (jit132-malformed-raises?
+        (lambda () (eval '(begin (define-syntax m (syntax-rules () (x 1))) (m)) (interaction-environment))))
+       #t)
+(check "syntax-rules: fixnum pattern raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(begin (define-syntax m (syntax-rules () (5 1))) (m)) (interaction-environment))))
+       #t)
+(check "%rebuild-syntax-rules: non-pair pattern raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda ()
+          (eval '(begin
+                   (define-syntax m (%rebuild-syntax-rules '() '((x . y)) '...))
+                   (m))
+                (interaction-environment))))
+       #t)
+(check "define-record-type R6RS/syntax-rules with valid patterns still work correctly"
+       (eval '(begin
+                (define-record-type point2 (fields (mutable x) (immutable y) z))
+                (define p2 (make-point2 1 2 3))
+                (define-syntax my-or (syntax-rules ()
+                                       ((_) #f) ((_ a) a)
+                                       ((_ a b ...) (let ((t a)) (if t t (my-or b ...))))))
+                (list (point2? p2) (point2-x p2) (point2-y p2) (point2-z p2) (my-or #f #f 5)))
+             (interaction-environment))
+       (list #t 1 2 3 5))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

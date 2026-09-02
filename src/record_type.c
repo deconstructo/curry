@@ -67,6 +67,20 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
         scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
                         "define-record-type: ill-formed special form");
     val_t name_sym = vcar(rest);
+    /* Issue #135 (second round, found by independent review): a
+     * non-symbol record name -- `(define-record-type 42 (fields a))`,
+     * `(define-record-type (x) (fields a))` -- previously reached
+     * sym_cstr(name_sym) below (both branches share this variable) and
+     * either crashed outright or read a non-Symbol object's memory at
+     * the wrong struct-field offset, feeding whatever bytes were there
+     * into snprintf -- a real out-of-bounds heap read, not just a
+     * missing-check crash, since it's reachable from untrusted source
+     * (or a programmatically-built form via `eval`) and its result
+     * (a corrupted generated binding name) is then observable by user
+     * code. Checked once here, covering both the R6RS and R7RS
+     * branches below since both use name_sym the same way. */
+    if (!vis_symbol(name_sym))
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "define-record-type: name must be a symbol");
     bool is_r6rs = vis_pair(vcdr(rest)) &&
                    vis_pair(vcadr(rest)) &&
                    (vcar(vcadr(rest)) == S_FIELDS  ||
@@ -92,6 +106,30 @@ void record_type_build_spec(val_t rest, val_t rtd_ref, RecordTypeSpec *spec) {
             val_t cl = vcar(c);
             if (vis_pair(cl) && vcar(cl) == S_FIELDS) { field_list = vcdr(cl); break; }
             c = vcdr(c);
+        }
+
+        /* Issue #135 (second round): a field-spec that's a pair but
+         * too short -- `(fields (mutable))`, missing the field name --
+         * previously reached vcadr(fspec) below (three separate loops
+         * all re-derive fspec from this same field_list) on a nil cdr.
+         * A field-spec that's a pair whose cadr isn't itself a symbol
+         * -- `(fields (mutable 42))` -- previously reached sym_cstr on
+         * a non-Symbol value, the same out-of-bounds-read class as
+         * name_sym above. Each fspec is either a bare symbol (an
+         * immutable field named directly) or `(mutable|immutable
+         * name)` per R6RS; validated once here rather than in each of
+         * the three loops that would otherwise re-derive the same
+         * unchecked fname. */
+        for (val_t fchk = field_list; vis_pair(fchk); fchk = vcdr(fchk)) {
+            val_t fspec = vcar(fchk);
+            if (vis_pair(fspec)) {
+                if (!vis_pair(vcdr(fspec)) || !vis_symbol(vcadr(fspec)))
+                    scm_raise_code(EC_WRONG_TYPE_ARGUMENT,
+                                    "define-record-type: ill-formed field spec");
+            } else if (!vis_symbol(fspec)) {
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT,
+                                "define-record-type: ill-formed field spec");
+            }
         }
 
         uint32_t nfields = (uint32_t)rp_list_length(field_list);

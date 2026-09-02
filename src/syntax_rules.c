@@ -824,6 +824,19 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
             scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
                             "syntax-rules: ill-formed rule");
         val_t pat  = vcar(rule);
+        /* Issue #135 (second round, found by independent review): a
+         * pattern that isn't itself a pair or vector -- `(syntax-rules
+         * () (x 1))`, `(syntax-rules () (5 1))` -- previously passed
+         * this rule-shape check (rule is a fine 2-element list) but
+         * later crashed sr_transformer_fn's own vcdr(pat) the first
+         * time the macro was actually USED, not when it was defined --
+         * so a malformed macro could be shipped/loaded successfully
+         * and only detonate for whoever calls it. Every R7RS pattern
+         * has a keyword/sub-pattern head position, so the top-level
+         * pattern is always list- or vector-shaped, never a bare atom. */
+        if (!vis_pair(pat) && !vis_vector(pat))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT,
+                            "syntax-rules: pattern must be a list or vector");
         val_t tmpl = vcadr(rule);
         compiled = scm_cons(scm_cons(pat, tmpl), compiled);
     }
@@ -883,9 +896,16 @@ val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t d
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: literals must be a proper list");
     if (scm_list_length(rules) < 0)
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: rules must be a proper list");
-    for (val_t r = rules; vis_pair(r); r = vcdr(r))
+    for (val_t r = rules; vis_pair(r); r = vcdr(r)) {
         if (!vis_pair(vcar(r)))
             scm_raise(V_FALSE, "%%rebuild-syntax-rules: each rule must be a (pattern . template) pair");
+        /* Same pattern-shape gap as sr_compile_fn's identical fix
+         * (issue #135, second round): a non-pair/non-vector pattern
+         * here crashes sr_transformer_fn's own vcdr(pat) at first use,
+         * not at definition time. */
+        if (!vis_pair(vcar(vcar(r))) && !vis_vector(vcar(vcar(r))))
+            scm_raise(V_FALSE, "%%rebuild-syntax-rules: pattern must be a list or vector");
+    }
     if (!vis_symbol(ellipsis))
         scm_raise(V_FALSE, "%%rebuild-syntax-rules: ellipsis must be a symbol");
 
