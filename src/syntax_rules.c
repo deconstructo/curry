@@ -744,8 +744,27 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
         val_t pat  = vcar(rule);
         val_t tmpl = vcdr(rule);
 
-        /* Skip the keyword position in the pattern */
-        val_t pat_rest  = vcdr(pat);
+        /* Skip the keyword position in the pattern. A top-level vector
+         * pattern (`#(keyword ...)`, valid per issue #135's own new
+         * vis_pair(pat)||vis_vector(pat) check) must be converted to a
+         * list first -- unlike every NESTED vector sub-pattern (handled
+         * by sr_match_one at line 122/173), this top-level keyword-skip
+         * previously called vcdr(pat) directly on a raw Vector object.
+         * Pair.cdr and Vector.data[0] sit at different struct offsets,
+         * so this was a real type-confusion / out-of-bounds read (found
+         * by a third review round), not just a missing-check crash:
+         * `vcdr` silently reinterpreted the vector's own length/first-
+         * element word as a val_t and handed it to sr_match_list. */
+        val_t pat_list  = vis_vector(pat) ? sr_vector_to_list(pat) : pat;
+        /* `#()` -- a zero-length vector pattern, with no keyword
+         * position at all -- converts to `()`, and vcdr(()) below
+         * would crash the same way vcdr on a raw empty Vector did.
+         * Treated as "this rule can never match" rather than raised,
+         * matching how a genuinely unmatchable rule is handled further
+         * down (sr_match_list returning false), since a macro can
+         * have other rules that DO match the same use. */
+        if (!vis_pair(pat_list)) continue;
+        val_t pat_rest  = vcdr(pat_list);
         val_t form_rest = vcdr(form);
 
         val_t bindings = V_NIL, ell_bindings = V_NIL;

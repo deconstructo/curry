@@ -1713,6 +1713,32 @@
              (interaction-environment))
        (list #t 1 2 3 5))
 
+;;; A third review round found the top-level vis_vector(pat) case the
+;;; #135 fix's own new pattern-shape check explicitly allows was itself
+;;; a type-confusion / out-of-bounds read: sr_transformer_fn called
+;;; vcdr(pat) directly on a raw Vector object (Pair.cdr and Vector's
+;;; own first-element slot sit at different struct offsets), silently
+;;; reinterpreting adjacent memory as a match-binding value instead of
+;;; raising or cleanly failing to match.
+(check "syntax-rules: top-level vector pattern doesn't type-confuse (rc=1, no wrong binding)"
+       (jit132-malformed-raises?
+        (lambda ()
+          (eval '(begin (define-syntax m (syntax-rules () (#(a) 'a))) (display (m 1 2 3)))
+                (interaction-environment))))
+       #t)
+(check "syntax-rules: empty vector pattern doesn't crash (never matches, tries other rules)"
+       (eval '(begin
+                (define-syntax m (syntax-rules () (#() 'empty) ((_ x) x)))
+                (m 42))
+             (interaction-environment))
+       42)
+(check "syntax-rules: nested vector sub-pattern still works correctly"
+       (eval '(begin
+                (define-syntax vec-len (syntax-rules () ((_ #(a b c)) (list a b c))))
+                (vec-len #(1 2 3)))
+             (interaction-environment))
+       (list 1 2 3))
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")
