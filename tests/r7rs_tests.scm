@@ -1358,6 +1358,116 @@
        (read (open-input-string "(1 2 (3 (4 5)) 'x)"))
        '(1 2 (3 (4 5)) (quote x)))
 
+;;; Issue #132: independent security review of the #127/#128 fix found
+;;; the identical unchecked-`rest`-destructure crash across a much
+;;; wider set of eval.c special forms than any single prior issue
+;;; tracked -- if/lambda/define/set!/define-values/quasiquote/
+;;; call-with-values/call-cc/guard/import(#:keyword) all SIGSEGVed on a
+;;; too-short argument list. Each of these already had a compiled-path
+;;; equivalent (compiler_classic.c/ir_lower.c) that validated correctly
+;;; for the same input -- only the tree-walker was missing the check.
+(define (jit132-malformed-raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+(check "if: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(if) (interaction-environment))))
+       #t)
+(check "if: missing consequent raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(if #t) (interaction-environment))))
+       #t)
+(check "lambda: missing params raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(lambda) (interaction-environment))))
+       #t)
+(check "define: missing name/expr raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define) (interaction-environment))))
+       #t)
+(check "set!: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set!) (interaction-environment))))
+       #t)
+(check "set!: missing value raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(set! x) (interaction-environment))))
+       #t)
+(check "define-values: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-values) (interaction-environment))))
+       #t)
+(check "define-values: missing expr raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(define-values (a)) (interaction-environment))))
+       #t)
+(check "quasiquote: missing operand raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(quasiquote) (interaction-environment))))
+       #t)
+(check "call-with-values: missing arguments raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call-with-values) (interaction-environment))))
+       #t)
+(check "call-with-values: missing consumer raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call-with-values (lambda () 1)) (interaction-environment))))
+       #t)
+(check "call/cc: missing operand raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(call/cc) (interaction-environment))))
+       #t)
+(check "guard: missing var-clauses list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard) (interaction-environment))))
+       #t)
+(check "guard: empty var-clauses list raises instead of crashing"
+       (jit132-malformed-raises? (lambda () (eval '(guard ()) (interaction-environment))))
+       #t)
+(check "guard: missing body doesn't crash (returns void)"
+       (jit132-malformed-raises? (lambda () (eval '(guard (e)) (interaction-environment)) #f))
+       #f)
+(check "import: #:keyword with no argument raises instead of crashing"
+       (jit132-malformed-raises?
+        (lambda () (eval '(import (curry crypto) #:prefix) (interaction-environment))))
+       #t)
+(check "if/lambda/define/set!/define-values/quasiquote/call-with-values/call-cc/guard still work correctly"
+       (list (if #t 1) (if #f 1 2) ((lambda () 5))
+             (let () (define x 10) x)
+             (let ((y 1)) (set! y 2) y)
+             (let-values (((a) (values 1))) a)
+             `(1 ,(+ 1 1))
+             (call-with-values (lambda () (values 1 2)) +)
+             (guard (e (#t 'caught)) (raise 'oops))
+             (call/cc (lambda (k) (k 42))))
+       (list 1 2 5 10 2 1 '(1 2) 3 'caught 42))
+
+;;; Issue #133: the printer (write/display, src/port.c) has the same
+;;; unbounded-recursion class #129 fixed for the reader, but for
+;;; runtime-constructed data rather than source text: ws_count_refs/
+;;; ws_write (the write/display-shared machinery) and plain scm_write
+;;; (write-simple, and the debugger's own value printing) all recurse
+;;; once per level of CAR nesting with no bound. A deeply car-nested
+;;; list built at runtime (never going through the reader, so #129's
+;;; own fix doesn't cover it) previously SIGSEGVed on write/display/
+;;; write-simple. Fixed by sharing check_c_stack_depth (the same guard
+;;; #125/#129 already share) at all three functions' own entries.
+;; 1000000, not a smaller depth: same lesson as #125/#129's own test
+;; thresholds -- the guard fires at a fraction of the real per-thread
+;; stack limit, and a Release build's optimizer shrinks ws_write's own
+;; per-recursion-level stack frame enough that 500000 (already
+;; confirmed reliable under Debug builds and under write-simple's
+;; simpler, unshared scm_write path at any build type) stopped
+;; reaching the guard's threshold under Release+64MB-stack specifically
+;; -- confirmed empirically that 800000 was the minimum reliable depth
+;; there; 1000000 gives comfortable margin, confirmed fast (well under
+;; a second) even at this size.
+(define (jit133-build-deep n x)
+  (if (= n 0) x (jit133-build-deep (- n 1) (list x))))
+(check "write: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (write (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "write-simple: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (write-simple (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "display: deeply car-nested runtime list raises a catchable stack-overflow, not a SIGSEGV"
+       (guard (e (#t 'caught))
+         (display (jit133-build-deep 1000000 1) (open-output-string)))
+       'caught)
+(check "write/write-simple/display: ordinary depth still works correctly"
+       (let ((out (open-output-string)))
+         (write (jit133-build-deep 50 1) out)
+         (string-length (get-output-string out)))
+       101)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

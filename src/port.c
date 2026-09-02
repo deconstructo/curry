@@ -3,6 +3,7 @@
 #include "gc.h"
 #include "numeric.h"
 #include "symbol.h"
+#include "eval.h"
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -408,6 +409,15 @@ static void write_number_notation(val_t v, val_t port) {
 }
 
 void scm_write(val_t v, val_t port) {
+    /* Issue #133: this plain (non-cycle-safe) writer -- reached
+     * directly by write-simple and by the debugger's own value
+     * printing (debug.c), bypassing scm_write_shared/ws_write's own
+     * guard entirely -- has the identical unbounded car-recursion in
+     * its own pair-writing branch below. Guarded at this function's
+     * single entry point since scm_write recurses into itself (both
+     * directly for a nested pair's car, and indirectly for a nested
+     * pair's own tail via the cdr loop's per-element calls). */
+    check_c_stack_depth("write");
     char buf[64];
     if (vis_nil(v))      { port_write_string(port, "()", 2); return; }
     if (vis_void(v))     { return; /* unspecified - write nothing */ }
@@ -716,6 +726,15 @@ static bool ws_is_compound(val_t v) {
  * list (no cycle, no sharing) overflow the C stack on write()/display(),
  * since those now route through this pass unconditionally. */
 static void ws_count_refs(val_t v, WSharedMap *m) {
+    /* Issue #133: the cdr-chain loop above is already iterative (see
+     * this function's own header comment), but the car recursion just
+     * below is not -- a deeply CAR-nested structure built at runtime
+     * (e.g. repeated `(list x)`-wrapping in a loop, never going through
+     * the reader) recurses once per nesting level with no bound, the
+     * same unbounded-C-recursion class #125/#129 already fixed for
+     * ir_emit and the reader. Shares check_c_stack_depth (runtime.c)
+     * with those, for the same reason ir_emit shares it with eval(). */
+    check_c_stack_depth("write");
     while (ws_is_compound(v)) {
         WSharedEntry *e = ws_find(m, v);
         if (e) { e->count++; return; }
@@ -758,6 +777,13 @@ static void ws_write_list(val_t v, val_t port, WSharedMap *m, bool as_display) {
 }
 
 static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display) {
+    /* See ws_count_refs's identical comment (issue #133) -- ws_write and
+     * ws_write_list are mutually recursive once per level of CAR
+     * nesting (ws_write_list's own cdr loop is already iterative, but
+     * its per-element ws_write(vcar(...)) call is not); guarding this
+     * single entry point covers the whole recursive tree, the same way
+     * ir_emit's own single guarded entry covers ir_emit_inline_call. */
+    check_c_stack_depth("write");
     if (!ws_is_compound(v)) { if (as_display) scm_display(v, port); else scm_write(v, port); return; }
     WSharedEntry *e = ws_find(m, v);
     if (e && e->count > 1) {

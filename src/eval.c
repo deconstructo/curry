@@ -149,9 +149,26 @@ static val_t eval_call_cc(val_t proc) {
  * compiler_internal.h, scoped to the bytecode compiler's own files --
  * this is the tree-walker's separate copy of the same tiny check,
  * matching its exact behavior and error message). */
+/* Issue #132: independent security review of the #127/#128 fix found
+ * the identical unchecked-`rest`-destructure crash across a much wider
+ * set of special forms than any single prior issue tracked (if/lambda/
+ * define/set!/define-values/quasiquote/call-with-values/call/cc/guard
+ * all SIGSEGVed on a too-short argument list). This is the tree-
+ * walker's own copy of compiler.c's require_min_args (same exact
+ * shape-checking loop, same error), used at every one of those sites
+ * below rather than hand-rolling an equivalent `!vis_pair(...)` check
+ * per site as the earlier one-off fixes did. */
+static void require_min_args(val_t args, int min, const char *form_name) {
+    val_t p = args;
+    for (int i = 0; i < min; i++) {
+        if (!vis_pair(p))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: ill-formed special form", form_name);
+        p = vcdr(p);
+    }
+}
+
 static void require_binding_shape(val_t binding, const char *form_name) {
-    if (!vis_pair(binding) || !vis_pair(vcdr(binding)))
-        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: ill-formed special form", form_name);
+    require_min_args(binding, 2, form_name);
 }
 
 val_t eval(val_t expr, val_t env) {
@@ -211,6 +228,12 @@ tail:
     }
 
     if (op == S_IF) {
+        /* Issue #132: `(if)` and `(if test)` (missing the consequent)
+         * previously fell straight into vcar(rest)/vcar(vcdr(rest))
+         * below and SIGSEGVed. The alternate branch is genuinely
+         * optional (checked separately below via vis_nil(alt)), but
+         * test and consequent are not. */
+        require_min_args(rest, 2, "if");
         val_t cond = eval(vcar(rest), env);
         rest = vcdr(rest);
         if (vis_true(cond)) {
@@ -223,6 +246,12 @@ tail:
     }
 
     if (op == S_LAMBDA) {
+        /* Issue #132: `(lambda)` -- no params list at all -- previously
+         * fell straight into vcar(rest) below and SIGSEGVed. A zero-
+         * body lambda (rest = (params) only) is fine -- confirmed the
+         * compiled path already accepts and compiles `(lambda ())` as
+         * a no-op returning void when called. */
+        require_min_args(rest, 1, "lambda");
         Closure *c = CURRY_NEW_PINNED(Closure);
         c->hdr.type  = T_CLOSURE;
         c->hdr.flags = 0;
@@ -243,6 +272,14 @@ tail:
     }
 
     if (op == S_DEFINE) {
+        /* Issue #132: `(define)` -- no name/expr at all -- previously
+         * fell straight into vcar(rest) below and SIGSEGVed. A missing
+         * value expression (`(define x)`) is already handled safely
+         * just below (vis_nil(vcdr(rest)) ? V_VOID : ...), and a
+         * non-symbol/non-pair name_form already raises via the final
+         * else branch -- only the totally-missing-rest case was
+         * unguarded. */
+        require_min_args(rest, 1, "define");
         val_t name_form = vcar(rest);
         val_t val;
         if (vis_symbol(name_form)) {
@@ -270,6 +307,10 @@ tail:
     }
 
     if (op == S_SET) {
+        /* Issue #132: `(set!)` / `(set! x)` -- missing the symbol
+         * and/or value expression -- previously fell straight into
+         * vcar(rest)/vcadr(rest) below and SIGSEGVed. */
+        require_min_args(rest, 2, "set!");
         val_t sym = vcar(rest);
         val_t val = eval(vcadr(rest), env);
         if (!env_set(env, sym, val))
@@ -283,6 +324,10 @@ tail:
 
     if (op == S_DEFINE_VALUES) {
         /* (define-values (var...) expr) */
+        /* Issue #132: `(define-values)` / `(define-values (a))` --
+         * missing the vars list and/or expr -- previously fell
+         * straight into vcar(rest)/vcadr(rest) below and SIGSEGVed. */
+        require_min_args(rest, 2, "define-values");
         val_t vars = vcar(rest);
         val_t val  = eval(vcadr(rest), env);
         if (!vis_values(val)) {
@@ -693,6 +738,9 @@ tail:
     }
 
     if (op == S_QUASIQUOTE) {
+        /* Issue #132: `(quasiquote)` -- no operand at all -- previously
+         * fell straight into vcar(rest) below and SIGSEGVed. */
+        require_min_args(rest, 1, "quasiquote");
         val_t expanded = expand_qq(vcar(rest), env, 0);
         expr = expanded; goto tail;
     }
@@ -792,6 +840,10 @@ tail:
     }
 
     if (op == S_CALL_WITH_VALUES) {
+        /* Issue #132: `(call-with-values)` / `(call-with-values p)` --
+         * missing the producer and/or consumer -- previously fell
+         * straight into vcar(rest)/vcadr(rest) below and SIGSEGVed. */
+        require_min_args(rest, 2, "call-with-values");
         val_t producer = eval(vcar(rest), env);
         val_t consumer = eval(vcadr(rest), env);
         val_t produced = apply(producer, V_NIL);
@@ -806,6 +858,9 @@ tail:
     }
 
     if (op == S_CALL_CC || op == S_CALL_WITH_CC) {
+        /* Issue #132: `(call/cc)` -- no operand at all -- previously
+         * fell straight into vcar(rest) below and SIGSEGVed. */
+        require_min_args(rest, 1, op == S_CALL_CC ? "call/cc" : "call-with-current-continuation");
         val_t proc = eval(vcar(rest), env);
         return eval_call_cc(proc);
     }
@@ -906,7 +961,17 @@ tail:
 
     if (op == S_GUARD) {
         /* (guard (var clause...) body...) */
+        /* Issue #132: `(guard)` -- no var/clauses list at all -- and
+         * `(guard ())` -- an empty one, missing var -- previously fell
+         * straight into vcar(rest)/vcar(var_clauses) below and
+         * SIGSEGVed. Matches compile_guard's own two require_min_args
+         * calls (one for each level). A missing BODY, by contrast, is
+         * intentionally left lenient below (matches the compiled
+         * path's own leniency: `(guard (e))` compiles to a no-op
+         * returning void, not an error). */
+        require_min_args(rest, 1, "guard");
         val_t var_clauses = vcar(rest);
+        require_min_args(var_clauses, 1, "guard");
         val_t var         = vcar(var_clauses);
         val_t clauses     = vcdr(var_clauses);
         val_t body        = vcdr(rest);
@@ -920,8 +985,10 @@ tail:
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
         current_handler = &h;
         if (setjmp(h.jmp) == 0) {
-            while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
-            result = eval(vcar(body), env);
+            if (!vis_nil(body)) {
+                while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+                result = eval(vcar(body), env);
+            }
             current_handler = h.prev;
             return result;
         }
@@ -994,6 +1061,13 @@ tail:
                 const char *kw = sym_cstr(vcar(rest));
                 if (kw[0] == '#' && kw[1] == ':') {
                     val_t kw_sym = vcar(rest); rest = vcdr(rest);
+                    /* Issue #132: a #:keyword modifier with no argument
+                     * after it at all (e.g. `(import (curry redis)
+                     * #:prefix)`) previously fell straight into
+                     * vcar(rest) below on a nil rest and SIGSEGVed. */
+                    if (!vis_pair(rest))
+                        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                                        "import: missing argument after %s", sym_cstr(kw_sym));
                     val_t kw_arg = vcar(rest); rest = vcdr(rest);
                     const char *name = sym_cstr(kw_sym) + 2; /* skip "#:" */
 
