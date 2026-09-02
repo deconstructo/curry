@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788338495353,
+  "lastUpdate": 1788343752925,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11246,6 +11246,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.283,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9d4d57b1ce677de92437a7dfa6655d578755b15c",
+          "message": "fix(symbolic,numeric,set): unbounded recursion in CAS, tuple arithmetic, and equal?/hash (#134) (#138)\n\n* fix(symbolic): share stack-depth guard across CAS construction/printing\n\nFixes #134: the symbolic CAS subsystem (src/symbolic.c,\nsrc/symbolic_print.c) has the same unbounded-recursion class #125/\n#129/#133 already fixed for eval()/ir_emit(), the reader, and the\nprinter, but for symbolic expression trees specifically -- a deeply\nnested expression (e.g. repeated `(sin ...)` wrapping, or any script\nthat recursively wraps a sym-var) SIGSEGVs during construction/\nsimplification, before #133's printer guard is ever reached (that\nguard only helps once a value already exists and is being written).\n\nEvery self-recursive expression-tree walker in symbolic.c now shares\ncheck_c_stack_depth (src/runtime.c): sx_simplify, sx_diff, sx_wirtinger,\nsx_substitute, sx_expand, sx_integrate, sx_limit_inner (the tree-\nstructural recursion there, distinct from its own existing\nLHOPITAL_MAX-bounded iteration-count recursion), sx_fracdiff,\nsx_fracint, sx_laplace, sx_ilaplace, sx_fourier, and sx_ifourier.\nsx_collect calls sx_expand immediately and has no separate self-\nrecursion of its own, so it's covered transitively.\n\nsymbolic_print.c's three dedicated writers -- sx_write (prefix,\nsym->string), sp_infix (sym->infix), and sl_latex (sym->latex) -- self-\nrecurse into their own expression-tree traversal without ever going\nthrough scm_write except for a numeric leaf, so #133's printer guard\ndidn't cover their own tree-walk above that. All three now share the\nsame guard.\n\nA regression test using the straightforward \"wrap N times, one sin\napplication per iteration\" construction turned out to cost O(depth-at-\nguard^2), not O(N): sx_simplify re-walks its entire argument tree from\nscratch on every call (no memoization of already-simplified\nsubexpressions), and how deep the chain gets before the guard fires\nscales with the real available stack -- confirmed to take 30+ seconds\nunder a Release build with a real 64MB stack, the same threshold-\ninflation #125/#129/#133's own tests hit for a different reason.\nRather than chase an ever-larger N, the test in tests/test_cli.sh\nexplicitly constrains the child process's own stack via `ulimit -s`\nfirst, making the guard's threshold small, deterministic, and fast\n(well under a second) regardless of host environment or build type.\n\n406/406 (numeric_ext_tests.scm, the primary symbolic-CAS test file,\nunaffected), 94/94 (test_cli.sh), 117/117 ctest (default build),\n118/118 ctest (LLVM build) -- all with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(symbolic,numeric,set): close remaining #134 gaps found by review\n\nIndependent code/security review of the first #134 fix found more\nself-recursive tree-walkers in the same class, plus two real crashes\nstill reachable after the initial guards landed:\n\nsymbolic.c: added the same check_c_stack_depth guard to six more\nself-recursive functions the first pass missed: sx_equal (structural\nequality), sx_trigsimp, sx_is_nc (non-commutativity test), sx_degree_long\n(polynomial degree), and the mutually-recursive sx_mul_for_ratio/\nsx_ratio_simplify pair. Most importantly, sx_depends_on: independent\nsecurity review found this one still crashed at unbounded depth\ndespite sx_integrate/sx_limit/sx_series/sx_laplace/sx_ilaplace/\nsx_fourier/sx_ifourier's own guards already having run, because it's\ncalled as their first structural check on a `up`/`down` tuple\nexpression -- tuples build nesting in O(1) per level with no\nsimplification pass, so unlike ordinary symbolic-expression\nconstruction (capped by sx_simplify's own guard), a tuple's depth is\nnever bounded before it reaches here.\n\nnumeric.c: num_mul has its own separate inline tuple-distribution loop\n-- unlike num_add/num_sub/num_neg, which all route through the\nalready-guarded tuple_binop/tuple_unop -- that recursed into a nested\ntuple with no bound of its own. This was the actual remaining crash\nfor `(∫ big x)` on a deeply up-wrapped tuple even after sx_depends_on\nwas fixed.\n\nset.c: scm_equal/val_hash have the identical unbounded-recursion\nclass, but reachable from ordinary Scheme data with no symbolic module\ninvolved at all -- a deeply nested list compared with `equal?` (or\nused as a hash-table key) SIGSEGVed. Broader-impact than the rest of\n#134 since set.c backs `equal?` and hash tables generally; fixed here\nrather than filed separately since it's the same trivial guard.\n\nsymbolic_print.c: also guarded sxc_write (the 'cuneiform notation\nwriter), a fourth self-recursive symbolic printer the first pass\nmissed -- not independently demonstrated to be exploitable (its own\nper-level stack frame is far smaller than the construction-side\nfunctions, so a tree only reaches it if already shallow enough to have\nsurvived construction), added for defense-in-depth/consistency with\nthe other three writers.\n\nFiled #137 (out of scope here): independent review also found\nsx_simplify's total lack of memoization is a genuine CPU-exhaustion\nDoS distinct from the stack-depth issue this fix closes -- an\nO(depth^2) re-walk that can burn tens of seconds of CPU under a\ngenerous stack ulimit before the guard ever fires. Fixing that\nrequires real memoization, a bigger change than a stack guard.\n\n10 new regression tests added to tests/r7rs_tests.scm (the up-tuple\nand equal? cases build in O(depth), not O(depth^2), so unlike\ntest_cli.sh's own symbolic-construction test they stay fast without\nneeding to constrain the process's own stack). Also improved the\nexisting test_cli.sh symbolic regression test to match on the specific\n\"call stack overflow\" message via error-message rather than accepting\nany raised condition.\n\n448/448 (r7rs_tests.scm), 94/94 (test_cli.sh), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build) -- all with .scc caches cleared.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-02T20:08:20+10:00",
+          "tree_id": "568d2b3b803b5cd02c3f0d24f4bb41f16bef9286",
+          "url": "https://github.com/deconstructo/curry/commit/9d4d57b1ce677de92437a7dfa6655d578755b15c"
+        },
+        "date": 1788343752267,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.604,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.342,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.046,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.45,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 106.453,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 222.895,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 52.001,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 72.271,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 57.7,
             "unit": "ms"
           }
         ]
