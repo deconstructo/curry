@@ -305,6 +305,14 @@ bool num_is_integer(val_t v) {
 
 /* Apply a binary numeric op element-wise to two same-type tuples. */
 static val_t tuple_binop(val_t a, val_t b, val_t (*op)(val_t, val_t), const char *ctx) {
+    /* Issue #134 (found via independent security review of the
+     * symbolic-CAS fix): a nested tuple (built in O(1) per level via
+     * `up`/`down`, with no simplification pass to cap depth the way
+     * sx_simplify does) recurses here once per level of nesting when
+     * `op` (num_neg/num_add/etc) dispatches back into a nested tuple
+     * element, with no bound. Same guard, same class as symbolic.c's
+     * own tree-walkers. */
+    check_c_stack_depth("numeric");
     Tuple *ta = as_tuple(a), *tb = as_tuple(b);
     if (ta->hdr.type != tb->hdr.type || ta->len != tb->len)
         scm_raise(V_FALSE, "tuple %s: type/dimension mismatch", ctx);
@@ -315,6 +323,8 @@ static val_t tuple_binop(val_t a, val_t b, val_t (*op)(val_t, val_t), const char
 
 /* Apply a unary numeric op element-wise to a tuple. */
 static val_t tuple_unop(val_t a, val_t (*op)(val_t)) {
+    /* Same unbounded-recursion class as tuple_binop above (issue #134). */
+    check_c_stack_depth("numeric");
     Tuple *t = as_tuple(a);
     val_t buf[256]; uint32_t n = t->len < 256 ? t->len : 256;
     for (uint32_t i = 0; i < n; i++) buf[i] = op(t->data[i]);
@@ -531,6 +541,14 @@ val_t num_mul(val_t a, val_t b) {
     /* Tuple distribution takes priority over symbolic so that sym-var × up-tuple
        distributes component-wise rather than wrapping in a CAS expression. */
     if (vis_tuple(a) || vis_tuple(b)) {
+        /* Issue #134: unlike num_add/num_sub/num_neg (which all route
+         * through the already-guarded tuple_binop/tuple_unop), this is
+         * num_mul's own separate inline tuple-distribution loop, which
+         * recurses into itself (num_mul(scalar, t->data[i])) once per
+         * level of a nested (up-wrapped) tuple with no bound. Found via
+         * independent security review after tuple_binop/tuple_unop's
+         * own guards turned out not to cover this path. */
+        check_c_stack_depth("numeric");
         if (vis_tuple(a) && vis_tuple(b)) {
             if (!vis_down(a) || !vis_up(b))
                 scm_raise(V_FALSE, "tuple *: only (down)*(up) contraction is defined");

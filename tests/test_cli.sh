@@ -715,12 +715,17 @@ SYMDEEP_SCM="$TMPDIR_CLI/symdeep.scm"
 cat > "$SYMDEEP_SCM" << 'SYMDEEP_EOF'
 (define x (sym-var 'x))
 (define (wrap n e) (if (= n 0) e (wrap (- n 1) (sin e))))
-(guard (e (#t (display "caught"))) (wrap 3000 x) (display "no-crash"))
+(guard (e (#t (display (error-message e)))) (wrap 3000 x) (display "no-crash"))
 SYMDEEP_EOF
 set +e
 symdeep_out=$(bash -c "ulimit -s 2048; \"$CURRY\" \"$SYMDEEP_SCM\"" 2>&1)
 set -e
-check "symbolic: deep expression construction raises a catchable stack-overflow, not a SIGSEGV" "$symdeep_out" "caught"
+# Matches on the specific stack-overflow condition's own message
+# (via error-message), not just "guard caught something" -- an
+# unrelated error (a typo, an unbound name) would otherwise also
+# satisfy a bare "did guard's #t clause fire" check.
+check_contains "symbolic: deep expression construction raises a catchable stack-overflow, not a SIGSEGV" \
+               "$symdeep_out" "call stack overflow"
 # Confirms ordinary symbolic construction/simplification/differentiation/
 # printing (nowhere near where the guard fires) still works correctly.
 sym_out=$("$CURRY" -e '(define x (sym-var (quote x)))

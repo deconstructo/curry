@@ -634,6 +634,15 @@ static Symbol *sxc_op_glyph(val_t op) {
 }
 
 static void sxc_write(val_t expr, val_t port) {
+    /* Same unbounded-recursion class as sx_write/sp_infix/sl_latex above
+     * (issue #134): a fourth self-recursive symbolic-expression writer,
+     * for the 'cuneiform notation. Not independently demonstrated to be
+     * exploitable (its own per-level stack frame is far smaller than
+     * the construction-side functions above, so in practice a tree
+     * survives construction only if it's already too shallow to reach
+     * this guard) -- added for defense-in-depth and consistency with
+     * the other three writers rather than a confirmed crash. */
+    check_c_stack_depth("symbolic");
     if (!vis_symbolic(expr) && !vis_symfn(expr)) {
         /* Numeric leaf: render in cuneiform when the value supports it
          * (sex_to_cuneiform already falls back to plain decimal itself). */

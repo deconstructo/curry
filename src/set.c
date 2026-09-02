@@ -3,6 +3,7 @@
 #include "gc.h"
 #include "numeric.h"
 #include "symbolic.h"
+#include "eval.h"
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -33,6 +34,13 @@ bool scm_eqv(val_t a, val_t b) {
 }
 
 bool scm_equal(val_t a, val_t b) {
+    /* Same unbounded-recursion class as symbolic.c's own tree-walkers
+     * (issue #134, found via independent security review of that fix):
+     * self-recurses into pair/vector/etc structure with no bound, and
+     * is reachable from ordinary Scheme data with no symbolic module
+     * involved at all -- a deeply nested list built via `(list e)` in
+     * a loop and compared with `equal?` SIGSEGVed. */
+    check_c_stack_depth("equal?");
     if (scm_eqv(a, b)) return true;
     if (vis_pair(a) && vis_pair(b))
         return scm_equal(vcar(a), vcar(b)) && scm_equal(vcdr(a), vcdr(b));
@@ -109,6 +117,8 @@ static uint32_t hash_mpz(mpz_srcptr z) {
  * inequality at the first differing element — an accepted tradeoff, same
  * as every other Scheme's equal-hash implementation. */
 uint32_t val_hash(val_t v, int cmp_type) {
+    /* Same unbounded-recursion class as scm_equal above (issue #134). */
+    check_c_stack_depth("equal?");
     if (cmp_type == SET_CMP_EQ || vis_imm(v) || vis_fixnum(v) || vis_char(v))
         return hash_u64((uint64_t)v);
     if (vis_flonum(v)) {

@@ -148,6 +148,8 @@ val_t sx_expr_arg(val_t e, int i) { return as_symexpr(e)->args[i]; }
 /* ---- Structural equality ---- */
 
 bool sx_equal(val_t a, val_t b) {
+    /* Same unbounded-recursion class as sx_simplify (issue #134). */
+    check_c_stack_depth("symbolic");
     if (a == b) return true;
     if (vis_symvar(a) && vis_symvar(b))
         return as_symvar(a)->name == as_symvar(b)->name;
@@ -949,6 +951,8 @@ val_t sx_simplify(val_t expr) {
  *   cos²(f) − sin²(f)  →  cos(2·f)
  */
 val_t sx_trigsimp(val_t expr) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (!vis_symexpr(expr)) return expr;
 
     SymExpr *se = as_symexpr(expr);
@@ -1127,6 +1131,8 @@ val_t sx_trigsimp(val_t expr) {
    quaternion-typed sym-var — signalling that products involving v are
    non-commutative and must use SX_NCMUL. */
 static bool sx_is_nc(val_t v) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (vis_quat(v) || vis_oct(v)) return true;
     if (vis_symvar(v)) return (sym_var_flags(v) & SYM_ASSUME_QUATERNION) != 0;
     if (!vis_symexpr(v)) return false;
@@ -1704,6 +1710,16 @@ val_t sx_substitute(val_t expr, val_t var, val_t val) {
 /* ---- Dependency test ---- */
 
 bool sx_depends_on(val_t expr, val_t var) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134).
+     * Found by independent security review to be reachable at
+     * unbounded depth despite sx_integrate/sx_limit/sx_series/
+     * sx_laplace/sx_ilaplace/sx_fourier/sx_ifourier's own guards
+     * already having run: this is called as their first structural
+     * check, on a `up`/`down` tuple expression, which builds nesting
+     * in O(1) per level with no simplification pass -- unlike ordinary
+     * symexpr construction (capped by sx_simplify's own guard), a
+     * tuple's depth is not bounded before it ever reaches here. */
+    check_c_stack_depth("symbolic");
     if (vis_number(expr)) return false;
     if (vis_symvar(expr))
         return as_symvar(expr)->name == as_symvar(var)->name;
@@ -1832,6 +1848,8 @@ val_t sx_expand(val_t expr) {
 
 /* Internal: degree as a C long (−1 for transcendentals of var, 0 for constants). */
 long sx_degree_long(val_t expr, val_t var) {
+    /* Same unbounded-recursion class as sx_diff above (issue #134). */
+    check_c_stack_depth("symbolic");
     if (vis_number(expr)) return 0;
     if (vis_symvar(expr))
         return (as_symvar(expr)->name == as_symvar(var)->name) ? 1 : 0;
@@ -2790,6 +2808,10 @@ unevaluated_i:;
 static val_t sx_ratio_simplify(val_t num, val_t den);
 
 static val_t sx_mul_for_ratio(val_t a, val_t b) {
+    /* Same unbounded-recursion class as sx_simplify above (issue #134):
+     * mutually recursive with sx_ratio_simplify below, driven by nested
+     * DIV/NEG structure. */
+    check_c_stack_depth("symbolic");
     /* (p/q)*b → ratio_simplify(p*b, q) */
     if (vis_symexpr(a) && as_symexpr(a)->op == SX_DIV && as_symexpr(a)->nargs == 2)
         return sx_ratio_simplify(sx_mul_for_ratio(as_symexpr(a)->args[0], b),
@@ -2805,6 +2827,8 @@ static val_t sx_mul_for_ratio(val_t a, val_t b) {
 }
 
 static val_t sx_ratio_simplify(val_t num, val_t den) {
+    /* Same unbounded-recursion class as sx_mul_for_ratio above (issue #134). */
+    check_c_stack_depth("symbolic");
     /* Pull negation from denominator */
     if (vis_symexpr(den) && as_symexpr(den)->op == SX_NEG && as_symexpr(den)->nargs == 1)
         return sx_neg(sx_ratio_simplify(num, as_symexpr(den)->args[0]));
