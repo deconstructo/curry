@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788446096150,
+  "lastUpdate": 1788450261525,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11729,6 +11729,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.685,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "76ede5f3ce8fdaa960ce2540d486f0c452b88807",
+          "message": "fix(main): synchronize REPL ,env against concurrent GLOBAL_ENV mutation (#152) (#155)\n\n* fix(main): synchronize REPL ,env against concurrent GLOBAL_ENV mutation (#152)\n\nThe REPL's ,env command (main.c) read GLOBAL_ENV's frame->size/\nframe->syms directly with no synchronization -- the same bug pattern\nissue #148 fixed in modules_import's no-export-list import walk.\nGLOBAL_ENV is a root frame actors can mutate concurrently via ordinary\ntop-level (define ...) calls even while the REPL sits idle at its\nprompt, racing frame_define's unsynchronized frame_grow/\nframe_hash_rehash (which reallocate f->syms/f->vals/f->hidx and bump\nf->size with no synchronization of their own, relying entirely on\nreaders going through env.c's seqlock protocol instead). Found by\n#148's own code reviewer while auditing the codebase for other\nunfixed instances of the same pattern.\n\nFixed by switching ,env to frame_snapshot_bindings (env.c/env.h), the\nsame whole-frame seqlock-validated copy #148 introduced -- values\naren't needed here, only names, so the paired vals array from the\nsnapshot goes unused.\n\nAdded a regression test to tests/test_cli.sh: spawns two actors\ncontinuously defining fresh top-level globals via eval, then issues\n,env as the very next stdin line (not after waiting for the actors to\nfinish, which would defeat the point), verifying the REPL survives\nwithout crashing or hanging while genuinely racing the actors --\nconfirmed by inspecting the interleaved output, which shows ,env's\nlisting running while the actors were still mid-loop (iteration\ncounts well short of their target), not after they'd already\nfinished.\n\n117/117 ctest suites pass (fresh --clear-cache run, verified across\nthree full-suite runs for confidence after one anomalous 5-minute\ntimeout on an initial run turned out not to reproduce -- the cli\nsuite, which carries this new test, consistently finished in ~25s\nacross all three follow-up runs).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* test(cli): add ctest TIMEOUT for the cli suite\n\nIndependent code review of #152's ,env fix (ce3d22c) reproduced the\nanomalous full-suite timeout mentioned in that commit's own message\nonce across 9 runs (could not pin down further diagnostics -- the\nfailure was not reproducible on demand, matching the original\nauthor's own account) and pointed out a real gap: the cli ctest entry\nhad no TIMEOUT property, unlike actors/websocket/ros, which already\ncarry one specifically because of this exact \"rare, non-deterministic\nhang\" risk shape (see tests/CMakeLists.txt's existing comments on\nthose). The new ,env regression subtest #152 added to cli races two\nactors against a busy-wait poll loop whose termination depends on\nboth actors actually finishing -- the identical open-ended-hang shape,\nnow inside a test suite that previously had no isolated timeout of\nits own. A real hang here would otherwise block only up to CI's\n30-minute job-level timeout with no fast, diagnosable ctest-level\nsignal.\n\nAdded set_tests_properties(cli PROPERTIES TIMEOUT 300) -- generous\nheadroom above cli's normal runtime (observed up to ~70s in CI,\n~25-27s locally across repeated runs) while still turning a future\nrecurrence into a fast, clearly-labeled TIMEOUT instead of an\nopen-ended block, matching the existing convention for actors/\nwebsocket/ros.\n\n117/117 ctest suites pass (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* test(cli): fix flaky check_contains usage in #152's ,env regression test\n\nIndependent security review of ce3d22c found the new ,env regression\ntest flaky on macOS at roughly 1-in-4 to 1-in-5 runs, contradicting\nthis branch's own earlier \"three follow-up runs, all passing\" claim --\nthe author's local run count just hadn't happened to hit it yet.\nRoot-caused by the reviewer: check_contains's printf '%s' \"$haystack\"\n| grep -qF pattern is timing-sensitive once $haystack is large (tens\nof KB, in this case curry's full GLOBAL_ENV symbol listing including\nmany multi-byte Akkadian/cuneiform names) and piped through macOS's\nshipped BSD grep 2.6.0-FreeBSD (~2010) under -q's early-exit-on-first-\nmatch behavior. Confirmed NOT a curry bug: byte-level inspection\nduring every observed failure showed the searched-for string was\nalways present, byte-for-byte, in curry's actual output -- replaying\nthe identical captured bytes through the same grep command afterward\nalways succeeded.\n\nFixed by adding check_contains_file (writes curry's output straight\nto a file instead of routing it through a shell variable and a pipe,\nthen greps the file directly), and switching the #152 test to use it.\nVerified with 18 consecutive full test_cli.sh runs (0 failures), where\nthe pre-fix version was expected to fail roughly 1 in 4-5 runs per the\nreviewer's own reproduction rate.\n\nAlso verified the earlier \"anomalous timeout\" concern doesn't\nreproduce as a genuine single-run hang: an isolated test_cli.sh run\ncompleted in under 30s with both #152 checks passing, confirming a\nprior batch-loop \"run 13 appears stuck\" observation was just the\nouter polling tool's own 5-minute cap being hit by CUMULATIVE runtime\nacross many sequential ~25-30s runs, not any single run hanging.\n\n117/117 ctest suites pass (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T01:43:13+10:00",
+          "tree_id": "64839ca0cffc8bd0dda3c5e759ace61ecb7ba8b3",
+          "url": "https://github.com/deconstructo/curry/commit/76ede5f3ce8fdaa960ce2540d486f0c452b88807"
+        },
+        "date": 1788450259674,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.345,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.219,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.284,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.523,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 91.96,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 220.126,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 55.3,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 61.727,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 44.533,
             "unit": "ms"
           }
         ]
