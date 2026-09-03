@@ -305,6 +305,37 @@
   (simplify (sqrt (expt x+ 2))) x+)
 
 ;;; ============================================================
+;;; 5. sx_simplify memoization (issue #137) -- O(depth) not O(depth^2),
+;;;    and a rule/algebra registered AFTER a node was cached still fires
+;;; ============================================================
+
+;; Building a chain of N nested (sin ...) applications one at a time,
+;; each call re-simplifying the whole existing tree so far, cost
+;; O(depth^2) before #137 -- at this depth that would have taken many
+;; seconds (or hit #134's own stack-depth guard first, depending on the
+;; ulimit in effect); after #137 it's O(depth) and fast regardless.
+;; Correctness matters more than timing here (a slow-but-correct CI
+;; environment shouldn't fail this test), so this only asserts the
+;; construction actually completes and produces a well-formed result,
+;; not a wall-clock budget.
+(define (wrap-sin n e) (if (= n 0) e (wrap-sin (- n 1) (sin e))))
+(define deep-sin (wrap-sin 200000 x))
+(assert-equal "sx_simplify memoization: deep (sin (sin ...)) chain still builds to the right op"
+  (sym-expr-op deep-sin) 'sin)
+(assert-equal "sx_simplify memoization: re-simplifying an already-simplified node is a no-op (same object back)"
+  (eq? (simplify deep-sin) deep-sin) #t)
+
+;; sx_invalidate_simplify_cache correctness: a node cached as "fully
+;; simplified" BEFORE a new rule for its own operator existed must not
+;; keep being served stale from that cache once the rule is registered.
+(define cached-before-rule (sym-expr 'sx137-op x))
+(assert-equal "sx_simplify memoization: uninterpreted op is left as-is before any rule exists"
+  (sym->string cached-before-rule) "sx137-op(x)")
+(define-rule (sx137-op ?a) -> (* 111 ?a))
+(assert-equal "sx_simplify memoization: a rule registered AFTER caching still fires on the cached node"
+  (sym->string (simplify cached-before-rule)) "111 * x")
+
+;;; ============================================================
 ;;; Report
 ;;; ============================================================
 (display "sx_algebra tests: ")
