@@ -1,5 +1,38 @@
 # Changelog
 
+### 1.23.6 - 2026-09-03
+
+**Fixed**
+
+- `sx_simplify` (the core CAS simplification function, `src/symbolic.c`)
+  had no memoization: every call re-walked and re-simplified its entire
+  argument tree from scratch, even subexpressions a prior call had already
+  fully simplified. Building an expression by repeatedly wrapping an
+  existing value one level at a time (e.g. `(sin e)` called N times in a
+  loop) cost O(depth²) instead of O(depth) — a genuine CPU-exhaustion risk
+  for any service simplifying untrusted or incrementally-built symbolic
+  expressions. Fixed with a generation-tagged cache on each expression
+  node, invalidated whenever `define-rule`/`define-algebra`/`clear-rules!`
+  or an `assume!`/`with-assumptions` change could alter what simplifying
+  an operator or variable actually does.
+- Curry's rule (`define-rule`/`define-ruleset`), algebra
+  (`define-algebra`), and module (`import`) registries — all reachable
+  concurrently from any actor, since actors are real OS threads with no
+  global interpreter lock — were read and written with zero
+  synchronization. Concurrent registrations could silently lose one
+  another (a classic unsynchronized linked-list-prepend lost update), and
+  a reader could observe a torn, partially-updated struct mid-write.
+  All three now use a `pthread_rwlock_t` (single-writer/many-reader);
+  hot-path readers snapshot what they need before invoking any
+  user-supplied Scheme callback, since re-entering the locked code from
+  inside such a callback (e.g. a rule's own action registering another
+  rule) would otherwise self-deadlock. See
+  [concurrency.md](docs/reference/concurrency.md#shared-global-state-and-actors)
+  for what's now safe to do across actors and the current caveats
+  (global, not per-operator, cache invalidation; the experimental
+  `--gc generational` backend has separately-tracked correctness gaps
+  unrelated to this fix).
+
 ### 1.23.5 - 2026-09-01
 
 **New — `(scheme case-lambda)`**

@@ -338,6 +338,38 @@ needed.
 
 ---
 
+## Shared global state and actors
+
+A few pieces of process-wide state are reachable from any actor concurrently
+and are worth calling out explicitly:
+
+- **`define-rule` / `define-ruleset` / `clear-rules!` / `define-algebra`**
+  (see [symbolic.md](symbolic.md)) register into global tables consulted by
+  every `simplify` call, on any actor, for the affected operator. These
+  registrations — and lookups against them — are safe to make concurrently
+  from multiple actors: the underlying tables are lock-protected against the
+  same kind of lost-update a naive shared linked list would suffer under
+  concurrent writers.
+- **`import`** likewise safely registers into curry's process-wide module
+  registry from any actor; concurrent imports (including of the same
+  not-yet-loaded module) will not corrupt the registry.
+
+Two caveats worth knowing about if you lean on this heavily:
+
+- `simplify`'s own memoization cache (added to fix an O(depth²) CPU-cost
+  issue) is invalidated globally whenever any actor registers a new rule or
+  algebra property — not scoped to just the affected operator. A workload
+  that *continuously* interleaves rule registration with heavy `simplify`
+  calls on unrelated operators will see more cache misses than a workload
+  that registers its rules up front, though never wrong results.
+- All of the above is validated under the default Boehm GC backend. The
+  experimental `--gc generational` backend has several known, separately
+  tracked correctness gaps unrelated to actor-safety of these registries
+  specifically — stick to the default backend for concurrent workloads
+  until those are resolved.
+
+---
+
 ## Choosing between the models
 
 ```
