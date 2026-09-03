@@ -262,10 +262,25 @@ static bool decompose_trig_sq(val_t term,
  * in symbolic.h), which bumps this counter, so every previously-cached
  * tag stops matching and the next sx_simplify call on each affected
  * node redoes the full pass under the new rule set. */
+/* Plain uint32_t, NOT _Atomic-qualified: __atomic_load_n/__atomic_add_fetch
+ * require a plain type (see runtime.c's identical convention/comment for
+ * g_jit_arith_tainted et al.) -- curry's own actors are real OS threads,
+ * so a script running define-rule/define-algebra/assume! on one actor
+ * while another is mid-sx_simplify needs at least a non-torn read/write
+ * here, even though the two-generations-out-of-sync worst case is just a
+ * transient over-eager cache miss (an extra full simplify pass), not a
+ * memory-safety issue -- SymExpr's own hdr.flags tag is a plain word
+ * write with no such cross-thread guarantee, matching how every other
+ * per-object flags field in this codebase is handled (see review notes
+ * on issue #137: no crash found in an actor stress test). Skipping 0 on
+ * increment reserves it for "never simplified" (sx_make_expr always
+ * zero-initializes hdr.flags), so a 2^32 wraparound can't make a fresh,
+ * never-simplified node read as cache-valid. */
 static uint32_t g_sx_simplify_generation = 1;
 
 void sx_invalidate_simplify_cache(void) {
-    g_sx_simplify_generation++;
+    uint32_t next = __atomic_add_fetch(&g_sx_simplify_generation, 1, __ATOMIC_RELAXED);
+    if (next == 0) __atomic_add_fetch(&g_sx_simplify_generation, 1, __ATOMIC_RELAXED);
 }
 
 static val_t sx_simplify_impl(val_t expr) {
@@ -985,11 +1000,12 @@ static val_t sx_simplify_impl(val_t expr) {
  * the current generation is returned unchanged with no further
  * recursion at any depth, not just at the top level. */
 val_t sx_simplify(val_t expr) {
-    if (vis_symexpr(expr) && as_symexpr(expr)->hdr.flags == g_sx_simplify_generation)
+    uint32_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
+    if (vis_symexpr(expr) && as_symexpr(expr)->hdr.flags == gen)
         return expr;
     val_t result = sx_simplify_impl(expr);
     if (vis_symexpr(result))
-        as_symexpr(result)->hdr.flags = g_sx_simplify_generation;
+        as_symexpr(result)->hdr.flags = gen;
     return result;
 }
 

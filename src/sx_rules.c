@@ -164,6 +164,13 @@ val_t sx_rules_list(val_t op_filter) {
 }
 
 void sx_rules_clear(val_t ruleset) {
+    /* Issue #137 follow-up (found by independent code review): removing
+     * a rule can change what simplifying its operator does (a node
+     * cached as "simplified" under the removed rule's rewrite may no
+     * longer be a fixpoint once the rule is gone), so this needs the
+     * same invalidation sx_rule_add already does for the opposite
+     * (adding) direction. */
+    sx_invalidate_simplify_cache();
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
         if (ruleset == V_FALSE) {

@@ -1378,6 +1378,15 @@ tail:
             nv++;
             cl = vcdr(cl);
         }
+        /* Issue #137 follow-up (found by independent code review):
+         * sx_simplify's own memoization cache is keyed only on rule/
+         * algebra registration generation, not on SymVar assumption
+         * flags -- but simplification results (e.g. sqrt(x^2) -> |x|
+         * vs. x) also depend on those flags. Without invalidating here,
+         * a node simplified before entering this form could be served
+         * stale from cache inside the body, even though its variable's
+         * assumptions just changed. */
+        if (nv > 0) sx_invalidate_simplify_cache();
 
         val_t result = V_VOID;
         ExnHandler h;
@@ -1393,10 +1402,12 @@ tail:
             /* Restore flags before re-raising */
             for (int i = 0; i < nv; i++)
                 as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
+            if (nv > 0) sx_invalidate_simplify_cache();
             scm_raise_val(h.exn);
         }
         for (int i = 0; i < nv; i++)
             as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
+        if (nv > 0) sx_invalidate_simplify_cache();
         return result;
     }
 
