@@ -348,9 +348,23 @@ static void eval_port_exprs(val_t port, bool print) {
                     continue;
                 }
                 if (!strcmp(name, "env")) {
+                    /* Issue #152 (same pattern as #148's modules_import
+                     * fix): GLOBAL_ENV is a root frame actors can mutate
+                     * concurrently via ordinary top-level define while
+                     * the REPL sits idle at its prompt -- reading
+                     * f->size/f->syms directly here raced frame_define's
+                     * unsynchronized frame_grow/frame_hash_rehash the
+                     * same way modules_import's raw walk did. Uses
+                     * frame_snapshot_bindings (env.c), the same
+                     * seqlock-validated whole-frame copy #148 added;
+                     * values aren't needed here, only names, so the
+                     * paired vals array from the snapshot is unused. */
                     EnvFrame *f = as_env(GLOBAL_ENV);
-                    for (uint32_t i = 0; i < f->size; i++) {
-                        scm_display(f->syms[i], PORT_STDOUT);
+                    val_t *syms, *vals;
+                    uint32_t n = frame_snapshot_bindings(f, &syms, &vals);
+                    (void)vals;
+                    for (uint32_t i = 0; i < n; i++) {
+                        scm_display(syms[i], PORT_STDOUT);
                         scm_newline(PORT_STDOUT);
                     }
                     continue;

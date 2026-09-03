@@ -796,6 +796,48 @@ out2=$("$CURRY" -e '(define-record-type point2 (fields (mutable x) (immutable y)
 (display (list (point2? (make-point2 1 2 3)) (point2-x (make-point2 1 2 3))))')
 check "define-record-type R6RS with valid field specs still compiles and runs correctly" "$out2" "(#t 1)"
 
+# ─── ,env REPL command vs concurrent GLOBAL_ENV mutation (issue #152) ──────────
+#
+# The REPL's ,env command used to read GLOBAL_ENV's frame->size/frame->syms
+# directly with no synchronization, racing any actor's concurrent top-level
+# (define ...) the same way modules_import's no-export-list import walk did
+# before issue #148's fix -- both bypassed env.c's seqlock protocol, the
+# only thing making GLOBAL_ENV safe to read while another actor's
+# frame_define is reallocating its syms/vals/hidx arrays (frame_grow/
+# frame_hash_rehash). Fixed by switching ,env to frame_snapshot_bindings
+# (env.c), the same whole-frame seqlock-validated copy #148 introduced.
+# Spawns several actors continuously defining fresh top-level globals while
+# ,env runs repeatedly, verifying the REPL survives without crashing or
+# hanging (piped stdin driving -i, matching this file's existing pattern
+# for REPL command tests above).
+ENV_SPAWN_SCM="$TMPDIR_CLI/env152_spawn.scm"
+cat > "$ENV_SPAWN_SCM" << 'ENV152_EOF'
+(define (definer-loop n tag)
+  (if (> n 0)
+      (begin
+        (eval (list 'define (string->symbol (string-append "env152-" (symbol->string tag) "-" (number->string n))) n)
+              (interaction-environment))
+        (definer-loop (- n 1) tag))))
+(define env152-d1 (spawn (lambda () (definer-loop 20000 'a))))
+(define env152-d2 (spawn (lambda () (definer-loop 20000 'b))))
+(display "env152-spawned")(newline)
+ENV152_EOF
+ENV_WAIT_SCM="$TMPDIR_CLI/env152_wait.scm"
+cat > "$ENV_WAIT_SCM" << 'ENV152_EOF'
+(let env152-loop ()
+  (if (or (actor-alive? env152-d1) (actor-alive? env152-d2)) (env152-loop)))
+(display "env152-defines-done")(newline)
+ENV152_EOF
+# ,env is issued as its own stdin line WHILE the two actors above are still
+# actively running (spawn returns immediately; the REPL reads and runs the
+# next line -- ,env -- with no wait in between), then the wait-script drains
+# both actors before ,quit so the process doesn't exit mid-definition.
+env152_out=$(printf '%s\n,env\n,env\n%s\n,quit\n' "$(cat "$ENV_SPAWN_SCM")" "$(cat "$ENV_WAIT_SCM")" | "$CURRY" -i 2>&1)
+check_contains ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- spawn completed" \
+  "$env152_out" "env152-spawned"
+check_contains ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- actors ran to completion afterward" \
+  "$env152_out" "env152-defines-done"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 echo
