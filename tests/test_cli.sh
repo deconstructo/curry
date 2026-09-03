@@ -44,6 +44,33 @@ check_contains() {
     fi
 }
 
+# Like check_contains, but greps a FILE directly instead of piping a shell
+# variable's contents through printf | grep -q. Independent security review
+# of issue #152's ,env regression test found that check_contains's
+# printf '%s' "$haystack" | grep -qF pattern is flaky (~1-in-4 to 1-in-5,
+# on macOS specifically) once $haystack is large (tens of KB) and
+# multi-byte-heavy (curry's Akkadian/cuneiform symbol names in this case) --
+# traced to a timing-sensitive interaction with macOS's shipped BSD grep
+# 2.6.0-FreeBSD (~2010) and -q's early-exit-on-first-match behavior when fed
+# a large buffer through a pipe under load, NOT a bug in curry itself
+# (verified: the byte sequence being searched for was always present,
+# byte-for-byte, in curry's actual output on every observed failure --
+# replaying the identical captured bytes through the same grep command
+# afterward always succeeded). Writing output straight to a file and
+# grepping the file sidesteps the pipe entirely.
+check_contains_file() {
+    local label="$1" file="$2" needle="$3"
+    if grep -qF -- "$needle" "$file"; then
+        echo "PASS: $label"
+        (( pass++ )) || true
+    else
+        echo "FAIL: $label (string not found)"
+        echo "  looking for: $needle"
+        echo "  in file: $file"
+        (( fail++ )) || true
+    fi
+}
+
 check_file_exists() {
     local label="$1" path="$2"
     if [ -f "$path" ]; then
@@ -832,11 +859,12 @@ ENV152_EOF
 # actively running (spawn returns immediately; the REPL reads and runs the
 # next line -- ,env -- with no wait in between), then the wait-script drains
 # both actors before ,quit so the process doesn't exit mid-definition.
-env152_out=$(printf '%s\n,env\n,env\n%s\n,quit\n' "$(cat "$ENV_SPAWN_SCM")" "$(cat "$ENV_WAIT_SCM")" | "$CURRY" -i 2>&1)
-check_contains ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- spawn completed" \
-  "$env152_out" "env152-spawned"
-check_contains ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- actors ran to completion afterward" \
-  "$env152_out" "env152-defines-done"
+ENV152_OUT="$TMPDIR_CLI/env152_out.txt"
+printf '%s\n,env\n,env\n%s\n,quit\n' "$(cat "$ENV_SPAWN_SCM")" "$(cat "$ENV_WAIT_SCM")" | "$CURRY" -i > "$ENV152_OUT" 2>&1
+check_contains_file ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- spawn completed" \
+  "$ENV152_OUT" "env152-spawned"
+check_contains_file ",env survives concurrent GLOBAL_ENV mutation from other actors (issue #152) -- actors ran to completion afterward" \
+  "$ENV152_OUT" "env152-defines-done"
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
