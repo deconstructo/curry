@@ -275,12 +275,39 @@ static bool decompose_trig_sq(val_t term,
  * on issue #137: no crash found in an actor stress test). Skipping 0 on
  * increment reserves it for "never simplified" (sx_make_expr always
  * zero-initializes hdr.flags), so a 2^32 wraparound can't make a fresh,
- * never-simplified node read as cache-valid. */
+ * never-simplified node read as cache-valid.
+ *
+ * The skip-0 step uses a compare-exchange retry loop rather than a plain
+ * fetch-add followed by a corrective second fetch-add: a second review
+ * round found that two separate atomic RMW ops leave a real window, right
+ * when the counter lands on 0 after wraparound, during which another
+ * thread's concurrent load can observe 0 before the corrective add runs --
+ * reintroducing the exact "never-simplified node misread as cached" bug
+ * this skip exists to prevent. A CAS loop makes the "then skip 0" step
+ * atomic with the increment itself, so no other thread ever observes an
+ * intermediate 0.
+ *
+ * Ordering is acquire/release, not relaxed: this generation counter is
+ * the only thing establishing a happens-before edge between "a rule/
+ * algebra/assumption mutation just happened" (an ordinary, non-atomic
+ * store, e.g. prim_assume's `hdr.flags |= flag`) and "another actor
+ * thread observes the resulting generation bump and therefore knows to
+ * recompute." Relaxed ordering would let a weakly-ordered CPU (this
+ * codebase explicitly targets arm64) reorder that ordinary store past
+ * the atomic bump, so a thread could see the new generation while still
+ * reading the OLD assumption flags/rule table -- matches the
+ * release/acquire pattern runtime.c already uses for g_jit_arith_tainted
+ * for the identical cross-thread-visibility reason, not relaxed. */
 static uint32_t g_sx_simplify_generation = 1;
 
 void sx_invalidate_simplify_cache(void) {
-    uint32_t next = __atomic_add_fetch(&g_sx_simplify_generation, 1, __ATOMIC_RELAXED);
-    if (next == 0) __atomic_add_fetch(&g_sx_simplify_generation, 1, __ATOMIC_RELAXED);
+    uint32_t cur = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
+    uint32_t next;
+    do {
+        next = cur + 1;
+        if (next == 0) next = 1;
+    } while (!__atomic_compare_exchange_n(&g_sx_simplify_generation, &cur, next,
+                                          0 /* not weak */, __ATOMIC_RELEASE, __ATOMIC_RELAXED));
 }
 
 static val_t sx_simplify_impl(val_t expr) {
@@ -1000,7 +1027,7 @@ static val_t sx_simplify_impl(val_t expr) {
  * the current generation is returned unchanged with no further
  * recursion at any depth, not just at the top level. */
 val_t sx_simplify(val_t expr) {
-    uint32_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
+    uint32_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_ACQUIRE);
     if (vis_symexpr(expr) && as_symexpr(expr)->hdr.flags == gen)
         return expr;
     val_t result = sx_simplify_impl(expr);
