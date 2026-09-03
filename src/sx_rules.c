@@ -6,6 +6,7 @@
 #include "builtins.h"  /* scm_cons */
 #include "eval.h"      /* apply_arr */
 #include "symbolic.h"  /* sx_invalidate_simplify_cache */
+#include <pthread.h>
 
 /* ---- Rule struct ---- */
 
@@ -29,6 +30,25 @@ typedef struct {
 
 static RuleSlot rtab[RTAB_SIZE];
 static int rtab_initialised = 0;
+
+/* Issue #141: curry actors are real OS threads with no global interpreter
+ * lock, and define-rule/clear-rules! (writers, via sx_rule_add/
+ * sx_rules_clear) can run concurrently with simplify (the reader, via
+ * sx_rule_try) on a different actor. Before this lock, sx_rule_add's
+ * append (an unsynchronized "walk to tail, then write ->next") could lose
+ * a concurrent registration, and sx_rule_try's traversal could race with
+ * sx_rules_clear's unlinking. A single-writer/many-reader rwlock is
+ * enough: mutation is rare (explicit define-rule/clear-rules! calls) next
+ * to lookups (every sx_simplify call on a user-defined operator).
+ *
+ * sx_rule_try releases this lock BEFORE invoking any rule's guard_fn/
+ * action_fn (arbitrary Scheme callables) -- see the snapshot-then-release
+ * pattern there. A guard or action is free to call define-rule itself
+ * (recursively re-entering this file), and pthread_rwlock_t is not
+ * recursive: a thread that still held the read lock while attempting the
+ * write lock inside sx_rule_add would deadlock against itself on most
+ * implementations' writer-preference. */
+static pthread_rwlock_t rtab_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 void sx_rules_init(void) {
     for (int i = 0; i < RTAB_SIZE; i++) rtab[i].op = V_VOID;
@@ -67,9 +87,8 @@ void sx_rule_add(val_t pattern, val_t pvars,
     val_t op = vcar(pattern);
     if (!vis_symbol(op)) return;
 
-    SxRule **chain = find_chain(op);
-    if (!chain) return; /* table full */
-
+    /* Allocate before taking the lock: GC_NEW never needs rtab_lock, and
+     * keeping allocation out of the critical section keeps it short. */
     SxRule *r = GC_NEW(SxRule);
     r->pattern   = pattern;
     r->pvars     = pvars;
@@ -77,6 +96,10 @@ void sx_rule_add(val_t pattern, val_t pvars,
     r->action_fn = action_fn;
     r->ruleset   = ruleset;
     r->next      = NULL;
+
+    pthread_rwlock_wrlock(&rtab_lock);
+    SxRule **chain = find_chain(op);
+    if (!chain) { pthread_rwlock_unlock(&rtab_lock); return; } /* table full */
 
     /* Append to end so rules fire in definition order */
     if (*chain == NULL) {
@@ -86,6 +109,7 @@ void sx_rule_add(val_t pattern, val_t pvars,
         while (tail->next) tail = tail->next;
         tail->next = r;
     }
+    pthread_rwlock_unlock(&rtab_lock);
 
     /* Issue #137: a node sx_simplify already cached as "fully
      * simplified" before this rule existed must not keep being served
@@ -94,12 +118,20 @@ void sx_rule_add(val_t pattern, val_t pvars,
     sx_invalidate_simplify_cache();
 }
 
+/* Fields sx_rule_try actually needs, copied out from under rtab_lock
+ * before any guard_fn/action_fn callback runs (see rtab_lock's comment
+ * above for why the lock cannot still be held at that point). */
+typedef struct {
+    val_t pattern, pvars, guard_fn, action_fn;
+} SxRuleSnap;
+
 val_t sx_rule_try(val_t expr) {
     if (!rtab_initialised || !vis_symexpr(expr)) return V_VOID;
 
     SymExpr *se  = as_symexpr(expr);
     val_t    op  = se->op;
 
+    pthread_rwlock_rdlock(&rtab_lock);
     int start = slot_for(op);
     SxRule *chain = NULL;
     for (int i = 0; i < RTAB_SIZE; i++) {
@@ -107,21 +139,39 @@ val_t sx_rule_try(val_t expr) {
         if (rtab[idx].op == op)   { chain = rtab[idx].head; break; }
         if (rtab[idx].op == V_VOID) break;
     }
-    if (!chain) return V_VOID;
+    int count = 0;
+    for (SxRule *r = chain; r; r = r->next) count++;
+    SxRuleSnap *snap = NULL;
+    if (count > 0) {
+        snap = (SxRuleSnap *)GC_MALLOC(sizeof(SxRuleSnap) * (size_t)count);
+        int i = 0;
+        for (SxRule *r = chain; r; r = r->next, i++) {
+            snap[i].pattern   = r->pattern;
+            snap[i].pvars     = r->pvars;
+            snap[i].guard_fn  = r->guard_fn;
+            snap[i].action_fn = r->action_fn;
+        }
+    }
+    pthread_rwlock_unlock(&rtab_lock);
 
-    for (SxRule *r = chain; r; r = r->next) {
-        val_t bindings = sx_pattern_match(r->pattern, expr);
+    for (int idx = 0; idx < count; idx++) {
+        val_t pattern   = snap[idx].pattern;
+        val_t pvars     = snap[idx].pvars;
+        val_t guard_fn  = snap[idx].guard_fn;
+        val_t action_fn = snap[idx].action_fn;
+
+        val_t bindings = sx_pattern_match(pattern, expr);
         if (bindings == V_FALSE) continue;
 
         /* Build argv in pvars order */
         int nparams = 0;
-        val_t pv = r->pvars;
+        val_t pv = pvars;
         while (vis_pair(pv)) { nparams++; pv = vcdr(pv); }
 
         val_t argv[64];
         if (nparams > 64) continue; /* safety guard */
 
-        pv = r->pvars;
+        pv = pvars;
         for (int i = 0; i < nparams; i++) {
             val_t sym = vcar(pv);
             /* Look up in bindings alist */
@@ -137,19 +187,22 @@ val_t sx_rule_try(val_t expr) {
         }
 
         /* Check guard */
-        if (r->guard_fn != V_FALSE) {
-            val_t ok = apply_arr(r->guard_fn, nparams, argv);
+        if (guard_fn != V_FALSE) {
+            val_t ok = apply_arr(guard_fn, nparams, argv);
             if (vis_false(ok)) continue;
         }
 
         /* Fire action */
-        return apply_arr(r->action_fn, nparams, argv);
+        return apply_arr(action_fn, nparams, argv);
     }
 
     return V_VOID;
 }
 
 val_t sx_rules_list(val_t op_filter) {
+    /* scm_cons never calls back into Scheme, so it is safe to hold the
+     * lock for the whole walk (unlike sx_rule_try's guard_fn/action_fn). */
+    pthread_rwlock_rdlock(&rtab_lock);
     val_t result = V_NIL;
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
@@ -160,6 +213,7 @@ val_t sx_rules_list(val_t op_filter) {
             result = scm_cons(desc, result);
         }
     }
+    pthread_rwlock_unlock(&rtab_lock);
     return result;
 }
 
@@ -171,6 +225,7 @@ void sx_rules_clear(val_t ruleset) {
      * same invalidation sx_rule_add already does for the opposite
      * (adding) direction. */
     sx_invalidate_simplify_cache();
+    pthread_rwlock_wrlock(&rtab_lock);
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
         if (ruleset == V_FALSE) {
@@ -190,6 +245,7 @@ void sx_rules_clear(val_t ruleset) {
             }
         }
     }
+    pthread_rwlock_unlock(&rtab_lock);
 }
 
 void sx_rules_gc_scan(void) {

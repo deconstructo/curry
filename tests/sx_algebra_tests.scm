@@ -336,6 +336,51 @@
   (sym->string (simplify cached-before-rule)) "111 * x")
 
 ;;; ============================================================
+;;; 6. rtab/atab concurrency (issue #141) -- concurrent define-rule/
+;;;    define-algebra/simplify calls across several actors must not
+;;;    crash or hang. This doesn't assert a specific outcome (the race
+;;;    this closes was a lost-update/torn-struct correctness hazard, not
+;;;    a memory-safety one -- see issue #141), just that the rwlocks
+;;;    added around rtab (sx_rules.c) and atab (sx_algebra.c) don't
+;;;    themselves introduce a deadlock (e.g. sx_rule_try's guard_fn/
+;;;    action_fn callbacks running while still holding rtab_lock would
+;;;    self-deadlock the first time a guard/action called define-rule).
+;;; ============================================================
+(define stress-x (sym-var 'stress-x))
+
+(define (writer-loop n)
+  (if (> n 0)
+      (begin
+        (define-rule (sx141-stress-op ?a) -> (* 2 ?a))
+        (writer-loop (- n 1)))))
+
+(define (reader-loop n)
+  (if (> n 0)
+      (begin
+        (simplify (sym-expr 'sx141-stress-op stress-x))
+        (reader-loop (- n 1)))))
+
+(define (algebra-writer-loop n)
+  (if (> n 0)
+      (begin
+        (define-algebra 'sx141-stress-alg-op #:commutative #t)
+        (algebra-writer-loop (- n 1)))))
+
+(define sx141-n 3000)
+(define w1 (spawn (lambda () (writer-loop sx141-n))))
+(define w2 (spawn (lambda () (writer-loop sx141-n))))
+(define r1 (spawn (lambda () (reader-loop sx141-n))))
+(define r2 (spawn (lambda () (reader-loop sx141-n))))
+(define a1 (spawn (lambda () (algebra-writer-loop sx141-n))))
+
+(let sx141-wait ()
+  (if (or (actor-alive? w1) (actor-alive? w2) (actor-alive? r1)
+          (actor-alive? r2) (actor-alive? a1))
+      (sx141-wait)))
+(assert-equal "rtab/atab concurrency: concurrent define-rule/define-algebra/simplify across actors completes without crash or hang"
+  #t #t)
+
+;;; ============================================================
 ;;; Report
 ;;; ============================================================
 (display "sx_algebra tests: ")

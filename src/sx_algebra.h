@@ -27,8 +27,12 @@ void         sx_algebra_init(void);
 void         sx_algebra_define(val_t op, bool commutative, bool associative,
                                val_t identity, val_t absorbing, val_t relations_fn);
 
-/* Look up algebra info for op.  Returns NULL if not declared. */
-AlgebraInfo *sx_algebra_lookup(val_t op);
+/* Look up algebra info for op, copying it into *out. Returns false (and
+   leaves *out untouched) if op has no declaration. A snapshot copy, not a
+   pointer into the live table, so the caller's reads (including invoking
+   relations_fn) can't observe a concurrent sx_algebra_define's write
+   mid-flight -- see sx_algebra.c's atab_lock comment. */
+bool         sx_algebra_lookup(val_t op, AlgebraInfo *out);
 
 /* Semispace GC scanner. */
 void         sx_algebra_gc_scan(void);

@@ -352,7 +352,8 @@ static val_t sx_simplify_impl(val_t expr) {
        Built-in operators (+, *, etc.) are not in the algebra table and fall
        through to the hard-coded dispatch below. */
     {
-        AlgebraInfo *alg = sx_algebra_lookup(op);
+        AlgebraInfo alg_info;
+        AlgebraInfo *alg = sx_algebra_lookup(op, &alg_info) ? &alg_info : NULL;
         if (alg) {
             /* Absorbing element: (op ... abs ...) → abs */
             if (alg->absorbing != V_VOID) {
