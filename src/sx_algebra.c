@@ -81,6 +81,16 @@ void sx_algebra_define(val_t op, bool commutative, bool associative,
 }
 
 void sx_algebra_gc_scan(void) {
+    /* Issue #141 follow-up (found by independent security review): under
+     * --gc generational, a minor collection is per-thread, not a
+     * stop-the-world pause for other actors, so this scanner runs
+     * concurrently with atab_lock-protected access from other threads
+     * and was mutating atab unguarded. Takes the same write lock
+     * sx_algebra_define uses; safe against self-deadlock for the same
+     * reason sx_rules_gc_scan's identical fix is -- gc_ss_evac/gc_ss_fwd
+     * don't allocate, and neither sx_algebra_define nor
+     * sx_algebra_lookup ever allocates while holding atab_lock. */
+    pthread_rwlock_wrlock(&atab_lock);
     for (int i = 0; i < ATAB_SIZE; i++) {
         if (atab[i].op == V_VOID) continue;
         atab[i].op           = (val_t)gc_ss_evac((uintptr_t)atab[i].op);
@@ -88,6 +98,7 @@ void sx_algebra_gc_scan(void) {
         atab[i].absorbing    = (val_t)gc_ss_evac((uintptr_t)atab[i].absorbing);
         atab[i].relations_fn = (val_t)gc_ss_evac((uintptr_t)atab[i].relations_fn);
     }
+    pthread_rwlock_unlock(&atab_lock);
 }
 
 /* ---- Assumption keyword → flag ---- */

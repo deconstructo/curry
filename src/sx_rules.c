@@ -125,11 +125,30 @@ typedef struct {
     val_t pattern, pvars, guard_fn, action_fn;
 } SxRuleSnap;
 
+/* Cap on rules-per-operator this hot path will snapshot in one call.
+ * Deliberately a fixed ON-STACK array, not GC_MALLOC: sx_rule_try is
+ * called on every sx_simplify for a user-defined operator, so it holds
+ * rtab_lock (for reading) during the count+copy above. Under --gc
+ * generational, a minor collection is per-thread, not stop-the-world,
+ * and sx_rules_gc_scan (which mutates rtab) takes rtab_lock for
+ * WRITING -- so if a GC_MALLOC here triggered a collection while this
+ * same thread still held the read lock, it would self-deadlock trying
+ * to promote that read lock's owner into the scanner's write-lock wait.
+ * A plain C stack array needs no allocation at all, closing that off;
+ * 256 rules for a single operator is far beyond any realistic
+ * define-rule use and matches this file's existing "silently cap and
+ * move on" convention (see find_chain's RTAB_SIZE-bounded probe, or the
+ * nparams > 64 check just below). */
+#define SX_RULE_TRY_MAX 256
+
 val_t sx_rule_try(val_t expr) {
     if (!rtab_initialised || !vis_symexpr(expr)) return V_VOID;
 
     SymExpr *se  = as_symexpr(expr);
     val_t    op  = se->op;
+
+    SxRuleSnap snap[SX_RULE_TRY_MAX];
+    int count = 0;
 
     pthread_rwlock_rdlock(&rtab_lock);
     int start = slot_for(op);
@@ -139,18 +158,11 @@ val_t sx_rule_try(val_t expr) {
         if (rtab[idx].op == op)   { chain = rtab[idx].head; break; }
         if (rtab[idx].op == V_VOID) break;
     }
-    int count = 0;
-    for (SxRule *r = chain; r; r = r->next) count++;
-    SxRuleSnap *snap = NULL;
-    if (count > 0) {
-        snap = (SxRuleSnap *)GC_MALLOC(sizeof(SxRuleSnap) * (size_t)count);
-        int i = 0;
-        for (SxRule *r = chain; r; r = r->next, i++) {
-            snap[i].pattern   = r->pattern;
-            snap[i].pvars     = r->pvars;
-            snap[i].guard_fn  = r->guard_fn;
-            snap[i].action_fn = r->action_fn;
-        }
+    for (SxRule *r = chain; r && count < SX_RULE_TRY_MAX; r = r->next, count++) {
+        snap[count].pattern   = r->pattern;
+        snap[count].pvars     = r->pvars;
+        snap[count].guard_fn  = r->guard_fn;
+        snap[count].action_fn = r->action_fn;
     }
     pthread_rwlock_unlock(&rtab_lock);
 
@@ -199,21 +211,59 @@ val_t sx_rule_try(val_t expr) {
     return V_VOID;
 }
 
+/* Fields sx_rules_list needs, copied out from under rtab_lock. */
+typedef struct { val_t pattern, ruleset; } SxRuleDesc;
+
 val_t sx_rules_list(val_t op_filter) {
-    /* scm_cons never calls back into Scheme, so it is safe to hold the
-     * lock for the whole walk (unlike sx_rule_try's guard_fn/action_fn). */
+    /* Unlike sx_rule_try, scm_cons never calls back into Scheme, so the
+     * usual reentrancy hazard doesn't apply here -- but scm_cons DOES
+     * allocate, and under --gc generational that can trigger a minor GC
+     * on this same thread, which runs sx_rules_gc_scan, which (below)
+     * takes rtab_lock for writing. pthread_rwlock_t is not recursive, so
+     * calling scm_cons while still holding rtab_lock (even for reading)
+     * would risk this exact thread self-deadlocking against itself the
+     * moment a collection actually triggers. Snapshot-then-release, same
+     * pattern as sx_rule_try, sidesteps it: count under the lock (no
+     * allocation), copy under the lock into an already-allocated buffer
+     * (no allocation), then build the result list with scm_cons entirely
+     * outside the lock. */
     pthread_rwlock_rdlock(&rtab_lock);
-    val_t result = V_NIL;
+    int count = 0;
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
         if (op_filter != V_FALSE && rtab[i].op != op_filter) continue;
-        for (SxRule *r = rtab[i].head; r; r = r->next) {
-            /* Descriptor: (pattern ruleset) */
-            val_t desc = scm_cons(r->pattern, scm_cons(r->ruleset, V_NIL));
-            result = scm_cons(desc, result);
+        for (SxRule *r = rtab[i].head; r; r = r->next) count++;
+    }
+    pthread_rwlock_unlock(&rtab_lock);
+
+    /* Allocate outside the lock, with headroom in case concurrent
+     * registrations grow the table between the count pass and the copy
+     * pass below -- a copy that hits this cap simply stops early rather
+     * than overflowing, since list-rules is inherently a best-effort
+     * snapshot of a table other actors may be mutating concurrently. */
+    int cap = count + count / 4 + 8;
+    SxRuleDesc *buf = (SxRuleDesc *)GC_MALLOC(sizeof(SxRuleDesc) * (size_t)cap);
+
+    pthread_rwlock_rdlock(&rtab_lock);
+    int n = 0;
+    for (int i = 0; i < RTAB_SIZE && n < cap; i++) {
+        if (rtab[i].op == V_VOID) continue;
+        if (op_filter != V_FALSE && rtab[i].op != op_filter) continue;
+        for (SxRule *r = rtab[i].head; r && n < cap; r = r->next, n++) {
+            buf[n].pattern = r->pattern;
+            buf[n].ruleset = r->ruleset;
         }
     }
     pthread_rwlock_unlock(&rtab_lock);
+
+    val_t result = V_NIL;
+    for (int i = 0; i < n; i++) {
+        /* Descriptor: (pattern ruleset) -- consing forward over the
+         * snapshot reproduces the original single-pass loop's ordering
+         * (which built the list by prepending in visit order). */
+        val_t desc = scm_cons(buf[i].pattern, scm_cons(buf[i].ruleset, V_NIL));
+        result = scm_cons(desc, result);
+    }
     return result;
 }
 
@@ -249,6 +299,21 @@ void sx_rules_clear(val_t ruleset) {
 }
 
 void sx_rules_gc_scan(void) {
+    /* Issue #141 follow-up (found by independent security review): under
+     * --gc generational, a minor collection is per-thread, NOT a
+     * stop-the-world pause for other actors (see gc_gen.c) -- so this
+     * scanner runs concurrently with every other actor's rtab_lock-
+     * protected access, and was mutating rtab's fields completely
+     * unguarded. Takes the same write lock sx_rule_add/sx_rules_clear
+     * use. Safe against self-deadlock: gc_ss_evac/gc_ss_fwd (identity
+     * functions under Boehm, real evacuation under generational) do not
+     * allocate, and every OTHER place in this file that takes rtab_lock
+     * is now structured to never allocate while holding it either (see
+     * sx_rule_add's pre-lock GC_NEW and sx_rules_list's snapshot-then-
+     * release pattern) -- so no thread can already be holding rtab_lock
+     * at the moment its own allocation triggers the minor collection
+     * that calls this scanner. */
+    pthread_rwlock_wrlock(&rtab_lock);
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
         rtab[i].op   = (val_t)gc_ss_evac((uintptr_t)rtab[i].op);
@@ -262,4 +327,5 @@ void sx_rules_gc_scan(void) {
             r->next      = (SxRule *)gc_ss_fwd(r->next);
         }
     }
+    pthread_rwlock_unlock(&rtab_lock);
 }
