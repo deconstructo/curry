@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788443622922,
+  "lastUpdate": 1788446096150,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11660,6 +11660,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.749,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e358a2db6c90ecf0a1ffd9a71fb06b6a03310691",
+          "message": "fix(modules,env): synchronize modules_import's no-export-list walk against concurrent env_define (#148) (#154)\n\n* fix(modules,env): synchronize modules_import's no-export-list walk against concurrent env_define (#148)\n\nmodules_import's \"no export list\" branch (re-exporting every binding in\nan imported module when the module declared no explicit (export ...)\nclause) walked the module's EnvFrame chain directly:\n\n    EnvFrame *f = mod->env;\n    while (f) {\n        for (uint32_t i = 0; i < f->size; i++)\n            import_binding(f->syms[i], f->vals[i], spec, filter, env);\n        f = f->parent;\n    }\n\nmod->env (and GLOBAL_ENV, which every (scheme base)/(scheme write)/etc.\nalias directly with has_exports = false) is a root frame -- exactly the\nkind env.c's own seqlock protocol exists to protect, since it can still\nbe mutated by another actor concurrently defining new bindings into it\n(frame_define -> frame_grow/frame_hash_rehash reallocate f->syms/\nf->vals/f->hidx and bump f->size with no synchronization of their own,\nrelying entirely on frame_lookup/frame_set going through the seqlock\nretry protocol instead). This raw walk bypassed that protocol entirely,\nreading f->size/f->syms/f->vals with no synchronization at all.\n\nIndependent code review of #143 (an unrelated fix to modules.c's module\nregistry) caught this with ThreadSanitizer: four distinct data races\nreported, e.g. a read at modules.c:547 racing a write inside\nframe_define_unlocked (env.c) from another actor's concurrent\ntop-level define. Confirmed by this fix: the same TSan repro (import\n(scheme base) from two actors while two others concurrently grow\nGLOBAL_ENV with fresh defines) reproduces the modules.c:547 race on the\npre-fix code and does not after.\n\nFixed by adding frame_snapshot_bindings (env.c/env.h): the same\nseqlock-validated read frame_lookup_versioned already does for a single\nsymbol lookup, generalized to copy out an entire frame's (sym, val)\npairs in one consistency-checked pass -- retrying if a concurrent\nframe_define was in progress or completed mid-copy, for root frames;\na plain memcpy for every other (single-thread-owned) frame, matching\nframe_lookup_versioned's own fast path. modules_import's no-export-list\nwalk now calls this once per frame instead of indexing f->syms/f->vals\ndirectly.\n\nAdded a regression test (tests/module_isolation_tests.scm): two actors\nimporting (scheme base) while two others concurrently define fresh\ntop-level bindings, forcing real frame_grow/rehash calls mid-import.\nThe existing #143 concurrency test (srfi 1/128) never actually\nexercised this code path, since SRFI libraries all declare explicit\nexport lists -- only the has_exports = false path (C modules, plain\n.scm files without define-library, and the built-in (scheme *)\naliases) is exposed to this race.\n\n117/117 ctest suites pass (fresh --clear-cache run). Also verified\ndirectly under ThreadSanitizer (not part of the normal build): the\nmodules.c:547 race is present on the pre-fix code and absent after,\nconfirmed by comparing against a stashed baseline build. The remaining\nTSan warnings under this same workload (frame_grow/frame_hash_rehash/\nhash_insert/gc_wb_slot in env.c) are identical before and after this\nfix -- they are the seqlock protocol's own accepted, by-design\n\"benign races\" (env.c's existing header comment already documents\nthis tradeoff), not something this commit introduces or could\neliminate.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* docs(modules): correct #148 comment on why the no-export-list walk needed locking\n\nIndependent security review of 71312ec found the comment (and the\noriginal commit message) described the wrong triggering scenario: it\nclaimed a define-library that self-registers before its own body\nfinishes running could expose a partially-loaded module to a\nconcurrent importer. Tracing modules_define_library and\nmodules_define_r6rs_library shows registry_insert only ever runs\nafter a define-library body whole clause-processing loop completes --\nthat specific path does not currently expose a partial module.\n\nThe real and sufficient hazard is simpler: every (scheme base),\n(scheme write), etc. alias IS GLOBAL_ENV directly\n(modules_register_builtin), and a plain .scm/.sld module loaded\nwithout define-library gets mod->env = env_extend(GLOBAL_ENV), so the\nparent-chain walk reaches GLOBAL_ENV either way. GLOBAL_ENV is the\none frame actors genuinely share, and any other actor's ordinary\ntop-level define races this walk with no relationship between the\ntwo beyond both running concurrently -- exactly what the regression\ntest in tests/module_isolation_tests.scm exercises. Corrected the\ncomment so a future reader traces the actual live hazard, not a\nhypothetical one.\n\nNo functional change.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T00:34:00+10:00",
+          "tree_id": "597fd384d506019ff9f43f8d001e93b5c7f1c03a",
+          "url": "https://github.com/deconstructo/curry/commit/e358a2db6c90ecf0a1ffd9a71fb06b6a03310691"
+        },
+        "date": 1788446093928,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.134,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.224,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.12,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.865,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 127.858,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.482,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.324,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.265,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.685,
             "unit": "ms"
           }
         ]
