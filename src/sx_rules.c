@@ -5,6 +5,7 @@
 #include "gc.h"
 #include "builtins.h"  /* scm_cons */
 #include "eval.h"      /* apply_arr */
+#include "symbolic.h"  /* sx_invalidate_simplify_cache */
 
 /* ---- Rule struct ---- */
 
@@ -85,6 +86,12 @@ void sx_rule_add(val_t pattern, val_t pvars,
         while (tail->next) tail = tail->next;
         tail->next = r;
     }
+
+    /* Issue #137: a node sx_simplify already cached as "fully
+     * simplified" before this rule existed must not keep being served
+     * stale from that cache now that a new rule could change what
+     * simplifying its operator actually does. */
+    sx_invalidate_simplify_cache();
 }
 
 val_t sx_rule_try(val_t expr) {

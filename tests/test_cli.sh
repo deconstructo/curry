@@ -697,25 +697,28 @@ check "let* with 20 sequential bindings still compiles and runs correctly" "$out
 #     stack-depth guard -- deep expression construction raises a
 #     catchable stack-overflow instead of a SIGSEGV (issue #134) ────────────
 #
-# sx_simplify re-walks its ENTIRE argument tree from scratch on every
-# call (no memoization of already-simplified subexpressions), so
-# building a chain of N nested `(sin ...)` applications one at a time
-# (each call re-simplifying the whole existing tree so far) costs
-# O(depth-at-guard^2), not O(N) -- confirmed empirically to take 30+
-# seconds under a Release build with a real 64MB stack, since the
-# guard's threshold (and therefore how deep the chain gets before
-# firing) scales with the real available stack. Rather than chase an
-# ever-larger N to outrun a bigger stack (as #125/#129/#133's own
-# thresholds needed), this test explicitly constrains the CHILD
-# process's own stack via `ulimit -s` first, making the guard's
-# threshold small, deterministic, and fast regardless of the host
-# environment's default stack or build type -- confirmed reliable and
-# fast (well under a second) across both Debug and Release builds.
+# Originally built via a chain of N nested `(sin ...)` applications one
+# at a time (each call re-simplifying the whole existing tree so far),
+# which cost O(depth-at-guard^2) before issue #137 added memoization to
+# sx_simplify -- after #137, that exact construction no longer deepens
+# the real C stack at all (each wrap only ever touches the ONE new
+# outer node; the already-tagged subtree beneath it returns instantly
+# with no recursion), so it can no longer reach this guard regardless
+# of N. Switched to `up`-tuple nesting (O(1) per level, no
+# simplification pass at all, same construction #134's own r7rs_tests.scm
+# regression test for sx_depends_on/∫ already uses) consumed by `∂`
+# (sx_diff has no memoization of its own -- #137 was scoped to
+# sx_simplify only, see that issue), which still recurses the real C
+# stack once per level and reaches the guard reliably. This test
+# explicitly constrains the CHILD process's own stack via `ulimit -s`
+# first, making the guard's threshold small, deterministic, and fast
+# regardless of the host environment's default stack or build type.
 SYMDEEP_SCM="$TMPDIR_CLI/symdeep.scm"
 cat > "$SYMDEEP_SCM" << 'SYMDEEP_EOF'
 (define x (sym-var 'x))
-(define (wrap n e) (if (= n 0) e (wrap (- n 1) (sin e))))
-(guard (e (#t (display (error-message e)))) (wrap 3000 x) (display "no-crash"))
+(define (build-up n e) (if (= n 0) e (build-up (- n 1) (up e))))
+(define big (build-up 3000 x))
+(guard (e (#t (display (error-message e)))) (∂ big x) (display "no-crash"))
 SYMDEEP_EOF
 set +e
 symdeep_out=$(bash -c "ulimit -s 2048; \"$CURRY\" \"$SYMDEEP_SCM\"" 2>&1)

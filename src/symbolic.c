@@ -226,7 +226,49 @@ static bool decompose_trig_sq(val_t term,
 }
 
 
-val_t sx_simplify(val_t expr) {
+/* Issue #137: sx_simplify_impl (below) re-walks and re-simplifies its
+ * ENTIRE argument tree from scratch on every call, even subexpressions
+ * a prior call already fully simplified -- building an expression by
+ * repeatedly wrapping an already-simplified result one level at a time
+ * (e.g. `(sin e)` called N times in a loop, each call passing in the
+ * previous iteration's own result) costs O(depth^2) total work, not
+ * O(depth), since each of the N calls re-simplifies the whole current
+ * tree. This is a genuine CPU-exhaustion DoS distinct from #134's
+ * stack-depth fix -- it fires at sizes well below that guard's own
+ * threshold, confirmed during #134's own testing to burn 20-30+ seconds
+ * of CPU under a generous stack ulimit before the guard ever engages.
+ *
+ * Fixed with a generation-tagged memoization cache: SymExpr's own
+ * hdr.flags field (unused for this type otherwise, confirmed by grep)
+ * stores the g_sx_simplify_generation value in effect the last time
+ * this exact node was fully simplified; sx_simplify (the public entry
+ * point, below sx_simplify_impl) checks that tag first and returns the
+ * node UNCHANGED with no recursion at all if it matches the CURRENT
+ * generation -- turning the "wrap an already-simplified result" pattern
+ * back into O(depth) total, since each wrap only ever simplifies the
+ * ONE new outer node, never re-walking the (already-tagged) tree
+ * beneath it.
+ *
+ * The generation counter exists because simplification is not a fixed
+ * function of an expression's own shape alone: `define-rule`/
+ * `define-algebra` register new rules/algebra properties at runtime
+ * (sx_rule_add / sx_algebra_define), which can change what "fully
+ * simplified" even means for operators already in use. A bare one-bit
+ * "already simplified" tag would let a node simplified BEFORE a new
+ * rule was registered keep being served stale from cache after the
+ * registration, if a script kept building on top of it -- a real
+ * correctness regression, not just a missed optimization. Both
+ * registration functions call sx_invalidate_simplify_cache() (declared
+ * in symbolic.h), which bumps this counter, so every previously-cached
+ * tag stops matching and the next sx_simplify call on each affected
+ * node redoes the full pass under the new rule set. */
+static uint32_t g_sx_simplify_generation = 1;
+
+void sx_invalidate_simplify_cache(void) {
+    g_sx_simplify_generation++;
+}
+
+static val_t sx_simplify_impl(val_t expr) {
     /* Issue #134: sx_simplify recurses into itself once per argument of
      * every nested SymExpr node (just below, and again for the tuple
      * case) with no bound at all -- a deeply nested expression tree
@@ -934,6 +976,21 @@ val_t sx_simplify(val_t expr) {
     }
 
     return sx_make_expr(op, n, sa);
+}
+
+/* Public entry point: the memoization fast-path for issue #137 (see the
+ * long comment above sx_simplify_impl for the full rationale). Every
+ * recursive call INSIDE sx_simplify_impl's own body calls this function
+ * (not sx_simplify_impl directly), so a subexpression already tagged at
+ * the current generation is returned unchanged with no further
+ * recursion at any depth, not just at the top level. */
+val_t sx_simplify(val_t expr) {
+    if (vis_symexpr(expr) && as_symexpr(expr)->hdr.flags == g_sx_simplify_generation)
+        return expr;
+    val_t result = sx_simplify_impl(expr);
+    if (vis_symexpr(result))
+        as_symexpr(result)->hdr.flags = g_sx_simplify_generation;
+    return result;
 }
 
 /* ---- Trigonometric simplification (trigsimp) ----

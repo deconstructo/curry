@@ -264,6 +264,14 @@ val_t sx_diff(val_t expr, val_t var);                        /* ∂/∂var (real
 val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar);     /* ∂/∂z or ∂/∂z̄ */
 val_t sx_integrate(val_t expr, val_t var);                   /* antiderivative ∫ ... dx */
 val_t sx_simplify(val_t expr);                               /* algebraic simplification */
+/* Bumps sx_simplify's own memoization generation counter (issue #137),
+ * invalidating every SymExpr node's cached "already fully simplified"
+ * tag. Must be called by anything that changes what simplification
+ * actually DOES for existing operators -- currently sx_rule_add
+ * (sx_rules.c) and sx_algebra_define (sx_algebra.c) -- so a node
+ * simplified before a new rule/algebra property was registered doesn't
+ * get silently served stale from cache after the registration. */
+void  sx_invalidate_simplify_cache(void);
 val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=val */
 bool  sx_equal(val_t a, val_t b);                            /* structural equality */
 bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */

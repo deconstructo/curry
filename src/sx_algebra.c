@@ -48,6 +48,11 @@ void sx_algebra_define(val_t op, bool commutative, bool associative,
             atab[idx].identity     = identity;
             atab[idx].absorbing    = absorbing;
             atab[idx].relations_fn = relations_fn;
+            /* Issue #137: same reasoning as sx_rule_add's identical
+             * call -- a node cached as "fully simplified" before this
+             * operator's algebra properties were (re-)defined must not
+             * keep being served stale now that they've changed. */
+            sx_invalidate_simplify_cache();
             return;
         }
     }
