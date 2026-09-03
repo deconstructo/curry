@@ -34,6 +34,19 @@ val_t           *frame_lookup(struct EnvFrame *f, val_t sym);          /* NULL i
  * out_ver is fine when the caller doesn't need it. */
 val_t           *frame_lookup_versioned(struct EnvFrame *f, val_t sym, uint32_t *out_ver);
 
+/* Copies out every (sym, val) pair currently in this ONE frame (not its
+ * parent chain) into freshly allocated arrays, returning the count. For a
+ * root frame (frame_is_global — reachable from more than one actor, see
+ * env.c's big seqlock comment) this is validated against a concurrent
+ * frame_define the same lock-free way frame_lookup_versioned validates a
+ * single lookup, retrying if a structural write was in progress or landed
+ * mid-copy; a plain memcpy for every other (single-thread-owned) frame.
+ * Needed by anything that must walk a WHOLE frame's bindings rather than
+ * look up one symbol at a time — e.g. modules.c's no-export-list import
+ * path, which used to index f->syms[i]/f->vals[i] directly with no
+ * synchronization at all. */
+uint32_t         frame_snapshot_bindings(struct EnvFrame *f, val_t **out_syms, val_t **out_vals);
+
 /* ---- Environment operations ---- */
 
 /* Create a new root (global) environment */

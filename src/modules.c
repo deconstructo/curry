@@ -541,11 +541,29 @@ val_t modules_import(val_t spec, val_t env) {
     } else {
         /* No export list: every binding in the module's own environment is
          * importable (C modules, plain .scm files loaded without
-         * define-library, and always-on builtin module aliases). */
+         * define-library, and always-on builtin module aliases).
+         *
+         * Issue #148 (TSan-confirmed): mod->env is a root frame
+         * (env_new_root(), same shape as GLOBAL_ENV), and root frames are
+         * exactly the ones env.c's seqlock protocol exists for -- another
+         * actor can still be executing this module's own top-level body
+         * (defining bindings into mod->env one at a time via frame_define)
+         * while this actor imports it, e.g. a define-library that
+         * self-registers before its body finishes running, then a second
+         * concurrent importer's self_reg re-check (modules_try_load) picks
+         * up the partially-loaded module. Indexing f->syms[i]/f->vals[i]
+         * directly here bypassed that protocol entirely -- a plain,
+         * unsynchronized read racing frame_define's unsynchronized
+         * f->syms/f->vals reallocation (frame_grow) and rehash. Uses
+         * frame_snapshot_bindings (env.c) instead, the same seqlock-
+         * validated copy frame_lookup_versioned already does for a single
+         * symbol, just for the whole frame at once. */
         EnvFrame *f = mod->env;
         while (f) {
-            for (uint32_t i = 0; i < f->size; i++)
-                import_binding(f->syms[i], f->vals[i], spec, filter, env);
+            val_t *syms, *vals;
+            uint32_t n = frame_snapshot_bindings(f, &syms, &vals);
+            for (uint32_t i = 0; i < n; i++)
+                import_binding(syms[i], vals[i], spec, filter, env);
             f = f->parent;
         }
     }
