@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788427838617,
+  "lastUpdate": 1788434770616,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11453,6 +11453,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 55.964,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aa9c35bf2f46a23a152c2a4147d37b13f840339e",
+          "message": "fix(symbolic): synchronize sx_rules/sx_algebra tables against concurrent actor access (#141) (#147)\n\n* fix(symbolic): synchronize rtab/atab against concurrent actor access (#141)\n\nsx_rules.c's rule table (rtab) and sx_algebra.c's algebra table (atab)\nwere read and written with no synchronization at all, despite curry\nactors being real OS threads with no global interpreter lock. Found\nduring the independent security review of #137 (sx_simplify\nmemoization): that fix hardened the memoization generation counter\nitself with real atomics specifically because a script can run\ndefine-rule/define-algebra on one actor while another is mid-simplify\n-- but the same argument applies with more force to the tables that\nbookkeeping is meant to track, and those were left completely\nunguarded.\n\nConcretely, before this fix:\n- sx_rule_add appended to a rule chain via an unsynchronized\n  walk-to-tail then write -- two concurrent registrations for the same\n  operator could compute the same stale tail and race to write ->next,\n  silently losing one registration.\n- sx_algebra_define wrote AlgebraInfo's five fields into a shared slot\n  one at a time with no barrier -- a concurrent reader could observe a\n  torn combination of old and new fields (e.g. a new `commutative`\n  paired with a stale `relations_fn`).\n- sx_rules_clear unlinked list nodes concurrently with sx_rule_try's\n  unsynchronized traversal of the same list.\n\nFixed with a pthread_rwlock_t per table (single-writer/many-reader,\nsince mutation via define-rule/define-algebra/clear-rules! is rare next\nto lookups on every sx_simplify call for a user-defined operator):\n\n- sx_rule_add/sx_rules_clear (writers) and sx_rules_list (reader) hold\n  rtab_lock for their full critical section.\n- sx_rule_try snapshots the matching rule chain's needed fields\n  (pattern/pvars/guard_fn/action_fn) into a local array under the read\n  lock, then releases the lock BEFORE calling sx_pattern_match/guard_fn/\n  action_fn. This matters because guard_fn/action_fn are arbitrary\n  Scheme callables -- one could itself call define-rule, and\n  pthread_rwlock_t is not recursive, so still holding the read lock\n  while sx_rule_add tried to take the write lock on the same thread\n  would self-deadlock.\n- sx_algebra_lookup's signature changed from returning a raw pointer\n  into the live table (AlgebraInfo *) to copying a whole-struct snapshot\n  into an out-parameter under the read lock (bool sx_algebra_lookup(op,\n  AlgebraInfo *out)), for the same reason: the caller in symbolic.c\n  reads several of the struct's fields across a stretch of code that\n  also invokes relations_fn (another arbitrary Scheme callable), so a\n  raw pointer into the table would let a concurrent sx_algebra_define\n  mutate the very struct being read mid-read.\n\nAdded a regression test (tests/sx_algebra_tests.scm) spawning several\nactors doing concurrent define-rule/define-algebra/simplify calls,\nverifying this completes without a crash or hang -- the race being\nclosed is a lost-update/torn-struct correctness hazard, not a\nmemory-safety one (confirmed by the security review: no crash in a\n50000-iteration 4-actor stress test even before this fix), so this test\nchecks the locking itself doesn't introduce a NEW hazard (deadlock),\nrather than asserting a specific simplification outcome.\n\n117/117 ctest suites pass (fresh --clear-cache run; the one apparent\nfailure in a full parallel run, websocket, is the existing known-flaky\nport-bind test, confirmed passing in isolation, unrelated to this\nchange).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* test(symbolic): add deterministic reentrant-callback regression for #141's locking\n\nIndependent code review of def4f46 found that the concurrency stress\ntest added alongside it never actually exercises the one hazard the\nlocking design specifically guards against: sx_rule_try (and\nsx_algebra_lookup's caller) must release rtab_lock/atab_lock BEFORE\ninvoking a rule's guard_fn/action_fn or an algebra's relations_fn,\nsince those are arbitrary Scheme callables that could themselves call\ndefine-rule/define-algebra, and pthread_rwlock_t is not recursive -- a\nthread still holding even a read lock when it tried to take the write\nlock on the same lock would self-deadlock. The multi-actor stress test\nonly ever registered non-reentrant rules, so it could not have caught\na regression that moved the unlock later.\n\nAdded two deterministic, single-threaded cases: an action_fn that\ncalls define-rule from inside sx_rule_try, and a relations_fn that\ncalls define-algebra from inside sx_algebra_lookup's caller. Both\nconfirm no self-deadlock and that the reentrantly-registered rule/\nalgebra actually takes effect afterward. Unlike the stress test, these\nfail reliably (not just \"sometimes,\" under the right interleaving) if\na future change reintroduces the hazard.\n\nAlso filed issue #143 for an unrelated, pre-existing gap the same\nreview surfaced while checking the \"stop-the-world makes rtab/atab's\nunsynchronized GC-scan callbacks safe\" reasoning: those scan callbacks\nare registered with the semispace GC backend, which is unreachable\ndead code (no CLI flag selects it), while the one real moving\ncollector (--gc generational) has no scanner registered for rtab/atab\nat all. Not addressed here -- out of scope for a locking fix, and\nunrelated to the default Boehm backend both #137 and #141 were\nverified against.\n\n117/117 ctest suites pass (fresh --clear-cache run; websocket's usual\nflake reproduces in a full parallel run and passes in isolation, as\nestablished in prior sessions).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(symbolic): lock rtab/atab's GC ext-scanners against the live generational backend (#141)\n\nIndependent security review of the rtab/atab locking fix (def4f46)\nfound that sx_rules_gc_scan/sx_algebra_gc_scan -- registered via\ngc_ss_register_ext_scanner in sx_rules_init/sx_algebra_init -- are NOT\ndead code tied to an unreachable semispace backend, as originally\nassumed while investigating a related question during that same\nreview. gc_ss_register_ext_scanner (src/gc.h:298) is a static inline\nalias straight through to the real gc_register_ext_scanner (src/gc.c),\nwhich IS wired into the actually-shipped --gc generational backend\n(src/gc_gen.c). The review captured a live stack trace of\ngc_gen_minor_collect -> sx_rules_gc_scan running concurrently with\nother actor threads mid-stress-test, confirming this scanner runs for\nreal and mutates rtab/atab's fields with zero synchronization against\nthe rwlocks def4f46 had just added -- because gc_gen.c's minor\ncollection is explicitly per-thread, not a stop-the-world pause for\nother actors (see that file's own comment on this), any actor's own\nallocation can trigger a minor collection whose scanner races against\nevery other actor's rtab_lock/atab_lock-protected access to those same\ntables. This is the same tables def4f46 was written to protect, so\nfixed here rather than filed as a fully separate issue.\n\nFix: both scanners now take their table's write lock for the duration\nof the scan. This is safe from self-deadlock only because every OTHER\nplace that takes rtab_lock/atab_lock in this pair of files was already\n(or is now) guaranteed to never allocate while holding it -- otherwise\na thread's own GC_MALLOC while it already held a read lock could\ntrigger the very minor collection whose scanner then tries to take the\nwrite lock on that same thread, deadlocking against itself. Two call\nsites needed restructuring to actually guarantee this:\n\n- sx_rule_try (the hot path, called from every sx_simplify on a\n  user-defined operator) was GC_MALLOC-ing its rule-chain snapshot\n  while holding rtab_lock for reading. Switched to a fixed on-stack\n  array (SX_RULE_TRY_MAX = 256 rules per operator, matching this\n  file's existing \"silently cap and move on\" convention for pathological\n  inputs), which needs no allocation at all.\n- sx_rules_list (list-rules) was calling scm_cons -- which allocates --\n  while holding rtab_lock for reading. Restructured to a count-under-\n  lock, allocate-outside-lock (with headroom for concurrent growth),\n  copy-under-lock, build-the-result-list-outside-lock sequence, so the\n  only allocation happens with no lock held at all.\n\nsx_algebra_define/sx_algebra_lookup already never allocated while\nholding atab_lock, so sx_algebra_gc_scan's fix needed no matching\nrestructuring elsewhere.\n\nVerified directly against the actual hazard: ran the existing 7-actor\nconcurrency stress pattern (writers/readers/algebra-writer/list-rules/\ngc-hammer) under `--gc generational --gc-nursery-size 16K` (tight\nnursery to maximize minor-collection frequency) for several runs with\nno hang or crash -- this is the one test that would have caught the\noriginal gap, since the default Boehm backend (what all prior testing\nin this session used) never exercises these scanners at all.\n\nAlso corrected issue #143, filed earlier in this same effort under the\nmistaken premise (from a different review pass) that these scanners\nwere dead code: they are not, and this commit is the fix. Left #143\nopen, retitled, to track the one remaining unfixed instance of the\nsame pattern: modules.c's scan_module_registry mutates the module\nregistry the same unsynchronized way under the same live scanner path,\nbut that is a different subsystem/data structure, out of scope for a\nrtab/atab-focused fix.\n\n117/117 ctest suites pass (fresh --clear-cache run, default Boehm\nbackend).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(symbolic): fix sx_rule_try's fixed-256 rule cap dropping legitimate rules (#145)\n\nIndependent security review of 54bb5a2 (the GC ext-scanner locking fix)\nfound that its SX_RULE_TRY_MAX = 256 fixed on-stack snapshot array --\nadded specifically to avoid allocating while holding rtab_lock for\nreading, since that allocation could otherwise trigger a minor GC\nwhose scanner then self-deadlocks trying to take rtab_lock for writing\non the same thread -- silently and permanently dropped every rule\nregistered past the 256th for one operator, with no diagnostic.\nConfirmed via direct repro: registering 300 distinct guarded rules for\none operator, rules #257-300 never fired again after that commit,\nwhere they had before it (and should have).\n\nFixed by applying the same count/allocate-outside-lock/copy pattern\nsx_rules_list already uses for the identical self-deadlock hazard:\ncount the matching chain's length under a read lock (no allocation),\nrelease the lock, GC_MALLOC a buffer sized to that count plus 25%+8\nheadroom (to tolerate concurrent growth between the two lock\nsections) with no lock held, then re-acquire the read lock only to\ncopy the (now possibly-stale) chain into that buffer, bounded by the\nbuffer's actual capacity. This only truncates if an operator's rule\ncount grows by more than the headroom in the few-microsecond gap\nbetween the two lock sections -- the same accepted best-effort bound\nsx_rules_list already documents -- rather than a hard, easily-hit\n256-rule ceiling.\n\nAdded a regression test (tests/sx_algebra_tests.scm) registering 300\nguarded rules for one operator (built via eval, since define-rule's\npattern/guard are literal at macro-expansion time) and confirming\nrules #42, #257, and #299 all still fire correctly.\n\nAlso investigated a separate, more serious finding from the same\nreview: a reproducible SIGSEGV / heap corruption under\n`--gc generational` with heavy concurrent rtab/atab traffic (filed as\nissue #144). Bisected by running the exact same repro against\n`main`@37c4c8f (before any of this branch's locking work): it does not\nSIGSEGV there, but the same script does deterministically fail with a\ntype error (\"apply: not a procedure\") under `--gc generational` where\nit completes normally under the default Boehm backend on that same\ncommit -- confirming the underlying corruption predates #137/#141\nentirely and is unrelated to rtab_lock/atab_lock, just manifesting\ndifferently depending on what gets corrupted. Left #144 open and\nupdated with this finding for separate follow-up; not blocking this\nbranch.\n\nAlso left issue #146 open and unaddressed here (sx_rules_gc_scan/\nsx_algebra_gc_scan now pay O(table size) under a write lock on every\nminor GC, a real throughput cliff under --gc generational as rtab/atab\ngrow) -- fixing that properly needs an incremental/remembered-set-style\nscanning scheme, real architecture work out of scope for a locking fix,\nand --gc generational is documented experimental, not the default\nbackend.\n\n117/117 ctest suites pass (fresh --clear-cache run, default Boehm\nbackend).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-03T21:25:20+10:00",
+          "tree_id": "54c25491c2cb7101984984513716ded7118a72ec",
+          "url": "https://github.com/deconstructo/curry/commit/aa9c35bf2f46a23a152c2a4147d37b13f840339e"
+        },
+        "date": 1788434768336,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.133,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.314,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.144,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.037,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 149.981,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 286.859,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.906,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.285,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 73.308,
             "unit": "ms"
           }
         ]
