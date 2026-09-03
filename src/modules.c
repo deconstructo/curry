@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
 #ifdef __linux__
 #  include <unistd.h>
 #  include <limits.h>
@@ -35,6 +36,29 @@ typedef struct ModuleEntry {
 
 static ModuleEntry *registry = NULL;
 
+/* Issue #143: found during review of #141's identical fix for
+ * sx_rules.c's rtab / sx_algebra.c's atab -- curry actors are real OS
+ * threads with no global interpreter lock, and this registry (like
+ * those tables) was read and written with zero synchronization,
+ * despite `import` being reachable from any actor concurrently.
+ * registry_insert's prepend ("e->next = registry; registry = e;") is
+ * an unsynchronized read-modify-write on the shared head pointer: two
+ * concurrent inserts can both read the same old head, and whichever
+ * write loses silently drops that entry from the list forever (the
+ * exact same lost-update sx_rule_add's identical unsynchronized append
+ * had). Single-writer/many-reader, matching sx_rules.c/sx_algebra.c's
+ * rtab_lock/atab_lock design: mutation (module import) is comparatively
+ * rare next to lookups.
+ *
+ * Unlike rtab/atab, this registry has no removal function at all
+ * (modules are never unloaded), so there is no unlink-vs-traversal
+ * hazard to worry about, and no per-entry field is ever mutated after
+ * publish except by scan_module_registry's GC evac/fwd fixups -- so
+ * registry_lookup's traversal never calls back into arbitrary Scheme
+ * code, and needs no snapshot-then-release pattern the way
+ * sx_rule_try's guard_fn/action_fn callbacks did. */
+static pthread_rwlock_t module_registry_lock = PTHREAD_RWLOCK_INITIALIZER;
+
 static bool names_equal(val_t a, val_t b) {
     while (vis_pair(a) && vis_pair(b)) {
         if (vcar(a) != vcar(b)) return false;
@@ -44,17 +68,28 @@ static bool names_equal(val_t a, val_t b) {
 }
 
 static Module *registry_lookup(val_t name) {
+    pthread_rwlock_rdlock(&module_registry_lock);
+    Module *found = NULL;
     for (ModuleEntry *e = registry; e; e = e->next)
-        if (names_equal(e->name, name)) return e->module;
-    return NULL;
+        if (names_equal(e->name, name)) { found = e->module; break; }
+    pthread_rwlock_unlock(&module_registry_lock);
+    return found;
 }
 
 static void registry_insert(val_t name, Module *mod) {
+    /* Allocate before taking the lock, same reasoning as sx_rule_add:
+     * gc_alloc_raw_pinned is itself an allocation, which under
+     * --gc generational can trigger a minor GC whose ext scanner
+     * (scan_module_registry, below) takes this same lock for writing --
+     * pthread_rwlock_t is not recursive, so allocating while already
+     * holding the lock (even for reading) could self-deadlock. */
     ModuleEntry *e = (ModuleEntry *)gc_alloc_raw_pinned(sizeof(ModuleEntry));
     e->name   = name;
     e->module = mod;
+    pthread_rwlock_wrlock(&module_registry_lock);
     e->next   = registry;
     registry  = e;
+    pthread_rwlock_unlock(&module_registry_lock);
 }
 
 /* ---- Module search path ---- */
@@ -222,10 +257,24 @@ static val_t strip_for(val_t spec) {
 /* ---- GC scanner for module registry ---- */
 
 static void scan_module_registry(void) {
+    /* Issue #143 (found the same way as sx_rules_gc_scan/
+     * sx_algebra_gc_scan's identical fix in #141): under --gc
+     * generational, a minor collection is per-thread, not a
+     * stop-the-world pause for other actors, so this scanner can run
+     * concurrently with module_registry_lock-protected access from
+     * other threads and was mutating entries unguarded. Takes the same
+     * write lock registry_insert uses. Safe against self-deadlock:
+     * gc_ss_evac/gc_ss_fwd don't allocate, and registry_insert's own
+     * allocation happens before it takes the lock (see its comment),
+     * so no thread can already be holding this lock at the moment its
+     * own allocation triggers the minor collection that runs this
+     * scanner. */
+    pthread_rwlock_wrlock(&module_registry_lock);
     for (ModuleEntry *e = registry; e; e = e->next) {
         e->name   = (val_t)gc_ss_evac((uintptr_t)e->name);
         e->module = (Module *)gc_ss_fwd(e->module);
     }
+    pthread_rwlock_unlock(&module_registry_lock);
 }
 
 /* ---- Public API ---- */
