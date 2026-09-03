@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788347880372,
+  "lastUpdate": 1788427838617,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11384,6 +11384,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.124,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "37c4c8ff873901eb579ca344e446835e89e96d6f",
+          "message": "fix(symbolic): memoize sx_simplify to close O(depth^2) CPU-exhaustion DoS (#137) (#142)\n\n* fix(symbolic): memoize sx_simplify to close O(depth^2) CPU-exhaustion\n\nFixes #137: sx_simplify re-walked and re-simplified its entire argument\ntree from scratch on every call, even subexpressions a prior call\nalready fully simplified. Building a symbolic expression by repeatedly\nwrapping an already-simplified result one level at a time (e.g. `(sin\ne)` called N times in a loop, each call passing in the previous\niteration's own result) cost O(depth^2) total work, not O(depth) --\nunder a generous stack ulimit this alone burned 20-30+ seconds of CPU\nbefore #134's stack-depth guard ever engaged, a genuine DoS distinct\nfrom that fix.\n\nClosed with a generation-tagged memoization cache: SymExpr's own\nhdr.flags field (otherwise unused for this type) stores the\ng_sx_simplify_generation value in effect the last time a given node\nwas fully simplified. sx_simplify (now a thin public wrapper around\nthe renamed sx_simplify_impl) checks that tag first and returns the\nnode unchanged with no recursion at all if it matches the current\ngeneration. Every recursive call inside sx_simplify_impl's own 700-line\nbody still calls the public sx_simplify, not the impl directly, so an\nalready-tagged subexpression short-circuits at ANY depth, not just at\nthe top level -- turning the \"wrap an already-simplified result\"\npattern back into O(depth) total.\n\nThe generation counter exists because simplification isn't a fixed\nfunction of shape alone: define-rule/define-algebra register new\nrules/algebra properties at runtime, which can change what \"fully\nsimplified\" means for operators already in use. A bare one-bit tag\nwould let a node cached before a new rule was registered keep being\nserved stale after the registration -- a real correctness regression,\nnot just a missed optimization. Both sx_rule_add (sx_rules.c) and\nsx_algebra_define (sx_algebra.c) now call the new\nsx_invalidate_simplify_cache() (symbolic.h) on every successful\nregistration, bumping the counter so every previously-cached tag stops\nmatching.\n\nAlso updated tests/test_cli.sh's own #134 regression test: its\n\"wrap in a loop\" construction no longer deepens the real C stack at\nall after this fix (each wrap now touches only the one new outer node),\nso it could no longer reach that guard regardless of how large N got.\nSwitched to `up`-tuple nesting (O(1) per level, no simplification pass,\nthe same construction r7rs_tests.scm's own #134 test for sx_depends_on/\n∫ already uses) consumed by `∂` (sx_diff has no memoization of its own\n-- this fix was scoped to sx_simplify only), which still recurses the\nreal C stack once per level and reaches the guard reliably.\n\n4 new regression tests added to tests/sx_algebra_tests.scm: a\n200000-deep (sin (sin ...)) chain builds correctly and re-simplifying\nit returns the identical object (proving the memoization fast-path\nfires), plus a cache-invalidation correctness test confirming a rule\nregistered AFTER a node was cached still fires on that cached node.\n\n466/466 (r7rs_tests.scm), 108/108 (test_cli.sh), 53/53 (sx_algebra_tests.scm,\nup from 49), 406/406 (numeric_ext_tests.scm), 117/117 ctest (default\nbuild), 118/118 ctest (LLVM build) -- all with .scc caches cleared.\nEmpirically confirmed the fix: a 100000-deep wrap chain that previously\nwould have taken tens of seconds (or hit the stack-depth guard first,\ndepending on ulimit) now completes in ~0.04s.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix(symbolic): close review findings on sx_simplify memoization (#137)\n\nFollow-up to 8a4dc28, addressing findings from independent code review\nand security review of that commit:\n\n- sx_simplify's cache is invalidated on define-rule/define-algebra\n  registration, but simplification results also depend on SymVar\n  assumption flags (e.g. sqrt(x^2) -> |x| vs x). A node cached before\n  an assume!/drop-assumption!/with-assumptions change could be served\n  stale afterward. Now invalidated from every entry point that mutates\n  a SymVar assumption flags: eval.c S_WITH_ASSUMPTIONS (entry, normal\n  exit, and exception re-raise paths) and builtins_curry.c\n  prim_assume/prim_drop_assumption/prim_assumption_set/\n  prim_assumption_restore (also covers the compiled with-assumptions\n  path, which desugars to the same primitives).\n\n- sx_rules_clear (rule removal) did not invalidate the cache, only\n  sx_rule_add (rule addition) did. A node cached as a fixpoint under a\n  since-removed rule could keep being served stale. Fixed by\n  invalidating on both directions.\n\n- The generation counter could wrap to 0, which sx_make_expr zero-\n  initialized hdr.flags would then read as \"already simplified\" for a\n  node that was never simplified at all. Fixed by skipping 0 on\n  wraparound. (A residual concern -- wrapping to some other previously\n  used generation value, not just 0 -- is being tracked separately,\n  see issue filed below.)\n\n- Curry actors are real OS threads, so the generation counter and each\n  node cached tag are potentially accessed concurrently. Switched to\n  __atomic_load_n/__atomic_add_fetch on the plain (non-_Atomic)\n  uint32_t counter, matching this codebase established convention for\n  lock-free counters elsewhere (see runtime.c).\n\n- test_cli.sh #134 regression test used N=3000 under ulimit -s 2048,\n  verified only against a Debug build. Security review found a Release\n  build (smaller per-recursion-level stack frames under optimization)\n  does not reach the guard at that depth. Re-measured directly against\n  both Debug and Release builds here: N=3000 overflows in Debug only,\n  N=20000 in both; bumped to N=50000 for margin (still under 0.1s).\n\nFull suite re-verified after these changes: 117/117 ctest suites pass\n(fresh --clear-cache run), including cli and sx_algebra.\n\nTwo residual findings from the security review are not addressed here\nand are being filed as a separate follow-up issue instead of folded\ninto this already-large fix: (1) sx_invalidate_simplify_cache bumps\none global counter, so interleaving cheap rule/algebra registrations\nwith expression construction can defeat memoization entirely,\nreintroducing O(depth^2)-comparable cost; (2) the generation counter\n32-bit range can in principle wrap around to collide with a stale\nper-node tag still in memory, not just to 0. Both point at the same\nunderlying limitation -- a single global generation number cannot\nscope cache validity to just the affected operator or subtree -- which\nneeds its own design pass (e.g. per-operator generation tracking)\nrather than a hurried bit-packing fix appended here.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(symbolic): CAS-based wraparound skip and acquire/release ordering for sx_simplify cache (#137)\n\nSecond independent code review of f3d91b0 found two remaining gaps in\nthe generation-counter mechanism itself (distinct from the two\nalready-filed issue #140 findings about cross-operator granularity and\ngeneral non-zero collision):\n\n- The \"skip 0 on wraparound\" fix was two separate atomic RMW ops (a\n  fetch-add, then a corrective second fetch-add if the result was 0).\n  That leaves a real window, right when the counter lands on 0 after\n  wraparound, during which another threads concurrent load can observe\n  0 before the corrective add runs -- reintroducing the exact\n  \"never-simplified node misread as cached\" bug the skip exists to\n  prevent (sx_make_expr zero-initializes hdr.flags). Fixed with a\n  compare-exchange retry loop, so the increment and the skip-0 step are\n  one atomic operation and no other thread ever observes an\n  intermediate 0.\n\n- Every access used __ATOMIC_RELAXED, which guarantees no torn reads of\n  the counter but establishes no happens-before edge between \"a rule/\n  algebra/assumption mutation just happened\" (an ordinary, non-atomic\n  store) and \"another actor thread observes the resulting generation\n  bump.\" On a weakly-ordered architecture (this codebase explicitly\n  targets arm64 -- Apple Silicon and the Docker arm64 Ubuntu/Fedora\n  checks in CLAUDE.md), that store could be reordered past the atomic\n  bump, letting a thread see the new generation while still reading\n  stale assumption flags or rule-table state. Switched to\n  __ATOMIC_RELEASE on the bump and __ATOMIC_ACQUIRE on the load,\n  matching runtime.cs g_jit_arith_tainted, which already uses\n  acquire/release rather than relaxed for the identical cross-thread-\n  visibility reason.\n\n117/117 ctest suites pass (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-03T19:29:59+10:00",
+          "tree_id": "1563cc1283c424e2deccb6e53d86583ddea6abf5",
+          "url": "https://github.com/deconstructo/curry/commit/37c4c8ff873901eb579ca344e446835e89e96d6f"
+        },
+        "date": 1788427837351,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.322,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.919,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.866,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.744,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 105.617,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 248.268,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 61.208,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 73.293,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 55.964,
             "unit": "ms"
           }
         ]
