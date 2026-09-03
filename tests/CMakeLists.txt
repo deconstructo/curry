@@ -141,6 +141,18 @@ endif()
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)
+# Issue #152's ,env regression subtest races two actors against a busy-wait
+# poll loop (env152-loop) whose termination depends on both actors actually
+# finishing -- the same open-ended-hang risk shape actors/websocket/ros
+# already carry an explicit TIMEOUT for below, and for the same reason: a
+# real hang here (e.g. a livelock in env.c's seqlock retry loop under
+# sustained writer contention, see issue #153) would otherwise block only
+# up to CI's 30-minute job-level timeout with no isolated, diagnosable
+# ctest-level signal. cli normally completes in under 70s (observed up to
+# ~70s in CI's own websocket-retry runs, ~25s locally); 300s gives
+# generous headroom above that while still turning an open-ended hang into
+# a fast, clearly-labeled TIMEOUT instead.
+set_tests_properties(cli PROPERTIES TIMEOUT 300)
 add_test(NAME debugger
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_debugger.sh
             $<TARGET_FILE:curry>)
