@@ -543,21 +543,31 @@ val_t modules_import(val_t spec, val_t env) {
          * importable (C modules, plain .scm files loaded without
          * define-library, and always-on builtin module aliases).
          *
-         * Issue #148 (TSan-confirmed): mod->env is a root frame
-         * (env_new_root(), same shape as GLOBAL_ENV), and root frames are
-         * exactly the ones env.c's seqlock protocol exists for -- another
-         * actor can still be executing this module's own top-level body
-         * (defining bindings into mod->env one at a time via frame_define)
-         * while this actor imports it, e.g. a define-library that
-         * self-registers before its body finishes running, then a second
-         * concurrent importer's self_reg re-check (modules_try_load) picks
-         * up the partially-loaded module. Indexing f->syms[i]/f->vals[i]
-         * directly here bypassed that protocol entirely -- a plain,
-         * unsynchronized read racing frame_define's unsynchronized
-         * f->syms/f->vals reallocation (frame_grow) and rehash. Uses
-         * frame_snapshot_bindings (env.c) instead, the same seqlock-
-         * validated copy frame_lookup_versioned already does for a single
-         * symbol, just for the whole frame at once. */
+         * Issue #148 (TSan-confirmed): walking here can reach GLOBAL_ENV
+         * itself -- directly, since every (scheme base)/(scheme write)/
+         * etc. alias IS GLOBAL_ENV (modules_register_builtin), and
+         * indirectly, since a plain .scm/.sld module loaded without
+         * define-library gets mod->env = env_extend(GLOBAL_ENV), so the
+         * parent-chain walk below reaches it too. GLOBAL_ENV is a root
+         * frame (parent == NULL) and the one frame env.c's seqlock
+         * protocol exists to protect, because it is the one frame actors
+         * genuinely share: any other actor's ordinary top-level (define
+         * ...) calls frame_define on this exact frame while this actor
+         * is mid-import, with no relationship between the two beyond both
+         * happening to run concurrently. (An earlier version of this
+         * comment described a different, define-library-self-registration
+         * scenario as the trigger; that path does not actually expose a
+         * partially-loaded module today -- registry_insert only runs
+         * after a define-library body's whole clause-processing loop
+         * finishes. GLOBAL_ENV's own ordinary concurrent mutation is the
+         * real and sufficient hazard, and is what the regression test in
+         * tests/module_isolation_tests.scm actually exercises.) Indexing
+         * f->syms[i]/f->vals[i] directly here bypassed that protocol
+         * entirely -- a plain, unsynchronized read racing frame_define's
+         * unsynchronized f->syms/f->vals reallocation (frame_grow) and
+         * rehash. Uses frame_snapshot_bindings (env.c) instead, the same
+         * seqlock-validated copy frame_lookup_versioned already does for
+         * a single symbol, just for the whole frame at once. */
         EnvFrame *f = mod->env;
         while (f) {
             val_t *syms, *vals;
