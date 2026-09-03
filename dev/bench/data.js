@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788434770616,
+  "lastUpdate": 1788443190375,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11522,6 +11522,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 73.308,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "613a6cdcaea0bf7b888d0abe8408d39c89c21443",
+          "message": "fix(modules): synchronize the module registry against concurrent actor access (#143) (#151)\n\nmodules.c's module registry (a name-list -> Module* linked list backing\nevery `import`) was read and written with zero synchronization, despite\ncurry actors being real OS threads with no global interpreter lock.\nFound during review of #141's identical fix for sx_rules.c's rtab /\nsx_algebra.c's atab: registry_insert's prepend\n(\"e->next = registry; registry = e;\") is an unsynchronized read-modify-\nwrite on the shared head pointer -- two concurrent inserts can both\nread the same old head, and whichever write loses silently drops that\nentry from the list forever, the same lost-update sx_rule_add's\nidentical unsynchronized append had before #141.\n\nFixed with a pthread_rwlock_t (module_registry_lock), single-writer/\nmany-reader, matching #141's design:\n- registry_insert (writer) allocates its ModuleEntry BEFORE taking the\n  lock (not while holding it), since gc_alloc_raw_pinned is itself an\n  allocation that under --gc generational can trigger a minor GC whose\n  ext scanner (scan_module_registry, below) takes this same lock for\n  writing -- allocating while already holding it would self-deadlock,\n  the identical hazard #141 closed for sx_rule_try/sx_rules_list.\n- registry_lookup (reader) holds the lock for its whole traversal --\n  unlike sx_rule_try, this never calls back into arbitrary Scheme code,\n  so no snapshot-then-release pattern is needed here.\n- scan_module_registry (the GC ext-scanner, confirmed live under\n  --gc generational by the same investigation that found #141's\n  scanners were, not dead code) now takes the write lock for its scan,\n  for the identical reason sx_rules_gc_scan/sx_algebra_gc_scan needed\n  to.\n\nUnlike rtab/atab, this registry has no removal function at all\n(modules are never unloaded), so there's no unlink-vs-traversal hazard\nto close -- the fix here is narrower than #141's.\n\nAdded a concurrency regression test (tests/module_isolation_tests.scm):\n4 actors concurrently importing modules, asserting completion without\ncrash or hang. Deliberately Boehm-only: the same script (concurrent\nimport, no sx_rules/sx_algebra involved at all) was separately found to\ntrip an unrelated, pre-existing corruption bug under\n`--gc generational` -- confirmed to reproduce identically on\nmain@aa9c35b, i.e. without this fix, so it's a wider-reaching instance\nof already-filed issue #144, not something this test is meant to catch\nor something this fix could plausibly cause.\n\n117/117 ctest suites pass (fresh --clear-cache run, default Boehm\nbackend).\n\n\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-03T23:45:47+10:00",
+          "tree_id": "57e7a0009a8477b52a33f91c009894b2dda30a80",
+          "url": "https://github.com/deconstructo/curry/commit/613a6cdcaea0bf7b888d0abe8408d39c89c21443"
+        },
+        "date": 1788443189663,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.257,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.089,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.992,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.327,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 118.707,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 228.328,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 53.784,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 73.323,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 58.182,
             "unit": "ms"
           }
         ]
