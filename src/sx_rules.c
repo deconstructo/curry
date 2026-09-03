@@ -125,31 +125,33 @@ typedef struct {
     val_t pattern, pvars, guard_fn, action_fn;
 } SxRuleSnap;
 
-/* Cap on rules-per-operator this hot path will snapshot in one call.
- * Deliberately a fixed ON-STACK array, not GC_MALLOC: sx_rule_try is
- * called on every sx_simplify for a user-defined operator, so it holds
- * rtab_lock (for reading) during the count+copy above. Under --gc
- * generational, a minor collection is per-thread, not stop-the-world,
- * and sx_rules_gc_scan (which mutates rtab) takes rtab_lock for
- * WRITING -- so if a GC_MALLOC here triggered a collection while this
- * same thread still held the read lock, it would self-deadlock trying
- * to promote that read lock's owner into the scanner's write-lock wait.
- * A plain C stack array needs no allocation at all, closing that off;
- * 256 rules for a single operator is far beyond any realistic
- * define-rule use and matches this file's existing "silently cap and
- * move on" convention (see find_chain's RTAB_SIZE-bounded probe, or the
- * nparams > 64 check just below). */
-#define SX_RULE_TRY_MAX 256
-
 val_t sx_rule_try(val_t expr) {
     if (!rtab_initialised || !vis_symexpr(expr)) return V_VOID;
 
     SymExpr *se  = as_symexpr(expr);
     val_t    op  = se->op;
 
-    SxRuleSnap snap[SX_RULE_TRY_MAX];
-    int count = 0;
-
+    /* Same count/allocate-outside-lock/copy pattern as sx_rules_list,
+     * for the same reason: sx_rule_try is called on every sx_simplify
+     * for a user-defined operator, so it holds rtab_lock (for reading)
+     * during the count+copy passes below. Under --gc generational, a
+     * minor collection is per-thread, not stop-the-world, and
+     * sx_rules_gc_scan (which mutates rtab) takes rtab_lock for
+     * WRITING -- so a GC_MALLOC while this thread still held the read
+     * lock would self-deadlock trying to promote that read lock's
+     * owner into the scanner's write-lock wait. An earlier version of
+     * this function used a fixed 256-entry on-stack array instead
+     * (avoiding allocation entirely), but that silently and
+     * permanently dropped every rule past the 256th registered for one
+     * operator from ever firing again -- a real correctness regression
+     * found by independent security review (issue #145), not just a
+     * theoretical one: reachable via ordinary define-ruleset use
+     * accumulating rules for a common operator over a program's
+     * lifetime, with no diagnostic. The count+headroom approach here
+     * only truncates if the operator's rule count grows by more than
+     * 25%+8 in the microseconds between the two lock sections, which
+     * is what sx_rules_list already accepts as a best-effort snapshot
+     * bound rather than a hard, easily-hit cap. */
     pthread_rwlock_rdlock(&rtab_lock);
     int start = slot_for(op);
     SxRule *chain = NULL;
@@ -158,15 +160,33 @@ val_t sx_rule_try(val_t expr) {
         if (rtab[idx].op == op)   { chain = rtab[idx].head; break; }
         if (rtab[idx].op == V_VOID) break;
     }
-    for (SxRule *r = chain; r && count < SX_RULE_TRY_MAX; r = r->next, count++) {
-        snap[count].pattern   = r->pattern;
-        snap[count].pvars     = r->pvars;
-        snap[count].guard_fn  = r->guard_fn;
-        snap[count].action_fn = r->action_fn;
+    int count = 0;
+    for (SxRule *r = chain; r; r = r->next) count++;
+    pthread_rwlock_unlock(&rtab_lock);
+
+    if (count == 0) return V_VOID;
+
+    int cap = count + count / 4 + 8;
+    SxRuleSnap *snap = (SxRuleSnap *)GC_MALLOC(sizeof(SxRuleSnap) * (size_t)cap);
+
+    pthread_rwlock_rdlock(&rtab_lock);
+    start = slot_for(op);
+    chain = NULL;
+    for (int i = 0; i < RTAB_SIZE; i++) {
+        int idx = (start + i) % RTAB_SIZE;
+        if (rtab[idx].op == op)   { chain = rtab[idx].head; break; }
+        if (rtab[idx].op == V_VOID) break;
+    }
+    int n = 0;
+    for (SxRule *r = chain; r && n < cap; r = r->next, n++) {
+        snap[n].pattern   = r->pattern;
+        snap[n].pvars     = r->pvars;
+        snap[n].guard_fn  = r->guard_fn;
+        snap[n].action_fn = r->action_fn;
     }
     pthread_rwlock_unlock(&rtab_lock);
 
-    for (int idx = 0; idx < count; idx++) {
+    for (int idx = 0; idx < n; idx++) {
         val_t pattern   = snap[idx].pattern;
         val_t pvars     = snap[idx].pvars;
         val_t guard_fn  = snap[idx].guard_fn;

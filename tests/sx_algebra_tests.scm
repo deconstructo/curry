@@ -409,6 +409,32 @@
 (assert-equal "rtab/atab locking: a relations_fn calling define-algebra from inside sx_algebra_lookup's caller does not self-deadlock"
   (sym->string (simplify (sym-expr 'sx141-reentrant-alg-op stress-x))) "sx141-reentrant-alg-op(stress-x)")
 
+;; sx_rule_try's first design (an on-stack SX_RULE_TRY_MAX = 256 snapshot,
+;; needed to avoid allocating while holding rtab_lock -- see the GC
+;; ext-scanner locking fix above) silently and permanently dropped every
+;; rule past the 256th registered for one operator, with no diagnostic --
+;; a real correctness regression found by independent security review
+;; (issue #145), reachable via ordinary define-ruleset use accumulating
+;; rules for a common operator, not just adversarial input. Register 300
+;; distinct guarded rules for one operator (built via eval since
+;; define-rule's pattern/guard are literal at expansion time) and confirm
+;; rules #257-300 -- the ones a fixed 256-cap would have silently excluded
+;; -- still fire.
+(let loop ((k 0))
+  (if (< k 300)
+      (begin
+        (eval (list 'define-rule (list 'sx145-many-rules-op '?a) '->
+                     (list 'quote (string->symbol (string-append "matched-" (number->string k))))
+                     '#:when (list '= '?a k))
+              (interaction-environment))
+        (loop (+ k 1)))))
+(assert-equal "sx_rule_try: rule #257 of 300 for one operator still fires (not silently dropped by a fixed snapshot cap)"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 257))) "matched-257")
+(assert-equal "sx_rule_try: rule #299 of 300 for one operator still fires"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 299))) "matched-299")
+(assert-equal "sx_rule_try: an early rule (#42 of 300) still fires correctly too"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 42))) "matched-42")
+
 ;;; ============================================================
 ;;; Report
 ;;; ============================================================
