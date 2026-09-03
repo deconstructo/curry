@@ -299,6 +299,31 @@ val_t *frame_lookup(EnvFrame *f, val_t sym) {
     return frame_lookup_versioned(f, sym, NULL);
 }
 
+uint32_t frame_snapshot_bindings(EnvFrame *f, val_t **out_syms, val_t **out_vals) {
+    if (!frame_is_global(f)) {
+        uint32_t n = f->size;
+        val_t *syms = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+        val_t *vals = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+        memcpy(syms, f->syms, n * sizeof(val_t));
+        memcpy(vals, f->vals, n * sizeof(val_t));
+        *out_syms = syms; *out_vals = vals;
+        return n;
+    }
+    for (;;) {
+        uint32_t v1 = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
+        if (v1 & 1) continue;
+        uint32_t n = f->size;
+        val_t *syms = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+        val_t *vals = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+        memcpy(syms, f->syms, n * sizeof(val_t));
+        memcpy(vals, f->vals, n * sizeof(val_t));
+        uint32_t v2 = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
+        if (v2 != v1) continue;
+        *out_syms = syms; *out_vals = vals;
+        return n;
+    }
+}
+
 /* ---- Environment ---- */
 
 val_t env_new_root(void) {

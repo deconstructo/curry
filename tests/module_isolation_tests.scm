@@ -210,5 +210,45 @@
 (check "module registry concurrency: concurrent import across actors completes without crash or hang"
   #t #t)
 
+;;; ── modules_import's no-export-list env walk (issue #148) ──────────────
+;;; The test above imports srfi 1/128, which both declare explicit
+;;; (export ...) clauses -- so it never actually exercises has_exports =
+;;; false's code path (modules_import's raw f->syms[i]/f->vals[i] walk,
+;;; TSan-confirmed racing frame_define's unsynchronized frame_grow/
+;;; frame_hash_rehash). (scheme base) and its sibling aliases ARE
+;;; registered with has_exports = false (modules_register_builtin,
+;;; modules.c) and alias GLOBAL_ENV directly -- so importing (scheme
+;;; base) walks GLOBAL_ENV's own frame chain via exactly the vulnerable
+;;; path, and GLOBAL_ENV is the one frame actually reachable from more
+;;; than one actor thread (env.c's own seqlock design doc). This test
+;;; imports (scheme base) repeatedly from two actors while two other
+;;; actors concurrently grow GLOBAL_ENV with fresh top-level defines
+;;; (forcing real frame_grow/rehash calls mid-import), which reliably
+;;; reproduced the race under ThreadSanitizer before the fix
+;;; (frame_snapshot_bindings, env.c) and does not after.
+(define (mreg148-definer-loop n tag)
+  (if (> n 0)
+      (begin
+        (eval (list 'define
+                     (string->symbol (string-append "mreg148-" (symbol->string tag) "-" (number->string n)))
+                     n)
+              (interaction-environment))
+        (mreg148-definer-loop (- n 1) tag))))
+(define (mreg148-importer-loop n)
+  (if (> n 0)
+      (begin
+        (import (scheme base))
+        (mreg148-importer-loop (- n 1)))))
+(define mreg148-d1 (spawn (lambda () (mreg148-definer-loop 2000 'a))))
+(define mreg148-d2 (spawn (lambda () (mreg148-definer-loop 2000 'b))))
+(define mreg148-i1 (spawn (lambda () (mreg148-importer-loop 300))))
+(define mreg148-i2 (spawn (lambda () (mreg148-importer-loop 300))))
+(let mreg148-wait ()
+  (if (or (actor-alive? mreg148-d1) (actor-alive? mreg148-d2)
+          (actor-alive? mreg148-i1) (actor-alive? mreg148-i2))
+      (mreg148-wait)))
+(check "modules_import no-export-list walk: importing (scheme base) while GLOBAL_ENV grows concurrently completes without crash or hang"
+  #t #t)
+
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))

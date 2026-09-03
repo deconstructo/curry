@@ -541,11 +541,39 @@ val_t modules_import(val_t spec, val_t env) {
     } else {
         /* No export list: every binding in the module's own environment is
          * importable (C modules, plain .scm files loaded without
-         * define-library, and always-on builtin module aliases). */
+         * define-library, and always-on builtin module aliases).
+         *
+         * Issue #148 (TSan-confirmed): walking here can reach GLOBAL_ENV
+         * itself -- directly, since every (scheme base)/(scheme write)/
+         * etc. alias IS GLOBAL_ENV (modules_register_builtin), and
+         * indirectly, since a plain .scm/.sld module loaded without
+         * define-library gets mod->env = env_extend(GLOBAL_ENV), so the
+         * parent-chain walk below reaches it too. GLOBAL_ENV is a root
+         * frame (parent == NULL) and the one frame env.c's seqlock
+         * protocol exists to protect, because it is the one frame actors
+         * genuinely share: any other actor's ordinary top-level (define
+         * ...) calls frame_define on this exact frame while this actor
+         * is mid-import, with no relationship between the two beyond both
+         * happening to run concurrently. (An earlier version of this
+         * comment described a different, define-library-self-registration
+         * scenario as the trigger; that path does not actually expose a
+         * partially-loaded module today -- registry_insert only runs
+         * after a define-library body's whole clause-processing loop
+         * finishes. GLOBAL_ENV's own ordinary concurrent mutation is the
+         * real and sufficient hazard, and is what the regression test in
+         * tests/module_isolation_tests.scm actually exercises.) Indexing
+         * f->syms[i]/f->vals[i] directly here bypassed that protocol
+         * entirely -- a plain, unsynchronized read racing frame_define's
+         * unsynchronized f->syms/f->vals reallocation (frame_grow) and
+         * rehash. Uses frame_snapshot_bindings (env.c) instead, the same
+         * seqlock-validated copy frame_lookup_versioned already does for
+         * a single symbol, just for the whole frame at once. */
         EnvFrame *f = mod->env;
         while (f) {
-            for (uint32_t i = 0; i < f->size; i++)
-                import_binding(f->syms[i], f->vals[i], spec, filter, env);
+            val_t *syms, *vals;
+            uint32_t n = frame_snapshot_bindings(f, &syms, &vals);
+            for (uint32_t i = 0; i < n; i++)
+                import_binding(syms[i], vals[i], spec, filter, env);
             f = f->parent;
         }
     }
