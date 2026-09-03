@@ -380,6 +380,35 @@
 (assert-equal "rtab/atab concurrency: concurrent define-rule/define-algebra/simplify across actors completes without crash or hang"
   #t #t)
 
+;; The concurrency stress above never actually exercises the ONE hazard
+;; def4f46's design specifically guards against: sx_rule_try must release
+;; rtab_lock before invoking a rule's action_fn/guard_fn, because
+;; pthread_rwlock_t is not recursive -- if a rule's own action called
+;; define-rule while sx_rule_try still held even a read lock (on the SAME
+;; thread, no other actor involved), sx_rule_add's attempt to take the
+;; write lock would self-deadlock. Single-threaded and deterministic,
+;; unlike the stress test above, so a future change that moved the
+;; unlock later would fail this reliably instead of only sometimes.
+(define-rule (sx141-reentrant-op ?a)
+  -> (begin (define-rule (sx141-reentrant-op2 ?b) -> (* 3 ?b))
+            (* 2 ?a)))
+(assert-equal "rtab/atab locking: an action_fn calling define-rule from inside sx_rule_try does not self-deadlock"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-op stress-x))) "2 * stress-x")
+(assert-equal "rtab/atab locking: the rule registered by that reentrant action_fn actually took effect"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-op2 stress-x))) "3 * stress-x")
+
+;; Same hazard, algebra side: a relations_fn calling define-algebra while
+;; sx_algebra_lookup's caller (sx_simplify_impl) still holds a snapshot
+;; obtained under atab_lock's read lock -- sx_algebra_lookup itself has
+;; already released the lock by the time relations_fn runs, so this must
+;; not deadlock either.
+(define-algebra 'sx141-reentrant-alg-op
+  #:relations (lambda (expr)
+                (define-algebra 'sx141-reentrant-alg-op2 #:commutative #t)
+                expr))
+(assert-equal "rtab/atab locking: a relations_fn calling define-algebra from inside sx_algebra_lookup's caller does not self-deadlock"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-alg-op stress-x))) "sx141-reentrant-alg-op(stress-x)")
+
 ;;; ============================================================
 ;;; Report
 ;;; ============================================================
