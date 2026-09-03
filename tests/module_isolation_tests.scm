@@ -179,5 +179,36 @@
 (check "r6rs except: excluded name not visible even inside the importing library"
   (r6-except-run) 'unbound-as-expected)
 
+;;; ── Module registry concurrency (issue #143) ────────────────────────────
+;;; modules.c's registry (the name-list -> Module* linked list backing
+;;; every `import`) was read and written with zero synchronization,
+;;; despite curry actors being real OS threads with no global interpreter
+;;; lock -- registry_insert's unsynchronized "read old head, write new
+;;; head" prepend could lose a concurrent registration, the same lost-
+;;; update sx_rule_add had before #141's identical fix for sx_rules.c's
+;;; rtab. Several actors concurrently importing modules must not crash or
+;;; hang. (Deliberately run only under the default Boehm backend: the
+;;; same underlying script -- concurrent module import with no sx_rules/
+;;; sx_algebra involved at all -- was separately found to trip an
+;;; unrelated, pre-existing corruption bug under `--gc generational`,
+;;; confirmed to reproduce identically without this locking fix and
+;;; tracked as issue #144, not something this test is meant to catch.)
+(define (importer-loop n)
+  (if (> n 0)
+      (begin
+        (import (srfi 1))
+        (import (srfi 128))
+        (importer-loop (- n 1)))))
+(define mreg-a1 (spawn (lambda () (importer-loop 500))))
+(define mreg-a2 (spawn (lambda () (importer-loop 500))))
+(define mreg-a3 (spawn (lambda () (importer-loop 500))))
+(define mreg-a4 (spawn (lambda () (importer-loop 500))))
+(let mreg-wait ()
+  (if (or (actor-alive? mreg-a1) (actor-alive? mreg-a2)
+          (actor-alive? mreg-a3) (actor-alive? mreg-a4))
+      (mreg-wait)))
+(check "module registry concurrency: concurrent import across actors completes without crash or hang"
+  #t #t)
+
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))
