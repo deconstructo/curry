@@ -336,6 +336,106 @@
   (sym->string (simplify cached-before-rule)) "111 * x")
 
 ;;; ============================================================
+;;; 6. rtab/atab concurrency (issue #141) -- concurrent define-rule/
+;;;    define-algebra/simplify calls across several actors must not
+;;;    crash or hang. This doesn't assert a specific outcome (the race
+;;;    this closes was a lost-update/torn-struct correctness hazard, not
+;;;    a memory-safety one -- see issue #141), just that the rwlocks
+;;;    added around rtab (sx_rules.c) and atab (sx_algebra.c) don't
+;;;    themselves introduce a deadlock (e.g. sx_rule_try's guard_fn/
+;;;    action_fn callbacks running while still holding rtab_lock would
+;;;    self-deadlock the first time a guard/action called define-rule).
+;;; ============================================================
+(define stress-x (sym-var 'stress-x))
+
+(define (writer-loop n)
+  (if (> n 0)
+      (begin
+        (define-rule (sx141-stress-op ?a) -> (* 2 ?a))
+        (writer-loop (- n 1)))))
+
+(define (reader-loop n)
+  (if (> n 0)
+      (begin
+        (simplify (sym-expr 'sx141-stress-op stress-x))
+        (reader-loop (- n 1)))))
+
+(define (algebra-writer-loop n)
+  (if (> n 0)
+      (begin
+        (define-algebra 'sx141-stress-alg-op #:commutative #t)
+        (algebra-writer-loop (- n 1)))))
+
+(define sx141-n 3000)
+(define w1 (spawn (lambda () (writer-loop sx141-n))))
+(define w2 (spawn (lambda () (writer-loop sx141-n))))
+(define r1 (spawn (lambda () (reader-loop sx141-n))))
+(define r2 (spawn (lambda () (reader-loop sx141-n))))
+(define a1 (spawn (lambda () (algebra-writer-loop sx141-n))))
+
+(let sx141-wait ()
+  (if (or (actor-alive? w1) (actor-alive? w2) (actor-alive? r1)
+          (actor-alive? r2) (actor-alive? a1))
+      (sx141-wait)))
+(assert-equal "rtab/atab concurrency: concurrent define-rule/define-algebra/simplify across actors completes without crash or hang"
+  #t #t)
+
+;; The concurrency stress above never actually exercises the ONE hazard
+;; def4f46's design specifically guards against: sx_rule_try must release
+;; rtab_lock before invoking a rule's action_fn/guard_fn, because
+;; pthread_rwlock_t is not recursive -- if a rule's own action called
+;; define-rule while sx_rule_try still held even a read lock (on the SAME
+;; thread, no other actor involved), sx_rule_add's attempt to take the
+;; write lock would self-deadlock. Single-threaded and deterministic,
+;; unlike the stress test above, so a future change that moved the
+;; unlock later would fail this reliably instead of only sometimes.
+(define-rule (sx141-reentrant-op ?a)
+  -> (begin (define-rule (sx141-reentrant-op2 ?b) -> (* 3 ?b))
+            (* 2 ?a)))
+(assert-equal "rtab/atab locking: an action_fn calling define-rule from inside sx_rule_try does not self-deadlock"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-op stress-x))) "2 * stress-x")
+(assert-equal "rtab/atab locking: the rule registered by that reentrant action_fn actually took effect"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-op2 stress-x))) "3 * stress-x")
+
+;; Same hazard, algebra side: a relations_fn calling define-algebra while
+;; sx_algebra_lookup's caller (sx_simplify_impl) still holds a snapshot
+;; obtained under atab_lock's read lock -- sx_algebra_lookup itself has
+;; already released the lock by the time relations_fn runs, so this must
+;; not deadlock either.
+(define-algebra 'sx141-reentrant-alg-op
+  #:relations (lambda (expr)
+                (define-algebra 'sx141-reentrant-alg-op2 #:commutative #t)
+                expr))
+(assert-equal "rtab/atab locking: a relations_fn calling define-algebra from inside sx_algebra_lookup's caller does not self-deadlock"
+  (sym->string (simplify (sym-expr 'sx141-reentrant-alg-op stress-x))) "sx141-reentrant-alg-op(stress-x)")
+
+;; sx_rule_try's first design (an on-stack SX_RULE_TRY_MAX = 256 snapshot,
+;; needed to avoid allocating while holding rtab_lock -- see the GC
+;; ext-scanner locking fix above) silently and permanently dropped every
+;; rule past the 256th registered for one operator, with no diagnostic --
+;; a real correctness regression found by independent security review
+;; (issue #145), reachable via ordinary define-ruleset use accumulating
+;; rules for a common operator, not just adversarial input. Register 300
+;; distinct guarded rules for one operator (built via eval since
+;; define-rule's pattern/guard are literal at expansion time) and confirm
+;; rules #257-300 -- the ones a fixed 256-cap would have silently excluded
+;; -- still fire.
+(let loop ((k 0))
+  (if (< k 300)
+      (begin
+        (eval (list 'define-rule (list 'sx145-many-rules-op '?a) '->
+                     (list 'quote (string->symbol (string-append "matched-" (number->string k))))
+                     '#:when (list '= '?a k))
+              (interaction-environment))
+        (loop (+ k 1)))))
+(assert-equal "sx_rule_try: rule #257 of 300 for one operator still fires (not silently dropped by a fixed snapshot cap)"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 257))) "matched-257")
+(assert-equal "sx_rule_try: rule #299 of 300 for one operator still fires"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 299))) "matched-299")
+(assert-equal "sx_rule_try: an early rule (#42 of 300) still fires correctly too"
+  (sym->string (simplify (sym-expr 'sx145-many-rules-op 42))) "matched-42")
+
+;;; ============================================================
 ;;; Report
 ;;; ============================================================
 (display "sx_algebra tests: ")
