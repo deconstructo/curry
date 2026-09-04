@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788555201783,
+  "lastUpdate": 1788556606204,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12557,6 +12557,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.46,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "78b8edb06a117931f85f4f7b57e518780f3bab7c",
+          "message": "fix(qt6,vecdb): reject unchecked bytevector/vector casts on data-payload args (#169, #179) (#183)\n\nSame recurring bug class as #158/#161/#166/#167/#165, this time in the\ntwo modules OFF by default (BUILD_MODULE_QT6/BUILD_MODULE_VECDB), so\nnever build-verified in this session's earlier passes -- both were\nactually buildable here (Qt6 via Homebrew, vecdb has no external\ndependency despite its own comment) and are now fully build- and\ntest-verified, not source-inspection-only.\n\nmodules/qt6/qt6.cpp (#169):\n- fn_make_gl_texture (make-gl-texture): av[0] passed straight to\n  curry_bytevector_length/_ref with no curry_is_bytevector check.\n  Confirmed reproducible SIGSEGV via (make-gl-texture 42 8 8).\n- fn_gl_texture_update (gl-texture-update!): identical gap on av[1].\n- fn_gfx_draw_image (gfx-draw-image!): no curry_is_bytevector check on\n  the data bytevector at all, AND the read loop bound (iw*ih*4) was\n  computed from separate caller-supplied width/height with no check\n  against the bytevector's real backing length -- a genuine bytevector\n  that's merely too short still read out of bounds, the same \"trusted\n  size fields vs. real length\" gap #167 fixed for images. Also added an\n  iw/ih > 0 guard (negative/zero dimensions previously produced a null\n  QImage whose ->bits() is a null pointer).\n\nmodules/vecdb/vecdb.cpp (#179):\n- fn_add (vecdb-add) and fn_search (vecdb-search): neither checked\n  their vector argument was actually a vector before\n  curry_vector_length/_ref's unchecked as_vec() cast. Additionally,\n  even a genuine vector's ELEMENTS were never checked as numeric before\n  curry_float, which is itself unchecked for anything but a fixnum/\n  flonum (vfloat(v) is a raw as_flo(v)->value cast) -- so a vector\n  containing a string or symbol would still wild-cast even after only\n  adding the outer vector check. Added a shared check_numeric_vector()\n  helper validating both layers. Confirmed reproducible SIGSEGV via\n  (vecdb-add db 1 42) and (vecdb-add db 1 (vector \"x\" 1 2)).\n\nAdded tests/vecdb_tests.scm (no dedicated suite existed for this\nmodule before) and extended tests/test_qt6_new.scm with regression\ncoverage for all three qt6 fixes (using the existing headless\ncall-with-painter pattern for gfx-draw-image!, no display needed).\nRegistered vecdb in tests/CMakeLists.txt gated on BUILD_MODULE_VECDB.\n\nBuilt and tested locally with both modules enabled\n(-DBUILD_MODULE_VECDB=ON -DBUILD_MODULE_QT6=ON\n-DCMAKE_PREFIX_PATH=\"$(brew --prefix qtbase)\") -- neither is enabled\nin CI's default build, so these fixes and their tests won't run there,\nbut were fully build- and runtime-verified here rather than left as\nsource-inspection-only.\n\n127/127 ctest suites pass locally with both modules enabled (fresh\n--clear-cache run, 1 new suite: vecdb).",
+          "timestamp": "2026-09-05T07:16:09+10:00",
+          "tree_id": "bd591d3373e8276f6f5c4c841a66139a811ed761",
+          "url": "https://github.com/deconstructo/curry/commit/78b8edb06a117931f85f4f7b57e518780f3bab7c"
+        },
+        "date": 1788556605466,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.104,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.415,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.083,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.91,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 144.932,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 282.344,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.073,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.463,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 69.536,
             "unit": "ms"
           }
         ]
