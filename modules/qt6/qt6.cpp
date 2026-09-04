@@ -1632,6 +1632,28 @@ struct GlBuffer {
 #define glbuf_to_val(b)  ptr_to_val("gl-buffer", (b))
 #define val_to_glbuf(v)  ((GlBuffer *)val_to_ptr("gl-buffer", (v)))
 
+/* Issue #182: several functions in this file (glbuf_load_data below,
+ * plus fn_gfx_draw_points/_lines/_fill_triangles/fn_project_4d/
+ * fn_rotate_4d_xw further down) took a vector argument without checking
+ * it was actually a vector -- or, for the fixed-length 4D helpers, long
+ * enough -- before curry_vector_length/_ref's unchecked as_vec() cast,
+ * the same class as #169/#179. Also validates each element is a real
+ * number before it reaches curry_float, which is itself unchecked for
+ * anything but a fixnum/flonum (vfloat(v) is a raw as_flo(v)->value
+ * cast) -- the same "container checked, elements not" gap
+ * check_numeric_vector in vecdb.cpp was written to close. Returns the
+ * vector's validated length. */
+static uint32_t check_real_vector(curry_val v, const char *who) {
+    if (!curry_is_vector(v)) curry_error("%s: not a vector", who);
+    uint32_t n = curry_vector_length(v);
+    for (uint32_t i = 0; i < n; i++) {
+        curry_val e = curry_vector_ref(v, i);
+        if (!curry_is_fixnum(e) && !curry_is_float(e))
+            curry_error("%s: vector element %u is not a real number", who, i);
+    }
+    return n;
+}
+
 static void glbuf_load_data(GlBuffer *buf, curry_val src) {
     buf->data.clear();
     if (vis_f64vec(src)) {
@@ -1640,7 +1662,7 @@ static void glbuf_load_data(GlBuffer *buf, curry_val src) {
         for (uint32_t i = 0; i < fv->len; i++)
             buf->data.push_back((float)fv->data[i]);
     } else if (curry_is_vector(src)) {
-        uint32_t n = curry_vector_length(src);
+        uint32_t n = check_real_vector(src, "gl-buffer");
         buf->data.reserve(n);
         for (uint32_t i = 0; i < n; i++)
             buf->data.push_back((float)curry_float(curry_vector_ref(src, i)));
@@ -2236,7 +2258,13 @@ static curry_val fn_gfx_draw_points(int ac, curry_val *av, void *ud) {
     double r = curry_float(av[3]), g = curry_float(av[4]);
     double b = curry_float(av[5]), a = curry_float(av[6]);
     double sz = curry_float(av[7]);
-    uint32_t n = curry_vector_length(xv);
+    uint32_t n = check_real_vector(xv, "gfx-draw-points!");
+    /* xv/yv are two independent vectors walked over the SAME index range
+     * -- a length mismatch (yv shorter than xv) is a distinct OOB hazard
+     * from the type check above, so it needs its own check even though
+     * yv itself is validated as a real vector. */
+    if (check_real_vector(yv, "gfx-draw-points!") < n)
+        curry_error("gfx-draw-points!: yvec shorter than xvec");
     p->save();
     p->setPen(Qt::NoPen);
     p->setBrush(QColor::fromRgbF(r,g,b,a));
@@ -2257,7 +2285,7 @@ static curry_val fn_gfx_draw_lines(int ac, curry_val *av, void *ud) {
     double r = curry_float(av[2]), g = curry_float(av[3]);
     double b = curry_float(av[4]), a = curry_float(av[5]);
     double w = curry_float(av[6]);
-    uint32_t n = curry_vector_length(cv);
+    uint32_t n = check_real_vector(cv, "gfx-draw-lines!");
     QVector<QLineF> lines;
     lines.reserve((int)(n/4));
     for (uint32_t i = 0; i + 3 < n; i += 4) {
@@ -2279,7 +2307,7 @@ static curry_val fn_gfx_fill_triangles(int ac, curry_val *av, void *ud) {
     curry_val  cv = av[1];
     double r = curry_float(av[2]), g = curry_float(av[3]);
     double b = curry_float(av[4]), a = curry_float(av[5]);
-    uint32_t n = curry_vector_length(cv);
+    uint32_t n = check_real_vector(cv, "gfx-fill-triangles!");
     p->save();
     p->setPen(Qt::NoPen);
     p->setBrush(QColor::fromRgbF(r,g,b,a));
@@ -2375,6 +2403,10 @@ static curry_val fn_make_4d_projector(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_project_4d(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    if (check_real_vector(av[0], "project-4d") < 1)
+        curry_error("project-4d: projector vector too short");
+    if (check_real_vector(av[1], "project-4d") < 4)
+        curry_error("project-4d: point vector too short (need 4 elements)");
     double fov4d = curry_float(curry_vector_ref(av[0], 0));
     double pts[4];
     for (int i = 0; i < 4; i++) pts[i] = curry_float(curry_vector_ref(av[1],(uint32_t)i));
@@ -2386,6 +2418,8 @@ static curry_val fn_project_4d(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_rotate_4d_xw(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    if (check_real_vector(av[0], "rotate-4d-xw") < 4)
+        curry_error("rotate-4d-xw: point vector too short (need 4 elements)");
     double pts[4];
     for (int i = 0; i < 4; i++) pts[i] = curry_float(curry_vector_ref(av[0],(uint32_t)i));
     double c = cos(curry_float(av[1])), s = sin(curry_float(av[1]));
