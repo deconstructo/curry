@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788450261525,
+  "lastUpdate": 1788513362018,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11798,6 +11798,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 44.533,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "47bc4b8c980b0f6aac5a16f096e295fef4a885f4",
+          "message": "fix(modules): re-check registry before inserting a freshly-loaded C module (#149) (#157)\n\nmodules_try_load's .so/.dylib branches inserted a freshly loaded\nModule into the registry unconditionally, unlike the .sld/.scm\nbranches just below them, which already re-check the registry after\nloading and prefer whatever is there before inserting (originally to\nhandle a define-library body self-registering during its own load,\nnot specifically for cross-actor concurrency -- but the mechanism is\nagnostic to WHO registered first, so it incidentally closes the\nconcurrency race too).\n\nFound during independent security review of #143 (module registry\nlocking): two actors racing to first-import the same not-yet-loaded\nC module could both see registry_lookup return NULL, both proceed to\nload_c_module (each independently dlopen-ing and running\ncurry_module_init), and both registry_insert their own Module*.\nWhichever insert ran last won as the identity every future lookup\nresolves to, while the OTHER racing importer kept and used the\nModule* it personally created -- two actors ending up bound to two\ndifferent \"singleton\" module instances.\n\nFixed by applying the identical re-check-then-prefer-existing pattern\nalready used for .sld/.scm to the .so/.dylib branches. This does not\nundo curry_module_init having run twice if the race was already lost\nby the time the re-check happens -- that side effect already\noccurred, and is a known, accepted consequence matching the .sld/.scm\npath's own existing duplicate-load tolerance -- but it does make\nevery racing actor converge on the same Module* going forward, closing\nthe observable inconsistency.\n\nAdded a regression test (tests/module_isolation_tests.scm): 16 actors\neach doing exactly one first-ever import of a not-previously-loaded\nC module (curry json), maximizing simultaneous first-load race-window\ncontention, verifying no crash/hang and that the module actually\nworks afterward regardless of which racing actor's load won.\n\n117/117 ctest suites pass (fresh --clear-cache run).\n\n\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T19:15:15+10:00",
+          "tree_id": "dba29e7b6d364b3ed697536534b665c3c1b3b967",
+          "url": "https://github.com/deconstructo/curry/commit/47bc4b8c980b0f6aac5a16f096e295fef4a885f4"
+        },
+        "date": 1788513361323,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.284,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.133,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.957,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.357,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 117.924,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 224.051,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 52.614,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 74.026,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 57.121,
             "unit": "ms"
           }
         ]
