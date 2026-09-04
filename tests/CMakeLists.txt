@@ -245,6 +245,17 @@ if(BUILD_MODULE_CRYPTO AND TARGET curry_crypto AND BUILD_MODULE_HTTP AND TARGET 
     set_tests_properties(s3 PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# Issue #156: curl_global_init (libcurl, not thread-safe to call
+# concurrently) was called unsynchronized from http.c/graphql.c/
+# storage.c. graphql-client/swift-client/azure-client all reach the
+# call directly in their constructor, no network access needed --
+# http-request's own race needs a real request and skips cleanly if
+# there's no network (see the test file's own header comment).
+if(BUILD_MODULE_HTTP AND TARGET curry_http AND BUILD_MODULE_GRAPHQL AND TARGET curry_graphql AND BUILD_MODULE_STORAGE AND TARGET curry_storage)
+    add_test(NAME curl_global_init_race COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/curl_global_init_race_tests.scm)
+    set_tests_properties(curl_global_init_race PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 # Pure-Scheme scientific I/O modules (fits/netcdf) plus the FFI-based hdf5
 # wrapper (requires BUILD_FFI=ON to compile; libhdf5 itself is a
 # runtime-only dlopen dependency, so hdf5_tests.scm skips cleanly if it's

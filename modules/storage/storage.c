@@ -27,6 +27,22 @@
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <curl/curl.h>
+#include <pthread.h>
+
+/* Issue #156: curl_global_init is not safe to call concurrently from
+ * multiple threads (libcurl's own documentation). Both call sites below
+ * (fn_swift_client, fn_azure_client) had no guard at all -- called
+ * unconditionally on every client construction -- so two actors each
+ * constructing their first client (whether both Swift, both Azure, or
+ * one of each) concurrently raced on it directly. pthread_once
+ * guarantees the wrapped call runs exactly once, thread-safely,
+ * regardless of how many threads race to call it at the same time; one
+ * shared guard for both call sites in this file, since they're both
+ * calling into the same underlying libcurl global state. Same pattern
+ * as modules/http/http.c and modules/graphql/graphql.c's identical
+ * fixes. */
+static pthread_once_t g_curl_init_once = PTHREAD_ONCE_INIT;
+static void curl_init_once_fn(void) { curl_global_init(CURL_GLOBAL_ALL); }
 
 /* ---- Memory buffer for curl responses ---- */
 
@@ -88,7 +104,7 @@ static curry_val fn_swift_client(int ac, curry_val *av, void *ud) {
     cs->username  = strdup(curry_string(av[1]));
     cs->password  = strdup(curry_string(av[2]));
     cs->project   = strdup(curry_string(av[3]));
-    curl_global_init(CURL_GLOBAL_ALL);
+    pthread_once(&g_curl_init_once, curl_init_once_fn);
     return client_to_val(cs);
 }
 
@@ -266,7 +282,7 @@ static curry_val fn_azure_client(int ac, curry_val *av, void *ud) {
     cs->access_key  = strdup(curry_string(av[0]));  /* account name */
     cs->secret_key  = strdup(curry_string(av[1]));  /* account key (base64) */
     cs->region      = strdup("core.windows.net");
-    curl_global_init(CURL_GLOBAL_ALL);
+    pthread_once(&g_curl_init_once, curl_init_once_fn);
     return client_to_val(cs);
 }
 

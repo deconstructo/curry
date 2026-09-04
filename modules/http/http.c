@@ -37,6 +37,19 @@
 #include <string.h>
 #include <stdlib.h>
 #include <curl/curl.h>
+#include <pthread.h>
+
+/* Issue #156: curl_global_init is documented by libcurl as NOT safe to
+ * call concurrently from multiple threads. Curry actors are real OS
+ * threads with no global interpreter lock, so two actors both making
+ * their first http-request concurrently used to race on this module's
+ * own lazy "static int curl_inited" check below -- an unsynchronized
+ * read-then-write, the same class of bug as an unguarded double-checked
+ * init anywhere else. pthread_once guarantees the wrapped call runs
+ * exactly once, thread-safely, regardless of how many threads race to
+ * call it at the same time. */
+static pthread_once_t g_curl_init_once = PTHREAD_ONCE_INIT;
+static void curl_init_once_fn(void) { curl_global_init(CURL_GLOBAL_ALL); }
 
 typedef struct { char *data; size_t len; size_t cap; } Buf;
 
@@ -178,8 +191,7 @@ static const char *resolve_body(int ac, curry_val *av, int idx,
 static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v,
                             const char *body, size_t body_len,
                             Buf *resp, HdrList *hdrs, long *code_out) {
-    static int curl_inited = 0;
-    if (!curl_inited) { curl_global_init(CURL_GLOBAL_ALL); curl_inited = 1; }
+    pthread_once(&g_curl_init_once, curl_init_once_fn);
 
     CURL *curl = curl_easy_init();
     if (!curl) curry_error("http: failed to init curl");

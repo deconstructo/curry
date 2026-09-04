@@ -33,6 +33,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <curl/curl.h>
+#include <pthread.h>
+
+/* Issue #156: curl_global_init is not safe to call concurrently from
+ * multiple threads (libcurl's own documentation). This call site had no
+ * guard at all -- called unconditionally on every graphql-client
+ * construction -- so two actors both constructing their first client
+ * concurrently raced on it directly. pthread_once guarantees the
+ * wrapped call runs exactly once, thread-safely, regardless of how many
+ * threads race to call it at the same time. Same pattern as
+ * modules/http/http.c's identical fix. */
+static pthread_once_t g_curl_init_once = PTHREAD_ONCE_INIT;
+static void curl_init_once_fn(void) { curl_global_init(CURL_GLOBAL_ALL); }
 
 /* ---- Response buffer ---- */
 
@@ -247,7 +259,7 @@ static curry_val fn_graphql_client(int ac, curry_val *av, void *ud) {
     (void)ud;
     GQLClient *c = calloc(1, sizeof(GQLClient));
     c->url = strdup(curry_string(av[0]));
-    curl_global_init(CURL_GLOBAL_ALL);
+    pthread_once(&g_curl_init_once, curl_init_once_fn);
 
     c->headers = NULL;
     /* Optional headers alist */
