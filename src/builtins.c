@@ -1557,7 +1557,11 @@ static val_t prim_make_bytes(int ac, val_t *av, void *ud) {
     memset(b->data,fill,n);
     return vptr(b);
 }
-static val_t prim_bytes_length(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(as_bytes(av[0])->len);}
+static val_t prim_bytes_length(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_bytes(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-length: not a bytevector");
+    return vfix(as_bytes(av[0])->len);
+}
 static val_t prim_bytes_u8_ref(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_bytes(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "bytevector-u8-ref: not a bytevector");

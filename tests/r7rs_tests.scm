@@ -961,6 +961,17 @@
 (check "bytevector-u8-ref"  (bytevector-u8-ref bv 2) 255)
 (check "bytevector-u8-ref 0" (bytevector-u8-ref bv 0) 0)
 (check "bytevector-length"  (bytevector-length bv) 4)
+;; Issue #166: bytevector-length had no type check at all -- as_bytes()
+;; casts the raw argument straight to a Bytevector* and dereferences ->len,
+;; so a fixnum/boolean argument's tagged bit pattern was dereferenced as a
+;; pointer (confirmed reproducible SIGSEGV pre-fix), not merely a wrong
+;; value like the string case below.
+(check "bytevector-length rejects a fixnum (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (bytevector-length 42)) 'raised)
+(check "bytevector-length rejects a boolean (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (bytevector-length #t)) 'raised)
+(check "bytevector-length rejects a string (was silently returning a wrong value)"
+       (guard (exn (#t 'raised)) (bytevector-length "hi")) 'raised)
 (check "bytevector?"  (bytevector? bv) #t)
 (check "bytevector? no" (bytevector? "str") #f)
 (check "bytevector-copy out-of-range raises instead of crashing"
