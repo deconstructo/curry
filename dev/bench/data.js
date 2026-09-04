@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788513362018,
+  "lastUpdate": 1788513670991,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11867,6 +11867,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 57.121,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c18200e4b0091482b6a19d17fe4df56ffa042db4",
+          "message": "fix(network,websocket): bind ephemeral ports in websocket/websocket_server/ros tests (issue #110) (#159)\n\nThe websocket, websocket_server, and ros ctest suites each bound\nfixed, hardcoded port numbers (17995, 17996, 17988, 17987, 17986,\n17990), inherently vulnerable to collision under ctest -j parallel\nexecution against another process already bound to the same port --\na lingering listener from a previous run, a system service, or\nanother test. Issue #110 diagnosed this after a CI run where\nwebsocket hung completely silent for 28+ minutes (no timeout on the\nunderlying accept call) while ros, in the same run, failed fast and\ncleanly with \"tcp-listen: bind failed on port 17995\". A ctest-level\nTIMEOUT was added at the time as an immediate mitigation, explicitly\nnot a fix for the root cause, with \"bind to port 0 for an OS-assigned\nephemeral port\" identified as the actual long-term fix.\n\nThis closes that gap at the root instead of only bounding its\nsymptom. tcp-listen and SRFI-106's make-server-socket already accept\n0 to request an OS-assigned ephemeral port -- what was missing was a\nway to read back which port the OS actually picked, since bind()\nalready happened by the time the caller could ask. Added:\n\n- socket-local-port (modules/network/srfi106.c): a new primitive\n  querying a socket's bound local port via getsockname. Not part of\n  the SRFI-106 spec (that spec has no way to query a bound socket's\n  local address at all), so registered directly under (curry network)\n  rather than added to (srfi s106 sockets)'s own export list, keeping\n  that file's stated spec-faithfulness intact. Works on any socket\n  handle from tcp-listen, udp-socket, or SRFI-106's own\n  make-client-socket/make-server-socket/socket-accept, since they all\n  share the same underlying (socket . bytevector-packed-fd)\n  representation (network_internal.h).\n- ws-listener-port (lib/curry/modules/curry/websocket.scm): the\n  equivalent for a ws-listen listener, built on socket-local-port\n  applied to the listener's own socket.\n\nAll three test files now call (tcp-listen 0)/(ws-listen 0) and derive\ntheir actual port from socket-local-port/ws-listener-port immediately\nafterward, instead of using a literal port number anywhere.\n\nVerified the fix actually closes the failure mode it targets, not\njust \"still passes normally\": held all six of the OLD hardcoded ports\nbusy from an external process (exactly the CI collision scenario\nissue #110 described) and confirmed all three suites still pass\ncleanly, since none of them depend on any fixed port anymore. Also\nran the full parallel ctest suite (the actual failure-triggering\ncondition -- \"under ctest -j full-suite contention\") three times\nclean.\n\nThe ctest-level TIMEOUT on these three tests is kept as defense-in-\ndepth (matching the \"actors\" test's own identical treatment for an\nunrelated rare hang) -- even with the port-contention root cause\nclosed, an open-ended hang from some other cause is still better\ncaught as a fast, diagnosable TIMEOUT than a silent CI stall.\n\nDocumented socket-local-port (docs/reference/module-network.md) and\nws-listener-port (docs/reference/module-websocket.md).\n\n117/117 ctest suites pass (fresh --clear-cache run), including 3\nadditional full-parallel-suite runs and 15 additional standalone runs\nof the three affected test files, all clean.\n\n\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T19:20:22+10:00",
+          "tree_id": "97dd676eda545d4d01f0c6af590afa6743c0a251",
+          "url": "https://github.com/deconstructo/curry/commit/c18200e4b0091482b6a19d17fe4df56ffa042db4"
+        },
+        "date": 1788513669337,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 14.57,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.362,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.99,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.856,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 110.191,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 257.082,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 62.937,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 75.022,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 58.941,
             "unit": "ms"
           }
         ]
