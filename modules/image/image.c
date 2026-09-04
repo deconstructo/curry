@@ -64,8 +64,38 @@ static curry_val make_image(uint32_t w, uint32_t h, uint32_t ch) {
     return v;
 }
 
+/* Issue #167: this used to check only that slot 0 was a fixnum -- not
+ * even that v itself was a vector (curry_vector_ref(v,0) does an
+ * unchecked as_vec() cast, so (image-width 42) SIGSEGVed before this
+ * check could even run), and never that slot 3 was really a bytevector
+ * or that its length matched the claimed width*height*channels. Since
+ * images are plain R7RS vectors, any Scheme code can forge one with
+ * (vector w h ch anything) using attacker-controlled w/h/ch alongside a
+ * too-small or wrong-typed slot 3 -- px_get/px_set then bounds-check only
+ * against the *forged* w/h/ch before reading/writing that slot 3 value,
+ * producing a real out-of-bounds heap read or write. Confirmed
+ * reproducible SIGSEGV (OOB write) via
+ * (image-set! (vector 100000 100000 4 (make-string 1 #\a)) 99999 99999 3 255).
+ * Now validates the whole shape: v is a 4-element vector, slots 0-2 are
+ * positive fixnums (with the same overflow guard make_image's own w*h*ch
+ * multiplication uses -- a forged w*h*ch that overflows back down to a
+ * small value must not be treated as valid just because it happens to
+ * match a small bytevector's length), and slot 3 is a bytevector whose
+ * length exactly equals width*height*channels. */
 static void check_image(curry_val v) {
-    if (!curry_is_fixnum(curry_vector_ref(v,0)))
+    if (!curry_is_vector(v) || curry_vector_length(v) != 4)
+        curry_error("image: not a valid image object");
+    curry_val wv = curry_vector_ref(v,0), hv = curry_vector_ref(v,1),
+              chv = curry_vector_ref(v,2), bv = curry_vector_ref(v,3);
+    if (!curry_is_fixnum(wv) || !curry_is_fixnum(hv) || !curry_is_fixnum(chv))
+        curry_error("image: not a valid image object");
+    intptr_t w = curry_fixnum(wv), h = curry_fixnum(hv), ch = curry_fixnum(chv);
+    if (w <= 0 || h <= 0 || ch <= 0 || ch > 4 || w > UINT32_MAX || h > UINT32_MAX)
+        curry_error("image: not a valid image object");
+    uint32_t uw = (uint32_t)w, uh = (uint32_t)h, uch = (uint32_t)ch;
+    if (uh > UINT32_MAX / uw || (uint64_t)uw * uh > UINT32_MAX / uch)
+        curry_error("image: not a valid image object");
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != uw * uh * uch)
         curry_error("image: not a valid image object");
 }
 
