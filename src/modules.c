@@ -404,12 +404,40 @@ static Module *modules_try_load(val_t name_list) {
         /* Try .so first */
         snprintf(full, sizeof(full), "%s/%s.so", search_dirs[i], path_base);
         mod = load_c_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return mod; }
+        if (mod) {
+            /* Issue #149: two actors racing to first-import the same
+             * not-yet-loaded C module can both see registry_lookup return
+             * NULL above and both proceed to load_c_module -- each doing
+             * its own dlopen + curry_module_init, independently. Without
+             * this re-check (the exact same pattern the .sld/.scm branch
+             * below already uses, for a same-load rather than cross-actor
+             * reason -- a define-library body self-registering during its
+             * own load), whichever registry_insert ran last would win as
+             * the identity every FUTURE lookup resolves to, while each
+             * racing importer still kept and used the Module* it
+             * personally created, leaving them bound to two different
+             * "singleton" instances. This doesn't undo curry_module_init
+             * having run twice if the race was already lost by the time
+             * we get here (that side effect already happened, and is a
+             * known, accepted consequence -- same as the .sld/.scm path's
+             * duplicate-load tolerance), but it does make every actor
+             * converge on the SAME Module* going forward. */
+            Module *self_reg = registry_lookup(name_list);
+            if (self_reg) return self_reg;
+            registry_insert(name_list, mod);
+            return mod;
+        }
 
         /* Try .dylib (macOS) */
         snprintf(full, sizeof(full), "%s/%s.dylib", search_dirs[i], path_base);
         mod = load_c_module(name_list, full);
-        if (mod) { registry_insert(name_list, mod); return mod; }
+        if (mod) {
+            /* Same reasoning as the .so branch just above. */
+            Module *self_reg = registry_lookup(name_list);
+            if (self_reg) return self_reg;
+            registry_insert(name_list, mod);
+            return mod;
+        }
 
         /* Try .sld (Scheme library definition) */
         snprintf(full, sizeof(full), "%s/%s.sld", search_dirs[i], path_base);

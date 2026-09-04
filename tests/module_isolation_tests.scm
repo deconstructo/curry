@@ -250,5 +250,50 @@
 (check "modules_import no-export-list walk: importing (scheme base) while GLOBAL_ENV grows concurrently completes without crash or hang"
   #t #t)
 
+;;; ── C-module (.so/.dylib) concurrent first-import race (issue #149) ────
+;;; modules_try_load's .so/.dylib branch used to lack the re-check step
+;;; the .sld/.scm branches already had (checking the registry again after
+;;; a successful load, before inserting, and preferring whatever's already
+;;; there): two actors racing to first-import the same not-yet-loaded C
+;;; module could each independently dlopen + run curry_module_init, then
+;;; each registry_insert its own Module* -- whichever insert ran last won
+;;; as the identity every future lookup resolves to, while the OTHER
+;;; racing importer still kept and used the Module* it personally
+;;; created, leaving actors bound to two different "singleton" module
+;;; instances. Many actors each doing exactly one FIRST-EVER import of
+;;; the same not-yet-loaded C module (curry json, unused elsewhere in
+;;; this file, so this is a genuine first load) maximizes simultaneous
+;;; race-window contention. Doesn't assert instance identity (no
+;;; primitive exposes Module* to Scheme) -- like #141/#143/#148's own
+;;; concurrency tests, this checks the fix doesn't introduce a NEW hazard
+;;; (crash/hang) under heavy contention on the actual vulnerable path.
+(define cmod149-actors
+  (list (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))
+        (spawn (lambda () (import (curry json))))))
+(define (cmod149-all-done? lst)
+  (or (null? lst)
+      (and (not (actor-alive? (car lst))) (cmod149-all-done? (cdr lst)))))
+(let cmod149-wait () (if (cmod149-all-done? cmod149-actors) 'done (cmod149-wait)))
+(check "C-module concurrent first-import race: 16 actors racing to first-load the same .so module completes without crash or hang"
+  #t #t)
+;; Confirm the module actually works afterward regardless of which racing
+;; actor's load "won" -- a basic functional smoke test, not just "didn't crash".
+(check "C-module concurrent first-import race: the module is actually usable afterward"
+  (json-stringify (list->vector (list 1 2 3))) "[1,2,3]")
+
 (display (string-append (number->string pass) " passed, " (number->string fail) " failed")) (newline)
 (if (> fail 0) (exit 1) (exit 0))
