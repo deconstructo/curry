@@ -1411,6 +1411,24 @@ struct GlShader {
 /* One shared empty VAO — all fullscreen-quad shaders use it. */
 static QOpenGLVertexArrayObject *s_quad_vao = nullptr;
 
+/* Issue #184: the mat4 vector branch checked the container was a vector
+ * of the right length before indexing (no OOB), but never checked each
+ * ELEMENT was numeric before curry_float -- itself unchecked for
+ * anything but a fixnum/flonum (vfloat(v) is a raw as_flo(v)->value
+ * cast). Same "container checked, elements not" gap check_real_vector
+ * (added in #182) was written to close, just not applied here. The list
+ * branch had the identical gap on each car. Worse, the final catch-all
+ * else branch had NO check at all -- despite its comment claiming to
+ * "treat as float" only flonum/bignum/rational, it actually ran
+ * curry_float() on literally anything not matched by an earlier branch
+ * (a string, a symbol, a wrong-length vector, a hash-table, ...), the
+ * widest exposure of the three. curry_float only has real support for
+ * fixnum/flonum (see its own src/api.c implementation), so bignum/
+ * rational were never actually handled correctly here either -- now
+ * rejected cleanly rather than silently mis-converted, matching the
+ * same tradeoff already established for vecdb.cpp's check_numeric_vector. */
+static bool is_real_number(curry_val v) { return curry_is_fixnum(v) || curry_is_float(v); }
+
 static void set_uniform(QOpenGLShaderProgram *prog, const char *name, curry_val val) {
     if (curry_is_fixnum(val)) {
         prog->setUniformValue(name, (GLint)curry_fixnum(val));
@@ -1419,21 +1437,29 @@ static void set_uniform(QOpenGLShaderProgram *prog, const char *name, curry_val 
     } else if (curry_is_vector(val) && curry_vector_length(val) == 16) {
         /* 16-element vector → mat4 (column-major) */
         float m[16];
-        for (int i = 0; i < 16; i++) m[i] = (float)curry_float(curry_vector_ref(val, (uint32_t)i));
+        for (int i = 0; i < 16; i++) {
+            curry_val e = curry_vector_ref(val, (uint32_t)i);
+            if (!is_real_number(e)) curry_error("gl-shader-draw!: mat4 element %d is not a real number", i);
+            m[i] = (float)curry_float(e);
+        }
         prog->setUniformValue(name, QMatrix4x4(m[0],m[1],m[2],m[3],
                                                m[4],m[5],m[6],m[7],
                                                m[8],m[9],m[10],m[11],
                                                m[12],m[13],m[14],m[15]));
     } else if (curry_is_pair(val)) {
         float f[4]; int n = 0;
-        for (curry_val it = val; curry_is_pair(it) && n < 4; it = curry_cdr(it))
-            f[n++] = (float)curry_float(curry_car(it));
+        for (curry_val it = val; curry_is_pair(it) && n < 4; it = curry_cdr(it)) {
+            curry_val e = curry_car(it);
+            if (!is_real_number(e)) curry_error("gl-shader-draw!: vector uniform element is not a real number");
+            f[n++] = (float)curry_float(e);
+        }
         if      (n == 2) prog->setUniformValue(name, QVector2D(f[0], f[1]));
         else if (n == 3) prog->setUniformValue(name, QVector3D(f[0], f[1], f[2]));
         else if (n == 4) prog->setUniformValue(name, QVector4D(f[0], f[1], f[2], f[3]));
-    } else {
-        /* flonum, bignum, rational — treat as float */
+    } else if (is_real_number(val)) {
         prog->setUniformValue(name, (GLfloat)curry_float(val));
+    } else {
+        curry_error("gl-shader-draw!: unsupported uniform value type");
     }
 }
 
