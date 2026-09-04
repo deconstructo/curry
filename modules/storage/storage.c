@@ -167,6 +167,10 @@ static curry_val fn_swift_put(int ac, curry_val *av, void *ud) {
     const char *object    = curry_string(av[2]);
     const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? curry_string(av[4]) : "application/octet-stream";
 
+    /* Issue #161: same unchecked as_bytes()-cast hazard fixed elsewhere
+     * (network module's socket-send/udp-send, crypto.c's hash/base64
+     * functions) -- this data argument was never validated either. */
+    if (!curry_is_bytevector(av[3])) curry_error("swift-put!: data must be a bytevector");
     size_t blen = curry_bytevector_length(av[3]);
     char *body = malloc(blen);
     for (uint32_t i = 0; i < (uint32_t)blen; i++) body[i] = (char)curry_bytevector_ref(av[3], i);
@@ -366,6 +370,8 @@ static curry_val fn_azure_put(int ac, curry_val *av, void *ud) {
     (void)ud;
     ClientState *cs = val_to_client(av[0]);
     const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? curry_string(av[4]) : "application/octet-stream";
+    /* Issue #161: same fix as fn_swift_put above. */
+    if (!curry_is_bytevector(av[3])) curry_error("azure-put!: data must be a bytevector");
     size_t blen = curry_bytevector_length(av[3]);
     char *body = malloc(blen);
     for (uint32_t i = 0; i < (uint32_t)blen; i++) body[i]=(char)curry_bytevector_ref(av[3],i);

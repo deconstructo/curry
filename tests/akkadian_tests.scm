@@ -943,12 +943,25 @@
 (check "PR cunei: 𒌝𒋻𒌋 (base64-encode)" (𒌝𒋻𒌋 (string->utf8 "hi")) "aGk=")
 (check-true "PR translit: ṭuppu-turrum binding (base64-decode)" (procedure? ṭuppu-turrum))
 (check-true "PR cunei: 𒌝𒄀𒌋 binding (base64-decode)" (procedure? 𒌝𒄀𒌋))
-(check "PR translit: kunukku-maḫrûm-ṭuppam (md5-hex)" (kunukku-maḫrûm-ṭuppam "hi") (md5-hex "hi"))
-(check "PR cunei: 𒁀𒃲𒁹𒌝 (md5-hex)" (𒁀𒃲𒁹𒌝 "hi") (md5-hex "hi"))
-(check "PR translit: kunukku-ištēn-ṭuppam (sha1-hex)" (kunukku-ištēn-ṭuppam "hi") (sha1-hex "hi"))
-(check "PR cunei: 𒁀𒃲𒀸𒌝 (sha1-hex)" (𒁀𒃲𒀸𒌝 "hi") (sha1-hex "hi"))
-(check "PR translit: kunukku-kabtum-ṭuppam (sha256-hex)" (kunukku-kabtum-ṭuppam "hi") (sha256-hex "hi"))
-(check "PR cunei: 𒁀𒃲𒆠𒌝 (sha256-hex)" (𒁀𒃲𒆠𒌝 "hi") (sha256-hex "hi"))
+;; md5-hex/sha1-hex/sha256-hex are documented as taking a bytevector
+;; (docs/reference/module-crypto.md), not a raw string -- these six
+;; checks passed a bare string before issue #161's fix added a proper
+;; curry_is_bytevector check to md5/sha1/sha256. That's not just a
+;; stricter-argument-type change: reinterpreting a String object's own
+;; header layout as if it were a Bytevector's silently computed a WRONG
+;; hash (confirmed: (md5-hex "hi") returned a bogus 33-hex-char result
+;; under the old unchecked code, not MD5("hi")'s real, correct
+;; 49f68a5c8493ec2c0bf489821c21fc3b) -- these checks only ever "passed"
+;; because both sides of each comparison shared the identical wrong
+;; interpretation, not because either side computed anything correct.
+;; Fixed to pass (string->utf8 "hi") on both sides, matching
+;; base64-encode's own already-correct usage just above.
+(check "PR translit: kunukku-maḫrûm-ṭuppam (md5-hex)" (kunukku-maḫrûm-ṭuppam (string->utf8 "hi")) (md5-hex (string->utf8 "hi")))
+(check "PR cunei: 𒁀𒃲𒁹𒌝 (md5-hex)" (𒁀𒃲𒁹𒌝 (string->utf8 "hi")) (md5-hex (string->utf8 "hi")))
+(check "PR translit: kunukku-ištēn-ṭuppam (sha1-hex)" (kunukku-ištēn-ṭuppam (string->utf8 "hi")) (sha1-hex (string->utf8 "hi")))
+(check "PR cunei: 𒁀𒃲𒀸𒌝 (sha1-hex)" (𒁀𒃲𒀸𒌝 (string->utf8 "hi")) (sha1-hex (string->utf8 "hi")))
+(check "PR translit: kunukku-kabtum-ṭuppam (sha256-hex)" (kunukku-kabtum-ṭuppam (string->utf8 "hi")) (sha256-hex (string->utf8 "hi")))
+(check "PR cunei: 𒁀𒃲𒆠𒌝 (sha256-hex)" (𒁀𒃲𒆠𒌝 (string->utf8 "hi")) (sha256-hex (string->utf8 "hi")))
 (check-true "PR translit: kunukku-kabti-pirišti binding (hmac-sha256)" (procedure? kunukku-kabti-pirišti))
 (check-true "PR cunei: 𒁀𒃲𒆠𒉡 binding (hmac-sha256)" (procedure? 𒁀𒃲𒆠𒉡))
 
