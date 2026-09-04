@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788538031241,
+  "lastUpdate": 1788553938091,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12419,6 +12419,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 73.242,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8f5002e9356ae36c1be9a87a33cd6b9adab06755",
+          "message": "fix(modules): reject unchecked handle-argument bytevector casts across redis, regex, sqlite, mqtt, storage, graphql, sync, git, neo4j, posix, rpi, ldap, vecdb, qt6 (#165) (#178)\n\nEvery one of these modules represents an opaque native handle as\n`(tag-symbol . bytevector-of-packed-pointer)`. The unwrap helper\nchecked the tag but never checked that the cdr was actually a\nbytevector (or, in three cases, checked NOTHING at all -- not even\nthe tag). curry_bytevector_ref/_length do an unchecked as_bytes()\ncast assuming their argument already IS a bytevector -- the same\nclass of bug #158 closed for network socket handles and #161 closed\nfor data arguments. A forged handle like (cons 'redis-conn 42) has\nthe right tag but a non-bytevector cdr, so curry_bytevector_ref\ndereferences a fixnum's raw tagged bit pattern as a pointer.\n\nConfirmed reproducible SIGSEGV pre-fix, now confirmed clean post-fix,\nin every module this environment can build (default-ON: redis,\nregex, sqlite, mqtt, storage, graphql, sync, git, neo4j, posix):\n\n  (redis-close! (cons 'redis-conn 42))\n  (regex-free (cons 'regex 42))\n  (sqlite-close 42)                              -- checked NOTHING before\n  (mqtt-publish (cons 'mqtt-conn 42) \"t\" \"p\")\n  (swift-put! (cons 'storage-client 42) ...)      -- checked NOTHING before\n  (graphql-query (cons 'graphql-client 42) \"{x}\") -- checked NOTHING before\n  (mutex-lock! (cons 'mutex 42))\n  (git-close! (cons 'git-repo 42))\n  (neo4j-disconnect (cons 'neo4j-conn 42))\n  (read-directory (cons 'directory-stream 42))\n\nsqlite.c's get_opaque additionally now takes the expected tag (it\npreviously took none at all), so passing e.g. a stmt handle where a\ndb is expected also raises cleanly instead of type-confusing the two\nwrapper structs.\n\nAlso fixed by source inspection (matching the identical established\npattern; not build-verified in this environment -- these modules are\nOFF by default and not built in CI either):\n- modules/rpi/rpi.c: all 8 handle types (gpio, watcher, i2c, spi, pwm,\n  camera, uart, watchdog) via a shared checked_ptr_cdr() helper.\n- modules/ldap/ldap.c: val_to_ldap previously checked only \"is a\n  symbol\", not which one, nor the cdr's bytevector-ness.\n- modules/vecdb/vecdb.cpp: val_to_db checked NOTHING at all.\n- modules/qt6/qt6.cpp: val_to_ptr already checked the tag correctly\n  (both symbol-ness and exact match) but never the cdr.\n- modules/piper/piper.c: val_to_ptr never checked the cdr either,\n  even though every call site already checks the tag first via\n  val_is_tagged().\n\nFix shape varies by how much each module already had: sites that\nalready checked the tag correctly (redis, mqtt, git, neo4j) just\nneeded the missing curry_is_bytevector+length check added inline.\nSites checking nothing at all (sqlite, storage, graphql, vecdb) got\nboth the tag and bytevector checks. Sites with an existing\nhas_tag()/unpack_ptr() pair spread across many call sites (sync,\nposix, rpi) got a single shared checked-unwrap helper added once\nrather than duplicated at every call site, mirroring how #173 fixed\nport.c/set.c.\n\nAdded tests/regex_tests.scm, tests/storage_tests.scm,\ntests/graphql_tests.scm, tests/sync_tests.scm, tests/neo4j_tests.scm\n(no dedicated suite existed for any of these five modules before) and\nextended tests/redis_tests.scm, tests/mqtt_tests.scm,\ntests/sqlite_tests.scm, tests/test_git.scm, tests/posix_tests.scm\nwith the forged-handle regression for each. Registered the five new\nsuites in tests/CMakeLists.txt, each correctly gated on its own\nBUILD_MODULE_* flag.\n\n124/124 ctest suites pass (fresh --clear-cache run, 5 new suites\nincluded).",
+          "timestamp": "2026-09-05T06:31:36+10:00",
+          "tree_id": "04cb08b1a33c4b2c79b8f7bf22b67781e43012ba",
+          "url": "https://github.com/deconstructo/curry/commit/8f5002e9356ae36c1be9a87a33cd6b9adab06755"
+        },
+        "date": 1788553936700,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 13.847,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 23.257,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.745,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 28.349,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 101.867,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 237.738,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 59.504,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 69.647,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 52.68,
             "unit": "ms"
           }
         ]
