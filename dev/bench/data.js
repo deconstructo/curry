@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788533414158,
+  "lastUpdate": 1788534601447,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12212,6 +12212,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.812,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c9dde8d2811e6ac4cc0374401da3d94699377e87",
+          "message": "fix(builtins): add missing type checks to string-length, error-object-*, close-port, and hash-table-* (#170) (#174)\n\nFound during independent security review of #166's fix (bytevector-length\nhad no type check at all). Reviewed every prim_* in src/builtins.c for\nthe same shape of bug -- an as_TYPE(av[i]) cast with no preceding\nvis_TYPE(av[i]) check -- and found four more groups, all reachable from\nplain, no-import-needed R7RS-core code, all confirmed reproducible\nSIGSEGV pre-fix:\n\n- string-length (prim_string_length): as_str() with no vis_string()\n  check, unlike every sibling string primitive two lines below it.\n- error-object-message/error-message, error-object-irritants,\n  error-object-code (prim_error_message/prim_error_irritants/\n  prim_error_code): as_err() with no vis_error() check, unlike\n  error-object?/error-to-string right next to them.\n- close-port/close-input-port/close-output-port (prim_close_port,\n  shared by all three DEF names): port_close() called unconditionally,\n  and port_close() itself (src/port.c) also did as_port() with no\n  vis_port() guard at either layer.\n- The entire hash-table-* family: hash-table-set!/-ref/-delete!/\n  -exists?/-keys/-values/->alist/-size, all routed through\n  hash_set/hash_ref/hash_delete/hash_has/hash_keys/hash_values/\n  hash_to_alist/hash_size in src/set.c, none of which had ANY type\n  check on their table argument -- the widest-reaching instance, 8\n  always-bound core entry points. Fixed at the builtin call sites in\n  builtins.c (prim_hash_*) rather than in set.c's internal helpers,\n  matching where #166 fixed bytevector-length.\n\nEvery fix follows the exact vis_TYPE() + scm_raise_code\n(EC_WRONG_TYPE_ARGUMENT, ...) idiom every other checked primitive in\nthe same files already uses. No behavior change on the correct-argument\npath.\n\nAdded regression coverage to tests/r7rs_tests.scm alongside each\nexisting section for these functions: string-length, error-object-*,\nclose-port, and all 8 hash-table-* entries now confirmed to raise\ncleanly instead of crashing.\n\n483/483 r7rs_tests.scm assertions pass; 119/119 ctest suites pass\n(fresh --clear-cache run).",
+          "timestamp": "2026-09-05T01:09:21+10:00",
+          "tree_id": "4b324d346873c37cceb73598794c93e6db83ccba",
+          "url": "https://github.com/deconstructo/curry/commit/c9dde8d2811e6ac4cc0374401da3d94699377e87"
+        },
+        "date": 1788534600715,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.427,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.033,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.825,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.868,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 132.804,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 278.941,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.566,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.779,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.584,
             "unit": "ms"
           }
         ]
