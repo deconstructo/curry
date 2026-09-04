@@ -3,10 +3,22 @@
 #include "gc.h"
 #include "numeric.h"
 #include "symbolic.h"
+#include "symbol.h"
 #include "eval.h"
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+
+/* Every set_* entry point below used to cast a caller-supplied val_t
+ * straight to a Set* via as_set() with no type check -- the exact same
+ * unchecked-as_TYPE()-cast hazard #170 closed for hash-table's Hashtable*,
+ * hash-table's own sibling structure in this same file, just left
+ * unguarded (issue #173). Fixed once here rather than at every builtins.c
+ * prim_set_* call site, mirroring how #173 fixed the port.c layer. */
+static Set *checked_set(val_t v, const char *who) {
+    if (!vis_set(v)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a set", who);
+    return as_set(v);
+}
 
 /* ---- Equality predicates ---- */
 
@@ -220,7 +232,7 @@ val_t set_make(int cmp_type) {
 }
 
 bool set_member(val_t sv, val_t elem) {
-    Set *s = as_set(sv);
+    Set *s = checked_set(sv, "set-member?");
     uint32_t mask = s->cap - 1;
     uint32_t idx  = val_hash(elem, s->cmp) & mask;
     while (1) {
@@ -232,7 +244,7 @@ bool set_member(val_t sv, val_t elem) {
 }
 
 void set_add_mut(val_t sv, val_t elem) {
-    Set *s = as_set(sv);
+    Set *s = checked_set(sv, "set-add!");
     if (set_member(sv, elem)) return;
     if (s->size * LOAD_DEN >= s->cap * LOAD_NUM) set_rehash(s);
     uint32_t mask = s->cap - 1;
@@ -244,7 +256,7 @@ void set_add_mut(val_t sv, val_t elem) {
 }
 
 void set_delete_mut(val_t sv, val_t elem) {
-    Set *s = as_set(sv);
+    Set *s = checked_set(sv, "set-delete!");
     uint32_t mask = s->cap - 1;
     uint32_t idx  = val_hash(elem, s->cmp) & mask;
     while (1) {
@@ -261,7 +273,7 @@ void set_delete_mut(val_t sv, val_t elem) {
 
 val_t set_add(val_t sv, val_t elem) {
     /* Copy and add */
-    Set *old = as_set(sv);
+    Set *old = checked_set(sv, "set-add");
     val_t nv = set_make(old->cmp);
     Set *s = as_set(nv);
     for (uint32_t i = 0; i < old->cap; i++) {
@@ -274,7 +286,7 @@ val_t set_add(val_t sv, val_t elem) {
 }
 
 val_t set_to_list(val_t sv) {
-    Set *s = as_set(sv);
+    Set *s = checked_set(sv, "set->list");
     val_t lst = V_NIL;
     for (uint32_t i = 0; i < s->cap; i++) {
         val_t e = s->buckets[i];
@@ -292,10 +304,10 @@ val_t list_to_set(val_t lst, int cmp_type) {
     return s;
 }
 
-uint32_t set_size(val_t sv) { return as_set(sv)->size; }
+uint32_t set_size(val_t sv) { return checked_set(sv, "set-size")->size; }
 
 val_t set_union(val_t a, val_t b) {
-    val_t r = set_make(as_set(a)->cmp);
+    val_t r = set_make(checked_set(a, "set-union")->cmp);
     val_t la = set_to_list(a), lb = set_to_list(b);
     while (vis_pair(la)) { set_add_mut(r, vcar(la)); la = vcdr(la); }
     while (vis_pair(lb)) { set_add_mut(r, vcar(lb)); lb = vcdr(lb); }
@@ -303,14 +315,14 @@ val_t set_union(val_t a, val_t b) {
 }
 
 val_t set_intersection(val_t a, val_t b) {
-    val_t r = set_make(as_set(a)->cmp);
+    val_t r = set_make(checked_set(a, "set-intersection")->cmp);
     val_t la = set_to_list(a);
     while (vis_pair(la)) { if (set_member(b, vcar(la))) set_add_mut(r, vcar(la)); la = vcdr(la); }
     return r;
 }
 
 val_t set_difference(val_t a, val_t b) {
-    val_t r = set_make(as_set(a)->cmp);
+    val_t r = set_make(checked_set(a, "set-difference")->cmp);
     val_t la = set_to_list(a);
     while (vis_pair(la)) { if (!set_member(b, vcar(la))) set_add_mut(r, vcar(la)); la = vcdr(la); }
     return r;
@@ -323,11 +335,11 @@ bool set_subset(val_t a, val_t b) {
 }
 
 bool set_equal(val_t a, val_t b) {
-    return as_set(a)->size == as_set(b)->size && set_subset(a, b);
+    return checked_set(a, "set=?")->size == checked_set(b, "set=?")->size && set_subset(a, b);
 }
 
 val_t set_copy(val_t sv) {
-    return list_to_set(set_to_list(sv), as_set(sv)->cmp);
+    return list_to_set(set_to_list(sv), checked_set(sv, "set-copy")->cmp);
 }
 
 val_t set_sym_diff(val_t a, val_t b) {

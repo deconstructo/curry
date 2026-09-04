@@ -13,6 +13,18 @@ extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn)
 
 val_t PORT_STDIN, PORT_STDOUT, PORT_STDERR;
 
+/* Every port_* entry point below takes a caller-supplied val_t and used to
+ * cast it straight to a Port* via as_port() with no type check -- the same
+ * unchecked-as_TYPE()-cast hazard as #166/#170/#172, just at this layer
+ * instead of a builtins.c prim_* wrapper. Fixing it here once, rather than
+ * at each of the dozen-plus builtins.c call sites into this file, is what
+ * closed the gap that let call-with-port slip through even after #170
+ * fixed close-port's own builtins.c wrapper (issue #173). */
+static Port *checked_port(val_t v, const char *who) {
+    if (!vis_port(v)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a port", who);
+    return as_port(v);
+}
+
 static val_t make_port(int flags) {
     Port *p = CURRY_NEW_PINNED(Port);
     p->hdr.type  = T_PORT;
@@ -136,7 +148,7 @@ static int read_utf8_codepoint(Port *p) {
 }
 
 int port_read_char(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "read-char");
     if (p->flags & PORT_CLOSED) return -1;
     int cp;
     /* Drain the one-codepoint lookahead if present */
@@ -150,10 +162,10 @@ int port_read_char(val_t v) {
     return cp;  /* -1 (EOF) or the codepoint */
 }
 
-int port_line(val_t v) { return as_port(v)->line; }
+int port_line(val_t v) { return checked_port(v, "port-line")->line; }
 
 int port_peek_char(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "peek-char");
     if (p->flags & PORT_CLOSED) return -1;
     /* If lookahead is already filled, return it without consuming */
     if (p->peeked_cp != -2) return p->peeked_cp;
@@ -171,13 +183,13 @@ int port_peek_char(val_t v) {
 }
 
 bool port_char_ready(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "char-ready?");
     if (p->flags & PORT_STRING) return p->u.str.pos < p->u.str.len;
     return true; /* conservative */
 }
 
 void port_write_char(val_t v, int cp) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "write-char");
     if (p->flags & PORT_CLOSED) return;
     /* Encode as UTF-8 */
     char buf[5]; int len;
@@ -203,7 +215,7 @@ void port_write_char(val_t v, int cp) {
 }
 
 void port_write_string(val_t v, const char *s, uint32_t len) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "write-string");
     if (p->flags & PORT_CLOSED) return;
     if (p->flags & PORT_STRING) {
         while (p->u.str.len + len + 1 >= p->u.str.cap) {
@@ -221,7 +233,7 @@ void port_write_string(val_t v, const char *s, uint32_t len) {
 }
 
 val_t port_read_line(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "read-line");
     if (p->flags & PORT_CLOSED || p->flags & PORT_BINARY) return V_EOF;
     /* Read until newline or EOF */
     val_t out = port_open_output_string();
@@ -256,7 +268,7 @@ val_t port_read_line(val_t v) {
 }
 
 int port_read_byte(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "read-u8");
     if (p->flags & PORT_CLOSED) return -1;
     if (p->flags & PORT_STRING) {
         if (p->u.str.pos >= p->u.str.len) return -1;
@@ -267,7 +279,7 @@ int port_read_byte(val_t v) {
 }
 
 int port_peek_byte(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "peek-u8");
     if (p->flags & PORT_CLOSED) return -1;
     if (p->flags & PORT_STRING) {
         if (p->u.str.pos >= p->u.str.len) return -1;
@@ -279,7 +291,7 @@ int port_peek_byte(val_t v) {
 }
 
 void port_write_byte(val_t v, uint8_t b) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "write-u8");
     if (p->flags & PORT_CLOSED) return;
     if (p->flags & PORT_STRING) {
         /* Binary string port: append raw byte without UTF-8 encoding. */
@@ -301,7 +313,7 @@ void port_write_byte(val_t v, uint8_t b) {
 }
 
 void port_close(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "close-port");
     if (p->flags & PORT_CLOSED) return;
     if (!(p->flags & PORT_STRING) && p->u.fp &&
         p->u.fp != stdin && p->u.fp != stdout && p->u.fp != stderr) {
@@ -335,7 +347,7 @@ val_t port_open_output_bytevector(void) {
 }
 
 val_t port_get_output_string(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "get-output-string");
     if (!(p->flags & PORT_STRING))
         scm_raise(V_FALSE, "get-output-string: not a string port");
     uint32_t len = (uint32_t)p->u.str.len;
@@ -351,7 +363,7 @@ val_t port_get_output_string(val_t v) {
 }
 
 val_t port_get_output_bytevector(val_t v) {
-    Port *p = as_port(v);
+    Port *p = checked_port(v, "get-output-bytevector");
     if (!(p->flags & PORT_STRING) || !(p->flags & PORT_BINARY))
         scm_raise(V_FALSE, "get-output-bytevector: not a binary output port");
     uint32_t len = (uint32_t)p->u.str.len;

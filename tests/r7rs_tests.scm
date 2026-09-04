@@ -211,6 +211,13 @@
 (check "list->string" (list->string '(#\h #\i)) "hi")
 (check "string->symbol" (string->symbol "foo") 'foo)
 (check "symbol->string" (symbol->string 'bar) "bar")
+;; Issue #173: string->symbol/symbol->string had no vis_string()/vis_symbol()
+;; check -- confirmed reproducible SIGSEGV via (string->symbol 42) /
+;; (symbol->string 42) pre-fix.
+(check "string->symbol rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string->symbol 42)) 'raised)
+(check "symbol->string rejects a non-symbol argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (symbol->string 42)) 'raised)
 
 ;;; Pairs
 (check "car" (car '(1 2 3)) 1)
@@ -727,6 +734,43 @@
 (check "set-size" (set-size s) 3)
 (define s2 (list->set '(3 4 5)))
 (check "set-intersection" (set-size (set-intersection s s2)) 1)
+;; Issue #173: the entire native set-* family (hash-table's exact sibling
+;; data structure in src/set.c) had NO type check whatsoever on its set
+;; argument -- confirmed reproducible SIGSEGV for each of these pre-fix.
+(check "set-size rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-size 42)) 'raised)
+(check "set-add! rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-add! 42 1)) 'raised)
+(check "set-member? rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-member? 42 1)) 'raised)
+(check "set->list rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set->list 42)) 'raised)
+(check "set-union rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-union 42 (make-set))) 'raised)
+(check "set-copy rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-copy 42)) 'raised)
+(check "set-delete! rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-delete! 42 1)) 'raised)
+(check "set-empty? rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-empty? 42)) 'raised)
+(check "set=? rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set=? 42 (make-set))) 'raised)
+(check "set-map rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-map (lambda (x) x) 42)) 'raised)
+(check "set-filter rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-filter (lambda (x) x) 42)) 'raised)
+(check "set-intersection rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-intersection 42 (make-set))) 'raised)
+(check "set-difference rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-difference 42 (make-set))) 'raised)
+(check "set-subset? rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-subset? 42 (make-set))) 'raised)
+(check "set-for-each rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-for-each display 42)) 'raised)
+(check "set-adjoin rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-adjoin 42 1)) 'raised)
+(check "set-fold rejects a non-set argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (set-fold + 0 42)) 'raised)
 
 ;;; Records
 (define-record-type <person>
@@ -919,6 +963,35 @@
 ;;; Strings
 (check "string=?"       (string=? "abc" "abc") #t)
 (check "string<?"       (string<? "abc" "abd") #t)
+;; Issue #173: the entire string comparison family (=?/<?/<=?/>?/>=?, plus
+;; the -ci variants) and string-append/string-for-each had no vis_string()
+;; check on any argument -- confirmed reproducible SIGSEGV pre-fix.
+(check "string=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string=? "a" 42)) 'raised)
+(check "string<? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string<? "a" 42)) 'raised)
+(check "string<=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string<=? "a" 42)) 'raised)
+(check "string>? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string>? "a" 42)) 'raised)
+(check "string>=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string>=? "a" 42)) 'raised)
+(check "string-ci=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-ci=? "a" 42)) 'raised)
+(check "string-ci<? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-ci<? "a" 42)) 'raised)
+(check "string-ci<=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-ci<=? "a" 42)) 'raised)
+(check "string-ci>? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-ci>? "a" 42)) 'raised)
+(check "string-ci>=? rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-ci>=? "a" 42)) 'raised)
+(check "string-append rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-append "a" 42)) 'raised)
+(check "string-append rejects a non-string first argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-append 42 "a")) 'raised)
+(check "string-for-each rejects a non-string argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-for-each display 42)) 'raised)
 (check "string-contains" (string-contains "hello world" "world") 6)
 (check "string-contains miss" (string-contains "hello" "xyz") #f)
 ;; Issue #172: string-contains had no vis_string() check on either
@@ -1006,6 +1079,48 @@
        (guard (exn (#t 'raised)) (read-bytevector -1)) 'raised)
 (check "read-bytevector basic still works"
        (bytevector-u8-ref (read-bytevector 2 (open-input-string "ab")) 0) 97)
+
+;; Issue #173: nearly the entire port I/O primitive layer (port.c's own
+;; functions, called unconditionally from most builtins.c wrappers) had no
+;; vis_port() check -- confirmed reproducible SIGSEGV for each of these
+;; pre-fix, including call-with-port, which crashed inside port_close even
+;; though its lambda body never touched the port argument at all.
+(check "read-char rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-char 42)) 'raised)
+(check "peek-char rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (peek-char 42)) 'raised)
+(check "read-line rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-line 42)) 'raised)
+(check "write-char rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (write-char #\a 42)) 'raised)
+(check "display rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (display "x" 42)) 'raised)
+(check "write rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (write "x" 42)) 'raised)
+(check "newline rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (newline 42)) 'raised)
+(check "read-u8 rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-u8 42)) 'raised)
+(check "peek-u8 rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (peek-u8 42)) 'raised)
+(check "write-u8 rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (write-u8 65 42)) 'raised)
+(check "char-ready? rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (char-ready? 42)) 'raised)
+(check "u8-ready? rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (u8-ready? 42)) 'raised)
+(check "read-string rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-string 5 42)) 'raised)
+(check "read-bytevector rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-bytevector 5 42)) 'raised)
+(check "write-bytevector rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (write-bytevector (bytevector 1 2) 42)) 'raised)
+(check "get-output-string rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (get-output-string 42)) 'raised)
+(check "call-with-port rejects a non-port argument (was a reproducible SIGSEGV in port_close, even though the lambda never touched the port)"
+       (guard (exn (#t 'raised)) (call-with-port 42 (lambda (p) 'ok))) 'raised)
+(check "read rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read 42)) 'raised)
 
 ;;; Predicates
 (check "vector?"    (vector? '#(1 2)) #t)
