@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788513670991,
+  "lastUpdate": 1788516967982,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -11936,6 +11936,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 58.941,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "55214007fc89e83a9c16be17c48e9ed344b3ca64",
+          "message": "fix(network): reject malformed raw socket handles across all raw-handle primitives (#158) (#163)\n\n* fix(network): reject malformed raw socket handles before net_val_to_sock (#158)\n\nnet_val_to_sock (modules/network/network_internal.h) unconditionally\nread sizeof(sock_t) bytes from a raw socket handle's bytevector with\nno bounds check of its own (curry_bytevector_ref does no bounds check\neither), while net_is_raw_socket_handle -- the gate deciding whether a\nvalue even reaches net_val_to_sock -- only checked that the value was\na pair whose car was the symbol 'socket, never that the cdr was\nactually a bytevector, let alone one of the right length.\n\nTwo distinct memory-safety issues followed from this:\n- A curry script constructing (cons 'socket (make-bytevector N ...))\n  with N < sizeof(sock_t) (including N=0) triggered a genuine\n  out-of-bounds heap read past the bytevector's own flexible-array-\n  member allocation, whose garbage result became an fd fed straight\n  into a real syscall (getsockname, send, recv, shutdown, close,\n  accept -- every primitive using net_extract_fd on a raw handle).\n- A cdr that wasn't a bytevector at all (e.g. (cons 'socket 42)) was\n  worse: curry_bytevector_length/curry_bytevector_ref assume their\n  argument already IS a bytevector (as_bytes does an unchecked cast),\n  so this was a type-confused read of whatever heap object the cdr\n  actually was, misinterpreted as a Bytevector's header/data.\n\nFound during independent security review of an unrelated commit\n(#110's ephemeral-port fix, which added one more caller of the same\nunsafe path via the new socket-local-port primitive).\n\nFixed by strengthening net_is_raw_socket_handle itself to verify both\nproperties before ever calling net_val_to_sock: the cdr must be an\nactual bytevector (curry_is_bytevector), and its length must be\nEXACTLY sizeof(sock_t) -- not just \"at least\", since exact match is\nthe only value that unambiguously round-trips through\nnet_sock_to_val's own construction. A malformed handle now falls\nthrough net_extract_fd's existing port-or-handle dispatch to\ncurry_port_fd, which already type-checks cleanly via vis_port and\nreturns -1 for any non-port value, producing the same \"not a socket\nhandle or file-backed port\" error net_extract_fd already raises for\nany other malformed input -- no new error path needed, just closing\nthe gap that let a malformed value slip past the type check meant to\ngate it.\n\nAdded a regression test (tests/network_tests.scm): too-short, empty,\nnon-bytevector, and too-long cdr values all rejected cleanly; a\ncorrectly-sized-but-garbage fd still reaches the syscall-level error\nit always did (a different, already-correct path this fix doesn't\nchange); and a genuine tcp-listen handle still works normally,\nconfirming the stricter check doesn't reject legitimate handles.\n\n117/117 ctest suites pass (fresh --clear-cache run, verified across\nmultiple full-suite runs).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(network): close the same OOB/type-confusion gap for tcp-accept/tcp-close/udp-* (#158)\n\nIndependent code review of d07456c found the fix was incomplete: it\nonly closed the gap for callers routing through net_extract_fd (every\nSRFI-106 socket-* primitive, plus socket-set-nonblocking!/socket-ready?\nin network.c itself). Five other network.c primitives -- tcp-accept,\ntcp-close, udp-bind, udp-send, udp-recv -- call net_val_to_sock\ndirectly via the raw #define val_to_sock alias, with no check of any\nkind, entirely bypassing net_is_raw_socket_handle's validation. Since\nthese are ordinary user-callable builtins taking arbitrary Scheme\nvalues, the review reproduced this concretely as an actual SIGSEGV\n(not merely a clean, catchable error) for:\n\n    (tcp-close (cons 'socket 42))\n    (udp-bind  (cons 'socket 42) 0)\n\nFixed by routing all five through a new shared helper,\nnet_checked_val_to_sock (network_internal.h): validates via the\nalready-fixed net_is_raw_socket_handle before ever calling\nnet_val_to_sock, raising a clean \"<who>: not a socket handle\" error\notherwise. Deliberately not net_extract_fd -- these five functions\nonly ever make sense on a raw handle, never a port (the same reasoning\nsrfi106.c's fn_socket_close already documents for its own identical,\nalready-correct inline check), so net_extract_fd's broader \"accepts\neither shape\" behavior would be the wrong fit here, same as it would\nbe for fn_socket_close.\n\nVerified all five previously-reproducible SIGSEGVs now produce clean,\ncatchable errors instead (tcp-close, udp-bind, tcp-accept, udp-send,\nudp-recv, each tested directly against a malformed handle). Added\nregression coverage for all five to tests/network_tests.scm; every\nother assertion in that file continues to exercise these same five\nprimitives with genuine tcp-listen/udp-socket handles, confirming the\nadded check doesn't reject legitimate use.\n\n117/117 ctest suites pass (fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T20:15:22+10:00",
+          "tree_id": "c6f18b1c8d1d507218a07f4fd7d399dfb5d4a4e1",
+          "url": "https://github.com/deconstructo/curry/commit/55214007fc89e83a9c16be17c48e9ed344b3ca64"
+        },
+        "date": 1788516967240,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.149,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.357,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.774,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.819,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 144.802,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 282.355,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.815,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.543,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 69.037,
             "unit": "ms"
           }
         ]
