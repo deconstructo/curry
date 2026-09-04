@@ -49,9 +49,28 @@ static inline sock_t net_val_to_sock(curry_val v) {
     return fd;
 }
 
+/* Issue #158: a curry script can construct ANY pair shaped like a raw
+ * socket handle -- e.g. (cons 'socket 42) or (cons 'socket (make-bytevector 0)) --
+ * since this check previously only looked at the car. net_val_to_sock
+ * unconditionally reads sizeof(sock_t) bytes from the cdr with no bounds
+ * check of its own (curry_bytevector_ref does no bounds check either), so
+ * a too-short bytevector was a genuine out-of-bounds heap read whose
+ * garbage result became an fd fed straight into a real syscall. A cdr
+ * that isn't a bytevector at all was worse: curry_bytevector_length/
+ * curry_bytevector_ref assume their argument already IS one (as_bytes
+ * does an unchecked cast), so misinterpreting an arbitrary heap object's
+ * header as a Bytevector's is its own type-confusion bug, not just an
+ * out-of-bounds length read. Now verifies both: the cdr must actually be
+ * a bytevector, and it must be EXACTLY sizeof(sock_t) bytes -- not just
+ * "at least", since a too-long bytevector silently accepted here would
+ * only ever have its first sizeof(sock_t) bytes read anyway, so exact
+ * match is the only value that unambiguously round-trips through
+ * net_sock_to_val's own construction. */
 static inline bool net_is_raw_socket_handle(curry_val v) {
-    return curry_is_pair(v) && curry_is_symbol(curry_car(v)) &&
-           strcmp(curry_symbol(curry_car(v)), "socket") == 0;
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v))) return false;
+    if (strcmp(curry_symbol(curry_car(v)), "socket") != 0) return false;
+    curry_val bv = curry_cdr(v);
+    return curry_is_bytevector(bv) && curry_bytevector_length(bv) == sizeof(sock_t);
 }
 
 /* Accepts either a raw socket handle (tcp-listen's/udp-socket's/SRFI-106

@@ -192,6 +192,47 @@
 (check "udp-send from unbound socket" (utf8->string (car received2)) "world")
 
 ;;; ════════════════════════════════════════════════════════════
+;;; Malformed raw socket handle rejection (issue #158)
+;;; ════════════════════════════════════════════════════════════
+;;;
+;;; net_val_to_sock (network_internal.h) unconditionally read
+;;; sizeof(sock_t) bytes from a raw socket handle's bytevector with no
+;;; length check of its own, and net_is_raw_socket_handle never checked
+;;; the cdr was even a bytevector at all -- a curry script constructing
+;;; a pair merely SHAPED like a raw socket handle (car the symbol
+;;; 'socket) could trigger an out-of-bounds heap read (too-short/empty
+;;; bytevector) or a type-confused read (a non-bytevector cdr entirely),
+;;; whose garbage result then fed straight into a real syscall as an fd.
+;;; Every one of these must now be rejected cleanly at the type-check
+;;; level (net_is_raw_socket_handle), before ever reaching
+;;; net_val_to_sock, rather than crashing, reading adjacent heap memory,
+;;; or silently proceeding with a garbage fd.
+(define (raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+
+(check "socket-local-port rejects a too-short bytevector cdr (was an OOB heap read)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 1 5))))) #t)
+(check "socket-local-port rejects an empty bytevector cdr (was an OOB heap read)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 0))))) #t)
+(check "socket-local-port rejects a non-bytevector cdr (was a type-confused read)"
+  (raises? (lambda () (socket-local-port (cons 'socket 42)))) #t)
+(check "socket-local-port rejects a too-long bytevector cdr"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 16 0))))) #t)
+;; A correctly-sized bytevector holding a garbage fd value is NOT a
+;; malformed-handle rejection -- it passes the shape/length check (as it
+;; must, since a real socket handle has exactly this shape) and instead
+;; fails later at the actual syscall (getsockname: Bad file descriptor),
+;; a different and already-correct error path this fix doesn't change.
+(check "socket-local-port on a correctly-sized garbage fd still raises (via the syscall, not the shape check)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 4 255))))) #t)
+;; A genuine socket handle (from tcp-listen) must still work normally --
+;; the stricter check must not reject legitimate handles.
+(let* ((l (tcp-listen 0)))
+  (check "socket-local-port still works on a genuine tcp-listen handle"
+    (> (socket-local-port l) 0) #t)
+  (tcp-close l))
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
