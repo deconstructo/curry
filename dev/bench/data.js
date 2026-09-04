@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788518341173,
+  "lastUpdate": 1788532446065,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12074,6 +12074,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 74.321,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "127fecba3a7b730fb2eb7ef121c358660fa1be00",
+          "message": "fix(network,crypto,storage): reject non-bytevector arguments across the same unchecked-cast bug class (#161) (#168)\n\nFound during independent security review of #158's fix (which closed\nthe identical hazard for the socket HANDLE argument of these same two\nnetwork functions): fn_socket_send (modules/network/srfi106.c) and\nfn_udp_send (modules/network/network.c) both take a `data` argument\npassed straight to curry_bytevector_length/curry_bytevector_data/\ncurry_bytevector_ref with no curry_is_bytevector check at all. Those\nfunctions (src/api.c) do an unchecked as_bytes() cast assuming their\nargument already IS a bytevector -- confirmed reproducible SIGSEGV via\n(socket-send some-socket 42) and (udp-send some-socket 42 host port).\n\nA broader grep (recommended by the issue itself) across every C module\nfor the same \"unchecked curry_bytevector_length/data/ref on a\nuser-supplied argument\" pattern found four more genuinely vulnerable\ncall sites, all fixed here since they're the identical one-line fix:\n\n- modules/crypto/crypto.c: fn_base64_encode, fn_md5, hash_via_evp\n  (shared by fn_sha1/fn_sha256), and fn_hmac_sha256 (two arguments) --\n  none checked their bytevector argument(s) at all.\n- modules/storage/storage.c: fn_swift_put and fn_azure_put's `data`\n  argument (av[3]) -- same gap.\n\nmodules/rpi/rpi.c and modules/http/http.c's resolve_body already had\nthe correct curry_is_bytevector check in every relevant place -- not\ntouched.\n\nFixing crypto.c's functions surfaced that the old unchecked behavior\nwasn't merely a crash risk: passing a raw STRING (rather than the\ndocumented bytevector -- see docs/reference/module-crypto.md) never\nraised an error under the old code, it silently computed a WRONG hash,\nby misinterpreting a String object's own header layout (which happens\nto share the same Hdr+len prefix as Bytevector, but diverges after\nthat) as if it were a Bytevector's. Confirmed concretely: (md5-hex \"hi\")\nreturned a bogus, non-MD5 33-hex-character result under the pre-fix\ncode, not MD5(\"hi\")'s real, independently-verified value\n(49f68a5c8493ec2c0bf489821c21fc3b). tests/akkadian_tests.scm's own\nAkkadian-alias regression tests for md5-hex/sha1-hex/sha256-hex had\nbeen passing a raw string on both sides of each comparison for exactly\nthis reason -- both sides shared the identical wrong interpretation,\nso the test never noticed. Fixed those six checks to pass\n(string->utf8 \"hi\") instead, matching the base64-encode check\nimmediately above them (which was already doing this correctly).\n\nAdded a dedicated tests/crypto_tests.scm (no such file existed before\n-- (curry crypto) was previously exercised only incidentally via the\nAkkadian alias tests): known-answer tests for base64-encode/md5-hex/\nsha1-hex/sha256-hex/hmac-sha256 (values cross-checked against both\n`shasum` and `openssl dgst`, not just curry's own output), plus\nregression coverage confirming every fixed function now rejects a\nnon-bytevector argument cleanly. Also extended tests/network_tests.scm\nwith coverage for socket-send/udp-send's data argument specifically.\n\n119/119 ctest suites pass (fresh --clear-cache run, two new suites\nincluded: crypto, plus the extended network suite).",
+          "timestamp": "2026-09-05T00:33:26+10:00",
+          "tree_id": "badc09c1c36f3750ac0c5b66cf6b3813c4ce3fc5",
+          "url": "https://github.com/deconstructo/curry/commit/127fecba3a7b730fb2eb7ef121c358660fa1be00"
+        },
+        "date": 1788532445234,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.025,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.844,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.202,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.728,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 153.197,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.171,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.012,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 94.252,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 74.562,
             "unit": "ms"
           }
         ]
