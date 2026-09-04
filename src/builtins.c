@@ -130,6 +130,7 @@ val_t scm_string_copy(val_t sv) {
 }
 
 val_t scm_string_append(val_t a, val_t b) {
+    if (!vis_string(a) || !vis_string(b)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-append: not a string");
     String *sa = as_str(a), *sb = as_str(b);
     uint32_t len = sa->len + sb->len;
     String *r = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
@@ -141,11 +142,13 @@ val_t scm_string_append(val_t a, val_t b) {
 }
 
 val_t scm_string_to_symbol(val_t sv) {
+    if (!vis_string(sv)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string->symbol: not a string");
     String *s = as_str(sv);
     return sym_intern(str_data(s), s->len);
 }
 
 val_t scm_symbol_to_string(val_t sym) {
+    if (!vis_symbol(sym)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "symbol->string: not a symbol");
     const char *name = sym_cstr(sym);
     uint32_t len = sym_len(sym);
     String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
@@ -1054,6 +1057,7 @@ static val_t prim_string_copy(int ac, val_t *av, void *ud) {
 }
 static val_t prim_string_append(int ac, val_t *av, void *ud) {
     (void)ud; if(ac==0) { String *e=CURRY_NEW_ATOM(String); e->hdr.type=T_STRING; e->hdr.flags=0; e->len=0; e->hash=0; e->orig_cap=0; e->ext=NULL; e->data[0]=0; return vptr(e); }
+    if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-append: not a string");
     val_t r = av[0];
     for(int i=1;i<ac;i++) r = scm_string_append(r, av[i]);
     return r;
@@ -1097,6 +1101,8 @@ static val_t prim_string_for_each(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t proc = av[0];
     int nstrs = ac - 1;
+    for (int i = 0; i < nstrs; i++)
+        if (!vis_string(av[i+1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-for-each: not a string");
     /* Collect ports for each string */
     val_t *ports = (val_t *)alloca((size_t)nstrs * sizeof(val_t));
     for (int i = 0; i < nstrs; i++) {
@@ -1159,11 +1165,22 @@ static val_t prim_list_to_string(int ac, val_t *av, void *ud) {
 }
 static val_t prim_string_to_symbol(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_string_to_symbol(av[0]);}
 static val_t prim_symbol_to_string(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_symbol_to_string(av[0]);}
+/* Comparison primitives (string=?/<?/etc, string-ci=?/<?/etc) take a
+ * variable-length chain of arguments and all compare adjacent pairs; check
+ * every argument up front rather than relying on the pairwise loop to touch
+ * each one, since that loop never re-validates an element already consumed
+ * as the *left* side of a prior pair. */
+static void check_all_strings(int ac, val_t *av, const char *who) {
+    for (int i = 0; i < ac; i++)
+        if (!vis_string(av[i])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a string", who);
+}
 static val_t prim_string_eq(int ac, val_t *av, void *ud) {
-    (void)ud; for(int i=1;i<ac;i++) { String *a=as_str(av[i-1]),*b=as_str(av[i]); if(a->len!=b->len||memcmp(str_data(a),str_data(b),a->len)!=0) return V_FALSE; } return V_TRUE;
+    (void)ud; check_all_strings(ac, av, "string=?");
+    for(int i=1;i<ac;i++) { String *a=as_str(av[i-1]),*b=as_str(av[i]); if(a->len!=b->len||memcmp(str_data(a),str_data(b),a->len)!=0) return V_FALSE; } return V_TRUE;
 }
 static val_t prim_string_lt(int ac, val_t *av, void *ud) {
-    (void)ud; for(int i=1;i<ac;i++) { if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; } return V_TRUE;
+    (void)ud; check_all_strings(ac, av, "string<?");
+    for(int i=1;i<ac;i++) { if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; } return V_TRUE;
 }
 static val_t prim_substring(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -1691,9 +1708,9 @@ static val_t prim_digit_value(int ac, val_t *av, void *ud) {
 }
 
 /* Strings — missing comparators */
-static val_t prim_string_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string<=?"); for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string>?"); for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string>=?"); for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 /* Case-insensitive string comparisons (scheme char library) */
 static int str_ci_cmp(const char *a, const char *b) {
@@ -1704,11 +1721,11 @@ static int str_ci_cmp(const char *a, const char *b) {
     }
     return tolower((unsigned char)*a) - tolower((unsigned char)*b);
 }
-static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))!=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))!=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 static val_t prim_string_upcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -2529,6 +2546,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
 
 static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "call-with-port: not a port");
     val_t port = av[0], proc = av[1];
     val_t result = V_VOID;
     ExnHandler h;
@@ -2593,6 +2611,7 @@ static val_t prim_set_for_each(int ac, val_t *av, void *ud) {
 static val_t prim_set_map(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t proc = av[0], sv = av[1];
+    if (!vis_set(sv)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-map: not a set");
     val_t r = set_make(as_set(sv)->cmp);
     val_t lst = set_to_list(sv);
     while (vis_pair(lst)) {
@@ -2604,6 +2623,7 @@ static val_t prim_set_map(int ac, val_t *av, void *ud) {
 static val_t prim_set_filter(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t pred = av[0], sv = av[1];
+    if (!vis_set(sv)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "set-filter: not a set");
     val_t r = set_make(as_set(sv)->cmp);
     val_t lst = set_to_list(sv);
     while (vis_pair(lst)) {
