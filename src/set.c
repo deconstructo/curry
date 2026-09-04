@@ -316,6 +316,7 @@ val_t set_union(val_t a, val_t b) {
 
 val_t set_intersection(val_t a, val_t b) {
     val_t r = set_make(checked_set(a, "set-intersection")->cmp);
+    checked_set(b, "set-intersection");
     val_t la = set_to_list(a);
     while (vis_pair(la)) { if (set_member(b, vcar(la))) set_add_mut(r, vcar(la)); la = vcdr(la); }
     return r;
@@ -323,12 +324,20 @@ val_t set_intersection(val_t a, val_t b) {
 
 val_t set_difference(val_t a, val_t b) {
     val_t r = set_make(checked_set(a, "set-difference")->cmp);
+    checked_set(b, "set-difference");
     val_t la = set_to_list(a);
     while (vis_pair(la)) { if (!set_member(b, vcar(la))) set_add_mut(r, vcar(la)); la = vcdr(la); }
     return r;
 }
 
 bool set_subset(val_t a, val_t b) {
+    /* checked_set(a, ...) happens transitively via set_to_list(a) below, but
+     * b is only ever touched inside the loop via set_member(b, ...) -- if a
+     * is a valid EMPTY set, that loop body never runs, so b's type was never
+     * validated at all (confirmed: (set-subset? (make-set) 42) silently
+     * returned #t instead of raising). Check both explicitly up front. */
+    checked_set(a, "set-subset?");
+    checked_set(b, "set-subset?");
     val_t la = set_to_list(a);
     while (vis_pair(la)) { if (!set_member(b, vcar(la))) return false; la = vcdr(la); }
     return true;

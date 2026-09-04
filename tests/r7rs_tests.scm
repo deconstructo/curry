@@ -771,6 +771,18 @@
        (guard (exn (#t 'raised)) (set-adjoin 42 1)) 'raised)
 (check "set-fold rejects a non-set argument (was a reproducible SIGSEGV)"
        (guard (exn (#t 'raised)) (set-fold + 0 42)) 'raised)
+;; Found during code review of #173's own fix: set-intersection/
+;; set-difference/set-subset? only validated their SECOND argument inside a
+;; loop guarded by the first (already-checked) argument's contents -- when
+;; the first argument is a valid EMPTY set, that loop body never runs, so a
+;; bad second argument silently slipped through instead of raising (e.g.
+;; (set-subset? (make-set) 42) returned #t instead of erroring).
+(check "set-intersection rejects a non-set 2nd argument even with an empty 1st set"
+       (guard (exn (#t 'raised)) (set-intersection (make-set) 42)) 'raised)
+(check "set-difference rejects a non-set 2nd argument even with an empty 1st set"
+       (guard (exn (#t 'raised)) (set-difference (make-set) 42)) 'raised)
+(check "set-subset? rejects a non-set 2nd argument even with an empty 1st set"
+       (guard (exn (#t 'raised)) (set-subset? (make-set) 42)) 'raised)
 
 ;;; Records
 (define-record-type <person>
