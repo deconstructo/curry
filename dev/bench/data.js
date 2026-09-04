@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788556606204,
+  "lastUpdate": 1788558788266,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12626,6 +12626,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 69.536,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4d0ce6bea44edbbfa043302d9db0a504ced6052",
+          "message": "fix(qt6): reject unchecked vector/list casts in remaining qt6 functions (#182, #184, #185) (#188)\n\n* fix(qt6): reject unchecked vector casts in gfx-draw-points!/lines!/fill-triangles!/project-4d/rotate-4d-xw plus gl-buffer element check (#182)\n\nLast thread in this session's \"unchecked cast\" bug-hunt chain (#158,\n#161, #166, #170, #172, #173, #165, #167, #169/#179). Found during\nindependent review of the #169/#179 fix: five more functions in\nmodules/qt6/qt6.cpp with the same unguarded curry_vector_length/_ref\ncasts, plus a sixth \"container checked, elements not\" gap.\n\n- fn_gfx_draw_points (gfx-draw-points!): neither xv nor yv were\n  checked as vectors before curry_vector_length/_ref. Additionally,\n  since xv/yv are two independent vectors walked over the SAME index\n  range, a length mismatch (yv shorter than xv) is a distinct OOB\n  hazard from the type check -- both are now validated, plus an\n  explicit length(yv) >= length(xv) check. Confirmed reproducible\n  SIGSEGV via (gfx-draw-points! painter 42 42 1.0 1.0 1.0 1.0 2.0).\n- fn_gfx_draw_lines (gfx-draw-lines!), fn_gfx_fill_triangles\n  (gfx-fill-triangles!): same missing vector check on their coords\n  vector.\n- fn_project_4d (project-4d), fn_rotate_4d_xw (rotate-4d-xw): neither\n  checked their point vector argument(s) were vectors OR long enough\n  before their fixed 4-element unrolled reads.\n- glbuf_load_data (backing make-gl-buffer/gl-buffer-update!) already\n  checked the container was a vector, but never validated each\n  ELEMENT was numeric before curry_float -- itself unchecked for\n  anything but a fixnum/flonum (vfloat(v) is a raw as_flo(v)->value\n  cast) -- the exact \"container checked, elements not\" gap the #179\n  vecdb fix's check_numeric_vector was specifically written to close,\n  left unpatched at this one qt6 call site.\n\nAdded a shared check_real_vector() helper (vector-ness + per-element\nreal-number check, returns validated length) used across all six\nsites, following the same established pattern as vecdb.cpp's\ncheck_numeric_vector.\n\nExtended tests/test_qt6_new.scm with regression coverage for all six\nfixes plus correct-usage confirmation for each, using the existing\nheadless call-with-painter setup where a painter argument is needed.\n\nBuilt and tested locally with BUILD_MODULE_QT6=ON (not enabled in\nCI's default build, same as #169/#179). 127/127 ctest suites pass\n(fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(qt6): set_uniform's mat4/list/scalar branches cast values without checking they're numeric (#184)\n\nFound during independent review of #182's fix (cc6feef), while doing a\nfinal exhaustive grep of every curry_vector_ref/curry_bytevector_ref\ncall in modules/qt6/qt6.cpp. set_uniform (used by gl-shader-draw!'s\nuniform-value dispatch) had three unguarded casts:\n\n- The 16-element-vector (mat4) branch checked curry_is_vector and the\n  exact length before indexing (no OOB), but never checked each\n  ELEMENT was numeric before curry_float -- itself unchecked for\n  anything but a fixnum/flonum (vfloat(v) is a raw as_flo(v)->value\n  cast). Same \"container checked, elements not\" gap check_real_vector\n  (added in #182) was written to close, just not applied here.\n- The list branch (vec2/vec3/vec4) had the identical gap on each car.\n- Worse, and beyond what #184's own text described: the final\n  catch-all else branch had NO check at all. Its comment claimed to\n  \"treat as float\" only flonum/bignum/rational, but it actually ran\n  curry_float() unconditionally on ANY value not matched by an earlier\n  branch -- a string, a symbol, a wrong-length vector, a hash-table,\n  anything -- the widest exposure of the three. curry_float only has\n  real support for fixnum/flonum (per its own src/api.c\n  implementation), so bignum/rational were never actually handled\n  correctly here either; now rejected cleanly instead of silently\n  mis-converted, matching the same tradeoff already established and\n  confirmed correct for vecdb.cpp's check_numeric_vector during #179's\n  review.\n\nAdded a small is_real_number() helper (fixnum-or-flonum, the exact\nprecondition curry_float needs) and applied it to all three branches\nplus the fallback -- a separate helper from #182's check_real_vector\nrather than reusing it, since the two check different things\n(element-level numeric-ness here vs. whole-vector-of-a-given-shape\nvalidation there) and set_uniform's branches don't need\ncheck_real_vector's vector semantics.\n\nNot runtime-testable in this headless environment: gl-shader-draw!\nrequires a genuine active QOpenGLContext (confirmed via SIGSEGV inside\nQt's own GL viewport query when attempted under\nQT_QPA_PLATFORM=offscreen on macOS -- a pre-existing environment\nlimitation unrelated to this fix, and confirmed no existing test in\nthis repo exercises gl-shader-draw! at all; the interactive examples\nthat use it all require a real window/canvas). Verified by source\ninspection only: is_real_number's precondition exactly matches what\ncurry_float can safely handle (same reasoning independently confirmed\nfor check_real_vector/check_numeric_vector across #182/#179's review),\nand the control flow was read carefully to confirm every branch that\nreaches curry_float/curry_fixnum now does so only after a matching\ntype check.\n\n127/127 ctest suites pass (unaffected -- this function isn't covered\nby any existing test, so no suite exercises the changed code path;\nconfirms no regression in everything that IS covered).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(qt6): reject unguarded list traversal in make-dropdown/make-radio-group/gfx-fill-polygon!/gfx-draw-polygon!/splitter-set-sizes!/gl-shader-draw-arrays! (#185)\n\nFound during independent security review of #182's fix: a parallel\nunchecked-cast pattern this whole chain (#158..#182) only ever covered\nfor vector-argument call sites, never for list traversal. Several\nfunctions walked a Scheme list via curry_cdr guarded only by\ncurry_is_nil(p), then called curry_car(p) (or further unpacked it) with\nno curry_is_pair(p) check first, and/or passed the extracted element\nstraight into curry_string/curry_float with no type check.\ncurry_car/curry_cdr/curry_string/curry_float are all unchecked casts\n(curry_string is str_data(as_str(v)); curry_float falls to a raw\nas_flo(v)->value cast for non-fixnum values), so a malformed list --\nan improper list, or a list of the wrong element type -- wild-casts.\n\n- fn_make_dropdown/fn_make_radio_group (make-dropdown/make-radio-group):\n  curry_string(curry_car(p)) with no pair/string check. Confirmed\n  reproducible SIGSEGV via (make-dropdown (list #t) 0 (lambda (i) i)).\n- fn_gfx_fill_polygon/fn_gfx_draw_polygon (gfx-fill-polygon!/\n  gfx-draw-polygon!): pt = curry_car(pts) never checked to actually be\n  a pair before unpacking it as (x . y) via curry_car(pt)/curry_cdr(pt).\n  Confirmed reproducible SIGSEGV via\n  (gfx-fill-polygon! painter (list 1 2 3)).\n- fn_splitter_set_sizes (splitter-set-sizes!): curry_float(curry_car(p))\n  with no pair/numeric check. Confirmed reproducible SIGSEGV via\n  (splitter-set-sizes! sp (list #t)).\n- fn_gl_shader_draw_arrays and its FBO-target variant (two call sites,\n  same code duplicated): the uniform-key string fallback\n  (curry_string(key) whenever key isn't a symbol) ran unconditionally\n  with no check key was actually a string. Fixed by skipping the\n  malformed entry instead, matching this loop's existing \"skip a\n  malformed uniform entry rather than abort the whole render\" style\n  for the adjacent !curry_is_pair(entry) check just above it.\n\nAdded three small shared helpers (check_string_list, check_point_list,\ncheck_number_list) following the same pattern as #182's\ncheck_real_vector -- each validates a whole list up front (every cell\ngenuinely a pair, i.e. the list must be proper; every element the\nright type) before the existing traversal loop runs.\n\nset_uniform's own list-branch gap (also identified in #185's original\nreport, item #6) was already fixed as part of #184's commit on this\nsame branch; the gl-shader-draw-arrays! attribute-fallback gap (item\n#7) is fixed here since it wasn't covered by that commit.\n\nExtended tests/test_qt6_new.scm with regression coverage for all five\nnewly-fixed crash sites plus correct-usage confirmation for each,\nusing the existing headless call-with-painter setup where a painter\nargument is needed.\n\nBuilt and tested locally with BUILD_MODULE_QT6=ON (not enabled in\nCI's default build, same as #169/#179/#182/#184). 127/127 ctest suites\npass (fresh --clear-cache run).",
+          "timestamp": "2026-09-05T07:52:25+10:00",
+          "tree_id": "b95e34fc91dfa4a099fc4ef86f3e63b651c56f8e",
+          "url": "https://github.com/deconstructo/curry/commit/d4d0ce6bea44edbbfa043302d9db0a504ced6052"
+        },
+        "date": 1788558786705,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.429,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.734,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.577,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.447,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 134.711,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 285.306,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.007,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.226,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 66.754,
             "unit": "ms"
           }
         ]
