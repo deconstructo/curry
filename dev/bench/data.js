@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788553938091,
+  "lastUpdate": 1788555201783,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12488,6 +12488,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 52.68,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b6a94118c7649fc4102c0b7ecf63184f51237483",
+          "message": "fix(image): forged image vector caused a real out-of-bounds heap read/write (#167) (#180)\n\nImages are plain R7RS vectors #(width height channels bytevector).\ncheck_image() previously only verified slot 0 was a fixnum -- not\neven that its argument was a vector at all (curry_vector_ref does an\nunchecked as_vec() cast, so (image-width 42) SIGSEGVed before this\ncheck could even run), and never that slot 3 was really a bytevector\nor that its length matched the claimed width*height*channels.\nBecause it's a bare vector, any Scheme code can forge one with\n(vector w h ch anything) using attacker-controlled w/h/ch alongside a\ntoo-small or wrong-typed slot-3 payload; px_get/px_set then\nbounds-check only against the forged dimensions before reading/\nwriting that slot 3 value. Confirmed reproducible SIGSEGV -- an\nout-of-bounds heap WRITE, not just a read -- via\n(image-set! (vector 100000 100000 4 (make-string 1 #\\a)) 99999 99999 3 255).\n\ncheck_image now validates the whole shape: v is a 4-element vector,\nslots 0-2 are positive fixnums within a valid range, and slot 3 is a\nbytevector whose length exactly equals width*height*channels --\ncomputed with the same overflow guard make_image's own w*h*ch\nmultiplication already uses, so a forged w*h*ch that wraps back down\nto a small value can't be mistaken for valid just because it happens\nto match a small bytevector's length.\n\nEvery image-consuming primitive already routed through check_image\nfirst (confirmed by grep across all fn_* entry points) -- fixing the\none function closes the gap everywhere at once.\n\nAdded tests/image_tests.scm (no dedicated suite existed for this\nmodule before): basic correctness plus six regression checks for the\nforged-vector class of bug (non-vector argument, oversized claimed\ndimensions, wrong-typed slot 3, right-typed-but-too-short bytevector,\noverflowing dimensions, and a wrong-length vector). Registered in\ntests/CMakeLists.txt, gated on BUILD_MODULE_IMAGE.\n\n125/125 ctest suites pass (fresh --clear-cache run, 1 new suite).",
+          "timestamp": "2026-09-05T06:52:34+10:00",
+          "tree_id": "06ce399e73aafddff52f1bf97363df5735352b17",
+          "url": "https://github.com/deconstructo/curry/commit/b6a94118c7649fc4102c0b7ecf63184f51237483"
+        },
+        "date": 1788555200823,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.527,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.609,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.565,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.53,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 131.784,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 281.63,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 66.315,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.936,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.46,
             "unit": "ms"
           }
         ]
