@@ -135,6 +135,14 @@ static RedisConn *val_to_conn(curry_val v) {
     if (!curry_is_pair(v) || curry_car(v) != conn_tag())
         curry_error("redis: not a redis client handle");
     curry_val bv = curry_cdr(v);
+    /* Issue #165: the tag was checked, but the cdr -- assumed to be a
+     * pointer-holding bytevector -- was read straight via
+     * curry_bytevector_ref with no curry_is_bytevector/length check first,
+     * the same unchecked-cast hazard #158 closed for network socket
+     * handles. Confirmed reproducible SIGSEGV via
+     * (redis-close! (cons 'redis-conn 42)). */
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(RedisConn *))
+        curry_error("redis: not a redis client handle");
     RedisConn *c;
     for (size_t i = 0; i < sizeof(RedisConn *); i++)
         ((uint8_t *)&c)[i] = curry_bytevector_ref(bv, (uint32_t)i);

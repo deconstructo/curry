@@ -256,6 +256,18 @@
 (check "machine-name is a string or #f"
        (or (string? (machine-name)) (eq? (machine-name) #f)) #t)
 
+;;; Issue #165: checked_ptr_cdr -- read-directory/close-directory checked
+;;; the tag but never checked the cdr was actually a pointer-holding
+;;; bytevector before unpack_ptr's curry_bytevector_ref dereferenced
+;;; whatever was there. Confirmed reproducible SIGSEGV via
+;;; (read-directory (cons 'directory-stream 42)) pre-fix.
+(check "read-directory rejects a forged handle (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (read-directory (cons 'directory-stream 42)))
+       'raised)
+(check "close-directory rejects a forged handle (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (close-directory (cons 'directory-stream 42)))
+       'raised)
+
 ;;; Summary
 
 (newline)

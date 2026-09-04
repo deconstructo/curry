@@ -80,6 +80,20 @@ static int has_tag(curry_val v, const char *tag) {
            strcmp(curry_symbol(curry_car(v)), tag) == 0;
 }
 
+/* Issue #165: has_tag checked the car, but every get_gpio/get_watcher/
+ * i2c/spi/pwm/camera/uart/watchdog unwrap below passed curry_cdr(v)
+ * straight to unpack_ptr()/unpack_fd() with no curry_is_bytevector/length
+ * check -- a forged handle like (cons 'gpio 42) has the right tag but a
+ * non-bytevector cdr, and curry_bytevector_ref's own unchecked
+ * as_bytes() cast then dereferences the fixnum's raw bit pattern as a
+ * pointer. Same hazard as (cons 'redis-conn 42) in the redis module. */
+static curry_val checked_ptr_cdr(curry_val v, const char *tag, const char *ctx) {
+    curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("%s: expected %s handle", ctx, tag);
+    return bv;
+}
+
 /* ---- GPIO (libgpiod) ---- */
 
 static curry_val wrap_gpio(struct gpiod_line *line) {
@@ -87,7 +101,7 @@ static curry_val wrap_gpio(struct gpiod_line *line) {
 }
 static struct gpiod_line *get_gpio(curry_val v, const char *ctx) {
     if (!has_tag(v, "gpio")) curry_error("%s: expected gpio handle", ctx);
-    return (struct gpiod_line *)unpack_ptr(curry_cdr(v));
+    return (struct gpiod_line *)unpack_ptr(checked_ptr_cdr(v, "gpio", ctx));
 }
 
 /* (gpio-open chip-num line-num direction) → gpio-handle
@@ -217,7 +231,7 @@ static curry_val wrap_watcher(GpioWatcher *w) {
 }
 static GpioWatcher *get_watcher(curry_val v, const char *ctx) {
     if (!has_tag(v, "watcher")) curry_error("%s: expected watcher handle", ctx);
-    return (GpioWatcher *)unpack_ptr(curry_cdr(v));
+    return (GpioWatcher *)unpack_ptr(checked_ptr_cdr(v, "watcher", ctx));
 }
 
 static void *watcher_thread_fn(void *arg) {
@@ -320,7 +334,7 @@ static curry_val wrap_i2c(int fd) {
 }
 static int get_i2c(curry_val v, const char *ctx) {
     if (!has_tag(v, "i2c")) curry_error("%s: expected i2c handle", ctx);
-    return unpack_fd(curry_cdr(v));
+    return unpack_fd(checked_ptr_cdr(v, "i2c", ctx));
 }
 
 /* (i2c-open bus-num) → i2c-handle  — opens /dev/i2c-N */
@@ -404,7 +418,7 @@ static curry_val wrap_spi(int fd) {
 }
 static int get_spi(curry_val v, const char *ctx) {
     if (!has_tag(v, "spi")) curry_error("%s: expected spi handle", ctx);
-    return unpack_fd(curry_cdr(v));
+    return unpack_fd(checked_ptr_cdr(v, "spi", ctx));
 }
 
 /* (spi-open bus device speed-hz mode) → spi-handle
@@ -495,7 +509,7 @@ static curry_val wrap_pwm(PwmHandle *h) {
 }
 static PwmHandle *get_pwm(curry_val v, const char *ctx) {
     if (!has_tag(v, "pwm")) curry_error("%s: expected pwm handle", ctx);
-    return (PwmHandle *)unpack_ptr(curry_cdr(v));
+    return (PwmHandle *)unpack_ptr(checked_ptr_cdr(v, "pwm", ctx));
 }
 
 static int pwm_write(const char *path, const char *val) {
@@ -638,7 +652,7 @@ static curry_val wrap_camera(Camera *c) {
 }
 static Camera *get_camera(curry_val v, const char *ctx) {
     if (!has_tag(v, "camera")) curry_error("%s: not a camera handle", ctx);
-    return (Camera *)unpack_ptr(curry_cdr(v));
+    return (Camera *)unpack_ptr(checked_ptr_cdr(v, "camera", ctx));
 }
 
 /* Map symbolic format name to V4L2 fourcc. */
@@ -843,7 +857,7 @@ static curry_val wrap_uart(int fd) {
 }
 static int get_uart(curry_val v, const char *ctx) {
     if (!has_tag(v, "uart")) curry_error("%s: not a uart handle", ctx);
-    return unpack_fd(curry_cdr(v));
+    return unpack_fd(checked_ptr_cdr(v, "uart", ctx));
 }
 
 static speed_t baud_to_speed(int baud) {
@@ -1076,7 +1090,7 @@ static curry_val wrap_watchdog(int fd) {
 }
 static int get_watchdog(curry_val v, const char *ctx) {
     if (!has_tag(v, "watchdog")) curry_error("%s: not a watchdog handle", ctx);
-    return unpack_fd(curry_cdr(v));
+    return unpack_fd(checked_ptr_cdr(v, "watchdog", ctx));
 }
 
 /* (watchdog-open [timeout-secs]) → watchdog-handle

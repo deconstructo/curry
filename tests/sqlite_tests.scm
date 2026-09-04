@@ -67,6 +67,15 @@
 
 (sqlite-close db)
 
+;;; Issue #165: get_opaque checked NOTHING at all before this fix -- not
+;;; even that its argument was a pair, let alone the tag or that the cdr
+;;; was really a pointer-holding bytevector. Confirmed reproducible
+;;; SIGSEGV via (sqlite-close 42) alone, no forged pair even needed.
+(check-error "sqlite-close-rejects-non-handle" (lambda () (sqlite-close 42)))
+(check-error "sqlite-close-rejects-forged-handle"
+  (lambda () (sqlite-close (cons 'sqlite-db 42))))
+(check-error "sqlite-exec-rejects-non-handle" (lambda () (sqlite-exec 42 "SELECT 1")))
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")

@@ -92,6 +92,21 @@ static int has_tag(curry_val v, const char *tag) {
            strcmp(curry_symbol(curry_car(v)), tag) == 0;
 }
 
+/* Issue #165: has_tag checked the car, but fn_read_directory/
+ * fn_close_directory passed curry_cdr(av[0]) straight to unpack_ptr()
+ * with no curry_is_bytevector/length check -- a forged handle like
+ * (cons 'directory-stream 42) has the right tag but a non-bytevector
+ * cdr, and curry_bytevector_ref's own unchecked as_bytes() cast then
+ * dereferences the fixnum's raw bit pattern as a pointer. Confirmed
+ * reproducible SIGSEGV via
+ * (read-directory (cons 'directory-stream 42)). */
+static curry_val checked_ptr_cdr(curry_val v, const char *tag, const char *fn) {
+    curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("posix: %s: not a %s", fn, tag);
+    return bv;
+}
+
 static void posix_error(const char *fn) {
     curry_error("posix: %s: %s", fn, strerror(errno));
 }
@@ -237,7 +252,7 @@ static curry_val fn_read_directory(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!has_tag(av[0], "directory-stream"))
         curry_error("posix: read-directory: not a directory stream");
-    DIR *d = (DIR *)unpack_ptr(curry_cdr(av[0]));
+    DIR *d = (DIR *)unpack_ptr(checked_ptr_cdr(av[0], "directory stream", "read-directory"));
     if (!d) curry_error("posix: read-directory: directory stream already closed");
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
@@ -251,7 +266,7 @@ static curry_val fn_close_directory(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!has_tag(av[0], "directory-stream"))
         curry_error("posix: close-directory: not a directory stream");
-    curry_val bv = curry_cdr(av[0]);
+    curry_val bv = checked_ptr_cdr(av[0], "directory stream", "close-directory");
     DIR *d = (DIR *)unpack_ptr(bv);
     if (!d) curry_error("posix: close-directory: directory stream already closed");
     clear_ptr(bv);

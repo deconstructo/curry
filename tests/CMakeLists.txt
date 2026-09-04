@@ -180,6 +180,41 @@ if(BUILD_MODULE_GIT AND TARGET curry_git)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# No dedicated suites existed for these five modules before issue #165's
+# fix (unchecked handle-argument bytevector cast across most C modules) --
+# each new file covers at least that regression; regex/sync also get full
+# basic-correctness coverage since neither needs external
+# network/server/credential state to exercise.
+if(BUILD_MODULE_REGEX AND TARGET curry_regex)
+    add_test(NAME regex COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/regex_tests.scm)
+    set_tests_properties(regex PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
+if(BUILD_MODULE_SYNC AND TARGET curry_sync)
+    add_test(NAME sync COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sync_tests.scm)
+    set_tests_properties(sync PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
+if(BUILD_MODULE_STORAGE AND TARGET curry_storage)
+    add_test(NAME storage COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/storage_tests.scm)
+    set_tests_properties(storage PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
+if(BUILD_MODULE_GRAPHQL AND TARGET curry_graphql)
+    add_test(NAME graphql COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/graphql_tests.scm)
+    set_tests_properties(graphql PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
+if(BUILD_MODULE_NEO4J AND TARGET curry_neo4j)
+    add_test(NAME neo4j COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/neo4j_tests.scm)
+    set_tests_properties(neo4j PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(TARGET curry_plplot)
     add_test(NAME plplot COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/test_plplot.scm)
     set_tests_properties(plplot PROPERTIES

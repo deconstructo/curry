@@ -305,6 +305,18 @@
 
 
 ;;; ================================================================
+;;; Issue #165: malformed handle rejection
+;;; ================================================================
+;;; val_to_conn checked the tag but never checked the cdr was actually a
+;;; pointer-holding bytevector before curry_bytevector_ref's own unchecked
+;;; as_bytes() cast dereferenced whatever was there -- confirmed
+;;; reproducible SIGSEGV via
+;;; (mqtt-publish (cons 'mqtt-conn 42) "t" "p") pre-fix.
+(check "mqtt-publish rejects a forged handle (was a reproducible SIGSEGV)"
+  (guard (exn (#t 'raised)) (mqtt-publish (cons 'mqtt-conn 42) "t" "p"))
+  'raised)
+
+;;; ================================================================
 ;;; Summary
 ;;; ================================================================
 

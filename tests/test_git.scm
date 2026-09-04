@@ -246,6 +246,13 @@
 
 (check "git-open bad path raises" (raises? (lambda () (git-open "/nonexistent/path/xyz"))) #t)
 
+;;; Issue #165: val_to_repo checked the tag but never checked the cdr was
+;;; actually a pointer-holding bytevector before curry_bytevector_ref's own
+;;; unchecked as_bytes() cast dereferenced whatever was there -- confirmed
+;;; reproducible SIGSEGV via (git-close! (cons 'git-repo 42)) pre-fix.
+(check "git-close! rejects a forged handle (was a reproducible SIGSEGV)"
+  (raises? (lambda () (git-close! (cons 'git-repo 42)))) #t)
+
 ;;; ── Summary ──────────────────────────────────────────────────────────────
 
 (newline)

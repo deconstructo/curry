@@ -80,6 +80,13 @@ static git_repository *val_to_repo(curry_val v) {
     if (!curry_is_pair(v) || curry_car(v) != repo_tag())
         curry_error("git: not a repository handle");
     curry_val bv = curry_cdr(v);
+    /* Issue #165: the tag was checked, but the cdr -- assumed to be a
+     * pointer-holding bytevector -- was read straight via
+     * curry_bytevector_ref with no curry_is_bytevector/length check first.
+     * Confirmed reproducible SIGSEGV via
+     * (git-close! (cons 'git-repo 42)). */
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(git_repository *))
+        curry_error("git: not a repository handle");
     git_repository *r;
     for (size_t i = 0; i < sizeof(git_repository *); i++)
         ((uint8_t *)&r)[i] = curry_bytevector_ref(bv, (uint32_t)i);

@@ -36,9 +36,16 @@ static curry_val ldap_to_val(LDAP *ld) {
 }
 
 static LDAP *val_to_ldap(curry_val v) {
-    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)))
+    /* Issue #165: this checked that the car was *some* symbol, not which
+     * one, and never checked the cdr was actually a pointer-holding
+     * bytevector at all before curry_bytevector_ref's own unchecked
+     * as_bytes() cast dereferenced whatever was there as a pointer. */
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)) ||
+        strcmp(curry_symbol(curry_car(v)), "ldap-conn") != 0)
         curry_error("ldap: not a connection handle");
     curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(LDAP *))
+        curry_error("ldap: not a connection handle");
     LDAP *ld;
     for (size_t i = 0; i < sizeof(LDAP *); i++)
         ((uint8_t *)&ld)[i] = curry_bytevector_ref(bv, (uint32_t)i);

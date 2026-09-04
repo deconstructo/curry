@@ -31,9 +31,24 @@ static curry_val make_opaque(void *ptr, const char *tag) {
     return curry_make_pair(curry_make_symbol(tag), bv2);
 }
 
-static void *get_opaque(curry_val v) {
+/* Issue #165: get_opaque used to check NOTHING at all -- not even that v
+ * was a pair, let alone that the tag matched or the cdr was really a
+ * pointer-holding bytevector. curry_cdr on a non-pair and
+ * curry_bytevector_ref's own unchecked as_bytes() cast on a non-bytevector
+ * cdr are both wild-pointer hazards. Confirmed reproducible SIGSEGV via
+ * (sqlite-close 42) alone -- no forged pair even needed. Now takes the
+ * expected tag and a context string (matching every other module's
+ * checked-unwrap pattern) so a wrong-handle-type mistake (e.g. passing a
+ * stmt where a db is expected) raises cleanly too, not just a raw
+ * type-confused pointer. */
+static void *get_opaque(curry_val v, const char *tag, const char *ctx) {
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)) ||
+        strcmp(curry_symbol(curry_car(v)), tag) != 0)
+        curry_error("%s: expected %s handle", ctx, tag);
     curry_val bv = curry_cdr(v);
     void *ptr;
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(ptr))
+        curry_error("%s: expected %s handle", ctx, tag);
     for (size_t i = 0; i < sizeof(ptr); i++)
         ((uint8_t *)&ptr)[i] = curry_bytevector_ref(bv, (uint32_t)i);
     return ptr;
@@ -103,14 +118,14 @@ static curry_val fn_open_memory(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_close(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmDB *w = (ScmDB *)get_opaque(av[0]);
+    ScmDB *w = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-close");
     sqlite3_close(w->db); free(w);
     return curry_void();
 }
 
 static curry_val fn_exec(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmDB *db = (ScmDB *)get_opaque(av[0]);
+    ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-exec");
     const char *sql = curry_string(av[1]);
 
     sqlite3_stmt *stmt = NULL;
@@ -150,7 +165,7 @@ static curry_val fn_exec(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_prepare(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmDB *db = (ScmDB *)get_opaque(av[0]);
+    ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-prepare");
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db->db, curry_string(av[1]), -1, &stmt, NULL);
     if (rc != SQLITE_OK) curry_error("sqlite-prepare: %s", sqlite3_errmsg(db->db));
@@ -160,7 +175,7 @@ static curry_val fn_prepare(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_bind(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmStmt *w = (ScmStmt *)get_opaque(av[0]);
+    ScmStmt *w = (ScmStmt *)get_opaque(av[0], "sqlite-stmt", "sqlite-bind");
     int idx = (int)curry_fixnum(av[1]);
     curry_val val = av[2];
     if (curry_is_bool(val) && !curry_bool(val)) sqlite3_bind_null(w->stmt, idx);
@@ -185,7 +200,7 @@ static curry_val fn_bind(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_step(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmStmt *w = (ScmStmt *)get_opaque(av[0]);
+    ScmStmt *w = (ScmStmt *)get_opaque(av[0], "sqlite-stmt", "sqlite-step");
     int rc = sqlite3_step(w->stmt);
     if (rc == SQLITE_ROW) return row_to_alist(w->stmt);
     if (rc == SQLITE_DONE) return curry_make_bool(false);
@@ -194,20 +209,20 @@ static curry_val fn_step(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_finalize(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmStmt *w = (ScmStmt *)get_opaque(av[0]);
+    ScmStmt *w = (ScmStmt *)get_opaque(av[0], "sqlite-stmt", "sqlite-finalize");
     sqlite3_finalize(w->stmt); free(w);
     return curry_void();
 }
 
 static curry_val fn_last_rowid(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmDB *db = (ScmDB *)get_opaque(av[0]);
+    ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-last-insert-rowid");
     return curry_make_fixnum((intptr_t)sqlite3_last_insert_rowid(db->db));
 }
 
 static curry_val fn_changes(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    ScmDB *db = (ScmDB *)get_opaque(av[0]);
+    ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-changes");
     return curry_make_fixnum(sqlite3_changes(db->db));
 }
 

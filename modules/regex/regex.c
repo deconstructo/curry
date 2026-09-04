@@ -38,7 +38,18 @@ static RegexData *get_regex(curry_val v, const char *ctx) {
         !curry_is_symbol(curry_car(v)) ||
         strcmp(curry_symbol(curry_car(v)), "regex") != 0)
         curry_error("%s: expected regex handle", ctx);
-    return (RegexData *)unpack_ptr(curry_cdr(v));
+    /* Issue #165: the tag (car) was checked, but the cdr -- assumed to be
+     * a pointer-holding bytevector -- was passed straight to unpack_ptr()
+     * with no curry_is_bytevector/length check, the same unchecked-cast
+     * hazard #158 closed for network socket handles. A forged handle like
+     * (cons 'regex 42) has the right tag but a non-bytevector cdr;
+     * curry_bytevector_ref's own unchecked as_bytes() cast then
+     * dereferences the fixnum's raw bit pattern as a pointer. Confirmed
+     * reproducible SIGSEGV via (regex-free (cons 'regex 42)). */
+    curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("%s: expected regex handle", ctx);
+    return (RegexData *)unpack_ptr(bv);
 }
 
 /* ---- (regex-compile pattern [flags]) → regex ---- */

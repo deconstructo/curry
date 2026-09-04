@@ -103,6 +103,13 @@ static NeoConn *conn_unbox(curry_val v, const char *ctx) {
         (curry_car(v) != conn_tag() && curry_car(v) != tx_tag()))
         curry_error("%s: not a neo4j connection or transaction", ctx);
     curry_val bv = curry_cdr(v);
+    /* Issue #165: the tag was checked, but the cdr -- assumed to be a
+     * pointer-holding bytevector -- was read straight via
+     * curry_bytevector_ref with no curry_is_bytevector/length check first.
+     * Confirmed reproducible SIGSEGV via
+     * (neo4j-disconnect (cons 'neo4j-conn 42)). */
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(NeoConn *))
+        curry_error("%s: not a neo4j connection or transaction", ctx);
     NeoConn *c;
     for (size_t i = 0; i < sizeof(NeoConn *); i++)
         ((uint8_t *)&c)[i] = curry_bytevector_ref(bv, (uint32_t)i);

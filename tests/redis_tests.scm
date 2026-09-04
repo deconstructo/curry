@@ -177,6 +177,15 @@
     (redis-del! c-tls "tls:str" "tls:l" "tls:s" "tls:h")
     (redis-close! c-tls)))
 
+;;; ---- Issue #165: malformed handle rejection ----
+;;; val_to_conn checked the tag but never checked the cdr was actually a
+;;; pointer-holding bytevector before curry_bytevector_ref's own unchecked
+;;; as_bytes() cast dereferenced whatever was there -- confirmed
+;;; reproducible SIGSEGV via (redis-close! (cons 'redis-conn 42)) pre-fix.
+(check "redis-close! rejects a forged handle (was a reproducible SIGSEGV)"
+  (guard (exn (#t 'raised)) (redis-close! (cons 'redis-conn 42)))
+  'raised)
+
 ;;; ---- Summary ----
 
 (newline)
