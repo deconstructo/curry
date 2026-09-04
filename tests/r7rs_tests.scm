@@ -74,6 +74,12 @@
 
 ;;; Strings
 (check "string-length" (string-length "hello") 5)
+;; Issue #170: string-length had no type check at all -- as_str() cast its
+;; argument straight to a String* with no vis_string() guard, unlike every
+;; other string primitive (confirmed reproducible SIGSEGV via
+;; (string-length 42) pre-fix).
+(check "string-length rejects a fixnum (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-length 42)) 'raised)
 (check "string-ref" (string-ref "hello" 1) #\e)
 (check "string-ref multibyte" (string-ref "héllo" 1) #\é)
 (check "string-ref negative index raises"
@@ -1060,6 +1066,14 @@
   "foobar")
 (check "input-port?"  (input-port?  (open-input-string "")) #t)
 (check "output-port?" (output-port? (open-output-string)) #t)
+;; Issue #170: close-port/close-input-port/close-output-port had no
+;; vis_port() check at either the builtin or port_close() layer -- as_port()
+;; cast straight to a Port*, confirmed reproducible SIGSEGV via
+;; (close-port 42) pre-fix.
+(check "close-port rejects a non-port argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (close-port 42)) 'raised)
+(check "close-port still works on a real port"
+       (begin (close-port (open-output-string)) 'ok) 'ok)
 
 ;;; Error objects
 (define captured-error
@@ -1068,6 +1082,15 @@
 (check "error-message"         (error-message captured-error) "bad input")
 (check "error-object-irritants" (error-object-irritants captured-error) '(42 "extra"))
 (check "error-object? non-err" (error-object? 42) #f)
+;; Issue #170: error-object-message/-irritants/-code had no vis_error()
+;; check -- as_err() cast straight to an ErrorObj*, confirmed reproducible
+;; SIGSEGV via (error-object-message 42) pre-fix.
+(check "error-object-message rejects a non-error argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (error-object-message 42)) 'raised)
+(check "error-object-irritants rejects a non-error argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (error-object-irritants 42)) 'raised)
+(check "error-object-code rejects a non-error argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (error-object-code 42)) 'raised)
 (check "raise-continuable"
   (with-exception-handler
     (lambda (e) (+ e 1))
@@ -1103,6 +1126,26 @@
 (check "hash-table-delete!" (hash-table-exists? h "x") #f)
 (check "hash-table-keys"   (length (hash-table-keys h)) 1)
 (check "hash-table-values" (hash-table-values h) '(20))
+;; Issue #170: the entire hash-table-* family (set!/ref/delete!/exists?/
+;; keys/values/->alist/size) had NO type check whatsoever on their table
+;; argument -- as_hash() cast straight to a Hashtable*, confirmed
+;; reproducible SIGSEGV via e.g. (hash-table-size 42) pre-fix.
+(check "hash-table-set! rejects a non-hash-table argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (hash-table-set! 42 'a 'b)) 'raised)
+(check "hash-table-ref rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table-ref 42 'a)) 'raised)
+(check "hash-table-delete! rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table-delete! 42 'a)) 'raised)
+(check "hash-table-exists? rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table-exists? 42 'a)) 'raised)
+(check "hash-table-keys rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table-keys 42)) 'raised)
+(check "hash-table-values rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table-values 42)) 'raised)
+(check "hash-table->alist rejects a non-hash-table argument"
+       (guard (exn (#t 'raised)) (hash-table->alist 42)) 'raised)
+(check "hash-table-size rejects a non-hash-table argument (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (hash-table-size 42)) 'raised)
 
 ;;; Force / promises
 (define p-lazy (make-promise (+ 1 2)))
