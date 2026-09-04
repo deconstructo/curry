@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788516967982,
+  "lastUpdate": 1788518341173,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12005,6 +12005,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 69.037,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1d7f8f5efe0af6be6e2d23a65da0105a09da5ee",
+          "message": "fix(http,graphql,storage): synchronize curl_global_init against concurrent actors (#156) (#164)\n\ncurl_global_init (libcurl) is documented by libcurl itself as NOT safe\nto call concurrently from multiple threads. Curry actors are real OS\nthreads with no global interpreter lock, so three separate call sites\nwere exposed:\n\n- modules/http/http.c's do_request had a racy hand-rolled\n  \"static int curl_inited = 0; if (!curl_inited) { curl_global_init(...);\n  curl_inited = 1; }\" -- an unsynchronized read-then-write, the classic\n  double-checked-init race: two actors both making their first\n  http-request concurrently could both observe curl_inited == 0 and\n  both call curl_global_init at the same time.\n- modules/graphql/graphql.c's fn_graphql_client and\n  modules/storage/storage.c's fn_swift_client/fn_azure_client had NO\n  guard at all -- curl_global_init was called unconditionally on every\n  single client construction, so two actors constructing their first\n  client (any combination of GraphQL/Swift/Azure) concurrently raced\n  on it directly, every time, not just on a rare first-call window.\n\nFixed with a pthread_once_t per module (one shared between\nfn_swift_client/fn_azure_client in storage.c, since both call into the\nsame underlying libcurl global state): pthread_once guarantees the\nwrapped call runs exactly once, thread-safely, regardless of how many\nthreads race to call it at the same time -- replacing http.c's racy\nhand-rolled check and adding real synchronization where graphql.c/\nstorage.c had none.\n\nConsidered and rejected moving curl_global_init into each module's\ncurry_module_init instead (the issue's other suggested option): that\nwould only move the race to concurrent first-import rather than close\nit, since curry_module_init is not actually guaranteed single-threaded\nin the presence of concurrent first-imports (a separate, already-fixed\nconcern, #149) -- and would still need its own synchronization to\nactually be race-free, at which point it's no simpler than fixing the\ncall sites directly. Also considered a single process-wide guard\nshared across all three modules (closing a narrower residual risk:\nliterally simultaneous first-use across TWO DIFFERENT modules, e.g. an\nhttp-request and a graphql-client construction landing in the exact\nsame instant on two threads) but rejected it: http/graphql/storage are\nthree separate, independently-optional .so module targets, and the\nonly place genuinely shared across all of them at the process level is\nthe core executable -- which does not currently link libcurl at all\n(only these three optional modules do), so exporting a shared guard\nfrom there would add libcurl as a new mandatory core dependency,\nreal unwanted scope creep for this fix. Each module's own guard closes\nthe actually-described race (concurrent first-use within one module,\nthe issue's own repro scenario); the narrower cross-module residual is\na much smaller, lower-probability risk than what existed before this\nfix (unconditional, always-racing calls in graphql.c/storage.c).\n\nAdded a regression test (tests/curl_global_init_race_tests.scm,\nregistered under the same BUILD_MODULE_HTTP/GRAPHQL/STORAGE guard s3's\nown test already uses): concurrent graphql-client/swift-client/\nazure-client construction across 8 actors (no network access needed,\nsince the race is in the constructor itself) plus concurrent\nhttp-request calls across 8 actors (skips cleanly if there's no\nnetwork access, matching network_tests.scm's own established\nconvention for network-dependent tests).\n\n118/118 ctest suites pass (fresh --clear-cache run, new suite\nincluded).\n\n\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-04T20:38:21+10:00",
+          "tree_id": "4b961bf8ab24dd2bae0969eb101384435ec829be",
+          "url": "https://github.com/deconstructo/curry/commit/f1d7f8f5efe0af6be6e2d23a65da0105a09da5ee"
+        },
+        "date": 1788518339442,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.465,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.353,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.223,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.605,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 153.049,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 294.394,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.557,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 94.461,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 74.321,
             "unit": "ms"
           }
         ]
