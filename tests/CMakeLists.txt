@@ -215,6 +215,14 @@ if(BUILD_MODULE_NEO4J AND TARGET curry_neo4j)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# No dedicated suite existed for (curry image) before issue #167's fix
+# (forged image vector causes an OOB heap read/write).
+if(BUILD_MODULE_IMAGE AND TARGET curry_image)
+    add_test(NAME image COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/image_tests.scm)
+    set_tests_properties(image PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(TARGET curry_plplot)
     add_test(NAME plplot COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/test_plplot.scm)
     set_tests_properties(plplot PROPERTIES
