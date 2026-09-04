@@ -90,10 +90,30 @@ static curry_val fn_make(int ac, curry_val *av, void *ud) {
     return db_to_val(db);
 }
 
+/* Issue #179: neither fn_add nor fn_search checked that the vector
+ * argument was actually a vector at all before curry_vector_length/_ref
+ * (an unchecked as_vec() cast, same class as #167's forged-image-vector
+ * bug), nor that each ELEMENT was actually numeric before curry_float --
+ * which is itself unchecked for anything but a fixnum/flonum (vfloat(v)
+ * is a raw as_flo(v)->value cast), so e.g. a vector containing a string
+ * or symbol would still wild-cast even after only checking the outer
+ * vector. Confirmed reproducible SIGSEGV via
+ * (vecdb-add db 1 42) and (vecdb-add db 1 (vector "x")). */
+static void check_numeric_vector(curry_val v, const char *who) {
+    if (!curry_is_vector(v)) curry_error("%s: not a vector", who);
+    uint32_t n = curry_vector_length(v);
+    for (uint32_t i = 0; i < n; i++) {
+        curry_val e = curry_vector_ref(v, i);
+        if (!curry_is_fixnum(e) && !curry_is_float(e))
+            curry_error("%s: vector element %u is not a real number", who, i);
+    }
+}
+
 static curry_val fn_add(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     VecDB *db = val_to_db(av[0]);
     long id   = (long)curry_fixnum(av[1]);
+    check_numeric_vector(av[2], "vecdb-add");
     uint32_t n = curry_vector_length(av[2]);
     if ((int)n != db->dims)
         curry_error("vecdb-add: vector has %u dimensions, expected %d", n, db->dims);
@@ -106,6 +126,7 @@ static curry_val fn_add(int ac, curry_val *av, void *ud) {
 static curry_val fn_search(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     VecDB *db  = val_to_db(av[0]);
+    check_numeric_vector(av[1], "vecdb-search");
     uint32_t n = curry_vector_length(av[1]);
     if ((int)n != db->dims)
         curry_error("vecdb-search: query vector has %u dimensions, expected %d", n, db->dims);

@@ -196,6 +196,45 @@
             (lambda (v) (> v ht-12))
             ht-after-font-change)
 
+;;; ── Phase 3: issue #169 regression (unchecked bytevector data-argument
+;;; casts in make-gl-texture/gl-texture-update!/gfx-draw-image!) ─────────────
+;;;
+;;; None of these checked their bytevector data argument at all before
+;;; curry_bytevector_length/_ref's unchecked as_bytes() cast -- same class
+;;; as #158/#161/#166/#167. gfx-draw-image! additionally computed its read
+;;; loop bound from separate caller-supplied width/height arguments with no
+;;; check against the bytevector's real backing length.
+
+(define (raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+
+(check "make-gl-texture rejects a non-bytevector argument (was a reproducible SIGSEGV)"
+       (raises? (lambda () (make-gl-texture 42 8 8))) #t)
+(check "make-gl-texture still works with a real bytevector"
+       (raises? (lambda () (make-gl-texture (make-bytevector 64 0) 8 8))) #f)
+
+(check "gl-texture-update! rejects a non-bytevector argument (was a reproducible SIGSEGV)"
+       (raises? (lambda ()
+                  (gl-texture-update! (make-gl-texture (make-bytevector 64 0) 8 8) 42)))
+       #t)
+
+(call-with-painter 100 100
+  (lambda (painter)
+    (check "gfx-draw-image! rejects a non-bytevector argument (was a reproducible SIGSEGV)"
+           (raises? (lambda () (gfx-draw-image! painter 0 0 10 10 42 4 4))) #t)
+    (check "gfx-draw-image! rejects a too-short bytevector (was a reproducible SIGSEGV / OOB read)"
+           (raises? (lambda ()
+                      (gfx-draw-image! painter 0 0 10 10 (make-bytevector 4 0) 4 4)))
+           #t)
+    (check "gfx-draw-image! rejects non-positive dimensions"
+           (raises? (lambda ()
+                      (gfx-draw-image! painter 0 0 10 10 (make-bytevector 64 0) -1 4)))
+           #t)
+    (check "gfx-draw-image! still works with a correctly-sized bytevector"
+           (raises? (lambda ()
+                      (gfx-draw-image! painter 0 0 10 10 (make-bytevector 64 128) 4 4)))
+           #f)))
+
 ;;; ── Summary ──────────────────────────────────────────────────────────────────
 
 (newline)

@@ -1568,6 +1568,11 @@ static curry_val fn_gl_shader_draw(int argc, curry_val *av, void *) {
  * (make-gl-texture bv w h 'rgba)    ; RGBA8 four-channel
  * (make-gl-texture bv w h 'rgba32f) ; RGBA 32-bit float (raw float bytes) */
 static curry_val fn_make_gl_texture(int argc, curry_val *av, void *) {
+    /* Issue #169: no curry_is_bytevector check on av[0] before
+     * curry_bytevector_length/_ref's unchecked as_bytes() cast -- same
+     * wild-pointer hazard #158/#161/#166 closed elsewhere. Confirmed
+     * reproducible SIGSEGV via (make-gl-texture 42 8 8). */
+    if (!curry_is_bytevector(av[0])) curry_error("make-gl-texture: not a bytevector");
     uint32_t n = curry_bytevector_length(av[0]);
     int w = (int)curry_fixnum(av[1]);
     int h = (int)curry_fixnum(av[2]);
@@ -1594,6 +1599,9 @@ static curry_val fn_make_gl_texture(int argc, curry_val *av, void *) {
 static curry_val fn_gl_texture_update(int argc, curry_val *av, void *) {
     (void)argc;
     GlTexture *tex = (GlTexture *)val_to_ptr("gl-texture", av[0]);
+    /* Issue #169: same gap as fn_make_gl_texture, on av[1]. Confirmed
+     * reproducible SIGSEGV via (gl-texture-update! tex 42). */
+    if (!curry_is_bytevector(av[1])) curry_error("gl-texture-update!: not a bytevector");
     uint32_t n = curry_bytevector_length(av[1]);
     tex->data.resize(n);
     for (uint32_t i = 0; i < n; i++)
@@ -2186,8 +2194,20 @@ static curry_val fn_gfx_draw_image(int ac, curry_val *av, void *ud) {
     double    dw = curry_float(av[3]), dh = curry_float(av[4]);
     curry_val bv = av[5];
     int       iw = (int)curry_float(av[6]), ih = (int)curry_float(av[7]);
-    QImage img(iw, ih, QImage::Format_RGBA8888);
+    /* Issue #169: bv was never checked with curry_is_bytevector before
+     * curry_bytevector_ref's unchecked as_bytes() cast, and even for a
+     * genuine bytevector, `total` was computed from separate
+     * caller-supplied iw/ih with no check that it doesn't exceed the
+     * bytevector's real backing length -- a too-short (or negative-
+     * dimensioned) argument still read/wrote out of bounds. Confirmed
+     * reproducible SIGSEGV via (gfx-draw-image! painter 0 0 10 10 42 4 4)
+     * and via a genuine but too-short bytevector. */
+    if (iw <= 0 || ih <= 0) curry_error("gfx-draw-image!: image dimensions must be positive");
     int total = iw * ih * 4;
+    if (!curry_is_bytevector(bv)) curry_error("gfx-draw-image!: not a bytevector");
+    if (curry_bytevector_length(bv) < (uint32_t)total)
+        curry_error("gfx-draw-image!: bytevector too short for %dx%d RGBA image", iw, ih);
+    QImage img(iw, ih, QImage::Format_RGBA8888);
     for (int i = 0; i < total; i++)
         img.bits()[i] = curry_bytevector_ref(bv, (uint32_t)i);
     p->drawImage(QRectF(dx,dy,dw,dh), img);

@@ -388,6 +388,14 @@ if(BUILD_MODULE_TYPEDVEC AND TARGET curry_typedvec AND BUILD_MODULE_F64VECTOR AN
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# No dedicated suite existed for (curry vecdb) before issue #179's fix
+# (unchecked vector/element casts on vecdb-add/vecdb-search's data args).
+if(BUILD_MODULE_VECDB AND TARGET curry_vecdb)
+    add_test(NAME vecdb COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/vecdb_tests.scm)
+    set_tests_properties(vecdb PROPERTIES
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(BUILD_MODULE_QT6 AND TARGET curry_qt6)
     # Phase 1 (widget creation) runs immediately; Phase 2 (painter / text
     # metrics) triggers an offscreen render via canvas-save-png!.
