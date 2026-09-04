@@ -18,7 +18,6 @@
              (display "  expected ") (write expected) (newline)
              (set! fail (+ fail 1)))))
 
-(define test-port 17995)
 (define ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
 ;;; ---- minimal from-scratch server-side WS handshake + text framing ----
@@ -91,7 +90,11 @@
 
 ;;; ---- the mock rosbridge server: a fixed scripted exchange ----
 
-(define listener (tcp-listen test-port))
+;; Issue #110: a hardcoded port collides under CI parallel load. 0 asks
+;; the OS for an arbitrary free ephemeral port; socket-local-port reads
+;; back which one it actually picked.
+(define listener (tcp-listen 0))
+(define test-port (socket-local-port listener))
 (define seen (make-hash-table)) ; label -> decoded JSON message, for later checks
 (define server-done (make-semaphore 0))
 
@@ -188,8 +191,8 @@
 ;;; ---- regression: a dropped connection must wake a no-timeout
 ;;; ros-call-service instead of hanging it forever ----
 
-(define close-test-port 17990)
-(define close-test-listener (tcp-listen close-test-port))
+(define close-test-listener (tcp-listen 0))
+(define close-test-port (socket-local-port close-test-listener))
 
 ;; Accepts the WS handshake, then closes immediately without ever
 ;; answering the call_service the client is about to send.

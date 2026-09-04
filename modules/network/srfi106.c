@@ -179,6 +179,37 @@ static curry_val fn_socket_accept(int ac, curry_val *av, void *ud) {
     return net_sock_to_val(client);
 }
 
+/* (socket-local-port socket) -> fixnum
+ *
+ * The actual port a socket is bound to, read back via getsockname --
+ * needed for a server socket created with a "0" service/port (the
+ * standard way to ask the OS for an arbitrary free ephemeral port
+ * instead of a hardcoded one): the caller doesn't learn what port that
+ * actually is until after bind() has already happened, since the OS
+ * picks it. Not part of SRFI 106 itself (that spec offers no way to
+ * query a bound socket's local address at all), but registered under
+ * the same "socket-*" naming convention as the rest of this file's
+ * primitives -- see docs/reference for how (curry websocket)'s ws-listen
+ * and the ros_tests.scm/websocket_tests.scm/websocket_server_tests.scm
+ * suites use this to bind an ephemeral port instead of a fixed one,
+ * closing out issue #110's CI port-contention flakiness at the root
+ * rather than only papering over it with a ctest-level timeout. */
+static curry_val fn_socket_local_port(int ac, curry_val *av, void *ud) {
+    (void)ud; (void)ac;
+    int fd = net_extract_fd(av[0], "socket-local-port");
+    struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+    if (getsockname(fd, (struct sockaddr *)&addr, &addrlen) != 0)
+        curry_error("socket-local-port: getsockname failed: %s", strerror(errno));
+    uint16_t port;
+    if (addr.ss_family == AF_INET6)
+        port = ntohs(((struct sockaddr_in6 *)&addr)->sin6_port);
+    else if (addr.ss_family == AF_INET)
+        port = ntohs(((struct sockaddr_in *)&addr)->sin_port);
+    else
+        curry_error("socket-local-port: not an AF_INET/AF_INET6 socket");
+    return curry_make_fixnum(port);
+}
+
 static curry_val fn_socket_send(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd = net_extract_fd(av[0], "socket-send");
@@ -304,6 +335,7 @@ void curry_srfi106_module_init(CurryVM *vm) {
     curry_define_fn(vm, "make-server-socket", fn_make_server_socket, 1, 4, NULL);
     curry_define_fn(vm, "socket?",             fn_socket_p,          1, 1, NULL);
     curry_define_fn(vm, "socket-accept",       fn_socket_accept,     1, 1, NULL);
+    curry_define_fn(vm, "socket-local-port",   fn_socket_local_port, 1, 1, NULL);
     curry_define_fn(vm, "socket-send",         fn_socket_send,       2, 3, NULL);
     curry_define_fn(vm, "socket-recv",         fn_socket_recv,       2, 3, NULL);
     curry_define_fn(vm, "socket-shutdown",     fn_socket_shutdown,   2, 2, NULL);

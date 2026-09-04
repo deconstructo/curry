@@ -45,6 +45,22 @@ stream, so not a port) — close it with `tcp-close`. Each accepted
 connection from `tcp-accept` is a port pair like `tcp-connect`'s, closed
 with `close-port` on each end.
 
+```scheme
+(socket-local-port sock)   ; the actual port a socket is bound to
+```
+
+Pass `0` as `tcp-listen`'s (or SRFI-106 `make-server-socket`'s) `port` to
+ask the OS for an arbitrary free ephemeral port instead of a hardcoded
+one — the standard way to avoid port-collision flakiness when a test or
+short-lived server doesn't care which specific port it gets, just that it
+gets *a* free one. Since the OS picks the port, you don't know which one
+until after `bind()` has already happened; `socket-local-port` reads it
+back via `getsockname`. Works on any socket handle from `tcp-listen`,
+`udp-socket`, or SRFI-106's `make-client-socket`/`make-server-socket`/
+`socket-accept` (they all share the same underlying representation).
+`(curry websocket)`'s `ws-listener-port` is the equivalent for a
+`ws-listen` listener.
+
 ### TLS client
 
 ```scheme

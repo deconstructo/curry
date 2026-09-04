@@ -61,7 +61,11 @@ Returned verbatim from the request line — a query string, if the client sent o
 
 ### `(ws-listen port)` → listener
 
-Binds and listens on `port`. Doesn't block, doesn't accept anything yet — mirrors `(curry network)`'s own `tcp-listen`.
+Binds and listens on `port`. Doesn't block, doesn't accept anything yet — mirrors `(curry network)`'s own `tcp-listen`. Pass `0` to ask the OS for an arbitrary free ephemeral port instead of a hardcoded one; use `ws-listener-port` to find out which one it picked.
+
+### `(ws-listener-port listener)` → fixnum
+
+The actual port `listener` is bound to — needed after `(ws-listen 0)`, since you don't know which ephemeral port the OS assigned until after the underlying `bind()` has already happened. Equivalent to `(curry network)`'s `socket-local-port` applied to the listener's own socket.
 
 ### `(ws-accept listener)` → ws
 

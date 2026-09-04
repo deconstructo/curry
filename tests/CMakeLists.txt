@@ -120,17 +120,27 @@ add_test(NAME case_lambda COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME websocket COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/websocket_tests.scm)
 add_test(NAME websocket_server COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/websocket_server_tests.scm)
 add_test(NAME ros COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ros_tests.scm)
-# Observed in CI (macos-latest, Release, under ctest -j full-suite
-# contention, twice in a row on 2026-08-31): the "websocket" test hung
-# completely silent for 28+ minutes until the whole job was cancelled --
-# no output, no failure, nothing -- while "ros" (the same run) failed fast
-# and cleanly with "tcp-listen: bind failed on port 17995", pointing at
-# port contention between these fixed-port networking tests under
-# parallel CI load as the likely root cause, not yet fixed. Same
-# treatment as the "actors" test's own documented rare-hang TIMEOUT just
-# above: turn a future recurrence into a fast, diagnosable CTest TIMEOUT
-# instead of a silent 28+ minute CI hang. See issue for the underlying
-# investigation this doesn't attempt to fix.
+# Issue #110: observed in CI (macos-latest, Release, under ctest -j
+# full-suite contention, twice in a row on 2026-08-31) -- the "websocket"
+# test hung completely silent for 28+ minutes until the whole job was
+# cancelled, while "ros" (the same run) failed fast and cleanly with
+# "tcp-listen: bind failed on port 17995". Root cause: these three tests
+# each bound fixed, hardcoded port numbers, inherently vulnerable to
+# collision under parallel CI load against another process (a lingering
+# listener from a previous run, a system service, another test) already
+# bound to the same port. Fixed at the root (not just papered over): all
+# three now bind port 0 (an OS-assigned ephemeral port) and read back the
+# actual port via socket-local-port/ws-listener-port
+# (modules/network/srfi106.c, lib/curry/modules/curry/websocket.scm) --
+# verified by holding all six of the OLD hardcoded ports busy from an
+# external process and confirming all three suites still pass cleanly,
+# since none of them depend on any fixed port anymore.
+#
+# The TIMEOUT below is kept anyway as defense-in-depth, matching the
+# "actors" test's own identical treatment just above for its unrelated
+# rare hang: even with the port-contention root cause closed, an
+# open-ended hang from some OTHER cause is still better caught as a fast,
+# diagnosable CTest TIMEOUT than a silent 28+ minute CI stall.
 set_tests_properties(websocket websocket_server ros PROPERTIES TIMEOUT 60)
 add_test(NAME srfi_95_78_212 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_95_78_212_tests.scm)
 add_test(NAME srfi_141 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_141_tests.scm)

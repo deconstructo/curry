@@ -25,7 +25,6 @@
              (display "  expected ") (write expected) (newline)
              (set! fail (+ fail 1)))))
 
-(define test-port 17988)
 (define ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
 ;;; ---- minimal from-scratch client-side handshake + framing ----
@@ -106,7 +105,11 @@
 
 ;;; ---- the real server under test: ws-listen / ws-accept ----
 
-(define listener (ws-listen test-port))
+;; Issue #110: a hardcoded port collides under CI parallel load. 0 asks
+;; the OS for an arbitrary free ephemeral port; ws-listener-port reads
+;; back which one it actually picked.
+(define listener (ws-listen 0))
+(define test-port (ws-listener-port listener))
 
 (define server-thread
   (spawn (lambda ()
@@ -180,7 +183,8 @@
 ;; into unbounded memory growth or a hang -- a client that sends a huge
 ;; unterminated "line" (or, separately, unboundedly many header lines)
 ;; must get a clean, bounded-cost rejection instead.
-(define cap-listener (ws-listen 17987))
+(define cap-listener (ws-listen 0))
+(define cap-port (ws-listener-port cap-listener))
 (define cap-done (make-semaphore 0))
 (define cap-result #f)
 
@@ -191,7 +195,7 @@
                (set! cap-result (list 'no-error conn))))
            (sem-post! cap-done))))
 
-(let* ((sock (make-client-socket "127.0.0.1" 17987))
+(let* ((sock (make-client-socket "127.0.0.1" cap-port))
        (out (socket-output-port sock)))
   ;; 20,000 bytes, no newline at all -- well past the per-line cap,
   ;; with the connection kept open so a missing cap would hang forever
@@ -207,7 +211,8 @@
 ;; 2. RFC 6455 5.1: a server MUST reject an unmasked frame from a
 ;; client (masking is a security requirement, not wire-format
 ;; decoration -- see the module's own comment on %ws-protocol-error!).
-(define mask-listener (ws-listen 17986))
+(define mask-listener (ws-listen 0))
+(define mask-port (ws-listener-port mask-listener))
 (define mask-done (make-semaphore 0))
 (define mask-result #f)
 
@@ -218,7 +223,7 @@
                (set! mask-result (list 'no-error (ws-recv! conn)))))
            (sem-post! mask-done))))
 
-(let* ((sock (make-client-socket "127.0.0.1" 17986))
+(let* ((sock (make-client-socket "127.0.0.1" mask-port))
        (in (socket-input-port sock))
        (out (socket-output-port sock))
        (key "dGhlIHNhbXBsZSBub25jZQ=="))
