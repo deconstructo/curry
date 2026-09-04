@@ -84,4 +84,25 @@ static inline int net_extract_fd(curry_val v, const char *who) {
     return fd;
 }
 
+/* Issue #158 follow-up (found by independent code review of the fix
+ * above): net_val_to_sock itself is still unconditionally called
+ * directly -- bypassing net_is_raw_socket_handle's validation entirely
+ * -- by every network.c primitive that only ever accepts a raw handle,
+ * never a port (tcp-accept, tcp-close, udp-bind, udp-send, udp-recv):
+ * they call the raw #define val_to_sock (== net_val_to_sock) on av[0]
+ * with no check at all, reachable directly from Scheme since these are
+ * ordinary user-callable builtins. Reproduced as an actual SIGSEGV, not
+ * just a benign clean error, for a malformed handle like
+ * (cons 'socket 42) passed to tcp-close/udp-bind. Those primitives
+ * can't use net_extract_fd (which also silently accepts a port, wrong
+ * for functions that make no sense on anything but a raw handle -- see
+ * srfi106.c's fn_socket_close, which already gets this right with its
+ * own inline net_is_raw_socket_handle check for the identical reason).
+ * This is that same check, factored out so five call sites don't each
+ * duplicate it. */
+static inline sock_t net_checked_val_to_sock(curry_val v, const char *who) {
+    if (!net_is_raw_socket_handle(v)) curry_error("%s: not a socket handle", who);
+    return net_val_to_sock(v);
+}
+
 #endif /* CURRY_NETWORK_INTERNAL_H */

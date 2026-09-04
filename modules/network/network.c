@@ -131,7 +131,7 @@ static curry_val fn_tcp_listen(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_t server = val_to_sock(av[0]);
+    sock_t server = net_checked_val_to_sock(av[0], "tcp-accept");
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
     sock_t client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
     if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
@@ -156,7 +156,7 @@ static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_tcp_close(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_close(val_to_sock(av[0]));
+    sock_close(net_checked_val_to_sock(av[0], "tcp-close"));
     return curry_void();
 }
 
@@ -174,7 +174,7 @@ static curry_val fn_udp_socket(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_udp_bind(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_t fd = val_to_sock(av[0]);
+    sock_t fd = net_checked_val_to_sock(av[0], "udp-bind");
     int port = (int)curry_fixnum(av[1]);
     struct sockaddr_in6 addr = {0};
     addr.sin6_family = AF_INET6;
@@ -187,7 +187,7 @@ static curry_val fn_udp_bind(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_t fd = val_to_sock(av[0]);
+    sock_t fd = net_checked_val_to_sock(av[0], "udp-send");
     uint32_t dlen = curry_bytevector_length(av[1]);
     uint8_t *data = malloc(dlen > 0 ? dlen : 1);
     if (!data) curry_error("udp-send: out of memory");
@@ -211,7 +211,7 @@ static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_t fd = val_to_sock(av[0]);
+    sock_t fd = net_checked_val_to_sock(av[0], "udp-recv");
     int maxbytes = (int)curry_fixnum(av[1]);
     if (maxbytes <= 0) curry_error("udp-recv: maxbytes must be positive");
     uint8_t *buf = malloc((size_t)maxbytes);
