@@ -245,6 +245,40 @@ static void *val_to_ptr(const char *tag, curry_val v) {
     return ptr;
 }
 
+/* Issue #187: curry_define_fn (src/api.c) only declares a handler's
+ * min/max ARITY -- there is no argument type signature, and nothing
+ * upstream of a handler validates that av[N] is actually the type the
+ * handler assumes before calling curry_string/curry_float/curry_symbol/
+ * curry_fixnum directly on it. All four are unchecked casts (see their
+ * src/api.c implementations: curry_string is str_data(as_str(v)),
+ * curry_float falls to a raw as_flo(v)->value cast for non-fixnum
+ * values, curry_symbol is sym_cstr(v), curry_fixnum is vunfix(v)) --
+ * the same bug class as #158..#185, just via a function's own direct
+ * positional arguments rather than a vector/list it's handed. Confirmed
+ * reproducible SIGSEGV via (make-window #t 100 100) and
+ * (make-window 'not-a-string 100 100). These thin wrappers are drop-in
+ * replacements for the four unchecked accessors above, used at every
+ * direct av[N] use site in this file; argpos is 1-based (matching how a
+ * Scheme user counts a procedure's own arguments) for a clear error
+ * message. */
+static const char *checked_string(curry_val v, int argpos, const char *who) {
+    if (!curry_is_string(v)) curry_error("%s: argument %d must be a string", who, argpos);
+    return curry_string(v);
+}
+static double checked_float(curry_val v, int argpos, const char *who) {
+    if (!curry_is_fixnum(v) && !curry_is_float(v))
+        curry_error("%s: argument %d must be a number", who, argpos);
+    return curry_float(v);
+}
+static const char *checked_symbol(curry_val v, int argpos, const char *who) {
+    if (!curry_is_symbol(v)) curry_error("%s: argument %d must be a symbol", who, argpos);
+    return curry_symbol(v);
+}
+static intptr_t checked_fixnum(curry_val v, int argpos, const char *who) {
+    if (!curry_is_fixnum(v)) curry_error("%s: argument %d must be an exact integer", who, argpos);
+    return curry_fixnum(v);
+}
+
 /* =========================================================================
  * Structs
  * ========================================================================= */
@@ -574,9 +608,9 @@ static QPainter *val_to_painter(curry_val v) {
 static curry_val fn_make_window(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ensure_app();
-    const char *title = curry_string(av[0]);
-    int w = (int)curry_float(av[1]);
-    int h = (int)curry_float(av[2]);
+    const char *title = checked_string(av[0], 1, "make-window");
+    int w = (int)checked_float(av[1], 2, "make-window");
+    int h = (int)checked_float(av[2], 3, "make-window");
 
     auto *ws              = new WinState();
     ws->draw_proc         = curry_make_bool(false);
@@ -653,7 +687,7 @@ static curry_val fn_window_hide(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; val_to_win(av[0])->win->hide(); return curry_void(); }
 static curry_val fn_window_set_title(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_win(av[0])->win->setWindowTitle(QString::fromUtf8(curry_string(av[1])));
+    val_to_win(av[0])->win->setWindowTitle(QString::fromUtf8(checked_string(av[1], 2, "window-set-title!")));
     return curry_void();
 }
 
@@ -729,7 +763,7 @@ static curry_val fn_canvas_mouse_grabbed_p(int ac, curry_val *av, void *ud) {
 static curry_val fn_canvas_save_png(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     WinState   *ws   = val_to_canvas(av[0]);
-    const char *path = curry_string(av[1]);
+    const char *path = checked_string(av[1], 2, "canvas-save-png!");
 
     if (curry_is_bool(ws->draw_proc))
         return curry_make_bool(false);
@@ -850,14 +884,14 @@ static curry_val fn_make_tabs(int ac, curry_val *av, void *ud) {
 static curry_val fn_tabs_add(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     ((QTabWidget *)val_to_widget(av[0]))->addTab(val_to_widget(av[1]),
-                                                   QString::fromUtf8(curry_string(av[2])));
+                                                   QString::fromUtf8(checked_string(av[2], 3, "tabs-add!")));
     return curry_void();
 }
 
 /* Group box — titled frame containing a layout */
 static curry_val fn_make_group_box(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    auto *gb = new QGroupBox(QString::fromUtf8(curry_string(av[0])));
+    auto *gb = new QGroupBox(QString::fromUtf8(checked_string(av[0], 1, "make-group-box")));
     auto *l  = new QVBoxLayout(gb);
     l->setContentsMargins(8,8,8,8); l->setSpacing(6); l->setAlignment(Qt::AlignTop);
     gb->setProperty("_qt6_vl", QVariant((quintptr)(void*)l));
@@ -870,7 +904,7 @@ static curry_val fn_make_group_box(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_make_label(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    auto *lbl = new QLabel(QString::fromUtf8(curry_string(av[0])));
+    auto *lbl = new QLabel(QString::fromUtf8(checked_string(av[0], 1, "make-label")));
     lbl->setWordWrap(true);
     lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     return widget_to_val(lbl);
@@ -878,13 +912,13 @@ static curry_val fn_make_label(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_label_set_text(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QLabel *)val_to_widget(av[0]))->setText(QString::fromUtf8(curry_string(av[1])));
+    ((QLabel *)val_to_widget(av[0]))->setText(QString::fromUtf8(checked_string(av[1], 2, "label-set-text!")));
     return curry_void();
 }
 
 static curry_val fn_make_button(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    auto *btn  = new QPushButton(QString::fromUtf8(curry_string(av[0])));
+    auto *btn  = new QPushButton(QString::fromUtf8(checked_string(av[0], 1, "make-button")));
     curry_val *proc = keep_alive(av[1]);
     QObject::connect(btn, &QPushButton::clicked, [proc]() {
         SCHEME_CALL(curry_apply(*proc, 0, nullptr));
@@ -894,7 +928,7 @@ static curry_val fn_make_button(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_make_toggle(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    auto *cb   = new QCheckBox(QString::fromUtf8(curry_string(av[0])));
+    auto *cb   = new QCheckBox(QString::fromUtf8(checked_string(av[0], 1, "make-toggle")));
     cb->setChecked(curry_bool(av[1]));
     curry_val *proc = keep_alive(av[2]);
     QObject::connect(cb, &QCheckBox::toggled, [proc](bool on) {
@@ -908,11 +942,11 @@ static curry_val fn_make_toggle(int ac, curry_val *av, void *ud) {
  * callback is optional; slider value is also readable any time via slider-value */
 static curry_val fn_make_slider(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *label   = curry_string(av[0]);
-    double      lo      = curry_float(av[1]);
-    double      hi      = curry_float(av[2]);
-    double      step    = curry_float(av[3]);
-    double      initial = curry_float(av[4]);
+    const char *label   = checked_string(av[0], 1, "make-slider");
+    double      lo      = checked_float(av[1], 2, "make-slider");
+    double      hi      = checked_float(av[2], 3, "make-slider");
+    double      step    = checked_float(av[3], 4, "make-slider");
+    double      initial = checked_float(av[4], 5, "make-slider");
 
     int steps = (step > 0.0 && (hi - lo) / step < 1e6)
                 ? (int)std::round((hi - lo) / step) : 10000;
@@ -966,7 +1000,7 @@ static curry_val fn_slider_set_value(int ac, curry_val *av, void *ud) {
     QVariant v = val_to_widget(av[0])->property("_qt6_ss");
     if (!v.isValid()) curry_error("qt6: not a slider widget");
     auto *ss = (SliderState *)v.value<quintptr>();
-    double val = curry_float(av[1]);
+    double val = checked_float(av[1], 2, "slider-set-value!");
     int pos = (int)std::round((val - ss->lo) / (ss->hi - ss->lo) * ss->steps);
     ss->slider->setValue(std::max(0, std::min(ss->steps, pos)));
     return curry_void();
@@ -1000,7 +1034,7 @@ static curry_val fn_make_dropdown(int ac, curry_val *av, void *ud) {
     auto *combo = new QComboBox();
     for (curry_val p = av[0]; !curry_is_nil(p); p = curry_cdr(p))
         combo->addItem(QString::fromUtf8(curry_string(curry_car(p))));
-    int sel = (int)curry_float(av[1]);
+    int sel = (int)checked_float(av[1], 2, "make-dropdown");
     if (sel >= 0 && sel < combo->count()) combo->setCurrentIndex(sel);
     curry_val *proc = keep_alive(av[2]);
     QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -1017,7 +1051,7 @@ static curry_val fn_dropdown_index(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_dropdown_set_index(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QComboBox *)val_to_widget(av[0]))->setCurrentIndex((int)curry_float(av[1]));
+    ((QComboBox *)val_to_widget(av[0]))->setCurrentIndex((int)checked_float(av[1], 2, "dropdown-set-index!"));
     return curry_void();
 }
 /* Alias for GTK-module compatibility */
@@ -1026,7 +1060,7 @@ static curry_val fn_dropdown_selected(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_dropdown_add_item(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QComboBox *)val_to_widget(av[0]))->addItem(QString::fromUtf8(curry_string(av[1])));
+    ((QComboBox *)val_to_widget(av[0]))->addItem(QString::fromUtf8(checked_string(av[1], 2, "dropdown-add-item!")));
     return curry_void();
 }
 static curry_val fn_dropdown_clear(int ac, curry_val *av, void *ud) {
@@ -1047,7 +1081,7 @@ static curry_val fn_make_radio_group(int ac, curry_val *av, void *ud) {
     auto *vbox      = new QVBoxLayout(container);
     vbox->setContentsMargins(0,0,0,0); vbox->setSpacing(4);
     auto *group = new QButtonGroup(container);
-    int idx = 0, initial = (int)curry_float(av[1]);
+    int idx = 0, initial = (int)checked_float(av[1], 2, "make-radio-group");
     for (curry_val p = av[0]; !curry_is_nil(p); p = curry_cdr(p), idx++) {
         auto *rb = new QRadioButton(QString::fromUtf8(curry_string(curry_car(p))));
         group->addButton(rb, idx);
@@ -1074,9 +1108,9 @@ static curry_val fn_radio_index(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_spin_box(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *sb = new QDoubleSpinBox();
-    sb->setRange(curry_float(av[0]), curry_float(av[1]));
-    sb->setSingleStep(curry_float(av[2]));
-    sb->setValue(curry_float(av[3]));
+    sb->setRange(checked_float(av[0], 1, "make-spin-box"), checked_float(av[1], 2, "make-spin-box"));
+    sb->setSingleStep(checked_float(av[2], 3, "make-spin-box"));
+    sb->setValue(checked_float(av[3], 4, "make-spin-box"));
     curry_val *proc = keep_alive(av[4]);
     QObject::connect(sb, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                      [proc](double val) {
@@ -1092,7 +1126,7 @@ static curry_val fn_spin_value(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_spin_set_value(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QDoubleSpinBox *)val_to_widget(av[0]))->setValue(curry_float(av[1]));
+    ((QDoubleSpinBox *)val_to_widget(av[0]))->setValue(checked_float(av[1], 2, "spin-set-value!"));
     return curry_void();
 }
 
@@ -1100,7 +1134,7 @@ static curry_val fn_spin_set_value(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_text_input(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *le = new QLineEdit();
-    le->setPlaceholderText(QString::fromUtf8(curry_string(av[0])));
+    le->setPlaceholderText(QString::fromUtf8(checked_string(av[0], 1, "make-text-input")));
     curry_val *proc = keep_alive(av[1]);
     QObject::connect(le, &QLineEdit::textChanged, [proc](const QString &s) {
         QByteArray ba = s.toUtf8();
@@ -1117,7 +1151,7 @@ static curry_val fn_text_value(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_text_set_value(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QLineEdit *)val_to_widget(av[0]))->setText(QString::fromUtf8(curry_string(av[1])));
+    ((QLineEdit *)val_to_widget(av[0]))->setText(QString::fromUtf8(checked_string(av[1], 2, "text-set-value!")));
     return curry_void();
 }
 
@@ -1125,13 +1159,13 @@ static curry_val fn_text_set_value(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_progress(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *pb = new QProgressBar();
-    pb->setRange((int)curry_float(av[0]), (int)curry_float(av[1]));
-    pb->setValue((int)curry_float(av[2]));
+    pb->setRange((int)checked_float(av[0], 1, "make-progress-bar"), (int)checked_float(av[1], 2, "make-progress-bar"));
+    pb->setValue((int)checked_float(av[2], 3, "make-progress-bar"));
     return widget_to_val(pb);
 }
 static curry_val fn_progress_set(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    ((QProgressBar *)val_to_widget(av[0]))->setValue((int)curry_float(av[1]));
+    ((QProgressBar *)val_to_widget(av[0]))->setValue((int)checked_float(av[1], 2, "progress-set!"));
     return curry_void();
 }
 
@@ -1156,15 +1190,15 @@ static curry_val fn_window_menubar(int ac, curry_val *av, void *ud) {
 static curry_val fn_menubar_add_menu(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     return menu_to_val(
-        val_to_menubar(av[0])->addMenu(QString::fromUtf8(curry_string(av[1]))));
+        val_to_menubar(av[0])->addMenu(QString::fromUtf8(checked_string(av[1], 2, "menubar-add-menu!"))));
 }
 /* (menu-add-action! menu title proc [shortcut-string]) */
 static curry_val fn_menu_add_action(int ac, curry_val *av, void *ud) {
     (void)ud;
     QMenu  *menu = val_to_menu(av[0]);
-    auto   *act  = menu->addAction(QString::fromUtf8(curry_string(av[1])));
+    auto   *act  = menu->addAction(QString::fromUtf8(checked_string(av[1], 2, "menu-add-action!")));
     if (ac >= 4)
-        act->setShortcut(QKeySequence(QString::fromUtf8(curry_string(av[3]))));
+        act->setShortcut(QKeySequence(QString::fromUtf8(checked_string(av[3], 4, "menu-add-action!"))));
     curry_val *proc = keep_alive(av[2]);
     QObject::connect(act, &QAction::triggered, [proc]() {
         SCHEME_CALL(curry_apply(*proc, 0, nullptr));
@@ -1174,7 +1208,7 @@ static curry_val fn_menu_add_action(int ac, curry_val *av, void *ud) {
 static curry_val fn_menu_add_submenu(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     return menu_to_val(
-        val_to_menu(av[0])->addMenu(QString::fromUtf8(curry_string(av[1]))));
+        val_to_menu(av[0])->addMenu(QString::fromUtf8(checked_string(av[1], 2, "menu-add-menu!"))));
 }
 static curry_val fn_menu_add_separator(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; val_to_menu(av[0])->addSeparator(); return curry_void();
@@ -1189,7 +1223,7 @@ static curry_val fn_window_add_toolbar(int ac, curry_val *av, void *ud) {
     auto *tb = new QToolBar();
     Qt::ToolBarArea area = Qt::TopToolBarArea;
     if (ac >= 2) {
-        const char *side = curry_symbol(av[1]);
+        const char *side = checked_symbol(av[1], 2, "window-add-toolbar!");
         if      (strcmp(side, "bottom") == 0) area = Qt::BottomToolBarArea;
         else if (strcmp(side, "left")   == 0) area = Qt::LeftToolBarArea;
         else if (strcmp(side, "right")  == 0) area = Qt::RightToolBarArea;
@@ -1200,7 +1234,7 @@ static curry_val fn_window_add_toolbar(int ac, curry_val *av, void *ud) {
 static curry_val fn_toolbar_add_action(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     auto *tb  = (QToolBar *)val_to_ptr("qt6-toolbar", av[0]);
-    auto *act = tb->addAction(QString::fromUtf8(curry_string(av[1])));
+    auto *act = tb->addAction(QString::fromUtf8(checked_string(av[1], 2, "toolbar-add-action!")));
     curry_val *proc = keep_alive(av[2]);
     QObject::connect(act, &QAction::triggered, [proc]() {
         SCHEME_CALL(curry_apply(*proc, 0, nullptr));
@@ -1224,7 +1258,7 @@ static curry_val fn_window_status_bar(int ac, curry_val *av, void *ud) {
 static curry_val fn_statusbar_set_text(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     ((QStatusBar *)val_to_ptr("qt6-statusbar", av[0]))
-        ->showMessage(QString::fromUtf8(curry_string(av[1])));
+        ->showMessage(QString::fromUtf8(checked_string(av[1], 2, "statusbar-set-text!")));
     return curry_void();
 }
 
@@ -1234,7 +1268,7 @@ static curry_val fn_statusbar_set_text(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_widget_set_style(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_widget(av[0])->setStyleSheet(QString::fromUtf8(curry_string(av[1])));
+    val_to_widget(av[0])->setStyleSheet(QString::fromUtf8(checked_string(av[1], 2, "widget-set-style!")));
     return curry_void();
 }
 static curry_val fn_widget_set_enabled(int ac, curry_val *av, void *ud) {
@@ -1247,19 +1281,19 @@ static curry_val fn_widget_set_visible(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_widget_set_tooltip(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_widget(av[0])->setToolTip(QString::fromUtf8(curry_string(av[1])));
+    val_to_widget(av[0])->setToolTip(QString::fromUtf8(checked_string(av[1], 2, "widget-set-tooltip!")));
     return curry_void();
 }
 static curry_val fn_widget_set_min_size(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_widget(av[0])->setMinimumSize((int)curry_float(av[1]),
-                                          (int)curry_float(av[2]));
+    val_to_widget(av[0])->setMinimumSize((int)checked_float(av[1], 2, "widget-set-min-size!"),
+                                          (int)checked_float(av[2], 3, "widget-set-min-size!"));
     return curry_void();
 }
 static curry_val fn_widget_set_max_size(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_widget(av[0])->setMaximumSize((int)curry_float(av[1]),
-                                          (int)curry_float(av[2]));
+    val_to_widget(av[0])->setMaximumSize((int)checked_float(av[1], 2, "widget-set-max-size!"),
+                                          (int)checked_float(av[2], 3, "widget-set-max-size!"));
     return curry_void();
 }
 
@@ -1273,7 +1307,7 @@ static curry_val fn_widget_set_max_size(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_make_timer(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    int ms     = (int)curry_float(av[0]);
+    int ms     = (int)checked_float(av[0], 1, "make-timer");
     curry_val *proc = keep_alive(av[1]);
     auto *t    = new QTimer();
     t->setInterval(ms);
@@ -1293,7 +1327,7 @@ static curry_val fn_timer_stop(int ac, curry_val *av, void *ud) {
 }
 static curry_val fn_timer_set_interval(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    val_to_timer(av[0])->setInterval((int)curry_float(av[1]));
+    val_to_timer(av[0])->setInterval((int)checked_float(av[1], 2, "timer-set-interval!"));
     return curry_void();
 }
 
@@ -1308,7 +1342,7 @@ struct TimerDt {
 
 static curry_val fn_make_timer_dt(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    int ms = (int)curry_float(av[0]);
+    int ms = (int)checked_float(av[0], 1, "make-timer/dt");
     curry_val *proc = keep_alive(av[1]);
     auto *td = new TimerDt{};
     td->timer = new QTimer();
@@ -1343,7 +1377,7 @@ static curry_val fn_clipboard_text(int ac, curry_val *av, void *ud) {
 static curry_val fn_clipboard_set_text(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     if (!s_app) return curry_void();
-    s_app->clipboard()->setText(QString::fromUtf8(curry_string(av[0])));
+    s_app->clipboard()->setText(QString::fromUtf8(checked_string(av[0], 1, "clipboard-set-text!")));
     return curry_void();
 }
 
@@ -1487,8 +1521,8 @@ static void set_uniform(QOpenGLShaderProgram *prog, const char *name, curry_val 
 }
 
 static curry_val fn_make_gl_shader(int argc, curry_val *av, void *) {
-    const char *vs = (argc == 1) ? k_default_vert : curry_string(av[0]);
-    const char *fs = (argc == 1) ? curry_string(av[0]) : curry_string(av[1]);
+    const char *vs = (argc == 1) ? k_default_vert : checked_string(av[0], 1, "make-gl-shader");
+    const char *fs = (argc == 1) ? checked_string(av[0], 1, "make-gl-shader") : checked_string(av[1], 2, "make-gl-shader");
     GlShader *sh = new GlShader{};
     sh->vert_src = strdup(vs);
     sh->frag_src = strdup(fs);
@@ -1623,9 +1657,9 @@ static curry_val fn_make_gl_texture(int argc, curry_val *av, void *) {
      * reproducible SIGSEGV via (make-gl-texture 42 8 8). */
     if (!curry_is_bytevector(av[0])) curry_error("make-gl-texture: not a bytevector");
     uint32_t n = curry_bytevector_length(av[0]);
-    int w = (int)curry_fixnum(av[1]);
-    int h = (int)curry_fixnum(av[2]);
-    const char *sym = (argc > 3 && curry_is_symbol(av[3])) ? curry_symbol(av[3]) : "";
+    int w = (int)checked_fixnum(av[1], 2, "make-gl-texture");
+    int h = (int)checked_fixnum(av[2], 3, "make-gl-texture");
+    const char *sym = (argc > 3 && curry_is_symbol(av[3])) ? checked_symbol(av[3], 4, "make-gl-texture") : "";
     bool rgba    = !strcmp(sym, "rgba");
     bool rgba32f = !strcmp(sym, "rgba32f");
     GlTexture *tex = new GlTexture{};
@@ -1754,7 +1788,7 @@ static void glbuf_sync(QOpenGLFunctions *gl, GlBuffer *buf) {
 static curry_val fn_gl_shader_draw_arrays(int argc, curry_val *av, void *) {
     GlShader  *sh      = (GlShader *)val_to_ptr("gl-shader", av[0]);
     QPainter  *painter = val_to_painter(av[1]);
-    int        vcount  = (int)curry_fixnum(av[2]);
+    int        vcount  = (int)checked_fixnum(av[2], 3, "gl-shader-draw-arrays!");
     curry_val  prim_s  = av[3];
     curry_val  uniforms = (argc > 4) ? av[4] : V_NIL;
     curry_val  attribs  = (argc > 5) ? av[5] : V_NIL;
@@ -1936,8 +1970,8 @@ static curry_val fn_make_gl_framebuffer(int ac, curry_val *av, void *) {
     (void)ac;
     auto *fb   = new GlFramebuffer{};
     fb->fbo_id = 0; fb->rbo_id = 0;
-    fb->w      = (int)curry_fixnum(av[0]);
-    fb->h      = (int)curry_fixnum(av[1]);
+    fb->w      = (int)checked_fixnum(av[0], 1, "make-gl-framebuffer");
+    fb->h      = (int)checked_fixnum(av[1], 2, "make-gl-framebuffer");
     fb->color  = new GlTexture{};
     fb->color->ifmt = GL_RGBA8; fb->color->fmt = GL_RGBA;
     fb->color->typ  = GL_UNSIGNED_BYTE;
@@ -1954,8 +1988,8 @@ static curry_val fn_gl_framebuffer_texture(int ac, curry_val *av, void *) {
 static curry_val fn_gl_framebuffer_resize(int ac, curry_val *av, void *) {
     (void)ac;
     GlFramebuffer *fb = val_to_glfbo(av[0]);
-    fb->w = (int)curry_fixnum(av[1]);
-    fb->h = (int)curry_fixnum(av[2]);
+    fb->w = (int)checked_fixnum(av[1], 2, "gl-framebuffer-resize!");
+    fb->h = (int)checked_fixnum(av[2], 3, "gl-framebuffer-resize!");
     fb->color->w = (GLsizei)fb->w;
     fb->color->h = (GLsizei)fb->h;
     /* Mark for reinit on next draw (fbo_id != 0 means reinit rather than fresh init) */
@@ -2060,10 +2094,10 @@ static curry_val fn_gl_shader_to(int argc, curry_val *av, void *) {
 static curry_val fn_gfx_clear(int ac, curry_val *av, void *ud) {
     (void)ud;
     QPainter *p = P;
-    QColor c = (ac >= 5) ? QColor::fromRgbF(curry_float(av[1]),curry_float(av[2]),
-                                              curry_float(av[3]),curry_float(av[4]))
-             : (ac >= 4) ? QColor::fromRgbF(curry_float(av[1]),curry_float(av[2]),
-                                              curry_float(av[3]))
+    QColor c = (ac >= 5) ? QColor::fromRgbF(checked_float(av[1], 2, "gfx-clear!"),checked_float(av[2], 3, "gfx-clear!"),
+                                              checked_float(av[3], 4, "gfx-clear!"),checked_float(av[4], 5, "gfx-clear!"))
+             : (ac >= 4) ? QColor::fromRgbF(checked_float(av[1], 2, "gfx-clear!"),checked_float(av[2], 3, "gfx-clear!"),
+                                              checked_float(av[3], 4, "gfx-clear!"))
              : Qt::black;
     p->fillRect(0, 0, p->device()->width(), p->device()->height(), c);
     return curry_void();
@@ -2072,8 +2106,8 @@ static curry_val fn_gfx_clear(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_set_color(int ac, curry_val *av, void *ud) {
     (void)ud;
     QPainter *p = P;
-    double r = curry_float(av[1]), g = curry_float(av[2]), b = curry_float(av[3]);
-    double a = (ac > 4) ? curry_float(av[4]) : 1.0;
+    double r = checked_float(av[1], 2, "gfx-set-color!"), g = checked_float(av[2], 3, "gfx-set-color!"), b = checked_float(av[3], 4, "gfx-set-color!");
+    double a = (ac > 4) ? checked_float(av[4], 5, "gfx-set-color!") : 1.0;
     QColor c = QColor::fromRgbF(r, g, b, a);
     p->setPen(QPen(c, p->pen().widthF()));
     p->setBrush(QBrush(c));
@@ -2083,10 +2117,10 @@ static curry_val fn_gfx_set_color(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_set_pen_color(int ac, curry_val *av, void *ud) {
     (void)ud;
     QPainter *p = P;
-    double a = (ac > 4) ? curry_float(av[4]) : 1.0;
+    double a = (ac > 4) ? checked_float(av[4], 5, "gfx-set-pen-color!") : 1.0;
     QPen pen = p->pen();
-    pen.setColor(QColor::fromRgbF(curry_float(av[1]),curry_float(av[2]),
-                                   curry_float(av[3]),a));
+    pen.setColor(QColor::fromRgbF(checked_float(av[1], 2, "gfx-set-pen-color!"),checked_float(av[2], 3, "gfx-set-pen-color!"),
+                                   checked_float(av[3], 4, "gfx-set-pen-color!"),a));
     p->setPen(pen);
     return curry_void();
 }
@@ -2094,7 +2128,7 @@ static curry_val fn_gfx_set_pen_color(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_set_pen_width(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; QPen pen = p->pen();
-    pen.setWidthF(curry_float(av[1])); p->setPen(pen);
+    pen.setWidthF(checked_float(av[1], 2, "gfx-set-pen-width!")); p->setPen(pen);
     return curry_void();
 }
 
@@ -2107,8 +2141,8 @@ static curry_val fn_gfx_set_antialias(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_set_font(int ac, curry_val *av, void *ud) {
     (void)ud;
     QPainter *p = P; QFont f = p->font();
-    if (ac > 1) f.setFamily(QString::fromUtf8(curry_string(av[1])));
-    if (ac > 2) f.setPointSizeF(curry_float(av[2]));
+    if (ac > 1) f.setFamily(QString::fromUtf8(checked_string(av[1], 2, "gfx-set-font!")));
+    if (ac > 2) f.setPointSizeF(checked_float(av[2], 3, "gfx-set-font!"));
     if (ac > 3) f.setBold(curry_bool(av[3]));
     if (ac > 4) f.setItalic(curry_bool(av[4]));
     p->setFont(f);
@@ -2118,7 +2152,7 @@ static curry_val fn_gfx_set_font(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_set_blend(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P;
-    const char *m = curry_symbol(av[1]);
+    const char *m = checked_symbol(av[1], 2, "gfx-set-blend!");
     QPainter::CompositionMode cm = QPainter::CompositionMode_SourceOver;
     if      (!strcmp(m,"add"))      cm = QPainter::CompositionMode_Plus;
     else if (!strcmp(m,"multiply")) cm = QPainter::CompositionMode_Multiply;
@@ -2134,67 +2168,67 @@ static curry_val fn_gfx_save(int ac, curry_val *av, void *ud)    { (void)ud;(voi
 static curry_val fn_gfx_restore(int ac, curry_val *av, void *ud) { (void)ud;(void)ac; P->restore(); return curry_void(); }
 
 static curry_val fn_gfx_translate(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; P->translate(curry_float(av[1]),curry_float(av[2])); return curry_void(); }
+    (void)ud;(void)ac; P->translate(checked_float(av[1], 2, "gfx-translate!"),checked_float(av[2], 3, "gfx-translate!")); return curry_void(); }
 static curry_val fn_gfx_rotate(int ac, curry_val *av, void *ud) {
     /* Accepts radians; QPainter uses degrees */
-    (void)ud;(void)ac; P->rotate(curry_float(av[1])*(180.0/M_PI)); return curry_void(); }
+    (void)ud;(void)ac; P->rotate(checked_float(av[1], 2, "gfx-rotate!")*(180.0/M_PI)); return curry_void(); }
 static curry_val fn_gfx_scale(int ac, curry_val *av, void *ud) {
-    (void)ud;(void)ac; P->scale(curry_float(av[1]),curry_float(av[2])); return curry_void(); }
+    (void)ud;(void)ac; P->scale(checked_float(av[1], 2, "gfx-scale!"),checked_float(av[2], 3, "gfx-scale!")); return curry_void(); }
 
 /* --- Shapes --- */
 
 static curry_val fn_gfx_fill_rect(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P;
-    p->fillRect(QRectF(curry_float(av[1]),curry_float(av[2]),
-                       curry_float(av[3]),curry_float(av[4])), p->brush());
+    p->fillRect(QRectF(checked_float(av[1], 2, "gfx-fill-rect!"),checked_float(av[2], 3, "gfx-fill-rect!"),
+                       checked_float(av[3], 4, "gfx-fill-rect!"),checked_float(av[4], 5, "gfx-fill-rect!")), p->brush());
     return curry_void();
 }
 
 static curry_val fn_gfx_draw_rect(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; p->save(); p->setBrush(Qt::NoBrush);
-    p->drawRect(QRectF(curry_float(av[1]),curry_float(av[2]),
-                       curry_float(av[3]),curry_float(av[4])));
+    p->drawRect(QRectF(checked_float(av[1], 2, "gfx-draw-rect!"),checked_float(av[2], 3, "gfx-draw-rect!"),
+                       checked_float(av[3], 4, "gfx-draw-rect!"),checked_float(av[4], 5, "gfx-draw-rect!")));
     p->restore(); return curry_void();
 }
 
 static curry_val fn_gfx_fill_circle(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; p->save(); p->setPen(Qt::NoPen);
-    p->drawEllipse(QPointF(curry_float(av[1]),curry_float(av[2])),
-                   curry_float(av[3]),curry_float(av[3]));
+    p->drawEllipse(QPointF(checked_float(av[1], 2, "gfx-fill-circle!"),checked_float(av[2], 3, "gfx-fill-circle!")),
+                   checked_float(av[3], 4, "gfx-fill-circle!"),checked_float(av[3], 4, "gfx-fill-circle!"));
     p->restore(); return curry_void();
 }
 
 static curry_val fn_gfx_draw_circle(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; p->save(); p->setBrush(Qt::NoBrush);
-    p->drawEllipse(QPointF(curry_float(av[1]),curry_float(av[2])),
-                   curry_float(av[3]),curry_float(av[3]));
+    p->drawEllipse(QPointF(checked_float(av[1], 2, "gfx-draw-circle!"),checked_float(av[2], 3, "gfx-draw-circle!")),
+                   checked_float(av[3], 4, "gfx-draw-circle!"),checked_float(av[3], 4, "gfx-draw-circle!"));
     p->restore(); return curry_void();
 }
 
 static curry_val fn_gfx_fill_ellipse(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; p->save(); p->setPen(Qt::NoPen);
-    p->drawEllipse(QPointF(curry_float(av[1]),curry_float(av[2])),
-                   curry_float(av[3]),curry_float(av[4]));
+    p->drawEllipse(QPointF(checked_float(av[1], 2, "gfx-fill-ellipse!"),checked_float(av[2], 3, "gfx-fill-ellipse!")),
+                   checked_float(av[3], 4, "gfx-fill-ellipse!"),checked_float(av[4], 5, "gfx-fill-ellipse!"));
     p->restore(); return curry_void();
 }
 
 static curry_val fn_gfx_draw_ellipse(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P; p->save(); p->setBrush(Qt::NoBrush);
-    p->drawEllipse(QPointF(curry_float(av[1]),curry_float(av[2])),
-                   curry_float(av[3]),curry_float(av[4]));
+    p->drawEllipse(QPointF(checked_float(av[1], 2, "gfx-draw-ellipse!"),checked_float(av[2], 3, "gfx-draw-ellipse!")),
+                   checked_float(av[3], 4, "gfx-draw-ellipse!"),checked_float(av[4], 5, "gfx-draw-ellipse!"));
     p->restore(); return curry_void();
 }
 
 static curry_val fn_gfx_draw_line(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    P->drawLine(QPointF(curry_float(av[1]),curry_float(av[2])),
-                QPointF(curry_float(av[3]),curry_float(av[4])));
+    P->drawLine(QPointF(checked_float(av[1], 2, "gfx-draw-line!"),checked_float(av[2], 3, "gfx-draw-line!")),
+                QPointF(checked_float(av[3], 4, "gfx-draw-line!"),checked_float(av[4], 5, "gfx-draw-line!")));
     return curry_void();
 }
 
@@ -2202,9 +2236,9 @@ static curry_val fn_gfx_draw_line(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_draw_arc(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P;
-    double cx = curry_float(av[1]), cy = curry_float(av[2]), r = curry_float(av[3]);
-    int start = (int)(curry_float(av[4]) * (180.0/M_PI) * 16.0);
-    int span  = (int)(curry_float(av[5]) * (180.0/M_PI) * 16.0);
+    double cx = checked_float(av[1], 2, "gfx-draw-arc!"), cy = checked_float(av[2], 3, "gfx-draw-arc!"), r = checked_float(av[3], 4, "gfx-draw-arc!");
+    int start = (int)(checked_float(av[4], 5, "gfx-draw-arc!") * (180.0/M_PI) * 16.0);
+    int span  = (int)(checked_float(av[5], 6, "gfx-draw-arc!") * (180.0/M_PI) * 16.0);
     p->save(); p->setBrush(Qt::NoBrush);
     p->drawArc(QRectF(cx-r, cy-r, r*2, r*2), start, span);
     p->restore(); return curry_void();
@@ -2213,9 +2247,9 @@ static curry_val fn_gfx_draw_arc(int ac, curry_val *av, void *ud) {
 static curry_val fn_gfx_fill_pie(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter *p = P;
-    double cx = curry_float(av[1]), cy = curry_float(av[2]), r = curry_float(av[3]);
-    int start = (int)(curry_float(av[4]) * (180.0/M_PI) * 16.0);
-    int span  = (int)(curry_float(av[5]) * (180.0/M_PI) * 16.0);
+    double cx = checked_float(av[1], 2, "gfx-fill-pie!"), cy = checked_float(av[2], 3, "gfx-fill-pie!"), r = checked_float(av[3], 4, "gfx-fill-pie!");
+    int start = (int)(checked_float(av[4], 5, "gfx-fill-pie!") * (180.0/M_PI) * 16.0);
+    int span  = (int)(checked_float(av[5], 6, "gfx-fill-pie!") * (180.0/M_PI) * 16.0);
     p->save(); p->setPen(Qt::NoPen);
     p->drawPie(QRectF(cx-r, cy-r, r*2, r*2), start, span);
     p->restore(); return curry_void();
@@ -2267,8 +2301,8 @@ static curry_val fn_gfx_draw_text(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     if (!curry_is_string(av[3]))
         curry_error("gfx-draw-text!: arg 4 must be a string (got wrong type) — usage: (gfx-draw-text! painter x y text)");
-    P->drawText(QPointF(curry_float(av[1]),curry_float(av[2])),
-                QString::fromUtf8(curry_string(av[3])));
+    P->drawText(QPointF(checked_float(av[1], 2, "gfx-draw-text!"),checked_float(av[2], 3, "gfx-draw-text!")),
+                QString::fromUtf8(checked_string(av[3], 4, "gfx-draw-text!")));
     return curry_void();
 }
 
@@ -2279,7 +2313,7 @@ static curry_val fn_gfx_text_width(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[1]))
         curry_error("gfx-text-width: arg 2 must be a string");
     return curry_make_float(
-        QFontMetricsF(P->font()).horizontalAdvance(QString::fromUtf8(curry_string(av[1]))));
+        QFontMetricsF(P->font()).horizontalAdvance(QString::fromUtf8(checked_string(av[1], 2, "gfx-text-width"))));
 }
 static curry_val fn_gfx_font_ascent(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac; return curry_make_float(QFontMetricsF(P->font()).ascent()); }
@@ -2293,10 +2327,10 @@ static curry_val fn_gfx_draw_image(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     /* (gfx-draw-image! painter dst-x dst-y dst-w dst-h bvec img-w img-h) */
     QPainter  *p  = P;
-    double    dx = curry_float(av[1]), dy = curry_float(av[2]);
-    double    dw = curry_float(av[3]), dh = curry_float(av[4]);
+    double    dx = checked_float(av[1], 2, "gfx-draw-image!"), dy = checked_float(av[2], 3, "gfx-draw-image!");
+    double    dw = checked_float(av[3], 4, "gfx-draw-image!"), dh = checked_float(av[4], 5, "gfx-draw-image!");
     curry_val bv = av[5];
-    int       iw = (int)curry_float(av[6]), ih = (int)curry_float(av[7]);
+    int       iw = (int)checked_float(av[6], 7, "gfx-draw-image!"), ih = (int)checked_float(av[7], 8, "gfx-draw-image!");
     /* Issue #169: bv was never checked with curry_is_bytevector before
      * curry_bytevector_ref's unchecked as_bytes() cast, and even for a
      * genuine bytevector, `total` was computed from separate
@@ -2336,9 +2370,9 @@ static curry_val fn_gfx_draw_points(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter  *p  = P;
     curry_val  xv = av[1], yv = av[2];
-    double r = curry_float(av[3]), g = curry_float(av[4]);
-    double b = curry_float(av[5]), a = curry_float(av[6]);
-    double sz = curry_float(av[7]);
+    double r = checked_float(av[3], 4, "gfx-draw-points!"), g = checked_float(av[4], 5, "gfx-draw-points!");
+    double b = checked_float(av[5], 6, "gfx-draw-points!"), a = checked_float(av[6], 7, "gfx-draw-points!");
+    double sz = checked_float(av[7], 8, "gfx-draw-points!");
     uint32_t n = check_real_vector(xv, "gfx-draw-points!");
     /* xv/yv are two independent vectors walked over the SAME index range
      * -- a length mismatch (yv shorter than xv) is a distinct OOB hazard
@@ -2363,9 +2397,9 @@ static curry_val fn_gfx_draw_lines(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter  *p  = P;
     curry_val  cv = av[1];
-    double r = curry_float(av[2]), g = curry_float(av[3]);
-    double b = curry_float(av[4]), a = curry_float(av[5]);
-    double w = curry_float(av[6]);
+    double r = checked_float(av[2], 3, "gfx-draw-lines!"), g = checked_float(av[3], 4, "gfx-draw-lines!");
+    double b = checked_float(av[4], 5, "gfx-draw-lines!"), a = checked_float(av[5], 6, "gfx-draw-lines!");
+    double w = checked_float(av[6], 7, "gfx-draw-lines!");
     uint32_t n = check_real_vector(cv, "gfx-draw-lines!");
     QVector<QLineF> lines;
     lines.reserve((int)(n/4));
@@ -2386,8 +2420,8 @@ static curry_val fn_gfx_fill_triangles(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
     QPainter  *p  = P;
     curry_val  cv = av[1];
-    double r = curry_float(av[2]), g = curry_float(av[3]);
-    double b = curry_float(av[4]), a = curry_float(av[5]);
+    double r = checked_float(av[2], 3, "gfx-fill-triangles!"), g = checked_float(av[3], 4, "gfx-fill-triangles!");
+    double b = checked_float(av[4], 5, "gfx-fill-triangles!"), a = checked_float(av[5], 6, "gfx-fill-triangles!");
     uint32_t n = check_real_vector(cv, "gfx-fill-triangles!");
     p->save();
     p->setPen(Qt::NoPen);
@@ -2442,8 +2476,8 @@ static curry_val fn_qt_process_events(int ac, curry_val *av, void *ud) {
    gfx-* procedures without a display. */
 static curry_val fn_call_with_painter(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
-    int w = qMax(1, (int)curry_float(av[0]));
-    int h = qMax(1, (int)curry_float(av[1]));
+    int w = qMax(1, (int)checked_float(av[0], 1, "call-with-painter"));
+    int h = qMax(1, (int)checked_float(av[1], 2, "call-with-painter"));
     curry_val proc = av[2];
     QPixmap pix(w, h);
     pix.fill(Qt::transparent);
@@ -2474,8 +2508,8 @@ static void project_4d_to_3d(const double *p4, double fov4d, double *p3) {
 
 static curry_val fn_make_4d_projector(int ac, curry_val *av, void *ud) {
     (void)ud;
-    double fov4d = ac > 0 ? curry_float(av[0]) : 4.0;
-    double fov3d = ac > 1 ? curry_float(av[1]) : 3.0;
+    double fov4d = ac > 0 ? checked_float(av[0], 1, "make-4d-projector") : 4.0;
+    double fov3d = ac > 1 ? checked_float(av[1], 2, "make-4d-projector") : 3.0;
     curry_val v = curry_make_vector(2, curry_make_bool(false));
     curry_vector_set(v, 0, curry_make_float(fov4d));
     curry_vector_set(v, 1, curry_make_float(fov3d));
@@ -2503,7 +2537,7 @@ static curry_val fn_rotate_4d_xw(int ac, curry_val *av, void *ud) {
         curry_error("rotate-4d-xw: point vector too short (need 4 elements)");
     double pts[4];
     for (int i = 0; i < 4; i++) pts[i] = curry_float(curry_vector_ref(av[0],(uint32_t)i));
-    double c = cos(curry_float(av[1])), s = sin(curry_float(av[1]));
+    double c = cos(checked_float(av[1], 2, "rotate-4d-xw")), s = sin(checked_float(av[1], 2, "rotate-4d-xw"));
     curry_val r = curry_make_vector(4, curry_make_bool(false));
     curry_vector_set(r, 0, curry_make_float(c*pts[0] - s*pts[3]));
     curry_vector_set(r, 1, curry_make_float(pts[1]));
@@ -2519,9 +2553,9 @@ static curry_val fn_rotate_4d_xw(int ac, curry_val *av, void *ud) {
 static curry_val fn_make_plain_window(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ensure_app();
-    const char *title = curry_string(av[0]);
-    int w = (int)curry_float(av[1]);
-    int h = (int)curry_float(av[2]);
+    const char *title = checked_string(av[0], 1, "make-plain-window");
+    int w = (int)checked_float(av[1], 2, "make-plain-window");
+    int h = (int)checked_float(av[2], 3, "make-plain-window");
 
     auto *ws              = new WinState();
     ws->draw_proc         = curry_make_bool(false);
@@ -2573,7 +2607,7 @@ static curry_val fn_make_splitter(int ac, curry_val *av, void *ud) {
     (void)ud;
     Qt::Orientation orient = Qt::Vertical;
     if (ac >= 1 && curry_is_symbol(av[0]))
-        if (strcmp(curry_symbol(av[0]), "horizontal") == 0)
+        if (strcmp(checked_symbol(av[0], 1, "make-splitter"), "horizontal") == 0)
             orient = Qt::Horizontal;
     auto *sp = new QSplitter(orient);
     sp->setChildrenCollapsible(false);
@@ -2644,14 +2678,14 @@ static curry_val fn_text_edit_text(int ac, curry_val *av, void *ud) {
 static curry_val fn_text_edit_set_text(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     widget_to_textedit(av[0])->setPlainText(
-        QString::fromUtf8(curry_string(av[1])));
+        QString::fromUtf8(checked_string(av[1], 2, "text-edit-set-text!")));
     return curry_void();
 }
 
 static curry_val fn_text_edit_append(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     widget_to_textedit(av[0])->appendPlainText(
-        QString::fromUtf8(curry_string(av[1])));
+        QString::fromUtf8(checked_string(av[1], 2, "text-edit-append!")));
     return curry_void();
 }
 
@@ -2685,8 +2719,8 @@ static curry_val fn_text_edit_on_change(int ac, curry_val *av, void *ud) {
 static curry_val fn_file_open_dialog(int ac, curry_val *av, void *ud) {
     (void)ud;
     ensure_app();
-    QString title  = (ac >= 1) ? QString::fromUtf8(curry_string(av[0])) : "Open File";
-    QString filter = (ac >= 2) ? QString::fromUtf8(curry_string(av[1])) : "All Files (*)";
+    QString title  = (ac >= 1) ? QString::fromUtf8(checked_string(av[0], 1, "file-open-dialog")) : "Open File";
+    QString filter = (ac >= 2) ? QString::fromUtf8(checked_string(av[1], 2, "file-open-dialog")) : "All Files (*)";
     QString path   = QFileDialog::getOpenFileName(nullptr, title, QString(), filter);
     if (path.isEmpty()) return curry_make_bool(false);
     return curry_make_string(path.toUtf8().constData());
@@ -2696,8 +2730,8 @@ static curry_val fn_file_open_dialog(int ac, curry_val *av, void *ud) {
 static curry_val fn_file_save_dialog(int ac, curry_val *av, void *ud) {
     (void)ud;
     ensure_app();
-    QString title  = (ac >= 1) ? QString::fromUtf8(curry_string(av[0])) : "Save File";
-    QString filter = (ac >= 2) ? QString::fromUtf8(curry_string(av[1])) : "All Files (*)";
+    QString title  = (ac >= 1) ? QString::fromUtf8(checked_string(av[0], 1, "file-save-dialog")) : "Save File";
+    QString filter = (ac >= 2) ? QString::fromUtf8(checked_string(av[1], 2, "file-save-dialog")) : "All Files (*)";
     QString path   = QFileDialog::getSaveFileName(nullptr, title, QString(), filter);
     if (path.isEmpty()) return curry_make_bool(false);
     return curry_make_string(path.toUtf8().constData());

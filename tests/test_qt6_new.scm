@@ -332,6 +332,51 @@
                         (list (cons 0.0 0.0) (cons 10.0 0.0) (cons 5.0 10.0)))))
            #f)))
 
+;;; ── Phase 6: issue #187 regression (unchecked direct positional-argument
+;;; casts: curry_string/curry_float/curry_symbol/curry_fixnum called
+;;; straight on av[N] with no type check) ─────────────────────────────────────
+;;;
+;;; curry_define_fn only declares a handler's arity, not argument TYPES --
+;;; nothing upstream validates av[N] before curry_string/curry_float/
+;;; curry_symbol/curry_fixnum (all unchecked casts) touch it. Fixed with
+;;; checked_string/checked_float/checked_symbol/checked_fixnum wrapper
+;;; functions applied at all ~160 direct av[N] call sites in this file.
+;;; Not exhaustive here (that many individual regression checks isn't
+;;; practical) -- this covers the two originally-confirmed crash repros
+;;; plus a representative sample across different argument positions/types/
+;;; call shapes, and relies on the rest of this suite (every widget/gfx
+;;; function exercised elsewhere in Phases 1-5, plus test_qt6.scm's
+;;; interactive coverage) to confirm no correct-usage path regressed.
+
+(check "make-window rejects a non-string title (was a reproducible SIGSEGV)"
+       (raises? (lambda () (make-window 'not-a-string 100 100))) #t)
+(check "make-window rejects a non-numeric width (was a reproducible SIGSEGV)"
+       (raises? (lambda () (make-window "t" #t 500))) #t)
+(check "make-window still works with correct argument types"
+       (raises? (lambda () (make-window "t" 100 100))) #f)
+
+(check "make-label rejects a non-string argument"
+       (raises? (lambda () (make-label 42))) #t)
+(check "make-label still works with a string"
+       (raises? (lambda () (make-label "hi"))) #f)
+
+(check "make-dropdown rejects a non-numeric initial-index"
+       (raises? (lambda () (make-dropdown (list "a") #t (lambda (i) i)))) #t)
+
+(let ((w (make-window "t" 100 100)))
+  (check "window-add-toolbar! rejects a non-symbol side argument"
+         (raises? (lambda () (window-add-toolbar! w "not-a-symbol"))) #t)
+  (check "window-set-title! rejects a non-string argument"
+         (raises? (lambda () (window-set-title! w 42))) #t)
+  (check "window-set-title! still works with a string"
+         (raises? (lambda () (window-set-title! w "New Title"))) #f))
+
+(let ((sb (make-spin-box 0.0 10.0 1.0 5.0 (lambda (v) v))))
+  (check "spin-set-value! rejects a non-numeric argument"
+         (raises? (lambda () (spin-set-value! sb "x"))) #t)
+  (check "spin-set-value! still works with a real number"
+         (raises? (lambda () (spin-set-value! sb 7.0))) #f))
+
 ;;; ── Summary ──────────────────────────────────────────────────────────────────
 
 (newline)
