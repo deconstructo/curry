@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788532446065,
+  "lastUpdate": 1788533414158,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12143,6 +12143,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 74.562,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "650becb00edd62c064262844ac70da6b72ce54c8",
+          "message": "fix(builtins): bytevector-length had no type check at all (#166) (#171)\n\nprim_bytes_length (src/builtins.c) cast its argument straight to a\nBytevector* via as_bytes() and dereferenced ->len, with no\nvis_bytes() check at all -- unlike every sibling bytevector\nprimitive (bytevector-u8-ref, bytevector-copy, bytevector-append,\netc.), which all correctly check first. This is R7RS core, always\npresent in GLOBAL_ENV, reachable with no import required.\n\nWorse than the #158/#161 pattern of misinterpreting one heap object\nas another: the argument can be an immediate value (fixnum/boolean/\nchar), whose raw tagged bit pattern gets dereferenced directly as a\npointer. Confirmed reproducible SIGSEGV via (bytevector-length 42)\nand (bytevector-length #t). A string argument didn't crash but\nreturned a wrong value (same \"silently wrong\" flavor as #161's\npre-fix crypto bug), since String's header happens to share enough\nof Bytevector's layout to read something.\n\nFixed by adding the same vis_bytes() check + scm_raise_code\n(EC_WRONG_TYPE_ARGUMENT, ...) every sibling primitive already uses.\nAdded regression coverage to tests/r7rs_tests.scm's existing\nbytevector section (fixnum, boolean, and string arguments all now\nraise cleanly instead of crashing or returning garbage).\n\n119/119 ctest suites pass (fresh --clear-cache run).",
+          "timestamp": "2026-09-05T00:49:24+10:00",
+          "tree_id": "6343e175baaaec9e3e83fc6ea51af08d8c809c24",
+          "url": "https://github.com/deconstructo/curry/commit/650becb00edd62c064262844ac70da6b72ce54c8"
+        },
+        "date": 1788533412290,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.379,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.883,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.078,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.771,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 143.779,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 285.995,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.917,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.801,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.812,
             "unit": "ms"
           }
         ]
