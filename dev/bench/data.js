@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788558788266,
+  "lastUpdate": 1788559993917,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12695,6 +12695,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.754,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "248739b1fb52c4f4294d219669baf1f812b197a6",
+          "message": "fix(qt6): reject unchecked direct positional-argument casts across ~160 call sites (#187) (#190)\n\nFound during independent review of #185's fix: a third, much larger\nvariant of the recurring unchecked-cast bug class this session's whole\nchain has been closing (#158..#185). curry_define_fn (src/api.c) only\ndeclares a handler's min/max ARITY -- there is no argument type\nsignature, and nothing upstream validates that av[N] is actually the\ntype a handler assumes before calling curry_string/curry_float/\ncurry_symbol/curry_fixnum directly on it. All four are unchecked casts\n(curry_string is str_data(as_str(v)); curry_float falls to a raw\nas_flo(v)->value cast for non-fixnum values; curry_symbol is\nsym_cstr(v); curry_fixnum is vunfix(v)) -- the same shape of bug as\nevery earlier fix in this chain, just on a function's own direct\npositional arguments rather than a vector/list it's handed.\n\nConfirmed reproducible SIGSEGV:\n  (make-window 'not-a-string 100 100)   -- curry_string on a symbol\n  (make-window \"t\" #t 500)              -- curry_float on a boolean\n\nA grep of curry_string(av[/curry_float(av[/curry_symbol(av[/\ncurry_fixnum(av[ across the file found 162 direct call sites across\n149 functions -- essentially every string/number/symbol-typed\npositional argument in the module (window/menu/label/button/checkbox/\nlineedit/toolbar/statusbar/stylesheet/tooltip/clipboard/font/\ndialog-title/dialog-filter constructors and setters, the gfx-*\ndrawing family, shader source arguments, etc.).\n\nAdded four thin checked-argument wrapper functions\n(checked_string/checked_float/checked_symbol/checked_fixnum, each\ntaking the value, its 1-based argument position, and the calling\nprocedure's Scheme-visible name for a clear error message) and\nreplaced all 162 direct av[N] call sites with them, mechanically\ngenerated from a script that mapped each fn_* C function to its\nregistered curry_define_fn Scheme name and substituted within each\nfunction's own body -- then manually verified via full rebuild, the\ntwo originally-reported repros, and a broader spot-check of variable-\narity call sites (e.g. gfx-clear!'s ac>=4/ac>=5 color-argument\nternary, where argument positions still line up correctly across\nbranches) and already-ternary-guarded sites (e.g. make-gl-texture's\noptional symbol argument, where the wrapper is redundant-but-harmless\nsince the ternary's own curry_is_symbol check already gates it).\nConfirmed zero unguarded curry_string(av[/curry_float(av[/\ncurry_symbol(av[/curry_fixnum(av[ call sites remain anywhere in the\nfile after the sweep.\n\nExtended tests/test_qt6_new.scm with a representative regression\nsample (not exhaustive given 162 sites isn't practical to test\nindividually) -- the two originally-confirmed crash repros plus\nseveral more spanning different argument positions, types, and call\nshapes (make-window, make-label, make-dropdown, window-add-toolbar!,\nwindow-set-title!, spin-set-value!) -- plus confirmation that every\ncorrect-usage path already exercised elsewhere in Phases 1-5 of the\nsame suite, and the full existing test_qt6.scm interactive coverage,\ncontinues to work.\n\nBuilt and tested locally with BUILD_MODULE_QT6=ON (not enabled in\nCI's default build, same as every other qt6 fix in this chain).\n127/127 ctest suites pass (fresh --clear-cache run).",
+          "timestamp": "2026-09-05T08:12:30+10:00",
+          "tree_id": "37cafdefa07464150beb714916b67187576a303e",
+          "url": "https://github.com/deconstructo/curry/commit/248739b1fb52c4f4294d219669baf1f812b197a6"
+        },
+        "date": 1788559992859,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.285,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.611,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.278,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.369,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 91.972,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 215.706,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 53.115,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 61.555,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 45.737,
             "unit": "ms"
           }
         ]
