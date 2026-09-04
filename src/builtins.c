@@ -1180,6 +1180,8 @@ static val_t prim_substring(int ac, val_t *av, void *ud) {
 }
 static val_t prim_string_contains(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-contains: not a string");
+    if (!vis_string(av[1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-contains: not a string");
     const char *haystack=str_data(as_str(av[0])), *needle=str_data(as_str(av[1]));
     const char *p = strstr(haystack, needle);
     return p ? vfix((intptr_t)(p - haystack)) : V_FALSE;

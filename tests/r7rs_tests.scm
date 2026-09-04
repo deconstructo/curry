@@ -921,6 +921,13 @@
 (check "string<?"       (string<? "abc" "abd") #t)
 (check "string-contains" (string-contains "hello world" "world") 6)
 (check "string-contains miss" (string-contains "hello" "xyz") #f)
+;; Issue #172: string-contains had no vis_string() check on either
+;; argument -- as_str() cast straight to a String*, confirmed reproducible
+;; SIGSEGV via (string-contains 42 "x") / (string-contains "x" 42) pre-fix.
+(check "string-contains rejects a non-string haystack (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-contains 42 "x")) 'raised)
+(check "string-contains rejects a non-string needle (was a reproducible SIGSEGV)"
+       (guard (exn (#t 'raised)) (string-contains "x" 42)) 'raised)
 (check "make-string"    (make-string 3 #\x) "xxx")
 (check "make-string negative size raises instead of crashing"
        (guard (exn (#t 'raised)) (make-string -1)) 'raised)
