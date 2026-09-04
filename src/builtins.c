@@ -896,6 +896,7 @@ static void str_invalidate_cache(String *s);
 
 static val_t prim_string_length(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
+    if (!vis_string(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-length: not a string");
     /* UTF-8 character count (not byte length) — cached, see str_nchars. */
     String *s = as_str(av[0]);
     return vfix(str_nchars(s));
@@ -2096,7 +2097,12 @@ static val_t prim_file_exists_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud;
     return vbool(access(str_data(as_str(av[0])), F_OK) == 0);
 }
 
-static val_t prim_close_port(int ac, val_t *av, void *ud) {(void)ac;(void)ud; port_close(av[0]); return V_VOID;}
+static val_t prim_close_port(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "close-port: not a port");
+    port_close(av[0]);
+    return V_VOID;
+}
 static val_t prim_input_port_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0]));}
 static val_t prim_input_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_input(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
 static val_t prim_output_port_open_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_port(av[0])&&port_is_output(av[0])&&!(as_port(av[0])->flags&PORT_CLOSED));}
@@ -2390,10 +2396,22 @@ static val_t prim_eval(int ac, val_t *av, void *ud) {
     return eval(av[0], env);
 }
 static val_t prim_interaction_env(int ac, val_t *av, void *ud) { (void)ac;(void)av;(void)ud; return GLOBAL_ENV; }
-static val_t prim_error_message(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->message;}
+static val_t prim_error_message(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_error(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "error-object-message: not an error object");
+    return as_err(av[0])->message;
+}
 static val_t prim_error_object_p(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_error(av[0]));}
-static val_t prim_error_irritants(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->irritants;}
-static val_t prim_error_code(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return as_err(av[0])->code;}
+static val_t prim_error_irritants(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_error(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "error-object-irritants: not an error object");
+    return as_err(av[0])->irritants;
+}
+static val_t prim_error_code(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_error(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "error-object-code: not an error object");
+    return as_err(av[0])->code;
+}
 static val_t prim_raise(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
 static val_t prim_raise_continuable(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
 static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
@@ -2656,14 +2674,46 @@ static val_t prim_set_find(int ac, val_t *av, void *ud) {
 
 /* ---- Hash tables ---- */
 static val_t prim_make_hash(int ac, val_t *av, void *ud) {(void)ud; int cmp=ac>0?(int)vunfix(av[0]):SET_CMP_EQUAL; return hash_make(cmp);}
-static val_t prim_hash_set(int ac, val_t *av, void *ud) {(void)ac;(void)ud; hash_set(av[0],av[1],av[2]); return V_VOID;}
-static val_t prim_hash_ref(int ac, val_t *av, void *ud) {(void)ud; val_t def=ac>2?av[2]:V_FALSE; return hash_ref(av[0],av[1],def);}
-static val_t prim_hash_del(int ac, val_t *av, void *ud) {(void)ac;(void)ud; hash_delete(av[0],av[1]); return V_VOID;}
-static val_t prim_hash_has(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(hash_has(av[0],av[1]));}
-static val_t prim_hash_keys(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return hash_keys(av[0]);}
-static val_t prim_hash_vals(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return hash_values(av[0]);}
-static val_t prim_hash_to_alist(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return hash_to_alist(av[0]);}
-static val_t prim_hash_size(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vfix(hash_size(av[0]));}
+static val_t prim_hash_set(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-set!: not a hash table");
+    hash_set(av[0],av[1],av[2]); return V_VOID;
+}
+static val_t prim_hash_ref(int ac, val_t *av, void *ud) {
+    (void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-ref: not a hash table");
+    val_t def=ac>2?av[2]:V_FALSE; return hash_ref(av[0],av[1],def);
+}
+static val_t prim_hash_del(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-delete!: not a hash table");
+    hash_delete(av[0],av[1]); return V_VOID;
+}
+static val_t prim_hash_has(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-exists?: not a hash table");
+    return vbool(hash_has(av[0],av[1]));
+}
+static val_t prim_hash_keys(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-keys: not a hash table");
+    return hash_keys(av[0]);
+}
+static val_t prim_hash_vals(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-values: not a hash table");
+    return hash_values(av[0]);
+}
+static val_t prim_hash_to_alist(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table->alist: not a hash table");
+    return hash_to_alist(av[0]);
+}
+static val_t prim_hash_size(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (!vis_hash(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "hash-table-size: not a hash table");
+    return vfix(hash_size(av[0]));
+}
 
 /* ---- Actors ---- */
 static val_t prim_spawn(int ac, val_t *av, void *ud) {
