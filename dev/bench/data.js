@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788534601447,
+  "lastUpdate": 1788535621963,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12281,6 +12281,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.584,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "06903a5b981b0c04f5b97ac610cefeef739bff9e",
+          "message": "fix(builtins): string-contains had no type check on either argument (#172) (#175)\n\nFound during independent code review of #170's fix. prim_string_contains\ncast both arguments straight to String* via as_str() with no\nvis_string() guard on either, right next to prim_substring/\nprim_write_string in the same file which both check correctly. Same\nbug class as #166/#170. Confirmed reproducible SIGSEGV via\n(string-contains 42 \"x\") and (string-contains \"x\" 42).\n\nFixed with the same vis_string() + scm_raise_code(EC_WRONG_TYPE_\nARGUMENT, ...) idiom used throughout the file. Added regression\ncoverage to tests/r7rs_tests.scm next to the existing string-contains\nchecks.\n\n485/485 r7rs_tests.scm assertions pass; 119/119 ctest suites pass\n(fresh --clear-cache run).",
+          "timestamp": "2026-09-05T01:25:49+10:00",
+          "tree_id": "37d12452efb69718c89b6aeda5a8f420ac74cfc0",
+          "url": "https://github.com/deconstructo/curry/commit/06903a5b981b0c04f5b97ac610cefeef739bff9e"
+        },
+        "date": 1788535620953,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 10.787,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.828,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.841,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.392,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 76.376,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 196.785,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 49.774,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 55.87,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 39.96,
             "unit": "ms"
           }
         ]
