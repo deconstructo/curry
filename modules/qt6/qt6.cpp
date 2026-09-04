@@ -231,6 +231,14 @@ static void *val_to_ptr(const char *tag, curry_val v) {
     if (strcmp(got, tag) != 0)
         curry_error("qt6: wrong handle type — expected %s, got %s", tag, got);
     curry_val bv = curry_cdr(v);
+    /* Issue #165: the tag was checked (both symbol-ness and exact match),
+     * but the cdr -- assumed to be a pointer-holding bytevector -- was
+     * read straight via curry_bytevector_ref with no
+     * curry_is_bytevector/length check first. A forged handle like
+     * (cons (string->symbol tag) 42) has the right tag but a
+     * non-bytevector cdr. */
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("qt6: malformed handle (expected %s)", tag);
     void *ptr = nullptr;
     for (size_t i = 0; i < sizeof(void *); i++)
         ((uint8_t *)&ptr)[i] = curry_bytevector_ref(bv, (uint32_t)i);

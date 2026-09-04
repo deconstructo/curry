@@ -47,7 +47,14 @@ static curry_val db_to_val(VecDB *db) {
 }
 
 static VecDB *val_to_db(curry_val v) {
+    /* Issue #165: this checked NOTHING at all -- not even a tag, let
+     * alone that the cdr was really a pointer-holding bytevector. */
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)) ||
+        strcmp(curry_symbol(curry_car(v)), "vecdb") != 0)
+        curry_error("vecdb: not a vector db handle");
     curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(VecDB *))
+        curry_error("vecdb: not a vector db handle");
     VecDB *db;
     for (size_t i = 0; i < sizeof(VecDB *); i++)
         ((uint8_t *)&db)[i] = curry_bytevector_ref(bv, (uint32_t)i);

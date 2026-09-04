@@ -81,7 +81,16 @@ static curry_val gql_to_val(GQLClient *c) {
 }
 
 static GQLClient *val_to_gql(curry_val v) {
+    /* Issue #165: this checked NOTHING at all -- not even a tag, let
+     * alone that the cdr was really a pointer-holding bytevector.
+     * Confirmed reproducible SIGSEGV via
+     * (graphql-query (cons 'graphql-client 42) "{x}"). */
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)) ||
+        strcmp(curry_symbol(curry_car(v)), "graphql-client") != 0)
+        curry_error("graphql: not a graphql client handle");
     curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(GQLClient *))
+        curry_error("graphql: not a graphql client handle");
     GQLClient *c;
     for (size_t i = 0; i < sizeof(GQLClient *); i++)
         ((uint8_t *)&c)[i] = curry_bytevector_ref(bv, (uint32_t)i);

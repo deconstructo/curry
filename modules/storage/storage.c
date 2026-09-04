@@ -88,7 +88,17 @@ static curry_val client_to_val(ClientState *cs) {
 }
 
 static ClientState *val_to_client(curry_val v) {
+    /* Issue #165: this checked NOTHING at all -- not even that v was a
+     * pair, let alone the tag or that the cdr was really a
+     * pointer-holding bytevector. curry_cdr on a non-pair and
+     * curry_bytevector_ref's own unchecked as_bytes() cast on a
+     * non-bytevector cdr are both wild-pointer hazards. */
+    if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)) ||
+        strcmp(curry_symbol(curry_car(v)), "storage-client") != 0)
+        curry_error("storage: not a storage client handle");
     curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(ClientState *))
+        curry_error("storage: not a storage client handle");
     ClientState *cs;
     for (size_t i = 0; i < sizeof(ClientState *); i++)
         ((uint8_t *)&cs)[i] = curry_bytevector_ref(bv, (uint32_t)i);

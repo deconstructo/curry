@@ -89,6 +89,14 @@ static bool val_is_tagged(curry_val v, const char *tag) {
 
 static void *val_to_ptr(curry_val v) {
     curry_val bv = curry_cdr(v);
+    /* Issue #165: every call site checks val_is_tagged(av[0], tag) first,
+     * but that only verifies the CAR -- the cdr, assumed to be a
+     * pointer-holding bytevector, was read straight via
+     * curry_bytevector_ref with no curry_is_bytevector/length check. A
+     * forged handle like (cons 'piper-synth 42) has the right tag but a
+     * non-bytevector cdr. */
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("piper: malformed handle");
     void *p;
     for (size_t i = 0; i < sizeof(void *); i++)
         ((uint8_t *)&p)[i] = curry_bytevector_ref(bv, (uint32_t)i);

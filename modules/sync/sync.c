@@ -41,13 +41,27 @@ static int has_tag(curry_val v, const char *tag) {
            strcmp(curry_symbol(curry_car(v)), tag) == 0;
 }
 
+/* Issue #165: has_tag checked the car, but every get_mutex/get_cond/
+ * get_sem below passed curry_cdr(v) straight to unpack_ptr() with no
+ * curry_is_bytevector/length check -- a forged handle like
+ * (cons 'mutex 42) has the right tag but a non-bytevector cdr, and
+ * curry_bytevector_ref's own unchecked as_bytes() cast then dereferences
+ * the fixnum's raw bit pattern as a pointer. Confirmed reproducible
+ * SIGSEGV via (mutex-lock! (cons 'mutex 42)). */
+static void *checked_unpack_ptr(curry_val v, const char *tag, const char *ctx) {
+    if (!has_tag(v, tag)) curry_error("%s: expected %s", ctx, tag);
+    curry_val bv = curry_cdr(v);
+    if (!curry_is_bytevector(bv) || curry_bytevector_length(bv) != sizeof(void *))
+        curry_error("%s: expected %s", ctx, tag);
+    return unpack_ptr(bv);
+}
+
 /* ---- Mutex ---- */
 static curry_val wrap_mutex(pthread_mutex_t *m) {
     return curry_make_pair(curry_make_symbol("mutex"), pack_ptr(m));
 }
 static pthread_mutex_t *get_mutex(curry_val v, const char *ctx) {
-    if (!has_tag(v, "mutex")) curry_error("%s: expected mutex", ctx);
-    return (pthread_mutex_t *)unpack_ptr(curry_cdr(v));
+    return (pthread_mutex_t *)checked_unpack_ptr(v, "mutex", ctx);
 }
 
 static curry_val fn_mutex_make(int ac, curry_val *av, void *ud) {
@@ -117,8 +131,7 @@ static curry_val wrap_cond(pthread_cond_t *cv) {
     return curry_make_pair(curry_make_symbol("condvar"), pack_ptr(cv));
 }
 static pthread_cond_t *get_cond(curry_val v, const char *ctx) {
-    if (!has_tag(v, "condvar")) curry_error("%s: expected condvar", ctx);
-    return (pthread_cond_t *)unpack_ptr(curry_cdr(v));
+    return (pthread_cond_t *)checked_unpack_ptr(v, "condvar", ctx);
 }
 
 static curry_val fn_cond_make(int ac, curry_val *av, void *ud) {
@@ -181,8 +194,7 @@ static curry_val wrap_sem(ScmSem *s) {
     return curry_make_pair(curry_make_symbol("semaphore"), pack_ptr(s));
 }
 static ScmSem *get_sem(curry_val v, const char *ctx) {
-    if (!has_tag(v, "semaphore")) curry_error("%s: expected semaphore", ctx);
-    return (ScmSem *)unpack_ptr(curry_cdr(v));
+    return (ScmSem *)checked_unpack_ptr(v, "semaphore", ctx);
 }
 
 static curry_val fn_sem_make(int ac, curry_val *av, void *ud) {
