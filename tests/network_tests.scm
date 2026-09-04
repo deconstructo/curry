@@ -192,6 +192,75 @@
 (check "udp-send from unbound socket" (utf8->string (car received2)) "world")
 
 ;;; ════════════════════════════════════════════════════════════
+;;; Malformed raw socket handle rejection (issue #158)
+;;; ════════════════════════════════════════════════════════════
+;;;
+;;; net_val_to_sock (network_internal.h) unconditionally read
+;;; sizeof(sock_t) bytes from a raw socket handle's bytevector with no
+;;; length check of its own, and net_is_raw_socket_handle never checked
+;;; the cdr was even a bytevector at all -- a curry script constructing
+;;; a pair merely SHAPED like a raw socket handle (car the symbol
+;;; 'socket) could trigger an out-of-bounds heap read (too-short/empty
+;;; bytevector) or a type-confused read (a non-bytevector cdr entirely),
+;;; whose garbage result then fed straight into a real syscall as an fd.
+;;; Every one of these must now be rejected cleanly at the type-check
+;;; level (net_is_raw_socket_handle), before ever reaching
+;;; net_val_to_sock, rather than crashing, reading adjacent heap memory,
+;;; or silently proceeding with a garbage fd.
+(define (raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+
+(check "socket-local-port rejects a too-short bytevector cdr (was an OOB heap read)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 1 5))))) #t)
+(check "socket-local-port rejects an empty bytevector cdr (was an OOB heap read)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 0))))) #t)
+(check "socket-local-port rejects a non-bytevector cdr (was a type-confused read)"
+  (raises? (lambda () (socket-local-port (cons 'socket 42)))) #t)
+(check "socket-local-port rejects a too-long bytevector cdr"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 16 0))))) #t)
+;; A correctly-sized bytevector holding a garbage fd value is NOT a
+;; malformed-handle rejection -- it passes the shape/length check (as it
+;; must, since a real socket handle has exactly this shape) and instead
+;; fails later at the actual syscall (getsockname: Bad file descriptor),
+;; a different and already-correct error path this fix doesn't change.
+(check "socket-local-port on a correctly-sized garbage fd still raises (via the syscall, not the shape check)"
+  (raises? (lambda () (socket-local-port (cons 'socket (make-bytevector 4 255))))) #t)
+;; A genuine socket handle (from tcp-listen) must still work normally --
+;; the stricter check must not reject legitimate handles.
+(let* ((l (tcp-listen 0)))
+  (check "socket-local-port still works on a genuine tcp-listen handle"
+    (> (socket-local-port l) 0) #t)
+  (tcp-close l))
+
+;;; The above only covered socket-local-port (an SRFI-106 primitive
+;;; already routed through net_extract_fd). Independent code review
+;;; found the fix was INCOMPLETE: network.c's tcp-accept, tcp-close,
+;;; udp-bind, udp-send, and udp-recv each called net_val_to_sock
+;;; directly (via the raw #define val_to_sock alias) with NO check at
+;;; all, entirely bypassing net_is_raw_socket_handle -- reproduced as an
+;;; actual SIGSEGV (not just a clean error) for tcp-close/udp-bind on a
+;;; malformed handle. Fixed by routing all five through a new shared
+;;; net_checked_val_to_sock helper (network_internal.h) instead of the
+;;; raw, unchecked val_to_sock/net_val_to_sock. Every one of these must
+;;; now reject a malformed handle cleanly too, not just crash-free but
+;;; via guard-catchable error, same as socket-local-port above.
+(check "tcp-accept rejects a non-bytevector cdr (was an unchecked type-confused read)"
+  (raises? (lambda () (tcp-accept (cons 'socket "x")))) #t)
+(check "tcp-close rejects a non-bytevector cdr (was a reproducible SIGSEGV)"
+  (raises? (lambda () (tcp-close (cons 'socket 42)))) #t)
+(check "udp-bind rejects a non-bytevector cdr (was a reproducible SIGSEGV)"
+  (raises? (lambda () (udp-bind (cons 'socket 42) 0))) #t)
+(check "udp-send rejects an empty bytevector cdr (was an unchecked OOB read feeding sendto)"
+  (raises? (lambda () (udp-send (cons 'socket (make-bytevector 0)) (make-bytevector 1) "127.0.0.1" 9)))
+  #t)
+(check "udp-recv rejects an empty bytevector cdr (was an unchecked OOB read feeding recvfrom)"
+  (raises? (lambda () (udp-recv (cons 'socket (make-bytevector 0)) 10))) #t)
+;; Genuine handles must still work normally on all five -- confirmed
+;; implicitly by every other test in this file (tcp-accept/tcp-close via
+;; § 1/§ 2, udp-bind/udp-send/udp-recv via § 4), all of which already ran
+;; successfully above using real tcp-listen/udp-socket handles.
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 
