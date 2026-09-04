@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788535621963,
+  "lastUpdate": 1788538031241,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12350,6 +12350,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 39.96,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "640594723c8830351c41157afa3fdea66dcc1073",
+          "message": "fix(builtins,port,set): add missing type checks to string comparison family, port I/O layer, and set-* family (#173) (#176)\n\n* fix(builtins,port,set): add missing type checks to string comparison family, port I/O layer, and set-* family (#173)\n\nFound during independent adversarial security review of #170's fix (and\nof #172, whose grep claimed src/builtins.c was exhaustively checked --\nit wasn't). Three large, distinct groups of the same unchecked-\nas_TYPE()-cast bug class, all confirmed reproducible SIGSEGV pre-fix,\nall reachable from plain no-import R7RS-core code:\n\n1. String comparison/conversion/append/for-each family (src/builtins.c):\n   string->symbol, symbol->string, string=?/<?/<=?/>?/>=?, the -ci\n   variants, string-append, string-for-each -- none checked\n   vis_string/vis_symbol on any argument. Fixed at each prim_* call\n   site (plus the shared scm_string_append/scm_string_to_symbol/\n   scm_symbol_to_string helpers they route through), following the\n   existing vis_TYPE()+scm_raise_code(EC_WRONG_TYPE_ARGUMENT,...)\n   idiom. Added a small check_all_strings() helper for the variadic\n   comparison family rather than duplicating a loop at each of the ten\n   *?/-ci-*? functions.\n\n2. Nearly the entire port I/O primitive layer (src/port.c): every one\n   of port_read_char/port_peek_char/port_char_ready/port_write_char/\n   port_write_string/port_read_line/port_read_byte/port_peek_byte/\n   port_write_byte/port_close/port_get_output_string/\n   port_get_output_bytevector did an unconditional as_port() with no\n   vis_port() guard anywhere in the file -- and most builtins.c\n   wrappers into them didn't check first either. Given the number of\n   call sites (well over a dozen), fixed once via a checked_port()\n   helper inside port.c itself (raising EC_WRONG_TYPE_ARGUMENT) rather\n   than re-deriving the same guard at every builtins.c wrapper,\n   matching what #170's own commit message wanted for close-port but\n   didn't actually implement even there. This also fixes\n   call-with-port, which used to crash inside port_close() even when\n   its lambda body never touched the port argument at all -- now also\n   checked explicitly up front in prim_call_with_port so a bad port\n   fails before the proc even runs, not just in the cleanup path.\n\n3. The entire native set-* family (src/set.c), hash-table's exact\n   sibling data structure in the same file that #170 already\n   completely fixed for hash-table but left set-* untouched: set_member,\n   set_add_mut, set_delete_mut, set_add, set_to_list, set_size,\n   set_union, set_intersection, set_difference, set_equal, set_copy all\n   did an unconditional as_set() with zero type check. Fixed the same\n   way as the port layer -- a checked_set() helper inside set.c itself.\n   Also found and fixed two direct as_set() calls in builtins.c's own\n   prim_set_map/prim_set_filter that bypassed set.c's functions\n   entirely (they read as_set(sv)->cmp before ever calling\n   set_to_list(sv), so the set.c-level fix alone didn't cover them).\n\nAdded regression coverage to tests/r7rs_tests.scm for all of the\nabove: string->symbol/symbol->string, the ten string comparison\nfunctions, string-append/string-for-each, all 18 port-layer entry\npoints (read-char/peek-char/read-line/write-char/display/write/\nnewline/read-u8/peek-u8/write-u8/char-ready?/u8-ready?/read-string/\nread-bytevector/write-bytevector/get-output-string/call-with-port/\nread), and 16 set-* entry points.\n\n535/535 r7rs_tests.scm assertions pass; 119/119 ctest suites pass\n(fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n* fix(set): validate second argument of set-intersection/-difference/-subset? even with an empty first set\n\nFound during independent code review of #173's own fix. set_intersection/\nset_difference/set_subset only validated their SECOND argument inside a\nloop guarded by the (already-checked) first argument's contents -- when\nthe first argument is a valid empty set, that loop body never executes,\nso a bad second argument silently slipped through instead of raising.\nConfirmed: (set-subset? (make-set) 42) returned #t instead of erroring,\nsame for set-intersection/set-difference silently returning an empty set.\n\nNot a crash (unlike the rest of #173's fixes) -- silently wrong output,\nsame \"correctness gap\" class as list->set's pre-existing empty-set\nbehavior, which the original #173 commit explicitly left alone as\nout of scope. This one is fixed since it's a direct, narrow gap in\nfunctions this same fix already touched, not a new family.\n\nAdded explicit checked_set() calls on the second argument up front in\nall three functions, plus a regression test for each in\ntests/r7rs_tests.scm.\n\n538/538 r7rs_tests.scm assertions pass; 119/119 ctest suites pass\n(fresh --clear-cache run).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BMiu9qzTUm6gzKJA2zkrQC\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-05T02:06:33+10:00",
+          "tree_id": "2aa3f910e28a1570257460d4dc33561556df4798",
+          "url": "https://github.com/deconstructo/curry/commit/640594723c8830351c41157afa3fdea66dcc1073"
+        },
+        "date": 1788538030410,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 18.428,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.256,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.066,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.698,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 139.473,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 284.454,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.128,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 91.165,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 73.242,
             "unit": "ms"
           }
         ]
