@@ -286,6 +286,54 @@
 
 ;;; ── Summary ──────────────────────────────────────────────────────────────────
 
+;;; ── Phase 5: issue #185 regression (unguarded list traversal:
+;;; make-dropdown/make-radio-group/gfx-fill-polygon!/gfx-draw-polygon!/
+;;; splitter-set-sizes!) ─────────────────────────────────────────────────────
+;;;
+;;; None of these checked a Scheme list was actually proper (curry_is_pair
+;;; per cell, not just curry_is_nil at the end), nor that each extracted
+;;; element had the right type, before curry_car/curry_cdr/curry_string/
+;;; curry_float -- all unchecked casts. Same class as #158..#182, via list
+;;; traversal instead of vector indexing.
+
+(check "make-dropdown rejects a list with a non-string element (was a reproducible SIGSEGV)"
+       (raises? (lambda () (make-dropdown (list #t) 0 (lambda (i) i)))) #t)
+(check "make-dropdown still works with a real string list"
+       (raises? (lambda () (make-dropdown (list "a" "b" "c") 0 (lambda (i) i)))) #f)
+
+(check "make-radio-group rejects a list with a non-string element (was a reproducible SIGSEGV)"
+       (raises? (lambda () (make-radio-group (list #t) 0 (lambda (i) i)))) #t)
+(check "make-radio-group still works with a real string list"
+       (raises? (lambda () (make-radio-group (list "x" "y") 0 (lambda (i) i)))) #f)
+
+(check "splitter-set-sizes! rejects a list with a non-numeric element (was a reproducible SIGSEGV)"
+       (raises? (lambda ()
+                  (splitter-set-sizes! (make-splitter 'horizontal) (list #t))))
+       #t)
+(check "splitter-set-sizes! still works with a real number list"
+       (raises? (lambda ()
+                  (splitter-set-sizes! (make-splitter 'horizontal) (list 100 200))))
+       #f)
+
+(call-with-painter 100 100
+  (lambda (painter)
+    (check "gfx-fill-polygon! rejects a list of non-pair points (was a reproducible SIGSEGV)"
+           (raises? (lambda () (gfx-fill-polygon! painter (list 1 2 3)))) #t)
+    (check "gfx-fill-polygon! still works with real (x . y) points"
+           (raises? (lambda ()
+                      (gfx-fill-polygon! painter
+                        (list (cons 0.0 0.0) (cons 10.0 0.0) (cons 5.0 10.0)))))
+           #f)
+    (check "gfx-draw-polygon! rejects a list of non-pair points (was a reproducible SIGSEGV)"
+           (raises? (lambda () (gfx-draw-polygon! painter (list 1 2 3)))) #t)
+    (check "gfx-draw-polygon! still works with real (x . y) points"
+           (raises? (lambda ()
+                      (gfx-draw-polygon! painter
+                        (list (cons 0.0 0.0) (cons 10.0 0.0) (cons 5.0 10.0)))))
+           #f)))
+
+;;; ── Summary ──────────────────────────────────────────────────────────────────
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")

@@ -972,9 +972,31 @@ static curry_val fn_slider_set_value(int ac, curry_val *av, void *ud) {
     return curry_void();
 }
 
+/* Issue #185: fn_make_dropdown/fn_make_radio_group below (and several
+ * other functions further down this file) walked a Scheme list via
+ * curry_cdr guarded only by curry_is_nil(p), then called curry_car(p)
+ * (or further unpacked it) with no curry_is_pair(p) check first, and/or
+ * passed the extracted element straight into curry_string/curry_float
+ * with no type check -- curry_car/curry_string/curry_float are all
+ * unchecked casts (curry_string is str_data(as_str(v)), curry_float
+ * falls to a raw as_flo(v)->value cast for non-fixnum values), so a
+ * malformed list (an improper list, or a list of the wrong element
+ * type) wild-casts. Same bug class as #158..#182, via list traversal
+ * instead of vector indexing -- a pattern the vector-focused fixes
+ * never covered. check_string_list validates a whole list up front:
+ * every cell must be a genuine pair (i.e. the list must be proper, not
+ * dotted/improper) and every element must be a string. */
+static void check_string_list(curry_val lst, const char *who) {
+    for (curry_val p = lst; !curry_is_nil(p); p = curry_cdr(p)) {
+        if (!curry_is_pair(p)) curry_error("%s: improper list", who);
+        if (!curry_is_string(curry_car(p))) curry_error("%s: list element is not a string", who);
+    }
+}
+
 /* (make-dropdown items initial-index callback) */
 static curry_val fn_make_dropdown(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    check_string_list(av[0], "make-dropdown");
     auto *combo = new QComboBox();
     for (curry_val p = av[0]; !curry_is_nil(p); p = curry_cdr(p))
         combo->addItem(QString::fromUtf8(curry_string(curry_car(p))));
@@ -1020,6 +1042,7 @@ static curry_val fn_dropdown_count(int ac, curry_val *av, void *ud) {
 /* (make-radio-group items initial-index callback) */
 static curry_val fn_make_radio_group(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    check_string_list(av[0], "make-radio-group");
     auto *container = new QWidget();
     auto *vbox      = new QVBoxLayout(container);
     vbox->setContentsMargins(0,0,0,0); vbox->setSpacing(4);
@@ -1785,6 +1808,13 @@ static curry_val fn_gl_shader_draw_arrays(int argc, curry_val *av, void *) {
         curry_val entry = curry_car(it);
         if (!curry_is_pair(entry)) continue;
         curry_val key = curry_car(entry), val = curry_cdr(entry);
+        /* Issue #185: the string fallback (curry_string(key)) ran
+         * unconditionally whenever key wasn't a symbol, with no check it
+         * was actually a string -- curry_string is str_data(as_str(v)),
+         * an unchecked cast. Skip the entry instead of wild-casting,
+         * matching this loop's existing "skip a malformed uniform entry
+         * rather than abort the whole render" style just above. */
+        if (!curry_is_symbol(key) && !curry_is_string(key)) continue;
         const char *name = curry_is_symbol(key) ? curry_symbol(key) : curry_string(key);
         if (curry_is_pair(val) && curry_is_symbol(curry_car(val)) &&
             !strcmp(curry_symbol(curry_car(val)), "gl-texture")) {
@@ -1973,6 +2003,13 @@ static curry_val fn_gl_shader_to(int argc, curry_val *av, void *) {
         curry_val entry = curry_car(it);
         if (!curry_is_pair(entry)) continue;
         curry_val key = curry_car(entry), val = curry_cdr(entry);
+        /* Issue #185: the string fallback (curry_string(key)) ran
+         * unconditionally whenever key wasn't a symbol, with no check it
+         * was actually a string -- curry_string is str_data(as_str(v)),
+         * an unchecked cast. Skip the entry instead of wild-casting,
+         * matching this loop's existing "skip a malformed uniform entry
+         * rather than abort the whole render" style just above. */
+        if (!curry_is_symbol(key) && !curry_is_string(key)) continue;
         const char *name = curry_is_symbol(key) ? curry_symbol(key) : curry_string(key);
         if (curry_is_pair(val) && curry_is_symbol(curry_car(val)) &&
             !strcmp(curry_symbol(curry_car(val)), "gl-texture")) {
@@ -2184,9 +2221,26 @@ static curry_val fn_gfx_fill_pie(int ac, curry_val *av, void *ud) {
     p->restore(); return curry_void();
 }
 
+/* Issue #185: fn_gfx_fill_polygon/fn_gfx_draw_polygon below never
+ * checked that each pt = (curry_car pts) was actually a pair before
+ * unpacking it as (x . y) via curry_car/curry_cdr, nor that x/y were
+ * real numbers before curry_float -- same unchecked-cast bug class as
+ * check_string_list above, just for a list of dotted (x . y) point
+ * pairs instead of a flat list of strings. */
+static void check_point_list(curry_val lst, const char *who) {
+    for (curry_val p = lst; !curry_is_nil(p); p = curry_cdr(p)) {
+        if (!curry_is_pair(p)) curry_error("%s: improper list", who);
+        curry_val pt = curry_car(p);
+        if (!curry_is_pair(pt)) curry_error("%s: point is not a pair", who);
+        if (!is_real_number(curry_car(pt)) || !is_real_number(curry_cdr(pt)))
+            curry_error("%s: point coordinates must be real numbers", who);
+    }
+}
+
 /* Polygon — points is a Scheme list of (x . y) pairs */
 static curry_val fn_gfx_fill_polygon(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    check_point_list(av[1], "gfx-fill-polygon!");
     QPainter *p = P; QPolygonF poly;
     for (curry_val pts = av[1]; !curry_is_nil(pts); pts = curry_cdr(pts)) {
         curry_val pt = curry_car(pts);
@@ -2198,6 +2252,7 @@ static curry_val fn_gfx_fill_polygon(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_gfx_draw_polygon(int ac, curry_val *av, void *ud) {
     (void)ud;(void)ac;
+    check_point_list(av[1], "gfx-draw-polygon!");
     QPainter *p = P; QPolygonF poly;
     for (curry_val pts = av[1]; !curry_is_nil(pts); pts = curry_cdr(pts)) {
         curry_val pt = curry_car(pts);
@@ -2533,8 +2588,20 @@ static curry_val fn_splitter_add(int ac, curry_val *av, void *ud) {
 }
 
 /* (splitter-set-sizes! splitter '(h1 h2 ...)) */
+/* Issue #185: same unchecked-cast bug class as check_string_list/
+ * check_point_list above -- fn_splitter_set_sizes walked a Scheme list
+ * via curry_cdr guarded only by curry_is_nil, then fed curry_car(p)
+ * straight into curry_float with no pair/numeric check first. */
+static void check_number_list(curry_val lst, const char *who) {
+    for (curry_val p = lst; !curry_is_nil(p); p = curry_cdr(p)) {
+        if (!curry_is_pair(p)) curry_error("%s: improper list", who);
+        if (!is_real_number(curry_car(p))) curry_error("%s: list element is not a real number", who);
+    }
+}
+
 static curry_val fn_splitter_set_sizes(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    check_number_list(av[1], "splitter-set-sizes!");
     QList<int> sizes;
     for (curry_val p = av[1]; !curry_is_nil(p); p = curry_cdr(p))
         sizes << (int)curry_float(curry_car(p));
