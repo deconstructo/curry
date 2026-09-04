@@ -213,6 +213,13 @@ static curry_val fn_socket_local_port(int ac, curry_val *av, void *ud) {
 static curry_val fn_socket_send(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd = net_extract_fd(av[0], "socket-send");
+    /* Issue #161: the socket HANDLE (av[0], just above) is validated via
+     * net_extract_fd, but this data argument never was -- curry_bytevector_
+     * length/data (src/api.c) do an unchecked as_bytes() cast assuming
+     * their argument already IS a bytevector, the identical hazard #158
+     * closed for the handle. Confirmed reproducible SIGSEGV via
+     * (socket-send some-socket 42). */
+    if (!curry_is_bytevector(av[1])) curry_error("socket-send: data must be a bytevector");
     uint32_t len = curry_bytevector_length(av[1]);
     const uint8_t *data = curry_bytevector_data(av[1]);
     int flags = ac > 2 ? (int)curry_fixnum(av[2]) : 0;

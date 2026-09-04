@@ -33,6 +33,11 @@ static const char b64_table[] =
 
 static curry_val fn_base64_encode(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    /* Issue #161: same unchecked as_bytes()-cast hazard #158/#161 already
+     * fixed for the network module's socket-send/udp-send -- every
+     * function in this file taking a bytevector argument straight from
+     * Scheme had the identical gap. */
+    if (!curry_is_bytevector(av[0])) curry_error("base64-encode: argument must be a bytevector");
     uint32_t inlen = curry_bytevector_length(av[0]);
     size_t outlen = 4 * ((inlen + 2) / 3) + 1;
     char *out = malloc(outlen);
@@ -194,6 +199,8 @@ static void md5_final(MD5Ctx *ctx, uint8_t *digest) {
 
 static curry_val fn_md5(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    /* Issue #161: same fix as fn_base64_encode above. */
+    if (!curry_is_bytevector(av[0])) curry_error("md5: argument must be a bytevector");
     MD5Ctx ctx; md5_init(&ctx);
     uint32_t n = curry_bytevector_length(av[0]);
     uint8_t *tmp = malloc(n);
@@ -216,6 +223,9 @@ static curry_val fn_md5_hex(int ac, curry_val *av, void *ud) {
 /* ---- SHA-1, SHA-256, HMAC via OpenSSL EVP ---- */
 
 static curry_val hash_via_evp(const EVP_MD *md, curry_val bv_in) {
+    /* Issue #161: same fix as fn_base64_encode above -- shared by
+     * fn_sha1/fn_sha256, both of which pass av[0] straight through. */
+    if (!curry_is_bytevector(bv_in)) curry_error("sha1/sha256: argument must be a bytevector");
     uint32_t inlen = curry_bytevector_length(bv_in);
     uint8_t *in = malloc(inlen);
     for (uint32_t i = 0; i < inlen; i++) in[i] = curry_bytevector_ref(bv_in, i);
@@ -252,6 +262,10 @@ static curry_val fn_sha256_hex(int ac,curry_val *av,void *ud){ (void)ud; return 
 
 static curry_val fn_hmac_sha256(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
+    /* Issue #161: same fix as fn_base64_encode above -- two arguments
+     * here, both need the check. */
+    if (!curry_is_bytevector(av[0])) curry_error("hmac-sha256: key must be a bytevector");
+    if (!curry_is_bytevector(av[1])) curry_error("hmac-sha256: data must be a bytevector");
     uint32_t klen = curry_bytevector_length(av[0]);
     uint32_t dlen = curry_bytevector_length(av[1]);
     uint8_t *key  = malloc(klen), *data = malloc(dlen);

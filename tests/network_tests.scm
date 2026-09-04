@@ -261,6 +261,25 @@
 ;; successfully above using real tcp-listen/udp-socket handles.
 
 ;;; ════════════════════════════════════════════════════════════
+;;; Issue #161 (second finding): socket-send/udp-send's DATA argument
+;;; (as opposed to the SOCKET HANDLE argument #158/above already
+;;; covers) was never checked either -- curry_bytevector_length/data do
+;;; the identical unchecked as_bytes() cast on whatever was passed,
+;;; reproduced as an actual SIGSEGV via (socket-send some-socket 42)/
+;;; (udp-send some-socket 42 host port). Fixed with a curry_is_bytevector
+;;; check in both fn_socket_send (srfi106.c) and fn_udp_send (network.c).
+;;; ════════════════════════════════════════════════════════════
+(check "udp-send rejects a non-bytevector data argument (was a reproducible SIGSEGV)"
+  (raises? (lambda () (udp-send (udp-socket) 42 "127.0.0.1" 9))) #t)
+(let* ((s1 (udp-socket)) (s2 (udp-socket)))
+  (udp-bind s2 19193)
+  (check "socket-send rejects a non-bytevector data argument (was a reproducible SIGSEGV)"
+    (raises? (lambda () (socket-send s1 42))) #t)
+  (tcp-close s1) (tcp-close s2))
+;; Genuine bytevector data must still work normally -- confirmed
+;; implicitly by udp-send's own successful use throughout § 4 above.
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

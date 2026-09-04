@@ -235,6 +235,13 @@ if(BUILD_MODULE_PIPER AND TARGET curry_piper)
     set_tests_properties(piper PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+# No dedicated (curry crypto) suite existed before issue #161's fix --
+# only akkadian_tests.scm's Akkadian-alias checks exercised it, and only
+# incidentally.
+if(BUILD_MODULE_CRYPTO AND TARGET curry_crypto)
+    add_test(NAME crypto COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/crypto_tests.scm)
+endif()
+
 # (curry s3) imports (curry crypto) for HMAC-SHA256/SHA-256 and
 # (curry http) for the actual requests -- both needed to even import,
 # regardless of whether a live S3-compatible endpoint is reachable

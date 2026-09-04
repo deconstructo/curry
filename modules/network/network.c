@@ -188,6 +188,11 @@ static curry_val fn_udp_bind(int ac, curry_val *av, void *ud) {
 static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t fd = net_checked_val_to_sock(av[0], "udp-send");
+    /* Issue #161: same hazard as srfi106.c's identical fix in
+     * fn_socket_send -- the socket HANDLE is validated just above, but
+     * this data argument never was. Confirmed reproducible SIGSEGV via
+     * (udp-send some-socket 42 host port). */
+    if (!curry_is_bytevector(av[1])) curry_error("udp-send: data must be a bytevector");
     uint32_t dlen = curry_bytevector_length(av[1]);
     uint8_t *data = malloc(dlen > 0 ? dlen : 1);
     if (!data) curry_error("udp-send: out of memory");
