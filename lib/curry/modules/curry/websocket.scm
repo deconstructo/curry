@@ -19,11 +19,19 @@
 ;;; live data to a browser-side frontend (e.g. React/whatever) without
 ;;; needing curry to also speak HTTP.
 (define-library (curry websocket)
-  (import (scheme base) (scheme write) (srfi s106 sockets) (curry crypto) (curry sync))
+  (import (scheme base) (scheme write) (srfi s106 sockets) (curry crypto) (curry sync)
+          ;; Just for socket-local-port, used by ws-listener-port below --
+          ;; a curry-specific extension (querying a bound socket's actual
+          ;; local port, needed to support listening on an OS-assigned
+          ;; ephemeral port rather than a hardcoded one) that isn't part of
+          ;; the SRFI-106 spec, so it isn't exported from
+          ;; (srfi s106 sockets) itself (see that file's own header
+          ;; comment on staying spec-faithful).
+          (curry network))
   (export
     ws-connect ws-send! ws-send-binary! ws-recv! ws-close! ws-closed?
     ws? ws-path
-    ws-listen ws-accept ws-listener? ws-listener-close!)
+    ws-listen ws-accept ws-listener? ws-listener-close! ws-listener-port)
   (begin
 
     ;; A GUID fixed by RFC 6455 itself -- concatenated with the client's
@@ -192,6 +200,14 @@
     ;; ---- Server: ws-listen / ws-accept
 
     (define (ws-listen port) (%make-ws-listener (make-server-socket port)))
+
+    ;; The actual port a listener is bound to -- needed when ws-listen was
+    ;; called with 0 (ask the OS for an arbitrary free ephemeral port,
+    ;; instead of a hardcoded one that risks colliding with another
+    ;; process, e.g. a lingering listener from a previous test run under
+    ;; parallel CI load), since the caller doesn't learn which port that
+    ;; actually is until after the underlying bind() has already happened.
+    (define (ws-listener-port listener) (socket-local-port (%ws-listener-socket listener)))
 
     (define (ws-listener-close! listener) (socket-close (%ws-listener-socket listener)))
 

@@ -24,7 +24,6 @@
              (display "  expected ") (write expected) (newline)
              (set! fail (+ fail 1)))))
 
-(define test-port 17996)
 (define ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
 ;;; ---- minimal from-scratch server-side handshake + framing ----
@@ -108,7 +107,13 @@
 
 ;;; ---- the mock server actor: canned protocol exchange for the test ----
 
-(define listener (tcp-listen test-port))
+;; Issue #110: a hardcoded port collides under CI parallel load (another
+;; process, or a lingering listener from a previous test run, already
+;; bound to it). 0 asks the OS for an arbitrary free ephemeral port;
+;; socket-local-port reads back which one it actually picked, since that
+;; isn't known until after bind() has already happened.
+(define listener (tcp-listen 0))
+(define test-port (socket-local-port listener))
 
 (define server-thread
   (spawn (lambda ()
@@ -192,8 +197,8 @@
 ;;; A server-to-client frame with the mask bit set is a protocol
 ;;; violation the client must reject, not silently unmask and accept.
 
-(define mask-test-port 17995)
-(define mask-listener (tcp-listen mask-test-port))
+(define mask-listener (tcp-listen 0))
+(define mask-test-port (socket-local-port mask-listener))
 
 (define mask-server-thread
   (spawn (lambda ()
