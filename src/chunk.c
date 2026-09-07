@@ -131,6 +131,7 @@ Chunk *chunk_new(void) {
     c->name       = NULL;
     c->source_name = NULL;
     c->glob_cache = NULL;
+    c->glob_cache_lock = 0;
     c->tree_eval_cache = NULL;
     c->local_debug = NULL;
     c->local_debug_len = 0;

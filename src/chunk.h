@@ -57,6 +57,20 @@ typedef struct {
                                  caller-owned, must outlive the chunk     */
 
     GlobCacheEntry *glob_cache; /* parallel to constants[], filled lazily; GC-traced */
+    /* Issue #162 follow-up: a coarse spinlock (0=unlocked, 1=locked)
+     * serializing WRITES to glob_cache entries only -- reads stay fully
+     * lock-free via vm.c's gcache_load. Without this, two actor threads
+     * racing a cache-fill for the SAME entry (e.g. both miss around a
+     * concurrent GLOBAL_ENV frame_grow) could interleave their two
+     * independent field writes into a torn (slot, version) pair that
+     * neither writer produced -- gcache_load/gcache_store's acquire/
+     * release pairing only protects one writer against readers, not
+     * writer against writer. Cache fills are infrequent (a miss, or an
+     * explicit define/set!), never the hot read path, so a spinlock here
+     * costs nothing in practice. Zero-initialized like every other Chunk
+     * field (chunk_new), so unlocked by default with no explicit init
+     * needed on the .scc-load path either. */
+    int glob_cache_lock;
 
     /* Per-call-site cache for OP_TREE_EVAL_CACHED (the tree-eval
      * passthrough for import/define-library/library -- see
