@@ -194,24 +194,17 @@ static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v
                             Buf *resp, HdrList *hdrs, long *code_out) {
     pthread_once(&g_curl_init_once, curl_init_once_fn);
 
-    CURL *curl = curl_easy_init();
-    if (!curl) curry_error("http: failed to init curl");
-
-    struct curl_slist *req_headers = NULL;
-
     /* Issue #192: this trusted hdrs_v to be a proper alist of
      * (string . string) pairs -- neither the list-spine nor each
      * element's shape was checked before curry_car/curry_string wild-cast
      * whatever was actually there, the same class #189 fixed for direct
-     * scalar arguments. */
+     * scalar arguments. Validated before curl_easy_init() so a rejected
+     * headers argument doesn't leak a CURL handle on every call. */
+    struct curl_slist *req_headers = NULL;
     for (curry_val l = hdrs_v; !curry_is_nil(l); l = curry_cdr(l)) {
         if (!curry_is_pair(l)) curry_error("http: headers must be a proper list");
-        curry_val kv = curry_car(l);
-        if (!curry_is_pair(kv) || !curry_is_string(curry_car(kv)) ||
-            !curry_is_string(curry_cdr(kv)))
-            curry_error("http: headers must be an alist of (string . string) pairs");
-        const char *name = curry_string(curry_car(kv));
-        const char *val  = curry_string(curry_cdr(kv));
+        const char *name, *val;
+        checked_string_pair(curry_car(l), "http: headers", &name, &val);
         if (strchr(name, '\r') || strchr(name, '\n') ||
             strchr(val,  '\r') || strchr(val,  '\n'))
             curry_error("http: header contains CR/LF — injection rejected");
@@ -219,6 +212,9 @@ static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v
         snprintf(hdr, sizeof(hdr), "%s: %s", name, val);
         req_headers = curl_slist_append(req_headers, hdr);
     }
+
+    CURL *curl = curl_easy_init();
+    if (!curl) { curl_slist_free_all(req_headers); curry_error("http: failed to init curl"); }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);

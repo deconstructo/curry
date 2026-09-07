@@ -60,4 +60,19 @@ static inline intptr_t checked_fixnum(curry_val v, int argpos, const char *who) 
     return curry_fixnum(v);
 }
 
+/* Issue #192: the same unchecked-cast hazard one layer deeper -- a
+ * (string . string) pair pulled out of a caller-supplied alist (e.g. an
+ * HTTP/GraphQL headers argument) needs the same guard before
+ * curry_string(curry_car(kv))/curry_string(curry_cdr(kv)) touch it.
+ * Originally duplicated identically in http.c's do_request and
+ * graphql.c's fn_graphql_client; promoted here for the same reason the
+ * scalar checked_* wrappers above were. */
+static inline void checked_string_pair(curry_val kv, const char *who,
+                                        const char **name_out, const char **val_out) {
+    if (!curry_is_pair(kv) || !curry_is_string(curry_car(kv)) || !curry_is_string(curry_cdr(kv)))
+        curry_error("%s: expected an alist of (string . string) pairs", who);
+    *name_out = curry_string(curry_car(kv));
+    *val_out  = curry_string(curry_cdr(kv));
+}
+
 #endif /* CURRY_CHECKED_ARGS_H */

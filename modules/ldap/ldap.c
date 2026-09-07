@@ -138,24 +138,32 @@ static int scope_from_sym(curry_val sym) {
  * the length-counting loop nor the fill loop checked curry_is_pair before
  * curry_cdr, nor curry_is_string before curry_string(curry_car(v)), so an
  * improper list or a list containing a non-string element wild-cast the
- * same way #189's direct scalar arguments did. */
+ * same way #189's direct scalar arguments did.
+ *
+ * Single pass rather than a count-then-fill pair of walks: curry actors
+ * are real OS threads sharing one GC heap, and pairs are mutable via
+ * set-car!/set-cdr!, so a separate validating count pass followed by an
+ * unchecked fill pass would leave a window for another actor holding the
+ * same list to mutate an element in between and still hit the wild-cast
+ * this fix closes. */
 static char **attrs_from_val(curry_val v) {
     if (curry_is_bool(v) && !curry_bool(v)) return NULL;  /* #f → all attrs */
-    int n = 0;
+    int n = 0, cap = 0;
+    char **arr = NULL;
     curry_val tmp = v;
     while (curry_is_pair(tmp)) {
         if (!curry_is_string(curry_car(tmp)))
             curry_error("ldap-search: attrs list must contain only strings");
-        n++;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 8;
+            arr = realloc(arr, (size_t)(cap + 1) * sizeof(char *));
+        }
+        arr[n++] = (char *)curry_string(curry_car(tmp));
         tmp = curry_cdr(tmp);
     }
     if (!curry_is_nil(tmp))
         curry_error("ldap-search: attrs must be a proper list of strings, or #f");
-    char **arr = calloc((size_t)(n + 1), sizeof(char *));
-    for (int i = 0; i < n; i++) {
-        arr[i] = (char *)curry_string(curry_car(v));
-        v = curry_cdr(v);
-    }
+    if (!arr) arr = calloc(1, sizeof(char *));
     arr[n] = NULL;
     return arr;
 }

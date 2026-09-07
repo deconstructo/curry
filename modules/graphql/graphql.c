@@ -276,33 +276,33 @@ static Buf gql_post(GQLClient *c, const char *body_json) {
 
 static curry_val fn_graphql_client(int ac, curry_val *av, void *ud) {
     (void)ud;
-    GQLClient *c = calloc(1, sizeof(GQLClient));
-    c->url = strdup(checked_string(av[0], 1, "graphql-client"));
-    pthread_once(&g_curl_init_once, curl_init_once_fn);
+    const char *url = checked_string(av[0], 1, "graphql-client");
 
-    c->headers = NULL;
-    /* Optional headers alist */
+    /* Issue #192: same unguarded alist-of-pairs pattern as http.c's
+     * do_request -- neither the list-spine nor each element's shape was
+     * checked before curry_car/curry_string wild-cast. Built before
+     * allocating GQLClient so a rejected headers argument doesn't leak
+     * the struct and its strdup'd url on every call. */
+    struct curl_slist *headers = NULL;
     if (ac > 1 && !curry_is_bool(av[1])) {
-        /* Issue #192: same unguarded alist-of-pairs pattern as http.c's
-         * do_request -- neither the list-spine nor each element's shape
-         * was checked before curry_car/curry_string wild-cast. */
         for (curry_val l = av[1]; !curry_is_nil(l); l = curry_cdr(l)) {
             if (!curry_is_pair(l)) curry_error("graphql-client: headers must be a proper list");
-            curry_val pair = curry_car(l);
-            if (!curry_is_pair(pair) || !curry_is_string(curry_car(pair)) ||
-                !curry_is_string(curry_cdr(pair)))
-                curry_error("graphql-client: headers must be an alist of (string . string) pairs");
-            const char *name = curry_string(curry_car(pair));
-            const char *val  = curry_string(curry_cdr(pair));
+            const char *name, *val;
+            checked_string_pair(curry_car(l), "graphql-client: headers", &name, &val);
             /* Reject headers containing CR or LF to prevent header injection */
             if (strchr(name, '\r') || strchr(name, '\n') ||
                 strchr(val,  '\r') || strchr(val,  '\n'))
                 curry_error("graphql: header name or value contains CR/LF — injection rejected");
             char hdr[512];
             snprintf(hdr, sizeof(hdr), "%s: %s", name, val);
-            c->headers = curl_slist_append(c->headers, hdr);
+            headers = curl_slist_append(headers, hdr);
         }
     }
+
+    GQLClient *c = calloc(1, sizeof(GQLClient));
+    c->url = strdup(url);
+    c->headers = headers;
+    pthread_once(&g_curl_init_once, curl_init_once_fn);
     return gql_to_val(c);
 }
 
