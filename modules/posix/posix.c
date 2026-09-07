@@ -158,10 +158,19 @@ static curry_val make_file_info(const struct stat *st) {
     return v;
 }
 
+/* Issue #192: this checked the tag and vector length, but never that
+ * every other slot was actually a fixnum before fn_file_info_ref/
+ * fn_file_info_type_p's own unchecked curry_fixnum(curry_vector_ref(...))
+ * casts touch it -- any Scheme code can forge
+ * (vector 'file-info "x" "x" ...) and hit the same wild-cast class #189
+ * fixed for direct scalar arguments. */
 static int is_file_info(curry_val v) {
     if (!curry_is_vector(v) || curry_vector_length(v) != FI_LEN) return 0;
     curry_val tag = curry_vector_ref(v, FI_TAG);
-    return curry_is_symbol(tag) && strcmp(curry_symbol(tag), "file-info") == 0;
+    if (!curry_is_symbol(tag) || strcmp(curry_symbol(tag), "file-info") != 0) return 0;
+    for (int i = FI_DEVICE; i < FI_LEN; i++)
+        if (!curry_is_fixnum(curry_vector_ref(v, i))) return 0;
+    return 1;
 }
 
 static curry_val checked_file_info(curry_val v, const char *fn) {
@@ -668,9 +677,15 @@ fail_errno:
 
 enum { PH_PID = 0, PH_STDIN, PH_STDOUT, PH_STDERR, PH_REAPED, PH_EXITCODE, PH_LEN };
 
+/* Issue #192: this checked the tag, vector-ness, and length, but never
+ * that PH_PID was actually a fixnum before reap_nonblocking/fn_process_kill's
+ * own unchecked curry_fixnum(curry_vector_ref(vec, PH_PID)) casts touch it
+ * -- any Scheme code can forge (cons 'process (vector "not-a-pid" ...))
+ * and hit the same wild-cast class #189 fixed for direct scalar arguments. */
 static int is_process_handle(curry_val v) {
     return has_tag(v, "process") && curry_is_vector(curry_cdr(v)) &&
-           curry_vector_length(curry_cdr(v)) == PH_LEN;
+           curry_vector_length(curry_cdr(v)) == PH_LEN &&
+           curry_is_fixnum(curry_vector_ref(curry_cdr(v), PH_PID));
 }
 
 static curry_val checked_process(curry_val v, const char *fn) {

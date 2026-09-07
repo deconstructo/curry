@@ -115,11 +115,20 @@ static void json_escape(const char *s, Buf *out) {
 
 static void val_to_json(curry_val v, Buf *out);
 
+/* Issue #192: val_to_json's caller only verifies the FIRST element looks
+ * like an (string . value) pair before routing here -- every later
+ * element's shape went unchecked, so a vars argument like
+ * (list (cons "a" 1) 42) wild-cast on the second element's
+ * curry_car/curry_string, the same class #189 fixed for direct scalar
+ * arguments. */
 static void alist_to_json(curry_val v, Buf *out) {
     buf_write("{", 1, 1, out);
     bool first = true;
     while (!curry_is_nil(v)) {
+        if (!curry_is_pair(v)) curry_error("graphql: variables must be a proper list");
         curry_val pair = curry_car(v);
+        if (!curry_is_pair(pair) || !curry_is_string(curry_car(pair)))
+            curry_error("graphql: variables must be an alist of (string . value) pairs");
         if (!first) buf_write(",", 1, 1, out);
         json_escape(curry_string(curry_car(pair)), out);
         buf_write(":", 1, 1, out);
@@ -274,8 +283,15 @@ static curry_val fn_graphql_client(int ac, curry_val *av, void *ud) {
     c->headers = NULL;
     /* Optional headers alist */
     if (ac > 1 && !curry_is_bool(av[1])) {
+        /* Issue #192: same unguarded alist-of-pairs pattern as http.c's
+         * do_request -- neither the list-spine nor each element's shape
+         * was checked before curry_car/curry_string wild-cast. */
         for (curry_val l = av[1]; !curry_is_nil(l); l = curry_cdr(l)) {
+            if (!curry_is_pair(l)) curry_error("graphql-client: headers must be a proper list");
             curry_val pair = curry_car(l);
+            if (!curry_is_pair(pair) || !curry_is_string(curry_car(pair)) ||
+                !curry_is_string(curry_cdr(pair)))
+                curry_error("graphql-client: headers must be an alist of (string . string) pairs");
             const char *name = curry_string(curry_car(pair));
             const char *val  = curry_string(curry_cdr(pair));
             /* Reject headers containing CR or LF to prevent header injection */

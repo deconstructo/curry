@@ -199,8 +199,17 @@ static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v
 
     struct curl_slist *req_headers = NULL;
 
+    /* Issue #192: this trusted hdrs_v to be a proper alist of
+     * (string . string) pairs -- neither the list-spine nor each
+     * element's shape was checked before curry_car/curry_string wild-cast
+     * whatever was actually there, the same class #189 fixed for direct
+     * scalar arguments. */
     for (curry_val l = hdrs_v; !curry_is_nil(l); l = curry_cdr(l)) {
+        if (!curry_is_pair(l)) curry_error("http: headers must be a proper list");
         curry_val kv = curry_car(l);
+        if (!curry_is_pair(kv) || !curry_is_string(curry_car(kv)) ||
+            !curry_is_string(curry_cdr(kv)))
+            curry_error("http: headers must be an alist of (string . string) pairs");
         const char *name = curry_string(curry_car(kv));
         const char *val  = curry_string(curry_cdr(kv));
         if (strchr(name, '\r') || strchr(name, '\n') ||

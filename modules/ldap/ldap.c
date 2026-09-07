@@ -134,11 +134,23 @@ static int scope_from_sym(curry_val sym) {
     curry_error("ldap-search: unknown scope '%s' (use 'base, 'one, or 'sub)", s);
 }
 
+/* Issue #192: this trusted v to be a proper list of strings -- neither
+ * the length-counting loop nor the fill loop checked curry_is_pair before
+ * curry_cdr, nor curry_is_string before curry_string(curry_car(v)), so an
+ * improper list or a list containing a non-string element wild-cast the
+ * same way #189's direct scalar arguments did. */
 static char **attrs_from_val(curry_val v) {
     if (curry_is_bool(v) && !curry_bool(v)) return NULL;  /* #f → all attrs */
     int n = 0;
     curry_val tmp = v;
-    while (!curry_is_nil(tmp)) { n++; tmp = curry_cdr(tmp); }
+    while (curry_is_pair(tmp)) {
+        if (!curry_is_string(curry_car(tmp)))
+            curry_error("ldap-search: attrs list must contain only strings");
+        n++;
+        tmp = curry_cdr(tmp);
+    }
+    if (!curry_is_nil(tmp))
+        curry_error("ldap-search: attrs must be a proper list of strings, or #f");
     char **arr = calloc((size_t)(n + 1), sizeof(char *));
     for (int i = 0; i < n; i++) {
         arr[i] = (char *)curry_string(curry_car(v));
