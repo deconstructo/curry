@@ -22,6 +22,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,8 +55,8 @@
 
 static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    const char *host = curry_string(av[0]);
-    int port = (int)curry_fixnum(av[1]);
+    const char *host = checked_string(av[0], 1, "tcp-connect");
+    int port = (int)checked_fixnum(av[1], 2, "tcp-connect");
     char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", port);
 
     struct addrinfo hints = {0}, *res;
@@ -103,8 +104,8 @@ static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_tcp_listen(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    int port = (int)curry_fixnum(av[0]);
-    int backlog = ac > 1 ? (int)curry_fixnum(av[1]) : 10;
+    int port = (int)checked_fixnum(av[0], 1, "tcp-listen");
+    int backlog = ac > 1 ? (int)checked_fixnum(av[1], 2, "tcp-listen") : 10;
 
     sock_t fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (fd == SOCK_INVALID) curry_error("tcp-listen: socket failed");
@@ -175,7 +176,7 @@ static curry_val fn_udp_socket(int ac, curry_val *av, void *ud) {
 static curry_val fn_udp_bind(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t fd = net_checked_val_to_sock(av[0], "udp-bind");
-    int port = (int)curry_fixnum(av[1]);
+    int port = (int)checked_fixnum(av[1], 2, "udp-bind");
     struct sockaddr_in6 addr = {0};
     addr.sin6_family = AF_INET6;
     addr.sin6_port   = htons((uint16_t)port);
@@ -197,8 +198,8 @@ static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
     uint8_t *data = malloc(dlen > 0 ? dlen : 1);
     if (!data) curry_error("udp-send: out of memory");
     for (uint32_t i = 0; i < dlen; i++) data[i] = curry_bytevector_ref(av[1], i);
-    const char *host = curry_string(av[2]);
-    int port = (int)curry_fixnum(av[3]);
+    const char *host = checked_string(av[2], 3, "udp-send");
+    int port = (int)checked_fixnum(av[3], 4, "udp-send");
     char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", port);
     struct addrinfo hints = {0}, *res;
     hints.ai_family   = AF_INET6;
@@ -217,7 +218,7 @@ static curry_val fn_udp_send(int ac, curry_val *av, void *ud) {
 static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t fd = net_checked_val_to_sock(av[0], "udp-recv");
-    int maxbytes = (int)curry_fixnum(av[1]);
+    int maxbytes = (int)checked_fixnum(av[1], 2, "udp-recv");
     if (maxbytes <= 0) curry_error("udp-recv: maxbytes must be positive");
     uint8_t *buf = malloc((size_t)maxbytes);
     if (!buf) curry_error("udp-recv: out of memory");
@@ -265,7 +266,7 @@ static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     struct timeval tv = {0, 0};
     struct timeval *tvp = &tv;
     if (ac > 1) {
-        double ms = curry_float(av[1]);
+        double ms = checked_float(av[1], 2, "socket-ready?");
         tv.tv_sec  = (long)(ms / 1000.0);
         tv.tv_usec = (long)(((long long)ms % 1000) * 1000);
     }

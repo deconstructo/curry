@@ -25,6 +25,7 @@
  * defined; harmless no-op on other platforms. */
 #define _DARWIN_C_SOURCE
 #include <curry.h>
+#include <curry_checked_args.h>
 #include "version.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,10 +158,19 @@ static curry_val make_file_info(const struct stat *st) {
     return v;
 }
 
+/* Issue #192: this checked the tag and vector length, but never that
+ * every other slot was actually a fixnum before fn_file_info_ref/
+ * fn_file_info_type_p's own unchecked curry_fixnum(curry_vector_ref(...))
+ * casts touch it -- any Scheme code can forge
+ * (vector 'file-info "x" "x" ...) and hit the same wild-cast class #189
+ * fixed for direct scalar arguments. */
 static int is_file_info(curry_val v) {
     if (!curry_is_vector(v) || curry_vector_length(v) != FI_LEN) return 0;
     curry_val tag = curry_vector_ref(v, FI_TAG);
-    return curry_is_symbol(tag) && strcmp(curry_symbol(tag), "file-info") == 0;
+    if (!curry_is_symbol(tag) || strcmp(curry_symbol(tag), "file-info") != 0) return 0;
+    for (int i = FI_DEVICE; i < FI_LEN; i++)
+        if (!curry_is_fixnum(curry_vector_ref(v, i))) return 0;
+    return 1;
 }
 
 static curry_val checked_file_info(curry_val v, const char *fn) {
@@ -667,9 +677,15 @@ fail_errno:
 
 enum { PH_PID = 0, PH_STDIN, PH_STDOUT, PH_STDERR, PH_REAPED, PH_EXITCODE, PH_LEN };
 
+/* Issue #192: this checked the tag, vector-ness, and length, but never
+ * that PH_PID was actually a fixnum before reap_nonblocking/fn_process_kill's
+ * own unchecked curry_fixnum(curry_vector_ref(vec, PH_PID)) casts touch it
+ * -- any Scheme code can forge (cons 'process (vector "not-a-pid" ...))
+ * and hit the same wild-cast class #189 fixed for direct scalar arguments. */
 static int is_process_handle(curry_val v) {
     return has_tag(v, "process") && curry_is_vector(curry_cdr(v)) &&
-           curry_vector_length(curry_cdr(v)) == PH_LEN;
+           curry_vector_length(curry_cdr(v)) == PH_LEN &&
+           curry_is_fixnum(curry_vector_ref(curry_cdr(v), PH_PID));
 }
 
 static curry_val checked_process(curry_val v, const char *fn) {
@@ -818,7 +834,7 @@ static curry_val fn_process_kill(int ac, curry_val *av, void *ud) {
     if (is_process_handle(av[0]))
         pid = (pid_t)curry_fixnum(curry_vector_ref(curry_cdr(av[0]), PH_PID));
     else if (curry_is_fixnum(av[0]))
-        pid = (pid_t)curry_fixnum(av[0]);
+        pid = (pid_t)checked_fixnum(av[0], 1, "process-kill");
     else
         curry_error("posix: process-kill: expected a process handle or a pid");
     int sig = ac >= 2 ? signal_from_val(av[1], "process-kill") : SIGTERM;
@@ -1007,7 +1023,7 @@ static curry_val fn_user_info(int ac, curry_val *av, void *ud) {
     char buf[4096];
     int rc;
     if (curry_is_fixnum(av[0]))
-        rc = getpwuid_r((uid_t)curry_fixnum(av[0]), &pwbuf, buf, sizeof(buf), &pw);
+        rc = getpwuid_r((uid_t)checked_fixnum(av[0], 1, "user-info"), &pwbuf, buf, sizeof(buf), &pw);
     else
         rc = getpwnam_r(req_string(av[0], "user-info"), &pwbuf, buf, sizeof(buf), &pw);
     if (rc != 0) { errno = rc; posix_error("user-info"); }
@@ -1046,7 +1062,7 @@ static curry_val fn_group_info(int ac, curry_val *av, void *ud) {
     char buf[4096];
     int rc;
     if (curry_is_fixnum(av[0]))
-        rc = getgrgid_r((gid_t)curry_fixnum(av[0]), &grbuf, buf, sizeof(buf), &gr);
+        rc = getgrgid_r((gid_t)checked_fixnum(av[0], 1, "group-info"), &grbuf, buf, sizeof(buf), &gr);
     else
         rc = getgrnam_r(req_string(av[0], "group-info"), &grbuf, buf, sizeof(buf), &gr);
     if (rc != 0) { errno = rc; posix_error("group-info"); }
@@ -1102,7 +1118,7 @@ static curry_val fn_terminal_p(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd;
     if (ac == 0) fd = STDIN_FILENO;
-    else if (curry_is_fixnum(av[0])) fd = (int)curry_fixnum(av[0]);
+    else if (curry_is_fixnum(av[0])) fd = (int)checked_fixnum(av[0], 1, "terminal?");
     else fd = curry_port_fd(av[0]);
     if (fd < 0) return curry_make_bool(false);
     return curry_make_bool(isatty(fd) != 0);

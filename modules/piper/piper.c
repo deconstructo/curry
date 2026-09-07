@@ -41,6 +41,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -193,9 +194,9 @@ static void free_leaked_synths_at_exit(void) {
 
 static curry_val fn_piper_create(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *model_path = curry_string(av[0]);
-    const char *config_path = (ac > 1 && curry_is_true(av[1])) ? curry_string(av[1]) : NULL;
-    const char *espeak_data_path = (ac > 2 && curry_is_true(av[2])) ? curry_string(av[2]) : NULL;
+    const char *model_path = checked_string(av[0], 1, "piper-create");
+    const char *config_path = (ac > 1 && curry_is_true(av[1])) ? checked_string(av[1], 2, "piper-create") : NULL;
+    const char *espeak_data_path = (ac > 2 && curry_is_true(av[2])) ? checked_string(av[2], 3, "piper-create") : NULL;
 
     /* piper_create is a C++ implementation behind an extern "C" API that
      * does NOT catch its own internal exceptions (confirmed: a
@@ -563,7 +564,7 @@ static curry_val fn_piper_speak_async(int ac, curry_val *av, void *ud) {
                 "(use piper-save to write a WAV file instead)");
 #endif
     piper_synthesizer *synth = (piper_synthesizer *)val_to_ptr(av[0]);
-    const char *text = curry_string(av[1]);
+    const char *text = checked_string(av[1], 2, "piper-speak-async");
     curry_val speaker_id = ac > 2 ? av[2] : curry_make_bool(false);
     curry_val length_scale = ac > 3 ? av[3] : curry_make_bool(false);
 
@@ -692,8 +693,8 @@ static curry_val fn_piper_save(int ac, curry_val *av, void *ud) {
     if (!val_is_tagged(av[0], "piper-synth"))
         curry_error("piper-save: not a piper synth handle");
     piper_synthesizer *synth = (piper_synthesizer *)val_to_ptr(av[0]);
-    const char *text = curry_string(av[1]);
-    const char *path = curry_string(av[2]);
+    const char *text = checked_string(av[1], 2, "piper-save");
+    const char *path = checked_string(av[2], 3, "piper-save");
     curry_val speaker_id = ac > 3 ? av[3] : curry_make_bool(false);
     curry_val length_scale = ac > 4 ? av[4] : curry_make_bool(false);
 

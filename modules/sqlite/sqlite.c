@@ -15,6 +15,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,7 +93,7 @@ static curry_val row_to_alist(sqlite3_stmt *stmt) {
 static curry_val fn_open(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sqlite3 *db = NULL;
-    int rc = sqlite3_open(curry_string(av[0]), &db);
+    int rc = sqlite3_open(checked_string(av[0], 1, "sqlite-open"), &db);
     if (rc != SQLITE_OK) {
         /* sqlite3_open() always returns a valid handle to sqlite3_close(),
          * even on failure — per its own documented contract. curry_error()
@@ -126,7 +127,7 @@ static curry_val fn_close(int ac, curry_val *av, void *ud) {
 static curry_val fn_exec(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-exec");
-    const char *sql = curry_string(av[1]);
+    const char *sql = checked_string(av[1], 2, "sqlite-exec");
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
@@ -167,7 +168,7 @@ static curry_val fn_prepare(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ScmDB *db = (ScmDB *)get_opaque(av[0], "sqlite-db", "sqlite-prepare");
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db->db, curry_string(av[1]), -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db->db, checked_string(av[1], 2, "sqlite-prepare"), -1, &stmt, NULL);
     if (rc != SQLITE_OK) curry_error("sqlite-prepare: %s", sqlite3_errmsg(db->db));
     ScmStmt *w = malloc(sizeof(ScmStmt)); w->stmt = stmt; w->db = db;
     return make_opaque(w, "sqlite-stmt");
@@ -176,7 +177,7 @@ static curry_val fn_prepare(int ac, curry_val *av, void *ud) {
 static curry_val fn_bind(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ScmStmt *w = (ScmStmt *)get_opaque(av[0], "sqlite-stmt", "sqlite-bind");
-    int idx = (int)curry_fixnum(av[1]);
+    int idx = (int)checked_fixnum(av[1], 2, "sqlite-bind");
     curry_val val = av[2];
     if (curry_is_bool(val) && !curry_bool(val)) sqlite3_bind_null(w->stmt, idx);
     else if (curry_is_fixnum(val)) sqlite3_bind_int64(w->stmt, idx, curry_fixnum(val));

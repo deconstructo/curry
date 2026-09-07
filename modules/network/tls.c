@@ -28,6 +28,7 @@
 #define _GNU_SOURCE /* fopencookie/cookie_io_functions_t (glibc) */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,8 +148,8 @@ static FILE *tls_fopen(TlsCookie *c, bool for_write) {
 
 static curry_val fn_tcp_connect_tls(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    const char *host = curry_string(av[0]);
-    int port = (int)curry_fixnum(av[1]);
+    const char *host = checked_string(av[0], 1, "tcp-connect-tls");
+    int port = (int)checked_fixnum(av[1], 2, "tcp-connect-tls");
     char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", port);
 
     struct addrinfo hints = {0}, *res;

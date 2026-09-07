@@ -50,6 +50,12 @@
 (check "vecdb-search rejects a vector with a non-numeric element (was a reproducible SIGSEGV)"
   (raises? (lambda () (vecdb-search db (vector 'a 'b 'c) 1))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; vecdb-make passed av[0] straight to curry_fixnum with no
+;;; curry_is_fixnum check.
+(check "vecdb-make rejects a non-numeric dims argument"
+  (raises? (lambda () (vecdb-make "x"))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

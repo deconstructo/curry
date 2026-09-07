@@ -28,6 +28,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,9 +113,9 @@ static curry_val fn_gpio_open(int ac, curry_val *av, void *ud) {
     if (!curry_is_fixnum(av[1])) curry_error("gpio-open: line must be fixnum");
     if (!curry_is_symbol(av[2])) curry_error("gpio-open: direction must be 'input or 'output");
 
-    int chip_num = (int)curry_fixnum(av[0]);
-    int line_num = (int)curry_fixnum(av[1]);
-    const char *dir = curry_symbol(av[2]);
+    int chip_num = (int)checked_fixnum(av[0], 1, "gpio-open");
+    int line_num = (int)checked_fixnum(av[1], 2, "gpio-open");
+    const char *dir = checked_symbol(av[2], 3, "gpio-open");
 
     char chip_path[32];
     snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%d", chip_num);
@@ -168,7 +169,7 @@ static curry_val fn_gpio_write(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     struct gpiod_line *line = get_gpio(av[0], "gpio-write");
     if (!curry_is_fixnum(av[1])) curry_error("gpio-write: value must be 0 or 1");
-    int val = (int)curry_fixnum(av[1]);
+    int val = (int)checked_fixnum(av[1], 2, "gpio-write");
     if (gpiod_line_set_value(line, val) < 0)
         curry_error("gpio-write: %s", strerror(errno));
     return curry_void();
@@ -196,7 +197,7 @@ static curry_val fn_gpio_p(int ac, curry_val *av, void *ud) {
 static curry_val fn_gpio_wait_edge(int ac, curry_val *av, void *ud) {
     (void)ud;
     struct gpiod_line *line = get_gpio(av[0], "gpio-wait-edge");
-    int timeout_ms = (ac >= 2 && curry_is_fixnum(av[1])) ? (int)curry_fixnum(av[1]) : -1;
+    int timeout_ms = (ac >= 2 && curry_is_fixnum(av[1])) ? (int)checked_fixnum(av[1], 2, "gpio-wait-edge") : -1;
 
     int fd = gpiod_line_event_get_fd(line);
     if (fd < 0)
@@ -341,7 +342,7 @@ static int get_i2c(curry_val v, const char *ctx) {
 static curry_val fn_i2c_open(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_fixnum(av[0])) curry_error("i2c-open: bus must be fixnum");
-    int bus = (int)curry_fixnum(av[0]);
+    int bus = (int)checked_fixnum(av[0], 1, "i2c-open");
     char path[32];
     snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
     int fd = open(path, O_RDWR);
@@ -353,9 +354,9 @@ static curry_val fn_i2c_open(int ac, curry_val *av, void *ud) {
 static curry_val fn_i2c_read(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     int fd   = get_i2c(av[0], "i2c-read");
-    int addr = (int)curry_fixnum(av[1]);
-    int reg  = (int)curry_fixnum(av[2]);
-    int n    = (int)curry_fixnum(av[3]);
+    int addr = (int)checked_fixnum(av[1], 2, "i2c-read");
+    int reg  = (int)checked_fixnum(av[2], 3, "i2c-read");
+    int n    = (int)checked_fixnum(av[3], 4, "i2c-read");
 
     if (ioctl(fd, I2C_SLAVE, addr) < 0)
         curry_error("i2c-read: cannot select addr 0x%02x: %s", addr, strerror(errno));
@@ -378,8 +379,8 @@ static curry_val fn_i2c_read(int ac, curry_val *av, void *ud) {
 static curry_val fn_i2c_write(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     int fd   = get_i2c(av[0], "i2c-write");
-    int addr = (int)curry_fixnum(av[1]);
-    int reg  = (int)curry_fixnum(av[2]);
+    int addr = (int)checked_fixnum(av[1], 2, "i2c-write");
+    int reg  = (int)checked_fixnum(av[2], 3, "i2c-write");
 
     if (!curry_is_bytevector(av[3])) curry_error("i2c-write: data must be bytevector");
     int dlen = (int)curry_bytevector_length(av[3]);
@@ -428,10 +429,10 @@ static curry_val fn_spi_open(int ac, curry_val *av, void *ud) {
     if (!curry_is_fixnum(av[0])) curry_error("spi-open: bus must be fixnum");
     if (!curry_is_fixnum(av[1])) curry_error("spi-open: device must be fixnum");
 
-    int bus    = (int)curry_fixnum(av[0]);
-    int device = (int)curry_fixnum(av[1]);
-    uint32_t speed = curry_is_fixnum(av[2]) ? (uint32_t)curry_fixnum(av[2]) : 1000000;
-    uint8_t  mode  = curry_is_fixnum(av[3]) ? (uint8_t)curry_fixnum(av[3])  : 0;
+    int bus    = (int)checked_fixnum(av[0], 1, "spi-open");
+    int device = (int)checked_fixnum(av[1], 2, "spi-open");
+    uint32_t speed = curry_is_fixnum(av[2]) ? (uint32_t)checked_fixnum(av[2], 3, "spi-open") : 1000000;
+    uint8_t  mode  = curry_is_fixnum(av[3]) ? (uint8_t)checked_fixnum(av[3], 4, "spi-open")  : 0;
 
     char path[32];
     snprintf(path, sizeof(path), "/dev/spidev%d.%d", bus, device);
@@ -526,8 +527,8 @@ static curry_val fn_pwm_open(int ac, curry_val *av, void *ud) {
     if (!curry_is_fixnum(av[0])) curry_error("pwm-open: chip must be fixnum");
     if (!curry_is_fixnum(av[1])) curry_error("pwm-open: channel must be fixnum");
 
-    int chip    = (int)curry_fixnum(av[0]);
-    int channel = (int)curry_fixnum(av[1]);
+    int chip    = (int)checked_fixnum(av[0], 1, "pwm-open");
+    int channel = (int)checked_fixnum(av[1], 2, "pwm-open");
 
     /* Export the channel if not already exported */
     char export_path[64], base[64];
@@ -565,8 +566,8 @@ static curry_val fn_pwm_set(int ac, curry_val *av, void *ud) {
     if (!curry_is_fixnum(av[1])) curry_error("pwm-set!: period-ns must be fixnum");
     if (!curry_is_fixnum(av[2])) curry_error("pwm-set!: duty-ns must be fixnum");
 
-    long period = (long)curry_fixnum(av[1]);
-    long duty   = (long)curry_fixnum(av[2]);
+    long period = (long)checked_fixnum(av[1], 2, "pwm-set!");
+    long duty   = (long)checked_fixnum(av[2], 3, "pwm-set!");
 
     char path[128], val[32];
     snprintf(path, sizeof(path), "%s/period",     h->base);
@@ -687,9 +688,9 @@ static curry_val fn_camera_open(int ac, curry_val *av, void *ud) {
     if (!curry_is_fixnum(av[1])) curry_error("camera-open: width must be fixnum");
     if (!curry_is_fixnum(av[2])) curry_error("camera-open: height must be fixnum");
 
-    const char *path = curry_string(av[0]);
-    uint32_t width   = (uint32_t)curry_fixnum(av[1]);
-    uint32_t height  = (uint32_t)curry_fixnum(av[2]);
+    const char *path = checked_string(av[0], 1, "camera-open");
+    uint32_t width   = (uint32_t)checked_fixnum(av[1], 2, "camera-open");
+    uint32_t height  = (uint32_t)checked_fixnum(av[2], 3, "camera-open");
     uint32_t pixfmt  = (ac >= 4) ? parse_pixfmt(av[3]) : V4L2_PIX_FMT_YUYV;
 
     int fd = open(path, O_RDWR);
@@ -884,8 +885,8 @@ static curry_val fn_uart_open(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[0])) curry_error("uart-open: path must be string");
     if (!curry_is_fixnum(av[1])) curry_error("uart-open: baud must be fixnum");
 
-    const char *path = curry_string(av[0]);
-    int         baud = (int)curry_fixnum(av[1]);
+    const char *path = checked_string(av[0], 1, "uart-open");
+    int         baud = (int)checked_fixnum(av[1], 2, "uart-open");
 
     int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) curry_error("uart-open: cannot open %s: %s", path, strerror(errno));
@@ -923,7 +924,7 @@ static curry_val fn_uart_read(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     int fd = get_uart(av[0], "uart-read");
     if (!curry_is_fixnum(av[1])) curry_error("uart-read: n must be fixnum");
-    int n = (int)curry_fixnum(av[1]);
+    int n = (int)checked_fixnum(av[1], 2, "uart-read");
     if (n <= 0 || n > 65536) curry_error("uart-read: n out of range [1,65536]");
 
     uint8_t *buf = malloc((size_t)n);
@@ -962,7 +963,7 @@ static curry_val fn_uart_write(int ac, curry_val *av, void *ud) {
 static curry_val fn_uart_read_line(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     int fd      = get_uart(av[0], "uart-read-line");
-    int timeout = (ac >= 2 && curry_is_fixnum(av[1])) ? (int)curry_fixnum(av[1]) : 1000;
+    int timeout = (ac >= 2 && curry_is_fixnum(av[1])) ? (int)checked_fixnum(av[1], 2, "uart-read-line") : 1000;
 
     char buf[4096];
     int  pos = 0;
@@ -1040,7 +1041,7 @@ static curry_val fn_w1_temperature(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[0])) curry_error("w1-temperature: path must be string");
 
     char slave_path[512];
-    snprintf(slave_path, sizeof(slave_path), "%s/w1_slave", curry_string(av[0]));
+    snprintf(slave_path, sizeof(slave_path), "%s/w1_slave", checked_string(av[0], 1, "w1-temperature"));
 
     FILE *f = fopen(slave_path, "r");
     if (!f) curry_error("w1-temperature: cannot open %s: %s", slave_path, strerror(errno));
@@ -1053,7 +1054,7 @@ static curry_val fn_w1_temperature(int ac, curry_val *av, void *ud) {
     fclose(f);
 
     if (!strstr(line1, "YES"))
-        curry_error("w1-temperature: CRC check failed for %s", curry_string(av[0]));
+        curry_error("w1-temperature: CRC check failed for %s", checked_string(av[0], 1, "w1-temperature"));
 
     char *t_pos = strstr(line2, "t=");
     if (!t_pos)
@@ -1069,7 +1070,7 @@ static curry_val fn_w1_raw(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[0])) curry_error("w1-raw: path must be string");
 
     char slave_path[512];
-    snprintf(slave_path, sizeof(slave_path), "%s/w1_slave", curry_string(av[0]));
+    snprintf(slave_path, sizeof(slave_path), "%s/w1_slave", checked_string(av[0], 1, "w1-raw"));
 
     FILE *f = fopen(slave_path, "r");
     if (!f) curry_error("w1-raw: cannot open %s: %s", slave_path, strerror(errno));
@@ -1102,7 +1103,7 @@ static curry_val fn_watchdog_open(int ac, curry_val *av, void *ud) {
     if (fd < 0) curry_error("watchdog-open: cannot open /dev/watchdog: %s", strerror(errno));
 
     if (ac >= 1 && curry_is_fixnum(av[0])) {
-        int timeout = (int)curry_fixnum(av[0]);
+        int timeout = (int)checked_fixnum(av[0], 1, "watchdog-open");
         if (ioctl(fd, WDIOC_SETTIMEOUT, &timeout) < 0) {
             /* Not all watchdog drivers support SETTIMEOUT — warn but continue. */
         }

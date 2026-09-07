@@ -18,6 +18,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,10 +111,10 @@ static curry_val fn_swift_client(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ClientState *cs = calloc(1, sizeof(ClientState));
     cs->is_swift  = true;
-    cs->auth_url  = strdup(curry_string(av[0]));
-    cs->username  = strdup(curry_string(av[1]));
-    cs->password  = strdup(curry_string(av[2]));
-    cs->project   = strdup(curry_string(av[3]));
+    cs->auth_url  = strdup(checked_string(av[0], 1, "swift-client"));
+    cs->username  = strdup(checked_string(av[1], 2, "swift-client"));
+    cs->password  = strdup(checked_string(av[2], 3, "swift-client"));
+    cs->project   = strdup(checked_string(av[3], 4, "swift-client"));
     pthread_once(&g_curl_init_once, curl_init_once_fn);
     return client_to_val(cs);
 }
@@ -173,9 +174,9 @@ static curry_val fn_swift_put(int ac, curry_val *av, void *ud) {
     ClientState *cs = val_to_client(av[0]);
     swift_authenticate(cs);
 
-    const char *container = curry_string(av[1]);
-    const char *object    = curry_string(av[2]);
-    const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? curry_string(av[4]) : "application/octet-stream";
+    const char *container = checked_string(av[1], 2, "swift-put!");
+    const char *object    = checked_string(av[2], 3, "swift-put!");
+    const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? checked_string(av[4], 5, "swift-put!") : "application/octet-stream";
 
     /* Issue #161: same unchecked as_bytes()-cast hazard fixed elsewhere
      * (network module's socket-send/udp-send, crypto.c's hash/base64
@@ -222,7 +223,7 @@ static curry_val fn_swift_get(int ac, curry_val *av, void *ud) {
 
     char url[1024];
     snprintf(url, sizeof(url), "%s/%s/%s", cs->storage_url,
-             curry_string(av[1]), curry_string(av[2]));
+             checked_string(av[1], 2, "swift-get"), checked_string(av[2], 3, "swift-get"));
 
     CURL *curl = curl_easy_init();
     Buf resp = buf_new();
@@ -293,8 +294,8 @@ static void azure_hmac_sha256(const char *key_b64, const char *data,
 static curry_val fn_azure_client(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ClientState *cs = calloc(1, sizeof(ClientState));
-    cs->access_key  = strdup(curry_string(av[0]));  /* account name */
-    cs->secret_key  = strdup(curry_string(av[1]));  /* account key (base64) */
+    cs->access_key  = strdup(checked_string(av[0], 1, "azure-client"));  /* account name */
+    cs->secret_key  = strdup(checked_string(av[1], 2, "azure-client"));  /* account key (base64) */
     cs->region      = strdup("core.windows.net");
     pthread_once(&g_curl_init_once, curl_init_once_fn);
     return client_to_val(cs);
@@ -379,14 +380,14 @@ static Buf azure_request(const ClientState *cs, const char *method,
 static curry_val fn_azure_put(int ac, curry_val *av, void *ud) {
     (void)ud;
     ClientState *cs = val_to_client(av[0]);
-    const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? curry_string(av[4]) : "application/octet-stream";
+    const char *ct = (ac > 4 && !curry_is_bool(av[4])) ? checked_string(av[4], 5, "azure-put!") : "application/octet-stream";
     /* Issue #161: same fix as fn_swift_put above. */
     if (!curry_is_bytevector(av[3])) curry_error("azure-put!: data must be a bytevector");
     size_t blen = curry_bytevector_length(av[3]);
     char *body = malloc(blen);
     for (uint32_t i = 0; i < (uint32_t)blen; i++) body[i]=(char)curry_bytevector_ref(av[3],i);
     long code = 0;
-    Buf resp = azure_request(cs,"PUT",curry_string(av[1]),curry_string(av[2]),body,blen,ct,&code);
+    Buf resp = azure_request(cs,"PUT",checked_string(av[1], 2, "azure-put!"),checked_string(av[2], 3, "azure-put!"),body,blen,ct,&code);
     free(body); buf_free(&resp);
     if (code<200||code>=300) curry_error("azure-put!: HTTP %ld", code);
     return curry_void();
@@ -396,7 +397,7 @@ static curry_val fn_azure_get(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ClientState *cs = val_to_client(av[0]);
     long code = 0;
-    Buf resp = azure_request(cs,"GET",curry_string(av[1]),curry_string(av[2]),NULL,0,NULL,&code);
+    Buf resp = azure_request(cs,"GET",checked_string(av[1], 2, "azure-get"),checked_string(av[2], 3, "azure-get"),NULL,0,NULL,&code);
     if (code<200||code>=300) { buf_free(&resp); curry_error("azure-get: HTTP %ld",code); }
     curry_val bv = curry_make_bytevector((uint32_t)resp.len,0);
     for (uint32_t i=0;i<(uint32_t)resp.len;i++) curry_bytevector_set(bv,i,(uint8_t)resp.data[i]);
@@ -408,7 +409,7 @@ static curry_val fn_azure_delete(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     ClientState *cs = val_to_client(av[0]);
     long code = 0;
-    Buf resp = azure_request(cs,"DELETE",curry_string(av[1]),curry_string(av[2]),NULL,0,NULL,&code);
+    Buf resp = azure_request(cs,"DELETE",checked_string(av[1], 2, "azure-delete!"),checked_string(av[2], 3, "azure-delete!"),NULL,0,NULL,&code);
     buf_free(&resp);
     if (code!=202&&code!=200) curry_error("azure-delete!: HTTP %ld",code);
     return curry_void();

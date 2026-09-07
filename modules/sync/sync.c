@@ -12,6 +12,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include "eval.h"
 #include <pthread.h>
 #include <setjmp.h>
@@ -161,7 +162,7 @@ static curry_val fn_cond_wait_timeout(int ac, curry_val *av, void *ud) {
     (void)ud;
     pthread_cond_t  *cv = get_cond(av[0], "cond-wait-timeout!");
     pthread_mutex_t *m  = get_mutex(av[1], "cond-wait-timeout!");
-    double secs = curry_is_fixnum(av[2]) ? (double)curry_fixnum(av[2]) : curry_float(av[2]);
+    double secs = curry_is_fixnum(av[2]) ? (double)checked_fixnum(av[2], 3, "cond-wait-timeout!") : checked_float(av[2], 3, "cond-wait-timeout!");
     (void)ac;
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -199,7 +200,7 @@ static ScmSem *get_sem(curry_val v, const char *ctx) {
 
 static curry_val fn_sem_make(int ac, curry_val *av, void *ud) {
     (void)ud;
-    unsigned initial = (ac >= 1 && curry_is_fixnum(av[0])) ? (unsigned)curry_fixnum(av[0]) : 0;
+    unsigned initial = (ac >= 1 && curry_is_fixnum(av[0])) ? (unsigned)checked_fixnum(av[0], 1, "make-semaphore") : 0;
     ScmSem *s = malloc(sizeof(ScmSem));
     if (!s) curry_error("make-semaphore: out of memory");
     if (pthread_mutex_init(&s->mtx, NULL) != 0) { free(s); curry_error("make-semaphore: mutex init failed"); }

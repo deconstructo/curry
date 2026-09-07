@@ -32,6 +32,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -556,7 +557,7 @@ static curry_val fn_load(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0]))
         curry_error("image-load: not a string (expected a path)");
-    const char *path = curry_string(av[0]);
+    const char *path = checked_string(av[0], 1, "image-load");
     switch (detect_format(path)) {
     case FMT_PNG:  return load_png(path);
     case FMT_JPEG: return load_jpeg(path);
@@ -569,7 +570,7 @@ static curry_val fn_save(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0]))
         curry_error("image-save: not a string (expected a path)");
-    const char *path = curry_string(av[0]);
+    const char *path = checked_string(av[0], 1, "image-save");
     curry_val img    = av[1];
     check_image(img);
     switch (detect_format(path)) {
@@ -582,9 +583,9 @@ static curry_val fn_save(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_make(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    uint32_t w  = (uint32_t)curry_fixnum(av[0]);
-    uint32_t h  = (uint32_t)curry_fixnum(av[1]);
-    uint32_t ch = (uint32_t)curry_fixnum(av[2]);
+    uint32_t w  = (uint32_t)checked_fixnum(av[0], 1, "image-make");
+    uint32_t h  = (uint32_t)checked_fixnum(av[1], 2, "image-make");
+    uint32_t ch = (uint32_t)checked_fixnum(av[2], 3, "image-make");
     if (ch != 3 && ch != 4) curry_error("image-make: channels must be 3 or 4");
     return make_image(w, h, ch);
 }
@@ -609,19 +610,19 @@ static curry_val fn_pixels(int ac, curry_val *av, void *ud) {
 static curry_val fn_ref(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     check_image(av[0]);
-    uint32_t x = (uint32_t)curry_fixnum(av[1]);
-    uint32_t y = (uint32_t)curry_fixnum(av[2]);
-    uint32_t c = (uint32_t)curry_fixnum(av[3]);
+    uint32_t x = (uint32_t)checked_fixnum(av[1], 2, "image-ref");
+    uint32_t y = (uint32_t)checked_fixnum(av[2], 3, "image-ref");
+    uint32_t c = (uint32_t)checked_fixnum(av[3], 4, "image-ref");
     return curry_make_fixnum((intptr_t)px_get(av[0], x, y, c));
 }
 
 static curry_val fn_set_px(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     check_image(av[0]);
-    uint32_t x = (uint32_t)curry_fixnum(av[1]);
-    uint32_t y = (uint32_t)curry_fixnum(av[2]);
-    uint32_t c = (uint32_t)curry_fixnum(av[3]);
-    uint8_t  v = (uint8_t)curry_fixnum(av[4]);
+    uint32_t x = (uint32_t)checked_fixnum(av[1], 2, "image-set!");
+    uint32_t y = (uint32_t)checked_fixnum(av[2], 3, "image-set!");
+    uint32_t c = (uint32_t)checked_fixnum(av[3], 4, "image-set!");
+    uint8_t  v = (uint8_t)checked_fixnum(av[4], 5, "image-set!");
     px_set(av[0], x, y, c, v);
     return curry_void();
 }
@@ -629,10 +630,10 @@ static curry_val fn_set_px(int ac, curry_val *av, void *ud) {
 static curry_val fn_crop(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     check_image(av[0]);
-    uint32_t sx = (uint32_t)curry_fixnum(av[1]);
-    uint32_t sy = (uint32_t)curry_fixnum(av[2]);
-    uint32_t nw = (uint32_t)curry_fixnum(av[3]);
-    uint32_t nh = (uint32_t)curry_fixnum(av[4]);
+    uint32_t sx = (uint32_t)checked_fixnum(av[1], 2, "image-crop");
+    uint32_t sy = (uint32_t)checked_fixnum(av[2], 3, "image-crop");
+    uint32_t nw = (uint32_t)checked_fixnum(av[3], 4, "image-crop");
+    uint32_t nh = (uint32_t)checked_fixnum(av[4], 5, "image-crop");
     uint32_t ch = img_ch(av[0]);
     curry_val out = make_image(nw, nh, ch);
     for (uint32_t y = 0; y < nh; y++)
@@ -645,8 +646,8 @@ static curry_val fn_crop(int ac, curry_val *av, void *ud) {
 static curry_val fn_scale(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     check_image(av[0]);
-    uint32_t nw = (uint32_t)curry_fixnum(av[1]);
-    uint32_t nh = (uint32_t)curry_fixnum(av[2]);
+    uint32_t nw = (uint32_t)checked_fixnum(av[1], 2, "image-scale");
+    uint32_t nh = (uint32_t)checked_fixnum(av[2], 3, "image-scale");
     uint32_t sw = img_w(av[0]), sh = img_h(av[0]), ch = img_ch(av[0]);
     curry_val out = make_image(nw, nh, ch);
 
@@ -721,7 +722,7 @@ static curry_val fn_format(int ac, curry_val *av, void *ud) {
      * off wherever that garbage pointer landed. */
     if (!curry_is_string(av[0]))
         curry_error("image-format: not a string (expected a path, e.g. \"photo.png\")");
-    switch (detect_format(curry_string(av[0]))) {
+    switch (detect_format(checked_string(av[0], 1, "image-format"))) {
     case FMT_PNG:  return curry_make_symbol("png");
     case FMT_JPEG: return curry_make_symbol("jpeg");
     case FMT_GIF:  return curry_make_symbol("gif");

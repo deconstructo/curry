@@ -68,6 +68,14 @@
 (check "hmac-sha256 rejects a non-bytevector data argument"
   (raises? (lambda () (hmac-sha256 (string->utf8 "key") 42))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; base64-decode passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "base64-decode rejects a non-string argument (was a reproducible SIGSEGV)"
+  (raises? (lambda () (base64-decode 42))) #t)
+(check "base64-decode still works with a real string"
+  (base64-decode "aGk=") (string->utf8 "hi"))
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

@@ -268,6 +268,21 @@
        (guard (exn (#t 'raised)) (close-directory (cons 'directory-stream 42)))
        'raised)
 
+;;; Issue #192: is_file_info/is_process_handle checked the tag and
+;;; vector shape but never that the numeric slots were actually fixnums
+;;; before fn_file_info_ref/fn_file_info_type_p's and
+;;; reap_nonblocking's/fn_process_kill's own unchecked curry_fixnum
+;;; casts touched them -- same class as #189, one layer deeper.
+(check "file-info-directory? rejects a forged file-info with non-fixnum slots"
+       (guard (exn (#t 'raised))
+         (file-info-directory?
+          (vector 'file-info "x" "x" "x" "x" "x" "x" "x" "x" "x" "x" "x" "x" "x")))
+       'raised)
+(check "process-kill rejects a forged process handle with a non-fixnum pid"
+       (guard (exn (#t 'raised))
+         (process-kill (cons 'process (vector "not-a-pid" #f #f #f #f #f))))
+       'raised)
+
 ;;; Summary
 
 (newline)

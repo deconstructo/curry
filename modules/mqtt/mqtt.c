@@ -54,6 +54,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,12 +314,12 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     (void)ud;
     ConnOpts o = default_opts();
     if (ac >= 5) {
-        o.username = curry_string(av[3]);
-        o.password = curry_string(av[4]);
+        o.username = checked_string(av[3], 4, "mqtt-connect");
+        o.password = checked_string(av[4], 5, "mqtt-connect");
     }
-    return conn_to_val(do_connect(curry_string(av[0]),
-                                  (int)curry_fixnum(av[1]),
-                                  curry_string(av[2]), &o));
+    return conn_to_val(do_connect(checked_string(av[0], 1, "mqtt-connect"),
+                                  (int)checked_fixnum(av[1], 2, "mqtt-connect"),
+                                  checked_string(av[2], 3, "mqtt-connect"), &o));
 }
 
 #ifdef HAVE_MQTT_TLS
@@ -326,16 +327,16 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
 static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     (void)ud;
     ConnOpts o = default_opts();
-    if (ac >= 4 && curry_is_string(av[3])) o.ca_cert  = curry_string(av[3]);
+    if (ac >= 4 && curry_is_string(av[3])) o.ca_cert  = checked_string(av[3], 4, "mqtt-connect-tls");
     /* even without a ca-cert, flag as TLS by using a non-NULL sentinel */
     if (!o.ca_cert) o.ca_cert = "";    /* empty = system CA, still ssl:// */
     if (ac >= 6) {
-        o.username = curry_string(av[4]);
-        o.password = curry_string(av[5]);
+        o.username = checked_string(av[4], 5, "mqtt-connect-tls");
+        o.password = checked_string(av[5], 6, "mqtt-connect-tls");
     }
-    return conn_to_val(do_connect(curry_string(av[0]),
-                                  (int)curry_fixnum(av[1]),
-                                  curry_string(av[2]), &o));
+    return conn_to_val(do_connect(checked_string(av[0], 1, "mqtt-connect-tls"),
+                                  (int)checked_fixnum(av[1], 2, "mqtt-connect-tls"),
+                                  checked_string(av[2], 3, "mqtt-connect-tls"), &o));
 }
 #endif
 
@@ -343,9 +344,9 @@ static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
 static curry_val fn_connect_opts(int ac, curry_val *av, void *ud) {
     (void)ud;
     ConnOpts o = (ac >= 4) ? parse_opts_alist(av[3]) : default_opts();
-    return conn_to_val(do_connect(curry_string(av[0]),
-                                  (int)curry_fixnum(av[1]),
-                                  curry_string(av[2]), &o));
+    return conn_to_val(do_connect(checked_string(av[0], 1, "mqtt-connect*"),
+                                  (int)checked_fixnum(av[1], 2, "mqtt-connect*"),
+                                  checked_string(av[2], 3, "mqtt-connect*"), &o));
 }
 
 /* (mqtt-disconnect client) */
@@ -392,9 +393,9 @@ static curry_val fn_dropped(int ac, curry_val *av, void *ud) {
 static curry_val fn_publish(int ac, curry_val *av, void *ud) {
     (void)ud;
     MQTTConn   *c       = val_to_conn(av[0]);
-    const char *topic   = curry_string(av[1]);
-    const char *payload = curry_string(av[2]);
-    int         qos     = (ac >= 4) ? (int)curry_fixnum(av[3]) : 0;
+    const char *topic   = checked_string(av[1], 2, "mqtt-publish");
+    const char *payload = checked_string(av[2], 3, "mqtt-publish");
+    int         qos     = (ac >= 4) ? (int)checked_fixnum(av[3], 4, "mqtt-publish") : 0;
     int         retain  = (ac >= 5) ? (curry_is_true(av[4]) ? 1 : 0) : 0;
     size_t      paylen  = strlen(payload);
 
@@ -412,8 +413,8 @@ static curry_val fn_publish(int ac, curry_val *av, void *ud) {
 static curry_val fn_subscribe(int ac, curry_val *av, void *ud) {
     (void)ud;
     MQTTConn   *c     = val_to_conn(av[0]);
-    const char *topic = curry_string(av[1]);
-    int         qos   = (ac >= 3) ? (int)curry_fixnum(av[2]) : 1;
+    const char *topic = checked_string(av[1], 2, "mqtt-subscribe");
+    int         qos   = (ac >= 3) ? (int)checked_fixnum(av[2], 3, "mqtt-subscribe") : 1;
     int rc = MQTTClient_subscribe(c->client, topic, qos);
     if (rc != MQTTCLIENT_SUCCESS)
         curry_error("mqtt-subscribe: failed (rc=%d)", rc);
@@ -423,7 +424,7 @@ static curry_val fn_subscribe(int ac, curry_val *av, void *ud) {
 /* (mqtt-unsubscribe client topic) */
 static curry_val fn_unsubscribe(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    MQTTClient_unsubscribe(val_to_conn(av[0])->client, curry_string(av[1]));
+    MQTTClient_unsubscribe(val_to_conn(av[0])->client, checked_string(av[1], 2, "mqtt-unsubscribe"));
     return curry_void();
 }
 
@@ -439,7 +440,7 @@ static curry_val fn_unsubscribe(int ac, curry_val *av, void *ud) {
 static curry_val fn_receive(int ac, curry_val *av, void *ud) {
     (void)ud;
     MQTTConn *c          = val_to_conn(av[0]);
-    int       timeout_ms = (ac >= 2) ? (int)curry_fixnum(av[1]) : 5000;
+    int       timeout_ms = (ac >= 2) ? (int)checked_fixnum(av[1], 2, "mqtt-receive") : 5000;
 
     pthread_mutex_lock(&c->qmtx);
 

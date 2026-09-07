@@ -58,6 +58,12 @@
 (check "image-ref rejects a wrong-length vector (not 4 elements)"
   (raises? (lambda () (image-ref (vector 10 10 3) 0 0 0))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; image-make passed av[0] straight to curry_fixnum with no
+;;; curry_is_fixnum check.
+(check "image-make rejects a non-numeric width argument"
+  (raises? (lambda () (image-make "x" 4 3))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

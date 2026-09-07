@@ -37,6 +37,12 @@
 (check "swift-put! rejects a non-pair argument (was a reproducible SIGSEGV)"
   (raises? (lambda () (swift-put! 42 "a" "b" (make-bytevector 1 0)))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; swift-client passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "swift-client rejects a non-string auth-url"
+  (raises? (lambda () (swift-client 42 "u" "p" "proj"))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

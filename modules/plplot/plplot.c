@@ -4,6 +4,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <plplot/plplot.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,12 +73,12 @@ static curry_val fn_plot_end(int ac, curry_val *av, void *ud) {
 static curry_val fn_plot_device(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0])) curry_error("plot-device: expected string");
-    plsdev(curry_string(av[0])); return curry_void();
+    plsdev(checked_string(av[0], 1, "plot-device")); return curry_void();
 }
 static curry_val fn_plot_output(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0])) curry_error("plot-output: expected string");
-    plsfnam(curry_string(av[0])); return curry_void();
+    plsfnam(checked_string(av[0], 1, "plot-output")); return curry_void();
 }
 static curry_val fn_plot_font_size(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud; plschr(0.0, (PLFLT)to_double(av[0], "plot-font-size")); return curry_void();
@@ -102,14 +103,14 @@ static curry_val fn_plot_labels(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0]) || !curry_is_string(av[1]) || !curry_is_string(av[2]))
         curry_error("plot-labels: expected 3 strings");
-    pllab(curry_string(av[0]), curry_string(av[1]), curry_string(av[2]));
+    pllab(checked_string(av[0], 1, "plot-labels"), checked_string(av[1], 2, "plot-labels"), checked_string(av[2], 3, "plot-labels"));
     return curry_void();
 }
 static curry_val fn_plot_box(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0]) || !curry_is_string(av[1]))
         curry_error("plot-box: expected 2 strings");
-    plbox(curry_string(av[0]), 0.0, 0, curry_string(av[1]), 0.0, 0);
+    plbox(checked_string(av[0], 1, "plot-box"), 0.0, 0, checked_string(av[1], 2, "plot-box"), 0.0, 0);
     return curry_void();
 }
 
@@ -194,8 +195,8 @@ static curry_val fn_plot_3d_box(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0]) || !curry_is_string(av[1]) || !curry_is_string(av[2]))
         curry_error("plot-3d-box: expected 3 strings");
-    plbox3("bnstu",curry_string(av[0]),0.0,0, "bnstu",curry_string(av[1]),0.0,0,
-           "bcdmnstuv",curry_string(av[2]),0.0,0); return curry_void();
+    plbox3("bnstu",checked_string(av[0], 1, "plot-3d-box"),0.0,0, "bnstu",checked_string(av[1], 2, "plot-3d-box"),0.0,0,
+           "bcdmnstuv",checked_string(av[2], 3, "plot-3d-box"),0.0,0); return curry_void();
 }
 static curry_val fn_plot_3d_line(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
@@ -237,15 +238,15 @@ static curry_val fn_plot_text(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[2])) curry_error("plot-text: expected string");
     plptex((PLFLT)to_double(av[0],"plot-text"), (PLFLT)to_double(av[1],"plot-text"),
-           1.0, 0.0, 0.5, curry_string(av[2])); return curry_void();
+           1.0, 0.0, 0.5, checked_string(av[2], 3, "plot-text")); return curry_void();
 }
 static curry_val fn_plot_mtex(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_string(av[0]) || !curry_is_string(av[4]))
         curry_error("plot-mtex: expected strings for side and text");
-    plmtex(curry_string(av[0]), (PLFLT)to_double(av[1],"plot-mtex"),
+    plmtex(checked_string(av[0], 1, "plot-mtex"), (PLFLT)to_double(av[1],"plot-mtex"),
            (PLFLT)to_double(av[2],"plot-mtex"), (PLFLT)to_double(av[3],"plot-mtex"),
-           curry_string(av[4])); return curry_void();
+           checked_string(av[4], 5, "plot-mtex")); return curry_void();
 }
 
 /* ---- Utilities ---- */

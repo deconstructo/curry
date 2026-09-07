@@ -34,6 +34,21 @@
 (check "graphql-query rejects a non-pair argument (was a reproducible SIGSEGV)"
   (raises? (lambda () (graphql-query 42 "{x}"))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; graphql-client passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "graphql-client rejects a non-string URL"
+  (raises? (lambda () (graphql-client 42))) #t)
+
+;;; ── Issue #192: unchecked list-element casts, one layer deeper ──────
+;;; alist_to_json only validated the FIRST vars-alist element's shape
+;;; before dispatching into the alist path; every later element's
+;;; curry_car/curry_string was unguarded. Runs before any network I/O.
+(check "graphql-query rejects a vars alist whose 2nd element isn't a pair"
+  (raises? (lambda ()
+    (graphql-query (graphql-client "http://example.invalid") "{x}"
+                    (list (cons "a" 1) 42)))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

@@ -19,6 +19,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,7 +77,7 @@ static int b64_val(char c) {
 
 static curry_val fn_base64_decode(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    const char *in = curry_string(av[0]);
+    const char *in = checked_string(av[0], 1, "base64-decode");
     size_t inlen = strlen(in);
     if (inlen % 4 != 0) curry_error("base64-decode: invalid input length");
 
@@ -285,7 +286,7 @@ static curry_val fn_hmac_sha256(int ac, curry_val *av, void *ud) {
 /* Convert a string to a UTF-8 bytevector (for hashing strings directly) */
 static curry_val fn_string_to_utf8(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    const char *s = curry_string(av[0]);
+    const char *s = checked_string(av[0], 1, "string->utf8");
     uint32_t n = (uint32_t)strlen(s);
     curry_val bv = curry_make_bytevector(n, 0);
     for (uint32_t i = 0; i < n; i++) curry_bytevector_set(bv, i, (uint8_t)s[i]);

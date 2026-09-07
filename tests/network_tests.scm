@@ -280,6 +280,16 @@
 ;; implicitly by udp-send's own successful use throughout § 4 above.
 
 ;;; ════════════════════════════════════════════════════════════
+;;; Issue #189: unchecked direct scalar argument casts
+;;; ════════════════════════════════════════════════════════════
+;;; tcp-connect/tcp-listen passed their port argument straight to
+;;; curry_fixnum with no curry_is_fixnum check.
+(check "tcp-connect rejects a non-numeric port"
+  (raises? (lambda () (tcp-connect "localhost" "80"))) #t)
+(check "tcp-listen rejects a non-numeric port"
+  (raises? (lambda () (tcp-listen "80"))) #t)
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

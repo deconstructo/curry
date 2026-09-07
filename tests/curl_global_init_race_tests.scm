@@ -90,6 +90,30 @@
         #t #t)))
 
 ;;; ════════════════════════════════════════════════════════════
+;;; Issue #192: unchecked list-element casts in header alists.
+;;;
+;;; do_request (http.c) and fn_graphql_client (graphql.c) each walked a
+;;; headers alist with curry_car/curry_cdr but never checked each
+;;; element was really a (string . string) pair before curry_string
+;;; wild-cast whatever was actually there -- the same class #189 fixed
+;;; for direct scalar arguments, one layer deeper. The header-validation
+;;; loop runs before any network I/O, so these raise instantly with no
+;;; network access required.
+;;; ════════════════════════════════════════════════════════════
+
+(define (raises? thunk)
+  (guard (e (#t #t)) (thunk) #f))
+
+(check "http-request rejects a non-pair header list element"
+  (raises? (lambda () (http-request "GET" "http://example.invalid" (list 42)))) #t)
+(check "http-request rejects a header pair with a non-string value"
+  (raises? (lambda () (http-request "GET" "http://example.invalid" (list (cons "X" 42))))) #t)
+(check "graphql-client rejects a non-pair header list element"
+  (raises? (lambda () (graphql-client "http://example.invalid" (list 42)))) #t)
+(check "graphql-client rejects a header pair with a non-string value"
+  (raises? (lambda () (graphql-client "http://example.invalid" (list (cons "X" 42))))) #t)
+
+;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════
 

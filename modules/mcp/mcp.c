@@ -40,6 +40,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include "mcp_auth.h"
 #include "eval.h"    /* SCM_PROTECT, ExnHandler, current_handler */
 #include "object.h"  /* ErrorObj, vis_error, as_err */
@@ -606,8 +607,8 @@ static curry_val fn_mcp_tool(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[1]))    curry_error("mcp-tool: description must be a string");
     if (!curry_is_procedure(av[3])) curry_error("mcp-tool: handler must be a procedure");
     Tool *t=&s_tools[s_ntool++];
-    strncpy(t->name,curry_string(av[0]),sizeof(t->name)-1);
-    strncpy(t->desc,curry_string(av[1]),sizeof(t->desc)-1);
+    strncpy(t->name,checked_string(av[0], 1, "mcp-tool"),sizeof(t->name)-1);
+    strncpy(t->desc,checked_string(av[1], 2, "mcp-tool"),sizeof(t->desc)-1);
     t->schema=av[2];  gc_register_root(&t->schema);
     t->handler=av[3]; gc_register_root(&t->handler);
     return curry_void();
@@ -620,8 +621,8 @@ static curry_val fn_mcp_resource(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[1]))    curry_error("mcp-resource: description must be a string");
     if (!curry_is_procedure(av[2])) curry_error("mcp-resource: handler must be a procedure");
     Resource *r=&s_res[s_nres++];
-    strncpy(r->uri, curry_string(av[0]),sizeof(r->uri)-1);
-    strncpy(r->desc,curry_string(av[1]),sizeof(r->desc)-1);
+    strncpy(r->uri, checked_string(av[0], 1, "mcp-resource"),sizeof(r->uri)-1);
+    strncpy(r->desc,checked_string(av[1], 2, "mcp-resource"),sizeof(r->desc)-1);
     r->handler=av[2]; gc_register_root(&r->handler);
     return curry_void();
 }
@@ -640,9 +641,9 @@ static curry_val fn_mcp_json(int ac, curry_val *av, void *ud) {
 static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (s_cur_token[0]=='\0') return curry_void();
-    double cur=curry_is_fixnum(av[0])?(double)curry_fixnum(av[0]):curry_float(av[0]);
-    double tot=curry_is_fixnum(av[1])?(double)curry_fixnum(av[1]):curry_float(av[1]);
-    const char *msg=curry_is_string(av[2])?curry_string(av[2]):"";
+    double cur=curry_is_fixnum(av[0])?(double)checked_fixnum(av[0], 1, "mcp-notify-progress"):checked_float(av[0], 1, "mcp-notify-progress");
+    double tot=curry_is_fixnum(av[1])?(double)checked_fixnum(av[1], 2, "mcp-notify-progress"):checked_float(av[1], 2, "mcp-notify-progress");
+    const char *msg=curry_is_string(av[2])?checked_string(av[2], 3, "mcp-notify-progress"):"";
     SB b; sb_init(&b);
     sb_s(&b,"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\","
            "\"params\":{\"progressToken\":"); sb_quoted(&b,s_cur_token);
@@ -656,8 +657,8 @@ static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
 /* (mcp-serve) or (mcp-serve name version) — stdio transport */
 static curry_val fn_mcp_serve(int ac, curry_val *av, void *ud) {
     (void)ud;
-    if (ac>=1 && curry_is_string(av[0])) strncpy(s_server_name,curry_string(av[0]),sizeof(s_server_name)-1);
-    if (ac>=2 && curry_is_string(av[1])) strncpy(s_server_ver, curry_string(av[1]),sizeof(s_server_ver)-1);
+    if (ac>=1 && curry_is_string(av[0])) strncpy(s_server_name,checked_string(av[0], 1, "mcp-serve"),sizeof(s_server_name)-1);
+    if (ac>=2 && curry_is_string(av[1])) strncpy(s_server_ver, checked_string(av[1], 2, "mcp-serve"),sizeof(s_server_ver)-1);
     char *line=malloc(LINE_LIMIT);
     if (!line) curry_error("mcp-serve: out of memory");
     while (fgets(line,LINE_LIMIT,stdin)) {
@@ -955,11 +956,11 @@ static curry_val fn_mcp_serve_sse(int ac, curry_val *av, void *ud) {
     (void)ud;
     if (ac < 1 || !curry_is_fixnum(av[0]))
         curry_error("mcp-serve-sse: first argument must be a port number");
-    int port = (int)curry_fixnum(av[0]);
+    int port = (int)checked_fixnum(av[0], 1, "mcp-serve-sse");
     if (ac >= 2 && curry_is_string(av[1]))
-        strncpy(s_server_name, curry_string(av[1]), sizeof(s_server_name) - 1);
+        strncpy(s_server_name, checked_string(av[1], 2, "mcp-serve-sse"), sizeof(s_server_name) - 1);
     if (ac >= 3 && curry_is_string(av[2]))
-        strncpy(s_server_ver,  curry_string(av[2]), sizeof(s_server_ver) - 1);
+        strncpy(s_server_ver,  checked_string(av[2], 3, "mcp-serve-sse"), sizeof(s_server_ver) - 1);
 
     ensure_sess_init();
     signal(SIGPIPE, SIG_IGN); /* failed sends return -1 instead of killing the process */

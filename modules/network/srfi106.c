@@ -44,6 +44,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,15 +101,15 @@ static const char *service_to_cstr(curry_val service, char *buf, size_t buflen) 
 
 static curry_val fn_make_client_socket(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *node = curry_string(av[0]);
+    const char *node = checked_string(av[0], 1, "make-client-socket");
     char service_buf[SERVICE_BUF_SIZE];
     const char *service = service_to_cstr(av[1], service_buf, sizeof(service_buf));
 
     struct addrinfo hints = {0}, *res;
-    hints.ai_family   = ac > 2 ? (int)curry_fixnum(av[2]) : AF_UNSPEC;
-    hints.ai_socktype = ac > 3 ? (int)curry_fixnum(av[3]) : SOCK_STREAM;
-    hints.ai_flags    = ac > 4 ? (int)curry_fixnum(av[4]) : 0;
-    hints.ai_protocol = ac > 5 ? (int)curry_fixnum(av[5]) : 0;
+    hints.ai_family   = ac > 2 ? (int)checked_fixnum(av[2], 3, "make-client-socket") : AF_UNSPEC;
+    hints.ai_socktype = ac > 3 ? (int)checked_fixnum(av[3], 4, "make-client-socket") : SOCK_STREAM;
+    hints.ai_flags    = ac > 4 ? (int)checked_fixnum(av[4], 5, "make-client-socket") : 0;
+    hints.ai_protocol = ac > 5 ? (int)checked_fixnum(av[5], 6, "make-client-socket") : 0;
 
     if (getaddrinfo(node, service, &hints, &res) != 0)
         curry_error("make-client-socket: could not resolve %s", node);
@@ -133,10 +134,10 @@ static curry_val fn_make_server_socket(int ac, curry_val *av, void *ud) {
     const char *service = service_to_cstr(av[0], service_buf, sizeof(service_buf));
 
     struct addrinfo hints = {0}, *res;
-    hints.ai_family   = ac > 1 ? (int)curry_fixnum(av[1]) : AF_UNSPEC;
-    hints.ai_socktype = ac > 2 ? (int)curry_fixnum(av[2]) : SOCK_STREAM;
+    hints.ai_family   = ac > 1 ? (int)checked_fixnum(av[1], 2, "make-server-socket") : AF_UNSPEC;
+    hints.ai_socktype = ac > 2 ? (int)checked_fixnum(av[2], 3, "make-server-socket") : SOCK_STREAM;
     hints.ai_flags    = AI_PASSIVE;
-    hints.ai_protocol = ac > 3 ? (int)curry_fixnum(av[3]) : 0;
+    hints.ai_protocol = ac > 3 ? (int)checked_fixnum(av[3], 4, "make-server-socket") : 0;
 
     if (getaddrinfo(NULL, service, &hints, &res) != 0)
         curry_error("make-server-socket: could not resolve service %s", service);
@@ -222,7 +223,7 @@ static curry_val fn_socket_send(int ac, curry_val *av, void *ud) {
     if (!curry_is_bytevector(av[1])) curry_error("socket-send: data must be a bytevector");
     uint32_t len = curry_bytevector_length(av[1]);
     const uint8_t *data = curry_bytevector_data(av[1]);
-    int flags = ac > 2 ? (int)curry_fixnum(av[2]) : 0;
+    int flags = ac > 2 ? (int)checked_fixnum(av[2], 3, "socket-send") : 0;
     ssize_t sent = send(fd, data, len, flags);
     if (sent < 0) curry_error("socket-send: send failed: %s", strerror(errno));
     return curry_make_fixnum(sent);
@@ -231,9 +232,9 @@ static curry_val fn_socket_send(int ac, curry_val *av, void *ud) {
 static curry_val fn_socket_recv(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd = net_extract_fd(av[0], "socket-recv");
-    intptr_t size = curry_fixnum(av[1]);
+    intptr_t size = checked_fixnum(av[1], 2, "socket-recv");
     if (size <= 0) curry_error("socket-recv: size must be a positive exact integer");
-    int flags = ac > 2 ? (int)curry_fixnum(av[2]) : 0;
+    int flags = ac > 2 ? (int)checked_fixnum(av[2], 3, "socket-recv") : 0;
 
     uint8_t *buf = malloc((size_t)size);
     if (!buf) curry_error("socket-recv: out of memory");
@@ -263,7 +264,7 @@ static curry_val fn_socket_recv(int ac, curry_val *av, void *ud) {
 static curry_val fn_socket_shutdown(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     int fd = net_extract_fd(av[0], "socket-shutdown");
-    intptr_t how = curry_fixnum(av[1]);
+    intptr_t how = checked_fixnum(av[1], 2, "socket-shutdown");
     int real_how;
     switch (how) {
         case 1: real_how = SHUT_RD;   break;

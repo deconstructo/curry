@@ -317,6 +317,15 @@
   'raised)
 
 ;;; ================================================================
+;;; Issue #189: unchecked direct scalar argument casts
+;;; ================================================================
+;;; mqtt-connect passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "mqtt-connect rejects a non-string host (was a reproducible SIGSEGV)"
+  (guard (exn (#t 'raised)) (mqtt-connect 42 1883 "client-id"))
+  'raised)
+
+;;; ================================================================
 ;;; Summary
 ;;; ================================================================
 
