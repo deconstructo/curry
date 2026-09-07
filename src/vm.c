@@ -495,6 +495,66 @@ static int vm_bind_args(BcClosure *cl, val_t *base, int argc) {
     return fixed + 1;
 }
 
+/* Issue #162: a Chunk's glob_cache is shared by every actor thread
+ * executing that compiled chunk concurrently (the normal case for N
+ * actors spawned from one shared lambda literal). root->version is
+ * already read/written with proper acquire/release (matching env.c's
+ * seqlock release store on frame_grow), but cache[ci].slot/.version
+ * themselves were plain, unsynchronized reads/writes -- so one thread's
+ * write could race another's read with no ordering between them,
+ * letting a reader observe a torn pair (a fresh version stamped next to
+ * a stale slot, or vice versa, mixed from two different writers) and
+ * wrongly take the fast path through a slot that doesn't correspond to
+ * the version it appears to match.
+ *
+ * Fixed the same way root->version already is: version is the
+ * synchronizing field (release on write, acquire on read); slot is
+ * relaxed but always written BEFORE version's release and read AFTER
+ * version's acquire, so a reader that observes a fresh version is
+ * guaranteed -- by the release/acquire pairing -- to also observe the
+ * slot write that preceded it, never a stale one from THE SAME writer.
+ * Reading version first (rather than checking slot != NULL first, as
+ * this code used to) is what makes that guarantee hold: the old order
+ * let a reader load a possibly-stale slot before even checking whether
+ * version had changed underneath it.
+ *
+ * That acquire/release pairing alone only protects one writer against
+ * concurrent readers -- it does NOT protect one writer against another
+ * concurrent writer. Two threads racing a cache-fill for the SAME entry
+ * (e.g. both miss around a concurrent GLOBAL_ENV frame_grow, so thread A
+ * computes a pre-grow (slot, ver) and thread B computes a post-grow
+ * (slot, ver) for the same index) could interleave their two independent
+ * stores into a torn pair neither of them produced: A's slot store, then
+ * B's slot store, then B's version release, then A's version release
+ * leaves (B's slot, A's version) visible -- a combination from neither
+ * writer. gcache_lock/gcache_unlock below close that by serializing
+ * WRITES only (reads stay fully lock-free through gcache_load, which is
+ * still what makes the fast path fast); see chunk.h's own comment on
+ * Chunk.glob_cache_lock for why a spinlock is cheap enough here (fills
+ * are rare, never the hot read path). */
+static inline void gcache_load(GlobCacheEntry *e, val_t **slot_out, uint32_t *ver_out) {
+    *ver_out  = atomic_load_explicit((_Atomic uint32_t *)&e->version, memory_order_acquire);
+    *slot_out = atomic_load_explicit((_Atomic(val_t *) *)&e->slot, memory_order_relaxed);
+}
+static inline void gcache_lock(Chunk *chunk) {
+    int expected = 0;
+    while (!atomic_compare_exchange_weak_explicit(
+               (_Atomic int *)&chunk->glob_cache_lock, &expected, 1,
+               memory_order_acquire, memory_order_relaxed)) {
+        expected = 0; /* CAS clobbers expected on failure; reset before retry */
+    }
+}
+static inline void gcache_unlock(Chunk *chunk) {
+    atomic_store_explicit((_Atomic int *)&chunk->glob_cache_lock, 0, memory_order_release);
+}
+static inline void gcache_store(Chunk *chunk, uint8_t ci, val_t *slot, uint32_t ver) {
+    gcache_lock(chunk);
+    GlobCacheEntry *e = &chunk->glob_cache[ci];
+    atomic_store_explicit((_Atomic(val_t *) *)&e->slot, slot, memory_order_relaxed);
+    atomic_store_explicit((_Atomic uint32_t *)&e->version, ver, memory_order_release);
+    gcache_unlock(chunk);
+}
+
 /* Shared cached global-variable lookup for OP_CALL_GLOBAL/
  * OP_TAIL_CALL_GLOBAL, which need this exact lookup fused with a call
  * rather than as a separate dispatch. Mirrors (does not replace)
@@ -510,15 +570,17 @@ static inline val_t load_global_cached(Chunk *chunk, uint8_t ci) {
     GlobCacheEntry *cache = chunk->glob_cache;
     EnvFrame *root = as_env(chunk->target_env == V_VOID ? GLOBAL_ENV : chunk->target_env);
     uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
-    if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
-                         cache[ci].version == root_ver, 1)) {
-        return *cache[ci].slot;
+    if (cache) {
+        val_t *cslot; uint32_t cver;
+        gcache_load(&cache[ci], &cslot, &cver);
+        if (__builtin_expect(cslot != NULL && cver == root_ver, 1))
+            return *cslot;
     }
     val_t sym = chunk->constants[ci];
     uint32_t ver;
     val_t *slot = frame_lookup_versioned(root, sym, &ver);
     if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
-    if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
+    if (cache) gcache_store(chunk, ci, slot, ver);
     return *slot;
 }
 
@@ -697,24 +759,29 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             GlobCacheEntry *cache = GCACHE;
             EnvFrame *root = as_env(TARGET_ENV);
             /* Acquire load: pairs with the release store in env.c's
-             * seq_end_write, so a match against cache[ci].version here
-             * guarantees cache[ci].slot (stamped from the same
+             * seq_end_write, so a match against the cache entry's version
+             * here guarantees its slot (stamped from the same
              * frame_lookup_versioned call that validated that version) is
              * still a slot in the CURRENT root->vals, not a stale one from
              * before a since-completed frame_grow. See env.c for why an
              * unsynchronized global-environment frame is unsafe when actor
-             * threads share it. */
+             * threads share it. gcache_load/gcache_store (see issue #162,
+             * above load_global_cached) give the cache entry ITSELF the
+             * same acquire/release treatment -- two actors executing this
+             * same compiled chunk concurrently would otherwise race on the
+             * entry's own slot/version fields. */
             uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
             val_t loaded_gval;
-            if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
-                                 cache[ci].version == root_ver, 1)) {
-                loaded_gval = *cache[ci].slot;
+            val_t *cslot = NULL; uint32_t cver = 0;
+            if (cache) gcache_load(&cache[ci], &cslot, &cver);
+            if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
+                loaded_gval = *cslot;
             } else {
                 val_t sym = CONSTS[ci];
                 uint32_t ver;
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
-                if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
+                if (cache) gcache_store(frame->closure->chunk, ci, slot, ver);
                 loaded_gval = *slot;
             }
             PUSH(loaded_gval);
@@ -737,9 +804,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * isn't a real global-arithmetic redefinition. */
             if (TARGET_ENV == GLOBAL_ENV)
                 jit_maybe_taint_global_arith(CONSTS[ci], val);
-            if (__builtin_expect(cache != NULL && cache[ci].slot != NULL &&
-                                 cache[ci].version == root_ver, 1)) {
-                gc_wb_slot(cache[ci].slot, val);
+            val_t *cslot = NULL; uint32_t cver = 0;
+            if (cache) gcache_load(&cache[ci], &cslot, &cver);
+            if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
+                gc_wb_slot(cslot, val);
             } else {
                 val_t sym = CONSTS[ci];
                 uint32_t ver;
@@ -747,7 +815,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
                 else {
                     gc_wb_slot(slot, val);
-                    if (cache) { cache[ci].slot = slot; cache[ci].version = ver; }
+                    if (cache) gcache_store(frame->closure->chunk, ci, slot, ver);
                 }
             }
             NEXT;
@@ -771,7 +839,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 EnvFrame *root = as_env(TARGET_ENV);
                 uint32_t ver;
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
-                if (slot) { cache[ci].slot = slot; cache[ci].version = ver; }
+                if (slot) gcache_store(frame->closure->chunk, ci, slot, ver);
             }
             NEXT;
         }
