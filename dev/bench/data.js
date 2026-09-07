@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788781832238,
+  "lastUpdate": 1788784706778,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12833,6 +12833,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.674,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "41f23e3d4c3363f33085e93f284de34d7475c140",
+          "message": "fix(vm): synchronize per-Chunk glob_cache entries across actor threads (#162) (#194)\n\nvm.c's per-Chunk global-variable inline cache (glob_cache) is shared by\nevery actor thread executing that compiled chunk concurrently (the\nnormal case for N actors spawned from one shared lambda literal).\nroot->version was already correctly acquire/release-ordered (matching\nenv.c's seqlock), but each cache entry's own two fields\n(GlobCacheEntry.slot/.version) were read and written as plain,\nunsynchronized memory accesses -- confirmed via ThreadSanitizer:\n6 data-race warnings per run, reliably reproduced, at exactly the\nload_global_cached/OP_LOAD_GLOBAL/OP_CALL_GLOBAL lines the issue cites.\n\nAdds gcache_load/gcache_store (src/vm.c), giving the cache entry the\nsame acquire-on-read/release-on-write treatment root->version already\nhad, at all 4 call sites: load_global_cached, OP_LOAD_GLOBAL,\nOP_STORE_GLOBAL, OP_DEF_GLOBAL.\n\nIndependent code review of that first pass found it only protects one\nwriter against concurrent readers, not one writer against another\nconcurrent writer -- two threads racing a cache-fill for the same entry\naround a concurrent GLOBAL_ENV frame_grow could still interleave their\ntwo independent field writes into a torn pair neither of them produced.\nClosed with a coarse per-Chunk spinlock (Chunk.glob_cache_lock,\nchunk.h/chunk.c) serializing writes only; reads stay fully lock-free.\n\nRe-verified under ThreadSanitizer both ways: the original repro (0\nwarnings across 4 runs, down from 6/run before the fix) and a heavier\nstress test mixing concurrent top-level `define` (forcing frame_grow)\nagainst concurrent reads (0 glob_cache-related warnings across 5 runs).\nThat second run did surface an unrelated, already-tracked race in\nenv.c's own seqlock protocol (issue #153) -- documented there with the\nconcrete repro, not fixed here (out of scope, and #153 already\ncorrectly scopes it as needing a real redesign).\n\nAdds a functional regression test to tests/actors_tests.scm exercising\nthe shared-chunk-under-concurrent-global-lookup shape; full ctest suite\n(127/127) passes.\n\n\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-07T22:37:39+10:00",
+          "tree_id": "6a250da335135edbb46c9bfbcec9cf8ca9a7dce5",
+          "url": "https://github.com/deconstructo/curry/commit/41f23e3d4c3363f33085e93f284de34d7475c140"
+        },
+        "date": 1788784704595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.6,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.614,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.183,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.155,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.249,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 238.243,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 51.959,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 73.375,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 60.799,
             "unit": "ms"
           }
         ]
