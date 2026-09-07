@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788559993917,
+  "lastUpdate": 1788781832238,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12764,6 +12764,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 45.737,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "78eb5e80f38cebe82f666430b8c332d5eda05177",
+          "message": "fix: reject unchecked scalar/list/vector-element av[N] casts across 22 modules (#189, #192) (#193)\n\n* Add a small, heavily-commented BASIC interpreter example\n\nNew self-contained example script (examples/basic_interpreter.scm):\ntokenizer -> precedence-climbing expression parser -> statement parser\n-> a flat statement vector loaded once (IF/THEN flattened into a\nconditional skip at load time, not executed via a second nested\ninterpreter call) -> a tail-recursive execution loop. Supports LET,\nPRINT, INPUT, IF/THEN (including the \"THEN <linenum>\" shorthand),\nGOTO, GOSUB/RETURN, FOR/TO/STEP/NEXT, DIM (1-D arrays), END/STOP, REM,\nnumeric and string variables, and a small function library (ABS INT\nSQR RND LEN VAL STR$ CHR$ ASC LEFT$ RIGHT$ MID$ TAB).\n\nIndependently reviewed via 8 code-review finder angles plus a\ndedicated security-review pass (per this repo's CLAUDE.md); fixed\neverything the reviews confirmed as a real bug, including: a parser\ncrash on bare NEXT, NEXT-with-no-FOR crashing before its own intended\nerror message, GOSUB/RETURN inside an IF/THEN using a disconnected\ncall stack (the reason IF/THEN is flattened into the main vector\ninstead of recursing), the THEN-linenum shorthand leaking trailing\ncolon-statements out of its conditional, string relational operators\n(< > <= >=) crashing instead of comparing lexically, array/TAB/LEFT$\n/RIGHT$/MID$ indices not being truncated (so a non-integer index like\nI/2 crashed instead of truncating), INPUT not handling EOF, an O(N^2)\nload-time line-index bug, a redundant double hash-table lookup on\nevery array read, and a DIM that could silently shadow a builtin\nfunction name.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n* fix: reject unchecked direct scalar av[N] casts across 22 modules outside qt6 (#189)\n\ncurry_define_fn only enforces argument arity, not type -- nothing\nupstream validates that av[N] is the type a handler assumes before\ncurry_string/curry_float/curry_fixnum/curry_symbol (all unchecked\ncasts in src/api.c) touch it directly. A wrong-type argument therefore\nwild-casts instead of raising a Scheme error, confirmed reproducible\nSIGSEGV via e.g. (sqlite-open 42) and (redis-connect 42 6379) -- same\nbug class as #158 through #187, just not yet swept outside qt6.cpp.\n\nAdds include/curry_checked_args.h with shared checked_string/\nchecked_float/checked_fixnum/checked_symbol wrappers (curry_error()\nfirst if the type doesn't match, naming the argument position and\ncalling procedure), then applies them at the unchecked call sites in\ncrypto, git, graphql, http, image, ldap, mcp, mcp_auth, mqtt, neo4j,\nnetwork, srfi106, tls, piper, plplot, posix, redis, regex, rpi,\nsqlite, storage, sync, and vecdb. Adds a regression test per fixed\ncall site.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\n* Remove BASIC interpreter example, pending further work\n\nPulling this back out of examples/ -- wants more work before it's\nready to publish.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\n* fix: validate list-element/vector-slot types before indirect casts (#192)\n\nSame underlying defect as #189, one layer deeper: several call sites\nvalidated the outer shape of a list/vector argument (pair-ness, tag,\nlength) but never each element's type before an unchecked\ncurry_string/curry_fixnum/curry_car/curry_cdr cast touched it -- so a\nforged list/vector whose outer shape passes the check but whose\nelements don't still wild-casts.\n\n- modules/posix/posix.c: is_file_info()/is_process_handle() now also\n  validate every numeric slot (all of FI_* / PH_PID) is a fixnum, not\n  just the tag and vector length.\n- modules/ldap/ldap.c: attrs_from_val() (ldap-search's optional attrs\n  argument) now validates every list element is a string before the\n  cast, and rejects improper lists.\n- modules/http/http.c: do_request()'s headers-alist loop now validates\n  each element is a (string . string) pair before the cast.\n- modules/graphql/graphql.c: fn_graphql_client()'s headers-alist loop\n  gets the same fix as http.c; alist_to_json() (graphql-query's vars\n  argument) now validates every element's shape, not just the first.\n\nAdds a regression test per fixed call site (skipping ldap.c: the\nmodule has no existing test harness and attrs_from_val is only\nreachable behind a live LDAP connection).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\n* fix: address code-review findings on #192 (resource leaks, TOCTOU, dedup)\n\nIndependent code-review of 6383680 found three real issues in the\nlist-element/vector-slot validation it added:\n\n- http.c's do_request and graphql.c's fn_graphql_client acquired a\n  resource (CURL handle / GQLClient struct + strdup'd url) before the\n  new header-list validation ran, so curry_error's longjmp on a\n  rejected headers argument leaked that resource on every call --\n  reordered so validation runs first.\n- ldap.c's attrs_from_val validated element types in a count-only\n  pass, then re-walked the same list from its original head in a\n  separate fill pass with no re-validation -- a TOCTOU window, since\n  curry actors are real OS threads sharing one GC heap and list pairs\n  are mutable via set-car!/set-cdr!. Collapsed to a single validating\n  pass with a growable buffer, which also drops the double list walk.\n- The (string . string) pair-validation block was hand-copied into\n  http.c and graphql.c's two headers loops. Promoted to a\n  checked_string_pair() helper in include/curry_checked_args.h,\n  matching that header's own stated purpose.\n\nNo behavior change on valid input; verified via the existing\nregression tests plus manual checks that both http-request and\ngraphql-client still build real requests correctly with genuine\nheaders.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\n---------\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-07T21:49:50+10:00",
+          "tree_id": "adc9c20911a72522a6eafa3d6a3400761bfbaf9a",
+          "url": "https://github.com/deconstructo/curry/commit/78eb5e80f38cebe82f666430b8c332d5eda05177"
+        },
+        "date": 1788781830041,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.868,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.833,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.66,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.811,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 138.087,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 291.059,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.566,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.996,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.674,
             "unit": "ms"
           }
         ]
