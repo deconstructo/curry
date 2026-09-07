@@ -12,6 +12,7 @@
 
 #include "mcp_auth.h"
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -654,7 +655,7 @@ const char *mcp_auth_www_authenticate(const char *error, const char *description
 static curry_val fn_auth_mode(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_symbol(av[0])) curry_error("mcp-auth-mode!: expected symbol");
-    const char *m = curry_symbol(av[0]);
+    const char *m = checked_symbol(av[0], 1, "mcp-auth-mode!");
     if      (strcmp(m, "none")           == 0) s_mode = MCP_AUTH_NONE;
     else if (strcmp(m, "self-contained") == 0) s_mode = MCP_AUTH_SELF_CONTAINED;
     else if (strcmp(m, "introspect")     == 0) s_mode = MCP_AUTH_INTROSPECT;
@@ -674,8 +675,8 @@ static curry_val fn_register_client(int ac, curry_val *av, void *ud) {
         pthread_mutex_unlock(&s_client_mu);
         curry_error("mcp-register-client!: client registry full (max %d)", MAX_CLIENTS);
     }
-    strncpy(s_clients[s_nclient].id,     curry_string(av[0]), 127);
-    strncpy(s_clients[s_nclient].secret, curry_string(av[1]), 255);
+    strncpy(s_clients[s_nclient].id,     checked_string(av[0], 1, "mcp-register-client!"), 127);
+    strncpy(s_clients[s_nclient].secret, checked_string(av[1], 2, "mcp-register-client!"), 255);
     s_nclient++;
     pthread_mutex_unlock(&s_client_mu);
     return curry_void();
@@ -684,7 +685,7 @@ static curry_val fn_register_client(int ac, curry_val *av, void *ud) {
 static curry_val fn_token_ttl(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_fixnum(av[0])) curry_error("mcp-token-ttl!: expected integer seconds");
-    s_token_ttl = (int)curry_fixnum(av[0]);
+    s_token_ttl = (int)checked_fixnum(av[0], 1, "mcp-token-ttl!");
     return curry_void();
 }
 
@@ -694,7 +695,7 @@ static curry_val fn_introspection_endpoint(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0]))
         curry_error("mcp-introspection-endpoint!: expected URL string");
-    strncpy(s_introspect_url, curry_string(av[0]), sizeof(s_introspect_url) - 1);
+    strncpy(s_introspect_url, checked_string(av[0], 1, "mcp-introspection-endpoint!"), sizeof(s_introspect_url) - 1);
     return curry_void();
 }
 
@@ -702,8 +703,8 @@ static curry_val fn_introspection_credentials(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0]) || !curry_is_string(av[1]))
         curry_error("mcp-introspection-credentials!: expected two strings");
-    strncpy(s_introspect_cred_id,  curry_string(av[0]), sizeof(s_introspect_cred_id) - 1);
-    strncpy(s_introspect_cred_sec, curry_string(av[1]), sizeof(s_introspect_cred_sec) - 1);
+    strncpy(s_introspect_cred_id,  checked_string(av[0], 1, "mcp-introspection-credentials!"), sizeof(s_introspect_cred_id) - 1);
+    strncpy(s_introspect_cred_sec, checked_string(av[1], 2, "mcp-introspection-credentials!"), sizeof(s_introspect_cred_sec) - 1);
     return curry_void();
 }
 
@@ -711,7 +712,7 @@ static curry_val fn_introspection_cache_ttl(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_fixnum(av[0]))
         curry_error("mcp-introspection-cache-ttl!: expected integer seconds");
-    s_introspect_cache_ttl = (int)curry_fixnum(av[0]);
+    s_introspect_cache_ttl = (int)checked_fixnum(av[0], 1, "mcp-introspection-cache-ttl!");
     return curry_void();
 }
 
@@ -720,7 +721,7 @@ static curry_val fn_introspection_cache_ttl(int ac, curry_val *av, void *ud) {
 static curry_val fn_jwt_algorithm(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_symbol(av[0])) curry_error("mcp-jwt-algorithm!: expected symbol");
-    const char *a = curry_symbol(av[0]);
+    const char *a = checked_symbol(av[0], 1, "mcp-jwt-algorithm!");
     if      (strcmp(a, "hs256") == 0) s_jwt_alg = JWT_HS256;
     else if (strcmp(a, "rs256") == 0) s_jwt_alg = JWT_RS256;
     else curry_error("mcp-jwt-algorithm!: unknown algorithm '%s' (hs256|rs256)", a);
@@ -730,28 +731,28 @@ static curry_val fn_jwt_algorithm(int ac, curry_val *av, void *ud) {
 static curry_val fn_jwt_secret(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-jwt-secret!: expected string");
-    strncpy(s_jwt_secret, curry_string(av[0]), sizeof(s_jwt_secret) - 1);
+    strncpy(s_jwt_secret, checked_string(av[0], 1, "mcp-jwt-secret!"), sizeof(s_jwt_secret) - 1);
     return curry_void();
 }
 
 static curry_val fn_jwt_public_key(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-jwt-public-key!: expected file path string");
-    FILE *f = fopen(curry_string(av[0]), "r");
-    if (!f) curry_error("mcp-jwt-public-key!: cannot open '%s'", curry_string(av[0]));
+    FILE *f = fopen(checked_string(av[0], 1, "mcp-jwt-public-key!"), "r");
+    if (!f) curry_error("mcp-jwt-public-key!: cannot open '%s'", checked_string(av[0], 1, "mcp-jwt-public-key!"));
     if (s_jwt_pubkey) { EVP_PKEY_free(s_jwt_pubkey); s_jwt_pubkey = NULL; }
     s_jwt_pubkey = PEM_read_PUBKEY(f, NULL, NULL, NULL);
     fclose(f);
     if (!s_jwt_pubkey)
         curry_error("mcp-jwt-public-key!: failed to parse public key from '%s'",
-                    curry_string(av[0]));
+                    checked_string(av[0], 1, "mcp-jwt-public-key!"));
     return curry_void();
 }
 
 static curry_val fn_jwt_public_key_pem(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-jwt-public-key-pem!: expected PEM string");
-    const char *pem = curry_string(av[0]);
+    const char *pem = checked_string(av[0], 1, "mcp-jwt-public-key-pem!");
     BIO *bio = BIO_new_mem_buf(pem, (int)strlen(pem));
     if (s_jwt_pubkey) { EVP_PKEY_free(s_jwt_pubkey); s_jwt_pubkey = NULL; }
     s_jwt_pubkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
@@ -764,14 +765,14 @@ static curry_val fn_jwt_public_key_pem(int ac, curry_val *av, void *ud) {
 static curry_val fn_jwt_issuer(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-jwt-issuer!: expected string");
-    strncpy(s_jwt_issuer, curry_string(av[0]), sizeof(s_jwt_issuer) - 1);
+    strncpy(s_jwt_issuer, checked_string(av[0], 1, "mcp-jwt-issuer!"), sizeof(s_jwt_issuer) - 1);
     return curry_void();
 }
 
 static curry_val fn_jwt_audience(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     if (!curry_is_string(av[0])) curry_error("mcp-jwt-audience!: expected string");
-    strncpy(s_jwt_audience, curry_string(av[0]), sizeof(s_jwt_audience) - 1);
+    strncpy(s_jwt_audience, checked_string(av[0], 1, "mcp-jwt-audience!"), sizeof(s_jwt_audience) - 1);
     return curry_void();
 }
 

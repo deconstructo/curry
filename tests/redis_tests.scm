@@ -186,6 +186,14 @@
   (guard (exn (#t 'raised)) (redis-close! (cons 'redis-conn 42)))
   'raised)
 
+;;; ---- Issue #189: unchecked direct scalar argument casts ----
+;;; curry_define_fn only enforces arity, not argument types -- redis-connect
+;;; passed av[0] straight to curry_string with no curry_is_string check,
+;;; confirmed reproducible SIGSEGV via (redis-connect 42 6379) pre-fix.
+(check "redis-connect rejects a non-string host (was a reproducible SIGSEGV)"
+  (guard (exn (#t 'raised)) (redis-connect 42 6379))
+  'raised)
+
 ;;; ---- Summary ----
 
 (newline)

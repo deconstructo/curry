@@ -18,6 +18,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,8 +57,8 @@ static LDAP *val_to_ldap(curry_val v) {
 
 static curry_val fn_ldap_connect(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    const char *host    = curry_string(av[0]);
-    int         port    = (int)curry_fixnum(av[1]);
+    const char *host    = checked_string(av[0], 1, "ldap-connect");
+    int         port    = (int)checked_fixnum(av[1], 2, "ldap-connect");
     bool        use_tls = curry_bool(av[2]);
 
     char uri[512];
@@ -85,8 +86,8 @@ static curry_val fn_ldap_connect(int ac, curry_val *av, void *ud) {
 static curry_val fn_ldap_bind(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     LDAP       *ld  = val_to_ldap(av[0]);
-    const char *dn  = curry_string(av[1]);
-    const char *pw  = curry_string(av[2]);
+    const char *dn  = checked_string(av[1], 2, "ldap-bind!");
+    const char *pw  = checked_string(av[2], 3, "ldap-bind!");
 
     struct berval cred;
     cred.bv_val = (char *)pw;
@@ -150,9 +151,9 @@ static char **attrs_from_val(curry_val v) {
 static curry_val fn_ldap_search(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     LDAP       *ld     = val_to_ldap(av[0]);
-    const char *base   = curry_string(av[1]);
+    const char *base   = checked_string(av[1], 2, "ldap-search");
     int         scope  = scope_from_sym(av[2]);
-    const char *filter = curry_string(av[3]);
+    const char *filter = checked_string(av[3], 4, "ldap-search");
     char      **attrs  = attrs_from_val(av[4]);
 
     LDAPMessage *result = NULL;
@@ -224,7 +225,7 @@ static curry_val fn_ldap_close(int ac, curry_val *av, void *ud) {
 static curry_val fn_ldap_set_option(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     LDAP       *ld  = val_to_ldap(av[0]);
-    const char *opt = curry_symbol(av[1]);
+    const char *opt = checked_symbol(av[1], 2, "ldap-set-option!");
     curry_val   val = av[2];
 
     if (strcmp(opt, "protocol-version") == 0) {
@@ -247,7 +248,7 @@ static curry_val fn_ldap_set_option(int ac, curry_val *av, void *ud) {
 /* (ldap-escape-value str) → escaped string safe for embedding in a filter value */
 static curry_val fn_ldap_escape_value(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    char *escaped = ldap_escape_filter_value(curry_string(av[0]));
+    char *escaped = ldap_escape_filter_value(checked_string(av[0], 1, "ldap-escape-value"));
     curry_val result = curry_make_string(escaped);
     free(escaped);
     return result;

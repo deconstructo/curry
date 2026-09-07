@@ -33,6 +33,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
@@ -251,8 +252,8 @@ static CURLcode do_request(const char *method, const char *url, curry_val hdrs_v
 
 static curry_val fn_http_request(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *method   = curry_string(av[0]);
-    const char *url      = curry_string(av[1]);
+    const char *method   = checked_string(av[0], 1, "http-request");
+    const char *url      = checked_string(av[1], 2, "http-request");
     curry_val   hdrs_v   = (ac > 2) ? av[2] : curry_nil();
     size_t      body_len = 0;
     char       *body_owned = NULL;
@@ -277,8 +278,8 @@ static curry_val fn_http_request(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_http_request_headers(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *method   = curry_string(av[0]);
-    const char *url      = curry_string(av[1]);
+    const char *method   = checked_string(av[0], 1, "http-request/headers");
+    const char *url      = checked_string(av[1], 2, "http-request/headers");
     curry_val   hdrs_v   = (ac > 2) ? av[2] : curry_nil();
     size_t      body_len = 0;
     char       *body_owned = NULL;

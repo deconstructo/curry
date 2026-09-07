@@ -50,6 +50,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <git2.h>
 /* libgit2 _INIT macros only set version fields; suppress spurious missing-init warnings */
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -105,21 +106,21 @@ static void git_check(int rc, const char *ctx) {
 static curry_val fn_open(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = NULL;
-    git_check(git_repository_open(&repo, curry_string(av[0])), "open");
+    git_check(git_repository_open(&repo, checked_string(av[0], 1, "git-open")), "open");
     return repo_to_val(repo);
 }
 
 static curry_val fn_init(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = NULL;
-    git_check(git_repository_init(&repo, curry_string(av[0]), 0), "init");
+    git_check(git_repository_init(&repo, checked_string(av[0], 1, "git-init"), 0), "init");
     return repo_to_val(repo);
 }
 
 static curry_val fn_clone(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = NULL;
-    git_check(git_clone(&repo, curry_string(av[0]), curry_string(av[1]), NULL), "clone");
+    git_check(git_clone(&repo, checked_string(av[0], 1, "git-clone"), checked_string(av[1], 2, "git-clone"), NULL), "clone");
     return repo_to_val(repo);
 }
 
@@ -212,7 +213,7 @@ static curry_val commit_to_alist(git_commit *c) {
 static curry_val fn_log(int ac, curry_val *av, void *ud) {
     (void)ud;
     git_repository *repo = val_to_repo(av[0]);
-    int limit = (ac >= 2) ? (int)curry_fixnum(av[1]) : 100;
+    int limit = (ac >= 2) ? (int)checked_fixnum(av[1], 2, "git-log") : 100;
 
     git_revwalk *walk = NULL;
     git_check(git_revwalk_new(&walk, repo), "log");
@@ -248,7 +249,7 @@ static curry_val fn_add(int ac, curry_val *av, void *ud) {
     git_repository *repo = val_to_repo(av[0]);
     git_index *idx = NULL;
     git_check(git_repository_index(&idx, repo), "index");
-    git_check(git_index_add_bypath(idx, curry_string(av[1])), "add");
+    git_check(git_index_add_bypath(idx, checked_string(av[1], 2, "git-add!")), "add");
     git_check(git_index_write(idx), "index write");
     git_index_free(idx);
     return curry_void();
@@ -274,7 +275,7 @@ static curry_val fn_reset_file(int ac, curry_val *av, void *ud) {
         /* No HEAD yet (empty repo) — just remove from index */
         git_index *idx = NULL;
         git_check(git_repository_index(&idx, repo), "index");
-        git_check(git_index_remove_bypath(idx, curry_string(av[1])), "reset");
+        git_check(git_index_remove_bypath(idx, checked_string(av[1], 2, "git-reset-file!")), "reset");
         git_check(git_index_write(idx), "index write");
         git_index_free(idx);
         return curry_void();
@@ -282,7 +283,7 @@ static curry_val fn_reset_file(int ac, curry_val *av, void *ud) {
     git_object *head_obj = NULL;
     git_check(git_reference_peel(&head_obj, head_ref, GIT_OBJECT_COMMIT), "peel");
     git_strarray pathspec;
-    char *paths[1] = { (char *)curry_string(av[1]) };
+    char *paths[1] = { (char *)checked_string(av[1], 2, "git-reset-file!") };
     pathspec.strings = paths; pathspec.count = 1;
     git_check(git_reset_default(repo, head_obj, &pathspec), "reset");
     git_object_free(head_obj);
@@ -295,9 +296,9 @@ static curry_val fn_reset_file(int ac, curry_val *av, void *ud) {
 static curry_val fn_commit(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo  = val_to_repo(av[0]);
-    const char *msg       = curry_string(av[1]);
-    const char *auth_name = curry_string(av[2]);
-    const char *auth_mail = curry_string(av[3]);
+    const char *msg       = checked_string(av[1], 2, "git-commit!");
+    const char *auth_name = checked_string(av[2], 3, "git-commit!");
+    const char *auth_mail = checked_string(av[3], 4, "git-commit!");
 
     git_index *idx = NULL;
     git_check(git_repository_index(&idx, repo), "commit index");
@@ -370,7 +371,7 @@ static curry_val fn_current_branch(int ac, curry_val *av, void *ud) {
 static curry_val fn_checkout(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = val_to_repo(av[0]);
-    const char *branch   = curry_string(av[1]);
+    const char *branch   = checked_string(av[1], 2, "git-checkout!");
 
     git_reference *ref = NULL;
     char refname[256];
@@ -393,7 +394,7 @@ static curry_val fn_checkout(int ac, curry_val *av, void *ud) {
 static curry_val fn_branch_create(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = val_to_repo(av[0]);
-    const char *name     = curry_string(av[1]);
+    const char *name     = checked_string(av[1], 2, "git-branch-create!");
 
     git_reference *head_ref = NULL;
     git_check(git_repository_head(&head_ref, repo), "branch-create head");
@@ -505,8 +506,8 @@ static curry_val fn_tags(int ac, curry_val *av, void *ud) {
 static curry_val fn_tag_create(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo = val_to_repo(av[0]);
-    const char *name     = curry_string(av[1]);
-    const char *msg      = curry_string(av[2]);
+    const char *name     = checked_string(av[1], 2, "git-tag-create!");
+    const char *msg      = checked_string(av[2], 3, "git-tag-create!");
 
     git_reference *head_ref = NULL;
     git_check(git_repository_head(&head_ref, repo), "tag head");
@@ -550,7 +551,7 @@ static curry_val fn_remotes(int ac, curry_val *av, void *ud) {
 static curry_val fn_fetch(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo   = val_to_repo(av[0]);
-    const char *remote_name= curry_string(av[1]);
+    const char *remote_name= checked_string(av[1], 2, "git-fetch!");
     git_remote *remote = NULL;
     git_check(git_remote_lookup(&remote, repo, remote_name), "fetch lookup");
     git_fetch_options opts = GIT_FETCH_OPTIONS_INIT;
@@ -562,8 +563,8 @@ static curry_val fn_fetch(int ac, curry_val *av, void *ud) {
 static curry_val fn_push(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     git_repository *repo   = val_to_repo(av[0]);
-    const char *remote_name= curry_string(av[1]);
-    const char *branch     = curry_string(av[2]);
+    const char *remote_name= checked_string(av[1], 2, "git-push!");
+    const char *branch     = checked_string(av[2], 3, "git-push!");
     git_remote *remote = NULL;
     git_check(git_remote_lookup(&remote, repo, remote_name), "push lookup");
     char refspec_buf[256];

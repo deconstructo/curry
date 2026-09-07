@@ -76,6 +76,13 @@
   (lambda () (sqlite-close (cons 'sqlite-db 42))))
 (check-error "sqlite-exec-rejects-non-handle" (lambda () (sqlite-exec 42 "SELECT 1")))
 
+;;; Issue #189: curry_define_fn only enforces arity, not argument types --
+;;; sqlite-open passed av[0] straight to curry_string with no
+;;; curry_is_string check, confirmed reproducible SIGSEGV via
+;;; (sqlite-open 42) pre-fix.
+(check-error "sqlite-open-rejects-non-string (was a reproducible SIGSEGV)"
+  (lambda () (sqlite-open 42)))
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")

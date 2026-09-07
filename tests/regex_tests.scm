@@ -40,6 +40,12 @@
 (check "regex-match rejects a forged handle (was a reproducible SIGSEGV)"
   (raises? (lambda () (regex-match (cons 'regex 42) "x"))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; regex-compile passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "regex-compile rejects a non-string pattern"
+  (raises? (lambda () (regex-compile 42))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

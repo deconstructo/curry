@@ -39,6 +39,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -832,10 +833,10 @@ static curry_val neo4j_exec(NeoConn *c, const char *cypher, curry_val params_ali
 
 static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *host     = curry_string(av[0]);
-    int         port     = (int)curry_fixnum(av[1]);
-    const char *user     = (ac >= 4 && curry_is_string(av[2])) ? curry_string(av[2]) : "neo4j";
-    const char *password = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : "";
+    const char *host     = checked_string(av[0], 1, "neo4j-connect");
+    int         port     = (int)checked_fixnum(av[1], 2, "neo4j-connect");
+    const char *user     = (ac >= 4 && curry_is_string(av[2])) ? checked_string(av[2], 3, "neo4j-connect") : "neo4j";
+    const char *password = (ac >= 4 && curry_is_string(av[3])) ? checked_string(av[3], 4, "neo4j-connect") : "";
     NeoConn *c = bolt_connect(host, port, user, password, false, NULL);
     return conn_box(c, conn_tag());
 }
@@ -843,11 +844,11 @@ static curry_val fn_connect(int ac, curry_val *av, void *ud) {
 #ifdef HAVE_NEO4J_TLS
 static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *host     = curry_string(av[0]);
-    int         port     = (int)curry_fixnum(av[1]);
-    const char *user     = (ac >= 4 && curry_is_string(av[2])) ? curry_string(av[2]) : "neo4j";
-    const char *password = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : "";
-    const char *ca_cert  = (ac >= 5 && curry_is_string(av[4])) ? curry_string(av[4]) : NULL;
+    const char *host     = checked_string(av[0], 1, "neo4j-connect-tls");
+    int         port     = (int)checked_fixnum(av[1], 2, "neo4j-connect-tls");
+    const char *user     = (ac >= 4 && curry_is_string(av[2])) ? checked_string(av[2], 3, "neo4j-connect-tls") : "neo4j";
+    const char *password = (ac >= 4 && curry_is_string(av[3])) ? checked_string(av[3], 4, "neo4j-connect-tls") : "";
+    const char *ca_cert  = (ac >= 5 && curry_is_string(av[4])) ? checked_string(av[4], 5, "neo4j-connect-tls") : NULL;
     NeoConn *c = bolt_connect(host, port, user, password, true, ca_cert);
     return conn_box(c, conn_tag());
 }
@@ -874,7 +875,7 @@ static curry_val fn_disconnect(int ac, curry_val *av, void *ud) {
 static curry_val fn_run(int ac, curry_val *av, void *ud) {
     (void)ud;
     NeoConn *c       = conn_unbox(av[0], "neo4j-run");
-    const char *cyph = curry_string(av[1]);
+    const char *cyph = checked_string(av[1], 2, "neo4j-run");
     curry_val params = (ac >= 3) ? av[2] : curry_nil();
     return neo4j_exec(c, cyph, params);
 }

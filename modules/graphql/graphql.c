@@ -29,6 +29,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -267,7 +268,7 @@ static Buf gql_post(GQLClient *c, const char *body_json) {
 static curry_val fn_graphql_client(int ac, curry_val *av, void *ud) {
     (void)ud;
     GQLClient *c = calloc(1, sizeof(GQLClient));
-    c->url = strdup(curry_string(av[0]));
+    c->url = strdup(checked_string(av[0], 1, "graphql-client"));
     pthread_once(&g_curl_init_once, curl_init_once_fn);
 
     c->headers = NULL;
@@ -325,7 +326,7 @@ static curry_val gql_execute(GQLClient *c, const char *operation, curry_val vars
 static curry_val fn_graphql_query(int ac, curry_val *av, void *ud) {
     (void)ud;
     GQLClient *c  = val_to_gql(av[0]);
-    const char *q = curry_string(av[1]);
+    const char *q = checked_string(av[1], 2, "graphql-query");
     curry_val vars = (ac > 2) ? av[2] : curry_nil();
     return gql_execute(c, q, vars);
 }

@@ -34,6 +34,12 @@
 (check "graphql-query rejects a non-pair argument (was a reproducible SIGSEGV)"
   (raises? (lambda () (graphql-query 42 "{x}"))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; graphql-client passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "graphql-client rejects a non-string URL"
+  (raises? (lambda () (graphql-client 42))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

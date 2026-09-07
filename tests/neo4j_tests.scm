@@ -35,6 +35,12 @@
 (check "neo4j-run rejects a forged handle (was a reproducible SIGSEGV)"
   (raises? (lambda () (neo4j-run (cons 'neo4j-conn 42) "RETURN 1"))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ──────────────
+;;; neo4j-connect passed av[0] straight to curry_string with no
+;;; curry_is_string check.
+(check "neo4j-connect rejects a non-string host"
+  (raises? (lambda () (neo4j-connect 42 7687))) #t)
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; Summary
 ;;; ════════════════════════════════════════════════════════════

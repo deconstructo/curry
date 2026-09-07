@@ -6,6 +6,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <regex.h>
 #include <string.h>
 #include <stdlib.h>
@@ -58,14 +59,14 @@ static curry_val fn_regex_compile(int ac, curry_val *av, void *ud) {
     if (!curry_is_string(av[0]))
         curry_error("regex-compile: expected string pattern");
     int flags = REG_EXTENDED;
-    if (ac >= 2 && curry_is_fixnum(av[1])) flags = (int)curry_fixnum(av[1]);
+    if (ac >= 2 && curry_is_fixnum(av[1])) flags = (int)checked_fixnum(av[1], 2, "regex-compile");
 
     RegexData *rx = malloc(sizeof(RegexData));
     if (!rx) curry_error("regex-compile: out of memory");
     rx->compiled = 0; rx->nmatch = 0;
 
     char errbuf[256];
-    int rc = regcomp(&rx->re, curry_string(av[0]), flags);
+    int rc = regcomp(&rx->re, checked_string(av[0], 1, "regex-compile"), flags);
     if (rc != 0) {
         regerror(rc, &rx->re, errbuf, sizeof(errbuf));
         free(rx);
@@ -98,11 +99,11 @@ static curry_val fn_regex_match(int ac, curry_val *av, void *ud) {
     (void)ud;
     RegexData *rx = get_regex(av[0], "regex-match");
     if (!curry_is_string(av[1])) curry_error("regex-match: expected string");
-    int eflags = (ac >= 3 && curry_is_fixnum(av[2])) ? (int)curry_fixnum(av[2]) : 0;
+    int eflags = (ac >= 3 && curry_is_fixnum(av[2])) ? (int)checked_fixnum(av[2], 3, "regex-match") : 0;
 
     size_t nm = rx->nmatch < MAX_GROUPS ? rx->nmatch : MAX_GROUPS;
     regmatch_t m[MAX_GROUPS];
-    int rc = do_exec(rx, curry_string(av[1]), eflags, m, nm);
+    int rc = do_exec(rx, checked_string(av[1], 2, "regex-match"), eflags, m, nm);
     if (rc == REG_NOMATCH) return curry_make_bool(false);
     if (rc != 0) {
         char errbuf[256]; regerror(rc, &rx->re, errbuf, sizeof(errbuf));
@@ -122,8 +123,8 @@ static curry_val fn_regex_match_string(int ac, curry_val *av, void *ud) {
     (void)ud;
     RegexData *rx = get_regex(av[0], "regex-match-string");
     if (!curry_is_string(av[1])) curry_error("regex-match-string: expected string");
-    const char *src = curry_string(av[1]);
-    int eflags = (ac >= 3 && curry_is_fixnum(av[2])) ? (int)curry_fixnum(av[2]) : 0;
+    const char *src = checked_string(av[1], 2, "regex-match-string");
+    int eflags = (ac >= 3 && curry_is_fixnum(av[2])) ? (int)checked_fixnum(av[2], 3, "regex-match-string") : 0;
 
     size_t nm = rx->nmatch < MAX_GROUPS ? rx->nmatch : MAX_GROUPS;
     regmatch_t m[MAX_GROUPS];
@@ -158,8 +159,8 @@ static curry_val fn_regex_replace(int ac, curry_val *av, void *ud) {
     RegexData *rx = get_regex(av[0], "regex-replace");
     if (!curry_is_string(av[1])) curry_error("regex-replace: expected string");
     if (!curry_is_string(av[2])) curry_error("regex-replace: expected replacement string");
-    const char *src  = curry_string(av[1]);
-    const char *repl = curry_string(av[2]);
+    const char *src  = checked_string(av[1], 2, "regex-replace");
+    const char *repl = checked_string(av[2], 3, "regex-replace");
     int replace_all  = (ac >= 4 && curry_is_true(av[3]));
 
     size_t out_cap = strlen(src) * 2 + 64;
@@ -221,7 +222,7 @@ static curry_val fn_regex_split(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     RegexData *rx = get_regex(av[0], "regex-split");
     if (!curry_is_string(av[1])) curry_error("regex-split: expected string");
-    const char *src = curry_string(av[1]);
+    const char *src = checked_string(av[1], 2, "regex-split");
 
     size_t nm = rx->nmatch < MAX_GROUPS ? rx->nmatch : MAX_GROUPS;
     regmatch_t m[MAX_GROUPS];

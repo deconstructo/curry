@@ -253,6 +253,12 @@
 (check "git-close! rejects a forged handle (was a reproducible SIGSEGV)"
   (raises? (lambda () (git-close! (cons 'git-repo 42)))) #t)
 
+;;; ── Issue #189: unchecked direct scalar argument casts ────────────────────
+;;; git-open passed av[0] straight to curry_string with no curry_is_string
+;;; check.
+(check "git-open rejects a non-string path"
+  (raises? (lambda () (git-open 42))) #t)
+
 ;;; ── Summary ──────────────────────────────────────────────────────────────
 
 (newline)

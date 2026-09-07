@@ -214,6 +214,12 @@
 (socket-close accepted2)
 (socket-close cws-srv)
 
+;;; Issue #189: unchecked direct scalar argument casts -- make-client-socket
+;;; passed av[0] straight to curry_string with no curry_is_string check.
+(check "make-client-socket rejects a non-string node argument"
+  (guard (exn (#t 'raised)) (make-client-socket 42 "80"))
+  'raised)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

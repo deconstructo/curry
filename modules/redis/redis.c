@@ -74,6 +74,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -321,8 +322,8 @@ static curry_val redis_call(RedisConn *c, int argc, ...) {
 
 static curry_val fn_connect(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *host = curry_string(av[0]);
-    int port = (int)curry_fixnum(av[1]);
+    const char *host = checked_string(av[0], 1, "redis-connect");
+    int port = (int)checked_fixnum(av[1], 2, "redis-connect");
     bool has_password = ac >= 3 && curry_is_string(av[2]);
 
     char port_str[16];
@@ -404,7 +405,7 @@ static curry_val fn_ping(int ac, curry_val *av, void *ud) {
 static curry_val fn_select(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     RedisConn *c = val_to_conn(av[0]);
-    long long db = (long long)curry_fixnum(av[1]);
+    long long db = (long long)checked_fixnum(av[1], 2, "redis-select");
     resp_start(c, 2);
     resp_arg_cstr(c, "SELECT");
     resp_arg_int(c, db);
@@ -430,7 +431,7 @@ static curry_val fn_set(int ac, curry_val *av, void *ud) {
     RedisConn *c = val_to_conn(av[0]);
     if (ac >= 4) {
         /* SET key value EX ttl */
-        long long ttl = (long long)curry_fixnum(av[3]);
+        long long ttl = (long long)checked_fixnum(av[3], 4, "redis-set!");
         resp_start(c, 5);
         resp_arg_cstr(c, "SET");
         resp_arg_val(c, av[1]);
@@ -491,7 +492,7 @@ static curry_val fn_incrby(int ac, curry_val *av, void *ud) {
     resp_start(c, 3);
     resp_arg_cstr(c, "INCRBY");
     resp_arg_val(c, av[1]);
-    resp_arg_int(c, (long long)curry_fixnum(av[2]));
+    resp_arg_int(c, (long long)checked_fixnum(av[2], 3, "redis-incrby!"));
     return resp_read(c);
 }
 
@@ -501,7 +502,7 @@ static curry_val fn_expire(int ac, curry_val *av, void *ud) {
     resp_start(c, 3);
     resp_arg_cstr(c, "EXPIRE");
     resp_arg_val(c, av[1]);
-    resp_arg_int(c, (long long)curry_fixnum(av[2]));
+    resp_arg_int(c, (long long)checked_fixnum(av[2], 3, "redis-expire!"));
     curry_val r = resp_read(c);
     return curry_make_bool(curry_fixnum(r) == 1);
 }
@@ -664,8 +665,8 @@ static curry_val fn_lrange(int ac, curry_val *av, void *ud) {
     resp_start(c, 4);
     resp_arg_cstr(c, "LRANGE");
     resp_arg_val(c, av[1]);
-    resp_arg_int(c, (long long)curry_fixnum(av[2]));
-    resp_arg_int(c, (long long)curry_fixnum(av[3]));
+    resp_arg_int(c, (long long)checked_fixnum(av[2], 3, "redis-lrange"));
+    resp_arg_int(c, (long long)checked_fixnum(av[3], 4, "redis-lrange"));
     return resp_read(c);
 }
 
@@ -723,7 +724,7 @@ static curry_val fn_scard(int ac, curry_val *av, void *ud) {
 static curry_val fn_zadd(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     RedisConn *c = val_to_conn(av[0]);
-    double score = curry_is_fixnum(av[2]) ? (double)curry_fixnum(av[2]) : curry_float(av[2]);
+    double score = curry_is_fixnum(av[2]) ? (double)checked_fixnum(av[2], 3, "redis-zadd!") : checked_float(av[2], 3, "redis-zadd!");
     char score_str[64];
     snprintf(score_str, sizeof(score_str), "%.17g", score);
     resp_start(c, 4);
@@ -740,8 +741,8 @@ static curry_val fn_zrange(int ac, curry_val *av, void *ud) {
     resp_start(c, 4);
     resp_arg_cstr(c, "ZRANGE");
     resp_arg_val(c, av[1]);
-    resp_arg_int(c, (long long)curry_fixnum(av[2]));
-    resp_arg_int(c, (long long)curry_fixnum(av[3]));
+    resp_arg_int(c, (long long)checked_fixnum(av[2], 3, "redis-zrange"));
+    resp_arg_int(c, (long long)checked_fixnum(av[3], 4, "redis-zrange"));
     return resp_read(c);
 }
 
@@ -752,8 +753,8 @@ static curry_val fn_zrange_withscores(int ac, curry_val *av, void *ud) {
     resp_start(c, 5);
     resp_arg_cstr(c, "ZRANGE");
     resp_arg_val(c, av[1]);
-    resp_arg_int(c, (long long)curry_fixnum(av[2]));
-    resp_arg_int(c, (long long)curry_fixnum(av[3]));
+    resp_arg_int(c, (long long)checked_fixnum(av[2], 3, "redis-zrange-withscores"));
+    resp_arg_int(c, (long long)checked_fixnum(av[3], 4, "redis-zrange-withscores"));
     resp_arg_cstr(c, "WITHSCORES");
     curry_val flat = resp_read(c);
 
@@ -842,10 +843,10 @@ static curry_val fn_info(int ac, curry_val *av, void *ud) {
 #ifdef HAVE_REDIS_TLS
 static curry_val fn_connect_tls(int ac, curry_val *av, void *ud) {
     (void)ud;
-    const char *host     = curry_string(av[0]);
-    int         port     = (int)curry_fixnum(av[1]);
+    const char *host     = checked_string(av[0], 1, "redis-connect-tls");
+    int         port     = (int)checked_fixnum(av[1], 2, "redis-connect-tls");
     bool        has_password = ac >= 3 && curry_is_string(av[2]);
-    const char *ca_cert  = (ac >= 4 && curry_is_string(av[3])) ? curry_string(av[3]) : NULL;
+    const char *ca_cert  = (ac >= 4 && curry_is_string(av[3])) ? checked_string(av[3], 4, "redis-connect-tls") : NULL;
 
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);

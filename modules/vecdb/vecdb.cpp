@@ -23,6 +23,7 @@
  */
 
 #include <curry.h>
+#include <curry_checked_args.h>
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -78,10 +79,10 @@ extern "C" {
 
 static curry_val fn_make(int ac, curry_val *av, void *ud) {
     (void)ud;
-    int dims = (int)curry_fixnum(av[0]);
+    int dims = (int)checked_fixnum(av[0], 1, "vecdb-make");
     int metric = 0; /* cosine default */
     if (ac > 1) {
-        const char *m = curry_symbol(av[1]);
+        const char *m = checked_symbol(av[1], 2, "vecdb-make");
         if (!strcmp(m, "l2")) metric = 1;
         else if (!strcmp(m, "ip")) metric = 2;
     }
@@ -112,7 +113,7 @@ static void check_numeric_vector(curry_val v, const char *who) {
 static curry_val fn_add(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     VecDB *db = val_to_db(av[0]);
-    long id   = (long)curry_fixnum(av[1]);
+    long id   = (long)checked_fixnum(av[1], 2, "vecdb-add");
     check_numeric_vector(av[2], "vecdb-add");
     uint32_t n = curry_vector_length(av[2]);
     if ((int)n != db->dims)
@@ -132,7 +133,7 @@ static curry_val fn_search(int ac, curry_val *av, void *ud) {
         curry_error("vecdb-search: query vector has %u dimensions, expected %d", n, db->dims);
     std::vector<float> query(n);
     for (uint32_t i = 0; i < n; i++) query[i] = (float)curry_float(curry_vector_ref(av[1], i));
-    int k = (int)curry_fixnum(av[2]);
+    int k = (int)checked_fixnum(av[2], 3, "vecdb-search");
 
     std::vector<std::pair<float, long>> scored;
     for (auto &kv : db->entries) {
@@ -157,7 +158,7 @@ static curry_val fn_search(int ac, curry_val *av, void *ud) {
 static curry_val fn_remove(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     VecDB *db = val_to_db(av[0]);
-    db->entries.erase((long)curry_fixnum(av[1]));
+    db->entries.erase((long)checked_fixnum(av[1], 2, "vecdb-remove"));
     return curry_void();
 }
 
