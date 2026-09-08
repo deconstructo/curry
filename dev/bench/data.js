@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788888595768,
+  "lastUpdate": 1788889515495,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13178,6 +13178,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 72.691,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1d7ca9c7fb326a7621d785af4dafc41e663b9b62",
+          "message": "fix(network): reject socket handles naming a fd curry never opened (#160) (#202)\n\nA raw socket handle is (socket . bytevector-packed-fd) -- a shape any\ncurry script can forge, e.g. (cons 'socket (some-bytevector)). Every\nsocket primitive validated only that shape (net_is_raw_socket_handle,\n#158), never whether curry's own socket primitives actually opened that\nfd -- so a forged handle naming an arbitrary fd the process happens to\nhave open (stdin/stdout/stderr, a fd belonging to something unrelated, a\njust-closed socket's recycled number) was silently operated on as if it\nwere a real, curry-issued socket.\n\nAdds a process-wide mutex-protected fd registry (network.c) shared\nbetween network.c and srfi106.c via network_internal.h. Every primitive\nthat hands a raw handle back to Scheme (tcp-listen, udp-socket,\nmake-client-socket, make-server-socket, socket-accept) now registers its\nfd through a new net_sock_to_val_registered() wrapper before returning;\nnet_checked_val_to_sock and net_extract_fd's raw-handle branch now reject\nany fd not present in the registry; tcp-close/socket-close deregister\nbefore closing.\n\nVerified manually that a handle forged to name fd 1 (a real, live fd) is\nnow rejected while genuine handles still work; full 127-suite ctest run\nclean. Independent code-review and security-review passes found no\ncorrectness bugs, bypasses, or new races.",
+          "timestamp": "2026-09-09T03:44:34+10:00",
+          "tree_id": "1cdda659cf7f4f41b0cc5ed4e686d700d742da19",
+          "url": "https://github.com/deconstructo/curry/commit/1d7ca9c7fb326a7621d785af4dafc41e663b9b62"
+        },
+        "date": 1788889514104,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.186,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.904,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.774,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.789,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 150.729,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 303.827,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.773,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.751,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 70.698,
             "unit": "ms"
           }
         ]
