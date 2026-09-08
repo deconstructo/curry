@@ -1,5 +1,63 @@
 # Changelog
 
+### 1.23.7 - 2026-09-09
+
+**Security — unchecked-cast sweep**
+
+A wrong-type argument to dozens of builtins and C-module primitives
+across the codebase (`crypto`, `git`, `graphql`, `http`, `image`, `ldap`,
+`mcp`, `mqtt`, `neo4j`, `network`/`srfi106`/`tls`, `piper`, `plplot`,
+`posix`, `redis`, `regex`, `rpi`, `sqlite`, `storage`, `sync`, `vecdb`,
+`qt6`, plus core `builtins.c`/`port.c`/`set.c`) previously wild-cast
+instead of raising a Scheme error — reproducible SIGSEGVs via calls like
+`(sqlite-open 42)`, `(redis-connect 42 6379)`, `(bytevector-length "x")`,
+or `(string-contains 42 "x")`. Closed with a shared `checked_string`/
+`checked_float`/`checked_fixnum`/`checked_symbol` wrapper set
+(`include/curry_checked_args.h`) applied at every unchecked call site
+found, plus targeted fixes: a forged image vector causing a real
+out-of-bounds heap read/write (image module), and raw socket handles —
+`(socket . bytevector-packed-fd)` — accepted with no shape or provenance
+check at all. The socket-handle fix went further than shape-checking:
+`network`/`srfi106` primitives now cross-check a process-wide fd registry
+so a forged handle naming a real but foreign fd (stdin/stdout/stderr,
+another module's fd, a recycled fd number) is rejected even when its
+shape is well-formed.
+
+**Concurrency — actor-shared state hardening**
+
+curry actors are real OS threads with no global interpreter lock;
+several long-standing shared structures turned out to be read or written
+across actors with no synchronization at all, found via a systematic
+review pass rather than a single incident:
+
+- `GLOBAL_ENV`'s seqlock: lock-free readers could race the mutex-
+  protected writer path at the level of individual plain-field reads
+  (not just the version counter), a genuine data race by the letter of
+  C11 even though the counter's own ordering was already sound. Also
+  closed a matching gap where the moving-GC backend's own evacuation of
+  a root environment's fields raced the same seqlock.
+- The rule/algebra tables (`define-rule`, `define-algebra`), the module
+  registry (`import`), the VM's per-`Chunk` global-lookup cache, and
+  `curl_global_init` (shared across every actor using `http`/`graphql`/
+  `storage`) all gained proper locking against concurrent actor access.
+- The experimental, opt-in `--gc generational` backend's own object
+  evacuation (never used by the default Boehm backend) had several of
+  the same class of gap against actor-shared objects — closed for
+  `EnvFrame`/`Module`, plus a throughput fix so the rule/algebra tables'
+  GC scan no longer re-walks the entire accumulated table on every
+  single minor collection from every actor (confirmed ~6x faster on a
+  concurrent workload). Remaining generational-backend gaps for other
+  object types are tracked separately and don't affect the default
+  backend.
+
+**Fixed**
+
+- `websocket`/`websocket_server`/`ros` test suites bound a fixed port
+  instead of an OS-assigned ephemeral one, causing CI port-contention
+  flakiness (#110).
+- A freshly-loaded C module could be registered twice if two actors
+  raced to first-import it concurrently.
+
 ### 1.23.6 - 2026-09-03
 
 **Fixed**
