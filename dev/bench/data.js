@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788784706778,
+  "lastUpdate": 1788860793615,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12902,6 +12902,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 60.799,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "37cf34cdf603c1d8c139a357ba028863b0065b25",
+          "message": "fix(symbolic): move sx_simplify's generation stamp off shared hdr.flags (#140) (#196)\n\nsx_simplify's memoization cache (added by #137 to fix an O(depth^2)\nCPU-exhaustion DoS) tags each fully-simplified SymExpr node with the\nvalue of a global generation counter, invalidated whenever\ndefine-rule/define-algebra/assume! changes anything. That counter was\nonly 32 bits -- constrained by living inside SymExpr's hdr.flags field,\nshared with every other heap object type -- and reliably wrapped in\n~3 minutes under tight invalidation (confirmed via a repro driving\n~22M cheap rule-registration calls/sec), letting a stale cached node\nget served as CURRENT after wraparound. A silent correctness bug, not\njust a missed optimization.\n\nSymExpr is its own dedicated struct (not a layout shared with other\nobject types the way hdr.flags is), so a wider, private field costs\nnothing to add: adds SymExpr.simplify_gen (a dedicated uint64_t,\nobject.h), widens g_sx_simplify_generation to match (same CAS-retry-\nskip-0 / acquire-release convention, only the width changes), and\nupdates sx_simplify() to read/write the new field instead of\nhdr.flags. At 64 bits, wrapping the same workload that reached 2^32\nin ~3 minutes would take on the order of tens of thousands of years.\n\nThis closes #140's \"finding 2\" only. #140 also reported a \"finding 1\"\n(interleaved rule/algebra registration defeats memoization entirely,\nsince invalidation is global rather than scoped to the operator that\nactually changed, reintroducing the O(depth^2) DoS under a specific\nadversarial pattern). A per-operator/per-variable scoped-invalidation\ndesign for finding 1 was drafted and independently validated in this\nsession -- directionally buildable, but validation surfaced a real\nsoundness gap (dependency masks must be derived from the operator\nsx_simplify_impl actually queried, not the operator of whatever result\nit rewrites to) and a structural ceiling no design in this category can\nclose (rule/algebra callbacks are arbitrary closures that can capture\nfree-variable dependencies invisible to any args-tree-based tracking\nscheme). Filed as #195 with the full validated design, the required\nfixes, and the capacity-sizing findings, rather than attempted here.\n\nAdds regression tests to tests/numeric_ext_tests.scm covering ordinary\ncache stability and define-rule invalidation still working correctly\nat the new field/width.\n\n\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-08T19:45:54+10:00",
+          "tree_id": "3f8d9bf3c3b8b3d2b5810004662fd962f908d360",
+          "url": "https://github.com/deconstructo/curry/commit/37cf34cdf603c1d8c139a357ba028863b0065b25"
+        },
+        "date": 1788860791856,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.06,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.978,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.375,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.511,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 157.554,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 307.986,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.54,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 96.834,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.562,
             "unit": "ms"
           }
         ]
