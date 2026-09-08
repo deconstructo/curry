@@ -1138,6 +1138,33 @@
     (exact->inexact (substitute s xv 0.04)) (sqrt 1.04) 1e-6))
 
 ;;; =========================================================================
+;;; Issue #140 (finding 2): sx_simplify's memoization generation counter
+;;; used to be packed into SymExpr's shared 32-bit hdr.flags field and
+;;; wrapped in ~3 minutes under tight invalidation (repeated
+;;; define-rule/define-algebra/assume! calls), letting a stale cached
+;;; node get served as current. Moved to a dedicated 64-bit field
+;;; (object.h's SymExpr.simplify_gen) -- not testing the wraparound
+;;; itself here (2^64 isn't reachable in test time), just the ordinary
+;;; correctness properties the fix must preserve: a cached result stays
+;;; cached until something actually invalidates it, and define-rule
+;;; still correctly invalidates and forces a fresh simplify pass.
+;;; =========================================================================
+
+(let* ((gv (sym-var 'g140))
+       (once (simplify (sin gv)))
+       (again (simplify (sin gv))))
+  (check "issue #140: repeated simplify of an unchanged expression is stable"
+    (equal? (sym->string once) (sym->string again)) #t))
+
+(define gv2 (sym-var 'g140b))
+(define before-140 (simplify (sin gv2)))
+(check "issue #140: simplify result before any rule change"
+  (sym->string before-140) "sin(g140b)")
+(define-rule (sin ?y) → (quote issue-140-rule-fired))
+(check "issue #140: define-rule invalidates the cache and the next simplify sees it"
+  (simplify (sin gv2)) 'issue-140-rule-fired)
+
+;;; =========================================================================
 ;;; Summary
 ;;; =========================================================================
 

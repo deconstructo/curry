@@ -127,6 +127,7 @@ val_t sx_make_expr(val_t op, int nargs, val_t *args) {
     e->hdr.flags = 0;
     e->op        = op;
     e->nargs     = (uint32_t)nargs;
+    e->simplify_gen = 0; /* zero-init is automatic via GC too; explicit for clarity */
     for (int i = 0; i < nargs; i++) e->args[i] = args[i];
     return vptr(e);
 }
@@ -239,15 +240,15 @@ static bool decompose_trig_sq(val_t term,
  * of CPU under a generous stack ulimit before the guard ever engages.
  *
  * Fixed with a generation-tagged memoization cache: SymExpr's own
- * hdr.flags field (unused for this type otherwise, confirmed by grep)
- * stores the g_sx_simplify_generation value in effect the last time
- * this exact node was fully simplified; sx_simplify (the public entry
- * point, below sx_simplify_impl) checks that tag first and returns the
- * node UNCHANGED with no recursion at all if it matches the CURRENT
- * generation -- turning the "wrap an already-simplified result" pattern
- * back into O(depth) total, since each wrap only ever simplifies the
- * ONE new outer node, never re-walking the (already-tagged) tree
- * beneath it.
+ * dedicated simplify_gen field (see object.h -- issue #140 moved this
+ * off hdr.flags, see below) stores the g_sx_simplify_generation value
+ * in effect the last time this exact node was fully simplified;
+ * sx_simplify (the public entry point, below sx_simplify_impl) checks
+ * that tag first and returns the node UNCHANGED with no recursion at
+ * all if it matches the CURRENT generation -- turning the "wrap an
+ * already-simplified result" pattern back into O(depth) total, since
+ * each wrap only ever simplifies the ONE new outer node, never
+ * re-walking the (already-tagged) tree beneath it.
  *
  * The generation counter exists because simplification is not a fixed
  * function of an expression's own shape alone: `define-rule`/
@@ -261,21 +262,66 @@ static bool decompose_trig_sq(val_t term,
  * registration functions call sx_invalidate_simplify_cache() (declared
  * in symbolic.h), which bumps this counter, so every previously-cached
  * tag stops matching and the next sx_simplify call on each affected
- * node redoes the full pass under the new rule set. */
-/* Plain uint32_t, NOT _Atomic-qualified: __atomic_load_n/__atomic_add_fetch
+ * node redoes the full pass under the new rule set.
+ *
+ * Issue #140 found two follow-up problems with this scheme, both from
+ * independent review of #137's own fix:
+ *
+ *   1. Invalidation is GLOBAL, not scoped to the operator/variable that
+ *      actually changed -- interleaving one cheap define-rule/
+ *      define-algebra call per step of an otherwise-cheap deep-
+ *      expression construction defeats memoization entirely,
+ *      reintroducing the O(depth^2) DoS this whole cache exists to
+ *      close. A proper fix needs per-operator AND per-variable scoped
+ *      invalidation (assumption changes are per-SymVar, not
+ *      per-operator, so the two invalidation sources need reconciling
+ *      too). Deliberately NOT attempted here: a design was drafted and
+ *      independently validated in the session that produced this fix,
+ *      and while directionally buildable, it surfaced a real soundness
+ *      gap (a node's tracked operator-dependency set must be derived
+ *      from the operator sx_simplify_impl actually QUERIED via
+ *      sx_rule_try/sx_algebra_lookup, not the operator of whatever
+ *      result it rewrites to -- e.g. `(- a 0)` rewrites to a `neg(a)`
+ *      node, silently losing the tracked dependency on SUB if derived
+ *      from the result's own top-level op instead) and a structural
+ *      ceiling no design in this category can close (sx_rule_add/
+ *      sx_algebra_define register arbitrary Scheme closures; one that
+ *      closes over a SymVar not among the expression's own args and
+ *      branches on its assumption flags creates a dependency invisible
+ *      to any args-tree-based tracking scheme). Filed as its own
+ *      follow-up issue with the validated design, the soundness fix,
+ *      and the capacity-sizing findings (a 128-slot per-operator table
+ *      is plausibly exhausted by an ORDINARY program's operator
+ *      vocabulary, not just an adversarial one) preserved for whoever
+ *      picks it up.
+ *
+ *   2. The generation counter itself was only 32 bits (constrained by
+ *      living inside SymExpr's shared hdr.flags field), and reliably
+ *      wrapped in ~3 minutes under tight invalidation (confirmed via a
+ *      repro driving ~22M cheap rule-registration calls/sec) -- letting
+ *      a stale cached node get served as CURRENT after wraparound, a
+ *      silent correctness bug, not just a missed optimization. THIS is
+ *      what this change fixes: SymExpr is its own dedicated struct (not
+ *      a layout shared with other heap object types the way hdr.flags
+ *      is), so a wider, private field costs nothing to add. At 64 bits,
+ *      wrapping the SAME workload that reached 2^32 in ~3 minutes would
+ *      take on the order of tens of thousands of years -- computationally
+ *      infeasible. */
+/* Plain uint64_t, NOT _Atomic-qualified: __atomic_load_n/__atomic_add_fetch
  * require a plain type (see runtime.c's identical convention/comment for
  * g_jit_arith_tainted et al.) -- curry's own actors are real OS threads,
  * so a script running define-rule/define-algebra/assume! on one actor
  * while another is mid-sx_simplify needs at least a non-torn read/write
  * here, even though the two-generations-out-of-sync worst case is just a
  * transient over-eager cache miss (an extra full simplify pass), not a
- * memory-safety issue -- SymExpr's own hdr.flags tag is a plain word
+ * memory-safety issue -- SymExpr's own simplify_gen tag is a plain word
  * write with no such cross-thread guarantee, matching how every other
  * per-object flags field in this codebase is handled (see review notes
  * on issue #137: no crash found in an actor stress test). Skipping 0 on
  * increment reserves it for "never simplified" (sx_make_expr always
- * zero-initializes hdr.flags), so a 2^32 wraparound can't make a fresh,
- * never-simplified node read as cache-valid.
+ * zero-initializes simplify_gen), so a 2^64 wraparound (already
+ * computationally infeasible on its own, see above) still couldn't make
+ * a fresh, never-simplified node read as cache-valid even in principle.
  *
  * The skip-0 step uses a compare-exchange retry loop rather than a plain
  * fetch-add followed by a corrective second fetch-add: a second review
@@ -298,11 +344,11 @@ static bool decompose_trig_sq(val_t term,
  * reading the OLD assumption flags/rule table -- matches the
  * release/acquire pattern runtime.c already uses for g_jit_arith_tainted
  * for the identical cross-thread-visibility reason, not relaxed. */
-static uint32_t g_sx_simplify_generation = 1;
+static uint64_t g_sx_simplify_generation = 1;
 
 void sx_invalidate_simplify_cache(void) {
-    uint32_t cur = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
-    uint32_t next;
+    uint64_t cur = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
+    uint64_t next;
     do {
         next = cur + 1;
         if (next == 0) next = 1;
@@ -1028,12 +1074,12 @@ static val_t sx_simplify_impl(val_t expr) {
  * the current generation is returned unchanged with no further
  * recursion at any depth, not just at the top level. */
 val_t sx_simplify(val_t expr) {
-    uint32_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_ACQUIRE);
-    if (vis_symexpr(expr) && as_symexpr(expr)->hdr.flags == gen)
+    uint64_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_ACQUIRE);
+    if (vis_symexpr(expr) && as_symexpr(expr)->simplify_gen == gen)
         return expr;
     val_t result = sx_simplify_impl(expr);
     if (vis_symexpr(result))
-        as_symexpr(result)->hdr.flags = gen;
+        as_symexpr(result)->simplify_gen = gen;
     return result;
 }
 
