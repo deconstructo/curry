@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788862882375,
+  "lastUpdate": 1788865982965,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13040,6 +13040,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 58.853,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "73a988c59ba1a54a4c3c7b8116f7c2ca022172be",
+          "message": "fix(env): synchronize GLOBAL_ENV's seqlock-protected fields (#153) (#199)\n\nGLOBAL_ENV's seqlock lets lock-free readers (frame_lookup_versioned,\nframe_snapshot_bindings) race the mutex-protected writer path\n(frame_define, frame_set). Independent review confirmed the version\ncounter's own release/acquire ordering (seq_begin_write/seq_end_write)\nis C11-sound, but the plain fields it guards (syms/vals/hidx/cap/hcap/\nsize) were read/written non-atomically -- a data race by the letter of\nthe C11 standard the instant a reader's optimistic read overlaps a\nwriter's plain write, regardless of whether the reader's later version\ncheck discards the result. A separate, more direct gap: frame_set\n(tree-walked `set!`) and vm.c's compiled OP_STORE_GLOBAL both wrote an\nexisting global slot's VALUE via a plain gc_wb_slot with zero seqlock\ncoverage at all (frame_set never bumps version, by design, since it's\n\"no structural change\").\n\nConfirmed via ThreadSanitizer: the unfixed code reliably produced 3-7\ndata-race warnings per run at exactly frame_grow/frame_hash_rehash/\nframe_lookup_unlocked, under 32 actors mixing `(eval (list 'define\n...))` (forcing frame_grow) against plain global reads.\n\nFix, gated on frame_is_global(f) so local (single-owned) frames are\ncompletely untouched:\n\n- src/env.c: syms/vals/hidx/cap/hcap/size accesses in frame_grow/\n  frame_hash_rehash/frame_build_hash/frame_define_unlocked/\n  frame_set_unlocked/frame_lookup_unlocked converted to atomic-relaxed\n  loads/stores via small gated helper functions.\n- frame_snapshot_bindings's bulk memcpy replaced with a per-element\n  atomic-relaxed copy loop for the global-frame branch.\n- src/gc.h: new gc_wb_slot_atomic_relaxed() (same write-barrier\n  bookkeeping as gc_wb_slot, atomic-relaxed store), guarded\n  `#ifndef __cplusplus` (stdatomic.h collides with <atomic>/libc++ in\n  C++ TUs like qt6.cpp).\n- src/vm.c: OP_LOAD_GLOBAL/OP_STORE_GLOBAL/load_global_cached's direct\n  slot dereferences converted to atomic-relaxed load/store.\n- Bounded retry: frame_lookup_versioned/frame_snapshot_bindings cap\n  their seqlock retry loops, falling back to g_global_frame_lock\n  outright afterward -- closes #153's item 2 (unbounded-retry\n  livelock).\n- New env_slot_load() (env.h/env.c) for external callers\n  (builtins.c's lookup_global_syntax, modules.c's import loop, main.c's\n  `,asm` debugger command) that dereference a env_lookup_slot result\n  themselves.\n- src/llvm/jit.cpp, src/llvm/codegen.cpp: independent security review\n  of the first pass caught two more sites doing the same plain\n  GLOBAL_ENV slot dereference (curry_jit_global_lookup, the JIT-time\n  local-macro check) -- fixed with the same env_slot_load helper.\n- Independent code review caught a stale, overclaiming comment on\n  frame_set (pre-existing, not introduced by this fix): it claimed\n  g_global_frame_lock serializes concurrent `set!` calls against each\n  other unconditionally, which was never true once VM-compiled\n  OP_STORE_GLOBAL existed as a separate bypass path that never took\n  this lock. Corrected to describe the actual guarantee (each write is\n  individually well-defined; writes from mixed tree-walked/compiled\n  call sites are not ordered relative to each other, ordinary\n  unsynchronized last-write-wins).\n\nRe-verified under ThreadSanitizer after the full fix (including the\nsecurity-review fixes): 0 warnings at this class across 5 repeated\nruns of the same 32-actor stress script, down from 3-7/run before.\n\nA fourth gap found during design validation -- the moving GC backends'\n(generational/semispace) own evacuation of f->vals races the same\nfields, but is confined entirely to those experimental, opt-in\nbackends (Boehm, the default, never executes that code path) -- filed\nas issue #198 rather than folded into this fix.\n\nAdds a functional regression test to tests/actors_tests.scm; full\nctest suite (127/127) passes.",
+          "timestamp": "2026-09-08T21:12:24+10:00",
+          "tree_id": "545c9572247c596f06f08e8c90c4c0c6a7c48bfe",
+          "url": "https://github.com/deconstructo/curry/commit/73a988c59ba1a54a4c3c7b8116f7c2ca022172be"
+        },
+        "date": 1788865980788,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 13.223,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.7,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.611,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 28.191,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 100.983,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 242.099,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 60.973,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 67.494,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 47.746,
             "unit": "ms"
           }
         ]
