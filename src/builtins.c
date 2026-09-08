@@ -238,8 +238,10 @@ static val_t prim_untrace(int ac, val_t *av, void *ud) {
  * bug class in this codebase's own SRFI shims) is always a global macro. */
 static bool lookup_global_syntax(val_t sym, val_t *out_transformer) {
     val_t *slot = env_lookup_slot(GLOBAL_ENV, sym);
-    if (!slot || !vis_syntax(*slot)) return false;
-    *out_transformer = as_syntax(*slot)->transformer;
+    if (!slot) return false;
+    val_t v = env_slot_load(slot); /* issue #153: GLOBAL_ENV slot, concurrently writable */
+    if (!vis_syntax(v)) return false;
+    *out_transformer = as_syntax(v)->transformer;
     return true;
 }
 static val_t prim_macro_p(int ac, val_t *av, void *ud) {

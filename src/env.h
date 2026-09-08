@@ -20,8 +20,30 @@
 struct EnvFrame;
 struct EnvFrame *frame_new(uint32_t capacity, struct EnvFrame *parent);
 bool             frame_define(struct EnvFrame *f, val_t sym, val_t val);
-bool             frame_set(struct EnvFrame *f, val_t sym, val_t val);  /* local only */
+bool             frame_set(struct EnvFrame *f, val_t sym, val_t val);  /* handles both
+                                                                            local frames and
+                                                                            the (possibly
+                                                                            shared) global
+                                                                            root frame */
 val_t           *frame_lookup(struct EnvFrame *f, val_t sym);          /* NULL if not found */
+
+/* Issue #153: a pointer returned by env_lookup_slot into a ROOT
+ * environment's vals[] (GLOBAL_ENV, or a define-library body's own
+ * env_new_root() frame -- both reachable from more than one actor
+ * thread, see env.c's own big seqlock comment) is a slot a DIFFERENT
+ * actor thread's frame_set/OP_STORE_GLOBAL can write concurrently,
+ * lock-free -- dereferencing it with a plain `*slot` is a data race by
+ * the letter of C11, the same class gc_wb_slot_atomic_relaxed's doc
+ * comment (env.c) explains for the write side. env_lookup_slot(root_env,
+ * sym)'s match, if any, is ALWAYS root_env's own frame (a root frame's
+ * chain walk terminates after one step, parent == NULL) -- so any
+ * caller that calls env_lookup_slot with a root environment (GLOBAL_ENV,
+ * or a module's own env) and then dereferences the result itself should
+ * read through this helper instead of `*slot` directly, rather than
+ * re-deriving "is this global" itself. Safe to call unconditionally --
+ * an atomic-relaxed load of a val_t is well-defined and correct
+ * regardless of whether the memory happens to be contended. */
+val_t            env_slot_load(val_t *slot);
 
 /* Like frame_lookup, but for the (possibly shared) GLOBAL_ENV frame also
  * hands back the frame->version the lookup was validated against, in the

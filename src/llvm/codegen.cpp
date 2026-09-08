@@ -1505,7 +1505,9 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
          * chunk before curry_llvm_jit_compile is ever called -- this
          * function never sees a let-syntax-local macro call at all. */
         val_t *slot = env_lookup_slot(GLOBAL_ENV, S(name));
-        if (slot && vis_syntax(*slot))
+        /* Issue #153: GLOBAL_ENV slot, concurrently writable -- see
+         * jit.cpp's curry_jit_global_lookup for the identical fix. */
+        if (slot && vis_syntax(env_slot_load(slot)))
             throw std::runtime_error(
                 std::string("JIT: macro invocation '") + name + "' not supported");
     }
