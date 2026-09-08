@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788860793615,
+  "lastUpdate": 1788862882375,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -12971,6 +12971,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.562,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c07047a35ba77fe1f69e8724bba669797e8df706",
+          "message": "docs(roadmap): track issue #195's scoped-invalidation design as deferred work (#197)\n\nAdds a \"CAS memoization: scoped cache invalidation\" entry under\n\"Active work outside the phase numbering\", matching that section's\nexisting pattern for #81/GC-rewrite/performance tracking.\n\nThe full design for #195 (per-operator/per-variable bounded dependency\ntracking to fix sx_simplify's global-invalidation DoS) was drafted and\nindependently validated twice this session -- each pass caught a real\nsoundness gap in the one before it. The fully refined design is written\nup as a comment on the issue. Deliberately not implemented here: real\nnew infrastructure in an area with several prior TSan-caught races, for\na DoS reachable only by deliberate adversarial interleaving, with a\nstructural ceiling (arbitrary rule/algebra closures can capture\ndependencies invisible to any args-tree-based scheme) no version of\nthis design can close. Documented so a future session can pick it up\nwithout re-deriving any of it.\n\nNo code changes -- docs/roadmap.md only.",
+          "timestamp": "2026-09-08T20:20:48+10:00",
+          "tree_id": "1b5a942301b668279f697e24ef85e31c019cd630",
+          "url": "https://github.com/deconstructo/curry/commit/c07047a35ba77fe1f69e8724bba669797e8df706"
+        },
+        "date": 1788862880661,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.432,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.101,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.207,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.302,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.334,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 236.571,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 52.665,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 73.032,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 58.853,
             "unit": "ms"
           }
         ]
