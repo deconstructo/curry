@@ -21,6 +21,7 @@
 
 #include <curry.h>
 #include <string.h>
+#include <stdbool.h>
 
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -34,11 +35,59 @@ typedef int sock_t;
 #  define sock_close close
 #endif
 
+/* Issue #160: process-wide registry of fds curry's own socket-opening
+ * primitives actually created (every call site that calls
+ * net_sock_to_val_registered below: tcp-listen, udp-socket,
+ * make-client-socket, make-server-socket, socket-accept). A raw socket
+ * handle's PAIR SHAPE is trivially forgeable from Scheme --
+ * net_is_raw_socket_handle (below) only checks shape, not provenance (see
+ * #158) -- so `(cons 'socket packed-fd-bytes)` names whatever fd number
+ * happens to be encoded, including fds this process has open for
+ * something entirely unrelated to a socket the curry script was ever
+ * actually handed: another open file, stdin/stdout/stderr, a DIFFERENT
+ * actor's own socket, or a fd number simply recycled by the OS after an
+ * earlier close. net_checked_val_to_sock and net_extract_fd's handle
+ * branch (below) both cross-check membership here before returning a fd
+ * to any caller, so a forged/foreign fd number is rejected the same way a
+ * malformed pair shape already is, instead of silently letting a curry
+ * script operate on whatever that fd currently happens to be.
+ *
+ * Defined once in network.c (always compiled whenever this module is
+ * built -- see CMakeLists.txt's BUILD_MODULE_NETWORK block), declared
+ * here with ordinary extern linkage so srfi106.c shares the exact same
+ * table instead of each translation unit getting its own (which a
+ * `static` definition in this header would have silently produced, since
+ * network.c and srfi106.c are separate TUs compiled into the same .so
+ * target). Mutex-protected growable array rather than a fixed-size table
+ * sized against sysconf(_SC_OPEN_MAX) (a soft limit a program can raise
+ * at runtime) or a full hash set: the number of concurrently open sockets
+ * in a real program is expected to stay small, so linear scan/insert/
+ * remove is plenty fast for this table's actual size. */
+bool net_fd_registry_add(sock_t fd);       /* false = registration failed (OOM) */
+void net_fd_registry_remove(sock_t fd);
+bool net_fd_registry_contains(sock_t fd);
+
 static inline curry_val net_sock_to_val(sock_t fd) {
     curry_val bv = curry_make_bytevector(sizeof(sock_t), 0);
     for (size_t i = 0; i < sizeof(sock_t); i++)
         curry_bytevector_set(bv, (uint32_t)i, ((uint8_t *)&fd)[i]);
     return curry_make_pair(curry_make_symbol("socket"), bv);
+}
+
+/* Every primitive that hands a freshly-created fd back to Scheme as a raw
+ * socket handle must register it first -- this is the one choke point
+ * that does both, so no call site can pack a handle without also
+ * registering it. On registration failure (OOM in the registry's own
+ * growable array), the fd is closed rather than handed to Scheme
+ * unregistered, which would have made it permanently unusable anyway
+ * (every future net_checked_val_to_sock/net_extract_fd call would reject
+ * it as unregistered) while also silently leaking it. */
+static inline curry_val net_sock_to_val_registered(sock_t fd, const char *who) {
+    if (!net_fd_registry_add(fd)) {
+        sock_close(fd);
+        curry_error("%s: out of memory (socket registry)", who);
+    }
+    return net_sock_to_val(fd);
 }
 
 static inline sock_t net_val_to_sock(curry_val v) {
@@ -78,7 +127,14 @@ static inline bool net_is_raw_socket_handle(curry_val v) {
  * port (tcp-connect's/tcp-accept's in-port or out-port) -- extract_fd
  * dispatches on which it got. */
 static inline int net_extract_fd(curry_val v, const char *who) {
-    if (net_is_raw_socket_handle(v)) return (int)net_val_to_sock(v);
+    if (net_is_raw_socket_handle(v)) {
+        sock_t fd = net_val_to_sock(v);
+        /* Issue #160: shape alone doesn't prove this fd is one curry's
+         * own socket primitives ever actually opened -- see the registry
+         * comment above. */
+        if (!net_fd_registry_contains(fd)) curry_error("%s: not a socket handle", who);
+        return (int)fd;
+    }
     int fd = curry_port_fd(v);
     if (fd < 0) curry_error("%s: not a socket handle or file-backed port", who);
     return fd;
@@ -102,7 +158,11 @@ static inline int net_extract_fd(curry_val v, const char *who) {
  * duplicate it. */
 static inline sock_t net_checked_val_to_sock(curry_val v, const char *who) {
     if (!net_is_raw_socket_handle(v)) curry_error("%s: not a socket handle", who);
-    return net_val_to_sock(v);
+    sock_t fd = net_val_to_sock(v);
+    /* Issue #160: see the registry comment above -- shape alone doesn't
+     * prove provenance. */
+    if (!net_fd_registry_contains(fd)) curry_error("%s: not a socket handle", who);
+    return fd;
 }
 
 #endif /* CURRY_NETWORK_INTERNAL_H */

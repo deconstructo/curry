@@ -46,12 +46,54 @@
  * helpers (net_sock_to_val/net_val_to_sock/net_is_raw_socket_handle/
  * net_extract_fd) now live in network_internal.h, shared with srfi106.c
  * (the SRFI-106 socket interface, added alongside it) -- see that
- * header's own comment. Local aliases kept here (rather than rewriting
- * every call site below) purely to minimize this diff; srfi106.c uses
- * the net_-prefixed names directly. */
+ * header's own comment. */
 #include "network_internal.h"
-#define sock_to_val net_sock_to_val
-#define val_to_sock net_val_to_sock
+
+#include <pthread.h>
+
+/* Issue #160: storage for the fd registry declared in network_internal.h
+ * -- defined once here (network.c is always compiled whenever the network
+ * module is built, unlike srfi106.c/tls.c which are conditionally added
+ * sources; see CMakeLists.txt) so both TUs share one table instead of
+ * each getting its own via a `static` definition in the shared header. */
+static pthread_mutex_t g_fd_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+static sock_t *g_fd_registry = NULL;
+static size_t g_fd_registry_len = 0, g_fd_registry_cap = 0;
+
+bool net_fd_registry_add(sock_t fd) {
+    pthread_mutex_lock(&g_fd_registry_lock);
+    bool ok = true;
+    if (g_fd_registry_len == g_fd_registry_cap) {
+        size_t newcap = g_fd_registry_cap ? g_fd_registry_cap * 2 : 16;
+        sock_t *grown = realloc(g_fd_registry, newcap * sizeof(sock_t));
+        if (grown) { g_fd_registry = grown; g_fd_registry_cap = newcap; }
+        else ok = false;
+    }
+    if (ok) g_fd_registry[g_fd_registry_len++] = fd;
+    pthread_mutex_unlock(&g_fd_registry_lock);
+    return ok;
+}
+
+void net_fd_registry_remove(sock_t fd) {
+    pthread_mutex_lock(&g_fd_registry_lock);
+    for (size_t i = 0; i < g_fd_registry_len; i++) {
+        if (g_fd_registry[i] == fd) {
+            g_fd_registry[i] = g_fd_registry[--g_fd_registry_len];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_fd_registry_lock);
+}
+
+bool net_fd_registry_contains(sock_t fd) {
+    pthread_mutex_lock(&g_fd_registry_lock);
+    bool found = false;
+    for (size_t i = 0; i < g_fd_registry_len; i++) {
+        if (g_fd_registry[i] == fd) { found = true; break; }
+    }
+    pthread_mutex_unlock(&g_fd_registry_lock);
+    return found;
+}
 
 static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
@@ -127,7 +169,7 @@ static curry_val fn_tcp_listen(int ac, curry_val *av, void *ud) {
     if (listen(fd, backlog) != 0) {
         sock_close(fd); curry_error("tcp-listen: listen failed");
     }
-    return sock_to_val(fd);
+    return net_sock_to_val_registered(fd, "tcp-listen");
 }
 
 static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
@@ -157,7 +199,9 @@ static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_tcp_close(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
-    sock_close(net_checked_val_to_sock(av[0], "tcp-close"));
+    sock_t fd = net_checked_val_to_sock(av[0], "tcp-close");
+    net_fd_registry_remove(fd);
+    sock_close(fd);
     return curry_void();
 }
 
@@ -170,7 +214,7 @@ static curry_val fn_udp_socket(int ac, curry_val *av, void *ud) {
      * there, unlike Linux) even before any udp-bind call. */
     int off = 0;
     setsockopt((int)fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
-    return sock_to_val(fd);
+    return net_sock_to_val_registered(fd, "udp-socket");
 }
 
 static curry_val fn_udp_bind(int ac, curry_val *av, void *ud) {

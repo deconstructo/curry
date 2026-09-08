@@ -125,7 +125,7 @@ static curry_val fn_make_client_socket(int ac, curry_val *av, void *ud) {
         curry_error("make-client-socket: connect failed");
     }
     freeaddrinfo(res);
-    return net_sock_to_val(fd);
+    return net_sock_to_val_registered(fd, "make-client-socket");
 }
 
 static curry_val fn_make_server_socket(int ac, curry_val *av, void *ud) {
@@ -163,7 +163,7 @@ static curry_val fn_make_server_socket(int ac, curry_val *av, void *ud) {
         curry_error("make-server-socket: listen failed");
     }
     freeaddrinfo(res);
-    return net_sock_to_val(fd);
+    return net_sock_to_val_registered(fd, "make-server-socket");
 }
 
 static curry_val fn_socket_p(int ac, curry_val *av, void *ud) {
@@ -177,7 +177,7 @@ static curry_val fn_socket_accept(int ac, curry_val *av, void *ud) {
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
     sock_t client = accept(server, (struct sockaddr *)&addr, &addrlen);
     if (client == SOCK_INVALID) curry_error("socket-accept: accept failed");
-    return net_sock_to_val(client);
+    return net_sock_to_val_registered(client, "socket-accept");
 }
 
 /* (socket-local-port socket) -> fixnum
@@ -292,7 +292,9 @@ static curry_val fn_socket_close(int ac, curry_val *av, void *ud) {
      * accept a port, only a raw handle. */
     if (!net_is_raw_socket_handle(av[0]))
         curry_error("socket-close: not a socket (did you mean close-port, for a socket-input-port/socket-output-port result?)");
-    sock_close(net_val_to_sock(av[0]));
+    sock_t fd = net_checked_val_to_sock(av[0], "socket-close");
+    net_fd_registry_remove(fd);
+    sock_close(fd);
     return curry_void();
 }
 
