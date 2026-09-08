@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788889515495,
+  "lastUpdate": 1788890929557,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13247,6 +13247,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 70.698,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "95bbac0d3f2c7644095e7a14fb871710b295e32e",
+          "message": "fix(gc_gen,sx_rules,sx_algebra): synchronize T_MODULE evacuation and skip no-op rtab/atab scans (#150, #146) (#204)\n\n#150: gc_gen.c's scan_pinned_object T_MODULE case evacuated a live\nModule's name/exports fields with no synchronization, while\nmodules_import (modules.c) read mod->exports from a possibly-different\nactor thread with no lock either -- a data race under --gc generational's\nnot-stop-the-world minor GC. Exposes the existing module_registry_lock\nvia three wrapper functions (modules_registry_rdlock_for_gc/wrlock_for_gc/\nunlock_for_gc) and takes it on both sides, mirroring #198's identical fix\nfor GLOBAL_ENV (env_global_frame_lock_for_gc).\n\n#146: sx_rules_gc_scan/sx_algebra_gc_scan walked their entire table\n(rtab: up to thousands of chained rules) on every single minor GC from\nevery actor, holding a write lock for the whole O(table-size) duration --\na real throughput regression for actor-heavy workloads. Adds a shared\nrelaxed-atomic generation counter, bumped on every insert, compared\nagainst a per-thread \"last scanned generation\" to skip the walk entirely\nwhen nothing changed since this thread's own last scan. Sound because\ngc_nursery is CURRY_THREAD_LOCAL and evacuate()'s in_nursery check is\nagainst the calling thread's own bounds -- a thread's scan only ever\nneeds to fix up entries referencing its own unpromoted nursery, and any\ninsert this thread itself made is guaranteed visible to its own next\ncheck (C11 same-thread program order). Verified via manual A/B (git\nstash): pre-fix 0.435s vs post-fix 0.074s on a 5000-rule/8-actor repro,\n~6x.\n\nBoth scoped to the experimental, opt-in --gc generational backend; the\ndefault Boehm backend is unaffected. Full 127-suite ctest clean, smoke-\ntested under --gc generational. Independent code-review and\nsecurity-review passes found no bugs in either fix; review did surface a\ndeeper, pre-existing gap one level past #150's scope (modules_import's\npost-unlock list traversal races concurrent evacuation of the list's own\npair cells, not just the head pointer this fix protects) -- filed\nseparately as #203 rather than expanding this PR, since a correct fix\nneeds the same lock-across-arbitrary-work redesign sx_rule_try already\nuses for rtab, not a mechanical extension of this change.\n\n\nScáth was here.",
+          "timestamp": "2026-09-09T04:08:00+10:00",
+          "tree_id": "40ca52e6200720a5253cb181efa87f296cdd15f1",
+          "url": "https://github.com/deconstructo/curry/commit/95bbac0d3f2c7644095e7a14fb871710b295e32e"
+        },
+        "date": 1788890928725,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.141,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.435,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.307,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.184,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 161.617,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 311.033,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.327,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 96.85,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 74.584,
             "unit": "ms"
           }
         ]
