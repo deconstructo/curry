@@ -712,6 +712,17 @@ typedef struct {
     Hdr      hdr;
     val_t    op;       /* a symbol: "+", "*", "expt", "sin", ... */
     uint32_t nargs;
+    /* Issue #140: sx_simplify's memoization generation stamp. Was
+     * packed into hdr.flags (a uint32_t shared with every other heap
+     * object type) by #137 -- that width let the global generation
+     * counter wrap in ~3 minutes under tight invalidation (repeated
+     * define-rule/define-algebra/assume! calls), letting a stale
+     * cached node get served as current. SymExpr is its own dedicated
+     * struct (not a shared layout), so a wider, PRIVATE field is just
+     * as easy as reusing hdr.flags was -- this is that field. See
+     * symbolic.c's sx_simplify/g_sx_simplify_generation for the full
+     * scheme; hdr.flags is no longer used by this type (left 0). */
+    uint64_t simplify_gen;
     val_t    args[];   /* flex array of sub-expressions */
 } SymExpr;
 
