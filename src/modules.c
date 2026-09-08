@@ -59,6 +59,21 @@ static ModuleEntry *registry = NULL;
  * sx_rule_try's guard_fn/action_fn callbacks did. */
 static pthread_rwlock_t module_registry_lock = PTHREAD_RWLOCK_INITIALIZER;
 
+/* Issue #150: thin wrappers around module_registry_lock so callers outside
+ * this file can synchronize against gc_gen.c's scan_pinned_object T_MODULE
+ * case, which mutates a live Module's name/exports fields (evacuating any
+ * that point into the nursery) during another actor's minor GC -- same
+ * "reuse the existing lock instead of inventing a new protocol" approach
+ * #198 used for GLOBAL_ENV (env_global_frame_lock_for_gc). modules_import
+ * (below) takes the read lock around its own read of mod->exports before
+ * that pointer can be raced by a concurrent T_MODULE scan on another
+ * thread; gc_gen.c's T_MODULE case takes the write lock (it mutates)
+ * around its evacuation, mirroring registry_insert's/scan_module_registry's
+ * own existing write-lock use of this exact mutex above. */
+void modules_registry_rdlock_for_gc(void) { pthread_rwlock_rdlock(&module_registry_lock); }
+void modules_registry_wrlock_for_gc(void) { pthread_rwlock_wrlock(&module_registry_lock); }
+void modules_registry_unlock_for_gc(void) { pthread_rwlock_unlock(&module_registry_lock); }
+
 static bool names_equal(val_t a, val_t b) {
     while (vis_pair(a) && vis_pair(b)) {
         if (vcar(a) != vcar(b)) return false;
@@ -560,7 +575,14 @@ val_t modules_import(val_t spec, val_t env) {
          * each exported name up directly instead of scanning every binding
          * the module happens to define. */
         val_t mod_env_val = vptr(mod->env);
-        for (val_t es = mod->exports; vis_pair(es); es = vcdr(es)) {
+        /* Issue #150: mod->exports is a field gc_gen.c's scan_pinned_object
+         * (T_MODULE case) can concurrently evacuate on another actor's
+         * minor GC -- snapshot it under the same lock that scan takes,
+         * rather than dereferencing it directly here. */
+        modules_registry_rdlock_for_gc();
+        val_t exports = mod->exports;
+        modules_registry_unlock_for_gc();
+        for (val_t es = exports; vis_pair(es); es = vcdr(es)) {
             val_t sym = vcar(es);
             val_t *slot = env_lookup_slot(mod_env_val, sym);
             if (!slot) continue; /* declared exported but never defined */
