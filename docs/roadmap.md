@@ -7,7 +7,9 @@ against actual shipped state through v1.8.0 — see "Where we are now" and
 2026-08-29 against actual shipped state through v1.23.3 plus a further
 tranche merged to `main` but not yet version-bumped — see "Where we are
 now", the summary timeline, and the new "Active work outside the phase
-numbering" section below. Source: cill_spec.pdf + design sessions.*
+numbering" section below. Updated 2026-09-08: added a "CAS memoization:
+scoped cache invalidation" entry under "Active work outside the phase
+numbering" for issue #195. Source: cill_spec.pdf + design sessions.*
 
 Curry is at v1.23.3 (released), plus unreleased work already merged to
 `main` (see below). Since this roadmap was last updated for v1.17.0:
@@ -148,6 +150,50 @@ tree-walker rather than the VM has no frame stack to copy. Phase 6's
 green-threads sketch (`(yield)` via LLVM coroutines) has an unresolved
 dependency on whatever continuation mechanism actually ships here — the
 two were never reconciled, see that phase's own note.
+
+### CAS memoization: scoped cache invalidation
+
+`sx_simplify`'s memoization cache (added to fix an O(depth²) CPU-
+exhaustion DoS) invalidates GLOBALLY — any `define-rule`/
+`define-algebra`/`assume!` call bumps one shared counter, flushing every
+cached node regardless of whether it's actually affected. Interleaving
+one cheap registration call per step of an otherwise-cheap deep-
+expression construction defeats memoization entirely and reintroduces
+the same O(depth²) DoS under that specific adversarial pattern. Tracked
+as [issue #195](https://github.com/deconstructo/curry/issues/195).
+
+A precise fix (bounded per-operator + per-variable dependency bitmasks
+on `SymExpr`, two new registries mirroring `rtab`/`atab`'s stable-slot
+shape) was fully designed and put through two independent validation
+passes — each pass found a real, previously-unnoticed soundness gap in
+the one before it (dependency masks must derive from the operator
+actually *queried*, not the operator of whatever a rule rewrites the
+result to; an untagged-intermediate-node dependency walk needs the
+codebase's existing `check_c_stack_depth` guard rather than an invented
+small bound, since several symbolic transforms — `sx_diff`,
+`sx_integrate`, and siblings — build untagged nodes as deep as the input
+expression itself; a multi-field publish needs an explicit acquire/
+release ordering discipline beyond what the existing single-field
+`simplify_gen` reasoning covers). The fully refined design, with all
+three gaps and their fixes, is written up on the issue.
+
+**Deliberately not implemented.** Two things earned that: the design
+requires real new infrastructure (bounded registries, ~40 bytes/node
+overhead, concurrency-sensitive multi-field publishing) in an area with
+several prior TSan-caught races (#148, #150, #153, #162), and the bug it
+closes is a CPU-exhaustion DoS reachable only by a script deliberately
+interleaving registration calls with deep-expression construction — a
+narrower, more deliberate pattern than the original accidental-O(depth²)
+motivation. Also carries a structural ceiling no design in this category
+can close regardless of effort: `define-rule`/`define-algebra` register
+arbitrary Scheme closures, and one that closes over a `SymVar` outside
+the expression's own args creates a dependency invisible to any
+args/structure-based tracking scheme — an accepted, documented
+limitation if this is ever built. `sx_simplify`'s generation-counter
+*wraparound* bug (a related but distinct correctness issue — a stale
+cached node silently served as current after ~3 minutes of tight
+invalidation) is already fixed (issue #140, closed) and is not part of
+what's deferred here.
 
 ### GC rewrite
 
