@@ -45,6 +45,28 @@ val_t           *frame_lookup(struct EnvFrame *f, val_t sym);          /* NULL i
  * regardless of whether the memory happens to be contended. */
 val_t            env_slot_load(val_t *slot);
 
+/* Issue #198: thin wrappers around g_global_frame_lock (env.c, private)
+ * for the moving-GC backend's (gc_gen.c) OWN evacuation of a root
+ * EnvFrame's vals[] -- the SAME mutex frame_define/frame_set already take
+ * for their own critical sections, so evacuation gets the same writer-
+ * exclusion guarantee without needing to replicate env.c's seqlock retry
+ * protocol in a GC backend file.
+ *
+ * Safe against self-deadlock, but for a NARROWER reason than "minor GC
+ * never fires synchronously mid-allocation" (that's not true in general --
+ * gc_nursery_refill CAN fire minor GC synchronously off an ordinary
+ * gc_alloc call, e.g. from the VM dispatch loop): every allocation INSIDE
+ * frame_define/frame_set/frame_grow/frame_build_hash/frame_hash_rehash
+ * (i.e. everywhere this lock is already held) goes through
+ * gc_alloc_raw_pinned[_atomic], which resolves straight to Boehm's
+ * GC_MALLOC/GC_MALLOC_ATOMIC (gen_alloc_raw_pinned, gc_gen.c) -- never
+ * gc_nursery_alloc/gc_nursery_refill. So THIS lock's own critical
+ * sections specifically never take the one path that could trigger a
+ * synchronous minor GC on the same thread, regardless of the general
+ * safepoint-deferral behavior elsewhere in the codebase. */
+void             env_global_frame_lock_for_gc(void);
+void             env_global_frame_unlock_for_gc(void);
+
 /* Like frame_lookup, but for the (possibly shared) GLOBAL_ENV frame also
  * hands back the frame->version the lookup was validated against, in the
  * same lock-free read as the slot fetch itself — see vm.c's OP_LOAD_GLOBAL/

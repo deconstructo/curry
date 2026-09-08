@@ -570,6 +570,9 @@ val_t env_slot_load(val_t *slot) {
     return atomic_load_explicit((_Atomic val_t *)slot, memory_order_relaxed);
 }
 
+void env_global_frame_lock_for_gc(void)   { pthread_mutex_lock(&g_global_frame_lock); }
+void env_global_frame_unlock_for_gc(void) { pthread_mutex_unlock(&g_global_frame_lock); }
+
 val_t env_lookup(val_t env, val_t sym) {
     EnvFrame *f = as_env(env);
     while (f) {
