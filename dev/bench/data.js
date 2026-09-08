@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788865982965,
+  "lastUpdate": 1788888595768,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13109,6 +13109,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 47.746,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7bbec008ad16b453f9b34b74fd010b4bf0fa8c74",
+          "message": "fix(gc_gen): synchronize T_ENV evacuation against env.c's own seqlock (#198) (#201)\n\ngc_gen.c (the only compiled generational-GC backend; gc_generational.c/\ngc_semispace.c exist but aren't in the build) evacuates a root EnvFrame's\nvals[] during its per-object pinned-scan (scan_pinned_object's case\nT_ENV) via plain, unsynchronized reads of f->size and reads/writes of\nf->vals[i] -- racing a concurrent frame_grow/frame_define/frame_set on\nwhichever actor thread actually owns/mutates that frame (GLOBAL_ENV, or\na define-library body's own env_new_root() frame -- both genuinely\nshared across actor threads, per #153's fix earlier this session).\n\nThis scan happens once per frame lifetime: gc_gen.c's pinned-object list\nis scan-once-then-compact, relying on gc_dirty_slots for all later\nupdates. For a long-lived, actively-shared frame like GLOBAL_ENV, that\none scan is triggered by whichever thread's minor GC happens to fire\nfirst after the frame was pinned -- which can easily land well after\nactors are already running and mutating it concurrently.\n\nConfirmed via ThreadSanitizer (16 actors spawned immediately, heavy\n`(eval (list 'define ...))` load, --gc generational --gc-nursery-size\n4K to force frequent minor GCs): this fires reliably.\n\nFix: gate on f->parent == NULL (frame_is_global's own definition,\ninlined since that helper is private to env.c). For root frames: take\nthe SAME g_global_frame_lock frame_define/frame_set already use\n(exposed via new env_global_frame_lock_for_gc/unlock_for_gc), ruling\nout any other WRITER for the loop's duration; each element is still\nread/written via atomic-relaxed (not plain) since a lock-free READER\n(frame_lookup_versioned) can still be running concurrently, matching\nenv.c's own atomic-relaxed convention from #153 -- skip the store when\nnothing moved, same as the tree_eval_cache evacuation precedent a few\ncases above in the same file. Local (non-root) frames are left on the\nexact original plain, lock-free loop, matching #153's own deliberate\nlocal-frame exemption.\n\nVerified deadlock-safe two ways (self-review, confirmed independently\nby both code-review and security-review): every allocation inside\ng_global_frame_lock's own critical sections (frame_grow/\nframe_build_hash/frame_hash_rehash) goes through gc_alloc_raw_pinned,\nwhich resolves straight to Boehm's GC_MALLOC -- never the nursery path\nthat could trigger a synchronous minor GC on the same thread -- and no\ncode path acquires pinned_lock (held around scan_pinned_object's\ncaller) while already holding g_global_frame_lock, since frame_new/\nenv_new_root's pinned_add call only needs pinned_lock on its rare\ncapacity-overflow slow path, never while g_global_frame_lock is held.\n\nRe-verified under ThreadSanitizer after the fix: 0 races within the\nT_ENV case across 5 repeated runs of the same stress script. That same\nstress test surfaced a genuinely separate, broader pre-existing pattern\nin gc_gen.c's other scan_pinned_object cases (T_UPVALUE, T_BCCLOSURE,\nT_ACTOR, T_MAILBOX) and its root-scanning step -- confirmed present\nwith or without this fix, filed as issue #200 (likely the same root\ncause as #144) rather than folded in here.\n\nNo automated regression test added: --gc generational has no CI/ctest\ncoverage at all in this project (confirmed via tests/CMakeLists.txt),\nso a test here wouldn't be exercised by anything -- same situation\nnoted for TSan coverage in #153. Verified instead via direct manual\n--gc generational runs of r7rs_tests/numeric_ext_tests/actors_tests/\ndynamic_wind_tests/sx_rules_tests (all pass) plus the TSan runs above.\nFull ctest suite (127/127, default Boehm backend) passes.",
+          "timestamp": "2026-09-09T03:29:09+10:00",
+          "tree_id": "cae8b07814d0375ca626c400352f09f66b9a5b74",
+          "url": "https://github.com/deconstructo/curry/commit/7bbec008ad16b453f9b34b74fd010b4bf0fa8c74"
+        },
+        "date": 1788888594922,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.805,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.842,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.407,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.655,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 155.308,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 304.389,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.385,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 93.955,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 72.691,
             "unit": "ms"
           }
         ]
