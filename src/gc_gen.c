@@ -20,6 +20,7 @@
 #include "gc_gen.h"
 #include "gc.h"
 #include "object.h"
+#include "env.h"         /* env_global_frame_lock_for_gc/unlock_for_gc, issue #198 */
 #include "vm.h"          /* VM struct, vm TLS pointer */
 #include <gc/gc.h>
 #include <gc/gc_mark.h>
@@ -554,9 +555,62 @@ static void scan_pinned_object(void *obj) {
     }
 
     case T_ENV: {
+        /* Issue #198: a root (GLOBAL_ENV, or a define-library body's own
+         * env_new_root() frame) is genuinely shared across actor threads
+         * (see env.c's own seqlock, issue #153) -- this evacuation loop
+         * used to read f->size and read/write f->vals[i] as plain fields
+         * with no synchronization at all, racing a concurrent
+         * frame_grow/frame_define/frame_set on whichever thread actually
+         * OWNS/mutates this frame. This runs once per frame (the pinned-
+         * object scan that fires on the NEXT minor GC after a frame is
+         * created, per this file's own pinned_add/compact design) --
+         * for a long-lived, actively-shared frame like GLOBAL_ENV, that
+         * one scan can easily land well after actors are already running
+         * and mutating it concurrently.
+         *
+         * Fixed by taking the SAME g_global_frame_lock frame_define/
+         * frame_set already use (env_global_frame_lock_for_gc, env.h) --
+         * safe against self-deadlock since minor GC only ever fires at an
+         * explicit safepoint, never synchronously from inside a call
+         * already holding that lock (see env.h's own doc comment on
+         * these wrappers) -- which rules out any OTHER writer racing
+         * size/vals for the loop's duration. A lock-free READER
+         * (frame_lookup_versioned) can still be running concurrently
+         * though, so each element is still read/written via atomic-
+         * relaxed (not plain) to keep that side well-defined too, exactly
+         * matching env.c's own gcache/vals-slot convention (relaxed
+         * suffices: correctness against evacuation moving an object is
+         * "reader sees the pre- or post-move pointer, either is a live,
+         * valid reference to the same logical value," not something that
+         * needs its own ordering -- from-space stays readable until the
+         * whole collection cycle completes). Skip the store when nothing
+         * moved, same as chunk.h's tree_eval_cache evacuation just above,
+         * to avoid a redundant atomic write racing a concurrent reader
+         * for no reason.
+         *
+         * LOCAL (non-root) frames are deliberately left on the original
+         * plain, lock-free loop -- matching #153's own local-frame
+         * exemption (single-owner, never raced by another MUTATOR
+         * thread) -- see issue #198's follow-up note for why a local
+         * frame's OWN one-time pinned-scan window is a separate, much
+         * narrower/lower-probability concern not fixed here. */
         EnvFrame *f = (EnvFrame *)obj;
-        for (uint32_t i = 0; i < f->size; i++)
-            f->vals[i] = evacuate(f->vals[i]);
+        if (f->parent == NULL) {
+            env_global_frame_lock_for_gc();
+            uint32_t n = f->size;
+            val_t *vals = f->vals;
+            for (uint32_t i = 0; i < n; i++) {
+                _Atomic val_t *slot = (_Atomic val_t *)&vals[i];
+                val_t old = atomic_load_explicit(slot, memory_order_relaxed);
+                val_t moved = evacuate(old);
+                if (moved != old)
+                    atomic_store_explicit(slot, moved, memory_order_relaxed);
+            }
+            env_global_frame_unlock_for_gc();
+        } else {
+            for (uint32_t i = 0; i < f->size; i++)
+                f->vals[i] = evacuate(f->vals[i]);
+        }
         break;
     }
     case T_CLOSURE: {
