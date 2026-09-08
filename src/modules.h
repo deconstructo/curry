@@ -39,6 +39,15 @@ bool modules_available(val_t name_list);
 /* Import a module spec into env */
 val_t modules_import(val_t spec, val_t env);
 
+/* Issue #150: thin wrappers around modules.c's own (private)
+ * module_registry_lock, for the moving-GC backend's (gc_gen.c) scan of a
+ * pinned Module object's name/exports fields -- see modules.c's own
+ * comment on these for why a caller reading mod->exports outside this
+ * file (modules_import) needs the read-lock side of this same mutex. */
+void modules_registry_rdlock_for_gc(void);
+void modules_registry_wrlock_for_gc(void);
+void modules_registry_unlock_for_gc(void);
+
 /* Register a built-in module */
 void modules_register_builtin(val_t name_list, val_t env);
 

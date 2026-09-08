@@ -21,6 +21,7 @@
 #include "gc.h"
 #include "object.h"
 #include "env.h"         /* env_global_frame_lock_for_gc/unlock_for_gc, issue #198 */
+#include "modules.h"      /* modules_registry_*lock_for_gc, issue #150 */
 #include "vm.h"          /* VM struct, vm TLS pointer */
 #include <gc/gc.h>
 #include <gc/gc_mark.h>
@@ -665,9 +666,17 @@ static void scan_pinned_object(void *obj) {
         break;
     }
     case T_MODULE: {
+        /* Issue #150: modules.c's modules_import reads mod->exports
+         * outside module_registry_lock's normal critical sections
+         * (registry_lookup/registry_insert/scan_module_registry) -- take
+         * the same lock here (its write side, since this mutates) so
+         * that read has something to synchronize against, mirroring
+         * #198's identical fix for GLOBAL_ENV's frame_set/env_slot_load. */
         Module *m = (Module *)obj;
+        modules_registry_wrlock_for_gc();
         m->name    = evacuate(m->name);
         m->exports = evacuate(m->exports);
+        modules_registry_unlock_for_gc();
         break;
     }
     case T_ACTOR: {

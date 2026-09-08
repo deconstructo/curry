@@ -28,6 +28,13 @@ static int atab_initialised = 0;
  * consistent copy, not a live, potentially-mid-write table slot. */
 static pthread_rwlock_t atab_lock = PTHREAD_RWLOCK_INITIALIZER;
 
+/* Issue #146: same reasoning and pattern as sx_rules.c's identical
+ * rtab_generation/rtab_last_scanned_gen fix -- see that file's comment
+ * for the full explanation of why a per-thread "nothing added since my
+ * last scan" check is correctness-preserving, not just a heuristic. */
+static _Atomic uint64_t atab_generation = 0;
+static CURRY_THREAD_LOCAL uint64_t atab_last_scanned_gen = (uint64_t)-1;
+
 void sx_algebra_init(void) {
     memset(atab, 0, sizeof(atab));
     for (int i = 0; i < ATAB_SIZE; i++) atab[i].op = V_VOID;
@@ -67,6 +74,9 @@ void sx_algebra_define(val_t op, bool commutative, bool associative,
             atab[idx].identity     = identity;
             atab[idx].absorbing    = absorbing;
             atab[idx].relations_fn = relations_fn;
+            atomic_store_explicit(&atab_generation,
+                atomic_load_explicit(&atab_generation, memory_order_relaxed) + 1,
+                memory_order_relaxed);
             pthread_rwlock_unlock(&atab_lock);
             /* Issue #137: same reasoning as sx_rule_add's identical
              * call -- a node cached as "fully simplified" before this
@@ -89,7 +99,13 @@ void sx_algebra_gc_scan(void) {
      * sx_algebra_define uses; safe against self-deadlock for the same
      * reason sx_rules_gc_scan's identical fix is -- gc_ss_evac/gc_ss_fwd
      * don't allocate, and neither sx_algebra_define nor
-     * sx_algebra_lookup ever allocates while holding atab_lock. */
+     * sx_algebra_lookup ever allocates while holding atab_lock.
+     *
+     * Issue #146: skip the walk when nothing has been added to atab (by
+     * any thread) since this thread's own last scan -- see
+     * atab_generation's/rtab_generation's declaration comments. */
+    uint64_t gen = atomic_load_explicit(&atab_generation, memory_order_relaxed);
+    if (gen == atab_last_scanned_gen) return;
     pthread_rwlock_wrlock(&atab_lock);
     for (int i = 0; i < ATAB_SIZE; i++) {
         if (atab[i].op == V_VOID) continue;
@@ -99,6 +115,7 @@ void sx_algebra_gc_scan(void) {
         atab[i].relations_fn = (val_t)gc_ss_evac((uintptr_t)atab[i].relations_fn);
     }
     pthread_rwlock_unlock(&atab_lock);
+    atab_last_scanned_gen = gen;
 }
 
 /* ---- Assumption keyword → flag ---- */
