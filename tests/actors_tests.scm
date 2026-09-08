@@ -361,6 +361,62 @@
                (else (loop (+ id 1)))))
        #t)
 
+;;; Issue #153: GLOBAL_ENV's seqlock (env.c) protects frame_grow/
+;;; frame_hash_rehash's structural writes with a version counter whose OWN
+;;; release/acquire ordering is C11-sound, but the PLAIN fields it guards
+;;; (syms/vals/hidx/cap/hcap/size) were read/written non-atomically -- a
+;;; data race by the letter of the C11 standard the instant a lock-free
+;;; reader's optimistic read overlaps a writer's plain write in real time,
+;;; regardless of whether the reader's later version check discards the
+;;; result. A separate, more direct gap: frame_set (tree-walked `set!`)
+;;; and vm.c's compiled OP_STORE_GLOBAL both wrote an existing global
+;;; slot's VALUE with zero seqlock coverage at all (frame_set never bumps
+;;; version, by design, since it's "no structural change").
+;;;
+;;; Confirmed via ThreadSanitizer (not run as part of this suite -- no
+;;; TSan build target exists in this project yet): the unfixed code
+;;; reliably produced 3-7 data-race warnings per run at exactly
+;;; frame_grow/frame_hash_rehash/frame_lookup_unlocked (env.c) under 32
+;;; actors mixing `(eval (list 'define ...))` (forcing frame_grow)
+;;; against plain global reads; the fix (atomic-relaxed accessors on the
+;;; global-frame path, gated on frame_is_global so local frames are
+;;; untouched, plus gc_wb_slot_atomic_relaxed for the value-write path)
+;;; reduced that to 0 warnings at this class across 5 repeated runs.
+;;;
+;;; This test can't reproduce a TSan report itself, but it exercises the
+;;; same shape (concurrent define-forced frame_grow against concurrent
+;;; reads AND writes of the SAME global) and asserts every actor still
+;;; observes internally-consistent results despite the contention -- a
+;;; torn read manifesting as a wrong value (rather than a crash) would
+;;; fail this.
+(define n153-workers 24)
+(define g153-counter 0) ; shared global -- exercises frame_set's value race too
+(define (worker153 id)
+  (lambda ()
+    (eval (list 'define (string->symbol (string-append "g153-" (number->string id))) id))
+    (let loop ((i 0))
+      (if (< i 500)
+          (begin (set! g153-counter (+ g153-counter 0)) ; touches the shared slot's value
+                 (loop (+ i 1)))))
+    (eval (list 'set! 'g153-counter '(+ g153-counter 0)))))
+(define actors153
+  (let loop ((i 0) (acc '()))
+    (if (>= i n153-workers) acc
+        (loop (+ i 1) (cons (spawn (worker153 i)) acc)))))
+(define (all-done153? actors)
+  (or (null? actors)
+      (and (not (actor-alive? (car actors))) (all-done153? (cdr actors)))))
+(let loop ((tries 0))
+  (when (and (< tries 2000) (not (all-done153? actors153)))
+    (la-busy-wait-a-bit)
+    (loop (+ tries 1))))
+(check "env.c seqlock: every actor's own top-level define is visible and correctly valued after concurrent frame_grow"
+       (let loop ((id 0))
+         (cond ((>= id n153-workers) #t)
+               ((not (equal? (eval (string->symbol (string-append "g153-" (number->string id)))) id)) #f)
+               (else (loop (+ id 1)))))
+       #t)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

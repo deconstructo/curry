@@ -564,7 +564,10 @@ val_t modules_import(val_t spec, val_t env) {
             val_t sym = vcar(es);
             val_t *slot = env_lookup_slot(mod_env_val, sym);
             if (!slot) continue; /* declared exported but never defined */
-            import_binding(sym, *slot, spec, filter, env);
+            /* issue #153: mod->env is a root frame (env_new_root()),
+             * concurrently writable by another actor still loading/
+             * defining into this module. */
+            import_binding(sym, env_slot_load(slot), spec, filter, env);
         }
     } else {
         /* No export list: every binding in the module's own environment is

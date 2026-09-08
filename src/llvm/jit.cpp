@@ -91,7 +91,12 @@ static uint64_t curry_jit_global_lookup(uint64_t sym_val) {
     val_t *slot = env_lookup_slot(GLOBAL_ENV, (val_t)sym_val);
     if (!slot)
         scm_raise(V_FALSE, "unbound variable");
-    return (uint64_t)*slot;
+    /* Issue #153: GLOBAL_ENV slot, concurrently writable by another
+     * actor's frame_set/OP_STORE_GLOBAL -- env_slot_load (not a plain
+     * *slot) matches how vm.c's own OP_LOAD_GLOBAL reads the same
+     * slots (gslot_load), just via env.h's C-linkage wrapper since this
+     * is a C++ TU and gc_wb_slot_atomic_relaxed itself is C-only. */
+    return (uint64_t)env_slot_load(slot);
 }
 
 /* Define or redefine a global variable. */

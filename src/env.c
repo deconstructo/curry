@@ -107,6 +107,65 @@ static inline void seq_end_write(EnvFrame *f, uint32_t v) {
     atomic_store_explicit((_Atomic uint32_t *)&f->version, v + 2, memory_order_release);
 }
 
+/*
+ * Issue #153: seq_begin_write/seq_end_write's own release/acquire pairing
+ * on `version` is C11-sound on its own terms -- a reader whose acquire
+ * load of `version` observes a given even value synchronizes-with
+ * whichever seq_end_write produced it, establishing happens-before over
+ * everything that writer did before that release store. The bug is a
+ * layer down: syms/vals/hidx/cap/hcap/size themselves are PLAIN fields,
+ * and a plain read racing a plain write to the SAME memory is a data
+ * race by the letter of the C11 standard the instant it happens in real
+ * time -- regardless of whether the reader's later version check (v2==v1)
+ * discards the result afterward. Confirmed via a real TSan run (see the
+ * comment on issue #153): frame_grow's plain `f->syms = ns` write racing
+ * frame_lookup_unlocked's plain `f->syms[idx]` read, reliably, under
+ * concurrent actors mixing `(define ...)` (forcing frame_grow) against
+ * plain global reads.
+ *
+ * Fix: make the fields themselves properly atomic (relaxed suffices --
+ * the ordering guarantee readers need still comes entirely from the
+ * separate version-counter's acquire/release above; these just need to
+ * stop being non-atomic so a racing access is well-defined instead of
+ * UB). Gated on frame_is_global(f): these accessor functions are shared
+ * between the global root frame (genuinely read/written by more than one
+ * actor thread) and every other frame (function-call locals, let bodies,
+ * ...), which is exclusively owned by whichever single call stack
+ * created it and never has this problem at all -- see this file's own
+ * top-of-file comment. Unconditionally atomic-ifying local-frame access
+ * would tax the hottest path in the tree-walking interpreter (every
+ * function-call frame's parameter binding) for zero benefit, so every
+ * field touch below is gated on a single frame_is_global(f) check per
+ * call, not applied blindly. */
+static inline uint32_t g_load_u32(uint32_t *p, bool atomic) {
+    return atomic ? atomic_load_explicit((_Atomic uint32_t *)p, memory_order_relaxed) : *p;
+}
+static inline void g_store_u32(uint32_t *p, uint32_t v, bool atomic) {
+    if (atomic) atomic_store_explicit((_Atomic uint32_t *)p, v, memory_order_relaxed);
+    else *p = v;
+}
+static inline val_t g_load_val(val_t *p, bool atomic) {
+    return atomic ? atomic_load_explicit((_Atomic val_t *)p, memory_order_relaxed) : *p;
+}
+static inline void g_store_val(val_t *p, val_t v, bool atomic) {
+    if (atomic) atomic_store_explicit((_Atomic val_t *)p, v, memory_order_relaxed);
+    else *p = v;
+}
+static inline val_t *g_load_valptr(val_t **p, bool atomic) {
+    return atomic ? (val_t *)atomic_load_explicit((_Atomic(val_t *) *)p, memory_order_relaxed) : *p;
+}
+static inline void g_store_valptr(val_t **p, val_t *v, bool atomic) {
+    if (atomic) atomic_store_explicit((_Atomic(val_t *) *)p, v, memory_order_relaxed);
+    else *p = v;
+}
+static inline uint32_t *g_load_u32ptr(uint32_t **p, bool atomic) {
+    return atomic ? (uint32_t *)atomic_load_explicit((_Atomic(uint32_t *) *)p, memory_order_relaxed) : *p;
+}
+static inline void g_store_u32ptr(uint32_t **p, uint32_t *v, bool atomic) {
+    if (atomic) atomic_store_explicit((_Atomic(uint32_t *) *)p, v, memory_order_relaxed);
+    else *p = v;
+}
+
 /* ---- Pair construction (needed for rest-arg list building) ---- */
 
 static val_t env_cons(val_t car, val_t cdr) {
@@ -123,10 +182,18 @@ static uint32_t sym_hash(val_t sym, uint32_t hcap) {
     return (uint32_t)((sym >> 3) * 2654435761u) & (hcap - 1);
 }
 
-static void hash_insert(uint32_t *hidx, uint32_t hcap, val_t *syms, uint32_t idx) {
+/* `atomic`: true when writing into a hidx array a lock-free reader can
+ * already see (the global frame's LIVE f->hidx, rehash's "just reinsert"
+ * fast path) -- false when building a fresh array not yet published via
+ * f->hidx (safe to touch plainly, no reader can reach it yet). syms is
+ * read-only here and only ever touched by the thread already holding
+ * g_global_frame_lock (hash_insert is only called from frame_build_hash/
+ * frame_hash_rehash, both invoked from within frame_define_unlocked while
+ * the writer lock is held), so no atomics are needed for that read. */
+static void hash_insert(uint32_t *hidx, uint32_t hcap, val_t *syms, uint32_t idx, bool atomic) {
     uint32_t h = sym_hash(syms[idx], hcap);
-    while (hidx[h] != UINT32_MAX) h = (h + 1) & (hcap - 1);
-    hidx[h] = idx;
+    while (g_load_u32(&hidx[h], atomic) != UINT32_MAX) h = (h + 1) & (hcap - 1);
+    g_store_u32(&hidx[h], idx, atomic);
 }
 
 static void frame_build_hash(EnvFrame *f) {
@@ -136,26 +203,29 @@ static void frame_build_hash(EnvFrame *f) {
     uint32_t *hidx = (uint32_t *)gc_alloc_raw_pinned_atomic(hcap * sizeof(uint32_t));
     memset(hidx, 0xFF, hcap * sizeof(uint32_t)); /* UINT32_MAX = empty */
     for (uint32_t i = 0; i < f->size; i++)
-        hash_insert(hidx, hcap, f->syms, i);
-    f->hidx = hidx;
-    f->hcap = hcap;
+        hash_insert(hidx, hcap, f->syms, i, false); /* fresh array, not yet published */
+    bool g = frame_is_global(f);
+    g_store_u32ptr(&f->hidx, hidx, g);
+    g_store_u32(&f->hcap, hcap, g);
 }
 
 static void frame_hash_rehash(EnvFrame *f) {
+    bool g = frame_is_global(f);
     uint32_t hcap = f->hcap;
     while (hcap < f->size * 2) hcap <<= 1;
     if (hcap == f->hcap) {
-        /* Just re-insert the newest entry */
-        hash_insert(f->hidx, f->hcap, f->syms, f->size - 1);
+        /* Just re-insert the newest entry -- into the LIVE f->hidx a
+         * lock-free reader can already be probing. */
+        hash_insert(f->hidx, f->hcap, f->syms, f->size - 1, g);
         return;
     }
     /* Need larger table */
     uint32_t *hidx = (uint32_t *)gc_alloc_raw_pinned_atomic(hcap * sizeof(uint32_t));
     memset(hidx, 0xFF, hcap * sizeof(uint32_t));
     for (uint32_t i = 0; i < f->size; i++)
-        hash_insert(hidx, hcap, f->syms, i);
-    f->hidx = hidx;
-    f->hcap = hcap;
+        hash_insert(hidx, hcap, f->syms, i, false); /* fresh array, not yet published */
+    g_store_u32ptr(&f->hidx, hidx, g);
+    g_store_u32(&f->hcap, hcap, g);
 }
 
 /* ---- Frame ---- */
@@ -183,31 +253,53 @@ EnvFrame *frame_new(uint32_t cap, EnvFrame *parent) {
  * hidx afterward, letting a concurrent lock-free reader through to observe
  * a torn intermediate state. */
 static void frame_grow(EnvFrame *f) {
+    bool g = frame_is_global(f);
     uint32_t new_cap = f->cap * 2;
     val_t *ns = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     val_t *nv = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     memcpy(ns, f->syms, f->size * sizeof(val_t));
     memcpy(nv, f->vals, f->size * sizeof(val_t));
-    f->syms = ns; f->vals = nv; f->cap = new_cap;
+    g_store_valptr(&f->syms, ns, g);
+    g_store_valptr(&f->vals, nv, g);
+    g_store_u32(&f->cap, new_cap, g);
 }
 
+/* Issue #153: the redefine-search reads below (hcap/hidx/syms/size) are
+ * safe as plain reads regardless of frame_is_global -- this function only
+ * ever runs while g_global_frame_lock is held (via frame_define), so no
+ * OTHER writer can be concurrently mutating them, and a lock-free
+ * reader's OWN concurrent read of the same fields is a benign read-read,
+ * never a race. What DOES need gating: every WRITE a lock-free reader
+ * could observe -- the redefine value-write, and the insert path's
+ * syms/vals/size writes (matching gc_wb_slot_atomic_relaxed's own doc
+ * comment: relaxed suffices, ordering comes from the seqlock). */
 static bool frame_define_unlocked(EnvFrame *f, val_t sym, val_t val) {
+    bool g = frame_is_global(f);
     /* Check if already in this frame (redefine) */
     if (f->hcap) {
         uint32_t h = sym_hash(sym, f->hcap);
         while (f->hidx[h] != UINT32_MAX) {
             uint32_t idx = f->hidx[h];
-            if (f->syms[idx] == sym) { gc_wb_slot(&f->vals[idx], val); return true; }
+            if (f->syms[idx] == sym) {
+                if (g) gc_wb_slot_atomic_relaxed(&f->vals[idx], val);
+                else   gc_wb_slot(&f->vals[idx], val);
+                return true;
+            }
             h = (h + 1) & (f->hcap - 1);
         }
     } else {
         for (uint32_t i = 0; i < f->size; i++)
-            if (f->syms[i] == sym) { gc_wb_slot(&f->vals[i], val); return true; }
+            if (f->syms[i] == sym) {
+                if (g) gc_wb_slot_atomic_relaxed(&f->vals[i], val);
+                else   gc_wb_slot(&f->vals[i], val);
+                return true;
+            }
     }
     if (f->size >= f->cap) frame_grow(f);
-    f->syms[f->size] = sym;
-    gc_wb_slot(&f->vals[f->size], val);
-    f->size++;
+    g_store_val(&f->syms[f->size], sym, g);
+    if (g) gc_wb_slot_atomic_relaxed(&f->vals[f->size], val);
+    else   gc_wb_slot(&f->vals[f->size], val);
+    g_store_u32(&f->size, f->size + 1, g);
     /* Build or update hash index */
     if (f->hcap) {
         frame_hash_rehash(f);
@@ -233,13 +325,29 @@ static bool frame_set_unlocked(EnvFrame *f, val_t sym, val_t val) {
         uint32_t h = sym_hash(sym, f->hcap);
         while (f->hidx[h] != UINT32_MAX) {
             uint32_t idx = f->hidx[h];
-            if (f->syms[idx] == sym) { gc_wb_slot(&f->vals[idx], val); return true; }
+            if (f->syms[idx] == sym) {
+                /* Reads above are safe plain reads regardless of global-
+                 * ness: frame_set_unlocked only ever runs while
+                 * g_global_frame_lock is held for the global case (via
+                 * frame_set), ruling out a concurrent structural writer;
+                 * a lock-free reader's own concurrent read of the same
+                 * fields is a benign read-read. Only this value WRITE
+                 * needs gating -- see gc_wb_slot_atomic_relaxed's doc
+                 * comment. */
+                if (frame_is_global(f)) gc_wb_slot_atomic_relaxed(&f->vals[idx], val);
+                else                    gc_wb_slot(&f->vals[idx], val);
+                return true;
+            }
             h = (h + 1) & (f->hcap - 1);
         }
         return false;
     }
     for (uint32_t i = 0; i < f->size; i++)
-        if (f->syms[i] == sym) { gc_wb_slot(&f->vals[i], val); return true; }
+        if (f->syms[i] == sym) {
+            if (frame_is_global(f)) gc_wb_slot_atomic_relaxed(&f->vals[i], val);
+            else                    gc_wb_slot(&f->vals[i], val);
+            return true;
+        }
     return false;
 }
 
@@ -253,38 +361,79 @@ bool frame_set(EnvFrame *f, val_t sym, val_t val) {
      * does. Taking g_global_frame_lock here (the same lock frame_define
      * holds for its whole critical section) rules that out directly: no
      * frame_define can be reallocating syms/vals/hidx while we hold it, so
-     * the traversal below is safe without a separate retry loop. This also
-     * serializes two actors calling (set! shared-global ...) at the same
-     * time against EACH OTHER, matching frame_define's writer-vs-writer
-     * guarantee — without it, two concurrent gc_wb_slot stores to the same
-     * slot are a plain, unsynchronized write/write race. */
+     * the traversal below is safe without a separate retry loop.
+     *
+     * This only serializes writer-vs-writer for callers that go through
+     * frame_set itself (env_set, i.e. tree-walked `(set! ...)`) — issue
+     * #153's independent review flagged that a PRE-EXISTING, separate
+     * overclaim here previously said this serializes "two actors calling
+     * (set! shared-global ...) against EACH OTHER" unconditionally, which
+     * is not true: VM-compiled `(set! ...)` (vm.c's OP_STORE_GLOBAL) writes
+     * the value slot directly via gslot_store and has never taken this
+     * lock, tree-walked or compiled, before or after #153's fix. Two
+     * concurrent writes to the SAME global from mixed tree-walked/compiled
+     * call sites are therefore each individually well-defined (gslot_store/
+     * gc_wb_slot_atomic_relaxed rule out torn reads/writes, per #153) but
+     * NOT ordered relative to each other -- an ordinary unsynchronized
+     * last-write-wins race, same as `set!`'s memory model gives you in any
+     * language without the caller adding their own synchronization. */
     pthread_mutex_lock(&g_global_frame_lock);
     bool result = frame_set_unlocked(f, sym, val);
     pthread_mutex_unlock(&g_global_frame_lock);
     return result;
 }
 
+/* Issue #153: the lock-free (global) read path -- every field touch below
+ * is gated on frame_is_global(f), snapshotted ONCE at entry rather than
+ * re-derived per access, so one lookup attempt is internally consistent
+ * even under a concurrent writer (the outer seqlock retry in
+ * frame_lookup_versioned discards the whole attempt if version changed
+ * meanwhile; this function's job is only to make sure that discarding is
+ * the WORST outcome -- never UB or an out-of-bounds access -- which
+ * requires every one of these to be a proper atomic load when g is
+ * true). Local (non-global) frames keep the exact original plain-access
+ * behavior. */
 static val_t *frame_lookup_unlocked(EnvFrame *f, val_t sym) {
-    if (f->hcap) {
-        uint32_t h = sym_hash(sym, f->hcap);
-        while (f->hidx[h] != UINT32_MAX) {
-            uint32_t idx = f->hidx[h];
-            if (f->syms[idx] == sym) return &f->vals[idx];
-            h = (h + 1) & (f->hcap - 1);
+    bool g = frame_is_global(f);
+    uint32_t hcap = g_load_u32(&f->hcap, g);
+    if (hcap) {
+        uint32_t *hidx = g_load_u32ptr(&f->hidx, g);
+        val_t    *syms = g_load_valptr(&f->syms, g);
+        val_t    *vals = g_load_valptr(&f->vals, g);
+        uint32_t h = sym_hash(sym, hcap);
+        for (;;) {
+            uint32_t idx = g_load_u32(&hidx[h], g);
+            if (idx == UINT32_MAX) return NULL;
+            if (g_load_val(&syms[idx], g) == sym) return &vals[idx];
+            h = (h + 1) & (hcap - 1);
         }
-        return NULL;
     }
-    for (uint32_t i = 0; i < f->size; i++)
-        if (f->syms[i] == sym) return &f->vals[i];
+    uint32_t size = g_load_u32(&f->size, g);
+    val_t   *syms = g_load_valptr(&f->syms, g);
+    val_t   *vals = g_load_valptr(&f->vals, g);
+    for (uint32_t i = 0; i < size; i++)
+        if (g_load_val(&syms[i], g) == sym) return &vals[i];
     return NULL;
 }
+
+/* Issue #153 item 2: an uncapped seqlock retry loop is a theoretical
+ * livelock under sustained contention (no backoff, restarts on ANY
+ * concurrent writer starting or completing mid-read). After this many
+ * failed attempts, fall back to taking g_global_frame_lock outright --
+ * serializing with writers instead of racing them -- which guarantees
+ * forward progress regardless of how hot the contention gets. Picked
+ * generously: normal contention resolves in a handful of retries at
+ * most (structural global-frame writes are load-time-rare, see this
+ * file's own top-of-file comment), so this only ever engages under
+ * genuinely pathological, sustained writer pressure. */
+#define FRAME_SEQLOCK_RETRY_CAP 1000
 
 val_t *frame_lookup_versioned(EnvFrame *f, val_t sym, uint32_t *out_ver) {
     if (!frame_is_global(f)) {
         if (out_ver) *out_ver = 0;
         return frame_lookup_unlocked(f, sym);
     }
-    for (;;) {
+    for (int tries = 0; tries < FRAME_SEQLOCK_RETRY_CAP; tries++) {
         uint32_t v1 = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
         if (v1 & 1) continue;
         val_t *result = frame_lookup_unlocked(f, sym);
@@ -293,10 +442,25 @@ val_t *frame_lookup_versioned(EnvFrame *f, val_t sym, uint32_t *out_ver) {
         if (out_ver) *out_ver = v1;
         return result;
     }
+    pthread_mutex_lock(&g_global_frame_lock);
+    val_t *result = frame_lookup_unlocked(f, sym);
+    if (out_ver) *out_ver = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
+    pthread_mutex_unlock(&g_global_frame_lock);
+    return result;
 }
 
 val_t *frame_lookup(EnvFrame *f, val_t sym) {
     return frame_lookup_versioned(f, sym, NULL);
+}
+
+/* Copies syms[0..n) / vals[0..n) element-by-element via atomic-relaxed
+ * loads instead of memcpy -- issue #153: memcpy has no notion of
+ * atomicity, so it can't safely read an array a concurrent writer might
+ * be touching (the same UB-by-definition concern gc_wb_slot_atomic_relaxed's
+ * doc comment explains for single-slot writes, just for a bulk read). */
+static void frame_copy_global(val_t *dst, val_t *src, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++)
+        dst[i] = atomic_load_explicit((_Atomic val_t *)&src[i], memory_order_relaxed);
 }
 
 uint32_t frame_snapshot_bindings(EnvFrame *f, val_t **out_syms, val_t **out_vals) {
@@ -309,19 +473,30 @@ uint32_t frame_snapshot_bindings(EnvFrame *f, val_t **out_syms, val_t **out_vals
         *out_syms = syms; *out_vals = vals;
         return n;
     }
-    for (;;) {
+    for (int tries = 0; tries < FRAME_SEQLOCK_RETRY_CAP; tries++) {
         uint32_t v1 = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
         if (v1 & 1) continue;
-        uint32_t n = f->size;
+        uint32_t n = g_load_u32(&f->size, true);
+        val_t *fsyms = g_load_valptr(&f->syms, true);
+        val_t *fvals = g_load_valptr(&f->vals, true);
         val_t *syms = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
         val_t *vals = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
-        memcpy(syms, f->syms, n * sizeof(val_t));
-        memcpy(vals, f->vals, n * sizeof(val_t));
+        frame_copy_global(syms, fsyms, n);
+        frame_copy_global(vals, fvals, n);
         uint32_t v2 = atomic_load_explicit((_Atomic uint32_t *)&f->version, memory_order_acquire);
         if (v2 != v1) continue;
         *out_syms = syms; *out_vals = vals;
         return n;
     }
+    pthread_mutex_lock(&g_global_frame_lock);
+    uint32_t n = f->size;
+    val_t *syms = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+    val_t *vals = (val_t *)gc_alloc_raw_pinned(n * sizeof(val_t));
+    memcpy(syms, f->syms, n * sizeof(val_t));
+    memcpy(vals, f->vals, n * sizeof(val_t));
+    pthread_mutex_unlock(&g_global_frame_lock);
+    *out_syms = syms; *out_vals = vals;
+    return n;
 }
 
 /* ---- Environment ---- */
@@ -384,14 +559,26 @@ bool env_set(val_t env, val_t sym, val_t val) {
     return false;
 }
 
+/* Issue #153: env.c's own internal helper -- a caller outside this file
+ * should use env_slot_load (env.h) instead, which doesn't need a frame
+ * argument since all its callers pass a root environment. */
+static inline val_t frame_slot_load(EnvFrame *f, val_t *slot) {
+    return frame_is_global(f) ? atomic_load_explicit((_Atomic val_t *)slot, memory_order_relaxed) : *slot;
+}
+
+val_t env_slot_load(val_t *slot) {
+    return atomic_load_explicit((_Atomic val_t *)slot, memory_order_relaxed);
+}
+
 val_t env_lookup(val_t env, val_t sym) {
     EnvFrame *f = as_env(env);
     while (f) {
         val_t *slot = frame_lookup(f, sym);
         if (slot) {
-            if (*slot == V_UNDEF)
+            val_t v = frame_slot_load(f, slot);
+            if (v == V_UNDEF)
                 scm_raise(V_FALSE, "variable used before initialization: %s", sym_cstr(sym));
-            return *slot;
+            return v;
         }
         f = f->parent;
     }
@@ -402,7 +589,10 @@ val_t env_lookup_or_false(val_t env, val_t sym) {
     EnvFrame *f = as_env(env);
     while (f) {
         val_t *slot = frame_lookup(f, sym);
-        if (slot && *slot != V_UNDEF) return *slot;
+        if (slot) {
+            val_t v = frame_slot_load(f, slot);
+            if (v != V_UNDEF) return v;
+        }
         f = f->parent;
     }
     return V_FALSE;
@@ -412,7 +602,7 @@ val_t *env_lookup_slot(val_t env, val_t sym) {
     EnvFrame *f = as_env(env);
     while (f) {
         val_t *slot = frame_lookup(f, sym);
-        if (slot && *slot != V_UNDEF) return slot;
+        if (slot && frame_slot_load(f, slot) != V_UNDEF) return slot;
         f = f->parent;
     }
     return NULL;

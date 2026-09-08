@@ -464,10 +464,13 @@ static void eval_port_exprs(val_t port, bool print) {
                     val_t *slot = env_lookup_slot(GLOBAL_ENV, sym_intern_cstr(fn_name));
                     if (!slot) {
                         fprintf(stderr, "unbound variable: %s\n", fn_name);
-                    } else if (!vis_bcclosure(*slot)) {
-                        fprintf(stderr, "%s: not a compiled procedure (no bytecode)\n", fn_name);
                     } else {
-                        chunk_disasm(as_bcclosure(*slot)->chunk, fn_name, stdout);
+                        /* issue #153: GLOBAL_ENV slot, concurrently writable */
+                        val_t v = env_slot_load(slot);
+                        if (!vis_bcclosure(v))
+                            fprintf(stderr, "%s: not a compiled procedure (no bytecode)\n", fn_name);
+                        else
+                            chunk_disasm(as_bcclosure(v)->chunk, fn_name, stdout);
                     }
                     continue;
                 }

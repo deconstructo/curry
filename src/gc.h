@@ -40,6 +40,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#ifndef __cplusplus
+#include <stdatomic.h> /* C++ TUs (qt6.cpp) that include this header never
+                         * call gc_wb_slot_atomic_relaxed below -- stdatomic.h
+                         * is C11-only and its atomic_* macros collide with
+                         * <atomic>/libc++ when pulled into a C++ TU, so it's
+                         * guarded out entirely rather than risk that clash. */
+#endif
 #include "value.h" /* val_t, and CURRY_THREAD_LOCAL used by gc_nursery etc. below --
                      * moved here from further down in this file (it used to be
                      * included lazily right before its first use) because
@@ -497,5 +504,45 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
 
 #define GC_WB(obj, field, newval) \
     do { val_t _gc_v = (newval); gc_wb_slot((val_t *)&(obj)->field, _gc_v); } while(0)
+
+/*
+ * gc_wb_slot_atomic_relaxed — issue #153: same write-barrier bookkeeping
+ * as gc_wb_slot, but the actual store is an atomic-relaxed store instead
+ * of a plain `*slot = newval`. Use ONLY for a slot that a lock-free
+ * reader on another thread can observe without holding any lock -- today
+ * that means exactly one thing: GLOBAL_ENV (or another root EnvFrame)'s
+ * vals[] array, written from env.c's frame_set_unlocked/
+ * frame_define_unlocked (the global-frame branch) and vm.c's
+ * OP_STORE_GLOBAL. Every other gc_wb_slot call site (pairs, vectors,
+ * local-frame fields, ...) stays on the plain version: those objects are
+ * single-thread-owned (see env.c's own top-of-file comment on why local
+ * frames never need this), so there is no concurrent reader to protect
+ * against and no reason to pay for an atomic store.
+ *
+ * Relaxed suffices (not acquire/release) because the ordering readers
+ * actually need comes from the SEPARATE seqlock version counter
+ * (env.c's seq_begin_write/seq_end_write, unchanged by this fix) for the
+ * structural (grow/rehash) case, or is simply "read old or new value,
+ * both are live, never torn" for the direct value-update case (frame_set/
+ * OP_STORE_GLOBAL never bump version at all -- this store's only job is
+ * to stop the write from being UB-by-definition against a concurrent
+ * plain read, not to add ordering the seqlock doesn't already provide).
+ *
+ * C-only (see the stdatomic.h include guard above): no C++ TU in this
+ * codebase touches GLOBAL_ENV's seqlock-protected slots directly. */
+#ifndef __cplusplus
+static inline void gc_wb_slot_atomic_relaxed(val_t *slot, val_t newval) {
+    atomic_store_explicit((_Atomic val_t *)slot, newval, memory_order_relaxed);
+    if (gc_dirty_slots && vis_ptr(newval)) {
+        const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
+        if (p >= gc_main_nursery_base && p < gc_main_nursery_limit) {
+            if (gc_dirty_count < GC_DIRTY_CAP)
+                gc_dirty_slots[gc_dirty_count++] = slot;
+            else
+                gc_dirty_overflow = true;
+        }
+    }
+}
+#endif /* __cplusplus */
 
 #endif /* CURRY_GC_H */

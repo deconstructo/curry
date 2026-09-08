@@ -555,6 +555,26 @@ static inline void gcache_store(Chunk *chunk, uint8_t ci, val_t *slot, uint32_t 
     gcache_unlock(chunk);
 }
 
+/* Issue #153: every slot dereferenced here (whether freshly looked up via
+ * frame_lookup_versioned or fetched from a warm glob_cache entry) always
+ * points into a ROOT EnvFrame's vals[] -- that's what OP_LOAD_GLOBAL/
+ * OP_STORE_GLOBAL/OP_CALL_GLOBAL/load_global_cached mean by "global" --
+ * which a DIFFERENT actor thread's frame_set/frame_define can write
+ * concurrently, lock-free. A plain `*slot` read or write here is a data
+ * race by the letter of C11 (see env.c's own doc comment on this same
+ * class of bug); load_global_cached/OP_LOAD_GLOBAL's own root->version
+ * check only validates the SLOT POINTER is still current, it says
+ * nothing about the VALUE stored there being torn-read-safe against a
+ * concurrent frame_set (frame_set never bumps version at all -- see
+ * env.c). Relaxed suffices: ordering comes from the version check above
+ * these calls, not from the value load/store itself. */
+static inline val_t gslot_load(val_t *slot) {
+    return atomic_load_explicit((_Atomic val_t *)slot, memory_order_relaxed);
+}
+static inline void gslot_store(val_t *slot, val_t v) {
+    gc_wb_slot_atomic_relaxed(slot, v);
+}
+
 /* Shared cached global-variable lookup for OP_CALL_GLOBAL/
  * OP_TAIL_CALL_GLOBAL, which need this exact lookup fused with a call
  * rather than as a separate dispatch. Mirrors (does not replace)
@@ -574,14 +594,14 @@ static inline val_t load_global_cached(Chunk *chunk, uint8_t ci) {
         val_t *cslot; uint32_t cver;
         gcache_load(&cache[ci], &cslot, &cver);
         if (__builtin_expect(cslot != NULL && cver == root_ver, 1))
-            return *cslot;
+            return gslot_load(cslot);
     }
     val_t sym = chunk->constants[ci];
     uint32_t ver;
     val_t *slot = frame_lookup_versioned(root, sym, &ver);
     if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
     if (cache) gcache_store(chunk, ci, slot, ver);
-    return *slot;
+    return gslot_load(slot);
 }
 
 /* Tier 2.5 step 1: shared fast path for every open-coded 1-argument
@@ -775,14 +795,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t *cslot = NULL; uint32_t cver = 0;
             if (cache) gcache_load(&cache[ci], &cslot, &cver);
             if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
-                loaded_gval = *cslot;
+                loaded_gval = gslot_load(cslot);
             } else {
                 val_t sym = CONSTS[ci];
                 uint32_t ver;
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (!slot) scm_raise_code(EC_UNBOUND_VARIABLE, "unbound variable: %s", sym_cstr(sym));
                 if (cache) gcache_store(frame->closure->chunk, ci, slot, ver);
-                loaded_gval = *slot;
+                loaded_gval = gslot_load(slot);
             }
             PUSH(loaded_gval);
             NEXT;
@@ -807,14 +827,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t *cslot = NULL; uint32_t cver = 0;
             if (cache) gcache_load(&cache[ci], &cslot, &cver);
             if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
-                gc_wb_slot(cslot, val);
+                gslot_store(cslot, val);
             } else {
                 val_t sym = CONSTS[ci];
                 uint32_t ver;
                 val_t *slot = frame_lookup_versioned(root, sym, &ver);
                 if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
                 else {
-                    gc_wb_slot(slot, val);
+                    gslot_store(slot, val);
                     if (cache) gcache_store(frame->closure->chunk, ci, slot, ver);
                 }
             }
