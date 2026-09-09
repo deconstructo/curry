@@ -575,15 +575,44 @@ val_t modules_import(val_t spec, val_t env) {
          * each exported name up directly instead of scanning every binding
          * the module happens to define. */
         val_t mod_env_val = vptr(mod->env);
-        /* Issue #150: mod->exports is a field gc_gen.c's scan_pinned_object
-         * (T_MODULE case) can concurrently evacuate on another actor's
-         * minor GC -- snapshot it under the same lock that scan takes,
-         * rather than dereferencing it directly here. */
+        /* Issue #150 / #203: mod->exports is a field gc_gen.c's
+         * scan_pinned_object (T_MODULE case) can evacuate on another
+         * actor's minor GC, and #150's original fix only snapshotted the
+         * head pointer -- the list's own pair cells (vcar/vcdr below)
+         * were still walked with no lock held at all. Issue #200 Phase B
+         * (src/gc_gen.c, gc_gen_stop_the_world()/start_the_world() now
+         * bracketing the whole of gc_gen_minor_collect(), not just the
+         * pinned-object-scan window) has since closed the specific
+         * concurrent-mutation race this guarded against: no other actor
+         * runs at all while a minor GC evacuates this list's cells, so an
+         * un-parked reader here can only ever run entirely before or
+         * entirely after a given collection, never during one. This
+         * snapshot is kept anyway as defense in depth -- issue #208 found
+         * a still-unexplained hang in that same stop-the-world protocol
+         * under a nested-spawn + dynamic define-library/import workload,
+         * so treat the STW guarantee as not yet fully proven for this
+         * exact code path. Same count/allocate-outside-lock/copy pattern
+         * sx_rule_try/sx_rules_list (src/sx_rules.c) already use for the
+         * unrelated "can't hold a lock across arbitrary work" problem --
+         * the copy pass itself must still finish inside the lock, so
+         * GC_MALLOC-ing the buffer has to happen between the two lock
+         * sections, not inside either one. */
         modules_registry_rdlock_for_gc();
-        val_t exports = mod->exports;
+        int export_count = 0;
+        for (val_t es = mod->exports; vis_pair(es); es = vcdr(es)) export_count++;
         modules_registry_unlock_for_gc();
-        for (val_t es = exports; vis_pair(es); es = vcdr(es)) {
-            val_t sym = vcar(es);
+
+        val_t *export_syms = export_count
+            ? (val_t *)GC_MALLOC(sizeof(val_t) * (size_t)export_count) : NULL;
+
+        modules_registry_rdlock_for_gc();
+        int export_n = 0;
+        for (val_t es = mod->exports; vis_pair(es) && export_n < export_count; es = vcdr(es))
+            export_syms[export_n++] = vcar(es);
+        modules_registry_unlock_for_gc();
+
+        for (int i = 0; i < export_n; i++) {
+            val_t sym = export_syms[i];
             val_t *slot = env_lookup_slot(mod_env_val, sym);
             if (!slot) continue; /* declared exported but never defined */
             /* issue #153: mod->env is a root frame (env_new_root()),
