@@ -66,11 +66,17 @@ void channel_send(val_t v, val_t val) {
         gc_wb_slot(&ch->buf[0], val);
         ch->hdr.flags |= CH_SYNC_WAITING_SEND;
         pthread_cond_signal(&ch->not_empty);
+        /* Issue #200 Phase A: can block indefinitely with no receiver --
+         * park so a future GC safepoint doesn't wait on this thread. */
+        gc_gen_thread_park();
         while ((ch->hdr.flags & CH_SYNC_WAITING_SEND) && !ch->closed)
             pthread_cond_wait(&ch->not_full, &ch->lock);
+        gc_gen_thread_unpark();
     } else {
+        gc_gen_thread_park();
         while (ch->count == ch->cap && !ch->closed)
             pthread_cond_wait(&ch->not_full, &ch->lock);
+        gc_gen_thread_unpark();
 
         if (ch->closed) {
             pthread_mutex_unlock(&ch->lock);
@@ -98,8 +104,11 @@ val_t channel_recv(val_t v) {
     if (ch->cap == 0) {
         ch->hdr.flags |= CH_SYNC_WAITING_RECV;
         pthread_cond_signal(&ch->not_full);
+        /* Issue #200 Phase A: see channel_send's identical comment. */
+        gc_gen_thread_park();
         while (!(ch->hdr.flags & CH_SYNC_WAITING_SEND) && !ch->closed)
             pthread_cond_wait(&ch->not_empty, &ch->lock);
+        gc_gen_thread_unpark();
 
         if (ch->closed && !(ch->hdr.flags & CH_SYNC_WAITING_SEND)) {
             ch->hdr.flags &= ~(uint32_t)CH_SYNC_WAITING_RECV;
@@ -114,8 +123,10 @@ val_t channel_recv(val_t v) {
         return val;
 
     } else {
+        gc_gen_thread_park();
         while (ch->count == 0 && !ch->closed)
             pthread_cond_wait(&ch->not_empty, &ch->lock);
+        gc_gen_thread_unpark();
 
         if (ch->count == 0) {
             pthread_mutex_unlock(&ch->lock);

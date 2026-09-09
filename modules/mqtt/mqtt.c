@@ -450,7 +450,12 @@ static curry_val fn_receive(int ac, curry_val *av, void *ud) {
         ts.tv_sec  +=  timeout_ms / 1000;
         ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
         if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+        /* Issue #200 Phase A: bounded by timeout_ms, but a caller can pass
+         * an arbitrarily large one -- park so a future GC safepoint
+         * doesn't wait on this thread for as long as that takes. */
+        curry_gc_thread_park();
         pthread_cond_timedwait(&c->qcv, &c->qmtx, &ts);
+        curry_gc_thread_unpark();
     }
 
     if (c->qhead == c->qtail) {

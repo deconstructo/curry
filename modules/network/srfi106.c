@@ -111,7 +111,12 @@ static curry_val fn_make_client_socket(int ac, curry_val *av, void *ud) {
     hints.ai_flags    = ac > 4 ? (int)checked_fixnum(av[4], 5, "make-client-socket") : 0;
     hints.ai_protocol = ac > 5 ? (int)checked_fixnum(av[5], 6, "make-client-socket") : 0;
 
-    if (getaddrinfo(node, service, &hints, &res) != 0)
+    /* Issue #200 Phase A: DNS resolution and connect() can both block for
+     * a while -- park across both (see curry.h's own comment). */
+    curry_gc_thread_park();
+    int gai_rc = getaddrinfo(node, service, &hints, &res);
+    curry_gc_thread_unpark();
+    if (gai_rc != 0)
         curry_error("make-client-socket: could not resolve %s", node);
 
     sock_t fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -119,7 +124,10 @@ static curry_val fn_make_client_socket(int ac, curry_val *av, void *ud) {
         freeaddrinfo(res);
         curry_error("make-client-socket: socket failed");
     }
-    if (connect((int)fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0) {
+    curry_gc_thread_park();
+    int connect_rc = connect((int)fd, res->ai_addr, (socklen_t)res->ai_addrlen);
+    curry_gc_thread_unpark();
+    if (connect_rc != 0) {
         sock_close(fd);
         freeaddrinfo(res);
         curry_error("make-client-socket: connect failed");
@@ -139,7 +147,11 @@ static curry_val fn_make_server_socket(int ac, curry_val *av, void *ud) {
     hints.ai_flags    = AI_PASSIVE;
     hints.ai_protocol = ac > 3 ? (int)checked_fixnum(av[3], 4, "make-server-socket") : 0;
 
-    if (getaddrinfo(NULL, service, &hints, &res) != 0)
+    /* Issue #200 Phase A: see fn_make_client_socket's identical comment. */
+    curry_gc_thread_park();
+    int gai_rc = getaddrinfo(NULL, service, &hints, &res);
+    curry_gc_thread_unpark();
+    if (gai_rc != 0)
         curry_error("make-server-socket: could not resolve service %s", service);
 
     sock_t fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -175,7 +187,10 @@ static curry_val fn_socket_accept(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     int server = net_extract_fd(av[0], "socket-accept");
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+    /* Issue #200 Phase A: see network.c's fn_tcp_accept's identical comment. */
+    curry_gc_thread_park();
     sock_t client = accept(server, (struct sockaddr *)&addr, &addrlen);
+    curry_gc_thread_unpark();
     if (client == SOCK_INVALID) curry_error("socket-accept: accept failed");
     return net_sock_to_val_registered(client, "socket-accept");
 }
@@ -238,7 +253,10 @@ static curry_val fn_socket_recv(int ac, curry_val *av, void *ud) {
 
     uint8_t *buf = malloc((size_t)size);
     if (!buf) curry_error("socket-recv: out of memory");
+    /* Issue #200 Phase A: can block indefinitely with nothing incoming. */
+    curry_gc_thread_park();
     ssize_t n = recv(fd, buf, (size_t)size, flags);
+    curry_gc_thread_unpark();
     if (n < 0) { free(buf); curry_error("socket-recv: recv failed: %s", strerror(errno)); }
 
     curry_val bv = curry_make_bytevector((uint32_t)n, 0);

@@ -155,12 +155,20 @@ static curry_val fn_tcp_connect_tls(int ac, curry_val *av, void *ud) {
     struct addrinfo hints = {0}, *res;
     hints.ai_family   = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port_str, &hints, &res) != 0)
+    /* Issue #200 Phase A: DNS resolution and connect() can both block for
+     * a while -- park across both (see curry.h's own comment). */
+    curry_gc_thread_park();
+    int gai_rc = getaddrinfo(host, port_str, &hints, &res);
+    curry_gc_thread_unpark();
+    if (gai_rc != 0)
         curry_error("tcp-connect-tls: could not resolve %s", host);
 
     int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0) { freeaddrinfo(res); curry_error("tcp-connect-tls: socket failed"); }
-    if (connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0) {
+    curry_gc_thread_park();
+    int connect_rc = connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen);
+    curry_gc_thread_unpark();
+    if (connect_rc != 0) {
         close(fd); freeaddrinfo(res);
         curry_error("tcp-connect-tls: connect failed");
     }
@@ -184,7 +192,12 @@ static curry_val fn_tcp_connect_tls(int ac, curry_val *av, void *ud) {
         curry_error("tcp-connect-tls: SSL_set1_host failed");
     }
 
-    if (SSL_connect(ssl) != 1) {
+    /* Issue #200 Phase A: the TLS handshake itself is a blocking network
+     * round-trip, same rationale as the plain connect() above. */
+    curry_gc_thread_park();
+    int ssl_connect_rc = SSL_connect(ssl);
+    curry_gc_thread_unpark();
+    if (ssl_connect_rc != 1) {
         unsigned long e = ERR_get_error();
         char errbuf[256];
         ERR_error_string_n(e, errbuf, sizeof(errbuf));

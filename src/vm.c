@@ -749,6 +749,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
         }
+        /* Issue #200 Phase A: see the identical comment at the computed-goto
+         * L_DISPATCH label above -- same safepoint poll, same gate. */
+        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
+            extern void gc_gen_safepoint(void);
+            gc_gen_safepoint();
+        }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         switch (READ_U8()) {
 #endif
@@ -1952,6 +1958,20 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             gc_minor_pending = false;
             extern void gc_gen_minor_collect(void);
             gc_gen_minor_collect();
+        }
+        /* Issue #200 Phase A: cross-thread safepoint poll, alongside this
+         * thread's own gc_minor_pending self-collection check above. Same
+         * gc_inhibit_count == 0 gate -- a thread mid-primitive-call (which
+         * may transiently hold a subsystem lock like rtab_lock/pinned_lock)
+         * is never asked to pause until it returns here with the inhibit
+         * count back at zero, so a pending gc_gen_stop_the_world() request
+         * naturally waits out any in-flight critical section instead of
+         * racing it. gc_gen_safepoint() itself is a cheap no-op check under
+         * the default Boehm backend (gc_stop_world is never set to 1 by
+         * anything outside the generational backend). */
+        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
+            extern void gc_gen_safepoint(void);
+            gc_gen_safepoint();
         }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         goto *dt[READ_U8()];

@@ -85,6 +85,12 @@ typedef struct gc_ops {
     /* Called once per new pthread before any allocation on that thread. */
     void  (*register_thread)(void);
 
+    /* Issue #200 Phase A: called once, symmetrically, from that same
+     * thread's exit path. No-op under Boehm; decrements the generational
+     * backend's live-thread count (gc_gen_thread_count, gc_gen.c) that a
+     * future stop-the-world safepoint's wait target depends on. */
+    void  (*unregister_thread)(void);
+
     /*
      * Pin/unpin: prevent the collector from moving `obj`.
      * Required when a C extension stores a raw Scheme pointer in a struct or
@@ -184,6 +190,12 @@ static inline void *gc_nursery_alloc(size_t n, bool has_ptrs) {
 
 void gc_init(void);              /* call once at startup, before any allocation */
 void gc_register_thread(void);   /* call once per new pthread                   */
+void gc_unregister_thread(void); /* call once from that same pthread's exit path
+                                   * (issue #200 Phase A) -- backend-dispatched via
+                                   * gc_ops, unlike a direct call to the
+                                   * generational-only gc_gen_unregister_thread(),
+                                   * so it's correctly a no-op under Boehm instead
+                                   * of corrupting a counter Boehm never touches */
 void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd);
 
 /* GC tuning — safe to call after gc_init() */
@@ -413,6 +425,43 @@ void gc_inhibit_restore(int saved);
     GcFrame _gc_frame = {_gc_frame_roots, (n), gc_shadow_stack}; \
     gc_shadow_stack = &_gc_frame; \
     __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
+
+/*
+ * Issue #200 Phase A — stop-the-world safepoint plumbing for the
+ * generational backend (defined unconditionally in gc_gen.c, same as
+ * gc_gen_minor_collect itself; harmless/near-free under the default
+ * Boehm backend since nothing sets gc_stop_world to 1 outside the
+ * generational backend's own code). See gc_gen.c's own declaration
+ * comments for the full rationale.
+ *
+ * gc_gen_safepoint() is already wired into the two existing poll points
+ * (vm.c's L_DISPATCH, eval.c's tail: label) as of this issue; declared
+ * here (rather than only inline-extern'd at those two sites, matching
+ * gc_gen_minor_collect's convention) because the remaining functions
+ * below have several call sites across different files.
+ *
+ * gc_gen_thread_park()/gc_gen_thread_unpark() bracket a genuinely long or
+ * unbounded blocking call (mailbox receive, a blocking accept()/recv(), a
+ * work-queue park) — without this, a thread parked in such a call would
+ * never return to a poll point on its own, so a future
+ * gc_gen_stop_the_world() request would wait for it indefinitely. Pair
+ * every blocking call reachable from actor code with these, park()
+ * immediately before the blocking call and unpark() immediately after.
+ *
+ * gc_gen_unregister_thread() is gc_gen.c's own vtable implementation of
+ * gc_unregister_thread() (above, near gc_register_thread's own
+ * declaration) -- call sites should use gc_unregister_thread(), NOT this
+ * directly: a direct call would run unconditionally regardless of active
+ * backend, decrementing gc_gen_thread_count even under Boehm (which never
+ * incremented it in the first place, since gen_register_thread is only
+ * reached when the generational backend is active). Declared here only
+ * so gc.c's vtable wiring can see it. */
+void gc_gen_safepoint(void);
+void gc_gen_stop_the_world(void);
+void gc_gen_start_the_world(void);
+void gc_gen_thread_park(void);
+void gc_gen_thread_unpark(void);
+void gc_gen_unregister_thread(void);  /* vtable impl only -- see comment above */
 
 /* ── GC statistics (available under both Boehm and generational backends) ── */
 

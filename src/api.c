@@ -248,6 +248,9 @@ void curry_port_write_string(curry_val port, const char *s) {
     port_write_string((val_t)port, s, (uint32_t)strlen(s));
 }
 
+void curry_gc_thread_park(void)   { gc_gen_thread_park(); }
+void curry_gc_thread_unpark(void) { gc_gen_thread_unpark(); }
+
 /* ---- List helpers ---- */
 
 curry_val curry_list(int n, ...) {

@@ -186,11 +186,20 @@ static void *worker_loop(void *arg) {
             execute_item(item);
         } else {
             atomic_fetch_add(&global_pool->n_parked, 1);
+            /* Issue #200 Phase A: this can block indefinitely with no work
+             * arriving -- park so a future GC safepoint doesn't wait on
+             * this thread for as long as that takes (see gc.h's own
+             * comment on gc_gen_thread_park/unpark; distinct from this
+             * function's own "parked" terminology for idle workers). */
+            gc_gen_thread_park();
             pthread_cond_wait(&global_pool->park_cond, &global_pool->park_mutex);
+            gc_gen_thread_unpark();
             atomic_fetch_sub(&global_pool->n_parked, 1);
             pthread_mutex_unlock(&global_pool->park_mutex);
         }
     }
+    /* Symmetric with gc_register_thread() above. */
+    gc_unregister_thread();
     vm_free();
     return NULL;
 }
