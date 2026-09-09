@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788891553196,
+  "lastUpdate": 1788943513272,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13454,6 +13454,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 73.965,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eaaa570ba7d9c2960a9a9ecd4a004a3732bd0840",
+          "message": "feat(gc_gen): stop-the-world safepoint plumbing, Phase A (#200) (#206)\n\n--gc generational's minor GC is per-thread, not stop-the-world: when it\nscans an object reachable from more than one actor thread, the scan\nraces that object's normal mutator access on other threads. This\nsession already fixed several concrete instances one type at a time\n(T_ENV via #198, T_MODULE via #150, rtab/atab throughput via #146), but\nreview kept finding more (#200's remaining four types, plus #203 one\nlayer past an already-\"fixed\" type) -- the recurrence rate means\nper-type patching won't converge. Decision: build a real stop-the-world\nsafepoint so every current and future GC-visible shared type is\nprotected by construction instead of by remembering to patch it.\n\nThis is Phase A: pure plumbing, deliberately no behavior change yet\n(nothing sets gc_stop_world to 1 anywhere in this commit -- that's a\nseparate future Phase B, wiring it into gc_gen_minor_collect's\npinned-object-scan window).\n\nPorted the safepoint core (gc_stop_world flag, gc_gen_safepoint,\ngc_gen_stop_the_world/start_the_world, gc_gen_thread_park/unpark) from\nsrc/gc_generational.c -- an orphaned, never-compiled earlier GC rewrite\nattempt (confirmed via CMakeLists.txt: only gc.c+gc_gen.c are built) --\ninto the live per-thread-nursery backend. Adds a real live-thread count\n(missing entirely before this: gen_register_thread set up a nursery but\ntracked no count anywhere, and nothing ever unregistered on thread\nexit), wires the existing gc_minor_pending poll points (vm.c's\nL_DISPATCH, eval()'s tail: label) to also check the new safepoint flag\nunder the same gc_inhibit_count == 0 gate, and brackets every\ngenuinely-blocking call reachable from actor code (mailbox receive,\nchannel send/recv, STM retry, work-pool park, parallel map/reduce wait,\nMCP's connection-accept/keepalive/recv loops, and several\nnetwork/sync/mqtt/piper module primitives) with park()/unpark() so a\nfuture safepoint request doesn't wait on a thread blocked in a syscall\nindefinitely.\n\nRegistration/unregistration is now properly symmetric and\nbackend-dispatched: gc_ops_t gained an unregister_thread vtable slot\n(no-op under Boehm, a real decrement under generational) and a new\npublic gc_unregister_thread() wrapper, mirroring the existing\ngc_register_thread(). Two real bugs were found and fixed during\nindependent review before this landed: modules/mcp/mcp.c independently\ncalls gc_register_thread() per SSE connection and was missed by the\ninitial sweep (5 unregistered exit paths, unbracketed recv()/accept())\n-- fixed by funneling every exit through one label and bracketing the\nblocking calls; and the unregister call was originally wired as a\ndirect, ungated call that ran under every backend including Boehm,\nsilently driving the (currently-unread) thread count negative on every\nordinary actor/worker exit -- fixed by the vtable slot above.\n\nVerified: full 127-suite ctest clean; manual smoke tests for channels,\nSTM, sync primitives, parallel map/reduce, and a live MCP SSE\nclient/server round-trip all pass under --gc generational; TSan sanity\npass shows no new races (confirmed via git-stash A/B against plain\nmain). That same TSan pass surfaced one genuine PRE-EXISTING race in\npinned_add's lock-free fast path (unrelated to this change, reproduces\nidentically without it) -- filed as #205, not fixed here. Two\nindependent code-review passes plus a security-review pass found no\nother correctness or safety issues in the final diff.\n\n\nClaude-Session: https://claude.ai/code/session_0151dxuF9rGDxCxMt1BArPph\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-09T18:44:31+10:00",
+          "tree_id": "dfb068db3624f7d3c1138f72a92c293731971a98",
+          "url": "https://github.com/deconstructo/curry/commit/eaaa570ba7d9c2960a9a9ecd4a004a3732bd0840"
+        },
+        "date": 1788943511510,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.456,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.275,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.579,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.154,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 157.958,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 307.546,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.245,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 99.158,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.115,
             "unit": "ms"
           }
         ]
