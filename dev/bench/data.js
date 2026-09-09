@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788943513272,
+  "lastUpdate": 1788957995757,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13523,6 +13523,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.115,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "04665d7a18f8c66c7819bd8e01e5085a12bc996c",
+          "message": "feat(gc_gen): engage stop-the-world for the full minor-collect body, Phase B (#200) (#207)\n\nPhase A (#206) built the stop-the-world/safepoint mechanism but left it\ninert. This wires gc_gen_stop_the_world()/start_the_world() around the\nwhole of gc_gen_minor_collect() instead of just the pinned/dirty/ext-scanner\nsteps, plus parks the calling thread around minor_gc_lock acquisition so a\nthread waiting to become the collector can't stall a concurrent\nstop-the-world.\n\nThe narrower bracket (steps 6-8 only) was insufficient: TSan's actor stress\nrepro (16 actors, --gc-nursery-size 4K, --gc generational) reliably caught a\ndata race in the root-scanning step (step 3) writing to GLOBAL_ENV's root\nslot while other actor threads read it lock-free via load_global_cached --\nunsynchronized even though the value doesn't change, since GLOBAL_ENV's\nframe is pinned. Moving the whole collection inside the STW bracket closes\nthis along with the originally-targeted T_UPVALUE/T_BCCLOSURE/T_ACTOR/\nT_MAILBOX races.\n\nVerified via the same TSan repro: reliable race before, 4/4 clean runs\nafter. ctest 127/127 passing; manual --gc generational smoke of\nactors_tests/r7rs_tests clean.\n\n\nClaude-Session: https://claude.ai/code/session_01Ct9329wat9ZDJ1Z975YKqm\n\nCo-authored-by: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-09T22:45:59+10:00",
+          "tree_id": "a3416c7fb0fc851892b3aab877938219136800f8",
+          "url": "https://github.com/deconstructo/curry/commit/04665d7a18f8c66c7819bd8e01e5085a12bc996c"
+        },
+        "date": 1788957994896,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.554,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 27.007,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.766,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.642,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 165.713,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 311.202,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.088,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 103.217,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 78.631,
             "unit": "ms"
           }
         ]
