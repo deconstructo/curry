@@ -867,7 +867,27 @@ void gc_gen_unregister_thread(void) {
 static pthread_mutex_t minor_gc_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void gc_gen_minor_collect(void) {
+    /* Issue #200 Phase B: a thread blocked here waiting to become the next
+     * collector (minor_gc_lock is already held by whichever thread is
+     * mid-collection) is NOT at a safepoint poll point any more -- it left
+     * L_DISPATCH/tail: to make this call. Without parking across the
+     * acquisition specifically, the ALREADY-collecting thread's own
+     * gc_gen_stop_the_world() (below) would wait forever for this thread
+     * to park, since this thread can't reach another poll point until it
+     * gets the lock, and it can't get the lock until the collector
+     * finishes -- which won't happen until its stop_the_world() wait is
+     * satisfied. Parking here breaks that cycle: this thread is excluded
+     * from the live-thread count for exactly as long as it's blocked
+     * waiting to become the collector, then re-included once it actually
+     * has the lock (at which point, if a stop-the-world happens to be
+     * active from some other collector that started in the meantime,
+     * gc_gen_thread_unpark()'s own gc_gen_safepoint() call correctly
+     * parks again -- impossible in practice since minor_gc_lock has at
+     * most one holder, so only the thread that itself just acquired it
+     * could be mid-stop_the_world, and a thread never waits on itself). */
+    gc_gen_thread_park();
     pthread_mutex_lock(&minor_gc_lock);
+    gc_gen_thread_unpark();
 
     collect_top = gc_nursery.top;
     if (collect_top == gc_nursery.base) {
@@ -887,6 +907,21 @@ void gc_gen_minor_collect(void) {
      * this region so Boehm defers any major collection until after we finish.
      */
     GC_disable();
+
+    /* Issue #200 Phase B: stop the world before ANY evacuation step, not just
+     * steps 6-8. TSan's stress repro (16 actors, --gc-nursery-size 4K)
+     * disproved the original placement here: step 3's root scan writes
+     * `*g_roots[i] = evacuate(*g_roots[i])`, and GLOBAL_ENV is one of those
+     * roots. Even though the EnvFrame it points to is pinned (so the write
+     * stores back the same pointer value), it is still an unsynchronized
+     * write racing every other actor thread's lock-free `load_global_cached`
+     * read of that same global -- a data race in the C memory model
+     * regardless of whether the value actually changes. Steps 1-2 (this
+     * thread's own shadow/VM stack) don't need protection on their own, but
+     * there's no benefit to carving them out of the bracket, and doing so
+     * previously hid this exact bug -- so the whole collection now runs
+     * start-to-finish between stop_the_world()/start_the_world(). */
+    gc_gen_stop_the_world();
 
     gc_evac_fn = gen_evac_fn;
     gc_fwd_fn  = gen_fwd_fn;
@@ -944,6 +979,31 @@ void gc_gen_minor_collect(void) {
      * since the last GC — fall back to a full pinned scan for correctness,
      * then compact.
      */
+    /* Issue #200 Phase B: steps 6-8 below are the ones that touch state
+     * genuinely reachable from more than one actor thread -- dirty tenured
+     * slots (mutations to promoted objects since the last cycle), pinned
+     * objects (EnvFrame/Module/Actor/Mailbox/Upvalue/... -- anything with
+     * gc_alloc_pinned's own val_t fields), and every registered ext
+     * scanner (rtab/atab, the module registry). Every one of those was,
+     * before this issue, scanned/evacuated here while every OTHER actor
+     * thread kept running and could concurrently mutate the exact same
+     * object -- the root cause behind #198/#150/#146/#200's own text and
+     * the four object types (T_UPVALUE/T_BCCLOSURE/T_ACTOR/T_MAILBOX)
+     * #200 found still unprotected after those three per-type fixes.
+     * Phase A (already landed) built the mechanism; the stop_the_world()
+     * call up near GC_disable() (see its own comment) is what actually
+     * engages it for the whole collection, steps 6-8 included: every other
+     * registered thread is genuinely paused (via gc_gen_safepoint()'s poll
+     * points in vm.c/eval.c) for the duration, so no concurrent mutation is
+     * possible regardless of object type -- closing the whole class at once
+     * rather than needing a bespoke lock per type. The existing per-type
+     * locks from #198/#150 (env_global_frame_lock_for_gc,
+     * modules_registry_*lock_for_gc) are now redundant under this bracket
+     * but are deliberately left in place rather than removed -- harmless
+     * defense-in-depth, and removing them is its own, separately-reviewable
+     * follow-up, not bundled into the PR that first activates
+     * stop-the-world. */
+
     if (gc_dirty_overflow) {
         pthread_mutex_lock(&pinned_lock);
         size_t pc = atomic_load_explicit(&pinned_count, memory_order_acquire);
@@ -990,6 +1050,11 @@ void gc_gen_minor_collect(void) {
     /* 8. Drain again (scanners may have promoted more objects) */
     while (wl_scan < wl_len)
         scan_object(worklist[wl_scan++].obj);
+
+    /* Issue #200 Phase B: every other thread resumes here -- see
+     * gc_gen_stop_the_world()'s own call site comment above for the full
+     * scope of what's protected between these two calls. */
+    gc_gen_start_the_world();
 
     gc_evac_fn = NULL;
     gc_fwd_fn  = NULL;
