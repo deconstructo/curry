@@ -729,6 +729,139 @@ static void scan_pinned_object(void *obj) {
 static uintptr_t gen_evac_fn(uintptr_t v) { return (uintptr_t)evacuate((val_t)v); }
 static void     *gen_fwd_fn(void *p)      { return evacuate_raw(p); }
 
+/* ── Safepoint: live thread count and stop-the-world handshake ───────────── */
+/*
+ * Issue #200 Phase A. Ported from gc_generational.c's safepoint core
+ * (gc_generational.c:181-242) -- that file is an orphaned, never-built
+ * earlier GC rewrite attempt (CMakeLists.txt only compiles gc.c and THIS
+ * file), but its stop-the-world mechanism itself is architecture-agnostic
+ * (it doesn't depend on that file's shared-nursery design) and is a clean
+ * fit here, adapted to this file's actually-live per-thread-nursery model
+ * and its own gc_inhibit_count (gc.c)/gc_minor_pending conventions rather
+ * than duplicating them.
+ *
+ * This section is PLUMBING ONLY -- gc_stop_world is never set to 1 by
+ * anything in this phase (that's Phase B, wiring it into
+ * gc_gen_minor_collect()'s pinned-object-scan window so a scan of any
+ * object reachable from more than one actor thread runs with every other
+ * actor genuinely paused, closing the whole class of race #198/#150/#200
+ * found piecemeal). Landing the plumbing on its own first: it's pure
+ * addition with no behavior change (gc_gen_safepoint() is an always-false
+ * fast-path check until Phase B), independently testable, and keeps this
+ * change reviewable at the size the rest of this session's core-touching
+ * work has been kept at.
+ *
+ * gc_gen_thread_count is the piece that didn't exist at all before this:
+ * gen_register_thread (below) sets up a thread's nursery but never
+ * tracked a live-thread count anywhere, and no actor-exit path called
+ * anything symmetric to unregister one (see gc_gen_unregister_thread's
+ * own comment). A safepoint's "has everyone else paused" wait needs an
+ * accurate count to wait against.
+ *
+ * gc_stop_world/gc_gen_parked_count/gc_gen_thread_count are _Atomic
+ * rather than plain, even though every real synchronization decision
+ * still happens under gc_stw_mutex/the condvars -- gc_gen_safepoint()'s
+ * fast path deliberately reads gc_stop_world OUTSIDE the mutex before
+ * falling back to the locked slow path (the whole point of a cheap
+ * poll), and a plain read racing a plain write from another thread is a
+ * data race by the letter of C11 regardless of what the mutex elsewhere
+ * guarantees -- the same class of issue #153/#198's fixes closed for
+ * GLOBAL_ENV's seqlock-protected fields, so the same fix applies here.
+ */
+static _Atomic int gc_gen_thread_count = 0;
+static _Atomic int gc_gen_parked_count = 0;
+static _Atomic int gc_stop_world       = 0;
+
+static pthread_mutex_t gc_stw_mutex  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  gc_stw_resume = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t  gc_stw_parked = PTHREAD_COND_INITIALIZER;
+
+/* Called from the same poll points gc_minor_pending's self-collection
+ * check already uses (vm.c's L_DISPATCH, eval.c's tail: label), under
+ * the same gc_inhibit_count == 0 gate -- see those call sites' own
+ * comments for why that gate is what makes this correct: a thread
+ * mid-primitive-call (which may transiently hold a subsystem lock this
+ * scan needs, e.g. rtab_lock/pinned_lock) is never asked to park until
+ * it returns here with the inhibit count back at zero, so
+ * gc_gen_stop_the_world()'s wait naturally waits out any in-flight
+ * critical section instead of racing it. */
+void gc_gen_safepoint(void) {
+    if (!atomic_load_explicit(&gc_stop_world, memory_order_relaxed)) return;
+    pthread_mutex_lock(&gc_stw_mutex);
+    if (atomic_load_explicit(&gc_stop_world, memory_order_relaxed)) {
+        atomic_fetch_add_explicit(&gc_gen_parked_count, 1, memory_order_relaxed);
+        pthread_cond_signal(&gc_stw_parked);
+        while (atomic_load_explicit(&gc_stop_world, memory_order_relaxed))
+            pthread_cond_wait(&gc_stw_resume, &gc_stw_mutex);
+        atomic_fetch_sub_explicit(&gc_gen_parked_count, 1, memory_order_relaxed);
+    }
+    pthread_mutex_unlock(&gc_stw_mutex);
+}
+
+/* Requester side: block until every OTHER live registered thread has
+ * reached gc_gen_safepoint() and parked (thread_count - 1, excluding the
+ * calling/requesting thread itself). Not yet called from anywhere in
+ * Phase A -- Phase B calls this around gc_gen_minor_collect()'s
+ * pinned-object-scan window. */
+void gc_gen_stop_the_world(void) {
+    pthread_mutex_lock(&gc_stw_mutex);
+    atomic_store_explicit(&gc_stop_world, 1, memory_order_relaxed);
+    /* Recompute the target each iteration: gc_gen_thread_park() can
+     * decrement gc_gen_thread_count while we wait (a thread that's about
+     * to block on a non-GC condvar doesn't need to reach a safepoint at
+     * all -- see its own comment), which signals gc_stw_parked so we
+     * re-check here rather than waiting on a target that's gone stale. */
+    while (atomic_load_explicit(&gc_gen_parked_count, memory_order_relaxed) <
+           atomic_load_explicit(&gc_gen_thread_count, memory_order_relaxed) - 1)
+        pthread_cond_wait(&gc_stw_parked, &gc_stw_mutex);
+}
+
+void gc_gen_start_the_world(void) {
+    atomic_store_explicit(&gc_stop_world, 0, memory_order_relaxed);
+    pthread_cond_broadcast(&gc_stw_resume);
+    pthread_mutex_unlock(&gc_stw_mutex);
+}
+
+/* Bracket a genuinely long/unbounded blocking call (mailbox receive, a
+ * blocking accept()/recv(), a work-queue park) with thread_park()/
+ * thread_unpark(): a thread parked in a real blocking OS wait never
+ * returns to a poll point on its own, so without this a
+ * gc_gen_stop_the_world() request would wait for it indefinitely (e.g.
+ * until a message arrives or a connection comes in, which may be never).
+ * Safe to exclude such a thread from the count entirely while it's
+ * blocked: it holds no Curry heap pointers that need protecting from a
+ * concurrent scan beyond what's already reachable through the pinned
+ * mailbox/socket object itself, since it isn't touching Curry objects at
+ * all while parked in the syscall/condvar wait. */
+void gc_gen_thread_park(void) {
+    pthread_mutex_lock(&gc_stw_mutex);
+    atomic_fetch_sub_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
+    pthread_cond_signal(&gc_stw_parked);
+    pthread_mutex_unlock(&gc_stw_mutex);
+}
+
+/* Re-register BEFORE calling gc_gen_safepoint(): if the safepoint call
+ * came first, a stop_the_world() that starts in the window between it
+ * returning and the count increment below would proceed without waiting
+ * for this (now-running-again) thread. Incrementing first means any such
+ * request either starts before the increment (and this thread's park()
+ * call already excluded it, correctly) or starts after (and now correctly
+ * waits for it via gc_gen_safepoint() below). */
+void gc_gen_thread_unpark(void) {
+    atomic_fetch_add_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
+    gc_gen_safepoint();
+}
+
+/* Actor exit has no symmetric call to gen_register_thread's nursery setup
+ * today (src/actors.c's cleanup path never called anything to undo it) --
+ * this doesn't reclaim the nursery slab (out of scope for Phase A, and
+ * Boehm already owns that memory via GC_MALLOC_UNCOLLECTABLE regardless),
+ * just keeps gc_gen_thread_count accurate so a future stop_the_world()'s
+ * wait target reflects threads that are actually still live. */
+void gc_gen_unregister_thread(void) {
+    atomic_fetch_sub_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
+}
+
 /* ── Minor GC ────────────────────────────────────────────────────────────── */
 
 static pthread_mutex_t minor_gc_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -941,6 +1074,13 @@ static void gen_register_thread(void) {
     GC_get_stack_base(&sb);
     GC_register_my_thread(&sb);
     alloc_thread_nursery();
+    /* Issue #200 Phase A: see gc_gen_thread_count's own declaration
+     * comment. Paired with gc_gen_unregister_thread(), this backend's
+     * gc_ops_t.unregister_thread implementation -- reached only through
+     * the backend-dispatched public gc_unregister_thread() (src/gc.c),
+     * called from every registered thread's exit path (src/actors.c,
+     * src/workpool.c, modules/mcp/mcp.c), never called directly. */
+    atomic_fetch_add_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
 }
 
 static void *gen_promote(void *obj, size_t bytes, bool has_ptrs) {
@@ -963,6 +1103,7 @@ gc_ops_t gc_gen_ops = {
     .alloc_raw_pinned  = gen_alloc_raw_pinned,
     .collect           = gen_collect,
     .register_thread   = gen_register_thread,
+    .unregister_thread = gc_gen_unregister_thread,
     .pin               = gen_pin,
     .unpin             = gen_unpin,
     .register_root     = gen_register_root,
@@ -991,6 +1132,12 @@ void gc_gen_init(size_t nursery_bytes) {
      * match (their Boehm allocations land outside this slab). */
     gc_main_nursery_base  = gc_nursery.base;
     gc_main_nursery_limit = gc_nursery.limit;
+
+    /* Issue #200 Phase A: the main thread never goes through
+     * gen_register_thread (it sets up its own nursery directly, above),
+     * so it needs its own count increment here to be included in
+     * gc_gen_thread_count -- see that variable's declaration comment. */
+    atomic_fetch_add_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
 }
 
 /*

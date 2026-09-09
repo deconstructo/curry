@@ -1134,12 +1134,19 @@ static val_t prim_tree_eval(int ac, val_t *av, void *ud) {
 
 static int map_par_threshold = 8;
 
-/* Shared wait pattern: submit, wait, check errors. */
+/* Shared wait pattern: submit, wait, check errors.
+ * Issue #200 Phase A: the submitting thread's wait here is unbounded from
+ * the GC's perspective (worker completion time isn't known in advance) --
+ * park so a future GC safepoint doesn't wait on this thread meanwhile. */
 #define POOL_WAIT(n_done_var, nchunks_var, done_mutex_var, done_cond_var) \
     do { \
         pthread_mutex_lock(&(done_mutex_var)); \
-        while (atomic_load(&(n_done_var)) < (nchunks_var)) \
-            pthread_cond_wait(&(done_cond_var), &(done_mutex_var)); \
+        if (atomic_load(&(n_done_var)) < (nchunks_var)) { \
+            gc_gen_thread_park(); \
+            while (atomic_load(&(n_done_var)) < (nchunks_var)) \
+                pthread_cond_wait(&(done_cond_var), &(done_mutex_var)); \
+            gc_gen_thread_unpark(); \
+        } \
         pthread_mutex_unlock(&(done_mutex_var)); \
         pthread_mutex_destroy(&(done_mutex_var)); \
         pthread_cond_destroy(&(done_cond_var)); \

@@ -43,6 +43,17 @@ static void  boehm_register_thread(void) {
     GC_get_stack_base(&sb);
     GC_register_my_thread(&sb);
 }
+/* Issue #200 Phase A: no-op counterpart to gen_unregister_thread's real
+ * live-thread-count decrement (src/gc_gen.c) -- Boehm has no such count to
+ * keep accurate. Needed as its own vtable slot (not just a direct call to
+ * the generational-only decrement from every register_thread() call site)
+ * because register_thread() is itself already backend-dispatched: a
+ * direct, ungated call to the generational decrement from a caller like
+ * actors.c/workpool.c would run under EVERY backend including this one,
+ * silently driving gc_gen_thread_count negative on every actor/worker
+ * exit under the (default) Boehm backend, where nothing ever incremented
+ * it in the first place. */
+static void  boehm_unregister_thread(void) {}
 /* Boehm is conservative — pin/unpin and root registration are no-ops. */
 static void  boehm_pin(void *obj)              { (void)obj; }
 static void  boehm_unpin(void *obj)            { (void)obj; }
@@ -61,6 +72,7 @@ static gc_ops_t gc_boehm_ops = {
     .alloc_raw_pinned  = boehm_alloc_raw_pinned,
     .collect           = boehm_collect,
     .register_thread   = boehm_register_thread,
+    .unregister_thread = boehm_unregister_thread,
     .pin               = boehm_pin,
     .unpin             = boehm_unpin,
     .register_root     = boehm_register_root,
@@ -399,6 +411,10 @@ void gc_init(void) {
 
 void gc_register_thread(void) {
     gc_ops->register_thread();
+}
+
+void gc_unregister_thread(void) {
+    gc_ops->unregister_thread();
 }
 
 void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd) {

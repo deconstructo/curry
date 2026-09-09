@@ -125,9 +125,24 @@ static void mailbox_push(Mailbox *m, val_t msg, Actor *target) {
 static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
     pthread_mutex_lock(&m->mutex);
     if (timeout_ms < 0) {
-        while (m->q.head == m->q.tail)
-            pthread_cond_wait(&m->cond, &m->mutex);
-    } else {
+        if (m->q.head == m->q.tail) {
+            /* Issue #200 Phase A: this can block for an unbounded time
+             * (no message ever arrives) -- park so a future
+             * gc_gen_stop_the_world() doesn't wait on this thread for as
+             * long as that takes. Safe: this thread touches no Curry
+             * heap pointers while blocked here beyond what the pinned
+             * Mailbox object itself already exposes. */
+            gc_gen_thread_park();
+            while (m->q.head == m->q.tail)
+                pthread_cond_wait(&m->cond, &m->mutex);
+            gc_gen_thread_unpark();
+        }
+    } else if (m->q.head == m->q.tail) {
+        /* Bounded by timeout_ms, but still park -- the timeout can be
+         * arbitrarily long, and there's no reason to make a
+         * stop-the-world request wait out someone else's receive
+         * timeout when this thread isn't touching Curry objects. */
+        gc_gen_thread_park();
         while (m->q.head == m->q.tail) {
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -136,10 +151,12 @@ static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
             if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
             int rc = pthread_cond_timedwait(&m->cond, &m->mutex, &ts);
             if (rc != 0 && m->q.head == m->q.tail) {
+                gc_gen_thread_unpark();
                 pthread_mutex_unlock(&m->mutex);
                 return V_FALSE;  /* timeout */
             }
         }
+        gc_gen_thread_unpark();
     }
     val_t msg = m->q.msgs[m->q.head];
     m->q.head = (m->q.head + 1) % m->q.cap;
@@ -217,6 +234,12 @@ static void *actor_thread(void *arg) {
      * to leak one allocation per actor spawned from an active load
      * context (i.e. nearly every actor in practice). */
     load_dir_release(0);
+
+    /* Issue #200 Phase A: symmetric with gc_register_thread() at this
+     * thread's entry (top of actor_thread) -- keeps gc_gen_thread_count
+     * accurate now that a thread count actually exists to keep accurate.
+     * See gc.h's own comment on this function. */
+    gc_unregister_thread();
 
     vm_free();
     pthread_cleanup_pop(1);

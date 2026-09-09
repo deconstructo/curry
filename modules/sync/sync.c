@@ -154,7 +154,11 @@ static curry_val fn_cond_wait(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     pthread_cond_t  *cv = get_cond(av[0], "cond-wait!");
     pthread_mutex_t *m  = get_mutex(av[1], "cond-wait!");
+    /* Issue #200 Phase A: an untimed wait can block indefinitely -- park
+     * so a future GC safepoint doesn't wait on this thread meanwhile. */
+    curry_gc_thread_park();
     pthread_cond_wait(cv, m);
+    curry_gc_thread_unpark();
     return curry_void();
 }
 /* (cond-wait-timeout! cv mutex seconds) → #t signalled, #f timed out */
@@ -169,7 +173,11 @@ static curry_val fn_cond_wait_timeout(int ac, curry_val *av, void *ud) {
     ts.tv_sec  += (time_t)secs;
     ts.tv_nsec += (long)((secs - (long)secs) * 1e9);
     if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+    /* Issue #200 Phase A: bounded by the timeout, but that can still be
+     * arbitrarily long -- see fn_cond_wait's identical comment. */
+    curry_gc_thread_park();
     int rc = pthread_cond_timedwait(cv, m, &ts);
+    curry_gc_thread_unpark();
     return curry_make_bool(rc != ETIMEDOUT);
 }
 static curry_val fn_cond_signal(int ac, curry_val *av, void *ud) {
@@ -220,7 +228,13 @@ static curry_val fn_sem_wait(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     ScmSem *s = get_sem(av[0], "sem-wait!");
     pthread_mutex_lock(&s->mtx);
-    while (s->count == 0) pthread_cond_wait(&s->cnd, &s->mtx);
+    if (s->count == 0) {
+        /* Issue #200 Phase A: can block indefinitely -- see fn_cond_wait's
+         * identical comment. */
+        curry_gc_thread_park();
+        while (s->count == 0) pthread_cond_wait(&s->cnd, &s->mtx);
+        curry_gc_thread_unpark();
+    }
     s->count--;
     pthread_mutex_unlock(&s->mtx);
     return curry_void();

@@ -104,12 +104,21 @@ static curry_val fn_tcp_connect(int ac, curry_val *av, void *ud) {
     struct addrinfo hints = {0}, *res;
     hints.ai_family   = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port_str, &hints, &res) != 0)
+    /* Issue #200 Phase A: DNS resolution and connect() can both block for
+     * a while (resolver timeout, TCP connect timeout) -- park across both
+     * so a future GC safepoint doesn't wait on this thread meanwhile. */
+    curry_gc_thread_park();
+    int gai_rc = getaddrinfo(host, port_str, &hints, &res);
+    curry_gc_thread_unpark();
+    if (gai_rc != 0)
         curry_error("tcp-connect: could not resolve %s", host);
 
     sock_t fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd == SOCK_INVALID) { freeaddrinfo(res); curry_error("tcp-connect: socket failed"); }
-    if (connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0) {
+    curry_gc_thread_park();
+    int connect_rc = connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen);
+    curry_gc_thread_unpark();
+    if (connect_rc != 0) {
         sock_close(fd); freeaddrinfo(res);
         curry_error("tcp-connect: connect failed");
     }
@@ -176,7 +185,12 @@ static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
     (void)ud; (void)ac;
     sock_t server = net_checked_val_to_sock(av[0], "tcp-accept");
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+    /* Issue #200 Phase A: accept() can block indefinitely waiting for an
+     * incoming connection -- park so a future GC safepoint doesn't wait
+     * on this thread for as long as that takes (see curry.h's comment). */
+    curry_gc_thread_park();
     sock_t client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
+    curry_gc_thread_unpark();
     if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
 
     /* Port pair, same rationale (and same fd-leak-on-fdopen-failure fix)
@@ -267,8 +281,11 @@ static curry_val fn_udp_recv(int ac, curry_val *av, void *ud) {
     uint8_t *buf = malloc((size_t)maxbytes);
     if (!buf) curry_error("udp-recv: out of memory");
     struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+    /* Issue #200 Phase A: can block indefinitely with nothing incoming. */
+    curry_gc_thread_park();
     ssize_t n = recvfrom((int)fd, buf, (size_t)maxbytes, 0,
                           (struct sockaddr *)&addr, &addrlen);
+    curry_gc_thread_unpark();
     if (n < 0) { free(buf); curry_error("udp-recv: recvfrom failed"); }
     curry_val bv = curry_make_bytevector((uint32_t)n, 0);
     for (ssize_t i = 0; i < n; i++) curry_bytevector_set(bv, (uint32_t)i, buf[i]);

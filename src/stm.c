@@ -181,8 +181,13 @@ static void tx_wait_for_change(TxState *tx) {
     }
 
     pthread_mutex_lock(&g_retry_mx);
+    /* Issue #200 Phase A: can block indefinitely until some other
+     * transaction commits a change -- park so a future GC safepoint
+     * doesn't wait on this thread meanwhile. */
+    gc_gen_thread_park();
     while (atomic_load_explicit(&g_vclock, memory_order_acquire) == snap_ver)
         pthread_cond_wait(&g_retry_cv, &g_retry_mx);
+    gc_gen_thread_unpark();
     pthread_mutex_unlock(&g_retry_mx);
 
     for (size_t i = 0; i < tx->rlen; i++) {

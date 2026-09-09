@@ -819,6 +819,12 @@ static void handle_sse_get(int fd) {
      * concurrent write failure on the POST side.
      * Use nanosleep with EINTR retry so Boehm GC signals (stop-the-world)
      * don't truncate the 15-second interval and fire a premature keepalive. */
+    /* Issue #200 Phase A: this loop blocks (in nanosleep, then whatever
+     * time the client takes to keep the socket alive) for the life of
+     * the SSE connection, which is meant to last indefinitely -- park
+     * for the whole loop, not per iteration, since nothing here touches
+     * Curry heap state either way. */
+    curry_gc_thread_park();
     while (true) {
         struct timespec ts = {15, 0}, rem;
         while (nanosleep(&ts, &rem) < 0 && errno == EINTR) ts = rem;
@@ -833,6 +839,7 @@ static void handle_sse_get(int fd) {
         pthread_mutex_unlock(&sess->wlock);
         if (!alive) break;
     }
+    curry_gc_thread_unpark();
 
 done:
     pthread_mutex_lock(&sess->wlock);
@@ -907,14 +914,22 @@ static void *conn_thread(void *arg) {
     vm_init();
 
     HttpReq req;
-    if (!http_recv(fd, &req)) { close(fd); return NULL; }
+    /* Issue #200 Phase A: http_recv can block indefinitely waiting for a
+     * slow/idle client -- park across the whole read, not each individual
+     * recv() inside it (fd_read_line reads one byte at a time; bracketing
+     * every syscall would mean a park/unpark pair, and the global
+     * gc_stw_mutex they take, per byte). */
+    curry_gc_thread_park();
+    bool got_req = http_recv(fd, &req);
+    curry_gc_thread_unpark();
+    if (!got_req) { close(fd); goto out; }
 
     /* OPTIONS preflight carries no credentials — bypass auth for CORS. */
     if (strcmp(req.method, "OPTIONS") == 0) {
         send(fd, CORS_PREFLIGHT, strlen(CORS_PREFLIGHT), MSG_NOSIGNAL);
         close(fd);
         free(req.body);
-        return NULL;
+        goto out;
     }
 
     /* POST /token is the unauthenticated token-issuance endpoint (mode A). */
@@ -924,18 +939,20 @@ static void *conn_thread(void *arg) {
         mcp_auth_handle_token_endpoint(fd, req.body ? req.body : "", req.body_len);
         close(fd);
         free(req.body);
-        return NULL;
+        goto out;
     }
 
     /* All other endpoints require a valid Bearer token. */
-    const char *bearer = extract_bearer(req.auth);
-    if (!mcp_auth_validate(bearer)) {
-        send_unauthorized(fd,
-            bearer[0] ? "invalid_token" : NULL,
-            bearer[0] ? "The access token is invalid or has expired" : NULL);
-        close(fd);
-        free(req.body);
-        return NULL;
+    {
+        const char *bearer = extract_bearer(req.auth);
+        if (!mcp_auth_validate(bearer)) {
+            send_unauthorized(fd,
+                bearer[0] ? "invalid_token" : NULL,
+                bearer[0] ? "The access token is invalid or has expired" : NULL);
+            close(fd);
+            free(req.body);
+            goto out;
+        }
     }
 
     if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/sse") == 0) {
@@ -948,6 +965,13 @@ static void *conn_thread(void *arg) {
     }
 
     free(req.body);
+out:
+    /* Issue #200 Phase A: symmetric with gc_register_thread() above --
+     * every exit path funnels through here so gc_gen_thread_count stays
+     * accurate (a leaked count per connection would eventually make a
+     * future stop-the-world request wait forever on threads that no
+     * longer exist). */
+    gc_unregister_thread();
     return NULL;
 }
 
@@ -1005,6 +1029,10 @@ static curry_val fn_mcp_serve_sse(int ac, curry_val *av, void *ud) {
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
+    /* Issue #200 Phase A: accept() blocks indefinitely between incoming
+     * connections -- park across the whole loop, not per-iteration
+     * (matches the doc comment above: "blocks forever"). */
+    curry_gc_thread_park();
     while (true) {
         int fd = accept(srv, NULL, NULL);
         if (fd < 0) continue;
@@ -1013,6 +1041,7 @@ static curry_val fn_mcp_serve_sse(int ac, curry_val *av, void *ud) {
         pthread_t tid;
         pthread_create(&tid, &attr, conn_thread, ca);
     }
+    curry_gc_thread_unpark();
 
     pthread_attr_destroy(&attr);
     close(srv);

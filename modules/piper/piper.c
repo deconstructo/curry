@@ -621,8 +621,15 @@ static curry_val fn_piper_wait(int ac, curry_val *av, void *ud) {
     PiperPlayback *pb = (PiperPlayback *)val_to_ptr(av[0]);
 
     pthread_mutex_lock(&pb->lock);
-    while (!pb->done)
-        pthread_cond_wait(&pb->cond, &pb->lock);
+    if (!pb->done) {
+        /* Issue #200 Phase A: audio playback duration is unbounded from
+         * the GC's perspective -- park so a future safepoint doesn't wait
+         * on this thread for as long as that takes. */
+        curry_gc_thread_park();
+        while (!pb->done)
+            pthread_cond_wait(&pb->cond, &pb->lock);
+        curry_gc_thread_unpark();
+    }
     bool had_error = pb->had_error;
     char msg[256];
     if (had_error) memcpy(msg, pb->error_msg, sizeof(msg));
