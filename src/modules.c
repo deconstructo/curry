@@ -736,10 +736,29 @@ val_t modules_define_library(val_t form, val_t env) {
     val_t name = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
+    val_t clause = V_NIL;
     bool  has_exports = false;
+    /* Issue #217: name/exports/lib_env/rest/clause are C locals that live
+     * across the whole clause-processing loop below -- including, via the
+     * S_BEGIN branch of define_library_clause, vm_eval() calls that run a
+     * library's own body forms (arbitrary, allocation-heavy user code).
+     * eval()'s own GC_AUTOFRAME only protects ITS four slots (expr/env/op/
+     * rest); it does not extend to values a callee (this function) pulls
+     * out of expr and holds in its own locals afterward. Without this
+     * frame, a minor collection firing during any later clause's
+     * processing (most obviously the begin-body vm_eval calls, but
+     * define_library_clause's own scm_cons calls building up `exports`
+     * qualify too) can relocate whatever name/exports/clause/rest
+     * currently point at without this function ever finding out. This is a
+     * real, independent hazard closed here -- but it is NOT the cause of
+     * #217's own "unknown GC:MOVE type" crash: that reproduces identically
+     * with this frame in place (see #217's own thread for the follow-up
+     * investigation). Keep both this fix and that issue open; they are
+     * separate gaps in the same area. */
+    GC_AUTOFRAME(5, &name, &lib_env, &exports, &rest, &clause);
 
     while (vis_pair(rest)) {
-        val_t clause = vcar(rest); rest = vcdr(rest);
+        clause = vcar(rest); rest = vcdr(rest);
         define_library_clause(clause, &exports, &has_exports, lib_env);
     }
     (void)env;
@@ -763,10 +782,18 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
     val_t name = vcar(rest);   rest = vcdr(rest);
     val_t lib_env = env_new_root();
     val_t exports = V_NIL;
+    val_t clause = V_NIL;
     bool  has_exports = false;
+    /* Issue #217: same hazard as modules_define_library's own GC_AUTOFRAME
+     * comment -- name/exports/lib_env/rest/clause are C locals held live
+     * across this function's own vm_eval() calls (inline body forms) and
+     * scm_cons() calls (building exports), neither of which this
+     * function's own C stack frame is otherwise visible to a minor
+     * collection. */
+    GC_AUTOFRAME(5, &name, &lib_env, &exports, &rest, &clause);
 
     while (vis_pair(rest)) {
-        val_t clause = vcar(rest); rest = vcdr(rest);
+        clause = vcar(rest); rest = vcdr(rest);
         if (!vis_pair(clause)) {
             vm_eval(clause, lib_env);
             continue;

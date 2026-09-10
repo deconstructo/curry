@@ -280,9 +280,12 @@ static size_t obj_size(const Hdr *h) {
         fprintf(stderr, "[gc_gen] FATAL: obj_size overflow for type %u at %p\n",
                 h->type, (const void *)h);
         abort();
-    default:
-        fprintf(stderr, "[gc_gen] FATAL: unknown GC:MOVE type %u at %p\n",
-                h->type, (const void *)h);
+    default: {
+        unsigned long raw[3];
+        memcpy(raw, h, sizeof(raw));
+        fprintf(stderr, "[gc_gen] FATAL: unknown GC:MOVE type %u at %p raw=[0x%lx,0x%lx,0x%lx]\n",
+                h->type, (const void *)h, raw[0], raw[1], raw[2]);
+    }
         /* Dump last 16 nursery allocations */
         {
             fprintf(stderr, "[gc_gen] last nursery allocations (oldest→newest):\n");
