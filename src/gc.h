@@ -557,28 +557,41 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
 /*
  * gc_wb_slot_atomic_relaxed — issue #153: same write-barrier bookkeeping
  * as gc_wb_slot, but the actual store is an atomic-relaxed store instead
- * of a plain `*slot = newval`. Use ONLY for a slot that a lock-free
- * reader on another thread can observe without holding any lock -- today
- * that means exactly one thing: GLOBAL_ENV (or another root EnvFrame)'s
- * vals[] array, written from env.c's frame_set_unlocked/
- * frame_define_unlocked (the global-frame branch) and vm.c's
- * OP_STORE_GLOBAL. Every other gc_wb_slot call site (pairs, vectors,
- * local-frame fields, ...) stays on the plain version: those objects are
- * single-thread-owned (see env.c's own top-of-file comment on why local
- * frames never need this), so there is no concurrent reader to protect
- * against and no reason to pay for an atomic store.
+ * of a plain `*slot = newval`. Use for a slot that a lock-free reader on
+ * another thread can observe without holding any lock -- today that's
+ * GLOBAL_ENV (or another root EnvFrame)'s vals[] array, written from
+ * env.c's frame_set_unlocked/frame_define_unlocked (the global-frame
+ * branch) and vm.c's OP_STORE_GLOBAL; and (issue #210) src/stm.c's
+ * TVar.value, written from tx_commit and stm_tvar_write's no-current-
+ * transaction path and read lock-free by stm_tvar_read. Every other
+ * gc_wb_slot call site (pairs, vectors, local-frame fields, ...) stays
+ * on the plain version: those objects are single-thread-owned (see
+ * env.c's own top-of-file comment on why local frames never need this),
+ * so there is no concurrent reader to protect against and no reason to
+ * pay for an atomic store.
  *
  * Relaxed suffices (not acquire/release) because the ordering readers
- * actually need comes from the SEPARATE seqlock version counter
- * (env.c's seq_begin_write/seq_end_write, unchanged by this fix) for the
- * structural (grow/rehash) case, or is simply "read old or new value,
- * both are live, never torn" for the direct value-update case (frame_set/
- * OP_STORE_GLOBAL never bump version at all -- this store's only job is
- * to stop the write from being UB-by-definition against a concurrent
- * plain read, not to add ordering the seqlock doesn't already provide).
+ * actually need comes from a SEPARATE version/seqlock counter each
+ * caller already maintains (env.c's seq_begin_write/seq_end_write for
+ * the structural grow/rehash case; stm.c's per-TVar `version`, released
+ * right after this store in both tx_commit and stm_tvar_write, for the
+ * TL2 case) -- this store's only job is to stop the write from being
+ * UB-by-definition against a concurrent plain read, not to add ordering
+ * the caller's own protocol doesn't already provide.
+ *
+ * gc_dirty_slots/gc_dirty_count bookkeeping below assumes its caller is
+ * always the MAIN thread -- true for env.c/vm.c's call sites (only the
+ * main thread's own top-level code produces nursery pointers in the
+ * first place, per this header's own gc_dirty_slots comment above), but
+ * NOT provably true for stm.c: an actor thread can commit a value it
+ * merely references (e.g. one it read out of GLOBAL_ENV or received in
+ * a message) that still happens to be main-thread-nursery-resident, into
+ * a TVar, hitting this bookkeeping from a non-main thread. Whether that's
+ * a live, exploitable gap (vs. some other invariant ruling it out) wasn't
+ * fully chased down when #210 added this second call site -- see #213.
  *
  * C-only (see the stdatomic.h include guard above): no C++ TU in this
- * codebase touches GLOBAL_ENV's seqlock-protected slots directly. */
+ * codebase touches GLOBAL_ENV's/TVar's seqlock-protected slots directly. */
 #ifndef __cplusplus
 static inline void gc_wb_slot_atomic_relaxed(val_t *slot, val_t newval) {
     atomic_store_explicit((_Atomic val_t *)slot, newval, memory_order_relaxed);

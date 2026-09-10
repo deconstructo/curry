@@ -152,7 +152,20 @@ static bool tx_commit(TxState *tx) {
 
     for (size_t i = 0; i < tx->wlen; i++) {
         TVar *tv  = tx->wset[i].tv;
-        gc_wb_slot(&tv->value, tx->wset[i].val);
+        /* Issue #210: tv->value is read lock-free by stm_tvar_read (both
+         * the in-transaction TL2 seqlock path and the no-current-
+         * transaction fast path below) -- gc_wb_slot's plain `*slot =
+         * newval` write, done here under tv->lock but with no
+         * synchronization visible to those lock-free readers, is a
+         * genuine data race under the C11 memory model regardless of the
+         * version-based seqlock logic layered on top (same shape #153
+         * fixed for GLOBAL_ENV's EnvFrame.vals[]). gc_wb_slot_atomic_relaxed
+         * is that exact fix, reused here: same write-barrier bookkeeping,
+         * atomic-relaxed store instead of a plain one. Relaxed suffices
+         * for the same reason it did for #153 -- the real ordering
+         * readers need comes from the separate version counter
+         * (write_ver, released just below), not from this store itself. */
+        gc_wb_slot_atomic_relaxed(&tv->value, tx->wset[i].val);
         atomic_store_explicit(
             (_Atomic uint64_t *)&tv->version, write_ver, memory_order_release);
     }
@@ -221,8 +234,17 @@ val_t stm_tvar_read(val_t v) {
     TVar    *tv = as_tvar(v);
     TxState *tx = current_tx;
 
+    /* Issue #210: plain reads of tv->value here and below raced tx_commit's
+     * (and the no-transaction stm_tvar_write's) write to the same field --
+     * see gc_wb_slot_atomic_relaxed's call site in tx_commit for the full
+     * writer-side reasoning. Matching relaxed atomic load on the reader
+     * side is what makes the pairing well-defined; it adds no ordering
+     * beyond what's already there; the version-based checks below (and,
+     * for this no-transaction case, the caller's own lack of any ordering
+     * requirement beyond "some committed value") are what any real
+     * consistency guarantee actually comes from. */
     if (!tx)
-        return tv->value;
+        return atomic_load_explicit((_Atomic val_t *)&tv->value, memory_order_relaxed);
 
     val_t pending = wset_lookup(tx, tv);
     if (pending != V_UNDEF) return pending;
@@ -246,7 +268,7 @@ val_t stm_tvar_read(val_t v) {
     if (ver > tx->read_ver)
         stm_retry();
 
-    val_t val = tv->value;
+    val_t val = atomic_load_explicit((_Atomic val_t *)&tv->value, memory_order_relaxed);
 
     uint64_t ver2 = atomic_load_explicit(
         (_Atomic uint64_t *)&tv->version, memory_order_acquire);
@@ -265,7 +287,9 @@ void stm_tvar_write(val_t v, val_t val) {
 
     if (!tx) {
         pthread_mutex_lock(&tv->lock);
-        gc_wb_slot(&tv->value, val);
+        /* Issue #210: same race as tx_commit's write -- see its call site
+         * for the full reasoning. */
+        gc_wb_slot_atomic_relaxed(&tv->value, val);
         atomic_fetch_add_explicit(&g_vclock, 1, memory_order_acq_rel);
         uint64_t new_ver = atomic_load_explicit(&g_vclock, memory_order_acquire);
         atomic_store_explicit(
