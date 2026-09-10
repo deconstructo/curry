@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788957995757,
+  "lastUpdate": 1788998434844,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13592,6 +13592,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.631,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6bf689440c21d4d8b2eb87182b77ffedd40a9f67",
+          "message": "Merge pull request #209 from deconstructo/modules-import-203-snapshot\n\nfix(modules,docs): snapshot export list under lock (#203) + INSTALL.md module docs",
+          "timestamp": "2026-09-10T09:59:55+10:00",
+          "tree_id": "4de97cd3690e565c50e1cb9f472423e9344c2d1f",
+          "url": "https://github.com/deconstructo/curry/commit/6bf689440c21d4d8b2eb87182b77ffedd40a9f67"
+        },
+        "date": 1788998433776,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.459,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 25.743,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.119,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.258,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 157.177,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 306.182,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 67.129,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.868,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 74.689,
             "unit": "ms"
           }
         ]
