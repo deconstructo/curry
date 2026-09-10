@@ -798,11 +798,13 @@ void gc_gen_safepoint(void) {
 void gc_gen_stop_the_world(void) {
     pthread_mutex_lock(&gc_stw_mutex);
     atomic_store_explicit(&gc_stop_world, 1, memory_order_relaxed);
-    /* Recompute the target each iteration: gc_gen_thread_park() can
-     * decrement gc_gen_thread_count while we wait (a thread that's about
-     * to block on a non-GC condvar doesn't need to reach a safepoint at
-     * all -- see its own comment), which signals gc_stw_parked so we
-     * re-check here rather than waiting on a target that's gone stale. */
+    /* Recompute the target each iteration: gc_gen_thread_park() and
+     * gc_gen_unregister_thread() can both decrement gc_gen_thread_count
+     * while we wait (a thread that's about to block on a non-GC condvar,
+     * or that's exiting for good, doesn't need to reach a safepoint at
+     * all -- see their own comments), each signaling gc_stw_parked when
+     * they do, so we re-check here rather than waiting on a target
+     * that's gone stale. */
     while (atomic_load_explicit(&gc_gen_parked_count, memory_order_relaxed) <
            atomic_load_explicit(&gc_gen_thread_count, memory_order_relaxed) - 1)
         pthread_cond_wait(&gc_stw_parked, &gc_stw_mutex);
@@ -811,6 +813,32 @@ void gc_gen_stop_the_world(void) {
 void gc_gen_start_the_world(void) {
     atomic_store_explicit(&gc_stop_world, 0, memory_order_relaxed);
     pthread_cond_broadcast(&gc_stw_resume);
+    pthread_mutex_unlock(&gc_stw_mutex);
+}
+
+/* Shared by gc_gen_thread_park() and gc_gen_unregister_thread(): both need
+ * to decrement gc_gen_thread_count and signal gc_stw_parked under
+ * gc_stw_mutex, for the identical reason -- gc_gen_stop_the_world()'s wait
+ * predicate (parked_count < thread_count - 1) is a function of this
+ * counter, so any decrement can be the one that satisfies an already-
+ * blocked collector's wait, and pairing the mutation with the signal under
+ * the mutex the waiter also holds during pthread_cond_wait is what makes
+ * that race-free. Issue #208: gc_gen_unregister_thread() used to skip the
+ * signal half of this (a plain atomic decrement, no mutex, no signal) --
+ * a classic missed-wakeup, confirmed via targeted tracing (register/park/
+ * unpark/unregister events plus parked_count/thread_count at each
+ * transition): thread_count dropped via exactly that unsignaled path
+ * while a collector sat blocked in pthread_cond_wait with its predicate
+ * already satisfied, and it never woke up -- reproduced as a genuine hang
+ * (confirmed via sustained near-zero CPU usage, not just slowness) under
+ * nested actor spawn combined with dynamic define-library/import. Having
+ * both call sites share one implementation, rather than hand-duplicating
+ * this exact lock/decrement/signal/unlock sequence, is what keeps them
+ * from drifting apart into this same bug again later. */
+static void gc_gen_thread_leave(void) {
+    pthread_mutex_lock(&gc_stw_mutex);
+    atomic_fetch_sub_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
+    pthread_cond_signal(&gc_stw_parked);
     pthread_mutex_unlock(&gc_stw_mutex);
 }
 
@@ -826,10 +854,7 @@ void gc_gen_start_the_world(void) {
  * mailbox/socket object itself, since it isn't touching Curry objects at
  * all while parked in the syscall/condvar wait. */
 void gc_gen_thread_park(void) {
-    pthread_mutex_lock(&gc_stw_mutex);
-    atomic_fetch_sub_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
-    pthread_cond_signal(&gc_stw_parked);
-    pthread_mutex_unlock(&gc_stw_mutex);
+    gc_gen_thread_leave();
 }
 
 /* Re-register BEFORE calling gc_gen_safepoint(): if the safepoint call
@@ -849,9 +874,11 @@ void gc_gen_thread_unpark(void) {
  * this doesn't reclaim the nursery slab (out of scope for Phase A, and
  * Boehm already owns that memory via GC_MALLOC_UNCOLLECTABLE regardless),
  * just keeps gc_gen_thread_count accurate so a future stop_the_world()'s
- * wait target reflects threads that are actually still live. */
+ * wait target reflects threads that are actually still live. See
+ * gc_gen_thread_leave()'s own comment (issue #208) for why this must
+ * signal gc_stw_parked, not just decrement the counter. */
 void gc_gen_unregister_thread(void) {
-    atomic_fetch_sub_explicit(&gc_gen_thread_count, 1, memory_order_relaxed);
+    gc_gen_thread_leave();
 }
 
 /* ── Minor GC ────────────────────────────────────────────────────────────── */
