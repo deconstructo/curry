@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789035638785,
+  "lastUpdate": 1789038938805,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13868,6 +13868,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 88.787,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3c54381750869784b80506ef9af46e9795c01cea",
+          "message": "Merge pull request #216 from deconstructo/gc-dirty-lock-213\n\nfix(gc): lock gc_dirty_slots/gc_dirty_count bookkeeping (#213)",
+          "timestamp": "2026-09-10T21:14:57+10:00",
+          "tree_id": "0f43ad1066b9ecb0578222009015d50761f2fec1",
+          "url": "https://github.com/deconstructo/curry/commit/3c54381750869784b80506ef9af46e9795c01cea"
+        },
+        "date": 1789038937702,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.829,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 27.197,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.781,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 31.97,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 165.838,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 309.073,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.052,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 100.189,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.331,
             "unit": "ms"
           }
         ]
