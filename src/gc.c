@@ -118,13 +118,18 @@ size_t    gc_card_table_ncards = 0;
  * gc_dirty_slots is allocated by gc_gen_init() and stays NULL under Boehm,
  * causing gc_wb_slot to reduce to a bare assignment.
  * gc_main_nursery_base/limit are set once in gc_gen_init to the main thread's
- * nursery slab bounds; gc_wb_slot uses these globals instead of TLS gc_nursery
- * so that actor/worker threads never trigger dirty-slot recording. */
+ * nursery slab bounds; gc_wb_slot's range check against them ensures this
+ * bookkeeping never fires for a value an actor/worker thread itself
+ * allocated (those always go straight to Boehm, per gc_inhibit) -- but does
+ * NOT ensure only the main thread ever executes the bookkeeping itself, since
+ * any thread can write a value that's still main-thread-nursery-resident
+ * (issue #213); gc_dirty_lock is what actually makes concurrent callers safe. */
 val_t  **gc_dirty_slots      = NULL;
 size_t   gc_dirty_count      = 0;
 bool     gc_dirty_overflow   = false;
 uint8_t *gc_main_nursery_base  = NULL;
 uint8_t *gc_main_nursery_limit = NULL;
+pthread_mutex_t gc_dirty_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ── GC statistics ──────────────────────────────────────────────────────────── */
 
