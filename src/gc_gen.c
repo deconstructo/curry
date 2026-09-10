@@ -1023,7 +1023,11 @@ void gc_gen_minor_collect(void) {
      * follow-up, not bundled into the PR that first activates
      * stop-the-world. */
 
-    if (gc_dirty_overflow) {
+    pthread_mutex_lock(&gc_dirty_lock);
+    bool dirty_overflow_snapshot = gc_dirty_overflow;
+    pthread_mutex_unlock(&gc_dirty_lock);
+
+    if (dirty_overflow_snapshot) {
         pthread_mutex_lock(&pinned_lock);
         size_t pc = pinned_count;
         void **slots = pinned_slots;
@@ -1036,9 +1040,18 @@ void gc_gen_minor_collect(void) {
         pinned_stable = 0;
         pthread_mutex_unlock(&pinned_lock);
     } else {
-        /* Update the recorded dirty slots in-place. */
+        /* Update the recorded dirty slots in-place. Issue #213: gc_dirty_lock
+         * held here to match "always touched under this lock" now that
+         * gc_wb_slot/gc_wb_slot_atomic_relaxed's bookkeeping isn't provably
+         * main-thread-only -- see gc_dirty_lock's own declaration comment.
+         * Not strictly required for THIS particular read given issue #200
+         * Phase B's stop-the-world already excludes every other thread by
+         * the time this runs, but costs nothing extra on the already-rare
+         * collection path. */
+        pthread_mutex_lock(&gc_dirty_lock);
         for (size_t i = 0; i < gc_dirty_count; i++)
             *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
+        pthread_mutex_unlock(&gc_dirty_lock);
         /* Scan new pinned objects (those added since the last compact). */
         pthread_mutex_lock(&pinned_lock);
         size_t pc = pinned_count;
@@ -1057,8 +1070,10 @@ void gc_gen_minor_collect(void) {
         pinned_stable = 0;
         pthread_mutex_unlock(&pinned_lock);
     }
+    pthread_mutex_lock(&gc_dirty_lock);
     gc_dirty_count    = 0;
     gc_dirty_overflow = false;
+    pthread_mutex_unlock(&gc_dirty_lock);
 
     /* 7. Call ext_scanner callbacks.
      * minor_gc_lock is non-recursive — ext_scanners must not allocate from
