@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788998434844,
+  "lastUpdate": 1789031612105,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -13661,6 +13661,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 74.689,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d3f404ab209a7fa9d9d634d4e350f1bc1ee7ec02",
+          "message": "Merge pull request #211 from deconstructo/pinned-add-205-lock-fast-path\n\nfix(gc_gen): make pinned_add fully lock-protected instead of lock-free (#205)",
+          "timestamp": "2026-09-10T19:12:40+10:00",
+          "tree_id": "d94c373a2018f397c442dbe7bed6c8a4527edcf5",
+          "url": "https://github.com/deconstructo/curry/commit/d3f404ab209a7fa9d9d634d4e350f1bc1ee7ec02"
+        },
+        "date": 1789031611029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.86,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.556,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.658,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.414,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 157.437,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 313.119,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.87,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.73,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 75.224,
             "unit": "ms"
           }
         ]
