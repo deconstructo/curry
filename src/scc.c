@@ -599,8 +599,13 @@ static bool read_chunk(FILE *f, Chunk *c) {
         if (!nbuf) return false;
         if (fread(nbuf, 1, nlen, f) != nlen) { free(nbuf); return false; }
         nbuf[nlen] = '\0';
-        /* Store in GC-managed memory so the pointer stays valid */
-        char *gc_name = (char *)gc_alloc_atomic(nlen + 1);
+        /* Store in GC-managed memory so the pointer stays valid.  c->name is a
+         * plain `const char *` field on Chunk, not a val_t -- unlike the
+         * constant-pool entries above, nothing in scan_pinned_object's T_CHUNK
+         * case (or anywhere else) ever evacuates/updates it, exactly like
+         * c->code just below.  It must come from stable (non-nursery) memory;
+         * see c->code's own comment for the full mechanism this fixes. */
+        char *gc_name = (char *)gc_alloc_raw_pinned_atomic(nlen + 1);
         memcpy(gc_name, nbuf, nlen + 1);
         free(nbuf);
         c->name = gc_name;
@@ -610,7 +615,34 @@ static bool read_chunk(FILE *f, Chunk *c) {
     if (!ri32(f, &c->code_len)) return false;
     if (c->code_len < 0) return false;
     c->code_cap = c->code_len;
-    c->code = (uint8_t *)gc_alloc_atomic((size_t)c->code_len + 1);
+    /* c->code is a raw `uint8_t *` field on Chunk, not a val_t -- unlike the
+     * constant pool (c->constants[], scanned every minor GC via the T_CHUNK
+     * case in scan_pinned_object/gc_gen.c), nothing ever evacuates or
+     * updates this pointer. The normal compiler path (chunk.c's
+     * chunk_reserve, compiler.c/compiler_classic.c) grows this buffer via
+     * GC_REALLOC directly -- stable, non-moving Boehm memory -- never
+     * through the nursery. gc_alloc_atomic(), by contrast, is nursery-
+     * eligible under --gc generational: a small bytecode buffer easily
+     * lands inside the loading thread's nursery slab, and the FIRST minor
+     * GC that thread runs afterward (gc_gen_minor_collect resets
+     * gc_nursery.top = gc_nursery.base unconditionally, regardless of
+     * whether this buffer's bytes are still "live" by any tracked
+     * reachability -- they never were reachable via any val_t root in the
+     * first place) silently reuses that memory for new allocations while
+     * an actor thread may still be executing bytecode straight out of
+     * c->code -- a genuine use-after-free/data corruption, not merely a
+     * stale read. This was the root cause of issue #222 (16-actor
+     * tvar-write! repro crashing reliably via the transparent .scc
+     * auto-cache / precompiled .scc load path, but never via
+     * --clear-cache): the main thread's own unrelated allocation traffic
+     * (e.g. a busy loop consing on the main thread) is exactly what drives
+     * its nursery to overflow and collect while spawned actors are
+     * concurrently running bytecode loaded from this exact buffer.
+     * gc_alloc_raw_pinned_atomic() matches GC_REALLOC's stability
+     * guarantee (never nursery-resident, never moved) without requiring
+     * every Chunk consumer to also learn to evacuate a raw byte pointer
+     * that was never part of the tracked object graph to begin with. */
+    c->code = (uint8_t *)gc_alloc_raw_pinned_atomic((size_t)c->code_len + 1);
     if (!c->code) return false;
     if (c->code_len && fread(c->code, 1, (size_t)c->code_len, f) != (size_t)c->code_len)
         return false;
