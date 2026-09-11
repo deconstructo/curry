@@ -523,14 +523,13 @@ extern size_t    gc_card_table_ncards;
  * Minor GC iterates these slot addresses to update forwarding pointers instead
  * of scanning the entire pinned list every collection.
  *
- * Issue #213: the range check below (gc_main_nursery_base/limit, the MAIN
- * thread's own nursery bounds) does correctly ensure this bookkeeping never
- * fires for a value an actor/worker thread itself allocated -- those always
- * go straight to Boehm, per gc_inhibit, never landing in this range. But it
- * does NOT ensure only the main thread ever EXECUTES this bookkeeping: any
- * thread whose gc_wb_slot/gc_wb_slot_atomic_relaxed call happens to write a
- * value that's still main-thread-nursery-resident -- e.g. an actor writing
- * a value it merely references (read from GLOBAL_ENV, received in a
+ * Issue #213: the range check below does correctly ensure this bookkeeping
+ * never fires for a value an actor/worker thread itself allocated -- those
+ * always go straight to Boehm, per gc_inhibit, never landing in this range.
+ * But it does NOT ensure only the main thread ever EXECUTES this
+ * bookkeeping: any thread whose gc_wb_slot/gc_wb_slot_atomic_relaxed call
+ * happens to write a value that's still nursery-resident -- e.g. an actor
+ * writing a value it merely references (read from GLOBAL_ENV, received in a
  * message) into a TVar or a shared pair/vector -- hits this exact code on
  * that actor's own thread. Two such threads (or the main thread's own
  * legitimate call, running concurrently with an actor's) can race the
@@ -546,14 +545,44 @@ extern size_t    gc_card_table_ncards;
  * hasn't reached this bookkeeping yet -- taking the lock here anyway costs
  * nothing (collection is already the rare, expensive path) and keeps
  * "always touched under gc_dirty_lock" a simple, uniform invariant rather
- * than one arm of it resting on a separate argument. */
+ * than one arm of it resting on a separate argument.
+ *
+ * Issue #220 (Candidate B): the range check itself used to compare only
+ * against gc_main_nursery_base/limit -- the MAIN thread's own nursery
+ * bounds -- which meant an ACTOR writing a value resident in its OWN
+ * nursery into an already-tenured slot (issue #220's repro: stm.c's
+ * TVar.value written from an actor's tvar-write!) was silently never
+ * recorded at all: the range check itself was false for every such write,
+ * regardless of locking. gc_gen_ptr_in_any_nursery() (gc_gen.c) replaces
+ * that check with one that recognizes ANY currently-registered thread's
+ * nursery, not just main's -- see its own declaration comment below and
+ * gc_gen.c's ptr_in_other_thread_nursery() for why this remains cheap on
+ * the common case and safe to call without stop-the-world in effect. */
 #define GC_DIRTY_CAP 4096
 extern val_t  **gc_dirty_slots;      /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
 extern size_t   gc_dirty_count;      /* number of valid entries                          */
 extern bool     gc_dirty_overflow;   /* set when buffer is full (fall back to full scan) */
-extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm    */
-extern uint8_t *gc_main_nursery_limit; /* ditto                                          */
+extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm.
+                                         * Issue #220: no longer read by gc_wb_slot's own
+                                         * range check (see gc_gen_ptr_in_any_nursery
+                                         * below) -- kept only because other code may
+                                         * still reference the main thread's bounds
+                                         * specifically; not load-bearing for the barrier. */
+extern uint8_t *gc_main_nursery_limit; /* ditto */
 extern pthread_mutex_t gc_dirty_lock;  /* guards gc_dirty_count/gc_dirty_slots/gc_dirty_overflow */
+
+/*
+ * Issue #220 Candidate B: is `p` resident in ANY currently-registered
+ * thread's nursery slab (not just the calling thread's own)? Defined in
+ * gc_gen.c; always returns false under Boehm (harmless -- gc_dirty_slots is
+ * NULL there, so gc_wb_slot never even reaches the call that would use
+ * this). Used in place of the old gc_main_nursery_base/limit range check so
+ * a write from ANY thread of a value resident in THAT thread's own nursery
+ * is correctly recorded, not just writes of main-thread-nursery-resident
+ * values. See gc_gen.c's own declaration comment for the precision
+ * trade-off this makes (deliberately over-inclusive, never under-inclusive)
+ * to stay race-free without requiring stop-the-world. */
+bool gc_gen_ptr_in_any_nursery(const void *p);
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
@@ -574,7 +603,7 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
      * branch rather than the whole write-barrier call). */
     if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
-        if (p >= gc_main_nursery_base && p < gc_main_nursery_limit) {
+        if (gc_gen_ptr_in_any_nursery(p)) {
             pthread_mutex_lock(&gc_dirty_lock);
             if (gc_dirty_count < GC_DIRTY_CAP)
                 gc_dirty_slots[gc_dirty_count++] = slot;
@@ -625,7 +654,7 @@ static inline void gc_wb_slot_atomic_relaxed(val_t *slot, val_t newval) {
     atomic_store_explicit((_Atomic val_t *)slot, newval, memory_order_relaxed);
     if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
-        if (p >= gc_main_nursery_base && p < gc_main_nursery_limit) {
+        if (gc_gen_ptr_in_any_nursery(p)) {
             pthread_mutex_lock(&gc_dirty_lock);
             if (gc_dirty_count < GC_DIRTY_CAP)
                 gc_dirty_slots[gc_dirty_count++] = slot;
