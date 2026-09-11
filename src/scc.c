@@ -496,7 +496,7 @@ static bool read_const(FILE *f, val_t *out) {
         return true;
     }
     case CTAG_PAIR: {
-        Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+        Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
         p->hdr.type = T_PAIR; p->hdr.flags = 0;
         p->car = V_NIL; p->cdr = V_NIL;
         *out = vptr(p);
@@ -509,7 +509,7 @@ static bool read_const(FILE *f, val_t *out) {
     case CTAG_VECTOR: {
         uint32_t len;
         if (!ru32(f, &len)) return false;
-        Vector *vec = (Vector *)gc_alloc(sizeof(Vector) + len * sizeof(val_t));
+        Vector *vec = (Vector *)gc_alloc_obj(sizeof(Vector) + len * sizeof(val_t));
         vec->hdr.type = T_VECTOR; vec->hdr.flags = 0; vec->len = len;
         *out = vptr(vec);
         for (uint32_t i = 0; i < len; i++) {
@@ -941,25 +941,59 @@ void scc_clear(const char *src_path) {
     if (fb) { remove(fb); free(fb); }
 }
 
+/* Issues #144/#217 (code-review follow-up on the #217 fix): read_const()/
+ * read_chunk() build up nested Pair/Vector/Chunk structures via plain C
+ * locals (e.g. read_const's own `p`/`vec`, and every recursive `car`/`cdr`/
+ * `elem` in between) with no GC-root registration at all -- unlike
+ * compiler_classic.c's equivalent reader-driven parsing (main.c's
+ * cache-miss branch), which main.c deliberately brackets in
+ * gc_inhibit_minor()/gc_resume_minor() for exactly this reason (see that
+ * call site's own comments). Before this fix, scc_load()/scc_load_direct()
+ * had no equivalent bracket at all: under --gc generational, a minor
+ * collection firing mid-recursion (e.g. while reading a deeply nested
+ * quoted constant, or simply because the .scc being loaded is large enough
+ * to exhaust the nursery partway through) evacuates an already-under-
+ * construction Pair/Vector out from under its own unrooted C local. The
+ * caller then keeps writing through that now-stale pointer (e.g.
+ * read_const's CTAG_PAIR case's `p->car = car; p->cdr = cdr;`, executed
+ * AFTER the recursive read_const() calls that could have triggered the
+ * collection) -- those writes land in the old, already-forwarded nursery
+ * memory instead of the promoted copy, which is what every other live
+ * reference (e.g. the parent chunk's constants[] slot) actually points to.
+ * The promoted copy is left with whatever car/cdr the memcpy captured at
+ * promotion time (typically the CTAG_PAIR case's own placeholder
+ * `V_NIL`/`V_NIL` initialization) forever, while the real values are
+ * silently lost to memory the nursery will reuse for something else on its
+ * next reset. This is very likely the mechanism behind #144's still-
+ * unresolved SIGSEGV (that issue's repro loads a `.scc` compiled ahead of
+ * time via `curry -c`, which is exactly scc_load_direct()'s call path) --
+ * gc_alloc_obj's fix for #217 addressed the Boehm-ESCAPE case (no minor GC
+ * runs at all), not this one, where a minor GC genuinely runs mid-parse
+ * and the caller's own C locals just aren't rooted against it. */
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
+    gc_inhibit_minor();
     char *p = primary_path(src_path);
     if (p && read_scc(p, src_path, chunks_out, n_out)) {
         free(p);
+        gc_resume_minor();
         return true;
     }
     free(p);
     /* Try user cache */
     char *fb = fallback_path(src_path);
-    if (!fb) return false;
+    if (!fb) { gc_resume_minor(); return false; }
     bool hit = read_scc(fb, src_path, chunks_out, n_out);
     free(fb);
+    gc_resume_minor();
     return hit;
 }
 
 bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
     FILE *f = fopen(scc_path, "rb");
     if (!f) return false;
+    gc_inhibit_minor();
     bool ok = load_chunks_from_file(f, NULL, chunks_out, n_out);
+    gc_resume_minor();
     fclose(f);
     return ok;
 }

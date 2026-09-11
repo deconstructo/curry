@@ -384,7 +384,7 @@ val_t prim_cons(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
      * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
-    Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+    Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
     p->hdr.type = T_PAIR; p->hdr.flags = 0;
     p->car = av[0]; p->cdr = av[1];
     return vptr(p);
@@ -1653,7 +1653,7 @@ static val_t prim_truncate_div(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t q = num_quotient(av[0], av[1]);
     val_t r = num_remainder(av[0], av[1]);
-    Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+    Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + 2*sizeof(val_t));
     mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
     mv->vals[0] = q; mv->vals[1] = r;
     return vptr(mv);
@@ -1669,7 +1669,7 @@ static val_t prim_exact_integer_sqrt(int ac, val_t *av, void *ud) {
         while (s > 0 && s * s > k) s--;
         while ((s+1)*(s+1) <= k) s++;
         intptr_t r = k - s * s;
-        Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+        Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + 2*sizeof(val_t));
         mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
         mv->vals[0] = vfix(s); mv->vals[1] = vfix(r);
         return vptr(mv);
@@ -1683,7 +1683,7 @@ static val_t prim_exact_integer_sqrt(int ac, val_t *av, void *ud) {
         val_t vs = make_big_from_mpz(s);
         val_t vr = make_big_from_mpz(r);
         mpz_clear(s); mpz_clear(r);
-        Values *mv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+        Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + 2*sizeof(val_t));
         mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = 2;
         mv->vals[0] = vs; mv->vals[1] = vr;
         return vptr(mv);
@@ -2811,7 +2811,7 @@ static val_t prim_record_ctor(int ac, val_t *av, void *ud) {
     if (!vis_rtd(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%record-ctor: not a record type");
     RecordType *rtd = vunptr(RecordType, av[0]);
     uint32_t n = rtd->nfields;
-    Record *r = (Record *)gc_alloc(sizeof(Record) + n * sizeof(val_t));
+    Record *r = (Record *)gc_alloc_obj(sizeof(Record) + n * sizeof(val_t));
     r->hdr.type=T_RECORD; r->hdr.flags=0;
     r->rtd = rtd;
     for (uint32_t i=0; i<n && (int)(i+1)<ac; i++) r->fields[i] = av[i+1];
@@ -3337,7 +3337,7 @@ static val_t prim_gensym(int ac, val_t *av, void *ud) {
 }
 static val_t prim_values(int ac, val_t *av, void *ud) {
     (void)ud; if(ac==1) return av[0];
-    Values *mv=(Values *)gc_alloc(sizeof(Values)+(size_t)ac*sizeof(val_t));
+    Values *mv=(Values *)gc_alloc_obj(sizeof(Values)+(size_t)ac*sizeof(val_t));
     mv->hdr.type=T_VALUES; mv->hdr.flags=0; mv->count=(uint32_t)ac;
     for(int i=0;i<ac;i++) mv->vals[i]=av[i];
     return vptr(mv);
@@ -3488,7 +3488,7 @@ static val_t prim_floor_div(int ac, val_t *av, void *ud) {
     check_exact_integer(av[0], "floor/");
     check_exact_integer(av[1], "floor/");
     val_t q=prim_floor_quotient(ac,av,ud), r2=num_sub(av[0],num_mul(q,av[1]));
-    Values *mv=(Values *)gc_alloc(sizeof(Values)+2*sizeof(val_t));
+    Values *mv=(Values *)gc_alloc_obj(sizeof(Values)+2*sizeof(val_t));
     mv->hdr.type=T_VALUES; mv->hdr.flags=0; mv->count=2; mv->vals[0]=q; mv->vals[1]=r2;
     return vptr(mv);
 }

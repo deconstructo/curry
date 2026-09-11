@@ -926,7 +926,7 @@ tail:
     if (op == S_VALUES) {
         int n = list_length(rest);
         if (n == 1) return eval(vcar(rest), env);
-        Values *mv = (Values *)gc_alloc(sizeof(Values) + (size_t)n * sizeof(val_t));
+        Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + (size_t)n * sizeof(val_t));
         mv->hdr.type=T_VALUES; mv->hdr.flags=0; mv->count=(uint32_t)n;
         for (int i = 0; i < n; i++) { mv->vals[i] = eval(vcar(rest), env); rest = vcdr(rest); }
         return vptr(mv);
