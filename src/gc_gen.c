@@ -87,20 +87,41 @@ void gc_gen_set_nursery_size(size_t bytes) {
  * doubling under a lock, mirroring pinned_add's own history -- see that
  * function's comment on issue #205 for why a lock-free version of this
  * exact shape of growable-array-scanned-by-another-thread was tried once
- * already and found to have a real, reproducible data race). Entries are
- * NEVER removed on thread exit: gc_gen_unregister_thread()/
- * gc_gen_thread_leave() already deliberately leave a dead thread's nursery
- * slab allocated forever (see that function's own comment -- Boehm owns
- * the memory regardless via GC_MALLOC_UNCOLLECTABLE, and reclaiming it is
- * out of scope), so leaving the table entry inert costs nothing extra: a
- * dead thread's slab can never again receive a fresh allocation, so it can
- * only ever contain objects already forwarded (harmless re-hit -- GC_FORWARDED
- * short-circuits in evacuate()) or, in the pathological case of a thread
- * that exited while still holding the only reference to a value nobody else
- * ever forwards, an already-unreachable object nothing will ever ask about
- * again. Compacting the array on unregister would need the same lock this
- * read path takes on every table-fallback lookup, for no correctness
- * benefit -- not worth it.
+ * already and found to have a real, reproducible data race).
+ *
+ * CAUTION (found by independent code-review AND security-review of an
+ * earlier version of this patch, both flagging the identical bug): a
+ * slot's `nursery` field is `&gc_nursery`, the address of the OWNING
+ * thread's own `_Thread_local GcNursery` object -- NOT the (deliberately
+ * immortal, GC_MALLOC_UNCOLLECTABLE) slab it points at. Actor threads in
+ * this codebase are detached (src/actors.c); once such a thread's body
+ * returns, the pthread runtime reclaims that thread's ENTIRE TLS block,
+ * including the storage backing its `gc_nursery` struct -- unlike the slab
+ * itself, that struct's storage is NOT immortal. An earlier version of
+ * this table left every entry in place forever after thread exit (on the
+ * theory that only the slab's liveness mattered), which meant
+ * ptr_in_other_thread_nursery() could dereference a dangling pointer into
+ * a since-reclaimed and possibly since-reused TLS block for any actor that
+ * had ever exited -- a genuine use-after-free reachable by ordinary
+ * spawn/exit traffic, not a contrived corner case. Fixed by tombstoning:
+ * unregister_thread_nursery() (called from gc_gen_unregister_thread() --
+ * genuine thread exit -- but deliberately NOT from gc_gen_thread_park(),
+ * whose thread is merely blocked and very much still alive, still owns its
+ * TLS, and will call gc_gen_thread_unpark() and resume) nulls this
+ * thread's own slot under g_thread_nurseries_lock before the thread
+ * actually returns/exits, and ptr_in_other_thread_nursery() skips a NULL
+ * `nursery` field. `my_nursery_table_idx` (thread-local, set once at
+ * registration) makes this an O(1) direct write rather than a search --
+ * cheap enough to not need weighing against the lock it already takes.
+ *
+ * Slots are NOT compacted/reused after being tombstoned: this thread's own
+ * `my_nursery_table_idx` is the only record of "which slot is mine", and
+ * nothing updates that thread-local value from another thread, so shifting
+ * other threads' entries down to fill a hole would silently invalidate
+ * their own cached indices. Leaving a permanent NULL hole is the safe
+ * trade-off -- see the g_nursery_table_min/max comment below for the
+ * follow-on cost this accepts (a monotonically growing scan/bounding-box),
+ * flagged as a known, accepted limitation rather than fixed here.
  *
  * g_nursery_table_min/max is a global bounding box (min base, max limit)
  * updated whenever a new thread registers, checked BEFORE touching the
@@ -108,17 +129,43 @@ void gc_gen_set_nursery_size(size_t bytes) {
  * every live pointer during every minor collection, so the fallback lookup
  * below must stay cheap for the overwhelmingly common case (pointer isn't
  * in ANY nursery, or is in the collecting thread's own -- both handled by
- * cheaper checks before this is ever reached).
+ * cheaper checks before this is ever reached). KNOWN LIMITATION (flagged
+ * during review, accepted rather than fixed here): this box only ever
+ * widens, never shrinks, even for a tombstoned/exited thread's slab -- so
+ * does the array itself (dead slots are nulled, not removed -- see above).
+ * In a long-running process that spawns a great many actors over its
+ * lifetime, both the bounding box's selectivity and the fallback scan's
+ * cost degrade towards "every candidate pointer walks the whole table",
+ * independent of how many threads are live RIGHT NOW. Matches this file's
+ * existing precedent of never freeing a dead thread's nursery slab either
+ * (see gc_gen_thread_leave()'s own comment) -- a real trade-off, not
+ * addressed by this change, worth revisiting if it shows up in practice
+ * (e.g. compacting periodically would need every live thread's own
+ * my_nursery_table_idx re-published under the lock, not attempted here).
  */
 #define THREAD_NURSERY_TABLE_INIT_CAP 64
 typedef struct {
-    GcNursery *nursery;  /* &gc_nursery, taken on the owning thread itself */
+    GcNursery *nursery;  /* &gc_nursery, taken on the owning thread itself;
+                           * NULL once that thread has exited (tombstoned by
+                           * unregister_thread_nursery(), below) -- skipped
+                           * by every scan of this table. */
 } ThreadNurseryEntry;
 
 static ThreadNurseryEntry *g_thread_nurseries;
 static size_t               g_thread_nurseries_count;
 static size_t               g_thread_nurseries_cap;
 static pthread_mutex_t      g_thread_nurseries_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* This thread's own index into g_thread_nurseries, set once at
+ * registration -- lets unregister_thread_nursery() tombstone this thread's
+ * slot in O(1) under the lock instead of searching for it (a search would
+ * also need SOME way to identify "which entry is mine" -- comparing
+ * `nursery == &gc_nursery` works just as well as an index for that, but the
+ * index is simpler and just as cheap). SIZE_MAX sentinel = never
+ * registered (should not happen for any thread that calls
+ * gc_gen_unregister_thread(), but unregister_thread_nursery() checks
+ * defensively anyway). */
+static CURRY_THREAD_LOCAL size_t my_nursery_table_idx = SIZE_MAX;
 
 static _Atomic uintptr_t g_nursery_table_min = (uintptr_t)UINTPTR_MAX;
 static _Atomic uintptr_t g_nursery_table_max = 0;
@@ -139,7 +186,9 @@ static void register_thread_nursery(void) {
         g_thread_nurseries = ns;
         g_thread_nurseries_cap = nc;
     }
-    g_thread_nurseries[g_thread_nurseries_count++].nursery = &gc_nursery;
+    size_t idx = g_thread_nurseries_count++;
+    g_thread_nurseries[idx].nursery = &gc_nursery;
+    my_nursery_table_idx = idx;
 
     uintptr_t base  = (uintptr_t)gc_nursery.base;
     uintptr_t limit = (uintptr_t)gc_nursery.limit;
@@ -154,6 +203,26 @@ static void register_thread_nursery(void) {
                                                    memory_order_relaxed, memory_order_relaxed))
         ;
     pthread_mutex_unlock(&g_thread_nurseries_lock);
+}
+
+/* Issue #220 Candidate B (post-review fix): tombstone THIS thread's own
+ * table entry. Must be called from gc_gen_unregister_thread() -- genuine,
+ * permanent thread exit, right before the thread's TLS is reclaimed -- and
+ * must NOT be called from gc_gen_thread_park()'s temporary parking (that
+ * thread is merely blocked, not exiting; it still owns its TLS and its
+ * gc_nursery is still a perfectly live, meaningful nursery that other
+ * threads' evacuation/write-barrier checks need to keep recognizing while
+ * it's parked). See the ThreadNurseryEntry struct comment above for what
+ * this fixes: without it, g_thread_nurseries could hold a dangling pointer
+ * into a since-freed (or since-reused) TLS block forever after any actor
+ * exits -- a genuine use-after-free, not a hypothetical one, since actors
+ * routinely spawn and exit as normal operation. */
+static void unregister_thread_nursery(void) {
+    if (my_nursery_table_idx == SIZE_MAX) return;  /* never registered */
+    pthread_mutex_lock(&g_thread_nurseries_lock);
+    g_thread_nurseries[my_nursery_table_idx].nursery = NULL;
+    pthread_mutex_unlock(&g_thread_nurseries_lock);
+    my_nursery_table_idx = SIZE_MAX;
 }
 
 /*
@@ -200,7 +269,9 @@ static bool ptr_in_other_thread_nursery(const void *p, bool precise) {
     pthread_mutex_lock(&g_thread_nurseries_lock);
     for (size_t i = 0; i < g_thread_nurseries_count; i++) {
         GcNursery *gn = g_thread_nurseries[i].nursery;
-        if (gn == &gc_nursery) continue;  /* self -- already checked by caller */
+        if (!gn || gn == &gc_nursery) continue;  /* tombstoned (exited), or
+                                                    * self -- already checked
+                                                    * by caller */
         const uint8_t *hi = precise ? gn->top : gn->limit;
         if ((const uint8_t *)p >= gn->base && (const uint8_t *)p < hi) {
             found = true;
@@ -1071,8 +1142,21 @@ void gc_gen_thread_unpark(void) {
  * just keeps gc_gen_thread_count accurate so a future stop_the_world()'s
  * wait target reflects threads that are actually still live. See
  * gc_gen_thread_leave()'s own comment (issue #208) for why this must
- * signal gc_stw_parked, not just decrement the counter. */
+ * signal gc_stw_parked, not just decrement the counter.
+ *
+ * Issue #220 Candidate B (post-review fix): also tombstones this thread's
+ * g_thread_nurseries entry via unregister_thread_nursery() -- see that
+ * function's own comment and the ThreadNurseryEntry struct comment above
+ * for why this is required (a dangling-pointer/use-after-free otherwise),
+ * and specifically why it belongs HERE and not in gc_gen_thread_leave()
+ * (shared with gc_gen_thread_park(), whose thread is not exiting). Ordered
+ * before gc_gen_thread_leave(): this thread is about to actually return
+ * and have its TLS reclaimed by the pthread runtime regardless of ordering
+ * here, so tombstoning first just means the window during which a
+ * concurrent scan could still (correctly) see this thread's still-valid
+ * nursery is a little longer, never shorter. */
 void gc_gen_unregister_thread(void) {
+    unregister_thread_nursery();
     gc_gen_thread_leave();
 }
 
