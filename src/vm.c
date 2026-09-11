@@ -1015,7 +1015,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 /* Allocate first: args still on VM stack so GC (if
                  * triggered) can update them. Re-read from stack after
                  * allocation. */
-                Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+                Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
                 p->hdr.type = T_PAIR; p->hdr.flags = 0;
                 p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
                 vm->sp -= 2; *vm->sp++ = vptr(p);
@@ -1753,7 +1753,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * it was applied as ONE argument, so
              * (call-with-values (lambda () (values)) (lambda () ...))
              * failed with "too many arguments (got 1, need 0)". */
-            Values *mv = (Values *)gc_alloc(sizeof(Values) + (size_t)n * sizeof(val_t));
+            Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + (size_t)n * sizeof(val_t));
             mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = n;
             val_t *base = vm->sp - n;
             for (int i = 0; i < (int)n; i++) mv->vals[i] = base[i];

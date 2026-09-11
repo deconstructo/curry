@@ -496,7 +496,7 @@ static bool read_const(FILE *f, val_t *out) {
         return true;
     }
     case CTAG_PAIR: {
-        Pair *p = (Pair *)gc_alloc(sizeof(Pair));
+        Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
         p->hdr.type = T_PAIR; p->hdr.flags = 0;
         p->car = V_NIL; p->cdr = V_NIL;
         *out = vptr(p);
@@ -509,7 +509,7 @@ static bool read_const(FILE *f, val_t *out) {
     case CTAG_VECTOR: {
         uint32_t len;
         if (!ru32(f, &len)) return false;
-        Vector *vec = (Vector *)gc_alloc(sizeof(Vector) + len * sizeof(val_t));
+        Vector *vec = (Vector *)gc_alloc_obj(sizeof(Vector) + len * sizeof(val_t));
         vec->hdr.type = T_VECTOR; vec->hdr.flags = 0; vec->len = len;
         *out = vptr(vec);
         for (uint32_t i = 0; i < len; i++) {

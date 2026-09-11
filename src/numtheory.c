@@ -524,7 +524,7 @@ static val_t prim_extended_gcd(int ac, val_t *av, void *ud) {
     mpz_gcdext(g, s, t, a, b);
     val_t triple[3] = { z_to_val(g), z_to_val(s), z_to_val(t) };
     mpz_clears(a, b, g, s, t, NULL);
-    Values *vv = (Values *)gc_alloc(sizeof(Values) + 3*sizeof(val_t));
+    Values *vv = (Values *)gc_alloc_obj(sizeof(Values) + 3*sizeof(val_t));
     vv->hdr.type = T_VALUES; vv->hdr.flags = 0; vv->count = 3;
     vv->vals[0] = triple[0]; vv->vals[1] = triple[1]; vv->vals[2] = triple[2];
     return vptr(vv);
@@ -1039,7 +1039,7 @@ static val_t prim_perfect_power_p(int ac, val_t *av, void *ud) {
                 val_t base = z_to_val(root);
                 val_t exp  = num_make_bignum_i((long)e);
                 mpz_clears(n, root, pow, NULL);
-                Values *vv = (Values *)gc_alloc(sizeof(Values) + 2*sizeof(val_t));
+                Values *vv = (Values *)gc_alloc_obj(sizeof(Values) + 2*sizeof(val_t));
                 vv->hdr.type = T_VALUES; vv->hdr.flags = 0; vv->count = 2;
                 vv->vals[0] = base; vv->vals[1] = exp;
                 return vptr(vv);

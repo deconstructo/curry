@@ -155,6 +155,7 @@ void *gc_nursery_refill(size_t n, bool has_ptrs);
 extern "C" {
     void *gc_alloc_impl(size_t n, int has_ptrs);
     void *gc_alloc_pinned_impl(size_t n, int has_ptrs);
+    void *gc_alloc_obj(size_t n);
 }
 #endif
 
@@ -226,11 +227,23 @@ static inline void *gc_alloc_raw_pinned_atomic(size_t n) { return gc_ops->alloc_
 #endif
 static inline void  gc_collect(void)                 { gc_ops->collect(); }
 
+/* Like gc_alloc(), for allocations the caller knows are a proper Hdr-
+ * prefixed GC:MOVE object (as opposed to a raw val_t[] buffer or a plain
+ * non-GC-value C struct) -- see its own doc comment in gc.c (issues
+ * #144/#215/#217) for why the distinction matters: only these can safely
+ * be registered for a later pinned-object scan if they escape straight to
+ * Boehm because a minor collection wasn't safe to run at allocation time.
+ * Declared above (in the C++ extern "C" block) for C++ callers; C sees it
+ * declared here instead since it isn't part of that block. */
+#ifndef __cplusplus
+void *gc_alloc_obj(size_t n);
+#endif
+
 /* ── Allocation macros ────────────────────────────────────────────────────── */
 
 /* Standard (semispace-eligible): */
-#define CURRY_NEW(T)              ((T *)gc_alloc(sizeof(T)))
-#define CURRY_NEW_FLEX(T, n)      ((T *)gc_alloc(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
+#define CURRY_NEW(T)              ((T *)gc_alloc_obj(sizeof(T)))
+#define CURRY_NEW_FLEX(T, n)      ((T *)gc_alloc_obj(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
 #define CURRY_NEW_ATOM(T)         ((T *)gc_alloc_atomic(sizeof(T)))
 #define CURRY_NEW_FLEX_ATOM(T, n) ((T *)gc_alloc_atomic(sizeof(T) + (n)*sizeof(((T*)0)->data[0])))
 

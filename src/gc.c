@@ -210,6 +210,71 @@ void *gc_nursery_refill(size_t n, bool has_ptrs) {
     return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
 }
 
+/*
+ * gc_alloc_obj — issues #144/#215/#217.
+ *
+ * Like gc_alloc(), but for allocations the caller knows will be a proper
+ * Hdr-prefixed GC:MOVE object (T_PAIR, T_VECTOR, T_RECORD, Values, ...) --
+ * i.e. everything CURRY_NEW/CURRY_NEW_FLEX construct, plus the handful of
+ * call sites that build such objects with a raw gc_alloc() call instead of
+ * going through those macros (flexible trailing-array sizing usually).
+ *
+ * gc_nursery_refill()'s Boehm-escape path (this file, just above) hands
+ * back a bare GC_MALLOC block whenever a minor collection wasn't safe to
+ * run at allocation time -- notably, the whole read+compile pipeline runs
+ * under gc_inhibit_count > 0 (main.c wraps it in gc_inhibit_minor()/
+ * gc_resume_minor()), and the tree-walking evaluator runs with
+ * gc_shadow_stack != NULL, both of which take the "defer, fall back to
+ * Boehm" branch above unconditionally, regardless of whether the object
+ * would otherwise have fit in a freshly-collected nursery. Such an escaped
+ * object is invisible to every other GC mechanism: it isn't in the nursery
+ * (so evacuate()/scan_object()'s worklist BFS never reaches it) and it
+ * isn't in pinned_slots (that's only populated by gc_alloc_pinned, a
+ * different allocator for GC:PIN types). Its caller then fills in fields
+ * immediately afterward -- e.g. scm_cons(car, cdr) -- and those fields are
+ * routinely fresh nursery pointers. Before this fix, such a field held a
+ * raw, unscanned nursery address forever: readable only as long as nothing
+ * reset the nursery region behind it, and silently reinterpreted as
+ * whatever unrelated object next legitimately reused that same byte
+ * offset the moment something did. This is the confirmed root cause of
+ * #217's "unknown GC:MOVE type" abort: forensics traced the corrupted
+ * value to exactly a pair built this way while reading/compiling a
+ * define-library form.
+ *
+ * Fix: detect the escape after the fact (the returned pointer, under the
+ * generational backend, always lies either inside the current nursery slab
+ * or nowhere near it -- there's no third option) and register it via the
+ * same pinned_add() gc_alloc_pinned already uses for GC:PIN types, so
+ * gc_gen_minor_collect()'s pinned-object scan visits it exactly once,
+ * walking whatever fields it has by the time that scan runs (strictly
+ * after this call's caller finishes writing them -- a minor collection can
+ * only fire at a gc_shadow_stack==NULL && gc_inhibit_count==0 safepoint,
+ * which is later than any plain-C field write this call's caller makes
+ * immediately upon return). scan_pinned_object's default case (gc_gen.c)
+ * now delegates to scan_object() for exactly this reason: unlike the fixed
+ * set of GC:PIN types it special-cases, an escaped object here is an
+ * ordinary GC:MOVE type and needs the identical per-field evacuate() logic
+ * scan_object() already implements for every such type.
+ *
+ * Deliberately NOT applied to plain gc_alloc(): several call sites use it
+ * for raw val_t[] buffers with no Hdr at all (builtins.c's apply-argv
+ * expansion, eval.c's call-argument buffer, runtime.c's list->vector-ish
+ * helper) or plain non-GC-value C structs (port.c's WSharedMap/
+ * WSharedEntry write-sharing table) -- treating either as Hdr-prefixed and
+ * handing it to scan_pinned_object/scan_object would read whatever
+ * unrelated bits happen to sit at offset 0 as an ObjType tag, which is
+ * exactly the "unexpected type <garbage>" abort this fix was first tried
+ * against before being narrowed to gc_alloc_obj specifically. */
+void *gc_alloc_obj(size_t n) {
+    void *p = gc_nursery_alloc(n, true);
+    if (gc_nursery.base != NULL &&
+        ((uint8_t *)p < gc_nursery.base || (uint8_t *)p >= gc_nursery.limit)) {
+        extern void gc_gen_pin_permanent(void *obj);
+        gc_gen_pin_permanent(p);
+    }
+    return p;
+}
+
 /* C-linkage allocator called from C++ translation units (jit.cpp).
  * C++ code cannot safely reference gc_nursery via 'extern thread_local' because
  * the C++ TLS wrapper symbol (_ZTW…) is ABI-incompatible with the C TLS symbol

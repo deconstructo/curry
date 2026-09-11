@@ -714,7 +714,20 @@ static void scan_pinned_object(void *obj) {
         break;
     }
     default:
-        /* Unknown pinned type — skip; conservative is safe. */
+        /* Issues #144/#215/#217: this used to silently skip anything not
+         * among the GC:PIN cases above ("conservative is safe") -- but as
+         * of gc_nursery_refill()'s fallback fix (src/gc.c), pinned_slots can
+         * now also hold ordinary GC:MOVE-tagged objects (T_PAIR, T_VECTOR,
+         * ...) that escaped straight to Boehm because a minor collection
+         * wasn't safe to run at allocation time. Those genuinely do have
+         * val_t fields that may point into the nursery and need the exact
+         * per-type evacuate() logic scan_object() already implements for
+         * every GC:MOVE type -- "skip" was never actually safe for them,
+         * it just happened not to matter until an object allocated this way
+         * held a live nursery reference. scan_object()'s own default case
+         * still aborts on a type unrecognized by EITHER switch, so this
+         * isn't a silent behavior change for genuinely unexpected data. */
+        scan_object(obj);
         break;
     }
 }

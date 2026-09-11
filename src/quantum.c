@@ -17,7 +17,7 @@ void quantum_init(void) { /* nothing; uses rand() seeded by main */ }
 /* ---- Internal helpers ---- */
 
 static val_t make_quantum(int n, val_t *amps, val_t *vals) {
-    Quantum *q = (Quantum *)gc_alloc(sizeof(Quantum) + (size_t)(2 * n) * sizeof(val_t));
+    Quantum *q = (Quantum *)gc_alloc_obj(sizeof(Quantum) + (size_t)(2 * n) * sizeof(val_t));
     q->hdr.type  = T_QUANTUM;
     q->hdr.flags = 0;
     q->n         = n;
