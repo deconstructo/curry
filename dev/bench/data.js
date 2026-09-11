@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789118048249,
+  "lastUpdate": 1789121209063,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -14282,6 +14282,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.262,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b8e8f6719616d71f93969d873f56a0ce715299c9",
+          "message": "Merge pull request #227 from deconstructo/fix-223-mailbox-stw-deadlock\n\nfix(actors): resolve mailbox-mutex / stop-the-world deadlock (#223)",
+          "timestamp": "2026-09-11T20:06:00+10:00",
+          "tree_id": "348b77e82fdd363d44210a4dfb41224a99b249bd",
+          "url": "https://github.com/deconstructo/curry/commit/b8e8f6719616d71f93969d873f56a0ce715299c9"
+        },
+        "date": 1789121206888,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.98,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 26.286,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.549,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 30.987,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 125.659,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 241.804,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 53.187,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 80.206,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 61.229,
             "unit": "ms"
           }
         ]
