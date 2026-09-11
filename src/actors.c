@@ -442,6 +442,17 @@ void actor_send(val_t actor_val, val_t msg) {
     mailbox_push(a->mailbox, msg, a);
 }
 
+/* Issue #223 security review note: mailbox_pop_wait's unlock/unpark/
+ * re-lock sequence relies on "only the owning actor's own thread ever
+ * calls mailbox_pop_wait on that actor's mailbox" to skip re-checking
+ * m->q.head == m->q.tail after the re-lock (nothing else can drain the
+ * queue in that window). That invariant holds today because this is the
+ * ONLY call site reaching mailbox_pop_wait, and it's only ever reached
+ * from builtins.c's `receive` primitive with actor_val defaulting to
+ * the CALLING thread's own current_actor -- i.e. every actor can only
+ * ever receive() on itself. If a future caller ever lets one thread
+ * request another actor's mailbox here, that assumption breaks; keep
+ * this comment and mailbox_pop_wait's own in sync with any such change. */
 val_t actor_receive(val_t actor_val, long timeout_ms) {
     Actor *a = vis_actor(actor_val) ? as_actor(actor_val) : current_actor;
     if (!a) return V_FALSE;
