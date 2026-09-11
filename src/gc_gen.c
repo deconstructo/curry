@@ -31,6 +31,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <stdint.h>
 
 /* ── Pause ring buffer ───────────────────────────────────────────────────── */
 
@@ -62,6 +63,173 @@ void gc_gen_set_nursery_size(size_t bytes) {
 
 /* ── Per-thread nursery slab ──────────────────────────────────────────────── */
 
+/*
+ * Issue #220 Candidate B: shared table of every live thread's nursery, so a
+ * minor collection triggered on one thread can recognize and promote a
+ * pointer that is resident in a DIFFERENT thread's nursery (not just its
+ * own) -- e.g. a value an actor wrote into an already-tenured TVar's field,
+ * or a value received via a mailbox message and bound to a local on the
+ * receiving thread. Safe to read/copy directly from another thread's slab
+ * here because gc_gen_stop_the_world() (issue #200 Phase B) genuinely
+ * pauses every other registered thread for the full duration of a minor
+ * collection -- see gc_gen_minor_collect()'s own comment on that bracket.
+ *
+ * Each entry stores a POINTER to the owning thread's own `gc_nursery` TLS
+ * instance (taken from &gc_nursery while running ON that thread, inside
+ * alloc_thread_nursery() below) rather than a copy of its bounds -- TLS
+ * storage is ordinary per-thread-backed memory, valid to dereference from
+ * any thread once its address is known, so this lets a reader always see
+ * that thread's CURRENT base/top/limit (in particular `top`, which only
+ * that thread's own future collection ever resets) without needing a
+ * separate update path every time a thread allocates.
+ *
+ * The array only ever grows (GC_MALLOC_UNCOLLECTABLE + realloc-style
+ * doubling under a lock, mirroring pinned_add's own history -- see that
+ * function's comment on issue #205 for why a lock-free version of this
+ * exact shape of growable-array-scanned-by-another-thread was tried once
+ * already and found to have a real, reproducible data race). Entries are
+ * NEVER removed on thread exit: gc_gen_unregister_thread()/
+ * gc_gen_thread_leave() already deliberately leave a dead thread's nursery
+ * slab allocated forever (see that function's own comment -- Boehm owns
+ * the memory regardless via GC_MALLOC_UNCOLLECTABLE, and reclaiming it is
+ * out of scope), so leaving the table entry inert costs nothing extra: a
+ * dead thread's slab can never again receive a fresh allocation, so it can
+ * only ever contain objects already forwarded (harmless re-hit -- GC_FORWARDED
+ * short-circuits in evacuate()) or, in the pathological case of a thread
+ * that exited while still holding the only reference to a value nobody else
+ * ever forwards, an already-unreachable object nothing will ever ask about
+ * again. Compacting the array on unregister would need the same lock this
+ * read path takes on every table-fallback lookup, for no correctness
+ * benefit -- not worth it.
+ *
+ * g_nursery_table_min/max is a global bounding box (min base, max limit)
+ * updated whenever a new thread registers, checked BEFORE touching the
+ * lock or walking the table -- evacuate()/in_nursery() fires on essentially
+ * every live pointer during every minor collection, so the fallback lookup
+ * below must stay cheap for the overwhelmingly common case (pointer isn't
+ * in ANY nursery, or is in the collecting thread's own -- both handled by
+ * cheaper checks before this is ever reached).
+ */
+#define THREAD_NURSERY_TABLE_INIT_CAP 64
+typedef struct {
+    GcNursery *nursery;  /* &gc_nursery, taken on the owning thread itself */
+} ThreadNurseryEntry;
+
+static ThreadNurseryEntry *g_thread_nurseries;
+static size_t               g_thread_nurseries_count;
+static size_t               g_thread_nurseries_cap;
+static pthread_mutex_t      g_thread_nurseries_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static _Atomic uintptr_t g_nursery_table_min = (uintptr_t)UINTPTR_MAX;
+static _Atomic uintptr_t g_nursery_table_max = 0;
+
+static void register_thread_nursery(void) {
+    pthread_mutex_lock(&g_thread_nurseries_lock);
+    if (g_thread_nurseries_count == g_thread_nurseries_cap) {
+        size_t nc = g_thread_nurseries_cap ? g_thread_nurseries_cap * 2
+                                            : THREAD_NURSERY_TABLE_INIT_CAP;
+        ThreadNurseryEntry *ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(ThreadNurseryEntry));
+        if (!ns) { fprintf(stderr, "[gc_gen] FATAL: thread_nurseries OOM\n"); abort(); }
+        if (g_thread_nurseries)
+            memcpy(ns, g_thread_nurseries, g_thread_nurseries_count * sizeof(ThreadNurseryEntry));
+        /* Safe to free: every reader/writer holds g_thread_nurseries_lock for
+         * its entire touch of this array, mirroring pinned_add's own fix
+         * (issue #205) for the identical shape of bug. */
+        if (g_thread_nurseries) GC_FREE(g_thread_nurseries);
+        g_thread_nurseries = ns;
+        g_thread_nurseries_cap = nc;
+    }
+    g_thread_nurseries[g_thread_nurseries_count++].nursery = &gc_nursery;
+
+    uintptr_t base  = (uintptr_t)gc_nursery.base;
+    uintptr_t limit = (uintptr_t)gc_nursery.limit;
+    uintptr_t old_min = atomic_load_explicit(&g_nursery_table_min, memory_order_relaxed);
+    while (base < old_min &&
+           !atomic_compare_exchange_weak_explicit(&g_nursery_table_min, &old_min, base,
+                                                   memory_order_relaxed, memory_order_relaxed))
+        ;
+    uintptr_t old_max = atomic_load_explicit(&g_nursery_table_max, memory_order_relaxed);
+    while (limit > old_max &&
+           !atomic_compare_exchange_weak_explicit(&g_nursery_table_max, &old_max, limit,
+                                                   memory_order_relaxed, memory_order_relaxed))
+        ;
+    pthread_mutex_unlock(&g_thread_nurseries_lock);
+}
+
+/*
+ * Is `p` resident in some OTHER currently-registered thread's nursery slab
+ * (the calling thread's own bounds are checked separately, and more
+ * cheaply, by each caller before this is ever reached)? Cheap global range
+ * pre-check first (single pair of atomic loads, no lock) so the common case
+ * -- pointer isn't in any nursery, e.g. an ordinary Boehm-tenured object --
+ * never touches g_thread_nurseries_lock at all.
+ *
+ * `precise` selects which bound to check a candidate thread's slab against:
+ *
+ *   - true  (used by in_nursery(), below, during a minor collection only):
+ *     bound against that thread's CURRENT `top`. Every other registered
+ *     thread is parked under stop-the-world for the full duration of a
+ *     collection (see gc_gen_minor_collect()'s own comment), so reading
+ *     another thread's `top` with a plain load is race-free and gives an
+ *     exact answer -- important here because a false positive would hand
+ *     evacuate() a bogus header to interpret from unallocated/zeroed nursery
+ *     space (obj_size()/scan_object() would abort on the garbage type tag).
+ *
+ *   - false (used by gc_gen_ptr_in_any_nursery(), below, for gc_wb_slot's
+ *     recording-side check -- issue #220 point 5): bound against that
+ *     thread's `limit` instead. This runs from ordinary mutator code with
+ *     NO stop-the-world in effect, so another thread's `top` can be
+ *     concurrently advancing via its own lock-free bump-pointer allocator
+ *     (gc_nursery_alloc's plain `gc_nursery.top = next`) -- reading it here
+ *     would be a data race. `base`/`limit` are written exactly once, at
+ *     that thread's own registration, and never touched again, so they are
+ *     always safe to read cross-thread. Bounding against `limit` instead of
+ *     `top` is over-inclusive (may treat some not-yet-allocated tail bytes
+ *     as "nursery-resident"), but that is harmless here: gc_wb_slot never
+ *     dereferences the header itself, it only records the SLOT address into
+ *     gc_dirty_slots for evacuate() to re-examine later, under the precise/
+ *     stop-the-world check above, at the next minor GC -- a spurious record
+ *     just costs one redundant (and safe) evacuate() call on a value that
+ *     turns out not to be nursery-resident after all. */
+static bool ptr_in_other_thread_nursery(const void *p, bool precise) {
+    uintptr_t addr = (uintptr_t)p;
+    if (addr < atomic_load_explicit(&g_nursery_table_min, memory_order_relaxed) ||
+        addr >= atomic_load_explicit(&g_nursery_table_max, memory_order_relaxed))
+        return false;
+    bool found = false;
+    pthread_mutex_lock(&g_thread_nurseries_lock);
+    for (size_t i = 0; i < g_thread_nurseries_count; i++) {
+        GcNursery *gn = g_thread_nurseries[i].nursery;
+        if (gn == &gc_nursery) continue;  /* self -- already checked by caller */
+        const uint8_t *hi = precise ? gn->top : gn->limit;
+        if ((const uint8_t *)p >= gn->base && (const uint8_t *)p < hi) {
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_thread_nurseries_lock);
+    return found;
+}
+
+/* gc_wb_slot/gc_wb_slot_atomic_relaxed's recording-side check (src/gc.h,
+ * issue #220 point 5): is `p` resident in ANY currently-registered thread's
+ * nursery, including the calling thread's own? Previously that check only
+ * recognized the MAIN thread's own nursery bounds (gc_main_nursery_base/
+ * limit), so an actor writing a value resident in ITS OWN nursery into an
+ * already-tenured slot (the exact shape of issue #220's repro) was silently
+ * never recorded -- the dirty-slot mechanism is what makes a minor GC look
+ * at that slot again at all (a "stable" pinned object is not re-scanned by
+ * type), so under-recording here is NOT made moot by evacuate()'s own
+ * any-thread fix above: that fix only helps once something actually asks
+ * evacuate() to look at the slot's value again, and dirty-slot recording is
+ * what causes that ask for an already-stable tenured object. The two
+ * mechanisms are complementary, not redundant -- both are required. */
+bool gc_gen_ptr_in_any_nursery(const void *p) {
+    if ((const uint8_t *)p >= gc_nursery.base && (const uint8_t *)p < gc_nursery.limit)
+        return true;
+    return ptr_in_other_thread_nursery(p, false);
+}
+
 static void alloc_thread_nursery(void) {
     size_t sz = gen_nursery_size;
     uint8_t *slab = (uint8_t *)GC_MALLOC_UNCOLLECTABLE(sz);
@@ -70,6 +238,7 @@ static void alloc_thread_nursery(void) {
     gc_nursery.base  = slab;
     gc_nursery.top   = slab;
     gc_nursery.limit = slab + sz;
+    register_thread_nursery();
 }
 
 /* ── Dirty-slot buffer allocation ────────────────────────────────────────── */
@@ -156,9 +325,19 @@ static void pinned_add(void *obj) {
 
 static uint8_t *collect_top;  /* snapshot of nursery.top at collection start */
 
+/*
+ * Issue #220 Candidate B: fast path checks the COLLECTING thread's own
+ * nursery first (cheap TLS reads, no lock) -- this is the overwhelmingly
+ * common case (an object a thread itself allocated and is now evacuating
+ * via its own roots) and MUST stay this cheap since it fires on essentially
+ * every live pointer touched during every minor collection. Only on a miss
+ * does this fall back to ptr_in_other_thread_nursery(), which checks every
+ * OTHER live thread's nursery (see that function's own comment for why that
+ * fallback itself stays cheap on ITS common case too). */
 static inline bool in_nursery(const void *p) {
-    return (const uint8_t *)p >= gc_nursery.base &&
-           (const uint8_t *)p <  collect_top;
+    if ((const uint8_t *)p >= gc_nursery.base && (const uint8_t *)p < collect_top)
+        return true;
+    return ptr_in_other_thread_nursery(p, true);
 }
 
 /* ── Work list (BFS queue of promoted objects to scan) ───────────────────── */
