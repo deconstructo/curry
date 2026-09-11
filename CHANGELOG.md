@@ -1,5 +1,47 @@
 # Changelog
 
+### 1.23.8 - 2026-09-11
+
+**Generational GC backend — corruption and deadlock fixes**
+
+All of the following affect only the experimental, opt-in `--gc
+generational` backend (never used by the default Boehm backend) and were
+found via a sustained investigation into a cluster of related heap-
+corruption and hang reports (#144, #215, #217, #220, #222, #223):
+
+- `gc_nursery_refill()`'s fallback path (used whenever a minor collection
+  isn't safe to run — e.g. the reader/compiler under `gc_inhibit_minor()`,
+  or the tree-walker) allocated straight from Boehm without ever
+  registering the object for future GC scanning, so a nursery pointer
+  written into one of its fields afterward could silently dangle once
+  that nursery region was reused (#217).
+- Loading a precompiled `.scc` file's constant pool ran unprotected
+  against a concurrent minor collection (#144), and separately allocated
+  a `Chunk`'s bytecode buffer from nursery-eligible memory even though
+  nothing scans/updates that field during evacuation — an actor could be
+  executing bytecode straight out of a buffer the collector had already
+  reset out from under it (#222).
+- The write barrier recording a tenured-object-field write only
+  recognized the *main* thread's nursery bounds, and, more fundamentally,
+  object evacuation during a minor collection only recognized the
+  *collecting* thread's own nursery — so a value written or received by
+  one actor and still resident in *that actor's* nursery could be missed
+  entirely by another thread's collection, corrupting fields like
+  `TVar.value` under concurrent `tvar-write!` load (#215, #220). Fixed by
+  having evacuation recognize any live thread's nursery, safe under the
+  stop-the-world protocol already introduced in 1.23.7.
+- An actor receiving a mailbox message could end up parked mid-safepoint
+  while still holding its own mailbox's mutex, deadlocking against any
+  other thread concurrently sending to it (#223).
+
+**Fixed**
+
+- `modules_define_library`/`modules_define_r6rs_library` held raw locals
+  across GC-triggering calls (`vm_eval`, `scm_cons`) without protecting
+  them from a moving collection — a real, independent hardening in the
+  same area as the corruption fixes above, closed as part of the same
+  investigation.
+
 ### 1.23.7 - 2026-09-09
 
 **Security — unchecked-cast sweep**
