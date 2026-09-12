@@ -264,14 +264,39 @@ val_t sx_diff(val_t expr, val_t var);                        /* ∂/∂var (real
 val_t sx_wirtinger(val_t expr, val_t var, bool is_dbar);     /* ∂/∂z or ∂/∂z̄ */
 val_t sx_integrate(val_t expr, val_t var);                   /* antiderivative ∫ ... dx */
 val_t sx_simplify(val_t expr);                               /* algebraic simplification */
-/* Bumps sx_simplify's own memoization generation counter (issue #137),
- * invalidating every SymExpr node's cached "already fully simplified"
- * tag. Must be called by anything that changes what simplification
- * actually DOES for existing operators -- currently sx_rule_add
- * (sx_rules.c) and sx_algebra_define (sx_algebra.c) -- so a node
- * simplified before a new rule/algebra property was registered doesn't
- * get silently served stale from cache after the registration. */
+/* Issue #195: scoped memoization invalidation, superseding #137/#140's
+ * single global generation counter. Bumps EVERY tracked operator and
+ * variable slot -- a true, unconditionally-safe global invalidation,
+ * kept for callers that don't know (or don't want to compute) which
+ * specific operator/variable actually changed. Prefer the scoped
+ * variants below when the affected operator/variable is known, since
+ * this one defeats memoization for the WHOLE cache, not just nodes
+ * that actually depended on what changed (see #195 for the DoS this
+ * distinction closes). */
 void  sx_invalidate_simplify_cache(void);
+/* Scoped invalidation: bumps only the generation slot for this specific
+ * operator symbol (plus the shared, always-safe overflow slot -- see
+ * symbolic.c's op_generation_table). Call whenever a rule/algebra
+ * registration changes what simplifying THIS operator does
+ * (sx_rule_add/sx_rules_clear in sx_rules.c, sx_algebra_define in
+ * sx_algebra.c). A SymExpr node's cached result stays valid across this
+ * call unless the node actually consulted this exact operator (directly,
+ * or transitively through a subexpression that did) during its own
+ * simplification. */
+void  sx_invalidate_simplify_cache_op(val_t op);
+/* Scoped invalidation: bumps only the generation slot for this specific
+ * variable NAME (plus the shared overflow slot). Variables are tracked
+ * by NAME, not SymVar object identity, matching how the rest of
+ * symbolic.c already treats same-named SymVars as the same logical
+ * variable (see symbolic.c:sx_equal and friends). Call whenever a
+ * SymVar's assumption flags change (eval.c's S_WITH_ASSUMPTIONS,
+ * builtins_curry.c's assume!/drop-assumption!/with-assumptions codegen
+ * support). Structural limitation (documented, not a bug): a registered
+ * rule/algebra closure that closes over a SymVar not among an
+ * expression's own args, and branches on that variable's assumption
+ * flags, creates a dependency this scheme cannot see -- no args-tree-
+ * based tracking scheme can close this gap; see #195. */
+void  sx_invalidate_simplify_cache_var(val_t var_name);
 val_t sx_substitute(val_t expr, val_t var, val_t val);       /* substitute var=val */
 bool  sx_equal(val_t a, val_t b);                            /* structural equality */
 bool  sx_depends_on(val_t expr, val_t var);                  /* true if expr contains var */

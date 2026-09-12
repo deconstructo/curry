@@ -149,13 +149,14 @@ static val_t prim_assume(int ac, val_t *av, void *ud) {
     uint32_t flag = sx_assumption_flag(av[1]);
     if (flag) {
         as_symvar(av[0])->hdr.flags |= flag;
-        /* Issue #137 follow-up: sx_simplify's memoization cache is
-         * keyed on rule/algebra generation only; simplification results
-         * also depend on SymVar assumption flags (sqrt(x^2) -> |x| vs.
-         * x), so a change here must invalidate the cache too -- see
-         * eval.c's S_WITH_ASSUMPTIONS's identical fix for the same
-         * class of mutation via a different entry point. */
-        sx_invalidate_simplify_cache();
+        /* Issue #137/#195 follow-up: sx_simplify's memoization cache
+         * tracks per-variable dependencies now (not a single global
+         * generation); simplification results also depend on SymVar
+         * assumption flags (sqrt(x^2) -> |x| vs. x), so a change here
+         * must invalidate this specific variable's slot -- see eval.c's
+         * S_WITH_ASSUMPTIONS's identical fix for the same class of
+         * mutation via a different entry point. */
+        sx_invalidate_simplify_cache_var(as_symvar(av[0])->name);
     }
     return V_VOID;
 }
@@ -171,7 +172,7 @@ static val_t prim_drop_assumption(int ac, val_t *av, void *ud) {
     uint32_t flag = sx_assumption_flag(av[1]);
     if (flag) {
         as_symvar(av[0])->hdr.flags &= ~flag;
-        sx_invalidate_simplify_cache(); /* see prim_assume's identical comment */
+        sx_invalidate_simplify_cache_var(as_symvar(av[0])->name); /* see prim_assume's identical comment */
     }
     return V_VOID;
 }
@@ -190,14 +191,14 @@ static val_t prim_assumption_set(int ac, val_t *av, void *ud) {
     (void)ud; (void)ac;
     if (!vis_symvar(av[0])) return V_VOID;
     as_symvar(av[0])->hdr.flags |= (uint32_t)vunfix(av[1]);
-    sx_invalidate_simplify_cache(); /* see prim_assume's identical comment */
+    sx_invalidate_simplify_cache_var(as_symvar(av[0])->name); /* see prim_assume's identical comment */
     return V_VOID;
 }
 static val_t prim_assumption_restore(int ac, val_t *av, void *ud) {
     (void)ud; (void)ac;
     if (!vis_symvar(av[0])) return V_VOID;
     as_symvar(av[0])->hdr.flags = (uint32_t)vunfix(av[1]);
-    sx_invalidate_simplify_cache(); /* see prim_assume's identical comment */
+    sx_invalidate_simplify_cache_var(as_symvar(av[0])->name); /* see prim_assume's identical comment */
     return V_VOID;
 }
 

@@ -127,7 +127,11 @@ val_t sx_make_expr(val_t op, int nargs, val_t *args) {
     e->hdr.flags = 0;
     e->op        = op;
     e->nargs     = (uint32_t)nargs;
-    e->simplify_gen = 0; /* zero-init is automatic via GC too; explicit for clarity */
+    /* zero-init (op_deps/var_deps/max_gen all 0, "never cached") is
+     * automatic via GC too; explicit for clarity -- see object.h. */
+    memset(e->op_deps, 0, sizeof(e->op_deps));
+    memset(e->var_deps, 0, sizeof(e->var_deps));
+    e->max_gen = 0;
     for (int i = 0; i < nargs; i++) e->args[i] = args[i];
     return vptr(e);
 }
@@ -239,121 +243,447 @@ static bool decompose_trig_sq(val_t term,
  * threshold, confirmed during #134's own testing to burn 20-30+ seconds
  * of CPU under a generous stack ulimit before the guard ever engages.
  *
- * Fixed with a generation-tagged memoization cache: SymExpr's own
- * dedicated simplify_gen field (see object.h -- issue #140 moved this
- * off hdr.flags, see below) stores the g_sx_simplify_generation value
- * in effect the last time this exact node was fully simplified;
- * sx_simplify (the public entry point, below sx_simplify_impl) checks
- * that tag first and returns the node UNCHANGED with no recursion at
- * all if it matches the CURRENT generation -- turning the "wrap an
- * already-simplified result" pattern back into O(depth) total, since
- * each wrap only ever simplifies the ONE new outer node, never
- * re-walking the (already-tagged) tree beneath it.
+ * Fixed with a generation-tagged memoization cache, originally (per
+ * #137/#140) a single global counter -- simple, but #140 found it let
+ * one cheap define-rule/define-algebra call interleaved per step of an
+ * otherwise-cheap deep-expression build defeat memoization ENTIRELY
+ * (invalidating the whole cache, not just nodes touching the operator
+ * that actually changed), reintroducing the O(depth^2) DoS this cache
+ * exists to close.
  *
- * The generation counter exists because simplification is not a fixed
- * function of an expression's own shape alone: `define-rule`/
- * `define-algebra` register new rules/algebra properties at runtime
- * (sx_rule_add / sx_algebra_define), which can change what "fully
- * simplified" even means for operators already in use. A bare one-bit
- * "already simplified" tag would let a node simplified BEFORE a new
- * rule was registered keep being served stale from cache after the
- * registration, if a script kept building on top of it -- a real
- * correctness regression, not just a missed optimization. Both
- * registration functions call sx_invalidate_simplify_cache() (declared
- * in symbolic.h), which bumps this counter, so every previously-cached
- * tag stops matching and the next sx_simplify call on each affected
- * node redoes the full pass under the new rule set.
+ * Issue #195 replaces the single global counter with PER-OPERATOR and
+ * PER-VARIABLE scoped generation tracking:
  *
- * Issue #140 found two follow-up problems with this scheme, both from
- * independent review of #137's own fix:
+ *   - op_generation_table / var_generation_table (below): fixed-size,
+ *     open-addressed tables mirroring sx_rules.c's rtab / sx_algebra.c's
+ *     atab -- slot never reassigned once claimed, rwlock guards
+ *     claiming only, reads are lock-free atomic loads once a slot
+ *     exists. Keyed by operator symbol / SymVar NAME symbol (not SymVar
+ *     object identity -- multiple distinct SymVars can share a name and
+ *     are the same logical variable elsewhere in this file, e.g.
+ *     sx_equal's vis_symvar case), both permanently-interned symbols
+ *     (GC_MALLOC_UNCOLLECTABLE, never moved -- see symbol.c), so unlike
+ *     rtab/atab these tables need no GC scanner.
+ *   - Each SymExpr node records which slots its OWN simplification
+ *     actually depended on (op_deps/var_deps bitmasks, object.h) and the
+ *     max generation those slots had AT CACHE TIME (max_gen). A cache
+ *     hit re-checks: is the CURRENT generation of every tracked slot
+ *     still <= max_gen? Bounded by table capacity, not tree depth --
+ *     the key property that closes the O(depth^2) DoS, since a deep but
+ *     narrow expression touches only a handful of distinct operators
+ *     regardless of its depth.
+ *   - Soundness (this is the fix for a gap #195's own design review
+ *     caught before any code was written): a node's operator dependency
+ *     must be the operator sx_simplify() actually QUERIED for that
+ *     node -- se->op, read and locked in via op_gen_touch() BEFORE
+ *     sx_simplify_impl runs any rule/algebra lookup for it -- never
+ *     derived from the shape of whatever the lookup rewrites it to.
+ *     E.g. `(- a 0)` rewrites to a `neg(a)` node; if the dependency were
+ *     derived from the RESULT's own top-level op (neg) instead of the
+ *     op actually queried (sub), a later `define-rule` for `-` would
+ *     never invalidate this cached rewrite -- exactly the silent-
+ *     staleness class #140 exists to prevent. sx_simplify implements
+ *     this via a thread-local stack of per-call-frame dependency
+ *     accumulators (g_sx_deps_stack, below): every nested sx_simplify()
+ *     call made WHILE processing node N's own frame -- whether a plain
+ *     child recursion or a rule/algebra rewrite's own recursive
+ *     re-simplify -- merges its contribution into N's frame, with no
+ *     change needed to sx_simplify_impl's own (large, rewrite-heavy)
+ *     body: it already calls sx_simplify(), not sx_simplify_impl(),
+ *     for every recursive step, including every rewrite continuation.
+ *   - Structural limitation (not a bug -- cannot be closed by any
+ *     design in this category, per #195's own design-validation pass):
+ *     sx_rule_add/sx_algebra_define register arbitrary Scheme closures
+ *     (guard_fn/action_fn/relations_fn). A closure that closes over a
+ *     SymVar NOT among the expression's own args, and branches on that
+ *     variable's assumption flags, creates a dependency invisible to
+ *     any args-tree-based tracking scheme, this one included. Accepted,
+ *     documented limitation -- do not attempt to "fix" this without a
+ *     fundamentally different (non-tree-based) design.
+ *   - Capacity (#195 finding 3): op_generation_table's real domain is
+ *     every operator symbol ever SEEN during simplification, not just
+ *     ones with a registered rule -- confirmed much larger than rtab's
+ *     own domain (rtab only grows via actual sx_rule_add calls). Sized
+ *     generously (256 op slots / 128 var slots) rather than made
+ *     growable, with the LAST slot of each table permanently reserved
+ *     as a safe overflow/catch-all: an operator or variable that can't
+ *     claim a real slot (table genuinely exhausted -- implausible under
+ *     256/128 slots outside a deliberately adversarial workload) is
+ *     tracked via the overflow slot instead, which every mutation of
+ *     that kind (op or var) bumps unconditionally -- an always-correct,
+ *     if coarser, fallback for just the overflowing operator/variable,
+ *     never for the whole cache. A fixed table was chosen over a
+ *     growable one for simplicity: growing rtab/atab-style tables under
+ *     their own rwlock is well-precedented in this codebase, but doing
+ *     it for tables consulted on literally every sx_simplify call (not
+ *     just rule-bearing operators) adds real complexity for a case 256/
+ *     128 slots already covers comfortably.
  *
- *   1. Invalidation is GLOBAL, not scoped to the operator/variable that
- *      actually changed -- interleaving one cheap define-rule/
- *      define-algebra call per step of an otherwise-cheap deep-
- *      expression construction defeats memoization entirely,
- *      reintroducing the O(depth^2) DoS this whole cache exists to
- *      close. A proper fix needs per-operator AND per-variable scoped
- *      invalidation (assumption changes are per-SymVar, not
- *      per-operator, so the two invalidation sources need reconciling
- *      too). Deliberately NOT attempted here: a design was drafted and
- *      independently validated in the session that produced this fix,
- *      and while directionally buildable, it surfaced a real soundness
- *      gap (a node's tracked operator-dependency set must be derived
- *      from the operator sx_simplify_impl actually QUERIED via
- *      sx_rule_try/sx_algebra_lookup, not the operator of whatever
- *      result it rewrites to -- e.g. `(- a 0)` rewrites to a `neg(a)`
- *      node, silently losing the tracked dependency on SUB if derived
- *      from the result's own top-level op instead) and a structural
- *      ceiling no design in this category can close (sx_rule_add/
- *      sx_algebra_define register arbitrary Scheme closures; one that
- *      closes over a SymVar not among the expression's own args and
- *      branches on its assumption flags creates a dependency invisible
- *      to any args-tree-based tracking scheme). Filed as its own
- *      follow-up issue with the validated design, the soundness fix,
- *      and the capacity-sizing findings (a 128-slot per-operator table
- *      is plausibly exhausted by an ORDINARY program's operator
- *      vocabulary, not just an adversarial one) preserved for whoever
- *      picks it up.
- *
- *   2. The generation counter itself was only 32 bits (constrained by
- *      living inside SymExpr's shared hdr.flags field), and reliably
- *      wrapped in ~3 minutes under tight invalidation (confirmed via a
- *      repro driving ~22M cheap rule-registration calls/sec) -- letting
- *      a stale cached node get served as CURRENT after wraparound, a
- *      silent correctness bug, not just a missed optimization. THIS is
- *      what this change fixes: SymExpr is its own dedicated struct (not
- *      a layout shared with other heap object types the way hdr.flags
- *      is), so a wider, private field costs nothing to add. At 64 bits,
- *      wrapping the SAME workload that reached 2^32 in ~3 minutes would
- *      take on the order of tens of thousands of years -- computationally
- *      infeasible. */
-/* Plain uint64_t, NOT _Atomic-qualified: __atomic_load_n/__atomic_add_fetch
- * require a plain type (see runtime.c's identical convention/comment for
- * g_jit_arith_tainted et al.) -- curry's own actors are real OS threads,
- * so a script running define-rule/define-algebra/assume! on one actor
- * while another is mid-sx_simplify needs at least a non-torn read/write
- * here, even though the two-generations-out-of-sync worst case is just a
- * transient over-eager cache miss (an extra full simplify pass), not a
- * memory-safety issue -- SymExpr's own simplify_gen tag is a plain word
- * write with no such cross-thread guarantee, matching how every other
- * per-object flags field in this codebase is handled (see review notes
- * on issue #137: no crash found in an actor stress test). Skipping 0 on
- * increment reserves it for "never simplified" (sx_make_expr always
- * zero-initializes simplify_gen), so a 2^64 wraparound (already
- * computationally infeasible on its own, see above) still couldn't make
- * a fresh, never-simplified node read as cache-valid even in principle.
- *
- * The skip-0 step uses a compare-exchange retry loop rather than a plain
- * fetch-add followed by a corrective second fetch-add: a second review
- * round found that two separate atomic RMW ops leave a real window, right
- * when the counter lands on 0 after wraparound, during which another
- * thread's concurrent load can observe 0 before the corrective add runs --
- * reintroducing the exact "never-simplified node misread as cached" bug
- * this skip exists to prevent. A CAS loop makes the "then skip 0" step
- * atomic with the increment itself, so no other thread ever observes an
- * intermediate 0.
- *
- * Ordering is acquire/release, not relaxed: this generation counter is
- * the only thing establishing a happens-before edge between "a rule/
- * algebra/assumption mutation just happened" (an ordinary, non-atomic
- * store, e.g. prim_assume's `hdr.flags |= flag`) and "another actor
- * thread observes the resulting generation bump and therefore knows to
- * recompute." Relaxed ordering would let a weakly-ordered CPU (this
- * codebase explicitly targets arm64) reorder that ordinary store past
- * the atomic bump, so a thread could see the new generation while still
- * reading the OLD assumption flags/rule table -- matches the
- * release/acquire pattern runtime.c already uses for g_jit_arith_tainted
- * for the identical cross-thread-visibility reason, not relaxed. */
-static uint64_t g_sx_simplify_generation = 1;
+ * Generation counters keep #140's already-fixed conventions: uint64_t
+ * (not _Atomic-qualified -- __atomic_load_n/compare_exchange require a
+ * plain type, matching runtime.c's g_jit_arith_tainted convention),
+ * skip-0-on-wraparound via a CAS retry loop (0 is reserved for "slot
+ * never bumped" / max_gen==0 is reserved for "node never cached"),
+ * acquire/release ordering (establishes happens-before between an
+ * ordinary, non-atomic mutation like prim_assume's `hdr.flags |= flag`
+ * and another actor thread observing the resulting generation bump and
+ * therefore knowing to recompute -- relaxed ordering would let a
+ * weakly-ordered CPU, e.g. arm64, reorder that plain store past the
+ * atomic bump). See #140's original PR for why each of these choices
+ * matters on its own (32-bit wraparound reached in ~3 minutes under
+ * tight invalidation; a plain fetch-add-then-corrective-add left a
+ * window where a concurrent load could observe an intermediate 0). */
 
-void sx_invalidate_simplify_cache(void) {
-    uint64_t cur = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_RELAXED);
+#define SX_OP_GEN_TABLE_SIZE   256
+#define SX_OP_GEN_OVERFLOW_IDX (SX_OP_GEN_TABLE_SIZE - 1)
+#define SX_OP_GEN_USABLE       (SX_OP_GEN_TABLE_SIZE - 1)
+#define SX_OP_MASK_WORDS       4   /* 256 bits: 255 usable slots + 1 overflow */
+
+#define SX_VAR_GEN_TABLE_SIZE   128
+#define SX_VAR_GEN_OVERFLOW_IDX (SX_VAR_GEN_TABLE_SIZE - 1)
+#define SX_VAR_GEN_USABLE       (SX_VAR_GEN_TABLE_SIZE - 1)
+#define SX_VAR_MASK_WORDS       2  /* 128 bits: 127 usable slots + 1 overflow */
+
+typedef struct { val_t key; uint64_t gen; } SxGenSlot;
+
+static SxGenSlot sx_op_gen_table[SX_OP_GEN_TABLE_SIZE];
+static SxGenSlot sx_var_gen_table[SX_VAR_GEN_TABLE_SIZE];
+static pthread_rwlock_t sx_op_gen_lock  = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_rwlock_t sx_var_gen_lock = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_once_t sx_gen_tables_once = PTHREAD_ONCE_INIT;
+
+static void sx_gen_tables_init_once(void) {
+    for (int i = 0; i < SX_OP_GEN_TABLE_SIZE; i++) {
+        sx_op_gen_table[i].key = V_VOID;
+        sx_op_gen_table[i].gen = 0;
+    }
+    for (int i = 0; i < SX_VAR_GEN_TABLE_SIZE; i++) {
+        sx_var_gen_table[i].key = V_VOID;
+        sx_var_gen_table[i].gen = 0;
+    }
+    /* Code-review finding: unlike every normal slot (which gets a real,
+     * clock-drawn nonzero gen the MOMENT it's first claimed -- see
+     * sx_op_gen_index/sx_var_gen_index's own "Issue #195 correctness fix"
+     * comments), the reserved overflow slot is never "claimed" at all --
+     * it's always index SX_OP_GEN_OVERFLOW_IDX/SX_VAR_GEN_OVERFLOW_IDX,
+     * fixed from the start. Left at the 0 init value, a node whose entire
+     * dependency set resolves only to the overflow slot (i.e., every
+     * operator/variable it touches happens to have overflowed its table)
+     * would get max_gen==0 the first time it's cached -- indistinguishable
+     * from object.h's own "never cached" sentinel, silently defeating
+     * memoization for that node specifically until the overflow slot
+     * happens to be bumped by some unrelated invalidation. Benign in
+     * effect (the node is just never served from cache, always
+     * recomputed -- never a WRONG answer), but it contradicts this file's
+     * own stated invariant for every other slot. Giving it a real,
+     * hardcoded nonzero gen here closes the gap the same way a claim
+     * would, without needing sx_gen_clock_next() (not yet declared at this
+     * point in the file) -- 1 is guaranteed distinct from and older than
+     * every value sx_gen_clock_next() itself can ever return (its first
+     * call returns 2: g_sx_gen_clock starts at 1, is incremented, then
+     * returned), so any later real invalidation of the overflow slot
+     * still correctly compares as newer. */
+    sx_op_gen_table[SX_OP_GEN_OVERFLOW_IDX].gen  = 1;
+    sx_var_gen_table[SX_VAR_GEN_OVERFLOW_IDX].gen = 1;
+}
+
+/* Both independent code-review and security-review passes flagged this as a
+ * genuine (if benign-in-practice) data race: a plain, unlocked int flag
+ * guarding first-use initialization of tables that every actor thread reads
+ * and writes, in a file otherwise meticulous about atomics/rwlocks for
+ * cross-actor visibility (see g_sx_gen_clock's own comment). Every racing
+ * writer stored the same values, so no divergence was ever observable on
+ * common platforms -- but it's still UB under C11 and would be flagged by
+ * ThreadSanitizer. pthread_once gives the same "run exactly once, visible
+ * to every thread before any of them proceeds past this call" guarantee
+ * `rtab_init`/`atab_init` already provide their own tables via a distinct
+ * mechanism (a one-time init call from modules_init(), not first-use lazy
+ * init) -- pthread_once is used here instead since this table's first use
+ * can genuinely come from any actor thread, not just startup. */
+static void sx_gen_tables_init(void) {
+    pthread_once(&sx_gen_tables_once, sx_gen_tables_init_once);
+}
+
+/* Issue #195 correctness fix (found while validating this exact design
+ * against sx_algebra_tests.scm's own pre-existing #137 regression test --
+ * "a rule registered AFTER caching still fires on the cached node"): op
+ * and var slots CANNOT each keep independent, self-relative generation
+ * counters (e.g. each doing its own skip-0 CAS increment starting from
+ * a shared initial value) if a node's single max_gen scalar is compared
+ * against the CURRENT max over several DIFFERENT tracked slots. Concrete
+ * failure: a node depends on op slot A (gen 1) and var slot B (gen 6,
+ * already bumped several times by earlier unrelated assume!/with-
+ * assumptions calls) -- max_gen recorded at cache time is max(1,6)=6.
+ * Later, ONLY slot A is bumped, 1 -> 2. The revalidation check computes
+ * current max(2,6)=6, which still equals the stored 6 -- a false HIT,
+ * silently serving a result that predates a real, relevant rule change.
+ * The stored single-scalar max is only a sound proxy for "did anything
+ * tracked change" when every slot's generation values are drawn from
+ * ONE shared, globally monotonic sequence -- so a slot being bumped
+ * ALWAYS receives a value strictly greater than every generation number
+ * issued anywhere before it, regardless of which specific slot (op or
+ * var, and regardless of that slot's own prior value) receives it. This
+ * restores the property the design relies on ("all counters are
+ * monotonic" only actually implies what's needed here if it's the SAME
+ * counter sequence backing every tracked slot). g_sx_gen_clock is that
+ * shared source; sx_gen_bump draws the next value from it and stores it
+ * (a plain assignment of a fresh, already-unique value, not a
+ * read-modify-write on the destination slot itself -- no CAS needed
+ * there). Table slots initialise to 0 (below the clock's own starting
+ * value of 1), which doubles as a harmless edge case: a node whose
+ * ENTIRE dependency set has never been bumped even once ends up with
+ * max_gen==0, indistinguishable from "never cached" -- always a safe,
+ * if slightly wasteful (one missed optimization, not a wrong answer),
+ * outcome; see max_gen's own field comment in object.h. */
+static uint64_t g_sx_gen_clock = 1;
+
+static uint64_t sx_gen_clock_next(void) {
+    uint64_t cur = __atomic_load_n(&g_sx_gen_clock, __ATOMIC_RELAXED);
     uint64_t next;
     do {
         next = cur + 1;
         if (next == 0) next = 1;
-    } while (!__atomic_compare_exchange_n(&g_sx_simplify_generation, &cur, next,
+    } while (!__atomic_compare_exchange_n(&g_sx_gen_clock, &cur, next,
                                           0 /* not weak */, __ATOMIC_RELEASE, __ATOMIC_RELAXED));
+    return next;
+}
+
+static void sx_gen_bump(uint64_t *genp) {
+    __atomic_store_n(genp, sx_gen_clock_next(), __ATOMIC_RELEASE);
+}
+
+/* Find-or-claim a table slot for `key`, mirroring rtab/atab's open-
+ * addressing find_chain/atab_slot pattern exactly: fast read-locked scan
+ * first (the hot path -- every sx_simplify call on a SymExpr touches
+ * this for its own operator), falling back to a write-locked claim only
+ * the first time a given op/var is ever seen. Returns the reserved
+ * overflow index if the table is genuinely full. */
+static int sx_op_gen_index(val_t op) {
+    unsigned h = (unsigned)((uintptr_t)op >> 3);
+    int start = (int)(h % (unsigned)SX_OP_GEN_USABLE);
+
+    pthread_rwlock_rdlock(&sx_op_gen_lock);
+    for (int i = 0; i < SX_OP_GEN_USABLE; i++) {
+        int idx = (start + i) % SX_OP_GEN_USABLE;
+        val_t cur = sx_op_gen_table[idx].key;
+        if (cur == op) { pthread_rwlock_unlock(&sx_op_gen_lock); return idx; }
+        if (cur == V_VOID) break;
+    }
+    pthread_rwlock_unlock(&sx_op_gen_lock);
+
+    pthread_rwlock_wrlock(&sx_op_gen_lock);
+    int result = SX_OP_GEN_OVERFLOW_IDX;
+    for (int i = 0; i < SX_OP_GEN_USABLE; i++) {
+        int idx = (start + i) % SX_OP_GEN_USABLE;
+        if (sx_op_gen_table[idx].key == op) { result = idx; break; }
+        if (sx_op_gen_table[idx].key == V_VOID) {
+            /* Issue #195 correctness fix: a slot's gen must become a real,
+             * nonzero, clock-ordered value the MOMENT it's first claimed,
+             * not stay at its 0 init placeholder until some later explicit
+             * invalidation. Otherwise a node whose entire dependency set
+             * (op AND every var it touches) has never been invalidated
+             * even once ends up with max_gen==0 -- indistinguishable from
+             * "never cached" (object.h's own sentinel), silently defeating
+             * memoization for the common case of a program that never
+             * calls define-rule/define-algebra/assume! at all. See
+             * op_deps's field comment in object.h and this file's
+             * g_sx_gen_clock comment for the full reasoning. */
+            sx_op_gen_table[idx].key = op;
+            sx_op_gen_table[idx].gen = sx_gen_clock_next();
+            result = idx;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&sx_op_gen_lock);
+    return result;
+}
+
+static int sx_var_gen_index(val_t name) {
+    unsigned h = (unsigned)((uintptr_t)name >> 3);
+    int start = (int)(h % (unsigned)SX_VAR_GEN_USABLE);
+
+    pthread_rwlock_rdlock(&sx_var_gen_lock);
+    for (int i = 0; i < SX_VAR_GEN_USABLE; i++) {
+        int idx = (start + i) % SX_VAR_GEN_USABLE;
+        val_t cur = sx_var_gen_table[idx].key;
+        if (cur == name) { pthread_rwlock_unlock(&sx_var_gen_lock); return idx; }
+        if (cur == V_VOID) break;
+    }
+    pthread_rwlock_unlock(&sx_var_gen_lock);
+
+    pthread_rwlock_wrlock(&sx_var_gen_lock);
+    int result = SX_VAR_GEN_OVERFLOW_IDX;
+    for (int i = 0; i < SX_VAR_GEN_USABLE; i++) {
+        int idx = (start + i) % SX_VAR_GEN_USABLE;
+        if (sx_var_gen_table[idx].key == name) { result = idx; break; }
+        if (sx_var_gen_table[idx].key == V_VOID) {
+            /* See sx_op_gen_index's identical fix for why a freshly-
+             * claimed slot needs a real clock-drawn gen immediately,
+             * not the 0 init placeholder. */
+            sx_var_gen_table[idx].key = name;
+            sx_var_gen_table[idx].gen = sx_gen_clock_next();
+            result = idx;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&sx_var_gen_lock);
+    return result;
+}
+
+static inline void sx_bit_set(uint64_t *mask, int idx) {
+    mask[idx >> 6] |= ((uint64_t)1 << (idx & 63));
+}
+
+/* Claims (if needed) the slot for `op`, sets its bit in `mask_out`, and
+ * returns its CURRENT generation -- called by sx_simplify() BEFORE
+ * sx_simplify_impl runs any rule/algebra lookup for this exact op (see
+ * the soundness note in the long comment above), so the returned value
+ * can never be newer than whatever state that lookup actually saw. */
+static uint64_t sx_op_gen_touch(val_t op, uint64_t mask_out[SX_OP_MASK_WORDS]) {
+    sx_gen_tables_init();
+    int idx = sx_op_gen_index(op);
+    sx_bit_set(mask_out, idx);
+    return __atomic_load_n(&sx_op_gen_table[idx].gen, __ATOMIC_ACQUIRE);
+}
+static uint64_t sx_var_gen_touch(val_t name, uint64_t mask_out[SX_VAR_MASK_WORDS]) {
+    sx_gen_tables_init();
+    int idx = sx_var_gen_index(name);
+    sx_bit_set(mask_out, idx);
+    return __atomic_load_n(&sx_var_gen_table[idx].gen, __ATOMIC_ACQUIRE);
+}
+
+/* Cache-hit validity check: current generation of every tracked slot,
+ * lock-free (slots are never reassigned once claimed, so reading .gen
+ * without the rwlock is safe -- only claiming a NEW slot needs it). */
+static uint64_t sx_op_gen_current_max(const uint64_t mask[SX_OP_MASK_WORDS]) {
+    uint64_t m = 0;
+    for (int w = 0; w < SX_OP_MASK_WORDS; w++) {
+        uint64_t bits = mask[w];
+        while (bits) {
+            int b = __builtin_ctzll(bits);
+            bits &= bits - 1;
+            uint64_t g = __atomic_load_n(&sx_op_gen_table[w * 64 + b].gen, __ATOMIC_ACQUIRE);
+            if (g > m) m = g;
+        }
+    }
+    return m;
+}
+static uint64_t sx_var_gen_current_max(const uint64_t mask[SX_VAR_MASK_WORDS]) {
+    uint64_t m = 0;
+    for (int w = 0; w < SX_VAR_MASK_WORDS; w++) {
+        uint64_t bits = mask[w];
+        while (bits) {
+            int b = __builtin_ctzll(bits);
+            bits &= bits - 1;
+            uint64_t g = __atomic_load_n(&sx_var_gen_table[w * 64 + b].gen, __ATOMIC_ACQUIRE);
+            if (g > m) m = g;
+        }
+    }
+    return m;
+}
+
+void sx_invalidate_simplify_cache_op(val_t op) {
+    sx_gen_tables_init();
+    int idx = sx_op_gen_index(op);
+    sx_gen_bump(&sx_op_gen_table[idx].gen);
+    if (idx != SX_OP_GEN_OVERFLOW_IDX)
+        sx_gen_bump(&sx_op_gen_table[SX_OP_GEN_OVERFLOW_IDX].gen);
+}
+
+void sx_invalidate_simplify_cache_var(val_t var_name) {
+    sx_gen_tables_init();
+    int idx = sx_var_gen_index(var_name);
+    sx_gen_bump(&sx_var_gen_table[idx].gen);
+    if (idx != SX_VAR_GEN_OVERFLOW_IDX)
+        sx_gen_bump(&sx_var_gen_table[SX_VAR_GEN_OVERFLOW_IDX].gen);
+}
+
+void sx_invalidate_simplify_cache(void) {
+    /* True global invalidation -- every claimed slot in both tables,
+     * plus both overflow slots. O(table size), not O(cache size); kept
+     * for callers that don't know (or don't want to compute) exactly
+     * which operator/variable changed. Nothing in this codebase calls
+     * this anymore as of #195 (sx_rule_add/sx_algebra_define/
+     * sx_rules_clear/assume!/with-assumptions all now use the scoped
+     * variants above), but it's kept available and genuinely global,
+     * not repurposed to mean something narrower, so it can never become
+     * a silent-unsoundness trap for a future caller that assumes the
+     * old global-invalidation contract. */
+    sx_gen_tables_init();
+    pthread_rwlock_wrlock(&sx_op_gen_lock);
+    for (int i = 0; i < SX_OP_GEN_TABLE_SIZE; i++) sx_gen_bump(&sx_op_gen_table[i].gen);
+    pthread_rwlock_unlock(&sx_op_gen_lock);
+    pthread_rwlock_wrlock(&sx_var_gen_lock);
+    for (int i = 0; i < SX_VAR_GEN_TABLE_SIZE; i++) sx_gen_bump(&sx_var_gen_table[i].gen);
+    pthread_rwlock_unlock(&sx_var_gen_lock);
+}
+
+/* ---- Per-call-frame dependency accumulator stack (see the soundness
+ * note in the long comment above) ----
+ *
+ * Heap-backed (not a fixed on-stack/TLS array of raw pointers), grown
+ * on demand, per-thread: most actor threads never touch symbolic code
+ * at all, so a lazily-allocated pointer costs nothing for them, and a
+ * growable buffer avoids picking one fixed depth that's either wasteful
+ * for the common case or too shallow for a legitimately deep (if
+ * unusual) expression tree.
+ *
+ * Indexed by depth rather than holding raw pointers into this
+ * function's own C stack frame is a deliberate exception-safety choice:
+ * a rule's guard_fn/action_fn or an algebra's relations_fn is arbitrary
+ * Scheme, free to call `error`/raise and unwind via longjmp through
+ * sx_simplify's own C stack frame without running its cleanup code. If
+ * the accumulator lived in THAT frame, an unwind would leave
+ * g_sx_deps_depth (thread-local, so it retains its value across the
+ * jump) pointing at a slot that's still perfectly valid storage --
+ * because it's in this static/heap buffer, not on the collapsed C
+ * stack -- but was never popped back down. The only consequence is a
+ * bounded, self-limiting "leak" of unused depth accounting for the rest
+ * of that thread's life (capped by SX_DEPS_STACK_HARD_MAX, at which
+ * point sx_simplify falls back to not caching at all rather than ever
+ * indexing out of bounds); a later, unrelated top-level call simply
+ * starts pushing frames at a higher starting depth than 0, which is
+ * internally self-consistent (each push/pop pair within one call still
+ * nests correctly relative to ITSELF) and never corrupts another
+ * thread's or another call's state, since g_sx_deps_stack is per-thread
+ * and each active call only ever reads/writes the slot(s) it pushed. */
+typedef struct {
+    uint64_t op[SX_OP_MASK_WORDS];
+    uint64_t var[SX_VAR_MASK_WORDS];
+    uint64_t max_gen;
+} SxDeps;
+
+#define SX_DEPS_STACK_HARD_MAX 65536
+
+static CURRY_THREAD_LOCAL SxDeps *g_sx_deps_stack = NULL;
+static CURRY_THREAD_LOCAL int     g_sx_deps_cap   = 0;
+static CURRY_THREAD_LOCAL int     g_sx_deps_depth = 0;
+
+/* Ensures g_sx_deps_stack has room for index `depth`; returns false (and
+ * leaves the stack untouched) if that would require growing past
+ * SX_DEPS_STACK_HARD_MAX -- the caller's job is to fall back to the
+ * always-safe "don't tag this node" path in that case. */
+static bool sx_deps_stack_reserve(int depth) {
+    if (depth < g_sx_deps_cap) return true;
+    if (depth >= SX_DEPS_STACK_HARD_MAX) return false;
+    int new_cap = g_sx_deps_cap ? g_sx_deps_cap * 2 : 64;
+    if (new_cap <= depth) new_cap = depth + 1;
+    if (new_cap > SX_DEPS_STACK_HARD_MAX) new_cap = SX_DEPS_STACK_HARD_MAX;
+    SxDeps *grown = (SxDeps *)realloc(g_sx_deps_stack, (size_t)new_cap * sizeof(SxDeps));
+    if (!grown) return false; /* OOM: safe fallback, same as hitting the hard cap */
+    g_sx_deps_stack = grown;
+    g_sx_deps_cap = new_cap;
+    return true;
+}
+
+static void sx_deps_merge_into_current(const uint64_t op_mask[SX_OP_MASK_WORDS],
+                                        const uint64_t var_mask[SX_VAR_MASK_WORDS],
+                                        uint64_t max_gen) {
+    if (g_sx_deps_depth <= 0) return;
+    SxDeps *cur = &g_sx_deps_stack[g_sx_deps_depth - 1];
+    for (int w = 0; w < SX_OP_MASK_WORDS; w++)  cur->op[w]  |= op_mask[w];
+    for (int w = 0; w < SX_VAR_MASK_WORDS; w++) cur->var[w] |= var_mask[w];
+    if (max_gen > cur->max_gen) cur->max_gen = max_gen;
 }
 
 static val_t sx_simplify_impl(val_t expr) {
@@ -1067,19 +1397,136 @@ static val_t sx_simplify_impl(val_t expr) {
     return sx_make_expr(op, n, sa);
 }
 
-/* Public entry point: the memoization fast-path for issue #137 (see the
- * long comment above sx_simplify_impl for the full rationale). Every
- * recursive call INSIDE sx_simplify_impl's own body calls this function
- * (not sx_simplify_impl directly), so a subexpression already tagged at
- * the current generation is returned unchanged with no further
- * recursion at any depth, not just at the top level. */
+/* Public entry point: the memoization fast-path for issue #137, scoped
+ * per-operator/per-variable as of #195 (see the long comment above
+ * sx_simplify_impl for the full rationale). Every recursive call INSIDE
+ * sx_simplify_impl's own body calls this function (not
+ * sx_simplify_impl directly) -- both plain child recursion and every
+ * rule/algebra rewrite's own re-simplify -- so a subexpression already
+ * cached and still valid is returned unchanged with no further
+ * recursion at any depth, not just at the top level, and every such
+ * call correctly contributes its own tracked dependencies to whichever
+ * node's frame is currently being computed (see
+ * sx_deps_merge_into_current / g_sx_deps_stack above). */
 val_t sx_simplify(val_t expr) {
-    uint64_t gen = __atomic_load_n(&g_sx_simplify_generation, __ATOMIC_ACQUIRE);
-    if (vis_symexpr(expr) && as_symexpr(expr)->simplify_gen == gen)
+    if (vis_symvar(expr)) {
+        /* Bare variables are always already "simplified"; still record
+         * a dependency on this var's own name into whatever frame is
+         * currently active, since the ENCLOSING node's own dispatch
+         * (sym_is_positive/sym_is_negative etc., a few lines further
+         * into sx_simplify_impl) may branch on its assumption flags. */
+        uint64_t var_mask[SX_VAR_MASK_WORDS] = {0};
+        uint64_t g = sx_var_gen_touch(as_symvar(expr)->name, var_mask);
+        static const uint64_t no_op_bits[SX_OP_MASK_WORDS] = {0};
+        sx_deps_merge_into_current(no_op_bits, var_mask, g);
         return expr;
+    }
+    if (!vis_symexpr(expr)) {
+        if (vis_tuple(expr)) return sx_simplify_impl(expr);
+        return expr; /* numbers, etc: nothing to track */
+    }
+
+    SymExpr *se0 = as_symexpr(expr);
+
+    /* Cache-hit check: is every slot this node's OWN prior computation
+     * depended on still at (or below) the generation recorded then?
+     *
+     * A SymExpr node returned unchanged by a rewrite elsewhere (e.g.
+     * `(- a 0)` simplifying straight to the pre-existing node `a`) can
+     * be a SHARED object multiple concurrent sx_simplify() calls (on
+     * different actor threads, or nested within the same thread) tag at
+     * once -- see the cache-store side below. max_gen is read with
+     * ACQUIRE and op_deps/var_deps with RELAXED, in that order: the
+     * store side always publishes mask updates (RELAXED fetch_or)
+     * strictly before its own max_gen update (RELEASE CAS), so an
+     * ACQUIRE load of max_gen that observes a given bump makes every
+     * mask bit set before that bump visible here too (release-sequence
+     * happens-before), without needing every individual word access to
+     * be a full acquire itself. */
+    uint64_t stored_max = __atomic_load_n(&se0->max_gen, __ATOMIC_ACQUIRE);
+    if (stored_max != 0) {
+        uint64_t op_mask[SX_OP_MASK_WORDS], var_mask[SX_VAR_MASK_WORDS];
+        for (int w = 0; w < SX_OP_MASK_WORDS; w++)
+            op_mask[w] = __atomic_load_n(&se0->op_deps[w], __ATOMIC_RELAXED);
+        for (int w = 0; w < SX_VAR_MASK_WORDS; w++)
+            var_mask[w] = __atomic_load_n(&se0->var_deps[w], __ATOMIC_RELAXED);
+        uint64_t cur_max = sx_op_gen_current_max(op_mask);
+        uint64_t var_max  = sx_var_gen_current_max(var_mask);
+        if (var_max > cur_max) cur_max = var_max;
+        if (cur_max <= stored_max) {
+            /* HIT: this node's own already-recorded deps become part of
+             * whatever the caller's frame is (if any) -- the caller's
+             * own eventual result transitively depends on everything
+             * this cached subtree depends on. */
+            sx_deps_merge_into_current(op_mask, var_mask, stored_max);
+            return expr;
+        }
+    }
+
+    /* MISS (or never cached): push a fresh frame for THIS node, seeded
+     * with the operator sx_simplify_impl is ABOUT to query (soundness:
+     * read before, never derived from the rewritten result's shape). */
+    int depth = g_sx_deps_depth;
+    if (!sx_deps_stack_reserve(depth)) {
+        /* Capacity fallback (see g_sx_deps_stack's comment): skip
+         * precise tracking for this node. Nested sx_simplify() calls
+         * made while computing it still merge into whatever frame WAS
+         * active (if any), which is conservative-safe; this node itself
+         * is simply never tagged/cached (max_gen stays 0 on the fresh
+         * node sx_make_expr allocates), so it's always recomputed. */
+        return sx_simplify_impl(expr);
+    }
+    {
+        SxDeps *frame0 = &g_sx_deps_stack[depth];
+        memset(frame0, 0, sizeof *frame0);
+        uint64_t g = sx_op_gen_touch(se0->op, frame0->op);
+        frame0->max_gen = g;
+    }
+    g_sx_deps_depth = depth + 1;
+
     val_t result = sx_simplify_impl(expr);
-    if (vis_symexpr(result))
-        as_symexpr(result)->simplify_gen = gen;
+
+    g_sx_deps_depth = depth; /* pop (frame's contents are still valid) */
+
+    /* Re-derive the frame pointer AFTER sx_simplify_impl returns, not
+     * before: a nested sx_simplify() call made WHILE computing `expr`
+     * (any child, or a rule/algebra rewrite's own recursive re-simplify)
+     * can itself need a deeper frame than g_sx_deps_stack currently has
+     * room for, triggering sx_deps_stack_reserve()'s realloc -- which
+     * can MOVE the whole array. A `frame` pointer captured before that
+     * call would then dangle; re-indexing by `depth` here always finds
+     * this call's own slot at its current (possibly relocated) address,
+     * since `depth` itself is a stable index, not a pointer. */
+    SxDeps *frame = &g_sx_deps_stack[depth];
+
+    if (vis_symexpr(result)) {
+        /* result may be a freshly-allocated node (the common case, not
+         * yet visible to any other thread -- these writes could be
+         * plain stores) OR a pre-existing SHARED node a rewrite path
+         * returned unchanged (e.g. `(- a 0)` -> `a`, see the cache-hit
+         * comment above) -- always use atomic RMW so a concurrent
+         * tagging of the SAME shared node from another call never loses
+         * an update. Masks (RELAXED fetch_or) are published strictly
+         * before max_gen (RELEASE CAS): see the cache-hit check's
+         * comment for why that specific order is what makes an ACQUIRE
+         * read of max_gen there see these bits too. */
+        SymExpr *rs = as_symexpr(result);
+        for (int w = 0; w < SX_OP_MASK_WORDS; w++)
+            if (frame->op[w]) __atomic_fetch_or(&rs->op_deps[w], frame->op[w], __ATOMIC_RELAXED);
+        for (int w = 0; w < SX_VAR_MASK_WORDS; w++)
+            if (frame->var[w]) __atomic_fetch_or(&rs->var_deps[w], frame->var[w], __ATOMIC_RELAXED);
+        uint64_t cur = __atomic_load_n(&rs->max_gen, __ATOMIC_RELAXED);
+        while (frame->max_gen > cur) {
+            if (__atomic_compare_exchange_n(&rs->max_gen, &cur, frame->max_gen,
+                                            1 /* weak */, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+                break;
+        }
+    }
+    /* Propagate this node's own contribution up into the (now-restored)
+     * enclosing frame too, if this call was itself made while an outer
+     * node's own frame was active. */
+    sx_deps_merge_into_current(frame->op, frame->var, frame->max_gen);
+
     return result;
 }
 

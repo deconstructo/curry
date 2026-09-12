@@ -5,7 +5,7 @@
 #include "gc.h"
 #include "builtins.h"  /* scm_cons */
 #include "eval.h"      /* apply_arr */
-#include "symbolic.h"  /* sx_invalidate_simplify_cache */
+#include "symbolic.h"  /* sx_invalidate_simplify_cache_op */
 #include <pthread.h>
 
 /* ---- Rule struct ---- */
@@ -149,11 +149,12 @@ void sx_rule_add(val_t pattern, val_t pvars,
         memory_order_relaxed);
     pthread_rwlock_unlock(&rtab_lock);
 
-    /* Issue #137: a node sx_simplify already cached as "fully
+    /* Issue #137/#195: a node sx_simplify already cached as "fully
      * simplified" before this rule existed must not keep being served
      * stale from that cache now that a new rule could change what
-     * simplifying its operator actually does. */
-    sx_invalidate_simplify_cache();
+     * simplifying its operator actually does -- scoped to just this
+     * operator (plus the shared overflow slot), not the whole cache. */
+    sx_invalidate_simplify_cache_op(op);
 }
 
 /* Fields sx_rule_try actually needs, copied out from under rtab_lock
@@ -331,29 +332,47 @@ void sx_rules_clear(val_t ruleset) {
      * cached as "simplified" under the removed rule's rewrite may no
      * longer be a fixpoint once the rule is gone), so this needs the
      * same invalidation sx_rule_add already does for the opposite
-     * (adding) direction. */
-    sx_invalidate_simplify_cache();
+     * (adding) direction.
+     *
+     * Issue #195: scoped, not global -- for a whole-table clear
+     * (ruleset == V_FALSE) every op currently present in rtab needs
+     * invalidating (this loop already walks the array either way, so
+     * that's mechanical); for a scoped ruleset clear, only the ops of
+     * slots that ACTUALLY had a rule unlinked. Collect the affected ops
+     * while under rtab_lock (rtab[i].op is stable, never reassigned
+     * once claimed -- see rtab's own declaration comment -- so reading
+     * it here is safe), then invalidate each after releasing the lock,
+     * matching this file's existing convention of never calling out to
+     * other subsystems while still holding rtab_lock. */
+    val_t affected[RTAB_SIZE];
+    int n_affected = 0;
     pthread_rwlock_wrlock(&rtab_lock);
     for (int i = 0; i < RTAB_SIZE; i++) {
         if (rtab[i].op == V_VOID) continue;
         if (ruleset == V_FALSE) {
+            if (rtab[i].head != NULL) affected[n_affected++] = rtab[i].op;
             rtab[i].head = NULL;
         } else {
             /* Remove rules belonging to this ruleset */
+            bool unlinked_any = false;
             SxRule **prev = &rtab[i].head;
             SxRule  *cur  = rtab[i].head;
             while (cur) {
                 if (cur->ruleset == ruleset) {
                     *prev = cur->next;
                     cur   = *prev;
+                    unlinked_any = true;
                 } else {
                     prev = &cur->next;
                     cur  = cur->next;
                 }
             }
+            if (unlinked_any) affected[n_affected++] = rtab[i].op;
         }
     }
     pthread_rwlock_unlock(&rtab_lock);
+
+    for (int i = 0; i < n_affected; i++) sx_invalidate_simplify_cache_op(affected[i]);
 }
 
 void sx_rules_gc_scan(void) {

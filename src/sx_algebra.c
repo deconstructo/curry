@@ -78,11 +78,12 @@ void sx_algebra_define(val_t op, bool commutative, bool associative,
                 atomic_load_explicit(&atab_generation, memory_order_relaxed) + 1,
                 memory_order_relaxed);
             pthread_rwlock_unlock(&atab_lock);
-            /* Issue #137: same reasoning as sx_rule_add's identical
+            /* Issue #137/#195: same reasoning as sx_rule_add's identical
              * call -- a node cached as "fully simplified" before this
              * operator's algebra properties were (re-)defined must not
-             * keep being served stale now that they've changed. */
-            sx_invalidate_simplify_cache();
+             * keep being served stale now that they've changed. Scoped
+             * to just this operator (plus the shared overflow slot). */
+            sx_invalidate_simplify_cache_op(op);
             return;
         }
     }
