@@ -336,6 +336,119 @@
   (sym->string (simplify cached-before-rule)) "111 * x")
 
 ;;; ============================================================
+;;; 5b. sx_simplify memoization: PER-OPERATOR/PER-VARIABLE scoped
+;;;     invalidation (issue #195), superseding #140's single global
+;;;     generation counter.
+;;; ============================================================
+
+;;; ---- 5b-i. Soundness fix: a node's tracked operator dependency must
+;;; be the operator actually QUERIED, not the operator of whatever the
+;;; rewrite produces (e.g. `(- a 0)` rewrites to `a` itself, and `(- 0
+;;; a)` rewrites to a BUILT-IN neg(a) dispatch -- both scenarios lose
+;;; every trace of "-" from the resulting shape). A rewrite that
+;;; collapses an operator out of the tree entirely can't be used to
+;;; observe this directly by re-simplifying the collapsed result alone
+;;; (there's nothing left pointing back at the vanished operator to
+;;; re-consult) -- so this uses two SYNTHETIC operators one level
+;;; apart instead, where the rewrite target ITSELF remains a visible,
+;;; distinctly-tagged SymExpr: sx195-a(v), wrapped by an outer
+;;; sx195wrap node (which sym-expr caches, so this exercises real
+;;; memoization, not just a fresh build), rewrites to sx195-b(v) once a
+;;; rule for sx195-a is registered AFTER the wrapper was already
+;;; cached. If sx195-b(v)'s own tracked deps only reflected its own
+;;; top-level op (sx195-b) -- the bug this fix closes -- the wrapper
+;;; would never notice a later sx195-a registration and would keep
+;;; serving the stale pre-rule sx195-a(v) content.
+(define x195sound (sym-var 'x195sound))
+(define inner195  (sym-expr 'sx195-a x195sound))
+(define wrapped195 (sym-expr 'sx195wrap inner195))
+(assert-equal "issue #195 soundness: wrapper caches the uninterpreted inner op before any rule exists"
+  (sym->string wrapped195) "sx195wrap(sx195-a(x195sound))")
+(define-rule (sx195-a ?v) -> (sym-expr 'sx195-b ?v))
+(assert-equal "issue #195 soundness: a later rule for the INNER op invalidates the OUTER cached wrapper too"
+  (sym->string (simplify wrapped195)) "sx195wrap(sx195-b(x195sound))")
+
+;;; ---- 5b-ii. Scoped correctness: registering a rule for operator A
+;;; does not disturb an already-cached, unrelated node for operator B.
+(define x195scope (sym-var 'x195scope))
+(define cached-b195 (sym-expr 'sx195-op-b x195scope))
+(assert-equal "issue #195 scoping: op B cached before any op A rule"
+  (sym->string cached-b195) "sx195-op-b(x195scope)")
+(define-rule (sx195-op-a ?a) -> (quote issue-195-op-a-fired))
+(assert-equal "issue #195 scoping: op B's cached node is UNCHANGED by an op A registration"
+  (eq? (simplify cached-b195) cached-b195) #t)
+
+;;; ---- 5b-iii. DoS closed: interleaving cheap rule registrations for
+;;; operators UNRELATED to an in-progress deep chain must not defeat
+;;; that chain's own memoization. Under the pre-#195 single global
+;;; counter (issue #140 finding 1), ANY registration -- even for a
+;;; completely unrelated operator -- invalidated the WHOLE cache,
+;;; reintroducing #137's O(depth^2) blowup; per #140's own repro a
+;;; 60000-deep interleaved chain took ~30s wall/~51s CPU. Scoped
+;;; invalidation should keep the interleaved run within a small
+;;; constant factor of the uninterleaved baseline instead of blowing
+;;; up quadratically. Uses %define-rule! directly (not the define-rule
+;;; special form, which needs a compile-time-literal operator symbol)
+;;; so each interleaved registration can target an operator other than
+;;; "sin" itself (the chain's own operator dependency is never the one
+;;; actually invalidated) -- cycling through a SMALL fixed pool of
+;;; synthetic operator names (not a fresh one per step): rtab
+;;; (sx_rules.c) is a fixed 128-slot table shared with every OTHER test
+;;; in this file, and each distinct operator symbol permanently claims
+;;; one of those slots the first time it's registered (by design, see
+;;; rtab's own comments) -- thousands of distinct one-off names would
+;;; exhaust it and starve every rule/ruleset test that runs after this
+;;; one in the same process. Reusing 8 names still triggers a genuine
+;;; op_gen_table invalidation on every single registration (sx_rule_add
+;;; calls sx_invalidate_simplify_cache_op unconditionally, regardless
+;;; of whether this is that operator's 1st or 2500th registered rule),
+;;; which is all this test actually needs. Tagged with a dedicated
+;;; ruleset and cleared afterward so the (functionally inert, identity)
+;;; rules it leaves behind don't linger for later tests.
+(define (wrap-sin195 n e) (if (= n 0) e (wrap-sin195 (- n 1) (sin e))))
+(define t195-depth 20000)
+(define t195-base-start (current-second))
+(define deep-sin195-base (wrap-sin195 t195-depth (sym-var 'x195base)))
+(define t195-base-elapsed (- (current-second) t195-base-start))
+
+;; Pooled operator names keep rtab's per-operator chain SHORT (each
+;; %define-rule! call appends to the tail of its operator's existing
+;; rule chain, an O(chain length) walk -- an unbounded pool would make
+;; registration itself accumulate quadratic cost across the run, which
+;; has nothing to do with what this test is actually checking). Also
+;; periodically clearing the ruleset keeps each of those 8 chains at a
+;; small, roughly-constant length throughout, rather than growing to
+;; ~2500 entries apiece by the end.
+(define t195-unrelated-pool-size 8)
+(define (wrap-sin195-interleaved n e)
+  (if (= n 0)
+      e
+      (begin
+        (%define-rule! (list (string->symbol
+                                (string-append "sx195-unrelated-"
+                                  (number->string (remainder n t195-unrelated-pool-size))))
+                              '?z)
+                        (list '?z)
+                        #f
+                        (lambda (z) z)
+                        'issue195-interleaved-ruleset)
+        (if (= 0 (remainder n 200)) (clear-rules! 'issue195-interleaved-ruleset))
+        (wrap-sin195-interleaved (- n 1) (sin e)))))
+(define t195-int-start (current-second))
+(define deep-sin195-int (wrap-sin195-interleaved t195-depth (sym-var 'x195int)))
+(define t195-int-elapsed (- (current-second) t195-int-start))
+(clear-rules! 'issue195-interleaved-ruleset)
+
+(assert-equal "issue #195 DoS: interleaved-registration chain still builds to the right op"
+  (sym-expr-op deep-sin195-int) 'sin)
+;; Generous bound: real O(depth^2) behavior at this depth would be many
+;; times slower than the baseline (seconds-to-minutes, not a small
+;; constant factor) -- this just needs to rule out that blowup, not
+;; assert a tight timing budget on possibly-loaded CI hardware.
+(assert-equal "issue #195 DoS: interleaved run stays within a small constant factor of the uninterleaved baseline"
+  (<= t195-int-elapsed (+ (* 15 t195-base-elapsed) 5.0)) #t)
+
+;;; ============================================================
 ;;; 6. rtab/atab concurrency (issue #141) -- concurrent define-rule/
 ;;;    define-algebra/simplify calls across several actors must not
 ;;;    crash or hang. This doesn't assert a specific outcome (the race

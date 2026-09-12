@@ -712,17 +712,24 @@ typedef struct {
     Hdr      hdr;
     val_t    op;       /* a symbol: "+", "*", "expt", "sin", ... */
     uint32_t nargs;
-    /* Issue #140: sx_simplify's memoization generation stamp. Was
-     * packed into hdr.flags (a uint32_t shared with every other heap
-     * object type) by #137 -- that width let the global generation
-     * counter wrap in ~3 minutes under tight invalidation (repeated
-     * define-rule/define-algebra/assume! calls), letting a stale
-     * cached node get served as current. SymExpr is its own dedicated
-     * struct (not a shared layout), so a wider, PRIVATE field is just
-     * as easy as reusing hdr.flags was -- this is that field. See
-     * symbolic.c's sx_simplify/g_sx_simplify_generation for the full
-     * scheme; hdr.flags is no longer used by this type (left 0). */
-    uint64_t simplify_gen;
+    /* Issue #195 (per-operator/per-variable scoped memoization, superseding
+     * #140's single global generation counter): op_deps/var_deps are
+     * membership bitmasks into symbolic.c's op_generation_table (256 slots,
+     * 4 words) and var_generation_table (128 slots, 2 words) -- one bit per
+     * slot, the last slot of each table reserved as a safe "overflow"
+     * catch-all (see symbolic.c). max_gen is the max, AT THE TIME this node
+     * was cached, of every tracked slot's generation counter (all counters
+     * are monotonic, so a single scalar max suffices for a sound validity
+     * check -- see sx_simplify's cache-hit path). 0 means "never cached"
+     * (sx_make_expr zero-initializes everything, and every real generation
+     * value starts at 1 and skips 0 on wraparound, matching #140's
+     * convention, so 0 can never collide with a genuine cached value).
+     * Replaces #137/#140's single simplify_gen field + global
+     * g_sx_simplify_generation counter -- see symbolic.c's long comment
+     * above sx_simplify_impl for the full history and rationale. */
+    uint64_t op_deps[4];
+    uint64_t var_deps[2];
+    uint64_t max_gen;
     val_t    args[];   /* flex array of sub-expressions */
 } SymExpr;
 
