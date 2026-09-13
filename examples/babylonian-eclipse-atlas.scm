@@ -136,7 +136,7 @@
 ;; 5. Plot the zigzag curve and save a PNG snapshot
 ;; -----------------------------------------------------------------------
 
-(define win (make-window "Babylonian daylight zigzag" 800 400))
+(define win (make-window "Babylonian daylight zigzag" 1600 800))
 
 (window-on-realize! win
   (lambda ()
@@ -145,7 +145,7 @@
         (lambda (painter w h)
           (gfx-clear! painter 0.07 0.07 0.1)
           (gfx-set-color! painter 0.9 0.85 0.6 1.0)
-          (gfx-set-font! painter "Helvetica" 16)
+          (gfx-set-font! painter "Helvetica" 24)
           (gfx-draw-text! painter 20 30
             "Babylonian System A daylight-length zigzag (24 months)")
 
@@ -166,7 +166,7 @@
 
             ;; the curve itself
             (gfx-set-pen-color! painter 1.0 0.8 0.3 1.0)
-            (gfx-set-pen-width! painter 2)
+            (gfx-set-pen-width! painter 3)
             (let loop ((m 0))
               (when (< m n-months)
                 (gfx-draw-line! painter
@@ -179,11 +179,11 @@
             (for-each
               (lambda (m)
                 (gfx-fill-circle! painter (x-of m)
-                  (y-of (babylonian-zigzag max-us min-us half-period m)) 4))
+                  (y-of (babylonian-zigzag max-us min-us half-period m)) 6))
               '(0 6 12 18 24))
 
             (gfx-set-color! painter 0.9 0.85 0.6 1.0)
-            (gfx-set-font! painter "Helvetica" 11)
+            (gfx-set-font! painter "Helvetica" 16)
             (gfx-draw-text! painter (x-of 0) (- (y-of min-us) 8)
               (string-append "min " (number->string min-us 'cuneiform) " UŠ"))
             (gfx-draw-text! painter (x-of 6) (- (y-of max-us) 8)
