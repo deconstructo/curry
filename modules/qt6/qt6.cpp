@@ -265,10 +265,19 @@ static const char *checked_string(curry_val v, int argpos, const char *who) {
     if (!curry_is_string(v)) curry_error("%s: argument %d must be a string", who, argpos);
     return curry_string(v);
 }
+/* Accepts the WHOLE numeric tower (bignum/rational/complex/etc), not just
+ * fixnum/flonum -- found while writing a demo that computed plot
+ * coordinates via plain integer division (e.g. `(/ w 2)` on an odd
+ * width), the exact shape of this module's own doc quickstart
+ * (`gfx-fill-circle! painter (/ w 2) (/ h 2) 80`): curry's `/` returns an
+ * EXACT RATIONAL whenever the division isn't even, so that quickstart
+ * itself would previously raise "must be a number" on any odd window
+ * width/height. curry_number_to_double (include/curry.h) already exists
+ * for exactly this coercion. */
 static double checked_float(curry_val v, int argpos, const char *who) {
-    if (!curry_is_fixnum(v) && !curry_is_float(v))
+    if (!curry_is_number(v))
         curry_error("%s: argument %d must be a number", who, argpos);
-    return curry_float(v);
+    return curry_number_to_double(v);
 }
 static const char *checked_symbol(curry_val v, int argpos, const char *who) {
     if (!curry_is_symbol(v)) curry_error("%s: argument %d must be a symbol", who, argpos);
