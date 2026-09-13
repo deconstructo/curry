@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789183899092,
+  "lastUpdate": 1789279033738,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -14558,6 +14558,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.649,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "21703ba28a05f70520ec74022c033cc3c870c085",
+          "message": "feat(cond): implement SRFI-61 extended cond clause (issue #81)\n\nAdds the (generator guard => receiver) clause shape to both compiled\n(compile_cond, src/compiler_classic.c) and tree-walked (S_COND case,\nsrc/eval.c) cond dispatch, since cond is a hardcoded special form not\nresolvable via a library define-syntax shim. The compiler path\ndesugars to call-with-values + apply + a nested cond carrying the\nremaining clauses; the tree-walker evaluates the generator once and\nunpacks single/multi-value results into a shared argument list for\nguard and receiver.\n\nAlso adds a compile-time C-stack-depth guard to compile_cond\n(check_c_stack_depth, matching ir_emit's issue #125 guard), closing\nissue #229: SF_COND bypasses ir_emit entirely, so its recursion had no\ndepth guard at all, and the SRFI-61 desugaring makes that recursion\nmuch cheaper to trigger (one C-stack frame per clause in a flat list).\n\nNew test: tests/srfi_61_cond_tests.scm, registered as ctest\nsrfi_61_cond, covering both dispatch paths.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01QRw6TDGFxiSgxdjMChcP1q",
+          "timestamp": "2026-09-13T15:55:35+10:00",
+          "tree_id": "d28a0779b59aa2962810068feb8bff2010dd4cf8",
+          "url": "https://github.com/deconstructo/curry/commit/21703ba28a05f70520ec74022c033cc3c870c085"
+        },
+        "date": 1789279032952,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.009,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.648,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.803,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.173,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 163.6,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 306.738,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 69.134,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 101.288,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 75.528,
             "unit": "ms"
           }
         ]
