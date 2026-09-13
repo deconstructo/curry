@@ -238,12 +238,15 @@ additions:
   the core `delay-force` SRFI-45 above wraps; verified stack-safe on a
   100,000-element stream, not just correct; `stream?` is deliberately
   looser than the spec as a result, see `s41.md`).
-- **Blocked:** SRFI-61 (a more general `cond` clause) can't be
-  implemented as a library — `cond` is a hardcoded special form the
-  evaluator dispatches on directly, not resolved through macro lookup, so
-  a `define-syntax cond` shim is silently ignored. Filed as
-  [issue #81](https://github.com/deconstructo/curry/issues/81); would
-  need a real compiler-level change, not a library.
+- **Shipped in v1.24.0:** SRFI-61 (a more general `cond` clause,
+  `(generator guard => receiver)`) — could not be implemented as a
+  library (`cond` is a hardcoded special form the evaluator/compiler
+  dispatches on directly, not resolved through macro lookup, so a
+  `define-syntax cond` shim was silently ignored), so it needed the
+  real compiler-level change flagged below when this was originally
+  filed as [issue #81](https://github.com/deconstructo/curry/issues/81).
+  Taught directly to both `compile_cond` (`src/compiler_classic.c`) and
+  the tree-walker's `S_COND` case (`src/eval.c`).
 - **Decided against:** SRFI-143 (Fixnums) — exists purely to let a
   compiler skip type-dispatch overhead via a guaranteed-bounded machine
   integer, which fights curry's own numeric-tower design goal of making
@@ -1185,7 +1188,9 @@ GR/QM library the original mapping promised for that slot):
 | ~~**v1.22.0–1.22.1**~~ | **Compiler IR pipeline, first landing** — the real IR/open-coding work this roadmap's performance section above describes as done; `--with-qt6` Apple Silicon Homebrew fix; a `delay-force` chain-flattening bug (3+ levels deep) fixed | ✓ shipped |
 | ~~**v1.23.0–1.23.2**~~ | Compiler Tiers 2.3–2.6 (local inliner, wrapper elision, wider open-coding, interleaved-lowering session API); `compiler.c` split into five files; a `call/cc` GC-shadow-stack/JIT-depth leak fixed; SRFI-106 (sockets); Piper neural TTS backend + real Homebrew formula for `libpiper`; `espeak-ng` `#:voice` fixed (never worked, for any voice) | ✓ shipped |
 | ~~**v1.23.3**~~ | `(curry gillespie)` stochastic simulation of cell biochemistry; SRFI-27 `random-source-pseudo-randomize!` fixed (never actually deterministic) + a real cross-thread RNG data race fixed + `random-source-state-ref`/`-set!` added; 20 silent gaps closed across six SRFI compatibility libraries; `README.md` split into `README.md` + `FEATURES.md` | ✓ shipped |
-| **unreleased, merged to `main`** | SRFI-9/31/45/95/78/212/141 (7 new libraries — see the SRFI section above for what's blocked/decided-against/parked alongside these); `(curry websocket)` (RFC 6455 client) + `(curry ros)` (rosbridge v2.0 JSON protocol client), with `docs/guides/ros-robot.md` driving real GPIO/PWM motors from ROS teleop; the 89 bare-numbered/dashed SRFI shim files renamed `.scm` → `.sld` (a pure re-export manifest, not an implementation, per R7RS-ecosystem convention) and documented as the pattern for splitting any module — SRFI or `(curry X)` — across multiple files; two real core bugs found and fixed along the way (`write`/`display` never rendered bytevector contents; `append` segfaulted instead of raising on a non-list argument) | merged, not yet version-bumped |
+| ~~**v1.23.4**~~ | SRFI-9/31/45/95/78/212/141 (7 new libraries — see the SRFI section above for what's blocked/decided-against/parked alongside these); `(curry websocket)` (RFC 6455 client) + `(curry ros)` (rosbridge v2.0 JSON protocol client), with `docs/guides/ros-robot.md` driving real GPIO/PWM motors from ROS teleop; the 89 bare-numbered/dashed SRFI shim files renamed `.scm` → `.sld` (a pure re-export manifest, not an implementation, per R7RS-ecosystem convention) and documented as the pattern for splitting any module — SRFI or `(curry X)` — across multiple files; two real core bugs found and fixed along the way (`write`/`display` never rendered bytevector contents; `append` segfaulted instead of raising on a non-list argument) | ✓ shipped |
+| ~~**v1.23.5–1.23.8**~~ | See `CHANGELOG.md` for the full per-version list (generational GC concurrency/correctness fixes, `sx_simplify` memoization scoping, and more) | ✓ shipped |
+| ~~**v1.24.0**~~ | SRFI-61 (`cond`'s extended `(generator guard => receiver)` arrow clause) implemented directly in both the compiler and tree-walker, closing the "Blocked" item above; a related compile-time C-stack-depth guard gap in `compile_cond` found and fixed | ✓ shipped |
 
 Remaining phases, in the dependency order from the top of this document —
 not pinned to specific version numbers, since the original numbering
