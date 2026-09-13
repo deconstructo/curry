@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789280613993,
+  "lastUpdate": 1789323392170,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -14765,6 +14765,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.485,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "0daebc5cadd4b5c3d94d5ba665a301d9c8cae007",
+          "message": "examples: add Babylonian eclipse atlas; fix (curry qt6) rational coords\n\nNew example (examples/babylonian-eclipse-atlas.scm) combining several of\ncurry's distinctive features in one program: the babylonian-astronomy\nmodule's zigzag function and Saros cycle, the symbolic CAS (the zigzag's\nrising phase as an actual differentiable expression), sexagesimal/\ncuneiform number notation, the actor system (one actor per city,\nmessage-passing results back to the main thread), and (curry qt6) (the\nzigzag plotted to a window and saved as a PNG snapshot).\n\nWriting it surfaced a real bug (issue #231, fixed here): qt6's shared\nchecked_float helper only accepted fixnum/flonum, rejecting the exact\nrationals curry's own `/` returns whenever a division isn't even --\nbreaking the module's own documented quickstart\n(`(gfx-fill-circle! painter (/ w 2) (/ h 2) 80)`) on any odd window\ndimension. Fixed by using the existing curry_is_number/\ncurry_number_to_double public API instead of the narrower check.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01QRw6TDGFxiSgxdjMChcP1q",
+          "timestamp": "2026-09-14T04:15:50+10:00",
+          "tree_id": "420156acbbcc93a2da0345696bcd44dbeae57a0c",
+          "url": "https://github.com/deconstructo/curry/commit/0daebc5cadd4b5c3d94d5ba665a301d9c8cae007"
+        },
+        "date": 1789323390810,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.931,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.035,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.455,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.661,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 130.266,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 264.367,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 54.488,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 80.212,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 63.681,
             "unit": "ms"
           }
         ]
