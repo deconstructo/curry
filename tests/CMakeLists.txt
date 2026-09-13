@@ -30,6 +30,7 @@ add_test(NAME srfi_215 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_253 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_253_tests.scm)
 add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
+add_test(NAME srfi_61_cond COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_61_cond_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
 add_test(NAME actors         COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
 # Rare, non-deterministic hang observed once in CI (Ubuntu Debug, under

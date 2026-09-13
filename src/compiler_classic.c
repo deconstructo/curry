@@ -1170,6 +1170,23 @@ static void compile_let_star_values(Compiler *c, val_t args, bool tail, int line
 }
 
 static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
+    /* SF_COND is dispatched straight to this function (never through
+     * IR_OR_CLASSIC/ir_emit -- see compile()'s own switch), so it never
+     * picks up ir_emit's own check_c_stack_depth("compile") call (issue
+     * #125) despite consuming the SAME physical C stack via the SAME
+     * kind of unbounded recursion: a nested `(cond ... (else (cond ...
+     * (else (cond ...)))))` recurses this function once per nesting
+     * level with no trampoline. The SRFI-61 desugaring just below (see
+     * its own comment) makes this recursion far cheaper to trigger --
+     * one level of C recursion PER CLAUSE in a single flat clause list,
+     * no nested parens required -- so a `cond` with thousands of SRFI-61
+     * clauses in a row could otherwise SIGSEGV the compiler itself
+     * (confirmed via independent security review) instead of raising a
+     * catchable error, the same failure class issue #127's nearby
+     * defensive checks in this same function already exist to prevent.
+     * Guard shared with eval()'s/ir_emit's own identical call, not
+     * duplicated -- same physical stack, same thread. */
+    check_c_stack_depth("compile");
     /* (cond (test expr...) ... (else expr...)) */
     /* Every non-else clause now pushes exactly one end_patches entry
      * (the "jump past the trailing OP_VOID fallback" fix applies
@@ -1209,6 +1226,64 @@ static void compile_cond(Compiler *c, val_t clauses, bool tail, int line) {
         val_t S_ELSE = sym_intern_cstr("else");
         if (test == S_ELSE) {
             compile_seq(c, exprs, tail, line);
+            goto cond_done;
+        }
+
+        /* SRFI-61: (cond (generator guard => receiver) ...) — a more
+         * general arrow clause where the test is a *generator* that may
+         * return multiple values (via call-with-values), and an explicit
+         * `guard` procedure (rather than truthiness of a single value)
+         * decides whether `receiver` fires. Distinguished from the
+         * standard 2-element arrow clause below by shape: exprs here is
+         * (guard => receiver) -- three elements with `=>` as the SECOND
+         * one, vs. the standard clause's exprs = (=> proc) -- two
+         * elements with `=>` FIRST. See issue #81: `cond` is a hardcoded
+         * special form (not resolvable via a library `define-syntax`
+         * shim), so this can only be added here, in the compiler itself.
+         *
+         * Must be checked and handled BEFORE the unconditional
+         * `compile(c, test, false, line)` a few lines below: that call
+         * compiles `test` as an ordinary single-value expression and
+         * leaves its result sitting on the stack for the other clause
+         * shapes (test-only/arrow/plain-body) to DUP/consume. SRFI-61's
+         * `test` is a *generator* that needs call-with-values semantics
+         * instead, compiled fresh inside its own desugared producer
+         * thunk below -- reaching the generic compile(c, test, ...) call
+         * first would both mis-compile the generator (as a single value)
+         * AND leave that leftover value permanently stuck on the stack
+         * (confirmed by a real run: a later `(check label (cond ...))`
+         * silently received the leftover value instead of `label`).
+         *
+         * Desugared to call-with-values + apply + a nested cond carrying
+         * the remaining clauses, then compiled recursively — mirrors
+         * compile_case's own desugar-to-existing-forms approach just
+         * below in this file, rather than hand-emitting new bytecode. */
+        val_t S_ARROW61 = sym_intern_cstr("=>");
+        if (vis_pair(exprs) && vis_pair(vcdr(exprs)) &&
+            vcar(vcdr(exprs)) == S_ARROW61 &&
+            vis_pair(vcdr(vcdr(exprs))) &&
+            vis_nil(vcdr(vcdr(vcdr(exprs))))) {
+            val_t guard_expr    = vcar(exprs);
+            val_t receiver_expr = vcar(vcdr(vcdr(exprs)));
+            val_t vals_sym  = sym_intern_cstr("%%srfi61-vals%%");
+            val_t apply_sym = sym_intern_cstr("apply");
+
+            val_t apply_guard = scm_cons(apply_sym,
+                scm_cons(guard_expr, scm_cons(vals_sym, V_NIL)));
+            val_t apply_recv = scm_cons(apply_sym,
+                scm_cons(receiver_expr, scm_cons(vals_sym, V_NIL)));
+            val_t rest_cond = scm_cons(S_COND, clauses);
+            val_t if_expr = scm_cons(S_IF,
+                scm_cons(apply_guard,
+                    scm_cons(apply_recv, scm_cons(rest_cond, V_NIL))));
+            val_t consumer_lam = scm_cons(S_LAMBDA,
+                scm_cons(vals_sym, scm_cons(if_expr, V_NIL)));
+            val_t producer_lam = scm_cons(S_LAMBDA,
+                scm_cons(V_NIL, scm_cons(test, V_NIL)));
+            val_t cwv = sym_intern_cstr("call-with-values");
+            val_t expanded = scm_cons(cwv,
+                scm_cons(producer_lam, scm_cons(consumer_lam, V_NIL)));
+            compile(c, expanded, tail, line);
             goto cond_done;
         }
 

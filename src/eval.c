@@ -619,6 +619,33 @@ tail:
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
                 expr = vcar(body); goto tail;
             }
+            /* SRFI-61: (generator guard => receiver) -- distinguished
+             * from the standard 2-element arrow clause (body = (=> proc))
+             * by shape: here body = (guard => receiver), three elements
+             * with `=>` as the SECOND one. `test` here is a *generator*
+             * that may produce multiple values (via call-with-values
+             * semantics, not plain truthiness); `guard` decides whether
+             * `receiver` fires. See issue #81 and compile_cond's mirror
+             * of this same check. */
+            if (vis_pair(body) && vis_pair(vcdr(body)) && vcar(vcdr(body)) == S_ARROW &&
+                vis_pair(vcdr(vcdr(body))) && vis_nil(vcdr(vcdr(vcdr(body))))) {
+                val_t guard_expr    = vcar(body);
+                val_t receiver_expr = vcar(vcdr(vcdr(body)));
+                val_t produced = eval(test, env);
+                val_t args;
+                if (vis_values(produced)) {
+                    Values *mv = as_vals(produced);
+                    args = V_NIL;
+                    for (int i = (int)mv->count - 1; i >= 0; i--)
+                        args = make_pair(mv->vals[i], args);
+                } else {
+                    args = make_pair(produced, V_NIL);
+                }
+                val_t guard_proc = eval(guard_expr, env);
+                if (vis_true(apply(guard_proc, args)))
+                    return apply(eval(receiver_expr, env), args);
+                continue;
+            }
             val_t result = eval(test, env);
             if (vis_true(result)) {
                 if (vis_nil(body)) return result;
