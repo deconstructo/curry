@@ -1,5 +1,35 @@
 # Changelog
 
+### 1.24.0 - 2026-09-13
+
+**New — SRFI 61 (`cond`'s extended arrow clause)**
+
+`cond` now accepts the extended `(generator guard => receiver)` clause
+shape from SRFI 61: `generator` may return multiple values (via
+`call-with-values` semantics, not just a single truthy/falsy test),
+`guard` decides whether the clause fires, and `receiver` is applied to
+the same values. Previously unimplementable as a library shim (#81):
+`cond` is a hardcoded special form dispatched by symbol identity in
+both the compiler and the tree-walker, not resolved through macro or
+environment lookup, so a user- or library-level `define-syntax cond`
+was silently ignored. Taught directly to `compile_cond`
+(`src/compiler_classic.c`, desugaring to `call-with-values` + `apply`
++ a nested `cond` for the remaining clauses) and to the `S_COND` case
+in `eval()` (`src/eval.c`, the tree-walked `define-library`-body path).
+
+**Fix — `compile_cond` had no compile-time C-stack-depth guard**
+
+Found via independent security review of the SRFI 61 work above (#229).
+`SF_COND` is dispatched straight to `compile_cond`, bypassing `ir_emit`'s
+own `check_c_stack_depth("compile")` call (added for #125) entirely, so
+its recursion through nested `cond`/`if`/lambda forms had no depth
+guard at all — and SRFI 61's desugaring made that recursion far cheaper
+to trigger (one C-stack frame per clause in a single flat clause list,
+no nested parens required). A `cond` with enough clauses could
+previously exhaust the real C stack and crash the process instead of
+raising a catchable condition. Fixed by adding the same guard
+`ir_emit` and `eval()` already share.
+
 ### 1.23.8 - 2026-09-11
 
 **Generational GC backend — corruption and deadlock fixes**
