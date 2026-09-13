@@ -227,6 +227,12 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 (if test consequent)
 (if test consequent alternate)
 (cond (test expr...) ... (else expr...))
+(cond (test => proc) ...)                      ; proc applied to test's value
+(cond (generator guard => receiver) ...)        ; SRFI-61: generator may return
+                                                 ; multiple values (call-with-
+                                                 ; values semantics); receiver
+                                                 ; applied only if (apply guard
+                                                 ; values...) is true
 (case val ((lit...) expr...) ... (else expr...))
 (when test body...)
 (unless test body...)
