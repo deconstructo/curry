@@ -28,6 +28,7 @@
 #include "scc.h"
 #include "version.h"
 #include "runtime_init.h"
+#include "nesting_depth.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,25 +149,6 @@ static void rl_save_history(void) {
     history_truncate_file(path, HISTORY_MAX);
 }
 
-/* Track nesting depth change across one line of text.
-   Handles strings and ; line comments; good enough for interactive input. */
-static int line_depth(const char *s) {
-    int d = 0;
-    bool in_str = false, esc = false;
-    for (; *s; s++) {
-        if (esc)    { esc = false; continue; }
-        if (in_str) {
-            if (*s == '\\') esc = true;
-            else if (*s == '"') in_str = false;
-            continue;
-        }
-        if (*s == ';') break;           /* line comment */
-        if (*s == '"') { in_str = true; continue; }
-        if (*s == '(' || *s == '[') d++;
-        else if (*s == ')' || *s == ']') d--;
-    }
-    return d;
-}
 
 /* Read a complete Scheme expression via readline, accumulating lines until
    parentheses balance.  Returns a malloc'd NUL-terminated string the caller
@@ -175,7 +157,7 @@ static char *rl_read_expr(void) {
     char *line = readline("> ");
     if (!line) return NULL;
 
-    int depth = line_depth(line);
+    int depth = curry_line_depth(line);
 
     if (depth <= 0) {
         /* Single-line expression (atom, quoted form, or balanced parens) */
@@ -206,7 +188,7 @@ static char *rl_read_expr(void) {
         memcpy(buf + used, more, mlen);
         used += mlen;
         buf[used++] = '\n';
-        depth += line_depth(more);
+        depth += curry_line_depth(more);
         free(more);
     }
     buf[used] = '\0';
