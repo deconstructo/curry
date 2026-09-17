@@ -312,6 +312,7 @@ option(BUILD_MODULE_LSP       "Build Language Server Protocol module" ON)
 option(BUILD_MODULE_PROFILING "Build profiling consumer module"      ON)
 option(BUILD_MODULE_POSIX     "Build POSIX filesystem/process module (SRFI-170 subset)" ON)
 option(BUILD_MODULE_CODESETS  "Build codesets module (SRFI-238: errno/signal/http-status)" ON)
+option(BUILD_JUPYTER_KERNEL   "Build the Jupyter kernel (xeus/xeus-zmq; not a (curry X) module -- a standalone executable, see docs/reference/jupyter-kernel.md)" OFF)
 
 # Modules are loaded as (curry name), which maps to the path "curry/name.so".
 # So the output file must be named "name.so" and placed in a "curry/" subdirectory
@@ -674,6 +675,40 @@ if(BUILD_MODULE_QT6)
     endif()
   else()
     message(WARNING "Qt6 not found, skipping qt6 module")
+  endif()
+endif()
+
+if(BUILD_JUPYTER_KERNEL)
+  # xeus/xeus-zmq/xtl/cppzmq/nlohmann_json are conda-forge packages, not
+  # available via Homebrew -- point CMAKE_PREFIX_PATH at a micromamba/conda
+  # env that has them, e.g.:
+  #   micromamba create -n curry-jupyter -c conda-forge xeus xeus-zmq xtl cppzmq nlohmann_json
+  #   cmake -B build -DBUILD_JUPYTER_KERNEL=ON \
+  #     -DCMAKE_PREFIX_PATH="$HOME/mamba/envs/curry-jupyter"
+  find_package(xeus QUIET)
+  find_package(xeus-zmq QUIET)
+  if(xeus_FOUND AND xeus-zmq_FOUND)
+    # Same rationale as the `curry` binary above: api.c compiled directly in
+    # (not only via curry_core.a, whose members are only pulled in when
+    # referenced) plus ENABLE_EXPORTS, so a notebook cell's (import (curry
+    # X)) can dlopen a C module and have it resolve curry_core symbols
+    # against this process -- without this, every C module import silently
+    # fails to resolve its expected symbols at dlopen time.
+    add_executable(curry_jupyter
+      modules/jupyter/main.cpp
+      modules/jupyter/interpreter.cpp
+      src/api.c)
+    target_include_directories(curry_jupyter PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(curry_jupyter PRIVATE curry_core xeus xeus-zmq)
+    set_target_properties(curry_jupyter PROPERTIES
+      OUTPUT_NAME "curry_jupyter"
+      ENABLE_EXPORTS ON)
+    install(TARGETS curry_jupyter DESTINATION bin)
+    message(STATUS "xeus ${xeus_VERSION} found — building Jupyter kernel (curry_jupyter)")
+  else()
+    message(WARNING "xeus/xeus-zmq not found (conda-forge only, not Homebrew) -- skipping Jupyter kernel; see BUILD_JUPYTER_KERNEL's option help")
   endif()
 endif()
 
