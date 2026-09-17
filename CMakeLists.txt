@@ -149,6 +149,7 @@ set(CORE_SOURCES
   src/compiler_ir_checks.c
   src/vm.c
   src/scc.c
+  src/runtime_init.c
 )
 
 # vm.c uses computed gotos (GCC/Clang extension) for the dispatch table.

@@ -27,6 +27,7 @@
 #include "compiler.h"
 #include "scc.h"
 #include "version.h"
+#include "runtime_init.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,55 +58,6 @@
     "Curry Scheme " CURRY_VERSION " (R7RS)" LLVM_TAG FFI_TAG "\n" \
     "Type ,quit to exit, ,help for help.\n\n"
 
-
-static void init_all(void) {
-    /* Issue #215: every one of these *_init() functions is plain C code
-     * that builds up val_t structures (module registries, alias lists,
-     * etc. -- e.g. modules_init()'s scm_cons() calls building up the
-     * (rnrs X)/(rnrs X Y) name lists) directly, not via apply_arr() (which
-     * brackets every ordinary Scheme-invoked primitive call in
-     * gc_inhibit_minor()/gc_resume_minor() already) and not via eval()'s
-     * tree-walker (which shadow-stacks its own C locals instead). Under
-     * --gc generational with a small enough nursery, a minor GC firing
-     * mid-construction here -- e.g. between allocating a pair and using
-     * its address in the next nested scm_cons() call -- moves an object
-     * whose new location no caller here is prepared to notice, corrupting
-     * state (confirmed: reliably crashes with "unknown GC:MOVE type" at
-     * --gc-nursery-size 1K, deterministically, before any user script
-     * code runs at all -- `curry --gc generational --gc-nursery-size 1K
-     * -e '(display 1)'` alone reproduces it). Bracketing the whole
-     * one-time startup sequence in gc_inhibit_minor()/gc_resume_minor()
-     * closes this the same way apply_arr() already does for ordinary
-     * primitive calls -- see gc.h's own doc comment on this pair of
-     * functions for the general rule this follows. Negligible cost:
-     * this runs once per process, falling back to Boehm-only allocation
-     * for the (small, bounded) startup working set instead of the
-     * nursery, not a hot path. */
-    gc_inhibit_minor();
-    gc_init();
-    sym_init();
-    num_init();
-    port_init();
-    env_init();
-    eval_init();
-    sx_rules_init();
-    sx_algebra_init();
-    actors_init();
-    stm_init();
-    channel_init();
-    condition_init();
-#ifdef BUILD_FFI
-    ffi_init();
-#endif
-    modules_init();
-    profiling_init(GLOBAL_ENV);
-    vm_init();
-    vm_debug_init();
-#ifdef BUILD_LLVM
-    curry_llvm_init();
-#endif
-    gc_resume_minor();
-}
 
 /* ---- Error reporting ---- */
 
@@ -716,7 +668,7 @@ int main(int argc, char **argv) {
         gc_gen_init(nursery_size);
         gc_ops = &gc_gen_ops;
     }
-    init_all();
+    curry_runtime_init();
 
     bool interactive = false;
     bool ran_something = false;
