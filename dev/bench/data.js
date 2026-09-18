@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789705182669,
+  "lastUpdate": 1789708139642,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15041,6 +15041,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 72.256,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7e485233a23fc9e5b4ffb93d6b36950756e61409",
+          "message": "Merge pull request #236 from deconstructo/fix-plplot-docs\n\nplplot docs fix (#235) + inline image display for the Jupyter kernel",
+          "timestamp": "2026-09-18T15:08:17+10:00",
+          "tree_id": "606b4523331b8faad4412589a041fe2cebe61c7f",
+          "url": "https://github.com/deconstructo/curry/commit/7e485233a23fc9e5b4ffb93d6b36950756e61409"
+        },
+        "date": 1789708138306,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.856,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.365,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.165,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 41.15,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.45,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 323.475,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.506,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 109.752,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 85.963,
             "unit": "ms"
           }
         ]
