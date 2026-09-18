@@ -334,7 +334,15 @@ static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(fd, &rfds);
+    /* Issue #200 Phase A / issue #237 review: select() can block for up
+     * to timeout-ms (now realistically multi-second, since ws-accept's
+     * timeout feature made this a load-bearing part of a public API's
+     * documented usage pattern) -- park so a future GC safepoint doesn't
+     * wait on this thread for that long. Same rationale, same pattern,
+     * as fn_tcp_accept's identical bracket above. */
+    curry_gc_thread_park();
     int r = select(fd + 1, &rfds, NULL, NULL, tvp);
+    curry_gc_thread_unpark();
     if (r < 0) curry_error("socket-ready?: select failed");
     return curry_make_bool(r > 0 && FD_ISSET(fd, &rfds));
 }

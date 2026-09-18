@@ -247,6 +247,36 @@
        (car mask-result) 'raised)
 (ws-listener-close! mask-listener)
 
+;; 3. Issue #237: ws-accept's optional timeout-ms. With no client ever
+;; connecting, it must raise a clean, catchable error instead of
+;; blocking forever; with a client connecting well within the window,
+;; the timeout must not false-positive-fail a connection that was
+;; actually fine.
+(define timeout-listener (ws-listen 0))
+(check "ws-accept times out cleanly when no client connects"
+       (guard (e (#t 'raised)) (ws-accept timeout-listener 300))
+       'raised)
+(ws-listener-close! timeout-listener)
+
+(define timeout-ok-listener (ws-listen 0))
+(define timeout-ok-port (ws-listener-port timeout-ok-listener))
+(define timeout-ok-done (make-semaphore 0))
+(define timeout-ok-result #f)
+
+(define timeout-ok-acceptor
+  (spawn (lambda ()
+           (guard (e (#t (set! timeout-ok-result (list 'raised (error-object-message e)))))
+             (let ((conn (ws-accept timeout-ok-listener 5000)))
+               (set! timeout-ok-result (list 'no-error (ws-path conn)))))
+           (sem-post! timeout-ok-done))))
+
+(define timeout-ok-client (ws-connect (string-append "ws://127.0.0.1:" (number->string timeout-ok-port) "/")))
+(sem-wait! timeout-ok-done)
+(check "ws-accept's timeout doesn't reject a connection that arrives in time"
+       timeout-ok-result (list 'no-error "/"))
+(ws-close! timeout-ok-client)
+(ws-listener-close! timeout-ok-listener)
+
 ;;; Summary
 
 (newline)

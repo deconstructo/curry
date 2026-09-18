@@ -67,9 +67,20 @@ Binds and listens on `port`. Doesn't block, doesn't accept anything yet — mirr
 
 The actual port `listener` is bound to — needed after `(ws-listen 0)`, since you don't know which ephemeral port the OS assigned until after the underlying `bind()` has already happened. Equivalent to `(curry network)`'s `socket-local-port` applied to the listener's own socket.
 
-### `(ws-accept listener)` → ws
+### `(ws-accept listener [timeout-ms])` → ws
 
 Blocks for the next incoming TCP connection and completes the RFC 6455 opening handshake on it (reads the client's `GET` request and headers, extracts `Sec-WebSocket-Key`, computes and sends `Sec-WebSocket-Accept`) before returning. By the time `ws-accept` returns, the connection is a fully negotiated WebSocket — `ws-send!`/`ws-recv!`/`ws-close!` all work on it exactly as they would on a `ws-connect` result. Raises if the request has no `Sec-WebSocket-Key` or a malformed request line, if the connection closes before the handshake completes, or if a single header line exceeds 8KB or the request has more than 100 header lines — a bounded-cost rejection of a connection that's misbehaving or attacking, rather than unbounded memory growth (an incoming connection is untrusted by construction, unlike `ws-connect`'s server, which the caller already chose to trust).
+
+With no `timeout-ms`, a call that never gets a client blocks forever — fine for a long-lived server, but a footgun for anything that needs to notice "no client ever showed up" (a test, a CLI tool with a startup grace period, ...). Pass `timeout-ms` (non-negative milliseconds) to raise a clear, catchable error instead of blocking indefinitely when no connection arrives within it:
+
+```scheme
+(guard (e (#t (display "no client connected in time") (newline)))
+  (ws-accept listener 5000))
+```
+
+This is a best-effort bound, not an absolute one — the readiness check and the actual accept are two separate, non-atomic steps, so a connection that resets in the narrow window between them can still make the call block past `timeout-ms` (see issue #238). In practice this needs a client to connect and immediately abort before this call's very next step, a vanishingly narrow window, so `timeout-ms` bounds the common case reliably; it just isn't watertight against a client timed to hit that exact window.
+
+(Issue #237 — the other half of #110's flaky-CI-hang fix, this one for real callers of the public API rather than just the test suite's own internal use of the underlying raw sockets.)
 
 ### `(ws-listener? obj)` → boolean
 

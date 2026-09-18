@@ -216,7 +216,40 @@
     ;; ws-accept returns, the connection is a fully negotiated WebSocket,
     ;; usable with ws-send!/ws-recv!/ws-close! exactly like a ws-connect
     ;; result (the role difference is internal, see the module header).
-    (define (ws-accept listener)
+    ;;
+    ;; Optional timeout-ms (issue #237): with no timeout, this blocks
+    ;; indefinitely -- fine for a long-lived server, but a real footgun
+    ;; for anything that needs to notice "no client ever showed up"
+    ;; (a test, a CLI tool with a startup grace period, ...), since the
+    ;; only thing that would ever catch a stuck accept is something
+    ;; entirely external to this call, like a blunt process-level
+    ;; timeout with no diagnostic pointing at accept specifically. Pass
+    ;; timeout-ms to raise a clear, catchable error instead of blocking
+    ;; forever when no connection arrives within it.
+    ;;
+    ;; This is a best-effort bound, not an absolute one: the readiness
+    ;; check (socket-ready?) and the actual accept (socket-accept) are
+    ;; two separate, non-atomic calls. In the narrow window between
+    ;; them, a connection that made the listener look ready could be
+    ;; reset by the client before socket-accept dequeues it, which can
+    ;; make socket-accept block again waiting for the next one -- with
+    ;; no further timeout check. In practice this needs a client to
+    ;; connect and then immediately abort before this thread's very next
+    ;; call, a vanishingly narrow window, but it means timeout-ms bounds
+    ;; the common case rather than being watertight. A fully race-free
+    ;; version would need a real non-blocking-accept retry loop against
+    ;; a deadline at the C level, not just a single poll-then-block --
+    ;; see issue #238 if this ever needs tightening further.
+    (define (ws-accept listener . maybe-timeout-ms)
+      (if (pair? maybe-timeout-ms)
+          (let ((timeout-ms (car maybe-timeout-ms)))
+            (if (negative? timeout-ms)
+                (error (string-append "ws-accept: timeout-ms must be non-negative, got "
+                                       (number->string timeout-ms))))
+            (if (not (socket-ready? (%ws-listener-socket listener) timeout-ms))
+                (error (string-append "ws-accept: timed out after "
+                                       (number->string timeout-ms)
+                                       "ms waiting for a client connection")))))
       (let* ((socket (socket-accept (%ws-listener-socket listener)))
              (in (socket-input-port socket))
              (out (socket-output-port socket))
