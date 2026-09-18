@@ -49,6 +49,7 @@ extern val_t
     /* stable machine-legible error codes — docs/reference/error-codes.md */
     EC_WRONG_TYPE_ARGUMENT, EC_WRONG_NUMBER_OF_ARGUMENTS, EC_UNBOUND_VARIABLE,
     EC_NOT_A_PROCEDURE, EC_DIVISION_BY_ZERO, EC_INDEX_OUT_OF_RANGE, EC_STACK_OVERFLOW,
+    EC_INTERRUPTED,
     S_APPLY, S_MAP, S_FOR_EACH,
     /* symbolic / CAS */
     S_SYMBOLIC,

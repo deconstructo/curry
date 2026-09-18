@@ -49,6 +49,7 @@ plumbing is required.
 | `division-by-zero` | Exact division, `quotient`, `remainder`, or `modulo` by zero | `numeric.c` — see note below |
 | `index-out-of-range` | A numeric index was outside a sequence's valid bounds | `vector-ref`, `vector-set!`, `substring` |
 | `stack-overflow` | The VM's value stack, call-frame stack, or exception-handler stack was exhausted | `vm.c` |
+| `interrupted` | A cross-thread interrupt request (e.g. the Jupyter kernel's `interrupt_request`) stopped a running computation | `vm.c`'s dispatch-loop safepoint, `src/interrupt.c` |
 
 Codes are pre-interned symbols (`EC_WRONG_TYPE_ARGUMENT`, etc.), declared
 in `src/symbol_list.h` next to the existing R7RS error-kind symbols
