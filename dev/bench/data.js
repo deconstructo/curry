@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789708330182,
+  "lastUpdate": 1789709308473,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15179,6 +15179,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 58.643,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "fd8b148704728bbf986f2189492470c79656413a",
+          "message": "Add ws-accept optional timeout-ms (fixes #237)\n\nThe other half of #110's flaky-CI-hang fix: ws-accept (the public\n(curry websocket) server-side accept, lib/curry/modules/curry/\nwebsocket.scm) always blocked forever waiting for a client connection,\nwith no way to bound the wait -- a real footgun for anything that\nneeds to notice \"no client ever showed up\" (a test, a CLI tool with a\nstartup grace period), since the only thing that ever caught a stuck\naccept was something entirely external like ctest's blunt 60s\nprocess-level TIMEOUT, with no diagnostic pointing at accept\nspecifically.\n\nws-accept now takes an optional timeout-ms, backward compatible (the\n1-argument form is byte-for-byte the old code path -- verified by\nreading, not just inference, during review). Uses the existing\nsocket-ready? primitive (already imported via (curry network)) to poll\nbefore accepting, raising a clean, catchable error instead of blocking\npast the deadline. Also applied the identical accept-with-timeout fix\nto tests/ros_tests.scm's two raw tcp-accept calls (the same test-only\npattern already used in tests/websocket_tests.scm from an earlier\ncommit) -- found via a live local reproduction of the same hang class\nwhile verifying this fix, not just a CI ghost.\n\nIndependent code review and security review both ran against this.\nCode review found no bugs, one low-priority suggestion (validate\ntimeout-ms is non-negative rather than depending on select()'s\nplatform-specific handling of a negative timeval) -- applied.\nSecurity review found a real, more subtle issue: socket-ready? and\nsocket-accept are two separate, non-atomic calls, so a connection that\nresets in the narrow window between them can still make socket-accept\nblock past the timeout with no further check. In practice this needs\na client to connect and then immediately abort before the very next\ncall -- a vanishingly narrow window -- so timeout-ms bounds the common\ncase reliably without being fully race-free. Documented as best-effort\n(both in ws-accept's own comment and docs/reference/module-\nwebsocket.md) rather than silently overclaiming a guarantee the\nimplementation doesn't fully provide; filed as issue #238 for whoever\nwants to close it properly (needs a real non-blocking-accept retry\nloop against a deadline at the C level, not a single poll-then-block).\n\nSecurity review also flagged a second, independent finding worth\nfixing now rather than deferring: socket-ready?'s underlying select()\ncall (modules/network/network.c) wasn't bracketed with\ncurry_gc_thread_park()/curry_gc_thread_unpark(), unlike every other\ncomparable blocking network call in the same file (fn_tcp_accept,\netc.) -- meaning a --gc generational stop-the-world safepoint request\nwould have to wait out this thread's select() for as long as\ntimeout-ms. This was pre-existing, but ws-accept's timeout feature is\nwhat turns socket-ready? into a load-bearing part of a public API's\ndocumented usage pattern with realistic multi-second timeouts, so\nfixed it to match fn_tcp_accept's existing precedent exactly.\n\nAll 133 ctest suites pass. websocket/websocket_server/ros verified\nindividually stable across 6+ consecutive isolated reruns; a single\ntransient timeout seen during combined-suite runs today did not\nreproduce on repeated reruns and matches the exact pre-existing\nCI-load-dependent flakiness #110 already documented -- not caused by\nthis change.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-18T15:27:45+10:00",
+          "tree_id": "569864c256a81afe8a405c12625c406e203cab1e",
+          "url": "https://github.com/deconstructo/curry/commit/fd8b148704728bbf986f2189492470c79656413a"
+        },
+        "date": 1789709306565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.272,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.985,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.414,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 41.427,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 193.667,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 325.609,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 74.108,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 112.256,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 85.626,
             "unit": "ms"
           }
         ]
