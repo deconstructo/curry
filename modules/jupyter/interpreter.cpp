@@ -23,6 +23,7 @@ extern "C" {
 #include "condition.h"
 #include "runtime_init.h"
 #include "nesting_depth.h"
+#include "interrupt.h"
 #include "version.h"
 }
 
@@ -246,20 +247,20 @@ nl::json curry_interpreter::shutdown_request_impl(bool /*restart*/) {
     return reply;
 }
 
-/* Not implemented -- see docs/reference/jupyter-kernel.md's "Known gaps"
- * and the tracking issue it links. Two things are missing, not one:
- * (1) main.cpp uses xeus::make_xserver_default, the non-split server,
- * which polls the shell and control channels from the same thread/loop
- * -- so while a cell is running inside vm_run(), an interrupt_request on
- * the control channel isn't even received until that call returns,
- * regardless of what this method does; (2) there's no hook into vm_run()
- * to actually stop a running computation even if the request did arrive
- * (unlike the interactive debugger's per-dispatch flag check -- see
- * docs/reference/debugger.md). Acking "ok" without doing anything, as
- * this stub does, keeps the wire protocol satisfied but is misleading:
- * a client's "interrupt" button appears to succeed while the kernel
- * stays wedged. */
+/* main.cpp builds this kernel with xeus::make_xserver_shell_main, the
+ * split server: the control channel (which delivers this request) is
+ * polled on its own thread, separate from the shell thread that's
+ * blocked inside vm_run() running a cell -- see docs/reference/
+ * jupyter-kernel.md's "Execution model". So this callback genuinely
+ * runs concurrently with a busy cell. vm_interrupt_request() (src/
+ * interrupt.c) sets a cross-thread atomic flag that vm_run()'s dispatch
+ * loop checks at every instruction (the same per-instruction safepoint
+ * the minor-GC poll and debugger hook already use); when set, it raises
+ * an EC_INTERRUPTED condition, which unwinds through execute_request_
+ * impl's ordinary SCM_PROTECT the same way any other raised condition
+ * does -- no special-casing needed on the execute side. */
 nl::json curry_interpreter::interrupt_request_impl() {
+    vm_interrupt_request();
     nl::json reply;
     reply["status"] = "ok";
     return reply;

@@ -117,6 +117,7 @@ SYM(EC_NOT_A_PROCEDURE,           "not-a-procedure")
 SYM(EC_DIVISION_BY_ZERO,          "division-by-zero")
 SYM(EC_INDEX_OUT_OF_RANGE,        "index-out-of-range")
 SYM(EC_STACK_OVERFLOW,            "stack-overflow")
+SYM(EC_INTERRUPTED,               "interrupted")
 
 SYM(S_APPLY,              "apply")
 SYM(S_MAP,                "map")

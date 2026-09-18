@@ -192,6 +192,7 @@
 
 #include "vm.h"
 #include "debug.h"
+#include "interrupt.h"
 #include "profiling.h"
 #include "compiler.h"
 #include "chunk.h"
@@ -756,6 +757,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             gc_gen_safepoint();
         }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
+        /* Same interrupt safepoint as the computed-goto L_DISPATCH below --
+         * see the comment there. Without this, a build on a compiler
+         * without computed-goto support (anything not __GNUC__) would
+         * silently never honor vm_interrupt_request(). */
+        if (__builtin_expect(vm_interrupt_pending(), 0) && vm_interrupt_pending_and_clear())
+            scm_raise_code(EC_INTERRUPTED, "interrupted");
         switch (READ_U8()) {
 #endif
 
@@ -1974,6 +1981,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             gc_gen_safepoint();
         }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
+        /* Cross-thread interrupt request (e.g. the Jupyter kernel's
+         * control-channel handler, on its own thread) -- same safepoint,
+         * same gate as the minor-GC poll and the debugger hook above.
+         * Raising here unwinds through the ordinary ExnHandler/
+         * SCM_PROTECT longjmp path like any other Scheme exception. */
+        if (__builtin_expect(vm_interrupt_pending(), 0) && vm_interrupt_pending_and_clear())
+            scm_raise_code(EC_INTERRUPTED, "interrupted");
         goto *dt[READ_U8()];
 #else  /* no computed goto */
         default:

@@ -61,6 +61,33 @@ curry's own Akkadian-preamble error text. State from forms that already
 ran in that cell (and any earlier cell) is preserved — an error doesn't
 reset `GLOBAL_ENV`, only the VM's operand stack (`vm_reset()`).
 
+### Interrupting a busy cell
+
+`main.cpp` builds the kernel with `xeus::make_xserver_shell_main` — the
+split server, which polls the control channel on its own thread separate
+from the shell thread a busy cell blocks. An `interrupt_request` sets a
+cross-thread atomic flag (`src/interrupt.c`) that `vm_run()`'s dispatch
+loop checks at every instruction (the same per-instruction safepoint the
+minor-GC poll and the interactive debugger's hook already use — see
+`vm.c`'s `L_DISPATCH`); when set, it raises an `EC_INTERRUPTED` condition,
+which unwinds through the cell's ordinary `SCM_PROTECT` exactly like any
+other raised exception, surfacing as a normal error reply.
+
+The kernelspec must set `"interrupt_mode": "message"` (which
+`tools/install-jupyter-kernel.sh` does) — without it, `jupyter_client`'s
+default is to send a raw `SIGINT` to the process instead of a
+control-channel message, and `curry_jupyter` has no `SIGINT` handler: an
+uncaught `SIGINT`'s default action terminates the whole process (verified
+during development -- worse than a hang, and the reason this field is
+required rather than optional).
+
+The interrupt safepoint only exists in `vm.c`'s bytecode dispatch loop,
+not in `eval()`'s tree-walker (`src/eval.c`) — the same structural gap
+the interactive debugger already has (its own doc notes it's invisible
+to tree-walked code). A cell whose hot loop happens to run through
+`eval()` rather than compiled VM bytecode (e.g. an infinite loop inside
+a `define-library` body) cannot currently be interrupted.
+
 ## Known limitations
 
 - **`is_complete_request` mis-tracks state across lines within a cell**:
@@ -77,21 +104,6 @@ reset `GLOBAL_ENV`, only the VM's operand stack (`vm_reset()`).
 
 ## Known gaps (not yet implemented)
 
-- **Interrupt**: `interrupt_request` acks `ok` without actually stopping
-  anything. Two separate problems, not one: `main.cpp` uses
-  `xeus::make_xserver_default`, the non-split server, which polls the
-  shell and control channels from the same thread/loop -- so while a
-  cell is running inside `vm_run()`, an interrupt request on the control
-  channel can't even be received until that call returns, no matter
-  what `interrupt_request_impl` does. And even if it could be received,
-  there's no hook into `vm_run()` to actually stop a running computation
-  (unlike the interactive debugger's per-dispatch flag check). A real
-  fix needs both: switch to `xeus::make_xserver_shell`/
-  `make_xserver_control` (the split variant, run on separate threads)
-  and add a VM-level interrupt flag. Tracked as
-  [issue #232](https://github.com/deconstructo/curry/issues/232) --
-  a busy/infinite cell currently makes the whole kernel process
-  permanently unresponsive; the only recourse is killing the process.
 - **Completion / inspect (hover)**: `complete_request`/`inspect_request`
   currently return empty results. The `(curry lsp)` module already
   implements the same builtin-table-plus-local-binding-collection logic

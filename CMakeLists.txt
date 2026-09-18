@@ -150,6 +150,7 @@ set(CORE_SOURCES
   src/vm.c
   src/scc.c
   src/runtime_init.c
+  src/interrupt.c
 )
 
 # vm.c uses computed gotos (GCC/Clang extension) for the dispatch table.
