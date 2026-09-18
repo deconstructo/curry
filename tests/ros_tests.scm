@@ -98,24 +98,21 @@
 (define seen (make-hash-table)) ; label -> decoded JSON message, for later checks
 (define server-done (make-semaphore 0))
 
-;; Issue #237 (the other half of #110's fix): tcp-accept has no timeout
-;; of its own, so if a client connection never arrives for any reason,
-;; the accepting actor blocks forever and silently -- only ever caught
-;; by ctest's blunt process-level TIMEOUT, no diagnostic pointing at
-;; accept specifically. Reproduced live locally (not just in CI) while
-;; verifying #237's fix to websocket_tests.scm. socket-ready? already
-;; supports a timeout poll on a listening socket -- this just uses it.
+;; Issue #237/#238 (the other half of #110's fix): tcp-accept had no
+;; timeout of its own, so if a client connection never arrived for any
+;; reason, the accepting actor blocked forever and silently -- only
+;; ever caught by ctest's blunt process-level TIMEOUT, no diagnostic
+;; pointing at accept specifically. Reproduced live locally (not just in
+;; CI) while verifying #237's fix. tcp-accept now takes an optional
+;; timeout-ms directly, implemented as a real non-blocking-accept retry
+;; loop against a deadline (#238 -- #237's first cut used a separate
+;; socket-ready? poll before a blocking accept, which had its own
+;; narrow TOCTOU race).
 (define %accept-timeout-ms 10000)
-(define (accept-with-timeout listener who)
-  (if (socket-ready? listener %accept-timeout-ms)
-      (tcp-accept listener)
-      (error (string-append who ": tcp-accept timed out after "
-                             (number->string %accept-timeout-ms)
-                             "ms waiting for a client connection"))))
 
 (define server-thread
   (spawn (lambda ()
-           (let* ((conn (accept-with-timeout listener "ros server-thread")) (in (car conn)) (out (cdr conn)))
+           (let* ((conn (tcp-accept listener %accept-timeout-ms)) (in (car conn)) (out (cdr conn)))
              (server-accept! in out)
 
              ;; 1. expect a subscribe op for /topic1
@@ -213,7 +210,7 @@
 ;; answering the call_service the client is about to send.
 (define close-test-server
   (spawn (lambda ()
-           (let* ((c (accept-with-timeout close-test-listener "ros close-test-server")) (in (car c)) (out (cdr c)))
+           (let* ((c (tcp-accept close-test-listener %accept-timeout-ms)) (in (car c)) (out (cdr c)))
              (server-accept! in out)
              (close-port in) (close-port out)))))
 

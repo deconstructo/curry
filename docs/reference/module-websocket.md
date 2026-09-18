@@ -78,9 +78,9 @@ With no `timeout-ms`, a call that never gets a client blocks forever — fine fo
   (ws-accept listener 5000))
 ```
 
-This is a best-effort bound, not an absolute one — the readiness check and the actual accept are two separate, non-atomic steps, so a connection that resets in the narrow window between them can still make the call block past `timeout-ms` (see issue #238). In practice this needs a client to connect and immediately abort before this call's very next step, a vanishingly narrow window, so `timeout-ms` bounds the common case reliably; it just isn't watertight against a client timed to hit that exact window.
+This is a genuinely race-free bound, not a poll-then-hope-nothing-changed one: under the hood (`socket-accept`, `(curry network)`'s SRFI-106 layer), it's a real non-blocking-accept retry loop against a single deadline, not a readiness check followed by a separate blocking accept — a connection that resets between polling and accepting doesn't get a fresh, unbounded wait; the retry uses whatever time budget is left.
 
-(Issue #237 — the other half of #110's flaky-CI-hang fix, this one for real callers of the public API rather than just the test suite's own internal use of the underlying raw sockets.)
+(Issues [#237](https://github.com/deconstructo/curry/issues/237)/[#238](https://github.com/deconstructo/curry/issues/238) — the other half of #110's flaky-CI-hang fix, this one for real callers of the public API rather than just the test suite's own internal use of the underlying raw sockets; #238 closed the TOCTOU gap #237's first cut left open.)
 
 ### `(ws-listener? obj)` → boolean
 

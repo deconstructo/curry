@@ -116,27 +116,22 @@
 (define test-port (socket-local-port listener))
 
 ;; Issue #110's own writeup flagged this as the *other*, still-unresolved
-;; half of that bug: tcp-accept has no timeout at all, so if a client
-;; connection never arrives for any reason (CI networking hiccup, thread
-;; scheduling delay, anything), the accepting actor blocks forever and
-;; silently -- the only thing that ever catches it is ctest's blunt
-;; process-level 60s TIMEOUT (tests/CMakeLists.txt), which kills the
+;; half of that bug: tcp-accept had no timeout at all, so if a client
+;; connection never arrived for any reason (CI networking hiccup, thread
+;; scheduling delay, anything), the accepting actor blocked forever and
+;; silently -- the only thing that ever caught it was ctest's blunt
+;; process-level 60s TIMEOUT (tests/CMakeLists.txt), which killed the
 ;; whole test with no diagnostic pointing at accept specifically.
-;; socket-ready? (module-network.md) already supports a timeout poll on
-;; a listening socket ("would tcp-accept block?"), so this doesn't need
-;; a new primitive -- just actually using the one that exists, turning a
-;; silent indefinite hang into a fast, clearly-labeled error.
+;; tcp-accept now takes an optional timeout-ms (issue #238; #237's first
+;; cut at this used a separate socket-ready? poll before a blocking
+;; accept, which had its own narrow TOCTOU race -- #238 closed that at
+;; the C level with a real non-blocking-accept retry loop, so this can
+;; just pass the timeout straight through).
 (define %accept-timeout-ms 10000)
-(define (accept-with-timeout listener who)
-  (if (socket-ready? listener %accept-timeout-ms)
-      (tcp-accept listener)
-      (error (string-append who ": tcp-accept timed out after "
-                             (number->string %accept-timeout-ms)
-                             "ms waiting for a client connection"))))
 
 (define server-thread
   (spawn (lambda ()
-           (let* ((conn (accept-with-timeout listener "websocket server-thread")) (in (car conn)) (out (cdr conn)))
+           (let* ((conn (tcp-accept listener %accept-timeout-ms)) (in (car conn)) (out (cdr conn)))
              (server-accept! in out)
 
              ;; 1. echo one text message back unchanged
@@ -221,7 +216,7 @@
 
 (define mask-server-thread
   (spawn (lambda ()
-           (let* ((conn (accept-with-timeout mask-listener "websocket mask-server-thread")) (in (car conn)) (out (cdr conn)))
+           (let* ((conn (tcp-accept mask-listener %accept-timeout-ms)) (in (car conn)) (out (cdr conn)))
              (server-accept! in out)
              ;; a text frame with the mask bit deliberately SET, plus a
              ;; (bogus, but present) mask key -- only a client may ever

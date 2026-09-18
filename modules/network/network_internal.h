@@ -30,6 +30,11 @@ typedef SOCKET sock_t;
 #  define sock_close closesocket
 #else
 #  include <unistd.h>
+#  include <fcntl.h>
+#  include <sys/select.h>
+#  include <errno.h>
+#  include <time.h>
+#  include <math.h>
 typedef int sock_t;
 #  define SOCK_INVALID (-1)
 #  define sock_close close
@@ -164,5 +169,133 @@ static inline sock_t net_checked_val_to_sock(curry_val v, const char *who) {
     if (!net_fd_registry_contains(fd)) curry_error("%s: not a socket handle", who);
     return fd;
 }
+
+#ifndef _WIN32
+/* On at least macOS/BSD (confirmed empirically -- not just a
+ * theoretical concern), a socket returned by accept() can inherit the
+ * LISTENING socket's O_NONBLOCK flag rather than starting fresh in
+ * blocking mode (Linux does not do this, but this codebase can't
+ * assume Linux-only). Every caller of accept() in this file hands the
+ * returned fd to curry's ordinary blocking-I/O port machinery, which
+ * would otherwise see spurious EWOULDBLOCK/EAGAIN on the very first
+ * read/write -- reproduced exactly this way during #238's development:
+ * a real client connecting and completing its side of a handshake,
+ * while the server side raised immediately instead of blocking to read
+ * the client's request, because net_accept_with_timeout (below)
+ * necessarily sets the listener non-blocking for its retry loop. The
+ * same inheritance can also happen via any ordinary accept() call on a
+ * listener a script separately made non-blocking with
+ * socket-set-nonblocking! -- so every caller of this function calls it
+ * unconditionally on every successful accept(), not just the timeout
+ * path, closing the whole bug class rather than one entry point into
+ * it. A hard error (not a silent no-op) if F_GETFL itself fails on the
+ * freshly-accepted fd -- independent review flagged the earlier
+ * silent-fail-open version as reproducing this exact bug quietly in
+ * that corner case instead of surfacing it. */
+static inline void net_clear_client_nonblock(sock_t client, const char *who) {
+    int flags = fcntl(client, F_GETFL, 0);
+    if (flags < 0) curry_error("%s: fcntl(F_GETFL) failed on accepted connection", who);
+    if (flags & O_NONBLOCK) fcntl(client, F_SETFL, flags & ~O_NONBLOCK);
+}
+
+/* Issue #238: a race-free accept-with-timeout, shared by network.c's
+ * tcp-accept and srfi106.c's socket-accept (both otherwise duplicating
+ * the identical logic). The naive approach -- poll with socket-ready?
+ * (a select() call), then a separate ordinary blocking accept() -- has
+ * a genuine TOCTOU gap: a connection that completes the handshake
+ * (making select() report the listener readable) can be reset by the
+ * client before the *separate* accept() call dequeues it, at which
+ * point accept() blocks again waiting for the next one, with no
+ * further timeout check at all -- silently defeating the very bound
+ * the caller asked for. That was issue #237's first cut at this (see
+ * fn_socket_ready_p in network.c, still used standalone elsewhere).
+ *
+ * This closes the gap properly: temporarily sets the listening socket
+ * non-blocking, then loops select()-then-accept() against a single
+ * absolute deadline (recomputing the *remaining* budget each
+ * iteration, never resetting to the full timeout) until a connection
+ * is actually accepted or the deadline passes. A connection that
+ * vanishes between select() and accept() (EWOULDBLOCK/EAGAIN/EINTR/
+ * ECONNABORTED) just falls through to the next loop iteration with
+ * whatever time budget is left, rather than returning a stale
+ * "success" or blocking unboundedly.
+ *
+ * The listening socket's original blocking-mode flag is always
+ * restored before this returns (success, timeout, or error) -- it's a
+ * borrowed fd the caller still owns and will keep using afterward
+ * (accepting more connections, closing it, etc.), so leaving it
+ * permanently non-blocking would be a surprising side effect on
+ * unrelated future calls. */
+
+static inline sock_t net_accept_with_timeout(sock_t server, double ms, const char *who) {
+    /* isfinite() rejects both NaN and +/-Infinity -- ms < 0 alone does
+     * NOT reject NaN (every NaN comparison is false), so +nan.0 would
+     * otherwise sail straight through into the deadline arithmetic
+     * below and hit undefined behavior on the double -> integer casts
+     * (C11 6.3.1.4). The upper bound similarly guards against a huge
+     * finite value (e.g. 1e300) doing the same -- 1e9 ms is ~11.5 days,
+     * already an absurd timeout for an accept call, so anything past it
+     * is a caller bug to report cleanly rather than silently truncate
+     * into garbage. */
+    if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
+        curry_error("%s: timeout-ms must be a non-negative finite number (max 1e9)", who);
+
+    int orig_flags = fcntl(server, F_GETFL, 0);
+    if (orig_flags < 0) curry_error("%s: fcntl(F_GETFL) failed", who);
+    if (fcntl(server, F_SETFL, orig_flags | O_NONBLOCK) < 0)
+        curry_error("%s: fcntl(F_SETFL) failed", who);
+
+    /* Single conversion from ms to total nanoseconds, not a separate
+     * tv_sec/tv_nsec split computed independently from ms/1000.0 and
+     * ms%1000 -- avoids those two derived values ever disagreeing with
+     * each other by a rounding hair. */
+    long long total_ns = (long long)(ms * 1.0e6);
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec  += (time_t)(total_ns / 1000000000LL);
+    deadline.tv_nsec += (long)(total_ns % 1000000000LL);
+    if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
+
+    for (;;) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
+                             + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
+        if (remaining_ms <= 0) {
+            fcntl(server, F_SETFL, orig_flags);
+            curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
+        }
+
+        struct timeval tv;
+        tv.tv_sec  = (long)(remaining_ms / 1000.0);
+        tv.tv_usec = (long)((remaining_ms - (double)tv.tv_sec * 1000.0) * 1000.0);
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(server, &rfds);
+        curry_gc_thread_park();
+        int r = select(server + 1, &rfds, NULL, NULL, &tv);
+        curry_gc_thread_unpark();
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            fcntl(server, F_SETFL, orig_flags);
+            curry_error("%s: select failed", who);
+        }
+        if (r == 0) continue; /* recompute remaining at the top; errors out there once truly expired */
+
+        struct sockaddr_storage addr;
+        socklen_t addrlen = sizeof(addr);
+        sock_t client = accept(server, (struct sockaddr *)&addr, &addrlen);
+        if (client != SOCK_INVALID) {
+            fcntl(server, F_SETFL, orig_flags);
+            net_clear_client_nonblock(client, who);
+            return client;
+        }
+        if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR || errno == ECONNABORTED)
+            continue; /* connection vanished between select() and accept() -- retry within remaining budget */
+        fcntl(server, F_SETFL, orig_flags);
+        curry_error("%s: accept failed", who);
+    }
+}
+#endif /* !_WIN32 */
 
 #endif /* CURRY_NETWORK_INTERNAL_H */
