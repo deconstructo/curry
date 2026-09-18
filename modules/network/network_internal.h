@@ -258,14 +258,35 @@ static inline sock_t net_accept_with_timeout(sock_t server, double ms, const cha
     if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
 
     for (;;) {
+        /* Issue #241 review: erroring out here whenever remaining_ms
+         * had already reached <= 0 -- BEFORE ever calling poll()/
+         * accept() even once -- meant an explicit timeout-ms of 0 (or
+         * any sufficiently small value) never actually checked the
+         * listener at all: deadline is computed as "now" (or "now" + a
+         * tiny delta) above, and this loop's own clock_gettime() call
+         * necessarily reads a strictly later "now" a few instructions
+         * afterward, so remaining_ms <= 0 was true on essentially every
+         * first iteration -- raising "timed out" even when a connection
+         * was sitting right there ready to accept. Fixed the same way
+         * as socket-ready?'s identical bug (network.c): still call
+         * poll() with a clamped-to-nonnegative timeout (0, an ordinary
+         * immediate non-blocking check) once the deadline has already
+         * passed, and only treat a fruitless *already-expired* attempt
+         * (the `expired` flag below) as the terminal "really timed out"
+         * case -- a fruitless attempt that hadn't yet expired loops
+         * back around to recheck instead. This also closes a related
+         * risk the naive "always continue on not-ready" retry had: once
+         * genuinely expired, a persistently-unready listener (e.g.
+         * stuck in POLLERR without POLLIN, or a connection that keeps
+         * vanishing between poll() and accept() right at the deadline
+         * edge) now correctly raises the timeout error instead of
+         * retrying forever past the deadline. */
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
         double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
                              + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
-        if (remaining_ms <= 0) {
-            fcntl(server, F_SETFL, orig_flags);
-            curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
-        }
+        bool expired = remaining_ms <= 0;
+        int timeout_ms = expired ? 0 : (int)ceil(remaining_ms);
 
         /* poll(), not select()/FD_SET: a fd_set is a fixed-size bitmap
          * (1024 bits on Linux/macOS/BSD) and FD_SET does an unchecked
@@ -274,25 +295,38 @@ static inline sock_t net_accept_with_timeout(sock_t server, double ms, const cha
          * concurrent sockets/actors, exactly the shape of process that
          * would use an accept timeout in the first place), that's an
          * out-of-bounds stack write, not just "select() misbehaves".
-         * poll()'s pollfd array has no such fixed limit. Round the
-         * timeout up (not down) so a sub-millisecond remaining budget
-         * still gets a real wait instead of a spurious immediate
-         * "timed out" poll() call. */
+         * poll()'s pollfd array has no such fixed limit. */
         struct pollfd pfd;
         pfd.fd = server;
         pfd.events = POLLIN;
         pfd.revents = 0;
-        int timeout_ms = (int)ceil(remaining_ms);
         curry_gc_thread_park();
         int r = poll(&pfd, 1, timeout_ms);
         curry_gc_thread_unpark();
         if (r < 0) {
-            if (errno == EINTR) continue;
+            bool was_eintr = (errno == EINTR);
+            if (!was_eintr) {
+                fcntl(server, F_SETFL, orig_flags);
+                curry_error("%s: poll failed", who);
+            }
+            /* Issue #241 follow-up review: gate EINTR on `expired` too,
+             * matching every other "attempt came back empty" branch
+             * below -- a signal that keeps interrupting poll() right at
+             * or after the deadline must not be able to retry forever
+             * past the caller's requested bound. */
+            if (!expired) continue;
             fcntl(server, F_SETFL, orig_flags);
-            curry_error("%s: poll failed", who);
+            curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
         }
-        if (r == 0) continue; /* recompute remaining at the top; errors out there once truly expired */
-        if (!(pfd.revents & POLLIN)) continue; /* POLLERR/POLLHUP/POLLNVAL without POLLIN -- nothing to accept yet, retry within remaining budget rather than call accept() on a listener that isn't actually ready */
+        if (r == 0 || !(pfd.revents & POLLIN)) {
+            /* r == 0: nothing ready within timeout_ms. Nonzero r but no
+             * POLLIN: POLLERR/POLLHUP/POLLNVAL instead -- nothing to
+             * accept yet either. Either way, only stop retrying once
+             * this attempt was already known to be past the deadline. */
+            if (!expired) continue;
+            fcntl(server, F_SETFL, orig_flags);
+            curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
+        }
 
         struct sockaddr_storage addr;
         socklen_t addrlen = sizeof(addr);
@@ -302,8 +336,13 @@ static inline sock_t net_accept_with_timeout(sock_t server, double ms, const cha
             net_clear_client_nonblock(client, who);
             return client;
         }
-        if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR || errno == ECONNABORTED)
-            continue; /* connection vanished between poll() and accept() -- retry within remaining budget */
+        if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR || errno == ECONNABORTED) {
+            /* connection vanished between poll() and accept() -- retry
+             * within remaining budget, unless there isn't any left. */
+            if (!expired) continue;
+            fcntl(server, F_SETFL, orig_flags);
+            curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
+        }
         fcntl(server, F_SETFL, orig_flags);
         curry_error("%s: accept failed", who);
     }

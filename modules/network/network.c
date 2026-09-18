@@ -341,48 +341,119 @@ static curry_val fn_socket_set_nonblocking(int ac, curry_val *av, void *ud) {
 static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd = extract_fd(av[0], "socket-ready?");
-    int timeout_ms = 0;
-    if (ac > 1) {
+    bool has_timeout = ac > 1;
+    struct timespec deadline;
+    if (has_timeout) {
         double ms = checked_float(av[1], 2, "socket-ready?");
         /* Issue #239 review: ms < 0 alone does not reject NaN (every NaN
          * comparison is false) -- validated the same way
          * net_accept_with_timeout is (network_internal.h), for the same
          * reason: an unvalidated NaN/Infinity/huge value reaching the
-         * double -> integer cast below is undefined behavior, not just
+         * double -> integer casts below is undefined behavior, not just
          * a wrong answer. */
         if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
             curry_error("socket-ready?: timeout-ms must be a non-negative finite number (max 1e9)");
-        timeout_ms = (int)ceil(ms);
+        /* Issue #241: a single poll() call with no deadline tracking
+         * meant EINTR (a signal delivered mid-wait) had no way to retry
+         * within whatever time budget was left -- it just failed the
+         * whole call outright, unlike net_accept_with_timeout's
+         * identical-shaped retry loop. Same fix here: an absolute
+         * deadline computed once, re-checked (and poll()'s timeout
+         * recomputed from the *remaining* budget, not reset to the
+         * full ms) on every retry, so a spurious signal costs at most
+         * one loop iteration instead of turning a transient interrupt
+         * into a hard error. */
+        long long total_ns = (long long)(ms * 1.0e6);
+        clock_gettime(CLOCK_MONOTONIC, &deadline);
+        deadline.tv_sec  += (time_t)(total_ns / 1000000000LL);
+        deadline.tv_nsec += (long)(total_ns % 1000000000LL);
+        if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
     }
-    /* Issue #239: poll(), not select()/FD_SET -- a fd_set is a
-     * fixed-size bitmap (1024 bits on Linux/macOS/BSD) and FD_SET does
-     * an unchecked write into it; for a socket fd number >= FD_SETSIZE
-     * (realistic on a long-lived process with many concurrent sockets/
-     * actors), that's an out-of-bounds stack write, not just "select()
-     * misbehaves". poll()'s pollfd array has no such fixed limit. */
-    struct pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-    /* Issue #200 Phase A / issue #237 review: poll() can block for up to
-     * timeout-ms (realistically multi-second, since ws-accept's timeout
-     * feature made this a load-bearing part of a public API's
-     * documented usage pattern) -- park so a future GC safepoint doesn't
-     * wait on this thread for that long. Same rationale, same pattern,
-     * as fn_tcp_accept's identical bracket. */
-    curry_gc_thread_park();
-    int r = poll(&pfd, 1, timeout_ms);
-    curry_gc_thread_unpark();
-    if (r < 0) curry_error("socket-ready?: poll failed");
-    /* POLLHUP/POLLERR without POLLIN too -- not just POLLIN alone. A
-     * closed/reset connection is exactly the select()-based code's old
-     * behavior here: a read() on it returns 0 (EOF) immediately rather
-     * than blocking, so it counts as "ready" the same way actual
-     * pending data does; some platforms report that state as POLLHUP
-     * rather than POLLIN on a stream socket, and missing it here would
-     * silently change socket-ready?'s EOF-detection behavior compared
-     * to before this function used poll(). */
-    return curry_make_bool(r > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR)));
+
+    for (;;) {
+        /* Issue #241 review: returning early here whenever remaining_ms
+         * had already reached <= 0 -- BEFORE ever calling poll() even
+         * once -- meant an explicit (socket-ready? sock 0), or any
+         * sufficiently small timeout-ms, silently never polled the fd
+         * at all: deadline is computed as "now" (or "now" + a tiny
+         * delta), and this loop's own clock_gettime() call necessarily
+         * reads a strictly later "now" a few instructions afterward, so
+         * remaining_ms <= 0 was true on essentially every first
+         * iteration -- always reporting "not ready" regardless of
+         * actual socket state, for a documented, legitimate call
+         * pattern ("check right now, don't block"). Fixed by still
+         * calling poll() with a clamped-to-nonnegative timeout (0, an
+         * ordinary immediate non-blocking check) when the deadline has
+         * already passed, and only treating a fruitless *already-
+         * expired* poll (the `expired` flag below) as the terminal
+         * "not ready" case -- a fruitless poll that hadn't yet expired
+         * loops back around to recheck instead. */
+        int timeout_ms = 0;
+        bool expired = false;
+        if (has_timeout) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
+                                 + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
+            if (remaining_ms <= 0) expired = true;
+            else timeout_ms = (int)ceil(remaining_ms);
+        }
+
+        /* Issue #239: poll(), not select()/FD_SET -- a fd_set is a
+         * fixed-size bitmap (1024 bits on Linux/macOS/BSD) and FD_SET
+         * does an unchecked write into it; for a socket fd number >=
+         * FD_SETSIZE (realistic on a long-lived process with many
+         * concurrent sockets/actors), that's an out-of-bounds stack
+         * write, not just "select() misbehaves". poll()'s pollfd array
+         * has no such fixed limit. */
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        /* Issue #200 Phase A / issue #237 review: poll() can block for
+         * up to timeout-ms (realistically multi-second, since
+         * ws-accept's timeout feature made this a load-bearing part of
+         * a public API's documented usage pattern) -- park so a future
+         * GC safepoint doesn't wait on this thread for that long. Same
+         * rationale, same pattern, as fn_tcp_accept's identical
+         * bracket. */
+        curry_gc_thread_park();
+        int r = poll(&pfd, 1, timeout_ms);
+        curry_gc_thread_unpark();
+        if (r < 0) {
+            bool was_eintr = (errno == EINTR);
+            if (!was_eintr) curry_error("socket-ready?: poll failed");
+            /* Issue #241 follow-up review: gate EINTR on `expired` too,
+             * matching the r == 0 branch below -- a signal that keeps
+             * interrupting poll() right at or after the deadline must
+             * not be able to retry forever past the caller's requested
+             * bound. With no timeout argument at all there's no
+             * deadline to violate, so it just retries the immediate
+             * poll unconditionally, same as before. */
+            if (!has_timeout) continue; /* no deadline to violate: just retry the immediate poll */
+            if (!expired) continue;
+            return curry_make_bool(false); /* expired: report not-ready rather than loop forever */
+        }
+        if (r == 0) {
+            /* A real (not-yet-expired) wait window elapsed with nothing
+             * ready -- loop back around; the next iteration's own
+             * remaining_ms check picks up from here (and will itself
+             * become `expired` once the true deadline has passed,
+             * triggering one final immediate poll rather than skipping
+             * straight to "not ready" -- see the comment above). */
+            if (has_timeout && !expired) continue;
+            return curry_make_bool(false); /* no-timeout immediate check, or an already-expired poll, found nothing ready */
+        }
+        /* POLLHUP/POLLERR without POLLIN too -- not just POLLIN alone. A
+         * closed/reset connection is exactly the select()-based code's
+         * old behavior here: a read() on it returns 0 (EOF) immediately
+         * rather than blocking, so it counts as "ready" the same way
+         * actual pending data does; some platforms report that state as
+         * POLLHUP rather than POLLIN on a stream socket, and missing it
+         * here would silently change socket-ready?'s EOF-detection
+         * behavior compared to before this function used poll(). */
+        return curry_make_bool((pfd.revents & (POLLIN | POLLHUP | POLLERR)) != 0);
+    }
 }
 
 /* Defined in tls.c, compiled into this same module target -- registers
