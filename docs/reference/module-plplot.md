@@ -281,4 +281,22 @@ Return `(width . height)` (a pair of integers, device pixels) of the current pag
 
 ## Using this from the Jupyter kernel
 
-`curry_jupyter` ([docs/reference/jupyter-kernel.md](jupyter-kernel.md)) doesn't yet wire up rich display (`image/png` output) — see that doc's "Known gaps". Running any of the examples above in a notebook cell writes the file to disk (e.g. `output.png`) but won't show the image inline; open the file separately to view it.
+`curry_jupyter` ([docs/reference/jupyter-kernel.md](jupyter-kernel.md)) has a `(jupyter-display-file path)` builtin that publishes a PNG/JPEG/SVG file as an inline image in the notebook. Add one line after `(plot-end)`:
+
+```scheme
+(import (curry plplot))
+
+(plot-device "pngcairo")
+(plot-output "y_x2.png")
+(plot-init)
+(plot-env -10.0 10.0 0.0 100.0)
+(plot-labels "x" "y" "y = x^2")
+(let* ((xs (map exact->inexact (iota 41 -10)))
+       (ys (map (lambda (x) (* x x)) xs)))
+  (plot-line xs ys))
+(plot-end)
+
+(jupyter-display-file "y_x2.png")
+```
+
+`(jupyter-display-file ...)` only exists inside the Jupyter kernel — it's not part of curry's core language, so the plain `curry` REPL/CLI doesn't have it and this line would need removing (or wrapping in a check) to run the same script outside a notebook.
