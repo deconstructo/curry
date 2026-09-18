@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789708139642,
+  "lastUpdate": 1789708330182,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15110,6 +15110,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 85.963,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "0db12ecf3125ae5b6c7c277b6872416819233fc0",
+          "message": "tests: add accept timeout to websocket_tests.scm (issue #237)\n\nThe other half of issue #110's fix, previously left as an explicit unfinished TODO: tcp-accept has no timeout of its own, so if a client connection never arrives for any reason (CI networking hiccup, scheduling delay, ...), the accepting actor blocks forever and silently -- only caught eventually by ctest's blunt 60s process-level TIMEOUT, with no diagnostic pointing at accept specifically. Recurred today on PR #236's macOS Release job; passed clean on an immediate rerun with no code changes, consistent with the CI-load-dependent flakiness #110 originally described.\n\nsocket-ready? (module-network.md) already supports a timeout poll on a listening socket -- this doesn't need a new primitive, just actually using the one that exists. Verified both the happy path (all 10 checks still pass) and the timeout branch itself (isolated test: no client connects, times out at 500ms with a clean catchable error instead of hanging).\n\nwebsocket_server_tests.scm has the identical gap through ws-accept, a public (curry websocket) API rather than test-only code -- filed as issue #237 rather than fixed here, since closing it properly needs an actual API decision (exposing the listener's socket for readiness polling, or adding an optional timeout parameter to ws-accept itself).\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-18T15:11:19+10:00",
+          "tree_id": "8cb1cac6a83fff54475da33f69a97cf75f80bbf2",
+          "url": "https://github.com/deconstructo/curry/commit/0db12ecf3125ae5b6c7c277b6872416819233fc0"
+        },
+        "date": 1789708328184,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.163,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 28.142,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.311,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 33.618,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 122.142,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 248.579,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 58.66,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 76.994,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 58.643,
             "unit": "ms"
           }
         ]
