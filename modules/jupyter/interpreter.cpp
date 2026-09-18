@@ -15,6 +15,7 @@ extern "C" {
 #include "value.h"
 #include "object.h"
 #include "symbol.h"
+#include "env.h"
 #include "port.h"
 #include "reader.h"
 #include "compiler.h"
@@ -27,6 +28,9 @@ extern "C" {
 #include "version.h"
 }
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -92,10 +96,154 @@ RenderedError render_error(val_t exn) {
     return r;
 }
 
+/* ---- (jupyter-display-file path) ----
+ *
+ * Jupyter-only builtin (registered into GLOBAL_ENV below, not compiled
+ * into curry_core -- the plain `curry` REPL/CLI has no use for it and
+ * doesn't get it). Lets Scheme code -- e.g. after plplot writes a PNG
+ * with (curry plplot) -- ask the kernel to publish that file as a
+ * display_data message, so it renders inline in the notebook instead of
+ * only existing as a file on disk. See docs/reference/jupyter-kernel.md.
+ */
+
+std::string base64_encode(const std::string &data) {
+    static const char table[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((data.size() + 2) / 3) * 4);
+    size_t i = 0;
+    while (i + 3 <= data.size()) {
+        uint32_t n = (uint8_t(data[i]) << 16) | (uint8_t(data[i + 1]) << 8) | uint8_t(data[i + 2]);
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += table[(n >> 6) & 0x3F];
+        out += table[n & 0x3F];
+        i += 3;
+    }
+    size_t rem = data.size() - i;
+    if (rem == 1) {
+        uint32_t n = uint8_t(data[i]) << 16;
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += "==";
+    } else if (rem == 2) {
+        uint32_t n = (uint8_t(data[i]) << 16) | (uint8_t(data[i + 1]) << 8);
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += table[(n >> 6) & 0x3F];
+        out += "=";
+    }
+    return out;
+}
+
+/* Extension -> (MIME type, needs base64). SVG is text, not base64 --
+ * per the Jupyter messaging spec, only genuinely binary MIME types are
+ * base64-encoded in a display_data payload. A plain string literal (no
+ * ownership) -- see the note on FileLoadResult below for why. */
+const char *mime_for_extension(const char *path, bool &binary) {
+    size_t plen = strlen(path);
+    auto ends_with = [&](const char *suffix) {
+        size_t n = strlen(suffix);
+        return plen >= n && strcmp(path + plen - n, suffix) == 0;
+    };
+    if (ends_with(".png"))  { binary = true;  return "image/png"; }
+    if (ends_with(".jpg") || ends_with(".jpeg")) { binary = true; return "image/jpeg"; }
+    if (ends_with(".svg"))  { binary = false; return "image/svg+xml"; }
+    return nullptr;
+}
+
+/* Plain-old-data result: deliberately holds no std::string/nl::json (no
+ * type with a non-trivial destructor). scm_raise()'s longjmp skips
+ * destructors of any C++ object still on the stack at the raise site --
+ * UB per the standard regardless of whether that particular destructor
+ * would have had an observable side effect. jupyter_display_file_prim
+ * below only ever calls scm_raise() while nothing but POD locals (this
+ * struct, a fixed-size char[] path buffer) are in scope; std::string/
+ * nl::json are constructed only in the guaranteed-no-more-raises tail
+ * after a successful load. */
+struct FileLoadResult {
+    enum { OK, BAD_EXTENSION, READ_FAILED } status;
+    const char *mime; /* string literal from mime_for_extension; only valid when status == OK */
+    bool binary;
+    char *data;       /* malloc'd; caller must free() when non-null */
+    size_t len;
+};
+
+FileLoadResult load_display_file(const char *path) {
+    FileLoadResult r{};
+    bool binary;
+    const char *mime = mime_for_extension(path, binary);
+    if (!mime) { r.status = FileLoadResult::BAD_EXTENSION; return r; }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) { r.status = FileLoadResult::READ_FAILED; return r; }
+    size_t cap = 65536, len = 0;
+    char *buf = static_cast<char *>(malloc(cap));
+    char chunk[65536];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+        if (len + n > cap) {
+            cap = (len + n) * 2;
+            buf = static_cast<char *>(realloc(buf, cap));
+        }
+        memcpy(buf + len, chunk, n);
+        len += n;
+    }
+    bool ok = !ferror(f);
+    fclose(f);
+    if (!ok) { free(buf); r.status = FileLoadResult::READ_FAILED; return r; }
+
+    r.status = FileLoadResult::OK;
+    r.mime = mime; r.binary = binary; r.data = buf; r.len = len;
+    return r;
+}
+
+val_t jupyter_display_file_prim(int argc, val_t *argv, void *ud) {
+    (void)argc;
+    if (!vis_string(argv[0]))
+        scm_raise(V_FALSE, "jupyter-display-file: expected a path string");
+
+    /* A fixed-size stack buffer, not std::string, for the same reason
+     * FileLoadResult is POD -- this needs to stay valid (and destructor-
+     * free) across the scm_raise() calls below. */
+    String *s = as_str(argv[0]);
+    char path[4096];
+    if (s->len >= sizeof(path))
+        scm_raise(V_FALSE, "jupyter-display-file: path too long (max %zu bytes)", sizeof(path) - 1);
+    memcpy(path, str_data(s), s->len);
+    path[s->len] = '\0';
+
+    FileLoadResult r = load_display_file(path);
+    if (r.status == FileLoadResult::BAD_EXTENSION)
+        scm_raise(V_FALSE, "jupyter-display-file: unsupported file extension: %s", path);
+    if (r.status == FileLoadResult::READ_FAILED)
+        scm_raise(V_FALSE, "jupyter-display-file: cannot read file: %s", path);
+
+    /* Success only from here on -- no further scm_raise() calls, so
+     * std::string/nl::json are safe to use for the rest of this call. */
+    std::string content(r.data, r.len);
+    free(r.data);
+
+    nl::json data;
+    data[r.mime] = r.binary ? base64_encode(content) : content;
+    data["text/plain"] = std::string("<") + r.mime + ": " + path + ">";
+
+    static_cast<curry_interpreter *>(ud)->display_data(data, nl::json::object(), nl::json::object());
+    return V_VOID;
+}
+
 } // namespace
 
 void curry_interpreter::configure_impl() {
     curry_runtime_init();
+
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
+    p->hdr.type  = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name      = "jupyter-display-file";
+    p->min_args  = 1; p->max_args = 1;
+    p->fn        = jupyter_display_file_prim;
+    p->ud        = this;
+    env_define(GLOBAL_ENV, sym_intern_cstr("jupyter-display-file"), vptr(p));
 }
 
 void curry_interpreter::execute_request_impl(xeus::xinterpreter::send_reply_callback cb,

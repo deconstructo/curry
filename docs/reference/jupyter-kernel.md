@@ -136,6 +136,36 @@ curry's own Akkadian-preamble error text. State from forms that already
 ran in that cell (and any earlier cell) is preserved — an error doesn't
 reset `GLOBAL_ENV`, only the VM's operand stack (`vm_reset()`).
 
+### Displaying images inline: `(jupyter-display-file path)`
+
+Only available inside this kernel (registered straight into `GLOBAL_ENV`
+in `configure_impl()`, `modules/jupyter/interpreter.cpp` — not compiled
+into `curry_core`, so the plain `curry` REPL/CLI doesn't have it). Reads
+`path` and publishes it as a Jupyter `display_data` message so it renders
+inline in the notebook, instead of only existing as a file on disk. The
+MIME type is inferred from the extension:
+
+| Extension | MIME type | Encoding |
+|---|---|---|
+| `.png` | `image/png` | base64 |
+| `.jpg` / `.jpeg` | `image/jpeg` | base64 |
+| `.svg` | `image/svg+xml` | raw text (SVG is XML, not binary — base64-encoding it would be valid but pointless) |
+
+Any other extension raises an error. Typical use, after `(curry plplot)`
+writes a file:
+
+```scheme
+(import (curry plplot))
+(plot-device "pngcairo")
+(plot-output "plot.png")
+(plot-init)
+...
+(plot-end)
+(jupyter-display-file "plot.png")
+```
+
+See [`docs/reference/module-plplot.md`](module-plplot.md) for full plotting examples.
+
 ### Interrupting a busy cell
 
 `main.cpp` builds the kernel with `xeus::make_xserver_shell_main` — the
@@ -187,7 +217,8 @@ a `define-library` body) cannot currently be interrupted.
   linkable into this standalone binary as-is. Reusing it means lifting
   that logic out of `modules/lsp/lsp.c` into something both can link
   against; out of scope for the initial kernel.
-- **Rich display**: results only ever publish as `text/plain`. Symbolic
-  CAS values could route through `sym->latex` as `text/latex`, and
-  `qt6`/`plplot` canvases could snapshot to `image/png` — neither is
-  wired up yet.
+- **Rich display for a cell's own *result* value**: an `execute_result`
+  (the value a cell evaluates to) still only ever publishes as
+  `text/plain` — no `text/latex` for symbolic CAS values via `sym->latex`,
+  for instance. File output (see below) already has a path to rich
+  display; only in-process values don't yet.
