@@ -111,7 +111,21 @@ Both accept either a raw socket handle (`tcp-listen`'s/`udp-socket`'s
 return value) or a port (`tcp-connect`'s/`tcp-accept`'s in-port or
 out-port) — whichever you have on hand. `socket-ready?` on a listening
 socket means "`tcp-accept` would not block"; on a connected port it means
-"there's data to read without blocking."
+"there's data to read without blocking." `timeout-ms` must be a
+non-negative finite number no greater than `1e9` (~11.5 days) — `tcp-accept`'s
+own optional timeout (above) has the identical bound, for the identical
+reason (an unvalidated NaN/Infinity/huge value would otherwise reach
+undefined-behavior integer casts internally).
+
+If you're polling before calling `tcp-accept` separately rather than
+using `tcp-accept`'s own `timeout-ms`, note that `socket-ready?`
+reporting a listener ready and the *next* `tcp-accept` call actually
+succeeding are two separate operations — a connection that resets in
+between can still make that separate `tcp-accept` block. `tcp-accept`'s
+own `timeout-ms` doesn't have this gap (it's a single non-blocking-retry
+loop against one deadline, not a poll-then-separate-accept); reach for
+that instead of hand-rolling `socket-ready?`+`tcp-accept` when you need
+an accept to be reliably time-bounded.
 
 This is deliberately **not** a full epoll/kqueue event-loop reactor.
 curry's actors are real OS threads (not green threads/coroutines — those

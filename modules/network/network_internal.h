@@ -31,7 +31,7 @@ typedef SOCKET sock_t;
 #else
 #  include <unistd.h>
 #  include <fcntl.h>
-#  include <sys/select.h>
+#  include <poll.h>
 #  include <errno.h>
 #  include <time.h>
 #  include <math.h>
@@ -201,21 +201,22 @@ static inline void net_clear_client_nonblock(sock_t client, const char *who) {
 /* Issue #238: a race-free accept-with-timeout, shared by network.c's
  * tcp-accept and srfi106.c's socket-accept (both otherwise duplicating
  * the identical logic). The naive approach -- poll with socket-ready?
- * (a select() call), then a separate ordinary blocking accept() -- has
- * a genuine TOCTOU gap: a connection that completes the handshake
- * (making select() report the listener readable) can be reset by the
- * client before the *separate* accept() call dequeues it, at which
- * point accept() blocks again waiting for the next one, with no
- * further timeout check at all -- silently defeating the very bound
- * the caller asked for. That was issue #237's first cut at this (see
- * fn_socket_ready_p in network.c, still used standalone elsewhere).
+ * (a poll() call as of issue #239; a select() call originally), then a
+ * separate ordinary blocking accept() -- has a genuine TOCTOU gap: a
+ * connection that completes the handshake (making the poll report the
+ * listener readable) can be reset by the client before the *separate*
+ * accept() call dequeues it, at which point accept() blocks again
+ * waiting for the next one, with no further timeout check at all --
+ * silently defeating the very bound the caller asked for. That was
+ * issue #237's first cut at this (see fn_socket_ready_p in network.c,
+ * still used standalone elsewhere).
  *
  * This closes the gap properly: temporarily sets the listening socket
- * non-blocking, then loops select()-then-accept() against a single
+ * non-blocking, then loops poll()-then-accept() against a single
  * absolute deadline (recomputing the *remaining* budget each
  * iteration, never resetting to the full timeout) until a connection
  * is actually accepted or the deadline passes. A connection that
- * vanishes between select() and accept() (EWOULDBLOCK/EAGAIN/EINTR/
+ * vanishes between poll() and accept() (EWOULDBLOCK/EAGAIN/EINTR/
  * ECONNABORTED) just falls through to the next loop iteration with
  * whatever time budget is left, rather than returning a stale
  * "success" or blocking unboundedly.
@@ -266,21 +267,32 @@ static inline sock_t net_accept_with_timeout(sock_t server, double ms, const cha
             curry_error("%s: timed out after %g ms waiting for a client connection", who, ms);
         }
 
-        struct timeval tv;
-        tv.tv_sec  = (long)(remaining_ms / 1000.0);
-        tv.tv_usec = (long)((remaining_ms - (double)tv.tv_sec * 1000.0) * 1000.0);
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(server, &rfds);
+        /* poll(), not select()/FD_SET: a fd_set is a fixed-size bitmap
+         * (1024 bits on Linux/macOS/BSD) and FD_SET does an unchecked
+         * write into it -- for a listening socket fd number >=
+         * FD_SETSIZE (realistic on a long-lived process with many
+         * concurrent sockets/actors, exactly the shape of process that
+         * would use an accept timeout in the first place), that's an
+         * out-of-bounds stack write, not just "select() misbehaves".
+         * poll()'s pollfd array has no such fixed limit. Round the
+         * timeout up (not down) so a sub-millisecond remaining budget
+         * still gets a real wait instead of a spurious immediate
+         * "timed out" poll() call. */
+        struct pollfd pfd;
+        pfd.fd = server;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int timeout_ms = (int)ceil(remaining_ms);
         curry_gc_thread_park();
-        int r = select(server + 1, &rfds, NULL, NULL, &tv);
+        int r = poll(&pfd, 1, timeout_ms);
         curry_gc_thread_unpark();
         if (r < 0) {
             if (errno == EINTR) continue;
             fcntl(server, F_SETFL, orig_flags);
-            curry_error("%s: select failed", who);
+            curry_error("%s: poll failed", who);
         }
         if (r == 0) continue; /* recompute remaining at the top; errors out there once truly expired */
+        if (!(pfd.revents & POLLIN)) continue; /* POLLERR/POLLHUP/POLLNVAL without POLLIN -- nothing to accept yet, retry within remaining budget rather than call accept() on a listener that isn't actually ready */
 
         struct sockaddr_storage addr;
         socklen_t addrlen = sizeof(addr);
@@ -291,7 +303,7 @@ static inline sock_t net_accept_with_timeout(sock_t server, double ms, const cha
             return client;
         }
         if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR || errno == ECONNABORTED)
-            continue; /* connection vanished between select() and accept() -- retry within remaining budget */
+            continue; /* connection vanished between poll() and accept() -- retry within remaining budget */
         fcntl(server, F_SETFL, orig_flags);
         curry_error("%s: accept failed", who);
     }
