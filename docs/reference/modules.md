@@ -2,6 +2,8 @@
 
 The full list of `(curry ...)` modules. Optional modules that need an external library are gated by a `-DBUILD_MODULE_X=ON` CMake flag (most default `ON`); see each module's own doc page for its exact flag and any extra runtime dependency.
 
+Looking for the [Jupyter kernel](jupyter-kernel.md)? It isn't a `(curry X)` module — it's a standalone executable (`curry_jupyter`, gated by `-DBUILD_JUPYTER_KERNEL=ON`) that Jupyter launches directly, not something `dlopen`'d into a running `curry` process, so it doesn't appear in the table below.
+
 | Module | Import | Description | Extra deps |
 |--------|--------|-------------|------------|
 | [json](module-json.md) | `(curry json)` | JSON parse / stringify | — |
