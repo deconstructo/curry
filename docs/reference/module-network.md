@@ -34,16 +34,24 @@ underlying connection. Close each with `close-port` when done.
 ### Server
 
 ```scheme
-(tcp-listen port)           ; listen on port (all interfaces), return a raw socket handle
-(tcp-listen port backlog)   ; listen with explicit backlog
-(tcp-accept listen-sock)    ; block until a client connects, return (in-port . out-port)
-(tcp-close listen-sock)     ; close the *listening* socket (not a port pair)
+(tcp-listen port)               ; listen on port (all interfaces), return a raw socket handle
+(tcp-listen port backlog)       ; listen with explicit backlog
+(tcp-accept listen-sock)        ; block until a client connects, return (in-port . out-port)
+(tcp-accept listen-sock ms)     ; same, but raise if no client connects within ms milliseconds
+(tcp-close listen-sock)         ; close the *listening* socket (not a port pair)
 ```
 
 `tcp-listen`'s own return value is a raw listening-socket handle (not a
 stream, so not a port) — close it with `tcp-close`. Each accepted
 connection from `tcp-accept` is a port pair like `tcp-connect`'s, closed
 with `close-port` on each end.
+
+`tcp-accept`'s optional `ms` (non-negative milliseconds) bounds how long
+it waits for a connection, raising a clean, catchable error instead of
+blocking indefinitely — internally a real non-blocking-accept retry
+loop against a single deadline (issue #238), not a readiness poll
+followed by a separate blocking accept, so a connection that resets
+mid-wait doesn't restart the clock or block past the deadline.
 
 ```scheme
 (socket-local-port sock)   ; the actual port a socket is bound to

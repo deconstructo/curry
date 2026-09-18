@@ -184,14 +184,29 @@ static curry_val fn_socket_p(int ac, curry_val *av, void *ud) {
 }
 
 static curry_val fn_socket_accept(int ac, curry_val *av, void *ud) {
-    (void)ud; (void)ac;
+    (void)ud;
     int server = net_extract_fd(av[0], "socket-accept");
-    struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
-    /* Issue #200 Phase A: see network.c's fn_tcp_accept's identical comment. */
-    curry_gc_thread_park();
-    sock_t client = accept(server, (struct sockaddr *)&addr, &addrlen);
-    curry_gc_thread_unpark();
-    if (client == SOCK_INVALID) curry_error("socket-accept: accept failed");
+    sock_t client;
+
+    if (ac > 1) {
+        /* Issue #238: race-free accept-with-timeout -- see
+         * net_accept_with_timeout's own comment (network_internal.h). */
+        double ms = checked_float(av[1], 2, "socket-accept");
+        client = net_accept_with_timeout(server, ms, "socket-accept");
+    } else {
+        struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+        /* Issue #200 Phase A: see network.c's fn_tcp_accept's identical
+         * comment. */
+        curry_gc_thread_park();
+        client = accept(server, (struct sockaddr *)&addr, &addrlen);
+        curry_gc_thread_unpark();
+        if (client == SOCK_INVALID) curry_error("socket-accept: accept failed");
+        /* See net_clear_client_nonblock's own comment (network_internal.h):
+         * not just net_accept_with_timeout's problem -- a listener a
+         * script separately made non-blocking via socket-set-nonblocking!
+         * hits the identical inheritance issue right here too. */
+        net_clear_client_nonblock(client, "socket-accept");
+    }
     return net_sock_to_val_registered(client, "socket-accept");
 }
 
@@ -362,7 +377,7 @@ void curry_srfi106_module_init(CurryVM *vm) {
     curry_define_fn(vm, "make-client-socket", fn_make_client_socket, 2, 6, NULL);
     curry_define_fn(vm, "make-server-socket", fn_make_server_socket, 1, 4, NULL);
     curry_define_fn(vm, "socket?",             fn_socket_p,          1, 1, NULL);
-    curry_define_fn(vm, "socket-accept",       fn_socket_accept,     1, 1, NULL);
+    curry_define_fn(vm, "socket-accept",       fn_socket_accept,     1, 2, NULL);
     curry_define_fn(vm, "socket-local-port",   fn_socket_local_port, 1, 1, NULL);
     curry_define_fn(vm, "socket-send",         fn_socket_send,       2, 3, NULL);
     curry_define_fn(vm, "socket-recv",         fn_socket_recv,       2, 3, NULL);

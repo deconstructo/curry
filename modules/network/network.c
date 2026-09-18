@@ -182,16 +182,32 @@ static curry_val fn_tcp_listen(int ac, curry_val *av, void *ud) {
 }
 
 static curry_val fn_tcp_accept(int ac, curry_val *av, void *ud) {
-    (void)ud; (void)ac;
+    (void)ud;
     sock_t server = net_checked_val_to_sock(av[0], "tcp-accept");
-    struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
-    /* Issue #200 Phase A: accept() can block indefinitely waiting for an
-     * incoming connection -- park so a future GC safepoint doesn't wait
-     * on this thread for as long as that takes (see curry.h's comment). */
-    curry_gc_thread_park();
-    sock_t client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
-    curry_gc_thread_unpark();
-    if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
+    sock_t client;
+
+    if (ac > 1) {
+        /* Issue #238: race-free accept-with-timeout -- see
+         * net_accept_with_timeout's own comment (network_internal.h). */
+        double ms = checked_float(av[1], 2, "tcp-accept");
+        client = net_accept_with_timeout(server, ms, "tcp-accept");
+    } else {
+        struct sockaddr_storage addr; socklen_t addrlen = sizeof(addr);
+        /* Issue #200 Phase A: accept() can block indefinitely waiting for
+         * an incoming connection -- park so a future GC safepoint doesn't
+         * wait on this thread for as long as that takes (see curry.h's
+         * comment). */
+        curry_gc_thread_park();
+        client = accept((int)server, (struct sockaddr *)&addr, &addrlen);
+        curry_gc_thread_unpark();
+        if (client == SOCK_INVALID) curry_error("tcp-accept: accept failed");
+        /* See net_clear_client_nonblock's own comment (network_internal.h):
+         * not just net_accept_with_timeout's problem to guard against --
+         * a listener a script separately made non-blocking via
+         * socket-set-nonblocking! hits the identical inheritance issue
+         * right here too. */
+        net_clear_client_nonblock(client, "tcp-accept");
+    }
 
     /* Port pair, same rationale (and same fd-leak-on-fdopen-failure fix)
      * as fn_tcp_connect above. */
@@ -364,7 +380,7 @@ void curry_srfi106_module_init(CurryVM *vm);
 void curry_module_init(CurryVM *vm) {
     curry_define_fn(vm, "tcp-connect", fn_tcp_connect, 2, 2, NULL);
     curry_define_fn(vm, "tcp-listen",  fn_tcp_listen,  1, 2, NULL);
-    curry_define_fn(vm, "tcp-accept",  fn_tcp_accept,  1, 1, NULL);
+    curry_define_fn(vm, "tcp-accept",  fn_tcp_accept,  1, 2, NULL);
     curry_define_fn(vm, "tcp-close",   fn_tcp_close,   1, 1, NULL);
     curry_define_fn(vm, "udp-socket",  fn_udp_socket,  0, 0, NULL);
     curry_define_fn(vm, "udp-bind",    fn_udp_bind,    2, 2, NULL);
