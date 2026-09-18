@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789709308473,
+  "lastUpdate": 1789730488542,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15248,6 +15248,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 85.626,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6691a6c428d6b4a603d0cea6ab458f8958afb0b2",
+          "message": "Merge pull request #240 from deconstructo/fix-issue-238-accept-timeout\n\nImplement race-free accept-with-timeout at the C level (fixes #238)",
+          "timestamp": "2026-09-18T21:20:45+10:00",
+          "tree_id": "bcb66c2aaedc45d3fb6d37f0a90172ee925a1216",
+          "url": "https://github.com/deconstructo/curry/commit/6691a6c428d6b4a603d0cea6ab458f8958afb0b2"
+        },
+        "date": 1789730487363,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 11.613,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 16.194,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.165,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 19.743,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 96.157,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 176.511,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 44.808,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 58.222,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 44.401,
             "unit": "ms"
           }
         ]
