@@ -115,9 +115,28 @@
 (define listener (tcp-listen 0))
 (define test-port (socket-local-port listener))
 
+;; Issue #110's own writeup flagged this as the *other*, still-unresolved
+;; half of that bug: tcp-accept has no timeout at all, so if a client
+;; connection never arrives for any reason (CI networking hiccup, thread
+;; scheduling delay, anything), the accepting actor blocks forever and
+;; silently -- the only thing that ever catches it is ctest's blunt
+;; process-level 60s TIMEOUT (tests/CMakeLists.txt), which kills the
+;; whole test with no diagnostic pointing at accept specifically.
+;; socket-ready? (module-network.md) already supports a timeout poll on
+;; a listening socket ("would tcp-accept block?"), so this doesn't need
+;; a new primitive -- just actually using the one that exists, turning a
+;; silent indefinite hang into a fast, clearly-labeled error.
+(define %accept-timeout-ms 10000)
+(define (accept-with-timeout listener who)
+  (if (socket-ready? listener %accept-timeout-ms)
+      (tcp-accept listener)
+      (error (string-append who ": tcp-accept timed out after "
+                             (number->string %accept-timeout-ms)
+                             "ms waiting for a client connection"))))
+
 (define server-thread
   (spawn (lambda ()
-           (let* ((conn (tcp-accept listener)) (in (car conn)) (out (cdr conn)))
+           (let* ((conn (accept-with-timeout listener "websocket server-thread")) (in (car conn)) (out (cdr conn)))
              (server-accept! in out)
 
              ;; 1. echo one text message back unchanged
@@ -202,7 +221,7 @@
 
 (define mask-server-thread
   (spawn (lambda ()
-           (let* ((conn (tcp-accept mask-listener)) (in (car conn)) (out (cdr conn)))
+           (let* ((conn (accept-with-timeout mask-listener "websocket mask-server-thread")) (in (car conn)) (out (cdr conn)))
              (server-accept! in out)
              ;; a text frame with the mask bit deliberately SET, plus a
              ;; (bogus, but present) mask key -- only a client may ever
