@@ -39,7 +39,8 @@
 #  include <unistd.h>
 #  include <arpa/inet.h>
 #  include <fcntl.h>
-#  include <sys/select.h>
+#  include <poll.h>
+#  include <math.h>
 #endif
 
 /* sock_t/SOCK_INVALID/sock_close and the raw-socket-handle pack/unpack
@@ -340,27 +341,48 @@ static curry_val fn_socket_set_nonblocking(int ac, curry_val *av, void *ud) {
 static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     (void)ud;
     int fd = extract_fd(av[0], "socket-ready?");
-    struct timeval tv = {0, 0};
-    struct timeval *tvp = &tv;
+    int timeout_ms = 0;
     if (ac > 1) {
         double ms = checked_float(av[1], 2, "socket-ready?");
-        tv.tv_sec  = (long)(ms / 1000.0);
-        tv.tv_usec = (long)(((long long)ms % 1000) * 1000);
+        /* Issue #239 review: ms < 0 alone does not reject NaN (every NaN
+         * comparison is false) -- validated the same way
+         * net_accept_with_timeout is (network_internal.h), for the same
+         * reason: an unvalidated NaN/Infinity/huge value reaching the
+         * double -> integer cast below is undefined behavior, not just
+         * a wrong answer. */
+        if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
+            curry_error("socket-ready?: timeout-ms must be a non-negative finite number (max 1e9)");
+        timeout_ms = (int)ceil(ms);
     }
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(fd, &rfds);
-    /* Issue #200 Phase A / issue #237 review: select() can block for up
-     * to timeout-ms (now realistically multi-second, since ws-accept's
-     * timeout feature made this a load-bearing part of a public API's
+    /* Issue #239: poll(), not select()/FD_SET -- a fd_set is a
+     * fixed-size bitmap (1024 bits on Linux/macOS/BSD) and FD_SET does
+     * an unchecked write into it; for a socket fd number >= FD_SETSIZE
+     * (realistic on a long-lived process with many concurrent sockets/
+     * actors), that's an out-of-bounds stack write, not just "select()
+     * misbehaves". poll()'s pollfd array has no such fixed limit. */
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    /* Issue #200 Phase A / issue #237 review: poll() can block for up to
+     * timeout-ms (realistically multi-second, since ws-accept's timeout
+     * feature made this a load-bearing part of a public API's
      * documented usage pattern) -- park so a future GC safepoint doesn't
      * wait on this thread for that long. Same rationale, same pattern,
-     * as fn_tcp_accept's identical bracket above. */
+     * as fn_tcp_accept's identical bracket. */
     curry_gc_thread_park();
-    int r = select(fd + 1, &rfds, NULL, NULL, tvp);
+    int r = poll(&pfd, 1, timeout_ms);
     curry_gc_thread_unpark();
-    if (r < 0) curry_error("socket-ready?: select failed");
-    return curry_make_bool(r > 0 && FD_ISSET(fd, &rfds));
+    if (r < 0) curry_error("socket-ready?: poll failed");
+    /* POLLHUP/POLLERR without POLLIN too -- not just POLLIN alone. A
+     * closed/reset connection is exactly the select()-based code's old
+     * behavior here: a read() on it returns 0 (EOF) immediately rather
+     * than blocking, so it counts as "ready" the same way actual
+     * pending data does; some platforms report that state as POLLHUP
+     * rather than POLLIN on a stream socket, and missing it here would
+     * silently change socket-ready?'s EOF-detection behavior compared
+     * to before this function used poll(). */
+    return curry_make_bool(r > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR)));
 }
 
 /* Defined in tls.c, compiled into this same module target -- registers
