@@ -17,10 +17,12 @@
 # Usage:
 #   tools/install-jupyter-kernel.sh [path/to/curry_jupyter] [--user]
 #
-# Requires the `jupyter` CLI (kernelspec install) on PATH -- e.g. from the
-# same conda-forge env used to build the kernel:
-#   micromamba create -n curry-jupyter -c conda-forge xeus xeus-zmq xtl \
-#     cppzmq nlohmann_json jupyter_client jupyter
+# Requires the `jupyter` CLI (kernelspec install) on PATH -- run this from
+# inside the activated micromamba environment you built curry_jupyter with
+# (`micromamba activate curry-jupyter`). First time setting any of this
+# up? See docs/reference/jupyter-kernel.md's "Getting started" section for
+# the full first-time walkthrough (installing micromamba, creating the
+# environment, etc.) -- this script only covers the kernelspec step.
 set -euo pipefail
 
 BINARY="${1:-build/curry_jupyter}"

@@ -7,40 +7,115 @@
 executable that Jupyter launches directly, owning the kernel's ZMQ sockets
 for the process's lifetime, and links `curry_core` itself.
 
-## Building
+## Getting started (first time setup)
 
-`xeus`, `xeus-zmq`, `xtl`, `cppzmq`, and `nlohmann_json` are conda-forge
-packages, not available via Homebrew. Get them via micromamba (or any other
-conda-forge-capable tool):
+`xeus`, `xeus-zmq`, `xtl`, `cppzmq`, and `nlohmann_json` — the libraries the
+kernel is built on — are only published on **conda-forge**, not Homebrew.
+So building and running this kernel needs a conda-forge-capable package
+manager. **micromamba** is the tool used here: a small, fast, standalone
+program that manages isolated software environments (folders with their
+own set of installed packages, so they can't collide with Homebrew or
+anything else on your system) and can install conda-forge packages into
+them. If you've never touched conda/mamba/anaconda before, that's the
+entire mental model you need: one command creates a named environment,
+one command "activates" it (puts its programs on your `PATH` for the
+current terminal), and everything you install goes into that isolated
+folder.
+
+**Step 1 — install micromamba and register it with your shell.**
 
 ```bash
 brew install micromamba
-micromamba create -n curry-jupyter -c conda-forge \
-  xeus xeus-zmq xtl cppzmq nlohmann_json cmake
+micromamba shell init --shell bash --root-prefix ~/mamba
+```
 
+(Use `--shell zsh` instead of `--shell bash` if `echo $SHELL` says
+`/bin/zsh` — that's the default on modern macOS.) That second command adds
+a short block to your shell's startup file (`~/.bash_profile` or
+`~/.zshrc`) that defines the `micromamba` command and sets `~/mamba` as
+the one consistent place all your environments live. **This step is
+required before `micromamba activate` will work at all** — skipping it is
+the single most common thing that goes wrong here, and it's a one-time
+setup, not something you repeat per project.
+
+After running it, **open a new terminal tab** (or run `source
+~/.bash_profile` / `source ~/.zshrc`) so the change takes effect.
+
+**Step 2 — create one environment with everything this needs**, both the
+C++ build dependencies and the Python-side Jupyter frontend:
+
+```bash
+micromamba create -n curry-jupyter -c conda-forge \
+  xeus xeus-zmq xtl cppzmq nlohmann_json cmake \
+  jupyterlab jupyter_console
+```
+
+This downloads everything into `~/mamba/envs/curry-jupyter` — it doesn't
+touch Homebrew, your system Python, or anything outside that folder.
+
+**Step 3 — activate it, then build the kernel against it:**
+
+```bash
+micromamba activate curry-jupyter
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_JUPYTER_KERNEL=ON \
-  -DCMAKE_PREFIX_PATH="$HOME/mamba/envs/curry-jupyter"
+  -DCMAKE_PREFIX_PATH="$CONDA_PREFIX"
 cmake --build build --target curry_jupyter
 ```
 
-If `xeus`/`xeus-zmq` aren't found at configure time, `BUILD_JUPYTER_KERNEL`
-just warns and skips the target rather than failing the whole configure.
+(`$CONDA_PREFIX` is set automatically once the environment is activated —
+it points at `~/mamba/envs/curry-jupyter`, so this works regardless of
+where `~/mamba` actually lives on your machine.) If `xeus`/`xeus-zmq`
+aren't found at configure time — e.g. you skipped Step 3's `activate` —
+`BUILD_JUPYTER_KERNEL` just prints a warning and skips the target rather
+than failing the whole `cmake -B build` configure.
 
-## Installing the kernelspec
+**Step 4 — register the kernel with Jupyter** (still inside the activated
+environment):
 
 ```bash
 tools/install-jupyter-kernel.sh build/curry_jupyter --user
 ```
 
-This requires the `jupyter` CLI (`kernelspec install`) — the easiest source
-is the same conda env used to build:
+**Step 5 — start Jupyter:**
 
 ```bash
-micromamba install -n curry-jupyter -c conda-forge jupyter
+jupyter lab                        # full browser-based notebook UI
+# or, for a lighter terminal-only client:
+jupyter console --kernel curry
 ```
 
-Then `jupyter console --kernel curry` or `jupyter notebook` (selecting the
-"Curry Scheme" kernel) will work.
+In JupyterLab, pick "Curry Scheme" from the kernel list when creating a
+new notebook.
+
+### Every time after the first setup
+
+You only repeat Steps 1–2 once, ever (per machine). Each new terminal
+session, all you need is:
+
+```bash
+micromamba activate curry-jupyter
+jupyter lab
+```
+
+If you rebuild `curry_jupyter` (e.g. after pulling new commits), redo
+Step 3's two `cmake` commands — no need to redo Step 4, the kernelspec
+just points at the binary's path and the binary gets replaced in place.
+
+### Troubleshooting: "two different curry-jupyter environments"
+
+If `micromamba env list` ever shows a `curry-jupyter` environment under
+somewhere like `/opt/homebrew/Cellar/micromamba/.../envs/curry-jupyter`
+*and* another one under `~/mamba/envs/curry-jupyter`, it means Step 1
+(the shell init) hasn't actually taken effect in whatever terminal ran
+the `create`/`install` command — micromamba falls back to using its own
+install directory as the default environment location when it can't find
+a configured root. The fix is Step 1 itself: run `micromamba shell init`
+as above, open a **new** terminal, and confirm with `echo
+$MAMBA_ROOT_PREFIX` that it prints `~/mamba` (or run `micromamba env
+list` and check the `curry-jupyter` row's path) before creating or
+installing anything else. Any stray environment under the Homebrew Cellar
+path is safe to delete — `rm -rf` that specific `envs/curry-jupyter`
+directory (never anything else under Cellar).
 
 ## Execution model
 
