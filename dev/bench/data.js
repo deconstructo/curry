@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789731888102,
+  "lastUpdate": 1789735133216,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15386,6 +15386,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 69.257,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2469fd175e699b10f00b3ab2cfc35874e3d1655c",
+          "message": "Merge pull request #245 from deconstructo/fix-issue-241-eintr-retry\n\nMake socket-ready? retry on EINTR within its remaining budget (fixes #241)",
+          "timestamp": "2026-09-18T22:37:54+10:00",
+          "tree_id": "1463dfb0569b6705eb98c8c8b3176d40e0717088",
+          "url": "https://github.com/deconstructo/curry/commit/2469fd175e699b10f00b3ab2cfc35874e3d1655c"
+        },
+        "date": 1789735130989,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.793,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.656,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.065,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 42.953,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 186.902,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 332.718,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 75.238,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 112.109,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 85.099,
             "unit": "ms"
           }
         ]
