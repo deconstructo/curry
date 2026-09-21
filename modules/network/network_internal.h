@@ -198,6 +198,61 @@ static inline void net_clear_client_nonblock(sock_t client, const char *who) {
     if (flags & O_NONBLOCK) fcntl(client, F_SETFL, flags & ~O_NONBLOCK);
 }
 
+/* Issue #244: shared deadline helpers for every poll()-with-timeout
+ * retry loop in this file (net_accept_with_timeout below and
+ * fn_socket_ready_p in network.c). This exact logic had to be fixed in
+ * lockstep, by hand, in two independently-duplicated copies twice in
+ * one sitting (issue #241: first the "never attempts a real poll() once
+ * the deadline has technically already passed" bug, then the "EINTR
+ * isn't gated on that same expired check" follow-up) before this
+ * refactor landed -- one shared implementation instead of two hand-kept-
+ * in-sync ones, so a third fix to this logic only has to happen once.
+ *
+ * isfinite() rejects both NaN and +/-Infinity -- ms < 0 alone does NOT
+ * reject NaN (every NaN comparison is false), so +nan.0 would otherwise
+ * sail straight through into the deadline arithmetic and hit undefined
+ * behavior on the double -> integer casts (C11 6.3.1.4). The upper
+ * bound similarly guards against a huge finite value (e.g. 1e300)
+ * doing the same -- 1e9 ms is ~11.5 days, already an absurd timeout for
+ * either an accept or a readiness check, so anything past it is a
+ * caller bug to report cleanly rather than silently truncate into
+ * garbage. */
+static inline struct timespec net_deadline_from_ms(double ms, const char *who) {
+    if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
+        curry_error("%s: timeout-ms must be a non-negative finite number (max 1e9)", who);
+    /* Single conversion from ms to total nanoseconds, not a separate
+     * tv_sec/tv_nsec split computed independently from ms/1000.0 and
+     * ms%1000 -- avoids those two derived values ever disagreeing with
+     * each other by a rounding hair. */
+    long long total_ns = (long long)(ms * 1.0e6);
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec  += (time_t)(total_ns / 1000000000LL);
+    deadline.tv_nsec += (long)(total_ns % 1000000000LL);
+    if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
+    return deadline;
+}
+
+/* Remaining time until `deadline`, clamped to a nonnegative poll()-ready
+ * millisecond timeout. Sets *expired once the deadline has already
+ * passed -- the CALLER must still attempt one real poll() with the
+ * returned (0) timeout rather than skip straight to "not ready"/"timed
+ * out" (issue #241: the naive "check the deadline, bail out before ever
+ * polling" version silently never checked the fd's real state at all
+ * for a timeout-ms of 0, or any sufficiently small value, since this
+ * function's own clock_gettime() necessarily reads a moment later than
+ * the deadline's own "now" baseline). Only stop retrying once *expired
+ * comes back true on an attempt that itself still found nothing. */
+static inline int net_remaining_poll_ms(struct timespec deadline, bool *expired) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
+                         + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
+    if (remaining_ms <= 0) { *expired = true; return 0; }
+    *expired = false;
+    return (int)ceil(remaining_ms);
+}
+
 /* Issue #238: a race-free accept-with-timeout, shared by network.c's
  * tcp-accept and srfi106.c's socket-accept (both otherwise duplicating
  * the identical logic). The naive approach -- poll with socket-ready?
@@ -229,64 +284,16 @@ static inline void net_clear_client_nonblock(sock_t client, const char *who) {
  * unrelated future calls. */
 
 static inline sock_t net_accept_with_timeout(sock_t server, double ms, const char *who) {
-    /* isfinite() rejects both NaN and +/-Infinity -- ms < 0 alone does
-     * NOT reject NaN (every NaN comparison is false), so +nan.0 would
-     * otherwise sail straight through into the deadline arithmetic
-     * below and hit undefined behavior on the double -> integer casts
-     * (C11 6.3.1.4). The upper bound similarly guards against a huge
-     * finite value (e.g. 1e300) doing the same -- 1e9 ms is ~11.5 days,
-     * already an absurd timeout for an accept call, so anything past it
-     * is a caller bug to report cleanly rather than silently truncate
-     * into garbage. */
-    if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
-        curry_error("%s: timeout-ms must be a non-negative finite number (max 1e9)", who);
+    struct timespec deadline = net_deadline_from_ms(ms, who);
 
     int orig_flags = fcntl(server, F_GETFL, 0);
     if (orig_flags < 0) curry_error("%s: fcntl(F_GETFL) failed", who);
     if (fcntl(server, F_SETFL, orig_flags | O_NONBLOCK) < 0)
         curry_error("%s: fcntl(F_SETFL) failed", who);
 
-    /* Single conversion from ms to total nanoseconds, not a separate
-     * tv_sec/tv_nsec split computed independently from ms/1000.0 and
-     * ms%1000 -- avoids those two derived values ever disagreeing with
-     * each other by a rounding hair. */
-    long long total_ns = (long long)(ms * 1.0e6);
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec  += (time_t)(total_ns / 1000000000LL);
-    deadline.tv_nsec += (long)(total_ns % 1000000000LL);
-    if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
-
     for (;;) {
-        /* Issue #241 review: erroring out here whenever remaining_ms
-         * had already reached <= 0 -- BEFORE ever calling poll()/
-         * accept() even once -- meant an explicit timeout-ms of 0 (or
-         * any sufficiently small value) never actually checked the
-         * listener at all: deadline is computed as "now" (or "now" + a
-         * tiny delta) above, and this loop's own clock_gettime() call
-         * necessarily reads a strictly later "now" a few instructions
-         * afterward, so remaining_ms <= 0 was true on essentially every
-         * first iteration -- raising "timed out" even when a connection
-         * was sitting right there ready to accept. Fixed the same way
-         * as socket-ready?'s identical bug (network.c): still call
-         * poll() with a clamped-to-nonnegative timeout (0, an ordinary
-         * immediate non-blocking check) once the deadline has already
-         * passed, and only treat a fruitless *already-expired* attempt
-         * (the `expired` flag below) as the terminal "really timed out"
-         * case -- a fruitless attempt that hadn't yet expired loops
-         * back around to recheck instead. This also closes a related
-         * risk the naive "always continue on not-ready" retry had: once
-         * genuinely expired, a persistently-unready listener (e.g.
-         * stuck in POLLERR without POLLIN, or a connection that keeps
-         * vanishing between poll() and accept() right at the deadline
-         * edge) now correctly raises the timeout error instead of
-         * retrying forever past the deadline. */
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
-                             + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
-        bool expired = remaining_ms <= 0;
-        int timeout_ms = expired ? 0 : (int)ceil(remaining_ms);
+        bool expired;
+        int timeout_ms = net_remaining_poll_ms(deadline, &expired);
 
         /* poll(), not select()/FD_SET: a fd_set is a fixed-size bitmap
          * (1024 bits on Linux/macOS/BSD) and FD_SET does an unchecked
