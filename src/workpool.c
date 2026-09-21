@@ -33,21 +33,30 @@ static void deque_init(WSDeque *d) {
     d->buf = gc_alloc_raw_pinned(DEQUE_CAP * sizeof(WorkItem *));
     atomic_init(&d->bottom, 0);
     atomic_init(&d->top,    0);
+    pthread_mutex_init(&d->owner_mutex, NULL);
 }
 
-/* Owner pushes onto bottom.  No locking needed — only the owner pushes. */
+/* Pushed by the dispatching thread (pool_submit's caller), popped by the
+ * deque's own worker thread -- two different threads, so both must
+ * serialize on owner_mutex (see WSDeque's comment in workpool.h). */
 static bool deque_push(WSDeque *d, WorkItem *item) {
+    pthread_mutex_lock(&d->owner_mutex);
     int64_t b = atomic_load_explicit(&d->bottom, memory_order_relaxed);
     int64_t t = atomic_load_explicit(&d->top,    memory_order_acquire);
-    if ((b - t) >= DEQUE_CAP - 1) return false;   /* full — caller falls back */
+    if ((b - t) >= DEQUE_CAP - 1) {               /* full — caller falls back */
+        pthread_mutex_unlock(&d->owner_mutex);
+        return false;
+    }
     d->buf[b & (DEQUE_CAP - 1)] = item;
     atomic_thread_fence(memory_order_release);
     atomic_store_explicit(&d->bottom, b + 1, memory_order_relaxed);
+    pthread_mutex_unlock(&d->owner_mutex);
     return true;
 }
 
 /* Owner pops from bottom (LIFO — favours cache-warm work). */
 static WorkItem *deque_pop(WSDeque *d) {
+    pthread_mutex_lock(&d->owner_mutex);
     int64_t b = atomic_load_explicit(&d->bottom, memory_order_relaxed) - 1;
     atomic_store_explicit(&d->bottom, b, memory_order_relaxed);
     atomic_thread_fence(memory_order_seq_cst);
@@ -55,10 +64,14 @@ static WorkItem *deque_pop(WSDeque *d) {
 
     if (b < t) {
         atomic_store_explicit(&d->bottom, t, memory_order_relaxed);
+        pthread_mutex_unlock(&d->owner_mutex);
         return NULL;
     }
     WorkItem *item = d->buf[b & (DEQUE_CAP - 1)];
-    if (b > t) return item;   /* more than one item — no race with thieves */
+    if (b > t) {
+        pthread_mutex_unlock(&d->owner_mutex);
+        return item;   /* more than one item — no race with thieves */
+    }
 
     /* Exactly one item left: race with a potential thief. */
     int64_t expected = t;
@@ -66,22 +79,37 @@ static WorkItem *deque_pop(WSDeque *d) {
                    &d->top, &expected, t + 1,
                    memory_order_seq_cst, memory_order_relaxed);
     atomic_store_explicit(&d->bottom, t + 1, memory_order_relaxed);
+    pthread_mutex_unlock(&d->owner_mutex);
     return won ? item : NULL;
 }
 
-/* Thief steals from top (FIFO — steals the oldest, least-cache-warm work). */
+/* Thief steals from top (FIFO — steals the oldest, least-cache-warm work).
+ * Also serialized on owner_mutex: with push/pop now running on two
+ * different threads (see WSDeque's comment), bottom is no longer written
+ * by a single owner thread the way classic Chase-Lev assumes, so a bare
+ * fence + acquire-load of bottom is no longer a reliable enough
+ * synchronization edge for the buf[] read below (TSan-confirmed race
+ * against a concurrent deque_push). Locking here costs a little of
+ * steal's usual lock-freedom, but steal only runs on an otherwise-idle
+ * worker scanning for work, not on any per-item hot path. */
 static WorkItem *deque_steal(WSDeque *d) {
+    pthread_mutex_lock(&d->owner_mutex);
     int64_t t = atomic_load_explicit(&d->top,    memory_order_acquire);
-    atomic_thread_fence(memory_order_seq_cst);
     int64_t b = atomic_load_explicit(&d->bottom, memory_order_acquire);
-    if (t >= b) return NULL;
+    if (t >= b) {
+        pthread_mutex_unlock(&d->owner_mutex);
+        return NULL;
+    }
 
     WorkItem *item = d->buf[t & (DEQUE_CAP - 1)];
     int64_t expected = t;
     if (!atomic_compare_exchange_strong_explicit(
             &d->top, &expected, t + 1,
-            memory_order_seq_cst, memory_order_relaxed))
+            memory_order_seq_cst, memory_order_relaxed)) {
+        pthread_mutex_unlock(&d->owner_mutex);
         return NULL;   /* another thief won the race */
+    }
+    pthread_mutex_unlock(&d->owner_mutex);
     return item;
 }
 
