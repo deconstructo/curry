@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789735133216,
+  "lastUpdate": 1789987285398,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15455,6 +15455,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 85.099,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ebfdbc0a11d3d8be9cc2699ed60e14dee8efcae4",
+          "message": "Merge pull request #247 from deconstructo/fix-issue-244-shared-deadline-helper\n\nExtract shared deadline/expired helper for accept/ready-timeout retries (fixes #244)",
+          "timestamp": "2026-09-21T20:40:33+10:00",
+          "tree_id": "5b55144a75eeaae5e85860a0551c69bcfdcb9c1b",
+          "url": "https://github.com/deconstructo/curry/commit/ebfdbc0a11d3d8be9cc2699ed60e14dee8efcae4"
+        },
+        "date": 1789987284402,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.991,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 34.035,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.571,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.727,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 198.459,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 322.239,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.049,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 116.554,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 92.441,
             "unit": "ms"
           }
         ]
