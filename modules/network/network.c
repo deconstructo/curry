@@ -344,60 +344,23 @@ static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     bool has_timeout = ac > 1;
     struct timespec deadline;
     if (has_timeout) {
+        /* Validation (NaN/Infinity/range) and the deadline computation
+         * itself are shared with net_accept_with_timeout -- see issue
+         * #244 and net_deadline_from_ms's own comment
+         * (network_internal.h). */
         double ms = checked_float(av[1], 2, "socket-ready?");
-        /* Issue #239 review: ms < 0 alone does not reject NaN (every NaN
-         * comparison is false) -- validated the same way
-         * net_accept_with_timeout is (network_internal.h), for the same
-         * reason: an unvalidated NaN/Infinity/huge value reaching the
-         * double -> integer casts below is undefined behavior, not just
-         * a wrong answer. */
-        if (!isfinite(ms) || ms < 0 || ms > 1.0e9)
-            curry_error("socket-ready?: timeout-ms must be a non-negative finite number (max 1e9)");
-        /* Issue #241: a single poll() call with no deadline tracking
-         * meant EINTR (a signal delivered mid-wait) had no way to retry
-         * within whatever time budget was left -- it just failed the
-         * whole call outright, unlike net_accept_with_timeout's
-         * identical-shaped retry loop. Same fix here: an absolute
-         * deadline computed once, re-checked (and poll()'s timeout
-         * recomputed from the *remaining* budget, not reset to the
-         * full ms) on every retry, so a spurious signal costs at most
-         * one loop iteration instead of turning a transient interrupt
-         * into a hard error. */
-        long long total_ns = (long long)(ms * 1.0e6);
-        clock_gettime(CLOCK_MONOTONIC, &deadline);
-        deadline.tv_sec  += (time_t)(total_ns / 1000000000LL);
-        deadline.tv_nsec += (long)(total_ns % 1000000000LL);
-        if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
+        deadline = net_deadline_from_ms(ms, "socket-ready?");
     }
 
     for (;;) {
-        /* Issue #241 review: returning early here whenever remaining_ms
-         * had already reached <= 0 -- BEFORE ever calling poll() even
-         * once -- meant an explicit (socket-ready? sock 0), or any
-         * sufficiently small timeout-ms, silently never polled the fd
-         * at all: deadline is computed as "now" (or "now" + a tiny
-         * delta), and this loop's own clock_gettime() call necessarily
-         * reads a strictly later "now" a few instructions afterward, so
-         * remaining_ms <= 0 was true on essentially every first
-         * iteration -- always reporting "not ready" regardless of
-         * actual socket state, for a documented, legitimate call
-         * pattern ("check right now, don't block"). Fixed by still
-         * calling poll() with a clamped-to-nonnegative timeout (0, an
-         * ordinary immediate non-blocking check) when the deadline has
-         * already passed, and only treating a fruitless *already-
-         * expired* poll (the `expired` flag below) as the terminal
-         * "not ready" case -- a fruitless poll that hadn't yet expired
-         * loops back around to recheck instead. */
+        /* net_remaining_poll_ms (network_internal.h) is what makes an
+         * explicit (socket-ready? sock 0), or any sufficiently small
+         * timeout-ms, still actually poll the fd at least once instead
+         * of silently reporting "not ready" without ever checking --
+         * see issue #241 and that function's own comment. */
         int timeout_ms = 0;
         bool expired = false;
-        if (has_timeout) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            double remaining_ms = (double)(deadline.tv_sec  - now.tv_sec)  * 1000.0
-                                 + (double)(deadline.tv_nsec - now.tv_nsec) / 1.0e6;
-            if (remaining_ms <= 0) expired = true;
-            else timeout_ms = (int)ceil(remaining_ms);
-        }
+        if (has_timeout) timeout_ms = net_remaining_poll_ms(deadline, &expired);
 
         /* Issue #239: poll(), not select()/FD_SET -- a fd_set is a
          * fixed-size bitmap (1024 bits on Linux/macOS/BSD) and FD_SET
