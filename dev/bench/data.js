@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789987552098,
+  "lastUpdate": 1789988644374,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15593,6 +15593,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 94.599,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e3cfb6332ac3f07a8b529f260a73ec0bf9390200",
+          "message": "Merge pull request #246 from deconstructo/fix-jupyter-render-crash\n\nFix Jupyter kernel crash on rendering a deep (non-circular) result or error",
+          "timestamp": "2026-09-21T21:03:22+10:00",
+          "tree_id": "0275dcad227df038f410ccec0e16c968a637af9b",
+          "url": "https://github.com/deconstructo/curry/commit/e3cfb6332ac3f07a8b529f260a73ec0bf9390200"
+        },
+        "date": 1789988642843,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.499,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.318,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.372,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.334,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 164.743,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 316.685,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 68.303,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 100.172,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 84.063,
             "unit": "ms"
           }
         ]
