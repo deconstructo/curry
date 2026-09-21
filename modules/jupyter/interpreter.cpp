@@ -74,7 +74,33 @@ RenderedError render_error(val_t exn) {
         if (vis_symbol(c->type_sym)) r.ename = sym_cstr(c->type_sym);
         message = c->message;
     }
-    r.evalue = vis_string(message) ? curry_string_to_std(message) : render_value(exn);
+    if (vis_string(message)) {
+        r.evalue = curry_string_to_std(message);
+    } else {
+        /* render_value calls scm_write_shared, which can itself raise
+         * (e.g. check_c_stack_depth's stack-overflow guard firing on a
+         * sufficiently deep but perfectly ordinary, non-circular
+         * structure -- src/runtime.c's own comment on that guard). This
+         * function runs from inside execute_request_impl's SCM_PROTECT
+         * on_exn block, where current_handler has already been popped
+         * back to whatever was installed before *this* cell's
+         * protection (NULL, for this kernel's outermost call chain) --
+         * SCM_PROTECT's macro expansion pops current_handler before
+         * running on_exn, not after. Without its own protection here, a
+         * pathological (still finite, non-circular) exn value would hit
+         * scm_raise_val's no-current_handler fallback in
+         * src/runtime.c and abort() the whole kernel process while just
+         * trying to report an unrelated error. Same reasoning and same
+         * fix as the render_value(last_value) call in
+         * execute_request_impl. */
+        ExnHandler h2;
+        SCM_PROTECT(h2, {
+            r.evalue = render_value(exn);
+        }, {
+            r.evalue = "<error value too deep or otherwise unprintable>";
+            vm_reset();
+        });
+    }
 
     val_t bt = vis_error(exn) ? as_err(exn)->backtrace : V_NIL;
     for (val_t f = bt; vis_pair(f); f = vcdr(f)) {
@@ -179,19 +205,27 @@ FileLoadResult load_display_file(const char *path) {
     if (!f) { r.status = FileLoadResult::READ_FAILED; return r; }
     size_t cap = 65536, len = 0;
     char *buf = static_cast<char *>(malloc(cap));
+    if (!buf) { fclose(f); r.status = FileLoadResult::READ_FAILED; return r; }
     char chunk[65536];
     size_t n;
+    bool alloc_failed = false;
     while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
         if (len + n > cap) {
-            cap = (len + n) * 2;
-            buf = static_cast<char *>(realloc(buf, cap));
+            size_t newcap = (len + n) * 2;
+            char *grown = static_cast<char *>(realloc(buf, newcap));
+            /* realloc leaves the original block untouched (and still
+             * owned by `buf`) when it fails -- must free it via the
+             * original pointer, not `grown` (NULL), or it leaks. */
+            if (!grown) { alloc_failed = true; break; }
+            buf = grown;
+            cap = newcap;
         }
         memcpy(buf + len, chunk, n);
         len += n;
     }
-    bool ok = !ferror(f);
+    bool read_ok = !ferror(f);
     fclose(f);
-    if (!ok) { free(buf); r.status = FileLoadResult::READ_FAILED; return r; }
+    if (alloc_failed || !read_ok) { free(buf); r.status = FileLoadResult::READ_FAILED; return r; }
 
     r.status = FileLoadResult::OK;
     r.mime = mime; r.binary = binary; r.data = buf; r.len = len;
@@ -321,8 +355,25 @@ void curry_interpreter::execute_request_impl(xeus::xinterpreter::send_reply_call
     }
 
     if (!vis_void(last_value)) {
+        /* render_value's scm_write_shared can itself raise (e.g. on a
+         * deeply nested but non-circular result -- check_c_stack_depth's
+         * stack-overflow guard, src/runtime.c) -- and we're outside any
+         * SCM_PROTECT at this point (the per-form one in the loop above
+         * has already exited normally). Without its own protection
+         * here, that would hit scm_raise_val's no-current_handler
+         * fallback and abort() the whole kernel process while just
+         * trying to report a successful cell's result. Same reasoning
+         * as render_error's identical fix. */
+        std::string rendered;
+        ExnHandler h2;
+        SCM_PROTECT(h2, {
+            rendered = render_value(last_value);
+        }, {
+            rendered = "<error rendering result>";
+            vm_reset();
+        });
         nl::json data;
-        data["text/plain"] = render_value(last_value);
+        data["text/plain"] = rendered;
         publish_execution_result(execution_counter, data, nl::json::object());
     }
 
