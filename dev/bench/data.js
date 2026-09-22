@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789988644374,
+  "lastUpdate": 1790064674755,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15662,6 +15662,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.063,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "535002f48432f118aacfd7ed5369f88bf3426418",
+          "message": "docs: fix build instructions found by a full clean-room test build\n\nDid a from-scratch build (micromamba env recreated after wiping\n~/mamba, every optional module + BUILD_MPFR/BUILD_FFI/BUILD_LLVM/\nBUILD_JUPYTER_KERNEL enabled together) and fixed everything that\ntripped it up along the way:\n\n- CLAUDE.md's top build example was broken as written: it enables\n  both BUILD_LLVM=ON and BUILD_MODULE_QT6=ON but only set\n  CMAKE_PREFIX_PATH for Qt6. Reproduced the exact failure\n  (find_package(LLVM CONFIG) fails outright without a hint -- llvm\n  is keg-only on Homebrew) and fixed the example to hint at LLVM's\n  prefix instead, noting Qt6's own fallback already covers it.\n- BUILD_MPFR, BUILD_MODULE_VECDB, and BUILD_MODULE_PIPER were\n  missing entirely from the build example and the per-OS dependency\n  install lists (including a missing libmpfr-dev/mpfr package).\n- The Module System section flatly claimed vecdb was \"always-on\" --\n  confirmed empirically it defaults OFF and is absent from a plain\n  build's mods/curry/. Rewrote that line to list what's actually\n  default-ON vs default-OFF.\n- jupyter-kernel.md didn't cover combining CMAKE_PREFIX_PATH when\n  building the kernel alongside other prefix-dependent modules\n  (LLVM/Qt6) in one invocation.\n- jupyter-kernel.md's rebuild guidance only covered rebuilding in\n  the same build directory -- a rebuild in a different tree doesn't\n  make the kernelspec follow it, which needed calling out.\n\nVerified: the corrected top-level build command runs verbatim with\nno errors; full ctest suite (136/136) passed against the all-options\nbuild; the Jupyter kernel was installed and a real cell executed\nthrough it end to end via jupyter_client.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-22T18:10:21+10:00",
+          "tree_id": "48dc5b926c65524ca3d5c9ed4ea6873fc82aea44",
+          "url": "https://github.com/deconstructo/curry/commit/535002f48432f118aacfd7ed5369f88bf3426418"
+        },
+        "date": 1790064672852,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.328,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.433,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.031,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.836,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 184.164,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 323.817,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.662,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 112.679,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 85.397,
             "unit": "ms"
           }
         ]
