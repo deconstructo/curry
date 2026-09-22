@@ -24,7 +24,15 @@ When you find a real bug in existing code — whether stumbled on while working 
 # Configure (Debug)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 
-# Configure with optional modules
+# Configure with optional modules -- everything that needs nothing beyond
+# a `brew`/`apt` package (see the Dependencies section below for packages).
+# BUILD_MODULE_CRYPTO/STORAGE/GRAPHQL/IMAGE/GIT/PLPLOT/MQTT/NEO4J/HTTP/etc.
+# already default ON -- only listed here for visibility, not required.
+# Two modules are left out of this block on purpose: BUILD_MODULE_PIPER
+# needs an external libpiper/onnxruntime build first (see
+# docs/reference/module-piper.md), and BUILD_JUPYTER_KERNEL needs a
+# conda-forge environment first (see docs/reference/jupyter-kernel.md) --
+# both fold into the same cmake invocation once their prerequisite is done.
 cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_CRYPTO=ON \
   -DBUILD_MODULE_LDAP=ON \
@@ -34,9 +42,19 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_GIT=ON \
   -DBUILD_MODULE_PLPLOT=ON \
   -DBUILD_MODULE_QT6=ON \
+  -DBUILD_MODULE_VECDB=ON \
+  -DBUILD_MPFR=ON \
   -DBUILD_FFI=ON \
   -DBUILD_LLVM=ON \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"   # macOS only, for Qt6 (see note below)
+  -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"   # macOS only, REQUIRED for
+    # BUILD_LLVM -- find_package(LLVM CONFIG) fails outright without it
+    # (Homebrew's llvm is keg-only; confirmed by configuring BUILD_LLVM=ON
+    # alone with no CMAKE_PREFIX_PATH: "Could not find a package
+    # configuration file provided by LLVM"). Qt6 does NOT need its own
+    # entry added here -- see the Qt6 note below, its fallback already
+    # covers this combined command. CMAKE_PREFIX_PATH takes one
+    # semicolon-separated list, not one flag per library, if you ever
+    # do need to add more: "$(brew --prefix llvm);$(brew --prefix qt@6)".
 
 
 
@@ -77,7 +95,11 @@ brew install bdw-gc gmp cmake
 
 # Optional modules — Linux
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
-                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev
+                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev \
+                 libmpfr-dev   # for -DBUILD_MPFR=ON
+# BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib via a C
+# wrapper). BUILD_MODULE_PIPER needs an external libpiper/onnxruntime build
+# first -- see docs/reference/module-piper.md, not covered by apt/brew.
 
 # LLVM JIT backend — Linux (requires LLVM ≥ 15)
 # Ubuntu 24.04 / Debian bookworm: LLVM 18 is in the main repo
@@ -93,8 +115,11 @@ sudo apt update && sudo apt install llvm-18-dev
 cmake -B build -DBUILD_LLVM=ON -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
 
 # Optional modules — macOS
-brew install openssl sqlite libgit2 libpng jpeg-turbo
+brew install openssl sqlite libgit2 libpng jpeg-turbo mpfr
 # curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with macOS
+# BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib via a C
+# wrapper). BUILD_MODULE_PIPER needs an external libpiper/onnxruntime build
+# first -- see docs/reference/module-piper.md, not covered by brew.
 
 # LLVM JIT backend — macOS
 brew install llvm
@@ -303,7 +328,7 @@ Linked list of `EnvFrame` structs (flat symbol/value arrays). `env_lookup()` rai
 
 ### Module system (`src/modules.h`, `src/modules.c`)
 
-Two kinds: C extension `.so` (exports `curry_module_init`) and Scheme `.sld`/`.scm`. Always-on: `json`, `network`, `redis`, `regex`, `sync`, `vecdb`, `sqlite`. Optional (`-DBUILD_MODULE_X=ON`, most default ON): `crypto`, `ldap`, `storage`, `http`, `graphql`, `image`, `git`, `ui`, `plplot`, `qt6`, `posix` (SRFI-170 filesystem/process bindings + SRFI-112 environment inquiry), `codesets` (SRFI-238 errno/signal/http-status lookup). Search order: `CURRY_MODULE_PATH`, then `lib/curry/modules/`.
+Two kinds: C extension `.so` (exports `curry_module_init`) and Scheme `.sld`/`.scm`. Every module is behind its own `-DBUILD_MODULE_X=ON/OFF` `option()` in `CMakeLists.txt` — none is unconditionally compiled in, so `-DBUILD_MODULE_X=OFF` always works to exclude one. Default ON (built by a plain `cmake -B build` with no extra flags): `json`, `network`, `redis`, `regex`, `sync`, `sqlite`, `crypto`, `storage`, `http`, `graphql`, `neo4j`, `mqtt`, `image`, `git`, `plplot`, `posix` (SRFI-170 filesystem/process bindings + SRFI-112 environment inquiry), `codesets` (SRFI-238 errno/signal/http-status lookup), `mcp`, `lsp`, `profiling`, `f64vector`, `typedvec`. Default OFF (confirmed empirically: absent from a plain default build's `mods/curry/` -- must be explicitly enabled): `ldap`, `qt6`, `vecdb`, `piper` (see `docs/reference/module-piper.md` for its extra external-build step). Search order: `CURRY_MODULE_PATH`, then `lib/curry/modules/`.
 
 Every pure-Scheme `(curry X)` module should be wrapped in `(define-library (curry X) (import ...) (export ...) (begin ...))`, matching the SRFI libraries' existing convention. A `define-library` body runs in a fresh environment with **no parent** (`env_new_root()` in `src/env.c`) — nothing is visible except what's explicitly imported, not even core builtins, though `(scheme base)`/`(scheme write)`/`(scheme inexact)`/etc. all alias the same flat `GLOBAL_ENV`, so importing `(scheme base)` alone normally reaches the whole core builtin surface. `(scheme case-lambda)` is the one exception — a real, separate library (`lib/curry/modules/scheme/case-lambda.sld`), not a `GLOBAL_ENV` alias, since `case-lambda` isn't part of R7RS's `(scheme base)` in the first place; it was mistakenly listed alongside the real aliases for a while, which meant importing it silently succeeded while providing nothing at all — fixed, but worth remembering if a future `(scheme X)` library is ever added: check whether R7RS actually specifies it as part of the flat core before reaching for the alias table instead of a real library file. The one non-obvious gotcha with a *real* library like this one: curry's `syntax-rules` is not hygienic across `define-library` boundaries, so if an **exported macro's expansion** references a helper procedure/macro/value not itself exported, importers get an `unbound-variable` error the first time they *use* the macro (not at import time) — trace every `define-syntax`'s expansion and export everything it transitively reaches. See [`docs/reference/writing-a-module.md`](docs/reference/writing-a-module.md) for the full pattern and worked examples.
 

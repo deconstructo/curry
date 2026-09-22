@@ -69,6 +69,15 @@ aren't found at configure time — e.g. you skipped Step 3's `activate` —
 `BUILD_JUPYTER_KERNEL` just prints a warning and skips the target rather
 than failing the whole `cmake -B build` configure.
 
+**Building this alongside other modules that also need a `CMAKE_PREFIX_PATH`
+hint** (e.g. `-DBUILD_LLVM=ON`, see the main [`CLAUDE.md`](../../CLAUDE.md)
+Build section): `CMAKE_PREFIX_PATH` takes one semicolon-separated list, not
+one flag per library — combine every prefix into the single flag, e.g.
+`-DCMAKE_PREFIX_PATH="$(brew --prefix llvm);$CONDA_PREFIX"`. Confirmed
+working this way for a from-scratch build with every optional module,
+`BUILD_FFI`, `BUILD_LLVM`, and `BUILD_JUPYTER_KERNEL` all enabled together
+in one `cmake -B build` invocation.
+
 **Step 4 — register the kernel with Jupyter** (still inside the activated
 environment):
 
@@ -97,9 +106,19 @@ micromamba activate curry-jupyter
 jupyter lab
 ```
 
-If you rebuild `curry_jupyter` (e.g. after pulling new commits), redo
-Step 3's two `cmake` commands — no need to redo Step 4, the kernelspec
-just points at the binary's path and the binary gets replaced in place.
+If you rebuild `curry_jupyter` **in the same build directory** (e.g. after
+pulling new commits), redo Step 3's two `cmake` commands — no need to redo
+Step 4, the kernelspec just points at the binary's path and the binary
+gets replaced in place.
+
+If you build it in a **different** build directory instead (e.g. you keep
+an everyday `build/` alongside a separate `build-full/` with every optional
+module enabled, or any other second tree), the kernelspec still points at
+whichever path Step 4 last registered — it does *not* follow you to the
+new binary. Redo Step 4 (`tools/install-jupyter-kernel.sh <new-path> --user`)
+to point Jupyter at the tree you actually want, or check which one is
+currently registered with `cat ~/Library/Jupyter/kernels/curry/kernel.json`
+(Linux: `~/.local/share/jupyter/kernels/curry/kernel.json`).
 
 ### Troubleshooting: "two different curry-jupyter environments"
 
