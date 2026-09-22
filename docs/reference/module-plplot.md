@@ -284,7 +284,7 @@ Return `(width . height)` (a pair of integers, device pixels) of the current pag
 `curry_jupyter` ([docs/reference/jupyter-kernel.md](jupyter-kernel.md)) has a `(jupyter-display-file path)` builtin that publishes a PNG/JPEG/SVG file as an inline image in the notebook. Add one line after `(plot-end)`:
 
 ```scheme
-(import (curry plplot))
+(import (scheme base) (srfi 1) (curry plplot))
 
 (plot-device "pngcairo")
 (plot-output "y_x2.png")
@@ -298,5 +298,7 @@ Return `(width . height)` (a pair of integers, device pixels) of the current pag
 
 (jupyter-display-file "y_x2.png")
 ```
+
+(`(srfi 1)` is required for `iota` — confirmed by running this exact cell through the kernel with only `(curry plplot)` imported: `unbound variable: iota`.)
 
 `(jupyter-display-file ...)` only exists inside the Jupyter kernel — it's not part of curry's core language, so the plain `curry` REPL/CLI doesn't have it and this line would need removing (or wrapping in a check) to run the same script outside a notebook.
