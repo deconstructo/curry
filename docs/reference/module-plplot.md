@@ -302,3 +302,25 @@ Return `(width . height)` (a pair of integers, device pixels) of the current pag
 (`(srfi 1)` is required for `iota` — confirmed by running this exact cell through the kernel with only `(curry plplot)` imported: `unbound variable: iota`.)
 
 `(jupyter-display-file ...)` only exists inside the Jupyter kernel — it's not part of curry's core language, so the plain `curry` REPL/CLI doesn't have it and this line would need removing (or wrapping in a check) to run the same script outside a notebook.
+
+The same one-line addition after `(plot-end)` works for a 3D surface, too — same pattern as the "Example — 3D surface" plot above, extending `y = x^2` to `z = x^2 + y^2`:
+
+```scheme
+(import (scheme base) (srfi 1) (curry plplot))
+
+(plot-device "pngcairo")
+(plot-output "paraboloid.png")
+(plot-init)
+(plot-3d-init -3.0 3.0 -3.0 3.0 0.0 18.0 45.0 30.0)
+(plot-3d-box "x" "y" "z")
+(plot-mtex "t" 1.0 0.5 0.5 "z = x^2 + y^2")
+(let* ((xs  (map exact->inexact (iota 25 -3 (/ 6.0 24))))
+       (ys  (map exact->inexact (iota 25 -3 (/ 6.0 24))))
+       (zss (map (lambda (y) (map (lambda (x) (+ (* x x) (* y y))) xs)) ys)))
+  (plot-3d-surface xs ys zss))
+(plot-end)
+
+(jupyter-display-file "paraboloid.png")
+```
+
+Verified end to end through a running kernel via `jupyter_client` — the cell publishes a `display_data` message with the rendered PNG, no error. `plot-3d-init x1 x2 y1 y2 z1 z2 alt az`'s last two arguments set the viewing angle (altitude/azimuth in degrees); `plot-3d-mesh` takes the same `xs ys zss` shape as `plot-3d-surface` if you want a wireframe instead of a shaded solid.
