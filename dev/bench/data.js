@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790064674755,
+  "lastUpdate": 1790064965185,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15731,6 +15731,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 85.397,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "c9ab76f61461ef03bcc30ffea0abd826eb5dfcf3",
+          "message": "docs(plplot): fix broken Jupyter y=x^2 example (missing srfi 1 import)\n\nThe \"Using this from the Jupyter kernel\" example only imported\n(curry plplot), but the snippet calls iota, which is SRFI-1 -- ran\nit verbatim through the kernel and got \"unbound variable: iota\".\nAdded (scheme base) (srfi 1) to the import list and re-verified the\ncorrected cell produces a display_data message with no error.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-22T18:15:19+10:00",
+          "tree_id": "6718853a7e1eb1645133d5fc2d4cdcacd66c76bf",
+          "url": "https://github.com/deconstructo/curry/commit/c9ab76f61461ef03bcc30ffea0abd826eb5dfcf3"
+        },
+        "date": 1790064962824,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.589,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.454,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.243,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.788,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 192.499,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 321.921,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.433,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 113.286,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 91.291,
             "unit": "ms"
           }
         ]
