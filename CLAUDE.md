@@ -18,26 +18,21 @@ After writing non-trivial C or Scheme code, spawn a fresh subagent (or use the `
 
 When you find a real bug in existing code — whether stumbled on while working on something else, or surfaced by a review pass — file it as a GitHub issue (`gh issue create`) rather than only fixing it silently or only mentioning it in conversation. This keeps a durable, searchable record independent of any one session's chat history. Fixing it in the same session afterward, when small and in scope, is still fine and often the right call — the issue documents what was wrong and why, the fix closes it.
 
+## Packaging an external dependency
+
+When a build option needs a library that isn't in Homebrew/apt (conda-forge-only, GitHub-only, no distro package, etc.), default to writing a tap-local Homebrew formula that builds it from source (`Formula/libpiper.rb`, `Formula/xeus.rb`, `Formula/xeus-zmq.rb` are worked examples) rather than reaching for a second package manager (conda/mamba/pip/etc.). A formula that just runs the library's own `cmake`/`make`/`configure` against a tarball isn't exotic — most C/C++ libraries build the same way no matter which package manager fronts them. Reach for a second package manager only when the dependency genuinely can't be built this way. (The Jupyter kernel's `xeus`/`xeus-zmq` were originally documented as needing micromamba for exactly this reason — nothing about them actually required conda-forge, a tap-local formula works fine; see `docs/reference/jupyter-kernel.md`'s Method A vs Method B.)
+
 ## Build
 
 ```bash
 # Configure (Debug)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 
-# Configure with optional modules -- everything that needs nothing beyond
-# a `brew`/`apt` package (see the Dependencies section below for packages).
-# BUILD_MODULE_CRYPTO/STORAGE/GRAPHQL/IMAGE/GIT/PLPLOT/MQTT/NEO4J/HTTP/etc.
-# already default ON -- only listed here for visibility, not required.
-# Two modules are left out of this block on purpose: BUILD_MODULE_PIPER
-# needs an external libpiper/onnxruntime build first (see
-# docs/reference/module-piper.md), and BUILD_JUPYTER_KERNEL needs xeus/
-# xeus-zmq first -- on macOS, `brew install deconstructo/curry/curry
-# --with-jupyter` handles this entirely (this repo's own tap now ships
-# xeus/xeus-zmq as tap-local formulas, no conda-forge needed); building
-# from this source tree directly still needs a conda-forge environment
-# (micromamba) first -- see docs/reference/jupyter-kernel.md for both
-# paths. Both fold into the same cmake invocation once their prerequisite
-# is done.
+# Configure with every optional module needing nothing beyond a brew/apt
+# package (see Dependencies below) -- most already default ON, listed here
+# for visibility. BUILD_MODULE_PIPER and BUILD_JUPYTER_KERNEL need one
+# extra step first -- see docs/reference/module-piper.md and
+# docs/reference/jupyter-kernel.md.
 cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_CRYPTO=ON \
   -DBUILD_MODULE_LDAP=ON \
@@ -51,17 +46,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MPFR=ON \
   -DBUILD_FFI=ON \
   -DBUILD_LLVM=ON \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"   # macOS only, REQUIRED for
-    # BUILD_LLVM -- find_package(LLVM CONFIG) fails outright without it
-    # (Homebrew's llvm is keg-only; confirmed by configuring BUILD_LLVM=ON
-    # alone with no CMAKE_PREFIX_PATH: "Could not find a package
-    # configuration file provided by LLVM"). Qt6 does NOT need its own
-    # entry added here -- see the Qt6 note below, its fallback already
-    # covers this combined command. CMAKE_PREFIX_PATH takes one
-    # semicolon-separated list, not one flag per library, if you ever
-    # do need to add more: "$(brew --prefix llvm);$(brew --prefix qt@6)".
-
-
+  -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"   # macOS only, see note below
 
 # Build
 cmake --build build -j$(nproc)                  # Linux
@@ -73,6 +58,8 @@ cmake --build build -j$(sysctl -n hw.logicalcpu) # macOS
 # Run a script
 ./build/curry script.scm
 ```
+
+**`CMAKE_PREFIX_PATH` on macOS, note:** required for `BUILD_LLVM` — Homebrew's `llvm` is keg-only, so `find_package(LLVM CONFIG)` fails outright without a hint. `BUILD_MODULE_QT6` does *not* need its own entry in the combined command above — see the Qt6 note below, its fallback already covers it. It's one semicolon-separated list, not one flag per library, if you ever need both explicitly: `"$(brew --prefix llvm);$(brew --prefix qt@6)"`.
 
 **Qt6 on macOS, note:** `brew --prefix qt@6` resolves to Homebrew's umbrella `qt`
 formula, whose `lib/cmake/Qt6/` does *not* actually contain `Qt6Config.cmake`
@@ -102,9 +89,11 @@ brew install bdw-gc gmp cmake
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
                  libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev \
                  libmpfr-dev   # for -DBUILD_MPFR=ON
-# BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib via a C
-# wrapper). BUILD_MODULE_PIPER needs an external libpiper/onnxruntime build
-# first -- see docs/reference/module-piper.md, not covered by apt/brew.
+# BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib). Not
+# covered by apt/brew at all: BUILD_MODULE_PIPER (see
+# docs/reference/module-piper.md) and BUILD_JUPYTER_KERNEL (see
+# docs/reference/jupyter-kernel.md) — both need a build step of their own
+# first, same OS-independent story on Linux and macOS.
 
 # LLVM JIT backend — Linux (requires LLVM ≥ 15)
 # Ubuntu 24.04 / Debian bookworm: LLVM 18 is in the main repo
@@ -121,10 +110,8 @@ cmake -B build -DBUILD_LLVM=ON -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
 
 # Optional modules — macOS
 brew install openssl sqlite libgit2 libpng jpeg-turbo mpfr
-# curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with macOS
-# BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib via a C
-# wrapper). BUILD_MODULE_PIPER needs an external libpiper/onnxruntime build
-# first -- see docs/reference/module-piper.md, not covered by brew.
+# curl, ldap, and qt@6 also available via brew; curl/ldap are bundled with
+# macOS. BUILD_MODULE_VECDB/PIPER/JUPYTER_KERNEL: see the Linux block above.
 
 # LLVM JIT backend — macOS
 brew install llvm
