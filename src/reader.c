@@ -638,6 +638,26 @@ static val_t read_datum(val_t port) {
                     sb_push_utf8(&sb, (uint32_t)next_char(port));
                     space_consumed = false;
                 } else if (nxt == ' ') {
+                    /* Inter-group spaces are only valid inside sexagesimal
+                     * number literals (e.g. 𒁹 𒌋𒁹 = 71), where every
+                     * glyph accumulated so far is a digit: CP_ASH (𒁹),
+                     * CP_U (𒌋), or CP_SHAR2 (𒑊).  Any other cuneiform
+                     * glyph means this is an Akkadian symbol — stop here
+                     * so adjacent symbols separated by a space tokenize
+                     * as two distinct tokens (e.g. 𒈷𒅆 𒆠𒉡𒆠 = map then
+                     * exact->inexact, not a single unknown token). */
+                    sb.buf[sb.len] = '\0';
+                    const char *_p = sb.buf;
+                    bool _sex_only = true;
+                    while (*_p) {
+                        int _cp = sex_decode_cp(&_p);
+                        if (_cp != (int)0x12079u &&   /* CP_ASH  = 𒁹 */
+                            _cp != (int)0x1230Bu &&   /* CP_U    = 𒌋 */
+                            _cp != (int)0x1244Au) {   /* CP_SHAR2= 𒑊 */
+                            _sex_only = false; break;
+                        }
+                    }
+                    if (!_sex_only) { space_consumed = false; break; }
                     next_char(port);                  /* tentatively eat space */
                     int after = peek_char_port(port);
                     if (SEX_IS_CUNEIFORM((uint32_t)after)) {

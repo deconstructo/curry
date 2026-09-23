@@ -102,6 +102,11 @@ RenderedError render_error(val_t exn) {
         });
     }
 
+    /* JupyterLab renders only the traceback list, not evalue separately.
+     * Prepend the error message as the first traceback line so it's always
+     * visible — the same convention used by IPython and other kernels. */
+    r.traceback.push_back(r.ename + ": " + r.evalue);
+
     val_t bt = vis_error(exn) ? as_err(exn)->backtrace : V_NIL;
     for (val_t f = bt; vis_pair(f); f = vcdr(f)) {
         val_t frame = vcar(f);
