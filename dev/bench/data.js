@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790065291437,
+  "lastUpdate": 1790144197201,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -15938,6 +15938,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 91.223,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "yvain",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "yvain",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "8c3845d1785a6d2176b6d544a5246d3e12708320",
+          "message": "fix(reader): cuneiform inter-group space must not merge adjacent symbol tokens\n\nThe tokenizer greedily consumed a single space between two cuneiform\ntokens when the following character was also cuneiform, intended for\nsexagesimal multi-place numbers (𒁹 𒌋𒁹 = 71). This incorrectly merged\nadjacent Akkadian procedure symbols separated by a space (e.g.\n𒈷𒅆 𒆠𒉡𒆠 was interned as one unknown symbol instead of map then\nexact->inexact).\n\nFix: only apply inter-group space merging when every glyph accumulated\nso far is a sexagesimal digit (CP_ASH 𒁹, CP_U 𒌋, or CP_SHAR2 𒑊).\nAny other cuneiform glyph means the token is an Akkadian symbol that\ncannot extend across a space. Sexagesimal tests: 110/110 still pass.\n\nfix(jupyter): include error message in traceback list\n\nJupyterLab renders only the traceback list, not evalue separately, so\nerrors showed only the location line (\"at <toplevel> (line 10)\") with\nthe actual message invisible. Prepend \"ename: evalue\" as the first\ntraceback entry, matching the convention used by IPython and other\nkernels.\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>",
+          "timestamp": "2026-09-23T12:52:33+10:00",
+          "tree_id": "6e7d3435b869ae17b200572cf7fcb823f234f862",
+          "url": "https://github.com/deconstructo/curry/commit/8c3845d1785a6d2176b6d544a5246d3e12708320"
+        },
+        "date": 1790144194728,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.138,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.455,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.033,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 40.76,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 187.299,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 326.573,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 72.291,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 109.964,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 84.622,
             "unit": "ms"
           }
         ]
