@@ -30,9 +30,14 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 # already default ON -- only listed here for visibility, not required.
 # Two modules are left out of this block on purpose: BUILD_MODULE_PIPER
 # needs an external libpiper/onnxruntime build first (see
-# docs/reference/module-piper.md), and BUILD_JUPYTER_KERNEL needs a
-# conda-forge environment first (see docs/reference/jupyter-kernel.md) --
-# both fold into the same cmake invocation once their prerequisite is done.
+# docs/reference/module-piper.md), and BUILD_JUPYTER_KERNEL needs xeus/
+# xeus-zmq first -- on macOS, `brew install deconstructo/curry/curry
+# --with-jupyter` handles this entirely (this repo's own tap now ships
+# xeus/xeus-zmq as tap-local formulas, no conda-forge needed); building
+# from this source tree directly still needs a conda-forge environment
+# (micromamba) first -- see docs/reference/jupyter-kernel.md for both
+# paths. Both fold into the same cmake invocation once their prerequisite
+# is done.
 cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_CRYPTO=ON \
   -DBUILD_MODULE_LDAP=ON \

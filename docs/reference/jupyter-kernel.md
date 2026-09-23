@@ -9,18 +9,57 @@ for the process's lifetime, and links `curry_core` itself.
 
 ## Getting started (first time setup)
 
-`xeus`, `xeus-zmq`, `xtl`, `cppzmq`, and `nlohmann_json` — the libraries the
-kernel is built on — are only published on **conda-forge**, not Homebrew.
-So building and running this kernel needs a conda-forge-capable package
-manager. **micromamba** is the tool used here: a small, fast, standalone
-program that manages isolated software environments (folders with their
-own set of installed packages, so they can't collide with Homebrew or
-anything else on your system) and can install conda-forge packages into
-them. If you've never touched conda/mamba/anaconda before, that's the
-entire mental model you need: one command creates a named environment,
-one command "activates" it (puts its programs on your `PATH` for the
-current terminal), and everything you install goes into that isolated
-folder.
+Two ways to get the kernel's dependencies (`xeus`, `xeus-zmq`, `xtl`,
+`cppzmq`, `nlohmann_json`) plus a Jupyter frontend:
+
+- **Method A — Homebrew (macOS, recommended).** `xeus`/`xeus-zmq` aren't in
+  homebrew-core, but this repo's own tap (`deconstructo/curry`) ships them
+  as tap-local formulas, and `cppzmq`/`nlohmann-json`/`jupyterlab` are all
+  in homebrew-core directly. No conda/mamba involved at all — confirmed
+  end to end (kernel built via `brew`, registered, and a real cell executed
+  through it) with zero micromamba present on the machine.
+- **Method B — micromamba / conda-forge.** Works the same way on Linux and
+  macOS, doesn't touch Homebrew at all, and is the only option if you'd
+  rather not add this tap. Slightly more setup the first time.
+
+### Method A — Homebrew (macOS, recommended)
+
+```bash
+# One-time: add this repo's tap if you haven't already, and trust it --
+# xeus-zmq's formula depends on this tap's own xeus formula, and Homebrew
+# refuses to load a formula-to-formula dependency from an untrusted tap
+# (confirmed: reinstalling curry with --with-jupyter failed outright with
+# "Refusing to load formula deconstructo/curry/xeus from untrusted tap"
+# until this was run -- a real, easy-to-hit first-time step).
+brew tap deconstructo/curry https://github.com/deconstructo/curry
+brew trust deconstructo/curry
+
+# The kernel itself, plus whatever other optional modules you want:
+brew install deconstructo/curry/curry --with-jupyter
+
+# A Jupyter frontend -- jupyterlab is in homebrew-core directly:
+brew install jupyterlab
+```
+
+`xeus` and `xeus-zmq` have no prebuilt bottle (tap-local formulas build
+from source) — each took under 15 seconds in testing, not a real wait.
+Everything else pours as a bottle.
+
+Register the kernel and launch (the `install` step prints these exact
+commands as a caveat, with your actual `brew --prefix curry` baked in):
+
+```bash
+$(brew --prefix curry)/libexec/install-jupyter-kernel.sh \
+  $(brew --prefix curry)/bin/curry_jupyter --user
+jupyter lab
+```
+
+If you already had `curry` installed via this tap without `--with-jupyter`,
+add it with `brew reinstall curry <your other --with-... flags> --with-jupyter`
+— Homebrew does not merge previous build options automatically, so repeat
+whichever ones you used before alongside the new one.
+
+### Method B — micromamba / conda-forge (cross-platform)
 
 **Step 1 — install micromamba and register it with your shell.**
 
@@ -96,7 +135,22 @@ jupyter console --kernel curry
 In JupyterLab, pick "Curry Scheme" from the kernel list when creating a
 new notebook.
 
-### Every time after the first setup
+### Every time after the first setup (Method A — Homebrew)
+
+Nothing to activate — just:
+
+```bash
+jupyter lab
+```
+
+After a `brew upgrade curry` (or `brew reinstall` with different `--with-...`
+flags), the kernelspec still points at the same `brew --prefix curry`-rooted
+path (Homebrew replaces the binary in place at that path on upgrade), so no
+need to re-register. Only re-run the `install-jupyter-kernel.sh` command
+above if you point Jupyter at a *different* `curry_jupyter` entirely (e.g. a
+manually-built `build/curry_jupyter` instead of the brewed one).
+
+### Every time after the first setup (Method B — micromamba)
 
 You only repeat Steps 1–2 once, ever (per machine). Each new terminal
 session, all you need is:
@@ -120,7 +174,7 @@ to point Jupyter at the tree you actually want, or check which one is
 currently registered with `cat ~/Library/Jupyter/kernels/curry/kernel.json`
 (Linux: `~/.local/share/jupyter/kernels/curry/kernel.json`).
 
-### Troubleshooting: "two different curry-jupyter environments"
+### Troubleshooting (Method B): "two different curry-jupyter environments"
 
 If `micromamba env list` ever shows a `curry-jupyter` environment under
 somewhere like `/opt/homebrew/Cellar/micromamba/.../envs/curry-jupyter`
