@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790144197201,
+  "lastUpdate": 1790152484618,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -16007,6 +16007,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.622,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "55beb9a082a26b6deda6b32f9fcd627b770637d5",
+          "message": "docs(jupyter): document the new Homebrew tap-only setup path\n\nA separate session added tap-local xeus/xeus-zmq formulas plus a\n--with-jupyter option on Formula/curry.rb, meaning the Jupyter\nkernel no longer needs micromamba/conda-forge on macOS. Tested this\nend to end from scratch:\n\n- brew tap deconstructo/curry + brew trust deconstructo/curry (the\n  latter is a real, previously-undocumented step: xeus-zmq depends\n  on this tap's own xeus formula, and Homebrew refuses to load a\n  formula-to-formula dependency from an untrusted tap)\n- brew install deconstructo/curry/curry --with-jupyter (xeus/\n  xeus-zmq build from source, no bottle, under 15s each)\n- brew install jupyterlab (available directly from homebrew-core)\n- registered the kernel and ran a real cell through jupyter_client\n  in a fully isolated environment (env -i, no micromamba on PATH at\n  all) -- got the correct result back\n\nRestructured the kernel doc into Method A (Homebrew, now the\nrecommended macOS path) and Method B (the existing micromamba path,\nkept as-is for Linux / conda-forge users), split the \"every time\nafter setup\" and troubleshooting sections to match, and updated\nCLAUDE.md's build example comment to mention both paths instead of\nonly conda-forge.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-23T18:33:43+10:00",
+          "tree_id": "0d774348292465a91b8634bb76631f1e0d25e044",
+          "url": "https://github.com/deconstructo/curry/commit/55beb9a082a26b6deda6b32f9fcd627b770637d5"
+        },
+        "date": 1790152481967,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.153,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 36.369,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.085,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 41.406,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 187.849,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 331.033,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 75.026,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.531,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 84.471,
             "unit": "ms"
           }
         ]
