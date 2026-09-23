@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790152484618,
+  "lastUpdate": 1790154449768,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -16076,6 +16076,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.471,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "0ed196e896af59d34a2a541ae947d9eff4edac20",
+          "message": "CLAUDE.md: add tap-local-formula-over-second-package-manager principle, trim bloat\n\nAdds a standing principle: when a build option needs a library not\nin Homebrew/apt, default to a tap-local formula building it from\nsource (Formula/libpiper.rb, Formula/xeus.rb, Formula/xeus-zmq.rb)\nrather than reaching for conda/mamba/pip as the default answer --\nthe Jupyter kernel's own docs originally reached for micromamba when\nnothing about xeus/xeus-zmq actually required conda-forge.\n\nAlso trims verbosity accumulated in the Build/Dependencies sections\nover the last few edits: moved the LLVM CMAKE_PREFIX_PATH\nexplanation out of an inline multi-line bash comment into prose\nmatching the existing Qt6 note's style, and deduplicated the\nVECDB/PIPER/JUPYTER asides that were repeated near-verbatim in both\nthe Linux and macOS dependency blocks. No facts removed, net -13\nlines. Verified the trimmed build command still configures cleanly.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-23T19:06:24+10:00",
+          "tree_id": "d179e679b01aca004575527221b1f6c956a51e6a",
+          "url": "https://github.com/deconstructo/curry/commit/0ed196e896af59d34a2a541ae947d9eff4edac20"
+        },
+        "date": 1790154448633,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 22.465,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.589,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.487,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 39.546,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 191.586,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 322.952,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 70.399,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 116.997,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 90.079,
             "unit": "ms"
           }
         ]
