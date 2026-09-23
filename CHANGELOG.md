@@ -1,5 +1,98 @@
 # Changelog
 
+### 1.25.1 - 2026-09-23
+
+**New — Jupyter kernel installable via Homebrew alone**
+
+`deconstructo/curry`'s tap now ships `Formula/xeus.rb` and
+`Formula/xeus-zmq.rb` (tap-local, building from source — neither is in
+homebrew-core), plus a new `--with-jupyter` option on `Formula/curry.rb`.
+`brew install deconstructo/curry/curry --with-jupyter` together with
+`brew install jupyterlab` now gets the whole Jupyter workflow running
+with no micromamba/conda-forge involved at all — verified end to end,
+including with the micromamba environment simulated as entirely absent.
+The existing micromamba path is unchanged and still works for Linux /
+conda-forge users. See `docs/reference/jupyter-kernel.md`'s Method A vs
+Method B.
+
+**Fix — cuneiform inter-group space merged adjacent symbol tokens**
+
+The reader's inter-group-space rule (valid inside sexagesimal number
+literals like 𒁹 𒌋𒁹) didn't check that every glyph accumulated so far
+was actually a sexagesimal digit glyph before treating a following
+space as part of the same token. Two adjacent Akkadian symbol tokens
+separated by a space (e.g. `𒈷𒅆 𒆠𒉡𒆠`, meant to read as two distinct
+symbols) were incorrectly merged into one unreadable token. Fixed in
+`src/reader.c` by requiring every glyph in the run so far to be
+CP_ASH/CP_U/CP_SHAR2 before the space is treated as inter-group.
+
+**Fix — Jupyter kernel error display**
+
+JupyterLab renders only a raised condition's traceback list, not its
+`evalue` separately, so the error message itself was easy to miss.
+`render_error` (`modules/jupyter/interpreter.cpp`) now prepends the
+error message as the first traceback line, matching the convention
+IPython and other kernels use.
+
+### 1.25.0 - 2026-09-22
+
+**New — Jupyter kernel (`curry_jupyter`)**
+
+A standalone Jupyter kernel built on xeus/xeus-zmq, gated behind
+`-DBUILD_JUPYTER_KERNEL=ON`. Each cell's top-level forms run through
+the same `compiler_compile()`/`vm_run()` path the REPL uses, not the
+tree-walker; one persistent `GLOBAL_ENV`/VM lives for the whole kernel
+process so definitions persist across cells. Includes inline image
+display (`(jupyter-display-file path)` — PNG/JPEG/SVG as a Jupyter
+`display_data` message) and real VM-level interrupt support (busy
+cells can be interrupted via the control channel, not just killed —
+`src/interrupt.c`, checked at `vm.c`'s dispatch loop). See
+`docs/reference/jupyter-kernel.md`.
+
+**Fix — race-free socket accept/ready timeouts (#237–#241)**
+
+`tcp-accept`/`socket-accept`/`socket-ready?`/`ws-accept` gained a
+proper, race-free timeout at the C level: rewritten around `poll()`
+instead of `select()`/`FD_SET` (avoiding an `FD_SETSIZE` out-of-bounds
+stack write), with a TOCTOU-free accept-with-timeout, correct behavior
+on a zero timeout (previously never actually polled once), and EINTR
+retries correctly gated on the deadline rather than looping unbounded.
+
+**Fix — data race and hang in the parallel work-stealing pool (#243)**
+
+The persistent thread pool backing `map`/`reduce`/`for-each/par` had a
+genuine data race in its Chase-Lev work-stealing deque
+(`src/workpool.c`): `pool_submit()` runs on whichever thread dispatches
+work — the main thread or any actor thread — and pushes directly into
+a worker thread's own deque, while that worker concurrently pops from
+the same deque. Classic Chase-Lev assumes a single owner thread does
+every push and pop; this pool didn't honor that, so a torn/lost push
+could mean a chunk's completion signal never fired, hanging the
+dispatcher forever with every worker idle. This was the real cause of
+a recurring, hard-to-reproduce `websocket`/`websocket_server`/`ros`
+test flake — unrelated to sockets or actors, reproducible any time a
+parallel dispatch happened from an actor thread under scheduling
+pressure. Found via `lldb` backtraces of a live hang plus a
+ThreadSanitizer build looped under synthetic CPU load; fixed with a
+per-deque mutex serializing push/pop/steal.
+
+**Fix — Jupyter kernel crash on rendering a deep result or error (#246)**
+
+Rendering a very deep (but non-circular) result or raised value in the
+Jupyter kernel could hit `scm_write_shared`'s stack-overflow guard with
+no `ExnHandler` installed, `abort()`-ing the entire kernel process
+instead of raising a catchable condition. Fixed by wrapping both
+render call sites in their own `SCM_PROTECT`, degrading to a clean
+error message instead.
+
+**Cleanup — deduplicated the accept/ready-timeout retry logic (#244)**
+
+`socket-ready?` and `net_accept_with_timeout` each had their own
+independent copy of the same absolute-deadline retry logic, which had
+to be fixed by hand in both places during #241. Extracted into shared
+`net_deadline_from_ms`/`net_remaining_poll_ms` helpers in
+`network_internal.h`.
+
 ### 1.24.0 - 2026-09-13
 
 **New — SRFI 61 (`cond`'s extended arrow clause)**
