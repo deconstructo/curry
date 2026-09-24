@@ -150,6 +150,43 @@ need to re-register. Only re-run the `install-jupyter-kernel.sh` command
 above if you point Jupyter at a *different* `curry_jupyter` entirely (e.g. a
 manually-built `build/curry_jupyter` instead of the brewed one).
 
+### Troubleshooting (Method A): JupyterLab loads but static assets 500 / blank UI
+
+If `jupyter lab` starts and prints its URL, but the browser shows a blank
+or broken page while the server log shows a 500 for `/static/lab/*.js`
+with:
+
+```
+AttributeError: 'FileFindHandler' object has no attribute 'allowed_symlink_directory'
+```
+
+this is an upstream version-skew bug between Tornado and `jupyter_server`,
+not anything curry-specific — Tornado 6.5.9 added a required
+`allowed_symlink_directory` attribute to `StaticFileHandler`, but
+`jupyter_server`'s `FileFindHandler.initialize()` (used to serve
+JupyterLab's static assets) overrides Tornado's `initialize()` without
+calling `super()`, so the attribute is never set. Fixed upstream in
+Tornado 6.5.10, which restores it as a class-level default
+([jupyter_server#1702](https://github.com/jupyter-server/jupyter_server/issues/1702),
+[tornado#3724](https://github.com/tornadoweb/tornado/issues/3724)). Confirmed
+hit by Homebrew's `jupyterlab` 4.6.3 formula, which bundled the broken
+6.5.9.
+
+Fix by upgrading tornado in place inside that formula's private venv
+(it has no `pip` binary of its own, but its linked Python can still
+reach Homebrew's `pip` module; `--ignore-installed` is needed because
+Homebrew's resource-based install leaves no `RECORD` file for the normal
+upgrade path's uninstall step to use):
+
+```bash
+/opt/homebrew/opt/jupyterlab/libexec/bin/python3 -m pip install \
+  --ignore-installed --no-deps "tornado>=6.5.10"
+```
+
+This isn't undone by a plain `jupyter lab` restart, but a future
+`brew reinstall jupyterlab`/`brew upgrade jupyterlab` that pulls in a
+still-broken tornado pin would need it re-run.
+
 ### Every time after the first setup (Method B — micromamba)
 
 You only repeat Steps 1–2 once, ever (per machine). Each new terminal
