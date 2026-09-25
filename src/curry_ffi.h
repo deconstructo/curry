@@ -35,6 +35,20 @@
  *     promoted to double (C's own default argument promotion for
  *     variadic float arguments — libffi requires this explicitly, see
  *     ffi_prep_cif_var's documentation).
+ *   (%ffi-make-callback proc ret-tag arg-tag-list) → foreign-callback
+ *     Exposes a Scheme procedure as a real, callable C function pointer
+ *     (a libffi closure) -- for handing to a C function that expects a
+ *     callback. Fixed-arity only (no variadic callbacks). 'string/
+ *     'c_string is not a supported ret-tag (see ffi_make_callback in
+ *     ffi.c for why). A C library can invoke this from any thread it
+ *     chooses, including one curry never registered -- closure_trampoline
+ *     defensively calls gc_register_thread()/vm_init() itself.
+ *   (%ffi-callback-ptr cb)                  → c-ptr (the function pointer)
+ *   (%ffi-callback-free! cb)                → void
+ *     NOT automatic/GC-finalized -- the caller must only call this once
+ *     certain the C library will never invoke the callback again; the
+ *     ForeignCallback object itself is GC:PIN and never collected on its
+ *     own for exactly this reason.
  *   (%ffi-make-cptr address-fixnum)         → c-ptr
  *   (%ffi-cptr-address c-ptr)               → fixnum
  *   (%ffi-matrix-ptr matrix)                → c-ptr (double*)
@@ -54,6 +68,9 @@ val_t ffi_make_fn(val_t lib, const char *c_name, val_t ret_tag, val_t arg_tags);
 val_t ffi_call_fn(val_t fn, val_t args);
 val_t ffi_make_fn_variadic(val_t lib, const char *c_name, val_t ret_tag, val_t fixed_arg_tags);
 val_t ffi_call_fn_variadic(val_t fn, val_t fixed_args, val_t variadic_typed_args);
+val_t ffi_make_callback(val_t proc, val_t ret_tag, val_t arg_tags);
+val_t ffi_callback_ptr(val_t cb);
+val_t ffi_callback_free(val_t cb);
 val_t ffi_make_cptr(void *ptr);
 
 void  ffi_register_builtins(val_t env);
