@@ -623,6 +623,172 @@
       (else (loop (+ i 1)))))
   #t)
 
+;;; ── Internal defines produced by macro expansion (GitHub issue #253) ─────────
+;;;
+;;; The VM compiler's lambda_prescan (compiler.c) decides what to
+;;; pre-declare as a letrec*-style local by matching a body form's head
+;;; against a fixed list of literal special-form symbols -- correct for a
+;;; literal (define ...), but previously blind to a user macro that itself
+;;; EXPANDS to one. A macro-expanded internal define compiled through the
+;;; VM used to silently fail to bind anything (no slot reserved, so the
+;;; later real expansion's store landed somewhere the body's reference to
+;;; the name never read back). The tree-walker (eval.c) has no equivalent
+;;; prescan and was never affected -- these tests exercise the VM path
+;;; specifically (an ordinary top-level (define ...) compiles through the
+;;; VM by default, which is what running this file via `curry` does).
+
+(define-syntax my-def
+  (syntax-rules ()
+    ((_ n v) (define n v))))
+
+(check "macro-expanded internal define binds correctly"
+  ((lambda ()
+     (my-def y 99)
+     y))
+  99)
+
+;; the exact minimal repro from #253's report
+(check "macro-expanded internal define, named procedure form"
+  (let ()
+    (define (f2)
+      (my-def y 99)
+      y)
+    (f2))
+  99)
+
+;; mutual reference between two macro-expanded internal defines --
+;; correct only if both got a real letrec*-style slot reservation
+;; (an unreserved slot would make one half of the mutual recursion
+;; read back stale/uninitialised data instead of the other's closure).
+(check "mutual recursion between two macro-expanded internal defines"
+  ((lambda ()
+     (my-def my-even? (lambda (n) (if (= n 0) #t (my-odd? (- n 1)))))
+     (my-def my-odd?  (lambda (n) (if (= n 0) #f (my-even? (- n 1)))))
+     (my-even? 10)))
+  #t)
+
+;; a macro expanding to ANOTHER macro invocation that itself expands to
+;; a define -- confirms the bounded re-expansion loop in
+;; prescan_macroexpand_defines actually iterates, not just expands once.
+(define-syntax my-def-indirect
+  (syntax-rules ()
+    ((_ n v) (my-def n v))))
+
+(check "double-indirect macro-expanded internal define"
+  ((lambda ()
+     (my-def-indirect z 123)
+     z))
+  123)
+
+;; Generated chain of 80 syntax-rules macros, each expanding to the
+;; next, terminating in a real (define n v) -- deliberately deeper than
+;; prescan_macroexpand_defines's old 64-iteration cap (found via review
+;; to silently reintroduce #253 past that depth: a tight cap recognized
+;; fewer levels than compile_seq's own real, effectively-uncapped
+;; SF_MACRO expansion actually reaches, so the prescan and the real pass
+;; disagreed about whether a deep form is a definition at all).
+(define-syntax deep-macro-0 (syntax-rules () ((_ n v) (deep-macro-1 n v))))
+(define-syntax deep-macro-1 (syntax-rules () ((_ n v) (deep-macro-2 n v))))
+(define-syntax deep-macro-2 (syntax-rules () ((_ n v) (deep-macro-3 n v))))
+(define-syntax deep-macro-3 (syntax-rules () ((_ n v) (deep-macro-4 n v))))
+(define-syntax deep-macro-4 (syntax-rules () ((_ n v) (deep-macro-5 n v))))
+(define-syntax deep-macro-5 (syntax-rules () ((_ n v) (deep-macro-6 n v))))
+(define-syntax deep-macro-6 (syntax-rules () ((_ n v) (deep-macro-7 n v))))
+(define-syntax deep-macro-7 (syntax-rules () ((_ n v) (deep-macro-8 n v))))
+(define-syntax deep-macro-8 (syntax-rules () ((_ n v) (deep-macro-9 n v))))
+(define-syntax deep-macro-9 (syntax-rules () ((_ n v) (deep-macro-10 n v))))
+(define-syntax deep-macro-10 (syntax-rules () ((_ n v) (deep-macro-11 n v))))
+(define-syntax deep-macro-11 (syntax-rules () ((_ n v) (deep-macro-12 n v))))
+(define-syntax deep-macro-12 (syntax-rules () ((_ n v) (deep-macro-13 n v))))
+(define-syntax deep-macro-13 (syntax-rules () ((_ n v) (deep-macro-14 n v))))
+(define-syntax deep-macro-14 (syntax-rules () ((_ n v) (deep-macro-15 n v))))
+(define-syntax deep-macro-15 (syntax-rules () ((_ n v) (deep-macro-16 n v))))
+(define-syntax deep-macro-16 (syntax-rules () ((_ n v) (deep-macro-17 n v))))
+(define-syntax deep-macro-17 (syntax-rules () ((_ n v) (deep-macro-18 n v))))
+(define-syntax deep-macro-18 (syntax-rules () ((_ n v) (deep-macro-19 n v))))
+(define-syntax deep-macro-19 (syntax-rules () ((_ n v) (deep-macro-20 n v))))
+(define-syntax deep-macro-20 (syntax-rules () ((_ n v) (deep-macro-21 n v))))
+(define-syntax deep-macro-21 (syntax-rules () ((_ n v) (deep-macro-22 n v))))
+(define-syntax deep-macro-22 (syntax-rules () ((_ n v) (deep-macro-23 n v))))
+(define-syntax deep-macro-23 (syntax-rules () ((_ n v) (deep-macro-24 n v))))
+(define-syntax deep-macro-24 (syntax-rules () ((_ n v) (deep-macro-25 n v))))
+(define-syntax deep-macro-25 (syntax-rules () ((_ n v) (deep-macro-26 n v))))
+(define-syntax deep-macro-26 (syntax-rules () ((_ n v) (deep-macro-27 n v))))
+(define-syntax deep-macro-27 (syntax-rules () ((_ n v) (deep-macro-28 n v))))
+(define-syntax deep-macro-28 (syntax-rules () ((_ n v) (deep-macro-29 n v))))
+(define-syntax deep-macro-29 (syntax-rules () ((_ n v) (deep-macro-30 n v))))
+(define-syntax deep-macro-30 (syntax-rules () ((_ n v) (deep-macro-31 n v))))
+(define-syntax deep-macro-31 (syntax-rules () ((_ n v) (deep-macro-32 n v))))
+(define-syntax deep-macro-32 (syntax-rules () ((_ n v) (deep-macro-33 n v))))
+(define-syntax deep-macro-33 (syntax-rules () ((_ n v) (deep-macro-34 n v))))
+(define-syntax deep-macro-34 (syntax-rules () ((_ n v) (deep-macro-35 n v))))
+(define-syntax deep-macro-35 (syntax-rules () ((_ n v) (deep-macro-36 n v))))
+(define-syntax deep-macro-36 (syntax-rules () ((_ n v) (deep-macro-37 n v))))
+(define-syntax deep-macro-37 (syntax-rules () ((_ n v) (deep-macro-38 n v))))
+(define-syntax deep-macro-38 (syntax-rules () ((_ n v) (deep-macro-39 n v))))
+(define-syntax deep-macro-39 (syntax-rules () ((_ n v) (deep-macro-40 n v))))
+(define-syntax deep-macro-40 (syntax-rules () ((_ n v) (deep-macro-41 n v))))
+(define-syntax deep-macro-41 (syntax-rules () ((_ n v) (deep-macro-42 n v))))
+(define-syntax deep-macro-42 (syntax-rules () ((_ n v) (deep-macro-43 n v))))
+(define-syntax deep-macro-43 (syntax-rules () ((_ n v) (deep-macro-44 n v))))
+(define-syntax deep-macro-44 (syntax-rules () ((_ n v) (deep-macro-45 n v))))
+(define-syntax deep-macro-45 (syntax-rules () ((_ n v) (deep-macro-46 n v))))
+(define-syntax deep-macro-46 (syntax-rules () ((_ n v) (deep-macro-47 n v))))
+(define-syntax deep-macro-47 (syntax-rules () ((_ n v) (deep-macro-48 n v))))
+(define-syntax deep-macro-48 (syntax-rules () ((_ n v) (deep-macro-49 n v))))
+(define-syntax deep-macro-49 (syntax-rules () ((_ n v) (deep-macro-50 n v))))
+(define-syntax deep-macro-50 (syntax-rules () ((_ n v) (deep-macro-51 n v))))
+(define-syntax deep-macro-51 (syntax-rules () ((_ n v) (deep-macro-52 n v))))
+(define-syntax deep-macro-52 (syntax-rules () ((_ n v) (deep-macro-53 n v))))
+(define-syntax deep-macro-53 (syntax-rules () ((_ n v) (deep-macro-54 n v))))
+(define-syntax deep-macro-54 (syntax-rules () ((_ n v) (deep-macro-55 n v))))
+(define-syntax deep-macro-55 (syntax-rules () ((_ n v) (deep-macro-56 n v))))
+(define-syntax deep-macro-56 (syntax-rules () ((_ n v) (deep-macro-57 n v))))
+(define-syntax deep-macro-57 (syntax-rules () ((_ n v) (deep-macro-58 n v))))
+(define-syntax deep-macro-58 (syntax-rules () ((_ n v) (deep-macro-59 n v))))
+(define-syntax deep-macro-59 (syntax-rules () ((_ n v) (deep-macro-60 n v))))
+(define-syntax deep-macro-60 (syntax-rules () ((_ n v) (deep-macro-61 n v))))
+(define-syntax deep-macro-61 (syntax-rules () ((_ n v) (deep-macro-62 n v))))
+(define-syntax deep-macro-62 (syntax-rules () ((_ n v) (deep-macro-63 n v))))
+(define-syntax deep-macro-63 (syntax-rules () ((_ n v) (deep-macro-64 n v))))
+(define-syntax deep-macro-64 (syntax-rules () ((_ n v) (deep-macro-65 n v))))
+(define-syntax deep-macro-65 (syntax-rules () ((_ n v) (deep-macro-66 n v))))
+(define-syntax deep-macro-66 (syntax-rules () ((_ n v) (deep-macro-67 n v))))
+(define-syntax deep-macro-67 (syntax-rules () ((_ n v) (deep-macro-68 n v))))
+(define-syntax deep-macro-68 (syntax-rules () ((_ n v) (deep-macro-69 n v))))
+(define-syntax deep-macro-69 (syntax-rules () ((_ n v) (deep-macro-70 n v))))
+(define-syntax deep-macro-70 (syntax-rules () ((_ n v) (deep-macro-71 n v))))
+(define-syntax deep-macro-71 (syntax-rules () ((_ n v) (deep-macro-72 n v))))
+(define-syntax deep-macro-72 (syntax-rules () ((_ n v) (deep-macro-73 n v))))
+(define-syntax deep-macro-73 (syntax-rules () ((_ n v) (deep-macro-74 n v))))
+(define-syntax deep-macro-74 (syntax-rules () ((_ n v) (deep-macro-75 n v))))
+(define-syntax deep-macro-75 (syntax-rules () ((_ n v) (deep-macro-76 n v))))
+(define-syntax deep-macro-76 (syntax-rules () ((_ n v) (deep-macro-77 n v))))
+(define-syntax deep-macro-77 (syntax-rules () ((_ n v) (deep-macro-78 n v))))
+(define-syntax deep-macro-78 (syntax-rules () ((_ n v) (deep-macro-79 n v))))
+(define-syntax deep-macro-79 (syntax-rules () ((_ n v) (define n v))))
+
+(check "80 levels of macro-to-macro indirection before the terminal define (regression for the review-found 64-cap gap)"
+  ((lambda ()
+     (deep-macro-0 y 42)
+     y))
+  42)
+
+;; R7RS's "no internal definition after an expression" ordering rule is
+;; unaffected by this fix -- prescan_macroexpand_defines only changes
+;; which forms get RECOGNIZED as definitions during the prescan; the
+;; existing `if (body_has_expr) scm_raise(...)` check that enforces
+;; ordering is untouched code, not exercised differently by this change.
+;; Not exercised here as a `check` assertion: the violation raises at
+;; VM COMPILE time (lambda_prescan runs while compiling the enclosing
+;; form, before any runtime `guard` around it is even active -- confirmed
+;; manually: a literal `(lambda () (display "") (my-def late 1) late)`
+;; at top level aborts the whole script with an uncaught error, the same
+;; way it already did before this fix for a literal (non-macro) internal
+;; define after an expression), which doesn't compose cleanly with a
+;; single assertion inside a long-running test file that needs to keep
+;; running afterward.
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

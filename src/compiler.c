@@ -550,6 +550,98 @@ int compile_params(Compiler *c, val_t params) {
 
 /* ── Lambda compilation ───────────────────────────────────────────────── */
 
+/* Best-effort: if `form`'s head is a macro (not already one of the
+ * define-family keywords or `symbolic`, which the caller already
+ * recognizes without expansion), expand it and re-check, repeatedly, up
+ * to a bounded number of steps. Returns the possibly-expanded form.
+ *
+ * Why this exists: lambda_prescan below decides what to reserve as a
+ * letrec*-style local purely by matching a form's head against a fixed
+ * list of literal special-form symbols (S_DEFINE, S_DEFINE_VALUES, ...)
+ * -- correct only for a literal `(define ...)`, not for a user macro
+ * that itself EXPANDS to one (e.g. `(define-foreign-library name path)`
+ * expanding to `(define name (%ffi-load path))`). Without this, a macro-
+ * expanded internal define compiled through the VM silently doesn't bind
+ * anything: no slot gets reserved here, so when compile_seq later
+ * expands the same form for real and compiles the resulting `(define
+ * ...)`, compile_define's "no pre-declared slot" fallback path doesn't
+ * follow the same reservation protocol every other internal define
+ * relies on, and the store lands somewhere the body's later reference to
+ * the name never reads back correctly (GitHub issue #253; the tree-
+ * walker -- eval.c -- has no equivalent prescan and was never affected).
+ *
+ * Uses the exact same three-tier macro lookup (local syntax -> chunk's
+ * target_env -> GLOBAL_ENV) as ir_lower.c's head_is_macro / compiler_
+ * classic.c's own inline SF_MACRO lookup, and the same apply()-the-
+ * transformer expansion call (with the same sr_current_env save/restore
+ * for template hygiene) compiler_classic.c's SF_MACRO case already uses
+ * for the real, authoritative expansion -- this is deliberately a SEPARATE
+ * expansion, not a cache of that one: the two run independently (this
+ * one discarded after prescan, that one driving actual codegen), which
+ * is safe because a macro of this shape (the caller's own argument
+ * substituted directly as the bound name, not synthesized) binds the
+ * identical symbol both times -- the only thing this function's result
+ * is used for is discovering that name early enough to reserve its slot.
+ * Never raises: expansion failure here just means "give up, don't
+ * expand" (`form` unchanged) -- a genuinely malformed macro use still
+ * gets a real, properly-reported error when compile_seq expands it again
+ * for real; this prescan step is not the place to report it.
+ *
+ * Iteration cap: deliberately generous (100000), not a tight "this
+ * shouldn't normally happen" guard -- compile_seq's own real SF_MACRO
+ * expansion (compiler_classic.c) recurses with NO analogous step bound
+ * at all, so a tight cap here doesn't just guard against pathological
+ * input, it silently REINTRODUCES issue #253 for any well-behaved
+ * macro-to-macro indirection chain deeper than the cap (confirmed via a
+ * 70-level macro-redirection chain during review: a 64-iteration cap
+ * left the 70th level's define unrecognized here while the real pass
+ * still expanded and compiled it, exactly the original bug). A
+ * genuinely pathological or non-terminating macro is still bounded by
+ * the same safety net the real pass already relies on for the identical
+ * apply() call -- the C-stack-depth guard's own stack-overflow
+ * exception (see check_c_stack_depth, src/runtime.c) -- caught here by
+ * the existing SCM_PROTECT below the same as any other expansion
+ * failure. This cap exists only so the function is provably terminating
+ * on its own, not as the thing actually expected to stop a runaway
+ * expansion in practice. */
+static val_t prescan_macroexpand_defines(Compiler *c, val_t form) {
+    for (int steps = 0; steps < 100000; steps++) {
+        if (!vis_pair(form) || !vis_symbol(vcar(form))) return form;
+        val_t head = lang_translate(vcar(form));
+        if (head == S_DEFINE || head == S_DEFINE_SYNTAX || head == S_DEFINE_VALUES ||
+            head == S_DEFINE_RECORD_TYPE || head == S_DEFINE_RULE ||
+            head == S_DEFINE_RULESET || head == S_DEFINE_ALGEBRA || head == S_SYMBOLIC)
+            return form; /* already recognized as-is -- nothing to expand */
+
+        val_t transformer;
+        bool is_macro = resolve_syntax_local(c, head, &transformer);
+        if (!is_macro && c->chunk->target_env != V_VOID) {
+            val_t macro = env_lookup_or_false(c->chunk->target_env, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
+        if (!is_macro) {
+            val_t macro = env_lookup_or_false(GLOBAL_ENV, head);
+            is_macro = vis_syntax(macro);
+            if (is_macro) transformer = as_syntax(macro)->transformer;
+        }
+        if (!is_macro) return form;
+
+        ExnHandler h;
+        val_t expanded = V_FALSE;
+        bool raised = false;
+        val_t saved_sr_env = sr_get_current_env();
+        sr_set_current_env(c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV);
+        SCM_PROTECT(h,
+            expanded = apply(transformer, scm_cons(form, V_NIL)),
+            raised = true);
+        sr_set_current_env(saved_sr_env);
+        if (raised) return form;
+        form = expanded;
+    }
+    return form; /* expansion budget exhausted -- back off, let the real pass report it */
+}
+
 /* Scan a lambda body for internal defines and pre-declare them as locals
  * (letrec* semantics), enforcing R7RS's "definitions must precede all
  * expressions in the body". Factored out of compile_lambda so ir_emit's
@@ -563,7 +655,7 @@ void lambda_prescan(Compiler *c, val_t body, int line) {
     val_t bscan = body;
     bool body_has_expr = false;
     while (vis_pair(bscan)) {
-        val_t form = vcar(bscan);
+        val_t form = prescan_macroexpand_defines(c, vcar(bscan));
         bool is_def = vis_pair(form) && vis_symbol(vcar(form)) &&
                       (lang_translate(vcar(form)) == S_DEFINE ||
                        lang_translate(vcar(form)) == S_DEFINE_SYNTAX ||
