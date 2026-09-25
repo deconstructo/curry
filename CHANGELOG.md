@@ -22,6 +22,19 @@ rather than client-side replay of precomputed frames. See
 system can call this binding from a spawned pthread as well as the
 main cell thread.
 
+**Docs — JupyterLab blank-UI troubleshooting (Method A)**
+
+Documented an upstream Tornado/`jupyter_server` version-skew bug that
+breaks Homebrew's `jupyterlab` formula: Tornado 6.5.9 added a required
+`allowed_symlink_directory` attribute to `StaticFileHandler` that
+`jupyter_server`'s `FileFindHandler` never sets, so every static asset
+request 500s and the JupyterLab UI loads blank. Not a curry bug — fixed
+upstream in Tornado 6.5.10
+([jupyter_server#1702](https://github.com/jupyter-server/jupyter_server/issues/1702),
+[tornado#3724](https://github.com/tornadoweb/tornado/issues/3724)).
+Added a troubleshooting entry with the in-place `pip install
+--ignore-installed` workaround to `docs/reference/jupyter-kernel.md`.
+
 ### 1.25.1 - 2026-09-23
 
 **New — Jupyter kernel installable via Homebrew alone**
