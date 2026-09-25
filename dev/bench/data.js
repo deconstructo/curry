@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790349063255,
+  "lastUpdate": 1790371179776,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -16421,6 +16421,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.267,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "40bb27b57e9c340f511def39bdfe84b56670b54e",
+          "message": "Merge pull request #250 from deconstructo/feature/ffi-variadic-support\n\nfeat(ffi): variadic C function support + ncurses printf bindings",
+          "timestamp": "2026-09-26T07:18:45+10:00",
+          "tree_id": "d7d761550d6f8dfe44e35e70e22b23131572667c",
+          "url": "https://github.com/deconstructo/curry/commit/40bb27b57e9c340f511def39bdfe84b56670b54e"
+        },
+        "date": 1790371177721,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.385,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 35.338,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.168,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 41.062,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 257.479,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 364.165,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 80.156,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 148.695,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 128.641,
             "unit": "ms"
           }
         ]
