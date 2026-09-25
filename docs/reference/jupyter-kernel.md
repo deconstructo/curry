@@ -209,7 +209,7 @@ curry's own Akkadian-preamble error text. State from forms that already
 ran in that cell (and any earlier cell) is preserved — an error doesn't
 reset `GLOBAL_ENV`, only the VM's operand stack (`vm_reset()`).
 
-### Displaying images inline: `(jupyter-display-file path)`
+### Displaying images inline: `(jupyter-display-file path [display-id])`
 
 Only available inside this kernel (registered straight into `GLOBAL_ENV`
 in `configure_impl()`, `modules/jupyter/interpreter.cpp` — not compiled
@@ -238,6 +238,35 @@ writes a file:
 ```
 
 See [`docs/reference/module-plplot.md`](module-plplot.md) for full plotting examples.
+
+**Animating in place with `display-id`.** Pass a second argument (a string
+or symbol) to tag the output with a Jupyter display id. The *first* call
+for a given id publishes an ordinary `display_data` message; every later
+call with the *same* id publishes `update_display_data` instead, which
+the frontend renders by replacing that existing output in place rather
+than appending a new image underneath it. This is the same two-message
+mechanism `IPython.display.display(x, display_id=...)` /
+`update_display(...)` use to back matplotlib's notebook animation
+support — it gives curry the same capability with no GIF encoding or
+extra frontend machinery, at the cost of the kernel actually re-rendering
+and re-publishing each frame (real per-step computation, e.g. an N-body
+integration, not a client-side replay of precomputed frames):
+
+```scheme
+(import (curry plplot))
+(let loop ((frame 0))
+  (when (< frame 200)
+    (render-frame! frame "orbit.png")  ; plplot draws the current frame
+    (jupyter-display-file "orbit.png" 'orbit)
+    (loop (+ frame 1))))
+```
+
+See [`examples/jupyter-orbit-animation.scm`](../../examples/jupyter-orbit-animation.scm)
+for a complete worked example (orbiting planets with fading trails).
+`display-id` tracking (`seen_display_ids` in `interpreter.cpp`) is a
+single process-lifetime set guarded by a mutex — safe to call from a
+`spawn`ed actor thread as well as the main cell thread, not just scoped
+to one cell or one execution.
 
 ### Interrupting a busy cell
 

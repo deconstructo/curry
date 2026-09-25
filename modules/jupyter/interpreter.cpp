@@ -31,8 +31,10 @@ extern "C" {
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 namespace curry_jupyter {
@@ -237,13 +239,35 @@ FileLoadResult load_display_file(const char *path) {
     return r;
 }
 
+/* Display ids seen so far in this kernel process -- the first
+ * jupyter-display-file call for a given id publishes a normal display_data
+ * (so the frontend has something to attach the id to); every later call
+ * with the same id publishes update_display_data instead, which the
+ * frontend renders by replacing that existing output in place. This is
+ * the same two-message mechanism IPython's display(..., display_id=)/
+ * update_display(...) uses under the hood -- it's what backs matplotlib's
+ * notebook animation support in Python, and gives curry the same
+ * capability without any GIF encoding or extra frontend machinery. A
+ * plain process-lifetime set (not tied to execution_counter/cell) is
+ * intentional: an animation loop spanning many top-level forms within one
+ * cell, or reused across cells, both still update the same output.
+ *
+ * curry's actor system (src/actors.h) runs spawned Scheme code on real
+ * detached pthreads, and jupyter-display-file is a plain GLOBAL_ENV
+ * binding an actor can call just as freely as the main REPL thread --
+ * concurrent unsynchronized insert() into an unordered_set is a data
+ * race (UB, not just a wrong first_time answer), so this needs its own
+ * lock even though the kernel's own execute_request_impl is otherwise
+ * single-threaded. */
+std::mutex seen_display_ids_mutex;
+std::unordered_set<std::string> seen_display_ids;
+
 val_t jupyter_display_file_prim(int argc, val_t *argv, void *ud) {
-    (void)argc;
     if (!vis_string(argv[0]))
         scm_raise(V_FALSE, "jupyter-display-file: expected a path string");
 
-    /* A fixed-size stack buffer, not std::string, for the same reason
-     * FileLoadResult is POD -- this needs to stay valid (and destructor-
+    /* Fixed-size stack buffers, not std::string, for the same reason
+     * FileLoadResult is POD -- these need to stay valid (and destructor-
      * free) across the scm_raise() calls below. */
     String *s = as_str(argv[0]);
     char path[4096];
@@ -251,6 +275,28 @@ val_t jupyter_display_file_prim(int argc, val_t *argv, void *ud) {
         scm_raise(V_FALSE, "jupyter-display-file: path too long (max %zu bytes)", sizeof(path) - 1);
     memcpy(path, str_data(s), s->len);
     path[s->len] = '\0';
+
+    bool has_id = argc >= 2;
+    char id[256];
+    if (has_id) {
+        const char *id_src;
+        uint32_t id_len;
+        if (vis_string(argv[1])) {
+            String *is = as_str(argv[1]);
+            id_src = str_data(is);
+            id_len = is->len;
+        } else if (vis_symbol(argv[1])) {
+            id_src = sym_cstr(argv[1]);
+            id_len = sym_len(argv[1]);
+        } else {
+            scm_raise(V_FALSE, "jupyter-display-file: display-id must be a string or symbol");
+            return V_VOID; /* unreachable: scm_raise() longjmps */
+        }
+        if (id_len >= sizeof(id))
+            scm_raise(V_FALSE, "jupyter-display-file: display-id too long (max %zu bytes)", sizeof(id) - 1);
+        memcpy(id, id_src, id_len);
+        id[id_len] = '\0';
+    }
 
     FileLoadResult r = load_display_file(path);
     if (r.status == FileLoadResult::BAD_EXTENSION)
@@ -267,7 +313,24 @@ val_t jupyter_display_file_prim(int argc, val_t *argv, void *ud) {
     data[r.mime] = r.binary ? base64_encode(content) : content;
     data["text/plain"] = std::string("<") + r.mime + ": " + path + ">";
 
-    static_cast<curry_interpreter *>(ud)->display_data(data, nl::json::object(), nl::json::object());
+    auto *interp = static_cast<curry_interpreter *>(ud);
+    if (!has_id) {
+        interp->display_data(data, nl::json::object(), nl::json::object());
+        return V_VOID;
+    }
+
+    nl::json transient;
+    transient["display_id"] = id;
+    bool first_time;
+    {
+        std::lock_guard<std::mutex> lock(seen_display_ids_mutex);
+        first_time = seen_display_ids.insert(id).second;
+    }
+    if (first_time) {
+        interp->display_data(data, nl::json::object(), transient);
+    } else {
+        interp->update_display_data(data, nl::json::object(), transient);
+    }
     return V_VOID;
 }
 
@@ -279,7 +342,7 @@ void curry_interpreter::configure_impl() {
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type  = T_PRIMITIVE; p->hdr.flags = 0;
     p->name      = "jupyter-display-file";
-    p->min_args  = 1; p->max_args = 1;
+    p->min_args  = 1; p->max_args = 2;
     p->fn        = jupyter_display_file_prim;
     p->ud        = this;
     env_define(GLOBAL_ENV, sym_intern_cstr("jupyter-display-file"), vptr(p));
