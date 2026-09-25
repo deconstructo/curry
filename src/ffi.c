@@ -28,6 +28,16 @@
 
 /* ---- Utilities ---- */
 
+/* Shared bound on total argument count and per-arg storage size, used both
+ * at define-foreign time (reject an over-wide signature before it can
+ * reach a call) and at call time (size the marshaling stack buffers in
+ * ffi_call_fn/ffi_call_fn_variadic). Defined here, ahead of every
+ * function that needs it, rather than down by ffi_call_fn where it used
+ * to live -- ffi_make_fn's own arg-count check (added below) needs it
+ * too, and a check that runs after the fact doesn't prevent anything. */
+#define FFI_MAX_ARGS 64
+#define FFI_ARG_BUF  16   /* max sizeof any supported C type */
+
 static inline const char *tag_str(val_t tag) {
     return vis_symbol(tag) ? sym_cstr(tag) : "?";
 }
@@ -191,6 +201,9 @@ val_t ffi_make_fn(val_t lib_val, const char *c_name, val_t ret_tag, val_t arg_ta
 
     int nargs = scm_list_length(arg_tags);
     if (nargs < 0) scm_raise(V_FALSE, "ffi-make-fn: arg-types must be a proper list");
+    if (nargs > FFI_MAX_ARGS)
+        scm_raise(V_FALSE, "ffi-make-fn: %s: %d args exceeds max %d",
+                  c_name, nargs, FFI_MAX_ARGS);
 
     /* Build ffi_type** array — malloc'd, permanent */
     ffi_type **atypes = malloc((nargs ? (size_t)nargs : 1) * sizeof(ffi_type *));
@@ -221,12 +234,90 @@ val_t ffi_make_fn(val_t lib_val, const char *c_name, val_t ret_tag, val_t arg_ta
     ff->arg_tags   = arg_tags;
     ff->ret_tag    = ret_tag;
     ff->nargs      = nargs;
+    ff->variadic   = false;
     ff->name       = strdup(c_name);
     return vptr(ff);
 }
 
-#define FFI_MAX_ARGS 64
-#define FFI_ARG_BUF  16   /* max sizeof any supported C type */
+/* ---- Variadic foreign functions ----
+ *
+ * C variadic calls (printf-shaped) have no fixed signature for the
+ * trailing arguments, so unlike ffi_make_fn's cif (built once, reused
+ * forever), a variadic call's cif has to be rebuilt per call from that
+ * call's actual argument types -- libffi's own ffi_prep_cif_var contract:
+ * a cif prepared for one (nfixed, ntotal, atypes) shape is only valid for
+ * calls matching that exact shape. See ffi_call_fn_variadic below. */
+
+val_t ffi_make_fn_variadic(val_t lib_val, const char *c_name, val_t ret_tag, val_t fixed_arg_tags) {
+    if (!vis_foreignlib(lib_val))
+        scm_raise(V_FALSE, "ffi-make-fn-variadic: not a foreign-lib");
+
+    void *fn = dlsym(as_foreignlib(lib_val)->handle, c_name);
+    if (!fn) scm_raise(V_FALSE, "ffi-make-fn-variadic: symbol not found: %s", c_name);
+
+    int nfixed = scm_list_length(fixed_arg_tags);
+    if (nfixed < 0) scm_raise(V_FALSE, "ffi-make-fn-variadic: fixed-arg-types must be a proper list");
+    if (nfixed > FFI_MAX_ARGS)
+        scm_raise(V_FALSE, "ffi-make-fn-variadic: %s: %d fixed args exceeds max %d",
+                  c_name, nfixed, FFI_MAX_ARGS);
+
+    ffi_type **atypes = malloc((nfixed ? (size_t)nfixed : 1) * sizeof(ffi_type *));
+    val_t tlist = fixed_arg_tags;
+    for (int i = 0; i < nfixed; i++) {
+        ffi_type *ft = ffi_type_for_tag(vcar(tlist));
+        if (!ft) scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown arg type '%s' for %s",
+                           tag_str(vcar(tlist)), c_name);
+        atypes[i] = ft;
+        tlist = vcdr(tlist);
+    }
+
+    ffi_type *rtype = ffi_type_for_tag(ret_tag);
+    if (!rtype) scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown return type '%s' for %s",
+                          tag_str(ret_tag), c_name);
+
+    /* A cif for the zero-variadic-args call shape (nfixed == ntotal) is
+     * valid per ffi_prep_cif_var's own docs and lets a call with no
+     * trailing arguments skip rebuilding one; a call that does supply
+     * variadic arguments always builds its own instead (see below). */
+    ffi_cif *cif = malloc(sizeof(ffi_cif));
+    if (ffi_prep_cif_var(cif, FFI_DEFAULT_ABI, (unsigned)nfixed, (unsigned)nfixed,
+                         rtype, nfixed ? atypes : NULL) != FFI_OK)
+        scm_raise(V_FALSE, "ffi-make-fn-variadic: ffi_prep_cif_var failed for %s", c_name);
+
+    ForeignFn *ff = CURRY_NEW_PINNED(ForeignFn);
+    ff->hdr.type   = T_FOREIGN_FN;
+    ff->hdr.flags  = 0;
+    ff->fn         = fn;
+    ff->cif        = cif;
+    ff->cif_atypes = atypes;
+    ff->arg_tags   = fixed_arg_tags;
+    ff->ret_tag    = ret_tag;
+    ff->nargs      = nfixed;
+    ff->variadic   = true;
+    ff->name       = strdup(c_name);
+    return vptr(ff);
+}
+
+/* Marshal one variadic-tail argument, applying C's default argument
+ * promotion for float -> double (libffi requires the promoted type here;
+ * passing ffi_type_float for a variadic slot is documented undefined
+ * behavior in ffi_prep_cif_var, since the callee's va_arg(ap, double)
+ * expects the promoted width). curry's other supported scalar types
+ * (int32/uint32/int64/uint64/pointer/string) are already at or above
+ * their C default-promoted width, so no other promotion is needed. */
+static bool marshal_variadic_arg(val_t v, val_t tag, void *buf, ffi_type **out_type) {
+    const char *t = norm_tag(tag_str(tag));
+    if (!strcmp(t, "float")) {
+        double d = num_to_double(v);
+        memcpy(buf, &d, sizeof(d));
+        *out_type = &ffi_type_double;
+        return true;
+    }
+    ffi_type *ft = ffi_type_for_tag(tag);
+    if (!ft) return false;
+    *out_type = ft;
+    return marshal_arg(v, tag, buf);
+}
 
 val_t ffi_call_fn(val_t ff_val, val_t args) {
     if (!vis_foreignfn(ff_val))
@@ -261,6 +352,86 @@ val_t ffi_call_fn(val_t ff_val, val_t args) {
     return unmarshal_ret(ret_buf, ff->ret_tag);
 }
 
+/* fixed_args: a proper list matching ff's fixed prefix exactly, same as
+ * ffi_call_fn. variadic_typed_args: a proper list of (type-symbol . value)
+ * pairs for the trailing C variadic arguments -- there's no static
+ * signature to read these types from, so the call site has to say what
+ * each one is (see marshal_variadic_arg's float->double promotion note
+ * above). Every call rebuilds its own cif: libffi requires a variadic
+ * cif's (nfixed, ntotal, atypes) to match the actual call being made, and
+ * that shape can differ from one call to the next (e.g. a format string
+ * with a different number/type of conversions each time). */
+val_t ffi_call_fn_variadic(val_t ff_val, val_t fixed_args, val_t variadic_typed_args) {
+    if (!vis_foreignfn(ff_val))
+        scm_raise(V_FALSE, "ffi-call-variadic: not a foreign-fn");
+    ForeignFn *ff = as_foreignfn(ff_val);
+    if (!ff->variadic)
+        scm_raise(V_FALSE, "ffi-call-variadic: %s was not declared variadic "
+                  "(define-foreign it with #:variadic)", ff->name);
+
+    int nfixed = ff->nargs;
+    int got_fixed = scm_list_length(fixed_args);
+    if (got_fixed != nfixed)
+        scm_raise(V_FALSE, "ffi-call-variadic: %s expects %d fixed arg%s, got %d",
+                  ff->name, nfixed, nfixed == 1 ? "" : "s", got_fixed);
+
+    int nvar = scm_list_length(variadic_typed_args);
+    if (nvar < 0)
+        scm_raise(V_FALSE, "ffi-call-variadic: variadic-typed-args must be a proper list");
+
+    int total = nfixed + nvar;
+    if (total > FFI_MAX_ARGS)
+        scm_raise(V_FALSE, "ffi-call-variadic: %s: %d total args exceeds max %d",
+                  ff->name, total, FFI_MAX_ARGS);
+
+    uint8_t   storage[FFI_MAX_ARGS * FFI_ARG_BUF];
+    void     *ptrs[FFI_MAX_ARGS];
+    ffi_type *atypes[FFI_MAX_ARGS];
+
+    ffi_type **fixed_atypes = (ffi_type **)ff->cif_atypes;
+    val_t tag_list = ff->arg_tags;
+    val_t arg_list = fixed_args;
+    for (int i = 0; i < nfixed; i++) {
+        ptrs[i]   = storage + i * FFI_ARG_BUF;
+        atypes[i] = fixed_atypes[i];
+        if (!marshal_arg(vcar(arg_list), vcar(tag_list), ptrs[i]))
+            scm_raise(V_FALSE, "ffi-call-variadic: cannot marshal fixed arg %d (type '%s') for %s",
+                      i + 1, tag_str(vcar(tag_list)), ff->name);
+        arg_list = vcdr(arg_list);
+        tag_list = vcdr(tag_list);
+    }
+
+    val_t var_list = variadic_typed_args;
+    for (int i = 0; i < nvar; i++) {
+        val_t pair = vcar(var_list);
+        if (!vis_pair(pair))
+            scm_raise(V_FALSE, "ffi-call-variadic: variadic arg %d for %s must be a "
+                      "(type . value) pair", i + 1, ff->name);
+        val_t tag = vcar(pair);
+        val_t val = vcdr(pair);
+        int idx = nfixed + i;
+        ptrs[idx] = storage + idx * FFI_ARG_BUF;
+        if (!marshal_variadic_arg(val, tag, ptrs[idx], &atypes[idx]))
+            scm_raise(V_FALSE, "ffi-call-variadic: cannot marshal variadic arg %d (type '%s') for %s",
+                      i + 1, tag_str(tag), ff->name);
+        var_list = vcdr(var_list);
+    }
+
+    ffi_type *rtype = ffi_type_for_tag(ff->ret_tag);
+    if (!rtype) scm_raise(V_FALSE, "ffi-call-variadic: unknown return type for %s", ff->name);
+
+    ffi_cif cif;
+    if (ffi_prep_cif_var(&cif, FFI_DEFAULT_ABI, (unsigned)nfixed, (unsigned)total,
+                         rtype, total ? atypes : NULL) != FFI_OK)
+        scm_raise(V_FALSE, "ffi-call-variadic: ffi_prep_cif_var failed for %s", ff->name);
+
+    uint8_t ret_buf[FFI_ARG_BUF] = {0};
+    void (*fn_ptr)(void);
+    memcpy(&fn_ptr, &ff->fn, sizeof(fn_ptr));
+    ffi_call(&cif, fn_ptr, ret_buf, total ? ptrs : NULL);
+    return unmarshal_ret(ret_buf, ff->ret_tag);
+}
+
 /* ---- Scheme primitives ---- */
 
 static void ffi_def(val_t env, const char *name,
@@ -287,6 +458,15 @@ static val_t prim_ffi_make_fn(int ac, val_t *av, void *ud) {
 }
 static val_t prim_ffi_call(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return ffi_call_fn(av[0], av[1]); }
+static val_t prim_ffi_make_fn_variadic(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_foreignlib(av[0])) scm_raise(V_FALSE, "%%ffi-make-fn-variadic: not a foreign-lib");
+    if (!vis_string(av[1]))     scm_raise(V_FALSE, "%%ffi-make-fn-variadic: c-name must be a string");
+    if (!vis_symbol(av[2]))     scm_raise(V_FALSE, "%%ffi-make-fn-variadic: ret-type must be a symbol");
+    return ffi_make_fn_variadic(av[0], str_data(as_str(av[1])), av[2], av[3]);
+}
+static val_t prim_ffi_call_variadic(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_call_fn_variadic(av[0], av[1], av[2]); }
 static val_t prim_make_cptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     void *p = vis_fixnum(av[0]) ? (void *)(uintptr_t)vunfix(av[0]) : NULL;
@@ -376,6 +556,8 @@ void ffi_register_builtins(val_t env) {
     ffi_def(env, "%ffi-load",           prim_ffi_load,          1, 1);
     ffi_def(env, "%ffi-make-fn",        prim_ffi_make_fn,       4, 4);
     ffi_def(env, "%ffi-call",           prim_ffi_call,          2, 2);
+    ffi_def(env, "%ffi-make-fn-variadic", prim_ffi_make_fn_variadic, 4, 4);
+    ffi_def(env, "%ffi-call-variadic",  prim_ffi_call_variadic, 3, 3);
     ffi_def(env, "%ffi-make-cptr",      prim_make_cptr,         1, 1);
     ffi_def(env, "%ffi-cptr-address",   prim_cptr_address,      1, 1);
     ffi_def(env, "%ffi-matrix-ptr",     prim_ffi_matrix_ptr,    1, 1);

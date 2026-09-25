@@ -66,6 +66,34 @@
   (guard (e (#t (error-object-message e))) (ncurses-add-string! 'fake-win "a" "b" "c"))
   "ncurses-add-string!: expected (win str) or (win y x str)")
 
+;;; ncurses-printf!/ncurses-mvprintf! — printf-style formatted output,
+;;; backed by (curry ffi)'s #:variadic support (wprintw/mvwprintw are
+;;; genuinely variadic C functions). Argument-type inference/validation
+;;; runs before ever touching win, so — like the add-string! checks above
+;;; — a bogus 'fake-win value still exercises the validation path with no
+;;; live terminal session needed.
+
+(check "printf!: rejects an argument type it can't format (a list)"
+  (guard (e (#t (error-object-message e))) (ncurses-printf! 'fake-win "%d" '(1 2 3)))
+  "ncurses printf: don't know how to format this argument type for printf")
+
+(check "printf!: rejects an exact integer outside 32-bit range"
+  (guard (e (#t (error-object-message e))) (ncurses-printf! 'fake-win "%d" (expt 2 40)))
+  "ncurses printf: exact integer out of 32-bit range for a printf %d-style argument — convert it to a string yourself")
+
+(check "printf!: accepts a 32-bit-boundary exact integer without raising the range check"
+  ;; Still touches win (a bogus symbol) after passing type validation, so
+  ;; this should fail on ncurses-window-cptr, NOT on the range check —
+  ;; confirms the boundary itself (2^31 - 1) is treated as in-range.
+  (guard (e (#t (string-contains (error-object-message e) "out of 32-bit range")))
+    (ncurses-printf! 'fake-win "%d" (- (expt 2 31) 1))
+    #f)
+  #f)
+
+(check "mvprintf!: rejects an argument type it can't format"
+  (guard (e (#t (error-object-message e))) (ncurses-mvprintf! 'fake-win 0 0 "%d" 'not-a-number))
+  "ncurses printf: don't know how to format this argument type for printf")
+
 ;;; ncurses-window? predicate shouldn't require a live session to reject
 ;;; non-windows.
 

@@ -27,6 +27,14 @@
  *   (%ffi-load path)                        → foreign-lib
  *   (%ffi-make-fn lib c-name ret-tag arg-tag-list) → foreign-fn
  *   (%ffi-call fn args)                     → Scheme value
+ *   (%ffi-make-fn-variadic lib c-name ret-tag fixed-arg-tag-list) → foreign-fn
+ *   (%ffi-call-variadic fn fixed-args variadic-typed-args) → Scheme value
+ *     variadic-typed-args is a list of (type-symbol . value) pairs — C
+ *     variadic calls have no static signature, so each call site must say
+ *     what type each trailing argument is. A 'float pair is silently
+ *     promoted to double (C's own default argument promotion for
+ *     variadic float arguments — libffi requires this explicitly, see
+ *     ffi_prep_cif_var's documentation).
  *   (%ffi-make-cptr address-fixnum)         → c-ptr
  *   (%ffi-cptr-address c-ptr)               → fixnum
  *   (%ffi-matrix-ptr matrix)                → c-ptr (double*)
@@ -44,6 +52,8 @@ void  ffi_init(void);
 val_t ffi_load_library(const char *path);
 val_t ffi_make_fn(val_t lib, const char *c_name, val_t ret_tag, val_t arg_tags);
 val_t ffi_call_fn(val_t fn, val_t args);
+val_t ffi_make_fn_variadic(val_t lib, const char *c_name, val_t ret_tag, val_t fixed_arg_tags);
+val_t ffi_call_fn_variadic(val_t fn, val_t fixed_args, val_t variadic_typed_args);
 val_t ffi_make_cptr(void *ptr);
 
 void  ffi_register_builtins(val_t env);

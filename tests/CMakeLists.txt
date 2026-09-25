@@ -87,6 +87,11 @@ add_test(NAME dot_locking  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME zeromq       COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/zeromq_tests.scm)
 add_test(NAME tts          COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/tts_tests.scm)
 if(BUILD_FFI)
+  # (curry ffi) itself -- define-foreign fixed-arity and #:variadic paths,
+  # against real libc functions (strlen/abs/snprintf) rather than a fake
+  # library, since libc's ABI for these is stable across every platform
+  # this runs on. No prior test file covered (curry ffi) directly at all.
+  add_test(NAME ffi           COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ffi_tests.scm)
   # (curry sql) unconditionally imports (curry mariadb)/(curry postgres),
   # both of which import (curry ffi) -- all three tests need BUILD_FFI=ON
   # to even import, regardless of whether a live MariaDB/PostgreSQL

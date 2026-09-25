@@ -671,7 +671,16 @@ typedef struct { Hdr hdr; void *handle; val_t path; } ForeignLib;
 /* Foreign function descriptor.
  * cif and cif_atypes are malloc'd (permanent, never freed).
  * arg_tags and ret_tag are Scheme values kept in this struct so the GC
- * can find them. */
+ * can find them.
+ *
+ * variadic: when true, `nargs`/`arg_tags`/cif_atypes describe only the
+ * FIXED leading parameters (e.g. printf's format string). `cif` is the
+ * cif for calling with zero variadic arguments (the nfixed==ntotal case,
+ * valid on its own per libffi's ffi_prep_cif_var docs); a call that
+ * supplies variadic arguments builds its own throwaway cif on the C
+ * stack each time (see ffi_call_fn_variadic in ffi.c) because libffi
+ * variadic cifs are shaped by each individual call's actual argument
+ * types/count, not knowable in advance the way a fixed signature is. */
 typedef struct {
     Hdr     hdr;
     void   *fn;          /* resolved symbol address                 */
@@ -680,6 +689,7 @@ typedef struct {
     val_t   arg_tags;    /* list of type symbols                    */
     val_t   ret_tag;     /* return type symbol                      */
     int     nargs;
+    bool    variadic;    /* true: nargs/arg_tags cover the fixed prefix only */
     char   *name;        /* C function name (for diagnostics)       */
 } ForeignFn;
 #define vis_foreignfn(v) vis_type(v, T_FOREIGN_FN)

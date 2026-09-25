@@ -19,10 +19,18 @@
 ;;; deliberate simplicity choice, not an oversight; the underlying %nc-*
 ;;; foreign bindings are private.
 ;;;
-;;; The printw/wprintw/mvprintw family (variadic, printf-style) is
-;;; deliberately not bound — (curry ffi) has no variadic-call support, and
-;;; ncurses-add-string! plus Scheme's own string-append/number->string cover
-;;; the same ground without needing it.
+;;; wprintw/mvwprintw (variadic, printf-style) ARE bound, as
+;;; ncurses-printf!/ncurses-mvprintf! — (curry ffi) gained variadic-call
+;;; support (define-foreign's #:variadic), and printf's own field-width/
+;;; precision/zero-padding formatting (%5d, %.2f, ...) isn't something
+;;; string-append/number->string reproduce without real work. Per this
+;;; module's own type-safety convention (see ncurses-add-string! below),
+;;; the C type for each trailing argument is inferred from the Scheme
+;;; value automatically rather than exposing (curry ffi)'s raw `va`
+;;; type-tagging to callers — consistent with "one idiomatic layer, not a
+;;; raw transliteration" above, and consistent with rejecting values that
+;;; can't be inferred safely (see %nc-infer-va) rather than letting a
+;;; type mismatch reach the C variadic call as undefined behavior.
 ;;;
 ;;; Two known, unavoidable rough edges from the underlying C library, not
 ;;; this module's own design:
@@ -47,6 +55,7 @@
 ;;;   (ncurses-window? x)
 ;;;   (ncurses-move! win y x)
 ;;;   (ncurses-add-string! win str) / (ncurses-add-string! win y x str)
+;;;   (ncurses-printf! win fmt arg ...) / (ncurses-mvprintf! win y x fmt arg ...)
 ;;;   (ncurses-refresh! win)
 ;;;   (ncurses-clear! win) / (ncurses-erase! win)
 ;;;   (ncurses-box! win)
@@ -66,7 +75,8 @@
   (export
     ncurses-init! ncurses-end! call-with-ncurses
     ncurses-window? ncurses-window-new ncurses-window-delete!
-    ncurses-move! ncurses-add-string! ncurses-refresh!
+    ncurses-move! ncurses-add-string! ncurses-printf! ncurses-mvprintf!
+    ncurses-refresh!
     ncurses-clear! ncurses-erase! ncurses-box!
     ncurses-window-height ncurses-window-width
     ncurses-getch
@@ -140,6 +150,10 @@
 (define-foreign (%nc-wrefresh (win c-ptr)) → int #:from %nc-lib #:c-name "wrefresh")
 (define-foreign (%nc-wgetch (win c-ptr)) → int #:from %nc-lib #:c-name "wgetch")
 (define-foreign (%nc-waddstr (win c-ptr) (str c-string)) → int #:from %nc-lib #:c-name "waddstr")
+(define-foreign (%nc-wprintw (win c-ptr) (fmt c-string) #:variadic)
+  → int #:from %nc-lib #:c-name "wprintw")
+(define-foreign (%nc-mvwprintw (win c-ptr) (y int) (x int) (fmt c-string) #:variadic)
+  → int #:from %nc-lib #:c-name "mvwprintw")
 (define-foreign (%nc-wmove (win c-ptr) (y int) (x int)) → int #:from %nc-lib #:c-name "wmove")
 (define-foreign (%nc-wattron (win c-ptr) (attrs int)) → int #:from %nc-lib #:c-name "wattron")
 (define-foreign (%nc-wattroff (win c-ptr) (attrs int)) → int #:from %nc-lib #:c-name "wattroff")
@@ -225,6 +239,46 @@
      (%nc-wmove (ncurses-window-cptr win) (car rest) (cadr rest))
      (%nc-waddstr (ncurses-window-cptr win) (caddr rest)))
     (else (error "ncurses-add-string!: expected (win str) or (win y x str)" rest))))
+
+;; Infers the C type each ncurses-printf!/ncurses-mvprintf! trailing
+;; argument should be passed as, so callers pass plain Scheme values (a
+;; string, an integer, a real number) rather than (curry ffi)'s raw `va`
+;; type tags — see the module header's note on why. An exact integer
+;; outside 32-bit range is rejected outright rather than silently widened
+;; to int64: the format string (e.g. "%d") is what actually determines
+;; the width wprintw's C implementation reads back off the variadic
+;; argument list, and there's no way for this module to know what format
+;; specifier a given positional argument is meant to satisfy — passing a
+;; wider type than the format string expects is undefined behavior in C,
+;; not just a formatting mistake.
+(define (%nc-infer-va v)
+  (cond
+    ((string? v) (va 'string v))
+    ((and (integer? v) (exact? v))
+     (if (and (>= v (- (expt 2 31))) (< v (expt 2 31)))
+         (va 'int v)
+         (error "ncurses printf: exact integer out of 32-bit range for a printf %d-style argument — convert it to a string yourself" v)))
+    ((real? v) (va 'double (exact->inexact v)))
+    (else (error "ncurses printf: don't know how to format this argument type for printf" v))))
+
+;; (ncurses-printf! win fmt arg ...) — printf-style formatted output at
+;; the window's current cursor position. Field width/precision/padding
+;; (e.g. "%5d", "%.2f") come from the format string exactly as in C.
+;;
+;; Argument types are inferred and validated (%nc-infer-va, above) BEFORE
+;; touching win at all — same ordering rationale as ncurses-add-string!:
+;; a badly-typed argument should raise a catchable Scheme error, not
+;; reach the underlying C call.
+(define (ncurses-printf! win fmt . args)
+  (let ((typed (map %nc-infer-va args)))
+    (apply %nc-wprintw (ncurses-window-cptr win) fmt typed)))
+
+;; (ncurses-mvprintf! win y x fmt arg ...) — moves to (y, x) first, then
+;; prints, in one call (mvwprintw's own semantics — equivalent to
+;; (ncurses-move! win y x) followed by ncurses-printf!, but atomic in C).
+(define (ncurses-mvprintf! win y x fmt . args)
+  (let ((typed (map %nc-infer-va args)))
+    (apply %nc-mvwprintw (ncurses-window-cptr win) y x fmt typed)))
 
 (define (ncurses-refresh! win) (%nc-wrefresh (ncurses-window-cptr win)))
 (define (ncurses-clear! win) (%nc-wclear (ncurses-window-cptr win)))

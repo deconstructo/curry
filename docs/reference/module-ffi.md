@@ -71,6 +71,53 @@ used directly as the C symbol name.
 
 ---
 
+## Variadic C functions (printf-shaped)
+
+### `(define-foreign (name (param type) ... #:variadic) → ret-type #:from lib)`
+### `(define-foreign (name (param type) ... #:variadic) → ret-type #:from lib #:c-name "sym")`
+
+`#:variadic` marks the end of the declared, fixed signature; the resulting
+procedure takes those fixed parameters plus any number of trailing
+arguments, each wrapped with `(va type value)`. Unlike a fixed-arity
+`define-foreign`, C variadic calls have no static signature for the
+trailing arguments — this is exactly the information a format string
+like `"%d %s"` encodes implicitly for `printf`, made explicit here
+because a bare Scheme value doesn't carry a C type on its own (an exact
+integer could mean `int32` or `int64`; a string is always `char*`, but
+plenty of other types aren't distinguishable from the Scheme value
+alone).
+
+```scheme
+(define-foreign-library libc "libc.so.6")   ; Linux — see Platform notes
+
+(define-foreign (c-snprintf (buf c-ptr) (size uint) (fmt string) #:variadic)
+  → int #:from libc #:c-name "snprintf")
+
+(define buf (make-bytevector 64 0))
+(with-pinned-bytevector buf p
+  (c-snprintf p 64 "%d-%s-%.2f" (va 'int 7) (va 'string "x") (va 'double 3.5)))
+; → 8  (the string "7-x-3.50" is 8 bytes; p now holds it)
+```
+
+### `(va type value)`
+
+Wraps one trailing argument with the C type it should be passed as.
+`type` is a symbol from the same [type mapping](#type-mapping) table
+fixed-arity `define-foreign` uses. A `'float` argument is silently
+promoted to `double` — this is C's own mandatory default argument
+promotion for variadic calls (libffi requires it explicitly; passing an
+unpromoted `float` in a variadic slot is undefined behavior), not
+something you need to do yourself.
+
+A function not declared with `#:variadic` cannot be called with `va`
+arguments, and a `#:variadic`-declared function's procedure always takes
+`va`-wrapped values after its fixed parameters — mixing the two forms on
+one `define-foreign` isn't meaningful, since libffi needs to know at
+`define-foreign` time whether the function's calling convention is fixed
+or variadic at all.
+
+---
+
 ## Type mapping
 
 Both C-style (`size_t`) and Scheme-style (`size-t`) names are accepted.
@@ -185,6 +232,8 @@ high-level macros above are built from them.
 | `(%ffi-load path)` | Load library, return `T_FOREIGN_LIB` |
 | `(%ffi-make-fn lib c-name ret-tag arg-tag-list)` | Build `T_FOREIGN_FN` descriptor |
 | `(%ffi-call fn args)` | Call a `T_FOREIGN_FN` with a list of arguments |
+| `(%ffi-make-fn-variadic lib c-name ret-tag fixed-arg-tag-list)` | Build a variadic `T_FOREIGN_FN` — `fixed-arg-tag-list` covers only the non-variadic prefix |
+| `(%ffi-call-variadic fn fixed-args variadic-typed-args)` | Call a variadic `T_FOREIGN_FN`; `variadic-typed-args` is a list of `(type-symbol . value)` pairs |
 | `(%ffi-make-cptr n)` | Wrap fixnum as `T_CPTR` |
 | `(%ffi-cptr-address p)` | Extract address from `T_CPTR` |
 | `(%ffi-matrix-ptr m)` | `T_CPTR` to `m->data`; pins `m` |

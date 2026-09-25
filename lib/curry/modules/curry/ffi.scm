@@ -4,6 +4,7 @@
 ;;;
 ;;; Primitives (in global env when BUILD_FFI=ON):
 ;;;   %ffi-load  %ffi-make-fn  %ffi-call
+;;;   %ffi-make-fn-variadic  %ffi-call-variadic
 ;;;   %ffi-make-cptr  %ffi-cptr-address
 ;;;   %ffi-matrix-ptr  %ffi-matrix-unpin
 ;;;   %ffi-tensor-ptr  %ffi-tensor-unpin
@@ -16,6 +17,7 @@
   (export
     define-foreign-library foreign-load-library
     define-foreign
+    va
     with-pinned-matrix with-pinned-tensor with-pinned-bytevector
     peek-bytes
     make-cptr cptr-address cptr-null? cptr-null)
@@ -48,22 +50,62 @@
 ;;;   void  int  uint  long  ulong  int32  uint32  int64  uint64
 ;;;   int32_t  uint32_t  int64_t  uint64_t  size_t  ssize_t  intptr  uintptr
 ;;;   float  double  bool  c-ptr  pointer  string  c-string
+;;;
+;;; ── Variadic C functions (printf-shaped) ────────────────────────────────────
+;;;
+;;; (define-foreign (fn-name (p type) ... #:variadic) → ret-type #:from lib)
+;;; (define-foreign (fn-name (p type) ... #:variadic) → ret-type #:from lib #:c-name "sym")
+;;;
+;;; #:variadic marks the LAST fixed parameter as the end of the declared
+;;; signature; the resulting procedure takes those fixed args plus any
+;;; number of extra trailing arguments, each wrapped with (va type value).
+;;; C variadic calls have no static signature for the trailing arguments —
+;;; this is the same information printf's own format string encodes
+;;; implicitly, made explicit here because Scheme values don't carry a C
+;;; type on their own (an exact integer could mean int32 or int64; a
+;;; string could mean char* or something else entirely).
+;;;
+;;;   (define-foreign (c-printf (fmt string) #:variadic) → int #:from libc)
+;;;   (c-printf "%d and %s\n" (va 'int 42) (va 'string "hi"))
+;;;
+;;; A 'float variadic argument is silently promoted to double, matching
+;;; C's own default argument promotion rule for variadic calls — you don't
+;;; need to (and shouldn't) do this promotion yourself.
 
 (define-syntax define-foreign
-  (syntax-rules (→)
-    ;; With explicit C name
+  (syntax-rules (→ #:variadic)
+    ;; Variadic, with explicit C name
+    ((_ (fn-name (pname ptype) ... #:variadic) → ret-type #:from lib #:c-name c-name)
+     (define fn-name
+       (let ((ff (%ffi-make-fn-variadic lib c-name 'ret-type (list 'ptype ...))))
+         (lambda (pname ... . rest)
+           (%ffi-call-variadic ff (list pname ...) rest)))))
+    ;; Variadic, without explicit C name
+    ((_ (fn-name (pname ptype) ... #:variadic) → ret-type #:from lib)
+     (define fn-name
+       (let ((ff (%ffi-make-fn-variadic lib (symbol->string 'fn-name)
+                                        'ret-type (list 'ptype ...))))
+         (lambda (pname ... . rest)
+           (%ffi-call-variadic ff (list pname ...) rest)))))
+    ;; Fixed-arity, with explicit C name
     ((_ (fn-name (pname ptype) ...) → ret-type #:from lib #:c-name c-name)
      (define fn-name
        (let ((ff (%ffi-make-fn lib c-name 'ret-type (list 'ptype ...))))
          (lambda (pname ...)
            (%ffi-call ff (list pname ...))))))
-    ;; Without explicit C name — use Scheme name converted to string
+    ;; Fixed-arity, without explicit C name — use Scheme name converted to string
     ((_ (fn-name (pname ptype) ...) → ret-type #:from lib)
      (define fn-name
        (let ((ff (%ffi-make-fn lib (symbol->string 'fn-name)
                                'ret-type (list 'ptype ...))))
          (lambda (pname ...)
            (%ffi-call ff (list pname ...))))))))
+
+;;; (va type value) — wrap one trailing argument for a #:variadic
+;;; define-foreign procedure, tagging it with the C type it should be
+;;; passed as (there's no way to infer this from the Scheme value alone —
+;;; see the #:variadic section above).
+(define (va type value) (cons type value))
 
 ;;; ── Zero-copy matrix / tensor passthrough ────────────────────────────────────
 

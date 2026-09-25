@@ -34,7 +34,7 @@ One idiomatic layer, not a raw transliteration of the C API — that's what CHIC
 
 There is deliberately no separate "raw bindings" escape hatch exported — the underlying `%nc-*` foreign bindings are private. Keeping this module to one clean surface, rather than the layered raw/idiomatic split `(curry qt6)` uses, is an intentional simplicity choice for this module specifically.
 
-The `printw`/`wprintw`/`mvprintw` family (variadic, printf-style) is **not bound** — `(curry ffi)` has no variadic-call support at all, and `ncurses-add-string!` plus Scheme's own `string-append`/`number->string` cover the same ground without needing it.
+`wprintw`/`mvwprintw` (variadic, printf-style) **are bound**, as `ncurses-printf!`/`ncurses-mvprintf!` — `(curry ffi)` gained variadic-call support (`define-foreign`'s `#:variadic`), and printf's own field-width/precision/zero-padding formatting (`%5d`, `%.2f`, ...) isn't something `string-append`/`number->string` reproduce without real work. Per this module's own type-safety convention (see `ncurses-add-string!` below), the C type for each trailing argument is inferred from the Scheme value automatically — a string, an exact 32-bit-range integer, or any other real number — rather than exposing `(curry ffi)`'s raw `va` type-tagging to callers; an argument type that can't be inferred safely (or an out-of-32-bit-range exact integer) raises a catchable Scheme error instead of reaching the C variadic call as undefined behavior.
 
 ## Two rough edges from the underlying C library, not this module
 
@@ -81,6 +81,20 @@ Wraps `newwin`. Raises if it fails (bad dimensions/position).
 ### `(ncurses-add-string! win str)` / `(ncurses-add-string! win y x str)`
 
 The 4-arg form moves the cursor first, then writes — the common case of "put this text at this position" in one call. `str` crosses into C as a raw, uncopied pointer (`(curry ffi)`'s `c-string` marshaling); an embedded NUL byte truncates the displayed text at that point rather than raising or corrupting memory — `waddstr` just stops reading at the first NUL, same as any C string function would.
+
+### `(ncurses-printf! win fmt arg ...)`
+
+Printf-style formatted output at the window's current cursor position (`wprintw`). Field width/precision/zero-padding come from the format string exactly as in C:
+
+```scheme
+(ncurses-printf! win "score: %5d (%.1f%%)\n" score percent)
+```
+
+Each `arg`'s C type is inferred from the Scheme value: a string maps to `%s`, an exact integer within 32-bit signed range maps to `%d`, and any other real number maps to `%f`/`%g` (as a `double`, matching C's own mandatory float→double promotion for variadic calls). An exact integer outside 32-bit range, or any value that isn't a string or real number, raises before the call ever reaches `wprintw` — there's no way for this module to know which format specifier a given positional argument is meant to satisfy, so passing a wider type than the format string expects would be undefined behavior in C, not just a formatting mistake; converting such a value to a string yourself and using `%s` is the way out.
+
+### `(ncurses-mvprintf! win y x fmt arg ...)`
+
+Moves to `(y, x)` first, then prints, in one call (`mvwprintw`'s own semantics — equivalent to `ncurses-move!` followed by `ncurses-printf!`, but atomic in C). Same argument-type inference as `ncurses-printf!`.
 
 ### `(ncurses-refresh! win)` / `(ncurses-clear! win)` / `(ncurses-erase! win)`
 
