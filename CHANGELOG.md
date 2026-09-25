@@ -1,5 +1,27 @@
 # Changelog
 
+### 1.25.2 - 2026-09-26
+
+**New — In-place image updates for Jupyter notebook animation**
+
+`(jupyter-display-file path [display-id])` now takes an optional
+display-id (string or symbol). The first call for a given id publishes
+an ordinary `display_data` message; every later call with the same id
+publishes `update_display_data` instead, so the frontend replaces that
+output in place rather than stacking a new image underneath it each
+time. This is the same two-message mechanism IPython's
+`display(x, display_id=...)`/`update_display(...)` use to back
+matplotlib's notebook animation support — curry gets the same
+capability, driven by real per-frame computation in the kernel (e.g. a
+`(curry plplot)`-rendered physics simulation looping inside a cell)
+rather than client-side replay of precomputed frames. See
+`examples/jupyter-orbit-animation.scm` for a complete worked example
+(orbiting planets with fading trails) and
+`docs/reference/jupyter-kernel.md` for the full description. The new
+`seen_display_ids` tracking set is mutex-guarded, since curry's actor
+system can call this binding from a spawned pthread as well as the
+main cell thread.
+
 ### 1.25.1 - 2026-09-23
 
 **New — Jupyter kernel installable via Homebrew alone**
