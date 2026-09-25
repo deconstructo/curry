@@ -11,6 +11,7 @@
 #include "curry_ffi.h"
 #include "gc.h"
 #include "eval.h"
+#include "vm.h"
 #include "env.h"
 #include "symbol.h"
 #include "object.h"
@@ -432,6 +433,281 @@ val_t ffi_call_fn_variadic(val_t ff_val, val_t fixed_args, val_t variadic_typed_
     return unmarshal_ret(ret_buf, ff->ret_tag);
 }
 
+/* ---- Foreign callbacks (a Scheme procedure exposed to C as a real,
+ * callable function pointer) ----
+ *
+ * libffi's ffi_prep_closure_loc builds a small stub of executable machine
+ * code -- the ForeignCallback's `code` pointer, handed to C as the actual
+ * function pointer -- that, when C calls it, invokes closure_trampoline
+ * below with (cif, ret, args, user_data). This is the reverse of an
+ * ordinary FFI call: instead of curry calling into C, C is calling into
+ * curry, so every marshaling direction is flipped from ffi_call_fn's
+ * (args are now C values arriving that need unmarshaling to Scheme; the
+ * return value is now a Scheme value that needs marshaling back to C). */
+
+/* A closure's return slot has a real, well-documented libffi ABI wrinkle
+ * that a plain call's argument marshaling does not: an integer/pointer
+ * return narrower than a full register (ffi_arg, e.g. a 32-bit int on a
+ * 64-bit host) must still be WRITTEN as a full ffi_arg, not at its
+ * nominal width -- libffi's closure trampoline reads the return slot
+ * back at register width regardless of the declared C type, and the
+ * platform ABI expects sign/zero-extension to already be done. This is
+ * why this is a separate function from marshal_arg (correct for a call's
+ * arguments, which each get their own natural-width storage slot) rather
+ * than reusing it here.
+ *
+ * 'string'/'c_string' is deliberately NOT a supported callback return
+ * type: marshal_arg's existing string handling for a *call argument*
+ * hands over str_data()'s pointer uncopied, which is safe for the
+ * duration of that one call -- but a callback's return value may be held
+ * and used by the C library indefinitely after this trampoline returns,
+ * and nothing keeps a curry-heap String object reachable from Boehm GC's
+ * perspective once it's reachable only via a raw pointer buried inside
+ * arbitrary C library state Boehm doesn't know how to scan. Rejected
+ * outright at ffi_make_callback definition time (see below) rather than
+ * left to fail unpredictably on first use. */
+static void marshal_callback_ret(val_t v, val_t tag, void *ret) {
+    const char *t = norm_tag(tag_str(tag));
+    if (!strcmp(t, "void")) return;
+    if (!strcmp(t, "double")) {
+        double d = num_to_double(v);
+        memcpy(ret, &d, sizeof(d));
+        return;
+    }
+    if (!strcmp(t, "float")) {
+        /* Floating-point returns use the platform's separate float
+         * register class, not the integer ffi_arg promotion below --
+         * written at natural width, matching libffi's own examples. */
+        float f = (float)num_to_double(v);
+        memcpy(ret, &f, sizeof(f));
+        return;
+    }
+    /* Every other supported return type is integer-or-pointer-shaped.
+     * ffi_arg is libffi's own register-width unsigned integer typedef --
+     * casting through intptr_t (signed, same width) for the signed cases
+     * sign-extends correctly; the unsigned cases zero-extend via a plain
+     * widening assignment, which C does correctly on its own. */
+    ffi_arg out = 0;
+    if (!strcmp(t,"int") || !strcmp(t,"int32") || !strcmp(t,"int32_t") || !strcmp(t,"bool")) {
+        int32_t n = (int32_t)(vis_fixnum(v) ? vunfix(v) : vis_true(v) ? 1 : 0);
+        out = (ffi_arg)(intptr_t)n;
+    } else if (!strcmp(t,"uint") || !strcmp(t,"uint32") || !strcmp(t,"uint32_t")) {
+        uint32_t n = (uint32_t)(vis_fixnum(v) ? (uintptr_t)vunfix(v) : 0);
+        out = (ffi_arg)n;
+    } else if (!strcmp(t,"long") || !strcmp(t,"int64") || !strcmp(t,"int64_t") ||
+               !strcmp(t,"intptr") || !strcmp(t,"ssize_t")) {
+        int64_t n = vis_fixnum(v) ? (int64_t)vunfix(v) : 0;
+        out = (ffi_arg)(intptr_t)n;
+    } else if (!strcmp(t,"ulong") || !strcmp(t,"uint64") || !strcmp(t,"uint64_t") ||
+               !strcmp(t,"size_t") || !strcmp(t,"uintptr")) {
+        uint64_t n = vis_fixnum(v) ? (uint64_t)(uintptr_t)vunfix(v) : 0;
+        out = (ffi_arg)n;
+    } else if (!strcmp(t,"c_ptr") || !strcmp(t,"pointer") || !strcmp(t,"void*")) {
+        void *p = vis_cptr(v)   ? as_cptr(v)->ptr
+                : vis_false(v)  ? NULL
+                : vis_fixnum(v) ? (void *)(uintptr_t)vunfix(v)
+                : NULL;
+        out = (ffi_arg)(uintptr_t)p;
+    }
+    /* Unknown/unsupported tag: out stays 0 -- unreachable in practice,
+     * ffi_make_callback already validated every tag (including rejecting
+     * string/c_string) before this trampoline could ever be installed. */
+    memcpy(ret, &out, sizeof(out));
+}
+
+static void closure_trampoline(ffi_cif *cif, void *ret, void **args, void *user_data) {
+    (void)cif;
+    ForeignCallback *fc = (ForeignCallback *)user_data;
+
+    /* The C library that owns this function pointer can invoke it from
+     * ANY thread it chooses -- not necessarily one curry itself ever
+     * spawned or registered (an async callback fired from a library's
+     * own worker thread is exactly the case this guards). Same two-call
+     * pattern actors.c uses when spawning a brand-new pthread:
+     * gc_register_thread() is a documented no-op if already registered;
+     * vm_init() is NOT idempotent (it unconditionally mallocs a fresh VM
+     * struct), hence the explicit `if (!vm)` guard -- calling it
+     * unconditionally on an already-registered thread (the common case:
+     * most callbacks, e.g. qsort's comparator, fire synchronously on the
+     * same thread that made the original FFI call) would leak a second
+     * VM struct and orphan the first, corrupting that thread's VM state. */
+    gc_register_thread();
+    if (!vm) vm_init();
+
+    int nargs = fc->nargs;
+    val_t argv[FFI_MAX_ARGS];
+    val_t tag_list = fc->arg_tags;
+    for (int i = 0; i < nargs; i++) {
+        argv[i] = unmarshal_ret(args[i], vcar(tag_list));
+        tag_list = vcdr(tag_list);
+    }
+
+    /* A Scheme exception must never longjmp back into the C library that
+     * invoked this trampoline -- it has no idea what curry's setjmp-based
+     * unwinding is, and the result is undefined behavior (identical
+     * rationale to modules/qt6/qt6.cpp's SCHEME_CALL macro at its own
+     * C++-callback boundary). Report to stderr and fall through to a
+     * zeroed return value instead of propagating -- SCM_PROTECT's own
+     * on_exn path already restores vm->sp/frame_count/open_upvalues via
+     * its built-in vm_exn_state_save/restore, so no extra manual
+     * VM-state bookkeeping is needed here beyond that. */
+    ExnHandler h;
+    val_t result = V_VOID;
+    bool raised = false;
+    SCM_PROTECT(h, {
+        result = apply_arr(fc->proc, nargs, argv);
+    }, {
+        raised = true;
+        fprintf(stderr, "[ffi callback] uncaught exception in a foreign-callback procedure "
+                        "-- returning a default value to the C caller\n");
+    });
+
+    /* NOT memset(ret, 0, FFI_ARG_BUF): `ret` is libffi's own buffer, sized
+     * for this closure's actual declared return type (as narrow as
+     * sizeof(float) for a 'float callback) -- FFI_ARG_BUF (16, "max
+     * sizeof any supported C type") is only a safe size for curry's OWN
+     * oversized scratch buffers elsewhere (e.g. ffi_call_fn's ret_buf), not
+     * for a buffer libffi itself allocated and sized precisely. Writing a
+     * flat 16 zero bytes here would write past what libffi reserved,
+     * corrupting adjacent stack memory in this trampoline's own frame.
+     * marshal_callback_ret already writes exactly the right width for
+     * every supported ret_tag; vfix(0) is a valid input for all of them
+     * (int-family -> 0, double/float -> 0.0, pointer -> NULL, void ->
+     * ignored) without risking num_to_double raising on a non-number,
+     * which V_FALSE would have done here -- a second raise from inside
+     * this already-caught exception's on_exn branch. */
+    if (raised) marshal_callback_ret(vfix(0), fc->ret_tag, ret);
+    else marshal_callback_ret(result, fc->ret_tag, ret);
+}
+
+val_t ffi_make_callback(val_t proc, val_t ret_tag, val_t arg_tags) {
+    int nargs = scm_list_length(arg_tags);
+    if (nargs < 0) scm_raise(V_FALSE, "ffi-make-callback: arg-types must be a proper list");
+    if (nargs > FFI_MAX_ARGS)
+        scm_raise(V_FALSE, "ffi-make-callback: %d args exceeds max %d", nargs, FFI_MAX_ARGS);
+
+    ffi_type **atypes = malloc((nargs ? (size_t)nargs : 1) * sizeof(ffi_type *));
+    val_t tlist = arg_tags;
+    for (int i = 0; i < nargs; i++) {
+        ffi_type *ft = ffi_type_for_tag(vcar(tlist));
+        if (!ft) {
+            free(atypes);
+            scm_raise(V_FALSE, "ffi-make-callback: unknown arg type '%s'", tag_str(vcar(tlist)));
+        }
+        atypes[i] = ft;
+        tlist = vcdr(tlist);
+    }
+
+    const char *rt = norm_tag(tag_str(ret_tag));
+    if (!strcmp(rt, "string") || !strcmp(rt, "c_string")) {
+        free(atypes);
+        scm_raise(V_FALSE, "ffi-make-callback: 'string is not a supported callback return "
+                  "type -- the returned pointer's lifetime can't be tracked once control "
+                  "returns to C; write into a caller-supplied buffer argument instead");
+    }
+    ffi_type *rtype = ffi_type_for_tag(ret_tag);
+    if (!rtype) {
+        free(atypes);
+        scm_raise(V_FALSE, "ffi-make-callback: unknown return type '%s'", tag_str(ret_tag));
+    }
+
+    ffi_cif *cif = malloc(sizeof(ffi_cif));
+    if (ffi_prep_cif(cif, FFI_DEFAULT_ABI, (unsigned)nargs, rtype,
+                     nargs ? atypes : NULL) != FFI_OK) {
+        free(atypes); free(cif);
+        scm_raise(V_FALSE, "ffi-make-callback: ffi_prep_cif failed");
+    }
+
+    void *code = NULL;
+    ffi_closure *closure = (ffi_closure *)ffi_closure_alloc(sizeof(ffi_closure), &code);
+    if (!closure) {
+        free(atypes); free(cif);
+        scm_raise(V_FALSE, "ffi-make-callback: ffi_closure_alloc failed");
+    }
+
+    ForeignCallback *fc = CURRY_NEW_PINNED(ForeignCallback);
+    fc->hdr.type  = T_FOREIGN_CALLBACK;
+    fc->hdr.flags = 0;
+    fc->closure   = closure;
+    fc->code      = code;
+    fc->cif       = cif;
+    fc->cif_atypes = atypes;
+    fc->proc      = proc;
+    fc->arg_tags  = arg_tags;
+    fc->ret_tag   = ret_tag;
+    fc->nargs     = nargs;
+    fc->freed     = false;
+    fc->gc_root_slot = NULL;
+
+    /* user_data is this ForeignCallback itself -- closure_trampoline gets
+     * it back as the 4th argument on every call. Root registration
+     * happens strictly AFTER this succeeds: `fc` is not yet reachable
+     * from anywhere else at this point (CURRY_NEW_PINNED is an ordinary
+     * collectible allocation, not an immortal one -- see the struct's own
+     * doc comment in object.h), so a failure path below can freely free
+     * `closure`/`cif`/`atypes` and let `fc` itself become ordinary
+     * garbage with no dangling-pointer risk, exactly because nothing has
+     * rooted it yet. */
+    if (ffi_prep_closure_loc(closure, cif, closure_trampoline, fc, code) != FFI_OK) {
+        ffi_closure_free(closure);
+        free(atypes); free(cif);
+        scm_raise(V_FALSE, "ffi-make-callback: ffi_prep_closure_loc failed");
+    }
+
+    /* Boehm only scans GC_MALLOC_UNCOLLECTABLE memory for registered
+     * roots (see gc_register_root's own comment in gc.c: "the slot is
+     * GC_MALLOC_UNCOLLECTABLE, so Boehm conservatively scans it" --
+     * ordinary malloc'd memory is invisible to it) -- this is what
+     * actually keeps `fc` reachable for as long as the C library might
+     * still hold and invoke its bare function pointer, independent of
+     * whether anything on the Scheme side still references the
+     * <foreign-callback> value. gc_register_root_val stores vptr(fc) into
+     * the slot and registers it in one locked critical section. */
+    val_t *root_slot = (val_t *)GC_MALLOC_UNCOLLECTABLE(sizeof(val_t));
+    gc_register_root_val(root_slot, vptr(fc));
+    fc->gc_root_slot = root_slot;
+
+    return vptr(fc);
+}
+
+val_t ffi_callback_ptr(val_t cb_val) {
+    if (!vis_foreigncallback(cb_val))
+        scm_raise(V_FALSE, "ffi-callback-ptr: not a foreign-callback");
+    ForeignCallback *fc = as_foreigncallback(cb_val);
+    if (fc->freed)
+        scm_raise(V_FALSE, "ffi-callback-ptr: this foreign-callback was already freed");
+    return ffi_make_cptr(fc->code);
+}
+
+val_t ffi_callback_free(val_t cb_val) {
+    if (!vis_foreigncallback(cb_val))
+        scm_raise(V_FALSE, "ffi-callback-free!: not a foreign-callback");
+    ForeignCallback *fc = as_foreigncallback(cb_val);
+    if (fc->freed)
+        scm_raise(V_FALSE, "ffi-callback-free!: this foreign-callback was already freed "
+                  "(double free)");
+    /* Deliberately NOT a GC finalizer -- see the ForeignCallback struct's
+     * own doc comment in object.h for why this has to be the caller's
+     * explicit responsibility: a C library that still holds this
+     * callback's function pointer could invoke it at any time until told
+     * otherwise, and nothing here can know whether that's still true. */
+    ffi_closure_free(fc->closure);
+    free(fc->cif);
+    free(fc->cif_atypes);
+    /* Undo ffi_make_callback's gc_register_root_val: past this point `fc`
+     * is ordinary GC-reachability-governed memory again, same as any
+     * other collectible object -- fine, since nothing should still be
+     * calling through a freed closure's code pointer anyway. The slot
+     * itself was GC_MALLOC_UNCOLLECTABLE and must be GC_FREE'd explicitly
+     * (Boehm never reclaims UNCOLLECTABLE memory on its own), matching
+     * vm_free()'s identical GC_FREE-after-GC_MALLOC_UNCOLLECTABLE pattern
+     * for the per-thread VM struct. */
+    gc_unregister_root(fc->gc_root_slot);
+    GC_FREE(fc->gc_root_slot);
+    fc->freed = true;
+    return V_VOID;
+}
+
 /* ---- Scheme primitives ---- */
 
 static void ffi_def(val_t env, const char *name,
@@ -467,6 +743,17 @@ static val_t prim_ffi_make_fn_variadic(int ac, val_t *av, void *ud) {
 }
 static val_t prim_ffi_call_variadic(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return ffi_call_fn_variadic(av[0], av[1], av[2]); }
+static val_t prim_ffi_make_callback(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_symbol(av[1])) scm_raise(V_FALSE, "%%ffi-make-callback: ret-type must be a symbol");
+    return ffi_make_callback(av[0], av[1], av[2]);
+}
+static val_t prim_ffi_callback_ptr(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_callback_ptr(av[0]); }
+static val_t prim_ffi_callback_free(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_callback_free(av[0]); }
+static val_t prim_foreigncallback_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(vis_foreigncallback(av[0])); }
 static val_t prim_make_cptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     void *p = vis_fixnum(av[0]) ? (void *)(uintptr_t)vunfix(av[0]) : NULL;
@@ -558,6 +845,10 @@ void ffi_register_builtins(val_t env) {
     ffi_def(env, "%ffi-call",           prim_ffi_call,          2, 2);
     ffi_def(env, "%ffi-make-fn-variadic", prim_ffi_make_fn_variadic, 4, 4);
     ffi_def(env, "%ffi-call-variadic",  prim_ffi_call_variadic, 3, 3);
+    ffi_def(env, "%ffi-make-callback",  prim_ffi_make_callback, 3, 3);
+    ffi_def(env, "%ffi-callback-ptr",   prim_ffi_callback_ptr,  1, 1);
+    ffi_def(env, "%ffi-callback-free!", prim_ffi_callback_free, 1, 1);
+    ffi_def(env, "foreign-callback?",   prim_foreigncallback_p, 1, 1);
     ffi_def(env, "%ffi-make-cptr",      prim_make_cptr,         1, 1);
     ffi_def(env, "%ffi-cptr-address",   prim_cptr_address,      1, 1);
     ffi_def(env, "%ffi-matrix-ptr",     prim_ffi_matrix_ptr,    1, 1);

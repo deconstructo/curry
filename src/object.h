@@ -104,6 +104,7 @@ typedef enum {
                                from the existing T_F64VEC (a separate, math/BLAS-flavored
                                module with its own different operation set) -- deliberately not
                                unified with it, to avoid destabilizing that already-shipped API. */
+    T_FOREIGN_CALLBACK = 56, /* GC:PIN val_t: proc, arg_tags, ret_tag — libffi closure inside */
 } ObjType;
 
 /*
@@ -694,6 +695,60 @@ typedef struct {
 } ForeignFn;
 #define vis_foreignfn(v) vis_type(v, T_FOREIGN_FN)
 #define as_foreignfn(v)  vunptr(ForeignFn, v)
+
+/* Foreign callback: a Scheme procedure exposed to C as a real, callable
+ * function pointer (a libffi closure/trampoline), for handing to a C
+ * function that expects a callback (comparators, event handlers, ...).
+ * `closure`/`code` are what ffi_closure_alloc/ffi_prep_closure_loc give
+ * back — `code` is the executable address to hand to C as the function
+ * pointer, `closure` is the (possibly different, W^X-split) writable
+ * handle libffi itself needs to free it later. `cif`/`cif_atypes`
+ * describe the CALLBACK'S OWN signature (what C calls it with), built
+ * once via a plain ffi_prep_cif (fixed-arity only — no variadic
+ * callbacks; see ffi_make_callback in ffi.c). `proc`/`arg_tags`/
+ * `ret_tag` are val_t so GC can find them, matching ForeignFn's own
+ * discipline.
+ *
+ * Lifetime is the caller's responsibility, not GC's: freed only via an
+ * explicit %ffi-callback-free!, never a finalizer -- a C library that
+ * still holds this callback's function pointer could invoke it at any
+ * time until told otherwise, and a GC finalizer has no way to know
+ * whether that's still true. `freed` guards against a double
+ * ffi_closure_free.
+ *
+ * GC:PIN alone (CURRY_NEW_PINNED) only means non-moving under a future
+ * precise/generational backend -- under the current Boehm backend it's
+ * an ORDINARY COLLECTIBLE allocation (boehm_alloc_pinned is boehm_alloc;
+ * confirmed in gc.c). It does NOT make this struct immortal, and nothing
+ * outside curry's own GC-managed heap keeps a bare C function pointer
+ * (the only thing handed to the C library) reachable from Boehm's
+ * perspective. `gc_root_slot` closes that gap explicitly: it points at a
+ * GC_MALLOC_UNCOLLECTABLE val_t (allocated and registered via
+ * gc_register_root_val in ffi_make_callback, only once
+ * ffi_prep_closure_loc has actually succeeded) holding this object's own
+ * vptr — Boehm scans GC_MALLOC_UNCOLLECTABLE memory but never collects
+ * it, so as long as that registration stands, this struct is reachable
+ * regardless of whether anything on the Scheme side still references it.
+ * ffi_callback_free unregisters and frees this slot as part of freeing
+ * the callback, at which point the object becomes ordinary
+ * GC-reachability-governed memory again (harmless, since nothing should
+ * still be calling through a freed closure's code pointer anyway). NULL
+ * until that registration happens. */
+typedef struct {
+    Hdr     hdr;
+    void   *closure;     /* ffi_closure* — the writable handle to free later */
+    void   *code;        /* executable address — this IS the C function pointer */
+    void   *cif;         /* ffi_cif* — the callback's own signature */
+    void   *cif_atypes;  /* ffi_type** array — kept for GC scanning */
+    val_t   proc;        /* the Scheme procedure invoked on each call */
+    val_t   arg_tags;    /* list of type symbols — for unmarshaling C's args */
+    val_t   ret_tag;     /* return type symbol — for marshaling the return value */
+    int     nargs;
+    bool    freed;
+    void   *gc_root_slot; /* val_t* — see doc comment above */
+} ForeignCallback;
+#define vis_foreigncallback(v) vis_type(v, T_FOREIGN_CALLBACK)
+#define as_foreigncallback(v)  vunptr(ForeignCallback, v)
 
 /* Promise (delay / delay-force) */
 #define PROMISE_LAZY   0  /* not yet forced */

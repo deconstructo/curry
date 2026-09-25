@@ -5,12 +5,13 @@
 ;;; Primitives (in global env when BUILD_FFI=ON):
 ;;;   %ffi-load  %ffi-make-fn  %ffi-call
 ;;;   %ffi-make-fn-variadic  %ffi-call-variadic
+;;;   %ffi-make-callback  %ffi-callback-ptr  %ffi-callback-free!
 ;;;   %ffi-make-cptr  %ffi-cptr-address
 ;;;   %ffi-matrix-ptr  %ffi-matrix-unpin
 ;;;   %ffi-tensor-ptr  %ffi-tensor-unpin
 ;;;   %ffi-bytevector-ptr  %ffi-bytevector-unpin
 ;;;   %ffi-peek-bytes
-;;;   c-ptr?  foreign-lib?  foreign-fn?  foreign-lib-path
+;;;   c-ptr?  foreign-lib?  foreign-fn?  foreign-lib-path  foreign-callback?
 
 (define-library (curry ffi)
   (import (scheme base))
@@ -18,6 +19,7 @@
     define-foreign-library foreign-load-library
     define-foreign
     va
+    define-foreign-callback foreign-callback-ptr foreign-callback-free!
     with-pinned-matrix with-pinned-tensor with-pinned-bytevector
     peek-bytes
     make-cptr cptr-address cptr-null? cptr-null)
@@ -106,6 +108,54 @@
 ;;; passed as (there's no way to infer this from the Scheme value alone —
 ;;; see the #:variadic section above).
 (define (va type value) (cons type value))
+
+;;; ── Foreign callbacks (a Scheme procedure exposed to C as a real,
+;;; callable function pointer) ────────────────────────────────────────────────
+;;;
+;;; (define-foreign-callback (name (p type) ...) → ret-type body ...)
+;;;
+;;; Defines name as a foreign-callback object wrapping a fresh procedure
+;;; (lambda (p ...) body ...). Pass (foreign-callback-ptr name) wherever a
+;;; C function parameter expects a callback function pointer.
+;;;
+;;;   (define-foreign-callback (compar (a c-ptr) (b c-ptr)) → int
+;;;     (- (peek-s32 a) (peek-s32 b)))
+;;;   (c-qsort base n 4 (foreign-callback-ptr compar))
+;;;
+;;; Fixed-arity only — no variadic callbacks. 'string/'c-string is not a
+;;; supported ret-type: the C caller may hold onto a returned pointer
+;;; indefinitely after this call returns, and nothing keeps a curry
+;;; string reachable from Boehm GC's perspective once it's reachable only
+;;; via a raw pointer buried inside C library state Boehm can't scan —
+;;; write into a caller-supplied buffer argument instead, the way most
+;;; real C callback APIs already expect.
+;;;
+;;; A C library can invoke the callback from ANY thread it chooses,
+;;; including one curry never spawned or registered itself — this is
+;;; handled defensively at the C level (see closure_trampoline in
+;;; src/ffi.c), not something a caller needs to think about here.
+;;;
+;;; Lifetime is NOT garbage-collected: a still-referenced callback whose
+;;; C function pointer a library might still call at any time can't
+;;; safely be freed just because the Scheme object became unreachable.
+;;; Call (foreign-callback-free! cb) explicitly once certain the C side
+;;; will never invoke it again — freeing one still in use, or freeing the
+;;; same one twice, is a caller error the same way it would be in C.
+(define-syntax define-foreign-callback
+  (syntax-rules (→)
+    ((_ (name (pname ptype) ...) → ret-type body ...)
+     (define name
+       (%ffi-make-callback (lambda (pname ...) body ...)
+                           'ret-type (list 'ptype ...))))))
+
+;;; (foreign-callback-ptr cb) → c-ptr — the callback's own function
+;;; pointer, to pass to a C function parameter expecting a callback.
+(define (foreign-callback-ptr cb) (%ffi-callback-ptr cb))
+
+;;; (foreign-callback-free! cb) — releases the callback's underlying
+;;; libffi closure. See the define-foreign-callback docstring above for
+;;; why this has to be explicit rather than GC-driven.
+(define (foreign-callback-free! cb) (%ffi-callback-free! cb))
 
 ;;; ── Zero-copy matrix / tensor passthrough ────────────────────────────────────
 

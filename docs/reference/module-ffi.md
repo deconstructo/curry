@@ -118,6 +118,56 @@ or variadic at all.
 
 ---
 
+## Foreign callbacks (exposing a Scheme procedure to C)
+
+### `(define-foreign-callback (name (param type) ...) → ret-type body ...)`
+
+Defines `name` as a real, callable C function pointer backed by `(lambda (param ...) body ...)`, for handing to a C function that itself expects a callback (comparators, event handlers, visitor functions):
+
+```scheme
+(import (curry ffi))
+(define-foreign-library libc "libc.so.6")   ; Linux — see Platform notes
+
+(define-foreign (c-qsort (base c-ptr) (nmemb uint) (width uint) (compar c-ptr)) → void
+  #:from libc #:c-name "qsort")
+
+;; qsort's comparator receives two `const void*` pointing at 4-byte
+;; little-endian int32 elements — decode each one from the raw bytes.
+(define (peek-s32-le ptr)
+  (let* ((bv (peek-bytes ptr 4))
+         (u (+ (bytevector-u8-ref bv 0)
+               (* 256 (bytevector-u8-ref bv 1))
+               (* 65536 (bytevector-u8-ref bv 2))
+               (* 16777216 (bytevector-u8-ref bv 3)))))
+    (if (>= u 2147483648) (- u 4294967296) u)))
+
+(define-foreign-callback (int-compar (a c-ptr) (b c-ptr)) → int
+  (- (peek-s32-le a) (peek-s32-le b)))
+
+(with-pinned-bytevector my-int-array base
+  (c-qsort base n 4 (foreign-callback-ptr int-compar)))
+```
+
+See `tests/ffi_tests.scm` for a complete, runnable version of this example (encode helper included), verified against a real `qsort` call.
+
+Fixed-arity only — there is no support for a callback with a variadic *incoming* signature. `ret-type` cannot be `string`/`c-string`: the C caller may hold onto a returned pointer indefinitely after the callback returns, and nothing keeps a curry-heap string reachable from Boehm GC's perspective once it's reachable only via a raw pointer buried inside C library state GC can't scan. Write into a caller-supplied buffer argument instead — the convention most real C callback APIs already use.
+
+A C library can invoke the callback from **any thread it chooses**, including one curry never spawned or registered at all (an async callback fired from a library's own worker thread). This is handled defensively at the C level — nothing a caller needs to think about.
+
+A Scheme exception raised inside a callback's body cannot be allowed to propagate back into the C library that invoked it (C has no concept of curry's `setjmp`-based unwinding — the result would be undefined behavior). It's caught, reported to stderr, and a default (zeroed) value is returned to the C caller instead; the VM's own state is unaffected by this — ordinary evaluation continues working normally afterward.
+
+### `(foreign-callback-ptr cb)` → *c-ptr*
+
+The callback's function pointer, to pass as a `c-ptr`-typed argument to a `define-foreign` procedure expecting a callback parameter.
+
+### `(foreign-callback-free! cb)`
+
+Releases the callback's underlying libffi closure. **Not garbage-collected** — a `<foreign-callback>` object is pinned for its whole life and never freed implicitly, because a C library that still holds its function pointer could invoke it at any time until told otherwise, and nothing can know from the Scheme side whether that's still true. Call this explicitly only once certain the C side will never invoke the callback again. Freeing a callback the C library might still call, or freeing the same one twice, is a caller error — same as it would be in C.
+
+### `(foreign-callback? v)` → *boolean*
+
+---
+
 ## Type mapping
 
 Both C-style (`size_t`) and Scheme-style (`size-t`) names are accepted.
@@ -234,6 +284,10 @@ high-level macros above are built from them.
 | `(%ffi-call fn args)` | Call a `T_FOREIGN_FN` with a list of arguments |
 | `(%ffi-make-fn-variadic lib c-name ret-tag fixed-arg-tag-list)` | Build a variadic `T_FOREIGN_FN` — `fixed-arg-tag-list` covers only the non-variadic prefix |
 | `(%ffi-call-variadic fn fixed-args variadic-typed-args)` | Call a variadic `T_FOREIGN_FN`; `variadic-typed-args` is a list of `(type-symbol . value)` pairs |
+| `(%ffi-make-callback proc ret-tag arg-tag-list)` | Build a `T_FOREIGN_CALLBACK` — a libffi closure exposing `proc` as a C function pointer |
+| `(%ffi-callback-ptr cb)` | The callback's function pointer, as a `c-ptr` |
+| `(%ffi-callback-free! cb)` | Release the callback's closure — not GC-driven, see `foreign-callback-free!` above |
+| `(foreign-callback? v)` | `#t` for a `T_FOREIGN_CALLBACK` |
 | `(%ffi-make-cptr n)` | Wrap fixnum as `T_CPTR` |
 | `(%ffi-cptr-address p)` | Extract address from `T_CPTR` |
 | `(%ffi-matrix-ptr m)` | `T_CPTR` to `m->data`; pins `m` |
@@ -314,11 +368,7 @@ static void ldap_conn_finalize(void *obj, void *cd) {
 }
 ```
 
-**The API uses callbacks.** libffi can construct callback trampolines but they
-require careful lifetime management and cannot capture Scheme closures directly.
-If the library calls back into user code (GTK signal handlers, LDAP SASL
-callbacks, SQLite aggregate functions), a C module that manages the trampoline
-lifetime is far safer.
+**The API uses a single, straightforward callback shape.** `define-foreign-callback` (see above) covers the common case well — a comparator, a simple event/visitor callback, one function pointer handed to one registration call — including the thread-safety story (a C library can invoke it from any thread) and exception-safety (a raised error inside the callback can't crash the process). It does not solve every callback shape, though: **prefer a C module when** the API needs many interrelated callbacks with shared mutable state across calls (GTK signal handlers wiring up a whole widget tree), SASL-style multi-step callback negotiation, or a callback whose lifetime is entangled with a session handle's own teardown (SQLite aggregate functions tied to a statement's lifecycle) — a C module can express that state machine directly in C, where curry's own `(curry ffi)`-based callback is deliberately just "one Scheme procedure, one function pointer, explicit free."
 
 **You need deep struct traversal.**  When the return value is a pointer to a
 linked list of structs that must be walked and freed with a different function
