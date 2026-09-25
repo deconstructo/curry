@@ -66,7 +66,24 @@ jobs:
           auto-push: ${{ github.event_name == 'push' }}
           comment-on-alert: true
           alert-comment-cc-users: ''
-          # >130% of the stored baseline (i.e. >30% slower) fails the run.
+          # See issue #251: on this workflow's shared ubuntu-latest runner,
+          # fib(25)/vm alone swung between 11.67ms and 22.47ms across 10
+          # consecutive commits immediately preceding that issue, several of
+          # which touched zero VM code (docs/Homebrew-formula-only changes)
+          # -- a ~2x natural cross-run variance from which host the runner
+          # lands on, not scheduling jitter (bench_ci.scm already takes the
+          # median of 7 timed runs per benchmark internally, which is the
+          # tool for jitter within a single run; it cannot smooth out which
+          # physical host a whole job gets scheduled onto). A 130% gate
+          # inside that band produced two different false-positive failures
+          # -- flagging a different subset of benchmarks each time -- on the
+          # exact same commit of a change that didn't even compile the code
+          # path it was blamed on (PR #250 touched only (curry ffi), built
+          # here with no -DBUILD_FFI=ON at all). alert-threshold stays at
+          # 130% (still useful signal — the PR comment below is informative
+          # regardless of outcome) but fail-on-alert is now false so a
+          # noise-driven alert can no longer block a merge; a maintainer
+          # reading the comment decides whether a flagged delta is real.
           alert-threshold: '130%'
-          fail-on-alert: true
+          fail-on-alert: false
           summary-always: true
