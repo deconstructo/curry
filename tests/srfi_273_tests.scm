@@ -89,6 +89,28 @@
          list)
        '(5 anything))
 
+;; Regression for a bug found by independent review: %clc273-try (the
+;; copied SRFI-253 dispatcher case-lambda-checked reuses) predates
+;; check-impl? entirely, so a (fname (check-impl? _)) formal in a
+;; case-lambda-checked clause's OWN argument-check position was being
+;; treated as a literal predicate expression and called as one --
+;; unconditionally raising instead of skipping the check as intended.
+;; %lc273-args (lambda-checked/define-checked's own formal-peeling
+;; macro) already special-cased this correctly; %clc273-try was
+;; missing the identical pattern until this was found.
+(check "check-impl? in case-lambda-checked's own argument-check position (regression)"
+       ((case-lambda-checked (((x (check-impl? integer?))) (list 'got x))) "not an integer, but unchecked")
+       '(got "not an integer, but unchecked"))
+
+;; Regression for a second bug found by the same review: check-impl?'s
+;; own error message was built from several adjacent string literals
+;; passed positionally to `error` rather than one concatenated string
+;; -- only the first fragment became the reported message, the rest
+;; silently became separate irritants instead of message text.
+(check "check-impl?'s own error message is the full sentence, not just the first fragment"
+       (guard (e (#t (error-object-message e))) (check-impl? 'x))
+       "check-impl?: this is auxiliary syntax, recognized only inside lambda-checked/case-lambda-checked/define-checked/declare-checked's check positions -- it cannot be called directly, and using it inside values-checked is an error per the SRFI text")
+
 ;;; ---- define-checked (extended) ----
 
 (define-checked (sq x) => (integer?) (* x x))

@@ -109,11 +109,13 @@
     ;; it as an actual procedure is not part of what this SRFI
     ;; specifies.
     (define (check-impl? . args)
-      (error "check-impl?: this is auxiliary syntax, recognized only inside "
-             "lambda-checked/case-lambda-checked/define-checked/"
-             "declare-checked's check positions -- it cannot be called "
-             "directly, and using it inside values-checked is an error per "
-             "the SRFI text" args))
+      (error (string-append
+               "check-impl?: this is auxiliary syntax, recognized only inside "
+               "lambda-checked/case-lambda-checked/define-checked/"
+               "declare-checked's check positions -- it cannot be called "
+               "directly, and using it inside values-checked is an error per "
+               "the SRFI text")
+             args))
 
     ;; ── define-check ─────────────────────────────────────────────────────────
     ;; (define-check name predicate) -- names/aliases predicate. Matches
@@ -262,10 +264,27 @@
         ((_ (clause . more) (out ...))
          (%clc273-normalize more (out ... clause)))))
 
-    ;; Verbatim copy of SRFI-253's %clc-dispatch/%clc-try (data-
-    ;; checking.scm) under new names -- see this file's header comment
-    ;; for why this is a deliberate copy, not an import-and-rename
-    ;; (curry issue #257) or an independent reimplementation.
+    ;; %clc273-dispatch is a verbatim copy of SRFI-253's %clc-dispatch
+    ;; (data-checking.scm) under a new name -- see this file's header
+    ;; comment for why this is a deliberate copy, not an import-and-
+    ;; rename (curry issue #257) or an independent reimplementation.
+    ;;
+    ;; %clc273-try is that same copy PLUS exactly one addition: a
+    ;; (fname (check-impl? _)) pattern, mirroring %lc273-args's own
+    ;; identical pattern for lambda-checked/define-checked (found
+    ;; missing here by independent review -- SRFI-253's original
+    ;; dispatcher predates check-impl? entirely, so without this,
+    ;; (check-impl? _) in a case-lambda-checked clause's own argument-
+    ;; check position was treated as a literal predicate expression and
+    ;; called as one, unconditionally raising instead of skipping the
+    ;; check as intended). This one addition cannot reintroduce the
+    ;; exponential-blowup bug the original fix (see the header comment
+    ;; on SRFI-253's own case-lambda-checked) closed: it's the same
+    ;; O(1)-per-formal shape as the pre-existing bare-fname clause
+    ;; immediately below it (just triggered by a different pattern),
+    ;; touches `fail` the same way every other clause here already
+    ;; does (a single reference to the already-built thunk, never
+    ;; re-expanding it), and adds no new recursion or duplication.
     (define-syntax %clc273-dispatch
       (syntax-rules ()
         ((_ args)
@@ -275,9 +294,14 @@
            (%clc273-try formals args (begin body ...) (fail-thunk))))))
 
     (define-syntax %clc273-try
-      (syntax-rules ()
+      (syntax-rules (check-impl?)
         ((_ () args-cursor body fail)
          (if (null? args-cursor) body fail))
+        ((_ ((fname (check-impl? _)) . more) args-cursor body fail)
+         (if (pair? args-cursor)
+             (let ((fname (car args-cursor)))
+               (%clc273-try more (cdr args-cursor) body fail))
+             fail))
         ((_ ((fname fpred) . more) args-cursor body fail)
          (if (pair? args-cursor)
              (let ((fname (car args-cursor)))
