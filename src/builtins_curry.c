@@ -20,6 +20,7 @@
 #include "vm.h"
 #include "gc.h"
 #include "workpool.h"
+#include "version.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1610,6 +1611,23 @@ static val_t prim_hardware_concurrency(int ac, val_t *av, void *ud) {
     return vfix(pool_hw_concurrency());
 }
 
+/* SRFI-176 support: a Scheme-visible accessor for CURRY_VERSION
+ * (version.h), so (srfi s176 version-flag)'s version-alist reports the
+ * SAME single source of truth src/main.c's own -v/-V flags and the
+ * release tooling (CLAUDE.md's release process) already use, instead
+ * of a second hand-maintained copy of the version string drifting out
+ * of sync at the next release. */
+static val_t prim_curry_version(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    size_t len = strlen(CURRY_VERSION);
+    String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    s->hdr.type = T_STRING; s->hdr.flags = 0; s->len = (uint32_t)len;
+    s->hash = 0; s->orig_cap = (uint32_t)len; s->ext = NULL;
+    memcpy(s->data, CURRY_VERSION, len);
+    s->data[len] = '\0';
+    return vptr(s);
+}
+
 void builtins_curry_register(val_t env) {
     pool_init();   /* start the work-stealing thread pool */
 
@@ -1719,6 +1737,7 @@ void builtins_curry_register(val_t env) {
     DEF("set-map-parallel-threshold!",prim_set_map_threshold,    1, 1);
     DEF("for-each/par",               prim_for_each_par,          2,-1);
     DEF("hardware-concurrency",       prim_hardware_concurrency,  0, 0);
+    DEF("curry-version",              prim_curry_version,         0, 0);
 
     /* SRFI-27 random numbers */
     DEF("random-real",                    prim_random_real,           0,0);
