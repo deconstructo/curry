@@ -1131,6 +1131,24 @@ static val_t prim_tree_eval(int ac, val_t *av, void *ud) {
     return eval(av[0], GLOBAL_ENV);
 }
 
+/* Issue #257: define-syntax's own compiled runtime-rebuild path (see
+ * compile_define_syntax, compiler_classic.c) used to always route through
+ * plain tree-eval above, which hardcodes GLOBAL_ENV -- so a macro defined
+ * at the top level of a define-library body's (begin ...) clause was
+ * actually bound into GLOBAL_ENV, not the library's own environment,
+ * completely bypassing the module system's export/import machinery (the
+ * SAME bug ordinary top-level `define` had until OP_DEF_GLOBAL was made
+ * target_env-aware, and the exact bug class define-algebra's own header
+ * comment already documents fixing once before). This variant takes the
+ * env explicitly (compiler_classic.c passes c->chunk->target_env, falling
+ * back to GLOBAL_ENV outside any library body, exactly like OP_DEF_GLOBAL
+ * itself does at runtime) instead of assuming GLOBAL_ENV unconditionally. */
+static val_t prim_tree_eval_in_env(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t env = av[1];
+    return eval(av[0], vis_env(env) ? env : GLOBAL_ENV);
+}
+
 /* ---- Parallel map, reduce, for-each/par — backed by work-stealing pool ---- */
 
 static int map_par_threshold = 8;
@@ -1690,6 +1708,7 @@ void builtins_curry_register(val_t env) {
     DEF("quad-frac-diff",       prim_quad_frac_diff,        3, 4);
     DEF("quad-frac-int",        prim_quad_frac_int,         3, 4);
     DEF("tree-eval",            prim_tree_eval,             1, 1);
+    DEF("%tree-eval-in-env",    prim_tree_eval_in_env,      2, 2);
 
     /* Parallel map / reduce */
     DEF("map",                        prim_map,               2,-1);

@@ -30,6 +30,15 @@
     socket-input-port socket-output-port call-with-socket
     address-family address-info socket-domain ip-protocol
     message-type shutdown-method socket-merge-flags socket-purge-flags
+    ;; Internal helpers address-info/message-type/shutdown-method's own
+    ;; expansions reach -- must be exported too (curry's syntax-rules is
+    ;; not hygienic across define-library boundaries, see
+    ;; docs/reference/writing-a-module.md). This previously worked by
+    ;; accident: a since-fixed compiler bug (issue #257) made every
+    ;; top-level define-syntax leak directly into GLOBAL_ENV regardless
+    ;; of which library defined it, so these were reachable from any
+    ;; macro-expansion site everywhere, exported or not.
+    %address-info-1 %message-type-1 %shutdown-method-1
     *af-unspec* *af-inet* *af-inet6*
     *sock-stream* *sock-dgram*
     *ai-canonname* *ai-numerichost* *ai-v4mapped* *ai-all* *ai-addrconfig*
