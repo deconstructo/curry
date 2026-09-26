@@ -58,6 +58,7 @@ static const char *norm_tag(const char *s) {
 /* ---- Type mapping: Scheme symbol → libffi type ---- */
 
 static ffi_type *ffi_type_for_tag(val_t tag) {
+    if (vis_ffistructtype(tag)) return (ffi_type *)as_ffistructtype(tag)->ffi_type_ptr;
     if (!vis_symbol(tag)) return NULL;
     const char *s = norm_tag(sym_cstr(tag));
     if (!strcmp(s,"void"))                              return &ffi_type_void;
@@ -81,7 +82,32 @@ static ffi_type *ffi_type_for_tag(val_t tag) {
 
 /* ---- Marshal Scheme value → C storage buffer ---- */
 
+/* A struct-by-value argument or return value is always a plain
+ * bytevector on the Scheme side (see FfiStructType's own doc comment in
+ * object.h) -- exactly `size` bytes, copied verbatim into/out of the
+ * call's storage slot, whose declared ffi_type (FFI_TYPE_STRUCT) tells
+ * libffi how to actually place/read those bytes per the platform's real
+ * struct-passing ABI (register-packed for a small-enough struct, a
+ * hidden pointer for a larger one, whatever the target requires) --
+ * curry itself never needs to know which convention applies; that's
+ * exactly what handing libffi a proper struct ffi_type buys. */
+static bool marshal_struct_arg(val_t v, val_t struct_tag, void *buf) {
+    FfiStructType *st = as_ffistructtype(struct_tag);
+    if (!vis_bytes(v) || as_bytes(v)->len != st->size) return false;
+    memcpy(buf, as_bytes(v)->data, st->size);
+    return true;
+}
+
+static val_t unmarshal_struct_ret(const void *buf, val_t struct_tag) {
+    FfiStructType *st = as_ffistructtype(struct_tag);
+    Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + st->size);
+    bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = (uint32_t)st->size;
+    memcpy(bv->data, buf, st->size);
+    return vptr(bv);
+}
+
 static bool marshal_arg(val_t v, val_t tag, void *buf) {
+    if (vis_ffistructtype(tag)) return marshal_struct_arg(v, tag, buf);
     const char *t = norm_tag(tag_str(tag));
     if (!strcmp(t,"int") || !strcmp(t,"int32") || !strcmp(t,"int32_t") || !strcmp(t,"bool")) {
         int32_t n = (int32_t)(vis_fixnum(v) ? vunfix(v)
@@ -129,6 +155,7 @@ static bool marshal_arg(val_t v, val_t tag, void *buf) {
 /* ---- Unmarshal C return value → Scheme ---- */
 
 static val_t unmarshal_ret(void *buf, val_t tag) {
+    if (vis_ffistructtype(tag)) return unmarshal_struct_ret(buf, tag);
     const char *t = norm_tag(tag_str(tag));
     if (!strcmp(t,"void"))   return V_VOID;
     if (!strcmp(t,"int") || !strcmp(t,"int32") || !strcmp(t,"int32_t") || !strcmp(t,"bool")) {
@@ -262,19 +289,45 @@ val_t ffi_make_fn_variadic(val_t lib_val, const char *c_name, val_t ret_tag, val
         scm_raise(V_FALSE, "ffi-make-fn-variadic: %s: %d fixed args exceeds max %d",
                   c_name, nfixed, FFI_MAX_ARGS);
 
+    /* Struct-by-value is deliberately NOT supported here (v1 scope):
+     * ffi_call_fn_variadic's per-call marshaling (both the fixed prefix
+     * and the variadic tail) still uses fixed FFI_ARG_BUF-sized slots,
+     * unlike ffi_call_fn's plain (non-variadic) path, which was made
+     * size-aware specifically for structs. ffi_type_for_tag itself
+     * doesn't know or care which caller it's serving, so it would
+     * happily resolve a struct-type tag here too -- this check exists
+     * so that's caught explicitly, as an intentional scope boundary,
+     * rather than silently accepted at definition time and only
+     * discovered as a stack buffer overflow the first time someone
+     * actually calls through it with a struct wider than FFI_ARG_BUF. */
+    if (vis_ffistructtype(ret_tag))
+        scm_raise(V_FALSE, "ffi-make-fn-variadic: struct-by-value return types are not "
+                  "supported for variadic functions (use %%ffi-make-fn instead)");
+
     ffi_type **atypes = malloc((nfixed ? (size_t)nfixed : 1) * sizeof(ffi_type *));
     val_t tlist = fixed_arg_tags;
     for (int i = 0; i < nfixed; i++) {
+        if (vis_ffistructtype(vcar(tlist))) {
+            free(atypes);
+            scm_raise(V_FALSE, "ffi-make-fn-variadic: struct-by-value fixed arguments are not "
+                      "supported for variadic functions (use %%ffi-make-fn instead)");
+        }
         ffi_type *ft = ffi_type_for_tag(vcar(tlist));
-        if (!ft) scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown arg type '%s' for %s",
-                           tag_str(vcar(tlist)), c_name);
+        if (!ft) {
+            free(atypes);
+            scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown arg type '%s' for %s",
+                      tag_str(vcar(tlist)), c_name);
+        }
         atypes[i] = ft;
         tlist = vcdr(tlist);
     }
 
     ffi_type *rtype = ffi_type_for_tag(ret_tag);
-    if (!rtype) scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown return type '%s' for %s",
-                          tag_str(ret_tag), c_name);
+    if (!rtype) {
+        free(atypes);
+        scm_raise(V_FALSE, "ffi-make-fn-variadic: unknown return type '%s' for %s",
+                  tag_str(ret_tag), c_name);
+    }
 
     /* A cif for the zero-variadic-args call shape (nfixed == ntotal) is
      * valid per ffi_prep_cif_var's own docs and lets a call with no
@@ -307,6 +360,14 @@ val_t ffi_make_fn_variadic(val_t lib_val, const char *c_name, val_t ret_tag, val
  * (int32/uint32/int64/uint64/pointer/string) are already at or above
  * their C default-promoted width, so no other promotion is needed. */
 static bool marshal_variadic_arg(val_t v, val_t tag, void *buf, ffi_type **out_type) {
+    /* Struct-by-value is not supported for variadic trailing arguments
+     * (v1 scope, see the identical check/comment in
+     * ffi_make_fn_variadic) -- the caller's storage slot for this
+     * argument is a fixed FFI_ARG_BUF bytes, which a struct instance can
+     * exceed; returning false here routes to ffi_call_fn_variadic's
+     * ordinary "cannot marshal" error rather than overflowing that
+     * slot. */
+    if (vis_ffistructtype(tag)) return false;
     const char *t = norm_tag(tag_str(tag));
     if (!strcmp(t, "float")) {
         double d = num_to_double(v);
@@ -331,26 +392,84 @@ val_t ffi_call_fn(val_t ff_val, val_t args) {
         scm_raise(V_FALSE, "ffi-call: %s expects %d arg%s, got %d",
                   ff->name, nargs, nargs == 1 ? "" : "s", got);
 
-    uint8_t  storage[FFI_MAX_ARGS * FFI_ARG_BUF];
-    void    *ptrs[FFI_MAX_ARGS];
+    /* Each arg's real storage width: FFI_ARG_BUF for every scalar type
+     * (as before -- every supported scalar fits comfortably within it),
+     * or a struct-by-value argument's own actual byte size, which can
+     * exceed FFI_ARG_BUF. Computed up front purely to decide whether the
+     * fast, allocation-free fixed-size path below still applies. */
+    size_t arg_size[FFI_MAX_ARGS];
+    size_t total = 0;
+    bool any_oversized = false;
+    {
+        val_t tl = ff->arg_tags;
+        for (int i = 0; i < nargs; i++) {
+            bool is_struct = vis_ffistructtype(vcar(tl));
+            arg_size[i] = is_struct ? as_ffistructtype(vcar(tl))->size : FFI_ARG_BUF;
+            if (arg_size[i] > FFI_ARG_BUF) any_oversized = true;
+            total += arg_size[i];
+            tl = vcdr(tl);
+        }
+    }
+    bool ret_is_struct = vis_ffistructtype(ff->ret_tag);
+    size_t ret_size = ret_is_struct ? as_ffistructtype(ff->ret_tag)->size : FFI_ARG_BUF;
+
+    /* Fast, allocation-free path: every arg AND the return value fit the
+     * original fixed per-slot width -- exactly the pre-struct-support
+     * behavior, unchanged, for the overwhelmingly common all-scalar
+     * call (this module's own docs already flag per-call libffi
+     * overhead as a real cost for a hot inner loop; adding an
+     * unconditional malloc/free to every ordinary call on top of that
+     * would make it worse for no reason). Only a struct-by-value
+     * argument or return value wider than FFI_ARG_BUF forces the
+     * dynamically-sized fallback below. */
+    uint8_t  fixed_storage[FFI_MAX_ARGS * FFI_ARG_BUF];
+    uint8_t  fixed_ret[FFI_ARG_BUF] = {0};
+    uint8_t *storage = fixed_storage;
+    uint8_t *ret_buf = fixed_ret;
+    bool storage_heap = false, ret_heap = false;
+
+    if (any_oversized) {
+        storage = total ? malloc(total) : NULL;
+        if (total && !storage)
+            scm_raise(V_FALSE, "ffi-call: out of memory marshaling arguments for %s", ff->name);
+        storage_heap = true;
+    }
+    if (ret_size > FFI_ARG_BUF) {
+        ret_buf = calloc(1, ret_size);
+        if (!ret_buf) {
+            if (storage_heap) free(storage);
+            scm_raise(V_FALSE, "ffi-call: out of memory for return value of %s", ff->name);
+        }
+        ret_heap = true;
+    }
+
+    void *ptrs[FFI_MAX_ARGS];
     val_t tag_list = ff->arg_tags;
     val_t arg_list = args;
+    size_t off = 0;
     for (int i = 0; i < nargs; i++) {
-        ptrs[i] = storage + i * FFI_ARG_BUF;
-        if (!marshal_arg(vcar(arg_list), vcar(tag_list), ptrs[i]))
+        ptrs[i] = storage_heap ? (storage + off) : (storage + i * FFI_ARG_BUF);
+        if (!marshal_arg(vcar(arg_list), vcar(tag_list), ptrs[i])) {
+            if (storage_heap) free(storage);
+            if (ret_heap) free(ret_buf);
             scm_raise(V_FALSE, "ffi-call: cannot marshal arg %d (type '%s') for %s",
                       i + 1, tag_str(vcar(tag_list)), ff->name);
+        }
+        off += arg_size[i];
         arg_list = vcdr(arg_list);
         tag_list = vcdr(tag_list);
     }
 
-    uint8_t ret_buf[FFI_ARG_BUF] = {0};
     /* POSIX guarantees dlsym void* → function pointer conversion.
      * Cast through union to suppress -Wpedantic. */
     void (*fn_ptr)(void);
     memcpy(&fn_ptr, &ff->fn, sizeof(fn_ptr));
     ffi_call((ffi_cif *)ff->cif, fn_ptr, ret_buf, nargs ? ptrs : NULL);
-    return unmarshal_ret(ret_buf, ff->ret_tag);
+    val_t result = unmarshal_ret(ret_buf, ff->ret_tag);
+
+    if (storage_heap) free(storage);
+    if (ret_heap) free(ret_buf);
+    return result;
 }
 
 /* fixed_args: a proper list matching ff's fixed prefix exactly, same as
@@ -589,6 +708,23 @@ val_t ffi_make_callback(val_t proc, val_t ret_tag, val_t arg_tags) {
     ffi_type **atypes = malloc((nargs ? (size_t)nargs : 1) * sizeof(ffi_type *));
     val_t tlist = arg_tags;
     for (int i = 0; i < nargs; i++) {
+        /* Struct-by-value is not supported for callback arguments (v1
+         * scope): closure_trampoline unmarshals each incoming argument
+         * via unmarshal_ret(args[i], tag), which is correct for struct
+         * args too (libffi hands the trampoline natural-width storage
+         * per declared type regardless of what that type is) -- the
+         * real gap is on the RETURN side (marshal_callback_ret's
+         * ffi_arg-promotion logic was written for scalar returns only),
+         * and rejecting struct args here as well keeps this feature's
+         * supported surface simple and symmetric rather than allowing a
+         * struct as an argument but not a return with no clear reason
+         * why. Checked explicitly rather than left to an incidental
+         * failure, matching ffi_make_fn_variadic's identical reasoning. */
+        if (vis_ffistructtype(vcar(tlist))) {
+            free(atypes);
+            scm_raise(V_FALSE, "ffi-make-callback: struct-by-value arguments are not "
+                      "supported for callbacks");
+        }
         ffi_type *ft = ffi_type_for_tag(vcar(tlist));
         if (!ft) {
             free(atypes);
@@ -598,6 +734,20 @@ val_t ffi_make_callback(val_t proc, val_t ret_tag, val_t arg_tags) {
         tlist = vcdr(tlist);
     }
 
+    /* Struct-by-value return is also not supported for callbacks (see
+     * the argument-side rejection above for the full reasoning). This
+     * is currently also enforced one layer up, at the Scheme-facing
+     * primitive (prim_ffi_make_callback requires vis_symbol(ret_tag),
+     * which a struct-type value fails) -- but ffi_make_callback is a
+     * public C API (curry_ffi.h), callable directly by other C code
+     * that wouldn't go through that primitive at all, so the check
+     * belongs here too rather than solely relying on a caller elsewhere
+     * having already validated it. */
+    if (vis_ffistructtype(ret_tag)) {
+        free(atypes);
+        scm_raise(V_FALSE, "ffi-make-callback: struct-by-value return types are not "
+                  "supported for callbacks");
+    }
     const char *rt = norm_tag(tag_str(ret_tag));
     if (!strcmp(rt, "string") || !strcmp(rt, "c_string")) {
         free(atypes);
@@ -708,6 +858,167 @@ val_t ffi_callback_free(val_t cb_val) {
     return V_VOID;
 }
 
+/* ---- Struct-by-value support ----
+ *
+ * A struct TYPE (ffi-struct-type) is reusable layout metadata, built
+ * once via ffi_make_struct_type; a struct INSTANCE is a plain
+ * bytevector of exactly the type's byte size (see FfiStructType's own
+ * doc comment in object.h for why no separate instance heap type
+ * exists). v1 scope, deliberately: flat structs only -- no field may
+ * itself be a struct type (rejected explicitly below, not silently
+ * mishandled), no struct-by-value support in a variadic call's trailing
+ * arguments or in a foreign-callback's signature (both still reject a
+ * struct-type tag the same way an unknown type would, via the ordinary
+ * ffi_type_for_tag failure path -- neither ffi_call_fn_variadic's
+ * per-call marshaling nor closure_trampoline's return-slot ABI handling
+ * were written with a >FFI_ARG_BUF-sized value in mind, unlike
+ * ffi_call_fn above, which was deliberately made size-aware for this). */
+
+val_t ffi_make_struct_type(val_t field_tags, val_t field_names) {
+    int n = scm_list_length(field_tags);
+    if (n < 0) scm_raise(V_FALSE, "ffi-make-struct-type: field-types must be a proper list");
+    if (n < 1) scm_raise(V_FALSE, "ffi-make-struct-type: struct must have at least one field");
+    if (n > FFI_MAX_ARGS)
+        scm_raise(V_FALSE, "ffi-make-struct-type: %d fields exceeds max %d", n, FFI_MAX_ARGS);
+    /* field_names is optional (V_NIL = unnamed, index-only access); when
+     * given it must name every field, one-to-one with field_tags -- a
+     * partial or mismatched-length name list would leave ffi_struct_ref/
+     * -set!'s name lookup either silently short or reading past the
+     * real field count. */
+    if (!vis_nil(field_names)) {
+        int nn = scm_list_length(field_names);
+        if (nn != n)
+            scm_raise(V_FALSE, "ffi-make-struct-type: field-names has %d names for %d fields",
+                      nn < 0 ? -1 : nn, n);
+        for (val_t p = field_names; vis_pair(p); p = vcdr(p))
+            if (!vis_symbol(vcar(p)))
+                scm_raise(V_FALSE, "ffi-make-struct-type: every field name must be a symbol");
+    }
+
+    /* libffi requires a NULL-terminated elements array, hence n+1. */
+    ffi_type **elements = malloc((size_t)(n + 1) * sizeof(ffi_type *));
+    val_t tl = field_tags;
+    for (int i = 0; i < n; i++) {
+        val_t tag = vcar(tl);
+        if (vis_ffistructtype(tag)) {
+            free(elements);
+            scm_raise(V_FALSE, "ffi-make-struct-type: nested structs are not supported (field %d)", i + 1);
+        }
+        ffi_type *ft = ffi_type_for_tag(tag);
+        if (!ft || ft == &ffi_type_void) {
+            free(elements);
+            scm_raise(V_FALSE, "ffi-make-struct-type: '%s' is not a valid struct field type (field %d)",
+                      tag_str(tag), i + 1);
+        }
+        elements[i] = ft;
+        tl = vcdr(tl);
+    }
+    elements[n] = NULL;
+
+    ffi_type *st_type = malloc(sizeof(ffi_type));
+    st_type->size = 0;       /* resolved below */
+    st_type->alignment = 0;  /* resolved below */
+    st_type->type = FFI_TYPE_STRUCT;
+    st_type->elements = elements;
+
+    /* Force libffi to resolve this struct type's own size/alignment now
+     * (rather than leaving it to whenever it's first used in a real
+     * define-foreign signature): a throwaway single-argument cif using
+     * this struct as that argument's type is libffi's standard way to
+     * get it to compute a struct type's layout on demand.
+     * ffi_get_struct_offsets below needs that layout already resolved --
+     * it reads it, it doesn't compute it. */
+    ffi_cif throwaway_cif;
+    ffi_type *throwaway_args[1];
+    throwaway_args[0] = st_type;
+    if (ffi_prep_cif(&throwaway_cif, FFI_DEFAULT_ABI, 1, &ffi_type_void, throwaway_args) != FFI_OK) {
+        free(elements); free(st_type);
+        scm_raise(V_FALSE, "ffi-make-struct-type: could not resolve struct layout");
+    }
+
+    size_t *offsets = malloc((size_t)n * sizeof(size_t));
+    if (ffi_get_struct_offsets(FFI_DEFAULT_ABI, st_type, offsets) != FFI_OK) {
+        free(elements); free(st_type); free(offsets);
+        scm_raise(V_FALSE, "ffi-make-struct-type: ffi_get_struct_offsets failed");
+    }
+
+    FfiStructType *st = CURRY_NEW_PINNED(FfiStructType);
+    st->hdr.type    = T_FFI_STRUCT_TYPE;
+    st->hdr.flags   = 0;
+    st->ffi_type_ptr = st_type;
+    st->elements    = elements;
+    st->offsets     = offsets;
+    st->field_tags  = field_tags;
+    st->field_names = field_names;
+    st->nfields     = n;
+    st->size        = st_type->size;
+    return vptr(st);
+}
+
+/* Resolves a field descriptor (a fixnum index, or a symbol name --
+ * requires the struct type to have been given field_names) to a
+ * validated 0-based index. Shared by ffi_struct_ref/ffi_struct_set so
+ * both accept either form identically. */
+static int resolve_field_index(FfiStructType *st, val_t field, const char *who) {
+    if (vis_fixnum(field)) {
+        intptr_t idx = vunfix(field);
+        if (idx < 0 || idx >= st->nfields)
+            scm_raise(V_FALSE, "%s: field index %ld out of range (0..%d)",
+                      who, (long)idx, st->nfields - 1);
+        return (int)idx;
+    }
+    if (vis_symbol(field)) {
+        int i = 0;
+        for (val_t p = st->field_names; vis_pair(p); p = vcdr(p), i++)
+            if (vcar(p) == field) return i;
+        scm_raise(V_FALSE, "%s: no field named '%s'", who, sym_cstr(field));
+    }
+    scm_raise(V_FALSE, "%s: field must be an exact integer index or a symbol name", who);
+}
+
+val_t ffi_struct_size(val_t struct_type) {
+    if (!vis_ffistructtype(struct_type))
+        scm_raise(V_FALSE, "ffi-struct-size: not an ffi-struct-type");
+    return vfix((intptr_t)as_ffistructtype(struct_type)->size);
+}
+
+val_t ffi_struct_make(val_t struct_type) {
+    if (!vis_ffistructtype(struct_type))
+        scm_raise(V_FALSE, "ffi-struct-make: not an ffi-struct-type");
+    FfiStructType *st = as_ffistructtype(struct_type);
+    Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + st->size);
+    bv->hdr.type = T_BYTEVECTOR; bv->hdr.flags = 0; bv->len = (uint32_t)st->size;
+    memset(bv->data, 0, st->size);
+    return vptr(bv);
+}
+
+val_t ffi_struct_ref(val_t struct_type, val_t bv_val, val_t field) {
+    if (!vis_ffistructtype(struct_type))
+        scm_raise(V_FALSE, "ffi-struct-ref: not an ffi-struct-type");
+    FfiStructType *st = as_ffistructtype(struct_type);
+    if (!vis_bytes(bv_val) || as_bytes(bv_val)->len != st->size)
+        scm_raise(V_FALSE, "ffi-struct-ref: not a %zu-byte struct instance", st->size);
+    int field_index = resolve_field_index(st, field, "ffi-struct-ref");
+    size_t off = ((size_t *)st->offsets)[field_index];
+    val_t tag = scm_list_ref(st->field_tags, field_index);
+    return unmarshal_ret(as_bytes(bv_val)->data + off, tag);
+}
+
+val_t ffi_struct_set(val_t struct_type, val_t bv_val, val_t field, val_t value) {
+    if (!vis_ffistructtype(struct_type))
+        scm_raise(V_FALSE, "ffi-struct-set!: not an ffi-struct-type");
+    FfiStructType *st = as_ffistructtype(struct_type);
+    if (!vis_bytes(bv_val) || as_bytes(bv_val)->len != st->size)
+        scm_raise(V_FALSE, "ffi-struct-set!: not a %zu-byte struct instance", st->size);
+    int field_index = resolve_field_index(st, field, "ffi-struct-set!");
+    size_t off = ((size_t *)st->offsets)[field_index];
+    val_t tag = scm_list_ref(st->field_tags, field_index);
+    if (!marshal_arg(value, tag, as_bytes(bv_val)->data + off))
+        scm_raise(V_FALSE, "ffi-struct-set!: cannot marshal value for field %d (type '%s')",
+                  field_index, tag_str(tag));
+    return V_VOID;
+}
+
 /* ---- Scheme primitives ---- */
 
 static void ffi_def(val_t env, const char *name,
@@ -729,7 +1040,12 @@ static val_t prim_ffi_make_fn(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     if (!vis_foreignlib(av[0])) scm_raise(V_FALSE, "%%ffi-make-fn: not a foreign-lib");
     if (!vis_string(av[1]))     scm_raise(V_FALSE, "%%ffi-make-fn: c-name must be a string");
-    if (!vis_symbol(av[2]))     scm_raise(V_FALSE, "%%ffi-make-fn: ret-type must be a symbol");
+    /* ret-type is normally a scalar type-tag symbol, but may also be an
+     * ffi-struct-type value (define-c-struct) for a function that
+     * returns a struct by value -- ffi_type_for_tag/unmarshal_ret both
+     * already handle that case; only reject something that's neither. */
+    if (!vis_symbol(av[2]) && !vis_ffistructtype(av[2]))
+        scm_raise(V_FALSE, "%%ffi-make-fn: ret-type must be a symbol or an ffi-struct-type");
     return ffi_make_fn(av[0], str_data(as_str(av[1])), av[2], av[3]);
 }
 static val_t prim_ffi_call(int ac, val_t *av, void *ud)
@@ -754,6 +1070,18 @@ static val_t prim_ffi_callback_free(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return ffi_callback_free(av[0]); }
 static val_t prim_foreigncallback_p(int ac, val_t *av, void *ud)
     { (void)ac; (void)ud; return vbool(vis_foreigncallback(av[0])); }
+static val_t prim_ffi_make_struct_type(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_make_struct_type(av[0], av[1]); }
+static val_t prim_ffi_struct_size(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_struct_size(av[0]); }
+static val_t prim_ffi_struct_make(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_struct_make(av[0]); }
+static val_t prim_ffi_struct_ref(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_struct_ref(av[0], av[1], av[2]); }
+static val_t prim_ffi_struct_set(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return ffi_struct_set(av[0], av[1], av[2], av[3]); }
+static val_t prim_ffistructtype_p(int ac, val_t *av, void *ud)
+    { (void)ac; (void)ud; return vbool(vis_ffistructtype(av[0])); }
 static val_t prim_make_cptr(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     void *p = vis_fixnum(av[0]) ? (void *)(uintptr_t)vunfix(av[0]) : NULL;
@@ -849,6 +1177,12 @@ void ffi_register_builtins(val_t env) {
     ffi_def(env, "%ffi-callback-ptr",   prim_ffi_callback_ptr,  1, 1);
     ffi_def(env, "%ffi-callback-free!", prim_ffi_callback_free, 1, 1);
     ffi_def(env, "foreign-callback?",   prim_foreigncallback_p, 1, 1);
+    ffi_def(env, "%ffi-make-struct-type", prim_ffi_make_struct_type, 2, 2);
+    ffi_def(env, "%ffi-struct-size",    prim_ffi_struct_size,   1, 1);
+    ffi_def(env, "%ffi-struct-make",    prim_ffi_struct_make,   1, 1);
+    ffi_def(env, "%ffi-struct-ref",     prim_ffi_struct_ref,    3, 3);
+    ffi_def(env, "%ffi-struct-set!",    prim_ffi_struct_set,    4, 4);
+    ffi_def(env, "ffi-struct-type?",    prim_ffistructtype_p,   1, 1);
     ffi_def(env, "%ffi-make-cptr",      prim_make_cptr,         1, 1);
     ffi_def(env, "%ffi-cptr-address",   prim_cptr_address,      1, 1);
     ffi_def(env, "%ffi-matrix-ptr",     prim_ffi_matrix_ptr,    1, 1);

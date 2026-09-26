@@ -55,6 +55,32 @@
  *   (%ffi-tensor-ptr tensor)                → c-ptr (double*)
  *   (foreign-lib? v)  (foreign-fn? v)  (c-ptr? v)
  *   (foreign-lib-path lib)                  → string
+ *
+ *   (%ffi-make-struct-type field-tag-list field-name-list) → ffi-struct-type
+ *     A struct-by-value type descriptor: field-tag-list is a list of
+ *     scalar type-tag symbols (one per field, in C declaration order --
+ *     no nested structs, v1 scope). field-name-list is either '() (no
+ *     names -- fields addressed by index only) or a list of symbols the
+ *     same length as field-tag-list, letting %ffi-struct-ref/-set!
+ *     address a field by name instead of index. Layout (size/alignment/
+ *     per-field byte offsets) is computed by libffi itself, not
+ *     hand-rolled. Use the resulting value as an arg-tag or ret-tag with
+ *     %ffi-make-fn/%ffi-call to pass or receive a struct BY VALUE -- NOT
+ *     supported in %ffi-make-fn-variadic/%ffi-call-variadic's trailing
+ *     arguments or in %ffi-make-callback's signature (v1 scope; both
+ *     reject a struct-type tag with a clear, explicit error, not
+ *     silently).
+ *   (%ffi-struct-size struct-type)          → fixnum (byte size)
+ *   (%ffi-struct-make struct-type)          → bytevector
+ *     A fresh, zeroed instance of struct-type -- exactly %ffi-struct-size
+ *     bytes. A struct INSTANCE is always a plain bytevector (see
+ *     FfiStructType's own doc comment in object.h); there is no separate
+ *     "struct instance" heap type.
+ *   (%ffi-struct-ref struct-type instance field) → Scheme value
+ *   (%ffi-struct-set! struct-type instance field value) → void
+ *     Read/write one field of a struct instance in place. `field` is
+ *     either a 0-based exact integer index, or a symbol naming the field
+ *     (only if struct-type was given field-name-list).
  */
 
 #include "value.h"
@@ -71,6 +97,11 @@ val_t ffi_call_fn_variadic(val_t fn, val_t fixed_args, val_t variadic_typed_args
 val_t ffi_make_callback(val_t proc, val_t ret_tag, val_t arg_tags);
 val_t ffi_callback_ptr(val_t cb);
 val_t ffi_callback_free(val_t cb);
+val_t ffi_make_struct_type(val_t field_tags, val_t field_names);
+val_t ffi_struct_size(val_t struct_type);
+val_t ffi_struct_make(val_t struct_type);
+val_t ffi_struct_ref(val_t struct_type, val_t bv, val_t field);
+val_t ffi_struct_set(val_t struct_type, val_t bv, val_t field, val_t value);
 val_t ffi_make_cptr(void *ptr);
 
 void  ffi_register_builtins(val_t env);

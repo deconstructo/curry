@@ -6,12 +6,15 @@
 ;;;   %ffi-load  %ffi-make-fn  %ffi-call
 ;;;   %ffi-make-fn-variadic  %ffi-call-variadic
 ;;;   %ffi-make-callback  %ffi-callback-ptr  %ffi-callback-free!
+;;;   %ffi-make-struct-type  %ffi-struct-size  %ffi-struct-make
+;;;   %ffi-struct-ref  %ffi-struct-set!
 ;;;   %ffi-make-cptr  %ffi-cptr-address
 ;;;   %ffi-matrix-ptr  %ffi-matrix-unpin
 ;;;   %ffi-tensor-ptr  %ffi-tensor-unpin
 ;;;   %ffi-bytevector-ptr  %ffi-bytevector-unpin
 ;;;   %ffi-peek-bytes
 ;;;   c-ptr?  foreign-lib?  foreign-fn?  foreign-lib-path  foreign-callback?
+;;;   ffi-struct-type?
 
 (define-library (curry ffi)
   (import (scheme base))
@@ -20,6 +23,8 @@
     define-foreign
     va
     define-foreign-callback foreign-callback-ptr foreign-callback-free!
+    define-c-struct
+    ffi-struct-size ffi-struct-make ffi-struct-ref ffi-struct-set!
     with-pinned-matrix with-pinned-tensor with-pinned-bytevector
     peek-bytes
     make-cptr cptr-address cptr-null? cptr-null)
@@ -156,6 +161,66 @@
 ;;; libffi closure. See the define-foreign-callback docstring above for
 ;;; why this has to be explicit rather than GC-driven.
 (define (foreign-callback-free! cb) (%ffi-callback-free! cb))
+
+;;; ── Struct-by-value support ──────────────────────────────────────────────────
+;;;
+;;; (define-c-struct name (field type) ...)
+;;;
+;;; Defines name as a struct-by-value type descriptor, usable as an
+;;; arg-tag or ret-tag with define-foreign's #:from lib forms via
+;;; %ffi-make-fn/%ffi-call directly (define-foreign's own (p type) ...
+;;; sugar is scalar-type-only -- see below for why) to pass or receive a
+;;; struct BY VALUE:
+;;;
+;;;   (define-c-struct point (x double) (y double))
+;;;   (define c-point-dot (%ffi-make-fn libm "point_dot" 'double (list point point)))
+;;;   (define p (ffi-struct-make point))
+;;;   (ffi-struct-set! point p 'x 3.0)
+;;;   (ffi-struct-set! point p 'y 4.0)
+;;;   (%ffi-call c-point-dot (list p p))  ; => 25.0
+;;;
+;;; A struct instance is always a plain bytevector, exactly
+;;; (ffi-struct-size name) bytes -- there is no separate "struct
+;;; instance" type. Field layout (size/alignment/per-field byte offset,
+;;; including real platform struct padding) is computed by libffi itself
+;;; from each field's type, not hand-rolled.
+;;;
+;;; No field may itself be a struct type (nested structs aren't
+;;; supported), and a struct-type value cannot be used as an arg-tag/
+;;; ret-tag with define-foreign's #:variadic forms or with
+;;; define-foreign-callback -- both reject one with a clear error rather
+;;; than silently mishandling it (v1 scope limits, not oversights).
+;;;
+;;; Why define-foreign's own (p type) ... sugar doesn't accept a struct
+;;; type directly: every type there is a bare symbol, quoted by the
+;;; macro ('double, 'int, ...) -- a struct type is a real runtime VALUE
+;;; (the result of define-c-struct), which would need to be evaluated,
+;;; not quoted, and syntax-rules has no clean way to tell "this token is
+;;; one of the known scalar names" from "this token is a variable naming
+;;; a struct type" at each parameter position. Declaring a struct-typed
+;;; function's signature via %ffi-make-fn/%ffi-call directly (both
+;;; already take arg-tags/ret-tag as ordinary runtime values, symbol or
+;;; struct-type alike) sidesteps that rather than fighting it.
+(define-syntax define-c-struct
+  (syntax-rules ()
+    ((_ name (field type) ...)
+     (define name (%ffi-make-struct-type (list 'type ...) '(field ...))))))
+
+;;; (ffi-struct-size struct-type) → fixnum -- the instance byte size.
+(define (ffi-struct-size struct-type) (%ffi-struct-size struct-type))
+
+;;; (ffi-struct-make struct-type) → bytevector -- a fresh, zeroed instance.
+(define (ffi-struct-make struct-type) (%ffi-struct-make struct-type))
+
+;;; (ffi-struct-ref struct-type instance field) → Scheme value
+;;; field is either a 0-based exact integer index, or (for a struct-type
+;;; defined via define-c-struct) a symbol naming the field.
+(define (ffi-struct-ref struct-type instance field)
+  (%ffi-struct-ref struct-type instance field))
+
+;;; (ffi-struct-set! struct-type instance field value) → void
+(define (ffi-struct-set! struct-type instance field value)
+  (%ffi-struct-set! struct-type instance field value))
 
 ;;; ── Zero-copy matrix / tensor passthrough ────────────────────────────────────
 

@@ -168,6 +168,54 @@ Releases the callback's underlying libffi closure. **Not garbage-collected** —
 
 ---
 
+## Struct-by-value support
+
+### `(define-c-struct name (field type) ...)`
+
+Defines `name` as a struct-by-value type descriptor, usable as an arg-tag or ret-tag with `%ffi-make-fn`/`%ffi-call` directly (**not** with `define-foreign`'s own `(param type)` sugar — see below for why) to pass or receive a struct BY VALUE:
+
+```scheme
+(import (curry ffi))
+(define-foreign-library libm "libm.so")   ; Linux — see Platform notes
+
+(define-c-struct point (x double) (y double))
+(define c-point-dot (%ffi-make-fn libm "point_dot" 'double (list point point)))
+
+(define p (ffi-struct-make point))
+(ffi-struct-set! point p 'x 3.0)
+(ffi-struct-set! point p 'y 4.0)
+(define q (ffi-struct-make point))
+(ffi-struct-set! point q 'x 1.0)
+(ffi-struct-set! point q 'y 2.0)
+(%ffi-call c-point-dot (list p q))
+; → 11.0
+```
+
+A struct **instance** is always a plain bytevector, exactly `(ffi-struct-size name)` bytes — there is no separate "struct instance" type. Field layout (size, alignment, and each field's byte offset, including real platform struct padding) is computed by libffi itself from each field's type — not hand-rolled, and verified against `{int32, double, int32}`'s real ABI size (24 bytes, not the naive 4+8+4=16) in `tests/ffi_tests.scm`.
+
+**Scope limits (v1, deliberate, not oversights):**
+- No field may itself be a struct type — nested structs aren't supported. Rejected with a clear error at `define-c-struct`/`%ffi-make-struct-type` time.
+- A struct-type value cannot be used as an arg-tag or ret-tag with `define-foreign`'s `#:variadic` forms, or with `define-foreign-callback`. Both reject one with a clear error rather than silently mishandling it — `ffi_call_fn_variadic`'s per-call marshaling and `closure_trampoline`'s return-slot ABI handling were never made struct-size-aware, unlike the plain (non-variadic) call path.
+
+**Why `define-foreign`'s own sugar doesn't accept a struct type directly:** every type there is a bare symbol, quoted by the macro (`'double`, `'int`, ...). A struct type is a real runtime *value* (the result of `define-c-struct`), which would need to be evaluated, not quoted — and `syntax-rules` has no clean way to tell "this token is one of the known scalar names" from "this token is a variable naming a struct type" at each parameter position. Declaring a struct-typed function's signature via `%ffi-make-fn`/`%ffi-call` directly (both already take arg-tags/ret-tag as ordinary runtime values, symbol or struct-type alike) sidesteps that rather than fighting it.
+
+### `(ffi-struct-size struct-type)` → *fixnum*
+
+The instance byte size.
+
+### `(ffi-struct-make struct-type)` → *bytevector*
+
+A fresh, zeroed instance.
+
+### `(ffi-struct-ref struct-type instance field)` → Scheme value
+### `(ffi-struct-set! struct-type instance field value)`
+
+Read/write one field of a struct instance in place. `field` is either a 0-based exact integer index, or (for a struct type defined via `define-c-struct`, which names its fields) a symbol naming the field. `%ffi-make-struct-type` can also build an unnamed struct type directly (pass `'()` for its field-names argument) if index-only access is fine — index and name access both work on any struct type that has names.
+
+### `(ffi-struct-type? v)` → *boolean*
+
+---
+
 ## Type mapping
 
 Both C-style (`size_t`) and Scheme-style (`size-t`) names are accepted.
@@ -288,6 +336,12 @@ high-level macros above are built from them.
 | `(%ffi-callback-ptr cb)` | The callback's function pointer, as a `c-ptr` |
 | `(%ffi-callback-free! cb)` | Release the callback's closure — not GC-driven, see `foreign-callback-free!` above |
 | `(foreign-callback? v)` | `#t` for a `T_FOREIGN_CALLBACK` |
+| `(%ffi-make-struct-type field-tag-list field-name-list)` | Build a `T_FFI_STRUCT_TYPE` — `field-name-list` is `'()` for an unnamed (index-only) struct type |
+| `(%ffi-struct-size struct-type)` | Instance byte size, as a fixnum |
+| `(%ffi-struct-make struct-type)` | A fresh, zeroed instance (a bytevector) |
+| `(%ffi-struct-ref struct-type instance field)` | Read one field (index or, if named, symbol) |
+| `(%ffi-struct-set! struct-type instance field value)` | Write one field in place |
+| `(ffi-struct-type? v)` | `#t` for a `T_FFI_STRUCT_TYPE` |
 | `(%ffi-make-cptr n)` | Wrap fixnum as `T_CPTR` |
 | `(%ffi-cptr-address p)` | Extract address from `T_CPTR` |
 | `(%ffi-matrix-ptr m)` | `T_CPTR` to `m->data`; pins `m` |

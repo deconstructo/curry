@@ -336,6 +336,173 @@
     "already freed (double free)"))
 
 ;;; ----------------------------------------------------------------------
+;;; Struct-by-value — define-c-struct, ffi-struct-size/-make/-ref/-set!,
+;;; %ffi-make-struct-type. Two real, independently-compiled ABIs back
+;;; this: libc's own div()/ldiv() for struct-by-value RETURN (div_t is a
+;;; real, standard, always-present {int quot; int rem;} struct returned
+;;; by value), and a tiny CMake-built shared library (fixtures/
+;;; ffi_struct_shim/shim.c, built as the ffi_struct_shim target, only
+;;; when BUILD_FFI=ON -- see tests/CMakeLists.txt) for struct-by-value
+;;; ARGUMENTS and real struct padding/alignment, since standard libc has
+;;; essentially no by-value struct-argument functions to test against
+;;; (everything that takes a struct takes it by pointer). Both directions
+;;; matter: curry's own code correctly agreeing with itself would prove
+;;; nothing about real cross-ABI correctness.
+;;; ----------------------------------------------------------------------
+
+;;; ── div_t div(int, int) -- struct-by-value RETURN, real libc ─────────────────
+
+(define div-t (%ffi-make-struct-type (list 'int 'int) '(quot rem)))
+(check "div_t size (2 ints, should be 8)" (ffi-struct-size div-t) 8)
+
+(define c-div (%ffi-make-fn libc "div" div-t (list 'int 'int)))
+
+(define (div-quot-rem n d)
+  (let ((r (%ffi-call c-div (list n d))))
+    (list (ffi-struct-ref div-t r 'quot) (ffi-struct-ref div-t r 'rem))))
+
+(check "div(17,5) via real libc struct-by-value return" (div-quot-rem 17 5) '(3 2))
+(check "div(-17,5) via real libc struct-by-value return" (div-quot-rem -17 5) '(-3 -2))
+(check "div(100,7) via real libc struct-by-value return" (div-quot-rem 100 7) '(14 2))
+(check "div(0,5) via real libc struct-by-value return" (div-quot-rem 0 5) '(0 0))
+
+;;; ── struct-by-value ARGUMENTS + real padding/alignment, via the shim ─────────
+
+(define ffi-struct-shim-path (get-environment-variable "CURRY_TEST_FFI_STRUCT_SHIM"))
+
+(if (not ffi-struct-shim-path)
+    (begin
+      (display "SKIP: struct-argument tests (CURRY_TEST_FFI_STRUCT_SHIM not set --")
+      (display " run via ctest, not a bare curry invocation, to get this)")
+      (newline))
+    (let ()
+      (define-foreign-library shimlib ffi-struct-shim-path)
+
+      (define-c-struct point (x double) (y double))
+      (define c-point-dot (%ffi-make-fn shimlib "point_dot" 'double (list point point)))
+      (define (dot x1 y1 x2 y2)
+        (let ((p1 (ffi-struct-make point)) (p2 (ffi-struct-make point)))
+          (ffi-struct-set! point p1 'x x1) (ffi-struct-set! point p1 'y y1)
+          (ffi-struct-set! point p2 'x x2) (ffi-struct-set! point p2 'y y2)
+          (%ffi-call c-point-dot (list p1 p2))))
+
+      ;; {int32 a; double b; int32 c;} has real ABI padding on every
+      ;; platform this runs on: 4 bytes before b to align it to 8, and 4
+      ;; trailing bytes after c to round the whole struct up to a
+      ;; multiple of double's own 8-byte alignment -- 24 bytes total, NOT
+      ;; the naive 4+8+4=16 a hand-rolled layout might get wrong. This is
+      ;; exactly the class of bug ffi_get_struct_offsets (libffi's own
+      ;; computation, not hand-rolled) exists to avoid.
+      (define-c-struct mixed (a int32) (b double) (c int32))
+      (define c-mixed (%ffi-make-fn shimlib "mixed_double_a_and_c" mixed (list mixed)))
+
+      (check "Point {double x; double y;} size (should be 16)" (ffi-struct-size point) 16)
+      (check "point_dot((3,4),(1,2)) via a real, independently-compiled shim"
+             (dot 3.0 4.0 1.0 2.0) 11.0)
+      (check "point_dot((1,0),(0,1)) orthogonal vectors -> 0"
+             (dot 1.0 0.0 0.0 1.0) 0.0)
+      (check "Mixed {int32,double,int32} size is the REAL padded ABI size (24), not naive 16"
+             (ffi-struct-size mixed) 24)
+
+      (let ((m (ffi-struct-make mixed)))
+        (ffi-struct-set! mixed m 'a 7)
+        (ffi-struct-set! mixed m 'b 3.5)
+        (ffi-struct-set! mixed m 'c -9)
+        (let ((result (%ffi-call c-mixed (list m))))
+          (check "mixed struct arg+return: a doubled (7 -> 14)" (ffi-struct-ref mixed result 'a) 14)
+          (check "mixed struct arg+return: b passed through unchanged (3.5)"
+                 (ffi-struct-ref mixed result 'b) 3.5)
+          (check "mixed struct arg+return: c doubled (-9 -> -18)" (ffi-struct-ref mixed result 'c) -18)))))
+
+;;; ── Manual construction / field access, no C call involved ───────────────────
+
+(let ((p (ffi-struct-make div-t)))
+  (ffi-struct-set! div-t p 'quot 42)
+  (ffi-struct-set! div-t p 'rem -7)
+  (check "manual struct set!/ref by name" (list (ffi-struct-ref div-t p 'quot) (ffi-struct-ref div-t p 'rem))
+         '(42 -7))
+  (check "manual struct set!/ref by index" (list (ffi-struct-ref div-t p 0) (ffi-struct-ref div-t p 1))
+         '(42 -7)))
+
+;;; ── Error paths ──────────────────────────────────────────────────────────────
+
+(check-pred "%ffi-make-struct-type rejects a nested struct field"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-struct-type (list div-t 'int) '())
+      "no error raised")
+    "nested structs are not supported"))
+
+(check-pred "%ffi-make-struct-type rejects 'void as a field type"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-struct-type (list 'void 'int) '())
+      "no error raised")
+    "is not a valid struct field type"))
+
+(check-pred "%ffi-make-struct-type rejects an empty field list"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-struct-type '() '())
+      "no error raised")
+    "at least one field"))
+
+(check-pred "%ffi-make-struct-type rejects a mismatched field-names length"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-struct-type (list 'int 'int) '(only-one-name))
+      "no error raised")
+    "names for"))
+
+(check-pred "ffi-struct-ref rejects a wrong-size bytevector"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (ffi-struct-ref div-t (make-bytevector 4 0) 0)
+      "no error raised")
+    "not a 8-byte struct instance"))
+
+(check-pred "ffi-struct-ref rejects an out-of-range index"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (ffi-struct-ref div-t (ffi-struct-make div-t) 5)
+      "no error raised")
+    "out of range"))
+
+(check-pred "ffi-struct-ref rejects an unknown field name"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (ffi-struct-ref div-t (ffi-struct-make div-t) 'nope)
+      "no error raised")
+    "no field named"))
+
+(check "ffi-struct-type? recognizes a struct type" (ffi-struct-type? div-t) #t)
+(check "ffi-struct-type? rejects an ordinary value" (ffi-struct-type? 42) #f)
+
+;;; ── Scope-limit rejections: struct types are NOT supported for variadic
+;;; trailing/fixed arguments or for foreign-callback signatures (v1) ───────────
+
+(check-pred "%ffi-make-fn-variadic rejects a struct-type fixed argument"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-fn-variadic libc "printf" 'int (list div-t))
+      "no error raised")
+    "struct-by-value fixed arguments are not supported"))
+
+(check-pred "%ffi-make-callback rejects a struct-type argument"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-callback (lambda (p) 0) 'int (list div-t))
+      "no error raised")
+    "struct-by-value arguments are not supported"))
+
+(check-pred "%ffi-make-callback rejects a struct-type return type"
+  (string-contains
+    (guard (e (#t (error-object-message e)))
+      (%ffi-make-callback (lambda () 0) div-t (list))
+      "no error raised")
+    "ret-type must be a symbol"))
+
+;;; ----------------------------------------------------------------------
 ;;; Summary
 ;;; ----------------------------------------------------------------------
 (newline)
