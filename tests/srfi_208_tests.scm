@@ -115,6 +115,20 @@
        (list (number? +nan.0) (number? -nan.0) (number? +inf.0) (number? -inf.0))
        '(#t #t #t #t))
 (check "ordinary numeric literals are unaffected" (list 3.14 -2.5 1e10 5 3/4) (list 3.14 -2.5 1e10 5 3/4))
+;; C99 strtod's "nan" spelling additionally accepts an arbitrary
+;; parenthesized n-char-sequence suffix (e.g. "nan(123)") -- a digit
+;; inside that suffix must not satisfy the reader's own digit-guard,
+;; or this is still not valid R7RS numeric syntax and must not parse as
+;; a number. Only reachable via string->number (an ordinary read()
+;; call already treats '(' as a token delimiter, so this exact bypass
+;; never reaches parse_number through source text) -- found by review
+;; as a real, narrow gap in the first version of this same fix.
+(check "string->number rejects nan(<digits>) rather than treating it as NaN"
+       (string->number "nan(123)") #f)
+(check "string->number rejects NAN(<digits>) case-insensitively too"
+       (string->number "NAN(3)") #f)
+(check "string->number still rejects a bare nan-with-empty-parens"
+       (string->number "nan()") #f)
 
 ;;; ---- Summary ----
 

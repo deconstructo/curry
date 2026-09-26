@@ -148,7 +148,19 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
      * to compile with "lambda param must be symbol" because `nan` alone
      * read as a NaN float instead of the symbol `nan`). */
     { bool has_digit = false;
-      for (const char *p = s; *p; p++) if (isdigit((unsigned char)*p)) { has_digit = true; break; }
+      for (const char *p = s; *p && *p != '('; p++)
+          if (isdigit((unsigned char)*p)) { has_digit = true; break; }
+      /* Stop the scan at '(' rather than scanning the whole token: C99
+       * strtod's "nan" spelling additionally accepts an arbitrary
+       * parenthesized n-char-sequence suffix (e.g. "nan(123)"), which
+       * would otherwise satisfy a naive "does this string contain a
+       * digit anywhere" check while still not being valid R7RS numeric
+       * syntax -- found by review as a real, if narrow, escape hatch:
+       * only reachable via (string->number "nan(123)") in practice,
+       * since an ordinary read() call already treats '(' as a token
+       * delimiter and never includes it in the token buffer, but
+       * string->number hands parse_number the full user-supplied
+       * string with no such delimiting. */
       if (!has_digit) goto not_a_float; }
     { double d = strtod(s, &end);
       if (*end == '\0') {
