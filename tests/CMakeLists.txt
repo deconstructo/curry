@@ -87,11 +87,26 @@ add_test(NAME dot_locking  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME zeromq       COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/zeromq_tests.scm)
 add_test(NAME tts          COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/tts_tests.scm)
 if(BUILD_FFI)
+  # Tiny shared library used only by ffi_tests.scm's struct-by-value
+  # ARGUMENT coverage. Standard libc has essentially no by-value
+  # struct-argument functions to test against (div_t/ldiv_t cover
+  # struct-by-value RETURN well via real libc; everything that takes a
+  # struct takes it by pointer) -- this shim exists purely so that
+  # direction has a genuine, independently-compiled C ABI to marshal
+  # against too, not just curry's own code agreeing with itself. No
+  # threading/blocking involved (unlike a some hypothetical pthread-based
+  # fixture), so this is safe as permanent, deterministic CI coverage.
+  add_library(ffi_struct_shim SHARED
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ffi_struct_shim/shim.c)
+  set_target_properties(ffi_struct_shim PROPERTIES PREFIX "")
+
   # (curry ffi) itself -- define-foreign fixed-arity and #:variadic paths,
   # against real libc functions (strlen/abs/snprintf) rather than a fake
   # library, since libc's ABI for these is stable across every platform
   # this runs on. No prior test file covered (curry ffi) directly at all.
   add_test(NAME ffi           COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ffi_tests.scm)
+  set_tests_properties(ffi PROPERTIES
+    ENVIRONMENT "CURRY_TEST_FFI_STRUCT_SHIM=$<TARGET_FILE:ffi_struct_shim>")
   # (curry sql) unconditionally imports (curry mariadb)/(curry postgres),
   # both of which import (curry ffi) -- all three tests need BUILD_FFI=ON
   # to even import, regardless of whether a live MariaDB/PostgreSQL

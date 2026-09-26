@@ -105,6 +105,7 @@ typedef enum {
                                module with its own different operation set) -- deliberately not
                                unified with it, to avoid destabilizing that already-shipped API. */
     T_FOREIGN_CALLBACK = 56, /* GC:PIN val_t: proc, arg_tags, ret_tag — libffi closure inside */
+    T_FFI_STRUCT_TYPE  = 57, /* GC:PIN val_t: field_tags — libffi struct ffi_type inside */
 } ObjType;
 
 /*
@@ -749,6 +750,52 @@ typedef struct {
 } ForeignCallback;
 #define vis_foreigncallback(v) vis_type(v, T_FOREIGN_CALLBACK)
 #define as_foreigncallback(v)  vunptr(ForeignCallback, v)
+
+/* FFI struct type descriptor: describes a flat (non-nested — no field may
+ * itself be a struct type, v1 scope limit, see ffi_make_struct_type in
+ * ffi.c) C struct's layout, so it can be used as a define-foreign
+ * argument or return type for passing/receiving a struct BY VALUE.
+ *
+ * `ffi_type_ptr` is a real libffi struct ffi_type (type == FFI_TYPE_STRUCT,
+ * ->elements a NULL-terminated array of each field's scalar ffi_type*,
+ * ->size/->alignment computed by libffi itself, not hand-rolled --
+ * platform struct padding/alignment rules are exactly the kind of thing
+ * worth never re-deriving by hand). `elements` is the malloc'd backing
+ * array `ffi_type_ptr->elements` points into (kept here so it can be
+ * freed alongside `ffi_type_ptr` -- never done in practice, since a
+ * struct type, once used in any define-foreign signature, must outlive
+ * every call through that binding for the process's remaining lifetime,
+ * exactly like ForeignFn's own cif/cif_atypes). `offsets[i]` is field
+ * i's byte offset within an instance, from ffi_get_struct_offsets --
+ * again libffi's own computation, not hand-rolled.
+ *
+ * A struct INSTANCE is a plain bytevector of `size` bytes (T_BYTEVECTOR,
+ * not a new heap type) -- consistent with how (curry ffi) already treats
+ * raw buffers elsewhere (with-pinned-bytevector, %ffi-peek-bytes); this
+ * descriptor is only the reusable layout/type metadata, looked up once
+ * per field access rather than duplicated per instance. */
+typedef struct {
+    Hdr     hdr;
+    void   *ffi_type_ptr;  /* ffi_type* — FFI_TYPE_STRUCT, ->elements below */
+    void   *elements;      /* ffi_type** array — backs ffi_type_ptr->elements */
+    void   *offsets;       /* size_t* array, one per field */
+    val_t   field_tags;    /* list of type-tag symbols, one per field, in order */
+    val_t   field_names;   /* list of field-name symbols, parallel to field_tags,
+                             * or V_NIL if this struct type wasn't given names --
+                             * ffi-struct-ref/-set! then only accept an integer
+                             * index, not a symbol. Lets a named field be looked
+                             * up by name entirely at runtime (ffi_struct_ref/
+                             * ffi_struct_set in ffi.c), so define-c-struct
+                             * (ffi.scm) never needs to synthesize new
+                             * identifiers like "point-x" from "point" and "x"
+                             * -- something a hygienic syntax-rules macro can't
+                             * do at all without a non-hygienic escape hatch
+                             * this codebase doesn't have. */
+    int     nfields;
+    size_t  size;          /* struct's total byte size (== ffi_type_ptr->size) */
+} FfiStructType;
+#define vis_ffistructtype(v) vis_type(v, T_FFI_STRUCT_TYPE)
+#define as_ffistructtype(v)  vunptr(FfiStructType, v)
 
 /* Promise (delay / delay-force) */
 #define PROMISE_LAZY   0  /* not yet forced */
