@@ -131,12 +131,31 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
         /* GMP bignum */
         return num_make_bignum_str(s, radix);
     }
-    /* Try float */
-    double d = strtod(s, &end);
-    if (*end == '\0') {
-        val_t v = num_make_float(d);
-        return exact_force ? num_exact(v) : v;
-    }
+    /* Try float. Guard against libc strtod's own C99-mandated leniency
+     * first: strtod("nan", ...), strtod("inf", ...), strtod("infinity",
+     * ...) (case-insensitive, and "nan" additionally accepts an
+     * arbitrary parenthesized suffix like "nan(0x1)") all succeed and
+     * consume the whole string, despite none of those spellings being a
+     * valid R7RS numeric literal (only the exact tokens "+inf.0",
+     * "-inf.0", "+nan.0", "-nan.0" are, already handled above, before
+     * this function is ever reached) -- an ordinary Scheme identifier
+     * spelled `nan`, `inf`, `Infinity`, etc. must still read back as a
+     * symbol. Every genuinely valid float token (leading sign/dot
+     * aside) contains at least one digit; "nan"/"inf"/"infinity" never
+     * do, so requiring one digit rejects exactly the strtod-only cases
+     * without narrowing normal float parsing at all (confirmed: this
+     * was a real, reproducible bug -- `(define (f who nan) ...)` failed
+     * to compile with "lambda param must be symbol" because `nan` alone
+     * read as a NaN float instead of the symbol `nan`). */
+    { bool has_digit = false;
+      for (const char *p = s; *p; p++) if (isdigit((unsigned char)*p)) { has_digit = true; break; }
+      if (!has_digit) goto not_a_float; }
+    { double d = strtod(s, &end);
+      if (*end == '\0') {
+          val_t v = num_make_float(d);
+          return exact_force ? num_exact(v) : v;
+      } }
+    not_a_float: ;
     /* Try complex literal: ends with 'i', e.g. +2i, 3+4i, 3-4i, +i, -i */
     size_t slen = strlen(s);
     if (slen >= 2 && s[slen-1] == 'i') {

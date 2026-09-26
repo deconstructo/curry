@@ -30,6 +30,7 @@ add_test(NAME srfi_215 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_253 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_253_tests.scm)
 add_test(NAME srfi_273 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_273_tests.scm)
 add_test(NAME srfi_120 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_120_tests.scm)
+add_test(NAME srfi_208 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_208_tests.scm)
 add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
 add_test(NAME srfi_61_cond COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_61_cond_tests.scm)
