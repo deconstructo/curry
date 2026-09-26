@@ -11,4 +11,5 @@
     *ai-canonname* *ai-numerichost* *ai-v4mapped* *ai-all* *ai-addrconfig*
     *ipproto-ip* *ipproto-tcp* *ipproto-udp*
     *msg-peek* *msg-oob* *msg-waitall*
-    *shut-rd* *shut-wr* *shut-rdwr*))
+    *shut-rd* *shut-wr* *shut-rdwr*
+    %address-info-1 %message-type-1 %shutdown-method-1))

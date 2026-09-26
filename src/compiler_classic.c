@@ -581,10 +581,32 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
     sr_set_current_local_macros(saved_locals);
 
     if (c->scope_depth == 0) {
+        /* Issue #257: this immediate definition exists only so a LATER
+         * top-level form compiled in this same run (before this chunk's
+         * own bytecode ever executes) can already see `name` as a macro
+         * via classify_head's target_env-then-GLOBAL_ENV lookup order
+         * (above). It must therefore go into the SAME place classify_head
+         * will actually look -- this chunk's own target_env when set (a
+         * define-library body), GLOBAL_ENV otherwise -- exactly like
+         * OP_DEF_GLOBAL already does for ordinary `define` at this same
+         * scope depth. Previously this always hardcoded GLOBAL_ENV
+         * regardless of target_env, so a macro defined at the top level of
+         * a define-library's own (begin ...) clause was actually bound
+         * into GLOBAL_ENV, not the library's own environment -- silently
+         * bypassing the module system's export/import machinery entirely
+         * (any import filter, not just rename, involving that macro was a
+         * no-op, since env_lookup_slot on the library's OWN env never
+         * found it there; the macro still appeared to "work" under its
+         * original name purely because it had leaked directly into
+         * GLOBAL_ENV, visible everywhere with no import at all -- even an
+         * unexported, nominally-private macro). Same bug class
+         * compile_define_algebra's own header comment already documents
+         * fixing once before for that unrelated special form. */
+        val_t def_env = c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV;
         Syntax *syn = CURRY_NEW(Syntax);
         syn->hdr.type = T_SYNTAX; syn->hdr.flags = 0;
         syn->transformer = transformer;
-        env_define(GLOBAL_ENV, name, vptr(syn));
+        env_define(def_env, name, vptr(syn));
 
         val_t literals, rules, ellipsis;
         val_t runtime_xfm_expr;
@@ -613,11 +635,22 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
 
         val_t whole_form    = scm_cons(S_DEFINE_SYNTAX,
                                 scm_cons(name, scm_cons(runtime_xfm_expr, V_NIL)));
-        val_t tree_eval_sym = sym_intern_cstr("tree-eval");
+        /* Issue #257 (continued): this SECOND definition is the one that
+         * actually sticks once this chunk's bytecode runs (it executes
+         * after the immediate compile-time env_define above, and both
+         * write the same name) -- plain tree-eval hardcodes GLOBAL_ENV in
+         * eval()'s own S_DEFINE_SYNTAX case, which would silently re-
+         * clobber the fix above back into GLOBAL_ENV the moment this
+         * bytecode actually runs. %tree-eval-in-env takes the target
+         * env explicitly (mirroring how c->chunk->target_env is already
+         * threaded into %rebuild-syntax-rules's own quoted 4th argument
+         * just above) instead of assuming GLOBAL_ENV unconditionally. */
+        val_t tree_eval_sym = sym_intern_cstr("%tree-eval-in-env");
         emit_ab(c, OP_LOAD_GLOBAL,
                 (uint8_t)chunk_add_const(c->chunk, tree_eval_sym), line);
         emit_const(c, whole_form, line);
-        emit_ab(c, OP_CALL, 1, line);
+        emit_const(c, c->chunk->target_env, line);
+        emit_ab(c, OP_CALL, 2, line);
     } else {
         add_syntax_local(c, name, transformer);
         emit(c, OP_VOID, line); /* define-syntax returns void */

@@ -83,6 +83,63 @@
 (check-unbound "r7rs full import: non-exported binding NOT visible"
   (lambda () (r7-full-internal)))
 
+;;; ── R7RS define-syntax (macro) isolation across library boundaries
+;;;    (issue #257) ───────────────────────────────────────────────────
+;;; compile_define_syntax (compiler_classic.c) used to always define a
+;;; top-level (scope_depth == 0) macro into GLOBAL_ENV, regardless of
+;;; the compiling chunk's own target_env -- unlike ordinary `define`
+;;; (OP_DEF_GLOBAL, already target_env-aware). So a macro defined at the
+;;; top level of ANY define-library's own (begin ...) clause was bound
+;;; directly into GLOBAL_ENV instead of that library's own environment,
+;;; silently bypassing the module system's export/import machinery
+;;; entirely: the macro was visible from anywhere in the program the
+;;; moment the library was merely LOADED, whether or not it was ever
+;;; imported, whether or not it was even exported, and an import filter
+;;; that gave it a new local name (rename) was a complete no-op, since
+;;; the module's own environment (what the filter actually operates on)
+;;; never had the binding in the first place. This section is the
+;;; negative-space complement to r7-full above (which only ever checked
+;;; the WORKING no-filter case for an ordinary procedure) -- it must use
+;;; names never referenced anywhere else in this file: merely defining
+;;; mreg257-src below, even totally unused, is exactly the scenario that
+;;; used to leak.
+(define-library (isolation mreg257-src)
+  (import (scheme base))
+  (export mreg257-exported)
+  (begin
+    (define-syntax mreg257-exported
+      (syntax-rules () ((_ x) (list 'exported x))))
+    ;; never exported -- must stay private to this library
+    (define-syntax mreg257-internal
+      (syntax-rules () ((_ x) (list 'internal x))))))
+
+;; Loading the library alone (no import at all yet) must not make
+;; either macro globally visible.
+(check-unbound "r7rs macro: defining a library does not leak its exported macro before import"
+  (lambda () (mreg257-exported 1)))
+(check-unbound "r7rs macro: defining a library never leaks a non-exported macro"
+  (lambda () (mreg257-internal 1)))
+
+(import (isolation mreg257-src))
+(check "r7rs macro: exported macro usable after import" (mreg257-exported 1) '(exported 1))
+(check-unbound "r7rs macro: non-exported macro still not visible after importing the library"
+  (lambda () (mreg257-internal 1)))
+
+;; `rename` must actually work for a macro binding (the originally
+;; reported half of #257): the renamed name works, and the library's
+;; own original name is not ALSO incidentally bound as a side effect.
+(define-library (isolation mreg257-rename-src)
+  (import (scheme base))
+  (export mreg257-orig-name)
+  (begin
+    (define-syntax mreg257-orig-name
+      (syntax-rules () ((_ x) (list 'renamed x))))))
+
+(import (rename (isolation mreg257-rename-src) (mreg257-orig-name mreg257-new-name)))
+(check "r7rs macro rename: renamed name works" (mreg257-new-name 1) '(renamed 1))
+(check-unbound "r7rs macro rename: original name not ALSO bound as a side effect"
+  (lambda () (mreg257-orig-name 1)))
+
 ;;; ── R7RS `only` ───────────────────────────────────────────────────────
 
 (define-library (isolation r7-only-src)
