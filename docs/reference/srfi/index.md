@@ -29,6 +29,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 
 | Library | SRFI | Description |
 |---------|------|-------------|
+| *no import — built into core `cond-expand`* ([`s0.md`](s0.md)) | [SRFI-0](https://srfi.schemers.org/srfi-0/) | Feature-based conditional expansion — implemented directly in the compiler/evaluator, not a library shim (`cond-expand` is a hardcoded special form; see `s0.md`) |
 | [`(srfi s1 lists)`](s1.md) | [SRFI-1](https://srfi.schemers.org/srfi-1/) | List library |
 | [`(srfi s4 uniform-vectors)`](s4.md) | [SRFI-4](https://srfi.schemers.org/srfi-4/) | Homogeneous numeric vectors — u8/s8/u16/s16/u32/s32/u64/s64vector from `(curry typedvec)` plus f64vector from `(curry f64vector)`; no f32vector (curry's numeric tower has no native single-precision type) |
 | [`(srfi s8 receive)`](s8.md) | [SRFI-8](https://srfi.schemers.org/srfi-8/) | `receive` multiple-values binding macro — shadows curry's own actor `receive` special form when imported |
