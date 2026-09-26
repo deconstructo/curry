@@ -138,6 +138,30 @@
     (check "period 0 stops further periodic firing" count seen-after-cancel))
   (timer-cancel! t))
 
+;; period 0 given directly to timer-schedule! (not just timer-reschedule!)
+;; must ALSO mean "one-shot", not "reschedule forever at an unchanged
+;; deadline" (a real bug: the initial-scheduling path was missing the
+;; same period-0-means-one-shot normalization timer-reschedule! already
+;; had, causing an immediate infinite refire/livelock).
+(let* ((t (make-timer))
+       (count 0))
+  (timer-schedule! t (lambda () (set! count (+ count 1))) 10 0)
+  (%wait-until (lambda () (>= count 1)) 500)
+  (let ((seen-once count))
+    (thread-sleep! 0.1)
+    (check "timer-schedule! with period 0 fires once, not forever" count seen-once)))
+
+;;; ---- timer-delta validation ----
+
+(check "make-timer-delta rejects a negative n"
+       (guard (e (#t 'caught))
+         (timer-schedule! (make-timer) (lambda () #f) (make-timer-delta -5 'ms)))
+       'caught)
+(check "make-timer-delta rejects an inexact n"
+       (guard (e (#t 'caught))
+         (timer-schedule! (make-timer) (lambda () #f) (make-timer-delta 1.5 'ms)))
+       'caught)
+
 ;;; ---- error handling ----
 
 ;; With an error-handler: the handler is called, and the timer keeps running.
@@ -153,6 +177,24 @@
          (%wait-until (lambda () (car ran-after)) 500)
          #t)
   (timer-cancel! t))
+
+;; If the error-handler ITSELF raises, that must not escape unguarded and
+;; kill the scheduler thread outright -- it's treated like an ordinary
+;; unhandled error: the timer stops, and the handler's own condition is
+;; what gets preserved for timer-cancel! to re-raise.
+(let* ((t (make-timer (lambda (e) (error "handler itself blew up")))))
+  (timer-schedule! t (lambda () (error "task failed")) 20)
+  ;; Poll (non-destructively) until the timer has actually stopped,
+  ;; same technique as the unhandled-error case below -- then cancel
+  ;; exactly once (timer-cancel! now destroys OS resources on its
+  ;; first successful call, so it must not be called speculatively in
+  ;; a poll loop the way it could be before that change).
+  (%wait-until
+    (lambda () (guard (e (#t #t)) (timer-schedule! t (lambda () #f) 5) #f))
+    500)
+  (check "an error-handler that raises stops the timer and preserves its own condition"
+         (guard (e (#t (error-object-message e))) (timer-cancel! t))
+         "handler itself blew up"))
 
 ;; Without an error-handler: the timer stops, and timer-cancel! re-raises
 ;; the preserved condition.

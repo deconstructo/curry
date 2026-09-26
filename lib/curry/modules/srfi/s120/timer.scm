@@ -111,13 +111,28 @@
     ;; Accepts either a timer-delta or a non-negative integer (already
     ;; milliseconds, per the SRFI text) and normalizes to a single
     ;; exact millisecond quantity for the scheduler's own internal math.
+    ;; The non-negative/exactness check is applied uniformly to the
+    ;; FINAL ms value, not just to a bare integer `x` -- a timer-delta
+    ;; with a negative or inexact `n` would otherwise sail through
+    ;; unchecked (a real gap found by review: make-timer-delta's own
+    ;; header comment claims validation happens "at construction time",
+    ;; but only ever checked `unit`, never `n`).
     (define (%->ms x who)
-      (cond
-        ((timer-delta? x) (%timer-delta->ms x))
-        ((and (integer? x) (exact? x) (>= x 0)) x)
-        (else (error (string-append who ": when/period must be a non-negative "
-                                     "exact integer (milliseconds) or a timer-delta")
-                     x))))
+      (let ((ms (if (timer-delta? x) (%timer-delta->ms x) x)))
+        (if (and (real? ms) (exact? ms) (>= ms 0))
+            ms
+            (error (string-append who ": when/period must be a non-negative "
+                                   "exact integer (milliseconds) or a timer-delta "
+                                   "with a non-negative exact n")
+                   x))))
+
+    ;; A period of 0 means "not periodic" (SRFI text: "set period to
+    ;; zero to cancel [a periodic task]") -- normalizes an already-
+    ;; converted ms period value to #f so the scheduler's own `period`
+    ;; check (a plain truthiness test) treats it as one-shot rather
+    ;; than reinserting the task forever at an unchanged deadline.
+    (define (%normalize-period period-ms)
+      (if (and period-ms (> period-ms 0)) period-ms #f))
 
     ;; ── Timer objects ────────────────────────────────────────────────────────
 
@@ -134,7 +149,27 @@
       ;; the record system itself.
       (next-id %timer-next-id %timer-next-id-set!)
       (preserved-error %timer-preserved-error %timer-preserved-error-set!)
-      (cancelled? %timer-cancelled? %timer-cancelled-set!))
+      ;; cancelled? means "should stop / has been told to stop" -- set
+      ;; the instant a stop is requested (explicitly, or by an
+      ;; unhandled task error) so nothing else can race ahead of it.
+      ;; stopped? means "the scheduler thread has actually finished its
+      ;; loop and performed its own final mutex-unlock!" -- only once
+      ;; stopped? is true is it safe for timer-cancel! to destroy the
+      ;; underlying mutex/condvar (see timer-cancel! below).
+      (cancelled? %timer-cancelled? %timer-cancelled-set!)
+      (stopped? %timer-stopped? %timer-stopped-set!)
+      ;; destroyed? means "a timer-cancel! call has already read/
+      ;; cleared preserved-error and destroyed the mutex/condvar" --
+      ;; DELIBERATELY separate from stopped?: the scheduler thread can
+      ;; reach stopped?=#t entirely on its own (e.g. it auto-stopped
+      ;; itself after an unhandled task error) before anyone has ever
+      ;; called timer-cancel! at all. Short-circuiting timer-cancel! on
+      ;; stopped? rather than destroyed? would (and, found by testing
+      ;; during development, once actually did) let the FIRST
+      ;; timer-cancel! call silently no-op and skip delivering a
+      ;; preserved error whenever the scheduler happened to already be
+      ;; fully stopped by the time it was called.
+      (destroyed? %timer-destroyed? %timer-destroyed-set!))
 
     ;; Monotonic "now", in exact milliseconds -- current-jiffy is
     ;; CLOCK_MONOTONIC-backed (src/builtins.c), so this is immune to
@@ -190,6 +225,15 @@
     ;; unhandled condition encountered (after the error-handler, if
     ;; any, already had a chance to handle it), or #f if every task's
     ;; thunk ran without an unhandled error.
+    ;;
+    ;; The call to `handler` is itself wrapped in its own guard: if a
+    ;; user-supplied error-handler raises, that escapes as an ordinary
+    ;; unhandled condition (stopping the timer) instead of propagating
+    ;; straight out of this whole function -- which would otherwise
+    ;; kill the scheduler thread outright with no `cancelled?`/
+    ;; `stopped?` bookkeeping ever happening, i.e. exactly the silent,
+    ;; undetectable failure this file's header comment says the outer
+    ;; guard exists to prevent in the first place.
     (define (%run-due-tasks! tmr due)
       (let ((handler (%timer-error-handler tmr)))
         (let loop ((ts due))
@@ -198,7 +242,7 @@
               (let ((unhandled
                       (guard (e (#t
                                  (if handler
-                                     (begin (handler e) #f)
+                                     (guard (e2 (#t e2)) (handler e) #f)
                                      e)))
                         ((%task-thunk (car ts)))
                         #f)))
@@ -207,12 +251,18 @@
     ;; The scheduler thread's own top-level loop. Runs until the timer
     ;; is cancelled (explicitly, or implicitly by an unhandled task
     ;; error with no error-handler -- see this file's header comment).
+    ;; On exit, sets stopped? and broadcasts before its own final
+    ;; mutex-unlock! -- timer-cancel! waits on exactly this signal
+    ;; before it's safe to destroy the mutex/condvar (see below).
     (define (%timer-loop! tmr)
       (let ((mx (%timer-mutex tmr)) (cv (%timer-condvar tmr)))
         (mutex-lock! mx)
         (let loop ()
           (if (%timer-cancelled? tmr)
-              (mutex-unlock! mx)
+              (begin
+                (%timer-stopped-set! tmr #t)
+                (cond-broadcast! cv)
+                (mutex-unlock! mx))
               (let* ((now (%now-ms))
                      (due (%pop-due-tasks! tmr now)))
                 (if (null? due)
@@ -231,7 +281,21 @@
                       (mutex-unlock! mx)
                       (let ((unhandled (%run-due-tasks! tmr due)))
                         (mutex-lock! mx)
-                        (when unhandled
+                        ;; Only record the error if an explicit
+                        ;; timer-cancel! didn't already run (and win)
+                        ;; while the mutex was released above -- without
+                        ;; this guard, a cancel that raced a task's own
+                        ;; unhandled error could return cleanly while
+                        ;; this branch went on to silently overwrite
+                        ;; preserved-error a moment later, orphaning the
+                        ;; condition (a real race found by review: the
+                        ;; caller who legitimately called timer-cancel!
+                        ;; never sees it, and nothing else ever will
+                        ;; either, since a preserved error is delivered
+                        ;; by the NEXT timer-cancel! call, and there is
+                        ;; no reason for the original caller to make
+                        ;; one). An explicit cancel always wins.
+                        (when (and unhandled (not (%timer-cancelled? tmr)))
                           (%timer-preserved-error-set! tmr unhandled)
                           (%timer-cancelled-set! tmr #t)))
                       (loop))))))))
@@ -245,21 +309,45 @@
         (%timer-next-id-set! tmr 0)
         (%timer-preserved-error-set! tmr #f)
         (%timer-cancelled-set! tmr #f)
+        (%timer-stopped-set! tmr #f)
+        (%timer-destroyed-set! tmr #f)
         (spawn (lambda () (%timer-loop! tmr)))
         tmr))
 
-    ;; A preserved error is delivered (raised) at most once: once this
-    ;; call has re-raised it, it's cleared, so a second timer-cancel!
-    ;; on an already-stopped timer is a harmless no-op instead of
-    ;; re-raising the same condition forever.
+    ;; Stops the timer and BLOCKS until the scheduler thread has
+    ;; actually finished its loop (see %timer-loop!'s own comment) --
+    ;; not just requested to stop -- so that by the time this call
+    ;; returns, no task will ever run again and it's safe to release
+    ;; the underlying OS mutex/condvar. A preserved error is delivered
+    ;; (raised) at most once: once read here, it's cleared, so a
+    ;; SECOND, SEQUENTIAL timer-cancel! call from the same thread on an
+    ;; already-stopped timer is a harmless no-op (the %timer-destroyed?
+    ;; check up front never touches the -- by then destroyed -- mutex
+    ;; at all). Calling timer-cancel! concurrently from multiple
+    ;; threads on the very same timer is NOT supported -- the same
+    ;; restriction (curry sync)'s own mutex-destroy!/condvar-destroy!
+    ;; already have (a mutex/condvar must not be destroyed while any
+    ;; thread might still be blocked trying to acquire it) -- ordinary
+    ;; single-owner usage (one thread creates and later cancels a given
+    ;; timer) is unaffected.
     (define (timer-cancel! tmr)
-      (mutex-lock! (%timer-mutex tmr))
-      (%timer-cancelled-set! tmr #t)
-      (let ((err (%timer-preserved-error tmr)))
-        (when err (%timer-preserved-error-set! tmr #f))
-        (cond-signal! (%timer-condvar tmr))
-        (mutex-unlock! (%timer-mutex tmr))
-        (when err (raise err))))
+      (if (%timer-destroyed? tmr)
+          (if #f #f)
+          (begin
+            (mutex-lock! (%timer-mutex tmr))
+            (%timer-cancelled-set! tmr #t)
+            (cond-signal! (%timer-condvar tmr))
+            (let wait ()
+              (unless (%timer-stopped? tmr)
+                (cond-wait! (%timer-condvar tmr) (%timer-mutex tmr))
+                (wait)))
+            (let ((err (%timer-preserved-error tmr)))
+              (when err (%timer-preserved-error-set! tmr #f))
+              (%timer-destroyed-set! tmr #t)
+              (mutex-unlock! (%timer-mutex tmr))
+              (mutex-destroy! (%timer-mutex tmr))
+              (condvar-destroy! (%timer-condvar tmr))
+              (when err (raise err))))))
 
     (define (timer-schedule! tmr thunk when . maybe-period)
       (let ((period (if (null? maybe-period) #f (car maybe-period))))
@@ -269,7 +357,7 @@
                    (error "timer-schedule!: timer is cancelled" tmr))
             (let* ((id (%timer-next-id tmr))
                    (when-ms (%->ms when "timer-schedule!"))
-                   (period-ms (and period (%->ms period "timer-schedule!"))))
+                   (period-ms (and period (%normalize-period (%->ms period "timer-schedule!")))))
               (%timer-next-id-set! tmr (+ id 1))
               (hash-table-set! (%timer-tasks tmr) id
                 (%make-task id thunk (+ (%now-ms) when-ms) period-ms))
@@ -293,7 +381,7 @@
               ;; literally "repeat every 0ms".
               (%task-when-abs-set! task (+ (%now-ms) when-ms))
               (when period-given?
-                (%task-period-set! task (if (and period-ms (> period-ms 0)) period-ms #f)))
+                (%task-period-set! task (%normalize-period period-ms)))
               (cond-signal! (%timer-condvar tmr))
               (mutex-unlock! (%timer-mutex tmr))
               id))))
