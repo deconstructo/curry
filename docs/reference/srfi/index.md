@@ -77,6 +77,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s252 property-testing)`](s252.md) | [SRFI-252](https://srfi.schemers.org/srfi-252/) | Property-based testing layered on `(srfi s64 testing)`: `test-property` and friends, plus a fixed suite of type/number generators |
 | [`(srfi s253 data-checking)`](s253.md) | [SRFI-253](https://srfi.schemers.org/srfi-253/) | Argument/return-value validation: `check-arg`, `values-checked`, `check-case`, `lambda-checked`, `case-lambda-checked`, `define-checked`, `define-record-type-checked` — works with curry's full extended type system (any predicate is a checker) |
 | [`(srfi s263 prototype-objects)`](s263.md) | [SRFI-263](https://srfi.schemers.org/srfi-263/) | Self-inspired prototype/message-passing object system — complements, doesn't replace, `(curry oop)` |
+| [`(srfi s273 extensions)`](s273.md) | [SRFI-273](https://srfi.schemers.org/srfi-273/) | Extends `(srfi 253)`: `=> (predicate ...)` return-value checking on `lambda-checked`/`case-lambda-checked`/`define-checked`, `check-impl?`, `define-check`, `declare-checked`, `define-values-checked` |
 | [`(srfi s279 inspect)`](s279.md) | [SRFI-279](https://srfi.schemers.org/srfi-279/) (draft) | `inspect-properties`/`inspect-describe` generic introspection protocol — curry-native implementation, not a port of the SRFI's own reference code (which depends on four other SRFIs curry doesn't have) |
 
 ## Portability note
