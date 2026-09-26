@@ -255,6 +255,43 @@
 (check "hash-table-dto dict-contains? false for a missing key" (dict-contains? hash-table-dto ht 999) #f)
 (check "hash-table-dto is impure" (dict-pure? hash-table-dto ht) #f)
 
+;;; ---- alist dict-for-each safety above curry's map_par_threshold ----
+;;; Regression for a real bug found by review: %derive-default's generic
+;;; dict-for-each-id used to route the caller's side-effecting proc
+;;; through the DTO's own dict-map-id, which for an alist is built on
+;;; curry's core `map` -- auto-parallelized above 8 elements. A dict big
+;;; enough to actually trigger that threshold is essential here: every
+;;; OTHER alist dict in this file has well under 8 entries and would
+;;; never have caught this. make-alist-dto now supplies its own
+;;; explicitly-sequential dict-for-each-id instead of relying on the
+;;; (unsafe-for-this-purpose) generic default.
+;; Built by counting DOWN and prepending (i=0's pair ends up at the
+;; front with no reverse needed) so key=i/value=(* i 10) unambiguously,
+;; unlike a prepend-while-counting-up-then-reverse construction, which
+;; silently pairs each key with the WRONG value (reverse flips the
+;; whole flat sequence, not pairwise) -- caught while writing this test.
+(define big-alist-d
+  (apply dict-set! equal-alist-dto '()
+    (let loop ((i 29) (acc '()))
+      (if (< i 0) acc (loop (- i 1) (cons i (cons (* i 10) acc)))))))
+(check "big alist dict-size" (dict-size equal-alist-dto big-alist-d) 30)
+(check "big alist key/value pairing is as intended" (dict-ref equal-alist-dto big-alist-d 3) 30)
+(let ((count 0))
+  (dict-for-each equal-alist-dto (lambda (k v) (set! count (+ count 1))) big-alist-d)
+  (check "big alist dict-for-each visits every association exactly once" count 30))
+(check "big alist dict->alist loses nothing" (length (dict->alist equal-alist-dto big-alist-d)) 30)
+(check "big alist dict-fold sums every value correctly"
+       (dict-fold equal-alist-dto (lambda (k v acc) (+ v acc)) 0 big-alist-d)
+       4350) ;; 10 * (0+1+...+29) = 10 * 435
+(check "big alist dict-every doesn't crash and is correct"
+       (dict-every equal-alist-dto (lambda (k v) (>= k 0)) big-alist-d) #t)
+(check "big alist dict-any finds a real match without crashing"
+       (dict-any equal-alist-dto (lambda (k v) (and (= k 15) v)) big-alist-d) 150)
+(call-with-values (lambda () (dict-pop! equal-alist-dto big-alist-d))
+  (lambda (d k v)
+    (check "big alist dict-pop! doesn't crash and removes exactly one association"
+           (dict-size equal-alist-dto d) 29)))
+
 ;;; ---- Summary ----
 
 (newline)

@@ -193,6 +193,17 @@
     ;; ...) with no extra wiring.
     (define (%derive-default dto proc-id)
       (cond
+        ;; WARNING for anyone building a new DTO: this default runs an
+        ;; arbitrary, order-sensitive, SIDE-EFFECTING caller proc through
+        ;; the DTO's own dict-map-id -- safe ONLY if that dict-map-id is
+        ;; guaranteed to invoke its callback strictly sequentially, once
+        ;; per association, in a single thread. A dict-map-id backed by a
+        ;; parallelizing primitive (like curry's own core `map`, which
+        ;; auto-parallelizes above 8 elements) is NOT safe here -- give
+        ;; such a DTO its own explicit, genuinely-sequential
+        ;; dict-for-each-id instead of relying on this default (see
+        ;; make-alist-dto's own dict-for-each-id below for exactly this;
+        ;; a real bug, found by review, before it had one).
         ((eq? proc-id dict-for-each-id)
          (lambda (proc dict . range)
            (let* ((cmp (dict-comparator dto dict))
@@ -448,7 +459,32 @@
                    (lambda (nk nv) (%alist-replace equal? key nk nv alist))
                    (lambda () (%alist-remove equal? key alist))))
                 (else (loop (cdr lst))))))
+        ;; dict-map-id is built on the core `map` builtin, which curry
+        ;; auto-parallelizes across worker threads above map_par_threshold
+        ;; (default 8 elements, see src/builtins_curry.c) -- perfectly
+        ;; safe for dict-map's OWN documented contract (proc must be
+        ;; pure), but %derive-default's own generic dict-for-each-id
+        ;; derivation (above) smuggles an arbitrary, order-sensitive,
+        ;; side-effecting caller proc through whatever dict-map-id
+        ;; happens to be -- a real bug found by review: an alist dict
+        ;; with more than 8 entries and no native dict-for-each-id of
+        ;; its own produced silently-wrong dict-fold/dict->alist results
+        ;; (lost associations from racing worker threads) and outright
+        ;; crashes (SIGBUS) from dict-pop!'s call/cc escape being invoked
+        ;; from a worker thread whose stack had already unwound. Every
+        ;; DTO whose dict-map isn't guaranteed strictly-sequential for an
+        ;; arbitrary callback -- this one included -- MUST supply its own
+        ;; dict-for-each-id rather than relying on the generic default;
+        ;; srfi-69-dto/hash-table-dto below already do, for the same
+        ;; reason (their own underlying hash-table-walk is sequential,
+        ;; but making that explicit here rather than relying on the
+        ;; derivation to happen to be safe is the whole point).
         dict-map-id (lambda (proc alist) (map (lambda (kv) (cons (car kv) (proc (car kv) (cdr kv)))) alist))
+        dict-for-each-id
+          (lambda (proc alist . range)
+            (let loop ((lst alist))
+              (if (pair? lst)
+                  (begin (proc (caar lst) (cdar lst)) (loop (cdr lst))))))
         dict-pure?-id (lambda (dict) #t)
         dict-remove-id (lambda (pred alist)
                          (let loop ((lst alist) (acc '()))
