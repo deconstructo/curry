@@ -136,6 +136,17 @@ check "-e expression" "$out" "eval-ok"
 out=$("$CURRY" -v 2>&1 || true)
 check_contains "-v shows version" "$out" "Curry"
 
+# SRFI-176: -V prints version-alist info in LOSE format and exits 0.
+set +e
+out=$("$CURRY" -V 2>&1)
+exit_code=$?
+set -e
+check "-V exits 0" "$exit_code" "0"
+check_contains "-V output has (command ...)" "$out" "(command \"curry\")"
+check_contains "-V output has (version ...)" "$out" "(version "
+first_char=$(printf '%s' "$out" | head -c1)
+check "-V's first line starts with '(' in column 1 (LOSE requirement)" "$first_char" "("
+
 # ─── Shebang handling in .scm files ───────────────────────────────────────────
 
 out=$("$CURRY" "$SHEBANG_SCM")

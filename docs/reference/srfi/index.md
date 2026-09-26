@@ -67,6 +67,7 @@ The same import-collision caveat as `(srfi N)` above applies identically here (i
 | [`(srfi s160 uniform-vectors)`](s160.md) | [SRFI-160](https://srfi.schemers.org/srfi-160/) | Extended homogeneous numeric vector ops (map/fold/filter/comparator/generator) for all 9 kinds, layered on `(srfi s4 uniform-vectors)` |
 | [`(srfi s170 posix)`](s170.md) | [SRFI-170](https://srfi.schemers.org/srfi-170/) | POSIX API (subset) — thin re-export of `(curry posix)`, requires `-DBUILD_MODULE_POSIX=ON` (default) |
 | [`(srfi s174 posix-timespecs)`](s174.md) | [SRFI-174](https://srfi.schemers.org/srfi-174/) | Immutable `(seconds nanoseconds)` time-instant type |
+| [`(srfi s176 version-flag)`](s176.md) | [SRFI-176](https://srfi.schemers.org/srfi-176/) | `version-alist` plus a `-V` CLI flag printing the same info in LOSE (Line-Oriented S-Expressions) format |
 | [`(srfi s194 random-data-samples)`](s194.md) | [SRFI-194](https://srfi.schemers.org/srfi-194/) | Random integer/real/boolean/char generators plus distribution samplers |
 | [`(srfi s195 multiple-value-boxes)`](s195.md) | [SRFI-195](https://srfi.schemers.org/srfi-195/) | Multiple-value boxes — extends `(srfi s111 boxes)` with `box-arity`/`unbox-value`/`set-box-value!` |
 | [`(srfi s209 enums)`](s209.md) | [SRFI-209](https://srfi.schemers.org/srfi-209/) | Enums and enum sets — typed, ordered symbolic constants with a name/ordinal/value, grouped into disjoint enum types; `define-enum`/`define-enumeration` sugar |
