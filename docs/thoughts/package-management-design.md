@@ -1,11 +1,21 @@
 # curry pkg — The Bīt Ṭuppi Design
 ## A Package Manager for Curry
 
-*Public draft — 2026-08-08. Supersedes `docs/guides/pkg-design.md` (kept in
-place as historical background — see that file for the original
-candidates/assessment reasoning this document builds on and, in one place,
-overturns). Feedback wanted: open a GitHub issue on the curry repository
-tagged `pkg-design`.*
+*Public draft — 2026-08-08, revised 2026-09-27. Supersedes
+`docs/guides/pkg-design.md` (kept in place as historical background — see
+that file for the original candidates/assessment reasoning this document
+builds on and, in one place, overturns). Feedback wanted: open a GitHub
+issue on the curry repository tagged `pkg-design`.*
+
+*2026-09-27 revision note: §9's SRFI-porting recommendation was written
+speculatively, before it had been exercised. It has since been put into
+practice repeatedly — eight new SRFIs (0, 28, 29, 120, 176, 208, 225, 273)
+landed in curry's own tree in the interim, following exactly the
+three-path naming convention §9 proposed, each with its own full test
+suite and an independent review pass before merge. §9 and §10 are updated
+below with what that experience actually surfaced, including one real,
+previously-unknown module-system defect that a design built on top of
+curry's `define-library` isolation needed to not have.*
 
 ---
 
@@ -483,6 +493,49 @@ around unchanged source; a guide showing exactly how to do that captures
 most of the value the automated route would, at a fraction of the ongoing
 cost.
 
+**Update, 2026-09-27: this is no longer speculative.** Eight SRFIs (0, 28,
+29, 120, 176, 208, 225, 273) were ported/implemented into curry's own tree
+since this document was first drafted, each using exactly the naming
+template above (`(srfi N)`, `(srfi srfi-N)`, `(srfi sN title-words)`,
+except 0 and 61 — see below). Three things that experience surfaced, worth
+folding into the eventual porting guide rather than leaving as tribal
+knowledge:
+
+- **Check `docs/reference/srfi/index.md` before porting anything.**
+  SRFI-215 turned out to already be implemented; SRFI-0 and SRFI-61 turned
+  out to already be fully covered by curry's own hardcoded `cond-expand`/
+  `cond` special forms (documented as such, with no `.sld` shim at all,
+  once that was confirmed) — an auto-generator or a porting guide that
+  didn't lead with "is this already here, under a name or in a form you
+  didn't expect" would have produced redundant or actively conflicting
+  work in both cases.
+- **A full test suite plus an independent review pass is not optional
+  ceremony — it found a real, distinct bug in nearly every one of the
+  eight ports**, not edge-case nitpicks: `check-impl?` being silently
+  treated as an ordinary predicate and called (always raising) instead of
+  recognized as its own special marker, in exactly one specific argument
+  position of SRFI-273's `case-lambda-checked`, a data-race that silently
+  corrupted results and crashed the process on SRFI-225 dictionaries over
+  eight entries (curry's `map` auto-parallelizes past that threshold, and
+  a derived default routed a side-effecting callback through it), an
+  incomplete escape-hatch fix in the SRFI-208 reader change, and a
+  dotted-list input crashing SRFI-29's `declare-bundle!` into the wrong
+  error entirely. None of these were caught by "the happy-path examples
+  from the spec work" — every one needed either a test deliberately
+  shaped to hit a boundary the author's own examples didn't (a dict past
+  the parallelization threshold; a malformed, not just wrong-typed,
+  specifier) or a second reader independent of the implementing session.
+  **The porting guide this section commits to should require both a real
+  test suite and an independent review before a port is considered done,
+  not present them as best-effort extras** — this is now a proven,
+  repeated pattern, not a one-off precaution.
+- **The three-path naming convention itself held up with no changes
+  needed** across all eight ports, including two (0, 61) that don't fit
+  the `.sld`-file shape at all — those get documented with a `*no
+  import — built into core X*` table entry instead, a pattern worth
+  naming explicitly in the porting guide as the answer for "this SRFI
+  turns out to already be a hardcoded special form."
+
 ---
 
 ## 10. What Must Change in curry Itself
@@ -515,6 +568,24 @@ dangling question.
   this list that isn't fully resolved — the recommended `CURRY_MODULE_PATH`-
   style override is a real answer, but it hasn't been built or tested, and
   is honestly flagged as such rather than presented as settled.
+- **Already fixed, 2026-09-27: a real cross-library macro-isolation defect
+  that this whole design silently assumed didn't exist.** A package
+  ecosystem's correctness depends on `define-library`'s isolation actually
+  holding — one package's internal, unexported macro must never leak into
+  another's namespace. It didn't hold: `compile_define_syntax`
+  (`src/compiler_classic.c`) defined every top-level macro directly into
+  `GLOBAL_ENV`, ignoring which library's own environment it was compiled
+  against, so a macro became globally visible the instant its library was
+  merely *loaded* — whether or not it was ever imported, whether or not it
+  was even exported. Originally reported as "`import`'s `rename` filter
+  doesn't work for macros" (issue #257); the rename symptom was incidental
+  — the real defect was this leak, found and fixed while porting SRFI-273
+  and SRFI-120 this cycle. Filed, fixed, and covered by regression tests
+  in `tests/module_isolation_tests.scm` before this document's revision.
+  Stated here because this document was written and published *before*
+  the defect was found, on the unstated assumption that curry's own
+  library isolation already worked correctly enough to build a package
+  system on top of — it didn't, and now does.
 
 ---
 
@@ -632,9 +703,14 @@ reasoning above, not lightly.
    style session override the right shape for local-development ergonomics
    under a global-install model, or does this quietly need real per-
    project environments sooner than §3 assumes?
-3. **The egg/SRFI porting scope** (§9) — is a manual guide really enough,
-   or does the value of automated porting kick in earlier than estimated
-   here?
+3. **The egg/SRFI porting scope** (§9) — for the SRFI half specifically, a
+   manual guide has since held up across eight real ports (§9's
+   2026-09-27 update); still genuinely open for the CHICKEN-egg half,
+   which hasn't been exercised at all yet — porting an actual `.egg`
+   package, not a SRFI reference implementation, may surface different
+   friction (real inter-egg dependencies, CHICKEN-specific idioms in the
+   source itself) that this cycle's evidence says nothing about either
+   way.
 
 Feedback: open a GitHub issue on the curry repository tagged `pkg-design`.
 
