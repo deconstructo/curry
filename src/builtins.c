@@ -350,6 +350,60 @@ static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; r
 static val_t prim_negative_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_negative(av[0])); }
 static val_t prim_nan_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_nan(av[0])); }
 static val_t prim_infinite_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_infinite(av[0])); }
+
+/* SRFI-208 support: raw IEEE-754 bit-pattern access for a flonum. Scheme-
+ * level numeric operations on a NaN never expose its sign/quiet/payload
+ * bits (arithmetic is free to canonicalize/collapse them) -- a union-
+ * style bit-pun through a C double is the only way to actually construct
+ * or inspect a specific NaN encoding, which is exactly the technique the
+ * SRFI's own reference implementation uses. These two primitives are
+ * deliberately the ONLY new surface this adds: everything else (field
+ * extraction/construction, validation) is ordinary bitwise-integer
+ * arithmetic, implemented in Scheme against the raw uint64 pattern --
+ * see lib/curry/modules/srfi/s208/nan-procedures.scm. Only ever a full
+ * 64-bit unsigned pattern: curry's numeric tower has no native single-
+ * precision float type, so SRFI-208's own optional single-precision path
+ * is out of scope (see that file's own header comment). */
+static val_t prim_flonum_raw_bits(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    if (!vis_flonum(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%flonum-raw-bits: not a flonum");
+    double d = vfloat(av[0]);
+    uint64_t bits; memcpy(&bits, &d, sizeof(bits));
+    if (bits <= (uint64_t)FIXNUM_MAX) return vfix((intptr_t)bits);
+    if (bits <= (uint64_t)INT64_MAX) return num_make_bignum_i((long)bits);
+    /* Top bit set (a negative flonum, i.e. sign bit 63 on): exceeds
+     * signed long's range entirely -- build the bignum via GMP directly,
+     * same technique modules/typedvec.c's own TV_U64 reader uses. */
+    { mpz_t z; mpz_init_set_ui(z, (unsigned long)(bits >> 32));
+      mpz_mul_2exp(z, z, 32);
+      mpz_add_ui(z, z, (unsigned long)(bits & 0xFFFFFFFFu));
+      val_t r = make_big_from_mpz(z); mpz_clear(z);
+      return r; }
+}
+static val_t prim_raw_bits_flonum(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    uint64_t bits;
+    if (vis_fixnum(av[0])) {
+        intptr_t x = vunfix(av[0]);
+        if (x < 0) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%raw-bits->flonum: expected a non-negative exact integer");
+        bits = (uint64_t)x;
+    } else if (vis_bignum(av[0])) {
+        Bignum *b = as_big(av[0]);
+        if (mpz_sgn(b->z) < 0) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%raw-bits->flonum: expected a non-negative exact integer");
+        if (mpz_sizeinbase(b->z, 2) > 64) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%raw-bits->flonum: value exceeds 64 bits");
+        unsigned long lo, hi;
+        mpz_t tmp; mpz_init(tmp);
+        mpz_tdiv_r_2exp(tmp, b->z, 32); lo = mpz_get_ui(tmp);
+        mpz_tdiv_q_2exp(tmp, b->z, 32); hi = mpz_get_ui(tmp);
+        mpz_clear(tmp);
+        bits = ((uint64_t)hi << 32) | (uint64_t)lo;
+    } else {
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%%raw-bits->flonum: expected an exact integer");
+        return V_VOID; /* unreachable */
+    }
+    double d; memcpy(&d, &bits, sizeof(d));
+    return num_make_float(d);
+}
 static val_t prim_finite_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_finite(av[0])); }
 static val_t prim_odd_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud;
     if (vis_fixnum(av[0])) return vbool(vunfix(av[0]) & 1);
@@ -3698,6 +3752,8 @@ void builtins_register(val_t env) {
     DEF("zero?",        prim_zero_p,      1,1); DEF("positive?",   prim_positive_p,  1,1);
     DEF("negative?",    prim_negative_p,  1,1); DEF("nan?",        prim_nan_p,       1,1);
     DEF("infinite?",    prim_infinite_p,  1,1); DEF("finite?",     prim_finite_p,    1,1);
+    DEF("%flonum-raw-bits", prim_flonum_raw_bits, 1,1);
+    DEF("%raw-bits->flonum", prim_raw_bits_flonum, 1,1);
     DEF("odd?",         prim_odd_p,       1,1); DEF("even?",       prim_even_p,      1,1);
     DEF("quaternion?",  prim_quat_p,      1,1); DEF("octonion?",   prim_oct_p,       1,1);
     DEF("bignum?",      prim_bignum_p,    1,1); DEF("multivector?", prim_mv_p,       1,1);
