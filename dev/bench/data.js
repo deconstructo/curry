@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790405845418,
+  "lastUpdate": 1790415256948,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -16766,6 +16766,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 48.918,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3b729898d4e1f73d3ea4af08a978050e46fc3e76",
+          "message": "Merge pull request #262 from deconstructo/fix/257-define-syntax-target-env\n\nfix(compiler): define-syntax at library top level leaked into GLOBAL_ENV (fixes #257)",
+          "timestamp": "2026-09-26T19:33:32+10:00",
+          "tree_id": "71b1f54c2e3ef71606fe8713c60dd848aa74f77e",
+          "url": "https://github.com/deconstructo/curry/commit/3b729898d4e1f73d3ea4af08a978050e46fc3e76"
+        },
+        "date": 1790415256049,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.113,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 36.039,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.129,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 41.064,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 187.002,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 326.623,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.234,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.333,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 83.265,
             "unit": "ms"
           }
         ]
