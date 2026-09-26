@@ -107,6 +107,15 @@
 (check "a bare (non-list) bundle specifier is rejected"
        (guard (e (#t 'caught)) (declare-bundle! 't29lib '()))
        'caught)
+;; Regression (found by review): a dotted (improper) list used to crash
+;; into a raw "car: not a pair" error instead of the same clean
+;; validation message every other malformed specifier produces.
+(check "a dotted-list bundle specifier is rejected with the same clean message as other malformed specifiers"
+       (guard (e (#t (error-object-message e))) (declare-bundle! (cons 'a 'b) '()))
+       "declare-bundle!: bundle specifier must be a non-empty list of symbols")
+(check "a longer dotted-list bundle specifier is also rejected cleanly"
+       (guard (e (#t (error-object-message e))) (declare-bundle! (cons 'a (cons 'b 'c)) '()))
+       "declare-bundle!: bundle specifier must be a non-empty list of symbols")
 
 ;;; ---- store-bundle! / load-bundle! (always #f per the SRFI's own text) ----
 

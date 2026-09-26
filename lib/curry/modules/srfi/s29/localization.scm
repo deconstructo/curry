@@ -55,8 +55,14 @@
     ;; choice of a flat association list (*localization-bundles*).
     (define %bundles '())
 
+    ;; (list? spec) rules out an improper (dotted) list up front -- found
+    ;; by review: without it, a dotted spec like (cons 'a 'b) walked all
+    ;; the way to its non-pair, non-null tail and crashed on (car s))
+    ;; with a raw "car: not a pair" error instead of this procedure's own
+    ;; clean validation message.
     (define (%valid-specifier? spec)
-      (and (pair? spec) (let loop ((s spec)) (or (null? s) (and (symbol? (car s)) (loop (cdr s)))))))
+      (and (pair? spec) (list? spec)
+           (let loop ((s spec)) (or (null? s) (and (symbol? (car s)) (loop (cdr s)))))))
 
     (define (declare-bundle! bundle-specifier alist)
       (if (not (%valid-specifier? bundle-specifier))
