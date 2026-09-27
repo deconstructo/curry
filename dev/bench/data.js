@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790498240464,
+  "lastUpdate": 1790501334391,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -17387,6 +17387,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 94.11,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a152725052ceba15d12cc8d5b3025bf48794587",
+          "message": "Merge pull request #280 from deconstructo/feature/srfi-272\n\nAdd SRFI-272 (Pretty Printing)",
+          "timestamp": "2026-09-27T19:28:12+10:00",
+          "tree_id": "14226202ff330a9c5e83850c61eedd599b86b91e",
+          "url": "https://github.com/deconstructo/curry/commit/0a152725052ceba15d12cc8d5b3025bf48794587"
+        },
+        "date": 1790501333441,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.518,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 33.141,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.202,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.949,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 194.417,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 332.25,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 74.861,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.755,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 87.922,
             "unit": "ms"
           }
         ]
