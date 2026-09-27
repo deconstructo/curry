@@ -88,11 +88,30 @@
                 (loop (%scan-block-comment-end text (+ i 2) len) depth started))
                ((and (char=? c #\#) (< (+ i 1) len) (char=? (string-ref text (+ i 1)) #\\))
                 (loop (+ i 3) depth #t))
+               ;; `#;datum` -- a datum comment -- contributes nothing to
+               ;; paren depth or `started`: skip past "#;", any
+               ;; whitespace/comments before the commented-out datum,
+               ;; then exactly that one datum (recursively, via this
+               ;; same scanner), and resume as if none of it were here.
+               ((and (char=? c #\#) (< (+ i 1) len) (char=? (string-ref text (+ i 1)) #\;))
+                (let* ((after-marker (%skip-ws-and-comments text (+ i 2) len))
+                       (after-datum (%scan-form-end text after-marker len)))
+                  (loop after-datum depth started)))
                ((or (char=? c #\() (char=? c #\[)) (loop (+ i 1) (+ depth 1) #t))
                ((or (char=? c #\)) (char=? c #\])) (loop (+ i 1) (- depth 1) #t))
                ((char=? c #\;) (loop (%scan-line-end text i len) depth started))
                ((and (= depth 0) started) i)
                (else (loop (+ i 1) depth #t))))))))
+
+    (define (%skip-ws-and-comments text i len)
+      (let loop ((i i))
+        (cond
+          ((>= i len) i)
+          ((char-whitespace? (string-ref text i)) (loop (+ i 1)))
+          ((char=? (string-ref text i) #\;) (loop (%scan-line-end text i len)))
+          ((and (char=? (string-ref text i) #\#) (< (+ i 1) len) (char=? (string-ref text (+ i 1)) #\|))
+           (loop (%scan-block-comment-end text (+ i 2) len)))
+          (else i))))
 
     (define (%scan-string-end text i len)
       (let loop ((i i))

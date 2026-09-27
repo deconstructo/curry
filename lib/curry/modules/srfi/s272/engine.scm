@@ -188,38 +188,61 @@
       (apply string-append (map (lambda (p) (if (pair? p) (cdr p) p)) pairs)))
 
     ;; ── Cycle/sharing detection ──────────────────────────────────────────────
+    ;;
+    ;; All three traversals below are written as an explicit work-stack
+    ;; loop rather than plain car/cdr recursion. This library is a
+    ;; define-library body, tree-walked via eval() (see CLAUDE.md's own
+    ;; non-tail-recursion stack-depth guard), so a naive `(begin (walk
+    ;; (car o)) (walk (cdr o)))` -- neither call in tail position, since
+    ;; there's bookkeeping after both -- overflows that guard on any
+    ;; ordinary list longer than a few hundred elements: real user data,
+    ;; not an obscure edge case, and the exact kind of bug this SRFI
+    ;; exists to handle gracefully. Every `loop` call below IS a tail
+    ;; call, so stack depth stays O(1) regardless of input length; the
+    ;; work list itself (heap-allocated, GC-managed) carries the O(n)
+    ;; cost instead.
 
     (define (%shareable? obj) (or (pair? obj) (vector? obj)))
 
+    (define (%children o)
+      (if (pair? o) (list (car o) (cdr o)) (vector->list o)))
+
+    ;; DFS with post-order 'leave markers so on-stack correctly reflects
+    ;; "currently being visited" (for genuine-cycle detection) rather
+    ;; than "ever visited".
     (define (%scan-cycles! obj on-stack done cyclic)
-      (when (%shareable? obj)
-        (cond
-          ((hash-table-exists? cyclic obj) (if #f #f))
-          ((hash-table-exists? on-stack obj) (hash-table-set! cyclic obj #t))
-          ((hash-table-exists? done obj) (if #f #f))
-          (else
-           (hash-table-set! on-stack obj #t)
-           (if (pair? obj)
-               (begin (%scan-cycles! (car obj) on-stack done cyclic)
-                      (%scan-cycles! (cdr obj) on-stack done cyclic))
-               (let loop ((i 0))
-                 (when (< i (vector-length obj))
-                   (%scan-cycles! (vector-ref obj i) on-stack done cyclic)
-                   (loop (+ i 1)))))
-           (hash-table-delete! on-stack obj)
-           (hash-table-set! done obj #t)))))
+      (let loop ((stack (list (cons 'visit obj))))
+        (if (null? stack)
+            (if #f #f)
+            (let ((tag (caar stack)) (o (cdar stack)) (rest (cdr stack)))
+              (cond
+                ((eq? tag 'leave)
+                 (hash-table-delete! on-stack o)
+                 (hash-table-set! done o #t)
+                 (loop rest))
+                ((not (%shareable? o)) (loop rest))
+                ((hash-table-exists? cyclic o) (loop rest))
+                ((hash-table-exists? on-stack o) (hash-table-set! cyclic o #t) (loop rest))
+                ((hash-table-exists? done o) (loop rest))
+                (else
+                 (hash-table-set! on-stack o #t)
+                 (loop (append (map (lambda (c) (cons 'visit c)) (%children o))
+                               (cons (cons 'leave o) rest)))))))))
 
     (define (%scan-refcounts! obj counts done)
-      (when (%shareable? obj)
-        (hash-table-update!/default counts obj (lambda (n) (+ n 1)) 0)
-        (when (not (hash-table-exists? done obj))
-          (hash-table-set! done obj #t)
-          (if (pair? obj)
-              (begin (%scan-refcounts! (car obj) counts done) (%scan-refcounts! (cdr obj) counts done))
-              (let loop ((i 0))
-                (when (< i (vector-length obj))
-                  (%scan-refcounts! (vector-ref obj i) counts done)
-                  (loop (+ i 1))))))))
+      (let loop ((stack (list obj)))
+        (if (null? stack)
+            (if #f #f)
+            (let ((o (car stack)) (rest (cdr stack)))
+              (cond
+                ((not (%shareable? o)) (loop rest))
+                (else
+                 (hash-table-update!/default counts o (lambda (n) (+ n 1)) 0)
+                 (if (hash-table-exists? done o)
+                     (loop rest)
+                     (begin
+                       (hash-table-set! done o #t)
+                       (loop (append (%children o) rest))))))))))
 
     ;; mode is 'graph, 'circle, or 'simple. Returns an eq?-hash-table
     ;; from object -> sequential label number, for exactly the objects
@@ -241,17 +264,18 @@
                         (else (lambda (o) #f))))
                     (seen (make-hash-table eq?))
                     (next 0))
-                (let walk ((o obj))
-                  (when (and (%shareable? o) (not (hash-table-exists? seen o)))
-                    (hash-table-set! seen o #t)
-                    (when (needs-label? o)
-                      (hash-table-set! labels o next)
-                      (set! next (+ next 1)))
-                    (if (pair? o)
-                        (begin (walk (car o)) (walk (cdr o)))
-                        (let loop ((i 0))
-                          (when (< i (vector-length o)) (walk (vector-ref o i)) (loop (+ i 1)))))))
-                labels)))))
+                (let loop ((stack (list obj)))
+                  (if (null? stack)
+                      labels
+                      (let ((o (car stack)) (rest (cdr stack)))
+                        (cond
+                          ((or (not (%shareable? o)) (hash-table-exists? seen o)) (loop rest))
+                          (else
+                           (hash-table-set! seen o #t)
+                           (when (needs-label? o)
+                             (hash-table-set! labels o next)
+                             (set! next (+ next 1)))
+                           (loop (append (%children o) rest))))))))))))
 
     ;; ── Doc tree constructors ────────────────────────────────────────────────
 
@@ -319,7 +343,9 @@
       (let ((hook (%find-matching-hook obj)))
         (cond
           (hook (%hook-doc obj hook depth labels printed mode))
-          ((and (pp-level) (> depth (pp-level)) (%shareable? obj))
+          ;; Spec: the root is level 0; a component at a level EQUAL TO
+          ;; OR EXCEEDING pp-level gets stubbed -- so >=, not >.
+          ((and (pp-level) (>= depth (pp-level)) (%shareable? obj))
            (%doc-atom (pp-level-stub)))
           ((and (not (eq? mode 'simple)) (%shareable? obj) (hash-table-exists? labels obj))
            (let ((n (hash-table-ref labels obj)))

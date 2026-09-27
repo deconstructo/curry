@@ -14,10 +14,15 @@
         (prefix (srfi 272 basic) bas:)
         (prefix (srfi srfi-272 basic) basalias:)
         (prefix (srfi 272 intermediate) int:)
+        (prefix (srfi srfi-272 intermediate) intalias:)
         (prefix (srfi 272 advanced) adv:)
+        (prefix (srfi srfi-272 advanced) advalias:)
         (prefix (srfi 272 fancy) fan:)
+        (prefix (srfi srfi-272 fancy) fanalias:)
         (prefix (srfi 272 colorize) col:)
-        (prefix (srfi 272 measure) mea:))
+        (prefix (srfi srfi-272 colorize) colalias:)
+        (prefix (srfi 272 measure) mea:)
+        (prefix (srfi srfi-272 measure) meaalias:))
 
 (define pass-count 0)
 (define fail-count 0)
@@ -77,6 +82,17 @@
 (check "basic pp width break" "(a\n b\n c\n d)\n"
   (capture (lambda (p) (parameterize ((bas:pp-width 3)) (bas:pp '(a b c d) p)))))
 
+;; Regression: pp-circle defaults to #t, so ordinary pp/pprint always
+;; runs the circle-detection scan; that scan used to recurse via plain
+;; car/cdr calls (none in tail position), overflowing this
+;; define-library's tree-walked stack-depth guard on any list longer
+;; than a few hundred elements -- an entirely ordinary input, not an
+;; edge case. Must complete without error.
+(check "basic pp handles long ordinary list without stack overflow" #t
+  (begin (bas:pp (make-list 5000 1) (open-output-string)) #t))
+(check "basic pprint-shared handles long ordinary list without stack overflow" #t
+  (begin (bas:pprint-shared (make-list 5000 1) (open-output-string)) #t))
+
 ;; ── intermediate: keyword args, pp*, pprint-file, pretty-style ──────────────
 
 (check "int pp default" "(1 2 3)\n" (capture (lambda (p) (int:pp '(1 2 3) p))))
@@ -86,8 +102,14 @@
   (capture (lambda (p) (int:pp* '(a b c) p (list 'pp-width 3)))))
 (check "int pp-length truncation" "(1 2 ...)\n"
   (capture (lambda (p) (int:pp '(1 2 3 4 5) p 'pp-length 2))))
-(check "int pp-level truncation" "(1 (2 ...))\n"
+;; Spec: root is level 0, elements level 1, etc.; a component at a
+;; level EQUAL TO OR EXCEEDING pp-level is stubbed -- so with pp-level
+;; 1, the level-1 element (2 (3 4)) is stubbed in full, and with
+;; pp-level 0 the root itself (level 0) is stubbed in full.
+(check "int pp-level truncation" "(1 ...)\n"
   (capture (lambda (p) (int:pp '(1 (2 (3 4))) p 'pp-level 1))))
+(check "int pp-level 0 stubs the root itself" "...\n"
+  (capture (lambda (p) (int:pp '(1 2) p 'pp-level 0))))
 (check "int pretty-style roundtrip" 'blue
   (begin (int:pretty-style 'accent 'blue) (int:pretty-style 'accent)))
 (check "int pretty-style missing" #f (int:pretty-style 'never-set-xyz))
@@ -159,6 +181,17 @@
     (let ((out (capture (lambda (p) (fan:pprint-file/html in p)))))
       (and (>= (%string-index out "<pre>") 0) (>= (%string-index out "</pre>") 0)))))
 
+;; Regression: a `#;datum` comment used to fall through to the generic
+;; line-comment branch (a bare `;` right after `#`), swallowing
+;; everything to end-of-line -- including any other top-level form on
+;; that same line -- instead of skipping just the commented-out datum.
+(let ((in "/tmp/curry-srfi272-test-fancy-dc.scm"))
+  (call-with-port (open-output-file in)
+    (lambda (p) (display "(+ 1 #;(ignored) 2)\n(display \"after\")\n" p)))
+  (check "fancy pprint-file #;datum comment doesn't eat following code" #t
+    (let ((out (capture (lambda (p) (fan:pprint-file in p)))))
+      (>= (%string-index out "after") 0))))
+
 ;; ── colorize ─────────────────────────────────────────────────────────────
 
 (check "col sgr0 basic fg" "31" (col:sgr0 1))
@@ -192,6 +225,15 @@
 (check "measure parameter is overridable" 42
   (parameterize ((mea:char-width-procedure (lambda (c) 42)))
     ((mea:char-width-procedure) #\a)))
+
+;; ── (srfi srfi-272 X) alias coverage for the remaining tiers ────────────────
+;; (minimalist and basic aliases are already exercised above)
+
+(check "intermediate alias functions" "(1 2 3)\n" (capture (lambda (p) (intalias:pp '(1 2 3) p))))
+(check "advanced alias functions" 10 (advalias:pp-radix))
+(check "fancy alias functions" "(1 2 3)\n" (capture (lambda (p) (fanalias:pp '(1 2 3) p))))
+(check "colorize alias functions" "31" (colalias:sgr0 1))
+(check "measure alias functions" 1 ((meaalias:char-width-procedure) #\a))
 
 ;; ── summary ──────────────────────────────────────────────────────────────
 
