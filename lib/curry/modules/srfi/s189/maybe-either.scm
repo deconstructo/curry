@@ -87,9 +87,14 @@
     (define (maybe? obj) (or (just? obj) (nothing? obj)))
     (define (either? obj) (or (right? obj) (left? obj)))
 
-    (define (list->just lst) (%make-just lst))
-    (define (list->left lst) (%make-left lst))
-    (define (list->right lst) (%make-right lst))
+    ;; list-copy: these containers are documented as immutable, so the
+    ;; payload must not alias a list the caller can still mutate after
+    ;; construction (a real bug, found by review: without copying,
+    ;; `(set-car! lst 999)` after `(list->just lst)` silently mutated the
+    ;; already-constructed Just's own payload).
+    (define (list->just lst) (%make-just (list-copy lst)))
+    (define (list->left lst) (%make-left (list-copy lst)))
+    (define (list->right lst) (%make-right (list-copy lst)))
 
     ;; ── Conversions between Maybe and Either ────────────────────────────────
 
@@ -261,21 +266,28 @@
     ;; two-values (a second #f flag = failure), plus the exception
     ;; protocol (a raised condition = failure).
 
-    (define (maybe->list m) (if (just? m) (just-payload m) '()))
-    (define (either->list e) (if (right? e) (right-payload e) '()))
-    (define (list->maybe lst) (if (null? lst) (nothing) (%make-just lst)))
-    (define (list->either lst . objs) (if (null? lst) (apply left objs) (%make-right lst)))
+    ;; Copying both on the way in (list->maybe/list->either, matching
+    ;; list->just/list->left/list->right above) and on the way out
+    ;; (maybe->list/either->list) -- an extracted list handed back to
+    ;; caller code is just as capable of being mutated afterward as a
+    ;; caller-supplied one is of being mutated before construction, and
+    ;; both would otherwise corrupt this "immutable" container's own
+    ;; internal state the same way.
+    (define (maybe->list m) (if (just? m) (list-copy (just-payload m)) '()))
+    (define (either->list e) (if (right? e) (list-copy (right-payload e)) '()))
+    (define (list->maybe lst) (if (null? lst) (nothing) (%make-just (list-copy lst))))
+    (define (list->either lst . objs) (if (null? lst) (apply left objs) (%make-right (list-copy lst))))
 
     (define (maybe->truth m) (if (just? m) (car (just-payload m)) #f))
     (define (either->truth e) (if (right? e) (car (right-payload e)) #f))
     (define (truth->maybe obj) (if obj (just obj) (nothing)))
     (define (truth->either obj . objs) (if obj (right obj) (apply left objs)))
 
-    (define (maybe->list-truth m) (if (just? m) (just-payload m) #f))
-    (define (either->list-truth e) (if (right? e) (right-payload e) #f))
-    (define (list-truth->maybe lst-or-f) (if lst-or-f (%make-just lst-or-f) (nothing)))
+    (define (maybe->list-truth m) (if (just? m) (list-copy (just-payload m)) #f))
+    (define (either->list-truth e) (if (right? e) (list-copy (right-payload e)) #f))
+    (define (list-truth->maybe lst-or-f) (if lst-or-f (%make-just (list-copy lst-or-f)) (nothing)))
     (define (list-truth->either lst-or-f . objs)
-      (if lst-or-f (%make-right lst-or-f) (apply left objs)))
+      (if lst-or-f (%make-right (list-copy lst-or-f)) (apply left objs)))
 
     (define (maybe->generation m) (if (just? m) (car (just-payload m)) (eof-object)))
     (define (either->generation e) (if (right? e) (car (right-payload e)) (eof-object)))
@@ -314,27 +326,29 @@
     ;; seeds. If stop? returns false on the results of successor, it is
     ;; an error. But if the second call to stop? returns true, mapper is
     ;; applied to seeds and the results are wrapped in a Just/Right and
-    ;; returned." Taken literally: this is NOT a general recursive
-    ;; unfold loop (unlike SRFI-1's own `unfold`) -- stop? is called at
-    ;; most twice total. mapper, per "applied to seeds" immediately
-    ;; after describing the successor step, is applied to the UPDATED
-    ;; seeds (successor's own result), not the original ones -- the only
-    ;; reading consistent with "otherwise it's an error" (a successor
-    ;; step that doesn't reach a stopping seed has nothing left to do).
+    ;; returned." This is NOT a general recursive unfold loop (unlike
+    ;; SRFI-1's own `unfold`) -- stop? is called at most twice total.
+    ;; mapper is applied to the ORIGINAL seeds, not the successor's
+    ;; result -- confirmed against the SRFI's own reference
+    ;; implementation (`(mapper (car seeds))`, successor's own return
+    ;; value used only to satisfy the second stop? check and otherwise
+    ;; discarded), not the "applied to seeds means the updated ones"
+    ;; reading this file's own first draft used (a real bug, found by
+    ;; review, since fixed).
     (define (maybe-unfold stop? mapper successor . seeds)
       (if (apply stop? seeds)
           (nothing)
           (let ((seeds2 (call-with-values (lambda () (apply successor seeds)) list)))
             (if (not (apply stop? seeds2))
                 (error "maybe-unfold: successor's result does not satisfy stop? on the second check" seeds2)
-                (list->just (call-with-values (lambda () (apply mapper seeds2)) list))))))
+                (list->just (call-with-values (lambda () (apply mapper seeds)) list))))))
     (define (either-unfold stop? mapper successor . seeds)
       (if (apply stop? seeds)
           (apply left seeds)
           (let ((seeds2 (call-with-values (lambda () (apply successor seeds)) list)))
             (if (not (apply stop? seeds2))
                 (error "either-unfold: successor's result does not satisfy stop? on the second check" seeds2)
-                (list->right (call-with-values (lambda () (apply mapper seeds2)) list))))))
+                (list->right (call-with-values (lambda () (apply mapper seeds)) list))))))
 
     ;; ── Syntax ───────────────────────────────────────────────────────────────
 
@@ -454,18 +468,23 @@
 
     (define (%tri-value m) (and (just? m) (car (just-payload m))))
 
-    ;; "Just #t if all same truth value or all Nothing" -- compare every
-    ;; remaining maybe against the FIRST one's own nothingness/value.
+    ;; "Just #t if all the maybes are true or if all are false. Otherwise,
+    ;; if any maybe is Nothing or any two maybes have different
+    ;; (trivalent) truth values, returns Just #f." Any Nothing ANYWHERE
+    ;; -- including every argument being Nothing -- means Just #f, no
+    ;; exception for "all Nothing" (confirmed against the SRFI's own
+    ;; reference implementation; a real bug, found by review, in an
+    ;; earlier draft of this file treated "all Nothing" as agreement and
+    ;; returned Just #t).
+    (define (%any-nothing? ms) (and (pair? ms) (or (nothing? (car ms)) (%any-nothing? (cdr ms)))))
     (define (tri=? . ms)
-      (if (null? ms)
-          (just #t)
-          (let ((first-nothing? (nothing? (car ms))) (first-val (%tri-value (car ms))))
-            (just (let loop ((rest (cdr ms)))
-                    (or (null? rest)
-                        (and (if first-nothing?
-                                 (nothing? (car rest))
-                                 (and (just? (car rest)) (eq? (%tri-value (car rest)) first-val)))
-                             (loop (cdr rest)))))))))
+      (cond
+        ((null? ms) (just #t))
+        ((%any-nothing? ms) (just #f))
+        (else (let ((first-val (%tri-value (car ms))))
+                (just (let loop ((rest (cdr ms)))
+                        (or (null? rest)
+                            (and (eq? (%tri-value (car rest)) first-val) (loop (cdr rest))))))))))
 
     (define (tri-and . ms)
       (let loop ((ms ms))

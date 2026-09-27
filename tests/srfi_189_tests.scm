@@ -38,6 +38,16 @@
 (check "just with zero payload values is still a Just, distinct from Nothing"
        (just? (just)) #t)
 (check "list->just wraps a list as the payload" (maybe->list (list->just '(1 2 3))) '(1 2 3))
+;; Regression (found by review): these containers are documented
+;; immutable, so constructing from -- or extracting into -- a mutable
+;; list must not alias the caller's own list in either direction.
+(let* ((src (list 1 2 3)) (j (list->just src)))
+  (set-car! src 999)
+  (check "list->just copies its input, doesn't alias the caller's list" (maybe->list j) '(1 2 3)))
+(let* ((j (just 1 2 3)) (extracted (maybe->list j)))
+  (set-car! extracted 999)
+  (check "maybe->list copies on the way out too, doesn't expose internal state"
+         (maybe->list j) '(1 2 3)))
 (check "list->left wraps a list as the payload" (either->list (list->left '(a b))) '())
 (check "list->right wraps a list as the payload" (either->list (list->right '(1 2))) '(1 2))
 
@@ -206,9 +216,13 @@
 (check "maybe-unfold raises if stop? is still false after one successor step"
        (guard (e (#t 'caught)) (maybe-unfold (lambda (n) #f) (lambda (n) n) (lambda (n) (+ n 1)) 0))
        'caught)
-(check "maybe-unfold applies mapper to the successor's result when stop? then succeeds"
+;; mapper is applied to the ORIGINAL seed (0), not the successor's
+;; result (1) -- confirmed against the SRFI's own reference
+;; implementation, which discards successor's return value except to
+;; satisfy the second stop? check.
+(check "maybe-unfold applies mapper to the ORIGINAL seed, not the successor's result"
        (maybe-ref (maybe-unfold (lambda (n) (= n 1)) (lambda (n) (* n 100)) (lambda (n) 1) 0) (lambda () 'err))
-       100)
+       0)
 (check "either-unfold returns a Left of seeds when stop? is immediately true"
        (either-ref (either-unfold (lambda (n) #t) (lambda (n) n) (lambda (n) n) 42) (lambda (e) e))
        42)
@@ -252,7 +266,10 @@
 
 (check "tri=? true when all Justs share the same value" (maybe-ref (tri=? (just #t) (just #t)) (lambda () 'none)) #t)
 (check "tri=? false when values differ" (maybe-ref (tri=? (just #t) (just #f)) (lambda () 'none)) #f)
-(check "tri=? true when all Nothing" (maybe-ref (tri=? (nothing) (nothing)) (lambda () 'none)) #t)
+;; ANY Nothing -- including every argument being Nothing -- means
+;; Just #f, no exception, per the SRFI's own reference implementation.
+(check "tri=? false when all Nothing" (maybe-ref (tri=? (nothing) (nothing)) (lambda () 'none)) #f)
+(check "tri=? false when one of several is Nothing" (maybe-ref (tri=? (just #t) (nothing) (just #t)) (lambda () 'none)) #f)
 (check "tri=? false when Just and Nothing are mixed" (maybe-ref (tri=? (just #t) (nothing)) (lambda () 'none)) #f)
 
 (check "tri-and returns Just #t when everything is true"
