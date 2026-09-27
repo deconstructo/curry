@@ -104,13 +104,21 @@
             ((> (caar alist) k) (cons (cons k v) alist))
             (else (cons (car alist) (%alist-adjoin (cdr alist) k v)))))
 
-    ;; Shared by alist->fxmapping/combinator, fxmapping-adjoin/combinator,
-    ;; fxmapping-union/combinator's per-pair step, and
-    ;; fxmapping-intersection/combinator's: combine (k, old, new) via
-    ;; proc if k is already present, else insert new as-is.
+    ;; Shared by alist->fxmapping/combinator and fxmapping-adjoin/
+    ;; combinator (union/combinator and intersection/combinator use
+    ;; their own separate %alist-union-combine/%alist-intersection-
+    ;; combine below, with a different argument order -- this comment
+    ;; previously, incorrectly, claimed they shared this helper too).
+    ;; combine is called as (combine k NEW OLD) -- the just-supplied
+    ;; value first, the already-present one second -- per the spec's
+    ;; own text and worked example for both call sites ("(proc k v2
+    ;; v1)"/"(f k v2 v1)", v2 being the newer value): a real bug, found
+    ;; by review, in an earlier draft of this file called combine as
+    ;; (k old new), silently wrong for any non-commutative combiner
+    ;; (string-append, cons, subtraction, ...).
     (define (%alist-combine alist k v combine)
       (cond ((null? alist) (list (cons k v)))
-            ((= (caar alist) k) (cons (cons k (combine k (cdar alist) v)) (cdr alist)))
+            ((= (caar alist) k) (cons (cons k (combine k v (cdar alist))) (cdr alist)))
             ((> (caar alist) k) (cons (cons k v) alist))
             (else (cons (car alist) (%alist-combine (cdr alist) k v combine)))))
 
@@ -183,20 +191,36 @@
                 (loop (call-with-values (lambda () (apply successor seeds)) list)
                       (%alist-adjoin alist k v)))))))
 
-    ;; proc receives an abort continuation plus the current seeds and
-    ;; must return (values key value new-seed ...). Calling abort at any
-    ;; point returns the fxmapping accumulated so far (not including the
-    ;; in-progress call that invoked it) as fxmapping-accumulate's own
-    ;; result, immediately.
+    ;; proc receives an abort-with-result continuation plus the current
+    ;; seeds and must return (values key value new-seed ...). Calling
+    ;; abort-with-result, at any point, with any number of arguments
+    ;; immediately returns the fxmapping accumulated so far (not
+    ;; including the in-progress call that invoked it) as
+    ;; fxmapping-accumulate's own FIRST return value, followed by
+    ;; whatever arguments abort-with-result was itself given, as
+    ;; ADDITIONAL return values -- per the spec's own text and its own
+    ;; worked example, which calls it as (abort-with-result 'finished).
+    ;; A real bug, found by review: an earlier draft of this file made
+    ;; this a zero-argument thunk, which raised a wrong-number-of-
+    ;; arguments error on that exact example instead of accepting and
+    ;; returning the extra value(s).
+    ;; Workaround for a separate, pre-existing curry core bug (filed as
+    ;; issue #274): invoking a call/cc continuation with more than one
+    ;; value silently drops every value past the first, instead of
+    ;; forwarding all of them the way a genuine multiple-values return
+    ;; must. Packs the fxmapping and every extra value into a single
+    ;; list -- call/cc's own single-value case works correctly -- and
+    ;; unpacks via (apply values ...) once outside the escape.
     (define (fxmapping-accumulate proc . seeds)
-      (call-with-current-continuation
-        (lambda (return)
-          (let loop ((seeds seeds) (alist '()))
-            (let ((abort (lambda () (return (%make-fxmapping alist)))))
-              (call-with-values (lambda () (apply proc abort seeds))
-                (lambda (k v . new-seeds)
-                  (%check-key k "fxmapping-accumulate")
-                  (loop new-seeds (%alist-adjoin alist k v)))))))))
+      (apply values
+        (call-with-current-continuation
+          (lambda (return)
+            (let loop ((seeds seeds) (alist '()))
+              (let ((abort (lambda extra (return (cons (%make-fxmapping alist) extra)))))
+                (call-with-values (lambda () (apply proc abort seeds))
+                  (lambda (k v . new-seeds)
+                    (%check-key k "fxmapping-accumulate")
+                    (loop new-seeds (%alist-adjoin alist k v))))))))))
 
     (define (alist->fxmapping alist)
       (%make-fxmapping

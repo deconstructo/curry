@@ -57,9 +57,15 @@
        (fxmapping-ref (fxmapping-adjoin m 1 'zz) 1 (lambda () 'nf)) 'a)
 (check "fxmapping-adjoin adds a genuinely new key"
        (fxmapping-ref (fxmapping-adjoin m 9 'new) 9 (lambda () 'nf)) 'new)
-(check "fxmapping-adjoin/combinator combines with the existing value"
-       (fxmapping-ref (fxmapping-adjoin/combinator m (lambda (k old new) (list old new)) 1 'zz) 1 (lambda () 'nf))
-       '(a zz))
+;; combine is called as (proc k NEW OLD) -- the just-supplied value
+;; first, the existing one second (per the spec's own text and worked
+;; example) -- a real bug, found by review, had these swapped; this
+;; check uses a non-commutative combiner (plain list, not equal either
+;; way round) so a regression would fail loudly rather than
+;; coincidentally still matching.
+(check "fxmapping-adjoin/combinator calls proc as (k new old)"
+       (fxmapping-ref (fxmapping-adjoin/combinator m (lambda (k new old) (list new old)) 1 'zz) 1 (lambda () 'nf))
+       '(zz a))
 (check "fxmapping-set overwrites an existing value"
        (fxmapping-ref (fxmapping-set m 1 'zz) 1 (lambda () 'nf)) 'zz)
 (check "fxmapping-adjust transforms an existing value"
@@ -201,13 +207,32 @@
 (check "fxmapping-accumulate's abort returns what's accumulated so far"
        (fxmapping->alist (fxmapping-accumulate (lambda (abort n) (if (= n 2) (abort) (values n (* n 100) (+ n 1)))) 1))
        '((1 . 100)))
+;; abort-with-result must accept and forward arbitrary extra values
+;; alongside the built fxmapping, as ADDITIONAL return values -- per
+;; the spec's own worked example, which calls it with an argument. A
+;; real bug, found by review: an earlier draft made this a zero-
+;; argument-only thunk, raising instead of accepting a value.
+(call-with-values
+  (lambda () (fxmapping-accumulate (lambda (abort n) (if (> n 3) (abort 'finished) (values n (* n n) (+ n 1)))) 1))
+  (lambda (m . extra)
+    (check "fxmapping-accumulate's abort-with-result accepts and returns an extra value"
+           (list (fxmapping->alist m) extra) '(((1 . 1) (2 . 4) (3 . 9)) (finished)))))
+(call-with-values
+  (lambda () (fxmapping-accumulate (lambda (abort n) (abort)) 1))
+  (lambda (m . extra)
+    (check "fxmapping-accumulate's abort with no extra values gives an empty extra list"
+           (list (fxmapping->alist m) extra) '(() ()))))
 
 ;;; ---- alist conversions ----
 
 (check "alist->fxmapping" (fxmapping->alist (alist->fxmapping (list (cons 1 'a) (cons 2 'b)))) '((1 . a) (2 . b)))
-(check "alist->fxmapping/combinator combines duplicate keys within the input"
-       (fxmapping->alist (alist->fxmapping/combinator (lambda (k a b) (list a b)) (list (cons 1 'a) (cons 1 'b))))
-       '((1 a b)))
+;; Same (k new old) argument order as fxmapping-adjoin/combinator,
+;; verified here with the spec's own worked example (string-append is
+;; non-commutative, so a swapped-argument regression fails loudly).
+(check "alist->fxmapping/combinator calls proc as (k new old), matching the spec's own example"
+       (fxmapping->alist (alist->fxmapping/combinator (lambda (k s t) (string-append s " " t))
+                            (list (cons 1 "riker") (cons 2 "yar") (cons 2 "tasha"))))
+       '((1 . "riker") (2 . "tasha yar")))
 
 ;;; ---- Summary ----
 
