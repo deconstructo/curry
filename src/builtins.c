@@ -461,14 +461,29 @@ static val_t prim_set_cdr(int ac, val_t *av, void *ud) {
     gc_wb_slot(&p->cdr, av[1]);
     return V_VOID;
 }
-#define CXR1(n,a)     static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(av[0]);}
-#define CXR2(n,a,b)   static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(av[0]));}
-#define CXR3(n,a,b,c) static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(c(av[0])));}
-CXR2(aa, vcar, vcar) CXR2(ad, vcar, vcdr) CXR2(da, vcdr, vcar) CXR2(dd, vcdr, vcdr)
-CXR3(aaa, vcar, vcar, vcar) CXR3(aad, vcar, vcar, vcdr)
-CXR3(ada, vcar, vcdr, vcar) CXR3(add, vcar, vcdr, vcdr)
-CXR3(daa, vcdr, vcar, vcar) CXR3(dad, vcdr, vcar, vcdr)
-CXR3(dda, vcdr, vcdr, vcar) CXR3(ddd, vcdr, vcdr, vcdr)
+/* Issue: the CXR2/CXR3-generated composed accessors (cadr, cddr, caddr,
+ * etc.) used to call the raw, unchecked vcar/vcdr macros directly at each
+ * step -- fine for internal C code that has already validated its types,
+ * but these are also registered as the Scheme-visible `cadr`/`cddr`/...
+ * primitives, where a too-short list (e.g. (cddr '(1))) reaches an
+ * intermediate '() or non-pair value, and vcar/vcdr's `as_pair(v)->car`
+ * reinterprets that immediate/non-heap value as a Pair pointer and
+ * dereferences it -- undefined behavior, observed as a segfault crashing
+ * the whole process instead of raising the catchable wrong-type-argument
+ * error every other accessor (car, cdr, list-ref, ...) raises. Fixed by
+ * routing every step through ccar_chk/ccdr_chk, which validate pair-ness
+ * first, exactly like prim_car/prim_cdr above already do for the
+ * single-level case. */
+static val_t ccar_chk(val_t v, const char *who) { if (!vis_pair(v)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s", who); return vcar(v); }
+static val_t ccdr_chk(val_t v, const char *who) { if (!vis_pair(v)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s", who); return vcdr(v); }
+#define CXR1(n,a)     static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(av[0], "c" #n "r: not a pair");}
+#define CXR2(n,a,b)   static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(av[0], "c" #n "r: not a pair"), "c" #n "r: not a pair");}
+#define CXR3(n,a,b,c) static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(c(av[0], "c" #n "r: not a pair"), "c" #n "r: not a pair"), "c" #n "r: not a pair");}
+CXR2(aa, ccar_chk, ccar_chk) CXR2(ad, ccar_chk, ccdr_chk) CXR2(da, ccdr_chk, ccar_chk) CXR2(dd, ccdr_chk, ccdr_chk)
+CXR3(aaa, ccar_chk, ccar_chk, ccar_chk) CXR3(aad, ccar_chk, ccar_chk, ccdr_chk)
+CXR3(ada, ccar_chk, ccdr_chk, ccar_chk) CXR3(add, ccar_chk, ccdr_chk, ccdr_chk)
+CXR3(daa, ccdr_chk, ccar_chk, ccar_chk) CXR3(dad, ccdr_chk, ccar_chk, ccdr_chk)
+CXR3(dda, ccdr_chk, ccdr_chk, ccar_chk) CXR3(ddd, ccdr_chk, ccdr_chk, ccdr_chk)
 #undef CXR1
 #undef CXR2
 #undef CXR3
