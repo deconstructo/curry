@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790758823865,
+  "lastUpdate": 1790761590908,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -17525,6 +17525,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 80.403,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "metanoia@gmail.com",
+            "name": "Scáth",
+            "username": "deconstructo"
+          },
+          "distinct": true,
+          "id": "9c5e9285a79bca3944940bfc4f89fe93b4285c59",
+          "message": "docs(thoughts): add theorem-prover-plan.md\n\nA long-term, incremental theorem-proving project: five stages\n(propositional prover, natural deduction, simply-typed lambda\ncalculus/Curry-Howard, a small dependently-typed core, tactics), each\nindependently real and usable. Written explicitly as a learning\nproject and to be shareable with prospective contributors -- includes\na per-stage pitch for who it'd suit. Nothing implemented yet.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-30T19:45:37+10:00",
+          "tree_id": "3f2eec0c636cc729624e11fca27389e6d86aefd6",
+          "url": "https://github.com/deconstructo/curry/commit/9c5e9285a79bca3944940bfc4f89fe93b4285c59"
+        },
+        "date": 1790761589410,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.924,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.856,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 6.247,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.067,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 187.735,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 322.667,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.414,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.728,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 86.727,
             "unit": "ms"
           }
         ]
