@@ -345,7 +345,10 @@ val_t apply(val_t proc, val_t args) {
     }
     if (vis_cont(proc)) {
         Continuation *cont = as_cont(proc);
-        cont->result = vis_pair(args) ? vcar(args) : V_VOID;
+        /* Matches prim_values' own convention exactly: exactly one
+         * value stays unboxed, 0 or 2+ values become a T_VALUES object
+         * -- so (k) delivers zero values, same as (values). */
+        cont->result = (vis_pair(args) && vis_nil(vcdr(args))) ? vcar(args) : make_values_from_list(args);
         __asm__ volatile("" ::: "memory");
         wind_unwind_to((WindFrame *)cont->wind_top);
         longjmp(*(jmp_buf *)cont->jmpbuf, 1);
