@@ -204,23 +204,20 @@
     ;; this a zero-argument thunk, which raised a wrong-number-of-
     ;; arguments error on that exact example instead of accepting and
     ;; returning the extra value(s).
-    ;; Workaround for a separate, pre-existing curry core bug (filed as
-    ;; issue #274): invoking a call/cc continuation with more than one
-    ;; value silently drops every value past the first, instead of
-    ;; forwarding all of them the way a genuine multiple-values return
-    ;; must. Packs the fxmapping and every extra value into a single
-    ;; list -- call/cc's own single-value case works correctly -- and
-    ;; unpacks via (apply values ...) once outside the escape.
+    ;; Issue #274 (a call/cc continuation invoked with multiple values
+    ;; used to silently drop every value past the first) is now fixed
+    ;; in curry core, so `return` can be called directly with the
+    ;; fxmapping followed by whatever extra values abort-with-result
+    ;; was given, with no packing/unpacking workaround needed.
     (define (fxmapping-accumulate proc . seeds)
-      (apply values
-        (call-with-current-continuation
-          (lambda (return)
-            (let loop ((seeds seeds) (alist '()))
-              (let ((abort (lambda extra (return (cons (%make-fxmapping alist) extra)))))
-                (call-with-values (lambda () (apply proc abort seeds))
-                  (lambda (k v . new-seeds)
-                    (%check-key k "fxmapping-accumulate")
-                    (loop new-seeds (%alist-adjoin alist k v))))))))))
+      (call-with-current-continuation
+        (lambda (return)
+          (let loop ((seeds seeds) (alist '()))
+            (let ((abort (lambda extra (apply return (%make-fxmapping alist) extra))))
+              (call-with-values (lambda () (apply proc abort seeds))
+                (lambda (k v . new-seeds)
+                  (%check-key k "fxmapping-accumulate")
+                  (loop new-seeds (%alist-adjoin alist k v)))))))))
 
     (define (alist->fxmapping alist)
       (%make-fxmapping

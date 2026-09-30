@@ -49,6 +49,18 @@ val_t apply_arr(val_t proc, int argc, val_t *argv);
 /* Evaluate a list of expressions, return the last value */
 val_t eval_body(val_t exprs, val_t env);
 
+/* Boxes argc values (argc >= 2) into a T_VALUES object, matching
+ * prim_values' own single-value-stays-unboxed convention -- shared by
+ * every continuation-invoke site (eval.c's tree-walker, runtime.c's
+ * compiled-code apply) so a continuation called with multiple
+ * arguments delivers all of them, not just the first. Caller must
+ * ensure argc >= 2; use the bare value directly for argc <= 1. */
+val_t make_values_from_arr(int argc, val_t *arr);
+
+/* Same, but from a proper Scheme list of length >= 2 (the VM/compiled-
+ * code apply path passes arguments as a list, not a C array). */
+val_t make_values_from_list(val_t lst);
+
 /* ---- Dynamic wind stack ---- */
 
 /* One frame per active dynamic-wind call.  Stack-allocated inside

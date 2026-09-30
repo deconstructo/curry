@@ -52,6 +52,7 @@ add_test(NAME actors         COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_
 # silent 15+ minute CI hang.
 set_tests_properties(actors PROPERTIES TIMEOUT 120)
 add_test(NAME dynamic_wind   COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_wind_tests.scm)
+add_test(NAME callcc_multivalue COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/callcc_multivalue_tests.scm)
 add_test(NAME disassemble    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/disassemble_tests.scm)
 add_test(NAME inliner        COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/inliner_tests.scm)
 add_test(NAME apply_tco      COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/apply_tco_tests.scm)

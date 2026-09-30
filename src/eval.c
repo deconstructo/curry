@@ -80,6 +80,26 @@ static val_t make_prim_thunk(PrimFn fn, void *ud) {
 
 /* ---- call/cc helper ---- */
 
+/* Boxes argc >= 2 values into a T_VALUES object -- see eval.h's own
+ * comment on the shared declaration. Mirrors prim_values' allocation
+ * exactly (src/builtins.c), just with argc pre-validated by callers. */
+val_t make_values_from_arr(int argc, val_t *arr) {
+    Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + (size_t)argc * sizeof(val_t));
+    mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = (uint32_t)argc;
+    for (int i = 0; i < argc; i++) mv->vals[i] = arr[i];
+    return vptr(mv);
+}
+
+val_t make_values_from_list(val_t lst) {
+    int n = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    Values *mv = (Values *)gc_alloc_obj(sizeof(Values) + (size_t)n * sizeof(val_t));
+    mv->hdr.type = T_VALUES; mv->hdr.flags = 0; mv->count = (uint32_t)n;
+    int i = 0;
+    for (val_t p = lst; vis_pair(p); p = vcdr(p)) mv->vals[i++] = vcar(p);
+    return vptr(mv);
+}
+
 /* noinline ensures the setjmp jmp_buf lives in this function's own stable
  * stack frame.  eval() uses a goto-based TCO loop, so the optimizer may
  * allocate locals in caller-saved registers that longjmp doesn't restore;
@@ -1571,7 +1591,10 @@ tail:
 
         if (vis_cont(proc)) {
             Continuation *cont = as_cont(proc);
-            cont->result = argc > 0 ? arr[0] : V_VOID;
+            /* Matches prim_values' own convention exactly: exactly one
+             * value stays unboxed, 0 or 2+ values become a T_VALUES
+             * object -- so (k) delivers zero values, same as (values). */
+            cont->result = argc == 1 ? arr[0] : make_values_from_arr(argc, arr);
             /* Memory barrier: clang (ARM64 -O2) dead-store-eliminates the write
              * to cont->result because longjmp() is declared noreturn and the
              * store appears dead.  The barrier forces the write to memory so
