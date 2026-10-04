@@ -1,5 +1,41 @@
 # Changelog
 
+### 1.26.0 - 2026-10-05
+
+**New — SRFI libraries**
+
+- SRFI 28 (Basic Format Strings) and SRFI 29 (Localization)
+- SRFI 120 (Timer APIs)
+- SRFI 176 (Version flag): `curry -V` and `(version-alist)`
+- SRFI 189 (Maybe and Either)
+- SRFI 208 (NaN procedures)
+- SRFI 224 (Integer Mappings)
+- SRFI 225 (Dictionaries)
+- SRFI 272 (Pretty Printing), all tiers except `show`
+- SRFI 273 (Extensions to Data (Type-)Checking)
+- SRFI 0 documented as already satisfied by core `cond-expand`
+
+**New — FFI**
+
+- Variadic C functions (`#:variadic`); `(curry ncurses)` now binds
+  `wprintw`/`mvwprintw` with it
+- Callbacks: a Scheme procedure can be passed to C as a function pointer
+- Struct-by-value arguments and return values
+
+**Fixes**
+
+- `call/cc` dropped all but the first value when a continuation was
+  invoked with multiple values (#274)
+- `cadr`/`cddr`/`caddr`/... composed accessors segfaulted on short lists
+- Compiler: internal defines produced by macro expansion now bind
+  correctly (#253)
+- Compiler: `define-syntax` at library top level leaked into
+  `GLOBAL_ENV` (#257)
+- Reader: `nan(<digits>)` bypassed the strtod digit guard (#266)
+- Review-found bugs fixed in the new SRFI 29, 120, 189, 224, 225, 272
+  and 273 implementations (#258, #264, #269, #272, #275)
+- CI benchmark job no longer fails PRs on runner-variance noise (#251)
+
 ### 1.25.2 - 2026-09-26
 
 **New — In-place image updates for Jupyter notebook animation**
