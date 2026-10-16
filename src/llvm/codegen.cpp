@@ -519,7 +519,11 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
 /* Nesting limit for the source walks below (collect_free_vars,
  * scan_captures). Deeper input makes the compile fail -- the caller falls
  * back to bytecode -- instead of overflowing the C stack. */
-static const int JIT_SCAN_DEPTH_MAX = 10000;
+static const int JIT_SCAN_DEPTH_MAX = 2000;   /* code generation itself
+                                                 * (emit_expr) uses about two
+                                                 * C frames per level and has
+                                                 * no guard of its own: it
+                                                 * crashed at ~6,000-7,000 */
 
 /* (name expr) binding lists: every element a pair whose car is a symbol and
  * whose cdr is a pair. */
@@ -617,11 +621,20 @@ static void collect_free_vars(val_t expr,
             vis_pair(rst) && well_formed_bindings(as_pair(rst)->car)) {
             val_t bindings = as_pair(rst)->car;
             val_t body     = as_pair(rst)->cdr;
+            /* letrec/letrec*: every name is in scope in every init. let*:
+             * a name is in scope only AFTER its own init, so (let* ((x (+ x
+             * 1))) ...) reads the OUTER x -- binding it first made that x
+             * look bound here, so emit_lambda did not capture it and the JIT
+             * compiled it as a global reference (wrong results). */
+            bool sequential = (s == S("let*"));
             auto nb = bound;
+            if (!sequential)
+                for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr)
+                    nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
             for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
                 val_t bnd = as_pair(b)->car;
-                nb.insert(as_sym(as_pair(bnd)->car)->data);
                 collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, nb, free, d);
+                if (sequential) nb.insert(as_sym(as_pair(bnd)->car)->data);
             }
             for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
                 collect_free_vars(as_pair(e)->car, nb, free, d);

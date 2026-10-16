@@ -232,6 +232,31 @@
 (check "JIT: quasiquote let template" (jit-cfv-mklet '((x 1)) '(x)) '(let ((x 1)) x))
 (check "JIT: quasiquote set! template" (jit-cfv-mkset '(y)) '(set! y))
 
+;; let* inside a nested lambda: the init of (x (+ x 1)) reads the OUTER x,
+;; so the lambda must capture it (found by review; wrong results on main:
+;; 101 from a global x instead of 2).
+(define x 100)
+(define (jit-letstar-f x) (let ((g (lambda () (let* ((x (+ x 1))) x)))) (g)))
+(define (jit-letstar-h y) (let ((g (lambda () (let* ((y (* y 2)) (z y)) z)))) (g)))
+(let loop ((i 0)) (when (< i 200) (jit-letstar-f 1) (jit-letstar-h 5) (loop (+ i 1))))
+(check "JIT: let* init reads the outer binding" (jit-letstar-f 1) 2)
+(check "JIT: let* sequential scope in a nested lambda" (jit-letstar-h 5) 10)
+
+;; jit-compile! must refuse what the auto-JIT refuses (#295): a procedure
+;; from a define-library (its globals are not in GLOBAL_ENV) and a closure
+;; using a let-syntax-local macro.
+(define-library (jit-295 lib)
+  (import (scheme base))
+  (export jit-295-f)
+  (begin (define (jit-295-helper x) (* x 3))
+         (define (jit-295-f x) (+ (jit-295-helper x) 1))))
+(import (jit-295 lib))
+(jit-compile! jit-295-f)
+(check "#295: jit-compile! of a define-library procedure stays correct" (jit-295-f 2) 7)
+(define jit-295-g (let-syntax ((dbl (syntax-rules () ((_ x) (* 2 x))))) (lambda (n) (dbl n))))
+(jit-compile! jit-295-g)
+(check "#295: jit-compile! of a let-syntax closure stays correct" (jit-295-g 21) 42)
+
 ;;; Issue #288: fresh closures of one chunk share a single compilation
 ;;; (correctness here; the fix is what keeps memory flat).
 (define (jit-288-mk) (lambda (x) (* x 2)))
