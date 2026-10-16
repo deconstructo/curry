@@ -518,7 +518,7 @@ extern size_t    gc_card_table_ncards;
 /* ── Write-buffer remembered set ─────────────────────────────────────────── */
 
 /*
- * When gc_dirty_slots is non-NULL (generational GC active), gc_wb_slot records
+ * When gc_dirty_active is true (generational GC active), gc_wb_slot records
  * the address of each slot that receives a main-thread-nursery→tenured write.
  * Minor GC iterates these slot addresses to update forwarding pointers instead
  * of scanning the entire pinned list every collection.
@@ -608,7 +608,7 @@ void gc_dirty_record(val_t *slot);
 
 /*
  * GC_WB(obj, field, val): write val into obj->field and record the slot if it
- * is a tenured→nursery write.  Under Boehm gc_dirty_slots is NULL so the
+ * is a tenured→nursery write.  Under Boehm gc_dirty_active is false so the
  * barrier reduces to the bare assignment.
  *
  * val must be a val_t.  Example: GC_WB(as_pair(p), car, new_car_val)

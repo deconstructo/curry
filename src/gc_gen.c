@@ -327,6 +327,7 @@ typedef struct { val_t *slot; uint64_t epoch; } DirtySetEntry;
 static DirtySetEntry *dirty_set;
 static size_t         dirty_set_cap;  /* power of two, 2 * gc_dirty_cap */
 static uint64_t       dirty_epoch = 1;
+static bool           dirty_gc_requested;  /* soft limit already asked this cycle */
 
 static size_t dirty_set_index(const val_t *slot, size_t cap) {
     uint64_t h = (uint64_t)(uintptr_t)slot * 0x9E3779B97F4A7C15ull;
@@ -334,7 +335,8 @@ static size_t dirty_set_index(const val_t *slot, size_t cap) {
 }
 
 /* Inserts `slot`; returns false if it was already present. The caller
- * keeps the load factor at or below 1/2, so a free entry always exists. */
+ * keeps at most cap/2 + 1 entries in the set (the +1 only briefly, while
+ * the array is about to grow), so a free entry always exists. */
 static bool dirty_set_insert(val_t *slot) {
     size_t mask = dirty_set_cap - 1;
     for (size_t i = dirty_set_index(slot, dirty_set_cap);; i = (i + 1) & mask) {
@@ -391,14 +393,18 @@ void gc_dirty_record(val_t *slot) {
         dirty_set_insert(slot);
     }
     gc_dirty_slots[gc_dirty_count++] = slot;
-    /* == not >=: ask once per cycle. A thread whose own nursery is empty
-     * returns early from gc_gen_minor_collect without draining, and would
-     * otherwise retry that at every safepoint. */
-    bool over_soft_limit = gc_dirty_count == GC_DIRTY_SOFT_LIMIT;
+    /* Ask for a minor GC once per cycle, and only from a thread that has a
+     * nursery (gc_minor_pending is thread-local, and a thread without one
+     * cannot collect). Asking on every record would make a thread whose
+     * own nursery is empty -- gc_gen_minor_collect returns early without
+     * draining -- retry at every safepoint. */
+    bool request = gc_dirty_count >= GC_DIRTY_SOFT_LIMIT &&
+                   !dirty_gc_requested && gc_nursery.base;
+    if (request) dirty_gc_requested = true;
     pthread_mutex_unlock(&gc_dirty_lock);
     /* Only a hint: the writing thread collects at its next safepoint
      * (vm.c's L_DISPATCH, eval.c's tail:), which empties the buffer. */
-    if (over_soft_limit && gc_nursery.base)
+    if (request)
         gc_minor_pending = true;
 }
 
@@ -1396,6 +1402,7 @@ void gc_gen_minor_collect(void) {
     memset(gc_dirty_slots, 0, gc_dirty_count * sizeof(val_t *));
     gc_dirty_count = 0;
     dirty_epoch++;                      /* empties dirty_set */
+    dirty_gc_requested = false;
     /* Give back the memory of a large burst; keep a small buffer. */
     if (gc_dirty_cap > GC_DIRTY_SOFT_LIMIT) {
         val_t **ns = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_INIT_CAP * sizeof(val_t *));

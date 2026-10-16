@@ -437,7 +437,7 @@ void gc_unregister_stack(void *base) {
 void gc_register_ext_scanner(void (*cb)(void)) {
     ensure_ext();
     if (g_ext_count == 0 && gc_dirty_active) {
-        /* gc_dirty_slots is non-NULL only under --gc generational.  Warn once:
+        /* gc_dirty_active is true only under --gc generational.  Warn once:
          * minor_gc_lock is non-recursive, so ext_scanners must not allocate
          * from the nursery or they will deadlock. */
         fprintf(stderr, "[gc] WARNING: ext_scanner registered under generational "
