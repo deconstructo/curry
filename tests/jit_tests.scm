@@ -122,6 +122,51 @@
        (guard (e (#t (error-object-code e))) (jit-auto-exact 1 2 3))
        'wrong-number-of-arguments)
 
+;;; 11b. Lambdas created inside JIT code, called from C primitives ──────────
+;;; Regression coverage for issue #289: a lambda created inside JIT-compiled
+;;; code is a T_JITCLOSURE. apply() (the list-argument entry point used by
+;;; map, for-each, apply and the work pool) had no case for it and raised
+;;; "apply: not a procedure" -- which hit ordinary code as soon as the
+;;; auto-JIT compiled a function passing a lambda to map. The lambda's own
+;;; entry also had no argument-count check, so a call with too few
+;;; arguments read past the end of the caller's argument array.
+(define (jit-289-adder k) (lambda (i) (+ i k)))
+(define (jit-289-rest k) (lambda (a . r) (list a r k)))
+(jit-compile! jit-289-adder)
+(jit-compile! jit-289-rest)
+(define jit-289-g (jit-289-adder 10))
+(define jit-289-gr (jit-289-rest 1))
+(check "#289: JIT lambda via map"       (map jit-289-g (list 1 2 3)) '(11 12 13))
+(check "#289: JIT lambda via for-each"
+       (let ((acc 0)) (for-each (lambda (x) (set! acc (+ acc (jit-289-g x)))) (list 1 2)) acc)
+       23)
+(check "#289: JIT lambda via apply"     (apply jit-289-g (list 5)) 15)
+(define jit-289-ap apply)
+(check "#289: JIT lambda via indirect apply" (jit-289-ap jit-289-g (list 6)) 16)
+(check "#289: JIT lambda via vector-map" (vector-map jit-289-g (vector 1 2)) #(11 12))
+(define jit-289-big (let r ((i 99) (a '())) (if (< i 0) a (r (- i 1) (cons i a)))))
+(check "#289: JIT lambda via parallel map (work pool)"
+       (let lp ((l (map jit-289-g jit-289-big)) (s 0)) (if (null? l) s (lp (cdr l) (+ s (car l)))))
+       5950)
+(check "#289: JIT rest lambda via apply" (apply jit-289-gr '(1 2 3)) '(1 (2 3) 1))
+(check "#289: JIT lambda, too few args via apply raises"
+       (guard (e (#t (error-object-code e))) (apply jit-289-g '()))
+       'wrong-number-of-arguments)
+(check "#289: JIT lambda, too many args via map raises"
+       (guard (e (#t (error-object-code e))) (map jit-289-g (list 1) (list 2)))
+       'wrong-number-of-arguments)
+(check "#289: JIT lambda, too few args called directly raises"
+       (guard (e (#t (error-object-code e))) (jit-289-g))
+       'wrong-number-of-arguments)
+(check "#289: JIT rest lambda, missing required arg raises"
+       (guard (e (#t (error-object-code e))) (apply jit-289-gr '()))
+       'wrong-number-of-arguments)
+;; The shape from the issue: no explicit JIT call, the auto-JIT compiles
+;; a function that passes a fresh lambda to map.
+(define (jit-289-hot x) (map (lambda (i) (+ i x)) (list 1 2 3)))
+(define (jit-289-go k acc) (if (= k 0) acc (jit-289-go (- k 1) (+ acc (car (jit-289-hot k))))))
+(check "#289: auto-JIT function passing a lambda to map" (jit-289-go 2000 0) 2003000)
+
 ;;; 12. jit-call-depth does not leak across a caught exception raised from
 ;;; inside a JIT-to-JIT call (curry_jit_apply_arr → apply_arr → longjmp) ──────
 ;;; Regression coverage: before ExnHandler gained saved_jit_depth (restored

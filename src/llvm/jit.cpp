@@ -34,6 +34,7 @@ extern "C" {
 #include "../object.h"
 #include "../gc.h"
 #include "../numeric.h"
+#include "../symbol.h"   /* EC_WRONG_NUMBER_OF_ARGUMENTS */
 }
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
@@ -134,6 +135,19 @@ static uint64_t curry_jit_make_closure(void *fn, int32_t n_caps, uint64_t *caps)
     for (int32_t i = 0; i < n_caps; i++)
         jc->caps[i] = (val_t)caps[i];
     return (uint64_t)vptr(jc);
+}
+
+/* Issue #289: raised from a JIT function's entry when it is called with the
+ * wrong number of arguments (emit_arity_check, codegen.cpp). Without the
+ * check, a call with too few arguments read past the end of argv. */
+static void curry_jit_arity_error(int32_t argc, int32_t n_fixed, int32_t has_rest) {
+    if (has_rest)
+        scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                       "procedure: too few arguments (got %d, need at least %d)",
+                       (int)argc, (int)n_fixed);
+    scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS,
+                   "procedure: wrong number of arguments (got %d, need %d)",
+                   (int)argc, (int)n_fixed);
 }
 
 /* Build a Scheme list from argv[0..n-1]. */
@@ -256,6 +270,7 @@ void JITSession::register_runtime_symbols() {
     add("curry_jit_alloc_cell",         (void *)curry_jit_alloc_cell);
     add("curry_jit_make_closure",       (void *)curry_jit_make_closure);
     add("curry_jit_list_tail",          (void *)curry_jit_list_tail);
+    add("curry_jit_arity_error",        (void *)curry_jit_arity_error);
 
     /* Comparison wrappers (bool → val_t). */
     add("curry_jit_lt",            (void *)curry_jit_lt);

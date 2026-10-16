@@ -257,6 +257,39 @@ static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
     return result;
 }
 
+/* ---- Argument-count check ---- */
+/*
+ * Issue #289: every JIT function reads its fixed parameters straight from
+ * argv[0..n_fixed-1], so a call with too few arguments read past the end of
+ * the caller's argument array, and a call with too many silently ignored the
+ * extras. The bytecode VM checks arity before switching to native code
+ * (vm_check_arity), but C callers (apply_arr, and through it map, for-each,
+ * apply) call a T_JITCLOSURE directly. Emitted first in the function, before
+ * any argv load.
+ */
+static void emit_arity_check(CompileCtx &cc, Value *argc_arg,
+                             int n_fixed, bool has_rest) {
+    Value *bad = has_rest
+        ? cc.B.CreateICmpSLT(argc_arg, ConstantInt::get(cc.i32_t, n_fixed))
+        : cc.B.CreateICmpNE(argc_arg, ConstantInt::get(cc.i32_t, n_fixed));
+    Function *fn = cc.B.GetInsertBlock()->getParent();
+    auto *bad_bb = BasicBlock::Create(cc.llvm_ctx, "arity_bad", fn);
+    auto *ok_bb  = BasicBlock::Create(cc.llvm_ctx, "arity_ok", fn);
+    cc.B.CreateCondBr(bad, bad_bb, ok_bb);
+
+    cc.B.SetInsertPoint(bad_bb);
+    auto *err_ft = FunctionType::get(Type::getVoidTy(cc.llvm_ctx),
+                                     { cc.i32_t, cc.i32_t, cc.i32_t }, false);
+    emit_statepoint_call(cc, declare_helper(cc.M, "curry_jit_arity_error", err_ft),
+                         err_ft,
+                         { argc_arg,
+                           ConstantInt::get(cc.i32_t, n_fixed),
+                           ConstantInt::get(cc.i32_t, has_rest ? 1 : 0) });
+    cc.B.CreateUnreachable();
+
+    cc.B.SetInsertPoint(ok_bb);
+}
+
 /* ---- Literal emission ---- */
 
 static Value *emit_literal(CompileCtx &cc, val_t v) {
@@ -671,6 +704,8 @@ static Value *emit_lambda(CompileCtx &cc, val_t params_val, val_t body_val) {
     auto *argc_arg = lambda_fn->getArg(0); argc_arg->setName("argc");
     auto *argv_arg = lambda_fn->getArg(1); argv_arg->setName("argv");
     auto *caps_arg = lambda_fn->getArg(2); caps_arg->setName("caps");
+
+    emit_arity_check(lcc, argc_arg, (int)fixed_params.size(), has_rest);
 
     lcc.push_scope();
 
@@ -1546,19 +1581,42 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
     auto *argv_arg = fn->getArg(1); argv_arg->setName("argv");
 
     Closure *cl = as_clos(proc);
+
+    /* Fixed parameters, then an optional rest parameter (a dotted tail or
+     * a bare symbol), same as emit_lambda. */
+    int n_fixed = 0;
+    val_t ps = cl->params;
+    for (; vis_pair(ps); ps = as_pair(ps)->cdr, ++n_fixed)
+        if (!vis_symbol(as_pair(ps)->car))
+            throw std::runtime_error("codegen_procedure: non-symbol param");
+    bool has_rest = vis_symbol(ps);
+    if (!has_rest && !vis_nil(ps))
+        throw std::runtime_error("codegen_procedure: malformed parameter list");
+
+    emit_arity_check(cc, argc_arg, n_fixed, has_rest);
+
     cc.push_scope();
     int idx = 0;
-    for (val_t ps = cl->params; vis_pair(ps); ps = as_pair(ps)->cdr, ++idx) {
-        val_t pn = as_pair(ps)->car;
-        if (!vis_symbol(pn))
-            throw std::runtime_error("codegen_procedure: non-symbol param");
-        const char *pstr = as_sym(pn)->data;
+    for (ps = cl->params; vis_pair(ps); ps = as_pair(ps)->cdr, ++idx) {
+        const char *pstr = as_sym(as_pair(ps)->car)->data;
         auto *gep  = cc.B.CreateGEP(cc.i64_t, argv_arg,
                                      ConstantInt::get(cc.i32_t, idx));
         auto *pval = cc.B.CreateLoad(cc.i64_t, gep, pstr);
         auto *slot = cc.alloc_root(pstr);
         cc.B.CreateStore(pval, slot);
         cc.bind(pstr, slot);
+    }
+    if (has_rest) {
+        const char *rstr = as_sym(ps)->data;
+        auto *list_ft = FunctionType::get(cc.i64_t, { cc.ptr_t, cc.i32_t }, false);
+        auto *list_fn = declare_helper(cc.M, "curry_jit_list_tail", list_ft);
+        auto *rest_argv = cc.B.CreateGEP(cc.i64_t, argv_arg,
+                                          ConstantInt::get(cc.i32_t, n_fixed));
+        auto *rest_n = cc.B.CreateSub(argc_arg, ConstantInt::get(cc.i32_t, n_fixed));
+        auto *rest_val = emit_statepoint_call(cc, list_fn, list_ft, { rest_argv, rest_n });
+        auto *slot = cc.alloc_root(rstr);
+        cc.B.CreateStore(rest_val, slot);
+        cc.bind(rstr, slot);
     }
     Value *result = emit_body(cc, cl->body);
     cc.pop_scope();

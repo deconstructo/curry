@@ -383,6 +383,16 @@ val_t apply(val_t proc, val_t args) {
         val_t *arr = args_to_arr(args, n, stack_arr, 64);
         return sx_make_apply(proc, n, arr);
     }
+    /* Issue #289: a lambda created inside JIT-compiled code is a
+     * T_JITCLOSURE. apply_arr already calls those; this list-argument
+     * entry point (used by map, for-each, apply and the work pool) had no
+     * case for them and raised "not a procedure". */
+    if (vis_jitclosure(proc)) {
+        int n = list_length(args);
+        val_t stack_arr[64];
+        val_t *arr = args_to_arr(args, n, stack_arr, 64);
+        return apply_arr(proc, n, arr);
+    }
     scm_raise_code(EC_NOT_A_PROCEDURE, "apply: not a procedure");
 }
 
