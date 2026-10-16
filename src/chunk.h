@@ -161,6 +161,15 @@ typedef struct {
      * declines JIT promotion for such a chunk, the same way it already
      * does for target_env above -- see issue #114. */
     bool   uses_local_macro;
+
+    /* LLVM JIT code shared by every closure of this chunk (issue #288):
+     * 0 = not compiled yet, V_FALSE = being compiled or not compilable,
+     * a T_JITCLOSURE = compiled. Only closures without upvalues use it
+     * (closures with upvalues are never JIT-compiled, issue #291), so the
+     * compiled code is the same for every one of them. Without this cache
+     * each new closure instance reached the call threshold on its own and
+     * was compiled again, and LLVM keeps every compiled module. */
+    val_t  jit_shared;
 } Chunk;
 
 /* Allocate a fresh empty chunk */

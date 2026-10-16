@@ -122,6 +122,150 @@
        (guard (e (#t (error-object-code e))) (jit-auto-exact 1 2 3))
        'wrong-number-of-arguments)
 
+;;; 11b. Lambdas created inside JIT code, called from C primitives ──────────
+;;; Regression coverage for issue #289: a lambda created inside JIT-compiled
+;;; code is a T_JITCLOSURE. apply() (the list-argument entry point used by
+;;; map, for-each, apply and the work pool) had no case for it and raised
+;;; "apply: not a procedure" -- which hit ordinary code as soon as the
+;;; auto-JIT compiled a function passing a lambda to map. The lambda's own
+;;; entry also had no argument-count check, so a call with too few
+;;; arguments read past the end of the caller's argument array.
+(define (jit-289-adder k) (lambda (i) (+ i k)))
+(define (jit-289-rest k) (lambda (a . r) (list a r k)))
+(jit-compile! jit-289-adder)
+(jit-compile! jit-289-rest)
+(define jit-289-g (jit-289-adder 10))
+(define jit-289-gr (jit-289-rest 1))
+(check "#289: JIT lambda via map"       (map jit-289-g (list 1 2 3)) '(11 12 13))
+(check "#289: JIT lambda via for-each"
+       (let ((acc 0)) (for-each (lambda (x) (set! acc (+ acc (jit-289-g x)))) (list 1 2)) acc)
+       23)
+(check "#289: JIT lambda via apply"     (apply jit-289-g (list 5)) 15)
+(define jit-289-ap apply)
+(check "#289: JIT lambda via indirect apply" (jit-289-ap jit-289-g (list 6)) 16)
+(check "#289: JIT lambda via vector-map" (vector-map jit-289-g (vector 1 2)) #(11 12))
+(define jit-289-big (let r ((i 99) (a '())) (if (< i 0) a (r (- i 1) (cons i a)))))
+(check "#289: JIT lambda via parallel map (work pool)"
+       (let lp ((l (map jit-289-g jit-289-big)) (s 0)) (if (null? l) s (lp (cdr l) (+ s (car l)))))
+       5950)
+(check "#289: JIT rest lambda via apply" (apply jit-289-gr '(1 2 3)) '(1 (2 3) 1))
+(check "#289: JIT lambda, too few args via apply raises"
+       (guard (e (#t (error-object-code e))) (apply jit-289-g '()))
+       'wrong-number-of-arguments)
+(check "#289: JIT lambda, too many args via map raises"
+       (guard (e (#t (error-object-code e))) (map jit-289-g (list 1) (list 2)))
+       'wrong-number-of-arguments)
+(check "#289: JIT lambda, too few args called directly raises"
+       (guard (e (#t (error-object-code e))) (jit-289-g))
+       'wrong-number-of-arguments)
+(check "#289: JIT rest lambda, missing required arg raises"
+       (guard (e (#t (error-object-code e))) (apply jit-289-gr '()))
+       'wrong-number-of-arguments)
+;; The shape from the issue: no explicit JIT call, the auto-JIT compiles
+;; a function that passes a fresh lambda to map.
+(define (jit-289-hot x) (map (lambda (i) (+ i x)) (list 1 2 3)))
+(define (jit-289-go k acc) (if (= k 0) acc (jit-289-go (- k 1) (+ acc (car (jit-289-hot k))))))
+(check "#289: auto-JIT function passing a lambda to map" (jit-289-go 2000 0) 2003000)
+
+;;; 11c. Captured variables changed with set! stay shared under JIT ─────────
+;;; Regression coverage for issue #291. A closure with upvalues used to be
+;;; JIT-compiled with each upvalue's value at that moment baked in as a
+;;; constant, so later set!s (by the closure or a sibling) were not seen
+;;; by the other side; closures with upvalues now stay on the bytecode VM.
+;;; Separately, a JIT-compiled function whose own inner lambdas set! a
+;;; variable of the function copied that variable into each lambda; such
+;;; functions are now left on the bytecode VM too.
+(define (jit-291-make)
+  (let ((n 0))
+    (cons (lambda () (set! n (+ n 1)) n)
+          (lambda () n))))
+(define jit-291-p (jit-291-make))
+(let loop ((i 0)) (when (< i 200) ((car jit-291-p)) (loop (+ i 1))))
+(check "#291: hot closure's set! of a shared variable"
+       (list ((car jit-291-p)) ((cdr jit-291-p))) '(201 201))
+(define (jit-291-make2) (let ((k 1)) (cons (lambda (x) (* x k)) (lambda (v) (set! k v)))))
+(define jit-291-q (jit-291-make2))
+(let loop ((i 0)) (when (< i 200) ((car jit-291-q) i) (loop (+ i 1))))
+((cdr jit-291-q) 100)
+(check "#291: hot closure sees a sibling's later set!" ((car jit-291-q) 2) 200)
+(jit-compile! (car jit-291-q))
+(check "#291: jit-compile! of a closure with upvalues keeps it correct"
+       ((car jit-291-q) 3) 300)
+(define (jit-291-counter m)
+  (let ((n 0))
+    (let ((inc! (lambda () (set! n (+ n 1)) n))
+          (get  (lambda () n)))
+      (let lp ((i 0)) (if (< i m) (begin (inc!) (lp (+ i 1)))))
+      (list (inc!) (get)))))
+(jit-compile! jit-291-counter)
+(check "#291: JIT'd function with inner lambdas sharing a set! variable"
+       (jit-291-counter 1000) '(1001 1001))
+(define (jit-291-sum xs) (let ((acc 0)) (for-each (lambda (x) (set! acc (+ acc x))) xs) acc))
+(jit-compile! jit-291-sum)
+(check "#291: JIT'd accumulator via for-each" (jit-291-sum (list 1 2 3 4)) 10)
+
+;; The same shapes spelled with Akkadian/cuneiform synonyms, which the JIT
+;; translates to set!/let/lambda; the #291 check must see them the same way
+;; (found by review of the #291 fix).
+(define (jit-291-akk1) (let ((n 0)) (let ((inc (lambda () (šanûm n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-akk2) (leqûm ((n 0)) (let ((inc (lambda () (set! n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-akk3) (let ((n 0)) (let ((inc (epēšum () (set! n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-cun)  (𒅁 ((n 0)) (let ((inc (𒇽 () (𒁀𒀀 n (+ n 1))))) (inc) (inc) n)))
+(for-each jit-compile! (list jit-291-akk1 jit-291-akk2 jit-291-akk3 jit-291-cun))
+(check "#291: Akkadian set! (šanûm) of a captured variable" (jit-291-akk1) 2)
+(check "#291: Akkadian let (leqûm) binding a captured variable" (jit-291-akk2) 2)
+(check "#291: Akkadian lambda (epēšum) capturing a set! variable" (jit-291-akk3) 2)
+(check "#291: cuneiform let/lambda/set!" (jit-291-cun) 2)
+
+;; Data shaped like special forms inside a hot function: case data and
+;; quasiquote templates. collect_free_vars treated them as code and read
+;; them without checking their shape, crashing the process (found by the
+;; security review of the #291 fix; it crashed on main too).
+(define (jit-cfv-kind op) (case op ((lambda) 'a) ((set! define) 'b) ((let let*) 'c) (else 'd)))
+(define (jit-cfv-mklet b body) `(let ,b ,@body))
+(define (jit-cfv-mkset v) `(set! ,@v))
+(let loop ((i 0))
+  (when (< i 200)
+    (jit-cfv-kind 'let) (jit-cfv-mklet '((x 1)) '(x)) (jit-cfv-mkset '(y))
+    (loop (+ i 1))))
+(check "JIT: case data named like special forms" (map jit-cfv-kind '(lambda define let* if)) '(a b c d))
+(check "JIT: quasiquote let template" (jit-cfv-mklet '((x 1)) '(x)) '(let ((x 1)) x))
+(check "JIT: quasiquote set! template" (jit-cfv-mkset '(y)) '(set! y))
+
+;; let* inside a nested lambda: the init of (x (+ x 1)) reads the OUTER x,
+;; so the lambda must capture it (found by review; wrong results on main:
+;; 101 from a global x instead of 2).
+(define x 100)
+(define (jit-letstar-f x) (let ((g (lambda () (let* ((x (+ x 1))) x)))) (g)))
+(define (jit-letstar-h y) (let ((g (lambda () (let* ((y (* y 2)) (z y)) z)))) (g)))
+(let loop ((i 0)) (when (< i 200) (jit-letstar-f 1) (jit-letstar-h 5) (loop (+ i 1))))
+(check "JIT: let* init reads the outer binding" (jit-letstar-f 1) 2)
+(check "JIT: let* sequential scope in a nested lambda" (jit-letstar-h 5) 10)
+
+;; jit-compile! must refuse what the auto-JIT refuses (#295): a procedure
+;; from a define-library (its globals are not in GLOBAL_ENV) and a closure
+;; using a let-syntax-local macro.
+(define-library (jit-295 lib)
+  (import (scheme base))
+  (export jit-295-f)
+  (begin (define (jit-295-helper x) (* x 3))
+         (define (jit-295-f x) (+ (jit-295-helper x) 1))))
+(import (jit-295 lib))
+(jit-compile! jit-295-f)
+(check "#295: jit-compile! of a define-library procedure stays correct" (jit-295-f 2) 7)
+(define jit-295-g (let-syntax ((dbl (syntax-rules () ((_ x) (* 2 x))))) (lambda (n) (dbl n))))
+(jit-compile! jit-295-g)
+(check "#295: jit-compile! of a let-syntax closure stays correct" (jit-295-g 21) 42)
+
+;;; Issue #288: fresh closures of one chunk share a single compilation
+;;; (correctness here; the fix is what keeps memory flat).
+(define (jit-288-mk) (lambda (x) (* x 2)))
+(define (jit-288-go k acc)
+  (if (= k 0) acc
+      (let ((f (jit-288-mk)))
+        (let lp ((i 0) (a acc)) (if (< i 60) (lp (+ i 1) (+ a (f i))) (jit-288-go (- k 1) a))))))
+(check "#288: many fresh hot closures of one chunk" (jit-288-go 500 0) 1770000)
+
 ;;; 12. jit-call-depth does not leak across a caught exception raised from
 ;;; inside a JIT-to-JIT call (curry_jit_apply_arr → apply_arr → longjmp) ──────
 ;;; Regression coverage: before ExnHandler gained saved_jit_depth (restored

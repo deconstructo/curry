@@ -257,6 +257,39 @@ static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
     return result;
 }
 
+/* ---- Argument-count check ---- */
+/*
+ * Issue #289: every JIT function reads its fixed parameters straight from
+ * argv[0..n_fixed-1], so a call with too few arguments read past the end of
+ * the caller's argument array, and a call with too many silently ignored the
+ * extras. The bytecode VM checks arity before switching to native code
+ * (vm_check_arity), but C callers (apply_arr, and through it map, for-each,
+ * apply) call a T_JITCLOSURE directly. Emitted first in the function, before
+ * any argv load.
+ */
+static void emit_arity_check(CompileCtx &cc, Value *argc_arg,
+                             int n_fixed, bool has_rest) {
+    Value *bad = has_rest
+        ? cc.B.CreateICmpSLT(argc_arg, ConstantInt::get(cc.i32_t, n_fixed))
+        : cc.B.CreateICmpNE(argc_arg, ConstantInt::get(cc.i32_t, n_fixed));
+    Function *fn = cc.B.GetInsertBlock()->getParent();
+    auto *bad_bb = BasicBlock::Create(cc.llvm_ctx, "arity_bad", fn);
+    auto *ok_bb  = BasicBlock::Create(cc.llvm_ctx, "arity_ok", fn);
+    cc.B.CreateCondBr(bad, bad_bb, ok_bb);
+
+    cc.B.SetInsertPoint(bad_bb);
+    auto *err_ft = FunctionType::get(Type::getVoidTy(cc.llvm_ctx),
+                                     { cc.i32_t, cc.i32_t, cc.i32_t }, false);
+    emit_statepoint_call(cc, declare_helper(cc.M, "curry_jit_arity_error", err_ft),
+                         err_ft,
+                         { argc_arg,
+                           ConstantInt::get(cc.i32_t, n_fixed),
+                           ConstantInt::get(cc.i32_t, has_rest ? 1 : 0) });
+    cc.B.CreateUnreachable();
+
+    cc.B.SetInsertPoint(ok_bb);
+}
+
 /* ---- Literal emission ---- */
 
 static Value *emit_literal(CompileCtx &cc, val_t v) {
@@ -483,9 +516,42 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
 
 /* ---- Free variable analysis ---- */
 
+/* Nesting limit for the source walks below (collect_free_vars,
+ * scan_captures). Deeper input makes the compile fail -- the caller falls
+ * back to bytecode -- instead of overflowing the C stack. */
+static const int JIT_SCAN_DEPTH_MAX = 2000;   /* code generation itself
+                                                 * (emit_expr) uses about two
+                                                 * C frames per level and has
+                                                 * no guard of its own: it
+                                                 * crashed at ~6,000-7,000 */
+
+/* (name expr) binding lists: every element a pair whose car is a symbol and
+ * whose cdr is a pair. */
+static bool well_formed_bindings(val_t b) {
+    for (; vis_pair(b); b = as_pair(b)->cdr) {
+        val_t bnd = as_pair(b)->car;
+        if (!vis_pair(bnd) || !vis_symbol(as_pair(bnd)->car) || !vis_pair(as_pair(bnd)->cdr))
+            return false;
+    }
+    return vis_nil(b);
+}
+
+/*
+ * Collect the free variables of `expr` (relative to `bound`) into `free`.
+ * Every special-form case first checks the form has the shape it expects;
+ * anything else -- a malformed form, or data that only looks like one, such
+ * as a case datum ((lambda) 'x) or a quasiquote template `(let ,b ,@body)
+ * -- goes to the generic walk below, which only follows real pairs. That
+ * can only add free names, never miss one, which is the safe direction.
+ * Before this, such data crashed the process (as_pair on a non-pair) as
+ * soon as the function holding it got hot.
+ */
 static void collect_free_vars(val_t expr,
                                const std::unordered_set<std::string> &bound,
-                               std::unordered_set<std::string> &free) {
+                               std::unordered_set<std::string> &free,
+                               int depth = 0) {
+    if (depth > JIT_SCAN_DEPTH_MAX)
+        throw std::runtime_error("JIT: expression nesting too deep");
     if (vis_symbol(expr)) {
         std::string n = as_sym(expr)->data;
         if (!bound.count(n)) free.insert(n);
@@ -493,14 +559,17 @@ static void collect_free_vars(val_t expr,
     }
     if (!vis_pair(expr)) return;
 
-    val_t op  = as_pair(expr)->car;
+    /* Translate Akkadian/cuneiform synonyms the same way emit_expr does, so
+     * e.g. epēšum is treated as lambda here too (issue #291 review). */
+    val_t op  = lang_translate(as_pair(expr)->car);
     val_t rst = as_pair(expr)->cdr;
+    int   d   = depth + 1;
 
     if (vis_symbol(op)) {
         val_t s = op;
         if (s == S("quote")) return;
 
-        if (s == S("lambda")) {
+        if (s == S("lambda") && vis_pair(rst)) {
             val_t params = as_pair(rst)->car;
             val_t body   = as_pair(rst)->cdr;
             auto nb = bound;
@@ -511,85 +580,195 @@ static void collect_free_vars(val_t expr,
                 p = as_pair(p)->cdr;
             }
             if (vis_symbol(p)) nb.insert(as_sym(p)->data);
-            else if (vis_symbol(params)) nb.insert(as_sym(params)->data);
             for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
+                collect_free_vars(as_pair(e)->car, nb, free, d);
             return;
         }
 
-        if (s == S("let")) {
+        if (s == S("let") && vis_pair(rst)) {
             val_t bindings = as_pair(rst)->car;
             val_t body     = as_pair(rst)->cdr;
-            if (vis_symbol(bindings)) {
+            if (vis_symbol(bindings) && vis_pair(body) &&
+                well_formed_bindings(as_pair(body)->car)) {
                 /* named let */
                 std::string loop_nm = as_sym(bindings)->data;
-                val_t real_b = vis_pair(body) ? as_pair(body)->car : V_NIL;
-                val_t real_body = vis_pair(body) ? as_pair(body)->cdr : V_NIL;
+                val_t real_b    = as_pair(body)->car;
+                val_t real_body = as_pair(body)->cdr;
                 for (val_t b = real_b; vis_pair(b); b = as_pair(b)->cdr)
-                    collect_free_vars(as_pair(as_pair(as_pair(b)->car)->cdr)->car, bound, free);
+                    collect_free_vars(as_pair(as_pair(as_pair(b)->car)->cdr)->car, bound, free, d);
                 auto nb = bound;
                 nb.insert(loop_nm);
                 for (val_t b = real_b; vis_pair(b); b = as_pair(b)->cdr)
-                    if (vis_symbol(as_pair(as_pair(b)->car)->car))
-                        nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
+                    nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
                 for (val_t e = real_body; vis_pair(e); e = as_pair(e)->cdr)
-                    collect_free_vars(as_pair(e)->car, nb, free);
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
                 return;
             }
-            auto nb = bound;
-            for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
-                val_t bnd = as_pair(b)->car;
-                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, bound, free);
-                if (vis_symbol(as_pair(bnd)->car))
+            if (well_formed_bindings(bindings)) {
+                auto nb = bound;
+                for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
+                    val_t bnd = as_pair(b)->car;
+                    collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, bound, free, d);
                     nb.insert(as_sym(as_pair(bnd)->car)->data);
+                }
+                for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
+                return;
             }
-            for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
-            return;
         }
 
-        if (s == S("let*") || s == S("letrec") || s == S("letrec*")) {
+        if ((s == S("let*") || s == S("letrec") || s == S("letrec*")) &&
+            vis_pair(rst) && well_formed_bindings(as_pair(rst)->car)) {
             val_t bindings = as_pair(rst)->car;
             val_t body     = as_pair(rst)->cdr;
+            /* letrec/letrec*: every name is in scope in every init. let*:
+             * a name is in scope only AFTER its own init, so (let* ((x (+ x
+             * 1))) ...) reads the OUTER x -- binding it first made that x
+             * look bound here, so emit_lambda did not capture it and the JIT
+             * compiled it as a global reference (wrong results). */
+            bool sequential = (s == S("let*"));
             auto nb = bound;
+            if (!sequential)
+                for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr)
+                    nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
             for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
                 val_t bnd = as_pair(b)->car;
-                if (vis_symbol(as_pair(bnd)->car))
-                    nb.insert(as_sym(as_pair(bnd)->car)->data);
-                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, nb, free);
+                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, nb, free, d);
+                if (sequential) nb.insert(as_sym(as_pair(bnd)->car)->data);
             }
             for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
+                collect_free_vars(as_pair(e)->car, nb, free, d);
             return;
         }
 
-        if (s == S("define")) {
+        if (s == S("define") && vis_pair(rst)) {
             val_t first = as_pair(rst)->car;
-            if (vis_symbol(first)) {
-                collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free);
-            } else if (vis_pair(first)) {
+            if (vis_symbol(first) && vis_pair(as_pair(rst)->cdr)) {
+                collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free, d);
+                return;
+            }
+            if (vis_pair(first)) {
                 auto nb = bound;
-                for (val_t p = as_pair(first)->cdr; vis_pair(p); p = as_pair(p)->cdr)
+                val_t p = as_pair(first)->cdr;
+                for (; vis_pair(p); p = as_pair(p)->cdr)
                     if (vis_symbol(as_pair(p)->car))
                         nb.insert(as_sym(as_pair(p)->car)->data);
+                if (vis_symbol(p)) nb.insert(as_sym(p)->data);
                 for (val_t e = as_pair(rst)->cdr; vis_pair(e); e = as_pair(e)->cdr)
-                    collect_free_vars(as_pair(e)->car, nb, free);
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
+                return;
             }
-            return;
         }
 
-        if (s == S("set!")) {
+        if (s == S("set!") && vis_pair(rst) && vis_symbol(as_pair(rst)->car) &&
+            vis_pair(as_pair(rst)->cdr)) {
             std::string n = as_sym(as_pair(rst)->car)->data;
             if (!bound.count(n)) free.insert(n);
-            collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free);
+            collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free, d);
             return;
         }
     }
 
-    /* Default: recurse on every subform. */
-    collect_free_vars(op, bound, free);
+    /* Default (and every malformed shape above): recurse on every subform. */
+    collect_free_vars(as_pair(expr)->car, bound, free, d);
     for (val_t e = rst; vis_pair(e); e = as_pair(e)->cdr)
-        collect_free_vars(as_pair(e)->car, bound, free);
+        collect_free_vars(as_pair(e)->car, bound, free, d);
+}
+
+/* ---- Captured-variable assignment check (issue #291) ---- */
+/*
+ * emit_lambda copies a captured variable into the new closure unless the
+ * binding is already a cell (letrec / named let / internal define). So if
+ * a local variable is captured by a nested lambda and also changed with
+ * set! -- inside that lambda or outside it -- the two sides each have
+ * their own copy and stop seeing each other's changes: silently wrong
+ * results (a JIT'd counter or accumulator). Until such variables get
+ * cells, refuse to compile any form where it can happen; the caller falls
+ * back to the bytecode VM, which shares variables correctly.
+ *
+ * The check is by name and ignores shadowing, so it can refuse code that
+ * would have been fine. That only costs speed, never correctness.
+ */
+namespace {
+struct CaptureScan {
+    std::unordered_set<std::string> assigned;  /* targets of set!          */
+    std::unordered_set<std::string> binders;   /* names bound locally      */
+    std::vector<std::pair<val_t, val_t>> lambdas; /* (params, body) pairs  */
+};
+}
+
+static void add_param_names(val_t params, std::unordered_set<std::string> &out) {
+    val_t p = params;
+    for (; vis_pair(p); p = as_pair(p)->cdr)
+        if (vis_symbol(as_pair(p)->car)) out.insert(as_sym(as_pair(p)->car)->data);
+    if (vis_symbol(p)) out.insert(as_sym(p)->data);
+}
+
+static void scan_captures(val_t e, CaptureScan &cs, int depth = 0) {
+    if (!vis_pair(e)) return;
+    if (depth > JIT_SCAN_DEPTH_MAX)
+        throw std::runtime_error("JIT: expression nesting too deep");
+    /* emit_expr compiles Akkadian/cuneiform synonyms (šanûm = set!,
+     * epēšum = lambda, leqûm = let, ...) as the English forms, so the
+     * scan must see them the same way or they bypass this check. */
+    val_t op  = lang_translate(as_pair(e)->car);
+    val_t rst = as_pair(e)->cdr;
+    if (vis_symbol(op)) {
+        if (op == S("quote")) return;
+        if (op == S("set!") && vis_pair(rst) && vis_symbol(as_pair(rst)->car))
+            cs.assigned.insert(as_sym(as_pair(rst)->car)->data);
+        if (op == S("lambda") && vis_pair(rst)) {
+            add_param_names(as_pair(rst)->car, cs.binders);
+            cs.lambdas.emplace_back(as_pair(rst)->car, as_pair(rst)->cdr);
+        }
+        if (op == S("define") && vis_pair(rst)) {
+            val_t target = as_pair(rst)->car;
+            if (vis_pair(target)) {           /* (define (name . params) body...) */
+                if (vis_symbol(as_pair(target)->car))
+                    cs.binders.insert(as_sym(as_pair(target)->car)->data);
+                add_param_names(as_pair(target)->cdr, cs.binders);
+                cs.lambdas.emplace_back(as_pair(target)->cdr, as_pair(rst)->cdr);
+            } else if (vis_symbol(target)) {
+                cs.binders.insert(as_sym(target)->data);
+            }
+        }
+        if ((op == S("let") || op == S("let*") || op == S("letrec") ||
+             op == S("letrec*") || op == S("do")) && vis_pair(rst)) {
+            val_t bindings = as_pair(rst)->car;
+            if (vis_symbol(bindings)) {       /* named let */
+                cs.binders.insert(as_sym(bindings)->data);
+                val_t b2 = as_pair(rst)->cdr;
+                bindings = vis_pair(b2) ? as_pair(b2)->car : V_NIL;
+            }
+            for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
+                val_t bnd = as_pair(b)->car;
+                if (vis_pair(bnd) && vis_symbol(as_pair(bnd)->car))
+                    cs.binders.insert(as_sym(as_pair(bnd)->car)->data);
+            }
+        }
+    }
+    for (val_t x = e; vis_pair(x); x = as_pair(x)->cdr)
+        scan_captures(as_pair(x)->car, cs, depth + 1);
+}
+
+/* Throws (so the caller falls back to bytecode) if any form in `forms`
+ * (a list) has a local variable that is both captured and assigned. */
+static void reject_captured_assignment(val_t forms) {
+    CaptureScan cs;
+    for (val_t f = forms; vis_pair(f); f = as_pair(f)->cdr)
+        scan_captures(as_pair(f)->car, cs);
+    if (cs.assigned.empty()) return;
+    for (auto &lam : cs.lambdas) {
+        std::unordered_set<std::string> bound, free;
+        add_param_names(lam.first, bound);
+        for (val_t e = lam.second; vis_pair(e); e = as_pair(e)->cdr)
+            collect_free_vars(as_pair(e)->car, bound, free);
+        for (auto &n : free)
+            if (cs.assigned.count(n) && cs.binders.count(n))
+                throw std::runtime_error(
+                    "JIT: local variable '" + n + "' is captured by a lambda "
+                    "and assigned with set!; staying on bytecode (issue #291)");
+    }
 }
 
 /* ---- Cell allocation ---- */
@@ -671,6 +850,8 @@ static Value *emit_lambda(CompileCtx &cc, val_t params_val, val_t body_val) {
     auto *argc_arg = lambda_fn->getArg(0); argc_arg->setName("argc");
     auto *argv_arg = lambda_fn->getArg(1); argv_arg->setName("argv");
     auto *caps_arg = lambda_fn->getArg(2); caps_arg->setName("caps");
+
+    emit_arity_check(lcc, argc_arg, (int)fixed_params.size(), has_rest);
 
     lcc.push_scope();
 
@@ -1512,6 +1693,7 @@ std::unique_ptr<llvm::Module> codegen_thunk(LLVMContext &llvm_ctx,
                                        const std::string &name) {
     if (!vis_closure(thunk))
         throw std::runtime_error("codegen_thunk: not a T_CLOSURE");
+    reject_captured_assignment(as_clos(thunk)->body);
 
     auto M  = make_module(llvm_ctx, name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
@@ -1536,6 +1718,7 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
                                            const std::string &name) {
     if (!vis_closure(proc))
         throw std::runtime_error("codegen_procedure: not a T_CLOSURE");
+    reject_captured_assignment(as_clos(proc)->body);
 
     auto M  = make_module(llvm_ctx, name);
     auto *ft = scheme_fn_type(llvm_ctx);
@@ -1546,19 +1729,42 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
     auto *argv_arg = fn->getArg(1); argv_arg->setName("argv");
 
     Closure *cl = as_clos(proc);
+
+    /* Fixed parameters, then an optional rest parameter (a dotted tail or
+     * a bare symbol), same as emit_lambda. */
+    int n_fixed = 0;
+    val_t ps = cl->params;
+    for (; vis_pair(ps); ps = as_pair(ps)->cdr, ++n_fixed)
+        if (!vis_symbol(as_pair(ps)->car))
+            throw std::runtime_error("codegen_procedure: non-symbol param");
+    bool has_rest = vis_symbol(ps);
+    if (!has_rest && !vis_nil(ps))
+        throw std::runtime_error("codegen_procedure: malformed parameter list");
+
+    emit_arity_check(cc, argc_arg, n_fixed, has_rest);
+
     cc.push_scope();
     int idx = 0;
-    for (val_t ps = cl->params; vis_pair(ps); ps = as_pair(ps)->cdr, ++idx) {
-        val_t pn = as_pair(ps)->car;
-        if (!vis_symbol(pn))
-            throw std::runtime_error("codegen_procedure: non-symbol param");
-        const char *pstr = as_sym(pn)->data;
+    for (ps = cl->params; vis_pair(ps); ps = as_pair(ps)->cdr, ++idx) {
+        const char *pstr = as_sym(as_pair(ps)->car)->data;
         auto *gep  = cc.B.CreateGEP(cc.i64_t, argv_arg,
                                      ConstantInt::get(cc.i32_t, idx));
         auto *pval = cc.B.CreateLoad(cc.i64_t, gep, pstr);
         auto *slot = cc.alloc_root(pstr);
         cc.B.CreateStore(pval, slot);
         cc.bind(pstr, slot);
+    }
+    if (has_rest) {
+        const char *rstr = as_sym(ps)->data;
+        auto *list_ft = FunctionType::get(cc.i64_t, { cc.ptr_t, cc.i32_t }, false);
+        auto *list_fn = declare_helper(cc.M, "curry_jit_list_tail", list_ft);
+        auto *rest_argv = cc.B.CreateGEP(cc.i64_t, argv_arg,
+                                          ConstantInt::get(cc.i32_t, n_fixed));
+        auto *rest_n = cc.B.CreateSub(argc_arg, ConstantInt::get(cc.i32_t, n_fixed));
+        auto *rest_val = emit_statepoint_call(cc, list_fn, list_ft, { rest_argv, rest_n });
+        auto *slot = cc.alloc_root(rstr);
+        cc.B.CreateStore(rest_val, slot);
+        cc.bind(rstr, slot);
     }
     Value *result = emit_body(cc, cl->body);
     cc.pop_scope();
@@ -1574,6 +1780,7 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
 std::unique_ptr<llvm::Module> codegen_file(LLVMContext &llvm_ctx,
                                             val_t forms,
                                             const std::string &module_name) {
+    reject_captured_assignment(forms);
     auto M  = make_module(llvm_ctx, module_name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
     auto *fn = make_fn(*M, llvm_ctx, "_curry_toplevel", ft);
@@ -1594,6 +1801,7 @@ std::unique_ptr<llvm::Module> codegen_file(LLVMContext &llvm_ctx,
 std::unique_ptr<llvm::Module> codegen_expr(LLVMContext &llvm_ctx,
                                             val_t expr,
                                             const std::string &name) {
+    reject_captured_assignment(scm_cons(expr, V_NIL));
     auto M  = make_module(llvm_ctx, name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
     auto *fn = make_fn(*M, llvm_ctx, name, ft);

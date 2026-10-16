@@ -383,6 +383,16 @@ val_t apply(val_t proc, val_t args) {
         val_t *arr = args_to_arr(args, n, stack_arr, 64);
         return sx_make_apply(proc, n, arr);
     }
+    /* Issue #289: a lambda created inside JIT-compiled code is a
+     * T_JITCLOSURE. apply_arr already calls those; this list-argument
+     * entry point (used by map, for-each, apply and the work pool) had no
+     * case for them and raised "not a procedure". */
+    if (vis_jitclosure(proc)) {
+        int n = list_length(args);
+        val_t stack_arr[64];
+        val_t *arr = args_to_arr(args, n, stack_arr, 64);
+        return apply_arr(proc, n, arr);
+    }
     scm_raise_code(EC_NOT_A_PROCEDURE, "apply: not a procedure");
 }
 
@@ -614,18 +624,28 @@ bool jit_arith_tainted(void) {
 /* Build (let ((name0 'val0) ...) src_lambda) to inject captured upvalue
  * values as constants so the JIT compiles them in without needing runtime
  * cell indirection. */
-val_t jit_wrap_upvals(BcClosure *cl) {
-    val_t bindings = V_NIL;
-    for (int i = cl->upval_count - 1; i >= 0; i--) {
-        val_t uval    = *cl->upvals[i]->location;
-        val_t name    = cl->chunk->upval_names[i];
-        val_t quoted  = scm_cons(S_QUOTE, scm_cons(uval, V_NIL));
-        val_t binding = scm_cons(name, scm_cons(quoted, V_NIL));
-        bindings = scm_cons(binding, bindings);
-    }
-    return scm_cons(S_LET, scm_cons(bindings, scm_cons(cl->chunk->src_lambda, V_NIL)));
-}
 #endif /* BUILD_LLVM */
+
+#ifdef BUILD_LLVM
+/* Issue #288: the JIT code for a chunk, compiled at most once and shared by
+ * every closure of that chunk (callers only pass chunks whose closures have
+ * no upvalues, so the code is the same for all of them). Returns the
+ * T_JITCLOSURE, or V_FALSE if the chunk is being compiled by another thread
+ * right now or cannot be compiled. */
+val_t jit_chunk_code(Chunk *ch) {
+    val_t shared = __atomic_load_n(&ch->jit_shared, __ATOMIC_ACQUIRE);
+    if (shared != 0) return shared;      /* compiled, or V_FALSE */
+    val_t expected = 0;
+    if (!__atomic_compare_exchange_n(&ch->jit_shared, &expected, V_FALSE,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return expected;                 /* another thread got there first */
+    val_t compiled = curry_llvm_jit_compile(ch->src_lambda);
+    if (!vis_jitclosure(compiled)) return V_FALSE;   /* stays V_FALSE */
+    __atomic_store_n(&ch->jit_shared, compiled, __ATOMIC_RELEASE);
+    return compiled;
+}
+#endif
 
 /* Called from vm.c (OP_CALL / OP_TAIL_CALL inline) and apply_arr below. */
 void maybe_jit_bcc(BcClosure *cl) {
@@ -663,32 +683,32 @@ void maybe_jit_bcc(BcClosure *cl) {
      * above, is the only place with the compile-time information needed
      * to catch it. See issue #114. */
     if (cl->chunk->uses_local_macro) return;
-    if (cl->upval_count > 0 && !cl->chunk->upval_names) return;
-    /* Skip JIT for self-referencing closures (named-let loops that capture
-     * themselves as an upvalue).  The bytecode tail-call reuse gives O(1)
-     * stack; JIT would bake the self-reference as a constant and recurse via
-     * apply_arr → vm_run, growing the C stack by one frame per iteration. */
-    for (int i = 0; i < cl->upval_count; i++) {
-        if (*cl->upvals[i]->location == vptr(cl)) {
-            __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
-            return;
-        }
-    }
-    if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < JIT_THRESHOLD) return;
-    /* CAS V_VOID → V_FALSE: only the winning thread compiles this closure.
-     * Losers see V_FALSE and fall back to bytecode until the result is stored. */
-    val_t expected = V_VOID;
-    if (!__atomic_compare_exchange_n(&cl->jit_val, &expected, V_FALSE,
-                                     /*weak=*/false,
-                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+    /* Issue #291: closures with upvalues stay on the bytecode VM. The JIT
+     * used to compile them with each upvalue's value at compile time baked
+     * in as a constant (a private copy), so a later set! -- by this closure
+     * or by another closure sharing the variable -- was not seen by the
+     * other side: silently wrong results. The bytecode VM shares upvalues
+     * correctly. Also covers self-referencing named-let closures, which
+     * were already excluded here. */
+    if (cl->upval_count > 0) {
+        __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
         return;
-    val_t src = (cl->upval_count > 0)
-        ? jit_wrap_upvals(cl)
-        : cl->chunk->src_lambda;
-    val_t compiled = curry_llvm_jit_compile(src);
-    __atomic_store_n(&cl->jit_val,
-                     vis_jitclosure(compiled) ? compiled : V_FALSE,
-                     __ATOMIC_RELEASE);
+    }
+    /* Issue #288: reuse the code already compiled for this chunk instead of
+     * compiling it again for every new closure instance. */
+    Chunk *ch = cl->chunk;
+    val_t shared = __atomic_load_n(&ch->jit_shared, __ATOMIC_ACQUIRE);
+    if (vis_jitclosure(shared)) {
+        __atomic_store_n(&cl->jit_val, shared, __ATOMIC_RELEASE);
+        return;
+    }
+    if (shared == V_FALSE) return;   /* being compiled, or not compilable */
+    if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < JIT_THRESHOLD) return;
+    /* Only one thread compiles a chunk; the others stay on bytecode until
+     * the result is stored, and nobody retries a chunk that failed. */
+    val_t compiled = jit_chunk_code(ch);
+    if (vis_jitclosure(compiled))
+        __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
 #else
     (void)cl;
 #endif
