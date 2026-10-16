@@ -84,11 +84,14 @@
 ;;    against VM_STACK_MAX), but the direct frame-reuse memmove bypassed
 ;;    that check entirely -- a long enough applied list overran
 ;;    frame->slots, the frame array, and the handler stack.
+;;    The bound is still checked (against VM_STACK_MAX), but since issue
+;;    #292 the value stack holds ~8.4 million slots, so reaching it needs a
+;;    list too large for this suite; 200,000 arguments must now just work.
 (define (sink . xs) (length xs))
 (define (unbounded-tail-apply n) (apply sink (make-list n 1)))
-(check "apply TCO: a very long applied list in tail position raises a clean stack-overflow, not a crash"
+(check "apply TCO: a very long applied list (200000) in tail position works"
        (guard (e (#t 'raised)) (unbounded-tail-apply 200000))
-       'raised)
+       200000)
 
 ;;; Summary
 

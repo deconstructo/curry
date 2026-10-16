@@ -33,11 +33,18 @@ Reader  →  AST (val_t cons tree)
 | `BcClosure` | Runtime closure: `Chunk*` + captured `Upvalue*[]` array |
 | `CallFrame` | Activation record: `BcClosure*`, instruction pointer `ip`, `slots` pointer into the value stack, slot count |
 
-The global `VM *vm` holds the flat value stack (`val_t stack[VM_STACK_MAX]`),
-the frame stack (`CallFrame frames[VM_FRAMES_MAX]`), and a linked list of
-open upvalues.
+The per-thread `VM *vm` holds the flat value stack (`vm->stack`,
+`VM_STACK_MAX` slots), the frame stack (`vm->frames`, `VM_FRAMES_MAX`
+frames), and a linked list of open upvalues.
 
-Limits: stack depth 4096 values, call depth 256 frames.
+Limits: 8,388,608 stack slots and 1,048,576 call frames (non-tail
+recursion depth). Both are anonymous `mmap` reservations made by
+`vm_init`, so they cost address space only; the OS gives a page real
+memory the first time it is touched, and nothing ever moves. Boehm does
+not scan mmap memory, so a push-other-roots callback (`vm_push_roots`)
+pushes the used part of every live VM's stack and frames at each
+collection. Before issue #292 these were arrays inside the VM struct:
+4,096 slots and 256 frames.
 
 ---
 

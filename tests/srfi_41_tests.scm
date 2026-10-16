@@ -105,11 +105,11 @@
 
 ;;; Stack safety: the entire reason this port uses curry's native
 ;;; delay-force for the cdr instead of plain delay is that a long
-;;; stream must not grow the VM's call stack per element. 100,000
-;;; elements is comfortably past the 256-frame guard a naive
-;;; non-tail-safe implementation would blow through.
+;;; stream must not grow the VM's call stack per element. 2,000,000
+;;; elements is past the VM's ~1,048,576-frame limit (VM_FRAMES_MAX,
+;;; issue #292), which a naive non-tail-safe implementation would hit.
 
-(check "stack-safe: stream-length over 100,000 elements" (stream-length (stream-range 0 100000)) 100000)
+(check "stack-safe: stream-length over 2,000,000 elements" (stream-length (stream-range 0 2000000)) 2000000)
 (check "stack-safe: stream-fold over 1,000 elements" (stream-fold + 0 (stream-range 1 1001)) 500500)
 (check "stack-safe: stream-filter over 50,000 elements"
        (stream-length (stream-filter even? (stream-range 0 50000)))

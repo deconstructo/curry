@@ -198,6 +198,9 @@
 #include "chunk.h"
 #include "opcode.h"
 #include "value.h"
+#include <sys/mman.h>
+#include <unistd.h>
+#include <pthread.h>
 #include "object.h"
 #include "gc.h"
 #include <gc/gc_mark.h>
@@ -213,9 +216,7 @@
 CURRY_THREAD_LOCAL VM *vm = NULL;
 
 __attribute__((noreturn)) void vm_stack_overflow(void) {
-    fprintf(stderr, "[vm] vm_stack_overflow: sp=%p stack_end=%p\n",
-            (void *)vm->sp, (void *)(vm->stack + VM_STACK_MAX));
-    fflush(stderr);
+    vm_note_overflow();
     scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
 }
 
@@ -229,10 +230,26 @@ static val_t vm_cstr_to_string(const char *s) {
     return vptr(str);
 }
 
+/* Issue #292: with ~a million frames possible, a full backtrace of a deep
+ * recursion cost hundreds of MB (a list and two strings per frame). Keep
+ * the outermost and innermost frames and one entry saying how many were
+ * left out between them. */
+#define VM_BT_OUTER 8
+#define VM_BT_INNER 48
+
 val_t vm_capture_backtrace(void) {
     if (!vm) return V_NIL;
     val_t bt = V_NIL;
-    for (int i = 0; i < vm->frame_count; i++) {
+    int n = vm->frame_count;
+    for (int i = 0; i < n; i++) {
+        if (n > VM_BT_OUTER + VM_BT_INNER + 1 && i == VM_BT_OUTER) {
+            char buf[64];
+            snprintf(buf, sizeof buf, "... %d more frames ...", n - VM_BT_OUTER - VM_BT_INNER);
+            val_t gap = scm_cons(vm_cstr_to_string(buf), scm_cons(V_FALSE, scm_cons(V_FALSE, V_NIL)));
+            bt = scm_cons(gap, bt);
+            i = n - VM_BT_INNER - 1;
+            continue;
+        }
         CallFrame *fr = &vm->frames[i];
         Chunk *ch = fr->closure->chunk;
         int off = (int)(fr->ip - ch->code);
@@ -255,19 +272,99 @@ val_t vm_capture_backtrace(void) {
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
+/*
+ * Issue #292: each VM's value stack and call frames live in their own
+ * anonymous mmap reservations. Nothing ever moves them (CallFrame.slots,
+ * vm->sp, saved handler sp and open Upvalue.location all point into the
+ * stack), and pages get real memory only when first touched.
+ *
+ * Boehm does not scan mmap memory, and scanning the whole reservation
+ * would be slow anyway, so a push-other-roots callback pushes just the
+ * used part of every live VM: [stack, sp + VM_GC_SLACK) and
+ * [frames, frames + frame_count + 1). The slack covers a value written
+ * just above sp by a thread that was stopped before incrementing sp (that
+ * value is normally also in a register, but this costs nothing). The
+ * registry of live VMs is a list changed only under Boehm's allocation
+ * lock, which collections also hold, so the callback needs no lock of its
+ * own (it must not take one: a stopped thread could hold it).
+ */
+#define VM_GC_SLACK 16
+
+static VM *g_vm_list = NULL;          /* guarded by Boehm's allocation lock */
+static GC_push_other_roots_proc g_prev_push_other_roots = NULL;
+
+static void vm_push_roots(void) {
+    for (VM *v = g_vm_list; v; v = v->gc_next) {
+        val_t *top = v->sp + VM_GC_SLACK;
+        if (top > v->stack + VM_STACK_MAX) top = v->stack + VM_STACK_MAX;
+        if (v->sp >= v->stack) GC_push_all(v->stack, top);
+        int nf = v->frame_count + 1;
+        if (nf > VM_FRAMES_MAX) nf = VM_FRAMES_MAX;
+        if (nf > 0) GC_push_all(v->frames, v->frames + nf);
+    }
+    if (g_prev_push_other_roots) g_prev_push_other_roots();
+}
+
+static void vm_install_push_roots(void) {
+    g_prev_push_other_roots = GC_get_push_other_roots();
+    GC_set_push_other_roots(vm_push_roots);
+}
+
+static void *vm_list_add(void *p) {
+    VM *v = (VM *)p;
+    v->gc_prev = NULL;
+    v->gc_next = g_vm_list;
+    if (g_vm_list) g_vm_list->gc_prev = v;
+    g_vm_list = v;
+    return NULL;
+}
+
+static void *vm_list_remove(void *p) {
+    VM *v = (VM *)p;
+    if (v->gc_prev) v->gc_prev->gc_next = v->gc_next;
+    else            g_vm_list = v->gc_next;
+    if (v->gc_next) v->gc_next->gc_prev = v->gc_prev;
+    v->gc_prev = v->gc_next = NULL;
+    return NULL;
+}
+
+static void *vm_reserve(size_t bytes, const char *what) {
+    void *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON
+#ifdef MAP_NORESERVE
+                   | MAP_NORESERVE
+#endif
+                   , -1, 0);
+    if (p == MAP_FAILED) {
+        fprintf(stderr, "[vm] cannot reserve %zu bytes for the %s\n", bytes, what);
+        abort();
+    }
+    return p;
+}
+
 void vm_init(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, vm_install_push_roots);
+
     /* Use GC_MALLOC_UNCOLLECTABLE so Boehm GC never frees the VM struct even
      * though the only reference is a CURRY_THREAD_LOCAL pointer (TLS is not scanned
      * as a GC root).  GC still scans the struct's interior for live val_t refs. */
     vm = (VM *)GC_MALLOC_UNCOLLECTABLE(sizeof(VM));
+    vm->stack  = (val_t *)vm_reserve((size_t)VM_STACK_MAX * sizeof(val_t), "VM value stack");
+    vm->frames = (CallFrame *)vm_reserve((size_t)VM_FRAMES_MAX * sizeof(CallFrame), "VM call frames");
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
+    GC_call_with_alloc_lock(vm_list_add, vm);
 }
 
 void vm_free(void) {
-    if (vm) GC_FREE(vm);
+    if (!vm) return;
+    GC_call_with_alloc_lock(vm_list_remove, vm);
+    munmap(vm->stack,  (size_t)VM_STACK_MAX * sizeof(val_t));
+    munmap(vm->frames, (size_t)VM_FRAMES_MAX * sizeof(CallFrame));
+    GC_FREE(vm);
     vm = NULL;
 }
 
@@ -283,11 +380,38 @@ void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues) {
     *open_upvalues = (void *)vm->open_upvalues;
 }
 
+/* After a stack-overflow error has unwound: replace the pages above the
+ * current top of the value stack and frame array with fresh untouched
+ * ones (mmap MAP_FIXED over the same addresses), which hands the memory
+ * the deep recursion used back to the OS on every platform. Nothing
+ * points above the current tops. */
+static void vm_release_range(void *from, void *end) {
+    uintptr_t pg = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t a  = ((uintptr_t)from + pg - 1) & ~(pg - 1);
+    uintptr_t b  = (uintptr_t)end;
+    if (a >= b) return;
+    void *p = mmap((void *)a, b - a, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_FIXED
+#ifdef MAP_NORESERVE
+                   | MAP_NORESERVE
+#endif
+                   , -1, 0);
+    (void)p;   /* on failure the old pages simply stay; nothing else changes */
+}
+
+static void vm_release_overflow_pages(void) {
+    if (!vm || !vm->overflowed) return;
+    vm->overflowed = false;
+    vm_release_range(vm->sp + VM_GC_SLACK, vm->stack + VM_STACK_MAX);
+    vm_release_range(vm->frames + vm->frame_count + 1, vm->frames + VM_FRAMES_MAX);
+}
+
 void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues) {
     if (!vm) return;
     vm->frame_count = frame_count;
     vm->sp = (val_t *)sp;
     vm->open_upvalues = (Upvalue *)open_upvalues;
+    vm_release_overflow_pages();
 }
 
 void vm_reset(void) {
@@ -295,6 +419,7 @@ void vm_reset(void) {
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
+    vm_release_overflow_pages();
 }
 
 /* Forward declaration — defined in eval.c where scm_cons / symbol.h are available. */
@@ -653,7 +778,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 
     int entry_depth = vm->frame_count;  /* used to detect return from nested calls */
     if (vm->frame_count >= VM_FRAMES_MAX)
-        scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX); }
     CallFrame *frame  = &vm->frames[vm->frame_count++];
     frame->closure    = top_closure;
     frame->has_callee_slot = true;  /* irrelevant in practice: pop_frame's
@@ -678,7 +803,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                         ? GLOBAL_ENV : frame->closure->chunk->target_env)
 #define PUSH(v)      do { \
     if (vm->sp >= vm->stack + VM_STACK_MAX) \
-        scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX); \
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX); } \
     *vm->sp++ = (v); } while (0)
 #define POP()        (*--vm->sp)
 #define PEEK(n)      (vm->sp[-1-(n)])
@@ -1185,7 +1310,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 }
                 vm_maybe_jit(cl);
                 if (vm->frame_count >= VM_FRAMES_MAX)
-                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                    { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX); }
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->has_callee_slot = true;  /* PEEK(argc2) above found the
@@ -1365,7 +1490,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 }
                 vm_maybe_jit(cl);
                 if (vm->frame_count >= VM_FRAMES_MAX)
-                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                    { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX); }
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->has_callee_slot = false;  /* no callee pushed above */
@@ -1873,6 +1998,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 vm->frame_count   = vm->handler_stack[chi].frame_count;
                 vm->sp            = vm->handler_stack[chi].sp;
                 vm->open_upvalues = vm->handler_stack[chi].open_upvalues;
+                vm_release_overflow_pages();
                 frame = &vm->frames[vm->handler_stack[chi].frame_idx];
                 PUSH(caught);
                 JUMP_ABS(vm->handler_stack[chi].catch_offset);

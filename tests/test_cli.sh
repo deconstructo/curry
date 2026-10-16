@@ -723,7 +723,13 @@ set +e
 "$CURRY" "$BIG_LETSTAR_SCM" >/dev/null 2>&1
 big_letstar_code=$?
 set -e
-check "let* with 20001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
+# Exit 0 (it compiles and runs) or 1 (a catchable stack-overflow) are both
+# fine; only a signal (exit >= 128, e.g. SIGSEGV) is a failure. This used
+# to expect exactly 1, but that 1 came from the VM's old 4096-slot value
+# stack overflowing at run time (20001 locals), not from the compile-time
+# guard; the value stack is no longer that small (issue #292).
+if [ "$big_letstar_code" -eq 0 ] || [ "$big_letstar_code" -eq 1 ]; then big_letstar_ok=yes; else big_letstar_ok="exit $big_letstar_code"; fi
+check "let* with 20001 sequential bindings compiles and runs, or raises a catchable stack-overflow -- not a SIGSEGV" "$big_letstar_ok" "yes"
 # Confirms a much smaller, entirely ordinary let* chain (nowhere near
 # where the guard fires) still compiles and runs correctly.
 out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6 1) (p7 1) (p8 1) (p9 1)
