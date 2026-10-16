@@ -55,6 +55,9 @@ measurements and the plan for a collector without global pauses are in
   its captured variables (#299).
 - A variadic call with no rest arguments at the stack limit wrote one
   slot past the value stack (#300).
+- An error inside a parallel `map`/`reduce`/`for-each/par` chunk left the
+  worker thread's VM deeper each time, until every parallel `map` failed
+  (#302).
 - Threads that ran foreign (FFI) callbacks are now unregistered from the
   GC when they exit.
 
