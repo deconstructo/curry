@@ -383,16 +383,27 @@ void vm_init(void) {
     GC_call_with_alloc_lock(vm_list_add, vm);
 }
 
-void vm_free(void) {
-    if (!vm) return;
+/* Free a VM given by pointer, without reading the thread-local `vm`
+ * (ffi.c's thread-exit destructor runs after macOS has torn TLS down). */
+void vm_free_vm(VM *v) {
+    if (!v) return;
     /* A closure that outlives this thread (e.g. sent to another actor before
      * this one died with an error) must not keep pointing into a stack that
      * is about to be unmapped. */
-    vm_close_upvalues(vm->stack);
-    GC_call_with_alloc_lock(vm_list_remove, vm);
-    munmap(vm->stack,  vm_stack_bytes(vm->stack_max));
-    munmap(vm->frames, vm_frames_bytes(vm->frames_max));
-    GC_FREE(vm);
+    while (v->open_upvalues) {
+        Upvalue *up = v->open_upvalues;
+        gc_wb_slot(&up->closed, *up->location);
+        up->location = &up->closed;
+        v->open_upvalues = up->next;
+    }
+    GC_call_with_alloc_lock(vm_list_remove, v);
+    munmap(v->stack,  vm_stack_bytes(v->stack_max));
+    munmap(v->frames, vm_frames_bytes(v->frames_max));
+    GC_FREE(v);
+}
+
+void vm_free(void) {
+    vm_free_vm(vm);
     vm = NULL;
 }
 
@@ -436,10 +447,14 @@ static void vm_release_overflow_pages(void) {
 
 void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues) {
     if (!vm) return;
+    /* After closing, the open-upvalue list is exactly the still-live ones.
+     * Do not put back the list saved at save time: an upvalue opened since
+     * then for a slot below sp (a closure made after the save capturing an
+     * older local) would be dropped while still open (#292 review). */
+    (void)open_upvalues;
     vm_close_upvalues((val_t *)sp);
     vm->frame_count = frame_count;
     vm->sp = (val_t *)sp;
-    vm->open_upvalues = (Upvalue *)open_upvalues;
     vm_release_overflow_pages();
 }
 
@@ -2037,7 +2052,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 vm->handler_count = chi;
                 vm->frame_count   = vm->handler_stack[chi].frame_count;
                 vm->sp            = vm->handler_stack[chi].sp;
-                vm->open_upvalues = vm->handler_stack[chi].open_upvalues;
+                /* open_upvalues: not restored from the snapshot -- see
+                 * vm_exn_state_restore. vm_close_upvalues above left the
+                 * list exactly right. */
                 vm_release_overflow_pages();
                 frame = &vm->frames[vm->handler_stack[chi].frame_idx];
                 PUSH(caught);

@@ -641,18 +641,21 @@ static void marshal_callback_ret(val_t v, val_t tag, void *ret) {
  * thread leaked its VM and the address space its stack reserves. */
 static pthread_key_t ffi_vm_key;
 static pthread_once_t ffi_vm_key_once = PTHREAD_ONCE_INIT;
-static void ffi_vm_destructor(void *unused) {
-    (void)unused;
-    vm_free();
+static void ffi_vm_destructor(void *p) {
+    /* On macOS _Thread_local storage is torn down by dyld's own key
+     * destructor, which runs first, so `vm` reads NULL here; free through
+     * the pointer stored in the key instead (#292 review). */
+    vm_free_vm((VM *)p);
     /* gc_register_thread() registered this foreign thread with Boehm
      * explicitly; it must be unregistered before it exits, or a later
-     * collection tries to stop a thread that no longer exists. */
-    GC_unregister_my_thread();
+     * collection tries to stop a thread that no longer exists. A thread
+     * Boehm created itself is unregistered by Boehm before this runs. */
+    if (GC_thread_is_registered()) GC_unregister_my_thread();
 }
 static void ffi_vm_key_init(void) { pthread_key_create(&ffi_vm_key, ffi_vm_destructor); }
 static void ffi_free_vm_at_thread_exit(void) {
     pthread_once(&ffi_vm_key_once, ffi_vm_key_init);
-    pthread_setspecific(ffi_vm_key, (void *)1);
+    pthread_setspecific(ffi_vm_key, vm);
 }
 
 static void closure_trampoline(ffi_cif *cif, void *ret, void **args, void *user_data) {

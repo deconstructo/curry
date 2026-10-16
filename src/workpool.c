@@ -123,6 +123,12 @@ static void execute_item(WorkItem *item) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
+    /* A raise inside the work item longjmps here from wherever it was in
+     * the worker's VM; rewind the VM (and close captured variables) the
+     * way SCM_PROTECT does, or every error leaves the worker's stack
+     * deeper until parallel map fails for good (#292 review). */
+    int   saved_fc; void *saved_sp, *saved_uv;
+    vm_exn_state_save(&saved_fc, &saved_sp, &saved_uv);
     current_handler = &h;
 
     if (setjmp(h.jmp) == 0) {
@@ -152,6 +158,7 @@ static void execute_item(WorkItem *item) {
     } else {
         current_handler = h.prev;
         jit_depth_restore(h.saved_jit_depth);
+        vm_exn_state_restore(saved_fc, saved_sp, saved_uv);
         item->error = true;
         item->exn   = h.exn;
     }

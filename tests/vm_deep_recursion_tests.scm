@@ -86,6 +86,37 @@
        (guard (e (#t (error-object-code e))) (vf 0 0 0 0 0 0 0 0 0))
        'stack-overflow)
 
+;; A closure made inside with-exception-handler's thunk (after the
+;; handler was installed) that captures a local of the enclosing procedure
+;; must still share that variable after the handler runs. The in-VM
+;; handler unwind used to put back the open-upvalue list saved when the
+;; handler was installed, dropping this still-open upvalue.
+(define weh-getter #f)
+(define weh-setter #f)
+(define (weh-g x)
+  (let ((v (make-vector 64 x)))
+    (with-exception-handler
+      (lambda (e) 0)
+      (lambda () (set! weh-getter (lambda () v)) (raise 'boom)))
+    (set! weh-setter (lambda () v))
+    (set! v (make-vector 64 (+ x 1)))
+    0))
+(guard (e (#t #f)) (weh-g 7))
+(check "closure from a handler thunk shares the variable" (eq? (weh-getter) (weh-setter)) #t)
+
+;; Errors inside parallel map chunks must not leave the worker threads'
+;; VMs deeper each time (they used to, until every parallel map failed).
+(define (wp-deep n) (if (= n 0) (raise 'b) (+ 1 (wp-deep (- n 1)))))
+(define (wp-deep2 n) (if (= n 0) 0 (+ 1 (wp-deep2 (- n 1)))))
+(define (wp-loop i)
+  (when (< i 3000)
+    (guard (e (#t e)) (map (lambda (x) (wp-deep 2000)) (make-list 64 0)))
+    (wp-loop (+ i 1))))
+(wp-loop 0)
+(check "parallel map still works after many errors in workers"
+       (apply + (map (lambda (x) (wp-deep2 2000)) (make-list 64 0)))
+       128000)
+
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed") (newline)
 (if (> fail 0) (exit 1) (exit 0))

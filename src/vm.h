@@ -132,6 +132,7 @@ extern CURRY_THREAD_LOCAL VM *vm;
 /* Lifecycle */
 void vm_init(void);
 void vm_free(void);
+void vm_free_vm(struct VM *v);   /* free a given VM; does not touch `vm` */
 
 /* Reset stack after a caught exception (longjmp leaves VM in unknown state). */
 void vm_reset(void);

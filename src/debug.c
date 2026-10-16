@@ -302,7 +302,6 @@ static void cmd_print(const CallFrame *fr, const char *text) {
     val_t   *saved_sp    = vm->sp;
     int      saved_fc    = vm->frame_count;
     int      saved_hc    = vm->handler_count;
-    Upvalue *saved_ouv   = vm->open_upvalues;
 
     ExnHandler h;
     SCM_PROTECT(h, {
@@ -320,7 +319,6 @@ static void cmd_print(const CallFrame *fr, const char *text) {
         vm->sp            = saved_sp;
         vm->frame_count   = saved_fc;
         vm->handler_count = saved_hc;
-        vm->open_upvalues = saved_ouv;
         printf("  error: ");
         if (vis_error(h.exn)) scm_display(as_err(h.exn)->message, PORT_STDOUT);
         else                  scm_write(h.exn, PORT_STDOUT);
