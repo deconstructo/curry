@@ -723,13 +723,12 @@ set +e
 "$CURRY" "$BIG_LETSTAR_SCM" >/dev/null 2>&1
 big_letstar_code=$?
 set -e
-# Exit 0 (it compiles and runs) or 1 (a catchable stack-overflow) are both
-# fine; only a signal (exit >= 128, e.g. SIGSEGV) is a failure. This used
-# to expect exactly 1, but that 1 came from the VM's old 4096-slot value
-# stack overflowing at run time (20001 locals), not from the compile-time
-# guard; the value stack is no longer that small (issue #292).
-if [ "$big_letstar_code" -eq 0 ] || [ "$big_letstar_code" -eq 1 ]; then big_letstar_ok=yes; else big_letstar_ok="exit $big_letstar_code"; fi
-check "let* with 20001 sequential bindings compiles and runs, or raises a catchable stack-overflow -- not a SIGSEGV" "$big_letstar_ok" "yes"
+# Must be exactly 1: a clean error. Its body (+ p0 ... p20000) is a call
+# with 20001 arguments, a compile error since #297. Exit 0 would mean a
+# wrong answer (before #297 the argument count wrapped modulo 256 and this
+# printed 33); a signal (>= 128) would mean a crash. Before issue #292 this
+# exited 1 for a different reason: the old 4096-slot value stack overflowed.
+check "let* with 20001 sequential bindings ending in a 20001-argument call is a clean error, not a SIGSEGV or a wrong answer" "$big_letstar_code" "1"
 # Confirms a much smaller, entirely ordinary let* chain (nowhere near
 # where the guard fires) still compiles and runs correctly.
 out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6 1) (p7 1) (p8 1) (p9 1)

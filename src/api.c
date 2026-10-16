@@ -144,6 +144,7 @@ void curry_vm_state_save(CurryVMState *s) {
 }
 
 void curry_vm_state_restore(const CurryVMState *s) {
+    vm_close_upvalues((val_t *)s->sp);   /* see vm_close_upvalues in vm.c */
     vm->sp            = (val_t *)s->sp;
     vm->frame_count   = s->frame_count;
     vm->open_upvalues = (Upvalue *)s->open_upvalues;

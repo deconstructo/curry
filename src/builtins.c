@@ -2528,6 +2528,7 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
          * comment for the full explanation. */
         jit_depth_restore(saved_jit_depth);
+        vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
         vm->frame_count   = saved_fc;
         vm->sp            = saved_sp;
         vm->open_upvalues = saved_uv;
@@ -2554,6 +2555,7 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     } else {
         current_handler = h.prev;
         jit_depth_restore(h.saved_jit_depth);
+        vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
         vm->frame_count   = saved_frame_count;
         vm->sp            = saved_sp;
         vm->open_upvalues = saved_upvals;

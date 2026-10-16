@@ -50,6 +50,42 @@
 (define bt (guard (e (#t (condition-backtrace e))) (fail-deep 100000)))
 (check "deep backtrace is capped" (< (length bt) 100) #t)
 
+;; Closures that escape frames abandoned by an exception must keep their
+;; values: every unwind path closes the open upvalues above the restored
+;; stack top (#292 reviews). Without that, the slots were no longer GC
+;; roots, so the captured objects were freed and reused, or (after an
+;; overflow) read from a zeroed page.
+(define escaped '())
+(define (esc-g x) (set! escaped (cons (lambda () x) escaped)) (raise 'boom))
+(define (esc-deep n x) (if (= n 0) (esc-g x) (+ 0 (esc-deep (- n 1) x))))
+(define (esc-rep d) (when (> d 20) (guard (e (#t #f)) (esc-deep d (make-vector 64 d))) (esc-rep (- d 10))))
+(esc-rep 240)
+(define junk '())
+(define (fill i) (when (< i 100000) (set! junk (cons (make-vector 64 -1) junk)) (fill (+ i 1))))
+(fill 0) (gc) (set! junk '()) (fill 0) (gc)
+(define (escaped-ok? l d)
+  (cond ((null? l) #t)
+        ((let ((v ((car l)))) (and (vector? v) (eqv? (vector-ref v 63) d))) (escaped-ok? (cdr l) (+ d 10)))
+        (else #f)))
+(check "closures escaping an exception keep their values after GC" (escaped-ok? escaped 30) #t)
+
+(define saved-after-overflow #f)
+(define (ovf n x)
+  (if (= n 0)
+      (begin (set! saved-after-overflow (lambda () x)) (+ 1 (ovf 0 (+ x 1))))
+      (+ 0 (ovf (- n 1) x))))
+(guard (e (#t #f)) (ovf 1000 42))
+(fill 0) (gc)
+(check "a closure escaping a stack overflow keeps its value" (number? (saved-after-overflow)) #t)
+
+;; A variadic procedure called with no rest arguments right at the stack
+;; limit writes its empty rest list one slot past the checked top; that
+;; slot is inside the reserved guard area, so this is a clean error.
+(define (vf a b c d e g h i j . r) (+ 1 (vf (- a 1) b c d e g h i j)))
+(check "variadic recursion past the limit raises cleanly"
+       (guard (e (#t (error-object-code e))) (vf 0 0 0 0 0 0 0 0 0))
+       'stack-overflow)
+
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed") (newline)
 (if (> fail 0) (exit 1) (exit 0))

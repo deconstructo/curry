@@ -1,3 +1,4 @@
+#include <pthread.h>
 /*
  * General C FFI for Curry Scheme — libffi backend.
  *
@@ -634,6 +635,26 @@ static void marshal_callback_ret(val_t v, val_t tag, void *ret) {
     memcpy(ret, &out, sizeof(out));
 }
 
+/* A callback may run on a thread curry never created (a library's own
+ * worker thread). The VM made for it there is freed when that thread
+ * exits, through a thread-specific-data destructor; otherwise every such
+ * thread leaked its VM and the address space its stack reserves. */
+static pthread_key_t ffi_vm_key;
+static pthread_once_t ffi_vm_key_once = PTHREAD_ONCE_INIT;
+static void ffi_vm_destructor(void *unused) {
+    (void)unused;
+    vm_free();
+    /* gc_register_thread() registered this foreign thread with Boehm
+     * explicitly; it must be unregistered before it exits, or a later
+     * collection tries to stop a thread that no longer exists. */
+    GC_unregister_my_thread();
+}
+static void ffi_vm_key_init(void) { pthread_key_create(&ffi_vm_key, ffi_vm_destructor); }
+static void ffi_free_vm_at_thread_exit(void) {
+    pthread_once(&ffi_vm_key_once, ffi_vm_key_init);
+    pthread_setspecific(ffi_vm_key, (void *)1);
+}
+
 static void closure_trampoline(ffi_cif *cif, void *ret, void **args, void *user_data) {
     (void)cif;
     ForeignCallback *fc = (ForeignCallback *)user_data;
@@ -651,7 +672,10 @@ static void closure_trampoline(ffi_cif *cif, void *ret, void **args, void *user_
      * same thread that made the original FFI call) would leak a second
      * VM struct and orphan the first, corrupting that thread's VM state. */
     gc_register_thread();
-    if (!vm) vm_init();
+    if (!vm) {
+        vm_init();
+        ffi_free_vm_at_thread_exit();
+    }
 
     int nargs = fc->nargs;
     val_t argv[FFI_MAX_ARGS];

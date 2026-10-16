@@ -968,6 +968,7 @@ static void *conn_thread(void *arg) {
 out:
     /* Symmetric with gc_register_thread() above -- every exit path
      * funnels through here. */
+    vm_free();   /* the VM made by vm_init above; each one reserves address space */
     gc_unregister_thread();
     return NULL;
 }

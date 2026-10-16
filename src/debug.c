@@ -179,8 +179,16 @@ static void print_frame_location(const CallFrame *fr, int line) {
 
 /* ── Inspection commands ─────────────────────────────────────────────── */
 
+/* Same shape as vm_capture_backtrace: with up to ~a million frames, show
+ * the 48 innermost and 8 outermost and say how many were skipped. */
 static void cmd_backtrace(const CallFrame *cur) {
-    for (int i = vm->frame_count - 1; i >= 0; i--) {
+    int n = vm->frame_count;
+    for (int i = n - 1; i >= 0; i--) {
+        if (n > 57 && i == n - 49) {
+            printf("  ... %d more frames ...\n", n - 56);
+            i = 8;
+            continue;
+        }
         const CallFrame *fr = &vm->frames[i];
         const Chunk *ch = fr->closure->chunk;
         int off = (int)(fr->ip - ch->code);
@@ -308,6 +316,7 @@ static void cmd_print(const CallFrame *fr, const char *text) {
             putchar('\n');
         }
     }, {
+        vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
         vm->sp            = saved_sp;
         vm->frame_count   = saved_fc;
         vm->handler_count = saved_hc;

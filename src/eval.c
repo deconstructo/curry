@@ -128,6 +128,7 @@ static val_t eval_call_cc(val_t proc) {
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         jit_depth_restore(saved_jit_depth);
         if (vm) {
+            vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
             vm->frame_count   = saved_fc;
             vm->sp            = saved_sp;
             vm->open_upvalues = saved_uv;
