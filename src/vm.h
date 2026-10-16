@@ -6,8 +6,17 @@
 #include "object.h"
 #include "chunk.h"
 
-#define VM_STACK_MAX  4096
-#define VM_FRAMES_MAX  256
+/* Issue #292: the value stack and call frames are virtual-memory
+ * reservations (vm_init), not arrays inside the VM struct, so these limits
+ * cost only address space: the OS gives a page real memory the first time
+ * it is touched. They used to be 4096 slots / 256 frames, which made any
+ * non-tail recursion deeper than 256 calls raise stack-overflow. */
+#define VM_STACK_MAX  (1 << 23)   /* value-stack slots: 64 MB reserved   */
+#define VM_FRAMES_MAX (1 << 20)   /* call frames                          */
+/* Reserved but never counted as usable, past vm->stack_max: a variadic
+ * call with no rest arguments writes its empty rest list at sp, one slot
+ * past the checked top (vm_bind_args). */
+#define VM_STACK_GUARD 64
 
 /*
  * Upvalue — a captured variable that may be open (still on the stack)
@@ -90,16 +99,31 @@ typedef struct {
  * One VM per thread (thread-local in the future; global for now).
  */
 typedef struct VM {
-    val_t      stack[VM_STACK_MAX];
+    val_t     *stack;                /* stack_max (+ guard) slots, mmap reserved */
     val_t     *sp;                   /* stack pointer (next free slot)   */
 
-    CallFrame  frames[VM_FRAMES_MAX];
+    CallFrame *frames;               /* frames_max frames, mmap reserved */
     int        frame_count;
+
+    /* The limits this VM actually got: VM_STACK_MAX / VM_FRAMES_MAX, or a
+     * fraction of them if that much address space could not be reserved
+     * (strict overcommit, ulimit -v). See vm_init. */
+    int        stack_max;
+    int        frames_max;
 
     Upvalue   *open_upvalues;        /* linked list of open upvalues     */
 
     VmHandlerInfo handler_stack[VM_HANDLERS_MAX]; /* exception save state */
     int           handler_count;                  /* active handler depth */
+
+    /* Registry of live VMs, read by the GC root callback in vm.c. Only
+     * changed while holding Boehm's allocation lock. */
+    struct VM    *gc_prev, *gc_next;
+
+    /* Set when a stack-overflow error is raised; the next restore after
+     * unwinding (vm_release_overflow_pages) gives the pages the deep
+     * recursion touched back to the OS. */
+    bool          overflowed;
 } VM;
 
 /* Per-thread VM instance — each thread must call vm_init() before use */
@@ -108,9 +132,13 @@ extern CURRY_THREAD_LOCAL VM *vm;
 /* Lifecycle */
 void vm_init(void);
 void vm_free(void);
+void vm_free_vm(struct VM *v);   /* free a given VM; does not touch `vm` */
 
 /* Reset stack after a caught exception (longjmp leaves VM in unknown state). */
 void vm_reset(void);
+
+/* Mark that a stack-overflow error is being raised (see VM.overflowed). */
+static inline void vm_note_overflow(void) { if (vm) vm->overflowed = true; }
 
 /* Execute a closure with argc arguments already on the stack.
    Returns the result value. */
@@ -139,7 +167,7 @@ val_t vm_capture_backtrace(void);
 
 /* Stack helpers (inline for speed) */
 static inline void   vm_push(val_t v)  {
-    if (vm->sp >= vm->stack + VM_STACK_MAX) vm_stack_overflow();
+    if (vm->sp >= vm->stack + vm->stack_max) vm_stack_overflow();
     *vm->sp++ = v;
 }
 static inline val_t  vm_pop(void)      { return *--vm->sp; }

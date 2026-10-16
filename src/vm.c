@@ -198,6 +198,9 @@
 #include "chunk.h"
 #include "opcode.h"
 #include "value.h"
+#include <sys/mman.h>
+#include <unistd.h>
+#include <pthread.h>
 #include "object.h"
 #include "gc.h"
 #include <gc/gc_mark.h>
@@ -213,10 +216,8 @@
 CURRY_THREAD_LOCAL VM *vm = NULL;
 
 __attribute__((noreturn)) void vm_stack_overflow(void) {
-    fprintf(stderr, "[vm] vm_stack_overflow: sp=%p stack_end=%p\n",
-            (void *)vm->sp, (void *)(vm->stack + VM_STACK_MAX));
-    fflush(stderr);
-    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
+    vm_note_overflow();
+    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", vm->stack_max);
 }
 
 static val_t vm_cstr_to_string(const char *s) {
@@ -229,10 +230,26 @@ static val_t vm_cstr_to_string(const char *s) {
     return vptr(str);
 }
 
+/* Issue #292: with ~a million frames possible, a full backtrace of a deep
+ * recursion cost hundreds of MB (a list and two strings per frame). Keep
+ * the outermost and innermost frames and one entry saying how many were
+ * left out between them. */
+#define VM_BT_OUTER 8
+#define VM_BT_INNER 48
+
 val_t vm_capture_backtrace(void) {
     if (!vm) return V_NIL;
     val_t bt = V_NIL;
-    for (int i = 0; i < vm->frame_count; i++) {
+    int n = vm->frame_count;
+    for (int i = 0; i < n; i++) {
+        if (n > VM_BT_OUTER + VM_BT_INNER + 1 && i == VM_BT_OUTER) {
+            char buf[64];
+            snprintf(buf, sizeof buf, "... %d more frames ...", n - VM_BT_OUTER - VM_BT_INNER);
+            val_t gap = scm_cons(vm_cstr_to_string(buf), scm_cons(V_FALSE, scm_cons(V_FALSE, V_NIL)));
+            bt = scm_cons(gap, bt);
+            i = n - VM_BT_INNER - 1;
+            continue;
+        }
         CallFrame *fr = &vm->frames[i];
         Chunk *ch = fr->closure->chunk;
         int off = (int)(fr->ip - ch->code);
@@ -255,19 +272,138 @@ val_t vm_capture_backtrace(void) {
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
+/*
+ * Issue #292: each VM's value stack and call frames live in their own
+ * anonymous mmap reservations. Nothing ever moves them (CallFrame.slots,
+ * vm->sp, saved handler sp and open Upvalue.location all point into the
+ * stack), and pages get real memory only when first touched.
+ *
+ * Boehm does not scan mmap memory, and scanning the whole reservation
+ * would be slow anyway, so a push-other-roots callback pushes just the
+ * used part of every live VM: [stack, sp + VM_GC_SLACK) and
+ * [frames, frames + frame_count + 1). The slack covers a value written
+ * just above sp by a thread that was stopped before incrementing sp (that
+ * value is normally also in a register, but this costs nothing). The
+ * registry of live VMs is a list changed only under Boehm's allocation
+ * lock, which collections also hold, so the callback needs no lock of its
+ * own (it must not take one: a stopped thread could hold it).
+ */
+#define VM_GC_SLACK 16
+
+static VM *g_vm_list = NULL;          /* guarded by Boehm's allocation lock */
+static GC_push_other_roots_proc g_prev_push_other_roots = NULL;
+
+static void vm_push_roots(void) {
+    for (VM *v = g_vm_list; v; v = v->gc_next) {
+        val_t *top = v->sp + VM_GC_SLACK;
+        if (top > v->stack + v->stack_max + VM_STACK_GUARD)
+            top = v->stack + v->stack_max + VM_STACK_GUARD;
+        if (v->sp >= v->stack) GC_push_all(v->stack, top);
+        int nf = v->frame_count + 1;
+        if (nf > v->frames_max) nf = v->frames_max;
+        if (nf > 0) GC_push_all(v->frames, v->frames + nf);
+    }
+    if (g_prev_push_other_roots) g_prev_push_other_roots();
+}
+
+static void vm_install_push_roots(void) {
+    g_prev_push_other_roots = GC_get_push_other_roots();
+    GC_set_push_other_roots(vm_push_roots);
+}
+
+static void *vm_list_add(void *p) {
+    VM *v = (VM *)p;
+    v->gc_prev = NULL;
+    v->gc_next = g_vm_list;
+    if (g_vm_list) g_vm_list->gc_prev = v;
+    g_vm_list = v;
+    return NULL;
+}
+
+static void *vm_list_remove(void *p) {
+    VM *v = (VM *)p;
+    if (v->gc_prev) v->gc_prev->gc_next = v->gc_next;
+    else            g_vm_list = v->gc_next;
+    if (v->gc_next) v->gc_next->gc_prev = v->gc_prev;
+    v->gc_prev = v->gc_next = NULL;
+    return NULL;
+}
+
+static void *vm_try_reserve(size_t bytes) {
+    void *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON
+#ifdef MAP_NORESERVE
+                   | MAP_NORESERVE
+#endif
+                   , -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+static size_t vm_stack_bytes(int stack_max) {
+    return ((size_t)stack_max + VM_STACK_GUARD) * sizeof(val_t);
+}
+static size_t vm_frames_bytes(int frames_max) {
+    return (size_t)frames_max * sizeof(CallFrame);
+}
+
 void vm_init(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, vm_install_push_roots);
+
     /* Use GC_MALLOC_UNCOLLECTABLE so Boehm GC never frees the VM struct even
      * though the only reference is a CURRY_THREAD_LOCAL pointer (TLS is not scanned
      * as a GC root).  GC still scans the struct's interior for live val_t refs. */
     vm = (VM *)GC_MALLOC_UNCOLLECTABLE(sizeof(VM));
+
+    /* Full size first; where address space is limited (Linux with strict
+     * overcommit ignores MAP_NORESERVE and charges the whole reservation;
+     * ulimit -v counts it too), fall back to smaller limits rather than
+     * abort the process. Even the smallest step (1/64) allows 16,384
+     * frames, 64 times the old fixed 256. */
+    for (int shift = 0; shift <= 6; shift += 2) {
+        int sm = VM_STACK_MAX >> shift, fm = VM_FRAMES_MAX >> shift;
+        void *st = vm_try_reserve(vm_stack_bytes(sm));
+        void *fr = st ? vm_try_reserve(vm_frames_bytes(fm)) : NULL;
+        if (st && fr) {
+            vm->stack = (val_t *)st;   vm->stack_max  = sm;
+            vm->frames = (CallFrame *)fr; vm->frames_max = fm;
+            break;
+        }
+        if (st) munmap(st, vm_stack_bytes(sm));
+    }
+    if (!vm->stack) {
+        fprintf(stderr, "[vm] cannot reserve memory for a VM stack (even %zu bytes)\n",
+                vm_stack_bytes(VM_STACK_MAX >> 6) + vm_frames_bytes(VM_FRAMES_MAX >> 6));
+        abort();
+    }
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
+    GC_call_with_alloc_lock(vm_list_add, vm);
+}
+
+/* Free a VM given by pointer, without reading the thread-local `vm`
+ * (ffi.c's thread-exit destructor runs after macOS has torn TLS down). */
+void vm_free_vm(VM *v) {
+    if (!v) return;
+    /* A closure that outlives this thread (e.g. sent to another actor before
+     * this one died with an error) must not keep pointing into a stack that
+     * is about to be unmapped. */
+    while (v->open_upvalues) {
+        Upvalue *up = v->open_upvalues;
+        gc_wb_slot(&up->closed, *up->location);
+        up->location = &up->closed;
+        v->open_upvalues = up->next;
+    }
+    GC_call_with_alloc_lock(vm_list_remove, v);
+    munmap(v->stack,  vm_stack_bytes(v->stack_max));
+    munmap(v->frames, vm_frames_bytes(v->frames_max));
+    GC_FREE(v);
 }
 
 void vm_free(void) {
-    if (vm) GC_FREE(vm);
+    vm_free_vm(vm);
     vm = NULL;
 }
 
@@ -283,18 +419,52 @@ void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues) {
     *open_upvalues = (void *)vm->open_upvalues;
 }
 
+/* After a stack-overflow error has unwound: replace the pages above the
+ * current top of the value stack and frame array with fresh untouched
+ * ones (mmap MAP_FIXED over the same addresses), which hands the memory
+ * the deep recursion used back to the OS on every platform. Nothing
+ * points above the current tops. */
+static void vm_release_range(void *from, void *end) {
+    uintptr_t pg = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t a  = ((uintptr_t)from + pg - 1) & ~(pg - 1);
+    uintptr_t b  = (uintptr_t)end;
+    if (a >= b) return;
+    void *p = mmap((void *)a, b - a, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_FIXED
+#ifdef MAP_NORESERVE
+                   | MAP_NORESERVE
+#endif
+                   , -1, 0);
+    (void)p;   /* on failure the old pages simply stay; nothing else changes */
+}
+
+static void vm_release_overflow_pages(void) {
+    if (!vm || !vm->overflowed) return;
+    vm->overflowed = false;
+    vm_release_range(vm->sp + VM_GC_SLACK, vm->stack + vm->stack_max + VM_STACK_GUARD);
+    vm_release_range(vm->frames + vm->frame_count + 1, vm->frames + vm->frames_max);
+}
+
 void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues) {
     if (!vm) return;
+    /* After closing, the open-upvalue list is exactly the still-live ones.
+     * Do not put back the list saved at save time: an upvalue opened since
+     * then for a slot below sp (a closure made after the save capturing an
+     * older local) would be dropped while still open (#292 review). */
+    (void)open_upvalues;
+    vm_close_upvalues((val_t *)sp);
     vm->frame_count = frame_count;
     vm->sp = (val_t *)sp;
-    vm->open_upvalues = (Upvalue *)open_upvalues;
+    vm_release_overflow_pages();
 }
 
 void vm_reset(void) {
+    vm_close_upvalues(vm->stack);
     vm->sp = vm->stack;
     vm->frame_count = 0;
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
+    vm_release_overflow_pages();
 }
 
 /* Forward declaration — defined in eval.c where scm_cons / symbol.h are available. */
@@ -347,6 +517,15 @@ static Upvalue *open_upvalue(val_t *slot) {
 
 /* Close all open upvalues at or above `last` on the stack.
    Called on scope exit (OP_CLOSE_UP) and frame pop (RETURN / TAIL_CALL). */
+/* Close every open upvalue whose slot is at or above `last`: copy the
+ * slot's value into the Upvalue and point it there. Must run on EVERY path
+ * that lowers vm->sp below live slots -- normal returns, and also each
+ * exception/continuation restore (vm_exn_state_restore, vm_reset, the
+ * in-VM handler unwind, call/cc, with-restarts, the debugger, the embedding
+ * API) and vm_free. Otherwise a closure that escaped the abandoned frames
+ * keeps pointing at slots that the GC no longer scans (it scans only up to
+ * sp), that later calls overwrite, or that are unmapped (issue #292
+ * reviews). */
 void vm_close_upvalues(val_t *last) {
     while (vm->open_upvalues && vm->open_upvalues->location >= last) {
         Upvalue *up  = vm->open_upvalues;
@@ -652,8 +831,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
     (void)vm_exn_handlers; /* suppress unused-var warning if no handlers pushed */
 
     int entry_depth = vm->frame_count;  /* used to detect return from nested calls */
-    if (vm->frame_count >= VM_FRAMES_MAX)
-        scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+    if (vm->frame_count >= vm->frames_max)
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", vm->frames_max); }
     CallFrame *frame  = &vm->frames[vm->frame_count++];
     frame->closure    = top_closure;
     frame->has_callee_slot = true;  /* irrelevant in practice: pop_frame's
@@ -677,8 +856,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #define TARGET_ENV   (frame->closure->chunk->target_env == V_VOID \
                         ? GLOBAL_ENV : frame->closure->chunk->target_env)
 #define PUSH(v)      do { \
-    if (vm->sp >= vm->stack + VM_STACK_MAX) \
-        scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX); \
+    if (vm->sp >= vm->stack + vm->stack_max) \
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", vm->stack_max); } \
     *vm->sp++ = (v); } while (0)
 #define POP()        (*--vm->sp)
 #define PEEK(n)      (vm->sp[-1-(n)])
@@ -1184,8 +1363,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     NEXT;
                 }
                 vm_maybe_jit(cl);
-                if (vm->frame_count >= VM_FRAMES_MAX)
-                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                if (vm->frame_count >= vm->frames_max)
+                    { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", vm->frames_max); }
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->has_callee_slot = true;  /* PEEK(argc2) above found the
@@ -1364,8 +1543,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     NEXT;
                 }
                 vm_maybe_jit(cl);
-                if (vm->frame_count >= VM_FRAMES_MAX)
-                    scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", VM_FRAMES_MAX);
+                if (vm->frame_count >= vm->frames_max)
+                    { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", vm->frames_max); }
                 CallFrame *nf  = &vm->frames[vm->frame_count++];
                 nf->closure    = cl;
                 nf->has_callee_slot = false;  /* no callee pushed above */
@@ -1676,8 +1855,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                  * mirroring vm_push's own VM_STACK_MAX check since this
                  * path bypasses vm_push entirely. */
                 vm_check_arity(cl, total_args);
-                if (total_args < 0 || frame->slots + total_args > vm->stack + VM_STACK_MAX)
-                    scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", VM_STACK_MAX);
+                if (total_args < 0 || frame->slots + total_args > vm->stack + vm->stack_max)
+                    { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", vm->stack_max); }
                 vm_maybe_jit(cl);
                 if (curry_profiling_level >= 2 && frame->prof_start_ns &&
                         frame->closure->chunk->name) {
@@ -1869,10 +2048,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 val_t caught = vm_exn_handlers[chi].exn;
                 current_handler   = vm_exn_handlers[chi].prev;
                 jit_depth_restore(vm_exn_handlers[chi].saved_jit_depth);
+                vm_close_upvalues(vm->handler_stack[chi].sp);
                 vm->handler_count = chi;
                 vm->frame_count   = vm->handler_stack[chi].frame_count;
                 vm->sp            = vm->handler_stack[chi].sp;
-                vm->open_upvalues = vm->handler_stack[chi].open_upvalues;
+                /* open_upvalues: not restored from the snapshot -- see
+                 * vm_exn_state_restore. vm_close_upvalues above left the
+                 * list exactly right. */
+                vm_release_overflow_pages();
                 frame = &vm->frames[vm->handler_stack[chi].frame_idx];
                 PUSH(caught);
                 JUMP_ABS(vm->handler_stack[chi].catch_offset);

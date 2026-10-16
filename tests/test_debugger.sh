@@ -18,9 +18,13 @@ CURRY="${1:?usage: test_debugger.sh <curry>}"
 pass=0
 fail=0
 
+# grep reads a here-string, not a pipe: with `set -o pipefail`,
+# `printf ... | grep -q` fails whenever grep exits on the first match while
+# printf is still writing (SIGPIPE) -- a timing-dependent false FAIL seen
+# on CI (ubuntu Debug, "file:line fires on the right line").
 check() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if grep -qF -- "$needle" <<<"$haystack"; then
         echo "PASS: $label"
         (( pass++ )) || true
     else
@@ -34,7 +38,7 @@ check() {
 
 check_absent() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if grep -qF -- "$needle" <<<"$haystack"; then
         echo "FAIL: $label (unexpectedly found $(printf '%q' "$needle"))"
         (( fail++ )) || true
     else

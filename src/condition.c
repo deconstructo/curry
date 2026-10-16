@@ -166,7 +166,6 @@ val_t condition_with_restarts(val_t restarts, val_t thunk) {
      * struct retains the aborted execution's sp/frame_count. */
     val_t   *saved_sp            = vm->sp;
     int      saved_frame_count   = vm->frame_count;
-    Upvalue *saved_open_upvalues = vm->open_upvalues;
     int      saved_handler_count = vm->handler_count;
 
     bool  raised = false;
@@ -186,9 +185,9 @@ val_t condition_with_restarts(val_t restarts, val_t thunk) {
 
     /* Restore VM state to what it was when with-restarts was entered,
      * so the restart thunk (or re-raised exception) starts from a clean slate. */
+    vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
     vm->sp            = saved_sp;
     vm->frame_count   = saved_frame_count;
-    vm->open_upvalues = saved_open_upvalues;
     vm->handler_count = saved_handler_count;
 
     if (vis_restart(exn)) {

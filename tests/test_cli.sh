@@ -33,7 +33,7 @@ check() {
 
 check_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if grep -qF -- "$needle" <<<"$haystack"; then
         echo "PASS: $label"
         (( pass++ )) || true
     else
@@ -178,7 +178,7 @@ fi
 
 # Default .scc should NOT have a shebang
 first_bytes=$(head -c 8 "$SCC_DEFAULT" | xxd -p 2>/dev/null || od -A n -t x1 -N 8 "$SCC_DEFAULT" | tr -d ' \n')
-if printf '%s' "$first_bytes" | grep -qi '2321'; then
+if grep -qi '2321' <<<"$first_bytes"; then
     echo "FAIL: -c without -x should not prepend shebang"
     (( fail++ )) || true
 else
@@ -480,7 +480,7 @@ check_contains "cache: MISS reported after content actually changed" "$err" "MIS
 
 # -e/REPL don't go through the script-file cache at all — no cache line.
 out=$("$CURRY" --timings -e '(display 1)' 2>&1 >/dev/null)
-if printf '%s' "$out" | grep -q 'cache'; then
+if grep -q 'cache' <<<"$out"; then
     echo "FAIL: --timings -e: no cache line (none expected, no cache decision made)"
     (( fail++ )) || true
 else
@@ -723,7 +723,12 @@ set +e
 "$CURRY" "$BIG_LETSTAR_SCM" >/dev/null 2>&1
 big_letstar_code=$?
 set -e
-check "let* with 20001 sequential bindings compiles to a catchable stack-overflow, not a SIGSEGV" "$big_letstar_code" "1"
+# Must be exactly 1: a clean error. Its body (+ p0 ... p20000) is a call
+# with 20001 arguments, a compile error since #297. Exit 0 would mean a
+# wrong answer (before #297 the argument count wrapped modulo 256 and this
+# printed 33); a signal (>= 128) would mean a crash. Before issue #292 this
+# exited 1 for a different reason: the old 4096-slot value stack overflowed.
+check "let* with 20001 sequential bindings ending in a 20001-argument call is a clean error, not a SIGSEGV or a wrong answer" "$big_letstar_code" "1"
 # Confirms a much smaller, entirely ordinary let* chain (nowhere near
 # where the guard fires) still compiles and runs correctly.
 out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6 1) (p7 1) (p8 1) (p9 1)

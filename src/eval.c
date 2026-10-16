@@ -117,7 +117,6 @@ static val_t eval_call_cc(val_t proc) {
      * pure tree-walker mode, e.g. test_core.c which skips vm_init). */
     int saved_fc   = vm ? vm->frame_count : 0;
     val_t *saved_sp = vm ? vm->sp : NULL;
-    Upvalue *saved_uv = vm ? vm->open_upvalues : NULL;
     /* Mirrors SCM_PROTECT's own save/restore (eval.h): a longjmp back into
      * this frame bypasses every normal-return cleanup between here and the
      * jump's origin, so the VM state above and g_jit_call_depth must be
@@ -128,9 +127,9 @@ static val_t eval_call_cc(val_t proc) {
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         jit_depth_restore(saved_jit_depth);
         if (vm) {
+            vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
             vm->frame_count   = saved_fc;
             vm->sp            = saved_sp;
-            vm->open_upvalues = saved_uv;
         }
         /* Force a real memory load: clang (ARM64 -O2) constant-folds cont->result
          * to V_VOID because it was V_VOID at setjmp time and doesn't see the write

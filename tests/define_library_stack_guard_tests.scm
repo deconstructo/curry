@@ -21,8 +21,9 @@
 ;;; The eval-elimination migration later moved define-library bodies off
 ;;; the tree-walker entirely -- they now compile and run through the VM
 ;;; (modules.c calls vm_eval, not eval()) -- so it's the VM's own
-;;; stricter 256-frame guard (vm.c's VM_FRAMES_MAX) that actually applies
-;;; here now, not eval()'s ~1400-1600-frame budget. The catchable-
+;;; frame limit (vm.c's VM_FRAMES_MAX; about a million frames since issue
+;;; #292, 256 before) that actually applies here now, not eval()'s
+;;; ~1400-1600-frame budget. The catchable-
 ;;; condition behavior this test exists to verify is unaffected either
 ;;; way; only the specific depth that "moderate, still completes
 ;;; normally" can mean changed (see below). This is its own ctest entry
@@ -59,19 +60,13 @@
 ;; Previously: process SIGSEGV, ctest reports this as a crash, not a
 ;; normal PASS/FAIL. Now: raises, guard catches it, execution continues.
 (check "non-tail recursion inside a define-library body raises a catchable condition instead of crashing"
-       (go-catch 1000000)
+       (go-catch 3000000)
        'caught)
 
-;; A depth comfortably under the VM's own compiled-path guard (256
-;; frames, vm.c's VM_FRAMES_MAX) must still complete normally -- the
-;; guard must not be so aggressive it breaks ordinary, previously-
-;; working recursion depths. define-library bodies are now compiled and
-;; run through the VM (the eval-elimination migration), not tree-walked,
-;; so it's the VM's own stricter 256-frame guard that applies here, not
-;; the tree-walker's much higher ~1400-1600 threshold this test used to
-;; target -- 1000 legitimately overflows now (it did not before this
-;; migration), so 100 is the depth actually being exercised, matching
-;; the parallel-worker-thread variant of this same check below.
+;; A depth comfortably under the VM's own frame limit (VM_FRAMES_MAX)
+;; must still complete normally -- the guard must not be so aggressive it
+;; breaks ordinary recursion depths. (The raising cases above use
+;; 3,000,000, past the ~1,048,576-frame limit set by issue #292.)
 (check "moderate non-tail recursion depth still completes normally"
        (deep-sum 100)
        100)
@@ -92,7 +87,7 @@
 ;; so a 12-element list here genuinely exercises worker threads, not
 ;; just the calling thread.
 (check "non-tail recursion inside a define-library body, run on parallel map worker threads, doesn't crash"
-       (map (lambda (x) (go-catch 1000000)) '(1 2 3 4 5 6 7 8 9 10 11 12))
+       (map (lambda (x) (go-catch 3000000)) '(1 2 3 4 5 6 7 8 9 10 11 12))
        '(caught caught caught caught caught caught caught caught caught caught caught caught))
 (check "moderate non-tail recursion depth on parallel map worker threads still completes normally"
        (map (lambda (x) (deep-sum 100)) '(1 2 3 4 5 6 7 8 9 10 11 12))
