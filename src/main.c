@@ -1,5 +1,4 @@
 #include "gc.h"
-#include "gc_gen.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -586,11 +585,8 @@ static void usage(const char *argv0) {
         "                    name or file:line; repeatable)\n"
         "  -v                Print version\n"
         "  -V                Print version info in SRFI-176 LOSE format\n"
-        "  --gc BACKEND      GC backend: boehm (default) or generational (experimental)\n"
+        "  --gc boehm        Accepted for compatibility; Boehm is the only collector\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
-        "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n"
-        "                    Note: generational backend is experimental. Actor-heavy workloads\n"
-        "                    may accumulate nursery garbage between main-thread GC cycles.\n"
         "  --timings         Print a read/expand/compile/execute pipeline timing\n"
         "                    report to stderr on exit\n"
         "  --clear-cache     Delete any existing .scc cache for the script being\n"
@@ -663,26 +659,38 @@ int main(int argc, char **argv) {
     atexit(curry_timings_report);
     atexit(write_pending_scc_atexit);   /* see write_pending_scc_atexit above */
 
-    /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
-    size_t nursery_size = 0;   /* 0 = use gc_gen default */
-    bool use_gen_gc = false;
-    for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--gc") == 0) {
-            if (strcmp(argv[i+1], "generational") == 0) {
-                use_gen_gc = true;
-            } else if (strcmp(argv[i+1], "boehm") != 0) {
-                fprintf(stderr,
-                    "curry: unknown GC backend '%s' (use 'boehm' or 'generational')\n",
-                    argv[i+1]);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "--gc-nursery-size") == 0) {
-            nursery_size = parse_size(argv[i+1]);
+    /* --gc is checked before the runtime starts. The generational backend
+     * was removed (issues #226, #285, #286); say so instead of silently
+     * running with Boehm, so scripts that asked for it notice. */
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        /* Stop at the script (first non-option) or "--": what follows are
+         * the script's own arguments. Skip the value of options that take
+         * one, so "-e '...'" is not mistaken for the script. */
+        if (a[0] != '-' || strcmp(a, "--") == 0) break;
+        if (a[1] != '-' && a[1] != '\0' && strchr("elcobG", a[strlen(a) - 1]) &&
+            strspn(a + 1, "elcobixvhVG") == strlen(a) - 1) {
+            i++;            /* short option cluster ending in one with a value */
+            continue;
         }
-    }
-    if (use_gen_gc) {
-        gc_gen_init(nursery_size);
-        gc_ops = &gc_gen_ops;
+        if (strcmp(a, "--gc-max-heap") == 0) { i++; continue; }
+        const char *backend = NULL;
+        if (strcmp(a, "--gc") == 0 && i + 1 < argc) backend = argv[++i];
+        else if (strncmp(a, "--gc=", 5) == 0)       backend = a + 5;
+        if (backend && strcmp(backend, "boehm") != 0) {
+            fprintf(stderr,
+                "curry: GC backend '%s' is not available; the generational "
+                "backend was removed and 'boehm' is the only collector\n",
+                backend);
+            return 1;
+        }
+        if (strcmp(a, "--gc-nursery-size") == 0 ||
+            strncmp(a, "--gc-nursery-size=", 18) == 0) {
+            fprintf(stderr,
+                "curry: --gc-nursery-size was removed together with the "
+                "generational GC backend\n");
+            return 1;
+        }
     }
     curry_runtime_init();
 
@@ -697,8 +705,7 @@ int main(int argc, char **argv) {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
         { "gc-max-heap",  required_argument, NULL, 'G' },
-        { "gc",              required_argument, NULL, 0   },  /* handled pre-scan */
-        { "gc-nursery-size", required_argument, NULL, 0   },  /* handled pre-scan */
+        { "gc",              required_argument, NULL, 0   },  /* checked above */
         { "timings",         no_argument,       NULL, 0   },
         { "clear-cache",     no_argument,       NULL, 0   },
         { NULL, 0, NULL, 0 }
@@ -715,7 +722,7 @@ int main(int argc, char **argv) {
                 curry_timings_enabled = true;
             else if (!strcmp(long_opts[long_idx].name, "clear-cache"))
                 clear_cache_flag = true;
-            break;   /* --gc / --gc-nursery-size already handled in the pre-scan */
+            break;   /* --gc already checked above */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;

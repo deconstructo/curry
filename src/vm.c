@@ -745,17 +745,6 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #   define CASE(op)  case op:
 #   define NEXT      break
     for (;;) {
-        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
-            gc_minor_pending = false;
-            extern void gc_gen_minor_collect(void);
-            gc_gen_minor_collect();
-        }
-        /* Issue #200 Phase A: see the identical comment at the computed-goto
-         * L_DISPATCH label above -- same safepoint poll, same gate. */
-        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-            extern void gc_gen_safepoint(void);
-            gc_gen_safepoint();
-        }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         /* Same interrupt safepoint as the computed-goto L_DISPATCH below --
          * see the comment there. Without this, a build on a compiler
@@ -1956,30 +1945,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
 #ifdef __GNUC__
-    /* Minor-GC safepoint: fires between instructions, after the current op has
-     * fully committed its result to vm->stack and before the next op begins.
-     * At this point all Scheme values are on vm->stack[0..sp) — the registered
-     * GC root range — so gc_gen_minor_collect() sees every live root. */
+    /* Between instructions: the current op has committed its result to
+     * vm->stack and the next op has not started. A collector that needs a
+     * per-thread safe point would poll here and at eval.c's tail: label. */
     L_DISPATCH:
-        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
-            gc_minor_pending = false;
-            extern void gc_gen_minor_collect(void);
-            gc_gen_minor_collect();
-        }
-        /* Issue #200 Phase A: cross-thread safepoint poll, alongside this
-         * thread's own gc_minor_pending self-collection check above. Same
-         * gc_inhibit_count == 0 gate -- a thread mid-primitive-call (which
-         * may transiently hold a subsystem lock like rtab_lock/pinned_lock)
-         * is never asked to pause until it returns here with the inhibit
-         * count back at zero, so a pending gc_gen_stop_the_world() request
-         * naturally waits out any in-flight critical section instead of
-         * racing it. gc_gen_safepoint() itself is a cheap no-op check under
-         * the default Boehm backend (gc_stop_world is never set to 1 by
-         * anything outside the generational backend). */
-        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-            extern void gc_gen_safepoint(void);
-            gc_gen_safepoint();
-        }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         /* Cross-thread interrupt request (e.g. the Jupyter kernel's
          * control-channel handler, on its own thread) -- same safepoint,

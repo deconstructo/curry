@@ -32,8 +32,7 @@ extern "C" {
 void vm_interrupt_request(void);
 
 /* Cheap fast-path check (relaxed load, no RMW) for the dispatch loop's
- * hot path -- same cost profile as the existing gc_gen_safepoint() call
- * at every instruction dispatch. Internal to vm.c. */
+ * hot path, checked at every instruction dispatch. Internal to vm.c. */
 bool vm_interrupt_pending(void);
 
 /* Slower, clears the flag: only called from the rare branch where

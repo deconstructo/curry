@@ -230,23 +230,6 @@ val_t eval(val_t expr, val_t env) {
     val_t op = V_NIL, rest = V_NIL;
     GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
-    /* Minor GC safe point: all four GC_AUTOFRAME slots are updated by the
-     * collector; op and rest are overwritten before use, so their values here
-     * don't matter.  The provably-live roots (expr, env) are both tracked. */
-    if (__builtin_expect(gc_minor_pending & (gc_inhibit_count == 0), 0)) {
-        gc_minor_pending = false;
-        extern void gc_gen_minor_collect(void);
-        gc_gen_minor_collect();
-    }
-    /* Issue #200 Phase A: cross-thread safepoint poll, eval()'s analog to
-     * vm.c's L_DISPATCH check just above -- see that comment for the full
-     * rationale (same gc_inhibit_count == 0 gate; cheap no-op under the
-     * default Boehm backend). expr/env are the only live roots needed here,
-     * both already tracked by the GC_AUTOFRAME above. */
-    if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-        extern void gc_gen_safepoint(void);
-        gc_gen_safepoint();
-    }
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
     /* Heap object: dispatch on type */

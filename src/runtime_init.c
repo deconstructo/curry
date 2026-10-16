@@ -1,6 +1,5 @@
 #include "runtime_init.h"
 #include "gc.h"
-#include "gc_gen.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif

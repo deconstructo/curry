@@ -2,7 +2,6 @@
 #include "symbol.h"
 #include "object.h"
 #include "gc.h"
-#include "gc_semispace.h"
 #include "symbolic.h"   /* SYM_ASSUME_* flags */
 #include <string.h>
 #include <pthread.h>

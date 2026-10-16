@@ -530,10 +530,6 @@ static val_t env_new_root_permanent(void) {
     f->hidx    = NULL;
     f->hcap    = 0;
     f->version = 0;
-    /* Register in pinned_slots so scan_pinned_object updates f->vals during
-     * minor GC (required even though the frame is uncollectable). */
-    extern void gc_gen_pin_permanent(void *);
-    gc_gen_pin_permanent(f);
     return vptr(f);
 }
 

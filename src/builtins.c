@@ -3443,9 +3443,7 @@ static val_t prim_features(int ac, val_t *av, void *ud) {
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
-    extern gc_ops_t gc_gen_ops;
-    extern gc_ops_t *gc_ops;
-    return sym_intern_cstr(gc_ops == &gc_gen_ops ? "generational" : "boehm");
+    return sym_intern_cstr("boehm");   /* the only collector */
 }
 static val_t prim_gc_heap_size(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_heap_size());}
 static val_t prim_gc_free_bytes(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_free_bytes());}
@@ -3508,21 +3506,11 @@ static val_t prim_gc_set_max_heap(int ac, val_t *av, void *ud) {
     gc_set_max_heap((size_t)vunfix(av[0]));
     return V_VOID;
 }
-/* (gc-stats) → alist of GC counters and the pause ring as a vector of fixnums.
- * Works under both Boehm (minor-count always 0) and generational backends. */
+/* (gc-stats) → alist of Boehm GC counters. Times are in nanoseconds;
+ * stw-ring-ns holds the most recent stop-the-world pauses, oldest first. */
 static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
 
-    /* Pause ring: copy into a Scheme vector */
-    uint64_t ring_buf[GC_PAUSE_RING_N];
-    size_t   ring_n = gc_get_pause_ring(ring_buf);
-    Vector  *rv = CURRY_NEW_FLEX(Vector, (uint32_t)ring_n);
-    rv->hdr.type = T_VECTOR; rv->hdr.flags = 0; rv->len = (uint32_t)ring_n;
-    for (size_t i = 0; i < ring_n; i++)
-        rv->data[i] = vfix((intptr_t)ring_buf[i]);
-    val_t ring_val = vptr(rv);
-
-    /* Boehm stop-the-world durations (ns), oldest first */
     uint64_t stw_buf[GC_STW_RING_N];
     size_t   stw_n = gc_get_stw_ring(stw_buf);
     Vector  *sv = CURRY_NEW_FLEX(Vector, (uint32_t)stw_n);
@@ -3531,39 +3519,29 @@ static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
         sv->data[i] = vfix((intptr_t)stw_buf[i]);
     val_t stw_val = vptr(sv);
 
-    /* Nursery used (main thread) */
-    size_t nursery_used = (size_t)(gc_nursery.top - gc_nursery.base);
-
     /* Build alist front-to-back (will be reversed — canonical key order) */
 #define APAIR(k, v) result = scm_cons(scm_cons(sym_intern_cstr(k), (v)), result)
+#define ALOAD(x) vfix((intptr_t)atomic_load_explicit(&(x), memory_order_relaxed))
     val_t result = V_NIL;
     APAIR("stw-ring-ns",      stw_val);
-    APAIR("stw-max-ns",       vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_max_ns,     memory_order_relaxed)));
-    APAIR("stw-total-ns",     vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_total_ns,   memory_order_relaxed)));
-    APAIR("stw-count",        vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_count,      memory_order_relaxed)));
-    APAIR("major-max-ns",     vfix((intptr_t)atomic_load_explicit(&gc_stat_major_max_ns,   memory_order_relaxed)));
-    APAIR("major-total-ns",   vfix((intptr_t)atomic_load_explicit(&gc_stat_major_total_ns, memory_order_relaxed)));
+    APAIR("stw-max-ns",       ALOAD(gc_stat_stw_max_ns));
+    APAIR("stw-total-ns",     ALOAD(gc_stat_stw_total_ns));
+    APAIR("stw-count",        ALOAD(gc_stat_stw_count));
+    APAIR("major-max-ns",     ALOAD(gc_stat_major_max_ns));
+    APAIR("major-total-ns",   ALOAD(gc_stat_major_total_ns));
+    APAIR("major-count",      ALOAD(gc_stat_major_count));
     APAIR("incremental",      GC_is_incremental_mode() ? V_TRUE : V_FALSE);
     APAIR("parallel-markers", vfix((intptr_t)GC_get_parallel() + 1));
-    APAIR("nursery-used",     vfix((intptr_t)nursery_used));
     APAIR("free-bytes",       vfix((intptr_t)gc_free_bytes()));
     APAIR("heap-size",        vfix((intptr_t)gc_heap_size()));
-    APAIR("pause-ring-us",    ring_val);
-    APAIR("minor-max-us",     vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_max_us,   memory_order_relaxed)));
-    APAIR("minor-total-us",   vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_total_us, memory_order_relaxed)));
-    APAIR("major-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_major_count,    memory_order_relaxed)));
-    APAIR("minor-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_count,    memory_order_relaxed)));
+#undef ALOAD
 #undef APAIR
     return result;
 }
 
 static val_t prim_gc_stats_reset(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
-    atomic_store_explicit(&gc_stat_minor_count,    0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_major_count,    0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_minor_total_us, 0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_minor_max_us,   0, memory_order_relaxed);
-    gc_reset_pause_ring();
+    atomic_store_explicit(&gc_stat_major_count, 0, memory_order_relaxed);
     gc_reset_boehm_stats();
     return V_VOID;
 }
