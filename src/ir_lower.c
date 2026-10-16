@@ -703,6 +703,7 @@ static IRNode *ir_lower_define_lambda_sugar(Compiler *c, val_t args, int line) {
 static IRNode *ir_lower_call(Compiler *c, val_t head, val_t args, bool tail, int line) {
     int argc = 0;
     for (val_t a = args; vis_pair(a); a = vcdr(a)) argc++;
+    check_call_argc(argc);
 
     IRNode *n = ir_node_new(c->ir_arena, IR_CALL, tail, line);
     n->as.call.head   = head;
@@ -731,6 +732,7 @@ static IRNode *ir_lower_call(Compiler *c, val_t head, val_t args, bool tail, int
 static IRNode *ir_lower_lambda_call(Compiler *c, IRNode *callee,
                                      IRNode **args, int argc,
                                      bool tail, int line) {
+    check_call_argc(argc);
     IRNode *n = ir_node_new(c->ir_arena, IR_CALL, tail, line);
     n->as.call.head   = V_FALSE;
     n->as.call.callee = callee;

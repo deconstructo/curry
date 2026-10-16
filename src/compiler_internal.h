@@ -36,6 +36,12 @@
 
 #define MAX_LOCALS  256
 #define MAX_UPVALS  256
+#define MAX_CALL_ARGS 255   /* OP_CALL & co. carry argc in one byte */
+
+/* A call with more arguments than one bytecode operand byte can hold used
+ * to have its count wrap modulo 256 -- (+ 1 1 ...) with 300 ones gave 44.
+ * Raise a compile error instead. (apply with a list has no such limit.) */
+void check_call_argc(int argc);
 #define MAX_SYNTAX_LOCALS 64
 
 /* Tier 2.3 local inliner: guards against mutual/indirect recursion
