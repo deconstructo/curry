@@ -830,7 +830,6 @@ void require_min_args(val_t args, int min, const char *form_name) {
  * bytecode" philosophy (curry_llvm.cpp) rather than ever propagating an
  * exception across the C/C++ boundary. */
 IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
-    gc_inhibit_minor();
 
     Compiler c;
     init_compiler(&c, NULL, "<jit>");
@@ -847,7 +846,6 @@ IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
         raised = true;
     });
 
-    gc_resume_minor();
 
     if (raised) {
         ir_arena_free(c.ir_arena);
@@ -958,7 +956,6 @@ Compiler *compiler_ir_session_new_child(Compiler *parent, const char *name) {
  * external calls into this codebase permanently blocks minor GC on the
  * thread); a self-contained bracket per call cannot leak that way. */
 IRNode *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int line) {
-    gc_inhibit_minor();
 
     IRNode *result = NULL;
     bool    raised = false;
@@ -971,7 +968,6 @@ IRNode *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int l
         raised = true;
     });
 
-    gc_resume_minor();
 
     return raised ? NULL : result;
 }
@@ -982,7 +978,6 @@ val_t compiler_compile(val_t expr) {
     static bool lang_ready = false;
     if (!lang_ready) { lang_registry_init(); lang_ready = true; }
 
-    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
@@ -1009,14 +1004,12 @@ val_t compiler_compile(val_t expr) {
     });
 
     ir_arena_free(c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(exn);
     return result;
 }
 
 val_t compiler_compile_script(val_t expr_list) {
-    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<script>");
     c.chunk->arity = 0;
@@ -1039,7 +1032,6 @@ val_t compiler_compile_script(val_t expr_list) {
     });
 
     ir_arena_free(c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(exn);
     return result;

@@ -755,7 +755,6 @@ int main(int argc, char **argv) {
             for (;;) {
                 val_t expr;
                 ExnHandler h;
-                gc_inhibit_minor();
                 h.prev = current_handler; current_handler = &h;
                 uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 if (setjmp(h.jmp) == 0) {
@@ -764,15 +763,14 @@ int main(int argc, char **argv) {
                     if (curry_timings_enabled)
                         curry_timing_read_ns += profiling_now_ns() - _read_t0;
                 }
-                else { gc_resume_minor(); current_handler = h.prev; break; }
-                if (vis_eof(expr)) { gc_resume_minor(); break; }
+                else { current_handler = h.prev; break; }
+                if (vis_eof(expr)) { break; }
                 h.prev = current_handler;
                 h.saved_jit_depth = jit_depth_save();
                 current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
                     uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(expr);
-                    gc_resume_minor();
                     if (curry_timings_enabled) {
                         uint64_t _t1 = profiling_now_ns();
                         curry_timing_compile_ns += _t1 - _t0;
@@ -977,11 +975,9 @@ int main(int argc, char **argv) {
                 int cap = 64;
                 chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
                 val_t v;
-                gc_inhibit_minor();
                 while (!vis_eof((v = timed_scm_read(port)))) {
                     uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(v);
-                    gc_resume_minor();   /* safe region: vm_run */
                     if (curry_timings_enabled) {
                         uint64_t _t1 = profiling_now_ns();
                         curry_timing_compile_ns += _t1 - _t0;
@@ -1002,9 +998,7 @@ int main(int argc, char **argv) {
                     vm_run(bc, 0);
                     if (curry_timings_enabled)
                         curry_timing_execute_ns += profiling_now_ns() - _t0;
-                    gc_inhibit_minor(); /* back to unsafe for next read/compile */
                 }
-                gc_resume_minor();   /* EOF exit: leave inhibit balanced */
                 port_close(port);
                 scc_write(argv[i], chunks, n_chunks);
                 g_pending_scc_src = NULL;   /* already written — don't also write at exit */

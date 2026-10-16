@@ -135,12 +135,8 @@ static val_t eval_call_cc(val_t proc) {
      * process. Found missing here (only gc_shadow was originally added)
      * by independent code review after the shadow-stack part of this fix
      * landed. */
-    void *saved_shadow = gc_shadow_save();
-    int   saved_inhibit = gc_inhibit_save();
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
-        gc_shadow_restore(saved_shadow);
-        gc_inhibit_restore(saved_inhibit);
         jit_depth_restore(saved_jit_depth);
         if (vm) {
             vm->frame_count   = saved_fc;
@@ -228,7 +224,6 @@ val_t eval(val_t expr, val_t env) {
      * iteration without crossing their declarations.
      * Under Boehm GC_AUTOFRAME is a no-op. */
     val_t op = V_NIL, rest = V_NIL;
-    GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
@@ -1111,8 +1106,6 @@ tail:
         val_t result = V_VOID;
         ExnHandler h;
         h.prev = current_handler;
-        h.saved_shadow   = gc_shadow_save();
-        h.saved_inhibit  = gc_inhibit_save();
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
         current_handler = &h;
@@ -1125,8 +1118,6 @@ tail:
             return result;
         }
         current_handler = h.prev;
-        gc_shadow_restore(h.saved_shadow);
-        gc_inhibit_restore(h.saved_inhibit);
         jit_depth_restore(h.saved_jit_depth);
         vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
         val_t exn = h.exn;

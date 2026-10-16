@@ -269,33 +269,10 @@ static val_t strip_for(val_t spec) {
     return spec;
 }
 
-/* ---- GC scanner for module registry ---- */
-
-static void scan_module_registry(void) {
-    /* Issue #143 (found the same way as sx_rules_gc_scan/
-     * sx_algebra_gc_scan's identical fix in #141): under --gc
-     * generational, a minor collection is per-thread, not a
-     * stop-the-world pause for other actors, so this scanner can run
-     * concurrently with module_registry_lock-protected access from
-     * other threads and was mutating entries unguarded. Takes the same
-     * write lock registry_insert uses. Safe against self-deadlock:
-     * gc_ss_evac/gc_ss_fwd don't allocate, and registry_insert's own
-     * allocation happens before it takes the lock (see its comment),
-     * so no thread can already be holding this lock at the moment its
-     * own allocation triggers the minor collection that runs this
-     * scanner. */
-    pthread_rwlock_wrlock(&module_registry_lock);
-    for (ModuleEntry *e = registry; e; e = e->next) {
-        e->name   = (val_t)gc_ss_evac((uintptr_t)e->name);
-        e->module = (Module *)gc_ss_fwd(e->module);
-    }
-    pthread_rwlock_unlock(&module_registry_lock);
-}
 
 /* ---- Public API ---- */
 
 void modules_init(void) {
-    gc_ss_register_ext_scanner(scan_module_registry);
     /* Add search dir relative to executable (handles build-tree and install) */
 #if defined(__linux__) || defined(__APPLE__)
     {
@@ -755,7 +732,6 @@ val_t modules_define_library(val_t form, val_t env) {
      * with this frame in place (see #217's own thread for the follow-up
      * investigation). Keep both this fix and that issue open; they are
      * separate gaps in the same area. */
-    GC_AUTOFRAME(5, &name, &lib_env, &exports, &rest, &clause);
 
     while (vis_pair(rest)) {
         clause = vcar(rest); rest = vcdr(rest);
@@ -790,7 +766,6 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
      * scm_cons() calls (building exports), neither of which this
      * function's own C stack frame is otherwise visible to a minor
      * collection. */
-    GC_AUTOFRAME(5, &name, &lib_env, &exports, &rest, &clause);
 
     while (vis_pair(rest)) {
         clause = vcar(rest); rest = vcdr(rest);

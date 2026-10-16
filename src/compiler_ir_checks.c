@@ -47,7 +47,6 @@
 #include "set.h"
 
 bool compiler_ir_self_check(val_t expr) {
-    gc_inhibit_minor();
 
     /* init_compiler allocates a fresh ir_arena for every root Compiler
      * now (see its own comment) -- no need to set one up explicitly here
@@ -102,14 +101,12 @@ bool compiler_ir_self_check(val_t expr) {
 
     ir_arena_free(old_c.ir_arena);
     ir_arena_free(new_c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(h.exn);
     return same;
 }
 
 bool compiler_ir_optimize_check(val_t expr) {
-    gc_inhibit_minor();
 
     /* init_compiler allocates a fresh ir_arena for every root Compiler
      * now (see its own comment) -- no need to set one up explicitly. */
@@ -151,7 +148,6 @@ bool compiler_ir_optimize_check(val_t expr) {
 
     ir_arena_free(old_c.ir_arena);
     ir_arena_free(new_c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(exn);
     return equal;
@@ -200,7 +196,6 @@ static int chunk_total_code_len(Chunk *c) {
 }
 
 bool compiler_ir_inline_fired_check(val_t expr) {
-    gc_inhibit_minor();
 
     Compiler old_c;
     init_compiler(&old_c, NULL, "<inline-fired-check-old>");
@@ -226,12 +221,10 @@ bool compiler_ir_inline_fired_check(val_t expr) {
     }, {
         ir_arena_free(old_c.ir_arena);
         ir_arena_free(new_c.ir_arena);
-        gc_resume_minor();
         scm_raise_val(h.exn);
     });
 
     ir_arena_free(old_c.ir_arena);
     ir_arena_free(new_c.ir_arena);
-    gc_resume_minor();
     return grew;
 }

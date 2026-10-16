@@ -348,8 +348,6 @@ val_t stm_atomically(val_t thunk) {
      * crash is always inside vm_run(), reached through apply_arr() called
      * from here, and disappears once retries restore this state exactly
      * as SCM_PROTECT already does for the exception path below. */
-    void   *saved_shadow;
-    int     saved_inhibit;
     int     saved_jit_depth;
     int     saved_vm_frame_count;
     void   *saved_vm_sp;
@@ -359,14 +357,10 @@ val_t stm_atomically(val_t thunk) {
         tx_reset(tx);
         current_handler = saved_handler;
 
-        saved_shadow    = gc_shadow_save();
-        saved_inhibit   = gc_inhibit_save();
         saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
 
         if (setjmp(retry_jmp) == RETRY_SIG) {
-            gc_shadow_restore(saved_shadow);
-            gc_inhibit_restore(saved_inhibit);
             jit_depth_restore(saved_jit_depth);
             vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
             tx_wait_for_change(tx);
@@ -413,13 +407,10 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
      * there): a stm_retry() inside thunk1/thunk2 longjmps straight to
      * local_jmp, skipping SCM_PROTECT's restore entirely, so it has to be
      * saved/restored here by hand around each attempt. */
-    void *saved_shadow;
-    int   saved_inhibit, saved_jit_depth;
+    int   saved_jit_depth;
     int   saved_vm_frame_count;
     void *saved_vm_sp, *saved_vm_open_upvalues;
 
-    saved_shadow    = gc_shadow_save();
-    saved_inhibit   = gc_inhibit_save();
     saved_jit_depth = jit_depth_save();
     vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
 
@@ -428,8 +419,6 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
         tx->retry_jmp = saved_retry;
         return r1;
     }
-    gc_shadow_restore(saved_shadow);
-    gc_inhibit_restore(saved_inhibit);
     jit_depth_restore(saved_jit_depth);
     vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
 
@@ -438,8 +427,6 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
     tx->read_ver = saved_read_ver;
     tx->retry_jmp = &local_jmp;
 
-    saved_shadow    = gc_shadow_save();
-    saved_inhibit   = gc_inhibit_save();
     saved_jit_depth = jit_depth_save();
     vm_exn_state_save(&saved_vm_frame_count, &saved_vm_sp, &saved_vm_open_upvalues);
 
@@ -448,8 +435,6 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
         tx->retry_jmp = saved_retry;
         return r2;
     }
-    gc_shadow_restore(saved_shadow);
-    gc_inhibit_restore(saved_inhibit);
     jit_depth_restore(saved_jit_depth);
     vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
 

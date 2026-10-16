@@ -86,8 +86,6 @@ typedef struct ExnHandler {
     jmp_buf         jmp;
     val_t           exn;    /* filled on raise */
     struct ExnHandler *prev;
-    void           *saved_shadow;  /* gc_shadow_stack at setjmp time — restored on longjmp */
-    int             saved_inhibit; /* gc_inhibit_count at setjmp time — restored on longjmp */
     int             saved_jit_depth; /* g_jit_call_depth at setjmp time — restored on longjmp;
                                          without this, an exception raised from inside a
                                          JIT-to-JIT call chain (curry_jit_apply_arr) skips the
@@ -208,23 +206,6 @@ void scm_raise_val(val_t exn) __attribute__((noreturn));
  * 'wrong-type-argument) on the error object; see docs/reference/error-codes.md. */
 void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
 
-/*
- * longjmp-safe shadow-stack and inhibit-counter helpers.
- * Declared here (with C linkage so C++ modules can use SCM_PROTECT) and
- * defined in gc.c.  Under C++ the shadow save returns NULL and restore is a
- * no-op; C++ modules never use GC_AUTOFRAME.
- */
-#ifdef __cplusplus
-extern "C" {
-#endif
-void *gc_shadow_save(void);
-void  gc_shadow_restore(void *saved);
-int   gc_inhibit_save(void);
-void  gc_inhibit_restore(int saved);
-#ifdef __cplusplus
-}
-#endif
-
 /* VM operand-stack/frame/upvalue state — saved/restored across an ExnHandler
  * unwind the same way OP_PUSH_HANDLER already does for purely in-VM catches
  * (VmHandlerInfo in vm.h). Defined in vm.c; opaque void* types here so
@@ -246,8 +227,6 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
 #define SCM_PROTECT(h, body, on_exn) do {              \
     (h).prev           = current_handler;               \
-    (h).saved_shadow   = gc_shadow_save();              \
-    (h).saved_inhibit  = gc_inhibit_save();             \
     (h).saved_jit_depth = jit_depth_save();             \
     vm_exn_state_save(&(h).saved_vm_frame_count,        \
                        &(h).saved_vm_sp,                \
@@ -258,8 +237,6 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
         current_handler = (h).prev;                     \
     } else {                                            \
         current_handler = (h).prev;                     \
-        gc_shadow_restore((h).saved_shadow);            \
-        gc_inhibit_restore((h).saved_inhibit);          \
         jit_depth_restore((h).saved_jit_depth);         \
         vm_exn_state_restore((h).saved_vm_frame_count,  \
                               (h).saved_vm_sp,           \

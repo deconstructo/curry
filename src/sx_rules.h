@@ -27,4 +27,3 @@ void  sx_rules_clear(val_t ruleset);
 
 /* Semispace GC external scanner — scans all val_t fields in rule structs.
    Registered automatically by sx_rules_init(). */
-void  sx_rules_gc_scan(void);

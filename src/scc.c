@@ -1003,29 +1003,24 @@ void scc_clear(const char *src_path) {
  * runs at all), not this one, where a minor GC genuinely runs mid-parse
  * and the caller's own C locals just aren't rooted against it. */
 bool scc_load(const char *src_path, Chunk ***chunks_out, int *n_out) {
-    gc_inhibit_minor();
     char *p = primary_path(src_path);
     if (p && read_scc(p, src_path, chunks_out, n_out)) {
         free(p);
-        gc_resume_minor();
         return true;
     }
     free(p);
     /* Try user cache */
     char *fb = fallback_path(src_path);
-    if (!fb) { gc_resume_minor(); return false; }
+    if (!fb) { return false; }
     bool hit = read_scc(fb, src_path, chunks_out, n_out);
     free(fb);
-    gc_resume_minor();
     return hit;
 }
 
 bool scc_load_direct(const char *scc_path, Chunk ***chunks_out, int *n_out) {
     FILE *f = fopen(scc_path, "rb");
     if (!f) return false;
-    gc_inhibit_minor();
     bool ok = load_chunks_from_file(f, NULL, chunks_out, n_out);
-    gc_resume_minor();
     fclose(f);
     return ok;
 }

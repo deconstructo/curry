@@ -227,27 +227,13 @@ static Value *emit_body(CompileCtx &cc, val_t forms);
 /* ---- Statepoint call emission ---- */
 /*
  * Wraps every potentially-allocating call in an llvm.experimental.gc.statepoint.
- * GCArgs is empty: Boehm conservatively scans the C stack for pointers in
- * old-gen; the generational GC is inhibited across every statepoint so nursery
- * pointers in JIT alloca slots are never stale (Phase 1 correctness fix).
- *
- * Phase 3 will populate GCArgs from cc.gc_roots once we have precise old-gen
- * and can emit gc.relocate projections.
- *
- * Minor GC inhibit protocol:
- *   gc_inhibit_minor_fn() is called before the statepoint; gc_resume_minor_fn()
- *   after.  This prevents the generational minor GC from running while live
- *   nursery pointers reside in JIT alloca slots that the GC cannot enumerate.
- *   If a Scheme exception longjmps through a JIT frame, SCM_PROTECT restores
- *   gc_inhibit_count to its pre-JIT value via gc_inhibit_restore().
+ * GCArgs is empty: Boehm conservatively scans the C stack, and objects never
+ * move, so JIT alloca slots need no relocation. A precise collector would
+ * populate GCArgs from cc.gc_roots.
  */
 static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
                                    FunctionType *ftype,
                                    ArrayRef<Value *> call_args) {
-    /* Inhibit minor GC before the call. */
-    auto *void_ft = FunctionType::get(Type::getVoidTy(cc.llvm_ctx), {}, false);
-    cc.B.CreateCall(void_ft,
-        declare_helper(cc.M, "curry_gc_inhibit_minor_jit", void_ft), {});
 
 #if LLVM_VERSION_MAJOR >= 17
     std::optional<ArrayRef<Value *>> deopt_args;
@@ -266,10 +252,6 @@ static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
         result = cc.V_VOID_c;
     else
         result = cc.B.CreateGCResult(sp, ftype->getReturnType());
-
-    /* Resume minor GC after the call. */
-    cc.B.CreateCall(void_ft,
-        declare_helper(cc.M, "curry_gc_resume_minor_jit", void_ft), {});
 
     return result;
 }

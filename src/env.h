@@ -64,8 +64,6 @@ val_t            env_slot_load(val_t *slot);
  * sections specifically never take the one path that could trigger a
  * synchronous minor GC on the same thread, regardless of the general
  * safepoint-deferral behavior elsewhere in the codebase. */
-void             env_global_frame_lock_for_gc(void);
-void             env_global_frame_unlock_for_gc(void);
 
 /* Like frame_lookup, but for the (possibly shared) GLOBAL_ENV frame also
  * hands back the frame->version the lookup was validated against, in the

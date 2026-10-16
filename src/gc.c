@@ -14,26 +14,6 @@
 #include <pthread.h>
 #include <time.h>
 
-/* ── Inert hooks of the removed moving collector ──────────────────────────── */
-
-CURRY_THREAD_LOCAL GcFrame *gc_shadow_stack  = NULL;
-CURRY_THREAD_LOCAL int      gc_inhibit_count = 0;
-CURRY_THREAD_LOCAL bool     gc_minor_pending = false;
-
-void gc_register_ext_scanner(void (*cb)(void)) { (void)cb; }
-uintptr_t gc_ss_evac(uintptr_t v) { return v; }
-void     *gc_ss_fwd(void *p)      { return p; }
-
-/* longjmp-safe shadow-stack helpers (called from SCM_PROTECT) */
-void *gc_shadow_save(void)        { return gc_shadow_stack; }
-void  gc_shadow_restore(void *p)  { gc_shadow_stack = (GcFrame *)p; }
-
-/* inhibit-counter wrappers for C++ and JIT code */
-void gc_inhibit_minor_fn(void) { gc_inhibit_count++; }
-void gc_resume_minor_fn(void)  { if (gc_inhibit_count > 0) gc_inhibit_count--; }
-int  gc_inhibit_save(void)     { return gc_inhibit_count; }
-void gc_inhibit_restore(int v) { gc_inhibit_count = v; }
-
 /* ── Safe points (no-ops; see gc.h) ───────────────────────────────────────── */
 
 void gc_gen_thread_park(void)   {}

@@ -50,37 +50,10 @@ static int rtab_initialised = 0;
  * implementations' writer-preference. */
 static pthread_rwlock_t rtab_lock = PTHREAD_RWLOCK_INITIALIZER;
 
-/* Issue #146: sx_rules_gc_scan used to walk every accumulated rule on
- * every single minor GC, from every actor, unconditionally -- an O(total
- * rule count) cost paid repeatedly (once per actor's own minor GC) even
- * when nothing in rtab could possibly need re-scanning. It can't: each
- * actor's minor GC only evacuates pointers into THAT actor's own
- * thread-local nursery (gc_nursery, gc.h, is CURRY_THREAD_LOCAL; evacuate/
- * gc_ss_evac's in_nursery check is against the calling thread's own
- * bounds) -- so a scan is only ever useful if some rule holding a
- * still-unpromoted nursery pointer was added since this exact thread's
- * own last scan. rtab_generation is bumped (under rtab_lock, so no extra
- * atomicity is needed for the increment itself) on every successful
- * sx_rule_add; rtab_last_scanned_gen is a plain thread-local snapshot of
- * the generation this thread scanned as of its last sx_rules_gc_scan
- * call. If nothing was added anywhere since then, this thread's next
- * minor GC needs no work here at all -- any rule added by ANOTHER thread
- * still gets a correctly-scoped (if now slightly delayed) scan the first
- * time that OTHER thread's own minor GC runs, since generation is shared
- * across all threads. The comparison is a relaxed atomic load/store, not
- * because of any ordering requirement here (the real synchronization for
- * the scan itself is still rtab_lock, unchanged), just because the
- * generation counter is written under a different thread's rtab_lock
- * critical section than the one reading it here -- a plain read/write
- * pair split across threads is a data race by the letter of C11
- * regardless of what a mutex elsewhere in the program guarantees. */
-static _Atomic uint64_t rtab_generation = 0;
-static CURRY_THREAD_LOCAL uint64_t rtab_last_scanned_gen = (uint64_t)-1;
 
 void sx_rules_init(void) {
     for (int i = 0; i < RTAB_SIZE; i++) rtab[i].op = V_VOID;
     rtab_initialised = 1;
-    gc_ss_register_ext_scanner(sx_rules_gc_scan);
 }
 
 /* Hash by interned symbol pointer (all symbols are unique pointers) */
@@ -136,17 +109,6 @@ void sx_rule_add(val_t pattern, val_t pvars,
         while (tail->next) tail = tail->next;
         tail->next = r;
     }
-    /* Issue #146: a fresh rule may hold nursery pointers (pattern/pvars/
-     * guard_fn/action_fn/ruleset) that a scan needs to evacuate -- bump
-     * the generation counter so any thread's "nothing changed, skip"
-     * check in sx_rules_gc_scan sees it. Still inside rtab_lock: no
-     * separate atomicity concern for the increment itself, just needs to
-     * use an atomic store since the counter is read via a plain relaxed
-     * load from other threads without rtab_lock (see the counter's own
-     * declaration comment). */
-    atomic_store_explicit(&rtab_generation,
-        atomic_load_explicit(&rtab_generation, memory_order_relaxed) + 1,
-        memory_order_relaxed);
     pthread_rwlock_unlock(&rtab_lock);
 
     /* Issue #137/#195: a node sx_simplify already cached as "fully
@@ -375,43 +337,3 @@ void sx_rules_clear(val_t ruleset) {
     for (int i = 0; i < n_affected; i++) sx_invalidate_simplify_cache_op(affected[i]);
 }
 
-void sx_rules_gc_scan(void) {
-    /* Issue #141 follow-up (found by independent security review): under
-     * --gc generational, a minor collection is per-thread, NOT a
-     * stop-the-world pause for other actors (see gc_gen.c) -- so this
-     * scanner runs concurrently with every other actor's rtab_lock-
-     * protected access, and was mutating rtab's fields completely
-     * unguarded. Takes the same write lock sx_rule_add/sx_rules_clear
-     * use. Safe against self-deadlock: gc_ss_evac/gc_ss_fwd (identity
-     * functions under Boehm, real evacuation under generational) do not
-     * allocate, and every OTHER place in this file that takes rtab_lock
-     * is now structured to never allocate while holding it either (see
-     * sx_rule_add's pre-lock GC_NEW and sx_rules_list's snapshot-then-
-     * release pattern) -- so no thread can already be holding rtab_lock
-     * at the moment its own allocation triggers the minor collection
-     * that calls this scanner.
-     *
-     * Issue #146: skip the whole O(total rule count) walk below when
-     * nothing has been added to rtab (by ANY thread) since this thread's
-     * own last scan -- see rtab_generation's declaration comment for why
-     * that's a sufficient, correctness-preserving check, not just a
-     * heuristic. */
-    uint64_t gen = atomic_load_explicit(&rtab_generation, memory_order_relaxed);
-    if (gen == rtab_last_scanned_gen) return;
-    pthread_rwlock_wrlock(&rtab_lock);
-    for (int i = 0; i < RTAB_SIZE; i++) {
-        if (rtab[i].op == V_VOID) continue;
-        rtab[i].op   = (val_t)gc_ss_evac((uintptr_t)rtab[i].op);
-        rtab[i].head = (SxRule *)gc_ss_fwd(rtab[i].head);
-        for (SxRule *r = rtab[i].head; r; r = r->next) {
-            r->pattern   = (val_t)gc_ss_evac((uintptr_t)r->pattern);
-            r->pvars     = (val_t)gc_ss_evac((uintptr_t)r->pvars);
-            r->guard_fn  = (val_t)gc_ss_evac((uintptr_t)r->guard_fn);
-            r->action_fn = (val_t)gc_ss_evac((uintptr_t)r->action_fn);
-            r->ruleset   = (val_t)gc_ss_evac((uintptr_t)r->ruleset);
-            r->next      = (SxRule *)gc_ss_fwd(r->next);
-        }
-    }
-    pthread_rwlock_unlock(&rtab_lock);
-    rtab_last_scanned_gen = gen;
-}

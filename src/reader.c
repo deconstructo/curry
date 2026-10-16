@@ -763,24 +763,19 @@ static val_t read_datum(val_t port) {
 CURRY_THREAD_LOCAL int g_reader_last_line = 0;
 
 val_t scm_read(val_t port) {
-    gc_inhibit_minor();
     skip_whitespace(port);
     g_reader_last_line = port_line(port);
     val_t result = read_datum(port);
-    gc_resume_minor();
     return result;
 }
 
 val_t scm_read_cstr(const char *src) {
     val_t p = port_open_input_string(src, (uint32_t)strlen(src));
-    gc_inhibit_minor();
     val_t result = read_datum(p);
-    gc_resume_minor();
     return result;
 }
 
 val_t scm_read_all(val_t port) {
-    gc_inhibit_minor();
     /* Build list of all datums in reverse, then reverse */
     val_t head = V_NIL;
     val_t v;
@@ -798,6 +793,5 @@ val_t scm_read_all(val_t port) {
         p->car = vcar(head); p->cdr = result;
         result = vptr(p); head = vcdr(head);
     }
-    gc_resume_minor();
     return result;
 }

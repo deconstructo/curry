@@ -85,17 +85,13 @@ static val_t scm_append_inner(val_t a, val_t b) {
     return scm_cons(vcar(a), scm_append_inner(vcdr(a), b));
 }
 val_t scm_append(val_t a, val_t b) {
-    gc_inhibit_minor();
     val_t r = scm_append_inner(a, b);
-    gc_resume_minor();
     return r;
 }
 
 val_t scm_reverse(val_t lst) {
     val_t r = V_NIL;
-    gc_inhibit_minor();
     while (vis_pair(lst)) { r = scm_cons(vcar(lst), r); lst = vcdr(lst); }
-    gc_resume_minor();
     return r;
 }
 
@@ -490,17 +486,13 @@ CXR3(dda, ccdr_chk, ccdr_chk, ccar_chk) CXR3(ddd, ccdr_chk, ccdr_chk, ccdr_chk)
 
 static val_t prim_list(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = V_NIL;
-    gc_inhibit_minor();
     for (int i = ac-1; i >= 0; i--) r = scm_cons(av[i], r);
-    gc_resume_minor();
     return r;
 }
 static val_t prim_list_star(int ac, val_t *av, void *ud) {
     (void)ud; if (ac == 0) return V_NIL;
     val_t r = av[ac-1];
-    gc_inhibit_minor();
     for (int i = ac-2; i >= 0; i--) r = scm_cons(av[i], r);
-    gc_resume_minor();
     return r;
 }
 static val_t prim_length(int ac, val_t *av, void *ud) {
@@ -2533,16 +2525,12 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
      * eval_call_cc's identical fix (eval.c) -- see that comment for the
      * full explanation of why all three (shadow stack, gc_inhibit_count,
      * g_jit_call_depth) need saving here, not just the shadow stack. */
-    void *saved_shadow = gc_shadow_save();
-    int   saved_inhibit = gc_inhibit_save();
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         /* Continuation was invoked — restore VM state and return captured value.
          * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
          * comment for the full explanation. */
-        gc_shadow_restore(saved_shadow);
-        gc_inhibit_restore(saved_inhibit);
         jit_depth_restore(saved_jit_depth);
         vm->frame_count   = saved_fc;
         vm->sp            = saved_sp;

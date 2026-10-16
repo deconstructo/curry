@@ -24,6 +24,11 @@
  *     calls, for per-thread handshakes. (The per-instruction safe-point poll
  *     was removed; vm.c's L_DISPATCH comment says where it would go.)
  *
+ * Also removed with it: the shadow stack (GC_AUTOFRAME), the minor-GC
+ * inhibit counter (gc_inhibit_minor/gc_resume_minor) and the ext-scanner
+ * registry. They told a moving collector where pointers were; a non-moving
+ * collector does not need them.
+ *
  * Thread safety
  * ─────────────
  * Call gc_register_thread() at the start of every new pthread that touches
@@ -111,61 +116,6 @@ static inline void gc_val_unpin(val_t v) { (void)v; }
 void gc_register_root(void *slot);
 void gc_register_root_val(void *slot, val_t v);
 void gc_unregister_root(void *slot);
-
-/* ── Hooks for the removed moving collector (removed in a follow-up) ──────── */
-
-/* Ext scanners, shadow-stack frames and the inhibit counter only mattered
- * to a collector that moved objects. They are inert now. */
-void gc_register_ext_scanner(void (*cb)(void));
-uintptr_t gc_ss_evac(uintptr_t v);
-void     *gc_ss_fwd(void *p);
-static inline void gc_ss_register_ext_scanner(void (*cb)(void)) {
-    gc_register_ext_scanner(cb);
-}
-
-typedef struct GcFrame {
-    val_t         **slots;
-    int             count;
-    struct GcFrame *prev;
-} GcFrame;
-
-#ifndef __cplusplus
-extern CURRY_THREAD_LOCAL GcFrame *gc_shadow_stack;
-extern CURRY_THREAD_LOCAL int      gc_inhibit_count;
-extern CURRY_THREAD_LOCAL bool     gc_minor_pending;
-
-static inline void gc_pop_frame(GcFrame **fp) {
-    gc_shadow_stack = (*fp)->prev;
-}
-#endif
-
-static inline void gc_inhibit_minor(void) {
-#ifndef __cplusplus
-    gc_inhibit_count++;
-#endif
-}
-static inline void gc_resume_minor(void) {
-#ifndef __cplusplus
-    if (gc_inhibit_count > 0) gc_inhibit_count--;
-#endif
-}
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-void gc_inhibit_minor_fn(void);
-void gc_resume_minor_fn(void);
-int  gc_inhibit_save(void);
-void gc_inhibit_restore(int saved);
-#ifdef __cplusplus
-}
-#endif
-
-#define GC_AUTOFRAME(n, ...) \
-    val_t *_gc_frame_roots[] = {__VA_ARGS__}; \
-    GcFrame _gc_frame = {_gc_frame_roots, (n), gc_shadow_stack}; \
-    gc_shadow_stack = &_gc_frame; \
-    __attribute__((cleanup(gc_pop_frame))) GcFrame *_gc_frame_sentinel = &_gc_frame
 
 /* ── Safe points (hooks for a future concurrent collector) ────────────────── */
 

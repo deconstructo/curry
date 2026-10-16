@@ -50,7 +50,6 @@
  * main.c so a second embedder can't silently drift out of order with
  * the first and reintroduce the crash above. */
 void curry_runtime_init(void) {
-    gc_inhibit_minor();
     gc_init();
     sym_init();
     num_init();
@@ -73,5 +72,4 @@ void curry_runtime_init(void) {
 #ifdef BUILD_LLVM
     curry_llvm_init();
 #endif
-    gc_resume_minor();
 }
