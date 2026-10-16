@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <time.h>
 
 /* ── Boehm backend ──────────────────────────────────────────────────────── */
 
@@ -139,9 +140,92 @@ _Atomic uint64_t gc_stat_major_count    = 0;
 _Atomic uint64_t gc_stat_minor_total_us = 0;
 _Atomic uint64_t gc_stat_minor_max_us   = 0;
 
+/* Boehm pause timing. Boehm calls gc_boehm_event_cb with its allocation
+ * lock held, from the thread running the collection, so the two start
+ * timestamps below are only ever touched by one thread at a time. The
+ * published counters are atomic because (gc-stats) reads them from any
+ * thread.
+ *
+ * A stop-the-world interval runs from GC_EVENT_PRE_STOP_WORLD to
+ * GC_EVENT_POST_START_WORLD: every registered thread is suspended for that
+ * long (the collecting thread is busy for it too). In Boehm's incremental
+ * mode one collection is split into several such intervals, so these are
+ * the pauses mutator threads actually see. A collection (GC_EVENT_START to
+ * GC_EVENT_END) is the whole cycle, which in incremental mode can span many
+ * intervals with mutator work in between. */
+_Atomic uint64_t gc_stat_stw_count       = 0;
+_Atomic uint64_t gc_stat_stw_total_ns    = 0;
+_Atomic uint64_t gc_stat_stw_max_ns      = 0;
+_Atomic uint64_t gc_stat_major_total_ns  = 0;
+_Atomic uint64_t gc_stat_major_max_ns    = 0;
+
+static _Atomic uint64_t gc_stw_ring[GC_STW_RING_N];
+static _Atomic size_t   gc_stw_ring_head = 0;
+
+static uint64_t gc_stw_start_ns;    /* guarded by Boehm's allocation lock */
+static uint64_t gc_major_start_ns;  /* ditto */
+
+static uint64_t gc_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+static void gc_stat_max(_Atomic uint64_t *slot, uint64_t v) {
+    uint64_t old = atomic_load_explicit(slot, memory_order_relaxed);
+    while (v > old &&
+           !atomic_compare_exchange_weak_explicit(slot, &old, v,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed))
+        ;
+}
+
 static void gc_boehm_event_cb(GC_EventType ev) {
-    if (ev == GC_EVENT_END)
+    switch (ev) {
+    case GC_EVENT_START:
+        gc_major_start_ns = gc_now_ns();
+        break;
+    case GC_EVENT_END: {
+        uint64_t d = gc_now_ns() - gc_major_start_ns;
         atomic_fetch_add_explicit(&gc_stat_major_count, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&gc_stat_major_total_ns, d, memory_order_relaxed);
+        gc_stat_max(&gc_stat_major_max_ns, d);
+        break;
+    }
+    case GC_EVENT_PRE_STOP_WORLD:
+        gc_stw_start_ns = gc_now_ns();
+        break;
+    case GC_EVENT_POST_START_WORLD: {
+        uint64_t d = gc_now_ns() - gc_stw_start_ns;
+        atomic_fetch_add_explicit(&gc_stat_stw_count, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&gc_stat_stw_total_ns, d, memory_order_relaxed);
+        gc_stat_max(&gc_stat_stw_max_ns, d);
+        size_t i = atomic_fetch_add_explicit(&gc_stw_ring_head, 1, memory_order_relaxed);
+        atomic_store_explicit(&gc_stw_ring[i % GC_STW_RING_N], d, memory_order_relaxed);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+size_t gc_get_stw_ring(uint64_t *out) {
+    size_t head = atomic_load_explicit(&gc_stw_ring_head, memory_order_relaxed);
+    size_t n = head < GC_STW_RING_N ? head : GC_STW_RING_N;
+    size_t first = head - n;
+    for (size_t i = 0; i < n; i++)
+        out[i] = atomic_load_explicit(&gc_stw_ring[(first + i) % GC_STW_RING_N],
+                                      memory_order_relaxed);
+    return n;
+}
+
+void gc_reset_boehm_stats(void) {
+    atomic_store_explicit(&gc_stat_stw_count,      0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_stw_total_ns,   0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_stw_max_ns,     0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_major_total_ns, 0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_major_max_ns,   0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stw_ring_head,       0, memory_order_relaxed);
 }
 
 #define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */

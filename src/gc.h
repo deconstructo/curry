@@ -508,6 +508,21 @@ void gc_gen_unregister_thread(void);  /* vtable impl only -- see comment above *
 extern size_t gc_get_pause_ring(uint64_t *out); /* defined in gc_gen.c; 0 under Boehm */
 extern void   gc_reset_pause_ring(void);        /* resets ring head to 0        */
 
+/* Boehm stop-the-world and whole-collection timing (gc.c's event callback,
+ * installed by gc_init, so only under the default Boehm backend). Times
+ * are in nanoseconds; gc_get_stw_ring copies up to GC_STW_RING_N of the
+ * most recent stop-the-world durations out in chronological order. */
+#define GC_STW_RING_N 1024
+#ifndef __cplusplus
+   extern _Atomic uint64_t gc_stat_stw_count;
+   extern _Atomic uint64_t gc_stat_stw_total_ns;
+   extern _Atomic uint64_t gc_stat_stw_max_ns;
+   extern _Atomic uint64_t gc_stat_major_total_ns;
+   extern _Atomic uint64_t gc_stat_major_max_ns;
+#endif
+size_t gc_get_stw_ring(uint64_t *out);
+void   gc_reset_boehm_stats(void);
+
 /* ── Card table (retained for backwards compat; no longer written by barrier) */
 
 #define GC_CARD_BYTES 512u

@@ -3522,12 +3522,29 @@ static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
         rv->data[i] = vfix((intptr_t)ring_buf[i]);
     val_t ring_val = vptr(rv);
 
+    /* Boehm stop-the-world durations (ns), oldest first */
+    uint64_t stw_buf[GC_STW_RING_N];
+    size_t   stw_n = gc_get_stw_ring(stw_buf);
+    Vector  *sv = CURRY_NEW_FLEX(Vector, (uint32_t)stw_n);
+    sv->hdr.type = T_VECTOR; sv->hdr.flags = 0; sv->len = (uint32_t)stw_n;
+    for (size_t i = 0; i < stw_n; i++)
+        sv->data[i] = vfix((intptr_t)stw_buf[i]);
+    val_t stw_val = vptr(sv);
+
     /* Nursery used (main thread) */
     size_t nursery_used = (size_t)(gc_nursery.top - gc_nursery.base);
 
     /* Build alist front-to-back (will be reversed — canonical key order) */
 #define APAIR(k, v) result = scm_cons(scm_cons(sym_intern_cstr(k), (v)), result)
     val_t result = V_NIL;
+    APAIR("stw-ring-ns",      stw_val);
+    APAIR("stw-max-ns",       vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_max_ns,     memory_order_relaxed)));
+    APAIR("stw-total-ns",     vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_total_ns,   memory_order_relaxed)));
+    APAIR("stw-count",        vfix((intptr_t)atomic_load_explicit(&gc_stat_stw_count,      memory_order_relaxed)));
+    APAIR("major-max-ns",     vfix((intptr_t)atomic_load_explicit(&gc_stat_major_max_ns,   memory_order_relaxed)));
+    APAIR("major-total-ns",   vfix((intptr_t)atomic_load_explicit(&gc_stat_major_total_ns, memory_order_relaxed)));
+    APAIR("incremental",      GC_is_incremental_mode() ? V_TRUE : V_FALSE);
+    APAIR("parallel-markers", vfix((intptr_t)GC_get_parallel() + 1));
     APAIR("nursery-used",     vfix((intptr_t)nursery_used));
     APAIR("free-bytes",       vfix((intptr_t)gc_free_bytes()));
     APAIR("heap-size",        vfix((intptr_t)gc_heap_size()));
@@ -3547,6 +3564,7 @@ static val_t prim_gc_stats_reset(int ac, val_t *av, void *ud) {
     atomic_store_explicit(&gc_stat_minor_total_us, 0, memory_order_relaxed);
     atomic_store_explicit(&gc_stat_minor_max_us,   0, memory_order_relaxed);
     gc_reset_pause_ring();
+    gc_reset_boehm_stats();
     return V_VOID;
 }
 
