@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792152155477,
+  "lastUpdate": 1792178262136,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -18077,6 +18077,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 81.857,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8da3fbbfc8e438a04dcb16376d9b962a8a0d09df",
+          "message": "Merge pull request #303 from deconstructo/fix/292-vm-stack\n\nVM: deep recursion (reserved stacks), unwind closes upvalues, work-pool rewind (#292 #299 #300 #302)",
+          "timestamp": "2026-10-17T06:16:54+11:00",
+          "tree_id": "7bf6033535afbe0f99b731b3996096bb94aada63",
+          "url": "https://github.com/deconstructo/curry/commit/8da3fbbfc8e438a04dcb16376d9b962a8a0d09df"
+        },
+        "date": 1792178260680,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.255,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.192,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.327,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.745,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 168.071,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 378.391,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 80.031,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 106.779,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 76.513,
             "unit": "ms"
           }
         ]
