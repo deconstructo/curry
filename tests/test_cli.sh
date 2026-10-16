@@ -33,7 +33,7 @@ check() {
 
 check_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if grep -qF -- "$needle" <<<"$haystack"; then
         echo "PASS: $label"
         (( pass++ )) || true
     else
@@ -178,7 +178,7 @@ fi
 
 # Default .scc should NOT have a shebang
 first_bytes=$(head -c 8 "$SCC_DEFAULT" | xxd -p 2>/dev/null || od -A n -t x1 -N 8 "$SCC_DEFAULT" | tr -d ' \n')
-if printf '%s' "$first_bytes" | grep -qi '2321'; then
+if grep -qi '2321' <<<"$first_bytes"; then
     echo "FAIL: -c without -x should not prepend shebang"
     (( fail++ )) || true
 else
@@ -480,7 +480,7 @@ check_contains "cache: MISS reported after content actually changed" "$err" "MIS
 
 # -e/REPL don't go through the script-file cache at all — no cache line.
 out=$("$CURRY" --timings -e '(display 1)' 2>&1 >/dev/null)
-if printf '%s' "$out" | grep -q 'cache'; then
+if grep -q 'cache' <<<"$out"; then
     echo "FAIL: --timings -e: no cache line (none expected, no cache decision made)"
     (( fail++ )) || true
 else
