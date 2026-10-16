@@ -886,6 +886,7 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         int argc = 0;
         val_t b = bindings;
         while (vis_pair(b)) { argc++; b = vcdr(b); }
+        check_call_argc(argc);
 
         /* Validates every binding before either loop below destructures
          * it -- see ir_lower_let's identical comment (issue #124). Not
@@ -974,6 +975,7 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         int argc = 0;
         val_t b = bindings;
         while (vis_pair(b)) { params = scm_cons(vcar(vcar(b)), params); argc++; b = vcdr(b); }
+        check_call_argc(argc);
         val_t fwd = V_NIL;
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
@@ -2227,6 +2229,7 @@ static void compile_call(Compiler *c, val_t head, val_t args, bool tail, int lin
     int argc = 0;
     val_t a = args;
     while (vis_pair(a)) { argc++; a = vcdr(a); }
+    check_call_argc(argc);
 
     /* Self-tail-call: a tail-position call whose head is exactly the
      * enclosing named-let loop's own self-reference (Compiler::

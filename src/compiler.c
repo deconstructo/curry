@@ -273,10 +273,12 @@ void end_scope(Compiler *c, int line) {
  * walk up ->enclosing) — used by internal define-syntax and by
  * let-syntax/letrec-syntax. */
 int add_syntax_local(Compiler *c, val_t name, val_t transformer) {
-    if (c->syntax_local_count == MAX_SYNTAX_LOCALS) {
-        fprintf(stderr, "compiler: too many local macros\n");
-        return 0;
-    }
+    /* These limits used to print a message and carry on with slot 0,
+     * which compiled wrong code silently; a compile error is the only
+     * safe answer (bytecode operands are one byte). */
+    if (c->syntax_local_count == MAX_SYNTAX_LOCALS)
+        scm_raise(V_FALSE, "compile: too many local macros in one scope (max %d)",
+                  MAX_SYNTAX_LOCALS);
     SyntaxLocal *s = &c->syntax_locals[c->syntax_local_count];
     s->name        = name;
     s->transformer = transformer;
@@ -325,11 +327,16 @@ bool resolve_syntax_local(Compiler *c, val_t name, val_t *out_transformer) {
     return false;
 }
 
+void check_call_argc(int argc) {
+    if (argc > MAX_CALL_ARGS)
+        scm_raise(V_FALSE, "compile: too many arguments in one call (%d, max %d); "
+                  "use apply with a list for more", argc, MAX_CALL_ARGS);
+}
+
 int add_local(Compiler *c, val_t name) {
-    if (c->local_count == MAX_LOCALS) {
-        fprintf(stderr, "compiler: too many locals\n");
-        return 0;
-    }
+    if (c->local_count == MAX_LOCALS)
+        scm_raise(V_FALSE, "compile: too many local variables in one procedure (max %d)",
+                  MAX_LOCALS);
     Local *l = &c->locals[c->local_count];
     l->name     = name;
     l->depth    = c->scope_depth;
@@ -443,10 +450,9 @@ int add_upvalue(Compiler *c, int index, bool is_local, val_t name) {
     for (int i = 0; i < c->upval_count; i++)
         if (c->upvals[i].index == index && c->upvals[i].is_local == is_local)
             return i;
-    if (c->upval_count == MAX_UPVALS) {
-        fprintf(stderr, "compiler: too many upvalues\n");
-        return 0;
-    }
+    if (c->upval_count == MAX_UPVALS)
+        scm_raise(V_FALSE, "compile: a procedure captures too many variables (max %d)",
+                  MAX_UPVALS);
     c->upvals[c->upval_count].index    = index;
     c->upvals[c->upval_count].is_local = is_local;
     c->upvals[c->upval_count].name     = name;

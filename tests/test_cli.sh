@@ -731,6 +731,41 @@ out=$("$CURRY" -e '(display (let* ((p0 1) (p1 1) (p2 1) (p3 1) (p4 1) (p5 1) (p6
                           (+ p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19)))')
 check "let* with 20 sequential bindings still compiles and runs correctly" "$out" "20"
 
+# ─── Compiler limits raise a compile error instead of compiling wrong code ──
+#
+# Bytecode operands are one byte: a call carries at most 255 arguments, a
+# procedure at most 256 locals and 256 captured variables. Before, a call
+# with 300 arguments had its count wrap modulo 256 ((+ 1 1 ...) with 300
+# ones printed 44), and the locals/upvalue limits printed a message and
+# carried on with slot 0. Tested through script files because `eval` uses
+# the tree-walker, which has no such limit.
+limit_script() {   # name, body
+    printf '%s\n' "$2" > "$TMPDIR_CLI/$1.scm"
+    set +e
+    limit_out=$("$CURRY" "$TMPDIR_CLI/$1.scm" 2>&1)
+    limit_code=$?
+    set -e
+}
+ones() { local s=""; for i in $(seq 1 "$1"); do s="$s 1"; done; echo "$s"; }
+names() { local s=""; for i in $(seq 0 $(( $2 - 1 ))); do s="$s $1$i"; done; echo "$s"; }
+binds() { local s=""; for i in $(seq 0 $(( $2 - 1 ))); do s="$s ($1$i 1)"; done; echo "$s"; }
+
+limit_script args255 "(display (+$(ones 255)))"
+check "a call with 255 arguments still works" "$limit_code:$limit_out" "0:255"
+limit_script args300 "(display (+$(ones 300)))"
+check "a call with 300 arguments is a compile error (printed 44 before)" \
+      "$limit_code:$(echo "$limit_out" | grep -c 'too many arguments in one call')" "1:1"
+limit_script params300 "(define (f$(names a 300)) 0) (display 'compiled)"
+check "a procedure with 300 parameters is a compile error" \
+      "$limit_code:$(echo "$limit_out" | grep -c 'too many local variables')" "1:1"
+limit_script upvals300 "(define (f) (let* ($(binds p 300)) ((lambda () (+ (+$(names p 100)) (+ $(names p 300 | cut -d' ' -f102-201)) (+ $(names p 300 | cut -d' ' -f202-301))))))) (display (f))"
+check "a procedure capturing 300 variables is a compile error" \
+      "$limit_code:$(echo "$limit_out" | grep -c 'captures too many variables')" "1:1"
+limit_script upvals200 "(define (f) (let* ($(binds q 200)) ((lambda () (+ (+$(names q 100)) (+ $(names q 200 | cut -d' ' -f102-201))))))) (display (f))"
+check "a procedure capturing 200 variables still works" "$limit_code:$limit_out" "0:200"
+limit_script apply300 "(display (apply + (make-list 300 1)))"
+check "apply with a 300-element list has no such limit" "$limit_code:$limit_out" "0:300"
+
 # ─── Symbolic CAS (sx_simplify/sx_diff/etc, symbolic.c) shares the same
 #     stack-depth guard -- deep expression construction raises a
 #     catchable stack-overflow instead of a SIGSEGV (issue #134) ────────────
