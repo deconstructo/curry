@@ -43,6 +43,21 @@ measurements and the plan for a collector without global pauses are in
   backtraces of deep errors are shortened, and memory used by a deep
   recursion is returned after a caught stack-overflow.
 
+**Fixes — compiler and VM**
+
+- Past its one-byte limits the compiler produced wrong code without an
+  error (#297): a call with more than 255 arguments had its count wrap
+  (`(+ 1 1 ...)` with 300 ones printed 44, and the same for `values` and
+  `apply`), and more than 256 locals or captured variables reused slot 0.
+  These are now compile errors; `apply` with a list has no such limit.
+- A closure that escaped frames abandoned by an exception, `call/cc` or a
+  restart could later see a wrong value, because unwinding never closed
+  its captured variables (#299).
+- A variadic call with no rest arguments at the stack limit wrote one
+  slot past the value stack (#300).
+- Threads that ran foreign (FFI) callbacks are now unregistered from the
+  GC when they exit.
+
 **Fixes — LLVM JIT (`-DBUILD_LLVM=ON` builds only)**
 
 - A lambda created in JIT-compiled code failed with "apply: not a
