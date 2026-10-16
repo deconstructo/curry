@@ -625,6 +625,97 @@ static void collect_free_vars(val_t expr,
         collect_free_vars(as_pair(e)->car, bound, free);
 }
 
+/* ---- Captured-variable assignment check (issue #291) ---- */
+/*
+ * emit_lambda copies a captured variable into the new closure unless the
+ * binding is already a cell (letrec / named let / internal define). So if
+ * a local variable is captured by a nested lambda and also changed with
+ * set! -- inside that lambda or outside it -- the two sides each have
+ * their own copy and stop seeing each other's changes: silently wrong
+ * results (a JIT'd counter or accumulator). Until such variables get
+ * cells, refuse to compile any form where it can happen; the caller falls
+ * back to the bytecode VM, which shares variables correctly.
+ *
+ * The check is by name and ignores shadowing, so it can refuse code that
+ * would have been fine. That only costs speed, never correctness.
+ */
+namespace {
+struct CaptureScan {
+    std::unordered_set<std::string> assigned;  /* targets of set!          */
+    std::unordered_set<std::string> binders;   /* names bound locally      */
+    std::vector<std::pair<val_t, val_t>> lambdas; /* (params, body) pairs  */
+};
+}
+
+static void add_param_names(val_t params, std::unordered_set<std::string> &out) {
+    val_t p = params;
+    for (; vis_pair(p); p = as_pair(p)->cdr)
+        if (vis_symbol(as_pair(p)->car)) out.insert(as_sym(as_pair(p)->car)->data);
+    if (vis_symbol(p)) out.insert(as_sym(p)->data);
+}
+
+static void scan_captures(val_t e, CaptureScan &cs) {
+    if (!vis_pair(e)) return;
+    val_t op  = as_pair(e)->car;
+    val_t rst = as_pair(e)->cdr;
+    if (vis_symbol(op)) {
+        if (op == S("quote")) return;
+        if (op == S("set!") && vis_pair(rst) && vis_symbol(as_pair(rst)->car))
+            cs.assigned.insert(as_sym(as_pair(rst)->car)->data);
+        if (op == S("lambda") && vis_pair(rst)) {
+            add_param_names(as_pair(rst)->car, cs.binders);
+            cs.lambdas.emplace_back(as_pair(rst)->car, as_pair(rst)->cdr);
+        }
+        if (op == S("define") && vis_pair(rst)) {
+            val_t target = as_pair(rst)->car;
+            if (vis_pair(target)) {           /* (define (name . params) body...) */
+                if (vis_symbol(as_pair(target)->car))
+                    cs.binders.insert(as_sym(as_pair(target)->car)->data);
+                add_param_names(as_pair(target)->cdr, cs.binders);
+                cs.lambdas.emplace_back(as_pair(target)->cdr, as_pair(rst)->cdr);
+            } else if (vis_symbol(target)) {
+                cs.binders.insert(as_sym(target)->data);
+            }
+        }
+        if ((op == S("let") || op == S("let*") || op == S("letrec") ||
+             op == S("letrec*") || op == S("do")) && vis_pair(rst)) {
+            val_t bindings = as_pair(rst)->car;
+            if (vis_symbol(bindings)) {       /* named let */
+                cs.binders.insert(as_sym(bindings)->data);
+                val_t b2 = as_pair(rst)->cdr;
+                bindings = vis_pair(b2) ? as_pair(b2)->car : V_NIL;
+            }
+            for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
+                val_t bnd = as_pair(b)->car;
+                if (vis_pair(bnd) && vis_symbol(as_pair(bnd)->car))
+                    cs.binders.insert(as_sym(as_pair(bnd)->car)->data);
+            }
+        }
+    }
+    for (val_t x = e; vis_pair(x); x = as_pair(x)->cdr)
+        scan_captures(as_pair(x)->car, cs);
+}
+
+/* Throws (so the caller falls back to bytecode) if any form in `forms`
+ * (a list) has a local variable that is both captured and assigned. */
+static void reject_captured_assignment(val_t forms) {
+    CaptureScan cs;
+    for (val_t f = forms; vis_pair(f); f = as_pair(f)->cdr)
+        scan_captures(as_pair(f)->car, cs);
+    if (cs.assigned.empty()) return;
+    for (auto &lam : cs.lambdas) {
+        std::unordered_set<std::string> bound, free;
+        add_param_names(lam.first, bound);
+        for (val_t e = lam.second; vis_pair(e); e = as_pair(e)->cdr)
+            collect_free_vars(as_pair(e)->car, bound, free);
+        for (auto &n : free)
+            if (cs.assigned.count(n) && cs.binders.count(n))
+                throw std::runtime_error(
+                    "JIT: local variable '" + n + "' is captured by a lambda "
+                    "and assigned with set!; staying on bytecode (issue #291)");
+    }
+}
+
 /* ---- Cell allocation ---- */
 /*
  * Allocates a GC-managed heap cell initialised to init_val and returns its
@@ -1547,6 +1638,7 @@ std::unique_ptr<llvm::Module> codegen_thunk(LLVMContext &llvm_ctx,
                                        const std::string &name) {
     if (!vis_closure(thunk))
         throw std::runtime_error("codegen_thunk: not a T_CLOSURE");
+    reject_captured_assignment(as_clos(thunk)->body);
 
     auto M  = make_module(llvm_ctx, name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
@@ -1571,6 +1663,7 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
                                            const std::string &name) {
     if (!vis_closure(proc))
         throw std::runtime_error("codegen_procedure: not a T_CLOSURE");
+    reject_captured_assignment(as_clos(proc)->body);
 
     auto M  = make_module(llvm_ctx, name);
     auto *ft = scheme_fn_type(llvm_ctx);
@@ -1632,6 +1725,7 @@ std::unique_ptr<llvm::Module> codegen_procedure(LLVMContext &llvm_ctx,
 std::unique_ptr<llvm::Module> codegen_file(LLVMContext &llvm_ctx,
                                             val_t forms,
                                             const std::string &module_name) {
+    reject_captured_assignment(forms);
     auto M  = make_module(llvm_ctx, module_name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
     auto *fn = make_fn(*M, llvm_ctx, "_curry_toplevel", ft);
@@ -1652,6 +1746,7 @@ std::unique_ptr<llvm::Module> codegen_file(LLVMContext &llvm_ctx,
 std::unique_ptr<llvm::Module> codegen_expr(LLVMContext &llvm_ctx,
                                             val_t expr,
                                             const std::string &name) {
+    reject_captured_assignment(scm_cons(expr, V_NIL));
     auto M  = make_module(llvm_ctx, name);
     auto *ft = FunctionType::get(Type::getInt64Ty(llvm_ctx), {}, false);
     auto *fn = make_fn(*M, llvm_ctx, name, ft);

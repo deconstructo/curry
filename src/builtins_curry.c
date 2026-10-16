@@ -1551,7 +1551,9 @@ static val_t prim_jit_call(int ac, val_t *av, void *ud) {
     val_t proc = av[0];
     if (vis_bcclosure(proc)) {
         BcClosure *cl = as_bcclosure(proc);
-        if (cl->chunk->src_lambda != V_VOID) {
+        /* Issue #291: closures with upvalues stay on the bytecode VM (see
+         * maybe_jit_bcc); compiling src_lambda alone would drop them. */
+        if (cl->chunk->src_lambda != V_VOID && cl->upval_count == 0) {
             val_t compiled = curry_llvm_jit_compile(cl->chunk->src_lambda);
             if (vis_jitclosure(compiled))
                 __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
@@ -1576,12 +1578,10 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
     if (!vis_bcclosure(proc)) return proc;
     BcClosure *cl = as_bcclosure(proc);
     if (cl->chunk->src_lambda == V_VOID) return proc;
-    if (cl->upval_count > 0 && !cl->chunk->upval_names) return proc;
-    extern val_t jit_wrap_upvals(BcClosure *);
-    val_t src = (cl->upval_count > 0)
-        ? jit_wrap_upvals(cl)
-        : cl->chunk->src_lambda;
-    val_t compiled = curry_llvm_jit_compile(src);
+    /* Issue #291: closures with upvalues stay on the bytecode VM (see
+     * maybe_jit_bcc in runtime.c), so they are returned unchanged. */
+    if (cl->upval_count > 0) return proc;
+    val_t compiled = curry_llvm_jit_compile(cl->chunk->src_lambda);
     if (vis_jitclosure(compiled))
         __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
     return proc;

@@ -167,6 +167,52 @@
 (define (jit-289-go k acc) (if (= k 0) acc (jit-289-go (- k 1) (+ acc (car (jit-289-hot k))))))
 (check "#289: auto-JIT function passing a lambda to map" (jit-289-go 2000 0) 2003000)
 
+;;; 11c. Captured variables changed with set! stay shared under JIT ─────────
+;;; Regression coverage for issue #291. A closure with upvalues used to be
+;;; JIT-compiled with each upvalue's value at that moment baked in as a
+;;; constant, so later set!s (by the closure or a sibling) were not seen
+;;; by the other side; closures with upvalues now stay on the bytecode VM.
+;;; Separately, a JIT-compiled function whose own inner lambdas set! a
+;;; variable of the function copied that variable into each lambda; such
+;;; functions are now left on the bytecode VM too.
+(define (jit-291-make)
+  (let ((n 0))
+    (cons (lambda () (set! n (+ n 1)) n)
+          (lambda () n))))
+(define jit-291-p (jit-291-make))
+(let loop ((i 0)) (when (< i 200) ((car jit-291-p)) (loop (+ i 1))))
+(check "#291: hot closure's set! of a shared variable"
+       (list ((car jit-291-p)) ((cdr jit-291-p))) '(201 201))
+(define (jit-291-make2) (let ((k 1)) (cons (lambda (x) (* x k)) (lambda (v) (set! k v)))))
+(define jit-291-q (jit-291-make2))
+(let loop ((i 0)) (when (< i 200) ((car jit-291-q) i) (loop (+ i 1))))
+((cdr jit-291-q) 100)
+(check "#291: hot closure sees a sibling's later set!" ((car jit-291-q) 2) 200)
+(jit-compile! (car jit-291-q))
+(check "#291: jit-compile! of a closure with upvalues keeps it correct"
+       ((car jit-291-q) 3) 300)
+(define (jit-291-counter m)
+  (let ((n 0))
+    (let ((inc! (lambda () (set! n (+ n 1)) n))
+          (get  (lambda () n)))
+      (let lp ((i 0)) (if (< i m) (begin (inc!) (lp (+ i 1)))))
+      (list (inc!) (get)))))
+(jit-compile! jit-291-counter)
+(check "#291: JIT'd function with inner lambdas sharing a set! variable"
+       (jit-291-counter 1000) '(1001 1001))
+(define (jit-291-sum xs) (let ((acc 0)) (for-each (lambda (x) (set! acc (+ acc x))) xs) acc))
+(jit-compile! jit-291-sum)
+(check "#291: JIT'd accumulator via for-each" (jit-291-sum (list 1 2 3 4)) 10)
+
+;;; Issue #288: fresh closures of one chunk share a single compilation
+;;; (correctness here; the fix is what keeps memory flat).
+(define (jit-288-mk) (lambda (x) (* x 2)))
+(define (jit-288-go k acc)
+  (if (= k 0) acc
+      (let ((f (jit-288-mk)))
+        (let lp ((i 0) (a acc)) (if (< i 60) (lp (+ i 1) (+ a (f i))) (jit-288-go (- k 1) a))))))
+(check "#288: many fresh hot closures of one chunk" (jit-288-go 500 0) 1770000)
+
 ;;; 12. jit-call-depth does not leak across a caught exception raised from
 ;;; inside a JIT-to-JIT call (curry_jit_apply_arr → apply_arr → longjmp) ──────
 ;;; Regression coverage: before ExnHandler gained saved_jit_depth (restored
