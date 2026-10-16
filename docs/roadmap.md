@@ -9,10 +9,15 @@ tranche merged to `main` but not yet version-bumped — see "Where we are
 now", the summary timeline, and the new "Active work outside the phase
 numbering" section below. Updated 2026-09-08: added a "CAS memoization:
 scoped cache invalidation" entry under "Active work outside the phase
-numbering" for issue #195. Source: cill_spec.pdf + design sessions.*
+numbering" for issue #195. Updated 2026-10-16 for v1.27.0: the
+generational GC was removed — see
+`docs/thoughts/generational-gc-removal.md`. Source: cill_spec.pdf +
+design sessions.*
 
-Curry is at v1.23.3 (released), plus unreleased work already merged to
-`main` (see below). Since this roadmap was last updated for v1.17.0:
+Curry is at v1.27.0. In v1.27.0 the experimental generational GC was
+removed and Boehm is the only collector (see
+`docs/thoughts/generational-gc-removal.md`); the rest of this paragraph
+describes v1.23.3 and earlier. Since this roadmap was last updated for v1.17.0:
 **a real compiler IR pipeline shipped** (Tiers 2.1 through 2.6 — open
 coding, a local inliner, wrapper elision, wider open-coding, an
 interleaved-lowering session API — the first IR curry has ever had, live
@@ -42,7 +47,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.23.3, plus unreleased work merged to `main`)
+## Where we are now (v1.27.0; the table below was last fully checked at v1.23.3)
 
 | Capability | Status |
 |---|---|
@@ -68,7 +73,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 | User rewrite rules (`define-rule`, `define-ruleset`) | ✓ **v1.4.0 Phase 4a** |
 | User algebra declarations (`define-algebra`, `with-assumptions`) | ✓ **v1.4.0 Phase 4b** |
 | **Extensible CAS — polynomial, Groebner, Risch (partial), special functions** | ✓ **v1.4.0 Phase 4c–4g, complete** |
-| **Generational GC** (nursery+tenured Cheney, write barriers, safepoints) | ✓ **v1.5.0–1.6.3, experimental** (`--gc generational`; Boehm remains default) |
+| **Generational GC** (nursery+tenured Cheney, write barriers, safepoints) | ✗ **removed in v1.27.0** — experimental from v1.5.0; moved objects other threads still held (#226), no measured benefit. See `docs/thoughts/generational-gc-removal.md` |
 | **Real error backtraces + machine-legible error codes** | ✓ **v1.7.0** |
 | **`(curry sets)` + `(curry logic)` modules** (multisets, 6 pluggable logics) | ✓ **v1.7.0** — partial, differently-shaped realization of "pluggable set theory foundations" below |
 | **Interactive debugger** (breakpoints, step/next/finish/continue, locals, backtrace) | ✓ **v1.8.0** — a slice of Phase 8 below, arrived standalone/early |
@@ -197,22 +202,15 @@ what's deferred here.
 
 ### GC rewrite
 
-**Status uncertain as of this update — needs a fresh check before
-resuming.** `docs/thoughts/performance-chez-kaappi.md` (2026-08-18)
-describes a `gc-rewrite` branch at M1 (safepoint landed at the VM's
-`L_DISPATCH`) with P2 (safepoint protocol) through P6 (per-actor minor
-GC) still ahead of it. As of 2026-08-29, no `gc-rewrite` or `gc-perf`
-branch exists in this repository, locally or on `origin` — neither
-merged (no corresponding commits on `main` beyond what's already
-described as the v1.5.0–1.6.3 generational GC in Phase 6 below) nor
-present as an open branch. Whether this means the branch was abandoned,
-deleted after being superseded, or is simply missing from this
-particular checkout is not established — confirm directly (check for it
-under a different name, check whether its author has notes elsewhere)
-before assuming the P1–P6 plan is still active. The generational GC that
-*did* ship (v1.5.0–1.6.3, Phase 6 below) remains experimental and
-opt-in, with the known tree-walker/minor-GC interaction gap noted there
-unresolved regardless of `gc-rewrite`'s status.
+**Replaced by a new plan (2026-10-16).** The `gc-rewrite`/`gc-perf` plan
+(P0–P6, a precise moving collector) is not being pursued. In v1.27.0 the
+generational GC was removed and Boehm is the only collector. The goal is
+now collection without stopping all threads at once, through a
+collector that never moves objects: write-barrier audit → own non-moving
+mark-sweep (BiBOP segments) → concurrent marking with short pauses →
+per-thread handshakes. Reasons, measurements and the step list are in
+`docs/thoughts/generational-gc-removal.md`. None of these steps has
+started.
 
 ### SRFI compatibility
 
@@ -567,13 +565,20 @@ parallel ensemble → Qt/PLplot visualisation.
 
 ## Phase 6 — v2.0: Generational GC + Green Threads + Pluggable Scheduler
 
-**Status: generational GC shipped, differently than planned here. Green
-threads, hot reload, and the pluggable scheduler are still entirely
+**Status: the generational GC shipped as an experiment (v1.5.0) and was
+removed in v1.27.0 — see `docs/thoughts/generational-gc-removal.md`.
+Green threads, hot reload, and the pluggable scheduler are still entirely
 unstarted.** This phase originally bundled all of these into one breaking
 "v2.0" release where the GC needed to understand green-thread stacks. In
 practice the GC work shipped alone, non-breaking, four versions ago:
 
-### ✓ Generational GC — shipped v1.5.0, refined through v1.6.3 (experimental)
+### ✗ Generational GC — shipped v1.5.0 (experimental), removed v1.27.0
+
+*Historical record of what was built. It was removed in v1.27.0 because
+it moved objects that other threads still held (#226), its correctness
+depended on rules every C function had to follow (#285, #286 and earlier),
+and it was not faster than Boehm. See
+`docs/thoughts/generational-gc-removal.md`.*
 
 What actually got built, and how it differs from the sketch below:
 - **Two generations, not three** — nursery (2 MB `mmap`, bump-pointer) and
@@ -1199,7 +1204,7 @@ broke after v1.4.0 and re-pinning invites the same drift:
 | Phase | Name | Highlights | Estimated effort |
 |---|---|---|---|
 | 5 | Physics I | GR library, QM library, Clifford + gamma matrices | 4–5 mo |
-| 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload — GC portion already shipped, see above; a heavier GC rewrite was planned on a `gc-rewrite` branch, status uncertain — see "Active work outside the phase numbering" above | 5–7 mo |
+| 6 (remainder) | Architecture | Green threads, pluggable scheduler, hot reload. The generational GC was removed in v1.27.0; the new GC plan (non-moving, no global pauses) is in "Active work outside the phase numbering" above | 5–7 mo |
 | 7 (remainder) | Types + Sets | Topology — Slim CLOS Layer 1 and pluggable-foundations portions already shipped, see above | 4–5 mo |
 | 8 (remainder) | Tooling | Full introspection, sampling profiler, Tracy, SIMD tower — debugger portion already shipped, see above | 3–4 mo |
 | 10 | Ecosystem | Package manager (deferred by decision); notebook (Qt6, mathematical rendering); units system; `explain-simplify`; LLM-integrated notebook; exploration sharing | 7–9 mo |
@@ -1229,7 +1234,7 @@ available since v1.1.0.
 
 | Interface | Backends |
 |---|---|
-| GC (`gc_ops_t`) | Boehm (default), semispace (`--gc semispace`, v1.3.0), generational (`--gc generational`, v1.5.0, experimental) |
+| GC | Boehm only (v1.27.0). Semispace (v1.3.0) and generational (v1.5.0, experimental) were removed — see `docs/thoughts/generational-gc-removal.md` |
 | Scheduler (`curry_sched_ops_t`) | not started (Phase 6 remainder) |
 | Set foundations | `(curry sets)` + `(curry logic)`, pure Scheme (v1.7.0) — no C-level `curry_foundations_ops_t` vtable exists or is currently planned to be needed |
 | Profiling backend | in-process call-count/wall-clock only (basic); Tracy/Perfetto not started (Phase 8 remainder) |

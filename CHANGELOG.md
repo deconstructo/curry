@@ -1,5 +1,71 @@
 # Changelog
 
+### 1.27.0 - 2026-10-16
+
+**Removed — the experimental generational GC (`--gc generational`)**
+
+Boehm (conservative, non-moving) is now the only garbage collector. The
+generational collector moved objects that other threads could still see,
+so programs using actors (and every program has work-pool threads) could
+read freed memory (#226). Its correctness also depended on rules every C
+function had to follow (#285, #286 and fourteen earlier issues), and it
+was not faster than Boehm in our benchmarks. The full reasons, the
+measurements and the plan for a collector without global pauses are in
+`docs/thoughts/generational-gc-removal.md`.
+
+- `--gc generational` and `--gc-nursery-size` now exit with an error that
+  says the backend was removed. `--gc boehm` still works.
+- `(gc-mode)` always returns `boehm`.
+- `(gc-stats)` no longer has `minor-count`, `minor-total-us`,
+  `minor-max-us`, `pause-ring-us`, `nursery-used`.
+- Benchmark telemetry fields `gc_minor_*` and `gc_nursery_used` are
+  replaced by `gc_stw_count`, `gc_stw_total_us`, `gc_stw_max_us`
+  (telegraf config and Grafana dashboard updated).
+- For C modules: objects never move, so Scheme values may be kept in C
+  local variables without registration. `GC_AUTOFRAME`,
+  `gc_inhibit_minor`/`gc_resume_minor` and `gc_register_ext_scanner` are
+  gone; the write barrier (`GC_WB`, `gc_wb_slot`) and
+  `gc_thread_park`/`unpark` stay for a future concurrent collector.
+- Before the removal, #285 (a fixed-size write-barrier record that
+  dropped entries when full) was fixed in #287.
+
+**New**
+
+- `(gc-stats)` reports Boehm's stop-the-world pauses: `stw-count`,
+  `stw-total-ns`, `stw-max-ns`, `stw-ring-ns` (last 1024 pauses), and
+  `major-total-ns`, `major-max-ns`, `incremental`, `parallel-markers`.
+  `docs/reference/gc.md` has pause measurements for Boehm's settings
+  (`GC_MARKERS`, `GC_ENABLE_INCREMENTAL`, `GC_PAUSE_TIME_TARGET`).
+- Deep non-tail recursion (#292): the bytecode VM's call stack held only
+  256 frames, so recursion deeper than 256 calls raised stack-overflow
+  (e.g. a recursive length over a 300-element list). The value stack and
+  call frames are now large reserved regions (about 1,048,576 frames),
+  backtraces of deep errors are shortened, and memory used by a deep
+  recursion is returned after a caught stack-overflow.
+
+**Fixes — LLVM JIT (`-DBUILD_LLVM=ON` builds only)**
+
+- A lambda created in JIT-compiled code failed with "apply: not a
+  procedure" when passed to `map`, `for-each` or `apply` -- in ordinary
+  code once it was compiled automatically (#289). JIT functions also did
+  not check their argument count; they now raise
+  `wrong-number-of-arguments`.
+- Closures whose captured variables are changed with `set!` returned
+  wrong values once JIT-compiled (a counter returned 50 instead of 1001)
+  (#291). Such code now stays on the bytecode VM.
+- A hot function containing `case` data or a quasiquote template shaped
+  like a special form (e.g. `((lambda) ...)`, `` `(let ,b ,@body) ``)
+  crashed the process (#293).
+- `let*` inside a nested lambda read the global instead of the outer
+  binding (#294).
+- `jit-compile!` compiled `define-library` procedures and `let-syntax`
+  closures that it must refuse ("unbound variable") (#295).
+- Each new closure instance was compiled again, so memory grew with every
+  call (722 MB in the #288 repro); compiled code is now shared per chunk
+  (46 MB).
+- The JIT no longer registers every captured-variable cell as a permanent
+  GC root (a memory leak).
+
 ### 1.26.0 - 2026-10-05
 
 **New — SRFI libraries**

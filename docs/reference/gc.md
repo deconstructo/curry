@@ -18,7 +18,9 @@ experimental generational backend (`--gc generational`, `--gc-nursery-size`)
 was removed: it moved objects that other threads could still see (issue
 #226), depended on every C store going through the write barrier (#285,
 #286), and measured no faster than Boehm. Passing either option now exits
-with an error that says so.
+with an error that says so. The full reasons, the measurements and the
+alternatives considered are in
+[`docs/thoughts/generational-gc-removal.md`](../thoughts/generational-gc-removal.md).
 
 ---
 
@@ -207,7 +209,8 @@ use `curry_gc_thread_park()` / `curry_gc_thread_unpark()` from `curry.h`.
 ## Future work
 
 The goal is collection without stopping all threads at once. The plan,
-from the discussion that led to removing the generational backend:
+from the discussion that led to removing the generational backend (see
+[`generational-gc-removal.md`](../thoughts/generational-gc-removal.md)):
 
 1. **Write-barrier audit and checker.** Route every pointer store into an
    existing object through `GC_WB` / `gc_wb_slot`, and add a debug mode that
