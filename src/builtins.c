@@ -3493,7 +3493,7 @@ static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
         sv->data[i] = vfix((intptr_t)stw_buf[i]);
     val_t stw_val = vptr(sv);
 
-    /* Build alist front-to-back (will be reversed — canonical key order) */
+    /* Each APAIR conses onto the front, so the last key added is first. */
 #define APAIR(k, v) result = scm_cons(scm_cons(sym_intern_cstr(k), (v)), result)
 #define ALOAD(x) vfix((intptr_t)atomic_load_explicit(&(x), memory_order_relaxed))
     val_t result = V_NIL;

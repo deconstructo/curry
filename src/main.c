@@ -659,39 +659,6 @@ int main(int argc, char **argv) {
     atexit(curry_timings_report);
     atexit(write_pending_scc_atexit);   /* see write_pending_scc_atexit above */
 
-    /* --gc is checked before the runtime starts. The generational backend
-     * was removed (issues #226, #285, #286); say so instead of silently
-     * running with Boehm, so scripts that asked for it notice. */
-    for (int i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        /* Stop at the script (first non-option) or "--": what follows are
-         * the script's own arguments. Skip the value of options that take
-         * one, so "-e '...'" is not mistaken for the script. */
-        if (a[0] != '-' || strcmp(a, "--") == 0) break;
-        if (a[1] != '-' && a[1] != '\0' && strchr("elcobG", a[strlen(a) - 1]) &&
-            strspn(a + 1, "elcobixvhVG") == strlen(a) - 1) {
-            i++;            /* short option cluster ending in one with a value */
-            continue;
-        }
-        if (strcmp(a, "--gc-max-heap") == 0) { i++; continue; }
-        const char *backend = NULL;
-        if (strcmp(a, "--gc") == 0 && i + 1 < argc) backend = argv[++i];
-        else if (strncmp(a, "--gc=", 5) == 0)       backend = a + 5;
-        if (backend && strcmp(backend, "boehm") != 0) {
-            fprintf(stderr,
-                "curry: GC backend '%s' is not available; the generational "
-                "backend was removed and 'boehm' is the only collector\n",
-                backend);
-            return 1;
-        }
-        if (strcmp(a, "--gc-nursery-size") == 0 ||
-            strncmp(a, "--gc-nursery-size=", 18) == 0) {
-            fprintf(stderr,
-                "curry: --gc-nursery-size was removed together with the "
-                "generational GC backend\n");
-            return 1;
-        }
-    }
     curry_runtime_init();
 
     bool interactive = false;
@@ -705,7 +672,8 @@ int main(int argc, char **argv) {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
         { "gc-max-heap",  required_argument, NULL, 'G' },
-        { "gc",              required_argument, NULL, 0   },  /* checked above */
+        { "gc",              required_argument, NULL, 0   },
+        { "gc-nursery-size", required_argument, NULL, 0   },  /* removed; error */
         { "timings",         no_argument,       NULL, 0   },
         { "clear-cache",     no_argument,       NULL, 0   },
         { NULL, 0, NULL, 0 }
@@ -713,6 +681,38 @@ int main(int argc, char **argv) {
 
     int opt;
     int long_idx;
+
+    /* First pass: check --gc before any option runs (-e/-l run as soon as
+     * the main pass reaches them). The generational backend was removed
+     * (issues #226, #285, #286); say so instead of silently running with
+     * Boehm, so scripts that asked for it notice. Same getopt_long call as
+     * the main pass, so option clusters, abbreviations and "--" are parsed
+     * identically; errors for other options are left to the main pass. */
+    opterr = 0;
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhVG:", long_opts, &long_idx)) != -1) {
+        if (opt != 0) continue;
+        if (!strcmp(long_opts[long_idx].name, "gc") && strcmp(optarg, "boehm") != 0) {
+            fprintf(stderr,
+                "curry: GC backend '%s' is not available; the generational "
+                "backend was removed and 'boehm' is the only collector\n",
+                optarg);
+            return 1;
+        }
+        if (!strcmp(long_opts[long_idx].name, "gc-nursery-size")) {
+            fprintf(stderr,
+                "curry: --gc-nursery-size was removed together with the "
+                "generational GC backend\n");
+            return 1;
+        }
+    }
+    opterr = 1;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    optreset = 1;
+    optind = 1;
+#else
+    optind = 0;   /* glibc: 0 forces a full reinitialisation */
+#endif
+
     /* '+' prefix: stop at first non-option so script args aren't consumed */
     while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhVG:", long_opts, &long_idx)) != -1) {
         switch (opt) {
@@ -722,7 +722,7 @@ int main(int argc, char **argv) {
                 curry_timings_enabled = true;
             else if (!strcmp(long_opts[long_idx].name, "clear-cache"))
                 clear_cache_flag = true;
-            break;   /* --gc already checked above */
+            break;   /* --gc / --gc-nursery-size: checked in the first pass */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;

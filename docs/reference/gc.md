@@ -132,7 +132,8 @@ void *gc_alloc_raw_pinned(size_t n);        /* untyped helper arrays      */
 void *gc_alloc_raw_pinned_atomic(size_t n);
 ```
 
-All return zeroed memory. Use the `_atomic` variants for data that never
+The scanned variants return zeroed memory; the `_atomic` variants do not,
+so initialize every byte. Use the `_atomic` variants for data that never
 holds pointers (strings, numbers, byte buffers): Boehm does not scan it, so
 it cannot keep other objects alive by accident. The `_pinned` variants mean
 "must never move"; they are identical to the others today, but keep using

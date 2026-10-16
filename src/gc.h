@@ -75,7 +75,8 @@ size_t gc_total_bytes(void);
  * non-moving collector; they are kept so call sites keep stating which
  * objects must never move (mutexes, GMP data, FILE*, jmp_buf, raw helper
  * arrays), for any future collector that cares.
- * All of them return zeroed memory.
+ * The scanned variants return zeroed memory; the _atomic variants do NOT
+ * (GC_MALLOC_ATOMIC leaves old contents), so initialize every byte.
  */
 static inline void *gc_alloc(size_t n)                   { return GC_MALLOC(n); }
 static inline void *gc_alloc_atomic(size_t n)            { return GC_MALLOC_ATOMIC(n); }

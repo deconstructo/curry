@@ -1507,8 +1507,7 @@ static void test_compiler_ir_session(void) {
         CHECK(ir && ir->kind == IR_CALL, "session: (* x x) in a child session lowers to IR_CALL");
     }
 
-    /* Malformed input mid-session: NULL, gc_inhibit_count still balanced,
-     * and (unlike compiler_ir_lower_for_jit's own one-shot contract) the
+    /* Malformed input mid-session: NULL, and (unlike compiler_ir_lower_for_jit's own one-shot contract) the
      * arena is NOT freed here -- earlier forms already lowered through
      * this session may still be referenced by the caller. Verified by
      * successfully lowering one more well-formed form through the SAME
@@ -1539,7 +1538,7 @@ static void test_compiler_ir_session(void) {
  * least 19 special forms by direct testing before the fix (require_min_args,
  * compiler.c). This is the regression test for all of them at once: each
  * must now raise a catchable EC_WRONG_NUMBER_OF_ARGUMENTS condition
- * (with gc_inhibit_count left balanced) instead of crashing. Uses run_vm
+ * instead of crashing. Uses run_vm
  * (the real compiled path) rather than compiler_ir_lower_for_jit, since
  * several of these forms (case/when/unless/do/guard/let-values/
  * parameterize/define-record-type) have no IR-native lowering at all and
