@@ -204,6 +204,34 @@
 (jit-compile! jit-291-sum)
 (check "#291: JIT'd accumulator via for-each" (jit-291-sum (list 1 2 3 4)) 10)
 
+;; The same shapes spelled with Akkadian/cuneiform synonyms, which the JIT
+;; translates to set!/let/lambda; the #291 check must see them the same way
+;; (found by review of the #291 fix).
+(define (jit-291-akk1) (let ((n 0)) (let ((inc (lambda () (šanûm n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-akk2) (leqûm ((n 0)) (let ((inc (lambda () (set! n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-akk3) (let ((n 0)) (let ((inc (epēšum () (set! n (+ n 1))))) (inc) (inc) n)))
+(define (jit-291-cun)  (𒅁 ((n 0)) (let ((inc (𒇽 () (𒁀𒀀 n (+ n 1))))) (inc) (inc) n)))
+(for-each jit-compile! (list jit-291-akk1 jit-291-akk2 jit-291-akk3 jit-291-cun))
+(check "#291: Akkadian set! (šanûm) of a captured variable" (jit-291-akk1) 2)
+(check "#291: Akkadian let (leqûm) binding a captured variable" (jit-291-akk2) 2)
+(check "#291: Akkadian lambda (epēšum) capturing a set! variable" (jit-291-akk3) 2)
+(check "#291: cuneiform let/lambda/set!" (jit-291-cun) 2)
+
+;; Data shaped like special forms inside a hot function: case data and
+;; quasiquote templates. collect_free_vars treated them as code and read
+;; them without checking their shape, crashing the process (found by the
+;; security review of the #291 fix; it crashed on main too).
+(define (jit-cfv-kind op) (case op ((lambda) 'a) ((set! define) 'b) ((let let*) 'c) (else 'd)))
+(define (jit-cfv-mklet b body) `(let ,b ,@body))
+(define (jit-cfv-mkset v) `(set! ,@v))
+(let loop ((i 0))
+  (when (< i 200)
+    (jit-cfv-kind 'let) (jit-cfv-mklet '((x 1)) '(x)) (jit-cfv-mkset '(y))
+    (loop (+ i 1))))
+(check "JIT: case data named like special forms" (map jit-cfv-kind '(lambda define let* if)) '(a b c d))
+(check "JIT: quasiquote let template" (jit-cfv-mklet '((x 1)) '(x)) '(let ((x 1)) x))
+(check "JIT: quasiquote set! template" (jit-cfv-mkset '(y)) '(set! y))
+
 ;;; Issue #288: fresh closures of one chunk share a single compilation
 ;;; (correctness here; the fix is what keeps memory flat).
 (define (jit-288-mk) (lambda (x) (* x 2)))

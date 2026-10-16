@@ -516,9 +516,38 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
 
 /* ---- Free variable analysis ---- */
 
+/* Nesting limit for the source walks below (collect_free_vars,
+ * scan_captures). Deeper input makes the compile fail -- the caller falls
+ * back to bytecode -- instead of overflowing the C stack. */
+static const int JIT_SCAN_DEPTH_MAX = 10000;
+
+/* (name expr) binding lists: every element a pair whose car is a symbol and
+ * whose cdr is a pair. */
+static bool well_formed_bindings(val_t b) {
+    for (; vis_pair(b); b = as_pair(b)->cdr) {
+        val_t bnd = as_pair(b)->car;
+        if (!vis_pair(bnd) || !vis_symbol(as_pair(bnd)->car) || !vis_pair(as_pair(bnd)->cdr))
+            return false;
+    }
+    return vis_nil(b);
+}
+
+/*
+ * Collect the free variables of `expr` (relative to `bound`) into `free`.
+ * Every special-form case first checks the form has the shape it expects;
+ * anything else -- a malformed form, or data that only looks like one, such
+ * as a case datum ((lambda) 'x) or a quasiquote template `(let ,b ,@body)
+ * -- goes to the generic walk below, which only follows real pairs. That
+ * can only add free names, never miss one, which is the safe direction.
+ * Before this, such data crashed the process (as_pair on a non-pair) as
+ * soon as the function holding it got hot.
+ */
 static void collect_free_vars(val_t expr,
                                const std::unordered_set<std::string> &bound,
-                               std::unordered_set<std::string> &free) {
+                               std::unordered_set<std::string> &free,
+                               int depth = 0) {
+    if (depth > JIT_SCAN_DEPTH_MAX)
+        throw std::runtime_error("JIT: expression nesting too deep");
     if (vis_symbol(expr)) {
         std::string n = as_sym(expr)->data;
         if (!bound.count(n)) free.insert(n);
@@ -526,14 +555,17 @@ static void collect_free_vars(val_t expr,
     }
     if (!vis_pair(expr)) return;
 
-    val_t op  = as_pair(expr)->car;
+    /* Translate Akkadian/cuneiform synonyms the same way emit_expr does, so
+     * e.g. epēšum is treated as lambda here too (issue #291 review). */
+    val_t op  = lang_translate(as_pair(expr)->car);
     val_t rst = as_pair(expr)->cdr;
+    int   d   = depth + 1;
 
     if (vis_symbol(op)) {
         val_t s = op;
         if (s == S("quote")) return;
 
-        if (s == S("lambda")) {
+        if (s == S("lambda") && vis_pair(rst)) {
             val_t params = as_pair(rst)->car;
             val_t body   = as_pair(rst)->cdr;
             auto nb = bound;
@@ -544,85 +576,90 @@ static void collect_free_vars(val_t expr,
                 p = as_pair(p)->cdr;
             }
             if (vis_symbol(p)) nb.insert(as_sym(p)->data);
-            else if (vis_symbol(params)) nb.insert(as_sym(params)->data);
             for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
+                collect_free_vars(as_pair(e)->car, nb, free, d);
             return;
         }
 
-        if (s == S("let")) {
+        if (s == S("let") && vis_pair(rst)) {
             val_t bindings = as_pair(rst)->car;
             val_t body     = as_pair(rst)->cdr;
-            if (vis_symbol(bindings)) {
+            if (vis_symbol(bindings) && vis_pair(body) &&
+                well_formed_bindings(as_pair(body)->car)) {
                 /* named let */
                 std::string loop_nm = as_sym(bindings)->data;
-                val_t real_b = vis_pair(body) ? as_pair(body)->car : V_NIL;
-                val_t real_body = vis_pair(body) ? as_pair(body)->cdr : V_NIL;
+                val_t real_b    = as_pair(body)->car;
+                val_t real_body = as_pair(body)->cdr;
                 for (val_t b = real_b; vis_pair(b); b = as_pair(b)->cdr)
-                    collect_free_vars(as_pair(as_pair(as_pair(b)->car)->cdr)->car, bound, free);
+                    collect_free_vars(as_pair(as_pair(as_pair(b)->car)->cdr)->car, bound, free, d);
                 auto nb = bound;
                 nb.insert(loop_nm);
                 for (val_t b = real_b; vis_pair(b); b = as_pair(b)->cdr)
-                    if (vis_symbol(as_pair(as_pair(b)->car)->car))
-                        nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
+                    nb.insert(as_sym(as_pair(as_pair(b)->car)->car)->data);
                 for (val_t e = real_body; vis_pair(e); e = as_pair(e)->cdr)
-                    collect_free_vars(as_pair(e)->car, nb, free);
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
                 return;
             }
-            auto nb = bound;
-            for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
-                val_t bnd = as_pair(b)->car;
-                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, bound, free);
-                if (vis_symbol(as_pair(bnd)->car))
+            if (well_formed_bindings(bindings)) {
+                auto nb = bound;
+                for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
+                    val_t bnd = as_pair(b)->car;
+                    collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, bound, free, d);
                     nb.insert(as_sym(as_pair(bnd)->car)->data);
+                }
+                for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
+                return;
             }
-            for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
-            return;
         }
 
-        if (s == S("let*") || s == S("letrec") || s == S("letrec*")) {
+        if ((s == S("let*") || s == S("letrec") || s == S("letrec*")) &&
+            vis_pair(rst) && well_formed_bindings(as_pair(rst)->car)) {
             val_t bindings = as_pair(rst)->car;
             val_t body     = as_pair(rst)->cdr;
             auto nb = bound;
             for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
                 val_t bnd = as_pair(b)->car;
-                if (vis_symbol(as_pair(bnd)->car))
-                    nb.insert(as_sym(as_pair(bnd)->car)->data);
-                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, nb, free);
+                nb.insert(as_sym(as_pair(bnd)->car)->data);
+                collect_free_vars(as_pair(as_pair(bnd)->cdr)->car, nb, free, d);
             }
             for (val_t e = body; vis_pair(e); e = as_pair(e)->cdr)
-                collect_free_vars(as_pair(e)->car, nb, free);
+                collect_free_vars(as_pair(e)->car, nb, free, d);
             return;
         }
 
-        if (s == S("define")) {
+        if (s == S("define") && vis_pair(rst)) {
             val_t first = as_pair(rst)->car;
-            if (vis_symbol(first)) {
-                collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free);
-            } else if (vis_pair(first)) {
+            if (vis_symbol(first) && vis_pair(as_pair(rst)->cdr)) {
+                collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free, d);
+                return;
+            }
+            if (vis_pair(first)) {
                 auto nb = bound;
-                for (val_t p = as_pair(first)->cdr; vis_pair(p); p = as_pair(p)->cdr)
+                val_t p = as_pair(first)->cdr;
+                for (; vis_pair(p); p = as_pair(p)->cdr)
                     if (vis_symbol(as_pair(p)->car))
                         nb.insert(as_sym(as_pair(p)->car)->data);
+                if (vis_symbol(p)) nb.insert(as_sym(p)->data);
                 for (val_t e = as_pair(rst)->cdr; vis_pair(e); e = as_pair(e)->cdr)
-                    collect_free_vars(as_pair(e)->car, nb, free);
+                    collect_free_vars(as_pair(e)->car, nb, free, d);
+                return;
             }
-            return;
         }
 
-        if (s == S("set!")) {
+        if (s == S("set!") && vis_pair(rst) && vis_symbol(as_pair(rst)->car) &&
+            vis_pair(as_pair(rst)->cdr)) {
             std::string n = as_sym(as_pair(rst)->car)->data;
             if (!bound.count(n)) free.insert(n);
-            collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free);
+            collect_free_vars(as_pair(as_pair(rst)->cdr)->car, bound, free, d);
             return;
         }
     }
 
-    /* Default: recurse on every subform. */
-    collect_free_vars(op, bound, free);
+    /* Default (and every malformed shape above): recurse on every subform. */
+    collect_free_vars(as_pair(expr)->car, bound, free, d);
     for (val_t e = rst; vis_pair(e); e = as_pair(e)->cdr)
-        collect_free_vars(as_pair(e)->car, bound, free);
+        collect_free_vars(as_pair(e)->car, bound, free, d);
 }
 
 /* ---- Captured-variable assignment check (issue #291) ---- */
@@ -654,9 +691,14 @@ static void add_param_names(val_t params, std::unordered_set<std::string> &out) 
     if (vis_symbol(p)) out.insert(as_sym(p)->data);
 }
 
-static void scan_captures(val_t e, CaptureScan &cs) {
+static void scan_captures(val_t e, CaptureScan &cs, int depth = 0) {
     if (!vis_pair(e)) return;
-    val_t op  = as_pair(e)->car;
+    if (depth > JIT_SCAN_DEPTH_MAX)
+        throw std::runtime_error("JIT: expression nesting too deep");
+    /* emit_expr compiles Akkadian/cuneiform synonyms (šanûm = set!,
+     * epēšum = lambda, leqûm = let, ...) as the English forms, so the
+     * scan must see them the same way or they bypass this check. */
+    val_t op  = lang_translate(as_pair(e)->car);
     val_t rst = as_pair(e)->cdr;
     if (vis_symbol(op)) {
         if (op == S("quote")) return;
@@ -693,7 +735,7 @@ static void scan_captures(val_t e, CaptureScan &cs) {
         }
     }
     for (val_t x = e; vis_pair(x); x = as_pair(x)->cdr)
-        scan_captures(as_pair(x)->car, cs);
+        scan_captures(as_pair(x)->car, cs, depth + 1);
 }
 
 /* Throws (so the caller falls back to bytecode) if any form in `forms`

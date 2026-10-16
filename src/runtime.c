@@ -626,6 +626,27 @@ bool jit_arith_tainted(void) {
  * cell indirection. */
 #endif /* BUILD_LLVM */
 
+#ifdef BUILD_LLVM
+/* Issue #288: the JIT code for a chunk, compiled at most once and shared by
+ * every closure of that chunk (callers only pass chunks whose closures have
+ * no upvalues, so the code is the same for all of them). Returns the
+ * T_JITCLOSURE, or V_FALSE if the chunk is being compiled by another thread
+ * right now or cannot be compiled. */
+val_t jit_chunk_code(Chunk *ch) {
+    val_t shared = __atomic_load_n(&ch->jit_shared, __ATOMIC_ACQUIRE);
+    if (shared != 0) return shared;      /* compiled, or V_FALSE */
+    val_t expected = 0;
+    if (!__atomic_compare_exchange_n(&ch->jit_shared, &expected, V_FALSE,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return expected;                 /* another thread got there first */
+    val_t compiled = curry_llvm_jit_compile(ch->src_lambda);
+    if (!vis_jitclosure(compiled)) return V_FALSE;   /* stays V_FALSE */
+    __atomic_store_n(&ch->jit_shared, compiled, __ATOMIC_RELEASE);
+    return compiled;
+}
+#endif
+
 /* Called from vm.c (OP_CALL / OP_TAIL_CALL inline) and apply_arr below. */
 void maybe_jit_bcc(BcClosure *cl) {
 #ifdef BUILD_LLVM
@@ -683,22 +704,11 @@ void maybe_jit_bcc(BcClosure *cl) {
     }
     if (shared == V_FALSE) return;   /* being compiled, or not compilable */
     if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < JIT_THRESHOLD) return;
-    /* CAS 0 → V_FALSE on the chunk: only one thread compiles a chunk.
-     * Losers fall back to bytecode until the result is stored. */
-    val_t expected = 0;
-    if (!__atomic_compare_exchange_n(&ch->jit_shared, &expected, V_FALSE,
-                                     /*weak=*/false,
-                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-        return;
-    val_t compiled = curry_llvm_jit_compile(ch->src_lambda);
-    if (vis_jitclosure(compiled)) {
-        __atomic_store_n(&ch->jit_shared, compiled, __ATOMIC_RELEASE);
+    /* Only one thread compiles a chunk; the others stay on bytecode until
+     * the result is stored, and nobody retries a chunk that failed. */
+    val_t compiled = jit_chunk_code(ch);
+    if (vis_jitclosure(compiled))
         __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
-    } else {
-        /* Not compilable: ch->jit_shared stays V_FALSE, so no other closure
-         * of this chunk tries again. */
-        __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
-    }
 #else
     (void)cl;
 #endif
