@@ -315,10 +315,34 @@ static void alloc_thread_nursery(void) {
 /* ── Dirty-slot buffer allocation ────────────────────────────────────────── */
 
 static void init_dirty_slots(void) {
-    gc_dirty_slots = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_CAP * sizeof(val_t *));
+    gc_dirty_slots = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_INIT_CAP * sizeof(val_t *));
     if (!gc_dirty_slots) { fprintf(stderr, "[gc_gen] FATAL: dirty_slots OOM\n"); abort(); }
-    gc_dirty_count    = 0;
-    gc_dirty_overflow = false;
+    gc_dirty_count = 0;
+    gc_dirty_cap   = GC_DIRTY_INIT_CAP;
+}
+
+/* Issue #285: see GC_DIRTY_INIT_CAP's comment in gc.h. The new array is
+ * GC_MALLOC_UNCOLLECTABLE like the first one, so Boehm keeps scanning the
+ * recorded slot addresses (they keep their containing objects alive until
+ * the next minor GC processes them). */
+void gc_dirty_record(val_t *slot) {
+    pthread_mutex_lock(&gc_dirty_lock);
+    if (__builtin_expect(gc_dirty_count == gc_dirty_cap, 0)) {
+        size_t nc = gc_dirty_cap * 2;
+        val_t **ns = (val_t **)GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t *));
+        if (!ns) { fprintf(stderr, "[gc_gen] FATAL: dirty_slots OOM\n"); abort(); }
+        memcpy(ns, gc_dirty_slots, gc_dirty_count * sizeof(val_t *));
+        GC_FREE(gc_dirty_slots);
+        gc_dirty_slots = ns;
+        gc_dirty_cap   = nc;
+    }
+    gc_dirty_slots[gc_dirty_count++] = slot;
+    bool over_soft_limit = gc_dirty_count >= GC_DIRTY_SOFT_LIMIT;
+    pthread_mutex_unlock(&gc_dirty_lock);
+    /* Only a hint: the writing thread collects at its next safepoint
+     * (vm.c's L_DISPATCH, eval.c's tail:), which empties the buffer. */
+    if (over_soft_limit && gc_nursery.base)
+        gc_minor_pending = true;
 }
 
 /* ── Pinned list ──────────────────────────────────────────────────────────── */
@@ -1267,15 +1291,11 @@ void gc_gen_minor_collect(void) {
 
     /* 6. Process dirty slots + initial scan of new pinned objects.
      *
-     * Fast path (no overflow): update each recorded slot directly, then scan
-     * only objects added since the last compact.  The stable range [0,
-     * pinned_stable) is skipped because (a) their initial fields were Boehm
-     * pointers at creation time (inhibit protocol), and (b) any subsequent
-     * mutations were captured in gc_dirty_slots.
-     *
-     * Overflow fallback: more than GC_DIRTY_CAP tenured→nursery writes fired
-     * since the last GC — fall back to a full pinned scan for correctness,
-     * then compact.
+     * Update each recorded slot directly, then scan only objects added
+     * since the last compact.  The stable range [0, pinned_stable) is
+     * skipped because (a) their initial fields were Boehm pointers at
+     * creation time (inhibit protocol), and (b) any subsequent mutations
+     * were captured in gc_dirty_slots, which cannot overflow (issue #285).
      */
     /* Issue #200 Phase B: steps 6-8 below are the ones that touch state
      * genuinely reachable from more than one actor thread -- dirty tenured
@@ -1302,57 +1322,47 @@ void gc_gen_minor_collect(void) {
      * follow-up, not bundled into the PR that first activates
      * stop-the-world. */
 
+    /* Update the recorded dirty slots in-place. Issue #213: gc_dirty_lock
+     * held here to match "always touched under this lock" now that
+     * gc_wb_slot/gc_wb_slot_atomic_relaxed's bookkeeping isn't provably
+     * main-thread-only -- see gc_dirty_lock's own declaration comment.
+     * Not strictly required for THIS particular read given issue #200
+     * Phase B's stop-the-world already excludes every other thread by
+     * the time this runs, but costs nothing extra on the already-rare
+     * collection path. Issue #285: the buffer never overflows, so every
+     * slot written since the last cycle is here. */
     pthread_mutex_lock(&gc_dirty_lock);
-    bool dirty_overflow_snapshot = gc_dirty_overflow;
+    for (size_t i = 0; i < gc_dirty_count; i++)
+        *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
+    gc_dirty_count = 0;
+    /* Give back the memory of a large burst; keep a small buffer. */
+    if (gc_dirty_cap > GC_DIRTY_SOFT_LIMIT) {
+        val_t **ns = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_INIT_CAP * sizeof(val_t *));
+        if (ns) {
+            GC_FREE(gc_dirty_slots);
+            gc_dirty_slots = ns;
+            gc_dirty_cap   = GC_DIRTY_INIT_CAP;
+        }
+    }
     pthread_mutex_unlock(&gc_dirty_lock);
 
-    if (dirty_overflow_snapshot) {
-        pthread_mutex_lock(&pinned_lock);
-        size_t pc = pinned_count;
-        void **slots = pinned_slots;
-        for (size_t i = 0; i < pc; i++) {
-            void *obj = slots[i];
-            if (obj) scan_pinned_object(obj);
-            slots[i] = NULL;  /* release reference so Boehm can reclaim dead objects */
-        }
-        pinned_count  = 0;
-        pinned_stable = 0;
-        pthread_mutex_unlock(&pinned_lock);
-    } else {
-        /* Update the recorded dirty slots in-place. Issue #213: gc_dirty_lock
-         * held here to match "always touched under this lock" now that
-         * gc_wb_slot/gc_wb_slot_atomic_relaxed's bookkeeping isn't provably
-         * main-thread-only -- see gc_dirty_lock's own declaration comment.
-         * Not strictly required for THIS particular read given issue #200
-         * Phase B's stop-the-world already excludes every other thread by
-         * the time this runs, but costs nothing extra on the already-rare
-         * collection path. */
-        pthread_mutex_lock(&gc_dirty_lock);
-        for (size_t i = 0; i < gc_dirty_count; i++)
-            *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
-        pthread_mutex_unlock(&gc_dirty_lock);
-        /* Scan new pinned objects (those added since the last compact). */
-        pthread_mutex_lock(&pinned_lock);
-        size_t pc = pinned_count;
-        void **slots = pinned_slots;
-        for (size_t i = pinned_stable; i < pc; i++) {
-            void *obj = slots[i];
-            if (obj) scan_pinned_object(obj);
-        }
-        /* Null ALL slots [0, pc) so Boehm can reclaim dead objects.  The stable
-         * range [0, pinned_stable) was already scanned in a prior cycle but still
-         * holds stale pointers; clearing them is necessary now that pinned objects
-         * are GC_MALLOC (not GC_MALLOC_UNCOLLECTABLE). */
-        memset(slots, 0, pc * sizeof(void *));
-        /* Compact: future mutations tracked via dirty_slots. */
-        pinned_count = 0;
-        pinned_stable = 0;
-        pthread_mutex_unlock(&pinned_lock);
+    /* Scan new pinned objects (those added since the last compact). */
+    pthread_mutex_lock(&pinned_lock);
+    size_t pc = pinned_count;
+    void **slots = pinned_slots;
+    for (size_t i = pinned_stable; i < pc; i++) {
+        void *obj = slots[i];
+        if (obj) scan_pinned_object(obj);
     }
-    pthread_mutex_lock(&gc_dirty_lock);
-    gc_dirty_count    = 0;
-    gc_dirty_overflow = false;
-    pthread_mutex_unlock(&gc_dirty_lock);
+    /* Null ALL slots [0, pc) so Boehm can reclaim dead objects.  The stable
+     * range [0, pinned_stable) was already scanned in a prior cycle but still
+     * holds stale pointers; clearing them is necessary now that pinned objects
+     * are GC_MALLOC (not GC_MALLOC_UNCOLLECTABLE). */
+    memset(slots, 0, pc * sizeof(void *));
+    /* Compact: future mutations tracked via dirty_slots. */
+    pinned_count = 0;
+    pinned_stable = 0;
+    pthread_mutex_unlock(&pinned_lock);
 
     /* 7. Call ext_scanner callbacks.
      * minor_gc_lock is non-recursive — ext_scanners must not allocate from

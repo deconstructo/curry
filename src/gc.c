@@ -126,7 +126,7 @@ size_t    gc_card_table_ncards = 0;
  * (issue #213); gc_dirty_lock is what actually makes concurrent callers safe. */
 val_t  **gc_dirty_slots      = NULL;
 size_t   gc_dirty_count      = 0;
-bool     gc_dirty_overflow   = false;
+size_t   gc_dirty_cap        = 0;
 uint8_t *gc_main_nursery_base  = NULL;
 uint8_t *gc_main_nursery_limit = NULL;
 pthread_mutex_t gc_dirty_lock = PTHREAD_MUTEX_INITIALIZER;

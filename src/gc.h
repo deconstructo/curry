@@ -558,10 +558,21 @@ extern size_t    gc_card_table_ncards;
  * nursery, not just main's -- see its own declaration comment below and
  * gc_gen.c's ptr_in_other_thread_nursery() for why this remains cheap on
  * the common case and safe to call without stop-the-world in effect. */
-#define GC_DIRTY_CAP 4096
+/* Issue #285: the buffer grows instead of overflowing. It used to be a
+ * fixed 4096 entries, and on overflow the collector dropped every recorded
+ * slot and scanned only pinned_slots -- but pinned_slots is emptied at the
+ * end of every minor GC, so objects tenured before the previous cycle (e.g.
+ * GLOBAL_ENV's frame) were scanned by neither path and kept pointers into
+ * the reset nursery. There is no fallback path any more: every recorded
+ * slot is always processed. */
+#define GC_DIRTY_INIT_CAP 4096
+/* Past this many entries gc_dirty_record() asks for a minor GC at the
+ * writing thread's next safepoint, so a store-heavy loop that allocates
+ * little cannot grow the buffer without limit. */
+#define GC_DIRTY_SOFT_LIMIT (1u << 16)
 extern val_t  **gc_dirty_slots;      /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
 extern size_t   gc_dirty_count;      /* number of valid entries                          */
-extern bool     gc_dirty_overflow;   /* set when buffer is full (fall back to full scan) */
+extern size_t   gc_dirty_cap;        /* allocated entries in gc_dirty_slots              */
 extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm.
                                          * Issue #220: no longer read by gc_wb_slot's own
                                          * range check (see gc_gen_ptr_in_any_nursery
@@ -569,7 +580,7 @@ extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Bo
                                          * still reference the main thread's bounds
                                          * specifically; not load-bearing for the barrier. */
 extern uint8_t *gc_main_nursery_limit; /* ditto */
-extern pthread_mutex_t gc_dirty_lock;  /* guards gc_dirty_count/gc_dirty_slots/gc_dirty_overflow */
+extern pthread_mutex_t gc_dirty_lock;  /* guards gc_dirty_count/gc_dirty_slots/gc_dirty_cap */
 
 /*
  * Issue #220 Candidate B: is `p` resident in ANY currently-registered
@@ -583,6 +594,11 @@ extern pthread_mutex_t gc_dirty_lock;  /* guards gc_dirty_count/gc_dirty_slots/g
  * trade-off this makes (deliberately over-inclusive, never under-inclusive)
  * to stay race-free without requiring stop-the-world. */
 bool gc_gen_ptr_in_any_nursery(const void *p);
+
+/* Record `slot` in gc_dirty_slots under gc_dirty_lock, growing the buffer
+ * when full (issue #285). Defined in gc_gen.c; only reached when
+ * gc_dirty_slots is non-NULL, i.e. under the generational backend. */
+void gc_dirty_record(val_t *slot);
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
 
@@ -604,12 +620,7 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
     if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
         if (gc_gen_ptr_in_any_nursery(p)) {
-            pthread_mutex_lock(&gc_dirty_lock);
-            if (gc_dirty_count < GC_DIRTY_CAP)
-                gc_dirty_slots[gc_dirty_count++] = slot;
-            else
-                gc_dirty_overflow = true;
-            pthread_mutex_unlock(&gc_dirty_lock);
+            gc_dirty_record(slot);
         }
     }
 }
@@ -655,12 +666,7 @@ static inline void gc_wb_slot_atomic_relaxed(val_t *slot, val_t newval) {
     if (gc_dirty_slots && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
         if (gc_gen_ptr_in_any_nursery(p)) {
-            pthread_mutex_lock(&gc_dirty_lock);
-            if (gc_dirty_count < GC_DIRTY_CAP)
-                gc_dirty_slots[gc_dirty_count++] = slot;
-            else
-                gc_dirty_overflow = true;
-            pthread_mutex_unlock(&gc_dirty_lock);
+            gc_dirty_record(slot);
         }
     }
 }
