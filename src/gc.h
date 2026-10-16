@@ -20,7 +20,7 @@
  * Hooks kept for that future collector (all cheap no-ops under Boehm):
  *   - gc_wb_slot / gc_wb_slot_atomic_relaxed / GC_WB: the write barrier.
  *     Keep routing pointer stores into existing objects through these.
- *   - gc_gen_thread_park / gc_gen_thread_unpark: brackets around blocking
+ *   - gc_thread_park / gc_thread_unpark: brackets around blocking
  *     calls, for per-thread handshakes. (The per-instruction safe-point poll
  *     was removed; vm.c's L_DISPATCH comment says where it would go.)
  *
@@ -120,7 +120,7 @@ void gc_unregister_root(void *slot);
 /* ── Safe points (hooks for a future concurrent collector) ────────────────── */
 
 /*
- * gc_gen_thread_park()/gc_gen_thread_unpark() bracket a long or unbounded
+ * gc_thread_park()/gc_thread_unpark() bracket a long or unbounded
  * blocking call (mailbox receive, accept/recv, a work-queue wait). Both are
  * no-ops today; a collector that scans each thread's roots at its own safe
  * point would scan a parked thread on its behalf.
@@ -128,8 +128,8 @@ void gc_unregister_root(void *slot);
 #ifdef __cplusplus
 extern "C" {
 #endif
-void gc_gen_thread_park(void);
-void gc_gen_thread_unpark(void);
+void gc_thread_park(void);
+void gc_thread_unpark(void);
 #ifdef __cplusplus
 }
 #endif

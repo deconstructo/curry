@@ -72,11 +72,8 @@ zero-divisor check.
 
 ## GC note
 
-`ErrorObj.code` is a `val_t` like every other field and must be traced by
-every moving GC backend. Curry has four: Boehm (conservative — traces
-automatically, no code needed) plus three precise/moving backends
-(`gc_gen.c`, `gc_generational.c`, `gc_semispace.c`) that each need an
-explicit `case T_ERROR` evacuation line. If you add a field to `ErrorObj`,
-grep for `e->backtrace` in those three files and add your field the same
-way — this is exactly the "not GC-traced" bug class documented in
+`ErrorObj.code` is a `val_t` like every other field. The collector (Boehm,
+conservative) traces it automatically; no code is needed when you add a
+field. A future precise collector would need every field listed per type
+— the "not GC-traced" bug class documented in
 `docs/thoughts/maturity-roadmap.md`.

@@ -510,7 +510,7 @@ val_t env_new_root(void) {
  * never frees it (Boehm's conservative scan of .data/.bss variables and
  * GC_MALLOC_UNCOLLECTABLE blocks reliably finds ordinary allocations but
  * can miss static pointers inside C .data sections on some macOS arm64
- * configurations when a Boehm GC fires during nursery-fill execution).
+ * configurations).
  * The root frame lives for the entire program lifetime — making it
  * uncollectable is both correct and leak-free.
  */

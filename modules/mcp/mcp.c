@@ -966,11 +966,8 @@ static void *conn_thread(void *arg) {
 
     free(req.body);
 out:
-    /* Issue #200 Phase A: symmetric with gc_register_thread() above --
-     * every exit path funnels through here so gc_gen_thread_count stays
-     * accurate (a leaked count per connection would eventually make a
-     * future stop-the-world request wait forever on threads that no
-     * longer exist). */
+    /* Symmetric with gc_register_thread() above -- every exit path
+     * funnels through here. */
     gc_unregister_thread();
     return NULL;
 }

@@ -10,8 +10,8 @@
  * thread) and checked from another (whichever thread is running vm_run()
  * for the busy cell) -- hence the atomic store/load in interrupt.c rather
  * than a plain bool. The actual check happens in vm.c's dispatch loop,
- * the same per-instruction safepoint the minor-GC poll and the debugger
- * hook already use (see vm.c's L_DISPATCH). When pending, it raises an
+ * at the same per-instruction point as the debugger hook (see vm.c's
+ * L_DISPATCH). When pending, it raises an
  * EC_INTERRUPTED condition via scm_raise_code -- which unwinds through
  * the ordinary ExnHandler/SCM_PROTECT longjmp path, exactly like any
  * other Scheme exception, so a caller that already wraps vm_run() in

@@ -44,8 +44,8 @@ bench.scm
 |-------|--------------|
 | Mean time per benchmark | Time-series by benchmark/gc/mode |
 | p99 latency | Tail latency comparison boehm vs gen |
-| Minor GC count | How many nursery collections per run |
-| Max minor GC pause (gauge) | Red threshold at 5ms |
+| GC pause count | How many stop-the-world GC pauses per run |
+| Max GC pause (gauge) | Red threshold at 5ms |
 | GC p99 pause (gauge) | From the 256-entry pause ring buffer |
 | Last major GC count | Boehm major collections per run |
 | Latest results table | boehm vs gen side-by-side, last run |

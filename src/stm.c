@@ -194,13 +194,13 @@ static void tx_wait_for_change(TxState *tx) {
     }
 
     pthread_mutex_lock(&g_retry_mx);
-    /* Issue #200 Phase A: can block indefinitely until some other
-     * transaction commits a change -- park so a future GC safepoint
+    /* Can block indefinitely until some other transaction commits a
+     * change -- park so a future GC safepoint
      * doesn't wait on this thread meanwhile. */
-    gc_gen_thread_park();
+    gc_thread_park();
     while (atomic_load_explicit(&g_vclock, memory_order_acquire) == snap_ver)
         pthread_cond_wait(&g_retry_cv, &g_retry_mx);
-    gc_gen_thread_unpark();
+    gc_thread_unpark();
     pthread_mutex_unlock(&g_retry_mx);
 
     for (size_t i = 0; i < tx->rlen; i++) {
@@ -331,8 +331,8 @@ val_t stm_atomically(val_t thunk) {
      * commit is detected — exactly like an uncaught exception unwinding
      * through vm_run(), but it bypasses SCM_PROTECT's own restore entirely
      * since it never touches h.jmp. Without saving/restoring the same
-     * vm->sp/frame_count/open_upvalues (plus the shadow stack, GC-inhibit
-     * count and JIT call depth) around it ourselves, each retry leaves
+     * vm->sp/frame_count/open_upvalues (and JIT call depth) around it
+     * ourselves, each retry leaves
      * vm->sp/frame_count wherever the retrying read happened; the next
      * retry's apply_arr call then captures that already-drifted vm->sp as
      * its new baseline, leaking VM stack/frame slots on every single

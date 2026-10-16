@@ -9,9 +9,8 @@ void vm_interrupt_request(void) {
 
 bool vm_interrupt_pending(void) {
     /* Cheap fast-path check for the dispatch loop's hot path (called on
-     * every single instruction, same as gc_gen_safepoint() already is --
-     * see vm.c's L_DISPATCH) -- a plain relaxed load, no read-modify-
-     * write. Only the rare true case pays for the heavier exchange
+     * every single instruction, see vm.c's L_DISPATCH) -- a plain relaxed
+     * load, no read-modify-write. Only the rare true case pays for the heavier exchange
      * below. */
     return atomic_load_explicit(&vm_interrupt_flag, memory_order_relaxed);
 }

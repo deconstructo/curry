@@ -219,16 +219,14 @@ void curry_port_write_byte(curry_val port, uint8_t byte);
  * an output port. No-op on a closed port or a non-port value. */
 void curry_port_write_string(curry_val port, const char *s);
 
-/* Issue #200 Phase A: bracket a C module primitive's own genuinely long
- * or unbounded blocking OS call (a blocking accept()/recv()/connect()
- * with no timeout, or anything else that can block for an unpredictable
- * duration) with curry_gc_thread_park() immediately before the call and
- * curry_gc_thread_unpark() immediately after it returns. Without this, a
- * future stop-the-world GC safepoint request (--gc generational; a
- * cheap no-op under the default Boehm backend) would wait for this
- * thread to return to its next safepoint poll, which may not happen
- * until the blocking call itself completes -- e.g. until a connection
- * arrives, which may be never. Safe to park across any call that
+/* Bracket a C module primitive's own genuinely long or unbounded blocking
+ * OS call (a blocking accept()/recv()/connect() with no timeout, or
+ * anything else that can block for an unpredictable duration) with
+ * curry_gc_thread_park() immediately before the call and
+ * curry_gc_thread_unpark() immediately after it returns. Both are no-ops
+ * with the current collector. A collector that pauses threads at safe
+ * points would otherwise wait for this thread to return from the blocking
+ * call, which may be never (e.g. no connection ever arrives). Safe to park across any call that
  * doesn't touch Curry heap values while blocked, which every plain OS
  * networking/IO syscall qualifies as. Calls must be paired 1:1, with no
  * Curry API calls in between (the whole point is that nothing Curry-

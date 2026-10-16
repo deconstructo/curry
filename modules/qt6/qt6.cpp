@@ -164,10 +164,8 @@ static curry_val s_proc_roots = 0;  /* 0 until module_init sets it to nil */
 /* Allocate a stable heap slot for a Scheme procedure so Qt connect lambdas
  * can safely hold a pointer to it across GC collections.
  *
- * Under Boehm the slot is found conservatively via the lambda's capture.
- * Under the generational backend gc_register_root ensures the slot is updated
- * when the procedure is promoted from nursery to tenured space, so lambdas
- * that capture (curry_val *proc) and call *proc always see the current address.
+ * The slot is malloc'd (new), which Boehm does not scan; the value stays
+ * alive through s_proc_roots (below) and gc_register_root's own copy.
  *
  * Returns the registered slot pointer for capture in QObject::connect lambdas. */
 static curry_val *keep_alive(curry_val v) {
@@ -317,10 +315,9 @@ struct WinState {
     QPoint         grab_warp_target; /* set before warping to filter the resulting move event */
 };
 
-/* Register all curry_val callback fields of a WinState as precise GC roots.
- * Under Boehm this is a no-op; under the generational backend the .so data
- * segment is not updated by the collector, so s_proc_roots and these fields
- * must be registered explicitly so nursery closures are forwarded on promotion. */
+/* Register all curry_val callback fields of a WinState as GC roots. WinState
+ * is allocated with new, which Boehm does not scan; every setter also calls
+ * keep_alive, which is what keeps later callback values alive. */
 static void ws_register_gc_roots(WinState *ws) {
     gc_register_root(&ws->draw_proc);
     gc_register_root(&ws->key_proc);
@@ -2756,12 +2753,7 @@ extern "C" void curry_module_init(CurryVM *vm) {
        time after (import (curry qt6)), not just after make-window. */
     ensure_app();
 
-    /* Anchor the proc-roots list on the GC heap so Boehm can trace it.
-     * Also register as an explicit GC root for the generational backend:
-     * s_proc_roots lives in the .so data segment which Boehm conservatively
-     * scans, but the generational collector only updates registered roots, so
-     * without this registration it would not update s_proc_roots after
-     * promoting nursery pairs — leaving a stale pointer into zeroed memory. */
+    /* s_proc_roots lives in the .so data segment, which Boehm scans. */
     s_proc_roots = curry_nil();
     gc_register_root(&s_proc_roots);
 

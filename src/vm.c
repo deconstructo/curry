@@ -1176,11 +1176,6 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
-                    /* Inhibit minor GC for the duration of the JIT call.
-                     * JIT'd code holds intermediate nursery pointers in registers
-                     * and alloca slots that the GC cannot enumerate without full
-                     * stackmap support.  While inhibited, nursery overflow falls
-                     * back to Boehm rather than moving objects under JIT code. */
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
@@ -1481,22 +1476,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * atomics on the slot itself so the race is well-defined
              * instead of relying on that coincidence.
              *
-             * Deliberately do NOT also call gc_wb_slot() on this slot
-             * (independent security review caught this: an earlier
-             * version called both gc_wb_slot() -- a plain, non-atomic
-             * `*slot = newval` -- and the atomic store below on the same
-             * slot, which is undefined behavior under C11 regardless of
-             * whether the two writes agree, and gc_wb_slot's own dirty-
-             * slot bookkeeping (gc_dirty_slots/gc_dirty_count, gc.h) is
-             * itself unsynchronized, so a future value that actually took
-             * its vis_ptr(newval) branch concurrently from two racing
-             * actor threads would corrupt that fixed-size array via an
-             * unlocked, non-atomic gc_dirty_count++). No write barrier is
-             * needed here in the first place: unlike a general heap
-             * mutation, this array is fully re-scanned every minor GC via
-             * gc_gen.c's T_CHUNK evacuation case (every chunk is a pinned
-             * Boehm object, walked in full each pass), so there is no
-             * "remembered set" for the barrier to populate. */
+             * Deliberately NOT gc_wb_slot(): that is a plain store, and
+             * mixing it with the atomic store below on the same slot is
+             * undefined behavior under C11 (found by independent security
+             * review). Every value cached here is the immediate V_VOID, so
+             * no barrier is needed; if this cache ever holds heap
+             * objects, a concurrent collector would need an atomic
+             * barrier variant here. */
             uint8_t ci = READ_U8();
             Chunk *chunk = frame->closure->chunk;
             _Atomic val_t *slot = chunk->tree_eval_cache
@@ -1941,8 +1927,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
     L_DISPATCH:
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         /* Cross-thread interrupt request (e.g. the Jupyter kernel's
-         * control-channel handler, on its own thread) -- same safepoint,
-         * same gate as the minor-GC poll and the debugger hook above.
+         * control-channel handler, on its own thread) -- same point as
+         * the debugger hook above.
          * Raising here unwinds through the ordinary ExnHandler/
          * SCM_PROTECT longjmp path like any other Scheme exception. */
         if (__builtin_expect(vm_interrupt_pending(), 0) && vm_interrupt_pending_and_clear())

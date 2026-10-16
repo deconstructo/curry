@@ -95,38 +95,14 @@ static Mailbox *mailbox_new(void) {
 }
 
 static void mailbox_push(Mailbox *m, val_t msg, Actor *target) {
-    /* Issue #223: deliberately NOT bracketed with gc_gen_thread_park()/
-     * gc_gen_thread_unpark(), unlike mailbox_pop_wait's genuinely
-     * unbounded message-arrival wait. Bracketing THIS lock acquisition
-     * was tried and reverted -- it reintroduces the exact same deadlock
-     * class in a new spot: gc_gen_thread_unpark() calls
-     * gc_gen_safepoint(), which can itself BLOCK for the duration of a
-     * concurrent gc_gen_stop_the_world(); parking before the lock and
-     * unparking only after acquiring it (mirroring gc_gen_minor_collect's
-     * minor_gc_lock pattern) means that block happens WHILE THIS THREAD
-     * STILL HOLDS m->mutex -- reproduced concretely: the main thread then
-     * sits in mailbox_push -> gc_gen_thread_unpark -> gc_gen_safepoint
-     * still holding the mutex, while a receiving actor blocks acquiring
-     * that same mutex in mailbox_pop_wait, never reaching its own
-     * safepoint poll, so the collector's stop_the_world() waits on that
-     * receiver forever. gc_gen_minor_collect's minor_gc_lock bracket
-     * avoids this because minor_gc_lock has at most one holder and that
-     * holder can't be mid-STW-request against itself; m->mutex has no
-     * such structural guarantee -- it's contended by arbitrary unrelated
-     * sender/receiver threads, any of which might be the very thread a
-     * third actor's stop-the-world is waiting on.
-     *
-     * This is safe left unbracketed precisely because of the fix applied
-     * to mailbox_pop_wait below: m->mutex is now NEVER held across a call
-     * that can block on a safepoint, by either function, so contending
-     * for it here is always a bounded, fast wait -- pthread_cond_wait
-     * (mailbox_pop_wait's actual unbounded wait) releases the mutex
-     * internally while blocked, per POSIX semantics, so it doesn't count.
-     * A thread mid this bounded critical section, not yet parked and not
-     * yet at its next safepoint poll, is exactly the case
-     * gc_gen_safepoint()'s own comment describes as already safe: a
-     * concurrent gc_gen_stop_the_world() simply waits for it to finish
-     * and reach its next real poll point, instead of racing it. */
+    /* Issue #223: deliberately NOT bracketed with gc_thread_park()/
+     * gc_thread_unpark(). Unpark is where a collector that pauses threads
+     * may make this thread wait. Waiting there while holding m->mutex
+     * deadlocked: a receiver blocked on this same mutex never reached its
+     * own safe point, so the collector waited on the receiver forever.
+     * Contending for m->mutex here is always a short wait, because neither
+     * this function nor mailbox_pop_wait holds it across park/unpark
+     * (pthread_cond_wait releases it while blocked). */
     pthread_mutex_lock(&m->mutex);
     size_t next = (m->q.tail + 1) % m->q.cap;
     if (next == m->q.head) {
@@ -156,82 +132,39 @@ static void mailbox_push(Mailbox *m, val_t msg, Actor *target) {
 
 static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
     pthread_mutex_lock(&m->mutex);
-    /* Issue #223: gc_gen_thread_unpark() calls gc_gen_safepoint(), which
-     * can itself BLOCK (if a gc_gen_stop_the_world() is active right now)
-     * until the collector calls gc_gen_start_the_world(). The original
-     * code called gc_gen_thread_unpark() while still holding m->mutex --
-     * so a receiving actor could end up parked mid-safepoint while still
-     * holding its own mailbox's mutex, and a concurrent mailbox_push()
-     * from another thread (blocked acquiring that same mutex) would then
-     * itself be stuck on a plain, non-safepoint-aware pthread_mutex_lock,
-     * never reaching a safepoint of its own -- so the stop-the-world
-     * request that's parking the receiver wound up waiting forever on the
-     * sender, and the sender waited forever on the receiver's mutex: a
-     * genuine 3-way deadlock, confirmed via a `sample` thread dump
-     * matching this exact cycle before this fix.
-     *
-     * Fix: once a wait loop below confirms a message is actually waiting,
-     * release m->mutex, call gc_gen_thread_unpark(), then re-acquire the
-     * mutex before touching m->q at all (see the per-branch comments).
-     * gc_gen_thread_unpark() is thus never called while holding the
-     * mutex, closing the deadlock -- and the dequeue itself still always
-     * happens fully unparked, exactly as in the pre-#223 code, so a
-     * concurrent GC scan of this (or any) Mailbox never races this
-     * thread's mutation of m->q (see the re-lock comment below for why
-     * that second property matters just as much as the first). */
+    /* Issue #223: gc_thread_unpark() may wait for a collector (see
+     * mailbox_push). It must never be called while holding m->mutex: a
+     * sender blocked on that mutex would never reach its own safe point,
+     * and the collector, the sender and this receiver would wait on each
+     * other forever (a 3-way deadlock, confirmed with a thread dump). So
+     * once a message is waiting, release m->mutex, unpark, then re-acquire
+     * the mutex before touching m->q. The dequeue therefore always happens
+     * unparked: a collector may read a parked thread's state without its
+     * locks, so a parked thread must not change m->q. */
     if (timeout_ms < 0) {
         if (m->q.head == m->q.tail) {
-            /* Issue #200 Phase A: this can block for an unbounded time
-             * (no message ever arrives) -- park so a future
-             * gc_gen_stop_the_world() doesn't wait on this thread for as
-             * long as that takes. Safe: this thread touches no Curry
-             * heap pointers while blocked here beyond what the pinned
-             * Mailbox object itself already exposes. */
-            gc_gen_thread_park();
+            /* Can block for an unbounded time (no message may ever
+             * arrive): park, so a collector does not wait on this thread.
+             * Safe: while blocked here this thread touches no Curry heap
+             * object except the Mailbox itself. */
+            gc_thread_park();
             while (m->q.head == m->q.tail)
                 pthread_cond_wait(&m->cond, &m->mutex);
-            /* Message now available, m->mutex held (pthread_cond_wait
-             * re-acquires it before returning). Release it before
-             * calling gc_gen_thread_unpark() -- see the #223 comment
-             * above -- then re-acquire before touching m->q below.
-             *
-             * This re-lock is required, not just for the unpark-while-
-             * holding-the-lock deadlock: a fresh code-review pass on an
-             * earlier version of this fix (which unparked AFTER the
-             * dequeue instead of before) found that it let the dequeue
-             * itself -- m->q.head advancing, m->q.msgs[head] being read
-             * -- happen while this thread was still "parked" (excluded
-             * from gc_gen_thread_count). gc_gen.c's T_MAILBOX scan under
-             * a concurrent gc_gen_stop_the_world() reads m->q WITHOUT
-             * taking m->mutex, relying entirely on every live thread
-             * being either past a safepoint or genuinely parked (i.e.
-             * provably not touching Curry-managed state) -- a parked
-             * thread that's still mutating m->q under the mutex breaks
-             * that invariant: an unsynchronized data race between this
-             * thread's write and the collector's read of the same
-             * fields, on a mailbox that could belong to any actor, not
-             * just this one. Re-acquiring after unpark() means the
-             * dequeue always happens fully unparked (registered, and
-             * already past any safepoint that was active), exactly
-             * matching the original code's ordering relative to m->q --
-             * only the unpark() call itself is now done without holding
-             * the lock. Not a lost-message risk: mailbox_pop_wait is
-             * only ever called by this actor's own thread (one reader
-             * per mailbox), so nothing else can drain the queue while
-             * we're unlocked here -- a concurrent mailbox_push() can
-             * only add messages or grow m->q.msgs (which preserves
-             * m->q.head's logical position), never remove the one we
-             * already confirmed is waiting. */
+            /* Message available, m->mutex held (pthread_cond_wait
+             * re-acquires it). Release it, unpark, re-acquire -- see the
+             * #223 comment above. No message can be lost meanwhile: only
+             * this actor's own thread reads this mailbox, and a concurrent
+             * mailbox_push can only add messages or grow m->q.msgs (which
+             * keeps m->q.head's logical position). */
             pthread_mutex_unlock(&m->mutex);
-            gc_gen_thread_unpark();
+            gc_thread_unpark();
             pthread_mutex_lock(&m->mutex);
         }
     } else if (m->q.head == m->q.tail) {
-        /* Bounded by timeout_ms, but still park -- the timeout can be
-         * arbitrarily long, and there's no reason to make a
-         * stop-the-world request wait out someone else's receive
-         * timeout when this thread isn't touching Curry objects. */
-        gc_gen_thread_park();
+        /* Bounded by timeout_ms, but still park: the timeout can be
+         * arbitrarily long, and this thread touches no Curry objects
+         * while it waits. */
+        gc_thread_park();
         while (m->q.head == m->q.tail) {
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -241,7 +174,7 @@ static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
             int rc = pthread_cond_timedwait(&m->cond, &m->mutex, &ts);
             if (rc != 0 && m->q.head == m->q.tail) {
                 pthread_mutex_unlock(&m->mutex);
-                gc_gen_thread_unpark();
+                gc_thread_unpark();
                 return V_FALSE;  /* timeout */
             }
         }
@@ -249,7 +182,7 @@ static val_t mailbox_pop_wait(Mailbox *m, long timeout_ms) {
          * unpark, and re-acquire before the shared dequeue code below
          * touches m->q. */
         pthread_mutex_unlock(&m->mutex);
-        gc_gen_thread_unpark();
+        gc_thread_unpark();
         pthread_mutex_lock(&m->mutex);
     }
     val_t msg = m->q.msgs[m->q.head];
@@ -329,10 +262,7 @@ static void *actor_thread(void *arg) {
      * context (i.e. nearly every actor in practice). */
     load_dir_release(0);
 
-    /* Issue #200 Phase A: symmetric with gc_register_thread() at this
-     * thread's entry (top of actor_thread) -- keeps gc_gen_thread_count
-     * accurate now that a thread count actually exists to keep accurate.
-     * See gc.h's own comment on this function. */
+    /* Symmetric with gc_register_thread() at the top of actor_thread. */
     gc_unregister_thread();
 
     vm_free();

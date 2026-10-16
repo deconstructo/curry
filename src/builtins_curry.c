@@ -1162,10 +1162,10 @@ static int map_par_threshold = 8;
     do { \
         pthread_mutex_lock(&(done_mutex_var)); \
         if (atomic_load(&(n_done_var)) < (nchunks_var)) { \
-            gc_gen_thread_park(); \
+            gc_thread_park(); \
             while (atomic_load(&(n_done_var)) < (nchunks_var)) \
                 pthread_cond_wait(&(done_cond_var), &(done_mutex_var)); \
-            gc_gen_thread_unpark(); \
+            gc_thread_unpark(); \
         } \
         pthread_mutex_unlock(&(done_mutex_var)); \
         pthread_mutex_destroy(&(done_mutex_var)); \

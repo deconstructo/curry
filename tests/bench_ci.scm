@@ -98,7 +98,7 @@
         (lp (+ i 1)
             (+ acc (call/cc (lambda (k) (k 1))))))))
 
-;; alloc churn: short-lived pairs, the nursery workload for gc-rewrite
+;; alloc churn: short-lived pairs
 (define (alloc-churn n)
   (let lp ((i n))
     (when (> i 0)

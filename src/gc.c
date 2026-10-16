@@ -16,8 +16,8 @@
 
 /* ── Safe points (no-ops; see gc.h) ───────────────────────────────────────── */
 
-void gc_gen_thread_park(void)   {}
-void gc_gen_thread_unpark(void) {}
+void gc_thread_park(void)   {}
+void gc_thread_unpark(void) {}
 
 /* ── GC statistics ────────────────────────────────────────────────────────── */
 

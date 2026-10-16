@@ -30,7 +30,9 @@
 #include <pthread.h>
 
 /*
- * GC classification for moving collectors (see docs/gc-moving-design.md §3):
+ * GC classification for moving collectors (see docs/gc-moving-design.md §3).
+ * No current collector moves objects; the tags record which types could
+ * move under a future one:
  *
  *   GC:MOVE  — may live in the nursery/semispace; only referenced via val_t.
  *   GC:PIN   — always in Boehm; raw C pointer from outside GC, or OS resource,
@@ -111,14 +113,13 @@ typedef enum {
 /*
  * All heap objects start with this header.
  *
- * fwd: zero during normal execution.  During a copying/compacting GC pass the
- * collector sets fwd to the new address and sets type = GC_FORWARDED.  The
- * mutator must never read fwd directly — use vis_forwarded() / hdr_fwd().
- * Placing fwd here (not in the first payload word) makes concurrent GC
- * safe: a concurrent mutator can always read type to detect a forwarded
- * object without racing with a payload write.
+ * fwd: forwarding address for a moving collector. Unused since the
+ * generational backend was removed (always 0). Removing it would make
+ * every object 8 bytes smaller (a pair would drop from Boehm's 48-byte
+ * size class to 32), but changes every object's layout, so it is a
+ * separate change.
  *
- * Size: 16 bytes on all 64-bit platforms.  This is the price of compaction.
+ * Size: 16 bytes on all 64-bit platforms.
  */
 typedef struct {
     uint32_t  type;   /* ObjType, or GC_FORWARDED when object has been moved */
@@ -342,8 +343,7 @@ typedef enum {
 } TVKind;
 
 /* Element byte width per kind -- shared by the typedvec module and the
- * GC (gc_gen.c needs it to size/copy a TypedVec without linking against
- * the module). Inline rather than a lookup table: TVKind is a small,
+ * core. Inline rather than a lookup table: TVKind is a small,
  * fixed, ordered enum, so a switch compiles to a jump table anyway. */
 static inline uint32_t tv_elem_size(TVKind k) {
     switch (k) {
@@ -718,9 +718,8 @@ typedef struct {
  * ffi_closure_free.
  *
  * GC:PIN alone (CURRY_NEW_PINNED) only means non-moving under a future
- * precise/generational backend -- under the current Boehm backend it's
- * an ORDINARY COLLECTIBLE allocation (boehm_alloc_pinned is boehm_alloc;
- * confirmed in gc.c). It does NOT make this struct immortal, and nothing
+ * moving collector -- under Boehm it's an ORDINARY COLLECTIBLE allocation
+ * (gc_alloc_pinned is GC_MALLOC; see gc.h). It does NOT make this struct immortal, and nothing
  * outside curry's own GC-managed heap keeps a bare C function pointer
  * (the only thing handed to the C library) reachable from Boehm's
  * perspective. `gc_root_slot` closes that gap explicitly: it points at a

@@ -36,8 +36,8 @@ cd ../..
 open http://localhost:3000          # admin / admin
 # → Dashboards → Curry Benchmarks → Curry Bench
 
-# 4. Compare GC backends in another terminal while watching Grafana
-./build/curry --gc generational tests/bench.scm
+# 4. Compare GC settings in another terminal while watching Grafana
+GC_MARKERS=1 ./build/curry tests/bench.scm
 
 # 5. Tear down when done
 docker compose -f tools/bench-stack/docker-compose.yml down
@@ -51,15 +51,13 @@ Results appear in Grafana within 5 seconds of each benchmark completing.
 
 ### `tests/bench.scm` — standard suite
 
-The everyday benchmark.  Calibrated to complete in under 5 minutes per GC
-backend.
+The everyday benchmark.  Calibrated to complete in under 5 minutes.
 
 ```bash
 ./build/curry tests/bench.scm                        # all suites
 ./build/curry tests/bench.scm --suite throughput     # CPU throughput only (~90 s)
 ./build/curry tests/bench.scm --suite gc             # GC behaviour only (~3 min)
 ./build/curry tests/bench.scm --suite actors         # actor concurrency (~1 min)
-./build/curry --gc generational tests/bench.scm      # same, with gen GC
 ```
 
 **Throughput suite** — same workloads as `vm_bench.scm`, run under both VM
@@ -79,9 +77,9 @@ properties:
 
 | Benchmark | What it measures |
 |-----------|-----------------|
-| `alloc-short` | 500 K cons cells, all die before next GC — minor GC throughput |
+| `alloc-short` | 500 K cons cells, all die before next GC — short-lived allocation throughput |
 | `alloc-medium` | 10 K 3-element lists, hold briefly then release — promotion and remembered-set cost |
-| `alloc-large` | 100 × 1 K-element vectors — large-object path, bypasses nursery |
+| `alloc-large` | 100 × 1 K-element vectors — large-object path |
 | `mutation` | 10 K-element vector, 200 K `vector-set!` calls — write-barrier cost in isolation |
 | `mixed` | Mini-interpreter evaluating 5 K expressions — realistic allocation + survival mix |
 
@@ -113,7 +111,7 @@ Heavy GC benchmarks:
 | `alloc-large/10K` | 100× more vectors |
 | `mutation/10M` | 50× more mutations |
 | `mixed/50K` | 10× more iterations |
-| `retained/100K+5M` | Builds 100 K retained objects then hammers 5 M short-lived ones — tests interaction between live old-gen and nursery collection |
+| `retained/100K+5M` | Builds 100 K retained objects then hammers 5 M short-lived ones — tests collection cost with a large live set alongside heavy short-lived allocation |
 | `actor-ring/32x500` | 32 actors, 500 rounds — heavy cross-thread GC pressure |
 
 ---
@@ -154,13 +152,13 @@ Even without the Docker stack, every benchmark prints a one-line summary to
 stdout:
 
 ```
-fib(28)/vm                    mean=178ms  p99=181ms  gc_minor=0
-alloc-short                   mean=42ms   p99=45ms   gc_minor=3
-actor-ring/8x100              mean=23ms   p99=25ms   gc_minor=0
+fib(28)/vm                    mean=178ms  p99=181ms  gc_stw=0
+alloc-short                   mean=42ms   p99=45ms   gc_stw=3
+actor-ring/8x100              mean=23ms   p99=25ms   gc_stw=0
 ```
 
-Fields: `mean` and `p99` wall time per iteration, `gc_minor` total minor GC
-collections fired across all iterations of that benchmark.
+Fields: `mean` and `p99` wall time per iteration, `gc_stw` number of
+stop-the-world GC pauses across all iterations of that benchmark.
 
 ---
 
@@ -196,13 +194,13 @@ auto-refreshes every 5 seconds.
 | Panel | What it shows |
 |-------|--------------|
 | Mean time per benchmark | Time-series lines, one per benchmark/gc/mode combination.  Lets you watch how a benchmark's mean evolves across consecutive runs. |
-| p99 latency over time | Tail latency comparison — boehm vs generational, side by side. |
-| Minor GC count per run | Bar chart: how many nursery collections fired during each benchmark run. |
-| Max minor GC pause (gauge) | Running maximum single-pause time in µs.  Red threshold at 5 ms. |
-| GC p99 pause (gauge) | p99 from the 256-entry pause ring buffer — more representative than the max. |
-| Major GC count per run | Boehm major collections triggered per benchmark run. |
-| Latest results table | Most recent boehm and generational results side-by-side with ratio column. |
-| Pause histogram | Live histogram of minor GC pause times from the pause ring, updated each run. |
+| p99 latency over time | Tail latency per benchmark. |
+| GC pause count per run | Bar chart: how many stop-the-world GC pauses happened during each benchmark run. |
+| Max GC pause (gauge) | Running maximum single-pause time in µs.  Red threshold at 5 ms. |
+| GC p99 pause (gauge) | p99 from the pause ring (last 1024 pauses) — more representative than the max. |
+| Major GC count per run | Boehm collections per benchmark run. |
+| Latest results table | Most recent results, side by side per `gc` tag, with ratio column. |
+| Pause histogram | Live histogram of GC pause times from the pause ring, updated each run. |
 
 ### MQTT event schema
 
@@ -214,7 +212,7 @@ Every event is a JSON object published to `curry/bench/events`.
 {
   "event":        "start" | "result",
   "benchmark":    "alloc-short",
-  "gc":           "boehm" | "generational",
+  "gc":           "boehm",
   "mode":         "vm" | "tw",
   "iterations":   10,
   "timestamp_ms": 1719446400000
@@ -233,17 +231,15 @@ Every event is a JSON object published to `curry/bench/events`.
   "min":              40.1,
   "max":              46.3,
   "gc_p99_us":        18,
-  "gc_minor_count":   3,
-  "gc_major_count":   1,
-  "gc_minor_total_us": 55,
-  "gc_minor_max_us":  32,
-  "gc_heap_bytes":    9125888,
-  "gc_nursery_used":  32304
+  "gc_stw_count":     3,
+  "gc_major_count":   3,
+  "gc_stw_total_us":  1850,
+  "gc_stw_max_us":    720,
+  "gc_heap_bytes":    9125888
 }
 ```
 
 All time values are in milliseconds unless suffixed `_us` (microseconds).
-`gc_nursery_used` is 0 under `--gc boehm`.
 
 You can subscribe to this topic directly with any MQTT client to build your
 own consumers:
@@ -268,33 +264,28 @@ piece of code:
     (loop (- i 1))))
 
 (let ((s (gc-stats)))
-  (display (assoc 'minor-count    s)) (newline)
-  (display (assoc 'minor-max-us   s)) (newline)
-  (display (assoc 'pause-ring-us  s)) (newline))
+  (display (assoc 'stw-count   s)) (newline)
+  (display (assoc 'stw-max-ns  s)) (newline)
+  (display (assoc 'stw-ring-ns s)) (newline))
 ```
 
-Under `--gc generational` this will show how many minor GCs fired and the
-pause times.  Under `--gc boehm` `minor-count` is always 0.
+This shows how many stop-the-world pauses happened and how long they were.
 
 See [`gc.md`](gc.md) for the full `(gc-stats)` field reference.
 
 ---
 
-## Comparing GC backends
+## Comparing GC settings
 
-Run the same suite twice and compare the terminal output:
+Boehm reads its settings from environment variables, so the same suite can
+be compared across settings without rebuilding:
 
 ```bash
-./build/curry tests/bench.scm --suite gc             > boehm.txt
-./build/curry --gc generational tests/bench.scm --suite gc > gen.txt
-diff boehm.txt gen.txt
+./build/curry tests/bench.scm --suite gc                              > default.txt
+GC_MARKERS=1 ./build/curry tests/bench.scm --suite gc                 > markers1.txt
+GC_ENABLE_INCREMENTAL=1 GC_PAUSE_TIME_TARGET=5 \
+  ./build/curry tests/bench.scm --suite gc                            > incr.txt
 ```
 
-Or use the Grafana **Latest results table** panel, which shows the ratio
-column automatically when both backends have results for the same benchmark
-name.
-
-The generational backend benefits programs that allocate many short-lived
-values (list processing, CAS rewrites, functional tree transforms).  It shows
-a regression for bignum-heavy arithmetic and programs with large persistent
-live sets.  See [`gc.md`](gc.md) for guidance on when to use each backend.
+See [`gc.md`](gc.md#pause-times) for measured trade-offs between these
+settings.

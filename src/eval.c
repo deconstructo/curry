@@ -118,23 +118,12 @@ static val_t eval_call_cc(val_t proc) {
     int saved_fc   = vm ? vm->frame_count : 0;
     val_t *saved_sp = vm ? vm->sp : NULL;
     Upvalue *saved_uv = vm ? vm->open_upvalues : NULL;
-    /* Mirrors SCM_PROTECT's own save/restore triple (eval.h) -- a longjmp
-     * back into this frame bypasses every normal-return cleanup between
-     * here and the jump's origin (longjmp restores registers/PC directly,
-     * it doesn't run cleanup attributes or fall through pending restores),
-     * which would otherwise leave all three of these permanently
-     * unbalanced: gc_shadow_stack pointing at expired C stack frames
-     * (matters only under --gc generational), gc_inhibit_count stuck
-     * incremented if the jump crosses a gc_inhibit_minor()/gc_resume_minor()
-     * bracket (e.g. invoking a captured continuation from inside a
-     * primitive like for-each's own C-side dispatch) -- permanently
-     * blocking minor GC on this thread, an unbounded nursery leak, not
-     * just a missed optimization -- and g_jit_call_depth stuck incremented
-     * if the jump crosses a JIT call boundary, permanently downgrading
-     * this closure to the bytecode interpreter for the rest of the
-     * process. Found missing here (only gc_shadow was originally added)
-     * by independent code review after the shadow-stack part of this fix
-     * landed. */
+    /* Mirrors SCM_PROTECT's own save/restore (eval.h): a longjmp back into
+     * this frame bypasses every normal-return cleanup between here and the
+     * jump's origin, so the VM state above and g_jit_call_depth must be
+     * restored by hand. Without the latter, a jump across a JIT call
+     * boundary leaves g_jit_call_depth incremented, permanently
+     * downgrading this closure to the bytecode interpreter. */
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         jit_depth_restore(saved_jit_depth);
@@ -218,11 +207,8 @@ val_t eval(val_t expr, val_t env) {
      * with ir_emit.c's own unbounded recursion (issue #125) -- see
      * check_c_stack_depth's own comment in runtime.c. */
     check_c_stack_depth("eval");
-    /* Shadow stack: register the two persistent locals so a moving GC can
-     * update them after nursery evacuation.  op/rest are declared here so
-     * they are in scope for GC_AUTOFRAME; goto tail re-assigns them each
-     * iteration without crossing their declarations.
-     * Under Boehm GC_AUTOFRAME is a no-op. */
+    /* op/rest are declared before the tail: label so goto tail can
+     * re-assign them each iteration without crossing their declarations. */
     val_t op = V_NIL, rest = V_NIL;
 tail:
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */

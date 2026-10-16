@@ -468,16 +468,11 @@ static void compile_symbolic(Compiler *c, val_t rest, int line) {
  * slot. Top-level (non-reentrant) callers wouldn't have noticed, since
  * frame_count == 0 takes pop_frame's full-reset path instead.
  *
- * Exception-safe: compiler_compile() brackets its work in
- * gc_inhibit_minor()/gc_resume_minor(), so a transformer expression that
- * raises during compilation or evaluation (a bad syntax-rules form, an
- * unbound reference, etc.) would otherwise longjmp past the matching
- * gc_resume_minor() with nothing to rebalance it — permanently leaking
- * gc_inhibit_count and disabling minor-GC safepoints for the rest of the
- * process.  SCM_PROTECT snapshots and restores it (along with the shadow
- * stack and JIT call depth) regardless of how many nested inhibit/resume
- * calls happened inside, then this re-raises the same exception so normal
- * error reporting (REPL, guard, etc.) is unaffected. */
+ * Exception-safe: a transformer expression that raises during compilation
+ * or evaluation (a bad syntax-rules form, an unbound reference, etc.)
+ * longjmps out of this function. SCM_PROTECT restores the VM state and JIT
+ * call depth, then this re-raises the same exception so normal error
+ * reporting (REPL, guard, etc.) is unaffected. */
 static val_t compile_time_eval(val_t expr) {
     ExnHandler h;
     val_t result = V_VOID;

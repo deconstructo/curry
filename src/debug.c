@@ -4,8 +4,7 @@
  * See debug.h for the model.  Everything here runs on the main thread
  * inside vm_run()'s dispatch loop, between two instructions: the current
  * op has fully committed its result, so vm->stack and vm->frames are
- * consistent and safe to inspect (the same invariant the minor-GC
- * safepoint relies on).
+ * consistent and safe to inspect.
  *
  * Stop conditions:
  *   - function-name breakpoint: frame entry (ip == chunk->code)

@@ -11,13 +11,13 @@
  * Source AST (tree-walker Closure)
  *   │
  *   ▼ curry::codegen_procedure()
- * LLVM IR Module  — opaque-pointer mode, gc "curry-generational" on every fn
+ * LLVM IR Module  — opaque-pointer mode, gc "curry-statepoint" on every fn
  *   │
  *   ▼ LLJIT::addIRModule()
  * Native code  — called directly; GC stack maps emitted by LLVM
  *
  * GC invariants (MUST be maintained from day 1, cannot be retrofitted):
- *   - Every function bears  gc "curry-generational"  in its LLVM IR.
+ *   - Every function bears  gc "curry-statepoint"  in its LLVM IR.
  *   - Every call site that can trigger GC is a gc.statepoint intrinsic.
  *   - Object references are  ptr  (opaque, LLVM 15+); no  i64*  casts.
  *   - Write barriers use  llvm.gcwrite  at every heap-to-heap pointer store.
@@ -38,7 +38,7 @@ extern "C" {
 
 /* ---- Initialisation ---- */
 
-/* Initialise LLVM targets, JIT session, and register the curry-generational
+/* Initialise LLVM targets, JIT session, and register the curry-statepoint
  * GC strategy.  Call once after gc_init() and before any compile request. */
 void curry_llvm_init(void);
 

@@ -119,9 +119,6 @@ val_t sx_make_apply(val_t fn, int nargs, val_t *args) {
 }
 
 val_t sx_make_expr(val_t op, int nargs, val_t *args) {
-    /* Pinned (Boehm-managed, non-moving): C built-ins hold val_t locals pointing
-     * to symbolic nodes across nursery allocations; pinning ensures they stay valid
-     * if a minor GC fires mid-computation. */
     SymExpr *e = (SymExpr *)gc_alloc_pinned(sizeof(SymExpr) + (size_t)nargs * sizeof(val_t));
     e->hdr.type  = T_SYMEXPR;
     e->hdr.flags = 0;

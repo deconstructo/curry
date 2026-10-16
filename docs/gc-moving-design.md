@@ -1,5 +1,9 @@
 # Moving GC Design for Curry Scheme
 
+> **Historical.** The generational backend built from this design was removed
+> in 2026-10 (see `docs/reference/gc.md` for why, and for the current plan,
+> which keeps objects in place instead of moving them).
+
 This document specifies the design for adding a moving (semispace or generational)
 GC to Curry.  The previous attempt (v1.5.0–v1.5.1) accumulated seven bug-fix
 commits after the initial eight-milestone implementation, each exposing an

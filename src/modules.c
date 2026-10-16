@@ -53,26 +53,10 @@ static ModuleEntry *registry = NULL;
  * Unlike rtab/atab, this registry has no removal function at all
  * (modules are never unloaded), so there is no unlink-vs-traversal
  * hazard to worry about, and no per-entry field is ever mutated after
- * publish except by scan_module_registry's GC evac/fwd fixups -- so
- * registry_lookup's traversal never calls back into arbitrary Scheme
+ * publish -- so registry_lookup's traversal never calls back into arbitrary Scheme
  * code, and needs no snapshot-then-release pattern the way
  * sx_rule_try's guard_fn/action_fn callbacks did. */
 static pthread_rwlock_t module_registry_lock = PTHREAD_RWLOCK_INITIALIZER;
-
-/* Issue #150: thin wrappers around module_registry_lock so callers outside
- * this file can synchronize against gc_gen.c's scan_pinned_object T_MODULE
- * case, which mutates a live Module's name/exports fields (evacuating any
- * that point into the nursery) during another actor's minor GC -- same
- * "reuse the existing lock instead of inventing a new protocol" approach
- * #198 used for GLOBAL_ENV (env_global_frame_lock_for_gc). modules_import
- * (below) takes the read lock around its own read of mod->exports before
- * that pointer can be raced by a concurrent T_MODULE scan on another
- * thread; gc_gen.c's T_MODULE case takes the write lock (it mutates)
- * around its evacuation, mirroring registry_insert's/scan_module_registry's
- * own existing write-lock use of this exact mutex above. */
-void modules_registry_rdlock_for_gc(void) { pthread_rwlock_rdlock(&module_registry_lock); }
-void modules_registry_wrlock_for_gc(void) { pthread_rwlock_wrlock(&module_registry_lock); }
-void modules_registry_unlock_for_gc(void) { pthread_rwlock_unlock(&module_registry_lock); }
 
 static bool names_equal(val_t a, val_t b) {
     while (vis_pair(a) && vis_pair(b)) {
@@ -92,12 +76,7 @@ static Module *registry_lookup(val_t name) {
 }
 
 static void registry_insert(val_t name, Module *mod) {
-    /* Allocate before taking the lock, same reasoning as sx_rule_add:
-     * gc_alloc_raw_pinned is itself an allocation, which under
-     * --gc generational can trigger a minor GC whose ext scanner
-     * (scan_module_registry, below) takes this same lock for writing --
-     * pthread_rwlock_t is not recursive, so allocating while already
-     * holding the lock (even for reading) could self-deadlock. */
+    /* Allocate before taking the lock: keep the critical section short. */
     ModuleEntry *e = (ModuleEntry *)gc_alloc_raw_pinned(sizeof(ModuleEntry));
     e->name   = name;
     e->module = mod;
@@ -552,41 +531,25 @@ val_t modules_import(val_t spec, val_t env) {
          * each exported name up directly instead of scanning every binding
          * the module happens to define. */
         val_t mod_env_val = vptr(mod->env);
-        /* Issue #150 / #203: mod->exports is a field gc_gen.c's
-         * scan_pinned_object (T_MODULE case) can evacuate on another
-         * actor's minor GC, and #150's original fix only snapshotted the
-         * head pointer -- the list's own pair cells (vcar/vcdr below)
-         * were still walked with no lock held at all. Issue #200 Phase B
-         * (src/gc_gen.c, gc_gen_stop_the_world()/start_the_world() now
-         * bracketing the whole of gc_gen_minor_collect(), not just the
-         * pinned-object-scan window) has since closed the specific
-         * concurrent-mutation race this guarded against: no other actor
-         * runs at all while a minor GC evacuates this list's cells, so an
-         * un-parked reader here can only ever run entirely before or
-         * entirely after a given collection, never during one. This
-         * snapshot is kept anyway as defense in depth -- issue #208 found
-         * a still-unexplained hang in that same stop-the-world protocol
-         * under a nested-spawn + dynamic define-library/import workload,
-         * so treat the STW guarantee as not yet fully proven for this
-         * exact code path. Same count/allocate-outside-lock/copy pattern
-         * sx_rule_try/sx_rules_list (src/sx_rules.c) already use for the
-         * unrelated "can't hold a lock across arbitrary work" problem --
-         * the copy pass itself must still finish inside the lock, so
-         * GC_MALLOC-ing the buffer has to happen between the two lock
-         * sections, not inside either one. */
-        modules_registry_rdlock_for_gc();
+        /* Issues #150/#203: copy the export list under the registry read
+         * lock, then work from the copy. The original reason (the removed
+         * generational GC moving these list cells during another actor's
+         * collection) is gone; the snapshot is kept as a cheap precaution
+         * against a concurrent load touching the same module. The buffer
+         * is allocated between the two lock sections, not inside either. */
+        pthread_rwlock_rdlock(&module_registry_lock);
         int export_count = 0;
         for (val_t es = mod->exports; vis_pair(es); es = vcdr(es)) export_count++;
-        modules_registry_unlock_for_gc();
+        pthread_rwlock_unlock(&module_registry_lock);
 
         val_t *export_syms = export_count
             ? (val_t *)GC_MALLOC(sizeof(val_t) * (size_t)export_count) : NULL;
 
-        modules_registry_rdlock_for_gc();
+        pthread_rwlock_rdlock(&module_registry_lock);
         int export_n = 0;
         for (val_t es = mod->exports; vis_pair(es) && export_n < export_count; es = vcdr(es))
             export_syms[export_n++] = vcar(es);
-        modules_registry_unlock_for_gc();
+        pthread_rwlock_unlock(&module_registry_lock);
 
         for (int i = 0; i < export_n; i++) {
             val_t sym = export_syms[i];
@@ -715,23 +678,6 @@ val_t modules_define_library(val_t form, val_t env) {
     val_t exports = V_NIL;
     val_t clause = V_NIL;
     bool  has_exports = false;
-    /* Issue #217: name/exports/lib_env/rest/clause are C locals that live
-     * across the whole clause-processing loop below -- including, via the
-     * S_BEGIN branch of define_library_clause, vm_eval() calls that run a
-     * library's own body forms (arbitrary, allocation-heavy user code).
-     * eval()'s own GC_AUTOFRAME only protects ITS four slots (expr/env/op/
-     * rest); it does not extend to values a callee (this function) pulls
-     * out of expr and holds in its own locals afterward. Without this
-     * frame, a minor collection firing during any later clause's
-     * processing (most obviously the begin-body vm_eval calls, but
-     * define_library_clause's own scm_cons calls building up `exports`
-     * qualify too) can relocate whatever name/exports/clause/rest
-     * currently point at without this function ever finding out. This is a
-     * real, independent hazard closed here -- but it is NOT the cause of
-     * #217's own "unknown GC:MOVE type" crash: that reproduces identically
-     * with this frame in place (see #217's own thread for the follow-up
-     * investigation). Keep both this fix and that issue open; they are
-     * separate gaps in the same area. */
 
     while (vis_pair(rest)) {
         clause = vcar(rest); rest = vcdr(rest);
@@ -760,12 +706,6 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
     val_t exports = V_NIL;
     val_t clause = V_NIL;
     bool  has_exports = false;
-    /* Issue #217: same hazard as modules_define_library's own GC_AUTOFRAME
-     * comment -- name/exports/lib_env/rest/clause are C locals held live
-     * across this function's own vm_eval() calls (inline body forms) and
-     * scm_cons() calls (building exports), neither of which this
-     * function's own C stack frame is otherwise visible to a minor
-     * collection. */
 
     while (vis_pair(rest)) {
         clause = vcar(rest); rest = vcdr(rest);

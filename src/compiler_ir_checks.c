@@ -63,10 +63,8 @@ bool compiler_ir_self_check(val_t expr) {
 
     /* compile()/ir_lower/ir_emit can scm_raise on malformed input
      * (unbound variable, bad special-form syntax, ...); without this,
-     * such a longjmp would skip both arena frees below and leave
-     * gc_inhibit_count unbalanced for the rest of the process -- exactly
-     * the hazard compile_time_eval's own SCM_PROTECT usage documents and
-     * guards against (independent security review). */
+     * such a longjmp would skip both arena frees below (independent
+     * security review). */
     ExnHandler h;
     SCM_PROTECT(h, {
         compile_classic(&old_c, expr, false, line);

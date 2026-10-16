@@ -132,15 +132,11 @@ val_t sx_rule_try(val_t expr) {
     SymExpr *se  = as_symexpr(expr);
     val_t    op  = se->op;
 
-    /* Same count/allocate-outside-lock/copy pattern as sx_rules_list,
-     * for the same reason: sx_rule_try is called on every sx_simplify
-     * for a user-defined operator, so it holds rtab_lock (for reading)
-     * during the count+copy passes below. Under --gc generational, a
-     * minor collection is per-thread, not stop-the-world, and
-     * sx_rules_gc_scan (which mutates rtab) takes rtab_lock for
-     * WRITING -- so a GC_MALLOC while this thread still held the read
-     * lock would self-deadlock trying to promote that read lock's
-     * owner into the scanner's write-lock wait. An earlier version of
+    /* Same count/allocate-outside-lock/copy pattern as sx_rules_list:
+     * sx_rule_try is called on every sx_simplify for a user-defined
+     * operator, and guard_fn/action_fn run arbitrary Scheme code that may
+     * itself add rules, so nothing here holds rtab_lock while calling
+     * back into Scheme or allocating. An earlier version of
      * this function used a fixed 256-entry on-stack array instead
      * (avoiding allocation entirely), but that silently and
      * permanently dropped every rule past the 256th registered for one
@@ -236,18 +232,10 @@ val_t sx_rule_try(val_t expr) {
 typedef struct { val_t pattern, ruleset; } SxRuleDesc;
 
 val_t sx_rules_list(val_t op_filter) {
-    /* Unlike sx_rule_try, scm_cons never calls back into Scheme, so the
-     * usual reentrancy hazard doesn't apply here -- but scm_cons DOES
-     * allocate, and under --gc generational that can trigger a minor GC
-     * on this same thread, which runs sx_rules_gc_scan, which (below)
-     * takes rtab_lock for writing. pthread_rwlock_t is not recursive, so
-     * calling scm_cons while still holding rtab_lock (even for reading)
-     * would risk this exact thread self-deadlocking against itself the
-     * moment a collection actually triggers. Snapshot-then-release, same
-     * pattern as sx_rule_try, sidesteps it: count under the lock (no
-     * allocation), copy under the lock into an already-allocated buffer
-     * (no allocation), then build the result list with scm_cons entirely
-     * outside the lock. */
+    /* Unlike sx_rule_try, scm_cons never calls back into Scheme, but
+     * rtab_lock is still never held while allocating: count under the
+     * lock, copy under the lock into an already-allocated buffer, then
+     * build the result list with scm_cons entirely outside the lock. */
     pthread_rwlock_rdlock(&rtab_lock);
     int count = 0;
     for (int i = 0; i < RTAB_SIZE; i++) {

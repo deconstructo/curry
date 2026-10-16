@@ -432,8 +432,6 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
  * this exact function pointer for Tier 2.5 open-coding. */
 val_t prim_cons(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
-     * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
     Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
     p->hdr.type = T_PAIR; p->hdr.flags = 0;
     p->car = av[0]; p->cdr = av[1];
@@ -2521,10 +2519,8 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     int saved_fc   = vm->frame_count;
     val_t *saved_sp = vm->sp;
     Upvalue *saved_uv = vm->open_upvalues;
-    /* Mirrors SCM_PROTECT's own save/restore triple (eval.h) and
-     * eval_call_cc's identical fix (eval.c) -- see that comment for the
-     * full explanation of why all three (shadow stack, gc_inhibit_count,
-     * g_jit_call_depth) need saving here, not just the shadow stack. */
+    /* Mirrors SCM_PROTECT's own save/restore (eval.h) and eval_call_cc's
+     * identical code (eval.c) -- see that comment. */
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         /* Continuation was invoked — restore VM state and return captured value.
@@ -3329,18 +3325,8 @@ static val_t prim_procedure_closure(int ac, val_t *av, void *ud) {
  * threat model (independent security review, confirmed by inspecting
  * hash_u64 directly).
  *
- * NOT stable under the (experimental, opt-in) `--gc generational`
- * backend: that backend promotes/copies live nursery objects into
- * Boehm's heap, changing the pointer -- and therefore this hash --
- * mid-process for any object that survives a minor collection.
- * Confirmed live: the same object's %object-id changed after enough
- * allocation to trigger a promotion under --gc generational, while
- * staying constant for the entire process under the default (non-
- * moving) Boehm backend. Not fixed here: giving every heap object a
- * real, GC-move-independent identity slot would mean adding a field to
- * every heap type this project has, for the sake of one experimental,
- * non-default backend -- a redesign disproportionate to this feature,
- * not attempted. */
+ * Stable for the life of the object because objects never move. A moving
+ * collector would need a separate identity field for this. */
 static val_t prim_object_id(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     return vfix((intptr_t)val_hash(av[0], SET_CMP_EQ));

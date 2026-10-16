@@ -362,11 +362,8 @@ Two caveats worth knowing about if you lean on this heavily:
   that *continuously* interleaves rule registration with heavy `simplify`
   calls on unrelated operators will see more cache misses than a workload
   that registers its rules up front, though never wrong results.
-- All of the above is validated under the default Boehm GC backend. The
-  experimental `--gc generational` backend has several known, separately
-  tracked correctness gaps unrelated to actor-safety of these registries
-  specifically — stick to the default backend for concurrent workloads
-  until those are resolved.
+- All of the above is validated under the Boehm collector (the only one;
+  the experimental generational backend was removed).
 
 ---
 

@@ -66,8 +66,7 @@ val_t sym_intern(const char *name, uint32_t len) {
         idx = (idx + 1) & mask;
     }
 
-    /* Symbols are permanent (never unintern'd) — use GC_MALLOC_UNCOLLECTABLE so
-     * Boehm never frees them even under the generational GC's GC_disable window. */
+    /* Symbols are permanent (never unintern'd) — GC_MALLOC_UNCOLLECTABLE. */
     Symbol *sym = (Symbol *)GC_MALLOC_UNCOLLECTABLE(sizeof(Symbol) + len + 1);
     sym->hdr.type  = T_SYMBOL;
     sym->hdr.flags = 0;
