@@ -2606,6 +2606,7 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
             n++; a = vcdr(a);
         }
         release_pending_slots(c, saved);
+        check_call_argc(n);   /* operand is one byte (#297 review) */
         emit_ab(c, OP_VALUES, (uint8_t)n, line);
         return;
     }
@@ -2625,6 +2626,7 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
             n++; a = vcdr(a);
         }
         release_pending_slots(c, saved);
+        check_call_argc(n);   /* operand is one byte (#297 review) */
         emit_ab(c, tail ? OP_TAIL_APPLY : OP_APPLY, (uint8_t)n, line); /* n = fn + intermediates + last-list */
         return;
     }

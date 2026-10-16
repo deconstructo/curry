@@ -763,6 +763,12 @@ check "a procedure capturing 300 variables is a compile error" \
       "$limit_code:$(echo "$limit_out" | grep -c 'captures too many variables')" "1:1"
 limit_script upvals200 "(define (f) (let* ($(binds q 200)) ((lambda () (+ (+$(names q 100)) (+ $(names q 200 | cut -d' ' -f102-201))))))) (display (f))"
 check "a procedure capturing 200 variables still works" "$limit_code:$limit_out" "0:200"
+limit_script values300 "(define (g) (call-with-values (lambda () (values$(ones 300))) (lambda a (length a)))) (display (g))"
+check "values with 300 values is a compile error (gave 44 before)" \
+      "$limit_code:$(echo "$limit_out" | grep -c 'too many arguments in one call')" "1:1"
+limit_script applyargs300 "(define (g) (apply list$(ones 300) '(a))) (display (length (g)))"
+check "apply with 300 spread arguments is a compile error" \
+      "$limit_code:$(echo "$limit_out" | grep -c 'too many arguments in one call')" "1:1"
 limit_script apply300 "(display (apply + (make-list 300 1)))"
 check "apply with a 300-element list has no such limit" "$limit_code:$limit_out" "0:300"
 
