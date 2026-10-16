@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792146688971,
+  "lastUpdate": 1792150191600,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -17870,6 +17870,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 70.079,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4fd8719bd231b312401ce35855e80a3b561b0e72",
+          "message": "Merge pull request #296 from deconstructo/fix/jit-correctness-288-289-291\n\nLLVM JIT correctness: map/apply with JIT lambdas, captured set!, crashes, memory (#288 #289 #291 #293 #294 #295)",
+          "timestamp": "2026-10-16T22:29:03+11:00",
+          "tree_id": "eb86c8dcece177fe4a794c0834804f525dae6ee8",
+          "url": "https://github.com/deconstructo/curry/commit/4fd8719bd231b312401ce35855e80a3b561b0e72"
+        },
+        "date": 1792150190419,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.407,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 24.494,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.214,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 29.776,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 132.145,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 259.528,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 60.426,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 80.775,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 65.028,
             "unit": "ms"
           }
         ]
