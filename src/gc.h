@@ -573,6 +573,10 @@ extern size_t    gc_card_table_ncards;
 extern val_t  **gc_dirty_slots;      /* GC_MALLOC_UNCOLLECTABLE array of slot addresses */
 extern size_t   gc_dirty_count;      /* number of valid entries                          */
 extern size_t   gc_dirty_cap;        /* allocated entries in gc_dirty_slots              */
+/* Set once by gc_gen_init before any other thread exists, never changed
+ * after. The barrier tests this instead of gc_dirty_slots, which is now
+ * reassigned under gc_dirty_lock when the buffer grows or shrinks. */
+extern bool     gc_dirty_active;
 extern uint8_t *gc_main_nursery_base;  /* set once by gc_gen_init; NULL under Boehm.
                                          * Issue #220: no longer read by gc_wb_slot's own
                                          * range check (see gc_gen_ptr_in_any_nursery
@@ -597,7 +601,7 @@ bool gc_gen_ptr_in_any_nursery(const void *p);
 
 /* Record `slot` in gc_dirty_slots under gc_dirty_lock, growing the buffer
  * when full (issue #285). Defined in gc_gen.c; only reached when
- * gc_dirty_slots is non-NULL, i.e. under the generational backend. */
+ * gc_dirty_active is true, i.e. under the generational backend. */
 void gc_dirty_record(val_t *slot);
 
 /* ── Write barrier ────────────────────────────────────────────────────────── */
@@ -617,7 +621,7 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
      * that range check alone doesn't guarantee only the main thread ever
      * reaches this branch, and why the lock is scoped to just this rare
      * branch rather than the whole write-barrier call). */
-    if (gc_dirty_slots && vis_ptr(newval)) {
+    if (gc_dirty_active && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
         if (gc_gen_ptr_in_any_nursery(p)) {
             gc_dirty_record(slot);
@@ -663,7 +667,7 @@ static inline void gc_wb_slot(val_t *slot, val_t newval) {
 #ifndef __cplusplus
 static inline void gc_wb_slot_atomic_relaxed(val_t *slot, val_t newval) {
     atomic_store_explicit((_Atomic val_t *)slot, newval, memory_order_relaxed);
-    if (gc_dirty_slots && vis_ptr(newval)) {
+    if (gc_dirty_active && vis_ptr(newval)) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)newval;
         if (gc_gen_ptr_in_any_nursery(p)) {
             gc_dirty_record(slot);

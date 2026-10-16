@@ -1,4 +1,6 @@
-;;; Regression test for issue #285 -- run with --gc generational.
+;;; Regression test for issue #285 -- run with --gc generational and a
+;;; nursery well under 1 MB (ctest uses 256K): `keep` below must force at
+;;; least one minor GC before `v` is defined, or the test passes vacuously.
 ;;;
 ;;; More than 4096 write-barrier records between two minor GCs used to
 ;;; overflow the fixed-size dirty-slot buffer. The collector then skipped
@@ -29,12 +31,22 @@
 (check "vector contents are correct" (equal? (vector-ref v 999) (cons 199999 199999)))
 (check "earlier list is intact" (and (= (length keep) 50000) (= (car keep) 1)))
 
-;; Store-only loop: no allocation, so only the soft limit can trigger a
-;; minor GC. The buffer must not grow for all 2M stores.
+;; Store-only loops: no allocation, so only the barrier's own soft limit
+;; can trigger a minor GC.
+;; 1. The same slot 2M times: recorded once (duplicates are skipped), so
+;;    the buffer stays at one entry.
 (define (store y i) (if (< i 2000000) (begin (vector-set! v 0 y) (store y (+ i 1)))))
-(define before (cdr (assq 'minor-count (gc-stats))))
 (store (cons 'a 'b) 0)
-(check "soft limit requests a minor GC" (> (cdr (assq 'minor-count (gc-stats))) before))
 (check "stored value is correct" (equal? (vector-ref v 0) '(a . b)))
+
+;; 2. 100000 distinct slots: passes the 65536-entry soft limit, which must
+;;    request a minor GC.
+(define big (make-vector 100000 #f))
+(define (fill y i) (if (< i 100000) (begin (vector-set! big i y) (fill y (+ i 1)))))
+(define before (cdr (assq 'minor-count (gc-stats))))
+(fill (cons 'c 'd) 0)
+(check "soft limit requests a minor GC" (> (cdr (assq 'minor-count (gc-stats))) before))
+(check "distinct slots are correct"
+       (and (equal? (vector-ref big 0) '(c . d)) (equal? (vector-ref big 99999) '(c . d))))
 
 (if (> failures 0) (exit 1))

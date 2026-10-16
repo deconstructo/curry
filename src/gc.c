@@ -127,6 +127,7 @@ size_t    gc_card_table_ncards = 0;
 val_t  **gc_dirty_slots      = NULL;
 size_t   gc_dirty_count      = 0;
 size_t   gc_dirty_cap        = 0;
+bool     gc_dirty_active     = false;
 uint8_t *gc_main_nursery_base  = NULL;
 uint8_t *gc_main_nursery_limit = NULL;
 pthread_mutex_t gc_dirty_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -435,7 +436,7 @@ void gc_unregister_stack(void *base) {
 
 void gc_register_ext_scanner(void (*cb)(void)) {
     ensure_ext();
-    if (g_ext_count == 0 && gc_dirty_slots != NULL) {
+    if (g_ext_count == 0 && gc_dirty_active) {
         /* gc_dirty_slots is non-NULL only under --gc generational.  Warn once:
          * minor_gc_lock is non-recursive, so ext_scanners must not allocate
          * from the nursery or they will deadlock. */

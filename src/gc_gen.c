@@ -314,11 +314,55 @@ static void alloc_thread_nursery(void) {
 
 /* ── Dirty-slot buffer allocation ────────────────────────────────────────── */
 
+/* Issue #285 review: every slot in gc_dirty_slots is also in this
+ * open-addressed set, so the same slot is never recorded twice between two
+ * minor GCs. Without it, a store loop that runs while minor GC is inhibited
+ * (inside a primitive's callback, where gc_minor_pending is never acted on)
+ * appended 8 bytes per store with no limit. With it, the buffer holds at
+ * most one entry per distinct slot. An entry is valid only when its epoch
+ * equals dirty_epoch; incrementing dirty_epoch empties the set in O(1).
+ * Plain malloc is enough: the slot addresses are kept alive by
+ * gc_dirty_slots itself. Guarded by gc_dirty_lock. */
+typedef struct { val_t *slot; uint64_t epoch; } DirtySetEntry;
+static DirtySetEntry *dirty_set;
+static size_t         dirty_set_cap;  /* power of two, 2 * gc_dirty_cap */
+static uint64_t       dirty_epoch = 1;
+
+static size_t dirty_set_index(const val_t *slot, size_t cap) {
+    uint64_t h = (uint64_t)(uintptr_t)slot * 0x9E3779B97F4A7C15ull;
+    return (size_t)(h >> 32) & (cap - 1);
+}
+
+/* Inserts `slot`; returns false if it was already present. The caller
+ * keeps the load factor at or below 1/2, so a free entry always exists. */
+static bool dirty_set_insert(val_t *slot) {
+    size_t mask = dirty_set_cap - 1;
+    for (size_t i = dirty_set_index(slot, dirty_set_cap);; i = (i + 1) & mask) {
+        DirtySetEntry *e = &dirty_set[i];
+        if (e->epoch != dirty_epoch) {
+            e->slot  = slot;
+            e->epoch = dirty_epoch;
+            return true;
+        }
+        if (e->slot == slot) return false;
+    }
+}
+
+static void dirty_set_alloc(size_t cap) {
+    DirtySetEntry *ns = (DirtySetEntry *)calloc(cap, sizeof(DirtySetEntry));
+    if (!ns) { fprintf(stderr, "[gc_gen] FATAL: dirty_set OOM\n"); abort(); }
+    free(dirty_set);
+    dirty_set     = ns;
+    dirty_set_cap = cap;
+}
+
 static void init_dirty_slots(void) {
     gc_dirty_slots = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_INIT_CAP * sizeof(val_t *));
     if (!gc_dirty_slots) { fprintf(stderr, "[gc_gen] FATAL: dirty_slots OOM\n"); abort(); }
     gc_dirty_count = 0;
     gc_dirty_cap   = GC_DIRTY_INIT_CAP;
+    dirty_set_alloc(2 * GC_DIRTY_INIT_CAP);
+    gc_dirty_active = true;
 }
 
 /* Issue #285: see GC_DIRTY_INIT_CAP's comment in gc.h. The new array is
@@ -327,6 +371,10 @@ static void init_dirty_slots(void) {
  * the next minor GC processes them). */
 void gc_dirty_record(val_t *slot) {
     pthread_mutex_lock(&gc_dirty_lock);
+    if (!dirty_set_insert(slot)) {          /* already recorded this cycle */
+        pthread_mutex_unlock(&gc_dirty_lock);
+        return;
+    }
     if (__builtin_expect(gc_dirty_count == gc_dirty_cap, 0)) {
         size_t nc = gc_dirty_cap * 2;
         val_t **ns = (val_t **)GC_MALLOC_UNCOLLECTABLE(nc * sizeof(val_t *));
@@ -335,9 +383,18 @@ void gc_dirty_record(val_t *slot) {
         GC_FREE(gc_dirty_slots);
         gc_dirty_slots = ns;
         gc_dirty_cap   = nc;
+        /* Rebuild the set at the new size. `slot` is already in the old set
+         * but not yet in the array, so reinsert it explicitly. */
+        dirty_set_alloc(2 * nc);
+        for (size_t i = 0; i < gc_dirty_count; i++)
+            dirty_set_insert(gc_dirty_slots[i]);
+        dirty_set_insert(slot);
     }
     gc_dirty_slots[gc_dirty_count++] = slot;
-    bool over_soft_limit = gc_dirty_count >= GC_DIRTY_SOFT_LIMIT;
+    /* == not >=: ask once per cycle. A thread whose own nursery is empty
+     * returns early from gc_gen_minor_collect without draining, and would
+     * otherwise retry that at every safepoint. */
+    bool over_soft_limit = gc_dirty_count == GC_DIRTY_SOFT_LIMIT;
     pthread_mutex_unlock(&gc_dirty_lock);
     /* Only a hint: the writing thread collects at its next safepoint
      * (vm.c's L_DISPATCH, eval.c's tail:), which empties the buffer. */
@@ -1334,7 +1391,11 @@ void gc_gen_minor_collect(void) {
     pthread_mutex_lock(&gc_dirty_lock);
     for (size_t i = 0; i < gc_dirty_count; i++)
         *gc_dirty_slots[i] = evacuate(*gc_dirty_slots[i]);
+    /* Clear the used entries: they are interior pointers in an
+     * uncollectable block and would keep dead containers alive. */
+    memset(gc_dirty_slots, 0, gc_dirty_count * sizeof(val_t *));
     gc_dirty_count = 0;
+    dirty_epoch++;                      /* empties dirty_set */
     /* Give back the memory of a large burst; keep a small buffer. */
     if (gc_dirty_cap > GC_DIRTY_SOFT_LIMIT) {
         val_t **ns = (val_t **)GC_MALLOC_UNCOLLECTABLE(GC_DIRTY_INIT_CAP * sizeof(val_t *));
@@ -1342,6 +1403,7 @@ void gc_gen_minor_collect(void) {
             GC_FREE(gc_dirty_slots);
             gc_dirty_slots = ns;
             gc_dirty_cap   = GC_DIRTY_INIT_CAP;
+            dirty_set_alloc(2 * GC_DIRTY_INIT_CAP);
         }
     }
     pthread_mutex_unlock(&gc_dirty_lock);
