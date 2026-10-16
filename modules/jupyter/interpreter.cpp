@@ -521,8 +521,8 @@ nl::json curry_interpreter::shutdown_request_impl(bool /*restart*/) {
  * jupyter-kernel.md's "Execution model". So this callback genuinely
  * runs concurrently with a busy cell. vm_interrupt_request() (src/
  * interrupt.c) sets a cross-thread atomic flag that vm_run()'s dispatch
- * loop checks at every instruction (the same per-instruction safepoint
- * the minor-GC poll and debugger hook already use); when set, it raises
+ * loop checks at every instruction (the same point the debugger hook
+ * uses); when set, it raises
  * an EC_INTERRUPTED condition, which unwinds through execute_request_
  * impl's ordinary SCM_PROTECT the same way any other raised condition
  * does -- no special-casing needed on the execute side. */

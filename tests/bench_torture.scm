@@ -36,8 +36,7 @@
 (define only-phase (flag-value "--phase" argv))
 
 (define bench-gc-tag
-  (let ((e (assoc 'nursery-used (gc-stats))))
-    (if (and e (> (cdr e) 0)) "generational" "boehm")))
+  (symbol->string (gc-mode)))
 
 ;; ── MQTT ─────────────────────────────────────────────────────────────────────
 
@@ -143,14 +142,14 @@
 ; Snapshot GC stats + pause-ring percentiles in one call.
 (define (gc-snap)
   (let* ((s      (gc-stats))
-         (ring   (alist-ref 'pause-ring-us s (make-vector 0)))
+         (ring   (vector-map (lambda (ns) (quotient ns 1000))
+                             (alist-ref 'stw-ring-ns s (make-vector 0))))
          (sorted (vector-copy ring)))
     (vector-sort! sorted <)
-    (list (cons "gc_minor_count"    (alist-ref 'minor-count    s 0))
+    (list (cons "gc_stw_count"      (alist-ref 'stw-count      s 0))
           (cons "gc_major_count"    (alist-ref 'major-count    s 0))
           (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0))
-          (cons "gc_nursery_used"   (alist-ref 'nursery-used   s 0))
-          (cons "gc_minor_max_us"   (alist-ref 'minor-max-us   s 0))
+          (cons "gc_stw_max_us"     (quotient (alist-ref 'stw-max-ns s 0) 1000))
           (cons "gc_pause_p50_us"   (vector-percentile sorted 0.50))
           (cons "gc_pause_p95_us"   (vector-percentile sorted 0.95))
           (cons "gc_pause_p99_us"   (vector-percentile sorted 0.99)))))
@@ -308,7 +307,6 @@
 
 ;; ── Phase 4: Write-barrier storm ──────────────────────────────────────────────
 ;; A large vector in tenured space gets 1M pointer writes per iteration.
-;; Under generational GC this hits the write barrier on every store.
 ;; Under Boehm it stresses cache and dirty-page scanning.
 
 (define wb-vec #f)
@@ -336,7 +334,7 @@
 
 ;; ── Phase 5: Allocation rate benchmark ───────────────────────────────────────
 ;; Pure allocation speed: cons cells as fast as possible.
-;; Shows raw nursery throughput and how quickly major GCs accumulate.
+;; Shows raw allocation throughput and how quickly collections accumulate.
 
 (define (phase-alloc-rate)
   (let lp ((i 0))

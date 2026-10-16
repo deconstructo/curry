@@ -30,7 +30,7 @@ running service (Postgres, MariaDB, Redis, etc.), say so.
 - Curry version (`curry -v`):
 - OS/arch:
 - Build flags used (if built from source), or "Homebrew" / "Homebrew --HEAD":
-- GC backend, if relevant (`--gc boehm` / `--gc generational`):
+- GC settings, if relevant (for example `GC_MARKERS`, `GC_ENABLE_INCREMENTAL`):
 
 ## Anything else
 

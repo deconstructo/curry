@@ -85,17 +85,13 @@ static val_t scm_append_inner(val_t a, val_t b) {
     return scm_cons(vcar(a), scm_append_inner(vcdr(a), b));
 }
 val_t scm_append(val_t a, val_t b) {
-    gc_inhibit_minor();
     val_t r = scm_append_inner(a, b);
-    gc_resume_minor();
     return r;
 }
 
 val_t scm_reverse(val_t lst) {
     val_t r = V_NIL;
-    gc_inhibit_minor();
     while (vis_pair(lst)) { r = scm_cons(vcar(lst), r); lst = vcdr(lst); }
-    gc_resume_minor();
     return r;
 }
 
@@ -436,8 +432,6 @@ static val_t prim_equal(int ac, val_t *av, void *ud) {
  * this exact function pointer for Tier 2.5 open-coding. */
 val_t prim_cons(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
-    /* Allocate first; av[] points into VM stack so GC can update av[0]/av[1].
-     * Re-reading after gc_alloc avoids stale nursery pointers in car/cdr. */
     Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
     p->hdr.type = T_PAIR; p->hdr.flags = 0;
     p->car = av[0]; p->cdr = av[1];
@@ -490,17 +484,13 @@ CXR3(dda, ccdr_chk, ccdr_chk, ccar_chk) CXR3(ddd, ccdr_chk, ccdr_chk, ccdr_chk)
 
 static val_t prim_list(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = V_NIL;
-    gc_inhibit_minor();
     for (int i = ac-1; i >= 0; i--) r = scm_cons(av[i], r);
-    gc_resume_minor();
     return r;
 }
 static val_t prim_list_star(int ac, val_t *av, void *ud) {
     (void)ud; if (ac == 0) return V_NIL;
     val_t r = av[ac-1];
-    gc_inhibit_minor();
     for (int i = ac-2; i >= 0; i--) r = scm_cons(av[i], r);
-    gc_resume_minor();
     return r;
 }
 static val_t prim_length(int ac, val_t *av, void *ud) {
@@ -2529,20 +2519,14 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     int saved_fc   = vm->frame_count;
     val_t *saved_sp = vm->sp;
     Upvalue *saved_uv = vm->open_upvalues;
-    /* Mirrors SCM_PROTECT's own save/restore triple (eval.h) and
-     * eval_call_cc's identical fix (eval.c) -- see that comment for the
-     * full explanation of why all three (shadow stack, gc_inhibit_count,
-     * g_jit_call_depth) need saving here, not just the shadow stack. */
-    void *saved_shadow = gc_shadow_save();
-    int   saved_inhibit = gc_inhibit_save();
+    /* Mirrors SCM_PROTECT's own save/restore (eval.h) and eval_call_cc's
+     * identical code (eval.c) -- see that comment. */
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         /* Continuation was invoked — restore VM state and return captured value.
          * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
          * comment for the full explanation. */
-        gc_shadow_restore(saved_shadow);
-        gc_inhibit_restore(saved_inhibit);
         jit_depth_restore(saved_jit_depth);
         vm->frame_count   = saved_fc;
         vm->sp            = saved_sp;
@@ -3341,18 +3325,8 @@ static val_t prim_procedure_closure(int ac, val_t *av, void *ud) {
  * threat model (independent security review, confirmed by inspecting
  * hash_u64 directly).
  *
- * NOT stable under the (experimental, opt-in) `--gc generational`
- * backend: that backend promotes/copies live nursery objects into
- * Boehm's heap, changing the pointer -- and therefore this hash --
- * mid-process for any object that survives a minor collection.
- * Confirmed live: the same object's %object-id changed after enough
- * allocation to trigger a promotion under --gc generational, while
- * staying constant for the entire process under the default (non-
- * moving) Boehm backend. Not fixed here: giving every heap object a
- * real, GC-move-independent identity slot would mean adding a field to
- * every heap type this project has, for the sake of one experimental,
- * non-default backend -- a redesign disproportionate to this feature,
- * not attempted. */
+ * Stable for the life of the object because objects never move. A moving
+ * collector would need a separate identity field for this. */
 static val_t prim_object_id(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     return vfix((intptr_t)val_hash(av[0], SET_CMP_EQ));
@@ -3443,9 +3417,7 @@ static val_t prim_features(int ac, val_t *av, void *ud) {
 static val_t prim_gc(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; gc_collect(); return V_VOID;}
 static val_t prim_gc_mode(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
-    extern gc_ops_t gc_gen_ops;
-    extern gc_ops_t *gc_ops;
-    return sym_intern_cstr(gc_ops == &gc_gen_ops ? "generational" : "boehm");
+    return sym_intern_cstr("boehm");   /* the only collector */
 }
 static val_t prim_gc_heap_size(int ac, val_t *av, void *ud)  {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_heap_size());}
 static val_t prim_gc_free_bytes(int ac, val_t *av, void *ud) {(void)ac;(void)av;(void)ud; return vfix((intptr_t)gc_free_bytes());}
@@ -3508,45 +3480,43 @@ static val_t prim_gc_set_max_heap(int ac, val_t *av, void *ud) {
     gc_set_max_heap((size_t)vunfix(av[0]));
     return V_VOID;
 }
-/* (gc-stats) → alist of GC counters and the pause ring as a vector of fixnums.
- * Works under both Boehm (minor-count always 0) and generational backends. */
+/* (gc-stats) → alist of Boehm GC counters. Times are in nanoseconds;
+ * stw-ring-ns holds the most recent stop-the-world pauses, oldest first. */
 static val_t prim_gc_stats(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
 
-    /* Pause ring: copy into a Scheme vector */
-    uint64_t ring_buf[GC_PAUSE_RING_N];
-    size_t   ring_n = gc_get_pause_ring(ring_buf);
-    Vector  *rv = CURRY_NEW_FLEX(Vector, (uint32_t)ring_n);
-    rv->hdr.type = T_VECTOR; rv->hdr.flags = 0; rv->len = (uint32_t)ring_n;
-    for (size_t i = 0; i < ring_n; i++)
-        rv->data[i] = vfix((intptr_t)ring_buf[i]);
-    val_t ring_val = vptr(rv);
+    uint64_t stw_buf[GC_STW_RING_N];
+    size_t   stw_n = gc_get_stw_ring(stw_buf);
+    Vector  *sv = CURRY_NEW_FLEX(Vector, (uint32_t)stw_n);
+    sv->hdr.type = T_VECTOR; sv->hdr.flags = 0; sv->len = (uint32_t)stw_n;
+    for (size_t i = 0; i < stw_n; i++)
+        sv->data[i] = vfix((intptr_t)stw_buf[i]);
+    val_t stw_val = vptr(sv);
 
-    /* Nursery used (main thread) */
-    size_t nursery_used = (size_t)(gc_nursery.top - gc_nursery.base);
-
-    /* Build alist front-to-back (will be reversed — canonical key order) */
+    /* Each APAIR conses onto the front, so the last key added is first. */
 #define APAIR(k, v) result = scm_cons(scm_cons(sym_intern_cstr(k), (v)), result)
+#define ALOAD(x) vfix((intptr_t)atomic_load_explicit(&(x), memory_order_relaxed))
     val_t result = V_NIL;
-    APAIR("nursery-used",     vfix((intptr_t)nursery_used));
+    APAIR("stw-ring-ns",      stw_val);
+    APAIR("stw-max-ns",       ALOAD(gc_stat_stw_max_ns));
+    APAIR("stw-total-ns",     ALOAD(gc_stat_stw_total_ns));
+    APAIR("stw-count",        ALOAD(gc_stat_stw_count));
+    APAIR("major-max-ns",     ALOAD(gc_stat_major_max_ns));
+    APAIR("major-total-ns",   ALOAD(gc_stat_major_total_ns));
+    APAIR("major-count",      ALOAD(gc_stat_major_count));
+    APAIR("incremental",      GC_is_incremental_mode() ? V_TRUE : V_FALSE);
+    APAIR("parallel-markers", vfix((intptr_t)GC_get_parallel() + 1));
     APAIR("free-bytes",       vfix((intptr_t)gc_free_bytes()));
     APAIR("heap-size",        vfix((intptr_t)gc_heap_size()));
-    APAIR("pause-ring-us",    ring_val);
-    APAIR("minor-max-us",     vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_max_us,   memory_order_relaxed)));
-    APAIR("minor-total-us",   vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_total_us, memory_order_relaxed)));
-    APAIR("major-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_major_count,    memory_order_relaxed)));
-    APAIR("minor-count",      vfix((intptr_t)atomic_load_explicit(&gc_stat_minor_count,    memory_order_relaxed)));
+#undef ALOAD
 #undef APAIR
     return result;
 }
 
 static val_t prim_gc_stats_reset(int ac, val_t *av, void *ud) {
     (void)ac;(void)av;(void)ud;
-    atomic_store_explicit(&gc_stat_minor_count,    0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_major_count,    0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_minor_total_us, 0, memory_order_relaxed);
-    atomic_store_explicit(&gc_stat_minor_max_us,   0, memory_order_relaxed);
-    gc_reset_pause_ring();
+    atomic_store_explicit(&gc_stat_major_count, 0, memory_order_relaxed);
+    gc_reset_boehm_stats();
     return V_VOID;
 }
 

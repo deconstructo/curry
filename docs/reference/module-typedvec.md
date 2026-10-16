@@ -62,7 +62,7 @@ This is a printed *representation*, not reader syntax — reading `#u8vec(...)`/
 
 ## GC
 
-Typed vectors are allocated atomically (`gc_alloc_atomic`) — the element bytes are never scanned for pointers, matching every other flat numeric buffer type in curry (`F64Vec`, `Bytevector`, `String`). Supported under both the default Boehm backend and the experimental `--gc generational` backend (`src/gc_gen.c` has explicit `T_TYPEDVEC` cases for size computation and marking it pointer-free).
+Typed vectors are allocated atomically (`gc_alloc_atomic`) — the element bytes are never scanned for pointers, matching every other flat numeric buffer type in curry (`F64Vec`, `Bytevector`, `String`).
 
 ## See also
 

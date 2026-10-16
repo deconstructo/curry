@@ -510,7 +510,7 @@ val_t env_new_root(void) {
  * never frees it (Boehm's conservative scan of .data/.bss variables and
  * GC_MALLOC_UNCOLLECTABLE blocks reliably finds ordinary allocations but
  * can miss static pointers inside C .data sections on some macOS arm64
- * configurations when a Boehm GC fires during nursery-fill execution).
+ * configurations).
  * The root frame lives for the entire program lifetime — making it
  * uncollectable is both correct and leak-free.
  */
@@ -530,10 +530,6 @@ static val_t env_new_root_permanent(void) {
     f->hidx    = NULL;
     f->hcap    = 0;
     f->version = 0;
-    /* Register in pinned_slots so scan_pinned_object updates f->vals during
-     * minor GC (required even though the frame is uncollectable). */
-    extern void gc_gen_pin_permanent(void *);
-    gc_gen_pin_permanent(f);
     return vptr(f);
 }
 
@@ -570,8 +566,6 @@ val_t env_slot_load(val_t *slot) {
     return atomic_load_explicit((_Atomic val_t *)slot, memory_order_relaxed);
 }
 
-void env_global_frame_lock_for_gc(void)   { pthread_mutex_lock(&g_global_frame_lock); }
-void env_global_frame_unlock_for_gc(void) { pthread_mutex_unlock(&g_global_frame_lock); }
 
 val_t env_lookup(val_t env, val_t sym) {
     EnvFrame *f = as_env(env);

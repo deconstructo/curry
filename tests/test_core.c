@@ -229,42 +229,24 @@ static void test_continuations(void) {
     CHECK(vis_fixnum(r) && vunfix(r) == 42, "call/cc escape");
 }
 
-/* Regression test for a real gap found by independent code review of the
- * gc_shadow_save/restore fix (eval_call_cc/prim_call_cc, eval.c/builtins.c):
- * SCM_PROTECT saves/restores THREE things around its own setjmp/longjmp --
- * the GC shadow stack, gc_inhibit_count, and g_jit_call_depth -- but the
- * call/cc capture sites only originally gained the first one. Invoking a
- * captured continuation from inside a primitive's own gc_inhibit_minor()/
- * gc_resume_minor() bracket (for-each's C-side dispatch is exactly this
- * shape) longjmps straight past the pending gc_resume_minor(), permanently
- * leaking gc_inhibit_count -- under --gc generational this blocks minor GC
- * on the thread forever (see src/compiler.c's own comment on this exact
- * failure class for a different call site). Covers both execution paths
- * that have their own independent call/cc implementation: eval_call_cc
- * (tree-walker, exercised via run()) and prim_call_cc (compiled VM,
- * exercised via run_vm()). */
-static void test_call_cc_inhibit_count_balanced(void) {
+/* Escaping with a continuation from inside a primitive's own C-side
+ * dispatch (for-each) must return the escaped value. Covers both call/cc
+ * implementations: eval_call_cc (tree-walker, via run()) and prim_call_cc
+ * (compiled VM, via run_vm()). */
+static void test_call_cc_escape_from_for_each(void) {
     {
-        int before = gc_inhibit_save();
         val_t r = run(
             "(call/cc (lambda (k) "
             " (for-each (lambda (x) (if (= x 3) (k 'done))) (list 1 2 3 4 5))))");
-        int after = gc_inhibit_save();
         CHECK(r == sym_intern_cstr("done"),
               "call/cc (tree-walker): escape from inside for-each returns correctly");
-        CHECK(before == after,
-              "call/cc (tree-walker): gc_inhibit_count balanced after escaping from inside for-each");
     }
     {
-        int before = gc_inhibit_save();
         val_t r = run_vm(
             "(call/cc (lambda (k) "
             " (for-each (lambda (x) (if (= x 3) (k 'done))) (list 1 2 3 4 5))))");
-        int after = gc_inhibit_save();
         CHECK(r == sym_intern_cstr("done"),
               "call/cc (compiled VM): escape from inside for-each returns correctly");
-        CHECK(before == after,
-              "call/cc (compiled VM): gc_inhibit_count balanced after escaping from inside for-each");
     }
 }
 
@@ -496,7 +478,7 @@ static void test_ir_self_check(void) {
     }
 
     /* Exception-safety regression: compiler_ir_self_check must not crash
-     * or corrupt gc_inhibit_count when compile() raises mid-way
+     * when compile() raises mid-way
      * (independent security review -- see this function's own
      * SCM_PROTECT comment in compiler.c). A begin with >256 distinct
      * symbols overflows chunk_add_const's compiler-limit check, a
@@ -529,7 +511,6 @@ static void test_ir_self_check(void) {
         val_t port = port_open_input_string(src, (uint32_t)strlen(src));
         val_t expr = scm_read(port);
 
-        int before = gc_inhibit_save();
         ExnHandler h;
         bool raised = false;
         SCM_PROTECT(h, {
@@ -537,9 +518,7 @@ static void test_ir_self_check(void) {
         }, {
             raised = true;
         });
-        int after = gc_inhibit_save();
         CHECK(raised, "ir self-check: >256-constant overflow raises");
-        CHECK(before == after, "ir self-check: gc_inhibit_count balanced after raise");
     }
 }
 
@@ -1012,7 +991,7 @@ static void test_ir_wrapper_elision_stress(void) {
  * bool; this uses its own SCM_PROTECT instead, following the exact same
  * pattern as the `>256-constant overflow raises` case in
  * test_ir_self_check above -- the assertion is that this raises a
- * catchable, well-formed error (and leaves gc_inhibit_count balanced)
+ * catchable, well-formed error
  * rather than corrupting memory or crashing the process.
  *
  * Deliberately its OWN function, not folded into
@@ -1045,7 +1024,6 @@ static void test_ir_wrapper_elision_max_locals_guard(void) {
 
     eval(def_expr, GLOBAL_ENV);  /* curry's own tree-walking Scheme evaluator (src/eval.c), not JS eval */
 
-    int before = gc_inhibit_save();
     ExnHandler h;
     bool raised = false;
     SCM_PROTECT(h, {
@@ -1053,11 +1031,8 @@ static void test_ir_wrapper_elision_max_locals_guard(void) {
     }, {
         raised = true;
     });
-    int after = gc_inhibit_save();
     CHECK(raised,
           "ir optimize-check: 300-binding flat let raises cleanly (no MAX_LOCALS overflow)");
-    CHECK(before == after,
-          "ir optimize-check: gc_inhibit_count balanced after 300-binding let raise");
 }
 
 /* Regression test for a real, confirmed miscompilation found while
@@ -1218,13 +1193,10 @@ static void test_car_cdr_open_coding(void) {
               "open-coded cdr: basic correctness");
     }
 
-    int before = gc_inhibit_save();
     ExnHandler h;
     bool raised = false;
     SCM_PROTECT(h, { run_vm("(car 5)"); }, { raised = true; });
-    int after = gc_inhibit_save();
     CHECK(raised, "open-coded car: wrong-type argument still raises");
-    CHECK(before == after, "open-coded car: gc_inhibit_count balanced after raise");
 
     raised = false;
     SCM_PROTECT(h, { run_vm("(car 1 2)"); }, { raised = true; });
@@ -1464,13 +1436,10 @@ static void test_compiler_ir_lower_for_jit(void) {
     {
         val_t port = port_open_input_string("(if)", 4);
         val_t expr = scm_read(port);
-        int before = gc_inhibit_save();
         IRArena *arena = (IRArena *)(void *)1;  /* poison: must be overwritten */
         IRNode *ir = compiler_ir_lower_for_jit(expr, &arena);
-        int after = gc_inhibit_save();
         CHECK(ir == NULL, "compiler_ir_lower_for_jit: malformed input returns NULL, not a longjmp");
         CHECK(arena == NULL, "compiler_ir_lower_for_jit: malformed input clears *out_arena");
-        CHECK(before == after, "compiler_ir_lower_for_jit: gc_inhibit_count balanced after raise");
     }
 }
 
@@ -1499,12 +1468,9 @@ static void test_compiler_ir_session(void) {
     {
         val_t port = port_open_input_string("(+ 1 2)", 7);
         val_t expr = scm_read(port);
-        int before = gc_inhibit_save();
         IRNode *ir = compiler_ir_session_lower_next(root, expr, false, 1);
-        int after = gc_inhibit_save();
         CHECK(ir != NULL, "session: lower_next returns a tree for ordinary input");
         CHECK(ir && ir->kind == IR_CALL, "session: (+ 1 2) lowers to IR_CALL");
-        CHECK(before == after, "session: gc_inhibit_count balanced after an ordinary lower_next call");
     }
     {
         /* Not (if #t 1 2): ir_optimize's own dead-branch elimination on a
@@ -1541,8 +1507,7 @@ static void test_compiler_ir_session(void) {
         CHECK(ir && ir->kind == IR_CALL, "session: (* x x) in a child session lowers to IR_CALL");
     }
 
-    /* Malformed input mid-session: NULL, gc_inhibit_count still balanced,
-     * and (unlike compiler_ir_lower_for_jit's own one-shot contract) the
+    /* Malformed input mid-session: NULL, and (unlike compiler_ir_lower_for_jit's own one-shot contract) the
      * arena is NOT freed here -- earlier forms already lowered through
      * this session may still be referenced by the caller. Verified by
      * successfully lowering one more well-formed form through the SAME
@@ -1550,11 +1515,8 @@ static void test_compiler_ir_session(void) {
     {
         val_t port = port_open_input_string("(if)", 4);
         val_t expr = scm_read(port);
-        int before = gc_inhibit_save();
         IRNode *ir = compiler_ir_session_lower_next(root, expr, false, 5);
-        int after = gc_inhibit_save();
         CHECK(ir == NULL, "session: malformed input returns NULL, not a longjmp");
-        CHECK(before == after, "session: gc_inhibit_count balanced after a raise mid-session");
 
         val_t port2 = port_open_input_string("(- 5 1)", 7);
         val_t expr2 = scm_read(port2);
@@ -1576,7 +1538,7 @@ static void test_compiler_ir_session(void) {
  * least 19 special forms by direct testing before the fix (require_min_args,
  * compiler.c). This is the regression test for all of them at once: each
  * must now raise a catchable EC_WRONG_NUMBER_OF_ARGUMENTS condition
- * (with gc_inhibit_count left balanced) instead of crashing. Uses run_vm
+ * instead of crashing. Uses run_vm
  * (the real compiled path) rather than compiler_ir_lower_for_jit, since
  * several of these forms (case/when/unless/do/guard/let-values/
  * parameterize/define-record-type) have no IR-native lowering at all and
@@ -1600,16 +1562,12 @@ static void test_special_form_arity_crashes(void) {
         "(with-exception-handler)", "(with-exception-handler (lambda (e) e))",
     };
     for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
-        int before = gc_inhibit_save();
         ExnHandler h;
         bool raised = false;
         SCM_PROTECT(h, { run_vm(forms[i]); }, { raised = true; });
-        int after = gc_inhibit_save();
         char msg[128];
         snprintf(msg, sizeof(msg), "%s: raises cleanly instead of crashing", forms[i]);
         CHECK(raised, msg);
-        snprintf(msg, sizeof(msg), "%s: gc_inhibit_count balanced after raise", forms[i]);
-        CHECK(before == after, msg);
     }
 }
 
@@ -1631,7 +1589,7 @@ int main(void) {
     RUN_TEST(test_tail_calls);
     RUN_TEST(test_closures);
     RUN_TEST(test_continuations);
-    RUN_TEST(test_call_cc_inhibit_count_balanced);
+    RUN_TEST(test_call_cc_escape_from_for_each);
     RUN_TEST(test_sets);
     RUN_TEST(test_hash_tables);
     RUN_TEST(test_records);

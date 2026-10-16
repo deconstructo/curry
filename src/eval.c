@@ -118,29 +118,14 @@ static val_t eval_call_cc(val_t proc) {
     int saved_fc   = vm ? vm->frame_count : 0;
     val_t *saved_sp = vm ? vm->sp : NULL;
     Upvalue *saved_uv = vm ? vm->open_upvalues : NULL;
-    /* Mirrors SCM_PROTECT's own save/restore triple (eval.h) -- a longjmp
-     * back into this frame bypasses every normal-return cleanup between
-     * here and the jump's origin (longjmp restores registers/PC directly,
-     * it doesn't run cleanup attributes or fall through pending restores),
-     * which would otherwise leave all three of these permanently
-     * unbalanced: gc_shadow_stack pointing at expired C stack frames
-     * (matters only under --gc generational), gc_inhibit_count stuck
-     * incremented if the jump crosses a gc_inhibit_minor()/gc_resume_minor()
-     * bracket (e.g. invoking a captured continuation from inside a
-     * primitive like for-each's own C-side dispatch) -- permanently
-     * blocking minor GC on this thread, an unbounded nursery leak, not
-     * just a missed optimization -- and g_jit_call_depth stuck incremented
-     * if the jump crosses a JIT call boundary, permanently downgrading
-     * this closure to the bytecode interpreter for the rest of the
-     * process. Found missing here (only gc_shadow was originally added)
-     * by independent code review after the shadow-stack part of this fix
-     * landed. */
-    void *saved_shadow = gc_shadow_save();
-    int   saved_inhibit = gc_inhibit_save();
+    /* Mirrors SCM_PROTECT's own save/restore (eval.h): a longjmp back into
+     * this frame bypasses every normal-return cleanup between here and the
+     * jump's origin, so the VM state above and g_jit_call_depth must be
+     * restored by hand. Without the latter, a jump across a JIT call
+     * boundary leaves g_jit_call_depth incremented, permanently
+     * downgrading this closure to the bytecode interpreter. */
     int   saved_jit_depth = jit_depth_save();
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
-        gc_shadow_restore(saved_shadow);
-        gc_inhibit_restore(saved_inhibit);
         jit_depth_restore(saved_jit_depth);
         if (vm) {
             vm->frame_count   = saved_fc;
@@ -222,31 +207,10 @@ val_t eval(val_t expr, val_t env) {
      * with ir_emit.c's own unbounded recursion (issue #125) -- see
      * check_c_stack_depth's own comment in runtime.c. */
     check_c_stack_depth("eval");
-    /* Shadow stack: register the two persistent locals so a moving GC can
-     * update them after nursery evacuation.  op/rest are declared here so
-     * they are in scope for GC_AUTOFRAME; goto tail re-assigns them each
-     * iteration without crossing their declarations.
-     * Under Boehm GC_AUTOFRAME is a no-op. */
+    /* op/rest are declared before the tail: label so goto tail can
+     * re-assign them each iteration without crossing their declarations. */
     val_t op = V_NIL, rest = V_NIL;
-    GC_AUTOFRAME(4, &expr, &env, &op, &rest);
 tail:
-    /* Minor GC safe point: all four GC_AUTOFRAME slots are updated by the
-     * collector; op and rest are overwritten before use, so their values here
-     * don't matter.  The provably-live roots (expr, env) are both tracked. */
-    if (__builtin_expect(gc_minor_pending & (gc_inhibit_count == 0), 0)) {
-        gc_minor_pending = false;
-        extern void gc_gen_minor_collect(void);
-        gc_gen_minor_collect();
-    }
-    /* Issue #200 Phase A: cross-thread safepoint poll, eval()'s analog to
-     * vm.c's L_DISPATCH check just above -- see that comment for the full
-     * rationale (same gc_inhibit_count == 0 gate; cheap no-op under the
-     * default Boehm backend). expr/env are the only live roots needed here,
-     * both already tracked by the GC_AUTOFRAME above. */
-    if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-        extern void gc_gen_safepoint(void);
-        gc_gen_safepoint();
-    }
     /* Non-pointer immediates: fixnum (tag=01), char (tag=10), bool/nil/void/eof (tag=11) */
     if (expr & 3) return expr;
     /* Heap object: dispatch on type */
@@ -1128,8 +1092,6 @@ tail:
         val_t result = V_VOID;
         ExnHandler h;
         h.prev = current_handler;
-        h.saved_shadow   = gc_shadow_save();
-        h.saved_inhibit  = gc_inhibit_save();
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
         current_handler = &h;
@@ -1142,8 +1104,6 @@ tail:
             return result;
         }
         current_handler = h.prev;
-        gc_shadow_restore(h.saved_shadow);
-        gc_inhibit_restore(h.saved_inhibit);
         jit_depth_restore(h.saved_jit_depth);
         vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
         val_t exn = h.exn;

@@ -11,7 +11,7 @@
  * pointers are additionally available as  ptr  (opaque pointer, LLVM 15+).
  *
  * Every emitted function has:
- *   attribute gc "curry-generational"  — triggers statepoint stack maps
+ *   attribute gc "curry-statepoint"  — triggers statepoint stack maps
  *   attribute nounwind                 — Scheme unwind uses longjmp, not C++
  *
  * Statepoints

@@ -255,12 +255,7 @@ int chunk_add_const(Chunk *c, val_t v) {
                (size_t)(cap - c->const_len) * sizeof(GlobCacheEntry));
         c->glob_cache = new_gc;
         /* Grow tree_eval_cache the same way, parallel to constants --
-         * see chunk.h's Chunk::tree_eval_cache comment. Unlike
-         * glob_cache this holds real val_t values (not raw pointers), so
-         * it needs gc_alloc_raw_pinned for the same "Boehm traces this"
-         * reason but ALSO needs a gc_gen.c evacuation case (added
-         * alongside T_CHUNK's existing one) for correctness under
-         * --gc generational. */
+         * see chunk.h's Chunk::tree_eval_cache comment. */
         val_t *new_tc = (val_t *)gc_alloc_raw_pinned((size_t)cap * sizeof(val_t));
         if (c->tree_eval_cache)
             memcpy(new_tc, c->tree_eval_cache, (size_t)c->const_len * sizeof(val_t));

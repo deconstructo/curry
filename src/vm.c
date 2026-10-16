@@ -745,17 +745,6 @@ val_t vm_run(BcClosure *top_closure, int argc) {
 #   define CASE(op)  case op:
 #   define NEXT      break
     for (;;) {
-        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
-            gc_minor_pending = false;
-            extern void gc_gen_minor_collect(void);
-            gc_gen_minor_collect();
-        }
-        /* Issue #200 Phase A: see the identical comment at the computed-goto
-         * L_DISPATCH label above -- same safepoint poll, same gate. */
-        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-            extern void gc_gen_safepoint(void);
-            gc_gen_safepoint();
-        }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         /* Same interrupt safepoint as the computed-goto L_DISPATCH below --
          * see the comment there. Without this, a build on a compiler
@@ -1187,16 +1176,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
-                    /* Inhibit minor GC for the duration of the JIT call.
-                     * JIT'd code holds intermediate nursery pointers in registers
-                     * and alloca slots that the GC cannot enumerate without full
-                     * stackmap support.  While inhibited, nursery overflow falls
-                     * back to Boehm rather than moving objects under JIT code. */
-                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
-                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     PUSH(result);
@@ -1244,11 +1226,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
-                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
-                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2 + 1;
                     if (pop_frame(&frame, result)) return *--vm->sp;
@@ -1313,11 +1293,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 val_t *call_args = vm->sp - argc2;
                 typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                 g_jit_call_depth++;
-                gc_inhibit_minor();
                 val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                      (uint64_t *)call_args,
                                                                      (uint64_t *)jc->caps);
-                gc_resume_minor();
                 g_jit_call_depth--;
                 vm->sp -= argc2;
                 if (pop_frame(&frame, result)) return *--vm->sp;
@@ -1378,11 +1356,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
-                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
-                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2;
                     PUSH(result);
@@ -1437,11 +1413,9 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                     val_t *call_args = vm->sp - argc2;
                     typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
                     g_jit_call_depth++;
-                    gc_inhibit_minor();
                     val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
                                                                          (uint64_t *)call_args,
                                                                          (uint64_t *)jc->caps);
-                    gc_resume_minor();
                     g_jit_call_depth--;
                     vm->sp -= argc2;
                     if (pop_frame(&frame, result)) return *--vm->sp;
@@ -1502,22 +1476,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
              * atomics on the slot itself so the race is well-defined
              * instead of relying on that coincidence.
              *
-             * Deliberately do NOT also call gc_wb_slot() on this slot
-             * (independent security review caught this: an earlier
-             * version called both gc_wb_slot() -- a plain, non-atomic
-             * `*slot = newval` -- and the atomic store below on the same
-             * slot, which is undefined behavior under C11 regardless of
-             * whether the two writes agree, and gc_wb_slot's own dirty-
-             * slot bookkeeping (gc_dirty_slots/gc_dirty_count, gc.h) is
-             * itself unsynchronized, so a future value that actually took
-             * its vis_ptr(newval) branch concurrently from two racing
-             * actor threads would corrupt that fixed-size array via an
-             * unlocked, non-atomic gc_dirty_count++). No write barrier is
-             * needed here in the first place: unlike a general heap
-             * mutation, this array is fully re-scanned every minor GC via
-             * gc_gen.c's T_CHUNK evacuation case (every chunk is a pinned
-             * Boehm object, walked in full each pass), so there is no
-             * "remembered set" for the barrier to populate. */
+             * Deliberately NOT gc_wb_slot(): that is a plain store, and
+             * mixing it with the atomic store below on the same slot is
+             * undefined behavior under C11 (found by independent security
+             * review). Every value cached here is the immediate V_VOID, so
+             * no barrier is needed; if this cache ever holds heap
+             * objects, a concurrent collector would need an atomic
+             * barrier variant here. */
             uint8_t ci = READ_U8();
             Chunk *chunk = frame->closure->chunk;
             _Atomic val_t *slot = chunk->tree_eval_cache
@@ -1956,34 +1921,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         }
 
 #ifdef __GNUC__
-    /* Minor-GC safepoint: fires between instructions, after the current op has
-     * fully committed its result to vm->stack and before the next op begins.
-     * At this point all Scheme values are on vm->stack[0..sp) — the registered
-     * GC root range — so gc_gen_minor_collect() sees every live root. */
+    /* Between instructions: the current op has committed its result to
+     * vm->stack and the next op has not started. A collector that needs a
+     * per-thread safe point would poll here and at eval.c's tail: label. */
     L_DISPATCH:
-        if (__builtin_expect(gc_minor_pending, 0) && gc_inhibit_count == 0) {
-            gc_minor_pending = false;
-            extern void gc_gen_minor_collect(void);
-            gc_gen_minor_collect();
-        }
-        /* Issue #200 Phase A: cross-thread safepoint poll, alongside this
-         * thread's own gc_minor_pending self-collection check above. Same
-         * gc_inhibit_count == 0 gate -- a thread mid-primitive-call (which
-         * may transiently hold a subsystem lock like rtab_lock/pinned_lock)
-         * is never asked to pause until it returns here with the inhibit
-         * count back at zero, so a pending gc_gen_stop_the_world() request
-         * naturally waits out any in-flight critical section instead of
-         * racing it. gc_gen_safepoint() itself is a cheap no-op check under
-         * the default Boehm backend (gc_stop_world is never set to 1 by
-         * anything outside the generational backend). */
-        if (__builtin_expect(gc_inhibit_count == 0, 1)) {
-            extern void gc_gen_safepoint(void);
-            gc_gen_safepoint();
-        }
         if (__builtin_expect(vm_debug_active, 0)) vm_debug_hook(frame);
         /* Cross-thread interrupt request (e.g. the Jupyter kernel's
-         * control-channel handler, on its own thread) -- same safepoint,
-         * same gate as the minor-GC poll and the debugger hook above.
+         * control-channel handler, on its own thread) -- same point as
+         * the debugger hook above.
          * Raising here unwinds through the ordinary ExnHandler/
          * SCM_PROTECT longjmp path like any other Scheme exception. */
         if (__builtin_expect(vm_interrupt_pending(), 0) && vm_interrupt_pending_and_clear())

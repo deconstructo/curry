@@ -1,19 +1,17 @@
 /*
- * curry-generational GC strategy.
+ * curry-statepoint GC strategy.
  *
  * LLVM's statepoint-based GC infrastructure requires a named GC strategy
  * registered via the GCRegistry.  Our strategy:
  *
  *  - Uses statepoints (not shadow-stack / explicit roots).
  *  - Requests stack-map emission so the runtime GC can walk roots.
- *  - Does NOT perform read/write barrier insertion in LLVM (Boehm bootstrap
- *    phase is conservative; the generational collector will add barriers via
- *    llvm.gcwrite at codegen time once it replaces Boehm).
+ *  - Does NOT insert read/write barriers in LLVM: Boehm scans conservatively
+ *    and needs none.
  *  - Sets InitialLoweringRequired=true so PlaceSafepointsPass runs.
  *
- * When the generational collector is ready, add:
- *   customReadBarriers()  / customWriteBarriers() overrides here, and
- *   emit llvm.gcwrite at every heap-pointer store in codegen.cpp.
+ * A future concurrent collector would add customWriteBarriers() here and
+ * emit llvm.gcwrite at every heap-pointer store in codegen.cpp.
  */
 
 #include "gc_strategy.h"
@@ -39,10 +37,10 @@ public:
     }
 };
 
-/* Register with the global GCRegistry so LLVM can look up "curry-generational"
+/* Register with the global GCRegistry so LLVM can look up "curry-statepoint"
  * as a named gc attribute on functions. */
 static GCRegistry::Add<CurryGCStrategy>
-    X("curry-generational", "Curry generational GC strategy");
+    X("curry-statepoint", "Curry statepoint GC strategy");
 
 void register_gc_strategy(void) {
     /* The GC_REGISTRY_ADD_GCSTRATEGY macro creates a static constructor that

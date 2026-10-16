@@ -125,12 +125,6 @@ static void execute_item(WorkItem *item) {
     h.saved_jit_depth = jit_depth_save();
     current_handler = &h;
 
-    /* Worker threads have no shadow stack and no registered roots for C-local
-     * val_t variables.  Inhibit minor GC for the duration of the work item so
-     * intermediate nursery pointers (e.g. the scm_cons arg pairs and REDUCE's
-     * acc) are not silently invalidated by a nursery reset. */
-    gc_inhibit_minor();
-
     if (setjmp(h.jmp) == 0) {
         switch (item->kind) {
         case WORK_MAP:
@@ -162,7 +156,6 @@ static void execute_item(WorkItem *item) {
         item->exn   = h.exn;
     }
 
-    gc_resume_minor();
 
     /* Signal one completion to the dispatcher. */
     pthread_mutex_lock(item->done_mutex);
@@ -214,14 +207,13 @@ static void *worker_loop(void *arg) {
             execute_item(item);
         } else {
             atomic_fetch_add(&global_pool->n_parked, 1);
-            /* Issue #200 Phase A: this can block indefinitely with no work
-             * arriving -- park so a future GC safepoint doesn't wait on
-             * this thread for as long as that takes (see gc.h's own
-             * comment on gc_gen_thread_park/unpark; distinct from this
-             * function's own "parked" terminology for idle workers). */
-            gc_gen_thread_park();
+            /* Can block indefinitely with no work arriving: gc-park so a
+             * collector does not wait on this thread (see gc.h on
+             * gc_thread_park/unpark; distinct from this function's own
+             * "parked" terminology for idle workers). */
+            gc_thread_park();
             pthread_cond_wait(&global_pool->park_cond, &global_pool->park_mutex);
-            gc_gen_thread_unpark();
+            gc_thread_unpark();
             atomic_fetch_sub(&global_pool->n_parked, 1);
             pthread_mutex_unlock(&global_pool->park_mutex);
         }
@@ -236,9 +228,8 @@ void pool_init(void) {
     if (global_pool) return;
 
     int n = pool_hw_concurrency();
-    /* WorkPool lives for the process lifetime and is pointed to by the raw C
-     * global `global_pool`.  It must be pinned so the generational GC never
-     * moves it and leaves `global_pool` dangling after a nursery reset. */
+    /* WorkPool lives for the process lifetime; the global `global_pool`
+     * keeps it (and the deques and work items it points to) reachable. */
     global_pool = gc_alloc_raw_pinned(sizeof(WorkPool));
     global_pool->n_workers = n;
     global_pool->threads   = gc_alloc_raw_pinned(n * sizeof(pthread_t));
@@ -299,8 +290,7 @@ WorkItem **pool_submit(WorkKind kind, val_t fn,
     int pos = 0;
     for (int c = 0; c < nchunks; c++) {
         int sz = (n - pos) / (nchunks - c);
-        /* WorkItem is pointed to by a raw C pointer in the deque's buf[].
-         * Pin it so the deque pointer stays valid across nursery resets. */
+        /* Reachable through the deque's buf[] (GC memory, via global_pool). */
         WorkItem *item = gc_alloc_raw_pinned(sizeof(WorkItem));
         *item = (WorkItem){
             .kind       = kind,

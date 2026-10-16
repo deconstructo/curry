@@ -226,9 +226,8 @@ The test suites registered in `ctest`:
   -v         Print version
   --timings  Print a read/expand/compile/execute pipeline timing report
              to stderr on exit (plus a cache HIT/MISS line for script runs)
-  --gc BACKEND          GC backend: boehm (default) or generational (experimental)
+  --gc boehm            Accepted for compatibility; Boehm is the only collector
   --gc-max-heap N       Limit GC heap (suffixes K/M/G; 0 = unlimited)
-  --gc-nursery-size N   Per-thread nursery size (requires --gc generational)
 ```
 
 Passing a `.scc` file as the positional argument runs it directly from bytecode without needing the original `.scm` source.

@@ -30,8 +30,7 @@
 (define bench-label (or (flag-value "--label" argv) ""))
 
 (define bench-gc-tag
-  (let ((e (assoc 'nursery-used (gc-stats))))
-    (if (and e (> (cdr e) 0)) "generational" "boehm")))
+  (symbol->string (gc-mode)))
 
 ;; ── MQTT ────────────────────────────────────────────────────────────────────
 
@@ -110,16 +109,15 @@
 
 (define (gc-stats-snapshot)
   (let ((s (gc-stats)))
-    (list (cons "gc_minor_count"    (alist-ref 'minor-count    s 0))
+    (list (cons "gc_stw_count"      (alist-ref 'stw-count      s 0))
           (cons "gc_major_count"    (alist-ref 'major-count    s 0))
-          (cons "gc_minor_total_us" (alist-ref 'minor-total-us s 0))
-          (cons "gc_minor_max_us"   (alist-ref 'minor-max-us   s 0))
-          (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0))
-          (cons "gc_nursery_used"   (alist-ref 'nursery-used   s 0)))))
+          (cons "gc_stw_total_us"   (quotient (alist-ref 'stw-total-ns s 0) 1000))
+          (cons "gc_stw_max_us"     (quotient (alist-ref 'stw-max-ns   s 0) 1000))
+          (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0)))))
 
 (define (gc-p99-us)
   (let* ((s   (gc-stats))
-         (ring (alist-ref 'pause-ring-us s (vector)))
+         (ring (vector-map (lambda (ns) (quotient ns 1000)) (alist-ref 'stw-ring-ns s (vector))))
          (n   (vector-length ring)))
     (if (= n 0) 0
         (let ((sv (vector-copy ring)))
@@ -214,7 +212,7 @@
 ;;
 ;; These are calibrated to produce hundreds of major GC collections per run.
 
-;; 5M short-lived pairs — nursery thrash, many minor GC cycles
+;; 5M short-lived pairs — allocation churn, many collections
 (define (bench-alloc-short-heavy)
   (let lp ((i 5000000))
     (when (> i 0)

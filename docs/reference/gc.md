@@ -1,144 +1,24 @@
 # Garbage Collector Reference
 
-Curry has two GC backends selectable at startup via `--gc`:
+Curry uses the [Boehm–Demers–Weiser](https://www.hboehm.info/gc/) garbage
+collector: conservative, non-moving, thread-safe, with parallel marking.
 
-| Flag | Backend | Moving? | Default? |
-|------|---------|---------|---------|
-| `--gc boehm` | Boehm conservative GC | No | Yes |
-| `--gc generational` | Generational (nursery + Boehm tenured) | Nursery only | No |
+- **Non-moving:** an object stays at the same address for its whole life. A
+  C pointer to a live object never goes stale, and `%object-id` is stable.
+- **Conservative:** Boehm scans the C stacks, registers, global data and
+  GC-allocated memory, and treats any word that looks like a pointer into
+  the heap as one. C code can keep Scheme values in local variables, in
+  GC-allocated structs and in globals without registering anything.
+- **Stop-the-world:** each collection stops all registered threads while it
+  marks. Pause length grows with the amount of live data (see
+  [Pause times](#pause-times)).
 
-Both implement the same `gc_ops_t` vtable, so C extension modules work unchanged under either backend.
-
----
-
-## Boehm (default)
-
-Conservative, stop-the-world, non-moving. All allocations go directly through
-`GC_MALLOC` / `GC_MALLOC_ATOMIC`. No configuration required.
-
-```
-curry script.scm              # Boehm (default)
-curry --gc boehm script.scm   # explicit
-```
-
-The conservative scan covers the C stack, global data segments, and all
-`GC_MALLOC_UNCOLLECTABLE` blocks. No write barriers. No root registration
-required for stack-resident pointers.
-
----
-
-## Generational
-
-A two-generation design:
-
-- **Gen 0 (nursery):** per-thread bump-pointer slab (default 512 KB, `GC_MALLOC_UNCOLLECTABLE`). Allocation is a single pointer increment — no lock, no function call.
-- **Gen 1 (tenured):** Boehm GC. Objects promoted from the nursery via `memcpy` into `GC_MALLOC` blocks.
-
-```
-curry --gc generational script.scm
-curry --gc gen script.scm          # shorthand
-```
-
-### Minor GC
-
-A minor collection fires when the nursery is exhausted and the thread is at a
-safe-point (between bytecode instructions, outside the tree-walking evaluator).
-It runs stop-the-world under a `GC_disable()` / `GC_enable()` bracket:
-
-1. Snapshot nursery extent.
-2. Evacuate shadow-stack roots (tree-walker eval frames).
-3. Evacuate VM value-stack slots.
-4. Evacuate registered `val_t` roots.
-5. BFS drain — scan promoted objects for nursery references.
-6. Scan pinned objects for cross-heap (tenured → nursery) references.
-7. Call registered external scanner callbacks.
-8. Second BFS drain.
-9. Zero and reset nursery.
-10. Clear write-barrier card table.
-
-Boehm manages the tenured generation; a major Boehm collection is triggered
-as normal by allocation pressure after `GC_enable()` returns.
-
-### Object classes
-
-**GC:MOVE** — allocated in the nursery, evacuated to Boehm on minor GC:
-`Pair`, `Vector`, `String`, `Bytevector`, `Flonum`, `Complex`,
-`Quaternion`, `Octonion`, `F64Vec`, `Values`, `Matrix`, `Tensor`,
-`Multivector`, `Spinor`, `SymVar`, `SymExpr`, `Surreal`, `Quantum`,
-`Tuple (up/down)`, `Record`, `RecordType`, `Set`, `Hashtable`,
-`Promise`, `Parameter`, `Traced`, `Syntax`, `ErrorObj`, `Condition`,
-`Restart`, `SymFn`, `CPtr`.
-
-**GC:PIN** — allocated directly in Boehm (`GC_MALLOC`), never moved:
-`Symbol`, `Bignum`, `Rational`, `Mpfr`, `Port`, `Primitive`,
-`BcClosure`, `Chunk`, `Upvalue`, `EnvFrame`, `Closure`, `Module`,
-`Actor`, `Mailbox`, `TVar`, `Channel`, `Continuation`,
-`ForeignLib`, `ForeignFn`, `JitClosure`.
-
-Pinned objects with pointer fields are tracked in an internal `pinned_slots`
-array.  After each minor GC the slots are nulled, releasing Boehm's reference
-so that dead pinned objects (closures, environments, upvalues that are no
-longer reachable from any live root) can be collected by the next Boehm major
-GC cycle.
-
-Pinned objects are registered in an internal `pinned_slots` array so that
-their `val_t` fields are updated during each minor GC.
-
-### Safe-point discipline
-
-Minor GC only fires when **both** conditions hold:
-
-- `gc_shadow_stack == NULL` — the tree-walking evaluator is not active.
-- `gc_inhibit_count == 0` — no inhibit guard is held.
-
-The bytecode VM dispatch loop is the primary safe-point. Allocations that
-occur inside the reader, compiler, or tree-walker fall back to Boehm directly.
-
-**LLVM JIT interaction**: when the JIT backend is enabled (`-DBUILD_LLVM=ON`),
-every call site in JIT-compiled code is wrapped in an
-`llvm.experimental.gc.statepoint`.  Each statepoint automatically inhibits
-minor GC before the call and resumes it after, preventing the collector from
-seeing stale nursery pointers in JIT alloca slots that are not yet enumerated
-in the statepoint's GC-args list.  If a Scheme exception (`scm_raise`) unwinds
-through a JIT frame via `longjmp`, `SCM_PROTECT` restores `gc_inhibit_count`
-to its pre-entry value so the counter is never permanently elevated.
-
-### Nursery size
-
-The default 512 KB nursery holds roughly 16 000 pairs. It can be adjusted
-with `--gc-nursery-size BYTES`:
-
-```
-curry --gc generational --gc-nursery-size 4194304 script.scm  # 4 MB
-```
-
-### Known limitations
-
-**Bignum-heavy workloads are slower than Boehm.** The generational GC
-assumes most objects are short-lived (the "generational hypothesis"). Bignum
-(`T_BIGNUM`) arithmetic — such as Collatz sequences starting from large
-numbers — allocates many objects that survive multiple minor GC cycles, making
-evacuation expensive. Measured overhead in this regime is approximately 60%
-vs. Boehm. For bignum-intensive programs, use the default Boehm backend.
-
-**The generational hypothesis is workload-dependent.** Programs dominated
-by list processing and short-lived functional values benefit from the nursery.
-Programs with large live sets or long-lived allocations (numerical
-simulations accumulating results, programs with many persistent actors) may
-see no benefit or a small regression.
-
-### When to use `--gc generational`
-
-Use it for programs that:
-- Build and discard many short-lived list structures.
-- Do functional-style tree transformations (CAS rewrites, symbolic computation).
-- Are allocation-heavy but with low survivor rates (most allocated objects
-  become unreachable before the next minor GC).
-
-Stick with Boehm (default) for:
-- Bignum / arbitrary-precision arithmetic.
-- Programs that accumulate large live sets.
-- Programs where allocation is infrequent (most compute is on fixnums).
+`--gc boehm` is accepted on the command line for compatibility. The
+experimental generational backend (`--gc generational`, `--gc-nursery-size`)
+was removed: it moved objects that other threads could still see (issue
+#226), depended on every C store going through the write barrier (#285,
+#286), and measured no faster than Boehm. Passing either option now exits
+with an error that says so.
 
 ---
 
@@ -146,106 +26,96 @@ Stick with Boehm (default) for:
 
 All procedures below are available without any import form.
 
----
-
 ### `(gc)`
 
-Force an immediate collection. Under Boehm calls `GC_gcollect()`; under
-generational triggers a minor GC followed by a Boehm major collection.
-Returns `#<void>`.
-
-```scheme
-(gc)
-```
-
----
+Force a full collection (`GC_gcollect()`). Returns `#<void>`.
 
 ### `(gc-mode)`
 
-Return a symbol identifying the active GC backend: `boehm` or `generational`.
+Always returns the symbol `boehm`.
 
-```scheme
-(gc-mode)   ; ⇒ boehm
-```
+### `(gc-heap-size)`, `(gc-free-bytes)`, `(gc-total-bytes)`
 
----
-
-### `(gc-heap-size)`
-
-Return the current Boehm heap size in bytes (fixnum).
-
----
-
-### `(gc-free-bytes)`
-
-Return the estimated free bytes in the Boehm heap (fixnum).
-
----
-
-### `(gc-total-bytes)`
-
-Return total bytes allocated since process start (fixnum).
-
----
+Current heap size, estimated free bytes in the heap, and total bytes
+allocated since the process started (fixnums).
 
 ### `(gc-stats)`
 
-Return an alist of GC statistics for the current run.  All counters are reset
-by `(gc-stats-reset!)` and accumulate until the next reset.
+An alist of collector statistics. Times are in nanoseconds.
 
 ```scheme
 (gc-stats)
-; ⇒ ((minor-count    . 3)
-;     (major-count    . 1)
-;     (minor-total-us . 55)
-;     (minor-max-us   . 32)
-;     (pause-ring-us  . #(32 12 11))   ; last ≤256 minor GC pause times, µs
-;     (heap-size      . 9125888)
-;     (free-bytes     . 2293760)
-;     (nursery-used   . 32304))
+; ⇒ ((heap-size        . 16769024)
+;     (free-bytes       . 4374528)
+;     (parallel-markers . 10)
+;     (incremental      . #f)
+;     (major-count      . 16)
+;     (major-total-ns   . 120850000)
+;     (major-max-ns     . 11809000)
+;     (stw-count        . 16)
+;     (stw-total-ns     . 110680000)
+;     (stw-max-ns       . 10729000)
+;     (stw-ring-ns      . #(612000 598000 ...)))
 ```
 
-`minor-count` and `minor-*-us` fields are 0 under `--gc boehm` (no minor
-GC).  `nursery-used` is 0 under Boehm; a non-zero value confirms the
-generational backend is active.
-
-The `pause-ring-us` vector holds the last 256 minor GC pause times in
-microseconds, oldest to newest.  Use it to compute p50/p95/p99 pause
-percentiles without sorting the full history.
-
----
+| Key | Meaning |
+|---|---|
+| `major-count`, `major-total-ns`, `major-max-ns` | Whole collections: count, total and longest duration. Boehm does not report these in incremental mode, so they stay 0 there. |
+| `stw-count`, `stw-total-ns`, `stw-max-ns` | Stop-the-world intervals: the pauses every thread sees. In incremental mode one collection is split into several of them. |
+| `stw-ring-ns` | The last 1024 stop-the-world durations, oldest first. Sort it for percentiles. |
+| `parallel-markers` | Number of marker threads (Boehm uses one per core by default; set with the `GC_MARKERS` environment variable). |
+| `incremental` | `#t` when Boehm's incremental mode is on. |
 
 ### `(gc-stats-reset!)`
 
-Zero all `gc-stats` counters and clear the pause ring.  Call before each
-benchmark run to isolate measurements.
-
-```scheme
-(gc-stats-reset!)
-(my-benchmark)
-(display (gc-stats))
-```
-
----
+Zero all counters and clear the ring. Call before a benchmark run.
 
 ### `(gc-enable-incremental!)`
 
-Switch Boehm to incremental (step-by-step) collection mode. Reduces
-stop-the-world pause length at the cost of slightly higher overall overhead.
-No-op if already incremental.
-
----
+Switch Boehm to incremental mode: a collection is done in several shorter
+stop-the-world steps. See [Pause times](#pause-times) for when this helps
+and when it hurts. The environment variable `GC_ENABLE_INCREMENTAL=1` does
+the same from process start, and `GC_PAUSE_TIME_TARGET=<ms>` sets the target
+step length (Boehm's default is 15 ms).
 
 ### `(gc-set-free-space-divisor! n)`
 
-Set Boehm's free-space divisor (default 3). Higher values trigger GC more
-aggressively, reducing heap size at the cost of more frequent pauses.
-
----
+Boehm's free-space divisor (default 3). Higher values collect more often
+and keep the heap smaller.
 
 ### `(gc-set-max-heap! bytes)`
 
-Cap the Boehm heap at `bytes` bytes. Pass `0` for no limit (default).
+Cap the heap at `bytes` bytes. `0` means no limit (default). Same as the
+`--gc-max-heap N` command-line option (suffixes K/M/G).
+
+---
+
+## Pause times
+
+Measured on an Apple M1 Max (10 cores), Boehm 8.2.12, median of 5 runs per
+setting. "max pause" is the longest stop-the-world interval.
+
+| Workload | default | `GC_ENABLE_INCREMENTAL=1 GC_PAUSE_TIME_TARGET=5` | `GC_MARKERS=1` |
+|---|---|---|---|
+| short-lived allocation, small heap | 1.3 ms max, 4.1 s | 1.6 ms max, 4.8 s | 1.3 ms max, 4.1 s |
+| ~3M live pairs, 314 MB heap | **91 ms** max, 4.3 s | **5.1 ms** max, 4.3 s | 68 ms max, 4.3 s |
+| old objects pointing to new ones, ~1M live pairs | 11.8 ms max, 1.5 s | 5.1 ms max, 1.7 s | 13.5 ms max, 1.5 s |
+| 6 actors allocating | 0.8 ms max, **1.24 s** | 1.6 ms max, 1.94 s | 1.5 ms max, **0.59 s** |
+| parallel `map` (work pool) | 1.1 ms max, **5.65 s** | 2.8 ms max, 9.30 s | 2.4 ms max, **2.28 s** |
+
+What this shows:
+
+- Pauses grow with the amount of live data, not with the allocation rate.
+- Incremental mode with a 5 ms target cuts long pauses on large heaps by
+  more than 10× at about the same total time, but makes programs with many
+  threads 55–80% slower (Boehm's incremental mode tracks changed pages with
+  memory protection).
+- With many Scheme threads (actors, the work pool), one marker thread was
+  2–2.5× faster than Boehm's default of one per core, even though each
+  pause was longer.
+
+These are measurements of one machine; check your own workload with
+`(gc-stats)` before changing settings.
 
 ---
 
@@ -254,91 +124,105 @@ Cap the Boehm heap at `bytes` bytes. Pass `0` for no limit (default).
 ### Allocation
 
 ```c
-void *gc_alloc(size_t n);              /* GC:MOVE — goes to nursery */
-void *gc_alloc_atomic(size_t n);       /* GC:MOVE, no interior pointers */
-void *gc_alloc_pinned(size_t n);       /* GC:PIN — Boehm uncollectable */
+void *gc_alloc(size_t n);                   /* may contain GC pointers   */
+void *gc_alloc_atomic(size_t n);            /* pointer-free data         */
+void *gc_alloc_pinned(size_t n);            /* same as gc_alloc today     */
 void *gc_alloc_pinned_atomic(size_t n);
-void *gc_alloc_raw_pinned(size_t n);   /* raw array, no Hdr, no pinned-list */
+void *gc_alloc_raw_pinned(size_t n);        /* untyped helper arrays      */
 void *gc_alloc_raw_pinned_atomic(size_t n);
 ```
 
-Convenience macros: `CURRY_NEW(T)`, `CURRY_NEW_PINNED(T)`,
-`CURRY_NEW_FLEX(T, n)`, `CURRY_NEW_FLEX_PINNED(T, n)`.
+The scanned variants return zeroed memory; the `_atomic` variants do not,
+so initialize every byte. Use the `_atomic` variants for data that never
+holds pointers (strings, numbers, byte buffers): Boehm does not scan it, so
+it cannot keep other objects alive by accident. The `_pinned` variants mean
+"must never move"; they are identical to the others today, but keep using
+them for objects with mutexes, GMP data, `FILE *`, `jmp_buf`, or raw C
+pointers held from outside the heap.
+
+Macros: `CURRY_NEW(T)`, `CURRY_NEW_FLEX(T, n)`, `CURRY_NEW_ATOM(T)`,
+`CURRY_NEW_PINNED(T)`, and their `_FLEX` / `_ATOM` combinations.
+
+Memory from `malloc`, C++ `new`, and thread-local storage is **not scanned**.
+A Scheme value stored only there can be collected while still in use.
 
 ### Root registration
 
 ```c
-void gc_register_root(val_t *slot);    /* register a val_t GC root */
-void gc_unregister_root(val_t *slot);
-void gc_register_stack(void *base, void **sp_ptr);  /* register a val_t stack */
-void gc_unregister_stack(void *base);
-void gc_register_ext_scanner(void (*cb)(void));     /* external scanner */
+void gc_register_root(void *slot);
+void gc_register_root_val(void *slot, val_t v);  /* store v, then register */
+void gc_unregister_root(void *slot);
 ```
 
-Under Boehm, root registration is supplementary — the conservative scan
-already covers stack and global data. Under the generational backend,
-registered roots are evacuated explicitly during minor GC.
+Registration keeps a copy of the slot's value **at the moment of
+registration** alive, until `gc_unregister_root`. It does not follow later
+changes to the slot. So:
 
-**Important:** `gc_register_root` registers the *slot address* as a root
-range.  Boehm reads the 8 bytes at the slot on every GC cycle and follows
-whatever heap pointer is currently stored there — so slot reassignments are
-automatically visible to subsequent collections.  Do not try to also
-register the pointed-to object's first bytes; those bytes are the `Hdr
-{type, flags}` header (a small integer), which Boehm would misinterpret as
-a near-null pointer candidate and crash on.
+- A slot in a global, a static array, a GC-allocated struct, or
+  `GC_MALLOC_UNCOLLECTABLE` memory needs no registration: Boehm scans it.
+- A slot in `malloc`/`new` memory that is set once and never changed:
+  register it after storing the value (or use `gc_register_root_val`).
+- A slot in `malloc`/`new` memory whose value changes: keep each new value
+  reachable some other way (for example a list held in a global, as the Qt6
+  module's `keep_alive` does), or move the slot into GC memory.
 
-### Safe-point guards
+`gc_pin` / `gc_unpin` / `gc_val_pin` / `gc_val_unpin` are no-ops, kept for
+modules that call them.
+
+### Threads
+
+Call `gc_register_thread()` at the start of every thread that touches
+Scheme values and `gc_unregister_thread()` on its exit path. Threads
+created with `pthread_create` in a file that includes `gc.h` go through
+Boehm's `GC_pthread_create` redirect.
+
+### Write barrier
 
 ```c
-gc_inhibit_minor();   /* prevent minor GC until matching gc_resume_minor() */
-gc_resume_minor();
+GC_WB(obj, field, val);                  /* obj->field = val */
+gc_wb_slot(&slot, val);                  /* slot = val       */
+gc_wb_slot_atomic_relaxed(&slot, val);   /* atomic store, for slots read
+                                            without a lock by other threads */
 ```
 
-Use these when C code holds raw `val_t` pointers that are not on the Scheme
-stack and not covered by the shadow stack or root registry. The reader,
-compiler, and several builtins use these guards internally.
+Today these are plain stores. Keep using them for every store of a pointer
+into an object that already exists: a concurrent collector needs a barrier
+on exactly these stores (see [Future work](#future-work)).
 
-**C++ and JIT callers** cannot use these inlines directly — they are guarded
-by `#ifndef __cplusplus` because the TLS variable `gc_inhibit_count` is not
-accessible from C++ translation units. Use the plain-C wrapper functions
-instead:
+### Blocking calls
 
 ```c
-/* Declared in gc.h inside extern "C" { }; defined in gc.c. */
-void gc_inhibit_minor_fn(void);
-void gc_resume_minor_fn(void);
-
-/* Save/restore the counter across longjmp (used by SCM_PROTECT internally). */
-int  gc_inhibit_save(void);
-void gc_inhibit_restore(int saved);
+gc_thread_park();      /* immediately before a long or unbounded blocking call */
+gc_thread_unpark();    /* immediately after it returns */
 ```
+
+No-ops today. A collector that pauses threads at safe points would scan a
+parked thread on its behalf instead of waiting for it. Never call
+`gc_thread_unpark()` while holding a lock that another thread may need to
+reach its own safe point (see `mailbox_push` in `src/actors.c`). C modules
+use `curry_gc_thread_park()` / `curry_gc_thread_unpark()` from `curry.h`.
 
 ---
 
-## Roadmap
+## Future work
 
-Planned improvements to the generational GC (✓ = shipped):
+The goal is collection without stopping all threads at once. The plan,
+from the discussion that led to removing the generational backend:
 
-- ✓ **`gc_register_root` crash fix** (v1.6.3) — removed a second
-  `GC_add_roots` call that registered object header bytes (small integers)
-  as root ranges, causing Boehm to dereference `NULL + 8 = 0x8` and crash
-  whenever `(gc)` was called after `(import (curry qt6))`.
-- ✓ **LLVM JIT statepoint safety** (v1.6.2) — minor GC is inhibited across
-  every JIT statepoint call so nursery pointers in JIT alloca slots are never
-  stale.  `SCM_PROTECT` restores the inhibit counter on `longjmp`.
-- **Unified safepoint protocol** — signal-based STW coordination so all
-  threads park at safe points before collection, enabling per-actor and
-  concurrent collection.
-- **Precise LLVM stack maps** — populate GCArgs in statepoints from
-  `cc.gc_roots` and use `gc.relocate` projections so the GC can enumerate
-  (and eventually move) JIT-stack nursery pointers precisely.
-- **Per-actor independent minor GC** — actor threads have their own nurseries
-  but currently cannot minor-GC them independently; garbage accumulates until
-  the main thread triggers a cycle.  Requires a unified safepoint protocol
-  across OS threads.
-- **Precise old-gen mark-sweep** — replace Boehm's conservative scan with a
-  precise BFS mark over the typed object graph, eliminating false retention
-  from integers that look like pointers.
-- **Concurrent old-gen marking (SATB)** — snapshot-at-the-beginning write
-  barrier to allow the mark phase to run concurrently with mutators, removing
-  long major GC pauses.
+1. **Write-barrier audit and checker.** Route every pointer store into an
+   existing object through `GC_WB` / `gc_wb_slot`, and add a debug mode that
+   finds stores that bypass it.
+2. **Own non-moving collector, stop-the-world.** Segment-based allocator
+   (BiBOP, see `docs/thoughts/performance-chez-kaappi.md` §3.2), per-thread
+   allocation, conservative stack scanning, finalizers and weak links;
+   replaces Boehm.
+3. **Concurrent marking** with short start/end pauses that do not grow with
+   the heap (as in Go).
+4. **Per-thread handshakes instead of those pauses** (on-the-fly
+   collection): no point at which all threads are stopped together.
+5. Optionally, generational collection without moving objects (sticky mark
+   bits).
+
+Separately, the object header has an unused 8-byte `fwd` field
+(`src/object.h`). Removing it would make every object 8 bytes smaller (a
+pair would go from Boehm's 48-byte size class to 32).

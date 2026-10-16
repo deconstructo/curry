@@ -12,7 +12,6 @@ add_test(NAME srfi_s279_inspect COMMAND curry --clear-cache ${CMAKE_CURRENT_SOUR
 add_test(NAME include_relative COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/include_relative_tests.scm)
 add_test(NAME define_library_stack_guard COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/define_library_stack_guard_tests.scm)
 add_test(NAME module_isolation COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/module_isolation_tests.scm)
-add_test(NAME gc_gen_dirty_overflow COMMAND curry --clear-cache --gc generational --gc-nursery-size 256K ${CMAKE_CURRENT_SOURCE_DIR}/gc_gen_dirty_overflow_tests.scm)
 set_tests_properties(include_relative PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include_relative")
 

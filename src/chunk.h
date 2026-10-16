@@ -94,13 +94,7 @@ typedef struct {
      * starting cold again on every new process -- fine, since it only
      * ever helps within one process's repeated execution of the same
      * chunk (e.g. an import nested inside a function called from a loop),
-     * never across process boundaries anyway.
-     *
-     * Unlike glob_cache, THIS array needs a gc_gen.c evacuation case:
-     * glob_cache stores raw val_t* slot pointers validated by a separate
-     * version check (safe to go stale under --gc generational), but this
-     * array stores real cached val_t RESULT values that must move with
-     * everything else. */
+     * never across process boundaries anyway. */
     val_t *tree_eval_cache;
 
     LocalDebugEntry *local_debug; /* debugger's slot→name map; may be NULL */

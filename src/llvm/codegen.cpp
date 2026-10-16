@@ -24,8 +24,9 @@
  *
  * gc.statepoint invariant (must hold from day 1):
  *   Every call that may allocate is emitted as an llvm.experimental.gc.statepoint.
- *   GC root enumeration (gc_args) is empty until L3 (generational GC).
- *   All emitted functions carry  gc "curry-generational"  and  nounwind.
+ *   GC root enumeration (gc_args) is empty: Boehm scans the stack
+ *   conservatively and objects never move.
+ *   All emitted functions carry  gc "curry-statepoint"  and  nounwind.
  */
 
 #include "codegen.h"
@@ -227,27 +228,13 @@ static Value *emit_body(CompileCtx &cc, val_t forms);
 /* ---- Statepoint call emission ---- */
 /*
  * Wraps every potentially-allocating call in an llvm.experimental.gc.statepoint.
- * GCArgs is empty: Boehm conservatively scans the C stack for pointers in
- * old-gen; the generational GC is inhibited across every statepoint so nursery
- * pointers in JIT alloca slots are never stale (Phase 1 correctness fix).
- *
- * Phase 3 will populate GCArgs from cc.gc_roots once we have precise old-gen
- * and can emit gc.relocate projections.
- *
- * Minor GC inhibit protocol:
- *   gc_inhibit_minor_fn() is called before the statepoint; gc_resume_minor_fn()
- *   after.  This prevents the generational minor GC from running while live
- *   nursery pointers reside in JIT alloca slots that the GC cannot enumerate.
- *   If a Scheme exception longjmps through a JIT frame, SCM_PROTECT restores
- *   gc_inhibit_count to its pre-JIT value via gc_inhibit_restore().
+ * GCArgs is empty: Boehm conservatively scans the C stack, and objects never
+ * move, so JIT alloca slots need no relocation. A precise collector would
+ * populate GCArgs from cc.gc_roots.
  */
 static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
                                    FunctionType *ftype,
                                    ArrayRef<Value *> call_args) {
-    /* Inhibit minor GC before the call. */
-    auto *void_ft = FunctionType::get(Type::getVoidTy(cc.llvm_ctx), {}, false);
-    cc.B.CreateCall(void_ft,
-        declare_helper(cc.M, "curry_gc_inhibit_minor_jit", void_ft), {});
 
 #if LLVM_VERSION_MAJOR >= 17
     std::optional<ArrayRef<Value *>> deopt_args;
@@ -267,10 +254,6 @@ static Value *emit_statepoint_call(CompileCtx &cc, Value *callee,
     else
         result = cc.B.CreateGCResult(sp, ftype->getReturnType());
 
-    /* Resume minor GC after the call. */
-    cc.B.CreateCall(void_ft,
-        declare_helper(cc.M, "curry_gc_resume_minor_jit", void_ft), {});
-
     return result;
 }
 
@@ -280,26 +263,14 @@ static Value *emit_literal(CompileCtx &cc, val_t v) {
     /* Non-pointer values (fixnums, chars, booleans, nil, void) are immediates
      * encoded in the val_t itself — always safe to embed as 64-bit constants. */
     if (!vis_ptr(v))   return ConstantInt::get(cc.i64_t, (uint64_t)v);
-    /* Symbols are pinned Boehm objects (gc_alloc_pinned) — they never enter
-     * the nursery and never move, so embedding is safe. */
+    /* Symbols are interned and never freed, so embedding is safe. */
     if (vis_symbol(v)) return ConstantInt::get(cc.i64_t, (uint64_t)v);
-    /* General heap objects (flonums, pairs, strings, etc.) may be allocated
-     * in the nursery.  Baking the raw pointer as a constant is wrong for
-     * generational GC: a subsequent minor collection would evacuate the object
-     * and reset the nursery, leaving the baked address stale.
-     *
-     * Instead: allocate a stable GC-root cell in uncollectable Boehm memory,
-     * store the current val_t there, and register it with gc_register_root so
-     * minor GC updates the cell when the object is promoted.  Emit a load
-     * instruction so JIT'd code reads the (possibly updated) address at
-     * runtime.  Under Boehm-only GC the pointer never changes, so this is
-     * just one extra memory load. */
+    /* General heap objects (flonums, pairs, strings, etc.): store the value
+     * in an uncollectable cell, which keeps the object alive for as long as
+     * the JIT code exists, and emit a load from it. The load is not needed
+     * while objects never move (the pointer could be baked in directly);
+     * it is kept so a future moving collector only has to update the cell. */
     val_t *root = (val_t *)GC_MALLOC_UNCOLLECTABLE(sizeof(val_t));
-    /* Use gc_register_root_val to atomically store v and register root
-     * under g_roots_lock.  A bare "*root = v; gc_register_root(root)"
-     * would race: a concurrent minor GC between the store and registration
-     * could evacuate the nursery object and reset the slab, leaving *root
-     * stale for all future JIT loads from this root cell. */
     gc_register_root_val(root, v);
     auto *root_addr = ConstantInt::get(cc.i64_t, (uint64_t)root);
     auto *root_ptr  = cc.B.CreateIntToPtr(root_addr, cc.ptr_t);
@@ -687,7 +658,7 @@ static Value *emit_lambda(CompileCtx &cc, val_t params_val, val_t body_val) {
         cc.i64_t, { cc.i32_t, cc.ptr_t, cc.ptr_t }, false);
     auto *lambda_fn = Function::Create(
         lambda_ft, Function::ExternalLinkage, fn_name, cc.M);
-    lambda_fn->setGC("curry-generational");
+    lambda_fn->setGC("curry-statepoint");
     lambda_fn->addFnAttr(Attribute::NoUnwind);
 
     /* Save caller's insertion point. */
@@ -1530,7 +1501,7 @@ static Function *make_fn(llvm::Module &M, LLVMContext &ctx,
                           const std::string &name,
                           FunctionType *ft) {
     auto *f = Function::Create(ft, Function::ExternalLinkage, name, M);
-    f->setGC("curry-generational");
+    f->setGC("curry-statepoint");
     f->addFnAttr(Attribute::NoUnwind);
     BasicBlock::Create(ctx, "entry", f);
     return f;

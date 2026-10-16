@@ -1,22 +1,8 @@
 /*
- * gc.c — GC lifecycle, Boehm backend, and per-thread nursery.
+ * gc.c — garbage collector: Boehm setup, root registration, statistics.
  *
- * The active backend is selected at gc_init() time via the gc_ops pointer.
- * Currently only the Boehm backend exists; a precise generational backend
- * will be added later and selected by setting gc_ops = &gc_boehm_ops (or a
- * new gc_gen_ops) before calling gc_init().
- *
- * Nursery (per-thread bump-pointer arena)
- * ────────────────────────────────────────
- * Each thread gets a GcNursery.  The fast path is a single pointer bump in
- * thread-local storage — no locks, no function calls.  When the nursery is
- * exhausted, gc_nursery_refill() is called; under the Boehm backend it
- * allocates a fresh slab from Boehm and resets the nursery, so there is no
- * minor collection yet.  The interface is correct for a future minor GC pass.
- *
- * Nursery slab size: 256 KB per thread.  Large enough to absorb typical
- * allocation bursts; small enough that Boehm's stop-the-world pause doesn't
- * grow unboundedly per thread.  Will be tunable once the generational GC lands.
+ * Boehm GC is the only collector (see gc.h's header comment for why the
+ * generational backend was removed). Allocation is inline in gc.h.
  */
 
 #define GC_THREADS
@@ -26,307 +12,118 @@
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <time.h>
 
-/* ── Boehm backend ──────────────────────────────────────────────────────── */
+/* ── Safe points (no-ops; see gc.h) ───────────────────────────────────────── */
 
-static void *boehm_alloc(size_t n, bool has_ptrs) {
-    return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
+void gc_thread_park(void)   {}
+void gc_thread_unpark(void) {}
+
+/* ── GC statistics ────────────────────────────────────────────────────────── */
+
+_Atomic uint64_t gc_stat_major_count = 0;
+
+/* Boehm pause timing. Boehm calls gc_boehm_event_cb with its allocation
+ * lock held, from the thread running the collection, so the two start
+ * timestamps below are only ever touched by one thread at a time. The
+ * published counters are atomic because (gc-stats) reads them from any
+ * thread.
+ *
+ * A stop-the-world interval runs from GC_EVENT_PRE_STOP_WORLD to
+ * GC_EVENT_POST_START_WORLD: every registered thread is suspended for that
+ * long (the collecting thread is busy for it too). In Boehm's incremental
+ * mode one collection is split into several such intervals, so these are
+ * the pauses mutator threads actually see. A collection (GC_EVENT_START to
+ * GC_EVENT_END) is the whole cycle, which in incremental mode can span many
+ * intervals with mutator work in between. */
+_Atomic uint64_t gc_stat_stw_count       = 0;
+_Atomic uint64_t gc_stat_stw_total_ns    = 0;
+_Atomic uint64_t gc_stat_stw_max_ns      = 0;
+_Atomic uint64_t gc_stat_major_total_ns  = 0;
+_Atomic uint64_t gc_stat_major_max_ns    = 0;
+
+static _Atomic uint64_t gc_stw_ring[GC_STW_RING_N];
+static _Atomic size_t   gc_stw_ring_head = 0;
+
+static uint64_t gc_stw_start_ns;    /* guarded by Boehm's allocation lock */
+static uint64_t gc_major_start_ns;  /* ditto */
+
+static uint64_t gc_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
 }
-/* Under Boehm, pinned allocation is identical to regular allocation.
- * The semispace backend overrides these to bypass the nursery. */
-static void *boehm_alloc_pinned(size_t n, bool has_ptrs)     { return boehm_alloc(n, has_ptrs); }
-static void *boehm_alloc_raw_pinned(size_t n, bool has_ptrs) { return boehm_alloc(n, has_ptrs); }
 
-static void  boehm_collect(void)           { GC_gcollect(); }
-static void  boehm_register_thread(void) {
-    struct GC_stack_base sb;
-    GC_get_stack_base(&sb);
-    GC_register_my_thread(&sb);
+static void gc_stat_max(_Atomic uint64_t *slot, uint64_t v) {
+    uint64_t old = atomic_load_explicit(slot, memory_order_relaxed);
+    while (v > old &&
+           !atomic_compare_exchange_weak_explicit(slot, &old, v,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed))
+        ;
 }
-/* Issue #200 Phase A: no-op counterpart to gen_unregister_thread's real
- * live-thread-count decrement (src/gc_gen.c) -- Boehm has no such count to
- * keep accurate. Needed as its own vtable slot (not just a direct call to
- * the generational-only decrement from every register_thread() call site)
- * because register_thread() is itself already backend-dispatched: a
- * direct, ungated call to the generational decrement from a caller like
- * actors.c/workpool.c would run under EVERY backend including this one,
- * silently driving gc_gen_thread_count negative on every actor/worker
- * exit under the (default) Boehm backend, where nothing ever incremented
- * it in the first place. */
-static void  boehm_unregister_thread(void) {}
-/* Boehm is conservative — pin/unpin and root registration are no-ops. */
-static void  boehm_pin(void *obj)              { (void)obj; }
-static void  boehm_unpin(void *obj)            { (void)obj; }
-static void  boehm_register_root(void *slot)   { (void)slot; }
-static void  boehm_unregister_root(void *slot) { (void)slot; }
-static size_t boehm_heap_size(void)  { return (size_t)GC_get_heap_size();  }
-static size_t boehm_free_bytes(void) { return (size_t)GC_get_free_bytes(); }
-/* Boehm objects never live in the nursery — promote is a no-op. */
-static void *boehm_promote(void *obj, size_t bytes, bool has_ptrs) {
-    (void)bytes; (void)has_ptrs; return obj;
-}
-
-static gc_ops_t gc_boehm_ops = {
-    .alloc             = boehm_alloc,
-    .alloc_pinned      = boehm_alloc_pinned,
-    .alloc_raw_pinned  = boehm_alloc_raw_pinned,
-    .collect           = boehm_collect,
-    .register_thread   = boehm_register_thread,
-    .unregister_thread = boehm_unregister_thread,
-    .pin               = boehm_pin,
-    .unpin             = boehm_unpin,
-    .register_root     = boehm_register_root,
-    .unregister_root   = boehm_unregister_root,
-    .heap_size         = boehm_heap_size,
-    .free_bytes        = boehm_free_bytes,
-    .promote           = boehm_promote,
-};
-
-gc_ops_t *gc_ops = &gc_boehm_ops;
-
-/* ── Per-thread nursery ─────────────────────────────────────────────────── */
-
-CURRY_THREAD_LOCAL GcNursery gc_nursery = { NULL, NULL, NULL };
-
-void   *gc_alloc_trace[GC_ALLOC_TRACE_N];
-size_t  gc_alloc_trace_idx;
-size_t  gc_alloc_trace_sz[GC_ALLOC_TRACE_N];
-
-/* Shadow stack TLS root — head of the per-thread GcFrame linked list.
- * NULL when no eval() frame is active (e.g. at top level between expressions).
- * Under Boehm this is never read by the GC; it exists so that GC_AUTOFRAME
- * in eval.c compiles cleanly and a debug assertion can verify balance. */
-CURRY_THREAD_LOCAL GcFrame *gc_shadow_stack = NULL;
-
-/* Counter for gc_inhibit_minor() / gc_resume_minor().
- * > 0 means we're inside compiler/reader/other unsafe C code;
- * gc_nursery_refill falls back to Boehm instead of triggering minor GC. */
-CURRY_THREAD_LOCAL int gc_inhibit_count = 0;
-
-/* Deferred minor GC flag.  Set by gc_nursery_refill() when the nursery
- * overflowed but minor GC couldn't fire (shadow stack non-NULL or inhibited).
- * Cleared and acted on by eval() at the next tail-call safe point. */
-CURRY_THREAD_LOCAL bool gc_minor_pending = false;
-
-/* Card table globals — retained for backwards compat; all stay NULL/0.
- * The write barrier no longer writes to the card table; it uses gc_dirty_slots. */
-uint8_t  *gc_card_table        = NULL;
-uintptr_t gc_tenured_base      = 0;
-size_t    gc_card_table_ncards = 0;
-
-/* Write-buffer remembered set.
- * gc_dirty_slots is allocated by gc_gen_init() and stays NULL under Boehm,
- * causing gc_wb_slot to reduce to a bare assignment.
- * gc_main_nursery_base/limit are set once in gc_gen_init to the main thread's
- * nursery slab bounds; gc_wb_slot's range check against them ensures this
- * bookkeeping never fires for a value an actor/worker thread itself
- * allocated (those always go straight to Boehm, per gc_inhibit) -- but does
- * NOT ensure only the main thread ever executes the bookkeeping itself, since
- * any thread can write a value that's still main-thread-nursery-resident
- * (issue #213); gc_dirty_lock is what actually makes concurrent callers safe. */
-val_t  **gc_dirty_slots      = NULL;
-size_t   gc_dirty_count      = 0;
-size_t   gc_dirty_cap        = 0;
-bool     gc_dirty_active     = false;
-uint8_t *gc_main_nursery_base  = NULL;
-uint8_t *gc_main_nursery_limit = NULL;
-pthread_mutex_t gc_dirty_lock = PTHREAD_MUTEX_INITIALIZER;
-
-/* ── GC statistics ──────────────────────────────────────────────────────────── */
-
-_Atomic uint64_t gc_stat_minor_count    = 0;
-_Atomic uint64_t gc_stat_major_count    = 0;
-_Atomic uint64_t gc_stat_minor_total_us = 0;
-_Atomic uint64_t gc_stat_minor_max_us   = 0;
 
 static void gc_boehm_event_cb(GC_EventType ev) {
-    if (ev == GC_EVENT_END)
+    switch (ev) {
+    case GC_EVENT_START:
+        gc_major_start_ns = gc_now_ns();
+        break;
+    case GC_EVENT_END: {
+        uint64_t d = gc_now_ns() - gc_major_start_ns;
         atomic_fetch_add_explicit(&gc_stat_major_count, 1, memory_order_relaxed);
-}
-
-#define NURSERY_SLAB_BYTES  (256u * 1024u)  /* 256 KB per thread */
-
-/*
- * Refill the nursery with a fresh slab and allocate n bytes from it.
- * Called only on the slow path (nursery exhausted or not yet initialised).
- *
- * Under Boehm: each slab is a GC_MALLOC allocation, so Boehm owns and scans
- * it.  The nursery top/limit are just a view into that allocation.
- *
- * Under a future generational GC: this is where a minor collection fires,
- * live objects are promoted, and the nursery is reset to its original extent.
- */
-void *gc_nursery_refill(size_t n, bool has_ptrs) {
-    /*
-     * Slow path: nursery exhausted (or disabled under Boehm where top==NULL).
-     *
-     * Under Boehm: top==limit==NULL, so every allocation reaches here.
-     * Call GC_MALLOC directly so each object is its own Boehm allocation
-     * (required for correct finaliser registration and atomic distinction).
-     *
-     * Under the generational GC (Phase 4): trigger a minor collection, reset
-     * the nursery, then retry the bump pointer.  If the object is larger than
-     * the nursery slab, promote it directly to Boehm.
-     *
-     * Do NOT call gc_ops->alloc() — that recurses back through gc_nursery_alloc
-     * and causes infinite recursion.
-     */
-    if (gc_nursery.base) {
-        /*
-         * Generational backend.
-         *
-         * Safe-point check: only fire minor GC when the tree-walking evaluator
-         * is NOT active.  The tree-walker (eval.c) pushes a GcFrame onto
-         * gc_shadow_stack at entry; when the shadow stack is non-empty we are
-         * inside an eval() call that holds untracked C-local val_t pointers.
-         * Triggering a minor GC at that point would leave those locals stale.
-         *
-         * The bytecode VM dispatch loop runs with gc_shadow_stack == NULL
-         * (no eval() frame active), so it IS a safe point for collection.
-         * When the VM calls call_foreign() → apply_arr() → eval(), the shadow
-         * stack becomes non-NULL and minor GC is inhibited until eval() returns.
-         *
-         * Allocations during tree-walker execution that overflow the nursery
-         * fall back to Boehm (same as Phase 3).  They are collected by Boehm's
-         * own major GC.
-         */
-        if (gc_shadow_stack == NULL && gc_inhibit_count == 0) {
-            extern void gc_gen_minor_collect(void);
-            gc_gen_minor_collect();
-            /* Retry bump pointer after collection */
-            n = (n + 7u) & ~7u;
-            if (gc_nursery.top + n <= gc_nursery.limit) {
-                void *p = gc_nursery.top;
-                gc_nursery.top += n;
-                return p;
-            }
-        } else {
-            /* Inside tree-walker (shadow stack non-empty) or inhibited: defer
-             * collection to the next eval() tail-call safe point, where only
-             * expr and env are live.  The allocation falls back to Boehm. */
-            gc_minor_pending = true;
-        }
-        /* Object too large for slab after collection, or Boehm fallback. */
+        atomic_fetch_add_explicit(&gc_stat_major_total_ns, d, memory_order_relaxed);
+        gc_stat_max(&gc_stat_major_max_ns, d);
+        break;
     }
-    return has_ptrs ? GC_MALLOC(n) : GC_MALLOC_ATOMIC(n);
-}
-
-/*
- * gc_alloc_obj — issues #144/#215/#217.
- *
- * Like gc_alloc(), but for allocations the caller knows will be a proper
- * Hdr-prefixed GC:MOVE object (T_PAIR, T_VECTOR, T_RECORD, Values, ...) --
- * i.e. everything CURRY_NEW/CURRY_NEW_FLEX construct, plus the handful of
- * call sites that build such objects with a raw gc_alloc() call instead of
- * going through those macros (flexible trailing-array sizing usually).
- *
- * gc_nursery_refill()'s Boehm-escape path (this file, just above) hands
- * back a bare GC_MALLOC block whenever a minor collection wasn't safe to
- * run at allocation time -- notably, the whole read+compile pipeline runs
- * under gc_inhibit_count > 0 (main.c wraps it in gc_inhibit_minor()/
- * gc_resume_minor()), and the tree-walking evaluator runs with
- * gc_shadow_stack != NULL, both of which take the "defer, fall back to
- * Boehm" branch above unconditionally, regardless of whether the object
- * would otherwise have fit in a freshly-collected nursery. Such an escaped
- * object is invisible to every other GC mechanism: it isn't in the nursery
- * (so evacuate()/scan_object()'s worklist BFS never reaches it) and it
- * isn't in pinned_slots (that's only populated by gc_alloc_pinned, a
- * different allocator for GC:PIN types). Its caller then fills in fields
- * immediately afterward -- e.g. scm_cons(car, cdr) -- and those fields are
- * routinely fresh nursery pointers. Before this fix, such a field held a
- * raw, unscanned nursery address forever: readable only as long as nothing
- * reset the nursery region behind it, and silently reinterpreted as
- * whatever unrelated object next legitimately reused that same byte
- * offset the moment something did. This is the confirmed root cause of
- * #217's "unknown GC:MOVE type" abort: forensics traced the corrupted
- * value to exactly a pair built this way while reading/compiling a
- * define-library form.
- *
- * Fix: detect the escape after the fact (the returned pointer, under the
- * generational backend, always lies either inside the current nursery slab
- * or nowhere near it -- there's no third option) and register it via the
- * same pinned_add() gc_alloc_pinned already uses for GC:PIN types, so
- * gc_gen_minor_collect()'s pinned-object scan visits it exactly once,
- * walking whatever fields it has by the time that scan runs (strictly
- * after this call's caller finishes writing them -- a minor collection can
- * only fire at a gc_shadow_stack==NULL && gc_inhibit_count==0 safepoint,
- * which is later than any plain-C field write this call's caller makes
- * immediately upon return). scan_pinned_object's default case (gc_gen.c)
- * now delegates to scan_object() for exactly this reason: unlike the fixed
- * set of GC:PIN types it special-cases, an escaped object here is an
- * ordinary GC:MOVE type and needs the identical per-field evacuate() logic
- * scan_object() already implements for every such type.
- *
- * Deliberately NOT applied to plain gc_alloc(): several call sites use it
- * for raw val_t[] buffers with no Hdr at all (builtins.c's apply-argv
- * expansion, eval.c's call-argument buffer, runtime.c's list->vector-ish
- * helper) or plain non-GC-value C structs (port.c's WSharedMap/
- * WSharedEntry write-sharing table) -- treating either as Hdr-prefixed and
- * handing it to scan_pinned_object/scan_object would read whatever
- * unrelated bits happen to sit at offset 0 as an ObjType tag, which is
- * exactly the "unexpected type <garbage>" abort this fix was first tried
- * against before being narrowed to gc_alloc_obj specifically. */
-void *gc_alloc_obj(size_t n) {
-    void *p = gc_nursery_alloc(n, true);
-    if (gc_nursery.base != NULL &&
-        ((uint8_t *)p < gc_nursery.base || (uint8_t *)p >= gc_nursery.limit)) {
-        extern void gc_gen_pin_permanent(void *obj);
-        gc_gen_pin_permanent(p);
+    case GC_EVENT_PRE_STOP_WORLD:
+        gc_stw_start_ns = gc_now_ns();
+        break;
+    case GC_EVENT_POST_START_WORLD: {
+        uint64_t d = gc_now_ns() - gc_stw_start_ns;
+        atomic_fetch_add_explicit(&gc_stat_stw_count, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&gc_stat_stw_total_ns, d, memory_order_relaxed);
+        gc_stat_max(&gc_stat_stw_max_ns, d);
+        size_t i = atomic_fetch_add_explicit(&gc_stw_ring_head, 1, memory_order_relaxed);
+        atomic_store_explicit(&gc_stw_ring[i % GC_STW_RING_N], d, memory_order_relaxed);
+        break;
     }
-    return p;
+    default:
+        break;
+    }
 }
 
-/* C-linkage allocator called from C++ translation units (jit.cpp).
- * C++ code cannot safely reference gc_nursery via 'extern thread_local' because
- * the C++ TLS wrapper symbol (_ZTW…) is ABI-incompatible with the C TLS symbol
- * ($tlv$init) on macOS/arm64. */
-void *gc_alloc_impl(size_t n, int has_ptrs) {
-    return gc_nursery_alloc(n, (bool)has_ptrs);
+size_t gc_get_stw_ring(uint64_t *out) {
+    size_t head = atomic_load_explicit(&gc_stw_ring_head, memory_order_relaxed);
+    size_t n = head < GC_STW_RING_N ? head : GC_STW_RING_N;
+    size_t first = head - n;
+    for (size_t i = 0; i < n; i++)
+        out[i] = atomic_load_explicit(&gc_stw_ring[(first + i) % GC_STW_RING_N],
+                                      memory_order_relaxed);
+    return n;
 }
-void *gc_alloc_pinned_impl(size_t n, int has_ptrs) {
-    return gc_ops->alloc_pinned(n, (bool)has_ptrs);
+
+void gc_reset_boehm_stats(void) {
+    atomic_store_explicit(&gc_stat_stw_count,      0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_stw_total_ns,   0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_stw_max_ns,     0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_major_total_ns, 0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stat_major_max_ns,   0, memory_order_relaxed);
+    atomic_store_explicit(&gc_stw_ring_head,       0, memory_order_relaxed);
 }
 
-/* ── Global root/stack/ext-scanner registries ────────────────────────────── */
-/*
- * These registries are always maintained regardless of GC backend.  Under Boehm
- * they are never read (conservative scan handles everything).  Under the
- * generational GC, gc_gen_minor_collect() reads them to find all roots.
- *
- * Capacities start small; arrays are realloc'd as needed.
- */
+/* ── Registered roots ─────────────────────────────────────────────────────── */
 
-#define GC_ROOTS_INIT_CAP   32
-#define GC_STACKS_INIT_CAP   4
-#define GC_EXT_INIT_CAP     16
+#define GC_ROOTS_INIT_CAP 32
 
-typedef struct { val_t *base; val_t **sp_ptr; } GcStackRange;
+static val_t **g_roots;         /* registered val_t* slots                    */
+static size_t  g_roots_count;
+static size_t  g_roots_cap;
+static val_t  *g_roots_shadow;  /* GC_MALLOC_UNCOLLECTABLE copies of *g_roots[i]
+                                 * taken at registration, so the registered
+                                 * value stays alive even when the slot itself
+                                 * is in memory Boehm does not scan */
 
-/* Non-static so gc_gen.c can read them via extern declarations in gc_gen.h. */
-val_t       **g_roots;         /* registered val_t* roots                     */
-size_t        g_roots_count;
-size_t        g_roots_cap;
-
-/*
- * Shadow copy of root VALUES (not pointers) in a GC_MALLOC_UNCOLLECTABLE block.
- * Boehm's conservative scan sees this block and marks the val_t heap targets live.
- * Without this, val_t* roots in .data/.bss are below Boehm's plausible heap range
- * and are invisible to Boehm's conservative scan, so referenced objects can be freed.
- */
-val_t         *g_roots_shadow;  /* GC_MALLOC_UNCOLLECTABLE, holds copies of *g_roots[i] */
-
-GcStackRange *g_stacks;        /* registered VM value-stack ranges            */
-size_t        g_stacks_count;
-size_t        g_stacks_cap;
-
-void        (**g_ext_scanners)(void);  /* external scanner callbacks          */
-size_t        g_ext_count;
-size_t        g_ext_cap;
-
-/* Function pointers set during minor GC so gc_ss_evac/gc_ss_fwd delegate to
- * gc_gen.c's evacuator without a circular dependency.  NULL outside collection. */
-uintptr_t (*gc_evac_fn)(uintptr_t) = NULL;
-void     *(*gc_fwd_fn)(void *)      = NULL;
+static pthread_mutex_t g_roots_lock_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 static void ensure_roots(void) {
     if (!g_roots) {
@@ -335,31 +132,6 @@ static void ensure_roots(void) {
         g_roots_cap = GC_ROOTS_INIT_CAP;
     }
 }
-static void ensure_stacks(void) {
-    if (!g_stacks) {
-        g_stacks = GC_MALLOC_UNCOLLECTABLE(GC_STACKS_INIT_CAP * sizeof(GcStackRange));
-        g_stacks_cap = GC_STACKS_INIT_CAP;
-    }
-}
-static void ensure_ext(void) {
-    if (!g_ext_scanners) {
-        g_ext_scanners = GC_MALLOC_UNCOLLECTABLE(GC_EXT_INIT_CAP * sizeof(void (*)(void)));
-        g_ext_cap = GC_EXT_INIT_CAP;
-    }
-}
-
-void gc_register_rawptr(void **rawptr)   { (void)rawptr; }
-void gc_unregister_rawptr(void **rawptr) { (void)rawptr; }
-
-/* Protects concurrent access to g_roots[] / g_roots_shadow[].
- * Callers: gc_register_root, gc_register_root_val, gc_unregister_root.
- * gc_gen_minor_collect acquires this (via gc_roots_lock/unlock) around its
- * g_roots[] evacuation loop so that a concurrent registration cannot observe
- * a partially-updated root array or a stale nursery address in a new root. */
-static pthread_mutex_t g_roots_lock_mtx = PTHREAD_MUTEX_INITIALIZER;
-
-void gc_roots_lock(void)   { pthread_mutex_lock(&g_roots_lock_mtx); }
-void gc_roots_unlock(void) { pthread_mutex_unlock(&g_roots_lock_mtx); }
 
 static void register_root_locked(void *slot) {
     ensure_roots();
@@ -387,9 +159,7 @@ void gc_register_root(void *slot) {
     pthread_mutex_unlock(&g_roots_lock_mtx);
 }
 
-/* Stores v into *slot and registers it as a root in one critical section.
- * This prevents a minor GC from running between the store and the registration
- * (which would leave *slot holding a stale nursery address after nursery reset). */
+/* Stores v into *slot and registers it as a root in one critical section. */
 void gc_register_root_val(void *slot, val_t v) {
     pthread_mutex_lock(&g_roots_lock_mtx);
     *(val_t *)slot = v;
@@ -411,68 +181,7 @@ void gc_unregister_root(void *slot) {
     pthread_mutex_unlock(&g_roots_lock_mtx);
 }
 
-void gc_register_stack(void *base, void **sp_ptr) {
-    ensure_stacks();
-    if (g_stacks_count == g_stacks_cap) {
-        size_t nc = g_stacks_cap * 2;
-        GcStackRange *ns = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(GcStackRange));
-        memcpy(ns, g_stacks, g_stacks_count * sizeof(GcStackRange));
-        GC_FREE(g_stacks);
-        g_stacks = ns; g_stacks_cap = nc;
-    }
-    g_stacks[g_stacks_count].base   = (val_t *)base;
-    g_stacks[g_stacks_count].sp_ptr = (val_t **)sp_ptr;
-    g_stacks_count++;
-}
-
-void gc_unregister_stack(void *base) {
-    for (size_t i = 0; i < g_stacks_count; i++) {
-        if (g_stacks[i].base == (val_t *)base) {
-            g_stacks[i] = g_stacks[--g_stacks_count];
-            return;
-        }
-    }
-}
-
-void gc_register_ext_scanner(void (*cb)(void)) {
-    ensure_ext();
-    if (g_ext_count == 0 && gc_dirty_active) {
-        /* gc_dirty_active is true only under --gc generational.  Warn once:
-         * minor_gc_lock is non-recursive, so ext_scanners must not allocate
-         * from the nursery or they will deadlock. */
-        fprintf(stderr, "[gc] WARNING: ext_scanner registered under generational "
-                "backend — scanner must not allocate from the nursery\n");
-    }
-    if (g_ext_count == g_ext_cap) {
-        size_t nc = g_ext_cap * 2;
-        void (**ns)(void) = GC_MALLOC_UNCOLLECTABLE(nc * sizeof(void (*)(void)));
-        memcpy(ns, g_ext_scanners, g_ext_count * sizeof(void (*)(void)));
-        GC_FREE(g_ext_scanners);
-        g_ext_scanners = ns; g_ext_cap = nc;
-    }
-    g_ext_scanners[g_ext_count++] = cb;
-}
-
-/* gc_gen.c accesses the registries via extern declarations in gc_gen.h */
-
-uintptr_t gc_ss_evac(uintptr_t v) { return gc_evac_fn ? gc_evac_fn(v) : v; }
-void     *gc_ss_fwd(void *p)      { return gc_fwd_fn  ? gc_fwd_fn(p)  : p; }
-
-/* ── longjmp-safe shadow-stack helpers (called from SCM_PROTECT) ──────── */
-
-void *gc_shadow_save(void)        { return gc_shadow_stack; }
-void  gc_shadow_restore(void *p)  { gc_shadow_stack = (GcFrame *)p; }
-
-/* ── inhibit-counter wrappers for C++ and JIT code ─────────────────────── */
-/* gc_inhibit_minor() is a no-op in C++ (TLS not accessible from C++).
- * These plain-C functions provide the same semantics to C++ callers. */
-
-void gc_inhibit_minor_fn(void) { gc_inhibit_count++; }
-void gc_resume_minor_fn(void)  { if (gc_inhibit_count > 0) gc_inhibit_count--; }
-int  gc_inhibit_save(void)     { return gc_inhibit_count; }
-void gc_inhibit_restore(int v) { gc_inhibit_count = v; }
-
-/* ── Lifecycle ──────────────────────────────────────────────────────────── */
+/* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
 void gc_init(void) {
     GC_INIT();
@@ -481,12 +190,16 @@ void gc_init(void) {
 }
 
 void gc_register_thread(void) {
-    gc_ops->register_thread();
+    struct GC_stack_base sb;
+    GC_get_stack_base(&sb);
+    GC_register_my_thread(&sb);
 }
 
-void gc_unregister_thread(void) {
-    gc_ops->unregister_thread();
-}
+/* Threads started with pthread_create in a file that includes gc.h go
+ * through Boehm's GC_pthread_create redirect, which unregisters them on
+ * exit by itself, so there is nothing to do here. Kept so every thread's
+ * exit path has a matching call for a future collector. */
+void gc_unregister_thread(void) {}
 
 void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd) {
     GC_register_finalizer(obj, (GC_finalization_proc)fn, cd, NULL, NULL);
@@ -495,6 +208,6 @@ void gc_finalizer(void *obj, void (*fn)(void *, void *), void *cd) {
 void   gc_set_max_heap(size_t bytes)    { GC_set_max_heap_size((GC_word)bytes); }
 void   gc_set_free_space_divisor(int n) { GC_set_free_space_divisor((GC_word)n); }
 void   gc_enable_incremental(void)      { GC_enable_incremental(); }
-size_t gc_heap_size(void)               { return gc_ops->heap_size();   }
-size_t gc_free_bytes(void)              { return gc_ops->free_bytes();  }
+size_t gc_heap_size(void)               { return (size_t)GC_get_heap_size(); }
+size_t gc_free_bytes(void)              { return (size_t)GC_get_free_bytes(); }
 size_t gc_total_bytes(void)             { return (size_t)GC_get_total_bytes(); }

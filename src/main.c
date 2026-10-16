@@ -1,5 +1,4 @@
 #include "gc.h"
-#include "gc_gen.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
 #endif
@@ -586,11 +585,8 @@ static void usage(const char *argv0) {
         "                    name or file:line; repeatable)\n"
         "  -v                Print version\n"
         "  -V                Print version info in SRFI-176 LOSE format\n"
-        "  --gc BACKEND      GC backend: boehm (default) or generational (experimental)\n"
+        "  --gc boehm        Accepted for compatibility; Boehm is the only collector\n"
         "  --gc-max-heap N   Limit GC heap (suffixes K/M/G, e.g. 256M; 0 = unlimited)\n"
-        "  --gc-nursery-size N  Per-thread nursery size (default 512K; requires --gc generational)\n"
-        "                    Note: generational backend is experimental. Actor-heavy workloads\n"
-        "                    may accumulate nursery garbage between main-thread GC cycles.\n"
         "  --timings         Print a read/expand/compile/execute pipeline timing\n"
         "                    report to stderr on exit\n"
         "  --clear-cache     Delete any existing .scc cache for the script being\n"
@@ -663,27 +659,6 @@ int main(int argc, char **argv) {
     atexit(curry_timings_report);
     atexit(write_pending_scc_atexit);   /* see write_pending_scc_atexit above */
 
-    /* Pre-scan for --gc and --gc-nursery-size before any GC initialisation. */
-    size_t nursery_size = 0;   /* 0 = use gc_gen default */
-    bool use_gen_gc = false;
-    for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--gc") == 0) {
-            if (strcmp(argv[i+1], "generational") == 0) {
-                use_gen_gc = true;
-            } else if (strcmp(argv[i+1], "boehm") != 0) {
-                fprintf(stderr,
-                    "curry: unknown GC backend '%s' (use 'boehm' or 'generational')\n",
-                    argv[i+1]);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "--gc-nursery-size") == 0) {
-            nursery_size = parse_size(argv[i+1]);
-        }
-    }
-    if (use_gen_gc) {
-        gc_gen_init(nursery_size);
-        gc_ops = &gc_gen_ops;
-    }
     curry_runtime_init();
 
     bool interactive = false;
@@ -697,8 +672,8 @@ int main(int argc, char **argv) {
         { "version",      no_argument,       NULL, 'v' },
         { "help",         no_argument,       NULL, 'h' },
         { "gc-max-heap",  required_argument, NULL, 'G' },
-        { "gc",              required_argument, NULL, 0   },  /* handled pre-scan */
-        { "gc-nursery-size", required_argument, NULL, 0   },  /* handled pre-scan */
+        { "gc",              required_argument, NULL, 0   },
+        { "gc-nursery-size", required_argument, NULL, 0   },  /* removed; error */
         { "timings",         no_argument,       NULL, 0   },
         { "clear-cache",     no_argument,       NULL, 0   },
         { NULL, 0, NULL, 0 }
@@ -706,6 +681,38 @@ int main(int argc, char **argv) {
 
     int opt;
     int long_idx;
+
+    /* First pass: check --gc before any option runs (-e/-l run as soon as
+     * the main pass reaches them). The generational backend was removed
+     * (issues #226, #285, #286); say so instead of silently running with
+     * Boehm, so scripts that asked for it notice. Same getopt_long call as
+     * the main pass, so option clusters, abbreviations and "--" are parsed
+     * identically; errors for other options are left to the main pass. */
+    opterr = 0;
+    while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhVG:", long_opts, &long_idx)) != -1) {
+        if (opt != 0) continue;
+        if (!strcmp(long_opts[long_idx].name, "gc") && strcmp(optarg, "boehm") != 0) {
+            fprintf(stderr,
+                "curry: GC backend '%s' is not available; the generational "
+                "backend was removed and 'boehm' is the only collector\n",
+                optarg);
+            return 1;
+        }
+        if (!strcmp(long_opts[long_idx].name, "gc-nursery-size")) {
+            fprintf(stderr,
+                "curry: --gc-nursery-size was removed together with the "
+                "generational GC backend\n");
+            return 1;
+        }
+    }
+    opterr = 1;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    optreset = 1;
+    optind = 1;
+#else
+    optind = 0;   /* glibc: 0 forces a full reinitialisation */
+#endif
+
     /* '+' prefix: stop at first non-option so script args aren't consumed */
     while ((opt = getopt_long(argc, argv, "+e:l:c:o:b:ixvhVG:", long_opts, &long_idx)) != -1) {
         switch (opt) {
@@ -715,7 +722,7 @@ int main(int argc, char **argv) {
                 curry_timings_enabled = true;
             else if (!strcmp(long_opts[long_idx].name, "clear-cache"))
                 clear_cache_flag = true;
-            break;   /* --gc / --gc-nursery-size already handled in the pre-scan */
+            break;   /* --gc / --gc-nursery-size: checked in the first pass */
         case 'v':
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;
@@ -748,7 +755,6 @@ int main(int argc, char **argv) {
             for (;;) {
                 val_t expr;
                 ExnHandler h;
-                gc_inhibit_minor();
                 h.prev = current_handler; current_handler = &h;
                 uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 if (setjmp(h.jmp) == 0) {
@@ -757,15 +763,14 @@ int main(int argc, char **argv) {
                     if (curry_timings_enabled)
                         curry_timing_read_ns += profiling_now_ns() - _read_t0;
                 }
-                else { gc_resume_minor(); current_handler = h.prev; break; }
-                if (vis_eof(expr)) { gc_resume_minor(); break; }
+                else { current_handler = h.prev; break; }
+                if (vis_eof(expr)) { break; }
                 h.prev = current_handler;
                 h.saved_jit_depth = jit_depth_save();
                 current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
                     uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(expr);
-                    gc_resume_minor();
                     if (curry_timings_enabled) {
                         uint64_t _t1 = profiling_now_ns();
                         curry_timing_compile_ns += _t1 - _t0;
@@ -970,11 +975,9 @@ int main(int argc, char **argv) {
                 int cap = 64;
                 chunks = GC_MALLOC((size_t)cap * sizeof(Chunk *));
                 val_t v;
-                gc_inhibit_minor();
                 while (!vis_eof((v = timed_scm_read(port)))) {
                     uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(v);
-                    gc_resume_minor();   /* safe region: vm_run */
                     if (curry_timings_enabled) {
                         uint64_t _t1 = profiling_now_ns();
                         curry_timing_compile_ns += _t1 - _t0;
@@ -995,9 +998,7 @@ int main(int argc, char **argv) {
                     vm_run(bc, 0);
                     if (curry_timings_enabled)
                         curry_timing_execute_ns += profiling_now_ns() - _t0;
-                    gc_inhibit_minor(); /* back to unsafe for next read/compile */
                 }
-                gc_resume_minor();   /* EOF exit: leave inhibit balanced */
                 port_close(port);
                 scc_write(argv[i], chunks, n_chunks);
                 g_pending_scc_src = NULL;   /* already written — don't also write at exit */

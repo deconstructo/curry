@@ -324,9 +324,7 @@ val_t apply(val_t proc, val_t args) {
         val_t *arr = args_to_arr(args, n, stack_arr, 64);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        gc_inhibit_minor();
         val_t r = prim->fn(n, arr, prim->ud);
-        gc_resume_minor();
         return r;
     }
     if (vis_closure(proc)) {
@@ -710,11 +708,9 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
             JitClosure *jc = as_jitclos(cl->jit_val);
             typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
             g_jit_call_depth++;
-            gc_inhibit_minor();
             val_t r = (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
                                                                     (uint64_t *)argv,
                                                                     (uint64_t *)jc->caps);
-            gc_resume_minor();
             g_jit_call_depth--;
             return r;
         }
@@ -740,11 +736,9 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     if (vis_jitclosure(proc)) {
         JitClosure *jc = as_jitclos(proc);
         typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-        gc_inhibit_minor();
         val_t r = (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
                                                                 (uint64_t *)argv,
                                                                 (uint64_t *)jc->caps);
-        gc_resume_minor();
         return r;
     }
     if (vis_symfn(proc)) return sx_make_apply(proc, argc, argv);
@@ -758,9 +752,7 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
                       prim->name, argc, prim->max_args);
         if (curry_profiling_level >= 3 && prim->name)
             profiling_record_prim(sym_intern_cstr(prim->name));
-        gc_inhibit_minor();
         val_t r = prim->fn(argc, argv, prim->ud);
-        gc_resume_minor();
         return r;
     }
     if (vis_closure(proc)) {

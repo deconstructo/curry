@@ -2,7 +2,6 @@
 ;;;
 ;;; Usage:
 ;;;   ./build/curry tests/bench.scm                         # all suites, Boehm GC
-;;;   ./build/curry tests/bench.scm --gc generational       # gen GC backend
 ;;;   ./build/curry tests/bench.scm --suite gc              # GC-specific suite only
 ;;;   ./build/curry tests/bench.scm --suite actors          # actor ring suite
 ;;;   ./build/curry tests/bench.scm --suite throughput      # CPU throughput suite
@@ -41,8 +40,7 @@
   (or (flag-value "--suite" argv) "all"))
 
 (define bench-gc-tag
-  (let ((e (assoc 'nursery-used (gc-stats))))
-    (if (and e (> (cdr e) 0)) "generational" "boehm")))
+  (symbol->string (gc-mode)))
 
 ;; ── MQTT setup ──────────────────────────────────────────────────────────────
 
@@ -131,16 +129,15 @@
 
 (define (gc-stats-snapshot)
   (let ((s (gc-stats)))
-    (list (cons "gc_minor_count"    (alist-ref 'minor-count    s 0))
+    (list (cons "gc_stw_count"      (alist-ref 'stw-count      s 0))
           (cons "gc_major_count"    (alist-ref 'major-count    s 0))
-          (cons "gc_minor_total_us" (alist-ref 'minor-total-us s 0))
-          (cons "gc_minor_max_us"   (alist-ref 'minor-max-us   s 0))
-          (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0))
-          (cons "gc_nursery_used"   (alist-ref 'nursery-used   s 0)))))
+          (cons "gc_stw_total_us"   (quotient (alist-ref 'stw-total-ns s 0) 1000))
+          (cons "gc_stw_max_us"     (quotient (alist-ref 'stw-max-ns   s 0) 1000))
+          (cons "gc_heap_bytes"     (alist-ref 'heap-size      s 0)))))
 
 (define (gc-p99-us)
   (let* ((s   (gc-stats))
-         (ring (alist-ref 'pause-ring-us s (vector)))
+         (ring (vector-map (lambda (ns) (quotient ns 1000)) (alist-ref 'stw-ring-ns s (vector))))
          (n   (vector-length ring)))
     (if (= n 0) 0
         (let ((sv (vector-copy ring)))
@@ -186,7 +183,7 @@
           (let pad ((s name)) (if (>= (string-length s) 28) s (pad (string-append s " "))))
           "  mean=" (number->string (inexact->exact (round (cdr (assoc "mean" st))))) "ms"
           "  p99="  (number->string (inexact->exact (round (cdr (assoc "p99"  st))))) "ms"
-          "  gc_minor=" (number->string (cdr (assoc "gc_minor_count" gst)))
+          "  gc_stw=" (number->string (cdr (assoc "gc_stw_count" gst)))
           "\n"))
       payload)))
 

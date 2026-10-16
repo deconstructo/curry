@@ -35,7 +35,6 @@ void         sx_algebra_define(val_t op, bool commutative, bool associative,
 bool         sx_algebra_lookup(val_t op, AlgebraInfo *out);
 
 /* Semispace GC scanner. */
-void         sx_algebra_gc_scan(void);
 
 /* Map an assumption keyword symbol to its SymVar flag bit.
    Returns 0 for unrecognised keywords. */

@@ -207,12 +207,11 @@ full API and type-mapping table.
 
 ## Garbage collector
 
-Curry ships two GC backends, selectable at runtime: `--gc boehm` (default —
-conservative, thread-safe, no configuration needed) or `--gc generational`
-(experimental — a per-thread nursery aimed at lower pause times on
-allocation-heavy workloads, opt-in while it matures). `(gc-stats)` and
-`(gc-stats-reset!)` expose live counters and pause times from either
-backend for your own instrumentation. See
+Curry uses the Boehm collector (conservative, non-moving, thread-safe, with
+parallel marking; no configuration needed). `(gc-stats)` and
+`(gc-stats-reset!)` expose collection counts and stop-the-world pause times
+for your own instrumentation, and Boehm's own environment variables
+(`GC_MARKERS`, `GC_ENABLE_INCREMENTAL`, `GC_PAUSE_TIME_TARGET`) tune it. See
 [`docs/reference/gc.md`](docs/reference/gc.md) for the full backend/flag/
 stats-field reference, [`docs/reference/benchmarking.md`](docs/reference/benchmarking.md)
 for the real-time Grafana monitoring stack (Docker or Apple's native

@@ -823,14 +823,12 @@ void require_min_args(val_t args, int min, const char *form_name) {
  * malformed input (unbound variable, bad special-form syntax, ...) the
  * exact same way compiler_ir_self_check's own SCM_PROTECT usage already
  * guards against, but crossing into C++ frames via a raw longjmp (no
- * destructor unwinding) is a strictly worse hazard than the pure-C
- * gc_inhibit_count leak that comment describes -- so a raise here is
+ * destructor unwinding) is a hazard of its own -- so a raise here is
  * caught and converted to a plain NULL return, mirroring
  * curry_llvm_jit_compile's own existing "silent failure, fall back to
  * bytecode" philosophy (curry_llvm.cpp) rather than ever propagating an
  * exception across the C/C++ boundary. */
 IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
-    gc_inhibit_minor();
 
     Compiler c;
     init_compiler(&c, NULL, "<jit>");
@@ -847,7 +845,6 @@ IRNode *compiler_ir_lower_for_jit(val_t expr, IRArena **out_arena) {
         raised = true;
     });
 
-    gc_resume_minor();
 
     if (raised) {
         ir_arena_free(c.ir_arena);
@@ -950,15 +947,8 @@ Compiler *compiler_ir_session_new_child(Compiler *parent, const char *name) {
  * invalidate state the caller hasn't finished inspecting yet; the caller
  * owns exactly when to call ir_arena_free on the arena
  * compiler_ir_session_new_root returned, same single-owner contract every
- * other IRArena in this codebase already has). Each call brackets its own
- * gc_inhibit_minor/gc_resume_minor pair independently, rather than
- * leaving that bracketing to the caller to hold open across the whole
- * session -- deliberately, after PR #71's call/cc fix found exactly this
- * class of bug (a paired inhibit/resume left unbalanced across multiple
- * external calls into this codebase permanently blocks minor GC on the
- * thread); a self-contained bracket per call cannot leak that way. */
+ * other IRArena in this codebase already has). */
 IRNode *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int line) {
-    gc_inhibit_minor();
 
     IRNode *result = NULL;
     bool    raised = false;
@@ -971,7 +961,6 @@ IRNode *compiler_ir_session_lower_next(Compiler *c, val_t form, bool tail, int l
         raised = true;
     });
 
-    gc_resume_minor();
 
     return raised ? NULL : result;
 }
@@ -982,7 +971,6 @@ val_t compiler_compile(val_t expr) {
     static bool lang_ready = false;
     if (!lang_ready) { lang_registry_init(); lang_ready = true; }
 
-    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<toplevel>");
 
@@ -1009,14 +997,12 @@ val_t compiler_compile(val_t expr) {
     });
 
     ir_arena_free(c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(exn);
     return result;
 }
 
 val_t compiler_compile_script(val_t expr_list) {
-    gc_inhibit_minor();
     Compiler c;
     init_compiler(&c, NULL, "<script>");
     c.chunk->arity = 0;
@@ -1039,7 +1025,6 @@ val_t compiler_compile_script(val_t expr_list) {
     });
 
     ir_arena_free(c.ir_arena);
-    gc_resume_minor();
 
     if (raised) scm_raise_val(exn);
     return result;

@@ -20,7 +20,7 @@
  * ----------------
  * Every object file produced by LLJIT that contains a .llvm_stackmaps section
  * is processed by curry_gc_register_stackmap() which records the safe-point
- * table for the GC's root enumeration walk (future: generational GC).
+ * table for a future precise collector's root enumeration walk.
  */
 
 #include "jit.h"
@@ -105,17 +105,14 @@ static void curry_jit_global_define(uint64_t sym_val, uint64_t val) {
 }
 
 /* Allocate a mutable cell holding one i64 for cell-based variable capture.
- *
- * The cell lives in Boehm (GC_MALLOC) rather than the nursery because:
- *  a) it has no Hdr type tag, so the nursery evacuator cannot size it;
- *  b) under the generational backend the cell's VALUE (a val_t) may point
- *     into the nursery — gc_register_root ensures minor GC updates it.
- *
- * Returns the cell address as a raw integer captured in JitClosure.caps[]. */
+ * Returns the cell address as a raw integer captured in JitClosure.caps[].
+ * The cell is reachable from the JIT frame (scanned conservatively) and from
+ * every JitClosure that captures it, so it needs no root registration. It
+ * used to be registered as a permanent root for the removed moving GC, which
+ * kept every cell (and its first value) alive for the rest of the process. */
 static uint64_t curry_jit_alloc_cell(uint64_t v) {
     uint64_t *cell = (uint64_t *)GC_MALLOC(sizeof(uint64_t));
     *cell = v;
-    gc_register_root(cell);  /* keep cell VALUE updated after nursery promotion */
     return (uint64_t)cell;
 }
 
@@ -124,11 +121,8 @@ static uint64_t curry_jit_alloc_cell(uint64_t v) {
  * n_caps: number of captured values
  * caps:   pointer to array of captured val_t values (copied into the closure)
  *
- * JitClosure is GC:PIN — it must never enter the nursery because:
- *  a) the native function pointer (fn) must not move;
- *  b) BcClosure.jit_val holds a raw JitClosure* — if the closure moved,
- *     all BcClosures with that raw pointer would dangle.
- * Use gc_alloc_pinned so the generational backend keeps it in Boehm. */
+ * Allocated with gc_alloc_pinned: BcClosure.jit_val holds a raw JitClosure*,
+ * so it must never move under any future moving collector. */
 static uint64_t curry_jit_make_closure(void *fn, int32_t n_caps, uint64_t *caps) {
     JitClosure *jc = (JitClosure *)gc_alloc_pinned(
         sizeof(JitClosure) + (size_t)n_caps * sizeof(val_t));
@@ -153,17 +147,6 @@ static uint64_t curry_jit_list_tail(uint64_t *argv, int32_t n) {
     }
     return (uint64_t)lst;
 }
-
-/* ---- GC inhibit wrappers (callable from JIT-compiled LLVM IR) ---- */
-/*
- * gc_inhibit_minor() / gc_resume_minor() are no-ops in C++ (TLS gc_inhibit_count
- * is not visible from __cplusplus).  These plain-C-linkage wrappers delegate to
- * the C implementations in gc.c so JIT code can inhibit minor GC around every
- * statepoint call (preventing minor GC from firing while live nursery pointers
- * reside in JIT alloca slots that the GC cannot yet enumerate).
- */
-static void curry_gc_inhibit_minor_jit(void) { gc_inhibit_minor_fn(); }
-static void curry_gc_resume_minor_jit(void)  { gc_resume_minor_fn(); }
 
 } /* extern "C" */
 
@@ -273,8 +256,6 @@ void JITSession::register_runtime_symbols() {
     add("curry_jit_alloc_cell",         (void *)curry_jit_alloc_cell);
     add("curry_jit_make_closure",       (void *)curry_jit_make_closure);
     add("curry_jit_list_tail",          (void *)curry_jit_list_tail);
-    add("curry_gc_inhibit_minor_jit",   (void *)curry_gc_inhibit_minor_jit);
-    add("curry_gc_resume_minor_jit",    (void *)curry_gc_resume_minor_jit);
 
     /* Comparison wrappers (bool → val_t). */
     add("curry_jit_lt",            (void *)curry_jit_lt);

@@ -4,8 +4,8 @@
 /*
  * debug.h — interactive bytecode debugger.
  *
- * The VM checks vm_debug_active at every instruction dispatch (same
- * pattern as the minor-GC safepoint) and calls vm_debug_hook() when set.
+ * The VM checks vm_debug_active at every instruction dispatch and calls
+ * vm_debug_hook() when set.
  * The hook stops execution on breakpoints and stepping boundaries and
  * drives a gdb-style command loop on stdin: step/next/finish/continue,
  * backtrace, locals, expression printing.
