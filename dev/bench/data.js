@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792142354968,
+  "lastUpdate": 1792146688971,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -17801,6 +17801,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 87.939,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a0a49f7a4a71de09eaf148a2e520d6508585b265",
+          "message": "Merge pull request #290 from deconstructo/remove-generational-gc\n\nRemove the generational GC backend; Boehm is the only collector",
+          "timestamp": "2026-10-16T21:30:39+11:00",
+          "tree_id": "e670073613da30e9a6c62155b3b0c08fd8f7f8d6",
+          "url": "https://github.com/deconstructo/curry/commit/a0a49f7a4a71de09eaf148a2e520d6508585b265"
+        },
+        "date": 1792146687556,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 17.761,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.147,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.067,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.739,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 144.943,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 256.693,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 50.169,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 97.846,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 70.079,
             "unit": "ms"
           }
         ]
