@@ -962,6 +962,62 @@
 (check "infinite? neg" (infinite? -inf.0) #t)
 (check "finite?"   (finite? 1.0)  #t)
 (check "finite? inf no" (finite? +inf.0) #f)
+;; rationalize (R7RS 6.2.6): simplest rational within y of x
+(check "rationalize R7RS example exact" (rationalize (exact 0.3) 1/10) 1/3)
+(check "rationalize 3/10 1/10" (rationalize 3/10 1/10) 1/3)
+(check "rationalize negative" (rationalize -3/10 1/10) -1/3)
+(check "rationalize zero tolerance keeps the value" (rationalize 1/3 0) 1/3)
+(check "rationalize integer, zero tolerance" (rationalize 5 0) 5)
+(check "rationalize 22/7 within 1/100" (rationalize 22/7 1/100) 22/7)
+(check "rationalize interval containing 0" (rationalize 1/10 1/2) 0)
+(check "rationalize interval with integer inside" (rationalize 7/3 1) 2)
+(check "rationalize negative tolerance uses its magnitude" (rationalize 7/3 -1) 2)
+(check "rationalize inexact result is inexact" (inexact? (rationalize 0.3 1/10)) #t)
+(check "rationalize inexact value" (< (abs (- (rationalize 0.3 1/10) 1/3)) 1e-12) #t)
+(check "rationalize exact args give exact result" (exact? (rationalize 3/10 1/10)) #t)
+(check "rationalize +inf.0 3" (rationalize +inf.0 3) +inf.0)
+(check "rationalize 3 +inf.0" (rationalize 3 +inf.0) 0.0)
+(check "rationalize +inf.0 +inf.0 is nan" (nan? (rationalize +inf.0 +inf.0)) #t)
+(check "rationalize nan is nan" (nan? (rationalize +nan.0 1)) #t)
+(check "rationalize large exact" (rationalize (/ (expt 10 40) (+ (expt 10 40) 1)) 1/1000) 1)
+;; Compare with a brute-force search: the smallest denominator d, then the
+;; smallest |p|, such that |p/d - x| <= y.
+(define (rationalize-brute x y)
+  (let loop ((d 1))
+    (let* ((lo (ceiling (* (- x y) d)))
+           (hi (floor (* (+ x y) d))))
+      (if (<= lo hi)
+          ;; (<= lo 0 hi) is avoided here: see #309 (three-argument comparison in JIT code)
+          (let ((p (cond ((and (<= lo 0) (<= 0 hi)) 0) ((> lo 0) lo) (else hi))))
+            (/ p d))
+          (loop (+ d 1))))))
+(define rationalize-mismatches 0)
+(do ((n -20 (+ n 1))) ((> n 20))
+  (do ((d 1 (+ d 1))) ((> d 12))
+    (for-each
+      (lambda (y)
+        (let ((x (/ n d)))
+          (if (not (= (rationalize x y) (rationalize-brute x y)))
+              (set! rationalize-mismatches (+ rationalize-mismatches 1)))))
+      '(0 1/50 1/20 1/7 1/3 1/2 1 3/2))))
+(check "rationalize agrees with brute force on 4000+ exact cases" rationalize-mismatches 0)
+(check "rationalize bignum rational, several terms"
+       (let* ((x (/ (expt 7 60) (+ (expt 11 60) 1)))
+              (r (rationalize x (/ 1 (expt 10 30)))))
+         (and (<= (abs (- r x)) (/ 1 (expt 10 30)))
+              (< (denominator r) (denominator x))))
+       #t)
+(check "rationalize zero tolerance on a huge value returns it"
+       (let ((x (/ (expt 7 5000) (+ (expt 11 5000) 1))))
+         (= x (rationalize x 0)))
+       #t)
+(check "rationalize -inf.0 3" (rationalize -inf.0 3) -inf.0)
+(check "rationalize flonum complex raises"
+       (guard (e (#t 'raised)) (rationalize 1.0+2.0i 1)) 'raised)
+(check "rationalize not a number raises"
+       (guard (e (#t 'raised)) (rationalize 'a 1)) 'raised)
+(check "rationalize complex raises"
+       (guard (e (#t 'raised)) (rationalize 1+2i 1)) 'raised)
 
 ;;; Characters
 (check "char-downcase"    (char-downcase #\A) #\a)

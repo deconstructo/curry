@@ -1718,6 +1718,83 @@ static val_t prim_truncate_div(int ac, val_t *av, void *ud) {
     return vptr(mv);
 }
 
+/* R7RS 6.2.6 (rationalize x y): the simplest rational number within y of x.
+ * "Simplest" is the one with the smallest denominator, and among those the
+ * smallest absolute numerator. Works on exact values with the continued
+ * fraction expansion; the expansion is collected in an array and folded back
+ * afterwards, so the recursion depth does not grow with the size of the
+ * numbers. An inexact argument makes the result inexact. */
+static bool is_real_number(val_t v) {
+    return vis_fixnum(v) || vis_bignum(v) || vis_rational(v) ||
+           vis_flonum(v) || vis_mpfr(v);
+}
+
+/* Simplest rational in [lo, hi]; 0 < lo <= hi, both exact. */
+static val_t simplest_rational_positive(val_t lo, val_t hi) {
+    size_t cap = 16, n = 0;
+    val_t *terms = (val_t *)gc_alloc(cap * sizeof(val_t));
+    for (;;) {
+        val_t fl = num_floor(lo);
+        val_t term;
+        bool done = true;
+        if (num_eq(fl, lo)) {
+            term = fl;                                  /* lo is an integer */
+        } else if (num_lt(fl, num_floor(hi))) {
+            term = num_add(fl, vfix(1));                /* an integer lies in (lo, hi] */
+        } else {
+            term = fl;                                  /* both in (fl, fl+1): recurse on reciprocals */
+            done = false;
+        }
+        if (n == cap) {
+            val_t *bigger = (val_t *)gc_alloc(cap * 2 * sizeof(val_t));
+            memcpy(bigger, terms, n * sizeof(val_t));
+            terms = bigger; cap *= 2;
+        }
+        terms[n++] = term;
+        if (done) break;
+        val_t new_lo = num_div(vfix(1), num_sub(hi, fl));
+        val_t new_hi = num_div(vfix(1), num_sub(lo, fl));
+        lo = new_lo; hi = new_hi;
+    }
+    val_t r = terms[n - 1];
+    for (size_t i = n - 1; i-- > 0; )
+        r = num_add(terms[i], num_div(vfix(1), r));
+    return r;
+}
+
+static val_t prim_rationalize(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t x = av[0], y = av[1];
+    if (!is_real_number(x)) scm_raise(V_FALSE, "rationalize: first argument is not a real number");
+    if (!is_real_number(y)) scm_raise(V_FALSE, "rationalize: second argument is not a real number");
+    bool inexact = vis_inexact(x) || vis_inexact(y);
+
+    /* Non-finite arguments (R7RS examples): (rationalize +inf.0 3) is +inf.0,
+     * (rationalize 3 +inf.0) is 0.0, (rationalize +inf.0 +inf.0) is +nan.0. */
+    if (num_is_nan(x) || num_is_nan(y)) return num_make_float(NAN);
+    if (num_is_infinite(y)) {
+        if (num_is_infinite(x)) return num_make_float(NAN);
+        return num_make_float(0.0);
+    }
+    if (num_is_infinite(x)) return x;
+
+    val_t ex = num_exact(x);
+    val_t ey = num_abs(num_exact(y));
+    /* Zero tolerance: the answer is x. Returning early also avoids running
+     * the full continued-fraction expansion of a very large x. */
+    if (num_is_zero(ey)) return inexact ? num_inexact(ex) : ex;
+    val_t lo = num_sub(ex, ey);
+    val_t hi = num_add(ex, ey);
+    val_t r;
+    if (!num_is_positive(lo) && !num_is_negative(hi))
+        r = vfix(0);                                    /* the interval contains 0 */
+    else if (num_is_positive(lo))
+        r = simplest_rational_positive(lo, hi);
+    else
+        r = num_neg(simplest_rational_positive(num_neg(hi), num_neg(lo)));
+    return inexact ? num_inexact(r) : r;
+}
+
 static val_t prim_exact_integer_sqrt(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t n = av[0];
@@ -3772,6 +3849,7 @@ void builtins_register(val_t env) {
     DEF("truncate/",prim_truncate_div,2,2);
     DEF("square",prim_square,1,1); DEF("exact-integer?",prim_exact_integer_p,1,1);
     DEF("exact-integer-sqrt",prim_exact_integer_sqrt,1,1);
+    DEF("rationalize",prim_rationalize,2,2);
     DEF("modulo",prim_modulo,2,2);
     DEF("floor",prim_floor,1,1); DEF("ceiling",prim_ceiling,1,1);
     DEF("truncate",prim_truncate,1,1); DEF("round",prim_round,1,1);
