@@ -147,6 +147,29 @@ check_contains "-V output has (version ...)" "$out" "(version "
 first_char=$(printf '%s' "$out" | head -c1)
 check "-V's first line starts with '(' in column 1 (LOSE requirement)" "$first_char" "("
 
+# -V prints the full version-alist: every line is one property starting with
+# '(' in column 1, and the build and C properties are present.
+bad_lines=$(grep -vc '^(' <<<"$out" || true)
+check "-V: every line starts with '(' in column 1" "$bad_lines" "0"
+for key in command website version languages build.date build.platform \
+           build.configure scheme.id scheme.srfi scheme.features scheme.path \
+           c.version c.compile c.link c.type-bits; do
+    check_contains "-V has ($key ...)" "$out" "($key "
+done
+
+# -V and (version-alist) report the same properties in the same order.
+keys_v=$(sed -n 's/^(\([^ )]*\).*/\1/p' <<<"$out")
+keys_a=$("$CURRY" -e '(import (srfi 176)) (for-each (lambda (e) (display (car e)) (newline)) (version-alist))')
+check "-V property names match (version-alist)" "$keys_v" "$keys_a"
+
+# scheme.srfi lists every SRFI under lib/curry/modules/srfi (plus the
+# built-in 0 and 61). Fails when a new SRFI is added without updating
+# SRFI_NUMBERS in src/version_info.c.
+srfi_dir="$(dirname "${BASH_SOURCE[0]}")/../lib/curry/modules/srfi"
+expected_srfis=$( (ls "$srfi_dir" | sed -En 's/^([0-9]+)\.s(ld|cm)$/\1/p'; echo 0; echo 61) | sort -un | tr '\n' ' ')
+actual_srfis=$(sed -n 's/^(scheme\.srfi \(.*\))$/\1/p' <<<"$out" | tr ' ' '\n' | sort -n | tr '\n' ' ')
+check "-V scheme.srfi matches lib/curry/modules/srfi" "$actual_srfis" "$expected_srfis"
+
 # ─── Shebang handling in .scm files ───────────────────────────────────────────
 
 out=$("$CURRY" "$SHEBANG_SCM")

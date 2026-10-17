@@ -1,5 +1,26 @@
 # Changelog
 
+### Unreleased
+
+**New — SRFI 176 build and C properties**
+
+- `(version-alist)` and `curry -V` now report build and C properties:
+  `build.date`, `build.platform`, `build.configure`, `build.git.commit`,
+  `build.git.branch`, `build.git.tag`, `build.git.modified`, `scheme.path`,
+  `c.version`, `c.compile`, `c.link` and `c.type-bits`. A property that is
+  unknown (for example the git ones in a tarball build) is left out.
+- `curry -V` prints the full `(version-alist)` in LOSE format. Before it
+  printed five properties. It now starts the runtime first, as running a
+  script does.
+- `(curry-version-alist)` is a new builtin; `version-alist` calls it.
+  Both `-V` and `version-alist` are built by one C function
+  (`src/version_info.c`), so they cannot differ.
+
+**Fixes**
+
+- `scheme.srfi` was missing SRFI 28, 29, 189, 208, 224 and 272. A test now
+  compares it with `lib/curry/modules/srfi/`.
+
 ### 1.27.0 - 2026-10-16
 
 **Removed — the experimental generational GC (`--gc generational`)**
