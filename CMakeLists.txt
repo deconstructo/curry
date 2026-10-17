@@ -150,13 +150,156 @@ set(CORE_SOURCES
   src/scc.c
   src/runtime_init.c
   src/interrupt.c
+  src/version_info.c
 )
 
 # vm.c uses computed gotos (GCC/Clang extension) for the dispatch table.
 set_source_files_properties(src/vm.c PROPERTIES COMPILE_FLAGS "-Wno-gnu-label-as-value")
 
+
+# ---- Build information for SRFI-176 (src/version_info.c) ----
+#
+# Two generated headers under ${CMAKE_BINARY_DIR}/generated:
+#   build_static.h   written here, at configure time: platform, C compiler,
+#                    compile and link flags, and the cache options this tree
+#                    was configured with. A change to any of them makes CMake
+#                    reconfigure, which rewrites the file.
+#   build_dynamic.h  written at every build by cmake/BuildInfo.cmake: build
+#                    date and git state. The file is replaced only when its
+#                    content changes (the date is not counted), so
+#                    version_info.c is not recompiled on every build.
+option(CURRY_BUILD_INFO_PATHS
+  "Put build-machine paths in SRFI-176 output (compiler and linker paths, -I/-L flags, install prefix, module search path, names of changed files)"
+  OFF)
+set(CURRY_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${CURRY_GENERATED_DIR}")
+
+function(curry_c_string out value)
+  string(REPLACE "\\" "\\\\" v "${value}")
+  string(REPLACE "\"" "\\\"" v "${v}")
+  string(REPLACE "\n" " " v "${v}")
+  string(REPLACE "\r" " " v "${v}")
+  string(REPLACE "?" "\\?" v "${v}")   # no trigraphs (??/) in the C source
+  string(REPLACE "<SEMI>" ";" v "${v}")   # see _curry_configure below
+  # file(CONFIGURE ... @ONLY) would expand @name@; write the character as an
+  # octal escape instead.
+  string(REPLACE "@" "\\100" v "${v}")
+  set(${out} "\"${v}\"" PARENT_SCOPE)
+endfunction()
+
+function(curry_c_string_array out)
+  set(items "")
+  foreach(item IN LISTS ARGN)
+    curry_c_string(q "${item}")
+    string(APPEND items "    ${q},\n")
+  endforeach()
+  set(${out} "${items}    NULL" PARENT_SCOPE)
+endfunction()
+
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _curry_bt_upper)
+set(_curry_cflags_all "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${_curry_bt_upper}}")
+separate_arguments(_curry_compile_args UNIX_COMMAND "${_curry_cflags_all}")
+separate_arguments(_curry_link_flags UNIX_COMMAND
+  "${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS_${_curry_bt_upper}}")
+set(_curry_link_libs "")
+foreach(l IN LISTS GC_LIBRARIES)
+  if(l MATCHES "^-" OR l MATCHES "/")
+    list(APPEND _curry_link_libs "${l}")
+  else()
+    list(APPEND _curry_link_libs "-l${l}")
+  endif()
+endforeach()
+list(APPEND _curry_link_libs "${GMP_LIB}" -lm)
+
+if(CURRY_BUILD_INFO_PATHS)
+  set(_curry_cc "${CMAKE_C_COMPILER}")
+else()
+  # Keep the compiler's file name, flags that name no path, and libraries by
+  # name (-lgmp instead of /opt/homebrew/lib/libgmp.dylib).
+  get_filename_component(_curry_cc "${CMAKE_C_COMPILER}" NAME)
+  set(_curry_keep "")
+  foreach(a IN LISTS _curry_compile_args)
+    if(NOT a MATCHES "/" AND NOT a MATCHES "^-(I|isystem|isysroot|F|iframework|L|include|iquote)")
+      list(APPEND _curry_keep "${a}")
+    endif()
+  endforeach()
+  set(_curry_compile_args ${_curry_keep})
+  set(_curry_keep "")
+  foreach(a IN LISTS _curry_link_flags)
+    if(NOT a MATCHES "/" AND NOT a MATCHES "^-(I|isystem|isysroot|F|iframework|L|include|iquote)")
+      list(APPEND _curry_keep "${a}")
+    endif()
+  endforeach()
+  set(_curry_link_flags ${_curry_keep})
+  set(_curry_keep "")
+  foreach(a IN LISTS _curry_link_libs)
+    if(a MATCHES "/")
+      get_filename_component(a "${a}" NAME_WE)
+      string(REGEX REPLACE "^lib" "" a "${a}")
+      set(a "-l${a}")
+    endif()
+    list(APPEND _curry_keep "${a}")
+  endforeach()
+  set(_curry_link_libs ${_curry_keep})
+endif()
+set(_curry_compile_cmd "${_curry_cc}" ${_curry_compile_args})
+set(_curry_link_cmd "${_curry_cc}" ${_curry_link_flags} ${_curry_link_libs})
+
+# Cache options that decide what this binary contains.
+get_cmake_property(_curry_cache_vars CACHE_VARIABLES)
+set(_curry_configure "")
+foreach(v IN LISTS _curry_cache_vars)
+  if(v MATCHES "^(BUILD_[A-Z0-9_]+|CMAKE_BUILD_TYPE)$"
+     OR (CURRY_BUILD_INFO_PATHS AND v MATCHES "^(CMAKE_INSTALL_PREFIX|CMAKE_PREFIX_PATH)$"))
+    # A value such as CMAKE_PREFIX_PATH is itself a ;-list; keep it as one
+    # element (curry_c_string turns <SEMI> back into ;).
+    string(REPLACE ";" "<SEMI>" _value "${${v}}")
+    list(APPEND _curry_configure "-D${v}=${_value}")
+  endif()
+endforeach()
+list(SORT _curry_configure)
+
+if(CURRY_BUILD_INFO_PATHS)
+  set(_curry_paths_flag 1)
+else()
+  set(_curry_paths_flag 0)
+endif()
+curry_c_string(_q_platform "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+curry_c_string(_q_cc_version "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
+curry_c_string_array(_a_configure ${_curry_configure})
+curry_c_string_array(_a_compile ${_curry_compile_cmd})
+curry_c_string_array(_a_link ${_curry_link_cmd})
+
+file(CONFIGURE OUTPUT "${CURRY_GENERATED_DIR}/build_static.h" CONTENT
+"/* Generated by CMakeLists.txt at configure time. Do not edit. */
+#define CURRY_BUILD_INFO_PATHS ${_curry_paths_flag}
+#define CURRY_BUILD_PLATFORM ${_q_platform}
+#define CURRY_BUILD_C_VERSION ${_q_cc_version}
+static const char *const curry_build_configure[] = {
+${_a_configure}
+};
+static const char *const curry_build_c_compile[] = {
+${_a_compile}
+};
+static const char *const curry_build_c_link[] = {
+${_a_link}
+};
+" @ONLY)
+
+add_custom_target(curry_build_info
+  COMMAND ${CMAKE_COMMAND}
+    -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+    -DOUT=${CURRY_GENERATED_DIR}/build_dynamic.h
+    -DINFO_PATHS=${CURRY_BUILD_INFO_PATHS}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildInfo.cmake
+  BYPRODUCTS ${CURRY_GENERATED_DIR}/build_dynamic.h
+  COMMENT "Recording build date and git state"
+  VERBATIM)
+
 add_library(curry_core STATIC ${CORE_SOURCES})
 set_target_properties(curry_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_dependencies(curry_core curry_build_info)
+target_include_directories(curry_core PRIVATE ${CURRY_GENERATED_DIR})
 target_include_directories(curry_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include

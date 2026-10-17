@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include "version_info.h"
 #include <pthread.h>
 #include <stdatomic.h>
 
@@ -1637,6 +1638,14 @@ static val_t prim_curry_version(int ac, val_t *av, void *ud) {
     return vptr(s);
 }
 
+/* SRFI-176: (curry-version-alist) returns the complete property list;
+ * (srfi s176 version-flag)'s version-alist just calls it, and the -V flag
+ * prints the same data (src/version_info.c). */
+static val_t prim_curry_version_alist(int ac, val_t *av, void *ud) {
+    (void)ac; (void)av; (void)ud;
+    return curry_version_alist();
+}
+
 void builtins_curry_register(val_t env) {
     pool_init();   /* start the work-stealing thread pool */
 
@@ -1747,6 +1756,7 @@ void builtins_curry_register(val_t env) {
     DEF("for-each/par",               prim_for_each_par,          2,-1);
     DEF("hardware-concurrency",       prim_hardware_concurrency,  0, 0);
     DEF("curry-version",              prim_curry_version,         0, 0);
+    DEF("curry-version-alist",        prim_curry_version_alist,   0, 0);
 
     /* SRFI-27 random numbers */
     DEF("random-real",                    prim_random_real,           0,0);

@@ -735,3 +735,10 @@ val_t modules_define_r6rs_library(val_t form, val_t env) {
     register_library(name, lib_env, exports, has_exports);
     return V_VOID;
 }
+
+/* Module search directories in search order, for SRFI-176's scheme.path.
+ * Returns the number of entries; *dirs points at internal storage. */
+int modules_search_dirs(const char *const **dirs) {
+    *dirs = search_dirs;
+    return num_search_dirs;
+}

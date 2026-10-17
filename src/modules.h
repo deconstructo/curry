@@ -36,6 +36,10 @@ val_t modules_load(val_t name_list);
  * raising on failure -- backs cond-expand's `(library <name>)` requirement. */
 bool modules_available(val_t name_list);
 
+/* Module search directories in search order (SRFI-176 scheme.path). Returns
+ * the number of entries; *dirs points at internal storage, do not modify. */
+int modules_search_dirs(const char *const **dirs);
+
 /* Import a module spec into env */
 val_t modules_import(val_t spec, val_t env);
 
