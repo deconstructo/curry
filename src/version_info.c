@@ -124,7 +124,14 @@ val_t curry_version_alist(void) {
             list = scm_cons(vfix(SRFI_NUMBERS[i]), list);
         ADD(prop("scheme.srfi", list));
     }
-    ADD(prop("scheme.features", features_list()));
+    {
+        /* A copy: features_list() returns a cached list that a caller must
+         * not be able to modify through the returned alist. */
+        val_t copy = V_NIL;
+        for (val_t f = features_list(); vis_pair(f); f = vcdr(f))
+            copy = scm_cons(vcar(f), copy);
+        ADD(prop("scheme.features", scm_reverse(copy)));
+    }
     {
         const char *const *dirs;
         int n = modules_search_dirs(&dirs);

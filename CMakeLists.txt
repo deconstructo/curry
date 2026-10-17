@@ -175,7 +175,12 @@ function(curry_c_string out value)
   string(REPLACE "\\" "\\\\" v "${value}")
   string(REPLACE "\"" "\\\"" v "${v}")
   string(REPLACE "\n" " " v "${v}")
+  string(REPLACE "\r" " " v "${v}")
+  string(REPLACE "?" "\\?" v "${v}")   # no trigraphs (??/) in the C source
   string(REPLACE "<SEMI>" ";" v "${v}")   # see _curry_configure below
+  # file(CONFIGURE ... @ONLY) would expand @name@; write the character as an
+  # octal escape instead.
+  string(REPLACE "@" "\\100" v "${v}")
   set(${out} "\"${v}\"" PARENT_SCOPE)
 endfunction()
 
