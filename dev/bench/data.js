@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792271357849,
+  "lastUpdate": 1792274155931,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -18422,6 +18422,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 72.668,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c412e01ddaa7db84a8c3e73e5ce49109e0b1199b",
+          "message": "Merge pull request #311 from deconstructo/fix/306-rationalize\n\nR7RS rationalize",
+          "timestamp": "2026-10-18T08:55:15+11:00",
+          "tree_id": "09fbeef88a476870329ef6b7c1ab1100042b015d",
+          "url": "https://github.com/deconstructo/curry/commit/c412e01ddaa7db84a8c3e73e5ce49109e0b1199b"
+        },
+        "date": 1792274154613,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 19.374,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.817,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.299,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.452,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 173.636,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 367.801,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 76.955,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 104.069,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.631,
             "unit": "ms"
           }
         ]
