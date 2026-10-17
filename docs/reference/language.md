@@ -809,6 +809,11 @@ The numeric tower supports the full R7RS arithmetic library:
 ; Integer square root
 (exact-integer-sqrt n)       ; → (values s r) such that n = s² + r, s ≥ 0, 0 ≤ r ≤ 2s
 
+; Simplest rational within a tolerance (smallest denominator, then smallest |numerator|)
+(rationalize x y)            ; (rationalize 3/10 1/10) → 1/3   (rationalize 0.3 1/10) → 0.3333333333333333
+                             ; inexact if x or y is inexact; (rationalize +inf.0 3) → +inf.0,
+                             ; (rationalize 3 +inf.0) → 0.0, (rationalize +inf.0 +inf.0) → +nan.0
+
 ; Bitwise (integers only)
 (arithmetic-shift n count)
 (bitwise-and a b ...)  (bitwise-or a b ...)  (bitwise-xor a b ...)

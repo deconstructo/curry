@@ -962,6 +962,28 @@
 (check "infinite? neg" (infinite? -inf.0) #t)
 (check "finite?"   (finite? 1.0)  #t)
 (check "finite? inf no" (finite? +inf.0) #f)
+;; rationalize (R7RS 6.2.6): simplest rational within y of x
+(check "rationalize R7RS example exact" (rationalize (exact 0.3) 1/10) 1/3)
+(check "rationalize 3/10 1/10" (rationalize 3/10 1/10) 1/3)
+(check "rationalize negative" (rationalize -3/10 1/10) -1/3)
+(check "rationalize zero tolerance keeps the value" (rationalize 1/3 0) 1/3)
+(check "rationalize integer, zero tolerance" (rationalize 5 0) 5)
+(check "rationalize 22/7 within 1/100" (rationalize 22/7 1/100) 22/7)
+(check "rationalize interval containing 0" (rationalize 1/10 1/2) 0)
+(check "rationalize interval with integer inside" (rationalize 7/3 1) 2)
+(check "rationalize negative tolerance uses its magnitude" (rationalize 7/3 -1) 2)
+(check "rationalize inexact result is inexact" (inexact? (rationalize 0.3 1/10)) #t)
+(check "rationalize inexact value" (< (abs (- (rationalize 0.3 1/10) 1/3)) 1e-12) #t)
+(check "rationalize exact args give exact result" (exact? (rationalize 3/10 1/10)) #t)
+(check "rationalize +inf.0 3" (rationalize +inf.0 3) +inf.0)
+(check "rationalize 3 +inf.0" (rationalize 3 +inf.0) 0.0)
+(check "rationalize +inf.0 +inf.0 is nan" (nan? (rationalize +inf.0 +inf.0)) #t)
+(check "rationalize nan is nan" (nan? (rationalize +nan.0 1)) #t)
+(check "rationalize large exact" (rationalize (/ (expt 10 40) (+ (expt 10 40) 1)) 1/1000) 1)
+(check "rationalize not a number raises"
+       (guard (e (#t 'raised)) (rationalize 'a 1)) 'raised)
+(check "rationalize complex raises"
+       (guard (e (#t 'raised)) (rationalize 1+2i 1)) 'raised)
 
 ;;; Characters
 (check "char-downcase"    (char-downcase #\A) #\a)

@@ -22,6 +22,8 @@
 
 **Fixes**
 
+- R7RS `rationalize` was not defined (#306). It now returns the simplest
+  rational within `y` of `x`, with the R7RS results for infinities and NaN.
 - `scheme.srfi` was missing SRFI 28, 29, 189, 208, 224 and 272. A test now
   compares it with `lib/curry/modules/srfi/`.
 
