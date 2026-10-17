@@ -1780,6 +1780,9 @@ static val_t prim_rationalize(int ac, val_t *av, void *ud) {
 
     val_t ex = num_exact(x);
     val_t ey = num_abs(num_exact(y));
+    /* Zero tolerance: the answer is x. Returning early also avoids running
+     * the full continued-fraction expansion of a very large x. */
+    if (num_is_zero(ey)) return inexact ? num_inexact(ex) : ex;
     val_t lo = num_sub(ex, ey);
     val_t hi = num_add(ex, ey);
     val_t r;
