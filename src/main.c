@@ -26,6 +26,7 @@
 #include "compiler.h"
 #include "scc.h"
 #include "version.h"
+#include "version_info.h"
 #include "runtime_init.h"
 #include "nesting_depth.h"
 #include <string.h>
@@ -595,39 +596,6 @@ static void usage(const char *argv0) {
         argv0);
 }
 
-/* SRFI-176: print one string LOSE-escaped (surrounding quotes included).
- * LOSE strings support exactly two escapes, \" and \\, and forbid literal
- * newlines -- none of the static strings -V ever prints actually need
- * escaping, but this is correct for any future property whose value
- * isn't a compile-time literal. */
-static void lose_print_string(const char *s) {
-    putchar('"');
-    for (const char *p = s; *p; p++) {
-        if (*p == '"' || *p == '\\') putchar('\\');
-        putchar(*p);
-    }
-    putchar('"');
-}
-
-/* SRFI-176 `-V`: prints a handful of version-alist's own properties in
- * LOSE (Line-Oriented S-Expressions) format directly, independent of
- * booting the Scheme runtime -- matching how -v/-h already short-
- * circuit before any VM/module initialization. `(srfi 176)`'s own
- * `version-alist` procedure (lib/curry/modules/srfi/s176/version-flag.
- * scm) returns a richer alist from *within* a running program
- * (including scheme.srfi/scheme.features, which need the module system
- * and (features) builtin actually initialized) -- the two deliberately
- * overlap on the handful of static identity properties below rather
- * than one calling the other, so this flag stays as fast and
- * dependency-free as -v/-h. */
-static void print_version_alist_lose(void) {
-    printf("(command \"curry\")\n");
-    printf("(website "); lose_print_string("https://github.com/deconstructo/curry"); printf(")\n");
-    printf("(version "); lose_print_string(CURRY_VERSION); printf(")\n");
-    printf("(languages scheme r7rs)\n");
-    printf("(scheme.id curry)\n");
-}
-
 /* Parse a size string like "256M", "1G", "512K", or a plain integer (bytes). */
 static val_t prim_command_line(int ac, val_t *av, void *ud) {
     (void)ac; (void)av;
@@ -727,8 +695,9 @@ int main(int argc, char **argv) {
             printf("Curry Scheme %s (R7RS)" LLVM_TAG FFI_TAG "\n", CURRY_VERSION);
             return 0;
         case 'V':
-            /* SRFI-176: machine-readable version info in LOSE format. */
-            print_version_alist_lose();
+            /* SRFI-176: the same list (version-alist) returns, in LOSE
+             * format. The runtime is already initialised above. */
+            curry_version_print_lose(stdout);
             return 0;
         case 'h':
             usage(argv[0]); return 0;
