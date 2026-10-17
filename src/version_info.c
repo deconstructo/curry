@@ -10,6 +10,11 @@
  * configure options) and build_dynamic.h (date, git state).
  *
  * A property whose value is unknown is left out, as the SRFI allows.
+ *
+ * Paths from the build machine are left out unless curry was configured with
+ * -DCURRY_BUILD_INFO_PATHS=ON: scheme.path, the names of changed files, the
+ * compiler and library paths in c.compile and c.link, and the install prefix
+ * and prefix path in build.configure.
  */
 #include "version_info.h"
 #include "version.h"
@@ -132,6 +137,7 @@ val_t curry_version_alist(void) {
             copy = scm_cons(vcar(f), copy);
         ADD(prop("scheme.features", scm_reverse(copy)));
     }
+#if CURRY_BUILD_INFO_PATHS
     {
         const char *const *dirs;
         int n = modules_search_dirs(&dirs);
@@ -140,6 +146,7 @@ val_t curry_version_alist(void) {
             list = scm_cons(make_str(dirs[i]), list);
         if (n > 0) ADD(prop("scheme.path", list));
     }
+#endif
 
     ADD(prop_string("c.version", CURRY_BUILD_C_VERSION));
     ADD(prop_strings("c.compile", curry_build_c_compile));

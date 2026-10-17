@@ -12,6 +12,10 @@
 - `curry -V` prints the full `(version-alist)` in LOSE format. Before it
   printed five properties. It now starts the runtime first, as running a
   script does.
+- Build-machine paths are not recorded by default: `scheme.path` and
+  `build.git.modified` are absent, `c.compile`/`c.link` show the compiler's
+  file name and libraries by name, and `build.configure` leaves out the
+  install prefix and prefix path. `-DCURRY_BUILD_INFO_PATHS=ON` records them.
 - `(curry-version-alist)` is a new builtin; `version-alist` calls it.
   Both `-V` and `version-alist` are built by one C function
   (`src/version_info.c`), so they cannot differ.

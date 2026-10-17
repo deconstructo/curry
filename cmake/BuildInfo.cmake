@@ -1,7 +1,8 @@
 # Writes ${OUT} (build_dynamic.h): the build date and git state for SRFI-176.
 # Run at every build as a custom target; see CMakeLists.txt.
 #
-# Inputs: SRC_DIR (source tree), OUT (header to write).
+# Inputs: SRC_DIR (source tree), OUT (header to write), INFO_PATHS (true to
+# include the names of changed files, CURRY_BUILD_INFO_PATHS in CMakeLists.txt).
 #
 # The header is rewritten only when its content other than the date
 # changes, so version_info.c is not recompiled on every build. A property
@@ -99,6 +100,9 @@ function(render out date)
       string(APPEND items "    ${q},\n")
       math(EXPR n "${n} + 1")
     endforeach()
+    if(NOT INFO_PATHS)
+      set(items "")   # file names are build-machine information; see CMakeLists.txt
+    endif()
     string(APPEND body "static const char *const curry_build_git_modified[] = {\n${items}    NULL\n};\n")
   endif()
   set(${out} "${body}" PARENT_SCOPE)

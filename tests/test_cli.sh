@@ -152,10 +152,20 @@ check "-V's first line starts with '(' in column 1 (LOSE requirement)" "$first_c
 bad_lines=$(grep -vc '^(' <<<"$out" || true)
 check "-V: every line starts with '(' in column 1" "$bad_lines" "0"
 for key in command website version languages build.date build.platform \
-           build.configure scheme.id scheme.srfi scheme.features scheme.path \
+           build.configure scheme.id scheme.srfi scheme.features \
            c.version c.compile c.link c.type-bits; do
     check_contains "-V has ($key ...)" "$out" "($key "
 done
+
+# Without -DCURRY_BUILD_INFO_PATHS=ON no property holds an absolute path and
+# there is no scheme.path or build.git.modified. (A branch name may contain
+# a slash, so look for a string that starts with one.) Skipped for a build
+# that turned the option on.
+if ! grep -q '^(scheme\.path ' <<<"$out"; then
+    leaked=$(grep -c '"/' <<<"$out" || true)
+    check "-V has no absolute paths (default build)" "$leaked" "0"
+    check_contains "-V default build has no build.git.modified" "$(grep -c '^(build\.git\.modified ' <<<"$out" || true)" "0"
+fi
 
 # -V and (version-alist) report the same properties in the same order.
 keys_v=$(sed -n 's/^(\([^ )]*\).*/\1/p' <<<"$out")
