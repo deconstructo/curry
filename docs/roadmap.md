@@ -11,36 +11,45 @@ numbering" section below. Updated 2026-09-08: added a "CAS memoization:
 scoped cache invalidation" entry under "Active work outside the phase
 numbering" for issue #195. Updated 2026-10-16 for v1.27.0: the
 generational GC was removed — see
-`docs/thoughts/generational-gc-removal.md`. Source: cill_spec.pdf +
+`docs/thoughts/generational-gc-removal.md`. Updated 2026-10-18 after the
+v1.27.0 release: the opening paragraph and the "Where we are now" rows
+for work shipped since v1.23.3 were rewritten. Source: cill_spec.pdf +
 design sessions.*
 
-Curry is at v1.27.0. In v1.27.0 the experimental generational GC was
-removed and Boehm is the only collector (see
-`docs/thoughts/generational-gc-removal.md`); the rest of this paragraph
-describes v1.23.3 and earlier. Since this roadmap was last updated for v1.17.0:
-**a real compiler IR pipeline shipped** (Tiers 2.1 through 2.6 — open
-coding, a local inliner, wrapper elision, wider open-coding, an
-interleaved-lowering session API — the first IR curry has ever had, live
-in production compilation, not experimental; `compiler.c` split into five
-files along the pipeline's own boundaries); **neural text-to-speech
-landed** (`(curry tts)`, cross-backend — espeak-ng and a Piper neural
-backend, plus a real Homebrew formula for `libpiper`); **the Gillespie
-stochastic simulation algorithm landed** (`(curry gillespie)`, composable
-propensity/rate-law combinators, multi-cell simulation via actors); **a
-cross-database SQL layer landed** (`(curry sql)`, sqlite/mariadb/postgres
-backends); **`(curry okf)`** (Open Knowledge Format v0.2) and **R7RS
-`cond-expand`/`(features)`** landed; a real SRFI-27 RNG data race and two
-broken deterministic-reseed primitives were found and fixed; and a
-systematic audit of every implemented SRFI against its actual
-specification (not just curry's own docs) found and closed real gaps —
-20 in the first two audit tranches (v1.23.3), plus seven entirely new
-SRFI libraries added since (9, 31, 45, 95, 78, 212, 141 — see the summary
-timeline and the new SRFI section below). None of this was tracked
-against a roadmap phase at the time it shipped — see `CHANGELOG.md`
-v1.17.0 through v1.23.3 for the dated list, and the new section below for
-work merged since 1.23.3 that has no CHANGELOG entry yet. Some things
-were also explicitly decided *against* rather than simply not gotten to
-yet — see the "Decided against" section before the summary timeline.
+Curry is at v1.27.0 (released 2026-10-18). Since v1.23.3 the following
+has shipped; `CHANGELOG.md` has the dated list.
+
+- **v1.24.0:** SRFI-61 (`cond` arrow clause) in the compiler and the
+  tree-walker.
+- **v1.25.0–1.25.2:** a Jupyter kernel (`curry_jupyter`, built on xeus),
+  installable through Homebrew, with inline images and in-place image
+  updates.
+- **v1.26.0:** SRFI 28, 29, 120, 176, 189, 208, 224, 225, 272 and 273;
+  FFI support for variadic C functions, callbacks and struct-by-value;
+  fixes for `call/cc` with multiple values and for composed accessors
+  (`cadr` and similar).
+- **v1.27.0:** the experimental generational GC was removed and Boehm is
+  the only collector (see `docs/thoughts/generational-gc-removal.md`);
+  `(gc-stats)` reports stop-the-world pauses; deep non-tail recursion
+  works (the VM stacks are large reserved regions, #292); the compiler
+  reports an error where it used to produce wrong code at its one-byte
+  limits (#297); several LLVM JIT correctness bugs were fixed (#288,
+  #289, #291, #293-#295); and closure-capture and work-pool bugs were
+  fixed (#299, #300, #302).
+
+Earlier, between v1.17.0 and v1.23.3: **a real compiler IR pipeline
+shipped** (Tiers 2.1 through 2.6 — open coding, a local inliner, wrapper
+elision, wider open-coding, an interleaved-lowering session API — the
+first IR curry has ever had, live in production compilation;
+`compiler.c` was split into five files); neural text-to-speech
+(`(curry tts)`, espeak-ng and Piper); `(curry gillespie)`; a
+cross-database SQL layer (`(curry sql)`); `(curry okf)`; R7RS
+`cond-expand`/`(features)`; a systematic audit of every implemented SRFI
+against its specification; and a fix for a real SRFI-27 data race. None
+of this was tracked against a roadmap phase at the time it shipped. Some
+things were also explicitly decided *against* rather than simply not
+gotten to yet — see the "Decided against" section before the summary
+timeline.
 This document maps the path from here to a compiled Scheme for
 scientific computing — the full cill specification. It is ordered by
 dependency, not ambition; each phase unblocks the phases above it.
@@ -84,10 +93,13 @@ dependency, not ambition; each phase unblocks the phases above it.
 | **`(curry sql)`** — cross-database Scheme-native query layer | ✓ **v1.18.0** — sqlite/mariadb/postgres backends |
 | **`(curry okf)`** — Open Knowledge Format v0.2 bundle reader/query/writer | ✓ **v1.17.0** |
 | **R7RS `cond-expand`/`(features)`** | ✓ **v1.20.0** |
-| **`(curry gillespie)`** — Gillespie stochastic simulation algorithm | ✓ unreleased, merged to `main` — composable propensity/rate-law combinators (`mass-action`/`arrhenius`/`michaelis-menten`/`hill`), multi-cell simulation via actors, no separate concurrency model |
-| **`(curry websocket)`** + **`(curry ros)`** — RFC 6455 client + rosbridge v2.0 JSON protocol client | ✓ unreleased, merged to `main` — pure Scheme, no ROS install/DDS transport needed; see `docs/guides/ros-robot.md` for driving real GPIO/PWM motors via `(curry rpi)` from ROS teleop |
-| **SRFI compatibility** | ✓ **47 libraries** as of the unreleased work below (39 at the start of the audit work this update covers, v1.23.3) — see the new SRFI section below for audit status and known gaps |
+| **`(curry gillespie)`** — Gillespie stochastic simulation algorithm | ✓ **v1.23.3** — composable propensity/rate-law combinators (`mass-action`/`arrhenius`/`michaelis-menten`/`hill`), multi-cell simulation via actors, no separate concurrency model |
+| **`(curry websocket)`** + **`(curry ros)`** — RFC 6455 client + rosbridge v2.0 JSON protocol client | ✓ **v1.23.4** — pure Scheme, no ROS install/DDS transport needed; see `docs/guides/ros-robot.md` for driving real GPIO/PWM motors via `(curry rpi)` from ROS teleop |
+| **SRFI compatibility** | ✓ **more than 47 libraries** (47 at v1.23.4; v1.24.0 and v1.26.0 added SRFI-61 and ten more) — see the SRFI section below for audit status and known gaps; the index is `docs/reference/srfi/index.md` |
 | **Full multi-shot `call/cc`** | ✗ — `setjmp`/`longjmp` escape-only continuations remain the whole story; the target strategy (VM frame-stack copying, decided against CPS — see "Decided against") is chosen but not implemented. See "Active work outside the phase numbering" below |
+| **Jupyter kernel** (`curry_jupyter`, xeus-based) | ✓ **v1.25.0** — inline images, in-place image updates (v1.25.2), Homebrew install with `--with-jupyter` (v1.25.1) |
+| **FFI: variadic functions, callbacks, struct-by-value** | ✓ **v1.26.0** |
+| **Deep non-tail recursion** (about 1,048,576 VM frames) | ✓ **v1.27.0** |
 | Green threads | ✗ |
 | Hot code reloading | ✗ |
 | Pluggable scheduler | ✗ |
@@ -214,9 +226,9 @@ started.
 
 ### SRFI compatibility
 
-47 `(srfi sN name)` libraries as of the work merged to `main` covered in
-the summary timeline below (39 at the start of the audit work covered
-here, v1.23.3). Two rounds of work distinct from ordinary new-library
+47 `(srfi sN name)` libraries at v1.23.4 (39 at the start of the audit
+work covered here, v1.23.3); v1.24.0 and v1.26.0 added more (see the
+summary timeline). Two rounds of work distinct from ordinary new-library
 additions:
 
 - **Gap audit (v1.23.3 and the tranche before it):** every already-
@@ -227,7 +239,7 @@ additions:
   implementation could silently miss its `(srfi N)`/`(srfi srfi-N)`
   re-export shims — now guarded permanently by
   `tests/srfi_legacy_dashed_names_tests.scm`.
-- **New libraries added post-audit** (all unreleased, merged to `main`):
+- **New libraries added post-audit** (all shipped in v1.23.4):
   SRFI-9 (records), SRFI-31 (`rec`), SRFI-45 (lazy/iterative algorithms),
   SRFI-95 (sorting/merging), SRFI-78 (lightweight testing), SRFI-212
   (aliases), SRFI-141 (integer division: `ceiling`/`round`/`euclidean`/
