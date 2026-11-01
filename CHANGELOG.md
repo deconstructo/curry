@@ -2,11 +2,19 @@
 
 ### Unreleased
 
-**Fixed — leading-dot decimals inside lists (#307)**
+**Changed (breaking output) — flonums print in readable form (#308)**
 
-- `.3`, `.5e2` and similar decimals with no digits before the point now read
-  as numbers inside lists, so `(display .3)` and `(+ .5 .25)` work. They were
-  read as symbols there. `...` and `.foo` are still symbols.
+- `write`, `display` and `number->string` now print an integer-valued flonum
+  with a `.0` (`1000.0`, not `1000`) and spell the non-finite values
+  `+inf.0`, `-inf.0` and `+nan.0` (were `inf`, `-inf`, `nan`), as R7RS 6.2.6
+  and 6.13.3 require. Output now reads back as the same inexact number. Any
+  script or test that compared against the old text needs updating. Matrix,
+  tensor and multivector element printing use the same formatter.
+- `(string->number "+inf.0")`, `"-inf.0"` and `"+nan.0"` now return the
+  value instead of `#f`.
+- A complex number with an infinite or NaN imaginary part prints one sign
+  (`1.0+inf.0i`, not `1.0++inf.0i`).
+- Not changed: quaternion and octonion components still print with `%g`.
 
 **New — SRFI 176 build and C properties**
 
