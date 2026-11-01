@@ -1062,6 +1062,21 @@
        '(46 945))
 (check "dot-prefixed symbols differing in codepoint stay distinct"
        (eq? (car '(.α)) (car '(.±))) #f)
+;; eqv? distinguishes the signed zeros (R7RS 6.1), so the compiler keeps both
+;; literals apart (#319)
+(check "eqv? 0.0 -0.0" (eqv? 0.0 -0.0) #f)
+(check "equal? 0.0 -0.0" (equal? 0.0 -0.0) #f)
+(check "= 0.0 -0.0 stays true" (= 0.0 -0.0) #t)
+(check "eqv? 0.0 0.0" (eqv? 0.0 0.0) #t)
+(check "eqv? same NaN" (eqv? +nan.0 +nan.0) #t)
+(check "memv finds the right signed zero" (memv -0.0 (list 0.0 -0.0)) '(-0.0))
+(check "signed-zero literals in one expression stay distinct"
+       (map (lambda (x) (/ 1. x)) (list 0.0 -0.0)) (list +inf.0 -inf.0))
+(check "signed-zero literals, other order"
+       (map (lambda (x) (/ 1. x)) (list -0.0 0.0)) (list -inf.0 +inf.0))
+(check "complex signed-zero imaginary parts are not eqv"
+       (eqv? 1.0+0.0i 1.0-0.0i) #f)
+
 ;; write/number->string output reads back as the same inexact value (#308)
 (check "number->string integer-valued flonum" (number->string 1000.0) "1000.0")
 (check "number->string +inf.0" (number->string +inf.0) "+inf.0")

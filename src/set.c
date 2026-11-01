@@ -26,11 +26,18 @@ bool scm_eq(val_t a, val_t b) {
     return a == b;
 }
 
+/* eqv? on flonums is "same value and same sign of zero" (R7RS 6.1:
+ * (eqv? 0.0 -0.0) is #f), so compare the bits, not with ==. This also makes
+ * a NaN eqv to a NaN of the same bits, which == never did. */
+static bool same_double(double x, double y) {
+    return memcmp(&x, &y, sizeof x) == 0;
+}
+
 bool scm_eqv(val_t a, val_t b) {
     if (a == b) return true;
     /* Same-type numeric comparisons */
     if (vis_fixnum(a) && vis_fixnum(b)) return vunfix(a) == vunfix(b);
-    if (vis_flonum(a) && vis_flonum(b)) return vfloat(a) == vfloat(b);
+    if (vis_flonum(a) && vis_flonum(b)) return same_double(vfloat(a), vfloat(b));
     if (vis_bignum(a) && vis_bignum(b)) return mpz_cmp(as_big(a)->z, as_big(b)->z) == 0;
     if (vis_rational(a) && vis_rational(b)) return mpq_equal(as_rat(a)->q, as_rat(b)->q);
     if (vis_complex(a) && vis_complex(b))
@@ -38,7 +45,8 @@ bool scm_eqv(val_t a, val_t b) {
                scm_eqv(as_cpx(a)->imag, as_cpx(b)->imag);
     if (vis_quat(a) && vis_quat(b)) {
         Quaternion *qa = as_quat(a), *qb = as_quat(b);
-        return qa->a == qb->a && qa->b == qb->b && qa->c == qb->c && qa->d == qb->d;
+        return same_double(qa->a, qb->a) && same_double(qa->b, qb->b) &&
+               same_double(qa->c, qb->c) && same_double(qa->d, qb->d);
     }
     if (vis_char(a) && vis_char(b)) return vunchr(a) == vunchr(b);
     if (vis_symbol(a) && vis_symbol(b)) return a == b; /* interned, so pointer eq */
