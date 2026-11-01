@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+**Fixed — `inexact` on bignums and ratnums rounds to nearest (#310)**
+
+- Converting an exact integer or ratio outside the fixnum range to a flonum
+  truncated toward zero (`GMP`'s `mpz_get_d`/`mpq_get_d`), so
+  `(inexact (- (exact 1e300) 1))` gave `9.999999999999999e+299`. It now
+  returns the closest double, ties to even, including overflow to `+inf.0`
+  and results in the subnormal range. Everything that converts through
+  `num_to_double` is affected, for example `exact->inexact`, `sqrt` and `exp`
+  of a bignum, and mixed exact/inexact arithmetic.
+
 **Fixed — leading-dot decimals inside lists (#307)**
 
 - `.3`, `.5e2` and similar decimals with no digits before the point now read

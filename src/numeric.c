@@ -163,11 +163,70 @@ val_t num_make_tuple(int type, uint32_t n, val_t *data) {
 
 /* ---- Coercions ---- */
 
+/* GMP's mpz_get_d and mpq_get_d truncate toward zero; R7RS wants the
+ * closest double (#310), ties to even.
+ *
+ * Returns a * 2^exp2 correctly rounded, for a > 0. `sticky` says the true
+ * value has further nonzero bits below a's lowest bit (a rational's
+ * division remainder). Rounds to 53 significant bits, fewer when the
+ * result lands in the subnormal range, so the final ldexp is exact and
+ * never rounds a second time. */
+static double mpz_round_ldexp(const mpz_t a, bool sticky, long exp2) {
+    long bits = (long)mpz_sizeinbase(a, 2);
+    long lead = bits - 1 + exp2;                 /* exponent of the top bit */
+    long keep = (lead >= -1022) ? 53 : 53 - (-1022 - lead);
+    if (keep < 0) return 0.0;                    /* below half the smallest subnormal */
+    long shift = bits - keep;
+    if (shift <= 0) return ldexp(mpz_get_d(a), (int)exp2);   /* already exact */
+    mpz_t m;
+    mpz_init(m);
+    mpz_tdiv_q_2exp(m, a, (unsigned long)shift);
+    bool half = mpz_tstbit(a, (unsigned long)(shift - 1)) != 0;
+    if (!sticky && shift > 1) sticky = mpz_scan1(a, 0) < (unsigned long)(shift - 1);
+    if (half && (sticky || mpz_odd_p(m))) mpz_add_ui(m, m, 1);
+    double r = mpz_get_d(m);                     /* at most 2^53: exact */
+    mpz_clear(m);
+    long e = shift + exp2;
+    if (e > 4000) e = 4000;                      /* ldexp overflows to inf either way */
+    if (e < -4000) e = -4000;
+    return ldexp(r, (int)e);
+}
+
+static double mpz_to_double_nearest(const mpz_t z) {
+    int sign = mpz_sgn(z);
+    if (sign == 0) return 0.0;
+    mpz_t a;
+    mpz_init(a);
+    mpz_abs(a, z);
+    double r = mpz_round_ldexp(a, false, 0);
+    mpz_clear(a);
+    return sign < 0 ? -r : r;
+}
+
+static double mpq_to_double_nearest(const mpq_t q) {
+    int sign = mpq_sgn(q);
+    if (sign == 0) return 0.0;
+    mpz_t n, d, quo, rem;
+    mpz_inits(n, d, quo, rem, NULL);
+    mpz_abs(n, mpq_numref(q));
+    mpz_set(d, mpq_denref(q));
+    /* Scale so the integer quotient has 63-65 bits: enough to round to 53
+     * (or fewer, for a subnormal) with the remainder as the sticky bit. */
+    long k = 64 - ((long)mpz_sizeinbase(n, 2) - (long)mpz_sizeinbase(d, 2));
+    if (k >= 0) mpz_mul_2exp(n, n, (unsigned long)k);
+    else        mpz_mul_2exp(d, d, (unsigned long)(-k));
+    mpz_tdiv_qr(quo, rem, n, d);
+    double r = mpz_round_ldexp(quo, mpz_sgn(rem) != 0, -k);
+    mpz_clears(n, d, quo, rem, NULL);
+    return sign < 0 ? -r : r;
+}
+
+
 double num_to_double(val_t v) {
     if (vis_fixnum(v))   return (double)vunfix(v);
     if (vis_flonum(v))   return vfloat(v);
-    if (vis_bignum(v))   return mpz_get_d(as_big(v)->z);
-    if (vis_rational(v)) return mpq_get_d(as_rat(v)->q);
+    if (vis_bignum(v))   return mpz_to_double_nearest(as_big(v)->z);
+    if (vis_rational(v)) return mpq_to_double_nearest(as_rat(v)->q);
     if (vis_complex(v))  return num_to_double(as_cpx(v)->real); /* drop imag */
     if (vis_surreal(v))  return sur_to_double(v);
 #ifdef BUILD_MPFR
