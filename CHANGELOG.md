@@ -2,6 +2,13 @@
 
 ### Unreleased
 
+**Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
+
+- The REPL's continuation prompt and the Jupyter kernel's
+  `is_complete_request` now track string, `|symbol|`, `#| |#` block comment,
+  `;` comment and `#\(` character-literal state across the whole input. A
+  paren inside any of these, on a later line, is no longer counted as nesting.
+
 **New — SRFI 176 build and C properties**
 
 - `(version-alist)` and `curry -V` now report build and C properties:
