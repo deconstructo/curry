@@ -157,9 +157,11 @@ static char *rl_read_expr(void) {
     char *line = readline("> ");
     if (!line) return NULL;
 
-    int depth = curry_line_depth(line);
+    CurryNest nest;
+    curry_nest_init(&nest);
+    curry_nest_feed_line(&nest, line);
 
-    if (depth <= 0) {
+    if (!curry_nest_incomplete(&nest)) {
         /* Single-line expression (atom, quoted form, or balanced parens) */
         if (*line) add_history(line);
         char *result = strdup(line);
@@ -176,7 +178,7 @@ static char *rl_read_expr(void) {
     if (*line) add_history(line);
     free(line);
 
-    while (depth > 0) {
+    while (curry_nest_incomplete(&nest)) {
         char *more = readline("... ");
         if (!more) break;               /* EOF mid-expression */
         if (*more) add_history(more);
@@ -188,7 +190,7 @@ static char *rl_read_expr(void) {
         memcpy(buf + used, more, mlen);
         used += mlen;
         buf[used++] = '\n';
-        depth += curry_line_depth(more);
+        curry_nest_feed_line(&nest, more);
         free(more);
     }
     buf[used] = '\0';

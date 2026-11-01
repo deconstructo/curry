@@ -478,13 +478,12 @@ nl::json curry_interpreter::inspect_request_impl(const std::string & /*code*/, i
 }
 
 nl::json curry_interpreter::is_complete_request_impl(const std::string &code) {
-    int depth = 0;
-    std::istringstream iss(code);
-    std::string line;
-    while (std::getline(iss, line)) depth += curry_line_depth(line.c_str());
+    CurryNest nest;
+    curry_nest_init(&nest);
+    curry_nest_feed(&nest, code.data(), code.size());
 
     nl::json reply;
-    if (depth > 0) {
+    if (curry_nest_incomplete(&nest)) {
         reply["status"] = "incomplete";
         reply["indent"] = "";
     } else {
