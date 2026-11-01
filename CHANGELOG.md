@@ -2,21 +2,23 @@
 
 ### Unreleased
 
-**Fixed — `inexact` on bignums and ratnums rounds to nearest (#310)**
+**Fixed — LLVM JIT miscompiled chained comparisons (#309)**
 
-- Converting an exact integer or ratio outside the fixnum range to a flonum
-  truncated toward zero (`GMP`'s `mpz_get_d`/`mpq_get_d`), so
-  `(inexact (- (exact 1e300) 1))` gave `9.999999999999999e+299`. It now
-  returns the closest double, ties to even, including overflow to `+inf.0`
-  and results in the subnormal range. Everything that converts through
-  `num_to_double` is affected, for example `exact->inexact`, `sqrt` and `exp`
-  of a bignum, and mixed exact/inexact arithmetic.
+- `(<= lo 0 hi)` and the other multi-argument comparisons failed with a
+  wrong-type error once the function was JIT-compiled, because the JIT
+  folded them left to right like `+`. They now chain pairwise as in the
+  interpreter. A comparison with fewer than two arguments, and `(-)` / `(/)`
+  with none, now raise the same arity error as the interpreter instead of
+  returning a bogus value.
+- `(+ x)` and `(* x)` in a JIT-compiled function now type-check `x` like the
+  interpreter (#321); they returned `x` unchecked.
 
-**Fixed — leading-dot decimals inside lists (#307)**
+**Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
 
-- `.3`, `.5e2` and similar decimals with no digits before the point now read
-  as numbers inside lists, so `(display .3)` and `(+ .5 .25)` work. They were
-  read as symbols there. `...` and `.foo` are still symbols.
+- The REPL's continuation prompt and the Jupyter kernel's
+  `is_complete_request` now track string, `|symbol|`, `#| |#` block comment,
+  `;` comment and `#\(` character-literal state across the whole input. A
+  paren inside any of these, on a later line, is no longer counted as nesting.
 
 **New — SRFI 176 build and C properties**
 
