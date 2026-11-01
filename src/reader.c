@@ -344,6 +344,20 @@ static val_t read_char_literal(val_t port) {
 static val_t read_datum(val_t port);
 static val_t read_list(val_t port, int close_ch);
 
+/* A list element whose token starts with '.': a decimal with no digits
+ * before the point (".3", ".5e2" -- R7RS 7.1.1) is a number, anything
+ * else (e.g. "...", ".foo") a symbol. Only a bare "." is a dot marker,
+ * and callers handle that before building the token. */
+static val_t dot_token_datum(const char *buf, uint32_t len) {
+    /* parse_number reads a C string, so a NUL inside the token would
+     * silently truncate it; such a token is never a number. */
+    if (strlen(buf) == len) {
+        val_t num = parse_number(buf, 10, false, false);
+        if (!vis_false(num)) return num;
+    }
+    return sym_intern(buf, len);
+}
+
 /* Given the reader is positioned right after one list element (post-
  * skip_whitespace), determines and returns the *rest* of the list: a
  * dotted-pair tail if "." is immediately followed by a delimiter (read one
@@ -397,10 +411,10 @@ static val_t read_list_tail(val_t port, int close_ch) {
         StrBuf sb; sb_init(&sb);
         sb_push(&sb, '.');
         while (!is_delimiter(peek_char_port(port))) {
-            sb_push(&sb, (char)next_char(port));
+            sb_push_utf8(&sb, (uint32_t)next_char(port));
         }
         sb.buf[sb.len] = '\0';
-        val_t sym = sym_intern(sb.buf, (uint32_t)sb.len);
+        val_t sym = dot_token_datum(sb.buf, (uint32_t)sb.len);
         val_t rest = read_list_tail(port, close_ch);
         Pair *p = CURRY_NEW(Pair);
         p->hdr.type = T_PAIR; p->hdr.flags = (uint32_t)elem_line;
@@ -453,9 +467,9 @@ static val_t read_list(val_t port, int close_ch) {
         StrBuf sb; sb_init(&sb);
         sb_push(&sb, '.');
         while (!is_delimiter(peek_char_port(port)))
-            sb_push(&sb, (char)next_char(port));
+            sb_push_utf8(&sb, (uint32_t)next_char(port));
         sb.buf[sb.len] = '\0';
-        head = sym_intern(sb.buf, (uint32_t)sb.len);
+        head = dot_token_datum(sb.buf, (uint32_t)sb.len);
     } else {
         head = read_datum(port);
     }

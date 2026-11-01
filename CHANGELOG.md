@@ -2,12 +2,11 @@
 
 ### Unreleased
 
-**Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
+**Fixed — leading-dot decimals inside lists (#307)**
 
-- The REPL's continuation prompt and the Jupyter kernel's
-  `is_complete_request` now track string, `|symbol|`, `#| |#` block comment,
-  `;` comment and `#\(` character-literal state across the whole input. A
-  paren inside any of these, on a later line, is no longer counted as nesting.
+- `.3`, `.5e2` and similar decimals with no digits before the point now read
+  as numbers inside lists, so `(display .3)` and `(+ .5 .25)` work. They were
+  read as symbols there. `...` and `.foo` are still symbols.
 
 **New — SRFI 176 build and C properties**
 
