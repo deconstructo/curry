@@ -49,6 +49,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
@@ -207,7 +208,8 @@ static void sb_grow(SB *b, size_t n) {
 static void sb_c(SB *b, char c)        { sb_grow(b,1); b->buf[b->len++]=c; b->buf[b->len]='\0'; }
 static void sb_s(SB *b, const char *s) { while(*s) sb_c(b,*s++); }
 static void sb_n(SB *b, long n)        { char t[32]; snprintf(t,sizeof(t),"%ld",n); sb_s(b,t); }
-static void sb_f(SB *b, double d)      { char t[32]; snprintf(t,sizeof(t),"%g",d); sb_s(b,t); }
+/* JSON has no spelling for inf or nan; write null instead. */
+static void sb_f(SB *b, double d)      { if (!isfinite(d)) { sb_s(b,"null"); return; } char t[32]; snprintf(t,sizeof(t),"%g",d); sb_s(b,t); }
 
 static void sb_quoted(SB *b, const char *s) {
     sb_c(b,'"');
