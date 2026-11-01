@@ -470,8 +470,9 @@ void scm_write(val_t v, val_t port) {
     if (vis_complex(v)) {
         scm_write(as_cpx(v)->real, port);
         val_t im = as_cpx(v)->imag;
-        /* +inf.0 / -inf.0 / +nan.0 already carry their own sign. */
-        bool im_has_sign = vis_flonum(im) && (isinf(vfloat(im)) || isnan(vfloat(im)));
+        /* +inf.0 / -inf.0 / +nan.0 and -0.0 already carry their own sign. */
+        bool im_has_sign = vis_flonum(im) &&
+            (isinf(vfloat(im)) || isnan(vfloat(im)) || signbit(vfloat(im)));
         if (!im_has_sign && !num_is_negative(im)) port_write_char(port, '+');
         scm_write(im, port);
         port_write_char(port, 'i');

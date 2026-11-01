@@ -1029,6 +1029,10 @@
        (list 1000.0 5.0 +inf.0 -inf.0))
 (check "complex with infinite imaginary part has one sign"
        (number->string (make-rectangular 1.0 +inf.0)) "1.0+inf.0i")
+(check "complex with negative-zero imaginary part has one sign"
+       (number->string (make-rectangular 1.5 -0.0)) "1.5-0.0i")
+(check "complex with +nan.0 imaginary part has one sign"
+       (number->string (make-rectangular 1.5 +nan.0)) "1.5+nan.0i")
 (check "written integer-valued flonum reads back inexact"
        (inexact? (read (open-input-string (number->string 1000.0)))) #t)
 (check "rationalize exact x, zero inexact tolerance is inexact"
