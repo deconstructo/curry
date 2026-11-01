@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "nesting_depth.h"
 
 static int pass = 0, fail = 0;
 
@@ -97,6 +98,29 @@ static val_t run_vm_script(const char *src) {
     BcClosure *cl = as_bcclosure(cl_val);
     vm_push(cl_val);
     return vm_run(cl, 0);
+}
+
+static bool nest_incomplete(const char *code) {
+    CurryNest n;
+    curry_nest_init(&n);
+    curry_nest_feed(&n, code, strlen(code));
+    return curry_nest_incomplete(&n);
+}
+
+static void test_nesting_depth_tracker(void) {
+    CHECK(!nest_incomplete("(+ 1 2)"),                 "balanced is complete");
+    CHECK(nest_incomplete("(+ 1\n  2"),                "open paren is incomplete");
+    CHECK(!nest_incomplete("(display \"a\nb (\")"),    "paren in multi-line string ignored");
+    CHECK(nest_incomplete("(display \"a\nb"),          "unterminated multi-line string");
+    CHECK(!nest_incomplete("#| (\n ( |# 1"),           "paren in multi-line block comment ignored");
+    CHECK(nest_incomplete("#| a\n b"),                 "unterminated block comment");
+    CHECK(!nest_incomplete("#| a #| ( |# ( |# 1"),     "nested block comment");
+    CHECK(!nest_incomplete("(f #\\( #\\) )"),          "paren char literals ignored");
+    CHECK(!nest_incomplete("(f #\\\" 1)"),             "quote char literal does not open string");
+    CHECK(!nest_incomplete("(f #\\; 1)"),              "semicolon char literal is not a comment");
+    CHECK(!nest_incomplete("(f 1) ; ( not counted\n"), "line comment ignored");
+    CHECK(!nest_incomplete("(f \"a\\\" (\")"),         "escaped quote stays in string");
+    CHECK(!nest_incomplete("(f |a (\nb| 1)"),          "paren in |symbol| ignored");
 }
 
 static void test_fixnums(void) {
@@ -1610,6 +1634,7 @@ int main(void) {
     RUN_TEST(test_compiler_ir_lower_for_jit);
     RUN_TEST(test_compiler_ir_session);
     RUN_TEST(test_special_form_arity_crashes);
+    RUN_TEST(test_nesting_depth_tracker);
 
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
