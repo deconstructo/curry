@@ -118,6 +118,8 @@ static void test_nesting_depth_tracker(void) {
     CHECK(!nest_incomplete("(f #\\( #\\) )"),          "paren char literals ignored");
     CHECK(!nest_incomplete("(f #\\\" 1)"),             "quote char literal does not open string");
     CHECK(!nest_incomplete("(f #\\; 1)"),              "semicolon char literal is not a comment");
+    CHECK(!nest_incomplete("(a #;(b) c)"),             "#; datum comment is not a line comment");
+    CHECK(nest_incomplete("(a #;(b\n c"),              "datum comment contents still nest");
     CHECK(!nest_incomplete("(f 1) ; ( not counted\n"), "line comment ignored");
     CHECK(!nest_incomplete("(f \"a\\\" (\")"),         "escaped quote stays in string");
     CHECK(!nest_incomplete("(f |a (\nb| 1)"),          "paren in |symbol| ignored");

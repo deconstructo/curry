@@ -58,6 +58,7 @@ static inline void curry_nest_feed(CurryNest *n, const char *s, size_t len) {
         if (n->char_lit) { n->char_lit = false; n->prev = 0; continue; }
         if (n->prev == '#' && c == '|') { n->block = 1; n->prev = 0; continue; }
         if (n->prev == '#' && c == '\\') { n->char_lit = true; n->prev = 0; continue; }
+        if (n->prev == '#' && c == ';') { n->prev = 0; continue; }  /* #; datum comment */
         n->prev = c;
         if (c == ';')       n->line_comment = true;
         else if (c == '"')  n->in_str = true;
