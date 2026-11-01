@@ -448,10 +448,23 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
         /* Variadic fold: (+), (*) → identity; (- x) → negate; (op a b c…) → fold */
         {
             auto it = ARITH2.find(op_nm);
-            if (it != ARITH2.end()) {
-                /* Count arguments */
-                int argc = 0;
-                for (val_t a = args; vis_pair(a); a = as_pair(a)->cdr) ++argc;
+            /* Count arguments */
+            int argc = 0;
+            for (val_t a = args; vis_pair(a); a = as_pair(a)->cdr) ++argc;
+            /* The left fold below is only right for the arithmetic
+             * operators. A comparison chains instead: (<= a b c) means
+             * (and (<= a b) (<= b c)), not (<= (<= a b) c), which
+             * compared a boolean with c and raised a wrong-type error
+             * once the function was JIT-compiled (#309). (< x) and (<) are
+             * #t, (-) / (/) are arity errors, and (+ x) / (* x) must still
+             * type-check x, so those shapes also go through the generic call
+             * to the real primitive. */
+            bool is_cmp = op_nm == "<" || op_nm == ">" || op_nm == "<=" ||
+                          op_nm == ">=" || op_nm == "=";
+            bool generic_only = (is_cmp && argc != 2) ||
+                                ((op_nm == "-" || op_nm == "/") && argc == 0) ||
+                                ((op_nm == "+" || op_nm == "*") && argc == 1);
+            if (it != ARITH2.end() && !generic_only) {
 
                 if (argc == 1) {
                     /* (+ v) → v;  (* v) → v;  (- v) → num_sub(0,v);  (/ v) → num_div(1,v) */

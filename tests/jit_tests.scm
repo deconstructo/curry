@@ -553,6 +553,49 @@
            (jit-ls-nested-user i) (+ i 1))
     (loop (+ i 1))))
 
+;; (Placed before the #118 tests below: those redefine - and permanently
+;; turn off the JIT's inline arithmetic, which is what this exercises.)
+;;; Variadic comparisons stay correct once the caller is hot (#309): a
+;;; comparison chains pairwise, it is not a left fold.
+(define (jit-309-g lo hi) (if (<= lo 0 hi) 0 hi))
+(define (jit-309-run n)
+  (let loop ((i 0) (acc '()))
+    (if (< i n)
+        (loop (+ i 1) (list (jit-309-g -17 -17) (jit-309-g -3 5) (jit-309-g 2 5)))
+        acc)))
+(check "JIT: (<= lo 0 hi) correct after the caller is hot"
+       (jit-309-run 300) '(-17 0 5))
+
+(define (jit-309-chain a b c d)
+  (list (< a b c d) (> d c b a) (<= a b b d) (>= d c c a) (= a a a)))
+(define (jit-309-chain-run n)
+  (let loop ((i 0) (r #f))
+    (if (< i n) (loop (+ i 1) (jit-309-chain 1 2 3 4)) r)))
+(check "JIT: four-argument comparison chains"
+       (jit-309-chain-run 300) '(#t #t #t #t #t))
+
+;; Fewer than two arguments is an arity error, as without the JIT; the
+;; compiled fold used to return the lone argument instead.
+(define (jit-309-one x) (< x))
+(define (jit-309-one-run n)
+  (let loop ((i 0) (r #f))
+    (if (< i n) (loop (+ i 1) (jit-309-one 7)) r)))
+(check "JIT: single-argument comparison is an arity error"
+       (guard (e (#t 'arity-error)) (jit-309-one-run 300)) 'arity-error)
+
+(define (jit-309-plus1 x) (+ x))
+(define (jit-309-times1 x) (* x))
+(define (jit-309-try thunk) (guard (e (#t 'err)) (thunk)))
+(define (jit-309-plus1-run n)
+  (let loop ((i 0) (r #f))
+    (if (< i n)
+        (loop (+ i 1) (list (jit-309-try (lambda () (jit-309-plus1 'a)))
+                            (jit-309-try (lambda () (jit-309-times1 "s")))
+                            (jit-309-plus1 5) (jit-309-times1 2.5)))
+        r)))
+(check "JIT: (+ x) and (* x) still type-check x"
+       (jit-309-plus1-run 300) '(err err 5 2.5))
+
 ;;; 18. Global redefinition of an arithmetic operator must deopt already-
 ;;; JIT-compiled closures and stop future fast-pathing (issue #118) ──────────
 ;;; codegen.cpp's ARITH2/ARITH1 fast paths only ever checked LOCAL

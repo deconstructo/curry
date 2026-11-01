@@ -2,19 +2,23 @@
 
 ### Unreleased
 
-**Changed (breaking output) — flonums print in readable form (#308)**
+**Fixed — LLVM JIT miscompiled chained comparisons (#309)**
 
-- `write`, `display` and `number->string` now print an integer-valued flonum
-  with a `.0` (`1000.0`, not `1000`) and spell the non-finite values
-  `+inf.0`, `-inf.0` and `+nan.0` (were `inf`, `-inf`, `nan`), as R7RS 6.2.6
-  and 6.13.3 require. Output now reads back as the same inexact number. Any
-  script or test that compared against the old text needs updating. Matrix,
-  tensor and multivector element printing use the same formatter.
-- `(string->number "+inf.0")`, `"-inf.0"` and `"+nan.0"` now return the
-  value instead of `#f`.
-- A complex number with an infinite or NaN imaginary part prints one sign
-  (`1.0+inf.0i`, not `1.0++inf.0i`).
-- Not changed: quaternion and octonion components still print with `%g`.
+- `(<= lo 0 hi)` and the other multi-argument comparisons failed with a
+  wrong-type error once the function was JIT-compiled, because the JIT
+  folded them left to right like `+`. They now chain pairwise as in the
+  interpreter. A comparison with fewer than two arguments, and `(-)` / `(/)`
+  with none, now raise the same arity error as the interpreter instead of
+  returning a bogus value.
+- `(+ x)` and `(* x)` in a JIT-compiled function now type-check `x` like the
+  interpreter (#321); they returned `x` unchecked.
+
+**Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
+
+- The REPL's continuation prompt and the Jupyter kernel's
+  `is_complete_request` now track string, `|symbol|`, `#| |#` block comment,
+  `;` comment and `#\(` character-literal state across the whole input. A
+  paren inside any of these, on a later line, is no longer counted as nesting.
 
 **New — SRFI 176 build and C properties**
 
