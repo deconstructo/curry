@@ -456,12 +456,14 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
              * (and (<= a b) (<= b c)), not (<= (<= a b) c), which
              * compared a boolean with c and raised a wrong-type error
              * once the function was JIT-compiled (#309). (< x) and (<) are
-             * #t, and (-) / (/) are arity errors, so those shapes also go
-             * through the generic call to the real primitive. */
+             * #t, (-) / (/) are arity errors, and (+ x) / (* x) must still
+             * type-check x, so those shapes also go through the generic call
+             * to the real primitive. */
             bool is_cmp = op_nm == "<" || op_nm == ">" || op_nm == "<=" ||
                           op_nm == ">=" || op_nm == "=";
             bool generic_only = (is_cmp && argc != 2) ||
-                                ((op_nm == "-" || op_nm == "/") && argc == 0);
+                                ((op_nm == "-" || op_nm == "/") && argc == 0) ||
+                                ((op_nm == "+" || op_nm == "*") && argc == 1);
             if (it != ARITH2.end() && !generic_only) {
 
                 if (argc == 1) {

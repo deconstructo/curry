@@ -583,6 +583,19 @@
 (check "JIT: single-argument comparison is an arity error"
        (guard (e (#t 'arity-error)) (jit-309-one-run 300)) 'arity-error)
 
+(define (jit-309-plus1 x) (+ x))
+(define (jit-309-times1 x) (* x))
+(define (jit-309-try thunk) (guard (e (#t 'err)) (thunk)))
+(define (jit-309-plus1-run n)
+  (let loop ((i 0) (r #f))
+    (if (< i n)
+        (loop (+ i 1) (list (jit-309-try (lambda () (jit-309-plus1 'a)))
+                            (jit-309-try (lambda () (jit-309-times1 "s")))
+                            (jit-309-plus1 5) (jit-309-times1 2.5)))
+        r)))
+(check "JIT: (+ x) and (* x) still type-check x"
+       (jit-309-plus1-run 300) '(err err 5 2.5))
+
 ;;; 18. Global redefinition of an arithmetic operator must deopt already-
 ;;; JIT-compiled closures and stop future fast-pathing (issue #118) ──────────
 ;;; codegen.cpp's ARITH2/ARITH1 fast paths only ever checked LOCAL

@@ -10,6 +10,8 @@
   interpreter. A comparison with fewer than two arguments, and `(-)` / `(/)`
   with none, now raise the same arity error as the interpreter instead of
   returning a bogus value.
+- `(+ x)` and `(* x)` in a JIT-compiled function now type-check `x` like the
+  interpreter (#321); they returned `x` unchecked.
 
 **Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
 
