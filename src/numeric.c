@@ -1396,12 +1396,12 @@ static bool num_only_trailing_zeros_after(const char *s, int keep) {
     return true;
 }
 
-int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
+static int flonum_shortest_body(double d, char *buf, size_t bufsize) {
     /* NaN never round-trips via == (NaN != NaN in IEEE), so the loop below
      * would spin all the way to precision 17 for no benefit -- short-
      * circuit both non-finite cases directly.
      *
-     * NaN is spelled as a literal "nan" here, NOT delegated to %g: a
+     * NaN is spelled as a literal "+nan.0" here (R7RS 6.2.6), NOT delegated to %g: a
      * NaN's sign bit is implementation-defined (IEEE 754 doesn't specify
      * what payload/sign a computation like 0.0/0.0 produces), and glibc's
      * printf faithfully reflects that bit in its output ("-nan" vs
@@ -1409,17 +1409,16 @@ int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
      * value) don't set it -- confirmed via CI: this codebase's own
      * NaN round-trip test passed on macOS and failed on Linux for
      * exactly this reason, for a value neither platform's C code
-     * chooses the sign of. curry's own display convention (unlike inf,
-     * where the sign IS meaningful and well-defined) doesn't distinguish
-     * signed NaNs at all, so normalize to the same "nan" spelling
-     * everywhere regardless of the underlying bit. +inf/-inf's sign is
-     * unambiguous IEEE 754, not implementation-defined, so %g is fine
-     * there. */
+     * chooses the sign of. curry's output (unlike inf, where the sign IS
+     * meaningful and well-defined) doesn't distinguish signed NaNs at
+     * all, so normalize to the same "+nan.0" spelling everywhere
+     * regardless of the underlying bit. +inf/-inf's sign is unambiguous
+     * IEEE 754, not implementation-defined. */
     if (d != d) {
-        return snprintf(buf, bufsize, "nan");
+        return snprintf(buf, bufsize, "+nan.0");
     }
-    if (d == 1.0/0.0 || d == -1.0/0.0)
-        return snprintf(buf, bufsize, "%g", d);
+    if (d == 1.0/0.0) return snprintf(buf, bufsize, "+inf.0");
+    if (d == -1.0/0.0) return snprintf(buf, bufsize, "-inf.0");
     int p_min = 17;
     for (int prec = 1; prec <= 17; prec++) {
         snprintf(buf, bufsize, "%.*g", prec, d);
@@ -1458,6 +1457,20 @@ int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
         if (num_only_trailing_zeros_after(buf, p_min)) return n;
     }
     return snprintf(buf, bufsize, "%.*g", p_min, d);
+}
+
+/* Shortest round-tripping spelling of `d`, always readable back as an
+ * inexact real (R7RS 6.2.6 / 6.13.3): a finite value with no decimal point
+ * or exponent gets ".0" appended so 1000.0 does not print as the exact
+ * integer 1000; non-finite values are +inf.0, -inf.0 and +nan.0. */
+int num_flonum_to_shortest_cstr(double d, char *buf, size_t bufsize) {
+    int n = flonum_shortest_body(d, buf, bufsize);
+    if (n > 0 && (size_t)n + 3 <= bufsize && d == d && d != 1.0/0.0 && d != -1.0/0.0
+        && !strpbrk(buf, ".eE")) {
+        buf[n] = '.'; buf[n + 1] = '0'; buf[n + 2] = '\0';
+        n += 2;
+    }
+    return n;
 }
 
 /* Copy len+1 bytes (including the NUL) of a C string into a freshly
