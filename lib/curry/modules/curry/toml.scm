@@ -563,11 +563,6 @@
     ((and (inexact? v) (= v +inf.0)) (write-string "inf" out))
     ((and (inexact? v) (= v -inf.0)) (write-string "-inf" out))
     ((and (inexact? v) (not (= v v))) (write-string "nan" out))
-    ((and (inexact? v) (integer? v))
-     ;; TOML floats must have a decimal point or exponent — 1.0, not 1 —
-     ;; to stay distinguishable from an integer on reparse.
-     (write-string (number->string v) out)
-     (unless (%string-index (number->string v) #\. 0) (write-string ".0" out)))
     (else (write-string (number->string v) out))))
 
 ;; Writes a value in the position an ARRAY ELEMENT occupies (inline

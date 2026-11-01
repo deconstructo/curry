@@ -41,6 +41,14 @@
 (define e123 (mv-e 3 0 0 1 2 3))
 (define scalar1 (mv-e 3 0 0))
 
+(check "mv with +inf.0 coefficient prints a single sign"
+       (let ((o (open-output-string)))
+         (display (mv-scale e1 +inf.0) o)
+         (let ((t (get-output-string o)) (hit #f))
+           (do ((i 0 (+ i 1))) ((>= i (- (string-length t) 1)) hit)
+             (when (and (char=? (string-ref t i) #\+) (char=? (string-ref t (+ i 1)) #\+))
+               (set! hit #t)))))
+       #f)
 (check "mv? yes"      (mv? e1) #t)
 (check "mv? no"       (mv? 42) #f)
 (check "mv-signature" (mv-signature e1) '(3 0 0))

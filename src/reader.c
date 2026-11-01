@@ -106,6 +106,14 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
      * denominator/real/imaginary substring reached via this function's own
      * recursive calls below (e.g. "3/" or "+i" splitting to an empty part). */
     if (*s == '\0') return V_FALSE;
+    /* The non-finite literals (R7RS 6.2.6). The reader checks these before
+     * calling here, but string->number reaches this function directly. */
+    if (radix == 10 && !exact_force) {
+        if (!strcmp(s, "+inf.0")) return num_make_float(1.0/0.0);
+        if (!strcmp(s, "-inf.0")) return num_make_float(-1.0/0.0);
+        if (!strcmp(s, "+nan.0") || !strcmp(s, "-nan.0"))
+            return num_make_float(0.0/0.0);
+    }
     /* Try integer */
     char *end;
     errno = 0;

@@ -125,6 +125,10 @@
 
 ;;; Writing
 
+(check "stringify exponent-form float gets no extra .0"
+       (toml-stringify '(("a" . 1e21))) "a = 1e+21\n")
+(check "stringify integer-valued float keeps .0"
+       (toml-stringify '(("a" . 5.0))) "a = 5.0\n")
 (check "stringify simple table" (toml-stringify '(("a" . 1) ("b" . "hi"))) "a = 1\nb = \"hi\"\n")
 (check "stringify nested table"
        (toml-stringify '(("owner" ("name" . "Tom"))))
