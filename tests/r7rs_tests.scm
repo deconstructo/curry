@@ -1012,6 +1012,10 @@
          (= x (rationalize x 0)))
        #t)
 (check "rationalize -inf.0 3" (rationalize -inf.0 3) -inf.0)
+(check "rationalize exact x, zero inexact tolerance is inexact"
+       (inexact? (rationalize 1/3 0.0)) #t)
+(check "rationalize interval containing 0 with inexact arg is inexact 0"
+       (let ((r (rationalize 0.5 0.5))) (and (inexact? r) (= r 0))) #t)
 (check "rationalize flonum complex raises"
        (guard (e (#t 'raised)) (rationalize 1.0+2.0i 1)) 'raised)
 (check "rationalize not a number raises"
