@@ -332,20 +332,6 @@ to tree-walked code). A cell whose hot loop happens to run through
 `eval()` rather than compiled VM bytecode (e.g. an infinite loop inside
 a `define-library` body) cannot currently be interrupted.
 
-## Known limitations
-
-- **`is_complete_request` mis-tracks state across lines within a cell**:
-  it reuses `curry_line_depth()` (the same nesting tracker the REPL's
-  `rl_read_expr` uses), summed independently per line. That function
-  resets its "inside a string"/"inside an escape" state at the start of
-  every call, so a paren that appears inside a string literal or a `#|
-  ... |#` block comment spanning multiple lines gets miscounted as real
-  nesting. This is an existing REPL limitation (readline input has the
-  same problem, one line at a time), not something the kernel introduces
-  -- but it's more likely to bite in a notebook cell, where multi-line
-  strings/comments are common. A real fix needs a full-buffer tracker
-  that carries string/comment state across the whole cell, not per line.
-
 ## Known gaps (not yet implemented)
 
 - **Completion / inspect (hover)**: `complete_request`/`inspect_request`
