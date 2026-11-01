@@ -1012,6 +1012,17 @@
          (= x (rationalize x 0)))
        #t)
 (check "rationalize -inf.0 3" (rationalize -inf.0 3) -inf.0)
+
+;; Decimals with no digits before the point (R7RS 7.1.1), inside lists (#307)
+(check "leading-dot decimal as call argument" (+ .5 .25) .75)
+(check "leading-dot decimal first in list" (car '(.5 2)) .5)
+(check "leading-dot decimal after head" (cadr '(1 .5 2)) .5)
+(check "leading-dot decimal with exponent" (car '(.25e1)) 2.5)
+(check "signed leading-dot decimals" '(-.5 +.5) '(-.5 .5))
+(check "leading-dot decimal as dotted tail" (cdr '(a . .5)) .5)
+(check "leading-dot decimal before dotted tail" (cdr '(a .5 . b)) '(.5 . b))
+(check "dot-prefixed symbols stay symbols" (symbol? (car '(.foo))) #t)
+(check "ellipsis stays a symbol" (symbol? (cadr '(a ...))) #t)
 (check "rationalize exact x, zero inexact tolerance is inexact"
        (inexact? (rationalize 1/3 0.0)) #t)
 (check "rationalize interval containing 0 with inexact arg is inexact 0"

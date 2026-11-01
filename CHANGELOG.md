@@ -2,6 +2,12 @@
 
 ### Unreleased
 
+**Fixed — leading-dot decimals inside lists (#307)**
+
+- `.3`, `.5e2` and similar decimals with no digits before the point now read
+  as numbers inside lists, so `(display .3)` and `(+ .5 .25)` work. They were
+  read as symbols there. `...` and `.foo` are still symbols.
+
 **New — SRFI 176 build and C properties**
 
 - `(version-alist)` and `curry -V` now report build and C properties:
