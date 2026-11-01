@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793532181409,
+  "lastUpdate": 1793532807754,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -18698,6 +18698,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.607,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a674061d7bbb27226460385b94ab20367fafacb4",
+          "message": "Merge pull request #318 from deconstructo/fix/308-flonum-print\n\nfix(print): write flonums in readable R7RS form (#308)",
+          "timestamp": "2026-11-01T22:32:47+11:00",
+          "tree_id": "ea70979f37992f20684f2edbed023ddb78ff30f5",
+          "url": "https://github.com/deconstructo/curry/commit/a674061d7bbb27226460385b94ab20367fafacb4"
+        },
+        "date": 1793532806475,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.447,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 20.913,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.411,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 24.96,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 148.472,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 277.435,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 57.42,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 88.567,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 69.521,
             "unit": "ms"
           }
         ]
