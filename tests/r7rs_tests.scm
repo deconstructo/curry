@@ -1023,6 +1023,11 @@
 (check "leading-dot decimal before dotted tail" (cdr '(a .5 . b)) '(.5 . b))
 (check "dot-prefixed symbols stay symbols" (symbol? (car '(.foo))) #t)
 (check "ellipsis stays a symbol" (symbol? (cadr '(a ...))) #t)
+(check "dot-prefixed non-ASCII symbol keeps its codepoint"
+       (map char->integer (string->list (symbol->string (car '(.α)))))
+       '(46 945))
+(check "dot-prefixed symbols differing in codepoint stay distinct"
+       (eq? (car '(.α)) (car '(.±))) #f)
 (check "rationalize exact x, zero inexact tolerance is inexact"
        (inexact? (rationalize 1/3 0.0)) #t)
 (check "rationalize interval containing 0 with inexact arg is inexact 0"

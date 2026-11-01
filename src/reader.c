@@ -349,8 +349,12 @@ static val_t read_list(val_t port, int close_ch);
  * else (e.g. "...", ".foo") a symbol. Only a bare "." is a dot marker,
  * and callers handle that before building the token. */
 static val_t dot_token_datum(const char *buf, uint32_t len) {
-    val_t num = parse_number(buf, 10, false, false);
-    if (!vis_false(num)) return num;
+    /* parse_number reads a C string, so a NUL inside the token would
+     * silently truncate it; such a token is never a number. */
+    if (strlen(buf) == len) {
+        val_t num = parse_number(buf, 10, false, false);
+        if (!vis_false(num)) return num;
+    }
     return sym_intern(buf, len);
 }
 
@@ -407,7 +411,7 @@ static val_t read_list_tail(val_t port, int close_ch) {
         StrBuf sb; sb_init(&sb);
         sb_push(&sb, '.');
         while (!is_delimiter(peek_char_port(port))) {
-            sb_push(&sb, (char)next_char(port));
+            sb_push_utf8(&sb, (uint32_t)next_char(port));
         }
         sb.buf[sb.len] = '\0';
         val_t sym = dot_token_datum(sb.buf, (uint32_t)sb.len);
@@ -463,7 +467,7 @@ static val_t read_list(val_t port, int close_ch) {
         StrBuf sb; sb_init(&sb);
         sb_push(&sb, '.');
         while (!is_delimiter(peek_char_port(port)))
-            sb_push(&sb, (char)next_char(port));
+            sb_push_utf8(&sb, (uint32_t)next_char(port));
         sb.buf[sb.len] = '\0';
         head = dot_token_datum(sb.buf, (uint32_t)sb.len);
     } else {
