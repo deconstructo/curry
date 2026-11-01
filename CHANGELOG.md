@@ -2,6 +2,15 @@
 
 ### Unreleased
 
+**Fixed — LLVM JIT miscompiled chained comparisons (#309)**
+
+- `(<= lo 0 hi)` and the other multi-argument comparisons failed with a
+  wrong-type error once the function was JIT-compiled, because the JIT
+  folded them left to right like `+`. They now chain pairwise as in the
+  interpreter. A comparison with fewer than two arguments, and `(-)` / `(/)`
+  with none, now raise the same arity error as the interpreter instead of
+  returning a bogus value.
+
 **Fixed — multi-line strings and comments in REPL and Jupyter input (#282)**
 
 - The REPL's continuation prompt and the Jupyter kernel's
