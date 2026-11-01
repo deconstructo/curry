@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
@@ -469,7 +470,9 @@ void scm_write(val_t v, val_t port) {
     if (vis_complex(v)) {
         scm_write(as_cpx(v)->real, port);
         val_t im = as_cpx(v)->imag;
-        if (!num_is_negative(im)) port_write_char(port, '+');
+        /* +inf.0 / -inf.0 / +nan.0 already carry their own sign. */
+        bool im_has_sign = vis_flonum(im) && (isinf(vfloat(im)) || isnan(vfloat(im)));
+        if (!im_has_sign && !num_is_negative(im)) port_write_char(port, '+');
         scm_write(im, port);
         port_write_char(port, 'i');
         return;

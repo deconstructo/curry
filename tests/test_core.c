@@ -151,7 +151,7 @@ static void test_flonum_shortest_string(void) {
     CHECK(strcmp(buf, "3.14159265358979") == 0, "flonum shortest-string: pi-like value keeps all digits");
 
     n = num_flonum_to_shortest_cstr(100.0, buf, sizeof(buf));
-    CHECK(strcmp(buf, "100") == 0, "flonum shortest-string: round value avoids needless scientific notation");
+    CHECK(strcmp(buf, "100.0") == 0, "flonum shortest-string: round value avoids needless scientific notation");
     (void)n;
 
     n = num_flonum_to_shortest_cstr(1e300, buf, sizeof(buf));
@@ -160,24 +160,34 @@ static void test_flonum_shortest_string(void) {
     (void)n;
 
     n = num_flonum_to_shortest_cstr(0.0/0.0, buf, sizeof(buf));
-    CHECK(strcmp(buf, "nan") == 0, "flonum shortest-string: NaN");
+    CHECK(strcmp(buf, "+nan.0") == 0, "flonum shortest-string: NaN");
     (void)n;
 
     n = num_flonum_to_shortest_cstr(1.0/0.0, buf, sizeof(buf));
-    CHECK(strcmp(buf, "inf") == 0, "flonum shortest-string: +inf");
+    CHECK(strcmp(buf, "+inf.0") == 0, "flonum shortest-string: +inf");
     (void)n;
 
+    n = num_flonum_to_shortest_cstr(-1.0/0.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "-inf.0") == 0, "flonum shortest-string: -inf");
+    n = num_flonum_to_shortest_cstr(1000.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "1000.0") == 0, "flonum shortest-string: integer-valued flonum keeps .0");
+    n = num_flonum_to_shortest_cstr(0.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "0.0") == 0, "flonum shortest-string: zero keeps .0");
+    n = num_flonum_to_shortest_cstr(-0.0, buf, sizeof(buf));
+    CHECK(strcmp(buf, "-0.0") == 0, "flonum shortest-string: negative zero");
+    n = num_flonum_to_shortest_cstr(1e21, buf, sizeof(buf));
+    CHECK(strcmp(buf, "1e+21") == 0, "flonum shortest-string: exponent form needs no .0");
     n = num_flonum_to_shortest_cstr(-129.985001, buf, sizeof(buf));
     CHECK(strcmp(buf, "-129.985001") == 0, "flonum shortest-string: negative value keeps sign and all digits");
     (void)n;
 
     n = num_flonum_to_shortest_cstr(-100.0, buf, sizeof(buf));
-    CHECK(strcmp(buf, "-100") == 0, "flonum shortest-string: negative round value, no scientific notation");
+    CHECK(strcmp(buf, "-100.0") == 0, "flonum shortest-string: negative round value, no scientific notation");
     (void)n;
 
     CHECK(vis_true(run("(= (string->number (number->string 129.985001)) 129.985001)")),
           "number->string round-trips 129.985001 (Scheme level)");
-    CHECK(vis_true(run("(string=? (number->string 100.0) \"100\")")),
+    CHECK(vis_true(run("(string=? (number->string 100.0) \"100.0\")")),
           "number->string of a round value has no scientific notation");
 }
 

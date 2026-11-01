@@ -1012,6 +1012,25 @@
          (= x (rationalize x 0)))
        #t)
 (check "rationalize -inf.0 3" (rationalize -inf.0 3) -inf.0)
+
+;; write/number->string output reads back as the same inexact value (#308)
+(check "number->string integer-valued flonum" (number->string 1000.0) "1000.0")
+(check "number->string +inf.0" (number->string +inf.0) "+inf.0")
+(check "number->string -inf.0" (number->string -inf.0) "-inf.0")
+(check "number->string +nan.0" (number->string +nan.0) "+nan.0")
+(check "string->number +inf.0" (string->number "+inf.0") +inf.0)
+(check "string->number -inf.0" (string->number "-inf.0") -inf.0)
+(check "string->number +nan.0 is nan" (nan? (string->number "+nan.0")) #t)
+(check "string->number inf is not a number" (string->number "inf") #f)
+(check "write of flonum list round-trips"
+       (let ((out (open-output-string)))
+         (write (list 1000.0 (exact->inexact 5) +inf.0 -inf.0) out)
+         (read (open-input-string (get-output-string out))))
+       (list 1000.0 5.0 +inf.0 -inf.0))
+(check "complex with infinite imaginary part has one sign"
+       (number->string (make-rectangular 1.0 +inf.0)) "1.0+inf.0i")
+(check "written integer-valued flonum reads back inexact"
+       (inexact? (read (open-input-string (number->string 1000.0)))) #t)
 (check "rationalize exact x, zero inexact tolerance is inexact"
        (inexact? (rationalize 1/3 0.0)) #t)
 (check "rationalize interval containing 0 with inexact arg is inexact 0"
