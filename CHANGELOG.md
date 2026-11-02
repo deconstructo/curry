@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+**Fixed — Debug build overflowed the C stack compiling nested `let*` (#304)**
+
+- Compiling a `let*` with about 200 bindings failed with `compile: call stack
+  overflow` on an unoptimised build with the default 8 MB stack. A `Compiler`
+  is about 20 KB, and `compile_lambda`, the named-let wrapper, `letrec`, `do`
+  and `ir_emit` (twice) each held one in their C frame, which compilation
+  recurses through once per nested binding. They are now allocated on the GC
+  heap, so a frame is a few hundred bytes: 800 bindings compile on a 1 MB
+  stack. Release builds were not affected, because the optimiser merged the
+  frames.
 **Fixed — `json-parse` reads integers beyond the fixnum range (#331)**
 
 - `(json-parse "[12345678901234567890]")` returned `#(-1)`, and an integer past

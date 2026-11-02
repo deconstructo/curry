@@ -61,32 +61,32 @@ static CURRY_THREAD_LOCAL bool g_force_classic_compile = false;
 
 static void compile_lambda(Compiler *parent, val_t params, val_t body,
                             const char *name, int line) {
-    Compiler c;
-    init_compiler(&c, parent, name);
+    Compiler *c = CURRY_NEW(Compiler);  /* heap: a Compiler is ~20 KB; see #304 */
+    init_compiler(c, parent, name);
 
-    int arity = compile_params(&c, params);
-    c.chunk->arity = arity;
-    begin_scope(&c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
+    int arity = compile_params(c, params);
+    c->chunk->arity = arity;
+    begin_scope(c);  /* body scope: depth 1+, so compile_define uses OP_STORE_LOCAL */
 
-    lambda_prescan(&c, body, line);
+    lambda_prescan(c, body, line);
 
-    compile_seq(&c, body, true, line);
-    Chunk *ch = end_compiler(&c);
+    compile_seq(c, body, true, line);
+    Chunk *ch = end_compiler(c);
 
     /* Preserve source AST and upvalue names for tiered JIT hot-swap. */
     ch->src_lambda = scm_cons(S_LAMBDA, scm_cons(params, body));
-    if (c.upval_count > 0) {
-        ch->upval_names = (val_t *)gc_alloc_raw_pinned((size_t)c.upval_count * sizeof(val_t));
-        for (int i = 0; i < c.upval_count; i++)
-            ch->upval_names[i] = c.upvals[i].name;
+    if (c->upval_count > 0) {
+        ch->upval_names = (val_t *)gc_alloc_raw_pinned((size_t)c->upval_count * sizeof(val_t));
+        for (int i = 0; i < c->upval_count; i++)
+            ch->upval_names[i] = c->upvals[i].name;
     }
 
     /* In parent: emit OP_CLOSURE followed by upvalue descriptors */
     int ci = chunk_add_const(parent->chunk, (val_t)(uintptr_t)ch);
     emit_ab(parent, OP_CLOSURE, (uint8_t)ci, line);
-    for (int i = 0; i < c.upval_count; i++) {
-        chunk_emit(parent->chunk, c.upvals[i].is_local ? 1 : 0, line);
-        chunk_emit(parent->chunk, (uint8_t)c.upvals[i].index,   line);
+    for (int i = 0; i < c->upval_count; i++) {
+        chunk_emit(parent->chunk, c->upvals[i].is_local ? 1 : 0, line);
+        chunk_emit(parent->chunk, (uint8_t)c->upvals[i].index,   line);
     }
 }
 
@@ -906,20 +906,20 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
         while (vis_pair(params)) { fwd = scm_cons(vcar(params), fwd); params = vcdr(params); }
 
         /* Outer wrapper, now with arity = argc instead of 0 */
-        Compiler outer;
-        init_compiler(&outer, c, as_sym(loop_name)->data);
+        Compiler *outer = CURRY_NEW(Compiler);  /* heap, see compile_lambda / #304 */
+        init_compiler(outer, c, as_sym(loop_name)->data);
         /* Slots 0..argc-1 = the loop variables, matching an ordinary
          * function's own param-binding convention exactly (same helper
          * compile_lambda itself uses). */
-        outer.chunk->arity = compile_params(&outer, fwd);
+        outer->chunk->arity = compile_params(outer, fwd);
 
         /* One more slot (argc) = loop_name's own self-reference
          * placeholder, captured as an upvalue by the inner recursive
          * lambda below -- unchanged from before, just moved from slot 0
          * to slot argc now that the params occupy 0..argc-1. */
-        add_local(&outer, loop_name);
-        mark_initialised(&outer);
-        emit(&outer, OP_VOID, line);
+        add_local(outer, loop_name);
+        mark_initialised(outer);
+        emit(outer, OP_VOID, line);
 
         /* Inner loop lambda; loop_name resolves as upvalue from outer's
          * slot argc. Arm the self-tail-call thread-local so a tail-
@@ -933,19 +933,19 @@ static void compile_let(Compiler *c, val_t args, bool tail, int line) {
          * textually appear relative to a given tail call. */
         g_compile_self_tail_name    = loop_name;
         g_compile_self_tail_mutated = body_mentions_set_target(c, body, loop_name);
-        compile_lambda(&outer, fwd, body, as_sym(loop_name)->data, line);
-        emit_ab(&outer, OP_STORE_LOCAL, (uint8_t)argc, line);  /* store closure → slot argc */
-        emit_ab(&outer, OP_LOAD_LOCAL,  (uint8_t)argc, line);  /* callee */
+        compile_lambda(outer, fwd, body, as_sym(loop_name)->data, line);
+        emit_ab(outer, OP_STORE_LOCAL, (uint8_t)argc, line);  /* store closure → slot argc */
+        emit_ab(outer, OP_LOAD_LOCAL,  (uint8_t)argc, line);  /* callee */
         for (int i = 0; i < argc; i++)
-            emit_ab(&outer, OP_LOAD_LOCAL, (uint8_t)i, line);  /* forward outer's own params as args */
-        emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc, line);
-        Chunk *och = end_compiler(&outer);
+            emit_ab(outer, OP_LOAD_LOCAL, (uint8_t)i, line);  /* forward outer's own params as args */
+        emit_ab(outer, OP_TAIL_CALL, (uint8_t)argc, line);
+        Chunk *och = end_compiler(outer);
 
         int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
         emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
-        for (int i = 0; i < outer.upval_count; i++) {
-            chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, line);
-            chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   line);
+        for (int i = 0; i < outer->upval_count; i++) {
+            chunk_emit(c->chunk, outer->upvals[i].is_local ? 1 : 0, line);
+            chunk_emit(c->chunk, (uint8_t)outer->upvals[i].index,   line);
         }
         /* Compile each init value in c's OWN scope -- the true
          * enclosing environment R7RS mandates -- rather than outer's,
@@ -1038,11 +1038,11 @@ static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
 
     /* Wrap in a zero-arg lambda to get a clean frame, so slot 0 = first
        letrec binding regardless of what is already on the caller's stack. */
-    Compiler lc;
-    init_compiler(&lc, c, "<letrec>");
-    lc.chunk->arity = 0;
+    Compiler *lc = CURRY_NEW(Compiler);  /* heap, see compile_lambda / #304 */
+    init_compiler(lc, c, "<letrec>");
+    lc->chunk->arity = 0;
 
-    begin_scope(&lc);
+    begin_scope(lc);
 
     /* Count bindings */
     int nb = 0;
@@ -1058,34 +1058,34 @@ static void compile_letrec(Compiler *c, val_t args, bool tail, int line) {
     val_t b = bindings;
     while (vis_pair(b)) {
         val_t name = vcar(vcar(b));
-        add_local(&lc, name);
-        mark_initialised(&lc);
-        emit(&lc, OP_VOID, line);
+        add_local(lc, name);
+        mark_initialised(lc);
+        emit(lc, OP_VOID, line);
         b = vcdr(b);
     }
 
-    int base_slot = lc.local_count - nb;
+    int base_slot = lc->local_count - nb;
 
     /* Compile and store each init (they can reference each other via upvalues) */
     b = bindings;
     int i = 0;
     while (vis_pair(b)) {
         val_t init = vcar(vcdr(vcar(b)));
-        compile(&lc, init, false, line);
-        emit_ab(&lc, OP_STORE_LOCAL, (uint8_t)(base_slot + i), line);
+        compile(lc, init, false, line);
+        emit_ab(lc, OP_STORE_LOCAL, (uint8_t)(base_slot + i), line);
         b = vcdr(b); i++;
     }
 
-    compile_seq(&lc, body, true, line);
-    end_scope(&lc, line);
+    compile_seq(lc, body, true, line);
+    end_scope(lc, line);
 
-    Chunk *lch = end_compiler(&lc);
+    Chunk *lch = end_compiler(lc);
 
     int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)lch);
     emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
-    for (int k = 0; k < lc.upval_count; k++) {
-        chunk_emit(c->chunk, lc.upvals[k].is_local ? 1 : 0, line);
-        chunk_emit(c->chunk, (uint8_t)lc.upvals[k].index, line);
+    for (int k = 0; k < lc->upval_count; k++) {
+        chunk_emit(c->chunk, lc->upvals[k].is_local ? 1 : 0, line);
+        chunk_emit(c->chunk, (uint8_t)lc->upvals[k].index, line);
     }
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
@@ -1522,10 +1522,10 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     for (val_t vs2 = var_specs; vis_pair(vs2); vs2 = vcdr(vs2))
         require_min_args(vcar(vs2), 2, "do");
 
-    Compiler lc;
-    init_compiler(&lc, c, "<do>");
-    lc.chunk->arity = 0;
-    Compiler *d = &lc;       /* alias so the rest of the function is readable */
+    Compiler *lc = CURRY_NEW(Compiler);  /* heap, see compile_lambda / #304 */
+    init_compiler(lc, c, "<do>");
+    lc->chunk->arity = 0;
+    Compiler *d = lc;       /* alias so the rest of the function is readable */
     begin_scope(d);
 
     /* Evaluate and bind init values */
@@ -1613,9 +1613,9 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
     Chunk *dch = end_compiler(d);
     int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)dch);
     emit_ab(c, OP_CLOSURE, (uint8_t)ci, line);
-    for (int k = 0; k < lc.upval_count; k++) {
-        chunk_emit(c->chunk, lc.upvals[k].is_local ? 1 : 0, line);
-        chunk_emit(c->chunk, (uint8_t)lc.upvals[k].index, line);
+    for (int k = 0; k < lc->upval_count; k++) {
+        chunk_emit(c->chunk, lc->upvals[k].is_local ? 1 : 0, line);
+        chunk_emit(c->chunk, (uint8_t)lc->upvals[k].index, line);
     }
     emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 0, line);
 }
