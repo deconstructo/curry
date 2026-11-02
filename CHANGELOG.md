@@ -9,6 +9,20 @@
   `|\mathrm{a}\rangle`. A float with an exponent is written `1.5\times 10^{-7}`.
   Such a value inside a product or sum gets parentheses.
 - The Jupyter kernel now publishes `text/latex` for these results as well.
+**Changed — the bytecode compiler's per-scope tables grow on demand (#335)**
+
+- A `Compiler` was about 20 KB because of fixed `locals[256]`, `known[256]`,
+  `upvals[256]` and `syntax_locals[64]` arrays, and one is created per nested
+  lambda, letrec, `do` and named let. The tables now start empty and grow as
+  needed; the 256/256/64 limits are unchanged. On a Debug build compiling a
+  5000-define script: user time 0.76 s to 0.34 s, peak memory 115 MB to 83 MB.
+**Changed — `json-stringify` writes integers beyond the fixnum range exactly (#337)**
+
+- `(json-stringify (vector (expt 10 30)))` was `[1e+30]` (and `[null]` past the
+  range of a double). It now writes every digit, so the value round-trips
+  through `json-parse`. JSON itself has no size limit, but some consumers
+  (for example JavaScript's `JSON.parse`) read a long integer as a double.
+  The `(curry mcp)` and `(curry graphql)` writers are not changed.
 
 **Fixed — `real?`, `rational?`, `finite?`, `infinite?`, `nan?` on complex numbers (#328)**
 
