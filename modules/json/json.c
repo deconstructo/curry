@@ -243,7 +243,14 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
          * 6 significant digits and silently changes the value. */
         num_flonum_to_shortest_cstr(d, buf, sizeof(buf)); sb_str(out,len,cap,buf); return;
     }
-    /* Any other numeric-tower value (bignum, exact rational, complex —
+    /* An integer beyond the fixnum range: write every digit, as json-parse
+     * reads them back exactly. JSON's grammar has no size limit, but some
+     * consumers (JavaScript's JSON.parse) turn a long integer into a double. */
+    if (curry_is_number(v) && num_is_integer(v)) {   /* fixnums and floats were handled above */
+        sb_str(out,len,cap,curry_string(num_to_string(v, 10)));
+        return;
+    }
+    /* Any other numeric-tower value (exact rational, complex —
      * JSON's own number type is just IEEE double, so there's nowhere
      * more precise to put these): convert rather than silently falling
      * through to the generic "unrecognized value" null case below, which
