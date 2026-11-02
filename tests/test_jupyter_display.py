@@ -42,6 +42,14 @@ def main():
         t.check("stdout is unaffected", out, "side effect")
         t.check("rich output follows a side effect", data.get("text/latex"), "$$\\frac{x}{3}$$")
 
+        _, data, _ = k.execute('(+ (sym-var (string->symbol "$$ \\\\text{x}")) 1)')
+        latex = data.get("text/latex", "")
+        t.check("a hostile variable name cannot close the display math",
+                latex.startswith("$$") and latex.endswith("$$") and "$$" not in latex[2:-2], True)
+        _, data, _ = k.execute('(+ (sym-var (string->symbol "<img src=x onerror=alert(1)>")) 1)')
+        t.check("a variable name with HTML has no raw angle brackets",
+                "<" not in data.get("text/latex", "<") and ">" not in data.get("text/latex", ">"), True)
+
         status, data, _ = k.execute("(define y 1)")
         t.check("a definition publishes no result", (status, data), ("ok", None))
     return t.finish()

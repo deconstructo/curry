@@ -366,8 +366,13 @@ so the notebook typesets it:
 (∂ (expt x 3) x)              ; renders as 3 x^{2}
 ```
 
+The text is made safe to embed in `$$ ... $$`: characters that LaTeX or HTML
+treat specially in a variable name, function name or string (`$ \ { } & % # ^ ~ < >`,
+whitespace) are written as math commands, so a hostile name cannot close the
+equation or inject markup. Non-finite floats appear as `\infty` and `\mathrm{NaN}`.
 Only a result that is itself symbolic is typeset. A list that merely contains
-one, a plain number and a string stay `text/plain`. If the LaTeX writer
+one, a plain number and a string stay `text/plain`. Quaternion, octonion, multivector,
+surreal and quantum results have no LaTeX writer yet and also stay `text/plain`. If the LaTeX writer
 raises (a pathologically deep expression, say), the result is still shown as
 plain text. Output a cell prints with `display` is unaffected, and images and
 other files still go through `jupyter-display-file`.

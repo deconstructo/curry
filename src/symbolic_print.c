@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <math.h>
 
 extern void scm_display(val_t v, val_t port);
 extern void scm_write(val_t v, val_t port);
@@ -320,11 +321,38 @@ static const char *sl_greek(const char *name, uint32_t len) {
     return NULL;
 }
 
+/* Names and free text reach LaTeX from user data (a symbol or string can
+ * contain anything), and this output is embedded in $$ ... $$ by the Jupyter
+ * kernel and other callers, so characters that are special to LaTeX or HTML
+ * are written as math commands rather than raw. Everything else, including
+ * multi-byte UTF-8, passes through; an underscore in a variable name is left
+ * alone (x_1 is a subscript) unless `plain` says the text is not a name. */
+static void sl_write_escaped(val_t port, const char *s, uint32_t len, bool plain) {
+    for (uint32_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        switch (c) {
+        case '\\': pws(port, "\\backslash "); break;
+        case '$': case '&': case '%': case '#': case '{': case '}':
+            port_write_char(port, '\\'); port_write_char(port, (int)c); break;
+        case '_':
+            if (plain) pws(port, "\\_"); else port_write_char(port, '_');
+            break;
+        case '^': pws(port, "\\hat{}"); break;
+        case '~': pws(port, "\\sim "); break;
+        case '<': pws(port, "\\lt "); break;
+        case '>': pws(port, "\\gt "); break;
+        default:
+            if (c < 0x20 || c == 0x7f || c == ' ') pws(port, "\\ ");
+            else port_write_string(port, s + i, 1);   /* raw byte: keeps UTF-8 intact */
+        }
+    }
+}
+
 static void sl_varname(val_t v, val_t port) {
     Symbol *s  = as_sym(as_symvar(v)->name);
     const char *gr = sl_greek(s->data, s->len);
     if (gr) pws(port, gr);
-    else    port_write_string(port, s->data, s->len);
+    else    sl_write_escaped(port, s->data, s->len, false);
 }
 
 /* Write a number in LaTeX: exact rationals become \frac{p}{q} */
@@ -359,7 +387,23 @@ static void sl_num(val_t v, val_t port) {
         port_write_char(port, '}');
         return;
     }
-    scm_display(v, port);
+    if (vis_flonum(v) && !isfinite(vfloat(v))) {
+        double d = vfloat(v);
+        if (d != d)      pws(port, "\\mathrm{NaN}");
+        else if (d < 0)  pws(port, "-\\infty");
+        else             pws(port, "\\infty");
+        return;
+    }
+    if (vis_number(v)) { scm_display(v, port); return; }
+    /* A string, or anything else that is not a number: its display text,
+     * set upright and escaped so it cannot break out of the math. */
+    val_t tmp = port_open_output_string();
+    scm_display(v, tmp);
+    val_t str = port_get_output_string(tmp);
+    port_close(tmp);
+    pws(port, "\\mathrm{");
+    sl_write_escaped(port, str_data(as_str(str)), as_str(str)->len, true);
+    port_write_char(port, '}');
 }
 
 /*
@@ -375,7 +419,7 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
     if (vis_symvar(expr)) { sl_varname(expr, port); return; }
     if (vis_symfn(expr)) {
         Symbol *s = as_sym(as_symfn(expr)->name);
-        port_write_string(port, s->data, s->len);
+        sl_write_escaped(port, s->data, s->len, false);
         return;
     }
 
@@ -498,7 +542,7 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
         sl_latex(a[1], SP_LOW, port);
     } else if (op == SX_APPLY && n >= 1 && vis_symfn(a[0])) {
         Symbol *fsym = as_sym(as_symfn(a[0])->name);
-        port_write_string(port, fsym->data, fsym->len);
+        sl_write_escaped(port, fsym->data, fsym->len, false);
         pws(port, "\\!\\left(");
         for (int i = 1; i < n; i++) {
             if (i > 1) pws(port, ",\\,");
@@ -527,7 +571,7 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
             port_write_char(port, '}');
         } else {
             pws(port, "\\operatorname{");
-            port_write_string(port, ops->data, ops->len);
+            sl_write_escaped(port, ops->data, ops->len, true);
             pws(port, "}\\!\\left(");
             for (int i = 0; i < n; i++) {
                 if (i > 0) pws(port, ",\\,");

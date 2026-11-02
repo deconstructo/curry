@@ -8,6 +8,12 @@
   (from `sym->latex`, wrapped in `$$`) alongside `text/plain`, so a notebook
   renders `(/ x 2)` as a fraction. Other results are unchanged. New test:
   `jupyter_display`; the kernel tests share `tests/jupyter_test_support.py`.
+- `sym->latex` now escapes characters that are special to LaTeX or HTML in a
+  variable name, function name, string or other non-numeric leaf (`$`, `\`,
+  `{`, `}`, `&`, `%`, `#`, `^`, `~`, `<`, `>`, whitespace), so its output is
+  safe inside `$$ ... $$`; ordinary names, Greek names and `x_1` are
+  unchanged. `+inf.0`, `-inf.0` and `+nan.0` print as `\infty`, `-\infty` and
+  `\mathrm{NaN}`.
 
 **New — Jupyter kernel completion and inspect (#283)**
 

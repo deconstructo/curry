@@ -1176,6 +1176,26 @@
 ;;; Summary
 ;;; =========================================================================
 
+;;; sym->latex escapes anything LaTeX or HTML would treat specially in a
+;;; variable name, function name or non-numeric leaf, so the text is safe to
+;;; embed in $$ ... $$ (the Jupyter kernel does). Ordinary names are untouched.
+(define (latex-of name) (sym->latex (+ (sym-var (string->symbol name)) 1)))
+(check "latex: ordinary name unchanged" (latex-of "x_1") "1 + x_1")
+(check "latex: unicode name unchanged" (latex-of "λx") "1 + λx")
+(check "latex: dollar and backslash and braces"
+       (latex-of "$$ \\text{x}") "1 + \\$\\$\\ \\backslash text\\{x\\}")
+(check "latex: html angle brackets" (latex-of "<b>") "1 + \\lt b\\gt ")
+(check "latex: newline and space become a space command" (latex-of "a b\nc") "1 + a\\ b\\ c")
+(check "latex: caret tilde percent hash ampersand"
+       (latex-of "a^b~c%d#e&f") "1 + a\\hat{}b\\sim c\\%d\\#e\\&f")
+(check "latex: a string leaf is set upright and escaped"
+       (sym->latex (+ x "a$b_c")) "x + \\mathrm{a\\$b\\_c}")
+(check "latex: +inf.0 leaf" (sym->latex (* x +inf.0)) "\\infty x")
+(check "latex: -inf.0 leaf" (sym->latex (* x -inf.0)) "-\\infty x")
+(check "latex: +nan.0 leaf" (sym->latex (+ x +nan.0)) "\\mathrm{NaN} + x")
+(check "latex: a Greek name still maps to its command"
+       (sym->latex (* (sym-var 'alpha) x)) "\\alpha x")
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")
