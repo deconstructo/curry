@@ -44,6 +44,7 @@
 #include "mcp_auth.h"
 #include "eval.h"    /* SCM_PROTECT, ExnHandler, current_handler */
 #include "object.h"  /* ErrorObj, vis_error, as_err */
+#include "numeric.h" /* num_flonum_to_shortest_cstr */
 #include "gc.h"      /* gc_register_thread */
 #include "vm.h"      /* vm_init — each SSE thread needs its own VM */
 #include <pthread.h>
@@ -209,7 +210,7 @@ static void sb_c(SB *b, char c)        { sb_grow(b,1); b->buf[b->len++]=c; b->bu
 static void sb_s(SB *b, const char *s) { while(*s) sb_c(b,*s++); }
 static void sb_n(SB *b, long n)        { char t[32]; snprintf(t,sizeof(t),"%ld",n); sb_s(b,t); }
 /* JSON has no spelling for inf or nan; write null instead. */
-static void sb_f(SB *b, double d)      { if (!isfinite(d)) { sb_s(b,"null"); return; } char t[32]; snprintf(t,sizeof(t),"%g",d); sb_s(b,t); }
+static void sb_f(SB *b, double d)      { if (!isfinite(d)) { sb_s(b,"null"); return; } char t[32]; num_flonum_to_shortest_cstr(d,t,sizeof(t)); sb_s(b,t); }
 
 static void sb_quoted(SB *b, const char *s) {
     sb_c(b,'"');
@@ -650,7 +651,11 @@ static curry_val fn_mcp_progress(int ac, curry_val *av, void *ud) {
     sb_s(&b,"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\","
            "\"params\":{\"progressToken\":"); sb_quoted(&b,s_cur_token);
     sb_s(&b,",\"value\":{\"kind\":\"report\",\"percentage\":");
-    sb_f(&b,tot>0?100.0*cur/tot:0.0);
+    { /* a progress percentage: six digits are plenty, and finite by construction */
+        char pct[32];
+        snprintf(pct, sizeof(pct), "%g", tot > 0 ? 100.0 * cur / tot : 0.0);
+        sb_s(&b, pct);
+    }
     sb_s(&b,",\"message\":"); sb_quoted(&b,msg); sb_s(&b,"}}}");
     emit_line(b.buf); sb_free(&b);
     return curry_void();

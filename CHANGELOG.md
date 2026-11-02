@@ -2,6 +2,21 @@
 
 ### Unreleased
 
+**Fixed — JSON number output (#326, #327)**
+
+- `(curry json)` and the MCP server wrote floats with `%g`, keeping only 6
+  significant digits, so `1234567.0` came back from a round trip as
+  `1234570.0`. They now write the shortest text that reads back as the same
+  double (`1234567.0`, `0.1`, `0.3333333333333333` for `1/3`). MCP progress
+  percentages still use 6 digits.
+- The JSON encoder in `(curry llm)`, used for request bodies and tool results,
+  wrote `+inf.0`, `+nan.0` and exact ratios like `1/3`, none of which is valid
+  JSON. Non-finite and complex numbers are now `null`, and a ratio is written
+  as a float.
+- `json-parse` no longer overflows a stack buffer on a number token longer
+  than 63 characters (#330); it aborted the process. An integer outside the
+  fixnum range is still parsed wrongly (#331).
+
 **Fixed — JSON output for non-finite numbers (#320)**
 
 - `json-stringify` / `json-write`, the MCP server and the GraphQL client wrote

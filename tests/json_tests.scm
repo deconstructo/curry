@@ -19,6 +19,18 @@
 (check "parse object"  (json-parse "{\"a\":1,\"b\":2}") '(("b" . 2) ("a" . 1)))
 (check "parse array"   (json-parse "[1,2,3]") #(1 2 3))
 (check "parse string"  (json-parse "\"hello\"") "hello")
+(check "parse survives a very long digit string (was a stack buffer overflow)"
+       (vector? (json-parse (string-append "[1" (make-string 200 #\1) "]"))) #t)
+(check "parse of a very long float token"
+       (vector? (json-parse (string-append "[1." (make-string 200 #\1) "]"))) #t)
+(check "stringify keeps all digits of a float"
+       (json-stringify (vector 1234567.0 123456789.123 0.1 1e21 -0.5))
+       "[1234567.0,123456789.123,0.1,1e+21,-0.5]")
+(check "stringify keeps all digits of an exact ratio"
+       (json-stringify (vector (/ 1 3))) "[0.3333333333333333]")
+(check "float survives a stringify/parse round trip"
+       (json-parse (json-stringify (vector 1234567.0 0.1 (/ 1 3))))
+       (vector 1234567.0 0.1 (/ 1. 3.)))
 (check "stringify writes null for +inf.0, -inf.0 and +nan.0 (not valid JSON otherwise)"
        (json-stringify (vector 1.5 +inf.0 -inf.0 +nan.0)) "[1.5,null,null,null]")
 (check "stringify writes null for a bignum too large for a double"
