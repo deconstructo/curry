@@ -212,7 +212,13 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_nil(v)) { sb_str(out,len,cap,"null"); return; }
     if (curry_is_bool(v)) { sb_str(out,len,cap,curry_bool(v)?"true":"false"); return; }
     if (curry_is_fixnum(v)) { snprintf(buf,sizeof(buf),"%ld",(long)curry_fixnum(v)); sb_str(out,len,cap,buf); return; }
-    if (curry_is_float(v)) { snprintf(buf,sizeof(buf),"%g",curry_float(v)); sb_str(out,len,cap,buf); return; }
+    /* JSON has no spelling for +inf.0, -inf.0 or +nan.0 ("inf"/"nan" are not
+     * valid JSON); write null, as JSON.stringify does. */
+    if (curry_is_float(v)) {
+        double d = curry_float(v);
+        if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }
+        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+    }
     /* Any other numeric-tower value (bignum, exact rational, complex —
      * JSON's own number type is just IEEE double, so there's nowhere
      * more precise to put these): convert rather than silently falling
@@ -220,7 +226,11 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
      * would make a real number indistinguishable from a genuinely absent
      * field. Must come after the fixnum/float checks above, which handle
      * those two cases exactly rather than through this lossy path. */
-    if (curry_is_number(v)) { snprintf(buf,sizeof(buf),"%g",curry_number_to_double(v)); sb_str(out,len,cap,buf); return; }
+    if (curry_is_number(v)) {
+        double d = curry_number_to_double(v);
+        if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }   /* e.g. a huge bignum */
+        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+    }
     if (curry_is_string(v)) { write_json_string(curry_string(v), out, len, cap); return; }
     /* A symbol used as an alist key (looks_like_alist now permits this,
      * matching how such an alist would actually be built) must still

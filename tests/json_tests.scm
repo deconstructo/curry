@@ -19,6 +19,10 @@
 (check "parse object"  (json-parse "{\"a\":1,\"b\":2}") '(("b" . 2) ("a" . 1)))
 (check "parse array"   (json-parse "[1,2,3]") #(1 2 3))
 (check "parse string"  (json-parse "\"hello\"") "hello")
+(check "stringify writes null for +inf.0, -inf.0 and +nan.0 (not valid JSON otherwise)"
+       (json-stringify (vector 1.5 +inf.0 -inf.0 +nan.0)) "[1.5,null,null,null]")
+(check "stringify writes null for a bignum too large for a double"
+       (json-stringify (vector (expt 10 400))) "[null]")
 (check "parse number"  (json-parse "42") 42)
 (check "parse true"    (json-parse "true") #t)
 (check "parse false"   (json-parse "false") #f)
