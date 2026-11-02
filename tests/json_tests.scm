@@ -23,6 +23,13 @@
        (vector? (json-parse (string-append "[1" (make-string 200 #\1) "]"))) #t)
 (check "parse of a very long float token"
        (vector? (json-parse (string-append "[1." (make-string 200 #\1) "]"))) #t)
+(check "parse keeps an integer beyond 64 bits"
+       (json-parse "[12345678901234567890, -12345678901234567890]")
+       (vector 12345678901234567890 -12345678901234567890))
+(check "parse keeps integers at the 62-bit fixnum boundary"
+       (json-parse "[4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905]")
+       (vector (- (expt 2 62) 1) (expt 2 62) (- (expt 2 62)) (- (- (expt 2 62)) 1)))
+(check "parsed big integers are exact" (exact? (vector-ref (json-parse "[99999999999999999999]") 0)) #t)
 (check "stringify keeps all digits of a float"
        (json-stringify (vector 1234567.0 123456789.123 0.1 1e21 -0.5))
        "[1234567.0,123456789.123,0.1,1e+21,-0.5]")
