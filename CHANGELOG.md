@@ -2,6 +2,13 @@
 
 ### Unreleased
 
+**Fixed — `json-parse` reads integers beyond the fixnum range (#331)**
+
+- `(json-parse "[12345678901234567890]")` returned `#(-1)`, and an integer past
+  62 bits wrapped to a wrong fixnum. It now returns the exact integer
+  (a bignum when needed). The writer is unchanged: `json-stringify` still
+  writes a bignum as a double.
+
 **New — Jupyter kernel typesets symbolic results (#284)**
 
 - A cell whose result is a symbolic expression now publishes `text/latex`

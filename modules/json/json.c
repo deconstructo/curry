@@ -27,6 +27,7 @@
 
 #include <curry.h>
 #include "numeric.h"   /* num_flonum_to_shortest_cstr */
+#include "reader.h"    /* parse_number */
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -117,7 +118,16 @@ static curry_val json_parse_number(const char **p) {
     if (!buf) return curry_eof();
     memcpy(buf, start, n);
     buf[n] = '\0';
-    curry_val v = is_float ? curry_make_float(atof(buf)) : curry_make_fixnum(atol(buf));
+    curry_val v;
+    if (is_float) {
+        v = curry_make_float(atof(buf));
+    } else {
+        /* parse_number returns a fixnum or, past 62 bits, a bignum. atol
+         * saturated at LONG_MAX and curry_make_fixnum wrapped a value that
+         * does not fit a fixnum, so 12345678901234567890 read back as -1. */
+        v = parse_number(buf, 10, false, false);
+        if (v == V_FALSE) v = curry_make_fixnum(0);   /* a bare "-" */
+    }
     free(buf);
     return v;
 }
