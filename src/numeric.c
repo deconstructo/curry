@@ -320,7 +320,39 @@ bool num_is_negative(val_t v) {
     return false;
 }
 
+/* finite?/infinite?/nan? for the components of a complex, quaternion or
+ * octonion: a finite number has every component finite; an infinite or NaN
+ * one has at least one such component (R7RS: (infinite? 3.0+inf.0i) is #t). */
+static bool num_components_all_finite(val_t v) {
+    if (vis_complex(v)) return num_is_finite(as_cpx(v)->real) && num_is_finite(as_cpx(v)->imag);
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        return isfinite(q->a) && isfinite(q->b) && isfinite(q->c) && isfinite(q->d);
+    }
+    Octonion *o = as_oct(v);
+    for (int i = 0; i < 8; i++) if (!isfinite(o->e[i])) return false;
+    return true;
+}
+static bool num_components_any(val_t v, int (*test)(double)) {
+    if (vis_complex(v)) {
+        Complex *c = as_cpx(v);
+        return (vis_flonum(c->real) && test(vfloat(c->real))) ||
+               (vis_flonum(c->imag) && test(vfloat(c->imag)));
+    }
+    if (vis_quat(v)) {
+        Quaternion *q = as_quat(v);
+        return test(q->a) || test(q->b) || test(q->c) || test(q->d);
+    }
+    Octonion *o = as_oct(v);
+    for (int i = 0; i < 8; i++) if (test(o->e[i])) return true;
+    return false;
+}
+static int dbl_isinf(double d) { return isinf(d); }
+static int dbl_isnan(double d) { return isnan(d); }
+#define NUM_MULTI_COMPONENT(v) (vis_complex(v) || vis_quat(v) || vis_oct(v))
+
 bool num_is_finite(val_t v)   {
+    if (NUM_MULTI_COMPONENT(v)) return num_components_all_finite(v);
     if (vis_surreal(v)) return sur_finite_p(v);
 #ifdef BUILD_MPFR
     if (vis_mpfr(v))    return !mpfr_is_nan(v) && !mpfr_is_inf(v);
@@ -329,6 +361,7 @@ bool num_is_finite(val_t v)   {
 }
 
 bool num_is_infinite(val_t v) {
+    if (NUM_MULTI_COMPONENT(v)) return num_components_any(v, dbl_isinf);
     if (vis_surreal(v)) return sur_infinite_p(v);
 #ifdef BUILD_MPFR
     if (vis_mpfr(v))    return mpfr_is_inf(v);
@@ -337,10 +370,28 @@ bool num_is_infinite(val_t v) {
 }
 
 bool num_is_nan(val_t v)      {
+    if (NUM_MULTI_COMPONENT(v)) return num_components_any(v, dbl_isnan);
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) return mpfr_is_nan(v);
 #endif
     return vis_flonum(v) && isnan(vfloat(v));
+}
+
+/* R7RS real?: a number with no imaginary part. complex?, quaternion and
+ * octonion values are not real (a normalized complex with an exact zero
+ * imaginary part is already a plain real). */
+bool num_is_real(val_t v) {
+    return vis_number(v) && !NUM_MULTI_COMPONENT(v);
+}
+
+/* R7RS rational?: exact, or a finite flonum. */
+bool num_is_rational(val_t v) {
+    if (vis_exact(v)) return true;
+    if (vis_flonum(v)) return isfinite(vfloat(v));
+#ifdef BUILD_MPFR
+    if (vis_mpfr(v)) return !mpfr_is_nan(v) && !mpfr_is_inf(v);
+#endif
+    return false;
 }
 
 bool num_is_integer(val_t v) {

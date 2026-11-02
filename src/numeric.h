@@ -56,6 +56,8 @@ bool num_is_negative(val_t v);
 bool num_is_nan(val_t v);
 bool num_is_infinite(val_t v);
 bool num_is_finite(val_t v);
+bool num_is_real(val_t v);
+bool num_is_rational(val_t v);
 bool num_is_integer(val_t v);   /* exact or inexact integer value */
 
 /* ---- Arithmetic ---- */
