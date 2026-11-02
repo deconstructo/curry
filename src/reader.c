@@ -603,7 +603,7 @@ static val_t read_datum(val_t port) {
             StrBuf sb; sb_init(&sb);
             sb_push(&sb, '#'); sb_push(&sb, ':');
             while (!is_delimiter(peek_char_port(port)))
-                sb_push(&sb, (char)next_char(port));
+                sb_push_utf8(&sb, (uint32_t)next_char(port));
             sb.buf[sb.len] = '\0';
             return sym_intern(sb.buf, (uint32_t)sb.len);
         }

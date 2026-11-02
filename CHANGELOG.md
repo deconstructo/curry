@@ -2,6 +2,12 @@
 
 ### Unreleased
 
+**Fixed — `#:keyword` reader keeps non-ASCII codepoints (#317)**
+
+- The `#:name` reader cut each codepoint to one byte, so `#:α` and `#:±`
+  read as the same symbol. It now keeps the full UTF-8 encoding. The
+  dot-prefixed list-element case from #317 was already fixed by #316.
+
 **Fixed — `json-parse` reads integers beyond the fixnum range (#331)**
 
 - `(json-parse "[12345678901234567890]")` returned `#(-1)`, and an integer past
