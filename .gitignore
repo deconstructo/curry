@@ -53,3 +53,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+
+__pycache__/
+*.pyc

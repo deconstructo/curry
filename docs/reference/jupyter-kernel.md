@@ -371,6 +371,3 @@ one, a plain number and a string stay `text/plain`. If the LaTeX writer
 raises (a pathologically deep expression, say), the result is still shown as
 plain text. Output a cell prints with `display` is unaffected, and images and
 other files still go through `jupyter-display-file`.
-
-## Known gaps (not yet implemented)
-
