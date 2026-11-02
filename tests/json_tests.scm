@@ -19,6 +19,10 @@
 (check "parse object"  (json-parse "{\"a\":1,\"b\":2}") '(("b" . 2) ("a" . 1)))
 (check "parse array"   (json-parse "[1,2,3]") #(1 2 3))
 (check "parse string"  (json-parse "\"hello\"") "hello")
+(check "parse survives a very long digit string (was a stack buffer overflow)"
+       (vector? (json-parse (string-append "[1" (make-string 200 #\1) "]"))) #t)
+(check "parse of a very long float token"
+       (vector? (json-parse (string-append "[1." (make-string 200 #\1) "]"))) #t)
 (check "stringify keeps all digits of a float"
        (json-stringify (vector 1234567.0 123456789.123 0.1 1e21 -0.5))
        "[1234567.0,123456789.123,0.1,1e+21,-0.5]")

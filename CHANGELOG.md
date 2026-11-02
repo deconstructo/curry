@@ -13,6 +13,9 @@
   wrote `+inf.0`, `+nan.0` and exact ratios like `1/3`, none of which is valid
   JSON. Non-finite and complex numbers are now `null`, and a ratio is written
   as a float.
+- `json-parse` no longer overflows a stack buffer on a number token longer
+  than 63 characters (#330); it aborted the process. An integer outside the
+  fixnum range is still parsed wrongly (#331).
 
 **Fixed — JSON output for non-finite numbers (#320)**
 
