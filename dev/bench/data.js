@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793606445077,
+  "lastUpdate": 1793606563765,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -19457,6 +19457,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 76.301,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1183a90d47f2b5d2003a9e1860af688a6aacd4c4",
+          "message": "Merge pull request #339 from deconstructo/fix/312-actors-hang\n\ntest(actors): dump thread stacks when the actors test hangs (#312)",
+          "timestamp": "2026-11-02T19:01:55+11:00",
+          "tree_id": "b792e96d9ec8a9d11202fba9586ae27aac2a0da6",
+          "url": "https://github.com/deconstructo/curry/commit/1183a90d47f2b5d2003a9e1860af688a6aacd4c4"
+        },
+        "date": 1793606562801,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.857,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.946,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.26,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.765,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 179.477,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 368.9,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 81.516,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 108.687,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 78.216,
             "unit": "ms"
           }
         ]
