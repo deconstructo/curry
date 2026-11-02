@@ -72,7 +72,7 @@ On `textDocument/hover`, the server extracts the identifier token under the
 cursor and looks it up in a static table generated from the same C sources
 that drive the editor syntax grammars
 ([`tools/gen-editor-syntax.py`](../../tools/gen-editor-syntax.py) →
-`modules/lsp/symbols_gen.h`):
+`src/editor_symbols_gen.h`):
 
 - **Special forms** (`define`, `lambda`, `let`, …) — from `src/symbol_list.h`
 - **Builtin procedures** (`display`, `map`, `mpfr-gamma`, …) — every

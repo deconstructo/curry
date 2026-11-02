@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+**New — Jupyter kernel completion and inspect (#283)**
+
+- Tab completion and Shift-Tab inspect now work in the Jupyter kernel instead
+  of returning empty results. Completion covers builtins, special forms,
+  names in the cell and names defined in earlier cells. The logic moved from
+  `modules/lsp/lsp.c` into `src/editor_assist.c` (in `curry_core`) and is
+  shared with the language server; `symbols_gen.h` moved to
+  `src/editor_symbols_gen.h`. New test: `jupyter_completion`, which drives the
+  real kernel and runs when the kernel and a Python with `jupyter_client` are
+  available.
 **Fixed — JSON number output (#326, #327)**
 
 - `(curry json)` and the MCP server wrote floats with `%g`, keeping only 6

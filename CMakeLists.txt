@@ -101,6 +101,7 @@ find_path(READLINE_INCLUDE NAMES readline/readline.h)
 
 set(CORE_SOURCES
   src/gc.c
+  src/editor_assist.c
   src/chunk.c
   src/ir.c
   src/symbol.c
@@ -915,6 +916,11 @@ endif()
 
 if(BUILD_MODULE_LSP)
   curry_c_module(lsp)
+  # editor_assist.c is in curry_core for the Jupyter kernel, but nothing in the
+  # main binary references it, so the linker drops it from the static library
+  # and lsp.so would find no assist_* symbols at dlopen. Compile it into the
+  # module too; its calls into the core still resolve from the main binary.
+  target_sources(curry_lsp PRIVATE src/editor_assist.c)
   message(STATUS "Building Language Server Protocol module")
 endif()
 

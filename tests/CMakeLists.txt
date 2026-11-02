@@ -292,6 +292,32 @@ if(BUILD_MODULE_LSP AND TARGET curry_lsp)
                 ${MOD_PATH})
 endif()
 
+# Jupyter kernel completion/inspect over the real protocol. Needs the kernel
+# (BUILD_JUPYTER_KERNEL) and a Python with jupyter_client: either set
+# CURRY_JUPYTER_PYTHON, or it is taken from the `jupyter` launcher's shebang.
+if(TARGET curry_jupyter)
+    if(NOT CURRY_JUPYTER_PYTHON)
+        find_program(CURRY_JUPYTER_LAUNCHER jupyter)
+        if(CURRY_JUPYTER_LAUNCHER)
+            file(STRINGS "${CURRY_JUPYTER_LAUNCHER}" _jl_first LIMIT_COUNT 1)
+            string(REGEX REPLACE "^#!" "" _jl_py "${_jl_first}")
+            execute_process(COMMAND ${_jl_py} -c "import jupyter_client"
+                            RESULT_VARIABLE _jl_rc OUTPUT_QUIET ERROR_QUIET)
+            if(_jl_rc EQUAL 0)
+                set(CURRY_JUPYTER_PYTHON "${_jl_py}")
+            endif()
+        endif()
+    endif()
+    if(CURRY_JUPYTER_PYTHON)
+        add_test(NAME jupyter_completion
+            COMMAND ${CURRY_JUPYTER_PYTHON}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_jupyter_completion.py
+                    $<TARGET_FILE:curry_jupyter>)
+    else()
+        message(STATUS "jupyter_completion test skipped: no Python with jupyter_client (set CURRY_JUPYTER_PYTHON)")
+    endif()
+endif()
+
 if(BUILD_LLVM)
     add_test(NAME jit COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
 endif()

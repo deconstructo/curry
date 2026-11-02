@@ -332,16 +332,29 @@ to tree-walked code). A cell whose hot loop happens to run through
 `eval()` rather than compiled VM bytecode (e.g. an infinite loop inside
 a `define-library` body) cannot currently be interrupted.
 
+## Completion and inspect
+
+Tab completion (`complete_request`) and the inspector (`inspect_request`,
+Shift-Tab in a notebook) share their logic with the `(curry lsp)` module
+through `src/editor_assist.c`, which lives in `curry_core`.
+
+- **Completion** offers, for the identifier before the cursor: the builtins
+  and special forms (plus their Akkadian synonyms), names bound by
+  `define`/`lambda`/`let`-family/`do` forms in the cell's own text, and
+  names already defined in the live global environment, so a function
+  defined in an earlier cell completes. Local bindings are found even in a
+  cell that is still being typed: unclosed parentheses are closed before the
+  text is read. Nothing is offered for an empty prefix, and at most 200
+  matches are returned. The match replaces the whole identifier around the
+  cursor. Positions are Unicode code points, as the protocol requires.
+- **Inspect** returns the same hover text the language server shows
+  (`text/plain` and `text/markdown`) for a builtin, special form or
+  Akkadian synonym, and "defined in this session" for a global the session
+  has defined. It does not yet show signatures or docstrings, and it does
+  not describe local bindings.
+
 ## Known gaps (not yet implemented)
 
-- **Completion / inspect (hover)**: `complete_request`/`inspect_request`
-  currently return empty results. The `(curry lsp)` module already
-  implements the same builtin-table-plus-local-binding-collection logic
-  this would need, but it's compiled into a `dlopen`'d `.so` that expects
-  a live curry process to resolve `curry_core` symbols from — it isn't
-  linkable into this standalone binary as-is. Reusing it means lifting
-  that logic out of `modules/lsp/lsp.c` into something both can link
-  against; out of scope for the initial kernel.
 - **Rich display for a cell's own *result* value**: an `execute_result`
   (the value a cell evaluates to) still only ever publishes as
   `text/plain` — no `text/latex` for symbolic CAS values via `sym->latex`,
