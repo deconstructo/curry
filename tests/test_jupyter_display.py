@@ -32,6 +32,14 @@ def main():
         t.check("a plain number has only text/plain", sorted(data), ["text/plain"])
         t.check("a plain number's text", data["text/plain"], "3")
 
+        _, data, _ = k.execute("(make-quaternion 1 2 3 4)")
+        t.check("a quaternion result adds text/latex", data.get("text/latex"),
+                "$$1 + 2\\mathbf{i} + 3\\mathbf{j} + 4\\mathbf{k}$$")
+        _, data, _ = k.execute("(make-rectangular 1 2)")
+        t.check("a complex result adds text/latex", data.get("text/latex"), "$$1 + 2i$$")
+        _, data, _ = k.execute("(mv-scale (mv-e 3 0 0 1 2) 2)")
+        t.check("a multivector result adds text/latex", data.get("text/latex"), "$$2e_{12}$$")
+
         _, data, _ = k.execute('"hello"')
         t.check("a string has only text/plain", sorted(data), ["text/plain"])
 
