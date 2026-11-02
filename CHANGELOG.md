@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**New — LaTeX output for complex, quaternion, octonion, multivector, surreal and quantum values (#334)**
+
+- `sym->latex` writes these as typeset math instead of raw display text:
+  `1 + 2\mathbf{i} + 3\mathbf{j} + 4\mathbf{k}`, `e_{12}`, `\omega + 5 - 2\varepsilon`,
+  `|\mathrm{a}\rangle`. A float with an exponent is written `1.5\times 10^{-7}`.
+  Such a value inside a product or sum gets parentheses.
+- The Jupyter kernel now publishes `text/latex` for these results as well.
+
 **Fixed — `real?`, `rational?`, `finite?`, `infinite?`, `nan?` on complex numbers (#328)**
 
 - `real?` was true for every number, including `1+2i` and quaternions. It is

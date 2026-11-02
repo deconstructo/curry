@@ -1196,6 +1196,36 @@
 (check "latex: a Greek name still maps to its command"
        (sym->latex (* (sym-var 'alpha) x)) "\\alpha x")
 
+;;; sym->latex for the rest of the numeric tower (#334)
+(check "latex complex"        (sym->latex 1+2i) "1 + 2i")
+(check "latex complex neg"    (sym->latex (make-rectangular 1.5 -2.5)) "1.5 - 2.5i")
+(check "latex pure imaginary" (sym->latex (make-rectangular 0 -1)) "-i")
+(check "latex quaternion"     (sym->latex (make-quaternion 1 2 3 4))
+       "1 + 2\\mathbf{i} + 3\\mathbf{j} + 4\\mathbf{k}")
+(check "latex quaternion signs and zeros" (sym->latex (make-quaternion -1 0 -3 0.5))
+       "-1 - 3\\mathbf{j} + 0.5\\mathbf{k}")
+(check "latex zero quaternion" (sym->latex (make-quaternion 0 0 0 0)) "0")
+(check "latex octonion"       (sym->latex (make-octonion 1 0 0 0 0 0 0 8)) "1 + 8e_{7}")
+(let ((e1 (mv-e 3 0 0 1)) (e12 (mv-e 3 0 0 1 2)) (e123 (mv-e 3 0 0 1 2 3)))
+  (check "latex blade"        (sym->latex e12) "e_{12}")
+  (check "latex multivector"  (sym->latex (mv+ (mv-scale e1 2) (mv-scale e123 -3)))
+         "2e_{1} - 3e_{123}")
+  (check "latex scalar plus blade" (sym->latex (mv+ (mv-e 3 0 0) e12)) "1 + e_{12}"))
+(check "latex zero multivector" (sym->latex (make-mv 3 0 0)) "0")
+(check "latex omega"          (sym->latex sur-w) "\\omega")
+(check "latex epsilon"        (sym->latex sur-e) "\\varepsilon")
+(check "latex surreal series"
+       (sym->latex (make-surreal (list (cons 1 1) (cons 0 5) (cons -1/2 -2))))
+       "\\omega + 5 - 2\\omega^{-\\frac{1}{2}}")
+(check "latex quantum"
+       (sym->latex (superpose (list (cons 1 'a))))
+       "|\\mathrm{a}\\rangle")
+(check "latex exponent float"  (sym->latex 1.5e-7) "1.5\\times 10^{-7}")
+(check "latex sum with a complex"     (sym->latex (+ x 1+2i)) "\\left(1 + 2i\\right) + x")
+(check "latex product with a quaternion"
+       (sym->latex (* x (make-quaternion 1 2 3 4)))
+       "x \\left(1 + 2\\mathbf{i} + 3\\mathbf{j} + 4\\mathbf{k}\\right)")
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")

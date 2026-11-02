@@ -1342,7 +1342,17 @@ Returns a LaTeX string suitable for embedding in `$...$` or `$$...$$` math mode:
 (sym->latex (log x))                      ; => "\\ln\\!\\left(x\\right)"
 ```
 
-Rational numbers render as `\frac{p}{q}`. Variable names that match Greek letters render as LaTeX commands:
+Rational numbers render as `\frac{p}{q}`. The other numeric-tower values are written as a sum of terms:
+
+```scheme
+(sym->latex (make-rectangular 1 2))        ; => "1 + 2i"
+(sym->latex (make-quaternion 1 2 3 4))     ; => "1 + 2\\mathbf{i} + 3\\mathbf{j} + 4\\mathbf{k}"
+(sym->latex (mv-e 3 0 0 1 2))              ; => "e_{12}"            ; Clifford blade
+(sym->latex surreal-with-omega-and-epsilon); => "\\omega + 5 - 2\\varepsilon"
+(sym->latex (superpose '((1 . a))))        ; => "|\\mathrm{a}\\rangle"
+```
+
+Octonion units are `e_{1}` to `e_{7}`. A float with an exponent is written `1.5\\times 10^{-7}`. Such a value inside a product or sum is parenthesized. Variable names that match Greek letters render as LaTeX commands:
 
 ```scheme
 (symbolic alpha beta gamma omega)

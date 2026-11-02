@@ -356,7 +356,8 @@ through `src/editor_assist.c`, which lives in `curry_core`.
 ## Rich display of a cell's result
 
 A cell's result is published as `text/plain` (the `write` form, as in the
-REPL). A symbolic CAS expression (`sym-var` and anything built from one) also
+REPL). A symbolic CAS expression (`sym-var` and anything built from one), or a
+complex, quaternion, octonion, multivector, surreal or quantum value, also
 carries `text/latex`, the same text `sym->latex` produces wrapped in `$$ ... $$`,
 so the notebook typesets it:
 
@@ -370,9 +371,8 @@ The text is made safe to embed in `$$ ... $$`: characters that LaTeX or HTML
 treat specially in a variable name, function name or string (`$ \ { } & % # ^ ~ < >`,
 whitespace) are written as math commands, so a hostile name cannot close the
 equation or inject markup. Non-finite floats appear as `\infty` and `\mathrm{NaN}`.
-Only a result that is itself symbolic is typeset. A list that merely contains
-one, a plain number and a string stay `text/plain`. Quaternion, octonion, multivector,
-surreal and quantum results have no LaTeX writer yet and also stay `text/plain`. If the LaTeX writer
+Only a result that is itself one of these values is typeset. A list that merely
+contains one, a plain real number and a string stay `text/plain`. If the LaTeX writer
 raises (a pathologically deep expression, say), the result is still shown as
 plain text. Output a cell prints with `display` is unaffected, and images and
 other files still go through `jupyter-display-file`.

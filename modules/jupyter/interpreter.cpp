@@ -62,13 +62,16 @@ std::string render_value(val_t v) {
 }
 
 /* Rich forms of a result value, added next to the text/plain form that is
- * always published. A symbolic CAS expression gets text/latex (the same text
- * as `sym->latex`, wrapped in $$ so the notebook typesets it as a display
- * equation). Protected separately from the plain-text rendering above: if
+ * always published. A symbolic CAS expression, or a complex, quaternion,
+ * octonion, multivector, surreal or quantum value, gets text/latex (the same
+ * text as `sym->latex`, wrapped in $$ so the notebook typesets it as a
+ * display equation). Plain reals stay text/plain only. Protected separately from the plain-text rendering above: if
  * the LaTeX writer raises (say on a pathologically deep expression), the
  * result is still shown, just without the typeset form. */
 void add_rich_representations(nl::json &data, val_t v) {
-    if (!vis_symbolic(v)) return;
+    if (!(vis_symbolic(v) || vis_complex(v) || vis_quat(v) || vis_oct(v) ||
+          vis_mv(v) || vis_surreal(v) || vis_quantum(v)))
+        return;
     std::string latex;
     bool ok = false;
     ExnHandler h;

@@ -355,6 +355,173 @@ static void sl_varname(val_t v, val_t port) {
     else    sl_write_escaped(port, s->data, s->len, false);
 }
 
+static void sl_num(val_t v, val_t port);
+
+/* ---- Other numeric-tower values (issue #334) ------------------------------
+ * Complex, quaternion, octonion, multivector, surreal and quantum values are
+ * written as a sum of terms, each a real coefficient and a unit:
+ *   1 + 2i      1 + 2\mathbf{i} + 3\mathbf{j} + 4\mathbf{k}      e_{12}
+ *   3\omega - \varepsilon      \frac{1}{2}|0\rangle + \frac{1}{2}|1\rangle */
+
+/* A double as a number value: integral doubles become exact integers, so a
+ * quaternion 1+2i+3j+4k is not written 1.0 + 2.0\mathbf{i} ... */
+static val_t sl_dval(double d) {
+    if (d == d && fabs(d) < 9007199254740992.0 && d == trunc(d)) return vfix((intptr_t)d);
+    return num_make_float(d);
+}
+
+/* A finite flonum: the shortest text that reads back, with an exponent
+ * written as m \times 10^{e}. */
+static void sl_flonum(double d, val_t port) {
+    char buf[64];
+    num_flonum_to_shortest_cstr(d, buf, sizeof(buf));
+    char *e = strchr(buf, 'e');
+    if (!e) { pws(port, buf); return; }
+    *e = '\0';
+    const char *ex = e + 1;
+    bool eneg = (*ex == '-');
+    if (*ex == '+' || *ex == '-') ex++;
+    while (*ex == '0' && ex[1]) ex++;
+    pws(port, buf);
+    pws(port, "\\times 10^{");
+    if (eneg) port_write_char(port, '-');
+    pws(port, ex);
+    port_write_char(port, '}');
+}
+
+static bool sl_is_nan(val_t c) { return vis_flonum(c) && vfloat(c) != vfloat(c); }
+
+/* The sign and magnitude of one term of a sum. `first` is true for the leading
+ * term (a bare "-" or nothing); later terms get " + " or " - ". With
+ * `has_unit`, a coefficient of 1 is left out: the unit alone is written. */
+static void sl_term_coef(val_t port, val_t c, bool first, bool has_unit) {
+    bool neg = !sl_is_nan(c) && num_is_negative(c);
+    if (neg) c = num_neg(c);
+    if (first) { if (neg) port_write_char(port, '-'); }
+    else pws(port, neg ? " - " : " + ");
+    if (has_unit && !sl_is_nan(c) && num_cmp(c, vfix(1)) == 0) return;
+    sl_num(c, port);
+}
+
+static bool sl_is_zero(val_t c) { return !sl_is_nan(c) && num_cmp(c, vfix(0)) == 0; }
+
+typedef void (*sl_unit_fn)(val_t port, const void *ctx, int idx);
+
+/* Write sum of coefs[i] * unit(i). Unit index 0 (when `scalar0`) is the plain
+ * number with no unit. Zero terms are skipped; an all-zero sum writes 0. */
+static void sl_sum(val_t port, int n, val_t (*coef)(const void *, int), const void *ctx,
+                   sl_unit_fn unit, bool scalar0) {
+    bool first = true;
+    for (int i = 0; i < n; i++) {
+        val_t c = coef(ctx, i);
+        if (sl_is_zero(c)) continue;
+        bool has_unit = !(scalar0 && i == 0);
+        sl_term_coef(port, c, first, has_unit);
+        if (has_unit) unit(port, ctx, i);
+        first = false;
+    }
+    if (first) port_write_char(port, '0');
+}
+
+static val_t sl_cpx_coef(const void *ctx, int i) {
+    const Complex *c = (const Complex *)ctx;
+    return i == 0 ? c->real : c->imag;
+}
+static void sl_cpx_unit(val_t port, const void *ctx, int i) { (void)ctx; (void)i; port_write_char(port, 'i'); }
+
+static val_t sl_quat_coef(const void *ctx, int i) {
+    const Quaternion *q = (const Quaternion *)ctx;
+    return sl_dval(i == 0 ? q->a : i == 1 ? q->b : i == 2 ? q->c : q->d);
+}
+static void sl_quat_unit(val_t port, const void *ctx, int i) {
+    (void)ctx;
+    static const char *const u[] = { "", "\\mathbf{i}", "\\mathbf{j}", "\\mathbf{k}" };
+    pws(port, u[i]);
+}
+
+static val_t sl_oct_coef(const void *ctx, int i) { return sl_dval(((const Octonion *)ctx)->e[i]); }
+static void sl_oct_unit(val_t port, const void *ctx, int i) {
+    (void)ctx;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "e_{%d}", i);
+    pws(port, buf);
+}
+
+static val_t sl_mv_coef(const void *ctx, int i) { return sl_dval(((const Multivector *)ctx)->c[i]); }
+/* The blade with bitmap i: e_{12} for e1 e2 (1-based subscripts). */
+static void sl_mv_unit(val_t port, const void *ctx, int i) {
+    const Multivector *mv = (const Multivector *)ctx;
+    pws(port, "e_{");
+    for (int k = 0; k < mv->n; k++) {
+        if (i & (1 << k)) port_write_char(port, (char)('1' + k));
+    }
+    port_write_char(port, '}');
+}
+
+static val_t sl_sur_coef(const void *ctx, int i) { return ((const Surreal *)ctx)->data[2*i+1]; }
+static void sl_sur_unit(val_t port, const void *ctx, int i) {
+    val_t e = ((const Surreal *)ctx)->data[2*i];
+    if (num_cmp(e, vfix(1)) == 0)       pws(port, "\\omega");
+    else if (num_cmp(e, vfix(-1)) == 0) pws(port, "\\varepsilon");
+    else { pws(port, "\\omega^{"); sl_num(e, port); port_write_char(port, '}'); }
+}
+
+/* Surreal exponent 0 is a plain real number: no unit. */
+static void sl_surreal(val_t v, val_t port) {
+    Surreal *s = as_surreal(v);
+    bool first = true;
+    for (int i = 0; i < s->nterms; i++) {
+        val_t c = s->data[2*i+1];
+        if (sl_is_zero(c)) continue;
+        bool has_unit = num_cmp(s->data[2*i], vfix(0)) != 0;
+        sl_term_coef(port, c, first, has_unit);
+        if (has_unit) sl_sur_unit(port, s, i);
+        first = false;
+    }
+    if (first) port_write_char(port, '0');
+}
+
+/* \alpha|x\rangle + ... ; a complex amplitude is parenthesized. */
+static void sl_quantum(val_t v, val_t port) {
+    Quantum *q = as_quantum(v);
+    if (q->n == 0) { port_write_char(port, '0'); return; }
+    for (int i = 0; i < q->n; i++) {
+        val_t amp = q->data[2*i];
+        if (vis_complex(amp)) {
+            if (i) pws(port, " + ");
+            pws(port, "\\left(");
+            sl_num(amp, port);
+            pws(port, "\\right)");
+        } else {
+            sl_term_coef(port, amp, i == 0, true);
+        }
+        pws(port, "|");
+        sl_num(q->data[2*i+1], port);
+        pws(port, "\\rangle");
+    }
+}
+
+/* True for a value written as a sum of several terms, which needs
+ * parentheses inside a product or a power. */
+static bool sl_is_sum_like(val_t v) {
+    return vis_complex(v) || vis_quat(v) || vis_oct(v) || vis_mv(v) ||
+           vis_surreal(v) || vis_quantum(v);
+}
+
+/* Returns true if it handled `v`. */
+static bool sl_num_tower(val_t v, val_t port) {
+    if (vis_complex(v)) { sl_sum(port, 2, sl_cpx_coef, as_cpx(v), sl_cpx_unit, true); return true; }
+    if (vis_quat(v))    { sl_sum(port, 4, sl_quat_coef, as_quat(v), sl_quat_unit, true); return true; }
+    if (vis_oct(v))     { sl_sum(port, 8, sl_oct_coef, as_oct(v), sl_oct_unit, true); return true; }
+    if (vis_mv(v)) {
+        sl_sum(port, (int)as_mv(v)->dim, sl_mv_coef, as_mv(v), sl_mv_unit, true);
+        return true;
+    }
+    if (vis_surreal(v)) { sl_surreal(v, port); return true; }
+    if (vis_quantum(v)) { sl_quantum(v, port); return true; }
+    return false;
+}
+
 /* Write a number in LaTeX: exact rationals become \frac{p}{q} */
 static void sl_num(val_t v, val_t port) {
     if (vis_rational(v)) {
@@ -394,6 +561,8 @@ static void sl_num(val_t v, val_t port) {
         else             pws(port, "\\infty");
         return;
     }
+    if (sl_num_tower(v, port)) return;
+    if (vis_flonum(v)) { sl_flonum(vfloat(v), port); return; }
     if (vis_number(v)) { scm_display(v, port); return; }
     /* A string, or anything else that is not a number: its display text,
      * set upright and escaped so it cannot break out of the math. */
@@ -415,7 +584,13 @@ static void sl_num(val_t v, val_t port) {
 static void sl_latex(val_t expr, int ctx, val_t port) {
     /* Same unbounded-recursion class as sp_infix above (issue #134). */
     check_c_stack_depth("symbolic");
-    if (!vis_symbolic(expr) && !vis_symfn(expr)) { sl_num(expr, port); return; }
+    if (!vis_symbolic(expr) && !vis_symfn(expr)) {
+        bool paren = sl_is_sum_like(expr) && ctx >= SP_ADD;
+        if (paren) pws(port, "\\left(");
+        sl_num(expr, port);
+        if (paren) pws(port, "\\right)");
+        return;
+    }
     if (vis_symvar(expr)) { sl_varname(expr, port); return; }
     if (vis_symfn(expr)) {
         Symbol *s = as_sym(as_symfn(expr)->name);
