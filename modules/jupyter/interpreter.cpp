@@ -24,13 +24,16 @@ extern "C" {
 #include "condition.h"
 #include "runtime_init.h"
 #include "nesting_depth.h"
+#include "editor_assist.h"
 #include "interrupt.h"
 #include "version.h"
 }
 
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
+#include <set>
 #include <mutex>
 #include <string>
 #include <sstream>
@@ -452,28 +455,138 @@ void curry_interpreter::execute_request_impl(xeus::xinterpreter::send_reply_call
     cb(reply);
 }
 
-/* Completion/inspect (hover) are deferred -- the LSP module already
- * implements the same builtin-table + local-binding-collection logic
- * this would need, but it's compiled into a dlopen'd .so that expects
- * to run inside a live curry process, not linked into this standalone
- * kernel binary. Reusing it means lifting that logic out of
- * modules/lsp/lsp.c into something both can link; out of scope here. */
-nl::json curry_interpreter::complete_request_impl(const std::string & /*code*/, int cursor_pos) {
+namespace {
+
+/* Jupyter positions are Unicode code points; the editor_assist API works on
+ * byte offsets into the UTF-8 text. */
+size_t codepoint_to_byte(const std::string &s, int cp) {
+    size_t i = 0;
+    for (int n = 0; n < cp && i < s.size(); ++n) {
+        ++i;
+        while (i < s.size() && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) ++i;
+    }
+    return i;
+}
+
+int byte_to_codepoint(const std::string &s, size_t byte) {
+    int n = 0;
+    for (size_t i = 0; i < byte && i < s.size(); ++i)
+        if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) ++n;
+    return n;
+}
+
+struct CompleteCtx {
+    const std::string *prefix;
+    std::set<std::string> *out;
+};
+
+void collect_matching(const char *label, int /*kind*/, const char * /*detail*/, void *ud) {
+    auto *c = static_cast<CompleteCtx *>(ud);
+    if (std::strncmp(label, c->prefix->c_str(), c->prefix->size()) == 0)
+        c->out->insert(label);
+}
+
+struct DescribeCtx {
+    const std::string *name;
+    bool found = false;
+};
+
+void find_global(const char *label, int /*kind*/, const char * /*detail*/, void *ud) {
+    auto *c = static_cast<DescribeCtx *>(ud);
+    if (*c->name == label) c->found = true;
+}
+
+/* Hover text from editor_assist is Markdown; the plain-text rendition just
+ * drops the emphasis and code marks. */
+std::string markdown_to_plain(const std::string &md) {
+    std::string out;
+    for (size_t i = 0; i < md.size(); ++i) {
+        if (md[i] == '*' && i + 1 < md.size() && md[i + 1] == '*') { ++i; continue; }
+        if (md[i] == '`') continue;
+        out += md[i];
+    }
+    return out;
+}
+
+/* A cell being typed is usually unfinished, and the reader fails at the
+ * first unclosed form before seeing any binding inside it. Closing the open
+ * parens lets the local-binding walk find `tmpval` in
+ * `(let ((tmpval 1)) (+ tmpval tmp`. Text ending inside a string or block
+ * comment is left alone: closers appended there would be swallowed. */
+std::string close_open_forms(const std::string &code) {
+    CurryNest nest;
+    curry_nest_init(&nest);
+    curry_nest_feed(&nest, code.data(), code.size());
+    if (nest.depth <= 0 || nest.in_str || nest.in_bar || nest.block > 0) return code;
+    /* A trailing line comment would swallow the closers too. */
+    std::string closed = code + "\n";
+    closed.append(static_cast<size_t>(std::min(nest.depth, ASSIST_MAX_READER_DEPTH)), ')');
+    return closed;
+}
+
+constexpr size_t kMaxCompletions = 200;
+
+}  // namespace
+
+/* Completion and inspect share their symbol tables and local-binding walk
+ * with the LSP module through src/editor_assist.c. Candidates are the
+ * builtins and special forms, names bound in the cell's own text, and names
+ * already defined in the live global environment (earlier cells). */
+nl::json curry_interpreter::complete_request_impl(const std::string &code, int cursor_pos) {
+    gc_register_thread();
     nl::json reply;
     reply["status"] = "ok";
     reply["matches"] = nl::json::array();
-    reply["cursor_start"] = cursor_pos;
-    reply["cursor_end"] = cursor_pos;
     reply["metadata"] = nl::json::object();
+
+    size_t byte = codepoint_to_byte(code, cursor_pos);
+    size_t start = 0, end = 0;
+    bool have_token = assist_token_range(code.c_str(), byte, &start, &end);
+    reply["cursor_start"] = have_token ? byte_to_codepoint(code, start) : cursor_pos;
+    reply["cursor_end"]   = have_token ? byte_to_codepoint(code, end)   : cursor_pos;
+    /* Nothing typed yet: offering all ~700 names helps nobody. */
+    if (!have_token || byte <= start) return reply;
+
+    std::string prefix = code.substr(start, byte - start);
+    std::set<std::string> found;
+    CompleteCtx ctx{&prefix, &found};
+    assist_candidates(close_open_forms(code).c_str(), collect_matching, &ctx);
+    assist_global_names(collect_matching, &ctx);
+
+    size_t n = 0;
+    for (const auto &m : found) {
+        if (n++ >= kMaxCompletions) break;
+        reply["matches"].push_back(m);
+    }
     return reply;
 }
 
-nl::json curry_interpreter::inspect_request_impl(const std::string & /*code*/, int /*cursor_pos*/, int /*detail_level*/) {
+nl::json curry_interpreter::inspect_request_impl(const std::string &code, int cursor_pos, int /*detail_level*/) {
+    gc_register_thread();
     nl::json reply;
     reply["status"] = "ok";
     reply["found"] = false;
     reply["data"] = nl::json::object();
     reply["metadata"] = nl::json::object();
+
+    size_t start = 0, end = 0;
+    if (!assist_token_range(code.c_str(), codepoint_to_byte(code, cursor_pos), &start, &end))
+        return reply;
+    std::string tok = code.substr(start, end - start);
+
+    char note[256];
+    std::string md;
+    if (assist_describe(tok.c_str(), note, sizeof(note))) {
+        md = note;
+    } else {
+        DescribeCtx dctx{&tok};
+        assist_global_names(find_global, &dctx);
+        if (!dctx.found) return reply;
+        md = "**" + tok + "** \u2014 defined in this session";
+    }
+    reply["found"] = true;
+    reply["data"]["text/plain"] = markdown_to_plain(md);
+    reply["data"]["text/markdown"] = md;
     return reply;
 }
 
