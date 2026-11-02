@@ -473,7 +473,8 @@ static void sl_surreal(val_t v, val_t port) {
     for (int i = 0; i < s->nterms; i++) {
         val_t c = s->data[2*i+1];
         if (sl_is_zero(c)) continue;
-        bool has_unit = num_cmp(s->data[2*i], vfix(0)) != 0;
+        val_t ex = s->data[2*i];
+        bool has_unit = sl_is_nan(ex) || num_cmp(ex, vfix(0)) != 0;
         sl_term_coef(port, c, first, has_unit);
         if (has_unit) sl_sur_unit(port, s, i);
         first = false;
@@ -484,21 +485,24 @@ static void sl_surreal(val_t v, val_t port) {
 /* \alpha|x\rangle + ... ; a complex amplitude is parenthesized. */
 static void sl_quantum(val_t v, val_t port) {
     Quantum *q = as_quantum(v);
-    if (q->n == 0) { port_write_char(port, '0'); return; }
+    bool first = true;
     for (int i = 0; i < q->n; i++) {
         val_t amp = q->data[2*i];
+        if (!vis_complex(amp) && sl_is_zero(amp)) continue;
         if (vis_complex(amp)) {
-            if (i) pws(port, " + ");
+            if (!first) pws(port, " + ");
             pws(port, "\\left(");
             sl_num(amp, port);
             pws(port, "\\right)");
         } else {
-            sl_term_coef(port, amp, i == 0, true);
+            sl_term_coef(port, amp, first, true);
         }
         pws(port, "|");
         sl_num(q->data[2*i+1], port);
         pws(port, "\\rangle");
+        first = false;
     }
+    if (first) port_write_char(port, '0');
 }
 
 /* True for a value written as a sum of several terms, which needs
@@ -524,6 +528,9 @@ static bool sl_num_tower(val_t v, val_t port) {
 
 /* Write a number in LaTeX: exact rationals become \frac{p}{q} */
 static void sl_num(val_t v, val_t port) {
+    /* sl_quantum recurses through here on its state values, never back
+     * through sl_latex, so guard the depth here too. */
+    check_c_stack_depth("symbolic");
     if (vis_rational(v)) {
         Rational *r  = as_rat(v);
         mpz_ptr   nm = mpq_numref(r->q);
