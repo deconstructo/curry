@@ -14,7 +14,8 @@ for ((t = 0; t < limit; t++)); do
 done
 echo "run_with_hang_dump: pid $pid still running after ${limit}s: $*" >&2
 if command -v gdb >/dev/null 2>&1; then
-    gdb -p "$pid" -batch -ex 'set pagination off' -ex 'thread apply all bt' >&2 2>&1
+    gdb_cmd=(gdb -p "$pid" -batch -ex 'set pagination off' -ex 'thread apply all bt')
+    "${gdb_cmd[@]}" >&2 2>&1 || sudo -n "${gdb_cmd[@]}" >&2 2>&1
 elif command -v sample >/dev/null 2>&1; then
     sample "$pid" 3 >&2 2>&1
 else
