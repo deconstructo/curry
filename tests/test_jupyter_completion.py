@@ -74,6 +74,13 @@ def main():
             check("complete with the cursor mid-token uses the text before it",
                   "string-append" in complete("(string-append x)", 8)["matches"]
                   and "string->list" in complete("(string-append x)", 8)["matches"], True)
+            check("complete a local bound inside an unclosed [ ] let",
+                  "bx" in complete("(let ([bx 1]) (+ bx b")["matches"], True)
+            check("complete with the cursor still inside an unclosed [",
+                  "bx" in complete("(let ([bx 1 (+ bx b")["matches"], True)
+            neg = complete("(string-ap", -5)
+            check("a negative cursor is clamped, not echoed back",
+                  (neg["cursor_start"], neg["cursor_end"]) >= (0, 0), True)
             check("no completions for an empty prefix", complete("(", 1)["matches"], [])
             u = complete("(define λx 1) (display λ")
             check("complete counts positions in code points",

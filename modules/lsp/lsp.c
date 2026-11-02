@@ -4,7 +4,7 @@
  * First milestone: stdio transport, Content-Length framing (LSP's own
  * framing, distinct from MCP's newline-delimited stdio), diagnostics
  * driven by the real reader (src/reader.c), and hover text driven by the
- * generated symbol table (modules/lsp/symbols_gen.h, produced by
+ * generated symbol table (src/editor_symbols_gen.h, produced by
  * tools/gen-editor-syntax.py from the same C sources the editor grammars
  * are generated from).
  *

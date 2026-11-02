@@ -516,11 +516,23 @@ std::string markdown_to_plain(const std::string &md) {
 std::string close_open_forms(const std::string &code) {
     CurryNest nest;
     curry_nest_init(&nest);
-    curry_nest_feed(&nest, code.data(), code.size());
+    /* Feed one character at a time: the tracker only counts depth, but a
+     * character that moves the depth is a real bracket (not one inside a
+     * string, comment or character literal), so the closers can match the
+     * brackets that were opened -- the reader rejects `(` closed by `]`. */
+    std::vector<char> open;
+    for (char c : code) {
+        int before = nest.depth;
+        curry_nest_feed(&nest, &c, 1);
+        if (nest.depth > before) open.push_back(c);
+        else if (nest.depth < before && !open.empty()) open.pop_back();
+    }
     if (nest.depth <= 0 || nest.in_str || nest.in_bar || nest.block > 0) return code;
     /* A trailing line comment would swallow the closers too. */
     std::string closed = code + "\n";
-    closed.append(static_cast<size_t>(std::min(nest.depth, ASSIST_MAX_READER_DEPTH)), ')');
+    size_t limit = static_cast<size_t>(ASSIST_MAX_READER_DEPTH);
+    for (size_t i = open.size(); i-- > 0 && closed.size() < code.size() + 1 + limit;)
+        closed += (open[i] == '[') ? ']' : ')';
     return closed;
 }
 
@@ -539,6 +551,7 @@ nl::json curry_interpreter::complete_request_impl(const std::string &code, int c
     reply["matches"] = nl::json::array();
     reply["metadata"] = nl::json::object();
 
+    if (cursor_pos < 0) cursor_pos = 0;   /* never echo an invalid position back */
     size_t byte = codepoint_to_byte(code, cursor_pos);
     size_t start = 0, end = 0;
     bool have_token = assist_token_range(code.c_str(), byte, &start, &end);
@@ -570,6 +583,7 @@ nl::json curry_interpreter::inspect_request_impl(const std::string &code, int cu
     reply["metadata"] = nl::json::object();
 
     size_t start = 0, end = 0;
+    if (cursor_pos < 0) cursor_pos = 0;
     if (!assist_token_range(code.c_str(), codepoint_to_byte(code, cursor_pos), &start, &end))
         return reply;
     std::string tok = code.substr(start, end - start);
