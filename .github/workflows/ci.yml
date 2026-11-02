@@ -35,7 +35,9 @@ jobs:
             libgc-dev libgmp-dev cmake build-essential pkg-config \
             libssl-dev libsqlite3-dev libcurl4-openssl-dev \
             libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
-            redis-server mosquitto
+            redis-server mosquitto gdb
+          # Let run_with_hang_dump.sh attach gdb to a hung test (issue #312).
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -86,7 +88,9 @@ jobs:
             libgc-dev libgmp-dev cmake build-essential pkg-config \
             libssl-dev libsqlite3-dev libcurl4-openssl-dev \
             libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
-            redis-server mosquitto llvm-18-dev
+            redis-server mosquitto llvm-18-dev gdb
+          # Let run_with_hang_dump.sh attach gdb to a hung test (issue #312).
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
