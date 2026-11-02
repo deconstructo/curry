@@ -1,6 +1,31 @@
 # Changelog
 
-### Unreleased
+### 1.28.0 - 2026-11-02
+
+**Changed — `write` and `display` print flonums in readable R7RS form (#308)**
+
+- A flonum with a whole value now prints with a decimal point, so it reads
+  back as a flonum: `(display 1000.0)` writes `1000.0` (it wrote `1000`), and
+  the non-finite values write as `+inf.0`, `-inf.0` and `+nan.0`. Complex and
+  multivector components follow the same rule, including the sign of an
+  infinite imaginary part. Code that compared printed output with `1000` for a
+  float needs `1000.0`.
+- `string->number` accepts `+inf.0`, `-inf.0`, `+nan.0` and `-nan.0`.
+- TOML output of floats with an exponent is correct (the extra `.0` is gone).
+
+**Fixed — `.3` is a number inside lists (#307)**
+
+- `'(1 .5)` and other lists read an element that starts with `.` followed by a
+  digit as the symbol `.5`. It is now the number `0.5`. A token such as `.α`
+  keeps its full UTF-8 spelling, and a NUL byte no longer cuts the token short.
+- A `#;` datum comment is no longer treated as a line comment by the REPL and
+  Jupyter nesting tracker (#314).
+
+**Fixed — bignums and ratios convert to the nearest double (#310)**
+
+- Converting an exact integer or ratio beyond the range of a fixnum to a
+  double truncated toward zero. It now rounds to nearest, ties to even, and
+  handles subnormal results, as R7RS `inexact` requires.
 
 **New — LaTeX output for complex, quaternion, octonion, multivector, surreal and quantum values (#334)**
 
@@ -154,6 +179,9 @@
   rational within `y` of `x`, with the R7RS results for infinities and NaN.
 - `scheme.srfi` was missing SRFI 28, 29, 189, 208, 224 and 272. A test now
   compares it with `lib/curry/modules/srfi/`.
+- The `actors` test runs through `tests/run_with_hang_dump.sh`, which prints the
+  stack of every thread if the test runs longer than 90 s. It records an
+  intermittent hang seen in CI on Ubuntu (#312, still open).
 
 ### 1.27.0 - 2026-10-16
 
