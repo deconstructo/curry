@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Fixed — JSON output for non-finite numbers (#320)**
+
+- `json-stringify` / `json-write`, the MCP server and the GraphQL client wrote
+  `inf`, `-inf` and `nan` for `+inf.0`, `-inf.0` and `+nan.0`, which is not
+  valid JSON. They now write `null`, as `JSON.stringify` does. A bignum too
+  large for a double also becomes `null` in `(curry json)` instead of `inf`.
+  Redis `ZADD` scores are unchanged: Redis accepts `inf` there.
+
 **Fixed — `eqv?` tells `0.0` and `-0.0` apart (#319)**
 
 - `(eqv? 0.0 -0.0)` and `(equal? 0.0 -0.0)` were `#t`; R7RS 6.1 requires `#f`.

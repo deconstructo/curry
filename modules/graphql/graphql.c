@@ -30,6 +30,7 @@
 
 #include <curry.h>
 #include <curry_checked_args.h>
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +149,11 @@ static void val_to_json(curry_val v, Buf *out) {
         char tmp[32]; snprintf(tmp, sizeof(tmp), "%ld", (long)curry_fixnum(v));
         buf_write(tmp, 1, strlen(tmp), out);
     } else if (curry_is_float(v)) {
-        char tmp[64]; snprintf(tmp, sizeof(tmp), "%.17g", curry_float(v));
+        double d = curry_float(v);
+        char tmp[64];
+        /* JSON has no spelling for inf or nan; write null instead. */
+        if (isfinite(d)) snprintf(tmp, sizeof(tmp), "%.17g", d);
+        else             snprintf(tmp, sizeof(tmp), "null");
         buf_write(tmp, 1, strlen(tmp), out);
     } else if (curry_is_string(v)) {
         json_escape(curry_string(v), out);
