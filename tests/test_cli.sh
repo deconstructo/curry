@@ -801,6 +801,12 @@ check "a procedure capturing 300 variables is a compile error" \
       "$limit_code:$(echo "$limit_out" | grep -c 'captures too many variables')" "1:1"
 limit_script upvals200 "(define (f) (let* ($(binds q 200)) ((lambda () (+ (+$(names q 100)) (+ $(names q 200 | cut -d' ' -f102-201))))))) (display (f))"
 check "a procedure capturing 200 variables still works" "$limit_code:$limit_out" "0:200"
+# Compilation recurses once per nested let* binding, and a Compiler is ~20 KB,
+# so holding one in each recursive C frame overflowed the default 8 MB stack
+# at about 200 bindings in an unoptimised build (#304). They live on the heap
+# now; a 2 MB stack and 600 bindings is far beyond what the old frames allowed.
+deep_out=$( (ulimit -s 2048; "$CURRY" -e "(define (f) (let* ($(binds q 600)) ((lambda () (+ (+$(names q 100))))))) (display (f))" 2>&1) || true)
+check "a let* with 600 bindings compiles on a 2 MB stack (#304)" "$deep_out" "100"
 limit_script values300 "(define (g) (call-with-values (lambda () (values$(ones 300))) (lambda a (length a)))) (display (g))"
 check "values with 300 values is a compile error (gave 44 before)" \
       "$limit_code:$(echo "$limit_out" | grep -c 'too many arguments in one call')" "1:1"

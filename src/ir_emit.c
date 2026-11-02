@@ -716,11 +716,11 @@ void ir_emit(Compiler *c, IRNode *n) {
          * emitted, one form at a time) here rather than during ir_lower:
          * this is the point where the real child Compiler this body
          * belongs to finally exists. */
-        Compiler child;
-        init_compiler(&child, c, n->as.lambda.name);
+        Compiler *child = CURRY_NEW(Compiler);  /* heap: a Compiler is ~20 KB; see #304 */
+        init_compiler(child, c, n->as.lambda.name);
 
-        int arity = compile_params(&child, n->as.lambda.params);
-        child.chunk->arity = arity;
+        int arity = compile_params(child, n->as.lambda.params);
+        child->chunk->arity = arity;
 
         /* Tier 2.4: populate known[] for any let/let*-desugared param
          * ir_lower_let/ir_lower_let_star already proved closed (see
@@ -735,20 +735,20 @@ void ir_emit(Compiler *c, IRNode *n) {
             for (val_t p = n->as.lambda.params; vis_pair(p); p = vcdr(p), pi++) {
                 IRKnownParam *kp = &n->as.lambda.known_params[pi];
                 if (kp->closed) {
-                    int slot = resolve_local(&child, vcar(p));
+                    int slot = resolve_local(child, vcar(p));
                     if (slot >= 0) {
-                        child.known[slot].valid  = true;
-                        child.known[slot].params = kp->params;
-                        child.known[slot].body   = kp->body;
-                        child.known[slot].argc   = kp->argc;
+                        child->known[slot].valid  = true;
+                        child->known[slot].params = kp->params;
+                        child->known[slot].body   = kp->body;
+                        child->known[slot].argc   = kp->argc;
                     }
                 }
             }
         }
 
-        begin_scope(&child);  /* body scope: depth 1+, matches compile_lambda */
+        begin_scope(child);  /* body scope: depth 1+, matches compile_lambda */
 
-        lambda_prescan(&child, n->as.lambda.body, n->line);
+        lambda_prescan(child, n->as.lambda.body, n->line);
 
         /* Interleaved lower-then-emit walk, one body form at a time,
          * against the now-real child compiler -- mirrors compile_seq(
@@ -757,7 +757,7 @@ void ir_emit(Compiler *c, IRNode *n) {
          * for compile()'s direct call per form. */
         val_t list = n->as.lambda.body;
         if (vis_nil(list)) {
-            emit(&child, OP_VOID, n->line);
+            emit(child, OP_VOID, n->line);
         } else {
             int seq_line = n->line;
             while (vis_pair(list)) {
@@ -766,37 +766,37 @@ void ir_emit(Compiler *c, IRNode *n) {
                 bool  last = vis_nil(rest);
                 if (as_pair(list)->hdr.flags)
                     seq_line = (int)as_pair(list)->hdr.flags;
-                IRNode *form_ir = ir_lower(&child, expr, last, seq_line);
-                ir_emit(&child, form_ir);
-                if (!last) emit(&child, OP_POP, seq_line);
+                IRNode *form_ir = ir_lower(child, expr, last, seq_line);
+                ir_emit(child, form_ir);
+                if (!last) emit(child, OP_POP, seq_line);
                 list = rest;
             }
         }
 
-        Chunk *ch = end_compiler(&child);
+        Chunk *ch = end_compiler(child);
 
         /* Preserve source AST and upvalue names for tiered JIT hot-swap --
          * matches compile_lambda exactly. */
         ch->src_lambda = scm_cons(S_LAMBDA,
                               scm_cons(n->as.lambda.params, n->as.lambda.body));
-        if (child.upval_count > 0) {
+        if (child->upval_count > 0) {
             ch->upval_names = (val_t *)gc_alloc_raw_pinned(
-                                  (size_t)child.upval_count * sizeof(val_t));
-            for (int i = 0; i < child.upval_count; i++)
-                ch->upval_names[i] = child.upvals[i].name;
+                                  (size_t)child->upval_count * sizeof(val_t));
+            for (int i = 0; i < child->upval_count; i++)
+                ch->upval_names[i] = child->upvals[i].name;
         }
 
         /* In parent: emit OP_CLOSURE followed by upvalue descriptors --
          * matches compile_lambda exactly. */
         int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)ch);
         emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
-        for (int i = 0; i < child.upval_count; i++) {
-            chunk_emit(c->chunk, child.upvals[i].is_local ? 1 : 0, n->line);
-            chunk_emit(c->chunk, (uint8_t)child.upvals[i].index,   n->line);
+        for (int i = 0; i < child->upval_count; i++) {
+            chunk_emit(c->chunk, child->upvals[i].is_local ? 1 : 0, n->line);
+            chunk_emit(c->chunk, (uint8_t)child->upvals[i].index,   n->line);
         }
         /* Tier 2.3: see g_last_lambda_upval_count's own comment -- last
          * statement in this case, after `child` is otherwise done with. */
-        g_last_lambda_upval_count = child.upval_count;
+        g_last_lambda_upval_count = child->upval_count;
         return;
     }
     case IR_NAMED_LET: {
@@ -866,29 +866,29 @@ void ir_emit(Compiler *c, IRNode *n) {
              * so a reference to loop_name0 within an init expression
              * can never resolve to this named-let's own about-to-be-
              * created self-reference. */
-            Compiler outer;
-            init_compiler(&outer, c, as_sym(loop_name0)->data);
-            outer.chunk->arity = compile_params(&outer, fwd0);
-            add_local(&outer, loop_name0);
-            mark_initialised(&outer);
-            emit(&outer, OP_VOID, n->line);
+            Compiler *outer = CURRY_NEW(Compiler);  /* heap: a Compiler is ~20 KB; see #304 */
+            init_compiler(outer, c, as_sym(loop_name0)->data);
+            outer->chunk->arity = compile_params(outer, fwd0);
+            add_local(outer, loop_name0);
+            mark_initialised(outer);
+            emit(outer, OP_VOID, n->line);
             g_compile_self_tail_name    = loop_name0;
             g_compile_self_tail_mutated = body_mentions_set_target(c, body0, loop_name0);
-            IRNode *loop_lambda0 = ir_lower_lambda(&outer, fwd0, body0,
+            IRNode *loop_lambda0 = ir_lower_lambda(outer, fwd0, body0,
                                                     as_sym(loop_name0)->data, n->line);
-            ir_emit(&outer, loop_lambda0);
-            emit_ab(&outer, OP_STORE_LOCAL, (uint8_t)argc0, n->line);
-            emit_ab(&outer, OP_LOAD_LOCAL,  (uint8_t)argc0, n->line);
+            ir_emit(outer, loop_lambda0);
+            emit_ab(outer, OP_STORE_LOCAL, (uint8_t)argc0, n->line);
+            emit_ab(outer, OP_LOAD_LOCAL,  (uint8_t)argc0, n->line);
             for (int i = 0; i < argc0; i++)
-                emit_ab(&outer, OP_LOAD_LOCAL, (uint8_t)i, n->line);
-            emit_ab(&outer, OP_TAIL_CALL, (uint8_t)argc0, n->line);
-            Chunk *och = end_compiler(&outer);
+                emit_ab(outer, OP_LOAD_LOCAL, (uint8_t)i, n->line);
+            emit_ab(outer, OP_TAIL_CALL, (uint8_t)argc0, n->line);
+            Chunk *och = end_compiler(outer);
 
             int ci = chunk_add_const(c->chunk, (val_t)(uintptr_t)och);
             emit_ab(c, OP_CLOSURE, (uint8_t)ci, n->line);
-            for (int i = 0; i < outer.upval_count; i++) {
-                chunk_emit(c->chunk, outer.upvals[i].is_local ? 1 : 0, n->line);
-                chunk_emit(c->chunk, (uint8_t)outer.upvals[i].index,   n->line);
+            for (int i = 0; i < outer->upval_count; i++) {
+                chunk_emit(c->chunk, outer->upvals[i].is_local ? 1 : 0, n->line);
+                chunk_emit(c->chunk, (uint8_t)outer->upvals[i].index,   n->line);
             }
             /* Compile each init value in c's OWN scope, pushed after
              * the callee -- the true enclosing environment R7RS
