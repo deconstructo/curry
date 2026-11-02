@@ -136,10 +136,10 @@ void init_compiler(Compiler *c, Compiler *enc, const char *name) {
     c->enclosing   = enc;
     c->chunk       = chunk_new();
     c->name        = name;
-    c->local_count = 0;
+    c->locals = NULL;  c->known = NULL;  c->local_cap = 0;  c->local_count = 0;
     c->scope_depth = 0;
-    c->upval_count = 0;
-    c->syntax_local_count = 0;
+    c->upvals = NULL;  c->upval_cap = 0;  c->upval_count = 0;
+    c->syntax_locals = NULL;  c->syntax_local_cap = 0;  c->syntax_local_count = 0;
     c->chunk->name = name;
     c->chunk->source_name = g_compile_source_name;
     c->chunk->target_env  = g_compile_target_env;
@@ -268,6 +268,43 @@ void end_scope(Compiler *c, int line) {
         c->syntax_local_count--;
 }
 
+/* Grow a compiler table so index `count` is valid, capped at `max`. New
+ * memory is zeroed (GC allocation). Callers have already checked count < max. */
+static int grow_cap(int cap, int count, int max) {
+    int n = cap ? cap * 2 : 8;
+    if (n <= count) n = count + 1;
+    return n > max ? max : n;
+}
+
+/* locals[] and known[] are parallel, so they grow together. */
+static void ensure_local_capacity(Compiler *c) {
+    if (c->local_count < c->local_cap) return;
+    int n = grow_cap(c->local_cap, c->local_count, MAX_LOCALS);
+    Local *l = (Local *)gc_alloc_obj((size_t)n * sizeof(Local));
+    KnownLambda *k = (KnownLambda *)gc_alloc_obj((size_t)n * sizeof(KnownLambda));
+    if (c->local_cap) {
+        memcpy(l, c->locals, (size_t)c->local_cap * sizeof(Local));
+        memcpy(k, c->known, (size_t)c->local_cap * sizeof(KnownLambda));
+    }
+    c->locals = l;  c->known = k;  c->local_cap = n;
+}
+
+static void ensure_upval_capacity(Compiler *c) {
+    if (c->upval_count < c->upval_cap) return;
+    int n = grow_cap(c->upval_cap, c->upval_count, MAX_UPVALS);
+    UpvalDesc *u = (UpvalDesc *)gc_alloc_obj((size_t)n * sizeof(UpvalDesc));
+    if (c->upval_cap) memcpy(u, c->upvals, (size_t)c->upval_cap * sizeof(UpvalDesc));
+    c->upvals = u;  c->upval_cap = n;
+}
+
+static void ensure_syntax_local_capacity(Compiler *c) {
+    if (c->syntax_local_count < c->syntax_local_cap) return;
+    int n = grow_cap(c->syntax_local_cap, c->syntax_local_count, MAX_SYNTAX_LOCALS);
+    SyntaxLocal *s = (SyntaxLocal *)gc_alloc_obj((size_t)n * sizeof(SyntaxLocal));
+    if (c->syntax_local_cap) memcpy(s, c->syntax_locals, (size_t)c->syntax_local_cap * sizeof(SyntaxLocal));
+    c->syntax_locals = s;  c->syntax_local_cap = n;
+}
+
 /* Register a macro visible from here to the end of the enclosing scope
  * (and to any nested lambda compiled within it, via resolve_syntax_local's
  * walk up ->enclosing) — used by internal define-syntax and by
@@ -279,6 +316,7 @@ int add_syntax_local(Compiler *c, val_t name, val_t transformer) {
     if (c->syntax_local_count == MAX_SYNTAX_LOCALS)
         scm_raise(V_FALSE, "compile: too many local macros in one scope (max %d)",
                   MAX_SYNTAX_LOCALS);
+    ensure_syntax_local_capacity(c);
     SyntaxLocal *s = &c->syntax_locals[c->syntax_local_count];
     s->name        = name;
     s->transformer = transformer;
@@ -337,6 +375,7 @@ int add_local(Compiler *c, val_t name) {
     if (c->local_count == MAX_LOCALS)
         scm_raise(V_FALSE, "compile: too many local variables in one procedure (max %d)",
                   MAX_LOCALS);
+    ensure_local_capacity(c);
     Local *l = &c->locals[c->local_count];
     l->name     = name;
     l->depth    = c->scope_depth;
@@ -414,6 +453,7 @@ int add_local(Compiler *c, val_t name) {
  * not just here) is a broader change than this landing's own scope. */
 int reserve_pending_slot(Compiler *c) {
     if (c->local_count == MAX_LOCALS) return -1;
+    ensure_local_capacity(c);
     int slot = c->local_count++;
     c->locals[slot].name     = V_FALSE;   /* never matches a real name */
     c->locals[slot].captured = false;
@@ -453,6 +493,7 @@ int add_upvalue(Compiler *c, int index, bool is_local, val_t name) {
     if (c->upval_count == MAX_UPVALS)
         scm_raise(V_FALSE, "compile: a procedure captures too many variables (max %d)",
                   MAX_UPVALS);
+    ensure_upval_capacity(c);
     c->upvals[c->upval_count].index    = index;
     c->upvals[c->upval_count].is_local = is_local;
     c->upvals[c->upval_count].name     = name;

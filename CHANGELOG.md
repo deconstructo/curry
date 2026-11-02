@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Changed — the bytecode compiler's per-scope tables grow on demand (#335)**
+
+- A `Compiler` was about 20 KB because of fixed `locals[256]`, `known[256]`,
+  `upvals[256]` and `syntax_locals[64]` arrays, and one is created per nested
+  lambda, letrec, `do` and named let. The tables now start empty and grow as
+  needed; the 256/256/64 limits are unchanged. On a Debug build compiling a
+  5000-define script: user time 0.76 s to 0.34 s, peak memory 115 MB to 83 MB.
+
 **Fixed — `#:keyword` reader keeps non-ASCII codepoints (#317)**
 
 - The `#:name` reader cut each codepoint to one byte, so `#:α` and `#:±`
