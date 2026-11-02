@@ -12,6 +12,11 @@
 - `finite?`, `infinite?` and `nan?` now look at every component of a complex,
   quaternion or octonion value: `(finite? (make-rectangular 1.0 +inf.0))` is
   `#f`, `(infinite? ...)` of it is `#t`.
+**Fixed — `#:keyword` reader keeps non-ASCII codepoints (#317)**
+
+- The `#:name` reader cut each codepoint to one byte, so `#:α` and `#:±`
+  read as the same symbol. It now keeps the full UTF-8 encoding. The
+  dot-prefixed list-element case from #317 was already fixed by #316.
 
 **Fixed — Debug build overflowed the C stack compiling nested `let*` (#304)**
 

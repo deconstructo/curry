@@ -1062,6 +1062,11 @@
        '(46 945))
 (check "dot-prefixed symbols differing in codepoint stay distinct"
        (eq? (car '(.α)) (car '(.±))) #f)
+(check "#: keywords differing in codepoint stay distinct"
+       (eq? '#:α '#:±) #f)
+(check "#: keyword keeps its codepoint"
+       (map char->integer (string->list (symbol->string '#:α)))
+       (list 35 58 945))
 ;; eqv? distinguishes the signed zeros (R7RS 6.1), so the compiler keeps both
 ;; literals apart (#319)
 (check "eqv? 0.0 -0.0" (eqv? 0.0 -0.0) #f)

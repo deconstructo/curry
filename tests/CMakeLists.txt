@@ -45,7 +45,11 @@ add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
 add_test(NAME srfi_61_cond COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_61_cond_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
-add_test(NAME actors         COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
+# run_with_hang_dump.sh prints every thread's stack after 90 s (before the
+# 120 s CTest TIMEOUT below), so a recurrence of the intermittent hang
+# (issue #312) leaves a stack dump in the CI log.
+add_test(NAME actors         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_with_hang_dump.sh 90
+         $<TARGET_FILE:curry> --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/actors_tests.scm)
 # Rare, non-deterministic hang observed once in CI (Ubuntu Debug, under
 # ctest -j full-suite contention): the 2000-actor spawn/race regression
 # test never returned, but did not reproduce in 9 follow-up attempts
