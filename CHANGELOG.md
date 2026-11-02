@@ -10,6 +10,16 @@
   (for example JavaScript's `JSON.parse`) read a long integer as a double.
   The `(curry mcp)` and `(curry graphql)` writers are not changed.
 
+**Fixed — `real?`, `rational?`, `finite?`, `infinite?`, `nan?` on complex numbers (#328)**
+
+- `real?` was true for every number, including `1+2i` and quaternions. It is
+  now false for complex, quaternion and octonion values (`complex?` is still
+  true for all numbers).
+- `rational?` was true only for exact numbers. It is now also true for finite
+  flonums (`(rational? 1.5)` is `#t`; `+inf.0` and `+nan.0` stay `#f`).
+- `finite?`, `infinite?` and `nan?` now look at every component of a complex,
+  quaternion or octonion value: `(finite? (make-rectangular 1.0 +inf.0))` is
+  `#f`, `(infinite? ...)` of it is `#t`.
 **Fixed — `#:keyword` reader keeps non-ASCII codepoints (#317)**
 
 - The `#:name` reader cut each codepoint to one byte, so `#:α` and `#:±`
