@@ -25,6 +25,7 @@ extern "C" {
 #include "runtime_init.h"
 #include "nesting_depth.h"
 #include "editor_assist.h"
+#include "symbolic.h"
 #include "interrupt.h"
 #include "version.h"
 }
@@ -58,6 +59,29 @@ std::string render_value(val_t v) {
     std::string text = curry_string_to_std(port_get_output_string(port));
     port_close(port);
     return text;
+}
+
+/* Rich forms of a result value, added next to the text/plain form that is
+ * always published. A symbolic CAS expression gets text/latex (the same text
+ * as `sym->latex`, wrapped in $$ so the notebook typesets it as a display
+ * equation). Protected separately from the plain-text rendering above: if
+ * the LaTeX writer raises (say on a pathologically deep expression), the
+ * result is still shown, just without the typeset form. */
+void add_rich_representations(nl::json &data, val_t v) {
+    if (!vis_symbolic(v)) return;
+    std::string latex;
+    bool ok = false;
+    ExnHandler h;
+    SCM_PROTECT(h, {
+        val_t port = port_open_output_string();
+        sx_write_latex(v, port);
+        latex = curry_string_to_std(port_get_output_string(port));
+        port_close(port);
+        ok = true;
+    }, {
+        vm_reset();
+    });
+    if (ok && !latex.empty()) data["text/latex"] = "$$" + latex + "$$";
 }
 
 /* Render a raised condition/error the same way print_scheme_error()
@@ -445,6 +469,7 @@ void curry_interpreter::execute_request_impl(xeus::xinterpreter::send_reply_call
         });
         nl::json data;
         data["text/plain"] = rendered;
+        add_rich_representations(data, last_value);
         publish_execution_result(execution_counter, data, nl::json::object());
     }
 
