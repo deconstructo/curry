@@ -107,19 +107,27 @@ struct Compiler {
     Chunk     *chunk;
     const char *name;
 
-    Local      locals[MAX_LOCALS];
+    /* locals[] and known[] (parallel, see below) and upvals[] and
+     * syntax_locals[] start empty and grow on demand (ensure_*_capacity
+     * in compiler.c); the MAX_* limits above still apply. Fixed arrays
+     * made a Compiler about 20 KB, one per nested lambda/letrec/do/named
+     * let (#335). */
+    Local     *locals;
+    int        local_cap;
     int        local_count;
     int        scope_depth;
 
     /* Tier 2.3 local inliner -- parallel to locals[] by physical slot
      * index (known[i] describes locals[i]). See KnownLambda's own comment
      * above. */
-    KnownLambda known[MAX_LOCALS];
+    KnownLambda *known;      /* same capacity as locals */
 
-    UpvalDesc  upvals[MAX_UPVALS];
+    UpvalDesc *upvals;
+    int        upval_cap;
     int        upval_count;
 
-    SyntaxLocal syntax_locals[MAX_SYNTAX_LOCALS];
+    SyntaxLocal *syntax_locals;
+    int         syntax_local_cap;
     int         syntax_local_count;
 
     /* Named-let self-tail-call (OP_SELF_TAIL_CALL, see compile_call and

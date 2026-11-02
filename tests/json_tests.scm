@@ -40,8 +40,15 @@
        (vector 1234567.0 0.1 (/ 1. 3.)))
 (check "stringify writes null for +inf.0, -inf.0 and +nan.0 (not valid JSON otherwise)"
        (json-stringify (vector 1.5 +inf.0 -inf.0 +nan.0)) "[1.5,null,null,null]")
-(check "stringify writes null for a bignum too large for a double"
-       (json-stringify (vector (expt 10 400))) "[null]")
+(check "stringify writes a bignum with every digit"
+       (json-stringify (vector (expt 10 30) (- (expt 2 70)) 12345678901234567890))
+       "[1000000000000000000000000000000,-1180591620717411303424,12345678901234567890]")
+(check "stringify writes a bignum beyond double range exactly"
+       (json-stringify (vector (expt 10 400)))
+       (string-append "[1" (make-string 400 #\0) "]"))
+(check "bignum survives a stringify/parse round trip"
+       (json-parse (json-stringify (vector (expt 10 30) (- (expt 3 100)))))
+       (vector (expt 10 30) (- (expt 3 100))))
 (check "parse number"  (json-parse "42") 42)
 (check "parse true"    (json-parse "true") #t)
 (check "parse false"   (json-parse "false") #f)
