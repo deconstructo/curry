@@ -292,7 +292,7 @@ if(BUILD_MODULE_LSP AND TARGET curry_lsp)
                 ${MOD_PATH})
 endif()
 
-# Jupyter kernel completion/inspect over the real protocol. Needs the kernel
+# Jupyter kernel completion/inspect and rich result display over the real protocol. Needs the kernel
 # (BUILD_JUPYTER_KERNEL) and a Python with jupyter_client: either set
 # CURRY_JUPYTER_PYTHON, or it is taken from the `jupyter` launcher's shebang.
 if(TARGET curry_jupyter)
@@ -312,6 +312,10 @@ if(TARGET curry_jupyter)
         add_test(NAME jupyter_completion
             COMMAND ${CURRY_JUPYTER_PYTHON}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test_jupyter_completion.py
+                    $<TARGET_FILE:curry_jupyter>)
+        add_test(NAME jupyter_display
+            COMMAND ${CURRY_JUPYTER_PYTHON}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_jupyter_display.py
                     $<TARGET_FILE:curry_jupyter>)
     else()
         message(STATUS "jupyter_completion test skipped: no Python with jupyter_client (set CURRY_JUPYTER_PYTHON)")

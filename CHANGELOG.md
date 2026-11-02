@@ -2,6 +2,19 @@
 
 ### Unreleased
 
+**New — Jupyter kernel typesets symbolic results (#284)**
+
+- A cell whose result is a symbolic expression now publishes `text/latex`
+  (from `sym->latex`, wrapped in `$$`) alongside `text/plain`, so a notebook
+  renders `(/ x 2)` as a fraction. Other results are unchanged. New test:
+  `jupyter_display`; the kernel tests share `tests/jupyter_test_support.py`.
+- `sym->latex` now escapes characters that are special to LaTeX or HTML in a
+  variable name, function name, string or other non-numeric leaf (`$`, `\`,
+  `{`, `}`, `&`, `%`, `#`, `^`, `~`, `<`, `>`, whitespace), so its output is
+  safe inside `$$ ... $$`; ordinary names, Greek names and `x_1` are
+  unchanged. `+inf.0`, `-inf.0` and `+nan.0` print as `\infty`, `-\infty` and
+  `\mathrm{NaN}`.
+
 **New — Jupyter kernel completion and inspect (#283)**
 
 - Tab completion and Shift-Tab inspect now work in the Jupyter kernel instead

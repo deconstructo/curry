@@ -353,10 +353,26 @@ through `src/editor_assist.c`, which lives in `curry_core`.
   has defined. It does not yet show signatures or docstrings, and it does
   not describe local bindings.
 
-## Known gaps (not yet implemented)
+## Rich display of a cell's result
 
-- **Rich display for a cell's own *result* value**: an `execute_result`
-  (the value a cell evaluates to) still only ever publishes as
-  `text/plain` — no `text/latex` for symbolic CAS values via `sym->latex`,
-  for instance. File output (see below) already has a path to rich
-  display; only in-process values don't yet.
+A cell's result is published as `text/plain` (the `write` form, as in the
+REPL). A symbolic CAS expression (`sym-var` and anything built from one) also
+carries `text/latex`, the same text `sym->latex` produces wrapped in `$$ ... $$`,
+so the notebook typesets it:
+
+```scheme
+(define x (sym-var 'x))
+(/ x 2)                       ; renders as \frac{x}{2}
+(∂ (expt x 3) x)              ; renders as 3 x^{2}
+```
+
+The text is made safe to embed in `$$ ... $$`: characters that LaTeX or HTML
+treat specially in a variable name, function name or string (`$ \ { } & % # ^ ~ < >`,
+whitespace) are written as math commands, so a hostile name cannot close the
+equation or inject markup. Non-finite floats appear as `\infty` and `\mathrm{NaN}`.
+Only a result that is itself symbolic is typeset. A list that merely contains
+one, a plain number and a string stay `text/plain`. Quaternion, octonion, multivector,
+surreal and quantum results have no LaTeX writer yet and also stay `text/plain`. If the LaTeX writer
+raises (a pathologically deep expression, say), the result is still shown as
+plain text. Output a cell prints with `display` is unaffected, and images and
+other files still go through `jupyter-display-file`.
