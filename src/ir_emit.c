@@ -455,8 +455,8 @@ void ir_emit(Compiler *c, IRNode *n) {
          * per-form limit. Splicing removes that reset, so a long chain of
          * lets/letrec sharing one enclosing frame (sequential lets in one
          * function body, or a single let* with 256+ bindings) now
-         * accumulates locals against ONE Compiler's fixed-size
-         * `locals[MAX_LOCALS]`/`known[MAX_LOCALS]` arrays. Without this
+         * accumulates locals against ONE Compiler's `locals`/`known`
+         * tables, which are capped at MAX_LOCALS entries. Without this
          * guard, ir_emit_inline_call's param-claiming loop writes
          * `c->locals[base + i]` / `c->known[base + i]` for i in
          * [0, argc) unconditionally -- reserve_pending_slot's own -1-on-
