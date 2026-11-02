@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793597019148,
+  "lastUpdate": 1793597522566,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -18974,6 +18974,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 43.834,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9807fd41009a195475a4a0216039045a0ea331fb",
+          "message": "Merge pull request #325 from deconstructo/fix/320-json-nonfinite\n\nfix: write null for non-finite numbers in JSON output (#320)",
+          "timestamp": "2026-11-02T16:31:23+11:00",
+          "tree_id": "cf423f0b938c86b5774fb794b7dd039570896561",
+          "url": "https://github.com/deconstructo/curry/commit/9807fd41009a195475a4a0216039045a0ea331fb"
+        },
+        "date": 1793597521740,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.195,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.397,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.312,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.642,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 175.552,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 337.726,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 74.281,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 102.977,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.685,
             "unit": "ms"
           }
         ]
