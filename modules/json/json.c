@@ -26,6 +26,7 @@
  */
 
 #include <curry.h>
+#include "numeric.h"   /* num_flonum_to_shortest_cstr */
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -217,7 +218,9 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_float(v)) {
         double d = curry_float(v);
         if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }
-        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+        /* Shortest text that reads back as the same double; %g keeps only
+         * 6 significant digits and silently changes the value. */
+        num_flonum_to_shortest_cstr(d, buf, sizeof(buf)); sb_str(out,len,cap,buf); return;
     }
     /* Any other numeric-tower value (bignum, exact rational, complex —
      * JSON's own number type is just IEEE double, so there's nowhere
@@ -229,7 +232,7 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_number(v)) {
         double d = curry_number_to_double(v);
         if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }   /* e.g. a huge bignum */
-        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+        num_flonum_to_shortest_cstr(d, buf, sizeof(buf)); sb_str(out,len,cap,buf); return;
     }
     if (curry_is_string(v)) { write_json_string(curry_string(v), out, len, cap); return; }
     /* A symbol used as an alist key (looks_like_alist now permits this,
