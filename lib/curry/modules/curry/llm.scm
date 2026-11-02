@@ -57,7 +57,20 @@
        (write-char #\" p))
       ((boolean? v) (display (if v "true" "false") p))
       ((null? v) (display "null" p))
-      ((number? v) (display (number->string v) p))
+      ;; JSON numbers: a complex number or a non-finite real (+inf.0, +nan.0)
+      ;; has no JSON spelling, so write null; an exact ratio like 1/3 is not
+      ;; valid JSON either, so write it as a float.
+      ((number? v)
+       ;; (real? is true for a complex number in curry, #328, so test the
+       ;; imaginary part directly.)
+       (cond ((not (zero? (imag-part v))) (display "null" p))
+             ((not (finite? (real-part v))) (display "null" p))
+             ((and (exact? v) (not (integer? v)))
+              ;; Convert first, then test the float: a ratio can be far too
+              ;; large for a double, and finite? is true of every exact number.
+              (let ((f (exact->inexact v)))
+                (display (if (finite? f) (number->string f) "null") p)))
+             (else (display (number->string v) p))))
       ((vector? v)
        (write-char #\[ p)
        (let loop ((i 0))

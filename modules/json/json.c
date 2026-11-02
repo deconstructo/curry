@@ -26,6 +26,7 @@
  */
 
 #include <curry.h>
+#include "numeric.h"   /* num_flonum_to_shortest_cstr */
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -99,15 +100,26 @@ static curry_val json_parse_string(const char **p) {
 }
 
 static curry_val json_parse_number(const char **p) {
-    char buf[64]; int i = 0;
-    if (**p == '-') buf[i++] = *(*p)++;
-    while (isdigit((unsigned char)**p)) buf[i++] = *(*p)++;
+    /* Scan the token's extent first, then copy exactly that many bytes: a
+     * fixed buffer overflowed on a long digit string from untrusted input. */
+    const char *start = *p;
     bool is_float = false;
-    if (**p == '.') { is_float = true; buf[i++] = *(*p)++; while (isdigit((unsigned char)**p)) buf[i++] = *(*p)++; }
-    if (**p == 'e' || **p == 'E') { is_float = true; buf[i++] = *(*p)++; if (**p=='+' || **p=='-') buf[i++]=*(*p)++; while (isdigit((unsigned char)**p)) buf[i++]=*(*p)++; }
-    buf[i] = '\0';
-    if (is_float) return curry_make_float(atof(buf));
-    return curry_make_fixnum(atol(buf));
+    if (**p == '-') (*p)++;
+    while (isdigit((unsigned char)**p)) (*p)++;
+    if (**p == '.') { is_float = true; (*p)++; while (isdigit((unsigned char)**p)) (*p)++; }
+    if (**p == 'e' || **p == 'E') {
+        is_float = true; (*p)++;
+        if (**p == '+' || **p == '-') (*p)++;
+        while (isdigit((unsigned char)**p)) (*p)++;
+    }
+    size_t n = (size_t)(*p - start);
+    char *buf = malloc(n + 1);
+    if (!buf) return curry_eof();
+    memcpy(buf, start, n);
+    buf[n] = '\0';
+    curry_val v = is_float ? curry_make_float(atof(buf)) : curry_make_fixnum(atol(buf));
+    free(buf);
+    return v;
 }
 
 static curry_val json_parse_value(const char **p) {
@@ -217,7 +229,9 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_float(v)) {
         double d = curry_float(v);
         if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }
-        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+        /* Shortest text that reads back as the same double; %g keeps only
+         * 6 significant digits and silently changes the value. */
+        num_flonum_to_shortest_cstr(d, buf, sizeof(buf)); sb_str(out,len,cap,buf); return;
     }
     /* Any other numeric-tower value (bignum, exact rational, complex —
      * JSON's own number type is just IEEE double, so there's nowhere
@@ -229,7 +243,7 @@ static void json_write_value(curry_val v, char **out, size_t *len, size_t *cap) 
     if (curry_is_number(v)) {
         double d = curry_number_to_double(v);
         if (!isfinite(d)) { sb_str(out,len,cap,"null"); return; }   /* e.g. a huge bignum */
-        snprintf(buf,sizeof(buf),"%g",d); sb_str(out,len,cap,buf); return;
+        num_flonum_to_shortest_cstr(d, buf, sizeof(buf)); sb_str(out,len,cap,buf); return;
     }
     if (curry_is_string(v)) { write_json_string(curry_string(v), out, len, cap); return; }
     /* A symbol used as an alist key (looks_like_alist now permits this,

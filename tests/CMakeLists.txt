@@ -3,6 +3,7 @@ target_link_libraries(curry_test PRIVATE curry_core)
 
 add_test(NAME core           COMMAND curry_test)
 add_test(NAME json           COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/json_tests.scm)
+add_test(NAME llm_json       COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/llm_json_tests.scm ${CMAKE_SOURCE_DIR}/lib/curry/modules/curry/llm.scm)
 add_test(NAME sqlite         COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sqlite_tests.scm)
 add_test(NAME scheme_r7rs    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/r7rs_tests.scm)
 add_test(NAME cxxxr_accessors COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/cxxxr_accessor_tests.scm)
