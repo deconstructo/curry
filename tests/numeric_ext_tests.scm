@@ -1223,13 +1223,15 @@
 (check "latex quantum skips a zero amplitude"
        (sym->latex (superpose (list (cons 0 'a) (cons 1 'b))))
        "|\\mathrm{b}\\rangle")
-(check "latex deeply nested quantum raises, not crashes"
-       (guard (e (#t 'raised))
+(check "latex deeply nested quantum does not crash"
+       ;; A Debug build raises stack-overflow here; a Release build has smaller
+       ;; frames and finishes. Either is fine; a segfault is not.
+       (guard (e (#t 'ok))
          (let loop ((i 0) (q 1))
            (if (< i 300000)
                (loop (+ i 1) (superpose (list (cons 1 q))))
-               (string-length (sym->latex q)))))
-       'raised)
+               (begin (sym->latex q) 'ok))))
+       'ok)
 (check "latex exponent float"  (sym->latex 1.5e-7) "1.5\\times 10^{-7}")
 (check "latex sum with a complex"     (sym->latex (+ x 1+2i)) "\\left(1 + 2i\\right) + x")
 (check "latex product with a quaternion"
