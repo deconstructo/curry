@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793598308465,
+  "lastUpdate": 1793598451380,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -19112,6 +19112,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.204,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0b9fcf3dfeb40ea37d11e1c9ba255f345f9786ae",
+          "message": "Merge pull request #329 from deconstructo/feat/283-jupyter-completion\n\nfeat(jupyter): completion and inspect in the kernel (#283)",
+          "timestamp": "2026-11-02T16:46:49+11:00",
+          "tree_id": "ccb51298926ea072e3b8fa1a15ef2a7cb2db7994",
+          "url": "https://github.com/deconstructo/curry/commit/0b9fcf3dfeb40ea37d11e1c9ba255f345f9786ae"
+        },
+        "date": 1793598450104,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.241,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.844,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 7.151,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.006,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 171.229,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 337.798,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 73.757,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 102.905,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 77.546,
             "unit": "ms"
           }
         ]
