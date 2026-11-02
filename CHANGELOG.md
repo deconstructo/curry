@@ -10,6 +10,15 @@
   large for a double also becomes `null` in `(curry json)` instead of `inf`.
   Redis `ZADD` scores are unchanged: Redis accepts `inf` there.
 
+**Fixed — `eqv?` tells `0.0` and `-0.0` apart (#319)**
+
+- `(eqv? 0.0 -0.0)` and `(equal? 0.0 -0.0)` were `#t`; R7RS 6.1 requires `#f`.
+  `scm_eqv` now compares flonum bits (and quaternion components), so `memv`,
+  `assv`, `case`, `equal?`-keyed hash tables and complex numbers with a
+  signed-zero part follow the same rule. This also fixed the compiler merging
+  the two literals: `(list 0.0 -0.0)` printed `(0.0 0.0)`. `(= 0.0 -0.0)` is
+  still `#t`. A NaN is now `eqv?` to a NaN with the same bits.
+
 **Fixed — LLVM JIT miscompiled chained comparisons (#309)**
 
 - `(<= lo 0 hi)` and the other multi-argument comparisons failed with a
