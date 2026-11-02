@@ -9,6 +9,13 @@
   lambda, letrec, `do` and named let. The tables now start empty and grow as
   needed; the 256/256/64 limits are unchanged. On a Debug build compiling a
   5000-define script: user time 0.76 s to 0.34 s, peak memory 115 MB to 83 MB.
+**Changed — `json-stringify` writes integers beyond the fixnum range exactly (#337)**
+
+- `(json-stringify (vector (expt 10 30)))` was `[1e+30]` (and `[null]` past the
+  range of a double). It now writes every digit, so the value round-trips
+  through `json-parse`. JSON itself has no size limit, but some consumers
+  (for example JavaScript's `JSON.parse`) read a long integer as a double.
+  The `(curry mcp)` and `(curry graphql)` writers are not changed.
 
 **Fixed — `real?`, `rational?`, `finite?`, `infinite?`, `nan?` on complex numbers (#328)**
 
