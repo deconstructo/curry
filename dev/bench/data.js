@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793606563765,
+  "lastUpdate": 1793607191073,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -19526,6 +19526,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.216,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "71e0bc975bc2bfb58ec0610eb2a17f200386c03f",
+          "message": "Merge pull request #341 from deconstructo/fix/328-real-finite\n\nfix(numeric): real?, rational?, finite?, infinite?, nan? handle complex and quaternion values (#328)",
+          "timestamp": "2026-11-02T19:12:32+11:00",
+          "tree_id": "93e56c5c7992e582d37d06997118655c3e307393",
+          "url": "https://github.com/deconstructo/curry/commit/71e0bc975bc2bfb58ec0610eb2a17f200386c03f"
+        },
+        "date": 1793607190119,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.039,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 18.371,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.917,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 21.694,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 90.649,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 202.944,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 55.417,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 61.59,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 40.986,
             "unit": "ms"
           }
         ]
