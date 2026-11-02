@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793605487221,
+  "lastUpdate": 1793605908205,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -19319,6 +19319,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.616,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "80dc4677c8a4ab6a4afc0b2f9ac70d6b1a8f520a",
+          "message": "Merge pull request #336 from deconstructo/fix/304-compile-stack-frames\n\nfix(compiler): allocate nested Compilers on the heap, not the C stack (#304)",
+          "timestamp": "2026-11-02T18:51:07+11:00",
+          "tree_id": "405136e276f5891828a2631c97292ffe0e720c83",
+          "url": "https://github.com/deconstructo/curry/commit/80dc4677c8a4ab6a4afc0b2f9ac70d6b1a8f520a"
+        },
+        "date": 1793605907417,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.241,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.385,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.182,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.318,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 179.993,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 370.751,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 82.321,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 109.98,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 80.028,
             "unit": "ms"
           }
         ]
