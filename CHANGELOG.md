@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Changed — `json-stringify` writes integers beyond the fixnum range exactly (#337)**
+
+- `(json-stringify (vector (expt 10 30)))` was `[1e+30]` (and `[null]` past the
+  range of a double). It now writes every digit, so the value round-trips
+  through `json-parse`. JSON itself has no size limit, but some consumers
+  (for example JavaScript's `JSON.parse`) read a long integer as a double.
+  The `(curry mcp)` and `(curry graphql)` writers are not changed.
+
 **Fixed — `#:keyword` reader keeps non-ASCII codepoints (#317)**
 
 - The `#:name` reader cut each codepoint to one byte, so `#:α` and `#:±`
