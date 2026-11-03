@@ -1911,6 +1911,90 @@ static curry_val ints_from_bytes(curry_val bvv, bool is_signed, const char *who)
 static curry_val fn_gpu_bytes_to_u32(int, curry_val *av, void *) { return ints_from_bytes(av[0], false, "gpu-bytes->u32"); }
 static curry_val fn_gpu_bytes_to_i32(int, curry_val *av, void *) { return ints_from_bytes(av[0], true, "gpu-bytes->i32"); }
 
+/* ---- std140 / std430 block packing ------------------------------------------
+ *
+ * (gpu-std140 fields) / (gpu-std430 fields) -> bytevector laid out the way
+ * GLSL lays out a uniform (std140) or storage (std430) block, so Scheme
+ * code never computes padding by hand.  fields:
+ *   (type value)                 type: float int uint vec2..4 ivec2..4
+ *   (array type (value ...))           uvec2..4 mat2 mat3 mat4
+ * Matrices are column-major sequences (16 numbers for mat4), the same
+ * convention as gpu-clip-space-matrix and (curry gpu-math).
+ */
+
+struct BlockType { const char *name; int comps; int cols; Elem elem; };
+static const BlockType k_block_types[] = {
+    { "float", 1, 1, Elem::F32 }, { "int", 1, 1, Elem::I32 }, { "uint", 1, 1, Elem::U32 },
+    { "vec2", 2, 1, Elem::F32 },  { "vec3", 3, 1, Elem::F32 }, { "vec4", 4, 1, Elem::F32 },
+    { "ivec2", 2, 1, Elem::I32 }, { "ivec3", 3, 1, Elem::I32 }, { "ivec4", 4, 1, Elem::I32 },
+    { "uvec2", 2, 1, Elem::U32 }, { "uvec3", 3, 1, Elem::U32 }, { "uvec4", 4, 1, Elem::U32 },
+    { "mat2", 2, 2, Elem::F32 },  { "mat3", 3, 3, Elem::F32 }, { "mat4", 4, 4, Elem::F32 },
+};
+
+static int vec_align(int comps) { return comps == 1 ? 4 : comps == 2 ? 8 : 16; }
+static qsizetype round_up(qsizetype x, qsizetype a) { return (x + a - 1) / a * a; }
+
+static void pack_block_into(QByteArray &out, curry_val fields, bool std430, const char *who) {
+    if (list_length(fields) < 0) curry_error("%s: argument must be a list of fields", who);
+    qsizetype max_align = std430 ? 4 : 16;
+    for (curry_val p = fields; curry_is_pair(p); p = curry_cdr(p)) {
+        curry_val f = curry_car(p);
+        long fl = list_length(f);
+        bool is_array = fl == 3 && sym_is(curry_car(f), "array");
+        if (!(fl == 2 || is_array) || !curry_is_symbol(is_array ? curry_car(curry_cdr(f)) : curry_car(f)))
+            curry_error("%s: fields are (type value) or (array type (value ...))", who);
+        const char *tn = curry_symbol(is_array ? curry_car(curry_cdr(f)) : curry_car(f));
+        curry_val value = is_array ? curry_car(curry_cdr(curry_cdr(f))) : curry_car(curry_cdr(f));
+        const BlockType *t = nullptr;
+        for (auto &bt : k_block_types) if (strcmp(bt.name, tn) == 0) t = &bt;
+        if (!t) curry_error("%s: unknown type '%s", who, tn);
+
+        /* Column layout: a matrix is an array of `cols` column vectors. */
+        qsizetype col_align = vec_align(t->comps);
+        qsizetype col_stride = t->cols > 1 ? (std430 ? col_align : 16) : t->comps * 4;
+        qsizetype elem_size = t->cols > 1 ? col_stride * t->cols : t->comps * 4;
+        qsizetype align = t->cols > 1 ? (std430 ? col_align : 16) : col_align;
+        long count = 1;
+        if (is_array) {
+            count = list_length(value);
+            if (count <= 0) curry_error("%s: array of %s must be a non-empty list", who, tn);
+            if (!std430 && align < 16) align = 16;   /* std140: array elements are vec4-aligned */
+        }
+        qsizetype stride = is_array ? round_up(elem_size, align) : elem_size;
+        if (align > max_align) max_align = align;
+
+        QByteArray vals;
+        flatten_numbers(vals, value, t->elem, who);
+        long want = count * t->comps * t->cols;
+        if (vals.size() != want * 4)
+            curry_error("%s: %s%s needs %ld numbers, got %lld", who, is_array ? "array of " : "", tn,
+                        want, (long long)(vals.size() / 4));
+        qsizetype base = round_up(out.size(), align);
+        out.append(QByteArray(base - out.size() + stride * count, '\0'));
+        const char *src = vals.constData();
+        for (long e = 0; e < count; e++)
+            for (int c = 0; c < t->cols; c++) {
+                memcpy(out.data() + base + e * stride + c * col_stride, src, (size_t)t->comps * 4);
+                src += t->comps * 4;
+            }
+    }
+    out.append(QByteArray(round_up(out.size(), max_align) - out.size(), '\0'));
+}
+
+static curry_val pack_block(curry_val fields, bool std430, const char *who) {
+    QByteArray *d = new QByteArray();
+    ExnHandler h;
+    curry_val err = 0;
+    SCM_PROTECT(h, pack_block_into(*d, fields, std430, who), err = h.exn);
+    if (err) { delete d; scm_raise_val(err); }
+    if (d->isEmpty()) { delete d; curry_error("%s: block is empty", who); }
+    curry_val bv = bytes_to_bv(*d);
+    delete d;
+    return bv;
+}
+static curry_val fn_gpu_std140(int, curry_val *av, void *) { return pack_block(av[0], false, "gpu-std140"); }
+static curry_val fn_gpu_std430(int, curry_val *av, void *) { return pack_block(av[0], true, "gpu-std430"); }
+
 /* =========================================================================
  * Registration
  * ========================================================================= */
@@ -1973,4 +2057,6 @@ void qt6_gpu_register(CurryVM *vm) {
     curry_define_fn(vm, "gpu-bytes->f32",           fn_gpu_bytes_to_f32,         1, 1, NULL);
     curry_define_fn(vm, "gpu-bytes->u32",           fn_gpu_bytes_to_u32,         1, 1, NULL);
     curry_define_fn(vm, "gpu-bytes->i32",           fn_gpu_bytes_to_i32,         1, 1, NULL);
+    curry_define_fn(vm, "gpu-std140",               fn_gpu_std140,               1, 1, NULL);
+    curry_define_fn(vm, "gpu-std430",               fn_gpu_std430,               1, 1, NULL);
 }

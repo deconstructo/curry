@@ -9,8 +9,8 @@
 ;;; With no usable GPU device the suite prints SKIP and exits 0, unless
 ;;; CURRY_GPU_REQUIRED is set, in which case that is a failure.
 
-(import (scheme base) (scheme write) (scheme process-context)
-        (curry qt6) (curry f64vector))
+(import (scheme base) (scheme cxr) (scheme write) (scheme process-context)
+        (curry qt6) (curry f64vector) (curry gpu-math))
 
 (define pass 0)
 (define fail 0)
@@ -312,6 +312,72 @@ void main() {
   (define vr (gpu-bytes->f32 (gpu-read-buffer dev vout)))
   (check "3D texture texelFetch (1,2,3)" (f64vector-ref vr (+ 1 (* 2 4) (* 3 16))) 57.0)
   (check "3D texture size" (gpu-texture-size vol) '(4 4 4)))
+
+;;; ---- std140 / std430 packing ------------------------------------------------
+
+(check "std140 float then vec3: vec3 aligned to 16"
+       (bytevector-length (gpu-std140 '((float 1.0) (vec3 (1 2 3))))) 32)
+(check "std140 vec3 then float: float fills the vec3's tail"
+       (f64vector->list (gpu-bytes->f32 (gpu-std140 '((vec3 (1 2 3)) (float 4)))))
+       '(1.0 2.0 3.0 4.0))
+(check "std140 float array has a 16-byte stride" (bytevector-length (gpu-std140 '((array float (1 2))))) 32)
+(check "std430 float array is tightly packed" (bytevector-length (gpu-std430 '((array float (1 2))))) 8)
+(check "std140 mat3 columns padded to vec4" (bytevector-length (gpu-std140 '((mat3 (1 2 3 4 5 6 7 8 9))))) 48)
+(check "std140 int field stores an integer"
+       (gpu-bytes->i32 (gpu-std140 '((int -7)))) #(-7 0 0 0))
+(check "std140 wrong value count raises" (raises? (lambda () (gpu-std140 '((vec3 (1 2)))))) #t)
+(check "std140 unknown type raises" (raises? (lambda () (gpu-std140 '((quat (1 2 3 4)))))) #t)
+
+;; The GPU agrees with the packing: a compute shader copies a std140
+;; uniform block's fields into a std430 storage buffer.
+(define cs-layout (make-gpu-shader 'compute "#version 440
+layout(local_size_x = 1) in;
+layout(std140, binding = 0) uniform U { float a; vec3 b; mat4 m; float arr[2]; int k; };
+layout(std430, binding = 1) buffer Out { float o[]; };
+void main() {
+  o[0] = a; o[1] = b.x; o[2] = b.y; o[3] = b.z;
+  o[4] = m[0][1]; o[5] = m[3][0]; o[6] = arr[0]; o[7] = arr[1]; o[8] = float(k);
+}"))
+(define layout-ubuf
+  (make-gpu-buffer 'uniform
+    (gpu-std140 (list '(float 1.5) '(vec3 (2 3 4)) (list 'mat4 (mat4-translate 9.0 0.0 0.0))
+                      '(array float (5 6)) '(int 7)))))
+(define layout-out (make-gpu-buffer 'storage 64))
+(define layout-pipe (make-gpu-compute-pipeline cs-layout
+  (make-gpu-bindings (list (list 'uniform 0 'compute layout-ubuf) (list 'storage 1 'compute layout-out)))))
+(gpu-run! dev (lambda (f) (gpu-compute-pass! f (lambda (p) (gpu-dispatch! p layout-pipe 1)))))
+(check "GPU reads gpu-std140's layout"
+       (let ((o (gpu-bytes->f32 (gpu-read-buffer dev layout-out))))
+         (map (lambda (i) (f64vector-ref o i)) '(0 1 2 3 4 5 6 7 8)))
+       '(1.5 2.0 3.0 4.0 0.0 9.0 5.0 6.0 7.0))
+
+;;; ---- (curry gpu-math) ----------------------------------------------------------
+
+(define (approx-list=? a b) (let loop ((a a) (b b))
+  (or (and (null? a) (null? b))
+      (and (pair? a) (pair? b) (< (abs (- (car a) (car b))) 1e-9) (loop (cdr a) (cdr b))))))
+
+(check "identity times vector"
+       (mat4*v4 (mat4-identity) '(1.0 2.0 3.0 1.0)) '(1.0 2.0 3.0 1.0))
+(check "translate moves a point"
+       (mat4*v4 (mat4-translate 1.0 2.0 3.0) '(1.0 1.0 1.0 1.0)) '(2.0 3.0 4.0 1.0))
+(check "rotate-z by 90 degrees maps x to y"
+       (approx-list=? (mat4*v4 (mat4-rotate-z (deg->rad 90)) '(1.0 0.0 0.0 1.0)) '(0.0 1.0 0.0 1.0)) #t)
+(check "inverse undoes a transform"
+       (let* ((m (mat4* (mat4-translate 1.0 -2.0 3.0) (mat4* (mat4-rotate-y 0.7) (mat4-scale 2.0 2.0 2.0))))
+              (p '(0.3 0.4 0.5 1.0)))
+         (approx-list=? (mat4*v4 (mat4-inverse m) (mat4*v4 m p)) p))
+       #t)
+(check "look-at puts the target on the -z axis"
+       (let ((v (mat4*v4 (mat4-look-at '(0.0 0.0 5.0) '(0.0 0.0 0.0) '(0.0 1.0 0.0)) '(0.0 0.0 0.0 1.0))))
+         (approx-list=? v '(0.0 0.0 -5.0 1.0)))
+       #t)
+(check "perspective maps the near plane to depth -1"
+       (let* ((p (mat4*v4 (mat4-perspective 1.0 1.0 0.5 10.0) '(0.0 0.0 -0.5 1.0))))
+         (< (abs (+ 1.0 (/ (caddr p) (list-ref p 3)))) 1e-9))
+       #t)
+(check "singular inverse raises" (raises? (lambda () (mat4-inverse (mat4-scale 0.0 1.0 1.0)))) #t)
+(check "v3-cross" (v3-cross '(1 0 0) '(0 1 0)) '(0 0 1))
 
 ;;; ---- errors ------------------------------------------------------------------
 
