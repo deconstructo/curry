@@ -13,6 +13,8 @@ add_test(NAME srfi_s279_inspect COMMAND curry --clear-cache ${CMAKE_CURRENT_SOUR
 add_test(NAME include_relative COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/include_relative_tests.scm)
 add_test(NAME define_library_stack_guard COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/define_library_stack_guard_tests.scm)
 add_test(NAME module_isolation COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/module_isolation_tests.scm)
+# (curry glsl) + (curry spacetime): emitter, CSE, CAS metric derivatives vs finite differences.
+add_test(NAME spacetime COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/spacetime_tests.scm)
 add_test(NAME vm_deep_recursion COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/vm_deep_recursion_tests.scm)
 set_tests_properties(include_relative PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include_relative")
@@ -473,4 +475,18 @@ if(BUILD_MODULE_QT6 AND TARGET curry_qt6)
     set_tests_properties(qt6 PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
         TIMEOUT 30)
+    # gpu-* (QRhi) layer: real GPU work on a headless device. Prints SKIP
+    # and passes when the host has no usable GPU backend.
+    if(CURRY_QT6_GPU_BUILT)
+        add_test(NAME qt6_gpu COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/gpu_tests.scm)
+        set_tests_properties(qt6_gpu PROPERTIES
+            ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
+            TIMEOUT 60)
+        # Geodesics traced with GLSL generated from symbolic metrics, checked
+        # against exact Schwarzschild deflection and Kerr capture limits.
+        add_test(NAME spacetime_gpu COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/spacetime_gpu_tests.scm)
+        set_tests_properties(spacetime_gpu PROPERTIES
+            ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
+            TIMEOUT 120)
+    endif()
 endif()

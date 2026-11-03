@@ -26,6 +26,10 @@ Looking for the [Jupyter kernel](jupyter-kernel.md)? It isn't a `(curry X)` modu
 | [image](module-image.md) | `(curry image)` | PNG / JPEG / GIF load, save, edit | `libpng-dev libjpeg-dev` |
 | [git](module-git.md) | `(curry git)` | Git repository access | `libgit2-dev` |
 | [qt6](module-qt6.md) | `(curry qt6)` | Qt6 windows, canvas, widgets, 4D math | Qt6 |
+| [qt6 gpu-*](module-qt6-gpu.md) | `(curry qt6)` | GPU rendering and compute via QRhi (Metal/Vulkan/D3D/GL) | Qt6 ≥ 6.7 + Shader Tools |
+| [gpu-math](module-qt6-gpu.md#curry-gpu-math) | `(curry gpu-math)` | 3-vectors and column-major 4x4 matrices | — |
+| [glsl](module-spacetime.md#curry-glsl) | `(curry glsl)` | CAS expressions → GLSL, with common-subexpression elimination | — |
+| [spacetime](module-spacetime.md) | `(curry spacetime)` | Symbolic metrics (Kerr–Schild family) → GLSL metric + geodesic integrator | — |
 | [plplot](module-plplot.md) | `(curry plplot)` | Scientific 2D/3D plotting | `libplplot-dev` |
 | [vecdb](module-vecdb.md) | `(curry vecdb)` | Vector nearest-neighbour search | — |
 | [regex](module-regex.md) | `(curry regex)` | POSIX extended regular expressions | — |
