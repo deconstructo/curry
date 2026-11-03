@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <curry.h>
 #include "eval.h"   /* SCM_PROTECT — catches longjmp-based Scheme exceptions */
+#include "qt6_common.h"
 extern "C" {
 #include "gc.h"             /* gc_register_root */
 }
@@ -52,7 +53,7 @@ extern "C" {
  * curry_apply(), the vm->sp restoration inside apply() is bypassed via
  * longjmp, leaving vm->sp corrupted.  Restoring it here prevents the
  * corruption from cascading into heap corruption on subsequent callbacks. */
-static void qt6_print_exn(const char *where, curry_val exn) {
+void qt6_print_exn(const char *where, curry_val exn) {
     const char *msg = curry_error_message(exn);
     if (msg) fprintf(stderr, "%s exception: %s\n", where, msg);
     else if (curry_is_string(exn)) fprintf(stderr, "%s exception: %s\n", where, curry_string(exn));
@@ -60,15 +61,6 @@ static void qt6_print_exn(const char *where, curry_val exn) {
     fflush(stderr);
 }
 
-#define SCHEME_CALL(call) do { \
-    ExnHandler _sch_h_; \
-    CurryVMState _vm_state_; \
-    curry_vm_state_save(&_vm_state_); \
-    SCM_PROTECT(_sch_h_, (call), { \
-        qt6_print_exn("[qt6]", _sch_h_.exn); \
-        curry_vm_state_restore(&_vm_state_); \
-    }); \
-} while(0)
 
 #include <QApplication>
 #include <QMainWindow>
@@ -168,7 +160,7 @@ static curry_val s_proc_roots = 0;  /* 0 until module_init sets it to nil */
  * alive through s_proc_roots (below) and gc_register_root's own copy.
  *
  * Returns the registered slot pointer for capture in QObject::connect lambdas. */
-static curry_val *keep_alive(curry_val v) {
+curry_val *keep_alive(curry_val v) {
     /* Belt-and-suspenders: also keep the value reachable via s_proc_roots so
      * Boehm's conservative scan finds it through the .so data segment. */
     s_proc_roots = curry_make_pair(v, s_proc_roots);
@@ -186,7 +178,7 @@ static char   s_argv0[] = "curry";
 static char  *s_argv[]  = { s_argv0, nullptr };
 static QApplication *s_app = nullptr;
 
-static void ensure_app() {
+void ensure_app() {
     if (s_app) return;
 #ifdef CURRY_QT6_PLUGIN_DIR
     /* Homebrew's Qt6 keg isn't on the default plugin search path, so a
@@ -215,14 +207,14 @@ static void ensure_app() {
  * where the bytevector stores the raw pointer bytes.
  * ========================================================================= */
 
-static curry_val ptr_to_val(const char *tag, void *ptr) {
+curry_val ptr_to_val(const char *tag, void *ptr) {
     curry_val bv = curry_make_bytevector((uint32_t)sizeof(void *), 0);
     for (size_t i = 0; i < sizeof(void *); i++)
         curry_bytevector_set(bv, (uint32_t)i, ((uint8_t *)&ptr)[i]);
     return curry_make_pair(curry_make_symbol(tag), bv);
 }
 
-static void *val_to_ptr(const char *tag, curry_val v) {
+void *val_to_ptr(const char *tag, curry_val v) {
     if (!curry_is_pair(v) || !curry_is_symbol(curry_car(v)))
         curry_error("qt6: not a handle (expected %s)", tag);
     const char *got = curry_symbol(curry_car(v));
@@ -259,7 +251,7 @@ static void *val_to_ptr(const char *tag, curry_val v) {
  * direct av[N] use site in this file; argpos is 1-based (matching how a
  * Scheme user counts a procedure's own arguments) for a clear error
  * message. */
-static const char *checked_string(curry_val v, int argpos, const char *who) {
+const char *checked_string(curry_val v, int argpos, const char *who) {
     if (!curry_is_string(v)) curry_error("%s: argument %d must be a string", who, argpos);
     return curry_string(v);
 }
@@ -272,16 +264,16 @@ static const char *checked_string(curry_val v, int argpos, const char *who) {
  * itself would previously raise "must be a number" on any odd window
  * width/height. curry_number_to_double (include/curry.h) already exists
  * for exactly this coercion. */
-static double checked_float(curry_val v, int argpos, const char *who) {
+double checked_float(curry_val v, int argpos, const char *who) {
     if (!curry_is_number(v))
         curry_error("%s: argument %d must be a number", who, argpos);
     return curry_number_to_double(v);
 }
-static const char *checked_symbol(curry_val v, int argpos, const char *who) {
+const char *checked_symbol(curry_val v, int argpos, const char *who) {
     if (!curry_is_symbol(v)) curry_error("%s: argument %d must be a symbol", who, argpos);
     return curry_symbol(v);
 }
-static intptr_t checked_fixnum(curry_val v, int argpos, const char *who) {
+intptr_t checked_fixnum(curry_val v, int argpos, const char *who) {
     if (!curry_is_fixnum(v)) curry_error("%s: argument %d must be an exact integer", who, argpos);
     return curry_fixnum(v);
 }
@@ -433,7 +425,7 @@ protected:
  * CurryCanvas implementations
  * ========================================================================= */
 
-static const char *qt_key_str(int key, const QString &text) {
+const char *qt_key_str(int key, const QString &text) {
     static char buf[64];
     switch (key) {
     case Qt::Key_Escape:    return "Escape";
@@ -472,7 +464,7 @@ static const char *qt_key_str(int key, const QString &text) {
     return buf;
 }
 
-static curry_val build_mods(Qt::KeyboardModifiers m) {
+curry_val build_mods(Qt::KeyboardModifiers m) {
     curry_val mods = curry_nil();
     if (m & Qt::MetaModifier)    mods = curry_make_pair(curry_make_symbol("meta"),  mods);
     if (m & Qt::AltModifier)     mods = curry_make_pair(curry_make_symbol("alt"),   mods);
@@ -2756,6 +2748,11 @@ extern "C" void curry_module_init(CurryVM *vm) {
     /* s_proc_roots lives in the .so data segment, which Boehm scans. */
     s_proc_roots = curry_nil();
     gc_register_root(&s_proc_roots);
+
+#ifdef CURRY_QT6_GPU
+    /* --- gpu-* (QRhi) layer, modules/qt6/gpu.cpp --- */
+    qt6_gpu_register(vm);
+#endif
 
     /* --- Layer 3: Window --- */
     curry_define_fn(vm, "make-window",               fn_make_window,          3, 3, NULL);

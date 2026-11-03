@@ -802,6 +802,51 @@ if(BUILD_MODULE_QT6)
     target_link_libraries(curry_qt6 PRIVATE
       Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets)
     message(STATUS "Qt6 ${Qt6_VERSION} found — building qt6 module")
+    # gpu-* layer (modules/qt6/gpu.cpp): QRhi (Metal/Vulkan/D3D/GL) via
+    # QRhiWidget, which needs Qt >= 6.7, plus QShaderBaker from the separate
+    # ShaderTools package for runtime GLSL -> SPIR-V/MSL/HLSL compilation.
+    # Optional: without either, the module builds exactly as before.
+    option(BUILD_QT6_GPU "Build the QRhi gpu-* layer of the qt6 module" ON)
+    if(BUILD_QT6_GPU)
+      if(Qt6_VERSION VERSION_LESS 6.7)
+        message(WARNING "Qt6 ${Qt6_VERSION} < 6.7 (no QRhiWidget) — qt6 gpu-* layer skipped")
+      else()
+        find_package(Qt6 QUIET COMPONENTS GuiPrivate ShaderTools ShaderToolsPrivate)
+        if(NOT TARGET Qt6::ShaderToolsPrivate AND APPLE)
+          find_program(CURRY_BREW_EXE brew)
+        endif()
+        if(NOT TARGET Qt6::ShaderToolsPrivate AND APPLE AND CURRY_BREW_EXE)
+          execute_process(
+            COMMAND ${CURRY_BREW_EXE} --prefix qtshadertools
+            OUTPUT_VARIABLE CURRY_QTSHADERTOOLS_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+          if(CURRY_QTSHADERTOOLS_PREFIX)
+            # Qt6Config looks up its components with NO_DEFAULT_PATH, so
+            # CMAKE_PREFIX_PATH is ignored for them; Homebrew installs
+            # qtshadertools in its own keg, outside qtbase's prefix.  Ask
+            # for the component package directly instead.
+            foreach(_pkg Qt6ShaderTools Qt6ShaderToolsPrivate)
+              find_package(${_pkg} CONFIG QUIET
+                PATHS "${CURRY_QTSHADERTOOLS_PREFIX}/lib/cmake/${_pkg}"
+                NO_DEFAULT_PATH)
+            endforeach()
+          endif()
+        endif()
+        if(TARGET Qt6::ShaderToolsPrivate AND TARGET Qt6::GuiPrivate)
+          target_sources(curry_qt6 PRIVATE modules/qt6/gpu.cpp)
+          # QRhi and QShaderBaker are public API with limited compatibility
+          # guarantees; Qt ships their headers (rhi/qrhi.h,
+          # rhi/qshaderbaker.h) through the *Private targets.
+          target_link_libraries(curry_qt6 PRIVATE Qt6::GuiPrivate Qt6::ShaderToolsPrivate)
+          target_compile_definitions(curry_qt6 PRIVATE CURRY_QT6_GPU)
+          message(STATUS "Qt6 ShaderTools found — building qt6 gpu-* (QRhi) layer")
+        else()
+          message(WARNING "Qt6 ShaderTools not found — qt6 gpu-* layer skipped "
+                          "(Debian/Ubuntu: qt6-shadertools-dev, Homebrew: qtshadertools)")
+        endif()
+      endif()
+    endif()
     if(APPLE)
       # Bake in Homebrew's platform-plugins directory (libqcocoa.dylib etc.)
       # so the module works without the user having to set
