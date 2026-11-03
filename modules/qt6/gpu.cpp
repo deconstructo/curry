@@ -62,8 +62,11 @@
 
 #include <cstring>
 #include <cmath>
+#include <climits>
 #include <vector>
 #include <memory>
+#include <pthread.h>
+#include <array>
 
 /* After every Qt header: object.h defines an `as_bytes` macro that
  * collides with QSpan's as_bytes(). */
@@ -80,10 +83,19 @@ static bool sym_is(curry_val v, const char *name) {
     return curry_is_symbol(v) && strcmp(curry_symbol(v), name) == 0;
 }
 
-/* Length of a proper list, or -1. */
+/* Length of a proper list, or -1 for an improper or circular one
+ * (tortoise and hare: a circular list used to loop forever here). */
 static long list_length(curry_val v) {
     long n = 0;
-    while (curry_is_pair(v)) { n++; v = curry_cdr(v); }
+    curry_val slow = v;
+    while (curry_is_pair(v)) {
+        n++;
+        v = curry_cdr(v);
+        if ((n & 1) == 0) {
+            slow = curry_cdr(slow);
+            if (slow == v && curry_is_pair(v)) return -1;
+        }
+    }
     return curry_is_nil(v) ? n : -1;
 }
 
@@ -164,21 +176,31 @@ static void push_elem(QByteArray &out, double x, Elem e) {
 
 /* Flatten numbers, (nested) lists, vectors and f64vectors into `out`.
  * A bytevector at the top level is taken as raw bytes. */
-static void flatten_numbers(QByteArray &out, curry_val v, Elem e, const char *who, int depth = 0) {
+/* Upper bound on numbers visited in one conversion.  Depth alone does not
+ * bound the work: a vector holding itself 1000 times is only one level
+ * of nesting per step but 1000^depth elements. */
+static const long k_max_data_elems = 1L << 28;
+
+static void flatten_numbers(QByteArray &out, curry_val v, Elem e, const char *who, int depth = 0,
+                            long *budget = nullptr) {
+    long local_budget = k_max_data_elems;
+    if (!budget) budget = &local_budget;
     if (depth > 64) curry_error("%s: data nested too deeply", who);
+    if (--*budget < 0) curry_error("%s: data has more than %ld elements", who, k_max_data_elems);
     if (curry_is_fixnum(v) || curry_is_float(v) || curry_is_number(v)) {
         if (!curry_is_number(v)) curry_error("%s: data element is not a number", who);
         push_elem(out, curry_number_to_double(v), e);
     } else if (vis_f64vec(v)) {
         F64Vec *fv = as_f64v(v);
+        if ((*budget -= fv->len) < 0) curry_error("%s: data has more than %ld elements", who, k_max_data_elems);
         for (uint32_t i = 0; i < fv->len; i++) push_elem(out, fv->data[i], e);
     } else if (curry_is_vector(v)) {
         uint32_t n = curry_vector_length(v);
-        for (uint32_t i = 0; i < n; i++) flatten_numbers(out, curry_vector_ref(v, i), e, who, depth + 1);
+        for (uint32_t i = 0; i < n; i++) flatten_numbers(out, curry_vector_ref(v, i), e, who, depth + 1, budget);
     } else if (curry_is_pair(v) || curry_is_nil(v)) {
-        if (list_length(v) < 0) curry_error("%s: data is an improper list", who);
+        if (list_length(v) < 0) curry_error("%s: data is an improper or circular list", who);
         for (curry_val p = v; curry_is_pair(p); p = curry_cdr(p))
-            flatten_numbers(out, curry_car(p), e, who, depth + 1);
+            flatten_numbers(out, curry_car(p), e, who, depth + 1, budget);
     } else if (curry_is_bytevector(v) && depth > 0) {
         curry_error("%s: a bytevector can only be given as the whole data, not nested", who);
     } else {
@@ -335,7 +357,20 @@ struct GpuBuffer : GpuRes {
     bool                    dirty = true;
     quint32                 dirty_lo = 0, dirty_hi = 0;
     QRhiBuffer             *buf = nullptr;
+    qint64                  max_index = -1;     /* index buffers: largest index, -1 = recompute */
+    long                    used_in_frame = 0;  /* uniform buffers: frame serial of last use */
     void drop_natives() override { delete_native(buf); dirty = true; dirty_lo = 0; dirty_hi = (quint32)data.size(); }
+    qint64 largest_index() {
+        if (max_index < 0) {
+            max_index = 0;
+            const uchar *p = (const uchar *)data.constData();
+            for (qsizetype i = 0; i + 4 <= data.size(); i += 4) {
+                quint32 v; memcpy(&v, p + i, 4);
+                if ((qint64)v > max_index) max_index = v;
+            }
+        }
+        return max_index;
+    }
 };
 
 #define val_to_buffer(v) ((GpuBuffer *)val_to_ptr("gpu-buffer", (v)))
@@ -421,7 +456,7 @@ struct GpuBindings : GpuRes {
 /* ---- graphics pipelines ------------------------------------------------- */
 
 struct VInputAttr { int binding, location; QRhiVertexInputAttribute::Format fmt; quint32 offset; };
-struct VInputBinding { quint32 stride; bool per_instance; };
+struct VInputBinding { quint32 stride; bool per_instance; quint32 attr_end; /* bytes of a vertex actually read */ };
 
 struct PipelineVariant {
     QRhiRenderPassDescriptor *rp;     /* owned compatible copy */
@@ -474,6 +509,14 @@ static void need_feature(QRhi *rhi, QRhi::Feature f, const char *what) {
         curry_error("gpu: the %s backend does not support %s", rhi->backendName(), what);
 }
 
+/* Resources whose upload went into the batch being prepared.  If preparing
+ * the pass fails, the batch is released without being submitted, so these
+ * are marked dirty again and upload on the next attempt. */
+static std::vector<GpuRes *> s_batch_uploads;
+
+static void batch_begin() { s_batch_uploads.clear(); }
+static void batch_failed();
+
 static void mat_buffer(QRhi *rhi, GpuBuffer *b, QRhiResourceUpdateBatch *u) {
     b->check_live("gpu buffer");
     if (b->bind_rhi(rhi) || !b->buf) {
@@ -489,7 +532,9 @@ static void mat_buffer(QRhi *rhi, GpuBuffer *b, QRhiResourceUpdateBatch *u) {
         else
             u->uploadStaticBuffer(b->buf, lo, n, b->data.constData() + lo);
         b->dirty = false;
+        s_batch_uploads.push_back(b);
     }
+    if (b->type == QRhiBuffer::Dynamic && s_frame) b->used_in_frame = s_frame->serial;
 }
 
 static void mat_texture(QRhi *rhi, GpuTexture *t, QRhiResourceUpdateBatch *u) {
@@ -527,7 +572,16 @@ static void mat_texture(QRhi *rhi, GpuTexture *t, QRhiResourceUpdateBatch *u) {
         u->uploadTexture(t->tex, desc);
         if (t->mipmaps) u->generateMips(t->tex);
         t->dirty = false;
+        s_batch_uploads.push_back(t);
     }
+}
+
+static void batch_failed() {
+    for (GpuRes *r : s_batch_uploads) {
+        if (auto *b = dynamic_cast<GpuBuffer *>(r)) { b->dirty = true; b->dirty_lo = 0; b->dirty_hi = (quint32)b->data.size(); }
+        else if (auto *t = dynamic_cast<GpuTexture *>(r)) t->dirty = !t->data.isEmpty();
+    }
+    s_batch_uploads.clear();
 }
 
 static void mat_sampler(QRhi *rhi, GpuSampler *s) {
@@ -598,6 +652,7 @@ static QRhiGraphicsPipeline *mat_pipeline(QRhi *rhi, GpuPipeline *p, QRhiRenderT
     il.setAttributes(va.cbegin(), va.cend());
     ps->setVertexInputLayout(il);
     ps->setShaderResourceBindings(p->layout->srb);
+    ps->setFlags(QRhiGraphicsPipeline::UsesScissor);   /* every draw sets one; see execute_render_pass */
     ps->setTopology(p->topology);
     ps->setCullMode(p->cull);
     ps->setFrontFace(p->front);
@@ -1077,6 +1132,10 @@ static QRhiBuffer::UsageFlags parse_buffer_usage(curry_val v, bool *index_only) 
     }
     if ((u & QRhiBuffer::UniformBuffer) && u != QRhiBuffer::UsageFlags(QRhiBuffer::UniformBuffer))
         curry_error("make-gpu-buffer: a uniform buffer cannot have other usages");
+    /* gpu-draw! checks every index against the vertex buffers using the
+     * CPU copy; a shader writing the indices would make that copy stale. */
+    if ((u & QRhiBuffer::IndexBuffer) && (u & QRhiBuffer::StorageBuffer))
+        curry_error("make-gpu-buffer: an index buffer cannot also be a storage buffer");
     *index_only = (n_index == n);
     return u;
 }
@@ -1116,7 +1175,11 @@ static curry_val fn_gpu_buffer_update(int ac, curry_val *av, void *) {
         curry_error("gpu-buffer-update!: %lld bytes at offset %lld do not fit in a %lld-byte buffer",
                     (long long)nd.size(), (long long)off, (long long)b->data.size());
     if (nd.isEmpty()) return curry_void();
+    if (b->type == QRhiBuffer::Dynamic && s_frame && b->used_in_frame == s_frame->serial)
+        curry_error("gpu-buffer-update!: this uniform buffer was already used in this frame; "
+                    "a uniform buffer holds one value per frame, so use a second buffer");
     memcpy(b->data.data() + off, nd.constData(), (size_t)nd.size());
+    b->max_index = -1;
     quint32 lo = (quint32)off, hi = (quint32)(off + nd.size());
     if (b->dirty) { b->dirty_lo = std::min(b->dirty_lo, lo); b->dirty_hi = std::max(b->dirty_hi, hi); }
     else          { b->dirty_lo = lo; b->dirty_hi = hi; b->dirty = true; }
@@ -1206,6 +1269,35 @@ static curry_val fn_make_gpu_sampler(int ac, curry_val *av, void *) {
     return ptr_to_val("gpu-sampler", s);
 }
 
+/* The GLSL front end and the SPIR-V translators recurse once per nested
+ * expression node, so a long enough expression (`1.0+1.0+...`) overflows
+ * the 8 MB main-thread stack and kills the process.  Compiling on a
+ * thread with a 512 MB stack (address space only; untouched pages cost
+ * nothing) together with the source size limit puts the deepest possible
+ * tree well inside the stack. */
+static const size_t k_max_shader_source = 256 * 1024;
+
+struct BakeJob { QShaderBaker *baker; QShader result; bool done; };
+
+static void *bake_thread_main(void *arg) {
+    BakeJob *j = (BakeJob *)arg;
+    j->result = j->baker->bake();
+    j->done = true;
+    return nullptr;
+}
+
+static bool bake_on_big_stack(BakeJob *job) {
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) return false;
+    pthread_attr_setstacksize(&attr, (size_t)512 << 20);
+    pthread_t th;
+    int rc = pthread_create(&th, &attr, bake_thread_main, job);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) return false;
+    pthread_join(th, nullptr);
+    return job->done;
+}
+
 /* (make-gpu-shader stage source) — Vulkan-style GLSL, compiled now. */
 static curry_val fn_make_gpu_shader(int, curry_val *av, void *) {
     const char *stage = checked_symbol(av[0], 1, "make-gpu-shader");
@@ -1215,6 +1307,10 @@ static curry_val fn_make_gpu_shader(int, curry_val *av, void *) {
     else if (strcmp(stage, "fragment") == 0) st = QShader::FragmentStage;
     else if (strcmp(stage, "compute") == 0)  st = QShader::ComputeStage;
     else curry_error("make-gpu-shader: stage must be vertex, fragment or compute");
+
+    size_t src_len = strlen(src);
+    if (src_len > k_max_shader_source)
+        curry_error("make-gpu-shader: shader source is %zu bytes; the limit is %zu", src_len, k_max_shader_source);
 
     QShaderBaker baker;
     QList<QShaderBaker::GeneratedShader> targets = {
@@ -1237,8 +1333,10 @@ static curry_val fn_make_gpu_shader(int, curry_val *av, void *) {
      * matters if that backend is actually used, and QRhi reports it then. */
     baker.setPerTargetCompilation(true);
     baker.setBreakOnShaderTranslationError(false);
-    baker.setSourceString(QByteArray(src), st);
-    QShader sh = baker.bake();
+    baker.setSourceString(QByteArray(src, (qsizetype)src_len), st);
+    BakeJob job{ &baker, QShader(), false };
+    if (!bake_on_big_stack(&job)) curry_error("make-gpu-shader: could not start the shader compiler thread");
+    QShader sh = job.result;
     if (!sh.isValid()) {
         QByteArray msg = baker.errorMessage().toUtf8();
         curry_error("make-gpu-shader: %s shader failed to compile:\n%s", stage, msg.constData());
@@ -1305,6 +1403,11 @@ static curry_val fn_make_gpu_bindings(int, curry_val *av, void *) {
                     if (!curry_is_fixnum(curry_car(rest)) || curry_fixnum(curry_car(rest)) < 0)
                         curry_error("%s: mip level must be a non-negative exact integer", who);
                     be.level = (int)curry_fixnum(curry_car(rest));
+                    int levels = 1;
+                    if (be.tex->mipmaps)
+                        for (int sz = std::max(be.tex->w, be.tex->h); sz > 1; sz >>= 1) levels++;
+                    if (be.level >= levels)
+                        curry_error("%s: mip level %d does not exist; the texture has %d level(s)", who, be.level, levels);
                 } else if (n != 4) curry_error("%s: (%s binding stages texture [level])", who, k);
             }
         } else {
@@ -1325,22 +1428,165 @@ static curry_val fn_make_gpu_bindings(int, curry_val *av, void *) {
     return ptr_to_val("gpu-bindings", b);
 }
 
+/* ---- checking bindings and vertex inputs against the shaders --------------
+ *
+ * QShader carries reflection data for every resource a shader declares.
+ * Metal aborts the whole process (MTLReportFailure) when a pipeline or
+ * draw does not match its shaders -- a missing buffer, a uniform buffer
+ * smaller than its block, a 2D texture where the shader samples a 3D one,
+ * a storage image of a different format -- so all of that is checked here
+ * and reported as an ordinary Scheme error instead.
+ */
+
+static QShaderDescription::ImageFormat image_format_of(QRhiTexture::Format f) {
+    using D = QShaderDescription;
+    switch (f) {
+    case QRhiTexture::RGBA8:    return D::ImageFormatRgba8;
+    case QRhiTexture::R8:       return D::ImageFormatR8;
+    case QRhiTexture::RG8:      return D::ImageFormatRg8;
+    case QRhiTexture::R16F:     return D::ImageFormatR16f;
+    case QRhiTexture::RGBA16F:  return D::ImageFormatRgba16f;
+    case QRhiTexture::R32F:     return D::ImageFormatR32f;
+    case QRhiTexture::RGBA32F:  return D::ImageFormatRgba32f;
+    case QRhiTexture::R32UI:    return D::ImageFormatR32ui;
+    case QRhiTexture::R32SI:    return D::ImageFormatR32i;
+    case QRhiTexture::RGBA32UI: return D::ImageFormatRgba32ui;
+    case QRhiTexture::RGBA32SI: return D::ImageFormatRgba32i;
+    default:                    return D::ImageFormatUnknown;
+    }
+}
+
+static bool is_integer_format(QRhiTexture::Format f) {
+    return f == QRhiTexture::R32UI || f == QRhiTexture::R32SI ||
+           f == QRhiTexture::RGBA32UI || f == QRhiTexture::RGBA32SI;
+}
+
+static const BindEntry *entry_at(const GpuBindings *b, int binding) {
+    for (auto &e : b->entries) if (e.binding == binding) return &e;
+    return nullptr;
+}
+
+static void check_texture_dim(const GpuTexture *t, QShaderDescription::VariableType vt,
+                              int binding, const char *who, const char *stage) {
+    using D = QShaderDescription;
+    bool want3d;
+    if      (vt == D::Sampler2D || vt == D::Image2D) want3d = false;
+    else if (vt == D::Sampler3D || vt == D::Image3D) want3d = true;
+    else curry_error("%s: %s shader binding %d uses a texture type gpu-* does not support yet "
+                     "(only 2D and 3D)", who, stage, binding);
+    if (want3d != (t->d != 0))
+        curry_error("%s: %s shader binding %d is a %s texture but a %s texture is bound",
+                    who, stage, binding, want3d ? "3D" : "2D", t->d ? "3D" : "2D");
+}
+
+/* Every resource `sh` declares must be in `b`, with the right kind, the
+ * stage enabled, and big enough. */
+static void check_shader_resources(const GpuShader *sh, const GpuBindings *b, const char *who) {
+    using SRB = QRhiShaderResourceBinding;
+    const QShaderDescription desc = sh->shader.description();
+    const char *stage = sh->stage == QShader::VertexStage ? "vertex"
+                      : sh->stage == QShader::FragmentStage ? "fragment" : "compute";
+    SRB::StageFlag flag = sh->stage == QShader::VertexStage ? SRB::VertexStage
+                        : sh->stage == QShader::FragmentStage ? SRB::FragmentStage : SRB::ComputeStage;
+    if (!desc.pushConstantBlocks().isEmpty())
+        curry_error("%s: %s shader uses push constants, which gpu-* does not support; use a uniform block", who, stage);
+    if (!desc.separateImages().isEmpty() || !desc.separateSamplers().isEmpty())
+        curry_error("%s: %s shader uses separate texture/sampler objects; use a combined sampler2D/sampler3D", who, stage);
+
+    auto need = [&](int binding, int set, const char *what) -> const BindEntry * {
+        if (set > 0) curry_error("%s: %s shader %s at binding %d uses descriptor set %d; only set 0 is supported",
+                                 who, stage, what, binding, set);
+        const BindEntry *e = entry_at(b, binding);
+        if (!e) curry_error("%s: %s shader declares a %s at binding %d but the bindings have nothing there",
+                            who, stage, what, binding);
+        if (!(e->stages & flag))
+            curry_error("%s: binding %d is used by the %s shader but its stages do not include %s",
+                        who, binding, stage, stage);
+        return e;
+    };
+    for (const auto &ub : desc.uniformBlocks()) {
+        const BindEntry *e = need(ub.binding, ub.descriptorSet, "uniform block");
+        if (e->kind != BindKind::Uniform)
+            curry_error("%s: %s shader binding %d is a uniform block but something else is bound", who, stage, ub.binding);
+        if (e->buf->data.size() < ub.size)
+            curry_error("%s: uniform block '%s' at binding %d is %d bytes but the bound buffer is %lld bytes",
+                        who, ub.blockName.constData(), ub.binding, ub.size, (long long)e->buf->data.size());
+    }
+    for (const auto &sb : desc.storageBlocks()) {
+        const BindEntry *e = need(sb.binding, sb.descriptorSet, "storage block");
+        if (e->kind != BindKind::Storage && e->kind != BindKind::StorageRead && e->kind != BindKind::StorageWrite)
+            curry_error("%s: %s shader binding %d is a storage block but something else is bound", who, stage, sb.binding);
+        if (e->buf->data.size() < sb.knownSize)
+            curry_error("%s: storage block '%s' at binding %d needs at least %d bytes but the bound buffer is %lld bytes",
+                        who, sb.blockName.constData(), sb.binding, sb.knownSize, (long long)e->buf->data.size());
+    }
+    for (const auto &v : desc.combinedImageSamplers()) {
+        const BindEntry *e = need(v.binding, v.descriptorSet, "sampled texture");
+        if (e->kind != BindKind::Texture)
+            curry_error("%s: %s shader binding %d is a sampled texture but something else is bound", who, stage, v.binding);
+        if (is_integer_format(e->tex->fi->fmt))
+            curry_error("%s: binding %d: integer-format textures (%s) cannot be sampled; bind them as an image",
+                        who, v.binding, e->tex->fi->name);
+        check_texture_dim(e->tex, v.type, v.binding, who, stage);
+    }
+    for (const auto &v : desc.storageImages()) {
+        const BindEntry *e = need(v.binding, v.descriptorSet, "storage image");
+        if (e->kind != BindKind::Image && e->kind != BindKind::ImageRead && e->kind != BindKind::ImageWrite)
+            curry_error("%s: %s shader binding %d is a storage image but something else is bound", who, stage, v.binding);
+        check_texture_dim(e->tex, v.type, v.binding, who, stage);
+        if (v.imageFormat != image_format_of(e->tex->fi->fmt))
+            curry_error("%s: %s shader image at binding %d has a different format from the bound %s texture",
+                        who, stage, v.binding, e->tex->fi->name);
+    }
+}
+
+/* Bindings swapped in at draw/dispatch time must have the pipeline's
+ * layout: same binding numbers, kinds and stages. */
+static void check_same_layout(const GpuBindings *layout, const GpuBindings *b, const char *who) {
+    if (layout == b) return;
+    if (layout->entries.size() != b->entries.size())
+        curry_error("%s: 'bindings has %zu entries but the pipeline's layout has %zu",
+                    who, b->entries.size(), layout->entries.size());
+    for (const auto &le : layout->entries) {
+        const BindEntry *e = entry_at(b, le.binding);
+        if (!e || e->kind != le.kind || e->stages != le.stages)
+            curry_error("%s: 'bindings entry %d does not match the pipeline's layout (kind and stages must be the same)",
+                        who, le.binding);
+    }
+}
+
+/* Every vertex shader input must be fed by an attribute in 'inputs. */
+static void check_vertex_inputs(const GpuShader *vs, const GpuPipeline *p, const char *who) {
+    for (const auto &in : vs->shader.description().inputVariables()) {
+        bool found = false;
+        for (auto &a : p->vattrs) if (a.location == in.location) found = true;
+        if (!found)
+            curry_error("%s: the vertex shader reads input '%s' at location %d but 'inputs has no attribute there",
+                        who, in.name.constData(), in.location);
+    }
+}
+
 static GpuBindings *s_empty_bindings = nullptr;
 static GpuBindings *empty_bindings() {
     if (!s_empty_bindings) s_empty_bindings = new GpuBindings();
     return s_empty_bindings;
 }
 
-struct AttrFormat { const char *name; QRhiVertexInputAttribute::Format f; };
+struct AttrFormat { const char *name; QRhiVertexInputAttribute::Format f; quint32 size; };
 static const AttrFormat k_attr_formats[] = {
-    { "float", QRhiVertexInputAttribute::Float },   { "float2", QRhiVertexInputAttribute::Float2 },
-    { "float3", QRhiVertexInputAttribute::Float3 }, { "float4", QRhiVertexInputAttribute::Float4 },
-    { "uint", QRhiVertexInputAttribute::UInt },     { "uint2", QRhiVertexInputAttribute::UInt2 },
-    { "uint3", QRhiVertexInputAttribute::UInt3 },   { "uint4", QRhiVertexInputAttribute::UInt4 },
-    { "sint", QRhiVertexInputAttribute::SInt },     { "sint2", QRhiVertexInputAttribute::SInt2 },
-    { "sint3", QRhiVertexInputAttribute::SInt3 },   { "sint4", QRhiVertexInputAttribute::SInt4 },
-    { "unorm-byte4", QRhiVertexInputAttribute::UNormByte4 },
+    { "float", QRhiVertexInputAttribute::Float, 4 },    { "float2", QRhiVertexInputAttribute::Float2, 8 },
+    { "float3", QRhiVertexInputAttribute::Float3, 12 }, { "float4", QRhiVertexInputAttribute::Float4, 16 },
+    { "uint", QRhiVertexInputAttribute::UInt, 4 },      { "uint2", QRhiVertexInputAttribute::UInt2, 8 },
+    { "uint3", QRhiVertexInputAttribute::UInt3, 12 },   { "uint4", QRhiVertexInputAttribute::UInt4, 16 },
+    { "sint", QRhiVertexInputAttribute::SInt, 4 },      { "sint2", QRhiVertexInputAttribute::SInt2, 8 },
+    { "sint3", QRhiVertexInputAttribute::SInt3, 12 },   { "sint4", QRhiVertexInputAttribute::SInt4, 16 },
+    { "unorm-byte4", QRhiVertexInputAttribute::UNormByte4, 4 },
 };
+
+/* Conservative limits every backend accepts (Metal shares its 31 buffer
+ * slots between vertex buffers and shader resources). */
+static const int k_max_vertex_slots = 8;
+static const int k_max_vertex_attrs = 16;
 
 /* 'inputs: list of vertex buffer slots, each
  *   (stride-bytes [per-instance] (location format offset-bytes) ...) */
@@ -1352,7 +1598,8 @@ static void parse_inputs(curry_val v, GpuPipeline *p, const char *who) {
         if (list_length(slot) < 1 || !curry_is_fixnum(curry_car(slot)) ||
             curry_fixnum(curry_car(slot)) <= 0 || curry_fixnum(curry_car(slot)) > 2048)
             curry_error("%s: input slot %d must start with a stride in bytes, in [1, 2048]", who, bi);
-        VInputBinding b{ (quint32)curry_fixnum(curry_car(slot)), false };
+        if (bi >= k_max_vertex_slots) curry_error("%s: at most %d vertex buffer slots", who, k_max_vertex_slots);
+        VInputBinding b{ (quint32)curry_fixnum(curry_car(slot)), false, 0 };
         curry_val a = curry_cdr(slot);
         if (curry_is_pair(a) && sym_is(curry_car(a), "per-instance")) { b.per_instance = true; a = curry_cdr(a); }
         for (; curry_is_pair(a); a = curry_cdr(a)) {
@@ -1361,13 +1608,19 @@ static void parse_inputs(curry_val v, GpuPipeline *p, const char *who) {
                 !curry_is_fixnum(curry_car(curry_cdr(curry_cdr(at)))))
                 curry_error("%s: attributes are (location format offset-bytes)", who);
             intptr_t loc = curry_fixnum(curry_car(at)), off = curry_fixnum(curry_car(curry_cdr(curry_cdr(at))));
-            if (loc < 0 || loc > 31 || off < 0 || off >= (intptr_t)b.stride)
-                curry_error("%s: attribute location must be in [0, 31] and offset inside the stride", who);
             const char *fn = curry_symbol(curry_car(curry_cdr(at)));
             const AttrFormat *af = nullptr;
             for (auto &f : k_attr_formats) if (strcmp(f.name, fn) == 0) af = &f;
             if (!af) curry_error("%s: unknown attribute format '%s", who, fn);
+            if (loc < 0 || loc >= k_max_vertex_attrs)
+                curry_error("%s: attribute location must be in [0, %d]", who, k_max_vertex_attrs - 1);
+            if (off < 0 || (quint64)off + af->size > b.stride)
+                curry_error("%s: attribute at location %ld (%s at offset %ld) does not fit in the %u-byte stride",
+                            who, (long)loc, fn, (long)off, b.stride);
+            for (auto &prev : p->vattrs)
+                if (prev.location == (int)loc) curry_error("%s: vertex attribute location %ld is used twice", who, (long)loc);
             p->vattrs.push_back({ bi, (int)loc, af->f, (quint32)off });
+            if ((quint32)off + af->size > b.attr_end) b.attr_end = (quint32)off + af->size;
         }
         p->vbindings.push_back(b);
     }
@@ -1431,6 +1684,9 @@ static curry_val fn_make_gpu_pipeline(int ac, curry_val *av, void *) {
     p->depth_write = opt_bool(o, "depth-write", true);
     p->line_width = (float)lw;
     if (o.has("inputs")) parse_inputs(o.get("inputs"), p.get(), who);
+    check_vertex_inputs(vs, p.get(), who);
+    check_shader_resources(vs, layout, who);
+    check_shader_resources(fs, layout, who);
     /* curry_error longjmps past p's destructor: everything that can raise is
      * done, release ownership to the handle now. */
     return ptr_to_val("gpu-pipeline", p.release());
@@ -1441,6 +1697,7 @@ static curry_val fn_make_gpu_compute_pipeline(int ac, curry_val *av, void *) {
     GpuShader *cs = val_to_shader(av[0]);
     if (cs->stage != QShader::ComputeStage) curry_error("make-gpu-compute-pipeline: not a compute shader");
     GpuBindings *layout = ac > 1 ? val_to_bindings(av[1]) : empty_bindings();
+    check_shader_resources(cs, layout, "make-gpu-compute-pipeline");
     auto *c = new GpuCompute();
     c->cs = cs; c->layout = layout;
     return ptr_to_val("gpu-compute-pipeline", c);
@@ -1485,6 +1742,65 @@ static curry_val protected_apply1(curry_val proc, curry_val arg, curry_val *resu
     return err;
 }
 
+/* ---- call/cc escapes ---------------------------------------------------------
+ *
+ * curry's call/cc is escape-only and jumps straight out with longjmp,
+ * skipping exception handlers -- so the cleanup after protected_apply1
+ * never runs and the frame/pass would stay "active" with QRhi mid-frame.
+ * Escapes do run dynamic-wind after-thunks (wind_unwind_to), so frame and
+ * pass procedures run under a WindFrame whose after-thunk is a C primitive
+ * that ends the pass or the device frame.  On a normal return or a Scheme
+ * error the WindFrame is just popped.
+ */
+
+static curry_val s_noop_prim = 0, s_end_pass_prim = 0, s_end_device_frame_prim = 0;
+
+static curry_val make_prim(const char *name, CurryFn fn) {
+    Primitive *p = CURRY_NEW_PINNED(Primitive);
+    p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
+    p->name = name; p->min_args = 0; p->max_args = 0;
+    p->fn = (PrimFn)fn; p->ud = nullptr;
+    return vptr(p);
+}
+
+static WindFrame *push_wind(curry_val after) {
+    WindFrame *wf = (WindFrame *)gc_alloc_raw_pinned(sizeof(WindFrame));
+    wf->before = s_noop_prim;
+    wf->after = after;
+    wf->prev = current_wind;
+    current_wind = wf;
+    return wf;
+}
+
+static void pop_wind(WindFrame *wf) { current_wind = wf->prev; }
+
+static void free_readbacks(std::vector<Readback *> &rbs, size_t from = 0) {
+    for (size_t j = from; j < rbs.size(); j++) {
+        if (!rbs[j]) continue;
+        if (rbs[j]->proc_slot) { gc_unregister_root(rbs[j]->proc_slot); delete rbs[j]->proc_slot; }
+        delete rbs[j];
+        rbs[j] = nullptr;
+    }
+}
+
+static curry_val fn_noop(int, curry_val *, void *) { return curry_void(); }
+
+static curry_val fn_end_pass_on_escape(int, curry_val *, void *) {
+    if (s_frame && s_frame->pass) { delete s_frame->pass; s_frame->pass = nullptr; }
+    return curry_void();
+}
+
+static curry_val fn_end_device_frame_on_escape(int, curry_val *, void *) {
+    if (!s_frame || !s_frame->device_frame) return curry_void();
+    FrameRec *f = s_frame;
+    s_frame = nullptr;
+    if (f->pass) { delete f->pass; f->pass = nullptr; }
+    f->rhi->endOffscreenFrame();
+    free_readbacks(f->device_readbacks);
+    delete f;
+    return curry_void();
+}
+
 /* (gpu-run! device (lambda (frame) ...)) — one synchronous offscreen frame. */
 static curry_val fn_gpu_run(int, curry_val *av, void *) {
     QRhi *rhi = device_rhi(val_to_device(av[0]), "gpu-run!");
@@ -1500,13 +1816,15 @@ static curry_val fn_gpu_run(int, curry_val *av, void *) {
     f->device_frame = true;
     s_frame = f;
     curry_val result;
+    WindFrame *wf = push_wind(s_end_device_frame_prim);
     curry_val err = protected_apply1(av[1], serial_handle("gpu-frame", f->serial), &result);
+    pop_wind(wf);
     s_frame = nullptr;
     rhi->endOffscreenFrame();   /* waits for completion: readbacks are done */
     std::vector<Readback *> rbs = std::move(f->device_readbacks);
     delete f;
     if (err) {
-        for (auto *rb : rbs) { if (rb->proc_slot) { gc_unregister_root(rb->proc_slot); delete rb->proc_slot; } delete rb; }
+        free_readbacks(rbs);
         scm_raise_val(err);
     }
     /* Deliver async readbacks now, outside Qt's code, so their errors
@@ -1520,7 +1838,7 @@ static curry_val fn_gpu_run(int, curry_val *av, void *) {
         curry_val ignored;
         curry_val e2 = protected_apply1(proc, bv, &ignored);
         if (e2) {
-            for (size_t j = i + 1; j < rbs.size(); j++) { gc_unregister_root(rbs[j]->proc_slot); delete rbs[j]->proc_slot; delete rbs[j]; }
+            free_readbacks(rbs, i + 1);
             scm_raise_val(e2);
         }
     }
@@ -1542,6 +1860,7 @@ static void execute_render_pass(FrameRec *f, PassRec *pr, QRhiRenderTarget *rt, 
     QRhi *rhi = f->rhi;
     QRhiResourceUpdateBatch *u = rhi->nextResourceUpdateBatch();
     if (!u) curry_error("gpu-render-pass!: out of resource update batches");
+    batch_begin();
     /* Everything that can raise happens before beginPass.  On a raise the
      * batch must go back to the pool, or the pool runs dry. */
     ExnHandler h;
@@ -1557,7 +1876,7 @@ static void execute_render_pass(FrameRec *f, PassRec *pr, QRhiRenderTarget *rt, 
             if (d.ibuf) mat_buffer(rhi, d.ibuf, u);
         }
     }, err = h.exn);
-    if (err) { u->release(); scm_raise_val(err); }
+    if (err) { batch_failed(); u->release(); scm_raise_val(err); }
 
     QRhiCommandBuffer *cb = f->cb;
     cb->beginPass(rt, clear, { depth_clear, 0 }, u);
@@ -1567,7 +1886,16 @@ static void execute_render_pass(FrameRec *f, PassRec *pr, QRhiRenderTarget *rt, 
         cb->setGraphicsPipeline(pss[i]);
         if (d.has_vp) cb->setViewport({ d.vp[0], d.vp[1], d.vp[2], d.vp[3] });
         else          cb->setViewport({ 0, 0, (float)sz.width(), (float)sz.height() });
-        if (d.has_sc) cb->setScissor({ d.sc[0], d.sc[1], d.sc[2], d.sc[3] });
+        if (d.has_sc) {
+            /* Metal aborts on a scissor rect outside the target: clip it. */
+            int x0 = std::max(0, d.sc[0]), y0 = std::max(0, d.sc[1]);
+            int x1 = std::min(sz.width(),  (int)std::min<qint64>((qint64)d.sc[0] + d.sc[2], INT_MAX));
+            int y1 = std::min(sz.height(), (int)std::min<qint64>((qint64)d.sc[1] + d.sc[3], INT_MAX));
+            if (x1 <= x0 || y1 <= y0) continue;   /* nothing visible: skip the draw */
+            cb->setScissor({ x0, y0, x1 - x0, y1 - y0 });
+        } else {
+            cb->setScissor({ 0, 0, sz.width(), sz.height() });
+        }
         cb->setShaderResources(d.b->srb);
         std::vector<QRhiCommandBuffer::VertexInput> vin;
         for (auto &vb : d.vbufs) vin.push_back({ vb.first->buf, vb.second });
@@ -1601,7 +1929,9 @@ static curry_val fn_gpu_render_pass(int ac, curry_val *av, void *) {
     pr->compute = false;
     f->pass = pr;
     curry_val result;
+    WindFrame *wf = push_wind(s_end_pass_prim);
     curry_val err = protected_apply1(av[1], serial_handle("gpu-pass", pr->serial), &result);
+    pop_wind(wf);
     f->pass = nullptr;
     if (err) { delete pr; scm_raise_val(err); }
     ExnHandler h;
@@ -1612,20 +1942,37 @@ static curry_val fn_gpu_render_pass(int ac, curry_val *av, void *) {
     return result;
 }
 
+/* Metal aborts the process on a dispatch over the device's limits instead
+ * of reporting an error, so check against what QRhi says the device has. */
+static void check_dispatch_limits(QRhi *rhi, const DispatchCmd &d) {
+    int maxg = rhi->resourceLimit(QRhi::MaxThreadGroupsPerDimension);
+    if (d.x > maxg || d.y > maxg || d.z > maxg)
+        curry_error("gpu-dispatch!: group count over the device limit of %d per dimension", maxg);
+    std::array<uint, 3> ls = d.pl->cs->shader.description().computeShaderLocalSize();
+    int mx = rhi->resourceLimit(QRhi::MaxThreadGroupX), my = rhi->resourceLimit(QRhi::MaxThreadGroupY),
+        mz = rhi->resourceLimit(QRhi::MaxThreadGroupZ), mt = rhi->resourceLimit(QRhi::MaxThreadsPerThreadGroup);
+    if ((int)ls[0] > mx || (int)ls[1] > my || (int)ls[2] > mz || (qint64)ls[0] * ls[1] * ls[2] > mt)
+        curry_error("gpu-dispatch!: the shader's local_size (%u, %u, %u) is over the device limit "
+                    "(%d, %d, %d; %d threads in total)", ls[0], ls[1], ls[2], mx, my, mz, mt);
+}
+
 static void execute_compute_pass(FrameRec *f, PassRec *pr) {
     QRhi *rhi = f->rhi;
     QRhiResourceUpdateBatch *u = rhi->nextResourceUpdateBatch();
     if (!u) curry_error("gpu-compute-pass!: out of resource update batches");
+    batch_begin();
     ExnHandler h;
     curry_val err = 0;
     std::vector<QRhiComputePipeline *> pss(pr->dispatches.size());
     SCM_PROTECT(h, {
         for (size_t i = 0; i < pr->dispatches.size(); i++) {
-            pss[i] = mat_compute(rhi, pr->dispatches[i].pl, u);
-            mat_bindings(rhi, pr->dispatches[i].b, u);
+            DispatchCmd &d = pr->dispatches[i];
+            pss[i] = mat_compute(rhi, d.pl, u);
+            mat_bindings(rhi, d.b, u);
+            check_dispatch_limits(rhi, d);
         }
     }, err = h.exn);
-    if (err) { u->release(); scm_raise_val(err); }
+    if (err) { batch_failed(); u->release(); scm_raise_val(err); }
     QRhiCommandBuffer *cb = f->cb;
     cb->beginComputePass(u);
     for (size_t i = 0; i < pr->dispatches.size(); i++) {
@@ -1650,7 +1997,9 @@ static curry_val fn_gpu_compute_pass(int, curry_val *av, void *) {
     pr->compute = true;
     f->pass = pr;
     curry_val result;
+    WindFrame *wf = push_wind(s_end_pass_prim);
     curry_val err = protected_apply1(av[1], serial_handle("gpu-pass", pr->serial), &result);
+    pop_wind(wf);
     f->pass = nullptr;
     if (err) { delete pr; scm_raise_val(err); }
     ExnHandler h;
@@ -1662,6 +2011,28 @@ static curry_val fn_gpu_compute_pass(int, curry_val *av, void *) {
 
 static quint32 opt_count(const Opts &o, const char *key, quint32 dflt) {
     return (quint32)opt_uint(o, key, dflt, 0x7fffffff);
+}
+
+/* Every vertex and instance the draw can fetch must lie inside its buffer:
+ * Metal and OpenGL do not bounds-check vertex fetches, so an over-long
+ * draw reads whatever memory follows the buffer.  For indexed draws the
+ * largest index in the whole index buffer is used (conservative). */
+static void check_draw_ranges(const DrawCmd &d, const char *who) {
+    if (d.count == 0 || d.instances == 0) return;
+    qint64 last_vertex = d.ibuf ? d.ibuf->largest_index() + d.vertex_offset
+                                : (qint64)d.first + d.count - 1;
+    qint64 last_instance = (qint64)d.first_instance + d.instances - 1;
+    for (size_t i = 0; i < d.pl->vbindings.size(); i++) {
+        const VInputBinding &b = d.pl->vbindings[i];
+        if (b.attr_end == 0) continue;   /* slot with no attributes reads nothing */
+        qint64 last = b.per_instance ? last_instance : last_vertex;
+        qint64 need = last * (qint64)b.stride + b.attr_end;
+        qint64 have = d.vbufs[i].first->data.size() - (qint64)d.vbufs[i].second;
+        if (need > have)
+            curry_error("%s: vertex buffer %zu holds %lld bytes but this draw reads %s %lld (needs %lld bytes)",
+                        who, i, (long long)have, b.per_instance ? "instance" : "vertex",
+                        (long long)last, (long long)need);
+    }
 }
 
 /* (gpu-draw! pass pipeline count ['bindings b] ['vertices bufs] ['index ibuf]
@@ -1681,8 +2052,11 @@ static curry_val fn_gpu_draw(int ac, curry_val *av, void *) {
     Opts o = parse_opts(ac, av, 3, who, allowed);
     d.b = o.has("bindings") ? val_to_bindings(o.get("bindings")) : d.pl->layout;
     d.b->check_live(who);
-    if (d.b->entries.size() != d.pl->layout->entries.size())
-        curry_error("%s: bindings do not match the pipeline's binding layout", who);
+    check_same_layout(d.pl->layout, d.b, who);
+    if (d.b != d.pl->layout) {
+        check_shader_resources(d.pl->vs, d.b, who);
+        check_shader_resources(d.pl->fs, d.b, who);
+    }
     if (o.has("vertices")) {
         curry_val vl = o.get("vertices");
         /* A handle is itself a pair (gpu-buffer . bytes): wrap a lone one. */
@@ -1717,10 +2091,14 @@ static curry_val fn_gpu_draw(int ac, curry_val *av, void *) {
         for (curry_val p = r; curry_is_pair(p); p = curry_cdr(p), i++) {
             if (!curry_is_number(curry_car(p))) curry_error("%s: '%s components must be numbers", who, k);
             q[i] = curry_number_to_double(curry_car(p));
+            if (!std::isfinite(q[i]) || std::fabs(q[i]) > 65536.0)
+                curry_error("%s: '%s components must be finite and within +-65536", who, k);
         }
+        if (q[2] < 0 || q[3] < 0) curry_error("%s: '%s width and height must not be negative", who, k);
         if (k[0] == 'v') { d.has_vp = true; for (int j = 0; j < 4; j++) d.vp[j] = (float)q[j]; }
         else             { d.has_sc = true; for (int j = 0; j < 4; j++) d.sc[j] = (int)q[j]; }
     }
+    check_draw_ranges(d, who);
     pr->draws.push_back(std::move(d));
     return curry_void();
 }
@@ -1742,8 +2120,8 @@ static curry_val fn_gpu_dispatch(int ac, curry_val *av, void *) {
     Opts o = parse_opts(ac, av, 2 + nums, who, allowed);
     d.b = o.has("bindings") ? val_to_bindings(o.get("bindings")) : d.pl->layout;
     d.b->check_live(who);
-    if (d.b->entries.size() != d.pl->layout->entries.size())
-        curry_error("%s: bindings do not match the pipeline's binding layout", who);
+    check_same_layout(d.pl->layout, d.b, who);
+    if (d.b != d.pl->layout) check_shader_resources(d.pl->cs, d.b, who);
     d.x = (int)g[0]; d.y = (int)g[1]; d.z = (int)g[2];
     pr->dispatches.push_back(d);
     return curry_void();
@@ -1758,10 +2136,11 @@ static void queue_readback(FrameRec *f, curry_val proc, bool is_tex, GpuBuffer *
     QRhi *rhi = f->rhi;
     QRhiResourceUpdateBatch *u = rhi->nextResourceUpdateBatch();
     if (!u) curry_error("gpu: out of resource update batches");
+    batch_begin();
     ExnHandler h;
     curry_val err = 0;
     SCM_PROTECT(h, { if (is_tex) mat_texture(rhi, t, u); else mat_buffer(rhi, b, u); }, err = h.exn);
-    if (err) { u->release(); scm_raise_val(err); }
+    if (err) { batch_failed(); u->release(); scm_raise_val(err); }
     auto *rb = new Readback{};
     rb->proc_slot = new curry_val(proc);
     gc_register_root(rb->proc_slot);
@@ -1812,10 +2191,12 @@ static QByteArray device_readback(QRhi *rhi, bool is_tex, GpuBuffer *b, GpuTextu
     QRhiCommandBuffer *cb = nullptr;
     if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess) curry_error("%s: could not begin a frame", who);
     QRhiResourceUpdateBatch *u = rhi->nextResourceUpdateBatch();
+    if (!u) { rhi->endOffscreenFrame(); curry_error("%s: out of resource update batches", who); }
+    batch_begin();
     ExnHandler h;
     curry_val err = 0;
     SCM_PROTECT(h, { if (is_tex) mat_texture(rhi, t, u); else mat_buffer(rhi, b, u); }, err = h.exn);
-    if (err) { u->release(); rhi->endOffscreenFrame(); scm_raise_val(err); }
+    if (err) { batch_failed(); u->release(); rhi->endOffscreenFrame(); scm_raise_val(err); }
     QRhiReadbackResult res;
     if (is_tex) u->readBackTexture(QRhiReadbackDescription(t->tex), &res);
     else        u->readBackBuffer(b->buf, 0, (quint32)b->data.size(), &res);
@@ -2000,6 +2381,13 @@ static curry_val fn_gpu_std430(int, curry_val *av, void *) { return pack_block(a
  * ========================================================================= */
 
 void qt6_gpu_register(CurryVM *vm) {
+    s_noop_prim = make_prim("gpu-wind-noop", fn_noop);
+    s_end_pass_prim = make_prim("gpu-end-pass-on-escape", fn_end_pass_on_escape);
+    s_end_device_frame_prim = make_prim("gpu-end-frame-on-escape", fn_end_device_frame_on_escape);
+    gc_register_root(&s_noop_prim);
+    gc_register_root(&s_end_pass_prim);
+    gc_register_root(&s_end_device_frame_prim);
+
     /* Devices and canvases */
     curry_define_fn(vm, "make-gpu-device",          fn_make_gpu_device,          0, 1, NULL);
     curry_define_fn(vm, "gpu-device-destroy!",      fn_gpu_device_destroy,       1, 1, NULL);

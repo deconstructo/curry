@@ -34,6 +34,7 @@ Matrix helpers are in a separate pure-Scheme library,
 - [Queries](#queries)
 - [Coordinate conventions](#coordinate-conventions)
 - [Resource lifetime](#resource-lifetime)
+- [What is checked, and what is not](#what-is-checked-and-what-is-not)
 - [`(curry gpu-math)`](#curry-gpu-math)
 - [Limits of this version](#limits-of-this-version)
 
@@ -424,6 +425,48 @@ on one at a time and is re-created when used on another. Re-creation
 uploads the CPU-side copy of the data, so results a compute shader wrote
 on the old device are not carried over.
 
+## What is checked, and what is not
+
+Metal, and some drivers for other APIs, do not report a mismatch as an
+error. They abort the whole process, or read memory past the end of a
+buffer. So the `gpu-*` procedures check everything they can before any
+command reaches the GPU, and raise an ordinary Scheme error instead:
+
+- **Against the shaders.** A pipeline reads Qt's reflection data for its
+  shaders. Every uniform block, sampled texture, storage block and storage
+  image a shader declares must be in the bindings at that binding number,
+  with the right kind, with that shader's stage listed, and big enough
+  (uniform and storage buffers are compared with the block size; textures
+  must be 2D or 3D as the shader expects; storage images must have the
+  format the shader declares). Every vertex shader input needs an
+  attribute in `'inputs`. Bindings passed to `gpu-draw!`/`gpu-dispatch!`
+  must have the pipeline's layout and are checked the same way.
+- **Vertex layouts.** At most 8 vertex buffer slots and 16 attributes;
+  attribute locations are unique; every attribute fits inside its stride.
+- **Draw ranges.** Every vertex and instance a draw can fetch must be
+  inside its buffer. For an indexed draw, the largest index in the index
+  buffer is used. Because of this, an index buffer cannot also be a
+  storage buffer: its CPU copy must always be the real contents.
+- **Viewport and scissor.** Values must be finite and within ±65536; the
+  scissor rectangle is clipped to the target, and a draw whose scissor is
+  entirely outside is skipped.
+- **Compute.** Group counts and the shader's `local_size` are compared
+  with the device's limits.
+- **Shader source.** At most 256 KB. The compiler runs on a thread with a
+  large stack, so a very long expression gives a compile error and does
+  not crash the process.
+- **Data.** Circular lists, self-containing vectors, and data with more
+  than 2^28 elements raise.
+- **Escapes.** A `call/cc` escape out of a frame or pass procedure ends
+  that frame or pass properly; its handles stop working.
+
+**Not checked: what shader code does with memory.** Inside a shader,
+`s[i]` with `i` past the end of a storage buffer is not bounds-checked on
+Metal or OpenGL. It can read or overwrite other GPU data of the same
+process. Treat shader source like native code: run only shaders you trust.
+A shader that loops for a very long time can also make the whole display
+stutter until the GPU driver stops it.
+
 ## `(curry gpu-math)`
 
 Pure Scheme. Vectors are lists `(x y z)` / `(x y z w)`; matrices are
@@ -448,7 +491,7 @@ Pure Scheme. Vectors are lists `(x y z)` / `(x y z w)`; matrices are
 
 - No geometry or tessellation shaders, texture arrays, cube maps, indirect
   draws or multiview yet, even where the backend supports them.
-- Index buffers are 32-bit only.
+- Index buffers are 32-bit only, and cannot be written by shaders.
 - 3D textures cannot be read back directly; copy them to a storage buffer
   with a compute shader.
 - One uniform buffer value per frame (see [Buffers](#buffers)).

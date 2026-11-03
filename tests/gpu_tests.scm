@@ -439,6 +439,162 @@ void main() {
 (gpu-release! doomed)
 (check "use after release raises" (raises? (lambda () (gpu-buffer-update! doomed '(0.0)))) #t)
 
+;;; ---- input that used to crash the process, hang, or lose data ----------------
+;;; Each of these was found by an independent review; before the fix each one
+;;; aborted the process (Metal validation), segfaulted, or hung.
+
+(define (raises-with? thunk text)
+  (let ((m (raise-message thunk))) (and m (string-contains? m text) #t)))
+
+(define circular (let ((l (list 1.0 2.0))) (set-cdr! (cdr l) l) l))
+(check "circular list as data raises instead of hanging"
+       (raises-with? (lambda () (make-gpu-buffer 'vertex circular)) "circular") #t)
+(check "circular list in gpu-f32-bytes raises" (raises? (lambda () (gpu-f32-bytes circular))) #t)
+(define self-vec (make-vector 1000 0.0))
+(let loop ((i 0)) (when (< i 1000) (vector-set! self-vec i self-vec) (loop (+ i 1))))
+(check "self-referencing vector raises instead of exploding" (raises? (lambda () (gpu-f32-bytes self-vec))) #t)
+
+;; very long expression: compiles (on the big-stack thread) or raises, no crash
+(define long-expr
+  (let loop ((k 20000) (acc "")) (if (= k 0) acc (loop (- k 1) (string-append acc "s[1]+")))))
+(check "20000-term shader expression does not crash the compiler"
+       (guard (e (#t 'raised))
+         (make-gpu-shader 'compute (string-append "#version 440
+layout(local_size_x = 1) in;
+layout(std430, binding = 0) buffer S { float s[]; };
+void main() { s[0] = " long-expr "1.0; }")) 'compiled)
+       'compiled)
+(check "oversized shader source raises"
+       (raises-with? (lambda () (make-gpu-shader 'compute (make-string 300000 #\space))) "limit") #t)
+
+;; vertex layouts
+(define vs-pos (make-gpu-shader 'vertex "#version 440
+layout(location = 0) in vec3 pos;
+void main() { gl_Position = vec4(pos, 1.0); }"))
+(check "attribute past the stride raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-pos 'fragment fs-white 'inputs '((4 (0 float3 0))))) "stride") #t)
+(check "duplicate attribute location raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-pos 'fragment fs-white
+                                                   'inputs '((16 (0 float3 0) (0 float 12))))) "twice") #t)
+(check "too many vertex buffer slots raises"
+       (raises? (lambda () (make-gpu-pipeline 'vertex vs-pos 'fragment fs-white
+                                              'inputs (cons '(12 (0 float3 0)) (make-list 9 '(16)))))) #t)
+(check "shader input with no attribute raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-pos 'fragment fs-white)) "location 0") #t)
+
+;; bindings checked against what the shaders declare
+(define small-ubuf (make-gpu-buffer 'uniform 16))
+(define fs-big-block (make-gpu-shader 'fragment "#version 440
+layout(location = 0) out vec4 frag;
+layout(std140, binding = 0) uniform U { vec4 c[8]; };
+void main() { frag = c[7]; }"))
+(check "uniform buffer smaller than its block raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-full 'fragment fs-big-block
+                                  'bindings (make-gpu-bindings (list (list 'uniform 0 'fragment small-ubuf))))) "bytes") #t)
+(check "missing binding raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-full 'fragment fs-uniform)) "nothing there") #t)
+(check "texture bound where a uniform block is declared raises"
+       (raises? (lambda () (make-gpu-pipeline 'vertex vs-full 'fragment fs-uniform
+                             'bindings (make-gpu-bindings (list (list 'texture 0 'fragment tex2 smp)))))) #t)
+(check "binding without the shader's stage raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-full 'fragment fs-uniform
+                                  'bindings (make-gpu-bindings (list (list 'uniform 0 'vertex colour-ubuf))))) "stages") #t)
+(define fs-3d (make-gpu-shader 'fragment "#version 440
+layout(location = 0) in vec2 uv;
+layout(location = 0) out vec4 frag;
+layout(binding = 0) uniform sampler3D vol;
+void main() { frag = texture(vol, vec3(uv, 0.5)); }"))
+(check "2D texture where the shader samples 3D raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-full 'fragment fs-3d 'bindings tbind)) "3D") #t)
+(check "swapped-in bindings of a different kind raise"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p upipe 3 'bindings tbind)) 'target t1))))) #t)
+(when (gpu-feature? dev 'compute)
+  (define rgba8-img (make-gpu-texture 8 8 'format 'rgba8 'storage #t))
+  (define cs-f32-img (make-gpu-shader 'compute "#version 440
+layout(local_size_x = 1) in;
+layout(rgba32f, binding = 0) uniform writeonly image2D img;
+void main() { imageStore(img, ivec2(0), vec4(1.0)); }"))
+  (check "storage image format mismatch raises"
+         (raises-with? (lambda () (make-gpu-compute-pipeline cs-f32-img
+                                    (make-gpu-bindings (list (list 'image-write 0 'compute rgba8-img))))) "format") #t)
+  (check "image mip level that does not exist raises"
+         (raises-with? (lambda () (make-gpu-bindings (list (list 'image-write 0 'compute rgba8-img 3)))) "mip level") #t)
+  ;; Raised by the shader compiler or by gpu-dispatch!, whichever knows the
+  ;; limit first -- either way an error, not a Metal abort.
+  (check "work group larger than the device allows raises"
+         (raises? (lambda ()
+           (let* ((cs (make-gpu-shader 'compute "#version 440
+layout(local_size_x = 1024, local_size_y = 2) in;
+layout(std430, binding = 0) buffer S { float s[]; };
+void main() { s[0] = 1.0; }"))
+                  (pl (make-gpu-compute-pipeline cs (make-gpu-bindings (list (list 'storage 0 'compute sbuf))))))
+             (gpu-run! dev (lambda (f) (gpu-compute-pass! f (lambda (p) (gpu-dispatch! p pl 1))))))))
+         #t))
+
+;; draw ranges
+(check "non-indexed draw past the end of the vertex buffer raises"
+       (raises-with? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 300000 'vertices tri)) 'target t1)))) "bytes") #t)
+(check "draw starting past the end raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 3 'vertices tri 'first 2000000000)) 'target t1))))) #t)
+(define wild-indices (make-gpu-buffer 'index '(0 1 1000000)))
+(check "index pointing past the vertex buffer raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 3 'vertices tri 'index wild-indices)) 'target t1))))) #t)
+(check "instance past the end of a per-instance buffer raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p)
+           (gpu-draw! p inst-pipe 6 'vertices (list small-quad offsets) 'index quad-indices 'instances 3)) 'target t1))))) #t)
+(check "index buffer that is also a storage buffer raises"
+       (raises? (lambda () (make-gpu-buffer '(index storage) '(0 1 2)))) #t)
+
+;; viewport and scissor
+(check "NaN scissor raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 3 'vertices tri 'scissor '(+nan.0 0 10 10))) 'target t1))))) #t)
+(check "huge viewport raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 3 'vertices tri 'viewport '(0 0 1e30 10))) 'target t1))))) #t)
+(define t8 (make-target))
+(gpu-run! dev (lambda (f)
+  (gpu-render-pass! f (lambda (p)
+    (gpu-draw! p colour-pipe 3 'vertices tri 'scissor '(-100 -100 50000 50000))   ; clipped to the target
+    (gpu-draw! p colour-pipe 3 'vertices tri 'scissor '(500 500 10 10)))          ; outside: skipped
+    'target t8)))
+(check "scissor larger than the target is clipped" (pixel (gpu-read-texture dev t8) 32 32) red)
+
+;; call/cc escapes out of a pass and out of a frame
+(define escaped-frame
+  (call/cc (lambda (k) (gpu-run! dev (lambda (f) (gpu-render-pass! f (lambda (p) (k f)) 'target t1))))))
+(check "escaped frame handle raises" (raises? (lambda () (gpu-render-pass! escaped-frame (lambda (p) #t) 'target t1))) #t)
+(check "device works after a call/cc escape" (gpu-run! dev (lambda (f) 'fine)) 'fine)
+(check "rendering works after a call/cc escape" (draw-uniform (make-target)) blue)
+
+;; a failed pass does not lose uploads queued before the failure
+(define fresh-tri (make-gpu-buffer 'vertex
+  (append (vertex '(-0.5 -0.5 0.5) (rgba green)) (vertex '(0.5 -0.5 0.5) (rgba green))
+          (vertex '( 0.0  0.5 0.5) (rgba green)))))
+(unless (gpu-feature? dev 'wide-lines)
+  (define wide-pipe (make-gpu-pipeline 'vertex vs-colour 'fragment fs-colour 'inputs colour-inputs
+                                       'topology 'lines 'line-width 3.0))
+  (check "pass using an unsupported feature raises"
+         (raises? (lambda () (gpu-run! dev (lambda (f)
+           (gpu-render-pass! f (lambda (p)
+             (gpu-draw! p colour-pipe 3 'vertices fresh-tri)
+             (gpu-draw! p wide-pipe 2 'vertices fresh-tri)) 'target t1))))) #t)
+  (define t9 (make-target))
+  (gpu-run! dev (lambda (f) (gpu-render-pass! f (lambda (p) (gpu-draw! p colour-pipe 3 'vertices fresh-tri)) 'target t9)))
+  (check "upload queued before the failure arrives on the retry" (pixel (gpu-read-texture dev t9) 32 32) green))
+
+;; one value per uniform buffer per frame
+(check "updating a uniform buffer after it was used in the same frame raises"
+       (raises-with? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p) (gpu-draw! p upipe 3)) 'target t1)
+         (gpu-buffer-update! colour-ubuf '(1.0 1.0 1.0 1.0))))) "second buffer") #t)
+(gpu-buffer-update! colour-ubuf '(0.0 0.0 1.0 1.0))
+
 ;;; ---- device lifetime -----------------------------------------------------------
 
 ;; Resources outlive a device: a second device re-creates them.
