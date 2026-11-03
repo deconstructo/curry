@@ -209,6 +209,7 @@ The test suites registered in `ctest`:
 | `babylonian_astronomy` | `babylonian_astronomy_tests.scm` | `(curry babylonian-astronomy)`: zigzag function, synodic-month/Saros eclipse-cycle constants, civil calendar month names, Akkadian aliases — 26 assertions |
 | `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
 | `lsp` | `test_lsp.sh` | `(curry lsp)` over real Content-Length-framed stdio: `initialize` capabilities, reader-driven diagnostics (raise + clear on `didChange`), hover (special forms/builtins/Akkadian synonyms), completion (static table + structurally-collected local bindings), the nesting-depth crash guard (including the `#\"`/`#\;` character-literal bypass), `didClose`, unknown-method errors — 27 assertions |
+| `qt6_gpu` | `gpu_tests.scm` | `(curry qt6)` `gpu-*` QRhi layer on a real headless GPU (Metal/Vulkan/GL): compute, rendering (depth, indexed, instanced, textures, render-to-texture), storage images, 3D textures, readback, `gpu-std140` layout checked by the GPU, `(curry gpu-math)`, error paths — prints SKIP without a GPU unless `CURRY_GPU_REQUIRED` is set; only registered when Qt ≥ 6.7 + Shader Tools are found |
 | `ode`, `pde_numerical`, `d_operator`, `tuples`, `partial`, `trig`, `sicm` | individual `.scm` files | Numeric/physics modules |
 
 ## CLI flags
@@ -337,7 +338,7 @@ Open-addressing hash tables, 75% max load, tombstone deletion. Comparator modes:
 
 ### Graphics / UI (`modules/qt6/qt6.cpp`)
 
-Three layers: `qt-*` (raw queries), `gfx-*` (2D GPU via QPainter/QOpenGLWidget), and Layer 3 (full UI: windows, canvas, menus, widgets, timers, dialogs). GLSL shader API: `make-gl-shader`, `gl-shader-draw!`, `make-gl-texture`, `make-gl-buffer`, `make-gl-framebuffer`. Key/mouse events, mouse capture (`canvas-grab-mouse!`), HiDPI, cross-platform (Linux/macOS/Windows). See `docs/reference/module-qt6.md`.
+Three layers: `qt-*` (raw queries), `gfx-*` (2D GPU via QPainter/QOpenGLWidget), and Layer 3 (full UI: windows, canvas, menus, widgets, timers, dialogs). GLSL shader API: `make-gl-shader`, `gl-shader-draw!`, `make-gl-texture`, `make-gl-buffer`, `make-gl-framebuffer`. Separately, `modules/qt6/gpu.cpp` adds a `gpu-*` layer on QRhi (Metal/Vulkan/D3D/GL; headless devices + `QRhiWidget` canvas, compute, depth/instancing/index buffers, `gpu-std140` packing; Qt ≥ 6.7 + Shader Tools, `BUILD_QT6_GPU`) — see `docs/reference/module-qt6-gpu.md`; shared helpers live in `modules/qt6/qt6_common.h`. Key/mouse events, mouse capture (`canvas-grab-mouse!`), HiDPI, cross-platform (Linux/macOS/Windows). See `docs/reference/module-qt6.md`.
 
 macOS: modules build as `.so` bundles with `-undefined dynamic_lookup`; main binary uses `ENABLE_EXPORTS ON`.
 

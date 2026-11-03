@@ -1353,7 +1353,7 @@ Each directory is tried for `.so`, `.dylib`, `.sld`, `.scm` in that order.
 | [`(curry pde)`](module-pde.md) | Standard | PDE solvers: heat, wave, Poisson, method of lines |
 | [`(curry pde-symbolic)`](module-pde-symbolic.md) | Standard | Symbolic PDE analysis: separation of variables, characteristics |
 | [`(curry sicm)`](module-sicm.md) | Standard | Classical mechanics (SICM): Lagrangian, Hamiltonian, rigid body, symplectic integration |
-| [`(curry qt6)`](module-qt6.md) | Optional | Qt6 windowing, 2D graphics, widgets |
+| [`(curry qt6)`](module-qt6.md) | Optional | Qt6 windowing, 2D graphics, widgets; GPU rendering and compute via QRhi ([`gpu-*`](module-qt6-gpu.md)) |
 | [`(curry plplot)`](module-plplot.md) | Optional | PLplot scientific plotting |
 | [`(curry mqtt)`](module-mqtt.md) | Optional | MQTT client with TLS |
 | [`(curry neo4j)`](module-neo4j.md) | Optional | Neo4j graph database (Bolt) |

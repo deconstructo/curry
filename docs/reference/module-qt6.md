@@ -548,6 +548,8 @@ Both procedures return a path string on confirmation, or `#f` if the user cancel
 
 ## GLSL shaders and textures
 
+> For new GPU work, see the [`gpu-*` layer](module-qt6-gpu.md): it runs on Metal, Vulkan and D3D as well as OpenGL, and has compute shaders, depth testing, instancing and index buffers. The `gl-*` procedures below are unchanged.
+
 Write full OpenGL 3.3 Core Profile fragment shaders directly in Scheme strings. The module handles context setup, HiDPI scaling, and QPainter interleaving automatically.
 
 ```scheme
