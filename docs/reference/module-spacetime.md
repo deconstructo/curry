@@ -2,7 +2,10 @@
 
 Write a formula once with curry's symbolic CAS, and run it on the GPU.
 
-- `(curry glsl)` turns CAS expressions into GLSL source.
+- `(curry glsl)` turns CAS expressions into GLSL source. GLSL, the
+  *OpenGL Shading Language*, is the C-like language that programs on the
+  graphics card ("shaders") are written in; see
+  [Shaders and GLSL, briefly](module-qt6-gpu.md#shaders-and-glsl-briefly).
 - `(curry spacetime)` defines spacetime metrics symbolically, derives their
   partial derivatives with the CAS, and emits a GLSL `metric_eval`
   function plus a geodesic integrator, ready for a

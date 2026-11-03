@@ -745,3 +745,6 @@ All module callbacks are safe to call from non-Qt threads via `send!`. Scheme pr
 | `examples/holo_explorer.scm` | Arbitrary-polynomial fractal explorer — parameter space, Julia sets, orbit traps |
 | `examples/tesseract.scm` | Rotating 4D hypercube |
 | `examples/maze4d.scm` | First-person 4D maze — GPU DDA raycaster with anaglyph stereo |
+| `examples/gpu-cube.scm` | Lit rotating cube on the [`gpu-*` layer](module-qt6-gpu.md): depth test, MSAA, std140 uniforms |
+| `examples/blackhole.scm` | Fall into a Kerr black hole, ray-traced per pixel on the GPU from a symbolic metric — see [the guide](../guides/blackhole.md) |
+| `examples/blackhole-anaglyph.scm` | The same in red/cyan 3D |

@@ -42,6 +42,7 @@ Documentation is split into two directories:
 - [Text-to-speech with Piper](docs/guides/tts-piper.md) — building `libpiper` and curry against it on macOS/Linux, speaking/saving audio via `(curry tts)`, sourcing and adding voice models
 - [Simulating cell biochemistry with Gillespie](docs/guides/gillespie-cells.md) — stochastic reaction networks, composable temperature/pH/nutrient-sensitive rate laws, multi-cell simulation via actors
 - [Talking to a tracked robot over rosbridge](docs/guides/ros-robot.md) — `(curry ros)` + `(curry rpi)`: ROS1/ROS2 teleop over `/cmd_vel` driving real GPIO/PWM motor control
+- [Falling into a black hole](docs/guides/blackhole.md) — GPU ray tracing through a Kerr black hole generated from a symbolic metric: what you see, why, and the controls (standard and red/cyan 3D)
 - [Benchmarking reference](docs/reference/benchmarking.md) — bench suites, MQTT event schema, all GC stat fields
 - [Profiling reference](docs/reference/profiling.md) — `**eval-profiler**`, `(curry profiling)` API, `,profile` REPL command, timing workflows
 

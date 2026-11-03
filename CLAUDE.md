@@ -89,6 +89,9 @@ brew install bdw-gc gmp cmake
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
                  libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev \
                  libmpfr-dev   # for -DBUILD_MPFR=ON
+# BUILD_MODULE_QT6's gpu-* layer (BUILD_QT6_GPU, default ON) also needs
+# Qt >= 6.7 + Qt Shader Tools: qt6-base-private-dev qt6-shadertools-dev
+# (Homebrew's qt includes them); without them it is skipped with a warning.
 # BUILD_MODULE_VECDB needs nothing extra (vendored usearch/hnswlib). Not
 # covered by apt/brew at all: BUILD_MODULE_PIPER (see
 # docs/reference/module-piper.md) and BUILD_JUPYTER_KERNEL (see
