@@ -113,25 +113,54 @@
 
 ;;; Condvar signal/wait
 ;;; sync module names: make-condvar, cond-wait!, cond-signal!
+;;;
+;;; Issue #312: this test used to call cond-wait! with no condition flag.
+;;; A condition variable does not remember a signal sent while nobody is
+;;; waiting, so whenever the signalling actor got the mutex first -- more
+;;; likely on a loaded CI machine -- the waiter blocked forever and the
+;;; main thread hung in sem-wait! (both stack traces in #312 show exactly
+;;; that: main in fn_sem_wait, one actor in pthread_cond_wait).  The
+;;; runtime was fine; the test used the condvar wrongly.  Correct use:
+;;; a flag guarded by the mutex, waited for in a loop (which also covers
+;;; spurious wake-ups).
 (define cv-mtx  (make-mutex))
 (define cv      (make-condvar))
+(define cv-ready #f)
 (define cv-result #f)
 (define sem5 (make-semaphore 0))
 
-(spawn (lambda ()
-         (mutex-lock! cv-mtx)
-         (cond-wait! cv cv-mtx)
-         (set! cv-result 'signaled)
-         (mutex-unlock! cv-mtx)
-         (sem-post! sem5)))
+(define (cv-wait-for-ready!)
+  (mutex-lock! cv-mtx)
+  (let loop ()
+    (unless cv-ready
+      (cond-wait! cv cv-mtx)
+      (loop)))
+  (set! cv-result 'signaled)
+  (mutex-unlock! cv-mtx)
+  (sem-post! sem5))
 
-(spawn (lambda ()
-         (mutex-lock! cv-mtx)
-         (cond-signal! cv)
-         (mutex-unlock! cv-mtx)))
+(define (cv-signal-ready!)
+  (mutex-lock! cv-mtx)
+  (set! cv-ready #t)
+  (cond-signal! cv)
+  (mutex-unlock! cv-mtx))
 
+(spawn cv-wait-for-ready!)
+(spawn cv-signal-ready!)
 (sem-wait! sem5)
 (check "condvar signal/wait" cv-result 'signaled)
+
+;;; The order that used to hang, forced: the signal is sent and finished
+;;; before the waiter even starts.  With the flag the waiter sees it and
+;;; never waits; without it, this would block forever every time.
+(set! cv-ready #f)
+(set! cv-result #f)
+(define sem5-signalled (make-semaphore 0))
+(spawn (lambda () (cv-signal-ready!) (sem-post! sem5-signalled)))
+(sem-wait! sem5-signalled)
+(spawn cv-wait-for-ready!)
+(sem-wait! sem5)
+(check "condvar: a signal sent before the wait is not lost (#312)" cv-result 'signaled)
 
 ;;; spawn + closure upvalue race — regression test.
 ;;;
