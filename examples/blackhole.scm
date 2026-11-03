@@ -272,13 +272,14 @@ void main() {
                     vec4 u_em = v / sqrt(n);
                     float gshift = E_obs / dot(P, u_em);
                     // Novikov–Thorne-like: flux ~ r^-3 (1 - sqrt(r_in / r)),
-                    // peak at about 1.36 r_in; temperature ~ flux^(1/4)
+                    // peak at r = (49/36) r_in, where x^3 (1 - sqrt x) = 0.05665;
+                    // temperature ~ flux^(1/4)
                     float x = disk_in / rh;
-                    float flux = x * x * x * max(1.0 - sqrt(x), 0.0) / 0.0302;   // 1 at the peak
-                    float T = 7500.0 * pow(max(flux, 1e-6), 0.25);
+                    float flux = x * x * x * max(1.0 - sqrt(x), 0.0) / 0.05665;   // 1 at the peak
+                    float T = 8750.0 * pow(max(flux, 1e-6), 0.25);               // peak 8750 K
                     float edge = smoothstep(disk_out, 0.6 * disk_out, rh);   // fade the outer edge
                     float alpha = 0.92 * edge;
-                    col += trans * alpha * blackbody(T * gshift) * (0.04 + 0.9 * flux)
+                    col += trans * alpha * blackbody(T * gshift) * (0.04 + 1.7 * flux)
                            * clamp(gshift * gshift * gshift * gshift, 0.0, 30.0);
                     trans *= 1.0 - alpha;
                 }

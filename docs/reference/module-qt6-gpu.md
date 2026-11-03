@@ -208,9 +208,9 @@ raises. A uniform buffer can't have any other usage, and its size is
 rounded up to a multiple of 16 bytes. Index buffers are always 32-bit.
 
 Updates take effect at the next pass that uses the buffer. Within one frame,
-a uniform buffer holds a single value: if you update it between two passes
-of the same frame, both passes may see the second value. Use one uniform
-buffer per object for per-object data.
+a uniform buffer holds a single value: once a draw or dispatch that uses it
+has been recorded, updating it again in the same frame raises an error. Use
+one uniform buffer per object for per-object data.
 
 ## Textures and samplers
 
@@ -340,8 +340,8 @@ nothing from that pass reaches the GPU, and the error propagates normally.
 ```
 
 On a device frame the procedure runs right after `gpu-run!`'s frame ends.
-On a canvas frame it runs when the GPU has finished that frame, during a
-later event-loop turn.
+On a canvas frame it runs on a later event-loop turn, after the GPU has
+finished that frame (never inside Qt's own frame processing).
 
 Texture readback returns rows as stored in the texture. With OpenGL, a
 texture used as a render target has its first row at the **bottom** of the
@@ -457,8 +457,20 @@ command reaches the GPU, and raise an ordinary Scheme error instead:
   not crash the process.
 - **Data.** Circular lists, self-containing vectors, and data with more
   than 2^28 elements raise.
-- **Escapes.** A `call/cc` escape out of a frame or pass procedure ends
-  that frame or pass properly; its handles stop working.
+- **Escapes.** A `call/cc` escape out of a frame, pass, or canvas render
+  procedure ends that frame or pass properly; its handles stop working.
+- **Threads.** Every `gpu-*` procedure that touches GPU state raises when
+  called from any thread but the main (Qt) thread, including from an
+  actor or from inside a parallel `map`. Only the byte-packing helpers
+  (`gpu-f32-bytes`, `gpu-std140`, ...) work on any thread.
+- **Sizes.** Textures are compared with the device's maximum size; 3D
+  textures are limited to 2048 in every dimension. Integer formats cannot
+  have generated mipmaps or be blended into.
+- **Arrays.** Arrays of textures or images in a shader, and matrix or
+  array vertex inputs, are refused (one resource per binding, one
+  attribute per input).
+- **Index buffers changed late.** An index buffer updated after a draw
+  was recorded is checked again when the pass runs.
 
 **Not checked: what shader code does with memory.** Inside a shader,
 `s[i]` with `i` past the end of a storage buffer is not bounds-checked on
@@ -466,6 +478,10 @@ Metal or OpenGL. It can read or overwrite other GPU data of the same
 process. Treat shader source like native code: run only shaders you trust.
 A shader that loops for a very long time can also make the whole display
 stutter until the GPU driver stops it.
+
+**Not checked: preprocessor expansion.** The 256 KB source limit does not
+limit what `#define` macros expand to; a shader built to expand
+exponentially can make compilation take a long time and a lot of memory.
 
 ## `(curry gpu-math)`
 
@@ -497,3 +513,4 @@ Pure Scheme. Vectors are lists `(x y z)` / `(x y z w)`; matrices are
 - One uniform buffer value per frame (see [Buffers](#buffers)).
 - Metal has no 64-bit floats in shaders; GPU work is 32-bit float.
 - Mouse capture (first-person mode) is not implemented for gpu canvases yet.
+- All GPU work happens on the main thread (see [What is checked](#what-is-checked-and-what-is-not)).

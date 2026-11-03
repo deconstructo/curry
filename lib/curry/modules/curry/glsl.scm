@@ -82,7 +82,19 @@
           (error (string-append "sym->glsl: no GLSL name given for " what) name))
         (unless (string? (cdr e))
           (error "sym->glsl: var-map values must be strings" e))
-        (cdr e)))
+        (protect (cdr e))))
+
+    ;; A var-map value that is not a plain name, member access or index
+    ;; (e.g. "a + b") is parenthesized, so it keeps its meaning inside a
+    ;; larger expression.
+    (define (protect text)
+      (if (let loop ((i 0))
+            (or (= i (string-length text))
+                (let ((c (string-ref text i)))
+                  (and (or (char-alphabetic? c) (char-numeric? c) (memv c '(#\_ #\. #\[ #\])))
+                       (loop (+ i 1))))))
+          text
+          (string-append "(" text ")")))
 
     ;; ---- operators ----
 
@@ -152,7 +164,8 @@
 
     ;; Generic walk.  Returns (key . code): key is the node's full text with
     ;; no substitutions (its structural identity), code is the text to use
-    ;; for it.  on-node receives (key code) for every interior node and
+    ;; for it.  on-node receives (key code x kids) for every interior node
+    ;; (x the CAS node, kids its children's (key . code) pairs) and
     ;; returns the code to use -- code itself for sym->glsl, a temporary's
     ;; name for a shared node in glsl-assignments.
     (define (walk x var-map on-node)
@@ -165,16 +178,16 @@
                (fname (lookup-name (sym-fn-name x) var-map "function"))
                (call (lambda (strs) (string-append fname "(" (join strs ", ") ")")))
                (key (call (smap car kids))))
-          (cons key (on-node key (call (smap cdr kids))))))
+          (cons key (on-node key (call (smap cdr kids)) x kids))))
        ((sym-expr? x)
         (let* ((args (args-of x))
                (kids (smap (lambda (a) (walk a var-map on-node)) args))
                (key (emit-node (sym-expr-op x) args (smap car kids))))
-          (cons key (on-node key (emit-node (sym-expr-op x) args (smap cdr kids))))))
+          (cons key (on-node key (emit-node (sym-expr-op x) args (smap cdr kids)) x kids))))
        (else (let ((s (emit-leaf x var-map))) (cons s s)))))
 
     (define (sym->glsl expr var-map)
-      (car (walk expr var-map (lambda (key code) code))))
+      (car (walk expr var-map (lambda (key code x kids) code))))
 
     ;; ---- many expressions with common subexpression elimination ----
 
@@ -199,14 +212,22 @@
            (unless (and (pair? t) (string? (car t)))
              (error "glsl-assignments: targets are (lvalue-string . expr)" t))
            (walk (cdr t) var-map
-                 (lambda (key code)
+                 (lambda (key code x kids)
                    (hash-table-set! counts key (+ 1 (href counts key 0)))
+                   ;; An integer power is expanded by repeating its base
+                   ;; (x*x*x...); count the base once more so a non-trivial
+                   ;; base becomes a temporary instead of being repeated.
+                   (when (and (sym-expr? x) (eq? (sym-expr-op x) 'expt) (pair? kids)
+                              (let ((e (sym-expr-arg x 1))) (and (exact-integer? e) (<= 2 (abs e) 8)))
+                              (sym-expr? (sym-expr-arg x 0)))
+                     (let ((base-key (car (car kids))))
+                       (hash-table-set! counts base-key (+ 1 (href counts base-key 0)))))
                    code)))
          targets)
         (let ((rhs
                (smap (lambda (t)
                       (cdr (walk (cdr t) var-map
-                                 (lambda (key code)
+                                 (lambda (key code x kids)
                                    (cond
                                     ((hash-table-exists? names key) (hash-table-ref names key))
                                     ((> (href counts key 0) 1)

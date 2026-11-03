@@ -10,7 +10,7 @@
 ;;; CURRY_GPU_REQUIRED is set, in which case that is a failure.
 
 (import (scheme base) (scheme cxr) (scheme write) (scheme process-context)
-        (curry qt6) (curry f64vector) (curry gpu-math))
+        (curry qt6) (curry f64vector) (curry gpu-math) (curry sync))
 
 (define pass 0)
 (define fail 0)
@@ -594,6 +594,81 @@ void main() { s[0] = 1.0; }"))
          (gpu-render-pass! f (lambda (p) (gpu-draw! p upipe 3)) 'target t1)
          (gpu-buffer-update! colour-ubuf '(1.0 1.0 1.0 1.0))))) "second buffer") #t)
 (gpu-buffer-update! colour-ubuf '(0.0 0.0 1.0 1.0))
+
+;;; ---- review findings on PR #347 ------------------------------------------------
+
+;; An index buffer changed after gpu-draw! recorded the draw is checked again
+;; when the pass executes.
+(define late-indices (make-gpu-buffer 'index '(0 1 2)))
+(check "index buffer updated after the draw was recorded is re-checked"
+       (raises? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p)
+           (gpu-draw! p colour-pipe 3 'vertices tri 'index late-indices)
+           (gpu-buffer-update! late-indices '(100000000 100000001 100000002)))
+           'target t1))))) #t)
+(gpu-buffer-update! late-indices '(0 1 2))
+
+;; one value per uniform buffer: also between two draws in one pass
+(check "updating a uniform buffer between two draws of one pass raises"
+       (raises-with? (lambda () (gpu-run! dev (lambda (f)
+         (gpu-render-pass! f (lambda (p)
+           (gpu-draw! p upipe 3)
+           (gpu-buffer-update! colour-ubuf '(1.0 0.0 1.0 1.0))
+           (gpu-draw! p upipe 3)) 'target t1)))) "second buffer") #t)
+(gpu-buffer-update! colour-ubuf '(0.0 0.0 1.0 1.0))
+
+(check "matrix vertex input raises"
+       (raises-with? (lambda () (make-gpu-pipeline
+         'vertex (make-gpu-shader 'vertex "#version 440
+layout(location = 0) in mat4 m;
+void main() { gl_Position = m[0]; }")
+         'fragment fs-white 'inputs '((64 (0 float4 0))))) "matrix") #t)
+(check "array of textures raises"
+       (raises-with? (lambda () (make-gpu-pipeline 'vertex vs-full
+         'fragment (make-gpu-shader 'fragment "#version 440
+layout(location = 0) in vec2 uv;
+layout(location = 0) out vec4 frag;
+layout(binding = 0) uniform sampler2D t[2];
+void main() { frag = texture(t[0], uv) + texture(t[1], uv); }")
+         'bindings tbind)) "array") #t)
+(check "3D texture over 2048 raises" (raises? (lambda () (make-gpu-texture 4096 4 'depth 4))) #t)
+(check "mipmaps on an integer format raise" (raises? (lambda () (make-gpu-texture 8 8 'format 'r32ui 'mipmaps #t))) #t)
+(check "depth-clear outside [0, 1] raises"
+       (raises? (lambda () (gpu-run! dev (lambda (f) (gpu-render-pass! f (lambda (p) #t) 'target t1 'depth-clear 2.0))))) #t)
+(check "numbers for a '(vertex index) buffer are u32 indices"
+       (gpu-bytes->u32 (gpu-read-buffer dev (make-gpu-buffer '(vertex index) '(0 1 2)))) #(0 1 2))
+
+;; gpu-* refuses to run off the main thread (an actor, or a parallel map)
+(define actor-result #f)
+(define actor-done (make-semaphore 0))
+(spawn (lambda ()
+         (set! actor-result (guard (e (#t 'raised)) (make-gpu-buffer 'vertex '(1.0)) 'ran))
+         (sem-post! actor-done)))
+(sem-wait! actor-done)
+(check "gpu-* from an actor raises" actor-result 'raised)
+(define packed-in-actor #f)
+(define packed-done (make-semaphore 0))
+(spawn (lambda ()
+         (set! packed-in-actor (bytevector-length (gpu-f32-bytes '(1.0 2.0))))
+         (sem-post! packed-done)))
+(sem-wait! packed-done)
+(check "byte packing still works from any thread" packed-in-actor 8)
+
+;; Canvas callbacks survive garbage collection: the render procedure is an
+;; inline closure, the heap is churned and collected, then a frame is
+;; rendered off screen through gpu-canvas-save-png!.
+(define gc-canvas (make-gpu-canvas))
+(define gc-render-calls 0)
+(let ((tag (make-string 64 #\x)))
+  (gpu-canvas-on-render! gc-canvas
+    (lambda (frame w h)
+      (when (= (string-length tag) 64) (set! gc-render-calls (+ gc-render-calls 1)))
+      (gpu-render-pass! frame (lambda (p) #t) 'clear '(0 1 0 1)))))
+(let loop ((i 0))
+  (when (< i 50) (make-vector 4000 (lambda (a) a)) (gc) (loop (+ i 1))))
+(define gc-png (string-append (or (get-environment-variable "TMPDIR") "/tmp/") "/curry-gpu-gc-test.png"))
+(when (gpu-canvas-save-png! gc-canvas gc-png)
+  (check "canvas render closure survives GC" (> gc-render-calls 0) #t))
 
 ;;; ---- device lifetime -----------------------------------------------------------
 

@@ -53,6 +53,16 @@ tanh asin acos atan asinh acosh atanh sign`. CAS operations with no GLSL
 meaning (integrals, limits, transforms, comparisons) and complex numbers
 raise an error.
 
+A `var-map` value that is an expression rather than a name (`"a + b"`)
+is put in parentheses. In `glsl-assignments`, the base of an expanded
+integer power is computed once into a temporary; plain `sym->glsl`
+repeats it.
+
+The emitter walks expressions as trees. An expression with heavily shared
+sub-expressions (built by repeated squaring, for example) is expanded as
+if every shared part were a separate copy, so its size can grow
+exponentially.
+
 GPU arithmetic is 32-bit float (Metal has no 64-bit floats at all).
 
 ## `(curry spacetime)`

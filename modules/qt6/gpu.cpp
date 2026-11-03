@@ -51,6 +51,7 @@
 #include <QOffscreenSurface>
 #include <QMatrix4x4>
 #include <QFloat16>
+#include <QThread>
 #include <rhi/qrhi.h>
 #include <rhi/qrhi_platform.h>
 #include <rhi/qshaderbaker.h>
@@ -320,6 +321,7 @@ static void forbid_during_frame(const char *who) {
 struct GpuRes {
     QRhi *rhi = nullptr;
     bool  released = false;
+    unsigned gen = 0;    /* bumped each time the native object is (re)created */
     virtual ~GpuRes() {}
     virtual void drop_natives() = 0;   /* delete native objects; keep CPU state */
 
@@ -346,6 +348,8 @@ struct GpuRes {
 
 template <typename T>
 static void delete_native(T *&p) { delete p; p = nullptr; }
+
+static bool is_integer_format(QRhiTexture::Format f);
 
 /* ---- buffers ------------------------------------------------------------ */
 
@@ -447,6 +451,8 @@ struct BindEntry {
 
 struct GpuBindings : GpuRes {
     std::vector<BindEntry> entries;
+    std::vector<unsigned> seen_gens;   /* per entry: buffer, texture, sampler generation */
+    unsigned srb_gen = 0;              /* bumped each time srb is rebuilt */
     QRhiShaderResourceBindings *srb = nullptr;
     void drop_natives() override { delete_native(srb); }
 };
@@ -481,7 +487,7 @@ struct GpuPipeline : GpuRes {
     /* The layout srb the variants were created against.  If the bindings
      * object re-creates its srb (a resource moved to another QRhi and
      * back), the variants hold a stale pointer and must be rebuilt. */
-    QRhiShaderResourceBindings *layout_srb = nullptr;
+    unsigned layout_gen = ~0u;   /* layout->srb_gen the variants were made with */
     void drop_natives() override {
         for (auto &v : variants) { delete v.ps; delete v.rp; }
         variants.clear();
@@ -494,7 +500,7 @@ struct GpuCompute : GpuRes {
     GpuShader   *cs;
     GpuBindings *layout;
     QRhiComputePipeline *ps = nullptr;
-    QRhiShaderResourceBindings *layout_srb = nullptr;   /* see GpuPipeline */
+    unsigned layout_gen = ~0u;   /* see GpuPipeline */
     void drop_natives() override { delete_native(ps); }
 };
 
@@ -512,7 +518,8 @@ static void need_feature(QRhi *rhi, QRhi::Feature f, const char *what) {
 /* Resources whose upload went into the batch being prepared.  If preparing
  * the pass fails, the batch is released without being submitted, so these
  * are marked dirty again and upload on the next attempt. */
-static std::vector<GpuRes *> s_batch_uploads;
+struct BatchUpload { GpuRes *res; quint32 lo, hi; };
+static std::vector<BatchUpload> s_batch_uploads;
 
 static void batch_begin() { s_batch_uploads.clear(); }
 static void batch_failed();
@@ -522,6 +529,7 @@ static void mat_buffer(QRhi *rhi, GpuBuffer *b, QRhiResourceUpdateBatch *u) {
     if (b->bind_rhi(rhi) || !b->buf) {
         if (b->usage & QRhiBuffer::StorageBuffer) need_feature(rhi, QRhi::Compute, "storage buffers");
         b->buf = rhi->newBuffer(b->type, b->usage, (quint32)b->data.size());
+        b->gen++;
         if (!b->buf->create()) { delete_native(b->buf); curry_error("gpu: buffer creation failed"); }
         b->dirty = true; b->dirty_lo = 0; b->dirty_hi = (quint32)b->data.size();
     }
@@ -532,7 +540,7 @@ static void mat_buffer(QRhi *rhi, GpuBuffer *b, QRhiResourceUpdateBatch *u) {
         else
             u->uploadStaticBuffer(b->buf, lo, n, b->data.constData() + lo);
         b->dirty = false;
-        s_batch_uploads.push_back(b);
+        s_batch_uploads.push_back({ b, lo, lo + n });
     }
     if (b->type == QRhiBuffer::Dynamic && s_frame) b->used_in_frame = s_frame->serial;
 }
@@ -544,6 +552,9 @@ static void mat_texture(QRhi *rhi, GpuTexture *t, QRhiResourceUpdateBatch *u) {
         if (t->render_target) fl |= QRhiTexture::RenderTarget;
         if (t->storage) { need_feature(rhi, QRhi::Compute, "storage images"); fl |= QRhiTexture::UsedWithLoadStore; }
         if (t->mipmaps) fl |= QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips;
+        int maxsz = rhi->resourceLimit(QRhi::TextureSizeMax);
+        if (t->w > maxsz || t->h > maxsz)
+            curry_error("gpu: a %dx%d texture is over this device's limit of %d", t->w, t->h, maxsz);
         if (t->d) {
             need_feature(rhi, QRhi::ThreeDimensionalTextures, "3D textures");
             fl |= QRhiTexture::ThreeDimensional;
@@ -551,6 +562,7 @@ static void mat_texture(QRhi *rhi, GpuTexture *t, QRhiResourceUpdateBatch *u) {
         } else {
             t->tex = rhi->newTexture(t->fi->fmt, QSize(t->w, t->h), 1, fl);
         }
+        t->gen++;
         if (!rhi->isTextureFormatSupported(t->fi->fmt, fl)) {
             delete_native(t->tex);
             curry_error("gpu: texture format %s is not supported with these flags on %s",
@@ -572,14 +584,20 @@ static void mat_texture(QRhi *rhi, GpuTexture *t, QRhiResourceUpdateBatch *u) {
         u->uploadTexture(t->tex, desc);
         if (t->mipmaps) u->generateMips(t->tex);
         t->dirty = false;
-        s_batch_uploads.push_back(t);
+        s_batch_uploads.push_back({ t, 0, 0 });
     }
 }
 
 static void batch_failed() {
-    for (GpuRes *r : s_batch_uploads) {
-        if (auto *b = dynamic_cast<GpuBuffer *>(r)) { b->dirty = true; b->dirty_lo = 0; b->dirty_hi = (quint32)b->data.size(); }
-        else if (auto *t = dynamic_cast<GpuTexture *>(r)) t->dirty = !t->data.isEmpty();
+    /* Restore exactly the range that was pending: re-uploading the whole
+     * CPU copy would overwrite results a shader wrote to the rest. */
+    for (const BatchUpload &u : s_batch_uploads) {
+        if (auto *b = dynamic_cast<GpuBuffer *>(u.res)) {
+            if (b->dirty) { b->dirty_lo = std::min(b->dirty_lo, u.lo); b->dirty_hi = std::max(b->dirty_hi, u.hi); }
+            else          { b->dirty_lo = u.lo; b->dirty_hi = u.hi; b->dirty = true; }
+        } else if (auto *t = dynamic_cast<GpuTexture *>(u.res)) {
+            t->dirty = !t->data.isEmpty();
+        }
     }
     s_batch_uploads.clear();
 }
@@ -588,6 +606,7 @@ static void mat_sampler(QRhi *rhi, GpuSampler *s) {
     s->check_live("gpu sampler");
     if (s->bind_rhi(rhi) || !s->s) {
         s->s = rhi->newSampler(s->filter, s->filter, s->mip, s->wrap, s->wrap, s->wrap);
+        s->gen++;
         if (!s->s->create()) { delete_native(s->s); curry_error("gpu: sampler creation failed"); }
     }
 }
@@ -611,15 +630,20 @@ static QRhiShaderResourceBinding make_srb_entry(const BindEntry &e) {
  * re-created native resource (new QRhi) always comes with a fresh srb. */
 static void mat_bindings(QRhi *rhi, GpuBindings *b, QRhiResourceUpdateBatch *u) {
     b->check_live("gpu bindings");
-    bool fresh = false;
-    for (auto &e : b->entries) {
-        if (e.buf) { QRhiBuffer *old = e.buf->buf; mat_buffer(rhi, e.buf, u); fresh |= (old != e.buf->buf); }
-        if (e.tex) { QRhiTexture *old = e.tex->tex; mat_texture(rhi, e.tex, u); fresh |= (old != e.tex->tex); }
-        if (e.smp) { QRhiSampler *old = e.smp->s; mat_sampler(rhi, e.smp); fresh |= (old != e.smp->s); }
+    /* Compare generations, not native pointers: a re-created native can
+     * land at the address of the one just freed (review of #347). */
+    bool fresh = b->seen_gens.size() != b->entries.size() * 3;
+    b->seen_gens.resize(b->entries.size() * 3, ~0u);
+    for (size_t i = 0; i < b->entries.size(); i++) {
+        auto &e = b->entries[i];
+        if (e.buf) { mat_buffer(rhi, e.buf, u);  fresh |= b->seen_gens[3*i]   != e.buf->gen; b->seen_gens[3*i]   = e.buf->gen; }
+        if (e.tex) { mat_texture(rhi, e.tex, u); fresh |= b->seen_gens[3*i+1] != e.tex->gen; b->seen_gens[3*i+1] = e.tex->gen; }
+        if (e.smp) { mat_sampler(rhi, e.smp);    fresh |= b->seen_gens[3*i+2] != e.smp->gen; b->seen_gens[3*i+2] = e.smp->gen; }
     }
     if (b->bind_rhi(rhi) || !b->srb || fresh) {
         delete_native(b->srb);
         b->srb = rhi->newShaderResourceBindings();
+        b->srb_gen++;
         QList<QRhiShaderResourceBinding> list;
         for (auto &e : b->entries) list.append(make_srb_entry(e));
         b->srb->setBindings(list.cbegin(), list.cend());
@@ -632,7 +656,7 @@ static QRhiGraphicsPipeline *mat_pipeline(QRhi *rhi, GpuPipeline *p, QRhiRenderT
     p->check_live("gpu pipeline");
     mat_bindings(rhi, p->layout, u);
     p->bind_rhi(rhi);
-    if (p->layout_srb != p->layout->srb) { p->drop_natives(); p->layout_srb = p->layout->srb; }
+    if (p->layout_gen != p->layout->srb_gen) { p->drop_natives(); p->layout_gen = p->layout->srb_gen; }
     QRhiRenderPassDescriptor *rpd = rt->renderPassDescriptor();
     int samples = rt->sampleCount();
     for (auto &v : p->variants)
@@ -688,7 +712,7 @@ static QRhiComputePipeline *mat_compute(QRhi *rhi, GpuCompute *c, QRhiResourceUp
     c->check_live("gpu compute pipeline");
     need_feature(rhi, QRhi::Compute, "compute shaders");
     mat_bindings(rhi, c->layout, u);
-    if (c->layout_srb != c->layout->srb) { delete_native(c->ps); c->layout_srb = c->layout->srb; }
+    if (c->layout_gen != c->layout->srb_gen) { delete_native(c->ps); c->layout_gen = c->layout->srb_gen; }
     if (c->bind_rhi(rhi) || !c->ps) {
         c->ps = rhi->newComputePipeline();
         c->ps->setShaderStage({ QRhiShaderStage::Compute, c->cs->shader });
@@ -713,7 +737,7 @@ static QRhiTextureRenderTarget *mat_texture_target(QRhi *rhi, GpuTexture *t, QRh
         t->rt = rhi->newTextureRenderTarget(desc);
         t->rp = t->rt->newCompatibleRenderPassDescriptor();
         t->rt->setRenderPassDescriptor(t->rp);
-        if (!t->rt->create()) { t->drop_natives(); t->rhi = nullptr; curry_error("gpu: render target creation failed"); }
+        if (!t->rt->create()) { t->detach(); curry_error("gpu: render target creation failed"); }
     }
     return t->rt;
 }
@@ -846,6 +870,11 @@ struct GpuCanvasState {
     curry_val render_proc, key_proc, key_up_proc, mouse_proc, scroll_proc, resize_proc;
 };
 
+struct WindFrame;
+static WindFrame *push_wind(curry_val after);
+static void pop_wind(WindFrame *wf);
+static curry_val s_end_canvas_frame_prim = 0;
+
 class CurryGpuCanvas : public QRhiWidget {
 public:
     GpuCanvasState st;
@@ -951,7 +980,11 @@ void CurryGpuCanvas::render(QRhiCommandBuffer *cb) {
         QSize ps = f.screen_rt->pixelSize();
         curry_val argv[3] = { serial_handle("gpu-frame", f.serial),
                               curry_make_fixnum(ps.width()), curry_make_fixnum(ps.height()) };
+        /* An escape out of the render procedure must not leave s_frame
+         * pointing at this (dead) stack frame. */
+        WindFrame *wf = push_wind(s_end_canvas_frame_prim);
         SCHEME_CALL(curry_apply(st.render_proc, 3, argv));
+        pop_wind(wf);
     }
     if (!f.screen_drawn) clear_screen(&f);
     s_frame = nullptr;
@@ -987,7 +1020,12 @@ static curry_val fn_make_gpu_canvas(int ac, curry_val *av, void *) {
         CurryGpuCanvas *c = val_to_gpu_canvas(av[0], who);                   \
         if (!curry_is_procedure(av[1]) && !curry_is_bool(av[1]))             \
             curry_error("%s: argument 2 must be a procedure or #f", who);    \
+        /* gc_register_root keeps a copy of the value seen at          \
+         * registration and the canvas is not GC-scanned, so re-root     \
+         * the slot after every store (review of #347). */              \
+        gc_unregister_root(&c->st.field);                                    \
         c->st.field = av[1];                                                 \
+        gc_register_root(&c->st.field);                                      \
         return curry_void();                                                 \
     }
 CANVAS_SETTER(fn_gpu_canvas_on_render, render_proc, "gpu-canvas-on-render!")
@@ -1136,7 +1174,10 @@ static QRhiBuffer::UsageFlags parse_buffer_usage(curry_val v, bool *index_only) 
      * CPU copy; a shader writing the indices would make that copy stale. */
     if ((u & QRhiBuffer::IndexBuffer) && (u & QRhiBuffer::StorageBuffer))
         curry_error("make-gpu-buffer: an index buffer cannot also be a storage buffer");
-    *index_only = (n_index == n);
+    /* Numbers for a buffer with any index usage are packed as u32: a
+     * '(vertex index) buffer used to get float bit patterns as indices. */
+    *index_only = n_index > 0;
+    (void)n;
     return u;
 }
 
@@ -1219,6 +1260,13 @@ static curry_val fn_make_gpu_texture(int ac, curry_val *av, void *) {
     t->storage = opt_bool(o, "storage", false);
     t->mipmaps = opt_bool(o, "mipmaps", false);
     if (t->mipmaps && t->d) { delete t; curry_error("make-gpu-texture: 'mipmaps is not supported for 3D textures"); }
+    /* Metal's limit for every 3D dimension; it aborts rather than failing. */
+    if (t->d && (t->w > 2048 || t->h > 2048 || t->d > 2048)) {
+        delete t; curry_error("make-gpu-texture: 3D textures are limited to 2048 in every dimension");
+    }
+    if (t->mipmaps && is_integer_format(t->fi->fmt)) {
+        delete t; curry_error("make-gpu-texture: integer formats cannot have generated mipmaps");
+    }
     if ((quint64)t->byte_size() > 0x7fffffffull) { delete t; curry_error("make-gpu-texture: texture larger than 2 GiB"); }
     if (o.has("data")) {
         /* texture_data may raise; don't leak t (no destructors run on longjmp). */
@@ -1366,7 +1414,7 @@ static QRhiShaderResourceBinding::StageFlags parse_stages(curry_val v, const cha
 static curry_val fn_make_gpu_bindings(int, curry_val *av, void *) {
     const char *who = "make-gpu-bindings";
     if (list_length(av[0]) < 0) curry_error("%s: argument must be a list of binding entries", who);
-    std::vector<BindEntry> entries;   /* filled first; a raise below leaks nothing heap-owned */
+    std::vector<BindEntry> entries;   /* a raise below leaks this vector's storage (small) */
     entries.reserve((size_t)list_length(av[0]));
     for (curry_val p = av[0]; curry_is_pair(p); p = curry_cdr(p)) {
         curry_val e = curry_car(p);
@@ -1520,7 +1568,13 @@ static void check_shader_resources(const GpuShader *sh, const GpuBindings *b, co
             curry_error("%s: storage block '%s' at binding %d needs at least %d bytes but the bound buffer is %lld bytes",
                         who, sb.blockName.constData(), sb.binding, sb.knownSize, (long long)e->buf->data.size());
     }
+    auto no_arrays = [&](const QShaderDescription::InOutVariable &v, const char *what) {
+        if (!v.arrayDims.isEmpty())
+            curry_error("%s: %s shader declares an array of %ss at binding %d; gpu-* binds one resource per binding",
+                        who, stage, what, v.binding);
+    };
     for (const auto &v : desc.combinedImageSamplers()) {
+        no_arrays(v, "texture");
         const BindEntry *e = need(v.binding, v.descriptorSet, "sampled texture");
         if (e->kind != BindKind::Texture)
             curry_error("%s: %s shader binding %d is a sampled texture but something else is bound", who, stage, v.binding);
@@ -1530,6 +1584,7 @@ static void check_shader_resources(const GpuShader *sh, const GpuBindings *b, co
         check_texture_dim(e->tex, v.type, v.binding, who, stage);
     }
     for (const auto &v : desc.storageImages()) {
+        no_arrays(v, "image");
         const BindEntry *e = need(v.binding, v.descriptorSet, "storage image");
         if (e->kind != BindKind::Image && e->kind != BindKind::ImageRead && e->kind != BindKind::ImageWrite)
             curry_error("%s: %s shader binding %d is a storage image but something else is bound", who, stage, v.binding);
@@ -1557,7 +1612,22 @@ static void check_same_layout(const GpuBindings *layout, const GpuBindings *b, c
 
 /* Every vertex shader input must be fed by an attribute in 'inputs. */
 static void check_vertex_inputs(const GpuShader *vs, const GpuPipeline *p, const char *who) {
+    using D = QShaderDescription;
     for (const auto &in : vs->shader.description().inputVariables()) {
+        /* A matrix or array input takes several locations; only one
+         * attribute per input is supported, so refuse them outright. */
+        switch (in.type) {
+        case D::Mat2: case D::Mat2x3: case D::Mat2x4: case D::Mat3: case D::Mat3x2: case D::Mat3x4:
+        case D::Mat4: case D::Mat4x2: case D::Mat4x3:
+        case D::DMat2: case D::DMat2x3: case D::DMat2x4: case D::DMat3: case D::DMat3x2: case D::DMat3x4:
+        case D::DMat4: case D::DMat4x2: case D::DMat4x3:
+            curry_error("%s: vertex input '%s' is a matrix; pass its columns as separate vec4 inputs",
+                        who, in.name.constData());
+        default: break;
+        }
+        if (!in.arrayDims.isEmpty())
+            curry_error("%s: vertex input '%s' is an array; arrays of vertex inputs are not supported",
+                        who, in.name.constData());
         bool found = false;
         for (auto &a : p->vattrs) if (a.location == in.location) found = true;
         if (!found)
@@ -1722,7 +1792,7 @@ static curry_val fn_gpu_release(int, curry_val *av, void *) {
      * is freed too. */
     r->detach();
     r->released = true;
-    if (auto *b = dynamic_cast<GpuBuffer *>(r)) b->data = QByteArray(b->data.size(), '\0'), b->data.squeeze();
+    if (auto *b = dynamic_cast<GpuBuffer *>(r)) b->data = QByteArray();
     if (auto *t = dynamic_cast<GpuTexture *>(r)) t->data.clear();
     return curry_void();
 }
@@ -1787,6 +1857,14 @@ static curry_val fn_noop(int, curry_val *, void *) { return curry_void(); }
 
 static curry_val fn_end_pass_on_escape(int, curry_val *, void *) {
     if (s_frame && s_frame->pass) { delete s_frame->pass; s_frame->pass = nullptr; }
+    return curry_void();
+}
+
+static curry_val fn_end_canvas_frame_on_escape(int, curry_val *, void *) {
+    if (s_frame && !s_frame->device_frame) {
+        if (s_frame->pass) { delete s_frame->pass; s_frame->pass = nullptr; }
+        s_frame = nullptr;
+    }
     return curry_void();
 }
 
@@ -1855,6 +1933,8 @@ static QColor parse_color(curry_val v, const char *who) {
     return QColor::fromRgbF((float)c[0], (float)c[1], (float)c[2], (float)c[3]);
 }
 
+static void check_draw_ranges(const DrawCmd &d, const char *who);
+
 static void execute_render_pass(FrameRec *f, PassRec *pr, QRhiRenderTarget *rt, GpuTexture *target_tex,
                                 const QColor &clear, float depth_clear) {
     QRhi *rhi = f->rhi;
@@ -1874,6 +1954,12 @@ static void execute_render_pass(FrameRec *f, PassRec *pr, QRhiRenderTarget *rt, 
             mat_bindings(rhi, d.b, u);
             for (auto &vb : d.vbufs) mat_buffer(rhi, vb.first, u);
             if (d.ibuf) mat_buffer(rhi, d.ibuf, u);
+            /* Again, with the data actually being uploaded: an index
+             * buffer updated after gpu-draw! recorded this draw must not
+             * get past the check (review of #347). */
+            check_draw_ranges(d, "gpu-render-pass!");
+            if (target_tex && is_integer_format(target_tex->fi->fmt) && d.pl->blend)
+                curry_error("gpu-render-pass!: blending into an integer-format target is not possible");
         }
     }, err = h.exn);
     if (err) { batch_failed(); u->release(); scm_raise_val(err); }
@@ -1922,7 +2008,9 @@ static curry_val fn_gpu_render_pass(int ac, curry_val *av, void *) {
     if (!target && f->device_frame) curry_error("%s: a device frame needs a 'target texture", who);
     if (target) target->check_live(who);
     QColor clear = o.has("clear") ? parse_color(o.get("clear"), who) : QColor(0, 0, 0, 255);
-    float dclear = (float)opt_real(o, "depth-clear", 1.0);
+    double dclear_d = opt_real(o, "depth-clear", 1.0);
+    if (!(dclear_d >= 0.0 && dclear_d <= 1.0)) curry_error("%s: 'depth-clear must be in [0, 1]", who);
+    float dclear = (float)dclear_d;
 
     auto *pr = new PassRec{};
     pr->serial = ++s_serial;
@@ -2013,6 +2101,14 @@ static quint32 opt_count(const Opts &o, const char *key, quint32 dflt) {
     return (quint32)opt_uint(o, key, dflt, 0x7fffffff);
 }
 
+/* A uniform buffer holds one value per frame.  Recording a draw that uses
+ * it counts as use, so update / draw / update / draw inside one pass
+ * raises instead of silently giving both draws the last value. */
+static void mark_uniforms_used(GpuBindings *b) {
+    for (auto &e : b->entries)
+        if (e.kind == BindKind::Uniform && s_frame) e.buf->used_in_frame = s_frame->serial;
+}
+
 /* Every vertex and instance the draw can fetch must lie inside its buffer:
  * Metal and OpenGL do not bounds-check vertex fetches, so an over-long
  * draw reads whatever memory follows the buffer.  For indexed draws the
@@ -2099,6 +2195,8 @@ static curry_val fn_gpu_draw(int ac, curry_val *av, void *) {
         else             { d.has_sc = true; for (int j = 0; j < 4; j++) d.sc[j] = (int)q[j]; }
     }
     check_draw_ranges(d, who);
+    mark_uniforms_used(d.b);
+    mark_uniforms_used(d.pl->layout);
     pr->draws.push_back(std::move(d));
     return curry_void();
 }
@@ -2123,6 +2221,8 @@ static curry_val fn_gpu_dispatch(int ac, curry_val *av, void *) {
     check_same_layout(d.pl->layout, d.b, who);
     if (d.b != d.pl->layout) check_shader_resources(d.pl->cs, d.b, who);
     d.x = (int)g[0]; d.y = (int)g[1]; d.z = (int)g[2];
+    mark_uniforms_used(d.b);
+    mark_uniforms_used(d.pl->layout);
     pr->dispatches.push_back(d);
     return curry_void();
 }
@@ -2148,14 +2248,19 @@ static void queue_readback(FrameRec *f, curry_val proc, bool is_tex, GpuBuffer *
         f->device_readbacks.push_back(rb);
     } else {
         rb->result.completed = [rb]() {
-            curry_val bv = bytes_to_bv(rb->result.data);
-            curry_val p = *rb->proc_slot;
-            SCHEME_CALL(curry_apply(p, 1, &bv));
-            gc_unregister_root(rb->proc_slot);
-            delete rb->proc_slot;
-            /* QRhi touches the result after completed() returns on some
-             * backends; free on the next event-loop turn instead. */
-            QMetaObject::invokeMethod(qApp, [rb]() { delete rb; }, Qt::QueuedConnection);
+            /* Called from inside QRhi's own frame processing: do not run
+             * Scheme here (it could release resources, start a nested
+             * frame, or escape through QRhi).  Run it on a later
+             * event-loop turn; QRhi may also still touch rb->result after
+             * this returns. */
+            QMetaObject::invokeMethod(qApp, [rb]() {
+                curry_val bv = bytes_to_bv(rb->result.data);
+                curry_val p = *rb->proc_slot;
+                gc_unregister_root(rb->proc_slot);
+                delete rb->proc_slot;
+                delete rb;
+                SCHEME_CALL(curry_apply(p, 1, &bv));
+            }, Qt::QueuedConnection);
         };
     }
     if (is_tex) u->readBackTexture(QRhiReadbackDescription(t->tex), &rb->result);
@@ -2380,63 +2485,83 @@ static curry_val fn_gpu_std430(int, curry_val *av, void *) { return pack_block(a
  * Registration
  * ========================================================================= */
 
+/* Every gpu-* procedure that touches GPU state runs on the Qt application
+ * thread only: the frame state is global, QRhi objects are not
+ * thread-safe, and a canvas renders on that thread anyway.  Registered
+ * through a trampoline that checks the thread before calling the real
+ * function (review of #347: two actors running gpu-run! raced). */
+struct GpuFnEntry { CurryFn fn; const char *name; };
+
+static curry_val main_thread_trampoline(int ac, curry_val *av, void *ud) {
+    const GpuFnEntry *e = (const GpuFnEntry *)ud;
+    if (!qApp || QThread::currentThread() != qApp->thread())
+        curry_error("%s: gpu-* procedures can only be used from the main thread (not from an actor)", e->name);
+    return e->fn(ac, av, nullptr);
+}
+
+static void gpu_def(CurryVM *vm, const char *name, CurryFn fn, int min_args, int max_args) {
+    curry_define_fn(vm, name, main_thread_trampoline, min_args, max_args, new GpuFnEntry{ fn, name });
+}
+
 void qt6_gpu_register(CurryVM *vm) {
     s_noop_prim = make_prim("gpu-wind-noop", fn_noop);
     s_end_pass_prim = make_prim("gpu-end-pass-on-escape", fn_end_pass_on_escape);
     s_end_device_frame_prim = make_prim("gpu-end-frame-on-escape", fn_end_device_frame_on_escape);
+    s_end_canvas_frame_prim = make_prim("gpu-end-canvas-frame-on-escape", fn_end_canvas_frame_on_escape);
+    gc_register_root(&s_end_canvas_frame_prim);
     gc_register_root(&s_noop_prim);
     gc_register_root(&s_end_pass_prim);
     gc_register_root(&s_end_device_frame_prim);
 
     /* Devices and canvases */
-    curry_define_fn(vm, "make-gpu-device",          fn_make_gpu_device,          0, 1, NULL);
-    curry_define_fn(vm, "gpu-device-destroy!",      fn_gpu_device_destroy,       1, 1, NULL);
-    curry_define_fn(vm, "make-gpu-canvas",          fn_make_gpu_canvas,          0, -1, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-render!",    fn_gpu_canvas_on_render,     2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-key!",       fn_gpu_canvas_on_key,        2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-key-up!",    fn_gpu_canvas_on_key_up,     2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-mouse!",     fn_gpu_canvas_on_mouse,      2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-scroll!",    fn_gpu_canvas_on_scroll,     2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-on-resize!",    fn_gpu_canvas_on_resize,     2, 2, NULL);
-    curry_define_fn(vm, "gpu-canvas-redraw!",       fn_gpu_canvas_redraw,        1, 1, NULL);
-    curry_define_fn(vm, "gpu-canvas-save-png!",     fn_gpu_canvas_save_png,      2, 2, NULL);
+    gpu_def(vm, "make-gpu-device", fn_make_gpu_device, 0, 1);
+    gpu_def(vm, "gpu-device-destroy!", fn_gpu_device_destroy, 1, 1);
+    gpu_def(vm, "make-gpu-canvas", fn_make_gpu_canvas, 0, -1);
+    gpu_def(vm, "gpu-canvas-on-render!", fn_gpu_canvas_on_render, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-key!", fn_gpu_canvas_on_key, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-key-up!", fn_gpu_canvas_on_key_up, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-mouse!", fn_gpu_canvas_on_mouse, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-scroll!", fn_gpu_canvas_on_scroll, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-resize!", fn_gpu_canvas_on_resize, 2, 2);
+    gpu_def(vm, "gpu-canvas-redraw!", fn_gpu_canvas_redraw, 1, 1);
+    gpu_def(vm, "gpu-canvas-save-png!", fn_gpu_canvas_save_png, 2, 2);
 
     /* Queries */
-    curry_define_fn(vm, "gpu-backend",              fn_gpu_backend,              1, 1, NULL);
-    curry_define_fn(vm, "gpu-device-name",          fn_gpu_device_name,          1, 1, NULL);
-    curry_define_fn(vm, "gpu-feature?",             fn_gpu_feature_p,            2, 2, NULL);
+    gpu_def(vm, "gpu-backend", fn_gpu_backend, 1, 1);
+    gpu_def(vm, "gpu-device-name", fn_gpu_device_name, 1, 1);
+    gpu_def(vm, "gpu-feature?", fn_gpu_feature_p, 2, 2);
     curry_define_fn(vm, "gpu-features",             fn_gpu_features,             0, 0, NULL);
-    curry_define_fn(vm, "gpu-limit",                fn_gpu_limit,                2, 2, NULL);
-    curry_define_fn(vm, "gpu-clip-space-matrix",    fn_gpu_clip_space_matrix,    1, 1, NULL);
-    curry_define_fn(vm, "gpu-framebuffer-y-up?",    fn_gpu_y_up_p,               1, 1, NULL);
+    gpu_def(vm, "gpu-limit", fn_gpu_limit, 2, 2);
+    gpu_def(vm, "gpu-clip-space-matrix", fn_gpu_clip_space_matrix, 1, 1);
+    gpu_def(vm, "gpu-framebuffer-y-up?", fn_gpu_y_up_p, 1, 1);
 
     /* Resources */
-    curry_define_fn(vm, "make-gpu-buffer",          fn_make_gpu_buffer,          2, 2, NULL);
-    curry_define_fn(vm, "gpu-buffer-update!",       fn_gpu_buffer_update,        2, 3, NULL);
-    curry_define_fn(vm, "gpu-buffer-size",          fn_gpu_buffer_size,          1, 1, NULL);
-    curry_define_fn(vm, "make-gpu-texture",         fn_make_gpu_texture,         2, -1, NULL);
-    curry_define_fn(vm, "gpu-texture-update!",      fn_gpu_texture_update,       2, 2, NULL);
-    curry_define_fn(vm, "gpu-texture-size",         fn_gpu_texture_size,         1, 1, NULL);
-    curry_define_fn(vm, "make-gpu-sampler",         fn_make_gpu_sampler,         0, -1, NULL);
-    curry_define_fn(vm, "make-gpu-shader",          fn_make_gpu_shader,          2, 2, NULL);
-    curry_define_fn(vm, "make-gpu-bindings",        fn_make_gpu_bindings,        1, 1, NULL);
-    curry_define_fn(vm, "make-gpu-pipeline",        fn_make_gpu_pipeline,        0, -1, NULL);
-    curry_define_fn(vm, "make-gpu-compute-pipeline", fn_make_gpu_compute_pipeline, 1, 2, NULL);
-    curry_define_fn(vm, "gpu-release!",             fn_gpu_release,              1, 1, NULL);
+    gpu_def(vm, "make-gpu-buffer", fn_make_gpu_buffer, 2, 2);
+    gpu_def(vm, "gpu-buffer-update!", fn_gpu_buffer_update, 2, 3);
+    gpu_def(vm, "gpu-buffer-size", fn_gpu_buffer_size, 1, 1);
+    gpu_def(vm, "make-gpu-texture", fn_make_gpu_texture, 2, -1);
+    gpu_def(vm, "gpu-texture-update!", fn_gpu_texture_update, 2, 2);
+    gpu_def(vm, "gpu-texture-size", fn_gpu_texture_size, 1, 1);
+    gpu_def(vm, "make-gpu-sampler", fn_make_gpu_sampler, 0, -1);
+    gpu_def(vm, "make-gpu-shader", fn_make_gpu_shader, 2, 2);
+    gpu_def(vm, "make-gpu-bindings", fn_make_gpu_bindings, 1, 1);
+    gpu_def(vm, "make-gpu-pipeline", fn_make_gpu_pipeline, 0, -1);
+    gpu_def(vm, "make-gpu-compute-pipeline", fn_make_gpu_compute_pipeline, 1, 2);
+    gpu_def(vm, "gpu-release!", fn_gpu_release, 1, 1);
 
     /* Frames, passes, commands */
-    curry_define_fn(vm, "gpu-run!",                 fn_gpu_run,                  2, 2, NULL);
-    curry_define_fn(vm, "gpu-render-pass!",         fn_gpu_render_pass,          2, -1, NULL);
-    curry_define_fn(vm, "gpu-compute-pass!",        fn_gpu_compute_pass,         2, 2, NULL);
-    curry_define_fn(vm, "gpu-draw!",                fn_gpu_draw,                 3, -1, NULL);
-    curry_define_fn(vm, "gpu-dispatch!",            fn_gpu_dispatch,             3, -1, NULL);
+    gpu_def(vm, "gpu-run!", fn_gpu_run, 2, 2);
+    gpu_def(vm, "gpu-render-pass!", fn_gpu_render_pass, 2, -1);
+    gpu_def(vm, "gpu-compute-pass!", fn_gpu_compute_pass, 2, 2);
+    gpu_def(vm, "gpu-draw!", fn_gpu_draw, 3, -1);
+    gpu_def(vm, "gpu-dispatch!", fn_gpu_dispatch, 3, -1);
 
     /* Readback */
-    curry_define_fn(vm, "gpu-read-buffer",          fn_gpu_read_buffer,          2, 2, NULL);
-    curry_define_fn(vm, "gpu-read-texture",         fn_gpu_read_texture,         2, 2, NULL);
-    curry_define_fn(vm, "gpu-read-buffer!",         fn_gpu_read_buffer_async,    3, 3, NULL);
-    curry_define_fn(vm, "gpu-read-texture!",        fn_gpu_read_texture_async,   3, 3, NULL);
-    curry_define_fn(vm, "gpu-save-texture-png",     fn_gpu_save_texture_png,     3, 3, NULL);
+    gpu_def(vm, "gpu-read-buffer", fn_gpu_read_buffer, 2, 2);
+    gpu_def(vm, "gpu-read-texture", fn_gpu_read_texture, 2, 2);
+    gpu_def(vm, "gpu-read-buffer!", fn_gpu_read_buffer_async, 3, 3);
+    gpu_def(vm, "gpu-read-texture!", fn_gpu_read_texture_async, 3, 3);
+    gpu_def(vm, "gpu-save-texture-png", fn_gpu_save_texture_png, 3, 3);
 
     /* Byte packing */
     curry_define_fn(vm, "gpu-f32-bytes",            fn_gpu_f32_bytes,            1, 1, NULL);

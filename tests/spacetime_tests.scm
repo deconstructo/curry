@@ -63,6 +63,16 @@
                       (else (loop (+ i 1) n))))))
        #t)
 
+;; review of #347: var-map expressions keep their meaning; power bases
+;; are computed once in glsl-assignments
+(check "var-map expression is parenthesized" (sym->glsl (* 2 r) '((r . "a + b"))) "(2.0 * (a + b))")
+(check "var-map member access is left alone" (sym->glsl (* 2 r) '((r . "u.r"))) "(2.0 * u.r)")
+(check "power base becomes a temporary"
+       (let ((code (glsl-assignments (list (cons "y" (expt (+ r M) 4))) vm)))
+         (and (string-contains? code "float cse0 = (r + mass);")
+              (string-contains? code "y = (cse0 * cse0 * cse0 * cse0);")))
+       #t)
+
 ;;; ---- Part 1: (curry spacetime) -------------------------------------------------
 
 (define coords (spacetime-coordinates))
