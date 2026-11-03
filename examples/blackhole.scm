@@ -28,7 +28,11 @@
 ;;;       + / - fall speed · [ / ] exposure · Q or Escape quit
 ;;;
 ;;; Other options: --start-r R (starting distance, default 30 M)
-;;;                --spin a  · --snapshot PATH [--snapshot-after SECONDS]
+;;;                --elevation DEG (above the disk plane, default 25)
+;;;                --spin a (0 <= a < 1, default 0.9) · --fall · --fall-speed S
+;;;                --snapshot PATH [--snapshot-after SECONDS]
+;;;
+;;; A guide to what you see: docs/guides/blackhole.md
 ;;;
 ;;; Units: M = 1 (G = c = 1).  Distances below are in units of M.
 
@@ -54,6 +58,9 @@
 (define snapshot-after (option "--snapshot-after" 1.5 string->number))
 (define spins '(0.0 0.5 0.9 0.998))
 (define spin (option "--spin" 0.9 string->number))
+;; a >= 1 has no horizon (a naked singularity): not something this demo handles
+(unless (and (real? spin) (<= 0 spin) (< spin 1))
+  (error "blackhole.scm: --spin must be at least 0 and less than 1" spin))
 (define start-fall-speed (option "--fall-speed" 5.0 string->number))
 ;; start this far above the disk plane, so the fall passes over the disk
 (define start-elevation (* (option "--elevation" 25.0 string->number) (/ 3.14159265 180)))
@@ -424,7 +431,9 @@ void main() {
          (let ((r (f64vector-ref camera-info 0)) (tau (f64vector-ref camera-info 1)))
            (string-append "   r = " (number->string (/ (round (* 100 r)) 100.0)) " M"
                           "   proper time = " (number->string (/ (round (* 10 tau)) 10.0)) " M"
-                          (cond ((> (f64vector-ref camera-info 3) 0.5)
+                          (cond ((and (> (f64vector-ref camera-info 3) 0.5) (= spin 0))
+                                 "   stopped just before the central singularity (R resets)")
+                                ((> (f64vector-ref camera-info 3) 0.5)
                                  "   reached the inner horizon: the end of the physical Kerr solution (R resets)")
                                 ((> (f64vector-ref camera-info 2) 0.5) "   INSIDE THE HORIZON")
                                 (else ""))))

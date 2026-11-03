@@ -20,6 +20,7 @@ Matrix helpers are in a separate pure-Scheme library,
 
 - [Requirements](#requirements)
 - [Concepts](#concepts)
+- [Shaders and GLSL, briefly](#shaders-and-glsl-briefly)
 - [Quickstart: compute without a window](#quickstart-compute-without-a-window)
 - [Quickstart: a window](#quickstart-a-window)
 - [Devices and canvases](#devices-and-canvases)
@@ -70,6 +71,47 @@ The model is the same as Vulkan, Metal and WebGPU, at a smaller scale:
 
 Resources can be created at any time, before any GPU device exists. Each one
 creates its native GPU object the first time it is used inside a frame.
+
+## Shaders and GLSL, briefly
+
+A **shader** is a small program that runs on the graphics card, in
+parallel, many thousands of copies at once. Three kinds are used here:
+
+- a **vertex shader** runs once per vertex and decides where it appears
+  on screen;
+- a **fragment shader** runs once per pixel covered by a triangle and
+  decides its colour;
+- a **compute shader** runs once per element of a grid you choose (one
+  per pixel, one per particle, ...) and can read and write buffers and
+  images freely. It is the one to use for simulations.
+
+Shaders are written in **GLSL**, the *OpenGL Shading Language*: a small
+C-like language with vector and matrix types (`vec3`, `mat4`, ...) and
+built-in maths (`dot`, `normalize`, `sin`, `inverse`, ...). Despite the
+name it is not tied to OpenGL any more: you write GLSL once, and Qt
+translates it for Metal, Vulkan, Direct3D or OpenGL, whichever the device
+uses. Each shader string starts with `#version 440` (or `450`).
+
+The `gpu-*` layer uses GLSL **as Vulkan defines it**, which is stricter
+than older OpenGL examples you may find. The differences that cause most
+compile errors:
+
+| Older OpenGL style | Vulkan-style GLSL (required here) |
+|--------------------|-----------------------------------|
+| `in vec3 pos;` | `layout(location = 0) in vec3 pos;` — every input and output has a location |
+| `uniform float t;` | `layout(std140, binding = 0) uniform U { float t; };` — uniforms live in a block with a binding number |
+| `uniform sampler2D tex;` | `layout(binding = 1) uniform sampler2D tex;` |
+| `gl_FragColor = ...;` | `layout(location = 0) out vec4 frag;` then `frag = ...;` |
+| `gl_VertexID`, `gl_InstanceID` | `gl_VertexIndex`, `gl_InstanceIndex` |
+
+The binding numbers in a shader are the numbers you give in
+[`make-gpu-bindings`](#bindings), and the locations of vertex inputs are
+the ones you give in a pipeline's [`'inputs`](#pipelines). A pipeline
+checks that the two sides match and raises an error naming the binding or
+location if they do not.
+
+You do not always have to write GLSL by hand: [`(curry glsl)`](module-spacetime.md#curry-glsl)
+generates it from curry's symbolic CAS.
 
 ## Quickstart: compute without a window
 

@@ -69,6 +69,9 @@ sudo apt install libffi-dev            # general FFI, BUILD_FFI=ON (off by defau
 sudo apt install llvm-18-dev           # LLVM JIT backend, BUILD_LLVM=ON (off by default) — see below
 sudo apt install libgpiod-dev          # rpi (Linux only, off by default) — see docs/guides/RPI.md
 # qt6: see docs/reference/module-qt6.md — needs a full Qt6 dev install (off by default)
+#   for its gpu-* layer (Metal/Vulkan GPU rendering and compute) also:
+#   sudo apt install qt6-base-private-dev qt6-shadertools-dev    # needs Qt >= 6.7: Ubuntu 25.04+, Debian 13+
+#   (check the version with: apt-cache policy qt6-base-dev)
 # piper: no apt package yet — build libpiper from source first, see docs/reference/module-piper.md (off by default)
 ```
 
@@ -81,6 +84,7 @@ sudo apt install libgpiod-dev          # rpi (Linux only, off by default) — se
 | `LDAP` | OFF | `libldap-dev` |
 | `VECDB` | OFF | none (optional `usearch` for approximate search — see `docs/reference/module-vecdb.md`) |
 | `QT6` | OFF | Qt6 dev packages — see `docs/reference/module-qt6.md` |
+| ↳ `BUILD_QT6_GPU` | ON (when `QT6` is ON) | Qt ≥ 6.7 plus Qt Shader Tools — the `gpu-*` layer, see `docs/reference/module-qt6-gpu.md`. Without them CMake prints a warning and builds the rest of `(curry qt6)` |
 | `PIPER` | OFF | manual `libpiper`/`onnxruntime` build — see `docs/reference/module-piper.md` |
 | `RPI` | OFF (no default value — must pass `=ON` explicitly), Linux only | `libgpiod-dev` — see `docs/guides/RPI.md` |
 
@@ -140,6 +144,8 @@ sudo dnf install libffi-devel                 # general FFI, BUILD_FFI=ON (off b
 sudo dnf install llvm-devel llvm-static        # LLVM JIT backend, BUILD_LLVM=ON (off by default)
 sudo dnf install libgpiod-devel               # rpi (Linux only, off by default) — see docs/guides/RPI.md
 # qt6: sudo dnf install qt6-qtbase-devel qt6-qtbase-gui — see docs/reference/module-qt6.md (off by default)
+#   for its gpu-* layer also: sudo dnf install qt6-qtbase-private-devel qt6-qtshadertools-devel
+# Package names vary between releases; check with `dnf search qt6`.
 # piper: no dnf package yet — build libpiper from source first, see docs/reference/module-piper.md (off by default)
 ```
 
@@ -229,6 +235,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
 cmake --build build -j$(sysctl -n hw.logicalcpu)
 ```
+
+> Homebrew's `qt` includes Qt Shader Tools, so the `gpu-*` layer (GPU rendering and compute on Metal, see `docs/reference/module-qt6-gpu.md`) is built too; CMake finds the separate `qtshadertools` keg on its own. Check the configure output for `building qt6 gpu-* (QRhi) layer`.
 
 > Qt6 on macOS uses Metal for rendering. `QOpenGLWidget` is bridged through Apple's OpenGL compatibility layer; expect deprecation warnings at runtime but the module works correctly.
 
