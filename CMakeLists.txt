@@ -812,26 +812,36 @@ if(BUILD_MODULE_QT6)
         message(WARNING "Qt6 ${Qt6_VERSION} < 6.7 (no QRhiWidget) — qt6 gpu-* layer skipped")
       else()
         find_package(Qt6 QUIET COMPONENTS GuiPrivate ShaderTools ShaderToolsPrivate)
-        if(NOT TARGET Qt6::ShaderToolsPrivate AND APPLE)
-          find_program(CURRY_BREW_EXE brew)
-        endif()
-        if(NOT TARGET Qt6::ShaderToolsPrivate AND APPLE AND CURRY_BREW_EXE)
-          execute_process(
-            COMMAND ${CURRY_BREW_EXE} --prefix qtshadertools
-            OUTPUT_VARIABLE CURRY_QTSHADERTOOLS_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET)
-          if(CURRY_QTSHADERTOOLS_PREFIX)
-            # Qt6Config looks up its components with NO_DEFAULT_PATH, so
-            # CMAKE_PREFIX_PATH is ignored for them; Homebrew installs
-            # qtshadertools in its own keg, outside qtbase's prefix.  Ask
-            # for the component package directly instead.
-            foreach(_pkg Qt6ShaderTools Qt6ShaderToolsPrivate)
-              find_package(${_pkg} CONFIG QUIET
-                PATHS "${CURRY_QTSHADERTOOLS_PREFIX}/lib/cmake/${_pkg}"
-                NO_DEFAULT_PATH)
-            endforeach()
+        # Qt6Config looks up its components with NO_DEFAULT_PATH, so
+        # CMAKE_PREFIX_PATH is ignored for them, and Homebrew installs
+        # qtshadertools in its own keg, outside qtbase's prefix.  So ask for
+        # the component packages directly, in every CMAKE_PREFIX_PATH entry
+        # (the Homebrew formula passes the qtshadertools keg there) and, on
+        # macOS, wherever `brew --prefix qtshadertools` says.
+        if(NOT TARGET Qt6::ShaderToolsPrivate)
+          set(_curry_st_prefixes ${CMAKE_PREFIX_PATH})
+          if(APPLE)
+            find_program(CURRY_BREW_EXE brew)
+            if(CURRY_BREW_EXE)
+              execute_process(
+                COMMAND ${CURRY_BREW_EXE} --prefix qtshadertools
+                OUTPUT_VARIABLE CURRY_QTSHADERTOOLS_PREFIX
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+              if(CURRY_QTSHADERTOOLS_PREFIX)
+                list(APPEND _curry_st_prefixes "${CURRY_QTSHADERTOOLS_PREFIX}")
+              endif()
+            endif()
           endif()
+          foreach(_prefix ${_curry_st_prefixes})
+            if(NOT TARGET Qt6::ShaderToolsPrivate AND EXISTS "${_prefix}/lib/cmake/Qt6ShaderToolsPrivate")
+              foreach(_pkg Qt6ShaderTools Qt6ShaderToolsPrivate)
+                find_package(${_pkg} CONFIG QUIET
+                  PATHS "${_prefix}/lib/cmake/${_pkg}"
+                  NO_DEFAULT_PATH)
+              endforeach()
+            endif()
+          endforeach()
         endif()
         if(TARGET Qt6::ShaderToolsPrivate AND TARGET Qt6::GuiPrivate)
           target_sources(curry_qt6 PRIVATE modules/qt6/gpu.cpp)
