@@ -473,4 +473,12 @@ if(BUILD_MODULE_QT6 AND TARGET curry_qt6)
     set_tests_properties(qt6 PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
         TIMEOUT 30)
+    # gpu-* (QRhi) layer: real GPU work on a headless device. Prints SKIP
+    # and passes when the host has no usable GPU backend.
+    if(CURRY_QT6_GPU_BUILT)
+        add_test(NAME qt6_gpu COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/gpu_tests.scm)
+        set_tests_properties(qt6_gpu PROPERTIES
+            ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH};QT_QPA_PLATFORM=offscreen"
+            TIMEOUT 60)
+    endif()
 endif()

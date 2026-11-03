@@ -1685,7 +1685,9 @@ static curry_val fn_gpu_draw(int ac, curry_val *av, void *) {
         curry_error("%s: bindings do not match the pipeline's binding layout", who);
     if (o.has("vertices")) {
         curry_val vl = o.get("vertices");
-        if (!curry_is_pair(vl) && !curry_is_nil(vl)) vl = curry_make_pair(vl, curry_nil());
+        /* A handle is itself a pair (gpu-buffer . bytes): wrap a lone one. */
+        if (!curry_is_nil(vl) && (!curry_is_pair(vl) || curry_is_symbol(curry_car(vl))))
+            vl = curry_make_pair(vl, curry_nil());
         if (list_length(vl) < 0) curry_error("%s: 'vertices must be a buffer or list of buffers", who);
         for (curry_val p = vl; curry_is_pair(p); p = curry_cdr(p)) {
             GpuBuffer *b = val_to_buffer(curry_car(p));

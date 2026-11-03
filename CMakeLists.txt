@@ -840,6 +840,7 @@ if(BUILD_MODULE_QT6)
           # rhi/qshaderbaker.h) through the *Private targets.
           target_link_libraries(curry_qt6 PRIVATE Qt6::GuiPrivate Qt6::ShaderToolsPrivate)
           target_compile_definitions(curry_qt6 PRIVATE CURRY_QT6_GPU)
+          set(CURRY_QT6_GPU_BUILT ON)   # tests/CMakeLists.txt registers gpu_tests
           message(STATUS "Qt6 ShaderTools found — building qt6 gpu-* (QRhi) layer")
         else()
           message(WARNING "Qt6 ShaderTools not found — qt6 gpu-* layer skipped "
