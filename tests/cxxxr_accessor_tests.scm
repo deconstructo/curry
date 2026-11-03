@@ -8,7 +8,7 @@
 ;;; error. Found while implementing SRFI-272; fixed in src/builtins.c by
 ;;; routing every step through checked ccar_chk/ccdr_chk helpers.
 
-(import (scheme base) (scheme write))
+(import (scheme base) (scheme write) (scheme cxr))
 
 (define pass-count 0)
 (define fail-count 0)
@@ -52,6 +52,26 @@
 (check "cdadr" '(3) (cdadr (list 1 (list 2 3))))
 (check "cddar" '() (cddar (list (list 1 2) 3)))
 (check "cdddr" '(4) (cdddr (list 1 2 3 4)))
+
+;; Four-level accessors (issue #345): they did not exist at all.  In a
+;; full binary tree of depth 4 built so that taking car adds "a" and cdr
+;; adds "d" to the FRONT of a leaf's label, (cXXXXr tree) is the leaf
+;; labelled "XXXX" -- every accessor has to return its own name.
+(define (cxr-tree suffix)
+  (if (= (string-length suffix) 4)
+      (string->symbol suffix)
+      (cons (cxr-tree (string-append "a" suffix)) (cxr-tree (string-append "d" suffix)))))
+(define tree4 (cxr-tree ""))
+(for-each
+ (lambda (name proc)
+   (check name (string->symbol (substring name 1 5)) (proc tree4))
+   (check-error (string-append name " on a 1-element list") (lambda () (proc (list 1)))))
+ '("caaaar" "caaadr" "caadar" "caaddr" "cadaar" "cadadr" "caddar" "cadddr"
+   "cdaaar" "cdaadr" "cdadar" "cdaddr" "cddaar" "cddadr" "cdddar" "cddddr")
+ (list caaaar caaadr caadar caaddr cadaar cadadr caddar cadddr
+       cdaaar cdaadr cdadar cdaddr cddaar cddadr cdddar cddddr))
+(check "cadddr on a plain list" 4 (cadddr (list 1 2 3 4 5)))
+(check "cddddr on a plain list" '(5) (cddddr (list 1 2 3 4 5)))
 
 (display "cxxxr accessor tests: ") (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)

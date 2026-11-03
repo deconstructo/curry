@@ -478,9 +478,21 @@ CXR3(aaa, ccar_chk, ccar_chk, ccar_chk) CXR3(aad, ccar_chk, ccar_chk, ccdr_chk)
 CXR3(ada, ccar_chk, ccdr_chk, ccar_chk) CXR3(add, ccar_chk, ccdr_chk, ccdr_chk)
 CXR3(daa, ccdr_chk, ccar_chk, ccar_chk) CXR3(dad, ccdr_chk, ccar_chk, ccdr_chk)
 CXR3(dda, ccdr_chk, ccdr_chk, ccar_chk) CXR3(ddd, ccdr_chk, ccdr_chk, ccdr_chk)
+/* Four-level accessors (R7RS (scheme cxr)), issue #345: they were missing
+ * entirely, so (import (scheme cxr)) succeeded but (cadddr x) was unbound. */
+#define CXR4(n,a,b,c,d) static val_t prim_c##n##r(int ac,val_t*av,void*ud){(void)ac;(void)ud;return a(b(c(d(av[0], "c" #n "r: not a pair"), "c" #n "r: not a pair"), "c" #n "r: not a pair"), "c" #n "r: not a pair");}
+CXR4(aaaa, ccar_chk, ccar_chk, ccar_chk, ccar_chk) CXR4(aaad, ccar_chk, ccar_chk, ccar_chk, ccdr_chk)
+CXR4(aada, ccar_chk, ccar_chk, ccdr_chk, ccar_chk) CXR4(aadd, ccar_chk, ccar_chk, ccdr_chk, ccdr_chk)
+CXR4(adaa, ccar_chk, ccdr_chk, ccar_chk, ccar_chk) CXR4(adad, ccar_chk, ccdr_chk, ccar_chk, ccdr_chk)
+CXR4(adda, ccar_chk, ccdr_chk, ccdr_chk, ccar_chk) CXR4(addd, ccar_chk, ccdr_chk, ccdr_chk, ccdr_chk)
+CXR4(daaa, ccdr_chk, ccar_chk, ccar_chk, ccar_chk) CXR4(daad, ccdr_chk, ccar_chk, ccar_chk, ccdr_chk)
+CXR4(dada, ccdr_chk, ccar_chk, ccdr_chk, ccar_chk) CXR4(dadd, ccdr_chk, ccar_chk, ccdr_chk, ccdr_chk)
+CXR4(ddaa, ccdr_chk, ccdr_chk, ccar_chk, ccar_chk) CXR4(ddad, ccdr_chk, ccdr_chk, ccar_chk, ccdr_chk)
+CXR4(ddda, ccdr_chk, ccdr_chk, ccdr_chk, ccar_chk) CXR4(dddd, ccdr_chk, ccdr_chk, ccdr_chk, ccdr_chk)
 #undef CXR1
 #undef CXR2
 #undef CXR3
+#undef CXR4
 
 static val_t prim_list(int ac, val_t *av, void *ud) {
     (void)ud; val_t r = V_NIL;
@@ -3827,6 +3839,10 @@ void builtins_register(val_t env) {
     DEF("caar",prim_caar,1,1); DEF("cadr",prim_cadr,1,1); DEF("cdar",prim_cdar,1,1); DEF("cddr",prim_cddr,1,1);
     DEF("caaar",prim_caaar,1,1); DEF("caadr",prim_caadr,1,1); DEF("cadar",prim_cadar,1,1); DEF("caddr",prim_caddr,1,1);
     DEF("cdaar",prim_cdaar,1,1); DEF("cdadr",prim_cdadr,1,1); DEF("cddar",prim_cddar,1,1); DEF("cdddr",prim_cdddr,1,1);
+    DEF("caaaar",prim_caaaar,1,1); DEF("caaadr",prim_caaadr,1,1); DEF("caadar",prim_caadar,1,1); DEF("caaddr",prim_caaddr,1,1);
+    DEF("cadaar",prim_cadaar,1,1); DEF("cadadr",prim_cadadr,1,1); DEF("caddar",prim_caddar,1,1); DEF("cadddr",prim_cadddr,1,1);
+    DEF("cdaaar",prim_cdaaar,1,1); DEF("cdaadr",prim_cdaadr,1,1); DEF("cdadar",prim_cdadar,1,1); DEF("cdaddr",prim_cdaddr,1,1);
+    DEF("cddaar",prim_cddaar,1,1); DEF("cddadr",prim_cddadr,1,1); DEF("cdddar",prim_cdddar,1,1); DEF("cddddr",prim_cddddr,1,1);
     DEF("set-cdr!",   prim_set_cdr,   2,2); DEF("list",       prim_list,      0,-1);
     DEF("list*",      prim_list_star, 1,-1); DEF("length",    prim_length,    1,1);
     DEF("append",     prim_append,    0,-1); DEF("reverse",   prim_reverse,   1,1);
