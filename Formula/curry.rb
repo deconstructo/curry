@@ -4,11 +4,11 @@ class Curry < Formula
   license "GPL-3.0-only"
 
   # Update url + sha256 after tagging a release:
-  #   git tag v1.28.0 && git push origin v1.28.0
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.28.0.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.28.0.tar.gz"
-  sha256 "2ff052204a922859a6fd37ee4b3baf3fb7f4d321759b8fc219191622f09bb7a1"
-  version "1.28.0"
+  #   git tag v1.29.0 && git push origin v1.29.0
+  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.29.0.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.29.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "1.29.0"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
@@ -56,6 +56,10 @@ class Curry < Formula
   # qtbase's opt_prefix on CMAKE_PREFIX_PATH, so depend on it explicitly
   # rather than relying on it being present transitively.
   depends_on "qtbase"   if build.with? "qt6"
+  # The qt6 module's gpu-* layer (QRhi) needs Qt Shader Tools, which
+  # Homebrew installs in its own keg; CMakeLists.txt looks for it in every
+  # CMAKE_PREFIX_PATH entry, so it is added to prefix_paths below.
+  depends_on "qtshadertools" if build.with? "qt6"
   depends_on "plplot"   if build.with? "plplot"
   # libpiper is this tap's own formula (Formula/libpiper.rb), not homebrew-
   # core -- see that formula's own header for why it can't live upstream
@@ -85,6 +89,7 @@ class Curry < Formula
     # qt@6 first makes the configure step fail outright.
     prefix_paths << Formula["qtbase"].opt_prefix    if build.with? "qt6"
     prefix_paths << Formula["qt@6"].opt_prefix      if build.with? "qt6"
+    prefix_paths << Formula["qtshadertools"].opt_prefix if build.with? "qt6"
     prefix_paths << Formula["plplot"].opt_prefix    if build.with? "plplot"
     prefix_paths << Formula["libpiper"].opt_prefix  if build.with? "piper"
     if build.with? "jupyter"

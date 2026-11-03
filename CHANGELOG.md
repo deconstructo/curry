@@ -1,5 +1,55 @@
 # Changelog
 
+### 1.29.0 - 2026-11-04
+
+**New — GPU rendering and compute on Metal, Vulkan and Direct3D: the `gpu-*` layer of `(curry qt6)` (#347)**
+
+- Built on QRhi, Qt's Rendering Hardware Interface, so GPU work is no longer
+  tied to OpenGL: Metal on macOS, Vulkan on Linux, D3D11/12 on Windows,
+  OpenGL as a fallback. The existing `gl-*` procedures are unchanged.
+- Headless devices (`make-gpu-device`, `gpu-run!`) and a window canvas
+  (`make-gpu-canvas`); buffers, 2D/3D textures, samplers, bindings, graphics
+  pipelines with explicit depth/cull/blend state, compute pipelines, indexed
+  and instanced draws, readback.
+- Shaders are GLSL strings compiled when created; a compile error is a Scheme
+  error with the compiler's message. `gpu-std140`/`gpu-std430` lay out
+  uniform and storage blocks the way GLSL does.
+- Every input is checked before it reaches the GPU, including against the
+  shaders' own declarations, because Metal ends the process on a mismatch
+  instead of reporting it (#346). What is not checked is documented.
+- Needs Qt 6.7 or newer and Qt Shader Tools; without them the rest of
+  `(curry qt6)` builds as before. The Homebrew formula's `--with-qt6` now
+  depends on `qtshadertools`.
+- `(curry gpu-math)`: 3-vectors and column-major 4x4 matrices.
+- Docs: `docs/reference/module-qt6-gpu.md`, including a short introduction
+  to shaders and GLSL.
+
+**New — symbolic spacetimes compiled to GPU code: `(curry glsl)` and `(curry spacetime)` (#347)**
+
+- `(curry glsl)` turns CAS expressions into GLSL, computing shared
+  sub-expressions once.
+- `(curry spacetime)` defines Schwarzschild, Reissner–Nordström, Kerr and
+  Kerr–Newman black holes (horizon-penetrating Kerr–Schild coordinates) or
+  any metric; the CAS derives every partial derivative, and the result is a
+  GPU function plus a geodesic integrator. Traced light rays match the exact
+  Schwarzschild bending to about 1e-7 and reproduce the Kerr capture limits.
+- `examples/blackhole.scm` and `examples/blackhole-anaglyph.scm`: fall
+  through the event horizon of a Kerr black hole, ray-traced per pixel, in
+  normal view or red/cyan 3D. Guide: `docs/guides/blackhole.md`.
+
+**Fixed — `(scheme cxr)` had no four-level accessors (#345)**
+
+- `cadddr`, `cddddr` and the other 14 four-level `c[ad]r` procedures were
+  missing, so `(import (scheme cxr))` succeeded but `(cadddr x)` was an
+  unbound variable. All 16 now exist, and raise an error, not a crash, on a
+  list that is too short.
+
+**Fixed — the `actors` test hung intermittently (#312)**
+
+- The cause was in the test, not the runtime: it used a condition variable
+  without a flag, so a signal sent before the wait was lost. The test now
+  uses the correct pattern and checks that order explicitly.
+
 ### 1.28.0 - 2026-11-02
 
 **Changed — `write` and `display` print flonums in readable R7RS form (#308)**

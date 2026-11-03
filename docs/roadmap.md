@@ -14,10 +14,11 @@ generational GC was removed — see
 `docs/thoughts/generational-gc-removal.md`. Updated 2026-10-18 after the
 v1.27.0 release: the opening paragraph and the "Where we are now" rows
 for work shipped since v1.23.3 were rewritten. Updated 2026-11-02 for
-v1.28.0: one entry added to the opening list. Source: cill_spec.pdf +
+v1.28.0: one entry added to the opening list. Updated 2026-11-04 for
+v1.29.0: one entry added to the opening list. Source: cill_spec.pdf +
 design sessions.*
 
-Curry is at v1.28.0 (released 2026-11-02). Since v1.23.3 the following
+Curry is at v1.29.0 (released 2026-11-04). Since v1.23.3 the following
 has shipped; `CHANGELOG.md` has the dated list.
 
 - **v1.24.0:** SRFI-61 (`cond` arrow clause) in the compiler and the
@@ -45,6 +46,13 @@ has shipped; `CHANGELOG.md` has the dated list.
   are correct for complex numbers; JSON number input and output are exact;
   and a Debug-build compiler stack overflow and an LLVM JIT comparison bug
   were fixed.
+- **v1.29.0:** GPU rendering and compute from Scheme on Metal, Vulkan and
+  D3D through Qt's QRhi (the `gpu-*` layer of `(curry qt6)`), with every
+  input checked before it reaches the GPU; `(curry glsl)` compiles CAS
+  expressions to GLSL; `(curry spacetime)` compiles symbolic metrics to a
+  GPU geodesic integrator, shown by a ray-traced fall into a Kerr black
+  hole; the four-level `cxr` accessors; and the intermittent `actors` test
+  hang was fixed.
 
 Earlier, between v1.17.0 and v1.23.3: **a real compiler IR pipeline
 shipped** (Tiers 2.1 through 2.6 — open coding, a local inliner, wrapper
@@ -65,7 +73,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.28.0; the table below was last fully checked at v1.23.3)
+## Where we are now (v1.29.0; the table below was last fully checked at v1.23.3)
 
 | Capability | Status |
 |---|---|
