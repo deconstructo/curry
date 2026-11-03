@@ -210,6 +210,8 @@ The test suites registered in `ctest`:
 | `cli` | `test_cli.sh` | CLI flags: shebang handling, `-c`/`-o`/`-x`, combined getopt, magic-byte detection for extension-less `.scc` files, `-l` load, script argument passing — 30 assertions |
 | `lsp` | `test_lsp.sh` | `(curry lsp)` over real Content-Length-framed stdio: `initialize` capabilities, reader-driven diagnostics (raise + clear on `didChange`), hover (special forms/builtins/Akkadian synonyms), completion (static table + structurally-collected local bindings), the nesting-depth crash guard (including the `#\"`/`#\;` character-literal bypass), `didClose`, unknown-method errors — 27 assertions |
 | `qt6_gpu` | `gpu_tests.scm` | `(curry qt6)` `gpu-*` QRhi layer on a real headless GPU (Metal/Vulkan/GL): compute, rendering (depth, indexed, instanced, textures, render-to-texture), storage images, 3D textures, readback, `gpu-std140` layout checked by the GPU, `(curry gpu-math)`, error paths — prints SKIP without a GPU unless `CURRY_GPU_REQUIRED` is set; only registered when Qt ≥ 6.7 + Shader Tools are found |
+| `spacetime` | `spacetime_tests.scm` | `(curry glsl)` (`sym->glsl`, CSE via `glsl-assignments`) and `(curry spacetime)` (Kerr–Schild metrics; CAS `∂g` checked against finite differences) — no GPU needed |
+| `spacetime_gpu` | `spacetime_gpu_tests.scm` | Light rays traced on the GPU with GLSL generated from symbolic metrics: Schwarzschild swept angle vs the exact integral (rel. error ~1e-7), capture limit 3√3 M, Kerr a=0.9 prograde/retrograde capture limits, energy/Hamiltonian conservation; registered with `qt6_gpu` |
 | `ode`, `pde_numerical`, `d_operator`, `tuples`, `partial`, `trig`, `sicm` | individual `.scm` files | Numeric/physics modules |
 
 ## CLI flags
