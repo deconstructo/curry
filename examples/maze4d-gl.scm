@@ -1,5 +1,9 @@
 #!/usr/bin/env curry
-;;; maze4d.scm — Wander a 4D maze as a 3D creature.
+;;; maze4d-gl.scm — Wander a 4D maze as a 3D creature (gl-* layer).
+;;;
+;;; The original version, on the older OpenGL-only gl-* layer of (curry qt6),
+;;; kept for Qt versions below 6.7.  examples/maze4d.scm is the same maze on
+;;; the gpu-* (QRhi) layer: Metal on macOS, Vulkan on Linux.
 ;;;
 ;;; The maze has passages in ±x, ±z within each w-slice, plus ±w connections
 ;;; between slices.  At any moment you see a first-person view (GPU DDA
@@ -199,11 +203,12 @@ float cast_ray(vec2 pos, vec2 rd, out bool x_side) {
         if (min(sdx, sdz) > 18.0) { x_side = false; return -1.0; }
         if (sdx < sdz) {
             int bit = sx > 0 ? 1 : 2;
-            if ((cell_bits(ix, iz) & bit) == 0) { x_side = true;  return max(0.01, sdx - ddx); }
+            /* the wall is on the boundary about to be crossed, at sdx */
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = true;  return max(0.01, sdx); }
             ix += sx; sdx += ddx;
         } else {
             int bit = sz > 0 ? 4 : 8;
-            if ((cell_bits(ix, iz) & bit) == 0) { x_side = false; return max(0.01, sdz - ddz); }
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = false; return max(0.01, sdz); }
             iz += sz; sdz += ddz;
         }
     }
@@ -256,9 +261,10 @@ void main() {
          * Player eye is at height 0.5 (mid-wall), floor at 0.
          * lp = 0.5 / (ly/hsh - 1)  →  infinity at horizon, 0.5 at feet. */
         float row_dist = 0.5 / max(0.001, ly / hsh - 1.0);
-        vec2  nrd = normalize(rd);
-        float fx  = fract(u_pos.x + row_dist * nrd.x);
-        float fz  = fract(u_pos.y + row_dist * nrd.y);
+        /* row_dist is perpendicular and rd's view component is 1, so the
+         * floor point is pos + row_dist*rd (normalizing bent the grid) */
+        float fx  = fract(u_pos.x + row_dist * rd.x);
+        float fz  = fract(u_pos.y + row_dist * rd.y);
         bool  gline = fx < 0.05 || fz < 0.05;
         /* Grid lines stay at the base dark colour; open tiles lighten slightly
          * near the player so the lines read as recessed cracks. */
