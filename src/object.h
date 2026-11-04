@@ -532,7 +532,8 @@ typedef struct {
 
 typedef struct {
     Hdr      hdr;
-    uint32_t size;
+    uint32_t size;     /* live elements */
+    uint32_t used;     /* live elements + tombstones; drives rehashing */
     uint32_t cap;
     val_t   *buckets;  /* V_UNDEF = empty, V_EOF = tombstone */
     int      cmp;
@@ -541,7 +542,8 @@ typedef struct {
 /* Hash table (same open-addressing scheme) */
 typedef struct {
     Hdr      hdr;
-    uint32_t size;
+    uint32_t size;     /* live entries */
+    uint32_t used;     /* live entries + tombstones; drives rehashing */
     uint32_t cap;
     val_t   *keys;
     val_t   *vals;
