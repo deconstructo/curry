@@ -23,7 +23,7 @@
 
 (define-library (srfi s272 measure-impl)
   (import (scheme base) (srfi s272 width-data))
-  (export char-width-procedure %string-width)
+  (export char-width-procedure %string-width %string-clusters %ambiguous-char?)
   (begin
 
     ;; Binary search over a flat (lo hi lo hi ...) vector.
@@ -92,4 +92,44 @@
                    ;; A zero-width character (a combining mark) keeps the
                    ;; previous glyph's state, including a pending ZWJ.
                    (loop (+ i 1) (+ total w) (if (= w 0) prev-cp cp) (if (= w 0) prev-w w)
-                         (and (= w 0) joined?)))))))))))
+                         (and (= w 0) joined?)))))))))
+
+    ;; East Asian Ambiguous characters: 1 column normally, 2 in a CJK
+    ;; context (SRFI 166's terminal-aware /wide variants).
+    (define (%ambiguous-char? c) (%in-ranges? (char->integer c) %ambiguous-ranges))
+
+    ;; The grapheme-like clusters of s as a list of (start end width), the
+    ;; same units %string-width adds up: a base character with its
+    ;; combining marks, a ZWJ sequence, a flag, an emoji with a modifier.
+    (define (%string-clusters s)
+      (let ((len (string-length s)) (width (char-width-procedure)))
+        (let loop ((i 0) (acc '()) (prev-cp 0) (prev-w 0) (joined? #f))
+          (if (>= i len)
+              (reverse acc)
+              (let* ((c (string-ref s i))
+                     (cp (char->integer c))
+                     (cw (width c))
+                     (w (or cw 0))
+                     (head (and (pair? acc) (car acc))))
+                (define (extend! new-w)
+                  (cons (list (car head) (+ i 1) new-w) (cdr acc)))
+                (cond
+                  ;; Merges into the cluster before it, adding no width.
+                  ((and head cw
+                        (or (and joined? (> w 0) (or (= w 2) (%text-default-emoji? cp)))
+                            (and (%regional-indicator? cp) (%regional-indicator? prev-cp))
+                            (and (%emoji-modifier? cp) (= prev-w 2) (%emoji-base? prev-cp))))
+                   (loop (+ i 1) (extend! (caddr head)) (if (%regional-indicator? cp) -1 cp) prev-w #f))
+                  ;; ZWJ joins the next glyph.
+                  ((and head (= cp #x200D))
+                   (loop (+ i 1) (extend! (caddr head)) cp prev-w #t))
+                  ;; VS16 widens a preceding text-default symbol.
+                  ((and head (= cp #xFE0F) (= prev-w 1) (%text-default-emoji? prev-cp))
+                   (loop (+ i 1) (extend! (+ (caddr head) 1)) cp 2 #f))
+                  ;; A zero-width character (a combining mark) joins the
+                  ;; cluster before it.
+                  ((and head cw (= w 0))
+                   (loop (+ i 1) (extend! (caddr head)) prev-cp prev-w joined?))
+                  (else
+                   (loop (+ i 1) (cons (list i (+ i 1) w) acc) cp w #f))))))))
+))

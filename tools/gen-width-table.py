@@ -11,6 +11,7 @@ Sources (downloaded once into --cache, default .unicode-cache/):
   - extracted/DerivedGeneralCategory.txt
                                  Mn, Me, Cf are 0 columns; Cc is unprintable
   - emoji/emoji-data.txt         Emoji_Presentation is 2 columns
+  East Asian Ambiguous (A) is kept as a separate table.
 
 Cuneiform (U+12000..U+1254F) is East Asian Width N, so it is 1 column.
 Only the Akkadian transliteration marks (combining macron, circumflex,
@@ -98,6 +99,9 @@ def main():
     wide += [(lo, hi) for lo, hi, _ in parse_ranges(paths["emoji/emoji-data.txt"], {"Emoji_Presentation"})]
     zero = [(lo, hi) for lo, hi, _ in parse_ranges(paths["extracted/DerivedGeneralCategory.txt"], {"Mn", "Me", "Cf"})]
     control = [(lo, hi) for lo, hi, _ in parse_ranges(paths["extracted/DerivedGeneralCategory.txt"], {"Cc"})]
+    # East Asian Ambiguous: 1 column normally, 2 in a CJK context
+    # (SRFI 166's terminal-aware /wide variants).
+    ambiguous = [(lo, hi) for lo, hi, _ in parse_ranges(paths["EastAsianWidth.txt"], {"A"})]
     # Soft hyphen (Cf) is conventionally 1 column in terminals; keep it
     # printable by removing it from the zero-width set.
     zero = [(lo, hi) for lo, hi in zero if not (lo == hi == 0xAD)]
@@ -113,12 +117,13 @@ def main():
     print()
     print("(define-library (srfi s272 width-data)")
     print("  (import (scheme base))")
-    print("  (export %wide-ranges %zero-width-ranges %control-ranges)")
+    print("  (export %wide-ranges %zero-width-ranges %control-ranges %ambiguous-ranges)")
     print("  (begin")
     print()
     emit("%wide-ranges", merge(wide))
     emit("%zero-width-ranges", merge(zero))
     emit("%control-ranges", merge(control))
+    emit("%ambiguous-ranges", merge(ambiguous))
     print("  ))")
 
 
