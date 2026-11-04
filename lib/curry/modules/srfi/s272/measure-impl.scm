@@ -2,55 +2,87 @@
 ;;; parameter holding a (char) -> (0|1|2|#f) terminal-column-width
 ;;; function. https://srfi.schemers.org/srfi-272/
 ;;;
-;;; Scope note: a fully spec-faithful implementation needs the complete
-;;; Unicode "East Asian Width" (UAX #11) property table plus the
-;;; combining-mark and default-ignorable tables, none of which curry
-;;; ships (no bundled Unicode Character Database). This is a practical
-;;; approximation in the same family as the widely-deployed POSIX
-;;; `wcwidth`: known Wide/Fullwidth block ranges score 2, known
-;;; combining-mark/zero-width ranges score 0, C0/C1 controls and other
-;;; non-printable codepoints score #f, everything else scores 1. It
-;;; covers the common cases (CJK text, combining diacritics, control
-;;; characters) correctly but is not exhaustive across all of Unicode --
-;;; documented here rather than silently claimed as complete.
+;;; The default procedure follows UAX #11 (East Asian Width) as the spec
+;;; asks, using tables generated from the Unicode Character Database by
+;;; tools/gen-width-table.py (see width-data.scm):
+;;;   - East Asian Wide / Fullwidth and Emoji_Presentation  -> 2
+;;;   - general category Mn / Me / Cf (combining marks, zero-width
+;;;     joiners, variation selectors, tag characters) and the Hangul
+;;;     medial vowels / final consonants                    -> 0
+;;;   - general category Cc (C0/C1 controls)                -> #f
+;;;   - everything else, including cuneiform (U+12000..U+1254F, East
+;;;     Asian Width N) and the Akkadian transliteration letters, which
+;;;     are precomposed or base + combining mark            -> 1
+;;;
+;;; %string-width is the engine's column measure for a whole string. It
+;;; adds the few cluster rules a per-character width cannot express, so a
+;;; string is measured as it renders on a terminal rather than as a count
+;;; of code points: a ZWJ sequence, a regional-indicator flag and an emoji
+;;; with a skin-tone modifier each take the columns of their base glyph,
+;;; and VARIATION SELECTOR-16 widens a text-default symbol to 2 columns.
 
 (define-library (srfi s272 measure-impl)
-  (import (scheme base) (scheme char))
-  (export char-width-procedure)
+  (import (scheme base) (srfi s272 width-data))
+  (export char-width-procedure %string-width)
   (begin
 
-    (define (%in-any-range? cp ranges)
-      (let loop ((rs ranges))
-        (cond ((null? rs) #f)
-              ((and (>= cp (caar rs)) (<= cp (cdar rs))) #t)
-              (else (loop (cdr rs))))))
-
-    ;; Representative Wide/Fullwidth ranges (Hangul jamo/syllables, CJK
-    ;; radicals/punctuation/ideographs incl. Ext A/B, kana, CJK
-    ;; compatibility, fullwidth forms, and common emoji blocks).
-    (define %wide-ranges
-      '((#x1100 . #x115F) (#x2E80 . #x303E) (#x3041 . #x33FF)
-        (#x3400 . #x4DBF) (#x4E00 . #x9FFF) (#xA000 . #xA4CF)
-        (#xAC00 . #xD7A3) (#xF900 . #xFAFF) (#xFE30 . #xFE4F)
-        (#xFF00 . #xFF60) (#xFFE0 . #xFFE6)
-        (#x1F300 . #x1F64F) (#x1F900 . #x1F9FF) (#x20000 . #x2FFFD) (#x30000 . #x3FFFD)))
-
-    ;; Representative combining-mark / zero-width ranges.
-    (define %zero-width-ranges
-      '((#x0300 . #x036F) (#x0483 . #x0489) (#x0591 . #x05BD)
-        (#x0610 . #x061A) (#x064B . #x065F) (#x06D6 . #x06DC)
-        (#x0E31 . #x0E31) (#x0E34 . #x0E3A) (#x200B . #x200F)
-        (#x20D0 . #x20FF) (#xFE00 . #xFE0F) (#xFE20 . #xFE2F)))
-
-    (define (%control-char? cp)
-      (or (<= cp #x1F) (= cp #x7F) (and (>= cp #x80) (<= cp #x9F))))
+    ;; Binary search over a flat (lo hi lo hi ...) vector.
+    (define (%in-ranges? cp ranges)
+      (let loop ((lo 0) (hi (quotient (vector-length ranges) 2)))
+        (if (>= lo hi)
+            #f
+            (let* ((mid (quotient (+ lo hi) 2))
+                   (rlo (vector-ref ranges (* 2 mid)))
+                   (rhi (vector-ref ranges (+ 1 (* 2 mid)))))
+              (cond ((< cp rlo) (loop lo mid))
+                    ((> cp rhi) (loop (+ mid 1) hi))
+                    (else #t))))))
 
     (define (%default-char-width c)
       (let ((cp (char->integer c)))
         (cond
-          ((%control-char? cp) #f)
-          ((%in-any-range? cp %zero-width-ranges) 0)
-          ((%in-any-range? cp %wide-ranges) 2)
+          ((< cp #x20) #f)
+          ((< cp #x7F) 1)
+          ((%in-ranges? cp %control-ranges) #f)
+          ((%in-ranges? cp %zero-width-ranges) 0)
+          ((%in-ranges? cp %wide-ranges) 2)
           (else 1))))
 
-    (define char-width-procedure (make-parameter %default-char-width))))
+    (define char-width-procedure (make-parameter %default-char-width))
+
+    (define (%regional-indicator? cp) (and (>= cp #x1F1E6) (<= cp #x1F1FF)))
+    (define (%emoji-modifier? cp) (and (>= cp #x1F3FB) (<= cp #x1F3FF)))
+
+    ;; Symbols whose default presentation is text (width 1) but which
+    ;; render as 2-column emoji when followed by U+FE0F.
+    (define (%text-default-emoji? cp)
+      (or (memv cp '(#xA9 #xAE #x203C #x2049 #x2122 #x2139 #x3030 #x303D #x3297 #x3299))
+          (and (>= cp #x2190) (<= cp #x2BFF))
+          (and (>= cp #x1F000) (<= cp #x1FAFF))))
+
+    ;; Terminal columns occupied by string s. Control characters and
+    ;; anything the width procedure scores #f count as 0.
+    (define (%string-width s)
+      (let ((len (string-length s)) (width (char-width-procedure)))
+        (let loop ((i 0) (total 0) (prev-cp 0) (prev-w 0) (joined? #f))
+          (if (>= i len)
+              total
+              (let* ((c (string-ref s i))
+                     (cp (char->integer c))
+                     (w (or (width c) 0)))
+                (cond
+                  ;; Second half of a flag, a skin-tone modifier, and the
+                  ;; character after a ZWJ all merge into the preceding
+                  ;; glyph.
+                  ((or (and joined? (> w 0))
+                       (and (%regional-indicator? cp) (%regional-indicator? prev-cp))
+                       (and (%emoji-modifier? cp) (= prev-w 2)))
+                   (loop (+ i 1) total (if (%regional-indicator? cp) -1 cp) prev-w #f))
+                  ;; ZWJ itself is width 0 and joins the next glyph.
+                  ((= cp #x200D) (loop (+ i 1) total cp prev-w #t))
+                  ;; VS16 widens a preceding text-default symbol.
+                  ((and (= cp #xFE0F) (= prev-w 1) (%text-default-emoji? prev-cp))
+                   (loop (+ i 1) (+ total 1) cp 2 #f))
+                  (else
+                   (loop (+ i 1) (+ total w) cp (if (= w 0) prev-w w) #f))))))))
+))
