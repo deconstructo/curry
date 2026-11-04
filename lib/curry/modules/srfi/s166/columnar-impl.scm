@@ -123,16 +123,18 @@
              (n (if (null? (%filter (lambda (c) (not (%col-literal c))) cols))
                     1
                     (apply max 0 finite-lens)))
-             (last-index (- (length cols) 1)))
+             (last-index (- (length cols) 1))
+             ;; a vector per column, so a cell is found without rescanning
+             (columns (map list->vector lines-per-col)))
         (let line-loop ((i 0))
           (when (< i n)
             (%emit! st
-              (let cell-loop ((cs cols) (ws widths) (ls lines-per-col) (j 0) (acc '()))
+              (let cell-loop ((cs cols) (ws widths) (ls columns) (j 0) (acc '()))
                 (if (null? cs)
                     (apply string-append (reverse (cons "\n" acc)))
                     (let* ((c (car cs))
                            (text (cond ((%col-literal c) (%col-literal c))
-                                       ((< i (length (car ls))) (list-ref (car ls) i))
+                                       ((< i (vector-length (car ls))) (vector-ref (car ls) i))
                                        (else "")))
                            (cell (if (%col-literal c)
                                      text
@@ -196,7 +198,7 @@
         (let fill ((i (- n 1)))
           (when (>= i 0)
             (let try ((j (+ i 1)) (line-width (vector-ref wd i)) (best-cost #f) (best-j (+ i 1)))
-              (let* ((cost (if (= j n) 0 (let ((slack (- target line-width))) (* slack slack slack))))
+              (let* ((cost (if (= j n) 0 (let ((slack (max 0 (- target line-width)))) (* slack slack slack))))
                      (cost (if (and (> line-width target) (> j (+ i 1))) #f cost))
                      (total (and cost (+ cost (vector-ref best j))))
                      (better? (and total (or (not best-cost) (< total best-cost)))))

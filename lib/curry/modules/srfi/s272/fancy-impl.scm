@@ -452,24 +452,33 @@
                     (lambda () (wrap (lambda () (%pprint-items items out))))))))))))
 
     ;; outfile is a filename string per the spec; an already-open output
-    ;; port is also accepted (used as is, never closed). Returns the port,
-    ;; whether this procedure opened it, and the remaining arguments.
+    ;; port is also accepted (used as is, never closed). Returns the
+    ;; destination (a path string, a port, or #f for the current output
+    ;; port) and the remaining arguments.
     (define (%split-outfile-and-kvs args)
       (cond
-        ((and (pair? args) (string? (car args))) (values (open-output-file (car args)) #t (cdr args)))
-        ((and (pair? args) (port? (car args))) (values (car args) #f (cdr args)))
-        (else (values (current-output-port) #f args))))
+        ((and (pair? args) (string? (car args))) (values (car args) (cdr args)))
+        ((and (pair? args) (port? (car args))) (values (car args) (cdr args)))
+        (else (values #f args))))
 
-    ;; Opens the output after the input has been read, and closes it on
-    ;; every exit, normal or not.
+    ;; Reads and parses the input, renders everything into a string, and
+    ;; only then opens the destination and writes it. Anything that can
+    ;; raise (a missing input, an unterminated list, a malformed style
+    ;; comment, a hook) therefore happens before the output is touched,
+    ;; so pprint-file can rewrite a file in place and a failure leaves the
+    ;; old output as it was.
     (define (%with-output args source-thunk body)
       (let ((source (source-thunk)))
         (call-with-values (lambda () (%split-outfile-and-kvs args))
-          (lambda (out owns-out? kvs)
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (body source out kvs))
-              (lambda () (when owns-out? (close-port out))))))))
+          (lambda (dest kvs)
+            (let ((buf (open-output-string)))
+              (body source buf kvs)
+              (let ((text (get-output-string buf)))
+                (cond
+                  ((string? dest)
+                   (call-with-output-file dest (lambda (out) (write-string text out))))
+                  (dest (write-string text dest))
+                  (else (write-string text (current-output-port))))))))))
 
     (define (pprint-file infile . args)
       (%with-output args (lambda () (%read-source infile))

@@ -57,8 +57,16 @@
     ;; render as 2-column emoji when followed by U+FE0F.
     (define (%text-default-emoji? cp)
       (or (memv cp '(#xA9 #xAE #x203C #x2049 #x2122 #x2139 #x3030 #x303D #x3297 #x3299))
-          (and (>= cp #x2190) (<= cp #x2BFF))
+          (%in-any? cp '((#x2194 . #x2199) (#x21A9 . #x21AA) (#x231A . #x231B) (#x2328 . #x2328)
+                         (#x23CF . #x23CF) (#x23E9 . #x23F3) (#x23F8 . #x23FA) (#x24C2 . #x24C2)
+                         (#x25AA . #x25AB) (#x25B6 . #x25B6) (#x25C0 . #x25C0) (#x25FB . #x25FE)
+                         (#x2600 . #x27BF) (#x2934 . #x2935) (#x2B05 . #x2B07) (#x2B1B . #x2B1C)
+                         (#x2B50 . #x2B50) (#x2B55 . #x2B55)))
           (and (>= cp #x1F000) (<= cp #x1FAFF))))
+
+    (define (%in-any? cp ranges)
+      (let loop ((rs ranges))
+        (and (pair? rs) (or (and (>= cp (caar rs)) (<= cp (cdar rs))) (loop (cdr rs))))))
 
     ;; A character a skin-tone modifier can attach to: the emoji blocks
     ;; and the text-default symbols.

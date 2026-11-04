@@ -404,8 +404,10 @@
         ((and (inexact? num) (or (nan? num) (infinite? num)))
          (%write->string num))
         (else
-         (let* ((neg? (negative? num))
-                (q (let ((e (if (exact? num) num (inexact->exact num)))) (abs e)))
+         (let* ((q (let ((e (if (exact? num) num (inexact->exact num)))) (abs e)))
+                ;; a negative number that rounds to zero is not shown as -0.00
+                (neg? (and (negative? num)
+                           (or (not precision) (not (zero? (round (* q (expt radix precision))))))))
                 (csep (%as-string comma-sep))
                 (dsep (let ((d (%as-string decimal-sep)))
                         (if (and (string=? d ".") (string=? csep ".")) "," d)))

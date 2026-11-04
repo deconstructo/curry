@@ -220,6 +220,16 @@
 (t "alias color" (ab:show #f (acl:as-red "x")) "\x1b;[31mx\x1b;[39m")
 (t "alias show" (ab:show #f (psa:pprinted '(a b))) "(a b)")
 
+;; ── Review fixes ────────────────────────────────────────────────────────
+(t "string-terminal-width/wide takes a range" (string-terminal-width/wide "abcdef" 1 3) 2)
+(t "negative rounding to zero has no sign" (show #f (numeric -0.001 10 2)) "0.00")
+(t "negative keeps its sign when not zero" (show #f (numeric -0.006 10 2)) "-0.01")
+(t "unterminated ANSI is not a sequence" (string-terminal-width "a\x1b;[1;2 ") 6)
+(t "overlong word does not distort wrapping"
+   (show #f (with ((width 5)) (wrapped "a bbbbbbbbbbbbbbbbbbbbbbbb c d e f")))
+   "a\nbbbbbbbbbbbbbbbbbbbbbbbb\nc d e\nf")
+(t "wide /wide variant in a range" (string-terminal-width/wide "αβγδ" 1 3) 4)
+
 (display "SRFI-166 tests: ") (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)
 (if (> fail-count 0) (exit 1))

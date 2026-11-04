@@ -459,7 +459,7 @@
     (define (%atom-semantic-color kind role)
       (case role
         ((keyword) 'keyword)
-        ((defined) 'defined)
+        ((defined head) 'defined)
         ((formal) 'formal)
         (else
          (case kind

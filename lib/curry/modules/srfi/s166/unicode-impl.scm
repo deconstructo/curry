@@ -26,8 +26,8 @@
     (define ESC (integer->char 27))
 
     ;; The end of the escape sequence starting at i (text[i] is ESC), or i
-    ;; if ESC does not start one. CSI ends at a final byte 0x40-0x7E; OSC
-    ;; ends at BEL or ESC \.
+    ;; if ESC does not start a complete one (an unterminated sequence is not
+    ;; one). CSI ends at a final byte 0x40-0x7E; OSC ends at BEL or ESC \.
     (define (%ansi-end s i)
       (let ((len (string-length s)))
         (if (>= (+ i 1) len)
@@ -36,12 +36,12 @@
               (cond
                 ((char=? c #\[)
                  (let loop ((j (+ i 2)))
-                   (cond ((>= j len) len)
+                   (cond ((>= j len) i)
                          ((let ((n (char->integer (string-ref s j)))) (and (>= n #x40) (<= n #x7E))) (+ j 1))
                          (else (loop (+ j 1))))))
                 ((char=? c #\])
                  (let loop ((j (+ i 2)))
-                   (cond ((>= j len) len)
+                   (cond ((>= j len) i)
                          ((char=? (string-ref s j) (integer->char 7)) (+ j 1))
                          ((and (char=? (string-ref s j) ESC) (< (+ j 1) len) (char=? (string-ref s (+ j 1)) #\\))
                           (+ j 2))
@@ -84,7 +84,7 @@
 
     (define (string-terminal-width/wide str . range)
       (parameterize ((char-width-procedure (%wide-width-procedure)))
-        (string-terminal-width str)))
+        (apply string-terminal-width str range)))
 
     ;; The clusters of s as (start end width), with each ANSI sequence a
     ;; zero-width cluster of its own.

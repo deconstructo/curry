@@ -76,7 +76,7 @@
   "(1 2 ...)\n"
   (run "(1 2 3 4 5)\n" 'pp-length 2))
 (check "html escapes text and wraps colors in spans"
-  "<pre><span class=\"pp-comment\">;; &lt;c&gt;</span>\n<span class=\"pp-paren\">(</span><span class=\"pp-keyword\">define</span> <span class=\"pp-variable\">x</span> <span class=\"pp-string\">\"a&lt;b\"</span><span class=\"pp-paren\">)</span>\n</pre>"
+  "<pre><span class=\"pp-comment\">;; &lt;c&gt;</span>\n<span class=\"pp-paren\">(</span><span class=\"pp-keyword\">define</span> <span class=\"pp-defined\">x</span> <span class=\"pp-string\">\"a&lt;b\"</span><span class=\"pp-paren\">)</span>\n</pre>"
   (run/html ";; <c>\n(define x \"a<b\")\n" 'pp-color #t))
 (check "html without color has no spans"
   "<pre>(define x \"a&lt;b\")\n</pre>"
@@ -115,6 +115,14 @@
 (check "pp-level applies inside a dotted tail"
   "(x . (a ...))\n"
   (run "(x . (a (b)))\n" 'pp-level 2))
+;; A failure while formatting must not empty the destination: a malformed
+;; ";; * pp-styles:" right side raises, after the output would have been
+;; opened by a naive implementation.
+(call-with-output-file path (lambda (p) (write-string ";; * pp-styles: bad := (_ e . \n(a b)\n" p)))
+(guard (e (#t #f)) (pprint-file path path))
+(check "failed in-place rewrite keeps the file"
+  ";; * pp-styles: bad := (_ e . \n(a b)\n"
+  (call-with-input-file path (lambda (p) (read-string 1000 p))))
 
 (display "SRFI-272 fancy tests: ") (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)
