@@ -418,11 +418,14 @@ static void write_number_notation(val_t v, val_t port, bool in_container) {
              * a space (several places, or a fraction) would read back as
              * separate elements, and one that is also an Akkadian keyword
              * (𒁹 = 1 is `define`, 𒌋 = 10 is `and`) would read back as that
-             * symbol. Write an exact number as the #s literal
+             * symbol, and a negative one (-𒁹) is read as a symbol too. An
+             * inexact number is always written in decimal in a container,
+             * so it stays inexact. Write an exact number as the #s literal
              * the reader accepts anywhere; an inexact one in plain decimal,
              * so it stays inexact. */
             if (cuneiform && in_container
-                && (memchr(str_data(as_str(s)), ' ', as_str(s)->len)
+                && (vis_flonum(v) || str_data(as_str(s))[0] == '-'
+                    || memchr(str_data(as_str(s)), ' ', as_str(s)->len)
                     || reader_is_akkadian_cuneiform(str_data(as_str(s))))) {
                 if (!vis_flonum(v)) {
                     val_t n = sex_to_neugebauer(v, -1);

@@ -73,7 +73,8 @@ still one token anywhere.
 same data. In a list or vector with `current-number-notation` set to
 `'cuneiform`, an exact number whose cuneiform text has a space (several places,
 or a fraction) or is also an Akkadian keyword (1 is `𒁹`, 10 is `𒌋`) is printed
-as `#s…`; an inexact one is printed in decimal so it stays inexact. At the top
+as `#s…` (so is a negative number, since `-𒁹` would read as a symbol); an
+inexact one is always printed in decimal so it stays inexact. At the top
 level the cuneiform form is unchanged:
 
 ```scheme
@@ -81,6 +82,12 @@ level the cuneiform form is unchanged:
 (write 70)         ; 𒁹 𒌋
 (write '(70 5 1))  ; (#s1,10 𒁹𒁹𒁹𒁹𒁹 #s1)
 ```
+
+At the top level a lone `𒁹` or `𒌋` still reads as the keyword (`define`, `and`)
+and a negative number such as `-𒁹𒁹𒁹𒁹𒁹` reads as a symbol; use
+`(string->number "…" 'cuneiform)` for those. Programs compiled before this
+change keep a `.scc` cache keyed on their source text, so run once with
+`--clear-cache` if a script used a multi-place cuneiform literal inside a call.
 
 ---
 

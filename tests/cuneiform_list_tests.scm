@@ -48,6 +48,9 @@
 (check "#s positive sign" 70 (rd "#s+1,10"))
 (check "#s negative fraction" -1/2 (rd "#s-0;30"))
 (check "#s sign alone is an error" 'error (guard (e (#t 'error)) (rd "#s-")))
+(check "#s two signs is an error" 'error (guard (e (#t 'error)) (rd "#s--1,10")))
+(check "#s mixed signs is an error" 'error (guard (e (#t 'error)) (rd "#s-+1")))
+(check "#s trailing junk is an error" 'error (guard (e (#t 'error)) (rd "#s-1,10x")))
 
 ;; ── Writing ─────────────────────────────────────────────────────────────
 (current-number-notation 'cuneiform)
@@ -59,7 +62,9 @@
 (check "list: two places" "(#s1,10)" (wr '(70)))
 (check "list: negative" "(#s-1,10)" (wr '(-70)))
 (check "list: fraction" "(#s0;30 #s1;30)" (wr '(1/2 3/2)))
-(check "list: an inexact number stays decimal" "(0.5)" (wr '(0.5)))
+(check "list: an inexact number stays decimal" "(0.5 5.0)" (wr '(0.5 5.0)))
+(check "list: a negative single-place number" "(#s-1 #s-5)" (wr '(-1 -5)))
+(check "negatives read back" '(-1 -5 -70) (rd (wr '(-1 -5 -70))))
 (check "vector" "#(#s1,10 𒁹𒁹𒁹𒁹𒁹)" (wr (vector 70 5)))
 (check "pair" "(#s1,10 . #s1,11)" (wr (cons 70 71)))
 (check "display" "(#s1,10)" (dsp '(70)))
