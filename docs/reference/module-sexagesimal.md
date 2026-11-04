@@ -53,6 +53,35 @@ in value position as part of a multi-group token (e.g. `𒁹 𒌋𒁹`) they rem
 sexagesimal numbers. Use `(string->number "𒁹" 'cuneiform)` to unambiguously
 obtain the number 1.
 
+### Inside lists, vectors and calls
+
+The space between place groups joins them **only at the top level of a
+read**. Inside `( )`, `[ ]`, `#( )` and `#u8( )` a space always ends a token, so
+`(𒁹 𒌋)` is a list of two elements (the symbols for `define` and `and`), not
+the number 70, and a call such as `(f 𒁹 𒌋𒁹)` has two arguments. To write a
+multi-place number inside a form, use `#s`:
+
+```scheme
+(f #s1,11)            ; 71
+(list #s1,10 #s-0;30) ; (70 -1/2)
+```
+
+`#s` accepts a leading `+` or `-`. A run of digits with no space (`𒌋𒌋𒁹𒁹𒁹`) is
+still one token anywhere.
+
+`write` and `display` follow the same rule, so what they print reads back as the
+same data. In a list or vector with `current-number-notation` set to
+`'cuneiform`, an exact number whose cuneiform text has a space (several places,
+or a fraction) or is also an Akkadian keyword (1 is `𒁹`, 10 is `𒌋`) is printed
+as `#s…`; an inexact one is printed in decimal so it stays inexact. At the top
+level the cuneiform form is unchanged:
+
+```scheme
+(current-number-notation 'cuneiform)
+(write 70)         ; 𒁹 𒌋
+(write '(70 5 1))  ; (#s1,10 𒁹𒁹𒁹𒁹𒁹 #s1)
+```
+
 ---
 
 ## Built-in procedures

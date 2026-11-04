@@ -4,6 +4,7 @@
 #include "numeric.h"
 #include "symbol.h"
 #include "eval.h"
+#include "reader.h"
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -400,17 +401,42 @@ static void write_string_escaped(val_t port, const char *s, uint32_t len) {
 }
 
 /* Write a number val (fixnum/bignum/rational/flonum) respecting current-number-notation. */
-static void write_number_notation(val_t v, val_t port) {
+static void write_number_notation(val_t v, val_t port, bool in_container) {
     if (g_number_notation != 0 && vis_symbol(g_number_notation)) {
         const char *note = as_sym(g_number_notation)->data;
         val_t s = V_FALSE;
+        bool cuneiform = false;
         if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
             s = sex_to_neugebauer(v, -1);
-        else if (strcmp(note, "cuneiform") == 0)
+        else if (strcmp(note, "cuneiform") == 0) {
             s = sex_to_cuneiform(v);
+            cuneiform = true;
+        }
         if (!vis_false(s)) {
-            port_write_string(port, str_data(as_str(s)), as_str(s)->len);
-            return;
+            /* Inside a list or vector the reader ends a cuneiform token at
+             * a space (issue #354), so a number whose cuneiform text holds
+             * a space (several places, or a fraction) would read back as
+             * separate elements, and one that is also an Akkadian keyword
+             * (𒁹 = 1 is `define`, 𒌋 = 10 is `and`) would read back as that
+             * symbol. Write an exact number as the #s literal
+             * the reader accepts anywhere; an inexact one in plain decimal,
+             * so it stays inexact. */
+            if (cuneiform && in_container
+                && (memchr(str_data(as_str(s)), ' ', as_str(s)->len)
+                    || reader_is_akkadian_cuneiform(str_data(as_str(s))))) {
+                if (!vis_flonum(v)) {
+                    val_t n = sex_to_neugebauer(v, -1);
+                    if (!vis_false(n)) {
+                        port_write_string(port, "#s", 2);
+                        port_write_string(port, str_data(as_str(n)), as_str(n)->len);
+                        return;
+                    }
+                }
+                /* fall through to the decimal fallback below */
+            } else {
+                port_write_string(port, str_data(as_str(s)), as_str(s)->len);
+                return;
+            }
         }
     }
     /* Fallback: decimal */
@@ -421,7 +447,12 @@ static void write_number_notation(val_t v, val_t port) {
     else if (vis_flonum(v))   { int n=num_flonum_to_shortest_cstr(vfloat(v),buf,sizeof(buf)); port_write_string(port,buf,(uint32_t)n); }
 }
 
-void scm_write(val_t v, val_t port) {
+static void scm_write_ctx(val_t v, val_t port, bool in_container);
+static void scm_display_ctx(val_t v, val_t port, bool in_container);
+
+void scm_write(val_t v, val_t port) { scm_write_ctx(v, port, false); }
+
+static void scm_write_ctx(val_t v, val_t port, bool in_container) {
     /* Issue #133: this plain (non-cycle-safe) writer -- reached
      * directly by write-simple and by the debugger's own value
      * printing (debug.c), bypassing scm_write_shared/ws_write's own
@@ -437,7 +468,7 @@ void scm_write(val_t v, val_t port) {
     if (vis_eof(v))      { port_write_string(port, "#<eof>", 6); return; }
     if (v == V_FALSE)    { port_write_string(port, "#f", 2); return; }
     if (v == V_TRUE)     { port_write_string(port, "#t", 2); return; }
-    if (vis_fixnum(v))   { write_number_notation(v, port); return; }
+    if (vis_fixnum(v))   { write_number_notation(v, port, in_container); return; }
     if (vis_char(v))     {
         uint32_t cp = vunchr(v);
         port_write_string(port, "#\\", 2);
@@ -449,9 +480,9 @@ void scm_write(val_t v, val_t port) {
     }
     if (vis_string(v))   { write_string_escaped(port, str_data(as_str(v)), as_str(v)->len); return; }
     if (vis_symbol(v))   { port_write_string(port, as_sym(v)->data, as_sym(v)->len); return; }
-    if (vis_flonum(v))   { write_number_notation(v, port); return; }
-    if (vis_bignum(v))   { write_number_notation(v, port); return; }
-    if (vis_rational(v)) { write_number_notation(v, port); return; }
+    if (vis_flonum(v))   { write_number_notation(v, port, in_container); return; }
+    if (vis_bignum(v))   { write_number_notation(v, port, in_container); return; }
+    if (vis_rational(v)) { write_number_notation(v, port, in_container); return; }
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) {
         val_t s = num_to_string(v, 10);
@@ -498,16 +529,16 @@ void scm_write(val_t v, val_t port) {
     }
     if (vis_pair(v)) {
         port_write_char(port, '(');
-        scm_write(vcar(v), port);
+        scm_write_ctx(vcar(v), port, true);
         val_t rest = vcdr(v);
         while (vis_pair(rest)) {
             port_write_char(port, ' ');
-            scm_write(vcar(rest), port);
+            scm_write_ctx(vcar(rest), port, true);
             rest = vcdr(rest);
         }
         if (!vis_nil(rest)) {
             port_write_string(port, " . ", 3);
-            scm_write(rest, port);
+            scm_write_ctx(rest, port, true);
         }
         port_write_char(port, ')');
         return;
@@ -517,7 +548,7 @@ void scm_write(val_t v, val_t port) {
         port_write_string(port, "#(", 2);
         for (uint32_t i = 0; i < vec->len; i++) {
             if (i) port_write_char(port, ' ');
-            scm_write(vec->data[i], port);
+            scm_write_ctx(vec->data[i], port, true);
         }
         port_write_char(port, ')'); return;
     }
@@ -770,29 +801,30 @@ static void ws_count_refs(val_t v, WSharedMap *m) {
     }
 }
 
-static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display);
+static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display, bool in_container);
 
 static void ws_write_list(val_t v, val_t port, WSharedMap *m, bool as_display) {
+    /* every element written here is inside a list */
     port_write_char(port, '(');
-    ws_write(vcar(v), port, m, as_display);
+    ws_write(vcar(v), port, m, as_display, true);
     val_t rest = vcdr(v);
     while (vis_pair(rest)) {
         WSharedEntry *e2 = ws_find(m, rest);
         if (e2 && e2->count > 1) {
             port_write_string(port, " . ", 3);
-            ws_write(rest, port, m, as_display);
+            ws_write(rest, port, m, as_display, true);
             port_write_char(port, ')');
             return;
         }
         port_write_char(port, ' ');
-        ws_write(vcar(rest), port, m, as_display);
+        ws_write(vcar(rest), port, m, as_display, true);
         rest = vcdr(rest);
     }
-    if (!vis_nil(rest)) { port_write_string(port, " . ", 3); ws_write(rest, port, m, as_display); }
+    if (!vis_nil(rest)) { port_write_string(port, " . ", 3); ws_write(rest, port, m, as_display, true); }
     port_write_char(port, ')');
 }
 
-static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display) {
+static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display, bool in_container) {
     /* See ws_count_refs's identical comment (issue #133) -- ws_write and
      * ws_write_list are mutually recursive once per level of CAR
      * nesting (ws_write_list's own cdr loop is already iterative, but
@@ -800,7 +832,7 @@ static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display) {
      * single entry point covers the whole recursive tree, the same way
      * ir_emit's own single guarded entry covers ir_emit_inline_call. */
     check_c_stack_depth("write");
-    if (!ws_is_compound(v)) { if (as_display) scm_display(v, port); else scm_write(v, port); return; }
+    if (!ws_is_compound(v)) { if (as_display) scm_display_ctx(v, port, in_container); else scm_write_ctx(v, port, in_container); return; }
     WSharedEntry *e = ws_find(m, v);
     if (e && e->count > 1) {
         if (e->label >= 0) {
@@ -818,19 +850,19 @@ static void ws_write(val_t v, val_t port, WSharedMap *m, bool as_display) {
         port_write_string(port, "#(", 2);
         for (uint32_t i = 0; i < vec->len; i++) {
             if (i) port_write_char(port, ' ');
-            ws_write(vec->data[i], port, m, as_display);
+            ws_write(vec->data[i], port, m, as_display, true);
         }
         port_write_char(port, ')');
         return;
     }
-    if (as_display) scm_display(v, port); else scm_write(v, port);
+    if (as_display) scm_display_ctx(v, port, in_container); else scm_write_ctx(v, port, in_container);
 }
 
 void scm_write_shared(val_t v, val_t port) {
     if (!ws_is_compound(v)) { scm_write(v, port); return; }
     WSharedMap *m = ws_new();
     ws_count_refs(v, m);
-    ws_write(v, port, m, false);
+    ws_write(v, port, m, false, false);
 }
 
 /*
@@ -846,10 +878,12 @@ void scm_display_shared(val_t v, val_t port) {
     if (!ws_is_compound(v)) { scm_display(v, port); return; }
     WSharedMap *m = ws_new();
     ws_count_refs(v, m);
-    ws_write(v, port, m, true);
+    ws_write(v, port, m, true, false);
 }
 
-void scm_display(val_t v, val_t port) {
+void scm_display(val_t v, val_t port) { scm_display_ctx(v, port, false); }
+
+static void scm_display_ctx(val_t v, val_t port, bool in_container) {
     /* Like write but strings/chars printed without quotes/escapes */
     if (vis_string(v)) {
         port_write_string(port, str_data(as_str(v)), as_str(v)->len);
@@ -859,7 +893,7 @@ void scm_display(val_t v, val_t port) {
         port_write_char(port, (int)vunchr(v));
         return;
     }
-    scm_write(v, port);
+    scm_write_ctx(v, port, in_container);
 }
 
 void scm_newline(val_t port) {

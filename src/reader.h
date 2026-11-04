@@ -36,6 +36,11 @@ extern CURRY_THREAD_LOCAL int g_reader_last_line;
 /* Read from a C string (convenience) */
 val_t scm_read_cstr(const char *src);
 
+/* True if the cuneiform token s is an Akkadian special-form or procedure
+ * name (so the reader returns a symbol, not a sexagesimal number): 𒁹 and
+ * 𒌋, for instance, are both numerals and the words for define and and. */
+bool reader_is_akkadian_cuneiform(const char *s);
+
 /* Read all datums from port into a list (used for file loading) */
 val_t scm_read_all(val_t port);
 

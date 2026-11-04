@@ -29,7 +29,7 @@
 (define three-halves #s1;30)      ; Neugebauer: 1;30 = 3/2
 (define one-hour #s1,0,0)         ; 1,0,0 = 3600
 (define eleven 𒌋𒁹)               ; cuneiform numeral 11
-(define seventy-one 𒁹 𒌋𒁹)        ; single-space groups merge: 1,11 = 71
+(define seventy-one #s1,11)       ; place groups only join at top level, so inside a form use #s: 1,11 = 71
 #;(this whole datum is commented out)
 
 ;; ---- Akkadian synonyms — the same language, older words -----------
