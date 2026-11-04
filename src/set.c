@@ -215,8 +215,16 @@ static bool slot_matches(val_t a, val_t b, int cmp) {
     return scm_equal(a, b);
 }
 
+/* Rehash target: grow when live entries fill at least half the table;
+ * otherwise (mostly tombstones) rebuild at the same capacity, which just
+ * drops the tombstones. */
+static uint32_t rehash_cap(uint32_t cap, uint32_t live) {
+    if (cap == 0) return 16;
+    return (live * 2 >= cap) ? cap * 2 : cap;
+}
+
 static void set_rehash(Set *s) {
-    uint32_t new_cap = s->cap ? s->cap * 2 : 16;
+    uint32_t new_cap = rehash_cap(s->cap, s->size);
     val_t *new_bkt   = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     for (uint32_t i = 0; i < new_cap; i++) new_bkt[i] = EMPTY_SLOT;
     uint32_t mask = new_cap - 1;
@@ -229,12 +237,13 @@ static void set_rehash(Set *s) {
     }
     s->buckets = new_bkt;
     s->cap = new_cap;
+    s->used = s->size;
 }
 
 val_t set_make(int cmp_type) {
     Set *s = CURRY_NEW(Set);
     s->hdr.type=T_SET; s->hdr.flags=0;
-    s->size=0; s->cap=0; s->buckets=NULL; s->cmp=cmp_type;
+    s->size=0; s->used=0; s->cap=0; s->buckets=NULL; s->cmp=cmp_type;
     set_rehash(s);
     return vptr(s);
 }
@@ -254,11 +263,12 @@ bool set_member(val_t sv, val_t elem) {
 void set_add_mut(val_t sv, val_t elem) {
     Set *s = checked_set(sv, "set-add!");
     if (set_member(sv, elem)) return;
-    if (s->size * LOAD_DEN >= s->cap * LOAD_NUM) set_rehash(s);
+    if (s->used * LOAD_DEN >= s->cap * LOAD_NUM) set_rehash(s);
     uint32_t mask = s->cap - 1;
     uint32_t idx  = val_hash(elem, s->cmp) & mask;
     while (s->buckets[idx] != EMPTY_SLOT && s->buckets[idx] != DEAD_SLOT)
         idx = (idx + 1) & mask;
+    if (s->buckets[idx] == EMPTY_SLOT) s->used++;
     s->buckets[idx] = elem;
     s->size++;
 }
@@ -366,7 +376,7 @@ val_t set_sym_diff(val_t a, val_t b) {
 /* ---- Hash table ---- */
 
 static void hash_rehash(Hashtable *h) {
-    uint32_t new_cap = h->cap ? h->cap * 2 : 16;
+    uint32_t new_cap = rehash_cap(h->cap, h->size);
     val_t *nk = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     val_t *nv = (val_t *)gc_alloc_raw_pinned(new_cap * sizeof(val_t));
     for (uint32_t i = 0; i < new_cap; i++) { nk[i]=EMPTY_SLOT; nv[i]=V_VOID; }
@@ -378,25 +388,37 @@ static void hash_rehash(Hashtable *h) {
         nk[idx] = h->keys[i]; nv[idx] = h->vals[i];
     }
     h->keys = nk; h->vals = nv; h->cap = new_cap;
+    h->used = h->size;
 }
 
 val_t hash_make(int cmp_type) {
     Hashtable *h = CURRY_NEW(Hashtable);
     h->hdr.type=T_HASHTABLE; h->hdr.flags=0;
-    h->size=0; h->cap=0; h->keys=NULL; h->vals=NULL; h->cmp=cmp_type;
+    h->size=0; h->used=0; h->cap=0; h->keys=NULL; h->vals=NULL; h->cmp=cmp_type;
     hash_rehash(h);
     return vptr(h);
 }
 
 void hash_set(val_t hv, val_t key, val_t val) {
     Hashtable *h = as_hash(hv);
-    if (h->size * LOAD_DEN >= h->cap * LOAD_NUM) hash_rehash(h);
+    if (h->used * LOAD_DEN >= h->cap * LOAD_NUM) hash_rehash(h);
     uint32_t mask = h->cap - 1;
     uint32_t idx  = val_hash(key, h->cmp) & mask;
-    while (h->keys[idx] != EMPTY_SLOT && h->keys[idx] != DEAD_SLOT) {
-        if (slot_matches(h->keys[idx], key, h->cmp)) { h->vals[idx]=val; return; }
+    /* Walk the whole probe chain (to the first EMPTY slot) looking for the
+     * key, remembering the first tombstone: the key may live past a
+     * tombstone, and only if it is absent may the tombstone be reused. */
+    bool have_dead = false;
+    uint32_t dead_idx = 0;
+    while (h->keys[idx] != EMPTY_SLOT) {
+        if (h->keys[idx] == DEAD_SLOT) {
+            if (!have_dead) { have_dead = true; dead_idx = idx; }
+        } else if (slot_matches(h->keys[idx], key, h->cmp)) {
+            h->vals[idx] = val;
+            return;
+        }
         idx = (idx + 1) & mask;
     }
+    if (have_dead) idx = dead_idx; else h->used++;
     h->keys[idx] = key; h->vals[idx] = val; h->size++;
 }
 
