@@ -64,7 +64,9 @@
     add-pp-hook lookup-pp-hook pretty-hook
     glst-pp-hook bvec-pp-hook atom-pp-hook rmac-pp-hook pp-hook?
     ;; Core rendering entry points
-    %pp-to-port %pp-lines-list %current-mode %render-to-string
+    %pp-to-port %pp-lines-list %current-mode %render-to-string %pp-doc-to-port
+    ;; Doc constructors, for (srfi 272 fancy)'s comment-preserving file reader
+    %doc-atom %doc-group %doc-dot-tail %doc-prefixed %doc-comment
     ;; Keyword-argument helper (shared by every pp/pprint variant)
     %pp-with-kwargs
     ;; Colorize integration, and the default style registry
@@ -318,6 +320,13 @@
     (define (%doc-dot-tail doc) (cons 'dot-tail doc))
     (define (%doc-labeled n doc) (list* 'labeled n doc))
     (define (%doc-labelref n) (cons 'labelref n))
+    ;; A source comment kept by pprint-file: text is the comment as
+    ;; written; eol? means it trailed the previous element on its line.
+    (define (%doc-comment text eol?) (list 'comment text eol?))
+    (define (%doc-prefixed text doc) (list* 'prefixed (list (cons 'meta text)) doc))
+    (define (%doc-comment? d) (%tag? d 'comment))
+    (define (%comment-text d) (cadr d))
+    (define (%comment-eol? d) (caddr d))
     (define (%tag? d t) (and (pair? d) (eq? (car d) t)))
     (define (%doc-atom? d) (%tag? d 'atom))
     (define (%doc-group? d) (%tag? d 'group))
@@ -468,6 +477,8 @@
         ((%doc-labeled? doc)
          (+ 2 (string-length (number->string (cadr doc))) (%flat-width (cddr doc))))
         ((%doc-prefixed? doc) (+ (%segs-width (cadr doc)) (%flat-width (cddr doc))))
+        ;; A comment can never be flat: it forces every enclosing group to break.
+        ((%doc-comment? doc) 1000000)
         ((%doc-group? doc)
          (let ((kids (%group-kids doc)))
            (+ (%string-width (%group-open doc)) (%string-width (%group-close doc))
@@ -556,28 +567,49 @@
             ((%doc-prefixed? doc)
              (for-each (lambda (seg) (colored! (car seg) (cdr seg))) (cadr doc))
              (flat! (cddr doc) #f))
+            ;; Only reached with pp-pretty #f, where comments are dropped.
+            ((%doc-comment? doc) (if #f #f))
             ((%doc-group? doc)
              (let ((open (open-text doc role)) (close (close-text doc role)))
                (colored! (delim-sc open) open)
-               (let loop ((kids (%group-kids doc)) (first #t) (i 0))
+               (let loop ((kids (%group-kids doc)) (roles (kid-roles doc role)) (first #t))
                  (when (pair? kids)
                    (if (and (not first) (not (%doc-dot-tail? (car kids)))) (emit! " "))
-                   (flat! (car kids) (flat-kid-role doc role i))
-                   (loop (cdr kids) #f (+ i 1))))
+                   (flat! (car kids) (car roles))
+                   (loop (cdr kids) (cdr roles) #f)))
                (colored! (delim-sc close) close)))))
 
-        ;; The role of kid i of a group printed with the given role: the
-        ;; parts of a definition head and of a formals list are colored
-        ;; as such; the first element of a list of clauses is a clause.
-        (define (flat-kid-role g role i)
-          (case role
-            ((head) (if (= i 0) 'defined 'formal))
-            ((formal) 'formal)
-            ((clauses) 'clause)
-            (else (if (and code? (= i 0) (eq? (%group-kind g) 'list) (%symbol-atom? (car (%group-kids g)))
-                           (%style-for (car (%group-kids g))))
-                      'keyword
-                      #f))))
+        ;; The role of each kid of a group printed with the given role,
+        ;; as a list with one entry per kid: the parts of a definition
+        ;; head and of a formals list are colored as such, the elements of
+        ;; a list of clauses (and the clauses a style names) are clauses,
+        ;; and the head of a styled form is a keyword.
+        (define (kid-roles g role)
+          (let* ((kids (%group-kids g)) (n (length kids)))
+            (case role
+              ((head) (cons 'defined (make-list (max 0 (- n 1)) 'formal)))
+              ((formal) (make-list n 'formal))
+              ((clauses) (make-list n 'clause))
+              (else
+               (let ((style (and code? (eq? (%group-kind g) 'list) (pair? kids)
+                                 (%symbol-atom? (car kids)) (not (ormap-dot-tail? (cdr kids)))
+                                 (%style-for (car kids)))))
+                 (if style
+                     (cons 'keyword (style-arg-roles (if (pair? style) (cdr style) 'body) (cdr kids)))
+                     (make-list n #f)))))))
+
+        ;; Roles for the arguments of a styled form, walking the style the
+        ;; way lay-styled! does.
+        (define (style-arg-roles fmt args)
+          (cond
+            ((null? args) '())
+            ((and (pair? fmt) (eq? (car fmt) 'i?))
+             (if (%symbol-atom? (car args))
+                 (cons 'formal (style-arg-roles (cdr fmt) (cdr args)))
+                 (style-arg-roles (cdr fmt) args)))
+            ((pair? fmt) (cons (%code->role (car fmt)) (style-arg-roles (cdr fmt) (cdr args))))
+            ((%clause-tail? fmt) (map (lambda (a) 'clause) args))
+            (else (map (lambda (a) #f) args))))
 
         (define (fits? doc col trail)
           (let ((fw (%flat-width doc)))
@@ -601,6 +633,9 @@
             ((%doc-prefixed? doc)
              (for-each (lambda (seg) (colored! (car seg) (cdr seg))) (cadr doc))
              (lay! (cddr doc) (+ col (%segs-width (cadr doc))) trail #f))
+            ((%doc-comment? doc)
+             (colored! 'comment (%comment-text doc))
+             (+ col (%string-width (%comment-text doc))))
             ((%doc-group? doc)
              (if (or (not pretty?) (null? (%group-kids doc)) (fits? doc col trail))
                  (begin (flat! doc role) (+ col (%flat-width doc)))
@@ -617,10 +652,47 @@
                                  (not (ormap-dot-tail? (cdr kids)))))
                  (style (and head-sym? (%style-for head))))
             (cond
+              ((ormap-comment? kids) (lay-commented! g col trail role head-sym? style))
               ((eq? role 'clauses) (lay-data! g col trail role))
               (style (lay-styled! g col trail role style))
               ((and head-sym? (pair? (cdr kids))) (lay-app! g col trail role))
               (else (lay-data! g col trail role)))))
+
+        (define (ormap-comment? ds)
+          (cond ((null? ds) #f) ((%doc-comment? (car ds)) #t) (else (ormap-comment? (cdr ds)))))
+
+        ;; A group holding source comments (pprint-file). A trailing
+        ;; comment stays on its element's line; every other element after
+        ;; the first argument starts a line, and the closing delimiter
+        ;; moves to a line of its own when a comment ends the group, since
+        ;; a line comment would swallow it.
+        (define (lay-commented! g col trail role head-sym? style)
+          (let* ((open (open-text g role)) (close (close-text g role))
+                 (ow (%string-width open)) (cw (%string-width close))
+                 (kids (%group-kids g))
+                 (c0 (+ col ow))
+                 (indent (cond (style (if (misering? col) c0 (+ col ow tab)))
+                               (head-sym? (+ col ow tab))
+                               (else c0))))
+            (colored! (delim-sc open) open)
+            (let loop ((ks kids) (c c0) (i 0) (prev #f))
+              (if (null? ks)
+                  (begin
+                    (when (and prev (%doc-comment? prev)) (newline-to! indent))
+                    (colored! (delim-sc close) close)
+                    (+ c cw))
+                  (let* ((k (car ks)) (last? (null? (cdr ks))) (tr (if last? (+ trail cw) 0)))
+                    (cond
+                      ((and (%doc-comment? k) (%comment-eol? k) prev)
+                       (emit! "  ")
+                       (loop (cdr ks) (lay! k (+ c 2) 0 #f) (+ i 1) k))
+                      ((= i 0) (loop (cdr ks) (lay! k c 0 (and style 'keyword)) 1 k))
+                      ((and (= i 1) head-sym? (not (%doc-comment? k)) (not (%doc-comment? prev)))
+                       (emit! " ")
+                       (loop (cdr ks) (lay! k (+ c 1) tr #f) 2 k))
+                      (else
+                       (newline-to! (if (and (= i 1) (not head-sym?)) c0 indent))
+                       (loop (cdr ks) (lay! k (if (and (= i 1) (not head-sym?)) c0 indent) tr #f) (+ i 1) k))))))))
 
         (define (ormap-dot-tail? ds)
           (cond ((null? ds) #f) ((%doc-dot-tail? (car ds)) #t) (else (ormap-dot-tail? (cdr ds)))))
@@ -803,6 +875,17 @@
       (let ((emit (pp-emit)) (tint (pp-tint)))
         (for-each (lambda (p) (if (eq? (car p) 'tint) (tint (cdr p) port) (emit (cdr p) port)))
                   (%render-pieces obj mode))
+        (if (and (pp-newline) (pp-pretty)) (emit "\n" port))))
+
+    ;; Prints an already-built doc (pprint-file's comment-preserving
+    ;; reader builds its own) with the current parameters.
+    ;; suffix, if given, is text written after the doc and before its
+    ;; final newline (a comment that trailed a top-level form).
+    (define (%pp-doc-to-port doc port . suffix)
+      (let ((emit (pp-emit)) (tint (pp-tint)))
+        (for-each (lambda (p) (if (eq? (car p) 'tint) (tint (cdr p) port) (emit (cdr p) port)))
+                  (%apply-lines-limit (%layout doc (pp-indent))))
+        (when (pair? suffix) (emit (car suffix) port))
         (if (and (pp-newline) (pp-pretty)) (emit "\n" port))))
 
     ;; ── Keyword-argument dispatch (intermediate tier onward) ────────────────

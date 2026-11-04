@@ -44,6 +44,7 @@ add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)
+add_test(NAME srfi_272_fancy COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_fancy_tests.scm)
 add_test(NAME srfi_272_layout COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_layout_tests.scm)
 add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
