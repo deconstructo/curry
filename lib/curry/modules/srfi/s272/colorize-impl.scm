@@ -191,7 +191,9 @@
         (formal . 7) (paren . 7)
         (variable . default) (bracket . default) (defined . bold)
         (keyword . 12) (number . 13) (directive . 13) (literal . 14)
-        (literal-meta . 6) (meta . 6) (warning . 1)))
+        (literal-meta . 6) (meta . 6) (warning . 1)
+        ;; Categories the first version of this library used.
+        (special-form . 12) (constant . 14) (symbol . default) (error . 1)))
 
     (define (semantic-color-mapper? obj) (procedure? obj))
 
@@ -204,7 +206,9 @@
           (let ((idx (palette-mapper sc)))
             (cond
               ((not (sgr-support-tier)) "")
-              ((eq? idx 'default) "")
+              ;; #f, `default` or anything that is not a palette index means
+              ;; the terminal's own color.
+              ((not (or (eq? idx 'bold) (and (exact-integer? idx) (<= 0 idx 15)))) "")
               ((eq? idx 'bold) (if start? "\x1b;[1m" "\x1b;[0m"))
               (start? (asb->sgr-string (asb-palette-ref palette idx)))
               (else "\x1b;[0m"))))))

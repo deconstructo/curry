@@ -60,6 +60,11 @@
           (and (>= cp #x2190) (<= cp #x2BFF))
           (and (>= cp #x1F000) (<= cp #x1FAFF))))
 
+    ;; A character a skin-tone modifier can attach to: the emoji blocks
+    ;; and the text-default symbols.
+    (define (%emoji-base? cp)
+      (and (integer? cp) (%text-default-emoji? cp)))
+
     ;; Terminal columns occupied by string s. Control characters and
     ;; anything the width procedure scores #f count as 0.
     (define (%string-width s)
@@ -74,9 +79,9 @@
                   ;; Second half of a flag, a skin-tone modifier, and the
                   ;; character after a ZWJ all merge into the preceding
                   ;; glyph.
-                  ((or (and joined? (> w 0))
+                  ((or (and joined? (> w 0) (or (= w 2) (%text-default-emoji? cp)))
                        (and (%regional-indicator? cp) (%regional-indicator? prev-cp))
-                       (and (%emoji-modifier? cp) (= prev-w 2)))
+                       (and (%emoji-modifier? cp) (= prev-w 2) (%emoji-base? prev-cp)))
                    (loop (+ i 1) total (if (%regional-indicator? cp) -1 cp) prev-w #f))
                   ;; ZWJ itself is width 0 and joins the next glyph.
                   ((= cp #x200D) (loop (+ i 1) total cp prev-w #t))
@@ -84,5 +89,7 @@
                   ((and (= cp #xFE0F) (= prev-w 1) (%text-default-emoji? prev-cp))
                    (loop (+ i 1) (+ total 1) cp 2 #f))
                   (else
-                   (loop (+ i 1) (+ total w) cp (if (= w 0) prev-w w) #f))))))))
-))
+                   ;; A zero-width character (a combining mark) keeps the
+                   ;; previous glyph's state, including a pending ZWJ.
+                   (loop (+ i 1) (+ total w) (if (= w 0) prev-cp cp) (if (= w 0) prev-w w)
+                         (and (= w 0) joined?)))))))))))

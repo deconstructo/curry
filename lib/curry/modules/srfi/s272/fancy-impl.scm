@@ -254,27 +254,37 @@
 
     ;; ── pp-level / pp-length on a parsed doc ────────────────────────────────
 
+    (define (%comment-doc? d) (and (pair? d) (eq? (car d) 'comment)))
+
+    (define (%level-stub-doc doc)
+      (if (and (pair? doc) (eq? (car doc) 'group) (eq? (pp-level-stub) #t))
+          (%doc-group (cadr doc) (caddr doc) (cadddr doc) (list (%doc-atom (pp-length-stub) 'stub #f)))
+          (%doc-atom (if (eq? (pp-level-stub) #t) (pp-length-stub) (pp-level-stub)) 'stub #f)))
+
+    ;; Applies pp-level and pp-length to a parsed doc, the way the engine
+    ;; applies them while building a doc from a datum. depth is the
+    ;; nesting level of doc; comments do not count toward pp-length.
     (define (%limit-doc doc depth)
       (let ((level (pp-level)) (maxlen (pp-length)))
         (cond
-          ((not (and (pair? doc) (eq? (car doc) 'group))) doc)
-          ((and level (>= depth level))
-           (if (eq? (pp-level-stub) #t)
-               (%doc-group (cadr doc) (caddr doc) (cadddr doc) (list (%doc-atom (pp-length-stub) 'stub #f)))
-               (%doc-atom (pp-level-stub) 'stub #f)))
-          (else
+          ((and (pair? doc) (memq (car doc) '(group prefixed)) level (>= depth level))
+           (%level-stub-doc doc))
+          ((and (pair? doc) (eq? (car doc) 'prefixed))
+           (cons 'prefixed (cons (cadr doc) (%limit-doc (cddr doc) (+ depth 1)))))
+          ((and (pair? doc) (eq? (car doc) 'dot-tail))
+           (cons 'dot-tail (%limit-doc (cdr doc) depth)))
+          ((and (pair? doc) (eq? (car doc) 'group))
            (let loop ((kids (cddddr doc)) (n 0) (acc '()))
              (cond
                ((null? kids) (%doc-group (cadr doc) (caddr doc) (cadddr doc) (reverse acc)))
-               ((and maxlen (>= n maxlen) (not (and (pair? (car kids)) (eq? (caar kids) 'comment))))
-                (%doc-group (cadr doc) (caddr doc) (cadddr doc) (reverse (cons (%doc-atom (pp-length-stub) 'stub #f) acc))))
-               (else (loop (cdr kids) (if (and (pair? (car kids)) (eq? (caar kids) 'comment)) n (+ n 1))
-                           (cons (let ((k (car kids)))
-                                   (cond ((and (pair? k) (eq? (car k) 'group)) (%limit-doc k (+ depth 1)))
-                                         ((and (pair? k) (eq? (car k) 'prefixed))
-                                          (cons 'prefixed (cons (cadr k) (%limit-doc (cddr k) (+ depth 1)))))
-                                         (else k)))
-                                 acc)))))))))
+               ((and maxlen (>= n maxlen) (not (%comment-doc? (car kids))))
+                (%doc-group (cadr doc) (caddr doc) (cadddr doc)
+                            (reverse (cons (%doc-atom (pp-length-stub) 'stub #f) acc))))
+               (else
+                (loop (cdr kids)
+                      (if (%comment-doc? (car kids)) n (+ n 1))
+                      (cons (%limit-doc (car kids) (+ depth 1)) acc))))))
+          (else doc))))
 
     ;; ── File-local settings ─────────────────────────────────────────────────
 
@@ -377,6 +387,11 @@
     (define (%emit-blank-lines n out)
       (let loop ((i 0)) (when (< i (min n 2)) (write-char #\newline out) (loop (+ i 1)))))
 
+    ;; Every top-level item ends its line even when pp-newline or
+    ;; pp-pretty suppresses the engine's own final newline.
+    (define (%finish-item out)
+      (unless (and (pp-newline) (pp-pretty)) (newline out)))
+
     (define (%pprint-items items out)
       (let ((decorate? (and (pp-decorate) #t)))
         (let loop ((items items) (first? #t))
@@ -387,14 +402,16 @@
                 ((eq? kind 'comment)
                  (when decorate?
                    (unless first? (%emit-blank-lines blanks out))
-                   (%pp-doc-to-port doc out))
+                   (%pp-doc-to-port doc out)
+                   (%finish-item out))
                  (loop (cdr items) (and first? (not decorate?))))
                 (else
                  (unless first? (if decorate? (%emit-blank-lines blanks out) (newline out)))
                  (let ((d (if decorate? (%limit-doc doc 0) (%strip-comments (%limit-doc doc 0)))))
                    (if (and decorate? trail)
                        (%pp-doc-to-port d out (string-append "  " trail))
-                       (%pp-doc-to-port d out)))
+                       (%pp-doc-to-port d out))
+                   (%finish-item out))
                  (loop (cdr items) #f))))))))
 
     ;; pp-decorate false: forms only, comments removed from inside them too.
@@ -411,13 +428,19 @@
         ((and (pair? doc) (eq? (car doc) 'dot-tail)) (cons 'dot-tail (%strip-comments (cdr doc))))
         (else doc)))
 
-    ;; wrap, if given, is called with a thunk and runs it in an extra
-    ;; dynamic extent inside the file-local settings and the keyword
-    ;; arguments (pprint-file/html binds its output hooks there, where it
-    ;; can see the final pp-color).
-    (define (%pprint-file-to-port infile out kvs wrap)
-      (let* ((text (%read-whole-file infile))
-             (items (%parse-source text))
+    ;; The input is read and parsed before the output is opened, so a
+    ;; missing or malformed input leaves the output untouched and
+    ;; pprint-file can rewrite a file in place.
+    (define (%read-source infile)
+      (let ((text (%read-whole-file infile)))
+        (cons text (%parse-source text))))
+
+    ;; wrap is called with a thunk and runs it in an extra dynamic extent
+    ;; inside the file-local settings and the keyword arguments
+    ;; (pprint-file/html binds its output hooks there, where it can see the
+    ;; final pp-color).
+    (define (%pprint-source source out kvs wrap)
+      (let* ((text (car source)) (items (cdr source))
              (local (%file-local-bindings text)))
         ;; Parameters from the file sit under keyword arguments.
         (%parameterize-bindings (car local) (cdr local)
@@ -429,18 +452,29 @@
                     (lambda () (wrap (lambda () (%pprint-items items out))))))))))))
 
     ;; outfile is a filename string per the spec; an already-open output
-    ;; port is also accepted (used as is, never closed).
+    ;; port is also accepted (used as is, never closed). Returns the port,
+    ;; whether this procedure opened it, and the remaining arguments.
     (define (%split-outfile-and-kvs args)
       (cond
         ((and (pair? args) (string? (car args))) (values (open-output-file (car args)) #t (cdr args)))
         ((and (pair? args) (port? (car args))) (values (car args) #f (cdr args)))
         (else (values (current-output-port) #f args))))
 
+    ;; Opens the output after the input has been read, and closes it on
+    ;; every exit, normal or not.
+    (define (%with-output args source-thunk body)
+      (let ((source (source-thunk)))
+        (call-with-values (lambda () (%split-outfile-and-kvs args))
+          (lambda (out owns-out? kvs)
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (body source out kvs))
+              (lambda () (when owns-out? (close-port out))))))))
+
     (define (pprint-file infile . args)
-      (call-with-values (lambda () (%split-outfile-and-kvs args))
-        (lambda (out owns-out? kvs)
-          (%pprint-file-to-port infile out kvs (lambda (thunk) (thunk)))
-          (when owns-out? (close-port out)))))
+      (%with-output args (lambda () (%read-source infile))
+        (lambda (source out kvs)
+          (%pprint-source source out kvs (lambda (thunk) (thunk))))))
 
     ;; ── HTML ─────────────────────────────────────────────────────────────────
 
@@ -465,10 +499,10 @@
     ;; Text is escaped; the mapper's markup is not. With pp-color true the
     ;; HTML mapper is used; a procedure given as pp-color is used as is.
     (define (pprint-file/html infile . args)
-      (call-with-values (lambda () (%split-outfile-and-kvs args))
-        (lambda (out owns-out? kvs)
+      (%with-output args (lambda () (%read-source infile))
+        (lambda (source out kvs)
           (write-string "<pre>" out)
-          (%pprint-file-to-port infile out kvs
+          (%pprint-source source out kvs
             (lambda (thunk)
               (%parameterize-bindings
                 (list pp-emit pp-tint pp-color)
@@ -476,5 +510,4 @@
                       (lambda (s p) (write-string s p))
                       (let ((c (pp-color))) (if (eq? c #t) %html-color-mapper c)))
                 thunk)))
-          (write-string "</pre>" out)
-          (when owns-out? (close-port out)))))))
+          (write-string "</pre>" out))))))

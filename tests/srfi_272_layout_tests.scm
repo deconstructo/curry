@@ -157,6 +157,25 @@
   (pp '(define x "hi") (open-output-string) 'pp-tint (lambda (s p) (set! tints (cons s tints))))
   (check "no pp-color means no tint" '() tints))
 
+;; A skin-tone modifier attaches only to an emoji base: a CJK character
+;; followed by one is 2 + 2 columns.
+(check "CJK + skin tone modifier counts 4 columns: fits"
+  "(\"中\x1F3FD;\" \"中\x1F3FD;\")\n"
+  (out (list "中\x1F3FD;" "中\x1F3FD;") 'pp-width 15 'pp-code #f))
+(check "CJK + skin tone modifier counts 4 columns: does not fit"
+  "(\"中\x1F3FD;\"\n \"中\x1F3FD;\")\n"
+  (out (list "中\x1F3FD;" "中\x1F3FD;") 'pp-width 14 'pp-code #f))
+;; A ZWJ before a non-emoji joins nothing.
+(check "ZWJ before a letter does not merge it"
+  "(\"a\x200D;b\" \"a\x200D;b\")\n"
+  (out (list "a\x200D;b" "a\x200D;b") 'pp-width 11 'pp-code #f))
+
+;; A mapper that returns #f or a bad index means "no color", not an error.
+(check "custom palette mapper returning #f"
+  ""
+  (semantic-color->start-string 'string
+    (make-semantic-color-mapper default-asb-palette (lambda (sc) #f)) 0))
+
 (display "SRFI-272 layout tests: ") (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)
 (if (> fail-count 0) (exit 1))

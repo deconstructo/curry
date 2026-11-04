@@ -90,6 +90,32 @@
 (run ";; -*- fill-column: 20 -*-\n(a)\n")
 (check "header settings do not leak" 79 (pp-width))
 
+;; The input is read before the output is opened, so a file can be
+;; reformatted in place; a missing input leaves the output alone.
+(call-with-output-file path (lambda (p) (write-string "(define (f n)   n)   ; keep\n" p)))
+(pprint-file path path)
+(check "pprint-file can rewrite its own input"
+  "(define (f n) n)  ; keep\n"
+  (call-with-input-file path (lambda (p) (read-line p) (read-string 1000 (open-input-string "")) 
+                                (let ((o (open-output-string)))
+                                  (pprint-file path o) (get-output-string o)))))
+(check "missing input leaves the output file untouched"
+  "(define (f n) n)  ; keep\n"
+  (begin
+    (guard (e (#t #f)) (pprint-file "/tmp/curry-srfi272-fancy-no-such-file.scm" path))
+    (let ((o (open-output-string))) (pprint-file path o) (get-output-string o))))
+
+;; Items stay on separate lines even when the engine's own newline is off.
+(check "pp-newline #f still separates top-level items"
+  "(a)\n;; c\n(b)\n"
+  (run "(a)\n;; c\n(b)\n" 'pp-newline #f))
+(check "pp-level applies to a quoted top-level form"
+  "'(a ...)\n"
+  (run "'(a (b (c)))\n" 'pp-level 2))
+(check "pp-level applies inside a dotted tail"
+  "(x . (a ...))\n"
+  (run "(x . (a (b)))\n" 'pp-level 2))
+
 (display "SRFI-272 fancy tests: ") (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)
 (if (> fail-count 0) (exit 1))

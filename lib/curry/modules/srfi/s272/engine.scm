@@ -327,6 +327,9 @@
     (define (%doc-comment? d) (%tag? d 'comment))
     (define (%comment-text d) (cadr d))
     (define (%comment-eol? d) (caddr d))
+    (define (%last-newline str)
+      (let loop ((i (- (string-length str) 1)))
+        (cond ((< i 0) #f) ((char=? (string-ref str i) #\newline) i) (else (loop (- i 1))))))
     (define (%tag? d t) (and (pair? d) (eq? (car d) t)))
     (define (%doc-atom? d) (%tag? d 'atom))
     (define (%doc-group? d) (%tag? d 'group))
@@ -635,7 +638,12 @@
              (lay! (cddr doc) (+ col (%segs-width (cadr doc))) trail #f))
             ((%doc-comment? doc)
              (colored! 'comment (%comment-text doc))
-             (+ col (%string-width (%comment-text doc))))
+             ;; A block comment may span lines (printed as written); the
+             ;; column after it is the width of its last line.
+             (let ((last-nl (%last-newline (%comment-text doc))))
+               (if last-nl
+                   (%string-width (substring (%comment-text doc) (+ last-nl 1) (string-length (%comment-text doc))))
+                   (+ col (%string-width (%comment-text doc))))))
             ((%doc-group? doc)
              (if (or (not pretty?) (null? (%group-kids doc)) (fits? doc col trail))
                  (begin (flat! doc role) (+ col (%flat-width doc)))
