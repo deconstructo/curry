@@ -209,6 +209,12 @@ void main() { frag = vec4(1.0, 0.5, 0.2, 1.0); }"))
                                       ; callbacks fire without a click first
 ```
 
+The grab works by warping the cursor back to the canvas centre after each
+move. On **Wayland** (the default desktop session of recent Ubuntu and
+Fedora) applications cannot move the cursor, so mouse capture does not
+work there; run under X11 (`QT_QPA_PLATFORM=xcb`) for mouse look. The
+`gl-*` canvas has the same limitation.
+
 In a window that also has widgets (a sidebar with sliders, ...), call
 `gpu-canvas-focus!` after showing the window: otherwise a focusable widget
 can take the keyboard, including the arrow keys.

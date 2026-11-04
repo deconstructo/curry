@@ -306,8 +306,11 @@ void main() {
     float cy  = cos(yaw);
     vec2  rd  = vec2(sy + cy * cam * half_fov, cy - sy * cam * half_fov);
     float hs  = eye_sep * 0.5;
-    vec2 l_pos = pos + vec2(-cy,  sy) * hs;
-    vec2 r_pos = pos + vec2( cy, -sy) * hs;
+    /* each eye stays in the player's cell: at a wide eye separation an eye
+     * could otherwise sit behind a wall and see the wrong corridor */
+    vec2 cell_lo = floor(pos) + 0.001, cell_hi = floor(pos) + 0.999;
+    vec2 l_pos = clamp(pos + vec2(-cy,  sy) * hs, cell_lo, cell_hi);
+    vec2 r_pos = clamp(pos + vec2( cy, -sy) * hs, cell_lo, cell_hi);
 
     /* ceiling and floor */
     vec3 bg;
@@ -316,7 +319,11 @@ void main() {
     } else {
         /* floor grid: eye at height 0.5, so a screen row at ly looks at the
          * floor 0.5 / (ly/hsh - 1) away (infinite at the horizon) */
-        float row_dist = 0.5 / max(0.001, ly / hsh - 1.0);
+        /* walls use half-height wall_h*hsh/d with the eye at wall_h/2, so
+         * the vertical focal length is 2*hsh and the floor at this row is
+         * wall_h / (ly/hsh - 1) away (#351: was 0.5/..., half the distance
+         * the walls use, so the floor slid at half speed) */
+        float row_dist = wall_h / max(0.001, ly / hsh - 1.0);
         /* row_dist is a perpendicular distance and rd's component along
          * the view direction is 1, so the floor point is pos + row_dist*rd
          * (normalizing rd here bent the grid lines like a fish-eye lens) */
@@ -436,12 +443,18 @@ void main() {
 (layout-add! central canvas)
 (window-set-central-widget! win central)
 
+(define *status-text* "")
 (define (update-status!)
-  (statusbar-set-text! status
-    (if (at-goal?)
-        "YOU ESCAPED THE 4D MAZE"
-        (string-append "w-slice " (number->string (+ *pw* 1)) " of " (number->string DW)
-                       "   —   goal: far corner of slice " (number->string DW)))))
+  (let ((text
+         (if (at-goal?)
+             "YOU ESCAPED THE 4D MAZE"
+             (string-append "w-slice " (number->string (+ *pw* 1)) " of " (number->string DW)
+                            "   —   goal: far corner of slice " (number->string DW)))))
+    ;; called on every tick (walking onto the goal must show the message),
+    ;; so only touch the status bar when the text actually changes
+    (unless (string=? text *status-text*)
+      (set! *status-text* text)
+      (statusbar-set-text! status text))))
 
 ;;; ── Input ─────────────────────────────────────────────────────────────────
 
@@ -500,6 +513,7 @@ void main() {
   (make-timer 16 (lambda ()
     (set! *ticks* (+ *ticks* 1))
     (tick-movement!)
+    (update-status!)
     (gpu-canvas-redraw! canvas)
     (when (and *snapshot* (= *ticks* 40))
       (display (if (gpu-canvas-save-png! canvas *snapshot*) "saved " "could not save "))

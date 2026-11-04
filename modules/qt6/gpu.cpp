@@ -913,7 +913,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *ev) override     { fire_mouse("release", ev); }
     void mouseDoubleClickEvent(QMouseEvent *ev) override { fire_mouse("double-press", ev); }
     void mouseMoveEvent(QMouseEvent *ev) override {
-        if (st.mouse_grabbed) { grabbed_move(ev); return; }
+        if (grabbed()) { grabbed_move(ev); return; }
         fire_mouse(ev->buttons() != Qt::NoButton ? "drag" : "move", ev);
     }
     void wheelEvent(QWheelEvent *ev) override;
@@ -940,14 +940,30 @@ private:
         SCHEME_CALL(curry_apply(st.grab_move_proc, 2, argv));
     }
 public:
+    /* The grab as Qt actually has it: Qt refuses a grab for a hidden
+     * widget and can drop one on its own (window hidden, app deactivated).
+     * When that happened, forget ours too and give the cursor back. */
+    bool grabbed() {
+        if (st.mouse_grabbed && QWidget::mouseGrabber() != this) {
+            st.mouse_grabbed = false;
+            unsetCursor();
+        }
+        return st.mouse_grabbed;
+    }
     void set_grab(bool on) {
-        if (on == st.mouse_grabbed) return;
-        st.mouse_grabbed = on;
+        if (on == grabbed()) return;
         if (on) {
-            st.grab_warp_target = QPoint(-1, -1);
             grabMouse();
+            if (QWidget::mouseGrabber() != this) return;   /* refused (hidden widget) */
+            st.mouse_grabbed = true;
             setCursor(Qt::BlankCursor);
+            /* Start from the centre, so the first move does not report the
+             * whole distance from the click point to the centre as motion. */
+            QPoint center = mapToGlobal(rect().center());
+            st.grab_warp_target = center;
+            QCursor::setPos(center);
         } else {
+            st.mouse_grabbed = false;
             releaseMouse();
             unsetCursor();
         }
@@ -1082,7 +1098,7 @@ static curry_val fn_gpu_canvas_release_mouse(int, curry_val *av, void *) {
     return curry_void();
 }
 static curry_val fn_gpu_canvas_mouse_grabbed_p(int, curry_val *av, void *) {
-    return curry_make_bool(val_to_gpu_canvas(av[0], "gpu-canvas-mouse-grabbed?")->st.mouse_grabbed);
+    return curry_make_bool(val_to_gpu_canvas(av[0], "gpu-canvas-mouse-grabbed?")->grabbed());
 }
 /* Keyboard focus to the canvas, so its key callbacks fire without a click
  * first (otherwise a focusable sidebar widget such as a slider can take

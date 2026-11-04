@@ -247,8 +247,11 @@ void main() {
     float cy  = cos(u_yaw);
     vec2  rd  = vec2(sy + cy * cam * u_half_fov, cy - sy * cam * u_half_fov);
     float hs  = u_eye_sep * 0.5;
-    vec2 l_pos = u_pos + vec2(-cy,  sy) * hs;
-    vec2 r_pos = u_pos + vec2( cy, -sy) * hs;
+    /* each eye stays in the player's cell (wide separation could put an
+     * eye behind a wall) */
+    vec2 cell_lo = floor(u_pos) + 0.001, cell_hi = floor(u_pos) + 0.999;
+    vec2 l_pos = clamp(u_pos + vec2(-cy,  sy) * hs, cell_lo, cell_hi);
+    vec2 r_pos = clamp(u_pos + vec2( cy, -sy) * hs, cell_lo, cell_hi);
 
     /* ── Background ─────────────────────────────────────────────────────── */
     vec3 bg;
@@ -260,7 +263,9 @@ void main() {
          * row_dist = perpendicular distance to the floor at this screen row.
          * Player eye is at height 0.5 (mid-wall), floor at 0.
          * lp = 0.5 / (ly/hsh - 1)  →  infinity at horizon, 0.5 at feet. */
-        float row_dist = 0.5 / max(0.001, ly / hsh - 1.0);
+        /* walls use half-height wall_h*hsh/d with the eye at wall_h/2, so
+         * the floor at this row is wall_h / (ly/hsh - 1) away (#351) */
+        float row_dist = u_wall_h / max(0.001, ly / hsh - 1.0);
         /* row_dist is perpendicular and rd's view component is 1, so the
          * floor point is pos + row_dist*rd (normalizing bent the grid) */
         float fx  = fract(u_pos.x + row_dist * rd.x);
