@@ -2,6 +2,21 @@
 
 ### Unreleased
 
+**New — SRFI 166 (Monadic Formatting) and `(srfi 272 show)`**
+
+- `(srfi 166)` and its `base`, `pretty`, `columnar`, `unicode` and `color`
+  libraries (and the `(srfi srfi-166 ...)` names): `show`, formatters, state
+  variables with `fn`/`with`/`with!`, `numeric` and its comma/SI/fitted forms,
+  padding, trimming and fitting, `columnar`/`tabular`, `wrapped`/`justified`,
+  terminal-aware widths, and ANSI color.
+- `columnar` and `trimmed/lazy` work without re-entrant continuations (curry's
+  `call/cc` only escapes): columns run to completion, and infinite columns stop
+  by escaping once they have enough lines.
+- Widths follow UAX #11 (Unicode 16.0), so CJK, emoji, combining marks,
+  cuneiform signs and Akkadian transliteration pad and trim correctly.
+- `(srfi 272 show)`: `pprinted` and `pprinted*`, the pretty printer as a
+  SRFI 166 formatter. This completes SRFI 272.
+
 **SRFI 272 (Pretty Printing) brought up to the final spec**
 
 - The layout engine is rewritten around the SRFI's style grammar: `define`,
