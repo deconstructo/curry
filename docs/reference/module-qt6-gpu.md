@@ -198,7 +198,26 @@ void main() { frag = vec4(1.0, 0.5, 0.2, 1.0); }"))
 (gpu-canvas-on-scroll! canvas (lambda (dx dy x y mods) ...))
 (gpu-canvas-on-resize! canvas (lambda (w h) ...))         ; logical pixels
 (gpu-canvas-save-png!  canvas path)                       ; renders a frame and saves it
+
+;; first-person controls: while grabbed, the cursor is hidden and kept in
+;; the canvas, and grab-move reports relative motion
+(gpu-canvas-grab-mouse!     canvas)
+(gpu-canvas-release-mouse!  canvas)
+(gpu-canvas-mouse-grabbed?  canvas)                       ; → #t / #f
+(gpu-canvas-on-grab-move!   canvas (lambda (dx dy) ...))  ; pixels moved while grabbed
+(gpu-canvas-focus!          canvas)   ; give the canvas keyboard focus, so its key
+                                      ; callbacks fire without a click first
 ```
+
+The grab works by warping the cursor back to the canvas centre after each
+move. On **Wayland** (the default desktop session of recent Ubuntu and
+Fedora) applications cannot move the cursor, so mouse capture does not
+work there; run under X11 (`QT_QPA_PLATFORM=xcb`) for mouse look. The
+`gl-*` canvas has the same limitation.
+
+In a window that also has widgets (a sidebar with sliders, ...), call
+`gpu-canvas-focus!` after showing the window: otherwise a focusable widget
+can take the keyboard, including the arrow keys.
 
 The canvas renders only when asked. For animation, call
 `gpu-canvas-redraw!` from a timer (`make-timer/dt`), or from inside the
@@ -554,5 +573,4 @@ Pure Scheme. Vectors are lists `(x y z)` / `(x y z w)`; matrices are
   with a compute shader.
 - One uniform buffer value per frame (see [Buffers](#buffers)).
 - Metal has no 64-bit floats in shaders; GPU work is 32-bit float.
-- Mouse capture (first-person mode) is not implemented for gpu canvases yet.
 - All GPU work happens on the main thread (see [What is checked](#what-is-checked-and-what-is-not)).
