@@ -8,6 +8,8 @@
 
 (define-library (srfi s272 advanced-impl)
   (import (scheme base) (srfi s272 engine) (srfi s272 intermediate-impl)
+          ;; Loaded for its side effect: installing the default color mapper.
+          (only (srfi s272 colorize-impl) sgr-support-tier)
           (srfi s158 generators-and-accumulators))
   (export
     pp pp* pprint pprint-shared pprint-simple pprint-file

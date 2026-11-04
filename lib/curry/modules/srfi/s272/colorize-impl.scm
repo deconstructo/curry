@@ -206,4 +206,8 @@
     (define (semantic-color->end-string sc . rest)
       (let ((mapper (if (pair? rest) (car rest) default-semantic-color-mapper))
             (tier (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) (sgr-support-tier))))
-        (parameterize ((sgr-support-tier tier)) (mapper sc #f))))))
+        (parameterize ((sgr-support-tier tier)) (mapper sc #f))))
+
+    ;; pp-color #t means "the default mapper"; the engine cannot import
+    ;; this library (it depends on the engine), so it is installed here.
+    (%set-default-color-mapper! default-semantic-color-mapper)))

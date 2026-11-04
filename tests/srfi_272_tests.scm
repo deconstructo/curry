@@ -79,7 +79,7 @@
 (check "pp-circle parameter default" #t (bas:pp-circle))
 
 ;; width-forced line breaking
-(check "basic pp width break" "(a\n b\n c\n d)\n"
+(check "basic pp width break" "(a b\n   c\n   d)\n"
   (capture (lambda (p) (parameterize ((bas:pp-width 3)) (bas:pp '(a b c d) p)))))
 
 ;; Regression: pp-circle defaults to #t, so ordinary pp/pprint always
@@ -96,9 +96,9 @@
 ;; ── intermediate: keyword args, pp*, pprint-file, pretty-style ──────────────
 
 (check "int pp default" "(1 2 3)\n" (capture (lambda (p) (int:pp '(1 2 3) p))))
-(check "int pp kwarg width" "(a\n b\n c)\n"
+(check "int pp kwarg width" "(a b\n   c)\n"
   (capture (lambda (p) (int:pp '(a b c) p 'pp-width 3))))
-(check "int pp* splices trailing kv-list" "(a\n b\n c)\n"
+(check "int pp* splices trailing kv-list" "(a b\n   c)\n"
   (capture (lambda (p) (int:pp* '(a b c) p (list 'pp-width 3)))))
 (check "int pp-length truncation" "(1 2 ...)\n"
   (capture (lambda (p) (int:pp '(1 2 3 4 5) p 'pp-length 2))))
