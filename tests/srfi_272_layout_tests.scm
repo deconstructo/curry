@@ -145,14 +145,22 @@
 (check "pp-graph labels shared structure" "(#0=(a b) #0#)\n"
   (let ((s (list 'a 'b))) (out (list s s) 'pp-graph #t)))
 
-;; pp-color: color sequences go through pp-tint, text through pp-emit.
+;; pp-color: color sequences go through pp-tint, text through pp-emit. The
+;; tier is pinned: the default is detected from the environment (TERM,
+;; NO_COLOR, ...), and CI has no terminal.
 (let ((tints '()) (emits '()))
-  (pp '(define x "hi") (open-output-string) 'pp-color #t
-      'pp-tint (lambda (s p) (set! tints (cons s tints)))
-      'pp-emit (lambda (s p) (set! emits (cons s emits))))
+  (parameterize ((sgr-support-tier 0))
+    (pp '(define x "hi") (open-output-string) 'pp-color #t
+        'pp-tint (lambda (s p) (set! tints (cons s tints)))
+        'pp-emit (lambda (s p) (set! emits (cons s emits)))))
   (check "pp-color text goes through pp-emit" "(define x \"hi\")\n"
     (apply string-append (reverse emits)))
   (check "pp-color sequences go through pp-tint" #t (pair? tints)))
+(let ((tints '()))
+  (parameterize ((sgr-support-tier #f))
+    (pp '(define x "hi") (open-output-string) 'pp-color #t
+        'pp-tint (lambda (s p) (set! tints (cons s tints)))))
+  (check "no color support means no sequences" '() tints))
 (let ((tints '()))
   (pp '(define x "hi") (open-output-string) 'pp-tint (lambda (s p) (set! tints (cons s tints))))
   (check "no pp-color means no tint" '() tints))
