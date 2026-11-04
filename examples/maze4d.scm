@@ -1,18 +1,26 @@
 #!/usr/bin/env curry
-;;; maze4d.scm — Wander a 4D maze as a 3D creature.
+;;; maze4d.scm — Wander a 4D maze as a 3D creature (gpu-* layer).
 ;;;
 ;;; The maze has passages in ±x, ±z within each w-slice, plus ±w connections
 ;;; between slices.  At any moment you see a first-person view (GPU DDA
-;;; raycaster with anaglyph stereo) of the 3D cross-section at your current w.
-;;; Press Q/E to step through w — the maze instantly resets around you.
+;;; raycaster with red/blue anaglyph stereo) of the 3D cross-section at your
+;;; current w.  Press Q/E to step through w — the maze instantly resets
+;;; around you.
 ;;;
 ;;; Goal: reach cell (DX-1, DZ-1) on w-slice (DW-1).  Yellow dot on minimap.
+;;; On the minimap, a green square marks a passage to the next w-slice (E),
+;;; an orange square a passage to the previous one (Q).
+;;;
+;;; This version runs on the gpu-* (QRhi) layer: Metal on macOS, Vulkan on
+;;; Linux.  The whole picture, including the minimap and the w-indicator,
+;;; is drawn by one fragment shader.  examples/maze4d-gl.scm is the same
+;;; maze on the older gl-* layer, for Qt versions below 6.7.
 ;;;
 ;;; Controls:
 ;;;   W / ↑    move forward        Q   step −w
 ;;;   S / ↓    move back           E   step +w
-;;;   A / ←    turn left           Esc quit
-;;;   D / →    turn right
+;;;   A / ←    turn left           click  grab mouse (mouse look)
+;;;   D / →    turn right          Esc    release mouse / quit
 
 (import (curry qt6))
 
@@ -152,155 +160,209 @@
 
 ;;; ── GPU raycaster ─────────────────────────────────────────────────────────
 ;;;
-;;; Maze cell data is uploaded as a DX × (DZ×DW) R8 texture.
-;;; Byte at column ix, row (iz + iw*DZ) = *cells*[cidx(ix,iz,iw)].
+;;; Maze cell data is a DX × (DZ×DW) r8 texture: the byte at column ix,
+;;; row (iz + iw*DZ) is *cells*[cidx(ix,iz,iw)], read with texelFetch.
 ;;;
-;;; The fragment shader casts two DDA rays per pixel (left/right eye for
-;;; anaglyph stereo) and composes ceiling + floor background + wall stripes
-;;; directly in a single pass.
+;;; The fragment shader casts two DDA rays per pixel (left/right eye for the
+;;; anaglyph) and composes ceiling, floor, wall stripes and the HUD in a
+;;; single pass.  All lengths in the shader are logical pixels with y
+;;; pointing down, like the QPainter coordinates the gl-* version used.
 
-(define *raycaster-frag* "
-#version 330 core
-out vec4 frag_color;
+(define *frame-block* "
+layout(std140, binding = 0) uniform Frame {
+    mat4  clip;       /* backend clip-space correction                */
+    vec2  res;        /* physical pixels                              */
+    vec2  pos;        /* (px, pz) player position                     */
+    float dpr;        /* device pixel ratio                           */
+    float yaw;
+    float half_fov;   /* camera-plane half-width (0.66)               */
+    float wall_h;     /* wall height in world units (1.0)             */
+    float fog;        /* fog falloff distance                         */
+    float eye_sep;    /* anaglyph inter-ocular separation             */
+    int   pw;         /* current w-slice                              */
+    int   y_up;       /* 1 when the framebuffer's origin is bottom-left */
+    int   DX;
+    int   DZ;
+    int   DW;
+    int   map_cell;   /* minimap cell size, logical pixels            */
+    int   map_pad;
+};
+")
 
-uniform vec2  u_resolution;   /* physical pixels — auto-set by gl-shader-draw! */
-uniform float u_dpr;          /* device pixel ratio — auto-set                 */
-uniform sampler2D u_maze;     /* DX × (DZ*DW), R8                              */
-uniform vec2  u_pos;          /* (px, pz) player position                      */
-uniform float u_yaw;
-uniform float u_half_fov;     /* camera-plane half-width (0.66)                */
-uniform float u_wall_h;       /* wall height in world units (1.0)              */
-uniform float u_fog;          /* fog falloff distance                          */
-uniform float u_eye_sep;      /* anaglyph inter-ocular separation              */
-uniform int   u_pw;           /* current w-slice                               */
-uniform int   u_DX;
-uniform int   u_DZ;
-uniform int   u_DW;
+(define *raycaster-vert* (string-append "#version 440
+" *frame-block* "
+void main() {
+    vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+    gl_Position = clip * vec4(p * 2.0 - 1.0, 0.5, 1.0);
+}"))
 
-int cell_bits(int ix, int iz) {
-    if (ix < 0 || ix >= u_DX || iz < 0 || iz >= u_DZ) return 0;
-    float u = (float(ix) + 0.5) / float(u_DX);
-    float v = (float(iz + u_pw * u_DZ) + 0.5) / float(u_DZ * u_DW);
-    return int(texture(u_maze, vec2(u, v)).r * 255.0 + 0.5);
+(define *raycaster-frag* (string-append "#version 440
+layout(location = 0) out vec4 frag_color;
+" *frame-block* "
+layout(binding = 1) uniform sampler2D maze;   /* DX x (DZ*DW), r8 */
+
+int cell_bits_w(int ix, int iz, int iw) {
+    if (ix < 0 || ix >= DX || iz < 0 || iz >= DZ || iw < 0 || iw >= DW) return 0;
+    return int(texelFetch(maze, ivec2(ix, iz + iw * DZ), 0).r * 255.0 + 0.5);
 }
+int cell_bits(int ix, int iz) { return cell_bits_w(ix, iz, pw); }
 
-float cast_ray(vec2 pos, vec2 rd, out bool x_side) {
+float cast_ray(vec2 p, vec2 rd, out bool x_side) {
     float ddx = abs(rd.x) < 1e-10 ? 1e30 : abs(1.0 / rd.x);
     float ddz = abs(rd.y) < 1e-10 ? 1e30 : abs(1.0 / rd.y);
-    int ix = int(floor(pos.x));
-    int iz = int(floor(pos.y));
+    int ix = int(floor(p.x));
+    int iz = int(floor(p.y));
     int sx = rd.x > 0.0 ? 1 : -1;
     int sz = rd.y > 0.0 ? 1 : -1;
-    float sdx = rd.x > 0.0 ? (float(ix + 1) - pos.x) * ddx
-                            : (pos.x - float(ix))     * ddx;
-    float sdz = rd.y > 0.0 ? (float(iz + 1) - pos.y) * ddz
-                            : (pos.y - float(iz))     * ddz;
+    float sdx = rd.x > 0.0 ? (float(ix + 1) - p.x) * ddx : (p.x - float(ix)) * ddx;
+    float sdz = rd.y > 0.0 ? (float(iz + 1) - p.y) * ddz : (p.y - float(iz)) * ddz;
     for (int i = 0; i < 64; i++) {
         if (min(sdx, sdz) > 18.0) { x_side = false; return -1.0; }
         if (sdx < sdz) {
             int bit = sx > 0 ? 1 : 2;
-            if ((cell_bits(ix, iz) & bit) == 0) { x_side = true;  return max(0.01, sdx - ddx); }
+            /* the wall is on the boundary about to be crossed, at sdx
+             * (sdx - ddx would be the boundary already behind us) */
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = true;  return max(0.01, sdx); }
             ix += sx; sdx += ddx;
         } else {
             int bit = sz > 0 ? 4 : 8;
-            if ((cell_bits(ix, iz) & bit) == 0) { x_side = false; return max(0.01, sdz - ddz); }
+            if ((cell_bits(ix, iz) & bit) == 0) { x_side = false; return max(0.01, sdz); }
             iz += sz; sdz += ddz;
         }
     }
     x_side = false; return -1.0;
 }
 
-/* Brick/masonry pattern on walls.
- *   tx  = fractional position along the wall (one cell = 1.0)
- *   ty  = fractional position top→bottom within the wall stripe
- * Returns a brightness multiplier:
- *   mortar gaps → 0.25  (dark recessed lines)
- *   brick faces → 0.80–0.95  (random per-brick variation)
- *
- * Mortar lines run horizontally every ¼ wall height and vertically every
- * ½ world unit with a half-brick stagger per row.  The mortar lines
- * compress together as distance grows — the strongest depth cue.
- * Brick faces are slightly randomised so long corridors don't look uniform. */
+/* Brick/masonry pattern on walls: mortar gaps 0.25, brick faces 0.80-0.95.
+ * Mortar lines compress with distance -- the strongest depth cue. */
 float brick(float tx, float ty) {
     float row = floor(ty * 4.0);
     float fy  = fract(ty * 4.0);
     float fx  = fract(tx * 2.0 + mod(row, 2.0) * 0.5);
-    if (fy < 0.07 || fx < 0.06) return 0.25;          /* mortar */
+    if (fy < 0.07 || fx < 0.06) return 0.25;
     float col = floor(tx * 2.0 + mod(row, 2.0) * 0.5);
     return 0.80 + fract(sin(row * 7.31 + col * 13.17) * 43758.55) * 0.15;
 }
 
+/* 1 inside a disc of radius r around c, with a one-pixel soft edge. */
+float disc(vec2 p, vec2 c, float r) { return 1.0 - smoothstep(r - 0.5, r + 0.5, length(p - c)); }
+
+/* 1 on a one-pixel-wide line segment from a to b. */
+float segment(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    return 1.0 - smoothstep(0.5, 1.0, length(p - (a + t * ab)));
+}
+
+/* Minimap, top right: background, walls, w-passages, goal, player. */
+vec3 minimap(vec2 p, vec3 col, float sw) {
+    float cell = float(map_cell);
+    vec2 o = vec2(sw - float(DX) * cell - float(map_pad), float(map_pad));
+    vec2 m = p - o;
+    if (m.x < -1.0 || m.y < -1.0 || m.x > float(DX) * cell + 1.0 || m.y > float(DZ) * cell + 1.0) return col;
+    col = mix(col, vec3(0.0, 0.0, 0.15), 0.75);
+    int ix = int(floor(m.x / cell)), iz = int(floor(m.y / cell));
+    int bits = cell_bits(clamp(ix, 0, DX - 1), clamp(iz, 0, DZ - 1));
+    if (ix >= 0 && ix < DX && iz >= 0 && iz < DZ) {
+        vec2 c = (vec2(ix, iz) + 0.5) * cell;
+        float sq = step(abs(m.x - c.x), cell * 0.18) * step(abs(m.y - c.y), cell * 0.18);
+        if ((bits & 16) != 0) col = mix(col, vec3(0.2, 0.8, 0.3), 0.6 * sq);
+        else if ((bits & 32) != 0) col = mix(col, vec3(0.9, 0.5, 0.15), 0.6 * sq);
+    }
+    /* walls: a vertical line at x = k*cell unless the passage is open */
+    int kx = int(floor(m.x / cell + 0.5));
+    if (abs(m.x - float(kx) * cell) < 0.75 && iz >= 0 && iz < DZ && kx >= 0 && kx <= DX)
+        if (kx == 0 || kx == DX || (cell_bits(kx - 1, iz) & 1) == 0) col = vec3(0.4, 0.5, 1.0);
+    int kz = int(floor(m.y / cell + 0.5));
+    if (abs(m.y - float(kz) * cell) < 0.75 && ix >= 0 && ix < DX && kz >= 0 && kz <= DZ)
+        if (kz == 0 || kz == DZ || (cell_bits(ix, kz - 1) & 4) == 0) col = vec3(0.4, 0.5, 1.0);
+    if (pw == DW - 1)
+        col = mix(col, vec3(1.0, 0.9, 0.1), disc(m, (vec2(DX, DZ) - 0.5) * cell, 4.5));
+    vec2 pc = pos * cell;
+    col = mix(col, vec3(1.0, 0.6, 0.6), segment(m, pc, pc + 9.0 * vec2(sin(yaw), cos(yaw))));
+    col = mix(col, vec3(1.0, 0.3, 0.3), disc(m, pc, 4.5));
+    return col;
+}
+
+/* One dot per w-slice, top left; the current one bright green. */
+vec3 w_indicator(vec2 p, vec3 col) {
+    for (int i = 0; i < DW; i++) {
+        vec2 c = vec2(16.0 + float(i) * 18.0, 14.0);
+        vec3 dot_col = i == pw ? vec3(0.2, 1.0, 0.5) : vec3(0.1, 0.3, 0.2);
+        col = mix(col, dot_col, disc(p, c, 6.0) * (i == pw ? 1.0 : 0.9));
+    }
+    return col;
+}
+
 void main() {
-    float sw  = u_resolution.x / u_dpr;
-    float sh  = u_resolution.y / u_dpr;
-    float lx  = gl_FragCoord.x / u_dpr;
-    float ly  = sh - gl_FragCoord.y / u_dpr;   /* flip Y: 0 = top */
+    float sw  = res.x / dpr;
+    float sh  = res.y / dpr;
+    float lx  = gl_FragCoord.x / dpr;
+    float ly  = y_up != 0 ? sh - gl_FragCoord.y / dpr : gl_FragCoord.y / dpr;   /* 0 = top */
     float hsh = sh * 0.5;
 
     float cam = 2.0 * lx / sw - 1.0;
-    float sy  = sin(u_yaw);
-    float cy  = cos(u_yaw);
-    vec2  rd  = vec2(sy + cy * cam * u_half_fov, cy - sy * cam * u_half_fov);
-    float hs  = u_eye_sep * 0.5;
-    vec2 l_pos = u_pos + vec2(-cy,  sy) * hs;
-    vec2 r_pos = u_pos + vec2( cy, -sy) * hs;
+    float sy  = sin(yaw);
+    float cy  = cos(yaw);
+    vec2  rd  = vec2(sy + cy * cam * half_fov, cy - sy * cam * half_fov);
+    float hs  = eye_sep * 0.5;
+    /* each eye stays in the player's cell: at a wide eye separation an eye
+     * could otherwise sit behind a wall and see the wrong corridor */
+    vec2 cell_lo = floor(pos) + 0.001, cell_hi = floor(pos) + 0.999;
+    vec2 l_pos = clamp(pos + vec2(-cy,  sy) * hs, cell_lo, cell_hi);
+    vec2 r_pos = clamp(pos + vec2( cy, -sy) * hs, cell_lo, cell_hi);
 
-    /* ── Background ─────────────────────────────────────────────────────── */
+    /* ceiling and floor */
     vec3 bg;
     if (ly < hsh) {
-        /* Ceiling: plain dark purple */
         bg = vec3(0.04, 0.03, 0.06);
     } else {
-        /* Floor: perspective grid.
-         * row_dist = perpendicular distance to the floor at this screen row.
-         * Player eye is at height 0.5 (mid-wall), floor at 0.
-         * lp = 0.5 / (ly/hsh - 1)  →  infinity at horizon, 0.5 at feet. */
-        float row_dist = 0.5 / max(0.001, ly / hsh - 1.0);
-        vec2  nrd = normalize(rd);
-        float fx  = fract(u_pos.x + row_dist * nrd.x);
-        float fz  = fract(u_pos.y + row_dist * nrd.y);
+        /* floor grid: eye at height 0.5, so a screen row at ly looks at the
+         * floor 0.5 / (ly/hsh - 1) away (infinite at the horizon) */
+        /* walls use half-height wall_h*hsh/d with the eye at wall_h/2, so
+         * the vertical focal length is 2*hsh and the floor at this row is
+         * wall_h / (ly/hsh - 1) away (#351: was 0.5/..., half the distance
+         * the walls use, so the floor slid at half speed) */
+        float row_dist = wall_h / max(0.001, ly / hsh - 1.0);
+        /* row_dist is a perpendicular distance and rd's component along
+         * the view direction is 1, so the floor point is pos + row_dist*rd
+         * (normalizing rd here bent the grid lines like a fish-eye lens) */
+        float fx  = fract(pos.x + row_dist * rd.x);
+        float fz  = fract(pos.y + row_dist * rd.y);
         bool  gline = fx < 0.05 || fz < 0.05;
-        /* Grid lines stay at the base dark colour; open tiles lighten slightly
-         * near the player so the lines read as recessed cracks. */
-        float fog_f = max(0.0, 1.0 - row_dist / u_fog);
+        float fog_f = max(0.0, 1.0 - row_dist / fog);
         float extra = gline ? 0.0 : fog_f * 0.07;
         bg = vec3(0.09 + extra, 0.08 + extra, 0.06 + extra);
     }
 
-    /* ── Wall rays ───────────────────────────────────────────────────────── */
+    /* walls: left eye in red, right eye in blue */
     bool lxs, rxs;
     float lp = cast_ray(l_pos, rd, lxs);
     float rp = cast_ray(r_pos, rd, rxs);
-
-    /* hit.coord = pos + dist * rd  (exact: rd·view_dir = 1 by construction) */
     float ra = 0.0, ba = 0.0;
     if (lp > 0.0) {
-        float h = u_wall_h * hsh / lp;
+        float h = wall_h * hsh / lp;
         if (ly >= hsh - h && ly <= hsh + h) {
-            float tx  = lxs ? fract(l_pos.y + lp * rd.y) : fract(l_pos.x + lp * rd.x);
-            float ty  = (ly - (hsh - h)) / (2.0 * h);
-            float fog = max(0.0, 1.0 - lp / u_fog);
-            ra = fog * (lxs ? 1.0 : 0.7) * brick(tx, ty);
+            float tx = lxs ? fract(l_pos.y + lp * rd.y) : fract(l_pos.x + lp * rd.x);
+            float ty = (ly - (hsh - h)) / (2.0 * h);
+            ra = max(0.0, 1.0 - lp / fog) * (lxs ? 1.0 : 0.7) * brick(tx, ty);
         }
     }
     if (rp > 0.0) {
-        float h = u_wall_h * hsh / rp;
+        float h = wall_h * hsh / rp;
         if (ly >= hsh - h && ly <= hsh + h) {
-            float tx  = rxs ? fract(r_pos.y + rp * rd.y) : fract(r_pos.x + rp * rd.x);
-            float ty  = (ly - (hsh - h)) / (2.0 * h);
-            float fog = max(0.0, 1.0 - rp / u_fog);
-            ba = fog * (rxs ? 1.0 : 0.7) * brick(tx, ty);
+            float tx = rxs ? fract(r_pos.y + rp * rd.y) : fract(r_pos.x + rp * rd.x);
+            float ty = (ly - (hsh - h)) / (2.0 * h);
+            ba = max(0.0, 1.0 - rp / fog) * (rxs ? 1.0 : 0.7) * brick(tx, ty);
         }
     }
+    vec3 col = clamp(vec3(bg.r + ra, bg.g, bg.b + ba), 0.0, 1.0);
 
-    frag_color = vec4(clamp(bg.r + ra, 0.0, 1.0),
-                      clamp(bg.g,      0.0, 1.0),
-                      clamp(bg.b + ba, 0.0, 1.0), 1.0);
-}
-")
-
-(define *raycaster-prog* #f)
-(define *maze-tex*       #f)
+    vec2 p = vec2(lx, ly);
+    col = minimap(p, col, sw);
+    col = w_indicator(p, col);
+    frag_color = vec4(col, 1.0);
+}"))
 
 ; Pack *cells* into a bytevector laid out as DX × (DZ*DW) rows.
 ; Row (iz + iw*DZ), column ix → byte index = iw*DX*DZ + iz*DX + ix = cidx(ix,iz,iw).
@@ -311,54 +373,16 @@ void main() {
       (bytevector-u8-set! bv i (vector-ref *cells* i)))
     bv))
 
-;;; ── HUD: minimap ──────────────────────────────────────────────────────────
-
-(define (draw-minimap! painter sw sh)
-  (let* ((mw  (* DX MAP-CELL))
-         (mh  (* DZ MAP-CELL))
-         (ox  (- sw mw MAP-PAD))
-         (oy  MAP-PAD)
-         (iw  *pw*))
-    (gfx-set-color! painter 0.0 0.0 0.15 0.75)
-    (gfx-fill-rect! painter ox oy mw mh)
-    (gfx-set-pen-color! painter 0.4 0.5 1.0 1.0)
-    (gfx-set-pen-width! painter 1.0)
-    (do ((k 0 (+ k 1))) ((> k DX))
-      (do ((iz 0 (+ iz 1))) ((= iz DZ))
-        (when (or (= k 0) (= k DX) (not (passage? (- k 1) iz iw B+X)))
-          (let ((px (+ ox (* k MAP-CELL))) (py (+ oy (* iz MAP-CELL))))
-            (gfx-draw-line! painter px py px (+ py MAP-CELL))))))
-    (do ((k 0 (+ k 1))) ((> k DZ))
-      (do ((ix 0 (+ ix 1))) ((= ix DX))
-        (when (or (= k 0) (= k DZ) (not (passage? ix (- k 1) iw B+Z)))
-          (let ((px (+ ox (* ix MAP-CELL))) (py (+ oy (* k MAP-CELL))))
-            (gfx-draw-line! painter px py (+ px MAP-CELL) py)))))
-    (when (= iw (- DW 1))
-      (gfx-set-color! painter 1.0 0.9 0.1 1.0)
-      (gfx-fill-circle! painter
-        (+ ox (* (- DX 0.5) MAP-CELL))
-        (+ oy (* (- DZ 0.5) MAP-CELL))
-        4.5))
-    (let* ((pcx (+ ox (* *px* MAP-CELL)))
-           (pcy (+ oy (* *pz* MAP-CELL))))
-      (gfx-set-color! painter 1.0 0.3 0.3 1.0)
-      (gfx-fill-circle! painter pcx pcy 4.5)
-      (gfx-set-pen-color! painter 1.0 0.6 0.6 1.0)
-      (gfx-draw-line! painter pcx pcy
-        (+ pcx (* 9.0 (sin *yaw*)))
-        (+ pcy (* 9.0 (cos *yaw*)))))))
-
-;;; ── HUD: w-level indicator ────────────────────────────────────────────────
-
-(define (draw-w-indicator! painter)
-  (let ((y 14.0) (r 6.0) (gap 18.0) (x0 16.0))
-    (do ((i 0 (+ i 1))) ((= i DW))
-      (let ((cx (+ x0 (* i gap))))
-        (if (= i *pw*)
-            (begin (gfx-set-color! painter 0.2 1.0 0.5 1.0)
-                   (gfx-fill-circle! painter cx y r))
-            (begin (gfx-set-color! painter 0.1 0.3 0.2 0.9)
-                   (gfx-fill-circle! painter cx y r)))))))
+(define *maze-tex* (make-gpu-texture DX (* DZ DW) 'format 'r8 'data (make-maze-bvec)))
+(define *frame-ubuf* (make-gpu-buffer 'uniform 192))
+(define *pipeline*
+  (make-gpu-pipeline
+    'vertex   (make-gpu-shader 'vertex *raycaster-vert*)
+    'fragment (make-gpu-shader 'fragment *raycaster-frag*)
+    'bindings (make-gpu-bindings
+                (list (list 'uniform 0 '(vertex fragment) *frame-ubuf*)
+                      (list 'texture 1 'fragment *maze-tex* (make-gpu-sampler 'filter 'nearest))))
+    'depth-test #f))
 
 ;;; ── Win check ─────────────────────────────────────────────────────────────
 
@@ -367,28 +391,70 @@ void main() {
        (= (player-iz) (- DZ 1))
        (= *pw* (- DW 1))))
 
-;;; ── Main draw ─────────────────────────────────────────────────────────────
+;;; ── Window ────────────────────────────────────────────────────────────────
 
-(define (draw-frame! painter sw sh)
-  ; GPU renders the 3D view (background + walls, both anaglyph eyes)
-  (gl-shader-draw! *raycaster-prog* painter
-    (list (cons "u_maze"     *maze-tex*)
-          (cons "u_pos"      (list *px* *pz*))
-          (cons "u_yaw"      *yaw*)
-          (cons "u_half_fov" HALF-FOV)
-          (cons "u_wall_h"   WALL-H)
-          (cons "u_fog"      FOG-DIST)
-          (cons "u_eye_sep"  *eye-sep*)
-          (cons "u_pw"       *pw*)
-          (cons "u_DX"       DX)
-          (cons "u_DZ"       DZ)
-          (cons "u_DW"       DW)))
-  ; HUD via QPainter on top (gl-shader-draw! calls endNativePainting first)
-  (draw-minimap!     painter sw sh)
-  (draw-w-indicator! painter)
-  (when (at-goal?)
-    (gfx-set-color! painter 1.0 1.0 0.0 0.95)
-    (gfx-draw-text! painter (/ sw 2.0) (/ sh 2.0) "YOU ESCAPED THE 4D MAZE")))
+(define canvas (make-gpu-canvas))
+(define *logical-w* 1.0)   ; set by the resize callback; gives the pixel ratio
+
+(gpu-canvas-on-resize! canvas (lambda (w h) (set! *logical-w* (max w 1))))
+
+(gpu-canvas-on-render! canvas
+  (lambda (frame w h)
+    (gpu-buffer-update! *frame-ubuf*
+      (gpu-std140
+        (list (list 'mat4  (gpu-clip-space-matrix frame))
+              (list 'vec2  (list w h))
+              (list 'vec2  (list *px* *pz*))
+              (list 'float (/ w *logical-w*))
+              (list 'float *yaw*)
+              (list 'float HALF-FOV)
+              (list 'float WALL-H)
+              (list 'float FOG-DIST)
+              (list 'float *eye-sep*)
+              (list 'int   *pw*)
+              (list 'int   (if (gpu-framebuffer-y-up? frame) 1 0))
+              (list 'int   DX) (list 'int DZ) (list 'int DW)
+              (list 'int   MAP-CELL) (list 'int MAP-PAD))))
+    (gpu-render-pass! frame (lambda (pass) (gpu-draw! pass *pipeline* 3)))))
+
+(define win (make-plain-window "4D Maze" 1080 640))
+(define status (window-status-bar win))
+
+(define sidebar (make-vbox))
+(widget-set-min-size! sidebar 210 0)
+(widget-set-max-size! sidebar 210 100000)
+(layout-add! sidebar (make-label "Stereo (red/blue)"))
+(layout-add! sidebar
+  (make-slider "Eye separation" 0 50 1 10
+    (lambda (v) (set! *eye-sep* (* v 0.01)))))
+(layout-add! sidebar (make-separator))
+(layout-add! sidebar (make-label "Controls"))
+(layout-add! sidebar (make-label "W/S/↑/↓  move"))
+(layout-add! sidebar (make-label "Click     grab mouse"))
+(layout-add! sidebar (make-label "Mouse     look"))
+(layout-add! sidebar (make-label "A/D/←/→  turn (ungrabbed)"))
+(layout-add! sidebar (make-label "Q/E      step ±w"))
+(layout-add! sidebar (make-label "Esc      release / quit"))
+(layout-add! sidebar (make-separator))
+(layout-add! sidebar (make-label "Minimap: green = exit to +w (E), orange = exit to −w (Q)"))
+
+(define central (make-hbox))
+(layout-add! central sidebar)
+(layout-add! central canvas)
+(window-set-central-widget! win central)
+
+(define *status-text* "")
+(define (update-status!)
+  (let ((text
+         (if (at-goal?)
+             "YOU ESCAPED THE 4D MAZE"
+             (string-append "w-slice " (number->string (+ *pw* 1)) " of " (number->string DW)
+                            "   —   goal: far corner of slice " (number->string DW)))))
+    ;; called on every tick (walking onto the goal must show the message),
+    ;; so only touch the status bar when the text actually changes
+    (unless (string=? text *status-text*)
+      (set! *status-text* text)
+      (statusbar-set-text! status text))))
 
 ;;; ── Input ─────────────────────────────────────────────────────────────────
 
@@ -396,19 +462,20 @@ void main() {
 
 (define (key-held? k) (hash-table-ref *held* k #f))
 
-(define (handle-key-down! key mods)
-  (hash-table-set! *held* key #t)
-  (cond
-    ((equal? key "q") (try-step-w! -1))
-    ((equal? key "e") (try-step-w!  1))
-    ((equal? key "Escape")
-     (if (canvas-mouse-grabbed? canvas)
-         (canvas-release-mouse! canvas)
-         (quit-event-loop)))
-    ((equal? key "Q") (quit-event-loop))))
+(gpu-canvas-on-key! canvas
+  (lambda (key mods)
+    (hash-table-set! *held* key #t)
+    (cond
+      ((equal? key "q") (try-step-w! -1) (update-status!))
+      ((equal? key "e") (try-step-w!  1) (update-status!))
+      ((equal? key "Escape")
+       (if (gpu-canvas-mouse-grabbed? canvas)
+           (gpu-canvas-release-mouse! canvas)
+           (quit-event-loop)))
+      ((equal? key "Q") (quit-event-loop)))))
 
-(define (handle-key-up! key mods)
-  (hash-table-delete! *held* key))
+(gpu-canvas-on-key-up! canvas
+  (lambda (key mods) (hash-table-delete! *held* key)))
 
 (define (tick-movement!)
   (let* ((sy (sin *yaw*)) (cy (cos *yaw*)))
@@ -417,55 +484,44 @@ void main() {
     (when (or (key-held? "s") (key-held? "Down"))
       (try-move! (- (* MOVE-SPEED sy)) (- (* MOVE-SPEED cy))))
     ; Arrow/AD turning only active when mouse is NOT grabbed
-    (when (not (canvas-mouse-grabbed? canvas))
+    (when (not (gpu-canvas-mouse-grabbed? canvas))
       (when (or (key-held? "a") (key-held? "Left"))
         (set! *yaw* (- *yaw* TURN-SPEED)))
       (when (or (key-held? "d") (key-held? "Right"))
         (set! *yaw* (+ *yaw* TURN-SPEED))))))
 
-;;; ── Window ────────────────────────────────────────────────────────────────
+(gpu-canvas-on-grab-move! canvas
+  (lambda (dx dy) (set! *yaw* (+ *yaw* (* dx MOUSE-SENS)))))
 
-(define win     (make-window "4D Maze" 1080 640))
-(define canvas  (window-canvas win))
-(define sidebar (window-sidebar win))
-
-(box-add! sidebar (make-label "Stereo (red/blue)"))
-(box-add! sidebar
-  (make-slider "Eye separation" 0 50 1 10
-    (lambda (v) (set! *eye-sep* (* v 0.01)))))
-(box-add! sidebar (make-separator))
-(box-add! sidebar (make-label "Controls"))
-(box-add! sidebar (make-label "W/S/↑/↓  move"))
-(box-add! sidebar (make-label "Click     grab mouse"))
-(box-add! sidebar (make-label "Mouse     look"))
-(box-add! sidebar (make-label "A/D/←/→  turn (ungrabbed)"))
-(box-add! sidebar (make-label "Q/E      step ±w"))
-(box-add! sidebar (make-label "Esc      release / quit"))
-
-(canvas-on-draw!  canvas draw-frame!)
-(window-on-key!    win handle-key-down!)
-(window-on-key-up! win handle-key-up!)
-(window-on-close!  win (lambda () (quit-event-loop)))
-
-(canvas-on-grab-move! canvas
-  (lambda (dx dy)
-    (set! *yaw* (+ *yaw* (* dx MOUSE-SENS)))))
-
-(canvas-on-mouse! canvas
+(gpu-canvas-on-mouse! canvas
   (lambda (event btn x y mods)
     (when (eq? event 'press)
-      (canvas-grab-mouse! canvas))))
+      (gpu-canvas-focus! canvas)
+      (gpu-canvas-grab-mouse! canvas))))
+
+(window-on-close! win (lambda () (quit-event-loop)))
+
+;; --snapshot PATH: render for a moment, save one frame, quit (for checking).
+(define *snapshot*
+  (let loop ((a (command-line)))
+    (cond ((or (null? a) (null? (cdr a))) #f)
+          ((string=? (car a) "--snapshot") (cadr a))
+          (else (loop (cdr a))))))
+(define *ticks* 0)
 
 (define timer
   (make-timer 16 (lambda ()
+    (set! *ticks* (+ *ticks* 1))
     (tick-movement!)
-    (canvas-redraw! canvas))))
-
-(window-on-realize! win
-  (lambda ()
-    (set! *raycaster-prog* (make-gl-shader *raycaster-frag*))
-    (set! *maze-tex*       (make-gl-texture (make-maze-bvec) DX (* DZ DW)))
-    (timer-start! timer)))
+    (update-status!)
+    (gpu-canvas-redraw! canvas)
+    (when (and *snapshot* (= *ticks* 40))
+      (display (if (gpu-canvas-save-png! canvas *snapshot*) "saved " "could not save "))
+      (display *snapshot*) (newline)
+      (quit-event-loop)))))
 
 (window-show! win)
+(gpu-canvas-focus! canvas)
+(update-status!)
+(timer-start! timer)
 (run-event-loop)
