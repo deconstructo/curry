@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793777942498,
+  "lastUpdate": 1793869442648,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -20354,6 +20354,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 79.041,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a05aabc0207e5516a255478da86b140105ca23ae",
+          "message": "Merge pull request #357 from deconstructo/feat/srfi-272-final-and-166\n\nSRFI 272 final, SRFI 166, and (srfi 272 show)",
+          "timestamp": "2026-11-05T20:02:50+11:00",
+          "tree_id": "a105f741d9db78d5df79c3a40242826c52b328c0",
+          "url": "https://github.com/deconstructo/curry/commit/a05aabc0207e5516a255478da86b140105ca23ae"
+        },
+        "date": 1793869441488,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 11.7,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.646,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.168,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 26.474,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 96.105,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 209.524,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 50.132,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 61.448,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 43.767,
             "unit": "ms"
           }
         ]
