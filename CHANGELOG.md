@@ -2,6 +2,39 @@
 
 ### Unreleased
 
+**Fixed — string case conversion is full Unicode (#355)**
+
+- `string-upcase`, `string-downcase` and `string-foldcase` use the full
+  mappings of SpecialCasing.txt and CaseFolding.txt: `ß` upcases to `SS`,
+  ligatures such as `ﬁ` to `FI`, and capital sigma downcases to final sigma
+  at the end of a word. Before, they only handled ASCII.
+- `string-ci=?` and the other `string-ci` comparisons compare foldcased
+  strings, so `(string-ci=? "Straße" "STRASSE")` is true. `char-ci=?` and
+  the other `char-ci` comparisons fold non-ASCII characters too.
+- The final-sigma rule skips case-ignorable characters (`Α.Σ` gives `α.ς`).
+  String comparisons keep embedded NULs, and string literals that differ only
+  after a NUL are no longer merged into one constant (#359).
+- `tools/gen-unicode-tables.py` also reads SpecialCasing.txt and emits three
+  full-mapping tables.
+
+**Changed — cuneiform numerals inside lists (#354) — breaking for multi-place literals in code**
+
+- The space between the place groups of a cuneiform numeral (`𒁹 𒌋𒁹` is 71)
+  now joins them only at the top level of a read. Inside `( )`, `[ ]`, `#( )`
+  and `#u8( )` a space ends the token, so `(𒁹 𒌋)` is a list of two elements,
+  not `(70)`, and `(f 𒁹 𒌋𒁹)` has two arguments. Write a multi-place number
+  inside a form with `#s`: `(f #s1,11)`.
+- `write` and `display` follow the same rule: with `current-number-notation`
+  set to `'cuneiform`, an exact number inside a list or vector whose cuneiform
+  text has a space, or is also an Akkadian keyword (`𒁹` is 1 and `define`),
+  prints as `#s…` (negative numbers too), so printed data reads back equal.
+  Inexact numbers print in decimal there.
+- `#s` accepts a leading `+` or `-` (`#s-1,10` is -70).
+- A top-level literal with three or more place groups (`𒁹 𒁹 𒁹`, 3661) is read
+  whole; it used to stop after two.
+- Listing adjacent cuneiform names in an `export` clause no longer merges them.
+- Cached `.scc` files are keyed on source text, so run once with `--clear-cache`
+  if a script wrote a multi-place cuneiform literal inside a call.
 **New — SRFI 166 (Monadic Formatting) and `(srfi 272 show)`**
 
 - `(srfi 166)` and its `base`, `pretty`, `columnar`, `unicode` and `color`
