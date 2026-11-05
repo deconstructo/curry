@@ -52,6 +52,7 @@
 #include <QMatrix4x4>
 #include <QFloat16>
 #include <QThread>
+#include <QCursor>
 #include <rhi/qrhi.h>
 #include <rhi/qrhi_platform.h>
 #include <rhi/qshaderbaker.h>
@@ -868,6 +869,9 @@ static QRhi *device_rhi(GpuDevice *d, const char *who) {
 
 struct GpuCanvasState {
     curry_val render_proc, key_proc, key_up_proc, mouse_proc, scroll_proc, resize_proc;
+    curry_val grab_move_proc;    /* (lambda (dx dy) ...) while the mouse is grabbed */
+    bool      mouse_grabbed;
+    QPoint    grab_warp_target;  /* our own cursor warp, to ignore its move event */
 };
 
 struct WindFrame;
@@ -880,13 +884,16 @@ public:
     GpuCanvasState st;
     explicit CurryGpuCanvas(QWidget *parent = nullptr) : QRhiWidget(parent) {
         st.render_proc = st.key_proc = st.key_up_proc = st.mouse_proc =
-            st.scroll_proc = st.resize_proc = curry_make_bool(false);
+            st.scroll_proc = st.resize_proc = st.grab_move_proc = curry_make_bool(false);
+        st.mouse_grabbed = false;
+        st.grab_warp_target = QPoint(-1, -1);
         gc_register_root(&st.render_proc);
         gc_register_root(&st.key_proc);
         gc_register_root(&st.key_up_proc);
         gc_register_root(&st.mouse_proc);
         gc_register_root(&st.scroll_proc);
         gc_register_root(&st.resize_proc);
+        gc_register_root(&st.grab_move_proc);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
@@ -906,6 +913,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *ev) override     { fire_mouse("release", ev); }
     void mouseDoubleClickEvent(QMouseEvent *ev) override { fire_mouse("double-press", ev); }
     void mouseMoveEvent(QMouseEvent *ev) override {
+        if (grabbed()) { grabbed_move(ev); return; }
         fire_mouse(ev->buttons() != Qt::NoButton ? "drag" : "move", ev);
     }
     void wheelEvent(QWheelEvent *ev) override;
@@ -914,6 +922,51 @@ protected:
         if (curry_is_bool(st.resize_proc)) return;
         curry_val argv[2] = { curry_make_fixnum(width()), curry_make_fixnum(height()) };
         SCHEME_CALL(curry_apply(st.resize_proc, 2, argv));
+    }
+private:
+    /* Mouse capture, as qt6.cpp's canvas does it: report the motion
+     * relative to the widget centre, then warp the cursor back there.  The
+     * move event our own warp produces is recognised and skipped. */
+    void grabbed_move(QMouseEvent *ev) {
+        if (curry_is_bool(st.grab_move_proc)) return;
+        QPoint global = ev->globalPosition().toPoint();
+        if (global == st.grab_warp_target) return;
+        QPoint center = mapToGlobal(rect().center());
+        int dx = global.x() - center.x(), dy = global.y() - center.y();
+        if (dx == 0 && dy == 0) return;
+        st.grab_warp_target = center;
+        QCursor::setPos(center);
+        curry_val argv[2] = { curry_make_fixnum(dx), curry_make_fixnum(dy) };
+        SCHEME_CALL(curry_apply(st.grab_move_proc, 2, argv));
+    }
+public:
+    /* The grab as Qt actually has it: Qt refuses a grab for a hidden
+     * widget and can drop one on its own (window hidden, app deactivated).
+     * When that happened, forget ours too and give the cursor back. */
+    bool grabbed() {
+        if (st.mouse_grabbed && QWidget::mouseGrabber() != this) {
+            st.mouse_grabbed = false;
+            unsetCursor();
+        }
+        return st.mouse_grabbed;
+    }
+    void set_grab(bool on) {
+        if (on == grabbed()) return;
+        if (on) {
+            grabMouse();
+            if (QWidget::mouseGrabber() != this) return;   /* refused (hidden widget) */
+            st.mouse_grabbed = true;
+            setCursor(Qt::BlankCursor);
+            /* Start from the centre, so the first move does not report the
+             * whole distance from the click point to the centre as motion. */
+            QPoint center = mapToGlobal(rect().center());
+            st.grab_warp_target = center;
+            QCursor::setPos(center);
+        } else {
+            st.mouse_grabbed = false;
+            releaseMouse();
+            unsetCursor();
+        }
     }
 private:
     void fire_key(curry_val proc, QKeyEvent *ev) {
@@ -1034,6 +1087,26 @@ CANVAS_SETTER(fn_gpu_canvas_on_key_up, key_up_proc, "gpu-canvas-on-key-up!")
 CANVAS_SETTER(fn_gpu_canvas_on_mouse,  mouse_proc,  "gpu-canvas-on-mouse!")
 CANVAS_SETTER(fn_gpu_canvas_on_scroll, scroll_proc, "gpu-canvas-on-scroll!")
 CANVAS_SETTER(fn_gpu_canvas_on_resize, resize_proc, "gpu-canvas-on-resize!")
+CANVAS_SETTER(fn_gpu_canvas_on_grab_move, grab_move_proc, "gpu-canvas-on-grab-move!")
+
+static curry_val fn_gpu_canvas_grab_mouse(int, curry_val *av, void *) {
+    val_to_gpu_canvas(av[0], "gpu-canvas-grab-mouse!")->set_grab(true);
+    return curry_void();
+}
+static curry_val fn_gpu_canvas_release_mouse(int, curry_val *av, void *) {
+    val_to_gpu_canvas(av[0], "gpu-canvas-release-mouse!")->set_grab(false);
+    return curry_void();
+}
+static curry_val fn_gpu_canvas_mouse_grabbed_p(int, curry_val *av, void *) {
+    return curry_make_bool(val_to_gpu_canvas(av[0], "gpu-canvas-mouse-grabbed?")->grabbed());
+}
+/* Keyboard focus to the canvas, so its key callbacks fire without a click
+ * first (otherwise a focusable sidebar widget such as a slider can take
+ * the arrow keys). */
+static curry_val fn_gpu_canvas_focus(int, curry_val *av, void *) {
+    val_to_gpu_canvas(av[0], "gpu-canvas-focus!")->setFocus(Qt::OtherFocusReason);
+    return curry_void();
+}
 
 static curry_val fn_gpu_canvas_redraw(int, curry_val *av, void *) {
     val_to_gpu_canvas(av[0], "gpu-canvas-redraw!")->update();
@@ -2523,6 +2596,11 @@ void qt6_gpu_register(CurryVM *vm) {
     gpu_def(vm, "gpu-canvas-on-mouse!", fn_gpu_canvas_on_mouse, 2, 2);
     gpu_def(vm, "gpu-canvas-on-scroll!", fn_gpu_canvas_on_scroll, 2, 2);
     gpu_def(vm, "gpu-canvas-on-resize!", fn_gpu_canvas_on_resize, 2, 2);
+    gpu_def(vm, "gpu-canvas-on-grab-move!", fn_gpu_canvas_on_grab_move, 2, 2);
+    gpu_def(vm, "gpu-canvas-grab-mouse!",   fn_gpu_canvas_grab_mouse,   1, 1);
+    gpu_def(vm, "gpu-canvas-release-mouse!", fn_gpu_canvas_release_mouse, 1, 1);
+    gpu_def(vm, "gpu-canvas-mouse-grabbed?", fn_gpu_canvas_mouse_grabbed_p, 1, 1);
+    gpu_def(vm, "gpu-canvas-focus!",        fn_gpu_canvas_focus,        1, 1);
     gpu_def(vm, "gpu-canvas-redraw!", fn_gpu_canvas_redraw, 1, 1);
     gpu_def(vm, "gpu-canvas-save-png!", fn_gpu_canvas_save_png, 2, 2);
 

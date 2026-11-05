@@ -181,9 +181,19 @@
     ;; semantic-color-mapper? is necessarily approximate (any procedure
     ;; of the right arity passes) -- documented, not hidden.
 
+    ;; Default semantic category -> palette index, per the SRFI. `default`
+    ;; means the terminal's own color (no sequence at all); `bold` is the
+    ;; default color in bold.
     (define %default-palette-mapping
-      '((comment . 8) (string . 2) (keyword . 4) (number . 5) (symbol . 6)
-        (error . 1) (warning . 3) (special-form . 4) (variable . 7) (constant . 5)))
+      '((comment . 8) (char . 10) (string . 10)
+        (escape . 11) (char-escape . 11) (string-escape . 11)
+        (char-meta . 11) (string-meta . 11) (symbol-escape . 11)
+        (formal . 7) (paren . 7)
+        (variable . default) (bracket . default) (defined . bold)
+        (keyword . 12) (number . 13) (directive . 13) (literal . 14)
+        (literal-meta . 6) (meta . 6) (warning . 1)
+        ;; Categories the first version of this library used.
+        (special-form . 12) (constant . 14) (symbol . default) (error . 1)))
 
     (define (semantic-color-mapper? obj) (procedure? obj))
 
@@ -191,10 +201,17 @@
       (let ((palette-mapper
               (if (pair? maybe-palette-mapper)
                   (car maybe-palette-mapper)
-                  (lambda (sc) (let ((hit (assq sc %default-palette-mapping))) (if hit (cdr hit) 7))))))
+                  (lambda (sc) (let ((hit (assq sc %default-palette-mapping))) (if hit (cdr hit) 'default))))))
         (lambda (sc start?)
-          (let ((asb (asb-palette-ref palette (palette-mapper sc))))
-            (if start? (asb->sgr-string asb) "\x1b;[0m")))))
+          (let ((idx (palette-mapper sc)))
+            (cond
+              ((not (sgr-support-tier)) "")
+              ;; #f, `default` or anything that is not a palette index means
+              ;; the terminal's own color.
+              ((not (or (eq? idx 'bold) (and (exact-integer? idx) (<= 0 idx 15)))) "")
+              ((eq? idx 'bold) (if start? "\x1b;[1m" "\x1b;[0m"))
+              (start? (asb->sgr-string (asb-palette-ref palette idx)))
+              (else "\x1b;[0m"))))))
 
     (define default-semantic-color-mapper (make-semantic-color-mapper default-asb-palette))
 
@@ -206,4 +223,8 @@
     (define (semantic-color->end-string sc . rest)
       (let ((mapper (if (pair? rest) (car rest) default-semantic-color-mapper))
             (tier (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) (sgr-support-tier))))
-        (parameterize ((sgr-support-tier tier)) (mapper sc #f))))))
+        (parameterize ((sgr-support-tier tier)) (mapper sc #f))))
+
+    ;; pp-color #t means "the default mapper"; the engine cannot import
+    ;; this library (it depends on the engine), so it is installed here.
+    (%set-default-color-mapper! default-semantic-color-mapper)))

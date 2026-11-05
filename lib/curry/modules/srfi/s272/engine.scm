@@ -1,49 +1,53 @@
 ;;; SRFI-272 shared engine: the real pretty-printing machinery every
 ;;; (srfi 272 ...) sub-library is built on. Not one of the SRFI's own
-;;; eight public library names -- an internal implementation detail,
-;;; exported broadly (a much wider surface than any one public library
-;;; needs) so each public .sld shim can re-export exactly its own
-;;; documented subset without duplicating logic.
+;;; public library names -- an internal implementation detail, exported
+;;; broadly (a much wider surface than any one public library needs) so
+;;; each public .sld shim can re-export exactly its own documented subset
+;;; without duplicating logic.
 ;;;
 ;;; https://srfi.schemers.org/srfi-272/ -- pretty printing, layered:
 ;;; (srfi 272) minimalist -> basic -> intermediate -> advanced -> fancy,
-;;; plus independent colorize/measure/show libraries. Status: DRAFT as
-;;; of this implementation (draft #3, 2026-09-21) -- ported in full at
-;;; the user's explicit request despite the spec still being subject to
-;;; change; see docs/reference/srfi/s272.md for the full list of
-;;; deliberate scope/fidelity decisions made where the spec's own
-;;; ambition exceeds what's tractable in one implementation pass
-;;; (notably: a real, working Wadler-style layout algorithm rather than
-;;; a line-by-line transliteration of any one reference implementation;
-;;; a practical, non-exhaustive East Asian Width approximation in the
-;;; measure library; and (srfi 272 show) omitted entirely since it
-;;; requires SRFI-166, which curry does not implement).
+;;; plus independent colorize/measure libraries and a show bridge to
+;;; SRFI 166. Status: FINAL (2026-11-01).
 ;;;
-;;; ── Document model ──────────────────────────────────────────────────
-;;; Every value to print is first converted into a small "doc" tree,
-;;; entirely independent of parameters that only affect LAYOUT (width,
-;;; indentation, colors) -- only pp-level/pp-length/graph-vs-circle-vs-
-;;; simple mode affect the doc tree's own SHAPE. A doc is one of:
-;;;   (atom . text)                  -- text is the exact string to emit
-;;;   (group open close kind . kids) -- kids is a list of docs
-;;;   (dot-tail . doc)               -- an improper-list tail, printed
-;;;                                      as " . <doc>" instead of a
-;;;                                      normal space-separated element
-;;;   (labeled n . doc)              -- wraps doc's own rendering in
-;;;                                      "#n=" (graph/circle mode only)
-;;;   (labelref . n)                 -- a bare "#n#" back-reference
-;;; A separate LAYOUT pass renders a doc tree to actual text, tracking
-;;; current column, deciding per-group whether the flat (single-line)
-;;; rendering fits the remaining width or whether to break the group
-;;; across lines -- the well-known two-pass "measure, then decide"
-;;; simplification of Wadler's own lazy algorithm from "A Prettier
-;;; Printer", which is easier to implement correctly and performs fine
-;;; for the sizes of data pp is actually used on.
+;;; ── Pipeline ────────────────────────────────────────────────────────
+;;; 1. Label assignment: two eq?-hash-table scans find shared objects
+;;;    (graph mode) or genuine cycles (circle mode); simple mode scans
+;;;    nothing.
+;;; 2. Doc building: the datum becomes a small tree, independent of every
+;;;    layout parameter (only pp-level/pp-length/labels/radix shape it):
+;;;      (atom segs kind obj)       segs = ((semantic-color-or-#f . text) ...)
+;;;      (group open close kind kids...)   kind: list | vector | hook
+;;;      (prefixed segs . doc)      a read macro: 'x `x ,x ,@x
+;;;      (dot-tail . doc)           an improper tail, printed ". x"
+;;;      (labeled n . doc)          "#n=" before a shared/circular object
+;;;      (labelref . n)             "#n#"
+;;; 3. Layout: a recursive fits-or-break pass. A group that fits the
+;;;    remaining width (counting the closing delimiters that must follow
+;;;    it on the same line) prints flat. Otherwise it breaks according to
+;;;    its style: a form whose head symbol has a style in pp-styles (the
+;;;    grammar of the SRFI: body, fill, dc*/ec*/fc*/lc*, i?, ...) uses
+;;;    it; any other form with a symbol head lays out as a procedure
+;;;    application; everything else is a data list, one element per line.
+;;;    A form's head is canonicalized with lang-translate first, so the
+;;;    Akkadian and cuneiform spellings of a special form use the style
+;;;    of the English one.
+;;; 4. Output: layout produces a list of pieces, (emit . text) for
+;;;    ordinary output and (tint . text) for color sequences, which is
+;;;    what pp-lines truncation and make-pprint-generator work on, and
+;;;    what is finally replayed through pp-emit / pp-tint.
+;;;
+;;; Every width is measured with %string-width ((srfi 272 measure)): a
+;;; terminal-column count that treats cuneiform and Akkadian
+;;; transliteration correctly (signs are 1 column, combining marks 0),
+;;; East Asian wide characters and emoji as 2, and keeps ZWJ sequences
+;;; and flags together.
 
 (define-library (srfi s272 engine)
   (import (scheme base) (scheme write) (scheme inexact)
           (srfi s69 hash-tables)
-          (srfi s158 generators-and-accumulators))
+          (srfi s158 generators-and-accumulators)
+          (srfi s272 measure-impl))
   (export
     ;; Parameters (basic tier)
     pp-width pp-graph pp-circle
@@ -60,9 +64,15 @@
     add-pp-hook lookup-pp-hook pretty-hook
     glst-pp-hook bvec-pp-hook atom-pp-hook rmac-pp-hook pp-hook?
     ;; Core rendering entry points
-    %pp-to-port %pp-lines-list %current-mode
+    %pp-to-port %pp-lines-list %current-mode %render-to-string %pp-doc-to-port
+    ;; Doc constructors, for (srfi 272 fancy)'s comment-preserving file reader
+    %doc-atom %doc-group %doc-dot-tail %doc-prefixed %doc-comment
     ;; Keyword-argument helper (shared by every pp/pprint variant)
-    %pp-with-kwargs)
+    %pp-with-kwargs
+    ;; Colorize integration, and the default style registry
+    %set-default-color-mapper! %default-styles
+    ;; Width of a string in terminal columns
+    %string-width)
   (begin
 
     ;; ── Parameters ───────────────────────────────────────────────────────────
@@ -84,8 +94,8 @@
     (define pp-miser-width (make-parameter 40))
     (define pp-indent (make-parameter 0))
     (define pp-tab (make-parameter 1))
-    (define pp-max-tab (make-parameter 4))
-    (define pp-code (make-parameter #f))
+    (define pp-max-tab (make-parameter 10))
+    (define pp-code (make-parameter #t))
     (define pp-brackets (make-parameter #f))
     (define pp-pretty (make-parameter #t))
     (define pp-color (make-parameter #f))
@@ -94,44 +104,72 @@
     (define pp-tint (make-parameter (lambda (s port) (write-string s port))))
 
     ;; ── Style registry ───────────────────────────────────────────────────────
-    ;; A style registry is an alist (symbol . style-object); functional
-    ;; update per the spec's own text ("returns new registry; original
-    ;; unmodified"). pp-styles is the parameter advanced-tier code
-    ;; threads through add-pp-style/lookup-pp-style; pretty-style (the
-    ;; simpler intermediate-tier get/setter) mutates the SAME parameter
-    ;; in place via parameterize's own current binding, so both tiers'
-    ;; mechanisms observe each other's changes when both are loaded.
+    ;; A style registry is an alist (symbol . style); functional update
+    ;; per the spec ("returns a new registry"). pp-styles starts out as
+    ;; %default-styles, the conventions for the R7RS special forms; the
+    ;; grammar is the SRFI's:
+    ;;   style     ::= (_ . fmt-tail)
+    ;;   fmt-tail  ::= body | fill | dc* | ec* | fc* | lc*
+    ;;               | (i? . fmt-tail) | (fmt . fmt-tail)
+    ;; A code before the tail is a distinguished argument kept on the
+    ;; form's first line (i identifier, d datum, e expression, f formals,
+    ;; l literals, h definition head, dc/ec/fc/lc one clause, dc*/ec*/
+    ;; fc*/lc* a list of clauses). The tail lays out the remaining
+    ;; arguments: body indents them, fill packs them, and a starred
+    ;; clause code lines them up as clauses.
 
-    (define pp-styles (make-parameter '()))
+    (define %default-styles
+      '((define . (_ h . body))
+        (define-values . (_ f . body))
+        (define-syntax . (_ i . body))
+        (define-record-type . (_ h e . body))
+        (define-library . (_ e . body))
+        (lambda . (_ f . body))
+        (named-lambda . (_ h . body))
+        (let . (_ i? fc* . body))
+        (let* . (_ fc* . body))
+        (letrec . (_ fc* . body))
+        (letrec* . (_ fc* . body))
+        (let-values . (_ fc* . body))
+        (let*-values . (_ fc* . body))
+        (let-syntax . (_ fc* . body))
+        (letrec-syntax . (_ fc* . body))
+        (parameterize . (_ fc* . body))
+        (if . (_ . body))
+        (when . (_ e . body))
+        (unless . (_ e . body))
+        (begin . (_ . body))
+        (or . (_ . fill))
+        (and . (_ . fill))
+        (do . (_ fc* ec . body))
+        (cond . (_ . ec*))
+        (case . (_ e . lc*))
+        (guard . (_ (f . ec*) . body))
+        (case-lambda . (_ . fc*))))
+
+    (define pp-styles (make-parameter %default-styles))
 
     (define (add-pp-style registry symbol style)
-      (if (not style)
-          (let loop ((r registry) (acc '()))
-            (cond ((null? r) (reverse acc))
-                  ((eq? (caar r) symbol) (append (reverse acc) (cdr r)))
-                  (else (loop (cdr r) (cons (car r) acc)))))
-          (cons (cons symbol style)
-                (let loop ((r registry) (acc '()))
-                  (cond ((null? r) (reverse acc))
-                        ((eq? (caar r) symbol) (append (reverse acc) (cdr r)))
-                        (else (loop (cdr r) (cons (car r) acc))))))))
+      (let ((without (let loop ((r registry) (acc '()))
+                       (cond ((null? r) (reverse acc))
+                             ((eq? (caar r) symbol) (loop (cdr r) acc))
+                             (else (loop (cdr r) (cons (car r) acc)))))))
+        (if (not style) without (cons (cons symbol style) without))))
 
     (define (lookup-pp-style registry symbol)
       (let ((hit (assq symbol registry))) (and hit (cdr hit))))
 
+    ;; (pretty-style sym) reads and (pretty-style sym style) sets the
+    ;; style of sym in the current pp-styles binding.
     (define (pretty-style symbol . maybe-style)
       (if (pair? maybe-style)
           (begin (pp-styles (add-pp-style (pp-styles) symbol (car maybe-style))) (if #f #f))
           (lookup-pp-style (pp-styles) symbol)))
 
     ;; ── Hook registry ────────────────────────────────────────────────────────
-    ;; A hook registry is an alist (test . hook); "new associations
-    ;; added to beginning; existing same-test associations replaced in
-    ;; place" per the spec's own text -- note this is REPLACE-IN-PLACE
-    ;; for an existing test, unlike add-pp-style's remove-then-prepend
-    ;; (which also ends up at the front, but the distinction matters if
-    ;; ever exposed): implemented literally as specified, not just
-    ;; "close enough".
+    ;; A hook registry is an alist (test . hook); "new associations added
+    ;; to the beginning; existing same-test associations replaced in
+    ;; place", implemented literally.
 
     (define-record-type <pp-hook>
       (%make-pp-hook kind render-proc extra) pp-hook? (kind %hook-kind) (render-proc %hook-render) (extra %hook-extra))
@@ -158,58 +196,51 @@
           (lookup-pp-hook (pp-hooks) test)))
 
     ;; Hook constructors. Each produces an opaque <pp-hook> whose
-    ;; render-proc knows how to turn a matching object into a doc tree
-    ;; (see %hook-doc below, in the main render pass) -- kept as plain
-    ;; closures over the constructor's own arguments rather than a
-    ;; bigger dispatch table, since there are only four shapes.
+    ;; render-proc turns a matching object into a doc, given a procedure
+    ;; that builds the doc of a sub-object.
 
     (define (glst-pp-hook prefix cf xf suffix)
-      (%make-pp-hook 'glst (lambda (obj build) (%doc-group prefix suffix 'hook-glst (map build (cf obj)))) xf))
+      (%make-pp-hook 'glst (lambda (obj build) (%doc-group prefix suffix 'hook (map build (cf obj)))) xf))
     (define (bvec-pp-hook prefix lf rf suffix)
       (%make-pp-hook 'bvec
         (lambda (obj build)
-          (%doc-group prefix suffix 'hook-bvec
+          (%doc-group prefix suffix 'hook
             (let loop ((i 0) (acc '()))
               (if (>= i (lf obj)) (reverse acc) (loop (+ i 1) (cons (build (rf obj i)) acc))))))
         #f))
+    ;; wf (printed width) is accepted but unused: widths are measured
+    ;; from the strings df returns. df returns strings, each optionally
+    ;; preceded by a semantic color symbol.
     (define (atom-pp-hook shareable? wf df)
-      (%make-pp-hook 'atom (lambda (obj build) (%doc-atom (%dfpairs->string (df obj (pp-radix))))) shareable?))
+      (%make-pp-hook 'atom
+        (lambda (obj build) (list 'atom (%df->segs (df obj (pp-radix))) 'hook obj))
+        shareable?))
     (define (rmac-pp-hook prefix ef xf)
-      (%make-pp-hook 'rmac (lambda (obj build) (%doc-group prefix "" 'hook-rmac (list (build (ef obj))))) xf))
+      (%make-pp-hook 'rmac
+        (lambda (obj build) (list* 'prefixed (list (cons 'meta prefix)) (build (ef obj))))
+        xf))
 
-    ;; atom-pp-hook's df returns a list of (color-symbol . string) or
-    ;; bare-string pairs; without live color-mapper wiring at this
-    ;; engine layer (colorize is a separate, independent library that
-    ;; may not even be loaded), this concatenates just the text parts --
-    ;; (srfi 272 colorize) callers get real color output via pp-color's
-    ;; own integration in the render pass for ORDINARY atoms; a colored
-    ;; atom-pp-hook is accepted or plain-concatenated here.
-    (define (%dfpairs->string pairs)
-      (apply string-append (map (lambda (p) (if (pair? p) (cdr p) p)) pairs)))
+    (define (%df->segs items)
+      (let loop ((items items) (sc #f) (acc '()))
+        (cond ((null? items) (reverse acc))
+              ((symbol? (car items)) (loop (cdr items) (car items) acc))
+              (else (loop (cdr items) #f (cons (cons sc (car items)) acc))))))
 
     ;; ── Cycle/sharing detection ──────────────────────────────────────────────
     ;;
-    ;; All three traversals below are written as an explicit work-stack
-    ;; loop rather than plain car/cdr recursion. This library is a
-    ;; define-library body, tree-walked via eval() (see CLAUDE.md's own
-    ;; non-tail-recursion stack-depth guard), so a naive `(begin (walk
-    ;; (car o)) (walk (cdr o)))` -- neither call in tail position, since
-    ;; there's bookkeeping after both -- overflows that guard on any
-    ;; ordinary list longer than a few hundred elements: real user data,
-    ;; not an obscure edge case, and the exact kind of bug this SRFI
-    ;; exists to handle gracefully. Every `loop` call below IS a tail
-    ;; call, so stack depth stays O(1) regardless of input length; the
-    ;; work list itself (heap-allocated, GC-managed) carries the O(n)
-    ;; cost instead.
+    ;; All traversals are explicit work-stack loops. This library is a
+    ;; define-library body, tree-walked via eval() (see CLAUDE.md's
+    ;; stack-depth guard), so plain car/cdr recursion would overflow it on
+    ;; any ordinary list longer than a few hundred elements. Every `loop`
+    ;; call is a tail call, so stack depth stays O(1) in the input length.
 
     (define (%shareable? obj) (or (pair? obj) (vector? obj)))
 
     (define (%children o)
       (if (pair? o) (list (car o) (cdr o)) (vector->list o)))
 
-    ;; DFS with post-order 'leave markers so on-stack correctly reflects
-    ;; "currently being visited" (for genuine-cycle detection) rather
-    ;; than "ever visited".
+    ;; DFS with post-order 'leave markers so on-stack means "currently
+    ;; being visited" (genuine cycles) rather than "ever visited".
     (define (%scan-cycles! obj on-stack done cyclic)
       (let loop ((stack (list (cons 'visit obj))))
         (if (null? stack)
@@ -244,9 +275,8 @@
                        (hash-table-set! done o #t)
                        (loop (append (%children o) rest))))))))))
 
-    ;; mode is 'graph, 'circle, or 'simple. Returns an eq?-hash-table
-    ;; from object -> sequential label number, for exactly the objects
-    ;; that need one under the given mode.
+    ;; mode is 'graph, 'circle, or 'simple. Returns an eq?-hash-table from
+    ;; object -> label number, for exactly the objects that need one.
     (define (%assign-labels obj mode)
       (let ((labels (make-hash-table eq?)))
         (if (eq? mode 'simple)
@@ -277,57 +307,67 @@
                              (set! next (+ next 1)))
                            (loop (append (%children o) rest))))))))))))
 
-    ;; ── Doc tree constructors ────────────────────────────────────────────────
+    ;; ── Doc constructors ─────────────────────────────────────────────────────
 
-    (define (%doc-atom text) (cons 'atom text))
-    (define (%doc-group open close kind kids) (list* 'group open close kind kids))
-    (define (%doc-dot-tail doc) (cons 'dot-tail doc))
-    (define (%doc-labeled n doc) (list* 'labeled n doc))
-    (define (%doc-labelref n) (cons 'labelref n))
-    (define (%doc-atom? d) (and (pair? d) (eq? (car d) 'atom)))
-    (define (%doc-group? d) (and (pair? d) (eq? (car d) 'group)))
-    (define (%doc-dot-tail? d) (and (pair? d) (eq? (car d) 'dot-tail)))
-    (define (%doc-labeled? d) (and (pair? d) (eq? (car d) 'labeled)))
-    (define (%doc-labelref? d) (and (pair? d) (eq? (car d) 'labelref)))
-
-    ;; list* (aka cons*): cons up all but the last argument onto the
-    ;; last one, used as-is (a plain list, here) -- not in (scheme
-    ;; base); tiny local helper so this file has no extra SRFI
-    ;; dependency just for it.
     (define (list* . args)
       (let loop ((args args))
         (cond ((null? args) '())
               ((null? (cdr args)) (car args))
               (else (cons (car args) (loop (cdr args)))))))
 
-    ;; ── Atom text rendering ──────────────────────────────────────────────────
-    ;; write-mode is 'write, 'display, or 'write-simple (only ever
-    ;; 'write-simple when the whole traversal's mode is 'simple, since
-    ;; that's the only case with no label bookkeeping to keep correct
-    ;; across nested write calls).
+    (define (%doc-atom text kind obj) (list 'atom (list (cons #f text)) kind obj))
+    (define (%doc-group open close kind kids) (list* 'group open close kind kids))
+    (define (%doc-dot-tail doc) (cons 'dot-tail doc))
+    (define (%doc-labeled n doc) (list* 'labeled n doc))
+    (define (%doc-labelref n) (cons 'labelref n))
+    ;; A source comment kept by pprint-file: text is the comment as
+    ;; written; eol? means it trailed the previous element on its line.
+    (define (%doc-comment text eol?) (list 'comment text eol?))
+    (define (%doc-prefixed text doc) (list* 'prefixed (list (cons 'meta text)) doc))
+    (define (%doc-comment? d) (%tag? d 'comment))
+    (define (%comment-text d) (cadr d))
+    (define (%comment-eol? d) (caddr d))
+    (define (%last-newline str)
+      (let loop ((i (- (string-length str) 1)))
+        (cond ((< i 0) #f) ((char=? (string-ref str i) #\newline) i) (else (loop (- i 1))))))
+    (define (%tag? d t) (and (pair? d) (eq? (car d) t)))
+    (define (%doc-atom? d) (%tag? d 'atom))
+    (define (%doc-group? d) (%tag? d 'group))
+    (define (%doc-dot-tail? d) (%tag? d 'dot-tail))
+    (define (%doc-labeled? d) (%tag? d 'labeled))
+    (define (%doc-labelref? d) (%tag? d 'labelref))
+    (define (%doc-prefixed? d) (%tag? d 'prefixed))
 
-    (define (%render-number-text n)
-      (let ((radix (pp-radix)))
-        (if (or (not (exact? n)) (= radix 10))
-            (number->string n radix)
-            (string-append (case radix ((2) "#b") ((8) "#o") ((16) "#x") (else "")) (number->string n radix)))))
+    (define (%group-open g) (cadr g))
+    (define (%group-close g) (caddr g))
+    (define (%group-kind g) (cadddr g))
+    (define (%group-kids g) (cddddr g))
+    (define (%atom-segs a) (cadr a))
+    (define (%atom-kind a) (caddr a))
+    (define (%atom-obj a) (cadddr a))
 
-    (define (%render-atom-text obj)
-      (let ((hook (%find-matching-hook obj)))
-        (cond
-          (hook (%dfpairs->string (list ((%hook-render hook) obj %render-atom-text))))
-          ((number? obj) (%render-number-text obj))
-          (else
-           (let ((p (open-output-string)))
-             (write obj p)
-             (get-output-string p))))))
+    ;; ── Atom text ────────────────────────────────────────────────────────────
+    ;; Numbers honor pp-radix; everything else, and decimal numbers, go
+    ;; through `write`, which also honors current-number-notation (so a
+    ;; sexagesimal or cuneiform numeral prints in the reader's own
+    ;; notation).
 
-    ;; A pp-hooks entry is (test . hookval). Per the spec: if hookval is
-    ;; a real hook object, test is an ordinary predicate and hookval is
-    ;; used directly on a match; if hookval is #t, test is itself a
-    ;; "hook-returning procedure" -- calling it on obj either returns
-    ;; #f (no match) or the actual <pp-hook> record to use. Returns the
-    ;; resolved <pp-hook> record, or #f if nothing matched.
+    (define (%write->string obj)
+      (let ((p (open-output-string))) (write obj p) (get-output-string p)))
+
+    (define (%atom-text obj)
+      (if (and (number? obj) (exact? obj) (not (= (pp-radix) 10)))
+          (string-append (case (pp-radix) ((2) "#b") ((8) "#o") ((16) "#x") (else ""))
+                         (number->string obj (pp-radix)))
+          (%write->string obj)))
+
+    (define (%atom-kind-of obj)
+      (cond ((symbol? obj) 'symbol) ((string? obj) 'string) ((char? obj) 'char)
+            ((number? obj) 'number) (else 'literal)))
+
+    ;; A pp-hooks entry is (test . hookval). If hookval is a hook, test is
+    ;; an ordinary predicate; if it is #t, test itself returns a hook (or
+    ;; #f) for the object.
     (define (%find-matching-hook obj)
       (let loop ((hs (pp-hooks)))
         (if (null? hs)
@@ -339,14 +379,20 @@
 
     ;; ── Doc building ─────────────────────────────────────────────────────────
 
+    (define (%read-macro-prefix obj)
+      (and (pair? obj) (pair? (cdr obj)) (null? (cddr obj))
+           (case (car obj)
+             ((quote) "'") ((quasiquote) "`") ((unquote) ",") ((unquote-splicing) ",@")
+             (else #f))))
+
     (define (%build-doc obj depth labels printed mode)
       (let ((hook (%find-matching-hook obj)))
         (cond
-          (hook (%hook-doc obj hook depth labels printed mode))
-          ;; Spec: the root is level 0; a component at a level EQUAL TO
-          ;; OR EXCEEDING pp-level gets stubbed -- so >=, not >.
+          (hook ((%hook-render hook) obj (lambda (sub) (%build-doc sub (+ depth 1) labels printed mode))))
+          ;; The root is level 0; a component at a level equal to or
+          ;; exceeding pp-level is stubbed.
           ((and (pp-level) (>= depth (pp-level)) (%shareable? obj))
-           (%doc-atom (pp-level-stub)))
+           (%level-stub obj))
           ((and (not (eq? mode 'simple)) (%shareable? obj) (hash-table-exists? labels obj))
            (let ((n (hash-table-ref labels obj)))
              (if (hash-table-exists? printed obj)
@@ -354,22 +400,32 @@
                  (begin (hash-table-set! printed obj #t)
                         (%doc-labeled n (%build-doc-body obj depth labels printed mode))))))
           ((%shareable? obj) (%build-doc-body obj depth labels printed mode))
-          (else (%doc-atom (%render-atom-text obj))))))
+          (else (%doc-atom (%atom-text obj) (%atom-kind-of obj) obj)))))
 
-    (define (%hook-doc obj hook depth labels printed mode)
-      ((%hook-render hook) obj (lambda (sub) (%build-doc sub (+ depth 1) labels printed mode))))
+    ;; pp-level-stub #t is the "shell" form: the object keeps its
+    ;; delimiters and its contents become the length stub.
+    (define (%level-stub obj)
+      (if (eq? (pp-level-stub) #t)
+          (%doc-group (if (vector? obj) "#(" "(") ")" (if (vector? obj) 'vector 'list)
+                      (list (%doc-atom (pp-length-stub) 'stub #f)))
+          (%doc-atom (pp-level-stub) 'stub #f)))
 
     (define (%build-doc-body obj depth labels printed mode)
-      (if (vector? obj)
-          (%doc-group "#(" ")" 'vector
-            (%build-doc-elements (vector->list obj) (+ depth 1) labels printed mode #f))
-          (%build-doc-pair obj (+ depth 1) labels printed mode)))
+      (cond
+        ((vector? obj)
+         (%doc-group "#(" ")" 'vector
+           (%build-doc-elements (vector->list obj) (+ depth 1) labels printed mode)))
+        ((and (%read-macro-prefix obj)
+              (not (and (not (eq? mode 'simple)) (hash-table-exists? labels (cdr obj)))))
+         (list* 'prefixed (list (cons 'meta (%read-macro-prefix obj)))
+                (%build-doc (cadr obj) (+ depth 1) labels printed mode)))
+        (else (%build-doc-pair obj (+ depth 1) labels printed mode))))
 
-    (define (%build-doc-elements lst depth labels printed mode dotted-ok)
+    (define (%build-doc-elements lst depth labels printed mode)
       (let ((maxlen (pp-length)))
         (let loop ((lst lst) (n 0) (acc '()))
           (cond
-            ((and maxlen (>= n maxlen) (pair? lst)) (reverse (cons (%doc-atom (pp-length-stub)) acc)))
+            ((and maxlen (>= n maxlen) (pair? lst)) (reverse (cons (%doc-atom (pp-length-stub) 'stub #f) acc)))
             ((null? lst) (reverse acc))
             (else (loop (cdr lst) (+ n 1) (cons (%build-doc (car lst) depth labels printed mode) acc)))))))
 
@@ -378,34 +434,59 @@
         (%doc-group "(" ")" 'list
           (let loop ((node obj) (n 0) (acc '()))
             (cond
-              ((and maxlen (>= n maxlen) (pair? node)) (reverse (cons (%doc-atom (pp-length-stub)) acc)))
+              ((and maxlen (>= n maxlen) (pair? node)) (reverse (cons (%doc-atom (pp-length-stub) 'stub #f) acc)))
               ((null? node) (reverse acc))
               ((and (pair? node) (> n 0) (not (eq? mode 'simple)) (hash-table-exists? labels node))
                (reverse (cons (%doc-dot-tail (%build-doc node depth labels printed mode)) acc)))
               ((pair? node) (loop (cdr node) (+ n 1) (cons (%build-doc (car node) depth labels printed mode) acc)))
               (else (reverse (cons (%doc-dot-tail (%build-doc node depth labels printed mode)) acc))))))))
 
-    ;; ── Layout / rendering ───────────────────────────────────────────────────
-    ;; %flat-width measures a doc's own single-line rendering length
-    ;; (memoized isn't needed -- docs here are trees, not shared graphs,
-    ;; since %build-doc already replaced any actual sharing with
-    ;; labelref leaves before layout ever runs).
+    ;; ── Colors ───────────────────────────────────────────────────────────────
+    ;; pp-color #t selects the default semantic mapper, which
+    ;; (srfi 272 colorize) installs; any other true value is a mapper
+    ;; procedure (semantic-color start?) -> string.
+
+    (define %default-color-mapper (list #f))
+    (define (%set-default-color-mapper! m) (set-car! %default-color-mapper m))
+
+    (define (%color-mapper)
+      (let ((c (pp-color)))
+        (cond ((not c) #f)
+              ((eq? c #t) (car %default-color-mapper))
+              ((procedure? c) c)
+              (else #f))))
+
+    (define (%atom-semantic-color kind role)
+      (case role
+        ((keyword) 'keyword)
+        ((defined head) 'defined)
+        ((formal) 'formal)
+        (else
+         (case kind
+           ((string) 'string) ((char) 'char) ((number) 'number)
+           ((symbol) 'variable) ((stub) 'meta) (else 'literal)))))
+
+    ;; ── Widths ───────────────────────────────────────────────────────────────
+
+    (define (%segs-width segs)
+      (let loop ((s segs) (n 0))
+        (if (null? s) n (loop (cdr s) (+ n (%string-width (cdar s)))))))
 
     (define (%flat-width doc)
       (cond
-        ((%doc-atom? doc) (string-length (cdr doc)))
+        ((%doc-atom? doc) (%segs-width (%atom-segs doc)))
         ((%doc-labelref? doc) (+ 2 (string-length (number->string (cdr doc)))))
         ((%doc-dot-tail? doc) (+ 3 (%flat-width (cdr doc))))
         ((%doc-labeled? doc)
-         (+ 1 (string-length (number->string (cadr doc))) 1 (%flat-width (cddr doc))))
+         (+ 2 (string-length (number->string (cadr doc))) (%flat-width (cddr doc))))
+        ((%doc-prefixed? doc) (+ (%segs-width (cadr doc)) (%flat-width (cddr doc))))
+        ;; A comment can never be flat: it forces every enclosing group to break.
+        ((%doc-comment? doc) 1000000)
         ((%doc-group? doc)
-         (let* ((open (cadr doc)) (close (caddr doc)) (kids (cdr (cdddr doc))))
-           (+ (string-length open) (string-length close)
-              ;; one separator space per gap between kids, except the gap
-              ;; right before a dot-tail kid -- dot-tail's own " . " (3
-              ;; chars, counted in its own %flat-width case above) already
-              ;; covers that gap, so adding a plain separator there too
-              ;; would double-count it.
+         (let ((kids (%group-kids doc)))
+           (+ (%string-width (%group-open doc)) (%string-width (%group-close doc))
+              ;; One separator per gap between kids, except before a
+              ;; dot-tail, whose own " . " already covers the gap.
               (let loop ((ks kids) (first #t) (n 0))
                 (cond ((null? ks) n)
                       (first (loop (cdr ks) #f n))
@@ -414,124 +495,412 @@
               (apply + (map %flat-width kids)))))
         (else 0)))
 
-    (define (%emit s port) ((pp-emit) s port))
+    ;; ── Style helpers ────────────────────────────────────────────────────────
 
-    ;; Prints doc flat (no line breaks) regardless of width -- used once
-    ;; a group has already been measured to fit, or when pp-pretty is #f.
-    (define (%print-flat doc port)
-      (cond
-        ((%doc-atom? doc) (%emit (cdr doc) port))
-        ((%doc-labelref? doc) (%emit (string-append "#" (number->string (cdr doc)) "#") port))
-        ((%doc-dot-tail? doc) (%emit " . " port) (%print-flat (cdr doc) port))
-        ((%doc-labeled? doc)
-         (%emit (string-append "#" (number->string (cadr doc)) "=") port)
-         (%print-flat (cddr doc) port))
-        ((%doc-group? doc)
-         (let ((open (cadr doc)) (close (caddr doc)) (kids (cdr (cdddr doc))))
-           (%emit open port)
-           (let loop ((kids kids) (first #t))
-             (when (pair? kids)
-               (if (and (not first) (not (%doc-dot-tail? (car kids)))) (%emit " " port))
-               (%print-flat (car kids) port)
-               (loop (cdr kids) #f)))
-           (%emit close port)))))
+    (define (%symbol-atom? d) (and (%doc-atom? d) (eq? (%atom-kind d) 'symbol)))
 
-    ;; Prints doc with real line breaking: `col` is the current column,
-    ;; `indent` the column to return to after a forced line break inside
-    ;; this doc. Returns the column after printing.
-    (define (%print-broken doc port col indent)
-      (cond
-        ((or (%doc-atom? doc) (%doc-labelref? doc))
-         (%print-flat doc port) (+ col (%flat-width doc)))
-        ((%doc-dot-tail? doc)
-         (%emit " . " port)
-         (%print-broken (cdr doc) port (+ col 3) indent))
-        ((%doc-labeled? doc)
-         (let* ((prefix (string-append "#" (number->string (cadr doc)) "=")))
-           (%emit prefix port)
-           (%print-broken (cddr doc) port (+ col (string-length prefix)) indent)))
-        ((%doc-group? doc)
-         (let* ((open (cadr doc)) (close (caddr doc)) (kids (cdr (cdddr doc)))
-                (width (pp-width)) (miser (pp-miser-width))
-                (inline (pp-inline-width))
-                (fits? (and (or (not width) (<= (+ col (%flat-width doc)) width))
-                            (or (not inline) (<= (%flat-width doc) inline)))))
-           (if (or (not (pp-pretty)) fits? (null? kids))
-               (begin (%print-flat doc port) (+ col (%flat-width doc)))
-               (let* ((child-indent
-                        (if (and miser width (> col (- width miser)))
-                            (+ indent (pp-tab))
-                            (min (+ col (string-length open)) (+ indent (pp-max-tab) (string-length open))))))
-                 (%emit open port)
-                 (let loop ((kids kids) (first #t) (c (+ col (string-length open))))
-                   (if (null? kids)
-                       (begin (%emit close port) (+ c (string-length close)))
-                       (let ((c2 (if first c (begin (%emit "\n" port) (%emit (make-string child-indent #\space) port) child-indent))))
-                         (loop (cdr kids) #f (%print-broken (car kids) port c2 child-indent)))))))))
-        (else col)))
+    ;; The style registered for a form headed by atom `head`: first under
+    ;; the symbol as written, then under its canonical English spelling.
+    (define (%style-for head)
+      (let ((sym (%atom-obj head)))
+        (or (lookup-pp-style (pp-styles) sym)
+            (let ((canon (lang-translate sym)))
+              (and (not (eq? canon sym)) (lookup-pp-style (pp-styles) canon))))))
 
-    ;; ── Line-limit enforcement ───────────────────────────────────────────────
-    ;; Rendered by first printing to a string port (so pp-lines can
-    ;; truncate before anything reaches the real destination), then
-    ;; emitting the (possibly truncated) result through pp-emit/pp-tint.
+    (define (%code->role code)
+      (case code
+        ((i f) 'formal)
+        ((h) 'head)
+        ((dc ec fc lc) 'clause)
+        ((dc* ec* fc* lc*) 'clauses)
+        (else #f)))
+
+    (define (%clause-tail? t) (memq t '(dc* ec* fc* lc*)))
+
+    ;; ── Layout ───────────────────────────────────────────────────────────────
+    ;; %layout returns the list of pieces for doc starting at column
+    ;; start-col. All the layout helpers close over the piece accumulator.
+
+    (define (%layout doc start-col)
+      (let ((pieces '())
+            (width (pp-width))
+            (inline (pp-inline-width))
+            (miser (pp-miser-width))
+            (tab (pp-tab))
+            (max-tab (pp-max-tab))
+            (code? (pp-code))
+            (brackets? (and (pp-code) (pp-brackets)))
+            (pretty? (pp-pretty))
+            (mapper (%color-mapper)))
+
+        (define (emit! s) (set! pieces (cons (cons 'emit s) pieces)))
+        (define (tint! s) (unless (string=? s "") (set! pieces (cons (cons 'tint s) pieces))))
+        (define (newline-to! col)
+          (emit! "\n")
+          (when (> col 0) (emit! (make-string col #\space))))
+
+        ;; Emit text wrapped in the color sequences of semantic color sc.
+        (define (colored! sc text)
+          (if (and mapper sc)
+              (begin (tint! (mapper sc #t)) (emit! text) (tint! (mapper sc #f)))
+              (emit! text)))
+
+        (define (open-text g role)
+          (if (and brackets? (eq? role 'clause) (eq? (%group-kind g) 'list)) "[" (%group-open g)))
+        (define (close-text g role)
+          (if (and brackets? (eq? role 'clause) (eq? (%group-kind g) 'list)) "]" (%group-close g)))
+        (define (delim-sc text) (if (or (string=? text "[") (string=? text "]")) 'bracket 'paren))
+
+        ;; Atom text carries its own color unless the layout assigned a
+        ;; role (a keyword head, a formal, a defined name).
+        (define (atom! a role)
+          (for-each (lambda (seg)
+                      (colored! (or (car seg) (%atom-semantic-color (%atom-kind a) role)) (cdr seg)))
+                    (%atom-segs a)))
+
+        ;; ·· Flat printing ··
+        (define (flat! doc role)
+          (cond
+            ((%doc-atom? doc) (atom! doc role))
+            ((%doc-labelref? doc) (colored! 'meta (string-append "#" (number->string (cdr doc)) "#")))
+            ((%doc-dot-tail? doc) (emit! " . ") (flat! (cdr doc) #f))
+            ((%doc-labeled? doc)
+             (colored! 'meta (string-append "#" (number->string (cadr doc)) "="))
+             (flat! (cddr doc) role))
+            ((%doc-prefixed? doc)
+             (for-each (lambda (seg) (colored! (car seg) (cdr seg))) (cadr doc))
+             (flat! (cddr doc) #f))
+            ;; Only reached with pp-pretty #f, where comments are dropped.
+            ((%doc-comment? doc) (if #f #f))
+            ((%doc-group? doc)
+             (let ((open (open-text doc role)) (close (close-text doc role)))
+               (colored! (delim-sc open) open)
+               (let loop ((kids (%group-kids doc)) (roles (kid-roles doc role)) (first #t))
+                 (when (pair? kids)
+                   (if (and (not first) (not (%doc-dot-tail? (car kids)))) (emit! " "))
+                   (flat! (car kids) (car roles))
+                   (loop (cdr kids) (cdr roles) #f)))
+               (colored! (delim-sc close) close)))))
+
+        ;; The role of each kid of a group printed with the given role,
+        ;; as a list with one entry per kid: the parts of a definition
+        ;; head and of a formals list are colored as such, the elements of
+        ;; a list of clauses (and the clauses a style names) are clauses,
+        ;; and the head of a styled form is a keyword.
+        (define (kid-roles g role)
+          (let* ((kids (%group-kids g)) (n (length kids)))
+            (case role
+              ((head) (cons 'defined (make-list (max 0 (- n 1)) 'formal)))
+              ((formal) (make-list n 'formal))
+              ((clauses) (make-list n 'clause))
+              (else
+               (let ((style (and code? (eq? (%group-kind g) 'list) (pair? kids)
+                                 (%symbol-atom? (car kids)) (not (ormap-dot-tail? (cdr kids)))
+                                 (%style-for (car kids)))))
+                 (if style
+                     (cons 'keyword (style-arg-roles (if (pair? style) (cdr style) 'body) (cdr kids)))
+                     (make-list n #f)))))))
+
+        ;; Roles for the arguments of a styled form, walking the style the
+        ;; way lay-styled! does.
+        (define (style-arg-roles fmt args)
+          (cond
+            ((null? args) '())
+            ((and (pair? fmt) (eq? (car fmt) 'i?))
+             (if (%symbol-atom? (car args))
+                 (cons 'formal (style-arg-roles (cdr fmt) (cdr args)))
+                 (style-arg-roles (cdr fmt) args)))
+            ((pair? fmt) (cons (%code->role (car fmt)) (style-arg-roles (cdr fmt) (cdr args))))
+            ((%clause-tail? fmt) (map (lambda (a) 'clause) args))
+            (else (map (lambda (a) #f) args))))
+
+        (define (fits? doc col trail)
+          (let ((fw (%flat-width doc)))
+            (and (or (not width) (<= (+ col fw trail) width))
+                 (or (not inline) (<= fw inline)))))
+
+        ;; ·· Layout proper ··
+        ;; Returns the column after printing doc. trail is the number of
+        ;; columns of closing delimiters that must follow doc on its last line.
+        (define (lay! doc col trail role)
+          (cond
+            ((%doc-atom? doc) (atom! doc role) (+ col (%flat-width doc)))
+            ((%doc-labelref? doc) (flat! doc role) (+ col (%flat-width doc)))
+            ((%doc-dot-tail? doc)
+             (emit! ". ")
+             (lay! (cdr doc) (+ col 2) trail #f))
+            ((%doc-labeled? doc)
+             (let ((prefix (string-append "#" (number->string (cadr doc)) "=")))
+               (colored! 'meta prefix)
+               (lay! (cddr doc) (+ col (string-length prefix)) trail role)))
+            ((%doc-prefixed? doc)
+             (for-each (lambda (seg) (colored! (car seg) (cdr seg))) (cadr doc))
+             (lay! (cddr doc) (+ col (%segs-width (cadr doc))) trail #f))
+            ((%doc-comment? doc)
+             (colored! 'comment (%comment-text doc))
+             ;; A block comment may span lines (printed as written); the
+             ;; column after it is the width of its last line.
+             (let ((last-nl (%last-newline (%comment-text doc))))
+               (if last-nl
+                   (%string-width (substring (%comment-text doc) (+ last-nl 1) (string-length (%comment-text doc))))
+                   (+ col (%string-width (%comment-text doc))))))
+            ((%doc-group? doc)
+             (if (or (not pretty?) (null? (%group-kids doc)) (fits? doc col trail))
+                 (begin (flat! doc role) (+ col (%flat-width doc)))
+                 (lay-group! doc col trail role)))
+            (else col)))
+
+        (define (misering? col) (and miser width (< miser width) (> col (- width miser))))
+
+        ;; The group does not fit: choose a layout from its head.
+        (define (lay-group! g col trail role)
+          (let* ((kids (%group-kids g))
+                 (head (car kids))
+                 (head-sym? (and code? (eq? (%group-kind g) 'list) (%symbol-atom? head)
+                                 (not (ormap-dot-tail? (cdr kids)))))
+                 (style (and head-sym? (%style-for head))))
+            (cond
+              ((ormap-comment? kids) (lay-commented! g col trail role head-sym? style))
+              ((eq? role 'clauses) (lay-data! g col trail role))
+              (style (lay-styled! g col trail role style))
+              ((and head-sym? (pair? (cdr kids))) (lay-app! g col trail role))
+              (else (lay-data! g col trail role)))))
+
+        (define (ormap-comment? ds)
+          (cond ((null? ds) #f) ((%doc-comment? (car ds)) #t) (else (ormap-comment? (cdr ds)))))
+
+        ;; A group holding source comments (pprint-file). A trailing
+        ;; comment stays on its element's line; every other element after
+        ;; the first argument starts a line, and the closing delimiter
+        ;; moves to a line of its own when a comment ends the group, since
+        ;; a line comment would swallow it.
+        (define (lay-commented! g col trail role head-sym? style)
+          (let* ((open (open-text g role)) (close (close-text g role))
+                 (ow (%string-width open)) (cw (%string-width close))
+                 (kids (%group-kids g))
+                 (c0 (+ col ow))
+                 (indent (cond (style (if (misering? col) c0 (+ col ow tab)))
+                               (head-sym? (+ col ow tab))
+                               (else c0))))
+            (colored! (delim-sc open) open)
+            (let loop ((ks kids) (c c0) (i 0) (prev #f))
+              (if (null? ks)
+                  (begin
+                    (when (and prev (%doc-comment? prev)) (newline-to! indent))
+                    (colored! (delim-sc close) close)
+                    (+ c cw))
+                  (let* ((k (car ks)) (last? (null? (cdr ks))) (tr (if last? (+ trail cw) 0)))
+                    (cond
+                      ((and (%doc-comment? k) (%comment-eol? k) prev)
+                       (emit! "  ")
+                       (loop (cdr ks) (lay! k (+ c 2) 0 #f) (+ i 1) k))
+                      ((= i 0) (loop (cdr ks) (lay! k c 0 (and style 'keyword)) 1 k))
+                      ((and (= i 1) head-sym? (not (%doc-comment? k)) (not (%doc-comment? prev)))
+                       (emit! " ")
+                       (loop (cdr ks) (lay! k (+ c 1) tr #f) 2 k))
+                      (else
+                       (newline-to! (if (and (= i 1) (not head-sym?)) c0 indent))
+                       (loop (cdr ks) (lay! k (if (and (= i 1) (not head-sym?)) c0 indent) tr #f) (+ i 1) k))))))))
+
+        (define (ormap-dot-tail? ds)
+          (cond ((null? ds) #f) ((%doc-dot-tail? (car ds)) #t) (else (ormap-dot-tail? (cdr ds)))))
+
+        ;; Data: every element on its own line, aligned after the delimiter.
+        (define (lay-data! g col trail role)
+          (let* ((open (open-text g role)) (close (close-text g role))
+                 (ow (%string-width open)) (cw (%string-width close))
+                 (c0 (+ col ow))
+                 (kid-role (if (eq? role 'clauses) 'clause #f)))
+            (colored! (delim-sc open) open)
+            (let loop ((kids (%group-kids g)) (first #t) (c c0))
+              (if (null? kids)
+                  (begin (colored! (delim-sc close) close) (+ c cw))
+                  (let* ((last? (null? (cdr kids)))
+                         (c1 (if first c (begin (newline-to! c0) c0))))
+                    (loop (cdr kids) #f
+                          (lay! (car kids) c1 (if last? (+ trail cw) 0) kid-role)))))))
+
+        ;; Procedure application: (head arg ...), arguments aligned under
+        ;; the first one, or indented by pp-tab when the head is long or
+        ;; the line is near the margin.
+        (define (lay-app! g col trail role)
+          (let* ((open (open-text g role)) (close (close-text g role))
+                 (ow (%string-width open)) (cw (%string-width close))
+                 (kids (%group-kids g)) (head (car kids))
+                 (hw (%flat-width head))
+                 (c-head (+ col ow))
+                 (align (+ c-head hw 1))
+                 (indent (+ col ow tab))
+                 (aligned? (and (<= (+ hw 1) (+ max-tab 1)) (not (misering? col)))))
+            (colored! (delim-sc open) open)
+            (atom! head #f)
+            (let loop ((args (cdr kids)) (first #t) (c (+ c-head hw)))
+              (if (null? args)
+                  (begin (colored! (delim-sc close) close) (+ c cw))
+                  (let* ((last? (null? (cdr args)))
+                         (tr (if last? (+ trail cw) 0))
+                         (c1 (cond ((and first aligned?) (emit! " ") (+ c 1))
+                                   (aligned? (newline-to! align) align)
+                                   (else (newline-to! indent) indent))))
+                    (loop (cdr args) #f (lay! (car args) c1 tr #f)))))))
+
+        ;; A form with a registered style. Distinguished arguments stay on
+        ;; the head's line; the tail lays out the rest.
+        (define (lay-styled! g col trail role style)
+          (let* ((open (open-text g role)) (close (close-text g role))
+                 (ow (%string-width open)) (cw (%string-width close))
+                 (kids (%group-kids g)) (head (car kids))
+                 (hw (%flat-width head))
+                 (body-col (if (misering? col) (+ col ow) (+ col ow tab)))
+                 (fmt (if (pair? style) (cdr style) 'body)))
+            (colored! (delim-sc open) open)
+            (atom! head 'keyword)
+            ;; Peel the leading codes off fmt, pairing them with arguments.
+            (let peel ((fmt fmt) (args (cdr kids)) (dist '()))
+              (cond
+                ((and (pair? fmt) (eq? (car fmt) 'i?))
+                 (if (and (pair? args) (%symbol-atom? (car args)))
+                     (peel (cdr fmt) (cdr args) (cons (cons (car args) 'formal) dist))
+                     (peel (cdr fmt) args dist)))
+                ((and (pair? fmt) (pair? args))
+                 (peel (cdr fmt) (cdr args) (cons (cons (car args) (%code->role (car fmt))) dist)))
+                ((pair? fmt) (peel '() args dist))
+                (else
+                 (let ((tail (if (null? fmt) 'body fmt)))
+                   (finish-styled! g col trail (+ col ow hw) cw close body-col
+                                   (reverse dist) tail args)))))))
+
+        (define (finish-styled! g col trail c-after-head cw close body-col dist tail rest)
+          ;; Distinguished arguments. The first stays on the head line.
+          ;; A later one joins it only if the previous one printed flat
+          ;; and it fits; otherwise it starts a line under the first
+          ;; (do's bindings and test clause line up this way).
+          (let dloop ((ds dist) (c c-after-head) (i 0) (prev-flat? #t) (first-col #f))
+            (if (pair? ds)
+                (let* ((arg (caar ds)) (arole (cdar ds))
+                       (tr (if (and (null? (cdr ds)) (null? rest)) (+ trail cw) 0))
+                       (same? (or (= i 0) (and prev-flat? (fits? arg (+ c 1) tr))))
+                       (acol (if same? (+ c 1) first-col)))
+                  (if same? (emit! " ") (newline-to! first-col))
+                  (dloop (cdr ds) (lay! arg acol tr arole) (+ i 1)
+                         (fits? arg acol tr) (or first-col acol)))
+                (let ((c-line c))
+                  (case tail
+                    ((body)
+                     (let loop ((args rest) (c c-line))
+                       (if (null? args)
+                           (begin (colored! (delim-sc close) close) (+ c cw))
+                           (begin
+                             (newline-to! body-col)
+                             (loop (cdr args)
+                                   (lay! (car args) body-col (if (null? (cdr args)) (+ trail cw) 0) #f))))))
+                    ((fill)
+                     (let* ((align (+ c-after-head 1))
+                            (align (if (> (- align col) (+ max-tab 2)) body-col align)))
+                       (let loop ((args rest) (c c-line) (first #t))
+                         (if (null? args)
+                             (begin (colored! (delim-sc close) close) (+ c cw))
+                             (let* ((a (car args)) (last? (null? (cdr args)))
+                                    (tr (if last? (+ trail cw) 0))
+                                    (fw (%flat-width a)))
+                               (cond
+                                 ((and first (null? dist) (fits-after? c fw tr)) (emit! " ") (loop (cdr args) (lay! a (+ c 1) tr #f) #f))
+                                 ((and (not first) (fits-after? c (+ 1 fw) tr)) (emit! " ") (loop (cdr args) (lay! a (+ c 1) tr #f) #f))
+                                 (else (newline-to! align) (loop (cdr args) (lay! a align tr #f) #f))))))))
+                    (else
+                     ;; Clauses (dc* ec* fc* lc*): aligned under the first
+                     ;; clause when the form has nothing else on its first
+                     ;; line, otherwise indented as a body.
+                     (let* ((same-line? (null? dist))
+                            (align (+ c-after-head 1))
+                            (indent (if same-line? align body-col)))
+                       (let loop ((args rest) (c c-line) (first #t))
+                         (if (null? args)
+                             (begin (colored! (delim-sc close) close) (+ c cw))
+                             (let* ((a (car args)) (tr (if (null? (cdr args)) (+ trail cw) 0)))
+                               (if (and first same-line?)
+                                   (begin (emit! " ") (loop (cdr args) (lay! a (+ c 1) tr 'clause) #f))
+                                   (begin (newline-to! indent) (loop (cdr args) (lay! a indent tr 'clause) #f)))))))))))))
+
+        (define (fits-after? c w tr)
+          (or (not width) (<= (+ c w tr) width)))
+
+        (lay! doc start-col 0 #f)
+        (reverse pieces)))
+
+    ;; ── Pieces: line limit, text, replay ────────────────────────────────────
+
+    (define (%newline-piece? p) (and (eq? (car p) 'emit) (string=? (cdr p) "\n")))
+
+    ;; Truncates pieces to pp-lines lines; the stub follows the last kept
+    ;; line, on a line of its own.
+    (define (%apply-lines-limit pieces)
+      (let ((maxlines (pp-lines)))
+        (if (not maxlines)
+            pieces
+            (let loop ((ps pieces) (n 0) (acc '()))
+              (cond
+                ((null? ps) pieces)
+                ((%newline-piece? (car ps))
+                 (if (= (+ n 1) maxlines)
+                     (append (reverse (cons (car ps) acc))
+                             (list (cons 'emit (or (pp-lines-stub) (pp-length-stub)))))
+                     (loop (cdr ps) (+ n 1) (cons (car ps) acc))))
+                (else (loop (cdr ps) n (cons (car ps) acc))))))))
+
+    (define (%pieces->string pieces)
+      (let ((out (open-output-string)))
+        (for-each (lambda (p) (write-string (cdr p) out)) pieces)
+        (get-output-string out)))
 
     (define (%split-lines s)
       (let ((len (string-length s)))
         (let loop ((i 0) (start 0) (acc '()))
           (cond
-            ((>= i len) (reverse (cons (substring s start i) acc)))
+            ((>= i len) (reverse (if (= start i) acc (cons (substring s start i) acc))))
             ((char=? (string-ref s i) #\newline) (loop (+ i 1) (+ i 1) (cons (substring s start i) acc)))
             (else (loop (+ i 1) start acc))))))
 
-    (define (%apply-lines-limit text)
-      (let ((maxlines (pp-lines)))
-        (if (not maxlines)
-            text
-            (let ((lines (%split-lines text)))
-              (if (<= (length lines) maxlines)
-                  text
-                  (let loop ((lines lines) (n 0) (acc '()))
-                    (if (= n maxlines)
-                        (string-append (apply string-append (map (lambda (l) (string-append l "\n")) (reverse acc)))
-                                       (or (pp-lines-stub) (pp-length-stub)))
-                        (loop (cdr lines) (+ n 1) (cons (car lines) acc)))))))))
+    ;; ── Entry points ─────────────────────────────────────────────────────────
 
-    ;; ── Top-level rendering entry points ─────────────────────────────────────
-
-    (define (%render-to-string obj mode)
+    (define (%render-pieces obj mode)
       (let* ((labels (%assign-labels obj mode))
              (printed (make-hash-table eq?))
-             (doc (%build-doc obj 0 labels printed mode))
-             (out (open-output-string)))
-        (parameterize ((pp-emit (lambda (s p) (write-string s p)))
-                       (pp-tint (lambda (s p) (write-string s p))))
-          (%print-broken doc out (pp-indent) (pp-indent)))
-        (get-output-string out)))
+             (doc (%build-doc obj 0 labels printed mode)))
+        (%apply-lines-limit (%layout doc (pp-indent)))))
 
-    ;; pp's own mode selection, per the spec: pp-graph wins over
-    ;; pp-circle when both are true.
+    (define (%render-to-string obj mode) (%pieces->string (%render-pieces obj mode)))
+
+    ;; Lines of the output, each with its terminating newline.
+    (define (%pp-lines-list obj mode)
+      (map (lambda (l) (string-append l "\n")) (%split-lines (%render-to-string obj mode))))
+
+    ;; pp's own mode selection: pp-graph wins over pp-circle.
     (define (%current-mode)
       (cond ((pp-graph) 'graph) ((pp-circle) 'circle) (else 'simple)))
 
     (define (%pp-to-port obj port mode)
-      (let ((text (%apply-lines-limit (%render-to-string obj mode))))
-        (%emit text port)
-        (if (and (pp-newline) (pp-pretty)) (%emit "\n" port))))
+      (let ((emit (pp-emit)) (tint (pp-tint)))
+        (for-each (lambda (p) (if (eq? (car p) 'tint) (tint (cdr p) port) (emit (cdr p) port)))
+                  (%render-pieces obj mode))
+        (if (and (pp-newline) (pp-pretty)) (emit "\n" port))))
 
-    (define (%pp-lines-list obj mode)
-      (let* ((text (%apply-lines-limit (%render-to-string obj mode)))
-             (lines (%split-lines text)))
-        (map (lambda (l) (string-append l "\n")) lines)))
+    ;; Prints an already-built doc (pprint-file's comment-preserving
+    ;; reader builds its own) with the current parameters.
+    ;; suffix, if given, is text written after the doc and before its
+    ;; final newline (a comment that trailed a top-level form).
+    (define (%pp-doc-to-port doc port . suffix)
+      (let ((emit (pp-emit)) (tint (pp-tint)))
+        (for-each (lambda (p) (if (eq? (car p) 'tint) (tint (cdr p) port) (emit (cdr p) port)))
+                  (%apply-lines-limit (%layout doc (pp-indent))))
+        (when (pair? suffix) (emit (car suffix) port))
+        (if (and (pp-newline) (pp-pretty)) (emit "\n" port))))
 
     ;; ── Keyword-argument dispatch (intermediate tier onward) ────────────────
-    ;; Scans (key value) ... pairs left-to-right against a fixed table
-    ;; of (keyword . parameter) associations; first match for a given
-    ;; keyword wins (matches the spec's own "scanned left-to-right;
-    ;; first match wins" text), unrecognized keywords are ignored rather
-    ;; than raising, so callers can pass parameter objects they don't
-    ;; know the keyword-symbol spelling for by using the parameter
-    ;; object itself as the "keyword" (also supported: a bare parameter
-    ;; object where a symbol is expected).
+    ;; Scans (key value) ... pairs left to right against a table of
+    ;; (keyword . parameter); the first match for a keyword wins.
+    ;; Unrecognized keywords are ignored. A parameter object may stand in
+    ;; for its keyword symbol.
     (define %kwarg-table
       (list (cons 'pp-width pp-width) (cons 'pp-graph pp-graph) (cons 'pp-circle pp-circle)
             (cons 'pp-radix pp-radix) (cons 'pp-level pp-level) (cons 'pp-length pp-length)
@@ -546,20 +915,19 @@
     (define (%kwarg->parameter key)
       (if (procedure? key) key (let ((hit (assq key %kwarg-table))) (and hit (cdr hit)))))
 
-    ;; Runs thunk with each (key value) pair in kvs applied via
-    ;; parameterize -- kvs is a flat list (key1 val1 key2 val2 ...).
+    ;; Runs thunk with each (key value) pair applied; for a repeated key
+    ;; the leftmost wins.
     (define (%pp-with-kwargs kvs thunk)
       (let loop ((kvs kvs) (params '()) (vals '()))
-        (if (null? kvs)
+        (if (or (null? kvs) (null? (cdr kvs)))
             (%parameterize-list params vals thunk)
             (let ((p (%kwarg->parameter (car kvs))))
-              (loop (cddr kvs)
-                    (if p (cons p params) params)
-                    (if p (cons (cadr kvs) vals) vals))))))
+              (if (and p (not (memq p params)))
+                  (loop (cddr kvs) (cons p params) (cons (cadr kvs) vals))
+                  (loop (cddr kvs) params vals))))))
 
-    ;; parameterize's own binding list must be syntactic; this builds
-    ;; the equivalent effect at runtime for a dynamically-sized list of
-    ;; (parameter . value) pairs via nested single-parameter dynamic-wind.
+    ;; parameterize needs a syntactic binding list; this does the same
+    ;; for a runtime-sized list of (parameter . value) pairs.
     (define (%parameterize-list params vals thunk)
       (if (null? params)
           (thunk)

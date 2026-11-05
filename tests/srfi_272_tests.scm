@@ -79,7 +79,7 @@
 (check "pp-circle parameter default" #t (bas:pp-circle))
 
 ;; width-forced line breaking
-(check "basic pp width break" "(a\n b\n c\n d)\n"
+(check "basic pp width break" "(a b\n   c\n   d)\n"
   (capture (lambda (p) (parameterize ((bas:pp-width 3)) (bas:pp '(a b c d) p)))))
 
 ;; Regression: pp-circle defaults to #t, so ordinary pp/pprint always
@@ -96,9 +96,9 @@
 ;; ── intermediate: keyword args, pp*, pprint-file, pretty-style ──────────────
 
 (check "int pp default" "(1 2 3)\n" (capture (lambda (p) (int:pp '(1 2 3) p))))
-(check "int pp kwarg width" "(a\n b\n c)\n"
+(check "int pp kwarg width" "(a b\n   c)\n"
   (capture (lambda (p) (int:pp '(a b c) p 'pp-width 3))))
-(check "int pp* splices trailing kv-list" "(a\n b\n c)\n"
+(check "int pp* splices trailing kv-list" "(a b\n   c)\n"
   (capture (lambda (p) (int:pp* '(a b c) p (list 'pp-width 3)))))
 (check "int pp-length truncation" "(1 2 ...)\n"
   (capture (lambda (p) (int:pp '(1 2 3 4 5) p 'pp-length 2))))
@@ -222,6 +222,22 @@
 (check "measure wide CJK width 2" 2 ((mea:char-width-procedure) (integer->char #x4e2d)))
 (check "measure combining mark width 0" 0 ((mea:char-width-procedure) (integer->char #x0301)))
 (check "measure control char width #f" #f ((mea:char-width-procedure) (integer->char 7)))
+(define (w cp) ((mea:char-width-procedure) (integer->char cp)))
+(check "measure cuneiform sign width 1 (East Asian Width N)" 1 (w #x12000))
+(check "measure cuneiform numeric sign width 1" 1 (w #x12415))
+(check "measure Akkadian combining macron width 0" 0 (w #x0304))
+(check "measure combining dot below width 0" 0 (w #x0323))
+(check "measure emoji width 2" 2 (w #x1F642))
+(check "measure fullwidth Latin width 2" 2 (w #xFF21))
+(check "measure Hangul syllable width 2" 2 (w #xAC00))
+(check "measure Hangul medial vowel width 0" 0 (w #x1161))
+(check "measure zero width joiner width 0" 0 (w #x200D))
+(check "measure variation selector-16 width 0" 0 (w #xFE0F))
+(check "measure tag character width 0" 0 (w #xE0041))
+(check "measure soft hyphen width 1" 1 (w #xAD))
+(check "measure C1 control width #f" #f (w #x85))
+(check "measure regional indicator width 2" 2 (w #x1F1E9))
+(check "measure supplementary-plane CJK width 2" 2 (w #x20000))
 (check "measure parameter is overridable" 42
   (parameterize ((mea:char-width-procedure (lambda (c) 42)))
     ((mea:char-width-procedure) #\a)))

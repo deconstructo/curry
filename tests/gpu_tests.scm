@@ -670,6 +670,21 @@ void main() { frag = texture(t[0], uv) + texture(t[1], uv); }")
 (when (gpu-canvas-save-png! gc-canvas gc-png)
   (check "canvas render closure survives GC" (> gc-render-calls 0) #t))
 
+;;; ---- canvas mouse capture and focus (added for the maze4d port) --------------
+;;; The canvas is never shown here, so the grab itself is not exercised (Qt
+;;; refuses to grab the mouse for a hidden widget); this checks the API.
+
+(define grab-canvas (make-gpu-canvas))
+(check "a new canvas has not grabbed the mouse" (gpu-canvas-mouse-grabbed? grab-canvas) #f)
+(check "gpu-canvas-on-grab-move! takes a procedure"
+       (begin (gpu-canvas-on-grab-move! grab-canvas (lambda (dx dy) #t)) #t) #t)
+(check "gpu-canvas-on-grab-move! takes #f" (begin (gpu-canvas-on-grab-move! grab-canvas #f) #t) #t)
+(check "gpu-canvas-on-grab-move! rejects a number" (raises? (lambda () (gpu-canvas-on-grab-move! grab-canvas 3))) #t)
+(check "releasing an ungrabbed mouse is harmless"
+       (begin (gpu-canvas-release-mouse! grab-canvas) (gpu-canvas-mouse-grabbed? grab-canvas)) #f)
+(check "gpu-canvas-focus! on a canvas" (begin (gpu-canvas-focus! grab-canvas) #t) #t)
+(check "grab procedures reject a non-canvas" (raises? (lambda () (gpu-canvas-grab-mouse! (make-gpu-buffer 'vertex '(1.0))))) #t)
+
 ;;; ---- device lifetime -----------------------------------------------------------
 
 ;; Resources outlive a device: a second device re-creates them.
