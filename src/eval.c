@@ -36,6 +36,7 @@
 #include "surreal.h"
 #include "profiling.h"
 #include "syntax_rules.h"
+#include "syntax_case.h"
 #include "curry_features.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1455,7 +1456,7 @@ tail:
         val_t transformed = V_VOID;
         ExnHandler sr_h;
         SCM_PROTECT(sr_h,
-            transformed = apply(as_syntax(op_val)->transformer, make_pair(expr, V_NIL)),
+            transformed = sc_apply_transformer(as_syntax(op_val)->transformer, expr),
             { sr_set_current_env(saved_sr_env); scm_raise_val(sr_h.exn); });
         sr_set_current_env(saved_sr_env);
         expr = transformed; goto tail;

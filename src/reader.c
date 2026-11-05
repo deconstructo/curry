@@ -579,6 +579,14 @@ static val_t read_datum(val_t port) {
     case '#': {
         int h = next_char(port);
         switch (h) {
+        /* R6RS syntax abbreviations: #'x #`x #,x #,@x */
+        case '\'': return wrap1(S_SYNTAX,     read_datum(port));
+        case '`':  return wrap1(S_QUASISYNTAX, read_datum(port));
+        case ',': {
+            int next = peek_char_port(port);
+            if (next == '@') { next_char(port); return wrap1(S_UNSYNTAX_SPLICING, read_datum(port)); }
+            return wrap1(S_UNSYNTAX, read_datum(port));
+        }
         case 't': {
             /* #t or #true */
             int p = peek_char_port(port);

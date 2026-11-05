@@ -483,6 +483,13 @@ static void scm_write_ctx(val_t v, val_t port, bool in_container) {
     }
     if (vis_string(v))   { write_string_escaped(port, str_data(as_str(v)), as_str(v)->len); return; }
     if (vis_symbol(v))   { port_write_string(port, as_sym(v)->data, as_sym(v)->len); return; }
+    if (vis_synobj(v))   {
+        val_t nm = as_synobj(v)->name;
+        port_write_string(port, "#<syntax ", 9);
+        port_write_string(port, as_sym(nm)->data, as_sym(nm)->len);
+        port_write_string(port, ">", 1);
+        return;
+    }
     if (vis_flonum(v))   { write_number_notation(v, port, in_container); return; }
     if (vis_bignum(v))   { write_number_notation(v, port, in_container); return; }
     if (vis_rational(v)) { write_number_notation(v, port, in_container); return; }

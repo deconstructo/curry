@@ -95,4 +95,14 @@ void  sr_set_current_env(val_t env);
 val_t sr_get_current_local_macros(void);
 void  sr_set_current_local_macros(val_t names);
 
+/* Entry points for syntax_case.c, which reuses this file's matcher and
+ * template expander. See the comment above their definitions. `bindings`
+ * and `ell_bindings` are the alists sr_match_pattern fills in. */
+val_t sr_default_ellipsis(void);
+bool  sr_match_pattern(val_t pat, val_t form, val_t literals, val_t ellipsis,
+                       val_t *bindings, val_t *ell_bindings);
+val_t sr_instantiate(val_t tmpl, val_t bindings, val_t ell_bindings, val_t ellipsis,
+                     val_t def_env, val_t local_macros,
+                     val_t (*mk_ident)(val_t sym, void *ud), void *ud);
+
 #endif /* CURRY_SYNTAX_RULES_H */

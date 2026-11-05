@@ -141,6 +141,7 @@ set(CORE_SOURCES
   src/matrix.c
   src/spinor.c
   src/syntax_rules.c
+  src/syntax_case.c
   src/profiling.c
   src/compiler.c
   src/compiler_classic.c
