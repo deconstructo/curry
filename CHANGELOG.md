@@ -2,6 +2,18 @@
 
 ### Unreleased
 
+**Fixed — string case conversion is full Unicode (#355)**
+
+- `string-upcase`, `string-downcase` and `string-foldcase` use the full
+  mappings of SpecialCasing.txt and CaseFolding.txt: `ß` upcases to `SS`,
+  ligatures such as `ﬁ` to `FI`, and capital sigma downcases to final sigma
+  at the end of a word. Before, they only handled ASCII.
+- `string-ci=?` and the other `string-ci` comparisons compare foldcased
+  strings, so `(string-ci=? "Straße" "STRASSE")` is true. `char-ci=?` and
+  the other `char-ci` comparisons fold non-ASCII characters too.
+- `tools/gen-unicode-tables.py` also reads SpecialCasing.txt and emits three
+  full-mapping tables.
+
 **New — SRFI 166 (Monadic Formatting) and `(srfi 272 show)`**
 
 - `(srfi 166)` and its `base`, `pretty`, `columnar`, `unicode` and `color`

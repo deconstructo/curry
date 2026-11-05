@@ -8,12 +8,15 @@ Usage:
 Downloads (and caches locally in .unicode-cache/, gitignored — not
 committed, matching the pattern Chez Scheme and Kaappi both use of
 regenerating from the authoritative UCD source rather than shipping the
-~3.5MB of raw source files in the repo) four files from unicode.org:
+~3.5MB of raw source files in the repo) five files from unicode.org:
 
   - UnicodeData.txt          general category, simple upper/lower mapping
   - DerivedCoreProperties.txt Alphabetic, Uppercase, Lowercase properties
   - PropList.txt              White_Space property
-  - CaseFolding.txt            simple case-folding mappings
+  - CaseFolding.txt            simple case-folding mappings, plus the full (F)
+                               multi-character ones
+  - SpecialCasing.txt          unconditional multi-character upper/lower
+                               mappings (German sharp s -> "SS", ligatures)
 
 Sourcing directly from these files (rather than Python's bundled
 `unicodedata` module) decouples the generated tables' Unicode version from
@@ -30,7 +33,8 @@ Tables emitted:
   - Three simple case-mapping tables (codepoint -> codepoint, 1:1 only —
     multi-character mappings like German ss->"SS" are out of scope for a
     single-character result and are skipped, left as identity by the
-    lookup layer): upper mapping, lower mapping, fold mapping (from
+    lookup layer), plus three full-mapping tables (upper, lower, fold) of
+    the multi-character cases, used by the string procedures: upper mapping, lower mapping, fold mapping (from
     CaseFolding.txt's common 'C' + simple 'S' status entries — distinct
     from the lowercase map for codepoints that fold differently than they
     lowercase, e.g. U+212A KELVIN SIGN folds to 'k' but has no simple
@@ -46,7 +50,8 @@ import urllib.request
 
 UCD_BASE = "https://www.unicode.org/Public/{version}/ucd/"
 CACHE_DIR = ".unicode-cache"
-FILES = ["UnicodeData.txt", "DerivedCoreProperties.txt", "PropList.txt", "CaseFolding.txt"]
+FILES = ["UnicodeData.txt", "DerivedCoreProperties.txt", "PropList.txt", "CaseFolding.txt",
+         "SpecialCasing.txt"]
 
 
 def fetch(version):
@@ -148,6 +153,65 @@ def parse_case_folding(path):
     return fold_map
 
 
+def parse_full_folding(path):
+    """{cp: [cps]} from CaseFolding.txt's full (F) entries."""
+    full = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            fields = [x.strip() for x in line.split(";")]
+            if len(fields) < 3 or fields[1] != "F":
+                continue
+            full[int(fields[0], 16)] = [int(x, 16) for x in fields[2].split()]
+    return full
+
+
+def parse_special_casing(path):
+    """Returns (upper, lower): {cp: [cps]} for the unconditional entries of
+    SpecialCasing.txt (those with no condition field) that map to more than
+    one codepoint. Conditional entries (final sigma, Turkic, Lithuanian)
+    are handled by context in src/unicode.c, or left out."""
+    upper, lower = {}, {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            fields = [x.strip() for x in line.split(";")]
+            # code; lower; title; upper; [condition;]
+            if len(fields) < 5 or fields[4] != "":
+                continue
+            cp = int(fields[0], 16)
+            lo = [int(x, 16) for x in fields[1].split()]
+            up = [int(x, 16) for x in fields[3].split()]
+            if len(lo) > 1:
+                lower[cp] = lo
+            if len(up) > 1:
+                upper[cp] = up
+    return upper, lower
+
+
+def emit_multi_table(out, name, mapping):
+    items = sorted(mapping.items())
+    out.write(f"const uint32_t {name}_from[] = {{\n    ")
+    out.write(", ".join(f"0x{cp:X}" for cp, _ in items))
+    out.write("\n};\n")
+    out.write(f"const uint32_t {name}_to[][3] = {{\n")
+    for _, to in items:
+        assert len(to) <= 3
+        out.write("    {" + ", ".join(f"0x{c:X}" for c in to + [0] * (3 - len(to))) + "},\n")
+    out.write("};\n")
+    out.write(f"const size_t {name}_count = {len(items)};\n\n")
+
+
+def emit_multi_decl(out, name):
+    out.write(f"extern const uint32_t {name}_from[];\n")
+    out.write(f"extern const uint32_t {name}_to[][3];\n")
+    out.write(f"extern const size_t {name}_count;\n\n")
+
+
 def dict_to_pairs(mapping):
     return sorted((cp, to) for cp, to in mapping.items() if to != cp)
 
@@ -195,6 +259,8 @@ def main():
     proplist = parse_prop_ranges(paths["PropList.txt"], {"White_Space"})
     numeric, upper_map, lower_map = parse_unicode_data(paths["UnicodeData.txt"])
     fold_map = parse_case_folding(paths["CaseFolding.txt"])
+    full_fold = parse_full_folding(paths["CaseFolding.txt"])
+    full_upper, full_lower = parse_special_casing(paths["SpecialCasing.txt"])
 
     alpha = derived["Alphabetic"]
     upper = derived["Uppercase"]
@@ -212,7 +278,7 @@ def main():
 /* GENERATED FILE — do not hand-edit.
  * Produced by tools/gen-unicode-tables.py from the Unicode Character
  * Database version {version} (UnicodeData.txt, DerivedCoreProperties.txt,
- * PropList.txt, CaseFolding.txt — unicode.org/Public/{version}/ucd/).
+ * PropList.txt, CaseFolding.txt, SpecialCasing.txt — unicode.org/Public/{version}/ucd/).
  * Regenerate: python3 tools/gen-unicode-tables.py (run from repo root)
  *
  * Each range table is a sorted, non-overlapping array of inclusive
@@ -233,6 +299,9 @@ def main():
         emit_mapping_decl(f, "unicode_upper_map")
         emit_mapping_decl(f, "unicode_lower_map")
         emit_mapping_decl(f, "unicode_fold_map")
+        emit_multi_decl(f, "unicode_full_upper")
+        emit_multi_decl(f, "unicode_full_lower")
+        emit_multi_decl(f, "unicode_full_fold")
         f.write("#endif /* CURRY_UNICODE_TABLES_H */\n")
 
     with open("src/unicode_tables.c", "w") as out:
@@ -254,6 +323,9 @@ def main():
         emit_mapping_table(out, "unicode_upper_map", upper_pairs)
         emit_mapping_table(out, "unicode_lower_map", lower_pairs)
         emit_mapping_table(out, "unicode_fold_map", fold_pairs)
+        emit_multi_table(out, "unicode_full_upper", full_upper)
+        emit_multi_table(out, "unicode_full_lower", full_lower)
+        emit_multi_table(out, "unicode_full_fold", full_fold)
 
     print(f"Wrote src/unicode_tables.h and src/unicode_tables.c "
           f"(Unicode {version}: {len(alpha)} alpha ranges, "

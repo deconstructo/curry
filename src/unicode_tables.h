@@ -4,7 +4,7 @@
 /* GENERATED FILE — do not hand-edit.
  * Produced by tools/gen-unicode-tables.py from the Unicode Character
  * Database version 16.0.0 (UnicodeData.txt, DerivedCoreProperties.txt,
- * PropList.txt, CaseFolding.txt — unicode.org/Public/16.0.0/ucd/).
+ * PropList.txt, CaseFolding.txt, SpecialCasing.txt — unicode.org/Public/16.0.0/ucd/).
  * Regenerate: python3 tools/gen-unicode-tables.py (run from repo root)
  *
  * Each range table is a sorted, non-overlapping array of inclusive
@@ -42,5 +42,17 @@ extern const size_t unicode_lower_map_count;
 extern const uint32_t unicode_fold_map_from[];
 extern const uint32_t unicode_fold_map_to[];
 extern const size_t unicode_fold_map_count;
+
+extern const uint32_t unicode_full_upper_from[];
+extern const uint32_t unicode_full_upper_to[][3];
+extern const size_t unicode_full_upper_count;
+
+extern const uint32_t unicode_full_lower_from[];
+extern const uint32_t unicode_full_lower_to[][3];
+extern const size_t unicode_full_lower_count;
+
+extern const uint32_t unicode_full_fold_from[];
+extern const uint32_t unicode_full_fold_to[][3];
+extern const size_t unicode_full_fold_count;
 
 #endif /* CURRY_UNICODE_TABLES_H */
