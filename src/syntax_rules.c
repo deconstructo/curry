@@ -162,7 +162,8 @@ static bool sr_match_one(val_t pat, val_t form, val_t literals, val_t ellipsis,
          * (including whatever clause was meant to bind an ordinary new
          * pattern variable). Checked first, same as any other literal. */
         if (sr_is_literal(pat, literals))
-            return vis_symbol(form) && form == pat;
+            return (vis_symbol(form) && form == pat) ||
+                   (vis_synobj(form) && as_synobj(form)->name == pat);
         if (pat == SR_UNDERSCORE) return true;
         /* Pattern variable — bind it */
         *bindings = scm_cons(scm_cons(pat, form), *bindings);
@@ -972,6 +973,35 @@ val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t d
 static val_t prim_rebuild_syntax_rules(int ac, val_t *av, void *ud) {
     (void)ud;
     return sr_rebuild_syntax_env(av[0], av[1], av[2], ac > 3 ? av[3] : V_VOID);
+}
+
+/* ---- Entry points shared with syntax_case.c ----
+ *
+ * syntax-case reuses this file's matcher and template expander rather than
+ * growing its own. Only the template-introduced-identifier policy differs:
+ * here such a symbol becomes a fresh gensym, there it becomes a syntax
+ * object that the macro-apply boundary resolves later, so the caller
+ * supplies the constructor. */
+
+val_t sr_default_ellipsis(void) { return SR_DEFAULT_ELLIPSIS; }
+
+bool sr_match_pattern(val_t pat, val_t form, val_t literals, val_t ellipsis,
+                      val_t *bindings, val_t *ell_bindings) {
+    return sr_match_one(pat, form, literals, ellipsis, bindings, ell_bindings);
+}
+
+val_t sr_instantiate(val_t tmpl, val_t bindings, val_t ell_bindings, val_t ellipsis,
+                     val_t def_env, val_t local_macros,
+                     val_t (*mk_ident)(val_t sym, void *ud), void *ud) {
+    val_t free_syms = V_NIL;
+    sr_collect_free_symbols(tmpl, bindings, ell_bindings, ellipsis, &free_syms);
+    val_t rename_map = V_NIL;
+    for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
+        val_t sym = vcar(s);
+        if (sr_is_protected(sym, def_env, local_macros)) continue;
+        rename_map = scm_cons(scm_cons(sym, mk_ident(sym, ud)), rename_map);
+    }
+    return sr_expand(tmpl, bindings, ell_bindings, rename_map, ellipsis, false);
 }
 
 /* ---- Registration ---- */

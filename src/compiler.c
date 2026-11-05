@@ -78,6 +78,7 @@
 #include "reader.h"
 #include "record_type.h"
 #include "syntax_rules.h"
+#include "syntax_case.h"
 #include "sx_algebra.h"
 #include "sx_pattern.h"
 #include "curry_features.h"
@@ -680,7 +681,7 @@ static val_t prescan_macroexpand_defines(Compiler *c, val_t form) {
         val_t saved_sr_env = sr_get_current_env();
         sr_set_current_env(c->chunk->target_env != V_VOID ? c->chunk->target_env : GLOBAL_ENV);
         SCM_PROTECT(h,
-            expanded = apply(transformer, scm_cons(form, V_NIL)),
+            expanded = sc_apply_transformer(transformer, form),
             raised = true);
         sr_set_current_env(saved_sr_env);
         if (raised) return form;

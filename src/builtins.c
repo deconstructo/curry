@@ -4,6 +4,7 @@
 #include "vm.h"
 #include "debug.h"
 #include "syntax_rules.h"
+#include "syntax_case.h"
 #include "env.h"
 #include "symbol.h"
 #include "numeric.h"
@@ -256,7 +257,7 @@ val_t macroexpand_1(val_t expr) {
     if (!vis_pair(expr) || !vis_symbol(vcar(expr))) return expr;
     val_t xfm;
     if (!lookup_global_syntax(vcar(expr), &xfm)) return expr;
-    return apply(xfm, scm_cons(expr, V_NIL));
+    return sc_apply_transformer(xfm, expr);
 }
 static val_t prim_macroexpand_1(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -332,6 +333,7 @@ val_t type_of_val(val_t v) {
         [T_FOREIGN_FN] = "foreign-function", [T_MPFR] = "mpfr",
         [T_INTERVAL] = "interval", [T_CHUNK] = "chunk",
         [T_UPVALUE] = "upvalue", [T_TYPEDVEC] = "typed-vector",
+        [T_SYNTAX_OBJ] = "syntax-object",
     };
     uint32_t t = vunptr(Hdr, v)->type;
     const char *nm = (t < sizeof(names)/sizeof(names[0]) && names[t]) ? names[t] : "unknown";
@@ -4207,6 +4209,7 @@ void builtins_register(val_t env) {
 
     /* syntax-rules keyword */
     syntax_rules_register(env);
+    syntax_case_register(env);
 
     builtins_curry_register(env);
 

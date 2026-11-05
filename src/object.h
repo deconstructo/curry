@@ -108,6 +108,7 @@ typedef enum {
                                unified with it, to avoid destabilizing that already-shipped API. */
     T_FOREIGN_CALLBACK = 56, /* GC:PIN val_t: proc, arg_tags, ret_tag — libffi closure inside */
     T_FFI_STRUCT_TYPE  = 57, /* GC:PIN val_t: field_tags — libffi struct ffi_type inside */
+    T_SYNTAX_OBJ       = 58, /* GC:MOVE val_t: name — an identifier introduced by a syntax-case template (src/syntax_case.c) */
 } ObjType;
 
 /*
@@ -166,6 +167,7 @@ static inline uint32_t vtype(val_t v) {
 #define vis_env(v)      vis_type(v, T_ENV)
 #define vis_values(v)   vis_type(v, T_VALUES)
 #define vis_syntax(v)   vis_type(v, T_SYNTAX)
+#define vis_synobj(v)   vis_type(v, T_SYNTAX_OBJ)
 #define vis_error(v)    vis_type(v, T_ERROR)
 #define vis_promise(v)  vis_type(v, T_PROMISE)
 #define vis_param(v)    vis_type(v, T_PARAMETER)
@@ -627,6 +629,17 @@ typedef struct {
     val_t transformer;  /* closure: (transformer form use-env def-env) */
 } Syntax;
 
+/* An identifier introduced by a syntax-case template (src/syntax_case.c).
+ * `name` is the source symbol; `mark` identifies the macro expansion that
+ * introduced it (0 = none). The macro-apply boundary (sc_apply_transformer)
+ * turns it back into an ordinary symbol before the compilers see it, so
+ * nothing outside syntax_case.c ever handles one. */
+typedef struct {
+    Hdr   hdr;
+    val_t name;         /* symbol */
+    val_t mark;         /* fixnum */
+} SynObj;
+
 /* Error object (R7RS error-object?) */
 typedef struct {
     Hdr   hdr;
@@ -948,6 +961,7 @@ typedef struct {
 #define as_env(v)     vunptr(EnvFrame,   v)
 #define as_vals(v)    vunptr(Values,     v)
 #define as_syntax(v)  vunptr(Syntax,     v)
+#define as_synobj(v)  vunptr(SynObj,     v)
 #define as_err(v)     vunptr(ErrorObj,   v)
 #define as_promise(v) vunptr(Promise,    v)
 #define as_param(v)   vunptr(Parameter,  v)

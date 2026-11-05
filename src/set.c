@@ -79,6 +79,9 @@ bool scm_equal(val_t a, val_t b) {
         Bytevector *ba = as_bytes(a), *bb = as_bytes(b);
         return ba->len == bb->len && memcmp(ba->data, bb->data, ba->len) == 0;
     }
+    if (vis_synobj(a) && vis_synobj(b))
+        return as_synobj(a)->name == as_synobj(b)->name &&
+               as_synobj(a)->mark == as_synobj(b)->mark;
     if (vis_symbolic(a) && vis_symbolic(b))
         return sx_equal(a, b);
     if (vis_tuple(a) && vis_tuple(b)) {
@@ -150,6 +153,9 @@ uint32_t val_hash(val_t v, int cmp_type) {
         return hash_bytes(str_data(s), s->len);
     }
     if (vis_symbol(v)) return as_sym(v)->hash;
+    if (vis_synobj(v))
+        return hash_combine(as_sym(as_synobj(v)->name)->hash,
+                            hash_u64((uint64_t)as_synobj(v)->mark));
     /* scm_eqv/scm_equal both compare bignums/rationals/complex/quaternions
      * by value regardless of cmp_type (scm_equal delegates to scm_eqv for
      * these), so they must hash by value under SET_CMP_EQV too, not just
