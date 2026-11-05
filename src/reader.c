@@ -31,6 +31,19 @@ static bool akk_is_cuneiform_sym(const char *s) {
     return false;
 }
 
+bool reader_is_akkadian_cuneiform(const char *s) { return akk_is_cuneiform_sym(s); }
+
+/* How many list / vector / bytevector reads enclose the datum being read.
+ * Inside one, a space always ends a cuneiform token: the space that
+ * separates the place groups of a sexagesimal literal at top level
+ * (`𒁹 𒌋𒁹` is 71) would otherwise merge neighbouring elements, so that
+ * `(𒁹 𒌋)` read as `(70)` and a list of numerals could not be read back
+ * (issue #354). A multi-place number inside a container is written
+ * `#s1,11` (see write_number_notation in port.c). The public read
+ * entry points reset this to 0, so a read that raised partway through
+ * cannot leave it stuck. */
+static _Thread_local int g_read_container_depth = 0;
+
 /* ---- Error handling ---- */
 /* Defined in eval.c; raises a read-error exception */
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
@@ -492,7 +505,9 @@ static val_t read_list(val_t port, int close_ch) {
 
 static val_t read_vector(val_t port) {
     /* Read a list then convert to vector */
+    g_read_container_depth++;
     val_t lst = read_list(port, ')');
+    g_read_container_depth--;
     uint32_t len = 0;
     val_t tmp = lst;
     while (vis_pair(tmp)) { len++; tmp = vcdr(tmp); }
@@ -503,7 +518,9 @@ static val_t read_vector(val_t port) {
 }
 
 static val_t read_bytevector(val_t port) {
+    g_read_container_depth++;
     val_t lst = read_list(port, ')');
+    g_read_container_depth--;
     uint32_t len = 0;
     val_t tmp = lst;
     while (vis_pair(tmp)) { len++; tmp = vcdr(tmp); }
@@ -544,8 +561,12 @@ static val_t read_datum(val_t port) {
     if (c == -1) return V_EOF;
 
     switch (c) {
-    case '(':  return read_list(port, ')');
-    case '[':  return read_list(port, ']');
+    case '(':  { g_read_container_depth++;
+                 val_t l = read_list(port, ')');
+                 g_read_container_depth--; return l; }
+    case '[':  { g_read_container_depth++;
+                 val_t l = read_list(port, ']');
+                 g_read_container_depth--; return l; }
     case ')': case ']': read_error("unexpected closing delimiter");
     case '"':  return read_string(port);
     case '\'': return wrap1(S_QUOTE,            read_datum(port));
@@ -661,10 +682,14 @@ static val_t read_datum(val_t port) {
             if (sb.len == 0)
                 read_error("empty sexagesimal literal after #s");
             sb.buf[sb.len] = '\0';
-            val_t result = sex_parse_neugebauer(sb.buf);
+            /* An optional sign: #s-1,10 is -70 (the writer emits this form
+             * for a negative multi-place number inside a list). */
+            bool negative = (sb.buf[0] == '-');
+            const char *digits = (negative || sb.buf[0] == '+') ? sb.buf + 1 : sb.buf;
+            val_t result = *digits ? sex_parse_neugebauer(digits) : V_FALSE;
             if (vis_false(result))
                 read_error("invalid sexagesimal literal after #s");
-            return result;
+            return negative ? num_neg(result) : result;
         }
         default:
             read_error("unknown # syntax");
@@ -690,7 +715,7 @@ static val_t read_datum(val_t port) {
                 if (SEX_IS_CUNEIFORM((uint32_t)nxt)) {
                     sb_push_utf8(&sb, (uint32_t)next_char(port));
                     space_consumed = false;
-                } else if (nxt == ' ') {
+                } else if (nxt == ' ' && g_read_container_depth == 0) {
                     /* Inter-group spaces are only valid inside sexagesimal
                      * number literals (e.g. 𒁹 𒌋𒁹 = 71), where every
                      * glyph accumulated so far is a digit: CP_ASH (𒁹),
@@ -704,6 +729,7 @@ static val_t read_datum(val_t port) {
                     bool _sex_only = true;
                     while (*_p) {
                         int _cp = sex_decode_cp(&_p);
+                        if (_cp == ' ') continue;     /* a group separator already read */
                         if (_cp != (int)0x12079u &&   /* CP_ASH  = 𒁹 */
                             _cp != (int)0x1230Bu &&   /* CP_U    = 𒌋 */
                             _cp != (int)0x1244Au) {   /* CP_SHAR2= 𒑊 */
@@ -785,6 +811,7 @@ static val_t read_datum(val_t port) {
 CURRY_THREAD_LOCAL int g_reader_last_line = 0;
 
 val_t scm_read(val_t port) {
+    g_read_container_depth = 0;
     skip_whitespace(port);
     g_reader_last_line = port_line(port);
     val_t result = read_datum(port);
@@ -793,12 +820,14 @@ val_t scm_read(val_t port) {
 
 val_t scm_read_cstr(const char *src) {
     val_t p = port_open_input_string(src, (uint32_t)strlen(src));
+    g_read_container_depth = 0;
     val_t result = read_datum(p);
     return result;
 }
 
 val_t scm_read_all(val_t port) {
     /* Build list of all datums in reverse, then reverse */
+    g_read_container_depth = 0;
     val_t head = V_NIL;
     val_t v;
     while (!vis_eof((v = read_datum(port)))) {
