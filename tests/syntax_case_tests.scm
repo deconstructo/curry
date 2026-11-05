@@ -336,6 +336,20 @@
         "identifier")
        #t)
 
+;; Quasiquoted data (atoms around an unquote) next to a renamed binder.
+(define-syntax qq-atoms
+  (lambda (x)
+    (syntax-case x ()
+      ((_) #'(let ((tmp 1)) `(a ,tmp 2 "s" #(b) . end))))))
+(check "quasiquote data with atoms and a renamed binder" (qq-atoms)
+       '(a 1 2 "s" #(b) . end))
+
+(define-syntax qq-atom-only
+  (lambda (x)
+    (syntax-case x ()
+      ((_) #'(let ((tmp 7)) (list `5 `sym `,tmp))))))
+(check "quasiquote of a bare atom" (qq-atom-only) '(5 sym 7))
+
 ;;; ---- Existing syntax-rules macros are unaffected ----
 
 (define-syntax rules-swap!

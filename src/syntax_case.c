@@ -165,6 +165,8 @@ static val_t sc_strip_qq(val_t v, int level) {
         for (uint32_t i = 0; i < src->len; i++) dst->data[i] = sc_strip_qq(src->data[i], level);
         return vptr(dst);
     }
+    /* Symbols, numbers, strings, (): data with nothing to resolve. */
+    if (!vis_pair(v)) return v;
     val_t head = V_NIL, tail = V_NIL;
     for (;;) {
         Pair *cell = as_pair(v);
