@@ -45,12 +45,15 @@
 (check "cuneiform 10"   (string->number "𒌋" 'cuneiform)   10)
 ;; Single-group: 𒌋𒌋𒁹𒁹𒁹 = 23
 (check "cuneiform 23"   𒌋𒌋𒁹𒁹𒁹  23)
-;; Two groups with space: 𒁹 𒌋𒁹 = 1*60+11 = 71
-(check "cuneiform 71"   𒁹 𒌋𒁹   71)
+;; Two groups with space: 𒁹 𒌋𒁹 = 1*60+11 = 71. The space between place
+;; groups only joins them at the top level of a read; inside a call or list a
+;; space ends the token (issue #354), so these are read from strings. See
+;; cuneiform_list_tests.scm for the list behaviour.
+(check "cuneiform 71"   (read (open-input-string "𒁹 𒌋𒁹"))   71)
 ;; 𒑊 = zero placeholder
 (check "cuneiform 0"    𒑊     0)
 ;; 𒁹 𒑊 = 1*60+0 = 60
-(check "cuneiform 60"   𒁹 𒑊   60)
+(check "cuneiform 60"   (read (open-input-string "𒁹 𒑊"))   60)
 
 ;; Regression: the reader's trailing-token loop (for glyphs like '?'/'!'
 ;; immediately after a cuneiform run) used to push a decoded codepoint back
@@ -150,7 +153,7 @@
 
 (check "rt #s 1;30"       (number->string #s1;30 'neugebauer)   "1;30")
 (check "rt #s 1,0,0"      (number->string #s1,0,0 'neugebauer)  "1,0,0")
-(check "rt cuneiform 71"  (number->string 𒁹 𒌋𒁹 'cuneiform)    "𒁹 𒌋𒁹")
+(check "rt cuneiform 71"  (number->string (read (open-input-string "𒁹 𒌋𒁹")) 'cuneiform)    "𒁹 𒌋𒁹")
 
 ;;; ---- current-number-notation ----
 
