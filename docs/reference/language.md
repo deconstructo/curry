@@ -264,8 +264,13 @@ Every value is a 64-bit word. Booleans, the empty list, `#!void`, and `#!eof` ar
 (letrec-syntax ((name transformer) ...) body...)
 ```
 
-`syntax-rules` is pattern-matching, not procedural — no `syntax-case`,
-no arbitrary transformer procedures. **Partially, not fully, hygienic**:
+`syntax-rules` is pattern-matching, not procedural. For macros that compute
+at expansion time, a transformer can be any procedure of the use-site form,
+and `syntax-case` (with `syntax`, `quasisyntax`, `with-syntax`,
+`generate-temporaries`, `datum->syntax`, `syntax->datum`, `identifier?`,
+`bound-identifier=?`, `free-identifier=?`, `syntax-violation`) is available
+without an import. Its hygiene is the same partial hygiene described next.
+**Partially, not fully, hygienic**:
 full hygiene (identifiers carrying lexical "color" resolved against the
 right environment at every reference) would be a rewrite of how
 identifiers are represented throughout the interpreter, not a

@@ -12,11 +12,15 @@
  * symbols (a fresh name per mark) before the result reaches the compilers,
  * so no other file has to know the type exists.
  *
- * This is partial hygiene, the same level syntax-rules has: an introduced
- * binder cannot capture a use-site variable, but a use-site binding can
- * still shadow a name the template refers to freely. See
- * docs/thoughts/syntax-case-hygiene-plan.md for the staged plan that closes
- * that gap.
+ * This is partial hygiene, the same level syntax-rules has. A name a
+ * template introduces is renamed per expansion unless it already names
+ * something real in the macro's defining environment (a special form, a
+ * global procedure or macro), so an introduced binder does not capture a
+ * use-site local. Two gaps remain, both shared with syntax-rules: a binder
+ * whose name is also a global (`tmp` with a global `tmp`) is not renamed,
+ * and a use-site binding can still shadow a name the template refers to
+ * freely. See docs/thoughts/syntax-case-hygiene-plan.md for the phases
+ * that close them.
  */
 
 #include "value.h"

@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- Names the generated code uses ----
@@ -56,9 +57,14 @@ static val_t sc_resolve(val_t v) {
     SynObj *o = as_synobj(v);
     long mark = (long)vunfix(o->mark);
     if (mark == 0) return o->name;
-    char buf[200];
-    snprintf(buf, sizeof buf, "%s\x01" "c%ld", sym_cstr(o->name), mark);
-    return sym_intern_cstr(buf);
+    const char *base = sym_cstr(o->name);
+    size_t n = strlen(base) + 40;
+    char *buf = malloc(n);
+    if (!buf) scm_raise(V_FALSE, "syntax: out of memory");
+    snprintf(buf, n, "%s\x01" "c%ld", base, mark);
+    val_t sym = sym_intern_cstr(buf);
+    free(buf);
+    return sym;
 }
 
 /* ---- Small list builder for generated code ---- */
@@ -128,7 +134,6 @@ static val_t sc_rebuild(val_t v, SynMap on_syn, SymMap on_sym, void *ud) {
     }
 }
 
-static val_t on_resolve(val_t o, void *ud) { (void)ud; return sc_resolve(o); }
 static val_t on_name(val_t o, void *ud)    { (void)ud; return as_synobj(o)->name; }
 
 /* Datum position (inside quote, a case clause's datums, quasiquoted data):
@@ -146,7 +151,6 @@ static val_t sc_strip_code(val_t v);
 /* Inside a quasiquote template only the unquoted parts are code. */
 static val_t sc_strip_qq(val_t v, int level) {
     check_c_stack_depth("syntax");
-    if (!sc_contains_synobj(v)) return v;
     if (sc_form2(v, S_UNQUOTE) || sc_form2(v, S_UNQUOTE_SPLICING)) {
         val_t arg = level == 1 ? sc_strip_code(vcadr(v)) : sc_strip_qq(vcadr(v), level - 1);
         return sc_list(2, vcar(v), arg);
@@ -186,9 +190,9 @@ static val_t sc_strip_qq(val_t v, int level) {
  * position gets the per-expansion name. */
 static val_t sc_strip_code(val_t v) {
     check_c_stack_depth("syntax");
-    if (!sc_contains_synobj(v)) return v;
     if (vis_synobj(v)) return sc_resolve(v);
-    if (vis_vector(v)) return sc_rebuild(v, on_resolve, NULL, NULL);
+    /* A vector in code position is a self-evaluating literal: data. */
+    if (vis_vector(v)) return sc_rebuild(v, on_name, NULL, NULL);
     if (!vis_pair(v)) return v;
     if (sc_form2(v, S_QUOTE))
         return sc_list(2, S_QUOTE, sc_strip_datum(vcadr(v)));
@@ -221,8 +225,6 @@ static val_t sc_strip_code(val_t v) {
     }
 }
 
-static val_t sc_strip(val_t v) { return sc_strip_code(v); }
-
 static val_t on_mark_sym(val_t sym, void *ud) { return sc_make_synobj(sym, *(long *)ud); }
 
 /* ---- The macro-apply boundary ---- */
@@ -245,7 +247,8 @@ val_t sc_apply_transformer(val_t transformer, val_t form) {
         { sc_cur_mark = saved; sc_cur_def_env = saved_env; scm_raise_val(h.exn); });
     sc_cur_mark = saved;
     sc_cur_def_env = saved_env;
-    return sc_strip(out);
+    /* One scan up front; the rebuild itself never rescans a subtree. */
+    return sc_contains_synobj(out) ? sc_strip_code(out) : out;
 }
 
 /* ---- Procedures ---- */
@@ -340,6 +343,8 @@ static val_t prim_syntax_to_datum(int ac, val_t *av, void *ud) {
  * carries no mark, so datum comes back unchanged. */
 static val_t prim_datum_to_syntax(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (!sc_is_ident(av[0]))
+        scm_raise(V_FALSE, "datum->syntax: the context must be an identifier");
     if (!vis_synobj(av[0])) return av[1];
     long mark = (long)vunfix(as_synobj(av[0])->mark);
     if (mark == 0) return av[1];

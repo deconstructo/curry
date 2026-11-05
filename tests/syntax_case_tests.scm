@@ -306,6 +306,36 @@
       ((_ a) #'(list 'tag a)))))
 (check "a quoted introduced symbol is not renamed" (quoted-tag 1) '(tag 1))
 
+;; A vector literal in a template is data: its symbols keep their names.
+(define-syntax vec-literal
+  (lambda (x)
+    (syntax-case x ()
+      ((_ a) #'(vector-ref #(a q) 1)))))
+(check "a vector literal keeps its symbols" (vec-literal 1) 'q)
+
+;; case data lists are data too.
+(define-syntax case-tag
+  (lambda (x)
+    (syntax-case x ()
+      ((_ e) #'(case e ((foo) 'is-foo) (else 'other))))))
+(check "case data keeps its symbols" (list (case-tag 'foo) (case-tag 'bar))
+       '(is-foo other))
+
+;; A long introduced name is not truncated into a clash.
+(define-syntax long-names
+  (lambda (x)
+    (syntax-case x ()
+      ((_) #'(let ((aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1 1)
+                    (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2 2))
+                (list aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2))))))
+(check "long introduced names stay distinct" (long-names) '(1 2))
+
+(check "datum->syntax needs an identifier context"
+       (message-contains?
+        (error-of (lambda () (datum->syntax 42 'foo)))
+        "identifier")
+       #t)
+
 ;;; ---- Existing syntax-rules macros are unaffected ----
 
 (define-syntax rules-swap!
