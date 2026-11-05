@@ -39,6 +39,10 @@ uint32_t unicode_to_lower(uint32_t cp);
  * lowercase mapping of its own, since it's already "lowercase-shaped"). */
 uint32_t unicode_fold_case(uint32_t cp);
 
+/* The Cased and Case_Ignorable properties, for the final-sigma rule. */
+bool unicode_is_cased(uint32_t cp);
+bool unicode_is_case_ignorable(uint32_t cp);
+
 /* Full case mappings: write the mapped codepoints (at most 3) to out and
  * return how many. A codepoint with no multi-character mapping gives its
  * simple mapping (1 codepoint). unicode_full_lower has no context: the

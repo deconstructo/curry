@@ -31,6 +31,12 @@ extern const size_t unicode_upper_ranges_count;
 extern const uint32_t unicode_lower_ranges[][2];
 extern const size_t unicode_lower_ranges_count;
 
+extern const uint32_t unicode_cased_ranges[][2];
+extern const size_t unicode_cased_ranges_count;
+
+extern const uint32_t unicode_case_ignorable_ranges[][2];
+extern const size_t unicode_case_ignorable_ranges_count;
+
 extern const uint32_t unicode_upper_map_from[];
 extern const uint32_t unicode_upper_map_to[];
 extern const size_t unicode_upper_map_count;

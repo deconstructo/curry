@@ -11,6 +11,9 @@
 - `string-ci=?` and the other `string-ci` comparisons compare foldcased
   strings, so `(string-ci=? "Straße" "STRASSE")` is true. `char-ci=?` and
   the other `char-ci` comparisons fold non-ASCII characters too.
+- The final-sigma rule skips case-ignorable characters (`Α.Σ` gives `α.ς`).
+  String comparisons keep embedded NULs, and string literals that differ only
+  after a NUL are no longer merged into one constant (#359).
 - `tools/gen-unicode-tables.py` also reads SpecialCasing.txt and emits three
   full-mapping tables.
 

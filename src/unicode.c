@@ -50,6 +50,14 @@ bool unicode_is_whitespace(uint32_t cp) {
     return range_contains(unicode_space_ranges, unicode_space_ranges_count, cp);
 }
 
+bool unicode_is_cased(uint32_t cp) {
+    return range_contains(unicode_cased_ranges, unicode_cased_ranges_count, cp);
+}
+
+bool unicode_is_case_ignorable(uint32_t cp) {
+    return range_contains(unicode_case_ignorable_ranges, unicode_case_ignorable_ranges_count, cp);
+}
+
 bool unicode_is_upper(uint32_t cp) {
     if (cp < 128) return isupper((int)cp) != 0;
     return range_contains(unicode_upper_ranges, unicode_upper_ranges_count, cp);

@@ -1243,9 +1243,14 @@ static val_t string_case_map_bytes(const char *data, size_t len, int mode) {
         if (mode == 0) k = unicode_full_upper(cps[i], m);
         else if (mode == 2) k = unicode_full_fold(cps[i], m);
         else if (cps[i] == 0x3A3) {
-            /* capital sigma ends a word as final sigma: after a letter, not before one */
-            bool after  = i > 0 && unicode_is_alphabetic(cps[i - 1]);
-            bool before = i + 1 < n && unicode_is_alphabetic(cps[i + 1]);
+            /* capital sigma at the end of a word is final sigma */
+            /* Final_Sigma: a cased letter before (skipping case-ignorable
+             * characters), no cased letter after (likewise) */
+            size_t b = i, a = i + 1;
+            while (b > 0 && unicode_is_case_ignorable(cps[b - 1])) b--;
+            bool after = b > 0 && unicode_is_cased(cps[b - 1]);
+            while (a < n && unicode_is_case_ignorable(cps[a])) a++;
+            bool before = a < n && unicode_is_cased(cps[a]);
             m[0] = (after && !before) ? 0x3C2 : 0x3C3;
             k = 1;
         } else k = unicode_full_lower(cps[i], m);
@@ -1896,17 +1901,19 @@ static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_st
 static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string>=?"); for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 /* Case-insensitive string comparisons (scheme char library) */
-static int str_ci_cmp(const char *a, const char *b) {
+static int str_ci_cmp(val_t x, val_t y) {
     /* compare the full foldcase of each, as R7RS 6.7 defines string-ci=? */
-    val_t fa = string_case_map_bytes(a, strlen(a), 2);
-    val_t fb = string_case_map_bytes(b, strlen(b), 2);
-    return strcmp(str_data(as_str(fa)), str_data(as_str(fb)));
+    val_t fa = string_case_map(x, 2), fb = string_case_map(y, 2);
+    String *sa = as_str(fa), *sb = as_str(fb);
+    size_t la = sa->len, lb = sb->len;
+    int c = memcmp(str_data(sa), str_data(sb), la < lb ? la : lb);
+    return c ? c : (la > lb) - (la < lb);
 }
-static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))!=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])!=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])>=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])<0) return V_FALSE; return V_TRUE;}
 
 static val_t prim_string_upcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;

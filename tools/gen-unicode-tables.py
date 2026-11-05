@@ -255,7 +255,7 @@ def main():
     paths = fetch(version)
 
     derived = parse_prop_ranges(paths["DerivedCoreProperties.txt"],
-                                 {"Alphabetic", "Uppercase", "Lowercase"})
+                                 {"Alphabetic", "Uppercase", "Lowercase", "Cased", "Case_Ignorable"})
     proplist = parse_prop_ranges(paths["PropList.txt"], {"White_Space"})
     numeric, upper_map, lower_map = parse_unicode_data(paths["UnicodeData.txt"])
     fold_map = parse_case_folding(paths["CaseFolding.txt"])
@@ -266,6 +266,8 @@ def main():
     upper = derived["Uppercase"]
     lower = derived["Lowercase"]
     whitespace = proplist["White_Space"]
+    cased = derived["Cased"]
+    case_ignorable = derived["Case_Ignorable"]
 
     upper_pairs = dict_to_pairs(upper_map)
     lower_pairs = dict_to_pairs(lower_map)
@@ -296,6 +298,8 @@ def main():
         emit_range_decl(f, "unicode_space_ranges")
         emit_range_decl(f, "unicode_upper_ranges")
         emit_range_decl(f, "unicode_lower_ranges")
+        emit_range_decl(f, "unicode_cased_ranges")
+        emit_range_decl(f, "unicode_case_ignorable_ranges")
         emit_mapping_decl(f, "unicode_upper_map")
         emit_mapping_decl(f, "unicode_lower_map")
         emit_mapping_decl(f, "unicode_fold_map")
@@ -320,6 +324,8 @@ def main():
         emit_range_table(out, "unicode_space_ranges", whitespace)
         emit_range_table(out, "unicode_upper_ranges", upper)
         emit_range_table(out, "unicode_lower_ranges", lower)
+        emit_range_table(out, "unicode_cased_ranges", cased)
+        emit_range_table(out, "unicode_case_ignorable_ranges", case_ignorable)
         emit_mapping_table(out, "unicode_upper_map", upper_pairs)
         emit_mapping_table(out, "unicode_lower_map", lower_pairs)
         emit_mapping_table(out, "unicode_fold_map", fold_pairs)

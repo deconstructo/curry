@@ -46,6 +46,12 @@
        (ustr #x3B1 #x3C2 #x20 #x3B2 #x3C2)
        (string-downcase (ustr #x391 #x3A3 #x20 #x392 #x3A3)))
 
+;; Final sigma skips case-ignorable characters (full stop, apostrophe)
+(check "final sigma after full stop" (ustr #x3B1 #x2E #x3C2) (string-downcase (ustr #x391 #x2E #x3A3)))
+(check "final sigma before apostrophe" (ustr #x3B1 #x3C2 #x27) (string-downcase (ustr #x391 #x3A3 #x27)))
+(check "medial sigma across full stop" (ustr #x3B1 #x3C3 #x2E #x3B2) (string-downcase (ustr #x391 #x3A3 #x2E #x392)))
+(check "lone sigma" (ustr #x3C3) (string-downcase (ustr #x3A3)))
+
 ;; Case-insensitive comparison uses the folded strings
 (check "ci= ascii" #t (string-ci=? "Hello" "hELLO"))
 (check "ci= non-ascii" #t (string-ci=? (ustr #xC9 #x63 #x6F #x6C #x65) (ustr #xE9 #x43 #x4F #x4C #x45)))
@@ -56,6 +62,12 @@
 (check "ci>= equal" #t (string-ci>=? "Abc" "aBC"))
 (check "ci= three" #t (string-ci=? "Ab" "aB" "AB"))
 (check "ci= greek final sigma folds" #t (string-ci=? (ustr #x3C2) (ustr #x3A3)))
+
+;; Embedded NULs take part in comparisons
+(check "ci= nul differs" #f (string-ci=? "a\x0;b" "a\x0;c"))
+(check "ci= nul same" #t (string-ci=? "A\x0;b" "a\x0;B"))
+(check "ci= trailing nul" #f (string-ci=? "ab" "ab\x0;"))
+(check "ci< trailing nul" #t (string-ci<? "ab" "ab\x0;"))
 
 ;; char-ci comparisons beyond Latin-1
 (check "char-ci= e-acute" #t (char-ci=? (integer->char #xC9) (integer->char #xE9)))
