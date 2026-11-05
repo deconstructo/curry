@@ -1,5 +1,45 @@
 # Changelog
 
+### Unreleased
+
+**New — SRFI 166 (Monadic Formatting) and `(srfi 272 show)`**
+
+- `(srfi 166)` and its `base`, `pretty`, `columnar`, `unicode` and `color`
+  libraries (and the `(srfi srfi-166 ...)` names): `show`, formatters, state
+  variables with `fn`/`with`/`with!`, `numeric` and its comma/SI/fitted forms,
+  padding, trimming and fitting, `columnar`/`tabular`, `wrapped`/`justified`,
+  terminal-aware widths, and ANSI color.
+- `columnar` and `trimmed/lazy` work without re-entrant continuations (curry's
+  `call/cc` only escapes): columns run to completion, and infinite columns stop
+  by escaping once they have enough lines.
+- Widths follow UAX #11 (Unicode 16.0), so CJK, emoji, combining marks,
+  cuneiform signs and Akkadian transliteration pad and trim correctly.
+- `(srfi 272 show)`: `pprinted` and `pprinted*`, the pretty printer as a
+  SRFI 166 formatter. This completes SRFI 272.
+
+**SRFI 272 (Pretty Printing) brought up to the final spec**
+
+- The layout engine is rewritten around the SRFI's style grammar: `define`,
+  `let`, `cond`, `case`, `do` and the other R7RS forms break the way Scheme
+  programmers expect, `pp-styles` and `pretty-style` change that, and read
+  macros print as `'x`, `` `x ``, `,x`, `,@x`. `pp-code` is now true by default.
+- Widths are terminal columns, from UAX #11 tables generated from Unicode 16.0:
+  CJK and emoji take 2, combining marks 0, cuneiform signs and Akkadian
+  transliteration 1. ZWJ sequences and flags count as one glyph.
+- A form headed by an Akkadian or cuneiform special-form name uses the style
+  of its English name (new builtin `lang-translate`).
+- `pprint-file` (fancy) keeps comments, including comments inside forms,
+  reads the `-*- ... -*-` header and `;; * pp-styles:` comments, and keeps the
+  source text of atoms, so cuneiform text round-trips exactly.
+  `pprint-file/html` escapes text and marks colors with `pp-CATEGORY` spans.
+- `pp-color` sends color sequences through `pp-tint`; the default mapper
+  follows the spec's category table and emits nothing when color is off.
+
+**Fixed**
+
+- Hash tables and sets could loop forever after many deletions, and
+  `hash-table-set!` could store a key twice (#353).
+
 ### 1.29.0 - 2026-11-04
 
 **New — GPU rendering and compute on Metal, Vulkan and Direct3D: the `gpu-*` layer of `(curry qt6)` (#347)**

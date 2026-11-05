@@ -49,6 +49,19 @@
       (loop (+ i 1))))
   (check "one delete removes the key" 0 (hash-table-size h))
   (check "deleted key is gone" #f (hash-table-exists? h 7)))
+;; Sets use the same open addressing: insert/delete churn must not leave a
+;; table with no empty slot.
+(let ((st (make-set)))
+  (let loop ((i 0))
+    (when (< i 5000)
+      (let ((k (list i)))
+        (set-add! st k)
+        (set-delete! st k))
+      (loop (+ i 1))))
+  (check "set empty after churn" 0 (set-size st))
+  (check "set absent element terminates" #f (set-member? st (list 'absent)))
+  (set-add! st 'x)
+  (check "set still works after churn" #t (set-member? st 'x)))
 
 (display pass-count) (display " passed, ")
 (display fail-count) (display " failed") (newline)

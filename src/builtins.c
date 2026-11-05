@@ -341,6 +341,16 @@ static val_t prim_type_of(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     return type_of_val(av[0]);
 }
+/* (lang-translate x): the canonical English symbol for an Akkadian /
+ * cuneiform special-form synonym (e.g. 𒁹 or šakānum -> define); any
+ * other value, including an already-English symbol, comes back unchanged.
+ * Exposes lang_translate() to Scheme so libraries that key on a form's
+ * head symbol (SRFI-272's style table) can treat synonyms as the form
+ * they name. */
+static val_t prim_lang_translate(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    return vis_symbol(av[0]) ? lang_translate(av[0]) : av[0];
+}
 static val_t prim_zero_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_zero(av[0])); }
 static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_positive(av[0])); }
 static val_t prim_negative_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_negative(av[0])); }
@@ -3817,6 +3827,7 @@ void builtins_register(val_t env) {
     DEF("macroexpand-1",  prim_macroexpand_1,   1,1);
     DEF("macroexpand",    prim_macroexpand,     1,1);
     DEF("type-of",        prim_type_of,         1,1);
+    DEF("lang-translate", prim_lang_translate,  1,1);
     DEF("untrace",      prim_untrace,     1,1);
     DEF("eof-object?",  prim_eof_object_p,1,1); DEF("bytevector?", prim_bytevector_p,1,1);
     DEF("set?",         prim_set_p,       1,1); DEF("hash-table?", prim_hash_table_p,1,1);
