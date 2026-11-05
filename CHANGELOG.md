@@ -2,6 +2,21 @@
 
 ### Unreleased
 
+**Fixed — string case conversion is full Unicode (#355)**
+
+- `string-upcase`, `string-downcase` and `string-foldcase` use the full
+  mappings of SpecialCasing.txt and CaseFolding.txt: `ß` upcases to `SS`,
+  ligatures such as `ﬁ` to `FI`, and capital sigma downcases to final sigma
+  at the end of a word. Before, they only handled ASCII.
+- `string-ci=?` and the other `string-ci` comparisons compare foldcased
+  strings, so `(string-ci=? "Straße" "STRASSE")` is true. `char-ci=?` and
+  the other `char-ci` comparisons fold non-ASCII characters too.
+- The final-sigma rule skips case-ignorable characters (`Α.Σ` gives `α.ς`).
+  String comparisons keep embedded NULs, and string literals that differ only
+  after a NUL are no longer merged into one constant (#359).
+- `tools/gen-unicode-tables.py` also reads SpecialCasing.txt and emits three
+  full-mapping tables.
+
 **Changed — cuneiform numerals inside lists (#354) — breaking for multi-place literals in code**
 
 - The space between the place groups of a cuneiform numeral (`𒁹 𒌋𒁹` is 71)

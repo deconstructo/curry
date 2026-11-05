@@ -226,7 +226,8 @@ int chunk_add_const(Chunk *c, val_t v) {
         if (vis_number(e) && vis_number(v) && scm_eqv(e, v)) return i;
         if (vis_symbol(e) && vis_symbol(v) && e == v)  return i; /* interned */
         if (vis_string(e) && vis_string(v) &&
-            strcmp(str_data(as_str(e)), str_data(as_str(v))) == 0) return i;
+            as_str(e)->len == as_str(v)->len &&
+            memcmp(str_data(as_str(e)), str_data(as_str(v)), as_str(v)->len) == 0) return i;
     }
     /* Every bytecode operand indexing into constants[] is a single uint8_t
      * (OP_LOAD_GLOBAL/OP_STORE_GLOBAL/OP_CALL_GLOBAL/OP_TAIL_CALL_GLOBAL/

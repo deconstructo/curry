@@ -1228,16 +1228,44 @@ static val_t prim_string_fill_bang(int ac, val_t *av, void *ud) {
     str_invalidate_cache(s);
     return V_VOID;
 }
+/* Full Unicode case conversion of a string (R7RS 6.7). mode: 0 upcase,
+ * 1 downcase (with the final-sigma rule), 2 foldcase. */
+static val_t string_case_map_bytes(const char *data, size_t len, int mode) {
+    val_t in = port_open_input_string(data, len);
+    size_t cap = len + 1, n = 0;
+    uint32_t *cps = GC_MALLOC_ATOMIC(cap * sizeof(uint32_t));
+    int cp;
+    while ((cp = port_read_char(in)) != -1) cps[n++] = (uint32_t)cp;
+    val_t out = port_open_output_string();
+    for (size_t i = 0; i < n; i++) {
+        uint32_t m[3];
+        int k;
+        if (mode == 0) k = unicode_full_upper(cps[i], m);
+        else if (mode == 2) k = unicode_full_fold(cps[i], m);
+        else if (cps[i] == 0x3A3) {
+            /* capital sigma at the end of a word is final sigma */
+            /* Final_Sigma: a cased letter before (skipping case-ignorable
+             * characters), no cased letter after (likewise) */
+            size_t b = i, a = i + 1;
+            while (b > 0 && unicode_is_case_ignorable(cps[b - 1])) b--;
+            bool after = b > 0 && unicode_is_cased(cps[b - 1]);
+            while (a < n && unicode_is_case_ignorable(cps[a])) a++;
+            bool before = a < n && unicode_is_cased(cps[a]);
+            m[0] = (after && !before) ? 0x3C2 : 0x3C3;
+            k = 1;
+        } else k = unicode_full_lower(cps[i], m);
+        for (int j = 0; j < k; j++) port_write_char(out, (int)m[j]);
+    }
+    return port_get_output_string(out);
+}
+static val_t string_case_map(val_t str, int mode) {
+    String *s = as_str(str);
+    return string_case_map_bytes(str_data(s), (size_t)s->len, mode);
+}
 static val_t prim_string_foldcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-foldcase: not a string");
-    String *s = as_str(av[0]);
-    val_t port_in  = port_open_input_string(str_data(s), s->len);
-    val_t port_out = port_open_output_string();
-    int cp;
-    while ((cp = port_read_char(port_in)) != -1)
-        port_write_char(port_out, tolower(cp));
-    return port_get_output_string(port_out);
+    return string_case_map(av[0], 2);
 }
 static val_t prim_list_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -1855,11 +1883,11 @@ static val_t prim_char_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<
 static val_t prim_char_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(vunchr(av[i-1])<vunchr(av[i])) return V_FALSE; return V_TRUE;}
 
 /* Case-insensitive char comparisons (scheme char library) */
-static val_t prim_char_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))!=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
-static val_t prim_char_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))>=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
-static val_t prim_char_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))>tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
-static val_t prim_char_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))<=tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
-static val_t prim_char_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(tolower((int)vunchr(av[i-1]))<tolower((int)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_eq(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(unicode_fold_case((uint32_t)vunchr(av[i-1]))!=unicode_fold_case((uint32_t)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_lt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(unicode_fold_case((uint32_t)vunchr(av[i-1]))>=unicode_fold_case((uint32_t)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_le(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(unicode_fold_case((uint32_t)vunchr(av[i-1]))>unicode_fold_case((uint32_t)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_gt(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(unicode_fold_case((uint32_t)vunchr(av[i-1]))<=unicode_fold_case((uint32_t)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
+static val_t prim_char_ci_ge(int ac, val_t *av, void *ud) {(void)ud; for(int i=1;i<ac;i++) if(unicode_fold_case((uint32_t)vunchr(av[i-1]))<unicode_fold_case((uint32_t)vunchr(av[i]))) return V_FALSE; return V_TRUE;}
 
 static val_t prim_digit_value(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
@@ -1873,35 +1901,29 @@ static val_t prim_string_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_st
 static val_t prim_string_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string>=?"); for(int i=1;i<ac;i++) if(strcmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
 
 /* Case-insensitive string comparisons (scheme char library) */
-static int str_ci_cmp(const char *a, const char *b) {
-    while (*a && *b) {
-        int da = tolower((unsigned char)*a), db = tolower((unsigned char)*b);
-        if (da != db) return da - db;
-        a++; b++;
-    }
-    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+static int str_ci_cmp(val_t x, val_t y) {
+    /* compare the full foldcase of each, as R7RS 6.7 defines string-ci=? */
+    val_t fa = string_case_map(x, 2), fb = string_case_map(y, 2);
+    String *sa = as_str(fa), *sb = as_str(fb);
+    size_t la = sa->len, lb = sb->len;
+    int c = memcmp(str_data(sa), str_data(sb), la < lb ? la : lb);
+    return c ? c : (la > lb) - (la < lb);
 }
-static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))!=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))>0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<=0) return V_FALSE; return V_TRUE;}
-static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(str_data(as_str(av[i-1])),str_data(as_str(av[i])))<0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_eq(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])!=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_lt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])>=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_le(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci<=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])>0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_gt(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])<=0) return V_FALSE; return V_TRUE;}
+static val_t prim_string_ci_ge(int ac, val_t *av, void *ud) {(void)ud; check_all_strings(ac, av, "string-ci>=?"); for(int i=1;i<ac;i++) if(str_ci_cmp(av[i-1],av[i])<0) return V_FALSE; return V_TRUE;}
 
 static val_t prim_string_upcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-upcase: not a string");
-    String *s = as_str(av[0]);
-    val_t in = port_open_input_string(str_data(s), s->len), out = port_open_output_string();
-    int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, toupper(cp));
-    return port_get_output_string(out);
+    return string_case_map(av[0], 0);
 }
 static val_t prim_string_downcase(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string-downcase: not a string");
-    String *s = as_str(av[0]);
-    val_t in = port_open_input_string(str_data(s), s->len), out = port_open_output_string();
-    int cp; while ((cp = port_read_char(in)) != -1) port_write_char(out, tolower(cp));
-    return port_get_output_string(out);
+    return string_case_map(av[0], 1);
 }
 
 /* (string-set! str k char) — in-place when same UTF-8 byte width; reallocates ext otherwise */

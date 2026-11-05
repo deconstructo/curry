@@ -43,6 +43,7 @@ add_test(NAME srfi_29 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sr
 add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_189_tests.scm)
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
+add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)
 add_test(NAME srfi_166 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_166_tests.scm)
 add_test(NAME srfi_272_fancy COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_fancy_tests.scm)
