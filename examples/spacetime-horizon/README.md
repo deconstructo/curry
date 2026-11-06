@@ -27,7 +27,9 @@ light, can go from that point.
 - Far away the cones stand upright.
 - Closer in, they lean toward the hole.
 - At the event horizon the outer edge of the cone is vertical. Light aimed
-  outward stays where it is.
+  outward stays where it is. (With spin this is true at the static limit,
+  r = 2, for light aimed straight outward; light with a sideways part can
+  still escape between r = 2 and the event horizon.)
 - Inside, every direction in the cone points inward. Staying at the same
   radius is as impossible as staying at the same time. The singularity at
   r = 0 is not a place you reach; it is where all the cones lead.
@@ -67,4 +69,6 @@ far away it agrees with the usual far-away clock.
   not cover.
 - **One space dimension is missing.** This is the equator only; the poles
   and the third space direction are not drawn.
+- Dropping from r₀ = 4 with a = 0 and L = −4 puts the observer on an unstable
+  circular orbit: it hovers at r = 4 for the full 400 of proper time.
 - Lines are one pixel wide on Metal.

@@ -11,8 +11,9 @@
 ;;;   * the equations pane evaluates the same formulas at the observer.
 ;;;
 ;;; Watch the cones.  Far away they stand upright.  Closer in they lean
-;;; toward the hole.  At the event horizon the outer edge of the cone is
-;;; vertical: light cannot move outward.  Inside, every direction in the
+;;; toward the hole.  At the event horizon (for no spin; with spin, at the
+;;; static limit, for light aimed straight outward) the outer edge of the
+;;; cone is vertical: light cannot move outward.  Inside, every direction in the
 ;;; cone points inward -- there is no way to stay at the same radius, for
 ;;; the same reason there is no way to stay at the same time.  With spin,
 ;;; the cones also lean sideways (frame dragging) before the horizon.
@@ -39,12 +40,20 @@
           ((string=? (car args) name) (cadr args))
           (else (loop (cdr args))))))
 
+;; A number from the command line, clamped to [lo, hi]; the default if the
+;; option is missing or is not a finite real number.
+(define (num-arg name default lo hi)
+  (let* ((str (arg-value name #f)) (v (and str (string->number str))))
+    (if (and v (real? v) (not (nan? (exact->inexact v))) (not (infinite? (exact->inexact v))))
+        (exact->inexact (max lo (min hi v)))
+        default)))
+
 (define snapshot (arg-value "--snapshot" #f))
-(define start-spin (let ((s (arg-value "--spin" #f))) (if s (string->number s) 0.0)))
-(define start-tau  (let ((s (arg-value "--tau" #f))) (if s (string->number s) #f)))
-(define start-L    (let ((s (arg-value "--L" #f))) (if s (string->number s) 0.0)))
-(define start-slices (let ((s (arg-value "--slices" #f))) (if s (string->number s) 1)))
-(define (num-arg name default) (let ((s (arg-value name #f))) (if s (string->number s) default)))
+(define start-spin (num-arg "--spin" 0.0 0.0 0.998))
+(define start-tau  (let ((v (num-arg "--tau" -1.0 -1.0 1e6))) (and (>= v 0.0) v)))
+(define start-L    (num-arg "--L" 0.0 -4.0 3.0))
+(define start-slices
+  (let ((v (num-arg "--slices" 1.0 1.0 5.0))) (cond ((< v 2.0) 1) ((< v 4.0) 3) (else 5))))
 
 ;;; ---- state ----
 
@@ -60,15 +69,16 @@
 (define playing (not start-tau))
 (define tau-cur (or start-tau 0.0))
 
-(define yaw (num-arg "--yaw" 0.55))
-(define pitch (num-arg "--pitch" 0.30))
-(define dist (num-arg "--dist" 30.0))
+(define yaw (num-arg "--yaw" 0.55 -100.0 100.0))
+(define pitch (num-arg "--pitch" 0.30 -1.5 1.5))
+(define dist (num-arg "--dist" 30.0 6.0 90.0))
 (define drag-from #f)
 
 (define wl #f)                          ; full worldline
 (define thin #f)                        ; thinned copy for drawing
 (define tau-end 1.0)
 (define wl-dirty #t)
+(define wl-dirty-tick 0)           ; timer tick of the latest change
 (define geom-dirty #t)
 
 (define T-LO -14.0)
@@ -380,9 +390,10 @@ void main() {
      "  light, outward dρ/dt = "
      (if sp (span (if (> (car sp) 0.0) C-OUT C-IN) (fix (car sp) 3)) "—") "\n"
      "  light, inward  dρ/dt = " (if sp (fix (cdr sp) 3) "—") "\n"
-     "    " (if (and sp (> (car sp) 0.0))
-               (span C-OUT "light can still climb outward")
-               (span C-IN "even outward-aimed light moves inward")) "\n"
+     "    " (cond ((and sp (> (car sp) 0.0)) (span C-OUT "light can still climb outward"))
+                   ((and (> a 0.0) (> r rp))
+                    (span C-MID "inside the static limit: radial light moves inward;\n    light aimed sideways can still escape"))
+                   (else (span C-IN "even outward-aimed light moves inward"))) "\n"
      "</pre>")))
 
 ;;; ---- widgets ----
@@ -392,11 +403,12 @@ void main() {
 (define scrub #f)
 (define ignore-scrub #f)
 
-(define (mark-wl-dirty!) (set! wl-dirty #t))
+(define ticks 0)
+(define (mark-wl-dirty!) (set! wl-dirty #t) (set! wl-dirty-tick ticks))
 
 (define spin-slider
   (make-slider "spin  a" 0.0 0.998 0.002 start-spin
-               (lambda (v) (set! spin v) (set! geom-dirty #t) (set! wl-dirty #t))))
+               (lambda (v) (set! spin v) (set! geom-dirty #t) (mark-wl-dirty!))))
 (define r0-slider
   (make-slider "start radius  r₀" 4.0 16.0 0.5 r0
                (lambda (v) (set! r0 v) (mark-wl-dirty!))))
@@ -469,7 +481,6 @@ void main() {
 (gpu-canvas-on-render! canvas
   (lambda (frame w h)
     (when geom-dirty (build-static!))
-    (when wl-dirty (rebuild-worldline!))
     (let* ((s (current-sample))
            (tc (vector-ref s 1)) (x (vector-ref s 2)) (y (vector-ref s 3)) (r (vector-ref s 4))
            (region (cond ((> r (ks-r-plus spin)) 0.0) ((> r (ks-r-minus spin)) 1.0) (else 2.0)))
@@ -540,12 +551,13 @@ void main() {
 (rebuild-worldline!)
 (label-set-text! eq-label (equations-html (current-sample)))
 
-(define ticks 0)
 (define timer
   (make-timer/dt 16
     (lambda (dt)
       (set! ticks (+ ticks 1))
-      (when wl-dirty (rebuild-worldline!))
+      ;; wait until the slider has been still for ~130 ms: a long worldline
+      ;; is thousands of interpreted RK4 steps
+      (when (and wl-dirty (>= (- ticks wl-dirty-tick) 8)) (rebuild-worldline!))
       (when playing
         (set! tau-cur (+ tau-cur (* speed (/ dt 1000.0))))
         (when (>= tau-cur tau-end) (set! tau-cur tau-end) (set! playing #f)))
