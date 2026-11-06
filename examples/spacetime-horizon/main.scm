@@ -417,10 +417,32 @@ void main() {
                    (else (span C-IN "even outward-aimed light moves inward"))) "\n"
      "</pre>")))
 
+;;; ---- how the fall ends ----
+
+(define (ending-message)
+  (let* ((last (vector-ref wl (- (vector-length wl) 1)))
+         (tau (vector-ref last 0)) (r (vector-ref last 4)))
+    (cond ((< r 0.06)
+           (string-append (if (> spin 0.0) "Reached the ring singularity" "Reached the singularity (r = 0)")
+                          " at τ = " (fix tau 2) ". Nothing continues past this point."))
+          ((and (> spin 0.0) (> r (* 0.9 (ks-r-minus spin))) (< r (ks-r-plus spin)))
+           (string-append "Turned around inside the horizons at τ = " (fix tau 2)
+                          " and is heading back out through the inner horizon. These coordinates"
+                          " do not cover where it goes next, so the worldline stops here."))
+          ((> r (* 2.9 r0))
+           (string-append "Swung around the hole and climbed back out (τ = " (fix tau 2) ")."))
+          (else (string-append "Stopped at τ = " (fix tau 2)
+                               " (the limit of the computed worldline).")))))
+
 ;;; ---- widgets ----
 
 (define eq-label (make-label ""))
-(define status-label (make-label ""))
+(define banner (make-label ""))
+(widget-set-style! banner "background:#3a1020; color:#ffd8e0; padding:8px; font-size:14px;")
+(widget-set-visible! banner #f)
+(define loop? #f)
+(define at-end #f)
+(define end-tick #f)                    ; tick at which the fall reached its end
 (define scrub #f)
 (define ignore-scrub #f)
 
@@ -456,6 +478,7 @@ void main() {
   (make-dropdown '("1 time slice" "3 time slices" "5 time slices")
                  (cond ((= start-slices 1) 0) ((= start-slices 5) 2) (else 1))
                  (lambda (i) (set! slices (case i ((0) 1) ((2) 5) (else 3))) (set! geom-dirty #t))))
+(define loop-toggle (make-toggle "loop" #f (lambda (on) (set! loop? on))))
 (define cones-toggle (make-toggle "light cones" #t (lambda (on) (set! show-cones on))))
 (define horizons-toggle
   (make-toggle "horizons and singularity" #t (lambda (on) (set! show-horizons on) (set! geom-dirty #t))))
@@ -482,10 +505,10 @@ void main() {
           (list (make-label "<b>Black hole</b>") spin-slider
                 (make-label "<b>Observer</b>") r0-slider L-slider
                 (make-separator)
-                (make-label "<b>Time</b>") scrub play-button restart-button speed-slider
+                (make-label "<b>Time</b>") scrub play-button restart-button loop-toggle speed-slider
                 (make-separator)
                 (make-label "<b>View</b>") cone-slider slices-dd cones-toggle horizons-toggle grid-toggle drag-toggle
-                (make-separator) legend status-label))
+                (make-separator) legend))
 
 (define eq-pane (make-scroll-area))
 (layout-add! eq-pane eq-label)
@@ -564,7 +587,10 @@ void main() {
 
 (define split (make-splitter 'horizontal))
 (splitter-add! split controls)
-(splitter-add! split canvas)
+(define centre (make-vbox))
+(layout-add! centre banner)
+(layout-add! centre canvas)
+(splitter-add! split centre)
 (splitter-add! split eq-pane)
 (splitter-set-sizes! split '(270 800 430))
 
@@ -585,12 +611,18 @@ void main() {
       (when playing
         (set! tau-cur (+ tau-cur (* speed (/ dt 1000.0))))
         (when (>= tau-cur tau-end) (set! tau-cur tau-end) (set! playing #f)))
+      (let ((now-end (>= tau-cur (- tau-end 1e-9))))
+        (when (and now-end (not at-end)) (set! end-tick ticks))
+        (set! at-end now-end))
+      ;; looping: rest on the last frame for about 1.5 s, then start again
+      (when (and loop? at-end end-tick (>= (- ticks end-tick) 90))
+        (set! tau-cur 0.0) (set! playing #t) (set! at-end #f))
       (when (= (remainder ticks 5) 0)
         (label-set-text! eq-label (equations-html (current-sample)))
-        (let ((r (vector-ref (current-sample) 4)))
-          (label-set-text! status-label
-            (if (and (< r 0.06) (> spin 0.0)) "reached the ring singularity"
-                (if (< r 0.06) "reached the singularity (r = 0)" "")))))
+        (if at-end
+            (begin (label-set-text! banner (string-append "<b>" (ending-message) "</b>"))
+                   (widget-set-visible! banner #t))
+            (widget-set-visible! banner #f)))
       (when (and playing (= (remainder ticks 3) 0))
         (set! ignore-scrub #t)
         (slider-set-value! scrub (* 1000.0 (/ tau-cur tau-end)))
