@@ -43,6 +43,14 @@ carried round at the angular velocity w(r) = 2a / (r³ + a²r + 2a²) at which
 the spin drags space there. They are straight at a = 0 and twist more with
 spin and nearer the hole. They are a picture of the dragging, not geodesics.
 
+Where the worldline crosses the static limit (teal), the event horizon
+(orange) and the inner horizon (violet), a ring of that colour is drawn
+round it, and a caption above the picture says what has just changed. The
+playback slows down from about 2.5 outside the event horizon to 12% of the
+chosen speed at the horizon and below, so the crossings can be followed; the
+equations pane shows the current rate. The "slow down near the horizons"
+toggle turns this off.
+
 The white cone and the white line belong to the falling observer. The
 yellow crosses are one tick each of the observer's own clock. Their
 spacing in the vertical direction, compared with the far time `t`, is the

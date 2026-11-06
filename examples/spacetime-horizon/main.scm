@@ -67,6 +67,7 @@
 (define show-horizons #t)
 (define show-grid #t)
 (define show-drag #t)
+(define slow? #t)                       ; slow the playback near the horizons
 (define playing (not start-tau))
 (define tau-cur (or start-tau 0.0))
 
@@ -166,6 +167,7 @@ void main() {
 (define drag-buf   (make-gpu-buffer 'vertex (* 8000 28)))
 (define wl-buf     (make-gpu-buffer 'vertex (* 5000 28)))
 (define tick-buf   (make-gpu-buffer 'vertex (* 1200 28)))
+(define mark-buf   (make-gpu-buffer 'vertex (* 400 28)))
 (define marker-buf (make-gpu-buffer 'vertex (* 8 28)))
 (define lattice-buf (make-gpu-buffer 'vertex (* 600 16)))
 (define me-buf      (make-gpu-buffer 'vertex 16))
@@ -297,12 +299,16 @@ void main() {
 
 (define wl-count 0)
 (define tick-count 0)
+(define mark-count 0)
+(define crossings '())                 ; (tau text css-colour), by increasing tau
 (define thin-taus #f)
 
 (define (region-colour r)
   (cond ((> r (ks-r-plus spin)) '(0.55 0.9 1.0))
         ((> r (ks-r-minus spin)) '(1.0 0.8 0.35))
         (else '(1.0 0.4 0.55))))
+
+(define (cadddr l) (car (cdr (cdr (cdr l)))))
 
 (define (rebuild-worldline!)
   (set! wl (ks-worldline spin L-in r0))
@@ -339,7 +345,74 @@ void main() {
   (let ((g (take-geometry!)))
     (gpu-buffer-update! tick-buf (car g))
     (set! tick-count (cdr g)))
+  (find-crossings!)
   (set! wl-dirty #f))
+
+;; Where the worldline crosses the static limit, the event horizon and the
+;; inner horizon: a caption for each, and a ring drawn round the worldline.
+(define (first-sample-below r-level)
+  (let ((n (vector-length wl)))
+    (let loop ((i 1))
+      (cond ((>= i n) #f)
+            ((< (vector-ref (vector-ref wl i) 4) r-level) (vector-ref wl i))
+            (else (loop (+ i 1)))))))
+
+(define (find-crossings!)
+  (let* ((rp (ks-r-plus spin)) (rm (ks-r-minus spin))
+         (levels
+          (append
+           (if (> spin 0.0)
+               (list (list 2.0 "static limit" "#1acdb3" '(0.1 0.8 0.7)
+                           "Nothing can stay at rest from here on, but light can still get out.")) '())
+           (list (list rp "event horizon" "#ff8c1a" '(1.0 0.55 0.1)
+                       (if (> spin 0.0)
+                           "No signal can reach the outside again. Between the horizons r runs like time."
+                           "No signal can reach the outside again. Inside, r runs like time.")))
+           (if (> spin 0.0)
+               (list (list rm "inner horizon" "#b366ff" '(0.7 0.4 1.0)
+                           "r is a space direction again. The ring singularity is ahead.")) '())))
+         (found '()))
+    (set! acc '()) (set! nv 0)
+    (for-each
+     (lambda (lv)
+       (let ((smp (first-sample-below (car lv))))
+         (when smp
+           (let ((x (vector-ref smp 2)) (y (vector-ref smp 3)) (t (vector-ref smp 1))
+                 (c (cadddr lv)) (ns 32))
+             (do ((i 0 (+ i 1))) ((= i ns))
+               (let ((a1 (* TWO-PI (/ i ns))) (a2 (* TWO-PI (/ (+ i 1) ns))))
+                 (seg! (+ x (* 0.55 (cos a1))) (+ y (* 0.55 (sin a1))) t
+                       (+ x (* 0.55 (cos a2))) (+ y (* 0.55 (sin a2))) t
+                       (car c) (cadr c) (caddr c) 1.0)))
+             (seg! x y (- t 0.35) x y (+ t 0.35) (car c) (cadr c) (caddr c) 1.0)
+             (set! found
+                   (cons (list (vector-ref smp 0)
+                               (string-append "Crossed the " (cadr lv) " (r = " (fix (car lv) 3)
+                                              ") at τ = " (fix (vector-ref smp 0) 2) ". "
+                                              (list-ref lv 4))
+                               (caddr lv))
+                         found))))))
+     levels)
+    (set! crossings (reverse found))
+    (let ((g (take-geometry!)))
+      (gpu-buffer-update! mark-buf (car g))
+      (set! mark-count (cdr g)))))
+
+;; The latest crossing already passed at proper time tau, or #f.
+(define (last-crossing tau)
+  (let loop ((cs crossings) (best #f))
+    (cond ((null? cs) best)
+          ((<= (car (car cs)) tau) (loop (cdr cs) (car cs)))
+          (else best))))
+
+;; Playback is slowed from rp + 2.5 down to the horizon, then held at 12%.
+(define (rate-factor r)
+  (if (not slow?)
+      1.0
+      (let ((u (/ (- r (ks-r-plus spin)) 2.5)))
+        (cond ((>= u 1.0) 1.0)
+              ((<= u 0.0) 0.12)
+              (else (+ 0.12 (* 0.88 u u (- 3.0 (* 2.0 u)))))))))
 
 (define (index-at-tau tau)              ; number of thinned vertices with tau_i <= tau
   (let loop ((lo 0) (hi (vector-length thin-taus)))
@@ -397,7 +470,11 @@ void main() {
      "  far time     t  = " (fix t 2) "\n"
      "  radius       r  = " (span col (fix r 3)) "   " (region-label r) "\n"
      "  dr/dτ           = " (fix rd 3) "\n"
-     "  dτ/dt           = " (fix (/ 1.0 td) 3) "   (the observer's clock rate)\n\n"
+     "  dτ/dt           = " (fix (/ 1.0 td) 3) "   (the observer's clock rate)\n"
+     (if (< (rate-factor r) 0.99)
+         (string-append "  playback        = ×" (fix (rate-factor r) 2) "   (slowed near the horizons)\n")
+         "")
+     "\n"
      (span C-HI "<b>What the metric says here</b>") "\n"
      "  f = 2/r             = " (fix f 3) "\n"
      "  g_tt = −1 + f       = " (span (if (< gtt 0.0) C-OUT C-IN) (fix gtt 3)) "\n"
@@ -440,6 +517,15 @@ void main() {
 (define banner (make-label ""))
 (widget-set-style! banner "background:#3a1020; color:#ffd8e0; padding:8px; font-size:14px;")
 (widget-set-visible! banner #f)
+(define banner-key #f)
+(define (set-banner! key text fg bg . edge)
+  (unless (equal? key banner-key)
+    (set! banner-key key)
+    (widget-set-style! banner
+      (string-append "background:" bg "; color:" fg "; padding:8px; font-size:14px;"
+                     (if (pair? edge) (string-append " border-left: 6px solid " (car edge) ";") "")))
+    (label-set-text! banner text))
+  (widget-set-visible! banner #t))
 (define loop? #f)
 (define at-end #f)
 (define end-tick #f)                    ; tick at which the fall reached its end
@@ -478,6 +564,7 @@ void main() {
   (make-dropdown '("1 time slice" "3 time slices" "5 time slices")
                  (cond ((= start-slices 1) 0) ((= start-slices 5) 2) (else 1))
                  (lambda (i) (set! slices (case i ((0) 1) ((2) 5) (else 3))) (set! geom-dirty #t))))
+(define slow-toggle (make-toggle "slow down near the horizons" #t (lambda (on) (set! slow? on))))
 (define loop-toggle (make-toggle "loop" #f (lambda (on) (set! loop? on))))
 (define cones-toggle (make-toggle "light cones" #t (lambda (on) (set! show-cones on))))
 (define horizons-toggle
@@ -505,7 +592,7 @@ void main() {
           (list (make-label "<b>Black hole</b>") spin-slider
                 (make-label "<b>Observer</b>") r0-slider L-slider
                 (make-separator)
-                (make-label "<b>Time</b>") scrub play-button restart-button loop-toggle speed-slider
+                (make-label "<b>Time</b>") scrub play-button restart-button loop-toggle slow-toggle speed-slider
                 (make-separator)
                 (make-label "<b>View</b>") cone-slider slices-dd cones-toggle horizons-toggle grid-toggle drag-toggle
                 (make-separator) legend))
@@ -554,6 +641,7 @@ void main() {
             (gpu-draw! pass strip-pipe k 'vertices wl-buf)
             (gpu-draw! pass strip-pipe k 'vertices wl-buf))
           (gpu-draw! pass lines-pipe tick-count 'vertices tick-buf)
+          (gpu-draw! pass lines-pipe mark-count 'vertices mark-buf)
           (gpu-draw! pass lines-pipe 6 'vertices marker-buf)
           (when show-cones
             (gpu-draw! pass cone-pipe 96 'vertices lattice-buf 'instances lattice-count))
@@ -609,7 +697,7 @@ void main() {
       ;; is thousands of interpreted RK4 steps
       (when (and wl-dirty (>= (- ticks wl-dirty-tick) 8)) (rebuild-worldline!))
       (when playing
-        (set! tau-cur (+ tau-cur (* speed (/ dt 1000.0))))
+        (set! tau-cur (+ tau-cur (* speed (rate-factor (vector-ref (current-sample) 4)) (/ dt 1000.0))))
         (when (>= tau-cur tau-end) (set! tau-cur tau-end) (set! playing #f)))
       (let ((now-end (>= tau-cur (- tau-end 1e-9))))
         (when (and now-end (not at-end)) (set! end-tick ticks))
@@ -619,10 +707,12 @@ void main() {
         (set! tau-cur 0.0) (set! playing #t) (set! at-end #f))
       (when (= (remainder ticks 5) 0)
         (label-set-text! eq-label (equations-html (current-sample)))
-        (if at-end
-            (begin (label-set-text! banner (string-append "<b>" (ending-message) "</b>"))
-                   (widget-set-visible! banner #t))
-            (widget-set-visible! banner #f)))
+        (let ((c (last-crossing tau-cur)))
+          (cond (at-end
+                 (set-banner! 'end (string-append "<b>" (ending-message) "</b>") "#ffd8e0" "#3a1020"))
+                (c (set-banner! (cadr c) (string-append "<b>" (cadr c) "</b>") "#ffffff" "#1c2a3e"
+                                (caddr c)))
+                (else (widget-set-visible! banner #f) (set! banner-key #f)))))
       (when (and playing (= (remainder ticks 3) 0))
         (set! ignore-scrub #t)
         (slider-set-value! scrub (* 1000.0 (/ tau-cur tau-end)))
