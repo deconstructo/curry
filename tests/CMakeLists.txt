@@ -15,6 +15,9 @@ add_test(NAME define_library_stack_guard COMMAND curry --clear-cache ${CMAKE_CUR
 add_test(NAME module_isolation COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/module_isolation_tests.scm)
 # (curry glsl) + (curry spacetime): emitter, CSE, CAS metric derivatives vs finite differences.
 add_test(NAME spacetime COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/spacetime_tests.scm)
+# examples/spacetime-horizon physics: closed-form Kerr-Schild slice vs the CAS metric,
+# cone frames, and the falling observer's conserved quantities.
+add_test(NAME spacetime_horizon COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/spacetime_horizon_tests.scm)
 add_test(NAME vm_deep_recursion COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/vm_deep_recursion_tests.scm)
 set_tests_properties(include_relative PROPERTIES
     ENVIRONMENT "CURRY_MODULE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include_relative")
