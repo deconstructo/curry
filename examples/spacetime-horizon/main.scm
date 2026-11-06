@@ -66,6 +66,7 @@
 (define show-cones #t)
 (define show-horizons #t)
 (define show-grid #t)
+(define show-drag #t)
 (define playing (not start-tau))
 (define tau-cur (or start-tau 0.0))
 
@@ -162,6 +163,7 @@ void main() {
 (define line-inputs '((28 (0 float3 0) (1 float4 12))))
 (define static-buf (make-gpu-buffer 'vertex (* STATIC-CAP 28)))
 (define grid-buf   (make-gpu-buffer 'vertex (* 4000 28)))
+(define drag-buf   (make-gpu-buffer 'vertex (* 8000 28)))
 (define wl-buf     (make-gpu-buffer 'vertex (* 5000 28)))
 (define tick-buf   (make-gpu-buffer 'vertex (* 1200 28)))
 (define marker-buf (make-gpu-buffer 'vertex (* 8 28)))
@@ -245,6 +247,24 @@ void main() {
   (let ((g (take-geometry!)))
     (gpu-buffer-update! grid-buf (car g))
     (set! grid-count (cdr g)))
+  ;; Frame dragging: at each radius, the path of a point carried round at the
+  ;; angular velocity at which space is dragged there (a locally non-rotating
+  ;; observer): w(r) = 2a / (r^3 + a^2 r + 2 a^2), M = 1.  Straight vertical
+  ;; lines for a = 0; the twist grows with the spin and toward the hole.
+  (for-each
+   (lambda (r)
+     (let ((w (/ (* 2.0 spin) (+ (* r r r) (* spin spin r) (* 2.0 spin spin)))))
+       (do ((ph 0 (+ ph 1))) ((= ph 3))
+         (let ((phi0 (* TWO-PI (/ ph 3))))
+           (do ((t T-LO (+ t 0.5))) ((>= t T-HI))
+             (let* ((p1 (+ phi0 (* w t))) (p2 (+ phi0 (* w (+ t 0.5)))))
+               (seg! (- (* r (cos p1)) (* spin (sin p1))) (+ (* r (sin p1)) (* spin (cos p1))) t
+                     (- (* r (cos p2)) (* spin (sin p2))) (+ (* r (sin p2)) (* spin (cos p2))) (+ t 0.5)
+                     0.85 0.7 1.0 0.55)))))))
+   '(1.2 2.0 3.0 4.5 7.0))
+  (let ((g (take-geometry!)))
+    (gpu-buffer-update! drag-buf (car g))
+    (set! drag-count (cdr g)))
   ;; cone lattice: (x y slice region) for each place, each slice
   (let* ((radii '(0.7 1.2 1.8 2.6 3.8 5.5 8.0))
          (azimuths 6)
@@ -270,6 +290,7 @@ void main() {
 
 (define static-count 0)
 (define grid-count 0)
+(define drag-count 0)
 (define lattice-count 0)
 
 ;;; ---- the worldline ----
@@ -439,6 +460,7 @@ void main() {
 (define horizons-toggle
   (make-toggle "horizons and singularity" #t (lambda (on) (set! show-horizons on) (set! geom-dirty #t))))
 (define grid-toggle (make-toggle "\"now\" slice grid" #t (lambda (on) (set! show-grid on))))
+(define drag-toggle (make-toggle "frame-dragging lines" #t (lambda (on) (set! show-drag on))))
 
 (define legend
   (make-label
@@ -451,6 +473,7 @@ void main() {
     "<span style='color:#b366ff'>violet</span>: inner horizon<br>"
     "<span style='color:#1acdb3'>teal</span>: static limit<br>"
     "<span style='color:#ff3030'>red</span>: singularity<br>"
+    "<span style='color:#d9b3ff'>lilac lines</span>: how space is dragged round by the spin (straight when a = 0)<br>"
     "<span style='color:#ffee50'>yellow crosses</span>: one tick of the observer's own clock<br><br>"
     "Up is time.  The horizontal plane is the equator of the black hole.")))
 
@@ -461,7 +484,7 @@ void main() {
                 (make-separator)
                 (make-label "<b>Time</b>") scrub play-button restart-button speed-slider
                 (make-separator)
-                (make-label "<b>View</b>") cone-slider slices-dd cones-toggle horizons-toggle grid-toggle
+                (make-label "<b>View</b>") cone-slider slices-dd cones-toggle horizons-toggle grid-toggle drag-toggle
                 (make-separator) legend status-label))
 
 (define eq-pane (make-scroll-area))
@@ -501,6 +524,7 @@ void main() {
         (lambda (pass)
           (when show-grid
             (gpu-draw! pass lines-pipe grid-count 'vertices grid-buf 'bindings bind-flw))
+          (when show-drag (gpu-draw! pass lines-pipe drag-count 'vertices drag-buf))
           (gpu-draw! pass lines-pipe static-count 'vertices static-buf)
           (gpu-draw! pass strip-pipe wl-count 'vertices wl-buf)
           (when (> k 1)                 ; the part already travelled, drawn twice: brighter

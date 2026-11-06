@@ -38,6 +38,11 @@ light, can go from that point.
   before the horizon, so nothing can stand still inside the static limit.
   The singularity becomes a ring of radius a.
 
+The lilac lines show frame dragging: at each radius, the path of a point
+carried round at the angular velocity w(r) = 2a / (r³ + a²r + 2a²) at which
+the spin drags space there. They are straight at a = 0 and twist more with
+spin and nearer the hole. They are a picture of the dragging, not geodesics.
+
 The white cone and the white line belong to the falling observer. The
 yellow crosses are one tick each of the observer's own clock. Their
 spacing in the vertical direction, compared with the far time `t`, is the
