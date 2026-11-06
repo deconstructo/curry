@@ -1,6 +1,34 @@
 # Changelog
 
-### Unreleased
+### 1.30.0 - 2026-11-07
+
+**New — `syntax-case` and syntax objects (#362)**
+
+- `syntax-case` with literals, fenders, and nested, tail, vector and dotted
+  patterns; `syntax`, `quasisyntax`, `with-syntax`, `generate-temporaries`,
+  `syntax->datum`, `datum->syntax`, `identifier?`, `bound-identifier=?`,
+  `free-identifier=?` and `syntax-violation`. The reader accepts `#'`, `` #` ``,
+  `#,` and `#,@`.
+- Hygiene is partial, the same as `syntax-rules`: an introduced binder does
+  not capture a use-site local, but a binder named like a global is not
+  renamed, and `free-identifier=?` compares names only (#361). The plan is in
+  `docs/thoughts/syntax-case-hygiene-plan.md`.
+
+**New — `maze4d` runs on the `gpu-*` layer, and a viewer for falling through a Kerr horizon (#352, #364)**
+
+- `examples/maze4d.scm` is ported to the `gpu-*` layer (Metal or Vulkan);
+  the Qt OpenGL version is kept as `examples/maze4d-gl.scm`. New canvas
+  procedures for mouse look: `gpu-canvas-grab-mouse!`,
+  `gpu-canvas-release-mouse!`, `gpu-canvas-mouse-grabbed?`,
+  `gpu-canvas-on-grab-move!` and `gpu-canvas-focus!`.
+- Fixed in both maze versions (#351): walls were drawn one cell too close,
+  the floor grid was bent, and the floor moved at half the wall speed.
+- `examples/spacetime-horizon/`: three panes (controls, a `gpu-*` picture,
+  live equations) showing light cones and a free-falling observer crossing
+  the horizons of a Kerr black hole (spin 0 is Schwarzschild), with the
+  singularity, static limit, frame-dragging lines, crossing markers and
+  slower playback near the horizons. The cones come from the same
+  `(curry spacetime)` metric GLSL. New ctest `spacetime_horizon`.
 
 **Fixed — string case conversion is full Unicode (#355)**
 

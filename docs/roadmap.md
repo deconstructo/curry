@@ -15,10 +15,11 @@ generational GC was removed — see
 v1.27.0 release: the opening paragraph and the "Where we are now" rows
 for work shipped since v1.23.3 were rewritten. Updated 2026-11-02 for
 v1.28.0: one entry added to the opening list. Updated 2026-11-04 for
-v1.29.0: one entry added to the opening list. Source: cill_spec.pdf +
+v1.29.0: one entry added to the opening list. Updated 2026-11-07 for
+v1.30.0: one entry added to the opening list. Source: cill_spec.pdf +
 design sessions.*
 
-Curry is at v1.29.0 (released 2026-11-04). Since v1.23.3 the following
+Curry is at v1.30.0 (released 2026-11-07). Since v1.23.3 the following
 has shipped; `CHANGELOG.md` has the dated list.
 
 - **v1.24.0:** SRFI-61 (`cond` arrow clause) in the compiler and the
@@ -53,6 +54,11 @@ has shipped; `CHANGELOG.md` has the dated list.
   GPU geodesic integrator, shown by a ray-traced fall into a Kerr black
   hole; the four-level `cxr` accessors; and the intermittent `actors` test
   hang was fixed.
+- **v1.30.0:** `syntax-case` with syntax objects (`syntax`, `quasisyntax`,
+  `with-syntax`, `datum->syntax`); full Unicode case mapping for strings;
+  SRFI 166 and the final SRFI 272; cuneiform numerals inside lists; hash
+  table deletion fixes; `maze4d` on the `gpu-*` layer; and a viewer for
+  falling through a Kerr horizon (`examples/spacetime-horizon`).
 
 Earlier, between v1.17.0 and v1.23.3: **a real compiler IR pipeline
 shipped** (Tiers 2.1 through 2.6 — open coding, a local inliner, wrapper
@@ -73,7 +79,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.29.0; the table below was last fully checked at v1.23.3)
+## Where we are now (v1.30.0; the table below was last fully checked at v1.23.3)
 
 | Capability | Status |
 |---|---|
