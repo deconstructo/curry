@@ -33,13 +33,83 @@ port of Rogue and will not play move for move like it.
 
 ## Not decided yet
 
-1. **Player classes.** Rogue has none; its descendants do. Plan: build the
-   classless core first, then add a small set of classes. Candidate set
-   drawn from curry's features: Scribe, Diviner (quantum effects),
-   Astronomer, Algebraist. Needs the user's input before work starts.
+1. **What the character choices do in the rules.** The lists are decided
+   (see "Characters" below). What each choice changes is proposed there and
+   needs the user's yes or changes.
 2. **Player against player.** Not in the first version.
 3. **Name** of the game and its directory. `examples/roguelike/` until chosen.
 4. **Turn timeout length.** Start at 5 seconds, make it a setting.
+
+## Characters
+
+Rogue has no classes; this game does. A new player chooses four things.
+The lists below are the user's. Rogue had none of them.
+
+| Choice | Options |
+|---|---|
+| Class | Valkyrie, Fighter, Cleric, Thief, Wizard, Bard, Bon vivant |
+| Gender | Male, Female, Hermaphrodite, Spicy |
+| Race | Human, Sióg |
+| Sexuality | Asexual, Celibate, Ambivalent, Multivalent, Univalent |
+
+(Spelling normalised from the user's message: "valkrie" is Valkyrie and
+"mutivalent" is Multivalent. Confirm.)
+
+### Proposed rules (not yet agreed)
+
+Principle: keep the first version simple. Class and race change the
+numbers. Gender changes the words. Sexuality changes how a character acts
+with other players and with charming monsters, which is where the
+multi-player game gets its own flavour.
+
+**Classes** (starting kit and one ability each):
+
+| Class | Starting kit | Ability |
+|---|---|---|
+| Valkyrie | Spear, light armor | Can drag a dying ally to the stairs |
+| Fighter | Sword, heavy armor | Highest health, extra damage |
+| Cleric | Mace, healing potion | Heals adjacent allies; resists undead drain |
+| Thief | Dagger, lockpicks | Finds traps; steals from monsters; moves quietly |
+| Wizard | Staff, one scroll | Identifies items by use; low health |
+| Bard | Lute, food | Calms monsters; each turn gives nearby allies a small bonus |
+| Bon vivant | Wine, good food, no weapon | Eating and drinking give extra benefit; smooth talk can make monsters hesitate |
+
+**Races:**
+
+| Race | Effect |
+|---|---|
+| Human | Plain; no special bonus or weakness |
+| Sióg | Sees further in the dark; light and quick; hurt more by iron weapons and armor |
+
+**Gender:** sets the pronouns used in game messages and the character
+sheet. Each option has its own word list, kept in one table the user can
+edit; the user chooses the words for Hermaphrodite and Spicy. No effect on
+stats.
+
+**Sexuality** (proposal: bonuses and resistances only, nothing that blocks
+play):
+
+| Choice | Effect |
+|---|---|
+| Asexual | Cannot be charmed by monsters |
+| Celibate | Small bonus to resisting temptation effects and to sticking to a vow (searching, resting) |
+| Ambivalent | Re-rolled each level: a small bonus or penalty, chosen at random |
+| Multivalent | Bonus that grows with the number of allies next to the character |
+| Univalent | Larger bonus while exactly one ally is next to the character; none otherwise |
+
+All of these need a "charm" effect to exist: some monsters and scrolls
+attempt to charm. If the user does not want charm in the game, Asexual and
+Celibate lose most of their meaning and would need a different effect.
+
+### Technical notes
+
+- A character is one record: class, gender, race, sexuality, plus stats.
+  Each choice is a row in a table, so adding an option later is a data
+  change, not a rule change.
+- With 7 × 4 × 2 × 5 = 280 combinations, tests cover every class and race
+  and each gender and sexuality separately, not every combination.
+- Names for all four fields are shown on the join screen and the character
+  sheet. Free-text fields are not allowed (see Security).
 
 ## What curry already gives us (checked 2026-11-07)
 
@@ -167,7 +237,9 @@ the unexpected-word table; monsters as actors that signal each other;
 quantum monsters and chests; surreal-number depth below the last level;
 symbolic scrolls. Pick items one at a time.
 
-### Phase 6 — Classes (2–3 days, after the user decides the set)
+### Phase 6 — Characters (3–4 days, after the user agrees the rules above)
+Class, race, gender and sexuality tables; the join screen; the charm effect;
+one test per class and race, and per gender and sexuality.
 
 ### Phase 7 — Special levels (optional)
 Black-hole level using the horizon-viewer code; four-dimensional level
