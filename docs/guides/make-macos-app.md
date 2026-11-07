@@ -38,6 +38,8 @@ tools/make-macos-app.sh [options] [output-dir]
 | `--sign IDENTITY` | `-` (ad-hoc) | `codesign` identity — pass `""` to skip signing entirely |
 | `--gc-max-heap N` | — | Bake `--gc-max-heap N` into the launcher (e.g. `256M`, `2G`) |
 | `--no-qt` | — | Skip Qt6 framework bundling even if `qt6.so` is present |
+| `--module NAME` | — | Also bundle `(curry NAME)`; for libraries the script loads under a computed name (repeat for multiple) |
+| `--all-modules` | — | Bundle every module in the build directory, not only those the script needs |
 
 ## Quickstart
 
@@ -55,6 +57,25 @@ tools/make-macos-app.sh \
 # Open it immediately
 open ~/Desktop/MyApp.app
 ```
+
+## Which modules are bundled
+
+Only the modules the app needs. The script reads the library names the main
+script and the `--extra` files mention — `(curry X)`, `(srfi N)`, `(scheme X)` —
+then follows the Scheme libraries those import, until nothing new appears.
+Each `(curry X)` found selects `X.so` from the build directory; the rest are
+left out, together with the libraries only they link (libgit2, cairo, OpenSSL,
+…). The build prints which modules it skipped. Qt is bundled only when
+`(curry qt6)` is needed, so a script that does not draw anything no longer
+carries Qt.
+
+The scan reads text, so it cannot see a library imported under a computed
+name (for example through `eval`). Pass those with `--module NAME`, or use
+`--all-modules` to get the old behaviour.
+
+What the scan cannot shrink is the `curry` binary itself. A build made with
+`-DBUILD_LLVM=ON` links `libLLVM` (165 MB), which is copied into every bundle
+and is most of the size. Build curry without LLVM for a smaller app.
 
 ## Scheme libraries
 
@@ -96,7 +117,7 @@ tools/make-macos-app.sh \
 open ~/Desktop/Spacetime\ Horizon.app
 ```
 
-The result is about 300 MB. It uses the `gpu-*` layer, so `QtShaderTools` is
+The result is about 290 MB, most of it `libLLVM` from the curry binary. It uses the `gpu-*` layer, so `QtShaderTools` is
 bundled along with the other Qt frameworks. Command-line options such as
 `--spin 0.9` can be passed to the launcher inside the bundle.
 

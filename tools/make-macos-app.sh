@@ -24,6 +24,10 @@
 #   --sign IDENTITY      codesign identity: '-' = ad-hoc, '' = skip (default: -)
 #   --gc-max-heap N      Bake --gc-max-heap N into the launcher (e.g. 512M, 2G)
 #   --no-qt              Skip Qt6 bundling even if qt6.so is present
+#   --module NAME        Also bundle (curry NAME) -- for libraries the script
+#                        loads by a computed name (repeat as needed)
+#   --all-modules        Bundle every module in the build directory, not just
+#                        the ones the script and its libraries import
 #   output-dir           Where to place AppName.app (default: .)
 
 set -euo pipefail
@@ -42,6 +46,8 @@ BUILD_DIR="$REPO_ROOT/build"
 SIGN_IDENTITY="-"
 GC_MAX_HEAP=""
 NO_QT=false
+ALL_MODULES=false
+EXTRA_MODULES=()
 OUTPUT_DIR="."
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -77,6 +83,8 @@ while [[ $# -gt 0 ]]; do
     --sign)        SIGN_IDENTITY="$2";  shift 2 ;;
     --gc-max-heap) GC_MAX_HEAP="$2";    shift 2 ;;
     --no-qt)       NO_QT=true;          shift   ;;
+    --module)      EXTRA_MODULES+=("$2"); shift 2 ;;
+    --all-modules) ALL_MODULES=true;    shift   ;;
     --help|-h)     usage ;;
     -*)            die "Unknown option: $1 (run with --help)" ;;
     *)             OUTPUT_DIR="$1"; shift ;;
@@ -103,11 +111,63 @@ APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
 
 [[ -d "$OUTPUT_DIR" ]] || die "Output directory does not exist: $OUTPUT_DIR"
 
+# ── which modules does the app need? ──────────────────────────────────────────
+# Bundling every .so drags in every library they link (libgit2, cairo, OpenSSL,
+# ...) and, through qt6.so, all of Qt.  Instead, read the library names the
+# script and the extra files mention -- (curry X), (srfi N), (scheme X) -- then
+# follow the Scheme libraries those pull in until nothing new appears.  This
+# over-includes (a mention in a comment counts) but does not under-include,
+# except for libraries a script loads under a computed name; --module covers
+# those.
+SCHEME_MODS="$REPO_ROOT/lib/curry/modules"
+
+# Print "kind name" for every (curry X / (srfi N / (scheme X in the given paths.
+lib_refs() {
+  grep -rohE '\((curry|srfi|scheme) [A-Za-z0-9-]+' "$@" 2>/dev/null \
+    | sed 's/^(//' | sort -u
+}
+
+# Print the Scheme source paths behind one "kind name" reference.
+lib_sources() {
+  case "$1" in
+    curry)  echo "$SCHEME_MODS/curry/$2.scm"; echo "$SCHEME_MODS/curry/$2" ;;
+    srfi)   echo "$SCHEME_MODS/srfi/$2.sld";  echo "$SCHEME_MODS/srfi/$2" ;;
+    scheme) echo "$SCHEME_MODS/scheme/$2.sld" ;;
+  esac
+}
+
+SEEN_REFS=""
+if ! $ALL_MODULES; then
+  PENDING="$(lib_refs "$MAIN_SCRIPT" ${EXTRA_FILES[@]+"${EXTRA_FILES[@]}"})"
+  for m in ${EXTRA_MODULES[@]+"${EXTRA_MODULES[@]}"}; do
+    PENDING="$PENDING"$'\n'"curry $m"
+  done
+  while [[ -n "$PENDING" ]]; do
+    SEEN_REFS="$(printf '%s\n%s\n' "$SEEN_REFS" "$PENDING" | sed '/^$/d' | sort -u)"
+    NEXT=""
+    while read -r kind name; do
+      [[ -n "$kind" ]] || continue
+      while read -r src; do
+        [[ -e "$src" ]] && NEXT="$NEXT"$'\n'"$(lib_refs "$src")"
+      done < <(lib_sources "$kind" "$name")
+    done <<< "$PENDING"
+    # keep only references not seen yet
+    PENDING="$(printf '%s\n' "$NEXT" | sed '/^$/d' | sort -u \
+               | comm -23 - <(printf '%s\n' "$SEEN_REFS"))"
+  done
+fi
+
+# True when (curry NAME) is wanted.
+need_module() {
+  $ALL_MODULES && return 0
+  printf '%s\n' "$SEEN_REFS" | grep -qx "curry $1"
+}
+
 # ── detect Qt6 module ─────────────────────────────────────────────────────────
 QT6_SO="$MODS_DIR/qt6.so"
 BUNDLE_QT=false
 MACDEPLOYQT=""
-if [[ -f "$QT6_SO" ]] && ! $NO_QT; then
+if [[ -f "$QT6_SO" ]] && ! $NO_QT && need_module qt6; then
   BUNDLE_QT=true
   # Prefer the qtbase macdeployqt (same version the module was built against)
   for candidate in \
@@ -150,13 +210,25 @@ chmod 755 "$CONTENTS/MacOS/curry"
 
 # ── copy modules ──────────────────────────────────────────────────────────────
 info "Copying modules"
-cp "$MODS_DIR"/*.so "$CONTENTS/Resources/mods/curry/" 2>/dev/null || true
+SKIPPED=""
+for so in "$MODS_DIR"/*.so; do
+  [[ -f "$so" ]] || continue
+  name="$(basename "$so" .so)"
+  if need_module "$name"; then
+    cp "$so" "$CONTENTS/Resources/mods/curry/"
+  else
+    SKIPPED="$SKIPPED $name"
+  fi
+done
+if [[ -d "$MODS_DIR/math" ]] && need_module math; then
+  cp -R "$MODS_DIR/math" "$CONTENTS/Resources/mods/curry/"
+fi
 step "$(ls "$CONTENTS/Resources/mods/curry/"*.so 2>/dev/null | wc -l | tr -d ' ') modules copied"
+[[ -z "$SKIPPED" ]] || step "not needed:$SKIPPED  (--all-modules to bundle them)"
 
 # Pure-Scheme libraries ((curry spacetime), (curry gpu-math), the SRFIs, ...) live
 # in lib/curry/modules, not in the build tree's mods/.  Merge them into the same
 # search directory so an app can import them without a curry installation.
-SCHEME_MODS="$REPO_ROOT/lib/curry/modules"
 if [[ -d "$SCHEME_MODS" ]]; then
   cp -R "$SCHEME_MODS"/. "$CONTENTS/Resources/mods/"
   step "Scheme libraries copied from lib/curry/modules"
