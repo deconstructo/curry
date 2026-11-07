@@ -1,5 +1,20 @@
 # Changelog
 
+### 1.30.1 - 2026-11-07
+
+**Fixed — `tools/make-macos-app.sh` apps (#365)**
+
+- Libraries written in Scheme, such as `(curry spacetime)` and `(curry gpu-math)`, are
+  now copied into the app. Before, an app that imported one failed on a machine
+  without curry installed.
+- Qt apps set `QT_QPA_PLATFORM_PLUGIN_PATH` to the bundle's own plugins. Before,
+  `qt6.so` added the Homebrew plugin directory, which loaded a second QtCore next
+  to the bundled one and the window failed to start.
+- Only the modules the script needs are bundled, found by reading the `(curry X)`,
+  `(srfi N)` and `(scheme X)` names it and its libraries mention. Qt is bundled
+  only when `(curry qt6)` is needed. `--module NAME` adds a library loaded under a
+  computed name; `--all-modules` bundles everything as before.
+
 ### 1.30.0 - 2026-11-07
 
 **New — `syntax-case` and syntax objects (#362)**
