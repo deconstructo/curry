@@ -30,12 +30,23 @@ port of Rogue and will not play move for move like it.
 | Display | Text over TCP; players use an ordinary terminal client | No client code to write |
 | Randomness | `(srfi 27)`, seeded; the starting seed is taken from the OS | Replayable games from a seed |
 | Network exposure | Local network only at first | Avoids the security work of an open server |
+| Kind of game | A Rogue-like, not a port: same sort of gameplay, monsters and items, written fresh in curry | Not move-for-move compatible with Rogue, so no need to copy its generator or quirks |
+| Scope | Keep it simple; the curry-feature ideas (Phase 5) are optional and none is chosen yet | Avoids scope growth |
+| Character choices | Four choices at joining: class, gender, race, sexuality (lists in "Characters") | The user's design |
+| Charm | Charm is in the game: some monsters and scrolls try to charm a character | The user's decision; sexuality effects depend on it |
+| Class set | Valkyrie, Fighter, Cleric, Thief, Wizard, Bard, Bon vivant | The user's list |
+| Gender set | Male, Female, Hermaphrodite, Spicy | The user's list |
+| Race set | Human, Sióg | The user's list |
+| Sexuality set | Asexual, Celibate, Ambivalent, Multivalent, Univalent | The user's list |
+| Where it lives | Plan in `docs/thoughts/roguelike-plan.md` on branch `docs/roguelike-plan` (pushed, no pull request yet) | New work goes through a branch |
 
 ## Not decided yet
 
-1. **What the character choices do in the rules.** The lists are decided
-   (see "Characters" below). What each choice changes is proposed there and
-   needs the user's yes or changes.
+1. **What the character choices do in the rules.** The lists and the
+   presence of charm are decided. What each choice changes is only proposed
+   (see "Characters" below) and needs the user's yes or changes. Also to
+   confirm: the spellings Valkyrie and Multivalent, and the pronoun words for
+   Hermaphrodite and Spicy.
 2. **Player against player.** Not in the first version.
 3. **Name** of the game and its directory. `examples/roguelike/` until chosen.
 4. **Turn timeout length.** Start at 5 seconds, make it a setting.
