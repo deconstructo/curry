@@ -56,6 +56,18 @@ tools/make-macos-app.sh \
 open ~/Desktop/MyApp.app
 ```
 
+## Scheme libraries
+
+Libraries written in Scheme (`(curry spacetime)`, `(curry gpu-math)`,
+`(curry glsl)`, `(scheme case-lambda)`, the SRFIs, …) are copied from
+`lib/curry/modules` into `Contents/Resources/mods/`, next to the `.so` modules,
+so a script can import them without a curry installation. This adds about
+2.5 MB.
+
+A script that `(load ...)`s a file next to itself needs that file passed with
+`--extra`; it lands beside `main.scc` in `Resources/`, where the relative load
+finds it.
+
 ## Qt6 GUI application
 
 ```bash
@@ -67,6 +79,26 @@ tools/make-macos-app.sh \
   --gc-max-heap 512M \
   ~/Desktop
 ```
+
+### Spacetime horizon viewer
+
+The black-hole viewer imports `(curry spacetime)` and loads `kerr-slice.scm`
+from its own directory, so it needs the `--extra` file:
+
+```bash
+tools/make-macos-app.sh \
+  --script examples/spacetime-horizon/main.scm \
+  --extra  examples/spacetime-horizon/kerr-slice.scm \
+  --name "Spacetime Horizon" \
+  --gc-max-heap 1G \
+  ~/Desktop
+
+open ~/Desktop/Spacetime\ Horizon.app
+```
+
+The result is about 300 MB. It uses the `gpu-*` layer, so `QtShaderTools` is
+bundled along with the other Qt frameworks. Command-line options such as
+`--spin 0.9` can be passed to the launcher inside the bundle.
 
 ### 4D Tesseract anaglyph viewer
 
@@ -125,11 +157,12 @@ MyApp.app/
       …
     Resources/
       main.scc               ← compiled bytecode of your .scm
-      mods/curry/            ← all Curry modules (.so files)
-        json.so
-        qt6.so
-        sqlite.so
+      mods/curry/            ← all Curry modules: the .so files from the build
+        json.so                  directory plus the Scheme libraries from
+        qt6.so                   lib/curry/modules (spacetime.scm, gpu-math.scm, …)
+        spacetime.scm
         …
+      mods/scheme/, mods/srfi/   ← the (scheme …) and (srfi …) libraries
       AppIcon.icns           ← (if --icon was provided)
       …                      ← (any --extra files)
 ```
@@ -142,11 +175,16 @@ MyApp.app/
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export CURRY_MODULE_PATH="$DIR/../Resources/mods"
+export QT_QPA_PLATFORM_PLUGIN_PATH="$DIR/../PlugIns/platforms"   # Qt apps only
 exec "$DIR/curry" --gc-max-heap 512M "$DIR/../Resources/main.scc" "$@"
 ```
 
 It sets `CURRY_MODULE_PATH` so modules are found inside the bundle, then
-`exec`s the embedded curry binary with the compiled script. Any arguments
+`exec`s the embedded curry binary with the compiled script. For Qt apps it also
+sets `QT_QPA_PLATFORM_PLUGIN_PATH` to the bundle's own plugins: without it
+`qt6.so` adds the Homebrew plugin directory it was built against, and on a
+machine that has Homebrew Qt a second copy of QtCore is loaded next to the
+bundled one and the window fails to start. Any arguments
 passed to the launcher (e.g. from the command line) are forwarded to
 `command-line-args` in the script.
 

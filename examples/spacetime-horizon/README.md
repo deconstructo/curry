@@ -85,3 +85,12 @@ far away it agrees with the usual far-away clock.
 - Dropping from r₀ = 4 with a = 0 and L = −4 puts the observer on an unstable
   circular orbit: it hovers at r = 4 for the full 400 of proper time.
 - Lines are one pixel wide on Metal.
+
+## As a macOS app
+
+```
+tools/make-macos-app.sh --script examples/spacetime-horizon/main.scm \
+  --extra examples/spacetime-horizon/kerr-slice.scm --name "Spacetime Horizon" ~/Desktop
+```
+
+See `docs/guides/make-macos-app.md`.

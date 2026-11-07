@@ -153,6 +153,17 @@ info "Copying modules"
 cp "$MODS_DIR"/*.so "$CONTENTS/Resources/mods/curry/" 2>/dev/null || true
 step "$(ls "$CONTENTS/Resources/mods/curry/"*.so 2>/dev/null | wc -l | tr -d ' ') modules copied"
 
+# Pure-Scheme libraries ((curry spacetime), (curry gpu-math), the SRFIs, ...) live
+# in lib/curry/modules, not in the build tree's mods/.  Merge them into the same
+# search directory so an app can import them without a curry installation.
+SCHEME_MODS="$REPO_ROOT/lib/curry/modules"
+if [[ -d "$SCHEME_MODS" ]]; then
+  cp -R "$SCHEME_MODS"/. "$CONTENTS/Resources/mods/"
+  step "Scheme libraries copied from lib/curry/modules"
+else
+  warn "No Scheme libraries at $SCHEME_MODS -- (curry X) libraries written in Scheme will not import"
+fi
+
 # ── bundle non-system Homebrew dylibs ─────────────────────────────────────────
 # Recursively copies Homebrew dylibs into Contents/Frameworks/ and rewires
 # @install_name references to use @rpath so the bundle is self-contained.
@@ -338,11 +349,19 @@ LAUNCHER="$CONTENTS/MacOS/$APP_NAME"
 GC_FLAG=""
 [[ -n "$GC_MAX_HEAP" ]] && GC_FLAG="--gc-max-heap $GC_MAX_HEAP"
 
+# qt6.so adds the Homebrew plugin directory it was built against to Qt's search
+# path unless QT_QPA_PLATFORM_PLUGIN_PATH is already set.  On a machine with
+# Homebrew Qt that loads a second copy of QtCore next to the bundled one and
+# the platform plugin fails to start.  Point it at the bundle's own plugins.
+QT_ENV=""
+$BUNDLE_QT && QT_ENV='export QT_QPA_PLATFORM_PLUGIN_PATH="$DIR/../PlugIns/platforms"'
+
 cat > "$LAUNCHER" <<LAUNCHER
 #!/bin/bash
 # Auto-generated launcher for ${APP_NAME}.app — do not edit by hand.
 DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 export CURRY_MODULE_PATH="\$DIR/../Resources/mods"
+${QT_ENV}
 exec "\$DIR/curry" ${GC_FLAG} "\$DIR/../Resources/main.scc" "\$@"
 LAUNCHER
 chmod 755 "$LAUNCHER"
