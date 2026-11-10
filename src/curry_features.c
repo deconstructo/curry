@@ -21,8 +21,10 @@ static const char *const FEATURE_NAMES[] = {
     "darwin",
 #elif defined(__linux__)
     "linux",
+#elif defined(__HAIKU__)
+    "haiku",
 #endif
-#if defined(__APPLE__) || defined(__linux__)
+#if defined(__APPLE__) || defined(__linux__) || defined(__HAIKU__)
     "unix",
     "posix",
 #endif

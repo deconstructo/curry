@@ -24,6 +24,10 @@
 #  include <mach-o/dyld.h>
 #  include <limits.h>
 #endif
+#ifdef __HAIKU__
+#  include <image.h>
+#  include <limits.h>
+#endif
 
 extern void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn));
 
@@ -253,7 +257,7 @@ static val_t strip_for(val_t spec) {
 
 void modules_init(void) {
     /* Add search dir relative to executable (handles build-tree and install) */
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(__HAIKU__)
     {
         char exe[PATH_MAX], dir[PATH_MAX];
         bool got_exe = false;
@@ -265,6 +269,18 @@ void modules_init(void) {
 #  ifdef __APPLE__
         uint32_t sz = sizeof(exe);
         if (_NSGetExecutablePath(exe, &sz) == 0) got_exe = true;
+#  endif
+#  ifdef __HAIKU__
+        /* No /proc on Haiku: the running program is the team's B_APP_IMAGE. */
+        image_info info;
+        int32 cookie = 0;
+        while (get_next_image_info(B_CURRENT_TEAM, &cookie, &info) == B_OK) {
+            if (info.type == B_APP_IMAGE) {
+                snprintf(exe, sizeof(exe), "%s", info.name);
+                got_exe = true;
+                break;
+            }
+        }
 #  endif
 
         if (got_exe) {
