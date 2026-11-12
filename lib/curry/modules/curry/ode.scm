@@ -185,16 +185,22 @@
           (let ((h-try (min h (- t1f t))))
             (call-with-values (lambda () (dp-step f t y h-try))
               (lambda (y5 err)
-                (if (<= err tol)
-                    ;; Accept — grow step cautiously
-                    (let ((h-new (* h-try 0.9
-                                    (expt (/ tol (max err 1e-20)) 0.2))))
-                      (loop (+ t h-try) y5
-                            (min (* 10.0 h-try) (max h-new h-try))))
-                    ;; Reject — shrink step
-                    (let ((h-new (* h-try 0.9
-                                    (expt (/ tol err) 0.25))))
-                      (loop t y (max (* 0.1 h-try) h-new)))))))))))
+                (cond
+                  ;; A NaN error estimate fails (<= err tol) every time and
+                  ;; turns h into NaN, so t would never reach t1: stop and
+                  ;; return the NaN solution.
+                  ((nan? err) y5)
+                  ;; Accept — grow step cautiously
+                  ((<= err tol)
+                   (let ((h-new (* h-try 0.9
+                                   (expt (/ tol (max err 1e-20)) 0.2))))
+                     (loop (+ t h-try) y5
+                           (min (* 10.0 h-try) (max h-new h-try)))))
+                  ;; Reject — shrink step
+                  (else
+                   (let ((h-new (* h-try 0.9
+                                   (expt (/ tol err) 0.25))))
+                     (loop t y (max (* 0.1 h-try) h-new))))))))))))
 
 (define (ode-rk45/steps f y0 t0 t1 . opts)
   (let* ((tol (if (pair? opts) (inexact (car opts)) 1e-6))
@@ -207,16 +213,21 @@
           (let ((h-try (min h (- t1f t))))
             (call-with-values (lambda () (dp-step f t y h-try))
               (lambda (y5 err)
-                (if (<= err tol)
-                    (let* ((t1*   (+ t h-try))
-                           (h-new (* h-try 0.9
-                                     (expt (/ tol (max err 1e-20)) 0.2))))
-                      (loop t1* y5
-                            (min (* 10.0 h-try) (max h-new h-try))
-                            (cons (cons t1* y5) acc)))
-                    (let ((h-new (* h-try 0.9
-                                    (expt (/ tol err) 0.25))))
-                      (loop t y (max (* 0.1 h-try) h-new) acc))))))))))
+                (cond
+                  ;; See ode-rk45: stop at the first NaN step.
+                  ((nan? err)
+                   (reverse (cons (cons (+ t h-try) y5) acc)))
+                  ((<= err tol)
+                   (let* ((t1*   (+ t h-try))
+                          (h-new (* h-try 0.9
+                                    (expt (/ tol (max err 1e-20)) 0.2))))
+                     (loop t1* y5
+                           (min (* 10.0 h-try) (max h-new h-try))
+                           (cons (cons t1* y5) acc))))
+                  (else
+                   (let ((h-new (* h-try 0.9
+                                   (expt (/ tol err) 0.25))))
+                     (loop t y (max (* 0.1 h-try) h-new) acc)))))))))))
 
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 5  VELOCITY-VERLET — symplectic integrator
