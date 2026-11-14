@@ -624,6 +624,31 @@
 ;;; when / unless return the last body value, as on bytecode.
 (define (jit-370-when-value x) (when x 5))
 (define (jit-370-unless-value x) (unless x 6))
+;;; Shapes that are accepted: the self-call is in tail position.
+(define (jit-370-nested n)            ; total of j over rows 0..n-1, j = 0..i
+  (let outer ((i 0) (acc 0))
+    (if (= i n)
+        acc
+        (let inner ((j 0) (a acc))
+          (if (> j i) (outer (+ i 1) a) (inner (+ j 1) (+ a 1)))))))
+(define (jit-370-same-name n)         ; inner loop shadows the outer name
+  (let loop ((i 0) (acc 0))
+    (if (= i n)
+        acc
+        (loop (+ i 1)
+              (+ acc (let loop ((j 0)) (if (= j n) j (loop (+ j 1)))))))))
+(define (jit-370-case-all i)
+  (let loop ((i i))
+    (if (> i 9)
+        'done
+        (case (modulo i 2) ((0) (loop (+ i 1))) (else (loop (+ i 3)))))))
+(define (jit-370-arity n)
+  (let loop ((i 0)) (if (< i n) (loop (+ i 1) 9) i)))
+;;; Issue #372: `=>` in a case clause, and SRFI-61 cond clauses, were
+;;; compiled with => read as a variable ("unbound variable" once hot).
+(define (jit-372-case x) (case x ((1) => (lambda (k) (+ k 41))) (else 0)))
+(define (jit-372-cond x)
+  (cond ((values x) number? => (lambda (k) (+ k 41))) (else 0)))
 (let loop ((k 0))
   (when (< k 120)
     (check "JIT #370: non-tail self-call then constant" (jit-370-const 3) 5)
@@ -636,6 +661,19 @@
     (check "JIT #370: tail self-call inside case" (jit-370-case 0) 'five)
     (check "JIT #370: when returns its body value" (jit-370-when-value #t) 5)
     (check "JIT #370: unless returns its body value" (jit-370-unless-value #f) 6)
+    (check "JIT #370: when is void when the test fails"
+           (eq? (jit-370-when-value #f) (if #f #f)) #t)
+    (check "JIT #370: unless is void when the test holds"
+           (eq? (jit-370-unless-value #t) (if #f #f)) #t)
+    (check "JIT #370: inner loop in tail position calls the outer loop"
+           (jit-370-nested 3) 6)
+    (check "JIT #370: inner loop with the same name" (jit-370-same-name 3) 9)
+    (check "JIT #370: case where every branch is a self-call"
+           (jit-370-case-all 0) 'done)
+    (check "JIT #370: self-call with the wrong argument count still raises"
+           (guard (e (#t 'raised)) (jit-370-arity 3)) 'raised)
+    (check "JIT #372: case clause with =>" (jit-372-case 1) 42)
+    (check "JIT #372: cond clause with a guard and =>" (jit-372-cond 1) 42)
     (loop (+ k 1))))
 
 ;;; 18. Global redefinition of an arithmetic operator must deopt already-

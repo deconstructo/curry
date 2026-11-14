@@ -396,17 +396,22 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
         Binding *b = cc.lookup(nm);
         for (int i = (int)cc.named_lets.size() - 1; b && b->is_named_let && i >= 0; --i) {
             if (cc.named_lets[i].name == nm) {
-                NamedLetCtx &nlet = cc.named_lets[i];
+                /* A copy, not a reference: an argument expression may hold
+                 * another named let, whose push_back onto cc.named_lets can
+                 * reallocate the vector while this call is being emitted. */
+                NamedLetCtx nlet = cc.named_lets[i];
                 /* Evaluate all new argument values BEFORE storing (avoid
                  * reading a slot after it may have been updated). */
+                /* A self-call with the wrong number of arguments is an
+                 * arity error on bytecode; leave it there to raise. */
+                size_t n_args = 0;
+                for (val_t a = args; vis_pair(a); a = as_pair(a)->cdr) ++n_args;
+                if (n_args != nlet.slots.size())
+                    throw std::runtime_error(
+                        "JIT: named-let self-call with wrong argument count");
                 SmallVector<Value *, 8> new_vals;
                 for (val_t a = args; vis_pair(a); a = as_pair(a)->cdr)
                     new_vals.push_back(emit_expr(cc, as_pair(a)->car));
-                /* A self-call with the wrong number of arguments is an
-                 * arity error on bytecode; leave it there to raise. */
-                if (new_vals.size() != nlet.slots.size())
-                    throw std::runtime_error(
-                        "JIT: named-let self-call with wrong argument count");
                 for (int j = 0; j < (int)new_vals.size(); ++j)
                     cc.B.CreateStore(new_vals[j], nlet.slots[j]);
                 cc.B.CreateBr(nlet.loop_bb);
@@ -858,11 +863,17 @@ static bool self_calls_all_tail(val_t expr, val_t name, bool tail, int depth) {
         if (op == S("cond")) {
             for (val_t c = rst; vis_pair(c); c = as_pair(c)->cdr) {
                 val_t clause = as_pair(c)->car;
-                if (!vis_pair(clause)) return self_calls_all_tail(clause, name, false, d);
+                if (!vis_pair(clause)) {
+                    if (!self_calls_all_tail(clause, name, false, d)) return false;
+                    continue;
+                }
                 val_t test = as_pair(clause)->car;
                 val_t body = as_pair(clause)->cdr;
-                if (vis_pair(body) && as_pair(body)->car == S("=>")) {
-                    /* (test => proc): proc is called with the test value. */
+                bool arrow = false;   /* (test => proc), (gen guard => proc) */
+                for (val_t b = body; vis_pair(b); b = as_pair(b)->cdr)
+                    if (as_pair(b)->car == S("=>")) arrow = true;
+                if (arrow) {
+                    /* proc is called afterwards: nothing here is tail. */
                     if (!self_calls_seq(clause, name, false, d)) return false;
                     continue;
                 }
@@ -877,9 +888,15 @@ static bool self_calls_all_tail(val_t expr, val_t name, bool tail, int depth) {
             if (!self_calls_all_tail(as_pair(rst)->car, name, false, d)) return false;
             for (val_t c = as_pair(rst)->cdr; vis_pair(c); c = as_pair(c)->cdr) {
                 val_t clause = as_pair(c)->car;
-                if (!vis_pair(clause)) return self_calls_all_tail(clause, name, false, d);
-                /* car is a datum list (or else): data, not code. */
-                if (!self_calls_seq(as_pair(clause)->cdr, name, tail, d)) return false;
+                if (!vis_pair(clause)) {
+                    if (!self_calls_all_tail(clause, name, false, d)) return false;
+                    continue;
+                }
+                /* car is a datum list (or else): data, not code. In
+                 * (data => proc), proc is called afterwards: not tail. */
+                val_t cbody = as_pair(clause)->cdr;
+                bool arrow = vis_pair(cbody) && as_pair(cbody)->car == S("=>");
+                if (!self_calls_seq(cbody, name, tail && !arrow, d)) return false;
             }
             return true;
         }
@@ -1254,6 +1271,13 @@ static Value *emit_cond(CompileCtx &cc, val_t clauses) {
         return cc.B.CreateLoad(cc.i64_t, result_slot, "cond_val");
     }
 
+    /* SRFI-61 (generator guard => receiver): not implemented here, and
+     * compiling it as an ordinary clause reads `=>` as a variable (#372). */
+    for (val_t b = body; vis_pair(b); b = as_pair(b)->cdr)
+        if (as_pair(b)->car == S("=>"))
+            throw std::runtime_error(
+                "JIT: cond clause with a guard and => is not supported");
+
     /* Normal (test expr...) clause */
     auto *then_bb  = BasicBlock::Create(cc.llvm_ctx, "cond_then", cc.fn);
     auto *else_bb  = BasicBlock::Create(cc.llvm_ctx, "cond_else", cc.fn);
@@ -1449,6 +1473,11 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             val_t clause = as_pair(cls)->car;
             val_t datums = as_pair(clause)->car;
             val_t cbody  = as_pair(clause)->cdr;
+            /* (data => proc) would be compiled with `=>` read as a
+             * variable (#372). */
+            if (vis_pair(cbody) && as_pair(cbody)->car == S("=>"))
+                throw std::runtime_error(
+                    "JIT: case clause with => is not supported");
 
             if (vis_symbol(datums) && datums == S("else")) {
                 Value *r = cc.V_VOID_c;
