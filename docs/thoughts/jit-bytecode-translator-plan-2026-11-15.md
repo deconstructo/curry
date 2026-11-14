@@ -1,6 +1,6 @@
 # JIT: translate bytecode to LLVM IR — plan
 
-Status: **plan only, nothing implemented**. Written 2026-11-15.
+Status: **approved 2026-11-15; phase 0 in progress**. Written 2026-11-15.
 
 This replaces the Tier 2.6 plan
 (`tier2-6-llvm-ir-retargeting-plan-2026-08-25.md`). That plan kept the JIT
@@ -140,28 +140,21 @@ refusal reason is recorded (see phase 0).
 Everything else (`OP_APPLY`, `OP_VALUES*`, `OP_CALL_WITH_VALUES`,
 `OP_TREE_EVAL_CACHED`, `OP_DISPLAY`, ...) is a helper call.
 
-## Decisions that need an answer from Scáth
+## Decisions (answered by Scáth, 2026-11-15)
 
-1. **The old `codegen.cpp`.**
-   - (a) Delete it when the translator passes the test suite. Also removes
-     `curry-jit-eval`, `curry-jit-call`, `curry_emit_llvm` (ahead-of-time
-     `.ll`/`.bc` output), `T_JITCLOSURE`, `Chunk::src_lambda` use by the JIT.
-   - (b) Keep it only for `curry_emit_llvm`.
-   - Recommended: (a). One front end is the whole point. Ahead-of-time
-     output can be rebuilt on the translator later if it is wanted.
-   - This removes builtins, so it is a breaking change.
-2. **Fix #370 in the old code now, or not.** The wrong result is live in
-   v1.30.1. A small fix is possible without touching the rest: before
-   compiling a named let, check that every call to the loop name is in tail
-   position, and refuse the function otherwise. About 60 lines.
-   Recommended: yes, as its own small PR, because the translator is weeks
-   away.
-3. **Statepoints.** Every call is wrapped in `gc.statepoint` with no GC
-   arguments. With Boehm only, and a non-moving collector as the goal, they
-   do nothing. Recommended: the translator emits plain calls. If a precise
-   collector is planned after all, say so before phase 1.
-4. **Compile on the calling thread or in the background.** Recommended:
-   calling thread at first (as now), background thread as a later phase.
+1. **The old `codegen.cpp` is kept.** It is not deleted. `curry-jit-eval`,
+   `curry-jit-call` and `curry_emit_llvm` (ahead-of-time `.ll`/`.bc` output)
+   keep using it, so nothing is removed and there is no breaking change.
+   In phase 4 the automatic compilation of hot closures moves to the
+   translator; the source-based path stays selectable with
+   `CURRY_JIT_BACKEND=source`. Consequence: `T_JITCLOSURE`,
+   `Chunk::src_lambda` and the `jit_arith_tainted` flag also stay, and
+   bugs in `codegen.cpp` still need fixing.
+2. **#370 is fixed in the old code now**, as its own PR
+   (branch `fix/370-jit-named-let-nontail`).
+3. **Statepoints:** the translator emits plain calls.
+4. **Compilation runs on the calling thread** at first; a background
+   thread is a later phase.
 
 ## Phases
 
@@ -183,7 +176,8 @@ with the JIT forced on and forced off and compare output.
   and vector access, direct global slot loads.
 - **Phase 3 — register promotion** (stack step 2 above). After this the
   simple-loop numbers should be better than the current JIT.
-- **Phase 4 — switch the default, remove the old code** (decision 1).
+- **Phase 4 — switch the default.** Hot closures are compiled by the
+  translator; `codegen.cpp` stays for the entry points in decision 1.
 - **Phase 5 — later, each optional:** `OP_PUSH_HANDLER`; counting loop
   iterations so that a long loop in a function called once is compiled;
   background compilation; direct native-to-native calls for known global
