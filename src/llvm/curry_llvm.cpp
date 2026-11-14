@@ -135,6 +135,19 @@ static void jit_copy_error(char *errbuf, size_t errlen, const char *msg) {
     snprintf(errbuf, errlen, "%s", msg);
     /* One line only: LLVM's verifier output has several. */
     if (char *nl = strchr(errbuf, '\n')) *nl = '\0';
+    /* The message can hold a symbol name (any UTF-8, cuneiform included).
+     * If snprintf cut it in the middle of a multi-byte character, drop the
+     * incomplete character: the text becomes a Scheme string. */
+    size_t n = strlen(errbuf);
+    if (n + 1 == errlen && strlen(msg) > n) {
+        size_t i = n;
+        while (i > 0 && ((unsigned char)errbuf[i - 1] & 0xC0) == 0x80) --i;  /* continuation bytes */
+        if (i > 0 && ((unsigned char)errbuf[i - 1] & 0x80)) {
+            unsigned char lead = (unsigned char)errbuf[i - 1];
+            size_t need = (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : 4;
+            if (n - (i - 1) < need) errbuf[i - 1] = '\0';
+        }
+    }
 }
 
 val_t curry_llvm_jit_compile(val_t src_lambda, char *errbuf, size_t errlen) {

@@ -476,7 +476,7 @@ static inline void vm_maybe_jit(BcClosure *cl) {
     if (vm_debug_active) return;  /* JIT'd code bypasses breakpoints */
     if (cl->jit_val != V_VOID) return;
     if (cl->chunk->src_lambda == V_VOID) return;
-    maybe_jit_bcc(cl);   /* marks closures with upvalues V_FALSE (#291) */
+    maybe_jit_bcc(cl);   /* marks closures the JIT refuses V_FALSE (jit_gate) */
 }
 
 /* ── BcClosure allocation ────────────────────────────────────────────── */

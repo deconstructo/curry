@@ -695,8 +695,23 @@ static void jit_config_init(void) {
 
 static inline void jit_config(void) { pthread_once(&g_jit_config_once, jit_config_init); }
 
-static const char *jit_chunk_label(const Chunk *ch) {
-    return ch->name ? ch->name : "#<procedure>";
+/* Print one CURRY_JIT_LOG=2 line. Procedure names and code-generator
+ * messages come from the program being run and can hold any bytes, so
+ * control characters (newlines, terminal escapes) are replaced: one event
+ * is always exactly one line. */
+static void jit_log_line(const char *what, const Chunk *ch, const char *detail) {
+    char line[512];
+    snprintf(line, sizeof line, "[jit] %s %s%s%s", what,
+             ch->name ? ch->name : "#<procedure>",
+             detail ? ": " : "", detail ? detail : "");
+    for (char *p = line; *p; p++)
+        if ((unsigned char)*p < 0x20 || *p == 0x7f) *p = '?';
+    fprintf(stderr, "%s\n", line);
+}
+
+bool jit_disabled(void) {
+    jit_config();
+    return g_jit_mode == JIT_MODE_OFF;
 }
 
 /* Why this closure may not be handed to the code generator at all, or
@@ -742,6 +757,9 @@ static JitRefusal jit_gate(const BcClosure *cl) {
 static void jit_note_refusal(Chunk *ch, JitRefusal why, const char *detail) {
     /* Not a property of the chunk, and it would be one line per chunk. */
     if (why == JR_DISABLED) return;
+    /* Already recorded: the usual case for a chunk with many closures, so
+     * skip the copy and the compare-and-swap on the shared Chunk. */
+    if (__atomic_load_n(&ch->jit_refusal, __ATOMIC_ACQUIRE)) return;
     const char *text = jit_refusal_text[why];
     if (detail && *detail) {
         size_t n = strlen(detail) + 1;
@@ -756,7 +774,7 @@ static void jit_note_refusal(Chunk *ch, JitRefusal why, const char *detail) {
         return;
     __atomic_fetch_add(&g_jit_n_refused[why], 1u, __ATOMIC_RELAXED);
     if (g_jit_log >= 2)
-        fprintf(stderr, "[jit] refused %s: %s\n", jit_chunk_label(ch), text);
+        jit_log_line("refused", ch, text);
 }
 
 /* Issue #288: the JIT code for a chunk, compiled at most once and shared by
@@ -764,7 +782,7 @@ static void jit_note_refusal(Chunk *ch, JitRefusal why, const char *detail) {
  * no upvalues, so the code is the same for all of them). Returns the
  * T_JITCLOSURE, or V_FALSE if the chunk is being compiled by another thread
  * right now or cannot be compiled. */
-val_t jit_chunk_code(Chunk *ch) {
+static val_t jit_chunk_code(Chunk *ch) {
     val_t shared = __atomic_load_n(&ch->jit_shared, __ATOMIC_ACQUIRE);
     if (shared != 0) return shared;      /* compiled, or V_FALSE */
     val_t expected = 0;
@@ -781,7 +799,7 @@ val_t jit_chunk_code(Chunk *ch) {
     __atomic_store_n(&ch->jit_shared, compiled, __ATOMIC_RELEASE);
     __atomic_fetch_add(&g_jit_n_compiled, 1u, __ATOMIC_RELAXED);
     if (g_jit_log >= 2)
-        fprintf(stderr, "[jit] compiled %s\n", jit_chunk_label(ch));
+        jit_log_line("compiled", ch, NULL);
     return compiled;
 }
 
@@ -794,8 +812,9 @@ void jit_compile_closure_now(BcClosure *cl) {
         __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
 }
 
-/* True if calls to `cl` run native code (or will from the next call: the
- * chunk's shared code exists and this closure may use it). */
+/* True if `cl` has native code: its own, or the chunk's shared code that it
+ * adopts on its next call. Call sites still run bytecode while the debugger
+ * or the profiler is active, and after the arithmetic taint (#118). */
 bool jit_closure_compiled(const BcClosure *cl) {
     if (vis_jitclosure(__atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE))) return true;
     return jit_gate(cl) == JR_NONE &&

@@ -6,7 +6,7 @@ When built with `-DBUILD_LLVM=ON`, Curry adds a tiered native-compilation layer 
 |-----------|-------------|
 | `(curry-llvm-available?)` | `#t` if the JIT backend is compiled in |
 | `(jit-compile! proc)` | Force-compile a bytecode closure to native code immediately |
-| `(jit-compiled? proc)` | `#t` if calls to `proc` run native code |
+| `(jit-compiled? proc)` | `#t` if `proc` has been compiled to native code (while the debugger or the profiler is active, calls still use bytecode) |
 | `(jit-refusal-reason proc)` | A string saying why `proc` is not and will not be compiled; `#f` if it is compiled or has not been tried yet |
 
 **Auto-JIT**: any `BcClosure` called ≥ 50 times is automatically compiled to native ARM64 or x86-64 on the next call. The compiled version replaces the bytecode interpreter transparently — no source changes needed.
@@ -23,7 +23,8 @@ reason. The current refusals:
 - a procedure that uses a macro, or a special form the code generator does
   not implement (`quasiquote`, `let-values`, `guard`, `parameterize`,
   `case-lambda`, and others);
-- a named let that calls itself outside tail position.
+- a named let that calls itself outside tail position;
+- a procedure whose source form was not saved with its bytecode.
 
 A procedure is only tried after 50 calls, so a long loop inside a procedure
 that is called once is not compiled either.
@@ -33,7 +34,7 @@ that is called once is not compiled either.
 | Variable | Effect |
 |----------|--------|
 | `CURRY_JIT=on` | Default: compile a closure after 50 calls |
-| `CURRY_JIT=off` | Never compile; `jit-compile!` does nothing |
+| `CURRY_JIT=off` | Never compile; `jit-compile!` does nothing, and `curry-jit-call` / `curry-jit-eval` run on bytecode |
 | `CURRY_JIT=force` | Compile on the first call. For testing: everything the JIT accepts runs as native code from the start |
 | `CURRY_JIT_LOG=1` | At exit, print to stderr how many chunks were compiled and how many were refused, by reason |
 | `CURRY_JIT_LOG=2` | Also print one line for each chunk when it is compiled or refused |

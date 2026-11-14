@@ -1554,10 +1554,12 @@ static val_t prim_jit_call(int ac, val_t *av, void *ud) {
         jit_compile_closure_now(as_bcclosure(proc));
         return apply_arr(proc, 0, NULL);
     }
+    if (jit_disabled()) return apply_arr(proc, 0, NULL);
     return curry_jit_call(proc);
 }
 static val_t prim_jit_eval(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (jit_disabled()) return vm_eval(av[0], GLOBAL_ENV);   /* CURRY_JIT=off */
     return curry_jit_eval_expr(av[0]);
 }
 static val_t prim_jit_call_depth(int ac, val_t *av, void *ud) {
@@ -1574,7 +1576,7 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
     return proc;
 }
 static val_t prim_jit_compiled_p(int ac, val_t *av, void *ud) {
-    /* (jit-compiled? proc) — #t if calls to proc run native code. */
+    /* (jit-compiled? proc) — #t if proc has been compiled to native code. */
     (void)ac; (void)ud;
     val_t proc = av[0];
     if (vis_jitclosure(proc)) return V_TRUE;
