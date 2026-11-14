@@ -402,7 +402,12 @@ static Value *emit_call(CompileCtx &cc, val_t fn_expr, val_t args) {
                 SmallVector<Value *, 8> new_vals;
                 for (val_t a = args; vis_pair(a); a = as_pair(a)->cdr)
                     new_vals.push_back(emit_expr(cc, as_pair(a)->car));
-                for (int j = 0; j < (int)new_vals.size() && j < (int)nlet.slots.size(); ++j)
+                /* A self-call with the wrong number of arguments is an
+                 * arity error on bytecode; leave it there to raise. */
+                if (new_vals.size() != nlet.slots.size())
+                    throw std::runtime_error(
+                        "JIT: named-let self-call with wrong argument count");
+                for (int j = 0; j < (int)new_vals.size(); ++j)
                     cc.B.CreateStore(new_vals[j], nlet.slots[j]);
                 cc.B.CreateBr(nlet.loop_bb);
                 return cc.V_VOID_c;   /* unreachable, but emit_body needs a value */
@@ -782,6 +787,145 @@ static void reject_captured_assignment(val_t forms) {
                     "JIT: local variable '" + n + "' is captured by a lambda "
                     "and assigned with set!; staying on bytecode (issue #291)");
     }
+}
+
+/* ---- Named-let self-call position check (issue #370) ---- */
+/*
+ * emit_call compiles a call to a named let's own name as a jump back to the
+ * top of the loop. That is only right when the call is in tail position of
+ * the loop body: a jump never comes back, so anything that should run after
+ * the call returns is lost (silently wrong results, or IR that fails
+ * verification). self_calls_all_tail returns true only if every use of
+ * `name` in `expr` is a call in tail position; the caller refuses to compile
+ * the function otherwise and it stays on bytecode.
+ *
+ * `tail` says whether `expr` itself is in tail position of the loop body.
+ * Forms this walk does not know (macros, unsupported special forms, data
+ * that only looks like code) get the generic treatment: every subform is
+ * non-tail. A form that rebinds `name` is handled conservatively -- at
+ * worst the function is refused, which only costs speed.
+ */
+static bool self_calls_all_tail(val_t expr, val_t name, bool tail, int depth = 0);
+
+static bool self_calls_seq(val_t forms, val_t name, bool tail, int depth) {
+    for (val_t e = forms; vis_pair(e); e = as_pair(e)->cdr) {
+        bool last = !vis_pair(as_pair(e)->cdr);
+        if (!self_calls_all_tail(as_pair(e)->car, name, tail && last, depth))
+            return false;
+    }
+    return true;
+}
+
+static bool params_bind(val_t params, val_t name) {
+    val_t p = params;
+    for (; vis_pair(p); p = as_pair(p)->cdr)
+        if (as_pair(p)->car == name) return true;
+    return p == name;
+}
+
+static bool self_calls_all_tail(val_t expr, val_t name, bool tail, int depth) {
+    if (depth > JIT_SCAN_DEPTH_MAX)
+        throw std::runtime_error("JIT: expression nesting too deep");
+    if (vis_symbol(expr)) return expr != name;   /* used as a value */
+    if (!vis_pair(expr)) return true;
+
+    val_t op  = lang_translate(as_pair(expr)->car);
+    val_t rst = as_pair(expr)->cdr;
+    int   d   = depth + 1;
+
+    if (op == name) {                            /* a self-call */
+        if (!tail) return false;
+        return self_calls_seq(rst, name, false, d);
+    }
+
+    if (vis_symbol(op)) {
+        if (op == S("quote")) return true;
+
+        if (op == S("if") && vis_pair(rst)) {
+            if (!self_calls_all_tail(as_pair(rst)->car, name, false, d)) return false;
+            for (val_t b = as_pair(rst)->cdr; vis_pair(b); b = as_pair(b)->cdr)
+                if (!self_calls_all_tail(as_pair(b)->car, name, tail, d)) return false;
+            return true;
+        }
+
+        if (op == S("begin") || op == S("and") || op == S("or"))
+            return self_calls_seq(rst, name, tail, d);
+
+        if ((op == S("when") || op == S("unless")) && vis_pair(rst))
+            return self_calls_all_tail(as_pair(rst)->car, name, false, d) &&
+                   self_calls_seq(as_pair(rst)->cdr, name, tail, d);
+
+        if (op == S("cond")) {
+            for (val_t c = rst; vis_pair(c); c = as_pair(c)->cdr) {
+                val_t clause = as_pair(c)->car;
+                if (!vis_pair(clause)) return self_calls_all_tail(clause, name, false, d);
+                val_t test = as_pair(clause)->car;
+                val_t body = as_pair(clause)->cdr;
+                if (vis_pair(body) && as_pair(body)->car == S("=>")) {
+                    /* (test => proc): proc is called with the test value. */
+                    if (!self_calls_seq(clause, name, false, d)) return false;
+                    continue;
+                }
+                if (test != S("else") && !self_calls_all_tail(test, name, false, d))
+                    return false;
+                if (!self_calls_seq(body, name, tail, d)) return false;
+            }
+            return true;
+        }
+
+        if (op == S("case") && vis_pair(rst)) {
+            if (!self_calls_all_tail(as_pair(rst)->car, name, false, d)) return false;
+            for (val_t c = as_pair(rst)->cdr; vis_pair(c); c = as_pair(c)->cdr) {
+                val_t clause = as_pair(c)->car;
+                if (!vis_pair(clause)) return self_calls_all_tail(clause, name, false, d);
+                /* car is a datum list (or else): data, not code. */
+                if (!self_calls_seq(as_pair(clause)->cdr, name, tail, d)) return false;
+            }
+            return true;
+        }
+
+        if (op == S("lambda") && vis_pair(rst)) {
+            if (params_bind(as_pair(rst)->car, name)) return true;   /* shadowed */
+            return self_calls_seq(as_pair(rst)->cdr, name, false, d);
+        }
+
+        if (op == S("let") && vis_pair(rst)) {
+            val_t first = as_pair(rst)->car;
+            val_t body  = as_pair(rst)->cdr;
+            val_t bindings = first;
+            bool shadowed = false;
+            if (vis_symbol(first) && vis_pair(body) &&
+                well_formed_bindings(as_pair(body)->car)) {       /* named let */
+                shadowed = (first == name);
+                bindings = as_pair(body)->car;
+                body     = as_pair(body)->cdr;
+            } else if (!well_formed_bindings(first)) {
+                return self_calls_seq(expr, name, false, d);
+            }
+            for (val_t b = bindings; vis_pair(b); b = as_pair(b)->cdr) {
+                val_t bnd = as_pair(b)->car;
+                if (as_pair(bnd)->car == name) shadowed = true;
+                if (!self_calls_all_tail(as_pair(as_pair(bnd)->cdr)->car, name, false, d))
+                    return false;
+            }
+            return shadowed || self_calls_seq(body, name, tail, d);
+        }
+
+        if ((op == S("let*") || op == S("letrec") || op == S("letrec*")) &&
+            vis_pair(rst) && well_formed_bindings(as_pair(rst)->car)) {
+            for (val_t b = as_pair(rst)->car; vis_pair(b); b = as_pair(b)->cdr) {
+                val_t bnd = as_pair(b)->car;
+                if (as_pair(bnd)->car == name) return false;   /* rebinds: refuse */
+                if (!self_calls_all_tail(as_pair(as_pair(bnd)->cdr)->car, name, false, d))
+                    return false;
+            }
+            return self_calls_seq(as_pair(rst)->cdr, name, tail, d);
+        }
+    }
+
+    /* Everything else -- ordinary calls, define, set!, do, unknown forms,
+     * malformed shapes: every subform is a non-tail use. */
+    return self_calls_seq(expr, name, false, d);
 }
 
 /* ---- Cell allocation ---- */
@@ -1334,22 +1478,27 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             cc.B.CreateCondBr(cc.B.CreateICmpNE(match_v, cc.V_FALSE_c),
                                then_bb, else_bb);
 
+            /* A branch that ended in a named-let self-call (a jump back to
+             * the loop) is already terminated and does not reach mrg_bb. */
             cc.B.SetInsertPoint(then_bb);
             Value *tv = cc.V_VOID_c;
             for (val_t e = cbody; vis_pair(e); e = as_pair(e)->cdr)
                 tv = emit_expr(cc, as_pair(e)->car);
-            cc.B.CreateBr(mrg_bb);
+            bool t_open = !cc.terminated();
+            if (t_open) cc.B.CreateBr(mrg_bb);
             BasicBlock *te = cc.B.GetInsertBlock();
 
             cc.B.SetInsertPoint(else_bb);
             Value *ev = emit_case_clauses(as_pair(cls)->cdr);
-            cc.B.CreateBr(mrg_bb);
+            bool e_open = !cc.terminated();
+            if (e_open) cc.B.CreateBr(mrg_bb);
             BasicBlock *ee = cc.B.GetInsertBlock();
 
             cc.B.SetInsertPoint(mrg_bb);
+            if (!t_open && !e_open) return cc.V_VOID_c;   /* mrg_bb unreachable */
             auto *phi = cc.B.CreatePHI(cc.i64_t, 2);
-            phi->addIncoming(tv, te);
-            phi->addIncoming(ev, ee);
+            if (t_open) phi->addIncoming(tv, te);
+            if (e_open) phi->addIncoming(ev, ee);
             return phi;
         };
         return emit_case_clauses(clauses);
@@ -1366,13 +1515,19 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
         Value *tv = emit_expr(cc, as_pair(rst)->car);
         auto *then_bb = BasicBlock::Create(cc.llvm_ctx, "when_t", cc.fn);
         auto *done_bb = BasicBlock::Create(cc.llvm_ctx, "when_d", cc.fn);
+        /* The value is the last body expression's, or void when the body
+         * does not run -- the same as on bytecode. */
+        auto *result_slot = cc.alloc_root("when_r");
+        cc.B.CreateStore(cc.V_VOID_c, result_slot);
         cc.B.CreateCondBr(cc.B.CreateICmpNE(tv, cc.V_FALSE_c), then_bb, done_bb);
         cc.B.SetInsertPoint(then_bb);
+        Value *last = cc.V_VOID_c;
         for (val_t e = as_pair(rst)->cdr; vis_pair(e); e = as_pair(e)->cdr)
-            emit_expr(cc, as_pair(e)->car);
-        cc.B.CreateBr(done_bb);
+            last = emit_expr(cc, as_pair(e)->car);
+        /* A tail self-call of a named let has already jumped. */
+        if (!cc.terminated()) { cc.B.CreateStore(last, result_slot); cc.B.CreateBr(done_bb); }
         cc.B.SetInsertPoint(done_bb);
-        return cc.V_VOID_c;
+        return cc.B.CreateLoad(cc.i64_t, result_slot, "when_val");
     }
 
     /* ---- (unless test e...) ---- */
@@ -1380,13 +1535,19 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
         Value *tv = emit_expr(cc, as_pair(rst)->car);
         auto *then_bb = BasicBlock::Create(cc.llvm_ctx, "unls_t", cc.fn);
         auto *done_bb = BasicBlock::Create(cc.llvm_ctx, "unls_d", cc.fn);
+        /* The value is the last body expression's, or void when the body
+         * does not run -- the same as on bytecode. */
+        auto *result_slot = cc.alloc_root("unls_r");
+        cc.B.CreateStore(cc.V_VOID_c, result_slot);
         cc.B.CreateCondBr(cc.B.CreateICmpEQ(tv, cc.V_FALSE_c), then_bb, done_bb);
         cc.B.SetInsertPoint(then_bb);
+        Value *last = cc.V_VOID_c;
         for (val_t e = as_pair(rst)->cdr; vis_pair(e); e = as_pair(e)->cdr)
-            emit_expr(cc, as_pair(e)->car);
-        cc.B.CreateBr(done_bb);
+            last = emit_expr(cc, as_pair(e)->car);
+        /* A tail self-call of a named let has already jumped. */
+        if (!cc.terminated()) { cc.B.CreateStore(last, result_slot); cc.B.CreateBr(done_bb); }
         cc.B.SetInsertPoint(done_bb);
-        return cc.V_VOID_c;
+        return cc.B.CreateLoad(cc.i64_t, result_slot, "unls_val");
     }
 
     /* ---- (begin e...) ---- */
@@ -1466,6 +1627,13 @@ static Value *emit_expr(CompileCtx &cc, val_t expr) {
             std::string loop_nm = as_sym(first)->data;
             val_t bindings = as_pair(as_pair(rst)->cdr)->car;
             val_t body     = as_pair(as_pair(rst)->cdr)->cdr;
+
+            /* Issue #370: the loop is compiled as a jump, which is only
+             * right for self-calls in tail position. */
+            if (!self_calls_seq(body, first, /*tail=*/true, 0))
+                throw std::runtime_error(
+                    "JIT: named let '" + loop_nm + "' calls itself outside "
+                    "tail position; staying on bytecode (issue #370)");
 
             SmallVector<std::string, 8> var_names;
             SmallVector<val_t, 8>       init_exprs;
