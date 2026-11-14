@@ -22,6 +22,8 @@ extern "C" {
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <cstdio>
+#include <cstring>
 
 static std::atomic<bool> g_initialised{false};
 
@@ -128,8 +130,19 @@ void curry_llvm_dump_last(void) {
     fprintf(stderr, "%s\n", g_last_ir.c_str());
 }
 
-val_t curry_llvm_jit_compile(val_t src_lambda) {
-    if (!g_initialised.load()) return V_VOID;
+static void jit_copy_error(char *errbuf, size_t errlen, const char *msg) {
+    if (!errbuf || errlen == 0) return;
+    snprintf(errbuf, errlen, "%s", msg);
+    /* One line only: LLVM's verifier output has several. */
+    if (char *nl = strchr(errbuf, '\n')) *nl = '\0';
+}
+
+val_t curry_llvm_jit_compile(val_t src_lambda, char *errbuf, size_t errlen) {
+    if (errbuf && errlen) errbuf[0] = '\0';
+    if (!g_initialised.load()) {
+        jit_copy_error(errbuf, errlen, "LLVM backend not initialised");
+        return V_VOID;
+    }
 
     static std::atomic<uint64_t> seq{0};
     std::string fn_name = "curry_jit_" + std::to_string(seq.fetch_add(1));
@@ -150,9 +163,15 @@ val_t curry_llvm_jit_compile(val_t src_lambda) {
         /* Call the compiled thunk outside the lock: it may trigger more JIT. */
         auto *fn = reinterpret_cast<val_t (*)()>(addr);
         val_t result = fn();
-        return vis_jitclosure(result) ? result : V_VOID;
+        if (vis_jitclosure(result)) return result;
+        jit_copy_error(errbuf, errlen, "compiled code did not produce a procedure");
+        return V_VOID;
+    } catch (const std::exception &e) {
+        jit_copy_error(errbuf, errlen, e.what());
+        return V_VOID;  /* keep using bytecode */
     } catch (...) {
-        return V_VOID;  /* silent: keep using bytecode */
+        jit_copy_error(errbuf, errlen, "unknown error in the code generator");
+        return V_VOID;
     }
 }
 

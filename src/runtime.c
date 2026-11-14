@@ -627,6 +627,138 @@ bool jit_arith_tainted(void) {
 #endif /* BUILD_LLVM */
 
 #ifdef BUILD_LLVM
+/* ── JIT configuration and reporting ─────────────────────────────────────
+ *
+ * CURRY_JIT=on     (default) compile a closure after JIT_THRESHOLD calls
+ * CURRY_JIT=off    never compile; jit-compile! does nothing
+ * CURRY_JIT=force  compile on the first call (for testing: every closure
+ *                  the JIT accepts runs as native code from the start)
+ *
+ * CURRY_JIT_LOG=1  print a summary to stderr at exit: chunks compiled, and
+ *                  chunks refused, by reason
+ * CURRY_JIT_LOG=2  also print one line per chunk when it is compiled or
+ *                  refused
+ *
+ * A refusal is recorded once per chunk in Chunk::jit_refusal (the first
+ * reason wins) and can be read with (jit-refusal-reason proc). */
+enum { JIT_MODE_ON = 0, JIT_MODE_OFF, JIT_MODE_FORCE };
+
+typedef enum {
+    JR_NONE = 0,
+    JR_DISABLED,
+    JR_NO_SOURCE,
+    JR_UPVALUES,
+    JR_LIBRARY_ENV,
+    JR_LOCAL_MACRO,
+    JR_CODEGEN,
+    JR_COUNT
+} JitRefusal;
+
+static const char *const jit_refusal_text[JR_COUNT] = {
+    [JR_NONE]        = "",
+    [JR_DISABLED]    = "JIT disabled (CURRY_JIT=off)",
+    [JR_NO_SOURCE]   = "no source form saved for this procedure",
+    [JR_UPVALUES]    = "closure captures variables (issue #291)",
+    [JR_LIBRARY_ENV] = "compiled inside a define-library",
+    [JR_LOCAL_MACRO] = "uses a let-syntax/letrec-syntax macro (issue #114)",
+    [JR_CODEGEN]     = "code generator refused the procedure",
+};
+
+static int            g_jit_mode = JIT_MODE_ON;
+static int            g_jit_log  = 0;
+static pthread_once_t g_jit_config_once = PTHREAD_ONCE_INIT;
+static uint32_t       g_jit_n_compiled;
+static uint32_t       g_jit_n_refused[JR_COUNT];
+
+static void jit_report_atexit(void) {
+    uint32_t refused = 0;
+    for (int i = 1; i < JR_COUNT; i++)
+        refused += __atomic_load_n(&g_jit_n_refused[i], __ATOMIC_RELAXED);
+    fprintf(stderr, "[jit] %u chunks compiled, %u refused\n",
+            __atomic_load_n(&g_jit_n_compiled, __ATOMIC_RELAXED), refused);
+    for (int i = 1; i < JR_COUNT; i++) {
+        uint32_t n = __atomic_load_n(&g_jit_n_refused[i], __ATOMIC_RELAXED);
+        if (n) fprintf(stderr, "[jit]   %6u  %s\n", n, jit_refusal_text[i]);
+    }
+}
+
+static void jit_config_init(void) {
+    const char *m = getenv("CURRY_JIT");
+    if (m && strcmp(m, "off") == 0)        g_jit_mode = JIT_MODE_OFF;
+    else if (m && strcmp(m, "force") == 0) g_jit_mode = JIT_MODE_FORCE;
+    else if (m && *m && strcmp(m, "on") != 0)
+        fprintf(stderr, "[jit] CURRY_JIT=%s not understood (use on, off or force); using on\n", m);
+    const char *l = getenv("CURRY_JIT_LOG");
+    if (l && *l) g_jit_log = (l[0] == '2') ? 2 : (l[0] == '0') ? 0 : 1;
+    if (g_jit_log >= 1) atexit(jit_report_atexit);
+}
+
+static inline void jit_config(void) { pthread_once(&g_jit_config_once, jit_config_init); }
+
+static const char *jit_chunk_label(const Chunk *ch) {
+    return ch->name ? ch->name : "#<procedure>";
+}
+
+/* Why this closure may not be handed to the code generator at all, or
+ * JR_NONE. The one place these conditions are written down: maybe_jit_bcc,
+ * jit-compile!, curry-jit-call and jit-refusal-reason all ask here. */
+static JitRefusal jit_gate(const BcClosure *cl) {
+    const Chunk *ch = cl->chunk;
+    jit_config();
+    if (g_jit_mode == JIT_MODE_OFF) return JR_DISABLED;
+    if (ch->src_lambda == V_VOID) return JR_NO_SOURCE;
+    /* JIT-compiled native code's global-variable resolution (src/llvm/
+     * jit.cpp's env_lookup_slot/env_define helpers) hard-codes GLOBAL_ENV,
+     * with no knowledge of a chunk's own Chunk::target_env (chunk.h) --
+     * unlike the bytecode VM's OP_LOAD_GLOBAL/etc, which read TARGET_ENV.
+     * A chunk compiled against a define-library body's own env_new_root()
+     * frame would, once JIT-promoted, silently start resolving its own
+     * top-level references against GLOBAL_ENV instead -- appearing as
+     * "unbound variable" for any reference to a same-library sibling that
+     * doesn't happen to also exist in GLOBAL_ENV. Such chunks stay on the
+     * bytecode VM. */
+    if (ch->target_env != V_VOID) return JR_LIBRARY_ENV;
+    /* A let-syntax/letrec-syntax-local macro use has no GLOBAL_ENV binding
+     * for codegen.cpp's own macro guard to find, and the enclosing
+     * let-syntax form itself is never part of this chunk's own src_lambda
+     * -- so codegen.cpp can silently compile a call to such a macro's name
+     * as an ordinary procedure call. classify_head (compiler_classic.c)
+     * sets this flag whenever compiling this chunk resolved a name via
+     * resolve_syntax_local. See issue #114. */
+    if (ch->uses_local_macro) return JR_LOCAL_MACRO;
+    /* Issue #291: closures with upvalues stay on the bytecode VM. The JIT
+     * used to compile them with each upvalue's value at compile time baked
+     * in as a constant (a private copy), so a later set! -- by this closure
+     * or by another closure sharing the variable -- was not seen by the
+     * other side: silently wrong results. Also covers self-referencing
+     * named-let closures. */
+    if (cl->upval_count > 0) return JR_UPVALUES;
+    return JR_NONE;
+}
+
+/* Record why `ch` was refused (once; the first reason wins), count it, and
+ * log it at CURRY_JIT_LOG=2. `detail`, when given, is the code generator's
+ * own message and is stored instead of the generic text. */
+static void jit_note_refusal(Chunk *ch, JitRefusal why, const char *detail) {
+    /* Not a property of the chunk, and it would be one line per chunk. */
+    if (why == JR_DISABLED) return;
+    const char *text = jit_refusal_text[why];
+    if (detail && *detail) {
+        size_t n = strlen(detail) + 1;
+        char *copy = (char *)GC_MALLOC_ATOMIC(n);
+        memcpy(copy, detail, n);
+        text = copy;
+    }
+    const char *expected = NULL;
+    if (!__atomic_compare_exchange_n(&ch->jit_refusal, &expected, text,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return;
+    __atomic_fetch_add(&g_jit_n_refused[why], 1u, __ATOMIC_RELAXED);
+    if (g_jit_log >= 2)
+        fprintf(stderr, "[jit] refused %s: %s\n", jit_chunk_label(ch), text);
+}
+
 /* Issue #288: the JIT code for a chunk, compiled at most once and shared by
  * every closure of that chunk (callers only pass chunks whose closures have
  * no upvalues, so the code is the same for all of them). Returns the
@@ -640,10 +772,43 @@ val_t jit_chunk_code(Chunk *ch) {
                                      /*weak=*/false,
                                      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
         return expected;                 /* another thread got there first */
-    val_t compiled = curry_llvm_jit_compile(ch->src_lambda);
-    if (!vis_jitclosure(compiled)) return V_FALSE;   /* stays V_FALSE */
+    char err[256];
+    val_t compiled = curry_llvm_jit_compile(ch->src_lambda, err, sizeof err);
+    if (!vis_jitclosure(compiled)) {     /* stays V_FALSE */
+        jit_note_refusal(ch, JR_CODEGEN, err);
+        return V_FALSE;
+    }
     __atomic_store_n(&ch->jit_shared, compiled, __ATOMIC_RELEASE);
+    __atomic_fetch_add(&g_jit_n_compiled, 1u, __ATOMIC_RELAXED);
+    if (g_jit_log >= 2)
+        fprintf(stderr, "[jit] compiled %s\n", jit_chunk_label(ch));
     return compiled;
+}
+
+/* Compile `cl` now if the JIT accepts it (jit-compile!, curry-jit-call). */
+void jit_compile_closure_now(BcClosure *cl) {
+    JitRefusal why = jit_gate(cl);
+    if (why != JR_NONE) { jit_note_refusal(cl->chunk, why, NULL); return; }
+    val_t compiled = jit_chunk_code(cl->chunk);
+    if (vis_jitclosure(compiled))
+        __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
+}
+
+/* True if calls to `cl` run native code (or will from the next call: the
+ * chunk's shared code exists and this closure may use it). */
+bool jit_closure_compiled(const BcClosure *cl) {
+    if (vis_jitclosure(__atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE))) return true;
+    return jit_gate(cl) == JR_NONE &&
+           vis_jitclosure(__atomic_load_n(&cl->chunk->jit_shared, __ATOMIC_ACQUIRE));
+}
+
+/* Why `cl` is not, and will not be, JIT-compiled; NULL if it is compiled or
+ * has simply not been tried yet. */
+const char *jit_closure_refusal(const BcClosure *cl) {
+    if (jit_closure_compiled(cl)) return NULL;
+    JitRefusal why = jit_gate(cl);
+    if (why != JR_NONE) return jit_refusal_text[why];
+    return __atomic_load_n(&cl->chunk->jit_refusal, __ATOMIC_ACQUIRE);
 }
 #endif
 
@@ -651,46 +816,12 @@ val_t jit_chunk_code(Chunk *ch) {
 void maybe_jit_bcc(BcClosure *cl) {
 #ifdef BUILD_LLVM
     if (__atomic_load_n(&cl->jit_val, __ATOMIC_ACQUIRE) != V_VOID) return;
-    if (cl->chunk->src_lambda == V_VOID) return;
-    /* JIT-compiled native code's global-variable resolution (src/llvm/
-     * jit.cpp's env_lookup_slot/env_define helpers) hard-codes GLOBAL_ENV,
-     * with no knowledge of a chunk's own Chunk::target_env (chunk.h) --
-     * unlike the bytecode VM's OP_LOAD_GLOBAL/etc, which read TARGET_ENV.
-     * A chunk compiled against a define-library body's own env_new_root()
-     * frame would, once JIT-promoted, silently start resolving its own
-     * top-level references against GLOBAL_ENV instead -- appearing as
-     * "unbound variable" for any reference to a same-library sibling that
-     * doesn't happen to also exist in GLOBAL_ENV. Conservative fix,
-     * matching this project's own established pattern for a closely
-     * related problem (docs/thoughts/performance-chez-kaappi.md ss4.4's
-     * call/cc side-exit design): such chunks stay on the bytecode VM tier
-     * permanently, never promoted to native code, rather than teaching
-     * the JIT's own codegen and runtime helpers about target_env too --
-     * real follow-up work, not attempted here. Bytecode-VM execution
-     * alone is still the actual goal of this migration (define-library
-     * bodies no longer tree-walked); JIT promotion on top of that is a
-     * further tier this specific case simply doesn't get yet. */
-    if (cl->chunk->target_env != V_VOID) return;
-    /* A let-syntax/letrec-syntax-local macro use has no GLOBAL_ENV binding
-     * for codegen.cpp's own macro guard to find, and the enclosing
-     * let-syntax form itself is never part of this chunk's own src_lambda
-     * (it's evaluated once at define time to produce the closure, then
-     * discarded) -- so codegen.cpp can silently compile a call to such a
-     * macro's name as an ordinary procedure call with no way to catch it
-     * from the AST alone. classify_head (compiler_classic.c) sets this
-     * flag whenever compiling this chunk resolved a name via
-     * resolve_syntax_local; bailing out here, same as target_env just
-     * above, is the only place with the compile-time information needed
-     * to catch it. See issue #114. */
-    if (cl->chunk->uses_local_macro) return;
-    /* Issue #291: closures with upvalues stay on the bytecode VM. The JIT
-     * used to compile them with each upvalue's value at compile time baked
-     * in as a constant (a private copy), so a later set! -- by this closure
-     * or by another closure sharing the variable -- was not seen by the
-     * other side: silently wrong results. The bytecode VM shares upvalues
-     * correctly. Also covers self-referencing named-let closures, which
-     * were already excluded here. */
-    if (cl->upval_count > 0) {
+    /* Refused before the code generator is even asked (see jit_gate). The
+     * answer depends only on the chunk and the closure's upvalue count,
+     * neither of which changes, so remember it in jit_val. */
+    JitRefusal why = jit_gate(cl);
+    if (why != JR_NONE) {
+        jit_note_refusal(cl->chunk, why, NULL);
         __atomic_store_n(&cl->jit_val, V_FALSE, __ATOMIC_RELEASE);
         return;
     }
@@ -703,7 +834,8 @@ void maybe_jit_bcc(BcClosure *cl) {
         return;
     }
     if (shared == V_FALSE) return;   /* being compiled, or not compilable */
-    if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < JIT_THRESHOLD) return;
+    uint32_t threshold = (g_jit_mode == JIT_MODE_FORCE) ? 1u : JIT_THRESHOLD;
+    if (__atomic_fetch_add(&cl->call_count, 1u, __ATOMIC_RELAXED) + 1 < threshold) return;
     /* Only one thread compiles a chunk; the others stay on bytecode until
      * the result is stored, and nobody retries a chunk that failed. */
     val_t compiled = jit_chunk_code(ch);
