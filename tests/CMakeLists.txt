@@ -49,10 +49,13 @@ add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_
 add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
 add_test(NAME c_stack_overflow COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_stack_overflow_tests.scm)
 set_tests_properties(c_stack_overflow PROPERTIES TIMEOUT 120)
+add_test(NAME list_arguments COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/list_arguments_tests.scm)
 add_test(NAME nan_bounds COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_bounds_tests.scm)
 # A loop that is not given a reachable bound would hang rather than fail.
 set_tests_properties(nan_bounds PROPERTIES TIMEOUT 60)
 add_test(NAME complex_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_compare_tests.scm)
+add_test(NAME ratio_complex COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/ratio_complex_tests.scm)
+add_test(NAME complex_exactness COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_exactness_tests.scm)
 add_test(NAME nan_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_compare_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)
 add_test(NAME srfi_166 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_166_tests.scm)
@@ -346,6 +349,36 @@ endif()
 
 if(BUILD_LLVM)
     add_test(NAME jit COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
+    # The same suites again with CURRY_JIT=force: every closure the JIT
+    # accepts is compiled on its first call, so the tests run as native
+    # code instead of only the few functions that happen to get hot. A
+    # failure here that the plain run does not have is a JIT bug. To run
+    # the whole suite this way: CURRY_JIT=force ctest --test-dir build
+    foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
+              actors sexagesimal hash_tombstone string_case jit)
+        add_test(NAME jit_force_${t}
+                 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
+        set_tests_properties(jit_force_${t} PROPERTIES ENVIRONMENT "CURRY_JIT=force")
+    endforeach()
+    # The bytecode-to-LLVM backend (src/llvm/bcjit.cpp), not yet the
+    # default: its own test file in each mode, and the same core suites
+    # with every closure it accepts compiled on the first call.
+    add_test(NAME jit_bytecode COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
+    add_test(NAME jit_bytecode_source_force COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
+    set_tests_properties(jit_bytecode_source_force PROPERTIES ENVIRONMENT "CURRY_JIT=force")
+    add_test(NAME jit_bytecode_exit COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_exit_tests.scm)
+    set_tests_properties(jit_bytecode_exit PROPERTIES
+                         ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
+    foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
+              actors sexagesimal hash_tombstone string_case jit jit_bytecode)
+        add_test(NAME jit_bc_force_${t}
+                 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
+        set_tests_properties(jit_bc_force_${t} PROPERTIES
+                             ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
+    endforeach()
+    # CURRY_JIT=off must leave the JIT tests passing on bytecode alone.
+    add_test(NAME jit_off COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
+    set_tests_properties(jit_off PROPERTIES ENVIRONMENT "CURRY_JIT=off")
 endif()
 
 if(BUILD_MODULE_NETWORK AND TARGET curry_network)

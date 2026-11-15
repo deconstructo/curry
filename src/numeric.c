@@ -110,6 +110,11 @@ val_t num_make_rational(val_t num, val_t den) {
     mpz_init(n); mpz_init(d);
     to_mpz(n, num);
     to_mpz(d, den);
+    /* mpq canonicalization divides by the denominator: SIGFPE for zero. */
+    if (mpz_sgn(d) == 0) {
+        mpq_clear(q); mpz_clear(n); mpz_clear(d);
+        scm_raise_code(EC_DIVISION_BY_ZERO, "ratio with a zero denominator");
+    }
     mpq_set_num(q, n);
     mpq_set_den(q, d);
     val_t result = make_rat_from_mpq(q);
@@ -247,6 +252,11 @@ long num_to_long(val_t v) {
 
 val_t num_inexact(val_t v) {
     if (vis_flonum(v)) return v;
+    /* Each part: (inexact 1+2i) is 1.0+2.0i, not the real part alone (#386). */
+    if (vis_complex(v)) {
+        check_c_stack_depth("numeric");    /* make-rectangular accepts complex parts */
+        return num_make_complex(num_inexact(as_cpx(v)->real), num_inexact(as_cpx(v)->imag));
+    }
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) return v;
     if (tl_mpfr_prec > 53)
@@ -256,6 +266,11 @@ val_t num_inexact(val_t v) {
 }
 
 val_t num_exact(val_t v) {
+    /* Each part: (exact 1.5+2.5i) is 3/2+5/2i, not left as it was (#386). */
+    if (vis_complex(v)) {
+        check_c_stack_depth("numeric");
+        return num_make_complex(num_exact(as_cpx(v)->real), num_exact(as_cpx(v)->imag));
+    }
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) return mpfr_to_exact(v);
 #endif

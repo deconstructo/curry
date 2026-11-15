@@ -110,6 +110,20 @@ static bool is_delimiter(int c) {
     return c == -1 || isspace(c) || c == '(' || c == ')' || c == '"' || c == ';' || c == '[' || c == ']';
 }
 
+/* True if every character of s is a digit in the given radix (and s is not
+ * empty): the denominator of a ratio. */
+static bool all_radix_digits(const char *s, int radix) {
+    if (*s == '\0') return false;
+    for (; *s; s++) {
+        int c = tolower((unsigned char)*s), d;
+        if (c >= '0' && c <= '9')      d = c - '0';
+        else if (c >= 'a' && c <= 'z') d = c - 'a' + 10;
+        else return false;
+        if (d >= radix) return false;
+    }
+    return true;
+}
+
 val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_force) {
     /* The empty string is never a valid number literal (R7RS). Without this,
      * strtol("", &end, radix) sets end == s (consumes nothing) and returns 0
@@ -136,8 +150,11 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
         val_t v = in_fixnum_range(i) ? vfix(i) : num_make_bignum_i(i);
         return inexact_force ? num_inexact(v) : v;
     }
-    /* Try bignum */
-    if (*end == '\0' || (*end == '/' && *(end+1) != '\0')) {
+    /* Try bignum, or a ratio a/b. The denominator must be plain digits: in
+     * "1/2+3i" the text after the slash is "2+3i", the imaginary part of a
+     * complex number whose real part is the ratio 1/2, not a denominator
+     * (#387). Such a token falls through to the complex literal case. */
+    if (*end == '\0' || (*end == '/' && all_radix_digits(end + 1, radix))) {
         /* Try rational a/b */
         const char *slash = strchr(s, '/');
         if (slash) {
@@ -147,6 +164,10 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
             val_t n = parse_number(num_part, radix, false, false);
             val_t d = parse_number(slash + 1, radix, false, false);
             if (!vis_number(n) || !vis_number(d)) return V_FALSE;
+            /* 1/0 is not a number. mpq canonicalization divides by the
+             * denominator: SIGFPE, which killed the process for a token as
+             * ordinary as `1/0` in source. */
+            if (vis_fixnum(d) && vunfix(d) == 0) return V_FALSE;
             return num_make_rational(n, d);
         }
         /* GMP bignum */
