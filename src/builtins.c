@@ -2263,7 +2263,7 @@ static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
     val_t saved = PORT_STDIN; PORT_STDIN = port;
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
     else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDIN = saved; port_close(port); scm_raise_val(h.exn); }
@@ -2278,7 +2278,7 @@ static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
     val_t saved = PORT_STDOUT; PORT_STDOUT = port;
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
     else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDOUT = saved; port_close(port); scm_raise_val(h.exn); }
@@ -2440,7 +2440,7 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         apply(av[0], V_NIL);
         current_handler = h.prev;
@@ -2703,7 +2703,7 @@ static val_t prim_error_code(int ac, val_t *av, void *ud) {
     return as_err(av[0])->code;
 }
 static val_t prim_raise(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
-static val_t prim_raise_continuable(int ac, val_t *av, void *ud) {(void)ac;(void)ud; scm_raise_val(av[0]);}
+static val_t prim_raise_continuable(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_raise_continuable(av[0]);}
 static val_t prim_error_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if(vis_error(av[0])) return as_err(av[0])->message;
@@ -2731,7 +2731,14 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     /* Mirrors SCM_PROTECT's own save/restore (eval.h) and eval_call_cc's
      * identical code (eval.c) -- see that comment. */
     int   saved_jit_depth = jit_depth_save();
+    /* The exception handler chain too: re-entering from inside frames that are
+     * gone (or from a handler that runs outside its own frame) must not leave
+     * current_handler pointing at them (#377). */
+    ExnHandler *saved_handler = current_handler;
+    int   saved_hcount = vm->handler_count;
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
+        current_handler   = saved_handler;
+        vm->handler_count = saved_hcount;
         /* Continuation was invoked — restore VM state and return captured value.
          * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc
@@ -2755,6 +2762,7 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
+    h.handler_proc = (handler == V_TRUE || handler == V_FALSE) ? V_VOID : handler;   /* #t/#f are the frame markers */
     current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         result = apply(thunk, V_NIL);
@@ -2788,6 +2796,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
+    h.handler_proc = V_TRUE;   /* cleanup-and-rethrow frame: see scm_raise_continuable */
     current_handler = &h;
     bool raised = false;
     val_t exn_val = V_VOID;
@@ -2815,7 +2824,7 @@ static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     bool raised = false; val_t exn_val = V_VOID;
     if (setjmp(h.jmp) == 0) {
         result = apply(proc, scm_cons(port, V_NIL));

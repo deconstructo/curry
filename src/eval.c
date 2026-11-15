@@ -125,8 +125,12 @@ static val_t eval_call_cc(val_t proc) {
      * boundary leaves g_jit_call_depth incremented, permanently
      * downgrading this closure to the bytecode interpreter. */
     int   saved_jit_depth = jit_depth_save();
+    ExnHandler *saved_handler = current_handler;     /* see prim_call_cc */
+    int   saved_hcount = vm ? vm->handler_count : 0;
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         jit_depth_restore(saved_jit_depth);
+        current_handler = saved_handler;
+        if (vm) vm->handler_count = saved_hcount;
         if (vm) {
             vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
             vm->frame_count   = saved_fc;
@@ -1038,7 +1042,7 @@ tail:
         val_t exn_val = V_VOID;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             /* `(parameterize ((p v)))` / `(parameterize ())` -- no body
              * forms at all -- previously reached vcar(body) on a nil
@@ -1094,7 +1098,7 @@ tail:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             if (!vis_nil(body)) {
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -1411,7 +1415,7 @@ tail:
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             result = eval_body(body, env);
             current_handler = h.prev;

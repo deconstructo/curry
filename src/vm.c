@@ -2050,13 +2050,27 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             ExnHandler *eh = &vm_exn_handlers[hi];
             eh->exn  = V_FALSE;
             eh->prev = current_handler;
+            /* the handler: on the stack just below the thunk. #t and #f are the
+             * frame markers (see ExnHandler::handler_proc): a non-procedure
+             * handler becomes #<void>, which raise-continuable then reports
+             * as "not a procedure". */
+            eh->handler_proc = (vm->sp[-1] == V_TRUE || vm->sp[-1] == V_FALSE) ? V_VOID : vm->sp[-1];
             eh->saved_jit_depth = jit_depth_save();
             current_handler = eh;
 
             if (setjmp(eh->jmp) != 0) {
                 /* An exception was raised and caught by this handler.
                  * Restore VM state from the saved snapshot. */
-                int chi = vm->handler_count - 1;
+                /* This frame's own index, not handler_count - 1: raise-continuable
+                 * calls a handler in place while entries above this one may exist
+                 * (guard inside the handler), and a raise from there lands here
+                 * with handler_count already past them. Every raise longjmps to
+                 * current_handler without changing it, so it is this frame's own
+                 * entry. Not `hi`: that is local to this case's block, whose
+                 * stack slot other cases reuse once it has been left, so after a
+                 * longjmp it holds whatever a later case wrote (unoptimised
+                 * builds crashed). */
+                int chi = (int)(current_handler - vm_exn_handlers);
                 val_t caught = vm_exn_handlers[chi].exn;
                 current_handler   = vm_exn_handlers[chi].prev;
                 jit_depth_restore(vm_exn_handlers[chi].saved_jit_depth);

@@ -129,7 +129,7 @@ static void execute_item(WorkItem *item) {
      * deeper until parallel map fails for good (#292 review). */
     int   saved_fc; void *saved_sp, *saved_uv;
     vm_exn_state_save(&saved_fc, &saved_sp, &saved_uv);
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
 
     if (setjmp(h.jmp) == 0) {
         switch (item->kind) {

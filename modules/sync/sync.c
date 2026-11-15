@@ -112,7 +112,7 @@ static curry_val fn_with_mutex(int ac, curry_val *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     bool raised = false; curry_val exn_val = curry_void();
     if (setjmp(h.jmp) == 0) {
         result = curry_apply(av[1], 0, NULL);
