@@ -261,6 +261,11 @@ val_t num_exact(val_t v) {
 #endif
     if (!vis_flonum(v)) return v;
     double d = vfloat(v);
+    /* mpq_set_d raises SIGFPE on NaN and infinity, which kills the process
+     * instead of raising a catchable error. */
+    if (!isfinite(d))
+        scm_raise(V_FALSE, "exact: no exact representation for %s",
+                  isnan(d) ? "+nan.0" : d > 0 ? "+inf.0" : "-inf.0");
     /* Convert double to exact rational via GMP */
     mpq_t q;
     mpq_init(q);
@@ -860,20 +865,37 @@ int num_cmp(val_t a, val_t b) {
     return r < 0 ? -1 : r > 0 ? 1 : 0;
 }
 
-bool num_eq(val_t a, val_t b) { return num_cmp(a,b)==0; }
-bool num_lt(val_t a, val_t b) { return num_cmp(a,b)<0;  }
-bool num_le(val_t a, val_t b) { return num_cmp(a,b)<=0; }
-bool num_gt(val_t a, val_t b) { return num_cmp(a,b)>0;  }
-bool num_ge(val_t a, val_t b) { return num_cmp(a,b)>=0; }
+/* A NaN is unordered: =, <, <=, >, >= are all false when either side is
+ * NaN (IEEE 754; R6RS 11.7.4.3).  num_cmp can only answer -1/0/+1 and
+ * reports an unordered pair as 0, and its many other callers rely on that
+ * three-way contract, so the predicates check for NaN themselves -- after
+ * num_cmp, which is what raises when an operand isn't a number. */
+static inline bool num_unordered(val_t a, val_t b) {
+    if (vis_fixnum(a) && vis_fixnum(b)) return false;
+    return num_is_nan(a) || num_is_nan(b);
+}
+bool num_eq(val_t a, val_t b) { return num_cmp(a,b)==0 && !num_unordered(a,b); }
+bool num_lt(val_t a, val_t b) { return num_cmp(a,b)<0  && !num_unordered(a,b); }
+bool num_le(val_t a, val_t b) { return num_cmp(a,b)<=0 && !num_unordered(a,b); }
+bool num_gt(val_t a, val_t b) { return num_cmp(a,b)>0  && !num_unordered(a,b); }
+bool num_ge(val_t a, val_t b) { return num_cmp(a,b)>=0 && !num_unordered(a,b); }
+/* min and max return a NaN argument rather than let the comparison pick
+ * whichever side it lands on, so the result doesn't depend on order. */
 val_t num_min(val_t a, val_t b) {
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
-    return num_le(a,b)?a:b;
+    int c = num_cmp(a,b);
+    if (num_is_nan(a)) return a;
+    if (num_is_nan(b)) return b;
+    return c<=0?a:b;
 }
 val_t num_max(val_t a, val_t b) {
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
-    return num_ge(a,b)?a:b;
+    int c = num_cmp(a,b);
+    if (num_is_nan(a)) return a;
+    if (num_is_nan(b)) return b;
+    return c>=0?a:b;
 }
 
 /* ---- Integer division ---- */

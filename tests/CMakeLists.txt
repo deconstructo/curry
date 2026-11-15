@@ -50,6 +50,7 @@ add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME nan_bounds COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_bounds_tests.scm)
 # A loop that is not given a reachable bound would hang rather than fail.
 set_tests_properties(nan_bounds PROPERTIES TIMEOUT 60)
+add_test(NAME nan_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_compare_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)
 add_test(NAME srfi_166 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_166_tests.scm)
 add_test(NAME srfi_272_fancy COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_fancy_tests.scm)
@@ -349,6 +350,8 @@ if(BUILD_MODULE_NETWORK AND TARGET curry_network)
     set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
     add_test(NAME srfi_106 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_106_tests.scm)
     set_tests_properties(srfi_106 PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    add_test(NAME char_ready COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/char_ready_tests.scm)
+    set_tests_properties(char_ready PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 # libpiper has no system package yet (see docs/reference/module-piper.md)

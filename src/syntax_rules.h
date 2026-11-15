@@ -95,6 +95,12 @@ void  sr_set_current_env(val_t env);
 val_t sr_get_current_local_macros(void);
 void  sr_set_current_local_macros(val_t names);
 
+/* The local VARIABLES of the enclosing function(s) when a macro is defined
+ * inside one, set by the same compiler functions, same discipline. A
+ * template may refer to them; they are never renamed (issue #361). */
+val_t sr_get_current_local_vars(void);
+void  sr_set_current_local_vars(val_t names);
+
 /* Entry points for syntax_case.c, which reuses this file's matcher and
  * template expander. See the comment above their definitions. `bindings`
  * and `ell_bindings` are the alists sr_match_pattern fills in. */

@@ -162,7 +162,10 @@ bool sx_equal(val_t a, val_t b) {
             if (!sx_equal(ea->args[i], eb->args[i])) return false;
         return true;
     }
-    if (vis_number(a) && vis_number(b)) return num_eq(a, b);
+    /* Structural, so a NaN leaf matches a NaN leaf (as eqv? does) even
+     * though (= +nan.0 +nan.0) is #f. */
+    if (vis_number(a) && vis_number(b))
+        return num_eq(a, b) || (num_is_nan(a) && num_is_nan(b));
     if (vis_symfn(a) && vis_symfn(b))
         return as_symfn(a)->name == as_symfn(b)->name;
     return false;
@@ -1333,6 +1336,8 @@ static val_t sx_simplify_impl(val_t expr) {
                     : (op == SX_GT) ? num_gt(a, b) : num_ge(a, b);
             return vbool(r);
         }
+        /* NaN is unordered against anything, a sym-var included. */
+        if (num_is_nan(a) || num_is_nan(b)) return V_FALSE;
         /* Reflexive: identical expressions on both sides. */
         if (sx_equal(a, b)) return vbool(op == SX_LE || op == SX_GE);
         /* One side a sign-flagged sym-var, other side a plain number. */
