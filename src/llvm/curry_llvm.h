@@ -31,6 +31,7 @@
 #include "../value.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,10 +67,10 @@ bool curry_llvm_available(void);
 void curry_llvm_dump_last(void);
 
 /* Tiered JIT: compile a (lambda params body...) AST to a T_JITCLOSURE.
- * Returns V_VOID (and is silent) if JIT is unavailable or compilation fails.
- * Closures with captures are wrapped in a (let ...) that injects the current
- * upvalue values — see jit_wrap_upvals() in runtime.c. */
-val_t curry_llvm_jit_compile(val_t src_lambda);
+ * Returns V_VOID if JIT is unavailable or compilation fails; prints
+ * nothing. On failure, if errbuf is not NULL, the reason is copied into it
+ * (at most errlen bytes, always NUL-terminated). */
+val_t curry_llvm_jit_compile(val_t src_lambda, char *errbuf, size_t errlen);
 
 /*
  * Compile a list of top-level S-expressions (parsed from a .scm file) and

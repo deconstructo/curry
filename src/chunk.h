@@ -170,6 +170,13 @@ typedef struct {
      * each new closure instance reached the call threshold on its own and
      * was compiled again, and LLVM keeps every compiled module. */
     val_t  jit_shared;
+
+    /* Why the JIT refused this chunk, or NULL if it has not refused it
+     * (not tried yet, or compiled). Set once (first reason wins) by
+     * jit_note_refusal in runtime.c; read by (jit-refusal-reason proc) and
+     * the CURRY_JIT_LOG report. Points at a static string or a GC-allocated
+     * copy of the code generator's error message. Not persisted in .scc. */
+    const char *jit_refusal;
 } Chunk;
 
 /* Allocate a fresh empty chunk */

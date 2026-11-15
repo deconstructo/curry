@@ -118,3 +118,11 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)
+
+      # Every test again with each closure compiled on its first call (see
+      # CURRY_JIT in docs/reference/llvm-jit.md).
+      - name: Test with the JIT forced on
+        working-directory: build
+        env:
+          CURRY_JIT: force
+        run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)

@@ -676,6 +676,47 @@
     (check "JIT #372: cond clause with a guard and =>" (jit-372-cond 1) 42)
     (loop (+ k 1))))
 
+;;; jit-compiled? and jit-refusal-reason (issue #371). The checks that need
+;;; compilation to happen are skipped when it cannot (CURRY_JIT=off).
+(define (jit-371-probe x) x)
+(define (jit-371-sq x) (* x x))
+(check "jit-compiled?: #f before the procedure is compiled or called"
+       (jit-compiled? jit-371-sq) #f)
+(check "jit-refusal-reason: a primitive has none" (jit-refusal-reason car) #f)
+(check "jit-compiled?: #f for a primitive" (jit-compiled? car) #f)
+(jit-compile! jit-371-probe)
+(when (jit-compiled? jit-371-probe)
+  (check "jit-refusal-reason: #f before the procedure is tried"
+         (jit-refusal-reason jit-371-sq) #f)
+  (jit-compile! jit-371-sq)
+  (check "jit-compiled?: #t after jit-compile!" (jit-compiled? jit-371-sq) #t)
+  (check "jit-refusal-reason: #f for a compiled procedure"
+         (jit-refusal-reason jit-371-sq) #f)
+  (check "jit-compiled?: compiled code still gives the right answer"
+         (jit-371-sq 12) 144)
+  ;; A closure with upvalues is refused before code generation (#291).
+  (let ((add5 ((lambda (k) (lambda (x) (+ x k))) 5)))
+    (jit-compile! add5)
+    (check "jit-compiled?: #f for a closure with upvalues" (jit-compiled? add5) #f)
+    (check "jit-refusal-reason: a string for a closure with upvalues"
+           (string? (jit-refusal-reason add5)) #t))
+  ;; Refused by the code generator: its own message is kept.
+  (let ()
+    (define (qq x) `(a ,x))
+    (jit-compile! qq)
+    (check "jit-compiled?: #f for an unsupported form" (jit-compiled? qq) #f)
+    (check "jit-refusal-reason: names the unsupported form"
+           (jit-refusal-reason qq) "JIT: unsupported special form 'quasiquote'")
+    (check "refused procedure still works" (qq 1) '(a 1)))
+  ;; #370: these loop shapes compile now; non-tail self-calls are refused.
+  (check "JIT #370: a when loop is compiled" (jit-compiled? jit-370-when) #t)
+  (check "JIT #370: an unless loop is compiled" (jit-compiled? jit-370-unless) #t)
+  (check "JIT #370: a case loop is compiled" (jit-compiled? jit-370-case) #t)
+  (check "JIT #370: a non-tail self-call is refused" (jit-compiled? jit-370-len) #f)
+  (check "JIT #370: the refusal reason is recorded"
+         (string? (jit-refusal-reason jit-370-len)) #t)
+  (check "JIT #372: a case clause with => is refused" (jit-compiled? jit-372-case) #f))
+
 ;;; 18. Global redefinition of an arithmetic operator must deopt already-
 ;;; JIT-compiled closures and stop future fast-pathing (issue #118) ──────────
 ;;; codegen.cpp's ARITH2/ARITH1 fast paths only ever checked LOCAL
