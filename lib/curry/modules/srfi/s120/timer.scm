@@ -349,15 +349,28 @@
               (condvar-destroy! (%timer-condvar tmr))
               (when err (raise err))))))
 
+    ;; A cancelled timer's mutex and condvar have been destroyed and freed
+    ;; (see timer-cancel!), so none of the operations below may lock
+    ;; them: locking freed memory blocks forever once the allocator reuses
+    ;; it (found as an intermittent hang of srfi_120_tests.scm on Linux,
+    ;; #398). %timer-destroyed? is only ever set by timer-cancel!, whose
+    ;; caller is the single owner of the timer (see its comment).
+    (define (%check-live! tmr who)
+      (when (%timer-destroyed? tmr)
+        (error (string-append who ": timer is cancelled") tmr)))
+
     (define (timer-schedule! tmr thunk when . maybe-period)
-      (let ((period (if (null? maybe-period) #f (car maybe-period))))
+      (%check-live! tmr "timer-schedule!")
+      ;; The time arguments are checked before the mutex is taken: an error
+      ;; raised while it is held would leave it locked for good.
+      (let* ((period (if (null? maybe-period) #f (car maybe-period)))
+             (when-ms (%->ms when "timer-schedule!"))
+             (period-ms (and period (%normalize-period (%->ms period "timer-schedule!")))))
         (mutex-lock! (%timer-mutex tmr))
         (if (%timer-cancelled? tmr)
             (begin (mutex-unlock! (%timer-mutex tmr))
                    (error "timer-schedule!: timer is cancelled" tmr))
-            (let* ((id (%timer-next-id tmr))
-                   (when-ms (%->ms when "timer-schedule!"))
-                   (period-ms (and period (%normalize-period (%->ms period "timer-schedule!")))))
+            (let* ((id (%timer-next-id tmr)))
               (%timer-next-id-set! tmr (+ id 1))
               (hash-table-set! (%timer-tasks tmr) id
                 (%make-task id thunk (+ (%now-ms) when-ms) period-ms))
@@ -366,15 +379,17 @@
               id))))
 
     (define (timer-reschedule! tmr id when . maybe-period)
-      (mutex-lock! (%timer-mutex tmr))
-      (let ((task (hash-table-ref/default (%timer-tasks tmr) id #f)))
+      (%check-live! tmr "timer-reschedule!")
+      (let* ((when-ms (%->ms when "timer-reschedule!"))
+             (period-given? (not (null? maybe-period)))
+             (period-ms (and period-given? (%->ms (car maybe-period) "timer-reschedule!"))))
+       (mutex-lock! (%timer-mutex tmr))
+       (let ((task (hash-table-ref/default (%timer-tasks tmr) id #f)))
         (if (not task)
             (begin (mutex-unlock! (%timer-mutex tmr))
                    (error "timer-reschedule!: id not associated with timer, "
                           "or its task already executed" tmr id))
-            (let* ((when-ms (%->ms when "timer-reschedule!"))
-                   (period-given? (not (null? maybe-period)))
-                   (period-ms (and period-given? (%->ms (car maybe-period) "timer-reschedule!"))))
+            (begin
               ;; "Set period to 0 to cancel [a] periodic task" (SRFI
               ;; text) -- 0 here means "no longer periodic", i.e. the
               ;; task becomes one-shot at the newly-given `when`, not
@@ -384,19 +399,24 @@
                 (%task-period-set! task (%normalize-period period-ms)))
               (cond-signal! (%timer-condvar tmr))
               (mutex-unlock! (%timer-mutex tmr))
-              id))))
+              id)))))
 
+    ;; A cancelled timer has no tasks: nothing to remove, nothing present.
     (define (timer-task-remove! tmr id)
-      (mutex-lock! (%timer-mutex tmr))
-      (let ((existed? (hash-table-exists? (%timer-tasks tmr) id)))
-        (when existed? (hash-table-delete! (%timer-tasks tmr) id))
-        (mutex-unlock! (%timer-mutex tmr))
-        existed?))
+      (and (not (%timer-destroyed? tmr))
+           (begin
+             (mutex-lock! (%timer-mutex tmr))
+             (let ((existed? (hash-table-exists? (%timer-tasks tmr) id)))
+               (when existed? (hash-table-delete! (%timer-tasks tmr) id))
+               (mutex-unlock! (%timer-mutex tmr))
+               existed?))))
 
     (define (timer-task-exists? tmr id)
-      (mutex-lock! (%timer-mutex tmr))
-      (let ((existed? (hash-table-exists? (%timer-tasks tmr) id)))
-        (mutex-unlock! (%timer-mutex tmr))
-        existed?))
+      (and (not (%timer-destroyed? tmr))
+           (begin
+             (mutex-lock! (%timer-mutex tmr))
+             (let ((existed? (hash-table-exists? (%timer-tasks tmr) id)))
+               (mutex-unlock! (%timer-mutex tmr))
+               existed?))))
 
   )) ;; end begin, define-library
