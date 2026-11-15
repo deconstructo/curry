@@ -223,6 +223,27 @@
          (guard (e (#t 'caught)) (timer-schedule! t (lambda () #f) 10))
          'caught))
 
+;;; Every operation on a cancelled timer is safe: its mutex is destroyed, so
+;;; none of them may lock it (it hung for good once the freed memory was reused, #398).
+(let ((t (make-timer)))
+  (let ((id (timer-schedule! t (lambda () #f) 100000)))
+    (timer-cancel! t)
+    (check "timer-reschedule! on a cancelled timer raises"
+           (guard (e (#t 'caught)) (timer-reschedule! t id 10)) 'caught)
+    (check "timer-task-remove! on a cancelled timer is #f" (timer-task-remove! t id) #f)
+    (check "timer-task-exists? on a cancelled timer is #f" (timer-task-exists? t id) #f)))
+
+;;; A bad time argument raises without leaving the timer's mutex locked: the
+;;; cancel afterwards would block for good otherwise.
+(let ((t (make-timer)))
+  (check "timer-schedule! with a bad time raises"
+         (guard (e (#t 'caught)) (timer-schedule! t (lambda () #f) 'soon)) 'caught)
+  (let ((id (timer-schedule! t (lambda () #f) 100000)))
+    (check "timer-reschedule! with a bad time raises"
+           (guard (e (#t 'caught)) (timer-reschedule! t id 'soon)) 'caught))
+  (timer-cancel! t)
+  (check "cancel after the errors returns" #t #t))
+
 ;;; ---- Summary ----
 
 (newline)
