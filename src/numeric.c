@@ -809,7 +809,27 @@ val_t num_abs(val_t a) {
 }
 
 /* ---- Comparison ---- */
+/* Complex numbers have no order either: num_cmp answers 0 when the two
+ * values are equal and 1 when they are not, like the quaternion case below,
+ * so num_eq works on them (issue #379). The ordering predicates must not
+ * call it for an ordering: num_check_ordered refuses first. */
+static int num_cmp_complex(val_t a, val_t b) {
+    val_t ar = a, ai = vfix(0), br = b, bi = vfix(0);
+    if (vis_complex(a)) { ar = as_cpx(a)->real; ai = as_cpx(a)->imag; }
+    if (vis_complex(b)) { br = as_cpx(b)->real; bi = as_cpx(b)->imag; }
+    return (num_cmp(ar, br) == 0 && num_cmp(ai, bi) == 0) ? 0 : 1;
+}
+
+void num_check_ordered(val_t a, val_t b, const char *who) {
+    if (vis_complex(a) || vis_complex(b) || vis_quat(a) || vis_quat(b) ||
+        vis_oct(a) || vis_oct(b))
+        scm_raise(V_FALSE, "%s: no ordering on complex, quaternion or octonion numbers", who);
+}
+
 int num_cmp(val_t a, val_t b) {
+    if ((vis_complex(a) || vis_complex(b)) && !vis_quat(a) && !vis_quat(b) &&
+        !vis_oct(a) && !vis_oct(b))
+        return num_cmp_complex(a, b);
     /* Quaternions have no total order — only equality is meaningful */
     if (vis_quat(a) || vis_quat(b)) {
         double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;

@@ -76,14 +76,22 @@ static uint64_t curry_jit_apply_arr(uint64_t proc_val, int argc, uint64_t *argv)
 }
 
 /* ---- Numeric comparison wrappers (bool → val_t) ---- */
-static uint64_t curry_jit_lt(uint64_t a, uint64_t b)
-    { return num_lt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE; }
-static uint64_t curry_jit_gt(uint64_t a, uint64_t b)
-    { return num_gt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE; }
-static uint64_t curry_jit_le(uint64_t a, uint64_t b)
-    { return num_le((val_t)a,(val_t)b) ? V_TRUE : V_FALSE; }
-static uint64_t curry_jit_ge(uint64_t a, uint64_t b)
-    { return num_ge((val_t)a,(val_t)b) ? V_TRUE : V_FALSE; }
+static uint64_t curry_jit_lt(uint64_t a, uint64_t b) {
+    num_check_ordered((val_t)a, (val_t)b, "<");
+    return num_lt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
+}
+static uint64_t curry_jit_gt(uint64_t a, uint64_t b) {
+    num_check_ordered((val_t)a, (val_t)b, ">");
+    return num_gt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
+}
+static uint64_t curry_jit_le(uint64_t a, uint64_t b) {
+    num_check_ordered((val_t)a, (val_t)b, "<=");
+    return num_le((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
+}
+static uint64_t curry_jit_ge(uint64_t a, uint64_t b) {
+    num_check_ordered((val_t)a, (val_t)b, ">=");
+    return num_ge((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
+}
 static uint64_t curry_jit_num_eq(uint64_t a, uint64_t b)
     { return num_eq((val_t)a,(val_t)b) ? V_TRUE : V_FALSE; }
 

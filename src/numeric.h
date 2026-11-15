@@ -102,6 +102,9 @@ val_t num_csc(val_t v);
 
 /* ---- Comparison (exact and inexact) ---- */
 int num_cmp(val_t a, val_t b);    /* -1 / 0 / +1 */
+/* Raise if either operand has no ordering (complex, quaternion, octonion).
+ * Called by <, <=, > and >= before they compare; `who` names the operator. */
+void num_check_ordered(val_t a, val_t b, const char *who);
 bool num_eq(val_t a, val_t b);
 bool num_lt(val_t a, val_t b);
 bool num_le(val_t a, val_t b);
