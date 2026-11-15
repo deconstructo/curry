@@ -97,6 +97,33 @@
            (lambda () (raise-continuable 'one) (raise-continuable 'two) (raise-continuable 'again))))
        '(late boom))
 
+;;; A handler that uses guard or with-exception-handler itself must not disturb
+;;; the frame it was called from (this crashed the process while the VM
+;;; handler stack entry of that frame was overwritten).
+(check "a handler using guard, then a plain raise handled by the same frame"
+       (guard (e (#t (list 'outer e)))
+         (with-exception-handler
+           (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) 'unwound))
+           (lambda () (raise-continuable 'cont) (raise 'second))))
+       'unwound)
+(check "a handler using guard returns its value to the raise point"
+       (with-exception-handler
+         (lambda (e) (guard (x (#t (list 'inner x))) (raise e)))
+         (lambda () (list 'got (raise-continuable 'v))))
+       '(got (inner v)))
+(check "a handler using with-exception-handler itself"
+       (with-exception-handler
+         (lambda (e) (with-exception-handler (lambda (x) (+ x 100)) (lambda () (raise-continuable e))))
+         (lambda () (+ 1 (raise-continuable 5))))
+       106)
+(check "the same frame handles a later raise after a nested handler ran"
+       (let ((f (lambda ()
+                  (with-exception-handler
+                    (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) (list 'weh-got e)))
+                    (lambda () (list (raise-continuable 'cont) (raise 'second)))))))
+         (list (f) (f)))
+       '((weh-got second) (weh-got second)))
+
 ;;; dynamic-wind: the handler runs inside the dynamic extent of the raise.
 (check "the handler runs between the before and after thunks"
        (let ((log '()))

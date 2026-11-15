@@ -159,8 +159,17 @@ val_t scm_raise_continuable(val_t exn) {
          * handler goes to the frame outside, whose catch code takes the TOP
          * entry of that stack to be its own. */
         int saved_hc = vm->handler_count;
-        if (h->vm_hi >= 0 && h->vm_hi < vm->handler_count) vm->handler_count = h->vm_hi;
+        bool lowered = h->vm_hi >= 0 && h->vm_hi < vm->handler_count;
+        VmHandlerInfo saved_info;
+        if (lowered) {
+            /* A guard or with-exception-handler the handler uses itself pushes
+             * its entry at index vm_hi: keep this frame's entry, which is read
+             * again when its thunk finishes or a later raise unwinds to it. */
+            saved_info = vm->handler_stack[h->vm_hi];
+            vm->handler_count = h->vm_hi;
+        }
         val_t r = apply(proc, scm_cons(exn, V_NIL));
+        if (lowered) vm->handler_stack[h->vm_hi] = saved_info;
         vm->handler_count = saved_hc;
         if (last_pass) last_pass->prev = saved_prev;
         current_handler = first;
