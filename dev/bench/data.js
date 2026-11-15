@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794720699114,
+  "lastUpdate": 1794722312032,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -21113,6 +21113,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 79.145,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2c45e63c6cc12e01f8ccc4c5df4b25e822b59fc5",
+          "message": "Merge pull request #384 from deconstructo/fix/380-scc-error-constant\n\nfix(compiler): a macro expansion error no longer breaks the .scc cache (#380)",
+          "timestamp": "2026-11-15T16:57:52+11:00",
+          "tree_id": "1e50513c0db1564f71b5a03da268b1ed2062dca3",
+          "url": "https://github.com/deconstructo/curry/commit/2c45e63c6cc12e01f8ccc4c5df4b25e822b59fc5"
+        },
+        "date": 1794722311166,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 11.196,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 17.272,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.983,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 21.021,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 89.595,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 179.125,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 49.6,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 56.742,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 41.332,
             "unit": "ms"
           }
         ]
