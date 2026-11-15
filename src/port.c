@@ -6,6 +6,9 @@
 #include "eval.h"
 #include "reader.h"
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -184,10 +187,88 @@ int port_peek_char(val_t v) {
     return p->peeked_cp;
 }
 
+/* Bytes the C library has already read from the descriptor into the stream's
+ * own buffer and not handed out yet, or -1 if this C library does not let us
+ * look. They do not show up as readable on the descriptor, so a readiness
+ * check on the descriptor alone misses them (issue #366). Compile with
+ * -DCURRY_PORT_NO_FILE_INTERNALS to take the -1 path on any platform. */
+static long fp_buffered_input(FILE *fp) {
+#if defined(CURRY_PORT_NO_FILE_INTERNALS)
+    (void)fp; return -1;
+#elif defined(__GLIBC__)
+    return (long)(fp->_IO_read_end - fp->_IO_read_ptr);
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+      defined(__OpenBSD__) || defined(__DragonFly__)
+    return (long)fp->_r;
+#else
+    (void)fp; return -1;
+#endif
+}
+
+/* For a C library whose buffer we cannot inspect: try to read one byte with
+ * the descriptor in non-blocking mode and push it back. Called by
+ * port_char_ready only once poll() has found nothing to read on the
+ * descriptor, so any byte it finds is in the stream buffer; and by
+ * port_buffered_input, which does not poll first.
+ *
+ * Limit: O_NONBLOCK belongs to the open file description, which another
+ * thread (or a process that inherited the descriptor) may share. For the few
+ * microseconds it is set, a blocking read by that other party gets EAGAIN,
+ * which stdio reports as end of file or an error; no data is lost. This path
+ * is used only on a C library other than glibc and the BSDs. */
+static bool fp_probe_nonblocking(FILE *fp, int fd) {
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) return true;                        /* cannot tell */
+    bool changed = !(fl & O_NONBLOCK);
+    if (changed && fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) return true;
+    int saved_errno = errno;
+    errno = 0;
+    int c = getc(fp);
+    bool ready;
+    if (c != EOF)         { ungetc(c, fp); ready = true; }
+    else if (feof(fp))    { ready = true; }         /* end of file: a read returns at once */
+    else { ready = !(errno == EAGAIN || errno == EWOULDBLOCK); clearerr(fp); }
+    if (changed) fcntl(fd, F_SETFL, fl);
+    errno = saved_errno;
+    return ready;
+}
+
+/* True if this input port already holds data that polling its descriptor
+ * would not show: a peeked character or bytes in the stream buffer. */
+bool port_buffered_input(val_t v) {
+    if (!vis_port(v)) return false;
+    Port *p = as_port(v);
+    if (p->flags & PORT_CLOSED) return false;
+    if (p->peeked_cp != -2) return true;
+    if (p->flags & PORT_STRING) return p->u.str.pos < p->u.str.len;
+    if (!(p->flags & PORT_INPUT) || !p->u.fp) return false;   /* nothing to read from */
+    long buffered = fp_buffered_input(p->u.fp);
+    if (buffered >= 0) return buffered > 0;
+    /* This C library does not let us look at its buffer: probe it. */
+    int fd = fileno(p->u.fp);
+    return fd >= 0 && fp_probe_nonblocking(p->u.fp, fd);
+}
+
 bool port_char_ready(val_t v) {
     Port *p = checked_port(v, "char-ready?");
     if (p->flags & PORT_STRING) return p->u.str.pos < p->u.str.len;
-    return true; /* conservative */
+    /* Reading from a closed port, or from one that is not an input port,
+     * does not block: it returns the end of file or raises. */
+    if ((p->flags & PORT_CLOSED) || !(p->flags & PORT_INPUT) || !p->u.fp) return true;
+    if (p->peeked_cp != -2) return true;
+    FILE *fp = p->u.fp;
+    long buffered = fp_buffered_input(fp);
+    if (buffered > 0) return true;
+    int fd = fileno(fp);
+    if (fd < 0) return true;     /* not backed by a descriptor (a TLS port): cannot tell */
+    struct pollfd pfd;
+    pfd.fd = fd; pfd.events = POLLIN; pfd.revents = 0;
+    int r;
+    do { r = poll(&pfd, 1, 0); } while (r < 0 && errno == EINTR);
+    if (r != 0) return true;     /* data, end of file, hang-up or error: a read will not block;
+                                    or poll failed, and we cannot tell */
+    if (buffered < 0) return fp_probe_nonblocking(fp, fd);
+    return false;
 }
 
 void port_write_char(val_t v, int cp) {

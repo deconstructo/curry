@@ -192,6 +192,10 @@ curry_val  curry_make_port_from_file(FILE *fp, bool output, bool binary);
  * callers that want to poll/select on its readiness. Returns -1 for a
  * string port or a closed port. */
 int        curry_port_fd(curry_val port);
+/* True if the input port already holds unread data that polling its file
+ * descriptor would not show (a peeked character, bytes in the stream buffer).
+ * Readiness checks (socket-ready?) must count it. */
+bool       curry_port_buffered_input(curry_val port);
 
 /* Generic byte-level port I/O for module authors whose C code already
  * works on raw bytes/C strings (e.g. a parser like curry_json's, which

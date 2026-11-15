@@ -347,6 +347,8 @@ if(BUILD_MODULE_NETWORK AND TARGET curry_network)
     set_tests_properties(network PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
     add_test(NAME srfi_106 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_106_tests.scm)
     set_tests_properties(srfi_106 PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    add_test(NAME char_ready COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/char_ready_tests.scm)
+    set_tests_properties(char_ready PROPERTIES ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 # libpiper has no system package yet (see docs/reference/module-piper.md)

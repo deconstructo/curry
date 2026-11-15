@@ -111,11 +111,26 @@ Both accept either a raw socket handle (`tcp-listen`'s/`udp-socket`'s
 return value) or a port (`tcp-connect`'s/`tcp-accept`'s in-port or
 out-port) — whichever you have on hand. `socket-ready?` on a listening
 socket means "`tcp-accept` would not block"; on a connected port it means
-"there's data to read without blocking." `timeout-ms` must be a
+"there's data to read without blocking" — including bytes a previous
+`read-char` or `read-line` left in the port's own buffer, which no longer
+show up on the descriptor (a client that sends `ab` in one packet, of which
+the program has read `a`, is still ready). `timeout-ms` must be a
 non-negative finite number no greater than `1e9` (~11.5 days) — `tcp-accept`'s
 own optional timeout (above) has the identical bound, for the identical
 reason (an unvalidated NaN/Infinity/huge value would otherwise reach
 undefined-behavior integer casts internally).
+
+### `char-ready?` and `u8-ready?` on ports
+
+`(char-ready? port)` and `(u8-ready? port)` are `#t` when a read would not
+wait: a character or byte is available, or the peer has closed and the read
+would return the end-of-file object. They are `#f` on an idle connection, so
+a loop over several connections can ask each one before reading it, without
+one silent client holding up the others. A character counts as available
+when its first byte has arrived; a client that sends the bytes of one
+multi-byte character in separate packets can still make `read-char` wait for
+the rest. Ports from `tcp-connect-tls` are not backed by a descriptor and
+still answer `#t`.
 
 If you're polling before calling `tcp-accept` separately rather than
 using `tcp-accept`'s own `timeout-ms`, note that `socket-ready?`

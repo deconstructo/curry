@@ -50,7 +50,9 @@ bool port_is_open(val_t p);
 /* ---- Character I/O ---- */
 int   port_read_char(val_t p);            /* returns Unicode codepoint or -1 on EOF */
 int   port_peek_char(val_t p);
-bool  port_char_ready(val_t p);
+bool  port_char_ready(val_t p);          /* a char (or EOF) can be read without waiting */
+bool  port_buffered_input(val_t p);      /* ... without even asking the descriptor: a peeked char or
+                                            bytes in the stream buffer (false if unknown) */
 void  port_unread_char(val_t p, int ch);
 void  port_write_char(val_t p, int ch);   /* writes UTF-8 encoding */
 int   port_line(val_t p);                 /* 1-based line of the next unread char */
