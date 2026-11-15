@@ -38,6 +38,22 @@
 (check "#i is still inexact" #i1/3 (/ 1.0 3))
 (check "a plain decimal is still a flonum" 1.1 (exact->inexact 11/10))
 
+;;; the reader's #e where the token ends
+(define (rd s) (read (open-input-string s)))
+(define (read-fails? s) (guard (e (#t #t)) (rd s) #f))
+(check "#e1.5 ends at a closing parenthesis" (rd "(#e1.5)") '(3/2))
+(check "#e1.5 ends at a comment" (rd "(#e1.5;x\n)") '(3/2))
+(check "#e1.5 ends at a space" (rd "(#e1.5 #e2)") '(3/2 2))
+(check "#e1.5 ends at a vector bracket" (rd "#(#e1.5)") (vector 3/2))
+(check "#e1.1 read from a string" (rd "#e1.1") 11/10)
+(check "#e+inf.0 is a read error" (read-fails? "#e+inf.0") #t)
+(check "#e- is a read error" (read-fails? "#e-") #t)
+(check "#e1.5.5 is a read error" (read-fails? "#e1.5.5") #t)
+(check "#e#e1 is a read error" (read-fails? "#e#e1") #t)
+(check "#e on a list is unchanged" (rd "#e(1 2)") '(1 2))
+(check "#xe is the hex digit, not an exactness prefix" (rd "#xe") 14)
+(check "#x1e3 is hex" (rd "#x1e3") 483)
+
 ;;; ---- exact? and inexact? on complex numbers (#401) ----
 (check "exact? 1+2i" (exact? 1+2i) #t)
 (check "exact? 1/2+3i" (exact? 1/2+3i) #t)

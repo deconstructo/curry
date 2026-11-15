@@ -779,7 +779,7 @@ static val_t read_datum(val_t port) {
              * start like a number (a parenthesis, a cuneiform numeral) is
              * still read as a datum and converted. */
             int nx = peek_char_port(port);
-            if (isdigit(nx) || nx == '+' || nx == '-' || nx == '.' || nx == '#') {
+            if ((nx >= '0' && nx <= '9') || nx == '+' || nx == '-' || nx == '.' || nx == '#') {
                 StrBuf sb; sb_init(&sb);
                 sb_push(&sb, '#'); sb_push(&sb, 'e');
                 while (!is_delimiter(peek_char_port(port)) && peek_char_port(port) < 128)
