@@ -2056,8 +2056,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 /* This frame's own index, not handler_count - 1: raise-continuable
                  * calls a handler in place while entries above this one may exist
                  * (guard inside the handler), and a raise from there lands here
-                 * with handler_count already past them. */
-                int chi = hi;
+                 * with handler_count already past them. Every raise longjmps to
+                 * current_handler without changing it, so it is this frame's own
+                 * entry. Not `hi`: that is local to this case's block, whose
+                 * stack slot other cases reuse once it has been left, so after a
+                 * longjmp it holds whatever a later case wrote (unoptimised
+                 * builds crashed). */
+                int chi = (int)(current_handler - vm_exn_handlers);
                 val_t caught = vm_exn_handlers[chi].exn;
                 current_handler   = vm_exn_handlers[chi].prev;
                 jit_depth_restore(vm_exn_handlers[chi].saved_jit_depth);
