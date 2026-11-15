@@ -73,6 +73,33 @@
 (check "#e on an exponent too large for a flonum" (s->n "#e1e100000") #f)
 (check "a prefix on something that is not a number" (s->n "#ifoo") #f)
 
+;;; #e on a complex number: each part is exact decimal, and an infinity or NaN
+;;; in either part is #f, not an error
+(check "#e1.1+2.2i" (s->n "#e1.1+2.2i") (make-rectangular 11/10 11/5))
+(check "#e1.1i" (s->n "#e1.1i") (make-rectangular 0 11/10))
+(check "#e-0.1-0.2i" (s->n "#e-0.1-0.2i") (make-rectangular -1/10 -1/5))
+(check "#e1e999+1i is exact, not an error" (exact? (real-part (s->n "#e1e999+1i"))) #t)
+(check "#e1e999+1i real part" (real-part (s->n "#e1e999+1i")) (expt 10 999))
+(check "#e1e100000+1i" (s->n "#e1e100000+1i") #f)
+(check "#e1e100000i" (s->n "#e1e100000i") #f)
+(check "#e1+1e100000i" (s->n "#e1+1e100000i") #f)
+(check "#e+inf.0+1i" (s->n "#e+inf.0+1i") #f)
+(check "#e+nan.0i" (s->n "#e+nan.0i") #f)
+(check "#e1+nan.0i" (s->n "#e1+nan.0i") #f)
+
+;;; exponents too large to build an exact number from
+(check "#e1e10000 is built" (exact? (s->n "#e1e10000")) #t)
+(check "#e1e-10000 is built" (exact? (s->n "#e1e-10000")) #t)
+(check "#e1e100000 is #f" (s->n "#e1e100000") #f)
+(check "#e1e-100000 is #f, not 0" (s->n "#e1e-100000") #f)
+
+;;; signs and exponents alone are not numbers
+(check "+" (s->n "+") #f)
+(check "-" (s->n "-") #f)
+(check "e5" (s->n "e5") #f)
+(check "#e1e+" (s->n "#e1e+") #f)
+(check "#e1e5.5" (s->n "#e1e5.5") #f)
+
 ;;; a decimal point exists only in radix 10
 (check "2 in radix 2 is not a number, not 2.0" (s->n "2" 2) #f)
 (check "9 in radix 8" (s->n "9" 8) #f)

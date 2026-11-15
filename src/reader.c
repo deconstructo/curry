@@ -127,8 +127,8 @@ static bool all_radix_digits(const char *s, int radix) {
 
 /* The exact value of a plain decimal real: [+-]digits[.digits][e[+-]digits],
  * so "1.1" is 11/10, not the double nearest to 1.1. #f if the text is not of
- * that shape (or its exponent is absurdly large), and the caller falls back
- * to parse_number. */
+ * that shape; #<void> if it is but its exponent is beyond what is worth
+ * building an exact number for. */
 static val_t exact_decimal(const char *s) {
     size_t n = strlen(s);
     char *digits = (char *)gc_alloc_atomic(n + 1);
@@ -153,12 +153,12 @@ static val_t exact_decimal(const char *s) {
         for (; *p; p++) {
             if (!isdigit((unsigned char)*p)) return V_FALSE;
             ex = ex * 10 + (*p - '0');
-            if (ex > 100000) return V_FALSE;
+            if (ex > 100000) return V_VOID;
         }
         if (eneg) ex = -ex;
     }
     long scale = ex - frac;
-    if (scale > 10000 || scale < -10000) return V_FALSE;
+    if (scale > 10000 || scale < -10000) return V_VOID;
     val_t m = parse_number(digits, 10, false, false);
     if (vis_false(m)) return V_FALSE;
     if (neg) m = num_neg(m);
@@ -195,16 +195,6 @@ val_t parse_number_prefixed(const char *s, int radix) {
             return V_FALSE;
         }
         s += 2;
-    }
-    if (exact && radix == 10) {
-        val_t d = exact_decimal(s);
-        if (!vis_false(d)) return d;
-    }
-    /* An infinity or NaN has no exact value; (string->number "#e1e999") is
-     * #f, not an error. */
-    if (exact) {
-        val_t plain = parse_number(s, radix, false, false);
-        if (vis_flonum(plain) && !isfinite(vfloat(plain))) return V_FALSE;
     }
     val_t v = parse_number(s, radix, exact, inexact);
     /* parse_number's inexact flag only reaches integers, not ratios. */
@@ -297,8 +287,17 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
       if (!has_digit) goto not_a_float; }
     { double d = strtod(s, &end);
       if (*end == '\0') {
-          val_t v = num_make_float(d);
-          return exact_force ? num_exact(v) : v;
+          if (!exact_force) return num_make_float(d);
+          /* Digit by digit, so "1.1" is 11/10 and not the double nearest it.
+           * This is also the path every real/imaginary part of an exact
+           * complex literal takes. */
+          val_t e = exact_decimal(s);
+          if (e == V_VOID) return V_FALSE;
+          if (!vis_false(e)) return e;
+          /* Not plain decimal text. An infinity or NaN has no exact value:
+           * not a number here, rather than an error out of string->number. */
+          if (!isfinite(d)) return V_FALSE;
+          return num_exact(num_make_float(d));   /* e.g. a C99 hex float */
       } }
     not_a_float: ;
     /* Try complex literal: ends with 'i', e.g. +2i, 3+4i, 3-4i, +i, -i */
