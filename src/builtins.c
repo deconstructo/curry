@@ -646,6 +646,7 @@ val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
      * paying for the 3+-arg scan on every call. */ \
     if (ac == 2) { \
         if (vis_symbolic(av[0]) || vis_symbolic(av[1])) return sx_##op(av[0], av[1]); \
+        if (!(vis_fixnum(av[0]) && vis_fixnum(av[1]))) num_check_ordered(av[0], av[1], name); \
         return vbool(num_##op(av[0], av[1])); \
     } \
     /* 3+ args: scan for a symbolic operand across the WHOLE call up
@@ -657,6 +658,9 @@ val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     for (int i=0;i<ac;i++) \
         if (vis_symbolic(av[i])) \
             scm_raise(V_FALSE, name ": symbolic comparison only supports exactly 2 arguments"); \
+    /* Every pair is checked, as the symbolic scan above checks every operand,
+     * so that (< 5 1 1+2i) raises instead of stopping at the first #f. */ \
+    for (int i=1;i<ac;i++) num_check_ordered(av[i-1], av[i], name); \
     for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; \
     return V_TRUE; }
 NUM_CMP_ORD(lt,lt,"<") NUM_CMP_ORD(le,le,"<=") NUM_CMP_ORD(gt,gt,">") NUM_CMP_ORD(ge,ge,">=")

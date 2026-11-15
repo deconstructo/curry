@@ -22,6 +22,7 @@
  */
 
 #include "value.h"
+#include "object.h"
 #include <stdbool.h>
 
 void num_init(void);
@@ -101,7 +102,20 @@ val_t num_sec(val_t v);
 val_t num_csc(val_t v);
 
 /* ---- Comparison (exact and inexact) ---- */
-int num_cmp(val_t a, val_t b);    /* -1 / 0 / +1 */
+int num_cmp(val_t a, val_t b);    /* -1 / 0 / +1; for complex, quaternion and
+                                     octonion operands only equality is
+                                     meaningful: 0 if equal, 1 if not */
+/* Raise if either operand has no ordering (complex, quaternion, octonion).
+ * Called by <, <=, > and >= before they compare; `who` names the operator.
+ * Inline, because it is on the path of every flonum and rational comparison:
+ * the common case is two tag tests. */
+void num_check_ordered_fail(const char *who) __attribute__((noreturn));
+#define NUM_HAS_NO_ORDER(v) (vis_ptr(v) && (vtype(v) == T_COMPLEX || \
+                              vtype(v) == T_QUATERNION || vtype(v) == T_OCTONION))
+static inline void num_check_ordered(val_t a, val_t b, const char *who) {
+    if (__builtin_expect(NUM_HAS_NO_ORDER(a) || NUM_HAS_NO_ORDER(b), 0))
+        num_check_ordered_fail(who);
+}
 bool num_eq(val_t a, val_t b);
 bool num_lt(val_t a, val_t b);
 bool num_le(val_t a, val_t b);
