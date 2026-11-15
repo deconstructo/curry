@@ -1740,8 +1740,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             int n_fixed      = (int)total - 2;   /* items between fn and last-list */
 
             /* Count tail list */
-            int n_tail = 0;
-            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+            /* The last argument must be a proper list: a non-list was
+             * silently ignored ((apply + 5) was 0), and a circular one
+             * counted forever. scm_list_length is -1 for both (#389). */
+            int n_tail = scm_list_length(last_list);
+            if (n_tail < 0)
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "apply: the last argument must be a proper list");
 
             int total_args = n_fixed + n_tail;
             /* Use a stack-local buffer for small calls; GC heap otherwise. */
@@ -1798,8 +1802,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t last_list  = base[total - 1];
             int n_fixed      = (int)total - 2;
 
-            int n_tail = 0;
-            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+            /* The last argument must be a proper list: a non-list was
+             * silently ignored ((apply + 5) was 0), and a circular one
+             * counted forever. scm_list_length is -1 for both (#389). */
+            int n_tail = scm_list_length(last_list);
+            if (n_tail < 0)
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "apply: the last argument must be a proper list");
 
             int total_args = n_fixed + n_tail;
             val_t buf[64];
