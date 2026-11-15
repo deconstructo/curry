@@ -340,6 +340,12 @@ static curry_val fn_socket_set_nonblocking(int ac, curry_val *av, void *ud) {
 
 static curry_val fn_socket_ready_p(int ac, curry_val *av, void *ud) {
     (void)ud;
+    /* A port may already hold bytes the C library read ahead into its stream
+     * buffer. They are not readable on the descriptor any more, so polling
+     * it alone reported "not ready" for data that a read-char would return
+     * at once (issue #366). */
+    if (curry_is_port(av[0]) && curry_port_buffered_input(av[0]))
+        return curry_make_bool(true);
     int fd = extract_fd(av[0], "socket-ready?");
     bool has_timeout = ac > 1;
     struct timespec deadline;
