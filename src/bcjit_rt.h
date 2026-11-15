@@ -36,8 +36,11 @@ extern "C" {
 
 /* Written by bcjit_enter for the native function's own use. */
 typedef struct {
-    val_t  *entry_sp;   /* vm->sp when the function was entered           */
-    val_t **sp_addr;    /* &vm->sp of the thread running the function     */
+    val_t   *entry_sp;  /* vm->sp when the function was entered           */
+    val_t  **sp_addr;   /* &vm->sp of the thread running the function     */
+    uint8_t **ip_addr;  /* &frame->ip: the function stores the offset of
+                           the instruction it is at, so a backtrace shows
+                           the right line                                  */
 } BcJitFrame;
 
 /* Function entry: copy the arguments to the top of the VM stack, check

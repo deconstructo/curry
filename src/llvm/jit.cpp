@@ -192,8 +192,12 @@ static void check(Error e) {
 /* ---- JITSession ---- */
 
 JITSession &JITSession::instance() {
-    static JITSession s;
-    return s;
+    /* Never destroyed. Actor threads are detached and can still be running
+     * native code when the main thread exits; destroying the session at
+     * exit unmaps that code under them (a crash at exit, found by review
+     * of the bytecode backend). The process is ending anyway. */
+    static JITSession *s = new JITSession;
+    return *s;
 }
 
 JITSession::JITSession() {

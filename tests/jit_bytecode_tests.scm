@@ -215,6 +215,32 @@
                  (if (equal? (vector-ref results k) '(610 124750 300)) (+ ok 1) ok))))))
 (check "12 actors run the same compiled procedures" (run-actors 12) 12)
 
+;;; Mutual non-tail recursion between a compiled procedure and one the
+;;; backend refuses (it uses call-with-values) used to overflow the C stack:
+;;; every pass added a nested vm_run frame that the depth limit did not count.
+(define (ping n) (if (= n 0) 0 (+ 1 (pong (- n 1)))))
+(define (pong n)
+  (if (= n 0) 0
+      (+ 1 (ping (- n 1)) (call-with-values (lambda () 0) (lambda (x) x)))))
+(check "compiled and refused procedures recurse into each other, 5000 deep"
+       (ping 5000) 5000)
+
+;;; Many values pushed without a call in between (the stack pointer must not
+;;; lag far behind what is live): a call with 20 operands computed inline.
+(define (sum20 a b c d e f g h i j k l m n o p q r s t)
+  (+ a b c d e f g h i j k l m n o p q r s t))
+(define (twenty x)
+  (sum20 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 x))
+(check "a call with twenty operands" (hot (lambda () (twenty 20))) 210)
+
+;;; A backtrace taken inside compiled code names the line that raised.
+(define (raises-on-line-4 x)
+  (let ((y (+ x 1)))
+    (list y
+          (car x))))
+(check "an error raised in compiled code is catchable"
+       (hot (lambda () (guard (e (#t 'caught)) (raises-on-line-4 5)))) 'caught)
+
 ;;; 9. What the bytecode backend compiles ────────────────────────────────────
 ;;; Only meaningful in a build with LLVM and CURRY_JIT_BACKEND=bytecode.
 (define bytecode-backend?

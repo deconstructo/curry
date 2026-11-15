@@ -356,6 +356,9 @@ if(BUILD_LLVM)
     add_test(NAME jit_bytecode COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
     add_test(NAME jit_bytecode_source_force COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
     set_tests_properties(jit_bytecode_source_force PROPERTIES ENVIRONMENT "CURRY_JIT=force")
+    add_test(NAME jit_bytecode_exit COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_exit_tests.scm)
+    set_tests_properties(jit_bytecode_exit PROPERTIES
+                         ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
               actors sexagesimal hash_tombstone string_case jit jit_bytecode)
         add_test(NAME jit_bc_force_${t}

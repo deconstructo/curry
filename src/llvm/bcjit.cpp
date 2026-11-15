@@ -296,7 +296,14 @@ struct Emitter {
 
     Type *i64, *i32, *ptr, *voidt;
     Function *fn = nullptr;
-    Value *self = nullptr, *slots = nullptr, *entry_sp = nullptr, *sp_addr = nullptr;
+    Value *self = nullptr, *slots = nullptr, *entry_sp = nullptr, *sp_addr = nullptr,
+          *ip_addr = nullptr;
+    /* vm->sp is known to be at least slots + sp_h. The collector scans the
+     * VM stack only up to sp + VM_GC_SLACK (16) while native code pushes
+     * inline without moving sp, so sp is never allowed to lag the current
+     * height by more than MAX_SP_LAG: see sync_sp_if_lagging. */
+    int sp_h = 0;
+    static constexpr int MAX_SP_LAG = 8;
     std::vector<BasicBlock *> block;   /* per insn; set for leaders */
 
     Emitter(LLVMContext &c, llvm::Module &m, const Chunk *chunk, const Layout &layout)
@@ -315,7 +322,26 @@ struct Emitter {
     Value *get(int k)  { return B.CreateLoad(i64, slot(k)); }
     void   put(int k, Value *v) { B.CreateStore(v, slot(k)); }
     /* vm->sp = slots + h: everything below h is live. */
-    void   set_sp(int h) { B.CreateStore(slot(h), sp_addr); }
+    void   set_sp(int h) { B.CreateStore(slot(h), sp_addr); sp_h = h; }
+    /* After an instruction that left height h: bring sp up if it lags. */
+    void   sync_sp_if_lagging(int h) { if (h - sp_h > MAX_SP_LAG) set_sp(h); }
+    /* Record the offset of the next instruction in the CallFrame, so a
+     * backtrace taken inside a helper shows this instruction's line. */
+    void   mark_ip(const Insn &in) {
+        B.CreateStore(addr(ch->code + in.next), ip_addr);
+    }
+    static bool pure(OpCode op) {
+        switch (op) {
+        case OP_CONST: case OP_CONST_W: case OP_TRUE: case OP_FALSE: case OP_NIL:
+        case OP_VOID: case OP_LOAD_LOCAL: case OP_STORE_LOCAL: case OP_LOAD_UP:
+        case OP_POP: case OP_DUP: case OP_SWAP: case OP_NOP: case OP_SLIDE:
+        case OP_JUMP: case OP_JUMP_FALSE: case OP_JUMP_TRUE:
+        case OP_STORE_UP: case OP_CLOSE_UP: case OP_RETURN:
+            return true;
+        default:
+            return false;
+        }
+    }
 
     FunctionCallee helper(const char *name, Type *ret, std::initializer_list<Type *> args) {
         return M.getOrInsertFunction(name, FunctionType::get(ret, args, false));
@@ -357,6 +383,9 @@ struct Emitter {
     }
 
     void emit_insn(const Insn &in, int h) {
+        if (!pure(in.op) || (in.op == OP_JUMP && in.a <= in.pc) ||
+            ((in.op == OP_JUMP_FALSE || in.op == OP_JUMP_TRUE) && in.a <= in.pc))
+            mark_ip(in);   /* helpers, and the interrupt poll on a back edge */
         switch (in.op) {
         case OP_CONST: case OP_CONST_W:
             /* The constant pool is fixed once the chunk is compiled and
@@ -509,14 +538,17 @@ struct Emitter {
                 block[i] = BasicBlock::Create(ctx, "pc" + std::to_string(L.insns[i].pc), fn);
 
         B.SetInsertPoint(entry);
-        auto *frame_ty = ArrayType::get(ptr, 2);          /* BcJitFrame */
-        static_assert(sizeof(BcJitFrame) == 2 * sizeof(void *), "BcJitFrame layout");
+        auto *frame_ty = ArrayType::get(ptr, 3);          /* BcJitFrame */
+        static_assert(sizeof(BcJitFrame) == 3 * sizeof(void *), "BcJitFrame layout");
         static_assert(offsetof(BcJitFrame, sp_addr) == sizeof(void *), "BcJitFrame layout");
+        static_assert(offsetof(BcJitFrame, ip_addr) == 2 * sizeof(void *), "BcJitFrame layout");
         Value *frame = B.CreateAlloca(frame_ty, nullptr, "frame");
         slots = call("bcjit_enter", ptr, {ptr, i32, ptr, ptr, i32},
                      {self, argc, args, frame, c32(L.max_height)});
         entry_sp = B.CreateLoad(ptr, B.CreateConstInBoundsGEP2_32(frame_ty, frame, 0, 0), "entry_sp");
         sp_addr  = B.CreateLoad(ptr, B.CreateConstInBoundsGEP2_32(frame_ty, frame, 0, 1), "sp_addr");
+        ip_addr  = B.CreateLoad(ptr, B.CreateConstInBoundsGEP2_32(frame_ty, frame, 0, 2), "ip_addr");
+        sp_h     = L.entry_height;   /* bcjit_enter leaves sp there */
         B.CreateBr(block[0]);
 
         bool open = false;   /* is the current block still without a terminator? */
@@ -525,6 +557,8 @@ struct Emitter {
             if (block[i]) {
                 if (open) B.CreateBr(block[i]);
                 B.SetInsertPoint(block[i]);
+                /* Predecessors keep sp within MAX_SP_LAG of the height. */
+                sp_h = L.height[i] > MAX_SP_LAG ? L.height[i] - MAX_SP_LAG : 0;
             } else if (!open) {
                 /* Reachable only by falling through, yet the instruction
                  * before it does not fall through: pass 2 would not have
@@ -533,6 +567,8 @@ struct Emitter {
             }
             emit_insn(L.insns[i], L.height[i]);
             Effect e = effect_of(L.insns[i]);
+            if (e.falls && !e.jumps)
+                sync_sp_if_lagging(L.height[i] - e.pops + e.pushes);
             /* Conditional jumps end the block too (both edges emitted). */
             open = e.falls && !e.jumps;
         }

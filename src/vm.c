@@ -2177,6 +2177,11 @@ val_t vm_eval(val_t expr, val_t env) {
 val_t *bcjit_enter(BcClosure *self, int32_t argc, val_t *args,
                    BcJitFrame *out, int32_t max_height) {
     VM *v = vm;
+    /* The translated code indexes self->upvals[i] for i below the chunk's
+     * upvalue count, which it checked at translation time. Make that
+     * invariant local instead of relying on every closure's creator. */
+    if (self->upval_count != self->chunk->upval_count)
+        scm_raise_code(EC_NOT_A_PROCEDURE, "apply: malformed closure");
     out->entry_sp = v->sp;
     out->sp_addr  = &v->sp;
     val_t *limit = v->stack + v->stack_max;
@@ -2203,6 +2208,7 @@ val_t *bcjit_enter(BcClosure *self, int32_t argc, val_t *args,
     f->prof_start_ns   = 0;
     f->has_callee_slot = false;   /* never read: bcjit_leave pops this frame */
     f->slot_count      = vm_bind_args(self, base, argc);
+    out->ip_addr       = &f->ip;
     return base;
 }
 
@@ -2272,7 +2278,15 @@ val_t bcjit_cons(Chunk *ch, int32_t ci, val_t a, val_t b) {
 }
 
 val_t bcjit_call(val_t callee, int32_t argc, val_t *args) {
-    return apply_arr(callee, argc, args);
+    /* One more level of C stack: apply_arr may run a nested vm_run, whose
+     * frame is large (its handler table). Counting it here, as the source
+     * backend's curry_jit_apply_arr does, makes the depth limit in
+     * jit_invoke send deep native/bytecode alternation back to bytecode
+     * before the C stack runs out. */
+    g_jit_call_depth++;
+    val_t r = apply_arr(callee, argc, args);
+    g_jit_call_depth--;
+    return r;
 }
 
 val_t bcjit_closure(BcClosure *self, val_t *slots, int32_t pc) {

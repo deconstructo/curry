@@ -923,6 +923,10 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
     }
     if (vis_jitclosure(proc)) {
         JitClosure *jc = as_jitclos(proc);
+        /* Code translated from bytecode needs its BcClosure as third
+         * argument; it is only ever reached through jit_invoke. */
+        if (jc->hdr.flags & JITC_BYTECODE)
+            scm_raise_code(EC_NOT_A_PROCEDURE, "apply: not a procedure");
         typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
         val_t r = (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
                                                                 (uint64_t *)argv,
