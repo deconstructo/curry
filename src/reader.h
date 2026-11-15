@@ -24,6 +24,7 @@
 
 /* Parse a number from a string (used by builtins string->number) */
 val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_force);
+val_t parse_number_prefixed(const char *s, int radix);
 
 /* Read one datum from port.  Returns the value or V_EOF. */
 val_t scm_read(val_t port);

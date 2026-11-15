@@ -910,7 +910,7 @@ static val_t prim_str_num(int ac, val_t *av, void *ud) {
         scm_raise(V_FALSE, "string->number: unknown notation '%s'", note);
     }
     int radix = ac > 1 ? (int)vunfix(av[1]) : 10;
-    return parse_number(s, radix, false, false);
+    return parse_number_prefixed(s, radix);
 }
 /* (current-number-notation) → current notation symbol
  * (current-number-notation 'neugebauer) → set notation */
