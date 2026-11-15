@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794726257483,
+  "lastUpdate": 1794726631064,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -21389,6 +21389,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 42.073,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "13768e6e2695855c3f7029c9f03900b2e7dde6f9",
+          "message": "Merge pull request #390 from deconstructo/fix/371-jit-visibility\n\nJIT visibility (jit-compiled?, refusal reasons, CURRY_JIT) and the bytecode backend: land #375 and #378 on main (#371)",
+          "timestamp": "2026-11-15T18:09:44+11:00",
+          "tree_id": "1b1c3cf3c580e9ff3e53b0edf6248d2b2f270f47",
+          "url": "https://github.com/deconstructo/curry/commit/13768e6e2695855c3f7029c9f03900b2e7dde6f9"
+        },
+        "date": 1794726630014,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.048,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 29.646,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.222,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 34.807,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 208.648,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 361.515,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 75.855,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 118.29,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.779,
             "unit": "ms"
           }
         ]
