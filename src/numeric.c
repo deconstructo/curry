@@ -247,6 +247,9 @@ long num_to_long(val_t v) {
 
 val_t num_inexact(val_t v) {
     if (vis_flonum(v)) return v;
+    /* Each part: (inexact 1+2i) is 1.0+2.0i, not the real part alone (#386). */
+    if (vis_complex(v))
+        return num_make_complex(num_inexact(as_cpx(v)->real), num_inexact(as_cpx(v)->imag));
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) return v;
     if (tl_mpfr_prec > 53)
@@ -256,6 +259,9 @@ val_t num_inexact(val_t v) {
 }
 
 val_t num_exact(val_t v) {
+    /* Each part: (exact 1.5+2.5i) is 3/2+5/2i, not left as it was (#386). */
+    if (vis_complex(v))
+        return num_make_complex(num_exact(as_cpx(v)->real), num_exact(as_cpx(v)->imag));
 #ifdef BUILD_MPFR
     if (vis_mpfr(v)) return mpfr_to_exact(v);
 #endif
