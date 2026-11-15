@@ -448,7 +448,7 @@ static CURRY_THREAD_LOCAL size_t  c_stack_limit = 0;
  * headroom") was found by independent security review to be unsafe:
  * curry's own parallel map/reduce/for-each worker pool (src/workpool.c)
  * spawns threads with a NULL pthread_attr_t, i.e. the platform default
- * stack size -- 512KB on macOS -- so a hardcoded 7MB threshold never
+ * stack size -- 512KB on macOS at the time -- so a hardcoded 7MB threshold never
  * fires there and the real stack still exhausts and crashes first,
  * exactly as before this guard existed. Querying the actual size makes
  * the guard correct on any thread, whatever its real stack turns out to
@@ -506,8 +506,8 @@ void check_c_stack_depth(const char *context) {
         size_t stack_size = query_thread_stack_size();
         /* Reserve 1/8 of the real stack (min 64KB) for whatever C stack
          * the raise/longjmp unwind path itself still needs once
-         * triggered -- scales down with small stacks (e.g. workpool's
-         * 512KB) instead of a fixed byte count that could exceed the
+         * triggered -- scales down with small stacks (e.g. a 512KB
+         * thread) instead of a fixed byte count that could exceed the
          * whole stack on a small thread. */
         size_t margin = stack_size / 8;
         if (margin < 64u * 1024u) margin = 64u * 1024u;
@@ -515,8 +515,10 @@ void check_c_stack_depth(const char *context) {
     }
     char stack_probe;
     size_t used = (size_t)((uintptr_t)c_stack_base - (uintptr_t)&stack_probe);
-    if (__builtin_expect(used > c_stack_limit, 0))
+    if (__builtin_expect(used > c_stack_limit, 0)) {
+        vm_note_overflow();
         scm_raise_code(EC_STACK_OVERFLOW, "%s: call stack overflow", context);
+    }
 }
 
 /* ---- Arithmetic-fast-path deopt (issue #118) ----

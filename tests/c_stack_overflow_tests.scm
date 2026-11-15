@@ -66,6 +66,23 @@
 (check "ten overflows in a row" (repeat 10) 'done)
 (check "and the interpreter still works" (rc 50) 50)
 
+;;; after the functions are hot enough for the JIT to compile them
+(let loop ((i 0)) (if (< i 3000) (begin (rc 20) (loop (+ i 1)))))
+(check "warmed apply recursion: a stack-overflow error"
+       (overflow-code (lambda () (rc 1000000))) 'stack-overflow)
+(check "warmed apply recursion still returns" (rc 100) 100)
+
+;;; force
+(define (nest-force d) (if (= d 0) 0 (force (delay (+ 1 (nest-force (- d 1)))))))
+(check "force recursion, shallow" (nest-force 100) 100)
+(check "force recursion, far too deep"
+       (overflow-code (lambda () (nest-force 1000000))) 'stack-overflow)
+
+;;; with-exception-handler
+(define (nest-weh d) (if (= d 0) 0 (+ 1 (with-exception-handler (lambda (e) (raise e)) (lambda () (nest-weh (- d 1)))))))
+(check "with-exception-handler recursion, far too deep"
+       (overflow-code (lambda () (nest-weh 1000000))) 'stack-overflow)
+
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
 (newline)
