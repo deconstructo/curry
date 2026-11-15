@@ -814,16 +814,17 @@ val_t num_abs(val_t a) {
  * so num_eq works on them (issue #379). The ordering predicates must not
  * call it for an ordering: num_check_ordered refuses first. */
 static int num_cmp_complex(val_t a, val_t b) {
+    /* make-rectangular accepts complex parts, so a value can nest to any
+     * depth; this recurses once per level. */
+    check_c_stack_depth("numeric");
     val_t ar = a, ai = vfix(0), br = b, bi = vfix(0);
     if (vis_complex(a)) { ar = as_cpx(a)->real; ai = as_cpx(a)->imag; }
     if (vis_complex(b)) { br = as_cpx(b)->real; bi = as_cpx(b)->imag; }
     return (num_cmp(ar, br) == 0 && num_cmp(ai, bi) == 0) ? 0 : 1;
 }
 
-void num_check_ordered(val_t a, val_t b, const char *who) {
-    if (vis_complex(a) || vis_complex(b) || vis_quat(a) || vis_quat(b) ||
-        vis_oct(a) || vis_oct(b))
-        scm_raise(V_FALSE, "%s: no ordering on complex, quaternion or octonion numbers", who);
+void num_check_ordered_fail(const char *who) {
+    scm_raise(V_FALSE, "%s: no ordering on complex, quaternion or octonion numbers", who);
 }
 
 int num_cmp(val_t a, val_t b) {

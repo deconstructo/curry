@@ -36,6 +36,15 @@
 (check "eqv? and equal? are unchanged" (list (eqv? 1+2i 1+2i) (equal? 1+2i 1+2i)) '(#t #t))
 (check "zero? is unchanged" (list (zero? 0+1i) (zero? 0.+0.i)) '(#f #t))
 
+;;; make-rectangular accepts complex parts, so a value can nest very deeply;
+;;; comparing two of them raises a catchable error instead of overflowing the
+;;; C stack.
+(define deep
+  (let loop ((i 0) (z 1)) (if (< i 200000) (loop (+ i 1) (make-rectangular z 1)) z)))
+(check "= on a very deeply nested complex does not crash"
+       (guard (e (#t 'raised-or-answered)) (= deep deep) 'raised-or-answered)
+       'raised-or-answered)
+
 ;;; Ordering is not defined ──────────────────────────────────────────────────
 (check "< raises for a complex operand" (raises? (lambda () (< 1+2i 3))) #t)
 (check "< raises for a complex second operand" (raises? (lambda () (< 3 1+2i))) #t)
