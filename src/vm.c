@@ -913,6 +913,14 @@ val_t vm_run(BcClosure *top_closure, int argc) {
      * Invariant: vm->handler_count at entry is entry_handler_count.  After
      * vm_run returns, handler_count is restored (handlers are always paired
      * with OP_POP_HANDLER in normal execution; longjmp unwinds the rest). */
+    /* Every nested vm_run is a big C frame (the handler table below is
+     * kilobytes), and a primitive that calls back into Scheme -- apply, map,
+     * for-each, sort, ... -- starts a new one per level of recursion through it.
+     * Nothing bounded that: (define (f n) (+ 1 (apply f (list (- n 1)))))
+     * killed the process with SIGSEGV after a few hundred levels, past any
+     * guard. Raise a catchable stack-overflow instead (#376). */
+    check_c_stack_depth("call");
+
     ExnHandler vm_exn_handlers[VM_HANDLERS_MAX];
     (void)vm_exn_handlers; /* suppress unused-var warning if no handlers pushed */
 
