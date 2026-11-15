@@ -39,6 +39,9 @@
 ;;; ── helpers ─────────────────────────────────────────────────────────────────
 
 (define (iota count . args)
+  ;; See srfi 1's iota: any count but a non-negative integer never ends.
+  (if (not (and (integer? count) (>= count 0)))
+      (error "iota: count must be a non-negative integer" count))
   (let ((start (if (null? args) 0 (car args)))
         (step  (if (or (null? args) (null? (cdr args))) 1 (cadr args))))
     (let loop ((i 0) (acc '()))

@@ -52,6 +52,25 @@
   (if (number? y) (* s y) (map (lambda (x) (* s x)) y)))
 
 ;;; L2 norm (scalar: absolute value; list: Euclidean norm)
+;;; The integrators loop until t reaches t1. A NaN or infinite bound, or a
+;;; step that is not a positive finite number, never gets it there, and the
+;;; loop does not end (issue #383). (< (abs x) +inf.0) is false for NaN too.
+(define (finite-real? x) (and (real? x) (< (abs x) +inf.0)))
+
+(define (check-span! who t0 t1)
+  (if (not (and (finite-real? t0) (finite-real? t1)))
+      (error (string-append who ": t0 and t1 must be finite real numbers") t0 t1)))
+
+(define (check-step! who h)
+  (if (not (and (finite-real? h) (> h 0)))
+      (error (string-append who ": the step h must be a finite positive number") h)))
+
+(define (check-tolerance! who opts)
+  (if (and (pair? opts)
+           (not (and (finite-real? (car opts)) (> (car opts) 0))))
+      (error (string-append who ": the tolerance must be a finite positive number")
+             (car opts))))
+
 (define (y-norm y)
   (if (number? y)
       (abs (inexact y))
@@ -63,6 +82,7 @@
 ;;; ════════════════════════════════════════════════════════════
 
 (define (ode-euler f y0 t0 t1 h)
+  (check-span! "ode-euler" t0 t1) (check-step! "ode-euler" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (y y0))
       (if (>= t t1f)
@@ -72,6 +92,7 @@
                   (y+ y (y* step (f t y)))))))))
 
 (define (ode-euler/steps f y0 t0 t1 h)
+  (check-span! "ode-euler/steps" t0 t1) (check-step! "ode-euler/steps" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (y y0) (acc (list (cons t0f y0))))
       (if (>= t t1f)
@@ -101,6 +122,7 @@
               (y+ k1 (y+ (y* 2.0 k2) (y+ (y* 2.0 k3) k4)))))))
 
 (define (ode-rk4 f y0 t0 t1 h)
+  (check-span! "ode-rk4" t0 t1) (check-step! "ode-rk4" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (y y0))
       (if (>= t t1f)
@@ -109,6 +131,7 @@
             (loop (+ t step) (rk4-step f t y step)))))))
 
 (define (ode-rk4/steps f y0 t0 t1 h)
+  (check-span! "ode-rk4/steps" t0 t1) (check-step! "ode-rk4/steps" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (y y0) (acc (list (cons t0f y0))))
       (if (>= t t1f)
@@ -175,6 +198,7 @@
       (values y5 (y-norm (y- y5 y4))))))
 
 (define (ode-rk45 f y0 t0 t1 . opts)
+  (check-span! "ode-rk45" t0 t1) (check-tolerance! "ode-rk45" opts)
   (let* ((tol (if (pair? opts) (inexact (car opts)) 1e-6))
          (t0f (inexact t0))
          (t1f (inexact t1))
@@ -197,6 +221,7 @@
                       (loop t y (max (* 0.1 h-try) h-new)))))))))))
 
 (define (ode-rk45/steps f y0 t0 t1 . opts)
+  (check-span! "ode-rk45/steps" t0 t1) (check-tolerance! "ode-rk45/steps" opts)
   (let* ((tol (if (pair? opts) (inexact (car opts)) 1e-6))
          (t0f (inexact t0))
          (t1f (inexact t1))
@@ -245,6 +270,7 @@
     (cons q1 p1)))
 
 (define (ode-verlet accel q0 p0 t0 t1 h)
+  (check-span! "ode-verlet" t0 t1) (check-step! "ode-verlet" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (q q0) (p p0))
       (if (>= t t1f)
@@ -254,6 +280,7 @@
             (loop (+ t step) (car qp) (cdr qp)))))))
 
 (define (ode-verlet/steps accel q0 p0 t0 t1 h)
+  (check-span! "ode-verlet/steps" t0 t1) (check-step! "ode-verlet/steps" h)
   (let ((t0f (inexact t0)) (t1f (inexact t1)) (hf (inexact h)))
     (let loop ((t t0f) (q q0) (p p0)
                (acc (list (cons t0f (cons q0 p0)))))

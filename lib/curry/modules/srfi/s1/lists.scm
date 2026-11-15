@@ -59,6 +59,10 @@
     ;;; ---- iota (pre-existing) ----
 
     (define (iota count . rest)
+      ;; The loop below stops when i equals count: a count that is not a
+      ;; non-negative integer (-1, 2.5, +nan.0) never matches and it never ends.
+      (if (not (and (integer? count) (>= count 0)))
+          (error "iota: count must be a non-negative integer" count))
       (let ((start (if (null? rest) 0 (car rest)))
             (step  (if (or (null? rest) (null? (cdr rest))) 1 (cadr rest))))
         (let loop ((i 0) (acc '()))
