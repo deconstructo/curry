@@ -93,9 +93,6 @@ typedef struct ExnHandler {
                                      unwinding, and returns its value (#377). Every
                                      site that links a frame into current_handler
                                      must set it (SCM_PROTECT does). */
-    int             vm_hi;        /* only meaningful when handler_proc is set: the index of
-                                     this frame in vm->handler_stack (OP_PUSH_HANDLER), or -1
-                                     for the interpreted with-exception-handler */
     int             saved_jit_depth; /* g_jit_call_depth at setjmp time — restored on longjmp;
                                          without this, an exception raised from inside a
                                          JIT-to-JIT call chain (curry_jit_apply_arr) skips the

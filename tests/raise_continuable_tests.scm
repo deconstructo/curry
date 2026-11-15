@@ -124,6 +124,51 @@
          (list (f) (f)))
        '((weh-got second) (weh-got second)))
 
+;;; A handler that escapes through a continuation captured inside the thunk:
+;;; the frame's own handler must be active again afterwards, and a raise that
+;;; unwinds to it must find its VM state intact.
+(check "escaping to a continuation inside the thunk reinstates the frame"
+       (let ((k #f) (log '()))
+         (let ((r (with-exception-handler
+                    (lambda (e)
+                      (if (eq? e 'cont)
+                          (k 'escaped)
+                          (begin (set! log (cons (list 'weh e) log)) 'weh-value)))
+                    (lambda ()
+                      (let ((v (call/cc (lambda (kk) (set! k kk) (raise-continuable 'cont)))))
+                        (list v (raise 'later)))))))
+           (list r log)))
+       '(weh-value ((weh later))))
+(check "the same with the frame one level deep inside another"
+       (guard (outer (#t (list 'outer outer)))
+         (with-exception-handler
+           (lambda (e) 'outer-weh)
+           (lambda ()
+             (with-exception-handler
+               (lambda (e) (if (eq? e 'cont) (guard (g (#t 'inner)) (raise 'q)) 'inner-weh))
+               (lambda () (list (raise-continuable 'cont) (raise 'z)))))))
+       'inner-weh)
+(check "a nested frame's handler using guard, then a normal exit and a raise outside"
+       (guard (outer (#t (list 'outer outer)))
+         (list
+           (with-exception-handler
+             (lambda (e) 'outer-weh)
+             (lambda ()
+               (with-exception-handler
+                 (lambda (e) (guard (g (#t 'inner)) (raise 'q)))
+                 (lambda () (raise-continuable 'cont)))))
+           (raise 'after)))
+       '(outer after))
+(check "leaving a with-exception-handler through a continuation does not leave its handler behind"
+       (let* ((r1 (call/cc (lambda (k) (with-exception-handler (lambda (e) 0) (lambda () (k 1))))))
+              (r2 (guard (e (#t (list 'caught e))) (raise 'x))))
+         (list r1 r2))
+       '(1 (caught x)))
+(check "a handler that is not a procedure is an error at the raise"
+       (guard (e (#t 'raised))
+         (with-exception-handler #t (lambda () (raise-continuable 1))))
+       'raised)
+
 ;;; dynamic-wind: the handler runs inside the dynamic extent of the raise.
 (check "the handler runs between the before and after thunks"
        (let ((log '()))
