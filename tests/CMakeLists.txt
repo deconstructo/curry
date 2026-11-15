@@ -51,6 +51,7 @@ add_test(NAME nan_bounds COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}
 # A loop that is not given a reachable bound would hang rather than fail.
 set_tests_properties(nan_bounds PROPERTIES TIMEOUT 60)
 add_test(NAME complex_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_compare_tests.scm)
+add_test(NAME complex_exactness COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_exactness_tests.scm)
 add_test(NAME nan_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_compare_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)
 add_test(NAME srfi_166 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_166_tests.scm)
