@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794713403728,
+  "lastUpdate": 1794719265076,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -20975,6 +20975,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 40.034,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "20749cf18b0aee0a00b5d236f6960e31d8868caa",
+          "message": "Merge pull request #381 from deconstructo/fix/361-syntax-rules-hygiene\n\nfix(syntax-rules): rename template binders within their scope; local macros see enclosing locals (#361)",
+          "timestamp": "2026-11-15T16:07:13+11:00",
+          "tree_id": "2e72f31cb71a12bacefce8256f84edb5ec830e95",
+          "url": "https://github.com/deconstructo/curry/commit/20749cf18b0aee0a00b5d236f6960e31d8868caa"
+        },
+        "date": 1794719264001,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 10.343,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 16.845,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.801,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 19.034,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 93.572,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 171.45,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 46.468,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 56.524,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 38.944,
             "unit": "ms"
           }
         ]
