@@ -1037,13 +1037,14 @@ tail:
         current_wind = wf;
 
         val_t result = V_VOID;
-        ExnHandler h;
+        ExnHandler *h = (ExnHandler *)malloc(sizeof(ExnHandler));
         bool raised = false;
         val_t exn_val = V_VOID;
-        h.prev = current_handler;
-        h.saved_jit_depth = jit_depth_save();
-        h.handler_proc = V_FALSE; current_handler = &h;
-        if (setjmp(h.jmp) == 0) {
+        if (!h) scm_raise("out of memory");
+        h->prev = current_handler;
+        h->saved_jit_depth = jit_depth_save();
+        h->handler_proc = V_FALSE; current_handler = h;
+        if (setjmp(h->jmp) == 0) {
             /* `(parameterize ((p v)))` / `(parameterize ())` -- no body
              * forms at all -- previously reached vcar(body) on a nil
              * body and crashed. The compiled path (compile_parameterize)
@@ -1057,7 +1058,7 @@ tail:
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
                 result = eval(vcar(body), env);
             }
-            current_handler = h.prev;
+            current_handler = h->prev;
         } else {
             current_handler = h.prev;
             jit_depth_restore(h.saved_jit_depth);
@@ -1094,17 +1095,19 @@ tail:
         require_body_shape(body, "guard");
 
         val_t result = V_VOID;
-        ExnHandler h;
-        h.prev = current_handler;
-        h.saved_jit_depth = jit_depth_save();
-        vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
-        h.handler_proc = V_FALSE; current_handler = &h;
-        if (setjmp(h.jmp) == 0) {
+        ExnHandler *h = (ExnHandler *)malloc(sizeof(ExnHandler));
+        if (!h) scm_raise("out of memory");
+        h->prev = current_handler;
+        h->saved_jit_depth = jit_depth_save();
+        vm_exn_state_save(&h->saved_vm_frame_count, &h->saved_vm_sp, &h->saved_vm_open_upvalues);
+        h->handler_proc = V_FALSE; current_handler = h;
+        if (setjmp(h->jmp) == 0) {
             if (!vis_nil(body)) {
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
                 result = eval(vcar(body), env);
             }
-            current_handler = h.prev;
+            current_handler = h->prev;
+            free(h);
             return result;
         }
         current_handler = h.prev;
@@ -1412,23 +1415,29 @@ tail:
             sx_invalidate_simplify_cache_var(as_symvar(saved_vars[i])->name);
 
         val_t result = V_VOID;
-        ExnHandler h;
-        h.prev = current_handler;
-        h.saved_jit_depth = jit_depth_save();
-        h.handler_proc = V_FALSE; current_handler = &h;
-        if (setjmp(h.jmp) == 0) {
+        ExnHandler *h = (ExnHandler *)malloc(sizeof(ExnHandler));
+        if (!h) scm_raise("out of memory");
+        h->prev = current_handler;
+        h->saved_jit_depth = jit_depth_save();
+        h->handler_proc = V_FALSE; current_handler = h;
+        if (setjmp(h->jmp) == 0) {
             result = eval_body(body, env);
-            current_handler = h.prev;
+            current_handler = h->prev;
         } else {
-            current_handler = h.prev;
-            jit_depth_restore(h.saved_jit_depth);
+            current_handler = h->prev;
+            jit_depth_restore(h->saved_jit_depth);
             /* Restore flags before re-raising */
             for (int i = 0; i < nv; i++)
                 as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
             for (int i = 0; i < nv; i++)
                 sx_invalidate_simplify_cache_var(as_symvar(saved_vars[i])->name);
-            scm_raise_val(h.exn);
+            {
+                val_t exn = h->exn;
+                free(h);
+                scm_raise_val(exn);
+            }
         }
+        free(h);
         for (int i = 0; i < nv; i++)
             as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
         for (int i = 0; i < nv; i++)
@@ -1458,10 +1467,23 @@ tail:
         val_t saved_sr_env = sr_get_current_env();
         sr_set_current_env(env);
         val_t transformed = V_VOID;
-        ExnHandler sr_h;
-        SCM_PROTECT(sr_h,
-            transformed = sc_apply_transformer(as_syntax(op_val)->transformer, expr),
-            { sr_set_current_env(saved_sr_env); scm_raise_val(sr_h.exn); });
+        ExnHandler *sr_h = (ExnHandler *)malloc(sizeof(ExnHandler));
+        if (!sr_h) scm_raise("out of memory");
+        sr_h->prev = current_handler;
+        sr_h->saved_jit_depth = jit_depth_save();
+        sr_h->handler_proc = V_FALSE;
+        current_handler = sr_h;
+        if (setjmp(sr_h->jmp) == 0) {
+            transformed = sc_apply_transformer(as_syntax(op_val)->transformer, expr);
+            current_handler = sr_h->prev;
+            free(sr_h);
+        } else {
+            val_t exn = sr_h->exn;
+            current_handler = sr_h->prev;
+            free(sr_h);
+            sr_set_current_env(saved_sr_env);
+            scm_raise_val(exn);
+        }
         sr_set_current_env(saved_sr_env);
         expr = transformed; goto tail;
     }
