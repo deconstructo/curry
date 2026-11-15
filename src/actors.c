@@ -230,7 +230,7 @@ static void *actor_thread(void *arg) {
 
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     uint64_t t0 = mono_ns();
     if (setjmp(h.jmp) == 0) {
         result = apply(start->closure, start->args);

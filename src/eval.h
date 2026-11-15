@@ -86,6 +86,16 @@ typedef struct ExnHandler {
     jmp_buf         jmp;
     val_t           exn;    /* filled on raise */
     struct ExnHandler *prev;
+    val_t           handler_proc; /* the handler procedure of a with-exception-handler
+                                     frame; V_TRUE for a frame that only cleans up and re-raises
+                                     (dynamic-wind); V_FALSE for every other kind of frame.
+                                     raise-continuable calls it in place, without
+                                     unwinding, and returns its value (#377). Every
+                                     site that links a frame into current_handler
+                                     must set it (SCM_PROTECT does). */
+    int             vm_hi;        /* only meaningful when handler_proc is set: the index of
+                                     this frame in vm->handler_stack (OP_PUSH_HANDLER), or -1
+                                     for the interpreted with-exception-handler */
     int             saved_jit_depth; /* g_jit_call_depth at setjmp time — restored on longjmp;
                                          without this, an exception raised from inside a
                                          JIT-to-JIT call chain (curry_jit_apply_arr) skips the
@@ -197,6 +207,10 @@ extern CURRY_THREAD_LOCAL RestartFrame *current_restart_frame;
 /* Walk the non-unwinding CondHandler chain; called by scm_raise_val and
  * condition_signal.  Defined in eval.c. */
 void walk_cond_handlers(val_t exn, CondHandler *h);
+/* (raise-continuable obj): call the nearest with-exception-handler handler in
+ * place and return its value; behaves like scm_raise_val if the nearest
+ * handler frame is of another kind. */
+val_t scm_raise_continuable(val_t exn);
 
 /* Raise an exception (never returns) */
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
@@ -227,6 +241,7 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
 #define SCM_PROTECT(h, body, on_exn) do {              \
     (h).prev           = current_handler;               \
+    (h).handler_proc   = V_FALSE;                       \
     (h).saved_jit_depth = jit_depth_save();             \
     vm_exn_state_save(&(h).saved_vm_frame_count,        \
                        &(h).saved_vm_sp,                \

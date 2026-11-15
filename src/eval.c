@@ -1038,7 +1038,7 @@ tail:
         val_t exn_val = V_VOID;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             /* `(parameterize ((p v)))` / `(parameterize ())` -- no body
              * forms at all -- previously reached vcar(body) on a nil
@@ -1094,7 +1094,7 @@ tail:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             if (!vis_nil(body)) {
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -1411,7 +1411,7 @@ tail:
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             result = eval_body(body, env);
             current_handler = h.prev;

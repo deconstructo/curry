@@ -2038,6 +2038,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             ExnHandler *eh = &vm_exn_handlers[hi];
             eh->exn  = V_FALSE;
             eh->prev = current_handler;
+            eh->handler_proc = vm->sp[-1];   /* the handler: on the stack just below the thunk */
+            eh->vm_hi = hi;
             eh->saved_jit_depth = jit_depth_save();
             current_handler = eh;
 

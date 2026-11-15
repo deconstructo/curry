@@ -214,7 +214,7 @@ static char *rl_read_expr(void) {
 static bool safe_read(val_t port, val_t *out) {
     ExnHandler h;
     h.prev = current_handler;
-    current_handler = &h;
+    h.handler_proc = V_FALSE; current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         *out = scm_read(port);
         current_handler = h.prev;
@@ -232,7 +232,7 @@ static void eval_port_exprs(val_t port, bool print) {
     for (;;) {
         val_t expr;
         ExnHandler h;
-        h.prev = current_handler; current_handler = &h;
+        h.prev = current_handler; h.handler_proc = V_FALSE; current_handler = &h;
         uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
         if (setjmp(h.jmp) == 0) {
             expr = scm_read(port);
@@ -392,7 +392,7 @@ static void eval_port_exprs(val_t port, bool print) {
                     if (vis_eof(arg)) break;
                     ExnHandler eh;
                     eh.prev = current_handler;
-                    current_handler = &eh;
+                    eh.handler_proc = V_FALSE; current_handler = &eh;
                     if (setjmp(eh.jmp) == 0) {
                         /* Restore current_handler AFTER the write, not
                          * before -- scm_write_shared can itself raise
@@ -448,7 +448,7 @@ static void eval_port_exprs(val_t port, bool print) {
     eval_expr:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
             val_t cl     = compiler_compile(expr);
@@ -726,7 +726,7 @@ int main(int argc, char **argv) {
             for (;;) {
                 val_t expr;
                 ExnHandler h;
-                h.prev = current_handler; current_handler = &h;
+                h.prev = current_handler; h.handler_proc = V_FALSE; current_handler = &h;
                 uint64_t _read_t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                 if (setjmp(h.jmp) == 0) {
                     expr = scm_read(str_port);
@@ -738,7 +738,7 @@ int main(int argc, char **argv) {
                 if (vis_eof(expr)) { break; }
                 h.prev = current_handler;
                 h.saved_jit_depth = jit_depth_save();
-                current_handler = &h;
+                h.handler_proc = V_FALSE; current_handler = &h;
                 if (setjmp(h.jmp) == 0) {
                     uint64_t _t0 = curry_timings_enabled ? profiling_now_ns() : 0;
                     val_t cl = compiler_compile(expr);
@@ -767,7 +767,7 @@ int main(int argc, char **argv) {
             ExnHandler h;
             h.prev = current_handler;
             h.saved_jit_depth = jit_depth_save();
-            current_handler = &h;
+            h.handler_proc = V_FALSE; current_handler = &h;
             if (setjmp(h.jmp) == 0) { scm_load(optarg, GLOBAL_ENV); current_handler = h.prev; }
             else {
                 current_handler = h.prev;
@@ -797,7 +797,7 @@ int main(int argc, char **argv) {
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             val_t v;
             while (!vis_eof((v = timed_scm_read(port)))) {
@@ -857,7 +857,7 @@ int main(int argc, char **argv) {
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        current_handler = &h;
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             /* So a top-level script's own (load "relative/path.scm")
              * resolves against the script's own directory, not the

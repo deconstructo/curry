@@ -128,6 +128,47 @@ void walk_cond_handlers(val_t exn, CondHandler *h) {
     walk_cond_handlers(exn, h->prev);
 }
 
+/* (raise-continuable obj). R7RS: the handler is called in the dynamic
+ * environment of the raise, except that the current handler is the one that
+ * was installed when the handler's own with-exception-handler was entered
+ * (the outer one), and the values it returns are returned by raise-continuable.
+ *
+ * with-exception-handler is implemented by unwinding to its frame and then
+ * calling the handler, so the raise point is gone by then. For the common
+ * case, where the nearest frame is a with-exception-handler frame (which holds
+ * its handler in handler_proc), call the handler right here instead and return
+ * what it returns. Any other nearest frame (a C-level catch, dynamic-wind's
+ * cleanup, ...) wants the exception unwound to it, as for raise. (#377) */
+extern val_t scm_cons(val_t, val_t);
+
+val_t scm_raise_continuable(val_t exn) {
+    /* Frames whose handler_proc is V_TRUE only clean up and re-raise
+     * (dynamic-wind): they are inside the dynamic extent of the raise, so
+     * the handler runs in place with them still active. */
+    ExnHandler *first = current_handler, *last_pass = NULL, *h = first;
+    while (h && h->handler_proc == V_TRUE) { last_pass = h; h = h->prev; }
+    if (h && h->handler_proc != V_FALSE) {
+        if (current_cond_handler)
+            walk_cond_handlers(exn, current_cond_handler);
+        val_t proc = h->handler_proc;
+        /* The handler runs with the handlers outside h installed. */
+        ExnHandler *saved_prev = NULL;
+        if (last_pass) { saved_prev = last_pass->prev; last_pass->prev = h->prev; }
+        else           { current_handler = h->prev; }
+        /* ... and outside h's slot in the VM handler stack: a raise from the
+         * handler goes to the frame outside, whose catch code takes the TOP
+         * entry of that stack to be its own. */
+        int saved_hc = vm->handler_count;
+        if (h->vm_hi >= 0 && h->vm_hi < vm->handler_count) vm->handler_count = h->vm_hi;
+        val_t r = apply(proc, scm_cons(exn, V_NIL));
+        vm->handler_count = saved_hc;
+        if (last_pass) last_pass->prev = saved_prev;
+        current_handler = first;
+        return r;
+    }
+    scm_raise_val(exn);
+}
+
 void scm_raise_val(val_t exn) {
     /* Step 1: offer to non-unwinding handler-bind handlers.
      * If any handler calls invoke-restart, we never reach step 2. */
