@@ -47,6 +47,10 @@
 (check "1/0" (string->number "1/0") #f)
 (check "0/0" (string->number "0/0") #f)
 (check "1/00" (string->number "1/00") #f)
+(check "1/0000000000000000000000 (a zero denominator past the fixnum range of digits)"
+       (string->number "1/0000000000000000000000") #f)
+(check "a signed denominator is not a number" (list (string->number "1/-2") (string->number "1/+2")) '(#f #f))
+(check "1/2/2024 is not a number" (string->number "1/2/2024") #f)
 (check "0/5 is zero" (string->number "0/5") 0)
 (check "a zero denominator in the imaginary part" (string->number "1/2+1/0i") #f)
 (check "a zero denominator in the real part" (string->number "1/0+1i") #f)

@@ -110,6 +110,11 @@ val_t num_make_rational(val_t num, val_t den) {
     mpz_init(n); mpz_init(d);
     to_mpz(n, num);
     to_mpz(d, den);
+    /* mpq canonicalization divides by the denominator: SIGFPE for zero. */
+    if (mpz_sgn(d) == 0) {
+        mpq_clear(q); mpz_clear(n); mpz_clear(d);
+        scm_raise_code(EC_DIVISION_BY_ZERO, "ratio with a zero denominator");
+    }
     mpq_set_num(q, n);
     mpq_set_den(q, d);
     val_t result = make_rat_from_mpq(q);
