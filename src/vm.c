@@ -210,6 +210,7 @@
 #include "eval.h"
 #include "set.h"
 #include "builtins.h"
+#include "bcjit_rt.h"
 
 /* ── Global VM state ─────────────────────────────────────────────────── */
 
@@ -471,12 +472,11 @@ void vm_reset(void) {
 void maybe_jit_bcc(BcClosure *cl);
 
 /* Quick inline guard: skip the call for the common case where jit_val is
- * already decided, or where no source AST was preserved. */
+ * already decided. */
 static inline void vm_maybe_jit(BcClosure *cl) {
     if (vm_debug_active) return;  /* JIT'd code bypasses breakpoints */
     if (cl->jit_val != V_VOID) return;
-    if (cl->chunk->src_lambda == V_VOID) return;
-    maybe_jit_bcc(cl);   /* marks closures with upvalues V_FALSE (#291) */
+    maybe_jit_bcc(cl);   /* marks closures the JIT refuses V_FALSE (jit_gate) */
 }
 
 /* ── BcClosure allocation ────────────────────────────────────────────── */
@@ -817,6 +817,92 @@ static inline val_t open_coded_binary2(Chunk *chunk, uint8_t ci, val_t a, val_t 
     return call_foreign(current, 2, args2);
 }
 
+/* OP_STORE_GLOBAL's body (also bcjit_store_global, for JIT-compiled code). */
+static inline void store_global_cached(Chunk *chunk, uint8_t ci, val_t val) {
+    GlobCacheEntry *cache = chunk->glob_cache;
+    val_t target = chunk->target_env == V_VOID ? GLOBAL_ENV : chunk->target_env;
+    EnvFrame *root = as_env(target);
+    uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
+    /* Compiled top-level set! on a bytecode-VM-compiled chunk goes
+     * straight through this opcode -- gc_wb_slot below, never
+     * env_set (env.c) -- so it must also hook the arithmetic-
+     * redefinition taint check (issue #118) directly here.
+     * env_define's OP_DEF_GLOBAL counterpart already routes
+     * through env_define itself and needs no separate hook.
+     * target == GLOBAL_ENV mirrors env_set's own check: a
+     * set! against some other root frame (a define-library body)
+     * isn't a real global-arithmetic redefinition. */
+    if (target == GLOBAL_ENV)
+        jit_maybe_taint_global_arith(chunk->constants[ci], val);
+    val_t *cslot = NULL; uint32_t cver = 0;
+    if (cache) gcache_load(&cache[ci], &cslot, &cver);
+    if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
+        gslot_store(cslot, val);
+    } else {
+        val_t sym = chunk->constants[ci];
+        uint32_t ver;
+        val_t *slot = frame_lookup_versioned(root, sym, &ver);
+        if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
+        else {
+            gslot_store(slot, val);
+            if (cache) gcache_store(chunk, ci, slot, ver);
+        }
+    }
+}
+
+/* OP_DEF_GLOBAL's body (also bcjit_def_global). */
+static inline void def_global_cached(Chunk *chunk, uint8_t ci, val_t val) {
+    val_t sym = chunk->constants[ci];
+    val_t target = chunk->target_env == V_VOID ? GLOBAL_ENV : chunk->target_env;
+    env_define(target, sym, val);
+    /* Fill cache after define, using the (slot, version) pair from
+     * one atomic frame_lookup_versioned call rather than fetching
+     * the slot and then separately re-reading root->version — the
+     * latter leaves a window where a second, concurrent define (on
+     * another actor thread) could grow the frame again in between,
+     * stamping this slot (valid for the generation env_define just
+     * produced) with a newer version than the one it's actually
+     * from, which would make every future cache hit trust it
+     * regardless of whether it's since gone stale. */
+    GlobCacheEntry *cache = chunk->glob_cache;
+    if (cache) {
+        EnvFrame *root = as_env(target);
+        uint32_t ver;
+        val_t *slot = frame_lookup_versioned(root, sym, &ver);
+        if (slot) gcache_store(chunk, ci, slot, ver);
+    }
+}
+
+/* OP_CONS's body (also bcjit_cons). Tier 2.5 step 1: open-coded cons -- see
+ * opcode.h's own comment on this opcode group. The caller keeps a and b
+ * reachable (on the VM stack, or in its own C frame) across the
+ * allocation. */
+static inline val_t open_coded_cons(Chunk *chunk, uint8_t ci, val_t a, val_t b) {
+    val_t current = load_global_cached(chunk, ci);
+    if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_cons, 1)) {
+        Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
+        p->hdr.type = T_PAIR; p->hdr.flags = 0;
+        p->car = a; p->cdr = b;
+        return vptr(p);
+    }
+    val_t args2[2]; args2[0] = a; args2[1] = b;
+    return call_foreign(current, 2, args2);
+}
+
+/* OP_CLOSURE's body (also bcjit_closure): a closure of `ch` created by
+ * `encl` running with frame `slots`. `caps` is the (is_local, idx) byte
+ * pair per upvalue that follows the opcode's operand. */
+static inline BcClosure *make_closure_capturing(BcClosure *encl, val_t *slots,
+                                                Chunk *ch, const uint8_t *caps) {
+    BcClosure *cl = vm_make_closure(ch, ch->upval_count);
+    for (int i = 0; i < ch->upval_count; i++) {
+        uint8_t is_local = caps[2 * i];
+        uint8_t idx      = caps[2 * i + 1];
+        cl->upvals[i] = is_local ? open_upvalue(&slots[idx]) : encl->upvals[idx];
+    }
+    return cl;
+}
+
 /* ── Main dispatch loop ──────────────────────────────────────────────── */
 
 val_t vm_run(BcClosure *top_closure, int argc) {
@@ -990,57 +1076,13 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_STORE_GLOBAL) {
             uint8_t ci = READ_U8();
             val_t val = POP();
-            GlobCacheEntry *cache = GCACHE;
-            EnvFrame *root = as_env(TARGET_ENV);
-            uint32_t root_ver = atomic_load_explicit((_Atomic uint32_t *)&root->version, memory_order_acquire);
-            /* Compiled top-level set! on a bytecode-VM-compiled chunk goes
-             * straight through this opcode -- gc_wb_slot below, never
-             * env_set (env.c) -- so it must also hook the arithmetic-
-             * redefinition taint check (issue #118) directly here.
-             * env_define's OP_DEF_GLOBAL counterpart already routes
-             * through env_define itself and needs no separate hook.
-             * TARGET_ENV == GLOBAL_ENV mirrors env_set's own check: a
-             * set! against some other root frame (a define-library body)
-             * isn't a real global-arithmetic redefinition. */
-            if (TARGET_ENV == GLOBAL_ENV)
-                jit_maybe_taint_global_arith(CONSTS[ci], val);
-            val_t *cslot = NULL; uint32_t cver = 0;
-            if (cache) gcache_load(&cache[ci], &cslot, &cver);
-            if (__builtin_expect(cslot != NULL && cver == root_ver, 1)) {
-                gslot_store(cslot, val);
-            } else {
-                val_t sym = CONSTS[ci];
-                uint32_t ver;
-                val_t *slot = frame_lookup_versioned(root, sym, &ver);
-                if (!slot) fprintf(stderr, "vm: set! unbound variable\n");
-                else {
-                    gslot_store(slot, val);
-                    if (cache) gcache_store(frame->closure->chunk, ci, slot, ver);
-                }
-            }
+            store_global_cached(frame->closure->chunk, ci, val);
             NEXT;
         }
         CASE(OP_DEF_GLOBAL) {
             uint8_t ci = READ_U8();
-            val_t sym = CONSTS[ci];
             val_t val = POP();
-            env_define(TARGET_ENV, sym, val);
-            /* Fill cache after define, using the (slot, version) pair from
-             * one atomic frame_lookup_versioned call rather than fetching
-             * the slot and then separately re-reading root->version — the
-             * latter leaves a window where a second, concurrent define (on
-             * another actor thread) could grow the frame again in between,
-             * stamping this slot (valid for the generation env_define just
-             * produced) with a newer version than the one it's actually
-             * from, which would make every future cache hit trust it
-             * regardless of whether it's since gone stale. */
-            GlobCacheEntry *cache = GCACHE;
-            if (cache) {
-                EnvFrame *root = as_env(TARGET_ENV);
-                uint32_t ver;
-                val_t *slot = frame_lookup_versioned(root, sym, &ver);
-                if (slot) gcache_store(frame->closure->chunk, ci, slot, ver);
-            }
+            def_global_cached(frame->closure->chunk, ci, val);
             NEXT;
         }
         CASE(OP_DEFINED_GLOBAL) {
@@ -1184,20 +1226,10 @@ val_t vm_run(BcClosure *top_closure, int argc) {
          * conservative stack scan covers it same as any other C local). */
         CASE(OP_CONS) {
             uint8_t ci = READ_U8();
-            val_t current = load_global_cached(frame->closure->chunk, ci);
-            if (__builtin_expect(vis_prim(current) && as_prim(current)->fn == prim_cons, 1)) {
-                /* Allocate first: args still on VM stack so GC (if
-                 * triggered) can update them. Re-read from stack after
-                 * allocation. */
-                Pair *p = (Pair *)gc_alloc_obj(sizeof(Pair));
-                p->hdr.type = T_PAIR; p->hdr.flags = 0;
-                p->car = vm->sp[-2]; p->cdr = vm->sp[-1];
-                vm->sp -= 2; *vm->sp++ = vptr(p);
-            } else {
-                val_t args2[2];
-                args2[1] = POP(); args2[0] = POP();
-                PUSH(call_foreign(current, 2, args2));
-            }
+            /* The operands stay on the VM stack until the pair exists. */
+            val_t r = open_coded_cons(frame->closure->chunk, ci, vm->sp[-2], vm->sp[-1]);
+            vm->sp -= 2;
+            PUSH(r);
             NEXT;
         }
         /* Tier 2.5 step 1: open-coded car/cdr/null?/pair? -- see opcode.h's
@@ -1350,14 +1382,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
-                    JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
-                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-                    g_jit_call_depth++;
-                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
-                                                                         (uint64_t *)call_args,
-                                                                         (uint64_t *)jc->caps);
-                    g_jit_call_depth--;
+                    val_t result = jit_invoke(cl, (int)argc2, call_args);
                     vm->sp -= argc2 + 1;
                     PUSH(result);
                     NEXT;
@@ -1400,14 +1426,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
-                    JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
-                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-                    g_jit_call_depth++;
-                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
-                                                                         (uint64_t *)call_args,
-                                                                         (uint64_t *)jc->caps);
-                    g_jit_call_depth--;
+                    val_t result = jit_invoke(cl, (int)argc2, call_args);
                     vm->sp -= argc2 + 1;
                     if (pop_frame(&frame, result)) return *--vm->sp;
                     if (vm->frame_count == entry_depth) return *--vm->sp;
@@ -1467,14 +1487,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                 && curry_profiling_level == 0 && !vm_debug_active) {
                 vm_check_arity(cl, argc2);
-                JitClosure *jc = as_jitclos(cl->jit_val);
                 val_t *call_args = vm->sp - argc2;
-                typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-                g_jit_call_depth++;
-                val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
-                                                                     (uint64_t *)call_args,
-                                                                     (uint64_t *)jc->caps);
-                g_jit_call_depth--;
+                val_t result = jit_invoke(cl, (int)argc2, call_args);
                 vm->sp -= argc2;
                 if (pop_frame(&frame, result)) return *--vm->sp;
                 if (vm->frame_count == entry_depth) return *--vm->sp;
@@ -1530,14 +1544,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
-                    JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
-                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-                    g_jit_call_depth++;
-                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
-                                                                         (uint64_t *)call_args,
-                                                                         (uint64_t *)jc->caps);
-                    g_jit_call_depth--;
+                    val_t result = jit_invoke(cl, (int)argc2, call_args);
                     vm->sp -= argc2;
                     PUSH(result);
                     NEXT;
@@ -1587,14 +1595,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
                 if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
                     && curry_profiling_level == 0 && !vm_debug_active) {
                     vm_check_arity(cl, argc2);
-                    JitClosure *jc = as_jitclos(cl->jit_val);
                     val_t *call_args = vm->sp - argc2;
-                    typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-                    g_jit_call_depth++;
-                    val_t result = ((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc2,
-                                                                         (uint64_t *)call_args,
-                                                                         (uint64_t *)jc->caps);
-                    g_jit_call_depth--;
+                    val_t result = jit_invoke(cl, (int)argc2, call_args);
                     vm->sp -= argc2;
                     if (pop_frame(&frame, result)) return *--vm->sp;
                     if (vm->frame_count == entry_depth) return *--vm->sp;
@@ -1695,14 +1697,8 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_CLOSURE) {
             uint8_t ci  = READ_U8();
             Chunk *ch   = vunptr(Chunk, CONSTS[ci]);
-            BcClosure *cl = vm_make_closure(ch, ch->upval_count);
-            for (int i = 0; i < ch->upval_count; i++) {
-                uint8_t is_local = READ_U8();
-                uint8_t idx      = READ_U8();
-                cl->upvals[i] = is_local
-                    ? open_upvalue(&frame->slots[idx])
-                    : frame->closure->upvals[idx];
-            }
+            BcClosure *cl = make_closure_capturing(frame->closure, frame->slots, ch, frame->ip);
+            frame->ip += 2 * ch->upval_count;
             PUSH(vptr(cl));
             NEXT;
         }
@@ -1740,8 +1736,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             int n_fixed      = (int)total - 2;   /* items between fn and last-list */
 
             /* Count tail list */
-            int n_tail = 0;
-            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+            /* The last argument must be a proper list: a non-list was
+             * silently ignored ((apply + 5) was 0), and a circular one
+             * counted forever. scm_list_length is -1 for both (#389). */
+            int n_tail = scm_list_length(last_list);
+            if (n_tail < 0)
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "apply: the last argument must be a proper list");
 
             int total_args = n_fixed + n_tail;
             /* Use a stack-local buffer for small calls; GC heap otherwise. */
@@ -1798,8 +1798,12 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t last_list  = base[total - 1];
             int n_fixed      = (int)total - 2;
 
-            int n_tail = 0;
-            for (val_t p = last_list; vis_pair(p); p = vcdr(p)) n_tail++;
+            /* The last argument must be a proper list: a non-list was
+             * silently ignored ((apply + 5) was 0), and a circular one
+             * counted forever. scm_list_length is -1 for both (#389). */
+            int n_tail = scm_list_length(last_list);
+            if (n_tail < 0)
+                scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "apply: the last argument must be a proper list");
 
             int total_args = n_fixed + n_tail;
             val_t buf[64];
@@ -2182,3 +2186,134 @@ val_t vm_eval(val_t expr, val_t env) {
     vm_push(cl_val);
     return vm_run(cl, 0);
 }
+
+/* ── Helpers for JIT-compiled bytecode (bcjit_rt.h) ──────────────────── */
+
+#ifdef BUILD_LLVM
+
+val_t *bcjit_enter(BcClosure *self, int32_t argc, val_t *args,
+                   BcJitFrame *out, int32_t max_height) {
+    VM *v = vm;
+    /* The translated code indexes self->upvals[i] for i below the chunk's
+     * upvalue count, which it checked at translation time. Make that
+     * invariant local instead of relying on every closure's creator. */
+    if (self->upval_count != self->chunk->upval_count)
+        scm_raise_code(EC_NOT_A_PROCEDURE, "apply: malformed closure");
+    out->entry_sp = v->sp;
+    out->sp_addr  = &v->sp;
+    val_t *limit = v->stack + v->stack_max;
+    /* The frame is always a copy of the arguments on top of the VM stack,
+     * never the caller's own array: the function binds a rest list and
+     * assigns to its parameters in place, and a C caller (a primitive that
+     * calls its procedure argument several times with the same argv) must
+     * not see that. */
+    val_t *base = v->sp;
+    if (argc < 0 || limit - base < (ptrdiff_t)argc)
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", v->stack_max); }
+    memmove(base, args, (size_t)argc * sizeof(val_t));
+    v->sp = base + argc;
+    /* Every stack position the function can use, checked once here
+     * instead of at each push. */
+    if (limit - base < (ptrdiff_t)max_height)
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "value stack overflow (max %d slots)", v->stack_max); }
+    if (v->frame_count >= v->frames_max)
+        { vm_note_overflow(); scm_raise_code(EC_STACK_OVERFLOW, "call stack overflow (max %d frames)", v->frames_max); }
+    CallFrame *f = &v->frames[v->frame_count++];
+    f->closure         = self;
+    f->ip              = self->chunk->code;
+    f->slots           = base;
+    f->prof_start_ns   = 0;
+    f->has_callee_slot = false;   /* never read: bcjit_leave pops this frame */
+    f->slot_count      = vm_bind_args(self, base, argc);
+    out->ip_addr       = &f->ip;
+    return base;
+}
+
+void bcjit_leave(val_t *slots, val_t *entry_sp) {
+    vm_close_upvalues(slots);
+    vm->frame_count--;
+    vm->sp = entry_sp;
+}
+
+void bcjit_poll(void) {
+    if (__builtin_expect(vm_interrupt_pending(), 0) && vm_interrupt_pending_and_clear())
+        scm_raise_code(EC_INTERRUPTED, "interrupted");
+}
+
+void bcjit_self_tail(BcClosure *self, val_t *slots, int32_t argc, val_t *new_args) {
+    vm_close_upvalues(slots);
+    memmove(slots, new_args, (size_t)argc * sizeof(val_t));
+    vm->sp = slots + argc;
+    vm->frames[vm->frame_count - 1].slot_count = vm_bind_args(self, slots, argc);
+    bcjit_poll();
+}
+
+val_t bcjit_load_global(Chunk *ch, int32_t ci) {
+    return load_global_cached(ch, (uint8_t)ci);
+}
+
+void bcjit_store_global(Chunk *ch, int32_t ci, val_t v) {
+    store_global_cached(ch, (uint8_t)ci, v);
+}
+
+void bcjit_def_global(Chunk *ch, int32_t ci, val_t v) {
+    def_global_cached(ch, (uint8_t)ci, v);
+}
+
+void bcjit_store_up(BcClosure *self, int32_t i, val_t v) {
+    gc_wb_slot(self->upvals[i]->location, v);
+}
+
+val_t bcjit_binary(Chunk *ch, int32_t ci, val_t a, val_t b, int32_t op) {
+    PrimFn expected;
+    switch (op) {
+    case OP_ADD:   expected = prim_add;    break;
+    case OP_SUB:   expected = prim_sub;    break;
+    case OP_MUL:   expected = prim_mul;    break;
+    case OP_NUMEQ: expected = prim_num_eq; break;
+    case OP_LT:    expected = prim_num_lt; break;
+    case OP_LE:    expected = prim_num_le; break;
+    case OP_GT:    expected = prim_num_gt; break;
+    default:       expected = prim_num_ge; break;   /* OP_GE */
+    }
+    return open_coded_binary2(ch, (uint8_t)ci, a, b, expected);
+}
+
+val_t bcjit_unary(Chunk *ch, int32_t ci, val_t x, int32_t op) {
+    PrimFn expected;
+    switch (op) {
+    case OP_CAR:   expected = prim_car;    break;
+    case OP_CDR:   expected = prim_cdr;    break;
+    case OP_NULLP: expected = prim_null_p; break;
+    default:       expected = prim_pair_p; break;   /* OP_PAIRP */
+    }
+    return open_coded_unary1(ch, (uint8_t)ci, x, expected);
+}
+
+val_t bcjit_cons(Chunk *ch, int32_t ci, val_t a, val_t b) {
+    return open_coded_cons(ch, (uint8_t)ci, a, b);
+}
+
+val_t bcjit_call(val_t callee, int32_t argc, val_t *args) {
+    /* One more level of C stack: apply_arr may run a nested vm_run, whose
+     * frame is large (its handler table). Counting it here, as the source
+     * backend's curry_jit_apply_arr does, makes the depth limit in
+     * jit_invoke send deep native/bytecode alternation back to bytecode
+     * before the C stack runs out. */
+    g_jit_call_depth++;
+    val_t r = apply_arr(callee, argc, args);
+    g_jit_call_depth--;
+    return r;
+}
+
+val_t bcjit_closure(BcClosure *self, val_t *slots, int32_t pc) {
+    const uint8_t *code = self->chunk->code;
+    Chunk *ch = vunptr(Chunk, self->chunk->constants[code[pc + 1]]);
+    return vptr(make_closure_capturing(self, slots, ch, code + pc + 2));
+}
+
+void bcjit_close_up(val_t *slot) {
+    vm_close_upvalues(slot);
+}
+
+#endif /* BUILD_LLVM */

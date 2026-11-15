@@ -195,4 +195,16 @@ void vm_close_upvalues(val_t *last);
  * `bc`'s upvalues, if any are still open). */
 BcClosure *vm_snapshot_closure_for_escape(BcClosure *bc);
 
+/* JIT state of one closure (runtime.c; defined only when BUILD_LLVM is on).
+ * jit_compile_closure_now compiles `cl` immediately if the JIT accepts it.
+ * jit_closure_compiled is true if it has native code (call sites still use
+ * bytecode while the debugger or the profiler is active).
+ * jit_closure_refusal is the reason it is not and will not be compiled, or
+ * NULL if it is compiled or has not been tried yet. */
+bool        jit_disabled(void);   /* CURRY_JIT=off */
+bool        jit_backend_is_bytecode(void);   /* CURRY_JIT_BACKEND=bytecode */
+void        jit_compile_closure_now(BcClosure *cl);
+bool        jit_closure_compiled(const BcClosure *cl);
+const char *jit_closure_refusal(const BcClosure *cl);
+
 #endif /* CURRY_VM_H */

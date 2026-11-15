@@ -560,7 +560,13 @@ static val_t prim_append(int ac, val_t *av, void *ud) {
     for (int i = ac-2; i >= 0; i--) r = scm_append(av[i], r);
     return r;
 }
-static val_t prim_reverse(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return scm_reverse(av[0]); }
+static val_t prim_reverse(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    /* (reverse 5) was () and (reverse '(1 2 . 3)) dropped the tail; a
+     * circular list never returned (#389). */
+    if (scm_list_length(av[0]) < 0) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "reverse: not a proper list");
+    return scm_reverse(av[0]);
+}
 static val_t prim_list_tail(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "not a number: index must be exact integer"); return scm_list_tail(av[0], (int)vunfix(av[1])); }
 static val_t prim_list_ref(int ac, val_t *av, void *ud) { (void)ac;(void)ud; if (!vis_fixnum(av[1])) scm_raise(V_FALSE, "not a number: index must be exact integer"); return scm_list_ref(av[0], (int)vunfix(av[1])); }
 static val_t prim_list_copy(int ac, val_t *av, void *ud) {
@@ -1300,7 +1306,13 @@ static val_t prim_list_to_string(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     val_t port = port_open_output_string();
     val_t lst = av[0];
-    while(vis_pair(lst)) { port_write_char(port,(int)vunchr(vcar(lst))); lst=vcdr(lst); }
+    /* (list->string 5) was "" and a non-character element was written as a
+     * garbage code point (#389). */
+    if (scm_list_length(lst) < 0) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "list->string: not a proper list");
+    while(vis_pair(lst)) {
+        if (!vis_char(vcar(lst))) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "list->string: element is not a character");
+        port_write_char(port,(int)vunchr(vcar(lst))); lst=vcdr(lst);
+    }
     return port_get_output_string(port);
 }
 static val_t prim_string_to_symbol(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return scm_string_to_symbol(av[0]);}
@@ -2463,6 +2475,8 @@ static val_t prim_apply(int ac, val_t *av, void *ud) {
     val_t args = V_NIL;
     /* Last arg is a list; prepend previous args */
     val_t last = av[ac-1];
+    if (scm_list_length(last) < 0)
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "apply: the last argument must be a proper list");
     for (int i = ac-2; i >= 1; i--) last = scm_cons(av[i], last);
     (void)args;
     return apply(proc, last);
@@ -2495,8 +2509,16 @@ static val_t prim_make_list(int ac, val_t *av, void *ud) {
 }
 static val_t prim_list_head(int ac, val_t *av, void *ud) {
     (void)ud;(void)ac;
-    val_t lst=av[0]; intptr_t n=vunfix(av[1]); val_t r=V_NIL;
-    while(n-->0 && vis_pair(lst)){ r=scm_cons(vcar(lst),r); lst=vcdr(lst); }
+    val_t lst=av[0]; val_t r=V_NIL;
+    if (!vis_fixnum(av[1]) || vunfix(av[1]) < 0)
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "list-head: the count must be a non-negative exact integer");
+    intptr_t n=vunfix(av[1]);
+    while(n-->0){
+        /* (list-head '(1 2) 5) was (1 2); R7RS-style list-head is an error
+         * when the list has fewer than n elements (#389). */
+        if (!vis_pair(lst)) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-head: the list is shorter than the count");
+        r=scm_cons(vcar(lst),r); lst=vcdr(lst);
+    }
     return scm_reverse(r);
 }
 static val_t prim_filter(int ac, val_t *av, void *ud) {
