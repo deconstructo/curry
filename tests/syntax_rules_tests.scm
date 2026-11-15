@@ -789,6 +789,269 @@
 ;; single assertion inside a long-running test file that needs to keep
 ;; running afterward.
 
+;; ════════════════════════════════════════════════════════════
+;; Issue #361: a binder the template introduces is renamed within its own
+;; scope even when its name is also bound globally; a local macro can refer
+;; to a local variable of the function it is defined in.
+;; ════════════════════════════════════════════════════════════
+
+;; The names below are bound globally ON PURPOSE: that is the case the old
+;; rule ("rename unless already bound") got wrong.
+(define tmp 100)
+(define acc 7)
+(define i 5)
+(define x 1000)
+
+(define-syntax ctr
+  (syntax-rules () ((_ a) (let ((tmp 1)) (+ tmp a)))))
+(check "#361: let binder named like a global does not capture the caller's"
+  (ctr tmp) 101)
+(check "#361: ... also when the argument is another global"
+  (ctr acc) 8)
+
+(define-syntax swap!
+  (syntax-rules () ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))
+(define other 5)
+(swap! tmp other)
+(check "#361: swap! with a user variable named tmp (value)" tmp 5)
+(check "#361: swap! with a user variable named tmp (other)" other 100)
+(set! tmp 100)    ; the swap above moved the 100; later checks expect it back
+
+(define-syntax shadow-list
+  (syntax-rules () ((_) (let ((list (list 1 2))) list))))
+(check "#361: a binder named like a procedure, whose init calls that procedure"
+  (shadow-list) '(1 2))
+
+(define-syntax shadow-car
+  (syntax-rules () ((_ p) (let ((car (lambda (z) 'mine))) (list (car p) 'done)))))
+(check "#361: a binder named car does not change the caller's car"
+  (list (shadow-car '(9 8)) (car '(9 8))) '((mine done) 9))
+
+;; Pattern variables are the caller's own identifiers: never renamed.
+(define-syntax my-let1
+  (syntax-rules () ((_ v e body) (let ((v e)) body))))
+(check "#361: a pattern variable in binder position stays the caller's"
+  (my-let1 x 3 (+ x 1)) 4)
+
+;; Each binding form.
+(define-syntax t-lambda
+  (syntax-rules () ((_ a) ((lambda (tmp) (* tmp 2)) a))))
+(check "#361: lambda formals" (t-lambda tmp) 200)
+
+(define-syntax t-lambda-rest
+  (syntax-rules () ((_ a b) ((lambda (acc . tmp) (list acc tmp)) a b))))
+(check "#361: lambda with a rest formal" (t-lambda-rest acc tmp) '(7 (100)))
+
+(define-syntax t-let*
+  (syntax-rules () ((_ a) (let* ((tmp a) (acc (+ tmp 1))) (list tmp acc)))))
+(check "#361: let* (an init sees the earlier binder, not the global)"
+  (t-let* 10) '(10 11))
+(check "#361: let* with caller arguments named like its binders"
+  (t-let* tmp) '(100 101))
+
+(define-syntax t-let*-init
+  (syntax-rules () ((_) (let* ((tmp tmp) (acc (+ tmp 1))) (list tmp acc)))))
+(check "#361: let* whose first init is the global of the same name"
+  (t-let*-init) '(100 101))
+
+(define-syntax t-letrec
+  (syntax-rules ()
+    ((_ n) (letrec ((tmp (lambda (k) (if (= k 0) 'done (tmp (- k 1)))))) (tmp n)))))
+(check "#361: letrec binder is visible in its own init" (t-letrec 3) 'done)
+
+(define-syntax t-named-let
+  (syntax-rules ()
+    ((_ n) (let tmp ((i n) (acc 0)) (if (= i 0) acc (tmp (- i 1) (+ acc i)))))))
+(check "#361: named let (name and variables are globals too)" (t-named-let 4) 10)
+
+(define-syntax t-do
+  (syntax-rules ()
+    ((_ n) (do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i n) acc)))))
+(check "#361: do variables" (t-do 4) 6)
+(check "#361: ... and the globals are untouched" (list i acc) '(5 7))
+
+(define-syntax t-let-values
+  (syntax-rules ()
+    ((_) (let-values (((tmp acc) (values 1 2))) (list tmp acc)))))
+(check "#361: let-values formals" (t-let-values) '(1 2))
+
+(define-syntax t-receive
+  (syntax-rules () ((_) (receive (tmp . acc) (values 1 2 3) (list tmp acc)))))
+(check "#361: receive formals" (t-receive) '(1 (2 3)))
+
+(import (scheme case-lambda))
+(define-syntax t-case-lambda
+  (syntax-rules ()
+    ((_) (let ((f (case-lambda ((tmp) (list 'one tmp)) ((tmp acc) (list 'two tmp acc)))))
+           (list (f 1) (f 1 2))))))
+(check "#361: case-lambda clauses" (t-case-lambda) '((one 1) (two 1 2)))
+
+(define-syntax t-guard
+  (syntax-rules ()
+    ((_ e) (guard (tmp (#t (list 'caught tmp))) (raise e)))))
+(check "#361: guard variable" (t-guard 'oops) '(caught oops))
+
+(define-syntax t-define-formals
+  (syntax-rules ()
+    ((_ name) (define (name tmp acc) (list tmp acc)))))
+(t-define-formals pair-up)
+(check "#361: formals of a define with a procedure header" (pair-up 1 2) '(1 2))
+
+(define-syntax t-internal-define
+  (syntax-rules ()
+    ((_ a) (let () (define tmp (* a 2)) (define (acc) (+ tmp 1)) (acc)))))
+(check "#361: internal definitions at the head of a body" (t-internal-define 5) 11)
+
+;; Scope: only the references inside the binder's scope are renamed.
+(define-syntax t-scope
+  (syntax-rules ()
+    ((_) (list (let ((tmp 1)) tmp) tmp))))
+(check "#361: a reference outside the binder's scope still means the global"
+  (t-scope) '(1 100))
+
+(define-syntax t-nested
+  (syntax-rules ()
+    ((_) (let ((x 1)) (+ (let ((x 2)) x) x)))))
+(check "#361: an inner binder of the same name shadows the outer one" (t-nested) 3)
+
+(define-syntax t-quote
+  (syntax-rules () ((_) (let ((tmp 1)) (list 'tmp tmp)))))
+(check "#361: a quoted symbol is data, not renamed" (t-quote) '(tmp 1))
+
+;; Ellipsis: one binder, referenced under an ellipsis.
+(define-syntax sum-all
+  (syntax-rules ()
+    ((_ v ...) (let ((acc 0)) (begin (set! acc (+ acc v)) ...) acc))))
+(check "#361: a template binder referenced inside an ellipsis"
+  (sum-all 1 2 3 acc) 13)
+
+;; Expansion after expansion: each use gets its own names.
+(define-syntax twice-tmp
+  (syntax-rules () ((_ a) (let ((tmp a)) (let ((tmp (* tmp 2))) tmp)))))
+(check "#361: nested uses of one macro" (twice-tmp (twice-tmp 3)) 12)
+
+;; A macro that defines a macro: the inner template's binder works.
+(define-syntax def-incr
+  (syntax-rules ()
+    ((_ name k) (define-syntax name
+                  (syntax-rules () ((_ a) (let ((tmp a)) (+ tmp k))))))))
+(def-incr add-ten 10)
+(check "#361: a macro defined by a macro, binder named like a global"
+  (add-ten tmp) 110)
+
+;; The case the old rule already handled must keep working: a symbol only
+;; passed along (never bound by a form in this template) is renamed per
+;; expansion by sr_is_protected's rule, so recursive accumulation works.
+(define-syntax accumulate-formals-2
+  (syntax-rules ()
+    ((_ (n ...)) (lambda (n ...) (list n ...)))
+    ((_ (n ...) tok . rest) (accumulate-formals-2 (n ... %slot-2) . rest))))
+(check "#361: accumulating recursive macro still gives distinct formals"
+  ((accumulate-formals-2 () a b c) 1 2 3) '(1 2 3))
+
+;; Inside a library, where the "already bound" check looks in the library's
+;; own environment.
+(define-library (test hygiene-361-library)
+  (export lib-ctr lib-helper)
+  (import (scheme base))
+  (begin
+    (define lib-tmp 50)
+    (define (lib-helper n) (* n 2))
+    (define-syntax lib-ctr
+      (syntax-rules ()
+        ((_ a) (let ((lib-tmp 1)) (+ lib-tmp (lib-helper a))))))))
+(import (test hygiene-361-library))
+(define lib-tmp 1000)
+(check "#361: a library macro's binder is not captured by the importer's global"
+  (lib-ctr lib-tmp) 2001)
+
+;; Review findings: macro-defining macros whose inner templates bind names
+;; that are also the inner pattern variables, and quasiquoted data.
+(define-syntax def-binder-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules () ((_ x body) (let ((x 1)) body)))))))
+(def-binder-macro bm-361)
+(check "#361: inner macro whose pattern variable is the binder of its template"
+  (bm-361 z (+ z 1)) 2)
+
+(define-syntax def-lam-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules () ((_ v e) ((lambda (v) e) 10)))))))
+(def-lam-macro lm-361)
+(check "#361: ... with a lambda in the inner template" (lm-361 q (* q 2)) 20)
+
+(define-syntax def-ellipsis-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules ()
+                  ((_ (v (... ...)) b) ((lambda (v (... ...)) b) 1 2)))))))
+(def-ellipsis-macro em-361)
+(check "#361: ... and with an escaped ellipsis" (em-361 (p r) (+ p r)) 3)
+
+(define-syntax outer-binder-inner-ref
+  (syntax-rules ()
+    ((_) (let ((v 6)) (define-syntax m (syntax-rules () ((_) v))) (m)))))
+(check "#361: an inner macro's template refers to the outer template's binder"
+  (outer-binder-inner-ref) 6)
+
+(define-syntax qq-data
+  (syntax-rules ()
+    ((_ a) (let ((tmp 1)) `(tmp ,tmp ,a)))))
+(check "#361: a symbol in quasiquoted data is data, only the unquotes are code"
+  (qq-data 5) '(tmp 1 5))
+
+;; ---- Second case of #361: local macros and the enclosing function's
+;; local variables ----
+
+(define (local-var-define-syntax y)
+  (define-syntax addy (syntax-rules () ((_ a) (+ a y))))
+  (addy 1))
+(check "#361: define-syntax inside a function, referring to its parameter"
+  (local-var-define-syntax 10) 11)
+
+(define (local-var-let-syntax y)
+  (let-syntax ((addy (syntax-rules () ((_ a) (+ a y)))))
+    (addy 1)))
+(check "#361: let-syntax referring to the enclosing function's parameter"
+  (local-var-let-syntax 10) 11)
+
+(define (local-var-letrec-syntax y)
+  (letrec-syntax ((count (syntax-rules ()
+                           ((_) y)
+                           ((_ a . rest) (+ 1 (count . rest))))))
+    (count 1 2 3)))
+(check "#361: letrec-syntax, recursive, referring to a parameter"
+  (local-var-letrec-syntax 100) 103)
+
+(define (local-var-let y)
+  (let ((z (* y 2)))
+    (define-syntax sum-yz (syntax-rules () ((_) (+ y z))))
+    (sum-yz)))
+(check "#361: a let-bound local and a parameter"
+  (local-var-let 5) 15)
+
+(define (outer-local y)
+  (define (inner)
+    (define-syntax addy (syntax-rules () ((_ a) (+ a y))))
+    (addy 1))
+  (inner))
+(check "#361: a macro in an inner function using the OUTER function's local"
+  (outer-local 10) 11)
+
+(define (local-and-binder tmp)
+  (define-syntax m (syntax-rules () ((_ a) (let ((tmp 1)) (+ tmp a)))))
+  (m tmp))
+(check "#361: a template binder named like an enclosing local does not capture"
+  (local-and-binder 100) 101)
+
+(define (local-var-closure y)
+  (define-syntax addy (syntax-rules () ((_ a) (+ a y))))
+  (lambda (k) (addy k)))
+(check "#361: the expansion inside a closure created in the function"
+  ((local-var-closure 10) 5) 15)
+
 ;;; Summary
 (newline)
 (display pass) (display " passed, ")

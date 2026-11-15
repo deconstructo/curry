@@ -8,6 +8,7 @@
 #include "set.h"
 #include "lang_registry.h"
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -39,6 +40,13 @@ typedef struct {
                         header comment for why def_env alone isn't enough for
                         these. Always V_NIL for a top-level or tree-walked
                         macro, where def_env already covers it. */
+    val_t local_vars;   /* names of the local variables of the enclosing
+                        function(s) at the point the macro was defined
+                        (issue #361, second case). They are real
+                        references the template may use, so they are never
+                        renamed. Only the compiler fills this in: a tree-
+                        walked macro's def_env is a real runtime frame that
+                        already holds them. V_NIL for everything else. */
 } SyntaxRulesData;
 
 /* ---- Current environment for (syntax-rules ...) evaluation ----
@@ -83,6 +91,19 @@ static CURRY_THREAD_LOCAL val_t sr_current_local_macros = V_NIL;
 
 val_t sr_get_current_local_macros(void) { return sr_current_local_macros; }
 void  sr_set_current_local_macros(val_t names) { sr_current_local_macros = names; }
+
+/* Companion to sr_current_local_macros: the local VARIABLES of the
+ * enclosing function(s). Without it a macro defined inside a function and
+ * referring to one of that function's locals -- (define (f y)
+ * (define-syntax addy (syntax-rules () ((_ a) (+ a y)))) (addy 1)) --
+ * had `y` renamed to a gensym, because the compiled path's def_env is
+ * GLOBAL_ENV, which holds no locals, so `y` looked like an introduced
+ * binder (issue #361). compile_define_syntax/compile_let_syntax set it
+ * around each compile_time_eval call, save/restore-style. */
+static CURRY_THREAD_LOCAL val_t sr_current_local_vars = V_NIL;
+
+val_t sr_get_current_local_vars(void) { return sr_current_local_vars; }
+void  sr_set_current_local_vars(val_t names) { sr_current_local_vars = names; }
 
 /* ---- Vector <-> list helpers, so patterns/templates need only be taught
  * about pairs; a vector pattern/template is handled by converting to/from
@@ -379,6 +400,22 @@ static val_t sr_ell_refs(val_t tmpl, val_t ell_bindings) {
  * into one -- verified against exactly the SRFI-26 cut/cute reference
  * implementation this was found through.
  *
+ * Two refinements (issue #361) sit around that rule:
+ *
+ *  - sr_scope_walk (below, before sr_expand's callers) runs first. It does
+ *    recognise the core binding forms in the template, and renames the
+ *    binders they introduce -- together with the references inside each
+ *    binder's own scope -- even when the name is also bound globally. The
+ *    syntactic detection rejected above is not enough on its own (it misses
+ *    the recursive case), but it is exact where it applies, which the
+ *    "already bound" test is not: `(let ((tmp 1)) ...)` in a template used
+ *    to capture the caller's global `tmp`. The gensyms it makes are not
+ *    renamed again by the rule here.
+ *  - A macro defined inside a function treats that function's local
+ *    variables as references (SyntaxRulesData.local_vars), because on the
+ *    compiled path def_env is GLOBAL_ENV and holds no locals; they used to
+ *    be taken for introduced binders and renamed to an unbound gensym.
+ *
  * This does not attempt full hygiene in the other direction (a
  * macro-introduced free reference capturing a same-named user binding
  * at the use site) -- that's the harder half of the problem and is
@@ -435,7 +472,7 @@ static void sr_init_protected_keywords(void) {
     sr_protected_ready = true;
 }
 
-static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
+static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros, val_t local_vars) {
     if (!sr_protected_ready) sr_init_protected_keywords();
     if (sr_sym_in_list(sym, sr_protected_keywords)) return true;
     /* An Akkadian/cuneiform special-form synonym (šumma for if, epēšum
@@ -452,6 +489,7 @@ static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
      * reference to a real special form, not an introduced binder. */
     if (sr_sym_in_list(lang_translate(sym), sr_protected_keywords)) return true;
     if (sr_sym_in_list(sym, local_macros)) return true;
+    if (sr_sym_in_list(sym, local_vars)) return true;
     if (env_lookup_slot(def_env, sym) != NULL) return true;
     /* A macro's own top-level (scope_depth == 0) self-reference is
      * eagerly registered into GLOBAL_ENV regardless of def_env
@@ -495,17 +533,25 @@ static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros) {
  * "don't descend" treatment quote gets, done separately since
  * quasiquote's own unquote/unquote-splicing regions DO need normal
  * pattern-variable substitution to still apply within them. */
+static int sr_cmp_val(const void *a, const void *b);
+
+/* `skip` (sorted, may be NULL) lists symbols to leave out: the gensyms the
+ * scoped pre-pass has already made. Without it each of them would be
+ * collected, and the quadratic dedupe below made a template with many
+ * binders slow. */
 static void sr_collect_free_symbols(val_t tmpl, val_t bindings, val_t ell_bindings,
-                                     val_t ellipsis, val_t *out_set) {
+                                     val_t ellipsis, val_t *out_set,
+                                     const val_t *skip, long nskip) {
     if (vis_vector(tmpl)) {
         Vector *v = as_vec(tmpl);
         for (uint32_t i = 0; i < v->len; i++)
-            sr_collect_free_symbols(v->data[i], bindings, ell_bindings, ellipsis, out_set);
+            sr_collect_free_symbols(v->data[i], bindings, ell_bindings, ellipsis, out_set, skip, nskip);
         return;
     }
     if (vis_symbol(tmpl)) {
         if (tmpl == ellipsis || tmpl == SR_UNDERSCORE) return;
         if (sr_is_pattern_var(tmpl, bindings, ell_bindings)) return;
+        if (skip && bsearch(&tmpl, skip, (size_t)nskip, sizeof(val_t), sr_cmp_val)) return;
         if (sr_sym_in_list(tmpl, *out_set)) return;
         *out_set = scm_cons(tmpl, *out_set);
         return;
@@ -515,13 +561,13 @@ static void sr_collect_free_symbols(val_t tmpl, val_t bindings, val_t ell_bindin
         return;
     val_t t = tmpl;
     while (vis_pair(t)) {
-        sr_collect_free_symbols(vcar(t), bindings, ell_bindings, ellipsis, out_set);
+        sr_collect_free_symbols(vcar(t), bindings, ell_bindings, ellipsis, out_set, skip, nskip);
         t = vcdr(t);
     }
     /* dotted tail (t is whatever terminates the list -- a symbol for a
      * dotted pattern/template, V_NIL for a proper one) */
     if (!vis_nil(t))
-        sr_collect_free_symbols(t, bindings, ell_bindings, ellipsis, out_set);
+        sr_collect_free_symbols(t, bindings, ell_bindings, ellipsis, out_set, skip, nskip);
 }
 
 /* Fresh name for one template-introduced binder, unique across the
@@ -555,6 +601,425 @@ static val_t sr_gensym(val_t base) {
     char buf[160];
     snprintf(buf, sizeof buf, "%s\x01%ld", sym_cstr(base), n);
     return sym_intern_cstr(buf);
+}
+
+
+/* ---- Scoped renaming of template-introduced binders (issue #361) ----
+ *
+ * The rule in sr_is_protected -- rename a template symbol unless it
+ * already names something real -- cannot tell a binder from a reference.
+ * A template that binds `tmp` with `let` was left alone whenever the
+ * caller happened to have a global `tmp`, so the let captured the
+ * caller's variable:
+ *
+ *   (define-syntax ctr (syntax-rules () ((_ a) (let ((tmp 1)) (+ tmp a)))))
+ *   (define tmp 100)
+ *   (ctr tmp)        ; 2, not 101
+ *
+ * This pass runs first, on the template of the rule that matched. Where the
+ * template itself contains a core binding form (lambda, let, let*, letrec,
+ * letrec*, named let, do, let-values, let*-values, receive, case-lambda,
+ * guard, define with formals, and internal defines at the head of a body),
+ * every template-introduced binder is given a fresh name for this
+ * expansion, and exactly the references inside that binder's scope are
+ * renamed with it -- whether or not the name is also bound somewhere else.
+ * Occurrences outside the scope keep the name, so
+ * (let ((list (list 1 2))) list) still reads the global `list` in the init.
+ *
+ * Not renamed here: pattern variables (they carry the caller's own
+ * identifiers), the macro's literals, special-form keywords and local
+ * macro names. Binders introduced through some other macro, or only
+ * becoming binders after later recursive expansions (the accumulating
+ * formals of SRFI-26's cut), are not seen by this pass; sr_is_protected's
+ * rule still handles them as before. A template with no binding form it
+ * understands is used unchanged.
+ *
+ * The gensyms made here are returned in `fresh` so that the caller does not
+ * rename them a second time. */
+
+static int sr_cmp_val(const void *a, const void *b) {
+    val_t x = *(const val_t *)a, y = *(const val_t *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+typedef struct {
+    val_t bindings, ell_bindings, ellipsis, literals, local_macros;
+    val_t fresh;       /* list of the gensyms made                         */
+    int   n_binders;   /* binders renamed: 0 = the template is unchanged   */
+    long  budget;      /* nodes the pass may still visit; at 0 it gives up
+                          and the template is used unchanged (the old
+                          behaviour), so a huge or machine-built template
+                          cannot make this pass dominate the expansion  */
+    bool  aborted;
+    val_t inner_pvars; /* pattern variables and literals of the inner
+                          (syntax-rules ...) whose template is being walked:
+                          they are never binders of this pass             */
+} SrScopeCtx;
+
+static bool sr_is_special_keyword(val_t sym) {
+    if (!sr_protected_ready) sr_init_protected_keywords();
+    return sr_sym_in_list(sym, sr_protected_keywords) ||
+           sr_sym_in_list(lang_translate(sym), sr_protected_keywords);
+}
+
+static bool sr_binder_eligible(SrScopeCtx *cx, val_t sym) {
+    if (!vis_symbol(sym)) return false;
+    if (sym == cx->ellipsis || sym == SR_UNDERSCORE) return false;
+    if (sr_is_pattern_var(sym, cx->bindings, cx->ell_bindings)) return false;
+    if (sr_is_literal(sym, cx->literals)) return false;
+    if (sr_is_special_keyword(sym)) return false;
+    if (sr_sym_in_list(sym, cx->local_macros)) return false;
+    if (sr_sym_in_list(sym, cx->inner_pvars)) return false;
+    return true;
+}
+
+/* scope: alist of (template-symbol . gensym), innermost first. */
+static val_t sr_scope_lookup(val_t scope, val_t sym) {
+    for (val_t l = scope; vis_pair(l); l = vcdr(l))
+        if (vcar(vcar(l)) == sym) return vcdr(vcar(l));
+    return V_FALSE;
+}
+
+static val_t sr_scope_add(SrScopeCtx *cx, val_t sym, val_t scope) {
+    if (!sr_binder_eligible(cx, sym)) return scope;
+    val_t g = sr_gensym(sym);
+    cx->fresh = scm_cons(g, cx->fresh);
+    cx->n_binders++;
+    return scm_cons(scm_cons(sym, g), scope);
+}
+
+/* A formals list: a symbol, or a proper or improper list of them. */
+static val_t sr_scope_add_formals(SrScopeCtx *cx, val_t formals, val_t scope) {
+    val_t f = formals;
+    for (; vis_pair(f); f = vcdr(f)) scope = sr_scope_add(cx, vcar(f), scope);
+    if (vis_symbol(f)) scope = sr_scope_add(cx, f, scope);
+    return scope;
+}
+
+/* Plain data (formals, binder names): rename the symbols that are in scope,
+ * with no special-form handling. */
+static val_t sr_scope_map_datum(val_t d, val_t scope, int depth) {
+    if (depth > 2000) return d;
+    if (vis_symbol(d)) {
+        val_t g = sr_scope_lookup(scope, d);
+        return g == V_FALSE ? d : g;
+    }
+    if (vis_vector(d))
+        return sr_list_to_vector(sr_scope_map_datum(sr_vector_to_list(d), scope, depth + 1));
+    if (!vis_pair(d)) return d;
+    /* Iterate along the spine; recurse only into the cars. */
+    val_t items = V_NIL;
+    val_t t = d;
+    for (; vis_pair(t); t = vcdr(t))
+        items = scm_cons(sr_scope_map_datum(vcar(t), scope, depth + 1), items);
+    val_t out = sr_scope_map_datum(t, scope, depth + 1);   /* improper tail or () */
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return out;
+}
+
+static val_t sr_scope_walk(SrScopeCtx *cx, val_t t, val_t scope, int depth);
+static val_t sr_scope_walk_list(SrScopeCtx *cx, val_t lst, val_t scope, int depth);
+
+/* Quasiquoted data: symbols in it are literal data and are left alone, as
+ * with quote; only the unquoted expressions are code. `level` is the
+ * quasiquote nesting depth (1 = directly inside the outermost one). */
+static val_t sr_scope_walk_qq(SrScopeCtx *cx, val_t t, val_t scope, int level, int depth) {
+    if (depth > 2000) return t;
+    if (vis_vector(t))
+        return sr_list_to_vector(sr_scope_walk_qq(cx, sr_vector_to_list(t), scope, level, depth + 1));
+    if (!vis_pair(t)) return t;
+    if (vis_symbol(vcar(t)) && vis_pair(vcdr(t)) && vis_nil(vcdr(vcdr(t)))) {
+        val_t k = lang_translate(vcar(t));
+        if (k == sym_intern_cstr("quasiquote"))
+            return scm_cons(vcar(t), scm_cons(
+                sr_scope_walk_qq(cx, vcar(vcdr(t)), scope, level + 1, depth + 1), V_NIL));
+        if (k == sym_intern_cstr("unquote") || k == sym_intern_cstr("unquote-splicing")) {
+            val_t e = (level == 1)
+                ? sr_scope_walk(cx, vcar(vcdr(t)), scope, depth + 1)
+                : sr_scope_walk_qq(cx, vcar(vcdr(t)), scope, level - 1, depth + 1);
+            return scm_cons(vcar(t), scm_cons(e, V_NIL));
+        }
+    }
+    val_t items = V_NIL;
+    val_t u = t;
+    for (; vis_pair(u); u = vcdr(u))
+        items = scm_cons(sr_scope_walk_qq(cx, vcar(u), scope, level, depth + 1), items);
+    val_t out = sr_scope_walk_qq(cx, u, scope, level, depth + 1);
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return out;
+}
+
+/* Every symbol in a pattern, as a list: the inner macro's pattern
+ * variables and literals. */
+static val_t sr_scope_pattern_syms(val_t pat, val_t acc, int depth) {
+    if (depth > 2000) return acc;
+    if (vis_symbol(pat)) return scm_cons(pat, acc);
+    if (vis_vector(pat)) return sr_scope_pattern_syms(sr_vector_to_list(pat), acc, depth + 1);
+    for (; vis_pair(pat); pat = vcdr(pat))
+        acc = sr_scope_pattern_syms(vcar(pat), acc, depth + 1);
+    if (vis_symbol(pat)) acc = scm_cons(pat, acc);
+    return acc;
+}
+
+/* (syntax-rules [ellipsis] (literal...) (pattern template)...) inside a
+ * template -- a macro-defining macro. The inner rules have their own
+ * pattern variables, which are not this template's binders and which shadow
+ * any outer binder of the same name; the patterns are left alone, the
+ * templates are walked so that a reference to an OUTER binder is still
+ * renamed with it. */
+static val_t sr_scope_walk_syntax_rules(SrScopeCtx *cx, val_t t, val_t scope, int depth) {
+    val_t head = vcar(t);
+    val_t rest = vcdr(t);
+    val_t first_parts = V_NIL;                 /* [ellipsis] (literal ...) */
+    val_t literals = V_NIL;
+    if (vis_pair(rest) && vis_symbol(vcar(rest)) && vis_pair(vcdr(rest))) {
+        first_parts = scm_cons(vcar(rest), V_NIL);   /* custom ellipsis */
+        rest = vcdr(rest);
+    }
+    if (!vis_pair(rest)) return t;
+    literals = vcar(rest);
+    val_t saved = cx->inner_pvars;
+    val_t items = V_NIL;
+    val_t r = vcdr(rest);
+    for (; vis_pair(r); r = vcdr(r)) {
+        val_t rule = vcar(r);
+        if (!vis_pair(rule) || !vis_pair(vcdr(rule))) { items = scm_cons(rule, items); continue; }
+        val_t pat = vcar(rule);
+        val_t syms = sr_scope_pattern_syms(pat, sr_scope_pattern_syms(literals, saved, depth), depth);
+        /* A name that is an inner pattern variable is not an outer binder
+         * inside this rule: shadow it with itself. */
+        val_t inner_scope = scope;
+        for (val_t l = syms; l != saved && vis_pair(l); l = vcdr(l))
+            inner_scope = scm_cons(scm_cons(vcar(l), vcar(l)), inner_scope);
+        cx->inner_pvars = syms;
+        val_t tmpl = sr_scope_walk_list(cx, vcdr(rule), inner_scope, depth + 1);
+        cx->inner_pvars = saved;
+        items = scm_cons(scm_cons(pat, tmpl), items);
+    }
+    val_t out = r;                              /* improper tail or () */
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return scm_cons(head, scm_append(first_parts, scm_cons(literals, out)));
+}
+
+/* A list of forms, each walked in `scope`. Improper tails are mapped as
+ * data. */
+static val_t sr_scope_walk_list(SrScopeCtx *cx, val_t lst, val_t scope, int depth) {
+    val_t items = V_NIL;
+    val_t t = lst;
+    for (; vis_pair(t); t = vcdr(t))
+        items = scm_cons(sr_scope_walk(cx, vcar(t), scope, depth), items);
+    val_t out = sr_scope_map_datum(t, scope, depth);
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return out;
+}
+
+/* The forms of a body. Leading `(define name ...)` / `(define (name ...)
+ * ...)` forms with a template-introduced name are internal definitions: the
+ * name is bound over the whole body. */
+static val_t sr_scope_walk_body(SrScopeCtx *cx, val_t body, val_t scope, int depth) {
+    for (val_t f = body; vis_pair(f); f = vcdr(f)) {
+        val_t form = vcar(f);
+        if (!vis_pair(form) || !vis_symbol(vcar(form)) ||
+            lang_translate(vcar(form)) != S_DEFINE || !vis_pair(vcdr(form)))
+            continue;
+        val_t target = vcar(vcdr(form));
+        scope = sr_scope_add(cx, vis_pair(target) ? vcar(target) : target, scope);
+    }
+    return sr_scope_walk_list(cx, body, scope, depth);
+}
+
+/* An element of a binding list: (name init...). Anything else (an ellipsis
+ * token, a pattern variable standing for several bindings) is kept as it
+ * is. */
+static bool sr_is_binding_pair(val_t e) { return vis_pair(e); }
+
+static val_t sr_scope_walk(SrScopeCtx *cx, val_t t, val_t scope, int depth) {
+    if (depth > 2000) return t;               /* unchanged: old behaviour */
+    if (cx->budget <= 0) { cx->aborted = true; return t; }
+    cx->budget--;
+    if (vis_symbol(t)) {
+        val_t g = sr_scope_lookup(scope, t);
+        return g == V_FALSE ? t : g;
+    }
+    if (vis_vector(t))
+        return sr_list_to_vector(sr_scope_walk_list(cx, sr_vector_to_list(t), scope, depth + 1));
+    if (!vis_pair(t)) return t;
+
+    val_t headsym = vcar(t);
+    val_t rest    = vcdr(t);
+    int   d       = depth + 1;
+
+    if (vis_symbol(headsym) && sr_scope_lookup(scope, headsym) == V_FALSE) {
+        val_t k = lang_translate(headsym);
+
+        if (k == S_QUOTE) return t;
+
+        if (k == S_QUASIQUOTE && vis_pair(rest) && vis_nil(vcdr(rest)))
+            return scm_cons(headsym, scm_cons(
+                sr_scope_walk_qq(cx, vcar(rest), scope, 1, d), V_NIL));
+
+        /* A macro-defining macro: see sr_scope_walk_syntax_rules. */
+        if (k == sym_intern_cstr("syntax-rules") && vis_pair(rest))
+            return sr_scope_walk_syntax_rules(cx, t, scope, d);
+
+        /* (lambda formals body...) */
+        if (k == S_LAMBDA && vis_pair(rest)) {
+            val_t inner = sr_scope_add_formals(cx, vcar(rest), scope);
+            return scm_cons(headsym,
+                     scm_cons(sr_scope_map_datum(vcar(rest), inner, d),
+                              sr_scope_walk_body(cx, vcdr(rest), inner, d)));
+        }
+
+        /* (case-lambda (formals body...) ...) */
+        if (k == sym_intern_cstr("case-lambda")) {
+            val_t items = V_NIL;
+            val_t c = rest;
+            for (; vis_pair(c); c = vcdr(c)) {
+                val_t clause = vcar(c);
+                if (!vis_pair(clause)) { items = scm_cons(clause, items); continue; }
+                val_t inner = sr_scope_add_formals(cx, vcar(clause), scope);
+                items = scm_cons(scm_cons(sr_scope_map_datum(vcar(clause), inner, d),
+                                          sr_scope_walk_body(cx, vcdr(clause), inner, d)),
+                                 items);
+            }
+            val_t out = sr_scope_map_datum(c, scope, d);
+            for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+            return scm_cons(headsym, out);
+        }
+
+        /* (let [name] ((v init)...) body...), (let* ...), (letrec ...),
+         * (letrec* ...) */
+        if ((k == S_LET || k == S_LET_STAR || k == S_LETREC || k == S_LETREC_STAR) &&
+            vis_pair(rest)) {
+            val_t name = V_NIL, bindings = vcar(rest), body = vcdr(rest);
+            bool named = false;
+            if (k == S_LET && vis_symbol(bindings) && vis_pair(body)) {
+                named = true; name = bindings;
+                bindings = vcar(body); body = vcdr(body);
+            }
+            bool sequential = (k == S_LET_STAR);
+            bool recursive  = (k == S_LETREC || k == S_LETREC_STAR);
+
+            val_t body_scope = scope;                 /* names for the body */
+            if (named) body_scope = sr_scope_add(cx, name, body_scope);
+            if (recursive)
+                for (val_t b = bindings; vis_pair(b); b = vcdr(b))
+                    if (sr_is_binding_pair(vcar(b)))
+                        body_scope = sr_scope_add(cx, vcar(vcar(b)), body_scope);
+
+            val_t init_scope = recursive ? body_scope : scope;
+            val_t cur = body_scope;      /* let*: grows as bindings are seen */
+            if (sequential) cur = scope;
+            val_t items = V_NIL;
+            val_t b = bindings;
+            for (; vis_pair(b); b = vcdr(b)) {
+                val_t e = vcar(b);
+                if (!sr_is_binding_pair(e)) { items = scm_cons(e, items); continue; }
+                val_t scope_for_init = sequential ? cur : init_scope;
+                val_t init = sr_scope_walk_list(cx, vcdr(e), scope_for_init, d);
+                val_t nm   = vcar(e);
+                if (sequential) cur = sr_scope_add(cx, nm, cur);
+                else if (!recursive) body_scope = sr_scope_add(cx, nm, body_scope);
+                val_t map_scope = sequential ? cur : body_scope;
+                items = scm_cons(scm_cons(sr_scope_map_datum(nm, map_scope, d), init), items);
+            }
+            val_t blist = sr_scope_map_datum(b, scope, d);
+            for (; vis_pair(items); items = vcdr(items)) blist = scm_cons(vcar(items), blist);
+            val_t fin = sequential ? cur : body_scope;
+            val_t new_body = sr_scope_walk_body(cx, body, fin, d);
+            if (named)
+                return scm_cons(headsym, scm_cons(sr_scope_map_datum(name, fin, d),
+                                  scm_cons(blist, new_body)));
+            return scm_cons(headsym, scm_cons(blist, new_body));
+        }
+
+        /* (do ((var init [step])...) (test expr...) body...) */
+        if (k == S_DO && vis_pair(rest) && vis_pair(vcdr(rest))) {
+            val_t specs = vcar(rest);
+            val_t inner = scope;
+            for (val_t b = specs; vis_pair(b); b = vcdr(b))
+                if (sr_is_binding_pair(vcar(b)))
+                    inner = sr_scope_add(cx, vcar(vcar(b)), inner);
+            val_t items = V_NIL;
+            val_t b = specs;
+            for (; vis_pair(b); b = vcdr(b)) {
+                val_t e = vcar(b);
+                if (!sr_is_binding_pair(e)) { items = scm_cons(e, items); continue; }
+                val_t parts = vcdr(e);       /* (init [step]) */
+                val_t np = V_NIL;
+                if (vis_pair(parts)) {
+                    val_t init = sr_scope_walk(cx, vcar(parts), scope, d);
+                    val_t steps = sr_scope_walk_list(cx, vcdr(parts), inner, d);
+                    np = scm_cons(init, steps);
+                } else np = sr_scope_walk_list(cx, parts, scope, d);
+                items = scm_cons(scm_cons(sr_scope_map_datum(vcar(e), inner, d), np), items);
+            }
+            val_t blist = sr_scope_map_datum(b, scope, d);
+            for (; vis_pair(items); items = vcdr(items)) blist = scm_cons(vcar(items), blist);
+            return scm_cons(headsym, scm_cons(blist,
+                              sr_scope_walk_list(cx, vcdr(rest), inner, d)));
+        }
+
+        /* (let-values (((formals...) init)...) body...) and let*-values */
+        if ((k == S_LET_VALUES || k == S_LET_STAR_VALUES) && vis_pair(rest)) {
+            bool sequential = (k == S_LET_STAR_VALUES);
+            val_t all = scope, cur = scope;
+            if (!sequential)
+                for (val_t b = vcar(rest); vis_pair(b); b = vcdr(b))
+                    if (sr_is_binding_pair(vcar(b)))
+                        all = sr_scope_add_formals(cx, vcar(vcar(b)), all);
+            val_t items = V_NIL;
+            val_t b = vcar(rest);
+            for (; vis_pair(b); b = vcdr(b)) {
+                val_t e = vcar(b);
+                if (!sr_is_binding_pair(e)) { items = scm_cons(e, items); continue; }
+                val_t init = sr_scope_walk_list(cx, vcdr(e), sequential ? cur : scope, d);
+                if (sequential) cur = sr_scope_add_formals(cx, vcar(e), cur);
+                items = scm_cons(scm_cons(sr_scope_map_datum(vcar(e), sequential ? cur : all, d), init),
+                                 items);
+            }
+            val_t blist = sr_scope_map_datum(b, scope, d);
+            for (; vis_pair(items); items = vcdr(items)) blist = scm_cons(vcar(items), blist);
+            return scm_cons(headsym, scm_cons(blist,
+                              sr_scope_walk_body(cx, vcdr(rest), sequential ? cur : all, d)));
+        }
+
+        /* (receive formals expr body...) */
+        if (k == S_RECEIVE && vis_pair(rest) && vis_pair(vcdr(rest))) {
+            val_t inner = sr_scope_add_formals(cx, vcar(rest), scope);
+            return scm_cons(headsym,
+                     scm_cons(sr_scope_map_datum(vcar(rest), inner, d),
+                       scm_cons(sr_scope_walk(cx, vcar(vcdr(rest)), scope, d),
+                                sr_scope_walk_body(cx, vcdr(vcdr(rest)), inner, d))));
+        }
+
+        /* (guard (var clause...) body...): var is bound in the clauses. */
+        if (k == S_GUARD && vis_pair(rest) && vis_pair(vcar(rest))) {
+            val_t spec  = vcar(rest);
+            val_t inner = sr_scope_add(cx, vcar(spec), scope);
+            return scm_cons(headsym,
+                     scm_cons(scm_cons(sr_scope_map_datum(vcar(spec), inner, d),
+                                       sr_scope_walk_list(cx, vcdr(spec), inner, d)),
+                              sr_scope_walk_list(cx, vcdr(rest), scope, d)));
+        }
+
+        /* (define (name . formals) body...): formals are bound in the body.
+         * The name itself is left to sr_is_protected's rule, except when an
+         * enclosing body already made it an internal definition. */
+        if (k == S_DEFINE && vis_pair(rest) && vis_pair(vcar(rest)) &&
+            vis_symbol(vcar(vcar(rest)))) {
+            val_t target = vcar(rest);
+            val_t inner = sr_scope_add_formals(cx, vcdr(target), scope);
+            return scm_cons(headsym,
+                     scm_cons(scm_cons(sr_scope_map_datum(vcar(target), scope, d),
+                                       sr_scope_map_datum(vcdr(target), inner, d)),
+                              sr_scope_walk_body(cx, vcdr(rest), inner, d)));
+        }
+    }
+
+    /* Anything else -- calls, other special forms, uses of other macros:
+     * every element, the head included, is walked. */
+    return sr_scope_walk_list(cx, t, scope, d);
 }
 
 /* Forward declaration */
@@ -777,13 +1242,34 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
              * this macro's own declared literals), for this one
              * expansion only -- see the "Partial hygiene" header
              * comment above sr_is_protected. */
+            /* Binders the template itself introduces are renamed within
+             * their own scope first (issue #361); a template with none is
+             * used as it is. */
+            SrScopeCtx cx = { bindings, ell_bindings, sr->ellipsis, sr->literals,
+                              sr->local_macros, V_NIL, 0, 200000, false, V_NIL };
+            val_t scoped = sr_scope_walk(&cx, tmpl, V_NIL, 0);
+            if (cx.aborted) { cx.fresh = V_NIL; cx.n_binders = 0; }
+            if (cx.n_binders > 0) tmpl = scoped;
+            /* The gensyms just made, as a sorted array: one binary search per
+             * free symbol below instead of a list scan (a template with many
+             * binders has as many gensyms as it has free symbols). */
+            long nfresh = 0;
+            for (val_t f = cx.fresh; vis_pair(f); f = vcdr(f)) nfresh++;
+            val_t *fresh_sorted = NULL;
+            if (nfresh > 0) {
+                fresh_sorted = (val_t *)gc_alloc_atomic((size_t)nfresh * sizeof(val_t));
+                long k = 0;
+                for (val_t f = cx.fresh; vis_pair(f); f = vcdr(f)) fresh_sorted[k++] = vcar(f);
+                qsort(fresh_sorted, (size_t)nfresh, sizeof(val_t), sr_cmp_val);
+            }
             val_t free_syms = V_NIL;
-            sr_collect_free_symbols(tmpl, bindings, ell_bindings, sr->ellipsis, &free_syms);
+            sr_collect_free_symbols(tmpl, bindings, ell_bindings, sr->ellipsis, &free_syms,
+                                    fresh_sorted, nfresh);      /* already fresh: skipped */
             val_t rename_map = V_NIL;
             for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
                 val_t sym = vcar(s);
                 if (sr_is_literal(sym, sr->literals)) continue;
-                if (sr_is_protected(sym, sr->def_env, sr->local_macros)) continue;
+                if (sr_is_protected(sym, sr->def_env, sr->local_macros, sr->local_vars)) continue;
                 rename_map = scm_cons(scm_cons(sym, sr_gensym(sym)), rename_map);
             }
             return sr_expand(tmpl, bindings, ell_bindings, rename_map, sr->ellipsis, false);
@@ -873,6 +1359,7 @@ static val_t sr_compile_fn(int ac, val_t *av, void *ud) {
     val_t cur_env = sr_get_current_env();
     sr->def_env = (cur_env == V_FALSE) ? GLOBAL_ENV : cur_env;
     sr->local_macros = sr_get_current_local_macros();
+    sr->local_vars   = sr_get_current_local_vars();
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
@@ -951,6 +1438,7 @@ val_t sr_rebuild_syntax_env(val_t literals, val_t rules, val_t ellipsis, val_t d
      * as target_env itself. */
     sr->def_env      = (def_env == V_VOID) ? GLOBAL_ENV : def_env;
     sr->local_macros = V_NIL;
+    sr->local_vars   = V_NIL;
 
     Primitive *p = CURRY_NEW_PINNED(Primitive);
     p->hdr.type = T_PRIMITIVE; p->hdr.flags = 0;
@@ -994,11 +1482,11 @@ val_t sr_instantiate(val_t tmpl, val_t bindings, val_t ell_bindings, val_t ellip
                      val_t def_env, val_t local_macros,
                      val_t (*mk_ident)(val_t sym, void *ud), void *ud) {
     val_t free_syms = V_NIL;
-    sr_collect_free_symbols(tmpl, bindings, ell_bindings, ellipsis, &free_syms);
+    sr_collect_free_symbols(tmpl, bindings, ell_bindings, ellipsis, &free_syms, NULL, 0);
     val_t rename_map = V_NIL;
     for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
         val_t sym = vcar(s);
-        if (sr_is_protected(sym, def_env, local_macros)) continue;
+        if (sr_is_protected(sym, def_env, local_macros, V_NIL)) continue;
         rename_map = scm_cons(scm_cons(sym, mk_ident(sym, ud)), rename_map);
     }
     return sr_expand(tmpl, bindings, ell_bindings, rename_map, ellipsis, false);
