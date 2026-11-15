@@ -164,12 +164,22 @@ typedef struct {
 
     /* LLVM JIT code shared by every closure of this chunk (issue #288):
      * 0 = not compiled yet, V_FALSE = being compiled or not compilable,
-     * a T_JITCLOSURE = compiled. Only closures without upvalues use it
-     * (closures with upvalues are never JIT-compiled, issue #291), so the
-     * compiled code is the same for every one of them. Without this cache
-     * each new closure instance reached the call threshold on its own and
-     * was compiled again, and LLVM keeps every compiled module. */
+     * a T_JITCLOSURE = compiled. With the source backend only closures
+     * without upvalues use it (closures with upvalues are never compiled
+     * there, issue #291), so the code is the same for all of them. With the
+     * bytecode backend (CURRY_JIT_BACKEND=bytecode) every closure of the
+     * chunk uses it, upvalues included: the native function takes its
+     * closure as an argument. Without this cache each new closure instance
+     * reached the call threshold on its own and was compiled again, and
+     * LLVM keeps every compiled module. */
     val_t  jit_shared;
+
+    /* Why the JIT refused this chunk, or NULL if it has not refused it
+     * (not tried yet, or compiled). Set once (first reason wins) by
+     * jit_note_refusal in runtime.c; read by (jit-refusal-reason proc) and
+     * the CURRY_JIT_LOG report. Points at a static string or a GC-allocated
+     * copy of the code generator's error message. Not persisted in .scc. */
+    const char *jit_refusal;
 } Chunk;
 
 /* Allocate a fresh empty chunk */
