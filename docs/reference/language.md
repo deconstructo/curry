@@ -301,8 +301,10 @@ global — so `(let ((tmp 1)) ...)` in a template never captures the caller's
 not covered: a binder that only becomes one through another macro's
 expansion, or after later recursive expansions of the same macro (the
 accumulating formals of SRFI-26 `cut`), is renamed only if its name is not
-already bound; and `syntax-case` templates do not yet get either
-improvement.
+already bound — and a macro defined inside a function never renames a name
+that is also a local variable of that function, so such a binder (through
+another macro) can capture it; and `syntax-case` templates do not yet get
+either improvement.
 
 ```scheme
 (define-syntax my-or

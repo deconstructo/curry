@@ -965,6 +965,43 @@
 (check "#361: a library macro's binder is not captured by the importer's global"
   (lib-ctr lib-tmp) 2001)
 
+;; Review findings: macro-defining macros whose inner templates bind names
+;; that are also the inner pattern variables, and quasiquoted data.
+(define-syntax def-binder-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules () ((_ x body) (let ((x 1)) body)))))))
+(def-binder-macro bm-361)
+(check "#361: inner macro whose pattern variable is the binder of its template"
+  (bm-361 z (+ z 1)) 2)
+
+(define-syntax def-lam-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules () ((_ v e) ((lambda (v) e) 10)))))))
+(def-lam-macro lm-361)
+(check "#361: ... with a lambda in the inner template" (lm-361 q (* q 2)) 20)
+
+(define-syntax def-ellipsis-macro
+  (syntax-rules ()
+    ((_ name) (define-syntax name
+                (syntax-rules ()
+                  ((_ (v (... ...)) b) ((lambda (v (... ...)) b) 1 2)))))))
+(def-ellipsis-macro em-361)
+(check "#361: ... and with an escaped ellipsis" (em-361 (p r) (+ p r)) 3)
+
+(define-syntax outer-binder-inner-ref
+  (syntax-rules ()
+    ((_) (let ((v 6)) (define-syntax m (syntax-rules () ((_) v))) (m)))))
+(check "#361: an inner macro's template refers to the outer template's binder"
+  (outer-binder-inner-ref) 6)
+
+(define-syntax qq-data
+  (syntax-rules ()
+    ((_ a) (let ((tmp 1)) `(tmp ,tmp ,a)))))
+(check "#361: a symbol in quasiquoted data is data, only the unquotes are code"
+  (qq-data 5) '(tmp 1 5))
+
 ;; ---- Second case of #361: local macros and the enclosing function's
 ;; local variables ----
 

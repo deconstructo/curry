@@ -632,6 +632,9 @@ typedef struct {
     val_t bindings, ell_bindings, ellipsis, literals, local_macros;
     val_t fresh;       /* list of the gensyms made                         */
     int   n_binders;   /* binders renamed: 0 = the template is unchanged   */
+    val_t inner_pvars; /* pattern variables and literals of the inner
+                          (syntax-rules ...) whose template is being walked:
+                          they are never binders of this pass             */
 } SrScopeCtx;
 
 static bool sr_is_special_keyword(val_t sym) {
@@ -647,6 +650,7 @@ static bool sr_binder_eligible(SrScopeCtx *cx, val_t sym) {
     if (sr_is_literal(sym, cx->literals)) return false;
     if (sr_is_special_keyword(sym)) return false;
     if (sr_sym_in_list(sym, cx->local_macros)) return false;
+    if (sr_sym_in_list(sym, cx->inner_pvars)) return false;
     return true;
 }
 
@@ -695,6 +699,88 @@ static val_t sr_scope_map_datum(val_t d, val_t scope, int depth) {
 }
 
 static val_t sr_scope_walk(SrScopeCtx *cx, val_t t, val_t scope, int depth);
+static val_t sr_scope_walk_list(SrScopeCtx *cx, val_t lst, val_t scope, int depth);
+
+/* Quasiquoted data: symbols in it are literal data and are left alone, as
+ * with quote; only the unquoted expressions are code. `level` is the
+ * quasiquote nesting depth (1 = directly inside the outermost one). */
+static val_t sr_scope_walk_qq(SrScopeCtx *cx, val_t t, val_t scope, int level, int depth) {
+    if (depth > 2000) return t;
+    if (vis_vector(t))
+        return sr_list_to_vector(sr_scope_walk_qq(cx, sr_vector_to_list(t), scope, level, depth + 1));
+    if (!vis_pair(t)) return t;
+    if (vis_symbol(vcar(t)) && vis_pair(vcdr(t)) && vis_nil(vcdr(vcdr(t)))) {
+        val_t k = lang_translate(vcar(t));
+        if (k == sym_intern_cstr("quasiquote"))
+            return scm_cons(vcar(t), scm_cons(
+                sr_scope_walk_qq(cx, vcar(vcdr(t)), scope, level + 1, depth + 1), V_NIL));
+        if (k == sym_intern_cstr("unquote") || k == sym_intern_cstr("unquote-splicing")) {
+            val_t e = (level == 1)
+                ? sr_scope_walk(cx, vcar(vcdr(t)), scope, depth + 1)
+                : sr_scope_walk_qq(cx, vcar(vcdr(t)), scope, level - 1, depth + 1);
+            return scm_cons(vcar(t), scm_cons(e, V_NIL));
+        }
+    }
+    val_t items = V_NIL;
+    val_t u = t;
+    for (; vis_pair(u); u = vcdr(u))
+        items = scm_cons(sr_scope_walk_qq(cx, vcar(u), scope, level, depth + 1), items);
+    val_t out = sr_scope_walk_qq(cx, u, scope, level, depth + 1);
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return out;
+}
+
+/* Every symbol in a pattern, as a list: the inner macro's pattern
+ * variables and literals. */
+static val_t sr_scope_pattern_syms(val_t pat, val_t acc, int depth) {
+    if (depth > 2000) return acc;
+    if (vis_symbol(pat)) return scm_cons(pat, acc);
+    if (vis_vector(pat)) return sr_scope_pattern_syms(sr_vector_to_list(pat), acc, depth + 1);
+    for (; vis_pair(pat); pat = vcdr(pat))
+        acc = sr_scope_pattern_syms(vcar(pat), acc, depth + 1);
+    if (vis_symbol(pat)) acc = scm_cons(pat, acc);
+    return acc;
+}
+
+/* (syntax-rules [ellipsis] (literal...) (pattern template)...) inside a
+ * template -- a macro-defining macro. The inner rules have their own
+ * pattern variables, which are not this template's binders and which shadow
+ * any outer binder of the same name; the patterns are left alone, the
+ * templates are walked so that a reference to an OUTER binder is still
+ * renamed with it. */
+static val_t sr_scope_walk_syntax_rules(SrScopeCtx *cx, val_t t, val_t scope, int depth) {
+    val_t head = vcar(t);
+    val_t rest = vcdr(t);
+    val_t first_parts = V_NIL;                 /* [ellipsis] (literal ...) */
+    val_t literals = V_NIL;
+    if (vis_pair(rest) && vis_symbol(vcar(rest)) && vis_pair(vcdr(rest))) {
+        first_parts = scm_cons(vcar(rest), V_NIL);   /* custom ellipsis */
+        rest = vcdr(rest);
+    }
+    if (!vis_pair(rest)) return t;
+    literals = vcar(rest);
+    val_t saved = cx->inner_pvars;
+    val_t items = V_NIL;
+    val_t r = vcdr(rest);
+    for (; vis_pair(r); r = vcdr(r)) {
+        val_t rule = vcar(r);
+        if (!vis_pair(rule) || !vis_pair(vcdr(rule))) { items = scm_cons(rule, items); continue; }
+        val_t pat = vcar(rule);
+        val_t syms = sr_scope_pattern_syms(pat, sr_scope_pattern_syms(literals, saved, depth), depth);
+        /* A name that is an inner pattern variable is not an outer binder
+         * inside this rule: shadow it with itself. */
+        val_t inner_scope = scope;
+        for (val_t l = syms; l != saved && vis_pair(l); l = vcdr(l))
+            inner_scope = scm_cons(scm_cons(vcar(l), vcar(l)), inner_scope);
+        cx->inner_pvars = syms;
+        val_t tmpl = sr_scope_walk_list(cx, vcdr(rule), inner_scope, depth + 1);
+        cx->inner_pvars = saved;
+        items = scm_cons(scm_cons(pat, tmpl), items);
+    }
+    val_t out = r;                              /* improper tail or () */
+    for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+    return scm_cons(head, scm_append(first_parts, scm_cons(literals, out)));
+}
 
 /* A list of forms, each walked in `scope`. Improper tails are mapped as
  * data. */
@@ -746,6 +832,14 @@ static val_t sr_scope_walk(SrScopeCtx *cx, val_t t, val_t scope, int depth) {
         val_t k = lang_translate(headsym);
 
         if (k == S_QUOTE) return t;
+
+        if (k == S_QUASIQUOTE && vis_pair(rest) && vis_nil(vcdr(rest)))
+            return scm_cons(headsym, scm_cons(
+                sr_scope_walk_qq(cx, vcar(rest), scope, 1, d), V_NIL));
+
+        /* A macro-defining macro: see sr_scope_walk_syntax_rules. */
+        if (k == sym_intern_cstr("syntax-rules") && vis_pair(rest))
+            return sr_scope_walk_syntax_rules(cx, t, scope, d);
 
         /* (lambda formals body...) */
         if (k == S_LAMBDA && vis_pair(rest)) {
@@ -1131,7 +1225,7 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
              * their own scope first (issue #361); a template with none is
              * used as it is. */
             SrScopeCtx cx = { bindings, ell_bindings, sr->ellipsis, sr->literals,
-                              sr->local_macros, V_NIL, 0 };
+                              sr->local_macros, V_NIL, 0, V_NIL };
             val_t scoped = sr_scope_walk(&cx, tmpl, V_NIL, 0);
             if (cx.n_binders > 0) tmpl = scoped;
             val_t free_syms = V_NIL;
