@@ -206,9 +206,16 @@ static long fp_buffered_input(FILE *fp) {
 }
 
 /* For a C library whose buffer we cannot inspect: try to read one byte with
- * the descriptor in non-blocking mode and push it back. Only called when the
- * descriptor itself has nothing to read, so the only way a byte can arrive
- * is from the stream buffer. */
+ * the descriptor in non-blocking mode and push it back. Called by
+ * port_char_ready only once poll() has found nothing to read on the
+ * descriptor, so any byte it finds is in the stream buffer; and by
+ * port_buffered_input, which does not poll first.
+ *
+ * Limit: O_NONBLOCK belongs to the open file description, which another
+ * thread (or a process that inherited the descriptor) may share. For the few
+ * microseconds it is set, a blocking read by that other party gets EAGAIN,
+ * which stdio reports as end of file or an error; no data is lost. This path
+ * is used only on a C library other than glibc and the BSDs. */
 static bool fp_probe_nonblocking(FILE *fp, int fd) {
     int fl = fcntl(fd, F_GETFL);
     if (fl < 0) return true;                        /* cannot tell */
@@ -234,7 +241,7 @@ bool port_buffered_input(val_t v) {
     if (p->flags & PORT_CLOSED) return false;
     if (p->peeked_cp != -2) return true;
     if (p->flags & PORT_STRING) return p->u.str.pos < p->u.str.len;
-    if (!p->u.fp) return false;
+    if (!(p->flags & PORT_INPUT) || !p->u.fp) return false;   /* nothing to read from */
     long buffered = fp_buffered_input(p->u.fp);
     if (buffered >= 0) return buffered > 0;
     /* This C library does not let us look at its buffer: probe it. */

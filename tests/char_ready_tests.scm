@@ -55,6 +55,8 @@
 ;;; 3. Drained again ─────────────────────────────────────────────────────────
 (check "char-ready? is #f again once everything is read" (char-ready? sin) #f)
 (check "socket-ready? is #f again" (socket-ready? sin 0) #f)
+(check "socket-ready? on the connection's output port polls the descriptor, as before"
+       (socket-ready? sout 0) #f)
 
 ;;; 4. peek-char ─────────────────────────────────────────────────────────────
 (send! cout "x")
@@ -100,6 +102,7 @@
 
 ;;; 8. Plain files and string ports ──────────────────────────────────────────
 (define path "char_ready_test_file.tmp")
+(when (file-exists? path) (delete-file path))     ; left behind by an aborted run
 (call-with-output-file path (lambda (o) (write-string "abc" o)))
 (define fin (open-input-file path))
 (check "char-ready? is #t on a regular file" (char-ready? fin) #t)
