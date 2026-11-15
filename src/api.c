@@ -226,6 +226,10 @@ int curry_port_fd(curry_val port) {
     return fileno(p->u.fp);
 }
 
+bool curry_port_buffered_input(curry_val port) {
+    return port_buffered_input((val_t)port);
+}
+
 curry_val curry_make_port_from_file(FILE *fp, bool output, bool binary) {
     int flags = (output ? PORT_OUTPUT : PORT_INPUT) | (binary ? PORT_BINARY : 0);
     return port_wrap_file_owned(fp, flags);

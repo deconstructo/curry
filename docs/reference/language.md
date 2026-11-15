@@ -1063,7 +1063,8 @@ If you want genuine SRFI-69/125 thunk semantics (and the `hash-table-ref/default
 (read-line port)
 (read-string k)                      ; read up to k chars, return string (or eof)
 (read-string k port)
-(char-ready?)                        ; #t if a char is available without blocking
+(char-ready?)                        ; #t if a read would not block: a char is
+                                     ; available, or the port is at end of file
 (char-ready? port)
 (eof-object? v)
 (eof-object)                         ; the eof singleton
