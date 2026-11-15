@@ -47,6 +47,9 @@ add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
 add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
+add_test(NAME nan_bounds COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_bounds_tests.scm)
+# A loop that is not given a reachable bound would hang rather than fail.
+set_tests_properties(nan_bounds PROPERTIES TIMEOUT 60)
 add_test(NAME complex_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_compare_tests.scm)
 add_test(NAME nan_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/nan_compare_tests.scm)
 add_test(NAME srfi_272 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_tests.scm)

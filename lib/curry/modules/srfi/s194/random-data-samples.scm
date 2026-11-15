@@ -52,6 +52,8 @@
       (make-random-boolean-generator (if (pair? p) (car p) 0.5)))
 
     (define (make-binomial-generator n . p)
+      (if (not (and (integer? n) (>= n 0)))
+          (error "make-binomial-generator: n must be a non-negative integer" n))
       (let ((prob (if (pair? p) (car p) 0.5)))
         (lambda ()
           (let loop ((i 0) (successes 0))
@@ -60,12 +62,19 @@
 
     (define (make-geometric-generator . p)
       (let ((prob (if (pair? p) (car p) 0.5)))
+        ;; The loop ends when a uniform draw falls below prob: for a prob that
+        ;; is not in (0, 1] (0, negative, +nan.0) it never does.
+        (if (not (and (real? prob) (> prob 0) (<= prob 1)))
+            (error "make-geometric-generator: p must be in (0, 1]" prob))
         (lambda ()
           (let loop ((trials 1))
             (if (< (random-real) prob) trials (loop (+ trials 1)))))))
 
     (define (make-poisson-generator mu)
       ; Knuth's algorithm: multiply uniforms until the product drops below e^-mu
+      ; (never, if e^-mu is +nan.0)
+      (if (not (and (real? mu) (>= mu 0) (< mu +inf.0)))
+          (error "make-poisson-generator: mu must be a finite non-negative number" mu))
       (let ((l (exp (- mu))))
         (lambda ()
           (let loop ((k 0) (p 1.0))

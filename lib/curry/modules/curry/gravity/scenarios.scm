@@ -166,6 +166,8 @@
 
 (define (scenario-random-cluster . args)
   (let* ((n   (if (pair? args) (car args) 8))
+         (_   (if (not (and (integer? n) (>= n 0)))
+                  (error "scenario-random-cluster: n must be a non-negative integer" n)))
          (G   1.0)
          (R   3.0))   ; cluster radius
     (rng-seed! 42)

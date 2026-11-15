@@ -52,6 +52,8 @@
               (let ((v i)) (set! i (+ i step)) v)))))
 
     (define (make-iota-generator count . rest)
+      (if (not (and (integer? count) (>= count 0)))
+          (error "make-iota-generator: count must be a non-negative integer" count))
       (let ((start (if (pair? rest) (car rest) 0))
             (step (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) 1)))
         (make-range-generator start (+ start (* count step)) step)))

@@ -59,18 +59,41 @@ val_t scm_cons(val_t car, val_t cdr) {
 }
 
 int scm_list_length(val_t lst) {
+    /* -1 for anything that is not a proper list: an improper list, a non-list
+     * value, or a circular list (found by advancing a second pointer at half
+     * the speed; the plain loop never ended on a cycle). */
     int n = 0;
-    while (vis_pair(lst)) { n++; lst = vcdr(lst); }
+    val_t slow = lst;
+    while (vis_pair(lst)) {
+        n++; lst = vcdr(lst);
+        if (!(n & 1)) {
+            slow = vcdr(slow);
+            if (slow == lst && vis_pair(lst)) return -1;
+        }
+    }
     return vis_nil(lst) ? n : -1;
 }
 
+/* list-ref and list-tail read the car and cdr of whatever they reach, so an
+ * index past the end of the list, a negative index, or a first argument that
+ * is not a list read from a non-pair: a segmentation fault (found by calling
+ * every library procedure with a NaN argument, issue #383). */
 val_t scm_list_ref(val_t lst, int n) {
-    for (int i = 0; i < n; i++) lst = vcdr(lst);
+    if (n < 0) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-ref: negative index");
+    for (int i = 0; i < n; i++) {
+        if (!vis_pair(lst)) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-ref: index out of range");
+        lst = vcdr(lst);
+    }
+    if (!vis_pair(lst)) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-ref: index out of range");
     return vcar(lst);
 }
 
 val_t scm_list_tail(val_t lst, int n) {
-    for (int i = 0; i < n; i++) lst = vcdr(lst);
+    if (n < 0) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-tail: negative index");
+    for (int i = 0; i < n; i++) {
+        if (!vis_pair(lst)) scm_raise_code(EC_INDEX_OUT_OF_RANGE, "list-tail: index out of range");
+        lst = vcdr(lst);
+    }
     return lst;
 }
 
@@ -1505,6 +1528,9 @@ static val_t prim_vector_to_string(int ac, val_t *av, void *ud) {
 static val_t prim_list_to_vector(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     int n=scm_list_length(av[0]);
+    /* -1 (not a proper list) used to become a vector of length 2^32-1: an
+     * allocation of tens of gigabytes that the call then appeared to hang on. */
+    if (n < 0) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "list->vector: not a proper list");
     Vector *v=CURRY_NEW_FLEX(Vector,(uint32_t)n);
     v->hdr.type=T_VECTOR; v->hdr.flags=0; v->len=(uint32_t)n;
     val_t lst=av[0]; for(int i=0;i<n;i++){v->data[i]=vcar(lst);lst=vcdr(lst);}
