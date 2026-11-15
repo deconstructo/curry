@@ -8,6 +8,7 @@
 #include "set.h"
 #include "lang_registry.h"
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -532,17 +533,25 @@ static bool sr_is_protected(val_t sym, val_t def_env, val_t local_macros, val_t 
  * "don't descend" treatment quote gets, done separately since
  * quasiquote's own unquote/unquote-splicing regions DO need normal
  * pattern-variable substitution to still apply within them. */
+static int sr_cmp_val(const void *a, const void *b);
+
+/* `skip` (sorted, may be NULL) lists symbols to leave out: the gensyms the
+ * scoped pre-pass has already made. Without it each of them would be
+ * collected, and the quadratic dedupe below made a template with many
+ * binders slow. */
 static void sr_collect_free_symbols(val_t tmpl, val_t bindings, val_t ell_bindings,
-                                     val_t ellipsis, val_t *out_set) {
+                                     val_t ellipsis, val_t *out_set,
+                                     const val_t *skip, long nskip) {
     if (vis_vector(tmpl)) {
         Vector *v = as_vec(tmpl);
         for (uint32_t i = 0; i < v->len; i++)
-            sr_collect_free_symbols(v->data[i], bindings, ell_bindings, ellipsis, out_set);
+            sr_collect_free_symbols(v->data[i], bindings, ell_bindings, ellipsis, out_set, skip, nskip);
         return;
     }
     if (vis_symbol(tmpl)) {
         if (tmpl == ellipsis || tmpl == SR_UNDERSCORE) return;
         if (sr_is_pattern_var(tmpl, bindings, ell_bindings)) return;
+        if (skip && bsearch(&tmpl, skip, (size_t)nskip, sizeof(val_t), sr_cmp_val)) return;
         if (sr_sym_in_list(tmpl, *out_set)) return;
         *out_set = scm_cons(tmpl, *out_set);
         return;
@@ -552,13 +561,13 @@ static void sr_collect_free_symbols(val_t tmpl, val_t bindings, val_t ell_bindin
         return;
     val_t t = tmpl;
     while (vis_pair(t)) {
-        sr_collect_free_symbols(vcar(t), bindings, ell_bindings, ellipsis, out_set);
+        sr_collect_free_symbols(vcar(t), bindings, ell_bindings, ellipsis, out_set, skip, nskip);
         t = vcdr(t);
     }
     /* dotted tail (t is whatever terminates the list -- a symbol for a
      * dotted pattern/template, V_NIL for a proper one) */
     if (!vis_nil(t))
-        sr_collect_free_symbols(t, bindings, ell_bindings, ellipsis, out_set);
+        sr_collect_free_symbols(t, bindings, ell_bindings, ellipsis, out_set, skip, nskip);
 }
 
 /* Fresh name for one template-introduced binder, unique across the
@@ -628,10 +637,20 @@ static val_t sr_gensym(val_t base) {
  * The gensyms made here are returned in `fresh` so that the caller does not
  * rename them a second time. */
 
+static int sr_cmp_val(const void *a, const void *b) {
+    val_t x = *(const val_t *)a, y = *(const val_t *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
 typedef struct {
     val_t bindings, ell_bindings, ellipsis, literals, local_macros;
     val_t fresh;       /* list of the gensyms made                         */
     int   n_binders;   /* binders renamed: 0 = the template is unchanged   */
+    long  budget;      /* nodes the pass may still visit; at 0 it gives up
+                          and the template is used unchanged (the old
+                          behaviour), so a huge or machine-built template
+                          cannot make this pass dominate the expansion  */
+    bool  aborted;
     val_t inner_pvars; /* pattern variables and literals of the inner
                           (syntax-rules ...) whose template is being walked:
                           they are never binders of this pass             */
@@ -816,6 +835,8 @@ static bool sr_is_binding_pair(val_t e) { return vis_pair(e); }
 
 static val_t sr_scope_walk(SrScopeCtx *cx, val_t t, val_t scope, int depth) {
     if (depth > 2000) return t;               /* unchanged: old behaviour */
+    if (cx->budget <= 0) { cx->aborted = true; return t; }
+    cx->budget--;
     if (vis_symbol(t)) {
         val_t g = sr_scope_lookup(scope, t);
         return g == V_FALSE ? t : g;
@@ -1225,16 +1246,29 @@ static val_t sr_transformer_fn(int ac, val_t *av, void *ud) {
              * their own scope first (issue #361); a template with none is
              * used as it is. */
             SrScopeCtx cx = { bindings, ell_bindings, sr->ellipsis, sr->literals,
-                              sr->local_macros, V_NIL, 0, V_NIL };
+                              sr->local_macros, V_NIL, 0, 200000, false, V_NIL };
             val_t scoped = sr_scope_walk(&cx, tmpl, V_NIL, 0);
+            if (cx.aborted) { cx.fresh = V_NIL; cx.n_binders = 0; }
             if (cx.n_binders > 0) tmpl = scoped;
+            /* The gensyms just made, as a sorted array: one binary search per
+             * free symbol below instead of a list scan (a template with many
+             * binders has as many gensyms as it has free symbols). */
+            long nfresh = 0;
+            for (val_t f = cx.fresh; vis_pair(f); f = vcdr(f)) nfresh++;
+            val_t *fresh_sorted = NULL;
+            if (nfresh > 0) {
+                fresh_sorted = (val_t *)gc_alloc_atomic((size_t)nfresh * sizeof(val_t));
+                long k = 0;
+                for (val_t f = cx.fresh; vis_pair(f); f = vcdr(f)) fresh_sorted[k++] = vcar(f);
+                qsort(fresh_sorted, (size_t)nfresh, sizeof(val_t), sr_cmp_val);
+            }
             val_t free_syms = V_NIL;
-            sr_collect_free_symbols(tmpl, bindings, ell_bindings, sr->ellipsis, &free_syms);
+            sr_collect_free_symbols(tmpl, bindings, ell_bindings, sr->ellipsis, &free_syms,
+                                    fresh_sorted, nfresh);      /* already fresh: skipped */
             val_t rename_map = V_NIL;
             for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
                 val_t sym = vcar(s);
                 if (sr_is_literal(sym, sr->literals)) continue;
-                if (sr_sym_in_list(sym, cx.fresh)) continue;   /* already fresh */
                 if (sr_is_protected(sym, sr->def_env, sr->local_macros, sr->local_vars)) continue;
                 rename_map = scm_cons(scm_cons(sym, sr_gensym(sym)), rename_map);
             }
@@ -1448,7 +1482,7 @@ val_t sr_instantiate(val_t tmpl, val_t bindings, val_t ell_bindings, val_t ellip
                      val_t def_env, val_t local_macros,
                      val_t (*mk_ident)(val_t sym, void *ud), void *ud) {
     val_t free_syms = V_NIL;
-    sr_collect_free_symbols(tmpl, bindings, ell_bindings, ellipsis, &free_syms);
+    sr_collect_free_symbols(tmpl, bindings, ell_bindings, ellipsis, &free_syms, NULL, 0);
     val_t rename_map = V_NIL;
     for (val_t s = free_syms; vis_pair(s); s = vcdr(s)) {
         val_t sym = vcar(s);
