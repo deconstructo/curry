@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794751253160,
+  "lastUpdate": 1794752859034,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -21941,6 +21941,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.232,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e6c775456de8530e9110e38f107b25d5fd1ca601",
+          "message": "Merge pull request #404 from deconstructo/fix/400-401-exactness\n\nfix: reader #e is exact for decimals; exact?/inexact? handle complex numbers (#400, #401)",
+          "timestamp": "2026-11-16T01:27:08+11:00",
+          "tree_id": "450fd873c389e43222d935ca2f76139cf28141ba",
+          "url": "https://github.com/deconstructo/curry/commit/e6c775456de8530e9110e38f107b25d5fd1ca601"
+        },
+        "date": 1794752858034,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 10.414,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 16.137,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.762,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 19.14,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 89.938,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 170.753,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 46.342,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 56.047,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 40.866,
             "unit": "ms"
           }
         ]
