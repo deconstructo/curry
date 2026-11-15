@@ -42,6 +42,14 @@
        (- (expt 2 67) 1))
 (check "#e" (s->n "#e+100000000000000000000") big)
 
+(check "a ratio literal in source" +100000000000000000000/3 (/ big 3))
+(check "a signed bignum imaginary part alone" (imag-part (s->n "+100000000000000000000i")) big)
+(check "radix 16, mixed case" (s->n "+ffffffffffffffffffffFFFF" 16) 79228162514264337593543950335)
+(check "radix 36" (s->n "+zzzzzzzzzzzzzzzzzzzzzzzz" 36) 22452257707354557240087211123792674815)
+(check "both parts signed bignums"
+       (s->n "+100000000000000000000-100000000000000000000i") (make-rectangular big (- big)))
+(check "a ratio of two signed bignums is not a number" (s->n "+100000000000000000000/+3") #f)
+
 ;;; text GMP does not accept is not a number
 (check "+" (s->n "+") #f)
 (check "-" (s->n "-") #f)
