@@ -350,6 +350,19 @@ if(BUILD_LLVM)
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_force_${t} PROPERTIES ENVIRONMENT "CURRY_JIT=force")
     endforeach()
+    # The bytecode-to-LLVM backend (src/llvm/bcjit.cpp), not yet the
+    # default: its own test file in each mode, and the same core suites
+    # with every closure it accepts compiled on the first call.
+    add_test(NAME jit_bytecode COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
+    add_test(NAME jit_bytecode_source_force COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_bytecode_tests.scm)
+    set_tests_properties(jit_bytecode_source_force PROPERTIES ENVIRONMENT "CURRY_JIT=force")
+    foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
+              actors sexagesimal hash_tombstone string_case jit jit_bytecode)
+        add_test(NAME jit_bc_force_${t}
+                 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
+        set_tests_properties(jit_bc_force_${t} PROPERTIES
+                             ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
+    endforeach()
     # CURRY_JIT=off must leave the JIT tests passing on bytecode alone.
     add_test(NAME jit_off COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
     set_tests_properties(jit_off PROPERTIES ENVIRONMENT "CURRY_JIT=off")

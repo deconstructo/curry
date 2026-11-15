@@ -23,6 +23,7 @@
 #include "eval.h"
 #include "runtime_internal.h"
 #include "vm.h"
+#include "bcjit_rt.h"
 #include "compiler.h"
 #ifdef BUILD_LLVM
 #  include "llvm/curry_llvm.h"
@@ -639,6 +640,12 @@ bool jit_arith_tainted(void) {
  * CURRY_JIT_LOG=2  also print one line per chunk when it is compiled or
  *                  refused
  *
+ * CURRY_JIT_BACKEND=source    (default) compile from the saved source form
+ *                             (src/llvm/codegen.cpp)
+ * CURRY_JIT_BACKEND=bytecode  translate the chunk's bytecode
+ *                             (src/llvm/bcjit.cpp); see
+ *                             docs/thoughts/jit-bytecode-translator-plan-2026-11-15.md
+ *
  * A refusal is recorded once per chunk in Chunk::jit_refusal (the first
  * reason wins) and can be read with (jit-refusal-reason proc). */
 enum { JIT_MODE_ON = 0, JIT_MODE_OFF, JIT_MODE_FORCE };
@@ -666,6 +673,7 @@ static const char *const jit_refusal_text[JR_COUNT] = {
 
 static int            g_jit_mode = JIT_MODE_ON;
 static int            g_jit_log  = 0;
+static bool           g_jit_bytecode = false;   /* CURRY_JIT_BACKEND=bytecode */
 static pthread_once_t g_jit_config_once = PTHREAD_ONCE_INIT;
 static uint32_t       g_jit_n_compiled;
 static uint32_t       g_jit_n_refused[JR_COUNT];
@@ -688,6 +696,10 @@ static void jit_config_init(void) {
     else if (m && strcmp(m, "force") == 0) g_jit_mode = JIT_MODE_FORCE;
     else if (m && *m && strcmp(m, "on") != 0)
         fprintf(stderr, "[jit] CURRY_JIT=%s not understood (use on, off or force); using on\n", m);
+    const char *b = getenv("CURRY_JIT_BACKEND");
+    if (b && strcmp(b, "bytecode") == 0) g_jit_bytecode = true;
+    else if (b && *b && strcmp(b, "source") != 0)
+        fprintf(stderr, "[jit] CURRY_JIT_BACKEND=%s not understood (use source or bytecode); using source\n", b);
     const char *l = getenv("CURRY_JIT_LOG");
     if (l && *l) g_jit_log = (l[0] == '2') ? 2 : (l[0] == '0') ? 0 : 1;
     if (g_jit_log >= 1) atexit(jit_report_atexit);
@@ -709,6 +721,11 @@ static void jit_log_line(const char *what, const Chunk *ch, const char *detail) 
     fprintf(stderr, "%s\n", line);
 }
 
+bool jit_backend_is_bytecode(void) {
+    jit_config();
+    return g_jit_bytecode;
+}
+
 bool jit_disabled(void) {
     jit_config();
     return g_jit_mode == JIT_MODE_OFF;
@@ -721,6 +738,11 @@ static JitRefusal jit_gate(const BcClosure *cl) {
     const Chunk *ch = cl->chunk;
     jit_config();
     if (g_jit_mode == JIT_MODE_OFF) return JR_DISABLED;
+    /* The bytecode translator needs none of the refusals below: it does
+     * not read the source form, it uses the chunk's own target_env and
+     * the closure's own upvalues, and macros are already expanded. What
+     * it cannot translate it refuses itself (JR_CODEGEN). */
+    if (g_jit_bytecode) return JR_NONE;
     if (ch->src_lambda == V_VOID) return JR_NO_SOURCE;
     /* JIT-compiled native code's global-variable resolution (src/llvm/
      * jit.cpp's env_lookup_slot/env_define helpers) hard-codes GLOBAL_ENV,
@@ -791,7 +813,9 @@ static val_t jit_chunk_code(Chunk *ch) {
                                      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
         return expected;                 /* another thread got there first */
     char err[256];
-    val_t compiled = curry_llvm_jit_compile(ch->src_lambda, err, sizeof err);
+    val_t compiled = g_jit_bytecode
+        ? curry_llvm_jit_compile_chunk(ch, err, sizeof err)
+        : curry_llvm_jit_compile(ch->src_lambda, err, sizeof err);
     if (!vis_jitclosure(compiled)) {     /* stays V_FALSE */
         jit_note_refusal(ch, JR_CODEGEN, err);
         return V_FALSE;
@@ -876,14 +900,7 @@ val_t apply_arr(val_t proc, int argc, val_t *argv) {
         if (vis_jitclosure(cl->jit_val) && g_jit_call_depth < JIT_CALL_DEPTH_LIMIT && !jit_arith_tainted()
             && curry_profiling_level == 0) {
             vm_check_arity(cl, argc);
-            JitClosure *jc = as_jitclos(cl->jit_val);
-            typedef uint64_t (*jit_fn_t)(int32_t, uint64_t *, uint64_t *);
-            g_jit_call_depth++;
-            val_t r = (val_t)((jit_fn_t)GC_REVEAL_POINTER(jc->fn))((int32_t)argc,
-                                                                    (uint64_t *)argv,
-                                                                    (uint64_t *)jc->caps);
-            g_jit_call_depth--;
-            return r;
+            return jit_invoke(cl, argc, argv);
         }
         maybe_jit_bcc(cl);
         val_t *saved_sp = vm->sp;

@@ -35,6 +35,7 @@ extern "C" {
 #include "../gc.h"
 #include "../numeric.h"
 #include "../symbol.h"   /* EC_WRONG_NUMBER_OF_ARGUMENTS */
+#include "../bcjit_rt.h"
 }
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
@@ -271,6 +272,23 @@ void JITSession::register_runtime_symbols() {
     add("curry_jit_make_closure",       (void *)curry_jit_make_closure);
     add("curry_jit_list_tail",          (void *)curry_jit_list_tail);
     add("curry_jit_arity_error",        (void *)curry_jit_arity_error);
+
+    /* Helpers for code translated from bytecode (bcjit.cpp); defined at
+     * the end of vm.c. */
+    add("bcjit_enter",        (void *)bcjit_enter);
+    add("bcjit_leave",        (void *)bcjit_leave);
+    add("bcjit_self_tail",    (void *)bcjit_self_tail);
+    add("bcjit_poll",         (void *)bcjit_poll);
+    add("bcjit_load_global",  (void *)bcjit_load_global);
+    add("bcjit_store_global", (void *)bcjit_store_global);
+    add("bcjit_def_global",   (void *)bcjit_def_global);
+    add("bcjit_store_up",     (void *)bcjit_store_up);
+    add("bcjit_binary",       (void *)bcjit_binary);
+    add("bcjit_unary",        (void *)bcjit_unary);
+    add("bcjit_cons",         (void *)bcjit_cons);
+    add("bcjit_call",         (void *)bcjit_call);
+    add("bcjit_closure",      (void *)bcjit_closure);
+    add("bcjit_close_up",     (void *)bcjit_close_up);
 
     /* Comparison wrappers (bool → val_t). */
     add("curry_jit_lt",            (void *)curry_jit_lt);

@@ -36,6 +36,8 @@ that is called once is not compiled either.
 | `CURRY_JIT=on` | Default: compile a closure after 50 calls |
 | `CURRY_JIT=off` | Never compile; `jit-compile!` does nothing, and `curry-jit-call` / `curry-jit-eval` run on bytecode |
 | `CURRY_JIT=force` | Compile on the first call. For testing: everything the JIT accepts runs as native code from the start |
+| `CURRY_JIT_BACKEND=source` | Default: compile from the saved source form of the procedure |
+| `CURRY_JIT_BACKEND=bytecode` | Experimental: translate the procedure's bytecode (see below) |
 | `CURRY_JIT_LOG=1` | At exit, print to stderr how many chunks were compiled and how many were refused, by reason |
 | `CURRY_JIT_LOG=2` | Also print one line for each chunk when it is compiled or refused |
 
@@ -43,6 +45,26 @@ To check a program for JIT bugs, run it with `CURRY_JIT=off` and with
 `CURRY_JIT=force` and compare the output. `ctest` does this for a set of
 core suites (`jit_force_*`); `CURRY_JIT=force ctest --test-dir build` does it
 for all of them.
+
+## The bytecode backend (experimental)
+
+`CURRY_JIT_BACKEND=bytecode` selects a second code generator that translates
+the bytecode the VM runs instead of the Scheme source. It is not the default
+yet. `(jit-backend)` returns `source` or `bytecode`.
+
+Because macros are already expanded in bytecode and variables are already
+resolved, it compiles what the source backend refuses: closures that capture
+variables, procedures inside a `define-library`, procedures that use macros
+or any special form, and named lets that call themselves outside tail
+position. It refuses a procedure only if it contains an instruction the
+translator does not handle yet: currently exception handlers (`guard`,
+`with-exception-handler`), multiple values (`values`, `call-with-values`),
+`apply`, and `import` inside a procedure.
+
+It is slower than the source backend on simple arithmetic loops for now:
+each instruction is a call into the VM's own code. The plan and the later
+phases that make it fast are in
+[`../thoughts/jit-bytecode-translator-plan-2026-11-15.md`](../thoughts/jit-bytecode-translator-plan-2026-11-15.md).
 
 ## Speed
 

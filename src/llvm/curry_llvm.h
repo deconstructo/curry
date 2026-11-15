@@ -72,6 +72,12 @@ void curry_llvm_dump_last(void);
  * (at most errlen bytes, always NUL-terminated). */
 val_t curry_llvm_jit_compile(val_t src_lambda, char *errbuf, size_t errlen);
 
+/* Tiered JIT, bytecode backend (bcjit.cpp): translate a Chunk's bytecode.
+ * `chunk` is a Chunk *. Returns a T_JITCLOSURE whose hdr.flags has
+ * JITC_BYTECODE set (bcjit_rt.h), or V_VOID with the reason in errbuf, as
+ * for curry_llvm_jit_compile. */
+val_t curry_llvm_jit_compile_chunk(void *chunk, char *errbuf, size_t errlen);
+
 /*
  * Compile a list of top-level S-expressions (parsed from a .scm file) and
  * write the resulting LLVM IR to `out_path`.

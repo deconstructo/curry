@@ -684,6 +684,10 @@
        (jit-compiled? jit-371-sq) #f)
 (check "jit-refusal-reason: a primitive has none" (jit-refusal-reason car) #f)
 (check "jit-compiled?: #f for a primitive" (jit-compiled? car) #f)
+;;; What the JIT refuses depends on the backend: the source-based one
+;;; (the default) refuses the shapes below; the bytecode translator
+;;; compiles them (tests/jit_bytecode_tests.scm covers those).
+(define jit-source-backend? (eq? (jit-backend) 'source))
 (jit-compile! jit-371-probe)
 (when (jit-compiled? jit-371-probe)
   (check "jit-refusal-reason: #f before the procedure is tried"
@@ -694,6 +698,11 @@
          (jit-refusal-reason jit-371-sq) #f)
   (check "jit-compiled?: compiled code still gives the right answer"
          (jit-371-sq 12) 144)
+  (check "JIT #370: a when loop is compiled" (jit-compiled? jit-370-when) #t)
+  (check "JIT #370: an unless loop is compiled" (jit-compiled? jit-370-unless) #t)
+  (check "JIT #370: a case loop is compiled" (jit-compiled? jit-370-case) #t))
+
+(when (and jit-source-backend? (jit-compiled? jit-371-probe))
   ;; A closure with upvalues is refused before code generation (#291).
   (let ((add5 ((lambda (k) (lambda (x) (+ x k))) 5)))
     (jit-compile! add5)
@@ -708,10 +717,7 @@
     (check "jit-refusal-reason: names the unsupported form"
            (jit-refusal-reason qq) "JIT: unsupported special form 'quasiquote'")
     (check "refused procedure still works" (qq 1) '(a 1)))
-  ;; #370: these loop shapes compile now; non-tail self-calls are refused.
-  (check "JIT #370: a when loop is compiled" (jit-compiled? jit-370-when) #t)
-  (check "JIT #370: an unless loop is compiled" (jit-compiled? jit-370-unless) #t)
-  (check "JIT #370: a case loop is compiled" (jit-compiled? jit-370-case) #t)
+  ;; #370: non-tail self-calls are refused.
   (check "JIT #370: a non-tail self-call is refused" (jit-compiled? jit-370-len) #f)
   (check "JIT #370: the refusal reason is recorded"
          (string? (jit-refusal-reason jit-370-len)) #t)
