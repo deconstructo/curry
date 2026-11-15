@@ -753,27 +753,42 @@ static val_t read_datum(val_t port) {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number(sb.buf, 2, false, false);
+            return parse_number_prefixed(sb.buf, 2);
         }
         case 'o': case 'O': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number(sb.buf, 8, false, false);
+            return parse_number_prefixed(sb.buf, 8);
         }
         case 'd': case 'D': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number(sb.buf, 10, false, false);
+            return parse_number_prefixed(sb.buf, 10);
         }
         case 'x': case 'X': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number(sb.buf, 16, false, false);
+            return parse_number_prefixed(sb.buf, 16);
         }
         case 'e': case 'E': {
+            /* Number text is parsed as text, so that #e1.1 is 11/10 and not
+             * the double nearest 1.1 turned exact. Anything that does not
+             * start like a number (a parenthesis, a cuneiform numeral) is
+             * still read as a datum and converted. */
+            int nx = peek_char_port(port);
+            if ((nx >= '0' && nx <= '9') || nx == '+' || nx == '-' || nx == '.' || nx == '#') {
+                StrBuf sb; sb_init(&sb);
+                sb_push(&sb, '#'); sb_push(&sb, 'e');
+                while (!is_delimiter(peek_char_port(port)) && peek_char_port(port) < 128)
+                    sb_push(&sb, (char)next_char(port));
+                sb.buf[sb.len] = '\0';
+                val_t v = parse_number_prefixed(sb.buf, 10);
+                if (vis_false(v)) read_error("invalid number after #e");
+                return v;
+            }
             val_t v = read_datum(port);
             return num_exact(v);
         }

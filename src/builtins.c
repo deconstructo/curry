@@ -209,8 +209,19 @@ PRED1(integer_p,  num_is_integer)
 PRED1(rational_p, num_is_rational)
 PRED1(real_p,     num_is_real)
 PRED1(complex_p,  vis_number)
-PRED1(exact_p,    vis_exact)
-PRED1(inexact_p,  vis_inexact)
+/* A complex number is exact when both parts are, inexact when either is not;
+ * a quaternion or octonion holds doubles, so it is inexact. The surreal,
+ * symbolic and multivector types are neither (as before). */
+static bool num_exact_p(val_t v) {
+    if (vis_complex(v)) return num_exact_p(as_cpx(v)->real) && num_exact_p(as_cpx(v)->imag);
+    return vis_exact(v);
+}
+static bool num_inexact_p(val_t v) {
+    if (vis_complex(v)) return num_inexact_p(as_cpx(v)->real) || num_inexact_p(as_cpx(v)->imag);
+    return vis_inexact(v) || vis_quat(v) || vis_oct(v);
+}
+PRED1(exact_p,    num_exact_p)
+PRED1(inexact_p,  num_inexact_p)
 static val_t prim_procedure_p(int ac, val_t *av, void *ud) {
     (void)ud; (void)ac;
     return vbool(vis_proc(av[0]) || vis_bcclosure(av[0]));
