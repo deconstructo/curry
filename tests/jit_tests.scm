@@ -596,6 +596,86 @@
 (check "JIT: (+ x) and (* x) still type-check x"
        (jit-309-plus1-run 300) '(err err 5 2.5))
 
+;;; Issue #370: a named let's self-call is compiled as a jump back to the top
+;;; of the loop, which is only right in tail position. A non-tail self-call
+;;; followed by a constant used to lose the constant (7, not 5); other
+;;; non-tail shapes failed IR verification. Such functions now stay on
+;;; bytecode. Each is called before and after it gets hot.
+(define (jit-370-const n)
+  (let loop ((i 0)) (if (< i n) (begin (loop (+ i 1)) 5) 7)))
+(define (jit-370-if-arg n)
+  (let loop ((i 0)) (+ 1 (if (< i n) (loop (+ i 1)) 0))))
+(define (jit-370-len l)
+  (let loop ((l l)) (if (null? l) 0 (+ 1 (loop (cdr l))))))
+(define (jit-370-and n)
+  (let loop ((i 0)) (if (< i n) (and (loop (+ i 1)) 'yes) #t)))
+(define (jit-370-let-init n)
+  (let loop ((i 0)) (if (< i n) (let ((r (loop (+ i 1)))) (+ r 1)) 0)))
+;;; Tail self-calls inside when / unless / case used to fail verification
+;;; (no JIT, right result); they must stay right now that they compile.
+(define (jit-370-when n)
+  (let ((acc 0))
+    (let loop ((i 0)) (when (< i n) (set! acc (+ acc i)) (loop (+ i 1))))
+    acc))
+(define (jit-370-unless n)
+  (let loop ((i 0) (acc 0)) (unless (> i n) (if (= i n) acc (loop (+ i 1) (+ acc i))))))
+(define (jit-370-case n)
+  (let loop ((i 0)) (case i ((5) 'five) (else (loop (+ i 1))))))
+;;; when / unless return the last body value, as on bytecode.
+(define (jit-370-when-value x) (when x 5))
+(define (jit-370-unless-value x) (unless x 6))
+;;; Shapes that are accepted: the self-call is in tail position.
+(define (jit-370-nested n)            ; total of j over rows 0..n-1, j = 0..i
+  (let outer ((i 0) (acc 0))
+    (if (= i n)
+        acc
+        (let inner ((j 0) (a acc))
+          (if (> j i) (outer (+ i 1) a) (inner (+ j 1) (+ a 1)))))))
+(define (jit-370-same-name n)         ; inner loop shadows the outer name
+  (let loop ((i 0) (acc 0))
+    (if (= i n)
+        acc
+        (loop (+ i 1)
+              (+ acc (let loop ((j 0)) (if (= j n) j (loop (+ j 1)))))))))
+(define (jit-370-case-all i)
+  (let loop ((i i))
+    (if (> i 9)
+        'done
+        (case (modulo i 2) ((0) (loop (+ i 1))) (else (loop (+ i 3)))))))
+(define (jit-370-arity n)
+  (let loop ((i 0)) (if (< i n) (loop (+ i 1) 9) i)))
+;;; Issue #372: `=>` in a case clause, and SRFI-61 cond clauses, were
+;;; compiled with => read as a variable ("unbound variable" once hot).
+(define (jit-372-case x) (case x ((1) => (lambda (k) (+ k 41))) (else 0)))
+(define (jit-372-cond x)
+  (cond ((values x) number? => (lambda (k) (+ k 41))) (else 0)))
+(let loop ((k 0))
+  (when (< k 120)
+    (check "JIT #370: non-tail self-call then constant" (jit-370-const 3) 5)
+    (check "JIT #370: self-call inside an argument's if" (jit-370-if-arg 3) 4)
+    (check "JIT #370: non-tail recursion over a list" (jit-370-len '(a b c)) 3)
+    (check "JIT #370: self-call as non-last and operand" (jit-370-and 3) 'yes)
+    (check "JIT #370: self-call in a let init" (jit-370-let-init 4) 4)
+    (check "JIT #370: tail self-call inside when" (jit-370-when 10) 45)
+    (check "JIT #370: tail self-call inside unless" (jit-370-unless 10) 45)
+    (check "JIT #370: tail self-call inside case" (jit-370-case 0) 'five)
+    (check "JIT #370: when returns its body value" (jit-370-when-value #t) 5)
+    (check "JIT #370: unless returns its body value" (jit-370-unless-value #f) 6)
+    (check "JIT #370: when is void when the test fails"
+           (eq? (jit-370-when-value #f) (if #f #f)) #t)
+    (check "JIT #370: unless is void when the test holds"
+           (eq? (jit-370-unless-value #t) (if #f #f)) #t)
+    (check "JIT #370: inner loop in tail position calls the outer loop"
+           (jit-370-nested 3) 6)
+    (check "JIT #370: inner loop with the same name" (jit-370-same-name 3) 9)
+    (check "JIT #370: case where every branch is a self-call"
+           (jit-370-case-all 0) 'done)
+    (check "JIT #370: self-call with the wrong argument count still raises"
+           (guard (e (#t 'raised)) (jit-370-arity 3)) 'raised)
+    (check "JIT #372: case clause with =>" (jit-372-case 1) 42)
+    (check "JIT #372: cond clause with a guard and =>" (jit-372-cond 1) 42)
+    (loop (+ k 1))))
+
 ;;; 18. Global redefinition of an arithmetic operator must deopt already-
 ;;; JIT-compiled closures and stop future fast-pathing (issue #118) ──────────
 ;;; codegen.cpp's ARITH2/ARITH1 fast paths only ever checked LOCAL

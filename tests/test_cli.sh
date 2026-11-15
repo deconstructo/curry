@@ -362,6 +362,42 @@ check_file_exists "cache-miss run wrote .scc" "$TMPDIR_CLI/macro_cache.scc"
 out=$(printf '(display (my-double 21))\n(newline)\n' | "$CURRY" -i "$MACRO_SCM")
 check_contains "define-syntax usable from -i REPL on cache-hit run" "$out" "42"
 
+# ─── A macro use that fails to expand survives the .scc cache (#380) ──────────
+# The compiler defers an expansion error to run time as (raise <error>). It
+# used to embed the error object itself in the constant pool, which the .scc
+# writer cannot store: "scc: internal error: constant of type 26 ..." on
+# stderr, and no cache. The error is now rebuilt from plain data at run time.
+EXPFAIL_SCM="$TMPDIR_CLI/expand_fail.scm"
+cat > "$EXPFAIL_SCM" << 'SCHEME'
+(define-syntax no-rules (syntax-rules ()))
+(define-syntax needs-two (syntax-rules () ((_ a b) (list a b))))
+(display (guard (e (#t (list 'caught (error-object? e)))) (no-rules foo)))
+(newline)
+(define-syntax boom (lambda (form) (error "boom" 'a "b" 3 (list 1 2 'x) car)))
+(display (guard (e (#t (list (error-object-message e) (error-object-irritants e))))
+  (boom)))
+(newline)
+(display (guard (e ((error-object? e) 'rebuilt)) (needs-two 1)))
+(newline)
+(display (guard (e ((string? (error-object-message e)) 'has-message)) (no-rules x y)))
+(newline)
+SCHEME
+rm -f "$TMPDIR_CLI/expand_fail.scc"
+EXPFAIL_ERR="$TMPDIR_CLI/expand_fail.err"
+out=$("$CURRY" "$EXPFAIL_SCM" 2>"$EXPFAIL_ERR")
+check "a failed macro expansion is still a catchable error (cache-miss run)" "$out" "(caught #t)
+(boom (a b 3 (1 2 x) #<primitive car>))
+rebuilt
+has-message"
+check "... and prints nothing to stderr" "$(cat "$EXPFAIL_ERR")" ""
+check_file_exists "... and the run wrote the .scc cache" "$TMPDIR_CLI/expand_fail.scc"
+out=$("$CURRY" "$EXPFAIL_SCM" 2>"$EXPFAIL_ERR")
+check "the cache-hit run gives the same output" "$out" "(caught #t)
+(boom (a b 3 (1 2 x) #<primitive car>))
+rebuilt
+has-message"
+check "... and prints nothing to stderr either" "$(cat "$EXPFAIL_ERR")" ""
+
 # ─── (symbolic ...) survives .scc cache-hit reruns ─────────────────────────────
 # Regression test: an earlier fix for symbolic's compiler codegen embedded
 # the resolved sym-var primitive directly as a bytecode constant to make it
