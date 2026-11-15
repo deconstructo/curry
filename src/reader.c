@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <math.h>
 #include <assert.h>
 #include <errno.h>
 
@@ -124,6 +125,93 @@ static bool all_radix_digits(const char *s, int radix) {
     return true;
 }
 
+/* The exact value of a plain decimal real: [+-]digits[.digits][e[+-]digits],
+ * so "1.1" is 11/10, not the double nearest to 1.1. #f if the text is not of
+ * that shape (or its exponent is absurdly large), and the caller falls back
+ * to parse_number. */
+static val_t exact_decimal(const char *s) {
+    size_t n = strlen(s);
+    char *digits = (char *)gc_alloc_atomic(n + 1);
+    size_t nd = 0;
+    bool neg = false, seen_dot = false;
+    long frac = 0, ex = 0;
+    const char *p = s;
+    if (*p == '+' || *p == '-') { neg = (*p == '-'); p++; }
+    for (; *p && *p != 'e' && *p != 'E'; p++) {
+        if (*p == '.' && !seen_dot) { seen_dot = true; continue; }
+        if (!isdigit((unsigned char)*p)) return V_FALSE;
+        digits[nd++] = *p;
+        if (seen_dot) frac++;
+    }
+    if (nd == 0) return V_FALSE;
+    digits[nd] = '\0';
+    if (*p == 'e' || *p == 'E') {
+        p++;
+        bool eneg = false;
+        if (*p == '+' || *p == '-') { eneg = (*p == '-'); p++; }
+        if (!isdigit((unsigned char)*p)) return V_FALSE;
+        for (; *p; p++) {
+            if (!isdigit((unsigned char)*p)) return V_FALSE;
+            ex = ex * 10 + (*p - '0');
+            if (ex > 100000) return V_FALSE;
+        }
+        if (eneg) ex = -ex;
+    }
+    long scale = ex - frac;
+    if (scale > 10000 || scale < -10000) return V_FALSE;
+    val_t m = parse_number(digits, 10, false, false);
+    if (vis_false(m)) return V_FALSE;
+    if (neg) m = num_neg(m);
+    if (scale >= 0) return num_mul(m, num_expt(vfix(10), vfix(scale)));
+    return num_div(m, num_expt(vfix(10), vfix(-scale)));
+}
+
+/* A number with R7RS 6.2.1 prefixes in front: #b #o #d #x set the radix, #e
+ * #i the exactness, at most one of each, in either order ("#x#e10",
+ * "#e#x10"). The prefix wins over `radix`. Returns #f when the text is not a
+ * number, the same as parse_number. Used by string->number; the reader
+ * handles its own prefixes while it reads the token. */
+val_t parse_number_prefixed(const char *s, int radix) {
+    bool radix_seen = false, exact = false, inexact = false;
+    while (s[0] == '#') {
+        switch (s[1]) {
+        case 'b': case 'B': case 'o': case 'O':
+        case 'd': case 'D': case 'x': case 'X':
+            if (radix_seen) return V_FALSE;
+            radix_seen = true;
+            radix = (s[1] == 'b' || s[1] == 'B') ? 2
+                  : (s[1] == 'o' || s[1] == 'O') ? 8
+                  : (s[1] == 'd' || s[1] == 'D') ? 10 : 16;
+            break;
+        case 'e': case 'E':
+            if (exact || inexact) return V_FALSE;
+            exact = true;
+            break;
+        case 'i': case 'I':
+            if (exact || inexact) return V_FALSE;
+            inexact = true;
+            break;
+        default:
+            return V_FALSE;
+        }
+        s += 2;
+    }
+    if (exact && radix == 10) {
+        val_t d = exact_decimal(s);
+        if (!vis_false(d)) return d;
+    }
+    /* An infinity or NaN has no exact value; (string->number "#e1e999") is
+     * #f, not an error. */
+    if (exact) {
+        val_t plain = parse_number(s, radix, false, false);
+        if (vis_flonum(plain) && !isfinite(vfloat(plain))) return V_FALSE;
+    }
+    val_t v = parse_number(s, radix, exact, inexact);
+    /* parse_number's inexact flag only reaches integers, not ratios. */
+    if (inexact && !vis_false(v)) v = num_inexact(v);
+    return v;
+}
+
 val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_force) {
     /* The empty string is never a valid number literal (R7RS). Without this,
      * strtol("", &end, radix) sets end == s (consumes nothing) and returns 0
@@ -189,6 +277,9 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
      * was a real, reproducible bug -- `(define (f who nan) ...)` failed
      * to compile with "lambda param must be symbol" because `nan` alone
      * read as a NaN float instead of the symbol `nan`). */
+    /* Decimal points and exponents exist only in radix 10 (R7RS 6.2.4):
+     * "2" in radix 2 is not the float 2.0. */
+    if (radix != 10) goto not_a_float;
     { bool has_digit = false;
       for (const char *p = s; *p && *p != '('; p++)
           if (isdigit((unsigned char)*p)) { has_digit = true; break; }
