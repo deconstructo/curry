@@ -373,6 +373,10 @@ cat > "$EXPFAIL_SCM" << 'SCHEME'
 (define-syntax needs-two (syntax-rules () ((_ a b) (list a b))))
 (display (guard (e (#t (list 'caught (error-object? e)))) (no-rules foo)))
 (newline)
+(define-syntax boom (lambda (form) (error "boom" 'a "b" 3 (list 1 2 'x) car)))
+(display (guard (e (#t (list (error-object-message e) (error-object-irritants e))))
+  (boom)))
+(newline)
 (display (guard (e ((error-object? e) 'rebuilt)) (needs-two 1)))
 (newline)
 (display (guard (e ((string? (error-object-message e)) 'has-message)) (no-rules x y)))
@@ -382,12 +386,14 @@ rm -f "$TMPDIR_CLI/expand_fail.scc"
 EXPFAIL_ERR="$TMPDIR_CLI/expand_fail.err"
 out=$("$CURRY" "$EXPFAIL_SCM" 2>"$EXPFAIL_ERR")
 check "a failed macro expansion is still a catchable error (cache-miss run)" "$out" "(caught #t)
+(boom (a b 3 (1 2 x) #<primitive car>))
 rebuilt
 has-message"
 check "... and prints nothing to stderr" "$(cat "$EXPFAIL_ERR")" ""
 check_file_exists "... and the run wrote the .scc cache" "$TMPDIR_CLI/expand_fail.scc"
 out=$("$CURRY" "$EXPFAIL_SCM" 2>"$EXPFAIL_ERR")
 check "the cache-hit run gives the same output" "$out" "(caught #t)
+(boom (a b 3 (1 2 x) #<primitive car>))
 rebuilt
 has-message"
 check "... and prints nothing to stderr either" "$(cat "$EXPFAIL_ERR")" ""
