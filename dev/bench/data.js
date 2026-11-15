@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794722312032,
+  "lastUpdate": 1794722500679,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -21182,6 +21182,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 41.332,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "03cf3e2f1a1cf00e3dee4e951d8fa9a5518ce81c",
+          "message": "Merge pull request #368 from dharmatech/fix/nan-comparisons\n\nfix(numeric): NaN is unordered in =, <, <=, >, >=; max/min propagate NaN",
+          "timestamp": "2026-11-15T17:00:59+11:00",
+          "tree_id": "8966ae05af0cebaea9402785a1692ecba0ac33ce",
+          "url": "https://github.com/deconstructo/curry/commit/03cf3e2f1a1cf00e3dee4e951d8fa9a5518ce81c"
+        },
+        "date": 1794722499298,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.54,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.316,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.376,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 28.271,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 148.739,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 282.169,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 59.515,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 90.838,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 72.991,
             "unit": "ms"
           }
         ]
