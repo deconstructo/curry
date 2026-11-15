@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794725919157,
+  "lastUpdate": 1794726257483,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -21320,6 +21320,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 39.639,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e62c529bda99b4f49f8ce49b3e9b57c1e41882f2",
+          "message": "Merge pull request #388 from deconstructo/fix/383-nan-bounds\n\nfix: library loops given an unreachable bound raise instead of never ending (#383)",
+          "timestamp": "2026-11-15T18:03:48+11:00",
+          "tree_id": "946f4970705b98fe27a3b99a62d673c4a552952a",
+          "url": "https://github.com/deconstructo/curry/commit/e62c529bda99b4f49f8ce49b3e9b57c1e41882f2"
+        },
+        "date": 1794726256797,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 10.756,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 16.893,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.766,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 18.943,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 89.369,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 175.074,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 49.185,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 57.824,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 42.073,
             "unit": "ms"
           }
         ]
