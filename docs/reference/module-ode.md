@@ -23,6 +23,14 @@ Ordinary differential equation solvers for initial-value problems of the form **
 
 ## API
 
+Every integrator checks its arguments first and raises an error for a start or
+end time `t0`, `t1` that is not a finite real number, for a fixed step `h` that
+is not a finite positive number (or is too small to advance `t` — smaller than
+the spacing of floating-point numbers near `t1`), and, for `ode-rk45`, for a
+tolerance that is not a finite positive number. Before, such a call never
+returned. When `t1 <= t0` the integrators return `y0` at once and `h` is not
+examined.
+
 Each method has two forms: a **final-value** form that returns `y` at `t1`, and a **/steps** form that returns a list of `(t . y)` snapshots at every accepted step.
 
 ### Euler

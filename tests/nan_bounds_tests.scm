@@ -112,6 +112,12 @@
 (check "ode-rk45: zero tolerance raises" (raises? (lambda () (ode-rk45 f 1.0 0 1 0))) #t)
 (check "ode-rk45/steps: +nan.0 end time raises" (raises? (lambda () (ode-rk45/steps f 1.0 0 nan))) #t)
 
+(check "ode-rk4: a step too small to advance t raises"
+       (raises? (lambda () (ode-rk4 f 1.0 1e6 1000001.0 1e-12))) #t)
+(check "ode-rk4: a start time after the end time returns y0 whatever h is"
+       (ode-rk4 f 1.0 5 0 0) 1.0)
+(check "ode-euler: ... and so does an equal end time" (ode-euler f 2.0 3 3 -1) 2.0)
+
 ;; The same calls with ordinary arguments give the right answers.
 (define (close? a b) (< (abs (- a b)) 1e-3))
 (check "ode-rk4 solves y' = -y" (close? (ode-rk4 f 1.0 0 1 0.01) (exp -1.0)) #t)
