@@ -443,6 +443,11 @@ typedef struct Continuation {
     void *jmpbuf;    /* heap-allocated jmp_buf */
     val_t result;    /* written before longjmp */
     void *wind_top;  /* WindFrame * at capture time; for dynamic-wind unwind */
+    void *handler;   /* ExnHandler * current at capture time: the frame of a handler
+                        enclosing the call/cc, alive for as long as the continuation can be
+                        invoked at all (escape-only). Put back by
+                        continuation_restore_handlers just before the jump. */
+    int   handler_count; /* vm->handler_count at capture time */
 } Continuation;
 
 /* Message queue (ring buffer, grown as needed) */

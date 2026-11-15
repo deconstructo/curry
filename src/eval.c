@@ -114,6 +114,8 @@ static val_t eval_call_cc(val_t proc) {
     cont->jmpbuf   = gc_alloc_raw_pinned(sizeof(jmp_buf));
     cont->result   = V_VOID;
     cont->wind_top = current_wind;
+    cont->handler = current_handler;
+    cont->handler_count = vm ? vm->handler_count : 0;
     /* VM state — only meaningful when the VM is active (vm may be NULL in
      * pure tree-walker mode, e.g. test_core.c which skips vm_init). */
     int saved_fc   = vm ? vm->frame_count : 0;
@@ -125,12 +127,8 @@ static val_t eval_call_cc(val_t proc) {
      * boundary leaves g_jit_call_depth incremented, permanently
      * downgrading this closure to the bytecode interpreter. */
     int   saved_jit_depth = jit_depth_save();
-    ExnHandler *saved_handler = current_handler;     /* see prim_call_cc */
-    int   saved_hcount = vm ? vm->handler_count : 0;
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
         jit_depth_restore(saved_jit_depth);
-        current_handler = saved_handler;
-        if (vm) vm->handler_count = saved_hcount;
         if (vm) {
             vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
             vm->frame_count   = saved_fc;
@@ -1565,6 +1563,7 @@ tail:
              * eval_call_cc's volatile reload sees the correct value after longjmp. */
             __asm__ volatile("" ::: "memory");
             wind_unwind_to((WindFrame *)cont->wind_top);
+            continuation_restore_handlers(cont);
             longjmp(*(jmp_buf *)cont->jmpbuf, 1);
         }
 

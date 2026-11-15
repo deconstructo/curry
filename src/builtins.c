@@ -2726,19 +2726,16 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     cont->jmpbuf   = gc_alloc_raw_pinned(sizeof(jmp_buf));
     cont->result   = V_VOID;
     cont->wind_top = current_wind;
+    cont->handler = current_handler;
+    cont->handler_count = vm->handler_count;
     int saved_fc   = vm->frame_count;
     val_t *saved_sp = vm->sp;
     /* Mirrors SCM_PROTECT's own save/restore (eval.h) and eval_call_cc's
      * identical code (eval.c) -- see that comment. */
     int   saved_jit_depth = jit_depth_save();
-    /* The exception handler chain too: re-entering from inside frames that are
-     * gone (or from a handler that runs outside its own frame) must not leave
-     * current_handler pointing at them (#377). */
-    ExnHandler *saved_handler = current_handler;
-    int   saved_hcount = vm->handler_count;
+    /* The exception handler chain is put back before the jump, by
+     * continuation_restore_handlers, from what the continuation recorded. */
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
-        current_handler   = saved_handler;
-        vm->handler_count = saved_hcount;
         /* Continuation was invoked — restore VM state and return captured value.
          * Volatile cast: clang (ARM64 -O2) folds cont->result to V_VOID without
          * it, because cont->result was V_VOID at setjmp time.  See eval_call_cc

@@ -235,6 +235,11 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
 }
 #endif
 
+/* Put the exception-handler chain back to what a continuation captured
+ * (runtime.c); called just before the continuation's longjmp. */
+struct Continuation;
+void continuation_restore_handlers(struct Continuation *cont);
+
 /* Install/remove a handler frame (used by guard, with-exception-handler) */
 #define SCM_PROTECT(h, body, on_exn) do {              \
     (h).prev           = current_handler;               \

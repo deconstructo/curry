@@ -142,6 +142,18 @@ void walk_cond_handlers(val_t exn, CondHandler *h) {
  * cleanup, ...) wants the exception unwound to it, as for raise. (#377) */
 extern val_t scm_cons(val_t, val_t);
 
+/* The handler chain a continuation was captured under. Done before the
+ * longjmp, from the continuation object, so no local variable of the
+ * call/cc frame has to carry a handler pointer across the setjmp. The
+ * frame it points at encloses the call/cc, so it exists whenever the jump
+ * lands (continuations are escape-only). Also reinstates a with-exception-
+ * handler frame that raise-continuable took off the chain while its
+ * handler ran in place. */
+void continuation_restore_handlers(struct Continuation *cont) {
+    current_handler = (ExnHandler *)cont->handler;
+    if (vm) vm->handler_count = cont->handler_count;
+}
+
 val_t scm_raise_continuable(val_t exn) {
     /* Frames whose handler_proc is V_TRUE only clean up and re-raise
      * (dynamic-wind): they are inside the dynamic extent of the raise, so
@@ -385,6 +397,7 @@ val_t apply(val_t proc, val_t args) {
         cont->result = (vis_pair(args) && vis_nil(vcdr(args))) ? vcar(args) : make_values_from_list(args);
         __asm__ volatile("" ::: "memory");
         wind_unwind_to((WindFrame *)cont->wind_top);
+        continuation_restore_handlers(cont);
         longjmp(*(jmp_buf *)cont->jmpbuf, 1);
     }
     if (vis_param(proc)) {
