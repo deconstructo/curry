@@ -490,6 +490,19 @@ static val_t compile_time_eval(val_t expr) {
     return result;
 }
 
+/* Names of the local variables visible where a macro is being defined: those
+ * of this function and of every enclosing one (reachable from here as
+ * upvalues). A macro template may refer to them, and sr_is_protected must
+ * not take them for template-introduced binders (issue #361). */
+static val_t visible_local_names(Compiler *c) {
+    val_t names = V_NIL;
+    for (Compiler *k = c; k; k = k->enclosing)
+        for (int i = 0; i < k->local_count; i++)
+            if (vis_symbol(k->locals[i].name))
+                names = scm_cons(k->locals[i].name, names);
+    return names;
+}
+
 /* (define-syntax name transformer-expr). At top level (scope_depth == 0)
  * this registers into GLOBAL_ENV immediately — eagerly, at compile time,
  * rather than ONLY deferring to a runtime tree-eval call — so a macro
@@ -568,13 +581,17 @@ static void compile_define_syntax(Compiler *c, val_t args, int line) {
      * (scope_depth == 0) define-syntax, where GLOBAL_ENV already covers
      * it via add_syntax_local below being unreachable for that branch. */
     val_t saved_locals = sr_get_current_local_macros();
+    val_t saved_vars   = sr_get_current_local_vars();
     sr_set_current_local_macros(scm_cons(name, saved_locals));
+    sr_set_current_local_vars(visible_local_names(c));
     val_t transformer = V_VOID;
     ExnHandler ds_h;
     SCM_PROTECT(ds_h,
         transformer = compile_time_eval(xfm_expr),
-        { sr_set_current_local_macros(saved_locals); scm_raise_val(ds_h.exn); });
+        { sr_set_current_local_macros(saved_locals); sr_set_current_local_vars(saved_vars);
+          scm_raise_val(ds_h.exn); });
     sr_set_current_local_macros(saved_locals);
+    sr_set_current_local_vars(saved_vars);
 
     if (c->scope_depth == 0) {
         /* Issue #257: this immediate definition exists only so a LATER
@@ -700,6 +717,8 @@ static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
     for (val_t b = bindings; vis_pair(b); b = vcdr(b))
         names = scm_cons(vcar(vcar(b)), names);
     sr_set_current_local_macros(names);
+    val_t saved_vars = sr_get_current_local_vars();
+    sr_set_current_local_vars(visible_local_names(c));
 
     val_t b = bindings;
     ExnHandler ls_h;
@@ -711,8 +730,10 @@ static void compile_let_syntax(Compiler *c, val_t args, bool tail, int line) {
             add_syntax_local(c, name, xfm);
             b = vcdr(b);
         }
-    }, { sr_set_current_local_macros(saved_locals); scm_raise_val(ls_h.exn); });
+    }, { sr_set_current_local_macros(saved_locals); sr_set_current_local_vars(saved_vars);
+         scm_raise_val(ls_h.exn); });
     sr_set_current_local_macros(saved_locals);
+    sr_set_current_local_vars(saved_vars);
 
     compile_seq(c, body, tail, line);
     end_scope(c, line);

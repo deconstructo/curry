@@ -290,6 +290,20 @@ name as a helper the macro relies on can still shadow it — write macros
 defensively (e.g. avoid common names like `tmp` for template-internal
 bindings) for that remaining case.
 
+Binders are the exception: when a template itself contains a
+binding form (`lambda`, `let`, `let*`, `letrec`, named `let`, `do`,
+`let-values`, `receive`, `case-lambda`, `guard`, a `define` with formals,
+internal `define`s), the names it binds are renamed, together with the
+references inside that binder's scope, even if the same name is also a
+global — so `(let ((tmp 1)) ...)` in a template never captures the caller's
+`tmp`. A macro defined inside a function (`define-syntax` in a body,
+`let-syntax`) can refer to that function's local variables. What is still
+not covered: a binder that only becomes one through another macro's
+expansion, or after later recursive expansions of the same macro (the
+accumulating formals of SRFI-26 `cut`), is renamed only if its name is not
+already bound; and `syntax-case` templates do not yet get either
+improvement.
+
 ```scheme
 (define-syntax my-or
   (syntax-rules ()
