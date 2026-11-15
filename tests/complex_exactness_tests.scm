@@ -34,6 +34,19 @@
 (check "exact of a complex with an infinite part raises"
        (raises? (lambda () (exact (make-rectangular 1. +inf.0)))) #t)
 
+;; The reader's #e and #i prefixes apply the same conversion to a literal.
+(check "#i on a complex literal" (list (real-part #i1+2i) (imag-part #i1+2i)) '(1.0 2.0))
+(check "#e on a complex literal" (list (real-part #e1.5+2.5i) (imag-part #e1.5+2.5i)) '(3/2 5/2))
+
+;; A value nested very deeply (make-rectangular accepts complex parts) raises a
+;; catchable error instead of overflowing the C stack.
+(define deep
+  (let loop ((i 0) (z 1)) (if (< i 200000) (loop (+ i 1) (make-rectangular z 1)) z)))
+(check "inexact of a very deeply nested complex does not crash"
+       (guard (e (#t 'done)) (inexact deep) 'done) 'done)
+(check "exact of a very deeply nested complex does not crash"
+       (guard (e (#t 'done)) (exact deep) 'done) 'done)
+
 (check "a round trip" (exact (inexact 3+4i)) 3+4i)
 (check "numerically equal after conversion" (= (inexact 1+2i) 1+2i) #t)
 (check "reals are unchanged" (list (inexact 1) (inexact 1/2) (exact 0.5) (exact 3)) '(1.0 0.5 1/2 3))
