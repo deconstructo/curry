@@ -1545,30 +1545,21 @@ static val_t prim_llvm_dump_last(int ac, val_t *av, void *ud) {
     return V_VOID;
 }
 static val_t prim_jit_call(int ac, val_t *av, void *ud) {
-    /* (curry-jit-call proc) — force-JIT-compile proc then call it.
-     * For BcClosure: extract src_lambda, compile, hot-swap jit_val, then call.
-     * Falls back to apply_arr if JIT unavailable or src_lambda not stored. */
+    /* (curry-jit-call proc) — force-JIT-compile proc then call it. A
+     * bytecode closure the JIT refuses (see jit_gate, runtime.c) is just
+     * called. */
     (void)ac; (void)ud;
     val_t proc = av[0];
     if (vis_bcclosure(proc)) {
-        BcClosure *cl = as_bcclosure(proc);
-        /* Issue #291: closures with upvalues stay on the bytecode VM (see
-         * maybe_jit_bcc); compiling src_lambda alone would drop them. */
-        /* Same refusals as maybe_jit_bcc (runtime.c): upvalues (#291),
-         * a define-library target env, a let-syntax-local macro (#114). */
-        if (cl->chunk->src_lambda != V_VOID && cl->upval_count == 0 &&
-            cl->chunk->target_env == V_VOID && !cl->chunk->uses_local_macro) {
-            extern val_t jit_chunk_code(Chunk *);
-            val_t compiled = jit_chunk_code(cl->chunk);   /* shared, #288 */
-            if (vis_jitclosure(compiled))
-                __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
-        }
+        jit_compile_closure_now(as_bcclosure(proc));
         return apply_arr(proc, 0, NULL);
     }
+    if (jit_disabled()) return apply_arr(proc, 0, NULL);
     return curry_jit_call(proc);
 }
 static val_t prim_jit_eval(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
+    if (jit_disabled()) return vm_eval(av[0], GLOBAL_ENV);   /* CURRY_JIT=off */
     return curry_jit_eval_expr(av[0]);
 }
 static val_t prim_jit_call_depth(int ac, val_t *av, void *ud) {
@@ -1576,25 +1567,43 @@ static val_t prim_jit_call_depth(int ac, val_t *av, void *ud) {
     return vfix(g_jit_call_depth);
 }
 static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
-    /* (jit-compile proc) — force immediate JIT compilation of proc.
-     * Returns the same proc (with jit_val set) or proc unchanged on failure. */
+    /* (jit-compile! proc) — compile proc now instead of waiting for it to
+     * get hot. Returns proc. Does nothing if the JIT refuses it (see
+     * jit_gate, runtime.c); (jit-refusal-reason proc) says why. */
     (void)ac; (void)ud;
     val_t proc = av[0];
-    if (!vis_bcclosure(proc)) return proc;
-    BcClosure *cl = as_bcclosure(proc);
-    if (cl->chunk->src_lambda == V_VOID) return proc;
-    /* Issue #291: closures with upvalues stay on the bytecode VM (see
-     * maybe_jit_bcc in runtime.c), so they are returned unchanged. */
-    if (cl->upval_count > 0) return proc;
-    /* Same refusals as maybe_jit_bcc: JIT code resolves globals in
-     * GLOBAL_ENV only (target_env), and cannot see let-syntax-local
-     * macros (issue #114). */
-    if (cl->chunk->target_env != V_VOID || cl->chunk->uses_local_macro) return proc;
-    extern val_t jit_chunk_code(Chunk *);
-    val_t compiled = jit_chunk_code(cl->chunk);   /* shared per chunk, #288 */
-    if (vis_jitclosure(compiled))
-        __atomic_store_n(&cl->jit_val, compiled, __ATOMIC_RELEASE);
+    if (vis_bcclosure(proc)) jit_compile_closure_now(as_bcclosure(proc));
     return proc;
+}
+static val_t prim_jit_backend(int ac, val_t *av, void *ud) {
+    /* (jit-backend) — 'source or 'bytecode: what hot closures are compiled
+     * from (CURRY_JIT_BACKEND). */
+    (void)ac; (void)av; (void)ud;
+    return sym_intern_cstr(jit_backend_is_bytecode() ? "bytecode" : "source");
+}
+static val_t prim_jit_compiled_p(int ac, val_t *av, void *ud) {
+    /* (jit-compiled? proc) — #t if proc has been compiled to native code. */
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (vis_jitclosure(proc)) return V_TRUE;
+    if (!vis_bcclosure(proc)) return V_FALSE;
+    return jit_closure_compiled(as_bcclosure(proc)) ? V_TRUE : V_FALSE;
+}
+static val_t prim_jit_refusal_reason(int ac, val_t *av, void *ud) {
+    /* (jit-refusal-reason proc) — a string saying why proc is not and will
+     * not be JIT-compiled, or #f if it is compiled, has not been tried yet,
+     * or is not a bytecode closure. */
+    (void)ac; (void)ud;
+    val_t proc = av[0];
+    if (!vis_bcclosure(proc)) return V_FALSE;
+    const char *why = jit_closure_refusal(as_bcclosure(proc));
+    if (!why) return V_FALSE;
+    uint32_t len = (uint32_t)strlen(why);
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, why, len + 1);
+    return vptr(str);
 }
 #endif /* BUILD_LLVM */
 
@@ -1863,6 +1872,9 @@ void builtins_curry_register(val_t env) {
     DEF("curry-jit-eval",        prim_jit_eval,          1, 1);
     DEF("jit-call-depth",        prim_jit_call_depth,    0, 0);
     DEF("jit-compile!",          prim_jit_compile,       1, 1);
+    DEF("jit-compiled?",         prim_jit_compiled_p,    1, 1);
+    DEF("jit-backend",           prim_jit_backend,       0, 0);
+    DEF("jit-refusal-reason",    prim_jit_refusal_reason, 1, 1);
 #endif
 
     /* ── GC builtins ───────────────────────────────────────────────────────── */

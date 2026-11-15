@@ -404,6 +404,7 @@ if(BUILD_LLVM)
   set(LLVM_BACKEND_SOURCES
     src/llvm/gc_strategy.cpp
     src/llvm/jit.cpp
+    src/llvm/bcjit.cpp
     src/llvm/curry_llvm.cpp
     src/llvm/codegen.cpp
   )
