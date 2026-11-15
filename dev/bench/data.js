@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794026637434,
+  "lastUpdate": 1794713403728,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -20906,6 +20906,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 65.482,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4df81f3bc594d5cc09faced5691fc8319166b452",
+          "message": "Merge pull request #374 from deconstructo/fix/370-jit-named-let-nontail\n\nfix(jit): named-let self-calls outside tail position, and three related JIT bugs",
+          "timestamp": "2026-11-15T14:29:22+11:00",
+          "tree_id": "118fad14cae101a6e0469cbe85cffb0e11d11bd7",
+          "url": "https://github.com/deconstructo/curry/commit/4df81f3bc594d5cc09faced5691fc8319166b452"
+        },
+        "date": 1794713402561,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 10.734,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 16.187,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 2.722,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 18.887,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 85.48,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 167.746,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 44.927,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 53.177,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 40.034,
             "unit": "ms"
           }
         ]
