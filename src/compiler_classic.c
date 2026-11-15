@@ -30,6 +30,7 @@
 #include "symbol.h"
 #include "gc.h"
 #include "numeric.h"
+#include "port.h"
 #include "env.h"
 #include "eval.h"
 #include "vm.h"
@@ -490,6 +491,56 @@ static val_t compile_time_eval(val_t expr) {
     return result;
 }
 
+
+/* The irritants of a macro-expansion error, as data the .scc cache can store:
+ * a symbol, string, number, character, boolean, nil, or a pair or vector of
+ * those is kept; anything else (a procedure, a port, a hash table, ...) is
+ * replaced by its printed form, a string. Deeper than 64 levels, or past 4096
+ * nodes in all, the rest is cut off with the string "...". */
+static val_t deferred_cstr(const char *text) {
+    uint32_t len = (uint32_t)strlen(text);
+    String *str = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+    str->hdr.type = T_STRING; str->hdr.flags = 0;
+    str->len = len; str->hash = 0; str->orig_cap = len; str->ext = NULL;
+    memcpy(str->data, text, len + 1);
+    return vptr(str);
+}
+
+static val_t deferred_plain_data(val_t v, int depth) {
+    static CURRY_THREAD_LOCAL int nodes;
+    if (depth == 0) nodes = 0;
+    if (depth > 64 || ++nodes > 4096) return deferred_cstr("...");
+    if (!vis_ptr(v)) return v;
+    switch (vtype(v)) {
+    case T_SYMBOL: case T_STRING: case T_FLONUM: case T_BIGNUM: case T_RATIONAL:
+    case T_COMPLEX:
+        return v;
+    case T_PAIR: {
+        /* Walk the spine in a loop and sanitize each car. */
+        val_t items = V_NIL, t = v;
+        for (; vis_pair(t); t = vcdr(t)) {
+            if (nodes > 4096) break;
+            items = scm_cons(deferred_plain_data(vcar(t), depth + 1), items);
+        }
+        val_t out = vis_pair(t) ? deferred_cstr("...") : deferred_plain_data(t, depth + 1);
+        for (; vis_pair(items); items = vcdr(items)) out = scm_cons(vcar(items), out);
+        return out;
+    }
+    case T_VECTOR: {
+        Vector *vec = as_vec(v);
+        Vector *nv = CURRY_NEW_FLEX(Vector, vec->len);
+        nv->hdr.type = T_VECTOR; nv->hdr.flags = 0; nv->len = vec->len;
+        for (uint32_t i = 0; i < vec->len; i++)
+            nv->data[i] = deferred_plain_data(vec->data[i], depth + 1);
+        return vptr(nv);
+    }
+    default: {
+        val_t port = port_open_output_string();
+        scm_write_shared(v, port);
+        return port_get_output_string(port);
+    }
+    }
+}
 /* Names of the local variables visible where a macro is being defined: those
  * of this function and of every enclosing one (reachable from here as
  * upvalues). A macro template may refer to them, and sr_is_protected must
@@ -2802,12 +2853,27 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
         if (curry_timings_enabled)
             curry_timing_expand_ns += profiling_now_ns() - _expand_t0;
         if (exn_val != V_FALSE) {
-            /* Expansion failed — emit (raise <error>) to defer to runtime */
-            val_t raise_sym = sym_intern_cstr("raise");
-            val_t raise_form = scm_cons(raise_sym,
-                                   scm_cons(scm_cons(S_QUOTE,
-                                                scm_cons(exn_val, V_NIL)),
-                                            V_NIL));
+            /* Expansion failed -- defer the error to run time. An error
+             * object cannot go into the constant pool as it is: the .scc
+             * cache cannot store one (it printed "constant of type 26 ...
+             * (not written)" and skipped the cache, issue #380). Hand over
+             * its message, irritants, kind and code as plain data and let
+             * %raise-deferred-error rebuild it. Any other raised value is
+             * quoted as before. */
+            val_t raise_form;
+            if (vis_error(exn_val)) {
+                ErrorObj *eo = as_err(exn_val);
+                val_t desc = scm_cons(eo->message,
+                               scm_cons(deferred_plain_data(eo->irritants, 0),
+                                 scm_cons(eo->kind, scm_cons(eo->code, V_NIL))));
+                raise_form = scm_cons(sym_intern_cstr("%raise-deferred-error"),
+                               scm_cons(scm_cons(S_QUOTE, scm_cons(desc, V_NIL)), V_NIL));
+            } else {
+                raise_form = scm_cons(sym_intern_cstr("raise"),
+                               scm_cons(scm_cons(S_QUOTE,
+                                            scm_cons(exn_val, V_NIL)),
+                                        V_NIL));
+            }
             compile(c, raise_form, tail, line);
         } else {
             compile(c, expanded, tail, line);

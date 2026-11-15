@@ -2593,6 +2593,41 @@ static val_t prim_error(int ac, val_t *av, void *ud) {
     e->code = V_FALSE; /* (error ...) is user-authored text, not a stable code site */
     scm_raise_val(vptr(e));
 }
+/* (%raise-deferred-error '(message irritants kind code)): raise the error a
+ * macro expansion failed with at compile time, rebuilt from plain data.
+ * The compiler (compiler_classic.c, SF_MACRO) used to embed the error
+ * object itself as a quoted constant, which the .scc cache cannot store;
+ * the data here can. The message already carries its preamble, so it is
+ * used as it is. The backtrace is the one at the place the code runs. */
+static val_t prim_raise_deferred_error(int ac, val_t *av, void *ud) {
+    (void)ac; (void)ud;
+    val_t d = av[0];
+    ErrorObj *e = CURRY_NEW(ErrorObj);
+    e->hdr.type = T_ERROR; e->hdr.flags = 0;
+    e->message = V_FALSE; e->irritants = V_NIL; e->kind = S_ERROR; e->code = V_FALSE;
+    if (vis_pair(d) && vis_string(vcar(d))) {
+        e->message = vcar(d);
+        d = vcdr(d);
+        if (vis_pair(d)) {
+            e->irritants = vcar(d); d = vcdr(d);
+            if (vis_pair(d)) {
+                if (vis_symbol(vcar(d))) e->kind = vcar(d);
+                d = vcdr(d);
+                if (vis_pair(d) && vis_symbol(vcar(d))) e->code = vcar(d);
+            }
+        }
+    } else {
+        static const char fallback[] = "macro expansion failed";
+        uint32_t len = (uint32_t)(sizeof fallback - 1);
+        String *m = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+        m->hdr.type = T_STRING; m->hdr.flags = 0;
+        m->len = len; m->hash = 0; m->orig_cap = len; m->ext = NULL;
+        memcpy(m->data, fallback, len + 1);
+        e->message = vptr(m);
+    }
+    e->backtrace = vm_capture_backtrace();
+    scm_raise_val(vptr(e));
+}
 static val_t prim_eval(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t env = (ac >= 2 && vis_env(av[1])) ? av[1] : GLOBAL_ENV;
@@ -4043,7 +4078,7 @@ void builtins_register(val_t env) {
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
     DEF("%delay-promise",prim_delay_promise,1,1); DEF("%delay-force-promise",prim_delay_force_promise,1,1);
-    DEF("error",prim_error,1,-1); DEF("raise",prim_raise,1,1);
+    DEF("error",prim_error,1,-1); DEF("raise",prim_raise,1,1); DEF("%raise-deferred-error",prim_raise_deferred_error,1,1);
     DEF("raise-continuable",prim_raise_continuable,1,1);
     DEF("error-message",prim_error_message,1,1);
     DEF("error-object-message",prim_error_message,1,1);
