@@ -159,6 +159,16 @@
 (let ((y (ode-rk45 (lambda (t y) (* -20.0 y)) 1.0 0.0 1.0 1e-6)))
   (check "rk45: fast decay e^{-20}" y (exp -20.0) 1e-4))
 
+;;; A derivative that turns NaN ends the integration instead of rejecting
+;;; every step forever: rk45 returns the NaN solution and rk45/steps stops
+;;; at the first NaN step.
+(let* ((f-blowup (lambda (t y) (if (> t 0.5) (/ 0. 0.) (- y))))
+       (y        (ode-rk45 f-blowup 1.0 0 1))
+       (steps    (ode-rk45/steps f-blowup 1.0 0 1)))
+  (check "rk45: NaN derivative returns NaN" (if (nan? y) 1 0) 1 0)
+  (check "rk45/steps: ends at the NaN step"
+         (if (nan? (cdr (car (reverse steps)))) 1 0) 1 0))
+
 ;;; ════════════════════════════════════════════════════════════
 ;;; § 4  VERLET tests (symplectic, Hamiltonian systems)
 ;;; ════════════════════════════════════════════════════════════

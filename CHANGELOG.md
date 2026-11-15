@@ -1,5 +1,24 @@
 # Changelog
 
+### Unreleased
+
+**Fixed — comparisons with NaN (#367)**
+
+- `=`, `<=` and `>=` returned `#t` when either operand was NaN, so
+  `(= +nan.0 +nan.0)` and `(<= +nan.0 1)` were `#t`. Every comparison with a
+  NaN operand is now `#f`, as IEEE 754 and R6RS specify. Comparing a NaN with
+  a non-number still raises.
+- A sign-flagged sym-var no longer compares as greater or less than NaN.
+- `max` and `min` return NaN when an argument is NaN; before, the result
+  depended on argument order.
+- `exact` (and `inexact->exact`) of NaN or an infinity raises an error
+  instead of killing the process with SIGFPE. Code that clamps before
+  converting, like `(exact (round (max 0 (min 255 x))))`, used to lose a NaN
+  in `max`/`min` and now reaches `exact`.
+- `ode-rk45` and `ode-rk45/steps` stop and return the NaN solution when the
+  derivative turns NaN. With NaN compared correctly, they used to reject
+  every step and never finish.
+
 ### 1.30.1 - 2026-11-07
 
 **Fixed — `tools/make-macos-app.sh` apps (#365)**
