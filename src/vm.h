@@ -202,6 +202,7 @@ BcClosure *vm_snapshot_closure_for_escape(BcClosure *bc);
  * jit_closure_refusal is the reason it is not and will not be compiled, or
  * NULL if it is compiled or has not been tried yet. */
 bool        jit_disabled(void);   /* CURRY_JIT=off */
+bool        jit_backend_is_bytecode(void);   /* CURRY_JIT_BACKEND=bytecode */
 void        jit_compile_closure_now(BcClosure *cl);
 bool        jit_closure_compiled(const BcClosure *cl);
 const char *jit_closure_refusal(const BcClosure *cl);

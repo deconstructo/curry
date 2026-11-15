@@ -126,3 +126,11 @@ jobs:
         env:
           CURRY_JIT: force
         run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)
+
+      # And once more with the bytecode-to-LLVM backend (src/llvm/bcjit.cpp).
+      - name: Test with the bytecode JIT backend forced on
+        working-directory: build
+        env:
+          CURRY_JIT: force
+          CURRY_JIT_BACKEND: bytecode
+        run: ctest --output-on-failure -j$(getconf _NPROCESSORS_ONLN)

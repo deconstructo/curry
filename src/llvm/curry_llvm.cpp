@@ -8,11 +8,15 @@
 #include "curry_llvm.h"
 #include "jit.h"
 #include "codegen.h"
+#include "bcjit.h"
 
 extern "C" {
 #include "../value.h"
 #include "../eval.h"
 #include "../vm.h"
+#include "../object.h"
+#include "../gc.h"
+#include "../bcjit_rt.h"
 }
 
 #include <llvm/IR/LLVMContext.h>
@@ -184,6 +188,44 @@ val_t curry_llvm_jit_compile(val_t src_lambda, char *errbuf, size_t errlen) {
         return V_VOID;  /* keep using bytecode */
     } catch (...) {
         jit_copy_error(errbuf, errlen, "unknown error in the code generator");
+        return V_VOID;
+    }
+}
+
+val_t curry_llvm_jit_compile_chunk(void *chunk, char *errbuf, size_t errlen) {
+    if (errbuf && errlen) errbuf[0] = '\0';
+    if (!g_initialised.load()) {
+        jit_copy_error(errbuf, errlen, "LLVM backend not initialised");
+        return V_VOID;
+    }
+
+    static std::atomic<uint64_t> seq{0};
+    std::string fn_name = "curry_bc_" + std::to_string(seq.fetch_add(1));
+
+    try {
+        auto ctx = curry::JITSession::make_context();
+        auto M = curry::bcjit_translate(*ctx, static_cast<const Chunk *>(chunk), fn_name);
+
+        uint64_t addr;
+        {
+            std::lock_guard<std::mutex> lock(g_jit_mutex);
+            curry::JITSession::instance().add_module(std::move(M), std::move(ctx));
+            addr = curry::JITSession::instance().lookup(fn_name);
+        }
+        /* The function takes its closure as an argument, so one
+         * T_JITCLOSURE without captures serves every closure of the chunk. */
+        JitClosure *jc = (JitClosure *)gc_alloc_pinned(sizeof(JitClosure));
+        jc->hdr.type  = T_JITCLOSURE;
+        jc->hdr.flags = JITC_BYTECODE;
+        jc->hdr.fwd   = 0;
+        jc->fn        = (void *)GC_HIDE_POINTER((void *)(uintptr_t)addr);
+        jc->n_caps    = 0;
+        return vptr(jc);
+    } catch (const std::exception &e) {
+        jit_copy_error(errbuf, errlen, e.what());
+        return V_VOID;
+    } catch (...) {
+        jit_copy_error(errbuf, errlen, "unknown error in the bytecode translator");
         return V_VOID;
     }
 }

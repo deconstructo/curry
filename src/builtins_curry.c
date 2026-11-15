@@ -1575,6 +1575,12 @@ static val_t prim_jit_compile(int ac, val_t *av, void *ud) {
     if (vis_bcclosure(proc)) jit_compile_closure_now(as_bcclosure(proc));
     return proc;
 }
+static val_t prim_jit_backend(int ac, val_t *av, void *ud) {
+    /* (jit-backend) — 'source or 'bytecode: what hot closures are compiled
+     * from (CURRY_JIT_BACKEND). */
+    (void)ac; (void)av; (void)ud;
+    return sym_intern_cstr(jit_backend_is_bytecode() ? "bytecode" : "source");
+}
 static val_t prim_jit_compiled_p(int ac, val_t *av, void *ud) {
     /* (jit-compiled? proc) — #t if proc has been compiled to native code. */
     (void)ac; (void)ud;
@@ -1867,6 +1873,7 @@ void builtins_curry_register(val_t env) {
     DEF("jit-call-depth",        prim_jit_call_depth,    0, 0);
     DEF("jit-compile!",          prim_jit_compile,       1, 1);
     DEF("jit-compiled?",         prim_jit_compiled_p,    1, 1);
+    DEF("jit-backend",           prim_jit_backend,       0, 0);
     DEF("jit-refusal-reason",    prim_jit_refusal_reason, 1, 1);
 #endif
 
