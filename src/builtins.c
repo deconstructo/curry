@@ -74,6 +74,44 @@ int scm_list_length(val_t lst) {
     return vis_nil(lst) ? n : -1;
 }
 
+/* The list arguments of map, for-each and their relatives (#408). They stop
+ * when the shortest list runs out (R7RS 6.10), and a circular list is allowed
+ * next to a finite one, so the lists cannot all be required to be proper up
+ * front. Checked before the first call instead: every argument is a pair or
+ * the empty list, and at least one is a proper list (if none is, they are all
+ * circular or improper: an endless loop or an error either way).
+ * (map car 5) used to be (). */
+void scm_check_list_args(const char *who, int nlists, val_t *lists) {
+    bool any_proper = false;
+    for (int i = 0; i < nlists; i++) {
+        if (!vis_pair(lists[i]) && !vis_nil(lists[i]))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a list", who);
+        if (!any_proper && scm_list_length(lists[i]) >= 0) any_proper = true;
+    }
+    if (!any_proper)
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a proper list", who);
+}
+
+/* True when one of the lists has run out. A list that ends in something other
+ * than the empty list is an error at the point it ends: (map f '(1 2 . 3))
+ * used to be (f 1) (f 2) and no complaint. */
+bool scm_list_args_done(const char *who, int nlists, val_t *lists) {
+    bool done = false;
+    for (int i = 0; i < nlists; i++) {
+        if (vis_pair(lists[i])) continue;
+        if (!vis_nil(lists[i]))
+            scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a proper list", who);
+        done = true;
+    }
+    return done;
+}
+
+/* One list argument that is walked to its end (filter, fold-left, ...). */
+void scm_check_list_arg(const char *who, val_t lst) {
+    if (scm_list_length(lst) < 0)
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: not a proper list", who);
+}
+
 /* list-ref and list-tail read the car and cdr of whatever they reach, so an
  * index past the end of the list, a negative index, or a first argument that
  * is not a list read from a non-pair: a segmentation fault (found by calling
@@ -1609,7 +1647,10 @@ static val_t prim_vector_map(int ac, val_t *av, void *ud) {
         if (!vis_vector(av[i+1])) scm_raise(V_FALSE, "vector-map: not a vector");
         vecs[i] = as_vec(av[i+1]);
     }
+    /* the shortest vector: the first one's length read past the end of a
+     * shorter one */
     uint32_t len = vecs[0]->len;
+    for (int i = 1; i < nvecs; i++) if (vecs[i]->len < len) len = vecs[i]->len;
     Vector *r = CURRY_NEW_FLEX(Vector, len);
     r->hdr.type=T_VECTOR; r->hdr.flags=0; r->len=len;
     for (uint32_t i = 0; i < len; i++) {
@@ -1629,7 +1670,10 @@ static val_t prim_vector_for_each(int ac, val_t *av, void *ud) {
         if (!vis_vector(av[i+1])) scm_raise(V_FALSE, "vector-for-each: not a vector");
         vecs[i] = as_vec(av[i+1]);
     }
+    /* the shortest vector: the first one's length read past the end of a
+     * shorter one */
     uint32_t len = vecs[0]->len;
+    for (int i = 1; i < nvecs; i++) if (vecs[i]->len < len) len = vecs[i]->len;
     for (uint32_t i = 0; i < len; i++) {
         val_t args = V_NIL;
         for (int j = nvecs - 1; j >= 0; j--)
@@ -2497,9 +2541,9 @@ static val_t prim_for_each(int ac, val_t *av, void *ud) {
     val_t proc = av[0];
     int nlists = ac - 1;
     val_t *lists = av + 1;
+    scm_check_list_args("for-each", nlists, lists);
     for (;;) {
-        for (int i = 0; i < nlists; i++)
-            if (!vis_pair(lists[i])) return V_VOID;
+        if (scm_list_args_done("for-each", nlists, lists)) return V_VOID;
         val_t args = V_NIL;
         for (int i = nlists - 1; i >= 0; i--)
             args = scm_cons(vcar(lists[i]), args);
@@ -2534,12 +2578,14 @@ static val_t prim_list_head(int ac, val_t *av, void *ud) {
 }
 static val_t prim_filter(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud; val_t pred=av[0], lst=av[1], r=V_NIL;
+    scm_check_list_arg("filter", lst);
     while(vis_pair(lst)) { if(vis_true(apply(pred,scm_cons(vcar(lst),V_NIL)))) r=scm_cons(vcar(lst),r); lst=vcdr(lst); }
     return scm_reverse(r);
 }
 static val_t prim_fold(int ac, val_t *av, void *ud) {
     /* fold-left: (proc acc element) — R6RS / standard left-fold convention */
     (void)ac;(void)ud; val_t proc=av[0], init=av[1], lst=av[2];
+    scm_check_list_arg("fold-left", lst);
     while(vis_pair(lst)) { init=apply(proc,scm_cons(init,scm_cons(vcar(lst),V_NIL))); lst=vcdr(lst); }
     return init;
 }
@@ -2549,6 +2595,11 @@ static val_t prim_fold_right(int ac, val_t *av, void *ud) {
     if (!vis_pair(lst)) return init;
     val_t rest = prim_fold_right(ac, (val_t[]){proc, init, vcdr(lst)}, ud);
     return apply(proc, scm_cons(vcar(lst), scm_cons(rest, V_NIL)));
+}
+/* The check is done once here, not at each level of the recursion above. */
+static val_t prim_fold_right_checked(int ac, val_t *av, void *ud) {
+    scm_check_list_arg("fold-right", av[2]);
+    return prim_fold_right(ac, av, ud);
 }
 static val_t prim_not(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_false(av[0]));}
 /* Iterative (not recursive) delay-force trampoline -- R7RS 4.2.5 requires
@@ -4146,7 +4197,7 @@ void builtins_register(val_t env) {
     DEF("eval",prim_eval,1,2); DEF("interaction-environment",prim_interaction_env,0,0);
     DEF("apply",prim_apply,2,-1);
     DEF("for-each",prim_for_each,2,-1);
-    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right,3,3);
+    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right_checked,3,3);
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
     DEF("%delay-promise",prim_delay_promise,1,1); DEF("%delay-force-promise",prim_delay_force_promise,1,1);
