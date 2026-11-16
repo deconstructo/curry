@@ -70,6 +70,44 @@
 (check "take-right reports under its own name"
        (message (lambda () (take-right '(1 2) 5))) "take-right: list has fewer elements than the count")
 
+;;; ---- sharing and freshness, as the SRFI specifies ----
+(check "take-right returns a shared tail" (eq? (take-right l5 2) (cdddr l5)) #t)
+(check "the second value of split-at is a shared tail"
+       (call-with-values (lambda () (split-at l5 2)) (lambda (a b) (eq? b (cddr l5)))) #t)
+(check "take of the whole list is a new list" (eq? (take l5 5) l5) #f)
+(check "drop-right 0 is a new list" (eq? (drop-right l5 0) l5) #f)
+(check "drop 0 is the list itself" (eq? (drop l5 0) l5) #t)
+
+;;; ---- circular lists ----
+(define circ (circular-list 1 2 3))
+(check "take from a circular list" (take circ 7) '(1 2 3 1 2 3 1))
+(check "drop from a circular list" (car (drop circ 4)) 2)
+(check "split-at on a circular list"
+       (call-with-values (lambda () (split-at circ 4)) (lambda (a b) (list a (car b)))) '((1 2 3 1) 2))
+(check "take-right of a circular list raises (it never returned)"
+       (message (lambda () (take-right circ 1))) "take-right: circular list")
+(check "drop-right of a circular list raises (it ran out of memory)"
+       (message (lambda () (drop-right circ 1))) "drop-right: circular list")
+(check "drop-right! of a circular list raises" (raises? (lambda () (drop-right! circ 1))) #t)
+
+;;; ---- more counts ----
+(check "a bignum count" (message (lambda () (take l5 (expt 10 30)))) "take: list has fewer elements than the count")
+(check "a negative bignum count"
+       (message (lambda () (take l5 (- (expt 10 30))))) "take: count must be an exact non-negative integer")
+(check "the irritant is the count, not the list"
+       (guard (e ((error-object? e) (error-object-irritants e))) (take '(1 2) 5)) '(5))
+(check "split-at on a dotted list"
+       (call-with-values (lambda () (split-at '(1 2 3 . d) 3)) list) '((1 2 3) d))
+(check "split-at! past the end" (raises? (lambda () (split-at! (list 1 2) 3))) #t)
+(check "take! with a negative count" (raises? (lambda () (take! (list 1 2) -1))) #t)
+(check "split-at names itself" (message (lambda () (split-at '(1 2) 3))) "split-at: list has fewer elements than the count")
+(check "drop-right names itself" (message (lambda () (drop-right '(1 2) 3))) "drop-right: list has fewer elements than the count")
+(define big (iota 1000000))
+(check "drop-right on a million elements" (length (drop-right big 1)) 999999)
+(check "take-right on a million elements" (take-right big 2) '(999998 999999))
+(check "split-at on a million elements"
+       (call-with-values (lambda () (split-at big 999999)) (lambda (a b) (list (length a) b))) '(999999 (999999)))
+
 ;;; ---- a count that is not an exact non-negative integer ----
 (check "take, negative" (raises? (lambda () (take l5 -1))) #t)
 (check "drop, negative" (raises? (lambda () (drop l5 -1))) #t)

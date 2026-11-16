@@ -177,8 +177,16 @@
       (unless (and (exact-integer? n) (>= n 0))
         (error (string-append who ": count must be an exact non-negative integer") n)))
 
+    ;; The count is the only irritant: the list can be a million elements.
     (define (%too-short who lst n)
-      (error (string-append who ": list has fewer elements than the count") lst n))
+      (error (string-append who ": list has fewer elements than the count") n))
+
+    ;; take-right and drop-right walk to the end of the list, which a
+    ;; circular list does not have: take-right never returned, and
+    ;; drop-right also collected elements until memory ran out.
+    (define (%check-finite who lst)
+      (when (circular-list? lst)
+        (error (string-append who ": circular list"))))
 
     (define (take lst n)
       (%check-count "take" lst n)
@@ -196,6 +204,7 @@
 
     (define (take-right lst n)
       (%check-count "take-right" lst n)
+      (%check-finite "take-right" lst)
       (let loop ((lead (%drop-for "take-right" lst n)) (lag lst))
         (if (pair? lead) (loop (cdr lead) (cdr lag)) lag)))
 
@@ -204,6 +213,7 @@
     ;; (length lst), which raises on one.
     (define (drop-right lst n)
       (%check-count "drop-right" lst n)
+      (%check-finite "drop-right" lst)
       (let loop ((lead (%drop-for "drop-right" lst n)) (lag lst) (acc '()))
         (if (pair? lead)
             (loop (cdr lead) (cdr lag) (cons (car lag) acc))
