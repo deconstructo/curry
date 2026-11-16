@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794815271970,
+  "lastUpdate": 1794816295642,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -22217,6 +22217,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.211,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4971dd86a85586123963d7809c12c16f8c7fe2a1",
+          "message": "Update README with news and package management plans\n\nAdded a news section detailing current work and future plans for package management.",
+          "timestamp": "2026-11-16T19:03:58+11:00",
+          "tree_id": "d6ac4eb3be3cf20ef37831f0ee36fc9223ae92f1",
+          "url": "https://github.com/deconstructo/curry/commit/4971dd86a85586123963d7809c12c16f8c7fe2a1"
+        },
+        "date": 1794816294596,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.275,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.016,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.229,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.073,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 143.572,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 255.334,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 57.262,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 86.4,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 63.675,
             "unit": "ms"
           }
         ]
