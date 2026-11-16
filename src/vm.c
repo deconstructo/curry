@@ -84,6 +84,7 @@
  *     OP_DUP  –   push copy of TOS
  *     OP_SWAP –   exchange TOS and TOS-1
  *     OP_NOP  –   no-op
+ *     OP_CALL_CC – pop a procedure, call it with the current continuation
  *
  *   Arithmetic  (numeric tower: fixnum → bignum → rational → flonum → …)
  *     OP_ADD  –   push num_add(a, b)    ; a = second-from-top, b = top
@@ -176,7 +177,7 @@
  *     OP_PUSH_HANDLER B   push exception handler frame; B = fallback offset.
  *                         (Not fully implemented; reserved for future use.)
  *     OP_POP_HANDLER  –   pop exception handler frame.
- *     OP_RAISE        –   raise TOS as exception via tree-walker raise.
+ *     OP_RAISE        –   re-raise for guard: pops unwound flag and exception.
  *
  *   I/O
  *     OP_DISPLAY –   (display TOS)  → void
@@ -1009,6 +1010,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_RAISE]       = &&L_OP_RAISE,
         [OP_DISPLAY]     = &&L_OP_DISPLAY,     [OP_WRITE]        = &&L_OP_WRITE,
         [OP_NEWLINE]     = &&L_OP_NEWLINE,     [OP_NOP]          = &&L_OP_NOP,
+        [OP_CALL_CC]     = &&L_OP_CALL_CC,
     };
 #   define CASE(op)  L_##op:
 #   define NEXT      goto L_DISPATCH
@@ -1125,6 +1127,15 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         CASE(OP_DUP)  { val_t v = PEEK(0); PUSH(v); NEXT; }
         CASE(OP_SWAP) { val_t a = POP(), b = POP(); PUSH(a); PUSH(b); NEXT; }
         CASE(OP_NOP)  NEXT;
+        CASE(OP_CALL_CC) {
+            /* guard's own call/cc. Not a call of the variable call/cc: code
+             * that uses guard need not have that name bound, or may have
+             * bound it to something else (#423). */
+            val_t proc = POP();
+            val_t r = scm_call_cc(proc);
+            PUSH(r);
+            NEXT;
+        }
 
         /* ── Arithmetic ─────────────────────────────────────────────── */
         /* Tier 2.5 step 2: open-coded +, -, * -- see opcode.h's own comment
@@ -2098,8 +2109,15 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             NEXT;
         }
         CASE(OP_RAISE) {
-            /* Raise TOS as an exception through the current_handler chain. */
+            /* The re-raise of a guard with no matching clause (compile_guard):
+             * [exn unwound]. unwound is () when the guard's handler was
+             * called in place by raise-continuable: the exception goes on to
+             * the outer handlers continuably, and what they return is the
+             * value of the original raise-continuable. Otherwise the raise
+             * has already unwound to the guard, and this is a plain raise. */
+            val_t unwound = POP();
             val_t exn = POP();
+            if (vis_nil(unwound)) { PUSH(scm_raise_continuable(exn)); NEXT; }
             scm_raise_val(exn);
             NEXT; /* unreachable */
         }

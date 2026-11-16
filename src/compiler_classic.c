@@ -1695,8 +1695,13 @@ static void compile_do(Compiler *c, val_t args, bool tail, int line) {
 
 /* ── with-exception-handler native compilation ───────────────────────── */
 
+/* for_guard: the handler is the one compile_guard builds. When it is called
+ * here, after the raise has unwound to this frame, it gets a second argument
+ * (#t); raise-continuable calls a handler in place with the exception alone.
+ * That is how a guard with no matching clause knows whether its re-raise can
+ * be continuable (see compile_guard). */
 static void compile_with_exception_handler(Compiler *c, val_t args,
-                                           bool tail, int line) {
+                                           bool tail, int line, bool for_guard) {
     /* (with-exception-handler handler thunk)
      *
      * Emitted bytecode:
@@ -1750,7 +1755,8 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
 
     /* Catch path: exception is on top, handler is below */
     patch_jump(c, catch_placeholder);
-    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 1, line); /* (handler exn) */
+    if (for_guard) emit(c, OP_TRUE, line);              /* (handler exn #t) */
+    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, for_guard ? 2 : 1, line); /* (handler exn) */
 
     patch_jump(c, end_jmp);
 }
@@ -1760,12 +1766,28 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
 static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     /* (guard (var clause...) body...)
      * Expands to:
-     *   (call/cc (lambda (%guard-k)
-     *     (with-exception-handler
-     *       (lambda (var)
-     *         (cond (test (%guard-k expr)) ... (else (raise var))))
+     *   (%guard-call/cc (lambda (%guard-k)
+     *     (%guard-with-exception-handler
+     *       (lambda (var . %guard-unwound)
+     *         (cond (test (%guard-k expr)) ...
+     *               (else (%guard-reraise var %guard-unwound))))
      *       (lambda () body...))))
-     * Each (else expr) clause wraps expr in (%guard-k ...) rather than raise. */
+     * Each (else expr) clause wraps expr in (%guard-k ...) rather than raise.
+     *
+     * With no matching clause the exception is raised again, and R7RS 4.2.7
+     * says with raise-continuable: an outer handler may return a value to
+     * the point of the original raise-continuable. That is only possible
+     * when this handler was called in place by raise-continuable, with the
+     * raise point still there. It can tell: called in place it gets the
+     * exception alone, called after the raise unwound to the guard it gets
+     * a second argument (compile_with_exception_handler, for_guard).
+     * %guard-reraise compiles to OP_RAISE, which re-raises continuably in
+     * the first case and with a plain raise in the second (#406). Both are
+     * special forms, not procedure calls: a library that imports only part
+     * of (scheme base) need not have raise or raise-continuable bound.
+     * %guard-call/cc (OP_CALL_CC) is one for the same reason: guard used
+     * the variable call/cc, and failed with "unbound variable: call/cc" in
+     * a library that did not import it (#423). */
     require_min_args(args, 1, "guard");
     val_t var_and_clauses = vcar(args);
     val_t body            = vcdr(args);
@@ -1773,8 +1795,7 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t var             = vcar(var_and_clauses);
     val_t clauses         = vcdr(var_and_clauses);
 
-    val_t S_WEH   = sym_intern_cstr("with-exception-handler");
-    val_t S_RAISE = sym_intern_cstr("raise");
+    val_t unwound = sym_intern_cstr("%guard-unwound");
     val_t S_COND2 = sym_intern_cstr("cond");
     val_t S_ELSE2 = sym_intern_cstr("else");
     val_t gk      = sym_intern_cstr("%guard-k");
@@ -1814,6 +1835,17 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
              * re-evaluating it, via cond's => arrow form (proc receives
              * the test's value as its one argument). */
             rest = scm_cons(S_ARROW, scm_cons(gk, V_NIL));
+        } else if (vcar(cbody) == S_ARROW && vis_pair(vcdr(cbody))) {
+            /* (test => receiver): the guard's value is (receiver v), with v
+             * the test's value. It was compiled as a body, with => read as a
+             * variable (#422). Becomes
+             *   (test => (lambda (%guard-v) (%guard-k (receiver %guard-v)))) */
+            val_t gv   = sym_intern_cstr("%guard-v");
+            val_t call = scm_cons(vcar(vcdr(cbody)), scm_cons(gv, V_NIL));
+            val_t lam  = scm_cons(S_LAMBDA,
+                             scm_cons(scm_cons(gv, V_NIL),
+                                 scm_cons(scm_cons(gk, scm_cons(call, V_NIL)), V_NIL)));
+            rest = scm_cons(S_ARROW, scm_cons(lam, V_NIL));
         } else {
             /* A clause body is (expr ...), i.e. an implicit begin — wrap
              * multi-expression bodies in an explicit (begin ...) so every
@@ -1828,7 +1860,8 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     }
     /* Append default (else (raise var)) if no else clause present */
     if (!has_else && ci < 64) {
-        val_t raise_form = scm_cons(S_RAISE, scm_cons(var, V_NIL));
+        val_t raise_form = scm_cons(S_GUARD_RERAISE,
+                               scm_cons(var, scm_cons(unwound, V_NIL)));
         clause_arr[ci++] = scm_cons(S_ELSE2, scm_cons(raise_form, V_NIL));
     }
     /* Build cond form from clause_arr in reverse (cons builds reversed list) */
@@ -1837,21 +1870,21 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
         cond_list = scm_cons(clause_arr[i], cond_list);
     val_t handler_cond = scm_cons(S_COND2, cond_list);
 
-    /* (lambda (var) cond-form) */
+    /* (lambda (var . %guard-unwound) cond-form) */
     val_t handler_lam = scm_cons(S_LAMBDA,
-                            scm_cons(scm_cons(var, V_NIL),
+                            scm_cons(scm_cons(var, unwound),
                                 scm_cons(handler_cond, V_NIL)));
     /* (lambda () body...) */
     val_t thunk_lam = scm_cons(S_LAMBDA, scm_cons(V_NIL, body));
     /* (with-exception-handler handler thunk) */
-    val_t weh_form = scm_cons(S_WEH,
+    val_t weh_form = scm_cons(S_GUARD_WEH,
                         scm_cons(handler_lam, scm_cons(thunk_lam, V_NIL)));
     /* (lambda (%guard-k) weh-form) */
     val_t outer_lam = scm_cons(S_LAMBDA,
                          scm_cons(scm_cons(gk, V_NIL),
                              scm_cons(weh_form, V_NIL)));
-    /* (call/cc outer-lam) */
-    val_t expanded = scm_cons(S_CALL_CC, scm_cons(outer_lam, V_NIL));
+    /* (%guard-call/cc outer-lam) */
+    val_t expanded = scm_cons(S_GUARD_CALL_CC, scm_cons(outer_lam, V_NIL));
     compile(c, expanded, tail, line);
 }
 
@@ -2459,6 +2492,9 @@ SpecialForm classify_head(Compiler *c, val_t head, val_t args,
     if (head == S_PARAMETERIZE) return SF_PARAMETERIZE;
     if (head == S_GUARD) return SF_GUARD;
     if (head == S_WITH_EXCEPTION_HANDLER) return SF_WITH_EXCEPTION_HANDLER;
+    if (head == S_GUARD_WEH) return SF_GUARD_WEH;
+    if (head == S_GUARD_RERAISE) return SF_GUARD_RERAISE;
+    if (head == S_GUARD_CALL_CC) return SF_GUARD_CALL_CC;
     if (head == S_RECEIVE && vis_pair(args) && vis_pair(vcdr(args)))
         return SF_RECEIVE;
     if (head == S_DEFINE_RECORD_TYPE) return SF_DEFINE_RECORD_TYPE;
@@ -2741,8 +2777,31 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
         compile_guard(c, args, tail, line);
         return;
 
+    case SF_GUARD_WEH:
+        compile_with_exception_handler(c, args, tail, line, true);
+        return;
+
+    /* (%guard-call/cc proc): see compile_guard. */
+    case SF_GUARD_CALL_CC:
+        require_min_args(args, 1, "guard");
+        compile(c, vcar(args), false, line);
+        emit(c, OP_CALL_CC, line);
+        return;
+
+    /* (%guard-reraise exn unwound): see compile_guard. */
+    case SF_GUARD_RERAISE: {
+        require_min_args(args, 2, "guard");
+        int saved = c->local_count;
+        compile(c, vcar(args), false, line);
+        reserve_pending_slot(c);
+        compile(c, vcar(vcdr(args)), false, line);
+        release_pending_slots(c, saved);
+        emit(c, OP_RAISE, line);
+        return;
+    }
+
     case SF_WITH_EXCEPTION_HANDLER:
-        compile_with_exception_handler(c, args, tail, line);
+        compile_with_exception_handler(c, args, tail, line, false);
         return;
 
     /* `receive` is ambiguous: it's both the R7RS special form (requires at

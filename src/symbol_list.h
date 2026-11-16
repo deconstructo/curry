@@ -57,6 +57,10 @@ SYM(S_CALL_WITH_VALUES,   "call-with-values")
 SYM(S_CALL_CC,            "call/cc")
 SYM(S_CALL_WITH_CC,       "call-with-current-continuation")
 SYM(S_WITH_EXCEPTION_HANDLER, "with-exception-handler")
+/* Only produced by compile_guard's own expansion (compiler_classic.c). */
+SYM(S_GUARD_WEH,          "%guard-with-exception-handler")
+SYM(S_GUARD_RERAISE,      "%guard-reraise")
+SYM(S_GUARD_CALL_CC,      "%guard-call/cc")
 
 /* Module system */
 SYM(S_DEFINE_LIBRARY,     "define-library")

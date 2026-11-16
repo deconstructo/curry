@@ -2815,6 +2815,9 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     return apply_arr(proc, 1, &cont_val);
 }
 
+/* (call/cc proc) for the VM's OP_CALL_CC. */
+val_t scm_call_cc(val_t proc) { return prim_call_cc(1, &proc, NULL); }
+
 static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud; val_t handler=av[0], thunk=av[1];
     val_t result = V_VOID;

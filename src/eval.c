@@ -146,6 +146,89 @@ static val_t eval_call_cc(val_t proc) {
 }
 
 
+/* The clauses of a guard, tried in order against the raised object. Sets
+ * *matched and returns the clause's value, or clears it when no clause
+ * applies. Used after the raise has unwound to the guard, and in place for
+ * raise-continuable (guard_in_place below). */
+static val_t guard_run_clauses(val_t exn, val_t var, val_t clauses, val_t env, bool *matched) {
+    *matched = true;
+    val_t guard_env = env_extend(env);
+    env_define(guard_env, var, exn);
+    val_t cs = clauses;
+    while (vis_pair(cs)) {
+        val_t clause = vcar(cs);
+        /* A guard clause shares cond's own shape, including a valid
+         * bare-test `(test)` form with no body -- unlike every other
+         * binding this file validates, require_binding_shape's "cdr
+         * must also be a pair" is too strict here, so this only
+         * checks that the clause itself is a pair (issue #124: an
+         * empty clause, (), previously SIGSEGV'd on the vcar(clause)
+         * just below). */
+        if (!vis_pair(clause))
+            scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
+        val_t test   = vcar(clause);
+        val_t cbody  = vcdr(clause);
+        cs = vcdr(cs);
+        if (test == S_ELSE) {
+            /* `(guard (e (else)) ...)` / `(guard (e (else . 2)) ...)`
+             * -- a missing or improper else-body -- found by a later
+             * review round; unlike cond's else (which shares this
+             * exact validate-then-nil-means-void shape, from #127),
+             * this branch had never been guarded at all. */
+            if (!vis_nil(cbody) && !vis_pair(cbody))
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
+            if (vis_nil(cbody)) return V_VOID;
+            while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
+            return eval(vcar(cbody), guard_env);
+        }
+        val_t tv = eval(test, guard_env);
+        if (vis_true(tv)) {
+            /* `!vis_pair(cbody)` (not just vis_nil) so an improper
+             * body like `(guard (e (#t . 2)) ...)` -- found by the
+             * same review round -- also falls back to returning the
+             * test's own value rather than crashing on vcdr(cbody)
+             * below; matches the compiled path's own confirmed
+             * (if slightly odd) leniency for this exact shape. */
+            if (!vis_pair(cbody)) return tv;
+            /* (test => receiver): the value is (receiver v), v the test's
+             * value. => was evaluated as a variable (#422). */
+            if (vcar(cbody) == S_ARROW && vis_pair(vcdr(cbody))) {
+                val_t recv = eval(vcar(vcdr(cbody)), guard_env);
+                return apply(recv, make_pair(tv, V_NIL));
+            }
+            while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
+            return eval(vcar(cbody), guard_env);
+        }
+    }
+    *matched = false;
+    return V_VOID;
+}
+
+/* A guard's handler as raise-continuable sees it (#406). scm_raise_continuable
+ * calls a frame's handler_proc in place, with the raise point still there.
+ * A clause that applies ends the guard with its value: the dynamic-wind
+ * frames entered since the guard are left, then control jumps to the
+ * guard's own frame. With no clause the object is raised again continuably
+ * to the handlers outside (R7RS 4.2.7), and what they return is returned
+ * to the original raise-continuable. */
+typedef struct {
+    val_t var, clauses, env;
+    void *jmpbuf;       /* heap-allocated jmp_buf, set in the guard's frame (as call/cc does) */
+    void *wind_top;     /* current_wind when the guard was entered */
+    val_t value;        /* of the clause that applied */
+} GuardInPlace;
+
+static val_t guard_in_place(int argc, val_t *argv, void *ud) {
+    (void)argc;
+    GuardInPlace *g = (GuardInPlace *)ud;
+    bool matched;
+    val_t v = guard_run_clauses(argv[0], g->var, g->clauses, g->env, &matched);
+    if (!matched) return scm_raise_continuable(argv[0]);
+    g->value = v;
+    wind_unwind_to((WindFrame *)g->wind_top);
+    longjmp(*(jmp_buf *)g->jmpbuf, 1);
+}
+
 /* ---- Evaluator ---- */
 
 /* A `(var init)`-shaped let / let* / letrec / do binding, or one of do's own
@@ -1098,7 +1181,26 @@ tail:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
-        h.handler_proc = V_FALSE; current_handler = &h;
+        /* raise-continuable calls this handler in place; a plain raise
+         * unwinds to h.jmp below (see guard_in_place). The primitive is
+         * only reached through this frame's handler_proc, and this frame
+         * outlives every call of it. */
+        GuardInPlace *gip = (GuardInPlace *)gc_alloc(sizeof(GuardInPlace));
+        gip->var = var; gip->clauses = clauses; gip->env = env;
+        gip->jmpbuf = gc_alloc_raw_pinned(sizeof(jmp_buf));
+        gip->wind_top = current_wind; gip->value = V_VOID;
+        Primitive *gp = CURRY_NEW(Primitive);
+        gp->hdr.type = T_PRIMITIVE; gp->hdr.flags = 0;
+        gp->name = "guard"; gp->min_args = 1; gp->max_args = 1;
+        gp->fn = guard_in_place; gp->ud = gip;
+        if (setjmp(*(jmp_buf *)gip->jmpbuf) != 0) {
+            /* a clause applied in place, at the raise point */
+            current_handler = h.prev;
+            jit_depth_restore(h.saved_jit_depth);
+            vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
+            return *(volatile val_t *)&gip->value;
+        }
+        h.handler_proc = vptr(gp); current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             if (!vis_nil(body)) {
                 while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
@@ -1113,48 +1215,9 @@ tail:
         val_t exn = h.exn;
 
         /* Try each clause */
-        val_t guard_env = env_extend(env);
-        env_define(guard_env, var, exn);
-        val_t cs = clauses;
-        while (vis_pair(cs)) {
-            val_t clause = vcar(cs);
-            /* A guard clause shares cond's own shape, including a valid
-             * bare-test `(test)` form with no body -- unlike every other
-             * binding this file validates, require_binding_shape's "cdr
-             * must also be a pair" is too strict here, so this only
-             * checks that the clause itself is a pair (issue #124: an
-             * empty clause, (), previously SIGSEGV'd on the vcar(clause)
-             * just below). */
-            if (!vis_pair(clause))
-                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
-            val_t test   = vcar(clause);
-            val_t cbody  = vcdr(clause);
-            cs = vcdr(cs);
-            if (test == S_ELSE) {
-                /* `(guard (e (else)) ...)` / `(guard (e (else . 2)) ...)`
-                 * -- a missing or improper else-body -- found by a later
-                 * review round; unlike cond's else (which shares this
-                 * exact validate-then-nil-means-void shape, from #127),
-                 * this branch had never been guarded at all. */
-                if (!vis_nil(cbody) && !vis_pair(cbody))
-                    scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
-                if (vis_nil(cbody)) return V_VOID;
-                while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
-                return eval(vcar(cbody), guard_env);
-            }
-            val_t tv = eval(test, guard_env);
-            if (vis_true(tv)) {
-                /* `!vis_pair(cbody)` (not just vis_nil) so an improper
-                 * body like `(guard (e (#t . 2)) ...)` -- found by the
-                 * same review round -- also falls back to returning the
-                 * test's own value rather than crashing on vcdr(cbody)
-                 * below; matches the compiled path's own confirmed
-                 * (if slightly odd) leniency for this exact shape. */
-                if (!vis_pair(cbody)) return tv;
-                while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
-                return eval(vcar(cbody), guard_env);
-            }
-        }
+        bool matched;
+        val_t gv = guard_run_clauses(exn, var, clauses, env, &matched);
+        if (matched) return gv;
         /* No clause matched: re-raise */
         scm_raise_val(exn);
     }
