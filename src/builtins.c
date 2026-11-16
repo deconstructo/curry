@@ -920,6 +920,8 @@ static val_t prim_str_num(int ac, val_t *av, void *ud) {
     (void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "string->number: not a string");
     const char *s = str_data(as_str(av[0]));
+    /* A character after an embedded NUL would be ignored: "12\0x" is not 12. */
+    if (strlen(s) != as_str(av[0])->len) return V_FALSE;
     if (ac > 1 && vis_symbol(av[1])) {
         const char *note = as_sym(av[1])->data;
         if (strcmp(note, "neugebauer") == 0 || strcmp(note, "Neugebauer") == 0)
@@ -929,8 +931,6 @@ static val_t prim_str_num(int ac, val_t *av, void *ud) {
         scm_raise(V_FALSE, "string->number: unknown notation '%s'", note);
     }
     int radix = ac > 1 ? checked_radix(av[1], "string->number") : 10;
-    /* A character after an embedded NUL would be ignored: "12\0x" is not 12. */
-    if (strlen(s) != as_str(av[0])->len) return V_FALSE;
     return parse_number_prefixed(s, radix);
 }
 /* (current-number-notation) → current notation symbol
