@@ -211,6 +211,14 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
      * denominator/real/imaginary substring reached via this function's own
      * recursive calls below (e.g. "3/" or "+i" splitting to an empty part). */
     if (*s == '\0') return V_FALSE;
+    /* strtol and strtod, used below, accept more than Scheme number syntax
+     * (#410): leading white space, and a C "0x" prefix (strtol in radix 16,
+     * strtod as a hexadecimal float in radix 10), so " 5" was 5 and "0x10"
+     * was 16.0. Neither is a number here. In a radix above 33 'x' is a
+     * digit, and "0x10" is an ordinary number. */
+    if (isspace((unsigned char)*s)) return V_FALSE;
+    { const char *d = (*s == '+' || *s == '-') ? s + 1 : s;
+      if (radix < 34 && d[0] == '0' && (d[1] == 'x' || d[1] == 'X')) return V_FALSE; }
     /* The non-finite literals (R7RS 6.2.6). The reader checks these before
      * calling here, but string->number reaches this function directly. */
     if (radix == 10 && !exact_force) {

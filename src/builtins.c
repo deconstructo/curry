@@ -889,6 +889,15 @@ static val_t prim_bitnot(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return
 static val_t prim_shl(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return num_shl(av[0],(int)vunfix(av[1]));}
 
 /* number<->string */
+/* The radix argument of number->string and string->number: an exact integer
+ * from 2 to 36. It went to GMP and strtol unchecked: (number->string 10 100)
+ * was a segmentation fault (mpz_get_str returns NULL for a base it does not
+ * support), and radix 0 made strtol guess the base from a C prefix (#410, #412). */
+static int checked_radix(val_t r, const char *who) {
+    if (!vis_fixnum(r) || vunfix(r) < 2 || vunfix(r) > 36)
+        scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "%s: radix must be an exact integer from 2 to 36", who);
+    return (int)vunfix(r);
+}
 static val_t prim_num_str(int ac, val_t *av, void *ud) {
     (void)ud;
     /* Check for symbol second arg (notation name) */
@@ -905,8 +914,7 @@ static val_t prim_num_str(int ac, val_t *av, void *ud) {
             return sex_to_cuneiform(av[0]);
         scm_raise(V_FALSE, "number->string: unknown notation '%s'", note);
     }
-    int radix = ac > 1 ? (int)vunfix(av[1]) : 10;
-    return num_to_string(av[0], radix);
+    return num_to_string(av[0], ac > 1 ? checked_radix(av[1], "number->string") : 10);
 }
 static val_t prim_str_num(int ac, val_t *av, void *ud) {
     (void)ud;
@@ -920,7 +928,9 @@ static val_t prim_str_num(int ac, val_t *av, void *ud) {
             return sex_parse_cuneiform(s);
         scm_raise(V_FALSE, "string->number: unknown notation '%s'", note);
     }
-    int radix = ac > 1 ? (int)vunfix(av[1]) : 10;
+    int radix = ac > 1 ? checked_radix(av[1], "string->number") : 10;
+    /* A character after an embedded NUL would be ignored: "12\0x" is not 12. */
+    if (strlen(s) != as_str(av[0])->len) return V_FALSE;
     return parse_number_prefixed(s, radix);
 }
 /* (current-number-notation) → current notation symbol
