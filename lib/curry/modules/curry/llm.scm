@@ -115,9 +115,14 @@
         ((pred (car lst)) (car lst))
         (else (list-find pred (cdr lst)))))
 
+;; The JSON arguments of a tool call. A model may send null (parsed as #f)
+;; or something else that is not an object; that is "no arguments", as it
+;; was when map returned () for a non-list (before #408).
 (define (string-keys->symbols alist)
-  (map (lambda (kv) (cons (string->symbol (car kv)) (cdr kv)))
-       alist))
+  (if (list? alist)
+      (map (lambda (kv) (cons (string->symbol (car kv)) (cdr kv)))
+           alist)
+      '()))
 
 ;;; ─── Client ─────────────────────────────────────────────────────────────────
 ;;; #(provider endpoint api-key default-model)

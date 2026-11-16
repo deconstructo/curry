@@ -58,6 +58,7 @@ add_test(NAME nan_bounds COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}
 # A loop that is not given a reachable bound would hang rather than fail.
 set_tests_properties(nan_bounds PROPERTIES TIMEOUT 60)
 add_test(NAME complex_compare COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/complex_compare_tests.scm)
+add_test(NAME number_syntax_strict COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/number_syntax_strict_tests.scm)
 add_test(NAME bignum_sign COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/bignum_sign_tests.scm)
 add_test(NAME exactness_literals COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/exactness_literals_tests.scm)
 add_test(NAME string_number_prefix COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_number_prefix_tests.scm)
@@ -69,6 +70,7 @@ add_test(NAME srfi_166 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_272_fancy COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_fancy_tests.scm)
 add_test(NAME srfi_272_layout COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_272_layout_tests.scm)
 add_test(NAME srfi_s26_cut COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s26_cut_tests.scm)
+add_test(NAME srfi_1_take_drop COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_1_take_drop_tests.scm)
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
 add_test(NAME srfi_61_cond COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_61_cond_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)

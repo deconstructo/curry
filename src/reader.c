@@ -202,6 +202,22 @@ val_t parse_number_prefixed(const char *s, int radix) {
     return v;
 }
 
+/* True if the n characters at p are an unsigned decimal number as far as their
+ * characters go: a digit or '.' first, then digits, '.', and an exponent with
+ * its sign. Used before strtod, which accepts much more. */
+static bool plain_decimal(const char *p, int n) {
+    if (n <= 0 || !(isdigit((unsigned char)p[0]) || p[0] == '.')) return false;
+    bool digit = false;
+    for (int i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)p[i];
+        if (isdigit(c)) { digit = true; continue; }
+        if (c == '.' || c == 'e' || c == 'E') continue;
+        if ((c == '+' || c == '-') && i > 0 && (p[i-1] == 'e' || p[i-1] == 'E')) continue;
+        return false;
+    }
+    return digit;
+}
+
 val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_force) {
     /* The empty string is never a valid number literal (R7RS). Without this,
      * strtol("", &end, radix) sets end == s (consumes nothing) and returns 0
@@ -211,6 +227,14 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
      * denominator/real/imaginary substring reached via this function's own
      * recursive calls below (e.g. "3/" or "+i" splitting to an empty part). */
     if (*s == '\0') return V_FALSE;
+    /* strtol and strtod, used below, accept more than Scheme number syntax
+     * (#410): leading white space, and a C "0x" prefix (strtol in radix 16,
+     * strtod as a hexadecimal float in radix 10), so " 5" was 5 and "0x10"
+     * was 16.0. Neither is a number here. In a radix above 33 'x' is a
+     * digit, and "0x10" is an ordinary number. */
+    if (isspace((unsigned char)*s)) return V_FALSE;
+    { const char *d = (*s == '+' || *s == '-') ? s + 1 : s;
+      if (radix < 34 && d[0] == '0' && (d[1] == 'x' || d[1] == 'X')) return V_FALSE; }
     /* The non-finite literals (R7RS 6.2.6). The reader checks these before
      * calling here, but string->number reaches this function directly. */
     if (radix == 10 && !exact_force) {
@@ -297,7 +321,7 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
           /* Not plain decimal text. An infinity or NaN has no exact value:
            * not a number here, rather than an error out of string->number. */
           if (!isfinite(d)) return V_FALSE;
-          return num_exact(num_make_float(d));   /* e.g. a C99 hex float */
+          return num_exact(num_make_float(d));
       } }
     not_a_float: ;
     /* Try complex literal: ends with 'i', e.g. +2i, 3+4i, 3-4i, +i, -i */
@@ -365,6 +389,10 @@ val_t parse_number(const char *s, int radix, bool exact_force, bool inexact_forc
             int nl = (te - ns) - (suffix=='i' || suffix=='j' || suffix=='k' ? 1 : 0);
             double val = 1.0;
             if (nl > 0) {
+                /* strtod takes more than a decimal number: white space, a C
+                 * hex float, "inf", "nan". "1+ 5k", "1+0x10k" and the
+                 * identifier nank were quaternions (#410). */
+                if (!plain_decimal(buf + ns, nl)) { ok = false; break; }
                 char *ep;
                 val = strtod(buf + ns, &ep);
                 if (ep != buf + ns + nl) { ok = false; break; }
@@ -753,25 +781,37 @@ static val_t read_datum(val_t port) {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number_prefixed(sb.buf, 2);
+            { val_t v = parse_number_prefixed(sb.buf, 2);
+              /* not a number in this radix: an error, not the value #f */
+              if (vis_false(v)) read_error("invalid number after #b");
+              return v; }
         }
         case 'o': case 'O': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number_prefixed(sb.buf, 8);
+            { val_t v = parse_number_prefixed(sb.buf, 8);
+              /* not a number in this radix: an error, not the value #f */
+              if (vis_false(v)) read_error("invalid number after #o");
+              return v; }
         }
         case 'd': case 'D': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number_prefixed(sb.buf, 10);
+            { val_t v = parse_number_prefixed(sb.buf, 10);
+              /* not a number in this radix: an error, not the value #f */
+              if (vis_false(v)) read_error("invalid number after #d");
+              return v; }
         }
         case 'x': case 'X': {
             StrBuf sb; sb_init(&sb);
             while (!is_delimiter(peek_char_port(port))) sb_push(&sb, (char)next_char(port));
             sb.buf[sb.len]='\0';
-            return parse_number_prefixed(sb.buf, 16);
+            { val_t v = parse_number_prefixed(sb.buf, 16);
+              /* not a number in this radix: an error, not the value #f */
+              if (vis_false(v)) read_error("invalid number after #x");
+              return v; }
         }
         case 'e': case 'E': {
             /* Number text is parsed as text, so that #e1.1 is 11/10 and not
