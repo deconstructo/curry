@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794816295642,
+  "lastUpdate": 1794816434430,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -22286,6 +22286,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 63.675,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d1ff0830cd2c4b3b0cb23be2be6a94fba32f3c3e",
+          "message": "Merge pull request #417 from deconstructo/deconstructo-patch-1\n\nUpdate README with new project details",
+          "timestamp": "2026-11-16T19:06:17+11:00",
+          "tree_id": "53b792d32bfb19491e00c653d73ce281c6ba9084",
+          "url": "https://github.com/deconstructo/curry/commit/d1ff0830cd2c4b3b0cb23be2be6a94fba32f3c3e"
+        },
+        "date": 1794816432908,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.4,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.86,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.209,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 26.559,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 146.547,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 254.169,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 57.587,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 87.025,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 63.915,
             "unit": "ms"
           }
         ]
