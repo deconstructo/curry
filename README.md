@@ -8,6 +8,21 @@ Error messages are rendered in Standard Babylonian Akkadian with cuneiform scrip
 
 Built around pluggable logics, an open-ended numeric tower, and no single "correct" answer treated as bedrock.
 
+## News and what I am working on
+- Fixing a lot of bugs - including a wonderful contribution from @dharmatech 
+- Improving the JIT compiler
+- I've used Curry to explore some aspects of black holes that I've not had an intuitive understanding of.
+- Oh, and for some fun, I'm trying to port Curry to Haiku! Yeap, I need to out-niche myself :-)
+
+### Package Management!!
+The next big thing that I want to work on is package management. It feels like it's time to do this - 
+it'll allow me to slim the curry repository down by moving a lot of the modules out to packages that 
+can be brought in as needed.
+
+I've not worked out the detail as yet. What I do know that I want is to support pure Curry scheme modules, pure Curry scheme modules that wrap around external libraries, and hybrid modules that have some Curry + some C/C++/Rust or whatever.
+
+If you want to contribute to this, drop me a line - perhaps in the Discussion section
+
 ## Documents
 
 Documentation is split into two directories:
