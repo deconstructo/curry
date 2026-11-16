@@ -196,6 +196,131 @@
              (loop (+ i 1) (+ acc (guard (e (#t 1)) (if (odd? i) (raise 'x) 2))))))
        150000)
 
+;;; ---- from the review ----
+(define (raises? thunk) (guard (e (#t #t)) (thunk) #f))
+
+;;; A handler slot was leaked each time a tree-walked guard caught what a
+;;; compiled guard passed on in place; after 64, "handler stack overflow" or a
+;;; segmentation fault (#426).
+(define (compiled-pass-on v) (guard (e ((symbol? e) (list 'sym e))) (raise-continuable v)))
+(check "a tree-walked guard catching past a compiled guard, 1000 times"
+       (let loop ((i 0) (acc 0))
+         (if (= i 1000)
+             acc
+             (loop (+ i 1) (+ acc (tree-eval '(guard (e ((string? e) 1)) (compiled-pass-on "s")))))))
+       1000)
+(check "the same inside a compiled guard"
+       (let loop ((i 0) (acc 0))
+         (if (= i 1000)
+             acc
+             (loop (+ i 1)
+                   (+ acc (guard (o ((symbol? o) 1))
+                            (tree-eval '(guard (e ((string? e) 2)) (compiled-pass-on "s"))))))))
+       2000)
+(check "a compiled handler that raises on, caught by the with-exception-handler procedure"
+       (let ((weh with-exception-handler))
+         (let loop ((i 0) (acc 0))
+           (if (= i 1000)
+               acc
+               (loop (+ i 1)
+                     (+ acc (weh (lambda (e) 1)
+                                 (lambda ()
+                                   (with-exception-handler (lambda (e) (raise e))
+                                     (lambda () (raise-continuable 'x))))))))))
+       1000)
+
+;;; Where a clause runs. For a raise-continuable it runs at the raise point,
+;;; before the after thunks of the dynamic-wind frames in between (it has to
+;;; be tried there to know whether the raise goes on); for a plain raise it
+;;; runs after them, as R7RS describes.
+(define log '())
+(define (L x) (set! log (cons x log)))
+(define (taken) (let ((l (reverse log))) (set! log '()) l))
+(check "compiled: clause before the after thunk, for raise-continuable"
+       (list (guard (e (#t (L 'clause) 'v))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out))))
+             (taken))
+       '(v (in clause out)))
+(check "compiled: clause after the after thunk, for raise"
+       (list (guard (e (#t (L 'clause) 'v))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise 'x)) (lambda () (L 'out))))
+             (taken))
+       '(v (in out clause)))
+(check "tree-walked: the same order for raise-continuable"
+       (list (tree-eval '(guard (e (#t (L 'clause) 'v))
+                           (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out)))))
+             (taken))
+       '(v (in clause out)))
+(check "tree-walked: the same order for raise"
+       (list (tree-eval '(guard (e (#t (L 'clause) 'v))
+                           (dynamic-wind (lambda () (L 'in)) (lambda () (raise 'x)) (lambda () (L 'out)))))
+             (taken))
+       '(v (in out clause)))
+(check "tree-walked: an after thunk that raises runs once and reaches the outer guard"
+       (list (tree-eval '(guard (o (#t (list 'outer o)))
+                           (guard (e (#t (L 'clause) 'v))
+                             (dynamic-wind (lambda () (L 'in))
+                                           (lambda () (raise-continuable 'x))
+                                           (lambda () (L 'out) (raise 'from-after))))))
+             (taken))
+       '((outer from-after) (in clause out)))
+
+;;; An exception from a clause goes outward, not back into the same guard.
+(check "a clause test that raises (in place)"
+       (guard (o (#t (list 'outer o))) (guard (e ((raise 'from-test) 1)) (raise-continuable 'x)))
+       '(outer from-test))
+(check "a clause body that raises (after unwinding)"
+       (guard (o (#t (list 'outer o))) (guard (e (#t (raise 'from-body))) (raise 'x)))
+       '(outer from-body))
+(check "a clause test that itself raises continuably"
+       (with-exception-handler (lambda (e) #t)
+         (lambda () (guard (e ((raise-continuable (list 'test e)) (list 'matched e))) (+ 1 (raise-continuable 10)))))
+       '(matched 10))
+(check "tree-walked: a clause test that raises"
+       (tree-eval '(guard (o (#t (list 'outer o))) (guard (e ((raise 'from-test) 1)) (raise-continuable 'x))))
+       '(outer from-test))
+
+;;; Clause shapes.
+(check "else with raise-continuable" (guard (e (else (list 'else e))) (+ 1 (raise-continuable 'x))) '(else x))
+(check "no clauses, no exception" (guard (e) 5) 5)
+(check "no clauses, raise" (guard (o (#t (list 'o o))) (guard (e) (raise 5))) '(o 5))
+(check "no clauses, raise-continuable"
+       (with-exception-handler (lambda (e) 9) (lambda () (+ 1 (guard (e) (raise-continuable 5))))) 10)
+(check "a clause whose test is #f" (guard (o (#t (list 'o o))) (guard (e (#f 1)) (raise 5))) '(o 5))
+(check "=> with no receiver is an error"
+       (raises? (lambda () (eval '(guard (e ((car e) =>)) (raise '(1))) (interaction-environment)))) #t)
+(check "=> with two receivers is an error"
+       (raises? (lambda () (eval '(guard (e ((car e) => list list)) (raise '(1))) (interaction-environment)))) #t)
+
+;;; The names the expansion uses are not the program's.
+(check "a program variable named %guard-unwound"
+       (let ((%guard-unwound 'mine)) (guard (e (#t %guard-unwound)) (raise 1))) 'mine)
+(check "a guard variable named %guard-unwound"
+       (guard (%guard-unwound ((symbol? %guard-unwound) (list 'got %guard-unwound))) (raise 'a)) '(got a))
+(check "a program variable named %guard-k"
+       (let ((%guard-k 'mine)) (guard (e (#t %guard-k)) (raise 1))) 'mine)
+(check "a receiver named %guard-v"
+       (let ((%guard-v (lambda (x) (list 'recv x)))) (guard (e ((car e) => %guard-v)) (raise '(7)))) '(recv 7))
+
+;;; Several threads at once.
+(import (curry sync))
+(define actor-total 0)
+(define actor-mutex (make-mutex))
+(define actor-done (make-semaphore 0))
+(define (actor-body)
+  (let loop ((i 0) (acc 0))
+    (if (= i 1000)
+        (begin (mutex-lock! actor-mutex)
+               (set! actor-total (+ actor-total acc))
+               (mutex-unlock! actor-mutex)
+               (sem-post! actor-done))
+        (loop (+ i 1)
+              (+ acc (with-exception-handler (lambda (e) 1)
+                       (lambda () (guard (x ((string? x) 0)) (raise-continuable 'x)))))))))
+(do ((a 0 (+ a 1))) ((= a 8)) (spawn actor-body))
+(do ((a 0 (+ a 1))) ((= a 8)) (sem-wait! actor-done))
+(check "eight actors, each a thousand guards with raise-continuable" actor-total 8000)
+
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
 (newline)

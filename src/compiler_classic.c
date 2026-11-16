@@ -1795,10 +1795,18 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t var             = vcar(var_and_clauses);
     val_t clauses         = vcdr(var_and_clauses);
 
-    val_t unwound = sym_intern_cstr("%guard-unwound");
+    /* Names no program writes: a variable of the program's own called
+     * %guard-unwound or %guard-k would otherwise be captured by this
+     * expansion (and the guard variable itself may have any name). */
+    static _Atomic unsigned guard_serial = 0;
+    char nm[48];
+    unsigned serial = ++guard_serial;
+    snprintf(nm, sizeof nm, "%%guard-unwound.%u", serial);
+    val_t unwound = sym_intern_cstr(nm);
     val_t S_COND2 = sym_intern_cstr("cond");
     val_t S_ELSE2 = sym_intern_cstr("else");
-    val_t gk      = sym_intern_cstr("%guard-k");
+    snprintf(nm, sizeof nm, "%%guard-k.%u", serial);
+    val_t gk      = sym_intern_cstr(nm);
 
     /* Validates every clause is itself a non-empty pair before either
      * loop below destructures it -- see ir_lower_let's identical comment
@@ -1835,12 +1843,15 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
              * re-evaluating it, via cond's => arrow form (proc receives
              * the test's value as its one argument). */
             rest = scm_cons(S_ARROW, scm_cons(gk, V_NIL));
-        } else if (vcar(cbody) == S_ARROW && vis_pair(vcdr(cbody))) {
+        } else if (vcar(cbody) == S_ARROW) {
+            if (!vis_pair(vcdr(cbody)) || !vis_nil(vcdr(vcdr(cbody))) || test == S_ELSE2)
+                scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: a => clause takes one receiver");
             /* (test => receiver): the guard's value is (receiver v), with v
              * the test's value. It was compiled as a body, with => read as a
              * variable (#422). Becomes
              *   (test => (lambda (%guard-v) (%guard-k (receiver %guard-v)))) */
-            val_t gv   = sym_intern_cstr("%guard-v");
+            snprintf(nm, sizeof nm, "%%guard-v.%u.%d", serial, ci);
+            val_t gv   = sym_intern_cstr(nm);
             val_t call = scm_cons(vcar(vcdr(cbody)), scm_cons(gv, V_NIL));
             val_t lam  = scm_cons(S_LAMBDA,
                              scm_cons(scm_cons(gv, V_NIL),

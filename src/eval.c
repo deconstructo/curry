@@ -192,7 +192,9 @@ static val_t guard_run_clauses(val_t exn, val_t var, val_t clauses, val_t env, b
             if (!vis_pair(cbody)) return tv;
             /* (test => receiver): the value is (receiver v), v the test's
              * value. => was evaluated as a variable (#422). */
-            if (vcar(cbody) == S_ARROW && vis_pair(vcdr(cbody))) {
+            if (vcar(cbody) == S_ARROW) {
+                if (!vis_pair(vcdr(cbody)) || !vis_nil(vcdr(vcdr(cbody))))
+                    scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: a => clause takes one receiver");
                 val_t recv = eval(vcar(vcdr(cbody)), guard_env);
                 return apply(recv, make_pair(tv, V_NIL));
             }
@@ -225,6 +227,13 @@ static val_t guard_in_place(int argc, val_t *argv, void *ud) {
     val_t v = guard_run_clauses(argv[0], g->var, g->clauses, g->env, &matched);
     if (!matched) return scm_raise_continuable(argv[0]);
     g->value = v;
+    /* The dynamic-wind frames between the raise point and the guard are
+     * left now. Their own handler frames are still installed here (raise-
+     * continuable keeps them while a handler runs in place); with them, an
+     * after thunk that raised was caught by its own frame, run a second
+     * time, and its exception then missed this guard's outer handlers. */
+    while (current_handler && current_handler->handler_proc == V_TRUE)
+        current_handler = current_handler->prev;
     wind_unwind_to((WindFrame *)g->wind_top);
     longjmp(*(jmp_buf *)g->jmpbuf, 1);
 }
@@ -1181,6 +1190,7 @@ tail:
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
         vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
+        h.saved_vm_handler_count = vm_handler_count_get();
         /* raise-continuable calls this handler in place; a plain raise
          * unwinds to h.jmp below (see guard_in_place). The primitive is
          * only reached through this frame's handler_proc, and this frame
@@ -1197,6 +1207,7 @@ tail:
             /* a clause applied in place, at the raise point */
             current_handler = h.prev;
             jit_depth_restore(h.saved_jit_depth);
+            vm_handler_count_set(h.saved_vm_handler_count);
             vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
             return *(volatile val_t *)&gip->value;
         }
@@ -1211,6 +1222,7 @@ tail:
         }
         current_handler = h.prev;
         jit_depth_restore(h.saved_jit_depth);
+        vm_handler_count_set(h.saved_vm_handler_count);
         vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
         val_t exn = h.exn;
 

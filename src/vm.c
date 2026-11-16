@@ -414,6 +414,17 @@ void vm_free(void) {
  * rewinds only what the protected region itself pushed, so it's safe to call
  * from a nested guard/with-exception-handler without discarding legitimate
  * outer VM frames. */
+/* The number of OP_PUSH_HANDLER frames in use. A C-level handler frame
+ * (SCM_PROTECT, the tree-walker's guard, the with-exception-handler
+ * primitive) saves it when it is set up and puts it back when it catches:
+ * raise-continuable runs a compiled frame's handler in place with that frame
+ * still counted, and if the handler leaves by raising to a C frame further
+ * out, nothing else lowers the count again. Each such exit leaked one of the
+ * VM_HANDLERS_MAX slots; after 64 every guard failed with "handler stack
+ * overflow", or crashed. */
+int  vm_handler_count_get(void)  { return vm ? vm->handler_count : 0; }
+void vm_handler_count_set(int n) { if (vm) vm->handler_count = n; }
+
 void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues) {
     if (!vm) { *frame_count = 0; *sp = NULL; *open_upvalues = NULL; return; }
     *frame_count = vm->frame_count;

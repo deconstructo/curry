@@ -101,6 +101,10 @@ typedef struct ExnHandler {
                                          JIT_CALL_DEPTH_LIMIT and silently disables the JIT
                                          fast path for the rest of the thread's lifetime. */
     int             saved_vm_frame_count; /* vm->frame_count at setjmp time — restored on longjmp */
+    int             saved_vm_handler_count; /* vm->handler_count at setjmp time — restored on longjmp
+                                         (see vm_handler_count_get, vm.c). Set by SCM_PROTECT and
+                                         the frames that catch without it; not by frames that
+                                         only clean up and raise again. */
     void           *saved_vm_sp;          /* vm->sp at setjmp time — restored on longjmp */
     void           *saved_vm_open_upvalues; /* vm->open_upvalues at setjmp time — restored on longjmp;
                                          together with the two fields above, mirrors what
@@ -231,6 +235,8 @@ extern "C" {
 #endif
 void vm_exn_state_save(int *frame_count, void **sp, void **open_upvalues);
 void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
+int  vm_handler_count_get(void);
+void vm_handler_count_set(int n);
 #ifdef __cplusplus
 }
 #endif
@@ -240,6 +246,7 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
     (h).prev           = current_handler;               \
     (h).handler_proc   = V_FALSE;                       \
     (h).saved_jit_depth = jit_depth_save();             \
+    (h).saved_vm_handler_count = vm_handler_count_get(); \
     vm_exn_state_save(&(h).saved_vm_frame_count,        \
                        &(h).saved_vm_sp,                \
                        &(h).saved_vm_open_upvalues);    \
@@ -250,6 +257,7 @@ void vm_exn_state_restore(int frame_count, void *sp, void *open_upvalues);
     } else {                                            \
         current_handler = (h).prev;                     \
         jit_depth_restore((h).saved_jit_depth);         \
+        vm_handler_count_set((h).saved_vm_handler_count); \
         vm_exn_state_restore((h).saved_vm_frame_count,  \
                               (h).saved_vm_sp,           \
                               (h).saved_vm_open_upvalues); \
