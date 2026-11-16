@@ -91,6 +91,65 @@
        (let ((n 0)) (vector-for-each (lambda (a b) (set! n (+ n 1))) (vector 1 2) (vector)) n) 0)
 (check "vector-map: not a vector" (raises? (lambda () (vector-map id '(1 2)))) #t)
 
+;;; ---- from the review of #408 ----
+(define (message thunk) (guard (e ((error-object? e) (error-object-message e)) (#t 'other)) (thunk) 'no-error))
+(define (ends-with? s suffix)
+  (and (string? s) (>= (string-length s) (string-length suffix))
+       (string=? (substring s (- (string-length s) (string-length suffix)) (string-length s)) suffix)))
+(check "the error is an error object naming map"
+       (ends-with? (message (lambda () (map car 5))) "map: not a list") #t)
+(check "the error names for-each"
+       (ends-with? (message (lambda () (for-each car '(1 . 2)))) "for-each: not a proper list") #t)
+(define lasso (let ((l (list 1 2 3 4 5))) (set-cdr! (cddddr l) (cddr l)) l))   ; 1 2 [3 4 5 3 4 5 ...]
+(check "map: a cycle after a prefix" (raises? (lambda () (map id lasso))) #t)
+(check "map: a cycle after a prefix, next to a finite list"
+       (map + lasso '(1 2 3 4 5 6 7 8 9)) '(2 4 6 8 10 9 11 13 12))
+(check "for-each: a cycle after a prefix" (raises? (lambda () (for-each id lasso))) #t)
+(define long-improper (let ((l (list-copy long))) (set-cdr! (list-tail l 49) 'end) l))   ; 50 pairs, parallel path
+(check "map: a long improper list" (raises? (lambda () (map id long-improper))) #t)
+(check "reduce: a long improper list" (raises? (lambda () (reduce + 0 long-improper))) #t)
+(check "for-each/par: a long improper list" (raises? (lambda () (for-each/par id long-improper))) #t)
+(check "fold-left: an improper list" (raises? (lambda () (fold-left + 0 '(1 2 . 3)))) #t)
+(check "map: a list made improper by the procedure"
+       (raises? (lambda () (let ((l (list 1 2 3 4))) (map (lambda (x) (if (= x 2) (set-cdr! (cdr l) 99)) x) l)))) #t)
+(check "for-each: nothing is called for a non-list"
+       (let ((n 0)) (guard (e (#t n)) (for-each (lambda (x) (set! n (+ n 1))) 5))) 0)
+(check "fold-right: nothing is called for an improper list"
+       (let ((n 0)) (guard (e (#t n)) (fold-right (lambda (x a) (set! n (+ n 1))) 0 '(1 2 . 3)))) 0)
+(check "map with three lists" (map + '(1 2 3) '(10 20 30) '(100 200)) '(111 222))
+(check "vector-for-each, first shorter"
+       (let ((acc '())) (vector-for-each (lambda (a b) (set! acc (cons b acc))) (vector 7 8) (make-vector 40 1)) acc)
+       '(1 1))
+(define-library (test traversal-in-library)
+  (import (scheme base))
+  (export in-library)
+  (begin (define (in-library x) (guard (e (#t 'raised)) (map car x)))))
+(import (test traversal-in-library))
+(check "inside a define-library body" (in-library 5) 'raised)
+
+;;; ---- fold-right on a long list (#418: a segmentation fault) ----
+(define million (let loop ((i 0) (acc '())) (if (= i 1000000) acc (loop (+ i 1) (cons i acc)))))
+(check "fold-right over a million elements" (fold-right + 0 million) 499999500000)
+(check "fold-right order" (fold-right list 0 '(1 2 3)) '(1 (2 (3 0))))
+(check "fold-right over the empty list" (fold-right + 7 '()) 7)
+(check "fold-right does not change its argument"
+       (let ((l (list 1 2 3))) (fold-right cons '() l) l) '(1 2 3))
+
+;;; ---- string-map (#419: it was not defined) ----
+(check "string-map" (string-map char-upcase "abc") "ABC")
+(check "string-map over the empty string" (string-map char-upcase "") "")
+(check "string-map with two strings stops at the shorter"
+       (string-map (lambda (a b) (if (char<? a b) a b)) "adcz" "bbb") "abb")
+(check "string-map, first string shorter"
+       (string-map (lambda (a b) b) "ab" "wxyz") "wx")
+(check "string-map beyond ASCII" (string-map char-upcase "straße λ") "STRAßE Λ")
+(check "string-map returns a new string"
+       (let ((s (string-copy "abc"))) (eq? s (string-map (lambda (c) c) s))) #f)
+(check "string-map: not a string" (raises? (lambda () (string-map char-upcase '(#\a)))) #t)
+(check "string-map: second argument not a string" (raises? (lambda () (string-map (lambda (a b) a) "ab" 5))) #t)
+(check "string-map: the procedure returns a non-character"
+       (raises? (lambda () (string-map (lambda (c) 1) "abc"))) #t)
+
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
 (newline)

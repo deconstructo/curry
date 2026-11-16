@@ -1264,6 +1264,37 @@ static val_t prim_string_to_vector(int ac, val_t *av, void *ud) {
     for (uint32_t i = n; i > 0; i--) { v->data[i-1] = vcar(chars); chars = vcdr(chars); }
     return vptr(v);
 }
+/* (string-map proc string1 string2 ...): the string of the characters proc
+ * returns, stopping at the end of the shortest string (R7RS 6.7). It was not
+ * defined at all (#419). */
+static val_t prim_string_map(int ac, val_t *av, void *ud) {
+    (void)ud;
+    val_t proc = av[0];
+    int nstrs = ac - 1;
+    for (int i = 0; i < nstrs; i++)
+        if (!vis_string(av[i+1])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-map: not a string");
+    val_t *ports = (val_t *)alloca((size_t)nstrs * sizeof(val_t));
+    for (int i = 0; i < nstrs; i++) {
+        String *s = as_str(av[i+1]);
+        ports[i] = port_open_input_string(str_data(s), s->len);
+    }
+    val_t out = port_open_output_string();
+    for (;;) {
+        /* one character from every string, so that none is left half-read
+         * when a shorter one ends */
+        val_t args = V_NIL; bool any_eof = false;
+        for (int i = nstrs - 1; i >= 0; i--) {
+            int cp = port_read_char(ports[i]);
+            if (cp == -1) any_eof = true;
+            else args = scm_cons(vchr((uint32_t)cp), args);
+        }
+        if (any_eof) break;
+        val_t c = apply(proc, args);
+        if (!vis_char(c)) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "string-map: the procedure did not return a character");
+        port_write_char(out, (int)vunchr(c));
+    }
+    return port_get_output_string(out);
+}
 static val_t prim_string_for_each(int ac, val_t *av, void *ud) {
     (void)ud;
     val_t proc = av[0];
@@ -2590,16 +2621,14 @@ static val_t prim_fold(int ac, val_t *av, void *ud) {
     return init;
 }
 static val_t prim_fold_right(int ac, val_t *av, void *ud) {
-    /* fold-right: (proc element acc) — recurse to the end, then apply on the way back */
-    (void)ud; val_t proc=av[0], init=av[1], lst=av[2];
-    if (!vis_pair(lst)) return init;
-    val_t rest = prim_fold_right(ac, (val_t[]){proc, init, vcdr(lst)}, ud);
-    return apply(proc, scm_cons(vcar(lst), scm_cons(rest, V_NIL)));
-}
-/* The check is done once here, not at each level of the recursion above. */
-static val_t prim_fold_right_checked(int ac, val_t *av, void *ud) {
+    /* fold-right: (proc element acc), last element first. Walks a reversed
+     * copy of the list in a loop: one C call per element, with no stack
+     * check, was a segmentation fault on a long list (#418). */
+    (void)ac;(void)ud; val_t proc=av[0], acc=av[1];
     scm_check_list_arg("fold-right", av[2]);
-    return prim_fold_right(ac, av, ud);
+    for (val_t r = scm_reverse(av[2]); vis_pair(r); r = vcdr(r))
+        acc = apply(proc, scm_cons(vcar(r), scm_cons(acc, V_NIL)));
+    return acc;
 }
 static val_t prim_not(int ac, val_t *av, void *ud) {(void)ac;(void)ud; return vbool(vis_false(av[0]));}
 /* Iterative (not recursive) delay-force trampoline -- R7RS 4.2.5 requires
@@ -4129,6 +4158,7 @@ void builtins_register(val_t env) {
     DEF("string-set!",prim_string_set_bang,3,3); DEF("string-copy!",prim_string_copy_bang,3,5);
     DEF("substring",prim_substring,2,3); DEF("string-contains",prim_string_contains,2,2);
     DEF("string-for-each",prim_string_for_each,2,-1);
+    DEF("string-map",prim_string_map,2,-1);
     DEF("string-fill!",prim_string_fill_bang,2,4);
     DEF("string-foldcase",prim_string_foldcase,1,1);
     DEF("write-string",prim_write_string,1,4);
@@ -4197,7 +4227,7 @@ void builtins_register(val_t env) {
     DEF("eval",prim_eval,1,2); DEF("interaction-environment",prim_interaction_env,0,0);
     DEF("apply",prim_apply,2,-1);
     DEF("for-each",prim_for_each,2,-1);
-    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right_checked,3,3);
+    DEF("filter",prim_filter,2,2); DEF("fold-left",prim_fold,3,3); DEF("fold-right",prim_fold_right,3,3);
     DEF("not",prim_not,1,1);
     DEF("force",prim_force,1,1); DEF("make-promise",prim_make_promise,1,1);
     DEF("%delay-promise",prim_delay_promise,1,1); DEF("%delay-force-promise",prim_delay_force_promise,1,1);
