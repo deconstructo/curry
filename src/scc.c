@@ -426,7 +426,7 @@ static bool read_const(FILE *f, val_t *out) {
         if (!buf) return false;
         *out = num_make_bignum_str(buf, 16);
         free(buf);
-        return true;
+        return !vis_false(*out);   /* #f: not a number, a corrupt file */
     }
     case CTAG_RATIONAL: {
         /* mpq_get_str writes "num/den" in base 16 */
@@ -446,6 +446,9 @@ static bool read_const(FILE *f, val_t *out) {
             den_v = vfix(1);
         }
         free(buf);
+        /* A corrupt file: not numbers, or a zero denominator (SIGFPE in mpq). */
+        if (vis_false(num_v) || vis_false(den_v) || (vis_fixnum(den_v) && vunfix(den_v) == 0))
+            return false;
         *out = num_make_rational(num_v, den_v);
         return true;
     }

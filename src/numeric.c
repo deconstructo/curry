@@ -95,9 +95,17 @@ val_t num_make_bignum_i(long n) {
     return vptr(b);
 }
 
+/* The integer written in `s` in `base`, or #f if GMP does not accept the text.
+ * A leading '+' is dropped first: GMP takes '-' but not '+', and a signed
+ * number too big for strtol arrives here. Failure used to leave the value 0,
+ * so "+100000000000000000000" was read as 0. */
 val_t num_make_bignum_str(const char *s, int base) {
+    if (*s == '+') s++;
     mpz_t z;
-    mpz_init_set_str(z, s, base);
+    if (mpz_init_set_str(z, s, base) != 0) {
+        mpz_clear(z);
+        return V_FALSE;
+    }
     val_t r = make_big_from_mpz(z);
     mpz_clear(z);
     return r;
