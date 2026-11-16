@@ -166,23 +166,55 @@
     ;; body, so a large-enough n would otherwise SIGSEGV the process
     ;; rather than raise (found by independent security review; a mere
     ;; few thousand elements was enough to crash the old version).
+    ;; "It is an error" (SRFI 1) for the count to be anything but an
+    ;; exact non-negative integer no larger than the number of pairs in
+    ;; the list. These raise for it: a count past the end used to give a
+    ;; short result -- (take '(1 2) 5) was (1 2) -- and a negative,
+    ;; fractional or NaN count never reached 0, so it took or dropped the
+    ;; whole list (#409). Dotted lists are allowed, as the SRFI says:
+    ;; (take '(1 2 3 . d) 2) is (1 2) and (drop '(1 2 3 . d) 3) is d.
+    (define (%check-count who lst n)
+      (unless (and (exact-integer? n) (>= n 0))
+        (error (string-append who ": count must be an exact non-negative integer") n)))
+
+    (define (%too-short who lst n)
+      (error (string-append who ": list has fewer elements than the count") lst n))
+
     (define (take lst n)
-      (let loop ((lst lst) (n n) (acc '()))
-        (if (or (= n 0) (null? lst))
-            (reverse acc)
-            (loop (cdr lst) (- n 1) (cons (car lst) acc)))))
+      (%check-count "take" lst n)
+      (let loop ((l lst) (k n) (acc '()))
+        (cond ((= k 0) (reverse acc))
+              ((pair? l) (loop (cdr l) (- k 1) (cons (car l) acc)))
+              (else (%too-short "take" lst n)))))
 
     (define (drop lst n)
-      (if (or (= n 0) (null? lst))
-          lst
-          (drop (cdr lst) (- n 1))))
+      (%check-count "drop" lst n)
+      (let loop ((l lst) (k n))
+        (cond ((= k 0) l)
+              ((pair? l) (loop (cdr l) (- k 1)))
+              (else (%too-short "drop" lst n)))))
 
     (define (take-right lst n)
-      (let loop ((lead (drop lst n)) (lag lst))
+      (%check-count "take-right" lst n)
+      (let loop ((lead (%drop-for "take-right" lst n)) (lag lst))
         (if (pair? lead) (loop (cdr lead) (cdr lag)) lag)))
 
+    ;; Walks with a lead pointer n pairs ahead, like take-right, so a
+    ;; dotted list works: (drop-right '(1 2 3 . d) 2) is (1). It used
+    ;; (length lst), which raises on one.
     (define (drop-right lst n)
-      (take lst (- (length lst) n)))
+      (%check-count "drop-right" lst n)
+      (let loop ((lead (%drop-for "drop-right" lst n)) (lag lst) (acc '()))
+        (if (pair? lead)
+            (loop (cdr lead) (cdr lag) (cons (car lag) acc))
+            (reverse acc))))
+
+    ;; drop, reporting a too-short list under the caller's name.
+    (define (%drop-for who lst n)
+      (let loop ((l lst) (k n))
+        (cond ((= k 0) l)
+              ((pair? l) (loop (cdr l) (- k 1)))
+              (else (%too-short who lst n)))))
 
     ;; SRFI-1 permits (but doesn't require) the !-suffixed variants to
     ;; imperatively splice their argument -- curry's implements them as
@@ -193,7 +225,12 @@
     (define (take! lst n) (take lst n))
     (define (drop-right! lst n) (drop-right lst n))
 
-    (define (split-at lst n) (values (take lst n) (drop lst n)))
+    (define (split-at lst n)
+      (%check-count "split-at" lst n)
+      (let loop ((l lst) (k n) (acc '()))
+        (cond ((= k 0) (values (reverse acc) l))
+              ((pair? l) (loop (cdr l) (- k 1) (cons (car l) acc)))
+              (else (%too-short "split-at" lst n)))))
     (define (split-at! lst n) (split-at lst n))
 
     (define (last lst) (car (last-pair lst)))
