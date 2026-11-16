@@ -1180,9 +1180,9 @@ static val_t prim_map_seq(int ac, val_t *av, void *ud) {
     int nlists = ac - 1;
     val_t *lists = av + 1;
     val_t result = V_NIL;
+    scm_check_list_args("map", nlists, lists);
     for (;;) {
-        for (int i = 0; i < nlists; i++)
-            if (!vis_pair(lists[i])) return scm_reverse(result);
+        if (scm_list_args_done("map", nlists, lists)) return scm_reverse(result);
         val_t args = V_NIL;
         for (int i = nlists - 1; i >= 0; i--)
             args = scm_cons(vcar(lists[i]), args);
@@ -1195,8 +1195,9 @@ static val_t prim_map_seq(int ac, val_t *av, void *ud) {
 static val_t prim_map(int ac, val_t *av, void *ud) {
     if (ac != 2) return prim_map_seq(ac, av, ud);
     val_t proc = av[0], lst = av[1];
-    int n = 0;
-    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    /* -1: not a proper list (the counting loop never ended on a circular
+     * one); prim_map_seq reports it. */
+    int n = scm_list_length(lst);
     if (n < map_par_threshold || pool_is_worker) return prim_map_seq(ac, av, ud);
 
     val_t *elems   = gc_alloc_raw_pinned(n * sizeof(val_t));
@@ -1228,6 +1229,7 @@ static val_t prim_map(int ac, val_t *av, void *ud) {
 static val_t prim_reduce_seq(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t fn = av[0], ridentity = av[1], lst = av[2];
+    scm_check_list_arg("reduce", lst);
     if (!vis_pair(lst)) return ridentity;
     val_t acc = vcar(lst);
     for (lst = vcdr(lst); vis_pair(lst); lst = vcdr(lst))
@@ -1237,9 +1239,9 @@ static val_t prim_reduce_seq(int ac, val_t *av, void *ud) {
 
 static val_t prim_reduce(int ac, val_t *av, void *ud) {
     val_t fn = av[0], ridentity = av[1], lst = av[2];
+    scm_check_list_arg("reduce", lst);
     if (!vis_pair(lst)) return ridentity;
-    int n = 0;
-    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    int n = scm_list_length(lst);
     if (n < map_par_threshold || pool_is_worker) return prim_reduce_seq(ac, av, ud);
 
     val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
@@ -1279,9 +1281,9 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     val_t proc = av[0];
     if (ac != 2) {
         int nlists = ac - 1; val_t *lists = av + 1;
+        scm_check_list_args("for-each/par", nlists, lists);
         for (;;) {
-            for (int i = 0; i < nlists; i++)
-                if (!vis_pair(lists[i])) return V_VOID;
+            if (scm_list_args_done("for-each/par", nlists, lists)) return V_VOID;
             val_t args = V_NIL;
             for (int i = nlists - 1; i >= 0; i--)
                 args = scm_cons(vcar(lists[i]), args);
@@ -1290,8 +1292,8 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
         }
     }
     val_t lst = av[1];
-    int n = 0;
-    for (val_t p = lst; vis_pair(p); p = vcdr(p)) n++;
+    scm_check_list_arg("for-each/par", lst);
+    int n = scm_list_length(lst);
     if (n < map_par_threshold || pool_is_worker) {
         for (val_t p = lst; vis_pair(p); p = vcdr(p))
             apply(proc, scm_cons(vcar(p), V_NIL));
