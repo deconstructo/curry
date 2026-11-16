@@ -11,7 +11,8 @@ Built around pluggable logics, an open-ended numeric tower, and no single "corre
 ## News and what I am working on
 - Fixing a lot of bugs - including a wonderful contribution from @dharmatech 
 - Improving the JIT compiler
-- I've used Curry to explore some aspects of black holes that I've not had an intuitive understanding of. 
+- I've used Curry to explore some aspects of black holes that I've not had an intuitive understanding of.
+- Oh, and for some fun, I'm trying to port Curry to Haiku! Yeap, I need to out-niche myself :-)
 
 ### Package Management!!
 The next big thing that I want to work on is package management. It feels like it's time to do this - 
