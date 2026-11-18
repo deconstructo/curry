@@ -65,6 +65,7 @@ void builtins_curry_register(val_t env);
 val_t scm_cons(val_t car, val_t cdr);
 val_t scm_list(int n, ...);         /* (list a b c ...) */
 int   scm_list_length(val_t lst);   /* -1 if improper */
+val_t scm_call_cc(val_t proc);
 /* The list arguments of map, for-each and the like (builtins.c). */
 void  scm_check_list_args(const char *who, int nlists, val_t *lists);
 bool  scm_list_args_done(const char *who, int nlists, val_t *lists);

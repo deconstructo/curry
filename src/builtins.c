@@ -2854,6 +2854,9 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
     return apply_arr(proc, 1, &cont_val);
 }
 
+/* (call/cc proc) for the VM's OP_CALL_CC. */
+val_t scm_call_cc(val_t proc) { return prim_call_cc(1, &proc, NULL); }
+
 static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud; val_t handler=av[0], thunk=av[1];
     val_t result = V_VOID;
@@ -2864,6 +2867,7 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
     h.handler_proc = (handler == V_TRUE || handler == V_FALSE) ? V_VOID : handler;   /* #t/#f are the frame markers */
+    h.saved_vm_handler_count = vm_handler_count_get();
     current_handler = &h;
     if (setjmp(h.jmp) == 0) {
         result = apply(thunk, V_NIL);
@@ -2871,6 +2875,7 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
     } else {
         current_handler = h.prev;
         jit_depth_restore(h.saved_jit_depth);
+        vm_handler_count_set(h.saved_vm_handler_count);
         vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
         vm->frame_count   = saved_frame_count;
         vm->sp            = saved_sp;

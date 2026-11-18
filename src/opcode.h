@@ -218,7 +218,7 @@ typedef enum {
     /* ── Exception handling ─────────────────────────────────────────── */
     OP_PUSH_HANDLER,/* B: push exception handler, jump offset B on exn   */
     OP_POP_HANDLER, /* pop exception handler frame                       */
-    OP_RAISE,       /* raise top of stack as exception                   */
+    OP_RAISE,       /* guard's re-raise: pop unwound flag, pop exception */
 
     /* ── I/O ────────────────────────────────────────────────────────── */
     OP_DISPLAY,     /* display pop() to current-output-port              */
@@ -227,6 +227,12 @@ typedef enum {
 
     /* ── Tail markers ───────────────────────────────────────────────── */
     OP_NOP,         /* no-op (for alignment / patching)                  */
+
+    /* Added after OP_NOP so that the numbers of the opcodes above do not
+     * change: a cached .scc file is keyed on its source text only. */
+    OP_CALL_CC,     /* pop a procedure, call it with the current
+                       continuation, push the result (guard's own
+                       call/cc: see compile_guard)                      */
 
     OP_COUNT        /* sentinel — number of opcodes                      */
 } OpCode;

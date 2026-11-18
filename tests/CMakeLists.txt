@@ -47,6 +47,7 @@ add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/s
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
 add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
+add_test(NAME guard_reraise COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/guard_reraise_tests.scm)
 add_test(NAME raise_continuable COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/raise_continuable_tests.scm)
 add_test(NAME c_stack_overflow COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_stack_overflow_tests.scm)
 set_tests_properties(c_stack_overflow PROPERTIES TIMEOUT 120)

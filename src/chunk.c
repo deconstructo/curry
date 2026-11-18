@@ -115,6 +115,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_WRITE]          = "WRITE",
     [OP_NEWLINE]        = "NEWLINE",
     [OP_NOP]            = "NOP",
+    [OP_CALL_CC]        = "CALL_CC",
 };
 
 /* ── Chunk allocation ────────────────────────────────────────────────── */
