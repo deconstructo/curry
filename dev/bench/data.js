@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794819485360,
+  "lastUpdate": 1795011445532,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -22562,6 +22562,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 77.922,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e11946b85310159669d1537d9f34b4f6c5dfd98f",
+          "message": "Merge pull request #424 from deconstructo/fix/406-guard-reraise-continuable\n\nfix(guard): continuable re-raise, => clauses, no dependence on call/cc (#406, #422, #423)\n\nThank feck this one got through - I had real issues with success on ubuntu 26 x86 - though it all compiled and tested happily on macOs and intel Fedora 44.",
+          "timestamp": "2026-11-19T01:15:14+11:00",
+          "tree_id": "adccbfacb1bd4c679b2decf07fe77d298ea370c0",
+          "url": "https://github.com/deconstructo/curry/commit/e11946b85310159669d1537d9f34b4f6c5dfd98f"
+        },
+        "date": 1795011444372,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 12.453,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.599,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.368,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 26.014,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 104.452,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 215.616,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 51.922,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 65.682,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 49.191,
             "unit": "ms"
           }
         ]
