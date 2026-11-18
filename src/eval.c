@@ -287,6 +287,84 @@ static void require_body_shape(val_t body, const char *form_name) {
         scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "%s: ill-formed special form", form_name);
 }
 
+/* The tree-walker's guard. Kept out of eval() on purpose: it holds two
+ * setjmp calls, and a function with several setjmp calls and as many locals
+ * as eval() is compiled badly by gcc 15 at -O2 (a closure built before the
+ * guard case was read back as zeros, on Ubuntu 26.04 only: #424). In a
+ * function of its own the setjmp state stays small. Every path returns or
+ * raises, so nothing here needs eval()'s `goto tail`. */
+static __attribute__((noinline)) val_t eval_guard(val_t rest, val_t env) {
+    /* (guard (var clause...) body...) */
+    /* Issue #132: `(guard)` -- no var/clauses list at all -- and
+     * `(guard ())` -- an empty one, missing var -- previously fell
+     * straight into vcar(rest)/vcar(var_clauses) below and
+     * SIGSEGVed. Matches compile_guard's own two require_min_args
+     * calls (one for each level). A missing BODY, by contrast, is
+     * intentionally left lenient below (matches the compiled
+     * path's own leniency: `(guard (e))` compiles to a no-op
+     * returning void, not an error). */
+    require_min_args(rest, 1, "guard");
+    val_t var_clauses = vcar(rest);
+    require_min_args(var_clauses, 1, "guard");
+    val_t var         = vcar(var_clauses);
+    val_t clauses     = vcdr(var_clauses);
+    val_t body        = vcdr(rest);
+    /* `(guard (e) . 5)` -- an improper body -- found by a later
+     * review round; the nil case remains intentionally lenient
+     * (see comment above), only the genuinely malformed shape
+     * raises. */
+    require_body_shape(body, "guard");
+
+    val_t result = V_VOID;
+    ExnHandler h;
+    h.prev = current_handler;
+    h.saved_jit_depth = jit_depth_save();
+    vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
+    h.saved_vm_handler_count = vm_handler_count_get();
+    /* raise-continuable calls this handler in place; a plain raise
+     * unwinds to h.jmp below (see guard_in_place). The primitive is
+     * only reached through this frame's handler_proc, and this frame
+     * outlives every call of it. */
+    GuardInPlace *gip = (GuardInPlace *)gc_alloc(sizeof(GuardInPlace));
+    gip->var = var; gip->clauses = clauses; gip->env = env;
+    gip->jmpbuf = gc_alloc_raw_pinned(sizeof(jmp_buf));
+    gip->wind_top = current_wind; gip->value = V_VOID;
+    Primitive *gp = CURRY_NEW(Primitive);
+    gp->hdr.type = T_PRIMITIVE; gp->hdr.flags = 0;
+    gp->name = "guard"; gp->min_args = 1; gp->max_args = 1;
+    gp->fn = guard_in_place; gp->ud = gip;
+    if (setjmp(*(jmp_buf *)gip->jmpbuf) != 0) {
+        /* a clause applied in place, at the raise point */
+        current_handler = h.prev;
+        jit_depth_restore(h.saved_jit_depth);
+        vm_handler_count_set(h.saved_vm_handler_count);
+        vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
+        return *(volatile val_t *)&gip->value;
+    }
+    h.handler_proc = vptr(gp); current_handler = &h;
+    if (setjmp(h.jmp) == 0) {
+        if (!vis_nil(body)) {
+            while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
+            result = eval(vcar(body), env);
+        }
+        current_handler = h.prev;
+        return result;
+    }
+    current_handler = h.prev;
+    jit_depth_restore(h.saved_jit_depth);
+    vm_handler_count_set(h.saved_vm_handler_count);
+    vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
+    val_t exn = h.exn;
+
+    /* Try each clause */
+    bool matched;
+    val_t gv = guard_run_clauses(exn, var, clauses, env, &matched);
+    if (matched) return gv;
+    /* No clause matched: re-raise */
+    scm_raise_val(exn);
+
+}
+
 val_t eval(val_t expr, val_t env) {
     /* Detects an approaching real C-stack overflow from unbounded
      * non-tail recursion through eval() -- goto-tail iterations below
@@ -1163,76 +1241,8 @@ tail:
         return result;
     }
 
-    if (op == S_GUARD) {
-        /* (guard (var clause...) body...) */
-        /* Issue #132: `(guard)` -- no var/clauses list at all -- and
-         * `(guard ())` -- an empty one, missing var -- previously fell
-         * straight into vcar(rest)/vcar(var_clauses) below and
-         * SIGSEGVed. Matches compile_guard's own two require_min_args
-         * calls (one for each level). A missing BODY, by contrast, is
-         * intentionally left lenient below (matches the compiled
-         * path's own leniency: `(guard (e))` compiles to a no-op
-         * returning void, not an error). */
-        require_min_args(rest, 1, "guard");
-        val_t var_clauses = vcar(rest);
-        require_min_args(var_clauses, 1, "guard");
-        val_t var         = vcar(var_clauses);
-        val_t clauses     = vcdr(var_clauses);
-        val_t body        = vcdr(rest);
-        /* `(guard (e) . 5)` -- an improper body -- found by a later
-         * review round; the nil case remains intentionally lenient
-         * (see comment above), only the genuinely malformed shape
-         * raises. */
-        require_body_shape(body, "guard");
-
-        val_t result = V_VOID;
-        ExnHandler h;
-        h.prev = current_handler;
-        h.saved_jit_depth = jit_depth_save();
-        vm_exn_state_save(&h.saved_vm_frame_count, &h.saved_vm_sp, &h.saved_vm_open_upvalues);
-        h.saved_vm_handler_count = vm_handler_count_get();
-        /* raise-continuable calls this handler in place; a plain raise
-         * unwinds to h.jmp below (see guard_in_place). The primitive is
-         * only reached through this frame's handler_proc, and this frame
-         * outlives every call of it. */
-        GuardInPlace *gip = (GuardInPlace *)gc_alloc(sizeof(GuardInPlace));
-        gip->var = var; gip->clauses = clauses; gip->env = env;
-        gip->jmpbuf = gc_alloc_raw_pinned(sizeof(jmp_buf));
-        gip->wind_top = current_wind; gip->value = V_VOID;
-        Primitive *gp = CURRY_NEW(Primitive);
-        gp->hdr.type = T_PRIMITIVE; gp->hdr.flags = 0;
-        gp->name = "guard"; gp->min_args = 1; gp->max_args = 1;
-        gp->fn = guard_in_place; gp->ud = gip;
-        if (setjmp(*(jmp_buf *)gip->jmpbuf) != 0) {
-            /* a clause applied in place, at the raise point */
-            current_handler = h.prev;
-            jit_depth_restore(h.saved_jit_depth);
-            vm_handler_count_set(h.saved_vm_handler_count);
-            vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
-            return *(volatile val_t *)&gip->value;
-        }
-        h.handler_proc = vptr(gp); current_handler = &h;
-        if (setjmp(h.jmp) == 0) {
-            if (!vis_nil(body)) {
-                while (vis_pair(vcdr(body))) { eval(vcar(body), env); body = vcdr(body); }
-                result = eval(vcar(body), env);
-            }
-            current_handler = h.prev;
-            return result;
-        }
-        current_handler = h.prev;
-        jit_depth_restore(h.saved_jit_depth);
-        vm_handler_count_set(h.saved_vm_handler_count);
-        vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
-        val_t exn = h.exn;
-
-        /* Try each clause */
-        bool matched;
-        val_t gv = guard_run_clauses(exn, var, clauses, env, &matched);
-        if (matched) return gv;
-        /* No clause matched: re-raise */
-        scm_raise_val(exn);
-    }
+    if (op == S_GUARD)
+        return eval_guard(rest, env);
 
     if (op == S_IMPORT) {
         /* Handled in modules.c; forward to the module system.
