@@ -385,6 +385,15 @@ if(BUILD_LLVM)
         set_tests_properties(jit_bc_force_${t} PROPERTIES
                              ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
     endforeach()
+    # #421: the source backend's per-call scratch arrays were dynamic
+    # allocas, so a loop making a call per iteration overflowed the C
+    # stack. The test compiles by hand, pinned to the source backend.
+    add_test(NAME jit_loop_stack COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_loop_stack_tests.scm)
+    set_tests_properties(jit_loop_stack PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "CURRY_JIT_BACKEND=source")
+    add_test(NAME jit_force_loop_stack COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_loop_stack_tests.scm)
+    set_tests_properties(jit_force_loop_stack PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=source")
     # CURRY_JIT=off must leave the JIT tests passing on bytecode alone.
     add_test(NAME jit_off COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/jit_tests.scm)
     set_tests_properties(jit_off PROPERTIES ENVIRONMENT "CURRY_JIT=off")

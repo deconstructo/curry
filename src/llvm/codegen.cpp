@@ -197,6 +197,16 @@ struct CompileCtx {
         return a;
     }
 
+    /* A scratch array of n i64 slots, allocated once in the entry block.
+     * An alloca emitted at the current insertion point is dynamic when that
+     * point sits inside a named-let loop body: it runs on every iteration
+     * and the stack space is not released until the function returns, so a
+     * loop that made a call per iteration exhausted the C stack (#421). */
+    AllocaInst *alloc_entry_array(uint32_t n, const std::string &name = "") {
+        IRBuilder<> eb(&fn->getEntryBlock(), fn->getEntryBlock().begin());
+        return eb.CreateAlloca(i64_t, ConstantInt::get(i32_t, n > 0 ? n : 1), name);
+    }
+
     bool terminated() const {
         /* NOT `getTerminator() != nullptr` -- that was the actual bug
          * behind issue #99 (crash on LLVM 23.1.0, "cannot get terminator
@@ -333,8 +343,7 @@ static Value *emit_global_define(CompileCtx &cc, val_t sym, Value *val_v) {
 static Value *emit_apply(CompileCtx &cc, Value *callee_v,
                          const SmallVector<Value *, 8> &arg_vals) {
     uint32_t argc = (uint32_t)arg_vals.size();
-    AllocaInst *argv_alloca = cc.B.CreateAlloca(
-        cc.i64_t, ConstantInt::get(cc.i32_t, argc > 0 ? argc : 1), "argv");
+    AllocaInst *argv_alloca = cc.alloc_entry_array(argc, "argv");
     for (uint32_t i = 0; i < argc; ++i) {
         auto *gep = cc.B.CreateGEP(cc.i64_t, argv_alloca,
                                     ConstantInt::get(cc.i32_t, i));
@@ -1080,9 +1089,7 @@ static Value *emit_lambda(CompileCtx &cc, val_t params_val, val_t body_val) {
     /* --- At call site: build capture array and create a JIT closure --- */
     Value *caps_ptr;
     if (!captured.empty()) {
-        caps_ptr = cc.B.CreateAlloca(cc.i64_t,
-                                      ConstantInt::get(cc.i32_t, (int)captured.size()),
-                                      "caps");
+        caps_ptr = cc.alloc_entry_array((uint32_t)captured.size(), "caps");
         for (int i = 0; i < (int)captured.size(); ++i) {
             Binding *cb = cc.lookup(captured[i]);
             /* See emit_expr's symbol-reference case for why a named let's
