@@ -60,7 +60,9 @@
 (define (run-in-actor thunk)
   (let ((a (spawn thunk)))
     (let wait () (if (actor-alive? a) (wait) 'done))))
-(check "loops in an actor" (begin (run-in-actor (lambda () (loop-call N))) 'ok) 'ok)
+(define actor-result #f)
+(run-in-actor (lambda () (set! actor-result (loop-call N))))
+(check "loops in an actor" actor-result N)
 
 ;;; arguments are still right when the call sits in a loop: each call reads
 ;;; its own argument array, reused from one iteration to the next
