@@ -221,53 +221,6 @@
 (check "a loop of 300 continuable raises" (sum-with-handler 300) 89700)
 (check "and again after it has been compiled" (sum-with-handler 300) 89700)
 
-;;; C-level frames that only clean up and re-raise are looked through, as
-;;; dynamic-wind's is: the handler runs in place and its value comes back to the
-;;; raise point (#407; it was an error once a returning handler became one).
-(import (curry sync) (curry conditions))
-(define (wch thunk) (with-exception-handler (lambda (e) 10) thunk))
-(check "through with-output-to-string"
-       (wch (lambda () (let ((s (with-output-to-string (lambda () (display (raise-continuable 'x)))))) s)))
-       "10")
-(check "with-output-to-string restores the output port afterwards"
-       (let ((before (current-output-port)))
-         (wch (lambda () (with-output-to-string (lambda () (raise-continuable 'x)))))
-         (eq? before (current-output-port)))
-       #t)
-(check "through call-with-port"
-       (wch (lambda () (call-with-port (open-input-string "a") (lambda (p) (+ 1 (raise-continuable 'x))))))
-       11)
-(check "through handler-bind"
-       (wch (lambda () (handler-bind ((error (lambda (c) 0))) (+ 1 (raise-continuable 'x)))))
-       11)
-(check "through with-mutex, which is unlocked afterwards"
-       (let ((m (make-mutex)))
-         (let ((r (wch (lambda () (with-mutex m (lambda () (+ 1 (raise-continuable 'x))))))))
-           (list r (with-mutex m (lambda () 'unlocked)))))
-       '(11 unlocked))
-(check "through eval"
-       (wch (lambda () (+ 1 (eval '(+ 1 (raise-continuable 'x)) (interaction-environment)))))
-       12)
-(check "through tree-walked parameterize"
-       (let ((p (make-parameter 1)))
-         (list (wch (lambda () (tree-eval (list 'parameterize (list (list p 5)) '(+ 1 (raise-continuable 'x))))))
-               (p)))
-       '(11 1))
-(define rc-load-file
-  (string-append (or (get-environment-variable "TMPDIR") "/tmp") "/raise_continuable_load_tmp.scm"))
-(call-with-output-file rc-load-file (lambda (p) (write '(+ 1 (raise-continuable 'x)) p)))
-(check "through load" (wch (lambda () (load rc-load-file))) 11)
-(delete-file rc-load-file)
-
-(check "map/seq over a long list: the handler's values come back to each raise point"
-       (wch (lambda () (length (map/seq (lambda (i) (raise-continuable i)) (vector->list (make-vector 50 1))))))
-       50)
-(check "a plain raise through with-output-to-string still reaches the handler, which must escape"
-       (call/cc (lambda (k)
-         (with-exception-handler (lambda (e) (k (list 'handled e)))
-           (lambda () (with-output-to-string (lambda () (raise 'boom)))))))
-       '(handled boom))
-
 (newline)
 (display pass) (display " passed, ") (display fail) (display " failed")
 (newline)

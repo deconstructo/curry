@@ -88,9 +88,7 @@ typedef struct ExnHandler {
     struct ExnHandler *prev;
     val_t           handler_proc; /* the handler procedure of a with-exception-handler
                                      frame; V_TRUE for a frame that only cleans up and re-raises
-                                     (dynamic-wind, with-output-to-string, handler-bind,
-                                     load, ...: SCM_PROTECT_CLEANUP); V_FALSE for every
-                                     other kind of frame (one that really catches).
+                                     (dynamic-wind); V_FALSE for every other kind of frame.
                                      raise-continuable calls it in place, without
                                      unwinding, and returns its value (#377). Every
                                      site that links a frame into current_handler
@@ -250,35 +248,6 @@ void vm_handler_count_set(int n);
 #define SCM_PROTECT(h, body, on_exn) do {              \
     (h).prev           = current_handler;               \
     (h).handler_proc   = V_FALSE;                       \
-    (h).saved_jit_depth = jit_depth_save();             \
-    (h).saved_vm_handler_count = vm_handler_count_get(); \
-    vm_exn_state_save(&(h).saved_vm_frame_count,        \
-                       &(h).saved_vm_sp,                \
-                       &(h).saved_vm_open_upvalues);    \
-    current_handler    = &(h);                          \
-    if (setjmp((h).jmp) == 0) {                        \
-        body;                                           \
-        current_handler = (h).prev;                     \
-    } else {                                            \
-        current_handler = (h).prev;                     \
-        jit_depth_restore((h).saved_jit_depth);         \
-        vm_handler_count_set((h).saved_vm_handler_count); \
-        vm_exn_state_restore((h).saved_vm_frame_count,  \
-                              (h).saved_vm_sp,           \
-                              (h).saved_vm_open_upvalues); \
-        on_exn;                                         \
-    }                                                   \
-} while (0)
-
-/* SCM_PROTECT for a frame whose on_exn only restores state and re-raises the
- * same exception (scm_raise_val(h.exn)): it catches nothing. raise-continuable
- * looks through such frames and calls the handler in place, with the frame
- * still active, as R7RS requires; with SCM_PROTECT it would unwind to the
- * frame and the handler's return would be an error (#407). Do not use it for
- * a frame that handles the exception, converts it, or drops it. */
-#define SCM_PROTECT_CLEANUP(h, body, on_exn) do {              \
-    (h).prev           = current_handler;               \
-    (h).handler_proc   = V_TRUE;                        \
     (h).saved_jit_depth = jit_depth_save();             \
     (h).saved_vm_handler_count = vm_handler_count_get(); \
     vm_exn_state_save(&(h).saved_vm_frame_count,        \

@@ -1212,7 +1212,7 @@ tail:
         val_t exn_val = V_VOID;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             /* `(parameterize ((p v)))` / `(parameterize ())` -- no body
              * forms at all -- previously reached vcar(body) on a nil
@@ -1500,7 +1500,7 @@ tail:
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
-        h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
+        h.handler_proc = V_FALSE; current_handler = &h;
         if (setjmp(h.jmp) == 0) {
             result = eval_body(body, env);
             current_handler = h.prev;

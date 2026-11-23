@@ -228,7 +228,7 @@ static Module *load_scheme_module(val_t name, const char *path) {
     load_push_dir(path);
     val_t result = V_VOID;
     ExnHandler h;
-    SCM_PROTECT_CLEANUP(h, {
+    SCM_PROTECT(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, mod_env);

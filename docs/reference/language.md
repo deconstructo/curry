@@ -159,7 +159,7 @@ Both `error-object-message` (R7RS) and `error-message` (legacy Curry name) are n
 
 For `raise`, `error` and errors raised by primitives, R7RS 6.11 says the handler is called in the dynamic environment of the raise, and that a secondary exception is raised if it returns. Curry unwinds to the `with-exception-handler` frame first and then calls the handler, so the raise point is gone when the handler runs. A handler that returns raises a secondary exception (error code `handler-returned`) in the handler's own dynamic environment, as R7RS says (#407). The difference you can see is the dynamic environment: a `dynamic-wind` between the raise and the handler has already run its after thunk when the handler is called.
 
-`raise-continuable` is exact: the handler is called at the raise point and its value is returned from `raise-continuable` (#377), also through `dynamic-wind` and the C-level forms that only clean up and re-raise (`with-output-to-string`, `call-with-port`, `with-mutex`, `handler-bind`, `load`, ...). The exception is the function of a parallel `map` / `for-each/par` / `reduce` (lists longer than `map-par-threshold`): it runs on a worker thread, so the handler cannot return to the raise point and a handler that returns gets the `handler-returned` error. Use `map/seq` there. To handle an error and carry on, use `guard`, or escape from the handler with a continuation:
+`raise-continuable` is exact: the handler is called at the raise point and its value is returned from `raise-continuable` (#377). To handle an error and carry on, use `guard`, or escape from the handler with a continuation:
 
 ```scheme
 (guard (e (#t 'default)) (risky))
