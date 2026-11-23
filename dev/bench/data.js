@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795418720799,
+  "lastUpdate": 1795420632787,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -22700,6 +22700,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 66.382,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9ca766e56bf52a6067a11520fc569ff2eb634f3a",
+          "message": "Merge pull request #430 from deconstructo/fix/407-handler-return-secondary-exception\n\nfix(exceptions): a handler returning from a non-continuable raise is an error (#407)",
+          "timestamp": "2026-11-23T18:56:33+11:00",
+          "tree_id": "efc1a35f42869c5a71f45dfa7f6cef637b8df90d",
+          "url": "https://github.com/deconstructo/curry/commit/9ca766e56bf52a6067a11520fc569ff2eb634f3a"
+        },
+        "date": 1795420631338,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.869,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 22.356,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.861,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 27.642,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 162.266,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 281.051,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 60.393,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 93.797,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 71.197,
             "unit": "ms"
           }
         ]
