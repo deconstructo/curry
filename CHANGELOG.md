@@ -15,7 +15,17 @@
   instead, for example `(call/cc (lambda (k) (with-exception-handler
   (lambda (e) (k default)) thunk)))`, or use `guard`.
 - `raise-continuable` is unchanged: the handler's value is returned to the
-  raise point.
+  raise point. It now also works through the C-level forms that only clean up
+  and re-raise: `with-output-to-string`, `with-output-to-file`,
+  `with-input-from-file`, `call-with-port`, `with-mutex`, `handler-bind`,
+  `load` and the tree-walker's `parameterize`/`with-assumptions` (the handler
+  runs at the raise point with the form still active, as for `dynamic-wind`).
+  Before, a returning handler there ended the whole `with-exception-handler`
+  call; with the new rule it would have been an error.
+- Known limit: inside the function of a parallel `map`, `for-each/par` or
+  `reduce` (lists longer than `map-par-threshold`), `raise-continuable` cannot
+  return to the raise point, because the function runs on a worker thread. A
+  handler that returns there gets the `handler-returned` error. Use `map/seq`.
 - The `.scc` format version is now 10; older caches are rebuilt.
 
 **Fixed — comparisons with NaN (#367)**

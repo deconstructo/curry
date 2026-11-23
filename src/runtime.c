@@ -1190,7 +1190,7 @@ val_t scm_load(const char *path, val_t env) {
     load_push_dir(path);
     val_t result = V_VOID;
     ExnHandler h;
-    SCM_PROTECT(h, {
+    SCM_PROTECT_CLEANUP(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, env);
