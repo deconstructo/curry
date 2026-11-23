@@ -720,10 +720,60 @@
 ;;; Exception handling
 (check "guard" (guard (e (#t 'caught)) (error "oops")) 'caught)
 (check "with-exception-handler"
-       (with-exception-handler
-         (lambda (e) 'handled)
-         (lambda () (raise 'boom)))
+       (call/cc (lambda (k)
+         (with-exception-handler
+           (lambda (e) (k 'handled))
+           (lambda () (raise 'boom)))))
        'handled)
+;; R7RS 6.11: a handler that returns from a non-continuable raise causes a
+;; secondary exception in the handler's dynamic environment (#407).
+(check "handler returning from raise: secondary exception reaches the outer guard"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) 'ignored) (lambda () (raise 'boom))))
+       'handler-returned)
+(check "handler returning from error: secondary exception reaches the outer guard"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) 'ignored) (lambda () (error "oops"))))
+       'handler-returned)
+(check "handler returning from a primitive's error: secondary exception"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) 'ignored) (lambda () (car 5))))
+       'handler-returned)
+;; The procedure form (with-exception-handler called as a value) is a separate
+;; implementation from the compiled special form.
+(define weh-value with-exception-handler)
+(check "procedure form: handler returning from raise: secondary exception"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (weh-value (lambda (e) 'ignored) (lambda () (raise 'boom))))
+       'handler-returned)
+(check "procedure form: handler returning from a primitive's error"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (weh-value (lambda (e) 'ignored) (lambda () (car 5))))
+       'handler-returned)
+(check "procedure form: a handler that escapes still works"
+       (call/cc (lambda (k) (weh-value (lambda (e) (k 'escaped)) (lambda () (raise 'boom)))))
+       'escaped)
+(check "procedure form: raise-continuable returns the handler's value"
+       (weh-value (lambda (e) 10) (lambda () (+ 1 (raise-continuable 'x))))
+       11)
+(check "handler returning from raise: the rest of the thunk does not run"
+       (let ((ran #f))
+         (guard (e (#t #f))
+           (with-exception-handler (lambda (e) 0)
+             (lambda () (raise 'boom) (set! ran #t))))
+         ran)
+       #f)
+(check "the secondary exception is raised with the outer handler installed"
+       (let ((seen '()))
+         (guard (e (#t #f))
+           (with-exception-handler
+             (lambda (outer) (set! seen (cons 'outer seen)) (raise outer))
+             (lambda ()
+               (with-exception-handler
+                 (lambda (inner) (set! seen (cons 'inner seen)) 'returns)
+                 (lambda () (raise 'boom))))))
+         (reverse seen))
+       '(inner outer))
 
 ;;; Sets
 (define s (make-set))

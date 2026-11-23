@@ -43,11 +43,15 @@
 /* ── Format constants ───────────────────────────────────────────────────── */
 
 #define SCC_MAGIC       "CURRYBC"   /* 7 bytes, no NUL */
-/* v9: no change to the layout. guard compiles to different code (#406: its
+/* v10: no change to the layout. with-exception-handler compiles to different
+ * code (#407: OP_HANDLER_RETURNED follows the handler call, which is no longer
+ * a tail call; the opcode is new and shifts the numbers after it), and the
+ * cache is keyed on the source text only.
+ * v9: no change to the layout. guard compiles to different code (#406: its
  * handler takes a second argument, OP_RAISE pops two values, OP_CALL_CC is
  * new), and the cache is keyed on the source text only, so without a new
  * number a script cached by an older binary would keep its old guard code. */
-#define SCC_FMT_VER     '\x09'   /* v8: persist Chunk.uses_local_macro (issue
+#define SCC_FMT_VER     '\x0a'   /* v8: persist Chunk.uses_local_macro (issue
                                     #114 -- a let-syntax/letrec-syntax-local
                                     macro use has no GLOBAL_ENV binding and
                                     isn't textually present in src_lambda, so

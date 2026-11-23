@@ -219,6 +219,7 @@ typedef enum {
     OP_PUSH_HANDLER,/* B: push exception handler, jump offset B on exn   */
     OP_POP_HANDLER, /* pop exception handler frame                       */
     OP_RAISE,       /* guard's re-raise: pop unwound flag, pop exception */
+    OP_HANDLER_RETURNED, /* a handler returned from a non-continuable raise: raise a secondary exception (#407) */
 
     /* ── I/O ────────────────────────────────────────────────────────── */
     OP_DISPLAY,     /* display pop() to current-output-port              */

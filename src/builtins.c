@@ -2879,7 +2879,10 @@ static val_t prim_with_exception_handler(int ac, val_t *av, void *ud) {
         vm_close_upvalues(saved_sp);   /* see vm_close_upvalues in vm.c */
         vm->frame_count   = saved_frame_count;
         vm->sp            = saved_sp;
-        result = apply(handler, scm_cons(h.exn, V_NIL));
+        apply(handler, scm_cons(h.exn, V_NIL));
+        /* The raise was not continuable: a handler that returns is an error,
+         * raised here with the handlers outside this frame installed (#407). */
+        scm_handler_returned();
     }
     return result;
 }

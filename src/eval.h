@@ -212,6 +212,9 @@ void walk_cond_handlers(val_t exn, CondHandler *h);
  * place and return its value; behaves like scm_raise_val if the nearest
  * handler frame is of another kind. */
 val_t scm_raise_continuable(val_t exn);
+/* A handler returned from a non-continuable raise: R7RS 6.11 says a secondary
+ * exception is raised in the handler's dynamic environment (#407). */
+void scm_handler_returned(void) __attribute__((noreturn));
 
 /* Raise an exception (never returns) */
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));

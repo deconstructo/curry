@@ -223,10 +223,11 @@
            (if (= i 1000)
                acc
                (loop (+ i 1)
-                     (+ acc (weh (lambda (e) 1)
-                                 (lambda ()
-                                   (with-exception-handler (lambda (e) (raise e))
-                                     (lambda () (raise-continuable 'x))))))))))
+                     (+ acc (call/cc (lambda (k)
+                              (weh (lambda (e) (k 1))
+                                   (lambda ()
+                                     (with-exception-handler (lambda (e) (raise e))
+                                       (lambda () (raise-continuable 'x))))))))))))
        1000)
 
 ;;; Where a clause runs. For a raise-continuable it runs at the raise point,

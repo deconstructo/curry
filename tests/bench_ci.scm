@@ -16,9 +16,7 @@
 ;; ── Command line ────────────────────────────────────────────────────────────
 
 (define argv
-  (with-exception-handler
-    (lambda (e) '())
-    (lambda () command-line-args)))
+  (guard (e (#t '())) command-line-args))
 
 (define (flag-value flag args)
   (let lp ((a args))

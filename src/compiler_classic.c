@@ -1714,8 +1714,11 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
      *   OP_JUMP end
      *  catch:
      *   ; sp restored to past handler, exception pushed → [handler exn]
-     *   OP_CALL 1               ← (handler exn) → result
+     *   OP_CALL 1               ← (handler exn); returning is an error:
+     *   OP_HANDLER_RETURNED       raises a secondary exception (#407)
      *  end:
+     * A guard's handler never returns (it escapes or re-raises), so its
+     * catch path is left as it was: a tail call with the extra argument.
      */
     require_min_args(args, 2, "with-exception-handler");
     val_t handler_expr = vcar(args);
@@ -1755,8 +1758,15 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
 
     /* Catch path: exception is on top, handler is below */
     patch_jump(c, catch_placeholder);
-    if (for_guard) emit(c, OP_TRUE, line);              /* (handler exn #t) */
-    emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, for_guard ? 2 : 1, line); /* (handler exn) */
+    if (for_guard) {
+        emit(c, OP_TRUE, line);                         /* (handler exn #t) */
+        emit_ab(c, tail ? OP_TAIL_CALL : OP_CALL, 2, line);
+    } else {
+        /* Not a tail call: when the handler returns, the raise was not
+         * continuable, so that is an error (#407). */
+        emit_ab(c, OP_CALL, 1, line);                   /* (handler exn) */
+        emit(c, OP_HANDLER_RETURNED, line);
+    }
 
     patch_jump(c, end_jmp);
 }

@@ -155,9 +155,16 @@ Both `error-object-message` (R7RS) and `error-message` (legacy Curry name) are n
   (error "something went wrong" 42))        ; => "something went wrong"
 ```
 
-### 5. `raise-continuable` — identical to `raise`
+### 5. `with-exception-handler`: the handler runs after the raise has unwound
 
-R7RS requires that `raise-continuable` allows the exception handler to return a value, which becomes the result of the `raise-continuable` call. Curry's `raise-continuable` is currently identical to `raise` and does not pass control back to the raise site. Handlers that return a value from `raise-continuable` will see unexpected behaviour.
+For `raise`, `error` and errors raised by primitives, R7RS 6.11 says the handler is called in the dynamic environment of the raise, and that a secondary exception is raised if it returns. Curry unwinds to the `with-exception-handler` frame first and then calls the handler, so the raise point is gone when the handler runs. A handler that returns raises a secondary exception (error code `handler-returned`) in the handler's own dynamic environment, as R7RS says (#407). The difference you can see is the dynamic environment: a `dynamic-wind` between the raise and the handler has already run its after thunk when the handler is called.
+
+`raise-continuable` is exact when only compiled code, `dynamic-wind`, `eval` and `guard` lie between the raise and the handler: the handler is called at the raise point and its value is returned from `raise-continuable` (#377). It is not yet exact through the C-level forms `with-output-to-string`, `with-output-to-file`, `with-input-from-file`, `call-with-port`, `with-mutex`, `handler-bind`, `load`, the tree-walker's `parameterize` and `with-assumptions`, nor inside the function of a parallel `map` / `for-each/par` / `reduce`: there the raise unwinds to the handler, and a handler that returns gets the `handler-returned` error (#429). Use `map/seq` instead of a parallel `map`. To handle an error and carry on, use `guard`, or escape from the handler with a continuation:
+
+```scheme
+(guard (e (#t 'default)) (risky))
+(call/cc (lambda (k) (with-exception-handler (lambda (e) (k 'default)) risky)))
+```
 
 ---
 
@@ -391,7 +398,8 @@ All tail positions are optimised — proper tail recursion is guaranteed. Named 
 
 (error "message" irritant...)
 (raise obj)
-(raise-continuable obj)        ; note: currently identical to raise — see R7RS deviations
+(raise-continuable obj)        ; the handler's value is returned to this point
+                               ; a handler that returns from raise or error is itself an error
 ```
 
 ### Condition system (CL-style) — `(import (curry conditions))`
