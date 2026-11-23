@@ -95,9 +95,10 @@
 (define weh-setter #f)
 (define (weh-g x)
   (let ((v (make-vector 64 x)))
-    (with-exception-handler
-      (lambda (e) 0)
-      (lambda () (set! weh-getter (lambda () v)) (raise 'boom)))
+    (call/cc (lambda (k)
+      (with-exception-handler
+        (lambda (e) (k 0))
+        (lambda () (set! weh-getter (lambda () v)) (raise 'boom)))))
     (set! weh-setter (lambda () v))
     (set! v (make-vector 64 (+ x 1)))
     0))

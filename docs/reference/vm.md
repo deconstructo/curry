@@ -406,6 +406,7 @@ conditional jump must not emit a separate `OP_POP` for the test value.
 | `OP_PUSH_HANDLER` | B | push handler frame; B = fallback offset (reserved) |
 | `OP_POP_HANDLER` | – | pop handler frame |
 | `OP_RAISE` | – | raise TOS as exception via `scm_raise` |
+| `OP_HANDLER_RETURNED` | – | a `with-exception-handler` handler returned from a non-continuable raise: pop its value and raise a `handler-returned` error (#407) |
 
 ### I/O
 

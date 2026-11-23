@@ -178,6 +178,8 @@
  *                         (Not fully implemented; reserved for future use.)
  *     OP_POP_HANDLER  –   pop exception handler frame.
  *     OP_RAISE        –   re-raise for guard: pops unwound flag and exception.
+ *     OP_HANDLER_RETURNED – the handler returned from a non-continuable raise:
+ *                       raise a secondary exception (#407).
  *
  *   I/O
  *     OP_DISPLAY –   (display TOS)  → void
@@ -1019,6 +1021,7 @@ val_t vm_run(BcClosure *top_closure, int argc) {
         [OP_TAIL_CALL_WITH_VALUES] = &&L_OP_TAIL_CALL_WITH_VALUES,
         [OP_PUSH_HANDLER]= &&L_OP_PUSH_HANDLER,[OP_POP_HANDLER]  = &&L_OP_POP_HANDLER,
         [OP_RAISE]       = &&L_OP_RAISE,
+        [OP_HANDLER_RETURNED] = &&L_OP_HANDLER_RETURNED,
         [OP_DISPLAY]     = &&L_OP_DISPLAY,     [OP_WRITE]        = &&L_OP_WRITE,
         [OP_NEWLINE]     = &&L_OP_NEWLINE,     [OP_NOP]          = &&L_OP_NOP,
         [OP_CALL_CC]     = &&L_OP_CALL_CC,
@@ -2130,6 +2133,16 @@ val_t vm_run(BcClosure *top_closure, int argc) {
             val_t exn = POP();
             if (vis_nil(unwound)) { PUSH(scm_raise_continuable(exn)); NEXT; }
             scm_raise_val(exn);
+            NEXT; /* unreachable */
+        }
+
+        CASE(OP_HANDLER_RETURNED) {
+            /* [handler's value] after a with-exception-handler handler was
+             * called for a raise that unwound to it. R7RS 6.11: a secondary
+             * exception is raised in the handler's dynamic environment, which
+             * is where the handler ran: the handlers outside this one. */
+            (void)POP();
+            scm_handler_returned();
             NEXT; /* unreachable */
         }
 

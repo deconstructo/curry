@@ -2,6 +2,22 @@
 
 ### Unreleased
 
+**Changed (breaking) — a handler that returns from a non-continuable raise (#407)**
+
+- R7RS 6.11: if the handler of `with-exception-handler` returns from a `raise`,
+  an `error`, or an error raised by a primitive such as `(car 5)`, a secondary
+  exception is raised in the handler's dynamic environment, so the handlers
+  outside it (a `guard`, an outer `with-exception-handler`) see it. It has the
+  error code `handler-returned`. Before, the handler's value became the value
+  of the whole `with-exception-handler` call: a handler that only logged
+  swallowed the error and the rest of the thunk was skipped.
+- Code that used a handler as "catch and return a default" must escape
+  instead, for example `(call/cc (lambda (k) (with-exception-handler
+  (lambda (e) (k default)) thunk)))`, or use `guard`.
+- `raise-continuable` is unchanged: the handler's value is returned to the
+  raise point.
+- The `.scc` format version is now 10; older caches are rebuilt.
+
 **Fixed — comparisons with NaN (#367)**
 
 - `=`, `<=` and `>=` returned `#t` when either operand was NaN, so

@@ -87,10 +87,15 @@
          (lambda () (raise-continuable 'x) (guard (e (#t 'caught)) (car '()))))
        'caught)
 (check "a later non-continuable raise is handled by the same handler, by unwinding"
-       (guard (e (#t (list 'guard e)))
+       (call/cc (lambda (k)
+         (with-exception-handler (lambda (e) (if (eq? e 'second) (k 1) 'again))
+           (lambda () (raise-continuable 'first) (raise 'second)))))
+       1)
+(check "a handler that returns from that later non-continuable raise: a secondary exception"
+       (guard (e ((error-object? e) (error-object-code e)))
          (with-exception-handler (lambda (e) 1)
            (lambda () (raise-continuable 'first) (raise 'second))))
-       1)
+       'handler-returned)
 (check "the outer guard is reached by a raise from a handler after earlier returns"
        (guard (e (#t (list 'late e)))
          (with-exception-handler (lambda (e) (if (eq? e 'again) (raise 'boom) 1))
@@ -102,9 +107,10 @@
 ;;; handler stack entry of that frame was overwritten).
 (check "a handler using guard, then a plain raise handled by the same frame"
        (guard (e (#t (list 'outer e)))
-         (with-exception-handler
-           (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) 'unwound))
-           (lambda () (raise-continuable 'cont) (raise 'second))))
+         (call/cc (lambda (k)
+           (with-exception-handler
+             (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) (k 'unwound)))
+             (lambda () (raise-continuable 'cont) (raise 'second))))))
        'unwound)
 (check "a handler using guard returns its value to the raise point"
        (with-exception-handler
@@ -118,9 +124,10 @@
        106)
 (check "the same frame handles a later raise after a nested handler ran"
        (let ((f (lambda ()
-                  (with-exception-handler
-                    (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) (list 'weh-got e)))
-                    (lambda () (list (raise-continuable 'cont) (raise 'second)))))))
+                  (call/cc (lambda (k)
+                    (with-exception-handler
+                      (lambda (e) (if (eq? e 'cont) (guard (x (#t 'inner)) (raise 'q)) (k (list 'weh-got e))))
+                      (lambda () (list (raise-continuable 'cont) (raise 'second)))))))))
          (list (f) (f)))
        '((weh-got second) (weh-got second)))
 
@@ -129,24 +136,26 @@
 ;;; unwinds to it must find its VM state intact.
 (check "escaping to a continuation inside the thunk reinstates the frame"
        (let ((k #f) (log '()))
-         (let ((r (with-exception-handler
+         (let ((r (call/cc (lambda (out)
+                  (with-exception-handler
                     (lambda (e)
                       (if (eq? e 'cont)
                           (k 'escaped)
-                          (begin (set! log (cons (list 'weh e) log)) 'weh-value)))
+                          (begin (set! log (cons (list 'weh e) log)) (out 'weh-value))))
                     (lambda ()
                       (let ((v (call/cc (lambda (kk) (set! k kk) (raise-continuable 'cont)))))
-                        (list v (raise 'later)))))))
+                        (list v (raise 'later)))))))))
            (list r log)))
        '(weh-value ((weh later))))
 (check "the same with the frame one level deep inside another"
        (guard (outer (#t (list 'outer outer)))
-         (with-exception-handler
-           (lambda (e) 'outer-weh)
-           (lambda ()
-             (with-exception-handler
-               (lambda (e) (if (eq? e 'cont) (guard (g (#t 'inner)) (raise 'q)) 'inner-weh))
-               (lambda () (list (raise-continuable 'cont) (raise 'z)))))))
+         (call/cc (lambda (out)
+           (with-exception-handler
+             (lambda (e) 'outer-weh)
+             (lambda ()
+               (with-exception-handler
+                 (lambda (e) (if (eq? e 'cont) (guard (g (#t 'inner)) (raise 'q)) (out 'inner-weh)))
+                 (lambda () (list (raise-continuable 'cont) (raise 'z)))))))))
        'inner-weh)
 (check "a nested frame's handler using guard, then a normal exit and a raise outside"
        (guard (outer (#t (list 'outer outer)))
@@ -181,14 +190,27 @@
          (reverse log))
        '(before handler after))
 
-;;; raise (not continuable) is unchanged: the handler's value is the value of
-;;; the with-exception-handler call.
-(check "raise still unwinds to the handler"
-       (with-exception-handler (lambda (e) (list 'handled e))
-         (lambda () (+ 1 (raise 'oops))))
+;;; raise (not continuable) still unwinds to the handler, which runs after the
+;;; raise point is gone. If it returns, that is an error (#407); to carry on it
+;;; has to escape.
+(check "raise still unwinds to the handler, which can escape"
+       (call/cc (lambda (k)
+         (with-exception-handler (lambda (e) (k (list 'handled e)))
+           (lambda () (+ 1 (raise 'oops))))))
        '(handled oops))
 (check "an error from a primitive is still handled by unwinding"
-       (with-exception-handler (lambda (e) 'handled) (lambda () (car '()))) 'handled)
+       (call/cc (lambda (k)
+         (with-exception-handler (lambda (e) (k 'handled)) (lambda () (car '())))))
+       'handled)
+(check "raise, handler returns: a secondary exception, not the handler's value"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) (list 'handled e))
+           (lambda () (+ 1 (raise 'oops)))))
+       'handler-returned)
+(check "an error from a primitive, handler returns: a secondary exception"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) 'handled) (lambda () (car '()))))
+       'handler-returned)
 
 ;;; In a loop, so the code is compiled (and native with the JIT).
 (define (sum-with-handler n)

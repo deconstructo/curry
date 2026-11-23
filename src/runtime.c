@@ -164,6 +164,11 @@ val_t scm_raise_continuable(val_t exn) {
     scm_raise_val(exn);
 }
 
+void scm_handler_returned(void) {
+    scm_raise_code(EC_HANDLER_RETURNED,
+                   "with-exception-handler: the handler returned from a non-continuable raise");
+}
+
 void scm_raise_val(val_t exn) {
     /* Step 1: offer to non-unwinding handler-bind handlers.
      * If any handler calls invoke-restart, we never reach step 2. */

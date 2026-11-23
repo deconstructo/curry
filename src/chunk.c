@@ -111,6 +111,7 @@ const char *opcode_name[OP_COUNT] = {
     [OP_PUSH_HANDLER]   = "PUSH_HANDLER",
     [OP_POP_HANDLER]    = "POP_HANDLER",
     [OP_RAISE]          = "RAISE",
+    [OP_HANDLER_RETURNED] = "HANDLER_RETURNED",
     [OP_DISPLAY]        = "DISPLAY",
     [OP_WRITE]          = "WRITE",
     [OP_NEWLINE]        = "NEWLINE",

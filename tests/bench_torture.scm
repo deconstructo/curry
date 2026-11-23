@@ -20,7 +20,7 @@
 ;; ── CLI ──────────────────────────────────────────────────────────────────────
 
 (define argv
-  (with-exception-handler (lambda (e) '()) (lambda () command-line-args)))
+  (guard (e (#t '())) command-line-args))
 
 (define (flag-value flag args)
   (let lp ((a args))
@@ -43,22 +43,16 @@
 (define mqtt-client #f)
 
 (define (mqtt-init!)
-  (with-exception-handler
-    (lambda (e)
-      (display "bench_torture: MQTT unavailable, stderr fallback\n"
-               (current-error-port)))
-    (lambda ()
-      (set! mqtt-client (mqtt-connect "localhost" 1883 "curry-torture")))))
+  (guard (e (#t (display "bench_torture: MQTT unavailable, stderr fallback\n"
+                         (current-error-port))))
+    (set! mqtt-client (mqtt-connect "localhost" 1883 "curry-torture"))))
 
 (define (publish payload-alist)
   (let ((json-str (json-stringify payload-alist)))
     (if mqtt-client
-        (with-exception-handler
-          (lambda (e)
-            (display json-str (current-error-port))
-            (newline (current-error-port)))
-          (lambda ()
-            (mqtt-publish mqtt-client "curry/bench/events" json-str 1)))
+        (guard (e (#t (display json-str (current-error-port))
+                      (newline (current-error-port))))
+          (mqtt-publish mqtt-client "curry/bench/events" json-str 1))
         (begin (display json-str (current-error-port))
                (newline (current-error-port))))))
 

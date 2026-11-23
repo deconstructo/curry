@@ -579,7 +579,7 @@ printf 'CURRYBC\x03garbage-not-a-real-v3-body' > "$CACHEVER_SCC"
 out=$("$CURRY" "$CACHEVER_SCM")
 check "cache: stale/wrong-version .scc rejected cleanly, recompiles" "$out" "42"
 ver_byte=$(od -An -tx1 -j 7 -N 1 "$CACHEVER_SCC" | tr -d ' \n')
-check "cache: stale .scc rewritten in the current format version" "$ver_byte" "09"
+check "cache: stale .scc rewritten in the current format version" "$ver_byte" "0a"
 
 # Regression: Chunk.src_lambda (procedure-lambda/procedure-arglist's data
 # source) used to never be written to .scc at all, so a script's SECOND run
