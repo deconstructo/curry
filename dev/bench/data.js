@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795420632787,
+  "lastUpdate": 1795507308798,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -22769,6 +22769,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 71.197,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4366a90669469e7fb9b4d352ff751d65e0953cdd",
+          "message": "Merge pull request #432 from deconstructo/fix/425-after-thunk-twice\n\nfix(dynamic-wind): an after thunk that raises during an escape runs once (#425)",
+          "timestamp": "2026-11-24T19:01:04+11:00",
+          "tree_id": "c46cadfd4573138afadcc09492298845c8f6d27d",
+          "url": "https://github.com/deconstructo/curry/commit/4366a90669469e7fb9b4d352ff751d65e0953cdd"
+        },
+        "date": 1795507307839,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 15.971,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 21.225,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.384,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.073,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 150.841,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 258.496,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 58.387,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 89.374,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 67.599,
             "unit": "ms"
           }
         ]
