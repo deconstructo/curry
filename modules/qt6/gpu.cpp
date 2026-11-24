@@ -1911,6 +1911,7 @@ static WindFrame *push_wind(curry_val after) {
     wf->before = s_noop_prim;
     wf->after = after;
     wf->prev = current_wind;
+    wf->outer_handler = current_handler;
     current_wind = wf;
     return wf;
 }

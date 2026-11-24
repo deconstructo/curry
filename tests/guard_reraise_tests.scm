@@ -257,14 +257,16 @@
                            (dynamic-wind (lambda () (L 'in)) (lambda () (raise 'x)) (lambda () (L 'out)))))
              (taken))
        '(v (in out clause)))
-(check "tree-walked: an after thunk that raises runs once and reaches the outer guard"
+;; The after thunk runs with the handlers outside its dynamic-wind (#425), so
+;; the inner guard, which is outside it, handles the thunk's raise as well.
+(check "tree-walked: an after thunk that raises runs once"
        (list (tree-eval '(guard (o (#t (list 'outer o)))
                            (guard (e (#t (L 'clause) 'v))
                              (dynamic-wind (lambda () (L 'in))
                                            (lambda () (raise-continuable 'x))
                                            (lambda () (L 'out) (raise 'from-after))))))
              (taken))
-       '((outer from-after) (in clause out)))
+       '(v (in clause out clause)))
 
 ;;; An exception from a clause goes outward, not back into the same guard.
 (check "a clause test that raises (in place)"

@@ -70,6 +70,12 @@ typedef struct WindFrame {
     val_t             before;
     val_t             after;
     struct WindFrame *prev;
+    /* current_handler when the dynamic-wind was entered: the handlers
+     * outside it.  wind_unwind_to installs this while it runs the after
+     * thunk, so the dynamic-wind's own cleanup frame, still on the chain
+     * during an escape, does not catch an exception raised by the thunk
+     * and run it a second time (#425). */
+    struct ExnHandler *outer_handler;
 } WindFrame;
 
 /* Thread-local wind stack (NULL = empty) */

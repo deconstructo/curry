@@ -2,6 +2,15 @@
 
 ### Unreleased
 
+**Fixed — an after thunk that raises during an escape ran twice (#425)**
+
+- When `guard` or a continuation escaped through a `dynamic-wind` and the after
+  thunk raised, the `dynamic-wind`'s own cleanup frame was still installed, so
+  it caught the exception and ran the after thunk a second time. The thunk now
+  runs once, with the handlers that were installed when the `dynamic-wind` was
+  entered (`WindFrame.outer_handler`). A `guard` outside the `dynamic-wind`
+  therefore handles the thunk's raise too; its clause can run a second time.
+
 **Changed (breaking) — a handler that returns from a non-continuable raise (#407)**
 
 - R7RS 6.11: if the handler of `with-exception-handler` returns from a `raise`,

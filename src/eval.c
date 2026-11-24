@@ -1202,6 +1202,7 @@ tail:
         wf->before = make_prim_thunk(param_before_fn, pb);
         wf->after  = make_prim_thunk(param_after_fn,  pb);
         wf->prev   = current_wind;
+        wf->outer_handler = current_handler;
 
         apply(wf->before, V_NIL);
         current_wind = wf;

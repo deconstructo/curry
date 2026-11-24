@@ -94,7 +94,12 @@ void wind_unwind_to(WindFrame *target) {
     while (current_wind != target) {
         WindFrame *wf = current_wind;
         current_wind = wf->prev;
+        /* Run the after thunk with the handlers outside its dynamic-wind
+         * (#425).  The caller is about to longjmp, which resets the chain. */
+        ExnHandler *saved = current_handler;
+        current_handler = wf->outer_handler;
         apply(wf->after, V_NIL);
+        current_handler = saved;
     }
 }
 

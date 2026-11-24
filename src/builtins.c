@@ -2899,6 +2899,7 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
     wf->before = before;
     wf->after  = after;
     wf->prev   = current_wind;
+    wf->outer_handler = current_handler;
     current_wind = wf;
 
     val_t result = V_VOID;
