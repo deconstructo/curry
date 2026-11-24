@@ -9,7 +9,12 @@
   it caught the exception and ran the after thunk a second time. The thunk now
   runs once, with the handlers that were installed when the `dynamic-wind` was
   entered (`WindFrame.outer_handler`). A `guard` outside the `dynamic-wind`
-  therefore handles the thunk's raise too; its clause can run a second time.
+  therefore handles the thunk's raise too (R7RS 6.10: the thunk runs in the
+  `dynamic-wind`'s own dynamic environment); its clause can run a second time.
+- Remaining difference from R7RS: `guard` evaluates a clause before unwinding
+  for `raise-continuable`, where the standard evaluates it after. So the log of
+  the issue's example is `(in clause out clause)`, the standard's is
+  `(in out clause)` (#431).
 
 **Changed (breaking) — a handler that returns from a non-continuable raise (#407)**
 
