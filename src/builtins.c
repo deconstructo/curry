@@ -2333,13 +2333,21 @@ static val_t prim_delete_file(int ac, val_t *av, void *ud) {
         scm_raise(S_FILE_ERROR, "delete-file: %s: %s", str_data(as_str(av[0])), strerror(errno));
     return V_VOID;
 }
+static void close_port_cleanup(void *a) { port_close(*(val_t *)a); }
+
 static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-input-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-input-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t result = apply(av[1], scm_cons(port, V_NIL));
-    port_close(port);
+    /* Close the port on every exit: normal, an exception, or a continuation
+     * escape (#428). */
+    WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
+    val_t result = V_VOID;
+    ExnHandler h;
+    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+                { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
 static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
@@ -2347,8 +2355,14 @@ static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-output-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-output-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t result = apply(av[1], scm_cons(port, V_NIL));
-    port_close(port);
+    /* Close the port on every exit: normal, an exception, or a continuation
+     * escape (#428). */
+    WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
+    val_t result = V_VOID;
+    ExnHandler h;
+    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+                { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
 /* Cleanup shared by the with-...-file forms: put the saved port back and close
@@ -2938,8 +2952,6 @@ static val_t prim_dynamic_wind(int ac, val_t *av, void *ud) {
     if (raised) scm_raise_val(exn_val);
     return result;
 }
-
-static void close_port_cleanup(void *a) { port_close(*(val_t *)a); }
 
 static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;

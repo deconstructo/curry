@@ -47,6 +47,23 @@
 (check "from-file: stdin restored" (eq? in0 (current-input-port)) #t)
 (delete-file f)
 
+;; ---- call-with-input-file / call-with-output-file ----
+(define g "c_form_escape_tmp2.txt")
+(call/cc (lambda (k) (call-with-output-file g (lambda (port) (write-string "xyz" port) (k 'out)))))
+(check "call-with-output-file: flushed after escape"
+       (call-with-input-file g (lambda (port) (read-line port))) "xyz")
+(define cwf-port #f)
+(call/cc (lambda (k) (call-with-input-file g (lambda (port) (set! cwf-port port) (k 'out)))))
+(check "call-with-input-file: closed after escape" (input-port-open? cwf-port) #f)
+(check "call-with-output-file: closed after raise"
+       (guard (e (#t (output-port-open? cwf-port))) 
+         (call-with-output-file g (lambda (port) (set! cwf-port port) (raise 'x))))
+       #f)
+(check "call-with-output-file: closed after raise (port)" (output-port-open? cwf-port) #f)
+(check "call-with-input-file: normal"
+       (call-with-input-file g (lambda (port) 'ok)) 'ok)
+(delete-file g)
+
 ;; ---- call-with-port ----
 (define p (open-input-string "hello"))
 (call/cc (lambda (k) (call-with-port p (lambda (port) (k 'out)))))
@@ -80,6 +97,33 @@
   (let ((p0 (current-precision)))
     (call/cc (lambda (k) (call-with-precision 200 (lambda () (k 'out)))))
     (check "precision: restored after escape" (current-precision) p0)))
+
+;; ---- normal and exception paths, and an escape that leaves only the inner form ----
+(define nlog '())
+(handler-bind (('gc-pressure (lambda (c) (set! nlog (cons 'outer nlog)))))
+  (call/cc (lambda (k)
+    (handler-bind (('gc-pressure (lambda (c) (set! nlog (cons 'inner nlog)))))
+      (k 'out))))
+  (signal (make-condition 'gc-pressure '() "x")))
+(check "handler-bind: inner escape leaves outer bound" nlog '(outer))
+(set! nlog '())
+(handler-bind (('gc-pressure (lambda (c) (set! nlog (cons 'h nlog)))))
+  'normal)
+(signal (make-condition 'gc-pressure '() "x"))
+(check "handler-bind: unbound after normal exit" nlog '())
+(guard (e (#t 'r)) (handler-bind (('gc-pressure (lambda (c) 1))) (raise 'boom)))
+(signal (make-condition 'gc-pressure '() "x"))
+(check "handler-bind: unbound after raise" nlog '())
+(check "with-assumptions: normal exit"
+       (begin (with-assumptions ((x positive)) 1) (can-assume? x 'positive)) #f)
+(check "with-assumptions: raise"
+       (begin (guard (e (#t 1)) (with-assumptions ((x positive)) (raise 'a))) (can-assume? x 'positive)) #f)
+(define p2 (open-input-string "q"))
+(call-with-port p2 (lambda (port) 1))
+(check "call-with-port: closed after normal exit" (input-port-open? p2) #f)
+(define p3 (open-input-string "q"))
+(guard (e (#t 1)) (call-with-port p3 (lambda (port) (raise 'a))))
+(check "call-with-port: closed after raise" (input-port-open? p3) #f)
 
 ;; ---- nested: both forms clean up, innermost first ----
 (call/cc (lambda (k)
