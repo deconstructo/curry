@@ -98,8 +98,34 @@ void wind_unwind_to(WindFrame *target) {
          * (#425).  The caller is about to longjmp, which resets the chain. */
         ExnHandler *saved = current_handler;
         current_handler = wf->outer_handler;
-        apply(wf->after, V_NIL);
+        if (wf->c_after) wf->c_after(wf->c_arg);
+        else             apply(wf->after, V_NIL);
         current_handler = saved;
+    }
+}
+
+WindFrame *wind_push_cleanup(void (*fn)(void *), void *arg) {
+    WindFrame *wf = gc_alloc_raw_pinned(sizeof(WindFrame));
+    wf->before        = V_VOID;
+    wf->after         = V_VOID;
+    wf->prev          = current_wind;
+    wf->outer_handler = current_handler;
+    wf->c_after       = fn;
+    wf->c_arg         = arg;
+    current_wind = wf;
+    return wf;
+}
+
+/* Run the cleanup unless a continuation escape already did: wind_unwind_to
+ * pops a frame before it runs it, so a frame no longer on the list has been
+ * cleaned up.  Frames above wf that were left on the list are dropped too. */
+void wind_pop_cleanup(WindFrame *wf) {
+    for (WindFrame *p = current_wind; p; p = p->prev) {
+        if (p == wf) {
+            current_wind = wf->prev;
+            wf->c_after(wf->c_arg);
+            return;
+        }
     }
 }
 
@@ -1180,6 +1206,12 @@ void load_dir_release(int mark) {
     }
 }
 
+void load_cleanup(void *arg) {
+    LoadCleanup *lc = arg;
+    load_dir_release(lc->mark);
+    port_close(lc->port);
+}
+
 val_t scm_load(const char *path, val_t env) {
     char resolved[4096];
     if (path[0] != '/' && load_dir_depth > 0 && load_dir_stack[load_dir_depth - 1]) {
@@ -1191,18 +1223,18 @@ val_t scm_load(const char *path, val_t env) {
     if (vis_false(port))
         scm_raise(V_FALSE, "load: cannot open file: %s", path);
 
-    int mark = load_dir_mark();
+    LoadCleanup lc = { load_dir_mark(), port };
     load_push_dir(path);
     val_t result = V_VOID;
+    WindFrame *wf = wind_push_cleanup(load_cleanup, &lc);
     ExnHandler h;
     SCM_PROTECT(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, env);
         }
-    }, { load_dir_release(mark); port_close(port); scm_raise_val(h.exn); });
-    load_dir_release(mark);
-    port_close(port);
+    }, { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
 

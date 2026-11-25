@@ -49,6 +49,8 @@ add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_
 add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
 add_test(NAME guard_reraise COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/guard_reraise_tests.scm)
 add_test(NAME after_thunk_unwind COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/after_thunk_unwind_tests.scm)
+add_test(NAME c_form_escape COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_form_escape_tests.scm)
+add_test(NAME c_form_escape_load COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/c_form_escape/main.scm)
 add_test(NAME raise_continuable COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/raise_continuable_tests.scm)
 add_test(NAME c_stack_overflow COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_stack_overflow_tests.scm)
 set_tests_properties(c_stack_overflow PROPERTIES TIMEOUT 120)

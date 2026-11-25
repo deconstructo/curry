@@ -42,6 +42,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ---- with-assumptions cleanup (#428) ---- */
+typedef struct { val_t *vars; uint32_t *flags; int n; } AssumptionRestore;
+static void restore_assumptions(void *arg) {
+    AssumptionRestore *ar = arg;
+    for (int i = 0; i < ar->n; i++)
+        as_symvar(ar->vars[i])->hdr.flags = ar->flags[i];
+    for (int i = 0; i < ar->n; i++)
+        sx_invalidate_simplify_cache_var(as_symvar(ar->vars[i])->name);
+}
+
 /* ---- parameterize WindFrame helpers ---- */
 
 typedef struct {
@@ -1498,6 +1508,10 @@ tail:
             sx_invalidate_simplify_cache_var(as_symvar(saved_vars[i])->name);
 
         val_t result = V_VOID;
+        /* Restore the flags on every exit: normal, an exception (before it
+         * is re-raised), or a continuation escape (#428). */
+        AssumptionRestore ar = { saved_vars, saved_flags, nv };
+        WindFrame *wf = wind_push_cleanup(restore_assumptions, &ar);
         ExnHandler h;
         h.prev = current_handler;
         h.saved_jit_depth = jit_depth_save();
@@ -1508,17 +1522,10 @@ tail:
         } else {
             current_handler = h.prev;
             jit_depth_restore(h.saved_jit_depth);
-            /* Restore flags before re-raising */
-            for (int i = 0; i < nv; i++)
-                as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
-            for (int i = 0; i < nv; i++)
-                sx_invalidate_simplify_cache_var(as_symvar(saved_vars[i])->name);
+            wind_pop_cleanup(wf);
             scm_raise_val(h.exn);
         }
-        for (int i = 0; i < nv; i++)
-            as_symvar(saved_vars[i])->hdr.flags = saved_flags[i];
-        for (int i = 0; i < nv; i++)
-            sx_invalidate_simplify_cache_var(as_symvar(saved_vars[i])->name);
+        wind_pop_cleanup(wf);
         return result;
     }
 

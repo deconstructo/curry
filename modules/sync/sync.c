@@ -102,13 +102,17 @@ static curry_val fn_mutex_p(int ac, curry_val *av, void *ud) {
     return curry_make_bool(has_tag(av[0], "mutex"));
 }
 
-/* (with-mutex mutex thunk) — lock, call thunk, always unlock (exception-safe) */
+static void unlock_mutex_cleanup(void *m) { pthread_mutex_unlock((pthread_mutex_t *)m); }
+
+/* (with-mutex mutex thunk) — lock, call thunk, always unlock: on a normal
+ * return, an exception, or a continuation escape (#428) */
 static curry_val fn_with_mutex(int ac, curry_val *av, void *ud) {
     (void)ac; (void)ud;
     pthread_mutex_t *m = get_mutex(av[0], "with-mutex");
     if (!curry_is_procedure(av[1])) curry_error("with-mutex: expected procedure");
     pthread_mutex_lock(m);
     curry_val result = curry_void();
+    WindFrame *wf = wind_push_cleanup(unlock_mutex_cleanup, m);
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
@@ -122,7 +126,7 @@ static curry_val fn_with_mutex(int ac, curry_val *av, void *ud) {
         jit_depth_restore(h.saved_jit_depth);
         raised = true; exn_val = h.exn;
     }
-    pthread_mutex_unlock(m);
+    wind_pop_cleanup(wf);
     if (raised) scm_raise_val(exn_val);
     return result;
 }
