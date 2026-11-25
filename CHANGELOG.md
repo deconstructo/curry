@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.31.0 - 2026-11-25
 
 **Fixed — an after thunk that raises during an escape ran twice (#425)**
 

@@ -4,11 +4,11 @@ class Curry < Formula
   license "GPL-3.0-only"
 
   # Update url + sha256 after tagging a release:
-  #   git tag v1.30.1 && git push origin v1.30.1
-  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.30.1.tar.gz | shasum -a 256
-  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.30.1.tar.gz"
+  #   git tag v1.31.0 && git push origin v1.31.0
+  #   curl -L https://github.com/deconstructo/curry/archive/refs/tags/v1.31.0.tar.gz | shasum -a 256
+  url "https://github.com/deconstructo/curry/archive/refs/tags/v1.31.0.tar.gz"
   sha256 "145bc5fa6179da879211de694c8f78c162d45d4ed16260faeb24dceb67dd79fb"
-  version "1.30.1"
+  version "1.31.0"
 
   head "https://github.com/deconstructo/curry.git", branch: "main"
 
