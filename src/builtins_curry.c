@@ -1195,10 +1195,23 @@ static val_t prim_map_seq(int ac, val_t *av, void *ud) {
 /* True when the calling thread is inside a with-exception-handler. A pool
  * worker cannot see that thread's handlers, so raise-continuable inside the
  * function could not return the handler's value to the raise point; map,
- * reduce and for-each/par run sequentially in that case (#429). */
+ * reduce and for-each/par run sequentially in that case (#429).
+ *
+ * A guard also puts a frame with a handler procedure on the chain, but its
+ * handler never returns a value to the raise point, so it must not turn the
+ * parallel paths off: a guard around a parallel map is common. The compiled
+ * guard's handler is (lambda (var . %guard-unwound) ...), a closure with one
+ * required argument and a rest list; the tree-walker's is a primitive. A user
+ * handler of that same shape is taken for a guard, which only means it is not
+ * made sequential. */
 static bool under_exception_handler(void) {
-    for (ExnHandler *h = current_handler; h; h = h->prev)
-        if (h->handler_proc != V_TRUE && h->handler_proc != V_FALSE) return true;
+    for (ExnHandler *h = current_handler; h; h = h->prev) {
+        val_t p = h->handler_proc;
+        if (p == V_TRUE || p == V_FALSE) continue;
+        if (vis_prim(p)) continue;
+        if (vis_type(p, T_BCCLOSURE) && as_bcclosure(p)->chunk->arity == -2) continue;
+        return true;
+    }
     return false;
 }
 

@@ -47,7 +47,11 @@
   #407 a returning handler there had been an error (`handler-returned`).
 - `map`, `for-each/par` and `reduce` run sequentially while the calling thread
   has a `with-exception-handler` active, so a `raise-continuable` in the
-  function returns to its raise point too. They are unchanged otherwise.
+  function returns to its raise point too (the speed-up is lost there; a
+  `guard` does not turn it off). They are unchanged otherwise.
+- The handler now runs with those forms still active, as R7RS says: a handler
+  reached through `with-mutex` runs while the mutex is held, so one that locks
+  the same mutex deadlocks.
 - A handler that leaves by a continuation captured between the raise and its
   `with-exception-handler` no longer makes a later raise skip that handler.
 - `with-restarts` and `atomically` still unwind to the handler.

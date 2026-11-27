@@ -313,6 +313,49 @@
 (check "reduce under with-exception-handler"
        (wch (lambda () (reduce (lambda (a b) (+ a b (raise-continuable 'x))) 0 big)))
        (+ 4950 (* 99 10)))
+;;; An exception raised by the handler that runs in place goes outward past the
+;;; frames it ran above, and skips its own with-exception-handler frame.
+(check "a handler that raises, through with-output-to-string and with-mutex"
+       (let ((m (make-mutex)) (before (current-output-port)))
+         (let ((r (guard (o (#t (list 'outer o)))
+                    (with-exception-handler (lambda (e) (raise 'from-handler))
+                      (lambda () (with-mutex m (lambda () (with-output-to-string (lambda () (raise-continuable 'x))))))))))
+           (list r (with-mutex m (lambda () 'unlocked)) (eq? before (current-output-port)))))
+       '((outer from-handler) unlocked #t))
+(check "a handler that escapes outward: stdout restored, mutex unlocked"
+       (let ((m (make-mutex)) (before (current-output-port)))
+         (let ((r (call/cc (lambda (k)
+                    (with-exception-handler (lambda (e) (k 'out))
+                      (lambda () (with-mutex m (lambda () (with-output-to-string (lambda () (raise-continuable 'x))))))))))) 
+           (list r (with-mutex m (lambda () 'unlocked)) (eq? before (current-output-port)))))
+       '(out unlocked #t))
+(check "a raise-continuable inside the handler, through a C-level form"
+       (with-exception-handler
+         (lambda (e)
+           (if (eq? e 'inner) 5
+               (+ 100 (with-exception-handler (lambda (e2) (+ 1 (if (eq? e2 'inner) 0 0)))
+                        (lambda () (with-output-to-string (lambda () #t)) (raise-continuable 'inner))))))
+         (lambda () (with-output-to-string (lambda () #t)) (raise-continuable 'outer)))
+       101)
+(check "with-restarts is not looked through: a returning handler is an error"
+       (guard (e ((error-object? e) (error-object-code e)))
+         (with-exception-handler (lambda (e) 1)
+           (lambda () (with-restarts ((r "r" 0)) (raise-continuable 'x)))))
+       'handler-returned)
+(check "through call-with-output-file and with-output-to-file"
+       (let ((f (string-append (or (get-environment-variable "TMPDIR") "/tmp") "/rc_file_tmp.txt")))
+         (let ((r (wch (lambda ()
+                    (list (call-with-output-file f (lambda (p) (+ 1 (raise-continuable 'x))))
+                          (begin (with-output-to-file f (lambda () (display (raise-continuable 'y)))) 'w))))))
+           (delete-file f)
+           r))
+       '(11 w))
+(check "a guard around a parallel map still gets every element (and does not stop the pool)"
+       (guard (e (#t 'caught)) (apply + (map (lambda (i) (* i 2)) big)))
+       9900)
+(check "a guard with an outer with-exception-handler: raise-continuable in map returns"
+       (wch (lambda () (guard (e ((string? e) 'no)) (apply + (map (lambda (i) (raise-continuable i)) big)))))
+       1000)
 (check "map outside a handler is still parallel-capable and correct"
        (apply + (map (lambda (i) (* i 2)) big))
        9900)
