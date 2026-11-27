@@ -2333,13 +2333,21 @@ static val_t prim_delete_file(int ac, val_t *av, void *ud) {
         scm_raise(S_FILE_ERROR, "delete-file: %s: %s", str_data(as_str(av[0])), strerror(errno));
     return V_VOID;
 }
+static void close_port_cleanup(void *a) { port_close(*(val_t *)a); }
+
 static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-input-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-input-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t result = apply(av[1], scm_cons(port, V_NIL));
-    port_close(port);
+    /* Close the port on every exit: normal, an exception, or a continuation
+     * escape (#428). */
+    WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
+    val_t result = V_VOID;
+    ExnHandler h;
+    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+                { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
 static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
@@ -2347,23 +2355,39 @@ static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "call-with-output-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "call-with-output-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t result = apply(av[1], scm_cons(port, V_NIL));
-    port_close(port);
+    /* Close the port on every exit: normal, an exception, or a continuation
+     * escape (#428). */
+    WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
+    val_t result = V_VOID;
+    ExnHandler h;
+    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+                { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
+/* Cleanup shared by the with-...-file forms: put the saved port back and close
+ * the file's.  Run by the form itself, or by wind_unwind_to when a continuation
+ * escapes through it (#428). */
+typedef struct { val_t saved; val_t port; } PortRedirect;
+static void restore_stdin_close(void *a)  { PortRedirect *r = a; PORT_STDIN  = r->saved; port_close(r->port); }
+static void restore_stdout_close(void *a) { PortRedirect *r = a; PORT_STDOUT = r->saved; port_close(r->port); }
+static void restore_stdout(void *a)       { PORT_STDOUT = *(val_t *)a; }
+
 static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
     (void)ac;(void)ud;
     if (!vis_string(av[0])) scm_raise(V_FALSE, "with-input-from-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_INPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-input-from-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t saved = PORT_STDIN; PORT_STDIN = port;
+    PortRedirect r = { PORT_STDIN, port };
+    PORT_STDIN = port;
+    WindFrame *wf = wind_push_cleanup(restore_stdin_close, &r);
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
     h.handler_proc = V_FALSE; current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
-    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDIN = saved; port_close(port); scm_raise_val(h.exn); }
-    PORT_STDIN = saved; port_close(port);
+    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); wind_pop_cleanup(wf); scm_raise_val(h.exn); }
+    wind_pop_cleanup(wf);
     return result;
 }
 static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
@@ -2371,14 +2395,16 @@ static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
     if (!vis_string(av[0])) scm_raise(V_FALSE, "with-output-to-file: not a string");
     val_t port = port_open_file(str_data(as_str(av[0])), PORT_OUTPUT);
     if (port == V_FALSE) scm_raise(S_FILE_ERROR, "with-output-to-file: cannot open '%s'", str_data(as_str(av[0])));
-    val_t saved = PORT_STDOUT; PORT_STDOUT = port;
+    PortRedirect r = { PORT_STDOUT, port };
+    PORT_STDOUT = port;
+    WindFrame *wf = wind_push_cleanup(restore_stdout_close, &r);
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
     h.handler_proc = V_FALSE; current_handler = &h;
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
-    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); PORT_STDOUT = saved; port_close(port); scm_raise_val(h.exn); }
-    PORT_STDOUT = saved; port_close(port);
+    else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); wind_pop_cleanup(wf); scm_raise_val(h.exn); }
+    wind_pop_cleanup(wf);
     return result;
 }
 
@@ -2533,6 +2559,7 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     val_t port = port_open_output_string();
     val_t saved = PORT_STDOUT;
     PORT_STDOUT = port;
+    WindFrame *wf = wind_push_cleanup(restore_stdout, &saved);
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
@@ -2543,10 +2570,10 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     } else {
         current_handler = h.prev;
         jit_depth_restore(h.saved_jit_depth);
-        PORT_STDOUT = saved;
+        wind_pop_cleanup(wf);
         scm_raise_val(h.exn);
     }
-    PORT_STDOUT = saved;
+    wind_pop_cleanup(wf);
     return port_get_output_string(port);
 }
 
@@ -2931,6 +2958,7 @@ static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     if (!vis_port(av[0])) scm_raise_code(EC_WRONG_TYPE_ARGUMENT, "call-with-port: not a port");
     val_t port = av[0], proc = av[1];
     val_t result = V_VOID;
+    WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
@@ -2944,7 +2972,7 @@ static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
         jit_depth_restore(h.saved_jit_depth);
         raised = true; exn_val = h.exn;
     }
-    port_close(port);
+    wind_pop_cleanup(wf);
     if (raised) scm_raise_val(exn_val);
     return result;
 }
@@ -3912,6 +3940,8 @@ MPFR_CONST_PRIM(prim_mpfr_catalan, mpfr_c_catalan)
 MPFR_CONST_PRIM(prim_mpfr_apery,   mpfr_c_apery)
 
 /* Dynamic precision via call-with-precision. */
+static void restore_mpfr_prec(void *a) { tl_mpfr_prec = *(mpfr_prec_t *)a; }
+
 static val_t prim_call_with_precision(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     if (!vis_fixnum(av[0])) scm_raise(V_FALSE, "call-with-precision: precision must be a fixnum");
@@ -3921,12 +3951,14 @@ static val_t prim_call_with_precision(int ac, val_t *av, void *ud) {
     mpfr_prec_t saved = tl_mpfr_prec;
     tl_mpfr_prec = (mpfr_prec_t)p;
     val_t result = V_VOID;
-    /* Reset the precision even on exceptional exit. */
+    /* Reset the precision on every exit: normal, an exception, or a
+     * continuation escape (#428). */
+    WindFrame *wf = wind_push_cleanup(restore_mpfr_prec, &saved);
     ExnHandler h;
     SCM_PROTECT(h,
         result = apply_arr(av[1], 0, NULL),
-        { tl_mpfr_prec = saved; scm_raise_val(h.exn); });
-    tl_mpfr_prec = saved;
+        { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     return result;
 }
 

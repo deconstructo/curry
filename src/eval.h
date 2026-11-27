@@ -76,6 +76,10 @@ typedef struct WindFrame {
      * during an escape, does not catch an exception raised by the thunk
      * and run it a second time (#425). */
     struct ExnHandler *outer_handler;
+    /* A native cleanup in place of `after` (#428): when c_after is set,
+     * wind_unwind_to calls it instead of applying `after`. */
+    void             (*c_after)(void *);
+    void              *c_arg;
 } WindFrame;
 
 /* Thread-local wind stack (NULL = empty) */
@@ -226,6 +230,16 @@ void scm_handler_returned(void) __attribute__((noreturn));
 void scm_raise(val_t kind, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
 void scm_raise_val(val_t exn) __attribute__((noreturn));
 
+/* Native cleanup for the C-level with-... forms (#428).  The form calls
+ * wind_push_cleanup before it installs its own ExnHandler frame and
+ * wind_pop_cleanup on its normal and exception paths.  A continuation escape
+ * that leaves the form runs fn(arg) through wind_unwind_to; the pop then finds
+ * the frame gone and does not run it again.  fn runs once either way, so
+ * `arg` must stay valid until wind_pop_cleanup (a local of the form is fine,
+ * since the escape runs fn before it jumps away). */
+WindFrame *wind_push_cleanup(void (*fn)(void *), void *arg);
+void       wind_pop_cleanup(WindFrame *wf);
+
 /* Like scm_raise, but stamps a stable machine-legible symbol code (e.g.
  * 'wrong-type-argument) on the error object; see docs/reference/error-codes.md. */
 void scm_raise_code(val_t code, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
@@ -289,6 +303,10 @@ val_t scm_load(const char *path, val_t env);
 void load_push_dir(const char *path);
 int  load_dir_mark(void);
 void load_dir_release(int mark);
+/* Release the directory context back to `mark` and close the port; the
+ * wind_push_cleanup callback of a load (#428), arg is a LoadCleanup. */
+typedef struct { int mark; val_t port; } LoadCleanup;
+void load_cleanup(void *arg);
 
 /* Cross-thread inheritance for actor_spawn (actors.c): call
  * load_dir_snapshot() on the spawning thread to capture its current

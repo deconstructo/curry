@@ -224,18 +224,18 @@ static Module *load_scheme_module(val_t name, const char *path) {
      * module that fails to load partway through doesn't leave stale
      * directory-context entries behind to corrupt a later, unrelated
      * load if the error is caught and execution continues. */
-    int mark = load_dir_mark();
+    LoadCleanup lc = { load_dir_mark(), port };
     load_push_dir(path);
     val_t result = V_VOID;
+    WindFrame *wf = wind_push_cleanup(load_cleanup, &lc);
     ExnHandler h;
     SCM_PROTECT(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, mod_env);
         }
-    }, { load_dir_release(mark); port_close(port); scm_raise_val(h.exn); });
-    load_dir_release(mark);
-    port_close(port);
+    }, { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     (void)result;
 
     return make_module(name, mod_env, V_NIL, false, NULL);

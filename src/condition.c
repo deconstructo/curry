@@ -122,12 +122,17 @@ void condition_signal(val_t cond) {
 
 /* ---- handler-bind-1 ---- */
 
+static void restore_cond_handler(void *a) { current_cond_handler = *(CondHandler **)a; }
+
 val_t condition_handler_bind(val_t type_sym, val_t proc, val_t thunk) {
     CondHandler h;
     h.type_sym = type_sym;
     h.proc     = proc;
     h.prev     = current_cond_handler;
     current_cond_handler = &h;
+    CondHandler *outer = h.prev;
+    /* Unbind on every exit, including a continuation escape (#428). */
+    WindFrame *wf = wind_push_cleanup(restore_cond_handler, &outer);
 
     val_t result = V_VOID;
     bool  raised = false;
@@ -139,12 +144,14 @@ val_t condition_handler_bind(val_t type_sym, val_t proc, val_t thunk) {
         raised = true; rexn = eh.exn;
     });
 
-    current_cond_handler = h.prev;
+    wind_pop_cleanup(wf);
     if (raised) scm_raise_val(rexn);
     return result;
 }
 
 /* ---- with-restarts ---- */
+
+static void restore_restart_frame(void *a) { current_restart_frame = *(RestartFrame **)a; }
 
 /*
  * invoke-restart raises the Restart object itself as an exception (via
@@ -159,6 +166,10 @@ val_t condition_with_restarts(val_t restarts, val_t thunk) {
     frame.restarts         = restarts;
     frame.prev             = current_restart_frame;
     current_restart_frame  = &frame;
+    RestartFrame *outer_frame = frame.prev;
+    /* Pop the frame on a continuation escape too: it lives on this C stack
+     * (#428). */
+    WindFrame *wf = wind_push_cleanup(restore_restart_frame, &outer_frame);
 
     /* Mirror what OP_PUSH_HANDLER does: snapshot the VM state so we can
      * restore it if a restart (or any exception) unwinds through us.
@@ -179,7 +190,7 @@ val_t condition_with_restarts(val_t restarts, val_t thunk) {
     });
     /* SCM_PROTECT has restored current_handler before reaching here */
 
-    current_restart_frame = frame.prev;
+    wind_pop_cleanup(wf);
 
     if (!raised) return result;
 
