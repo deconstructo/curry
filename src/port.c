@@ -574,7 +574,6 @@ static void scm_write_ctx(val_t v, val_t port, bool in_container) {
     if (vis_flonum(v))   { write_number_notation(v, port, in_container); return; }
     if (vis_bignum(v))   { write_number_notation(v, port, in_container); return; }
     if (vis_rational(v)) { write_number_notation(v, port, in_container); return; }
-#ifdef BUILD_MPFR
     if (vis_mpfr(v)) {
         val_t s = num_to_string(v, 10);
         port_write_string(port, str_data(as_str(s)), as_str(s)->len);
@@ -588,7 +587,6 @@ static void scm_write_ctx(val_t v, val_t port, bool in_container) {
         port_write_string(port, ">", 1);
         return;
     }
-#endif
     if (vis_complex(v)) {
         scm_write(as_cpx(v)->real, port);
         val_t im = as_cpx(v)->imag;

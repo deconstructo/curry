@@ -686,10 +686,8 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Remaining core builtins (src/builtins.c) — trig, bitwise, list
 ;;; accessors, quaternions, ports, hash tables, sets, actors, error
-;;; objects, control flow, GC stats: all bound at startup. MPFR and
-;;; interval arithmetic are gated behind -DBUILD_MPFR=ON (off by
-;;; default) and share one #ifdef block in builtins.c, so both are
-;;; guarded together.
+;;; objects, control flow, GC stats: all bound at startup, including MPFR
+;;; and interval arithmetic.
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (check "PR translit: ašarēdum-turrum (acos)" (ašarēdum-turrum 0.5) (acos 0.5))
@@ -787,19 +785,17 @@
 (check-true "PR translit: ṭēm-ebēbim binding (gc-stats)" (procedure? ṭēm-ebēbim))
 (check-true "PR translit: mīnu-nagbim binding (gc-heap-size)" (procedure? mīnu-nagbim))
 
-;; MPFR and interval arithmetic share one #ifdef BUILD_MPFR block in
-;; builtins.c, off by default — guarded together like ldap/rpi/LLVM-JIT.
-(guard (e (#t (display "SKIP: MPFR/interval builtins not built in (BUILD_MPFR=OFF)") (newline)))
-  (check-true "PR translit: nasqum binding (mpfr)" (procedure? nasqum))
-  (check-true "PR translit: nasqu-kippatim binding (mpfr-pi)" (procedure? nasqu-kippatim))
-  (check-true "PR translit: pūtum binding (interval)" (procedure? pūtum))
-  (check-true "PR translit: epēš-pūtim binding (make-interval)" (procedure? epēš-pūtim))
-  (check "PR translit: šapil-pūtim / elû-pūtim (interval-lo/hi)"
-    ;; endpoints come back as MPFR (arbitrary-precision, directed-rounded per
-    ;; docs/reference/numeric-precision.md), so round-trip through exact
-    ;; before comparing against plain fixnums.
-    (list (exact (šapil-pūtim (epēš-pūtim 1 5))) (exact (elû-pūtim (epēš-pūtim 1 5))))
-    '(1 5)))
+;; MPFR and interval arithmetic are core builtins.
+(check-true "PR translit: nasqum binding (mpfr)" (procedure? nasqum))
+(check-true "PR translit: nasqu-kippatim binding (mpfr-pi)" (procedure? nasqu-kippatim))
+(check-true "PR translit: pūtum binding (interval)" (procedure? pūtum))
+(check-true "PR translit: epēš-pūtim binding (make-interval)" (procedure? epēš-pūtim))
+(check "PR translit: šapil-pūtim / elû-pūtim (interval-lo/hi)"
+  ;; endpoints come back as MPFR (arbitrary-precision, directed-rounded per
+  ;; docs/reference/numeric-precision.md), so round-trip through exact
+  ;; before comparing against plain fixnums.
+  (list (exact (šapil-pūtim (epēš-pūtim 1 5))) (exact (elû-pūtim (epēš-pūtim 1 5))))
+  '(1 5))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; More CAS, special functions, STM/channels, JIT/GC introspection, and

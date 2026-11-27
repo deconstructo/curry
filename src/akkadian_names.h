@@ -701,7 +701,7 @@ AKK_PR("gc-enable-incremental!",  "šitkun-ebēbi-mala",  "𒁹𒉡𒉡𒉡𒉡"
 AKK_PR("gc-set-free-space-divisor!", "šakān-puluggi-paṭārim", "𒁹𒇲𒉌𒇲")
 AKK_PR("gc-set-max-heap!",        "šakān-rabûti-nagbim","𒁹𒃲𒉡𒃲𒉡")
 
-/* ---- MPFR (BUILD_MPFR=ON) ---- */
+/* ---- MPFR ---- */
 /* nasqu: "chosen, select, precise" — genuine adjective, an apt root for
  * arbitrary-precision arithmetic. */
 AKK_PR("mpfr",              "nasqum",             "𒉡𒀸𒌋")

@@ -190,15 +190,10 @@ static inline uint32_t vtype(val_t v) {
 #define vis_jitclosure(v) vis_type(v, T_JITCLOSURE)
 #define vis_proc(v)     (vis_closure(v) || vis_type(v, T_BCCLOSURE) || vis_prim(v) || vis_cont(v) || vis_traced(v) || vis_jitclosure(v))
 
-#ifdef BUILD_MPFR
 #define vis_mpfr(v)     vis_type(v, T_MPFR)
 #define vis_ival(v)     vis_type(v, T_INTERVAL)
 #define as_mpfr(v)      vunptr(Mpfr,     v)
 #define as_ival(v)      vunptr(Interval, v)
-#else
-#define vis_mpfr(v)     (0)
-#define vis_ival(v)     (0)
-#endif
 
 #define vis_number(v)   (vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || \
                          vis_rational(v) || vis_complex(v) || \
@@ -308,7 +303,6 @@ typedef struct {
     double e[8];
 } Octonion;
 
-#ifdef BUILD_MPFR
 #include <mpfr.h>
 /* MPFR arbitrary-precision float (atomic — mpfr_t cleaned by GC finalizer) */
 typedef struct {
@@ -323,7 +317,6 @@ typedef struct {
     val_t lo;
     val_t hi;
 } Interval;
-#endif
 
 /* F64Vec: typed flat array of doubles — no GC pointers, use CURRY_NEW_FLEX_ATOM */
 typedef struct {

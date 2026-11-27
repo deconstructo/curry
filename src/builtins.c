@@ -20,9 +20,7 @@
 #include "unicode_tables.h"
 #include "lang_registry.h"
 #include "curry_features.h"
-#ifdef BUILD_MPFR
 #include "mpfr_num.h"
-#endif
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -3887,7 +3885,6 @@ static val_t prim_floor_div(int ac, val_t *av, void *ud) {
     return vptr(mv);
 }
 
-#ifdef BUILD_MPFR
 /* ============================================================ */
 /* MPFR primitives                                              */
 /* ============================================================ */
@@ -4055,7 +4052,6 @@ static val_t prim_interval_contains(int ac, val_t *av, void *ud) {
     Interval *iv = as_ival(av[0]);
     return vbool(num_le(iv->lo, av[1]) && num_le(av[1], iv->hi));
 }
-#endif /* BUILD_MPFR */
 
 /* ---- Registration ---- */
 
@@ -4477,7 +4473,6 @@ void builtins_register(val_t env) {
     /* Number theory (GMP-only; always built) */
     builtins_numtheory_register(env);
 
-#ifdef BUILD_MPFR
     /* MPFR constructors / predicates */
     DEF("mpfr",                 prim_mpfr,             1, 2);
     DEF("mpfr?",                prim_mpfr_p,           1, 1);
@@ -4535,7 +4530,6 @@ void builtins_register(val_t env) {
     }
 
     mpfr_num_init();
-#endif
 
     /* ---- Foreign-language procedure aliases (Akkadian and any other
      * registered language pack — see lang_registry.h) ---- */

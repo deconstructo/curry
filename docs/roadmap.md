@@ -105,7 +105,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 | **CL-style condition system with restarts** | ✓ **v1.1.0** |
 | **General C FFI (libffi, zero-copy matrix/tensor)** | ✓ **v1.1.0** (`BUILD_FFI=ON`) |
 | **SRFI compatibility layer (`srfi s1`, `srfi s27`)** | ✓ **v1.1.1** |
-| **MPFR arbitrary-precision floats + interval arithmetic** | ✓ **v1.2.0** (`BUILD_MPFR=ON`) |
+| **MPFR arbitrary-precision floats + interval arithmetic** | ✓ **v1.2.0** (a required dependency since this change) |
 | **Number theory** (primality, factoring, modular arithmetic, combinatorics, CF) | ✓ **v1.2.0** |
 | **FFI design guidance** (when to use FFI vs C module) | ✓ **v1.2.1** (docs) |
 | **Sexagesimal / Babylonian number system** | ✓ **v1.2.5** |

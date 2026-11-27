@@ -14,7 +14,6 @@ class Curry < Formula
 
   option "with-llvm",      "Build LLVM ORC JIT backend (tiered native compilation)"
   option "with-ffi",       "Build general C FFI (libffi backend)"
-  option "with-mpfr",      "Build MPFR arbitrary-precision float support"
   option "with-qt6",       "Build Qt6 GUI module"
   option "with-plplot",    "Build PLplot scientific plotting module"
   option "with-ldap",      "Build LDAP/LDAPS module"
@@ -27,6 +26,7 @@ class Curry < Formula
   # Required
   depends_on "bdw-gc"
   depends_on "gmp"
+  depends_on "mpfr"
   depends_on "readline"
 
   # Always-on modules
@@ -48,7 +48,6 @@ class Curry < Formula
   depends_on "openldap" if build.with? "ldap"
   depends_on "llvm"     if build.with? "llvm"
   depends_on "libffi"   if build.with? "ffi"
-  depends_on "mpfr"     if build.with? "mpfr"
   depends_on "qt@6"     if build.with? "qt6"
   # qt@6 is an alias for the umbrella "qt" formula, which pulls in qtbase as
   # a dependency but does not itself symlink Qt6Config.cmake into its own
@@ -112,7 +111,6 @@ class Curry < Formula
       -DBUILD_MODULE_PROFILING=ON
       -DBUILD_LLVM=#{build.with?("llvm")   ? "ON" : "OFF"}
       -DBUILD_FFI=#{build.with?("ffi")     ? "ON" : "OFF"}
-      -DBUILD_MPFR=#{build.with?("mpfr")   ? "ON" : "OFF"}
       -DBUILD_MODULE_QT6=#{build.with?("qt6")      ? "ON" : "OFF"}
       -DBUILD_MODULE_PLPLOT=#{build.with?("plplot") ? "ON" : "OFF"}
       -DBUILD_MODULE_NEO4J=ON

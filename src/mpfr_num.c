@@ -1,6 +1,5 @@
 #include "mpfr_num.h"
 
-#ifdef BUILD_MPFR
 #include "object.h"
 #include "gc.h"
 #include "numeric.h"
@@ -594,4 +593,3 @@ void mpfr_num_init(void) {
     /* libmpfr is stateless beyond a few thread-local caches; nothing to do. */
 }
 
-#endif /* BUILD_MPFR */

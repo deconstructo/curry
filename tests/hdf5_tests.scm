@@ -4,8 +4,8 @@
 ;;; time — see hdf5.scm), so it may not be installed on the machine running
 ;;; this suite. If the import fails, skip cleanly (print a note, exit 0)
 ;;; rather than failing the whole test run — there is no compile-time flag
-;;; to gate this test's registration on the way BUILD_MPFR gates the mpfr
-;;; suite, since the dependency is only ever known at runtime.
+;;; to gate this test's registration on, since the dependency is only ever
+;;; known at runtime.
 
 (define hdf5-available
   (guard (e (#t #f))

@@ -90,8 +90,10 @@ endif()
 find_library(GMP_LIB NAMES gmp REQUIRED)
 find_path(GMP_INCLUDE NAMES gmp.h REQUIRED)
 
-# MPFR — arbitrary precision floating-point (built on GMP)
-option(BUILD_MPFR "Build MPFR arbitrary-precision float support" OFF)
+# MPFR — arbitrary precision floating-point (built on GMP). Required: it is
+# part of the numeric tower, not an option.
+find_library(MPFR_LIB NAMES mpfr REQUIRED)
+find_path(MPFR_INCLUDE NAMES mpfr.h REQUIRED)
 
 # readline — optional, enhances the REPL with history and line editing
 find_library(READLINE_LIB NAMES readline)
@@ -343,19 +345,10 @@ endif()
 
 # ---- MPFR (arbitrary precision floating-point) ----
 
-if(BUILD_MPFR)
-  find_library(MPFR_LIB NAMES mpfr REQUIRED)
-  find_path(MPFR_INCLUDE NAMES mpfr.h REQUIRED)
-  if(MPFR_LIB AND MPFR_INCLUDE)
-    message(STATUS "Found MPFR — arbitrary precision float enabled")
-    target_sources(curry_core PRIVATE src/mpfr_num.c)
-    target_compile_definitions(curry_core PUBLIC BUILD_MPFR)
-    target_include_directories(curry_core PUBLIC ${MPFR_INCLUDE})
-    target_link_libraries(curry_core PUBLIC ${MPFR_LIB})
-  else()
-    message(FATAL_ERROR "MPFR not found. Install libmpfr-dev or brew install mpfr")
-  endif()
-endif()
+message(STATUS "Found MPFR: ${MPFR_LIB}")
+target_sources(curry_core PRIVATE src/mpfr_num.c)
+target_include_directories(curry_core PUBLIC ${MPFR_INCLUDE})
+target_link_libraries(curry_core PUBLIC ${MPFR_LIB})
 
 # ---- FFI (libffi-backed foreign function interface) ----
 
@@ -1070,7 +1063,7 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
 # Hard runtime deps — always required regardless of which modules are built
 # libsqlite3-0 is included because the sqlite module is always compiled into the package
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libgc1t64 | libgc1 | libgc2, libgmp10, libreadline8 | libreadline8t64 | libreadline9, libsqlite3-0")
+    "libgc1t64 | libgc1 | libgc2, libgmp10, libmpfr6, libreadline8 | libreadline8t64 | libreadline9, libsqlite3-0")
 
 # Optional modules — only needed if those modules were built into this package.
 # libhdf5 is the one exception: (curry hdf5) is pure Scheme + FFI and dlopen's
@@ -1098,7 +1091,7 @@ set(CPACK_RPM_PACKAGE_RELEASE       "1")
 set(CPACK_RPM_PACKAGE_LICENSE       "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP         "Development/Languages")
 set(CPACK_RPM_PACKAGE_REQUIRES
-    "gc >= 8.0, gmp >= 6.0, readline >= 8.0, sqlite-libs")
+    "gc >= 8.0, gmp >= 6.0, mpfr >= 4.0, readline >= 8.0, sqlite-libs")
 set(CPACK_RPM_PACKAGE_RECOMMENDS
     "openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap, hdf5")
 set(CPACK_RPM_PACKAGE_SUGGESTS

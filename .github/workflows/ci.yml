@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libgc-dev libgmp-dev cmake build-essential pkg-config \
+            libgc-dev libgmp-dev libmpfr-dev cmake build-essential pkg-config \
             libssl-dev libsqlite3-dev libcurl4-openssl-dev \
             libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
             redis-server mosquitto gdb
@@ -43,7 +43,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install bdw-gc gmp cmake pkg-config \
+          brew install bdw-gc gmp mpfr cmake pkg-config \
             openssl sqlite libgit2 libpng jpeg-turbo plplot \
             redis mosquitto
 
@@ -85,7 +85,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libgc-dev libgmp-dev cmake build-essential pkg-config \
+            libgc-dev libgmp-dev libmpfr-dev cmake build-essential pkg-config \
             libssl-dev libsqlite3-dev libcurl4-openssl-dev \
             libpng-dev libjpeg-dev libgit2-dev libplplot-dev \
             redis-server mosquitto llvm-18-dev gdb
@@ -96,7 +96,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install bdw-gc gmp cmake pkg-config \
+          brew install bdw-gc gmp mpfr cmake pkg-config \
             openssl sqlite libgit2 libpng jpeg-turbo plplot \
             redis mosquitto llvm
 

@@ -1,9 +1,8 @@
 # Arbitrary-precision floats and number theory
 
 This document covers curry's MPFR-backed arbitrary-precision floating-point
-type and the always-on number theory library.  The MPFR feature requires the
-interpreter to be built with `-DBUILD_MPFR=ON` (and `libmpfr` installed).
-The number theory functions are always available — they only depend on GMP.
+type and the number theory library.  MPFR is a required dependency, like GMP:
+it is always built in (`libmpfr` must be installed).
 
 ## MPFR floats
 
@@ -218,12 +217,12 @@ the remaining composite cofactors.
 ```bash
 # Linux
 sudo apt install libmpfr-dev
-cmake -B build -DBUILD_MPFR=ON
+cmake -B build
 cmake --build build -j$(nproc)
 ctest --test-dir build -V -R mpfr
 
 # macOS
 brew install mpfr
-cmake -B build -DBUILD_MPFR=ON
+cmake -B build
 cmake --build build -j$(sysctl -n hw.logicalcpu)
 ```
