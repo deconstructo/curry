@@ -25,7 +25,7 @@ Any board running a 64-bit or 32-bit Linux kernel with the standard
 sudo apt update
 sudo apt install \
     build-essential cmake \
-    libgc-dev libgmp-dev \
+    libgc-dev libgmp-dev libmpfr-dev \
     libgpiod-dev \
     libreadline-dev
 ```

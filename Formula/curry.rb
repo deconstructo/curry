@@ -80,7 +80,7 @@ class Curry < Formula
     prefix_paths << Formula["openldap"].opt_prefix  if build.with? "ldap"
     prefix_paths << Formula["llvm"].opt_prefix      if build.with? "llvm"
     prefix_paths << Formula["libffi"].opt_prefix    if build.with? "ffi"
-    prefix_paths << Formula["mpfr"].opt_prefix      if build.with? "mpfr"
+    prefix_paths << Formula["mpfr"].opt_prefix
     # qtbase must precede qt@6 here: CMake's find_package(Qt6) picks the
     # first matching prefix on CMAKE_PREFIX_PATH, and the umbrella qt@6
     # tree has a Qt6CoreToolsConfig.cmake that references target files it
@@ -156,9 +156,7 @@ class Curry < Formula
                    "(display (fact 5)) (newline)'").chomp
     assert_equal "#t", shell_output("#{bin}/curry -e '(display (prime? 17)) (newline)'").chomp
     assert_equal "(2 2 3)", shell_output("#{bin}/curry -e '(display (factor 12)) (newline)'").chomp
-    if build.with? "mpfr"
-      assert_equal "#t",
-        shell_output("#{bin}/curry -e '(display (mpfr? (with-precision 256 (mpfr-pi)))) (newline)'").chomp
-    end
+    assert_equal "#t",
+      shell_output("#{bin}/curry -e '(display (mpfr? (with-precision 256 (mpfr-pi)))) (newline)'").chomp
   end
 end

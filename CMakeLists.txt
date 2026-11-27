@@ -213,7 +213,7 @@ foreach(l IN LISTS GC_LIBRARIES)
     list(APPEND _curry_link_libs "-l${l}")
   endif()
 endforeach()
-list(APPEND _curry_link_libs "${GMP_LIB}" -lm)
+list(APPEND _curry_link_libs "${GMP_LIB}" "${MPFR_LIB}" -lm)
 
 if(CURRY_BUILD_INFO_PATHS)
   set(_curry_cc "${CMAKE_C_COMPILER}")
@@ -475,6 +475,7 @@ function(curry_math_module name)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${GC_INCLUDE_DIRS}
     ${GMP_INCLUDE}
+    ${MPFR_INCLUDE}
   )
   set_target_properties(curry_math_${name} PROPERTIES
     PREFIX ""
@@ -504,6 +505,7 @@ function(curry_c_module name)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${GC_INCLUDE_DIRS}
     ${GMP_INCLUDE}
+    ${MPFR_INCLUDE}
   )
   set_target_properties(curry_${name} PROPERTIES
     PREFIX ""
@@ -524,6 +526,7 @@ function(curry_cxx_module name)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${GC_INCLUDE_DIRS}
     ${GMP_INCLUDE}
+    ${MPFR_INCLUDE}
   )
   set_target_properties(curry_${name} PROPERTIES
     PREFIX ""
@@ -955,6 +958,7 @@ if(BUILD_MODULE_MCP)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${GC_INCLUDE_DIRS}
     ${GMP_INCLUDE}
+    ${MPFR_INCLUDE}
     ${OPENSSL_INCLUDE_DIR})
   target_link_libraries(curry_mcp PRIVATE OpenSSL::SSL OpenSSL::Crypto)
   set_target_properties(curry_mcp PROPERTIES
