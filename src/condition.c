@@ -138,7 +138,7 @@ val_t condition_handler_bind(val_t type_sym, val_t proc, val_t thunk) {
     bool  raised = false;
     val_t rexn   = V_FALSE;
     ExnHandler eh;
-    SCM_PROTECT(eh, {
+    SCM_PROTECT_CLEANUP(eh, {
         result = apply_arr(thunk, 0, NULL);
     }, {
         raised = true; rexn = eh.exn;

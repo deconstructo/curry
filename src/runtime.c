@@ -147,6 +147,12 @@ WindFrame *wind_push_cleanup(void (*fn)(void *), void *arg) {
     return wf;
 }
 
+void wind_drop(WindFrame *wf) {
+    for (WindFrame *p = current_wind; p; p = p->prev) {
+        if (p == wf) { current_wind = wf->prev; return; }
+    }
+}
+
 /* Run the cleanup unless a continuation escape already did: wind_unwind_to
  * pops a frame before it runs it, so a frame no longer on the list has been
  * cleaned up.  Frames above wf that were left on the list are dropped too. */
@@ -204,6 +210,15 @@ void walk_cond_handlers(val_t exn, CondHandler *h) {
  * cleanup, ...) wants the exception unwound to it, as for raise. (#377) */
 extern val_t scm_cons(val_t, val_t);
 
+/* Undo the handler-chain splice below if the handler leaves by a continuation
+ * escape (#429): without it a later raise would skip the with-exception-handler
+ * frame whose handler was running. */
+typedef struct { ExnHandler *last_pass; ExnHandler *saved_prev; } RaiseSplice;
+static void undo_raise_splice(void *arg) {
+    RaiseSplice *rs = arg;
+    rs->last_pass->prev = rs->saved_prev;
+}
+
 val_t scm_raise_continuable(val_t exn) {
     /* Frames whose handler_proc is V_TRUE only clean up and re-raise
      * (dynamic-wind): they are inside the dynamic extent of the raise, so
@@ -218,8 +233,20 @@ val_t scm_raise_continuable(val_t exn) {
         ExnHandler *saved_prev = NULL;
         if (last_pass) { saved_prev = last_pass->prev; last_pass->prev = h->prev; }
         else           { current_handler = h->prev; }
-        val_t r = apply(proc, scm_cons(exn, V_NIL));
-        if (last_pass) last_pass->prev = saved_prev;
+        val_t r = V_VOID;
+        if (last_pass) {
+            RaiseSplice rs = { last_pass, saved_prev };
+            WindFrame *wf = wind_push_cleanup(undo_raise_splice, &rs);
+            /* If the handler raises, the exception goes outward past every
+             * frame in between and the splice must stay while it does; only
+             * the wind frame is dropped. */
+            ExnHandler eh;
+            SCM_PROTECT_CLEANUP(eh, r = apply(proc, scm_cons(exn, V_NIL)),
+                                { wind_drop(wf); scm_raise_val(eh.exn); });
+            wind_pop_cleanup(wf);
+        } else {
+            r = apply(proc, scm_cons(exn, V_NIL));
+        }
         current_handler = first;
         return r;
     }
@@ -1262,7 +1289,7 @@ val_t scm_load(const char *path, val_t env) {
     val_t result = V_VOID;
     WindFrame *wf = wind_push_cleanup(load_cleanup, &lc);
     ExnHandler h;
-    SCM_PROTECT(h, {
+    SCM_PROTECT_CLEANUP(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, env);

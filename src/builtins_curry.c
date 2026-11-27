@@ -1192,13 +1192,23 @@ static val_t prim_map_seq(int ac, val_t *av, void *ud) {
     }
 }
 
+/* True when the calling thread is inside a with-exception-handler. A pool
+ * worker cannot see that thread's handlers, so raise-continuable inside the
+ * function could not return the handler's value to the raise point; map,
+ * reduce and for-each/par run sequentially in that case (#429). */
+static bool under_exception_handler(void) {
+    for (ExnHandler *h = current_handler; h; h = h->prev)
+        if (h->handler_proc != V_TRUE && h->handler_proc != V_FALSE) return true;
+    return false;
+}
+
 static val_t prim_map(int ac, val_t *av, void *ud) {
     if (ac != 2) return prim_map_seq(ac, av, ud);
     val_t proc = av[0], lst = av[1];
     /* -1: not a proper list (the counting loop never ended on a circular
      * one); prim_map_seq reports it. */
     int n = scm_list_length(lst);
-    if (n < map_par_threshold || pool_is_worker) return prim_map_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker || under_exception_handler()) return prim_map_seq(ac, av, ud);
 
     val_t *elems   = gc_alloc_raw_pinned(n * sizeof(val_t));
     val_t *results = gc_alloc_raw_pinned(n * sizeof(val_t));
@@ -1242,7 +1252,7 @@ static val_t prim_reduce(int ac, val_t *av, void *ud) {
     scm_check_list_arg("reduce", lst);
     if (!vis_pair(lst)) return ridentity;
     int n = scm_list_length(lst);
-    if (n < map_par_threshold || pool_is_worker) return prim_reduce_seq(ac, av, ud);
+    if (n < map_par_threshold || pool_is_worker || under_exception_handler()) return prim_reduce_seq(ac, av, ud);
 
     val_t *elems = gc_alloc_raw_pinned(n * sizeof(val_t));
     { val_t p = lst; for (int i = 0; i < n; i++, p = vcdr(p)) elems[i] = vcar(p); }
@@ -1294,7 +1304,7 @@ static val_t prim_for_each_par(int ac, val_t *av, void *ud) {
     val_t lst = av[1];
     scm_check_list_arg("for-each/par", lst);
     int n = scm_list_length(lst);
-    if (n < map_par_threshold || pool_is_worker) {
+    if (n < map_par_threshold || pool_is_worker || under_exception_handler()) {
         for (val_t p = lst; vis_pair(p); p = vcdr(p))
             apply(proc, scm_cons(vcar(p), V_NIL));
         return V_VOID;
