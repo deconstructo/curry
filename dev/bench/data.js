@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795852902779,
+  "lastUpdate": 1795861272979,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23942,6 +23942,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 78.965,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e69730bc2f89237d836e75421e8da25c0f2546e2",
+          "message": "Merge pull request #462 from deconstructo/fix/437-symbolic-contract\n\nfeat(cas): one contract for symbolic values in comparison, equality, rounding and predicates (#437)",
+          "timestamp": "2026-11-28T21:20:33+11:00",
+          "tree_id": "37ea497be5042c0c52c8ab3e783e9d6a74866ce2",
+          "url": "https://github.com/deconstructo/curry/commit/e69730bc2f89237d836e75421e8da25c0f2546e2"
+        },
+        "date": 1795861271797,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 11.512,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 18.823,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 3.031,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 21.231,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 95.803,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 194.417,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 54.127,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 62.049,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 45.43,
             "unit": "ms"
           }
         ]
