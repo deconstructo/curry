@@ -411,11 +411,22 @@ bool num_is_integer(val_t v) {
 /* ---- Tuple helpers ---- */
 
 /* Unpack a quaternion or scalar-coerced value into four doubles.
- * Scalar → (val, 0, 0, 0).  Used by num_add/sub/mul/div/cmp. */
+ * Scalar → (val, 0, 0, 0); complex x+yi → (x, y, 0, 0), since i is the
+ * quaternion's own i (#436).  Used by num_add/sub/mul/div/cmp. */
 #define UNPACK_QUAT(v, r0, r1, r2, r3) \
     do { if (vis_quat(v)) { Quaternion *_q = as_quat(v); \
              (r0)=_q->a; (r1)=_q->b; (r2)=_q->c; (r3)=_q->d; } \
+         else if (vis_complex(v)) { (r0)=num_to_double(as_cpx(v)->real); \
+             (r1)=num_to_double(as_cpx(v)->imag); (r2)=(r3)=0.0; } \
          else { (r0)=num_to_double(v); (r1)=(r2)=(r3)=0.0; } } while (0)
+
+/* The same for an octonion operand: a quaternion fills e0..e3, a complex
+ * number e0..e1, a real e0 (#436). */
+static void oct_unpack(val_t v, double e[8]) {
+    memset(e, 0, 8 * sizeof(double));
+    if (vis_oct(v)) memcpy(e, as_oct(v)->e, 8 * sizeof(double));
+    else UNPACK_QUAT(v, e[0], e[1], e[2], e[3]);
+}
 
 /* Apply a binary numeric op element-wise to two same-type tuples. */
 static val_t tuple_binop(val_t a, val_t b, val_t (*op)(val_t, val_t), const char *ctx) {
@@ -524,26 +535,25 @@ val_t num_add(val_t a, val_t b) {
         return vis_quantum(a) ? quantum_add_scalar(a, b) : quantum_add_scalar(b, a);
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_add(a, b);
-    if (vis_complex(a) || vis_complex(b)) {
+    if ((vis_complex(a) || vis_complex(b)) &&
+        !vis_quat(a) && !vis_quat(b) && !vis_oct(a) && !vis_oct(b)) {
         val_t ar = vis_complex(a) ? as_cpx(a)->real : a;
         val_t ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
         val_t br = vis_complex(b) ? as_cpx(b)->real : b;
         val_t bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
         return num_make_complex(num_add(ar, br), num_add(ai, bi));
     }
+    if (vis_oct(a) || vis_oct(b)) {
+        double x[8], y[8], e[8];
+        oct_unpack(a, x); oct_unpack(b, y);
+        for (int i = 0; i < 8; i++) e[i] = x[i] + y[i];
+        return num_make_oct(e);
+    }
     if (vis_quat(a) || vis_quat(b)) {
         double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
         UNPACK_QUAT(a, a0,a1,a2,a3);
         UNPACK_QUAT(b, b0,b1,b2,b3);
         return num_make_quat(a0+b0, a1+b1, a2+b2, a3+b3);
-    }
-    if (vis_oct(a) || vis_oct(b)) {
-        double e[8] = {0};
-        if (vis_oct(a)) for(int i=0;i<8;i++) e[i] += as_oct(a)->e[i];
-        else e[0] += num_to_double(a);
-        if (vis_oct(b)) for(int i=0;i<8;i++) e[i] += as_oct(b)->e[i];
-        else e[0] += num_to_double(b);
-        return num_make_oct(e);
     }
     return arith2(a, b, add_fix, add_big, add_rat, add_flo);
 }
@@ -601,10 +611,17 @@ val_t num_sub(val_t a, val_t b) {
         return vis_quantum(a) ? quantum_sub_scalar(a, b) : quantum_sub_scalar(b, num_neg(a));
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_sub(a, b);
-    if (vis_complex(a) || vis_complex(b)) {
+    if ((vis_complex(a) || vis_complex(b)) &&
+        !vis_quat(a) && !vis_quat(b) && !vis_oct(a) && !vis_oct(b)) {
         val_t ar = vis_complex(a) ? as_cpx(a)->real : a,  ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
         val_t br = vis_complex(b) ? as_cpx(b)->real : b,  bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
         return num_make_complex(num_sub(ar, br), num_sub(ai, bi));
+    }
+    if (vis_oct(a) || vis_oct(b)) {
+        double x[8], y[8], e[8];
+        oct_unpack(a, x); oct_unpack(b, y);
+        for (int i = 0; i < 8; i++) e[i] = x[i] - y[i];
+        return num_make_oct(e);
     }
     if (vis_quat(a) || vis_quat(b)) {
         double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
@@ -681,7 +698,7 @@ val_t num_mul(val_t a, val_t b) {
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_mul(a, b);
     /* Quaternion multiplication (non-commutative: Hamilton product) */
-    if (vis_quat(a) || vis_quat(b)) {
+    if ((vis_quat(a) || vis_quat(b)) && !vis_oct(a) && !vis_oct(b)) {
         double a0=0,a1=0,a2=0,a3=0, b0=0,b1=0,b2=0,b3=0;
         UNPACK_QUAT(a, a0,a1,a2,a3);
         UNPACK_QUAT(b, b0,b1,b2,b3);
@@ -705,8 +722,7 @@ val_t num_mul(val_t a, val_t b) {
     if (vis_oct(a) || vis_oct(b)) {
         /* Full octonion multiplication via Cayley-Dickson construction */
         double x[8]={0}, y[8]={0}, z[8]={0};
-        if (vis_oct(a)) memcpy(x, as_oct(a)->e, 8*sizeof(double)); else x[0]=num_to_double(a);
-        if (vis_oct(b)) memcpy(y, as_oct(b)->e, 8*sizeof(double)); else y[0]=num_to_double(b);
+        oct_unpack(a, x); oct_unpack(b, y);
         /* Multiplication table for e1..e7 (Graves/Cayley convention) */
         static const int8_t oct_mul[8][8][2] = {
             /* [a][b] = {index, sign} where e_a * e_b = sign * e_index */
@@ -885,6 +901,15 @@ bool num_lt(val_t a, val_t b) { return num_cmp(a,b)<0  && !num_unordered(a,b); }
 bool num_le(val_t a, val_t b) { return num_cmp(a,b)<=0 && !num_unordered(a,b); }
 bool num_gt(val_t a, val_t b) { return num_cmp(a,b)>0  && !num_unordered(a,b); }
 bool num_ge(val_t a, val_t b) { return num_cmp(a,b)>=0 && !num_unordered(a,b); }
+/* R7RS 6.2.6: if any argument is inexact the result is too, so an exact
+ * result picked against a flonum or an MPFR value is converted to that kind
+ * (#441). `other` is the argument that was not picked. */
+static val_t minmax_inexact(val_t result, val_t other) {
+    if (!(vis_fixnum(result) || vis_bignum(result) || vis_rational(result))) return result;
+    if (vis_mpfr(other))   return mpfr_coerce(result, mpfr_precision(other));
+    if (vis_flonum(other)) return num_make_float(num_to_double(result));
+    return result;
+}
 /* min and max return a NaN argument rather than let the comparison pick
  * whichever side it lands on, so the result doesn't depend on order. */
 val_t num_min(val_t a, val_t b) {
@@ -893,7 +918,7 @@ val_t num_min(val_t a, val_t b) {
     int c = num_cmp(a,b);
     if (num_is_nan(a)) return a;
     if (num_is_nan(b)) return b;
-    return c<=0?a:b;
+    return c<=0 ? minmax_inexact(a, b) : minmax_inexact(b, a);
 }
 val_t num_max(val_t a, val_t b) {
     if (vis_complex(a) || vis_complex(b))
@@ -901,7 +926,7 @@ val_t num_max(val_t a, val_t b) {
     int c = num_cmp(a,b);
     if (num_is_nan(a)) return a;
     if (num_is_nan(b)) return b;
-    return c>=0?a:b;
+    return c>=0 ? minmax_inexact(a, b) : minmax_inexact(b, a);
 }
 
 /* ---- Integer division ---- */
@@ -1405,10 +1430,17 @@ val_t num_bitlen(val_t a) {
 /* ---- Complex ---- */
 val_t num_real_part(val_t v) {
     if (vis_symbolic(v)) return sx_real(v);
+    if (vis_quat(v)) return num_make_float(as_quat(v)->a);       /* #436 */
+    if (vis_oct(v))  return num_make_float(as_oct(v)->e[0]);
     return vis_complex(v) ? as_cpx(v)->real : v;
 }
+/* The imaginary part of a quaternion or octonion is its vector part, a value
+ * of the same type with a zero real part, so that real + imaginary = the
+ * original (#436). */
 val_t num_imag_part(val_t v) {
     if (vis_symbolic(v)) return sx_imag(v);
+    if (vis_quat(v)) { Quaternion *q = as_quat(v); return num_make_quat(0.0, q->b, q->c, q->d); }
+    if (vis_oct(v))  { double e[8]; memcpy(e, as_oct(v)->e, sizeof e); e[0] = 0.0; return num_make_oct(e); }
     return vis_complex(v) ? as_cpx(v)->imag : vfix(0);
 }
 val_t num_magnitude(val_t v) {

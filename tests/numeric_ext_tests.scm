@@ -1238,6 +1238,44 @@
        (sym->latex (* x (make-quaternion 1 2 3 4)))
        "x \\left(1 + 2\\mathbf{i} + 3\\mathbf{j} + 4\\mathbf{k}\\right)")
 
+;;; ----------------------------------------------------------------------
+;;; Quaternion, complex and octonion operands mix (#436)
+;;; ----------------------------------------------------------------------
+(define q1234 (make-quaternion 1 2 3 4))
+(check "real-part of a quaternion"        (real-part q1234) 1.0)
+(check "imag-part of a quaternion is its vector part"
+       (imag-part q1234) (make-quaternion 0 2 3 4))
+(check "real + imag = the quaternion"     (+ (real-part q1234) (imag-part q1234)) q1234)
+(check "real-part of an octonion"         (real-part (make-octonion 5 1 2 3 4 5 6 7)) 5.0)
+(check "quaternion + complex adds the imaginary part to i"
+       (+ q1234 2+i) (make-quaternion 3 3 3 4))
+(check "complex + quaternion"             (+ 2+i q1234) (make-quaternion 3 3 3 4))
+(check "quaternion - complex"             (- q1234 2+i) (make-quaternion -1 1 3 4))
+(check "quaternion * complex (Hamilton)"  (* q1234 2+i) (make-quaternion 0 5 10 5))
+(check "complex * quaternion is not the same"
+       (* 2+i q1234) (make-quaternion 0 5 2 11))
+(check "quaternion / complex"
+       (let ((r (/ q1234 2+i)))
+         (list (< (abs (- (real-part r) 0.8)) 1e-12)
+               (< (abs (- (quaternion-z r) 2.2)) 1e-12)))
+       '(#t #t))
+(check "quaternion + real still works"    (+ q1234 5) (make-quaternion 6 2 3 4))
+(check "equal? on octonions compares all eight parts"
+       (list (equal? (make-octonion 1 2 3 4 5 6 7 8) (make-octonion 1 2 3 4 5 6 7 8))
+             (equal? (make-octonion 1 2 3 4 5 6 7 8) (make-octonion 1 2 3 4 5 6 7 9)))
+       '(#t #f))
+(check "quaternion + octonion promotes to the octonion"
+       (+ q1234 (make-octonion 1 0 0 0 0 0 0 1)) (make-octonion 2 2 3 4 0 0 0 1))
+(check "octonion + quaternion"
+       (+ (make-octonion 1 0 0 0 0 0 0 1) q1234) (make-octonion 2 2 3 4 0 0 0 1))
+(check "quaternion - octonion"
+       (- q1234 (make-octonion 1 0 0 0 0 0 0 1)) (make-octonion 0 2 3 4 0 0 0 -1))
+(check "complex + octonion"
+       (+ 2+i (make-octonion 1 0 0 0 0 0 0 1)) (make-octonion 3 1 0 0 0 0 0 1))
+(check "i * j = k through a quaternion and an octonion operand"
+       (* (make-quaternion 0 1 0 0) (make-octonion 0 0 1 0 0 0 0 0))
+       (make-octonion 0 0 0 1 0 0 0 0))
+
 (newline)
 (display pass) (display " passed, ")
 (display fail) (display " failed")

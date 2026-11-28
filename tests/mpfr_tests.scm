@@ -212,6 +212,60 @@
               0.0 1e-14)
 
 ;;; ----------------------------------------------------------------------
+;;; eqv?/equal? and hashing (#439)
+;;; ----------------------------------------------------------------------
+(check "eqv? same value, same precision"    (eqv? (mpfr 1) (mpfr 1)) #t)
+(check "equal? same value, same precision"  (equal? (mpfr 1/3) (mpfr 1/3)) #t)
+(check "eqv? different value"               (eqv? (mpfr 1) (mpfr 2)) #f)
+(check "eqv? different precision"           (eqv? (mpfr 1) (with-precision 64 (mpfr 1))) #f)
+(check "eqv? an MPFR value and an exact one" (eqv? (mpfr 1) 1) #f)
+(check "eqv? +0 and -0"                     (eqv? (mpfr 0) (- (mpfr 0))) #f)
+(check "eqv? NaN and NaN"
+       (let ((n (/ (mpfr 0) (mpfr 0)))) (eqv? n (/ (mpfr 0) (mpfr 0)))) #t)
+(check "equal? inside a list"               (equal? (list (mpfr 1/3) 2) (list (mpfr 1/3) 2)) #t)
+(check "member finds an MPFR value"
+       (and (member (mpfr 2) (list 1 (mpfr 2) 3)) #t) #t)
+(check "assoc finds an MPFR key"
+       (cdr (assoc (mpfr 2) (list (cons 1 'one) (cons (mpfr 2) 'two)))) 'two)
+(let ((h (make-hash-table equal?)))
+  (hash-table-set! h (mpfr 1/3) 'third)
+  (check "hash table keyed on an MPFR value" (hash-table-ref h (mpfr 1/3) 'none) 'third)
+  (check "hash table: another precision is another key"
+         (hash-table-ref h (with-precision 64 (mpfr 1/3)) 'none) 'none))
+
+;;; ----------------------------------------------------------------------
+;;; max/min with an inexact argument are inexact (#441)
+;;; ----------------------------------------------------------------------
+(check "max MPFR, exact picked: result is MPFR" (mpfr? (max (mpfr 1/3) 1/2)) #t)
+(check "max MPFR, exact picked: value"          (< (abs (- (max (mpfr 1/3) 1/2) 0.5)) 1e-30) #t)
+(check "min MPFR, exact picked: result is MPFR" (mpfr? (min 1/4 (mpfr 1/3))) #t)
+(check "max, MPFR picked"                       (mpfr? (max (mpfr 3) 2)) #t)
+(check "max of exact and flonum, exact bigger"  (max 3 2.0) 3.0)
+(check "min of exact and flonum, exact smaller" (min 1 2.0) 1.0)
+(check "max of a ratio and a flonum"            (max 1/2 0.25) 0.5)
+(check "max of three, flonum in the middle"     (max 1 2.5 2) 2.5)
+(check "max of exact numbers stays exact"       (max 1/2 1/3) 1/2)
+
+;;; ----------------------------------------------------------------------
+;;; Printing: the digits the precision supports (#441)
+;;; ----------------------------------------------------------------------
+(define (digits-of x)
+  (let* ((s (number->string x))
+         (e (let loop ((i 0)) (if (char=? (string-ref s i) #\e) i (loop (+ i 1))))))
+    (let count ((i 0) (n 0))
+      (cond ((= i e) n)
+            ((char-numeric? (string-ref s i)) (count (+ i 1) (+ n 1)))
+            (else (count (+ i 1) n))))))
+(check "128 bits print 38 digits"  (digits-of (mpfr 1/3)) 38)
+(check "53 bits print 15 digits"   (with-precision 53 (digits-of (mpfr 1/3))) 15)
+(check "256 bits print 77 digits"  (with-precision 256 (digits-of (mpfr 1/3))) 77)
+(check "1/3 has no rounding noise" (string=? (substring (number->string (mpfr 1/3)) 0 12) "3.3333333333") #t)
+(check "zero has exponent 0"
+       (let* ((s (number->string (mpfr 0))) (n (string-length s)))
+         (string=? (substring s (- n 2) n) "e0"))
+       #t)
+
+;;; ----------------------------------------------------------------------
 ;;; Summary
 ;;; ----------------------------------------------------------------------
 (newline)

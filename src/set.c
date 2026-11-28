@@ -2,6 +2,7 @@
 #include "object.h"
 #include "gc.h"
 #include "numeric.h"
+#include "mpfr_num.h"
 #include "symbolic.h"
 #include "symbol.h"
 #include "eval.h"
@@ -40,6 +41,14 @@ bool scm_eqv(val_t a, val_t b) {
     if (vis_flonum(a) && vis_flonum(b)) return same_double(vfloat(a), vfloat(b));
     if (vis_bignum(a) && vis_bignum(b)) return mpz_cmp(as_big(a)->z, as_big(b)->z) == 0;
     if (vis_rational(a) && vis_rational(b)) return mpq_equal(as_rat(a)->q, as_rat(b)->q);
+    /* Two MPFR values are eqv? when they have the same precision and the same
+     * value (a NaN is eqv to a NaN; +0 and -0 differ, as for flonums) (#439). */
+    if (vis_mpfr(a) && vis_mpfr(b)) {
+        mpfr_srcptr x = as_mpfr(a)->x, y = as_mpfr(b)->x;
+        if (mpfr_get_prec(x) != mpfr_get_prec(y)) return false;
+        if (mpfr_nan_p(x) || mpfr_nan_p(y)) return mpfr_nan_p(x) && mpfr_nan_p(y);
+        return mpfr_equal_p(x, y) && mpfr_signbit(x) == mpfr_signbit(y);
+    }
     if (vis_complex(a) && vis_complex(b))
         return scm_eqv(as_cpx(a)->real, as_cpx(b)->real) &&
                scm_eqv(as_cpx(a)->imag, as_cpx(b)->imag);
@@ -47,6 +56,11 @@ bool scm_eqv(val_t a, val_t b) {
         Quaternion *qa = as_quat(a), *qb = as_quat(b);
         return same_double(qa->a, qb->a) && same_double(qa->b, qb->b) &&
                same_double(qa->c, qb->c) && same_double(qa->d, qb->d);
+    }
+    if (vis_oct(a) && vis_oct(b)) {       /* as the quaternion case: all eight parts */
+        for (int i = 0; i < 8; i++)
+            if (!same_double(as_oct(a)->e[i], as_oct(b)->e[i])) return false;
+        return true;
     }
     if (vis_char(a) && vis_char(b)) return vunchr(a) == vunchr(b);
     if (vis_symbol(a) && vis_symbol(b)) return a == b; /* interned, so pointer eq */
@@ -160,11 +174,25 @@ uint32_t val_hash(val_t v, int cmp_type) {
      * by value regardless of cmp_type (scm_equal delegates to scm_eqv for
      * these), so they must hash by value under SET_CMP_EQV too, not just
      * SET_CMP_EQUAL. */
+    if (vis_mpfr(v)) {       /* by value and precision, as scm_eqv compares them */
+        mpfr_srcptr x = as_mpfr(v)->x;
+        double d = mpfr_nan_p(x) ? 0.0 : mpfr_get_d(x, MPFR_RNDN);
+        uint64_t bits; memcpy(&bits, &d, 8);
+        return hash_combine(hash_u64(bits), hash_u64((uint64_t)mpfr_get_prec(x)
+                                                      + (mpfr_nan_p(x) ? 1 : 0)));
+    }
     if (vis_bignum(v))   return hash_mpz(as_big(v)->z);
     if (vis_rational(v)) return hash_combine(hash_mpz(mpq_numref(as_rat(v)->q)),
                                               hash_mpz(mpq_denref(as_rat(v)->q)));
     if (vis_complex(v))  return hash_combine(val_hash(as_cpx(v)->real, cmp_type),
                                               val_hash(as_cpx(v)->imag, cmp_type));
+    if (vis_oct(v)) {
+        uint64_t bits;
+        memcpy(&bits, &as_oct(v)->e[0], 8);
+        uint32_t h = hash_u64(bits);
+        for (int i = 1; i < 8; i++) { memcpy(&bits, &as_oct(v)->e[i], 8); h = hash_combine(h, hash_u64(bits)); }
+        return h;
+    }
     if (vis_quat(v)) {
         Quaternion *q = as_quat(v);
         uint64_t bits[4];
