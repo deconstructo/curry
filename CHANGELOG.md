@@ -8,6 +8,13 @@
 
 **Fixed: arithmetic between an MPFR number and a complex, quaternion, octonion, symbolic or surreal number (#440).** These raised `mpfr: operand must be real`, because every pair with an MPFR operand went to code for real scalars. Such pairs now go to the other operand's own arithmetic: `(+ (mpfr 1/3) 1+2i)` is a complex number, `(+ x (mpfr 1/3))` an expression. Quaternion and octonion convert the MPFR value to a double, because their parts are doubles. Matrices and multivectors still raise.
 
+**Changed: symbolic values in comparisons, equality, rounding and the number predicates (#437).** A symbolic value is now a number to the language, and the standard operators have one defined behaviour for it.
+- `(< x 1)`, `<=`, `>`, `>=` **raise** when the comparison cannot be decided. They used to return a relation, which is truthy, so `(if (< x 1) 'a 'b)` always took the first branch. They still return `#t`/`#f` for two numbers, identical expressions and a `'positive`/`'negative` variable against a number. **Breaking:** code that used `<` to build a relation must use the new `sym<`, `sym<=`, `sym>`, `sym>=`.
+- `(= x x)` is `#t` and `(= x 1)` is `#f` (structural); both used to raise.
+- `(number? x)` and `(complex? x)` are `#t`; `real?`, `rational?` and `integer?` are `#t` only with the matching assumption. **Breaking:** code that used `(number? e)` to mean "nothing left to substitute" must use `(not (symbolic? e))`; `(curry spacetime)` and its tests did.
+- `max`, `min`, `floor`, `ceiling`, `round`, `truncate` of a symbolic value return an expression that evaluates after `substitute` (`floor` returned its argument, `max` raised). `(exact->inexact e)` and `(inexact->exact e)` convert the numbers inside `e`.
+- `(+ x "a")` and the other arithmetic operators raise `not a number` for a string, character, symbol, boolean, list or vector operand.
+
 ### 1.32.0 - 2026-11-28
 
 **Fixed: `bernoulli` and `euler-number` from several threads (#454).** Both fill a shared cache on demand without a lock, so a parallel `map` over them returned wrong values (B10 came out as 17993126/33), died on a division by zero, or hung. One mutex now covers computing and copying an entry.

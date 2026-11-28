@@ -239,6 +239,11 @@ val_t sx_cot(val_t a);
 val_t sx_sec(val_t a);
 val_t sx_csc(val_t a);
 val_t sx_sign(val_t a);
+val_t sx_floor(val_t a);  val_t sx_ceiling(val_t a);
+val_t sx_round(val_t a);  val_t sx_truncate(val_t a);
+val_t sx_max(val_t a, val_t b);  val_t sx_min(val_t a, val_t b);
+/* (exact->inexact e) / (inexact->exact e): convert every number inside e. */
+val_t sx_inexact(val_t e);  val_t sx_exact(val_t e);
 
 /* ---- Comparisons (returns V_TRUE/V_FALSE when decidable, else a
  * symbolic comparison expression, e.g. (< x 5)). Decidable cases: both
@@ -344,6 +349,7 @@ extern val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 extern val_t SX_COT, SX_SEC, SX_CSC;
 extern val_t SX_LIMIT;
 extern val_t SX_SIGN;
+extern val_t SX_FLOOR, SX_CEILING, SX_ROUND, SX_TRUNCATE, SX_MAX, SX_MIN;
 extern val_t SX_LT, SX_LE, SX_GT, SX_GE;
 extern val_t SX_APPLY;   /* symbolic function application: (apply fn arg0 arg1 ...) */
 extern val_t SX_LAPLACE; /* unevaluated Laplace transform node */

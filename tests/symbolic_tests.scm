@@ -531,6 +531,73 @@
 (check-pf "pf x/((2x+1)²(x+3))"     x (* (expt (+ (* 2 x) 1) 2) (+ x 3)))
 (check-pf "pf (3x²+1)/(6x²+5x+1)"   (+ (* 3 (expt x 2)) 1) (+ (* 6 (expt x 2)) (* 5 x) 1))
 
+;;; ---- #437: the symbolic contract ---- ;;;
+;; A symbolic value is a number. An undecidable comparison raises (it used to
+;; return a relation, which is truthy). = is structural. floor/max/... stay
+;; symbolic. exact->inexact converts what is inside.
+(define (raises? thunk) (guard (e (#t #t)) (thunk) #f))
+(define px (sym-var 'px 'positive))
+(define nx (sym-var 'nx 'negative))
+(define ix (sym-var 'ix 'integer))
+
+(check "(< x 1) raises" (raises? (lambda () (< x 1))) #t)
+(check "(> x 1) raises" (raises? (lambda () (> x 1))) #t)
+(check "(<= 1 x) raises" (raises? (lambda () (<= 1 x))) #t)
+(check "(>= x y) raises" (raises? (lambda () (>= x (sym-var 'y)))) #t)
+(check "an if on an undecidable comparison does not take a branch"
+       (guard (e (#t 'raised)) (if (< x 1) 'a 'b)) 'raised)
+(check "the same inside a compiled loop"
+       (guard (e (#t 'raised)) (let loop ((i 0)) (if (< i 3) (loop (+ i 1)) (if (< x i) 'a 'b)))) 'raised)
+(check "the same through apply" (guard (e (#t 'raised)) (apply < (list x 1))) 'raised)
+(check "a decidable comparison still gives a boolean" (list (< px 0) (> px 0) (< nx 0) (<= x x) (< x x)) '(#f #t #t #t #f))
+(check "sym< builds the relation" (symbolic? (sym< x 1)) #t)
+(check "sym< decides when it can" (sym< px 0) #f)
+(check "sym<= sym> sym>= build relations"
+       (map symbolic? (list (sym<= x 1) (sym> x 1) (sym>= x 1))) '(#t #t #t))
+(check "a three-argument chain with a symbolic value still raises" (raises? (lambda () (< 1 x 5))) #t)
+(check "numbers are untouched" (list (< 1 2) (< 2 1) (<= 2 2) (> 3 2 1)) '(#t #f #t #t))
+
+(check "(= x x)" (= x x) #t)
+(check "(= x 1)" (= x 1) #f)
+(check "(= 1 x)" (= 1 x) #f)
+(check "(= x (+ x 1))" (= x (+ x 1)) #f)
+(check "(= (+ x 1) (+ 1 x))" (= (+ x 1) (+ 1 x)) #t)
+(check "(= x x x)" (= x x x) #t)
+(check "(= 1 1 1) still works" (= 1 1 1) #t)
+
+(check "number? of a symbolic value" (list (number? x) (number? (+ x 1)) (complex? x)) '(#t #t #t))
+(check "real? needs an assumption" (list (real? x) (real? px) (real? nx) (real? (+ x 1))) '(#f #t #t #f))
+(check "integer? and rational? need the integer assumption"
+       (list (integer? x) (integer? ix) (rational? ix) (rational? px)) '(#f #t #t #f))
+(check "number? of a non-number" (list (number? "a") (number? 'a) (number? '())) '(#f #f #f))
+
+(check "floor stays symbolic" (sym->string (floor x)) "floor(x)")
+(check "floor, ceiling, round, truncate print" 
+       (map sym->string (list (ceiling x) (round x) (truncate x))) '("ceiling(x)" "round(x)" "truncate(x)"))
+(check "floor evaluates after substitute" (substitute (floor (+ x 1/2)) x 2) 2)
+(check "ceiling evaluates after substitute" (substitute (ceiling (* x 1/3)) x 4) 2)
+(check "round evaluates after substitute" (substitute (round x) x 7/2) 4)
+(check "truncate evaluates after substitute" (substitute (truncate x) x -7/2) -3)
+(check "floor of an integer variable is itself" (equal? (floor ix) ix) #t)
+(check "floor of a number is unchanged" (list (floor 7/2) (floor -1.5)) '(3 -2.0))
+(check "the derivative of floor is 0" (∂ (floor x) x) 0)
+(check "max stays symbolic" (sym->string (max x 1)) "max(x, 1)")
+(check "min stays symbolic" (sym->string (min x 1)) "min(x, 1)")
+(check "max evaluates after substitute" (list (substitute (max x 1) x 5) (substitute (max x 1) x -5)) '(5 1))
+(check "min evaluates after substitute" (list (substitute (min x 1) x 5) (substitute (min x 1) x -5)) '(1 -5))
+(check "max of identical values" (equal? (max x x) x) #t)
+(check "max of numbers is unchanged" (list (max 1 2 3) (min 1 2.0)) '(3 1.0))
+(check "max latex" (sym->latex (max x 1)) "\\operatorname{max}\\!\\left(x, 1\\right)")
+
+(check "exact->inexact converts the numbers inside" (sym->string (exact->inexact (+ x 1))) "1.0 + x")
+(check "inexact->exact converts them back" (sym->string (inexact->exact (* 0.5 x))) "1/2 * x")
+(check "exact->inexact on a bare variable" (equal? (exact->inexact x) x) #t)
+
+(check "(+ x \"a\") raises" (raises? (lambda () (+ x "a"))) #t)
+(check "(* x 'a) raises" (raises? (lambda () (* x 'a))) #t)
+(check "(- \"a\" x) raises" (raises? (lambda () (- "a" x))) #t)
+(check "(/ x '(1)) raises" (raises? (lambda () (/ x '(1)))) #t)
+
 ;;; ---- Summary ---- ;;;
 
 (newline)

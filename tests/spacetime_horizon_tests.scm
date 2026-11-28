@@ -29,10 +29,10 @@
 (define (cas-component m i j x y a)
   (let* ((e (metric-component m i j))
          (vars (spacetime-coordinates))
-         (e1 (if (number? e) e (substitute e (list-ref vars 3) 0)))
-         (e2 (if (number? e1) e1 (substitute e1 (list-ref vars 0) 0)))
-         (e3 (if (number? e2) e2 (substitute e2 (list-ref vars 1) x)))
-         (e4 (if (number? e3) e3 (substitute e3 (list-ref vars 2) y))))
+         (e1 (if (not (symbolic? e)) e (substitute e (list-ref vars 3) 0)))
+         (e2 (if (not (symbolic? e1)) e1 (substitute e1 (list-ref vars 0) 0)))
+         (e3 (if (not (symbolic? e2)) e2 (substitute e2 (list-ref vars 1) x)))
+         (e4 (if (not (symbolic? e3)) e3 (substitute e3 (list-ref vars 2) y))))
     e4))
 
 (define (check-metric a x y)
@@ -47,7 +47,7 @@
           (let ((cas (cas-component m i j x y a))
                 (mine (ks-dot P (list-ref basis i) (list-ref basis j))))
             (check (list "metric component" a x y i j cas mine)
-                   (and (number? cas) (near? cas mine 1e-9)))))
+                   (and (number? cas) (not (symbolic? cas)) (near? cas mine 1e-9)))))
         idx))
      idx)))
 

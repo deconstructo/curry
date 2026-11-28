@@ -28,6 +28,7 @@ val_t SX_ASINH, SX_ACOSH, SX_ATANH;
 val_t SX_COT, SX_SEC, SX_CSC;
 val_t SX_LIMIT;
 val_t SX_SIGN;
+val_t SX_FLOOR, SX_CEILING, SX_ROUND, SX_TRUNCATE, SX_MAX, SX_MIN;
 val_t SX_LT, SX_LE, SX_GT, SX_GE;
 val_t SX_APPLY;
 val_t SX_LAPLACE;
@@ -68,6 +69,12 @@ void symbolic_init(void) {
     SX_CSC       = sym_intern_cstr("csc");
     SX_LIMIT     = sym_intern_cstr("limit");
     SX_SIGN      = sym_intern_cstr("sign");
+    SX_FLOOR     = sym_intern_cstr("floor");
+    SX_CEILING   = sym_intern_cstr("ceiling");
+    SX_ROUND     = sym_intern_cstr("round");
+    SX_TRUNCATE  = sym_intern_cstr("truncate");
+    SX_MAX       = sym_intern_cstr("max");
+    SX_MIN       = sym_intern_cstr("min");
     SX_LT        = sym_intern_cstr("<");
     SX_LE        = sym_intern_cstr("<=");
     SX_GT        = sym_intern_cstr(">");
@@ -1295,6 +1302,19 @@ static val_t sx_simplify_impl(val_t expr) {
             if (num_is_negative(sa[0])) return vfix(-1);
             return vfix(1);
         }
+        if (op == SX_FLOOR)    return num_floor(sa[0]);
+        if (op == SX_CEILING)  return num_ceiling(sa[0]);
+        if (op == SX_ROUND)    return num_round(sa[0]);
+        if (op == SX_TRUNCATE) return num_truncate(sa[0]);
+    }
+    /* floor/ceiling/round/truncate of an integer-valued variable is itself */
+    if (n == 1 && (op == SX_FLOOR || op == SX_CEILING || op == SX_ROUND || op == SX_TRUNCATE) &&
+        vis_symvar(sa[0]) && (sym_var_flags(sa[0]) & SYM_ASSUME_INTEGER))
+        return sa[0];
+    /* max / min */
+    if (n == 2 && (op == SX_MAX || op == SX_MIN)) {
+        if (num_count == 2) return op == SX_MAX ? num_max(sa[0], sa[1]) : num_min(sa[0], sa[1]);
+        if (sx_equal(sa[0], sa[1])) return sa[0];
     }
 
     /* ---- ABS — assumption-based simplification ---- */
@@ -1748,6 +1768,37 @@ val_t sx_abs(val_t a) {
     if (vis_number(a)) return num_abs(a);
     return sx_simplify(sx_expr1(SX_ABS, a));
 }
+/* floor/ceiling/round/truncate/max/min of a symbolic value stay symbolic and
+ * evaluate once the value is known (#437). */
+#define SX_ROUNDER(name, op, fn) \
+    val_t sx_##name(val_t a) { if (vis_number(a)) return fn(a); return sx_simplify(sx_expr1(op, a)); }
+SX_ROUNDER(floor,    SX_FLOOR,    num_floor)
+SX_ROUNDER(ceiling,  SX_CEILING,  num_ceiling)
+SX_ROUNDER(round,    SX_ROUND,    num_round)
+SX_ROUNDER(truncate, SX_TRUNCATE, num_truncate)
+#undef SX_ROUNDER
+val_t sx_max(val_t a, val_t b) {
+    if (vis_number(a) && vis_number(b)) return num_max(a, b);
+    return sx_simplify(sx_expr2(SX_MAX, a, b));
+}
+val_t sx_min(val_t a, val_t b) {
+    if (vis_number(a) && vis_number(b)) return num_min(a, b);
+    return sx_simplify(sx_expr2(SX_MIN, a, b));
+}
+
+/* Apply f to every number inside e and rebuild. */
+static val_t sx_map_numbers(val_t e, val_t (*f)(val_t)) {
+    if (vis_number(e)) return f(e);
+    if (!vis_symexpr(e)) return e;
+    check_c_stack_depth("symbolic");
+    SymExpr *se = as_symexpr(e);
+    int n = (int)se->nargs;
+    val_t *args = (val_t *)gc_alloc_raw_pinned((size_t)(n ? n : 1) * sizeof(val_t));
+    for (int i = 0; i < n; i++) args[i] = sx_map_numbers(se->args[i], f);
+    return sx_simplify(sx_make_expr(se->op, n, args));
+}
+val_t sx_inexact(val_t e) { return sx_map_numbers(e, num_inexact); }
+val_t sx_exact(val_t e)   { return sx_map_numbers(e, num_exact); }
 val_t sx_add(val_t a, val_t b) {
     /* tuple + tuple (with symbolic elements) distributes via num_add */
     if (vis_tuple(a) || vis_tuple(b)) return num_add(a, b);
@@ -2005,6 +2056,10 @@ val_t sx_diff(val_t expr, val_t var) {
         return sx_div(sx_diff(args[0], var),
                       sx_mul(vfix(2), sx_sqrt(args[0])));
     }
+
+    /* floor, ceiling, round and truncate are constant between their jumps */
+    if ((op == SX_FLOOR || op == SX_CEILING || op == SX_ROUND || op == SX_TRUNCATE) && n == 1)
+        return vfix(0);
 
     if (op == SX_ABS && n == 1) {
         /* d/dx |f| = f * f' / |f|  (undefined at 0) */

@@ -1401,9 +1401,14 @@ static void test_arithmetic_open_coding(void) {
      * project-wide, see feedback_scheme_base_global_env_aliasing_test_
      * gotcha in this repo's memory notes). */
     {
-        val_t r = run_vm("(< (sym-var 'x) 5)");
-        CHECK(vis_symbolic(r),
-              "open-coded <: symbolic operand still dispatches to a symbolic comparison node");
+        /* an undecidable comparison raises (#437) ... */
+        val_t r = run_vm("(guard (e (#t 'raised)) (< (sym-var 'x) 5))");
+        CHECK(r == sym_intern_cstr("raised"),
+              "open-coded <: undecidable symbolic comparison raises");
+        /* ... and a decidable one reaches sx_lt through the real primitive */
+        r = run_vm("(< (sym-var 'p 'positive) 0)");
+        CHECK(r == V_FALSE,
+              "open-coded <: symbolic operand still dispatches to the symbolic decision rules");
     }
     {
         val_t r = run_vm("(+ (sym-var 'x) 5)");
