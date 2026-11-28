@@ -19,6 +19,7 @@
 #include "eval.h"
 #include "gc.h"
 #include <gmp.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -699,7 +700,17 @@ static val_t prim_catalan(int ac, val_t *av, void *ud) {
     return out;
 }
 
-/* ---- Bernoulli numbers (exact rationals).  Cached statically. ---- */
+/* ---- Bernoulli numbers (exact rationals).  Cached statically. ----
+ *
+ * The Bernoulli and Euler caches are shared by every thread, and (bernoulli n)
+ * is reachable from a parallel map. Computing an entry initialises GMP numbers
+ * in place and sets a flag afterwards; two threads asking for the same index,
+ * or one asking for a value another was still computing from, gave wrong
+ * values, a division by zero, and hangs (#454). One mutex covers the compute
+ * step and the copy out of the cache; a call needs the lock for microseconds
+ * once the entry exists. Nothing in a locked section raises (the index is
+ * checked before it), so the lock cannot be left held. */
+static pthread_mutex_t numtheory_cache_mx = PTHREAD_MUTEX_INITIALIZER;
 
 #define BERNOULLI_CACHE_SIZE 256
 static mpq_t  bernoulli_cache[BERNOULLI_CACHE_SIZE];
@@ -741,10 +752,13 @@ static val_t prim_bernoulli(int ac, val_t *av, void *ud) {
     long n = (long)vunfix(av[0]);
     if (n < 0)  scm_raise(V_FALSE, "bernoulli: negative index");
     if (n >= BERNOULLI_CACHE_SIZE) scm_raise(V_FALSE, "bernoulli: index too large");
+    pthread_mutex_lock(&numtheory_cache_mx);
     compute_bernoulli((int)n);
     /* Convert mpq to val_t (rational, or integer if denom = 1). */
-    return num_make_rational(make_big_from_mpz(mpq_numref(bernoulli_cache[n])),
-                             make_big_from_mpz(mpq_denref(bernoulli_cache[n])));
+    val_t r = num_make_rational(make_big_from_mpz(mpq_numref(bernoulli_cache[n])),
+                                make_big_from_mpz(mpq_denref(bernoulli_cache[n])));
+    pthread_mutex_unlock(&numtheory_cache_mx);
+    return r;
 }
 
 /* Euler numbers — even-indexed nonzero, odd-indexed zero.  All exact integers. */
@@ -779,8 +793,11 @@ static val_t prim_euler_number(int ac, val_t *av, void *ud) {
     long n = (long)vunfix(av[0]);
     if (n < 0) scm_raise(V_FALSE, "euler-number: negative index");
     if (n >= EULER_CACHE_SIZE) scm_raise(V_FALSE, "euler-number: index too large");
+    pthread_mutex_lock(&numtheory_cache_mx);
     compute_euler((int)n);
-    return z_to_val(euler_cache[n]);
+    val_t r = z_to_val(euler_cache[n]);
+    pthread_mutex_unlock(&numtheory_cache_mx);
+    return r;
 }
 
 /* Stirling numbers — recurrence tables, O(n*k).  Returned as bignums. */

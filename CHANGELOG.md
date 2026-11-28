@@ -2,6 +2,8 @@
 
 ### Unreleased
 
+**Fixed: `bernoulli` and `euler-number` from several threads (#454).** Both fill a shared cache on demand without a lock, so a parallel `map` over them returned wrong values (B10 came out as 17993126/33), died on a division by zero, or hung. One mutex now covers computing and copying an entry.
+
 **Fixed: shared hash tables, sets and string ports (#452, #453).** `map` runs on the work pool above 8 elements, so a lambda that wrote one hash table ran on several threads: a rehash under a probing thread made the program never finish (20000 elements, 3 of 3 runs). A string port written from several threads lost output and could crash, because its capacity grew before its buffer. Each table and each string port now has a lock held for one operation. An update that reads and then writes (`ref` then `set!`) is still two operations: use a mutex from `(curry sync)`. Not fixed here: the Bernoulli and Euler caches (#454).
 
 **New — futures: `(curry future)`**
