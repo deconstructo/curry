@@ -457,6 +457,69 @@
 (check-rational "∫x²/(x+1)"         (/ (expt x 2) (+ x 1)))
 (check-rational "∫1/(x²+1)"         (/ 1 (+ (expt x 2) 1)))
 
+;; #457: non-monic repeated factors, factors with a leading coefficient other than 1
+;; that the factoriser used to miss, a repeated factor whose residue was wrong, and
+;; float coefficients. check-rational alone would pass for an integral left
+;; unevaluated (the derivative of (∫ f x) is f), so also require a result.
+(define (has-integral? e)
+  (let ((s (sym->string e)))
+    (let loop ((i 0))
+      (cond ((= i (string-length s)) #f)
+            ((char=? (string-ref s i) #\∫) #t)
+            (else (loop (+ i 1)))))))
+(define (check-integrated label f)
+  (check (string-append label " is evaluated") (has-integral? (∫ f x)) #f)
+  (check-rational label f))
+
+(check-integrated "∫(x³+1)/(5x²(x+1))"  (/ (+ (expt x 3) 1) (* 5 (expt x 2) (+ x 1))))
+(check-integrated "∫1/(2x+1)²"          (/ 1 (expt (+ (* 2 x) 1) 2)))
+(check-integrated "∫x/(2x+1)²"          (/ x (expt (+ (* 2 x) 1) 2)))
+(check-integrated "∫1/(2x+1)³"          (/ 1 (expt (+ (* 2 x) 1) 3)))
+(check-integrated "∫1/((3x+1)³(x+2))"   (/ 1 (* (expt (+ (* 3 x) 1) 3) (+ x 2))))
+(check-integrated "∫1/((2x+1)²(x+1))"   (/ 1 (* (expt (+ (* 2 x) 1) 2) (+ x 1))))
+(check-integrated "∫1/((2x+1)(x+2))"    (/ 1 (* (+ (* 2 x) 1) (+ x 2))))
+(check-integrated "∫(x+5)/(2x²+5x+2)"   (/ (+ x 5) (+ (* 2 (expt x 2)) (* 5 x) 2)))
+(check-integrated "∫1/(4x²-1)"          (/ 1 (- (* 4 (expt x 2)) 1)))
+(check-integrated "∫(x+1)/((2x+1)(x²+1))" (/ (+ x 1) (* (+ (* 2 x) 1) (+ (expt x 2) 1))))
+(check-integrated "∫1/(3(x+1)²)"        (/ 1 (* 3 (expt (+ x 1) 2))))
+(check-integrated "∫x/(3x²+6x+3)"       (/ x (+ (* 3 (expt x 2)) (* 6 x) 3)))
+(check-integrated "∫6x²/(3x³+3)"        (/ (* 6 (expt x 2)) (+ (* 3 (expt x 3)) 3)))
+(check-integrated "∫x²/(2(x+1)³)"       (/ (expt x 2) (* 2 (expt (+ x 1) 3))))
+(check-integrated "∫x/(2.5x²+1)"        (/ x (+ (* 2.5 (expt x 2)) 1)))
+(check-integrated "∫x³/(0.5x²+1.0)"     (/ (expt x 3) (+ (* 0.5 (expt x 2)) 1.0)))
+
+(define (factor-strings p)
+  (map (lambda (f) (cons (sym->string (car f)) (cdr f))) (poly-factor p x)))
+(check "poly-factor 6x²+5x+1"
+       (factor-strings (+ (* 6 (expt x 2)) (* 5 x) 1))
+       '(("1 + 2 * x" . 1) ("1 + 3 * x" . 1)))
+(check "poly-factor (2x+1)(3x+1)(x+4)"
+       (factor-strings (* (+ (* 2 x) 1) (+ (* 3 x) 1) (+ x 4)))
+       '(("1 + 2 * x" . 1) ("1 + 3 * x" . 1) ("4 + x" . 1)))
+(check "poly-factor (2x+1)³"
+       (factor-strings (expt (+ (* 2 x) 1) 3))
+       '(("1 + 2 * x" . 3)))
+(check "poly-squarefree (2x+1)²(x+1)"
+       (map (lambda (p) (cons (sym->string (car p)) (cdr p)))
+            (poly-squarefree (* (expt (+ (* 2 x) 1) 2) (+ x 1)) x))
+       '(("1 + x" . 1) ("1 + 2 * x" . 2)))
+
+;; partial-fractions: the pieces add up to the fraction, also when deg N >= deg D
+(define (check-pf label n d)
+  (let ((pf (partial-fractions n d x)))
+    (check (string-append label " has no object printed in it")
+           (let ((s (sym->string pf)))
+             (let loop ((i 0))
+               (cond ((> (+ i 7) (string-length s)) #t)
+                     ((string=? (substring s i (+ i 7)) "#<objec") #f)
+                     (else (loop (+ i 1))))))
+           #t)
+    (check-approx (string-append label " at x=2") (substitute pf x 2) (substitute (/ n d) x 2) 1e-12)
+    (check-approx (string-append label " at x=5") (substitute pf x 5) (substitute (/ n d) x 5) 1e-12)))
+(check-pf "pf (x⁴+1)/((x+1)(x²+1))" (+ (expt x 4) 1) (* (+ x 1) (+ (expt x 2) 1)))
+(check-pf "pf x/((2x+1)²(x+3))"     x (* (expt (+ (* 2 x) 1) 2) (+ x 3)))
+(check-pf "pf (3x²+1)/(6x²+5x+1)"   (+ (* 3 (expt x 2)) 1) (+ (* 6 (expt x 2)) (* 5 x) 1))
+
 ;;; ---- Summary ---- ;;;
 
 (newline)

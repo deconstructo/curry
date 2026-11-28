@@ -46,20 +46,51 @@ static int poly_deg(val_t *c, int len) {
     return -1;
 }
 
-/* content(p) = gcd of all coefficients (as an integer) */
-static val_t poly_content(val_t *c, int n) {
-    val_t g = Q(0);
-    for (int i = 0; i <= n; i++) {
-        if (!qzero(c[i])) g = num_gcd(g, num_abs(c[i]));
-    }
-    return qzero(g) ? Q(1) : g;
+/* Numerator and denominator of an exact rational (an integer has denominator 1). */
+static val_t rat_num(val_t v) {
+    if (!vis_rational(v)) return v;
+    mpz_t z; mpz_init_set(z, mpq_numref(as_rat(v)->q));
+    val_t r = make_big_from_mpz(z); mpz_clear(z);
+    return r;
+}
+static val_t rat_den(val_t v) {
+    if (!vis_rational(v)) return Q(1);
+    mpz_t z; mpz_init_set(z, mpq_denref(as_rat(v)->q));
+    val_t r = make_big_from_mpz(z); mpz_clear(z);
+    return r;
 }
 
-/* Make primitive: divide all coefficients by their gcd */
+/* content(p) over the rationals: gcd of the numerators over the lcm of the
+ * denominators, so that p / content(p) has coprime integer coefficients. For
+ * integer coefficients this is their gcd. A rational coefficient used to raise
+ * "exact integer required" here (#457). */
+static val_t poly_content(val_t *c, int n) {
+    val_t g = Q(0), l = Q(1);
+    for (int i = 0; i <= n; i++) {
+        if (qzero(c[i])) continue;
+        g = num_gcd(g, num_abs(rat_num(c[i])));
+        l = num_lcm(l, rat_den(c[i]));
+    }
+    return qzero(g) ? Q(1) : num_div(g, l);
+}
+
+/* Make primitive: divide all coefficients by their content */
 static void poly_primitive(val_t *c, int n) {
     val_t g = poly_content(c, n);
     if (qone(g)) return;
     for (int i = 0; i <= n; i++) c[i] = num_div(c[i], g);
+}
+
+/* Scale c in place to a primitive integer polynomial with a positive leading
+ * coefficient; returns s with (old c) = s * (new c). */
+static val_t poly_normalize(val_t *c, int n) {
+    int d = poly_deg(c, n + 1);
+    if (d < 0) return Q(1);
+    val_t s = poly_content(c, n);
+    if (num_is_negative(c[d])) s = num_neg(s);
+    if (qone(s)) return s;
+    for (int i = 0; i <= n; i++) c[i] = num_div(c[i], s);
+    return s;
 }
 
 /* Make monic: divide all coefficients by leading coefficient */
@@ -262,7 +293,7 @@ static void poly_div(val_t *a, int da, val_t *b, int db,
                      val_t **rout, int *dr_out) {
     int dq = da - db;
     val_t *q = poly_alloc(dq < 0 ? 0 : dq);
-    val_t *r = poly_alloc(da);
+    val_t *r = poly_alloc(da < 0 ? 0 : da);
     for (int i = 0; i <= da; i++) r[i] = a[i];
     val_t lcb = b[db];
     int dr = da;
@@ -408,22 +439,8 @@ val_t sx_poly_resultant(val_t p, val_t q, val_t var) {
 /* PART 5: Squarefree factorisation (Yun's algorithm)                         */
 /* ========================================================================== */
 
-/* Exact polynomial quotient: returns p/q (no remainder expected).
-   If there IS a remainder the result is approximate — callers guarantee
-   exact divisibility. */
-static val_t poly_exact_div(val_t p, val_t q, val_t var) {
-    int dp, dq;
-    val_t *cp = expr_to_poly(p, var, &dp);
-    val_t *cq = expr_to_poly(q, var, &dq);
-    if (!cp || !cq || dq < 0) return sx_div(p, q); /* fall back */
-    if (dp < dq) return Q(0);
-    val_t *rem; int dr;
-    val_t *quot; int dqt;
-    poly_div(cp, dp, cq, dq, &quot, &dqt, &rem, &dr);
-    return poly_to_expr(quot, dqt < 0 ? 0 : dqt, var);
-}
-
-/* The same, with the quotient made primitive (content 1): the squarefree
+/* Exact polynomial quotient p/q (callers guarantee divisibility), made
+ * primitive (content 1): the squarefree
  * factors of Yun's algorithm are only defined up to a constant, and this keeps
  * them in the form poly-squarefree has always returned. */
 static val_t poly_exact_div_primitive(val_t p, val_t q, val_t var) {
@@ -520,14 +537,10 @@ static val_t *lagrange_interp(val_t *xs, val_t *ys, int npts, int *out_deg) {
         val_t denom = Q(1);
         for (int j = 0; j < npts; j++) {
             if (j == i) continue;
-            /* multiply li by (x - x_j) */
-            for (int k = li_deg; k >= 0; k--) {
-                li[k + 1] = li[k];
-                li[k] = num_neg(num_mul(li[k], xs[j]));
-                if (k + 1 > li_deg + 1) li_deg = k + 1;
-            }
-            if (li_deg < 1) { li_deg = 1; li[1] = li[0]; li[0] = num_neg(xs[j]); }
-            else li_deg++;
+            /* li *= (x - x_j); descending, so li[k-1] is still the old one */
+            for (int k = li_deg + 1; k >= 0; k--)
+                li[k] = num_sub(k > 0 ? li[k - 1] : Q(0), num_mul(xs[j], li[k]));
+            li_deg++;
             denom = num_mul(denom, num_sub(xs[i], xs[j]));
         }
         if (qzero(denom)) { return NULL; }
@@ -579,10 +592,9 @@ static val_t kronecker_find_factor(val_t *p, int dp, val_t var, int fd) {
     int *div_counts = (int *)gc_alloc_raw_pinned_atomic((size_t)npts * sizeof(int));
     val_t **divisors = (val_t **)gc_alloc_raw_pinned((size_t)npts * sizeof(val_t *));
     for (int i = 0; i < npts; i++) {
-        if (!vis_fixnum(ys[i]) && !(vis_number(ys[i]))) {
-            return Q(1); /* non-integer value — can't do Kronecker */
-        }
-        long yv = vis_fixnum(ys[i]) ? vunfix(ys[i]) : 0;
+        if (!vis_fixnum(ys[i]))
+            return Q(1); /* not a machine integer — can't do Kronecker */
+        long yv = vunfix(ys[i]);
         if (yv == 0) {
             /* xs[i] is a root of p — (x - xs[i]) is a factor */
             /* Check if it divides p */
@@ -607,7 +619,7 @@ static val_t kronecker_find_factor(val_t *p, int dp, val_t var, int fd) {
 
     int max_tries = 1;
     for (int i = 0; i < npts; i++) max_tries *= div_counts[i];
-    if (max_tries > 2048) max_tries = 2048; /* safety limit */
+    if (max_tries > 20000) max_tries = 20000; /* safety limit */
 
     for (int attempt = 0; attempt < max_tries; attempt++) {
         val_t *cand_ys = (val_t *)gc_alloc_raw_pinned((size_t)npts * sizeof(val_t));
@@ -622,7 +634,9 @@ static val_t kronecker_find_factor(val_t *p, int dp, val_t var, int fd) {
                 if (!vis_fixnum(cand[i])) { integer_coeffs = false; break; }
             }
             if (integer_coeffs && !qzero(cand[cd])) {
-                /* Trial division */
+                /* Trial division. A factor and its negative are the same
+                 * factor: keep the one with a positive leading coefficient. */
+                if (num_is_negative(cand[cd])) poly_negate(cand, cd);
                 val_t *rem; int dr;
                 val_t *quot; int dqt;
                 val_t *p2 = poly_copy(p, dp);
@@ -649,9 +663,10 @@ val_t sx_poly_factor(val_t p, val_t var) {
     if (!cp) scm_raise(V_FALSE, "poly-factor: argument must be a polynomial");
     if (dp < 0) return scm_cons(scm_cons(Q(0), Q(1)), V_NIL);
 
-    /* Extract content (rational part) */
-    val_t cont = poly_content(cp, dp);
-    poly_primitive(cp, dp);
+    /* Extract the content and the sign of the leading coefficient, leaving a
+     * primitive integer polynomial with a positive leading coefficient: the
+     * factors are then too, and their product is exactly what remains. */
+    val_t cont = poly_normalize(cp, dp);
 
     val_t result = V_NIL;
     if (!qone(cont)) result = scm_cons(scm_cons(cont, Q(1)), result);
@@ -694,7 +709,7 @@ val_t sx_poly_factor(val_t p, val_t var) {
                     result = scm_cons(scm_cons(sx_simplify(f), mult), result);
                     /* quot is new remainder */
                     crem = quot; drem = dqt;
-                    poly_monic(crem, drem);
+                    poly_normalize(crem, drem);
                     found_any = true;
                     trial_deg = 0; /* restart search with reduced polynomial */
                     break;
@@ -720,209 +735,179 @@ val_t sx_poly_factor(val_t p, val_t var) {
 /* PART 7: Partial fractions                                                   */
 /* ========================================================================== */
 
-/*
- * Extended Euclidean algorithm for polynomials.
- * Finds s, t such that s*a + t*b = gcd(a,b).
- * Returns gcd; sets *s_out, *t_out.
- */
-static val_t poly_extended_gcd(val_t *a, int da, val_t *b, int db,
-                               val_t var,
-                               val_t **s_out, int *ds_out,
-                               val_t **t_out, int *dt_out) {
-    if (da < 0) {
-        /* gcd(0, b) = b; s=0, t=1 */
-        *s_out = poly_alloc(0); (*s_out)[0] = Q(0); *ds_out = -1;
-        *t_out = poly_alloc(0); (*t_out)[0] = Q(1); *dt_out = 0;
-        return poly_to_expr(b, db, var);
-    }
-    if (db < 0) {
-        *s_out = poly_alloc(0); (*s_out)[0] = Q(1); *ds_out = 0;
-        *t_out = poly_alloc(0); (*t_out)[0] = Q(0); *dt_out = -1;
-        return poly_to_expr(a, da, var);
-    }
-
-    /* Extended Euclidean via matrix method */
-    val_t *old_r = poly_copy(a, da); int dor = da;
-    val_t *r     = poly_copy(b, db); int dr  = db;
-    val_t *old_s = poly_alloc(0); old_s[0] = Q(1); int dос = 0;
-    val_t *s     = poly_alloc(0); s[0]     = Q(0); int ds  = -1;
-    val_t *old_t = poly_alloc(0); old_t[0] = Q(0); int dot = -1;
-    val_t *t     = poly_alloc(0); t[0]     = Q(1); int dt  = 0;
-
-    while (dr >= 0) {
-        val_t *quot; int dq;
-        val_t *rem;  int dr2;
-        poly_div(old_r, dor, r, dr, &quot, &dq, &rem, &dr2);
-
-        /* new_s = old_s - q*s; new_t = old_t - q*t */
-        /* (simplified: use expr arithmetic for the Bezout coefficients) */
-        val_t q_expr = poly_to_expr(quot, dq, var);
-        val_t s_expr = poly_to_expr(s, ds < 0 ? 0 : ds, var);
-        val_t t_expr = poly_to_expr(t, dt < 0 ? 0 : dt, var);
-        val_t os_expr= poly_to_expr(old_s, dос < 0 ? 0 : dос, var);
-        val_t ot_expr= poly_to_expr(old_t, dot < 0 ? 0 : dot, var);
-
-        val_t new_s_expr = sx_simplify(sx_sub(os_expr, sx_mul(q_expr, s_expr)));
-        val_t new_t_expr = sx_simplify(sx_sub(ot_expr, sx_mul(q_expr, t_expr)));
-
-        val_t *new_s = expr_to_poly(new_s_expr, var, &dос);
-        val_t *new_t = expr_to_poly(new_t_expr, var, &dot);
-        if (!new_s || !new_t) break; /* shouldn't happen for poly inputs */
-
-        old_r = r;  dor = dr;
-        r     = rem; dr  = dr2;
-        old_s = s;  /* (reuse dос) */
-        s     = new_s; /* dос already set */
-        old_t = t;
-        t     = new_t; /* dot already set */
-        (void)ds;
-        ds = dос; dot = dot; /* silence warnings */
-    }
-
-    *s_out = old_s; *ds_out = dос;
-    *t_out = old_t; *dt_out = dot;
-    return poly_to_expr(old_r, dor, var);
+static val_t *poly_mul(val_t *a, int da, val_t *b, int db, int *dout) {
+    if (da < 0 || db < 0) { *dout = -1; return poly_alloc(0); }
+    val_t *r = poly_alloc(da + db);
+    for (int i = 0; i <= da; i++)
+        for (int j = 0; j <= db; j++)
+            r[i + j] = num_add(r[i + j], num_mul(a[i], b[j]));
+    *dout = poly_deg(r, da + db + 1);
+    return r;
 }
 
-val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
-    /* Polynomial part: if deg(N) >= deg(D), divide out first */
+static val_t *poly_sub(val_t *a, int da, val_t *b, int db, int *dout) {
+    int n = da > db ? da : db;
+    if (n < 0) n = 0;
+    val_t *r = poly_alloc(n);
+    for (int i = 0; i <= da; i++) r[i] = a[i];
+    for (int i = 0; i <= db; i++) r[i] = num_sub(r[i], b[i]);
+    *dout = poly_deg(r, n + 1);
+    return r;
+}
+
+/*
+ * Extended Euclidean algorithm: returns g = gcd(a, b) (up to a constant) and
+ * sets *s_out so that s*a + t*b = g for some t. Exact division over the
+ * rationals throughout.
+ */
+static val_t *poly_bezout(val_t *a, int da, val_t *b, int db,
+                          val_t **s_out, int *ds_out, int *dg_out) {
+    val_t *r0 = poly_copy(a, da < 0 ? 0 : da); int d0 = da;
+    val_t *r1 = poly_copy(b, db < 0 ? 0 : db); int d1 = db;
+    val_t *s0 = poly_alloc(0); s0[0] = Q(1); int ds0 = 0;
+    val_t *s1 = poly_alloc(0); int ds1 = -1;
+    while (d1 >= 0) {
+        val_t *q, *r2; int dq, d2;
+        poly_div(r0, d0, r1, d1, &q, &dq, &r2, &d2);
+        int dqs, ds2;
+        val_t *qs = poly_mul(q, dq, s1, ds1, &dqs);
+        val_t *s2 = poly_sub(s0, ds0, qs, dqs, &ds2);
+        r0 = r1; d0 = d1; r1 = r2; d1 = d2;
+        s0 = s1; ds0 = ds1; s1 = s2; ds1 = ds2;
+    }
+    *s_out = s0; *ds_out = ds0; *dg_out = d0;
+    return r0;
+}
+
+/* One term A / f^k of a partial-fraction decomposition. */
+typedef struct { val_t A; val_t f; long k; } PfTerm;
+
+/* Coefficients must be exact numbers; a flonum is converted to the exact
+ * rational it stands for, so that every step below is exact. */
+static bool poly_make_exact(val_t *c, int n) {
+    for (int i = 0; i <= n; i++) {
+        if (vis_flonum(c[i])) {
+            double d = num_to_double(c[i]);
+            if (d != d || d - d != 0) return false;     /* NaN or infinity */
+            c[i] = num_exact(c[i]);
+        } else if (!(vis_fixnum(c[i]) || vis_bignum(c[i]) || vis_rational(c[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Decompose N/D into a polynomial part plus terms A/f^k, with f irreducible
+ * over the rationals, deg A < deg f. Works over the rationals:
+ *   1. D = c * P with P = prod f_i^m_i from the factoriser (a mismatch means
+ *      the factoriser missed something: refuse),
+ *   2. N/P = sum N_i / f_i^m_i by the Chinese remainder theorem:
+ *      N_i = N * (P/f_i^m_i)^-1 mod f_i^m_i, from the extended Euclid,
+ *   3. each N_i / f^m is split by writing N_i in powers of f.
+ * Returns false when the input is not such a quotient or cannot be factored.
+ */
+static bool pf_decompose(val_t num_expr, val_t den_expr, val_t var,
+                         val_t *poly_part, PfTerm **terms_out, int *nterms_out) {
     int dn, dd;
     val_t *cn = expr_to_poly(num_expr, var, &dn);
     val_t *cd = expr_to_poly(den_expr, var, &dd);
-    if (!cn || !cd) return sx_div(num_expr, den_expr);
+    if (!cn || !cd || dd < 0) return false;
+    if (dn >= 0 && !poly_make_exact(cn, dn)) return false;
+    if (!poly_make_exact(cd, dd)) return false;
 
-    /* Divide N and D by the integer content of D: N/D = (N/c)/(D/c). The
-     * factor list sx_poly_factor returns has no constant in it, so for
-     * D = 3x^2+3 the factor was (x^2+1) and the 3 was lost: x/(3x^2+3)
-     * integrated as x/(x^2+1) (#447). Only the content, not the leading
-     * coefficient: D/c keeps integer coefficients, which sx_poly_factor needs
-     * (it raises on a rational one). A denominator with rational or inexact
-     * coefficients is left as it was. */
-    if (dd > 0) {
-        bool ints = true;
-        for (int i = 0; i <= dd; i++)
-            if (!(vis_fixnum(cd[i]) || vis_bignum(cd[i]))) { ints = false; break; }
-        val_t c = ints ? poly_content(cd, dd) : Q(1);
-        if (!qone(c)) {
-            for (int i = 0; i <= dn; i++) cn[i] = num_div(cn[i], c);
-            for (int i = 0; i <= dd; i++) cd[i] = num_div(cd[i], c);
-            num_expr = poly_to_expr(cn, dn < 0 ? 0 : dn, var);
-            den_expr = poly_to_expr(cd, dd, var);
-        }
-    }
+    *poly_part = Q(0); *terms_out = NULL; *nterms_out = 0;
 
-    val_t poly_part = Q(0);
-    val_t *rem_n = cn; int drn = dn;
+    /* D = scale * Dn, Dn primitive with integer coefficients */
+    val_t scale = poly_normalize(cd, dd);
+    for (int i = 0; i <= dn; i++) cn[i] = num_div(cn[i], scale);
+
+    val_t *rn = cn; int drn = dn;
     if (dn >= dd) {
-        val_t *quot; int dq; val_t *rem2; int dr2;
-        poly_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
-        poly_part = poly_to_expr(quot, dq, var);
-        rem_n = rem2; drn = dr2;
+        val_t *quot, *rem; int dq, dr;
+        poly_div(cn, dn, cd, dd, &quot, &dq, &rem, &dr);
+        *poly_part = poly_to_expr(quot, dq < 0 ? 0 : dq, var);
+        rn = rem; drn = dr;
     }
-    if (drn < 0) return sx_simplify(poly_part);
-    val_t N = poly_to_expr(rem_n, drn, var);
+    if (drn < 0 || dd == 0) return true;
 
-    /* Factorise denominator */
-    val_t factors = sx_poly_factor(den_expr, var);
-    if (!vis_pair(factors)) return sx_add(poly_part, sx_div(N, den_expr));
+    /* Factors, each primitive with a positive leading coefficient */
+    val_t flist = sx_poly_factor(poly_to_expr(cd, dd, var), var);
+    int nf = 0;
+    for (val_t l = flist; vis_pair(l); l = vcdr(l)) nf++;
+    val_t **F = (val_t **)gc_alloc_raw_pinned((size_t)(nf + 1) * sizeof(val_t *));
+    val_t **G = (val_t **)gc_alloc_raw_pinned((size_t)(nf + 1) * sizeof(val_t *));
+    int *dF = (int *)gc_alloc_raw_pinned_atomic((size_t)(nf + 1) * sizeof(int));
+    int *dG = (int *)gc_alloc_raw_pinned_atomic((size_t)(nf + 1) * sizeof(int));
+    long *M = (long *)gc_alloc_raw_pinned_atomic((size_t)(nf + 1) * sizeof(long));
+    int n = 0;
+    val_t *P = poly_alloc(0); P[0] = Q(1); int dP = 0;
+    for (val_t l = flist; vis_pair(l); l = vcdr(l)) {
+        val_t kv = vcar(l);
+        if (!vis_fixnum(vcdr(kv)) || vunfix(vcdr(kv)) < 1) return false;
+        int df; val_t *cf = expr_to_poly(vcar(kv), var, &df);
+        if (!cf || df < 0) return false;
+        if (df == 0) continue;                  /* a constant: absorbed below */
+        if (!poly_make_exact(cf, df)) return false;
+        poly_normalize(cf, df);
+        F[n] = cf; dF[n] = df; M[n] = vunfix(vcdr(kv));
+        G[n] = poly_alloc(0); G[n][0] = Q(1); dG[n] = 0;
+        for (long j = 0; j < M[n]; j++) G[n] = poly_mul(G[n], dG[n], cf, df, &dG[n]);
+        P = poly_mul(P, dP, G[n], dG[n], &dP);
+        n++;
+    }
+    if (n == 0 || dP != dd) return false;       /* factoriser lost or gained a factor */
 
-    /*
-     * For each irreducible factor fᵢ of multiplicity mᵢ:
-     *   N/D = Σᵢ Σₖ₌₁ᵐⁱ Aᵢₖ / fᵢᵏ
-     *
-     * For simple factors (deg=1, mult=1), use the residue formula:
-     *   A = N(root) / D'(root)
-     * where D' = d(den)/d(var) and root satisfies f(root)=0.
-     *
-     * For linear factors f = a*var + b, root = -b/a.
-     * For quadratic/higher or repeated factors, fall back to Bezout.
-     */
-    val_t D_prime = sx_simplify(sx_expand(sx_diff(den_expr, var)));
-    val_t result  = poly_part;
+    /* Dn = k * P for a constant k, or the factorisation is wrong */
+    val_t *kq, *kr; int dkq, dkr;
+    poly_div(cd, dd, P, dP, &kq, &dkq, &kr, &dkr);
+    if (dkr >= 0 || dkq != 0) return false;
+    val_t k = kq[0];
+    for (int i = 0; i <= drn; i++) rn[i] = num_div(rn[i], k);
 
-    val_t flist = factors;
-    while (vis_pair(flist)) {
-        val_t kv   = vcar(flist); flist = vcdr(flist);
-        val_t f    = vcar(kv);
-        val_t mult = vcdr(kv);
-        if (!vis_fixnum(mult)) continue;
-        long m = vunfix(mult);
+    PfTerm *terms = (PfTerm *)gc_alloc_raw_pinned((size_t)(dd + 1) * sizeof(PfTerm));
+    int nt = 0;
+    for (int i = 0; i < n; i++) {
+        val_t *E, *er; int dE, der;
+        poly_div(P, dP, G[i], dG[i], &E, &dE, &er, &der);
+        val_t *s; int ds, dg;
+        val_t *g = poly_bezout(E, dE, G[i], dG[i], &s, &ds, &dg);
+        if (dg != 0) return false;              /* not coprime: cannot happen */
+        int dt, dm;
+        val_t *t = poly_mul(rn, drn, s, ds, &dt);
+        val_t *m, *q0; int dq0;
+        poly_div(t, dt, G[i], dG[i], &q0, &dq0, &m, &dm);
+        for (int j = 0; j <= dm; j++) m[j] = num_div(m[j], g[0]);
 
-        /* Get factor degree */
-        int df; val_t *cf = expr_to_poly(f, var, &df);
-        if (!cf) { result = sx_add(result, sx_div(N, sx_expt(f, Q(m)))); continue; }
-
-        if (df == 1 && m == 1) {
-            /* Simple linear factor: residue formula.
-               Root r = -c[0]/c[1] */
-            val_t r = sx_simplify(num_neg(num_div(cf[0], cf[1])));
-            val_t N_at_r  = sx_simplify(sx_substitute(N,       var, r));
-            val_t Dp_at_r = sx_simplify(sx_substitute(D_prime, var, r));
-            if (num_is_zero(Dp_at_r)) continue;
-            val_t A = sx_simplify(num_div(N_at_r, Dp_at_r));
-            if (!num_is_zero(A))
-                result = sx_add(result, sx_simplify(sx_div(A, f)));
-        } else if (df == 1 && m > 1) {
-            /* Repeated linear factor: use repeated residues */
-            val_t r = sx_simplify(num_neg(num_div(cf[0], cf[1])));
-            val_t g = N; /* will divide out roots iteratively */
-            for (long k = 1; k <= m; k++) {
-                /* A_k = 1/(m-k)! * d^(m-k)/dvar^(m-k) [N*(f/lc(f))^m / D] at r */
-                /* Simple version: A_k from g at r, where g = remainder */
-                val_t g_at_r = sx_simplify(sx_substitute(g, var, r));
-                /* Compute denominator: D / f^k evaluated at r, then A_k = g(r)/that */
-                val_t fk = sx_expt(f, Q(k));
-                val_t comp = poly_exact_div(den_expr, fk, var);
-                val_t comp_at_r = sx_simplify(sx_substitute(comp, var, r));
-                if (!num_is_zero(comp_at_r)) {
-                    val_t Ak = sx_simplify(num_div(g_at_r, comp_at_r));
-                    if (!num_is_zero(Ak)) {
-                        result = sx_add(result, sx_div(Ak, sx_simplify(fk)));
-                        g = sx_simplify(sx_expand(sx_sub(g, sx_mul(Ak, comp))));
-                    }
-                }
+        /* N_i = r_0 + f (r_1 + f (r_2 + ...)),  N_i / f^m = sum r_j / f^(m-j) */
+        val_t fe = poly_to_expr(F[i], dF[i], var);
+        val_t *cur = m; int dc = dm;
+        for (long j = 0; j < M[i] && dc >= 0; j++) {
+            val_t *q, *r; int dq, dr;
+            poly_div(cur, dc, F[i], dF[i], &q, &dq, &r, &dr);
+            if (dr >= 0) {
+                terms[nt].A = poly_to_expr(r, dr, var);
+                terms[nt].f = fe;
+                terms[nt].k = M[i] - j;
+                nt++;
             }
-        } else {
-            /* Irreducible higher-degree factor (e.g. x²+1).
-               Find comp = den / f^m (complementary denominator).
-               The coefficient A satisfies: A·comp + B·f^m = N for some B.
-               If comp = 1 (f^m = den), then A = N directly (reduce mod f^m). */
-            val_t fk = sx_expt(f, Q(m));
-            val_t comp = poly_exact_div(den_expr, sx_simplify(fk), var);
-            int dcomp; val_t *ccomp = expr_to_poly(comp, var, &dcomp);
-
-            val_t A;
-            if (!ccomp || dcomp == 0) {
-                /* comp is a constant — A = N / comp (mod f^m) */
-                val_t comp_val = (!ccomp || dcomp < 0) ? Q(1) : ccomp[0];
-                A = poly_to_expr(cn, dn, var); /* A = N */
-                if (!qone(comp_val)) {
-                    int da; val_t *ca = expr_to_poly(
-                        sx_simplify(num_div(A, comp_val)), var, &da);
-                    A = ca ? poly_to_expr(ca, da, var) : A;
-                }
-            } else {
-                /* General case: use extended GCD */
-                val_t *s_b; int ds; val_t *t_b; int dt;
-                poly_extended_gcd(cf, df, ccomp, dcomp, var,
-                                  &s_b, &ds, &t_b, &dt);
-                A = sx_simplify(sx_mul(
-                    poly_to_expr(t_b, dt < 0 ? 0 : dt, var), N));
-            }
-            /* Reduce A modulo f */
-            A = sx_simplify(A);
-            int da; val_t *ca = expr_to_poly(A, var, &da);
-            if (ca && da >= df) {
-                val_t *qr; int dqr; val_t *rr; int drr;
-                poly_div(ca, da, cf, df, &qr, &dqr, &rr, &drr);
-                A = poly_to_expr(rr, drr < 0 ? 0 : drr, var);
-                A = sx_simplify(A);
-            }
-            if (!num_is_zero(A))
-                result = sx_add(result, sx_div(A, sx_simplify(fk)));
+            cur = q; dc = dq;
         }
+        if (nt > dd) return false;              /* cannot happen: at most deg D terms */
     }
+    *terms_out = terms; *nterms_out = nt;
+    return true;
+}
 
+val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
+    val_t poly_part; PfTerm *terms; int nt;
+    if (!pf_decompose(num_expr, den_expr, var, &poly_part, &terms, &nt))
+        return sx_div(num_expr, den_expr);
+    val_t result = poly_part;
+    for (int i = 0; i < nt; i++) {
+        val_t fk = terms[i].k == 1 ? terms[i].f : sx_expt(terms[i].f, Q(terms[i].k));
+        result = sx_add(result, sx_div(terms[i].A, fk));
+    }
     return sx_simplify(result);
 }
 
@@ -1411,86 +1396,28 @@ val_t sx_integrate_rational(val_t expr, val_t var) {
         (int)as_symexpr(ex)->nargs != 2)
         return V_VOID;
 
-    val_t num_ex = as_symexpr(ex)->args[0];
-    val_t den_ex = as_symexpr(ex)->args[1];
-
     /* Both must be polynomials in var */
     int dn, dd;
-    val_t *cn = expr_to_poly(num_ex, var, &dn);
-    val_t *cd = expr_to_poly(den_ex, var, &dd);
+    val_t *cn = expr_to_poly(as_symexpr(ex)->args[0], var, &dn);
+    val_t *cd = expr_to_poly(as_symexpr(ex)->args[1], var, &dd);
     if (!cn || !cd || dd <= 0) return V_VOID;
 
-    /* Polynomial part */
+    /* Polynomial part plus terms A/f^k */
+    val_t poly_part; PfTerm *terms; int nt;
+    if (!pf_decompose(as_symexpr(ex)->args[0], as_symexpr(ex)->args[1], var,
+                      &poly_part, &terms, &nt))
+        return V_VOID;
+
     val_t result = Q(0);
-    if (dn >= dd) {
-        val_t *quot; int dq; val_t *rem2; int dr2;
-        poly_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
-        val_t poly_part = integrate_poly(poly_to_expr(quot, dq < 0 ? 0 : dq, var), var);
-        if (poly_part == V_VOID) return V_VOID;
-        result = poly_part;
-        cn = rem2; dn = dr2;
-        if (dn < 0) return sx_simplify(result);
+    if (!num_is_zero(poly_part)) {
+        result = integrate_poly(poly_part, var);
+        if (result == V_VOID) return V_VOID;
     }
-
-    val_t N = poly_to_expr(cn, dn, var);
-    val_t D = poly_to_expr(cd, dd, var);
-
-    /* Partial fraction decomposition */
-    val_t pf = sx_partial_fractions(N, D, var);
-    if (num_is_zero(pf)) return V_VOID; /* decomposition failed */
-
-    /* Integrate each partial fraction term.
-       pf is a sum of A/f^k and possibly a polynomial part. */
-    val_t pf_ex = sx_simplify(sx_expand(pf));
-
-    /* Collect additive terms */
-    int nterms; val_t *terms; val_t single[1];
-    if (vis_symexpr(pf_ex) && as_symexpr(pf_ex)->op == SX_ADD) {
-        nterms = (int)as_symexpr(pf_ex)->nargs;
-        terms  = as_symexpr(pf_ex)->args;
-    } else { single[0] = pf_ex; nterms = 1; terms = single; }
-
-    for (int i = 0; i < nterms; i++) {
-        val_t t = terms[i];
-        val_t int_t = V_VOID;
-
-        /* Pure number or polynomial-in-var term */
-        if (vis_number(t)) {
-            int_t = sx_mul(t, var);
-        } else if (!vis_symexpr(t)) {
-            int_t = V_VOID;
-        } else {
-            SymExpr *se = as_symexpr(t);
-
-            /* A / f^k */
-            if (se->op == SX_DIV && (int)se->nargs == 2) {
-                val_t A = se->args[0];
-                val_t denom = se->args[1];
-                /* Extract f and k from denom = f^k */
-                val_t f; long k = 1;
-                if (vis_symexpr(denom) && as_symexpr(denom)->op == SX_EXPT &&
-                    (int)as_symexpr(denom)->nargs == 2 &&
-                    vis_fixnum(as_symexpr(denom)->args[1])) {
-                    f = as_symexpr(denom)->args[0];
-                    k = vunfix(as_symexpr(denom)->args[1]);
-                } else {
-                    f = denom;
-                }
-                int_t = integrate_pf_term(A, f, k, var);
-            }
-            /* Polynomial term: x^k or (c * x^k) etc. */
-            else {
-                int_t = integrate_poly(t, var);
-            }
-        }
-
-        if (int_t == V_VOID) {
-            /* Can't integrate this term — give up */
-            return V_VOID;
-        }
+    for (int i = 0; i < nt; i++) {
+        val_t int_t = integrate_pf_term(terms[i].A, terms[i].f, terms[i].k, var);
+        if (int_t == V_VOID) return V_VOID;     /* can't integrate this term */
         result = sx_add(result, int_t);
     }
-
     return sx_simplify(result);
 }
 
