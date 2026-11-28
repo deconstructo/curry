@@ -23,9 +23,10 @@
         (lambda () (L 'out) (raise 'from-after))))))
 ;; The inner guard is outside the dynamic-wind, so it is still installed when
 ;; the after thunk runs during the escape (R7RS 6.10) and handles the thunk's
-;; own raise too: the clause runs twice, the after thunk once.
+;; own raise: its clause runs once, for that exception, after the after thunk
+;; (#431), and the after thunk runs once.
 (check "guard: result" r1 'v)
-(check "guard: after ran once" (reverse log) '(in clause out clause))
+(check "guard: after ran once" (reverse log) '(in out clause))
 
 ;; same through an explicit call/cc escape
 (set! log '())

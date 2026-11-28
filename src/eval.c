@@ -162,14 +162,25 @@ static val_t eval_call_cc(val_t proc) {
 }
 
 
-/* The clauses of a guard, tried in order against the raised object. Sets
- * *matched and returns the clause's value, or clears it when no clause
- * applies. Used after the raise has unwound to the guard, and in place for
- * raise-continuable (guard_in_place below). */
-static val_t guard_run_clauses(val_t exn, val_t var, val_t clauses, val_t env, bool *matched) {
-    *matched = true;
+/* Which clause of a guard applies to a raised object, and what is left to run
+ * of it. The tests are tried in order, where the guard sees the raise: in
+ * place for raise-continuable (guard_in_place below), at the guard for a
+ * plain raise. The clause body is not run here: it runs after control has
+ * left the dynamic-wind frames between the raise and the guard, so their
+ * after thunks come first, as R7RS 6.11 has it (#431). */
+enum { GS_NONE, GS_VALUE, GS_BODY, GS_ARROW };
+typedef struct {
+    int   kind;
+    val_t env;       /* the guard's environment, the variable bound to the object */
+    val_t body;      /* GS_BODY: the clause's expressions; GS_ARROW: (receiver) */
+    val_t value;     /* GS_VALUE: the result; GS_ARROW: the test's value */
+} GuardSel;
+
+static void guard_select(val_t exn, val_t var, val_t clauses, val_t env, GuardSel *sel) {
+    sel->kind = GS_NONE;
     val_t guard_env = env_extend(env);
     env_define(guard_env, var, exn);
+    sel->env = guard_env;
     val_t cs = clauses;
     while (vis_pair(cs)) {
         val_t clause = vcar(cs);
@@ -193,9 +204,9 @@ static val_t guard_run_clauses(val_t exn, val_t var, val_t clauses, val_t env, b
              * this branch had never been guarded at all. */
             if (!vis_nil(cbody) && !vis_pair(cbody))
                 scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: ill-formed special form");
-            if (vis_nil(cbody)) return V_VOID;
-            while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
-            return eval(vcar(cbody), guard_env);
+            if (vis_nil(cbody)) { sel->kind = GS_VALUE; sel->value = V_VOID; return; }
+            sel->kind = GS_BODY; sel->body = cbody;
+            return;
         }
         val_t tv = eval(test, guard_env);
         if (vis_true(tv)) {
@@ -205,28 +216,45 @@ static val_t guard_run_clauses(val_t exn, val_t var, val_t clauses, val_t env, b
              * test's own value rather than crashing on vcdr(cbody)
              * below; matches the compiled path's own confirmed
              * (if slightly odd) leniency for this exact shape. */
-            if (!vis_pair(cbody)) return tv;
+            if (!vis_pair(cbody)) { sel->kind = GS_VALUE; sel->value = tv; return; }
             /* (test => receiver): the value is (receiver v), v the test's
              * value. => was evaluated as a variable (#422). */
             if (vcar(cbody) == S_ARROW) {
                 if (!vis_pair(vcdr(cbody)) || !vis_nil(vcdr(vcdr(cbody))))
                     scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: a => clause takes one receiver");
-                val_t recv = eval(vcar(vcdr(cbody)), guard_env);
-                return apply(recv, make_pair(tv, V_NIL));
+                sel->kind = GS_ARROW; sel->body = vcdr(cbody); sel->value = tv;
+                return;
             }
-            while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), guard_env); cbody = vcdr(cbody); }
-            return eval(vcar(cbody), guard_env);
+            sel->kind = GS_BODY; sel->body = cbody;
+            return;
         }
     }
-    *matched = false;
-    return V_VOID;
+}
+
+/* Runs what guard_select chose. noinline: eval_guard reads the selection back
+ * after a longjmp, and this call makes it load the fields from memory. */
+static __attribute__((noinline)) val_t guard_finish(const GuardSel *sel) {
+    switch (sel->kind) {
+    case GS_VALUE: return sel->value;
+    case GS_ARROW: {
+        val_t recv = eval(vcar(sel->body), sel->env);
+        return apply(recv, make_pair(sel->value, V_NIL));
+    }
+    case GS_BODY: {
+        val_t cbody = sel->body;
+        while (vis_pair(vcdr(cbody))) { eval(vcar(cbody), sel->env); cbody = vcdr(cbody); }
+        return eval(vcar(cbody), sel->env);
+    }
+    default: return V_VOID;
+    }
 }
 
 /* A guard's handler as raise-continuable sees it (#406). scm_raise_continuable
  * calls a frame's handler_proc in place, with the raise point still there.
- * A clause that applies ends the guard with its value: the dynamic-wind
- * frames entered since the guard are left, then control jumps to the
- * guard's own frame. With no clause the object is raised again continuably
+ * Its clause tests are tried there. A clause that applies ends the guard: the
+ * dynamic-wind frames entered since the guard are left (their after thunks
+ * run), then control jumps to the guard's own frame, which runs the clause's
+ * body (#431). With no clause the object is raised again continuably
  * to the handlers outside (R7RS 4.2.7), and what they return is returned
  * to the original raise-continuable. */
 typedef struct {
@@ -234,16 +262,16 @@ typedef struct {
     void *jmpbuf;       /* heap-allocated jmp_buf, set in the guard's frame (as call/cc does) */
     void *wind_top;     /* current_wind when the guard was entered */
     uintptr_t frame_mark; /* the guard's stack position, for cc_unwind_to */
-    val_t value;        /* of the clause that applied */
+    GuardSel sel;       /* the clause that applied */
 } GuardInPlace;
 
 static val_t guard_in_place(int argc, val_t *argv, void *ud) {
     (void)argc;
     GuardInPlace *g = (GuardInPlace *)ud;
-    bool matched;
-    val_t v = guard_run_clauses(argv[0], g->var, g->clauses, g->env, &matched);
-    if (!matched) return scm_raise_continuable(argv[0]);
-    g->value = v;
+    GuardSel sel;
+    guard_select(argv[0], g->var, g->clauses, g->env, &sel);
+    if (sel.kind == GS_NONE) return scm_raise_continuable(argv[0]);
+    g->sel = sel;
     /* The dynamic-wind frames between the raise point and the guard are
      * left now. Their own handler frames are still installed here (raise-
      * continuable keeps them while a handler runs in place); with them, an
@@ -346,7 +374,7 @@ static __attribute__((noinline)) val_t eval_guard(val_t rest, val_t env) {
     GuardInPlace *gip = (GuardInPlace *)gc_alloc(sizeof(GuardInPlace));
     gip->var = var; gip->clauses = clauses; gip->env = env;
     gip->jmpbuf = gc_alloc_raw_pinned(sizeof(jmp_buf));
-    gip->wind_top = current_wind; gip->value = V_VOID;
+    gip->wind_top = current_wind; gip->sel.kind = GS_NONE;
     gip->frame_mark = (uintptr_t)&h;
     Primitive *gp = CURRY_NEW(Primitive);
     gp->hdr.type = T_PRIMITIVE; gp->hdr.flags = 0;
@@ -358,7 +386,7 @@ static __attribute__((noinline)) val_t eval_guard(val_t rest, val_t env) {
         jit_depth_restore(h.saved_jit_depth);
         vm_handler_count_set(h.saved_vm_handler_count);
         vm_exn_state_restore(h.saved_vm_frame_count, h.saved_vm_sp, h.saved_vm_open_upvalues);
-        return *(volatile val_t *)&gip->value;
+        return guard_finish(&gip->sel);
     }
     h.handler_proc = vptr(gp); current_handler = &h;
     if (setjmp(h.jmp) == 0) {
@@ -376,9 +404,9 @@ static __attribute__((noinline)) val_t eval_guard(val_t rest, val_t env) {
     val_t exn = h.exn;
 
     /* Try each clause */
-    bool matched;
-    val_t gv = guard_run_clauses(exn, var, clauses, env, &matched);
-    if (matched) return gv;
+    GuardSel sel;
+    guard_select(exn, var, clauses, env, &sel);
+    if (sel.kind != GS_NONE) return guard_finish(&sel);
     /* No clause matched: re-raise */
     scm_raise_val(exn);
 

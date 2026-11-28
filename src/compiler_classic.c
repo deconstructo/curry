@@ -1776,13 +1776,23 @@ static void compile_with_exception_handler(Compiler *c, val_t args,
 static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     /* (guard (var clause...) body...)
      * Expands to:
-     *   (%guard-call/cc (lambda (%guard-k)
-     *     (%guard-with-exception-handler
-     *       (lambda (var . %guard-unwound)
-     *         (cond (test (%guard-k expr)) ...
-     *               (else (%guard-reraise var %guard-unwound))))
-     *       (lambda () body...))))
-     * Each (else expr) clause wraps expr in (%guard-k ...) rather than raise.
+     *   (let ((%sel #f) (%exn #f) (%tv #f))
+     *     (let ((%v (%guard-call/cc (lambda (%guard-k)
+     *                 (%guard-with-exception-handler
+     *                   (lambda (var . %guard-unwound)
+     *                     (cond (test0 (set! %exn var) (set! %sel 0) (%guard-k #f)) ...
+     *                           (else (%guard-reraise var %guard-unwound))))
+     *                   (lambda () body...))))))
+     *       (if %sel
+     *           (let ((var %exn))
+     *             (case %sel ((0) expr0 ...) ((1) (receiver1 %tv)) ...))
+     *           %v)))
+     * The handler only picks the clause (its test runs where the guard sees the
+     * raise: at the raise point for raise-continuable) and escapes. The clause's
+     * body runs after the escape, so the after thunks of the dynamic-wind frames
+     * in between run first, as R7RS 6.11 has it (#431). A body that raised or an
+     * after thunk that raises during the escape reaches this same handler again
+     * and picks again; the last pick is the one that runs, once.
      *
      * With no matching clause the exception is raised again, and R7RS 4.2.7
      * says with raise-continuable: an outer handler may return a value to
@@ -1817,6 +1827,14 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t S_ELSE2 = sym_intern_cstr("else");
     snprintf(nm, sizeof nm, "%%guard-k.%u", serial);
     val_t gk      = sym_intern_cstr(nm);
+    snprintf(nm, sizeof nm, "%%guard-sel.%u", serial);
+    val_t g_sel   = sym_intern_cstr(nm);
+    snprintf(nm, sizeof nm, "%%guard-exn.%u", serial);
+    val_t g_exn   = sym_intern_cstr(nm);
+    snprintf(nm, sizeof nm, "%%guard-tv.%u", serial);
+    val_t g_tv    = sym_intern_cstr(nm);
+    snprintf(nm, sizeof nm, "%%guard-v.%u", serial);
+    val_t g_val   = sym_intern_cstr(nm);
 
     /* Validates every clause is itself a non-empty pair before either
      * loop below destructures it -- see ir_lower_let's identical comment
@@ -1839,43 +1857,55 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
         cl = vcdr(cl);
     }
 
-    /* Build cond clauses in forward order (collect into array, then cons) */
+    /* Build cond clauses in forward order (collect into array, then cons).
+     * case_arr gets the matching deferred bodies, one per clause that picks. */
     val_t clause_arr[64];
-    int ci = 0;
+    val_t case_arr[64];
+    int ci = 0, ni = 0;
     cl = clauses;
     while (vis_pair(cl) && ci < 64) {
         val_t clause = vcar(cl);
         val_t test   = vcar(clause);
         val_t cbody  = vcdr(clause);
         val_t rest;
+        /* (set! %exn var) (set! %sel i) (%guard-k #f): pick clause i, escape. */
+        #define PICK(i_) \
+            scm_cons(scm_cons(S_SET, scm_cons(g_exn, scm_cons(var, V_NIL))), \
+              scm_cons(scm_cons(S_SET, scm_cons(g_sel, scm_cons(vfix(i_), V_NIL))), \
+                scm_cons(scm_cons(gk, scm_cons(V_FALSE, V_NIL)), V_NIL)))
         if (!vis_pair(cbody)) {
             /* Bodyless clause (test) — return test's own value without
              * re-evaluating it, via cond's => arrow form (proc receives
-             * the test's value as its one argument). */
+             * the test's value as its one argument). The value is the
+             * guard's; there is no body to defer. */
             rest = scm_cons(S_ARROW, scm_cons(gk, V_NIL));
         } else if (vcar(cbody) == S_ARROW) {
             if (!vis_pair(vcdr(cbody)) || !vis_nil(vcdr(vcdr(cbody))) || test == S_ELSE2)
                 scm_raise_code(EC_WRONG_NUMBER_OF_ARGUMENTS, "guard: a => clause takes one receiver");
-            /* (test => receiver): the guard's value is (receiver v), with v
-             * the test's value. It was compiled as a body, with => read as a
-             * variable (#422). Becomes
-             *   (test => (lambda (%guard-v) (%guard-k (receiver %guard-v)))) */
-            snprintf(nm, sizeof nm, "%%guard-v.%u.%d", serial, ci);
+            /* (test => receiver): the guard's value is (receiver v), v the
+             * test's value (#422), and the receiver is called after the
+             * escape (#431). Becomes
+             *   (test => (lambda (%guard-v) (set! %tv %guard-v) <pick>))
+             * and the case branch (receiver %tv). */
+            snprintf(nm, sizeof nm, "%%guard-a.%u.%d", serial, ci);
             val_t gv   = sym_intern_cstr(nm);
-            val_t call = scm_cons(vcar(vcdr(cbody)), scm_cons(gv, V_NIL));
+            val_t pick = PICK(ni);
             val_t lam  = scm_cons(S_LAMBDA,
                              scm_cons(scm_cons(gv, V_NIL),
-                                 scm_cons(scm_cons(gk, scm_cons(call, V_NIL)), V_NIL)));
+                                 scm_cons(scm_cons(S_SET, scm_cons(g_tv, scm_cons(gv, V_NIL))),
+                                          pick)));
             rest = scm_cons(S_ARROW, scm_cons(lam, V_NIL));
+            val_t call = scm_cons(vcar(vcdr(cbody)), scm_cons(g_tv, V_NIL));
+            case_arr[ni] = scm_cons(scm_cons(vfix(ni), V_NIL), scm_cons(call, V_NIL));
+            ni++;
         } else {
-            /* A clause body is (expr ...), i.e. an implicit begin — wrap
-             * multi-expression bodies in an explicit (begin ...) so every
-             * expression actually runs, not just the first. */
-            val_t body_expr = vis_pair(vcdr(cbody))
-                ? scm_cons(S_BEGIN, cbody)
-                : vcar(cbody);
-            rest = scm_cons(scm_cons(gk, scm_cons(body_expr, V_NIL)), V_NIL);
+            /* A clause body is (expr ...), an implicit begin; the case branch
+             * has it as it is. */
+            rest = PICK(ni);
+            case_arr[ni] = scm_cons(scm_cons(vfix(ni), V_NIL), cbody);
+            ni++;
         }
+        #undef PICK
         clause_arr[ci++] = scm_cons(test == S_ELSE2 ? S_ELSE2 : test, rest);
         cl = vcdr(cl);
     }
@@ -1905,7 +1935,26 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
                          scm_cons(scm_cons(gk, V_NIL),
                              scm_cons(weh_form, V_NIL)));
     /* (%guard-call/cc outer-lam) */
-    val_t expanded = scm_cons(S_GUARD_CALL_CC, scm_cons(outer_lam, V_NIL));
+    val_t callcc = scm_cons(S_GUARD_CALL_CC, scm_cons(outer_lam, V_NIL));
+    /* (case %sel ((0) expr0 ...) ...) */
+    val_t case_list = V_NIL;
+    for (int i = ni - 1; i >= 0; i--) case_list = scm_cons(case_arr[i], case_list);
+    val_t case_form = scm_cons(S_CASE, scm_cons(g_sel, case_list));
+    /* (let ((var %exn)) case-form) */
+    val_t bind_var = scm_cons(S_LET,
+                         scm_cons(scm_cons(scm_cons(var, scm_cons(g_exn, V_NIL)), V_NIL),
+                             scm_cons(case_form, V_NIL)));
+    /* (if %sel bind-var %v) */
+    val_t finish = scm_cons(S_IF, scm_cons(g_sel, scm_cons(bind_var, scm_cons(g_val, V_NIL))));
+    /* (let ((%v callcc)) finish) */
+    val_t inner = scm_cons(S_LET,
+                      scm_cons(scm_cons(scm_cons(g_val, scm_cons(callcc, V_NIL)), V_NIL),
+                          scm_cons(finish, V_NIL)));
+    /* (let ((%sel #f) (%exn #f) (%tv #f)) inner) */
+    val_t cells = scm_cons(scm_cons(g_sel, scm_cons(V_FALSE, V_NIL)),
+                    scm_cons(scm_cons(g_exn, scm_cons(V_FALSE, V_NIL)),
+                      scm_cons(scm_cons(g_tv,  scm_cons(V_FALSE, V_NIL)), V_NIL)));
+    val_t expanded = scm_cons(S_LET, scm_cons(cells, scm_cons(inner, V_NIL)));
     compile(c, expanded, tail, line);
 }
 
