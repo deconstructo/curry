@@ -516,6 +516,16 @@ static val_t add_rat(val_t a, val_t b) {
 }
 static val_t add_flo(double a, double b) { return num_make_float(a + b); }
 
+/* The MPFR routines take two real scalars. A pair that has an MPFR operand and
+ * anything else (complex, quaternion, surreal, symbolic, tuple...) used to go
+ * there anyway and raise "mpfr-coerce: not a real number" (#440); it now falls
+ * through to the branch for the other operand's type, which handles an MPFR
+ * value like any other real. */
+static inline bool mpfr_real_operand(val_t v) {
+    return vis_fixnum(v) || vis_flonum(v) || vis_bignum(v) || vis_rational(v) || vis_mpfr(v);
+}
+#define MPFR_PAIR(a, b) ((vis_mpfr(a) || vis_mpfr(b)) && mpfr_real_operand(a) && mpfr_real_operand(b))
+
 val_t num_add(val_t a, val_t b) {
     /* Fast paths: fixnum check is a single tag-bit test (no memory dereference);
      * flonum check requires loading the type header — so fixnum always goes first. */
@@ -526,7 +536,7 @@ val_t num_add(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) + (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) + vfloat(b));
     }
-    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_add(a, b);
+    if (MPFR_PAIR(a, b)) return mpfr_num_add(a, b);
     /* Tuple addition distributes before symbolic so that 0+tuple and tuple+0
        work correctly when the zero is symbolic (e.g. from variadic accumulator). */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -604,7 +614,7 @@ val_t num_sub(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) - (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) - vfloat(b));
     }
-    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_sub(a, b);
+    if (MPFR_PAIR(a, b)) return mpfr_num_sub(a, b);
     /* Tuple subtraction before symbolic for same reason as num_add. */
     if (vis_tuple(a) || vis_tuple(b)) {
         if (!vis_tuple(b) && num_is_zero(b)) return a;
@@ -667,7 +677,7 @@ val_t num_mul(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) * (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) * vfloat(b));
     }
-    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_mul(a, b);
+    if (MPFR_PAIR(a, b)) return mpfr_num_mul(a, b);
     /* Tuple distribution takes priority over symbolic so that sym-var × up-tuple
        distributes component-wise rather than wrapping in a CAS expression. */
     if (vis_tuple(a) || vis_tuple(b)) {
@@ -759,7 +769,7 @@ val_t num_div(val_t a, val_t b) {
         if (vis_fixnum(b)) return num_make_float(vfloat(a) / (double)vunfix(b));
         if (vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
     }
-    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_div(a, b);
+    if (MPFR_PAIR(a, b)) return mpfr_num_div(a, b);
     if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(a, b);
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && !vis_quantum(b)) return quantum_div_scalar(a, b);
@@ -871,7 +881,7 @@ int num_cmp(val_t a, val_t b) {
         return da < db ? -1 : da > db ? 1 : 0;
     }
     if (vis_surreal(a) || vis_surreal(b)) return sur_compare(a, b);
-    if (vis_mpfr(a) || vis_mpfr(b)) return mpfr_num_cmp(a, b);
+    if (MPFR_PAIR(a, b)) return mpfr_num_cmp(a, b);
     if (vis_flonum(a) || vis_flonum(b)) {
         double da = num_to_double(a), db = num_to_double(b);
         return da < db ? -1 : da > db ? 1 : 0;

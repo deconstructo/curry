@@ -266,6 +266,63 @@
        #t)
 
 ;;; ----------------------------------------------------------------------
+;;; An MPFR operand with a complex, quaternion, octonion, symbolic or surreal
+;;; operand (#440). The MPFR branch of + - * / ran first and raised
+;;; "mpfr-coerce: not a real number" for anything but a real scalar.
+;;; ----------------------------------------------------------------------
+(define mx (sym-var 'x))
+(define (raises? thunk) (guard (e (#t #t)) (thunk) #f))
+
+;; Complex: the real part stays MPFR, the result is a complex number.
+(check-pred "mpfr + complex does not raise" (not (raises? (lambda () (+ (mpfr 1) 1+2i)))))
+(check "mpfr + complex: real part" (= (real-part (+ (mpfr 1) 1+2i)) 2) #t)
+(check "mpfr + complex: real part is MPFR" (mpfr? (real-part (+ (mpfr 1) 1+2i))) #t)
+(check "mpfr + complex: imaginary part" (imag-part (+ (mpfr 1) 1+2i)) 2)
+(check "complex + mpfr, the other order" (= (real-part (+ 1+2i (mpfr 1))) 2) #t)
+(check "mpfr - complex" (list (= (real-part (- (mpfr 2) 1+2i)) 1) (imag-part (- (mpfr 2) 1+2i))) '(#t -2))
+(check "mpfr * complex"
+       (list (= (real-part (* (mpfr 2) 1+2i)) 2) (= (imag-part (* (mpfr 2) 1+2i)) 4)) '(#t #t))
+(check "complex / mpfr"
+       (list (= (real-part (/ 1+2i (mpfr 4))) 1/4) (= (imag-part (/ 1+2i (mpfr 4))) 1/2)) '(#t #t))
+
+;; Quaternion and octonion: their parts are doubles, so the MPFR operand is converted.
+(check "mpfr + quaternion" (+ (mpfr 1) (make-quaternion 1 2 3 4)) (make-quaternion 2 2 3 4))
+(check "quaternion * mpfr" (* (make-quaternion 1 2 3 4) (mpfr 2)) (make-quaternion 2 4 6 8))
+(check-pred "mpfr + octonion does not raise"
+            (not (raises? (lambda () (+ (mpfr 1) (make-octonion 1 2 3 4 5 6 7 8))))))
+
+;; Symbolic: an expression holding an MPFR constant, which evaluates and differentiates.
+(check-pred "x + mpfr is symbolic" (symbolic? (+ mx (mpfr 1/3))))
+(check-pred "mpfr + x is symbolic" (symbolic? (+ (mpfr 1/3) mx)))
+(check-pred "x * mpfr is symbolic" (symbolic? (* mx (mpfr 1/3))))
+(check-pred "mpfr / x is symbolic" (symbolic? (/ (mpfr 1/3) mx)))
+(check-pred "mpfr - x is symbolic" (symbolic? (- (mpfr 1/3) mx)))
+(check-approx "(x*mpfr + 1) at x=3" (substitute (+ (* mx (mpfr 1/3)) 1) mx 3) 2.0 1e-12)
+(check-approx "d/dx of mpfr*x^2 at x=3" (substitute (∂ (* (mpfr 1/3) (expt mx 2)) mx) mx 3) 2.0 1e-12)
+(check "mpfr < x is a relation, not an error" (symbolic? (< (mpfr 1) mx)) #t)
+
+;; Surreal.
+(check "mpfr + surreal" (= (+ (mpfr 1) (make-surreal '((0 . 3)))) 4) #t)
+(check "surreal * mpfr" (= (* (make-surreal '((0 . 3))) (mpfr 2)) 6) #t)
+(check "mpfr < surreal" (< (mpfr 1) (make-surreal '((0 . 3)))) #t)
+
+;; Still an error where a plain number is an error, and the same one.
+(check-pred "mpfr + a string raises" (raises? (lambda () (+ (mpfr 1) "a"))))
+(check "the message is the one a fixnum gets"
+       (guard (e (#t (error-object-message e))) (+ (mpfr 1) "a"))
+       (guard (e (#t (error-object-message e))) (+ 1 "a")))
+(check-pred "mpfr * matrix raises like 2 * matrix"
+            (and (raises? (lambda () (* (mpfr 2) (make-matrix 2 2 1))))
+                 (raises? (lambda () (* 2 (make-matrix 2 2 1))))))
+(check-pred "ordering a complex number against mpfr still raises"
+            (raises? (lambda () (< (mpfr 1) 1+2i))))
+
+;; Real operands are untouched.
+(check-approx "mpfr + rational value" (+ (mpfr 1) 1/3) 1.3333333333333333 1e-15)
+(check "mpfr + bignum stays MPFR" (mpfr? (+ (mpfr 1) 100000000000000000000)) #t)
+(check "mpfr + mpfr stays MPFR" (mpfr? (+ (mpfr 1) (mpfr 2))) #t)
+
+;;; ----------------------------------------------------------------------
 ;;; Summary
 ;;; ----------------------------------------------------------------------
 (newline)
