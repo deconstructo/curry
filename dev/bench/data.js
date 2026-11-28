@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795846582886,
+  "lastUpdate": 1795851674475,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23735,6 +23735,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 80.765,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "81f986ac6b25bcb2cf23ff67a2e76642e19dd7b8",
+          "message": "Merge pull request #458 from deconstructo/fix/447-symbolic-tests\n\nfix(symbolic): exact polynomial division in rational integration; register symbolic tests (#447)",
+          "timestamp": "2026-11-28T18:40:34+11:00",
+          "tree_id": "a32a5f3de3265dd14737093cf7485986db13d908",
+          "url": "https://github.com/deconstructo/curry/commit/81f986ac6b25bcb2cf23ff67a2e76642e19dd7b8"
+        },
+        "date": 1795851673391,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.429,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.803,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.779,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.064,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 181.204,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 361.63,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 86.867,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 112.223,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 84.024,
             "unit": "ms"
           }
         ]
