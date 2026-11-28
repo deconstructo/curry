@@ -49,6 +49,8 @@ A future that another worker is already running is waited for. That can only han
 
 The thunk runs with a handler of its own. What it raises becomes the future's result (also for `raise-continuable`: there is no handler outside to return a value to).
 
+A thunk gets a private copy of the variables it captures, as a `spawn`ed thunk does: a thunk made in a loop sees the loop variable's value from when it was made, and a `set!` the thunk makes on a captured local is not seen by the code that made it (#448). Use a global, a box or a mutex-guarded structure to hand a value back, or just return it.
+
 Continuations do not cross threads: a continuation captured outside the thunk and invoked from it raises `continuation-expired` if a worker runs the thunk, which fails the future. If `future-get` runs the thunk in the thread that holds the continuation, the escape works; the future is then marked failed ("the thunk was left by a continuation") so nobody waits for it for ever.
 
 ## Notes

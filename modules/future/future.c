@@ -28,6 +28,7 @@
 #include <curry.h>
 #include <curry_checked_args.h>
 #include "eval.h"
+#include "vm.h"
 #include "workpool.h"
 #include <pthread.h>
 #include <string.h>
@@ -76,6 +77,16 @@ static val_t make_future(int state, val_t thunk, val_t dep) {
     curry_vector_set(f, F_DEP, dep);
     curry_vector_set(f, F_CONTS, curry_nil());
     return f;
+}
+
+/* A thunk goes to another thread, possibly while the frame that made it is
+ * still running. Its open upvalues point into that frame's stack slots, which
+ * the creator goes on to reuse (the next iteration of a loop), so the thunk
+ * would read a later value. Give it a private snapshot, as `spawn` does
+ * (actor_spawn in actors.c). A `set!` the thunk makes on a captured variable is
+ * therefore not seen by the creator. */
+static val_t escape_proc(val_t proc) {
+    return vis_bcclosure(proc) ? vptr(vm_snapshot_closure_for_escape(as_bcclosure(proc))) : proc;
 }
 
 /* Call proc(args) in a handler of its own; true with *out set, or false with
@@ -276,7 +287,7 @@ static bool await(val_t f, const struct timespec *deadline) {
 static val_t fn_pool_submit(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     if (!curry_is_procedure(av[0])) curry_error("pool-submit: expected a procedure");
-    val_t f = make_future(ST_QUEUED, av[0], curry_make_bool(false));
+    val_t f = make_future(ST_QUEUED, escape_proc(av[0]), curry_make_bool(false));
     enqueue(f);
     return f;
 }
@@ -322,7 +333,7 @@ static val_t fn_future_then(int ac, val_t *av, void *ud) {
     (void)ac; (void)ud;
     val_t f = checked_future(av[0], "future-then");
     if (!curry_is_procedure(av[1])) curry_error("future-then: expected a procedure");
-    val_t g = make_future(ST_WAITING, av[1], f);
+    val_t g = make_future(ST_WAITING, escape_proc(av[1]), f);
     pthread_mutex_lock(&fut_mx);
     int st = fstate(f);
     if (!finished(st)) {

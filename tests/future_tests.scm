@@ -127,6 +127,23 @@
 (check "200 futures"
        (sum (map future-get (map (lambda (i) (pool-submit (lambda () (* i i)))) (range 200))))
        (sum (map (lambda (i) (* i i)) (range 200))))
+;; A thunk that captures a loop variable runs on another thread while the loop
+;; goes on and reuses that variable's slot: it must see its own value.
+(define (loop-futures n)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) (reverse acc)
+        (loop (+ i 1) (cons (pool-submit (lambda () (* i i))) acc)))))
+(check "2000 futures made in a loop each see their own loop variable"
+       (map future-get (loop-futures 2000))
+       (map (lambda (i) (* i i)) (range 2000)))
+(define (loop-thens n)
+  (let ((f (pool-submit (lambda () 0))))
+    (let loop ((i 0) (acc '()))
+      (if (= i n) (reverse acc)
+          (loop (+ i 1) (cons (future-then f (lambda (v) (+ v i))) acc))))))
+(check "2000 future-then procedures made in a loop each see their own variable"
+       (map future-get (loop-thens 2000))
+       (range 2000))
 (define counter 0)
 (define counter-mx (make-mutex))
 (check "every future runs exactly once"
@@ -219,13 +236,13 @@
        (let ((bad (filter (lambda (r) (not (memq r '(escaped raised)))) escape-outcomes)))
          (length bad))
        0)
+(define wind-log '())
 (check "dynamic-wind inside the thunk"
-       (let ((log '()))
-         (list (future-get (pool-submit (lambda ()
-                  (dynamic-wind (lambda () (set! log (cons 'in log)))
-                                (lambda () 'v)
-                                (lambda () (set! log (cons 'out log)))))))
-               (reverse log)))
+       (list (future-get (pool-submit (lambda ()
+                (dynamic-wind (lambda () (set! wind-log (cons 'in wind-log)))
+                              (lambda () 'v)
+                              (lambda () (set! wind-log (cons 'out wind-log)))))))
+             (reverse wind-log))
        '(v (in out)))
 
 ;;; ---- parallel map inside a future still works ----
