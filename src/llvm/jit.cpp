@@ -34,6 +34,7 @@ extern "C" {
 #include "../object.h"
 #include "../gc.h"
 #include "../numeric.h"
+#include "../builtins.h"   /* prim_num_lt/le/gt/ge */
 #include "../symbol.h"   /* EC_WRONG_NUMBER_OF_ARGUMENTS */
 #include "../bcjit_rt.h"
 }
@@ -78,18 +79,34 @@ static uint64_t curry_jit_apply_arr(uint64_t proc_val, int argc, uint64_t *argv)
 
 /* ---- Numeric comparison wrappers (bool → val_t) ---- */
 static uint64_t curry_jit_lt(uint64_t a, uint64_t b) {
+    if (vis_symbolic((val_t)a) || vis_symbolic((val_t)b)) {   /* decide or raise, as the primitive */
+        val_t args[2] = {(val_t)a, (val_t)b};
+        return (uint64_t)prim_num_lt(2, args, NULL);
+    }
     num_check_ordered((val_t)a, (val_t)b, "<");
     return num_lt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
 }
 static uint64_t curry_jit_gt(uint64_t a, uint64_t b) {
+    if (vis_symbolic((val_t)a) || vis_symbolic((val_t)b)) {   /* decide or raise, as the primitive */
+        val_t args[2] = {(val_t)a, (val_t)b};
+        return (uint64_t)prim_num_gt(2, args, NULL);
+    }
     num_check_ordered((val_t)a, (val_t)b, ">");
     return num_gt((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
 }
 static uint64_t curry_jit_le(uint64_t a, uint64_t b) {
+    if (vis_symbolic((val_t)a) || vis_symbolic((val_t)b)) {   /* decide or raise, as the primitive */
+        val_t args[2] = {(val_t)a, (val_t)b};
+        return (uint64_t)prim_num_le(2, args, NULL);
+    }
     num_check_ordered((val_t)a, (val_t)b, "<=");
     return num_le((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
 }
 static uint64_t curry_jit_ge(uint64_t a, uint64_t b) {
+    if (vis_symbolic((val_t)a) || vis_symbolic((val_t)b)) {   /* decide or raise, as the primitive */
+        val_t args[2] = {(val_t)a, (val_t)b};
+        return (uint64_t)prim_num_ge(2, args, NULL);
+    }
     num_check_ordered((val_t)a, (val_t)b, ">=");
     return num_ge((val_t)a,(val_t)b) ? V_TRUE : V_FALSE;
 }

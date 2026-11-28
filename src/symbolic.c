@@ -1794,7 +1794,10 @@ static val_t sx_map_numbers(val_t e, val_t (*f)(val_t)) {
     SymExpr *se = as_symexpr(e);
     int n = (int)se->nargs;
     val_t *args = (val_t *)gc_alloc_raw_pinned((size_t)(n ? n : 1) * sizeof(val_t));
-    for (int i = 0; i < n; i++) args[i] = sx_map_numbers(se->args[i], f);
+    /* An exponent is structure, not a coefficient: x^2 must not become x^2.0 */
+    for (int i = 0; i < n; i++)
+        args[i] = (se->op == SX_EXPT && i == 1 && vis_fixnum(se->args[i]))
+                  ? se->args[i] : sx_map_numbers(se->args[i], f);
     return sx_simplify(sx_make_expr(se->op, n, args));
 }
 val_t sx_inexact(val_t e) { return sx_map_numbers(e, num_inexact); }

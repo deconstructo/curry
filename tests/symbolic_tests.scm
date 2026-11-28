@@ -598,6 +598,34 @@
 (check "(- \"a\" x) raises" (raises? (lambda () (- "a" x))) #t)
 (check "(/ x '(1)) raises" (raises? (lambda () (/ x '(1)))) #t)
 
+;; The compiled and JIT tiers give the same answers as the primitive (review of #437:
+;; the LLVM comparison wrappers never saw a symbolic operand).
+(define (gt* a b) (> a b)) (define (lt* a b) (< a b))
+(define (le* a b) (<= a b)) (define (ge* a b) (>= a b))
+(let warm ((i 0)) (when (< i 500) (gt* i 1) (lt* i 1) (le* i 1) (ge* i 1) (warm (+ i 1))))
+(check "warmed > on identical expressions" (gt* x x) #f)
+(check "warmed <= on identical expressions" (le* x x) #t)
+(check "warmed >= on identical expressions" (ge* x x) #t)
+(check "warmed < undecidable raises with the explicit-form message"
+       (guard (e (#t (number? (string-contains (condition-message e) "use sym<")))) (lt* x 5)) #t)
+(check "warmed > against a positive variable" (gt* px 0) #t)
+
+;; exact->inexact converts coefficients, not exponents (x^2 must stay a polynomial)
+(check "exact->inexact keeps an integer exponent"
+       (sym->string (exact->inexact (+ (* 1/2 (expt x 2)) 1))) "1.0 + 0.5 * x^2")
+(check "exact->inexact of x^2 is x^2" (equal? (exact->inexact (expt x 2)) (expt x 2)) #t)
+(check "an inexact polynomial still solves"
+       (length (solve (exact->inexact (- (expt x 2) 4)) x)) 2)
+
+;; max/min take numbers and symbolic values only
+(check "(max x \"a\") raises" (raises? (lambda () (max x "a"))) #t)
+(check "(min x '(1)) raises" (raises? (lambda () (min x '(1)))) #t)
+;; the sign of a symbolic value: from the assumption, else an error
+(check "positive? and negative? from assumptions"
+       (list (positive? px) (negative? px) (positive? nx) (negative? nx)) '(#t #f #f #t))
+(check "positive? of an unassumed variable raises" (raises? (lambda () (positive? x))) #t)
+(check "negative? of an unassumed variable raises" (raises? (lambda () (negative? x))) #t)
+
 ;;; ---- Summary ---- ;;;
 
 (newline)

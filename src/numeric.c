@@ -528,6 +528,12 @@ static inline bool mpfr_real_operand(val_t v) {
 }
 #define MPFR_PAIR(a, b) ((vis_mpfr(a) || vis_mpfr(b)) && mpfr_real_operand(a) && mpfr_real_operand(b))
 
+/* max/min/floor build a node only around a number or a symbolic value. */
+static val_t sx_ordered_operand(val_t v, const char *who) {
+    if (!(vis_number(v) || vis_symbolic(v))) scm_raise(V_FALSE, "%s: not a number", who);
+    return v;
+}
+
 /* An operand of arithmetic with a symbolic value must be something arithmetic
  * can be done on: (+ x "a") is an error, not an expression (#437). */
 static val_t sx_operand(val_t v, const char *who) {
@@ -946,7 +952,7 @@ static val_t minmax_inexact(val_t result, val_t other) {
 /* min and max return a NaN argument rather than let the comparison pick
  * whichever side it lands on, so the result doesn't depend on order. */
 val_t num_min(val_t a, val_t b) {
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_min(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_min(sx_ordered_operand(a, "min"), sx_ordered_operand(b, "min"));
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
     int c = num_cmp(a,b);
@@ -955,7 +961,7 @@ val_t num_min(val_t a, val_t b) {
     return c<=0 ? minmax_inexact(a, b) : minmax_inexact(b, a);
 }
 val_t num_max(val_t a, val_t b) {
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_max(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_max(sx_ordered_operand(a, "max"), sx_ordered_operand(b, "max"));
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
     int c = num_cmp(a,b);

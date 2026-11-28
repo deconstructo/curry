@@ -221,6 +221,7 @@
 (define (%literal driver raw value)
   (cond
     ((not value) "NULL")
+    ((symbolic? value) (error "sql: a symbolic value is not a SQL literal" value))
     ((number? value) (number->string value))
     (else ((driver-escape-literal driver) raw value))))
 

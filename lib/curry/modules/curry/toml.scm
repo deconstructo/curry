@@ -575,6 +575,7 @@
     ((toml-datetime? v) (write-string (toml-datetime->string v) out))
     ((eq? v #t) (write-string "true" out))
     ((eq? v #f) (write-string "false" out))
+    ((symbolic? v) (error "toml: a symbolic value cannot be written" v))
     ((number? v) (%write-number v out))
     ((string? v) (%write-basic-string v out))
     ((symbol? v) (%write-basic-string (symbol->string v) out))

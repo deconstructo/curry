@@ -902,6 +902,7 @@
     ((and (number? v) (inexact? v) (= v +inf.0)) (write-string ".inf" out))
     ((and (number? v) (inexact? v) (= v -inf.0)) (write-string "-.inf" out))
     ((and (number? v) (inexact? v) (not (= v v))) (write-string ".nan" out))
+    ((symbolic? v) (error "yaml: a symbolic value cannot be written" v))
     ((number? v) (write-string (number->string v) out))
     ((symbol? v) (%emit-scalar-string (symbol->string v) out))
     ((string? v)

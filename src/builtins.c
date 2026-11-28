@@ -432,8 +432,25 @@ static val_t prim_lang_translate(int ac, val_t *av, void *ud) {
     return vis_symbol(av[0]) ? lang_translate(av[0]) : av[0];
 }
 static val_t prim_zero_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_zero(av[0])); }
-static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_positive(av[0])); }
-static val_t prim_negative_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_negative(av[0])); }
+/* Sign of a symbolic value: from its 'positive/'negative assumption, else an error (#437). */
+static val_t prim_positive_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (vis_symbolic(av[0])) {
+        if (sym_is_positive(av[0])) return V_TRUE;
+        if (sym_is_negative(av[0])) return V_FALSE;
+        scm_raise(V_FALSE, "positive?: cannot decide the sign of a symbolic value");
+    }
+    return vbool(num_is_positive(av[0]));
+}
+static val_t prim_negative_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (vis_symbolic(av[0])) {
+        if (sym_is_negative(av[0])) return V_TRUE;
+        if (sym_is_positive(av[0])) return V_FALSE;
+        scm_raise(V_FALSE, "negative?: cannot decide the sign of a symbolic value");
+    }
+    return vbool(num_is_negative(av[0]));
+}
 static val_t prim_nan_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_nan(av[0])); }
 static val_t prim_infinite_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_infinite(av[0])); }
 
