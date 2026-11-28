@@ -35,7 +35,7 @@ Wait for `f` for at most `seconds` (a real number). `#t` if it finished, `#f` if
 
 ### `(future-then f proc)` → *future*
 
-A future for `(proc value-of-f)`, queued when `f` has finished. If `f` raised, the new future fails with the same object and `proc` is not called. Chains of any length work.
+A future for `(proc value-of-f)`, queued when `f` has finished. If `f` raised, the new future fails with the same object and `proc` is not called. A chain of a million `future-then` links works (the links are walked with a worklist, not by recursion), whether the head succeeds or fails.
 
 ### `(future? x)` → *boolean*
 
@@ -43,7 +43,7 @@ A future for `(proc value-of-f)`, queued when `f` has finished. If `f` raised, t
 
 A future that waits for another future does not starve the pool. `future-get` on a future nobody has started runs it in the calling thread (the pool finds it taken and skips it), and on a `future-then` future it first works on the future it waits for. So any number of futures can wait for futures they created, in a tree or a chain, with the pool smaller than the number of futures.
 
-A future that another worker is already running is waited for. That can only hang if futures wait for each other in a cycle, for example a future that calls `future-get` on itself.
+A future that another worker is already running is waited for. That can only hang if futures wait for each other in a cycle. A future that waits for itself is caught and raises an error; a longer cycle (A waits for B, B waits for A) is not, and hangs.
 
 ## Exceptions, continuations
 
@@ -54,6 +54,7 @@ Continuations do not cross threads: a continuation captured outside the thunk an
 ## Notes
 
 - There is no way to cancel a future yet.
+- `(exit n)` inside a thunk exits the whole process, as it does anywhere.
 - A future is a Scheme vector tagged `%future`, so `vector?` is `#t` for it, and printing it shows its fields. Do not build or change one by hand. The collector frees a future when nothing refers to it: there is nothing to destroy.
 - All futures share one mutex and one condition variable. Every completion wakes every waiting thread; they look at their own future and go back to sleep. Fine for hundreds of waiters, not for hundreds of thousands.
 - On a pool worker, `map`, `reduce` and `for-each/par` in a thunk run sequentially, as they do in any worker (nested parallel dispatch would deadlock the pool).

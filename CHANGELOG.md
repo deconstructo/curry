@@ -13,6 +13,8 @@
   a future nobody has started runs it in the calling thread, and on a
   `future-then` future first works on the future it waits for. A thunk that
   leaves by a continuation does not leave its future stuck as running.
+- A chain of a million `future-then` links works, with a failing head too; a
+  future that waits for itself raises an error instead of hanging.
 - The pool gets a generic entry for this, `pool_submit_task`. New CMake option
   `BUILD_MODULE_FUTURE` (default ON). See `docs/reference/module-future.md`.
 

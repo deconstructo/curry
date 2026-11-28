@@ -99,6 +99,30 @@
                (begin (sem-post! gate) (future-get f)))))
        50)
 
+;; A chain is not limited by the C stack: both when the head succeeds and when it fails.
+(define (chain n root)
+  (let loop ((i 0) (f root)) (if (= i n) f (loop (+ i 1) (future-then f (lambda (x) (+ x 1)))))))
+(check "a chain of 60000, asked for at the end"
+       (future-get (chain 60000 (pool-submit (lambda () 0)))) 60000)
+(check "a chain of 60000 behind a failure"
+       (raised (lambda () (future-get (chain 60000 (pool-submit (lambda () (raise 'boom)))))))
+       '(raised boom))
+(check "every link of a failed chain has failed"
+       (let* ((head (pool-submit (lambda () (raise 'boom))))
+              (end (chain 1000 head)))
+         (future-wait end 5))
+       #t)
+
+;;; ---- waiting for yourself ----
+(define self-future #f)
+(check "a future that waits for itself raises instead of hanging"
+       (car (raised (lambda ()
+         (set! self-future (pool-submit (lambda () (future-get self-future))))
+         (future-get self-future))))
+       'raised)
+(check "and is finished"
+       (future-wait self-future 5) #t)
+
 ;;; ---- many futures ----
 (check "200 futures"
        (sum (map future-get (map (lambda (i) (pool-submit (lambda () (* i i)))) (range 200))))

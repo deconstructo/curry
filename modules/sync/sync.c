@@ -314,6 +314,7 @@ static curry_val fn_rwlock_destroy(int ac, curry_val *av, void *ud) {
     pthread_rwlock_destroy(l); free(l);
     return curry_void();
 }
+static void rwlock_fail(int rc, const char *ctx) __attribute__((noreturn));
 static void rwlock_fail(int rc, const char *ctx) {
     if (rc == EDEADLK) curry_error("%s: this thread already holds the lock (it is not recursive)", ctx);
     curry_error("%s: error %d", ctx, rc);

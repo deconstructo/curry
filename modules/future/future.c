@@ -31,6 +31,7 @@
 #include "workpool.h"
 #include <pthread.h>
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <time.h>
 
@@ -47,13 +48,17 @@ static bool is_future(val_t v) {
 }
 /* A hand-made vector with the right tag must not be able to hang a waiter or
  * send it through a wrong slot: the state has to be one of the five, and a
- * future that waits has to wait for a future. */
+ * future that waits has to wait for a future. The slots are read under the
+ * mutex, as every other access to them is. */
 static val_t checked_future(val_t v, const char *ctx) {
     if (!is_future(v)) curry_error("%s: expected a future", ctx);
-    val_t s = curry_vector_ref(v, F_STATE);
-    if (!curry_is_fixnum(s) || curry_fixnum(s) < ST_WAITING || curry_fixnum(s) > ST_FAILED ||
-        (curry_fixnum(s) == ST_WAITING && !is_future(curry_vector_ref(v, F_DEP))))
-        curry_error("%s: expected a future", ctx);
+    pthread_mutex_lock(&fut_mx);
+    val_t s   = curry_vector_ref(v, F_STATE);
+    val_t dep = curry_vector_ref(v, F_DEP);
+    bool bad = !curry_is_fixnum(s) || curry_fixnum(s) < ST_WAITING || curry_fixnum(s) > ST_FAILED ||
+               (curry_fixnum(s) == ST_WAITING && !is_future(dep));
+    pthread_mutex_unlock(&fut_mx);
+    if (bad) curry_error("%s: expected a future", ctx);
     return v;
 }
 static int fstate(val_t f) {
@@ -84,8 +89,13 @@ static bool call_captured(val_t proc, int argc, val_t *argv, val_t *out, val_t *
     return ok;
 }
 
+/* The future this thread is running, innermost first, so a thunk that waits for
+ * its own future can be told instead of hanging. */
+typedef struct RunCtx { val_t f; struct RunCtx *prev; } RunCtx;
+static CURRY_THREAD_LOCAL RunCtx *running = NULL;
+
 static void future_run(val_t f);
-static void dep_done(val_t g);
+static void release(val_t conts);
 
 static void task_entry(void *arg) { future_run((val_t)(uintptr_t)arg); }
 
@@ -94,23 +104,33 @@ static void enqueue(val_t f) {
     if (!pool_submit_task(task_entry, (void *)(uintptr_t)f)) future_run(f);
 }
 
-/* Cleanup on the wind list while a thunk runs. Normally the outcome is already
- * recorded when this runs and it does nothing. If a continuation escaped from
- * the thunk (a thunk run by future-get in the thread that holds the
- * continuation), f is still RUNNING: fail it, so nobody waits for it for ever. */
+/* f has finished by failing (the mutex is held): the list of futures that were
+ * waiting for it, to be released after the unlock. */
+static val_t take_conts(val_t f) {
+    val_t conts = curry_vector_ref(f, F_CONTS);
+    curry_vector_set(f, F_CONTS, curry_nil());
+    curry_vector_set(f, F_THUNK, curry_make_bool(false));       /* let it go */
+    return conts;
+}
+
+/* Cleanup on the wind list while a thunk runs. It always puts the running
+ * context back. Normally the outcome is already recorded and that is all. If a
+ * continuation escaped from the thunk (a thunk run by future-get in the thread
+ * that holds the continuation), f is still RUNNING: fail it, so nobody waits for
+ * it for ever. */
 static void future_abandon(void *arg) {
-    val_t f = (val_t)(uintptr_t)arg;
+    RunCtx *ctx = (RunCtx *)arg;
+    running = ctx->prev;
+    val_t f = ctx->f;
     val_t msg = curry_make_string("future: the thunk was left by a continuation");
     pthread_mutex_lock(&fut_mx);
     if (fstate(f) != ST_RUNNING) { pthread_mutex_unlock(&fut_mx); return; }
     curry_vector_set(f, F_EXN, msg);
     set_state(f, ST_FAILED);
-    curry_vector_set(f, F_THUNK, curry_make_bool(false));
-    val_t conts = curry_vector_ref(f, F_CONTS);
-    curry_vector_set(f, F_CONTS, curry_nil());
+    val_t conts = take_conts(f);
     pthread_cond_broadcast(&fut_cv);
     pthread_mutex_unlock(&fut_mx);
-    for (; curry_is_pair(conts); conts = curry_cdr(conts)) dep_done(curry_car(conts));
+    release(conts);
 }
 
 /* Claim f if it is still QUEUED, run it, record the outcome, and let the
@@ -126,46 +146,91 @@ static void future_run(val_t f) {
     pthread_mutex_unlock(&fut_mx);
 
     val_t out = curry_void(), exn = curry_void();
-    WindFrame *wf = wind_push_cleanup(future_abandon, (void *)(uintptr_t)f);
+    RunCtx ctx = { f, running };
+    running = &ctx;
+    WindFrame *wf = wind_push_cleanup(future_abandon, &ctx);
     bool ok = is_future(dep) ? call_captured(thunk, 1, &arg, &out, &exn)
                              : call_captured(thunk, 0, NULL, &out, &exn);
 
     pthread_mutex_lock(&fut_mx);
     if (ok) { curry_vector_set(f, F_RESULT, out); set_state(f, ST_DONE); }
     else    { curry_vector_set(f, F_EXN, exn);    set_state(f, ST_FAILED); }
-    curry_vector_set(f, F_THUNK, curry_make_bool(false));       /* let it go */
-    val_t conts = curry_vector_ref(f, F_CONTS);
-    curry_vector_set(f, F_CONTS, curry_nil());
+    val_t conts = take_conts(f);
     pthread_cond_broadcast(&fut_cv);
     pthread_mutex_unlock(&fut_mx);
-    wind_pop_cleanup(wf);        /* the outcome is recorded: future_abandon does nothing */
+    wind_pop_cleanup(wf);        /* the outcome is recorded: future_abandon only restores `running` */
 
-    for (; curry_is_pair(conts); conts = curry_cdr(conts)) dep_done(curry_car(conts));
+    release(conts);
 }
 
-/* g was waiting for its dependency, which has finished: queue g, or fail it
- * with the dependency's exception. Safe to call twice, and from any thread. */
-static void dep_done(val_t g) {
+/* One step for g, which was waiting for its dependency: if that has finished,
+ * queue g, or fail it with the dependency's exception. Returns the futures that
+ * were waiting for g if g failed (else nil). Safe to call twice, from any thread. */
+static val_t dep_done_step(val_t g) {
     pthread_mutex_lock(&fut_mx);
     val_t dep = curry_vector_ref(g, F_DEP);
     if (fstate(g) != ST_WAITING || !is_future(dep) || !finished(fstate(dep))) {
         pthread_mutex_unlock(&fut_mx);
-        return;
+        return curry_nil();
     }
     if (fstate(dep) == ST_DONE) {
         set_state(g, ST_QUEUED);
         pthread_mutex_unlock(&fut_mx);
         enqueue(g);
-        return;
+        return curry_nil();
     }
     curry_vector_set(g, F_EXN, curry_vector_ref(dep, F_EXN));
     set_state(g, ST_FAILED);
-    curry_vector_set(g, F_THUNK, curry_make_bool(false));
-    val_t conts = curry_vector_ref(g, F_CONTS);
-    curry_vector_set(g, F_CONTS, curry_nil());
+    val_t conts = take_conts(g);
     pthread_cond_broadcast(&fut_cv);
     pthread_mutex_unlock(&fut_mx);
-    for (; curry_is_pair(conts); conts = curry_cdr(conts)) dep_done(curry_car(conts));
+    return conts;
+}
+
+/* Let each future in `conts` go on. A failure passes to the futures waiting for
+ * the failed one, and so on down a chain: with a worklist, not by recursion, so
+ * the length of a future-then chain is not limited by the C stack. */
+static void release(val_t conts) {
+    val_t work = curry_nil();
+    for (; curry_is_pair(conts); conts = curry_cdr(conts)) work = curry_make_pair(curry_car(conts), work);
+    while (curry_is_pair(work)) {
+        val_t g = curry_car(work);
+        work = curry_cdr(work);
+        val_t more = dep_done_step(g);
+        for (; curry_is_pair(more); more = curry_cdr(more)) work = curry_make_pair(curry_car(more), work);
+    }
+}
+static void dep_done(val_t g) { release(curry_make_pair(g, curry_nil())); }
+
+static bool await(val_t f, const struct timespec *deadline);
+
+/* f waits for a chain of futures. Settle it from the far end, one link at a
+ * time, instead of calling await on the dependency (which would do the same
+ * again one link down, once per link). The links are kept in a C array: each is
+ * reachable from f through its F_DEP slot, so the collector cannot free them. */
+static void settle_chain(val_t f) {
+    size_t n = 0, cap = 64;
+    val_t *links = malloc(cap * sizeof(val_t));
+    if (!links) curry_error("future-get: out of memory");
+    val_t cur = f;
+    pthread_mutex_lock(&fut_mx);
+    while (fstate(cur) == ST_WAITING && is_future(curry_vector_ref(cur, F_DEP))) {
+        if (n == cap) {
+            cap *= 2;
+            val_t *bigger = realloc(links, cap * sizeof(val_t));
+            if (!bigger) { pthread_mutex_unlock(&fut_mx); free(links); curry_error("future-get: out of memory"); }
+            links = bigger;
+        }
+        links[n++] = cur;
+        cur = curry_vector_ref(cur, F_DEP);
+    }
+    pthread_mutex_unlock(&fut_mx);
+    await(cur, NULL);                       /* the first one that is not waiting */
+    for (size_t i = n; i-- > 0; ) {
+        dep_done(links[i]);                 /* its dependency has finished */
+        await(links[i], NULL);              /* queued: run it here; running elsewhere: wait */
+    }
+    free(links);
 }
 
 /* Wait until f has finished. With `deadline` the wait is bounded and nothing is
@@ -182,11 +247,16 @@ static bool await(val_t f, const struct timespec *deadline) {
             continue;
         }
         if (!deadline && st == ST_WAITING) {
-            val_t dep = curry_vector_ref(f, F_DEP);
             pthread_mutex_unlock(&fut_mx);
-            if (is_future(dep)) await(dep, NULL);   /* work on what f is waiting for */
-            dep_done(f);
+            settle_chain(f);                     /* work on what f is waiting for */
             continue;
+        }
+        if (st == ST_RUNNING) {                  /* is it this thread's own future? */
+            for (RunCtx *c = running; c; c = c->prev)
+                if (c->f == f) {
+                    pthread_mutex_unlock(&fut_mx);
+                    curry_error("future: a future cannot wait for itself");
+                }
         }
         /* RUNNING elsewhere, or a timed wait: block until something finishes. */
         curry_gc_thread_park();
