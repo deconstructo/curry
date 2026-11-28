@@ -168,6 +168,17 @@ extern CURRY_THREAD_LOCAL int g_jit_call_depth;
 int  jit_depth_save(void);
 void jit_depth_restore(int saved);
 
+/* Live call/cc frames (runtime.c, #443). A call/cc pushes its continuation
+ * with its frame's stack position and pops it when it returns; every
+ * longjmp drops the frames it jumps past (cc_unwind_to, given the target
+ * frame's stack position). Invoking a continuation not on the list raises
+ * continuation-expired instead of jumping into a frame that is gone. */
+struct Continuation;
+void cc_push(struct Continuation *cont, uintptr_t frame_mark);
+void cc_pop(struct Continuation *cont);
+void cc_unwind_to(uintptr_t target_mark);
+void cc_check_live(struct Continuation *cont);
+
 /* Shared C-stack-depth guard (runtime.c) -- raises EC_STACK_OVERFLOW,
  * naming `context` in the message, once this thread's real C stack
  * usage crosses the cached per-thread limit. Originally eval()'s own

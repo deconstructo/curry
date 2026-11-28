@@ -436,6 +436,12 @@ typedef struct Continuation {
     void *jmpbuf;    /* heap-allocated jmp_buf */
     val_t result;    /* written before longjmp */
     void *wind_top;  /* WindFrame * at capture time; for dynamic-wind unwind */
+    /* The call/cc frame's stack position, and the next older live call/cc
+     * frame on this thread (current_cc, runtime.c). A continuation is
+     * invoked only while it is on that list: once its call/cc has returned,
+     * jmpbuf names a stack frame that no longer exists (#443). */
+    uintptr_t frame_mark;
+    struct Continuation *cc_prev;
 } Continuation;
 
 /* Message queue (ring buffer, grown as needed) */

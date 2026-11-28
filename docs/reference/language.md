@@ -106,7 +106,7 @@ Curry aims for R7RS compatibility. The following deviations are confirmed and no
 
 ### 1. `call/cc` — escape continuations only
 
-`call-with-current-continuation` captures and invokes escape continuations (jumping outward through live stack frames) correctly, including correct interaction with `dynamic-wind`. **Upward continuations** — capturing a continuation and invoking it after the original call has returned — are not supported and will behave unpredictably.
+`call-with-current-continuation` captures and invokes escape continuations (jumping outward through live stack frames) correctly, including correct interaction with `dynamic-wind`. **Upward continuations** — capturing a continuation and invoking it after the original call has returned — are not supported. Invoking one raises an error with the code `continuation-expired`, which `guard` can catch; so does invoking a continuation from an actor. From a worker of a parallel `map` the error reaches the caller wrapped as "map: error in parallel worker" (#443).
 
 ```scheme
 ; Works: escape
@@ -114,7 +114,9 @@ Curry aims for R7RS compatibility. The following deviations are confirmed and no
 
 ; Does NOT work: upward continuation
 (define k #f)
-(+ 1 (call/cc (lambda c (set! k c) 0)))        ; storing k and later (k 5) is unsupported
+(+ 1 (call/cc (lambda (c) (set! k c) 0)))      ; => 1
+(k 5)                                          ; raises continuation-expired
+(guard (e ((error-object? e) (error-object-code e))) (k 5))  ; => continuation-expired
 ```
 
 Delimited continuations (`shift`/`reset`) are on the roadmap but not yet implemented.
