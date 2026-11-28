@@ -785,7 +785,7 @@ The CAS (symbolic layer) treats numbers as constants. **Fixnum, bignum, rational
 (∂ (* q p) q)             ; => p   (ordered product rule)
 ```
 
-**Surreals**: `+`, `-`, `*` work as CAS constants. `sqrt` is special-cased and works. `sin`, `cos`, `exp`, and `log` of a surreal are not supported.
+**Surreals**: `+`, `-`, `*` work as CAS constants. `sqrt`, `sin`, `cos`, `tan`, `exp`, `log`, the inverse and hyperbolic functions, and `expt` of a surreal `x0 + d` (`d` infinitesimal) give `f(x0) + f'(x0)·d`; see [Auto-differentiation](symbolic.md#auto-differentiation).
 
 **Multivectors**: not recognized as numeric constants by the CAS. Mixing a multivector with any symbolic expression will raise an error. Multivectors must be kept in their own computational layer, separate from the CAS.
 

@@ -1887,6 +1887,11 @@ val_t sx_diff(val_t expr, val_t var) {
     /* Numbers differentiate to 0 */
     if (vis_number(expr)) return vfix(0);
 
+    /* A procedure is not an expression: it used to differentiate to 0 (#438). */
+    if (vis_proc(expr))
+        scm_raise(V_FALSE, "∂: first argument is a procedure, not an expression; "
+                           "use (auto-diff f x), or apply it to a symbolic variable");
+
     /* Symbolic variable */
     if (vis_symvar(expr)) {
         return (as_symvar(expr)->name == as_symvar(var)->name) ? vfix(1) : vfix(0);
