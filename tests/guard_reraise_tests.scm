@@ -230,18 +230,19 @@
                                        (lambda () (raise-continuable 'x))))))))))))
        1000)
 
-;;; Where a clause runs. For a raise-continuable it runs at the raise point,
-;;; before the after thunks of the dynamic-wind frames in between (it has to
-;;; be tried there to know whether the raise goes on); for a plain raise it
-;;; runs after them, as R7RS describes.
+;;; Where a clause runs. Its test is tried where the guard sees the raise (at
+;;; the raise point for a raise-continuable, so the re-raise can return there
+;;; when nothing matches); its body runs after the dynamic-wind frames between
+;;; the raise and the guard are left, after their after thunks, as R7RS 6.11
+;;; has it (#431).
 (define log '())
 (define (L x) (set! log (cons x log)))
 (define (taken) (let ((l (reverse log))) (set! log '()) l))
-(check "compiled: clause before the after thunk, for raise-continuable"
+(check "compiled: clause after the after thunk, for raise-continuable"
        (list (guard (e (#t (L 'clause) 'v))
                (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out))))
              (taken))
-       '(v (in clause out)))
+       '(v (in out clause)))
 (check "compiled: clause after the after thunk, for raise"
        (list (guard (e (#t (L 'clause) 'v))
                (dynamic-wind (lambda () (L 'in)) (lambda () (raise 'x)) (lambda () (L 'out))))
@@ -251,14 +252,15 @@
        (list (tree-eval '(guard (e (#t (L 'clause) 'v))
                            (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out)))))
              (taken))
-       '(v (in clause out)))
+       '(v (in out clause)))
 (check "tree-walked: the same order for raise"
        (list (tree-eval '(guard (e (#t (L 'clause) 'v))
                            (dynamic-wind (lambda () (L 'in)) (lambda () (raise 'x)) (lambda () (L 'out)))))
              (taken))
        '(v (in out clause)))
 ;; The after thunk runs with the handlers outside its dynamic-wind (#425), so
-;; the inner guard, which is outside it, handles the thunk's raise as well.
+;; the inner guard, which is outside it, handles the thunk's raise as well; the
+;; clause runs once, for that exception (R7RS), after the after thunk.
 (check "tree-walked: an after thunk that raises runs once"
        (list (tree-eval '(guard (o (#t (list 'outer o)))
                            (guard (e (#t (L 'clause) 'v))
@@ -266,7 +268,127 @@
                                            (lambda () (raise-continuable 'x))
                                            (lambda () (L 'out) (raise 'from-after))))))
              (taken))
-       '(v (in clause out clause)))
+       '(v (in out clause)))
+
+;; The same, compiled, and in the other clause shapes (#431).
+(check "compiled: an after thunk that raises, the clause runs once"
+       (list (guard (o (#t (list 'outer o)))
+               (guard (e (#t (L 'clause) 'v))
+                 (dynamic-wind (lambda () (L 'in))
+                               (lambda () (raise-continuable 'x))
+                               (lambda () (L 'out) (raise 'from-after)))))
+             (taken))
+       '(v (in out clause)))
+(check "compiled: the clause sees the exception that picked it (the thunk's)"
+       (guard (o (#t (list 'outer o)))
+         (guard (e (#t e))
+           (dynamic-wind (lambda () #f) (lambda () (raise-continuable 'x))
+                         (lambda () (raise 'from-after)))))
+       'from-after)
+(check "compiled: => receiver is called after the after thunk"
+       (list (guard (e ((assq 'a e) => (lambda (p) (L 'receiver) (cdr p))))
+               (dynamic-wind (lambda () (L 'in))
+                             (lambda () (raise-continuable (list (cons 'a 42))))
+                             (lambda () (L 'out))))
+             (taken))
+       '(42 (in out receiver)))
+(check "tree-walked: => receiver is called after the after thunk"
+       (list (tree-eval '(guard (e ((assq 'a e) => (lambda (p) (L 'receiver) (cdr p))))
+                           (dynamic-wind (lambda () (L 'in))
+                                         (lambda () (raise-continuable (list (cons 'a 42))))
+                                         (lambda () (L 'out)))))
+             (taken))
+       '(42 (in out receiver)))
+(check "compiled: else clause after the after thunk"
+       (list (guard (e (else (L 'else) 'v))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out))))
+             (taken))
+       '(v (in out else)))
+(check "compiled: a clause with only a test"
+       (list (guard (e ((memq e '(a b c))))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'b)) (lambda () (L 'out))))
+             (taken))
+       '((b c) (in out)))
+(check "compiled: the clause test still runs at the raise point"
+       (list (guard (e ((begin (L 'test) #t) (L 'body) 'v))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out))))
+             (taken))
+       '(v (in test out body)))
+(check "compiled: no clause matches, the outer handler's value returns to the raise point"
+       (list (with-exception-handler (lambda (e) 10)
+               (lambda ()
+                 (guard (e2 ((string? e2) 'no))
+                   (dynamic-wind (lambda () (L 'in))
+                                 (lambda () (+ 1 (raise-continuable 'x)))
+                                 (lambda () (L 'out))))))
+             (taken))
+       '(11 (in out)))
+(check "compiled: a clause body with several expressions, after the escape"
+       (list (guard (e (#t (L 'one) (L 'two) 'last))
+               (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out))))
+             (taken))
+       '(last (in out one two)))
+(check "compiled: the guard's value can be several values"
+       (call-with-values (lambda () (guard (e (#t #f)) (values 1 2 3))) list)
+       '(1 2 3))
+(check "compiled: the exception variable keeps its name inside the body"
+       (guard (my-var (#t (list 'got my-var))) (raise-continuable 'x))
+       '(got x))
+(check "compiled: a body that raises goes outward after the after thunk"
+       (list (guard (o (#t (list 'outer o)))
+               (guard (e (#t (L 'body) (raise 'from-body)))
+                 (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out)))))
+             (taken))
+       '((outer from-body) (in out body)))
+(check "nested guards: the inner clause body and the outer one in order"
+       (list (guard (o (#t (L 'outer) (list 'outer o)))
+               (guard (e ((symbol? e) (L 'inner) (raise 'again)))
+                 (dynamic-wind (lambda () (L 'in)) (lambda () (raise-continuable 'x)) (lambda () (L 'out)))))
+             (taken))
+       '((outer again) (in out inner outer)))
+(check "a guard in a loop, repeated"
+       (let loop ((i 0) (acc 0))
+         (if (= i 300) acc
+             (loop (+ i 1) (+ acc (guard (e (#t (+ e 1))) (raise-continuable i))))))
+       45150)
+(check "a guard whose body returns normally still returns the value"
+       (guard (e (#t 'caught)) (+ 1 2)) 3)
+(check "the value is not mistaken for a clause pick"
+       (guard (e (#t 'caught)) #f) #f)
+
+;; A pick left behind by an escape that was cut short is not run: an after
+;; thunk jumps to a continuation inside the guard body, and the body returns
+;; normally (R7RS: the value of the body).
+(check "compiled: the guard's continuation is not reached, the body's value is the guard's"
+       (guard (e (#t 'clause))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'escaped))))))
+       'escaped)
+(check "tree-walked: the same"
+       (tree-eval '(guard (e (#t 'clause))
+                     (call/cc (lambda (k)
+                       (dynamic-wind (lambda () #f)
+                                     (lambda () (raise-continuable 'x))
+                                     (lambda () (k 'escaped)))))))
+       'escaped)
+(check "compiled: a later raise picks a bodyless clause after an abandoned pick"
+       (guard (e ((memq e '(a b))) ((symbol? e) (list 'first e)))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'back)))))
+         (raise-continuable 'b))
+       '(b))
+(check "compiled: after the abandoned pick the body can finish with its own value"
+       (guard (e (#t 'clause))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'back)))))
+         'finished)
+       'finished)
 
 ;;; An exception from a clause goes outward, not back into the same guard.
 (check "a clause test that raises (in place)"

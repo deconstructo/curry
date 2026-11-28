@@ -16,6 +16,25 @@
 - An escape cannot cross an actor's entry frame: a continuation invoked from
   another thread raises `continuation-expired` (#443).
 
+**Changed — a `guard` clause body runs after the `dynamic-wind` after thunks (#431)**
+
+- With `raise-continuable`, a `guard` clause ran before the after thunks of the
+  `dynamic-wind` frames between the raise and the guard: the log of the
+  example in #431 was `(in clause out)`. R7RS 6.11 runs the clause after
+  leaving them, `(in out clause)`, which is what a plain `raise` already did.
+  The clause's *test* is still tried where the guard sees the raise (at the
+  raise point for `raise-continuable`), because with no matching clause the
+  raise goes on to the outer handlers and their value must return there (#406);
+  only the body, and the receiver of a `=>` clause, moved. A clause test that
+  has side effects, or reads a parameter, therefore still runs before the after
+  thunks.
+- An after thunk that raises during the escape reaches the same `guard`; its
+  clause now runs once, for that exception (it ran twice, `(in clause out
+  clause)`, and now is `(in out clause)`), as R7RS has it.
+- A compiled `guard` is expanded differently (the handler records which clause
+  applies and escapes; the body runs after the escape). Compiled `.scc` files
+  made by an earlier build keep the old order until recompiled.
+
 **Fixed — quaternion, complex and octonion operands; MPFR `eqv?`, `max` and printing (#436, #439, #441)**
 
 - `(real-part q)` of a quaternion returns its scalar part, not the whole
