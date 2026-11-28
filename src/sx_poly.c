@@ -423,6 +423,25 @@ static val_t poly_exact_div(val_t p, val_t q, val_t var) {
     return poly_to_expr(quot, dqt < 0 ? 0 : dqt, var);
 }
 
+/* The same, with the quotient made primitive (content 1): the squarefree
+ * factors of Yun's algorithm are only defined up to a constant, and this keeps
+ * them in the form poly-squarefree has always returned. */
+static val_t poly_exact_div_primitive(val_t p, val_t q, val_t var) {
+    int dp, dq;
+    val_t *cp = expr_to_poly(p, var, &dp);
+    val_t *cq = expr_to_poly(q, var, &dq);
+    if (!cp || !cq || dq < 0) return sx_div(p, q);
+    if (dp < dq) return Q(0);
+    val_t *rem; int dr;
+    val_t *quot; int dqt;
+    poly_div(cp, dp, cq, dq, &quot, &dqt, &rem, &dr);
+    int d = dqt < 0 ? 0 : dqt;
+    val_t content = poly_content(quot, d);
+    if (!qone(content))
+        for (int i = 0; i <= d; i++) quot[i] = num_div(quot[i], content);
+    return poly_to_expr(quot, d, var);
+}
+
 /*
  * Yun's algorithm: given p(x), compute squarefree decomposition
  *   p = a_1 * a_2^2 * a_3^3 * ...
@@ -438,7 +457,7 @@ val_t sx_poly_squarefree(val_t p, val_t var) {
 
     /* g = gcd(p, p'),  a = p/g = squarefree radical */
     val_t g = sx_poly_gcd(p_ex, dp, var);
-    val_t a = poly_exact_div(p_ex, g, var);
+    val_t a = poly_exact_div_primitive(p_ex, g, var);
 
     int k = 1;
     while (k < 64) {
@@ -448,13 +467,13 @@ val_t sx_poly_squarefree(val_t p, val_t var) {
             break;
 
         val_t b = sx_poly_gcd(g, a, var);           /* b = gcd(g, a) */
-        val_t f = poly_exact_div(a, b, var);         /* f = factors at multiplicity k */
+        val_t f = poly_exact_div_primitive(a, b, var);         /* f = factors at multiplicity k */
         val_t f_s = sx_simplify(f);
         if (!num_is_one(f_s) && !(vis_fixnum(f_s) && (vunfix(f_s) == 1 || vunfix(f_s) == -1)))
             result = scm_cons(scm_cons(f_s, Q(k)), result);
 
         a = b;
-        g = poly_exact_div(g, b, var);
+        g = poly_exact_div_primitive(g, b, var);
         k++;
     }
 
@@ -772,16 +791,24 @@ val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
     val_t *cd = expr_to_poly(den_expr, var, &dd);
     if (!cn || !cd) return sx_div(num_expr, den_expr);
 
-    /* Make the denominator monic: N/D = (N/c)/(D/c) for c its leading
-     * coefficient. sx_poly_factor returns the irreducible factors without the
-     * constant, so for D = 3x^2+3 the factor list was (x^2+1) and the 3 was
-     * lost: x/(3x^2+3) integrated as x/(x^2+1) (#447). */
-    if (dd > 0 && !qone(cd[dd])) {
-        val_t lc = cd[dd];
-        for (int i = 0; i <= dn; i++) cn[i] = num_div(cn[i], lc);
-        for (int i = 0; i <= dd; i++) cd[i] = num_div(cd[i], lc);
-        num_expr = poly_to_expr(cn, dn < 0 ? 0 : dn, var);
-        den_expr = poly_to_expr(cd, dd, var);
+    /* Divide N and D by the integer content of D: N/D = (N/c)/(D/c). The
+     * factor list sx_poly_factor returns has no constant in it, so for
+     * D = 3x^2+3 the factor was (x^2+1) and the 3 was lost: x/(3x^2+3)
+     * integrated as x/(x^2+1) (#447). Only the content, not the leading
+     * coefficient: D/c keeps integer coefficients, which sx_poly_factor needs
+     * (it raises on a rational one). A denominator with rational or inexact
+     * coefficients is left as it was. */
+    if (dd > 0) {
+        bool ints = true;
+        for (int i = 0; i <= dd; i++)
+            if (!(vis_fixnum(cd[i]) || vis_bignum(cd[i]))) { ints = false; break; }
+        val_t c = ints ? poly_content(cd, dd) : Q(1);
+        if (!qone(c)) {
+            for (int i = 0; i <= dn; i++) cn[i] = num_div(cn[i], c);
+            for (int i = 0; i <= dd; i++) cd[i] = num_div(cd[i], c);
+            num_expr = poly_to_expr(cn, dn < 0 ? 0 : dn, var);
+            den_expr = poly_to_expr(cd, dd, var);
+        }
     }
 
     val_t poly_part = Q(0);

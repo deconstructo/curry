@@ -436,6 +436,23 @@
 (check-rational "∫5/(3(x+1))"       (/ 5 (* 3 (+ x 1))))
 (check-rational "∫(x⁴+x)/(2x²+2)"   (/ (+ (expt x 4) x) (+ (* 2 (expt x 2)) 2)))
 (check-rational "∫x⁵/(5x²+10)"      (/ (expt x 5) (+ (* 5 (expt x 2)) 10)))
+;; Denominators with integer coefficients and a leading coefficient other than 1
+;; must still be factored: making the denominator monic turned them into rational
+;; ones, which poly-factor raises on (found in review of the #447 fix).
+(check-rational "∫1/(2x²+3x+1)"      (/ 1 (+ (* 2 (expt x 2)) (* 3 x) 1)))
+(check-rational "∫x/(2x²+x)"         (/ x (+ (* 2 (expt x 2)) x)))
+(check-rational "∫(x+1)/(2x²+3)"     (/ (+ x 1) (+ (* 2 (expt x 2)) 3)))
+(check-rational "∫x³/(2x²+1)"        (/ (expt x 3) (+ (* 2 (expt x 2)) 1)))
+(check-rational "∫x/(3(x²+1))"       (/ x (* 3 (+ (expt x 2) 1))))
+(check-rational "∫(5x²+1)/(4(x+1)(x+2))" (/ (+ (* 5 (expt x 2)) 1) (* 4 (+ x 1) (+ x 2))))
+(check-rational "∫1/(-x²-1)"         (/ 1 (- (- (expt x 2)) 1)))
+(check-rational "∫x/(-3x²-3)"        (/ x (- (* -3 (expt x 2)) 3)))
+(check-rational "∫1/(x/2+1/3)"       (/ 1 (+ (/ x 2) 1/3)))
+;; poly-squarefree keeps primitive factors, the constant is dropped
+(check "poly-squarefree of 2(x+1)²(3x+1)"
+       (map (lambda (p) (cons (sym->string (car p)) (cdr p)))
+            (poly-squarefree (* 2 (expt (+ x 1) 2) (+ (* 3 x) 1)) x))
+       '(("1 + 3 * x" . 1) ("1 + x" . 2)))
 ;; a monic denominator still works
 (check-rational "∫x²/(x+1)"         (/ (expt x 2) (+ x 1)))
 (check-rational "∫1/(x²+1)"         (/ 1 (+ (expt x 2) 1)))
