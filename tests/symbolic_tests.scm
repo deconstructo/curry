@@ -84,11 +84,11 @@
 (check "2*3*x coeff" (let ((e (simplify (* 2 3 x))))
                        (symbolic? e)) #t)
 
-;;; coefficient -1 becomes neg (real case)
+;;; coefficient -1 is the neg form: the constructor builds it, and simplify keeps it
 (define neg-x (* -1 x))
-(check "-1*x → neg form" (let ((s (simplify neg-x)))
-                            (and (symbolic? s)
-                                 (not (equal? s neg-x)))) #t)
+(check "-1*x is the neg form" (sym->string neg-x) "-x")
+(check "and simplify keeps it" (equal? (simplify neg-x) (- x)) #t)
+(check "2*-1*x folds to -2*x" (sym->string (simplify (* 2 -1 x))) "-2 * x")
 
 ;;; Numerics in ADD are accumulated at the front
 (define e-add (simplify (+ x 3 2)))
@@ -410,6 +410,52 @@
   (check "Maxwell: monopoles div(B)=0" divB 0)
   (check "Maxwell: Faraday curl(E)+∂B/∂t=0"  faraday '(0 0 0))
   (check "Maxwell: Ampere curl(B)-∂E/∂t=0"   ampere  '(0 0 0)))
+
+;;; ---- Rational integrands with a scaled denominator (#447) ---- ;;;
+;;; The integral of x^2/(2x) came out as x^2/2: polynomial division scaled the
+;;; remainder by the divisor's leading coefficient and left the quotient terms
+;;; unscaled, and partial fractions dropped a constant factor of the
+;;; denominator. Each antiderivative is differentiated and compared with the
+;;; integrand at two points, so a wrong constant factor cannot pass.
+(define (check-rational label f)
+  (let ((F (∫ f x)))
+    (check-antideriv (string-append label " at x=2") f F 2.0 1e-9)
+    (check-antideriv (string-append label " at x=3") f F 3.0 1e-9)))
+
+(check-rational "∫x²/(2x)"          (/ (expt x 2) (* 2 x)))
+(check-rational "∫x/(2x)"           (/ x (* 2 x)))
+(check-rational "∫x³/(4x²)"         (/ (expt x 3) (* 4 (expt x 2))))
+(check-rational "∫(1+x²)/(3x)"      (/ (+ 1 (expt x 2)) (* 3 x)))
+(check-rational "∫x²/(2(1+x))"      (/ (expt x 2) (* 2 (+ 1 x))))
+(check-rational "∫1/(2+2x)"         (/ 1 (+ 2 (* 2 x))))
+(check-rational "∫x³/(3+3x²)"       (/ (expt x 3) (+ 3 (* 3 (expt x 2)))))
+(check-rational "∫x/(3+3x²)"        (/ x (+ 3 (* 3 (expt x 2)))))
+(check-rational "∫1/(3+3x²)"        (/ 1 (+ 3 (* 3 (expt x 2)))))
+(check-rational "∫(1+x)/(2+2x²)"    (/ (+ 1 x) (+ 2 (* 2 (expt x 2)))))
+(check-rational "∫1/(2(x+1)(x+2))"  (/ 1 (* 2 (+ x 1) (+ x 2))))
+(check-rational "∫5/(3(x+1))"       (/ 5 (* 3 (+ x 1))))
+(check-rational "∫(x⁴+x)/(2x²+2)"   (/ (+ (expt x 4) x) (+ (* 2 (expt x 2)) 2)))
+(check-rational "∫x⁵/(5x²+10)"      (/ (expt x 5) (+ (* 5 (expt x 2)) 10)))
+;; Denominators with integer coefficients and a leading coefficient other than 1
+;; must still be factored: making the denominator monic turned them into rational
+;; ones, which poly-factor raises on (found in review of the #447 fix).
+(check-rational "∫1/(2x²+3x+1)"      (/ 1 (+ (* 2 (expt x 2)) (* 3 x) 1)))
+(check-rational "∫x/(2x²+x)"         (/ x (+ (* 2 (expt x 2)) x)))
+(check-rational "∫(x+1)/(2x²+3)"     (/ (+ x 1) (+ (* 2 (expt x 2)) 3)))
+(check-rational "∫x³/(2x²+1)"        (/ (expt x 3) (+ (* 2 (expt x 2)) 1)))
+(check-rational "∫x/(3(x²+1))"       (/ x (* 3 (+ (expt x 2) 1))))
+(check-rational "∫(5x²+1)/(4(x+1)(x+2))" (/ (+ (* 5 (expt x 2)) 1) (* 4 (+ x 1) (+ x 2))))
+(check-rational "∫1/(-x²-1)"         (/ 1 (- (- (expt x 2)) 1)))
+(check-rational "∫x/(-3x²-3)"        (/ x (- (* -3 (expt x 2)) 3)))
+(check-rational "∫1/(x/2+1/3)"       (/ 1 (+ (/ x 2) 1/3)))
+;; poly-squarefree keeps primitive factors, the constant is dropped
+(check "poly-squarefree of 2(x+1)²(3x+1)"
+       (map (lambda (p) (cons (sym->string (car p)) (cdr p)))
+            (poly-squarefree (* 2 (expt (+ x 1) 2) (+ (* 3 x) 1)) x))
+       '(("1 + 3 * x" . 1) ("1 + x" . 2)))
+;; a monic denominator still works
+(check-rational "∫x²/(x+1)"         (/ (expt x 2) (+ x 1)))
+(check-rational "∫1/(x²+1)"         (/ 1 (+ (expt x 2) 1)))
 
 ;;; ---- Summary ---- ;;;
 

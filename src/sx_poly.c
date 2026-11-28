@@ -249,6 +249,37 @@ static void poly_pseudo_div(val_t *a, int da, val_t *b, int db,
     *rout = r; *dr_out = dr;
 }
 
+/* True polynomial division over the coefficient field: a = q*b + r with
+ * deg r < deg b, no scaling. poly_pseudo_div above scales the remainder by the
+ * divisor's leading coefficient at every step and leaves the quotient terms it
+ * has already produced unscaled, so for a divisor whose leading coefficient is
+ * not 1 neither result is a quotient or remainder of a. That is what the
+ * subresultant GCD and the resultant want, and nothing else: use this wherever
+ * the quotient or remainder itself is needed (#447: the integral of
+ * x^2/(2x) came out as x^2/2). */
+static void poly_div(val_t *a, int da, val_t *b, int db,
+                     val_t **qout, int *dq_out,
+                     val_t **rout, int *dr_out) {
+    int dq = da - db;
+    val_t *q = poly_alloc(dq < 0 ? 0 : dq);
+    val_t *r = poly_alloc(da);
+    for (int i = 0; i <= da; i++) r[i] = a[i];
+    val_t lcb = b[db];
+    int dr = da;
+    while (dr >= db) {
+        int e = dr - db;
+        val_t c = num_div(r[dr], lcb);
+        q[e] = c;
+        for (int j = 0; j <= db; j++) r[e + j] = num_sub(r[e + j], num_mul(c, b[j]));
+        r[dr] = Q(0);                       /* exact by construction; drop rounding residue */
+        int new_dr = dr - 1;
+        while (new_dr >= 0 && qzero(r[new_dr])) new_dr--;
+        dr = new_dr;
+    }
+    *qout = q; *dq_out = dq < 0 ? -1 : poly_deg(q, dq + 1);
+    *rout = r; *dr_out = dr;
+}
+
 /* ========================================================================== */
 /* PART 3: Polynomial GCD — subresultant PRS                                  */
 /* ========================================================================== */
@@ -388,12 +419,27 @@ static val_t poly_exact_div(val_t p, val_t q, val_t var) {
     if (dp < dq) return Q(0);
     val_t *rem; int dr;
     val_t *quot; int dqt;
-    poly_pseudo_div(cp, dp, cq, dq, &quot, &dqt, &rem, &dr);
-    /* Divide out any scalar introduced by pseudo-division */
-    val_t content = poly_content(quot, dqt < 0 ? 0 : dqt);
-    if (!qone(content))
-        for (int i = 0; i <= dqt; i++) quot[i] = num_div(quot[i], content);
+    poly_div(cp, dp, cq, dq, &quot, &dqt, &rem, &dr);
     return poly_to_expr(quot, dqt < 0 ? 0 : dqt, var);
+}
+
+/* The same, with the quotient made primitive (content 1): the squarefree
+ * factors of Yun's algorithm are only defined up to a constant, and this keeps
+ * them in the form poly-squarefree has always returned. */
+static val_t poly_exact_div_primitive(val_t p, val_t q, val_t var) {
+    int dp, dq;
+    val_t *cp = expr_to_poly(p, var, &dp);
+    val_t *cq = expr_to_poly(q, var, &dq);
+    if (!cp || !cq || dq < 0) return sx_div(p, q);
+    if (dp < dq) return Q(0);
+    val_t *rem; int dr;
+    val_t *quot; int dqt;
+    poly_div(cp, dp, cq, dq, &quot, &dqt, &rem, &dr);
+    int d = dqt < 0 ? 0 : dqt;
+    val_t content = poly_content(quot, d);
+    if (!qone(content))
+        for (int i = 0; i <= d; i++) quot[i] = num_div(quot[i], content);
+    return poly_to_expr(quot, d, var);
 }
 
 /*
@@ -411,7 +457,7 @@ val_t sx_poly_squarefree(val_t p, val_t var) {
 
     /* g = gcd(p, p'),  a = p/g = squarefree radical */
     val_t g = sx_poly_gcd(p_ex, dp, var);
-    val_t a = poly_exact_div(p_ex, g, var);
+    val_t a = poly_exact_div_primitive(p_ex, g, var);
 
     int k = 1;
     while (k < 64) {
@@ -421,13 +467,13 @@ val_t sx_poly_squarefree(val_t p, val_t var) {
             break;
 
         val_t b = sx_poly_gcd(g, a, var);           /* b = gcd(g, a) */
-        val_t f = poly_exact_div(a, b, var);         /* f = factors at multiplicity k */
+        val_t f = poly_exact_div_primitive(a, b, var);         /* f = factors at multiplicity k */
         val_t f_s = sx_simplify(f);
         if (!num_is_one(f_s) && !(vis_fixnum(f_s) && (vunfix(f_s) == 1 || vunfix(f_s) == -1)))
             result = scm_cons(scm_cons(f_s, Q(k)), result);
 
         a = b;
-        g = poly_exact_div(g, b, var);
+        g = poly_exact_div_primitive(g, b, var);
         k++;
     }
 
@@ -643,7 +689,7 @@ val_t sx_poly_factor(val_t p, val_t var) {
                     val_t *rem; int dr; val_t *quot; int dqt;
                     val_t *crem2 = poly_copy(crem, drem);
                     if (!cf2) break;
-                    poly_pseudo_div(crem2, drem, cf2, df, &quot, &dqt, &rem, &dr);
+                    poly_div(crem2, drem, cf2, df, &quot, &dqt, &rem, &dr);
                     if (dr >= 0) break;
                     result = scm_cons(scm_cons(sx_simplify(f), mult), result);
                     /* quot is new remainder */
@@ -706,7 +752,7 @@ static val_t poly_extended_gcd(val_t *a, int da, val_t *b, int db,
     while (dr >= 0) {
         val_t *quot; int dq;
         val_t *rem;  int dr2;
-        poly_pseudo_div(old_r, dor, r, dr, &quot, &dq, &rem, &dr2);
+        poly_div(old_r, dor, r, dr, &quot, &dq, &rem, &dr2);
 
         /* new_s = old_s - q*s; new_t = old_t - q*t */
         /* (simplified: use expr arithmetic for the Bezout coefficients) */
@@ -745,11 +791,31 @@ val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
     val_t *cd = expr_to_poly(den_expr, var, &dd);
     if (!cn || !cd) return sx_div(num_expr, den_expr);
 
+    /* Divide N and D by the integer content of D: N/D = (N/c)/(D/c). The
+     * factor list sx_poly_factor returns has no constant in it, so for
+     * D = 3x^2+3 the factor was (x^2+1) and the 3 was lost: x/(3x^2+3)
+     * integrated as x/(x^2+1) (#447). Only the content, not the leading
+     * coefficient: D/c keeps integer coefficients, which sx_poly_factor needs
+     * (it raises on a rational one). A denominator with rational or inexact
+     * coefficients is left as it was. */
+    if (dd > 0) {
+        bool ints = true;
+        for (int i = 0; i <= dd; i++)
+            if (!(vis_fixnum(cd[i]) || vis_bignum(cd[i]))) { ints = false; break; }
+        val_t c = ints ? poly_content(cd, dd) : Q(1);
+        if (!qone(c)) {
+            for (int i = 0; i <= dn; i++) cn[i] = num_div(cn[i], c);
+            for (int i = 0; i <= dd; i++) cd[i] = num_div(cd[i], c);
+            num_expr = poly_to_expr(cn, dn < 0 ? 0 : dn, var);
+            den_expr = poly_to_expr(cd, dd, var);
+        }
+    }
+
     val_t poly_part = Q(0);
     val_t *rem_n = cn; int drn = dn;
     if (dn >= dd) {
         val_t *quot; int dq; val_t *rem2; int dr2;
-        poly_pseudo_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
+        poly_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
         poly_part = poly_to_expr(quot, dq, var);
         rem_n = rem2; drn = dr2;
     }
@@ -848,7 +914,7 @@ val_t sx_partial_fractions(val_t num_expr, val_t den_expr, val_t var) {
             int da; val_t *ca = expr_to_poly(A, var, &da);
             if (ca && da >= df) {
                 val_t *qr; int dqr; val_t *rr; int drr;
-                poly_pseudo_div(ca, da, cf, df, &qr, &dqr, &rr, &drr);
+                poly_div(ca, da, cf, df, &qr, &dqr, &rr, &drr);
                 A = poly_to_expr(rr, drr < 0 ? 0 : drr, var);
                 A = sx_simplify(A);
             }
@@ -1358,7 +1424,7 @@ val_t sx_integrate_rational(val_t expr, val_t var) {
     val_t result = Q(0);
     if (dn >= dd) {
         val_t *quot; int dq; val_t *rem2; int dr2;
-        poly_pseudo_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
+        poly_div(cn, dn, cd, dd, &quot, &dq, &rem2, &dr2);
         val_t poly_part = integrate_poly(poly_to_expr(quot, dq < 0 ? 0 : dq, var), var);
         if (poly_part == V_VOID) return V_VOID;
         result = poly_part;

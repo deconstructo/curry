@@ -87,6 +87,7 @@ add_test(NAME srfi_1_take_drop COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURC
 add_test(NAME srfi_s14_char_sets COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_s14_char_sets_tests.scm)
 add_test(NAME srfi_61_cond COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_61_cond_tests.scm)
 add_test(NAME numeric_ext    COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numeric_ext_tests.scm)
+add_test(NAME symbolic      COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/symbolic_tests.scm)
 # run_with_hang_dump.sh prints every thread's stack after 90 s (before the
 # 120 s CTest TIMEOUT below), so a recurrence of the intermittent hang
 # (issue #312) leaves a stack dump in the CI log.
