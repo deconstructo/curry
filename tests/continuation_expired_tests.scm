@@ -89,6 +89,26 @@
            actor-result))
        'continuation-expired)
 
+;;; A guard clause that runs in place (raise-continuable) leaves the call/cc
+;;; frames between the raise and the guard.
+(define k-in-guard #f)
+(check "a guard clause run in place, with a call/cc frame in between"
+       (tree-eval '(guard (e (#t 'caught))
+                     (call/cc (lambda (k) (set! k-in-guard k) (raise-continuable 'x)))))
+       'caught)
+(check "that continuation is expired afterwards"
+       (code-of (lambda () (k-in-guard 1))) 'continuation-expired)
+
+;;; An STM retry leaves the call/cc frames inside the first alternative.
+(define k-in-stm #f)
+(check "or-else takes the second alternative after a retry"
+       (atomically (lambda ()
+                     (%or-else (lambda () (call/cc (lambda (k) (set! k-in-stm k) (retry))))
+                               (lambda () 'second))))
+       'second)
+(check "the continuation captured before the retry is expired"
+       (code-of (lambda () (k-in-stm 1))) 'continuation-expired)
+
 ;;; Escapes still work, at every depth.
 (check "escape" (call/cc (lambda (k) (+ 1 (k 42)))) 42)
 (check "escape with two values"

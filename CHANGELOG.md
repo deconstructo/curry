@@ -8,7 +8,9 @@
   raise, or by another continuation) jumped into a C stack frame that no longer
   existed, and the process died with a segmentation fault. It now raises an
   error with the code `continuation-expired`, which `guard` can catch. A
-  continuation invoked from another thread raises the same error.
+  continuation invoked from an actor raises the same error. From a worker of a
+  parallel `map` the error reaches the caller wrapped as "map: error in
+  parallel worker", with no code.
 - Escapes are unchanged. Each thread keeps a list of its running `call/cc`
   frames; a `call/cc` adds its continuation and removes it when it returns, and
   every non-local exit (a raise, a continuation escape, a `guard` clause run in

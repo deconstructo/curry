@@ -106,7 +106,7 @@ Curry aims for R7RS compatibility. The following deviations are confirmed and no
 
 ### 1. `call/cc` — escape continuations only
 
-`call-with-current-continuation` captures and invokes escape continuations (jumping outward through live stack frames) correctly, including correct interaction with `dynamic-wind`. **Upward continuations** — capturing a continuation and invoking it after the original call has returned — are not supported. Invoking one raises an error with the code `continuation-expired`, which `guard` can catch; so does invoking a continuation from a thread other than the one that captured it (#443).
+`call-with-current-continuation` captures and invokes escape continuations (jumping outward through live stack frames) correctly, including correct interaction with `dynamic-wind`. **Upward continuations** — capturing a continuation and invoking it after the original call has returned — are not supported. Invoking one raises an error with the code `continuation-expired`, which `guard` can catch; so does invoking a continuation from an actor. From a worker of a parallel `map` the error reaches the caller wrapped as "map: error in parallel worker" (#443).
 
 ```scheme
 ; Works: escape
