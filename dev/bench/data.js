@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795832175196,
+  "lastUpdate": 1795832840983,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23252,6 +23252,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 83.013,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7d2e9617d28514d4035e48a931a06b3b466b74da",
+          "message": "Merge pull request #446 from deconstructo/fix/438-autodiff\n\nfix(auto-diff): transcendental functions carry the epsilon part; (∂ procedure x) raises (#438)",
+          "timestamp": "2026-11-28T13:26:41+11:00",
+          "tree_id": "f33feba6085b4cc7e3212d84b60c26d6e254485e",
+          "url": "https://github.com/deconstructo/curry/commit/7d2e9617d28514d4035e48a931a06b3b466b74da"
+        },
+        "date": 1795832839751,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 20.911,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.523,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.787,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.852,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 182.138,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 340.873,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 83.746,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.746,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 79.693,
             "unit": "ms"
           }
         ]
