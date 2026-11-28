@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.32.0 - 2026-11-28
 
 **Fixed: `bernoulli` and `euler-number` from several threads (#454).** Both fill a shared cache on demand without a lock, so a parallel `map` over them returned wrong values (B10 came out as 17993126/33), died on a division by zero, or hung. One mutex now covers computing and copying an entry.
 

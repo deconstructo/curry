@@ -18,10 +18,11 @@ v1.28.0: one entry added to the opening list. Updated 2026-11-04 for
 v1.29.0: one entry added to the opening list. Updated 2026-11-07 for
 v1.30.0: one entry added to the opening list. Updated 2026-11-07 for
 v1.30.1: one entry added to the opening list. Updated 2026-11-25 for
-v1.31.0: one entry added to the opening list. Source: cill_spec.pdf +
+v1.31.0: one entry added to the opening list. Updated 2026-11-28 for
+v1.32.0: one entry added to the opening list. Source: cill_spec.pdf +
 design sessions.*
 
-Curry is at v1.31.0 (released 2026-11-25). Since v1.23.3 the following
+Curry is at v1.32.0 (released 2026-11-28). Since v1.23.3 the following
 has shipped; `CHANGELOG.md` has the dated list.
 
 - **v1.24.0:** SRFI-61 (`cond` arrow clause) in the compiler and the
@@ -67,6 +68,14 @@ has shipped; `CHANGELOG.md` has the dated list.
   error (`handler-returned`, breaking; `.scc` format 10); an after thunk
   that raises during an escape runs once; a JIT loop-stack crash and NaN
   comparison fixes. `CHANGELOG.md` has the full list.
+- **v1.32.0:** `(curry future)` (futures on the work pool) and read-write
+  locks, `once` and barriers in `(curry sync)`; a `guard` clause body runs
+  after the `dynamic-wind` after thunks (R7RS order, breaking); MPFR is a
+  required dependency (breaking for builds); an expired continuation raises
+  `continuation-expired` instead of crashing; quaternion/complex/octonion
+  mixing, `auto-diff` through transcendental functions; hash tables, sets,
+  string ports and the Bernoulli/Euler caches are safe to share between
+  threads. `CHANGELOG.md` has the full list.
 
 Earlier, between v1.17.0 and v1.23.3: **a real compiler IR pipeline
 shipped** (Tiers 2.1 through 2.6 — open coding, a local inliner, wrapper
@@ -87,7 +96,7 @@ dependency, not ambition; each phase unblocks the phases above it.
 
 ---
 
-## Where we are now (v1.31.0; the table below was last fully checked at v1.23.3)
+## Where we are now (v1.32.0; the table below was last fully checked at v1.23.3)
 
 | Capability | Status |
 |---|---|
