@@ -272,6 +272,12 @@ if(BUILD_MODULE_SYNC AND TARGET curry_sync)
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
+if(BUILD_MODULE_FUTURE AND BUILD_MODULE_SYNC AND TARGET curry_future AND TARGET curry_sync)
+    add_test(NAME future COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/future_tests.scm)
+    set_tests_properties(future PROPERTIES TIMEOUT 120
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+endif()
+
 if(BUILD_MODULE_STORAGE AND TARGET curry_storage)
     add_test(NAME storage COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/storage_tests.scm)
     set_tests_properties(storage PROPERTIES

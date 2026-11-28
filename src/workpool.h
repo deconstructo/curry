@@ -19,7 +19,7 @@
 
 /* ── work item ─────────────────────────────────────────────────────────── */
 
-typedef enum { WORK_MAP, WORK_FOREACH, WORK_REDUCE } WorkKind;
+typedef enum { WORK_MAP, WORK_FOREACH, WORK_REDUCE, WORK_TASK } WorkKind;
 
 typedef struct {
     WorkKind kind;
@@ -34,6 +34,8 @@ typedef struct {
     atomic_int      *n_done;
     pthread_mutex_t *done_mutex;
     pthread_cond_t  *done_cond;
+    void (*task)(void *);   /* WORK_TASK: run task(task_arg); no completion signal */
+    void  *task_arg;
 } WorkItem;
 
 /* ── Chase-Lev work-stealing deque ─────────────────────────────────────── */
@@ -93,6 +95,16 @@ extern CURRY_THREAD_LOCAL bool pool_is_worker;
 
 /* Number of logical CPUs (same value the pool uses for its thread count). */
 int pool_hw_concurrency(void);
+
+/*
+ * Run task(arg) once on a pool worker, as soon as one is free. Returns false,
+ * without running it, if every deque is full: the caller then runs it itself.
+ * `arg` is kept reachable for the collector until the task has run (it may be
+ * a val_t). The task must not raise (a raise is caught and dropped here) and
+ * does its own completion signalling: the pool keeps no record of it. Used by
+ * futures (modules/future).
+ */
+bool pool_submit_task(void (*task)(void *), void *arg);
 
 /*
  * Submit a parallel job split into chunks derived from n elements.

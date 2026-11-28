@@ -10,9 +10,10 @@ matches your problem:
 | **Actors** (`spawn` / `send!` / `receive`) | Independent processes communicating by message | built-in |
 | **Channels** (`make-channel` / `channel-send!` / `channel-recv!`) | Producer/consumer pipelines, streaming data | built-in |
 | **STM** (`atomically` / `tvar-read` / `tvar-write!`) | Shared mutable state with composable transactions | built-in; `(import (curry stm))` for macros |
-| **Low-level sync** (`make-mutex` / `make-condvar` / `make-semaphore`) | C interop, building higher-level primitives | `(import (curry sync))` |
+| **Low-level sync** (`make-mutex` / `make-condvar` / `make-semaphore` / `make-rwlock` / `make-once` / `make-barrier`) | C interop, building higher-level primitives | `(import (curry sync))` |
+| **Futures** (`pool-submit` / `future-get` / `future-then`) | One computation to run on the thread pool and collect later | `(import (curry future))` |
 
-All four are available in every build — no compile flags required. Actors,
+All five are available in every build — no compile flags required. Actors,
 channels, and STM share the same Boehm GC heap, so values can be passed
 between threads without copying.
 

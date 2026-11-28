@@ -2,6 +2,20 @@
 
 ### Unreleased
 
+**New — futures: `(curry future)`**
+
+- `(pool-submit thunk)` runs a thunk on a worker of the pool that `map` and
+  `for-each/par` use and returns a future; `future-get` waits for the value or
+  raises what the thunk raised (as often as asked); `future-wait` is the timed
+  wait; `future-done?`; `future-then` runs a procedure on the value when the
+  future is done (and passes a failure on); `future?`.
+- A future that waits for another one does not starve the pool: `future-get` on
+  a future nobody has started runs it in the calling thread, and on a
+  `future-then` future first works on the future it waits for. A thunk that
+  leaves by a continuation does not leave its future stuck as running.
+- The pool gets a generic entry for this, `pool_submit_task`. New CMake option
+  `BUILD_MODULE_FUTURE` (default ON). See `docs/reference/module-future.md`.
+
 **New — read-write locks, once and barriers in `(curry sync)`**
 
 - `make-rwlock`, `rwlock-read-lock!`, `rwlock-write-lock!`, the `try` variants,
