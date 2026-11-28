@@ -20,14 +20,15 @@
  * call into Scheme, and never across more than one table). A compound update
  * ("read, then set") is still two operations: use a mutex from (curry sync).
  *
- * The hash of the key is taken before the lock: it is the part that can raise
- * (stack-overflow on a very deeply nested key), and a raise with the lock held
- * would leave the table locked (see spinlock.h for what happens then). */
+ * The hash of the key is taken before the lock where that is possible. What
+ * can still raise inside a section (stack-overflow while rehashing a deep stored
+ * key, or comparing one) releases the lock first; see spinlock.h. */
 #define table_lock   spin_lock
 #define table_unlock spin_unlock
 
 uint32_t spin_next_token = 1;
 CURRY_THREAD_LOCAL uint32_t spin_my_token = 0;
+CURRY_THREAD_LOCAL uint32_t *spin_held = NULL;
 
 /* Every set_* entry point below used to cast a caller-supplied val_t
  * straight to a Set* via as_set() with no type check -- the exact same

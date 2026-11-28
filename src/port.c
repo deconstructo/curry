@@ -431,26 +431,28 @@ val_t port_get_output_string(val_t v) {
     Port *p = checked_port(v, "get-output-string");
     if (!(p->flags & PORT_STRING))
         scm_raise(V_FALSE, "get-output-string: not a string port");
-    /* Allocate outside the lock for the length seen, and copy under it; if the
-     * port grew in between, go round again. */
+    /* Allocate outside the lock for the length seen, then copy under it what
+     * the port holds. Only if it has grown past the allocation go round again
+     * (a reader that waited for an unchanged length could starve while others
+     * keep writing). */
     String *s = NULL;
-    uint32_t len = 0;
+    uint32_t cap = 0;
     for (;;) {
         spin_lock(&p->lock);
         uint32_t now = (uint32_t)p->u.str.len;
-        if (s && now == len) {
-            memcpy(s->data, p->u.str.buf, len + 1);
+        if (s && now <= cap) {
+            memcpy(s->data, p->u.str.buf, now + 1);
             spin_unlock(&p->lock);
+            s->len = now;
+            s->orig_cap = now;
             return vptr(s);
         }
         spin_unlock(&p->lock);
-        len = now;
-        s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
+        cap = now + now / 4 + 16;
+        s = (String *)gc_alloc_atomic(sizeof(String) + cap + 1);
         s->hdr.type  = T_STRING;
         s->hdr.flags = 0;
-        s->len  = len;
         s->hash = 0;
-        s->orig_cap = len;
         s->ext = NULL;
     }
 }
@@ -460,21 +462,21 @@ val_t port_get_output_bytevector(val_t v) {
     if (!(p->flags & PORT_STRING) || !(p->flags & PORT_BINARY))
         scm_raise(V_FALSE, "get-output-bytevector: not a binary output port");
     Bytevector *bv = NULL;
-    uint32_t len = 0;
+    uint32_t cap = 0;
     for (;;) {
         spin_lock(&p->lock);
         uint32_t now = (uint32_t)p->u.str.len;
-        if (bv && now == len) {
-            memcpy(bv->data, p->u.str.buf, len);
+        if (bv && now <= cap) {
+            memcpy(bv->data, p->u.str.buf, now);
             spin_unlock(&p->lock);
+            bv->len = now;
             return vptr(bv);
         }
         spin_unlock(&p->lock);
-        len = now;
-        bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + len);
+        cap = now + now / 4 + 16;
+        bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + cap);
         bv->hdr.type  = T_BYTEVECTOR;
         bv->hdr.flags = 0;
-        bv->len = len;
     }
 }
 
