@@ -231,24 +231,31 @@ static val_t on_mark_sym(val_t sym, void *ud) { return sc_make_synobj(sym, *(lon
 
 /* ---- The macro-apply boundary ---- */
 
+typedef struct { long mark; val_t def_env; } ScSaved;
+static void sc_restore(void *arg) {
+    ScSaved *s = (ScSaved *)arg;
+    sc_cur_mark = s->mark; sc_cur_def_env = s->def_env;
+}
+
 val_t sc_apply_transformer(val_t transformer, val_t form) {
     if (vis_prim(transformer))
         return apply(transformer, scm_cons(form, V_NIL));
 
-    long saved = sc_cur_mark;
-    val_t saved_env = sc_cur_def_env;
+    ScSaved sv = { sc_cur_mark, sc_cur_def_env };
     sc_cur_mark = (long)atomic_fetch_add(&sc_mark_counter, 1) + 1;
     if (vis_closure(transformer))
         sc_cur_def_env = vptr(as_clos(transformer)->env);
     else
         sc_cur_def_env = sr_get_current_env();
     val_t out = V_VOID;
+    /* On the wind list, so a continuation escape out of the transformer puts
+     * the mark and environment back too (#433). */
+    WindFrame *wf = wind_push_cleanup(sc_restore, &sv);
     ExnHandler h;
     SCM_PROTECT(h,
         out = apply(transformer, scm_cons(form, V_NIL)),
-        { sc_cur_mark = saved; sc_cur_def_env = saved_env; scm_raise_val(h.exn); });
-    sc_cur_mark = saved;
-    sc_cur_def_env = saved_env;
+        { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
+    wind_pop_cleanup(wf);
     /* One scan up front; the rebuild itself never rescans a subtree. */
     return sc_contains_synobj(out) ? sc_strip_code(out) : out;
 }

@@ -30,6 +30,7 @@
 #include "stm.h"
 #include "gc.h"
 #include "eval.h"
+#include "runtime_internal.h"
 #include "value.h"
 #include "object.h"
 
@@ -308,6 +309,11 @@ void stm_tvar_write(val_t v, val_t val) {
 
 #define RETRY_SIG 1
 
+/* Put current_tx back when atomically is left by a continuation escape as well
+ * as by a return or a raise: a later atomically on this thread would see a
+ * stale transaction (#433). */
+static void restore_tx(void *arg) { current_tx = *(TxState **)arg; }
+
 val_t stm_atomically(val_t thunk) {
     TxState *outer_tx = current_tx;
 
@@ -316,6 +322,7 @@ val_t stm_atomically(val_t thunk) {
 
     TxState *tx = tx_new();
     current_tx  = tx;
+    WindFrame *wf = wind_push_cleanup(restore_tx, &outer_tx);
 
     ExnHandler *saved_handler = current_handler;
 
@@ -363,6 +370,7 @@ val_t stm_atomically(val_t thunk) {
         if (setjmp(retry_jmp) == RETRY_SIG) {
             jit_depth_restore(saved_jit_depth);
             vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
+            wind_unwind_to(wf);        /* the cleanups of the with-... forms the retry left */
             tx_wait_for_change(tx);
             continue;
         }
@@ -377,13 +385,13 @@ val_t stm_atomically(val_t thunk) {
 
         if (got_exn) {
             val_t exn   = h.exn;
-            current_tx  = outer_tx;
+            wind_pop_cleanup(wf);      /* restores current_tx */
             current_handler = saved_handler;
             scm_raise_val(exn);
         }
 
         if (tx_commit(tx)) {
-            current_tx = outer_tx;
+            wind_pop_cleanup(wf);      /* restores current_tx */
             return result;
         }
     }
@@ -402,6 +410,7 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
 
     jmp_buf local_jmp;
     tx->retry_jmp = &local_jmp;
+    WindFrame *saved_wind = current_wind;
 
     /* Same vm-state leak as stm_atomically's retry_jmp (see the comment
      * there): a stm_retry() inside thunk1/thunk2 longjmps straight to
@@ -421,6 +430,7 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
     }
     jit_depth_restore(saved_jit_depth);
     vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
+    wind_unwind_to(saved_wind);        /* a retry left the cleanups of with-... forms */
 
     tx->rlen     = saved_rlen;
     tx->wlen     = saved_wlen;
@@ -437,6 +447,7 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
     }
     jit_depth_restore(saved_jit_depth);
     vm_exn_state_restore(saved_vm_frame_count, saved_vm_sp, saved_vm_open_upvalues);
+    wind_unwind_to(saved_wind);        /* a retry left the cleanups of with-... forms */
 
     tx->rlen     = saved_rlen;
     tx->wlen     = saved_wlen;

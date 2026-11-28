@@ -111,6 +111,8 @@ val_t make_values_from_list(val_t lst) {
     return vptr(mv);
 }
 
+static void restore_sr_env(void *arg) { sr_set_current_env(*(val_t *)arg); }
+
 /* noinline ensures the setjmp jmp_buf lives in this function's own stable
  * stack frame.  eval() uses a goto-based TCO loop, so the optimizer may
  * allocate locals in caller-saved registers that longjmp doesn't restore;
@@ -1558,11 +1560,14 @@ tail:
         val_t saved_sr_env = sr_get_current_env();
         sr_set_current_env(env);
         val_t transformed = V_VOID;
+        /* On the wind list too, so a continuation escape out of the
+         * transformer restores it (#433). */
+        WindFrame *sr_wf = wind_push_cleanup(restore_sr_env, &saved_sr_env);
         ExnHandler sr_h;
         SCM_PROTECT(sr_h,
             transformed = sc_apply_transformer(as_syntax(op_val)->transformer, expr),
-            { sr_set_current_env(saved_sr_env); scm_raise_val(sr_h.exn); });
-        sr_set_current_env(saved_sr_env);
+            { wind_pop_cleanup(sr_wf); scm_raise_val(sr_h.exn); });
+        wind_pop_cleanup(sr_wf);
         expr = transformed; goto tail;
     }
 
