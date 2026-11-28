@@ -623,8 +623,8 @@
 ;; the sign of a symbolic value: from the assumption, else an error
 (check "positive? and negative? from assumptions"
        (list (positive? px) (negative? px) (positive? nx) (negative? nx)) '(#t #f #f #t))
-(check "positive? of an unassumed variable raises" (raises? (lambda () (positive? x))) #t)
-(check "negative? of an unassumed variable raises" (raises? (lambda () (negative? x))) #t)
+(check "positive? and negative? of an unassumed variable are #f (rule guards rely on it)"
+       (list (positive? x) (negative? x)) '(#f #f))
 
 ;;; ---- Summary ---- ;;;
 

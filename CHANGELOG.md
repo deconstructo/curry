@@ -13,7 +13,7 @@
 - `(= x x)` is `#t` and `(= x 1)` is `#f` (structural); both used to raise.
 - `(number? x)` and `(complex? x)` are `#t`; `real?`, `rational?` and `integer?` are `#t` only with the matching assumption. **Breaking:** code that used `(number? e)` to mean "nothing left to substitute" must use `(not (symbolic? e))`; `(curry spacetime)` and its tests did.
 - `max`, `min`, `floor`, `ceiling`, `round`, `truncate` of a symbolic value return an expression that evaluates after `substitute` (`floor` returned its argument, `max` raised). `(exact->inexact e)` and `(inexact->exact e)` convert the numbers inside `e`.
-- `positive?` and `negative?` of a symbolic value answer from its `'positive`/`'negative` assumption and otherwise raise. `(curry sql)`, `(curry toml)` and `(curry yaml)` raise on a symbolic value instead of writing its text as a number literal (the SQL one would have spliced a variable's name into the statement). The LLVM JIT comparison wrappers follow the same rule as the primitive.
+- `positive?` and `negative?` of a symbolic variable are `#t` when it is declared `'positive`/`'negative` and `#f` otherwise (rewrite-rule guards depend on the `#f`). `(curry sql)`, `(curry toml)` and `(curry yaml)` raise on a symbolic value instead of writing its text as a number literal (the SQL one would have spliced a variable's name into the statement). The LLVM JIT comparison wrappers follow the same rule as the primitive.
 - `(+ x "a")` and the other arithmetic operators raise `not a number` for a string, character, symbol, boolean, list or vector operand.
 
 ### 1.32.0 - 2026-11-28
