@@ -619,7 +619,7 @@ static val_t kronecker_find_factor(val_t *p, int dp, val_t var, int fd) {
 
     int max_tries = 1;
     for (int i = 0; i < npts; i++) max_tries *= div_counts[i];
-    if (max_tries > 20000) max_tries = 20000; /* safety limit */
+    if (max_tries > 4096) max_tries = 4096; /* safety limit */
 
     for (int attempt = 0; attempt < max_tries; attempt++) {
         val_t *cand_ys = (val_t *)gc_alloc_raw_pinned((size_t)npts * sizeof(val_t));
@@ -637,6 +637,10 @@ static val_t kronecker_find_factor(val_t *p, int dp, val_t var, int fd) {
                 /* Trial division. A factor and its negative are the same
                  * factor: keep the one with a positive leading coefficient. */
                 if (num_is_negative(cand[cd])) poly_negate(cand, cd);
+                /* Interpolation can give 20160*(x+2): a multiple of a factor
+                 * divides p over the rationals too. Only the primitive one is
+                 * a factor of a primitive p (Gauss). */
+                poly_primitive(cand, cd);
                 val_t *rem; int dr;
                 val_t *quot; int dqt;
                 val_t *p2 = poly_copy(p, dp);

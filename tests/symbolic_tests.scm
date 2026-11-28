@@ -499,6 +499,17 @@
 (check "poly-factor (2x+1)³"
        (factor-strings (expt (+ (* 2 x) 1) 3))
        '(("1 + 2 * x" . 3)))
+(define (factors-multiply-back label p)
+  (let ((prod (apply * (map (lambda (f) (expt (car f) (cdr f))) (poly-factor p x)))))
+    (check label (simplify (expand (- prod p))) 0)))
+(factors-multiply-back "poly-factor (x+2)(x+3)(x+4)(x+5) multiplies back"
+                       (* (+ x 2) (+ x 3) (+ x 4) (+ x 5)))
+(factors-multiply-back "poly-factor (x+1)...(x+7) multiplies back"
+                       (* (+ x 1) (+ x 2) (+ x 3) (+ x 4) (+ x 5) (+ x 6) (+ x 7)))
+(factors-multiply-back "poly-factor (x+2)(3x²-3x+4) multiplies back"
+                       (* (+ x 2) (+ (* 3 (expt x 2)) (* -3 x) 4)))
+(factors-multiply-back "poly-factor 3(x²+2x+6)(3x²-3x+4) multiplies back"
+                       (* 3 (+ (expt x 2) (* 2 x) 6) (+ (* 3 (expt x 2)) (* -3 x) 4)))
 (check "poly-squarefree (2x+1)²(x+1)"
        (map (lambda (p) (cons (sym->string (car p)) (cdr p)))
             (poly-squarefree (* (expt (+ (* 2 x) 1) 2) (+ x 1)) x))
