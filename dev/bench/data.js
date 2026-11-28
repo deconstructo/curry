@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795833160433,
+  "lastUpdate": 1795834612125,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23390,6 +23390,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 67.4,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6b0afa7c5e34aa92a8b995134cdbeed8f2e06b6f",
+          "message": "Merge pull request #450 from deconstructo/fix/431-guard-order\n\nfix(guard): a clause body runs after the dynamic-wind after thunks, as R7RS 6.11 has it (#431)",
+          "timestamp": "2026-11-28T13:56:18+11:00",
+          "tree_id": "c887655d3b70b1307b39cac4b2fe6fb8680e7f60",
+          "url": "https://github.com/deconstructo/curry/commit/6b0afa7c5e34aa92a8b995134cdbeed8f2e06b6f"
+        },
+        "date": 1795834611237,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 16.075,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 22.441,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 4.444,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 25.578,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 149.466,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 275.876,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 65.24,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 92.932,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 68.248,
             "unit": "ms"
           }
         ]
