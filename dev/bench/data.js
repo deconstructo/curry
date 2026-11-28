@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795845501747,
+  "lastUpdate": 1795846260535,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23597,6 +23597,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.429,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bd283bc4d871f6612403e4de49863786180e0f4a",
+          "message": "Merge pull request #456 from deconstructo/fix/454-numtheory-caches\n\nfix(numtheory): lock the Bernoulli and Euler caches (#454)",
+          "timestamp": "2026-11-28T17:10:16+11:00",
+          "tree_id": "c00866e171e668362c4f090fe3334f614580634b",
+          "url": "https://github.com/deconstructo/curry/commit/bd283bc4d871f6612403e4de49863786180e0f4a"
+        },
+        "date": 1795846258900,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.322,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.544,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.609,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.832,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 182.281,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 346.68,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 85.118,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.244,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 81.917,
             "unit": "ms"
           }
         ]
