@@ -1,5 +1,9 @@
 # Changelog
 
+### Unreleased
+
+**Fixed: symbolic integration of rational functions with a scaled denominator (#447).** `(∫ (/ (expt x 2) (* 2 x)) x)` returned x²/2 instead of x²/4, `x³/(4x²)` returned x²/2 instead of x²/8, and `x/(3x²+3)` returned ½·ln(1+x²) instead of ⅙·ln(1+x²). Two causes: polynomial division scaled its remainder by the divisor's leading coefficient and left the quotient unscaled, and partial fractions dropped a constant factor of the denominator. The antiderivatives of `x·ln x` and `x²·ln x` went through the same code and were wrong too. `symbolic_tests.scm` (160 assertions) is now registered in ctest. Still wrong or unevaluated, and not new: #457.
+
 ### 1.32.0 - 2026-11-28
 
 **Fixed: `bernoulli` and `euler-number` from several threads (#454).** Both fill a shared cache on demand without a lock, so a parallel `map` over them returned wrong values (B10 came out as 17993126/33), died on a division by zero, or hung. One mutex now covers computing and copying an entry.
