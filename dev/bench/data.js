@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795843759256,
+  "lastUpdate": 1795845501747,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23528,6 +23528,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 81.681,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b6543b3f5387d809c69cd641740f36dfae194920",
+          "message": "Merge pull request #455 from deconstructo/fix/452-453-table-and-port-locks\n\nfix(set,port): lock hash tables, sets and string ports (#452, #453)",
+          "timestamp": "2026-11-28T16:57:15+11:00",
+          "tree_id": "52167a71e363cc7fe0685e7a08d8db11405eb6e4",
+          "url": "https://github.com/deconstructo/curry/commit/b6543b3f5387d809c69cd641740f36dfae194920"
+        },
+        "date": 1795845500232,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.119,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.575,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.647,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 36.079,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 182.034,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 350.627,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 85.437,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 110.732,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 84.429,
             "unit": "ms"
           }
         ]
