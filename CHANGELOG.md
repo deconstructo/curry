@@ -2,6 +2,20 @@
 
 ### Unreleased
 
+**Fixed — a continuation escape out of `atomically` or a macro transformer (#433)**
+
+- A `call/cc` escape out of `atomically` left the aborted transaction as the
+  thread's current one. Its writes were then visible outside any transaction,
+  and the next `atomically` on the thread ran inside the stale transaction and
+  never committed. The escape now puts the transaction state back, as a return
+  or a raise already did. A `retry` inside a `with-...` form, or inside an
+  `or-else` alternative, also runs the cleanups of the forms it leaves.
+- The same for the macro-transformer state the tree-walker and `syntax-case`
+  keep (`sr_set_current_env`, `sc_cur_mark`, `sc_cur_def_env`); an escape out of
+  a transformer is unusual, so this has no visible effect yet.
+- An escape cannot cross an actor's entry frame: a continuation invoked from
+  another thread raises `continuation-expired` (#443).
+
 **Fixed — quaternion, complex and octonion operands; MPFR `eqv?`, `max` and printing (#436, #439, #441)**
 
 - `(real-part q)` of a quaternion returns its scalar part, not the whole

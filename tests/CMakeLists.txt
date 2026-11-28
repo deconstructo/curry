@@ -52,6 +52,7 @@ add_test(NAME after_thunk_unwind COMMAND curry --clear-cache ${CMAKE_CURRENT_SOU
 add_test(NAME c_form_escape COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_form_escape_tests.scm)
 add_test(NAME c_form_escape_load COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/c_form_escape/main.scm)
 add_test(NAME raise_continuable COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/raise_continuable_tests.scm)
+add_test(NAME escape_restores COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/escape_restores_tests.scm)
 add_test(NAME continuation_expired COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/continuation_expired_tests.scm)
 add_test(NAME c_stack_overflow COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_stack_overflow_tests.scm)
 set_tests_properties(c_stack_overflow PROPERTIES TIMEOUT 120)
@@ -367,7 +368,7 @@ if(BUILD_LLVM)
     # the whole suite this way: CURRY_JIT=force ctest --test-dir build
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
               actors sexagesimal hash_tombstone string_case jit
-              continuation_expired)
+              continuation_expired escape_restores)
         add_test(NAME jit_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_force_${t} PROPERTIES ENVIRONMENT "CURRY_JIT=force")
@@ -383,7 +384,7 @@ if(BUILD_LLVM)
                          ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
               actors sexagesimal hash_tombstone string_case jit jit_bytecode
-              continuation_expired)
+              continuation_expired escape_restores)
         add_test(NAME jit_bc_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_bc_force_${t} PROPERTIES
