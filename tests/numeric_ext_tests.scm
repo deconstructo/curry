@@ -477,6 +477,59 @@
 (check-approx "auto-diff x²"     (auto-diff (lambda (t) (* t t))             3.0)  6.0  1e-10)
 (check-approx "auto-diff x³"     (auto-diff (lambda (t) (* t t t))           2.0) 12.0  1e-10)
 (check-approx "auto-diff x²+3x"  (auto-diff (lambda (t) (+ (* t t) (* 3 t))) 2.0)  7.0  1e-10)
+
+;;; auto-diff through the transcendental functions (#438): they carry the ε
+;;; part (f(x0 + d) = f(x0) + f'(x0)·d) instead of returning the standard
+;;; part's value, which made the derivative 0.
+(check-approx "auto-diff sin"   (auto-diff (lambda (t) (sin t)) 3)   (cos 3) 1e-12)
+(check-approx "auto-diff cos"   (auto-diff (lambda (t) (cos t)) 3)   (- (sin 3)) 1e-12)
+(check-approx "auto-diff tan"   (auto-diff (lambda (t) (tan t)) 0.5) (/ 1 (* (cos 0.5) (cos 0.5))) 1e-12)
+(check-approx "auto-diff exp"   (auto-diff (lambda (t) (exp t)) 1)   (exp 1) 1e-12)
+(check "auto-diff log is exact at an exact point" (auto-diff (lambda (t) (log t)) 4) 1/4)
+(check-approx "auto-diff asin"  (auto-diff (lambda (t) (asin t)) 0.5) (/ 1 (sqrt 0.75)) 1e-12)
+(check-approx "auto-diff acos"  (auto-diff (lambda (t) (acos t)) 0.5) (- (/ 1 (sqrt 0.75))) 1e-12)
+(check "auto-diff atan"         (auto-diff (lambda (t) (atan t)) 2) 1/5)
+(check-approx "auto-diff sinh"  (auto-diff (lambda (t) (sinh t)) 1)  (cosh 1) 1e-12)
+(check-approx "auto-diff cosh"  (auto-diff (lambda (t) (cosh t)) 1)  (sinh 1) 1e-12)
+(check-approx "auto-diff tanh"  (auto-diff (lambda (t) (tanh t)) 1)  (/ 1 (* (cosh 1) (cosh 1))) 1e-12)
+(check-approx "auto-diff asinh" (auto-diff (lambda (t) (asinh t)) 1) (/ 1 (sqrt 2)) 1e-12)
+(check-approx "auto-diff acosh" (auto-diff (lambda (t) (acosh t)) 2) (/ 1 (sqrt 3)) 1e-12)
+(check-approx "auto-diff atanh" (auto-diff (lambda (t) (atanh t)) 0.5) (/ 1 0.75) 1e-12)
+(check "auto-diff atan, two arguments, first varies"  (auto-diff (lambda (t) (atan t 3)) 4) 3/25)
+(check "auto-diff atan, two arguments, second varies" (auto-diff (lambda (t) (atan 3 t)) 4) -3/25)
+(check "auto-diff sqrt"         (auto-diff (lambda (t) (sqrt t)) 4) 1/4)
+(check-approx "auto-diff expt with a non-integer power" (auto-diff (lambda (t) (expt t 0.5)) 4) 0.25 1e-12)
+(check-approx "auto-diff expt with a ratio power" (auto-diff (lambda (t) (expt t 1/2)) 4) 0.25 1e-12)
+(check-approx "auto-diff expt with the variable as the power"
+              (auto-diff (lambda (t) (expt 2 t)) 3) (* 8 (log 2)) 1e-12)
+(check-approx "auto-diff of t^t"
+              (auto-diff (lambda (t) (expt t t)) 2) (* 4 (+ (log 2) 1)) 1e-12)
+(check "auto-diff of a negative base to a fractional power raises"
+       (string? (guard (e ((error-object? e) (error-object-message e)))
+                  (auto-diff (lambda (t) (expt t 1/2)) -4) 'no-error))
+       #t)
+(check-approx "auto-diff of a composition (chain rule)"
+              (auto-diff (lambda (t) (exp (sin t))) 1) (* (exp (sin 1)) (cos 1)) 1e-12)
+(check-approx "auto-diff of a product with sin"
+              (auto-diff (lambda (t) (* t (sin t))) 2) (+ (sin 2) (* 2 (cos 2))) 1e-12)
+(check-approx "auto-diff of sin(t²)"
+              (auto-diff (lambda (t) (sin (* t t))) 1.5) (* 3 (cos 2.25)) 1e-12)
+(check "auto-diff of a constant is 0"    (auto-diff (lambda (t) 5) 3) 0)
+(check "auto-diff of floor is 0"         (auto-diff (lambda (t) (floor t)) 3.5) 0)
+(check "auto-diff survives exact->inexact" (auto-diff (lambda (t) (* 2 (exact->inexact t))) 3) 2.0)
+(define (error-of thunk)
+  (guard (e ((error-object? e) (error-object-message e)) (#t 'raised-non-error))
+    (thunk) 'no-error))
+(check "auto-diff of log at a negative point raises, not 0"
+       (string? (error-of (lambda () (auto-diff (lambda (t) (log t)) -1)))) #t)
+(check "auto-diff of asin outside [-1,1] raises"
+       (string? (error-of (lambda () (auto-diff (lambda (t) (asin t)) 2)))) #t)
+(check "sin of an ordinary number is unchanged" (sin 0) 0.0)
+(check "(∂ procedure x) raises instead of returning 0"
+       (begin (symbolic x)
+              (string? (error-of (lambda () (∂ (lambda (t) (* t t)) x)))))
+       #t)
+(check "(∂ number x) is still 0"  (begin (symbolic x) (∂ 5 x)) 0)
 (check-approx "auto-diff x-5"    (auto-diff (lambda (t) (- t 5))            10.0)  1.0  1e-10)
 
 

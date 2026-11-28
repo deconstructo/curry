@@ -262,6 +262,13 @@ val_t num_inexact(val_t v) {
         return num_make_complex(num_inexact(as_cpx(v)->real), num_inexact(as_cpx(v)->imag));
     }
     if (vis_mpfr(v)) return v;
+    if (vis_surreal(v)) {            /* each coefficient; the ε part must survive (#438) */
+        int n = sur_nterms(v);
+        val_t *exps   = (val_t *)gc_alloc((size_t)(n ? n : 1) * sizeof(val_t));
+        val_t *coeffs = (val_t *)gc_alloc((size_t)(n ? n : 1) * sizeof(val_t));
+        for (int i = 0; i < n; i++) { exps[i] = sur_term_exp(v, i); coeffs[i] = num_inexact(sur_term_coeff(v, i)); }
+        return sur_make(n, exps, coeffs);
+    }
     if (tl_mpfr_prec > 53)
         return mpfr_coerce(v, tl_mpfr_prec);
     return num_make_float(num_to_double(v));
@@ -979,8 +986,62 @@ val_t num_lcm(val_t a, val_t b) {
 }
 
 /* ---- Rounding ---- */
+/* Forward-mode differentiation through a transcendental function (#438).
+ * A surreal x0 + d, d infinitesimal, maps to f(x0) + f'(x0)·d: the ε part of
+ * the result is f'(x0) times the ε part of the argument, which is what
+ * (auto-diff f x) reads. Only the first-order term is right: the d² and higher
+ * terms of the result are not (f'' is not applied), so the ε² coefficient of
+ * a lifted function is not meaningful. An argument with
+ * an infinite part, or a point where f or f' is not real, raises: the
+ * result used to be the standard part's value, silently without the ε part. */
+static void sur_split(val_t v, val_t *x0, val_t *delta) {
+    if (!sur_finite_p(v))
+        scm_raise(V_FALSE, "a surreal argument with an infinite part has no derivative here");
+    *x0    = sur_real_part(v);
+    *delta = sur_sub(v, sur_from_val(*x0));
+}
+static val_t sur_real_or_raise(val_t r, const char *name) {
+    if (vis_complex(r) || vis_symbolic(r) || num_is_nan(r))
+        scm_raise(V_FALSE, "%s: the value or its derivative is not real at this point", name);
+    return r;
+}
+static val_t sur_lift(val_t v, const char *name, val_t (*f)(val_t), val_t (*df)(val_t)) {
+    val_t x0, delta;
+    sur_split(v, &x0, &delta);
+    if (sur_is_zero(delta)) return f(x0);
+    val_t fx  = sur_real_or_raise(f(x0), name);
+    val_t dfx = sur_real_or_raise(df(x0), name);
+    return sur_add(sur_from_val(fx), sur_mul(sur_from_val(dfx), delta));
+}
+/* floor, ceiling, truncate and round are flat between the jumps: f(x0 + d) is
+ * f(x0) for an infinitesimal d, so the result is real and its derivative 0 (#438). */
+static val_t sur_step(val_t v, val_t (*f)(val_t)) {
+    val_t x0, delta;
+    sur_split(v, &x0, &delta);
+    return f(x0);
+}
+#define SUR_DERIV(fname, expr) static val_t fname(val_t x) { return expr; }
+#define ONE vfix(1)
+SUR_DERIV(d_sin,   num_cos(x))
+SUR_DERIV(d_cos,   num_neg(num_sin(x)))
+SUR_DERIV(d_tan,   num_div(ONE, num_mul(num_cos(x), num_cos(x))))
+SUR_DERIV(d_sqrt,  num_div(ONE, num_mul(vfix(2), num_sqrt(x))))
+SUR_DERIV(d_exp,   num_exp(x))
+SUR_DERIV(d_log,   num_div(ONE, x))
+SUR_DERIV(d_asin,  num_div(ONE, num_sqrt(num_sub(ONE, num_mul(x, x)))))
+SUR_DERIV(d_acos,  num_neg(num_div(ONE, num_sqrt(num_sub(ONE, num_mul(x, x))))))
+SUR_DERIV(d_atan,  num_div(ONE, num_add(ONE, num_mul(x, x))))
+SUR_DERIV(d_sinh,  num_cosh(x))
+SUR_DERIV(d_cosh,  num_sinh(x))
+SUR_DERIV(d_tanh,  num_div(ONE, num_mul(num_cosh(x), num_cosh(x))))
+SUR_DERIV(d_asinh, num_div(ONE, num_sqrt(num_add(num_mul(x, x), ONE))))
+SUR_DERIV(d_acosh, num_div(ONE, num_sqrt(num_sub(num_mul(x, x), ONE))))
+SUR_DERIV(d_atanh, num_div(ONE, num_sub(ONE, num_mul(x, x))))
+#undef ONE
+
 val_t num_floor(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+    if (vis_surreal(v)) return sur_step(v, num_floor);
     if (vis_mpfr(v))  return mpfr_num_floor(v);
     if (vis_flonum(v)) return num_make_float(floor(vfloat(v)));
     if (vis_rational(v)) {
@@ -992,6 +1053,7 @@ val_t num_floor(val_t v) {
 }
 val_t num_ceiling(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+    if (vis_surreal(v)) return sur_step(v, num_ceiling);
     if (vis_mpfr(v))  return mpfr_num_ceiling(v);
     if (vis_flonum(v)) return num_make_float(ceil(vfloat(v)));
     if (vis_rational(v)) {
@@ -1003,6 +1065,7 @@ val_t num_ceiling(val_t v) {
 }
 val_t num_truncate(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+    if (vis_surreal(v)) return sur_step(v, num_truncate);
     if (vis_mpfr(v))  return mpfr_num_truncate(v);
     if (vis_flonum(v)) return num_make_float(trunc(vfloat(v)));
     if (vis_rational(v)) {
@@ -1014,6 +1077,7 @@ val_t num_truncate(val_t v) {
 }
 val_t num_round(val_t v) {
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
+    if (vis_surreal(v)) return sur_step(v, num_round);
     if (vis_mpfr(v))  return mpfr_num_round(v);
     if (vis_flonum(v)) {
         double d = vfloat(v);
@@ -1042,6 +1106,15 @@ val_t num_round(val_t v) {
 /* ---- Transcendentals ---- */
 val_t num_expt(val_t base, val_t exp) {
     if (vis_symbolic(base) || vis_symbolic(exp)) return sx_expt(base, exp);
+    if (vis_surreal(exp) && sur_finite_p(exp)) {   /* b^(x0 + d) = exp((x0 + d)·log b) (#438) */
+        val_t x0, delta;
+        sur_split(exp, &x0, &delta);
+        if (sur_is_zero(delta)) return num_expt(base, x0);
+        if (num_is_zero(base))
+            scm_raise(V_FALSE, "expt: zero to a surreal power has no derivative");
+        val_t lb = vis_surreal(base) ? num_log(base) : sur_real_or_raise(num_log(base), "expt");
+        return num_exp(num_mul(exp, lb));
+    }
     if (vis_surreal(base)) return sur_expt(base, exp);
     /* Integer/rational base ^ fixnum exponent: use GMP for efficiency */
     if ((vis_fixnum(base) || vis_bignum(base) || vis_rational(base)) && vis_fixnum(exp)) {
@@ -1100,7 +1173,12 @@ static val_t quat_assemble(const Quaternion *q, double scalar, double vscale) {
 
 val_t num_sqrt(val_t v) {
     if (vis_symbolic(v)) return sx_sqrt(v);
-    if (vis_surreal(v))  return sur_expt(v, num_make_rational(vfix(1), vfix(2)));
+    if (vis_surreal(v)) {
+        /* x0 + d with a nonzero standard part and nothing infinite: carry d (#438). */
+        if (sur_finite_p(v) && !num_is_zero(sur_real_part(v)))
+            return sur_lift(v, "sqrt", num_sqrt, d_sqrt);
+        return sur_expt(v, num_make_rational(vfix(1), vfix(2)));
+    }
     if (vis_mpfr(v)) {
         if (mpfr_sgn(as_mpfr(v)->x) < 0) {
             /* sqrt of negative real → imaginary result */
@@ -1141,6 +1219,7 @@ val_t num_sqrt(val_t v) {
 }
 
 val_t num_asin(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "asin", num_asin, d_asin);
     if (vis_symbolic(v)) return sx_asin(v);
     if (vis_mpfr(v)) return mpfr_num_asin(v);
     if (vis_quat(v)) {
@@ -1163,6 +1242,7 @@ val_t num_asin(val_t v) {
     return num_make_float(asin(num_to_double(v)));
 }
 val_t num_acos(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "acos", num_acos, d_acos);
     if (vis_symbolic(v)) return sx_acos(v);
     if (vis_mpfr(v)) return mpfr_num_acos(v);
     if (vis_quat(v)) {
@@ -1184,6 +1264,7 @@ val_t num_acos(val_t v) {
     return num_make_float(acos(num_to_double(v)));
 }
 val_t num_atan(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "atan", num_atan, d_atan);
     if (vis_symbolic(v)) return sx_atan(v);
     if (vis_mpfr(v)) return mpfr_num_atan(v);
     if (vis_quat(v)) {
@@ -1208,6 +1289,7 @@ val_t num_atan(val_t v) {
 
 /* Complex-aware transcendentals */
 val_t num_exp(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "exp", num_exp, d_exp);
     if (vis_symbolic(v)) return sx_exp(v);
     if (vis_mpfr(v)) return mpfr_num_exp(v);
     if (vis_quat(v)) {
@@ -1226,6 +1308,7 @@ val_t num_exp(val_t v) {
     return num_make_float(exp(num_to_double(v)));
 }
 val_t num_log(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "log", num_log, d_log);
     if (vis_symbolic(v)) return sx_log(v);
     if (vis_mpfr(v)) {
         if (mpfr_sgn(as_mpfr(v)->x) < 0) {
@@ -1251,6 +1334,7 @@ val_t num_log(val_t v) {
     return num_make_float(log(x));
 }
 val_t num_sin(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "sin", num_sin, d_sin);
     if (vis_symbolic(v)) return sx_sin(v);
     if (vis_mpfr(v)) return mpfr_num_sin(v);
     if (vis_quat(v)) {
@@ -1267,6 +1351,7 @@ val_t num_sin(val_t v) {
     return num_make_float(sin(num_to_double(v)));
 }
 val_t num_cos(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "cos", num_cos, d_cos);
     if (vis_symbolic(v)) return sx_cos(v);
     if (vis_mpfr(v)) return mpfr_num_cos(v);
     if (vis_quat(v)) {
@@ -1283,6 +1368,7 @@ val_t num_cos(val_t v) {
     return num_make_float(cos(num_to_double(v)));
 }
 val_t num_tan(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "tan", num_tan, d_tan);
     if (vis_symbolic(v)) return sx_tan(v);
     if (vis_mpfr(v)) return mpfr_num_tan(v);
     /* sin(q) and cos(q) share the same imaginary axis v̂, so they commute */
@@ -1290,11 +1376,23 @@ val_t num_tan(val_t v) {
     return num_make_float(tan(num_to_double(v)));
 }
 val_t num_atan2(val_t y, val_t x) {
+    if (vis_surreal(y) || vis_surreal(x)) {
+        /* atan2(y0 + dy, x0 + dx) = atan2(y0, x0) + (x0·dy − y0·dx) / (x0² + y0²) (#438) */
+        val_t y0, dy, x0, dx;
+        if (vis_surreal(y)) sur_split(y, &y0, &dy); else { y0 = y; dy = SUR_ZERO; }
+        if (vis_surreal(x)) sur_split(x, &x0, &dx); else { x0 = x; dx = SUR_ZERO; }
+        val_t f = num_atan2(y0, x0);
+        if (sur_is_zero(dy) && sur_is_zero(dx)) return f;
+        val_t r2 = num_add(num_mul(x0, x0), num_mul(y0, y0));
+        val_t num = sur_sub(sur_mul(sur_from_val(x0), dy), sur_mul(sur_from_val(y0), dx));
+        return sur_add(sur_from_val(f), sur_div(num, sur_from_val(r2)));
+    }
     if (vis_mpfr(y) || vis_mpfr(x)) return mpfr_num_atan2(y, x);
     return num_make_float(atan2(num_to_double(y), num_to_double(x)));
 }
 
 val_t num_sinh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "sinh", num_sinh, d_sinh);
     if (vis_symbolic(v)) return sx_sinh(v);
     if (vis_mpfr(v)) return mpfr_num_sinh(v);
     if (vis_quat(v)) {
@@ -1311,6 +1409,7 @@ val_t num_sinh(val_t v) {
     return num_make_float(sinh(num_to_double(v)));
 }
 val_t num_cosh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "cosh", num_cosh, d_cosh);
     if (vis_symbolic(v)) return sx_cosh(v);
     if (vis_mpfr(v)) return mpfr_num_cosh(v);
     if (vis_quat(v)) {
@@ -1327,6 +1426,7 @@ val_t num_cosh(val_t v) {
     return num_make_float(cosh(num_to_double(v)));
 }
 val_t num_tanh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "tanh", num_tanh, d_tanh);
     if (vis_symbolic(v)) return sx_tanh(v);
     if (vis_mpfr(v)) return mpfr_num_tanh(v);
     /* sinh(q) and cosh(q) share the same imaginary axis v̂, so they commute */
@@ -1339,6 +1439,7 @@ val_t num_tanh(val_t v) {
     return num_make_float(tanh(num_to_double(v)));
 }
 val_t num_asinh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "asinh", num_asinh, d_asinh);
     if (vis_symbolic(v)) return sx_asinh(v);
     if (vis_mpfr(v)) return mpfr_num_asinh(v);
     if (vis_quat(v) || vis_complex(v))
@@ -1347,6 +1448,7 @@ val_t num_asinh(val_t v) {
     return num_make_float(asinh(num_to_double(v)));
 }
 val_t num_acosh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "acosh", num_acosh, d_acosh);
     if (vis_symbolic(v)) return sx_acosh(v);
     if (vis_mpfr(v)) return mpfr_num_acosh(v);
     if (vis_quat(v) || vis_complex(v))
@@ -1355,6 +1457,7 @@ val_t num_acosh(val_t v) {
     return num_make_float(acosh(num_to_double(v)));
 }
 val_t num_atanh(val_t v) {
+    if (vis_surreal(v)) return sur_lift(v, "atanh", num_atanh, d_atanh);
     if (vis_symbolic(v)) return sx_atanh(v);
     if (vis_mpfr(v)) return mpfr_num_atanh(v);
     if (vis_quat(v) || vis_complex(v))

@@ -1166,7 +1166,18 @@ For a function f(z) = u(x,y) + i·v(x,y) written in terms of real part `u` and i
 (auto-diff (lambda (x) (/ 1 x)) 2)            ; => -1/4 [−1/x² at x=2]
 ```
 
-Note: C-level primitives such as `sin`, `cos`, and `exp` do not propagate surreals. For transcendental derivatives use symbolic differentiation instead.
+The transcendental functions carry the ε part too: a surreal `x0 + d`, with `d` infinitesimal, goes to `f(x0) + f'(x0)·d`. Only the first-order (ε) part of the result is correct; the ε² and higher coefficients of a lifted function are not:
+
+```scheme
+(auto-diff (lambda (t) (sin t)) 3)                 ; => -0.98999...  [cos 3]
+(auto-diff (lambda (t) (log t)) 4)                 ; => 1/4
+(auto-diff (lambda (t) (exp (sin t))) 1)           ; => 1.2533...    [chain rule]
+(auto-diff (lambda (t) (expt 2 t)) 3)              ; => 5.545...     [8 ln 2]
+```
+
+This covers `sin cos tan asin acos atan` (also with two arguments) `sinh cosh tanh asinh acosh atanh exp log sqrt` and `expt` with the variable as base or power. `floor`, `ceiling`, `truncate` and `round` give a real result, so their derivative is 0. `exact->inexact` keeps the ε part. A point where the function or its derivative is not real (`log` of a negative number, `asin` of 2, a negative base to a fractional power) raises an error, as does a surreal with an infinite part. Earlier versions returned the standard part's value for these functions, so `auto-diff` returned 0 with no error.
+
+`(∂ f x)` with a procedure `f` raises an error; it used to return 0. Use `(auto-diff f x)` for a number, or apply the procedure to a symbolic variable and differentiate the result: `(∂ (f x) x)`.
 
 ### Combining auto-diff and symbolic CAS
 

@@ -22,6 +22,22 @@
   default 128 bits) instead of two more that were rounding noise, and zero
   prints with the exponent `e0`.
 
+**Fixed — `auto-diff` through transcendental functions, and `∂` of a procedure (#438)**
+
+- `(auto-diff f x)` returned 0 with no error when `f` used `sin`, `cos`, `exp`,
+  `log` or any other transcendental function, because they converted the
+  surreal `x + ε` to its standard part. They now carry the ε part: a surreal
+  `x0 + d` goes to `f(x0) + f'(x0)·d`. `(auto-diff (lambda (t) (sin t)) 3)` is
+  `-0.98999…`. Covered: `sin cos tan asin acos atan` (also two-argument `atan`),
+  `sinh cosh tanh asinh acosh atanh`, `exp`, `log`, `sqrt`, and `expt` with the
+  variable as base (a non-integer power) or as power. `floor`, `ceiling`,
+  `truncate` and `round` of a surreal return a real (derivative 0), and
+  `exact->inexact` keeps the ε part.
+- Where the function or its derivative is not real (`log` of a negative number,
+  `asin` of 2) or the surreal has an infinite part, an error is raised instead
+  of a wrong number.
+- `(∂ f x)` with a procedure `f` raises an error instead of returning 0.
+
 **Fixed — invoking a continuation after its `call/cc` returned (#443)**
 
 - A continuation invoked after its `call/cc` had returned (normally, by a
