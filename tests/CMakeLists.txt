@@ -46,6 +46,10 @@ add_test(NAME srfi_29 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sr
 add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_189_tests.scm)
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
+# Before the locks (#452, #453) a parallel map writing one hash table never
+# returned: a timeout turns a regression into a fast failure, not a hung CI job.
+add_test(NAME shared_table_port COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/shared_table_port_tests.scm)
+set_tests_properties(shared_table_port PROPERTIES TIMEOUT 120)
 add_test(NAME string_case COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/string_case_tests.scm)
 add_test(NAME guard_reraise COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/guard_reraise_tests.scm)
 add_test(NAME after_thunk_unwind COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/after_thunk_unwind_tests.scm)
