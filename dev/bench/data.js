@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795834612125,
+  "lastUpdate": 1795843759256,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23459,6 +23459,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 68.248,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6d62673fe02df30f71ceba21c6ebb0955efdbc84",
+          "message": "Merge pull request #451 from deconstructo/feature/a3-sync-primitives\n\nfeat(sync,future): read-write locks, once, barriers and futures (A3)",
+          "timestamp": "2026-11-28T16:28:36+11:00",
+          "tree_id": "d5c0ea294077d4da950d55a553d7df62fd80bfbf",
+          "url": "https://github.com/deconstructo/curry/commit/6d62673fe02df30f71ceba21c6ebb0955efdbc84"
+        },
+        "date": 1795843757718,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.176,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 30.939,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.629,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 35.794,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 185.152,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 344.511,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 83.684,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 111.172,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 81.681,
             "unit": "ms"
           }
         ]
