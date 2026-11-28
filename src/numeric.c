@@ -989,7 +989,9 @@ val_t num_lcm(val_t a, val_t b) {
 /* Forward-mode differentiation through a transcendental function (#438).
  * A surreal x0 + d, d infinitesimal, maps to f(x0) + f'(x0)·d: the ε part of
  * the result is f'(x0) times the ε part of the argument, which is what
- * (auto-diff f x) reads. Terms in d² and above are dropped. An argument with
+ * (auto-diff f x) reads. Only the first-order term is right: the d² and higher
+ * terms of the result are not (f'' is not applied), so the ε² coefficient of
+ * a lifted function is not meaningful. An argument with
  * an infinite part, or a point where f or f' is not real, raises: the
  * result used to be the standard part's value, silently without the ε part. */
 static void sur_split(val_t v, val_t *x0, val_t *delta) {
@@ -999,7 +1001,7 @@ static void sur_split(val_t v, val_t *x0, val_t *delta) {
     *delta = sur_sub(v, sur_from_val(*x0));
 }
 static val_t sur_real_or_raise(val_t r, const char *name) {
-    if (vis_complex(r) || vis_symbolic(r))
+    if (vis_complex(r) || vis_symbolic(r) || num_is_nan(r))
         scm_raise(V_FALSE, "%s: the value or its derivative is not real at this point", name);
     return r;
 }
@@ -1104,16 +1106,16 @@ val_t num_round(val_t v) {
 /* ---- Transcendentals ---- */
 val_t num_expt(val_t base, val_t exp) {
     if (vis_symbolic(base) || vis_symbolic(exp)) return sx_expt(base, exp);
-    if (vis_surreal(base)) return sur_expt(base, exp);
-    if (vis_surreal(exp)) {          /* b^(x0 + d) = exp((x0 + d)·log b) (#438) */
+    if (vis_surreal(exp) && sur_finite_p(exp)) {   /* b^(x0 + d) = exp((x0 + d)·log b) (#438) */
         val_t x0, delta;
         sur_split(exp, &x0, &delta);
         if (sur_is_zero(delta)) return num_expt(base, x0);
         if (num_is_zero(base))
             scm_raise(V_FALSE, "expt: zero to a surreal power has no derivative");
-        val_t lb = sur_real_or_raise(num_log(base), "expt");
+        val_t lb = vis_surreal(base) ? num_log(base) : sur_real_or_raise(num_log(base), "expt");
         return num_exp(num_mul(exp, lb));
     }
+    if (vis_surreal(base)) return sur_expt(base, exp);
     /* Integer/rational base ^ fixnum exponent: use GMP for efficiency */
     if ((vis_fixnum(base) || vis_bignum(base) || vis_rational(base)) && vis_fixnum(exp)) {
         long e = vunfix(exp);

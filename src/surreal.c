@@ -298,7 +298,7 @@ val_t sur_expt(val_t base, val_t exp) {
             val_t delta = sur_sub(base, sur_from_val(x0));
             val_t f  = num_expt(x0, exp);
             val_t df = num_mul(exp, num_expt(x0, num_sub(exp, vfix(1))));
-            if (vis_complex(f) || vis_complex(df))
+            if (vis_complex(f) || vis_complex(df) || num_is_nan(f) || num_is_nan(df))
                 scm_raise(V_FALSE, "expt: the value or its derivative is not real at this point");
             return sur_add(sur_from_val(f), sur_mul(sur_from_val(df), delta));
         }

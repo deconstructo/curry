@@ -502,6 +502,12 @@
 (check-approx "auto-diff expt with a ratio power" (auto-diff (lambda (t) (expt t 1/2)) 4) 0.25 1e-12)
 (check-approx "auto-diff expt with the variable as the power"
               (auto-diff (lambda (t) (expt 2 t)) 3) (* 8 (log 2)) 1e-12)
+(check-approx "auto-diff of t^t"
+              (auto-diff (lambda (t) (expt t t)) 2) (* 4 (+ (log 2) 1)) 1e-12)
+(check "auto-diff of a negative base to a fractional power raises"
+       (string? (guard (e ((error-object? e) (error-object-message e)))
+                  (auto-diff (lambda (t) (expt t 1/2)) -4) 'no-error))
+       #t)
 (check-approx "auto-diff of a composition (chain rule)"
               (auto-diff (lambda (t) (exp (sin t))) 1) (* (exp (sin 1)) (cos 1)) 1e-12)
 (check-approx "auto-diff of a product with sin"
