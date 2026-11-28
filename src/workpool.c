@@ -144,6 +144,9 @@ static void execute_item(WorkItem *item) {
                 apply(item->fn, scm_cons(item->elems[i], V_NIL));
             }
             break;
+        case WORK_TASK:
+            item->task(item->task_arg);
+            break;
         case WORK_REDUCE: {
             val_t acc = item->elems[item->start];
             for (int i = item->start + 1; i < item->end; i++) {
@@ -164,7 +167,8 @@ static void execute_item(WorkItem *item) {
     }
 
 
-    /* Signal one completion to the dispatcher. */
+    /* Signal one completion to the dispatcher (a task signals for itself). */
+    if (item->kind == WORK_TASK) return;
     pthread_mutex_lock(item->done_mutex);
     atomic_fetch_add(item->n_done, 1);
     pthread_cond_signal(item->done_cond);
@@ -279,6 +283,34 @@ void pool_init(void) {
 
 /* ── dispatch ────────────────────────────────────────────────────────────── */
 
+static void wake_workers(void) {
+    /* The lock must be held while checking n_parked to close the race where a
+     * worker increments n_parked and then calls cond_wait between our load and
+     * the broadcast. */
+    pthread_mutex_lock(&global_pool->park_mutex);
+    if (atomic_load_explicit(&global_pool->n_parked, memory_order_relaxed) > 0)
+        pthread_cond_broadcast(&global_pool->park_cond);
+    pthread_mutex_unlock(&global_pool->park_mutex);
+}
+
+bool pool_submit_task(void (*task)(void *), void *arg) {
+    if (!global_pool) return false;
+    static atomic_uint next_deque = 0;
+    int nw = global_pool->n_workers;
+    /* Reachable through the deque's buf[] (GC memory, via global_pool). */
+    WorkItem *item = gc_alloc_raw_pinned(sizeof(WorkItem));
+    *item = (WorkItem){ .kind = WORK_TASK, .result = V_VOID, .exn = V_FALSE,
+                        .task = task, .task_arg = arg };
+    unsigned first = atomic_fetch_add(&next_deque, 1);
+    for (int i = 0; i < nw; i++) {
+        if (deque_push(&global_pool->deques[(first + (unsigned)i) % (unsigned)nw], item)) {
+            wake_workers();
+            return true;
+        }
+    }
+    return false;
+}
+
 #define OVERSUBSCRIPTION 4
 
 WorkItem **pool_submit(WorkKind kind, val_t fn,
@@ -323,13 +355,8 @@ WorkItem **pool_submit(WorkKind kind, val_t fn,
         pos += sz;
     }
 
-    /* Wake any parked workers.  The lock must be held while checking n_parked
-     * to close the race where a worker increments n_parked and then calls
-     * cond_wait between our relaxed load above and the broadcast. */
-    pthread_mutex_lock(&global_pool->park_mutex);
-    if (atomic_load_explicit(&global_pool->n_parked, memory_order_relaxed) > 0)
-        pthread_cond_broadcast(&global_pool->park_cond);
-    pthread_mutex_unlock(&global_pool->park_mutex);
+    /* Wake any parked workers. */
+    wake_workers();
 
     return items;
 }

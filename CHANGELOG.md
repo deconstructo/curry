@@ -2,6 +2,36 @@
 
 ### Unreleased
 
+**New — futures: `(curry future)`**
+
+- `(pool-submit thunk)` runs a thunk on a worker of the pool that `map` and
+  `for-each/par` use and returns a future; `future-get` waits for the value or
+  raises what the thunk raised (as often as asked); `future-wait` is the timed
+  wait; `future-done?`; `future-then` runs a procedure on the value when the
+  future is done (and passes a failure on); `future?`.
+- A future that waits for another one does not starve the pool: `future-get` on
+  a future nobody has started runs it in the calling thread, and on a
+  `future-then` future first works on the future it waits for. A thunk that
+  leaves by a continuation does not leave its future stuck as running.
+- A chain of a million `future-then` links works, with a failing head too; a
+  future that waits for itself raises an error instead of hanging.
+- The pool gets a generic entry for this, `pool_submit_task`. New CMake option
+  `BUILD_MODULE_FUTURE` (default ON). See `docs/reference/module-future.md`.
+
+**New — read-write locks, once and barriers in `(curry sync)`**
+
+- `make-rwlock`, `rwlock-read-lock!`, `rwlock-write-lock!`, the `try` variants,
+  `rwlock-unlock!`, `with-read-lock` and `with-write-lock` (released on a
+  return, a raise and a continuation escape), `rwlock?`, `rwlock-destroy!`.
+- `make-once` and `once!`: run an initialisation once across threads; callers
+  that arrive while it runs wait for it; a thunk that raises or escapes does
+  not use the once up. `once-done?`, `once?`, `once-destroy!`.
+- `make-barrier`, `barrier-wait!` (reusable; one caller per round gets `#t`),
+  `barrier-parties`, `barrier?`, `barrier-destroy!`. Built on a mutex and a
+  condition variable, since macOS has no `pthread_barrier_t`.
+- `with-mutex` shares its cleanup code with the new `with-...` forms; its
+  behaviour is unchanged.
+
 **Fixed — a continuation escape out of `atomically` or a macro transformer (#433)**
 
 - A `call/cc` escape out of `atomically` left the aborted transaction as the
