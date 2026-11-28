@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgc-dev libgmp-dev cmake build-essential pkg-config
+          sudo apt-get install -y libgc-dev libgmp-dev libmpfr-dev cmake build-essential pkg-config
 
       - name: Configure (Release)
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release

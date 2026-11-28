@@ -1,7 +1,6 @@
 #ifndef CURRY_MPFR_NUM_H
 #define CURRY_MPFR_NUM_H
 
-#ifdef BUILD_MPFR
 #include <mpfr.h>
 #include "value.h"
 #include "object.h"
@@ -116,5 +115,4 @@ val_t interval_from_number(val_t v);  /* point interval [v,v] */
 
 void mpfr_num_init(void);
 
-#endif /* BUILD_MPFR */
 #endif /* CURRY_MPFR_NUM_H */

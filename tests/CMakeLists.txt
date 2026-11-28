@@ -217,9 +217,7 @@ set_tests_properties(websocket websocket_server ros PROPERTIES TIMEOUT 60)
 add_test(NAME srfi_95_78_212 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_95_78_212_tests.scm)
 add_test(NAME srfi_141 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_141_tests.scm)
 add_test(NAME srfi_41 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_41_tests.scm)
-if(BUILD_MPFR)
-  add_test(NAME mpfr COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
-endif()
+add_test(NAME mpfr COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/mpfr_tests.scm)
 add_test(NAME cli
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_cli.sh
             $<TARGET_FILE:curry>)

@@ -1,5 +1,17 @@
 # Changelog
 
+### Unreleased
+
+**Changed — MPFR is a required dependency**
+
+- `libmpfr` is now required, like GMP. The `BUILD_MPFR` option and the
+  `#ifdef BUILD_MPFR` blocks in `numeric.c`, `builtins.c`, `object.h`, `port.c`
+  and `mpfr_num.*` are gone, so every build has the same numeric tower: `mpfr`,
+  the interval type and the `mpfr` test suite are always built. CI, the `.deb`
+  and `.rpm` dependency lists, the Homebrew formula (`depends_on "mpfr"`, the
+  `--with-mpfr` option is removed) and the install docs name it. Install it with
+  `apt install libmpfr-dev`, `dnf install mpfr-devel` or `brew install mpfr`.
+
 ### 1.31.0 - 2026-11-25
 
 **Fixed — an after thunk that raises during an escape ran twice (#425)**

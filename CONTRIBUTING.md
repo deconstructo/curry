@@ -37,7 +37,7 @@ cmake --build build -j$(sysctl -n hw.logicalcpu) # macOS
 ./build/curry
 ```
 
-Required dependencies: `libgc` (Boehm GC), `libgmp`, pthreads, CMake ≥ 3.20,
+Required dependencies: `libgc` (Boehm GC), `libgmp`, `libmpfr`, pthreads, CMake ≥ 3.20,
 a C11 compiler. See [`docs/guides/INSTALL.md`](docs/guides/INSTALL.md) for
 the full dependency list, optional module flags (`-DBUILD_MODULE_*`), and
 platform-specific instructions (Homebrew on macOS, apt on Debian/Ubuntu).

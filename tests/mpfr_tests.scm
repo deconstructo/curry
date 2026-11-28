@@ -1,5 +1,4 @@
 ;;; MPFR arbitrary-precision float tests.
-;;; Only run when curry is compiled with -DBUILD_MPFR=ON.
 
 (define pass 0)
 (define fail 0)

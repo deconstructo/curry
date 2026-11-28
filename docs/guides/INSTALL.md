@@ -49,7 +49,7 @@ brew install --formula Formula/curry.rb
 # Required — note OpenSSL: the network module (on by default, TLS sockets)
 # links it unconditionally, so CMake's top-level configure fails without it
 # even if you don't touch any module flags.
-sudo apt install libgc-dev libgmp-dev libssl-dev cmake build-essential
+sudo apt install libgc-dev libgmp-dev libmpfr-dev libssl-dev cmake build-essential
 
 # Modules that are ON by default need no extra package beyond the above —
 # json, network, redis, sqlite, regex, sync, mcp, lsp, profiling, posix,
@@ -128,7 +128,7 @@ Package names differ from Debian's (`gc-devel` vs. `libgc-dev`, etc.), but the C
 # Required — OpenSSL too: the network module (on by default, TLS sockets)
 # links it unconditionally, so CMake's top-level configure fails without it
 # even if you don't touch any module flags.
-sudo dnf install gc-devel gmp-devel openssl-devel cmake gcc gcc-c++ make pkgconfig
+sudo dnf install gc-devel gmp-devel mpfr-devel openssl-devel cmake gcc gcc-c++ make pkgconfig
 
 # sqlite (on by default)
 sudo dnf install sqlite-devel
@@ -166,7 +166,7 @@ On an Apple Silicon Mac with Docker Desktop (or `podman`/the `container` CLI), a
 ```bash
 docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro fedora:latest bash -c '
   set -ex
-  dnf install -y gc-devel gmp-devel openssl-devel cmake gcc gcc-c++ make pkgconfig \
+  dnf install -y gc-devel gmp-devel mpfr-devel openssl-devel cmake gcc gcc-c++ make pkgconfig \
     sqlite-devel libcurl-devel \
     libpng-devel libjpeg-turbo-devel libgit2-devel plplot-devel redis mosquitto git
   cp -r /src /work && cd /work
@@ -192,7 +192,7 @@ xcode-select --install
 # Required — OpenSSL too: the network module (on by default, TLS sockets)
 # links it unconditionally, so CMake's top-level configure fails without it
 # even if you don't touch any module flags.
-brew install bdw-gc gmp openssl cmake
+brew install bdw-gc gmp mpfr openssl cmake
 
 # Modules that are ON by default need no extra package beyond the above —
 # json, network, redis, sqlite, regex, sync, mcp, lsp, profiling, posix,
@@ -318,8 +318,8 @@ Both packages install to standard system paths:
 
 | Package type | Hard deps | Recommended | Suggested |
 |---|---|---|---|
-| `.deb` | `libgc2`, `libgmp10`, `libreadline8`, `libsqlite3-0` | OpenSSL, libcurl, libgit2, libpng, libjpeg, paho-c, libldap, libhdf5 | Qt6, PLplot |
-| `.rpm` | `gc >= 8.0`, `gmp >= 6.0`, `readline >= 8.0`, `sqlite-libs` | openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap, hdf5 | qt6-qtbase, plplot |
+| `.deb` | `libgc2`, `libgmp10`, `libmpfr6`, `libreadline8`, `libsqlite3-0` | OpenSSL, libcurl, libgit2, libpng, libjpeg, paho-c, libldap, libhdf5 | Qt6, PLplot |
+| `.rpm` | `gc >= 8.0`, `gmp >= 6.0`, `mpfr >= 4.0`, `readline >= 8.0`, `sqlite-libs` | openssl-libs, libcurl, libgit2, libpng, libjpeg-turbo, paho-c, openldap, hdf5 | qt6-qtbase, plplot |
 
 Optional modules can be enabled at configure time before packaging — any module whose library is present will be built and included in the package automatically. `libhdf5` is the one exception: `(curry hdf5)` is pure Scheme + FFI and `dlopen`s it at runtime rather than linking at build time, so it's recommended regardless of build configuration — `(curry fits)` and `(curry netcdf)` need no extra library at all.
 

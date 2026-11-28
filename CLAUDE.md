@@ -43,7 +43,6 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_MODULE_PLPLOT=ON \
   -DBUILD_MODULE_QT6=ON \
   -DBUILD_MODULE_VECDB=ON \
-  -DBUILD_MPFR=ON \
   -DBUILD_FFI=ON \
   -DBUILD_LLVM=ON \
   -DCMAKE_PREFIX_PATH="$(brew --prefix llvm)"   # macOS only, see note below
@@ -76,19 +75,18 @@ platform plugin cocoa"* — no `QT_QPA_PLATFORM_PLUGIN_PATH` env var needed.
 
 ## Dependencies
 
-Required: `libgc` (Boehm GC), `libgmp`, pthreads, CMake ≥ 3.20, C11 compiler.
+Required: `libgc` (Boehm GC), `libgmp`, `libmpfr`, pthreads, CMake ≥ 3.20, C11 compiler.
 
 ```bash
 # Debian/Ubuntu
-sudo apt install libgc-dev libgmp-dev cmake build-essential
+sudo apt install libgc-dev libgmp-dev libmpfr-dev cmake build-essential
 
 # macOS (Homebrew)
-brew install bdw-gc gmp cmake
+brew install bdw-gc gmp mpfr cmake
 
 # Optional modules — Linux
 sudo apt install libssl-dev libsqlite3-dev libcurl4-openssl-dev libldap-dev \
-                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev \
-                 libmpfr-dev   # for -DBUILD_MPFR=ON
+                 libpng-dev libjpeg-dev libgit2-dev libgtk-4-dev libplplot-dev
 # BUILD_MODULE_QT6's gpu-* layer (BUILD_QT6_GPU, default ON) also needs
 # Qt >= 6.7 + Qt Shader Tools: qt6-base-private-dev qt6-shadertools-dev
 # (Homebrew's qt includes them); without them it is skipped with a warning.
@@ -137,7 +135,7 @@ container's build tree never touches the host's own `build/` directory:
 docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro ubuntu:24.04 bash -c '
   set -ex
   apt-get update
-  apt-get install -y libgc-dev libgmp-dev cmake build-essential pkg-config \
+  apt-get install -y libgc-dev libgmp-dev libmpfr-dev cmake build-essential pkg-config \
     libssl-dev libsqlite3-dev libcurl4-openssl-dev \
     libpng-dev libjpeg-dev libgit2-dev libplplot-dev redis-server mosquitto git
   cp -r /src /work && cd /work
@@ -149,7 +147,7 @@ docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro ubuntu:24.04 bash -c 
 # Fedora, arm64 — dnf package names differ from apt (gc-devel vs libgc-dev, etc.)
 docker run --rm --platform linux/arm64 -v "$(pwd)":/src:ro fedora:latest bash -c '
   set -ex
-  dnf install -y gc-devel gmp-devel cmake gcc gcc-c++ make pkgconfig \
+  dnf install -y gc-devel gmp-devel mpfr-devel cmake gcc gcc-c++ make pkgconfig \
     openssl-devel sqlite-devel libcurl-devel \
     libpng-devel libjpeg-turbo-devel libgit2-devel plplot-devel redis mosquitto git
   cp -r /src /work && cd /work
