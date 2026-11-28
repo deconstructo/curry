@@ -368,13 +368,13 @@ val_t mpfr_to_string(val_t v, int digits, int base) {
     if (!vis_mpfr(v)) scm_raise(V_FALSE, "mpfr->string: not an mpfr");
     if (base < 2 || base > 62) base = 10;
     /* digits=0 → the digits the precision supports: floor(prec * log_base(2)),
-     * at least 1. The last digit MPFR needs to identify the value uniquely
+     * at least 2. The last digit MPFR needs to identify the value uniquely
      * (mpfr_get_str with n=0) is rounding noise to a reader, and a printed
      * MPFR value does not read back as one anyway (#441). */
     if (digits <= 0) {
         double bits_per_digit = log2((double)base);
         digits = (int)floor((double)mpfr_get_prec(as_mpfr(v)->x) / bits_per_digit);
-        if (digits < 1) digits = 1;
+        if (digits < 2) digits = 2;   /* mpfr_get_str requires n >= 2 */
     }
     mpfr_exp_t exp;
     char *raw = mpfr_get_str(NULL, &exp, base, (size_t)digits, as_mpfr(v)->x, tl_mpfr_rnd);

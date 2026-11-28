@@ -1272,6 +1272,10 @@
        (- q1234 (make-octonion 1 0 0 0 0 0 0 1)) (make-octonion 0 2 3 4 0 0 0 -1))
 (check "complex + octonion"
        (+ 2+i (make-octonion 1 0 0 0 0 0 0 1)) (make-octonion 3 1 0 0 0 0 0 1))
+(check "complex * octonion promotes to the octonion"
+       (* 2+i (make-octonion 1 0 0 0 0 0 0 0)) (make-octonion 2 1 0 0 0 0 0 0))
+(check "octonion * complex"
+       (* (make-octonion 1 0 0 0 0 0 0 0) 2+i) (make-octonion 2 1 0 0 0 0 0 0))
 (check "i * j = k through a quaternion and an octonion operand"
        (* (make-quaternion 0 1 0 0) (make-octonion 0 0 1 0 0 0 0 0))
        (make-octonion 0 0 0 1 0 0 0 0))

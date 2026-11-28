@@ -710,7 +710,7 @@ val_t num_mul(val_t a, val_t b) {
         );
     }
     /* Complex multiplication */
-    if (vis_complex(a) || vis_complex(b)) {
+    if ((vis_complex(a) || vis_complex(b)) && !vis_oct(a) && !vis_oct(b)) {
         val_t ar = vis_complex(a) ? as_cpx(a)->real : a, ai = vis_complex(a) ? as_cpx(a)->imag : vfix(0);
         val_t br = vis_complex(b) ? as_cpx(b)->real : b, bi = vis_complex(b) ? as_cpx(b)->imag : vfix(0);
         return num_make_complex(
