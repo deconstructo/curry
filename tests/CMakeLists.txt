@@ -46,6 +46,10 @@ add_test(NAME srfi_29 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sr
 add_test(NAME srfi_189 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_189_tests.scm)
 add_test(NAME srfi_224 COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/srfi_224_tests.scm)
 add_test(NAME hash_tombstone COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/hash_tombstone_tests.scm)
+# Before the lock (#454) a parallel map over bernoulli could hang, die on SIGFPE
+# or return wrong values; a timeout makes a regression a fast failure.
+add_test(NAME numtheory_cache_threads COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/numtheory_cache_threads_tests.scm)
+set_tests_properties(numtheory_cache_threads PROPERTIES TIMEOUT 120)
 # Before the locks (#452, #453) a parallel map writing one hash table never
 # returned: a timeout turns a regression into a fast failure, not a hung CI job.
 add_test(NAME shared_table_port COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/shared_table_port_tests.scm)
